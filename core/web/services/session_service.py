@@ -2139,6 +2139,259 @@ def append_cli_agent_lifecycle_event(
     return normalized_event_entry
 
 
+def append_cli_agent_task_result_event(
+    session_id: str,
+    *,
+    task_result: dict[str, Any],
+    wake_agent: bool = False,
+    wake_reason: str = "",
+) -> dict[str, Any] | None:
+    """Persist a CLI Agent task result and optionally wake the owning Agent."""
+
+    normalized_session_id = str(session_id or "").strip()
+    if not normalized_session_id or not isinstance(task_result, dict):
+        return None
+    task_id = str(task_result.get("taskId") or "").strip()
+    terminal_session_id = str(task_result.get("terminalSessionId") or "").strip()
+    status = str(task_result.get("status") or "").strip().lower() or "unknown"
+    result_subject = task_id or terminal_session_id
+    if not result_subject:
+        return None
+    result_key = f"cli_agent_task_result:{result_subject}:{status}"
+    content = _format_cli_agent_task_result_content(task_result)
+    metadata = {
+        "kind": "cli_agent_task_result",
+        "resultKey": result_key,
+        "taskId": task_id,
+        "status": status,
+        "code": str(task_result.get("code") or "").strip(),
+        "adapterId": str(task_result.get("adapterId") or task_result.get("agentType") or "").strip(),
+        "label": str(task_result.get("label") or "CLI Agent").strip(),
+        "sourceSessionId": normalized_session_id,
+        "terminalSessionId": terminal_session_id,
+        "cliRunId": str(task_result.get("cliRunId") or "").strip(),
+        "lockKey": str(task_result.get("lockKey") or "").strip(),
+        "cliSessionId": str(task_result.get("cliSessionId") or "").strip(),
+        "cwd": str(task_result.get("cwd") or "").strip(),
+        "taskHash": str(task_result.get("taskHash") or "").strip(),
+        "taskPreview": str(task_result.get("taskPreview") or "").strip(),
+        "completionReason": str(task_result.get("completionReason") or "").strip(),
+        "completedAt": str(task_result.get("completedAt") or _now_timestamp()).strip(),
+        "timedOut": bool(task_result.get("timedOut")),
+        "folded": True,
+    }
+    with _CHAT_STATE_LOCK:
+        payload = load_chat_state(PROJECT_ROOT)
+        conversation = _find_conversation_entry(payload, normalized_session_id)
+        if conversation is None:
+            return None
+        messages = normalize_chat_messages(conversation.get("messages") or [])
+        existing = _find_cli_agent_task_result_message(messages, result_key=result_key)
+        if existing is not None:
+            return existing
+        else:
+            result_entry = _make_chat_message("assistant", content, metadata=metadata)
+            conversation["messages"] = messages + [result_entry]
+            conversation["updated_at"] = result_entry["timestamp"]
+            payload["updated_at"] = result_entry["timestamp"]
+            save_chat_state(PROJECT_ROOT, payload)
+    _record_session_cycle_message(
+        normalized_session_id,
+        result_entry,
+        event="cli_agent_task_result",
+        status=status,
+    )
+    signal = _record_chat_next_state_signal(
+        session_id=normalized_session_id,
+        turn_id=_current_session_turn_id(normalized_session_id),
+        source="runtime",
+        kind="cli_agent_result",
+        polarity="negative" if status in {"failed", "timeout", "error"} else "neutral",
+        mode="directive",
+        related_event_code="conversation.cli_agent.task_result",
+        summary=trim_lines(content, max_lines=8),
+        metadata={
+            "taskId": task_id,
+            "terminalSessionId": terminal_session_id,
+            "status": status,
+            "wakeReason": str(wake_reason or "").strip(),
+        },
+    )
+    wake_status = ""
+    if wake_agent:
+        wake_status = _wake_agent_for_cli_agent_task_result(
+            normalized_session_id,
+            task_result=task_result,
+            result_content=content,
+            signal_id=str((signal or {}).get("signalId") or ""),
+            wake_reason=wake_reason,
+        )
+    _record_cli_agent_task_result_event(
+        normalized_session_id,
+        task_result=task_result,
+        wake_status=wake_status,
+        signal_id=str((signal or {}).get("signalId") or ""),
+    )
+    _publish_session_detail_snapshot(normalized_session_id)
+    if isinstance(result_entry, dict):
+        result_entry = dict(result_entry)
+        if wake_status:
+            result_entry["_cliAgentWakeStatus"] = wake_status
+    return result_entry
+
+
+def _format_cli_agent_task_result_content(task_result: dict[str, Any]) -> str:
+    label = str(task_result.get("label") or task_result.get("adapterId") or task_result.get("agentType") or "CLI Agent").strip()
+    status = str(task_result.get("status") or "unknown").strip().lower()
+    status_label = {
+        "completed": "完成",
+        "failed": "失败",
+        "timeout": "超时",
+        "sent": "已发送",
+        "running": "运行中",
+        "error": "错误",
+    }.get(status, status or "未知")
+    lines = [
+        f"CLI Agent 任务结果回流：{label}",
+        f"状态：{status_label}",
+    ]
+    code = str(task_result.get("code") or "").strip()
+    if code:
+        lines.append(f"代码：{code}")
+    cwd = str(task_result.get("cwd") or "").strip()
+    if cwd:
+        lines.append(f"目录：{cwd}")
+    reason = str(task_result.get("completionReason") or "").strip()
+    if reason:
+        lines.append(f"原因：{reason}")
+    preview = trim_lines(task_result.get("taskPreview") or "", max_lines=2)
+    if preview:
+        lines.append(f"任务：{preview}")
+    segments = list(task_result.get("resultSegments") or [])
+    segment_lines: list[str] = []
+    for item in segments[-8:]:
+        if not isinstance(item, dict):
+            continue
+        text = trim_lines(item.get("text") or "", max_lines=8)
+        if not text:
+            continue
+        kind = str(item.get("kind") or "output").strip() or "output"
+        segment_lines.append(f"- [{kind}] {text}")
+    if segment_lines:
+        lines.append("最近完整片段：")
+        lines.extend(segment_lines)
+    else:
+        stdout = trim_lines(task_result.get("stdoutPreview") or "", max_lines=12)
+        if stdout:
+            lines.append("输出摘要：")
+            lines.append(stdout)
+    if status in {"failed", "timeout", "error"}:
+        lines.append("请基于该失败/超时结果判断下一步策略，不要重复调用同一个 CLI 任务，除非你需要验证新的假设。")
+    return "\n".join(line for line in lines if str(line or "").strip()).strip()
+
+
+def _current_session_turn_id(session_id: str) -> str:
+    with _RUNNING_SESSIONS_LOCK:
+        return str(_SESSION_ACTIVE_TURN_IDS.get(session_id) or "").strip()
+
+
+def _wake_agent_for_cli_agent_task_result(
+    session_id: str,
+    *,
+    task_result: dict[str, Any],
+    result_content: str,
+    signal_id: str = "",
+    wake_reason: str = "",
+) -> str:
+    if _is_session_running(session_id):
+        return "guided_running"
+    lang = get_web_language()
+    prompt = "\n".join(
+        [
+            "CLI Agent 已返回任务结果，请把它当作当前会话的工具结果继续处理。",
+            "先吸收结果，再决定是否需要继续主 Agent 侧动作；不要因为看到 CLI 结果而重复启动同一个 CLI Agent。",
+            result_content,
+        ]
+    ).strip()
+    requested_leases = ["readonly_chat"]
+    lease_decision = _check_chat_turn_lease_decision(requested_leases)
+    if not lease_decision.allowed:
+        return "wake_blocked_by_lease"
+    with _CHAT_STATE_LOCK:
+        payload = load_chat_state(PROJECT_ROOT)
+        conversation = _find_conversation_entry(payload, session_id)
+        if conversation is None:
+            return "wake_session_missing"
+        if _is_session_running(session_id):
+            return "guided_running"
+        _ensure_conversation_agent_metadata(conversation)
+        agent_id = str(conversation.get("agent_id") or conversation.get("agentId") or "").strip()
+        _resolve_active_agent_for_turn(session_id, agent_id, lang=lang)
+        history_messages = normalize_chat_messages(conversation.get("messages") or [])
+        active_task = _normalize_session_active_task(conversation.get("active_task") or conversation.get("activeTask"))
+        if not _is_task_tool_backed_active_task(active_task):
+            active_task = None
+        turn_control = _create_session_turn_control(session_id)
+        conversation["last_turn_status"] = "running"
+        conversation["updated_at"] = _now_timestamp()
+        payload["active_conversation_id"] = session_id
+        payload["updated_at"] = conversation["updated_at"]
+        save_chat_state(PROJECT_ROOT, payload)
+        _set_session_running(session_id, True, turn_id=turn_control.turn_id, leases=requested_leases)
+        _persist_chat_turn_work_run(
+            session_id=session_id,
+            turn_id=turn_control.turn_id,
+            status="running",
+            agent_id=agent_id,
+            leases=requested_leases,
+            user_message=prompt,
+            started_at=conversation["updated_at"],
+            updated_at=conversation["updated_at"],
+        )
+    _set_session_waiting_live_output(session_id, turn_id=turn_control.turn_id)
+    _record_session_turn_started_event(
+        session_id,
+        turn_id=turn_control.turn_id,
+        leases=requested_leases,
+        user_message=prompt,
+        raw_user_message="",
+        user_message_source="cli_agent_result",
+    )
+    context = {
+        "session_id": session_id,
+        "turn_id": turn_control.turn_id,
+        "turn_control": turn_control,
+        "user_message": prompt,
+        "raw_user_message": "",
+        "user_message_source": "cli_agent_result",
+        "history_messages": history_messages,
+        "mental_model_enabled": None,
+        "active_task": active_task,
+        "agent_id": agent_id,
+        "leases": requested_leases,
+        "llm_slot": SESSION_LLM_SLOT_DIALOGUE,
+        "submit_timing_fields": {"source": "cli_agent_result", "signalId": signal_id, "wakeReason": str(wake_reason or "").strip()},
+        "submit_started_at_monotonic": _perf_counter(),
+    }
+    _record_session_turn_scheduled_event(context)
+    try:
+        _schedule_session_turn(context)
+    except Exception as exc:
+        _persist_chat_turn_work_run(
+            session_id=session_id,
+            turn_id=turn_control.turn_id,
+            status="failed",
+            leases=requested_leases,
+            user_message=prompt,
+            summary=f"{type(exc).__name__}: {exc}",
+        )
+        _set_session_running(session_id, False, turn_id=turn_control.turn_id)
+        _clear_session_turn_control(session_id, turn_id=turn_control.turn_id)
+        _persist_session_turn_failure(session_id, context, exc)
+        return "wake_schedule_failed"
+    return "wake_scheduled"
+
+
 def get_active_session_detail() -> dict | None:
     """Return the current active conversation detail when available."""
 
@@ -8060,6 +8313,23 @@ def _find_cli_agent_lifecycle_message(
     return None
 
 
+def _find_cli_agent_task_result_message(
+    messages: list[dict[str, Any]],
+    *,
+    result_key: str,
+) -> dict[str, Any] | None:
+    normalized_key = str(result_key or "").strip()
+    if not normalized_key:
+        return None
+    for message in messages:
+        metadata = message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
+        if str(metadata.get("kind") or "").strip() != "cli_agent_task_result":
+            continue
+        if str(metadata.get("resultKey") or "").strip() == normalized_key:
+            return message
+    return None
+
+
 def _cli_agent_lifecycle_sidecar_path(session_id: str) -> Path:
     workspace_path = (PROJECT_ROOT / _session_workspace_relative_path(session_id)).resolve()
     sessions_root = (PROJECT_ROOT / "workspace" / "sessions").resolve()
@@ -11551,6 +11821,42 @@ def _record_cli_agent_lifecycle_event(
     except Exception as exc:
         _debug_logger.warning(
             f"runtime scene cli lifecycle log skipped: {type(exc).__name__}: {exc}",
+            tag="LOGS",
+        )
+
+
+def _record_cli_agent_task_result_event(
+    session_id: str,
+    *,
+    task_result: dict[str, Any],
+    wake_status: str = "",
+    signal_id: str = "",
+) -> None:
+    try:
+        record_runtime_scene_event(
+            "conversation",
+            "cli_agent",
+            "conversation.cli_agent.task_result",
+            level="warning" if str(task_result.get("status") or "").strip().lower() in {"failed", "timeout", "error"} else "info",
+            outcome=str(task_result.get("status") or "").strip() or "updated",
+            message="CLI Agent task result recorded in conversation history.",
+            fields={
+                "sessionId": str(session_id or "").strip(),
+                "taskId": str(task_result.get("taskId") or "").strip(),
+                "status": str(task_result.get("status") or "").strip(),
+                "code": str(task_result.get("code") or "").strip(),
+                "terminalSessionId": str(task_result.get("terminalSessionId") or "").strip(),
+                "adapterId": str(task_result.get("adapterId") or task_result.get("agentType") or "").strip(),
+                "cliRunId": str(task_result.get("cliRunId") or "").strip(),
+                "wakeStatus": str(wake_status or "").strip(),
+                "signalId": str(signal_id or "").strip(),
+                "segmentCount": len(list(task_result.get("resultSegments") or [])),
+            },
+            lifecycle=True,
+        )
+    except Exception as exc:
+        _debug_logger.warning(
+            f"runtime scene cli task result log skipped: {type(exc).__name__}: {exc}",
             tag="LOGS",
         )
 
@@ -15248,8 +15554,15 @@ def _ensure_session_ui_capture_hooks(ui: Any) -> None:
                 return
             cleaned = _sanitize_message_content("assistant", text)
             if cleaned:
-                capture.note_content(cleaned)
-                _set_session_live_output(session_id, turn_id=capture.turn_id, content=cleaned)
+                previous = str(capture.content or "")
+                if done:
+                    next_content = cleaned
+                elif previous and cleaned.startswith(previous):
+                    next_content = cleaned
+                else:
+                    next_content = f"{previous}{cleaned}" if previous else cleaned
+                capture.note_content(next_content)
+                _set_session_live_output(session_id, turn_id=capture.turn_id, content=next_content)
 
         def clear_response_stream_proxy():
             original = originals.get("clear_response_stream")
@@ -15428,7 +15741,7 @@ def _recent_session_guidance_summaries(
     summaries: list[str] = []
     for signal in signals:
         kind = str(signal.get("kind") or "").strip()
-        if kind not in {"user_guidance", "user_interrupt_guidance"}:
+        if kind not in {"user_guidance", "user_interrupt_guidance", "cli_agent_result"}:
             continue
         summary = trim_lines(signal.get("summary") or "", max_lines=2)
         if summary:

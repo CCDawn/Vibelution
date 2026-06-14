@@ -1950,6 +1950,8 @@ def create_llm_facing_tools() -> List[BaseTool]:
         # 自我建模类工具默认不常驻，避免在普通轮次抢占操作面。
         # ToolPolicy 申请入口保留为配置兼容工具，不再默认暴露给 LLM。
         "agent_tool_permission_request_tool",
+        # 默认读文件能力统一走 grep/code_symbol/cli 的受控链路，避免同类读取工具重复暴露。
+        "read_file_tool",
         "update_diagnosis_rules_tool",
         "update_self_model_tool",
         "get_self_model_tool",
