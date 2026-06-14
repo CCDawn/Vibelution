@@ -1,4 +1,6 @@
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
+import { FitAddon } from "@xterm/addon-fit";
+import { Terminal } from "@xterm/xterm";
 import {
   Apple,
   ArrowUpRight,
@@ -166,6 +168,7 @@ import {
   type ChatMentionTarget,
 } from "./chatMentionTokens";
 import styles from "./ChatCodingRoute.module.css";
+import "@xterm/xterm/css/xterm.css";
 
 type ActiveSkillContract = {
   status?: string;
@@ -354,15 +357,6 @@ function buildCliAgentRunViews(messages: ConversationMessage[]): CliAgentRunView
   return runs;
 }
 
-const TERMINAL_ANSI_PATTERN = /\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1B\\))/g;
-
-function terminalTextForDisplay(value: string) {
-  return String(value || "")
-    .replace(TERMINAL_ANSI_PATTERN, "")
-    .replace(/\r\n/g, "\n")
-    .replace(/\r/g, "\n");
-}
-
 function terminalStatusText(session: CliAgentTerminalSession | null, connecting: boolean, lang: "zh" | "en") {
   if (connecting && !session) {
     return lang === "zh" ? "连接中" : "Connecting";
@@ -403,15 +397,20 @@ function CliAgentRunTerminalPanel({
   onTerminalSessionChange?: (runId: string, session: CliAgentTerminalSession) => void;
 }) {
   const [terminalSession, setTerminalSession] = useState<CliAgentTerminalSession | null>(null);
-  const [terminalText, setTerminalText] = useState("");
   const [terminalInput, setTerminalInput] = useState("");
   const [terminalError, setTerminalError] = useState("");
   const [connecting, setConnecting] = useState(false);
-  const outputRef = useRef<HTMLPreElement | null>(null);
+  const [terminalHasOutput, setTerminalHasOutput] = useState(false);
+  const terminalElementRef = useRef<HTMLDivElement | null>(null);
+  const terminalRef = useRef<Terminal | null>(null);
+  const fitAddonRef = useRef<FitAddon | null>(null);
+  const pendingReplayRef = useRef("");
+  const terminalSessionIdRef = useRef("");
+  const terminalAliveRef = useRef(false);
+  const terminalHasOutputRef = useRef(false);
+  const lastPostedSizeRef = useRef<{ rows: number; cols: number } | null>(null);
   const terminalSessionId = String(terminalSession?.terminalSessionId || "").trim();
   const statusText = terminalStatusText(terminalSession, connecting, lang);
-  const rawTerminalText = terminalText || String(terminalSession?.transcriptTail || "");
-  const displayTerminalText = terminalTextForDisplay(rawTerminalText);
   const visibleCommand = Array.isArray(terminalSession?.commandPreview) && terminalSession?.commandPreview.length
     ? terminalSession.commandPreview.join(" ")
     : run.commandLine;
@@ -421,12 +420,167 @@ function CliAgentRunTerminalPanel({
       : (lang === "zh" ? "命令会话还没有输出。" : "No terminal output yet."));
 
   useEffect(() => {
+    terminalSessionIdRef.current = terminalSessionId;
+    terminalAliveRef.current = Boolean(terminalSession?.alive);
+  }, [terminalSession?.alive, terminalSessionId]);
+
+  const markTerminalHasOutput = useCallback(() => {
+    if (terminalHasOutputRef.current) {
+      return;
+    }
+    terminalHasOutputRef.current = true;
+    setTerminalHasOutput(true);
+  }, []);
+
+  const writeTerminalChunk = useCallback((chunk: string, options?: { reset?: boolean }) => {
+    const text = String(chunk || "");
+    const terminal = terminalRef.current;
+    if (options?.reset) {
+      pendingReplayRef.current = "";
+      terminalHasOutputRef.current = false;
+      setTerminalHasOutput(false);
+      terminal?.reset();
+    }
+    if (!text) {
+      return;
+    }
+    markTerminalHasOutput();
+    if (terminal) {
+      terminal.write(text);
+      return;
+    }
+    pendingReplayRef.current = `${pendingReplayRef.current}${text}`.slice(-120000);
+  }, [markTerminalHasOutput]);
+
+  const sendTerminalRawInput = useCallback((data: string) => {
+    const sessionId = terminalSessionIdRef.current;
+    if (!sessionId || !terminalAliveRef.current || !data) {
+      return;
+    }
+    setTerminalError("");
+    fetchJson<CliAgentTerminalSession>(`/api/cli-agents/terminal-sessions/${encodeURIComponent(sessionId)}/input`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ data }),
+    })
+      .then((session) => setTerminalSession(session))
+      .catch((error) => setTerminalError(error instanceof Error ? error.message : String(error)));
+  }, []);
+
+  const postTerminalSize = useCallback((rows: number, cols: number) => {
+    const sessionId = terminalSessionIdRef.current;
+    if (!sessionId || rows <= 0 || cols <= 0) {
+      return;
+    }
+    const previous = lastPostedSizeRef.current;
+    if (previous?.rows === rows && previous.cols === cols) {
+      return;
+    }
+    lastPostedSizeRef.current = { rows, cols };
+    fetchJson<CliAgentTerminalSession>(`/api/cli-agents/terminal-sessions/${encodeURIComponent(sessionId)}/resize`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ rows, cols }),
+    })
+      .then((session) => setTerminalSession(session))
+      .catch(() => undefined);
+  }, []);
+
+  const fitTerminal = useCallback(() => {
+    const terminal = terminalRef.current;
+    const fitAddon = fitAddonRef.current;
+    if (!terminal || !fitAddon) {
+      return;
+    }
+    try {
+      fitAddon.fit();
+      postTerminalSize(terminal.rows, terminal.cols);
+    } catch {
+      return;
+    }
+  }, [postTerminalSize]);
+
+  useEffect(() => {
+    const element = terminalElementRef.current;
+    if (!element) {
+      return;
+    }
+    const terminal = new Terminal({
+      cursorBlink: true,
+      fontFamily: '"Cascadia Mono", Consolas, "SFMono-Regular", ui-monospace, monospace',
+      fontSize: 13,
+      lineHeight: 1.15,
+      scrollback: 5000,
+      convertEol: false,
+      theme: {
+        background: "#06100d",
+        foreground: "#d7f7e8",
+        cursor: "#bdf6dc",
+        selectionBackground: "#225b48",
+        black: "#06100d",
+        red: "#ff8a8a",
+        green: "#9ee7b8",
+        yellow: "#f7d774",
+        blue: "#8db6ff",
+        magenta: "#d6a2ff",
+        cyan: "#8de9df",
+        white: "#d7f7e8",
+        brightBlack: "#62756f",
+        brightRed: "#ffaaaa",
+        brightGreen: "#bdf6dc",
+        brightYellow: "#ffe59d",
+        brightBlue: "#b2ccff",
+        brightMagenta: "#e3bcff",
+        brightCyan: "#b5fff6",
+        brightWhite: "#ffffff",
+      },
+    });
+    const fitAddon = new FitAddon();
+    terminal.loadAddon(fitAddon);
+    terminal.open(element);
+    terminalRef.current = terminal;
+    fitAddonRef.current = fitAddon;
+
+    const pending = pendingReplayRef.current;
+    if (pending) {
+      pendingReplayRef.current = "";
+      terminal.write(pending);
+    }
+
+    const dataDisposable = terminal.onData((data) => sendTerminalRawInput(data));
+    const scheduleFit = () => {
+      window.requestAnimationFrame(fitTerminal);
+    };
+    const resizeObserver = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(scheduleFit);
+    resizeObserver?.observe(element);
+    window.addEventListener("resize", scheduleFit);
+    scheduleFit();
+
+    return () => {
+      resizeObserver?.disconnect();
+      window.removeEventListener("resize", scheduleFit);
+      dataDisposable.dispose();
+      terminal.dispose();
+      terminalRef.current = null;
+      fitAddonRef.current = null;
+    };
+  }, [fitTerminal, sendTerminalRawInput]);
+
+  useEffect(() => {
+    if (!terminalSessionId) {
+      return;
+    }
+    window.requestAnimationFrame(fitTerminal);
+  }, [fitTerminal, terminalSessionId]);
+
+  useEffect(() => {
     let disposed = false;
     const controller = new AbortController();
     setConnecting(true);
     setTerminalError("");
-    setTerminalText("");
     setTerminalSession(null);
+    lastPostedSizeRef.current = null;
+    writeTerminalChunk("", { reset: true });
 
     fetchJson<CliAgentTerminalSession>("/api/cli-agents/terminal-sessions/ensure", {
       method: "POST",
@@ -450,7 +604,7 @@ function CliAgentRunTerminalPanel({
           return;
         }
         setTerminalSession(session);
-        setTerminalText(String(session.transcriptTail || ""));
+        writeTerminalChunk(String(session.transcriptTail || ""), { reset: true });
       })
       .catch((error) => {
         if (disposed || controller.signal.aborted) {
@@ -468,7 +622,7 @@ function CliAgentRunTerminalPanel({
       disposed = true;
       controller.abort();
     };
-  }, [run.agentType, run.cwd, run.id, run.messageId, run.mode, run.result, run.task, sourceSessionId]);
+  }, [run.agentType, run.cwd, run.id, run.messageId, run.mode, run.result, run.task, sourceSessionId, writeTerminalChunk]);
 
   useEffect(() => {
     if (terminalSession) {
@@ -487,11 +641,11 @@ function CliAgentRunTerminalPanel({
         if (payload.session) {
           setTerminalSession(payload.session);
           if (payload.type === "terminal_snapshot") {
-            setTerminalText(String(payload.session.transcriptTail || ""));
+            writeTerminalChunk(String(payload.session.transcriptTail || ""), { reset: true });
           }
         }
         if (payload.type === "terminal_output" && payload.chunk) {
-          setTerminalText((current) => `${current}${payload.chunk}`);
+          writeTerminalChunk(payload.chunk);
         }
       } catch {
         return;
@@ -509,15 +663,7 @@ function CliAgentRunTerminalPanel({
       stream.removeEventListener("terminal_status", handleEvent as EventListener);
       stream.close();
     };
-  }, [terminalSessionId]);
-
-  useEffect(() => {
-    const element = outputRef.current;
-    if (!element) {
-      return;
-    }
-    element.scrollTop = element.scrollHeight;
-  }, [displayTerminalText]);
+  }, [terminalSessionId, writeTerminalChunk]);
 
   const sendTerminalInput = useCallback((event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -527,14 +673,8 @@ function CliAgentRunTerminalPanel({
     }
     setTerminalInput("");
     setTerminalError("");
-    fetchJson<CliAgentTerminalSession>(`/api/cli-agents/terminal-sessions/${encodeURIComponent(terminalSessionId)}/input`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ data: `${data}\r\n` }),
-    })
-      .then((session) => setTerminalSession(session))
-      .catch((error) => setTerminalError(error instanceof Error ? error.message : String(error)));
-  }, [terminalInput, terminalSessionId]);
+    sendTerminalRawInput(`${data}\r\n`);
+  }, [sendTerminalRawInput, terminalInput, terminalSessionId]);
 
   return (
     <section className={styles.cliAgentRunPanel} aria-label={`${run.title} ${lang === "zh" ? "终端" : "terminal"}`}>
@@ -546,9 +686,14 @@ function CliAgentRunTerminalPanel({
           </span>
           <code>{visibleCommand}</code>
         </div>
-        <pre ref={outputRef} className={styles.cliAgentTerminalOutput}>
-          {displayTerminalText || emptyText}
-        </pre>
+        <div className={styles.cliAgentTerminalOutputShell}>
+          <div ref={terminalElementRef} className={styles.cliAgentTerminalOutput} />
+          {terminalError || !terminalHasOutput ? (
+            <div className={styles.cliAgentTerminalOverlay} data-tone={terminalError ? "error" : "muted"}>
+              {emptyText}
+            </div>
+          ) : null}
+        </div>
         <form className={styles.cliAgentTerminalInputRow} onSubmit={sendTerminalInput}>
           <span aria-hidden="true">$</span>
           <input
