@@ -51,6 +51,7 @@ export const queryKeys = {
   memoryItemDetails: () => ["memory", "item-detail"] as const,
   memoryItemDetail: (sectionId: string, itemId: string) => ["memory", "item-detail", sectionId, itemId] as const,
   memoryUsageContract: () => ["memory", "usage-contract"] as const,
+  memoryCleanupPreview: () => ["memory", "cleanup", "preview"] as const,
   memoryKnowledgeGraph: (agentId = "", include = "", teamId = "", knowledgeBaseId = "", limit = 800) =>
     ["memory", "knowledge-graph", agentId, include, teamId, knowledgeBaseId, limit] as const,
   memoryKnowledgeGraphNodeDetail: (nodeId: string, agentId = "") => ["memory", "knowledge-graph", "node-detail", nodeId, agentId] as const,
