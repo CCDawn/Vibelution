@@ -1,7 +1,11 @@
 import copy
 import json
 
+import pytest
+
 from core.web.services import agent_directory_service, agent_mode_binding_service
+
+pytestmark = pytest.mark.serial
 
 
 def _use_tmp_project_root(tmp_path, monkeypatch):
