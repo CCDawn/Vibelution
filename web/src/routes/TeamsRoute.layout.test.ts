@@ -307,6 +307,15 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("sourceCollectionStagePrimaryAction");
     expect(routeSource).toContain("sourceCollectionStageSecondaryAction");
     expect(routeSource).toContain("SourceCollectionStepState");
+    expect(routeSource).toContain("SourceCollectionStageModuleId");
+    expect(routeSource).toContain("parseSourceCollectionStageModuleId");
+    expect(routeSource).toContain("collectionStage");
+    expect(routeSource).toContain("selectedSourceCollectionStageId");
+    expect(routeSource).toContain("selectSourceCollectionStage");
+    expect(routeSource).toContain("renderSourceCollectionActiveStagePanel");
+    expect(routeSource).toContain("sourceCollectionStageCardSelected");
+    expect(routeSource).toContain("sourceCollectionStageOperationPanel");
+    expect(routeSource).toContain("aria-pressed");
     expect(routeSource).toContain("sourceCollectionStageModules.map");
     expect(routeSource).toContain("sourceCollectionStepClassName");
     expect(routeSource).toContain("阶段详情");
@@ -452,7 +461,9 @@ describe("TeamsRoute layout contract", () => {
     expect(routeStyles.sourceCollectionControlPanel).toBeTypeOf("string");
     expect(routeStyles.sourceCollectionStageModules).toBeTypeOf("string");
     expect(routeStyles.sourceCollectionStageCard).toBeTypeOf("string");
+    expect(routeStyles.sourceCollectionStageCardSelected).toBeTypeOf("string");
     expect(routeStyles.sourceCollectionStageCardHead).toBeTypeOf("string");
+    expect(routeStyles.sourceCollectionStageOperationPanel).toBeTypeOf("string");
     expect(routeStyles.sourceCollectionStagePrimaryAction).toBeTypeOf("string");
     expect(routeStyles.sourceCollectionStageSecondaryAction).toBeTypeOf("string");
     expect(routeStyles.sourceCollectionFocusedPanel).toBeTypeOf("string");
