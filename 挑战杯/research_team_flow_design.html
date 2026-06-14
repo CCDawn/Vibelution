@@ -784,6 +784,11 @@
         <b class="status-pill">已接入前端/API</b>
       </div>
 <div class="feature-row">
+        <strong>阶段 Agent 配置面板</strong>
+        <span>知识搜集、实验、迭代阶段页从 Team canvas / Team members / Agent config workspace 推导本阶段功能 Agent，并跳转复用 Agent 管理配置</span>
+        <b class="status-pill">已接入前端</b>
+      </div>
+<div class="feature-row">
         <strong>评级建议</strong>
         <span>knowledge_rating_suggestion_tool 只提交 reviewable rating suggestion</span>
         <b class="status-pill ready">已有能力</b>
@@ -2095,6 +2100,12 @@
               <strong>资料筛选 Agent 复审入口</strong>
               <span>资料筛选已完成时，步骤卡和右侧控制台主按钮不再只显示查看结果，而是显示 Agent 重新筛选，并通过 source-quality/assess-batch force=true 重新审查已筛候选。</span>
               <span>资料筛选详情页保留查看结果入口，同时新增显眼的 Agent 批量审查按钮；复审仍只写 CandidateStore 的 sourceQualityAssessment，不写正式 Team Knowledge、RAG 或 official graph。</span>
+            </div>
+<div class="blueprint-row">
+              <b>M6.37</b>
+              <strong>阶段 Agent 配置面板</strong>
+              <span>科研总览卡显示阶段 Agent 可用数；知识搜集、实验和迭代阶段页展示本阶段功能 Agent、绑定状态、模型摘要和配置入口。</span>
+              <span>绑定来源复用 Team canvas / Team members / Agent config workspace；点击配置跳转 Agent 管理，不复制第二套 Agent 配置表单；缺绑定时显示待绑定或引用失效。</span>
             </div>
       </div>
       <div class="tag-row">
