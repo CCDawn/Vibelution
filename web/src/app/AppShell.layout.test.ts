@@ -17,6 +17,10 @@ const shellStyles = readFileSync(fileURLToPath(new URL("./AppShell.module.css", 
 describe("AppShell layout contract", () => {
   it("renders one compact status summary chip while keeping the detailed guide panel", () => {
     expect(shellSource).toContain("statusSummaryChip");
+    expect(shellSource).toContain("gateStatusValue");
+    expect(shellSource).toContain("<span className={styles.statusBadgeLabel}>Gate</span>");
+    expect(shellSource).toContain("className={`${styles.statusCluster} ${styles.brandGate}`}");
+    expect(shellSource).not.toContain('t("brandSubtle")');
     expect(shellSource).toContain("LazyAppShellStatusGuidePanel");
     expect(shellSource).toContain("statusGuideOpen ? (");
     expect(shellSource).not.toContain("statusGuidePanel");
@@ -28,9 +32,11 @@ describe("AppShell layout contract", () => {
   });
 
   it("keeps the global shell top bar compact", () => {
+    expect(styles.brandGate).toBeTypeOf("string");
     expect(styles.statusSummaryChip).toBeTypeOf("string");
     expect(styles.statusSummaryCount).toBeTypeOf("string");
     expect(shellStyles).toContain("flex-wrap: nowrap");
+    expect(shellStyles).toContain(".brandGate .statusGuidePanel");
     expect(shellStyles).toContain("@media (max-width: 1180px)");
     expect(shellStyles).toContain(".topClock span:last-child");
     expect(shellStyles).toContain("@media (max-width: 980px)");
