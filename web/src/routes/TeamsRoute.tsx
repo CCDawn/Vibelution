@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, Archive, ArrowLeft, Bot, CheckCircle2, Link2, Play, Plus, RefreshCw, Save, Search, Send, Trash2, Unlink, Users } from "lucide-react";
+import { AlertTriangle, Archive, ArrowLeft, Bot, CheckCircle2, Eye, Link2, Play, Plus, RefreshCw, Save, Search, Send, Trash2, Unlink, Users } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
@@ -2541,7 +2541,7 @@ export function TeamsRoute({
   });
 
   const assessSourceQualityBatchMutation = useMutation({
-    mutationFn: (payload: { teamId: string; assessedByAgent: string; maxCandidates?: number }) =>
+    mutationFn: (payload: { teamId: string; assessedByAgent: string; maxCandidates?: number; force?: boolean; notes?: string }) =>
       fetchJson<TeamWorkflowSourceQualityBatchAssessmentPayload>(
         `/api/teams/${encodeURIComponent(payload.teamId)}/workflow-orchestration/source-quality/assess-batch`,
         {
@@ -2550,6 +2550,8 @@ export function TeamsRoute({
           body: JSON.stringify({
             assessedByAgent: payload.assessedByAgent,
             maxCandidates: payload.maxCandidates ?? 100,
+            force: payload.force ?? false,
+            notes: payload.notes ?? "",
           }),
         },
       ),
@@ -3290,6 +3292,26 @@ export function TeamsRoute({
           <span>{lang === "zh" ? "已筛" : "assessed"} <strong>{sourceQualityAssessedCount}</strong></span>
           <span>{lang === "zh" ? "通过" : "approved"} <strong>{sourceCollectionApprovedCount}</strong></span>
           <span>{lang === "zh" ? "待筛" : "pending"} <strong>{sourceQualityUnassessedCount}</strong></span>
+        </div>
+        <div className={styles.sourceCollectionPanelActions}>
+          <button
+            type="button"
+            className={styles.sourceCollectionStagePrimaryAction}
+            onClick={runSourceCollectionScreeningAction}
+            disabled={sourceCollectionScreeningDisabled || selectedTeamSourceQualityPending}
+          >
+            <CheckCircle2 size={13} />
+            {sourceCollectionScreeningButtonText}
+          </button>
+          <button
+            type="button"
+            className={styles.sourceCollectionStageSecondaryAction}
+            onClick={openSourceCollectionScreeningPanel}
+            disabled={sourceCollectionScreeningDisabled}
+          >
+            <Eye size={13} />
+            {lang === "zh" ? "查看筛选结果" : "View results"}
+          </button>
         </div>
         {screeningCandidates.length ? (
           <div className={styles.workflowCandidateList}>
@@ -4770,9 +4792,9 @@ export function TeamsRoute({
   const sourceCollectionScreeningButtonText = selectedTeamSourceQualityPending
     ? (lang === "zh" ? "Agent 筛选中" : "Agent screening")
     : sourceQualityUnassessedCount > 0
-      ? (lang === "zh" ? "执行资料筛选" : "Run screening")
+      ? (lang === "zh" ? "Agent 筛选资料" : "Agent screen")
       : sourceQualityCandidateCount > 0
-        ? (lang === "zh" ? "查看筛选结果" : "View screening")
+        ? (lang === "zh" ? "Agent 重新筛选" : "Agent re-screen")
         : (lang === "zh" ? "资料筛选" : "Screening");
   const sourceCollectionScreeningStatusText = selectedTeamSourceQualityPending
     ? (lang === "zh" ? "进行中" : "running")
@@ -4855,14 +4877,16 @@ export function TeamsRoute({
     if (!selectedTeam?.teamId || sourceCollectionScreeningDisabled || selectedTeamSourceQualityPending) {
       return;
     }
-    if (sourceQualityUnassessedCount <= 0) {
-      openSourceCollectionScreeningPanel();
-      return;
-    }
+    const forceRescreen = sourceQualityUnassessedCount <= 0 && sourceQualityCandidateCount > 0;
+    const maxCandidates = forceRescreen ? sourceQualityCandidateCount : sourceQualityUnassessedCount;
     assessSourceQualityBatchMutation.mutate({
       teamId: selectedTeam.teamId,
       assessedByAgent: sourceCollectionQualityAgentId,
-      maxCandidates: Math.max(1, Math.min(100, sourceQualityUnassessedCount)),
+      maxCandidates: Math.max(1, Math.min(200, maxCandidates)),
+      force: forceRescreen,
+      notes: forceRescreen
+        ? "Source Quality Assessment Agent re-screened already assessed source_manifest candidates on user request."
+        : "Source Quality Assessment Agent screened pending source_manifest candidates.",
     });
   };
   const openSourceCollectionCandidatePanel = () => {

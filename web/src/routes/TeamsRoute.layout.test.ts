@@ -324,6 +324,11 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("还需补充资料");
     expect(routeSource).toContain("个任务未完成");
     expect(routeSource).toContain("全部来源已筛");
+    expect(routeSource).toContain("Agent 重新筛选");
+    expect(routeSource).toContain("forceRescreen");
+    expect(routeSource).toContain("force: forceRescreen");
+    expect(routeSource).toContain("sourceCollectionPanelActions");
+    expect(routeSource).toContain("Source Quality Assessment Agent re-screened already assessed source_manifest candidates");
     expect(routeSource).toContain("检查前审");
     expect(routeSource).not.toContain("待继续搜索");
     expect(routeSource).toContain("/storage/open");
@@ -464,6 +469,7 @@ describe("TeamsRoute layout contract", () => {
     expect(routeStyles.sourceCollectionStageCardSelected).toBeTypeOf("string");
     expect(routeStyles.sourceCollectionStageCardHead).toBeTypeOf("string");
     expect(routeStyles.sourceCollectionStageOperationPanel).toBeTypeOf("string");
+    expect(routeStyles.sourceCollectionPanelActions).toBeTypeOf("string");
     expect(routeStyles.sourceCollectionStagePrimaryAction).toBeTypeOf("string");
     expect(routeStyles.sourceCollectionStageSecondaryAction).toBeTypeOf("string");
     expect(routeStyles.sourceCollectionFocusedPanel).toBeTypeOf("string");
