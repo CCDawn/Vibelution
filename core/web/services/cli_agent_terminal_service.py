@@ -28,7 +28,9 @@ SESSION_STATE_DIR = RUNTIME_ROOT / "sessions"
 TRANSCRIPT_DIR = RUNTIME_ROOT / "transcripts"
 DEFAULT_ROWS = 28
 DEFAULT_COLS = 100
-MAX_TRANSCRIPT_TAIL_CHARS = 24000
+MAX_TRANSCRIPT_TAIL_CHARS = 120000
+MAX_TRANSCRIPT_BYTES = 1_500_000
+TRANSCRIPT_TRIM_TARGET_BYTES = 900_000
 STREAM_HEARTBEAT_SECONDS = 15
 STREAM_QUEUE_SIZE = 200
 
@@ -174,9 +176,7 @@ class _TerminalRuntime:
             return ""
 
     def _record_output(self, chunk: str) -> None:
-        self.transcript_path.parent.mkdir(parents=True, exist_ok=True)
-        with self.transcript_path.open("a", encoding="utf-8", errors="replace") as handle:
-            handle.write(chunk)
+        _append_transcript_chunk(self.transcript_path, chunk)
         next_cli_session_id = _extract_cli_session_id(chunk, self.session_id_regex)
         with self.lock:
             if next_cli_session_id and not str(self.state.get("cliSessionId") or "").strip():
@@ -629,12 +629,46 @@ def _read_transcript_tail(path: Path, limit: int = MAX_TRANSCRIPT_TAIL_CHARS) ->
     if not path.exists():
         return ""
     try:
-        text = path.read_text(encoding="utf-8", errors="replace")
+        byte_limit = max(8192, limit * 4)
+        with path.open("rb") as handle:
+            handle.seek(0, os.SEEK_END)
+            size = handle.tell()
+            handle.seek(max(0, size - byte_limit), os.SEEK_SET)
+            text = handle.read().decode("utf-8", errors="replace")
     except Exception:
         return ""
     if len(text) <= limit:
         return text
     return text[-limit:]
+
+
+def _append_transcript_chunk(path: Path, chunk: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    data = str(chunk or "").encode("utf-8", errors="replace")
+    with path.open("ab") as handle:
+        handle.write(data)
+    try:
+        if path.stat().st_size > MAX_TRANSCRIPT_BYTES:
+            _trim_transcript_file(path)
+    except Exception:
+        return
+
+
+def _trim_transcript_file(path: Path) -> None:
+    try:
+        size = path.stat().st_size
+    except Exception:
+        return
+    if size <= MAX_TRANSCRIPT_BYTES:
+        return
+    try:
+        with path.open("rb") as handle:
+            handle.seek(max(0, size - TRANSCRIPT_TRIM_TARGET_BYTES), os.SEEK_SET)
+            tail = handle.read()
+        text = tail.decode("utf-8", errors="replace")
+        path.write_bytes(text.encode("utf-8", errors="replace"))
+    except Exception:
+        return
 
 
 def _public_state(state: dict[str, Any]) -> dict[str, Any]:

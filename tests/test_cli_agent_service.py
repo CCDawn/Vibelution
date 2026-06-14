@@ -262,3 +262,28 @@ def test_cli_agent_terminal_ensure_writes_runtime_state_without_project_config(m
     assert session["transcriptPath"].startswith(".runtime/cli_agents/transcripts/")
     assert (terminal_service.SESSION_STATE_DIR / f"{session['terminalSessionId']}.json").exists()
     assert not (project_root / "workspace" / "cli_agents" / "cli_agents.json").exists()
+
+
+def test_cli_agent_terminal_reads_only_bounded_transcript_tail(tmp_path):
+    transcript = tmp_path / "terminal.log"
+    transcript.write_bytes(("old" * 10000 + "\x1b[2J最后一屏").encode("utf-8"))
+
+    tail = terminal_service._read_transcript_tail(transcript, limit=8)
+
+    assert len(tail) <= 8
+    assert "最后一屏" in tail
+    assert "oldold" not in tail
+
+
+def test_cli_agent_terminal_trims_large_tui_transcript(monkeypatch, tmp_path):
+    transcript = tmp_path / "terminal.log"
+    monkeypatch.setattr(terminal_service, "MAX_TRANSCRIPT_BYTES", 200)
+    monkeypatch.setattr(terminal_service, "TRANSCRIPT_TRIM_TARGET_BYTES", 120)
+
+    terminal_service._append_transcript_chunk(transcript, "\x1b[?2026h" + "A" * 180)
+    terminal_service._append_transcript_chunk(transcript, "\x1b[5;76H" + "B" * 180)
+
+    data = transcript.read_text(encoding="utf-8", errors="replace")
+    assert transcript.stat().st_size <= 200
+    assert data.endswith("B" * 120)
+    assert "A" * 80 not in data
