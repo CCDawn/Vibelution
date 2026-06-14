@@ -2056,6 +2056,12 @@
   padding: 3px 7px;
 }
 
+.manageListPanel .itemButtonDense {
+  align-items: stretch;
+  min-height: 62px;
+  padding: 4px 7px;
+}
+
 .itemContentButton {
   display: grid;
   gap: 5px;
@@ -2072,6 +2078,12 @@
 
 .itemContentButtonDense {
   gap: 3px;
+}
+
+.manageListPanel .itemContentButtonDense {
+  align-self: stretch;
+  grid-template-rows: 16px 14px 18px;
+  gap: 2px;
 }
 
 .itemHeader {
@@ -2152,6 +2164,24 @@
   gap: 10px;
 }
 
+.manageListPanel .manageItemPrimary,
+.manageListPanel .manageItemMeta,
+.manageListPanel .manageItemFooter {
+  min-height: 0;
+  line-height: 1.15;
+}
+
+.manageListPanel .manageItemPrimary {
+  grid-template-columns: minmax(0, 1fr) 78px;
+  align-items: center;
+  gap: 8px;
+}
+
+.manageListPanel .manageItemPrimary span {
+  justify-self: end;
+  text-align: right;
+}
+
 .manageItemPrimary strong,
 .manageItemMeta span,
 .manageItemSummary {
@@ -2178,15 +2208,29 @@
   font-size: 0.67rem;
 }
 
+.manageListPanel .manageItemMeta {
+  grid-template-columns: minmax(70px, 0.2fr) minmax(0, 1fr);
+  align-items: center;
+}
+
 .manageItemFooter {
   grid-template-columns: minmax(0, 1fr) minmax(86px, auto);
   align-items: center;
   gap: 6px;
 }
 
+.manageListPanel .manageItemFooter {
+  grid-template-columns: minmax(0, 1fr) minmax(64px, max-content);
+  overflow: hidden;
+}
+
 .manageItemSummary {
   color: var(--fg-secondary);
   font-size: 0.69rem;
+}
+
+.manageListPanel .manageItemSummary {
+  line-height: 18px;
 }
 
 .manageItemBadges {
@@ -2197,10 +2241,22 @@
   overflow: hidden;
 }
 
+.manageListPanel .manageItemBadges {
+  justify-self: end;
+  max-width: 168px;
+}
+
 .manageItemBadges > span {
   min-height: 18px;
   padding-inline: 5px;
   font-size: 0.66rem;
+}
+
+.manageListPanel .manageItemBadges > span {
+  flex: 0 0 auto;
+  max-width: 72px;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .itemBadges,
