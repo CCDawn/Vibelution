@@ -915,6 +915,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("return run.id || run.sourceRunId");
     expect(routeSource).toContain("function shouldRenderCliAgentRunTab");
     expect(routeSource).toContain('code === "CLI_AGENT_TERMINAL_ACTIVE"');
+    expect(routeSource).toContain("if (!result) {");
     expect(routeSource).toContain('["error", "failed", "failure", "timeout"].includes(normalizedStatus)');
     expect(routeSource).toContain("const runsById = new Map<string, CliAgentRunView>()");
     expect(routeSource).toContain("const lifecycleByRunId = new Map<string, CliAgentLifecyclePatch>()");
