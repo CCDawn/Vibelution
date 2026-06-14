@@ -103,15 +103,25 @@ def _write_cli_agent_config_with_mimo_db(path, db_path):
 
 def test_codex_readonly_uses_exec_with_readonly_sandbox(monkeypatch, tmp_path):
     project_root = _configure_roots(monkeypatch, tmp_path)
-    calls = []
+    spawned = []
+    writes = []
 
     monkeypatch.setattr(service.shutil, "which", lambda candidate: r"C:\tools\codex.exe" if candidate == "codex.exe" else "")
 
-    def fake_run(args, **kwargs):
-        calls.append((args, kwargs))
-        return subprocess.CompletedProcess(args=args, returncode=0, stdout='{"type":"message"}\n', stderr="")
+    class FakeProcess:
+        def isalive(self):
+            return True
 
-    monkeypatch.setattr(service.subprocess, "run", fake_run)
+        def write(self, data):
+            writes.append(data)
+
+    def fake_spawn(args, **kwargs):
+        spawned.append((args, kwargs))
+        return FakeProcess(), "conpty"
+
+    monkeypatch.setattr(terminal_service, "_spawn_terminal_process", fake_spawn)
+    monkeypatch.setattr(terminal_service._TerminalRuntime, "start", lambda self: None)
+    monkeypatch.setattr(terminal_service, "_schedule_session_id_discovery", lambda *args, **kwargs: None)
 
     result = service.run_cli_agent(
         agent_type="codex_code",
@@ -121,20 +131,14 @@ def test_codex_readonly_uses_exec_with_readonly_sandbox(monkeypatch, tmp_path):
         timeout=15,
     )
 
-    assert result["status"] == "ok"
-    args, kwargs = calls[0]
-    assert args[:2] == [r"C:\tools\codex.exe", "exec"]
-    assert "--cd" in args
-    assert str(project_root) in args
-    assert args[args.index("--sandbox") + 1] == "read-only"
-    assert args[args.index("--ask-for-approval") + 1] == "never"
-    assert "--json" in args
-    assert args[-1] == "Inspect the repository without changing files."
-    assert result["commandPreview"][-1].startswith("<task:")
-    assert result["commandPreview"][-1] != args[-1]
+    assert result["status"] == "sent"
+    assert result["code"] == "CLI_AGENT_TASK_SENT"
+    args, kwargs = spawned[0]
+    assert args == [r"C:\tools\codex.exe", "--cd", str(project_root)]
     assert kwargs["cwd"] == str(project_root)
-    assert kwargs["timeout"] == 15
-    assert (service.RUN_RECORD_DIR / f"{result['runId']}.json").exists()
+    assert writes == ["Inspect the repository without changing files.\r\n"]
+    assert result["terminalSessionId"].startswith("cli-term-")
+    assert result["taskId"].startswith("cli-task-")
 
 
 def test_mimo_worktree_mode_requires_sibling_worktree(monkeypatch, tmp_path):
@@ -156,15 +160,25 @@ def test_mimo_worktree_mode_builds_dir_and_agent_args(monkeypatch, tmp_path):
     project_root = _configure_roots(monkeypatch, tmp_path)
     worktree = project_root.parent / "Vibelution-worktrees" / "cli-agent-demo"
     worktree.mkdir(parents=True)
-    calls = []
+    spawned = []
+    writes = []
 
     monkeypatch.setattr(service.shutil, "which", lambda candidate: r"C:\tools\mimo.cmd" if candidate == "mimo.cmd" else "")
 
-    def fake_run(args, **kwargs):
-        calls.append((args, kwargs))
-        return subprocess.CompletedProcess(args=args, returncode=0, stdout='{"status":"ok"}\n', stderr="")
+    class FakeProcess:
+        def isalive(self):
+            return True
 
-    monkeypatch.setattr(service.subprocess, "run", fake_run)
+        def write(self, data):
+            writes.append(data)
+
+    def fake_spawn(args, **kwargs):
+        spawned.append((args, kwargs))
+        return FakeProcess(), "conpty"
+
+    monkeypatch.setattr(terminal_service, "_spawn_terminal_process", fake_spawn)
+    monkeypatch.setattr(terminal_service._TerminalRuntime, "start", lambda self: None)
+    monkeypatch.setattr(terminal_service, "_schedule_session_id_discovery", lambda *args, **kwargs: None)
 
     result = service.run_cli_agent(
         agent_type="mimo_code",
@@ -176,14 +190,12 @@ def test_mimo_worktree_mode_builds_dir_and_agent_args(monkeypatch, tmp_path):
         allow_unsafe_permissions=True,
     )
 
-    assert result["status"] == "ok"
-    args, _kwargs = calls[0]
-    assert args[:2] == [r"C:\tools\mimo.cmd", "run"]
-    assert args[args.index("--dir") + 1] == str(worktree)
-    assert args[args.index("--model") + 1] == "mimo-model"
-    assert args[args.index("--agent") + 1] == "build"
-    assert "--dangerously-skip-permissions" in args
-    assert args[-1] == "Implement in this worktree."
+    assert result["status"] == "sent"
+    assert result["code"] == "CLI_AGENT_TASK_SENT"
+    args, kwargs = spawned[0]
+    assert args == [r"C:\tools\mimo.cmd", str(worktree)]
+    assert kwargs["cwd"] == str(worktree)
+    assert writes == ["Implement in this worktree.\r\n"]
 
 
 def test_missing_cli_agent_executable_returns_error(monkeypatch, tmp_path):
@@ -201,7 +213,7 @@ def test_missing_cli_agent_executable_returns_error(monkeypatch, tmp_path):
     assert result["executableCandidates"] == ["codex.exe", "codex"]
 
 
-def test_cli_agent_run_tool_reuses_running_terminal_before_spawning(monkeypatch, tmp_path):
+def test_cli_agent_run_tool_does_not_reuse_persisted_running_state_without_runtime(monkeypatch, tmp_path):
     project_root = _configure_roots(monkeypatch, tmp_path)
     state_dir = project_root / ".runtime" / "cli_agents" / "sessions"
     state_dir.mkdir(parents=True)
@@ -230,11 +242,9 @@ def test_cli_agent_run_tool_reuses_running_terminal_before_spawning(monkeypatch,
         cwd=str(project_root),
     )
 
-    assert result["status"] == "ok"
-    assert result["code"] == "CLI_AGENT_TERMINAL_ACTIVE"
-    assert result["terminalReuse"] is True
-    assert result["terminalSessionId"] == "cli-term-active"
-    assert result["cliRunId"] == "cli-run-active"
+    assert result["status"] == "error"
+    assert result["code"] == "CLI_AGENT_NOT_FOUND"
+    assert result.get("terminalReuse") is None
 
 
 def test_cli_agent_run_tool_does_not_reuse_stale_terminal_state(monkeypatch, tmp_path):

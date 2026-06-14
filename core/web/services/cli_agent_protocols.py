@@ -166,7 +166,7 @@ def _paragraph_blocks(text: str) -> list[str]:
 def _looks_like_new_block(line: str) -> bool:
     return bool(
         re.match(
-            r"^(Thought|Answer|Build|Error|Traceback|Status|状态|回答|思考|执行|运行|[$>#])\b",
+            r"^(Thought|Answer|Build|Error|Status|状态|回答|思考|执行|运行|[$>#])\b",
             line,
             flags=re.IGNORECASE,
         )
@@ -200,4 +200,3 @@ def _safe_search(pattern: str, text: str) -> bool:
         return bool(re.search(pattern, text))
     except re.error:
         return False
-
