@@ -7,6 +7,7 @@ import json
 import os
 import queue
 import re
+import sqlite3
 import subprocess
 import threading
 import time
@@ -33,6 +34,10 @@ MAX_TRANSCRIPT_BYTES = 1_500_000
 TRANSCRIPT_TRIM_TARGET_BYTES = 900_000
 STREAM_HEARTBEAT_SECONDS = 15
 STREAM_QUEUE_SIZE = 200
+DEFAULT_DISCOVERY_POLL_ATTEMPTS = 8
+DEFAULT_DISCOVERY_POLL_INTERVAL_SECONDS = 0.75
+DEFAULT_DISCOVERY_CREATED_GRACE_MS = 5000
+DEFAULT_DISCOVERY_MAX_ROWS = 80
 
 
 class CliAgentTerminalError(Exception):
@@ -178,14 +183,20 @@ class _TerminalRuntime:
     def _record_output(self, chunk: str) -> None:
         _append_transcript_chunk(self.transcript_path, chunk)
         next_cli_session_id = _extract_cli_session_id(chunk, self.session_id_regex)
+        linked_session_id = ""
         with self.lock:
             if next_cli_session_id and not str(self.state.get("cliSessionId") or "").strip():
                 self.state["cliSessionId"] = next_cli_session_id
+                self.state["cliSessionIdSource"] = "stdout_regex"
+                self.state["sessionDiscoveryStatus"] = "found"
+                linked_session_id = next_cli_session_id
             self.state["status"] = "running"
             self.state["alive"] = True
             self.state["updatedAt"] = _now_iso()
             _write_state(self.state)
             public_state = _public_state(dict(self.state))
+        if linked_session_id:
+            _record_cli_agent_lifecycle_link(public_state, source="stdout_regex")
         self._publish({"type": "terminal_output", "chunk": chunk, "session": public_state})
 
     def _publish(self, event: dict[str, Any]) -> None:
@@ -250,14 +261,34 @@ def ensure_cli_agent_terminal_session(
         normalized_source_session_id = normalized_source_session_id or str(existing_state.get("sourceSessionId") or "").strip()
         normalized_source_message_id = normalized_source_message_id or str(existing_state.get("sourceMessageId") or "").strip()
         normalized_source_run_id = normalized_source_run_id or str(existing_state.get("sourceRunId") or "").strip()
+        requested_task = task or str(existing_state.get("task") or "")
+        requested_cwd = cwd or str(existing_state.get("cwd") or "")
+        requested_mode = mode or str(existing_state.get("mode") or "readonly")
+        requested_model = model or str(existing_state.get("model") or "")
+        requested_agent = agent or str(existing_state.get("agent") or "")
+        existing_cli_session_id = cli_session_id or str(existing_state.get("cliSessionId") or "")
+        if not existing_cli_session_id and existing_state:
+            existing_cli_session_id = _discover_existing_cli_session_id(
+                agent_type=normalized_type,
+                state={
+                    **existing_state,
+                    "cwd": requested_cwd or existing_state.get("cwd") or "",
+                },
+            )
+            if existing_cli_session_id:
+                existing_state = {
+                    **existing_state,
+                    "cliSessionId": existing_cli_session_id,
+                    "cliSessionIdSource": "session_discovery_existing",
+                }
         command = _build_terminal_command(
             agent_type=normalized_type,
-            task=task or str(existing_state.get("task") or ""),
-            cwd=cwd or str(existing_state.get("cwd") or ""),
-            mode=mode or str(existing_state.get("mode") or "readonly"),
-            model=model or str(existing_state.get("model") or ""),
-            agent=agent or str(existing_state.get("agent") or ""),
-            cli_session_id=cli_session_id or str(existing_state.get("cliSessionId") or ""),
+            task=requested_task,
+            cwd=requested_cwd,
+            mode=requested_mode,
+            model=requested_model,
+            agent=requested_agent,
+            cli_session_id=existing_cli_session_id,
         )
         lock_key = _stable_cli_lock_key(
             adapter_id=normalized_type,
@@ -265,7 +296,7 @@ def ensure_cli_agent_terminal_session(
             source_message_id=normalized_source_message_id,
             source_run_id=normalized_source_run_id,
             cwd=str(command.get("cwd") or cwd or ""),
-            task=task or str(existing_state.get("task") or ""),
+            task=requested_task,
         )
         cli_run_id = _stable_cli_run_id(
             adapter_id=normalized_type,
@@ -273,7 +304,7 @@ def ensure_cli_agent_terminal_session(
             source_message_id=normalized_source_message_id,
             source_run_id=normalized_source_run_id,
             cwd=str(command.get("cwd") or cwd or ""),
-            task=task or str(existing_state.get("task") or ""),
+            task=requested_task,
         )
         locked_runtime = _find_active_locked_runtime(lock_key, exclude_terminal_session_id=terminal_session_id)
         if locked_runtime is not None:
@@ -288,7 +319,7 @@ def ensure_cli_agent_terminal_session(
         state = _initial_state(
             terminal_session_id=terminal_session_id,
             command=command,
-            task=task or str(existing_state.get("task") or ""),
+            task=requested_task,
             source_session_id=normalized_source_session_id,
             source_message_id=normalized_source_message_id,
             source_run_id=normalized_source_run_id,
@@ -315,6 +346,7 @@ def ensure_cli_agent_terminal_session(
         _RUNTIMES[terminal_session_id] = runtime
         runtime.start()
         _send_initial_task(runtime, str(command.get("initialInput") or ""))
+        _schedule_session_id_discovery(runtime, command.get("sessionDiscovery"))
         cli_agent_service._record_event(
             "cli_agent.terminal.started",
             outcome="started",
@@ -402,6 +434,8 @@ def stop_cli_agent_terminal_session(terminal_session_id: str) -> dict[str, Any]:
     with runtime.lock:
         runtime.state["status"] = "stopping"
         runtime.state["alive"] = False
+        runtime.state["userClosed"] = True
+        runtime.state["closedAt"] = _now_iso()
         runtime.state["updatedAt"] = _now_iso()
         _write_state(runtime.state)
     return runtime.snapshot()
@@ -475,6 +509,7 @@ def _build_terminal_command(
     args = _render_terminal_argv_template(argv_template, context, executable_args)
     initial_input = "" if use_resume else _render_template_arg(str(terminal.get("initialInput") or ""), context)
     session_id_spec = terminal.get("sessionId") if isinstance(terminal.get("sessionId"), dict) else {}
+    session_discovery_spec = terminal.get("sessionDiscovery") if isinstance(terminal.get("sessionDiscovery"), dict) else {}
     return {
         "adapterId": agent_type,
         "label": str(adapter.get("label") or agent_type),
@@ -488,6 +523,7 @@ def _build_terminal_command(
         "cliSessionId": context["cliSessionId"],
         "initialInput": initial_input,
         "sessionIdRegex": str(session_id_spec.get("regex") or ""),
+        "sessionDiscovery": dict(session_discovery_spec),
         "resumed": use_resume,
     }
 
@@ -598,6 +634,8 @@ def _initial_state(
     previous_state: dict[str, Any],
 ) -> dict[str, Any]:
     now = _now_iso()
+    process_started_at_ms = _now_epoch_ms()
+    cli_session_id = str(command.get("cliSessionId") or previous_state.get("cliSessionId") or "")
     return {
         "schemaVersion": 1,
         "terminalSessionId": terminal_session_id,
@@ -618,7 +656,9 @@ def _initial_state(
         "task": task,
         "taskHash": cli_agent_service._task_hash(task),
         "taskPreview": cli_agent_service._clip(task, 500),
-        "cliSessionId": str(command.get("cliSessionId") or previous_state.get("cliSessionId") or ""),
+        "cliSessionId": cli_session_id,
+        "cliSessionIdSource": str(previous_state.get("cliSessionIdSource") or ("resume_state" if cli_session_id else "")),
+        "sessionDiscoveryStatus": "skipped" if cli_session_id else "",
         "commandPreview": list(command.get("preview") or []),
         "resumed": bool(command.get("resumed")),
         "status": "starting",
@@ -627,6 +667,8 @@ def _initial_state(
         "rows": _clamp_int(rows, DEFAULT_ROWS, 4, 120),
         "cols": _clamp_int(cols, DEFAULT_COLS, 20, 240),
         "transcriptPath": str(previous_state.get("transcriptPath") or ""),
+        "processStartedAt": now,
+        "processStartedAtMs": process_started_at_ms,
         "createdAt": str(previous_state.get("createdAt") or now),
         "updatedAt": now,
     }
@@ -661,6 +703,245 @@ def _link_runtime_source(runtime: _TerminalRuntime, *, source_message_id: str, s
         )
         runtime.state["updatedAt"] = _now_iso()
         _write_state(runtime.state)
+
+
+def _discover_existing_cli_session_id(*, agent_type: str, state: dict[str, Any]) -> str:
+    if bool(state.get("userClosed")) or str(state.get("status") or "").strip().lower() == "closed":
+        return ""
+    spec = _terminal_session_discovery_spec(agent_type)
+    if not spec:
+        return ""
+    discovered = _discover_cli_session_id_for_state(state, spec, existing=True)
+    if discovered:
+        _touch_cli_session_id_in_state(
+            str(state.get("terminalSessionId") or ""),
+            discovered,
+            source="session_discovery_existing",
+            status="found",
+        )
+    return discovered
+
+
+def _terminal_session_discovery_spec(agent_type: str) -> dict[str, Any]:
+    adapters = cli_agent_service._load_adapter_definitions()
+    adapter = adapters.get(agent_type)
+    terminal = adapter.get("terminal") if isinstance(adapter, dict) and isinstance(adapter.get("terminal"), dict) else {}
+    spec = terminal.get("sessionDiscovery") if isinstance(terminal.get("sessionDiscovery"), dict) else {}
+    source = str(spec.get("source") or "").strip()
+    if not source or source.lower() in {"none", "disabled", "false"}:
+        return {}
+    return dict(spec)
+
+
+def _schedule_session_id_discovery(runtime: _TerminalRuntime, raw_spec: Any) -> None:
+    spec = dict(raw_spec) if isinstance(raw_spec, dict) else {}
+    if not spec or str(spec.get("source") or "").strip().lower() in {"", "none", "disabled", "false"}:
+        return
+    with runtime.lock:
+        if str(runtime.state.get("cliSessionId") or "").strip():
+            return
+        runtime.state["sessionDiscoveryStatus"] = "pending"
+        runtime.state["updatedAt"] = _now_iso()
+        _write_state(runtime.state)
+
+    def discover_later() -> None:
+        attempts = _clamp_int(spec.get("pollAttempts"), DEFAULT_DISCOVERY_POLL_ATTEMPTS, 1, 60)
+        interval = _clamp_float(
+            spec.get("pollIntervalSeconds"),
+            DEFAULT_DISCOVERY_POLL_INTERVAL_SECONDS,
+            0.1,
+            10.0,
+        )
+        for _attempt in range(attempts):
+            with runtime.lock:
+                state = dict(runtime.state)
+                if str(state.get("cliSessionId") or "").strip():
+                    return
+            discovered = _discover_cli_session_id_for_state(state, spec, existing=False)
+            if discovered:
+                _apply_discovered_cli_session_id(runtime, discovered, source="session_discovery")
+                return
+            if not runtime.is_alive():
+                break
+            time.sleep(interval)
+        with runtime.lock:
+            if not str(runtime.state.get("cliSessionId") or "").strip():
+                runtime.state["sessionDiscoveryStatus"] = "not_found"
+                runtime.state["updatedAt"] = _now_iso()
+                _write_state(runtime.state)
+
+    threading.Thread(
+        target=discover_later,
+        name=f"cli-agent-session-discovery-{runtime.state.get('terminalSessionId')}",
+        daemon=True,
+    ).start()
+
+
+def _apply_discovered_cli_session_id(runtime: _TerminalRuntime, cli_session_id: str, *, source: str) -> None:
+    normalized = str(cli_session_id or "").strip()
+    if not normalized:
+        return
+    with runtime.lock:
+        if str(runtime.state.get("cliSessionId") or "").strip():
+            return
+        runtime.state["cliSessionId"] = normalized
+        runtime.state["cliSessionIdSource"] = source
+        runtime.state["sessionDiscoveryStatus"] = "found"
+        runtime.state["updatedAt"] = _now_iso()
+        _write_state(runtime.state)
+        public_state = _public_state(dict(runtime.state))
+    _record_cli_agent_lifecycle_link(public_state, source=source)
+    runtime._publish({"type": "terminal_status", "session": public_state})
+
+
+def _touch_cli_session_id_in_state(
+    terminal_session_id: str,
+    cli_session_id: str,
+    *,
+    source: str,
+    status: str,
+) -> None:
+    normalized_terminal_session_id = str(terminal_session_id or "").strip()
+    normalized_cli_session_id = str(cli_session_id or "").strip()
+    if not normalized_terminal_session_id or not normalized_cli_session_id:
+        return
+    state = _read_state(normalized_terminal_session_id)
+    if not state or str(state.get("cliSessionId") or "").strip():
+        return
+    state["cliSessionId"] = normalized_cli_session_id
+    state["cliSessionIdSource"] = source
+    state["sessionDiscoveryStatus"] = status
+    state["updatedAt"] = _now_iso()
+    _write_state(state)
+    _record_cli_agent_lifecycle_link(_public_state(dict(state)), source=source)
+
+
+def _record_cli_agent_lifecycle_link(state: dict[str, Any], *, source: str) -> None:
+    source_session_id = str(state.get("sourceSessionId") or "").strip()
+    cli_session_id = str(state.get("cliSessionId") or "").strip()
+    if not source_session_id or not cli_session_id:
+        return
+    try:
+        from . import session_service
+
+        session_service.append_cli_agent_lifecycle_event(
+            source_session_id,
+            event="linked",
+            terminal_session={**state, "cliSessionIdSource": source},
+        )
+    except Exception as exc:
+        cli_agent_service._record_event(
+            "cli_agent.terminal.lifecycle_link_failed",
+            outcome="failed",
+            fields={
+                "terminalSessionId": str(state.get("terminalSessionId") or ""),
+                "cliRunId": str(state.get("cliRunId") or ""),
+                "adapterId": str(state.get("adapterId") or state.get("agentType") or ""),
+                "errorType": type(exc).__name__,
+            },
+        )
+
+
+def _discover_cli_session_id_for_state(state: dict[str, Any], spec: dict[str, Any], *, existing: bool) -> str:
+    source = str(spec.get("source") or "").strip().lower()
+    if source in {"mimocode_sqlite", "sqlite_latest_by_cwd"}:
+        return _discover_mimocode_sqlite_session_id(state, spec, existing=existing)
+    return ""
+
+
+def _discover_mimocode_sqlite_session_id(state: dict[str, Any], spec: dict[str, Any], *, existing: bool) -> str:
+    cwd = str(state.get("cwd") or "").strip()
+    if not cwd:
+        return ""
+    database_path = _render_discovery_path(str(spec.get("databasePath") or ""))
+    if not database_path.exists():
+        return ""
+    normalized_cwd = _normalize_path_for_match(cwd)
+    if not normalized_cwd:
+        return ""
+    started_at_ms = _state_started_at_ms(state)
+    created_grace_ms = _clamp_int(spec.get("createdGraceMs"), DEFAULT_DISCOVERY_CREATED_GRACE_MS, 0, 86_400_000)
+    min_timestamp_ms = max(0, started_at_ms - created_grace_ms) if started_at_ms else 0
+    max_rows = _clamp_int(spec.get("maxRows"), DEFAULT_DISCOVERY_MAX_ROWS, 1, 500)
+    try:
+        uri = f"{database_path.resolve().as_uri()}?mode=ro"
+        connection = sqlite3.connect(uri, uri=True, timeout=0.2)
+        connection.row_factory = sqlite3.Row
+        try:
+            rows = connection.execute(
+                "select id, directory, title, time_created, time_updated from session "
+                "order by time_updated desc limit ?",
+                (max_rows,),
+            ).fetchall()
+        finally:
+            connection.close()
+    except sqlite3.Error:
+        return ""
+    for row in rows:
+        row_cwd = _normalize_path_for_match(str(row["directory"] or ""))
+        if row_cwd != normalized_cwd:
+            continue
+        created_at = _safe_int(row["time_created"])
+        updated_at = _safe_int(row["time_updated"])
+        latest_at = max(created_at, updated_at)
+        if min_timestamp_ms and latest_at < min_timestamp_ms:
+            if existing:
+                continue
+            return ""
+        session_id = str(row["id"] or "").strip()
+        if _valid_discovered_session_id(session_id, spec):
+            return session_id
+    return ""
+
+
+def _render_discovery_path(template: str) -> Path:
+    raw = template or "{home}/.local/share/mimocode/mimocode.db"
+    rendered = raw.replace("{home}", str(Path.home())).replace("{projectRoot}", str(Path(PROJECT_ROOT)))
+    return Path(rendered).expanduser()
+
+
+def _normalize_path_for_match(value: str) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    try:
+        text = str(Path(text).resolve())
+    except Exception:
+        pass
+    return text.replace("\\", "/").rstrip("/").lower()
+
+
+def _state_started_at_ms(state: dict[str, Any]) -> int:
+    explicit = _safe_int(state.get("processStartedAtMs"))
+    if explicit:
+        return explicit
+    created_at = str(state.get("createdAt") or "").strip()
+    if not created_at:
+        return 0
+    try:
+        parsed = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+        return int(parsed.timestamp() * 1000)
+    except ValueError:
+        return 0
+
+
+def _valid_discovered_session_id(session_id: str, spec: dict[str, Any]) -> bool:
+    if not session_id:
+        return False
+    regex = str(spec.get("idRegex") or r"^[A-Za-z0-9_.:-]+$").strip()
+    if not regex:
+        return True
+    try:
+        return bool(re.match(regex, session_id))
+    except re.error:
+        return True
+
+
+def _safe_int(value: Any) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
 
 
 def _stable_cli_lock_key(
@@ -878,6 +1159,8 @@ def _public_state(state: dict[str, Any]) -> dict[str, Any]:
         "taskHash",
         "taskPreview",
         "cliSessionId",
+        "cliSessionIdSource",
+        "sessionDiscoveryStatus",
         "commandPreview",
         "resumed",
         "status",
@@ -887,6 +1170,10 @@ def _public_state(state: dict[str, Any]) -> dict[str, Any]:
         "cols",
         "transcriptPath",
         "transcriptTail",
+        "processStartedAt",
+        "processStartedAtMs",
+        "userClosed",
+        "closedAt",
         "createdAt",
         "updatedAt",
     }
@@ -909,9 +1196,21 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _now_epoch_ms() -> int:
+    return int(time.time() * 1000)
+
+
 def _clamp_int(value: Any, default: int, minimum: int, maximum: int) -> int:
     try:
         parsed = int(value)
+    except (TypeError, ValueError):
+        parsed = default
+    return max(minimum, min(maximum, parsed))
+
+
+def _clamp_float(value: Any, default: float, minimum: float, maximum: float) -> float:
+    try:
+        parsed = float(value)
     except (TypeError, ValueError):
         parsed = default
     return max(minimum, min(maximum, parsed))
