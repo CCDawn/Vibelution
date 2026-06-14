@@ -10,6 +10,8 @@ import {
   MessageCircleHeart,
   Plus,
   Search,
+  ShieldAlert,
+  ShieldCheck,
   Sparkles,
   Square,
   Trash2,
@@ -63,6 +65,7 @@ import {
   SessionGuidanceMode,
   ConversationSummary,
   SessionDetail,
+  AgentToolGovernanceRequest,
   SessionRuntimeNotice,
   SessionSummary,
   SessionStreamEvent,
@@ -528,6 +531,93 @@ function describeError(error: unknown, fallback: string) {
     return `${fallback}: ${error.message}`;
   }
   return fallback;
+}
+
+const TOOL_APPROVAL_LABELS: Record<string, string> = {
+  agent_message_tool: "助手消息",
+  agent_tool_permission_request_tool: "权限申请",
+  apply_diff_edit_tool: "差异编辑",
+  apply_patch_tool: "补丁编辑",
+  clean_workspace_debris_tool: "清理工作区",
+  cli_tool: "命令行",
+  code_symbol_tool: "代码结构",
+  compress_context_tool: "压缩上下文",
+  conversation_log_inspect_tool: "会话日志",
+  create_child_session_tool: "创建子会话",
+  get_core_context_tool: "核心记忆",
+  get_current_goal_tool: "当前目标",
+  get_entity_history_tool: "实体历史",
+  get_git_status_summary_tool: "仓库状态",
+  get_recent_changes_tool: "近期变更",
+  glob_tool: "列文件",
+  grep_search_tool: "搜索代码",
+  image2_generate_tool: "生成图片",
+  knowledge_proposal_tool: "知识提案",
+  knowledge_query_tool: "知识查询",
+  list_child_sessions_tool: "子会话列表",
+  plan_update_tool: "更新计划",
+  python_lint_tool: "代码检查",
+  read_file_tool: "读文件",
+  record_learning_tool: "记录学习",
+  run_test_for_tool: "运行测试",
+  search_error_archive_tool: "错误档案",
+  search_memory_tool: "搜索记忆",
+  session_reference_query_tool: "引用会话",
+  task_create_tool: "创建任务",
+  task_list_tool: "任务列表",
+  task_start_tool: "开始任务",
+  task_stop_tool: "停止任务",
+  task_update_tool: "更新任务",
+  trigger_self_restart_tool: "重启应用",
+  web_fetch_tool: "读取网页",
+  web_search_tool: "网页搜索",
+  write_file_tool: "写文件",
+};
+
+function toolApprovalLabels(request: AgentToolGovernanceRequest | null | undefined) {
+  const delta = request?.policyDelta;
+  const tools = [
+    ...(delta?.grantTools ?? []),
+    ...(delta?.unblockTools ?? []),
+    ...(delta?.revokeTools ?? []),
+    ...(delta?.blockTools ?? []),
+  ]
+    .map((tool) => String(tool ?? "").trim())
+    .filter(Boolean);
+  const seen = new Set<string>();
+  const unique = tools.filter((tool) => {
+    if (seen.has(tool)) {
+      return false;
+    }
+    seen.add(tool);
+    return true;
+  });
+  return unique.map((tool) => ({
+    id: tool,
+    label: TOOL_APPROVAL_LABELS[tool] ?? "工具能力",
+  }));
+}
+
+function toolApprovalScopeLabel(scope: string | undefined, lang: "zh" | "en") {
+  const normalized = String(scope ?? "persistent").trim().toLowerCase();
+  if (normalized === "session") {
+    return lang === "zh" ? "本会话" : "This session";
+  }
+  if (normalized === "turn") {
+    return lang === "zh" ? "本轮" : "This turn";
+  }
+  return lang === "zh" ? "长期策略" : "Persistent";
+}
+
+function toolApprovalRiskLabel(level: string | undefined, lang: "zh" | "en") {
+  const normalized = String(level ?? "low").trim().toLowerCase();
+  if (normalized === "high") {
+    return lang === "zh" ? "高风险" : "High risk";
+  }
+  if (normalized === "medium") {
+    return lang === "zh" ? "中风险" : "Medium risk";
+  }
+  return lang === "zh" ? "低风险" : "Low risk";
 }
 
 function submitTelemetryFields(
@@ -1979,6 +2069,47 @@ export function ChatCodingRoute() {
     },
   });
 
+  const resolveToolApprovalMutation = useMutation({
+    mutationFn: async (
+      { request, decision }: {
+        request: AgentToolGovernanceRequest;
+        decision: "approve" | "reject";
+      },
+    ) =>
+      fetchJson<AgentToolGovernanceRequest>(
+        `/api/agents/${encodeURIComponent(request.targetAgentId)}/tool-governance-requests/${encodeURIComponent(request.requestId)}`,
+        {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            decision,
+            resolvedBy: "user",
+            resolutionNote: decision === "approve" ? "会话内批准" : "会话内拒绝",
+          }),
+        },
+      ),
+    onSuccess: (_payload, variables) => {
+      const sessionId = activeSessionId || variables.request.sourceSessionId || "";
+      setSessionComposerErrors((current) => (sessionId ? { ...current, [sessionId]: "" } : current));
+      if (sessionId) {
+        void queryClient.invalidateQueries({ queryKey: queryKeys.session(sessionId) });
+        void chatWorkspaceCache.refreshSessionRuntime(sessionId);
+      }
+      void queryClient.invalidateQueries({ queryKey: queryKeys.agents() });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.agentConfigWorkspace() });
+      void chatWorkspaceCache.afterSessionChanged({ sessionId });
+    },
+    onError: (error, variables) => {
+      const sessionId = activeSessionId || variables.request.sourceSessionId || "__sessions__";
+      setSessionComposerErrors((current) => ({
+        ...current,
+        [sessionId]: describeError(error, lang === "zh" ? "处理工具审批失败" : "Resolve tool approval failed"),
+      }));
+    },
+  });
+
   const petActionMutation = useMutation({
     mutationFn: async ({ action }: { action: PetInteractionAction }) =>
       fetchJson<PetActionResponse>("/api/pet/actions", {
@@ -2815,6 +2946,22 @@ export function ChatCodingRoute() {
         ? t("cacheHitNotCalled")
       : t("cacheHitMissing")
     : t("cacheObservationPending");
+  const pendingToolApproval = useMemo(
+    () => (detail?.pendingToolGovernanceRequests ?? []).find((request) => request.status === "pending_review") ?? null,
+    [detail?.pendingToolGovernanceRequests],
+  );
+  const pendingToolApprovalLabels = useMemo(
+    () => toolApprovalLabels(pendingToolApproval),
+    [pendingToolApproval],
+  );
+  const pendingToolApprovalRawTitle = pendingToolApprovalLabels.map((item) => item.id).join("、");
+  const pendingToolApprovalScope = toolApprovalScopeLabel(pendingToolApproval?.grantScope, lang);
+  const pendingToolApprovalRisk = toolApprovalRiskLabel(pendingToolApproval?.riskLevel, lang);
+  const pendingToolApprovalPending = Boolean(
+    pendingToolApproval
+    && resolveToolApprovalMutation.isPending
+    && resolveToolApprovalMutation.variables?.request.requestId === pendingToolApproval.requestId,
+  );
   const activeDraft = activeSessionId ? sessionDrafts[activeSessionId] ?? "" : "";
   const activeComposerRawError = activeSessionId ? sessionComposerErrors[activeSessionId] ?? "" : "";
   const activeLatestTurnErrorMessage = useMemo(
@@ -5362,6 +5509,60 @@ export function ChatCodingRoute() {
                         </div>
                       </div>
                     ))}
+                  </div>
+                ) : null}
+                {pendingToolApproval ? (
+                  <div className={styles.toolApprovalOverlay} role="presentation">
+                    <section
+                      className={styles.toolApprovalDialog}
+                      role="dialog"
+                      aria-modal="true"
+                      aria-label={lang === "zh" ? "工具权限审批" : "Tool permission approval"}
+                    >
+                      <div className={styles.toolApprovalIcon}>
+                        <ShieldAlert size={18} />
+                      </div>
+                      <div className={styles.toolApprovalBody}>
+                        <div className={styles.toolApprovalHeader}>
+                          <strong>{lang === "zh" ? "工具权限审批" : "Tool permission approval"}</strong>
+                          <span>{pendingToolApprovalRisk}</span>
+                        </div>
+                        <p>
+                          {lang === "zh"
+                            ? `当前助手请求启用${pendingToolApprovalLabels.length > 1 ? "这些能力" : "此能力"}，批准后仅在${pendingToolApprovalScope}生效。`
+                            : `The current agent requests tool access. Approval applies to ${pendingToolApprovalScope}.`}
+                        </p>
+                        <div className={styles.toolApprovalToolList} title={pendingToolApprovalRawTitle}>
+                          {pendingToolApprovalLabels.length
+                            ? pendingToolApprovalLabels.slice(0, 4).map((item) => (
+                              <span key={item.id}>{item.label}</span>
+                            ))
+                            : <span>{lang === "zh" ? "工具策略变更" : "Tool policy change"}</span>}
+                          {pendingToolApprovalLabels.length > 4 ? (
+                            <span>{lang === "zh" ? `另 ${pendingToolApprovalLabels.length - 4} 项` : `+${pendingToolApprovalLabels.length - 4}`}</span>
+                          ) : null}
+                        </div>
+                      </div>
+                      <div className={styles.toolApprovalActions}>
+                        <button
+                          type="button"
+                          onClick={() => resolveToolApprovalMutation.mutate({ request: pendingToolApproval, decision: "reject" })}
+                          disabled={pendingToolApprovalPending}
+                        >
+                          <X size={15} />
+                          <span>{lang === "zh" ? "拒绝" : "Reject"}</span>
+                        </button>
+                        <button
+                          type="button"
+                          className={styles.toolApprovalAllow}
+                          onClick={() => resolveToolApprovalMutation.mutate({ request: pendingToolApproval, decision: "approve" })}
+                          disabled={pendingToolApprovalPending}
+                        >
+                          <ShieldCheck size={15} />
+                          <span>{pendingToolApprovalPending ? (lang === "zh" ? "处理中" : "Resolving") : (lang === "zh" ? "允许" : "Allow")}</span>
+                        </button>
+                      </div>
+                    </section>
                   </div>
                 ) : null}
                 <LazyConversationView

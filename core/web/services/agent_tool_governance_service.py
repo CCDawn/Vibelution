@@ -68,6 +68,7 @@ HIGH_RISK_GRANT_TOOLS = {
 }
 GOVERNANCE_SYSTEM_ROLES = {"ceo", "organization_advisor", "capability_steward"}
 REQUEST_STATUSES = {"pending_review", "applied", "rejected"}
+GRANT_SCOPES = {"persistent", "session", "turn"}
 
 
 class AgentToolGovernanceError(ValueError):
@@ -88,6 +89,9 @@ def submit_tool_governance_request(
     unblock_tools: list[str] | None = None,
     reason: str = "",
     apply_mode: str = "auto",
+    grant_scope: str = "persistent",
+    source_session_id: str = "",
+    source_turn_id: str = "",
 ) -> dict[str, Any]:
     """Create a controlled ToolPolicy change request.
 
@@ -107,6 +111,8 @@ def submit_tool_governance_request(
     )
     if not any(delta.values()):
         raise AgentToolGovernanceError("Tool governance request must include at least one tool change.")
+    normalized_grant_scope = _normalize_grant_scope(grant_scope)
+    _validate_grant_scope_delta(normalized_grant_scope, delta)
 
     authority = _actor_authority(proposer, target_agent)
     risk = _classify_delta(delta)
@@ -122,7 +128,8 @@ def submit_tool_governance_request(
     resolved_at = ""
     resolved_by = ""
     if not requires_approval:
-        applied_agent = _apply_tool_delta(str(target_agent["agentId"]), delta)
+        if normalized_grant_scope == "persistent":
+            applied_agent = _apply_tool_delta(str(target_agent["agentId"]), delta)
         status = "applied"
         resolved_at = utc_now_iso()
         resolved_by = _actor_label(proposer) or "agent_tool_governance"
@@ -138,6 +145,9 @@ def submit_tool_governance_request(
         resolved_at=resolved_at,
         resolved_by=resolved_by,
         resolution_note="auto_applied_low_risk" if status == "applied" else "",
+        grant_scope=normalized_grant_scope,
+        source_session_id=source_session_id,
+        source_turn_id=source_turn_id,
     )
     _append_request(applied_agent or target_agent, request)
     _record_tool_governance_event("agent_tool_governance.request_created", request)
@@ -213,17 +223,65 @@ def resolve_tool_governance_request(
             return item
 
         delta = item.get("policyDelta") if isinstance(item.get("policyDelta"), dict) else {}
-        applied_agent = _apply_tool_delta(str(target_agent.get("agentId") or ""), _normalize_delta_from_payload(delta))
+        normalized_delta = _normalize_delta_from_payload(delta)
+        grant_scope = _normalize_grant_scope(str(item.get("grantScope") or "persistent"))
         item["status"] = "applied"
         item["resolvedAt"] = utc_now_iso()
         item["resolvedBy"] = trim_lines(str(resolved_by or "user"), max_lines=1) or "user"
         item["resolutionNote"] = trim_lines(str(resolution_note or "approved"), max_lines=4)
-        item["appliedToolPolicyId"] = str(applied_agent.get("toolPolicyId") or "")
-        item["after"] = _policy_snapshot(applied_agent.get("toolPolicy") if isinstance(applied_agent.get("toolPolicy"), dict) else {})
+        if grant_scope == "persistent":
+            applied_agent = _apply_tool_delta(str(target_agent.get("agentId") or ""), normalized_delta)
+            item["appliedToolPolicyId"] = str(applied_agent.get("toolPolicyId") or "")
+            item["after"] = _policy_snapshot(applied_agent.get("toolPolicy") if isinstance(applied_agent.get("toolPolicy"), dict) else {})
+        else:
+            policy = target_agent.get("toolPolicy") if isinstance(target_agent.get("toolPolicy"), dict) else {}
+            item["appliedToolPolicyId"] = ""
+            item["temporaryGrant"] = _temporary_grant_payload(
+                delta=normalized_delta,
+                grant_scope=grant_scope,
+                source_session_id=str(item.get("sourceSessionId") or "").strip(),
+                source_turn_id=str(item.get("sourceTurnId") or "").strip(),
+                applied_at=str(item.get("resolvedAt") or "").strip(),
+            )
+            item["after"] = _policy_snapshot(_policy_with_temporary_delta(policy, normalized_delta))
         _write_requests(path, requests)
         _record_tool_governance_event("agent_tool_governance.request_applied", item, outcome="applied")
         return item
     raise AgentToolGovernanceNotFoundError(f"Tool governance request not found: {request_id}")
+
+
+def temporary_granted_tools_for_agent(
+    agent_id: str,
+    *,
+    session_id: str = "",
+    turn_id: str = "",
+) -> list[str]:
+    """Return approved non-persistent grants visible to the current runtime scope."""
+
+    agent = _raw_agent(agent_id, include_archived=True)
+    if not agent:
+        return []
+    normalized_session_id = str(session_id or "").strip()
+    normalized_turn_id = str(turn_id or "").strip()
+    result: list[str] = []
+    seen: set[str] = set()
+    for item in _read_requests(agent):
+        if str(item.get("status") or "").strip().lower() != "applied":
+            continue
+        grant_scope = _normalize_grant_scope(str(item.get("grantScope") or "persistent"))
+        if grant_scope == "persistent":
+            continue
+        if not _grant_scope_matches(item, grant_scope, session_id=normalized_session_id, turn_id=normalized_turn_id):
+            continue
+        grant_payload = item.get("temporaryGrant") if isinstance(item.get("temporaryGrant"), dict) else {}
+        delta = _normalize_delta_from_payload(item.get("policyDelta") if isinstance(item.get("policyDelta"), dict) else {})
+        tools = _unique_tools(list(grant_payload.get("grantTools") or []) or delta.get("grantTools") or [])
+        for tool in tools:
+            if tool in seen:
+                continue
+            result.append(tool)
+            seen.add(tool)
+    return result
 
 
 def utc_now_iso() -> str:
@@ -284,6 +342,24 @@ def _normalize_delta_from_payload(payload: dict[str, Any]) -> dict[str, list[str
         block_tools=list(payload.get("blockTools") or []),
         unblock_tools=list(payload.get("unblockTools") or []),
     )
+
+
+def _normalize_grant_scope(value: str) -> str:
+    normalized = str(value or "persistent").strip().lower()
+    if not normalized:
+        normalized = "persistent"
+    if normalized not in GRANT_SCOPES:
+        raise AgentToolGovernanceError("Unsupported tool governance grant scope.")
+    return normalized
+
+
+def _validate_grant_scope_delta(grant_scope: str, delta: dict[str, list[str]]) -> None:
+    if grant_scope == "persistent":
+        return
+    if not delta.get("grantTools"):
+        raise AgentToolGovernanceError("Temporary tool governance requests must grant at least one tool.")
+    if delta.get("revokeTools") or delta.get("blockTools") or delta.get("unblockTools"):
+        raise AgentToolGovernanceError("Temporary tool governance requests only support grantTools.")
 
 
 def _unique_tools(values: list[str] | None) -> list[str]:
@@ -401,15 +477,38 @@ def _request_payload(
     resolved_at: str = "",
     resolved_by: str = "",
     resolution_note: str = "",
+    grant_scope: str = "persistent",
+    source_session_id: str = "",
+    source_turn_id: str = "",
 ) -> dict[str, Any]:
     now = utc_now_iso()
     request_id = _new_request_id()
     policy = target_agent.get("toolPolicy") if isinstance(target_agent.get("toolPolicy"), dict) else {}
+    normalized_grant_scope = _normalize_grant_scope(grant_scope)
+    temporary_grant = (
+        _temporary_grant_payload(
+            delta=delta,
+            grant_scope=normalized_grant_scope,
+            source_session_id=source_session_id,
+            source_turn_id=source_turn_id,
+            applied_at=resolved_at or now,
+        )
+        if status == "applied" and normalized_grant_scope != "persistent"
+        else {}
+    )
+    after_policy = (
+        _policy_with_temporary_delta(policy, delta)
+        if status == "applied" and normalized_grant_scope != "persistent"
+        else policy
+    )
     return {
         "eventId": request_id,
         "requestId": request_id,
         "kind": "tool_governance_request",
         "status": status if status in REQUEST_STATUSES else "pending_review",
+        "grantScope": normalized_grant_scope,
+        "sourceSessionId": trim_lines(str(source_session_id or ""), max_lines=1),
+        "sourceTurnId": trim_lines(str(source_turn_id or ""), max_lines=1),
         "targetAgentId": str(target_agent.get("agentId") or "").strip(),
         "targetAgentCode": str(target_agent.get("agentCode") or "").strip(),
         "targetAgentName": str(target_agent.get("displayName") or "").strip(),
@@ -427,8 +526,9 @@ def _request_payload(
         "resolvedAt": resolved_at,
         "resolvedBy": resolved_by,
         "resolutionNote": resolution_note,
-        "appliedToolPolicyId": str(target_agent.get("toolPolicyId") or "") if status == "applied" else "",
-        "after": _policy_snapshot(policy) if status == "applied" else {},
+        "appliedToolPolicyId": str(target_agent.get("toolPolicyId") or "") if status == "applied" and normalized_grant_scope == "persistent" else "",
+        "temporaryGrant": temporary_grant,
+        "after": _policy_snapshot(after_policy) if status == "applied" else {},
     }
 
 
@@ -439,6 +539,64 @@ def _policy_snapshot(policy: dict[str, Any]) -> dict[str, Any]:
         "blockedTools": list(policy.get("blockedTools") or [])[:120],
         "writeScopes": list(policy.get("writeScopes") or [])[:12],
     }
+
+
+def _policy_with_temporary_delta(policy: dict[str, Any], delta: dict[str, list[str]]) -> dict[str, Any]:
+    allowed = _ordered_set(policy.get("allowedTools") or [])
+    blocked = set(_ordered_set(policy.get("blockedTools") or []))
+    temporary_allowed: list[str] = []
+    for tool in delta.get("grantTools") or []:
+        if not tool or tool in blocked:
+            continue
+        if tool not in allowed:
+            allowed.append(tool)
+            temporary_allowed.append(tool)
+    return {
+        **policy,
+        "allowedTools": _ordered_set(allowed),
+        "temporaryAllowedTools": _ordered_set(list(policy.get("temporaryAllowedTools") or []) + temporary_allowed),
+    }
+
+
+def _temporary_grant_payload(
+    *,
+    delta: dict[str, list[str]],
+    grant_scope: str,
+    source_session_id: str,
+    source_turn_id: str,
+    applied_at: str,
+) -> dict[str, Any]:
+    return {
+        "scope": grant_scope,
+        "sessionId": trim_lines(str(source_session_id or ""), max_lines=1),
+        "turnId": trim_lines(str(source_turn_id or ""), max_lines=1),
+        "grantTools": _unique_tools(delta.get("grantTools") or []),
+        "appliedAt": trim_lines(str(applied_at or utc_now_iso()), max_lines=1),
+    }
+
+
+def _grant_scope_matches(
+    request: dict[str, Any],
+    grant_scope: str,
+    *,
+    session_id: str,
+    turn_id: str,
+) -> bool:
+    if grant_scope == "session":
+        request_session_id = str(request.get("sourceSessionId") or "").strip()
+        return bool(session_id and request_session_id and request_session_id == session_id)
+    if grant_scope == "turn":
+        request_session_id = str(request.get("sourceSessionId") or "").strip()
+        request_turn_id = str(request.get("sourceTurnId") or "").strip()
+        return bool(
+            session_id
+            and turn_id
+            and request_session_id
+            and request_turn_id
+            and request_session_id == session_id
+            and request_turn_id == turn_id
+        )
+    return False
 
 
 def _ordered_set(values: Any) -> list[str]:
