@@ -5249,8 +5249,12 @@ def test_session_live_output_publishes_lightweight_assistant_delta_without_detai
     assert event["type"] == "assistant_delta"
     assert event["sessionId"] == "session-live"
     assert event["turnId"] == "turn-running"
-    assert event["content"] == "hello"
-    assert event["thought"] == "thinking"
+    assert event["content"] == ""
+    assert event["thought"] == ""
+    assert event["contentDelta"] == "hello"
+    assert event["thoughtDelta"] == "thinking"
+    assert event["replaceContent"] is False
+    assert event["replaceThought"] is False
     assert event["feedbackEvents"][0]["kind"] == "status"
     assert event["feedbackEvents"][0]["name"] == "model_response"
     assert event["done"] is False
@@ -5258,9 +5262,9 @@ def test_session_live_output_publishes_lightweight_assistant_delta_without_detai
     snapshot_events = [item for item in recorded_events if item[0][2] == "session.detail_snapshot.published"]
     assert len(delta_events) == 2
     assert not snapshot_events
+    assert any(item[1]["fields"]["contentChars"] == 5 for item in delta_events)
+    assert any(item[1]["fields"]["thoughtChars"] == 8 for item in delta_events)
     fields = delta_events[-1][1]["fields"]
-    assert fields["contentChars"] == 5
-    assert fields["thoughtChars"] == 8
     assert fields["subscriberCount"] == 1
 
 

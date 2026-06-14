@@ -1487,11 +1487,23 @@ class SessionLiveOutputState:
     stage: str = ""
     thought: str = ""
     content: str = ""
+    thought_delta: str = ""
+    content_delta: str = ""
+    replace_thought: bool = False
+    replace_content: bool = False
     mental_snapshot: dict[str, Any] | None = None
     tool_calls: list[dict[str, Any]] = field(default_factory=list)
     feedback_events: list[dict[str, Any]] = field(default_factory=list)
     context_composition: dict[str, Any] | None = None
     updated_at: str = ""
+
+
+def _live_output_delta(previous: str, current: str) -> tuple[str, bool]:
+    previous_text = str(previous or "")
+    current_text = str(current or "")
+    if current_text.startswith(previous_text):
+        return current_text[len(previous_text):], False
+    return current_text, True
 
 
 @dataclass
@@ -14201,12 +14213,22 @@ def _set_session_live_output(
             _SESSION_LIVE_OUTPUTS[session_id] = state
         elif output_turn_id and not state.turn_id:
             state.turn_id = output_turn_id
+        previous_thought = state.thought
+        previous_content = state.content
         if stage is not _UNSET:
             state.stage = str(stage or "").strip()
         if thought is not _UNSET:
             state.thought = _sanitize_thought_text(thought)
         if content is not _UNSET:
             state.content = _sanitize_message_content("assistant", content)
+        thought_delta = ""
+        content_delta = ""
+        replace_thought = False
+        replace_content = False
+        if thought is not _UNSET:
+            thought_delta, replace_thought = _live_output_delta(previous_thought, state.thought)
+        if content is not _UNSET:
+            content_delta, replace_content = _live_output_delta(previous_content, state.content)
         if mental_snapshot is not _UNSET:
             state.mental_snapshot = _normalize_mental_snapshot(mental_snapshot)
         if tool_calls is not _UNSET:
@@ -14229,8 +14251,10 @@ def _set_session_live_output(
                     session_id=state.session_id,
                     turn_id=state.turn_id,
                     stage=state.stage,
-                    thought=state.thought,
-                    content=state.content,
+                    thought_delta=thought_delta,
+                    content_delta=content_delta,
+                    replace_thought=replace_thought,
+                    replace_content=replace_content,
                     feedback_events=list(state.feedback_events or []),
                     updated_at=state.updated_at,
                 )
@@ -14240,8 +14264,10 @@ def _set_session_live_output(
                 session_id=state.session_id,
                 turn_id=state.turn_id,
                 stage=state.stage,
-                thought=state.thought,
-                content=state.content,
+                thought_delta=thought_delta,
+                content_delta=content_delta,
+                replace_thought=replace_thought,
+                replace_content=replace_content,
                 feedback_events=list(state.feedback_events or []),
                 updated_at=state.updated_at,
             )
@@ -16100,6 +16126,10 @@ def _publish_session_assistant_delta(
         "stage": str(state.stage or "").strip(),
         "content": str(state.content or ""),
         "thought": str(state.thought or ""),
+        "contentDelta": str(state.content_delta or ""),
+        "thoughtDelta": str(state.thought_delta or ""),
+        "replaceContent": bool(state.replace_content),
+        "replaceThought": bool(state.replace_thought),
         "feedbackEvents": list(state.feedback_events or []),
         "updatedAt": str(state.updated_at or "").strip() or _now_timestamp(),
         "done": bool(done),
@@ -16107,7 +16137,11 @@ def _publish_session_assistant_delta(
     delivered_count = 0
     dropped_count = 0
     for subscriber in subscribers:
-        dropped_count += _coalesce_session_stream_queue(subscriber, event_type="assistant_delta")
+        dropped_count += _coalesce_session_stream_queue(
+            subscriber,
+            event_type="assistant_delta",
+            replacement_event=event,
+        )
         try:
             subscriber.put_nowait(event)
             delivered_count += 1
@@ -16131,8 +16165,8 @@ def _publish_session_assistant_delta(
         subscriber_count=len(subscribers),
         delivered_count=delivered_count,
         dropped_count=dropped_count,
-        content_chars=len(str(state.content or "")),
-        thought_chars=len(str(state.thought or "")),
+        content_chars=len(str(state.content_delta or "")),
+        thought_chars=len(str(state.thought_delta or "")),
         done=done,
     )
 
@@ -16141,6 +16175,7 @@ def _coalesce_session_stream_queue(
     subscriber: queue.Queue[dict[str, Any]],
     *,
     event_type: str,
+    replacement_event: dict[str, Any] | None = None,
 ) -> int:
     """Drop stale status snapshots for one SSE subscriber before enqueuing a newer one."""
 
@@ -16155,6 +16190,12 @@ def _coalesce_session_stream_queue(
         except queue.Empty:
             break
         if str(existing.get("type") or "").strip() == normalized_event_type:
+            if normalized_event_type == "assistant_delta" and replacement_event is not None:
+                if _merge_assistant_delta_stream_events(existing, replacement_event):
+                    dropped_count += 1
+                    continue
+                kept.append(existing)
+                continue
             dropped_count += 1
             continue
         kept.append(existing)
@@ -16164,6 +16205,36 @@ def _coalesce_session_stream_queue(
         except queue.Full:
             dropped_count += 1
     return dropped_count
+
+
+def _merge_assistant_delta_stream_events(existing: dict[str, Any], replacement: dict[str, Any]) -> bool:
+    if str(existing.get("sessionId") or "") != str(replacement.get("sessionId") or ""):
+        return False
+    if str(existing.get("turnId") or "") != str(replacement.get("turnId") or ""):
+        return False
+    for field_name, delta_key, replace_key in (
+        ("content", "contentDelta", "replaceContent"),
+        ("thought", "thoughtDelta", "replaceThought"),
+    ):
+        existing_delta = str(existing.get(delta_key) if existing.get(delta_key) is not None else existing.get(field_name) or "")
+        replacement_delta = str(
+            replacement.get(delta_key) if replacement.get(delta_key) is not None else replacement.get(field_name) or ""
+        )
+        if bool(replacement.get(replace_key)):
+            replacement[delta_key] = replacement_delta
+            replacement[replace_key] = True
+            continue
+        if bool(existing.get(replace_key)):
+            replacement[delta_key] = existing_delta + replacement_delta
+            replacement[replace_key] = True
+            continue
+        replacement[delta_key] = existing_delta + replacement_delta
+        replacement[replace_key] = False
+    if not replacement.get("stage"):
+        replacement["stage"] = str(existing.get("stage") or "")
+    if "feedbackEvents" not in replacement and "feedbackEvents" in existing:
+        replacement["feedbackEvents"] = list(existing.get("feedbackEvents") or [])
+    return True
 
 
 def _encode_sse_event(event_name: str, payload: dict[str, Any]) -> str:

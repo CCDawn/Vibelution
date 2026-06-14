@@ -621,7 +621,7 @@ def _find_reusable_terminal_session(*, agent_type: str, cwd: str) -> dict[str, A
         if bool(state.get("userClosed")):
             continue
         status = str(state.get("status") or "").strip().lower()
-        if status in {"closed", "stopping", "stopped", "exited"}:
+        if status in {"closed", "stopping", "stopped", "exited", "stale"}:
             continue
         state_agent_type = _normalize_id(state.get("adapterId") or state.get("agentType"))
         if state_agent_type != normalized_agent_type:

@@ -4532,6 +4532,10 @@ export type SessionAssistantDeltaStreamEvent = {
   stage: string;
   content: string;
   thought: string;
+  contentDelta?: string;
+  thoughtDelta?: string;
+  replaceContent?: boolean;
+  replaceThought?: boolean;
   feedbackEvents?: ConversationFeedbackEvent[];
   updatedAt: string;
   done: boolean;
