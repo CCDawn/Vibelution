@@ -471,8 +471,8 @@ def _build_terminal_command(
         "agent": str(agent or adapter.get("defaultAgent") or ""),
         "cliSessionId": str(cli_session_id or ""),
     }
-    args = [_render_template_arg(str(item), context) for item in argv_template]
-    args = [item for item in args if item != ""]
+    executable_args = _terminal_executable_args(executable)
+    args = _render_terminal_argv_template(argv_template, context, executable_args)
     initial_input = "" if use_resume else _render_template_arg(str(terminal.get("initialInput") or ""), context)
     session_id_spec = terminal.get("sessionId") if isinstance(terminal.get("sessionId"), dict) else {}
     return {
@@ -490,6 +490,58 @@ def _build_terminal_command(
         "sessionIdRegex": str(session_id_spec.get("regex") or ""),
         "resumed": use_resume,
     }
+
+
+def _render_terminal_argv_template(
+    argv_template: list[Any],
+    context: dict[str, str],
+    executable_args: list[str],
+) -> list[str]:
+    args: list[str] = []
+    for item in argv_template:
+        raw = str(item)
+        if raw == "{exe}":
+            args.extend(executable_args)
+            continue
+        rendered = _render_template_arg(raw, context)
+        if rendered:
+            args.append(rendered)
+    return args
+
+
+def _terminal_executable_args(executable: str) -> list[str]:
+    expanded = _resolve_windows_npm_cmd_shim(executable)
+    if expanded:
+        return expanded
+    return [executable]
+
+
+def _resolve_windows_npm_cmd_shim(executable: str) -> list[str]:
+    if os.name != "nt":
+        return []
+    path = Path(str(executable or "")).expanduser()
+    if path.suffix.lower() != ".cmd" or not path.exists():
+        return []
+    try:
+        source = path.read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        return []
+    match = re.search(r"%dp0%[\\/](node_modules[\\/][^\"]+)", source, flags=re.IGNORECASE)
+    if not match:
+        return []
+    relative_parts = [part for part in re.split(r"[\\/]+", match.group(1)) if part]
+    if not relative_parts:
+        return []
+    script_path = path.parent.joinpath(*relative_parts)
+    if not script_path.exists():
+        return []
+    local_node = path.parent / "node.exe"
+    node_path = str(local_node) if local_node.exists() else (
+        cli_agent_service.shutil.which("node.exe") or cli_agent_service.shutil.which("node") or ""
+    )
+    if not node_path:
+        return []
+    return [node_path, str(script_path)]
 
 
 def _spawn_terminal_process(args: list[str], *, cwd: str, rows: int, cols: int) -> tuple[Any, str]:
