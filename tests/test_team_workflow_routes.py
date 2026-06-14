@@ -366,6 +366,43 @@ def test_team_workflow_route_assesses_source_quality_batch(tmp_path, monkeypatch
     assert response.json()["officialBoundary"]["writesOfficialGraph"] is False
 
 
+def test_team_workflow_route_force_rescreens_source_quality_batch(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    client = _client()
+    team = client.post("/api/teams", json={"name": "ai科学研究团队"}).json()
+    candidate = team_workflow_orchestration_service.register_candidate_source(
+        team["teamId"],
+        {
+            "title": "Predictive coding cortical hierarchy neural network paper",
+            "sourceUrl": "https://doi.org/10.0000/predictive-coding",
+            "sourceKind": "paper",
+            "summary": "Neural predictive coding evidence for network learning and attention mechanisms.",
+            "tags": ["neuro", "algorithm"],
+            "allowedForAnalysis": True,
+            "createdByAgent": "Data Discovery Agent",
+        },
+    )["candidate"]
+
+    first = client.post(
+        f"/api/teams/{team['teamId']}/workflow-orchestration/source-quality/assess-batch",
+        json={"assessedByAgent": "Source Quality Agent"},
+    )
+    second = client.post(
+        f"/api/teams/{team['teamId']}/workflow-orchestration/source-quality/assess-batch",
+        json={"assessedByAgent": "Source Quality Review Agent", "force": True},
+    )
+
+    assert first.status_code == 201, first.text
+    assert second.status_code == 201, second.text
+    payload = second.json()
+    assert payload["status"] == "completed"
+    assert payload["assessedByAgent"] == "Source Quality Review Agent"
+    assert payload["summary"]["assessedCandidateCount"] == 1
+    assert payload["summary"]["skippedCandidateCount"] == 0
+    assert payload["assessments"][0]["candidateId"] == candidate["candidateId"]
+    assert payload["officialBoundary"]["candidateOnly"] is True
+
+
 def test_team_workflow_route_blocks_source_collection_without_prompt_cache(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     monkeypatch.setattr(
