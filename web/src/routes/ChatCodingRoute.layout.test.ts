@@ -853,11 +853,17 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("function cliAgentRunIdFromTabId");
     expect(routeSource).toContain("function buildCliAgentRunViews");
     expect(routeSource).toContain("toolCall.name !== CLI_AGENT_TOOL_NAME");
+    expect(routeSource).toContain("function isCliAgentRunActiveForClose");
+    expect(routeSource).toContain("const [closedCliAgentRunIdsBySession");
+    expect(routeSource).toContain("const [cliAgentTerminalSessions");
     expect(routeSource).toContain('const activeFilePath = workspace.activeTab !== "agent" && !activeCliAgentRunId ? workspace.activeTab : null;');
     expect(routeSource).toContain("cliAgentRuns={cliAgentRunTabs}");
     expect(routeSource).toContain("onOpenCliAgentRun={(runId) =>");
+    expect(routeSource).toContain("onCloseCliAgentRun={(runId) =>");
     expect(routeSource).toContain("setActiveTab(activeSessionId, cliAgentRunTabId(runId));");
+    expect(routeSource).toContain("window.confirm(");
     expect(routeSource).toContain("<CliAgentRunTerminalPanel");
+    expect(routeSource).toContain("onTerminalSessionChange={handleCliAgentTerminalSessionChange}");
     expect(routeSource).toContain(") : activeCliAgentRun ? (");
     expect(routeSource).toContain('"/api/cli-agents/terminal-sessions/ensure"');
     expect(routeSource).toContain("new EventSource(`/api/cli-agents/terminal-sessions/${encodeURIComponent(terminalSessionId)}/events`)");
@@ -868,11 +874,18 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeCssSource).toContain(".cliAgentRunPanel");
     expect(routeCssSource).toContain(".cliAgentTerminalFrame");
     expect(routeCssSource).toContain("background: #06100d");
+    expect(routeCssSource).toContain(".cliAgentTerminalStatus");
     expect(routeCssSource).toContain(".cliAgentTerminalInputRow");
     expect(routeCssSource).toContain(".agentSessionTabCli");
+    expect(routeCssSource).toContain(".agentSessionTabCloseButton");
+    expect(routeCssSource).not.toContain(".cliAgentRunIconButton");
+    expect(routeCssSource).not.toContain(".cliAgentRunMetaBar");
     expect(agentSessionTabStripSource).toContain("export type CliAgentRunTab");
     expect(agentSessionTabStripSource).toContain("cliAgentRuns.map");
     expect(agentSessionTabStripSource).toContain("SquareTerminal");
+    expect(agentSessionTabStripSource).toContain("onCloseCliAgentRun?:");
+    expect(agentSessionTabStripSource).toContain("styles.agentSessionTabCloseButton");
+    expect(agentSessionTabStripSource).not.toContain("run.mode ? ` · ${run.mode}` : \"\"");
   });
 
   it("renders a compact QQ-style tree with direct sessions separate from Team-owned rooms", () => {

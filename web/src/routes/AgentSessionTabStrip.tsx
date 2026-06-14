@@ -41,6 +41,7 @@ export type AgentSessionTabStripProps = {
   onDragReference: (event: DragEvent<HTMLElement>, reference: SessionReferenceAttachment) => void;
   onOpenDirectSession: (sessionId: string) => void;
   onOpenCliAgentRun?: (runId: string) => void;
+  onCloseCliAgentRun?: (runId: string) => void;
   onRenameTitleChange: (title: string) => void;
   onSetActiveTab: (sessionId: string, tab: "agent") => void;
   onSubmitRename: (session: SessionSummary) => void;
@@ -67,6 +68,7 @@ export function AgentSessionTabStrip({
   onDragReference,
   onOpenDirectSession,
   onOpenCliAgentRun,
+  onCloseCliAgentRun,
   onRenameTitleChange,
   onSetActiveTab,
   onSubmitRename,
@@ -206,28 +208,39 @@ export function AgentSessionTabStrip({
           tabActive ? styles.agentSessionTabActive : "",
         ].filter(Boolean).join(" ");
         return (
-          <button
+          <div
             key={run.id}
-            type="button"
-            className={tabClassName}
+            className={`${tabClassName} ${styles.agentSessionTabClosable}`}
             aria-current={tabActive ? "true" : undefined}
-            onClick={() => onOpenCliAgentRun?.(run.id)}
             title={title}
           >
-            <span className={styles.agentSessionTabIcon} aria-hidden="true">
-              <SquareTerminal size={14} />
-            </span>
-            <span className={styles.agentSessionTabCopy}>
-              <span className={styles.agentSessionTabKicker}>
-                {lang === "zh" ? "CLI Agent" : "CLI Agent"}
+            <button
+              type="button"
+              className={styles.agentSessionTabMainAction}
+              onClick={() => onOpenCliAgentRun?.(run.id)}
+              title={title}
+            >
+              <span className={styles.agentSessionTabIcon} aria-hidden="true">
+                <SquareTerminal size={14} />
               </span>
-              <span className={styles.agentSessionTabTitle}>{run.title}</span>
-            </span>
-            <span className={styles.agentSessionTabMeta}>
-              {statusLabel(run.status)}
-              {run.mode ? ` · ${run.mode}` : ""}
-            </span>
-          </button>
+              <span className={`${styles.agentSessionTabCopy} ${styles.agentSessionTabCopyCompact}`}>
+                <span className={styles.agentSessionTabTitle}>{run.title}</span>
+              </span>
+              <span className={styles.agentSessionTabMeta}>{statusLabel(run.status)}</span>
+            </button>
+            <button
+              type="button"
+              className={styles.agentSessionTabCloseButton}
+              onClick={(event) => {
+                event.stopPropagation();
+                onCloseCliAgentRun?.(run.id);
+              }}
+              title={lang === "zh" ? "关闭终端页" : "Close terminal tab"}
+              aria-label={`${lang === "zh" ? "关闭终端页" : "Close terminal tab"} ${run.title}`}
+            >
+              <X size={13} />
+            </button>
+          </div>
         );
       })}
     </div>
