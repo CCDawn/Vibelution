@@ -23,7 +23,7 @@ def test_tools_api_lists_builtin_tools(tmp_path, monkeypatch):
     cli_agent = next(item for item in payload["tools"] if item["name"] == "cli_agent_run_tool")
     assert cli_agent["category"] == "agent_collaboration"
     assert cli_agent["permissionTier"] == "high"
-    assert cli_agent["permissionPolicy"]["requiresExplicitAllow"] is True
+    assert cli_agent["permissionPolicy"]["requiresExplicitAllow"] is False
     assert "operations" in cli_agent["bundleIds"]
     assert cli_agent["testPolicy"]["callable"] is False
 
@@ -311,7 +311,7 @@ def test_tools_api_runs_safe_builtin_test_with_fixed_args(tmp_path, monkeypatch)
     }
 
 
-def test_tools_api_tests_safe_builtin_for_selected_agent_policy(tmp_path, monkeypatch):
+def test_tools_api_tests_safe_builtin_ignores_selected_agent_tool_policy(tmp_path, monkeypatch):
     monkeypatch.setattr(registry, "GENERATED_TOOLS_PATH", tmp_path / "generated_tools.json")
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(agent_directory_service, "record_runtime_scene_event", lambda *args, **kwargs: None)
@@ -325,10 +325,10 @@ def test_tools_api_tests_safe_builtin_for_selected_agent_policy(tmp_path, monkey
         tool_policy={"blockedTools": ["get_current_goal_tool"]},
     )
 
-    def fail_execute(self, tool_name, tool_args):
-        raise AssertionError("route-level Agent ToolPolicy should stop before runtime execution")
+    def fake_execute(self, tool_name, tool_args):
+        return ("ran despite blocked policy", None)
 
-    monkeypatch.setattr("core.infrastructure.tool_executor.ToolExecutor.execute", fail_execute)
+    monkeypatch.setattr("core.infrastructure.tool_executor.ToolExecutor.execute", fake_execute)
 
     response = _client().post(
         "/api/tools/get_current_goal_tool/test",
@@ -337,11 +337,11 @@ def test_tools_api_tests_safe_builtin_for_selected_agent_policy(tmp_path, monkey
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["status"] == "blocked"
-    assert payload["called"] is False
+    assert payload["status"] == "succeeded"
+    assert payload["called"] is True
     assert payload["agent"]["agentId"] == agent["agentId"]
-    assert payload["agentCompatibility"]["status"] == "blocked"
-    assert "ToolPolicy" in payload["message"] or "工具策略" in payload["message"]
+    assert payload["agentCompatibility"]["status"] == "succeeded"
+    assert payload["resultPreview"] == "ran despite blocked policy"
 
 
 def test_tools_api_generated_tool_test(tmp_path, monkeypatch):

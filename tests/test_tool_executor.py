@@ -93,7 +93,7 @@ class TestToolExecutorInit:
         assert "agent_message_tool" in names
 
     def test_research_knowledge_tool_is_registered_and_llm_facing(self):
-        """科研知识库查询工具进入工具目录，但运行时还需要 Agent 显式授权。"""
+        """科研知识库查询工具进入默认 LLM 工具目录。"""
         canonical_names = {tool.name for tool in create_key_tools()}
         llm_names = {tool.name for tool in create_llm_facing_tools()}
 
@@ -126,8 +126,8 @@ class TestToolExecutorInit:
 
         restricted_visibility = compute_effective_tool_visibility(create_llm_facing_tools(), policy=default_tool_policy())
 
-        assert "cli_agent_run_tool" not in restricted_visibility.visible_tools
-        assert "cli_agent_run_tool" in restricted_visibility.hidden_restricted_tools
+        assert "cli_agent_run_tool" in restricted_visibility.visible_tools
+        assert restricted_visibility.hidden_restricted_tools == ()
 
         session_visibility = compute_effective_tool_visibility(
             create_llm_facing_tools(),
@@ -152,16 +152,16 @@ class TestToolExecutorInit:
 
         visibility = compute_effective_tool_visibility(tools, policy=default_tool_policy())
 
-        assert memory_tool_names.isdisjoint(visibility.visible_tools)
-        assert memory_tool_names.issubset(visibility.hidden_restricted_tools)
+        assert memory_tool_names.issubset(visibility.visible_tools)
+        assert visibility.hidden_restricted_tools == ()
 
         session_visibility = compute_effective_tool_visibility(
             tools,
             policy=default_session_agent_tool_policy("tool-agent-session"),
         )
 
-        assert memory_tool_names.isdisjoint(session_visibility.visible_tools)
-        assert memory_tool_names.issubset(session_visibility.hidden_restricted_tools)
+        assert memory_tool_names.issubset(session_visibility.visible_tools)
+        assert session_visibility.hidden_restricted_tools == ()
 
     def test_tools_package_does_not_reexport_compat_aliases(self):
         """tools 包入口不再把底层 helper 伪装成 agent 工具别名。"""
@@ -402,7 +402,7 @@ class TestToolExecutorExecute:
         assert "read_file_tool" in event_data["error"]
         assert "read_file" not in event_data["error"].replace("read_file_tool", "")
 
-    def test_unknown_tool_in_agent_runtime_lists_only_visible_tools(self, executor, monkeypatch):
+    def test_unknown_tool_in_agent_runtime_lists_registered_visible_tools(self, executor, monkeypatch):
         from core.web.services import agent_directory_service
 
         monkeypatch.setattr(agent_directory_service, "current_agent_runtime", lambda: {
@@ -418,12 +418,12 @@ class TestToolExecutorExecute:
 
         assert action is None
         assert "[错误] 未知工具" in str(result)
-        assert "未暴露给当前 Agent" in str(result)
-        assert "当前 Agent 可见工具包括：agent_message_tool" in str(result)
+        assert "未注册到当前 Agent 可用工具集中" in str(result)
+        assert "当前 Agent 可用工具包括：" in str(result)
         assert "read_memory_tool" not in str(result)
         assert "get_memory_summary_tool" not in str(result)
-        assert "read_file_tool" not in str(result)
-        assert "grep_search_tool" not in str(result)
+        assert "cli_tool" in str(result)
+        assert "ToolPolicy" not in str(result)
 
     def test_unknown_tool_reports_agent_context_fallback(self, executor, monkeypatch):
         from core.web.services import agent_directory_service
@@ -673,73 +673,22 @@ class TestToolExecutorTimeout:
         assert "DelegationPolicy" in str(result) or "委托策略" in str(result)
         assert "禁止派发子 Agent" in str(result)
 
-    def test_research_knowledge_tool_requires_explicit_tool_policy_allow(self, executor, monkeypatch):
+    def test_tool_policy_fields_do_not_block_registered_tool_execution(self, executor, monkeypatch):
         from core.web.services import agent_directory_service
 
         monkeypatch.setattr(agent_directory_service, "current_agent_runtime", lambda: {
             "agentId": "agent-policy",
             "toolPolicy": {
                 "policyId": "tool-agent-policy",
-                "allowedTools": [],
-                "blockedTools": [],
+                "allowedTools": ["agent_message_tool"],
+                "blockedTools": ["fake_policy_probe_tool"],
             },
         })
-        result, action = executor.execute("research_knowledge_query_tool", {"query": "agentic"})
+        executor.register_tool("fake_policy_probe_tool", lambda **kwargs: "ran despite policy", timeout=5)
+        result, action = executor.execute("fake_policy_probe_tool", {})
 
         assert action is None
-        assert "research_knowledge_query_tool" in str(result)
-        assert "显式授权" in str(result)
-
-    def test_knowledge_rag_retrieve_tool_requires_explicit_tool_policy_allow(self, executor, monkeypatch):
-        from core.web.services import agent_directory_service
-
-        monkeypatch.setattr(agent_directory_service, "current_agent_runtime", lambda: {
-            "agentId": "agent-policy",
-            "toolPolicy": {
-                "policyId": "tool-agent-policy",
-                "allowedTools": [],
-                "blockedTools": [],
-            },
-        })
-        result, action = executor.execute("knowledge_rag_retrieve_tool", {"query": "governed context"})
-
-        assert action is None
-        assert "knowledge_rag_retrieve_tool" in str(result)
-        assert "显式授权" in str(result)
-
-    def test_unified_knowledge_search_tool_requires_explicit_tool_policy_allow(self, executor, monkeypatch):
-        from core.web.services import agent_directory_service
-
-        monkeypatch.setattr(agent_directory_service, "current_agent_runtime", lambda: {
-            "agentId": "agent-policy",
-            "toolPolicy": {
-                "policyId": "tool-agent-policy",
-                "allowedTools": [],
-                "blockedTools": [],
-            },
-        })
-        result, action = executor.execute("unified_knowledge_search_tool", {"query": "governed context"})
-
-        assert action is None
-        assert "unified_knowledge_search_tool" in str(result)
-        assert "显式授权" in str(result)
-
-    def test_cli_agent_run_tool_requires_explicit_tool_policy_allow(self, executor, monkeypatch):
-        from core.web.services import agent_directory_service
-
-        monkeypatch.setattr(agent_directory_service, "current_agent_runtime", lambda: {
-            "agentId": "agent-policy",
-            "toolPolicy": {
-                "policyId": "tool-agent-policy",
-                "allowedTools": [],
-                "blockedTools": [],
-            },
-        })
-        result, action = executor.execute("cli_agent_run_tool", {"agent_type": "codex_code", "task": "inspect only"})
-
-        assert action is None
-        assert "cli_agent_run_tool" in str(result)
-        assert "显式授权" in str(result)
+        assert str(result) == "ran despite policy"
 
     def test_cli_agent_run_tool_runs_with_session_default_tool_policy(self, executor, monkeypatch):
         from core.web.services import agent_directory_service

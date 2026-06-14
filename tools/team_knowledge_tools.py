@@ -42,9 +42,6 @@ def unified_knowledge_search_tool(
 
     runtime = _current_runtime()
     agent_id = str(runtime.get("agentId") or "").strip()
-    blocked = _tool_policy_blocked(runtime, UNIFIED_KNOWLEDGE_SEARCH_TOOL_NAME)
-    if blocked:
-        return _json_result(blocked)
     requested_base_id = str(knowledge_base_id or "").strip()
     memory_policy = runtime.get("memoryPolicy") if isinstance(runtime.get("memoryPolicy"), dict) else {}
     allowed_base_ids = _policy_ids(memory_policy, "readKnowledgeBaseIds")
@@ -109,9 +106,6 @@ def knowledge_query_tool(query: str = "", knowledge_base_id: str = "", limit: in
 
     runtime = _current_runtime()
     agent_id = str(runtime.get("agentId") or "").strip()
-    blocked = _tool_policy_blocked(runtime, KNOWLEDGE_QUERY_TOOL_NAME)
-    if blocked:
-        return _json_result(blocked)
     normalized_limit = _clamp_limit(limit)
     normalized_query = trim_lines(str(query or ""), max_lines=4).strip().lower()
     requested_base_id = str(knowledge_base_id or "").strip()
@@ -191,9 +185,6 @@ def knowledge_rag_retrieve_tool(
 
     runtime = _current_runtime()
     agent_id = str(runtime.get("agentId") or "").strip()
-    blocked = _tool_policy_blocked(runtime, KNOWLEDGE_RAG_RETRIEVE_TOOL_NAME)
-    if blocked:
-        return _json_result(blocked)
     requested_base_id = str(knowledge_base_id or "").strip()
     memory_policy = runtime.get("memoryPolicy") if isinstance(runtime.get("memoryPolicy"), dict) else {}
     allowed_base_ids = _policy_ids(memory_policy, "readKnowledgeBaseIds")
@@ -290,9 +281,6 @@ def knowledge_proposal_tool(
 
     runtime = _current_runtime()
     agent_id = str(runtime.get("agentId") or "").strip()
-    blocked = _tool_policy_blocked(runtime, KNOWLEDGE_PROPOSAL_TOOL_NAME)
-    if blocked:
-        return _json_result(blocked)
     base_id = str(knowledge_base_id or "").strip()
     memory_policy = runtime.get("memoryPolicy") if isinstance(runtime.get("memoryPolicy"), dict) else {}
     allowed_base_ids = _policy_ids(memory_policy, "proposeKnowledgeBaseIds")
@@ -397,9 +385,6 @@ def knowledge_ingestion_tool(
 
     runtime = _current_runtime()
     agent_id = str(runtime.get("agentId") or "").strip()
-    blocked = _tool_policy_blocked(runtime, KNOWLEDGE_INGESTION_TOOL_NAME)
-    if blocked:
-        return _json_result(blocked)
     base_id = str(knowledge_base_id or "").strip()
     memory_policy = runtime.get("memoryPolicy") if isinstance(runtime.get("memoryPolicy"), dict) else {}
     allowed_base_ids = _policy_ids(memory_policy, "proposeKnowledgeBaseIds")
@@ -469,9 +454,6 @@ def knowledge_governance_tasks_tool(status: str = "open") -> str:
 
     runtime = _current_runtime()
     agent_id = str(runtime.get("agentId") or "").strip()
-    blocked = _tool_policy_blocked(runtime, KNOWLEDGE_GOVERNANCE_TASKS_TOOL_NAME)
-    if blocked:
-        return _json_result(blocked)
     try:
         from core.web.services import team_knowledge_service
 
@@ -507,9 +489,6 @@ def knowledge_operations_health_tool() -> str:
 
     runtime = _current_runtime()
     agent_id = str(runtime.get("agentId") or "").strip()
-    blocked = _tool_policy_blocked(runtime, KNOWLEDGE_OPERATIONS_HEALTH_TOOL_NAME)
-    if blocked:
-        return _json_result(blocked)
     try:
         from core.web.services import team_knowledge_service
 
@@ -548,9 +527,6 @@ def knowledge_governance_plan_tool(limit: int = 8) -> str:
 
     runtime = _current_runtime()
     agent_id = str(runtime.get("agentId") or "").strip()
-    blocked = _tool_policy_blocked(runtime, KNOWLEDGE_GOVERNANCE_PLAN_TOOL_NAME)
-    if blocked:
-        return _json_result(blocked)
     try:
         from core.web.services import team_knowledge_service
 
@@ -589,9 +565,6 @@ def knowledge_steward_recommendations_tool(limit: int = 8) -> str:
 
     runtime = _current_runtime()
     agent_id = str(runtime.get("agentId") or "").strip()
-    blocked = _tool_policy_blocked(runtime, KNOWLEDGE_STEWARD_RECOMMENDATIONS_TOOL_NAME)
-    if blocked:
-        return _json_result(blocked)
     try:
         from core.web.services import team_knowledge_service
 
@@ -630,9 +603,6 @@ def knowledge_steward_workbench_tool(limit: int = 8) -> str:
 
     runtime = _current_runtime()
     agent_id = str(runtime.get("agentId") or "").strip()
-    blocked = _tool_policy_blocked(runtime, KNOWLEDGE_STEWARD_WORKBENCH_TOOL_NAME)
-    if blocked:
-        return _json_result(blocked)
     try:
         from core.web.services import team_knowledge_service
 
@@ -687,9 +657,6 @@ def knowledge_rating_suggestion_tool(
 
     runtime = _current_runtime()
     agent_id = str(runtime.get("agentId") or "").strip()
-    blocked = _tool_policy_blocked(runtime, KNOWLEDGE_RATING_SUGGESTION_TOOL_NAME)
-    if blocked:
-        return _json_result(blocked)
     base_id = str(knowledge_base_id or "").strip()
     memory_policy = runtime.get("memoryPolicy") if isinstance(runtime.get("memoryPolicy"), dict) else {}
     allowed_base_ids = _policy_ids(memory_policy, "rateKnowledgeBaseIds") or _policy_ids(memory_policy, "reviewKnowledgeBaseIds")
@@ -749,21 +716,12 @@ def knowledge_rating_suggestion_tool(
         )
 
 
-def _tool_policy_blocked(runtime: dict[str, Any], tool_name: str) -> dict[str, Any] | None:
-    policy = runtime.get("toolPolicy") if isinstance(runtime.get("toolPolicy"), dict) else {}
-    allowed = {str(item or "").strip() for item in policy.get("allowedTools") or [] if str(item or "").strip()}
-    blocked = {str(item or "").strip() for item in policy.get("blockedTools") or [] if str(item or "").strip()}
-    if tool_name not in allowed or tool_name in blocked:
-        return _blocked_result(str(runtime.get("agentId") or "").strip(), "tool_not_explicitly_allowed")
-    return None
-
-
 def _blocked_result(agent_id: str, reason: str) -> dict[str, Any]:
     return {
         "ok": False,
         "status": "blocked",
         "error": reason,
-        "message": "Team knowledge tools require explicit ToolPolicy and MemoryPolicy/team access.",
+        "message": "Team knowledge access is limited by MemoryPolicy and team access.",
         "agentId": agent_id,
     }
 
