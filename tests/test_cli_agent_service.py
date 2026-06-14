@@ -201,6 +201,42 @@ def test_missing_cli_agent_executable_returns_error(monkeypatch, tmp_path):
     assert result["executableCandidates"] == ["codex.exe", "codex"]
 
 
+def test_cli_agent_run_tool_reuses_running_terminal_before_spawning(monkeypatch, tmp_path):
+    project_root = _configure_roots(monkeypatch, tmp_path)
+    state_dir = project_root / ".runtime" / "cli_agents" / "sessions"
+    state_dir.mkdir(parents=True)
+    (state_dir / "cli-term-active.json").write_text(
+        """
+{
+  "terminalSessionId": "cli-term-active",
+  "adapterId": "codex_code",
+  "agentType": "codex_code",
+  "label": "Codex Code",
+  "cliRunId": "cli-run-active",
+  "lockKey": "cli-lock-active",
+  "cwd": "__CWD__",
+  "status": "running",
+  "alive": true,
+  "updatedAt": "2026-06-14T10:00:00+00:00"
+}
+""".strip().replace("__CWD__", str(project_root).replace("\\", "\\\\")),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(service.shutil, "which", lambda candidate: "")
+
+    result = service.run_cli_agent(
+        agent_type="codex_code",
+        task="继续处理当前问题",
+        cwd=str(project_root),
+    )
+
+    assert result["status"] == "ok"
+    assert result["code"] == "CLI_AGENT_TERMINAL_ACTIVE"
+    assert result["terminalReuse"] is True
+    assert result["terminalSessionId"] == "cli-term-active"
+    assert result["cliRunId"] == "cli-run-active"
+
+
 def test_windows_subprocess_kwargs_hide_console(monkeypatch):
     class StartupInfo:
         def __init__(self):
@@ -494,6 +530,79 @@ def test_cli_agent_terminal_reuses_active_lock_for_same_session_adapter_and_cwd(
     assert second["linkedSourceRunIds"] == ["run-1", "run-2"]
 
 
+def test_cli_agent_terminal_idempotent_after_backend_restart(monkeypatch, tmp_path):
+    project_root = _configure_roots(monkeypatch, tmp_path)
+    monkeypatch.setattr(service.shutil, "which", lambda candidate: r"C:\tools\mimo.cmd" if candidate == "mimo.cmd" else "")
+    spawned = []
+
+    class FakeProcess:
+        def isalive(self):
+            return True
+
+    def fake_spawn(*args, **kwargs):
+        spawned.append((args, kwargs))
+        return FakeProcess(), "conpty"
+
+    monkeypatch.setattr(terminal_service, "_spawn_terminal_process", fake_spawn)
+    monkeypatch.setattr(terminal_service._TerminalRuntime, "start", lambda self: None)
+    monkeypatch.setattr(terminal_service, "_send_initial_task", lambda *args, **kwargs: None)
+
+    first = terminal_service.ensure_cli_agent_terminal_session(
+        agent_type="mimo_code",
+        task="第一次调用",
+        cwd=str(project_root),
+        mode="readonly",
+        source_session_id="session-1",
+        source_message_id="message-1",
+        source_run_id="run-1",
+    )
+    terminal_service._RUNTIMES.clear()
+    second = terminal_service.ensure_cli_agent_terminal_session(
+        agent_type="mimo_code",
+        task="第二次调用",
+        cwd=str(project_root),
+        mode="readonly",
+        source_session_id="session-1",
+        source_message_id="message-2",
+        source_run_id="run-2",
+    )
+
+    assert len(spawned) == 2
+    assert second["terminalSessionId"] == first["terminalSessionId"]
+    assert second["cliRunId"] == first["cliRunId"]
+    assert second["lockKey"] == first["lockKey"]
+    assert second["linkedSourceRunIds"] == ["run-1", "run-2"]
+
+
+def test_cli_agent_terminal_stop_closes_related_duplicate_states(monkeypatch, tmp_path):
+    project_root = _configure_roots(monkeypatch, tmp_path)
+    common = {
+        "adapterId": "mimo_code",
+        "agentType": "mimo_code",
+        "label": "MiMo Code",
+        "sourceSessionId": "session-1",
+        "cliRunId": "cli-run-same",
+        "lockKey": "cli-lock-same",
+        "cwd": str(project_root),
+        "status": "running",
+        "alive": True,
+        "updatedAt": "2026-06-14T10:00:00+00:00",
+    }
+    terminal_service._write_state({**common, "terminalSessionId": "cli-term-old-a", "sourceRunId": "run-1"})
+    terminal_service._write_state({**common, "terminalSessionId": "cli-term-old-b", "sourceRunId": "run-2"})
+
+    closed = terminal_service.stop_cli_agent_terminal_session("cli-term-old-a")
+
+    first = terminal_service._read_state("cli-term-old-a")
+    second = terminal_service._read_state("cli-term-old-b")
+    assert closed["status"] == "closed"
+    assert set(closed["closedTerminalSessionIds"]) == {"cli-term-old-a", "cli-term-old-b"}
+    assert first["userClosed"] is True
+    assert second["userClosed"] is True
+    assert first["status"] == "closed"
+    assert second["status"] == "closed"
+
+
 def test_cli_agent_lifecycle_close_event_persists_once(monkeypatch, tmp_path):
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(session_service, "_publish_session_detail_snapshot", lambda *args, **kwargs: None)
@@ -543,6 +652,52 @@ def test_cli_agent_lifecycle_close_event_persists_once(monkeypatch, tmp_path):
     assert lifecycle_messages[0]["content"] == "MiMo Code 已关闭。"
     assert lifecycle_messages[0]["metadata"]["cliRunId"] == "cli-run-1"
     assert lifecycle_messages[0]["metadata"]["linkedSourceRunIds"] == ["run-1", "run-2"]
+    sidecar_path = tmp_path / "workspace" / "sessions" / "session-1" / "logs" / "cli_agent_lifecycle.jsonl"
+    assert sidecar_path.exists()
+    assert len(sidecar_path.read_text(encoding="utf-8").splitlines()) == 1
+
+
+def test_cli_agent_lifecycle_sidecar_restores_detail_after_message_truncation(monkeypatch, tmp_path):
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(session_service, "_publish_session_detail_snapshot", lambda *args, **kwargs: None)
+    monkeypatch.setattr(session_service, "_record_session_cycle_message", lambda *args, **kwargs: None)
+    monkeypatch.setattr(session_service, "record_runtime_scene_event", lambda *args, **kwargs: {"accepted": True})
+    save_chat_state(
+        tmp_path,
+        build_chat_state(
+            [{"role": "user", "content": "打开 MiMo Code", "timestamp": "2026-06-14T10:00:00"}],
+            conversation_id="session-1",
+            title="CLI 会话",
+        ),
+    )
+    terminal_session = {
+        "terminalSessionId": "term-1",
+        "cliRunId": "cli-run-1",
+        "adapterId": "mimo_code",
+        "label": "MiMo Code",
+        "sourceRunId": "run-1",
+        "cwd": str(tmp_path),
+    }
+    session_service.append_cli_agent_lifecycle_event(
+        "session-1",
+        event="closed",
+        terminal_session=terminal_session,
+    )
+    state = load_chat_state(tmp_path)
+    state["conversations"][0]["messages"] = [
+        item for item in state["conversations"][0]["messages"]
+        if (item.get("metadata") or {}).get("kind") != "cli_agent_lifecycle"
+    ]
+    save_chat_state(tmp_path, state)
+
+    detail = session_service.get_session_detail("session-1")
+
+    lifecycle_messages = [
+        item for item in detail["messages"]
+        if (item.get("metadata") or {}).get("kind") == "cli_agent_lifecycle"
+    ]
+    assert len(lifecycle_messages) == 1
+    assert lifecycle_messages[0]["metadata"]["lifecycleKey"] == "cli_agent_lifecycle:closed:cli-run-1"
 
 
 def test_cli_agent_lifecycle_link_event_persists_cli_session_id(monkeypatch, tmp_path):
