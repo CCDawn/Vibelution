@@ -1,4 +1,20 @@
 .route {
+  --bg-canvas: #eef3f8;
+  --surface-page: #f6f8fb;
+  --surface-header: rgba(255, 255, 255, 0.94);
+  --surface-panel: rgba(255, 255, 255, 0.88);
+  --surface-card: rgba(248, 251, 255, 0.92);
+  --surface-panel-hover: #eef5ff;
+  --border-soft: #d9e2ec;
+  --border-strong: #b8c7d8;
+  --fg-primary: #172033;
+  --fg-secondary: #53627a;
+  --fg-tertiary: #7a879a;
+  --accent-primary: #4f7fd9;
+  --state-success: #3f9b74;
+  --state-warning: #bd8532;
+  --state-error: #d45d66;
+  --danger: #d45d66;
   display: grid;
   grid-template-rows: auto;
   align-content: start;
@@ -9,7 +25,9 @@
   overflow-y: auto;
   overscroll-behavior: contain;
   scrollbar-gutter: stable;
-  background: color-mix(in srgb, var(--surface-page) 95%, var(--bg-canvas));
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.88), rgba(246, 248, 251, 0.94) 28%, rgba(238, 243, 248, 0.98)),
+    var(--surface-page);
 }
 
 .header {
@@ -18,9 +36,10 @@
   justify-content: space-between;
   gap: var(--route-topbar-gap);
   min-width: 0;
-  padding: 9px 12px;
+  padding: 8px 12px;
   border-bottom: 1px solid var(--border-strong);
-  background: var(--surface-header, rgba(22, 25, 28, 0.78));
+  background: var(--surface-header);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.88) inset;
 }
 
 .header > div:first-child {
@@ -75,8 +94,8 @@
   align-items: center;
   justify-content: center;
   gap: 6px;
-  min-height: 30px;
-  padding: 5px 9px;
+  min-height: 28px;
+  padding: 4px 8px;
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-control);
   color: var(--fg-secondary);
@@ -86,31 +105,32 @@
 }
 
 .primaryButton {
-  border-color: color-mix(in srgb, var(--accent-primary) 62%, var(--border-soft));
-  background: color-mix(in srgb, var(--accent-primary) 18%, var(--surface-panel));
+  border-color: color-mix(in srgb, var(--accent-primary) 36%, var(--border-soft));
+  background: color-mix(in srgb, var(--accent-primary) 10%, #ffffff);
   color: var(--fg-primary);
 }
 
 .iconButton {
-  background: var(--surface-card, rgba(20, 23, 26, 0.72));
+  background: color-mix(in srgb, var(--surface-card) 86%, #ffffff);
 }
 
 .dangerButton {
-  border-color: color-mix(in srgb, var(--danger, #ef6b73) 55%, var(--border-soft));
-  color: color-mix(in srgb, var(--danger, #ef6b73) 78%, var(--fg-primary));
+  border-color: color-mix(in srgb, var(--danger) 34%, var(--border-soft));
+  color: color-mix(in srgb, var(--danger) 74%, var(--fg-primary));
+  background: color-mix(in srgb, var(--danger) 7%, #ffffff);
 }
 
 .primaryButton:hover,
 .iconButton:hover {
   border-color: var(--border-strong);
   color: var(--fg-primary);
-  background: var(--surface-panel-hover, rgba(34, 39, 44, 0.9));
+  background: var(--surface-panel-hover);
 }
 
 .dangerButton:hover:not(:disabled) {
-  border-color: color-mix(in srgb, var(--danger, #ef6b73) 80%, var(--border-strong));
+  border-color: color-mix(in srgb, var(--danger) 52%, var(--border-strong));
   color: var(--fg-primary);
-  background: color-mix(in srgb, var(--danger, #ef6b73) 22%, var(--surface-panel-hover));
+  background: color-mix(in srgb, var(--danger) 12%, #ffffff);
 }
 
 .primaryButton:disabled,
@@ -122,21 +142,21 @@
 .summaryStrip {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 8px;
-  padding: 10px 12px 0;
+  gap: 6px;
+  padding: 8px 12px 0;
 }
 
 .userGuide {
   display: grid;
-  grid-template-columns: max-content minmax(132px, max-content) minmax(0, 1fr) max-content;
+  grid-template-columns: max-content minmax(132px, max-content) max-content;
   align-items: center;
   gap: 8px;
   min-width: 0;
-  margin: 8px 12px 0;
-  padding: 8px 10px;
+  margin: 6px 12px 0;
+  padding: 6px 9px;
   border: 1px solid var(--border-soft);
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--surface-panel) 82%, transparent);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--surface-panel) 88%, transparent);
 }
 
 .userGuide span {
@@ -147,7 +167,6 @@
 }
 
 .userGuide strong,
-.userGuide small,
 .userGuide em {
   min-width: 0;
   overflow: hidden;
@@ -158,13 +177,6 @@
 .userGuide strong {
   color: var(--fg-primary);
   font-size: 0.86rem;
-}
-
-.userGuide small {
-  color: var(--fg-secondary);
-  font-size: 0.78rem;
-  font-style: normal;
-  line-height: 1.25;
 }
 
 .userGuide em {
@@ -188,37 +200,35 @@
 .settingsStrip {
   display: grid;
   grid-template-columns:
-    minmax(148px, 1.2fr)
-    minmax(96px, 0.7fr)
-    minmax(112px, 0.9fr)
-    minmax(96px, 0.7fr)
-    minmax(96px, 0.7fr)
+    minmax(110px, 0.78fr)
+    minmax(92px, 0.6fr)
+    repeat(3, minmax(82px, 0.52fr))
     max-content
-    minmax(104px, 0.75fr)
-    minmax(112px, 0.8fr)
+    minmax(96px, 0.62fr)
+    minmax(104px, 0.68fr)
     max-content
     max-content
     max-content;
   align-items: end;
-  gap: 8px;
+  gap: 6px;
   min-width: 0;
   align-self: start;
-  margin: 8px 12px 0;
-  padding: 8px 9px;
+  margin: 6px 12px 0;
+  padding: 7px 8px;
   border: 1px solid var(--border-soft);
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--surface-panel) 78%, transparent);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--surface-panel) 90%, transparent);
 }
 
 .developerPanel {
   display: grid;
-  gap: 8px;
+  gap: 6px;
   min-width: 0;
-  margin: 8px 12px 0;
-  padding: 8px 9px;
+  margin: 6px 12px 0;
+  padding: 7px 8px;
   border: 1px solid var(--border-soft);
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--surface-panel) 78%, transparent);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--surface-panel) 90%, transparent);
 }
 
 .developerPanel[data-enabled="true"] {
@@ -229,7 +239,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
+  gap: 8px;
   min-width: 0;
 }
 
@@ -241,22 +251,13 @@
 
 .developerPanelHeader strong {
   color: var(--fg-primary);
-  font-size: 0.82rem;
-}
-
-.developerPanelHeader small {
-  min-width: 0;
-  color: var(--fg-secondary);
-  font-size: 0.74rem;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  font-size: 0.8rem;
 }
 
 .developerGrid {
   display: grid;
-  grid-template-columns: minmax(180px, 0.55fr) minmax(260px, 1fr) minmax(280px, 0.95fr);
-  gap: 8px;
+  grid-template-columns: minmax(138px, 0.42fr) minmax(300px, 1fr) minmax(260px, 0.82fr);
+  gap: 6px;
   min-width: 0;
 }
 
@@ -264,10 +265,10 @@
 .developerNoise,
 .cleanupConsole {
   min-width: 0;
-  padding: 8px;
+  padding: 7px;
   border: 1px solid var(--border-soft);
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--surface-card) 76%, transparent);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--surface-card) 88%, transparent);
 }
 
 .developerStatus {
@@ -309,7 +310,7 @@
 
 .developerNoise {
   display: grid;
-  gap: 7px;
+  gap: 6px;
 }
 
 .developerNoiseHeader {
@@ -325,12 +326,12 @@
   align-items: center;
   justify-content: center;
   gap: 5px;
-  min-height: 26px;
-  padding: 3px 7px;
+  min-height: 24px;
+  padding: 3px 6px;
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-control);
   color: var(--fg-secondary);
-  background: color-mix(in srgb, var(--surface-card) 82%, transparent);
+  background: color-mix(in srgb, var(--surface-card) 90%, #ffffff);
   font-size: 0.74rem;
 }
 
@@ -341,8 +342,8 @@
 
 .noiseItemGrid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 6px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 5px;
   min-width: 0;
 }
 
@@ -350,7 +351,7 @@
   display: grid;
   gap: 2px;
   min-width: 0;
-  padding: 6px 7px;
+  padding: 5px 6px;
   border: 1px solid color-mix(in srgb, var(--border-soft) 72%, transparent);
   border-radius: 6px;
 }
@@ -381,7 +382,7 @@
 
 .cleanupConsole {
   display: grid;
-  gap: 7px;
+  gap: 6px;
 }
 
 .cleanupMetrics,
@@ -399,12 +400,12 @@
 
 .cleanupPlan {
   display: grid;
-  gap: 4px;
+  gap: 3px;
   min-width: 0;
-  padding: 7px;
+  padding: 6px;
   border: 1px solid color-mix(in srgb, var(--state-warning) 34%, var(--border-soft));
   border-radius: 6px;
-  background: color-mix(in srgb, var(--state-warning) 8%, transparent);
+  background: color-mix(in srgb, var(--state-warning) 6%, #ffffff);
 }
 
 .cleanupPlan strong,
@@ -490,7 +491,7 @@
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-control);
   color: var(--fg-primary);
-  background: color-mix(in srgb, var(--surface-card) 82%, transparent);
+  background: #ffffff;
   font-size: 0.78rem;
 }
 
@@ -516,10 +517,10 @@
   gap: 5px;
   min-height: 28px;
   padding: 3px 8px;
-  border: 1px solid color-mix(in srgb, var(--accent-primary) 54%, var(--border-soft));
+  border: 1px solid color-mix(in srgb, var(--accent-primary) 34%, var(--border-soft));
   border-radius: var(--radius-control);
   color: var(--fg-primary);
-  background: color-mix(in srgb, var(--accent-primary) 17%, var(--surface-card));
+  background: color-mix(in srgb, var(--accent-primary) 9%, #ffffff);
   font-size: 0.76rem;
 }
 
@@ -542,7 +543,7 @@
   padding: 2px;
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-control);
-  background: color-mix(in srgb, var(--surface-card) 82%, transparent);
+  background: #ffffff;
 }
 
 .segmentedControl button {
@@ -562,7 +563,7 @@
 
 .segmentedControl button[data-active="true"] {
   color: var(--fg-primary);
-  background: color-mix(in srgb, var(--accent-primary) 22%, var(--surface-panel));
+  background: color-mix(in srgb, var(--accent-primary) 11%, #ffffff);
 }
 
 .segmentedControl button:disabled {
@@ -573,17 +574,18 @@
 .metric,
 .panel {
   border: 1px solid var(--border-soft);
-  border-radius: 8px;
-  background: var(--surface-panel, rgba(27, 31, 35, 0.78));
+  border-radius: 7px;
+  background: var(--surface-panel);
 }
 
 .metric {
   display: grid;
-  grid-template-columns: minmax(86px, max-content) minmax(0, 1fr);
+  grid-template-columns: minmax(72px, max-content) minmax(0, 1fr);
   align-items: baseline;
-  gap: 3px 9px;
+  gap: 2px 7px;
   min-width: 0;
-  padding: 9px 11px;
+  padding: 7px 9px;
+  border-color: color-mix(in srgb, var(--border-soft) 90%, #ffffff);
 }
 
 .metric span,
@@ -633,12 +635,12 @@
 
 .notice {
   display: grid;
-  gap: 3px;
+  gap: 2px;
   margin: 6px 12px 0;
-  padding: 7px 9px;
+  padding: 6px 8px;
   border: 1px solid var(--border-soft);
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--surface-panel) 88%, transparent);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--surface-panel) 92%, transparent);
   color: var(--fg-secondary);
   font-size: 0.82rem;
 }
@@ -673,7 +675,7 @@
   grid-auto-rows: auto;
   gap: 6px;
   min-height: 0;
-  padding: 8px 12px max(16px, env(safe-area-inset-bottom));
+  padding: 6px 12px max(14px, env(safe-area-inset-bottom));
   overflow: visible;
 }
 
@@ -681,7 +683,7 @@
   display: block;
   min-width: 0;
   min-height: 0;
-  padding: 8px 10px;
+  padding: 7px 9px;
 }
 
 .matrixPanel {
@@ -713,15 +715,15 @@
 
 .guardStrip {
   display: grid;
-  grid-template-columns: minmax(98px, max-content) minmax(140px, max-content) minmax(0, 1fr);
-  gap: 8px;
+  grid-template-columns: minmax(82px, max-content) minmax(128px, max-content) minmax(0, 1fr);
+  gap: 7px;
   align-items: center;
   min-width: 0;
-  margin: 8px 0;
-  padding: 8px 10px;
+  margin: 6px 0;
+  padding: 6px 8px;
   border: 1px solid var(--border-soft);
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--surface-card) 78%, transparent);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--surface-card) 88%, transparent);
 }
 
 .guardStrip span {
@@ -784,10 +786,10 @@
 .guardianTable {
   display: grid;
   min-width: 0;
-  margin-top: 8px;
+  margin-top: 6px;
   overflow: hidden;
   border: 1px solid var(--border-soft);
-  border-radius: 8px;
+  border-radius: 7px;
 }
 
 .statusHead,
@@ -795,10 +797,10 @@
 .guardianHead,
 .guardianRow {
   display: grid;
-  gap: 8px;
+  gap: 7px;
   align-items: center;
   min-width: 0;
-  padding: 7px 9px;
+  padding: 6px 8px;
 }
 
 .statusHead,
@@ -814,13 +816,14 @@
 .statusHead,
 .guardianHead {
   border-bottom: 1px solid var(--border-soft);
-  background: color-mix(in srgb, var(--surface-card) 82%, transparent);
+  background: color-mix(in srgb, var(--surface-card) 94%, #ffffff);
 }
 
 .statusRow,
 .guardianRow {
   color: var(--fg-secondary);
-  font-size: 0.8rem;
+  font-size: 0.78rem;
+  background: color-mix(in srgb, #ffffff 74%, var(--surface-card));
 }
 
 .statusRow + .statusRow,
@@ -1061,10 +1064,6 @@
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .developerPanelHeader small {
-    white-space: normal;
-  }
-
   .workspace {
     display: flex;
     flex-direction: column;
@@ -1107,7 +1106,6 @@
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .userGuide small,
   .userGuide em {
     overflow: visible;
     overflow-wrap: anywhere;
