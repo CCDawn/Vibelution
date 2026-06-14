@@ -1,6 +1,10 @@
+import pytest
+
 from config import Settings
 from core.llm.protocol_resolver import resolve_model_protocol
 from core.llm.protocols import ModelProtocol
+
+pytestmark = pytest.mark.serial
 
 
 def make_config(**kwargs):

@@ -27,6 +27,8 @@ from tools.rebirth_tools import (
     validate_restarter_available,
 )
 
+pytestmark = pytest.mark.serial
+
 
 # ============================================================================
 # 测试辅助函数

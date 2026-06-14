@@ -10,6 +10,8 @@ from core.web.app import create_app
 from core.web.control import CONTROL_TOKEN_HEADER, get_control_token
 from core.web.services import reset_service
 
+pytestmark = pytest.mark.serial
+
 
 @pytest.fixture
 def reset_project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:

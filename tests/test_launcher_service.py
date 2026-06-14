@@ -1,6 +1,7 @@
 import json
 from datetime import datetime, timedelta, timezone
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -9,6 +10,8 @@ from core.launcher import service as launcher_service
 from core.web.routes import launcher as web_launcher_routes
 from core.runtime_manager import work_run_store
 from core.runtime_manager.work_run_store import WorkRunStore
+
+pytestmark = pytest.mark.serial
 
 
 def test_standalone_launcher_app_exposes_project_lifecycle_routes(monkeypatch):

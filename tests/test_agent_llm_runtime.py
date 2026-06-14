@@ -3,6 +3,8 @@ import pytest
 from config import Settings
 from core.llm.agent_runtime import AgentLlmResolutionError, resolve_agent_llm
 
+pytestmark = pytest.mark.serial
+
 
 def _config_with_agent_models():
     config = Settings(

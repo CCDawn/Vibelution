@@ -6,6 +6,7 @@
 
 import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
+
 from core.infrastructure.model_discovery import (
     ModelDiscovery,
     ModelInfo,
@@ -14,6 +15,8 @@ from core.infrastructure.model_discovery import (
     discover_model_sync,
     get_dynamic_model_config,
 )
+
+pytestmark = pytest.mark.serial
 
 
 class TestModelDiscovery:

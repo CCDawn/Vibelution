@@ -24,6 +24,8 @@ from core.infrastructure.security import (
     FORBIDDEN_COMMANDS,
 )
 
+pytestmark = pytest.mark.serial
+
 # 动态获取项目根目录（避免硬编码路径）
 _PROJECT_ROOT = str(Path(__file__).parent.parent)
 
