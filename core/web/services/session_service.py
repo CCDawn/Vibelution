@@ -3694,65 +3694,6 @@ def submit_session_message(
             if include_started_turn_id:
                 detail["startedTurnId"] = turn_control.turn_id
             return detail
-        if image_route["route"] == "image2":
-            context = {
-                "session_id": conversation_id,
-                "turn_id": turn_control.turn_id,
-                "turn_control": turn_control,
-                "user_message": image_route_prompt or message or _image2_prompt_from_attachments(lang),
-                "raw_user_message": message,
-                "user_message_source": "image_attachment_image2",
-                "attachments": attachments,
-                "history_messages": previous_messages,
-                "mental_model_enabled": mental_model_enabled,
-                "active_task": active_task,
-                "agent_id": agent_id,
-                "leases": requested_leases,
-                "skill_invocation": skill_invocation,
-                "active_skill_contract": active_skill_contract,
-                "llm_slot": image_route_llm_slot,
-                "submit_timing_fields": dict(submit_timing_fields),
-                "submit_started_at_monotonic": submit_started_at,
-            }
-            _record_image_attachment_router_event(
-                conversation_id,
-                turn_id=turn_control.turn_id,
-                route="image2",
-                intent=image_route["intent"],
-                outcome="scheduled",
-                agent_id=agent_id,
-                attachments=attachments,
-                fields=image_route_log_fields,
-            )
-            _record_session_turn_scheduled_event(context)
-            try:
-                schedule_started_at = _perf_counter()
-                _schedule_image2_attachment_turn(context)
-                submit_timing_fields["scheduleSubmitMs"] = _elapsed_ms(schedule_started_at)
-            except Exception as exc:
-                _persist_chat_turn_work_run(
-                    session_id=conversation_id,
-                    turn_id=turn_control.turn_id,
-                    status="failed",
-                    leases=requested_leases,
-                    user_message=message,
-                    summary=f"{type(exc).__name__}: {exc}",
-                )
-                _set_session_running(conversation_id, False)
-                _clear_session_turn_control(conversation_id)
-                _persist_session_turn_failure(conversation_id, context, exc)
-                _publish_session_detail_snapshot(conversation_id)
-                raise
-            if lightweight_response:
-                return _accepted_session_turn_payload(
-                    conversation_id,
-                    turn_control.turn_id,
-                    status="running",
-                )
-            detail = get_session_detail(conversation_id) or {}
-            if include_started_turn_id:
-                detail["startedTurnId"] = turn_control.turn_id
-            return detail
         if image_route["route"] == "vision":
             _record_image_attachment_router_event(
                 conversation_id,
@@ -7746,9 +7687,7 @@ def _resolve_image_attachment_turn_route(
         supports_image_input = False
     if intent in {"image2_edit", "vision_analysis"} and supports_image_input is True:
         route = "vision"
-    elif intent == "image2_edit":
-        route = "image2"
-    elif intent == "vision_analysis":
+    elif intent in {"image2_edit", "vision_analysis"}:
         route = "block_vision"
     else:
         route = "clarify"
@@ -7835,16 +7774,8 @@ def _image_input_unsupported_message(lang: str, *, model_name: str = "") -> str:
     model_label = str(model_name or "").strip() or text_for(lang, zh="当前模型", en="current model")
     return text_for(
         lang,
-        zh=f"当前 Agent 使用的对话模型 `{model_label}` 未确认支持图像输入，所以我没有把图片发送给模型。请在 Agent 管理中切换到支持图像输入的模型，或说明要基于这张图生成/调整图片，我会交给 image2 工具处理。",
-        en=f"The current Agent dialogue model `{model_label}` is not confirmed to support image input, so I did not send the image to the model. Switch this Agent to a vision-capable model, or ask to generate/edit an image based on it so image2 can handle it.",
-    )
-
-
-def _image2_prompt_from_attachments(lang: str) -> str:
-    return text_for(
-        lang,
-        zh="请基于本轮图片附件生成或调整图片。",
-        en="Generate or edit an image based on this turn's image attachment.",
+        zh=f"当前 Agent 使用的对话模型 `{model_label}` 未确认支持图像输入，所以我没有把图片发送给模型。请在 Agent 管理中切换到支持图像输入的对话模型；需要生成/调整图片时，由对话模型理解上下文后再按工具协议调用 image2 工具。",
+        en=f"The current Agent dialogue model `{model_label}` is not confirmed to support image input, so I did not send the image to the model. Switch this Agent to a vision-capable dialogue model; image generation/editing should be invoked by the dialogue model through the image2 tool protocol after it understands the context.",
     )
 
 
@@ -8136,130 +8067,6 @@ def _schedule_session_turn(context: dict[str, Any]) -> None:
 def _submit_scheduled_session_turn(context: dict[str, Any]) -> None:
     context["_executor_submitted_at_monotonic"] = _perf_counter()
     _SESSION_EXECUTOR.submit(_execute_scheduled_session_turn, context)
-
-
-def _schedule_image2_attachment_turn(context: dict[str, Any]) -> None:
-    _SESSION_EXECUTOR.submit(_execute_image2_attachment_turn, dict(context))
-
-
-def _execute_image2_attachment_turn(context: dict[str, Any]) -> None:
-    session_id = str(context.get("session_id") or "").strip()
-    turn_id = str(context.get("turn_id") or "").strip()
-    agent_id = str(context.get("agent_id") or "").strip()
-    attachments = _normalize_message_attachments(context.get("attachments") or [])
-    try:
-        if turn_id and not _is_session_turn_current(session_id, turn_id):
-            _record_session_turn_lifecycle_event(
-                session_id,
-                "image2_router_skipped_stale",
-                turn_id=turn_id,
-                outcome="skipped",
-                fields={"reason": "turn_id_not_current"},
-            )
-            return
-        _record_image_attachment_router_event(
-            session_id,
-            turn_id=turn_id,
-            route="image2",
-            intent="image2_edit",
-            outcome="running",
-            agent_id=agent_id,
-            attachments=attachments,
-        )
-        prompt = str(context.get("user_message") or "").strip() or _image2_prompt_from_attachments(get_web_language())
-        artifact_ids = [
-            str(item.get("artifactId") or "").strip()
-            for item in attachments
-            if str(item.get("artifactId") or "").strip()
-        ]
-        if not artifact_ids:
-            raise SessionValidationError("No image attachment artifact is available for image2.")
-
-        from tools.image2_tools import image2_generate_tool
-
-        with active_agent_runtime(agent_id, session_id=session_id, turn_id=turn_id):
-            tool_result_text = image2_generate_tool(
-                prompt=prompt,
-                input_artifact_id=artifact_ids[0],
-            )
-        try:
-            tool_result = json.loads(tool_result_text)
-        except (TypeError, ValueError):
-            tool_result = {"ok": False, "status": "failed", "message": str(tool_result_text or "")}
-        ok = bool(tool_result.get("ok")) if isinstance(tool_result, dict) else False
-        summary = (
-            text_for(get_web_language(), zh="已基于图片生成新图片。", en="Generated a new image based on the attachment.")
-            if ok
-            else str((tool_result or {}).get("message") or "image2 failed")
-        )
-        _record_image_attachment_router_event(
-            session_id,
-            turn_id=turn_id,
-            route="image2",
-            intent="image2_edit",
-            outcome="succeeded" if ok else "failed",
-            level="info" if ok else "warning",
-            agent_id=agent_id,
-            attachments=attachments,
-            fields={
-                "toolStatus": str((tool_result or {}).get("status") or "").strip(),
-                "artifactId": str((tool_result or {}).get("artifactId") or "").strip(),
-                "inputArtifactId": artifact_ids[0],
-            },
-        )
-        _persist_chat_turn_work_run(
-            session_id=session_id,
-            turn_id=turn_id,
-            status="completed" if ok else "failed",
-            agent_id=agent_id,
-            leases=list(context.get("leases") or ["readonly_chat"]),
-            user_message=str(context.get("raw_user_message") or prompt).strip(),
-            summary=summary,
-            error_type="" if ok else str((tool_result or {}).get("errorType") or "image2_failed"),
-            error="" if ok else str((tool_result or {}).get("message") or ""),
-            finished_at=_now_timestamp(),
-        )
-        if ok:
-            with _CHAT_STATE_LOCK:
-                payload = load_chat_state(PROJECT_ROOT)
-                conversation = _find_conversation_entry(payload, session_id)
-                if conversation is not None:
-                    conversation["last_turn_status"] = "ready"
-                    conversation.pop("last_turn_error", None)
-                    conversation.pop("lastTurnError", None)
-                    conversation["updated_at"] = _now_timestamp()
-                    payload["updated_at"] = conversation["updated_at"]
-                    save_chat_state(PROJECT_ROOT, payload)
-        else:
-            _persist_session_turn_result(
-                session_id,
-                {
-                    "status": "failed_runtime",
-                    "summary": f"图片生成失败：{summary}",
-                    "raw_output": f"图片生成失败：{summary}",
-                    "error": summary,
-                    "outcome": "failed",
-                },
-                turn_id=turn_id,
-            )
-    except Exception as exc:
-        _record_session_turn_lifecycle_event(
-            session_id,
-            "image2_router_exception",
-            turn_id=turn_id,
-            level="error",
-            outcome="failed",
-            fields={
-                "exceptionType": type(exc).__name__,
-                "errorPreview": trim_lines(str(exc), max_lines=2),
-            },
-        )
-        if _is_session_turn_current(session_id, turn_id):
-            _persist_session_turn_failure(session_id, context, exc)
-    finally:
-        _set_session_running(session_id, False, turn_id=turn_id)
-        _clear_session_turn_control(session_id, turn_id=turn_id)
-        _publish_session_detail_snapshot(session_id)
 
 
 def _execute_scheduled_session_turn(context: dict[str, Any]) -> None:

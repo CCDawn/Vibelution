@@ -6318,9 +6318,8 @@ def test_session_user_image_attachment_edit_intent_reaches_supported_multimodal_
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(session_service, "_SESSION_EXECUTOR", SimpleNamespace(submit=lambda fn, context: fn(context)))
     monkeypatch.setattr(
-        session_service,
-        "_schedule_image2_attachment_turn",
-        lambda context: pytest.fail("supported multimodal models must receive image input before image2"),
+        "tools.image2_tools.image2_generate_tool",
+        lambda **kwargs: pytest.fail("supported multimodal models must receive image input before image2"),
     )
     base_config = session_service.get_config().model_copy(deep=True)
     primary_profile = base_config.llm.get_profile(role="primary")
@@ -6409,11 +6408,12 @@ def test_session_user_image_attachment_edit_intent_reaches_supported_multimodal_
     assert router_events[-1]["fields"]["supportsImageInput"] is True
 
 
-def test_session_user_image_attachment_edit_intent_routes_to_image2_when_agent_cannot_read_images(tmp_path, monkeypatch):
+def test_session_user_image_attachment_edit_intent_blocks_when_agent_cannot_read_images(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path, task_status="done")
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(session_service, "_SESSION_EXECUTOR", SimpleNamespace(submit=lambda fn, context: fn(context)))
+    monkeypatch.setattr(session_service, "_schedule_session_turn", lambda context: pytest.fail("LLM turn should not be scheduled"))
     base_config = session_service.get_config().model_copy(deep=True)
     primary_profile = base_config.llm.get_profile(role="primary")
     primary_model_id, primary_model_entry = base_config.llm.get_model_library_entry_for_profile(primary_profile)
@@ -6439,23 +6439,16 @@ def test_session_user_image_attachment_edit_intent_routes_to_image2_when_agent_c
             prompt_template_id="prompt-chat-default",
         ),
     )
-    captured: dict[str, object] = {}
-
-    def fake_image2_generate_tool(**kwargs):
-        captured.update(kwargs)
-        session_service.append_session_assistant_artifact_message(
-            "session-live",
-            "已生成图片。",
-            metadata={
-                "kind": "image2_generation",
-                "status": "succeeded",
-                "imageUrl": "/api/sessions/session-live/artifacts/generated.png",
-                "artifactId": "generated.png",
-            },
-        )
-        return json.dumps({"ok": True, "status": "succeeded", "artifactId": "generated.png"})
-
-    monkeypatch.setattr("tools.image2_tools.image2_generate_tool", fake_image2_generate_tool)
+    monkeypatch.setattr(
+        "tools.image2_tools.image2_generate_tool",
+        lambda **kwargs: pytest.fail("image2 must be called by the model tool protocol, not the session entry"),
+    )
+    recorded_scene_events: list[tuple[tuple, dict]] = []
+    monkeypatch.setattr(
+        session_service,
+        "record_runtime_scene_event",
+        lambda *args, **kwargs: recorded_scene_events.append((args, kwargs)) or {"accepted": True},
+    )
 
     upload_response = client.post(
         "/api/sessions/session-live/attachments",
@@ -6476,18 +6469,26 @@ def test_session_user_image_attachment_edit_intent_routes_to_image2_when_agent_c
     )
 
     assert response.status_code == 202
-    assert captured["prompt"] == "把这张图改成 2D 卡通头像"
-    assert captured["input_artifact_id"] == artifact_id
+    payload = response.json()
+    assert payload["currentPhase"] == "failed"
+    assert "未确认支持图像输入" in payload["messages"][-1]["content"]
+    router_events = [
+        kwargs for args, kwargs in recorded_scene_events
+        if args[:3] == ("conversation", "image_attachment_router", "conversation.image_attachment_router.routed")
+    ]
+    assert router_events
+    assert router_events[-1]["fields"]["route"] == "block_vision"
+    assert router_events[-1]["fields"]["intent"] == "image2_edit"
     state = load_chat_state(tmp_path)
-    assert state["conversations"][0]["last_turn_status"] == "ready"
-    assert state["conversations"][0]["messages"][-1]["metadata"]["kind"] == "image2_generation"
+    assert state["conversations"][0]["last_turn_status"] == "failed"
 
 
-def test_session_recent_image_reference_routes_to_image2(tmp_path, monkeypatch):
+def test_session_recent_image_reference_blocks_when_agent_cannot_read_images(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path, task_status="done")
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(session_service, "_SESSION_EXECUTOR", SimpleNamespace(submit=lambda fn, context: fn(context)))
+    monkeypatch.setattr(session_service, "_schedule_session_turn", lambda context: pytest.fail("LLM turn should not be scheduled"))
     base_config = session_service.get_config().model_copy(deep=True)
     primary_profile = base_config.llm.get_profile(role="primary")
     primary_model_id, primary_model_entry = base_config.llm.get_model_library_entry_for_profile(primary_profile)
@@ -6513,23 +6514,16 @@ def test_session_recent_image_reference_routes_to_image2(tmp_path, monkeypatch):
             prompt_template_id="prompt-chat-default",
         ),
     )
-    captured: dict[str, object] = {}
-
-    def fake_image2_generate_tool(**kwargs):
-        captured.update(kwargs)
-        session_service.append_session_assistant_artifact_message(
-            "session-live",
-            "已生成图片。",
-            metadata={
-                "kind": "image2_generation",
-                "status": "succeeded",
-                "imageUrl": "/api/sessions/session-live/artifacts/generated.png",
-                "artifactId": "generated.png",
-            },
-        )
-        return json.dumps({"ok": True, "status": "succeeded", "artifactId": "generated.png"})
-
-    monkeypatch.setattr("tools.image2_tools.image2_generate_tool", fake_image2_generate_tool)
+    monkeypatch.setattr(
+        "tools.image2_tools.image2_generate_tool",
+        lambda **kwargs: pytest.fail("image2 must be called by the model tool protocol, not the session entry"),
+    )
+    recorded_scene_events: list[tuple[tuple, dict]] = []
+    monkeypatch.setattr(
+        session_service,
+        "record_runtime_scene_event",
+        lambda *args, **kwargs: recorded_scene_events.append((args, kwargs)) or {"accepted": True},
+    )
 
     upload_response = client.post(
         "/api/sessions/session-live/attachments",
@@ -6550,28 +6544,41 @@ def test_session_recent_image_reference_routes_to_image2(tmp_path, monkeypatch):
     )
 
     assert response.status_code == 202
-    assert captured["prompt"] == "把刚才那张图改成 2D 卡通头像"
-    assert captured["input_artifact_id"] == artifact_id
+    payload = response.json()
+    assert payload["currentPhase"] == "failed"
+    assert "未确认支持图像输入" in payload["messages"][-1]["content"]
+    router_events = [
+        kwargs for args, kwargs in recorded_scene_events
+        if args[:3] == ("conversation", "image_attachment_router", "conversation.image_attachment_router.routed")
+    ]
+    assert router_events
+    assert router_events[-1]["fields"]["route"] == "block_vision"
+    assert router_events[-1]["fields"]["intent"] == "image2_edit"
     latest_user = [message for message in response.json()["messages"] if message["role"] == "user"][-1]
     assert latest_user["metadata"]["resolvedRecentImageReference"]["status"] == "resolved"
+    assert latest_user["metadata"]["resolvedRecentImageReference"]["artifactIds"] == [artifact_id]
 
 
-def test_session_contextual_retry_restores_recent_image_attachment(tmp_path, monkeypatch):
+def test_session_contextual_retry_restores_recent_image_attachment_for_supported_multimodal_agent(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path, task_status="done")
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(session_service, "_SESSION_EXECUTOR", SimpleNamespace(submit=lambda fn, context: fn(context)))
+    monkeypatch.setattr(
+        "tools.image2_tools.image2_generate_tool",
+        lambda **kwargs: pytest.fail("contextual retry must return to the dialogue model, not image2"),
+    )
     base_config = session_service.get_config().model_copy(deep=True)
     primary_profile = base_config.llm.get_profile(role="primary")
     primary_model_id, primary_model_entry = base_config.llm.get_model_library_entry_for_profile(primary_profile)
     provider_id = str((primary_model_entry or {}).get("provider_id") or primary_profile.provider_id)
-    dialogue_model_id = primary_model_id or "contextual-image2-fallback-no-vision-model"
-    base_config.llm.model_library[dialogue_model_id] = {
+    vision_model_id = primary_model_id or "contextual-retry-vision-model"
+    base_config.llm.model_library[vision_model_id] = {
         **dict(primary_model_entry or {}),
         "provider_id": provider_id,
-        "model": str((primary_model_entry or {}).get("model") or "contextual-image2-fallback-no-vision"),
-        "label": str((primary_model_entry or {}).get("label") or "contextual-image2-fallback-no-vision"),
-        "supports_image_input": False,
+        "model": str((primary_model_entry or {}).get("model") or "contextual-retry-vision"),
+        "label": str((primary_model_entry or {}).get("label") or "contextual-retry-vision"),
+        "supports_image_input": True,
     }
     monkeypatch.setattr(session_service, "get_config", lambda: base_config)
     _bind_seeded_session_agent(
@@ -6580,28 +6587,33 @@ def test_session_contextual_retry_restores_recent_image_attachment(tmp_path, mon
             "session-live",
             display_name="真实会话",
             llm_bindings={
-                "dialogue": {"modelId": dialogue_model_id},
-                "vision": {"modelId": dialogue_model_id},
+                "dialogue": {"modelId": vision_model_id},
+                "vision": {"modelId": vision_model_id},
             },
             prompt_template_id="prompt-chat-default",
         ),
     )
-    calls: list[dict[str, object]] = []
+    seen_turns: list[dict[str, object]] = []
 
-    def fake_image2_generate_tool(**kwargs):
-        calls.append(dict(kwargs))
-        session_service.append_session_assistant_artifact_message(
-            "session-live",
-            "模型服务上游暂时失败，本轮没有完成。",
-            metadata={
-                "kind": "image2_generation",
-                "status": "failed",
-                "errorType": "RuntimeError",
-            },
-        )
-        raise RuntimeError("provider failed")
+    class DummyAgent:
+        def seed_chat_history(self, messages):
+            pass
 
-    monkeypatch.setattr("tools.image2_tools.image2_generate_tool", fake_image2_generate_tool)
+        def run_single_turn(self, initial_prompt=None, attachments=None):
+            seen_turns.append(
+                {
+                    "initial_prompt": initial_prompt,
+                    "attachments": list(attachments or []),
+                }
+            )
+            return {
+                "status": "completed",
+                "summary": "已读取图片并继续处理。",
+                "raw_output": "已读取图片并继续处理。",
+                "outcome": "done",
+            }
+
+    monkeypatch.setattr(session_service, "create_chat_agent", lambda **kwargs: DummyAgent())
 
     upload_response = client.post(
         "/api/sessions/session-live/attachments",
@@ -6631,9 +6643,9 @@ def test_session_contextual_retry_restores_recent_image_attachment(tmp_path, mon
     )
 
     assert second.status_code == 202
-    assert len(calls) >= 2
-    assert calls[-1]["input_artifact_id"] == artifact_id
-    assert calls[-1]["prompt"] == "这是你生成的图片,跟原来的图片完全不一样,你需要继续调整提示词,来逼近原来的图片"
+    assert len(seen_turns) == 2
+    assert seen_turns[-1]["attachments"][0]["artifactId"] == artifact_id
+    assert seen_turns[-1]["initial_prompt"] == "这是你生成的图片,跟原来的图片完全不一样,你需要继续调整提示词,来逼近原来的图片"
     latest_user = [message for message in second.json()["messages"] if message["role"] == "user"][-1]
     assert latest_user["metadata"]["resolvedRecentImageReference"]["status"] == "resolved"
     assert latest_user["metadata"]["resolvedRecentImageReference"]["source"] == "contextual_retry"
@@ -6658,9 +6670,8 @@ def test_session_contextual_retry_ignores_active_task_image_clarification(tmp_pa
     scheduled_contexts: list[dict] = []
     monkeypatch.setattr(session_service, "_schedule_session_turn", lambda context: scheduled_contexts.append(dict(context)))
     monkeypatch.setattr(
-        session_service,
-        "_schedule_image2_attachment_turn",
-        lambda context: pytest.fail("plain continue must not be routed to image2"),
+        "tools.image2_tools.image2_generate_tool",
+        lambda **kwargs: pytest.fail("plain continue must not be routed to image2"),
     )
 
     upload_response = client.post(
