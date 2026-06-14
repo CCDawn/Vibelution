@@ -1970,7 +1970,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
   });
 
   const memoryKnowledgeGraphQuery = useQuery({
-    queryKey: queryKeys.memoryKnowledgeGraph(fallbackKnowledgeActorAgentId),
+    queryKey: queryKeys.memoryKnowledgeGraph(fallbackKnowledgeActorAgentId, "officialResearchGraph"),
     queryFn: () => {
       const params = appendAgentParam(new URLSearchParams({ include: "officialResearchGraph" }), fallbackKnowledgeActorAgentId);
       return fetchJson<MemoryKnowledgeGraphPayload>(`/api/memory/knowledge-graph?${params.toString()}`);
@@ -2302,9 +2302,12 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
     refetchInterval: false,
   });
   const knowledgeRagHealthQuery = useQuery({
-    queryKey: queryKeys.knowledgeRagHealth(),
-    queryFn: () => fetchJson<KnowledgeRagHealthPayload>("/api/knowledge/rag/health"),
-    enabled: forcedView === "knowledge",
+    queryKey: queryKeys.knowledgeRagHealth(activeKnowledgeActorAgentId),
+    queryFn: () => {
+      const params = appendAgentParam(new URLSearchParams(), activeKnowledgeActorAgentId);
+      return fetchJson<KnowledgeRagHealthPayload>(`/api/knowledge/rag/health?${params.toString()}`);
+    },
+    enabled: forcedView === "knowledge" && Boolean(activeKnowledgeActorAgentId),
     refetchInterval: resolvePollingInterval(pageVisible, 60_000),
     refetchIntervalInBackground: false,
   });

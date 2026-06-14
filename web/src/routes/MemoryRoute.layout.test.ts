@@ -119,7 +119,7 @@ describe("MemoryRoute layout contract", () => {
   });
 
   it("wires the read-only 3D memory knowledge graph API and canvas shell", () => {
-    expect(routeSource).toContain("queryKeys.memoryKnowledgeGraph(fallbackKnowledgeActorAgentId)");
+    expect(routeSource).toContain('queryKeys.memoryKnowledgeGraph(fallbackKnowledgeActorAgentId, "officialResearchGraph")');
     expect(routeSource).toContain('appendAgentParam(new URLSearchParams({ include: "officialResearchGraph" }), fallbackKnowledgeActorAgentId)');
     expect(routeSource).toContain("fetchJson<MemoryKnowledgeGraphPayload>(`/api/memory/knowledge-graph?${params.toString()}`)");
     expect(routeSource).toContain("MemoryKnowledgeGraphNodeDetailPayload");
@@ -290,8 +290,8 @@ describe("MemoryRoute layout contract", () => {
     expect(routeSource).toContain("/api/knowledge/search");
     expect(routeSource).toContain("queryKeys.knowledgeSearch(");
     expect(routeSource).toContain("queryKeys.knowledgeItems(activeKnowledgeBaseForItems, activeKnowledgeActorAgentId)");
-    expect(routeSource).toContain("queryKeys.knowledgeRagHealth");
-    expect(routeSource).toContain("/api/knowledge/rag/health");
+    expect(routeSource).toContain("queryKeys.knowledgeRagHealth(activeKnowledgeActorAgentId)");
+    expect(routeSource).toContain("/api/knowledge/rag/health?");
     expect(routeSource).toContain("fetchJson<KnowledgeRagHealthPayload>");
     expect(routeSource).toContain("queryKeys.knowledgeRagRetrieve");
     expect(routeSource).toContain("/api/knowledge/rag/retrieve");

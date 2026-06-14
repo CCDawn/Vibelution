@@ -2,6 +2,7 @@ from fastapi.testclient import TestClient
 
 from core.web.app import create_app
 from core.web.control import CONTROL_TOKEN_HEADER, get_control_token
+from core.web.routes import knowledge as knowledge_routes
 from core.web.services import agent_directory_service, chat_room_service, team_knowledge_service, team_service
 
 
@@ -267,6 +268,19 @@ def test_knowledge_routes_reject_non_member_and_legacy_source_artifact_route(tmp
 
 def test_knowledge_routes_reject_empty_actor_for_governed_content(tmp_path, monkeypatch):
     client, team, lead, member, _outsider = _setup(tmp_path, monkeypatch)
+    recorded_events: list[dict] = []
+
+    def fake_record_runtime_scene_event(component, phase, event_code, **kwargs):
+        recorded_events.append(
+            {
+                "component": component,
+                "phase": phase,
+                "eventCode": event_code,
+                **kwargs,
+            }
+        )
+
+    monkeypatch.setattr(knowledge_routes, "record_runtime_scene_event", fake_record_runtime_scene_event)
     empty_create = client.post(
         f"/api/teams/{team['teamId']}/knowledge-bases",
         json={"name": "No Actor KB"},
@@ -309,7 +323,9 @@ def test_knowledge_routes_reject_empty_actor_for_governed_content(tmp_path, monk
     assert client.get("/api/knowledge/steward/workbench").status_code == 422
     assert client.get("/api/knowledge/operations/health").status_code == 422
     assert client.get("/api/knowledge/governance/plan").status_code == 422
+    assert client.get("/api/knowledge/rag/health").status_code == 422
     assert client.get(f"/api/agents/{member['agentId']}/knowledge-bases").status_code == 422
+    assert any(event["eventCode"] == "knowledge.rag.health.blocked" for event in recorded_events)
 
     allowed_items = client.get(
         f"/api/knowledge-bases/{base['knowledgeBaseId']}/items",
@@ -559,13 +575,14 @@ def test_knowledge_rag_retrieve_route_requires_agent_id(tmp_path, monkeypatch):
 
 
 def test_knowledge_rag_health_route_reports_local_provider_ready(tmp_path, monkeypatch):
-    client, _team, _lead, _member, _outsider = _setup(tmp_path, monkeypatch)
+    client, _team, _lead, member, _outsider = _setup(tmp_path, monkeypatch)
 
-    response = client.get("/api/knowledge/rag/health")
+    response = client.get("/api/knowledge/rag/health", params={"agentId": member["agentId"]})
 
     assert response.status_code == 200
     payload = response.json()
     assert payload["schemaVersion"] == 1
+    assert payload["agentId"] == member["agentId"]
     assert payload["provider"] == "local"
     assert payload["status"] == "ready"
     providers = {provider["provider"]: provider for provider in payload["providers"]}
