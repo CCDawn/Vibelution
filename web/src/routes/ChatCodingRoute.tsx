@@ -229,6 +229,8 @@ type CliAgentRunView = CliAgentRunTab & {
   sourceRunId: string;
   toolCall: ToolCall;
   result: CliAgentRunResult | null;
+  terminalSessionId: string;
+  cliSessionId: string;
   task: string;
   cwd: string;
   commandLine: string;
@@ -377,10 +379,83 @@ function closedCliAgentRunIdFromMessage(message: ConversationMessage) {
   return cliAgentLifecycleText(message, "cliRunId") || cliAgentLifecycleText(message, "sourceRunId");
 }
 
+type CliAgentLifecyclePatch = {
+  event: string;
+  cliRunId: string;
+  sourceRunId: string;
+  terminalSessionId: string;
+  cliSessionId: string;
+  status: string;
+};
+
+function cliAgentLifecyclePatchFromMessage(message: ConversationMessage): CliAgentLifecyclePatch | null {
+  if (cliAgentLifecycleText(message, "kind") !== "cli_agent_lifecycle") {
+    return null;
+  }
+  const event = cliAgentLifecycleText(message, "event") || cliAgentLifecycleText(message, "status");
+  return {
+    event,
+    cliRunId: cliAgentLifecycleText(message, "cliRunId"),
+    sourceRunId: cliAgentLifecycleText(message, "sourceRunId"),
+    terminalSessionId: cliAgentLifecycleText(message, "terminalSessionId"),
+    cliSessionId: cliAgentLifecycleText(message, "cliSessionId"),
+    status: cliAgentLifecycleText(message, "status") || event,
+  };
+}
+
+function applyCliAgentLifecyclePatch(run: CliAgentRunView, patch: CliAgentLifecyclePatch) {
+  if (patch.terminalSessionId) {
+    run.terminalSessionId = patch.terminalSessionId;
+  }
+  if (patch.cliSessionId) {
+    run.cliSessionId = patch.cliSessionId;
+  }
+}
+
+function applyCliAgentLifecyclePatchToRuns(
+  runsById: Map<string, CliAgentRunView>,
+  runIds: string[],
+  patch: CliAgentLifecyclePatch,
+) {
+  for (const runId of runIds) {
+    const directRun = runsById.get(runId);
+    if (directRun) {
+      applyCliAgentLifecyclePatch(directRun, patch);
+    }
+  }
+  for (const run of runsById.values()) {
+    if (runIds.includes(run.sourceRunId)) {
+      applyCliAgentLifecyclePatch(run, patch);
+    }
+  }
+}
+
 function buildCliAgentRunViews(messages: ConversationMessage[], sourceSessionId = ""): CliAgentRunView[] {
   const runsById = new Map<string, CliAgentRunView>();
+  const lifecycleByRunId = new Map<string, CliAgentLifecyclePatch>();
   const closedRunIds = new Set<string>();
   for (const message of messages) {
+    const lifecyclePatch = cliAgentLifecyclePatchFromMessage(message);
+    if (lifecyclePatch) {
+      const lifecycleRunIds = [lifecyclePatch.cliRunId, lifecyclePatch.sourceRunId].filter(Boolean);
+      if (lifecyclePatch.event === "closed") {
+        for (const runId of lifecycleRunIds) {
+          closedRunIds.add(runId);
+          runsById.delete(runId);
+        }
+        for (const run of runsById.values()) {
+          if (lifecycleRunIds.includes(run.sourceRunId)) {
+            runsById.delete(run.id);
+          }
+        }
+      } else {
+        for (const runId of lifecycleRunIds) {
+          lifecycleByRunId.set(runId, lifecyclePatch);
+        }
+        applyCliAgentLifecyclePatchToRuns(runsById, lifecycleRunIds, lifecyclePatch);
+      }
+      continue;
+    }
     const closedRunId = closedCliAgentRunIdFromMessage(message);
     if (closedRunId) {
       closedRunIds.add(closedRunId);
@@ -409,6 +484,7 @@ function buildCliAgentRunViews(messages: ConversationMessage[], sourceSessionId 
         sourceRunId,
         task,
       });
+      const lifecyclePatchForRun = lifecycleByRunId.get(cliRunId) ?? lifecycleByRunId.get(sourceRunId);
       closedRunIds.delete(cliRunId);
       const run: CliAgentRunView = {
         id: cliRunId,
@@ -416,6 +492,8 @@ function buildCliAgentRunViews(messages: ConversationMessage[], sourceSessionId 
         sourceRunId,
         toolCall,
         result,
+        terminalSessionId: String(lifecyclePatchForRun?.terminalSessionId || ""),
+        cliSessionId: String(result?.cliSessionId || lifecyclePatchForRun?.cliSessionId || ""),
         title,
         summary,
         status,
@@ -433,7 +511,7 @@ function buildCliAgentRunViews(messages: ConversationMessage[], sourceSessionId 
       runsById.set(cliRunId, run);
     }
   }
-  return Array.from(runsById.values()).filter((run) => !closedRunIds.has(run.id));
+  return Array.from(runsById.values()).filter((run) => !closedRunIds.has(run.id) && !closedRunIds.has(run.sourceRunId));
 }
 
 function terminalStatusText(session: CliAgentTerminalSession | null, connecting: boolean, lang: "zh" | "en") {
@@ -684,7 +762,7 @@ function CliAgentRunTerminalPanel({
         sourceSessionId,
         sourceMessageId: run.messageId,
         sourceRunId: run.sourceRunId,
-        cliSessionId: String(run.result?.cliSessionId || ""),
+        cliSessionId: String(run.cliSessionId || run.result?.cliSessionId || ""),
         rows: 28,
         cols: 100,
       }),

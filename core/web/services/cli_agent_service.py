@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import os
@@ -42,6 +43,14 @@ DEFAULT_CLI_AGENT_ADAPTERS: dict[str, dict[str, Any]] = {
             "sessionId": {
                 "source": "stdout_regex",
                 "regex": "(?i)(?:session|conversation|thread)[ _-]?id[:=]\\s*([A-Za-z0-9_.:-]+)",
+            },
+            "sessionDiscovery": {
+                "source": "mimocode_sqlite",
+                "databasePath": "{home}/.local/share/mimocode/mimocode.db",
+                "pollAttempts": 10,
+                "pollIntervalSeconds": 0.75,
+                "createdGraceMs": 5000,
+                "maxRows": 80,
             },
             "capabilities": {
                 "interactive": True,
@@ -252,7 +261,7 @@ def run_cli_agent(
 
 
 def _load_adapter_definitions() -> dict[str, dict[str, Any]]:
-    adapters = {key: dict(value) for key, value in DEFAULT_CLI_AGENT_ADAPTERS.items()}
+    adapters = copy.deepcopy(DEFAULT_CLI_AGENT_ADAPTERS)
     payload = _read_registry_payload()
     records: list[dict[str, Any]] = []
     if isinstance(payload, dict):
