@@ -64,6 +64,48 @@ def test_data_processing_route_runs_collection_slice(tmp_path, monkeypatch):
     assert status_response.json()["boundaries"]["writesKnowledgeGraph"] is False
 
 
+def test_data_processing_route_filters_source_collection_runs_by_team_before_limit(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    client = _client()
+    target_response = client.post(
+        "/api/data-processing/runs",
+        json={
+            "title": "Research team source collection",
+            "scope": {"teamId": "research-team"},
+            "metadata": {
+                "startedFrom": "team_workflow_source_collection",
+                "teamId": "research-team",
+            },
+        },
+    )
+    for index in range(4):
+        client.post(
+            "/api/data-processing/runs",
+            json={
+                "title": f"Other run {index}",
+                "scope": {"teamId": f"other-team-{index}"},
+                "metadata": {
+                    "startedFrom": "other_flow",
+                    "teamId": f"other-team-{index}",
+                },
+            },
+        )
+
+    response = client.get(
+        "/api/data-processing/runs",
+        params={
+            "limit": 1,
+            "teamId": "research-team",
+            "startedFrom": "team_workflow_source_collection",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["summary"]["filtered"] is True
+    assert response.json()["summary"]["runCount"] == 1
+    assert response.json()["runs"][0]["runId"] == target_response.json()["runId"]
+
+
 def test_data_processing_route_reports_unknown_run(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     client = _client()
