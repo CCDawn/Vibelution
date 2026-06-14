@@ -584,16 +584,27 @@ describe("MemoryRoute layout contract", () => {
   it("keeps team knowledge governance compact and hides internal policy tokens behind readable labels", () => {
     expect(routeSource).toContain("function policyTokenLabel");
     expect(routeSource).toContain("function memoryDomainDisplayLabel");
+    expect(routeSource).toContain("function memoryDomainOwnerLabel");
+    expect(routeSource).toContain("function memoryBoundaryLabel");
+    expect(routeSource).toContain("function stewardStageDisplayTitle");
     expect(routeSource).toContain("policyTokenLabel(domain.promptDefault, lang)");
     expect(routeSource).toContain("(memoryUsageContract?.domains ?? []).slice(0, 4).map");
     expect(routeSource).toContain("memoryDomainDisplayLabel(domain.label, domain.domainId, lang)");
+    expect(routeSource).toContain("memoryDomainOwnerLabel(domain.owner, lang)");
+    expect(routeSource).toContain("memoryBoundaryLabel(domain.boundary, lang)");
     expect(routeSource).toContain("policyTokenLabel(knowledgeSteward?.steward.permissionBoundary");
     expect(routeSource).toContain("compactInlineList(knowledgeSteward?.steward.toolPolicy.preferredTools, 3)");
     expect(routeSource).toContain("compactInlineList(knowledgeSteward?.steward.toolPolicy.allowedTools, 2)");
+    expect(routeSource).toContain('preferredCount} {lang === "zh" ? "项" : "items"}');
+    expect(routeSource).toContain("knowledgeStewardRecommendations.length ? (");
+    expect(routeSource).toContain("stewardStageDisplayTitle(stage.stageId, stage.title, lang)");
+    expect(routeSource).toContain("visibleTools.length");
+    expect(routeSource).toContain("hiddenTools.length");
     expect(routeSource).toContain("className={styles.knowledgeGovernanceDeck}");
 
     expect(memoryCssSource).toContain(".knowledgeGovernanceDeck");
     expect(memoryCssSource).toContain("grid-template-columns: minmax(0, 1.04fr) minmax(0, 0.96fr)");
+    expect(memoryCssSource).toContain(".stewardMission small,\n.stewardMetric small {\n  display: none;");
     expect(memoryCssSource).toContain(".stewardRecommendationRow small {\n  display: none;");
     expect(memoryCssSource).toContain(".knowledgeGovernanceDeck {\n    grid-template-columns: minmax(0, 1fr);");
   });
