@@ -294,6 +294,25 @@ function metadataText(metadata: Record<string, unknown> | undefined, key: string
   return "";
 }
 
+function isCliAgentLifecycleMessage(message: ConversationMessage) {
+  return metadataText(message.metadata, "kind") === "cli_agent_lifecycle";
+}
+
+function cliAgentLifecycleLabel(message: ConversationMessage, lang: "zh" | "en") {
+  const label = metadataText(message.metadata, "label") || metadataText(message.metadata, "adapterId") || "CLI Agent";
+  const event = metadataText(message.metadata, "event") || metadataText(message.metadata, "status");
+  if (event === "closed") {
+    return lang === "zh" ? `终端已关闭 · ${label}` : `Terminal closed · ${label}`;
+  }
+  return lang === "zh" ? `终端状态 · ${label}` : `Terminal status · ${label}`;
+}
+
+function cliAgentLifecycleDetail(message: ConversationMessage) {
+  return metadataText(message.metadata, "cliRunId")
+    || metadataText(message.metadata, "terminalSessionId")
+    || message.content;
+}
+
 function agentInboxSourceLabel(message: ConversationMessage) {
   const metadata = message.metadata;
   const sourceLabel = [
@@ -2464,6 +2483,23 @@ export function ConversationView({
               </div>
             ) : null}
             {timelineMessages.map((message) => {
+            if (isCliAgentLifecycleMessage(message)) {
+              const detail = cliAgentLifecycleDetail(message);
+              return (
+                <article key={message.id} className={styles.cliAgentLifecycleTurn}>
+                  <span className={styles.cliAgentLifecycleIcon} aria-hidden="true">
+                    <TerminalSquare size={14} />
+                  </span>
+                  <span className={styles.cliAgentLifecycleText}>
+                    {cliAgentLifecycleLabel(message, lang)}
+                  </span>
+                  {detail ? <code className={styles.cliAgentLifecycleMeta}>{detail}</code> : null}
+                  {message.timestamp ? (
+                    <span className={styles.cliAgentLifecycleTime}>{formatTimestamp(message.timestamp)}</span>
+                  ) : null}
+                </article>
+              );
+            }
             const operationGroups = buildConversationOperationGroups(message, operationLabels);
             const hasRunningTools = hasRunningOperation(operationGroups.tools);
             const hasFeedbackTimeline = (message.feedbackEvents?.length ?? 0) > 0;

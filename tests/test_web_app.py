@@ -42,6 +42,7 @@ from fastapi.testclient import TestClient
 
 from core.web.app import create_app
 from core.web.control import CONTROL_TOKEN_HEADER, get_control_token
+from core.web.routes import cli_agents as cli_agent_routes
 from core.web.routes import evolution as evolution_routes
 from core.web.services import (
     agent_mode_binding_service,
@@ -5314,6 +5315,47 @@ def test_session_events_stream_rejects_missing_session():
     response = client.get("/api/sessions/missing-session/events")
     assert response.status_code == 404
     assert response.json()["detail"] == "Session not found"
+
+
+def test_cli_agent_terminal_stop_route_records_lifecycle_event(monkeypatch):
+    recorded = []
+
+    terminal_session = {
+        "terminalSessionId": "term-1",
+        "sourceSessionId": "session-live",
+        "cliRunId": "cli-run-1",
+        "adapterId": "mimo_code",
+        "label": "MiMo Code",
+    }
+
+    def fake_append(session_id, *, event, terminal_session):
+        recorded.append((session_id, event, dict(terminal_session)))
+        return {
+            "id": "session-live-message-2",
+            "role": "assistant",
+            "content": "MiMo Code 已关闭。",
+            "timestamp": "2026-06-14T10:00:00",
+            "metadata": {
+                "kind": "cli_agent_lifecycle",
+                "event": "closed",
+                "cliRunId": "cli-run-1",
+            },
+        }
+
+    monkeypatch.setattr(
+        cli_agent_routes,
+        "stop_cli_agent_terminal_session",
+        lambda terminal_session_id: {**terminal_session, "terminalSessionId": terminal_session_id},
+    )
+    monkeypatch.setattr(cli_agent_routes, "append_cli_agent_lifecycle_event", fake_append)
+
+    response = client.post("/api/cli-agents/terminal-sessions/term-1/stop")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["terminalSessionId"] == "term-1"
+    assert payload["lifecycleEvent"]["metadata"]["kind"] == "cli_agent_lifecycle"
+    assert recorded == [("session-live", "closed", {**terminal_session, "terminalSessionId": "term-1"})]
 
 
 def test_submit_session_message_rejects_archived_agent_without_mutating_session(tmp_path, monkeypatch):

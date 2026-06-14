@@ -2018,6 +2018,90 @@ def get_session_detail(session_id: str) -> dict | None:
     return None
 
 
+def append_cli_agent_lifecycle_event(
+    session_id: str,
+    *,
+    event: str = "closed",
+    terminal_session: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
+    """Append a folded CLI Agent lifecycle event to the persisted conversation."""
+
+    normalized_session_id = str(session_id or "").strip()
+    if not normalized_session_id:
+        return None
+    terminal = dict(terminal_session or {}) if isinstance(terminal_session, dict) else {}
+    normalized_event = str(event or "closed").strip().lower() or "closed"
+    cli_run_id = str(terminal.get("cliRunId") or "").strip()
+    terminal_session_id = str(terminal.get("terminalSessionId") or "").strip()
+    lifecycle_subject = cli_run_id or terminal_session_id
+    if not lifecycle_subject:
+        return None
+    lifecycle_key = f"cli_agent_lifecycle:{normalized_event}:{lifecycle_subject}"
+    label = str(terminal.get("label") or terminal.get("adapterId") or terminal.get("agentType") or "CLI Agent").strip()
+    lang = get_web_language()
+    timestamp = _now_timestamp()
+    content = text_for(
+        lang,
+        zh=f"{label} 已关闭。",
+        en=f"{label} closed.",
+    )
+    metadata = {
+        "kind": "cli_agent_lifecycle",
+        "event": normalized_event,
+        "status": normalized_event,
+        "lifecycleKey": lifecycle_key,
+        "cliRunId": cli_run_id,
+        "terminalSessionId": terminal_session_id,
+        "adapterId": str(terminal.get("adapterId") or terminal.get("agentType") or "").strip(),
+        "label": label,
+        "sourceSessionId": normalized_session_id,
+        "sourceMessageId": str(terminal.get("sourceMessageId") or "").strip(),
+        "sourceRunId": str(terminal.get("sourceRunId") or "").strip(),
+        "linkedSourceRunIds": list(terminal.get("linkedSourceRunIds") or []),
+        "cwd": str(terminal.get("cwd") or "").strip(),
+        "cliSessionId": str(terminal.get("cliSessionId") or "").strip(),
+        "closedAt": timestamp,
+        "folded": True,
+    }
+    with _CHAT_STATE_LOCK:
+        payload = load_chat_state(PROJECT_ROOT)
+        conversation = _find_conversation_entry(payload, normalized_session_id)
+        if conversation is None:
+            return None
+        messages = normalize_chat_messages(conversation.get("messages") or [])
+        existing = _find_cli_agent_lifecycle_message(
+            normalized_session_id,
+            messages,
+            lifecycle_key=lifecycle_key,
+        )
+        if existing is not None:
+            return existing
+        event_entry = _make_chat_message("assistant", content, metadata=metadata)
+        conversation["messages"] = messages + [event_entry]
+        conversation["updated_at"] = event_entry["timestamp"]
+        payload["updated_at"] = event_entry["timestamp"]
+        save_chat_state(PROJECT_ROOT, payload)
+        normalized_messages = _normalize_messages(normalized_session_id, conversation["messages"])
+        normalized_event_entry = _find_cli_agent_lifecycle_message(
+            normalized_session_id,
+            normalized_messages,
+            lifecycle_key=lifecycle_key,
+        )
+    _record_session_cycle_message(
+        normalized_session_id,
+        event_entry,
+        event="cli_agent_lifecycle",
+        status=normalized_event,
+    )
+    _record_cli_agent_lifecycle_event(
+        normalized_session_id,
+        event=normalized_event,
+        metadata=metadata,
+    )
+    _publish_session_detail_snapshot(normalized_session_id)
+    return normalized_event_entry
+
+
 def get_active_session_detail() -> dict | None:
     """Return the current active conversation detail when available."""
 
@@ -7565,6 +7649,25 @@ def _find_conversation_entry(payload: dict[str, Any], session_id: str) -> dict[s
     return None
 
 
+def _find_cli_agent_lifecycle_message(
+    conversation_id: str,
+    messages: list[dict[str, Any]],
+    *,
+    lifecycle_key: str,
+) -> dict[str, Any] | None:
+    normalized_key = str(lifecycle_key or "").strip()
+    if not normalized_key:
+        return None
+    normalized_messages = _normalize_messages(conversation_id, messages)
+    for message in normalized_messages:
+        metadata = message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
+        if str(metadata.get("kind") or "").strip() != "cli_agent_lifecycle":
+            continue
+        if str(metadata.get("lifecycleKey") or "").strip() == normalized_key:
+            return message
+    return None
+
+
 def _new_conversation_id(existing_ids: set[str] | None = None) -> str:
     existing = set(existing_ids or set())
     base = f"session-{datetime.now().strftime('%Y%m%d-%H%M%S-%f')}"
@@ -10915,6 +11018,38 @@ def _record_session_cycle_message(
     except Exception as exc:
         _debug_logger.warning(
             f"runtime scene conversation log skipped: {type(exc).__name__}: {exc}",
+            tag="LOGS",
+        )
+
+
+def _record_cli_agent_lifecycle_event(
+    session_id: str,
+    *,
+    event: str,
+    metadata: dict[str, Any],
+) -> None:
+    try:
+        record_runtime_scene_event(
+            "conversation",
+            "cli_agent",
+            "conversation.cli_agent.lifecycle",
+            level="info",
+            outcome=str(event or "").strip() or "updated",
+            message="CLI Agent lifecycle event recorded in conversation history.",
+            fields={
+                "sessionId": str(session_id or "").strip(),
+                "event": str(event or "").strip(),
+                "cliRunId": str(metadata.get("cliRunId") or "").strip(),
+                "terminalSessionId": str(metadata.get("terminalSessionId") or "").strip(),
+                "adapterId": str(metadata.get("adapterId") or "").strip(),
+                "sourceRunId": str(metadata.get("sourceRunId") or "").strip(),
+                "linkedSourceRunCount": len(list(metadata.get("linkedSourceRunIds") or [])),
+            },
+            lifecycle=True,
+        )
+    except Exception as exc:
+        _debug_logger.warning(
+            f"runtime scene cli lifecycle log skipped: {type(exc).__name__}: {exc}",
             tag="LOGS",
         )
 
