@@ -467,11 +467,13 @@ function isCliAgentRunActiveForClose(run: CliAgentRunView, session?: CliAgentTer
 function CliAgentRunTerminalPanel({
   run,
   sourceSessionId,
+  active,
   lang,
   onTerminalSessionChange,
 }: {
   run: CliAgentRunView;
   sourceSessionId: string;
+  active: boolean;
   lang: "zh" | "en";
   onTerminalSessionChange?: (runId: string, session: CliAgentTerminalSession) => void;
 }) {
@@ -652,6 +654,16 @@ function CliAgentRunTerminalPanel({
   }, [fitTerminal, terminalSessionId]);
 
   useEffect(() => {
+    if (!active) {
+      return;
+    }
+    window.requestAnimationFrame(() => {
+      fitTerminal();
+      terminalRef.current?.focus();
+    });
+  }, [active, fitTerminal, terminalSessionId]);
+
+  useEffect(() => {
     let disposed = false;
     const controller = new AbortController();
     setConnecting(true);
@@ -744,7 +756,13 @@ function CliAgentRunTerminalPanel({
   }, [terminalSessionId, writeTerminalChunk]);
 
   return (
-    <section className={styles.cliAgentRunPanel} aria-label={`${run.title} ${lang === "zh" ? "终端" : "terminal"}`}>
+    <section
+      className={active ? styles.cliAgentRunPanel : `${styles.cliAgentRunPanel} ${styles.cliAgentRunPanelHidden}`}
+      aria-hidden={!active}
+      aria-label={`${run.title} ${lang === "zh" ? "终端" : "terminal"}`}
+      data-active={active ? "true" : "false"}
+      data-cli-agent-run-id={run.id}
+    >
       <div className={styles.cliAgentTerminalFrame}>
         <div className={styles.cliAgentTerminalCommand} title={visibleCommand}>
           <span className={styles.cliAgentTerminalStatus}>
@@ -1823,6 +1841,7 @@ export function ChatCodingRoute() {
   const [groupManagePurposeDraft, setGroupManagePurposeDraft] = useState("discussion");
   const [closedCliAgentRunTokensBySession, setClosedCliAgentRunTokensBySession] = useState<Record<string, string[]>>({});
   const [cliAgentTerminalSessions, setCliAgentTerminalSessions] = useState<Record<string, CliAgentTerminalSession>>({});
+  const [mountedCliAgentRunIdsBySession, setMountedCliAgentRunIdsBySession] = useState<Record<string, string[]>>({});
   const layoutRef = useRef<HTMLDivElement | null>(null);
   const sessionStreamErrorLoggedRef = useRef<Record<string, boolean>>({});
   const sessionStreamPayloadErrorLoggedRef = useRef<Record<string, boolean>>({});
@@ -3439,6 +3458,54 @@ export function ChatCodingRoute() {
     () => activeCliAgentRunId ? cliAgentRunTabs.find((run) => run.id === activeCliAgentRunId) : undefined,
     [activeCliAgentRunId, cliAgentRunTabs],
   );
+  const mountedCliAgentRunIds = activeSessionId ? (mountedCliAgentRunIdsBySession[activeSessionId] ?? []) : [];
+  const mountedCliAgentRunIdSet = useMemo(() => {
+    const ids = new Set(mountedCliAgentRunIds);
+    if (activeCliAgentRun && !groupPanelActive) {
+      ids.add(activeCliAgentRun.id);
+    }
+    return ids;
+  }, [activeCliAgentRun, groupPanelActive, mountedCliAgentRunIds]);
+  const mountedCliAgentRuns = useMemo(
+    () => cliAgentRunTabs.filter((run) => mountedCliAgentRunIdSet.has(run.id)),
+    [cliAgentRunTabs, mountedCliAgentRunIdSet],
+  );
+  useEffect(() => {
+    if (!activeSessionId || !activeCliAgentRun || groupPanelActive) {
+      return;
+    }
+    setMountedCliAgentRunIdsBySession((current) => {
+      const existing = current[activeSessionId] ?? [];
+      if (existing.includes(activeCliAgentRun.id)) {
+        return current;
+      }
+      return {
+        ...current,
+        [activeSessionId]: [...existing, activeCliAgentRun.id],
+      };
+    });
+  }, [activeCliAgentRun, activeSessionId, groupPanelActive]);
+  useEffect(() => {
+    if (!activeSessionId) {
+      return;
+    }
+    const availableRunIds = new Set(cliAgentRunTabs.map((run) => run.id));
+    setMountedCliAgentRunIdsBySession((current) => {
+      const existing = current[activeSessionId] ?? [];
+      const next = existing.filter((runId) => availableRunIds.has(runId));
+      if (next.length === existing.length) {
+        return current;
+      }
+      if (next.length === 0) {
+        const { [activeSessionId]: _removed, ...remaining } = current;
+        return remaining;
+      }
+      return {
+        ...current,
+        [activeSessionId]: next,
+      };
+    });
+  }, [activeSessionId, cliAgentRunTabs]);
   useEffect(() => {
     if (!activeSessionId || !activeCliAgentRunId) {
       return;
@@ -3512,6 +3579,21 @@ export function ChatCodingRoute() {
     setCliAgentTerminalSessions((current) => {
       const { [run.id]: _removed, ...remaining } = current;
       return remaining;
+    });
+    setMountedCliAgentRunIdsBySession((current) => {
+      const existing = current[activeSessionId] ?? [];
+      if (!existing.includes(run.id)) {
+        return current;
+      }
+      const next = existing.filter((runId) => runId !== run.id);
+      if (next.length === 0) {
+        const { [activeSessionId]: _removed, ...remaining } = current;
+        return remaining;
+      }
+      return {
+        ...current,
+        [activeSessionId]: next,
+      };
     });
     if (activeCliAgentRunId === run.id) {
       setActiveTab(activeSessionId, "agent");
@@ -6010,6 +6092,16 @@ export function ChatCodingRoute() {
         </div>
 
         <div className={styles.centerSurface}>
+          {mountedCliAgentRuns.map((run) => (
+            <CliAgentRunTerminalPanel
+              key={run.id}
+              run={run}
+              sourceSessionId={activeSessionId || ""}
+              active={!groupPanelActive && activeCliAgentRunId === run.id}
+              lang={lang}
+              onTerminalSessionChange={handleCliAgentTerminalSessionChange}
+            />
+          ))}
           {projectBusActive ? (
             <div className={styles.groupConversationFrame}>
               <header className={styles.groupConversationHeader}>
@@ -6576,17 +6668,12 @@ export function ChatCodingRoute() {
             ) : (
               <div className={styles.emptySurface}>{t("loadingSession")}</div>
             )
-          ) : activeCliAgentRun ? (
-            <CliAgentRunTerminalPanel
-              run={activeCliAgentRun}
-              sourceSessionId={activeSessionId || ""}
-              lang={lang}
-              onTerminalSessionChange={handleCliAgentTerminalSessionChange}
-            />
           ) : activeCliAgentRunId ? (
-            <div className={styles.emptySurface}>
-              {lang === "zh" ? "这个 CLI 工具页还没有可显示的运行记录。" : "This CLI tool page has no run to display."}
-            </div>
+            activeCliAgentRun ? null : (
+              <div className={styles.emptySurface}>
+                {lang === "zh" ? "这个 CLI 工具页还没有可显示的运行记录。" : "This CLI tool page has no run to display."}
+              </div>
+            )
           ) : fileContentQuery.isError ? (
             <div className={styles.emptySurface}>
               {describeError(fileContentQuery.error, t("loadFailed"))}
