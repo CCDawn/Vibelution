@@ -237,6 +237,40 @@ def test_cli_agent_run_tool_reuses_running_terminal_before_spawning(monkeypatch,
     assert result["cliRunId"] == "cli-run-active"
 
 
+def test_cli_agent_run_tool_does_not_reuse_stale_terminal_state(monkeypatch, tmp_path):
+    project_root = _configure_roots(monkeypatch, tmp_path)
+    state_dir = project_root / ".runtime" / "cli_agents" / "sessions"
+    state_dir.mkdir(parents=True)
+    (state_dir / "cli-term-stale.json").write_text(
+        """
+{
+  "terminalSessionId": "cli-term-stale",
+  "adapterId": "codex_code",
+  "agentType": "codex_code",
+  "label": "Codex Code",
+  "cliRunId": "cli-run-stale",
+  "lockKey": "cli-lock-stale",
+  "cwd": "__CWD__",
+  "status": "stale",
+  "alive": false,
+  "updatedAt": "2026-06-14T10:00:00+00:00"
+}
+""".strip().replace("__CWD__", str(project_root).replace("\\", "\\\\")),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(service.shutil, "which", lambda candidate: "")
+
+    result = service.run_cli_agent(
+        agent_type="codex_code",
+        task="继续处理当前问题",
+        cwd=str(project_root),
+    )
+
+    assert result["status"] == "error"
+    assert result["code"] == "CLI_AGENT_NOT_FOUND"
+    assert result.get("terminalReuse") is None
+
+
 def test_windows_subprocess_kwargs_hide_console(monkeypatch):
     class StartupInfo:
         def __init__(self):
@@ -530,6 +564,49 @@ def test_cli_agent_terminal_reuses_active_lock_for_same_session_adapter_and_cwd(
     assert second["linkedSourceRunIds"] == ["run-1", "run-2"]
 
 
+def test_cli_agent_terminal_reuses_active_lock_across_source_sessions(monkeypatch, tmp_path):
+    project_root = _configure_roots(monkeypatch, tmp_path)
+    monkeypatch.setattr(service.shutil, "which", lambda candidate: r"C:\tools\mimo.cmd" if candidate == "mimo.cmd" else "")
+    spawned = []
+
+    class FakeProcess:
+        def isalive(self):
+            return True
+
+    def fake_spawn(*args, **kwargs):
+        spawned.append((args, kwargs))
+        return FakeProcess(), "conpty"
+
+    monkeypatch.setattr(terminal_service, "_spawn_terminal_process", fake_spawn)
+    monkeypatch.setattr(terminal_service._TerminalRuntime, "start", lambda self: None)
+    monkeypatch.setattr(terminal_service, "_send_initial_task", lambda *args, **kwargs: None)
+
+    first = terminal_service.ensure_cli_agent_terminal_session(
+        agent_type="mimo_code",
+        task="第一次调用",
+        cwd=str(project_root),
+        mode="readonly",
+        source_session_id="session-1",
+        source_message_id="message-1",
+        source_run_id="run-1",
+    )
+    second = terminal_service.ensure_cli_agent_terminal_session(
+        agent_type="mimo_code",
+        task="第二次调用",
+        cwd=str(project_root),
+        mode="readonly",
+        source_session_id="session-2",
+        source_message_id="message-2",
+        source_run_id="run-2",
+    )
+
+    assert len(spawned) == 1
+    assert second["terminalSessionId"] == first["terminalSessionId"]
+    assert second["cliRunId"] == first["cliRunId"]
+    assert second["lockKey"] == first["lockKey"]
+    assert second["linkedSourceRunIds"] == ["run-1", "run-2"]
+
+
 def test_cli_agent_terminal_ensure_supersedes_legacy_duplicate_states(monkeypatch, tmp_path):
     project_root = _configure_roots(monkeypatch, tmp_path)
     monkeypatch.setattr(service.shutil, "which", lambda candidate: r"C:\tools\mimo.cmd" if candidate == "mimo.cmd" else "")
@@ -714,6 +791,33 @@ def test_cli_agent_terminal_stop_closes_related_duplicate_states(monkeypatch, tm
     assert second["userClosed"] is True
     assert first["status"] == "closed"
     assert second["status"] == "closed"
+
+
+def test_cli_agent_terminal_startup_reconcile_marks_orphan_running_state_stale(monkeypatch, tmp_path):
+    project_root = _configure_roots(monkeypatch, tmp_path)
+    terminal_service._write_state(
+        {
+            "terminalSessionId": "cli-term-orphan",
+            "adapterId": "mimo_code",
+            "agentType": "mimo_code",
+            "label": "MiMo Code",
+            "cliRunId": "cli-run-orphan",
+            "lockKey": "cli-lock-orphan",
+            "cwd": str(project_root),
+            "status": "running",
+            "alive": True,
+            "updatedAt": "2026-06-14T10:00:00+00:00",
+        }
+    )
+    terminal_service._RUNTIMES.clear()
+
+    result = terminal_service.reconcile_cli_agent_terminal_states_on_startup(reason="test_startup")
+
+    state = terminal_service._read_state("cli-term-orphan")
+    assert result["staleCount"] == 1
+    assert state["status"] == "stale"
+    assert state["alive"] is False
+    assert state["staleReason"] == "test_startup"
 
 
 def test_cli_agent_lifecycle_close_event_persists_once(monkeypatch, tmp_path):
