@@ -970,17 +970,9 @@ def _image_context_request_from_user_message(message: dict[str, Any]) -> dict[st
     if not artifact_ids:
         return {}
 
-    prompts = [
-        trim_lines(resolved_reference.get("prompt") or "", max_lines=4),
-        trim_lines(message.get("content") or "", max_lines=4),
-    ]
-    seen_prompts: set[str] = set()
-    for prompt in prompts:
-        if not prompt or prompt in seen_prompts:
-            continue
-        seen_prompts.add(prompt)
-        if _is_retriable_image_request_prompt(prompt):
-            return {"prompt": prompt, "artifactIds": artifact_ids}
+    prompt = trim_lines(message.get("content") or "", max_lines=4)
+    if prompt and _is_retriable_image_request_prompt(prompt):
+        return {"prompt": prompt, "artifactIds": artifact_ids}
     return {}
 
 
@@ -7742,16 +7734,20 @@ def _resolve_image_attachment_turn_route(
     agent_instance: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     intent = _classify_image_attachment_intent(message)
-    route_llm_slot = SESSION_LLM_SLOT_VISION if intent == "vision_analysis" else SESSION_LLM_SLOT_DIALOGUE
+    route_llm_slot = (
+        SESSION_LLM_SLOT_VISION
+        if intent in {"image2_edit", "vision_analysis"}
+        else SESSION_LLM_SLOT_DIALOGUE
+    )
     supports_image_input = _session_agent_supports_image_input(agent_instance, slot=route_llm_slot)
     model_id = _session_agent_llm_slot_model_id(agent_instance, route_llm_slot)
     model_name = _session_agent_llm_model_name(agent_instance, slot=route_llm_slot)
     if supports_image_input is None:
         supports_image_input = False
-    if intent == "image2_edit":
-        route = "image2"
-    elif intent == "vision_analysis" and supports_image_input is True:
+    if intent in {"image2_edit", "vision_analysis"} and supports_image_input is True:
         route = "vision"
+    elif intent == "image2_edit":
+        route = "image2"
     elif intent == "vision_analysis":
         route = "block_vision"
     else:

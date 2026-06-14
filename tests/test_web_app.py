@@ -6312,11 +6312,133 @@ def test_session_user_image_attachment_vision_slot_overrides_dialogue_model(tmp_
     assert router_events[-1]["fields"]["visionModelId"] == vision_model_id
 
 
-def test_session_user_image_attachment_edit_intent_routes_to_image2(tmp_path, monkeypatch):
+def test_session_user_image_attachment_edit_intent_reaches_supported_multimodal_agent(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path, task_status="done")
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(session_service, "_SESSION_EXECUTOR", SimpleNamespace(submit=lambda fn, context: fn(context)))
+    monkeypatch.setattr(
+        session_service,
+        "_schedule_image2_attachment_turn",
+        lambda context: pytest.fail("supported multimodal models must receive image input before image2"),
+    )
+    base_config = session_service.get_config().model_copy(deep=True)
+    primary_profile = base_config.llm.get_profile(role="primary")
+    primary_model_id, primary_model_entry = base_config.llm.get_model_library_entry_for_profile(primary_profile)
+    provider_id = str((primary_model_entry or {}).get("provider_id") or primary_profile.provider_id)
+    vision_model_id = primary_model_id or "mimo-edit-intent-test-model"
+    base_config.llm.model_library[vision_model_id] = {
+        **dict(primary_model_entry or {}),
+        "provider_id": provider_id,
+        "model": str((primary_model_entry or {}).get("model") or "mimo-v2.5-pro"),
+        "label": str((primary_model_entry or {}).get("label") or "mimo-edit-intent-test-model"),
+        "supports_image_input": True,
+    }
+    monkeypatch.setattr(session_service, "get_config", lambda: base_config)
+    _bind_seeded_session_agent(
+        tmp_path,
+        agent_directory_service.ensure_agent_for_session(
+            "session-live",
+            display_name="真实会话",
+            llm_bindings={
+                "dialogue": {"modelId": vision_model_id},
+                "vision": {"modelId": vision_model_id},
+            },
+            prompt_template_id="prompt-chat-default",
+        ),
+    )
+    seen: dict[str, object] = {}
+    recorded_scene_events: list[tuple[tuple, dict]] = []
+    monkeypatch.setattr(
+        session_service,
+        "record_runtime_scene_event",
+        lambda *args, **kwargs: recorded_scene_events.append((args, kwargs)) or {"accepted": True},
+    )
+
+    class DummyAgent:
+        def seed_chat_history(self, messages):
+            pass
+
+        def run_single_turn(self, initial_prompt=None, attachments=None):
+            seen["initial_prompt"] = initial_prompt
+            seen["attachments"] = list(attachments or [])
+            return {
+                "status": "completed",
+                "summary": "我已先查看图片并准备调整方案。",
+                "raw_output": "我已先查看图片并准备调整方案。",
+                "outcome": "done",
+            }
+
+    def fake_create_chat_agent(**kwargs):
+        seen["runtime_model"] = kwargs["config"].llm.profiles["primary"].model
+        return DummyAgent()
+
+    monkeypatch.setattr(session_service, "create_chat_agent", fake_create_chat_agent)
+
+    upload_response = client.post(
+        "/api/sessions/session-live/attachments",
+        content=(
+            b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01"
+            b"\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4"
+            b"\x89\x00\x00\x00\nIDATx\x9cc\x00\x01\x00\x00\x05"
+            b"\x00\x01\r\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82"
+        ),
+        headers={"Content-Type": "image/png", "X-Vibelution-Filename": "sketch.png"},
+    )
+    assert upload_response.status_code == 201
+    artifact_id = upload_response.json()["artifactId"]
+
+    response = client.post(
+        "/api/sessions/session-live/messages",
+        json={"content": "把这张图改成 2D 卡通头像", "attachmentIds": [artifact_id]},
+    )
+
+    assert response.status_code == 202
+    assert seen["initial_prompt"] == "把这张图改成 2D 卡通头像"
+    assert seen["runtime_model"] == base_config.llm.model_library[vision_model_id]["model"]
+    assert seen["attachments"][0]["artifactId"] == artifact_id
+    assert seen["attachments"][0]["dataUrl"].startswith("data:image/png;base64,")
+    router_events = [
+        kwargs for args, kwargs in recorded_scene_events
+        if args[:3] == ("conversation", "image_attachment_router", "conversation.image_attachment_router.routed")
+    ]
+    assert router_events
+    assert router_events[-1]["fields"]["route"] == "vision"
+    assert router_events[-1]["fields"]["intent"] == "image2_edit"
+    assert router_events[-1]["fields"]["llmSlot"] == "vision"
+    assert router_events[-1]["fields"]["supportsImageInput"] is True
+
+
+def test_session_user_image_attachment_edit_intent_routes_to_image2_when_agent_cannot_read_images(tmp_path, monkeypatch):
+    _seed_chat_state(tmp_path, task_status="done")
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(session_service, "_SESSION_EXECUTOR", SimpleNamespace(submit=lambda fn, context: fn(context)))
+    base_config = session_service.get_config().model_copy(deep=True)
+    primary_profile = base_config.llm.get_profile(role="primary")
+    primary_model_id, primary_model_entry = base_config.llm.get_model_library_entry_for_profile(primary_profile)
+    provider_id = str((primary_model_entry or {}).get("provider_id") or primary_profile.provider_id)
+    dialogue_model_id = primary_model_id or "image2-fallback-no-vision-model"
+    base_config.llm.model_library[dialogue_model_id] = {
+        **dict(primary_model_entry or {}),
+        "provider_id": provider_id,
+        "model": str((primary_model_entry or {}).get("model") or "image2-fallback-no-vision"),
+        "label": str((primary_model_entry or {}).get("label") or "image2-fallback-no-vision"),
+        "supports_image_input": False,
+    }
+    monkeypatch.setattr(session_service, "get_config", lambda: base_config)
+    _bind_seeded_session_agent(
+        tmp_path,
+        agent_directory_service.ensure_agent_for_session(
+            "session-live",
+            display_name="真实会话",
+            llm_bindings={
+                "dialogue": {"modelId": dialogue_model_id},
+                "vision": {"modelId": dialogue_model_id},
+            },
+            prompt_template_id="prompt-chat-default",
+        ),
+    )
     captured: dict[str, object] = {}
 
     def fake_image2_generate_tool(**kwargs):
@@ -6366,6 +6488,31 @@ def test_session_recent_image_reference_routes_to_image2(tmp_path, monkeypatch):
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(session_service, "_SESSION_EXECUTOR", SimpleNamespace(submit=lambda fn, context: fn(context)))
+    base_config = session_service.get_config().model_copy(deep=True)
+    primary_profile = base_config.llm.get_profile(role="primary")
+    primary_model_id, primary_model_entry = base_config.llm.get_model_library_entry_for_profile(primary_profile)
+    provider_id = str((primary_model_entry or {}).get("provider_id") or primary_profile.provider_id)
+    dialogue_model_id = primary_model_id or "recent-image2-fallback-no-vision-model"
+    base_config.llm.model_library[dialogue_model_id] = {
+        **dict(primary_model_entry or {}),
+        "provider_id": provider_id,
+        "model": str((primary_model_entry or {}).get("model") or "recent-image2-fallback-no-vision"),
+        "label": str((primary_model_entry or {}).get("label") or "recent-image2-fallback-no-vision"),
+        "supports_image_input": False,
+    }
+    monkeypatch.setattr(session_service, "get_config", lambda: base_config)
+    _bind_seeded_session_agent(
+        tmp_path,
+        agent_directory_service.ensure_agent_for_session(
+            "session-live",
+            display_name="真实会话",
+            llm_bindings={
+                "dialogue": {"modelId": dialogue_model_id},
+                "vision": {"modelId": dialogue_model_id},
+            },
+            prompt_template_id="prompt-chat-default",
+        ),
+    )
     captured: dict[str, object] = {}
 
     def fake_image2_generate_tool(**kwargs):
@@ -6414,6 +6561,31 @@ def test_session_contextual_retry_restores_recent_image_attachment(tmp_path, mon
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(session_service, "_SESSION_EXECUTOR", SimpleNamespace(submit=lambda fn, context: fn(context)))
+    base_config = session_service.get_config().model_copy(deep=True)
+    primary_profile = base_config.llm.get_profile(role="primary")
+    primary_model_id, primary_model_entry = base_config.llm.get_model_library_entry_for_profile(primary_profile)
+    provider_id = str((primary_model_entry or {}).get("provider_id") or primary_profile.provider_id)
+    dialogue_model_id = primary_model_id or "contextual-image2-fallback-no-vision-model"
+    base_config.llm.model_library[dialogue_model_id] = {
+        **dict(primary_model_entry or {}),
+        "provider_id": provider_id,
+        "model": str((primary_model_entry or {}).get("model") or "contextual-image2-fallback-no-vision"),
+        "label": str((primary_model_entry or {}).get("label") or "contextual-image2-fallback-no-vision"),
+        "supports_image_input": False,
+    }
+    monkeypatch.setattr(session_service, "get_config", lambda: base_config)
+    _bind_seeded_session_agent(
+        tmp_path,
+        agent_directory_service.ensure_agent_for_session(
+            "session-live",
+            display_name="真实会话",
+            llm_bindings={
+                "dialogue": {"modelId": dialogue_model_id},
+                "vision": {"modelId": dialogue_model_id},
+            },
+            prompt_template_id="prompt-chat-default",
+        ),
+    )
     calls: list[dict[str, object]] = []
 
     def fake_image2_generate_tool(**kwargs):
@@ -6517,6 +6689,28 @@ def test_session_contextual_retry_ignores_active_task_image_clarification(tmp_pa
                 "role": "assistant",
                 "content": "我看到你发送了图片。你想让我分析这张图片，还是基于它生成/调整图片？请补一句你的目标。",
                 "timestamp": "2026-05-18T11:59:00",
+            },
+            {
+                "role": "user",
+                "content": "继续",
+                "timestamp": "2026-05-18T12:00:00",
+                "metadata": {
+                    "resolvedRecentImageReference": {
+                        "status": "resolved",
+                        "source": "contextual_retry",
+                        "prompt": "我看到你发送了图片。你想让我分析这张图片，还是基于它生成/调整图片？请补一句你的目标。",
+                        "artifactIds": [artifact["artifactId"]],
+                    }
+                },
+            },
+            {
+                "role": "assistant",
+                "content": "图片生成失败：image2 provider returned 401",
+                "timestamp": "2026-05-18T12:01:00",
+                "metadata": {
+                    "kind": "turn_error",
+                    "reasonCode": "auth_failed",
+                },
             },
         ]
     )
