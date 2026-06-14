@@ -267,6 +267,8 @@ type CliAgentTerminalSession = {
   cols?: number;
   transcriptPath?: string;
   transcriptTail?: string;
+  transcriptTailReplayable?: boolean;
+  transcriptTailRenderReason?: string;
   createdAt?: string;
   updatedAt?: string;
 };
@@ -609,9 +611,14 @@ function CliAgentRunTerminalPanel({
   const visibleCommand = Array.isArray(terminalSession?.commandPreview) && terminalSession?.commandPreview.length
     ? terminalSession.commandPreview.join(" ")
     : run.commandLine;
+  const transcriptReplayBlocked = terminalSession?.transcriptTailReplayable === false;
   const emptyText = terminalError
     || (connecting
       ? (lang === "zh" ? "正在连接命令会话..." : "Connecting terminal session...")
+      : transcriptReplayBlocked
+        ? (lang === "zh"
+          ? "终端已连接；历史 TUI 画面无法安全重放，等待新的可渲染输出。"
+          : "Terminal connected; the historical TUI screen cannot be safely replayed. Waiting for new renderable output.")
       : (lang === "zh" ? "命令会话还没有输出。" : "No terminal output yet."));
 
   useEffect(() => {
@@ -646,6 +653,14 @@ function CliAgentRunTerminalPanel({
     }
     pendingReplayRef.current = `${pendingReplayRef.current}${text}`.slice(-120000);
   }, [markTerminalHasOutput]);
+
+  const replayTerminalSnapshot = useCallback((session: CliAgentTerminalSession) => {
+    if (session.transcriptTailReplayable === false) {
+      writeTerminalChunk("", { reset: true });
+      return;
+    }
+    writeTerminalChunk(String(session.transcriptTail || ""), { reset: true });
+  }, [writeTerminalChunk]);
 
   const sendTerminalRawInput = useCallback((data: string) => {
     const sessionId = terminalSessionIdRef.current;
@@ -809,7 +824,7 @@ function CliAgentRunTerminalPanel({
           return;
         }
         setTerminalSession(session);
-        writeTerminalChunk(String(session.transcriptTail || ""), { reset: true });
+        replayTerminalSnapshot(session);
       })
       .catch((error) => {
         if (disposed || controller.signal.aborted) {
@@ -827,7 +842,7 @@ function CliAgentRunTerminalPanel({
       disposed = true;
       controller.abort();
     };
-  }, [run.agentType, run.cwd, run.messageId, run.mode, run.result, run.sourceRunId, run.task, sourceSessionId, writeTerminalChunk]);
+  }, [replayTerminalSnapshot, run.agentType, run.cwd, run.messageId, run.mode, run.result, run.sourceRunId, run.task, sourceSessionId, writeTerminalChunk]);
 
   useEffect(() => {
     if (terminalSession) {
@@ -846,7 +861,7 @@ function CliAgentRunTerminalPanel({
         if (payload.session) {
           setTerminalSession(payload.session);
           if (payload.type === "terminal_snapshot") {
-            writeTerminalChunk(String(payload.session.transcriptTail || ""), { reset: true });
+            replayTerminalSnapshot(payload.session);
           }
         }
         if (payload.type === "terminal_output" && payload.chunk) {
@@ -868,7 +883,7 @@ function CliAgentRunTerminalPanel({
       stream.removeEventListener("terminal_status", handleEvent as EventListener);
       stream.close();
     };
-  }, [terminalSessionId, writeTerminalChunk]);
+  }, [replayTerminalSnapshot, terminalSessionId, writeTerminalChunk]);
 
   return (
     <section
