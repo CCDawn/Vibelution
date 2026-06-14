@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from . import cli_agent_service
+from . import cli_agent_task_kernel
 
 try:  # pragma: no cover - availability is platform/package dependent
     from winpty import PtyProcess
@@ -168,6 +169,7 @@ class _TerminalRuntime:
                     "transport": self.transport,
                 },
             )
+            cli_agent_task_kernel.mark_terminal_closed(final_state, status=str(final_state.get("status") or "exited"))
 
     def _read_chunk(self) -> str:
         try:
@@ -197,6 +199,7 @@ class _TerminalRuntime:
             public_state = _public_state(dict(self.state))
         if linked_session_id:
             _record_cli_agent_lifecycle_link(public_state, source="stdout_regex")
+        cli_agent_task_kernel.ingest_terminal_output(public_state, chunk)
         self._publish({"type": "terminal_output", "chunk": chunk, "session": public_state})
 
     def _publish(self, event: dict[str, Any]) -> None:
@@ -231,6 +234,7 @@ def ensure_cli_agent_terminal_session(
     cli_session_id: str = "",
     rows: int = DEFAULT_ROWS,
     cols: int = DEFAULT_COLS,
+    send_initial_task: bool = False,
 ) -> dict[str, Any]:
     """Return an attached or newly started terminal session for a configured CLI Agent."""
 
@@ -382,7 +386,8 @@ def ensure_cli_agent_terminal_session(
         )
         _RUNTIMES[terminal_session_id] = runtime
         runtime.start()
-        _send_initial_task(runtime, str(command.get("initialInput") or ""))
+        if send_initial_task:
+            _send_initial_task(runtime, str(command.get("initialInput") or ""))
         _schedule_session_id_discovery(runtime, command.get("sessionDiscovery"))
         cli_agent_service._record_event(
             "cli_agent.terminal.started",

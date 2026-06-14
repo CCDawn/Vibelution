@@ -133,44 +133,6 @@ def run_cli_agent(
         )
 
     cwd_result = _resolve_run_cwd(cwd, mode=normalized_mode)
-    if cwd_result.get("ok"):
-        active_terminal = _find_reusable_terminal_session(
-            agent_type=normalized_type,
-            cwd=str(cwd_result.get("cwd") or cwd or ""),
-        )
-        if active_terminal:
-            run_id = _new_run_id()
-            duration_ms = round((time.perf_counter() - started_at) * 1000, 3)
-            label = str(adapter.get("label") or normalized_type)
-            result = {
-                "status": "ok",
-                "code": "CLI_AGENT_TERMINAL_ACTIVE",
-                "runId": run_id,
-                "agentType": normalized_type,
-                "label": label,
-                "mode": normalized_mode,
-                "cwd": str(cwd_result.get("cwd") or cwd or ""),
-                "durationMs": duration_ms,
-                "terminalSessionId": str(active_terminal.get("terminalSessionId") or ""),
-                "cliRunId": str(active_terminal.get("cliRunId") or ""),
-                "lockKey": str(active_terminal.get("lockKey") or ""),
-                "cliSessionId": str(active_terminal.get("cliSessionId") or ""),
-                "terminalStatus": str(active_terminal.get("status") or ""),
-                "terminalAlive": bool(active_terminal.get("alive")),
-                "stdoutPreview": f"已检测到同一目录已有运行中的 {label} 终端会话，请复用该 CLI Agent 继续交互。",
-                "stderrPreview": "",
-                "exitCode": 0,
-                "timedOut": False,
-                "terminalReuse": True,
-                "logPath": "",
-            }
-            result["logPath"] = _write_run_record(result)
-            _record_event(
-                "cli_agent.run.reused_terminal",
-                outcome="succeeded",
-                fields=_event_fields(result, task_hash=_task_hash(task_text)),
-            )
-            return result
 
     executable = _resolve_executable(adapter)
     if not executable:
@@ -192,6 +154,52 @@ def run_cli_agent(
     timeout_seconds = _clamp_int(timeout, DEFAULT_TIMEOUT_SECONDS, 1, MAX_TIMEOUT_SECONDS)
     max_output_chars = _clamp_int(output_limit, DEFAULT_OUTPUT_LIMIT, 1000, MAX_OUTPUT_LIMIT)
     task_hash = _task_hash(task_text)
+
+    terminal = adapter.get("terminal") if isinstance(adapter.get("terminal"), dict) else {}
+    if bool(terminal.get("enabled")):
+        try:
+            from . import cli_agent_task_kernel
+            from . import cli_agent_terminal_service
+
+            terminal_session = cli_agent_terminal_service.ensure_cli_agent_terminal_session(
+                agent_type=normalized_type,
+                task=task_text,
+                cwd=str(run_cwd),
+                mode=normalized_mode,
+                model=model,
+                agent=agent,
+                send_initial_task=False,
+            )
+            task_result = cli_agent_task_kernel.submit_cli_agent_task(
+                terminal_session=terminal_session,
+                task=task_text,
+                timeout_seconds=timeout_seconds,
+                output_limit=max_output_chars,
+                source="cli_agent_run_tool",
+            )
+            task_result["durationMs"] = round((time.perf_counter() - started_at) * 1000, 3)
+            task_result["runId"] = task_result.get("taskId") or _new_run_id()
+            task_result["commandPreview"] = list(terminal_session.get("commandPreview") or [])
+            task_result["logPath"] = task_result.get("logPath") or _write_run_record(task_result)
+            _record_event(
+                "cli_agent.run.task_brokered",
+                outcome="succeeded" if task_result.get("status") != "error" else "failed",
+                fields=_event_fields(task_result, task_hash=task_hash),
+            )
+            return task_result
+        except Exception as exc:
+            duration_ms = round((time.perf_counter() - started_at) * 1000, 3)
+            result = _error_result(
+                getattr(exc, "code", "") or "CLI_AGENT_TERMINAL_BROKER_FAILED",
+                getattr(exc, "message", "") or str(exc),
+                agent_type=normalized_type,
+                cwd=str(run_cwd),
+                mode=normalized_mode,
+                durationMs=duration_ms,
+            )
+            result["logPath"] = _write_run_record(result)
+            _record_event("cli_agent.run.task_broker_failed", outcome="failed", fields=_event_fields(result, task_hash=task_hash))
+            return result
 
     args_result = _build_command_args(
         adapter,
