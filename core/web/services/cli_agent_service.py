@@ -36,8 +36,8 @@ DEFAULT_CLI_AGENT_ADAPTERS: dict[str, dict[str, Any]] = {
         "supportedModes": list(SUPPORTED_MODES),
         "terminal": {
             "enabled": True,
-            "launch": {"argv": ["{exe}", "code", "--dir", "{cwd}"]},
-            "resume": {"argv": ["{exe}", "code", "resume", "{cliSessionId}", "--dir", "{cwd}"]},
+            "launch": {"argv": ["{exe}", "{cwd}"]},
+            "resume": {"argv": ["{exe}", "{cwd}", "--session", "{cliSessionId}"]},
             "initialInput": "{task}\r\n",
             "sessionId": {
                 "source": "stdout_regex",

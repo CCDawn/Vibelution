@@ -157,6 +157,48 @@ def test_list_cli_agent_adapters_reports_availability(monkeypatch, tmp_path):
     assert adapters["mimo_code"]["terminal"]["capabilities"]["pty"] is True
 
 
+def test_mimo_cli_terminal_launch_uses_tui_project_protocol(monkeypatch, tmp_path):
+    project_root = _configure_roots(monkeypatch, tmp_path)
+    monkeypatch.setattr(service.shutil, "which", lambda candidate: r"C:\tools\mimo.cmd" if candidate == "mimo.cmd" else "")
+
+    command = terminal_service._build_terminal_command(
+        agent_type="mimo_code",
+        task="列出根目录",
+        cwd=str(project_root),
+        mode="readonly",
+        model="",
+        agent="",
+        cli_session_id="",
+    )
+
+    assert command["args"] == [r"C:\tools\mimo.cmd", str(project_root)]
+    assert "code" not in command["args"]
+    assert "--dir" not in command["args"]
+    assert command["resumed"] is False
+    assert command["initialInput"] == "列出根目录\r\n"
+
+
+def test_mimo_cli_terminal_resume_uses_session_option(monkeypatch, tmp_path):
+    project_root = _configure_roots(monkeypatch, tmp_path)
+    monkeypatch.setattr(service.shutil, "which", lambda candidate: r"C:\tools\mimo.cmd" if candidate == "mimo.cmd" else "")
+
+    command = terminal_service._build_terminal_command(
+        agent_type="mimo_code",
+        task="继续上次任务",
+        cwd=str(project_root),
+        mode="readonly",
+        model="",
+        agent="",
+        cli_session_id="MIMO-123",
+    )
+
+    assert command["args"] == [r"C:\tools\mimo.cmd", str(project_root), "--session", "MIMO-123"]
+    assert "resume" not in command["args"]
+    assert "--dir" not in command["args"]
+    assert command["resumed"] is True
+    assert command["initialInput"] == ""
+
+
 def test_cli_agent_terminal_resume_uses_user_level_protocol(monkeypatch, tmp_path):
     project_root = _configure_roots(monkeypatch, tmp_path)
     service.CLI_AGENT_REGISTRY_PATH.parent.mkdir(parents=True)
