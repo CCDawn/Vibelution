@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from config import AppConfig
-from config.models import LLMProfile
+from config.models import LLMProfile, PromptCacheConfig
 
 from .discovery import discover_model
 from .reasoning_effort import model_supports_gpt_reasoning_effort, normalize_reasoning_effort
@@ -218,6 +218,7 @@ def config_for_agent_llm_model(
             "provider_id": provider_id,
             "model": model_name,
             "api_key_env": str(entry.get("api_key_env") or "").strip(),
+            "prompt_cache": entry.get("prompt_cache") if "prompt_cache" in entry else PromptCacheConfig(),
         }
     )
     runtime_config.llm.profiles[runtime_profile_id] = selected
