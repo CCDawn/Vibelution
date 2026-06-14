@@ -538,6 +538,9 @@ function shouldRenderCliAgentRunTab(result: CliAgentRunResult | null, status: st
   ) {
     return true;
   }
+  if (!result) {
+    return false;
+  }
   const normalizedStatus = String(result?.status || status || "").trim().toLowerCase();
   if (["error", "failed", "failure", "timeout"].includes(normalizedStatus)) {
     return false;
@@ -545,7 +548,7 @@ function shouldRenderCliAgentRunTab(result: CliAgentRunResult | null, status: st
   if (code === "CLI_AGENT_EXITED_NONZERO" || code === "CLI_AGENT_LAUNCH_FAILED" || code === "CLI_AGENT_TIMEOUT") {
     return false;
   }
-  return true;
+  return false;
 }
 
 function terminalStatusText(session: CliAgentTerminalSession | null, connecting: boolean, lang: "zh" | "en") {
