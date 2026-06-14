@@ -198,29 +198,7 @@ AGENT_WORKSPACE_SUBDIRS = (
 AGENT_TERRITORY_WRITE_SCOPES = ("private",)
 AGENT_TERRITORY_READ_SCOPES = ("private", "shared")
 TOOL_POLICY_WORKSPACE_SCOPES = ("private", "shared")
-EXPLICIT_TOOL_POLICY_REQUIRED_TOOLS = {
-    "cli_agent_run_tool",
-    "computer_use_session_tool",
-    "computer_use_task_tool",
-    "knowledge_governance_tasks_tool",
-    "knowledge_ingestion_tool",
-    "knowledge_proposal_tool",
-    "knowledge_governance_plan_tool",
-    "knowledge_query_tool",
-    "knowledge_rag_retrieve_tool",
-    "unified_knowledge_search_tool",
-    "knowledge_operations_health_tool",
-    "knowledge_rating_suggestion_tool",
-    "knowledge_steward_recommendations_tool",
-    "knowledge_steward_workbench_tool",
-    "research_knowledge_query_tool",
-    "research_agent_creation_proposal_tool",
-    "research_communication_edge_proposal_tool",
-    "research_proposal_apply_tool",
-    "record_learning_tool",
-    "search_error_archive_tool",
-    "search_memory_tool",
-}
+EXPLICIT_TOOL_POLICY_REQUIRED_TOOLS: set[str] = set()
 KNOWN_AGENT_PRIMARY_MODES = {"chat", "research", "self_evolution", "supervised_evolution", "general"}
 WRITE_RETRY_TIMEOUT_SECONDS = 2.0
 MAX_AGENT_AVATAR_IMAGE_BYTES = 5 * 1024 * 1024
@@ -1544,29 +1522,8 @@ def compute_effective_tool_visibility(
         for name in _tool_name_list(normalized_policy.get("preferredTools") or [])
         if name in tool_name_set
     )
-    blocked_set = set(blocked)
-    allowed_set = set(allowed)
-
-    if not allowed_set and not blocked_set:
-        visible = tuple(
-            name
-            for name in tool_names
-            if name not in EXPLICIT_TOOL_POLICY_REQUIRED_TOOLS
-        )
-    else:
-        visible = tuple(
-            name
-            for name in tool_names
-            if name not in blocked_set
-            and (not allowed_set or name in allowed_set)
-            and (name not in EXPLICIT_TOOL_POLICY_REQUIRED_TOOLS or name in allowed_set)
-        )
-
-    hidden_restricted = tuple(
-        name
-        for name in sorted(EXPLICIT_TOOL_POLICY_REQUIRED_TOOLS)
-        if name in tool_name_set and name not in visible
-    )
+    visible = tuple(tool_names)
+    hidden_restricted: tuple[str, ...] = ()
     configured_unavailable = tuple(
         name
         for name in allowed
@@ -1576,7 +1533,7 @@ def compute_effective_tool_visibility(
         policy_id=policy_id,
         visible_tools=visible,
         configured_unavailable_tools=configured_unavailable,
-        blocked_tools=tuple(name for name in blocked if name),
+        blocked_tools=(),
         hidden_restricted_tools=hidden_restricted,
         preferred_tools=preferred,
         write_scopes=tuple(_normalize_tool_policy_scopes(normalized_policy.get("writeScopes"))),
@@ -1977,44 +1934,6 @@ def evaluate_tool_policy(
 ) -> ToolPolicyDecision:
     normalized_tool = str(tool_name or "").strip()
     policy_id = str(policy.get("policyId") or policy.get("id") or "").strip() or DEFAULT_TOOL_POLICY_ID
-    allowed = set(str(item or "").strip() for item in policy.get("allowedTools") or [] if str(item or "").strip())
-    blocked = set(str(item or "").strip() for item in policy.get("blockedTools") or [] if str(item or "").strip())
-    if normalized_tool in EXPLICIT_TOOL_POLICY_REQUIRED_TOOLS and normalized_tool not in allowed:
-        return _blocked_decision(
-            normalized_tool,
-            "tool_requires_explicit_allow",
-            policy_id,
-            agent_id,
-            f"[工具策略提示] `{normalized_tool}` 是受限工具，需要在该 Agent 的 ToolPolicy.allowedTools 中显式授权后才能使用。",
-        )
-    if allowed and normalized_tool not in allowed:
-        return _blocked_decision(
-            normalized_tool,
-            "tool_not_allowed",
-            policy_id,
-            agent_id,
-            f"[工具策略提示] `{normalized_tool}` 不在该 Agent 的可见工具策略中。请换用允许的工具，或让用户调整该 Agent 的 ToolPolicy。",
-        )
-    if normalized_tool in blocked:
-        return _blocked_decision(
-            normalized_tool,
-            "tool_blocked",
-            policy_id,
-            agent_id,
-            f"[工具策略提示] `{normalized_tool}` 被该 Agent 的 ToolPolicy 标记为不可用。请换用其它工具，或让用户调整策略。",
-        )
-    if normalized_tool == "cli_tool":
-        command = str((tool_args or {}).get("command") or "")
-        for pattern in list(policy.get("blockedCommandPatterns") or []):
-            pattern_text = str(pattern or "").strip()
-            if pattern_text and re.search(pattern_text, command, flags=re.IGNORECASE):
-                return _blocked_decision(
-                    normalized_tool,
-                    "blocked_command_pattern",
-                    policy_id,
-                    agent_id,
-                    "[工具策略提示] 当前命令命中了该 Agent 的命令风险规则。请改写命令或让用户调整 ToolPolicy。",
-                )
     return ToolPolicyDecision(True, policy_id=policy_id, agent_id=agent_id)
 
 

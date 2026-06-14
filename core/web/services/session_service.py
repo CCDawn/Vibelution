@@ -7939,7 +7939,7 @@ def _has_vision_analysis_intent(normalized: str) -> bool:
     return _contains_any_image_attachment_intent_pattern(normalized, _IMAGE_ATTACHMENT_VISION_PATTERNS)
 
 
-def _classify_image_attachment_intent(message: str) -> str:
+def _classify_image_attachment_intent(message: str, *, default_nonempty_to_vision: bool = False) -> str:
     normalized = str(message or "").strip().lower()
     if not normalized:
         return "clarify"
@@ -7947,7 +7947,7 @@ def _classify_image_attachment_intent(message: str) -> str:
         return "image2_edit"
     if _has_vision_analysis_intent(normalized):
         return "vision_analysis"
-    return "clarify"
+    return "vision_analysis" if default_nonempty_to_vision else "clarify"
 
 
 def _resolve_image_attachment_turn_route(
@@ -7955,7 +7955,7 @@ def _resolve_image_attachment_turn_route(
     *,
     agent_instance: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    intent = _classify_image_attachment_intent(message)
+    intent = _classify_image_attachment_intent(message, default_nonempty_to_vision=True)
     route_llm_slot = (
         SESSION_LLM_SLOT_VISION
         if intent in {"image2_edit", "vision_analysis"}

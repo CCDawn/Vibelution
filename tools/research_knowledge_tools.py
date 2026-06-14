@@ -37,24 +37,6 @@ def research_knowledge_query_tool(
 
     runtime = _current_runtime()
     agent_id = str(runtime.get("agentId") or "").strip()
-    policy = runtime.get("toolPolicy") if isinstance(runtime.get("toolPolicy"), dict) else {}
-    if not _is_explicitly_allowed(policy):
-        _record_query_event(
-            "research_knowledge.query.blocked",
-            runtime=runtime,
-            level="warning",
-            outcome="blocked",
-            fields={"reason": "tool_not_explicitly_allowed"},
-        )
-        return _json_result(
-            {
-                "ok": False,
-                "status": "blocked",
-                "error": "tool_not_explicitly_allowed",
-                "message": "research_knowledge_query_tool 需要在该 Agent 的 ToolPolicy.allowedTools 中显式授权。",
-                "agentId": agent_id,
-            }
-        )
 
     normalized_collection = str(collection or "all").strip().lower() or "all"
     if normalized_collection not in _ALLOWED_COLLECTIONS:
@@ -119,12 +101,6 @@ def research_knowledge_query_tool(
                 "agentId": agent_id,
             }
         )
-
-
-def _is_explicitly_allowed(policy: dict[str, Any]) -> bool:
-    allowed = {str(item or "").strip() for item in policy.get("allowedTools") or [] if str(item or "").strip()}
-    blocked = {str(item or "").strip() for item in policy.get("blockedTools") or [] if str(item or "").strip()}
-    return RESEARCH_KNOWLEDGE_QUERY_TOOL_NAME in allowed and RESEARCH_KNOWLEDGE_QUERY_TOOL_NAME not in blocked
 
 
 def _select_results(payload: dict[str, Any], *, collection: str, limit: int) -> dict[str, list[dict[str, Any]]]:

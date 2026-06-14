@@ -50,7 +50,8 @@ def test_prompt_template_registry_repairs_research_defaults(tmp_path, monkeypatc
     assert steward_detail["metadata"]["roleKey"] == "research_capability_steward"
     assert "能力管家 agent" in steward_detail["content"]
     assert "research_proposal_apply_tool" in steward_detail["content"]
-    assert "ToolPolicy.allowedTools" in steward_detail["content"]
+    assert "Tool Plan" in steward_detail["content"]
+    assert "ToolPolicy.allowedTools" not in steward_detail["content"]
     assert (tmp_path / "workspace" / "agent_config" / "prompt_templates.json").exists()
     assert (tmp_path / "workspace" / "prompts" / "research" / "ceo.md").exists()
     assert (tmp_path / "workspace" / "prompts" / "research" / "organization_advisor.md").exists()
