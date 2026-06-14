@@ -636,7 +636,7 @@ function isCliAgentRunActiveForClose(run: CliAgentRunView, session?: CliAgentTer
     return true;
   }
   const status = String(session?.status || run.result?.terminalStatus || run.status || "").trim().toLowerCase();
-  if (["active", "pending", "queued", "running", "starting", "stopping"].includes(status)) {
+  if (["active", "pending", "queued", "sent", "running", "starting", "stopping"].includes(status)) {
     return true;
   }
   if (["closed", "stopped", "exited", "stale"].includes(status)) {
@@ -911,7 +911,7 @@ function CliAgentRunTerminalPanel({
       disposed = true;
       controller.abort();
     };
-  }, [replayTerminalSnapshot, run.agentType, run.cwd, run.messageId, run.mode, run.result, run.sourceRunId, run.task, sourceSessionId, writeTerminalChunk]);
+  }, [replayTerminalSnapshot, run.agentType, run.cliSessionId, run.cwd, run.messageId, run.mode, run.sourceRunId, run.task, sourceSessionId, writeTerminalChunk]);
 
   useEffect(() => {
     if (terminalSession) {
