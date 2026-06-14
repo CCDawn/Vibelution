@@ -705,18 +705,47 @@ function contextCompositionSegmentClass(key: string) {
   }
 }
 
-function cacheCompositionSegmentClass(key: string) {
-  switch (key) {
+function cacheCompositionSegmentClass(keyOrStatus: string) {
+  switch (keyOrStatus) {
     case "cached":
+    case "hit":
+    case "computed_hit":
       return styles.contextCompositionSegmentCached;
     case "cache_write":
+    case "write":
+    case "computed_write":
       return styles.contextCompositionSegmentCacheWrite;
     case "uncached":
+    case "miss":
+    case "computed_miss":
       return styles.contextCompositionSegmentUncached;
     case "missing":
+    case "computed_unknown":
       return styles.contextCompositionSegmentMissing;
     default:
       return styles.contextCompositionSegmentOther;
+  }
+}
+
+function cacheDonutSegmentClass(keyOrStatus: string) {
+  switch (keyOrStatus) {
+    case "cached":
+    case "hit":
+    case "computed_hit":
+      return styles.cacheDonutSegmentCached;
+    case "cache_write":
+    case "write":
+    case "computed_write":
+      return styles.cacheDonutSegmentCacheWrite;
+    case "uncached":
+    case "miss":
+    case "computed_miss":
+      return styles.cacheDonutSegmentUncached;
+    case "missing":
+    case "computed_unknown":
+      return styles.cacheDonutSegmentMissing;
+    default:
+      return styles.cacheDonutSegmentOther;
   }
 }
 
@@ -732,18 +761,96 @@ function cacheCompositionSegmentLabel(key: string, fallback: string, t: (key: Tr
   return translated === dictionaryKey ? (fallback || key) : translated;
 }
 
-function compositionSegmentWidth(value: number, total: number) {
-  if (total <= 0) {
-    return "100%";
-  }
-  return `${Math.max(4, Math.round((Math.max(0, value) / total) * 1000) / 10)}%`;
-}
-
 function contextWindowSegmentWidth(value: number, total: number) {
   if (total <= 0 || value <= 0) {
     return "0%";
   }
   return `${Math.round((Math.max(0, value) / total) * 1000) / 10}%`;
+}
+
+const MIN_CACHE_DONUT_SEGMENT_PERCENT = 3;
+
+type CacheDonutSegment = SessionCacheCompositionSegment & {
+  actualPercent: number;
+  visualPercent: number;
+  startPercent: number;
+  visuallyAmplified: boolean;
+};
+
+function buildCacheDonutSegments(
+  segments: SessionCacheCompositionSegment[],
+  total: number,
+  minPercent = MIN_CACHE_DONUT_SEGMENT_PERCENT,
+): CacheDonutSegment[] {
+  const totalTokens = Math.max(0, total);
+  const positiveSegments = segments
+    .map((segment) => ({
+      ...segment,
+      tokens: Math.max(0, segment.tokens ?? 0),
+    }))
+    .filter((segment) => segment.tokens > 0);
+  if (!positiveSegments.length || totalTokens <= 0) {
+    return [];
+  }
+  const rawSegments = positiveSegments.map((segment) => ({
+    ...segment,
+    actualPercent: (segment.tokens / totalTokens) * 100,
+  }));
+  const minVisualPercent = Math.max(0, minPercent);
+  const minSegmentTotal = rawSegments.reduce(
+    (sum, segment) => sum + (segment.actualPercent > 0 && segment.actualPercent < minVisualPercent ? minVisualPercent : 0),
+    0,
+  );
+  const largeRawTotal = rawSegments.reduce(
+    (sum, segment) => sum + (segment.actualPercent >= minVisualPercent ? segment.actualPercent : 0),
+    0,
+  );
+  let cursor = 0;
+  if (minSegmentTotal >= 100) {
+    const sharedPercent = 100 / rawSegments.length;
+    return rawSegments.map((segment, index) => {
+      const startPercent = cursor;
+      const visualPercent = index === rawSegments.length - 1 ? Math.max(0, 100 - cursor) : sharedPercent;
+      cursor += visualPercent;
+      return {
+        ...segment,
+        visualPercent,
+        startPercent,
+        visuallyAmplified: visualPercent > segment.actualPercent,
+      };
+    });
+  }
+  const largeScale = largeRawTotal > 0 ? (100 - minSegmentTotal) / largeRawTotal : 1;
+  return rawSegments.map((segment, index) => {
+    const startPercent = cursor;
+    const isSmall = segment.actualPercent > 0 && segment.actualPercent < minVisualPercent;
+    const rawVisualPercent = isSmall ? minVisualPercent : segment.actualPercent * largeScale;
+    const visualPercent = index === rawSegments.length - 1 ? Math.max(0, 100 - cursor) : rawVisualPercent;
+    cursor += visualPercent;
+    return {
+      ...segment,
+      visualPercent,
+      startPercent,
+      visuallyAmplified: visualPercent > segment.actualPercent + 0.01,
+    };
+  });
+}
+
+function cacheDonutSegmentTitle(
+  segment: CacheDonutSegment,
+  totalTokens: number,
+  numberFormatter: Intl.NumberFormat,
+  lang: "zh" | "en",
+) {
+  const percent = Math.round(segment.actualPercent);
+  const parts = [
+    `${segment.label || segment.key}: ${numberFormatter.format(segment.tokens)} / ${numberFormatter.format(totalTokens)} · ${percent}%`,
+    segment.cachePolicy ? `${lang === "zh" ? "缓存策略" : "cache policy"} ${segment.cachePolicy}` : "",
+    segment.source ? `${lang === "zh" ? "来源" : "source"} ${segment.source}` : "",
+    segment.description || "",
+    segment.visuallyAmplified ? (lang === "zh" ? "视觉段已放大，便于鼠标锁定。" : "Visual arc is amplified for hover targeting.") : "",
+  ];
+  return parts.filter(Boolean).join(" · ");
 }
 
 function removeSessionImageAttachment(
@@ -3393,18 +3500,71 @@ export function ChatCodingRoute() {
       activeSkillContract.skillPath || "",
     ].filter(Boolean).join(" · ")
     : "";
-  const cacheCompositionSegments = useMemo(() => {
-    const segments = lastCacheComposition?.segments ?? [];
-    return segments.filter((segment: SessionCacheCompositionSegment) => (segment.tokens ?? 0) > 0 || segment.key === "missing");
-  }, [lastCacheComposition]);
-  const cacheCompositionTotalTokens = Math.max(
-    lastCacheComposition?.inputTokens ?? 0,
-    cacheCompositionSegments.reduce((total, segment) => total + Math.max(0, segment.tokens ?? 0), 0),
+  const providerCacheInputTokens = Math.max(0, lastCacheComposition?.inputTokens ?? 0);
+  const providerCachedInputTokens = Math.max(0, Math.min(lastCacheComposition?.cachedInputTokens ?? 0, providerCacheInputTokens));
+  const providerUncachedInputTokens = Math.max(
+    0,
+    lastCacheComposition?.uncachedInputTokens ?? (providerCacheInputTokens - providerCachedInputTokens),
+  );
+  const trueCacheDonutSegments = useMemo(
+    () => buildCacheDonutSegments(
+      [
+        {
+          key: "cached",
+          label: t("cacheSegment_cached"),
+          tokens: providerCachedInputTokens,
+          status: "hit",
+          source: "provider_usage",
+          description: lang === "zh" ? "上游返回的真实缓存命中输入 token。" : "Provider-reported cached input tokens.",
+        },
+        {
+          key: "uncached",
+          label: t("cacheSegment_uncached"),
+          tokens: Math.max(0, providerCacheInputTokens - providerCachedInputTokens),
+          status: "miss",
+          source: "provider_usage",
+          description: lang === "zh" ? "上游返回的非缓存命中输入 token。" : "Provider-reported input tokens that were not cache hits.",
+        },
+      ],
+      providerCacheInputTokens,
+    ),
+    [lang, providerCachedInputTokens, providerCacheInputTokens, t],
+  );
+  const computedCacheCompositionSegments = useMemo(() => {
+    const segments = lastCacheComposition?.computedSegments ?? [];
+    return segments
+      .filter((segment: SessionCacheCompositionSegment) => (segment.tokens ?? 0) > 0 || segment.key === "computed_missing")
+      .map((segment) => {
+        const translatedLabel = segment.key === "system_prompt_overhead"
+          ? (lang === "zh" ? "system / tools" : "system / tools")
+          : contextCompositionSegmentLabel(segment.key, segment.label, t);
+        return {
+          ...segment,
+          label: translatedLabel,
+        };
+      });
+  }, [lang, lastCacheComposition, t]);
+  const computedCacheCompositionTotalTokens = Math.max(
+    lastCacheComposition?.computedInputTokens ?? 0,
+    computedCacheCompositionSegments.reduce((total, segment) => total + Math.max(0, segment.tokens ?? 0), 0),
+  );
+  const computedCacheDonutSegments = useMemo(
+    () => buildCacheDonutSegments(computedCacheCompositionSegments, computedCacheCompositionTotalTokens),
+    [computedCacheCompositionSegments, computedCacheCompositionTotalTokens],
   );
   const cacheCompositionPercent = Math.round(Math.max(0, Math.min(1, lastCacheComposition?.cacheHitRate ?? 0)) * 100);
+  const computedCacheCompositionPercent = Math.round(Math.max(0, Math.min(1, lastCacheComposition?.computedCacheHitRate ?? 0)) * 100);
+  const averageCacheCompositionPercent = Math.round(Math.max(0, Math.min(1, lastCacheComposition?.averageCacheHitRate ?? 0)) * 100);
+  const averageCacheObservedTurnCount = Math.max(0, lastCacheComposition?.averageObservedTurnCount ?? 0);
+  const averageCacheInputTokens = Math.max(0, lastCacheComposition?.averageInputTokens ?? 0);
+  const averageCachedInputTokens = Math.max(0, lastCacheComposition?.averageCachedInputTokens ?? 0);
+  const cacheCompositionTrueLabel = lang === "zh" ? "真" : "true";
+  const cacheCompositionComputedLabel = lang === "zh" ? "计" : "calc";
+  const cacheCompositionAverageLabel = lang === "zh" ? "均" : "avg";
+  const cacheCompositionAverageValue = averageCacheObservedTurnCount > 0 ? `${averageCacheCompositionPercent}%` : "--";
   const cacheCompositionSummary = lastCacheComposition
     ? lastCacheComposition.source === "provider_usage"
-      ? `${numberFormatter.format(lastCacheComposition.cachedInputTokens)} / ${numberFormatter.format(lastCacheComposition.inputTokens)} · ${cacheCompositionPercent}%`
+      ? `${cacheCompositionTrueLabel} ${cacheCompositionPercent}% · ${cacheCompositionComputedLabel} ${computedCacheCompositionPercent}% · ${cacheCompositionAverageLabel} ${cacheCompositionAverageValue}`
       : lastCacheComposition.source === "not_called"
         ? t("cacheHitNotCalled")
       : t("cacheHitMissing")
@@ -3412,9 +3572,12 @@ export function ChatCodingRoute() {
   const cacheCompositionTitle = lastCacheComposition
     ? lastCacheComposition.source === "provider_usage"
       ? [
-        `${t("previousCacheHit")} ${numberFormatter.format(lastCacheComposition.cachedInputTokens)} / ${numberFormatter.format(lastCacheComposition.inputTokens)} · ${cacheCompositionPercent}%`,
+        `${cacheCompositionTrueLabel} ${numberFormatter.format(providerCachedInputTokens)} / ${numberFormatter.format(providerCacheInputTokens)} · ${cacheCompositionPercent}%`,
+        `${cacheCompositionComputedLabel} ${numberFormatter.format(lastCacheComposition.computedCachedInputTokens ?? 0)} / ${numberFormatter.format(computedCacheCompositionTotalTokens)} · ${computedCacheCompositionPercent}%`,
+        `${cacheCompositionAverageLabel} ${numberFormatter.format(averageCachedInputTokens)} / ${numberFormatter.format(averageCacheInputTokens)} · ${cacheCompositionAverageValue}`,
+        `${lang === "zh" ? "观测轮次" : "observed turns"} ${numberFormatter.format(averageCacheObservedTurnCount)}`,
         `write ${numberFormatter.format(lastCacheComposition.cacheCreationInputTokens ?? 0)}`,
-        `uncached ${numberFormatter.format(lastCacheComposition.uncachedInputTokens ?? 0)}`,
+        `uncached ${numberFormatter.format(providerUncachedInputTokens)}`,
       ].join(" · ")
       : lastCacheComposition.source === "not_called"
         ? t("cacheHitNotCalled")
@@ -5196,27 +5359,82 @@ export function ChatCodingRoute() {
                     <span>{t("previousCacheHit")}</span>
                     <strong>{cacheCompositionSummary}</strong>
                   </div>
-                  <div className={styles.contextCompositionBar} aria-hidden="true">
-                    {cacheCompositionSegments.length ? (
-                      cacheCompositionSegments.map((segment) => (
-                        <span
-                          key={`${segment.key}-${segment.status}`}
-                          className={`${styles.contextCompositionSegment} ${cacheCompositionSegmentClass(segment.key)}`}
-                          style={{ width: compositionSegmentWidth(segment.tokens ?? 0, cacheCompositionTotalTokens || 1) }}
-                        />
-                      ))
-                    ) : (
-                      <span className={`${styles.contextCompositionSegment} ${styles.contextCompositionSegmentMissing}`} />
-                    )}
+                  <div className={styles.cacheDonutPanel}>
+                    <div className={styles.cacheDonutShell}>
+                      <svg
+                        className={styles.cacheDonutSvg}
+                        viewBox="0 0 100 100"
+                        role="img"
+                        aria-label={cacheCompositionTitle}
+                      >
+                        <circle className={`${styles.cacheDonutTrack} ${styles.cacheDonutOuterTrack}`} cx="50" cy="50" r="42" pathLength={100} />
+                        {computedCacheDonutSegments.map((segment, index) => (
+                          <circle
+                            key={`computed-${segment.key}-${segment.status}-${index}`}
+                            className={`${styles.cacheDonutSegment} ${styles.cacheDonutOuterSegment} ${cacheDonutSegmentClass(segment.status || segment.key)}`}
+                            cx="50"
+                            cy="50"
+                            r="42"
+                            pathLength={100}
+                            style={{
+                              strokeDasharray: `${segment.visualPercent} ${Math.max(0, 100 - segment.visualPercent)}`,
+                              strokeDashoffset: -segment.startPercent,
+                            } as CSSProperties}
+                          >
+                            <title>{cacheDonutSegmentTitle(segment, computedCacheCompositionTotalTokens, numberFormatter, lang)}</title>
+                          </circle>
+                        ))}
+                        <circle className={`${styles.cacheDonutTrack} ${styles.cacheDonutInnerTrack}`} cx="50" cy="50" r="31" pathLength={100} />
+                        {trueCacheDonutSegments.map((segment, index) => (
+                          <circle
+                            key={`true-${segment.key}-${segment.status}-${index}`}
+                            className={`${styles.cacheDonutSegment} ${styles.cacheDonutInnerSegment} ${cacheDonutSegmentClass(segment.status || segment.key)}`}
+                            cx="50"
+                            cy="50"
+                            r="31"
+                            pathLength={100}
+                            style={{
+                              strokeDasharray: `${segment.visualPercent} ${Math.max(0, 100 - segment.visualPercent)}`,
+                              strokeDashoffset: -segment.startPercent,
+                            } as CSSProperties}
+                          >
+                            <title>{cacheDonutSegmentTitle(segment, providerCacheInputTokens, numberFormatter, lang)}</title>
+                          </circle>
+                        ))}
+                      </svg>
+                      <div className={styles.cacheDonutCenter} title={cacheCompositionTitle}>
+                        <strong>{cacheCompositionPercent}%</strong>
+                        <span>{cacheCompositionComputedLabel} {computedCacheCompositionPercent}%</span>
+                        <small>{cacheCompositionAverageLabel} {cacheCompositionAverageValue}</small>
+                      </div>
+                    </div>
+                    <div className={styles.cacheDonutStats}>
+                      <span title={cacheCompositionTitle}>
+                        <b>{lang === "zh" ? "真实" : "true"}</b>
+                        {numberFormatter.format(providerCachedInputTokens)} / {numberFormatter.format(providerCacheInputTokens)}
+                      </span>
+                      <span title={cacheCompositionTitle}>
+                        <b>{lang === "zh" ? "计算" : "calc"}</b>
+                        {numberFormatter.format(lastCacheComposition?.computedCachedInputTokens ?? 0)} / {numberFormatter.format(computedCacheCompositionTotalTokens)}
+                      </span>
+                      <span title={cacheCompositionTitle}>
+                        <b>{lang === "zh" ? "总均" : "avg"}</b>
+                        {cacheCompositionAverageValue}
+                        {averageCacheObservedTurnCount > 0 ? ` · ${numberFormatter.format(averageCacheObservedTurnCount)}` : ""}
+                      </span>
+                    </div>
                   </div>
-                  {cacheCompositionSegments.length ? (
+                  {computedCacheDonutSegments.length ? (
                     <div className={styles.contextCompositionLegend}>
-                      {cacheCompositionSegments.map((segment) => (
-                        <span key={`${segment.key}-${segment.status}-legend`}>
-                          <i className={cacheCompositionSegmentClass(segment.key)} />
-                          {cacheCompositionSegmentLabel(segment.key, segment.label, t)}
+                      {computedCacheDonutSegments.map((segment, index) => (
+                        <span
+                          key={`${segment.key}-${segment.status}-${index}-legend`}
+                          title={cacheDonutSegmentTitle(segment, computedCacheCompositionTotalTokens, numberFormatter, lang)}
+                        >
+                          <i className={cacheCompositionSegmentClass(segment.status || segment.key)} />
+                          {segment.key === "computed_missing" ? cacheCompositionSegmentLabel("missing", segment.label, t) : segment.label}
                           {" "}
-                          {segment.key === "missing" ? "" : numberFormatter.format(segment.tokens ?? 0)}
+                          {segment.key === "computed_missing" ? "" : numberFormatter.format(segment.tokens ?? 0)}
                         </span>
                       ))}
                     </div>

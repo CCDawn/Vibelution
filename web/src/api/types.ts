@@ -4333,6 +4333,10 @@ export type SessionCacheCompositionSegment = {
   label: string;
   tokens: number;
   status: string;
+  source?: string;
+  description?: string;
+  cachePolicy?: string;
+  order?: number;
 };
 
 export type SessionCacheComposition = {
@@ -4346,6 +4350,15 @@ export type SessionCacheComposition = {
   uncachedInputTokens: number;
   cacheHitRate: number;
   segments: SessionCacheCompositionSegment[];
+  computedInputTokens?: number;
+  computedCachedInputTokens?: number;
+  computedUncachedInputTokens?: number;
+  computedCacheHitRate?: number;
+  computedSegments?: SessionCacheCompositionSegment[];
+  averageInputTokens?: number;
+  averageCachedInputTokens?: number;
+  averageCacheHitRate?: number;
+  averageObservedTurnCount?: number;
 };
 
 export type SessionDetail = SessionSummary & {
@@ -4388,6 +4401,7 @@ export type SessionDetail = SessionSummary & {
     totalCacheCreationInputTokens?: number;
     totalUncachedInputTokens?: number;
     totalCacheHitRate: number;
+    totalObservedTurnCount?: number;
     updatedAt: string;
     source: string;
   };
