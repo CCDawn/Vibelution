@@ -80,7 +80,7 @@ describe("AgentsRoute layout contract", () => {
   it("labels Agent filter health counts instead of concatenating bare numbers", () => {
     expect(routeSource).toContain("function groupAriaLabel");
     expect(routeSource).toContain("aria-label={groupAriaLabel(displayLabel, group, copy, lang)}");
-    expect(routeSource).toContain("{copy.healthIssueShort} {group.healthCount}");
+    expect(routeSource).toContain('group.id === "setup:inbox" ? copy.statusReminderShort : copy.healthIssueShort');
     expect(routeSource).not.toContain("{group.healthCount ? <em>{group.healthCount}</em> : null}");
   });
 
@@ -305,12 +305,17 @@ describe("AgentsRoute layout contract", () => {
   });
 
   it("explains Agent health states with reason and next action instead of a bare hint pill", () => {
-    expect(routeSource).toContain('return lang === "zh" ? "可优化" : "Optional"');
+    expect(routeSource).toContain('return lang === "zh" ? "提醒" : "Notice"');
     expect(routeSource).toContain("function issueSummary");
     expect(routeSource).toContain("function issueNextStep");
+    expect(routeSource).toContain("function issuePanelLabel");
+    expect(routeSource).toContain("function issueDisplayTitle");
+    expect(routeSource).toContain("Inbox 有待处理消息");
+    expect(routeSource).toContain("这是 Inbox 待办提醒，不代表配置坏了");
     expect(routeSource).toContain("styles.healthCell");
     expect(routeSource).toContain("styles.detailHealthStatus");
     expect(routeSource).toContain("copy.healthNextStep");
+    expect(routeSource).toContain("copy.statusReminders");
     expect(routeSource).toContain("issueSummary(agent.health, lang)");
     expect(routeSource).toContain("issueNextStep(selectedAgent.health, lang)");
     expect(styles.healthCell).toBeTruthy();

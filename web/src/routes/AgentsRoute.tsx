@@ -755,9 +755,13 @@ function issueLabel(issues: AgentConfigHealthIssue[], lang: "zh" | "en") {
     return lang === "zh" ? "需处理" : "Review";
   }
   if (tone === "info") {
-    return lang === "zh" ? "可优化" : "Optional";
+    return lang === "zh" ? "提醒" : "Notice";
   }
   return lang === "zh" ? "正常" : "OK";
+}
+
+function issuePanelLabel(issues: AgentConfigHealthIssue[], copy: ReturnType<typeof agentsRouteCopy>) {
+  return issueTone(issues) === "info" ? copy.statusReminders : copy.healthIssues;
 }
 
 function workspaceHealthStatusLabel(status: string, lang: "zh" | "en") {
@@ -781,12 +785,12 @@ function workspaceHealthStatusDescription(status: string, summary: AgentConfigWo
   const blockingCount = summary?.blockingIssueCount ?? 0;
   const warningCount = summary?.warningIssueCount ?? 0;
   if (normalized === "ok" || issueCount === 0) {
-    return lang === "zh" ? "当前没有明显健康问题。" : "No obvious health issues.";
+    return lang === "zh" ? "当前没有需处理问题。" : "No issues need review.";
   }
   if (lang === "zh") {
-    return `共 ${issueCount} 个健康问题，阻塞 ${blockingCount} 个，警告 ${warningCount} 个。`;
+    return `共 ${issueCount} 个需处理问题，阻塞 ${blockingCount} 个，警告 ${warningCount} 个。`;
   }
-  return `${issueCount} health issues: ${blockingCount} blocking, ${warningCount} warning.`;
+  return `${issueCount} issues need review: ${blockingCount} blocking, ${warningCount} warning.`;
 }
 
 function sortedHealthIssues(issues: AgentConfigHealthIssue[]) {
@@ -800,10 +804,18 @@ function issueSummary(issues: AgentConfigHealthIssue[], lang: "zh" | "en") {
     return lang === "zh" ? "配置完整，可直接引用" : "Ready to use";
   }
   const rest = issues.length > 1 ? (lang === "zh" ? `，另有 ${issues.length - 1} 项` : `, +${issues.length - 1} more`) : "";
-  return `${first.title}${rest}`;
+  return `${issueDisplayTitle(first, lang)}${rest}`;
+}
+
+function issueDisplayTitle(issue: AgentConfigHealthIssue, lang: "zh" | "en") {
+  if (issue.code === "pending_inbox_messages") {
+    return lang === "zh" ? "Inbox 有待处理消息" : "Pending inbox messages";
+  }
+  return issue.title;
 }
 
 function issueNextStep(issues: AgentConfigHealthIssue[], lang: "zh" | "en") {
+  const [first] = sortedHealthIssues(issues);
   const tone = issueTone(issues);
   if (tone === "blocking") {
     return lang === "zh" ? "先补齐阻塞项，否则不要加入可调度池。" : "Fix blocking items before routing this Agent.";
@@ -812,9 +824,14 @@ function issueNextStep(issues: AgentConfigHealthIssue[], lang: "zh" | "en") {
     return lang === "zh" ? "建议在配置页处理，避免运行时缺上下文。" : "Review config to avoid missing runtime context.";
   }
   if (tone === "info") {
-    return lang === "zh" ? "不影响使用，但补齐后更容易被团队和群聊理解。" : "Usable now; completing it improves team and room clarity.";
+    if (first?.code === "pending_inbox_messages") {
+      return lang === "zh"
+        ? "这是 Inbox 待办提醒，不代表配置坏了；进入活动页处理消息即可。"
+        : "This is an inbox reminder, not a broken config; handle the messages in Activity.";
+    }
+    return lang === "zh" ? "这是提醒项，不影响当前配置完整度。" : "This is a reminder and does not affect current config readiness.";
   }
-  return lang === "zh" ? "当前没有需要处理的健康项。" : "No health action is needed.";
+  return lang === "zh" ? "当前没有需要处理的问题或提醒。" : "No issue or reminder needs action.";
 }
 
 function runtimeStatusLabel(agent: AgentConfigWorkspaceAgent | null | undefined, lang: "zh" | "en") {
@@ -1390,16 +1407,17 @@ function groupDescription(group: { id: string; description?: string }, copy: Ret
 
 function groupAriaLabel(
   label: string,
-  group: { count: number; healthCount?: number },
+  group: { id?: string; count: number; healthCount?: number },
   copy: ReturnType<typeof agentsRouteCopy>,
   lang: "zh" | "en",
 ) {
   if (!group.healthCount) {
     return lang === "zh" ? `${label}，${group.count} 个 Agent` : `${label}, ${group.count} Agents`;
   }
+  const countLabel = group.id === "setup:inbox" ? copy.statusReminderShort : copy.healthIssueShort;
   return lang === "zh"
-    ? `${label}，${group.count} 个 Agent，${copy.healthIssues} ${group.healthCount} 个`
-    : `${label}, ${group.count} Agents, ${copy.healthIssues} ${group.healthCount}`;
+    ? `${label}，${group.count} 个 Agent，${countLabel} ${group.healthCount} 个`
+    : `${label}, ${group.count} Agents, ${countLabel} ${group.healthCount}`;
 }
 
 function draftFromAgent(agent: AgentConfigWorkspaceAgent | null | undefined): AgentConfigDraft {
@@ -2642,8 +2660,8 @@ function agentsRouteCopy(lang: "zh" | "en") {
         managementFilterNoTeamHint: "尚未被任何团队画布引用，适合继续分配组织位置。",
         managementFilterPendingInbox: "有待处理消息",
         managementFilterPendingInboxHint: "Agent inbox 仍有待处理消息，需要进入运行页处理。",
-        managementFilterMaintenance: "健康问题待处理",
-        managementFilterMaintenanceHint: "存在阻塞或警告级健康问题，需要进入维护区处理。",
+        managementFilterMaintenance: "需处理问题",
+        managementFilterMaintenanceHint: "存在阻塞或警告级问题，需要进入维护区处理。",
         createAgent: "新增 Agent",
         createAgentTitle: "新增 Agent",
         createAgentHint: "会话入口 Agent 用于项目开发和调试，按 Codex-like 配置创建；团队/科研 Agent 才需要人物摘要、任务使命和团队归属。",
@@ -2699,8 +2717,10 @@ function agentsRouteCopy(lang: "zh" | "en") {
         archiveProtectionHint: "这是科研团队核心 Agent，当前状态仍是活跃；系统只是在这里禁止归档操作，不代表它已经归档。",
         archivedAgents: "已归档",
         teams: "团队",
-        healthIssues: "健康问题",
+        healthIssues: "需处理问题",
         healthIssueShort: "问题",
+        statusReminders: "状态提醒",
+        statusReminderShort: "提醒",
         workspaceHealthStatus: "工作区健康状态",
         chatRooms: "群聊",
         inbox: "待处理消息",
@@ -2737,7 +2757,7 @@ function agentsRouteCopy(lang: "zh" | "en") {
         selectAgent: "选择一个 Agent 查看统一配置卡片。",
         readOnly: "只读总览",
         policyPending: "协作策略待配置",
-        noIssues: "当前没有明显健康问题。",
+        noIssues: "当前没有需处理问题或提醒。",
         routeHint: "这张卡片是 Agent 的唯一配置点；业务页面只引用这里的 Agent。",
         managementBriefTitle: "管理完整度",
         managementBriefHint: "按当前 Agent 身份检查必要配置；会话入口 Agent 不要求人物档案和团队归属。",
@@ -3009,8 +3029,8 @@ function agentsRouteCopy(lang: "zh" | "en") {
         managementFilterNoTeamHint: "Not referenced by any team canvas yet.",
         managementFilterPendingInbox: "Pending messages",
         managementFilterPendingInboxHint: "Agent inbox has pending messages to handle in Activity.",
-        managementFilterMaintenance: "Health issues to handle",
-        managementFilterMaintenanceHint: "Has blocking or warning health issues that should be handled in Maintenance.",
+        managementFilterMaintenance: "Issues to review",
+        managementFilterMaintenanceHint: "Has blocking or warning issues that should be handled in Maintenance.",
         createAgent: "New Agent",
         createAgentTitle: "Create persistent Agent",
         createAgentHint: "Session entry Agents are created like Codex-style project executors. Team and research Agents still need persona, task mission, and organization placement.",
@@ -3066,8 +3086,10 @@ function agentsRouteCopy(lang: "zh" | "en") {
         archiveProtectionHint: "This is a core research Agent and is still active. This panel only blocks archive actions; it does not mean the Agent is archived.",
         archivedAgents: "Archived",
         teams: "Teams",
-        healthIssues: "Health Issues",
+        healthIssues: "Issues to review",
         healthIssueShort: "Issues",
+        statusReminders: "Status reminders",
+        statusReminderShort: "Reminders",
         workspaceHealthStatus: "Workspace health status",
         chatRooms: "Group Rooms",
         inbox: "Pending inbox",
@@ -3104,7 +3126,7 @@ function agentsRouteCopy(lang: "zh" | "en") {
         selectAgent: "Select an Agent to inspect its unified config card.",
         readOnly: "Read-only",
         policyPending: "Policy registry pending",
-        noIssues: "No obvious health issues.",
+        noIssues: "No issues or reminders.",
         routeHint: "This card is the single Agent config point. Product pages should only reference Agents from here.",
         managementBriefTitle: "Management readiness",
         managementBriefHint: "Checks only the fields required by the current Agent identity. Session entry Agents do not require persona profiles or team membership.",
@@ -4884,7 +4906,9 @@ export function AgentsRoute() {
                           {displayLabel}
                         </span>
                         <strong>{group.count}</strong>
-                        {group.healthCount ? <em>{copy.healthIssueShort} {group.healthCount}</em> : null}
+                        {group.healthCount ? (
+                          <em>{group.id === "setup:inbox" ? copy.statusReminderShort : copy.healthIssueShort} {group.healthCount}</em>
+                        ) : null}
                       </button>
                     );
                   })}
@@ -5161,7 +5185,7 @@ export function AgentsRoute() {
                 <span>{copy.prompt}</span>
                 <span>{copy.runtimeStatus}</span>
                 <span>{copy.modeMembership}</span>
-                <span>{copy.healthIssues}</span>
+                <span>{copy.statusReminders}</span>
               </div>
               {visibleAgents.map((agent) => {
                 const active = selectedAgent?.agentId === agent.agentId;
@@ -5525,7 +5549,7 @@ export function AgentsRoute() {
                 </div>
                 <section className={`${styles.healthGuidePanel} ${styles[`healthGuide_${issueTone(selectedAgent.health)}`]}`}>
                   <div>
-                    <span>{copy.healthIssues}</span>
+                    <span>{issuePanelLabel(selectedAgent.health, copy)}</span>
                     <strong>{issueLabel(selectedAgent.health, lang)} · {issueSummary(selectedAgent.health, lang)}</strong>
                   </div>
                   <p><strong>{copy.healthNextStep}</strong>{issueNextStep(selectedAgent.health, lang)}</p>
@@ -5922,7 +5946,7 @@ export function AgentsRoute() {
               <section className={styles.detailSection}>
                 <div className={styles.panelHeader}>
                   <div>
-                    <p className={styles.panelEyebrow}>{copy.healthIssues}</p>
+                    <p className={styles.panelEyebrow}>{issuePanelLabel(selectedAgent.health, copy)}</p>
                     <h3>{issueLabel(selectedAgent.health, lang)} · {issueSummary(selectedAgent.health, lang)}</h3>
                   </div>
                   {selectedAgent.health.length ? <AlertTriangle size={16} /> : <CheckCircle2 size={16} />}
@@ -5932,7 +5956,7 @@ export function AgentsRoute() {
                   <div className={styles.issueList}>
                     {selectedAgent.health.map((issue) => (
                       <article key={`${issue.code}:${issue.detail}`} className={`${styles.issueItem} ${styles[`issueItem_${issue.severity}`]}`}>
-                        <strong>{issue.title}</strong>
+                        <strong>{issueDisplayTitle(issue, lang)}</strong>
                         <p>{issue.detail}</p>
                         {issue.code === "pending_inbox_messages" ? (
                           <button
