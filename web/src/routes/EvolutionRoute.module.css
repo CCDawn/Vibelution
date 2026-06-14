@@ -1634,6 +1634,33 @@
     color-mix(in srgb, var(--surface-card-muted) 78%, transparent);
 }
 
+.casePreflightIssue {
+  display: grid;
+  gap: 5px;
+  padding: 10px 11px;
+  border: 1px solid color-mix(in srgb, var(--state-warning) 36%, var(--border-hairline));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--state-warning) 9%, var(--surface-card-subtle));
+  color: var(--fg-secondary);
+}
+
+.casePreflightIssue strong {
+  color: var(--fg-primary);
+  font-size: 0.86rem;
+}
+
+.casePreflightIssue span,
+.casePreflightIssue small {
+  color: var(--fg-secondary);
+  font-size: 0.78rem;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.casePreflightIssue small {
+  color: var(--fg-tertiary);
+}
+
 .caseTraceMessage {
   display: grid;
   gap: 3px;
