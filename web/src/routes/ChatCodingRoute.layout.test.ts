@@ -905,12 +905,18 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("function cliAgentRunTabId");
     expect(routeSource).toContain("function cliAgentRunIdFromTabId");
     expect(routeSource).toContain("function buildCliAgentRunViews");
+    expect(routeSource).toContain("function parseCliAgentResultText");
+    expect(routeSource).toContain("for (const candidate of [toolCall.resultPreview, toolCall.summary])");
     expect(routeSource).toContain("function cliAgentRunIdForSource");
     expect(routeSource).toContain("closedCliAgentRunIdFromMessage");
     expect(routeSource).toContain("cliAgentLifecyclePatchFromMessage");
     expect(routeSource).toContain("applyCliAgentLifecyclePatchToRuns");
     expect(routeSource).toContain("function cliAgentRunCloseToken");
     expect(routeSource).toContain("return run.id || run.sourceRunId");
+    expect(routeSource).toContain("function shouldRenderCliAgentRunTab");
+    expect(routeSource).toContain('code === "CLI_AGENT_TERMINAL_ACTIVE"');
+    expect(routeSource).toContain("if (!result) {");
+    expect(routeSource).toContain('["error", "failed", "failure", "timeout"].includes(normalizedStatus)');
     expect(routeSource).toContain("const runsById = new Map<string, CliAgentRunView>()");
     expect(routeSource).toContain("const lifecycleByRunId = new Map<string, CliAgentLifecyclePatch>()");
     expect(routeSource).toContain("closedRunIds.add(closedRunId)");
@@ -941,6 +947,9 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("void sessionDetailQuery.refetch()");
     expect(routeSource).toContain("new EventSource(`/api/cli-agents/terminal-sessions/${encodeURIComponent(terminalSessionId)}/events`)");
     expect(routeSource).toContain("terminal_output");
+    expect(routeSource).toContain("transcriptTailReplayable");
+    expect(routeSource).toContain("const replayTerminalSnapshot");
+    expect(routeSource).toContain("历史 TUI 画面无法安全重放");
     expect(routeSource).toContain('import { Terminal } from "@xterm/xterm"');
     expect(routeSource).toContain("terminal.write(");
     expect(routeSource).not.toContain("terminalTextForDisplay");
