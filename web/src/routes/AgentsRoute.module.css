@@ -531,6 +531,42 @@
   font: inherit;
 }
 
+.bulkSelectionList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+
+.bulkSelectionList span {
+  max-width: 100%;
+  overflow: hidden;
+  padding: 3px 7px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-control);
+  background: var(--surface-card);
+  color: var(--fg-secondary);
+  font-size: 0.74rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bulkFieldHeader {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--fg-tertiary);
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.bulkFieldHeader input {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  accent-color: var(--accent-cool);
+}
+
 .detailSection h3 {
   font-size: 0.94rem;
 }
@@ -631,6 +667,10 @@
     inset 0 0 0 1px color-mix(in srgb, var(--accent-warm) 18%, transparent),
     0 0 0 1px color-mix(in srgb, var(--accent-warm) 8%, transparent);
   background: color-mix(in srgb, var(--accent-warm) 9%, var(--surface-panel-strong));
+}
+
+.agentRowBulkSelected {
+  background: color-mix(in srgb, var(--accent-cool) 10%, var(--surface-panel-strong));
 }
 
 .agentRow > span,
@@ -2465,6 +2505,14 @@
 
 .field input {
   padding: 0 9px;
+}
+
+.field .bulkFieldHeader input {
+  flex: 0 0 auto;
+  width: 14px;
+  height: 14px;
+  min-height: 14px;
+  padding: 0;
 }
 
 .field select {

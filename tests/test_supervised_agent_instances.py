@@ -229,7 +229,11 @@ def test_ensure_supervised_agent_instances_does_not_reactivate_archived_fixed_ro
     first = supervised_agent_service.ensure_supervised_agent_instances()
     baseline = next(agent for agent in first if agent["metadata"]["supervisedRole"] == "baseline")
     agent_mode_binding_service.remove_agent_from_mode_bindings(baseline["agentId"])
-    agent_directory_service.archive_agent_instance(baseline["agentId"])
+    state = agent_directory_service.load_state()
+    for item in state.get("agents") or []:
+        if item.get("agentId") == baseline["agentId"]:
+            item["status"] = "archived"
+    agent_directory_service.save_state(state)
 
     second = supervised_agent_service.ensure_supervised_agent_instances()
 
