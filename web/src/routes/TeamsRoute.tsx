@@ -226,9 +226,10 @@ type SourceCollectionTraceMessage = {
 };
 
 type SourceCollectionStepState = "active" | "done" | "failed" | "idle" | "pending";
+type SourceCollectionStageModuleId = "collection" | "screening" | "candidate" | "graph" | "memory";
 
 type SourceCollectionStageModule = {
-  id: string;
+  id: SourceCollectionStageModuleId;
   label: string;
   metric: string;
   summary: string;
@@ -242,6 +243,12 @@ type SourceCollectionStageModule = {
   onAction: () => void;
   onDetail: () => void;
 };
+
+function parseSourceCollectionStageModuleId(value: string | null): SourceCollectionStageModuleId | null {
+  return value === "collection" || value === "screening" || value === "candidate" || value === "graph" || value === "memory"
+    ? value
+    : null;
+}
 
 type SourceCollectionStorageOpenTarget =
   | "run_directory"
@@ -1771,6 +1778,7 @@ export function TeamsRoute({
   const [searchParams, setSearchParams] = useSearchParams();
   const requestedResearchViewParam = searchParams.get("researchView");
   const requestedResearchWorkspaceView = parseResearchWorkspaceView(searchParams.get("researchView"));
+  const requestedSourceCollectionStage = parseSourceCollectionStageModuleId(searchParams.get("collectionStage"));
   const sourceCollectionStandalone =
     sourceCollectionStandaloneProp || requestedResearchWorkspaceView === "knowledge_collection" || requestedResearchViewParam === "source_collection";
   const stageStandaloneView: ResearchStageWorkspaceView | null =
@@ -1807,6 +1815,9 @@ export function TeamsRoute({
     summary: "",
     notes: "",
   });
+  const [selectedSourceCollectionStageId, setSelectedSourceCollectionStageId] = useState<SourceCollectionStageModuleId>(
+    requestedSourceCollectionStage ?? "collection",
+  );
   const [sourceCollectionExpandedPanelId, setSourceCollectionExpandedPanelId] = useState("");
   const [sourceCollectionFocusedPanelId, setSourceCollectionFocusedPanelId] = useState("");
   const [nodePositionDrafts, setNodePositionDrafts] = useState<Record<string, { x: number; y: number }>>({});
@@ -2068,6 +2079,12 @@ export function TeamsRoute({
       setSelectedTeamId(fallbackVisibleTeamId);
     }
   }, [fallbackVisibleTeamId, requestedVisibleAgentTeamId, requestedVisibleTeamId, selectedTeamId, visibleTeamIds]);
+
+  useEffect(() => {
+    if (requestedSourceCollectionStage) {
+      setSelectedSourceCollectionStageId(requestedSourceCollectionStage);
+    }
+  }, [requestedSourceCollectionStage]);
 
   useEffect(() => {
     if (selectedNode) {
@@ -3252,7 +3269,8 @@ export function TeamsRoute({
         id="source-collection-screening-panel"
         className={sourceCollectionPanelClassName("source-collection-screening-panel")}
         open={
-          sourceCollectionExpandedPanelId === "source-collection-screening-panel"
+          selectedSourceCollectionStageId === "screening"
+          || sourceCollectionExpandedPanelId === "source-collection-screening-panel"
           || sourceCollectionScreeningStepState === "active"
           || sourceCollectionScreeningStepState === "pending"
         }
@@ -3403,7 +3421,8 @@ export function TeamsRoute({
         id="source-collection-candidates-panel"
         className={sourceCollectionPanelClassName("source-collection-candidates-panel")}
         open={
-          sourceCollectionExpandedPanelId === "source-collection-candidates-panel"
+          selectedSourceCollectionStageId === "candidate"
+          || sourceCollectionExpandedPanelId === "source-collection-candidates-panel"
           || sourceCollectionCandidateStepState === "active"
         }
         onToggle={(event) => {
@@ -3465,7 +3484,8 @@ export function TeamsRoute({
         id="source-collection-graph-panel"
         className={sourceCollectionPanelClassName("source-collection-graph-panel")}
         open={
-          sourceCollectionExpandedPanelId === "source-collection-graph-panel"
+          selectedSourceCollectionStageId === "graph"
+          || sourceCollectionExpandedPanelId === "source-collection-graph-panel"
           || sourceCollectionGraphStepState === "active"
         }
         onToggle={(event) => {
@@ -3552,7 +3572,8 @@ export function TeamsRoute({
         id="source-collection-memory-panel"
         className={sourceCollectionPanelClassName("source-collection-memory-panel")}
         open={
-          sourceCollectionExpandedPanelId === "source-collection-memory-panel"
+          selectedSourceCollectionStageId === "memory"
+          || sourceCollectionExpandedPanelId === "source-collection-memory-panel"
           || sourceCollectionMemoryStepState === "active"
         }
         onToggle={(event) => {
@@ -3593,6 +3614,9 @@ export function TeamsRoute({
   }
 
   function renderSourceCollectionControlsPanel() {
+    const activeModule =
+      sourceCollectionStageModules.find((module) => module.id === selectedSourceCollectionStageId)
+      ?? sourceCollectionStageModules[0];
     return (
       <section
         id="source-collection-actions"
@@ -3613,6 +3637,23 @@ export function TeamsRoute({
             {sourceCollectionStatusLabel(sourceCollectionRunStatus?.runStatus || selectedSourceCollectionRun?.status || "pending", lang)}
           </span>
         </div>
+        <section className={styles.sourceCollectionStageOperationPanel}>
+          <div>
+            <strong>{activeModule.label}</strong>
+            <span>{activeModule.status} · {activeModule.metric}</span>
+          </div>
+          <button
+            type="button"
+            className={activeModule.actionTone === "primary" ? styles.sourceCollectionStagePrimaryAction : styles.sourceCollectionStageSecondaryAction}
+            disabled={activeModule.actionDisabled}
+            onClick={activeModule.onAction}
+          >
+            {renderSourceCollectionStageActionIcon(activeModule.actionIcon)}
+            {activeModule.actionLabel}
+          </button>
+        </section>
+        {selectedSourceCollectionStageId === "collection" ? (
+        <>
         <details className={styles.workflowSourceCollectionDetails} open={!selectedSourceCollectionRun}>
           <summary>
             <span>{lang === "zh" ? "本轮配置" : "Run settings"}</span>
@@ -3727,9 +3768,6 @@ export function TeamsRoute({
           </label>
         </div>
         {renderSourceCollectionStorageActions()}
-        {renderSourceCollectionScreeningPanel()}
-        {renderSourceCollectionCandidatePanel()}
-        {renderSourceCollectionGraphPanel()}
         <details className={styles.workflowSourceCollectionDetails}>
           <summary>
             <span>{lang === "zh" ? "查询与分工详情" : "Query and assignment details"}</span>
@@ -3858,42 +3896,93 @@ export function TeamsRoute({
           </button>
           </form>
         </details>
-        {renderSourceCollectionMemoryPanel()}
-        {selectedTeamStartSourceCollectionError ? (
-          <div className={styles.messageError}>{selectedTeamStartSourceCollectionError.message}</div>
+        </>
         ) : null}
-        {selectedTeamRecordSourceCollectionOutputError ? (
-          <div className={styles.messageError}>{selectedTeamRecordSourceCollectionOutputError.message}</div>
-        ) : null}
-        {selectedTeamExecuteSourceCollectionSearchError ? (
-          <div className={styles.messageError}>{selectedTeamExecuteSourceCollectionSearchError.message}</div>
-        ) : null}
-        {selectedTeamExecuteSourceCollectionSearchResult ? (
-          <div className={styles.messageResult}>
-            <strong>
-              {selectedTeamExecuteSourceCollectionSearchResult.accepted
-                ? (lang === "zh" ? "搜索已转后台" : "Search queued in background")
-                : (lang === "zh" ? "搜索执行已回写" : "Search execution written")}
-            </strong>
-            {selectedTeamExecuteSourceCollectionSearchResult.accepted ? (
-              <span>{lang === "zh" ? "页面可继续操作，结果会自动刷新。" : "You can keep working; results will refresh automatically."}</span>
-            ) : (
-              <span>
-                {selectedTeamExecuteSourceCollectionSearchResult.executedQueryCount} {lang === "zh" ? "条搜索" : "queries"} / {selectedTeamExecuteSourceCollectionSearchResult.recordCount} {lang === "zh" ? "条资料记录" : "DataRecord"} / {selectedTeamExecuteSourceCollectionSearchResult.importedCount} {lang === "zh" ? "个候选" : "candidate"}
-              </span>
-            )}
+        {selectedSourceCollectionStageId === "screening" ? (
+          <div className={styles.workflowSourceQualityStats}>
+            <span>{lang === "zh" ? "来源" : "sources"} <strong>{sourceQualityCandidateCount}</strong></span>
+            <span>{lang === "zh" ? "已筛" : "assessed"} <strong>{sourceQualityAssessedCount}</strong></span>
+            <span>{lang === "zh" ? "通过" : "approved"} <strong>{sourceCollectionApprovedCount}</strong></span>
+            <span>{lang === "zh" ? "待筛" : "pending"} <strong>{sourceQualityUnassessedCount}</strong></span>
           </div>
         ) : null}
-        {selectedTeamRecordSourceCollectionOutputResult ? (
-          <div className={styles.messageResult}>
-            <strong>{lang === "zh" ? "已回写" : "Written"}</strong>
-            <span>
-              {selectedTeamRecordSourceCollectionOutputResult.output.createdRecords.length} {lang === "zh" ? "条资料记录" : "DataRecord"} / {selectedTeamRecordSourceCollectionOutputResult.imported.length} {lang === "zh" ? "个候选" : "candidate"}
-            </span>
+        {selectedSourceCollectionStageId === "candidate" ? (
+          <>
+            <div className={styles.workflowSourceQualityStats}>
+              <span>{lang === "zh" ? "候选" : "candidates"} <strong>{sourceManifestCandidates.length}</strong></span>
+              <span>{lang === "zh" ? "通过筛选" : "approved"} <strong>{sourceCollectionApprovedCount}</strong></span>
+            </div>
+            {renderSourceCollectionStorageActions()}
+          </>
+        ) : null}
+        {selectedSourceCollectionStageId === "graph" ? (
+          <div className={styles.workflowSourceQualityStats}>
+            <span>{lang === "zh" ? "节点" : "nodes"} <strong>{candidateGraphNodeCount}</strong></span>
+            <span>{lang === "zh" ? "边" : "edges"} <strong>{candidateGraphEdgeCount}</strong></span>
           </div>
+        ) : null}
+        {selectedSourceCollectionStageId === "memory" ? (
+          <div className={styles.workflowSourceQualityStats}>
+            <span>{lang === "zh" ? "待审" : "pending"} <strong>{knowledgePendingReviewCount}</strong></span>
+            <span>{lang === "zh" ? "正式" : "formal"} <strong>{formalKnowledgeItemCount}</strong></span>
+            <span>{lang === "zh" ? "通过候选" : "approved"} <strong>{sourceCollectionApprovedCount}</strong></span>
+          </div>
+        ) : null}
+        {selectedSourceCollectionStageId === "collection" ? (
+          <>
+            {selectedTeamStartSourceCollectionError ? (
+              <div className={styles.messageError}>{selectedTeamStartSourceCollectionError.message}</div>
+            ) : null}
+            {selectedTeamRecordSourceCollectionOutputError ? (
+              <div className={styles.messageError}>{selectedTeamRecordSourceCollectionOutputError.message}</div>
+            ) : null}
+            {selectedTeamExecuteSourceCollectionSearchError ? (
+              <div className={styles.messageError}>{selectedTeamExecuteSourceCollectionSearchError.message}</div>
+            ) : null}
+            {selectedTeamExecuteSourceCollectionSearchResult ? (
+              <div className={styles.messageResult}>
+                <strong>
+                  {selectedTeamExecuteSourceCollectionSearchResult.accepted
+                    ? (lang === "zh" ? "搜索已转后台" : "Search queued in background")
+                    : (lang === "zh" ? "搜索执行已回写" : "Search execution written")}
+                </strong>
+                {selectedTeamExecuteSourceCollectionSearchResult.accepted ? (
+                  <span>{lang === "zh" ? "页面可继续操作，结果会自动刷新。" : "You can keep working; results will refresh automatically."}</span>
+                ) : (
+                  <span>
+                    {selectedTeamExecuteSourceCollectionSearchResult.executedQueryCount} {lang === "zh" ? "条搜索" : "queries"} / {selectedTeamExecuteSourceCollectionSearchResult.recordCount} {lang === "zh" ? "条资料记录" : "DataRecord"} / {selectedTeamExecuteSourceCollectionSearchResult.importedCount} {lang === "zh" ? "个候选" : "candidate"}
+                  </span>
+                )}
+              </div>
+            ) : null}
+            {selectedTeamRecordSourceCollectionOutputResult ? (
+              <div className={styles.messageResult}>
+                <strong>{lang === "zh" ? "已回写" : "Written"}</strong>
+                <span>
+                  {selectedTeamRecordSourceCollectionOutputResult.output.createdRecords.length} {lang === "zh" ? "条资料记录" : "DataRecord"} / {selectedTeamRecordSourceCollectionOutputResult.imported.length} {lang === "zh" ? "个候选" : "candidate"}
+                </span>
+              </div>
+            ) : null}
+          </>
         ) : null}
       </section>
     );
+  }
+
+  function renderSourceCollectionActiveStagePanel() {
+    if (selectedSourceCollectionStageId === "screening") {
+      return renderSourceCollectionScreeningPanel();
+    }
+    if (selectedSourceCollectionStageId === "candidate") {
+      return renderSourceCollectionCandidatePanel();
+    }
+    if (selectedSourceCollectionStageId === "graph") {
+      return renderSourceCollectionGraphPanel();
+    }
+    if (selectedSourceCollectionStageId === "memory") {
+      return renderSourceCollectionMemoryPanel();
+    }
+    return renderSourceCollectionConversation();
   }
 
   function renderResearchStageStandalonePage(stageView: Exclude<ResearchStageWorkspaceView, "knowledge_collection">) {
@@ -4696,7 +4785,33 @@ export function TeamsRoute({
     styles.workflowSourceCollectionDetails,
     sourceCollectionFocusedPanelId === panelId ? styles.sourceCollectionFocusedPanel : "",
   ].filter(Boolean).join(" ");
+  const sourceCollectionStageForPanel = (panelId: string): SourceCollectionStageModuleId => {
+    if (panelId === "source-collection-screening-panel") {
+      return "screening";
+    }
+    if (panelId === "source-collection-candidates-panel") {
+      return "candidate";
+    }
+    if (panelId === "source-collection-graph-panel") {
+      return "graph";
+    }
+    if (panelId === "source-collection-memory-panel") {
+      return "memory";
+    }
+    return "collection";
+  };
+  const selectSourceCollectionStage = (stageId: SourceCollectionStageModuleId) => {
+    setSelectedSourceCollectionStageId(stageId);
+    if (!sourceCollectionStandalone) {
+      return;
+    }
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.set("researchView", "knowledge_collection");
+    nextParams.set("collectionStage", stageId);
+    setSearchParams(nextParams, { replace: true });
+  };
   const scrollSourceCollectionPanelIntoView = (panelId: string) => {
+    selectSourceCollectionStage(sourceCollectionStageForPanel(panelId));
     setSourceCollectionExpandedPanelId(panelId);
     setSourceCollectionFocusedPanelId(panelId);
     window.setTimeout(() => {
@@ -4736,6 +4851,7 @@ export function TeamsRoute({
     scrollSourceCollectionPanelIntoView("source-collection-screening-panel");
   };
   const runSourceCollectionScreeningAction = () => {
+    selectSourceCollectionStage("screening");
     if (!selectedTeam?.teamId || sourceCollectionScreeningDisabled || selectedTeamSourceQualityPending) {
       return;
     }
@@ -5138,9 +5254,14 @@ export function TeamsRoute({
               {sourceCollectionStageModules.map((module, index) => (
                 <article
                   key={module.id}
-                  className={`${styles.sourceCollectionStageCard} ${sourceCollectionStepClassName(module.state)}`}
+                  className={[
+                    styles.sourceCollectionStageCard,
+                    sourceCollectionStepClassName(module.state),
+                    module.id === selectedSourceCollectionStageId ? styles.sourceCollectionStageCardSelected : "",
+                  ].filter(Boolean).join(" ")}
                   role="button"
                   tabIndex={0}
+                  aria-pressed={module.id === selectedSourceCollectionStageId}
                   title={module.detailLabel}
                   onClick={(event) => {
                     if (event.target instanceof Element && event.target.closest("button")) {
@@ -5157,7 +5278,6 @@ export function TeamsRoute({
                   <span className={styles.sourceCollectionStageModuleText}>
                     <b>{module.label}</b>
                     <em>{module.metric}</em>
-                    <small>{module.summary}</small>
                   </span>
                   <button
                     type="button"
@@ -5173,7 +5293,7 @@ export function TeamsRoute({
               ))}
             </section>
             <div className={styles.sourceCollectionPageGrid}>
-              {renderSourceCollectionConversation()}
+              {renderSourceCollectionActiveStagePanel()}
               {renderSourceCollectionControlsPanel()}
             </div>
           </main>
