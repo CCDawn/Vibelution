@@ -5391,6 +5391,7 @@ def test_cli_agent_terminal_stop_route_records_lifecycle_event(monkeypatch):
     payload = response.json()
     assert payload["terminalSessionId"] == "term-1"
     assert payload["lifecycleEvent"]["metadata"]["kind"] == "cli_agent_lifecycle"
+    assert payload["lifecycleEvent"]["metadata"]["cliRunId"] == "cli-run-1"
     assert recorded == [("session-live", "closed", {**terminal_session, "terminalSessionId": "term-1"})]
 
 

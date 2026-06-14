@@ -910,10 +910,12 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("cliAgentLifecyclePatchFromMessage");
     expect(routeSource).toContain("applyCliAgentLifecyclePatchToRuns");
     expect(routeSource).toContain("function cliAgentRunCloseToken");
+    expect(routeSource).toContain("return run.id || run.sourceRunId");
     expect(routeSource).toContain("const runsById = new Map<string, CliAgentRunView>()");
     expect(routeSource).toContain("const lifecycleByRunId = new Map<string, CliAgentLifecyclePatch>()");
     expect(routeSource).toContain("closedRunIds.add(closedRunId)");
     expect(routeSource).toContain("!closedRunIds.has(run.id) && !closedRunIds.has(run.sourceRunId)");
+    expect(routeSource).not.toContain("closedRunIds.delete(cliRunId)");
     expect(routeSource).toContain("toolCall.name !== CLI_AGENT_TOOL_NAME");
     expect(routeSource).toContain("function isCliAgentRunActiveForClose");
     expect(routeSource).toContain("const [closedCliAgentRunTokensBySession");
