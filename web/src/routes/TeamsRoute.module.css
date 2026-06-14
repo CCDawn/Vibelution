@@ -1285,6 +1285,13 @@
   outline: none;
 }
 
+.sourceCollectionStageCardSelected {
+  border-color: color-mix(in srgb, var(--accent-cool) 72%, var(--border-strong));
+  box-shadow:
+    inset 0 -3px 0 color-mix(in srgb, var(--accent-cool) 64%, transparent),
+    0 0 0 2px color-mix(in srgb, var(--accent-cool) 14%, transparent);
+}
+
 .sourceCollectionStageCardHead {
   display: flex;
   min-width: 0;
@@ -1380,6 +1387,42 @@
 .sourceCollectionStageSecondaryAction:disabled {
   cursor: not-allowed;
   opacity: 0.52;
+}
+
+.sourceCollectionStageOperationPanel {
+  display: grid;
+  gap: 8px;
+  padding: 9px;
+  border: 1px solid var(--source-step-border, var(--border-soft));
+  border-radius: 7px;
+  background:
+    linear-gradient(90deg, var(--source-step-bg-soft, transparent), transparent 78%),
+    color-mix(in srgb, var(--surface-card) 76%, transparent);
+}
+
+.sourceCollectionStageOperationPanel div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.sourceCollectionStageOperationPanel strong,
+.sourceCollectionStageOperationPanel span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sourceCollectionStageOperationPanel strong {
+  color: var(--fg-primary);
+  font-size: 0.78rem;
+}
+
+.sourceCollectionStageOperationPanel span {
+  color: var(--source-step-fg, var(--fg-muted));
+  font-size: 0.66rem;
+  font-weight: 780;
 }
 
 .sourceCollectionStepActive {

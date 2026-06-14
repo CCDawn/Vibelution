@@ -39,7 +39,7 @@
         <aside class="dashboard-panel">
           <h2>审核摘要</h2>
           <div class="kpi-grid">
-            <div class="kpi"><b>当前阶段</b><strong>M6.34</strong><span>知识搜集一级工作台已改为当前判断、阶段颜色、关键数量和下一步按钮。</span></div>
+            <div class="kpi"><b>当前阶段</b><strong>M6.35</strong><span>知识搜集五个步骤已改为页内子页，只显示当前阶段内容和当前阶段操作。</span></div>
             <div class="kpi"><b>流程节点</b><strong>13</strong><span>1-9 为知识入库主线，10-13 保留占位与维护节点。</span></div>
             <div class="kpi"><b>候选资料</b><strong>10</strong><span>第一轮 source_manifest 已进入 candidate-only 工作区。</span></div>
             <div class="kpi"><b>正式写入</b><strong>0</strong><span>未写正式 Team Knowledge、RAG 或 official graph。</span></div>
@@ -659,8 +659,8 @@
         <div class="agent-row">
         <b>01</b>
         <strong>Source Intake Agent</strong>
-        <span>可复用通用 data-processing assignment / source-extraction / source-quality 后端已接入；Teams 资料搜集执行台、候选资料筛选台、科研总览控制台、KV 缓存对话轨迹、启动复用反馈、metadata-only 搜索执行闭环、高价值信息层、中文控制台、默认层去说明化、步骤卡主操作入口、资料筛选页内反馈、资料筛选 Agent 批量执行和候选库可视化二级索引已接入</span>
-        <span>ResearchStageRound 建立 / 科研控制台一键进入知识搜集 / 总览页只显示三阶段主操作 / 知识搜集状态驱动按钮 / 知识搜集中文展示映射 / 默认层去说明化 / 右侧主操作唯一化 / 资料筛选入口常驻 / 步骤卡主操作入口 / 步骤卡二级索引 / 候选库可视化面板 / 资料筛选页内详情 / 资料筛选展开高亮反馈 / 资料筛选 Agent 批量执行 / source-quality/assess-batch / 新一轮搜集入口 / active 知识搜集轮次复用反馈 / 自动启动团队协调 round / DataProcessingRun 建立 / DataProcessingRun reviewing 收口 / DataSearchPlan/querySeeds 搜索计划 / KV/prompt cache 启动门禁 / 稳定前缀/动态增量契约 / CollectionAssignment 资料搜集任务 / assignedQueries 角色分配 / promptCachePartition 角色分区 / Teams 启动搜集批次 / Teams 查看 run/assignment/query/KV 状态 / Teams 高价值摘要层 / Teams 搜索下一批 / Crossref 元数据搜索执行器 / 搜索执行事件进入搜集对话流 / DataRecord 通用记录 / DataRecord 自动导入 source_manifest / metadata-only 下载边界 / 手工 CollectionOutput 回写 / 本地资料登记 / source_manifest 写入 / 文件路径/页码/来源可信度记录 / 本地 PDF sha256/pageAnchors/excerpt 抽取 / sourceQualityAssessment 筛选 / 可选 research_knowledge_query_tool 查重</span>
+        <span>可复用通用 data-processing assignment / source-extraction / source-quality 后端已接入；Teams 资料搜集执行台、候选资料筛选台、科研总览控制台、KV 缓存对话轨迹、启动复用反馈、metadata-only 搜索执行闭环、高价值信息层、中文控制台、默认层去说明化、步骤卡主操作入口、资料筛选页内反馈、资料筛选 Agent 批量执行、候选库可视化二级索引和知识搜集阶段子页控制台已接入</span>
+        <span>ResearchStageRound 建立 / 科研控制台一键进入知识搜集 / 总览页只显示三阶段主操作 / 知识搜集状态驱动按钮 / 知识搜集中文展示映射 / 默认层去说明化 / 右侧主操作唯一化 / 资料筛选入口常驻 / 步骤卡主操作入口 / 步骤卡二级索引 / 阶段子页控制台 / 候选库可视化面板 / 资料筛选页内详情 / 资料筛选展开高亮反馈 / 资料筛选 Agent 批量执行 / source-quality/assess-batch / 新一轮搜集入口 / active 知识搜集轮次复用反馈 / 自动启动团队协调 round / DataProcessingRun 建立 / DataProcessingRun reviewing 收口 / DataSearchPlan/querySeeds 搜索计划 / KV/prompt cache 启动门禁 / 稳定前缀/动态增量契约 / CollectionAssignment 资料搜集任务 / assignedQueries 角色分配 / promptCachePartition 角色分区 / Teams 启动搜集批次 / Teams 查看 run/assignment/query/KV 状态 / Teams 高价值摘要层 / Teams 搜索下一批 / Crossref 元数据搜索执行器 / 搜索执行事件进入搜集对话流 / DataRecord 通用记录 / DataRecord 自动导入 source_manifest / metadata-only 下载边界 / 手工 CollectionOutput 回写 / 本地资料登记 / source_manifest 写入 / 文件路径/页码/来源可信度记录 / 本地 PDF sha256/pageAnchors/excerpt 抽取 / sourceQualityAssessment 筛选 / 可选 research_knowledge_query_tool 查重</span>
         <span>确认资料允许分析、来源可信度和是否纳入本轮。</span>
       </div>
 <div class="agent-row">
@@ -730,7 +730,7 @@
       <div class="agent-matrix">
         <div class="feature-row">
         <strong>知识搜集一级工作台</strong>
-        <span>顶部展示当前判断、未完成任务、候选资料、搜索问题、缓存状态；5 个阶段卡用颜色区分进行中/完成/失败/待处理/未进行，并把详情内容下沉到二级区</span>
+        <span>顶部展示当前判断、未完成任务、候选资料、搜索问题、缓存状态；5 个阶段卡用颜色区分进行中/完成/失败/待处理/未进行；点击阶段卡后底部只显示当前阶段子页，右侧只显示当前阶段操作</span>
         <b class="status-pill">已接入前端</b>
       </div>
 <div class="feature-row">
@@ -1332,7 +1332,7 @@
                 </div>
 <div class="service-row">
                   <b>TeamsRoute workflow workspace</b>
-                  <span>已落地入口：Teams 页顶部固定横向切换条只暴露 AI 搜索范围团队和 ai科学研究团队，左侧栏已删除；监督进化/自进化模式页各自读取系统 Team 并展示只读团队画布；选择 ai科学研究团队后直接进入 research-team 专属科研控制台；总览只显示知识搜集、实验、迭代三张阶段卡，每张卡一个主操作和阶段详情入口。知识搜集卡会显示当前批次、待处理、候选和查询数，主按钮按状态执行开始、下一批搜索、筛选入口或打开工作台，另有新一轮搜集入口。知识搜集页位于 /teams?team=research-team&amp;researchView=knowledge_collection，默认展示高价值状态摘要、状态驱动主操作和对话式 source collection 过程流；执行 source collection 搜索时会写入 source_collection_run 运行快照，让 AppShell 顶部“正在进行”显示知识搜集；资料搜集、资料筛选、候选入库、候选图谱、共享记忆前审五张步骤卡各自带主按钮，资料筛选会调用资料质量评估 Agent 批量执行，完成后展开、滚动并高亮页内筛选详情；KV/prompt cache、稳定前缀、动态增量、assignment、query、存储路径和手工回写保留在可展开详情中；默认层移除解释性小字；实验/迭代页先提供规划启动、轮次状态和边界说明；旧 source_collection 参数兼容映射到知识搜集。</span>
+                  <span>已落地入口：Teams 页顶部固定横向切换条只暴露 AI 搜索范围团队和 ai科学研究团队，左侧栏已删除；监督进化/自进化模式页各自读取系统 Team 并展示只读团队画布；选择 ai科学研究团队后直接进入 research-team 专属科研控制台；总览只显示知识搜集、实验、迭代三张阶段卡，每张卡一个主操作和阶段详情入口。知识搜集卡会显示当前批次、待处理、候选和查询数，主按钮按状态执行开始、下一批搜索、筛选入口或打开工作台，另有新一轮搜集入口。知识搜集页位于 /teams?team=research-team&amp;researchView=knowledge_collection，默认展示高价值状态摘要、状态驱动主操作和对话式 source collection 过程流；执行 source collection 搜索时会写入 source_collection_run 运行快照，让 AppShell 顶部“正在进行”显示知识搜集；资料搜集、资料筛选、候选入库、候选图谱、共享记忆前审五张步骤卡各自带主按钮并作为页内子页索引，底部只显示当前阶段内容，右侧只显示当前阶段操作与关键数量；资料筛选会调用资料质量评估 Agent 批量执行，完成后展开、滚动并高亮页内筛选详情；KV/prompt cache、稳定前缀、动态增量、assignment、query、存储路径和手工回写保留在可展开详情中；默认层移除解释性小字；实验/迭代页先提供规划启动、轮次状态和边界说明；旧 source_collection 参数兼容映射到知识搜集。</span>
                 </div>
 <div class="service-row">
                   <b>local_research_worker_model</b>
@@ -2083,6 +2083,12 @@
               <strong>候选库可视化二级索引</strong>
               <span>知识搜集阶段的资料搜集、资料筛选、候选入库、候选图谱、共享记忆前审五张步骤卡都可点击进入对应页内详情；候选入库主按钮改为查看可视化候选库，不再直接打开 candidate_store/index.json。</span>
               <span>底层 candidate_store/index.json 仍保留在“更多证据文件”中作为维护入口；用户主路径只看到候选卡片、筛选状态、图谱预览和共享记忆前审，不再被 JSON 文件打断。</span>
+            </div>
+<div class="blueprint-row">
+              <b>M6.35</b>
+              <strong>知识搜集阶段子页控制台</strong>
+              <span>知识搜集阶段的五张步骤卡升级为页内子页索引，点击资料搜集、资料筛选、候选入库、候选图谱或共享记忆前审时，底部只显示该阶段内容。</span>
+              <span>右侧控制台按当前阶段切换主操作按钮和关键数量；资料搜集保留配置/批次/回写折叠区，其余阶段只显示对应查看、筛选、刷新或前审动作，避免所有阶段信息同屏堆叠。</span>
             </div>
       </div>
       <div class="tag-row">
