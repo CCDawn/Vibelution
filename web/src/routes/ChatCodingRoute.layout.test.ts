@@ -832,7 +832,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.conversationKindBadgeChild).toBeTypeOf("string");
   });
 
-  it("renders cli agent tool calls as command tabs beside child sessions", () => {
+  it("renders cli agent tool calls as persistent terminal tabs beside child sessions", () => {
     expect(routeSource).toContain('const CLI_AGENT_TOOL_NAME = "cli_agent_run_tool"');
     expect(routeSource).toContain('const CLI_AGENT_RUN_TAB_PREFIX = "cli-agent-run:"');
     expect(routeSource).toContain("function cliAgentRunTabId");
@@ -843,10 +843,18 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("cliAgentRuns={cliAgentRunTabs}");
     expect(routeSource).toContain("onOpenCliAgentRun={(runId) =>");
     expect(routeSource).toContain("setActiveTab(activeSessionId, cliAgentRunTabId(runId));");
-    expect(routeSource).toContain("<CliAgentRunCommandPanel");
+    expect(routeSource).toContain("<CliAgentRunTerminalPanel");
     expect(routeSource).toContain(") : activeCliAgentRun ? (");
+    expect(routeSource).toContain('"/api/cli-agents/terminal-sessions/ensure"');
+    expect(routeSource).toContain("new EventSource(`/api/cli-agents/terminal-sessions/${encodeURIComponent(terminalSessionId)}/events`)");
+    expect(routeSource).toContain("terminal_output");
+    expect(routeSource).toContain("/input`");
+    expect(routeSource).toContain("/stop`");
     expect(routeSource).not.toContain("const [activeCliAgentRunId, setActiveCliAgentRunId] = useState");
     expect(routeCssSource).toContain(".cliAgentRunPanel");
+    expect(routeCssSource).toContain(".cliAgentTerminalFrame");
+    expect(routeCssSource).toContain("background: #06100d");
+    expect(routeCssSource).toContain(".cliAgentTerminalInputRow");
     expect(routeCssSource).toContain(".agentSessionTabCli");
     expect(agentSessionTabStripSource).toContain("export type CliAgentRunTab");
     expect(agentSessionTabStripSource).toContain("cliAgentRuns.map");

@@ -17,8 +17,9 @@ from .runtime_scene_service import record_runtime_scene_event
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
-CLI_AGENT_REGISTRY_PATH = PROJECT_ROOT / "workspace" / "cli_agents" / "cli_agents.json"
-RUN_RECORD_DIR = PROJECT_ROOT / "workspace" / "cli_agents" / "runs"
+USER_CLI_AGENT_CONFIG_PATH = Path.home() / "Documents" / "Vibelution" / "config" / "cli_agents.json"
+CLI_AGENT_REGISTRY_PATH = USER_CLI_AGENT_CONFIG_PATH
+RUN_RECORD_DIR = PROJECT_ROOT / ".runtime" / "cli_agents" / "runs"
 DEFAULT_TIMEOUT_SECONDS = 600
 MAX_TIMEOUT_SECONDS = 1800
 DEFAULT_OUTPUT_LIMIT = 12000
@@ -29,16 +30,50 @@ DEFAULT_CLI_AGENT_ADAPTERS: dict[str, dict[str, Any]] = {
     "mimo_code": {
         "id": "mimo_code",
         "label": "MiMo Code",
-        "description": "Run MiMo Code in non-interactive `mimo run` mode.",
+        "description": "Run MiMo Code through the configured CLI Agent protocol.",
+        "protocol": "pty_agent",
         "executableCandidates": ["mimo.cmd", "mimo.exe", "mimo"],
         "supportedModes": list(SUPPORTED_MODES),
+        "terminal": {
+            "enabled": True,
+            "launch": {"argv": ["{exe}", "code", "--dir", "{cwd}"]},
+            "resume": {"argv": ["{exe}", "code", "resume", "{cliSessionId}", "--dir", "{cwd}"]},
+            "initialInput": "{task}\r\n",
+            "sessionId": {
+                "source": "stdout_regex",
+                "regex": "(?i)(?:session|conversation|thread)[ _-]?id[:=]\\s*([A-Za-z0-9_.:-]+)",
+            },
+            "capabilities": {
+                "interactive": True,
+                "pty": True,
+                "resume": True,
+                "transcript": True,
+            },
+        },
     },
     "codex_code": {
         "id": "codex_code",
         "label": "Codex Code",
-        "description": "Run OpenAI Codex CLI in non-interactive `codex exec` mode.",
+        "description": "Run OpenAI Codex CLI through the configured CLI Agent protocol.",
+        "protocol": "pty_agent",
         "executableCandidates": ["codex.exe", "codex"],
         "supportedModes": list(SUPPORTED_MODES),
+        "terminal": {
+            "enabled": True,
+            "launch": {"argv": ["{exe}", "--cd", "{cwd}"]},
+            "resume": {"argv": ["{exe}", "resume", "{cliSessionId}", "--cd", "{cwd}"]},
+            "initialInput": "{task}\r\n",
+            "sessionId": {
+                "source": "stdout_regex",
+                "regex": "(?i)(?:session|conversation|thread)[ _-]?id[:=]\\s*([A-Za-z0-9_.:-]+)",
+            },
+            "capabilities": {
+                "interactive": True,
+                "pty": True,
+                "resume": True,
+                "transcript": True,
+            },
+        },
     },
 }
 
@@ -236,14 +271,32 @@ def _load_adapter_definitions() -> dict[str, dict[str, Any]]:
         allowed_keys = {
             "label",
             "description",
+            "protocol",
             "executablePath",
             "executableCandidates",
             "supportedModes",
             "defaultModel",
             "defaultAgent",
+            "terminal",
         }
-        adapters[adapter_id].update({key: record[key] for key in allowed_keys if key in record})
+        _merge_adapter_definition(adapters[adapter_id], {key: record[key] for key in allowed_keys if key in record})
     return adapters
+
+
+def _merge_adapter_definition(adapter: dict[str, Any], override: dict[str, Any]) -> None:
+    terminal_override = override.pop("terminal", None)
+    adapter.update(override)
+    if not isinstance(terminal_override, dict):
+        return
+    terminal = adapter.setdefault("terminal", {})
+    if not isinstance(terminal, dict):
+        adapter["terminal"] = dict(terminal_override)
+        return
+    for key, value in terminal_override.items():
+        if isinstance(value, dict) and isinstance(terminal.get(key), dict):
+            terminal[key] = {**terminal[key], **value}
+        else:
+            terminal[key] = value
 
 
 def _read_registry_payload() -> Any:
@@ -258,14 +311,29 @@ def _read_registry_payload() -> Any:
 
 def _adapter_summary(adapter: dict[str, Any]) -> dict[str, Any]:
     executable = _resolve_executable(adapter)
+    terminal = adapter.get("terminal") if isinstance(adapter.get("terminal"), dict) else {}
+    capabilities = terminal.get("capabilities") if isinstance(terminal.get("capabilities"), dict) else {}
     return {
         "id": str(adapter.get("id") or ""),
         "label": str(adapter.get("label") or adapter.get("id") or ""),
         "description": str(adapter.get("description") or ""),
+        "protocol": str(adapter.get("protocol") or "cli_agent"),
         "supportedModes": list(adapter.get("supportedModes") or SUPPORTED_MODES),
         "available": bool(executable),
         "executablePath": executable or "",
         "executableCandidates": list(adapter.get("executableCandidates") or []),
+        "configPath": str(Path(CLI_AGENT_REGISTRY_PATH)),
+        "terminal": {
+            "enabled": bool(terminal.get("enabled")),
+            "launch": bool(isinstance(terminal.get("launch"), dict)),
+            "resume": bool(isinstance(terminal.get("resume"), dict)),
+            "capabilities": {
+                "interactive": bool(capabilities.get("interactive")),
+                "pty": bool(capabilities.get("pty")),
+                "resume": bool(capabilities.get("resume")),
+                "transcript": bool(capabilities.get("transcript")),
+            },
+        },
     }
 
 

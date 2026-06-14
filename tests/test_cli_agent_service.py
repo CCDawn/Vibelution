@@ -1,14 +1,23 @@
 import subprocess
 
 from core.web.services import cli_agent_service as service
+from core.web.services import cli_agent_terminal_service as terminal_service
 
 
 def _configure_roots(monkeypatch, tmp_path):
     project_root = tmp_path / "Vibelution"
     project_root.mkdir()
     monkeypatch.setattr(service, "PROJECT_ROOT", project_root)
-    monkeypatch.setattr(service, "CLI_AGENT_REGISTRY_PATH", project_root / "workspace" / "cli_agents" / "cli_agents.json")
-    monkeypatch.setattr(service, "RUN_RECORD_DIR", project_root / "workspace" / "cli_agents" / "runs")
+    user_config = tmp_path / "Documents" / "Vibelution" / "config" / "cli_agents.json"
+    monkeypatch.setattr(service, "USER_CLI_AGENT_CONFIG_PATH", user_config)
+    monkeypatch.setattr(service, "CLI_AGENT_REGISTRY_PATH", user_config)
+    monkeypatch.setattr(service, "RUN_RECORD_DIR", project_root / ".runtime" / "cli_agents" / "runs")
+    monkeypatch.setattr(terminal_service, "PROJECT_ROOT", project_root)
+    monkeypatch.setattr(terminal_service, "RUNTIME_ROOT", project_root / ".runtime" / "cli_agents")
+    monkeypatch.setattr(terminal_service, "SESSION_STATE_DIR", project_root / ".runtime" / "cli_agents" / "sessions")
+    monkeypatch.setattr(terminal_service, "TRANSCRIPT_DIR", project_root / ".runtime" / "cli_agents" / "transcripts")
+    terminal_service.shutdown_cli_agent_terminal_sessions()
+    terminal_service._RUNTIMES.clear()
     monkeypatch.setattr(service, "record_runtime_scene_event", lambda *args, **kwargs: {"accepted": False})
     return project_root
 
@@ -143,3 +152,71 @@ def test_list_cli_agent_adapters_reports_availability(monkeypatch, tmp_path):
 
     assert adapters["mimo_code"]["available"] is True
     assert adapters["codex_code"]["available"] is False
+    assert adapters["mimo_code"]["configPath"].endswith("cli_agents.json")
+    assert adapters["mimo_code"]["terminal"]["enabled"] is True
+    assert adapters["mimo_code"]["terminal"]["capabilities"]["pty"] is True
+
+
+def test_cli_agent_terminal_resume_uses_user_level_protocol(monkeypatch, tmp_path):
+    project_root = _configure_roots(monkeypatch, tmp_path)
+    service.CLI_AGENT_REGISTRY_PATH.parent.mkdir(parents=True)
+    service.CLI_AGENT_REGISTRY_PATH.write_text(
+        """
+{
+  "adapters": {
+    "mimo_code": {
+      "terminal": {
+        "resume": {"argv": ["{exe}", "resume", "{cliSessionId}", "--cwd", "{cwd}"]},
+        "sessionId": {"regex": "会话:([A-Z0-9]+)"}
+      }
+    }
+  }
+}
+""".strip(),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(service.shutil, "which", lambda candidate: r"C:\tools\mimo.cmd" if candidate == "mimo.cmd" else "")
+
+    command = terminal_service._build_terminal_command(
+        agent_type="mimo_code",
+        task="继续上次任务",
+        cwd=str(project_root),
+        mode="readonly",
+        model="",
+        agent="",
+        cli_session_id="MIMO-123",
+    )
+
+    assert command["args"] == [r"C:\tools\mimo.cmd", "resume", "MIMO-123", "--cwd", str(project_root)]
+    assert command["resumed"] is True
+    assert command["initialInput"] == ""
+    assert command["sessionIdRegex"] == "会话:([A-Z0-9]+)"
+
+
+def test_cli_agent_terminal_ensure_writes_runtime_state_without_project_config(monkeypatch, tmp_path):
+    project_root = _configure_roots(monkeypatch, tmp_path)
+    monkeypatch.setattr(service.shutil, "which", lambda candidate: r"C:\tools\mimo.cmd" if candidate == "mimo.cmd" else "")
+
+    class FakeProcess:
+        def isalive(self):
+            return True
+
+    monkeypatch.setattr(terminal_service, "_spawn_terminal_process", lambda *args, **kwargs: (FakeProcess(), "conpty"))
+    monkeypatch.setattr(terminal_service._TerminalRuntime, "start", lambda self: None)
+    monkeypatch.setattr(terminal_service, "_send_initial_task", lambda *args, **kwargs: None)
+
+    session = terminal_service.ensure_cli_agent_terminal_session(
+        agent_type="mimo_code",
+        task="列出 Python 文件",
+        cwd=str(project_root),
+        mode="readonly",
+        source_session_id="session-1",
+        source_message_id="message-1",
+        source_run_id="run-1",
+    )
+
+    assert session["transport"] == "conpty"
+    assert session["alive"] is True
+    assert session["transcriptPath"].startswith(".runtime/cli_agents/transcripts/")
+    assert (terminal_service.SESSION_STATE_DIR / f"{session['terminalSessionId']}.json").exists()
+    assert not (project_root / "workspace" / "cli_agents" / "cli_agents.json").exists()

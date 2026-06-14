@@ -1,0 +1,690 @@
+"""Persistent terminal sessions for configured CLI Agent adapters."""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+import queue
+import re
+import subprocess
+import threading
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+from . import cli_agent_service
+
+try:  # pragma: no cover - availability is platform/package dependent
+    from winpty import PtyProcess
+except Exception:  # pragma: no cover - fallback is covered by unit tests
+    PtyProcess = None  # type: ignore[assignment]
+
+
+PROJECT_ROOT = cli_agent_service.PROJECT_ROOT
+RUNTIME_ROOT = PROJECT_ROOT / ".runtime" / "cli_agents"
+SESSION_STATE_DIR = RUNTIME_ROOT / "sessions"
+TRANSCRIPT_DIR = RUNTIME_ROOT / "transcripts"
+DEFAULT_ROWS = 28
+DEFAULT_COLS = 100
+MAX_TRANSCRIPT_TAIL_CHARS = 24000
+STREAM_HEARTBEAT_SECONDS = 15
+STREAM_QUEUE_SIZE = 200
+
+
+class CliAgentTerminalError(Exception):
+    """Raised when a CLI Agent terminal session cannot be created or used."""
+
+    def __init__(self, code: str, message: str):
+        super().__init__(message)
+        self.code = code
+        self.message = message
+
+
+class _TerminalRuntime:
+    def __init__(
+        self,
+        *,
+        state: dict[str, Any],
+        process: Any,
+        transport: str,
+        transcript_path: Path,
+        session_id_regex: str,
+    ) -> None:
+        self.state = state
+        self.process = process
+        self.transport = transport
+        self.transcript_path = transcript_path
+        self.session_id_regex = session_id_regex
+        self.subscribers: list[queue.Queue[dict[str, Any]]] = []
+        self.stop_requested = threading.Event()
+        self.lock = threading.RLock()
+        self.reader_thread = threading.Thread(
+            target=self._reader_loop,
+            name=f"cli-agent-terminal-{state.get('terminalSessionId')}",
+            daemon=True,
+        )
+
+    def start(self) -> None:
+        self.reader_thread.start()
+
+    def subscribe(self) -> queue.Queue[dict[str, Any]]:
+        subscriber: queue.Queue[dict[str, Any]] = queue.Queue(maxsize=STREAM_QUEUE_SIZE)
+        with self.lock:
+            self.subscribers.append(subscriber)
+        return subscriber
+
+    def unsubscribe(self, subscriber: queue.Queue[dict[str, Any]]) -> None:
+        with self.lock:
+            self.subscribers = [item for item in self.subscribers if item is not subscriber]
+
+    def send_input(self, data: str) -> None:
+        if not data:
+            return
+        if self.transport == "conpty":
+            self.process.write(data)
+            return
+        stdin = getattr(self.process, "stdin", None)
+        if stdin is None:
+            raise CliAgentTerminalError("TERMINAL_STDIN_UNAVAILABLE", "Terminal input is not available.")
+        stdin.write(data)
+        stdin.flush()
+
+    def resize(self, rows: int, cols: int) -> None:
+        rows = _clamp_int(rows, DEFAULT_ROWS, 4, 120)
+        cols = _clamp_int(cols, DEFAULT_COLS, 20, 240)
+        with self.lock:
+            self.state["rows"] = rows
+            self.state["cols"] = cols
+            self.state["updatedAt"] = _now_iso()
+            _write_state(self.state)
+        if self.transport == "conpty":
+            try:
+                self.process.setwinsize(rows, cols)
+            except Exception:
+                return
+
+    def stop(self) -> None:
+        self.stop_requested.set()
+        try:
+            if self.transport == "conpty":
+                try:
+                    self.process.terminate(force=True)
+                except TypeError:
+                    self.process.terminate()
+            else:
+                self.process.terminate()
+        except Exception:
+            pass
+
+    def is_alive(self) -> bool:
+        try:
+            if self.transport == "conpty":
+                return bool(self.process.isalive())
+            return self.process.poll() is None
+        except Exception:
+            return False
+
+    def snapshot(self) -> dict[str, Any]:
+        with self.lock:
+            payload = dict(self.state)
+        payload["alive"] = self.is_alive()
+        payload["transport"] = self.transport
+        payload["transcriptTail"] = _read_transcript_tail(self.transcript_path)
+        return _public_state(payload)
+
+    def _reader_loop(self) -> None:
+        try:
+            while not self.stop_requested.is_set():
+                chunk = self._read_chunk()
+                if not chunk:
+                    if not self.is_alive():
+                        break
+                    time.sleep(0.05)
+                    continue
+                self._record_output(chunk)
+        finally:
+            with self.lock:
+                self.state["status"] = "stopped" if self.stop_requested.is_set() else "exited"
+                self.state["alive"] = False
+                self.state["updatedAt"] = _now_iso()
+                _write_state(self.state)
+                final_state = _public_state(dict(self.state))
+            self._publish({"type": "terminal_status", "session": final_state})
+            cli_agent_service._record_event(
+                "cli_agent.terminal.exited",
+                outcome="stopped" if self.stop_requested.is_set() else "completed",
+                fields={
+                    "terminalSessionId": str(self.state.get("terminalSessionId") or ""),
+                    "adapterId": str(self.state.get("adapterId") or ""),
+                    "transport": self.transport,
+                },
+            )
+
+    def _read_chunk(self) -> str:
+        try:
+            if self.transport == "conpty":
+                return str(self.process.read() or "")
+            stdout = getattr(self.process, "stdout", None)
+            if stdout is None:
+                return ""
+            return str(stdout.read(1) or "")
+        except Exception:
+            return ""
+
+    def _record_output(self, chunk: str) -> None:
+        self.transcript_path.parent.mkdir(parents=True, exist_ok=True)
+        with self.transcript_path.open("a", encoding="utf-8", errors="replace") as handle:
+            handle.write(chunk)
+        next_cli_session_id = _extract_cli_session_id(chunk, self.session_id_regex)
+        with self.lock:
+            if next_cli_session_id and not str(self.state.get("cliSessionId") or "").strip():
+                self.state["cliSessionId"] = next_cli_session_id
+            self.state["status"] = "running"
+            self.state["alive"] = True
+            self.state["updatedAt"] = _now_iso()
+            _write_state(self.state)
+            public_state = _public_state(dict(self.state))
+        self._publish({"type": "terminal_output", "chunk": chunk, "session": public_state})
+
+    def _publish(self, event: dict[str, Any]) -> None:
+        with self.lock:
+            subscribers = list(self.subscribers)
+        for subscriber in subscribers:
+            try:
+                subscriber.put_nowait(event)
+            except queue.Full:
+                try:
+                    subscriber.get_nowait()
+                    subscriber.put_nowait(event)
+                except Exception:
+                    continue
+
+
+_RUNTIMES: dict[str, _TerminalRuntime] = {}
+_RUNTIMES_LOCK = threading.RLock()
+
+
+def ensure_cli_agent_terminal_session(
+    *,
+    agent_type: str,
+    task: str = "",
+    cwd: str = "",
+    mode: str = "readonly",
+    model: str = "",
+    agent: str = "",
+    source_session_id: str = "",
+    source_message_id: str = "",
+    source_run_id: str = "",
+    cli_session_id: str = "",
+    rows: int = DEFAULT_ROWS,
+    cols: int = DEFAULT_COLS,
+) -> dict[str, Any]:
+    """Return an attached or newly started terminal session for a configured CLI Agent."""
+
+    normalized_type = cli_agent_service._normalize_id(agent_type)
+    if not normalized_type:
+        raise CliAgentTerminalError("MISSING_CLI_AGENT", "CLI Agent type is required.")
+    terminal_session_id = _stable_terminal_session_id(
+        adapter_id=normalized_type,
+        source_session_id=source_session_id,
+        source_message_id=source_message_id,
+        source_run_id=source_run_id,
+        cwd=cwd,
+        mode=mode,
+        task=task,
+    )
+
+    with _RUNTIMES_LOCK:
+        runtime = _RUNTIMES.get(terminal_session_id)
+        if runtime and runtime.is_alive():
+            snapshot = runtime.snapshot()
+            _touch_state(terminal_session_id, status="running", alive=True)
+            return snapshot
+
+        existing_state = _read_state(terminal_session_id)
+        command = _build_terminal_command(
+            agent_type=normalized_type,
+            task=task or str(existing_state.get("task") or ""),
+            cwd=cwd or str(existing_state.get("cwd") or ""),
+            mode=mode or str(existing_state.get("mode") or "readonly"),
+            model=model or str(existing_state.get("model") or ""),
+            agent=agent or str(existing_state.get("agent") or ""),
+            cli_session_id=cli_session_id or str(existing_state.get("cliSessionId") or ""),
+        )
+        state = _initial_state(
+            terminal_session_id=terminal_session_id,
+            command=command,
+            task=task or str(existing_state.get("task") or ""),
+            source_session_id=source_session_id or str(existing_state.get("sourceSessionId") or ""),
+            source_message_id=source_message_id or str(existing_state.get("sourceMessageId") or ""),
+            source_run_id=source_run_id or str(existing_state.get("sourceRunId") or ""),
+            rows=rows,
+            cols=cols,
+            previous_state=existing_state,
+        )
+        process, transport = _spawn_terminal_process(command["args"], cwd=command["cwd"], rows=rows, cols=cols)
+        state["transport"] = transport
+        state["alive"] = True
+        state["status"] = "running"
+        transcript_path = _transcript_path(terminal_session_id)
+        state["transcriptPath"] = _relative_to_project(transcript_path)
+        _write_state(state)
+        runtime = _TerminalRuntime(
+            state=state,
+            process=process,
+            transport=transport,
+            transcript_path=transcript_path,
+            session_id_regex=str(command.get("sessionIdRegex") or ""),
+        )
+        _RUNTIMES[terminal_session_id] = runtime
+        runtime.start()
+        _send_initial_task(runtime, str(command.get("initialInput") or ""))
+        cli_agent_service._record_event(
+            "cli_agent.terminal.started",
+            outcome="started",
+            fields={
+                "terminalSessionId": terminal_session_id,
+                "adapterId": normalized_type,
+                "cwd": str(command.get("cwd") or ""),
+                "mode": str(command.get("mode") or ""),
+                "transport": transport,
+                "resumed": bool(command.get("resumed")),
+                "commandPreview": list(command.get("preview") or []),
+            },
+        )
+        return runtime.snapshot()
+
+
+def get_cli_agent_terminal_session(terminal_session_id: str) -> dict[str, Any]:
+    session_id = _normalize_terminal_session_id(terminal_session_id)
+    with _RUNTIMES_LOCK:
+        runtime = _RUNTIMES.get(session_id)
+        if runtime:
+            return runtime.snapshot()
+    state = _read_state(session_id)
+    if not state:
+        raise CliAgentTerminalError("TERMINAL_SESSION_NOT_FOUND", "Terminal session not found.")
+    state["alive"] = False
+    return _public_state({**state, "transcriptTail": _read_transcript_tail(_transcript_path(session_id))})
+
+
+def stream_cli_agent_terminal_events(terminal_session_id: str):
+    session_id = _normalize_terminal_session_id(terminal_session_id)
+    with _RUNTIMES_LOCK:
+        runtime = _RUNTIMES.get(session_id)
+    if runtime is None:
+        yield _encode_sse_event(
+            "terminal_snapshot",
+            {
+                "type": "terminal_snapshot",
+                "session": get_cli_agent_terminal_session(session_id),
+            },
+        )
+        return
+
+    subscriber = runtime.subscribe()
+    try:
+        yield _encode_sse_event(
+            "terminal_snapshot",
+            {
+                "type": "terminal_snapshot",
+                "session": runtime.snapshot(),
+            },
+        )
+        while True:
+            try:
+                event = subscriber.get(timeout=STREAM_HEARTBEAT_SECONDS)
+            except queue.Empty:
+                yield ": keep-alive\n\n"
+                continue
+            yield _encode_sse_event(str(event.get("type") or "terminal_event"), event)
+            if str(event.get("type") or "") == "terminal_status":
+                session = event.get("session") if isinstance(event.get("session"), dict) else {}
+                if not bool(session.get("alive")):
+                    break
+    finally:
+        runtime.unsubscribe(subscriber)
+
+
+def write_cli_agent_terminal_input(terminal_session_id: str, data: str) -> dict[str, Any]:
+    runtime = _require_runtime(terminal_session_id)
+    runtime.send_input(str(data or ""))
+    return runtime.snapshot()
+
+
+def resize_cli_agent_terminal_session(terminal_session_id: str, rows: int, cols: int) -> dict[str, Any]:
+    runtime = _require_runtime(terminal_session_id)
+    runtime.resize(rows, cols)
+    return runtime.snapshot()
+
+
+def stop_cli_agent_terminal_session(terminal_session_id: str) -> dict[str, Any]:
+    runtime = _require_runtime(terminal_session_id)
+    runtime.stop()
+    _touch_state(_normalize_terminal_session_id(terminal_session_id), status="stopping", alive=False)
+    return runtime.snapshot()
+
+
+def shutdown_cli_agent_terminal_sessions() -> None:
+    with _RUNTIMES_LOCK:
+        runtimes = list(_RUNTIMES.values())
+        _RUNTIMES.clear()
+    for runtime in runtimes:
+        runtime.stop()
+
+
+def _require_runtime(terminal_session_id: str) -> _TerminalRuntime:
+    session_id = _normalize_terminal_session_id(terminal_session_id)
+    with _RUNTIMES_LOCK:
+        runtime = _RUNTIMES.get(session_id)
+    if runtime is None or not runtime.is_alive():
+        raise CliAgentTerminalError("TERMINAL_SESSION_NOT_RUNNING", "Terminal session is not running.")
+    return runtime
+
+
+def _build_terminal_command(
+    *,
+    agent_type: str,
+    task: str,
+    cwd: str,
+    mode: str,
+    model: str,
+    agent: str,
+    cli_session_id: str,
+) -> dict[str, Any]:
+    adapters = cli_agent_service._load_adapter_definitions()
+    adapter = adapters.get(agent_type)
+    if not adapter:
+        raise CliAgentTerminalError("UNSUPPORTED_CLI_AGENT", f"Unsupported CLI agent type: {agent_type}")
+    terminal = adapter.get("terminal") if isinstance(adapter.get("terminal"), dict) else {}
+    if not terminal.get("enabled"):
+        raise CliAgentTerminalError("TERMINAL_NOT_SUPPORTED", f"{adapter.get('label') or agent_type} does not support terminal sessions.")
+    executable = cli_agent_service._resolve_executable(adapter)
+    if not executable:
+        raise CliAgentTerminalError("CLI_AGENT_NOT_FOUND", f"{adapter.get('label') or agent_type} executable was not found.")
+    normalized_mode = str(mode or "readonly").strip().lower()
+    if normalized_mode not in cli_agent_service.SUPPORTED_MODES:
+        raise CliAgentTerminalError("UNSUPPORTED_MODE", f"Unsupported CLI agent mode: {normalized_mode}")
+    cwd_result = cli_agent_service._resolve_run_cwd(cwd, mode=normalized_mode)
+    if not cwd_result.get("ok"):
+        raise CliAgentTerminalError(
+            str(cwd_result.get("code") or "INVALID_CWD"),
+            str(cwd_result.get("message") or "Invalid CLI agent working directory."),
+        )
+    run_cwd = str(cwd_result["cwd"])
+    resume_spec = terminal.get("resume") if isinstance(terminal.get("resume"), dict) else {}
+    launch_spec = terminal.get("launch") if isinstance(terminal.get("launch"), dict) else {}
+    use_resume = bool(str(cli_session_id or "").strip()) and bool(resume_spec.get("argv"))
+    spec = resume_spec if use_resume else launch_spec
+    argv_template = spec.get("argv")
+    if not isinstance(argv_template, list) or not argv_template:
+        raise CliAgentTerminalError("TERMINAL_PROTOCOL_INVALID", "CLI Agent terminal argv template is missing.")
+
+    context = {
+        "exe": executable,
+        "cwd": run_cwd,
+        "task": task,
+        "mode": normalized_mode,
+        "model": str(model or adapter.get("defaultModel") or ""),
+        "agent": str(agent or adapter.get("defaultAgent") or ""),
+        "cliSessionId": str(cli_session_id or ""),
+    }
+    args = [_render_template_arg(str(item), context) for item in argv_template]
+    args = [item for item in args if item != ""]
+    initial_input = "" if use_resume else _render_template_arg(str(terminal.get("initialInput") or ""), context)
+    session_id_spec = terminal.get("sessionId") if isinstance(terminal.get("sessionId"), dict) else {}
+    return {
+        "adapterId": agent_type,
+        "label": str(adapter.get("label") or agent_type),
+        "args": args,
+        "preview": _redacted_preview(args, task=task),
+        "cwd": run_cwd,
+        "mode": normalized_mode,
+        "task": task,
+        "model": context["model"],
+        "agent": context["agent"],
+        "cliSessionId": context["cliSessionId"],
+        "initialInput": initial_input,
+        "sessionIdRegex": str(session_id_spec.get("regex") or ""),
+        "resumed": use_resume,
+    }
+
+
+def _spawn_terminal_process(args: list[str], *, cwd: str, rows: int, cols: int) -> tuple[Any, str]:
+    env = cli_agent_service._run_environment()
+    env.pop("CI", None)
+    env.pop("NO_COLOR", None)
+    rows = _clamp_int(rows, DEFAULT_ROWS, 4, 120)
+    cols = _clamp_int(cols, DEFAULT_COLS, 20, 240)
+    if os.name == "nt" and PtyProcess is not None:
+        return PtyProcess.spawn(args, cwd=cwd, env=env, dimensions=(rows, cols)), "conpty"
+    process = subprocess.Popen(
+        args,
+        cwd=cwd,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        bufsize=0,
+        env=env,
+        **cli_agent_service._subprocess_no_window_kwargs(),
+    )
+    return process, "pipe"
+
+
+def _send_initial_task(runtime: _TerminalRuntime, initial_input: str) -> None:
+    if not initial_input.strip():
+        return
+
+    def write_later() -> None:
+        time.sleep(0.35)
+        if runtime.is_alive():
+            try:
+                runtime.send_input(initial_input)
+            except Exception:
+                return
+
+    threading.Thread(target=write_later, name="cli-agent-terminal-initial-input", daemon=True).start()
+
+
+def _initial_state(
+    *,
+    terminal_session_id: str,
+    command: dict[str, Any],
+    task: str,
+    source_session_id: str,
+    source_message_id: str,
+    source_run_id: str,
+    rows: int,
+    cols: int,
+    previous_state: dict[str, Any],
+) -> dict[str, Any]:
+    now = _now_iso()
+    return {
+        "schemaVersion": 1,
+        "terminalSessionId": terminal_session_id,
+        "adapterId": str(command.get("adapterId") or ""),
+        "agentType": str(command.get("adapterId") or ""),
+        "label": str(command.get("label") or command.get("adapterId") or ""),
+        "sourceSessionId": source_session_id,
+        "sourceMessageId": source_message_id,
+        "sourceRunId": source_run_id,
+        "cwd": str(command.get("cwd") or ""),
+        "mode": str(command.get("mode") or "readonly"),
+        "model": str(command.get("model") or ""),
+        "agent": str(command.get("agent") or ""),
+        "task": task,
+        "taskHash": cli_agent_service._task_hash(task),
+        "taskPreview": cli_agent_service._clip(task, 500),
+        "cliSessionId": str(command.get("cliSessionId") or previous_state.get("cliSessionId") or ""),
+        "commandPreview": list(command.get("preview") or []),
+        "resumed": bool(command.get("resumed")),
+        "status": "starting",
+        "alive": False,
+        "transport": "",
+        "rows": _clamp_int(rows, DEFAULT_ROWS, 4, 120),
+        "cols": _clamp_int(cols, DEFAULT_COLS, 20, 240),
+        "transcriptPath": str(previous_state.get("transcriptPath") or ""),
+        "createdAt": str(previous_state.get("createdAt") or now),
+        "updatedAt": now,
+    }
+
+
+def _stable_terminal_session_id(
+    *,
+    adapter_id: str,
+    source_session_id: str,
+    source_message_id: str,
+    source_run_id: str,
+    cwd: str,
+    mode: str,
+    task: str,
+) -> str:
+    basis = "\n".join(
+        [
+            adapter_id,
+            str(source_session_id or ""),
+            str(source_message_id or ""),
+            str(source_run_id or ""),
+            str(cwd or ""),
+            str(mode or ""),
+            cli_agent_service._task_hash(str(task or "")),
+        ]
+    )
+    return f"cli-term-{hashlib.sha256(basis.encode('utf-8', errors='replace')).hexdigest()[:16]}"
+
+
+def _read_state(terminal_session_id: str) -> dict[str, Any]:
+    path = _state_path(terminal_session_id)
+    if not path.exists():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _write_state(state: dict[str, Any]) -> None:
+    terminal_session_id = _normalize_terminal_session_id(str(state.get("terminalSessionId") or ""))
+    path = _state_path(terminal_session_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _touch_state(terminal_session_id: str, *, status: str, alive: bool) -> None:
+    state = _read_state(terminal_session_id)
+    if not state:
+        return
+    state["status"] = status
+    state["alive"] = alive
+    state["updatedAt"] = _now_iso()
+    _write_state(state)
+
+
+def _state_path(terminal_session_id: str) -> Path:
+    return SESSION_STATE_DIR / f"{_normalize_terminal_session_id(terminal_session_id)}.json"
+
+
+def _transcript_path(terminal_session_id: str) -> Path:
+    return TRANSCRIPT_DIR / f"{_normalize_terminal_session_id(terminal_session_id)}.log"
+
+
+def _normalize_terminal_session_id(value: str) -> str:
+    normalized = "".join(ch if ch.isalnum() or ch in {"-", "_"} else "-" for ch in str(value or "").strip())
+    if not normalized:
+        raise CliAgentTerminalError("MISSING_TERMINAL_SESSION", "Terminal session id is required.")
+    return normalized[:120]
+
+
+def _render_template_arg(template: str, context: dict[str, str]) -> str:
+    rendered = template
+    for key, value in context.items():
+        rendered = rendered.replace("{" + key + "}", str(value or ""))
+    return rendered
+
+
+def _redacted_preview(args: list[str], *, task: str) -> list[str]:
+    task_hash = cli_agent_service._task_hash(task)
+    return [f"<task:{task_hash}>" if task and item == task else item for item in args]
+
+
+def _extract_cli_session_id(chunk: str, regex: str) -> str:
+    if not regex:
+        return ""
+    try:
+        match = re.search(regex, chunk)
+    except re.error:
+        return ""
+    if not match:
+        return ""
+    return str(match.group(1) if match.groups() else match.group(0)).strip()
+
+
+def _read_transcript_tail(path: Path, limit: int = MAX_TRANSCRIPT_TAIL_CHARS) -> str:
+    if not path.exists():
+        return ""
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except Exception:
+        return ""
+    if len(text) <= limit:
+        return text
+    return text[-limit:]
+
+
+def _public_state(state: dict[str, Any]) -> dict[str, Any]:
+    keys = {
+        "terminalSessionId",
+        "adapterId",
+        "agentType",
+        "label",
+        "sourceSessionId",
+        "sourceMessageId",
+        "sourceRunId",
+        "cwd",
+        "mode",
+        "taskHash",
+        "taskPreview",
+        "cliSessionId",
+        "commandPreview",
+        "resumed",
+        "status",
+        "alive",
+        "transport",
+        "rows",
+        "cols",
+        "transcriptPath",
+        "transcriptTail",
+        "createdAt",
+        "updatedAt",
+    }
+    return {key: state.get(key) for key in keys if key in state}
+
+
+def _encode_sse_event(event_name: str, payload: dict[str, Any]) -> str:
+    body = json.dumps(payload, ensure_ascii=False)
+    return f"event: {event_name}\ndata: {body}\n\n"
+
+
+def _relative_to_project(path: Path) -> str:
+    try:
+        return path.resolve().relative_to(Path(PROJECT_ROOT).resolve()).as_posix()
+    except ValueError:
+        return str(path)
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _clamp_int(value: Any, default: int, minimum: int, maximum: int) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        parsed = default
+    return max(minimum, min(maximum, parsed))
