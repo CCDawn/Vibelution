@@ -1179,6 +1179,44 @@ def test_assess_source_quality_batch_reports_no_pending_candidates(tmp_path, mon
     assert second["summary"]["skippedCandidateCount"] == 1
 
 
+def test_assess_source_quality_batch_force_rescreens_assessed_sources(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = team_service.create_team(name="ai科学研究团队")
+    candidate = team_workflow_orchestration_service.register_candidate_source(
+        team["teamId"],
+        {
+            "title": "Predictive coding neural paper",
+            "sourceUrl": "https://doi.org/10.0000/predictive-coding",
+            "sourceKind": "paper",
+            "summary": "Neural network predictive coding.",
+            "tags": ["neuro", "network"],
+            "allowedForAnalysis": True,
+            "createdByAgent": "Data Discovery Agent",
+        },
+    )["candidate"]
+
+    first = team_workflow_orchestration_service.assess_source_quality_batch(team["teamId"], {})
+    second = team_workflow_orchestration_service.assess_source_quality_batch(
+        team["teamId"],
+        {
+            "assessedByAgent": "Source Quality Review Agent",
+            "force": True,
+            "notes": "Agent re-screen requested by user.",
+        },
+    )
+
+    assert first["summary"]["assessedCandidateCount"] == 1
+    assert second["status"] == "completed"
+    assert second["assessedByAgent"] == "Source Quality Review Agent"
+    assert second["summary"]["assessedCandidateCount"] == 1
+    assert second["summary"]["skippedCandidateCount"] == 0
+    assert second["assessments"][0]["candidateId"] == candidate["candidateId"]
+    assert second["sourceQualityStatus"]["summary"]["assessedSourceCandidateCount"] == 1
+    assert second["officialBoundary"]["writesFormalKnowledge"] is False
+    assert second["officialBoundary"]["writesRag"] is False
+    assert second["officialBoundary"]["writesOfficialGraph"] is False
+
+
 def test_source_extraction_failure_keeps_manifest_needing_confirmation(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     team = team_service.create_team(name="挑战杯科研团队")

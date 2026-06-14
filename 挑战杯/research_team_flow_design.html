@@ -39,7 +39,7 @@
         <aside class="dashboard-panel">
           <h2>审核摘要</h2>
           <div class="kpi-grid">
-            <div class="kpi"><b>当前阶段</b><strong>M6.35</strong><span>知识搜集五个步骤已改为页内子页，只显示当前阶段内容和当前阶段操作。</span></div>
+            <div class="kpi"><b>当前阶段</b><strong>M6.36</strong><span>资料筛选已完成后也能由 Agent 重新筛选，并保留查看结果入口。</span></div>
             <div class="kpi"><b>流程节点</b><strong>13</strong><span>1-9 为知识入库主线，10-13 保留占位与维护节点。</span></div>
             <div class="kpi"><b>候选资料</b><strong>10</strong><span>第一轮 source_manifest 已进入 candidate-only 工作区。</span></div>
             <div class="kpi"><b>正式写入</b><strong>0</strong><span>未写正式 Team Knowledge、RAG 或 official graph。</span></div>
@@ -465,7 +465,7 @@
           <div class="plan-summary">
             <div class="service-row"><strong>知识搜集主线</strong><span>只跑通知识搜集、筛选、候选入库、知识治理 Agent 和图谱同步设计；不进入训练实验、算法实现或比赛交付。</span></div>
             <div class="service-row"><strong>实施目标</strong><span>复用 Vibelution 现有 Research、Team Knowledge、RAG、Knowledge Steward 和 Memory Graph 能力，把 01-09 做成可运行 MVP。</span></div>
-            <div class="service-row"><strong>团队入口</strong><span>/teams?team=research-team · 选中 ai科学研究团队后，团队内容区显示科研控制台：研究主题、当前阶段、知识搜集/实验/迭代三张阶段卡、每卡一个主按钮和一个阶段详情入口；知识搜集卡会按未开始、待继续搜索、搜索中、待筛选、可进入实验、等待回写显示状态，并提供“新一轮搜集”；知识搜集独立页的资料搜集、资料筛选、候选入库、候选图谱、共享记忆前审五张步骤卡各自承载开始/查看/刷新按钮，资料筛选主按钮会让资料质量评估 Agent 批量执行待筛候选，并在页内详情展示结果；模型证据、候选、路径、校验和内部状态默认移到阶段详情页或高级信息中。</span></div>
+            <div class="service-row"><strong>团队入口</strong><span>/teams?team=research-team · 选中 ai科学研究团队后，团队内容区显示科研控制台：研究主题、当前阶段、知识搜集/实验/迭代三张阶段卡、每卡一个主按钮和一个阶段详情入口；知识搜集卡会按未开始、待继续搜索、搜索中、待筛选、可进入实验、等待回写显示状态，并提供“新一轮搜集”；知识搜集独立页的资料搜集、资料筛选、候选入库、候选图谱、共享记忆前审五张步骤卡各自承载开始/查看/刷新按钮，资料筛选主按钮会让资料质量评估 Agent 批量执行待筛候选；若已筛完，则显示 Agent 重新筛选并 force 复审已筛候选；模型证据、候选、路径、校验和内部状态默认移到阶段详情页或高级信息中。</span></div>
           </div>
           <div class="dashboard-panel">
             <h2>边界提醒</h2>
@@ -659,8 +659,8 @@
         <div class="agent-row">
         <b>01</b>
         <strong>Source Intake Agent</strong>
-        <span>可复用通用 data-processing assignment / source-extraction / source-quality 后端已接入；Teams 资料搜集执行台、候选资料筛选台、科研总览控制台、KV 缓存对话轨迹、启动复用反馈、metadata-only 搜索执行闭环、高价值信息层、中文控制台、默认层去说明化、步骤卡主操作入口、资料筛选页内反馈、资料筛选 Agent 批量执行、候选库可视化二级索引和知识搜集阶段子页控制台已接入</span>
-        <span>ResearchStageRound 建立 / 科研控制台一键进入知识搜集 / 总览页只显示三阶段主操作 / 知识搜集状态驱动按钮 / 知识搜集中文展示映射 / 默认层去说明化 / 右侧主操作唯一化 / 资料筛选入口常驻 / 步骤卡主操作入口 / 步骤卡二级索引 / 阶段子页控制台 / 候选库可视化面板 / 资料筛选页内详情 / 资料筛选展开高亮反馈 / 资料筛选 Agent 批量执行 / source-quality/assess-batch / 新一轮搜集入口 / active 知识搜集轮次复用反馈 / 自动启动团队协调 round / DataProcessingRun 建立 / DataProcessingRun reviewing 收口 / DataSearchPlan/querySeeds 搜索计划 / KV/prompt cache 启动门禁 / 稳定前缀/动态增量契约 / CollectionAssignment 资料搜集任务 / assignedQueries 角色分配 / promptCachePartition 角色分区 / Teams 启动搜集批次 / Teams 查看 run/assignment/query/KV 状态 / Teams 高价值摘要层 / Teams 搜索下一批 / Crossref 元数据搜索执行器 / 搜索执行事件进入搜集对话流 / DataRecord 通用记录 / DataRecord 自动导入 source_manifest / metadata-only 下载边界 / 手工 CollectionOutput 回写 / 本地资料登记 / source_manifest 写入 / 文件路径/页码/来源可信度记录 / 本地 PDF sha256/pageAnchors/excerpt 抽取 / sourceQualityAssessment 筛选 / 可选 research_knowledge_query_tool 查重</span>
+        <span>可复用通用 data-processing assignment / source-extraction / source-quality 后端已接入；Teams 资料搜集执行台、候选资料筛选台、科研总览控制台、KV 缓存对话轨迹、启动复用反馈、metadata-only 搜索执行闭环、高价值信息层、中文控制台、默认层去说明化、步骤卡主操作入口、资料筛选页内反馈、资料筛选 Agent 批量执行、候选库可视化二级索引、知识搜集阶段子页控制台和资料筛选 Agent 复审入口已接入</span>
+        <span>ResearchStageRound 建立 / 科研控制台一键进入知识搜集 / 总览页只显示三阶段主操作 / 知识搜集状态驱动按钮 / 知识搜集中文展示映射 / 默认层去说明化 / 右侧主操作唯一化 / 资料筛选入口常驻 / 步骤卡主操作入口 / 步骤卡二级索引 / 阶段子页控制台 / 资料筛选 Agent 复审 / 候选库可视化面板 / 资料筛选页内详情 / 资料筛选展开高亮反馈 / 资料筛选 Agent 批量执行 / source-quality/assess-batch / source-quality force 重筛 / 新一轮搜集入口 / active 知识搜集轮次复用反馈 / 自动启动团队协调 round / DataProcessingRun 建立 / DataProcessingRun reviewing 收口 / DataSearchPlan/querySeeds 搜索计划 / KV/prompt cache 启动门禁 / 稳定前缀/动态增量契约 / CollectionAssignment 资料搜集任务 / assignedQueries 角色分配 / promptCachePartition 角色分区 / Teams 启动搜集批次 / Teams 查看 run/assignment/query/KV 状态 / Teams 高价值摘要层 / Teams 搜索下一批 / Crossref 元数据搜索执行器 / 搜索执行事件进入搜集对话流 / DataRecord 通用记录 / DataRecord 自动导入 source_manifest / metadata-only 下载边界 / 手工 CollectionOutput 回写 / 本地资料登记 / source_manifest 写入 / 文件路径/页码/来源可信度记录 / 本地 PDF sha256/pageAnchors/excerpt 抽取 / sourceQualityAssessment 筛选 / 可选 research_knowledge_query_tool 查重</span>
         <span>确认资料允许分析、来源可信度和是否纳入本轮。</span>
       </div>
 <div class="agent-row">
@@ -2089,6 +2089,12 @@
               <strong>知识搜集阶段子页控制台</strong>
               <span>知识搜集阶段的五张步骤卡升级为页内子页索引，点击资料搜集、资料筛选、候选入库、候选图谱或共享记忆前审时，底部只显示该阶段内容。</span>
               <span>右侧控制台按当前阶段切换主操作按钮和关键数量；资料搜集保留配置/批次/回写折叠区，其余阶段只显示对应查看、筛选、刷新或前审动作，避免所有阶段信息同屏堆叠。</span>
+            </div>
+<div class="blueprint-row">
+              <b>M6.36</b>
+              <strong>资料筛选 Agent 复审入口</strong>
+              <span>资料筛选已完成时，步骤卡和右侧控制台主按钮不再只显示查看结果，而是显示 Agent 重新筛选，并通过 source-quality/assess-batch force=true 重新审查已筛候选。</span>
+              <span>资料筛选详情页保留查看结果入口，同时新增显眼的 Agent 批量审查按钮；复审仍只写 CandidateStore 的 sourceQualityAssessment，不写正式 Team Knowledge、RAG 或 official graph。</span>
             </div>
       </div>
       <div class="tag-row">
