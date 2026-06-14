@@ -82,3 +82,109 @@ def test_agent_bulk_prompt_template_rejects_empty_template_id(tmp_path, monkeypa
     assert response.status_code == 422, response.text
     assert "Prompt template id is required" in response.json()["detail"]
     assert agent_directory_service.get_agent(agent["agentId"])["promptTemplateId"] == agent["promptTemplateId"]
+
+
+def test_agent_bulk_config_updates_selected_fields_and_preserves_other_llm_slots(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    alpha = agent_directory_service.create_agent_instance(
+        display_name="Bulk Config Alpha",
+        llm_bindings={
+            "dialogue": {"modelId": "old-dialogue"},
+            "vision": {"modelId": "vision-model"},
+        },
+        prompt_template_id="prompt-chat-default",
+        primary_mode="chat",
+    )
+    beta = agent_directory_service.create_agent_instance(
+        display_name="Bulk Config Beta",
+        llm_bindings={"dialogue": {"modelId": "old-dialogue"}},
+        prompt_template_id="prompt-chat-default",
+        primary_mode="chat",
+    )
+    archived = agent_directory_service.create_agent_instance(display_name="Bulk Config Archived")
+    agent_directory_service.archive_agent_instance(archived["agentId"])
+    events = []
+    monkeypatch.setattr(
+        agent_bulk_edit_service,
+        "record_runtime_scene_event",
+        lambda *args, **kwargs: events.append((args, kwargs)) or {"accepted": True},
+    )
+
+    response = client.post(
+        "/api/agents/bulk-config",
+        json={
+            "agentIds": [alpha["agentId"], beta["agentId"], archived["agentId"]],
+            "applyFields": ["llmBindings", "promptTemplateId", "primaryMode", "roleKey"],
+            "patch": {
+                "llmBindings": {"dialogue": {"modelId": "new-dialogue"}},
+                "promptTemplateId": "prompt-research-broad",
+                "primaryMode": "research",
+                "roleKey": "research_data",
+            },
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["status"] == "completed"
+    assert payload["summary"] == {
+        "requestedCount": 3,
+        "successCount": 2,
+        "skippedCount": 1,
+        "failedCount": 0,
+    }
+    assert payload["appliedFields"] == ["llmBindings", "promptTemplateId", "primaryMode", "roleKey"]
+    updated_alpha = agent_directory_service.get_agent(alpha["agentId"])
+    updated_beta = agent_directory_service.get_agent(beta["agentId"])
+    assert updated_alpha["llmBindings"]["dialogue"]["modelId"] == "new-dialogue"
+    assert updated_alpha["llmBindings"]["vision"]["modelId"] == "vision-model"
+    assert updated_beta["llmBindings"]["dialogue"]["modelId"] == "new-dialogue"
+    assert updated_alpha["promptTemplateId"] == "prompt-research-broad"
+    assert updated_alpha["primaryMode"] == "research"
+    assert updated_alpha["roleKey"] == "research_data"
+    assert payload["skipped"] == [
+        {"agentId": archived["agentId"], "reason": "archived", "message": "Archived Agent cannot be updated."}
+    ]
+    assert events[-1][0][:3] == ("agent_directory", "bulk_edit", "agent.bulk_config.updated")
+    assert events[-1][1]["fields"]["appliedFields"] == ["llmBindings", "promptTemplateId", "primaryMode", "roleKey"]
+
+
+def test_agent_bulk_config_skips_protected_system_agent_identity_updates(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    protected = agent_directory_service.create_agent_instance(
+        display_name="Protected Bulk Identity",
+        llm_bindings={"dialogue": {"modelId": "old-dialogue"}},
+        prompt_template_id="prompt-chat-default",
+        primary_mode="supervised_evolution",
+        role_key="judge",
+        metadata={"fixedRole": True, "supervisedRole": "judge"},
+    )
+    peer = agent_directory_service.create_agent_instance(display_name="Editable Bulk Identity")
+
+    response = client.post(
+        "/api/agents/bulk-config",
+        json={
+            "agentIds": [protected["agentId"], peer["agentId"]],
+            "applyFields": ["primaryMode", "roleKey"],
+            "patch": {
+                "primaryMode": "research",
+                "roleKey": "research_peer",
+            },
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["summary"]["successCount"] == 1
+    assert payload["summary"]["skippedCount"] == 1
+    assert payload["skipped"] == [
+        {
+            "agentId": protected["agentId"],
+            "reason": "protected_identity",
+            "message": "Protected system Agent identity cannot be bulk edited.",
+        }
+    ]
+    assert agent_directory_service.get_agent(protected["agentId"])["primaryMode"] == "supervised_evolution"
+    updated_peer = agent_directory_service.get_agent(peer["agentId"])
+    assert updated_peer["primaryMode"] == "research"
+    assert updated_peer["roleKey"] == "research_peer"

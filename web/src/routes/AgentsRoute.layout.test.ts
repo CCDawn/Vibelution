@@ -800,14 +800,25 @@ describe("AgentsRoute layout contract", () => {
 
   it("supports bulk Agent selection with prompt editing and protected safe archive", () => {
     expect(routeSource).toContain("selectedBulkAgentIds");
+    expect(routeSource).toContain("bulkSelectionAnchorAgentId");
+    expect(routeSource).toContain("event.ctrlKey || event.metaKey || event.shiftKey");
+    expect(routeSource).toContain("visibleAgents.slice(start, end + 1)");
+    expect(routeSource).toContain("bulkConfigDraftFromAgents");
+    expect(routeSource).toContain("bulkApplyAgentConfig");
     expect(routeSource).toContain("bulkApplyPromptTemplate");
     expect(routeSource).toContain("bulkArchiveAgents");
     expect(routeSource).toContain("bulkPurgeAgents");
     expect(routeSource).toContain("agentArchiveProtected(agent)");
+    expect(routeSource).toContain('metadataFlag(agent, "fixedRole")');
+    expect(routeSource).toContain('metadataString(agent, "supervisedRole")');
     expect(routeSource).toContain("copy.bulkSkippedProtected");
     expect(routeSource).toContain("copy.bulkPurgeConfirm");
     expect(routeSource).toContain("copy.bulkPurgeResult");
+    expect(routeSource).toContain("copy.bulkEditMixed");
     expect(routeSource).toContain('"/api/agents/bulk-prompt-template"');
+    expect(routeSource).toContain('"/api/agents/bulk-config"');
+    expect(routeSource).toContain("applyFields: bulkConfigApplyFields(bulkConfigApply)");
+    expect(routeSource).toContain("patch: bulkConfigPatchFromDraft(bulkConfigDraft, bulkConfigApply)");
     expect(routeSource).toContain("body: JSON.stringify({ agentIds: selectedBulkAgents.map((agent) => agent.agentId), promptTemplateId: bulkPromptTemplateId })");
     expect(routeSource).toContain("bulkUpdatedAgentWorkspaceCache");
     expect(routeSource).toContain('"/api/agents/bulk-archive"');
@@ -819,10 +830,15 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).not.toContain("`/api/agents/${encodeURIComponent(agent.agentId)}/purge`");
     expect(routeSource).toContain('method: "DELETE"');
     expect(routeSource).toContain("onClick={bulkPurgeAgents}");
+    expect(routeSource).toContain("onClick={bulkApplyAgentConfig}");
     expect(routeSource).toContain("styles.bulkActionBar");
+    expect(routeSource).toContain("styles.bulkSelectionList");
+    expect(routeSource).toContain("styles.bulkFieldHeader");
+    expect(routeSource).toContain("styles.agentRowBulkSelected");
     expect(routeSource).toContain("styles.agentRowShell");
     expect(stylesSource).toContain("grid-template-rows: auto auto minmax(0, 1fr)");
     expect(stylesSource).toContain("grid-template-columns: auto auto auto minmax(140px, 1fr)");
     expect(stylesSource).toContain("min-height: 26px");
+    expect(stylesSource).toContain(".agentRowBulkSelected");
   });
 });

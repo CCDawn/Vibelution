@@ -1642,33 +1642,27 @@ def test_agent_config_workspace_does_not_report_historical_mode_repair_warnings(
     )
 
 
-def test_agent_delete_api_does_not_reactivate_archived_supervised_non_core_fixed_role(tmp_path, monkeypatch):
+def test_agent_delete_api_blocks_supervised_fixed_role_agent(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     monkeypatch.setattr(config_service, "get_config_workspace", _fake_config_workspace)
     supervised = supervised_agent_service.ensure_supervised_agent_instances()
     baseline = next(agent for agent in supervised if agent["metadata"].get("supervisedRole") == "baseline")
-    events = []
-    monkeypatch.setattr(
-        supervised_agent_service,
-        "record_runtime_scene_event",
-        lambda *args, **kwargs: events.append((args, kwargs)) or {"accepted": True},
-    )
 
     response = client.delete(f"/api/agents/{baseline['agentId']}")
-    assert response.status_code == 200, response.text
+    assert response.status_code == 422, response.text
+    assert "Protected core Agent" in response.json()["detail"]
 
     workspace_response = client.get("/api/agents/config-workspace")
     assert workspace_response.status_code == 200, workspace_response.text
-    archived = agent_directory_service.get_agent(baseline["agentId"], include_archived=True)
-    assert archived["status"] == "archived"
+    active = agent_directory_service.get_agent(baseline["agentId"], include_archived=True)
+    assert active["status"] == "active"
     payload = agent_mode_binding_service.get_mode_bindings_payload()["modes"]["supervised_evolution"]
-    assert payload["slots"]["baseline"] == ""
-    assert "baseline" in payload["excludedSlots"]
-    assert baseline["agentId"] not in payload["availableAgentIds"]
+    assert payload["slots"]["baseline"] == baseline["agentId"]
+    assert "baseline" not in payload["excludedSlots"]
+    assert baseline["agentId"] in payload["availableAgentIds"]
     workspace = workspace_response.json()
-    assert baseline["agentId"] in {item["agentId"] for item in workspace["agents"] if item["status"] == "archived"}
-    assert baseline["agentId"] not in workspace["modeBindings"]["supervised_evolution"]["availableAgentIds"]
-    assert not any(item[0][2] == "agent.reactivated" for item in events)
+    assert baseline["agentId"] in {item["agentId"] for item in workspace["agents"] if item["status"] == "active"}
+    assert baseline["agentId"] in workspace["modeBindings"]["supervised_evolution"]["availableAgentIds"]
 
 
 def test_agent_delete_api_blocks_core_supervised_judge(tmp_path, monkeypatch):
@@ -1690,8 +1684,8 @@ def test_agent_delete_api_blocks_core_supervised_judge(tmp_path, monkeypatch):
 def test_agent_patch_status_archived_uses_safe_archive_cleanup(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     monkeypatch.setattr(config_service, "get_config_workspace", _fake_config_workspace)
-    supervised = supervised_agent_service.ensure_supervised_agent_instances()
-    reviewer = next(agent for agent in supervised if agent["metadata"].get("supervisedRole") == "reviewer")
+    reviewer_session = session_service.create_chat_session(title="PATCH 归档 Agent")
+    reviewer = agent_directory_service.get_agent(reviewer_session["agentId"])
     peer = session_service.create_chat_session(title="Peer Agent")
     room = chat_room_service.create_chat_room(
         title="PATCH 归档群聊",
@@ -1715,9 +1709,7 @@ def test_agent_patch_status_archived_uses_safe_archive_cleanup(tmp_path, monkeyp
     assert payload["archiveSummary"]["removedFromTeamIds"] == [team["teamId"]]
     archived = agent_directory_service.get_agent(reviewer["agentId"], include_archived=True)
     assert archived["status"] == "archived"
-    bindings = agent_mode_binding_service.get_mode_bindings_payload()["modes"]["supervised_evolution"]
-    assert bindings["slots"]["reviewer"] == ""
-    assert "reviewer" in bindings["excludedSlots"]
+    bindings = agent_mode_binding_service.get_mode_bindings_payload()["modes"]["chat"]
     assert reviewer["agentId"] not in bindings["availableAgentIds"]
     room_detail = chat_room_service.get_chat_room_detail(room["roomId"])
     assert [participant["agentId"] for participant in room_detail["participants"]] == [peer["agentId"]]
@@ -1725,23 +1717,22 @@ def test_agent_patch_status_archived_uses_safe_archive_cleanup(tmp_path, monkeyp
     assert [member["agentId"] for member in team_detail["members"]] == [peer["agentId"]]
 
 
-def test_agent_purge_api_does_not_recreate_deleted_supervised_fixed_role(tmp_path, monkeypatch):
+def test_agent_purge_api_blocks_supervised_fixed_role_agent(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     monkeypatch.setattr(config_service, "get_config_workspace", _fake_config_workspace)
     supervised = supervised_agent_service.ensure_supervised_agent_instances()
     auditor = next(agent for agent in supervised if agent["metadata"].get("supervisedRole") == "auditor")
 
     archive_response = client.delete(f"/api/agents/{auditor['agentId']}")
-    assert archive_response.status_code == 200, archive_response.text
-    purge_response = client.delete(f"/api/agents/{auditor['agentId']}/purge")
-    assert purge_response.status_code == 200, purge_response.text
+    assert archive_response.status_code == 422, archive_response.text
+    assert "Protected core Agent" in archive_response.json()["detail"]
 
     workspace_response = client.get("/api/agents/config-workspace")
     assert workspace_response.status_code == 200, workspace_response.text
-    assert agent_directory_service.get_agent(auditor["agentId"], include_archived=True) is None
+    assert agent_directory_service.get_agent(auditor["agentId"], include_archived=True)["status"] == "active"
     payload = agent_mode_binding_service.get_mode_bindings_payload()["modes"]["supervised_evolution"]
-    assert payload["slots"]["auditor"] == ""
-    assert "auditor" in payload["excludedSlots"]
+    assert payload["slots"]["auditor"] == auditor["agentId"]
+    assert "auditor" not in payload["excludedSlots"]
     workspace = workspace_response.json()
     supervised_agents = [
         item
@@ -1749,28 +1740,37 @@ def test_agent_purge_api_does_not_recreate_deleted_supervised_fixed_role(tmp_pat
         if item.get("primaryMode") == "supervised_evolution"
         and item.get("roleKey") == "auditor"
     ]
-    assert supervised_agents == []
+    assert [item["agentId"] for item in supervised_agents] == [auditor["agentId"]]
 
 
 def test_agent_purge_api_preserves_fixed_role_tombstone_after_legacy_archive(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     monkeypatch.setattr(config_service, "get_config_workspace", _fake_config_workspace)
-    supervised = supervised_agent_service.ensure_supervised_agent_instances()
-    reviewer = next(agent for agent in supervised if agent["metadata"].get("supervisedRole") == "reviewer")
+    reviewer = agent_directory_service.create_agent_instance(
+        display_name="Legacy Archived Reviewer",
+        primary_mode="supervised_evolution",
+        role_key="reviewer",
+    )
     agent_directory_service.archive_agent_instance(reviewer["agentId"])
+    agent_directory_service.update_agent_instance(
+        reviewer["agentId"],
+        metadata={"fixedRole": True, "supervisedRole": "reviewer"},
+    )
     repaired = agent_mode_binding_service.get_mode_bindings_payload()["modes"]["supervised_evolution"]
     assert repaired["slots"]["reviewer"] == ""
 
     purge_response = client.delete(f"/api/agents/{reviewer['agentId']}/purge")
-    assert purge_response.status_code == 200, purge_response.text
+    assert purge_response.status_code == 422, purge_response.text
+    assert "Protected core Agent" in purge_response.json()["detail"]
     workspace_response = client.get("/api/agents/config-workspace")
     assert workspace_response.status_code == 200, workspace_response.text
 
     payload = agent_mode_binding_service.get_mode_bindings_payload()["modes"]["supervised_evolution"]
     assert payload["slots"]["reviewer"] == ""
     assert "reviewer" in payload["excludedSlots"]
+    assert agent_directory_service.get_agent(reviewer["agentId"], include_archived=True)["status"] == "archived"
     workspace = workspace_response.json()
-    assert not [
+    assert [
         item
         for item in workspace["agents"]
         if item.get("primaryMode") == "supervised_evolution"
