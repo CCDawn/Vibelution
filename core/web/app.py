@@ -21,6 +21,7 @@ from .control import WebControlGuardMiddleware, control_token_payload, ensure_co
 from .routes.config import router as config_router
 from .routes.agents import router as agents_router
 from .routes.chat_rooms import router as chat_rooms_router
+from .routes.cli_agents import router as cli_agents_router
 from .routes.computer_use import router as computer_use_router
 from .routes.conversations import router as conversations_router
 from .routes.data_processing import router as data_processing_router
@@ -333,6 +334,9 @@ async def _lifespan(_: FastAPI):
             startup_cache_prewarm_task.cancel()
             with suppress(asyncio.CancelledError):
                 await startup_cache_prewarm_task
+        from .services.cli_agent_terminal_service import shutdown_cli_agent_terminal_sessions
+
+        await asyncio.to_thread(shutdown_cli_agent_terminal_sessions)
         loop.set_exception_handler(previous_handler)
 
 
@@ -380,6 +384,7 @@ def create_app() -> FastAPI:
     app.include_router(conversations_router, prefix="/api")
     app.include_router(sessions_router, prefix="/api")
     app.include_router(chat_rooms_router, prefix="/api")
+    app.include_router(cli_agents_router, prefix="/api")
     app.include_router(project_agent_bus_router, prefix="/api")
     app.include_router(team_templates_router, prefix="/api")
     app.include_router(teams_router, prefix="/api")
