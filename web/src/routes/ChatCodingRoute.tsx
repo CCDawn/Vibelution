@@ -288,8 +288,8 @@ function textArg(args: Record<string, unknown> | undefined, key: string) {
   return "";
 }
 
-function parseCliAgentResult(toolCall: ToolCall): CliAgentRunResult | null {
-  const raw = String(toolCall.resultPreview ?? "").trim();
+function parseCliAgentResultText(value: unknown): CliAgentRunResult | null {
+  const raw = String(value ?? "").trim();
   if (!raw || !raw.startsWith("{")) {
     return null;
   }
@@ -299,6 +299,16 @@ function parseCliAgentResult(toolCall: ToolCall): CliAgentRunResult | null {
   } catch {
     return null;
   }
+}
+
+function parseCliAgentResult(toolCall: ToolCall): CliAgentRunResult | null {
+  for (const candidate of [toolCall.resultPreview, toolCall.summary]) {
+    const parsed = parseCliAgentResultText(candidate);
+    if (parsed) {
+      return parsed;
+    }
+  }
+  return null;
 }
 
 function cliAgentTitle(agentType: string, result: CliAgentRunResult | null) {
