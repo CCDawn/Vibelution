@@ -975,6 +975,14 @@
   overflow: auto;
 }
 
+.gitCommitList,
+.gitWorktreeList {
+  display: grid;
+  gap: 6px;
+  max-height: 126px;
+  overflow: auto;
+}
+
 .gitFileItem {
   display: grid;
   grid-template-columns: 36px minmax(0, 1fr);
@@ -983,6 +991,48 @@
   min-width: 0;
   color: var(--fg-secondary);
   font-size: 0.76rem;
+}
+
+.gitCommitItem,
+.gitWorktreeItem {
+  display: grid;
+  grid-template-columns: 62px minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+  padding: 6px 7px;
+  border: 1px solid color-mix(in srgb, var(--border-soft) 76%, transparent);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--shell-card) 70%, transparent);
+  color: var(--fg-secondary);
+  font-size: 0.74rem;
+}
+
+.gitWorktreeItem {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.gitCommitItem code {
+  color: var(--accent-warm-2);
+  font-size: 0.7rem;
+}
+
+.gitCommitItem span,
+.gitWorktreeItem strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gitWorktreeItem strong {
+  color: var(--fg-primary);
+}
+
+.gitWorktreeItem span {
+  color: var(--accent-warm-2);
+  font-size: 0.7rem;
+  white-space: nowrap;
 }
 
 .gitFileItem code {

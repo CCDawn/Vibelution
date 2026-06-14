@@ -111,11 +111,16 @@ describe("AppShell layout contract", () => {
     expect(utilityMenuSource).toContain('to="/git"');
     expect(utilityMenuSource).toContain('href="/launcher"');
     expect(utilityMenuSource).toContain('target="_blank"');
+    expect(utilityMenuSource).toContain("requiresAttention");
+    expect(utilityMenuSource).toContain("gitStatus.localCommits.commits");
+    expect(utilityMenuSource).toContain("gitStatus.worktrees.items");
     expect(shellSource).toContain('data-browser-role="workbench"');
     expect(styles.utilityTrigger).toBeTypeOf("string");
     expect(styles.utilityPanel).toBeTypeOf("string");
     expect(styles.utilityClusterOpen).toBeTypeOf("string");
     expect(styles.utilityButtonGrid).toBeTypeOf("string");
+    expect(styles.gitCommitList).toBeTypeOf("string");
+    expect(styles.gitWorktreeList).toBeTypeOf("string");
   });
 
   it("keeps active work details out of the primary top bar chip", () => {

@@ -248,6 +248,9 @@ export function GitRoute() {
   const status = statusQuery.data;
   const upstream = status?.upstream;
   const aheadBehind = upstream?.hasUpstream ? `${upstream.ahead} / ${upstream.behind}` : t("gitNoUpstream");
+  const localCommitCount = status?.localCommits?.total ?? upstream?.ahead ?? 0;
+  const worktreeBranchCount = status?.worktrees?.withCommits ?? 0;
+  const worktreeTotalCount = status?.worktrees?.total ?? 0;
   const commitBlockReason = getGitCommitBlockReason(
     selectedCount,
     commitMessage,
@@ -364,6 +367,14 @@ export function GitRoute() {
         <section className={styles.summaryCard}>
           <span>{t("gitAheadBehind")}</span>
           <strong>{aheadBehind}</strong>
+        </section>
+        <section className={styles.summaryCard}>
+          <span>{t("gitLocalCommits")}</span>
+          <strong>{localCommitCount}</strong>
+        </section>
+        <section className={styles.summaryCard}>
+          <span>{t("gitWorktreeBranches")}</span>
+          <strong>{worktreeBranchCount} / {worktreeTotalCount}</strong>
         </section>
       </div>
 

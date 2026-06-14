@@ -23,6 +23,8 @@ GIT_STATUS_SNAPSHOT_CACHE_TTL_SECONDS = 1.5
 GIT_STATUS_METADATA_CACHE_TTL_SECONDS = 30.0
 DEFAULT_COMMIT_LIMIT = 20
 MAX_COMMIT_LIMIT = 60
+STATUS_LOCAL_COMMIT_LIMIT = 5
+STATUS_WORKTREE_LIMIT = 12
 MAX_DIFF_CHARS = 180_000
 MAX_AI_DIFF_CHARS = 24_000
 MAX_AI_FILE_DIFF_CHARS = 8_000
@@ -130,6 +132,9 @@ def _cached_git_status_metadata(service: Any, snapshot: Any) -> dict[str, Any]:
         "headRev": head_rev,
         "upstream": _upstream_payload(service, branch),
     }
+    upstream = payload["upstream"]
+    payload["localCommits"] = _local_commits_payload(service, upstream)
+    payload["worktrees"] = _worktrees_payload(service, branch)
     with _GIT_STATUS_CACHE_LOCK:
         _GIT_STATUS_METADATA_CACHE.clear()
         _GIT_STATUS_METADATA_CACHE.update(
@@ -336,6 +341,10 @@ def get_git_status(limit: int | None = DEFAULT_STATUS_LIMIT) -> dict[str, Any]:
     counts = _status_counts(files)
     dirty = bool(files)
     visible_files = _limit_files(files, limit)
+    upstream = metadata.get("upstream") if isinstance(metadata.get("upstream"), dict) else _empty_upstream()
+    local_commits = metadata.get("localCommits") if isinstance(metadata.get("localCommits"), dict) else _empty_local_commits()
+    worktrees = metadata.get("worktrees") if isinstance(metadata.get("worktrees"), dict) else _empty_worktrees()
+    status_level = _status_level(snapshot, counts, upstream, worktrees)
 
     return {
         "available": bool(snapshot.available),
@@ -343,12 +352,16 @@ def get_git_status(limit: int | None = DEFAULT_STATUS_LIMIT) -> dict[str, Any]:
         "branch": branch,
         "headRev": head_rev or snapshot.base_rev or "",
         "headRevShort": _short_rev(head_rev or snapshot.base_rev),
-        "upstream": metadata.get("upstream") if isinstance(metadata.get("upstream"), dict) else _empty_upstream(),
+        "upstream": upstream,
         "snapshotId": snapshot.snapshot_id,
         "createdAt": snapshot.created_at,
         "dirty": dirty,
-        "summary": _summary(snapshot, counts),
+        "requiresAttention": status_level not in {"clean", "unavailable"},
+        "statusLevel": status_level,
+        "summary": _summary(snapshot, counts, upstream=upstream, worktrees=worktrees),
         "counts": counts,
+        "localCommits": local_commits,
+        "worktrees": worktrees,
         "files": visible_files,
         "totalFiles": len(files),
         "truncated": len(visible_files) < len(files),
@@ -378,20 +391,7 @@ def get_git_commits(limit: int = DEFAULT_COMMIT_LIMIT) -> dict[str, Any]:
             "commits": [],
         }
 
-    commits: list[dict[str, Any]] = []
-    for raw in result.stdout.splitlines():
-        parts = raw.split("\x1f", 4)
-        if len(parts) < 5:
-            continue
-        commits.append(
-            {
-                "sha": parts[0],
-                "shortSha": parts[1],
-                "author": parts[2],
-                "authoredAt": parts[3],
-                "subject": parts[4],
-            }
-        )
+    commits = _parse_commit_lines(result.stdout)
     return {"available": True, "error": "", "commits": commits}
 
 
@@ -692,6 +692,28 @@ def _empty_upstream() -> dict[str, Any]:
     }
 
 
+def _empty_local_commits() -> dict[str, Any]:
+    return {
+        "available": True,
+        "error": "",
+        "total": 0,
+        "commits": [],
+        "truncated": False,
+    }
+
+
+def _empty_worktrees() -> dict[str, Any]:
+    return {
+        "available": True,
+        "error": "",
+        "total": 0,
+        "external": 0,
+        "withCommits": 0,
+        "items": [],
+        "truncated": False,
+    }
+
+
 def _upstream_payload(service: Any, branch: str) -> dict[str, Any]:
     payload = _empty_upstream()
     upstream_result = _safe_run_git(service, ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"])
@@ -721,11 +743,164 @@ def _upstream_payload(service: Any, branch: str) -> dict[str, Any]:
     return payload
 
 
+def _local_commits_payload(service: Any, upstream: dict[str, Any]) -> dict[str, Any]:
+    payload = _empty_local_commits()
+    total = max(0, _safe_int(str(upstream.get("ahead") or "0")))
+    payload["total"] = total
+    if total <= 0:
+        return payload
+    upstream_name = str(upstream.get("name") or "").strip()
+    if not upstream_name:
+        return payload
+    result = _safe_run_git(
+        service,
+        [
+            "log",
+            f"--max-count={STATUS_LOCAL_COMMIT_LIMIT}",
+            "--date=iso-strict",
+            "--pretty=format:%H%x1f%h%x1f%aN%x1f%aI%x1f%s",
+            f"{upstream_name}..HEAD",
+        ],
+    )
+    if result is None or result.returncode != 0:
+        payload["available"] = False
+        payload["error"] = _git_error(result) or "git log failed"
+        return payload
+    payload["commits"] = _parse_commit_lines(result.stdout)
+    payload["truncated"] = total > len(payload["commits"])
+    return payload
+
+
+def _worktrees_payload(service: Any, current_branch: str) -> dict[str, Any]:
+    result = _safe_run_git(service, ["worktree", "list", "--porcelain"])
+    if result is None or result.returncode != 0:
+        payload = _empty_worktrees()
+        payload["available"] = False
+        payload["error"] = _git_error(result) or "git worktree list failed"
+        return payload
+    entries = _parse_worktree_list(result.stdout)
+    branches_with_commits = _branches_not_merged_main(service)
+    items: list[dict[str, Any]] = []
+    for entry in entries:
+        path = str(entry.get("worktree") or "").strip()
+        if not path:
+            continue
+        branch_ref = str(entry.get("branch") or "").strip()
+        branch = _display_branch(branch_ref)
+        head_rev = str(entry.get("HEAD") or "").strip()
+        is_main_worktree = _same_path(path, PROJECT_ROOT)
+        has_commits = branch in branches_with_commits
+        items.append(
+            {
+                "path": path,
+                "branch": branch or (f"detached@{_short_rev(head_rev)}" if head_rev else ""),
+                "branchRef": branch_ref,
+                "headRev": head_rev,
+                "headRevShort": _short_rev(head_rev),
+                "isMain": is_main_worktree,
+                "isCurrent": branch == current_branch,
+                "aheadMain": 0,
+                "behindMain": 0,
+                "hasCommits": has_commits,
+            }
+        )
+    items.sort(key=lambda item: (not bool(item["isMain"]), not bool(item["hasCommits"]), str(item["branch"])))
+    with_commits = sum(1 for item in items if item["hasCommits"])
+    visible = items[:STATUS_WORKTREE_LIMIT]
+    for item in visible:
+        branch = str(item.get("branch") or "").strip()
+        relation = _branch_main_relation(service, branch)
+        item["aheadMain"] = relation["ahead"]
+        item["behindMain"] = relation["behind"]
+        item["hasCommits"] = bool(item["hasCommits"]) or relation["ahead"] > 0
+    return {
+        "available": True,
+        "error": "",
+        "total": len(items),
+        "external": sum(1 for item in items if not item["isMain"]),
+        "withCommits": with_commits,
+        "items": visible,
+        "truncated": len(visible) < len(items),
+    }
+
+
+def _parse_worktree_list(stdout: str) -> list[dict[str, str]]:
+    entries: list[dict[str, str]] = []
+    current: dict[str, str] = {}
+    for raw_line in str(stdout or "").splitlines():
+        line = raw_line.strip()
+        if not line:
+            if current:
+                entries.append(current)
+                current = {}
+            continue
+        if " " not in line:
+            current[line] = "true"
+            continue
+        key, value = line.split(" ", 1)
+        current[key] = value.strip()
+    if current:
+        entries.append(current)
+    return entries
+
+
+def _display_branch(branch_ref: str) -> str:
+    text = str(branch_ref or "").strip()
+    if text.startswith("refs/heads/"):
+        return text.removeprefix("refs/heads/")
+    return text
+
+
+def _branch_main_relation(service: Any, branch: str) -> dict[str, int]:
+    normalized = str(branch or "").strip()
+    if not normalized or normalized == "main":
+        return {"ahead": 0, "behind": 0}
+    result = _safe_run_git(service, ["rev-list", "--left-right", "--count", f"main...{normalized}"])
+    if result is None or result.returncode != 0:
+        return {"ahead": 0, "behind": 0}
+    parts = result.stdout.strip().split()
+    if len(parts) < 2:
+        return {"ahead": 0, "behind": 0}
+    return {"behind": _safe_int(parts[0]), "ahead": _safe_int(parts[1])}
+
+
+def _branches_not_merged_main(service: Any) -> set[str]:
+    result = _safe_run_git(service, ["branch", "--no-merged", "main", "--format=%(refname:short)"])
+    if result is None or result.returncode != 0:
+        return set()
+    return {line.strip() for line in result.stdout.splitlines() if line.strip()}
+
+
+def _same_path(path: str, target: Path) -> bool:
+    try:
+        return Path(path).resolve() == target.resolve()
+    except OSError:
+        return False
+
+
 def _safe_int(value: str) -> int:
     try:
         return int(value)
     except (TypeError, ValueError):
         return 0
+
+
+def _parse_commit_lines(stdout: str) -> list[dict[str, Any]]:
+    commits: list[dict[str, Any]] = []
+    for raw in str(stdout or "").splitlines():
+        parts = raw.split("\x1f", 4)
+        if len(parts) < 5:
+            continue
+        commits.append(
+            {
+                "sha": parts[0],
+                "shortSha": parts[1],
+                "author": parts[2],
+                "authoredAt": parts[3],
+                "subject": parts[4],
+            }
+        )
+    return commits
 
 
 def _safe_run_git(service: Any, args: list[str]) -> Any | None:
@@ -1029,19 +1204,61 @@ def _status_counts(files: list[dict[str, Any]]) -> dict[str, int]:
     return counts
 
 
-def _summary(snapshot: WorkingTreeSnapshot, counts: dict[str, int]) -> str:
+def _status_level(
+    snapshot: WorkingTreeSnapshot,
+    counts: dict[str, int],
+    upstream: dict[str, Any],
+    worktrees: dict[str, Any],
+) -> str:
+    if not snapshot.available:
+        return "unavailable"
+    if counts["total"] > 0:
+        return "dirty"
+    ahead = _safe_int(str(upstream.get("ahead") or "0"))
+    behind = _safe_int(str(upstream.get("behind") or "0"))
+    if ahead > 0 and behind > 0:
+        return "diverged"
+    if ahead > 0:
+        return "local_commits"
+    if _safe_int(str(worktrees.get("withCommits") or "0")) > 0:
+        return "worktree_commits"
+    if behind > 0:
+        return "behind"
+    return "clean"
+
+
+def _summary(
+    snapshot: WorkingTreeSnapshot,
+    counts: dict[str, int],
+    *,
+    upstream: dict[str, Any],
+    worktrees: dict[str, Any],
+) -> str:
     if not snapshot.available:
         return f"Git unavailable: {snapshot.error or 'unknown'}"
-    if counts["total"] == 0:
-        return "工作区干净"
     parts: list[str] = []
-    if counts["staged"]:
-        parts.append(f"staged {counts['staged']}")
-    if counts["unstaged"]:
-        parts.append(f"unstaged {counts['unstaged']}")
-    if counts["untracked"]:
-        parts.append(f"untracked {counts['untracked']}")
-    if counts["deleted"]:
-        parts.append(f"deleted {counts['deleted']}")
-    detail = " / ".join(parts) if parts else "changed"
-    return f"{counts['total']} 个变化文件，{detail}"
+    if counts["total"] == 0:
+        parts.append("工作区干净")
+    else:
+        change_parts: list[str] = []
+        if counts["staged"]:
+            change_parts.append(f"staged {counts['staged']}")
+        if counts["unstaged"]:
+            change_parts.append(f"unstaged {counts['unstaged']}")
+        if counts["untracked"]:
+            change_parts.append(f"untracked {counts['untracked']}")
+        if counts["deleted"]:
+            change_parts.append(f"deleted {counts['deleted']}")
+        detail = " / ".join(change_parts) if change_parts else "changed"
+        parts.append(f"{counts['total']} 个变化文件，{detail}")
+    upstream_name = str(upstream.get("name") or upstream.get("remote") or "").strip()
+    ahead = _safe_int(str(upstream.get("ahead") or "0"))
+    behind = _safe_int(str(upstream.get("behind") or "0"))
+    if ahead > 0:
+        parts.append(f"本地 {upstream_name or 'upstream'} 前方 {ahead} 个提交")
+    if behind > 0:
+        parts.append(f"落后 {upstream_name or 'upstream'} {behind} 个提交")
+    worktree_commits = _safe_int(str(worktrees.get("withCommits") or "0"))
+    if worktree_commits > 0:
+        parts.append(f"{worktree_commits} 个 worktree 分支有待合入提交")
+    return "；".join(parts)

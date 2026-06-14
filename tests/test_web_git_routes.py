@@ -53,6 +53,32 @@ def test_git_status_endpoint_exposes_read_only_worktree_snapshot(monkeypatch):
                 return SimpleNamespace(returncode=0, stdout="origin/codex/git-navbar\n")
             if args == ["rev-list", "--left-right", "--count", "origin/codex/git-navbar...HEAD"]:
                 return SimpleNamespace(returncode=0, stdout="1\t2\n")
+            if args == [
+                "log",
+                "--max-count=5",
+                "--date=iso-strict",
+                "--pretty=format:%H%x1f%h%x1f%aN%x1f%aI%x1f%s",
+                "origin/codex/git-navbar..HEAD",
+            ]:
+                return SimpleNamespace(
+                    returncode=0,
+                    stdout="abcdef1234567890\x1fabcdef1\x1fAgent\x1f2026-05-21T10:00:00+08:00\x1ffeat: local git ui\n",
+                    stderr="",
+                )
+            if args == ["worktree", "list", "--porcelain"]:
+                return SimpleNamespace(
+                    returncode=0,
+                    stdout=(
+                        "worktree C:/Users/17533/Desktop/Vibelution\n"
+                        "HEAD abcdef1234567890\n"
+                        "branch refs/heads/codex/git-navbar\n"
+                    ),
+                    stderr="",
+                )
+            if args == ["branch", "--no-merged", "main", "--format=%(refname:short)"]:
+                return SimpleNamespace(returncode=0, stdout="codex/git-navbar\n", stderr="")
+            if args == ["rev-list", "--left-right", "--count", "main...codex/git-navbar"]:
+                return SimpleNamespace(returncode=0, stdout="0\t1\n", stderr="")
             raise AssertionError(args)
 
     monkeypatch.setattr(git_status_service, "get_git_memory_service", lambda: FakeGitStatusService())
@@ -68,6 +94,11 @@ def test_git_status_endpoint_exposes_read_only_worktree_snapshot(monkeypatch):
     assert payload["upstream"]["ahead"] == 2
     assert payload["upstream"]["behind"] == 1
     assert payload["dirty"] is True
+    assert payload["requiresAttention"] is True
+    assert payload["statusLevel"] == "dirty"
+    assert payload["localCommits"]["total"] == 2
+    assert payload["localCommits"]["commits"][0]["shortSha"] == "abcdef1"
+    assert payload["worktrees"]["withCommits"] == 1
     assert payload["counts"] == {
         "total": 2,
         "staged": 0,
@@ -79,6 +110,88 @@ def test_git_status_endpoint_exposes_read_only_worktree_snapshot(monkeypatch):
     assert payload["files"][0]["statusLabel"] == "modified"
     assert payload["totalFiles"] == 2
     assert payload["truncated"] is True
+
+
+def test_git_status_endpoint_marks_local_main_and_worktree_commits_as_attention(monkeypatch):
+    git_status_service._clear_git_status_cache()
+    project_root = str(git_status_service.PROJECT_ROOT).replace("\\", "/")
+
+    class FakeGitStatusService:
+        def scan_working_tree(self, store=False):
+            assert store is False
+            return SimpleNamespace(
+                available=True,
+                error=None,
+                snapshot_id="wt-clean-local",
+                created_at="2026-06-14T05:00:00",
+                base_rev="9469ddb51234567890",
+                files=[],
+            )
+
+        def _git_head_rev(self):
+            return "9469ddb51234567890"
+
+        def _run_git(self, args):
+            if args == ["branch", "--show-current"]:
+                return SimpleNamespace(returncode=0, stdout="main\n", stderr="")
+            if args == ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"]:
+                return SimpleNamespace(returncode=0, stdout="origin/main\n", stderr="")
+            if args == ["rev-list", "--left-right", "--count", "origin/main...HEAD"]:
+                return SimpleNamespace(returncode=0, stdout="0\t11\n", stderr="")
+            if args == [
+                "log",
+                "--max-count=5",
+                "--date=iso-strict",
+                "--pretty=format:%H%x1f%h%x1f%aN%x1f%aI%x1f%s",
+                "origin/main..HEAD",
+            ]:
+                return SimpleNamespace(
+                    returncode=0,
+                    stdout=(
+                        "9469ddb51234567890\x1f9469ddb\x1fAgent\x1f2026-06-14T13:40:00+08:00\x1ftest: align git status\n"
+                        "020a7d47dfa776c9\x1f020a7d4\x1fAgent\x1f2026-06-14T13:34:38+08:00\x1fmerge: compact trace UI"
+                    ),
+                    stderr="",
+                )
+            if args == ["worktree", "list", "--porcelain"]:
+                return SimpleNamespace(
+                    returncode=0,
+                    stdout=(
+                        f"worktree {project_root}\n"
+                        "HEAD 9469ddb51234567890\n"
+                        "branch refs/heads/main\n"
+                        "\n"
+                        "worktree C:/Users/17533/Desktop/Vibelution-worktrees/demo\n"
+                        "HEAD 1111111111111111\n"
+                        "branch refs/heads/codex/demo\n"
+                    ),
+                    stderr="",
+                )
+            if args == ["branch", "--no-merged", "main", "--format=%(refname:short)"]:
+                return SimpleNamespace(returncode=0, stdout="codex/demo\n", stderr="")
+            if args == ["rev-list", "--left-right", "--count", "main...codex/demo"]:
+                return SimpleNamespace(returncode=0, stdout="3\t2\n", stderr="")
+            raise AssertionError(args)
+
+    monkeypatch.setattr(git_status_service, "get_git_memory_service", lambda: FakeGitStatusService())
+
+    response = client.get("/api/git/status", params={"limit": 10})
+
+    assert response.status_code == 200, response.json()
+    payload = response.json()
+    assert payload["dirty"] is False
+    assert payload["requiresAttention"] is True
+    assert payload["statusLevel"] == "local_commits"
+    assert payload["summary"] == "工作区干净；本地 origin/main 前方 11 个提交；1 个 worktree 分支有待合入提交"
+    assert payload["upstream"]["ahead"] == 11
+    assert payload["localCommits"]["total"] == 11
+    assert [item["shortSha"] for item in payload["localCommits"]["commits"]] == ["9469ddb", "020a7d4"]
+    assert payload["worktrees"]["total"] == 2
+    assert payload["worktrees"]["external"] == 1
+    assert payload["worktrees"]["withCommits"] == 1
+    assert payload["worktrees"]["items"][1]["branch"] == "codex/demo"
+    assert payload["worktrees"]["items"][1]["aheadMain"] == 2
+    assert payload["worktrees"]["items"][1]["behindMain"] == 3
 
 
 def test_git_status_endpoint_reports_unavailable(monkeypatch):
