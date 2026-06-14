@@ -25,6 +25,7 @@ from core.web.services.config_service import (
     update_intake_mode,
     update_language,
 )
+from core.web.services.model_reference_service import ModelReferenceConflictError
 
 
 router = APIRouter(tags=["config"])
@@ -95,6 +96,8 @@ class ConfigAvatarImagePayload(BaseModel):
 
 
 def _raise_config_http_error(exc: Exception) -> None:
+    if isinstance(exc, ModelReferenceConflictError):
+        raise HTTPException(status_code=409, detail=exc.impact) from exc
     if isinstance(exc, ConfigConflictError):
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     raise HTTPException(status_code=422, detail=str(exc)) from exc
