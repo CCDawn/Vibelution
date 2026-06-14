@@ -245,6 +245,82 @@ export type MemoryUsageContractPayload = {
   };
 };
 
+export type MemoryCleanupTargetRequest = {
+  targetType:
+    | "global_runtime_memory"
+    | "agent_private_memory"
+    | "agent_formal_knowledge"
+    | "team_knowledge"
+    | "knowledge_base"
+    | "agent_memory_policy"
+    | string;
+  agentId?: string;
+  teamId?: string;
+  ownerType?: "team" | "agent" | string;
+  ownerId?: string;
+  knowledgeBaseId?: string;
+  scopedKnowledgeBaseId?: string;
+};
+
+export type MemoryCleanupPathResult = {
+  path: string;
+  kind: string;
+  action: string;
+  status?: "preview" | "deleted" | "skipped" | "failed" | string;
+  note?: string;
+  message?: string;
+  exists: boolean;
+  fileCount: number;
+  byteCount: number;
+  rowCount: number;
+};
+
+export type MemoryCleanupCounts = {
+  pathCount: number;
+  fileCount: number;
+  byteCount: number;
+  rowCount: number;
+  databaseRowCount: number;
+  knowledgeBaseCount: number;
+  knowledgeItemCount: number;
+  sourceArtifactCount: number;
+  proposalCount: number;
+  batchCount: number;
+  ratingSuggestionCount: number;
+  vectorRecordCount: number;
+  memoryPolicyResetCount: number;
+};
+
+export type MemoryCleanupTargetResult = {
+  targetKey: string;
+  targetType: string;
+  label: string;
+  ownerType: string;
+  ownerId: string;
+  agentId: string;
+  teamId: string;
+  knowledgeBaseId: string;
+  scopedKnowledgeBaseId: string;
+  status: "preview" | "executed" | string;
+  paths: MemoryCleanupPathResult[];
+  counts: MemoryCleanupCounts;
+  warnings: string[];
+};
+
+export type MemoryCleanupPreviewResponse = {
+  schemaVersion: number;
+  mode: string;
+  hardDelete: boolean;
+  confirmationPhrase: string;
+  targets: MemoryCleanupTargetResult[];
+  totals: MemoryCleanupCounts & { targetCount: number };
+  operatingBoundary: Record<string, boolean | string>;
+  generatedAt: string;
+  elapsedMs: number;
+};
+
+export type MemoryCleanupExecuteResponse = MemoryCleanupPreviewResponse;
+
 export type KnowledgeBasePermissions = {
   canRead: boolean;
   canPropose: boolean;
