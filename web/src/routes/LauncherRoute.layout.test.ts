@@ -203,15 +203,25 @@ describe("LauncherRoute layout contract", () => {
     expect(routeSource).toContain("title={row.technical}");
     expect(routeSource).not.toContain("<p className={styles.subtitle}>{lifecycleDisplay.detail || copy.subtitle}</p>");
     expect(routeSource).not.toContain("<small>{userGuideDetail}</small>");
-    expect(routeStylesSource).toContain(".notice span");
+    expect(routeSource).not.toContain("{notice.text !== noticeTextShort ? <span>{copy.technicalDetailAvailable}</span> : null}");
   });
 
-  it("keeps the current guidance strip readable on narrow screens", () => {
-    expect(routeStylesSource).toContain(".userGuide small");
+  it("keeps guidance terse while preserving detail in hover titles", () => {
+    expect(routeSource).toContain('className={styles.userGuide} data-tone={userGuideTone} title={userGuideDetail}');
+    expect(routeSource).not.toContain("<small title={userGuideDetail}>{userGuideDetailShort}</small>");
     expect(routeStylesSource).toContain(".userGuide em");
     expect(routeStylesSource).toContain("overflow-wrap: anywhere");
     expect(routeStylesSource).toContain("white-space: normal");
     expect(routeStylesSource).toContain("grid-column: auto");
+  });
+
+  it("uses a light dense Launcher surface with muted action buttons", () => {
+    expect(routeStylesSource).toContain("--surface-page: #f6f8fb");
+    expect(routeStylesSource).toContain("--surface-header: rgba(255, 255, 255, 0.94)");
+    expect(routeStylesSource).toContain("background: color-mix(in srgb, var(--accent-primary) 10%, #ffffff)");
+    expect(routeStylesSource).toContain("background: color-mix(in srgb, var(--danger) 7%, #ffffff)");
+    expect(routeStylesSource).toContain("min-height: 28px");
+    expect(routeStylesSource).toContain("padding: 4px 8px");
   });
 
   it("keeps the complete launcher surface reachable when the window is short", () => {
@@ -222,7 +232,7 @@ describe("LauncherRoute layout contract", () => {
     expect(routeStylesSource).toContain("overscroll-behavior: contain");
     expect(routeStylesSource).toContain("scrollbar-gutter: stable");
     expect(routeStylesSource).toContain("padding-bottom: max(12px, env(safe-area-inset-bottom))");
-    expect(routeStylesSource).toContain("padding: 8px 12px max(16px, env(safe-area-inset-bottom))");
+    expect(routeStylesSource).toContain("padding: 6px 12px max(14px, env(safe-area-inset-bottom))");
     expect(routeStylesSource).toContain("overflow: visible");
     expect(routeStylesSource).not.toContain("grid-template-rows: auto auto auto auto auto minmax(0, 1fr)");
   });
