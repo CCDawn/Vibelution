@@ -2006,6 +2006,7 @@ export function ChatCodingRoute() {
   const [leftRailCollapsed, setLeftRailCollapsed] = useState(false);
   const [rightPaneCollapsed, setRightPaneCollapsed] = useState(false);
   const [centerFirstLayout, setCenterFirstLayout] = useState(false);
+  const [cacheDetailOpen, setCacheDetailOpen] = useState(false);
   const centerFirstAutoCollapseRef = useRef(false);
   const imageUploadInFlightRef = useRef<Record<string, boolean>>({});
   const [sessionDrafts, setSessionDrafts] = useState<Record<string, string>>({});
@@ -4093,6 +4094,9 @@ export function ChatCodingRoute() {
   const cacheCompositionComputedLabel = lang === "zh" ? "计" : "calc";
   const cacheCompositionAverageLabel = lang === "zh" ? "均" : "avg";
   const cacheCompositionAverageValue = averageCacheObservedTurnCount > 0 ? `${averageCacheCompositionPercent}%` : "--";
+  const cacheDetailAvailable = Boolean(lastCacheComposition);
+  const cacheDetailDialogTitle = lang === "zh" ? "缓存命中详情" : "Cache hit details";
+  const cacheDetailOpenLabel = lang === "zh" ? "查看上一轮缓存命中详情" : "View previous cache hit details";
   const cacheCompositionSummary = lastCacheComposition
     ? lastCacheComposition.source === "provider_usage"
       ? `${cacheCompositionTrueLabel} ${cacheCompositionPercent}% · ${cacheCompositionComputedLabel} ${computedCacheCompositionPercent}% · ${cacheCompositionAverageLabel} ${cacheCompositionAverageValue}`
@@ -4114,6 +4118,27 @@ export function ChatCodingRoute() {
         ? t("cacheHitNotCalled")
       : t("cacheHitMissing")
     : t("cacheObservationPending");
+  const closeCacheDetail = useCallback(() => setCacheDetailOpen(false), []);
+  const openCacheDetail = useCallback(() => {
+    if (cacheDetailAvailable) {
+      setCacheDetailOpen(true);
+    }
+  }, [cacheDetailAvailable]);
+  useEffect(() => {
+    if (!cacheDetailOpen) {
+      return undefined;
+    }
+    function handleCacheDetailKeyDown(event: globalThis.KeyboardEvent) {
+      if (event.key === "Escape") {
+        closeCacheDetail();
+      }
+    }
+    window.addEventListener("keydown", handleCacheDetailKeyDown);
+    return () => window.removeEventListener("keydown", handleCacheDetailKeyDown);
+  }, [cacheDetailOpen, closeCacheDetail]);
+  useEffect(() => {
+    setCacheDetailOpen(false);
+  }, [activeSessionId]);
   const pendingToolApproval = useMemo(
     () => (detail?.pendingToolGovernanceRequests ?? []).find((request) => request.status === "pending_review") ?? null,
     [detail?.pendingToolGovernanceRequests],
@@ -5885,13 +5910,23 @@ export function ChatCodingRoute() {
                   ) : null}
                 </div>
 
-                <div className={styles.contextCompositionItem} title={cacheCompositionTitle}>
+                <div className={styles.contextCompositionItem}>
                   <div className={styles.contextCompositionHeader}>
                     <span>{t("previousCacheHit")}</span>
                     <strong>{cacheCompositionSummary}</strong>
                   </div>
                   <div className={styles.cacheDonutPanel}>
-                    <div className={styles.cacheDonutShell}>
+                    <button
+                      type="button"
+                      className={styles.cacheDonutTrigger}
+                      onClick={openCacheDetail}
+                      disabled={!cacheDetailAvailable}
+                      aria-label={cacheDetailOpenLabel}
+                      aria-expanded={cacheDetailOpen}
+                      aria-controls={cacheDetailOpen ? "cache-detail-dialog" : undefined}
+                      title={cacheDetailOpenLabel}
+                    >
+                    <span className={styles.cacheDonutShell}>
                       <svg
                         className={styles.cacheDonutSvg}
                         viewBox="0 0 100 100"
@@ -5908,9 +5943,7 @@ export function ChatCodingRoute() {
                             r="42"
                             pathLength={100}
                             style={cacheDonutSegmentStyle(segment, computedCacheDonutSegments.length > 1 ? 0.55 : 0)}
-                          >
-                            <title>{cacheDonutSegmentTitle(segment, computedCacheCompositionTotalTokens, numberFormatter, lang)}</title>
-                          </circle>
+                          />
                         ))}
                         <circle className={`${styles.cacheDonutTrack} ${styles.cacheDonutInnerTrack}`} cx="50" cy="50" r="31" pathLength={100} />
                         {trueCacheDonutSegments.map((segment, index) => (
@@ -5922,27 +5955,26 @@ export function ChatCodingRoute() {
                             r="31"
                             pathLength={100}
                             style={cacheDonutSegmentStyle(segment, trueCacheDonutSegments.length > 1 ? 0.4 : 0)}
-                          >
-                            <title>{cacheDonutSegmentTitle(segment, providerCacheInputTokens, numberFormatter, lang)}</title>
-                          </circle>
+                          />
                         ))}
                       </svg>
-                      <div className={styles.cacheDonutCenter} title={cacheCompositionTitle}>
+                      <div className={styles.cacheDonutCenter} title={cacheDetailOpenLabel}>
                         <strong>{cacheCompositionPercent}%</strong>
                         <span>{cacheCompositionComputedLabel} {computedCacheCompositionPercent}%</span>
                         <small>{cacheCompositionAverageLabel} {cacheCompositionAverageValue}</small>
                       </div>
-                    </div>
+                    </span>
+                    </button>
                     <div className={styles.cacheDonutStats}>
-                      <span title={cacheCompositionTitle}>
+                      <span title={cacheDetailOpenLabel}>
                         <b>{lang === "zh" ? "真实" : "true"}</b>
                         {numberFormatter.format(providerCachedInputTokens)} / {numberFormatter.format(providerCacheInputTokens)}
                       </span>
-                      <span title={cacheCompositionTitle}>
+                      <span title={cacheDetailOpenLabel}>
                         <b>{lang === "zh" ? "计算" : "calc"}</b>
                         {numberFormatter.format(lastCacheComposition?.computedCachedInputTokens ?? 0)} / {numberFormatter.format(computedCacheCompositionTotalTokens)}
                       </span>
-                      <span title={cacheCompositionTitle}>
+                      <span title={cacheDetailOpenLabel}>
                         <b>{lang === "zh" ? "总均" : "avg"}</b>
                         {cacheCompositionAverageValue}
                         {averageCacheObservedTurnCount > 0 ? ` · ${numberFormatter.format(averageCacheObservedTurnCount)}` : ""}
@@ -7347,8 +7379,155 @@ export function ChatCodingRoute() {
             )}
             </>
           )}
+          </div>
+        </aside>
+      {cacheDetailOpen && cacheDetailAvailable ? (
+        <div className={styles.cacheDetailOverlay} role="presentation" onClick={closeCacheDetail}>
+          <section
+            id="cache-detail-dialog"
+            className={styles.cacheDetailDialog}
+            role="dialog"
+            aria-modal="true"
+            aria-label={cacheDetailDialogTitle}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <header className={styles.cacheDetailHeader}>
+              <div>
+                <p>{t("previousCacheHit")}</p>
+                <h3>{cacheDetailDialogTitle}</h3>
+              </div>
+              <button
+                type="button"
+                className={styles.cacheDetailCloseButton}
+                onClick={closeCacheDetail}
+                aria-label={lang === "zh" ? "关闭缓存详情" : "Close cache details"}
+              >
+                <X size={16} />
+              </button>
+            </header>
+
+            <div className={styles.cacheDetailSummaryGrid}>
+              <div>
+                <span>{lang === "zh" ? "真实命中" : "True hit"}</span>
+                <strong>{cacheCompositionPercent}%</strong>
+                <small>{numberFormatter.format(providerCachedInputTokens)} / {numberFormatter.format(providerCacheInputTokens)}</small>
+              </div>
+              <div>
+                <span>{lang === "zh" ? "计算命中" : "Computed hit"}</span>
+                <strong>{computedCacheCompositionPercent}%</strong>
+                <small>{numberFormatter.format(lastCacheComposition?.computedCachedInputTokens ?? 0)} / {numberFormatter.format(computedCacheCompositionTotalTokens)}</small>
+              </div>
+              <div>
+                <span>{lang === "zh" ? "总平均命中" : "Average hit"}</span>
+                <strong>{cacheCompositionAverageValue}</strong>
+                <small>{lang === "zh" ? "轮次" : "turns"} {numberFormatter.format(averageCacheObservedTurnCount)}</small>
+              </div>
+            </div>
+
+            <div className={styles.cacheDetailBody}>
+              <div className={styles.cacheDetailDonutPanel}>
+                <div className={styles.cacheDetailDonutShell}>
+                  <svg
+                    className={`${styles.cacheDonutSvg} ${styles.cacheDetailDonutSvg}`}
+                    viewBox="0 0 100 100"
+                    role="img"
+                    aria-label={cacheCompositionTitle}
+                  >
+                    <circle className={`${styles.cacheDonutTrack} ${styles.cacheDonutOuterTrack}`} cx="50" cy="50" r="42" pathLength={100} />
+                    {computedCacheDonutSegments.map((segment, index) => (
+                      <circle
+                        key={`detail-computed-${segment.key}-${segment.status}-${index}`}
+                        className={`${styles.cacheDonutSegment} ${styles.cacheDonutOuterSegment} ${cacheDonutComputedSegmentClass(segment.key)}`}
+                        cx="50"
+                        cy="50"
+                        r="42"
+                        pathLength={100}
+                        style={cacheDonutSegmentStyle(segment, computedCacheDonutSegments.length > 1 ? 0.55 : 0)}
+                      >
+                        <title>{cacheDonutSegmentTitle(segment, computedCacheCompositionTotalTokens, numberFormatter, lang)}</title>
+                      </circle>
+                    ))}
+                    <circle className={`${styles.cacheDonutTrack} ${styles.cacheDonutInnerTrack}`} cx="50" cy="50" r="31" pathLength={100} />
+                    {trueCacheDonutSegments.map((segment, index) => (
+                      <circle
+                        key={`detail-true-${segment.key}-${segment.status}-${index}`}
+                        className={`${styles.cacheDonutSegment} ${styles.cacheDonutInnerSegment} ${cacheDonutSegmentClass(segment.status || segment.key)}`}
+                        cx="50"
+                        cy="50"
+                        r="31"
+                        pathLength={100}
+                        style={cacheDonutSegmentStyle(segment, trueCacheDonutSegments.length > 1 ? 0.4 : 0)}
+                      >
+                        <title>{cacheDonutSegmentTitle(segment, providerCacheInputTokens, numberFormatter, lang)}</title>
+                      </circle>
+                    ))}
+                  </svg>
+                  <div className={`${styles.cacheDonutCenter} ${styles.cacheDetailDonutCenter}`} title={cacheCompositionTitle}>
+                    <strong>{cacheCompositionPercent}%</strong>
+                    <span>{cacheCompositionComputedLabel} {computedCacheCompositionPercent}%</span>
+                    <small>{cacheCompositionAverageLabel} {cacheCompositionAverageValue}</small>
+                  </div>
+                </div>
+                <p>{cacheCompositionTitle}</p>
+              </div>
+
+              <div className={styles.cacheDetailSegmentList}>
+                <section className={styles.cacheDetailSegmentGroup}>
+                  <div className={styles.cacheDetailSegmentHeader}>
+                    <strong>{lang === "zh" ? "计算拼接段" : "Computed prefix segments"}</strong>
+                    <span>{numberFormatter.format(computedCacheCompositionTotalTokens)} tokens</span>
+                  </div>
+                  {computedCacheDonutSegments.length ? (
+                    computedCacheDonutSegments.map((segment, index) => (
+                      <div
+                        key={`detail-computed-row-${segment.key}-${segment.status}-${index}`}
+                        className={styles.cacheDetailSegmentRow}
+                        title={cacheDonutSegmentTitle(segment, computedCacheCompositionTotalTokens, numberFormatter, lang)}
+                      >
+                        <i className={`${styles.cacheDetailSwatch} ${computedCacheLegendSegmentClass(segment.key)}`} />
+                        <div className={styles.cacheDetailSegmentText}>
+                          <strong>{segment.key === "computed_missing" ? cacheCompositionSegmentLabel("missing", segment.label, t) : segment.label}</strong>
+                          <span>{segment.cachePolicy || segment.source || segment.status || segment.key}</span>
+                          {segment.contentPreview ? <small>{segment.contentPreview}</small> : null}
+                        </div>
+                        <em>{numberFormatter.format(segment.tokens ?? 0)} · {Math.round(segment.actualPercent)}%</em>
+                      </div>
+                    ))
+                  ) : (
+                    <div className={styles.cacheDetailEmpty}>{lang === "zh" ? "暂无计算段数据" : "No computed segment data"}</div>
+                  )}
+                </section>
+
+                <section className={styles.cacheDetailSegmentGroup}>
+                  <div className={styles.cacheDetailSegmentHeader}>
+                    <strong>{lang === "zh" ? "Provider 真实命中" : "Provider true hits"}</strong>
+                    <span>{numberFormatter.format(providerCacheInputTokens)} tokens</span>
+                  </div>
+                  {trueCacheDonutSegments.length ? (
+                    trueCacheDonutSegments.map((segment, index) => (
+                      <div
+                        key={`detail-true-row-${segment.key}-${segment.status}-${index}`}
+                        className={styles.cacheDetailSegmentRow}
+                        title={cacheDonutSegmentTitle(segment, providerCacheInputTokens, numberFormatter, lang)}
+                      >
+                        <i className={`${styles.cacheDetailSwatch} ${cacheDonutSegmentClass(segment.status || segment.key)}`} />
+                        <div className={styles.cacheDetailSegmentText}>
+                          <strong>{segment.label || segment.key}</strong>
+                          <span>{segment.source || segment.status || segment.key}</span>
+                          {segment.description ? <small>{segment.description}</small> : null}
+                        </div>
+                        <em>{numberFormatter.format(segment.tokens ?? 0)} · {Math.round(segment.actualPercent)}%</em>
+                      </div>
+                    ))
+                  ) : (
+                    <div className={styles.cacheDetailEmpty}>{lang === "zh" ? "暂无真实命中数据" : "No provider hit data"}</div>
+                  )}
+                </section>
+              </div>
+            </div>
+          </section>
         </div>
-      </aside>
+      ) : null}
     </div>
   );
 }
