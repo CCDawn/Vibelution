@@ -11,6 +11,7 @@ import {
   GitCommitResponse,
   GitCommitsResponse,
   GitFileDiff,
+  GitObjectDetail,
   GitStatusSummary,
 } from "../api/types";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
@@ -42,12 +43,20 @@ const GIT_CHANGE_PANEL_BOUNDS = { min: 260, max: 520 };
 const GIT_CHANGE_PANEL_DEFAULT_WIDTH = 340;
 
 type GitWorktreeItem = GitStatusSummary["worktrees"]["items"][number];
+type GitObjectSelection = {
+  kind: "commit" | "branch" | "worktree";
+  ref: string;
+  path?: string;
+  label: string;
+  sourceLabel: string;
+};
 
 export function GitRoute() {
   const { lang, t } = useGitRouteI18n();
   const queryClient = useQueryClient();
   const [activeFilter, setActiveFilter] = useState<GitFilter>("all");
   const [activePath, setActivePath] = useState<string | null>(null);
+  const [activeObject, setActiveObject] = useState<GitObjectSelection | null>(null);
   const [selectedPaths, setSelectedPaths] = useState<string[]>([]);
   const [selectedAiModelId, setSelectedAiModelId] = useState("");
   const [aiPromptDraft, setAiPromptDraft] = useState("");
@@ -126,6 +135,18 @@ export function GitRoute() {
     queryKey: queryKeys.gitDiff(activePath ?? ""),
     queryFn: () => fetchJson<GitFileDiff>(`/api/git/diff?path=${encodeURIComponent(activePath ?? "")}`),
     enabled: Boolean(activePath && statusQuery.data?.available),
+  });
+  const objectDetailQuery = useQuery({
+    queryKey: ["git", "object-detail", activeObject?.kind ?? "", activeObject?.ref ?? "", activeObject?.path ?? ""] as const,
+    queryFn: () => {
+      const params = new URLSearchParams({
+        kind: activeObject?.kind ?? "",
+        ref: activeObject?.ref ?? "",
+        path: activeObject?.path ?? "",
+      });
+      return fetchJson<GitObjectDetail>(`/api/git/object-detail?${params.toString()}`);
+    },
+    enabled: Boolean(activeObject && statusQuery.data?.available),
   });
 
   useEffect(() => {
@@ -214,6 +235,9 @@ export function GitRoute() {
     if (activePath) {
       void queryClient.invalidateQueries({ queryKey: queryKeys.gitDiff(activePath) });
     }
+    if (activeObject) {
+      void queryClient.invalidateQueries({ queryKey: ["git", "object-detail"] });
+    }
   };
 
   const toggleSelectedPath = (path: string) => {
@@ -258,6 +282,7 @@ export function GitRoute() {
   const localCommitPreview = (status?.localCommits?.commits ?? []).slice(0, 6);
   const pendingWorktrees = (status?.worktrees?.items ?? []).filter((item) => !item.isMain && item.hasCommits);
   const pendingWorktreePreview = pendingWorktrees.slice(0, 8);
+  const worktreeDetailTarget = pendingWorktrees[0] ?? (status?.worktrees?.items ?? []).find((item) => !item.isMain) ?? null;
   const recentCommits = commitsQuery.data?.commits ?? [];
   const commitBlockReason = getGitCommitBlockReason(
     selectedCount,
@@ -296,6 +321,11 @@ export function GitRoute() {
     lang === "zh" ? `已选 ${selectedCount} 个文件` : `${selectedCount} selected file${selectedCount === 1 ? "" : "s"}`;
   const selectedOverflowText =
     lang === "zh" ? `另有 ${selectedOverflowCount} 个文件` : `${selectedOverflowCount} more file${selectedOverflowCount === 1 ? "" : "s"}`;
+  const gitObjectDetailTitle = lang === "zh" ? "对象详情" : "Object detail";
+  const gitCommitSourceLabel = lang === "zh" ? "提交内容" : "Commit content";
+  const gitBranchSourceLabel = lang === "zh" ? "分支内容" : "Branch content";
+  const gitWorktreeSourceLabel = lang === "zh" ? "Worktree 内容" : "Worktree content";
+  const activeObjectSourceLabel = activeObject?.sourceLabel ?? gitObjectDetailTitle;
   const workspaceStyle = useMemo(
     () =>
       ({
@@ -350,9 +380,55 @@ export function GitRoute() {
     return item.branch || normalizedPath.split("/").filter(Boolean).pop() || item.headRevShort || "-";
   }
 
-  function renderCommitItem(commit: GitCommitSummary) {
+  function selectGitObject(selection: GitObjectSelection) {
+    setActiveObject(selection);
+    setActivePath(null);
+  }
+
+  function selectCurrentBranch() {
+    const branch = status?.branch || status?.headRevShort || "";
+    if (!branch) {
+      return;
+    }
+    selectGitObject({
+      kind: "branch",
+      ref: branch,
+      label: branch,
+      sourceLabel: gitBranchSourceLabel,
+    });
+  }
+
+  function selectWorktree(item: GitWorktreeItem) {
+    selectGitObject({
+      kind: "worktree",
+      ref: item.branch || item.headRev,
+      path: item.path,
+      label: worktreeDisplayName(item),
+      sourceLabel: gitWorktreeSourceLabel,
+    });
+  }
+
+  function selectFilePath(path: string) {
+    setActiveObject(null);
+    setActivePath(path);
+  }
+
+  function renderCommitItem(commit: GitCommitSummary, sourceLabel = gitCommitSourceLabel) {
+    const active = activeObject?.kind === "commit" && activeObject.ref === commit.sha;
     return (
-      <article key={commit.sha} className={styles.commitItem}>
+      <button
+        key={commit.sha}
+        type="button"
+        className={active ? `${styles.commitItem} ${styles.objectItemActive}` : styles.commitItem}
+        onClick={() =>
+          selectGitObject({
+            kind: "commit",
+            ref: commit.sha,
+            label: `${commit.shortSha} ${commit.subject}`,
+            sourceLabel,
+          })
+        }
+      >
         <div className={styles.commitHeader}>
           <code>{commit.shortSha}</code>
           <span>
@@ -362,7 +438,7 @@ export function GitRoute() {
         </div>
         <strong>{commit.subject}</strong>
         <p>{t("gitCommitBy")}: {commit.author}</p>
-      </article>
+      </button>
     );
   }
 
@@ -381,10 +457,10 @@ export function GitRoute() {
       </header>
 
       <div className={styles.summaryGrid}>
-        <section className={styles.summaryCard}>
+        <button type="button" className={styles.summaryCard} onClick={selectCurrentBranch} disabled={!status?.branch}>
           <span>{t("gitBranch")}</span>
           <strong>{status?.branch || status?.headRevShort || "-"}</strong>
-        </section>
+        </button>
         <section className={styles.summaryCard}>
           <span>{t("gitChangedFiles")}</span>
           <strong>{status?.counts.total ?? 0}</strong>
@@ -401,10 +477,19 @@ export function GitRoute() {
           <span>{t("gitLocalCommits")}</span>
           <strong>{localCommitCount}</strong>
         </section>
-        <section className={styles.summaryCard}>
+        <button
+          type="button"
+          className={styles.summaryCard}
+          onClick={() => {
+            if (worktreeDetailTarget) {
+              selectWorktree(worktreeDetailTarget);
+            }
+          }}
+          disabled={!worktreeDetailTarget}
+        >
           <span>{t("gitWorktreeBranches")}</span>
           <strong>{worktreeBranchCount} / {worktreeTotalCount}</strong>
-        </section>
+        </button>
       </div>
 
       {!statusQuery.isPending && status && !status.available ? (
@@ -415,13 +500,13 @@ export function GitRoute() {
         {noChangedFiles ? (
           <>
             <main className={styles.gitOverviewPanel}>
-              <section className={styles.cleanStateStrip}>
+              <button type="button" className={styles.cleanStateStrip} onClick={selectCurrentBranch}>
                 <div>
                   <p className={styles.panelEyebrow}>{lang === "zh" ? "状态" : "Status"}</p>
                   <h2>{lang === "zh" ? "工作区干净" : "Clean worktree"}</h2>
                 </div>
                 <span>{status?.summary || (lang === "zh" ? "没有文件变更。" : "No changed files.")}</span>
-              </section>
+              </button>
               <div className={styles.gitSituationGrid}>
                 <section className={styles.gitSituationCard}>
                   <div className={styles.panelHeader}>
@@ -432,7 +517,7 @@ export function GitRoute() {
                     <span className={styles.countPill}>{localCommitCount}</span>
                   </div>
                   <div className={styles.situationList}>
-                    {localCommitPreview.map(renderCommitItem)}
+                    {localCommitPreview.map((commit) => renderCommitItem(commit, gitCommitSourceLabel))}
                     {!localCommitPreview.length ? (
                       <p className={styles.emptyState}>{lang === "zh" ? "没有本地提交待同步。" : "No local commits ahead of upstream."}</p>
                     ) : null}
@@ -448,13 +533,22 @@ export function GitRoute() {
                   </div>
                   <div className={styles.worktreeList}>
                     {pendingWorktreePreview.map((item) => (
-                      <article key={`${item.path}-${item.branch}`} className={styles.worktreeItem}>
+                      <button
+                        key={`${item.path}-${item.branch}`}
+                        type="button"
+                        className={
+                          activeObject?.kind === "worktree" && activeObject.path === item.path
+                            ? `${styles.worktreeItem} ${styles.objectItemActive}`
+                            : styles.worktreeItem
+                        }
+                        onClick={() => selectWorktree(item)}
+                      >
                         <div>
                           <strong>{worktreeDisplayName(item)}</strong>
                           <span>{displayGitPath(item.path)}</span>
                         </div>
                         <code>+{item.aheadMain} / -{item.behindMain}</code>
-                      </article>
+                      </button>
                     ))}
                     {!pendingWorktreePreview.length ? (
                       <p className={styles.emptyState}>{lang === "zh" ? "没有待合入 worktree 分支。" : "No worktree branches with pending commits."}</p>
@@ -462,6 +556,29 @@ export function GitRoute() {
                   </div>
                 </section>
               </div>
+            </main>
+            <main className={styles.objectDetailPanel}>
+              {activeObject ? (
+                <GitDiffView
+                  path={activeObject.label}
+                  diff={objectDetailQuery.data}
+                  loading={objectDetailQuery.isPending}
+                  changed
+                  sourceLabel={objectDetailQuery.data?.statusLabel || activeObjectSourceLabel}
+                  headerActions={
+                    <span className={styles.inlineMeta}>
+                      <GitBranch size={14} />
+                      {activeObject.kind}
+                    </span>
+                  }
+                />
+              ) : (
+                <div className={styles.emptyPreview}>
+                  <GitBranch size={24} />
+                  <strong>{gitObjectDetailTitle}</strong>
+                  <p>{lang === "zh" ? "点击提交、分支或 worktree 查看内容。" : "Select a commit, branch, or worktree."}</p>
+                </div>
+              )}
             </main>
             <aside className={`${styles.commitPanel} ${styles.historyPanel}`}>
               <div className={styles.panelHeader}>
@@ -472,7 +589,7 @@ export function GitRoute() {
                 <GitCommitHorizontal size={18} />
               </div>
               <div className={styles.commitList}>
-                {recentCommits.map(renderCommitItem)}
+                {recentCommits.map((commit) => renderCommitItem(commit, gitCommitSourceLabel))}
                 {!commitsQuery.isPending && !recentCommits.length ? (
                   <p className={styles.emptyState}>{commitsQuery.data?.error || t("gitNoCommits")}</p>
                 ) : null}
@@ -534,7 +651,7 @@ export function GitRoute() {
                         {isSelected ? <CheckSquare size={16} /> : <Square size={16} />}
                       </button>
                       <span className={styles.fileStatus}>{file.status}</span>
-                      <button type="button" className={styles.fileCopyButton} onClick={() => setActivePath(file.path)}>
+                      <button type="button" className={styles.fileCopyButton} onClick={() => selectFilePath(file.path)}>
                         <strong>{gitFileName(file.path)}</strong>
                         <span className={styles.filePathText}>{displayGitPath(file.path)}</span>
                         <span className={styles.fileBadgeRow}>
@@ -562,7 +679,21 @@ export function GitRoute() {
             />
 
             <main className={styles.diffPanel}>
-              {activePath ? (
+              {activeObject ? (
+                <GitDiffView
+                  path={activeObject.label}
+                  diff={objectDetailQuery.data}
+                  loading={objectDetailQuery.isPending}
+                  changed
+                  sourceLabel={objectDetailQuery.data?.statusLabel || activeObjectSourceLabel}
+                  headerActions={
+                    <span className={styles.inlineMeta}>
+                      <GitBranch size={14} />
+                      {activeObject.kind}
+                    </span>
+                  }
+                />
+              ) : activePath ? (
                 <GitDiffView
                   path={activePath}
                   diff={diffQuery.data}
@@ -726,7 +857,7 @@ export function GitRoute() {
             <GitCommitHorizontal size={18} />
           </div>
           <div className={styles.commitList}>
-            {recentCommits.map(renderCommitItem)}
+            {recentCommits.map((commit) => renderCommitItem(commit, gitCommitSourceLabel))}
             {!commitsQuery.isPending && !recentCommits.length ? (
               <p className={styles.emptyState}>{commitsQuery.data?.error || t("gitNoCommits")}</p>
             ) : null}

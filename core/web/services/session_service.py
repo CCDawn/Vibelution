@@ -2092,12 +2092,20 @@ def append_cli_agent_lifecycle_event(
             lifecycle_key=lifecycle_key,
         )
         if existing is not None:
+            _append_cli_agent_lifecycle_sidecar(normalized_session_id, existing)
             return existing
+        existing_sidecar = _find_cli_agent_lifecycle_sidecar_message(
+            normalized_session_id,
+            lifecycle_key=lifecycle_key,
+        )
         event_entry = _make_chat_message("assistant", content, metadata=metadata)
+        if existing_sidecar is not None:
+            event_entry["timestamp"] = str(existing_sidecar.get("timestamp") or event_entry["timestamp"])
         conversation["messages"] = messages + [event_entry]
         conversation["updated_at"] = event_entry["timestamp"]
         payload["updated_at"] = event_entry["timestamp"]
         save_chat_state(PROJECT_ROOT, payload)
+        _append_cli_agent_lifecycle_sidecar(normalized_session_id, event_entry)
         normalized_messages = _normalize_messages(normalized_session_id, conversation["messages"])
         normalized_event_entry = _find_cli_agent_lifecycle_message(
             normalized_session_id,
@@ -7803,6 +7811,113 @@ def _find_cli_agent_lifecycle_message(
         if str(metadata.get("lifecycleKey") or "").strip() == normalized_key:
             return message
     return None
+
+
+def _cli_agent_lifecycle_sidecar_path(session_id: str) -> Path:
+    workspace_path = (PROJECT_ROOT / _session_workspace_relative_path(session_id)).resolve()
+    sessions_root = (PROJECT_ROOT / "workspace" / "sessions").resolve()
+    if not workspace_path.is_relative_to(sessions_root):
+        raise SessionValidationError(f"Invalid session workspace path: {workspace_path}")
+    return workspace_path / "logs" / "cli_agent_lifecycle.jsonl"
+
+
+def _append_cli_agent_lifecycle_sidecar(session_id: str, message: dict[str, Any]) -> None:
+    metadata = message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
+    lifecycle_key = str(metadata.get("lifecycleKey") or "").strip()
+    if not lifecycle_key:
+        return
+    if _find_cli_agent_lifecycle_sidecar_message(session_id, lifecycle_key=lifecycle_key) is not None:
+        return
+    try:
+        path = _cli_agent_lifecycle_sidecar_path(session_id)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        record = {
+            "schemaVersion": 1,
+            "timestamp": str(message.get("timestamp") or _now_timestamp()).strip(),
+            "sessionId": str(session_id or "").strip(),
+            "lifecycleKey": lifecycle_key,
+            "event": str(metadata.get("event") or metadata.get("status") or "").strip(),
+            "message": message,
+        }
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(record, ensure_ascii=False, separators=(",", ":")) + "\n")
+    except Exception as exc:
+        _debug_logger.warning(
+            f"cli agent lifecycle sidecar append skipped: {type(exc).__name__}: {exc}",
+            tag="LOGS",
+        )
+
+
+def _find_cli_agent_lifecycle_sidecar_message(
+    session_id: str,
+    *,
+    lifecycle_key: str,
+) -> dict[str, Any] | None:
+    normalized_key = str(lifecycle_key or "").strip()
+    if not normalized_key:
+        return None
+    for message in _load_cli_agent_lifecycle_sidecar_messages(session_id):
+        metadata = message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
+        if str(metadata.get("kind") or "").strip() != "cli_agent_lifecycle":
+            continue
+        if str(metadata.get("lifecycleKey") or "").strip() == normalized_key:
+            return message
+    return None
+
+
+def _load_cli_agent_lifecycle_sidecar_messages(session_id: str) -> list[dict[str, Any]]:
+    try:
+        path = _cli_agent_lifecycle_sidecar_path(session_id)
+    except Exception:
+        return []
+    if not path.exists():
+        return []
+    result: list[dict[str, Any]] = []
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except Exception:
+        return []
+    for line in lines:
+        text = str(line or "").strip()
+        if not text:
+            continue
+        try:
+            payload = json.loads(text)
+        except Exception:
+            continue
+        message = payload.get("message") if isinstance(payload, dict) else None
+        if not isinstance(message, dict):
+            continue
+        metadata = message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
+        if str(metadata.get("kind") or "").strip() != "cli_agent_lifecycle":
+            continue
+        result.append(dict(message))
+    return result
+
+
+def _merge_cli_agent_lifecycle_sidecar_messages(
+    session_id: str,
+    messages: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    merged = list(messages or [])
+    seen_keys: set[str] = set()
+    for message in merged:
+        metadata = message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
+        lifecycle_key = str(metadata.get("lifecycleKey") or "").strip()
+        if str(metadata.get("kind") or "").strip() == "cli_agent_lifecycle" and lifecycle_key:
+            seen_keys.add(lifecycle_key)
+    additions: list[dict[str, Any]] = []
+    for message in _load_cli_agent_lifecycle_sidecar_messages(session_id):
+        metadata = message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
+        lifecycle_key = str(metadata.get("lifecycleKey") or "").strip()
+        if not lifecycle_key or lifecycle_key in seen_keys:
+            continue
+        seen_keys.add(lifecycle_key)
+        additions.append(message)
+    if not additions:
+        return merged
+    normalized = _normalize_messages(session_id, merged + additions)
+    return sorted(normalized, key=lambda item: _timestamp_sort_key(str(item.get("timestamp") or "")))
 
 
 def _new_conversation_id(existing_ids: set[str] | None = None) -> str:
@@ -14006,7 +14121,10 @@ def _mental_diagnosis_summary(lang: str, cognitive_state: str) -> str:
 
 
 def _messages_with_live_output(session_id: str, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    detail_messages = list(messages or [])
+    detail_messages = _merge_cli_agent_lifecycle_sidecar_messages(
+        session_id,
+        _normalize_messages(session_id, messages),
+    )
     live_message = _build_live_output_message(session_id)
     if live_message is None:
         return detail_messages

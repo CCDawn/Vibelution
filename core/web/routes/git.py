@@ -10,6 +10,7 @@ from core.web.services.git_status_service import (
     generate_git_commit_message,
     get_git_commits,
     get_git_file_diff,
+    get_git_object_detail,
     get_git_status,
     update_git_commit_message_model,
     update_git_commit_message_prompt,
@@ -51,6 +52,14 @@ def git_commits(limit: int = Query(default=20, ge=1, le=60)) -> dict:
 def git_diff(path: str = Query(min_length=1)) -> dict:
     try:
         return get_git_file_diff(path)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/git/object-detail")
+def git_object_detail(kind: str = Query(min_length=1), ref: str = Query(default=""), path: str = Query(default="")) -> dict:
+    try:
+        return get_git_object_detail(kind, ref, path)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
