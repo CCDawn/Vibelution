@@ -21,7 +21,7 @@ import {
   Wrench,
   X,
 } from "lucide-react";
-import { Suspense, lazy, type CSSProperties, type KeyboardEvent, type PointerEvent, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, lazy, type CSSProperties, type KeyboardEvent, type PointerEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 
 import { fetchJson } from "../api/client";
@@ -77,6 +77,7 @@ import { buildSupervisedRunRecordDisplay, supervisedDecisionLabel } from "./supe
 import { buildSupervisedRunControlSummary } from "./supervisedRunSummary";
 import { buildSupervisedCaseTraceItems, type SupervisedCaseTraceItem } from "./supervisedCaseTrace";
 import { createEvolutionWorkspaceCache } from "./evolutionWorkspaceCache";
+import { modelDisplayLabel } from "./agentDisplay";
 import {
   clampPaneSize,
   clampPaneWidth,
@@ -148,8 +149,15 @@ type SupervisedRunMember = {
   label: string;
   name: string;
   model: string;
+  modelId: string;
   agentId: string;
   status: "active" | "configured" | "missing";
+};
+
+type SupervisedPreflightIssue = {
+  title: string;
+  detail: string;
+  reason: string;
 };
 
 const LIBRARY_STATUS_FILTERS: LibraryStatusFilter[] = [
@@ -300,13 +308,53 @@ function hasSupervisedAgentBindings(bindings: Record<string, EvolutionActiveRunA
   return Boolean(bindings && Object.keys(bindings).length > 0);
 }
 
-function supervisedMemberModelLabel(binding: EvolutionActiveRunAgentBinding | undefined) {
-  const dialogueModel =
+function supervisedMemberModelId(binding: EvolutionActiveRunAgentBinding | undefined) {
+  return String(
     binding?.dialogueModelId
     || binding?.llmBindings?.dialogue?.modelId
     || binding?.llmBindings?.primary?.modelId
-    || "";
-  return String(dialogueModel || "").trim() || "--";
+    || "",
+  ).trim();
+}
+
+function supervisedMemberModelLabel(
+  binding: EvolutionActiveRunAgentBinding | undefined,
+  resolveModelLabel?: (modelId: string) => string | undefined,
+) {
+  return modelDisplayLabel(supervisedMemberModelId(binding), resolveModelLabel) || "--";
+}
+
+function supervisedPreflightIssue(run: EvolutionActiveRun | null | undefined, lang: "zh" | "en"): SupervisedPreflightIssue | null {
+  const latestPreflightEvent = [...(run?.eventTail ?? [])].reverse().find((event) => {
+    const phase = String((event as { phase?: unknown }).phase || "").trim();
+    const summary = String(event.summary || "").toLowerCase();
+    const reason = String(event.reason || "").toLowerCase();
+    return phase === "environment_preflight"
+      || summary.includes("environment_preflight")
+      || reason.includes("环境预检")
+      || reason.includes("preflight");
+  });
+  const preflightSummary = String(latestPreflightEvent?.summary || "").trim();
+  const preflightReason = String(latestPreflightEvent?.reason || "").trim();
+  const runReason = String(run?.reason || "").trim();
+  const latestMessage = String(run?.latestMessage || "").trim();
+  const hasPreflightFailure =
+    Boolean(latestPreflightEvent)
+    || /missing_verifier_dependency|环境预检|预检状态|未启动 agent|not start(ed)? agent/i.test(`${runReason}\n${latestMessage}`);
+  const terminal = ["done", "failed", "cancelled"].includes(String(run?.status || "").trim().toLowerCase());
+  const noCaseIo = !run?.currentCaseIo?.latestOutput && !(run?.currentCaseIo?.transcript ?? []).length;
+  if (!hasPreflightFailure || !terminal || !noCaseIo) {
+    return null;
+  }
+
+  const reason = preflightReason || runReason || preflightSummary || latestMessage;
+  return {
+    title: lang === "zh" ? "任务环境预检失败，未启动 Agent" : "Task environment preflight failed; no agent was started",
+    detail: lang === "zh"
+      ? "当前 case 没有 agent 输出，因为评测在验证环境检查阶段已结束。"
+      : "There is no agent output for this case because evaluation stopped during verifier environment checks.",
+    reason,
+  };
 }
 
 function statusIcon(status: string, decision = "") {
@@ -599,6 +647,14 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     refetchInterval: resolvePollingInterval(pageVisible, 8_000),
     refetchIntervalInBackground: false,
   });
+  const modelLabelsById = useMemo(
+    () => new Map(Object.entries(configQuery.data?.modelLabels ?? {})),
+    [configQuery.data?.modelLabels],
+  );
+  const resolveModelLabel = useCallback(
+    (modelId: string) => modelLabelsById.get(modelId),
+    [modelLabelsById],
+  );
   const selfTrackEnabled = forcedTrack === "self" || (configQuery.data?.modeAvailability.self_evolution ?? false);
   const supervisedTrackEnabled = forcedTrack === "supervised" || (configQuery.data?.modeAvailability.supervised_evolution ?? true);
   const activeTrack = forcedTrack ?? (
@@ -1100,8 +1156,9 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   const monitoredCaseHasOutput = Boolean(
     monitoredRun?.currentCaseIo?.latestOutput || monitoredCaseTraceItems.length > 0,
   );
+  const monitoredPreflightIssue = supervisedPreflightIssue(monitoredRun, lang);
   const monitoredCaseHasVisibleIo = Boolean(
-    monitoredRun?.currentCasePrompt || monitoredRun?.currentCaseIo?.latestInput || monitoredCaseHasOutput,
+    monitoredRun?.currentCasePrompt || monitoredRun?.currentCaseIo?.latestInput || monitoredCaseHasOutput || monitoredPreflightIssue,
   );
   const runPauseRequested = Boolean(monitoredRun?.pauseRequested) && monitoredRunStatus !== "paused";
   const runPaused = monitoredRunStatus === "paused";
@@ -1123,6 +1180,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
       const agentId = String(binding.agentId || "").trim();
       const roleText = String(binding.roleLabel || "").trim() || runRoleLabel(role);
       const displayName = String(binding.displayName || binding.agentCode || agentId || "").trim();
+      const modelId = supervisedMemberModelId(binding);
       const isActive =
         currentRole === role
         || (Boolean(currentAgentId) && Boolean(agentId) && currentAgentId === agentId);
@@ -1130,12 +1188,13 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
         role,
         label: roleText,
         name: displayName || (lang === "zh" ? "未配置" : "Not configured"),
-        model: supervisedMemberModelLabel(binding),
+        model: supervisedMemberModelLabel(binding, resolveModelLabel),
+        modelId,
         agentId,
         status: isActive ? "active" : agentId ? "configured" : "missing",
       };
     });
-  }, [lang, supervisedMembersBindingRun?.agentBindings, supervisedMembersRun?.currentAgentBinding?.agentId, supervisedMembersRun?.currentRole]);
+  }, [lang, resolveModelLabel, supervisedMembersBindingRun?.agentBindings, supervisedMembersRun?.currentAgentBinding?.agentId, supervisedMembersRun?.currentRole]);
   const latestRunStatusLabel = latestRun?.decision
     ? displayDecisionLabel(latestRun.decision)
     : statusLabel(latestRun?.status || "");
@@ -2915,7 +2974,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                     </div>
                     <div className={styles.supervisedMemberIdentity}>
                       <strong>{member.name}</strong>
-                      <span>{member.model}</span>
+                      <span title={member.modelId || member.model}>{member.model}</span>
                     </div>
                   </article>
                 ))}
@@ -3280,6 +3339,12 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                               );
                             })}
                           </div>
+                        </div>
+                      ) : monitoredPreflightIssue ? (
+                        <div className={styles.casePreflightIssue}>
+                          <strong>{monitoredPreflightIssue.title}</strong>
+                          <span>{monitoredPreflightIssue.detail}</span>
+                          {monitoredPreflightIssue.reason ? <small>{monitoredPreflightIssue.reason}</small> : null}
                         </div>
                       ) : (
                         <p className={styles.noticeText}>{t("caseIoWaiting")}</p>

@@ -226,6 +226,9 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).toContain("hasSupervisedAgentBindings");
     expect(routeSource).toContain("supervisedMembersBindingRun?.agentBindings");
     expect(routeSource).toContain("supervisedMembersRun?.currentAgentBinding?.agentId");
+    expect(routeSource).toContain("modelDisplayLabel(supervisedMemberModelId(binding), resolveModelLabel)");
+    expect(routeSource).toContain("configQuery.data?.modelLabels");
+    expect(routeSource).toContain("title={member.modelId || member.model}");
     expect(routeSource).toContain("styles.supervisedMembersPanel");
     expect(routeSource).toContain("本轮监督成员");
     expect(stylesSource).toContain(".supervisedMembersPanel");
@@ -324,6 +327,16 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(stylesSource).toContain(".caseRawEvidence");
     expect(stylesSource).toContain("max-height: 30%");
     expect(stylesSource).not.toContain("max-height: 340px");
+  });
+
+  it("shows environment preflight failures instead of waiting for agent output forever", () => {
+    expect(routeSource).toContain("supervisedPreflightIssue(monitoredRun, lang)");
+    expect(routeSource).toContain("任务环境预检失败，未启动 Agent");
+    expect(routeSource).toContain("missing_verifier_dependency");
+    expect(routeSource).toContain("monitoredPreflightIssue ? (");
+    expect(routeSource).toContain("styles.casePreflightIssue");
+    expect(stylesSource).toContain(".casePreflightIssue");
+    expect(stylesSource).toContain("var(--state-warning)");
   });
 
   it("keeps supervised launch from reserving space for worktree review in the left rail", () => {
