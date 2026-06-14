@@ -1895,6 +1895,10 @@
   background: color-mix(in srgb, var(--surface-panel-strong) 92%, #07100e 8%);
 }
 
+.cliAgentRunPanelHidden {
+  display: none;
+}
+
 .cliAgentTerminalFrame {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
