@@ -1776,6 +1776,7 @@ export function AppShell() {
   const primaryStatusCard = rightStatusCards.reduce((selected, item) =>
     statusPriority[item.tone] < statusPriority[selected.tone] ? item : selected,
   rightStatusCards[0]);
+  const gateStatusValue = `${primaryStatusCard.label}: ${primaryStatusCard.value}`;
   const statusSummaryTitle = rightStatusCards.map((item) => `${item.label}: ${item.value}`).join(" · ");
 
   return (
@@ -1834,7 +1835,47 @@ export function AppShell() {
             <span className={styles.versionPill} title={`Vibelution v${APP_VERSION}`}>
               v{APP_VERSION}
             </span>
-            <span className={styles.brandSubtle}>{t("brandSubtle")}</span>
+            <div
+              className={`${styles.statusCluster} ${styles.brandGate}`}
+              tabIndex={0}
+              aria-label={t("systemStatusGuide")}
+              title={statusSummaryTitle}
+              onMouseEnter={() => setStatusGuideOpen(true)}
+              onMouseLeave={(event) => {
+                if (!event.currentTarget.contains(document.activeElement)) {
+                  setStatusGuideOpen(false);
+                }
+              }}
+              onFocus={() => setStatusGuideOpen(true)}
+              onBlur={(event) => {
+                const nextTarget = event.relatedTarget;
+                if (!(nextTarget instanceof Node) || !event.currentTarget.contains(nextTarget)) {
+                  setStatusGuideOpen(false);
+                }
+              }}
+            >
+              <div className={styles.statusSummaryChip}>
+                <span className={`${styles.statusDot} ${styles[`status_${primaryStatusCard.tone}`]}`} />
+                <span className={styles.statusBadgeLabel}>Gate</span>
+                <strong className={styles.statusBadgeValue}>{gateStatusValue}</strong>
+                <span className={styles.statusSummaryCount}>{rightStatusCards.length}</span>
+              </div>
+              {statusGuideOpen ? (
+                <Suspense fallback={null}>
+                  <LazyAppShellStatusGuidePanel
+                    lang={lang}
+                    t={t}
+                    cards={rightStatusCards}
+                    frontendState={frontendState}
+                    backendState={backendState}
+                    runtimeControllerState={runtimeControllerState}
+                    lifecycleProof={lifecycleProof}
+                    workbench={workbench}
+                    buildId={buildId}
+                  />
+                </Suspense>
+              ) : null}
+            </div>
           </div>
           <div className={styles.topClock} title={timezone} aria-label={`${t("systemTime")}: ${currentTime}`}>
             <span className={`${styles.statusDot} ${styles.status_idle}`} />
@@ -1970,47 +2011,6 @@ export function AppShell() {
                   t={t}
                   frontendVisible={frontendVisible}
                   onClose={closeUtilityMenu}
-                />
-              </Suspense>
-            ) : null}
-          </div>
-          <div
-            className={styles.statusCluster}
-            tabIndex={0}
-            aria-label={t("systemStatusGuide")}
-            title={statusSummaryTitle}
-            onMouseEnter={() => setStatusGuideOpen(true)}
-            onMouseLeave={(event) => {
-              if (!event.currentTarget.contains(document.activeElement)) {
-                setStatusGuideOpen(false);
-              }
-            }}
-            onFocus={() => setStatusGuideOpen(true)}
-            onBlur={(event) => {
-              const nextTarget = event.relatedTarget;
-              if (!(nextTarget instanceof Node) || !event.currentTarget.contains(nextTarget)) {
-                setStatusGuideOpen(false);
-              }
-            }}
-          >
-            <div className={styles.statusSummaryChip}>
-              <span className={`${styles.statusDot} ${styles[`status_${primaryStatusCard.tone}`]}`} />
-              <span className={styles.statusBadgeLabel}>{primaryStatusCard.label}</span>
-              <strong className={styles.statusBadgeValue}>{primaryStatusCard.value}</strong>
-              <span className={styles.statusSummaryCount}>{rightStatusCards.length}</span>
-            </div>
-            {statusGuideOpen ? (
-              <Suspense fallback={null}>
-                <LazyAppShellStatusGuidePanel
-                  lang={lang}
-                  t={t}
-                  cards={rightStatusCards}
-                  frontendState={frontendState}
-                  backendState={backendState}
-                  runtimeControllerState={runtimeControllerState}
-                  lifecycleProof={lifecycleProof}
-                  workbench={workbench}
-                  buildId={buildId}
                 />
               </Suspense>
             ) : null}

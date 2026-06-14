@@ -288,7 +288,7 @@
 
 .brandCopy {
   display: inline-flex;
-  align-items: baseline;
+  align-items: center;
   gap: 8px;
   min-width: 0;
 }
@@ -317,6 +317,21 @@
   color: var(--fg-tertiary);
   font-size: 0.78rem;
   white-space: nowrap;
+}
+
+.brandGate {
+  flex: 0 1 260px;
+  align-items: flex-start;
+  min-width: 0;
+}
+
+.brandGate .statusSummaryChip {
+  max-width: min(260px, 32vw);
+}
+
+.brandGate .statusGuidePanel {
+  right: auto;
+  left: 0;
 }
 
 .topClock {
