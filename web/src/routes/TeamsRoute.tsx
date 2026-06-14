@@ -231,6 +231,7 @@ type SourceCollectionStageModule = {
   id: string;
   label: string;
   metric: string;
+  summary: string;
   state: SourceCollectionStepState;
   status: string;
   detailLabel: string;
@@ -2657,9 +2658,9 @@ export function TeamsRoute({
       : selectedTeamExecuteSourceCollectionSearchPending
         ? (lang === "zh" ? "搜索中" : "searching")
         : sourceCollectionOpenAssignmentCount > 0
-          ? (lang === "zh" ? "待继续搜索" : "ready to search")
+          ? (lang === "zh" ? "需补充资料" : "more sources needed")
           : sourceManifestCandidates.length > sourceCollectionApprovedCount
-            ? (lang === "zh" ? "待筛选" : "needs screening")
+            ? (lang === "zh" ? "资料待筛选" : "needs screening")
             : sourceManifestCandidates.length > 0
               ? (lang === "zh" ? "可进入实验" : "ready for experiment")
               : (lang === "zh" ? "等待回写" : "waiting for writeback");
@@ -4394,14 +4395,14 @@ export function TeamsRoute({
     ?? sourceCollectionAssignments.reduce((total, assignment) => total + (assignment.scope.queryCount ?? assignment.scope.assignedQueries?.length ?? 0), 0);
   const sourceCollectionApprovedCount = teamWorkflowSourceQualityStatus?.summary.approvedSourceCandidateCount ?? 0;
   const sourceCollectionStageFocusLabel = !selectedSourceCollectionRun
-    ? (lang === "zh" ? "待启动" : "not started")
+    ? (lang === "zh" ? "尚未启动" : "not started")
     : sourceCollectionOpenAssignmentCount > 0
-      ? (lang === "zh" ? "待继续搜索" : "ready to search")
+      ? (lang === "zh" ? "还需补充资料" : "more sources needed")
       : sourceManifestCandidates.length > sourceCollectionApprovedCount
-        ? (lang === "zh" ? "待筛选" : "screening needed")
+        ? (lang === "zh" ? "资料待筛选" : "screening needed")
         : sourceManifestCandidates.length > 0
-          ? (lang === "zh" ? "可进入治理" : "ready for governance")
-          : (lang === "zh" ? "待回写" : "waiting for writeback");
+          ? (lang === "zh" ? "可进入实验规划" : "ready for experiment")
+          : (lang === "zh" ? "等待结果回写" : "waiting for writeback");
   const sourceCollectionTraceMessages = useMemo<SourceCollectionTraceMessage[]>(() => {
     const messages: SourceCollectionTraceMessage[] = [];
     messages.push({
@@ -4824,12 +4825,39 @@ export function TeamsRoute({
               : !selectedSourceCollectionRun
                 ? (lang === "zh" ? "未开始" : "Not started")
                 : sourceCollectionOpenAssignmentCount > 0
-                  ? (lang === "zh" ? "待继续搜索" : "Ready to search")
+                  ? (lang === "zh" ? "需补充资料" : "More sources needed")
                   : sourceManifestCandidates.length > sourceCollectionApprovedCount
-                    ? (lang === "zh" ? "待资料筛选" : "Needs screening")
+                    ? (lang === "zh" ? "待筛选资料" : "Needs screening")
                     : sourceManifestCandidates.length > 0
                       ? (lang === "zh" ? "可进入实验" : "Ready for experiment")
                       : (lang === "zh" ? "待回写" : "Waiting for writeback");
+  const sourceCollectionDecisionText = (() => {
+    if (sourceCollectionOperationFailed) {
+      return lang === "zh" ? "处理失败，先查看下方失败步骤，再重试当前按钮。" : "A step failed. Review the failed step below, then retry its action.";
+    }
+    if (sourceCollectionOperationActive) {
+      return lang === "zh" ? "正在处理当前动作，完成后会刷新阶段颜色和结果数量。" : "Current action is running. Stage colors and counts update when it completes.";
+    }
+    if (!selectedSourceCollectionRun) {
+      return lang === "zh" ? "点击开始搜集，生成本轮搜索任务和存储目录。" : "Start collection to create the search work and storage folder.";
+    }
+    if (sourceCollectionOpenAssignmentCount > 0) {
+      return lang === "zh"
+        ? `还有 ${sourceCollectionOpenAssignmentCount} 个搜集任务未完成，继续搜索即可推进。`
+        : `${sourceCollectionOpenAssignmentCount} collection assignments remain. Run the next search to proceed.`;
+    }
+    if (sourceManifestCandidates.length > sourceCollectionApprovedCount) {
+      return lang === "zh"
+        ? "候选资料已到位，下一步执行资料筛选。"
+        : "Candidate sources are ready. Run screening next.";
+    }
+    if (sourceManifestCandidates.length > 0) {
+      return lang === "zh"
+        ? "资料链路已具备，可进入实验规划或继续补充资料。"
+        : "The source chain is ready. Move to experiment planning or collect more.";
+    }
+    return lang === "zh" ? "等待 Agent 回写搜集结果。" : "Waiting for agent writeback.";
+  })();
   const sourceCollectionStepStatusText = (state: SourceCollectionStepState) => {
     const labels: Record<SourceCollectionStepState, string> = lang === "zh"
       ? {
@@ -4919,6 +4947,11 @@ export function TeamsRoute({
       id: "collection",
       label: lang === "zh" ? "资料搜集" : "Collection",
       metric: `${sourceCollectionRecordCount || sourceManifestCandidates.length} ${lang === "zh" ? "记录" : "records"} / ${sourceCollectionQueryCount} ${lang === "zh" ? "查询" : "queries"}`,
+      summary: !selectedSourceCollectionRun
+        ? (lang === "zh" ? "点击开始生成本轮任务" : "Start to create this run")
+        : sourceCollectionOpenAssignmentCount > 0
+          ? (lang === "zh" ? `${sourceCollectionOpenAssignmentCount} 个任务未完成` : `${sourceCollectionOpenAssignmentCount} assignments open`)
+          : (lang === "zh" ? "资料已进入候选链路" : "Sources entered the candidate chain"),
       state: sourceCollectionSearchStepState,
       status: sourceCollectionStepStatusText(sourceCollectionSearchStepState),
       detailLabel: lang === "zh" ? "查看搜集过程" : "View collection process",
@@ -4933,6 +4966,11 @@ export function TeamsRoute({
       id: "screening",
       label: lang === "zh" ? "资料筛选" : "Screening",
       metric: `${sourceQualityAssessedCount}/${sourceQualityCandidateCount}`,
+      summary: sourceQualityCandidateCount <= 0
+        ? (lang === "zh" ? "先完成资料搜集" : "Collect sources first")
+        : sourceQualityUnassessedCount > 0
+          ? (lang === "zh" ? `${sourceQualityUnassessedCount} 条待筛` : `${sourceQualityUnassessedCount} unscreened`)
+          : (lang === "zh" ? "全部来源已筛" : "All sources screened"),
       state: sourceCollectionScreeningStepState,
       status: sourceCollectionStepStatusText(sourceCollectionScreeningStepState),
       detailLabel: lang === "zh" ? "查看筛选详情" : "View screening details",
@@ -4947,6 +4985,9 @@ export function TeamsRoute({
       id: "candidate",
       label: lang === "zh" ? "候选入库" : "Candidates",
       metric: `${sourceManifestCandidates.length} ${lang === "zh" ? "候选" : "candidates"}`,
+      summary: sourceManifestCandidates.length > 0
+        ? (lang === "zh" ? "候选库可视化查看" : "Open the visual library")
+        : (lang === "zh" ? "等待资料入候选" : "Waiting for candidates"),
       state: sourceCollectionCandidateStepState,
       status: sourceCollectionStepStatusText(sourceCollectionCandidateStepState),
       detailLabel: lang === "zh" ? "查看候选库" : "View candidate library",
@@ -4961,6 +5002,11 @@ export function TeamsRoute({
       id: "graph",
       label: lang === "zh" ? "候选图谱" : "Graph",
       metric: `${candidateGraphNodeCount} ${lang === "zh" ? "节点" : "nodes"} / ${candidateGraphEdgeCount} ${lang === "zh" ? "边" : "edges"}`,
+      summary: candidateGraphNodeCount > 0
+        ? (lang === "zh" ? "关系快照已生成" : "Graph snapshot ready")
+        : sourceManifestCandidates.length > 0
+          ? (lang === "zh" ? "可生成候选关系" : "Can build candidate links")
+          : (lang === "zh" ? "先有候选资料" : "Needs candidates first"),
       state: sourceCollectionGraphStepState,
       status: sourceCollectionStepStatusText(sourceCollectionGraphStepState),
       detailLabel: lang === "zh" ? "查看图谱详情" : "View graph details",
@@ -4975,10 +5021,17 @@ export function TeamsRoute({
       id: "memory",
       label: lang === "zh" ? "共享记忆前审" : "Memory precheck",
       metric: `${knowledgePendingReviewCount} ${lang === "zh" ? "待审" : "review"} / ${formalKnowledgeItemCount} ${lang === "zh" ? "正式" : "formal"}`,
+      summary: formalKnowledgeItemCount > 0
+        ? (lang === "zh" ? "正式知识已同步" : "Formal knowledge synced")
+        : knowledgePendingReviewCount > 0
+          ? (lang === "zh" ? "有待审入库对象" : "Review items pending")
+          : sourceCollectionApprovedCount > 0
+            ? (lang === "zh" ? "可检查入库门槛" : "Ready to check the gate")
+            : (lang === "zh" ? "等筛选通过后前审" : "Precheck after approval"),
       state: sourceCollectionMemoryStepState,
       status: sourceCollectionStepStatusText(sourceCollectionMemoryStepState),
       detailLabel: lang === "zh" ? "查看前审详情" : "View precheck details",
-      actionLabel: teamWorkflowKnowledgeIngestionStatusQuery.isFetching ? (lang === "zh" ? "刷新中" : "Refreshing") : (lang === "zh" ? "刷新前审" : "Refresh"),
+      actionLabel: teamWorkflowKnowledgeIngestionStatusQuery.isFetching ? (lang === "zh" ? "检查中" : "Checking") : (lang === "zh" ? "检查前审" : "Check"),
       actionDisabled: !selectedTeam?.teamId || teamWorkflowKnowledgeIngestionStatusQuery.isFetching,
       actionTone: "secondary",
       actionIcon: "refresh",
@@ -5071,18 +5124,14 @@ export function TeamsRoute({
             <section className={`${styles.sourceCollectionCommandBar} ${sourceCollectionStepClassName(sourceCollectionConsoleState)}`} aria-label={lang === "zh" ? "知识搜集操作台" : "Knowledge collection command bar"}>
               <div className={styles.sourceCollectionCommandTitle}>
                 <strong>{sourceCollectionRunTitleLabel(selectedSourceCollectionRun?.title || sourceCollectionDraft.title, lang)}</strong>
-                <span>
-                  {selectedSourceCollectionRun
-                    ? `${sourceCollectionRunLabel(selectedSourceCollectionRun.runId)} · ${sourceCollectionStatusLabel(sourceCollectionRunStatus?.runStatus || selectedSourceCollectionRun.status, lang)}`
-                    : (lang === "zh" ? "还没有启动本轮资料搜集。" : "No source collection run has started yet.")}
-                </span>
+                <span>{sourceCollectionDecisionText}</span>
               </div>
               <div className={styles.sourceCollectionCommandStats}>
-                <span>{lang === "zh" ? "当前" : "stage"} <strong>{sourceCollectionStageFocusLabel}</strong></span>
-                <span>{lang === "zh" ? "待处理" : "open"} <strong>{sourceCollectionOpenAssignmentCount}</strong></span>
-                <span>{lang === "zh" ? "候选" : "candidates"} <strong>{sourceManifestCandidates.length}</strong></span>
+                <span>{lang === "zh" ? "当前判断" : "stage"} <strong>{sourceCollectionStageFocusLabel}</strong></span>
+                <span>{lang === "zh" ? "未完成任务" : "open"} <strong>{sourceCollectionOpenAssignmentCount}</strong></span>
+                <span>{lang === "zh" ? "候选资料" : "candidates"} <strong>{sourceManifestCandidates.length}</strong></span>
                 <span>{lang === "zh" ? "搜索问题" : "queries"} <strong>{sourceCollectionQueryCount}</strong></span>
-                <span>{lang === "zh" ? "缓存门禁" : "cache"} <strong>{sourceCollectionPromptCacheStatusLabel(sourceCollectionPromptCacheStatus, lang)}</strong></span>
+                <span>{lang === "zh" ? "缓存状态" : "cache"} <strong>{sourceCollectionPromptCacheStatusLabel(sourceCollectionPromptCacheStatus, lang)}</strong></span>
               </div>
             </section>
             <section id="source-collection-stage-status" className={styles.sourceCollectionStageModules} aria-label={lang === "zh" ? "知识搜集内部模块" : "Knowledge collection modules"}>
@@ -5108,6 +5157,7 @@ export function TeamsRoute({
                   <span className={styles.sourceCollectionStageModuleText}>
                     <b>{module.label}</b>
                     <em>{module.metric}</em>
+                    <small>{module.summary}</small>
                   </span>
                   <button
                     type="button"

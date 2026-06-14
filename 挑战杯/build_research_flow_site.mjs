@@ -423,6 +423,7 @@ const knowledgeRunbook = {
     ["Ingestion Approval Gate", "批准正式入库和正式图谱同步。"],
   ],
   featureMatrix: [
+    ["知识搜集一级工作台", "顶部展示当前判断、未完成任务、候选资料、搜索问题、缓存状态；5 个阶段卡用颜色区分进行中/完成/失败/待处理/未进行，并把详情内容下沉到二级区", "已接入前端"],
     ["资料与候选存储", "source_manifest、knowledge_candidates/index、候选 JSON 命名与状态流", "需新设计"],
     ["PDF/资料解析", "读取本地 PDF、页码锚点、摘录范围和 sourceFiles 绑定", "已接入后端/API"],
     ["科研知识只读查询", "research_knowledge_query_tool 用于查历史科研资料、claims、evidence、gaps", "已有能力"],
@@ -465,7 +466,7 @@ const implementationBlueprint = {
     chatRoomPurpose: "research_coordination",
     workflowPath: "workspace/teams/research-team/workflow_orchestration.json",
     candidateStorePath: "workspace/teams/research-team/candidate_store/index.json",
-    note: "挑战杯科研流程直接绑定当前 Vibelution ai科学研究团队，不另建新团队；Teams 页顶部只保留 AI 搜索范围团队和 ai科学研究团队两个固定入口，左侧栏删除，不再展示创建团队、模板创建或完整团队列表；选择 ai科学研究团队后直接进入团队专属科研工作台，默认只显示科研控制台：知识搜集、实验、迭代三张阶段卡各保留一个主操作和阶段详情入口；资料搜集已折叠进知识搜集阶段页，组织画布仅保留为附属结构视图。",
+    note: "挑战杯科研流程直接绑定当前 Vibelution ai科学研究团队，不另建新团队；Teams 页顶部只保留 AI 搜索范围团队和 ai科学研究团队两个固定入口，左侧栏删除，不再展示创建团队、模板创建或完整团队列表；选择 ai科学研究团队后直接进入团队专属科研工作台，默认只显示科研控制台：知识搜集、实验、迭代三张阶段卡各保留一个主操作和阶段详情入口；资料搜集已折叠进知识搜集阶段页，组织画布仅保留为附属结构视图；知识搜集一级工作台只展示当前判断、关键数量、阶段颜色和下一步按钮，详细追踪放入详情区。",
     workspaceEntry: "/teams?team=research-team",
     sourceCollectionEntry: "/teams?team=research-team&researchView=knowledge_collection",
     defaultView: "选中 ai科学研究团队后，团队内容区显示科研控制台：研究主题、当前阶段、知识搜集/实验/迭代三张阶段卡、每卡一个主按钮和一个阶段详情入口；知识搜集卡会按未开始、待继续搜索、搜索中、待筛选、可进入实验、等待回写显示状态，并提供“新一轮搜集”；知识搜集独立页的资料搜集、资料筛选、候选入库、候选图谱、共享记忆前审五张步骤卡各自承载开始/查看/刷新按钮，资料筛选主按钮会让资料质量评估 Agent 批量执行待筛候选，并在页内详情展示结果；模型证据、候选、路径、校验和内部状态默认移到阶段详情页或高级信息中。",
@@ -2790,7 +2791,7 @@ function indexHtml() {
         <aside class="dashboard-panel">
           <h2>审核摘要</h2>
           <div class="kpi-grid">
-            <div class="kpi"><b>当前阶段</b><strong>M6.33</strong><span>候选库主入口已改为可视化二级索引，底层 JSON 只保留为维护入口。</span></div>
+            <div class="kpi"><b>当前阶段</b><strong>M6.34</strong><span>知识搜集一级工作台已改为当前判断、阶段颜色、关键数量和下一步按钮。</span></div>
             <div class="kpi"><b>流程节点</b><strong>${nodes.length}</strong><span>1-9 为知识入库主线，10-13 保留占位与维护节点。</span></div>
             <div class="kpi"><b>候选资料</b><strong>${currentResearchRun.sources.length}</strong><span>第一轮 source_manifest 已进入 candidate-only 工作区。</span></div>
             <div class="kpi"><b>正式写入</b><strong>0</strong><span>未写正式 Team Knowledge、RAG 或 official graph。</span></div>
