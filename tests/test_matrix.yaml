@@ -1,0 +1,167 @@
+version: 1
+
+always:
+  commands:
+    - "git diff --check"
+
+default:
+  commands:
+    - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_runner.py -q"
+    - ".\\.venv\\Scripts\\python.exe -m pytest tests/ --collect-only -q"
+  notes:
+    - "No focused rule matched; use a cheap runner smoke plus collect-only before choosing broader validation."
+
+rules:
+  - id: test-tooling
+    description: "Test runner, selector, pytest fixtures, and test documentation."
+    paths:
+      - "tests/test_matrix.yaml"
+      - "tests/select_tests.py"
+      - "tests/test_select_tests.py"
+      - "tests/test_runner.py"
+      - "tests/conftest.py"
+      - "tests/README.md"
+    commands:
+      - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_select_tests.py tests/test_runner.py -q"
+      - ".\\.venv\\Scripts\\python.exe -m pytest tests/ --collect-only -q"
+    notes:
+      - "Pure test-tooling changes do not require Launcher refresh."
+
+  - id: web-session-chat
+    description: "Direct chat, session routes, room routes, and conversation UI."
+    paths:
+      - "core/web/services/session_service.py"
+      - "core/web/services/chat_room_service.py"
+      - "core/web/routes/session_routes.py"
+      - "core/web/routes/chat_room_routes.py"
+      - "tests/test_web_app.py"
+      - "tests/test_web_session_routes.py"
+      - "tests/test_chat_room_service.py"
+      - "tests/test_chat_room_routes.py"
+      - "tests/helpers/web_chat_state.py"
+      - "web/src/routes/ChatCodingRoute.tsx"
+      - "web/src/routes/ChatCodingRoute.module.css"
+      - "web/src/routes/ChatCodingRoute.layout.test.ts"
+      - "web/src/components/conversation/**"
+    commands:
+      - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_web_session_routes.py tests/test_chat_room_service.py tests/test_chat_room_routes.py -q"
+      - "npm --prefix web run test -- ChatCodingRoute.layout.test.ts"
+      - "npm --prefix web run build"
+    notes:
+      - "Use the route/service subset first; widen to tests/test_web_app.py only when shared app fixtures or legacy route coverage changed."
+
+  - id: web-runtime-launcher
+    description: "Launcher, runtime manager, runtime scene, and runtime route behavior."
+    paths:
+      - "core/runtime_manager/**"
+      - "core/web/services/runtime_scene_service.py"
+      - "core/web/routes/runtime_routes.py"
+      - "scripts/vibelution_launcher.ps1"
+      - "scripts/vibelution_launcher.py"
+      - "tests/test_runtime_manager.py"
+      - "tests/test_launcher_scripts.py"
+      - "tests/test_launcher_service.py"
+      - "tests/test_web_runtime_routes.py"
+      - "tests/helpers/web_runtime_scene.py"
+    commands:
+      - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_runtime_manager.py tests/test_launcher_scripts.py tests/test_launcher_service.py tests/test_web_runtime_routes.py -q"
+    notes:
+      - "Runtime lifecycle changes need an explicit Launcher refresh decision after automated validation."
+
+  - id: web-evolution
+    description: "Supervised/self evolution web routes, harness, and control-plane services."
+    paths:
+      - "core/evolution/**"
+      - "core/self_evolution/**"
+      - "core/web/routes/evolution.py"
+      - "core/web/services/evolution_service.py"
+      - "core/web/services/self_evolution_service.py"
+      - "core/web/services/supervised_control_service.py"
+      - "scripts/evolution_harness.py"
+      - "tests/test_web_evolution_routes.py"
+      - "tests/test_evolution_harness.py"
+      - "tests/test_gym_*.py"
+    commands:
+      - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_web_evolution_routes.py tests/test_evolution_harness.py tests/test_gym_engine.py tests/test_gym_runner.py tests/test_gym_promotion.py -q"
+    notes:
+      - "Keep evolution route tests serial unless the touched file is known to be isolated."
+
+  - id: config-models
+    description: "Operator config, public config panel, model library, prompt cache, and LLM client routing."
+    paths:
+      - "config/**"
+      - "core/llm/**"
+      - "core/web/services/config_service.py"
+      - "tests/test_config_panel.py"
+      - "tests/test_config_sync.py"
+      - "tests/test_public_config_model_refs.py"
+      - "tests/test_llm_client.py"
+      - "tests/test_prompt_cache_hit_optimization.py"
+      - "tests/test_llm_invocation_context.py"
+    commands:
+      - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_config_panel.py tests/test_config_sync.py tests/test_public_config_model_refs.py tests/test_llm_client.py tests/test_prompt_cache_hit_optimization.py tests/test_llm_invocation_context.py -q"
+    notes:
+      - "Verify effective config behavior, not only source defaults."
+
+  - id: git-worktree
+    description: "Git service, Git memory, worktree hygiene, and no-console Git process paths."
+    paths:
+      - "core/infrastructure/git_process.py"
+      - "core/infrastructure/git_memory.py"
+      - "core/web/services/git_status_service.py"
+      - "tests/test_git_process.py"
+      - "tests/test_git_memory.py"
+      - "tests/test_git_status_service.py"
+      - "tests/test_web_git_routes.py"
+    commands:
+      - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_git_process.py tests/test_git_memory.py tests/test_git_status_service.py tests/test_web_git_routes.py -q"
+    notes:
+      - "On Windows, include no-console regression coverage for runtime Git paths."
+
+  - id: teams-knowledge
+    description: "Teams, Team Knowledge, Challenge Cup flow, and source collection workflow."
+    paths:
+      - "core/web/services/team_service.py"
+      - "core/web/services/team_knowledge_service.py"
+      - "core/web/services/team_workflow_orchestration_service.py"
+      - "core/web/routes/team_workflows.py"
+      - "tests/test_team_service.py"
+      - "tests/test_team_knowledge_service.py"
+      - "tests/test_team_workflow_orchestration_service.py"
+      - "tests/test_team_workflow_routes.py"
+      - "web/src/routes/TeamsRoute.tsx"
+      - "web/src/routes/TeamsRoute.layout.test.ts"
+      - "挑战杯/**"
+    commands:
+      - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_team_service.py tests/test_team_knowledge_service.py tests/test_team_workflow_orchestration_service.py tests/test_team_workflow_routes.py -q"
+      - "npm --prefix web run test -- TeamsRoute.layout.test.ts"
+      - "npm --prefix web run build"
+      - "node 挑战杯/build_research_flow_site.mjs"
+    notes:
+      - "Challenge Cup flow changes must regenerate and verify the research flow HTML."
+
+  - id: frontend-workbench
+    description: "Workbench routes, shared frontend API types, and route-level layout tests."
+    paths:
+      - "web/src/routes/**"
+      - "web/src/components/**"
+      - "web/src/api/**"
+      - "web/src/app/**"
+      - "web/src/i18n/**"
+    commands:
+      - "npm --prefix web run test"
+      - "npm --prefix web run build"
+    notes:
+      - "Prefer narrowing the Vitest file list manually when the changed route has a dedicated layout test."
+
+  - id: docs-only
+    description: "Documentation-only changes."
+    paths:
+      - "*.md"
+      - "docs/**"
+      - ".docs/**"
+      - "PROJECT_MEMORY.html"
+    commands:
+      - "git diff --check"
+    notes:
+      - "Docs-only changes normally do not require Launcher refresh or product version bump."
