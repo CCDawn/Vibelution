@@ -706,6 +706,94 @@ def test_memory_usage_contract_aligns_team_agent_and_evolution_boundaries(tmp_pa
     assert items["summary"]["itemCount"] == 0
 
 
+def test_memory_global_overviews_do_not_expose_formal_knowledge_bodies(tmp_path, monkeypatch):
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(memory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(team_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(team_knowledge_service, "PROJECT_ROOT", tmp_path)
+    team_agent = agent_directory_service.create_agent_instance(display_name="Global Overview Team Agent")
+    private_agent = agent_directory_service.create_agent_instance(display_name="Global Overview Private Agent")
+    team = team_service.create_team(name="Global Overview Team", members=[{"agentId": team_agent["agentId"], "role": "lead"}])
+    team_base = team_knowledge_service.create_knowledge_base(
+        team["teamId"],
+        name="Global Overview Team KB",
+        actor_agent_id=team_agent["agentId"],
+    )
+    agent_base = team_knowledge_service.create_agent_knowledge_base(
+        private_agent["agentId"],
+        name="Global Overview Agent KB",
+        actor_agent_id=private_agent["agentId"],
+    )
+    team_source = _source_artifact(
+        team_base["knowledgeBaseId"],
+        team_id=team["teamId"],
+        actor_agent_id=team_agent["agentId"],
+        title="Team overview boundary source",
+    )
+    agent_inbox_source = team_knowledge_service.collect_source_to_inbox(
+        "agent",
+        private_agent["agentId"],
+        source_type="manual_user_entry",
+        source_ref={"note": "Agent overview boundary source"},
+        original_content="Memory route test source content.",
+        original_filename="memory-route-source.txt",
+        title="Agent overview boundary source",
+        actor_agent_id=private_agent["agentId"],
+    )
+    agent_reviewed = team_knowledge_service.review_owner_inbox_source(
+        "agent",
+        private_agent["agentId"],
+        agent_inbox_source["inboxSourceId"],
+        decision="accepted",
+        reviewed_by_agent_id=private_agent["agentId"],
+    )
+    agent_source = team_knowledge_service.create_source_artifact_from_central_source(
+        agent_base["knowledgeBaseId"],
+        agent_reviewed["centralSource"]["centralSourceId"],
+        actor_agent_id=private_agent["agentId"],
+        title="Agent overview boundary source",
+    )
+    team_proposal = team_knowledge_service.create_refinement_proposal(
+        team_base["knowledgeBaseId"],
+        source_artifact_ids=[team_source["sourceArtifactId"]],
+        proposed_by_agent_id=team_agent["agentId"],
+        title="Team secret boundary",
+        content="TEAM FORMAL BODY MUST NOT APPEAR IN GLOBAL MEMORY OVERVIEW",
+    )
+    agent_proposal = team_knowledge_service.create_refinement_proposal(
+        agent_base["knowledgeBaseId"],
+        source_artifact_ids=[agent_source["sourceArtifactId"]],
+        proposed_by_agent_id=private_agent["agentId"],
+        title="Agent secret boundary",
+        content="AGENT FORMAL BODY MUST NOT APPEAR IN GLOBAL MEMORY OVERVIEW",
+    )
+    team_knowledge_service.review_refinement_proposal(
+        team_base["knowledgeBaseId"],
+        team_proposal["proposalId"],
+        status="approved",
+        reviewed_by_agent_id=team_agent["agentId"],
+    )
+    team_knowledge_service.review_refinement_proposal(
+        agent_base["knowledgeBaseId"],
+        agent_proposal["proposalId"],
+        status="approved",
+        reviewed_by_agent_id=private_agent["agentId"],
+    )
+
+    overview = client.get("/api/memory/overview").json()
+    contract = client.get("/api/memory/usage-contract").json()
+    overview_text = json.dumps(overview, ensure_ascii=False)
+    contract_text = json.dumps(contract, ensure_ascii=False)
+
+    assert overview["summary"]["sectionCount"] >= 1
+    assert contract["currentState"]["knowledge"]["knowledgeBaseCount"] == 2
+    assert contract["currentState"]["knowledge"]["itemCount"] == 2
+    assert "TEAM FORMAL BODY MUST NOT APPEAR IN GLOBAL MEMORY OVERVIEW" not in overview_text
+    assert "AGENT FORMAL BODY MUST NOT APPEAR IN GLOBAL MEMORY OVERVIEW" not in overview_text
+    assert "TEAM FORMAL BODY MUST NOT APPEAR IN GLOBAL MEMORY OVERVIEW" not in contract_text
+    assert "AGENT FORMAL BODY MUST NOT APPEAR IN GLOBAL MEMORY OVERVIEW" not in contract_text
+
+
 def test_memory_usage_contract_reuses_recent_aggregate(tmp_path, monkeypatch):
     monkeypatch.setattr(memory_service, "PROJECT_ROOT", tmp_path)
     memory_service._clear_memory_usage_contract_cache()

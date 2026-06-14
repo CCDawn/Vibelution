@@ -198,12 +198,13 @@ def test_local_rag_retrieval_returns_contexts_with_citations(rag_knowledge_env):
     assert citation["sourceArtifactIds"] == context["source"]["sourceArtifactIds"]
 
 
-def test_rag_retrieval_health_reports_local_provider_ready():
+def test_rag_retrieval_health_reports_local_provider_ready(rag_knowledge_env):
     from core.web.services import rag_retrieval_service
 
-    payload = rag_retrieval_service.get_rag_retrieval_health()
+    payload = rag_retrieval_service.get_rag_retrieval_health(agent_id=rag_knowledge_env["member"]["agentId"])
 
     assert payload["schemaVersion"] == 1
+    assert payload["agentId"] == rag_knowledge_env["member"]["agentId"]
     assert payload["provider"] == "local"
     assert payload["status"] == "ready"
     providers = {provider["provider"]: provider for provider in payload["providers"]}

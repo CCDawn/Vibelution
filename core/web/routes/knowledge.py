@@ -381,7 +381,40 @@ def knowledge_rag_retrieve(
 
 @router.get("/knowledge/rag/health")
 def knowledge_rag_health(agentId: str = "") -> dict:
-    return get_rag_retrieval_health(agent_id=str(agentId or "").strip())
+    normalized_agent_id = str(agentId or "").strip()
+    if not normalized_agent_id:
+        _record_rag_health_event(
+            "knowledge.rag.health.blocked",
+            agent_id="",
+            outcome="blocked",
+            fields={"reason": "agent_id_required"},
+        )
+        raise HTTPException(status_code=422, detail="agentId is required for governed RAG health.")
+    return get_rag_retrieval_health(agent_id=normalized_agent_id)
+
+
+def _record_rag_health_event(
+    event_code: str,
+    *,
+    agent_id: str,
+    outcome: str,
+    fields: dict[str, Any] | None = None,
+) -> None:
+    try:
+        record_runtime_scene_event(
+            "knowledge_routes",
+            "rag",
+            event_code,
+            message=event_code,
+            outcome=outcome,
+            fields={
+                "agentId": str(agent_id or "").strip(),
+                **dict(fields or {}),
+            },
+            lifecycle=True,
+        )
+    except Exception:
+        pass
 
 
 @router.post("/knowledge/sources/inbox", status_code=status.HTTP_201_CREATED)

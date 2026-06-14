@@ -51,7 +51,8 @@ export const queryKeys = {
   memoryItemDetails: () => ["memory", "item-detail"] as const,
   memoryItemDetail: (sectionId: string, itemId: string) => ["memory", "item-detail", sectionId, itemId] as const,
   memoryUsageContract: () => ["memory", "usage-contract"] as const,
-  memoryKnowledgeGraph: (agentId = "") => ["memory", "knowledge-graph", agentId] as const,
+  memoryKnowledgeGraph: (agentId = "", include = "", teamId = "", knowledgeBaseId = "", limit = 800) =>
+    ["memory", "knowledge-graph", agentId, include, teamId, knowledgeBaseId, limit] as const,
   memoryKnowledgeGraphNodeDetail: (nodeId: string, agentId = "") => ["memory", "knowledge-graph", "node-detail", nodeId, agentId] as const,
   knowledgeDashboardSnapshot: (agentId = "") => ["knowledge", "dashboard-snapshot", agentId] as const,
   knowledgeOverview: () => ["knowledge", "overview"] as const,
@@ -61,7 +62,7 @@ export const queryKeys = {
   knowledgeItems: (knowledgeBaseId: string, agentId = "") => ["knowledge", "items", knowledgeBaseId, agentId] as const,
   knowledgeSearch: (knowledgeBaseId: string, agentId: string, query: string, tags: string, mode = "") =>
     ["knowledge", "search", knowledgeBaseId, agentId, query, tags, mode] as const,
-  knowledgeRagHealth: () => ["knowledge", "rag", "health"] as const,
+  knowledgeRagHealth: (agentId = "") => ["knowledge", "rag", "health", agentId] as const,
   knowledgeRagRetrieve: (knowledgeBaseId: string, agentId: string, query: string, tags: string, mode: string, topK: number, maxContextChars: number) =>
     ["knowledge", "rag", "retrieve", knowledgeBaseId, agentId, query, tags, mode, topK, maxContextChars] as const,
   knowledgeRatingSuggestions: (knowledgeBaseId: string, agentId = "", status = "", priority = "") =>
