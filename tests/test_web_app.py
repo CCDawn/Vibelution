@@ -3999,6 +3999,7 @@ def test_persist_turn_result_exposes_previous_context_and_cache_composition(tmp_
                         "itemCount": 1,
                         "source": "raw_user_message",
                         "description": "safe summary",
+                        "contentPreview": "本轮输入：请审查缓存圆环的外圈分段",
                         "cachePolicy": "never_cache",
                         "includedInModelInput": True,
                     },
@@ -4010,6 +4011,7 @@ def test_persist_turn_result_exposes_previous_context_and_cache_composition(tmp_
                         "itemCount": 2,
                         "source": "seed_chat_history",
                         "description": "safe summary",
+                        "contentPreview": "历史摘要：上一轮确认要显示真实/计算/总均命中",
                         "cachePolicy": "prefix_candidate",
                         "includedInModelInput": True,
                     },
@@ -4054,8 +4056,42 @@ def test_persist_turn_result_exposes_previous_context_and_cache_composition(tmp_
     assert computed_segments[0]["tokens"] == 946
     assert computed_segments[0]["status"] == "computed_hit"
     assert computed_segments[0]["source"] == "provider_input_remainder"
+    assert "system prompt" in computed_segments[0]["contentPreview"]
     assert computed_segments[1]["status"] == "computed_hit"
+    assert computed_segments[1]["contentPreview"] == "历史摘要：上一轮确认要显示真实/计算/总均命中"
     assert computed_segments[2]["status"] == "computed_miss"
+    assert computed_segments[2]["contentPreview"] == "本轮输入：请审查缓存圆环的外圈分段"
+
+
+def test_cache_composition_context_manifest_adds_bounded_content_previews(tmp_path, monkeypatch):
+    _seed_chat_state(tmp_path, task_status="done")
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    conversation = load_chat_state(tmp_path)["conversations"][0]
+
+    manifest = session_service._build_last_context_composition(
+        conversation=conversation,
+        turn_id="turn-preview",
+        user_message="请把外圈每段都显示提示词内容，并且不要让小段无法 hover。",
+        history_messages=[
+            {"role": "user", "content": "上一轮我要求用圆圈显示计算命中。"},
+            {"role": "assistant", "content": "已经实现双层圆环，但外圈同色段不容易审查。"},
+        ],
+        active_task={
+            "kind": "chat_turn",
+            "status": "running",
+            "title": "缓存圆环细节",
+            "goal": "显示外圈分段内容摘要",
+        },
+        runtime_context_block="Agent 上下文：稳定系统前缀。",
+        guidance_context_block="最近操作指导：按顺序修复。",
+        guidance_context_included=True,
+    )
+
+    by_key = {item["key"]: item for item in manifest["segments"]}
+    assert by_key["current_user"]["contentPreview"] == "请把外圈每段都显示提示词内容，并且不要让小段无法 hover。"
+    assert "上一轮我要求用圆圈显示计算命中" in by_key["history"]["contentPreview"]
+    assert by_key["agent_context"]["contentPreview"] == "Agent 上下文：稳定系统前缀。"
+    assert by_key["guidance"]["contentPreview"] == "最近操作指导：按顺序修复。"
 
 
 def test_session_detail_live_context_uses_current_missing_cache_composition(tmp_path, monkeypatch):

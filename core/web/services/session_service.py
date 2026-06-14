@@ -6360,8 +6360,101 @@ def _normalize_turn_llm_usage(value: Any) -> dict[str, Any] | None:
     }
 
 
+def _context_segment_content_preview(value: Any) -> str:
+    if not isinstance(value, dict):
+        return ""
+    for key in (
+        "contentPreview",
+        "content_preview",
+        "promptPreview",
+        "prompt_preview",
+        "content",
+    ):
+        preview = _compact_preview_text(value.get(key), max_lines=3, max_chars=240)
+        if preview:
+            return preview
+    return ""
+
+
+def _message_list_content_preview(messages: list[dict[str, Any]], *, limit: int = 4) -> str:
+    parts: list[str] = []
+    for item in list(messages or [])[-limit:]:
+        if not isinstance(item, dict):
+            continue
+        role = str(item.get("role") or "message").strip() or "message"
+        content = _compact_preview_text(item.get("content") or "", max_lines=2, max_chars=120)
+        if not content:
+            tool_parts = []
+            for tool_call in list(item.get("toolCalls") or item.get("tool_calls") or [])[:2]:
+                if isinstance(tool_call, dict):
+                    tool_parts.append(
+                        _compact_preview_text(
+                            tool_call.get("summary")
+                            or tool_call.get("resultPreview")
+                            or tool_call.get("result_preview")
+                            or tool_call.get("name")
+                            or "",
+                            max_lines=1,
+                            max_chars=80,
+                        )
+                    )
+            content = "; ".join(part for part in tool_parts if part)
+        if content:
+            parts.append(f"{role}: {content}")
+    return _compact_preview_text(" | ".join(parts), max_lines=1, max_chars=240)
+
+
+def _active_task_content_preview(active_task: Any) -> str:
+    task = _normalize_session_active_task(active_task)
+    if not isinstance(task, dict):
+        return ""
+    parts = [
+        task.get("title"),
+        task.get("goal"),
+        task.get("latest_summary"),
+        task.get("next_action"),
+    ]
+    return _compact_preview_text(" | ".join(str(item or "") for item in parts if str(item or "").strip()), max_lines=1, max_chars=240)
+
+
+def _attach_context_segment_content_previews(
+    manifest: dict[str, Any] | None,
+    previews: dict[str, str],
+) -> dict[str, Any] | None:
+    if not isinstance(manifest, dict):
+        return manifest
+    updated = dict(manifest)
+    next_segments: list[dict[str, Any]] = []
+    for item in list(updated.get("segments") or []):
+        if not isinstance(item, dict):
+            continue
+        segment = dict(item)
+        preview = previews.get(str(segment.get("key") or "").strip()) or _context_segment_content_preview(segment)
+        if preview:
+            segment["contentPreview"] = preview
+        next_segments.append(segment)
+    updated["segments"] = next_segments
+    return updated
+
+
 def _normalize_session_context_composition(value: Any) -> dict[str, Any] | None:
-    return normalize_context_manifest(value)
+    normalized = normalize_context_manifest(value)
+    if normalized is None or not isinstance(value, dict):
+        return normalized
+    raw_segments = [item for item in list(value.get("segments") or []) if isinstance(item, dict)]
+    if not raw_segments:
+        return normalized
+    next_segments: list[dict[str, Any]] = []
+    for index, item in enumerate(list(normalized.get("segments") or [])):
+        segment = dict(item)
+        raw = raw_segments[index] if index < len(raw_segments) else {}
+        preview = _context_segment_content_preview(raw)
+        if preview:
+            segment["contentPreview"] = preview
+        next_segments.append(segment)
+    updated = dict(normalized)
+    updated["segments"] = next_segments
+    return updated
 
 
 def _active_chat_turn_work_run_for_session(session_id: str) -> dict[str, Any] | None:
@@ -6464,6 +6557,7 @@ def _normalize_session_cache_composition(value: Any) -> dict[str, Any] | None:
                 "description": str(item.get("description") or "").strip(),
                 "cachePolicy": str(item.get("cachePolicy") or item.get("cache_policy") or "").strip(),
                 "order": _coerce_nonnegative_int(item.get("order") or 0),
+                "contentPreview": _context_segment_content_preview(item),
             }
         )
     if not segments:
@@ -6492,6 +6586,7 @@ def _normalize_session_cache_composition(value: Any) -> dict[str, Any] | None:
                 "description": str(item.get("description") or "").strip(),
                 "cachePolicy": str(item.get("cachePolicy") or item.get("cache_policy") or "").strip(),
                 "order": _coerce_nonnegative_int(item.get("order") or 0),
+                "contentPreview": _context_segment_content_preview(item),
             }
         )
     computed_input_tokens = _coerce_nonnegative_int(
@@ -6603,6 +6698,7 @@ def _build_computed_cache_segments(
                     "description": "No provider input tokens were available for computed cache diagnostics.",
                     "cachePolicy": "unknown",
                     "order": 0,
+                    "contentPreview": "No provider input token payload was available for computed cache diagnostics.",
                 }
             ],
             0,
@@ -6626,6 +6722,10 @@ def _build_computed_cache_segments(
                 ),
                 "cachePolicy": "assumed_stable_prefix",
                 "order": 0,
+                "contentPreview": (
+                    "Provider input not covered by the context manifest, usually stable system prompt, "
+                    "developer instructions, or tool schema. Raw text is not expanded here."
+                ),
             }
         )
         computed_cached_tokens += unexplained_tokens
@@ -6658,6 +6758,7 @@ def _build_computed_cache_segments(
                 "description": str(item.get("description") or "").strip(),
                 "cachePolicy": cache_policy,
                 "order": index,
+                "contentPreview": _context_segment_content_preview(item),
             }
         )
     computed_cached_tokens = min(computed_cached_tokens, total_input_tokens)
@@ -7154,6 +7255,25 @@ def _build_last_context_composition(
         limit_agent_id=str(limit_payload.get("agentId") or "").strip(),
         prompt_cache_partition=prompt_cache_partition,
         segments=segments,
+    )
+    content_previews = {
+        "current_user": _compact_preview_text(user_message, max_lines=3, max_chars=240),
+        "history": _message_list_content_preview(history_messages),
+        "active_task": _active_task_content_preview(active_task),
+        "agent_context": _compact_preview_text(runtime_context_block, max_lines=3, max_chars=240),
+        "dynamic_runtime_context": _compact_preview_text(dynamic_runtime_context_block, max_lines=3, max_chars=240),
+        "guidance": _compact_preview_text(guidance_context_block, max_lines=3, max_chars=240),
+        "skill": _compact_preview_text(skill_runtime_context_block, max_lines=3, max_chars=240),
+        "active_skill": _compact_preview_text(active_skill_context_block, max_lines=3, max_chars=240),
+        "attachments": _compact_preview_text(
+            ", ".join(str(item.get("filename") or item.get("contentType") or "") for item in normalized_attachments),
+            max_lines=1,
+            max_chars=240,
+        ),
+    }
+    normalized = _attach_context_segment_content_previews(
+        normalized,
+        {key: value for key, value in content_previews.items() if value},
     )
     return normalized or {
         "schemaVersion": 1,

@@ -4335,6 +4335,7 @@ export type SessionCacheCompositionSegment = {
   status: string;
   source?: string;
   description?: string;
+  contentPreview?: string;
   cachePolicy?: string;
   order?: number;
 };

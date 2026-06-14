@@ -2431,6 +2431,16 @@
   min-width: 0;
 }
 
+.contextCompositionLegend em {
+  min-width: 0;
+  max-width: 180px;
+  overflow: hidden;
+  color: color-mix(in srgb, var(--fg-tertiary) 82%, transparent);
+  font-style: normal;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .contextCompositionLegend i {
   flex: 0 0 auto;
   width: 6px;
@@ -2576,6 +2586,48 @@
 
 .cacheDonutSegmentOther {
   stroke: #6f7dd9;
+}
+
+.cacheDonutSegmentSystem {
+  stroke: #27b4a6;
+}
+
+.cacheDonutSegmentUser {
+  stroke: #4f8cff;
+}
+
+.cacheDonutSegmentHistory {
+  stroke: #7a8494;
+}
+
+.cacheDonutSegmentTask {
+  stroke: #d19a3f;
+}
+
+.cacheDonutSegmentAgent {
+  stroke: #36a86f;
+}
+
+.cacheDonutSegmentGuidance {
+  stroke: #c26ad8;
+}
+
+.cacheDonutSegmentSkill {
+  stroke: #d6655a;
+}
+
+.cacheDonutSegmentAttachments {
+  stroke: #3fb8c8;
+}
+
+.cacheDonutLegendPreview::before {
+  content: "·";
+  margin-right: 3px;
+  color: color-mix(in srgb, var(--fg-tertiary) 55%, transparent);
+}
+
+.contextCompositionSegmentSystem {
+  background: #27b4a6;
 }
 
 .contextCompositionSegmentUser {

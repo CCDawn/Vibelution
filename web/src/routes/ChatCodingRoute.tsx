@@ -850,28 +850,6 @@ function contextCompositionSegmentClass(key: string) {
   }
 }
 
-function cacheCompositionSegmentClass(keyOrStatus: string) {
-  switch (keyOrStatus) {
-    case "cached":
-    case "hit":
-    case "computed_hit":
-      return styles.contextCompositionSegmentCached;
-    case "cache_write":
-    case "write":
-    case "computed_write":
-      return styles.contextCompositionSegmentCacheWrite;
-    case "uncached":
-    case "miss":
-    case "computed_miss":
-      return styles.contextCompositionSegmentUncached;
-    case "missing":
-    case "computed_unknown":
-      return styles.contextCompositionSegmentMissing;
-    default:
-      return styles.contextCompositionSegmentOther;
-  }
-}
-
 function cacheDonutSegmentClass(keyOrStatus: string) {
   switch (keyOrStatus) {
     case "cached":
@@ -891,6 +869,54 @@ function cacheDonutSegmentClass(keyOrStatus: string) {
       return styles.cacheDonutSegmentMissing;
     default:
       return styles.cacheDonutSegmentOther;
+  }
+}
+
+function cacheDonutComputedSegmentClass(key: string) {
+  switch (key) {
+    case "system_prompt_overhead":
+      return styles.cacheDonutSegmentSystem;
+    case "current_user":
+      return styles.cacheDonutSegmentUser;
+    case "history":
+      return styles.cacheDonutSegmentHistory;
+    case "active_task":
+      return styles.cacheDonutSegmentTask;
+    case "agent_context":
+      return styles.cacheDonutSegmentAgent;
+    case "guidance":
+      return styles.cacheDonutSegmentGuidance;
+    case "skill":
+    case "active_skill":
+      return styles.cacheDonutSegmentSkill;
+    case "attachments":
+      return styles.cacheDonutSegmentAttachments;
+    default:
+      return styles.cacheDonutSegmentOther;
+  }
+}
+
+function computedCacheLegendSegmentClass(key: string) {
+  switch (key) {
+    case "system_prompt_overhead":
+      return styles.contextCompositionSegmentSystem;
+    case "current_user":
+      return styles.contextCompositionSegmentUser;
+    case "history":
+      return styles.contextCompositionSegmentHistory;
+    case "active_task":
+      return styles.contextCompositionSegmentTask;
+    case "agent_context":
+      return styles.contextCompositionSegmentAgent;
+    case "guidance":
+      return styles.contextCompositionSegmentGuidance;
+    case "skill":
+    case "active_skill":
+      return styles.contextCompositionSegmentSkill;
+    case "attachments":
+      return styles.contextCompositionSegmentAttachments;
+    default:
+      return styles.contextCompositionSegmentOther;
   }
 }
 
@@ -992,10 +1018,23 @@ function cacheDonutSegmentTitle(
     `${segment.label || segment.key}: ${numberFormatter.format(segment.tokens)} / ${numberFormatter.format(totalTokens)} · ${percent}%`,
     segment.cachePolicy ? `${lang === "zh" ? "缓存策略" : "cache policy"} ${segment.cachePolicy}` : "",
     segment.source ? `${lang === "zh" ? "来源" : "source"} ${segment.source}` : "",
+    segment.contentPreview ? `${lang === "zh" ? "内容" : "content"} ${segment.contentPreview}` : "",
     segment.description || "",
     segment.visuallyAmplified ? (lang === "zh" ? "视觉段已放大，便于鼠标锁定。" : "Visual arc is amplified for hover targeting.") : "",
   ];
   return parts.filter(Boolean).join(" · ");
+}
+
+function cacheDonutSegmentStyle(segment: CacheDonutSegment, gapPercent = 0): CSSProperties {
+  const gap = Math.max(0, Math.min(1, gapPercent));
+  const visiblePercent = segment.visualPercent > gap
+    ? Math.max(0.45, segment.visualPercent - gap)
+    : segment.visualPercent;
+  const offset = -(segment.startPercent + (segment.visualPercent > gap ? gap / 2 : 0));
+  return {
+    strokeDasharray: `${visiblePercent} ${Math.max(0, 100 - visiblePercent)}`,
+    strokeDashoffset: offset,
+  };
 }
 
 function removeSessionImageAttachment(
@@ -5516,15 +5555,12 @@ export function ChatCodingRoute() {
                         {computedCacheDonutSegments.map((segment, index) => (
                           <circle
                             key={`computed-${segment.key}-${segment.status}-${index}`}
-                            className={`${styles.cacheDonutSegment} ${styles.cacheDonutOuterSegment} ${cacheDonutSegmentClass(segment.status || segment.key)}`}
+                            className={`${styles.cacheDonutSegment} ${styles.cacheDonutOuterSegment} ${cacheDonutComputedSegmentClass(segment.key)}`}
                             cx="50"
                             cy="50"
                             r="42"
                             pathLength={100}
-                            style={{
-                              strokeDasharray: `${segment.visualPercent} ${Math.max(0, 100 - segment.visualPercent)}`,
-                              strokeDashoffset: -segment.startPercent,
-                            } as CSSProperties}
+                            style={cacheDonutSegmentStyle(segment, computedCacheDonutSegments.length > 1 ? 0.55 : 0)}
                           >
                             <title>{cacheDonutSegmentTitle(segment, computedCacheCompositionTotalTokens, numberFormatter, lang)}</title>
                           </circle>
@@ -5538,10 +5574,7 @@ export function ChatCodingRoute() {
                             cy="50"
                             r="31"
                             pathLength={100}
-                            style={{
-                              strokeDasharray: `${segment.visualPercent} ${Math.max(0, 100 - segment.visualPercent)}`,
-                              strokeDashoffset: -segment.startPercent,
-                            } as CSSProperties}
+                            style={cacheDonutSegmentStyle(segment, trueCacheDonutSegments.length > 1 ? 0.4 : 0)}
                           >
                             <title>{cacheDonutSegmentTitle(segment, providerCacheInputTokens, numberFormatter, lang)}</title>
                           </circle>
@@ -5576,10 +5609,15 @@ export function ChatCodingRoute() {
                           key={`${segment.key}-${segment.status}-${index}-legend`}
                           title={cacheDonutSegmentTitle(segment, computedCacheCompositionTotalTokens, numberFormatter, lang)}
                         >
-                          <i className={cacheCompositionSegmentClass(segment.status || segment.key)} />
+                          <i className={computedCacheLegendSegmentClass(segment.key)} />
                           {segment.key === "computed_missing" ? cacheCompositionSegmentLabel("missing", segment.label, t) : segment.label}
                           {" "}
                           {segment.key === "computed_missing" ? "" : numberFormatter.format(segment.tokens ?? 0)}
+                          {segment.contentPreview ? (
+                            <em className={styles.cacheDonutLegendPreview}>
+                              {segment.contentPreview}
+                            </em>
+                          ) : null}
                         </span>
                       ))}
                     </div>
