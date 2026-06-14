@@ -43,7 +43,7 @@ from core.web.services.agent_bulk_delete_service import (
     bulk_archive_agents,
     bulk_purge_agents,
 )
-from core.web.services.agent_bulk_edit_service import bulk_update_agent_prompt_template
+from core.web.services.agent_bulk_edit_service import bulk_update_agent_config, bulk_update_agent_prompt_template
 from core.web.services.agent_mode_binding_service import (
     AgentModeBindingError,
     get_mode_bindings_payload,
@@ -141,6 +141,14 @@ class AgentBulkPromptTemplatePayload(BaseModel):
 
     agentIds: list[str] = Field(default_factory=list)
     promptTemplateId: str = ""
+
+
+class AgentBulkConfigPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    agentIds: list[str] = Field(default_factory=list)
+    patch: dict[str, Any] = Field(default_factory=dict)
+    applyFields: list[str] = Field(default_factory=list)
 
 
 class AgentAvatarUploadPayload(BaseModel):
@@ -810,6 +818,14 @@ def agent_bulk_purge(payload: AgentBulkActionPayload) -> dict:
 def agent_bulk_prompt_template(payload: AgentBulkPromptTemplatePayload) -> dict:
     try:
         return bulk_update_agent_prompt_template(payload.agentIds, payload.promptTemplateId)
+    except AgentDirectoryError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.post("/agents/bulk-config")
+def agent_bulk_config(payload: AgentBulkConfigPayload) -> dict:
+    try:
+        return bulk_update_agent_config(payload.agentIds, payload.patch, payload.applyFields)
     except AgentDirectoryError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
