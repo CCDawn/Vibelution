@@ -354,14 +354,6 @@ function buildCliAgentRunViews(messages: ConversationMessage[]): CliAgentRunView
   return runs;
 }
 
-function formatDurationMs(durationMs: number | undefined) {
-  if (!Number.isFinite(durationMs)) {
-    return "";
-  }
-  const value = Number(durationMs);
-  return value >= 1000 ? `${(value / 1000).toFixed(1)}s` : `${Math.round(value)}ms`;
-}
-
 const TERMINAL_ANSI_PATTERN = /\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1B\\))/g;
 
 function terminalTextForDisplay(value: string) {
@@ -391,16 +383,24 @@ function terminalStatusText(session: CliAgentTerminalSession | null, connecting:
   return lang === "zh" ? "未运行" : "Stopped";
 }
 
+function isCliAgentRunActiveForClose(run: CliAgentRunView, session?: CliAgentTerminalSession) {
+  if (session?.alive) {
+    return true;
+  }
+  const status = String(session?.status || run.status || "").trim().toLowerCase();
+  return ["active", "pending", "queued", "running", "starting", "stopping"].includes(status);
+}
+
 function CliAgentRunTerminalPanel({
   run,
   sourceSessionId,
   lang,
-  statusLabel,
+  onTerminalSessionChange,
 }: {
   run: CliAgentRunView;
   sourceSessionId: string;
   lang: "zh" | "en";
-  statusLabel: (status: string) => string;
+  onTerminalSessionChange?: (runId: string, session: CliAgentTerminalSession) => void;
 }) {
   const [terminalSession, setTerminalSession] = useState<CliAgentTerminalSession | null>(null);
   const [terminalText, setTerminalText] = useState("");
@@ -409,11 +409,6 @@ function CliAgentRunTerminalPanel({
   const [connecting, setConnecting] = useState(false);
   const outputRef = useRef<HTMLPreElement | null>(null);
   const terminalSessionId = String(terminalSession?.terminalSessionId || "").trim();
-  const transportLabel = terminalSession?.transport === "conpty"
-    ? (lang === "zh" ? "真实终端" : "PTY")
-    : terminalSession?.transport === "pipe"
-      ? (lang === "zh" ? "兼容通道" : "Pipe")
-      : "";
   const statusText = terminalStatusText(terminalSession, connecting, lang);
   const rawTerminalText = terminalText || String(terminalSession?.transcriptTail || "");
   const displayTerminalText = terminalTextForDisplay(rawTerminalText);
@@ -476,6 +471,12 @@ function CliAgentRunTerminalPanel({
   }, [run.agentType, run.cwd, run.id, run.messageId, run.mode, run.result, run.task, sourceSessionId]);
 
   useEffect(() => {
+    if (terminalSession) {
+      onTerminalSessionChange?.(run.id, terminalSession);
+    }
+  }, [onTerminalSessionChange, run.id, terminalSession]);
+
+  useEffect(() => {
     if (!terminalSessionId || typeof EventSource === "undefined") {
       return;
     }
@@ -535,88 +536,14 @@ function CliAgentRunTerminalPanel({
       .catch((error) => setTerminalError(error instanceof Error ? error.message : String(error)));
   }, [terminalInput, terminalSessionId]);
 
-  const stopTerminal = useCallback(() => {
-    if (!terminalSessionId) {
-      return;
-    }
-    setTerminalError("");
-    fetchJson<CliAgentTerminalSession>(`/api/cli-agents/terminal-sessions/${encodeURIComponent(terminalSessionId)}/stop`, {
-      method: "POST",
-    })
-      .then((session) => setTerminalSession(session))
-      .catch((error) => setTerminalError(error instanceof Error ? error.message : String(error)));
-  }, [terminalSessionId]);
-
-  const reconnectTerminal = useCallback(() => {
-    setTerminalSession(null);
-    setTerminalText("");
-    setTerminalError("");
-    setConnecting(true);
-    fetchJson<CliAgentTerminalSession>("/api/cli-agents/terminal-sessions/ensure", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        agentType: run.agentType,
-        task: run.task,
-        cwd: run.cwd,
-        mode: run.mode || "readonly",
-        sourceSessionId,
-        sourceMessageId: run.messageId,
-        sourceRunId: run.id,
-        cliSessionId: terminalSession?.cliSessionId || "",
-        rows: 28,
-        cols: 100,
-      }),
-    })
-      .then((session) => {
-        setTerminalSession(session);
-        setTerminalText(String(session.transcriptTail || ""));
-      })
-      .catch((error) => setTerminalError(error instanceof Error ? error.message : String(error)))
-      .finally(() => setConnecting(false));
-  }, [run.agentType, run.cwd, run.id, run.messageId, run.mode, run.task, sourceSessionId, terminalSession?.cliSessionId]);
-
   return (
-    <section className={styles.cliAgentRunPanel} aria-label={lang === "zh" ? "命令终端" : "CLI Agent terminal"}>
-      <header className={styles.cliAgentRunHeader}>
-        <span className={styles.cliAgentRunIcon} aria-hidden="true">
-          <SquareTerminal size={18} />
-        </span>
-        <div className={styles.cliAgentRunHeading}>
-          <p>{lang === "zh" ? "命令终端" : "Terminal"}</p>
-          <h2>{run.title}</h2>
-        </div>
-        <div className={styles.cliAgentRunActions}>
-          <span className={styles.cliAgentRunStatus}>{statusText}</span>
-          <button
-            type="button"
-            className={styles.cliAgentRunIconButton}
-            onClick={reconnectTerminal}
-            title={lang === "zh" ? "重新连接" : "Reconnect"}
-            aria-label={lang === "zh" ? "重新连接命令终端" : "Reconnect terminal"}
-          >
-            <RotateCcw size={14} />
-          </button>
-          <button
-            type="button"
-            className={styles.cliAgentRunIconButton}
-            onClick={stopTerminal}
-            disabled={!terminalSession?.alive}
-            title={lang === "zh" ? "停止" : "Stop"}
-            aria-label={lang === "zh" ? "停止命令终端" : "Stop terminal"}
-          >
-            <Square size={14} />
-          </button>
-        </div>
-      </header>
-      <div className={styles.cliAgentRunMetaBar}>
-        <span>{transportLabel || statusLabel(run.status)}</span>
-        {terminalSession?.cliSessionId ? <span title={terminalSession.cliSessionId}>{lang === "zh" ? "已绑定上次会话" : "Session bound"}</span> : null}
-        {formatDurationMs(run.durationMs) ? <span>{formatDurationMs(run.durationMs)}</span> : null}
-      </div>
+    <section className={styles.cliAgentRunPanel} aria-label={`${run.title} ${lang === "zh" ? "终端" : "terminal"}`}>
       <div className={styles.cliAgentTerminalFrame}>
         <div className={styles.cliAgentTerminalCommand} title={visibleCommand}>
-          <span aria-hidden="true">$</span>
+          <span className={styles.cliAgentTerminalStatus}>
+            <SquareTerminal size={13} aria-hidden="true" />
+            <span>{statusText}</span>
+          </span>
           <code>{visibleCommand}</code>
         </div>
         <pre ref={outputRef} className={styles.cliAgentTerminalOutput}>
@@ -1549,6 +1476,8 @@ export function ChatCodingRoute() {
   const [groupManageSessionIds, setGroupManageSessionIds] = useState<string[]>([]);
   const [groupManageModeDraft, setGroupManageModeDraft] = useState("round_robin");
   const [groupManagePurposeDraft, setGroupManagePurposeDraft] = useState("discussion");
+  const [closedCliAgentRunIdsBySession, setClosedCliAgentRunIdsBySession] = useState<Record<string, string[]>>({});
+  const [cliAgentTerminalSessions, setCliAgentTerminalSessions] = useState<Record<string, CliAgentTerminalSession>>({});
   const layoutRef = useRef<HTMLDivElement | null>(null);
   const sessionStreamErrorLoggedRef = useRef<Record<string, boolean>>({});
   const sessionStreamPayloadErrorLoggedRef = useRef<Record<string, boolean>>({});
@@ -3155,9 +3084,11 @@ export function ChatCodingRoute() {
   const selectedSessionDetail =
     rawSessionDetail && rawSessionDetail.id === activeSessionId ? rawSessionDetail : undefined;
   const detail = selectedSessionDetail;
+  const closedCliAgentRunIds = activeSessionId ? (closedCliAgentRunIdsBySession[activeSessionId] ?? []) : [];
+  const closedCliAgentRunIdSet = useMemo(() => new Set(closedCliAgentRunIds), [closedCliAgentRunIds]);
   const cliAgentRunTabs = useMemo(
-    () => buildCliAgentRunViews(detail?.messages ?? []),
-    [detail?.messages],
+    () => buildCliAgentRunViews(detail?.messages ?? []).filter((run) => !closedCliAgentRunIdSet.has(run.id)),
+    [closedCliAgentRunIdSet, detail?.messages],
   );
   const activeCliAgentRun = useMemo(
     () => activeCliAgentRunId ? cliAgentRunTabs.find((run) => run.id === activeCliAgentRunId) : undefined,
@@ -3171,6 +3102,74 @@ export function ChatCodingRoute() {
       setActiveTab(activeSessionId, "agent");
     }
   }, [activeCliAgentRunId, activeSessionId, cliAgentRunTabs, setActiveTab]);
+  const handleCliAgentTerminalSessionChange = useCallback((runId: string, session: CliAgentTerminalSession) => {
+    setCliAgentTerminalSessions((current) => {
+      const previous = current[runId];
+      if (
+        previous?.terminalSessionId === session.terminalSessionId
+        && previous?.status === session.status
+        && previous?.alive === session.alive
+        && previous?.cliSessionId === session.cliSessionId
+      ) {
+        return current;
+      }
+      return {
+        ...current,
+        [runId]: session,
+      };
+    });
+  }, []);
+  const closeCliAgentRun = useCallback(async (run: CliAgentRunView) => {
+    if (!activeSessionId) {
+      return;
+    }
+    const terminalSession = cliAgentTerminalSessions[run.id];
+    const shouldStopTerminal = isCliAgentRunActiveForClose(run, terminalSession);
+    if (shouldStopTerminal && typeof window !== "undefined") {
+      const confirmed = window.confirm(
+        lang === "zh"
+          ? `关闭后将结束当前 ${run.title} 终端会话，是否关闭？`
+          : `Closing will end the current ${run.title} terminal session. Close it?`,
+      );
+      if (!confirmed) {
+        return;
+      }
+    }
+    if (shouldStopTerminal && terminalSession?.terminalSessionId) {
+      try {
+        await fetchJson<CliAgentTerminalSession>(
+          `/api/cli-agents/terminal-sessions/${encodeURIComponent(terminalSession.terminalSessionId)}/stop`,
+          { method: "POST" },
+        );
+      } catch (error) {
+        if (typeof window !== "undefined") {
+          window.alert(
+            lang === "zh"
+              ? `关闭 ${run.title} 终端失败：${describeError(error, "请求失败")}`
+              : `Failed to close ${run.title}: ${describeError(error, "Request failed")}`,
+          );
+        }
+        return;
+      }
+    }
+    setClosedCliAgentRunIdsBySession((current) => {
+      const existing = current[activeSessionId] ?? [];
+      if (existing.includes(run.id)) {
+        return current;
+      }
+      return {
+        ...current,
+        [activeSessionId]: [...existing, run.id],
+      };
+    });
+    setCliAgentTerminalSessions((current) => {
+      const { [run.id]: _removed, ...remaining } = current;
+      return remaining;
+    });
+    if (activeCliAgentRunId === run.id) {
+      setActiveTab(activeSessionId, "agent");
+    }
+  }, [activeCliAgentRunId, activeSessionId, cliAgentTerminalSessions, lang, setActiveTab]);
   const sessionDetailLoadingForActiveSession = Boolean(
     activeSessionId
     && (!rawSessionDetail || rawSessionDetail.id !== activeSessionId)
@@ -5500,6 +5499,12 @@ export function ChatCodingRoute() {
                   setActiveTab(activeSessionId, cliAgentRunTabId(runId));
                 }
               }}
+              onCloseCliAgentRun={(runId) => {
+                const run = cliAgentRunTabs.find((item) => item.id === runId);
+                if (run) {
+                  void closeCliAgentRun(run);
+                }
+              }}
               onOpenDirectSession={handleOpenDirectSession}
               onRenameTitleChange={setEditingSessionTitle}
               onSetActiveTab={setActiveTab}
@@ -6119,7 +6124,7 @@ export function ChatCodingRoute() {
               run={activeCliAgentRun}
               sourceSessionId={activeSessionId || ""}
               lang={lang}
-              statusLabel={statusLabel}
+              onTerminalSessionChange={handleCliAgentTerminalSessionChange}
             />
           ) : activeCliAgentRunId ? (
             <div className={styles.emptySurface}>

@@ -1619,6 +1619,32 @@
   overflow: hidden;
 }
 
+.agentSessionTabClosable {
+  grid-template-columns: minmax(0, 1fr) auto;
+  padding: 0 6px 0 8px;
+  cursor: default;
+}
+
+.agentSessionTabMainAction {
+  display: grid;
+  grid-template-columns: auto minmax(74px, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  min-height: 32px;
+  border: 0;
+  padding: 4px 0;
+  color: inherit;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.agentSessionTabMainAction:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--state-success) 42%, transparent);
+  outline-offset: 2px;
+}
+
 .agentSessionTab:hover {
   color: var(--fg-primary);
   border-color: color-mix(in srgb, var(--border-soft) 72%, transparent);
@@ -1696,6 +1722,10 @@
   text-align: left;
 }
 
+.agentSessionTabCopyCompact {
+  gap: 0;
+}
+
 .agentSessionTabKicker {
   color: var(--fg-tertiary);
   font-size: 0.62rem;
@@ -1759,6 +1789,26 @@
 .agentSessionTabEditButton:disabled {
   cursor: not-allowed;
   opacity: 0.46;
+}
+
+.agentSessionTabCloseButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  color: var(--fg-tertiary);
+  background: transparent;
+  cursor: pointer;
+}
+
+.agentSessionTabCloseButton:hover,
+.agentSessionTabCloseButton:focus-visible {
+  color: var(--state-error);
+  border-color: color-mix(in srgb, var(--state-error) 28%, transparent);
+  background: color-mix(in srgb, var(--state-error) 10%, transparent);
 }
 
 .agentSessionTabMeta {
@@ -1840,114 +1890,9 @@
   flex-direction: column;
   min-height: 0;
   height: 100%;
-  padding: 12px;
-  gap: 10px;
+  padding: 10px;
   overflow: hidden;
   background: color-mix(in srgb, var(--surface-panel-strong) 92%, #07100e 8%);
-}
-
-.cliAgentRunHeader {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  gap: 10px;
-  align-items: center;
-  min-height: 42px;
-}
-
-.cliAgentRunIcon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  border: 1px solid color-mix(in srgb, var(--state-success) 24%, var(--border-soft));
-  border-radius: 7px;
-  color: var(--state-success);
-  background: color-mix(in srgb, var(--state-success) 10%, transparent);
-}
-
-.cliAgentRunHeading {
-  min-width: 0;
-}
-
-.cliAgentRunHeading p {
-  margin: 0 0 2px;
-  color: var(--fg-tertiary);
-  font-size: 0.68rem;
-  font-weight: 760;
-}
-
-.cliAgentRunHeading h2 {
-  margin: 0;
-  overflow: hidden;
-  color: var(--fg-primary);
-  font-size: 1rem;
-  line-height: 1.2;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.cliAgentRunActions {
-  display: inline-flex;
-  align-items: center;
-  justify-self: end;
-  gap: 6px;
-  min-width: 0;
-}
-
-.cliAgentRunStatus {
-  border: 1px solid color-mix(in srgb, var(--state-success) 24%, var(--border-soft));
-  border-radius: 999px;
-  padding: 4px 9px;
-  color: var(--state-success);
-  background: color-mix(in srgb, var(--state-success) 8%, transparent);
-  font-size: 0.72rem;
-  font-weight: 760;
-  white-space: nowrap;
-}
-
-.cliAgentRunIconButton {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  border: 1px solid color-mix(in srgb, var(--border-soft) 76%, transparent);
-  border-radius: 7px;
-  color: var(--fg-secondary);
-  background: color-mix(in srgb, var(--surface-panel) 78%, transparent);
-  cursor: pointer;
-}
-
-.cliAgentRunIconButton:hover:not(:disabled),
-.cliAgentRunIconButton:focus-visible:not(:disabled) {
-  color: var(--state-success);
-  border-color: color-mix(in srgb, var(--state-success) 34%, transparent);
-  background: color-mix(in srgb, var(--state-success) 12%, transparent);
-}
-
-.cliAgentRunIconButton:disabled {
-  cursor: not-allowed;
-  opacity: 0.42;
-}
-
-.cliAgentRunMetaBar {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  min-height: 22px;
-  overflow: hidden;
-  color: var(--fg-tertiary);
-  font-size: 0.72rem;
-  font-weight: 720;
-  white-space: nowrap;
-}
-
-.cliAgentRunMetaBar span {
-  overflow: hidden;
-  max-width: 220px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .cliAgentTerminalFrame {
@@ -1974,6 +1919,16 @@
   background: #071713;
   font-family: "Cascadia Mono", "Consolas", monospace;
   font-size: 0.76rem;
+}
+
+.cliAgentTerminalStatus {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 58px;
+  color: #a9f0ce;
+  font-weight: 780;
+  white-space: nowrap;
 }
 
 .cliAgentTerminalCommand code {

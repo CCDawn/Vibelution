@@ -141,11 +141,14 @@ describe("AgentSessionTabStrip", () => {
       ],
     });
 
-    expect(markup).toContain("CLI Agent");
     expect(markup).toContain("Codex Code");
-    expect(markup).toContain("readonly");
+    expect(markup).not.toContain("CLI Agent");
+    expect(markup).not.toContain("readonly");
     expect(markup).toContain("aria-current=\"true\"");
     expect(markup).toContain("agentSessionTabCli");
+    expect(markup).toContain("agentSessionTabMainAction");
+    expect(markup).toContain("agentSessionTabCloseButton");
+    expect(markup).toContain("关闭终端页 Codex Code");
   });
 
   it("renders nothing when there is only one session", () => {
