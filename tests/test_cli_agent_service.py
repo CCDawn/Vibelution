@@ -866,6 +866,32 @@ def test_cli_agent_terminal_reads_only_bounded_transcript_tail(tmp_path):
     assert "oldold" not in tail
 
 
+def test_cli_agent_terminal_marks_plain_transcript_tail_replayable(tmp_path):
+    transcript = tmp_path / "terminal.log"
+    transcript.write_text("line 1\nline 2\n", encoding="utf-8")
+
+    snapshot = terminal_service._read_transcript_snapshot(transcript, limit=120)
+
+    assert snapshot["transcriptTail"].splitlines() == ["line 1", "line 2"]
+    assert snapshot["transcriptTailReplayable"] is True
+    assert snapshot["transcriptTailRenderReason"] == "replayable"
+
+
+def test_cli_agent_terminal_suppresses_unsafe_tui_transcript_tail(tmp_path):
+    transcript = tmp_path / "terminal.log"
+    spinner_tail = "".join(
+        f"\x1b[?2026h\x1b[?25l\x1b[34;6H\x1b[38;2;128;128;128m⠋\x1b[0m\x1b[57;6H\x1b[?25h\x1b[?2026l"
+        for _ in range(40)
+    )
+    transcript.write_text(spinner_tail, encoding="utf-8")
+
+    snapshot = terminal_service._read_transcript_snapshot(transcript, limit=120000)
+
+    assert snapshot["transcriptTail"] == ""
+    assert snapshot["transcriptTailReplayable"] is False
+    assert snapshot["transcriptTailRenderReason"] == "unsafe_tui_control_tail"
+
+
 def test_cli_agent_terminal_trims_large_tui_transcript(monkeypatch, tmp_path):
     transcript = tmp_path / "terminal.log"
     monkeypatch.setattr(terminal_service, "MAX_TRANSCRIPT_BYTES", 200)
