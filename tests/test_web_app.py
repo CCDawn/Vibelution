@@ -806,6 +806,8 @@ def test_persist_turn_result_exposes_previous_context_and_cache_composition(tmp_
                 "output_tokens": 80,
                 "cached_input_tokens": 250,
                 "cache_creation_input_tokens": 125,
+                "provider": "xiaomi",
+                "model": "mimo-v2.5-pro",
             },
         },
         turn_id="turn-context-composition",
@@ -830,6 +832,12 @@ def test_persist_turn_result_exposes_previous_context_and_cache_composition(tmp_
     assert detail["lastCacheComposition"]["computedCachedInputTokens"] == 996
     assert detail["lastCacheComposition"]["computedUncachedInputTokens"] == 4
     assert detail["lastCacheComposition"]["computedCacheHitRate"] == pytest.approx(0.996)
+    assert detail["lastCacheComposition"]["calibratedCachedInputTokens"] == 250
+    assert detail["lastCacheComposition"]["calibratedCacheHitRate"] == pytest.approx(0.25)
+    assert detail["lastCacheComposition"]["computedOverestimatedInputTokens"] == 746
+    assert detail["lastCacheComposition"]["providerExtraCachedInputTokens"] == 0
+    assert detail["lastCacheComposition"]["calibrationStatus"] == "provider_lower_than_computed"
+    assert "Xiaomi/MiMo" in detail["lastCacheComposition"]["calibrationReason"]
     assert detail["lastCacheComposition"]["averageInputTokens"] == 1500
     assert detail["lastCacheComposition"]["averageCachedInputTokens"] == 350
     assert detail["lastCacheComposition"]["averageObservedTurnCount"] == 2
@@ -844,6 +852,16 @@ def test_persist_turn_result_exposes_previous_context_and_cache_composition(tmp_
     assert computed_segments[1]["contentPreview"] == "历史摘要：上一轮确认要显示真实/计算/总均命中"
     assert computed_segments[2]["status"] == "computed_miss"
     assert computed_segments[2]["contentPreview"] == "本轮输入：请审查缓存圆环的外圈分段"
+    calibrated_segments = detail["lastCacheComposition"]["calibratedSegments"]
+    assert [item["key"] for item in calibrated_segments] == ["system_prompt_overhead", "history", "current_user"]
+    assert calibrated_segments[0]["observedStatus"] == "observed_partial"
+    assert calibrated_segments[0]["observedCachedInputTokens"] == 200
+    assert calibrated_segments[0]["observedMissedInputTokens"] == 746
+    assert calibrated_segments[0]["computedOverestimatedInputTokens"] == 746
+    assert calibrated_segments[1]["observedStatus"] == "observed_hit"
+    assert calibrated_segments[1]["observedCachedInputTokens"] == 50
+    assert calibrated_segments[2]["observedStatus"] == "computed_miss"
+    assert calibrated_segments[2]["observedMissedInputTokens"] == 4
 
 
 def test_cache_composition_context_manifest_adds_bounded_content_previews(tmp_path, monkeypatch):

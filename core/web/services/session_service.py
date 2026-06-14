@@ -6635,6 +6635,39 @@ def _active_task_with_live_work_run(
     return updated
 
 
+def _normalize_session_cache_composition_segment(item: Any, *, default_status: str) -> dict[str, Any] | None:
+    if not isinstance(item, dict):
+        return None
+    key = str(item.get("key") or "").strip()
+    if not key:
+        return None
+    return {
+        "key": key,
+        "label": str(item.get("label") or key).strip() or key,
+        "tokens": _coerce_nonnegative_int(item.get("tokens") or 0),
+        "status": str(item.get("status") or default_status).strip() or default_status,
+        "source": str(item.get("source") or "").strip(),
+        "description": str(item.get("description") or "").strip(),
+        "cachePolicy": str(item.get("cachePolicy") or item.get("cache_policy") or "").strip(),
+        "order": _coerce_nonnegative_int(item.get("order") or 0),
+        "contentPreview": _context_segment_content_preview(item),
+        "observedStatus": str(item.get("observedStatus") or item.get("observed_status") or "").strip(),
+        "observedCachedInputTokens": _coerce_nonnegative_int(
+            item.get("observedCachedInputTokens") or item.get("observed_cached_input_tokens") or 0
+        ),
+        "observedMissedInputTokens": _coerce_nonnegative_int(
+            item.get("observedMissedInputTokens") or item.get("observed_missed_input_tokens") or 0
+        ),
+        "computedOverestimatedInputTokens": _coerce_nonnegative_int(
+            item.get("computedOverestimatedInputTokens") or item.get("computed_overestimated_input_tokens") or 0
+        ),
+        "providerExtraCachedInputTokens": _coerce_nonnegative_int(
+            item.get("providerExtraCachedInputTokens") or item.get("provider_extra_cached_input_tokens") or 0
+        ),
+        "calibrationReason": str(item.get("calibrationReason") or item.get("calibration_reason") or "").strip(),
+    }
+
+
 def _normalize_session_cache_composition(value: Any) -> dict[str, Any] | None:
     if not isinstance(value, dict):
         return None
@@ -6663,24 +6696,9 @@ def _normalize_session_cache_composition(value: Any) -> dict[str, Any] | None:
         source = "not_called"
     segments = []
     for item in list(value.get("segments") or []):
-        if not isinstance(item, dict):
-            continue
-        key = str(item.get("key") or "").strip()
-        if not key:
-            continue
-        segments.append(
-            {
-                "key": key,
-                "label": str(item.get("label") or key).strip() or key,
-                "tokens": _coerce_nonnegative_int(item.get("tokens") or 0),
-                "status": str(item.get("status") or "observed").strip() or "observed",
-                "source": str(item.get("source") or "").strip(),
-                "description": str(item.get("description") or "").strip(),
-                "cachePolicy": str(item.get("cachePolicy") or item.get("cache_policy") or "").strip(),
-                "order": _coerce_nonnegative_int(item.get("order") or 0),
-                "contentPreview": _context_segment_content_preview(item),
-            }
-        )
+        segment = _normalize_session_cache_composition_segment(item, default_status="observed")
+        if segment is not None:
+            segments.append(segment)
     if not segments:
         if input_tokens:
             segments = [
@@ -6692,24 +6710,14 @@ def _normalize_session_cache_composition(value: Any) -> dict[str, Any] | None:
             segments = [{"key": "missing", "label": "missing", "tokens": 1, "status": "missing"}]
     computed_segments = []
     for item in list(value.get("computedSegments") or value.get("computed_segments") or []):
-        if not isinstance(item, dict):
-            continue
-        key = str(item.get("key") or "").strip()
-        if not key:
-            continue
-        computed_segments.append(
-            {
-                "key": key,
-                "label": str(item.get("label") or key).strip() or key,
-                "tokens": _coerce_nonnegative_int(item.get("tokens") or 0),
-                "status": str(item.get("status") or "computed_unknown").strip() or "computed_unknown",
-                "source": str(item.get("source") or "").strip(),
-                "description": str(item.get("description") or "").strip(),
-                "cachePolicy": str(item.get("cachePolicy") or item.get("cache_policy") or "").strip(),
-                "order": _coerce_nonnegative_int(item.get("order") or 0),
-                "contentPreview": _context_segment_content_preview(item),
-            }
-        )
+        segment = _normalize_session_cache_composition_segment(item, default_status="computed_unknown")
+        if segment is not None:
+            computed_segments.append(segment)
+    calibrated_segments = []
+    for item in list(value.get("calibratedSegments") or value.get("calibrated_segments") or []):
+        segment = _normalize_session_cache_composition_segment(item, default_status="not_observed")
+        if segment is not None:
+            calibrated_segments.append(segment)
     computed_input_tokens = _coerce_nonnegative_int(
         value.get("computedInputTokens") or value.get("computed_input_tokens") or input_tokens
     )
@@ -6746,10 +6754,33 @@ def _normalize_session_cache_composition(value: Any) -> dict[str, Any] | None:
         or value.get("average_turn_count")
         or 0
     )
+    calibrated_cached_tokens = min(
+        _coerce_nonnegative_int(
+            value.get("calibratedCachedInputTokens")
+            or value.get("calibrated_cached_input_tokens")
+            or cached_tokens
+        ),
+        input_tokens,
+    ) if input_tokens else 0
+    computed_overestimated_tokens = _coerce_nonnegative_int(
+        value.get("computedOverestimatedInputTokens")
+        or value.get("computed_overestimated_input_tokens")
+        or 0
+    )
+    provider_extra_cached_tokens = _coerce_nonnegative_int(
+        value.get("providerExtraCachedInputTokens")
+        or value.get("provider_extra_cached_input_tokens")
+        or 0
+    )
     return {
         "turnId": str(value.get("turnId") or value.get("turn_id") or "").strip(),
         "recordedAt": str(value.get("recordedAt") or value.get("recorded_at") or "").strip(),
         "source": source,
+        "provider": str(value.get("provider") or "").strip(),
+        "model": str(value.get("model") or "").strip(),
+        "llmModelId": str(value.get("llmModelId") or value.get("llm_model_id") or "").strip(),
+        "promptCacheScope": str(value.get("promptCacheScope") or value.get("prompt_cache_scope") or "").strip(),
+        "promptCachePartition": str(value.get("promptCachePartition") or value.get("prompt_cache_partition") or "").strip(),
         "inputTokens": input_tokens,
         "cachedInputTokens": cached_tokens,
         "cacheReadInputTokens": cached_tokens,
@@ -6762,6 +6793,14 @@ def _normalize_session_cache_composition(value: Any) -> dict[str, Any] | None:
         "computedUncachedInputTokens": computed_uncached_tokens,
         "computedCacheHitRate": (computed_cached_tokens / computed_input_tokens) if computed_input_tokens > 0 else 0.0,
         "computedSegments": computed_segments,
+        "calibratedInputTokens": input_tokens,
+        "calibratedCachedInputTokens": calibrated_cached_tokens,
+        "calibratedCacheHitRate": (calibrated_cached_tokens / input_tokens) if input_tokens > 0 else 0.0,
+        "calibratedSegments": calibrated_segments,
+        "computedOverestimatedInputTokens": computed_overestimated_tokens,
+        "providerExtraCachedInputTokens": provider_extra_cached_tokens,
+        "calibrationStatus": str(value.get("calibrationStatus") or value.get("calibration_status") or "").strip(),
+        "calibrationReason": str(value.get("calibrationReason") or value.get("calibration_reason") or "").strip(),
         "averageInputTokens": average_input_tokens,
         "averageCachedInputTokens": average_cached_tokens,
         "averageCacheHitRate": (average_cached_tokens / average_input_tokens) if average_input_tokens > 0 else 0.0,
@@ -6886,6 +6925,186 @@ def _build_computed_cache_segments(
     return segments, computed_cached_tokens, max(0, total_input_tokens - computed_cached_tokens)
 
 
+def _provider_cache_calibration_reason(
+    *,
+    provider: str,
+    model: str,
+    source: str,
+    cache_creation_tokens: int,
+    overestimated_tokens: int,
+    provider_extra_cached_tokens: int,
+) -> tuple[str, str]:
+    provider_name = provider.lower()
+    model_name = model.lower()
+    if source != "provider_usage":
+        return (
+            "not_available",
+            "Provider cache usage was not returned; computed segments are shown as theoretical cache candidates.",
+        )
+    if overestimated_tokens > 0:
+        if "xiaomi" in provider_name or "mimo" in model_name:
+            if cache_creation_tokens <= 0:
+                return (
+                    "provider_lower_than_computed",
+                    "Xiaomi/MiMo returned fewer cache-read tokens than the computed stable-prefix upper bound and reported no new cache creation for this turn.",
+                )
+            return (
+                "provider_lower_than_computed",
+                "Xiaomi/MiMo returned fewer cache-read tokens than the computed stable-prefix upper bound; the difference is attributed to computed prefix segments.",
+            )
+        if "qwen" in provider_name or "qwen" in model_name:
+            return (
+                "provider_lower_than_computed",
+                "Qwen provider cache usage is lower than the computed stable-prefix upper bound; the difference is attributed to computed prefix segments.",
+            )
+        if "openai" in provider_name or "gpt" in model_name:
+            return (
+                "provider_lower_than_computed",
+                "OpenAI provider cache usage is lower than the computed stable-prefix upper bound; the difference is attributed to computed prefix segments.",
+            )
+        return (
+            "provider_lower_than_computed",
+            "Provider cache usage is lower than the computed stable-prefix upper bound; the difference is attributed to computed prefix segments.",
+        )
+    if provider_extra_cached_tokens > 0:
+        return (
+            "provider_higher_than_computed",
+            "Provider reported more cached input than the context manifest can map to computed cacheable segments.",
+        )
+    return (
+        "aligned",
+        "Provider cache usage matches the computed stable-prefix estimate for mapped input tokens.",
+    )
+
+
+def _calibrate_session_cache_segments(
+    *,
+    source: str,
+    provider: str,
+    model: str,
+    input_tokens: int,
+    cached_tokens: int,
+    cache_creation_tokens: int,
+    computed_segments: list[dict[str, Any]],
+    computed_cached_tokens: int,
+) -> dict[str, Any]:
+    normalized_input_tokens = _coerce_nonnegative_int(input_tokens)
+    normalized_cached_tokens = min(_coerce_nonnegative_int(cached_tokens), normalized_input_tokens) if normalized_input_tokens else 0
+    normalized_computed_cached_tokens = min(
+        _coerce_nonnegative_int(computed_cached_tokens),
+        normalized_input_tokens,
+    ) if normalized_input_tokens else 0
+    provider_observed = source == "provider_usage" and normalized_input_tokens > 0
+    overestimated_tokens = max(0, normalized_computed_cached_tokens - normalized_cached_tokens) if provider_observed else 0
+    provider_extra_cached_tokens = max(0, normalized_cached_tokens - normalized_computed_cached_tokens) if provider_observed else 0
+    calibrated_segments: list[dict[str, Any]] = []
+    for item in computed_segments:
+        segment = dict(item)
+        tokens = _coerce_nonnegative_int(segment.get("tokens") or 0)
+        status = str(segment.get("status") or "").strip()
+        if not provider_observed:
+            observed_status = "not_observed"
+            observed_cached = 0
+            observed_missed = 0
+        elif status == "computed_hit":
+            observed_status = "observed_hit"
+            observed_cached = tokens
+            observed_missed = 0
+        elif status == "computed_write":
+            observed_status = "computed_write"
+            observed_cached = 0
+            observed_missed = tokens
+        elif status == "computed_miss":
+            observed_status = "computed_miss"
+            observed_cached = 0
+            observed_missed = tokens
+        else:
+            observed_status = "not_observed"
+            observed_cached = 0
+            observed_missed = 0
+        segment["observedStatus"] = observed_status
+        segment["observedCachedInputTokens"] = observed_cached
+        segment["observedMissedInputTokens"] = observed_missed
+        segment["computedOverestimatedInputTokens"] = 0
+        segment["providerExtraCachedInputTokens"] = 0
+        calibrated_segments.append(segment)
+    remaining_overestimate = overestimated_tokens
+    primary_indices = [
+        index
+        for index, item in enumerate(calibrated_segments)
+        if item.get("status") == "computed_hit"
+        and (
+            str(item.get("source") or "") == "provider_input_remainder"
+            or str(item.get("cachePolicy") or "") == "assumed_stable_prefix"
+        )
+    ]
+    fallback_indices = [
+        index
+        for index, item in reversed(list(enumerate(calibrated_segments)))
+        if item.get("status") == "computed_hit" and index not in set(primary_indices)
+    ]
+    for index in primary_indices + fallback_indices:
+        if remaining_overestimate <= 0:
+            break
+        item = calibrated_segments[index]
+        available = _coerce_nonnegative_int(item.get("observedCachedInputTokens") or 0)
+        deducted = min(available, remaining_overestimate)
+        if deducted <= 0:
+            continue
+        remaining_overestimate -= deducted
+        observed_cached = max(0, available - deducted)
+        observed_missed = _coerce_nonnegative_int(item.get("observedMissedInputTokens") or 0) + deducted
+        item["observedCachedInputTokens"] = observed_cached
+        item["observedMissedInputTokens"] = observed_missed
+        item["computedOverestimatedInputTokens"] = _coerce_nonnegative_int(
+            item.get("computedOverestimatedInputTokens") or 0
+        ) + deducted
+        item["observedStatus"] = "observed_miss" if observed_cached <= 0 else "observed_partial"
+    if provider_extra_cached_tokens > 0:
+        calibrated_segments.append(
+            {
+                "key": "provider_extra_hit",
+                "label": "provider extra cached",
+                "tokens": provider_extra_cached_tokens,
+                "status": "provider_extra_hit",
+                "source": "provider_usage",
+                "description": "Provider reported cached input that the computed context manifest could not map to a cacheable segment.",
+                "cachePolicy": "provider_observed",
+                "order": len(calibrated_segments) + 1,
+                "contentPreview": "Additional provider cache read outside the mapped session context manifest.",
+                "observedStatus": "observed_hit",
+                "observedCachedInputTokens": provider_extra_cached_tokens,
+                "observedMissedInputTokens": 0,
+                "computedOverestimatedInputTokens": 0,
+                "providerExtraCachedInputTokens": provider_extra_cached_tokens,
+                "calibrationReason": "Provider reported more cached input than computed cacheable segments.",
+            }
+        )
+    status, reason = _provider_cache_calibration_reason(
+        provider=provider,
+        model=model,
+        source=source,
+        cache_creation_tokens=cache_creation_tokens,
+        overestimated_tokens=overestimated_tokens,
+        provider_extra_cached_tokens=provider_extra_cached_tokens,
+    )
+    if remaining_overestimate > 0:
+        status = "unmapped_provider_gap"
+        reason = f"{reason} {remaining_overestimate} computed cache tokens could not be mapped to a segment."
+    return {
+        "calibratedInputTokens": normalized_input_tokens,
+        "calibratedCachedInputTokens": normalized_cached_tokens if provider_observed else 0,
+        "calibratedCacheHitRate": (normalized_cached_tokens / normalized_input_tokens)
+        if provider_observed and normalized_input_tokens > 0
+        else 0.0,
+        "calibratedSegments": calibrated_segments,
+        "computedOverestimatedInputTokens": overestimated_tokens,
+        "providerExtraCachedInputTokens": provider_extra_cached_tokens,
+        "calibrationStatus": status,
+        "calibrationReason": reason,
+    }
+
+
 def _cache_average_from_usage(cache_usage: dict[str, Any] | None) -> dict[str, int]:
     if not isinstance(cache_usage, dict):
         return {
@@ -6932,12 +7151,23 @@ def _enrich_session_cache_composition(
         context_composition=context_composition,
     )
     average = _cache_average_from_usage(average_cache)
+    calibration = _calibrate_session_cache_segments(
+        source=str(normalized.get("source") or ""),
+        provider=str(normalized.get("provider") or ""),
+        model=str(normalized.get("model") or normalized.get("llmModelId") or ""),
+        input_tokens=input_tokens,
+        cached_tokens=_coerce_nonnegative_int(normalized.get("cachedInputTokens") or 0),
+        cache_creation_tokens=_coerce_nonnegative_int(normalized.get("cacheCreationInputTokens") or 0),
+        computed_segments=computed_segments,
+        computed_cached_tokens=computed_cached,
+    )
     enriched = {
         **normalized,
         "computedInputTokens": max(input_tokens, sum(_coerce_nonnegative_int(item.get("tokens") or 0) for item in computed_segments)),
         "computedCachedInputTokens": computed_cached,
         "computedUncachedInputTokens": computed_uncached,
         "computedSegments": computed_segments,
+        **calibration,
         "averageInputTokens": average["inputTokens"],
         "averageCachedInputTokens": average["cachedInputTokens"],
         "averageObservedTurnCount": average["observedTurnCount"],
@@ -6999,6 +7229,11 @@ def _build_session_cache_composition(
             "turnId": turn_id,
             "recordedAt": usage.get("recordedAt") or _now_timestamp(),
             "source": "provider_usage",
+            "provider": usage.get("provider") or "",
+            "model": usage.get("model") or "",
+            "llmModelId": usage.get("llmModelId") or "",
+            "promptCacheScope": usage.get("promptCacheScope") or "",
+            "promptCachePartition": usage.get("promptCachePartition") or "",
             "inputTokens": input_tokens,
             "cachedInputTokens": cached_tokens,
             "cacheCreationInputTokens": cache_creation_tokens,
