@@ -1259,11 +1259,15 @@ export function ConversationView({
       : progress.latestFailed
         ? lang === "zh" ? "执行失败" : "Failed"
         : lang === "zh" ? "已完成" : "Done";
+    const failureSummary = progress.latestFailed && progress.currentSummary
+      ? progress.currentSummary
+      : "";
     return [
       stateLabel,
       progress.currentLabel,
       `${progress.completedCount}/${total}`,
       elapsed !== null ? formatDuration(elapsed) : "",
+      failureSummary,
     ].filter(Boolean);
   }
 
@@ -1756,8 +1760,12 @@ export function ConversationView({
             ))}
           </div>
         ) : null}
-        {renderOperationProgressRail(operations)}
-        {expanded ? renderFeedbackOperationTable(operations, { limitInitialRows: true }) : null}
+        {expanded ? (
+          <>
+            {renderOperationProgressRail(operations)}
+            {renderFeedbackOperationTable(operations, { limitInitialRows: true })}
+          </>
+        ) : null}
       </section>
     );
   }
