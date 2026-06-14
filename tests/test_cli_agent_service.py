@@ -586,6 +586,63 @@ def test_cli_agent_terminal_ensure_supersedes_legacy_duplicate_states(monkeypatc
     assert legacy["supersededByTerminalSessionId"] == session["terminalSessionId"]
 
 
+def test_cli_agent_terminal_restart_ensure_supersedes_legacy_duplicate_states(monkeypatch, tmp_path):
+    project_root = _configure_roots(monkeypatch, tmp_path)
+    monkeypatch.setattr(service.shutil, "which", lambda candidate: r"C:\tools\mimo.cmd" if candidate == "mimo.cmd" else "")
+
+    class FakeProcess:
+        def isalive(self):
+            return True
+
+    monkeypatch.setattr(terminal_service, "_spawn_terminal_process", lambda *args, **kwargs: (FakeProcess(), "conpty"))
+    monkeypatch.setattr(terminal_service._TerminalRuntime, "start", lambda self: None)
+    monkeypatch.setattr(terminal_service, "_send_initial_task", lambda *args, **kwargs: None)
+
+    session = terminal_service.ensure_cli_agent_terminal_session(
+        agent_type="mimo_code",
+        task="第一次调用",
+        cwd=str(project_root),
+        mode="readonly",
+        source_session_id="session-1",
+        source_message_id="message-1",
+        source_run_id="run-1",
+    )
+    terminal_service._write_state(
+        {
+            "terminalSessionId": "cli-term-legacy-restart",
+            "adapterId": "mimo_code",
+            "agentType": "mimo_code",
+            "label": "MiMo Code",
+            "sourceSessionId": "session-1",
+            "sourceRunId": "run-legacy",
+            "cliRunId": session["cliRunId"],
+            "lockKey": session["lockKey"],
+            "cwd": str(project_root),
+            "status": "running",
+            "alive": True,
+            "updatedAt": "2026-06-14T10:00:00+00:00",
+        }
+    )
+    terminal_service._RUNTIMES.clear()
+
+    resumed = terminal_service.ensure_cli_agent_terminal_session(
+        agent_type="mimo_code",
+        task="第二次调用",
+        cwd=str(project_root),
+        mode="readonly",
+        source_session_id="session-1",
+        source_message_id="message-2",
+        source_run_id="run-2",
+    )
+
+    legacy = terminal_service._read_state("cli-term-legacy-restart")
+    assert resumed["terminalSessionId"] == session["terminalSessionId"]
+    assert legacy["status"] == "closed"
+    assert legacy["alive"] is False
+    assert legacy["closeReason"] == "superseded_by_idempotent_terminal"
+    assert legacy["supersededByTerminalSessionId"] == session["terminalSessionId"]
+
+
 def test_cli_agent_terminal_idempotent_after_backend_restart(monkeypatch, tmp_path):
     project_root = _configure_roots(monkeypatch, tmp_path)
     monkeypatch.setattr(service.shutil, "which", lambda candidate: r"C:\tools\mimo.cmd" if candidate == "mimo.cmd" else "")

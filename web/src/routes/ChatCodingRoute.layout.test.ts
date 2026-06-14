@@ -905,6 +905,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("function cliAgentRunTabId");
     expect(routeSource).toContain("function cliAgentRunIdFromTabId");
     expect(routeSource).toContain("function buildCliAgentRunViews");
+    expect(routeSource).toContain("function parseCliAgentResultText");
+    expect(routeSource).toContain("for (const candidate of [toolCall.resultPreview, toolCall.summary])");
     expect(routeSource).toContain("function cliAgentRunIdForSource");
     expect(routeSource).toContain("closedCliAgentRunIdFromMessage");
     expect(routeSource).toContain("cliAgentLifecyclePatchFromMessage");
