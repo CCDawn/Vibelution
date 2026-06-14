@@ -1864,6 +1864,59 @@ function sourceInboxStatusLabel(copy: Copy, status: SourceInboxStatusFilter | st
   return copy.allSourceStatuses;
 }
 
+function policyTokenLabel(value: string | undefined, lang: "zh" | "en") {
+  const normalized = String(value ?? "").trim().toLowerCase();
+  const zh: Record<string, string> = {
+    not_in_prompt: "不进提示词",
+    conversation_context_only: "仅对话上下文",
+    bounded_runtime_context: "受限运行上下文",
+    proposal_and_rating_suggestion_only: "仅提案与评级建议",
+    agent_runtime_dependent: "随 Agent 运行态",
+    clear: "无待办",
+  };
+  const en: Record<string, string> = {
+    not_in_prompt: "Not in prompt",
+    conversation_context_only: "Conversation only",
+    bounded_runtime_context: "Bounded runtime",
+    proposal_and_rating_suggestion_only: "Proposal/rating only",
+    agent_runtime_dependent: "Agent runtime",
+    clear: "Clear",
+  };
+  return (lang === "zh" ? zh : en)[normalized] || normalized || "-";
+}
+
+function memoryDomainDisplayLabel(label: string | undefined, domainId: string | undefined, lang: "zh" | "en") {
+  const key = String(domainId || label || "").trim().toLowerCase().replace(/\s+/g, "_");
+  const zh: Record<string, string> = {
+    agent_private_memory: "Agent 私有",
+    agent_formal_knowledge_base: "Agent 正式知识",
+    team_knowledge_base: "团队知识库",
+    team_chat_refinement: "群聊精炼",
+    self_evolution_evidence: "自进化证据",
+    supervised_evolution_evidence: "监督证据",
+    external_search_and_pdf: "外部搜索/PDF",
+  };
+  const en: Record<string, string> = {
+    agent_private_memory: "Agent private",
+    agent_formal_knowledge_base: "Agent knowledge",
+    team_knowledge_base: "Team knowledge",
+    team_chat_refinement: "Chat refinement",
+    self_evolution_evidence: "Self-evolution",
+    supervised_evolution_evidence: "Supervised evidence",
+    external_search_and_pdf: "External/PDF",
+  };
+  return (lang === "zh" ? zh : en)[key] || label || domainId || "-";
+}
+
+function compactInlineList(items: string[] | undefined, limit: number) {
+  const visible = (items ?? []).map((item) => String(item).trim()).filter(Boolean);
+  return {
+    visible: visible.slice(0, limit),
+    overflow: Math.max(0, visible.length - limit),
+    title: visible.join(", "),
+  };
+}
+
 function invalidateKnowledgeDashboard(queryClient: ReturnType<typeof useQueryClient>, agentId = "") {
   void queryClient.invalidateQueries({ queryKey: queryKeys.knowledgeDashboardSnapshot(agentId) });
 }
@@ -4389,6 +4442,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
           ))}
         </div>
       </section>
+      <div className={styles.knowledgeGovernanceDeck}>
       <section className={styles.usageContractPanel} aria-label={copy.usageContract}>
         <div className={styles.managementHeader}>
           <div>
@@ -4398,22 +4452,44 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
           <span className={styles.countPill}>{memoryUsageContract?.domains.length ?? 0}</span>
         </div>
         <div className={styles.contractPrinciples}>
-          {(memoryUsageContract?.principles ?? []).slice(0, 5).map((principle) => (
-            <span key={principle}>{principle}</span>
-          ))}
+          <span title={(memoryUsageContract?.principles ?? []).join("\n")}>
+            {(memoryUsageContract?.principles ?? []).length} {lang === "zh" ? "条边界规则" : "boundary rules"}
+          </span>
+          <span title={copy.reviewerRequired}>{copy.reviewerRequired}</span>
+          <span title={copy.promptBoundary}>{copy.promptBoundary}</span>
         </div>
         <div className={styles.contractDomainGrid}>
-          {(memoryUsageContract?.domains ?? []).map((domain) => (
-            <section key={domain.domainId} className={styles.contractDomainRow}>
+          {(memoryUsageContract?.domains ?? []).slice(0, 4).map((domain) => (
+            <section
+              key={domain.domainId}
+              className={styles.contractDomainRow}
+              title={[
+                domain.label,
+                domain.owner && `${copy.ownerScope}: ${domain.owner}`,
+                domain.storage && `${copy.sourcePath}: ${domain.storage}`,
+                `${copy.allowedUse}: ${domain.readsThrough.join(", ") || "-"}`,
+                `${copy.writeBoundary}: ${domain.canCreateFormalKnowledge ? copy.reviewerRequired : domain.boundary}`,
+                `Prompt: ${domain.promptDefault || "-"}`,
+              ].filter(Boolean).join("\n")}
+            >
               <div>
-                <strong>{domain.label}</strong>
-                <small>{domain.owner} · {domain.storage}</small>
+                <strong>{memoryDomainDisplayLabel(domain.label, domain.domainId, lang)}</strong>
+                <small>{domain.owner}</small>
               </div>
-              <span>{copy.allowedUse}: {domain.readsThrough.slice(0, 2).join(", ")}</span>
-              <span>{copy.writeBoundary}: {domain.canCreateFormalKnowledge ? copy.reviewerRequired : domain.boundary}</span>
-              <code>{domain.promptDefault}</code>
+              <span>{domain.canCreateFormalKnowledge ? copy.reviewerRequired : policyTokenLabel(domain.boundary, lang)}</span>
+              <code>{policyTokenLabel(domain.promptDefault, lang)}</code>
             </section>
           ))}
+          {(memoryUsageContract?.domains.length ?? 0) > 4 ? (
+            <section className={styles.contractDomainRow} title={(memoryUsageContract?.domains ?? []).slice(4).map((domain) => domain.label).join("\n")}>
+              <div>
+                <strong>+{(memoryUsageContract?.domains.length ?? 0) - 4}</strong>
+                <small>{copy.memoryDomains}</small>
+              </div>
+              <span>{lang === "zh" ? "悬停查看" : "Hover for details"}</span>
+              <code>{copy.promptBoundary}</code>
+            </section>
+          ) : null}
         </div>
         <div className={styles.contractStateGrid}>
           <section>
@@ -4433,12 +4509,10 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
           </section>
         </div>
         <div className={styles.contractForbiddenList} aria-label={copy.forbiddenActions}>
-          {(memoryUsageContract?.forbiddenActions ?? []).slice(0, 6).map((action) => (
-            <span key={action}>
-              <XCircle size={13} />
-              {action}
-            </span>
-          ))}
+          <span title={(memoryUsageContract?.forbiddenActions ?? []).join("\n")}>
+            <XCircle size={13} />
+            {(memoryUsageContract?.forbiddenActions ?? []).length} {copy.forbiddenActions}
+          </span>
         </div>
       </section>
       <section className={styles.knowledgeStewardPanel} aria-label={copy.knowledgeSteward}>
@@ -4472,17 +4546,30 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
           </div>
           <div className={styles.stewardMetric}>
             <span>{copy.stewardBoundary}</span>
-            <strong>{knowledgeSteward?.steward.permissionBoundary || "proposal_and_rating_suggestion_only"}</strong>
+            <strong title={knowledgeSteward?.steward.permissionBoundary || "proposal_and_rating_suggestion_only"}>
+              {policyTokenLabel(knowledgeSteward?.steward.permissionBoundary || "proposal_and_rating_suggestion_only", lang)}
+            </strong>
             <small>{knowledgeSteward?.operatingBoundary.formalKnowledgeRequiresReviewer ? copy.reviewerRequired : copy.noDirectApply}</small>
           </div>
         </div>
         <div className={styles.stewardToolRows}>
-          <span>{copy.preferredTools}</span>
-          {(knowledgeSteward?.steward.toolPolicy.preferredTools ?? []).slice(0, 4).map((tool) => (
-            <code key={`preferred:${tool}`}>{tool}</code>
-          ))}
-          <span>{copy.allowedTools}</span>
-          <small>{(knowledgeSteward?.steward.toolPolicy.allowedTools ?? []).join(", ") || "-"}</small>
+          {(() => {
+            const preferred = compactInlineList(knowledgeSteward?.steward.toolPolicy.preferredTools, 3);
+            const allowed = compactInlineList(knowledgeSteward?.steward.toolPolicy.allowedTools, 2);
+            return (
+              <>
+                <span title={preferred.title}>{copy.preferredTools}</span>
+                {preferred.visible.map((tool) => (
+                  <code key={`preferred:${tool}`} title={tool}>{tool}</code>
+                ))}
+                {preferred.overflow ? <small title={preferred.title}>+{preferred.overflow}</small> : null}
+                <span title={allowed.title}>{copy.allowedTools}</span>
+                <small title={allowed.title}>
+                  {allowed.visible.join(", ") || "-"}{allowed.overflow ? ` +${allowed.overflow}` : ""}
+                </small>
+              </>
+            );
+          })()}
         </div>
         <div className={styles.stewardRecommendations}>
           <div className={styles.stewardRecommendationHeader}>
@@ -4518,17 +4605,19 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
             <small>{copy.reviewerRequired}</small>
           </div>
           <div className={styles.stewardStageGrid} aria-label={copy.stewardStages}>
-            {(knowledgeStewardWorkbench?.stages ?? []).map((stage) => (
+            {(knowledgeStewardWorkbench?.stages ?? []).slice(0, 2).map((stage) => (
               <section key={stage.stageId} className={styles.stewardStageCard}>
                 <div>
-                  <span className={stage.status === "clear" ? styles.statusPillMuted : styles.statusPill}>{stage.status}</span>
+                  <span className={stage.status === "clear" ? styles.statusPillMuted : styles.statusPill} title={stage.status}>
+                    {policyTokenLabel(stage.status, lang)}
+                  </span>
                   <strong>{stage.title}</strong>
                 </div>
-                <p>{stage.description}</p>
+                <p title={stage.description}>{stage.description}</p>
                 <small>
                   {copy.openGovernanceTasks}: {stage.openCount} · {copy.executable}: {stage.executableCount}
                 </small>
-                <code>{stage.nextTool}</code>
+                <code title={stage.nextTool}>{stage.nextTool}</code>
               </section>
             ))}
           </div>
@@ -4542,15 +4631,14 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
             ))}
           </div>
           <div className={styles.stewardChecklist} aria-label={copy.acceptanceChecklist}>
-            {(knowledgeStewardWorkbench?.acceptanceChecklist ?? []).map((item) => (
-              <span key={item.id}>
-                <CheckCircle2 size={13} />
-                {item.label}
-              </span>
-            ))}
+            <span title={(knowledgeStewardWorkbench?.acceptanceChecklist ?? []).map((item) => item.label).join("\n")}>
+              <CheckCircle2 size={13} />
+              {(knowledgeStewardWorkbench?.acceptanceChecklist ?? []).length} {copy.acceptanceChecklist}
+            </span>
           </div>
         </div>
       </section>
+      </div>
       {knowledgeFeedback.tone !== "idle" ? (
         <section className={knowledgeFeedback.tone === "error" ? styles.panelError : styles.panelNotice}>
           {knowledgeFeedback.tone === "error" ? <TriangleAlert size={16} /> : <CheckCircle2 size={16} />}
