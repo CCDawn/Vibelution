@@ -70,4 +70,3 @@ def test_tool_intent_filters_hidden_range_reader(monkeypatch):
 
     assert intent is not None
     assert intent.recommended_tools == []
-
