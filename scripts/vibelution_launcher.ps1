@@ -404,12 +404,12 @@ function Sync-LauncherEndpointFromState {
 
     $resolvedPort = $script:port
     $statePort = 0
-    $rawPort = [string]$state.port
+    $rawPort = [string](Get-ObjectPropertyValue -Object $state -Name "port" -Default "")
     if ($rawPort -and [int]::TryParse($rawPort, [ref]$statePort) -and $statePort -gt 0 -and $statePort -lt 65536) {
         $resolvedPort = $statePort
     }
 
-    $resolvedUrl = if ($state.url) { [string]$state.url } else { "" }
+    $resolvedUrl = [string](Get-ObjectPropertyValue -Object $state -Name "url" -Default "")
     Set-LauncherEndpoint -ResolvedPort $resolvedPort -ResolvedUrl $resolvedUrl
 }
 
@@ -1250,7 +1250,8 @@ function Clear-ActiveRuntimeSceneReference {
     if ($SceneId) {
         try {
             $payload = Get-Content -LiteralPath $activeRuntimeScenePath -Raw -Encoding utf8 | ConvertFrom-Json
-            if ([string]$payload.runtimeSceneId -ne $SceneId) {
+            $payloadSceneId = [string](Get-ObjectPropertyValue -Object $payload -Name "runtimeSceneId" -Default "")
+            if ($payloadSceneId -ne $SceneId) {
                 return
             }
         } catch {
@@ -1261,18 +1262,25 @@ function Clear-ActiveRuntimeSceneReference {
     Remove-Item -LiteralPath $activeRuntimeScenePath -Force -ErrorAction SilentlyContinue
 }
 
+function Set-RuntimeSceneContextFromStateObject {
+    param($State)
+
+    $sceneId = [string](Get-ObjectPropertyValue -Object $State -Name "runtimeSceneId" -Default "")
+    $sceneDir = [string](Get-ObjectPropertyValue -Object $State -Name "runtimeSceneDir" -Default "")
+    if (-not $sceneId -or -not $sceneDir) {
+        return $false
+    }
+
+    Set-CurrentRuntimeSceneContext -SceneId $sceneId -SceneDir $sceneDir
+    return $true
+}
+
 function Restore-RuntimeSceneContextFromState {
     $state = Get-State
     if (-not $state) {
         return $false
     }
-    $sceneId = [string]$state.runtimeSceneId
-    $sceneDir = [string]$state.runtimeSceneDir
-    if (-not $sceneId -or -not $sceneDir) {
-        return $false
-    }
-    Set-CurrentRuntimeSceneContext -SceneId $sceneId -SceneDir $sceneDir
-    return $true
+    return Set-RuntimeSceneContextFromStateObject -State $state
 }
 
 function Get-CurrentRuntimeSceneFilePath {
@@ -4075,14 +4083,16 @@ function Ensure-WebBuild {
 function Get-ManagedBackendCandidatePids {
     $pids = New-Object System.Collections.Generic.List[int]
     $state = Get-State
-    if ($state -and $state.backendPid) {
-        $trackedPid = [int]$state.backendPid
+    $stateBackendPid = [int](Get-ObjectPropertyValue -Object $state -Name "backendPid" -Default 0)
+    if ($stateBackendPid -gt 0) {
+        $trackedPid = $stateBackendPid
         if (Test-ProcessLooksLikeManagedBackend -ProcessId $trackedPid) {
             [void]$pids.Add($trackedPid)
         }
     }
-    if ($state -and $state.backendLaunchPid) {
-        $trackedLaunchPid = [int]$state.backendLaunchPid
+    $stateBackendLaunchPid = [int](Get-ObjectPropertyValue -Object $state -Name "backendLaunchPid" -Default 0)
+    if ($stateBackendLaunchPid -gt 0) {
+        $trackedLaunchPid = $stateBackendLaunchPid
         if (Test-ProcessLooksLikeManagedBackend -ProcessId $trackedLaunchPid) {
             [void]$pids.Add($trackedLaunchPid)
         }
@@ -6173,8 +6183,9 @@ function Get-SessionSnapshot {
     $browserWindowProcesses = @(Get-ManagedBrowserWindowProcesses -ProfileDir $ProfileDir -Role $BrowserRole)
 
     $backendPid = $null
-    if ($state -and $state.backendPid -and (Test-ProcessAlive ([int]$state.backendPid))) {
-        $backendPid = [int]$state.backendPid
+    $stateBackendPid = [int](Get-ObjectPropertyValue -Object $state -Name "backendPid" -Default 0)
+    if ($stateBackendPid -gt 0 -and (Test-ProcessAlive $stateBackendPid)) {
+        $backendPid = $stateBackendPid
     } elseif ($backendPids.Count -gt 0) {
         $backendPid = [int]$backendPids[0]
     }
@@ -6483,9 +6494,10 @@ function Get-SessionReferenceTime {
         }
     }
 
-    if ($Snapshot -and $Snapshot.State -and $Snapshot.State.startedAt) {
+    $stateStartedAt = [string](Get-ObjectPropertyValue -Object $Snapshot.State -Name "startedAt" -Default "")
+    if ($Snapshot -and $Snapshot.State -and $stateStartedAt) {
         $parsed = [datetime]::MinValue
-        if ([datetime]::TryParse([string]$Snapshot.State.startedAt, [ref]$parsed)) {
+        if ([datetime]::TryParse($stateStartedAt, [ref]$parsed)) {
             return $parsed.ToUniversalTime()
         }
     }
@@ -6545,9 +6557,7 @@ function Write-SessionRefreshSkippedForOpen {
         -Message "A running managed session needed source refresh, but open/start is non-destructive; use restart for code refresh." `
         -Level "warning" `
         -Fields $fields
-    if ($Snapshot.State -and $Snapshot.State.runtimeSceneId -and $Snapshot.State.runtimeSceneDir) {
-        Set-CurrentRuntimeSceneContext -SceneId ([string]$Snapshot.State.runtimeSceneId) -SceneDir ([string]$Snapshot.State.runtimeSceneDir)
-    }
+    [void](Set-RuntimeSceneContextFromStateObject -State $Snapshot.State)
     if ($script:currentRuntimeSceneId) {
         Write-RuntimeSceneEvent `
             -Component "launcher" `
@@ -6570,14 +6580,9 @@ function Adopt-Or-FocusSession {
 
     if (-not $Snapshot.State -or -not $Snapshot.SupervisorPid) {
         Write-Note "Adopting a live managed session and reattaching supervision."
-        if ($Snapshot.State -and $Snapshot.State.runtimeSceneId -and $Snapshot.State.runtimeSceneDir) {
-            Set-CurrentRuntimeSceneContext -SceneId ([string]$Snapshot.State.runtimeSceneId) -SceneDir ([string]$Snapshot.State.runtimeSceneDir)
-        }
-        $backendLaunchPid = if ($Snapshot.State -and $Snapshot.State.backendLaunchPid) {
-            [int]$Snapshot.State.backendLaunchPid
-        } else {
-            [int]$Snapshot.BackendPid
-        }
+        [void](Set-RuntimeSceneContextFromStateObject -State $Snapshot.State)
+        $stateBackendLaunchPid = [int](Get-ObjectPropertyValue -Object $Snapshot.State -Name "backendLaunchPid" -Default 0)
+        $backendLaunchPid = if ($stateBackendLaunchPid -gt 0) { $stateBackendLaunchPid } else { [int]$Snapshot.BackendPid }
         $managedSessionId = [guid]::NewGuid().ToString()
         Save-SessionState `
             -ManagedSessionId $managedSessionId `
@@ -6605,8 +6610,7 @@ function Adopt-Or-FocusSession {
     }
 
     Write-Note "Vibelution is already running. Focusing the existing app window."
-    if ($Snapshot.State -and $Snapshot.State.runtimeSceneId -and $Snapshot.State.runtimeSceneDir) {
-        Set-CurrentRuntimeSceneContext -SceneId ([string]$Snapshot.State.runtimeSceneId) -SceneDir ([string]$Snapshot.State.runtimeSceneDir)
+    if (Set-RuntimeSceneContextFromStateObject -State $Snapshot.State) {
         $focusResult = [bool](Focus-ManagedBrowserWindow -ProfileDir $workbenchBrowserProfileDir -Role "workbench" -KnownWindowPid $Snapshot.BrowserWindowPid)
         Write-RuntimeSceneEvent `
             -Component "launcher" `
@@ -6630,9 +6634,7 @@ function Complete-HeadlessSessionWithBrowser {
     }
 
     Write-Note "A healthy backend is already running without a browser. Opening the managed app window."
-    if ($Snapshot.State -and $Snapshot.State.runtimeSceneId -and $Snapshot.State.runtimeSceneDir) {
-        Set-CurrentRuntimeSceneContext -SceneId ([string]$Snapshot.State.runtimeSceneId) -SceneDir ([string]$Snapshot.State.runtimeSceneDir)
-    } else {
+    if (-not (Set-RuntimeSceneContextFromStateObject -State $Snapshot.State)) {
         Initialize-RuntimeScene -Trigger $Action -BrowserManaged $true
     }
 
@@ -6648,16 +6650,10 @@ function Complete-HeadlessSessionWithBrowser {
 
     $browserExecutable = Resolve-EdgeExecutable
     $browserInfo = Start-ManagedBrowser -BrowserExecutable $browserExecutable -ProfileDir $workbenchBrowserProfileDir -WindowPurpose "workbench"
-    $managedSessionId = if ($Snapshot.State -and $Snapshot.State.sessionId) {
-        [string]$Snapshot.State.sessionId
-    } else {
-        [guid]::NewGuid().ToString()
-    }
-    $backendLaunchPid = if ($Snapshot.State -and $Snapshot.State.backendLaunchPid) {
-        [int]$Snapshot.State.backendLaunchPid
-    } else {
-        [int]$Snapshot.BackendPid
-    }
+    $stateSessionId = [string](Get-ObjectPropertyValue -Object $Snapshot.State -Name "sessionId" -Default "")
+    $managedSessionId = if ($stateSessionId) { $stateSessionId } else { [guid]::NewGuid().ToString() }
+    $stateBackendLaunchPid = [int](Get-ObjectPropertyValue -Object $Snapshot.State -Name "backendLaunchPid" -Default 0)
+    $backendLaunchPid = if ($stateBackendLaunchPid -gt 0) { $stateBackendLaunchPid } else { [int]$Snapshot.BackendPid }
     Save-SessionState `
         -ManagedSessionId $managedSessionId `
         -BackendPid $Snapshot.BackendPid `
@@ -6803,11 +6799,8 @@ function Open-LauncherControlSurface {
             $startedControlBackend = $true
         }
 
-        $managedSessionId = if ($snapshot.State -and $snapshot.State.sessionId) {
-            [string]$snapshot.State.sessionId
-        } else {
-            [guid]::NewGuid().ToString()
-        }
+        $stateSessionId = [string](Get-ObjectPropertyValue -Object $snapshot.State -Name "sessionId" -Default "")
+        $managedSessionId = if ($stateSessionId) { $stateSessionId } else { [guid]::NewGuid().ToString() }
 
         if ($NoBrowser) {
             Save-LauncherControlWindowState `
@@ -7332,8 +7325,7 @@ function Stop-ManagedSession {
     }
 
     Write-Note "Stopping Vibelution session ($Reason)..."
-    if ($snapshot.State -and $snapshot.State.runtimeSceneId -and $snapshot.State.runtimeSceneDir) {
-        Set-CurrentRuntimeSceneContext -SceneId ([string]$snapshot.State.runtimeSceneId) -SceneDir ([string]$snapshot.State.runtimeSceneDir)
+    if (Set-RuntimeSceneContextFromStateObject -State $snapshot.State) {
         Write-RuntimeSceneEvent `
             -Component "launcher" `
             -Phase "shutdown" `
@@ -7529,14 +7521,17 @@ function Show-Status {
 
     if ($snapshot.State) {
         Write-Host "State     : $statePath"
-        if ($snapshot.State.runtimeSceneId) {
-            Write-Host "Scene     : $($snapshot.State.runtimeSceneId)"
+        $sceneId = [string](Get-ObjectPropertyValue -Object $snapshot.State -Name "runtimeSceneId" -Default "")
+        $backendStdout = [string](Get-ObjectPropertyValue -Object $snapshot.State -Name "backendStdout" -Default "")
+        $backendStderr = [string](Get-ObjectPropertyValue -Object $snapshot.State -Name "backendStderr" -Default "")
+        if ($sceneId) {
+            Write-Host "Scene     : $sceneId"
         }
-        if ($snapshot.State.backendStdout) {
-            Write-Host "Logs      : $($snapshot.State.backendStdout)"
+        if ($backendStdout) {
+            Write-Host "Logs      : $backendStdout"
         }
-        if ($snapshot.State.backendStderr) {
-            Write-Host "Errors    : $($snapshot.State.backendStderr)"
+        if ($backendStderr) {
+            Write-Host "Errors    : $backendStderr"
         }
     } else {
         Write-Host "State     : not tracking a managed session"
@@ -7794,18 +7789,17 @@ function Run-SupervisorLoop {
                 -Fields @{ managed_session_id = $ManagedSessionId }
             return
         }
-        if ($state.sessionId -ne $ManagedSessionId) {
+        $stateSessionId = [string](Get-ObjectPropertyValue -Object $state -Name "sessionId" -Default "")
+        if ($stateSessionId -ne $ManagedSessionId) {
             Write-LauncherControlLog `
                 -Event "launcher.supervisor.exit_session_replaced" `
                 -Message "Supervisor exited because launcher state now belongs to a different session." `
-                -Fields @{ managed_session_id = $ManagedSessionId; current_session_id = [string]$state.sessionId }
+                -Fields @{ managed_session_id = $ManagedSessionId; current_session_id = $stateSessionId }
             return
         }
 
         $trackedBackendPid = 0
-        if ($state.backendPid) {
-            $trackedBackendPid = [int]$state.backendPid
-        }
+        $trackedBackendPid = [int](Get-ObjectPropertyValue -Object $state -Name "backendPid" -Default 0)
         $backendLiveness = Get-ManagedBackendLiveness -TrackedPid $trackedBackendPid
         $backendAlive = [bool]$backendLiveness.Alive
         if (
@@ -7842,7 +7836,8 @@ function Run-SupervisorLoop {
             return
         }
 
-        if ([bool]$state.browserManaged -and $browserWindowCount -eq 0) {
+        $browserManaged = [bool](Get-ObjectPropertyValue -Object $state -Name "browserManaged" -Default $false)
+        if ($browserManaged -and $browserWindowCount -eq 0) {
             Write-Note "Supervisor detected app window closure. Stopping the backend."
             Stop-ManagedSession -Reason "app window closed"
             return
