@@ -827,7 +827,7 @@ def test_permission_audit_explains_tool_memory_and_team_boundaries(knowledge_env
     audit = team_knowledge_service.knowledge_permission_audit(agent_id=knowledge_env["member"]["agentId"])
 
     assert audit["tools"]["knowledge_query_tool"]["visible"] is True
-    assert audit["tools"]["knowledge_proposal_tool"]["reason"] == "tool_policy_blocked"
+    assert audit["tools"]["knowledge_proposal_tool"]["reason"] == "available"
     row = audit["knowledgeBases"][0]
     assert row["permissions"]["read"]["allowed"] is True
     assert row["permissions"]["review"]["allowed"] is False

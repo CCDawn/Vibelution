@@ -80,7 +80,7 @@ def _source_ids(env: dict, *, title: str = "Tool source", knowledge_base_id: str
     return [source["sourceArtifactId"]]
 
 
-def test_team_knowledge_tools_are_llm_facing_but_hidden_without_explicit_allow(tmp_path, monkeypatch):
+def test_team_knowledge_tools_are_llm_facing_without_explicit_allow(tmp_path, monkeypatch):
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
     agent = agent_directory_service.create_agent_instance(display_name="Default Agent")
     tools = [
@@ -116,15 +116,7 @@ def test_team_knowledge_tools_are_llm_facing_but_hidden_without_explicit_allow(t
         "knowledge_steward_workbench_tool",
         "agent_message_tool",
     }
-    assert "knowledge_query_tool" not in [tool.name for tool in visible]
-    assert "unified_knowledge_search_tool" not in [tool.name for tool in visible]
-    assert "knowledge_rag_retrieve_tool" not in [tool.name for tool in visible]
-    assert "knowledge_proposal_tool" not in [tool.name for tool in visible]
-    assert "knowledge_rating_suggestion_tool" not in [tool.name for tool in visible]
-    assert "knowledge_operations_health_tool" not in [tool.name for tool in visible]
-    assert "knowledge_governance_plan_tool" not in [tool.name for tool in visible]
-    assert "knowledge_steward_recommendations_tool" not in [tool.name for tool in visible]
-    assert "knowledge_steward_workbench_tool" not in [tool.name for tool in visible]
+    assert [tool.name for tool in visible] == [tool.name for tool in tools]
 
 
 def test_knowledge_proposal_tool_submits_source_and_pending_candidate(tmp_path, monkeypatch):

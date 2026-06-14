@@ -916,13 +916,13 @@ class ToolExecutor:
                 if visible_names:
                     visible = ", ".join(visible_names)
                     return (
-                        "[错误] 未知工具：该工具未暴露给当前 Agent。"
-                        f"当前 Agent 可见工具包括：{visible}。"
-                        "请换用可见工具，或让用户调整该 Agent 的 ToolPolicy。"
+                        "[错误] 未知工具：该工具未注册到当前 Agent 可用工具集中。"
+                        f"当前 Agent 可用工具包括：{visible}。"
+                        "请换用已注册工具。"
                     )
                 return (
-                    "[错误] 未知工具：该工具未暴露给当前 Agent。"
-                    "当前 Agent 没有可见工具。请让用户调整该 Agent 的 ToolPolicy。"
+                    "[错误] 未知工具：该工具未注册到当前 Agent 可用工具集中。"
+                    "当前 Agent 当前没有可用的已注册工具。"
                 )
         except Exception as exc:
             fallback_context_warning = f" 当前 Agent 上下文不可用（{type(exc).__name__}）。"

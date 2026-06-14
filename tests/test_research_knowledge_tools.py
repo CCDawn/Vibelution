@@ -69,7 +69,7 @@ def _seed_knowledge_base(root):
     return path
 
 
-def test_research_knowledge_tool_requires_explicit_agent_allow(tmp_path, monkeypatch):
+def test_research_knowledge_tool_queries_without_explicit_agent_allow(tmp_path, monkeypatch):
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(knowledge_base, "get_workspace", lambda: type("Workspace", (), {"project_root": tmp_path})())
     _seed_knowledge_base(tmp_path)
@@ -78,9 +78,9 @@ def test_research_knowledge_tool_requires_explicit_agent_allow(tmp_path, monkeyp
     with agent_directory_service.active_agent_runtime(agent["agentId"], session_id="session-research"):
         result = json.loads(research_knowledge_tools.research_knowledge_query_tool(query="agentic"))
 
-    assert result["ok"] is False
-    assert result["status"] == "blocked"
-    assert result["error"] == "tool_not_explicitly_allowed"
+    assert result["ok"] is True
+    assert result["status"] == "succeeded"
+    assert result["results"]["entries"][0]["title"] == "Agentic literature review benchmark"
 
 
 def test_research_knowledge_tool_queries_allowed_agent(tmp_path, monkeypatch):
@@ -113,7 +113,7 @@ def test_research_knowledge_tool_queries_allowed_agent(tmp_path, monkeypatch):
     assert result["limit"] == 5
 
 
-def test_research_knowledge_tool_is_llm_facing_but_hidden_without_explicit_allow(tmp_path, monkeypatch):
+def test_research_knowledge_tool_is_llm_facing_without_explicit_allow(tmp_path, monkeypatch):
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
     agent = agent_directory_service.create_agent_instance(display_name="默认工具 Agent")
     tools = [tool for tool in create_llm_facing_tools() if tool.name in {"research_knowledge_query_tool", "agent_message_tool"}]
@@ -122,7 +122,7 @@ def test_research_knowledge_tool_is_llm_facing_but_hidden_without_explicit_allow
         visible = agent_directory_service.filter_llm_tools_for_current_agent(tools)
 
     assert {tool.name for tool in tools} == {"research_knowledge_query_tool", "agent_message_tool"}
-    assert [tool.name for tool in visible] == ["agent_message_tool"]
+    assert [tool.name for tool in visible] == ["agent_message_tool", "research_knowledge_query_tool"]
 
     agent_directory_service.update_agent_instance(
         agent["agentId"],
@@ -134,7 +134,7 @@ def test_research_knowledge_tool_is_llm_facing_but_hidden_without_explicit_allow
     assert [tool.name for tool in visible] == ["agent_message_tool", "research_knowledge_query_tool"]
 
 
-def test_tool_policy_filtering_stays_structural_not_prompt_text(tmp_path, monkeypatch):
+def test_tool_policy_filtering_no_longer_hides_registered_tools(tmp_path, monkeypatch):
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
     agent = agent_directory_service.create_agent_instance(display_name="受限工具 Agent", primary_mode="general")
     agent_directory_service.update_agent_instance(
@@ -146,4 +146,4 @@ def test_tool_policy_filtering_stays_structural_not_prompt_text(tmp_path, monkey
     with agent_directory_service.active_agent_runtime(agent["agentId"], session_id="session-tools"):
         visible = agent_directory_service.filter_llm_tools_for_current_agent(tools)
 
-    assert [tool.name for tool in visible] == ["agent_message_tool"]
+    assert [tool.name for tool in visible] == ["web_search_tool", "agent_message_tool"]
