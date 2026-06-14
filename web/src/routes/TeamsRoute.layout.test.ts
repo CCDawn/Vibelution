@@ -381,6 +381,9 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("搜集对话流");
     expect(routeSource).toContain("KV 缓存门禁已写入本轮搜集");
     expect(routeSource).toContain("promptCachePolicy: SOURCE_COLLECTION_PROMPT_CACHE_POLICY");
+    expect(routeSource).toContain('SOURCE_COLLECTION_PROMPT_CACHE_MODEL_LABEL = "configured prompt-cache model"');
+    expect(routeSource).not.toContain('modelId: "houmo_qwen35_9b_agent"');
+    expect(routeSource).toContain("|| selectedTeamStartResearchStageError");
     expect(routeSource).toContain("promptCachePartition");
     expect(routeSource).toContain("dynamic delta: query/result refs only");
     expect(routeSource).toContain("continuedSourceRunRef");

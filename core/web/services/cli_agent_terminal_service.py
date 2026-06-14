@@ -138,7 +138,7 @@ class _TerminalRuntime:
             payload = dict(self.state)
         payload["alive"] = self.is_alive()
         payload["transport"] = self.transport
-        payload["transcriptTail"] = _read_transcript_tail(self.transcript_path)
+        payload.update(_read_transcript_snapshot(self.transcript_path))
         return _public_state(payload)
 
     def _reader_loop(self) -> None:
@@ -412,7 +412,7 @@ def get_cli_agent_terminal_session(terminal_session_id: str) -> dict[str, Any]:
     if not state:
         raise CliAgentTerminalError("TERMINAL_SESSION_NOT_FOUND", "Terminal session not found.")
     state["alive"] = False
-    return _public_state({**state, "transcriptTail": _read_transcript_tail(_transcript_path(session_id))})
+    return _public_state({**state, **_read_transcript_snapshot(_transcript_path(session_id))})
 
 
 def stream_cli_agent_terminal_events(terminal_session_id: str):
@@ -500,7 +500,7 @@ def stop_cli_agent_terminal_session(terminal_session_id: str) -> dict[str, Any]:
     return _public_state(
         {
             **final_state,
-            "transcriptTail": _read_transcript_tail(_transcript_path(session_id)),
+            **_read_transcript_snapshot(_transcript_path(session_id)),
         }
     )
 
@@ -1329,6 +1329,32 @@ def _read_transcript_tail(path: Path, limit: int = MAX_TRANSCRIPT_TAIL_CHARS) ->
     return text[-limit:]
 
 
+def _read_transcript_snapshot(path: Path, limit: int = MAX_TRANSCRIPT_TAIL_CHARS) -> dict[str, Any]:
+    tail = _read_transcript_tail(path, limit=limit)
+    replayable, reason = _classify_transcript_tail_replay(tail)
+    return {
+        "transcriptTail": tail if replayable else "",
+        "transcriptTailReplayable": replayable,
+        "transcriptTailRenderReason": reason,
+    }
+
+
+def _classify_transcript_tail_replay(text: str) -> tuple[bool, str]:
+    if not text:
+        return True, "empty"
+    escape_count = text.count("\x1b")
+    cursor_move_count = len(re.findall(r"\x1b\[[0-9;]*[Hf]", text))
+    tui_mode_count = len(re.findall(r"\x1b\[\?[0-9;]*(?:h|l)", text))
+    without_ansi = re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", text)
+    visible = "".join(ch for ch in without_ansi if ch.isprintable() and not ch.isspace())
+    visible_ratio = len(visible) / max(len(text), 1)
+    control_heavy = escape_count >= 20 and visible_ratio < 0.08
+    tui_repaint_tail = (cursor_move_count >= 10 or tui_mode_count >= 10) and visible_ratio < 0.15
+    if control_heavy or tui_repaint_tail:
+        return False, "unsafe_tui_control_tail"
+    return True, "replayable"
+
+
 def _append_transcript_chunk(path: Path, chunk: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     data = str(chunk or "").encode("utf-8", errors="replace")
@@ -1387,6 +1413,8 @@ def _public_state(state: dict[str, Any]) -> dict[str, Any]:
         "cols",
         "transcriptPath",
         "transcriptTail",
+        "transcriptTailReplayable",
+        "transcriptTailRenderReason",
         "processStartedAt",
         "processStartedAtMs",
         "userClosed",

@@ -22,11 +22,11 @@ def _client() -> TestClient:
     return TestClient(create_app(), headers={CONTROL_TOKEN_HEADER: get_control_token()})
 
 
-def _fake_local_research_public_config(*, prompt_cache_mode="explicit_cache_control"):
+def _fake_local_research_public_config(*, prompt_cache_mode="explicit_cache_control", model_library: dict | None = None):
     return {
         "llm": {
             "profiles": {},
-            "model_library": {
+            "model_library": model_library or {
                 "houmo_qwen35_9b_agent": {
                     "model": "qwen3.5-9b",
                     "provider": "local",
@@ -419,7 +419,7 @@ def test_team_workflow_route_blocks_source_collection_without_prompt_cache(tmp_p
     )
 
     assert response.status_code == 422
-    assert "requires prompt cache/KV reuse" in response.json()["detail"]
+    assert "No prompt-cache-capable model is configured" in response.json()["detail"]
     assert "automatic or explicit_cache_control" in response.json()["detail"]
 
 
@@ -450,6 +450,58 @@ def test_team_workflow_route_starts_research_stage_round(tmp_path, monkeypatch):
     assert status_response.status_code == 200, status_response.text
     assert status_response.json()["phases"][0]["activeRoundId"] == response.json()["stageRound"]["stageRoundId"]
     assert status_response.json()["boundaries"]["writesFormalKnowledge"] is False
+
+
+def test_team_workflow_route_resolves_stale_prompt_cache_model_for_stage_round(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        team_workflow_orchestration_service,
+        "load_public_config",
+        lambda: _fake_local_research_public_config(
+            model_library={
+                "local_model_server_b": {
+                    "model": "Qwen3-32B-AWQ",
+                    "label": "RiverSyncle Qwen3 32B AWQ / Server B",
+                    "provider": {"kind": "local"},
+                },
+                "relay_openai_gpt_5_5": {
+                    "model": "gpt-5.5",
+                    "label": "GPT-5.5-pixel",
+                    "provider": {"kind": "relay"},
+                    "prompt_cache": {"mode": "automatic"},
+                },
+                "relay_image2": {
+                    "model": "image2",
+                    "label": "Image2 via relay",
+                    "provider": {"kind": "relay"},
+                    "prompt_cache": {"mode": "automatic"},
+                },
+            }
+        ),
+    )
+    client = _client()
+    team = client.post("/api/teams", json={"name": "ai科学研究团队"}).json()
+
+    response = client.post(
+        f"/api/teams/{team['teamId']}/workflow-orchestration/stage-rounds/start",
+        json={
+            "stageType": "knowledge_collection",
+            "topic": "predictive coding",
+            "promptCachePolicy": {
+                "requirement": "required_for_llm_execution",
+                "modelId": "houmo_qwen35_9b_agent",
+            },
+        },
+    )
+
+    assert response.status_code == 201, response.text
+    policy = response.json()["promptCachePolicy"]
+    assert policy["gate"]["status"] == "satisfied"
+    assert policy["modelId"] == "relay_openai_gpt_5_5"
+    assert policy["promptCacheMode"] == "automatic"
+    assert policy["modelResolution"]["status"] == "fallback"
+    assert policy["modelResolution"]["requestedModelId"] == "houmo_qwen35_9b_agent"
+    assert response.json()["searchPlan"]["promptCachePolicy"]["modelId"] == "relay_openai_gpt_5_5"
 
 
 def test_team_workflow_route_retries_research_stage_coordination(tmp_path, monkeypatch):

@@ -48,6 +48,9 @@ import {
   KnowledgeTracePayload,
   MemoryItem,
   MemoryItemDetailPayload,
+  MemoryCleanupExecuteResponse,
+  MemoryCleanupPreviewResponse,
+  MemoryCleanupTargetRequest,
   MemoryKnowledgeGraphEdge,
   MemoryKnowledgeGraphNode,
   MemoryKnowledgeGraphNodeDetailPayload,
@@ -393,6 +396,32 @@ type Copy = {
   currentContractState: string;
   graphView: string;
   graphSubtitle: string;
+  cleanupView: string;
+  cleanupSubtitle: string;
+  cleanupTargets: string;
+  cleanupPreview: string;
+  cleanupExecute: string;
+  cleanupConfirmPhrase: string;
+  cleanupConfirmPlaceholder: string;
+  cleanupHardDelete: string;
+  cleanupNoBackup: string;
+  cleanupSelectedTargets: string;
+  cleanupGlobalRuntime: string;
+  cleanupAgentPrivate: string;
+  cleanupAgentFormalKnowledge: string;
+  cleanupAgentMemoryPolicy: string;
+  cleanupTeamKnowledge: string;
+  cleanupKnowledgeBase: string;
+  cleanupPreviewReady: string;
+  cleanupExecuteDone: string;
+  cleanupNoTargets: string;
+  cleanupSelectTargets: string;
+  cleanupFailed: string;
+  cleanupRows: string;
+  cleanupFiles: string;
+  cleanupBytes: string;
+  cleanupVectorRecords: string;
+  cleanupCentralSourceBoundary: string;
   knowledgeGraph: string;
   graphNodes: string;
   graphEdges: string;
@@ -424,9 +453,16 @@ type Copy = {
 
 type FilterMode = "all" | "prompt" | "visible" | "manual" | "missing";
 type ManageFilterMode = "all" | "prompt" | "editable" | "changed" | "missing";
-export type MemoryRouteView = "overview" | "effective" | "manage" | "sources" | "knowledge" | "graph";
+export type MemoryRouteView = "overview" | "effective" | "manage" | "sources" | "knowledge" | "graph" | "cleanup";
 type MemoryChannel = "conversation" | "research" | "self_evolution" | "supervised_evolution" | "explicit_read";
 type ChannelFilter = MemoryChannel | "";
+type CleanupTargetOption = {
+  key: string;
+  label: string;
+  detail: string;
+  target: MemoryCleanupTargetRequest;
+  risk: "high" | "critical";
+};
 type GraphRelation = {
   edge: MemoryKnowledgeGraphEdge;
   neighbor: MemoryKnowledgeGraphNode;
@@ -820,6 +856,32 @@ const COPY: Record<"zh" | "en", Copy> = {
     currentContractState: "当前状态",
     graphView: "知识图谱",
     graphSubtitle: "以只读 3D 结构网观察 Project、Team、Agent、记忆、知识库、来源、进化和监督关系。",
+    cleanupView: "记忆清理",
+    cleanupSubtitle: "集中选择运行记忆、Agent 私有记忆、团队知识库和 RAG 元数据，预览后硬删除。",
+    cleanupTargets: "清理目标",
+    cleanupPreview: "预览影响",
+    cleanupExecute: "执行清理",
+    cleanupConfirmPhrase: "确认短语",
+    cleanupConfirmPlaceholder: "输入：硬删除记忆",
+    cleanupHardDelete: "硬删除",
+    cleanupNoBackup: "不进入回收站，也不生成兼容副本。",
+    cleanupSelectedTargets: "选中目标",
+    cleanupGlobalRuntime: "全局运行记忆",
+    cleanupAgentPrivate: "Agent 私有记忆",
+    cleanupAgentFormalKnowledge: "Agent 正式知识",
+    cleanupAgentMemoryPolicy: "Agent MemoryPolicy",
+    cleanupTeamKnowledge: "团队知识库",
+    cleanupKnowledgeBase: "单个知识库",
+    cleanupPreviewReady: "预览已生成",
+    cleanupExecuteDone: "清理完成",
+    cleanupNoTargets: "当前没有可选择的清理目标。",
+    cleanupSelectTargets: "先选择至少一个目标，再生成预览。",
+    cleanupFailed: "清理失败",
+    cleanupRows: "记录",
+    cleanupFiles: "文件",
+    cleanupBytes: "字节",
+    cleanupVectorRecords: "RAG 索引",
+    cleanupCentralSourceBoundary: "单个知识库清理不会删除中央来源文件；中央来源需要单独治理。",
     knowledgeGraph: "项目知识图谱",
     graphNodes: "节点",
     graphEdges: "连线",
@@ -1159,6 +1221,32 @@ const COPY: Record<"zh" | "en", Copy> = {
     currentContractState: "Current state",
     graphView: "Knowledge graph",
     graphSubtitle: "Observe Project, Team, Agent, memory, knowledge, source, evolution, and supervision links as a read-only 3D network.",
+    cleanupView: "Memory cleanup",
+    cleanupSubtitle: "Select runtime memory, Agent private memory, team knowledge, and RAG metadata, preview them, then hard-delete.",
+    cleanupTargets: "Cleanup targets",
+    cleanupPreview: "Preview impact",
+    cleanupExecute: "Execute cleanup",
+    cleanupConfirmPhrase: "Confirmation phrase",
+    cleanupConfirmPlaceholder: "Type: 硬删除记忆",
+    cleanupHardDelete: "Hard delete",
+    cleanupNoBackup: "No recycle bin and no compatibility copy.",
+    cleanupSelectedTargets: "Selected targets",
+    cleanupGlobalRuntime: "Global runtime memory",
+    cleanupAgentPrivate: "Agent private memory",
+    cleanupAgentFormalKnowledge: "Agent formal knowledge",
+    cleanupAgentMemoryPolicy: "Agent MemoryPolicy",
+    cleanupTeamKnowledge: "Team knowledge",
+    cleanupKnowledgeBase: "Single knowledge base",
+    cleanupPreviewReady: "Preview ready",
+    cleanupExecuteDone: "Cleanup complete",
+    cleanupNoTargets: "No cleanup targets are currently available.",
+    cleanupSelectTargets: "Select at least one target before previewing.",
+    cleanupFailed: "Cleanup failed",
+    cleanupRows: "Rows",
+    cleanupFiles: "Files",
+    cleanupBytes: "Bytes",
+    cleanupVectorRecords: "RAG index",
+    cleanupCentralSourceBoundary: "Single knowledge-base cleanup does not delete central source files; central sources need separate governance.",
     knowledgeGraph: "Project knowledge graph",
     graphNodes: "Nodes",
     graphEdges: "Edges",
@@ -1700,6 +1788,7 @@ const MEMORY_VIEWS: Array<{ key: MemoryRouteView; href: string }> = [
   { key: "sources", href: "/memory/sources" },
   { key: "knowledge", href: "/memory/knowledge" },
   { key: "graph", href: "/memory/graph" },
+  { key: "cleanup", href: "/memory/cleanup" },
 ];
 
 function memoryViewLabel(copy: Copy, view: MemoryRouteView) {
@@ -1717,6 +1806,9 @@ function memoryViewLabel(copy: Copy, view: MemoryRouteView) {
   }
   if (view === "graph") {
     return copy.graphView;
+  }
+  if (view === "cleanup") {
+    return copy.cleanupView;
   }
   return copy.overviewView;
 }
@@ -1736,6 +1828,9 @@ function memoryViewSubtitle(copy: Copy, view: MemoryRouteView) {
   }
   if (view === "graph") {
     return copy.graphSubtitle;
+  }
+  if (view === "cleanup") {
+    return copy.cleanupSubtitle;
   }
   return copy.overviewSubtitle;
 }
@@ -1964,6 +2059,40 @@ function compactInlineList(items: string[] | undefined, limit: number) {
   };
 }
 
+function cleanupTargetKey(target: MemoryCleanupTargetRequest) {
+  return [
+    target.targetType,
+    target.ownerType ?? "",
+    target.ownerId ?? "",
+    target.agentId ?? "",
+    target.teamId ?? "",
+    target.scopedKnowledgeBaseId ?? "",
+    target.knowledgeBaseId ?? "",
+  ].filter(Boolean).join(":");
+}
+
+function cleanupOwnerIdForBase(base: TeamKnowledgeBase) {
+  return String(base.ownerId || (base.ownerType === "agent" ? base.agentId : base.teamId) || "").trim();
+}
+
+function cleanupOwnerLabelForBase(base: TeamKnowledgeBase, lang: "zh" | "en") {
+  if (base.ownerType === "agent") {
+    return `${lang === "zh" ? "Agent" : "Agent"} ${base.agentName || base.ownerId || base.agentId || "-"}`;
+  }
+  return `${lang === "zh" ? "团队" : "Team"} ${base.teamName || base.ownerId || base.teamId || "-"}`;
+}
+
+function formatByteCount(value: number) {
+  const bytes = Number.isFinite(value) ? Math.max(0, value) : 0;
+  if (bytes >= 1024 * 1024) {
+    return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+  }
+  if (bytes >= 1024) {
+    return `${(bytes / 1024).toFixed(1)} KB`;
+  }
+  return `${bytes} B`;
+}
+
 function invalidateKnowledgeDashboard(queryClient: ReturnType<typeof useQueryClient>, agentId = "") {
   void queryClient.invalidateQueries({ queryKey: queryKeys.knowledgeDashboardSnapshot(agentId) });
 }
@@ -2016,6 +2145,14 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
   const [graphSearchText, setGraphSearchText] = useState("");
   const [activeGraphNodeType, setActiveGraphNodeType] = useState("");
   const [selectedGraphNodeId, setSelectedGraphNodeId] = useState("");
+  const [selectedCleanupTargetKeys, setSelectedCleanupTargetKeys] = useState<string[]>([]);
+  const [cleanupConfirmationText, setCleanupConfirmationText] = useState("");
+  const [cleanupPreview, setCleanupPreview] = useState<MemoryCleanupPreviewResponse | null>(null);
+  const [cleanupExecution, setCleanupExecution] = useState<MemoryCleanupExecuteResponse | null>(null);
+  const [cleanupFeedback, setCleanupFeedback] = useState<{ tone: "idle" | "success" | "error"; text: string }>({
+    tone: "idle",
+    text: "",
+  });
   const [knowledgeFeedback, setKnowledgeFeedback] = useState<{ tone: "idle" | "success" | "error"; text: string }>({
     tone: "idle",
     text: "",
@@ -2048,7 +2185,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
   const agentsQuery = useQuery({
     queryKey: queryKeys.agents(),
     queryFn: () => fetchJson<AgentInstance[]>("/api/agents?detail=summary"),
-    enabled: forcedView === "knowledge" || forcedView === "graph",
+    enabled: forcedView === "knowledge" || forcedView === "graph" || forcedView === "cleanup",
     refetchInterval: resolvePollingInterval(pageVisible, 60_000),
     refetchIntervalInBackground: false,
   });
@@ -2068,7 +2205,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
     },
     refetchInterval: resolvePollingInterval(pageVisible, 45_000),
     refetchIntervalInBackground: false,
-    enabled: forcedView === "knowledge" && Boolean(fallbackKnowledgeActorAgentId),
+    enabled: (forcedView === "knowledge" || forcedView === "cleanup") && Boolean(fallbackKnowledgeActorAgentId),
   });
 
   const memoryKnowledgeGraphQuery = useQuery({
@@ -2197,6 +2334,53 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
       setMutationFeedback({
         tone: "error",
         text: `${copy.mutationFailed}: ${error instanceof Error ? error.message : String(error)}`,
+      });
+    },
+  });
+
+  const cleanupPreviewMutation = useMutation({
+    mutationFn: async (targets: MemoryCleanupTargetRequest[]) =>
+      fetchJson<MemoryCleanupPreviewResponse>("/api/memory/cleanup/preview", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ targets }),
+      }),
+    onSuccess: (payload) => {
+      setCleanupPreview(payload);
+      setCleanupExecution(null);
+      setCleanupFeedback({ tone: "success", text: copy.cleanupPreviewReady });
+      void queryClient.setQueryData(queryKeys.memoryCleanupPreview(), payload);
+    },
+    onError: (error) => {
+      setCleanupFeedback({
+        tone: "error",
+        text: `${copy.cleanupFailed}: ${error instanceof Error ? error.message : String(error)}`,
+      });
+    },
+  });
+
+  const cleanupExecuteMutation = useMutation({
+    mutationFn: async ({ targets, confirmationPhrase }: { targets: MemoryCleanupTargetRequest[]; confirmationPhrase: string }) =>
+      fetchJson<MemoryCleanupExecuteResponse>("/api/memory/cleanup/execute", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ targets, confirmationPhrase }),
+      }),
+    onSuccess: (payload) => {
+      setCleanupPreview(payload);
+      setCleanupExecution(payload);
+      setCleanupConfirmationText("");
+      setCleanupFeedback({ tone: "success", text: copy.cleanupExecuteDone });
+      invalidateMemoryQueries(queryClient);
+      invalidateKnowledgeDashboard(queryClient, fallbackKnowledgeActorAgentId);
+      void queryClient.invalidateQueries({ queryKey: queryKeys.agents() });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.memoryKnowledgeGraph(fallbackKnowledgeActorAgentId, "officialResearchGraph") });
+      void queryClient.invalidateQueries({ queryKey: ["knowledge"] });
+    },
+    onError: (error) => {
+      setCleanupFeedback({
+        tone: "error",
+        text: `${copy.cleanupFailed}: ${error instanceof Error ? error.message : String(error)}`,
       });
     },
   });
@@ -2364,6 +2548,82 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
     knowledgeBases.find((base) => knowledgeBaseRequestId(base) === activeKnowledgeBaseId) ?? knowledgeBases[0] ?? null;
   const activeKnowledgeBaseForItems = knowledgeBaseRequestId(activeKnowledgeBase);
   const activeKnowledgeActorAgentId = actorAgentIdForKnowledgeContext(activeKnowledgeBase, knowledgeActorAgents, fallbackKnowledgeActorAgentId);
+  const cleanupTargetOptions = useMemo<CleanupTargetOption[]>(() => {
+    const options: CleanupTargetOption[] = [
+      {
+        key: "global_runtime_memory",
+        label: copy.cleanupGlobalRuntime,
+        detail: "workspace/memory, STATE_MEMORY.md, workspace/agent_brain.db memory tables",
+        target: { targetType: "global_runtime_memory" },
+        risk: "critical",
+      },
+    ];
+    const addOption = (option: Omit<CleanupTargetOption, "key">) => {
+      const key = cleanupTargetKey(option.target);
+      if (!options.some((item) => item.key === key)) {
+        options.push({ ...option, key });
+      }
+    };
+    knowledgeActorAgents
+      .filter((agent) => agent.status !== "archived")
+      .forEach((agent) => {
+        const agentName = agent.displayName || agent.agentCode || agent.agentId;
+        addOption({
+          label: `${copy.cleanupAgentPrivate} · ${agentName}`,
+          detail: agent.workspacePath ? `${agent.workspacePath}/memory` : `workspace/agents/${agent.agentId}/memory`,
+          target: { targetType: "agent_private_memory", agentId: agent.agentId },
+          risk: "critical",
+        });
+        addOption({
+          label: `${copy.cleanupAgentFormalKnowledge} · ${agentName}`,
+          detail: agent.workspacePath ? `${agent.workspacePath}/knowledge` : `workspace/agents/${agent.agentId}/knowledge`,
+          target: { targetType: "agent_formal_knowledge", agentId: agent.agentId },
+          risk: "critical",
+        });
+        addOption({
+          label: `${copy.cleanupAgentMemoryPolicy} · ${agentName}`,
+          detail: agent.memoryPolicyId || `memory-${agent.agentId}`,
+          target: { targetType: "agent_memory_policy", agentId: agent.agentId },
+          risk: "high",
+        });
+      });
+    knowledgeBases.forEach((base) => {
+      const ownerId = cleanupOwnerIdForBase(base);
+      const ownerType = String(base.ownerType || "team");
+      if (ownerId && ownerType === "team") {
+        addOption({
+          label: `${copy.cleanupTeamKnowledge} · ${base.teamName || ownerId}`,
+          detail: `workspace/teams/${ownerId}/knowledge`,
+          target: { targetType: "team_knowledge", teamId: ownerId, ownerType: "team", ownerId },
+          risk: "critical",
+        });
+      }
+      if (ownerId && (ownerType === "team" || ownerType === "agent")) {
+        addOption({
+          label: `${copy.cleanupKnowledgeBase} · ${base.name}`,
+          detail: `${cleanupOwnerLabelForBase(base, lang)} · ${base.scopedKnowledgeBaseId || base.knowledgeBaseId}`,
+          target: {
+            targetType: "knowledge_base",
+            ownerType,
+            ownerId,
+            teamId: ownerType === "team" ? ownerId : "",
+            agentId: ownerType === "agent" ? ownerId : "",
+            knowledgeBaseId: base.knowledgeBaseId,
+            scopedKnowledgeBaseId: base.scopedKnowledgeBaseId || "",
+          },
+          risk: "critical",
+        });
+      }
+    });
+    return options;
+  }, [copy, knowledgeActorAgents, knowledgeBases, lang]);
+  const selectedCleanupTargets = useMemo(
+    () =>
+      cleanupTargetOptions
+        .filter((option) => selectedCleanupTargetKeys.includes(option.key))
+        .map((option) => option.target),
+    [cleanupTargetOptions, selectedCleanupTargetKeys],
+  );
   const activeSourceOwnerType = sourceOwnerType;
   const activeSourceOwnerId = sourceOwnerId.trim();
   const activeSourceInboxStatus = sourceInboxStatus === "all" ? "" : sourceInboxStatus;
@@ -3328,6 +3588,30 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
       knowledgeBaseId: knowledgeBaseRequestId(activeKnowledgeBase),
       suggestionIds: selectedVisibleRatingSuggestionIds,
       status,
+    });
+  };
+  const toggleCleanupTarget = (targetKey: string) => {
+    setCleanupExecution(null);
+    setCleanupPreview(null);
+    setSelectedCleanupTargetKeys((current) =>
+      current.includes(targetKey) ? current.filter((value) => value !== targetKey) : [...current, targetKey],
+    );
+  };
+  const previewCleanup = () => {
+    if (!selectedCleanupTargets.length) {
+      setCleanupFeedback({ tone: "error", text: copy.cleanupSelectTargets });
+      return;
+    }
+    cleanupPreviewMutation.mutate(selectedCleanupTargets);
+  };
+  const executeCleanup = () => {
+    if (!selectedCleanupTargets.length) {
+      setCleanupFeedback({ tone: "error", text: copy.cleanupSelectTargets });
+      return;
+    }
+    cleanupExecuteMutation.mutate({
+      targets: selectedCleanupTargets,
+      confirmationPhrase: cleanupConfirmationText,
     });
   };
 
@@ -5586,6 +5870,173 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
     </>
   );
 
+  const renderCleanupView = () => {
+    const report = cleanupExecution ?? cleanupPreview;
+    const totals = report?.totals;
+    const canExecute = selectedCleanupTargets.length > 0 && cleanupConfirmationText.trim() === (report?.confirmationPhrase || "硬删除记忆");
+    return (
+      <>
+        <div className={styles.summaryGrid}>
+          <section className={styles.summaryCard}>
+            <span>{copy.cleanupSelectedTargets}</span>
+            <strong>{selectedCleanupTargets.length}</strong>
+            <small>{cleanupTargetOptions.length}</small>
+          </section>
+          <section className={styles.summaryCard}>
+            <span>{copy.cleanupRows}</span>
+            <strong>{totals?.rowCount ?? 0}</strong>
+            <small>{copy.cleanupHardDelete}</small>
+          </section>
+          <section className={styles.summaryCard}>
+            <span>{copy.cleanupFiles}</span>
+            <strong>{totals?.fileCount ?? 0}</strong>
+            <small>{formatByteCount(totals?.byteCount ?? 0)}</small>
+          </section>
+          <section className={styles.summaryCard}>
+            <span>{copy.cleanupVectorRecords}</span>
+            <strong>{totals?.vectorRecordCount ?? 0}</strong>
+            <small>RAG</small>
+          </section>
+        </div>
+
+        <section className={styles.cleanupWarning}>
+          <TriangleAlert size={16} />
+          <strong>{copy.cleanupHardDelete}</strong>
+          <span>{copy.cleanupNoBackup}</span>
+        </section>
+
+        <div className={styles.cleanupWorkspace}>
+          <section className={styles.cleanupTargetPanel}>
+            <div className={styles.panelHeader}>
+              <div>
+                <h2>{copy.cleanupTargets}</h2>
+                <p>{copy.cleanupSelectTargets}</p>
+              </div>
+              <span className={styles.countPill}>{selectedCleanupTargets.length}</span>
+            </div>
+            {knowledgeDashboardSnapshotQuery.isPending || agentsQuery.isPending ? <div className={styles.emptyState}>{copy.loading}</div> : null}
+            {!knowledgeDashboardSnapshotQuery.isPending && !agentsQuery.isPending && !cleanupTargetOptions.length ? (
+              <div className={styles.emptyState}>{copy.cleanupNoTargets}</div>
+            ) : null}
+            <div className={styles.cleanupTargetList}>
+              {cleanupTargetOptions.map((option) => {
+                const selected = selectedCleanupTargetKeys.includes(option.key);
+                return (
+                  <label key={option.key} className={styles.cleanupTargetRow} data-selected={selected} data-risk={option.risk}>
+                    <input
+                      type="checkbox"
+                      checked={selected}
+                      onChange={() => toggleCleanupTarget(option.key)}
+                      aria-label={option.label}
+                    />
+                    <span>
+                      <strong>{option.label}</strong>
+                      <small>{option.detail}</small>
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
+          </section>
+
+          <section className={styles.cleanupPreviewPanel}>
+            <div className={styles.panelHeader}>
+              <div>
+                <h2>{copy.cleanupPreview}</h2>
+                <p>{copy.cleanupCentralSourceBoundary}</p>
+              </div>
+              <button
+                type="button"
+                className={styles.inlineActionButton}
+                onClick={previewCleanup}
+                disabled={!selectedCleanupTargets.length || cleanupPreviewMutation.isPending}
+              >
+                <Eye size={15} />
+                {copy.cleanupPreview}
+              </button>
+            </div>
+            {report ? (
+              <>
+                <div className={styles.cleanupStats}>
+                  <span>{copy.cleanupRows}: {report.totals.rowCount}</span>
+                  <span>{copy.cleanupFiles}: {report.totals.fileCount}</span>
+                  <span>{copy.cleanupBytes}: {formatByteCount(report.totals.byteCount)}</span>
+                  <span>{copy.cleanupVectorRecords}: {report.totals.vectorRecordCount}</span>
+                </div>
+                <div className={styles.cleanupPreviewList}>
+                  {report.targets.map((target) => (
+                    <article key={target.targetKey} className={styles.cleanupPreviewItem}>
+                      <header>
+                        <strong>{target.label}</strong>
+                        <span>{target.status}</span>
+                      </header>
+                      <div className={styles.cleanupPreviewCounts}>
+                        <span>{copy.cleanupRows}: {target.counts.rowCount}</span>
+                        <span>{copy.cleanupFiles}: {target.counts.fileCount}</span>
+                        <span>{copy.cleanupVectorRecords}: {target.counts.vectorRecordCount}</span>
+                      </div>
+                      {target.warnings.map((warning) => (
+                        <p key={warning} className={styles.cleanupInlineWarning}>{warning}</p>
+                      ))}
+                      <div className={styles.cleanupPathList}>
+                        {target.paths.map((path) => (
+                          <span key={`${target.targetKey}:${path.path}:${path.action}`}>
+                            <small>{path.action}{path.status ? ` · ${path.status}` : ""}</small>
+                            <strong>{path.path}</strong>
+                            <em>{path.rowCount ? `${path.rowCount} ${copy.cleanupRows}` : path.fileCount ? `${path.fileCount} ${copy.cleanupFiles}` : path.exists ? path.kind : copy.missing}</em>
+                          </span>
+                        ))}
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              </>
+            ) : (
+              <div className={styles.emptyState}>{copy.cleanupSelectTargets}</div>
+            )}
+          </section>
+
+          <section className={styles.cleanupExecutePanel}>
+            <div className={styles.panelHeader}>
+              <div>
+                <h2>{copy.cleanupExecute}</h2>
+                <p>{copy.cleanupConfirmPhrase}: {report?.confirmationPhrase ?? "硬删除记忆"}</p>
+              </div>
+              <Trash2 size={18} />
+            </div>
+            <label className={styles.cleanupConfirmField}>
+              <span>{copy.cleanupConfirmPhrase}</span>
+              <input
+                value={cleanupConfirmationText}
+                placeholder={copy.cleanupConfirmPlaceholder}
+                onChange={(event) => setCleanupConfirmationText(event.target.value)}
+              />
+            </label>
+            <button
+              type="button"
+              className={styles.cleanupExecuteButton}
+              onClick={executeCleanup}
+              disabled={!canExecute || cleanupExecuteMutation.isPending}
+            >
+              <Trash2 size={15} />
+              {copy.cleanupExecute}
+            </button>
+            {cleanupFeedback.tone !== "idle" ? (
+              <p className={styles.cleanupFeedback} data-tone={cleanupFeedback.tone}>{cleanupFeedback.text}</p>
+            ) : null}
+            {cleanupExecution ? (
+              <div className={styles.cleanupExecutionSummary}>
+                <CheckCircle2 size={18} />
+                <span>{copy.cleanupExecuteDone}</span>
+                <strong>{cleanupExecution.totals.targetCount}</strong>
+              </div>
+            ) : null}
+          </section>
+        </div>
+      </>
+    );
+  };
+
   const renderGraphView = () => (
     <>
       <div className={styles.summaryGrid}>
@@ -5878,7 +6329,9 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
                 ? renderKnowledgeView()
                 : forcedView === "graph"
                   ? renderGraphView()
-                  : renderSourcesView()}
+                  : forcedView === "cleanup"
+                    ? renderCleanupView()
+                    : renderSourcesView()}
       </div>
     </section>
   );

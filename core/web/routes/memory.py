@@ -20,6 +20,11 @@ from core.web.services.memory_graph_service import (
     get_memory_knowledge_graph_node_detail,
     record_memory_knowledge_graph_blocked,
 )
+from core.web.services.memory_cleanup_service import (
+    MemoryCleanupError,
+    execute_memory_cleanup,
+    preview_memory_cleanup,
+)
 
 
 router = APIRouter(tags=["memory"])
@@ -29,6 +34,24 @@ class MemoryItemPayload(BaseModel):
     title: str = Field("", max_length=160)
     summary: str = Field("", max_length=1000)
     content: str = Field("", max_length=20000)
+
+
+class MemoryCleanupTargetPayload(BaseModel):
+    targetType: str = Field("", max_length=80)
+    agentId: str = Field("", max_length=160)
+    teamId: str = Field("", max_length=160)
+    ownerType: str = Field("", max_length=32)
+    ownerId: str = Field("", max_length=160)
+    knowledgeBaseId: str = Field("", max_length=260)
+    scopedKnowledgeBaseId: str = Field("", max_length=320)
+
+
+class MemoryCleanupPreviewPayload(BaseModel):
+    targets: list[MemoryCleanupTargetPayload] = Field(default_factory=list, max_length=200)
+
+
+class MemoryCleanupExecutePayload(MemoryCleanupPreviewPayload):
+    confirmationPhrase: str = Field("", max_length=80)
 
 
 @router.get("/memory/overview")
@@ -80,6 +103,25 @@ def memory_knowledge_graph_node_detail(
     if payload is None:
         raise HTTPException(status_code=404, detail="Memory graph node detail not found.")
     return payload
+
+
+@router.post("/memory/cleanup/preview")
+def memory_cleanup_preview(payload: MemoryCleanupPreviewPayload) -> dict:
+    try:
+        return preview_memory_cleanup([target.model_dump() for target in payload.targets])
+    except MemoryCleanupError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.post("/memory/cleanup/execute")
+def memory_cleanup_execute(payload: MemoryCleanupExecutePayload) -> dict:
+    try:
+        return execute_memory_cleanup(
+            [target.model_dump() for target in payload.targets],
+            confirmation_phrase=payload.confirmationPhrase,
+        )
+    except MemoryCleanupError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.post("/memory/items", status_code=status.HTTP_201_CREATED)
