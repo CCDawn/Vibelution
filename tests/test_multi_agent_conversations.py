@@ -25,6 +25,8 @@ from core.web.services import (
 )
 from tools.session_reference_tools import session_reference_context
 
+pytestmark = pytest.mark.serial
+
 
 client = TestClient(create_app(), headers={CONTROL_TOKEN_HEADER: get_control_token()})
 

@@ -62,6 +62,7 @@ from .workbench_controller import (
     focus_workbench,
     observe_workbench,
     open_workbench,
+    persist_workbench_launcher_state_after_open,
     restart_workbench,
 )
 
@@ -2274,6 +2275,11 @@ class RuntimeManagerDaemon:
         state["runtimeState"] = "running"
         state["managerPid"] = self._pid
         state["daemonRunning"] = True
+        launcher_state_sync = persist_workbench_launcher_state_after_open(
+            verification,
+            last_reason=str(workbench.get("lastReason") or "explicit_open"),
+            last_source=str(workbench.get("lastSource") or "runtime_manager"),
+        )
         save_state(state)
         return self._finish_command(
             command_id,
@@ -2282,6 +2288,7 @@ class RuntimeManagerDaemon:
             result_data={
                 "stableBackup": stable_backup,
                 "lifecycleTimingsMs": lifecycle_timings_ms or {},
+                "launcherStateSync": launcher_state_sync,
             },
             reconcile=False,
         )
@@ -2737,6 +2744,11 @@ class RuntimeManagerDaemon:
                     "workbench.open.focus_skipped",
                     {"commandId": command_id, "reason": "no_browser"},
                 )
+            persist_workbench_launcher_state_after_open(
+                observation,
+                last_reason=str(workbench.get("lastReason") or args.get("reason") or "already_open"),
+                last_source=str(workbench.get("lastSource") or args.get("source") or "runtime_manager"),
+            )
             return self._finish_command(command_id, ok=True, message="Workbench is already open.")
 
         workbench.update(
@@ -3680,6 +3692,11 @@ class RuntimeManagerDaemon:
             )
             | {"attempts": open_attempts},
         )
+        launcher_state_sync = persist_workbench_launcher_state_after_open(
+            open_verification,
+            last_reason=str(args.get("reason") or "explicit_restart"),
+            last_source=str(args.get("source") or "runtime_manager"),
+        )
         return {
             "residualCleanup": cleanup_result,
             "requestedNoBrowser": requested_no_browser,
@@ -3687,6 +3704,7 @@ class RuntimeManagerDaemon:
             "buildPreflight": build_preflight,
             "lifecycleTimingsMs": lifecycle_timings_ms,
             "closeStrategy": close_strategy,
+            "launcherStateSync": launcher_state_sync,
         }
 
     def _handle_restart_workbench(self, *, command_id: str, args: dict[str, Any]) -> dict[str, Any]:

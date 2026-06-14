@@ -5,6 +5,8 @@ import pytest
 from core.runtime_manager import evolution_store, work_run_store
 from core.runtime_manager.work_run_store import WorkRunStore, normalize_run_id, normalize_run_kind
 
+pytestmark = pytest.mark.serial
+
 
 def test_work_run_store_tracks_active_and_latest_per_kind(tmp_path):
     store = WorkRunStore(root=tmp_path / ".runtime" / "work_runs")

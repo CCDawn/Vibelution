@@ -1,10 +1,14 @@
 import json
 
+import pytest
+
 from fastapi.testclient import TestClient
 
 from core.web.app import create_app
 from core.web.control import CONTROL_TOKEN_HEADER, get_control_token
 from core.web.services import runtime_scene_service
+
+pytestmark = pytest.mark.serial
 
 
 client = TestClient(create_app(), headers={CONTROL_TOKEN_HEADER: get_control_token()})

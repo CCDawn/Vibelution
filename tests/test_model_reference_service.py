@@ -17,6 +17,8 @@ from core.web.services.model_reference_service import (
     scan_model_references,
 )
 
+pytestmark = pytest.mark.serial
+
 
 def _write_json(path, payload):
     path.parent.mkdir(parents=True, exist_ok=True)

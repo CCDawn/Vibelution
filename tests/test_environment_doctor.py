@@ -16,7 +16,7 @@ DOCTOR_SCRIPT = PROJECT_ROOT / "scripts" / "doctor.ps1"
 EXPECTED_VENV_PYTHON = PROJECT_ROOT / ".venv" / "Scripts" / "python.exe"
 
 
-pytestmark = pytest.mark.slow
+pytestmark = [pytest.mark.slow, pytest.mark.serial]
 
 
 def _powershell_exe() -> str:
