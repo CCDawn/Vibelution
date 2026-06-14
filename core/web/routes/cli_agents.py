@@ -36,6 +36,7 @@ class CliAgentTerminalEnsurePayload(BaseModel):
     cliSessionId: str = ""
     rows: int = Field(default=28, ge=4, le=120)
     cols: int = Field(default=100, ge=20, le=240)
+    sendInitialTask: bool = False
 
 
 class CliAgentTerminalInputPayload(BaseModel):
@@ -72,6 +73,7 @@ def cli_agent_terminal_ensure(payload: CliAgentTerminalEnsurePayload) -> dict[st
             cli_session_id=payload.cliSessionId,
             rows=payload.rows,
             cols=payload.cols,
+            send_initial_task=payload.sendInitialTask,
         )
     except CliAgentTerminalError as exc:
         _raise_terminal_error(exc)
