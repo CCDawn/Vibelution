@@ -799,7 +799,7 @@
 .operationStatusLine {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 5px 10px;
   min-width: 0;
   max-width: 100%;
@@ -823,8 +823,12 @@
 }
 
 .operationStatusMeta {
+  min-width: 0;
+  overflow: hidden;
   color: color-mix(in srgb, var(--fg-tertiary) 80%, transparent);
   font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .operationProgressRail {

@@ -296,7 +296,7 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).toContain("Agent 私信 · A014 · 能力管家");
   });
 
-  it("limits expanded feedback timelines to the latest execution steps by default", () => {
+  it("keeps completed feedback timelines collapsed to a compact execution summary by default", () => {
     const feedbackEvents = Array.from({ length: 40 }, (_, index) => ({
       sequence: index + 1,
       kind: "tool" as const,
@@ -318,12 +318,12 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).toContain("已完成");
     expect(html).toContain("40/40");
     expect(html).not.toContain("+33");
-    expect(html).toContain("tool_40");
+    expect(html).not.toContain("tool_40");
     expect(html).not.toContain("已折叠更早 4 步执行记录");
     expect(html).not.toContain("step 5");
   });
 
-  it("deduplicates the compact execution rail without showing a collapsed count", () => {
+  it("hides completed execution rail details until the trace is expanded", () => {
     const repeatedCommandEvents = Array.from({ length: 8 }, (_, index) => ({
       sequence: index + 1,
       kind: "tool" as const,
@@ -352,11 +352,13 @@ describe("ConversationView edit resend affordance", () => {
 
     expect(html).toContain("执行过程");
     expect(html).not.toContain("+");
-    expect(html).toContain("命令");
-    expect(html.match(/title="命令 · 已完成"/g)?.length ?? 0).toBe(1);
+    expect(html).toContain("9 步");
+    expect(html).toContain("9/9");
+    expect(html).not.toContain("命令");
+    expect(html.match(/title="命令 · 已完成"/g)?.length ?? 0).toBe(0);
   });
 
-  it("keeps only the real failed step red in the compact execution rail", () => {
+  it("summarizes only the real failed execution step in the collapsed trace", () => {
     const html = renderConversation([
       {
         id: "assistant-feedback-synthetic-failures",
@@ -404,11 +406,14 @@ describe("ConversationView edit resend affordance", () => {
       },
     ]);
 
-    expect(html).toContain('title="准备上下文 · 已完成"');
-    expect(html).toContain('title="绑定 Agent · 已完成"');
-    expect(html).toContain('title="请求模型 · 已完成"');
-    expect(html.match(/title="命令 · 失败"/g)?.length ?? 0).toBe(1);
-    expect(html.match(/title=".*?· 失败"/g)?.length ?? 0).toBe(1);
+    expect(html).toContain("执行失败");
+    expect(html).toContain("命令");
+    expect(html).toContain("4/5");
+    expect(html).toContain("[超时] cli_tool 执行超时");
+    expect(html).not.toContain('title="准备上下文 · 已完成"');
+    expect(html).not.toContain('title="绑定 Agent · 已完成"');
+    expect(html).not.toContain('title="请求模型 · 已完成"');
+    expect(html.match(/title=".*?· 失败"/g)?.length ?? 0).toBe(0);
   });
 
   it("renders group-room transcripts as sync records instead of assistant answers", () => {
@@ -1441,8 +1446,8 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).toContain("3 步");
     expect(html).toContain("已完成");
     expect(html).toContain("3/3");
-    expect(html).toContain("思考过程");
-    expect(html).toContain("读取");
+    expect(html).not.toContain("思考过程");
+    expect(html).not.toContain("读取");
     expect(html).toContain('title="展开执行明细"');
     expect(html).not.toContain('title="展开工具调用"');
     expect(html).not.toContain("先看日志");
@@ -1521,8 +1526,8 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).toContain("执行过程");
     expect(html).toContain("执行中");
     expect(html).toContain("2/3");
-    expect(html).toContain("准备上下文");
-    expect(html).toContain("绑定 Agent");
+    expect(html).not.toContain("准备上下文");
+    expect(html).not.toContain("绑定 Agent");
     expect(html).toContain("请求模型");
     expect(html).not.toContain("当前位置");
     expect(html).not.toContain("请求模型中");
@@ -1594,7 +1599,7 @@ describe("ConversationView edit resend affordance", () => {
       },
     ]);
 
-    expect(html).toContain("搜索");
+    expect(html).not.toContain("搜索");
     expect(html).toContain("1 步");
     expect(html).toContain("已完成");
     expect(html).toContain("1/1");
