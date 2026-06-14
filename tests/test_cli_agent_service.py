@@ -24,6 +24,34 @@ def _configure_roots(monkeypatch, tmp_path):
     return project_root
 
 
+def _write_fake_mimo_npm_shim(tmp_path):
+    npm_dir = tmp_path / "npm"
+    cli_script = npm_dir / "node_modules" / "@mimo-ai" / "cli" / "bin" / "mimo"
+    cli_script.parent.mkdir(parents=True)
+    cli_script.write_text("console.log('mimo')\n", encoding="utf-8")
+    cmd_path = npm_dir / "mimo.cmd"
+    cmd_path.write_text(
+        """
+@ECHO off
+GOTO start
+:find_dp0
+SET dp0=%~dp0
+EXIT /b
+:start
+SETLOCAL
+CALL :find_dp0
+IF EXIST "%dp0%\\node.exe" (
+  SET "_prog=%dp0%\\node.exe"
+) ELSE (
+  SET "_prog=node"
+)
+endLocal & goto #_undefined_# 2>NUL || title %COMSPEC% & "%_prog%"  "%dp0%\\node_modules\\@mimo-ai\\cli\\bin\\mimo" %*
+""".strip(),
+        encoding="utf-8",
+    )
+    return cmd_path, cli_script
+
+
 def test_codex_readonly_uses_exec_with_readonly_sandbox(monkeypatch, tmp_path):
     project_root = _configure_roots(monkeypatch, tmp_path)
     calls = []
@@ -161,7 +189,18 @@ def test_list_cli_agent_adapters_reports_availability(monkeypatch, tmp_path):
 
 def test_mimo_cli_terminal_launch_uses_tui_project_protocol(monkeypatch, tmp_path):
     project_root = _configure_roots(monkeypatch, tmp_path)
-    monkeypatch.setattr(service.shutil, "which", lambda candidate: r"C:\tools\mimo.cmd" if candidate == "mimo.cmd" else "")
+    mimo_cmd, mimo_script = _write_fake_mimo_npm_shim(tmp_path)
+    node_exe = r"C:\tools\node.exe"
+
+    def fake_which(candidate):
+        if candidate == "mimo.cmd":
+            return str(mimo_cmd)
+        if candidate == "node.exe":
+            return node_exe
+        return ""
+
+    monkeypatch.setattr(terminal_service.os, "name", "nt", raising=False)
+    monkeypatch.setattr(service.shutil, "which", fake_which)
 
     command = terminal_service._build_terminal_command(
         agent_type="mimo_code",
@@ -173,7 +212,8 @@ def test_mimo_cli_terminal_launch_uses_tui_project_protocol(monkeypatch, tmp_pat
         cli_session_id="",
     )
 
-    assert command["args"] == [r"C:\tools\mimo.cmd", str(project_root)]
+    assert command["args"] == [node_exe, str(mimo_script), str(project_root)]
+    assert all(not str(item).lower().endswith(".cmd") for item in command["args"])
     assert "code" not in command["args"]
     assert "--dir" not in command["args"]
     assert command["resumed"] is False
@@ -182,7 +222,18 @@ def test_mimo_cli_terminal_launch_uses_tui_project_protocol(monkeypatch, tmp_pat
 
 def test_mimo_cli_terminal_resume_uses_session_option(monkeypatch, tmp_path):
     project_root = _configure_roots(monkeypatch, tmp_path)
-    monkeypatch.setattr(service.shutil, "which", lambda candidate: r"C:\tools\mimo.cmd" if candidate == "mimo.cmd" else "")
+    mimo_cmd, mimo_script = _write_fake_mimo_npm_shim(tmp_path)
+    node_exe = r"C:\tools\node.exe"
+
+    def fake_which(candidate):
+        if candidate == "mimo.cmd":
+            return str(mimo_cmd)
+        if candidate == "node.exe":
+            return node_exe
+        return ""
+
+    monkeypatch.setattr(terminal_service.os, "name", "nt", raising=False)
+    monkeypatch.setattr(service.shutil, "which", fake_which)
 
     command = terminal_service._build_terminal_command(
         agent_type="mimo_code",
@@ -194,7 +245,8 @@ def test_mimo_cli_terminal_resume_uses_session_option(monkeypatch, tmp_path):
         cli_session_id="MIMO-123",
     )
 
-    assert command["args"] == [r"C:\tools\mimo.cmd", str(project_root), "--session", "MIMO-123"]
+    assert command["args"] == [node_exe, str(mimo_script), str(project_root), "--session", "MIMO-123"]
+    assert all(not str(item).lower().endswith(".cmd") for item in command["args"])
     assert "resume" not in command["args"]
     assert "--dir" not in command["args"]
     assert command["resumed"] is True
