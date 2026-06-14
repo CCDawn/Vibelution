@@ -6050,14 +6050,12 @@ def _source_collection_agent_id(role: str, payload: dict[str, Any]) -> str:
 def _source_collection_prompt_cache_policy(team_id: str, payload: dict[str, Any], roles: list[str]) -> dict[str, Any]:
     raw_policy = payload.get("promptCachePolicy") if isinstance(payload.get("promptCachePolicy"), dict) else {}
     requirement = _normalize_source_collection_prompt_cache_requirement(raw_policy, payload)
-    model_id = (
+    requested_model_id = (
         _trim_text(raw_policy.get("modelId"), max_length=160)
         or _trim_text(payload.get("modelId"), max_length=160)
-        or LOCAL_RESEARCH_MODEL_ID
     )
-    model_entry = _source_collection_model_library_entry(model_id)
-    prompt_cache = model_entry.get("prompt_cache") if isinstance(model_entry.get("prompt_cache"), dict) else {}
-    prompt_cache_mode = _trim_text(prompt_cache.get("mode"), max_length=80).lower() or "disabled"
+    model_id, model_entry, model_resolution = _source_collection_resolve_prompt_cache_model(requested_model_id)
+    prompt_cache_mode = _source_collection_prompt_cache_mode(model_entry)
     model_name = _trim_text(model_entry.get("model") or model_entry.get("label"), max_length=240) or model_id
     provider_id = _trim_text(model_entry.get("provider_id") or model_entry.get("provider"), max_length=160)
     hard_block = requirement in SOURCE_COLLECTION_PROMPT_CACHE_REQUIRED_MODES
@@ -6065,7 +6063,12 @@ def _source_collection_prompt_cache_policy(team_id: str, payload: dict[str, Any]
     gate_reason = ""
     if requirement not in SOURCE_COLLECTION_PROMPT_CACHE_DISABLED_MODES and not model_entry:
         gate_status = "blocked" if hard_block else "warning"
-        gate_reason = f"Prompt cache model is not configured: {model_id}"
+        requested_for_message = _trim_text(model_resolution.get("requestedModelId"), max_length=160)
+        gate_reason = (
+            f"Prompt cache model is not configured: {requested_for_message}"
+            if requested_for_message
+            else "No prompt-cache-capable model is configured for knowledge collection."
+        )
     elif hard_block and prompt_cache_mode not in SOURCE_COLLECTION_SUPPORTED_PROMPT_CACHE_MODES:
         gate_status = "blocked"
         gate_reason = (
@@ -6093,6 +6096,7 @@ def _source_collection_prompt_cache_policy(team_id: str, payload: dict[str, Any]
         "modelName": model_name,
         "providerId": provider_id,
         "promptCacheMode": prompt_cache_mode,
+        "modelResolution": model_resolution,
         "supportedPromptCacheModes": sorted(SOURCE_COLLECTION_SUPPORTED_PROMPT_CACHE_MODES),
         "partitionTemplate": "research-team:{teamId}:knowledge_collection:{agentRole}:{modelId}",
         "rolePartitions": role_partitions,
@@ -6114,13 +6118,16 @@ def _source_collection_prompt_cache_policy(team_id: str, payload: dict[str, Any]
                 "policyId": policy["policyId"],
                 "requirement": requirement,
                 "modelId": model_id,
+                "requestedModelId": model_resolution.get("requestedModelId", ""),
+                "modelResolutionStatus": model_resolution.get("status", ""),
                 "promptCacheMode": prompt_cache_mode,
                 "outcome": "blocked",
                 "reason": gate_reason,
             },
         )
         raise TeamWorkflowOrchestrationError(
-            f"{gate_reason} Set prompt_cache.mode to automatic or explicit_cache_control before starting knowledge collection."
+            f"{gate_reason} Knowledge collection requires prompt cache/KV reuse. "
+            "Set prompt_cache.mode to automatic or explicit_cache_control before starting knowledge collection."
         )
     return policy
 
@@ -6139,15 +6146,94 @@ def _normalize_source_collection_prompt_cache_requirement(raw_policy: dict[str, 
     return "required_for_llm_execution"
 
 
-def _source_collection_model_library_entry(model_id: str) -> dict[str, Any]:
+def _source_collection_model_library() -> dict[str, Any]:
     try:
         public_config = load_public_config()
     except Exception:
         public_config = {}
     llm = public_config.get("llm") if isinstance(public_config, dict) else {}
     model_library = llm.get("model_library") if isinstance(llm, dict) else {}
-    entry = model_library.get(model_id) if isinstance(model_library, dict) else {}
-    return dict(entry) if isinstance(entry, dict) else {}
+    return dict(model_library) if isinstance(model_library, dict) else {}
+
+
+def _source_collection_prompt_cache_mode(model_entry: dict[str, Any]) -> str:
+    prompt_cache = model_entry.get("prompt_cache") if isinstance(model_entry.get("prompt_cache"), dict) else {}
+    return _trim_text(prompt_cache.get("mode"), max_length=80).lower() or "disabled"
+
+
+def _source_collection_is_text_model(model_id: str, model_entry: dict[str, Any]) -> bool:
+    descriptor = " ".join(
+        [
+            str(model_id or ""),
+            str(model_entry.get("model") or ""),
+            str(model_entry.get("label") or ""),
+            str(model_entry.get("transport") or ""),
+        ]
+    ).lower()
+    if "image2" in descriptor or "image" in descriptor:
+        return False
+    return True
+
+
+def _source_collection_prompt_cache_model_score(model_id: str, model_entry: dict[str, Any]) -> tuple[int, str]:
+    descriptor = " ".join(
+        [
+            str(model_id or ""),
+            str(model_entry.get("model") or ""),
+            str(model_entry.get("label") or ""),
+            str((model_entry.get("provider") or {}).get("kind") if isinstance(model_entry.get("provider"), dict) else model_entry.get("provider") or ""),
+        ]
+    ).lower()
+    score = 0
+    if _source_collection_is_text_model(model_id, model_entry):
+        score += 100
+    if "qwen" in descriptor or "local" in descriptor:
+        score += 30
+    if "relay" in descriptor or "openai" in descriptor or "gpt" in descriptor:
+        score += 20
+    return (-score, str(model_id or ""))
+
+
+def _source_collection_resolve_prompt_cache_model(requested_model_id: str) -> tuple[str, dict[str, Any], dict[str, Any]]:
+    model_library = _source_collection_model_library()
+    requested_entry = model_library.get(requested_model_id) if requested_model_id else {}
+    if isinstance(requested_entry, dict) and _source_collection_prompt_cache_mode(requested_entry) in SOURCE_COLLECTION_SUPPORTED_PROMPT_CACHE_MODES:
+        return requested_model_id, dict(requested_entry), {
+            "status": "requested",
+            "requestedModelId": requested_model_id,
+            "reason": "",
+        }
+
+    candidates: list[tuple[tuple[int, str], str, dict[str, Any]]] = []
+    for candidate_id, candidate_entry in model_library.items():
+        if not isinstance(candidate_entry, dict):
+            continue
+        if _source_collection_prompt_cache_mode(candidate_entry) not in SOURCE_COLLECTION_SUPPORTED_PROMPT_CACHE_MODES:
+            continue
+        if not _source_collection_is_text_model(str(candidate_id), candidate_entry):
+            continue
+        candidates.append((_source_collection_prompt_cache_model_score(str(candidate_id), candidate_entry), str(candidate_id), dict(candidate_entry)))
+    if candidates:
+        candidates.sort(key=lambda item: item[0])
+        resolved_id = candidates[0][1]
+        resolved_entry = candidates[0][2]
+        return resolved_id, resolved_entry, {
+            "status": "fallback" if requested_model_id and resolved_id != requested_model_id else "auto",
+            "requestedModelId": requested_model_id,
+            "reason": "requested_model_unavailable" if requested_model_id and not requested_entry else "requested_model_prompt_cache_unsupported" if requested_model_id else "auto_selected",
+        }
+
+    if isinstance(requested_entry, dict) and requested_entry:
+        return requested_model_id, dict(requested_entry), {
+            "status": "unavailable",
+            "requestedModelId": requested_model_id,
+            "reason": "requested_model_prompt_cache_unsupported",
+        }
+    return requested_model_id, {}, {
+        "status": "unavailable",
+        "requestedModelId": requested_model_id,
+        "reason": "requested_model_not_configured" if requested_model_id else "no_prompt_cache_model_configured",
+    }
 
 
 def _source_collection_prompt_cache_partition(team_id: str, role: str, *, model_id: str) -> str:

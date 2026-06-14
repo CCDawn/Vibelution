@@ -470,7 +470,7 @@ const implementationBlueprint = {
     note: "挑战杯科研流程直接绑定当前 Vibelution ai科学研究团队，不另建新团队；Teams 页顶部只保留 AI 搜索范围团队和 ai科学研究团队两个固定入口，左侧栏删除，不再展示创建团队、模板创建或完整团队列表；选择 ai科学研究团队后直接进入团队专属科研工作台，默认只显示科研控制台：知识搜集、实验、迭代三张阶段卡各保留一个主操作和阶段详情入口；资料搜集已折叠进知识搜集阶段页，组织画布仅保留为附属结构视图；知识搜集一级工作台只展示当前判断、关键数量、阶段颜色和下一步按钮，详细追踪放入详情区。",
     workspaceEntry: "/teams?team=research-team",
     sourceCollectionEntry: "/teams?team=research-team&researchView=knowledge_collection",
-    defaultView: "选中 ai科学研究团队后，团队内容区显示科研控制台：研究主题、当前阶段、知识搜集/实验/迭代三张阶段卡、每卡一个主按钮和一个阶段详情入口；知识搜集卡会按未开始、待继续搜索、搜索中、待筛选、可进入实验、等待回写显示状态，并提供“新一轮搜集”；知识搜集独立页的资料搜集、资料筛选、候选入库、候选图谱、共享记忆前审五张步骤卡各自承载开始/查看/刷新按钮，资料筛选主按钮会让资料质量评估 Agent 批量执行待筛候选；若已筛完，则显示 Agent 重新筛选并 force 复审已筛候选；批次列表按 teamId/startedFrom 在服务端过滤，后台 activeWorkRun 会持续显示正在团队搜索，每个子步骤右侧展示当前相关 Agent 和配置入口；模型证据、候选、路径、校验和内部状态默认移到阶段详情页或高级信息中。",
+    defaultView: "选中 ai科学研究团队后，团队内容区显示科研控制台：研究主题、当前阶段、知识搜集/实验/迭代三张阶段卡、每卡一个主按钮和一个阶段详情入口；知识搜集卡会按未开始、待继续搜索、搜索中、待筛选、可进入实验、等待回写显示状态，并提供“新一轮搜集”；知识搜集独立页的资料搜集、资料筛选、候选入库、候选图谱、共享记忆前审五张步骤卡各自承载开始/查看/刷新按钮，资料筛选主按钮会让资料质量评估 Agent 批量执行待筛候选；若已筛完，则显示 Agent 重新筛选并 force 复审已筛候选；批次列表按 teamId/startedFrom 在服务端过滤，后台 activeWorkRun 会持续显示正在团队搜索，每个子步骤右侧展示当前相关 Agent 和配置入口；知识搜集启动不再依赖旧的 houmo_qwen35_9b_agent 固定 ID，而是由后端从当前模型库解析可用 KV 模型；模型证据、候选、路径、校验和内部状态默认移到阶段详情页或高级信息中。",
     canvasView: "组织画布保留可编辑能力，但不再出现在科研三阶段一级索引中；普通团队仍保持画布优先布局。",
   },
   architecture: [
@@ -533,6 +533,7 @@ const implementationBlueprint = {
     ["M6.36", "资料筛选 Agent 复审入口", "资料筛选已完成时，步骤卡和右侧控制台主按钮不再只显示查看结果，而是显示 Agent 重新筛选，并通过 source-quality/assess-batch force=true 重新审查已筛候选。", "资料筛选详情页保留查看结果入口，同时新增显眼的 Agent 批量审查按钮；复审仍只写 CandidateStore 的 sourceQualityAssessment，不写正式 Team Knowledge、RAG 或 official graph。"],
     ["M6.37", "阶段 Agent 配置面板", "科研总览卡显示阶段 Agent 可用数；知识搜集、实验和迭代阶段页展示本阶段功能 Agent、绑定状态、模型摘要和配置入口。", "绑定来源复用 Team canvas / Team members / Agent config workspace；点击配置跳转 Agent 管理，不复制第二套 Agent 配置表单；缺绑定时显示待绑定或引用失效。"],
     ["M6.38", "知识搜集运行闭环根治", "data-processing run 列表支持按 profileId、teamId 和 startedFrom 服务端过滤，Teams 知识搜集页不再先取全局最近批次后本地过滤；后台搜索 accepted 后把 activeWorkRun 合成到控制台和对话流，资料搜集卡保持进行中直到 runStatus 收口。", "五个知识搜集子步骤的右侧控制台展示当前步骤相关功能 Agent，并复用 Agent 管理页进行配置；这轮只修复批次可见性、后台状态可见性和 Agent 绑定可操作性，不写正式 Team Knowledge、RAG 或 official graph。"],
+    ["M6.39", "知识搜索启动模型解析根治", "修复知识搜集启动闪退：source collection prompt-cache policy 不再硬依赖已不存在的 houmo_qwen35_9b_agent；后端把前端传入的 modelId 视为偏好，从当前 operator config 模型库选择支持 automatic/explicit_cache_control 的文本模型。", "如果没有任何可用 KV 模型，接口仍明确阻断并返回可读原因；Teams 控制台把阶段启动错误纳入失败态，避免按钮闪一下后用户不知道原因。本轮不改 operator config，不写正式知识/RAG/official graph。"],
   ],
   schemas: [
     "DataProcessingRun",
@@ -559,7 +560,7 @@ const implementationBlueprint = {
     ["data_processing API", "已落地：/api/data-processing/profiles、runs 创建/列表/详情、records、collection-assignments、outputs、status；供数据搜集类 Agent 领取任务和回写结果。"],
     ["team_workflow_orchestration_service", "已落地：Team 级 workflowOrchestration、ResearchStageRound、CandidateStore、transfer request/decision、source-collection run 启动、DataSearchPlan/query seed 契约、prompt cache/KV 启动门禁、DataRecord -> source_manifest 幂等导入桥、source_quality assessment、paper_note chunk planning，以及 official_model_evidence 证据登记/status。"],
     ["team_workflows API", "已落地：/api/teams/{team_id}/workflow-orchestration、stage-rounds/status、stage-rounds/start、stage-rounds/{stageRoundId}/coordination/retry、stage-rounds/{stageRoundId}/memory-record/retry、source-collection-runs（含 searchPlan/querySeeds/assignedQueries/resultWritebackContract）、candidates/source、data-processing/runs/{runId}/records/{recordId}/source-candidate、candidates/{candidate_id}/source-extraction、source-quality/status、candidates/{candidate_id}/source-quality/assess、paper-note-chunks/status、candidates/{candidate_id}/paper-note-chunks/plan、candidates/{candidate_id}/paper-note-draft（支持 chunkId）、candidates、candidates/validation、candidate-graph、transfers、decide、knowledge-ingestion/status、coordination/status、official-model-evidence/status、official-model-evidence；coordination/status 返回 communicationBrief。"],
-    ["TeamsRoute workflow workspace", "已落地入口：Teams 页顶部固定横向切换条只暴露 AI 搜索范围团队和 ai科学研究团队，左侧栏已删除；监督进化/自进化模式页各自读取系统 Team 并展示只读团队画布；选择 ai科学研究团队后直接进入 research-team 专属科研控制台；总览只显示知识搜集、实验、迭代三张阶段卡，每张卡一个主操作和一个阶段详情入口。知识搜集卡会显示当前批次、待处理、候选和查询数，主按钮按状态执行开始、下一批搜索、筛选入口或打开工作台，另有新一轮搜集入口。知识搜集页位于 /teams?team=research-team&researchView=knowledge_collection，默认展示高价值状态摘要、状态驱动主操作和对话式 source collection 过程流；执行 source collection 搜索时会写入 source_collection_run 运行快照，让 AppShell 顶部“正在进行”显示知识搜集；资料搜集 run 列表通过 data-processing 服务端 teamId/startedFrom 过滤，避免被其它团队批次挤掉；后台 accepted 后 activeWorkRun 会进入控制台和对话流，直到 runStatus 收口；资料搜集、资料筛选、候选入库、候选图谱、共享记忆前审五张步骤卡各自带主按钮并作为页内子页索引，底部只显示当前阶段内容，右侧只显示当前阶段操作、关键数量和当前步骤 Agent 配置入口；资料筛选会调用资料质量评估 Agent 批量执行，完成后展开、滚动并高亮页内筛选详情；KV/prompt cache、稳定前缀、动态增量、assignment、query、存储路径和手工回写保留在可展开详情中；默认层移除解释性小字；实验/迭代页先提供规划启动、轮次状态和边界说明；旧 source_collection 参数兼容映射到知识搜集。"],
+    ["TeamsRoute workflow workspace", "已落地入口：Teams 页顶部固定横向切换条只暴露 AI 搜索范围团队和 ai科学研究团队，左侧栏已删除；监督进化/自进化模式页各自读取系统 Team 并展示只读团队画布；选择 ai科学研究团队后直接进入 research-team 专属科研控制台；总览只显示知识搜集、实验、迭代三张阶段卡，每张卡一个主操作和一个阶段详情入口。知识搜集卡会显示当前批次、待处理、候选和查询数，主按钮按状态执行开始、下一批搜索、筛选入口或打开工作台，另有新一轮搜集入口。知识搜集页位于 /teams?team=research-team&researchView=knowledge_collection，默认展示高价值状态摘要、状态驱动主操作和对话式 source collection 过程流；执行 source collection 搜索时会写入 source_collection_run 运行快照，让 AppShell 顶部“正在进行”显示知识搜集；资料搜集 run 列表通过 data-processing 服务端 teamId/startedFrom 过滤，避免被其它团队批次挤掉；后台 accepted 后 activeWorkRun 会进入控制台和对话流，直到 runStatus 收口；资料搜集、资料筛选、候选入库、候选图谱、共享记忆前审五张步骤卡各自带主按钮并作为页内子页索引，底部只显示当前阶段内容，右侧只显示当前阶段操作、关键数量和当前步骤 Agent 配置入口；资料筛选会调用资料质量评估 Agent 批量执行，完成后展开、滚动并高亮页内筛选详情；KV/prompt cache 由后端从当前模型库解析，不再依赖旧固定模型 ID；稳定前缀、动态增量、assignment、query、存储路径和手工回写保留在可展开详情中；默认层移除解释性小字；实验/迭代页先提供规划启动、轮次状态和边界说明；旧 source_collection 参数兼容映射到知识搜集。"],
     ["local_research_worker_model", "已落地任务包构建、32k 上下文预算、统一 LLMClient invoke、JSON 提取/校验和 CandidateStore 草稿记录；解析失败不入库。"],
     ["team_communication_binding", "复用 Research Organization 通信边、Team linkedChatRoom、round_robin/opportunistic 群聊轮次。"],
     ["candidate_store", "已落地 Team 级 index、候选列表查询、按类型/状态过滤、validationSummary，并接入 source_manifest、paper_note、neuro_mechanism、mechanism_mapping、algorithm_hypothesis、candidate_graph 最小校验；rejected 候选保留在 CandidateStore metadata.rejectionArchive，但不进入候选图谱推进节点。"],
@@ -2796,7 +2797,7 @@ function indexHtml() {
         <aside class="dashboard-panel">
           <h2>审核摘要</h2>
           <div class="kpi-grid">
-            <div class="kpi"><b>当前阶段</b><strong>M6.38</strong><span>资料搜集批次查询、后台运行态和当前步骤 Agent 配置入口已形成闭环。</span></div>
+            <div class="kpi"><b>当前阶段</b><strong>M6.39</strong><span>知识搜索启动已改为从当前模型库解析可用 KV 模型，避免旧固定 ID 阻断。</span></div>
             <div class="kpi"><b>流程节点</b><strong>${nodes.length}</strong><span>1-9 为知识入库主线，10-13 保留占位与维护节点。</span></div>
             <div class="kpi"><b>候选资料</b><strong>${currentResearchRun.sources.length}</strong><span>第一轮 source_manifest 已进入 candidate-only 工作区。</span></div>
             <div class="kpi"><b>正式写入</b><strong>0</strong><span>未写正式 Team Knowledge、RAG 或 official graph。</span></div>
