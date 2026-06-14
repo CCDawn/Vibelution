@@ -84,9 +84,9 @@ describe("MemoryRoute layout contract", () => {
     expect(routeSource).not.toContain("setActiveItemId(flatVisibleItems[0]?.item.id ?? \"\")");
   });
 
-  it("splits memory into overview, effective scope, management, source audit, team knowledge, and graph views", () => {
+  it("splits memory into overview, effective scope, management, source audit, team knowledge, graph, and cleanup views", () => {
     expect(routeSource).toContain(
-      'export type MemoryRouteView = "overview" | "effective" | "manage" | "sources" | "knowledge" | "graph"',
+      'export type MemoryRouteView = "overview" | "effective" | "manage" | "sources" | "knowledge" | "graph" | "cleanup"',
     );
     expect(routeSource).toContain("MEMORY_VIEWS");
     expect(routeSource).toContain("styles.subnav");
@@ -96,11 +96,13 @@ describe("MemoryRoute layout contract", () => {
     expect(routeSource).toContain("renderSourcesView()");
     expect(routeSource).toContain("renderKnowledgeView()");
     expect(routeSource).toContain("renderGraphView()");
+    expect(routeSource).toContain("renderCleanupView()");
     expect(routeSource).toContain('forcedView === "overview"');
     expect(routeSource).toContain('forcedView === "effective"');
     expect(routeSource).toContain('forcedView === "manage"');
     expect(routeSource).toContain('forcedView === "knowledge"');
     expect(routeSource).toContain('forcedView === "graph"');
+    expect(routeSource).toContain('forcedView === "cleanup"');
   });
 
   it("keeps dense Memory workspaces bounded with internal scrolling", () => {
@@ -257,6 +259,35 @@ describe("MemoryRoute layout contract", () => {
     expect(routerSource).toContain('<MemoryRoute forcedView="graph" />');
     expect(routerSource).toContain('path: "agents/memory/graph"');
     expect(routerSource).toContain('<LegacyMemoryRedirect to="/memory/graph" />');
+  });
+
+  it("wires the hard-delete memory cleanup console behind preview and confirmation APIs", () => {
+    expect(routeSource).toContain("MemoryCleanupTargetRequest");
+    expect(routeSource).toContain("MemoryCleanupPreviewResponse");
+    expect(routeSource).toContain('fetchJson<MemoryCleanupPreviewResponse>("/api/memory/cleanup/preview"');
+    expect(routeSource).toContain('fetchJson<MemoryCleanupExecuteResponse>("/api/memory/cleanup/execute"');
+    expect(routeSource).toContain("confirmationPhrase");
+    expect(routeSource).toContain("cleanupConfirmationText.trim()");
+    expect(routeSource).toContain("copy.cleanupHardDelete");
+    expect(routeSource).toContain("copy.cleanupNoBackup");
+    expect(routeSource).toContain("copy.cleanupCentralSourceBoundary");
+    expect(routeSource).toContain("targetType: \"global_runtime_memory\"");
+    expect(routeSource).toContain("targetType: \"agent_private_memory\"");
+    expect(routeSource).toContain("targetType: \"agent_formal_knowledge\"");
+    expect(routeSource).toContain("targetType: \"agent_memory_policy\"");
+    expect(routeSource).toContain("targetType: \"team_knowledge\"");
+    expect(routeSource).toContain("targetType: \"knowledge_base\"");
+    expect(routeSource).toContain("queryKeys.memoryCleanupPreview()");
+    expect(memoryCssSource).toContain(".cleanupWorkspace");
+    expect(memoryCssSource).toContain(".cleanupTargetPanel");
+    expect(memoryCssSource).toContain(".cleanupPreviewPanel");
+    expect(memoryCssSource).toContain(".cleanupExecutePanel");
+    expect(memoryCssSource).toContain(".cleanupExecuteButton");
+    expect(memoryCssSource).toContain(".cleanupPathList span");
+    expect(routerSource).toContain('path: "memory/cleanup"');
+    expect(routerSource).toContain('<MemoryRoute forcedView="cleanup" />');
+    expect(routerSource).toContain('path: "agents/memory/cleanup"');
+    expect(routerSource).toContain('<LegacyMemoryRedirect to="/memory/cleanup" />');
   });
 
   it("wires the team knowledge platform to a dashboard snapshot plus scoped action APIs", () => {
@@ -550,6 +581,8 @@ describe("MemoryRoute layout contract", () => {
     expect(routerSource).toContain('<MemoryRoute forcedView="sources" />');
     expect(routerSource).toContain('path: "memory/knowledge"');
     expect(routerSource).toContain('<MemoryRoute forcedView="knowledge" />');
+    expect(routerSource).toContain('path: "memory/cleanup"');
+    expect(routerSource).toContain('<MemoryRoute forcedView="cleanup" />');
     expect(routerSource).toContain('path: "agents/memory"');
     expect(routerSource).toContain('<LegacyMemoryRedirect to="/memory" />');
     expect(routerSource).toContain('path: "agents/memory/effective"');
@@ -560,6 +593,8 @@ describe("MemoryRoute layout contract", () => {
     expect(routerSource).toContain('<LegacyMemoryRedirect to="/memory/sources" />');
     expect(routerSource).toContain('path: "agents/memory/knowledge"');
     expect(routerSource).toContain('<LegacyMemoryRedirect to="/memory/knowledge" />');
+    expect(routerSource).toContain('path: "agents/memory/cleanup"');
+    expect(routerSource).toContain('<LegacyMemoryRedirect to="/memory/cleanup" />');
     expect(routeSource).toContain('{ key: "overview", href: "/memory" }');
     expect(routeSource).toContain('to={`/memory/sources?section=');
     expect(routeSource).toContain('to={`/memory/manage?section=');

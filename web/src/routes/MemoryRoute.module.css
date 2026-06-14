@@ -3775,6 +3775,303 @@
   color: var(--state-warning);
 }
 
+.cleanupWarning {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--state-danger) 30%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--state-danger) 8%, var(--surface-card));
+  color: var(--fg-secondary);
+  font-size: 0.82rem;
+}
+
+.cleanupWarning svg,
+.cleanupWarning strong {
+  flex: 0 0 auto;
+  color: var(--state-danger);
+}
+
+.cleanupWorkspace {
+  display: grid;
+  grid-template-columns: minmax(230px, 0.34fr) minmax(420px, 0.92fr) minmax(300px, 0.46fr);
+  gap: 8px;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.cleanupTargetPanel,
+.cleanupPreviewPanel,
+.cleanupExecutePanel {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 8px;
+  min-width: 0;
+  min-height: 0;
+  padding: 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--surface-panel);
+  overflow: hidden;
+}
+
+.cleanupPreviewPanel {
+  grid-template-rows: auto auto minmax(0, 1fr);
+}
+
+.cleanupExecutePanel {
+  grid-template-rows: auto auto auto auto minmax(0, 1fr);
+}
+
+.cleanupTargetList,
+.cleanupPreviewList {
+  display: grid;
+  align-content: start;
+  gap: 6px;
+  min-height: 0;
+  overflow: auto;
+}
+
+.cleanupTargetRow {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--surface-card);
+  cursor: pointer;
+}
+
+.cleanupTargetRow[data-selected="true"] {
+  border-color: color-mix(in srgb, var(--accent-cool) 42%, transparent);
+  background: color-mix(in srgb, var(--accent-cool) 10%, var(--surface-card));
+}
+
+.cleanupTargetRow[data-risk="critical"][data-selected="true"] {
+  border-color: color-mix(in srgb, var(--state-danger) 42%, transparent);
+}
+
+.cleanupTargetRow input {
+  margin-top: 2px;
+}
+
+.cleanupTargetRow span,
+.cleanupPreviewItem header,
+.cleanupPathList span {
+  min-width: 0;
+}
+
+.cleanupTargetRow strong,
+.cleanupTargetRow small {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cleanupTargetRow strong {
+  color: var(--fg-primary);
+  font-size: 0.82rem;
+}
+
+.cleanupTargetRow small {
+  margin-top: 2px;
+  color: var(--fg-tertiary);
+  font-size: 0.74rem;
+}
+
+.inlineActionButton,
+.cleanupExecuteButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 30px;
+  min-width: 0;
+  padding: 0 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  font: inherit;
+  font-size: 0.76rem;
+}
+
+.inlineActionButton {
+  background: var(--surface-card);
+  color: var(--fg-secondary);
+}
+
+.cleanupExecuteButton {
+  border-color: color-mix(in srgb, var(--state-danger) 38%, transparent);
+  background: color-mix(in srgb, var(--state-danger) 12%, transparent);
+  color: var(--state-danger);
+}
+
+.inlineActionButton:hover:not(:disabled),
+.cleanupExecuteButton:hover:not(:disabled) {
+  border-color: var(--border-strong);
+  background: var(--surface-panel-hover);
+  color: var(--fg-primary);
+}
+
+.inlineActionButton:disabled,
+.cleanupExecuteButton:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.cleanupStats,
+.cleanupPreviewCounts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.cleanupStats span,
+.cleanupPreviewCounts span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 0 7px;
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  background: var(--surface-card);
+  color: var(--fg-secondary);
+  font-size: 0.74rem;
+}
+
+.cleanupPreviewItem {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--surface-card);
+}
+
+.cleanupPreviewItem header {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.cleanupPreviewItem header strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg-primary);
+  font-size: 0.84rem;
+}
+
+.cleanupPreviewItem header span {
+  flex: 0 0 auto;
+  color: var(--fg-tertiary);
+  font-size: 0.74rem;
+}
+
+.cleanupInlineWarning {
+  margin: 0;
+  color: var(--state-warning);
+  font-size: 0.75rem;
+}
+
+.cleanupPathList {
+  display: grid;
+  gap: 4px;
+}
+
+.cleanupPathList span {
+  display: grid;
+  grid-template-columns: minmax(72px, 0.22fr) minmax(0, 1fr) minmax(76px, 0.22fr);
+  gap: 6px;
+  align-items: center;
+  min-height: 24px;
+  padding: 4px 6px;
+  border-radius: 6px;
+  background: var(--surface-page);
+}
+
+.cleanupPathList small,
+.cleanupPathList strong,
+.cleanupPathList em {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.72rem;
+}
+
+.cleanupPathList small {
+  color: var(--fg-tertiary);
+}
+
+.cleanupPathList strong {
+  color: var(--fg-secondary);
+  font-weight: 600;
+}
+
+.cleanupPathList em {
+  color: var(--fg-tertiary);
+  font-style: normal;
+  text-align: right;
+}
+
+.cleanupConfirmField {
+  display: grid;
+  gap: 5px;
+}
+
+.cleanupConfirmField span {
+  color: var(--fg-secondary);
+  font-size: 0.76rem;
+}
+
+.cleanupConfirmField input {
+  min-width: 0;
+  min-height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--surface-card);
+  color: var(--fg-primary);
+  font: inherit;
+  font-size: 0.82rem;
+}
+
+.cleanupFeedback {
+  margin: 0;
+  color: var(--fg-secondary);
+  font-size: 0.78rem;
+}
+
+.cleanupFeedback[data-tone="success"] {
+  color: var(--state-success);
+}
+
+.cleanupFeedback[data-tone="error"] {
+  color: var(--state-danger);
+}
+
+.cleanupExecutionSummary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  padding: 8px;
+  border: 1px solid color-mix(in srgb, var(--state-success) 28%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--state-success) 9%, var(--surface-card));
+  color: var(--state-success);
+  font-size: 0.82rem;
+}
+
 .visibilityHeader {
   display: grid;
   grid-template-columns: 22px minmax(0, 1fr);
@@ -3978,6 +4275,14 @@
     grid-template-columns: minmax(210px, 250px) minmax(0, 1fr);
   }
 
+  .cleanupWorkspace {
+    grid-template-columns: minmax(260px, 0.42fr) minmax(0, 1fr);
+  }
+
+  .cleanupExecutePanel {
+    grid-column: 1 / -1;
+  }
+
   .graphCanvasShell {
     min-height: 360px;
   }
@@ -4007,6 +4312,10 @@
 
   .knowledgeRow {
     grid-template-columns: minmax(76px, 0.26fr) minmax(0, 0.72fr) minmax(0, 1fr) auto;
+  }
+
+  .cleanupPathList span {
+    grid-template-columns: minmax(70px, 0.24fr) minmax(0, 1fr) minmax(64px, 0.2fr);
   }
 }
 
@@ -4054,8 +4363,14 @@
   .sourceGovernanceControls,
   .sourceRecordMeta,
   .stewardGrid,
-  .ratingControls {
+  .ratingControls,
+  .cleanupWorkspace,
+  .cleanupPathList span {
     grid-template-columns: 1fr;
+  }
+
+  .cleanupExecutePanel {
+    grid-column: auto;
   }
 
   .stewardToolRows {
@@ -4102,5 +4417,9 @@
   .reviewRank,
   .reviewQueueActions {
     grid-column: auto;
+  }
+
+  .cleanupPathList em {
+    text-align: left;
   }
 }
