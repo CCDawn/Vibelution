@@ -56,6 +56,7 @@ from config.settings import reload_config
 from .config_editor_schema import build_editor_meta, build_editor_sections
 from .git_status_service import validate_git_commit_message_prompt, with_git_config_defaults
 from .i18n import resolve_language, text_for
+from .model_reference_service import ModelReferenceConflictError, assert_model_delete_safe
 from .runtime_scene_service import record_runtime_scene_event
 from .workbench_contract_service import get_workbench_contract
 
@@ -1579,6 +1580,7 @@ def draft_delete_model(
     old_item = current_library.get(model_id, {}) if isinstance(current_library, dict) else {}
     old_env = str(old_item.get("api_key_env", "")).strip() if isinstance(old_item, dict) else ""
     _assert_model_deletion_allowed(current, model_id)
+    _assert_model_delete_workspace_references_allowed(current, model_id)
     updated = delete_llm_model(current, model_id)
     updated = _mark_model_ref_profiles_unconfigured(updated, model_id)
     current_meta = _with_cleared_api_key(_drop_api_key_state(current_meta, old_env), old_env)
@@ -1903,6 +1905,34 @@ def _assert_model_deletion_allowed(public_config: dict[str, Any], model_id: str)
             lifecycle=True,
         )
         raise ValueError("Cannot delete the model used for Git commit messages. Rebind the Git commit model before deleting this model.")
+
+
+def _assert_model_delete_workspace_references_allowed(public_config: dict[str, Any], model_id: str) -> None:
+    normalized_model_id = str(model_id or "").strip()
+    if not normalized_model_id:
+        return
+    try:
+        assert_model_delete_safe(
+            normalized_model_id,
+            public_config=public_config,
+            include_public_config=False,
+        )
+    except ModelReferenceConflictError as exc:
+        _record_config_scene_event(
+            "validate",
+            "config.model_delete.blocked",
+            message="LLM model deletion blocked by live workspace references.",
+            level="warning",
+            outcome="rejected",
+            fields={
+                "modelId": normalized_model_id,
+                "liveReferenceCount": exc.impact.get("liveReferenceCount", 0),
+                "historicalReferenceCount": exc.impact.get("historicalReferenceCount", 0),
+                "liveReferences": exc.impact.get("liveReferences", [])[:20],
+            },
+            lifecycle=True,
+        )
+        raise
 
 
 def _validate_git_commit_settings(public_config: dict[str, Any]) -> None:
@@ -2400,6 +2430,10 @@ def apply_config_workspace(
         old_public=current_public,
         lang=lang,
     )
+    base_for_summary = submitted_base or current_public
+    removed_model_ids = _removed_model_ids_from_paths(changed_paths, base_for_summary, submitted)
+    for removed_model_id in removed_model_ids:
+        _assert_model_delete_workspace_references_allowed(merged, removed_model_id)
     validate_llm_public_config(merged)
     _validate_git_commit_settings(merged)
     optional_unconfigured_profile_ids = _optional_unconfigured_profile_ids(merged)
@@ -2448,7 +2482,6 @@ def apply_config_workspace(
             en="Config saved to external operator config.toml.",
         ),
     )
-    base_for_summary = submitted_base or current_public
     _record_config_scene_event(
         "persist",
         "config.workspace.applied",
@@ -2467,7 +2500,7 @@ def apply_config_workspace(
             "changedPathCount": len(changed_paths),
             "changedPaths": [_format_config_path(path) for path in changed_paths[:50]],
             "addedModelIds": _added_model_ids_from_paths(changed_paths, base_for_summary, submitted),
-            "removedModelIds": _removed_model_ids_from_paths(changed_paths, base_for_summary, submitted),
+            "removedModelIds": removed_model_ids,
             "changedModelIds": _changed_model_ids_from_paths(changed_paths, base_for_summary, submitted),
             "runtimeConfigReloaded": True,
             "primaryProviderKind": primary_provider.kind,
