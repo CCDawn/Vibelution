@@ -1142,28 +1142,30 @@ def create_key_tools() -> List[BaseTool]:
 
     @tool
     def agent_tool_permission_request_tool(
-        target_agent: str,
+        target_agent: str = "",
         grant_tools: str = "",
         revoke_tools: str = "",
         block_tools: str = "",
         unblock_tools: str = "",
         reason: str = "",
         apply_mode: str = "auto",
+        grant_scope: str = "session",
     ) -> str:
         """
-        【Agent 工具权限治理】为另一个 Agent 提交受控 ToolPolicy 变更请求。
+        【Agent 工具权限申请】提交受控工具权限请求，目标留空时申请当前 Agent 自己使用。
 
-        适合顾问 Agent、能力管家或团队负责人根据角色职责调整成员工具权限。低风险变更可自动应用；
-        高风险授权会进入待审批队列，不会绕过用户确认。最终结果统一落在目标 Agent 的 ToolPolicy。
+        当前 Agent 缺少某个工具时，用此工具申请临时启用；请求会进入当前会话审批弹窗，
+        用户批准前不会改变可见工具。配置页发起的治理请求可使用 persistent 做长期策略变更。
 
         Args:
-            target_agent: 目标 Agent 的 agentId、稳定代号或唯一名称
+            target_agent: 目标 Agent 的 agentId、稳定代号或唯一名称；留空表示当前 Agent
             grant_tools: 要加入 allowedTools 的工具名，多个用逗号或换行分隔
             revoke_tools: 要从 allowedTools 移除的工具名，多个用逗号或换行分隔
             block_tools: 要加入 blockedTools 的工具名，多个用逗号或换行分隔
             unblock_tools: 要从 blockedTools 移除的工具名，多个用逗号或换行分隔
             reason: 变更理由，说明角色职责和任务场景
             apply_mode: auto 或 review；auto 仍会让高风险变更等待审批
+            grant_scope: session、turn 或 persistent；自助申请默认用 session
 
         Returns:
             JSON 格式的请求状态、风险等级、是否需要审批和 requestId
@@ -1176,6 +1178,7 @@ def create_key_tools() -> List[BaseTool]:
             unblock_tools=unblock_tools,
             reason=reason,
             apply_mode=apply_mode,
+            grant_scope=grant_scope,
         )
 
     @tool

@@ -1827,6 +1827,7 @@
 }
 
 .conversationFrame {
+  position: relative;
   display: flex;
   flex-direction: column;
   height: 100%;
@@ -2122,6 +2123,148 @@
 .runtimeNoticeMessage {
   color: var(--fg-primary);
   overflow-wrap: anywhere;
+}
+
+.toolApprovalOverlay {
+  position: absolute;
+  inset: 0;
+  z-index: 8;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 18px 18px 0;
+  pointer-events: none;
+}
+
+.toolApprovalDialog {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) auto;
+  gap: 10px;
+  width: min(680px, 100%);
+  padding: 10px;
+  border: 1px solid color-mix(in srgb, var(--accent-warm) 34%, var(--border-soft));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface-panel) 96%, var(--accent-warm) 5%);
+  box-shadow: 0 16px 36px rgba(15, 23, 42, 0.18);
+  pointer-events: auto;
+}
+
+.toolApprovalIcon {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border: 1px solid color-mix(in srgb, var(--accent-warm) 26%, var(--border-soft));
+  border-radius: 8px;
+  color: var(--accent-warm-2);
+  background: color-mix(in srgb, var(--accent-warm) 10%, transparent);
+}
+
+.toolApprovalBody {
+  display: grid;
+  min-width: 0;
+  gap: 5px;
+}
+
+.toolApprovalHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.toolApprovalHeader strong {
+  color: var(--fg-primary);
+  font-size: 0.88rem;
+  line-height: 1.25;
+}
+
+.toolApprovalHeader span {
+  flex: 0 0 auto;
+  padding: 2px 7px;
+  border: 1px solid color-mix(in srgb, var(--accent-warm) 30%, var(--border-soft));
+  border-radius: 999px;
+  color: var(--accent-warm-2);
+  font-size: 0.72rem;
+}
+
+.toolApprovalBody p {
+  margin: 0;
+  color: var(--fg-secondary);
+  font-size: 0.78rem;
+  line-height: 1.38;
+}
+
+.toolApprovalToolList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  min-width: 0;
+}
+
+.toolApprovalToolList span {
+  padding: 2px 7px;
+  border: 1px solid color-mix(in srgb, var(--accent-cool) 28%, var(--border-soft));
+  border-radius: 999px;
+  color: var(--accent-cool);
+  background: color-mix(in srgb, var(--accent-cool) 9%, transparent);
+  font-size: 0.72rem;
+  line-height: 1.25;
+  white-space: nowrap;
+}
+
+.toolApprovalActions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.toolApprovalActions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: 7px;
+  color: var(--fg-secondary);
+  background: var(--surface-panel-muted);
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+
+.toolApprovalActions button:disabled {
+  cursor: wait;
+  opacity: 0.66;
+}
+
+.toolApprovalActions button:hover:not(:disabled) {
+  color: var(--fg-primary);
+  border-color: color-mix(in srgb, var(--accent-cool) 24%, var(--border-soft));
+}
+
+.toolApprovalActions .toolApprovalAllow {
+  color: var(--surface-page);
+  border-color: color-mix(in srgb, var(--accent-cool) 48%, transparent);
+  background: color-mix(in srgb, var(--accent-cool) 82%, black 8%);
+}
+
+.toolApprovalActions .toolApprovalAllow:hover:not(:disabled) {
+  color: var(--surface-page);
+  border-color: color-mix(in srgb, var(--accent-cool) 58%, transparent);
+  background: color-mix(in srgb, var(--accent-cool) 88%, black 6%);
+}
+
+@media (max-width: 720px) {
+  .toolApprovalDialog {
+    grid-template-columns: 30px minmax(0, 1fr);
+  }
+
+  .toolApprovalActions {
+    grid-column: 1 / -1;
+    justify-content: flex-end;
+  }
 }
 
 .emptySurface {

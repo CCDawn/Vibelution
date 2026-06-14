@@ -11,29 +11,31 @@ from core.chat.chat_task_types import trim_lines
 
 
 def agent_tool_permission_request_tool(
-    target_agent: str,
+    target_agent: str = "",
     grant_tools: str = "",
     revoke_tools: str = "",
     block_tools: str = "",
     unblock_tools: str = "",
     reason: str = "",
     apply_mode: str = "auto",
+    grant_scope: str = "session",
 ) -> str:
     """
-    Submit a controlled ToolPolicy change request for another Agent.
+    Submit a controlled ToolPolicy change request.
 
-    Governance Agents may auto-apply low-risk changes. High-risk grants stay
-    pending for user review. The final state is always stored in the target
-    Agent's ToolPolicy.
+    When target_agent is empty, the request targets the current Agent. Agent
+    self-requests default to current-session temporary grants and wait for
+    user approval before the tool becomes visible.
 
     Args:
-        target_agent: Target Agent id, stable code such as A002, or unique display name.
+        target_agent: Target Agent id, stable code such as A002, or unique display name. Empty means current Agent.
         grant_tools: Comma/newline separated tools to add to allowedTools.
         revoke_tools: Comma/newline separated tools to remove from allowedTools.
         block_tools: Comma/newline separated tools to add to blockedTools.
         unblock_tools: Comma/newline separated tools to remove from blockedTools.
         reason: Short rationale for the permission change.
         apply_mode: auto or review. auto still keeps high-risk changes pending.
+        grant_scope: session, turn, or persistent. Agent self-requests should normally use session.
 
     Returns:
         JSON string describing applied/pending status and review requirement.
@@ -45,6 +47,8 @@ def agent_tool_permission_request_tool(
 
         runtime = current_agent_runtime()
         proposer_agent_id = str(runtime.get("agentId") or "").strip()
+        source_session_id = str(runtime.get("sessionId") or "").strip()
+        source_turn_id = str(runtime.get("turnId") or "").strip()
         if not proposer_agent_id:
             return _json_result(
                 {
@@ -55,7 +59,8 @@ def agent_tool_permission_request_tool(
                 }
             )
 
-        target = _resolve_target_agent(str(target_agent or "").strip(), list_agents(include_archived=False))
+        target_label = str(target_agent or "").strip() or proposer_agent_id
+        target = _resolve_target_agent(target_label, list_agents(include_archived=False))
         if not target.get("ok"):
             return _json_result(target)
         target_agent_payload = target["agent"]
@@ -69,6 +74,9 @@ def agent_tool_permission_request_tool(
             unblock_tools=_parse_tool_list(unblock_tools),
             reason=reason,
             apply_mode=apply_mode,
+            grant_scope=grant_scope,
+            source_session_id=source_session_id,
+            source_turn_id=source_turn_id,
         )
         return _json_result(
             {
@@ -77,6 +85,8 @@ def agent_tool_permission_request_tool(
                 "requestId": request.get("requestId") or "",
                 "targetAgentId": request.get("targetAgentId") or target_agent_id,
                 "targetAgentCode": request.get("targetAgentCode") or target_agent_payload.get("agentCode") or "",
+                "grantScope": request.get("grantScope") or grant_scope,
+                "sourceSessionId": request.get("sourceSessionId") or source_session_id,
                 "requiresApproval": bool(request.get("requiresApproval")),
                 "riskLevel": request.get("riskLevel") or "",
                 "riskTags": request.get("riskTags") or [],
@@ -191,10 +201,13 @@ def _parse_tool_list(value: str) -> list[str]:
 
 def _status_message(request: dict[str, Any]) -> str:
     status = str(request.get("status") or "").strip()
+    grant_scope = str(request.get("grantScope") or "persistent").strip()
     if status == "applied":
+        if grant_scope != "persistent":
+            return "工具临时权限已批准；后续同一会话运行会看到这些工具。"
         return "工具权限变更已通过治理服务应用到目标 Agent 的 ToolPolicy。"
     if status == "pending_review":
-        return "工具权限变更已进入待审批队列，高风险或非授权变更不会自动应用。"
+        return "工具权限申请已进入会话待审批队列，批准前不会改变可见工具。"
     return "工具权限治理请求已记录。"
 
 

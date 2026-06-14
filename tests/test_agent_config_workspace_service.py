@@ -2625,6 +2625,83 @@ def test_agent_tool_governance_high_risk_change_waits_for_review_and_can_be_appr
     assert updated["toolPolicy"]["allowedTools"] == ["cli_tool"]
 
 
+def test_agent_tool_governance_session_scope_approval_does_not_persist_policy(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    target = agent_directory_service.create_agent_instance(
+        display_name="临时授权 Agent",
+        primary_mode="research",
+        role_key="research_broad",
+        prompt_template_id="prompt-research-broad",
+    )
+
+    request = agent_tool_governance_service.submit_tool_governance_request(
+        target["agentId"],
+        proposed_by_agent_id=target["agentId"],
+        grant_tools=["cli_tool"],
+        reason="当前会话需要运行一次验证命令。",
+        apply_mode="auto",
+        grant_scope="session",
+        source_session_id="session-tool-approval",
+        source_turn_id="turn-request",
+    )
+    unchanged = agent_directory_service.get_agent(target["agentId"])
+
+    assert request["status"] == "pending_review"
+    assert request["grantScope"] == "session"
+    assert unchanged["toolPolicy"]["allowedTools"] == []
+
+    approved = agent_tool_governance_service.resolve_tool_governance_request(
+        target["agentId"],
+        request["requestId"],
+        decision="approve",
+        resolved_by="user",
+        resolution_note="允许当前会话临时使用。",
+    )
+    still_persistent = agent_directory_service.get_agent(target["agentId"])
+    base_policy = agent_directory_service.resolve_tool_policy_for_agent(target["agentId"])
+    session_policy = agent_directory_service.resolve_tool_policy_for_agent(
+        target["agentId"],
+        session_id="session-tool-approval",
+        turn_id="turn-next",
+    )
+    other_session_policy = agent_directory_service.resolve_tool_policy_for_agent(
+        target["agentId"],
+        session_id="session-other",
+    )
+
+    assert approved["status"] == "applied"
+    assert approved["grantScope"] == "session"
+    assert approved["appliedToolPolicyId"] == ""
+    assert approved["temporaryGrant"]["grantTools"] == ["cli_tool"]
+    assert still_persistent["toolPolicy"]["allowedTools"] == []
+    assert base_policy["allowedTools"] == []
+    assert session_policy["allowedTools"] == ["cli_tool"]
+    assert session_policy["temporaryAllowedTools"] == ["cli_tool"]
+    assert other_session_policy["allowedTools"] == []
+
+
+def test_session_detail_surfaces_pending_tool_governance_request(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    session = session_service.create_chat_session(title="审批会话")
+    agent_id = session["agentId"]
+    request = agent_tool_governance_service.submit_tool_governance_request(
+        agent_id,
+        proposed_by_agent_id=agent_id,
+        grant_tools=["read_file_tool"],
+        reason="需要当前会话临时读取文件。",
+        apply_mode="auto",
+        grant_scope="session",
+        source_session_id=session["id"],
+        source_turn_id="turn-request",
+    )
+
+    detail = session_service.get_session_detail(session["id"])
+
+    assert detail["pendingToolGovernanceRequests"][0]["requestId"] == request["requestId"]
+    assert detail["pendingToolGovernanceRequests"][0]["grantScope"] == "session"
+    assert detail["pendingToolGovernanceRequests"][0]["policyDelta"]["grantTools"] == ["read_file_tool"]
+
+
 def test_agent_tool_governance_uses_shared_tool_catalog_risk_metadata(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     advisor = agent_directory_service.create_agent_instance(

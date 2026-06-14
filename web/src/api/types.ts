@@ -2444,6 +2444,9 @@ export type AgentToolGovernanceRequest = {
   requestId: string;
   kind: string;
   status: "pending_review" | "applied" | "rejected" | string;
+  grantScope?: "persistent" | "session" | "turn" | string;
+  sourceSessionId?: string;
+  sourceTurnId?: string;
   targetAgentId: string;
   targetAgentCode: string;
   targetAgentName: string;
@@ -2467,6 +2470,14 @@ export type AgentToolGovernanceRequest = {
   resolvedBy: string;
   resolutionNote: string;
   appliedToolPolicyId: string;
+  temporaryGrant?: {
+    scope?: "persistent" | "session" | "turn" | string;
+    sessionId?: string;
+    turnId?: string;
+    grantTools?: string[];
+    appliedAt?: string;
+    [key: string]: unknown;
+  };
   after?: Record<string, unknown>;
 };
 
@@ -4388,6 +4399,7 @@ export type SessionDetail = SessionSummary & {
   nextStateSignals?: ChatNextStateSignalSummary[];
   groupContextEvents?: GroupContextEvent[];
   agentInboxMessages?: AgentInboxMessage[];
+  pendingToolGovernanceRequests?: AgentToolGovernanceRequest[];
   toolPolicy?: ToolPolicy | null;
   memoryPolicy?: MemoryPolicy | null;
   stopRequested: boolean;
