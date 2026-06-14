@@ -245,6 +245,14 @@ type SourceCollectionStageModule = {
   onDetail: () => void;
 };
 
+const SOURCE_COLLECTION_STAGE_AGENT_KEYS: Record<SourceCollectionStageModuleId, string[]> = {
+  collection: ["research_coordination", "data_discovery", "source_acquisition", "content_extraction"],
+  screening: ["source_quality"],
+  candidate: ["research_coordination", "source_quality"],
+  graph: ["research_coordination", "source_quality"],
+  memory: ["knowledge_steward"],
+};
+
 function parseSourceCollectionStageModuleId(value: string | null): SourceCollectionStageModuleId | null {
   return value === "collection" || value === "screening" || value === "candidate" || value === "graph" || value === "memory"
     ? value
@@ -326,6 +334,20 @@ type TeamWorkflowSourceCollectionSearchExecutionPayload = {
   createdRecords: DataProcessingCollectionOutputPayload["createdRecords"];
   imported: TeamWorkflowDataRecordSourceCandidateImportPayload[];
   executionEvents: SourceCollectionSearchExecutionEvent[];
+  activeWorkRun?: {
+    runId: string;
+    status: string;
+    currentPhase: string;
+    currentTask?: string;
+    summary?: string;
+    openAssignmentCount?: number;
+    recordCount?: number;
+    queryCount?: number;
+    error?: string;
+    errorType?: string;
+    storagePath?: string;
+    updatedAt?: string;
+  };
   boundaries: {
     externalSearchTriggered: boolean;
     externalSearchQueued?: boolean;
@@ -2184,8 +2206,16 @@ export function TeamsRoute({
   });
   const sourceCollectionRunsQuery = useQuery({
     queryKey: queryKeys.teamWorkflowSourceCollectionRuns(effectiveTeamId || "none", SOURCE_COLLECTION_RUN_PREVIEW_LIMIT),
-    queryFn: () => fetchJson<DataProcessingRunListPayload>(`/api/data-processing/runs?limit=${SOURCE_COLLECTION_RUN_PREVIEW_LIMIT}`),
+    queryFn: () =>
+      fetchJson<DataProcessingRunListPayload>(
+        `/api/data-processing/runs?limit=${SOURCE_COLLECTION_RUN_PREVIEW_LIMIT}&teamId=${encodeURIComponent(effectiveTeamId)}&startedFrom=team_workflow_source_collection`,
+      ),
     enabled: Boolean(effectiveTeamId && researchWorkflowTeamSelected),
+    refetchInterval: (query) => {
+      const payload = query.state.data as DataProcessingRunListPayload | undefined;
+      const hasActiveRun = (payload?.runs ?? []).some((run) => ["collecting", "processing"].includes(String(run.status || "").toLowerCase()));
+      return resolvePollingInterval(pageVisible, hasActiveRun ? 1500 : false);
+    },
   });
   const linkedChatRoomId = selectedTeam?.linkedChatRoomId ?? "";
   const linkedRoomStatusForPolling = String(selectedTeam?.linkedChatRoom?.status || "").toLowerCase();
@@ -2981,6 +3011,66 @@ export function TeamsRoute({
                     {binding.agent ? (lang === "zh" ? "配置" : "Configure") : (lang === "zh" ? "绑定" : "Bind")}
                   </Link>
                 </div>
+              </article>
+            );
+          })}
+        </div>
+      </section>
+    );
+  }
+
+  function renderSourceCollectionStageAgents(stageId: SourceCollectionStageModuleId) {
+    const targetKeys = new Set(SOURCE_COLLECTION_STAGE_AGENT_KEYS[stageId]);
+    const bindings = (researchStageAgentBindingsByStage.knowledge_collection ?? []).filter((binding) => targetKeys.has(binding.key));
+    if (!bindings.length) {
+      return null;
+    }
+    return (
+      <section className={styles.sourceCollectionStageAgentPanel} aria-label={lang === "zh" ? "当前步骤 Agent" : "Current step Agents"}>
+        <div className={styles.sourceCollectionStageAgentHeader}>
+          <strong>{lang === "zh" ? "当前步骤 Agent" : "Step Agents"}</strong>
+          <Link to="/agents">
+            <Link2 size={12} />
+            {lang === "zh" ? "Agent 管理" : "Agent management"}
+          </Link>
+        </div>
+        <div className={styles.sourceCollectionStageAgentList}>
+          {bindings.map((binding) => {
+            const tone = binding.agent
+              ? researchStageAgentConfigTone(binding.agent)
+              : binding.agentId
+                ? "blocked"
+                : "missing";
+            const info = agentDisplayInfo(binding.agent, lang, {
+              name: binding.bindingLabel || (lang === "zh" ? binding.zh : binding.en),
+            });
+            const agentName = binding.agent
+              ? info.name
+              : binding.agentId
+                ? binding.agentId
+                : (lang === "zh" ? "未绑定" : "Not bound");
+            const statusLabel = binding.agent
+              ? researchStageAgentConfigStatusLabel(binding.agent, lang)
+              : binding.agentId
+                ? (lang === "zh" ? "引用失效" : "missing reference")
+                : (lang === "zh" ? "待绑定" : "missing");
+            return (
+              <article
+                key={`source-step-${stageId}-${binding.key}`}
+                className={[
+                  styles.sourceCollectionStageAgentCard,
+                  styles[`researchStageAgentCard_${tone}`],
+                ].filter(Boolean).join(" ")}
+              >
+                <div>
+                  <small>{lang === "zh" ? binding.zh : binding.en}</small>
+                  <strong>{agentName}</strong>
+                </div>
+                <span>{statusLabel}</span>
+                <Link to={binding.agentId ? researchStageAgentManagementRoute(binding.agentId) : "/agents"}>
+                  <Link2 size={12} />
+                  {binding.agent ? (lang === "zh" ? "配置" : "Configure") : (lang === "zh" ? "绑定" : "Bind")}
+                </Link>
               </article>
             );
           })}
@@ -4011,6 +4101,7 @@ export function TeamsRoute({
             {activeModule.actionLabel}
           </button>
         </section>
+        {renderSourceCollectionStageAgents(activeModule.id)}
         {selectedSourceCollectionStageId === "collection" ? (
         <>
         <details className={styles.workflowSourceCollectionDetails} open={!selectedSourceCollectionRun}>
@@ -4789,6 +4880,7 @@ export function TeamsRoute({
       : null;
   const selectedTeamExecuteSourceCollectionSearchResult =
     executeSourceCollectionSearchMutation.variables?.teamId === selectedTeam?.teamId ? executeSourceCollectionSearchMutation.data : undefined;
+  const selectedSourceCollectionActiveWorkRun = selectedTeamExecuteSourceCollectionSearchResult?.activeWorkRun;
   const selectedSourceCollectionStorageArtifacts =
     selectedTeamExecuteSourceCollectionSearchResult?.storageArtifacts
     ?? sourceCollectionStorageArtifactsForRun(selectedTeam?.teamId ?? effectiveTeamId, selectedSourceCollectionRunEffectiveId);
@@ -4939,6 +5031,22 @@ export function TeamsRoute({
         ].filter(Boolean),
       });
     }
+    if (selectedSourceCollectionActiveWorkRun && ["running", "queued"].includes(String(selectedSourceCollectionActiveWorkRun.status || "").toLowerCase())) {
+      messages.push({
+        id: `active-work-${selectedSourceCollectionActiveWorkRun.runId}`,
+        agentRole: "Source Collection Agent",
+        title: lang === "zh" ? "正在执行本批资料搜索" : "Running this source search batch",
+        body: selectedSourceCollectionActiveWorkRun.currentTask || selectedSourceCollectionActiveWorkRun.summary || (lang === "zh" ? "后台正在把搜索结果写成资料记录和候选资料。" : "The background worker is writing search results into records and candidates."),
+        status: selectedSourceCollectionActiveWorkRun.status,
+        tone: "search",
+        refs: [
+          `${selectedSourceCollectionActiveWorkRun.openAssignmentCount ?? sourceCollectionOpenAssignmentCount} ${lang === "zh" ? "个未完成任务" : "open assignments"}`,
+          `${selectedSourceCollectionActiveWorkRun.recordCount ?? sourceCollectionRunStatus?.summary.recordCount ?? 0} ${lang === "zh" ? "条资料记录" : "records"}`,
+          `${selectedSourceCollectionActiveWorkRun.queryCount ?? sourceCollectionQueryCount} ${lang === "zh" ? "条搜索问题" : "queries"}`,
+        ],
+        storageRefs: [selectedSourceCollectionActiveWorkRun.storagePath || selectedSourceCollectionStorageArtifacts?.runDirectory || ""].filter(Boolean),
+      });
+    }
     if (selectedTeamExecuteSourceCollectionSearchResult?.executionEvents?.length) {
       const events = selectedTeamExecuteSourceCollectionSearchResult.executionEvents;
       const searchedCount = events.filter((event) => event.eventType === "search.executed").length;
@@ -5041,6 +5149,7 @@ export function TeamsRoute({
   }, [
     lang,
     selectedSourceCollectionRun,
+    selectedSourceCollectionActiveWorkRun,
     selectedSourceCollectionStorageArtifacts,
     selectedTeamRecordSourceCollectionOutputResult,
     selectedTeamExecuteSourceCollectionSearchResult,
@@ -5055,6 +5164,8 @@ export function TeamsRoute({
     sourceCollectionPromptCacheRequirement,
     sourceCollectionPromptCacheStatus,
     sourceCollectionSearchPlanRef,
+    sourceCollectionQueryCount,
+    sourceCollectionRunStatus?.summary.recordCount,
     sourceManifestCandidates,
     teamWorkflow?.candidateStore.storagePath,
     teamWorkflowSourceQualityStatus,
@@ -5099,11 +5210,22 @@ export function TeamsRoute({
   const selectedTeamSourceQualityPending = selectedTeamAssessSourceQualityPending || selectedTeamAssessSourceQualityBatchPending;
   const selectedTeamSourceQualityError = selectedTeamAssessSourceQualityError || selectedTeamAssessSourceQualityBatchError;
   const sourceCollectionRunStatusValue = String(sourceCollectionRunStatus?.runStatus || selectedSourceCollectionRun?.status || "").toLowerCase();
+  const sourceCollectionAcceptedBackgroundActive = Boolean(
+    selectedTeamExecuteSourceCollectionSearchResult?.accepted
+    && selectedSourceCollectionActiveWorkRun
+    && ["running", "queued"].includes(String(selectedSourceCollectionActiveWorkRun.status || "").toLowerCase())
+    && (!sourceCollectionRunStatus || ["collecting", "processing"].includes(sourceCollectionRunStatusValue)),
+  );
+  const sourceCollectionAcceptedBackgroundFailed = Boolean(
+    selectedSourceCollectionActiveWorkRun
+    && ["failed", "blocked"].includes(String(selectedSourceCollectionActiveWorkRun.status || "").toLowerCase()),
+  );
   const sourceCollectionRecordCount = sourceCollectionRunStatus?.summary.recordCount ?? 0;
   const sourceCollectionOperationActive = Boolean(
     selectedTeamStartResearchStagePending
     || selectedTeamStartSourceCollectionPending
     || selectedTeamExecuteSourceCollectionSearchPending
+    || sourceCollectionAcceptedBackgroundActive
     || selectedTeamRecordSourceCollectionOutputPending
     || selectedTeamSourceQualityPending
     || selectedTeamBuildCandidateGraphPending,
@@ -5111,6 +5233,7 @@ export function TeamsRoute({
   const sourceCollectionOperationFailed = Boolean(
     sourceCollectionRunStatusValue === "failed"
     || sourceCollectionRunStatusValue === "blocked"
+    || sourceCollectionAcceptedBackgroundFailed
     || selectedTeamStartSourceCollectionError
     || selectedTeamExecuteSourceCollectionSearchError
     || selectedTeamRecordSourceCollectionOutputError
@@ -5288,7 +5411,7 @@ export function TeamsRoute({
           : sourceManifestCandidates.length > 0
             ? "done"
             : "pending";
-  const sourceCollectionConsoleStatusText = selectedTeamExecuteSourceCollectionSearchPending
+  const sourceCollectionConsoleStatusText = selectedTeamExecuteSourceCollectionSearchPending || sourceCollectionAcceptedBackgroundActive
     ? (lang === "zh" ? "正在团队搜索" : "Team search running")
     : selectedTeamStartResearchStagePending || selectedTeamStartSourceCollectionPending
       ? (lang === "zh" ? "正在启动搜集" : "Starting collection")
@@ -5314,6 +5437,9 @@ export function TeamsRoute({
       return lang === "zh" ? "处理失败，先查看下方失败步骤，再重试当前按钮。" : "A step failed. Review the failed step below, then retry its action.";
     }
     if (sourceCollectionOperationActive) {
+      if (sourceCollectionAcceptedBackgroundActive) {
+        return selectedSourceCollectionActiveWorkRun?.currentTask || selectedSourceCollectionActiveWorkRun?.summary || (lang === "zh" ? "后台资料搜集正在运行，完成后会刷新记录、候选和下一步状态。" : "Background source collection is running; records, candidates, and next state will refresh when it completes.");
+      }
       return lang === "zh" ? "正在处理当前动作，完成后会刷新阶段颜色和结果数量。" : "Current action is running. Stage colors and counts update when it completes.";
     }
     if (!selectedSourceCollectionRun) {
@@ -5363,7 +5489,7 @@ export function TeamsRoute({
   }[state]);
   const sourceCollectionSearchStepState: SourceCollectionStepState = sourceCollectionOperationFailed
     ? "failed"
-    : selectedTeamExecuteSourceCollectionSearchPending || selectedTeamStartResearchStagePending || selectedTeamStartSourceCollectionPending
+    : selectedTeamExecuteSourceCollectionSearchPending || sourceCollectionAcceptedBackgroundActive || selectedTeamStartResearchStagePending || selectedTeamStartSourceCollectionPending
       ? "active"
       : !selectedSourceCollectionRun
         ? "idle"

@@ -1623,6 +1623,100 @@
   font-weight: 780;
 }
 
+.sourceCollectionStageAgentPanel {
+  display: grid;
+  gap: 7px;
+  padding: 9px;
+  border: 1px solid color-mix(in srgb, var(--accent-cool) 22%, var(--border-soft));
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--surface-card) 70%, transparent);
+}
+
+.sourceCollectionStageAgentHeader {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.sourceCollectionStageAgentHeader strong {
+  min-width: 0;
+  color: var(--fg-primary);
+  font-size: 0.74rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sourceCollectionStageAgentHeader a,
+.sourceCollectionStageAgentCard a {
+  display: inline-flex;
+  flex: 0 0 auto;
+  min-height: 24px;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 0 8px;
+  border: 1px solid color-mix(in srgb, var(--accent-cool) 26%, var(--border-soft));
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--surface-panel-strong) 78%, transparent);
+  color: var(--fg-primary);
+  font-size: 0.66rem;
+  font-weight: 800;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.sourceCollectionStageAgentList {
+  display: grid;
+  gap: 6px;
+}
+
+.sourceCollectionStageAgentCard {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid var(--stage-agent-card-border, var(--border-soft));
+  border-radius: 7px;
+  background: var(--stage-agent-card-bg, color-mix(in srgb, var(--surface-card) 78%, transparent));
+}
+
+.sourceCollectionStageAgentCard div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.sourceCollectionStageAgentCard small,
+.sourceCollectionStageAgentCard strong,
+.sourceCollectionStageAgentCard span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sourceCollectionStageAgentCard small {
+  color: var(--fg-muted);
+  font-size: 0.62rem;
+  font-weight: 760;
+}
+
+.sourceCollectionStageAgentCard strong {
+  color: var(--fg-primary);
+  font-size: 0.72rem;
+}
+
+.sourceCollectionStageAgentCard span {
+  color: var(--fg-secondary);
+  font-size: 0.64rem;
+  font-weight: 780;
+}
+
 .sourceCollectionPanelActions {
   display: grid;
   grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);

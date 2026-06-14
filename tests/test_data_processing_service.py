@@ -61,6 +61,34 @@ def test_processing_run_records_intake_to_workspace(tmp_path, monkeypatch):
     assert _read_jsonl(records_path)[0]["recordId"] == record["recordId"]
 
 
+def test_processing_run_list_filters_before_limit(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    target = data_processing_service.create_processing_run(
+        title="Team source collection",
+        scope={"teamId": "research-team"},
+        metadata={"startedFrom": "team_workflow_source_collection", "teamId": "research-team"},
+    )
+    for index in range(5):
+        data_processing_service.create_processing_run(
+            title=f"Other run {index}",
+            scope={"teamId": f"other-team-{index}"},
+            metadata={"startedFrom": "other_flow", "teamId": f"other-team-{index}"},
+        )
+
+    runs = data_processing_service.list_processing_runs(
+        limit=1,
+        metadata_filters={
+            "startedFrom": "team_workflow_source_collection",
+            "teamId": "research-team",
+        },
+    )
+
+    assert runs["summary"]["filtered"] is True
+    assert runs["summary"]["runCount"] == 1
+    assert runs["summary"]["returnedCount"] == 1
+    assert runs["runs"][0]["runId"] == target["runId"]
+
+
 def test_collection_assignment_records_agent_output_without_publishing(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     run = data_processing_service.create_processing_run(title="Agent collection")
