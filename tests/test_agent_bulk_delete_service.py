@@ -92,3 +92,51 @@ def test_bulk_purge_rolls_back_direct_session_tombstone_when_agent_delete_fails(
     bindings = agent_mode_binding_service.get_mode_bindings_payload()["modes"]
     assert bindings["chat"]["defaultAgentId"] == peer_session["agentId"]
     assert agent_session["agentId"] not in bindings["chat"]["availableAgentIds"]
+
+
+def test_bulk_archive_skips_system_fixed_role_agent(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    protected = agent_directory_service.create_agent_instance(
+        display_name="System Fixed Role",
+        metadata={"fixedRole": True, "supervisedRole": "baseline"},
+        primary_mode="supervised_evolution",
+        role_key="baseline",
+    )
+
+    result = agent_bulk_delete_service.bulk_archive_agents([protected["agentId"]])
+
+    assert result["status"] == "completed"
+    assert result["summary"]["successCount"] == 0
+    assert result["summary"]["skippedCount"] == 1
+    assert result["skipped"] == [
+        {
+            "agentId": protected["agentId"],
+            "reason": "protected",
+            "message": "Protected core Agent cannot be archived.",
+        }
+    ]
+    assert agent_directory_service.get_agent(protected["agentId"])["status"] == "active"
+
+
+def test_bulk_purge_skips_system_fixed_role_agent_even_when_legacy_archived(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    protected = agent_directory_service.create_agent_instance(display_name="Legacy Archived Fixed Role")
+    agent_directory_service.archive_agent_instance(protected["agentId"])
+    agent_directory_service.update_agent_instance(
+        protected["agentId"],
+        metadata={"fixedRole": True, "supervisedRole": "reviewer"},
+    )
+
+    result = agent_bulk_delete_service.bulk_purge_agents([protected["agentId"]])
+
+    assert result["status"] == "completed"
+    assert result["summary"]["successCount"] == 0
+    assert result["summary"]["skippedCount"] == 1
+    assert result["skipped"] == [
+        {
+            "agentId": protected["agentId"],
+            "reason": "protected",
+            "message": "Protected core Agent cannot be purged.",
+        }
+    ]
+    assert agent_directory_service.get_agent(protected["agentId"], include_archived=True)["status"] == "archived"

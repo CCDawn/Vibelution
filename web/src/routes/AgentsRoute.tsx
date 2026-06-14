@@ -21,7 +21,7 @@ import {
   Users,
   Wrench,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { type MouseEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { fetchJson } from "../api/client";
@@ -262,6 +262,13 @@ type AgentBulkPromptTemplateResponse = Omit<AgentBulkActionResponse, "success"> 
   success: AgentConfigWorkspaceAgent[];
   promptTemplateId?: string;
 };
+type AgentBulkConfigResponse = Omit<AgentBulkActionResponse, "success"> & {
+  success: AgentConfigWorkspaceAgent[];
+  appliedFields?: string[];
+};
+type AgentBulkConfigField = "dialogueModelId" | "promptTemplateId" | "primaryMode" | "roleKey";
+type AgentBulkConfigDraft = Record<AgentBulkConfigField, string>;
+type AgentBulkConfigApply = Record<AgentBulkConfigField, boolean>;
 type ModelProfileChoice = {
   key: string;
   modelId: string;
@@ -330,6 +337,18 @@ const DEFAULT_AGENT_RESET_OPTIONS: AgentResetOptions = {
   resetToolPolicy: false,
   resetMemoryPolicy: false,
   resetRuntimePolicy: false,
+};
+const DEFAULT_BULK_CONFIG_DRAFT: AgentBulkConfigDraft = {
+  dialogueModelId: "",
+  promptTemplateId: "",
+  primaryMode: "",
+  roleKey: "",
+};
+const DEFAULT_BULK_CONFIG_APPLY: AgentBulkConfigApply = {
+  dialogueModelId: false,
+  promptTemplateId: false,
+  primaryMode: false,
+  roleKey: false,
 };
 const DEFAULT_SESSION_AGENT_ALLOWED_TOOLS = [
   "apply_patch_tool",
@@ -1953,6 +1972,84 @@ function normalizeCreateDraftForWorkspace(draft: AgentCreateDraft, workspace: Ag
   };
 }
 
+function commonBulkConfigValue(
+  agents: AgentConfigWorkspaceAgent[],
+  selector: (agent: AgentConfigWorkspaceAgent) => string,
+) {
+  if (!agents.length) {
+    return "";
+  }
+  const first = selector(agents[0]);
+  return agents.every((agent) => selector(agent) === first) ? first : "";
+}
+
+function bulkConfigValueMixed(
+  agents: AgentConfigWorkspaceAgent[],
+  selector: (agent: AgentConfigWorkspaceAgent) => string,
+) {
+  if (agents.length < 2) {
+    return false;
+  }
+  const first = selector(agents[0]);
+  return !agents.every((agent) => selector(agent) === first);
+}
+
+function bulkConfigDraftFromAgents(agents: AgentConfigWorkspaceAgent[]): AgentBulkConfigDraft {
+  return {
+    dialogueModelId: commonBulkConfigValue(agents, (agent) => agentLlmSlotModelId(agent.llmBindings, FALLBACK_AGENT_LLM_SLOTS[0])),
+    promptTemplateId: commonBulkConfigValue(agents, (agent) => agent.promptTemplateId || ""),
+    primaryMode: commonBulkConfigValue(agents, (agent) => agent.primaryMode || ""),
+    roleKey: commonBulkConfigValue(agents, (agent) => agent.roleKey || ""),
+  };
+}
+
+function bulkConfigApplyFields(apply: AgentBulkConfigApply) {
+  const fields: string[] = [];
+  if (apply.dialogueModelId) {
+    fields.push("llmBindings");
+  }
+  if (apply.promptTemplateId) {
+    fields.push("promptTemplateId");
+  }
+  if (apply.primaryMode) {
+    fields.push("primaryMode");
+  }
+  if (apply.roleKey) {
+    fields.push("roleKey");
+  }
+  return fields;
+}
+
+function bulkConfigPatchFromDraft(draft: AgentBulkConfigDraft, apply: AgentBulkConfigApply) {
+  const patch: Record<string, unknown> = {};
+  if (apply.dialogueModelId) {
+    patch.llmBindings = {
+      dialogue: { modelId: draft.dialogueModelId },
+    };
+  }
+  if (apply.promptTemplateId) {
+    patch.promptTemplateId = draft.promptTemplateId;
+  }
+  if (apply.primaryMode) {
+    patch.primaryMode = draft.primaryMode;
+  }
+  if (apply.roleKey) {
+    patch.roleKey = draft.roleKey;
+  }
+  return patch;
+}
+
+function bulkConfigFieldReady(field: AgentBulkConfigField, draft: AgentBulkConfigDraft) {
+  if (field === "roleKey") {
+    return true;
+  }
+  return Boolean(draft[field].trim());
+}
+
+function bulkConfigReady(draft: AgentBulkConfigDraft, apply: AgentBulkConfigApply) {
+  return (Object.keys(apply) as AgentBulkConfigField[]).some((field) => apply[field] && bulkConfigFieldReady(field, draft));
+}
+
 function createDraftReady(draft: AgentCreateDraft, bundles: ToolBundle[] = []) {
   const workSession = isWorkSessionCreateDraft(draft);
   const selectedPolicy = toolBundleSelectionToPolicy(draft.selectedToolBundleIds, bundles);
@@ -2558,7 +2655,16 @@ function metadataFlag(agent: AgentConfigWorkspaceAgent | null | undefined, key: 
 function agentArchiveProtected(agent: AgentConfigWorkspaceAgent | null | undefined) {
   const systemRole = metadataString(agent, "systemRole");
   const researchOrgRole = metadataString(agent, "researchOrgRole");
-  return metadataFlag(agent, "protected") || systemRole === "ceo" || researchOrgRole === "organization_advisor";
+  const systemOwnedRole = [
+    systemRole,
+    metadataString(agent, "selfEvolutionRole"),
+    metadataString(agent, "supervisedRole"),
+    metadataString(agent, "aiSearchRole"),
+  ].some(Boolean);
+  return metadataFlag(agent, "protected")
+    || metadataFlag(agent, "fixedRole")
+    || systemOwnedRole
+    || ["ceo", "organization_advisor", "capability_steward", "knowledge_steward"].includes(researchOrgRole);
 }
 
 function agentConfigPanes(copy: ReturnType<typeof agentsRouteCopy>, agent: AgentConfigWorkspaceAgent | null): Array<{
@@ -2607,6 +2713,16 @@ function agentsRouteCopy(lang: "zh" | "en") {
         bulkWorking: "批量处理中...",
         bulkNoSelection: "请先选择 Agent。",
         bulkNoPrompt: "请先选择要应用的提示词模板。",
+        bulkNoConfigFields: "请选择要批量应用的配置字段。",
+        bulkEditTitle: "批量编辑",
+        bulkEditSelected: "已选 Agent",
+        bulkEditMixed: "混合值",
+        bulkApplyField: "应用",
+        bulkDialogueModel: "对话模型",
+        bulkPrimaryMode: "身份模式",
+        bulkRoleKey: "角色键",
+        bulkConfigReset: "重置面板",
+        bulkApplyConfig: "保存批量配置",
         bulkArchiveConfirm: "确认安全归档已选 Agent？受保护或已归档项会自动跳过。",
         bulkPurgeConfirm: "确认彻底删除已选的已归档 Agent？活跃或受保护项会自动跳过；该操作会删除 Agent 私有工作区，直连历史仅保留为已删除 Agent 历史。",
         bulkSkippedArchived: "已归档，跳过",
@@ -2615,6 +2731,7 @@ function agentsRouteCopy(lang: "zh" | "en") {
         bulkArchiveResult: "批量归档完成",
         bulkPurgeResult: "批量彻底删除完成",
         bulkPromptResult: "批量提示词更新完成",
+        bulkConfigResult: "批量配置更新完成",
         filterSections: {
           status: "状态",
           boundary: "Agent 身份",
@@ -2976,6 +3093,16 @@ function agentsRouteCopy(lang: "zh" | "en") {
         bulkWorking: "Working...",
         bulkNoSelection: "Select Agents first.",
         bulkNoPrompt: "Choose a prompt template first.",
+        bulkNoConfigFields: "Select at least one config field to apply.",
+        bulkEditTitle: "Bulk edit",
+        bulkEditSelected: "Selected Agents",
+        bulkEditMixed: "Mixed value",
+        bulkApplyField: "Apply",
+        bulkDialogueModel: "Dialogue model",
+        bulkPrimaryMode: "Identity mode",
+        bulkRoleKey: "Role key",
+        bulkConfigReset: "Reset panel",
+        bulkApplyConfig: "Save bulk config",
         bulkArchiveConfirm: "Archive the selected Agents? Protected or already archived items will be skipped.",
         bulkPurgeConfirm: "Permanently delete the selected archived Agents? Active or protected Agents will be skipped; private workspaces are removed and direct-session history is kept as deleted-Agent history.",
         bulkSkippedArchived: "Already archived; skipped",
@@ -2984,6 +3111,7 @@ function agentsRouteCopy(lang: "zh" | "en") {
         bulkArchiveResult: "Bulk archive finished",
         bulkPurgeResult: "Bulk delete finished",
         bulkPromptResult: "Bulk prompt update finished",
+        bulkConfigResult: "Bulk config update finished",
         filterSections: {
           status: "Status",
           boundary: "Agent identity",
@@ -3373,7 +3501,10 @@ export function AgentsRoute() {
   const [avatarEditorOpen, setAvatarEditorOpen] = useState(false);
   const [notice, setNotice] = useState<{ tone: "success" | "error"; text: string } | null>(null);
   const [selectedBulkAgentIds, setSelectedBulkAgentIds] = useState<Set<string>>(() => new Set());
+  const [bulkSelectionAnchorAgentId, setBulkSelectionAnchorAgentId] = useState("");
   const [bulkPromptTemplateId, setBulkPromptTemplateId] = useState("");
+  const [bulkConfigDraft, setBulkConfigDraft] = useState<AgentBulkConfigDraft>(DEFAULT_BULK_CONFIG_DRAFT);
+  const [bulkConfigApply, setBulkConfigApply] = useState<AgentBulkConfigApply>(DEFAULT_BULK_CONFIG_APPLY);
   const [bulkAgentPending, setBulkAgentPending] = useState(false);
   const draftSyncSourceRef = useRef<AgentDraftSyncSource | null>(null);
 
@@ -3446,6 +3577,16 @@ export function AgentsRoute() {
     () => visibleAgents.filter((agent) => selectedBulkAgentIds.has(agent.agentId)),
     [selectedBulkAgentIds, visibleAgents],
   );
+  const selectedBulkAgentKey = selectedBulkAgents.map((agent) => agent.agentId).join("|");
+  const bulkConfigMixed = useMemo(() => {
+    return {
+      dialogueModelId: bulkConfigValueMixed(selectedBulkAgents, (agent) => agentLlmSlotModelId(agent.llmBindings, FALLBACK_AGENT_LLM_SLOTS[0])),
+      promptTemplateId: bulkConfigValueMixed(selectedBulkAgents, (agent) => agent.promptTemplateId || ""),
+      primaryMode: bulkConfigValueMixed(selectedBulkAgents, (agent) => agent.primaryMode || ""),
+      roleKey: bulkConfigValueMixed(selectedBulkAgents, (agent) => agent.roleKey || ""),
+    };
+  }, [selectedBulkAgentKey]);
+  const bulkConfigCanSave = selectedBulkAgents.length > 1 && bulkConfigReady(bulkConfigDraft, bulkConfigApply) && !bulkAgentPending;
   const allVisibleAgentsSelected = visibleAgents.length > 0 && selectedBulkAgents.length === visibleAgents.length;
   const visiblePolicyTools = useMemo(() => {
     const query = normalizeText(toolSearchText);
@@ -3521,6 +3662,11 @@ export function AgentsRoute() {
   const refresh = () => {
     void chatWorkspaceCache.afterAgentWorkspaceChanged();
   };
+
+  useEffect(() => {
+    setBulkConfigDraft(bulkConfigDraftFromAgents(selectedBulkAgents));
+    setBulkConfigApply(DEFAULT_BULK_CONFIG_APPLY);
+  }, [selectedBulkAgentKey]);
 
   useEffect(() => {
     const nextSource = draftSyncSourceFromAgent(workspace, selectedAgent);
@@ -4495,9 +4641,24 @@ export function AgentsRoute() {
     createAgentMutation.mutate(createDraft);
   };
 
-  const toggleBulkAgent = (agentId: string, selected: boolean) => {
+  const toggleBulkAgent = (agentId: string, selected: boolean, extendRange = false) => {
     setSelectedBulkAgentIds((current) => {
       const next = new Set(current);
+      if (extendRange && bulkSelectionAnchorAgentId) {
+        const anchorIndex = visibleAgents.findIndex((agent) => agent.agentId === bulkSelectionAnchorAgentId);
+        const targetIndex = visibleAgents.findIndex((agent) => agent.agentId === agentId);
+        if (anchorIndex >= 0 && targetIndex >= 0) {
+          const [start, end] = anchorIndex <= targetIndex ? [anchorIndex, targetIndex] : [targetIndex, anchorIndex];
+          visibleAgents.slice(start, end + 1).forEach((agent) => {
+            if (selected) {
+              next.add(agent.agentId);
+            } else {
+              next.delete(agent.agentId);
+            }
+          });
+          return next;
+        }
+      }
       if (selected) {
         next.add(agentId);
       } else {
@@ -4505,14 +4666,87 @@ export function AgentsRoute() {
       }
       return next;
     });
+    setBulkSelectionAnchorAgentId(agentId);
+  };
+
+  const handleAgentRowSelect = (agent: AgentConfigWorkspaceAgent, event: MouseEvent<HTMLButtonElement>) => {
+    if (event.ctrlKey || event.metaKey || event.shiftKey) {
+      event.preventDefault();
+      toggleBulkAgent(agent.agentId, event.shiftKey ? true : !selectedBulkAgentIds.has(agent.agentId), event.shiftKey);
+      return;
+    }
+    setSelectedAgentId(agent.agentId);
+    setBulkSelectionAnchorAgentId(agent.agentId);
   };
 
   const selectVisibleBulkAgents = () => {
     setSelectedBulkAgentIds(new Set(visibleAgents.map((agent) => agent.agentId)));
+    setBulkSelectionAnchorAgentId(visibleAgents[0]?.agentId ?? "");
   };
 
   const clearBulkAgents = () => {
     setSelectedBulkAgentIds(new Set());
+    setBulkSelectionAnchorAgentId("");
+  };
+
+  const updateBulkConfigDraft = (patch: Partial<AgentBulkConfigDraft>) => {
+    setBulkConfigDraft((current) => ({ ...current, ...patch }));
+  };
+
+  const toggleBulkConfigApply = (field: AgentBulkConfigField, selected: boolean) => {
+    setBulkConfigApply((current) => ({ ...current, [field]: selected }));
+  };
+
+  const bulkApplyAgentConfig = async () => {
+    if (bulkAgentPending) {
+      return;
+    }
+    if (selectedBulkAgents.length < 2) {
+      setNotice({ tone: "error", text: copy.bulkNoSelection });
+      return;
+    }
+    if (!bulkConfigReady(bulkConfigDraft, bulkConfigApply)) {
+      setNotice({ tone: "error", text: copy.bulkNoConfigFields });
+      return;
+    }
+
+    setBulkAgentPending(true);
+    let success = 0;
+    let skipped = 0;
+    let failed = 0;
+    const notes: string[] = [];
+    const agentsById = new Map(selectedBulkAgents.map((agent) => [agent.agentId, agent]));
+
+    try {
+      const response = await fetchJson<AgentBulkConfigResponse>("/api/agents/bulk-config", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          agentIds: selectedBulkAgents.map((agent) => agent.agentId),
+          applyFields: bulkConfigApplyFields(bulkConfigApply),
+          patch: bulkConfigPatchFromDraft(bulkConfigDraft, bulkConfigApply),
+        }),
+      });
+      queryClient.setQueryData<AgentConfigWorkspace | undefined>(
+        queryKeys.agentConfigWorkspace(),
+        (current) => bulkUpdatedAgentWorkspaceCache(current, response.success),
+      );
+      success = response.summary.successCount;
+      skipped = response.summary.skippedCount;
+      failed = response.summary.failedCount;
+      response.skipped.forEach((item) => notes.push(agentBulkActionItemNote(item, agentsById, copy.bulkSkippedProtected)));
+      response.failed.forEach((item) => notes.push(agentBulkActionItemNote(item, agentsById, "")));
+    } catch (error) {
+      failed = selectedBulkAgents.length;
+      notes.push(error instanceof Error ? error.message : String(error));
+    }
+
+    setBulkAgentPending(false);
+    setNotice({
+      tone: failed > 0 ? "error" : "success",
+      text: agentBulkActionSummary(copy.bulkConfigResult, success, skipped, failed, notes, lang),
+    });
+    void chatWorkspaceCache.afterAgentWorkspaceChanged();
   };
 
   const bulkApplyPromptTemplate = async () => {
@@ -5193,6 +5427,11 @@ export function AgentsRoute() {
                 const display = agentDisplayInfo(agent, lang);
                 const modelDisplay = agentDialogueModelDisplay(agent, lang);
                 const bulkSelected = selectedBulkAgentIds.has(agent.agentId);
+                const rowClassName = [
+                  styles.agentRow,
+                  active ? styles.agentRowActive : "",
+                  bulkSelected ? styles.agentRowBulkSelected : "",
+                ].filter(Boolean).join(" ");
                 return (
                   <div key={agent.agentId} className={styles.agentRowShell}>
                     <label className={styles.rowSelect} title={`${copy.bulkSelected}: ${display.name}`}>
@@ -5200,14 +5439,18 @@ export function AgentsRoute() {
                         type="checkbox"
                         checked={bulkSelected}
                         aria-label={`${copy.bulkSelected}: ${display.name}`}
-                        onChange={(event) => toggleBulkAgent(agent.agentId, event.target.checked)}
+                        onChange={(event) => toggleBulkAgent(
+                          agent.agentId,
+                          event.target.checked,
+                          Boolean((event.nativeEvent as globalThis.MouseEvent).shiftKey),
+                        )}
                       />
                       {bulkSelected ? <CheckSquare size={15} /> : <Square size={15} />}
                     </label>
                     <button
                       type="button"
-                      className={active ? `${styles.agentRow} ${styles.agentRowActive}` : styles.agentRow}
-                      onClick={() => setSelectedAgentId(agent.agentId)}
+                      className={rowClassName}
+                      onClick={(event) => handleAgentRowSelect(agent, event)}
                     >
                       <span className={styles.agentIdentity}>
                         {renderAgentAvatar(
@@ -5247,7 +5490,137 @@ export function AgentsRoute() {
         </main>
 
         <aside className={styles.detailPanel}>
-          {selectedAgent ? (
+          {selectedBulkAgents.length > 1 ? (
+            <section className={styles.configEditor}>
+              <div className={styles.panelHeader}>
+                <div>
+                  <p className={styles.panelEyebrow}>{copy.bulkEditTitle}</p>
+                  <h3>{copy.bulkEditSelected}: {selectedBulkAgents.length}</h3>
+                </div>
+                <CheckSquare size={17} />
+              </div>
+              <div className={styles.bulkSelectionList}>
+                {selectedBulkAgents.slice(0, 8).map((agent) => (
+                  <span key={`bulk-selected:${agent.agentId}`}>
+                    {agentLabel(agent)}
+                  </span>
+                ))}
+                {selectedBulkAgents.length > 8 ? <span>+{selectedBulkAgents.length - 8}</span> : null}
+              </div>
+              <div className={styles.editorGrid}>
+                <label className={styles.field}>
+                  <span className={styles.bulkFieldHeader}>
+                    <input
+                      type="checkbox"
+                      checked={bulkConfigApply.dialogueModelId}
+                      onChange={(event) => toggleBulkConfigApply("dialogueModelId", event.target.checked)}
+                    />
+                    {copy.bulkApplyField}
+                  </span>
+                  <span>{copy.bulkDialogueModel}</span>
+                  <select
+                    value={bulkConfigDraft.dialogueModelId}
+                    disabled={!bulkConfigApply.dialogueModelId || bulkAgentPending}
+                    onChange={(event) => updateBulkConfigDraft({ dialogueModelId: event.target.value })}
+                  >
+                    <option value="">{bulkConfigMixed.dialogueModelId ? copy.bulkEditMixed : "-"}</option>
+                    {agentModelChoices.map((model) => (
+                      <option key={`bulk-dialogue:${model.modelId}`} value={model.modelId}>
+                        {model.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className={styles.field}>
+                  <span className={styles.bulkFieldHeader}>
+                    <input
+                      type="checkbox"
+                      checked={bulkConfigApply.promptTemplateId}
+                      onChange={(event) => toggleBulkConfigApply("promptTemplateId", event.target.checked)}
+                    />
+                    {copy.bulkApplyField}
+                  </span>
+                  <span>{copy.prompt}</span>
+                  <select
+                    value={bulkConfigDraft.promptTemplateId}
+                    disabled={!bulkConfigApply.promptTemplateId || bulkAgentPending}
+                    onChange={(event) => updateBulkConfigDraft({ promptTemplateId: event.target.value })}
+                  >
+                    <option value="">{bulkConfigMixed.promptTemplateId ? copy.bulkEditMixed : "-"}</option>
+                    {workspace?.promptTemplates.map((template) => (
+                      <option key={`bulk-prompt:${template.promptTemplateId || template.templateId}`} value={template.promptTemplateId || template.templateId || ""}>
+                        {promptTemplateOptionLabel(template, lang)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className={styles.field}>
+                  <span className={styles.bulkFieldHeader}>
+                    <input
+                      type="checkbox"
+                      checked={bulkConfigApply.primaryMode}
+                      onChange={(event) => toggleBulkConfigApply("primaryMode", event.target.checked)}
+                    />
+                    {copy.bulkApplyField}
+                  </span>
+                  <span>{copy.bulkPrimaryMode}</span>
+                  <select
+                    value={bulkConfigDraft.primaryMode}
+                    disabled={!bulkConfigApply.primaryMode || bulkAgentPending}
+                    onChange={(event) => updateBulkConfigDraft({ primaryMode: event.target.value })}
+                  >
+                    <option value="">{bulkConfigMixed.primaryMode ? copy.bulkEditMixed : "-"}</option>
+                    {AGENT_PRIMARY_MODE_OPTIONS.map((mode) => (
+                      <option key={`bulk-mode:${mode}`} value={mode}>
+                        {modeLabel(mode, lang)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className={styles.field}>
+                  <span className={styles.bulkFieldHeader}>
+                    <input
+                      type="checkbox"
+                      checked={bulkConfigApply.roleKey}
+                      onChange={(event) => toggleBulkConfigApply("roleKey", event.target.checked)}
+                    />
+                    {copy.bulkApplyField}
+                  </span>
+                  <span>{copy.bulkRoleKey}</span>
+                  <input
+                    value={bulkConfigDraft.roleKey}
+                    placeholder={bulkConfigMixed.roleKey ? copy.bulkEditMixed : "-"}
+                    disabled={!bulkConfigApply.roleKey || bulkAgentPending}
+                    onChange={(event) => updateBulkConfigDraft({ roleKey: event.target.value })}
+                  />
+                </label>
+              </div>
+              {notice ? (
+                <p className={notice.tone === "error" ? styles.errorText : styles.successText}>{notice.text}</p>
+              ) : null}
+              <div className={styles.editorActions}>
+                <button
+                  type="button"
+                  className={styles.secondaryButton}
+                  disabled={bulkAgentPending}
+                  onClick={() => {
+                    setBulkConfigDraft(bulkConfigDraftFromAgents(selectedBulkAgents));
+                    setBulkConfigApply(DEFAULT_BULK_CONFIG_APPLY);
+                  }}
+                >
+                  {copy.bulkConfigReset}
+                </button>
+                <button
+                  type="button"
+                  className={styles.primaryButton}
+                  disabled={!bulkConfigCanSave}
+                  onClick={bulkApplyAgentConfig}
+                >
+                  {bulkAgentPending ? copy.bulkWorking : copy.bulkApplyConfig}
+                </button>
+              </div>
+            </section>
+          ) : selectedAgent ? (
             <>
               <section className={styles.detailHeader}>
                 <div className={styles.avatarEditorAnchor}>

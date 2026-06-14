@@ -4025,8 +4025,21 @@ def _count_policy_refs(agents: list[dict[str, Any]], field: str, policy_id: str)
 
 def _agent_archive_protected(agent: dict[str, Any]) -> bool:
     metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
-    system_role = str(metadata.get("systemRole") or metadata.get("researchOrgRole") or "").strip()
-    return bool(metadata.get("protected")) or system_role in {"ceo", "organization_advisor", KNOWLEDGE_STEWARD_ROLE_KEY}
+    if bool(metadata.get("protected")) or bool(metadata.get("fixedRole")):
+        return True
+    system_role = str(metadata.get("systemRole") or "").strip()
+    research_org_role = str(metadata.get("researchOrgRole") or "").strip()
+    system_owned_role = any(
+        str(metadata.get(key) or "").strip()
+        for key in ("selfEvolutionRole", "supervisedRole", "aiSearchRole")
+    )
+    if system_owned_role or system_role:
+        return True
+    return research_org_role in {"ceo", "organization_advisor", "capability_steward", KNOWLEDGE_STEWARD_ROLE_KEY}
+
+
+def agent_archive_protected(agent: dict[str, Any]) -> bool:
+    return _agent_archive_protected(agent)
 
 
 def _find_agent(state: dict[str, Any], agent_id: str) -> dict[str, Any] | None:
