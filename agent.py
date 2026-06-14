@@ -2627,10 +2627,11 @@ class SelfEvolvingAgent:
                                 streamed_reasoning += chunk_reasoning
                                 ui.stream_thought(chunk_reasoning, done=False)
                             if chunk_text:
-                                streamed_text += str(chunk_text)
+                                chunk_visible_text = str(chunk_text)
+                                streamed_text += chunk_visible_text
                                 stream_response = getattr(ui, "stream_response", None)
                                 if callable(stream_response):
-                                    stream_response(streamed_text, done=False)
+                                    stream_response(chunk_visible_text, done=False)
                                 elif not streamed_reasoning:
                                     ui.stream_thought(streamed_text, done=False)
                         flushed_think = think_tag_parser.flush()
@@ -2638,10 +2639,11 @@ class SelfEvolvingAgent:
                             streamed_reasoning += flushed_think.reasoning_text
                             ui.stream_thought(flushed_think.reasoning_text, done=False)
                         if flushed_think.visible_text:
-                            streamed_text += flushed_think.visible_text
+                            flushed_visible_text = str(flushed_think.visible_text)
+                            streamed_text += flushed_visible_text
                             stream_response = getattr(ui, "stream_response", None)
                             if callable(stream_response):
-                                stream_response(streamed_text, done=False)
+                                stream_response(flushed_visible_text, done=False)
                             elif not streamed_reasoning:
                                 ui.stream_thought(streamed_text, done=False)
                         if full_chunk is not None:

@@ -134,15 +134,6 @@ def run_cli_agent(
 
     cwd_result = _resolve_run_cwd(cwd, mode=normalized_mode)
 
-    executable = _resolve_executable(adapter)
-    if not executable:
-        return _error_result(
-            "CLI_AGENT_NOT_FOUND",
-            f"{adapter['label']} executable was not found on PATH.",
-            agent_type=normalized_type,
-            executableCandidates=list(adapter.get("executableCandidates") or []),
-        )
-
     if not cwd_result.get("ok"):
         return _error_result(
             str(cwd_result.get("code") or "INVALID_CWD"),
@@ -197,9 +188,20 @@ def run_cli_agent(
                 mode=normalized_mode,
                 durationMs=duration_ms,
             )
+            if result.get("code") == "CLI_AGENT_NOT_FOUND":
+                result["executableCandidates"] = list(adapter.get("executableCandidates") or [])
             result["logPath"] = _write_run_record(result)
             _record_event("cli_agent.run.task_broker_failed", outcome="failed", fields=_event_fields(result, task_hash=task_hash))
             return result
+
+    executable = _resolve_executable(adapter)
+    if not executable:
+        return _error_result(
+            "CLI_AGENT_NOT_FOUND",
+            f"{adapter['label']} executable was not found on PATH.",
+            agent_type=normalized_type,
+            executableCandidates=list(adapter.get("executableCandidates") or []),
+        )
 
     args_result = _build_command_args(
         adapter,
