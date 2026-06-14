@@ -19,6 +19,8 @@ from core.runtime_manager import work_run_store
 from core.runtime_manager import workbench_controller
 from core.runtime_manager.work_run_store import WorkRunStore
 
+pytestmark = pytest.mark.serial
+
 
 def _repeat_last(items):
     values = list(items)

@@ -1,6 +1,10 @@
 import json
 
+import pytest
+
 from core.runtime_manager import state_store
+
+pytestmark = pytest.mark.serial
 
 
 def test_save_state_suppresses_persistent_windows_lock(tmp_path, monkeypatch, capsys):

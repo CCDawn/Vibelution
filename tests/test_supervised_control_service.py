@@ -8,6 +8,8 @@ from core.web.services import supervised_control_service as service
 from core.web.services import supervised_conversation_harness_adapter as conversation_adapter
 from tests.helpers.chat_turn_harness import wait_for_condition
 
+pytestmark = pytest.mark.serial
+
 
 @pytest.fixture(autouse=True)
 def reset_supervised_run_state(monkeypatch: pytest.MonkeyPatch):

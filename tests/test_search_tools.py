@@ -28,6 +28,8 @@ from tools.search_tools import (
     search_and_read_tool,
 )
 
+pytestmark = pytest.mark.serial
+
 
 # ============================================================================
 # 测试辅助函数和数据

@@ -24,6 +24,8 @@ from tools.shell_tools import (
     extract_symbols, self_test,
 )
 
+pytestmark = pytest.mark.serial
+
 
 # ============================================================================
 # 测试辅助函数
