@@ -418,6 +418,11 @@ describe("MemoryRoute layout contract", () => {
     expect(routeSource).toContain("copy.bulkRestore");
     expect(routeSource).toContain("styles.editPreviewPanel");
     expect(routeSource).toContain("styles.editPreviewGrid");
+    expect(memoryCssSource).toContain(".manageListPanel .itemButtonDense");
+    expect(memoryCssSource).toContain("min-height: 62px");
+    expect(memoryCssSource).toContain(".manageListPanel .itemContentButtonDense");
+    expect(memoryCssSource).toContain("grid-template-rows: 16px 14px 18px");
+    expect(memoryCssSource).toContain(".manageListPanel .manageItemBadges > span");
   });
 
   it("surfaces agent visibility, prompt injection, and raw content in the detail pane", () => {
