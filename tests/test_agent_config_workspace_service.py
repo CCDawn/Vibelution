@@ -2406,7 +2406,7 @@ def test_agent_config_workspace_agent_patch_updates_card_fields(tmp_path, monkey
     assert payload["llmBindings"]["dialogue"]["modelId"] == "model-research"
     assert "profileId" not in payload
     assert payload["promptTemplateId"] == "prompt-research-broad"
-    assert payload["toolPolicyId"] == "default"
+    assert payload["toolPolicyId"] == f"tool-{agent['agentId']}"
     assert payload["memoryPolicyId"] == memory_policy_id
 
 
