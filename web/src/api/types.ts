@@ -1526,6 +1526,8 @@ export type GitStatusSummary = {
   snapshotId: string;
   createdAt: string;
   dirty: boolean;
+  requiresAttention: boolean;
+  statusLevel: "clean" | "dirty" | "local_commits" | "worktree_commits" | "behind" | "diverged" | "unavailable";
   summary: string;
   counts: {
     total: number;
@@ -1533,6 +1535,33 @@ export type GitStatusSummary = {
     unstaged: number;
     untracked: number;
     deleted: number;
+  };
+  localCommits: {
+    available: boolean;
+    error: string;
+    total: number;
+    commits: GitCommitSummary[];
+    truncated: boolean;
+  };
+  worktrees: {
+    available: boolean;
+    error: string;
+    total: number;
+    external: number;
+    withCommits: number;
+    items: Array<{
+      path: string;
+      branch: string;
+      branchRef: string;
+      headRev: string;
+      headRevShort: string;
+      isMain: boolean;
+      isCurrent: boolean;
+      aheadMain: number;
+      behindMain: number;
+      hasCommits: boolean;
+    }>;
+    truncated: boolean;
   };
   files: GitStatusFile[];
   totalFiles: number;

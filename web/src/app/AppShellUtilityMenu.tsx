@@ -107,10 +107,20 @@ export function AppShellUtilityMenu({ lang, t, frontendVisible, onClose }: AppSh
     : "";
   const gitAvailable = Boolean(gitStatus?.available);
   const gitDirty = Boolean(gitStatus?.dirty);
-  const gitTone: SystemStatusTone = gitAvailable ? (gitDirty ? "caution" : "running") : "idle";
+  const gitAttention = Boolean(gitStatus?.requiresAttention ?? gitDirty);
+  const gitTone: SystemStatusTone = gitAvailable ? (gitAttention ? "caution" : "running") : "idle";
   const gitBranch = gitStatus?.branch || gitStatus?.headRevShort || "-";
+  const gitAhead = gitStatus?.upstream?.ahead ?? 0;
+  const gitBehind = gitStatus?.upstream?.behind ?? 0;
+  const gitWorktreeCommits = gitStatus?.worktrees?.withCommits ?? 0;
   const gitValue = gitAvailable
-    ? gitDirty
+    ? gitAhead > 0
+      ? `+${gitAhead}`
+      : gitBehind > 0
+        ? `-${gitBehind}`
+        : gitWorktreeCommits > 0
+          ? `${gitWorktreeCommits} wt`
+          : gitDirty
       ? `${gitStatus?.counts.total ?? 0}`
       : t("gitClean")
     : gitStatusQuery.isPending
@@ -223,7 +233,21 @@ export function AppShellUtilityMenu({ lang, t, frontendVisible, onClose }: AppSh
           <strong>{gitBranch}</strong>
           <span>{t("gitUpstream")}</span>
           <strong>{gitStatus?.upstream?.name || gitStatus?.upstream?.remote || t("gitNoUpstream")}</strong>
+          <span>{t("gitLocalCommits")}</span>
+          <strong>{gitAhead} / {gitBehind}</strong>
+          <span>{t("gitWorktrees")}</span>
+          <strong>{gitWorktreeCommits} / {gitStatus?.worktrees?.total ?? 0}</strong>
         </div>
+        {gitStatus?.localCommits?.commits?.length ? (
+          <div className={styles.gitCommitList} aria-label={t("gitLocalCommits")}>
+            {gitStatus.localCommits.commits.slice(0, 3).map((commit) => (
+              <div key={commit.sha} className={styles.gitCommitItem}>
+                <code>{commit.shortSha}</code>
+                <span>{commit.subject}</span>
+              </div>
+            ))}
+          </div>
+        ) : null}
         <div className={styles.gitCountGrid}>
           <span>
             <strong>{gitStatus?.counts.staged ?? 0}</strong>
@@ -250,9 +274,19 @@ export function AppShellUtilityMenu({ lang, t, frontendVisible, onClose }: AppSh
             </div>
           ))}
           {gitStatus?.truncated ? <p>{t("gitTruncated")}</p> : null}
-          {gitStatus && gitStatus.available && !gitStatus.files.length ? <p>{t("gitNoChanges")}</p> : null}
+          {gitStatus && gitStatus.available && !gitStatus.requiresAttention ? <p>{t("gitNoChanges")}</p> : null}
           {gitStatus && !gitStatus.available ? <p>{gitStatus.error || t("gitUnavailable")}</p> : null}
         </div>
+        {gitStatus?.worktrees?.items?.length ? (
+          <div className={styles.gitWorktreeList} aria-label={t("gitWorktrees")}>
+            {gitStatus.worktrees.items.slice(0, 5).map((item) => (
+              <div key={`${item.path}-${item.branch}`} className={styles.gitWorktreeItem}>
+                <strong>{item.branch || item.headRevShort}</strong>
+                <span>{item.isMain ? "main" : `${item.aheadMain} / ${item.behindMain}`}</span>
+              </div>
+            ))}
+          </div>
+        ) : null}
       </div>
     </div>
   );

@@ -50,4 +50,11 @@ describe("GitRoute layout contract", () => {
     expect(routeSource).toContain("stagedOutsideSelection");
     expect(routeSource).toContain("gitCommitSelected");
   });
+
+  it("surfaces local commits and worktree branch pressure in the summary cards", () => {
+    expect(routeSource).toContain("localCommitCount");
+    expect(routeSource).toContain("worktreeBranchCount");
+    expect(routeSource).toContain('t("gitLocalCommits")');
+    expect(routeSource).toContain('t("gitWorktreeBranches")');
+  });
 });

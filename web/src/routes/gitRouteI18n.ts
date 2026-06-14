@@ -57,6 +57,7 @@ export const gitRouteDictionary = {
     gitFilterUnstaged: "未暂存",
     gitFilterUntracked: "未跟踪",
     gitHead: "HEAD",
+    gitLocalCommits: "本地提交",
     gitManualCommit: "手动提交",
     gitNoCommits: "没有可显示的提交记录。",
     gitNoMatchingChanges: "没有匹配当前筛选的变化文件。",
@@ -75,6 +76,8 @@ export const gitRouteDictionary = {
     gitStatusUnavailable: "当前仓库 Git 状态不可用。",
     gitUnselectFile: "取消选择此文件",
     gitUpstream: "上游",
+    gitWorktreeBranches: "Worktree 分支",
+    gitWorktrees: "Worktree",
   },
   en: {
     changed: "changed",
@@ -129,6 +132,7 @@ export const gitRouteDictionary = {
     gitFilterUnstaged: "Unstaged",
     gitFilterUntracked: "Untracked",
     gitHead: "HEAD",
+    gitLocalCommits: "Local commits",
     gitManualCommit: "Manual commit",
     gitNoCommits: "No commits to show.",
     gitNoMatchingChanges: "No changed files match the current filter.",
@@ -147,6 +151,8 @@ export const gitRouteDictionary = {
     gitStatusUnavailable: "Git status is unavailable for this workspace.",
     gitUnselectFile: "Unselect this file",
     gitUpstream: "Upstream",
+    gitWorktreeBranches: "Worktree branches",
+    gitWorktrees: "Worktrees",
   },
 } as const;
 
