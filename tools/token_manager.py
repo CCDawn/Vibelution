@@ -1102,7 +1102,7 @@ def format_compression_report(compressor: Any) -> str:
 
 
 # ============================================================================
-# 主动压缩工具 — 模型感知到疲惫时可主动调用
+# 主动检查点/压缩请求工具 — 模型感知到上下文拥挤时可主动调用
 # ============================================================================
 
 # 模块级标志：工具设置，agent 主循环检查并执行
@@ -1111,11 +1111,11 @@ _compression_reason: str = ""
 
 
 def request_compression(reason: str = "主动压缩") -> str:
-    """请求上下文压缩（由 compress_context_tool 调用）"""
+    """请求上下文检查点或压缩 fallback（由 compress_context_tool 调用）"""
     global _compression_requested, _compression_reason
     _compression_requested = True
     _compression_reason = reason
-    return f"已请求上下文压缩: {reason}。压缩将在下一次迭代时执行。"
+    return f"已请求上下文检查点/压缩 fallback: {reason}。原始会话历史不会被删除或改写。"
 
 
 def is_compression_requested() -> bool:
@@ -1134,10 +1134,10 @@ def consume_compression_request() -> str:
 
 def compress_context_tool(reason: str = "主动压缩") -> str:
     """
-    主动压缩上下文，释放思维空间。
+    请求上下文检查点或压缩 fallback。
 
-    当你感到思绪拥挤、上下文混乱、或需要更多空间思考时调用。
-    压缩会保留最近的关键对话，将旧内容压缩为摘要。
+    当你感到上下文过长或需要整理旧证据时调用。原始会话历史不会被删除或改写；
+    旧证据应通过 history_search_tool / history_fetch_tool 精确查询。
 
     Args:
         reason: 压缩原因（如"上下文太长"、"需要更多空间"）

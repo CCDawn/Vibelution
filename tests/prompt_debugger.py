@@ -379,6 +379,66 @@ TOOL_TEST_SUITES: Dict[str, Dict] = {
             },
         ],
     },
+    "history_search_tool": {
+        "name": "会话历史搜索工具",
+        "description": "按关键词、事件类型、工具名或角色搜索当前会话历史事件",
+        "params": {
+            "query": "关键词",
+            "event_type": "user_message / assistant_message / tool_call / tool_result / checkpoint",
+            "tool_name": "可选工具名",
+            "role": "user 或 assistant",
+            "limit": 8,
+            "session_id": "可选目标会话 ID",
+        },
+        "scenarios": [
+            {
+                "scenario": "查找旧工具结果",
+                "prompt": "用户问：刚才已经跑过测试了吗？先搜索当前会话里和 pytest 有关的历史工具结果，避免重复执行。",
+                "expected_tool": "history_search_tool",
+            },
+        ],
+    },
+    "history_fetch_tool": {
+        "name": "会话历史读取工具",
+        "description": "按 event_id 精确读取一条会话历史事件详情",
+        "params": {"event_id": "历史事件 ID", "session_id": "可选目标会话 ID"},
+        "scenarios": [
+            {
+                "scenario": "读取精确历史事件",
+                "prompt": "已知 history_search_tool 返回的 eventId 是 m18:tool_result:0，请读取这条历史事件的完整内容。",
+                "expected_tool": "history_fetch_tool",
+            },
+        ],
+    },
+    "history_timeline_tool": {
+        "name": "会话时间线工具",
+        "description": "在不知道关键词时浏览当前会话历史事件时间线",
+        "params": {
+            "start": 0,
+            "limit": 20,
+            "include_tools": False,
+            "session_id": "可选目标会话 ID",
+        },
+        "scenarios": [
+            {
+                "scenario": "浏览历史时间线",
+                "prompt": "用户问：这轮对话前面都做了什么？先浏览当前会话最近的历史时间线，不要重新判断用户意图。",
+                "expected_tool": "history_timeline_tool",
+            },
+        ],
+    },
+    "history_checkpoint_tool": {
+        "name": "会话检查点工具",
+        "description": "读取当前会话最近的历史检查点，用于导航旧历史",
+        "params": {"session_id": "可选目标会话 ID"},
+        "scenarios": [
+            {
+                "scenario": "读取最近检查点",
+                "prompt": "当前上下文很长，先读取这个会话最近的历史检查点，再决定要不要继续查旧事件。",
+                "expected_tool": "history_checkpoint_tool",
+            },
+        ],
+    },
 }
 
 

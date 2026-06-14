@@ -37,6 +37,7 @@ from core.context.skill_contract import (
 from core.chat.chat_result_contract import build_chat_coding_result_contract
 from core.chat.chat_result_formatter import format_chat_reply
 from core.chat.chat_task_types import trim_lines
+from core.chat.context_assembler import assemble_conversation_context
 from core.chat.skill_registry import build_skill_runtime_context, skill_descriptor_for_log
 from core.chat.slash_commands import SkillSlashCommand, parse_skill_slash_command
 from core.infrastructure.event_bus import EventNames, get_event_bus
@@ -175,93 +176,6 @@ _SESSION_USER_IMAGE_MAX_BYTES = 8 * 1024 * 1024
 SESSION_USER_IMAGE_MAX_BYTES = _SESSION_USER_IMAGE_MAX_BYTES
 SESSION_PROMPT_CACHE_SCOPE_AGENT_STATIC = "chat_agent_static"
 SESSION_PROMPT_CACHE_SCOPE_SESSION_FALLBACK = "chat_session_fallback"
-_LIGHTWEIGHT_CHAT_HISTORY_MESSAGE_LIMIT = 6
-_LIGHTWEIGHT_CHAT_MAX_COMPACT_CHARS = 24
-_LIGHTWEIGHT_CHAT_EXACT_MESSAGES = {
-    "hello",
-    "hey",
-    "hi",
-    "ok",
-    "thanks",
-    "thankyou",
-    "你好",
-    "您好",
-    "嗨",
-    "哈喽",
-    "在吗",
-    "谢谢",
-    "感谢",
-    "辛苦了",
-    "收到",
-}
-_LIGHTWEIGHT_CHAT_TOOL_INTENT_MARKERS = (
-    "agent",
-    "api",
-    "backend",
-    "branch",
-    "bug",
-    "build",
-    "codex",
-    "commit",
-    "config",
-    "debug",
-    "diagnose",
-    "error",
-    "fix",
-    "frontend",
-    "git",
-    "implement",
-    "log",
-    "merge",
-    "performance",
-    "profile",
-    "push",
-    "review",
-    "run",
-    "test",
-    "tool",
-    "vibelution",
-    "worktree",
-    "上线",
-    "修改",
-    "修复",
-    "优化",
-    "分支",
-    "分析",
-    "前端",
-    "后端",
-    "合并",
-    "启动",
-    "审查",
-    "工具",
-    "性能",
-    "执行",
-    "提交",
-    "接口",
-    "排查",
-    "推送",
-    "改动",
-    "文件",
-    "日志",
-    "权限",
-    "测试",
-    "生成",
-    "看一下",
-    "确认",
-    "继续",
-    "规划",
-    "解决",
-    "诊断",
-    "记忆",
-    "配置",
-    "部署",
-    "错误",
-    "问题",
-    "项目",
-    "验证",
-    "慢",
-    "卡",
-)
 
 
 def _perf_counter() -> float:
@@ -5349,6 +5263,13 @@ def _normalize_messages(conversation_id: str, items: Any) -> list[dict[str, Any]
         role = str(raw.get("role") or "").strip().lower()
         if role not in {"user", "assistant"}:
             continue
+        raw_metadata = raw.get("metadata")
+        if (
+            role == "assistant"
+            and isinstance(raw_metadata, dict)
+            and str(raw_metadata.get("kind") or "").strip() == "checkpoint"
+        ):
+            continue
         content = _sanitize_message_content(role, raw.get("content") or "")
         thought = _normalize_message_thought(raw, role=role)
         mental_snapshot = _normalize_mental_snapshot(raw.get("mental_snapshot") or raw.get("mentalSnapshot"))
@@ -5376,7 +5297,7 @@ def _normalize_messages(conversation_id: str, items: Any) -> list[dict[str, Any]
             entry["attachments"] = attachments
         if references:
             entry["references"] = references
-        metadata = raw.get("metadata")
+        metadata = raw_metadata
         if isinstance(metadata, dict) and metadata:
             entry["metadata"] = dict(metadata)
             if role == "assistant" and str(metadata.get("kind") or "").strip() == "turn_error":
@@ -5560,26 +5481,6 @@ def _history_messages_for_agent_seed(items: Any) -> list[dict[str, Any]]:
     return filtered
 
 
-def _compact_lightweight_chat_text(text: Any) -> str:
-    compact = re.sub(r"\s+", "", str(text or "").strip().lower())
-    return re.sub(r"[，,。.!！?？、；;：:]+", "", compact)
-
-
-def _lightweight_chat_has_tool_intent_marker(message: str, compact: str) -> bool:
-    lowered = str(message or "").strip().lower()
-    for marker in _LIGHTWEIGHT_CHAT_TOOL_INTENT_MARKERS:
-        value = str(marker or "").strip().lower()
-        if not value:
-            continue
-        if re.fullmatch(r"[a-z0-9_]+", value):
-            if re.search(rf"(?<![a-z0-9_]){re.escape(value)}(?![a-z0-9_])", lowered):
-                return True
-            continue
-        if value in compact:
-            return True
-    return False
-
-
 def _lightweight_chat_payload_decision(
     context: dict[str, Any],
     *,
@@ -5602,30 +5503,7 @@ def _lightweight_chat_payload_decision(
     message = raw_message or effective_message
     if not message:
         return False, "empty_message"
-    if _looks_like_agent_inbox_protocol_message(message):
-        return False, "agent_inbox_protocol"
-    if _is_continue_request(message):
-        return False, "continue_request"
-    if _is_contextual_confirmation_message(message):
-        return False, "contextual_confirmation"
-
-    compact = _compact_lightweight_chat_text(message)
-    if not compact:
-        return False, "empty_compact_message"
-    if _lightweight_chat_has_tool_intent_marker(message, compact):
-        return False, "tool_intent_marker"
-    if compact in _LIGHTWEIGHT_CHAT_EXACT_MESSAGES:
-        return True, "exact_short_dialogue"
-    if len(compact) <= _LIGHTWEIGHT_CHAT_MAX_COMPACT_CHARS:
-        return True, "short_dialogue"
-    return False, "message_too_long"
-
-
-def _trim_lightweight_chat_history(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    normalized = list(messages or [])
-    if len(normalized) <= _LIGHTWEIGHT_CHAT_HISTORY_MESSAGE_LIMIT:
-        return normalized
-    return normalized[-_LIGHTWEIGHT_CHAT_HISTORY_MESSAGE_LIMIT:]
+    return False, "unified_conversation_chain"
 
 
 def _should_omit_message_from_agent_history(message: dict[str, Any]) -> bool:
@@ -5637,6 +5515,12 @@ def _should_omit_message_from_agent_history(message: dict[str, Any]) -> bool:
     if role == "user" and _is_system_authored_user_message_entry(message):
         return True
     attachments = _normalize_message_attachments(message.get("attachments") or message.get("imageAttachments") or [])
+    if role == "assistant":
+        tool_calls = _normalize_message_tool_calls(
+            message.get("tool_calls") or message.get("toolCalls") or message.get("tools") or []
+        )
+        if tool_calls:
+            return False
     if role != "user":
         return role == "assistant" and (
             not content
@@ -6154,6 +6038,8 @@ def _build_session_detail_from_summary(
     active_task = _normalize_session_active_task(
         conversation.get("active_task") or conversation.get("activeTask")
     )
+    if not _is_task_tool_backed_active_task(active_task):
+        active_task = None
     live_work_run = _active_chat_turn_work_run_for_session(conversation["id"])
     active_task = _active_task_with_live_work_run(active_task, live_work_run)
     changed_files = list(active_task.get("changed_files") or []) if active_task else []
@@ -6371,6 +6257,8 @@ def _active_task_with_live_work_run(
     active_task: dict[str, Any] | None,
     live_work_run: dict[str, Any] | None,
 ) -> dict[str, Any] | None:
+    if not _is_task_tool_backed_active_task(active_task):
+        return active_task
     if not isinstance(live_work_run, dict):
         return active_task
     status = str(live_work_run.get("status") or live_work_run.get("currentPhase") or "").strip().lower()
@@ -8623,10 +8511,13 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                 if callable(stop_configurer):
                     stop_configurer(lambda: _get_turn_control_stop_reason(turn_control))
                 raw_history_messages = list(context.get("history_messages") or [])
-                history_messages = _history_messages_for_agent_seed(raw_history_messages)
-                full_history_message_count = len(history_messages)
-                if lightweight_chat_payload:
-                    history_messages = _trim_lightweight_chat_history(history_messages)
+                seedable_history_messages = _history_messages_for_agent_seed(raw_history_messages)
+                context_assembly = assemble_conversation_context(
+                    seedable_history_messages,
+                    session_id=session_id,
+                )
+                history_messages = context_assembly.history_messages
+                full_history_message_count = len(seedable_history_messages)
                 static_runtime_context_block = (
                     str(getattr(agent_context_packet, "static_context_block", "") or "").strip()
                     if agent_context_packet is not None
@@ -8720,24 +8611,6 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                         volatile_runtime_context_seed(active_skill_context_block)
                         active_skill_context_included = True
                     active_skill_context_seed_ms = _elapsed_ms(active_skill_stage_started_at)
-                if lightweight_chat_payload:
-                    _record_session_turn_lifecycle_event(
-                        session_id,
-                        "lightweight_chat_payload",
-                        turn_id=turn_id,
-                        outcome="enabled",
-                        fields={
-                            "reason": lightweight_chat_payload_reason,
-                            "disableTools": True,
-                            "runtimeContextSkipped": not bool(runtime_context_block),
-                            "staticRuntimeContextSkipped": not bool(static_runtime_context_block),
-                            "dynamicRuntimeContextSkipped": not bool(dynamic_runtime_context_block),
-                            "rawHistoryMessageCount": len(raw_history_messages),
-                            "fullSeedableHistoryMessageCount": full_history_message_count,
-                            "seededHistoryMessageCount": len(history_messages),
-                            "historyLimit": _LIGHTWEIGHT_CHAT_HISTORY_MESSAGE_LIMIT,
-                        },
-                    )
                 _record_session_turn_lifecycle_event(
                     session_id,
                     "history_seeded",
@@ -8747,6 +8620,10 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                         "rawHistoryMessageCount": len(list(context.get("history_messages") or [])),
                         "fullSeedableHistoryMessageCount": full_history_message_count,
                         "seededHistoryMessageCount": len(history_messages),
+                        "historyLedgerEventCount": len(context_assembly.events),
+                        "historyIncludedEventCount": len(context_assembly.included_event_ids),
+                        "historyOmittedEventCount": context_assembly.omitted_event_count,
+                        "historyCheckpointEventId": context_assembly.checkpoint_event_id,
                         "agentRuntimeContextIncluded": bool(static_runtime_context_block),
                         "staticRuntimeContextIncluded": bool(static_runtime_context_block),
                         "dynamicRuntimeContextIncluded": dynamic_runtime_context_included,
@@ -8857,6 +8734,7 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                     attachments=attachments,
                     prompt_cache_partition=prompt_cache_partition,
                 )
+                context_composition["contextAssembly"] = context_assembly.to_composition_patch()
                 context_cache = (
                     context_composition.get("cache")
                     if isinstance(context_composition.get("cache"), dict)
