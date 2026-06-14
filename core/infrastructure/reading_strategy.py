@@ -20,6 +20,36 @@ class ReadingStrategy:
     rationale: str
 
 
+def _current_agent_visible_tool_names() -> set[str] | None:
+    try:
+        from core.web.services.agent_directory_service import (
+            current_agent_runtime,
+            effective_visible_tool_names_for_current_agent,
+        )
+
+        runtime = current_agent_runtime()
+        if not str((runtime or {}).get("agentId") or "").strip():
+            return None
+        return set(effective_visible_tool_names_for_current_agent())
+    except Exception:
+        return None
+
+
+def _filter_for_current_agent(tool_names: List[str]) -> List[str]:
+    visible = _current_agent_visible_tool_names()
+    if visible is None:
+        return list(tool_names)
+    return [name for name in tool_names if name in visible]
+
+
+def _reading_strategy(task_type: str, recommended_tools: List[str], rationale: str) -> ReadingStrategy:
+    return ReadingStrategy(
+        task_type=task_type,
+        recommended_tools=_filter_for_current_agent(recommended_tools),
+        rationale=rationale,
+    )
+
+
 def infer_reading_task(prompt: str = "", current_status: str = "", last_validation: str = "") -> str:
     text = " ".join(part for part in [prompt or "", current_status or "", last_validation or ""] if part).lower()
 
@@ -37,30 +67,30 @@ def infer_reading_task(prompt: str = "", current_status: str = "", last_validati
 def build_reading_strategy(prompt: str = "", current_status: str = "", last_validation: str = "") -> ReadingStrategy:
     task_type = infer_reading_task(prompt=prompt, current_status=current_status, last_validation=last_validation)
     if task_type == "verify":
-        return ReadingStrategy(
+        return _reading_strategy(
             task_type=task_type,
             recommended_tools=["grep_search_tool", "read_file_tool", "python_lint_tool"],
             rationale="先看验证输出和命中位置，再分页读取相关片段。",
         )
     if task_type == "modify":
-        return ReadingStrategy(
+        return _reading_strategy(
             task_type=task_type,
             recommended_tools=["code_symbol_tool", "read_file_tool"],
             rationale="优先用代码图谱确认影响范围和候选测试，再补局部文件上下文。",
         )
     if task_type == "analyze":
-        return ReadingStrategy(
+        return _reading_strategy(
             task_type=task_type,
             recommended_tools=["grep_search_tool", "code_symbol_tool", "read_file_tool"],
             rationale="先定位症状路径，再补局部证据做归因。",
         )
     if task_type == "understand":
-        return ReadingStrategy(
+        return _reading_strategy(
             task_type=task_type,
             recommended_tools=["code_symbol_tool", "read_file_tool"],
             rationale="先看项目图谱，再读目标文件、符号和局部上下文。",
         )
-    return ReadingStrategy(
+    return _reading_strategy(
         task_type="locate",
         recommended_tools=["grep_search_tool", "code_symbol_tool"],
         rationale="先缩小范围，再用代码图谱决定读哪个文件、符号或影响链。",

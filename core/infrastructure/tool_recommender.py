@@ -18,6 +18,40 @@ class ToolDecision:
     fallback_if_failed: List[str]
 
 
+def _current_agent_visible_tool_names() -> set[str] | None:
+    try:
+        from core.web.services.agent_directory_service import (
+            current_agent_runtime,
+            effective_visible_tool_names_for_current_agent,
+        )
+
+        runtime = current_agent_runtime()
+        if not str((runtime or {}).get("agentId") or "").strip():
+            return None
+        return set(effective_visible_tool_names_for_current_agent())
+    except Exception:
+        return None
+
+
+def _filter_for_current_agent(tool_names: List[str], visible: set[str] | None) -> List[str]:
+    if visible is None:
+        return list(tool_names)
+    return [name for name in tool_names if name in visible]
+
+
+def _policy_aware_decision(decision: ToolDecision) -> ToolDecision:
+    visible = _current_agent_visible_tool_names()
+    if visible is None:
+        return decision
+    return ToolDecision(
+        next_intent=decision.next_intent,
+        recommended_tools=_filter_for_current_agent(decision.recommended_tools, visible),
+        avoid_tools=_filter_for_current_agent(decision.avoid_tools, visible),
+        reason=decision.reason,
+        fallback_if_failed=_filter_for_current_agent(decision.fallback_if_failed, visible),
+    )
+
+
 def decide_next_tools(snapshot: Dict[str, Any]) -> ToolDecision:
     task = snapshot.get("reading_task") or "locate"
     sufficiency = snapshot.get("reading_sufficiency") or ""
@@ -46,125 +80,125 @@ def decide_next_tools(snapshot: Dict[str, Any]) -> ToolDecision:
     modify_enough = "已足够" in sufficiency or "可开始动手" in sufficiency
 
     if task == "modify" and modify_enough:
-        return ToolDecision(
+        return _policy_aware_decision(ToolDecision(
             next_intent="edit_target",
             recommended_tools=["apply_diff_edit_tool"],
             avoid_tools=["grep_search_tool", "read_file_tool", "cli_tool"],
             reason="修改上下文已足够，继续读取会稀释当前证据；直接进入编辑并保留验证闭环。",
             fallback_if_failed=["code_symbol_tool", "grep_search_tool"],
-        )
+        ))
 
     if duplicate_read_seen and has_detail:
-        return ToolDecision(
+        return _policy_aware_decision(ToolDecision(
             next_intent="synthesize_answer",
             recommended_tools=[],
             avoid_tools=["read_file_tool", "cli_tool"],
             reason="最新读取与已读范围重叠，没有新增证据；先综合现有证据、明确缺口或进入修改，不要继续顺序读取。",
             fallback_if_failed=["code_symbol_tool", "grep_search_tool"],
-        )
+        ))
 
     if pending_continuations:
         latest = pending_continuations[-1]
         path = latest.get("path") or ""
         if has_detail or enough_for_conclusion:
-            return ToolDecision(
+            return _policy_aware_decision(ToolDecision(
                 next_intent="synthesize_answer",
                 recommended_tools=[],
                 avoid_tools=["read_file_tool", "cli_tool"],
                 reason="上一段结果还有剩余内容，但当前已有局部证据；先综合现有证据或说明精确缺口，不要按剩余内容顺序翻页。",
                 fallback_if_failed=["code_symbol_tool", "grep_search_tool"],
-            )
+            ))
         reason = (
             f"上一段结果还有剩余内容，但不要默认顺序补读 {path}；先按目标判断缺少文本命中、结构还是实体上下文。"
             if path
             else "上一段结果还有剩余内容，但不要默认顺序补读；先按目标判断缺少哪类证据。"
         )
-        return ToolDecision(
+        return _policy_aware_decision(ToolDecision(
             next_intent="choose_read_target",
             recommended_tools=["grep_search_tool", "code_symbol_tool"],
             avoid_tools=["read_file_tool", "cli_tool"],
             reason=reason,
             fallback_if_failed=["code_symbol_tool"],
-        )
+        ))
 
     if task == "verify":
-        return ToolDecision(
+        return _policy_aware_decision(ToolDecision(
             next_intent="inspect_range" if validations else "locate_text",
             recommended_tools=["run_test_for_tool", "read_file_tool"],
             avoid_tools=["cli_tool"] if validations else [],
             reason="验证任务优先读取失败输出与相关片段，再决定复测。",
             fallback_if_failed=["grep_search_tool", "python_lint_tool"],
-        )
+        ))
 
     if task == "modify":
         if any(read_entities.values()) and not any(read_ranges.values()):
-            return ToolDecision(
+            return _policy_aware_decision(ToolDecision(
                 next_intent="inspect_range",
                 recommended_tools=["read_file_tool"],
                 avoid_tools=["cli_tool"],
                 reason="已定位目标实体，但还缺一段局部上下文；只补目标片段。",
                 fallback_if_failed=["code_symbol_tool", "grep_search_tool"],
-            )
-        return ToolDecision(
+            ))
+        return _policy_aware_decision(ToolDecision(
             next_intent="inspect_entity",
             recommended_tools=["code_symbol_tool", "read_file_tool"],
             avoid_tools=["cli_tool"],
             reason="修改任务先拿到目标实体和上下文；证据足够后直接进入编辑。",
             fallback_if_failed=["code_symbol_tool", "grep_search_tool"],
-        )
+        ))
 
     if task == "understand":
         if enough_for_conclusion and has_detail:
-            return ToolDecision(
+            return _policy_aware_decision(ToolDecision(
                 next_intent="synthesize_answer",
                 recommended_tools=[],
                 avoid_tools=["read_file_tool", "cli_tool"],
                 reason="理解上下文已够形成结论；先输出归纳或明确缺口，不再机械补读。",
                 fallback_if_failed=["code_symbol_tool"],
-            )
-        return ToolDecision(
+            ))
+        return _policy_aware_decision(ToolDecision(
             next_intent="inspect_structure" if not read_entities else "inspect_entity",
             recommended_tools=["code_symbol_tool", "read_file_tool"],
             avoid_tools=["cli_tool"],
             reason="理解任务先看结构，再看实体。",
             fallback_if_failed=["read_file_tool"],
-        )
+        ))
 
     if task == "analyze":
         if has_detail and (has_location or enough_for_conclusion):
-            return ToolDecision(
+            return _policy_aware_decision(ToolDecision(
                 next_intent="synthesize_answer",
                 recommended_tools=[],
                 avoid_tools=["read_file_tool", "cli_tool"],
                 reason="归因已有搜索命中和局部证据；先形成分析结论或列出精确缺口。",
                 fallback_if_failed=["code_symbol_tool", "grep_search_tool"],
-            )
-        return ToolDecision(
+            ))
+        return _policy_aware_decision(ToolDecision(
             next_intent="locate_text" if not read_searches else "inspect_range",
             recommended_tools=["grep_search_tool", "read_file_tool"],
             avoid_tools=["cli_tool"],
             reason="归因任务先定位症状，再补局部证据。",
             fallback_if_failed=["code_symbol_tool"],
-        )
+        ))
 
     avoid = []
     if any(item.get("kind") == "duplicate_search" for item in blockers):
         avoid.append("grep_search_tool")
     if has_location and has_detail:
-        return ToolDecision(
+        return _policy_aware_decision(ToolDecision(
             next_intent="synthesize_answer",
             recommended_tools=[],
             avoid_tools=avoid + ["read_file_tool", "cli_tool"],
             reason="定位任务已有命中和局部证据；下一步应综合判断或说明缺口，而不是继续读取片段。",
             fallback_if_failed=["code_symbol_tool", "grep_search_tool"],
-        )
-    return ToolDecision(
+        ))
+    return _policy_aware_decision(ToolDecision(
         next_intent="locate_text" if not has_location else "inspect_entity",
         recommended_tools=["grep_search_tool", "code_symbol_tool"] if not has_location else ["code_symbol_tool", "read_file_tool"],
         avoid_tools=avoid + ["cli_tool"],
         reason="定位任务先命中，再转实体或局部上下文。",
         fallback_if_failed=["code_symbol_tool", "read_file_tool"],
-    )
+    ))
 
 
 def format_decision_summary(decision: ToolDecision) -> str:
