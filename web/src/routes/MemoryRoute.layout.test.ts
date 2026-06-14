@@ -580,4 +580,21 @@ describe("MemoryRoute layout contract", () => {
     expect(routeSource).toContain("styles.pipelinePanel");
     expect(routeSource).toContain("styles.pipelineSteps");
   });
+
+  it("keeps team knowledge governance compact and hides internal policy tokens behind readable labels", () => {
+    expect(routeSource).toContain("function policyTokenLabel");
+    expect(routeSource).toContain("function memoryDomainDisplayLabel");
+    expect(routeSource).toContain("policyTokenLabel(domain.promptDefault, lang)");
+    expect(routeSource).toContain("(memoryUsageContract?.domains ?? []).slice(0, 4).map");
+    expect(routeSource).toContain("memoryDomainDisplayLabel(domain.label, domain.domainId, lang)");
+    expect(routeSource).toContain("policyTokenLabel(knowledgeSteward?.steward.permissionBoundary");
+    expect(routeSource).toContain("compactInlineList(knowledgeSteward?.steward.toolPolicy.preferredTools, 3)");
+    expect(routeSource).toContain("compactInlineList(knowledgeSteward?.steward.toolPolicy.allowedTools, 2)");
+    expect(routeSource).toContain("className={styles.knowledgeGovernanceDeck}");
+
+    expect(memoryCssSource).toContain(".knowledgeGovernanceDeck");
+    expect(memoryCssSource).toContain("grid-template-columns: minmax(0, 1.04fr) minmax(0, 0.96fr)");
+    expect(memoryCssSource).toContain(".stewardRecommendationRow small {\n  display: none;");
+    expect(memoryCssSource).toContain(".knowledgeGovernanceDeck {\n    grid-template-columns: minmax(0, 1fr);");
+  });
 });
