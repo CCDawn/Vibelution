@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, Archive, ArrowLeft, Bot, CheckCircle2, Link2, Play, Plus, RefreshCw, Save, Search, Send, Trash2, Unlink, Users } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
+import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 
 import { fetchJson } from "../api/client";
@@ -233,11 +233,13 @@ type SourceCollectionStageModule = {
   metric: string;
   state: SourceCollectionStepState;
   status: string;
+  detailLabel: string;
   actionLabel: string;
   actionDisabled: boolean;
   actionTone: "primary" | "secondary";
   actionIcon: "play" | "search" | "check" | "archive" | "refresh";
   onAction: () => void;
+  onDetail: () => void;
 };
 
 type SourceCollectionStorageOpenTarget =
@@ -3264,7 +3266,7 @@ export function TeamsRoute({
           <span>{lang === "zh" ? "资料筛选" : "Source screening"}</span>
           <small>{sourceQualityAssessedCount}/{sourceQualityCandidateCount}</small>
         </summary>
-        <div id="source-collection-candidates-panel" className={styles.workflowSourceQualityStats}>
+        <div id="source-collection-screening-stats" className={styles.workflowSourceQualityStats}>
           <span>{lang === "zh" ? "候选" : "sources"} <strong>{sourceQualityCandidateCount}</strong></span>
           <span>{lang === "zh" ? "已筛" : "assessed"} <strong>{sourceQualityAssessedCount}</strong></span>
           <span>{lang === "zh" ? "通过" : "approved"} <strong>{sourceCollectionApprovedCount}</strong></span>
@@ -3388,6 +3390,202 @@ export function TeamsRoute({
         ) : null}
         {selectedTeamSourceQualityError ? (
           <div className={styles.messageError}>{selectedTeamSourceQualityError.message}</div>
+        ) : null}
+      </details>
+    );
+  }
+
+  function renderSourceCollectionCandidatePanel() {
+    const visibleCandidates = sourceManifestCandidates.slice(0, 12);
+    return (
+      <details
+        id="source-collection-candidates-panel"
+        className={sourceCollectionPanelClassName("source-collection-candidates-panel")}
+        open={
+          sourceCollectionExpandedPanelId === "source-collection-candidates-panel"
+          || sourceCollectionCandidateStepState === "active"
+        }
+        onToggle={(event) => {
+          if (!event.currentTarget.open && sourceCollectionExpandedPanelId === "source-collection-candidates-panel") {
+            setSourceCollectionExpandedPanelId("");
+          }
+        }}
+        tabIndex={-1}
+      >
+        <summary>
+          <span>{lang === "zh" ? "候选库" : "Candidate library"}</span>
+          <small>{sourceManifestCandidates.length}</small>
+        </summary>
+        <div className={styles.workflowSourceQualityStats}>
+          <span>{lang === "zh" ? "候选" : "candidates"} <strong>{sourceManifestCandidates.length}</strong></span>
+          <span>{lang === "zh" ? "已筛" : "assessed"} <strong>{sourceQualityAssessedCount}</strong></span>
+          <span>{lang === "zh" ? "通过" : "approved"} <strong>{sourceCollectionApprovedCount}</strong></span>
+          <span>{lang === "zh" ? "待筛" : "pending"} <strong>{sourceQualityUnassessedCount}</strong></span>
+        </div>
+        {visibleCandidates.length ? (
+          <div className={styles.workflowCandidateList}>
+            {visibleCandidates.map((candidate) => {
+              const sourceQualitySummary = candidateSourceQualityAssessmentSummary(candidate);
+              const chunkPlanSummary = candidatePaperNoteChunkPlanSummary(candidate);
+              const qualityText = sourceQualitySummary
+                ? `${workflowIngestionStatusLabel(sourceQualitySummary.decision, lang)} · ${sourceQualitySummary.overallScore}/100`
+                : (lang === "zh" ? "待筛选" : "pending screening");
+              return (
+                <article key={candidate.candidateId} className={styles.workflowCandidateItem}>
+                  <div className={styles.workflowCandidateHeader}>
+                    <strong>{candidate.title || candidate.candidateId}</strong>
+                    <span className={`${styles.workflowTag} ${workflowQualityTone(candidate.qualityStatus)}`}>
+                      {workflowStateLabel(candidate.currentState, lang)}
+                    </span>
+                  </div>
+                  <p>{candidate.summary || candidate.candidateId}</p>
+                  <div className={styles.workflowCandidateMeta}>
+                    <span>{sourceCollectionSourceTypeLabel(candidate.sourceKind || candidate.candidateType, lang)}</span>
+                    <span>{qualityText}</span>
+                    {chunkPlanSummary ? (
+                      <span>paper_note {chunkPlanSummary.completedChunkCount}/{chunkPlanSummary.chunkCount}</span>
+                    ) : null}
+                    <span>{formatTime(candidate.updatedAt, lang)}</span>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        ) : (
+          <div className={styles.empty}>{lang === "zh" ? "暂无候选资料。" : "No source candidates yet."}</div>
+        )}
+      </details>
+    );
+  }
+
+  function renderSourceCollectionGraphPanel() {
+    return (
+      <details
+        id="source-collection-graph-panel"
+        className={sourceCollectionPanelClassName("source-collection-graph-panel")}
+        open={
+          sourceCollectionExpandedPanelId === "source-collection-graph-panel"
+          || sourceCollectionGraphStepState === "active"
+        }
+        onToggle={(event) => {
+          if (!event.currentTarget.open && sourceCollectionExpandedPanelId === "source-collection-graph-panel") {
+            setSourceCollectionExpandedPanelId("");
+          }
+        }}
+        tabIndex={-1}
+      >
+        <summary>
+          <span>{lang === "zh" ? "候选图谱" : "Candidate graph"}</span>
+          <small>{candidateGraphNodeCount} / {candidateGraphEdgeCount}</small>
+        </summary>
+        {teamWorkflowCandidateGraph && teamWorkflowCandidateGraphLayout ? (
+          <>
+            <div className={styles.workflowGraphStats}>
+              <span>{lang === "zh" ? "节点" : "nodes"} <strong>{teamWorkflowCandidateGraph.summary.nodeCount}</strong></span>
+              <span>{lang === "zh" ? "边" : "edges"} <strong>{teamWorkflowCandidateGraph.summary.edgeCount}</strong></span>
+              <span>{lang === "zh" ? "缺口" : "missing"} <strong>{teamWorkflowCandidateGraph.summary.missingLinkCount}</strong></span>
+              <span>{lang === "zh" ? "待审" : "review"} <strong>{teamWorkflowCandidateGraph.summary.unreviewedNodeCount}</strong></span>
+            </div>
+            <div
+              className={styles.workflowGraphFrame}
+              style={{ "--workflow-graph-height": `${teamWorkflowCandidateGraphLayout.height}px` } as WorkflowGraphFrameStyle}
+            >
+              <svg
+                className={styles.workflowGraphSvg}
+                viewBox={`0 0 ${WORKFLOW_GRAPH_WIDTH} ${teamWorkflowCandidateGraphLayout.height}`}
+                preserveAspectRatio="xMinYMin meet"
+                aria-hidden="true"
+              >
+                <defs>
+                  <marker id="workflow-graph-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto">
+                    <path d="M 0 0 L 10 5 L 0 10 z" />
+                  </marker>
+                </defs>
+                {teamWorkflowCandidateGraphLayout.edges.map((edge) => {
+                  const path = workflowGraphEdgePath(edge, teamWorkflowCandidateGraphLayout.nodes);
+                  return path ? (
+                    <path
+                      key={`${edge.sourceCandidateId}-${edge.targetCandidateId}-${edge.relation}`}
+                      className={styles.workflowGraphEdge}
+                      d={path}
+                    />
+                  ) : null;
+                })}
+              </svg>
+              {teamWorkflowCandidateGraphLayout.nodes.map((node) => (
+                <div
+                  key={node.candidateId}
+                  className={`${styles.workflowGraphNode} ${workflowGraphNodeTone(node)}`}
+                  style={{
+                    "--workflow-graph-node-x": `${node.x}px`,
+                    "--workflow-graph-node-y": `${node.y}px`,
+                  } as WorkflowGraphNodeStyle}
+                  title={`${node.candidateId} · ${node.currentState}`}
+                >
+                  <strong>{node.title || node.candidateId}</strong>
+                  <span>{workflowStateLabel(node.currentState, lang)}</span>
+                </div>
+              ))}
+            </div>
+          </>
+        ) : (
+          <div className={styles.empty}>
+            {teamWorkflowCandidateGraphQuery.isPending
+              ? (lang === "zh" ? "正在读取候选图谱..." : "Loading candidate graph...")
+              : (lang === "zh" ? "尚未生成候选图谱。" : "No candidate graph yet.")}
+          </div>
+        )}
+        {teamWorkflowCandidateGraphQuery.error instanceof Error ? (
+          <div className={styles.messageError}>{teamWorkflowCandidateGraphQuery.error.message}</div>
+        ) : null}
+        {selectedTeamBuildCandidateGraphError ? (
+          <div className={styles.messageError}>{selectedTeamBuildCandidateGraphError.message}</div>
+        ) : null}
+      </details>
+    );
+  }
+
+  function renderSourceCollectionMemoryPanel() {
+    return (
+      <details
+        id="source-collection-memory-panel"
+        className={sourceCollectionPanelClassName("source-collection-memory-panel")}
+        open={
+          sourceCollectionExpandedPanelId === "source-collection-memory-panel"
+          || sourceCollectionMemoryStepState === "active"
+        }
+        onToggle={(event) => {
+          if (!event.currentTarget.open && sourceCollectionExpandedPanelId === "source-collection-memory-panel") {
+            setSourceCollectionExpandedPanelId("");
+          }
+        }}
+        tabIndex={-1}
+      >
+        <summary>
+          <span>{lang === "zh" ? "共享记忆前审" : "Memory precheck"}</span>
+          <small>{knowledgePendingReviewCount} / {formalKnowledgeItemCount}</small>
+        </summary>
+        <div className={styles.workflowSourceQualityStats}>
+          <span>{lang === "zh" ? "待审" : "pending"} <strong>{knowledgePendingReviewCount}</strong></span>
+          <span>{lang === "zh" ? "正式" : "formal"} <strong>{formalKnowledgeItemCount}</strong></span>
+          <span>{lang === "zh" ? "通过候选" : "approved"} <strong>{sourceCollectionApprovedCount}</strong></span>
+        </div>
+        {teamWorkflowKnowledgeIngestionStatus?.actionItems.length ? (
+          <div className={styles.workflowIngestionActions}>
+            {teamWorkflowKnowledgeIngestionStatus.actionItems.slice(0, 4).map((item) => (
+              <span key={`${item.code}-${item.message}`} className={workflowIngestionTone(item.severity)}>
+                {workflowIngestionStatusLabel(item.severity, lang)} · {item.message}
+              </span>
+            ))}
+          </div>
+        ) : null}
+        <div className={styles.workflowIngestionBoundary}>
+          <span>{lang === "zh" ? "候选区前审" : "candidate precheck"}</span>
+          <span>{lang === "zh" ? "正式知识写入关闭" : "formal knowledge write off"}</span>
+          <span>{lang === "zh" ? "进入候选仓库后再筛选" : "screen after candidate import"}</span>
+        </div>
+        {teamWorkflowKnowledgeIngestionStatusQuery.error instanceof Error ? (
+          <div className={styles.messageError}>{teamWorkflowKnowledgeIngestionStatusQuery.error.message}</div>
         ) : null}
       </details>
     );
@@ -3529,6 +3727,8 @@ export function TeamsRoute({
         </div>
         {renderSourceCollectionStorageActions()}
         {renderSourceCollectionScreeningPanel()}
+        {renderSourceCollectionCandidatePanel()}
+        {renderSourceCollectionGraphPanel()}
         <details className={styles.workflowSourceCollectionDetails}>
           <summary>
             <span>{lang === "zh" ? "查询与分工详情" : "Query and assignment details"}</span>
@@ -3657,11 +3857,7 @@ export function TeamsRoute({
           </button>
           </form>
         </details>
-        <div id="source-collection-memory-panel" className={styles.workflowIngestionBoundary}>
-          <span>{lang === "zh" ? "执行器：手动/Agent 均可提交搜集结果" : "Executor: manual or Agent CollectionOutput"}</span>
-          <span>{lang === "zh" ? "正式知识写入关闭" : "formal knowledge write off"}</span>
-          <span>{lang === "zh" ? "进入候选仓库后再筛选" : "screen after candidate import"}</span>
-        </div>
+        {renderSourceCollectionMemoryPanel()}
         {selectedTeamStartSourceCollectionError ? (
           <div className={styles.messageError}>{selectedTeamStartSourceCollectionError.message}</div>
         ) : null}
@@ -4552,11 +4748,10 @@ export function TeamsRoute({
       maxCandidates: Math.max(1, Math.min(100, sourceQualityUnassessedCount)),
     });
   };
-  const openSourceCollectionCandidateStore = () => {
-    if (!selectedTeam?.teamId || !selectedSourceCollectionStorageArtifacts || selectedSourceCollectionStorageOpenPending) {
+  const openSourceCollectionCandidatePanel = () => {
+    if (!selectedTeam?.teamId) {
       return;
     }
-    openSourceCollectionStorageTarget("candidate_store");
     scrollSourceCollectionPanelIntoView("source-collection-candidates-panel");
   };
   const refreshSourceCollectionGraph = () => {
@@ -4564,6 +4759,7 @@ export function TeamsRoute({
       return;
     }
     buildCandidateGraphMutation.mutate(selectedTeam.teamId);
+    scrollSourceCollectionPanelIntoView("source-collection-graph-panel");
   };
   const refreshSourceCollectionMemoryPrecheck = () => {
     if (!selectedTeam?.teamId || teamWorkflowKnowledgeIngestionStatusQuery.isFetching) {
@@ -4591,6 +4787,7 @@ export function TeamsRoute({
     if (!selectedTeam?.teamId) {
       return;
     }
+    scrollSourceCollectionPanelIntoView("source-collection-process");
     if (!selectedSourceCollectionRun) {
       launchResearchStage("knowledge_collection");
       return;
@@ -4724,11 +4921,13 @@ export function TeamsRoute({
       metric: `${sourceCollectionRecordCount || sourceManifestCandidates.length} ${lang === "zh" ? "记录" : "records"} / ${sourceCollectionQueryCount} ${lang === "zh" ? "查询" : "queries"}`,
       state: sourceCollectionSearchStepState,
       status: sourceCollectionStepStatusText(sourceCollectionSearchStepState),
+      detailLabel: lang === "zh" ? "查看搜集过程" : "View collection process",
       actionLabel: sourceCollectionCollectionActionLabel,
       actionDisabled: sourceCollectionCollectionActionDisabled,
       actionTone: "primary",
       actionIcon: selectedSourceCollectionRun && sourceCollectionOpenAssignmentCount > 0 ? "search" : "play",
       onAction: runSourceCollectionCollectionAction,
+      onDetail: () => scrollSourceCollectionPanelIntoView("source-collection-process"),
     },
     {
       id: "screening",
@@ -4736,11 +4935,13 @@ export function TeamsRoute({
       metric: `${sourceQualityAssessedCount}/${sourceQualityCandidateCount}`,
       state: sourceCollectionScreeningStepState,
       status: sourceCollectionStepStatusText(sourceCollectionScreeningStepState),
+      detailLabel: lang === "zh" ? "查看筛选详情" : "View screening details",
       actionLabel: sourceCollectionScreeningButtonText,
       actionDisabled: sourceCollectionScreeningDisabled || selectedTeamSourceQualityPending,
       actionTone: "primary",
       actionIcon: "check",
       onAction: runSourceCollectionScreeningAction,
+      onDetail: () => scrollSourceCollectionPanelIntoView("source-collection-screening-panel"),
     },
     {
       id: "candidate",
@@ -4748,11 +4949,13 @@ export function TeamsRoute({
       metric: `${sourceManifestCandidates.length} ${lang === "zh" ? "候选" : "candidates"}`,
       state: sourceCollectionCandidateStepState,
       status: sourceCollectionStepStatusText(sourceCollectionCandidateStepState),
-      actionLabel: selectedSourceCollectionStorageOpenPending ? (lang === "zh" ? "打开中" : "Opening") : (lang === "zh" ? "打开候选库" : "Open store"),
-      actionDisabled: !selectedSourceCollectionStorageArtifacts || selectedSourceCollectionStorageOpenPending,
+      detailLabel: lang === "zh" ? "查看候选库" : "View candidate library",
+      actionLabel: lang === "zh" ? "查看候选库" : "View library",
+      actionDisabled: !selectedTeam?.teamId,
       actionTone: "secondary",
       actionIcon: "archive",
-      onAction: openSourceCollectionCandidateStore,
+      onAction: openSourceCollectionCandidatePanel,
+      onDetail: openSourceCollectionCandidatePanel,
     },
     {
       id: "graph",
@@ -4760,11 +4963,13 @@ export function TeamsRoute({
       metric: `${candidateGraphNodeCount} ${lang === "zh" ? "节点" : "nodes"} / ${candidateGraphEdgeCount} ${lang === "zh" ? "边" : "edges"}`,
       state: sourceCollectionGraphStepState,
       status: sourceCollectionStepStatusText(sourceCollectionGraphStepState),
+      detailLabel: lang === "zh" ? "查看图谱详情" : "View graph details",
       actionLabel: selectedTeamBuildCandidateGraphPending ? (lang === "zh" ? "生成中" : "Building") : (lang === "zh" ? "刷新图谱" : "Refresh"),
       actionDisabled: !selectedTeam?.teamId || sourceManifestCandidates.length <= 0 || selectedTeamBuildCandidateGraphPending,
       actionTone: "secondary",
       actionIcon: "refresh",
       onAction: refreshSourceCollectionGraph,
+      onDetail: () => scrollSourceCollectionPanelIntoView("source-collection-graph-panel"),
     },
     {
       id: "memory",
@@ -4772,13 +4977,28 @@ export function TeamsRoute({
       metric: `${knowledgePendingReviewCount} ${lang === "zh" ? "待审" : "review"} / ${formalKnowledgeItemCount} ${lang === "zh" ? "正式" : "formal"}`,
       state: sourceCollectionMemoryStepState,
       status: sourceCollectionStepStatusText(sourceCollectionMemoryStepState),
+      detailLabel: lang === "zh" ? "查看前审详情" : "View precheck details",
       actionLabel: teamWorkflowKnowledgeIngestionStatusQuery.isFetching ? (lang === "zh" ? "刷新中" : "Refreshing") : (lang === "zh" ? "刷新前审" : "Refresh"),
       actionDisabled: !selectedTeam?.teamId || teamWorkflowKnowledgeIngestionStatusQuery.isFetching,
       actionTone: "secondary",
       actionIcon: "refresh",
       onAction: refreshSourceCollectionMemoryPrecheck,
+      onDetail: () => scrollSourceCollectionPanelIntoView("source-collection-memory-panel"),
     },
   ];
+  const sourceCollectionStageCardKeyDown = (
+    event: ReactKeyboardEvent<HTMLElement>,
+    onDetail: () => void,
+  ) => {
+    if (event.target instanceof Element && event.target.closest("button")) {
+      return;
+    }
+    if (event.key !== "Enter" && event.key !== " ") {
+      return;
+    }
+    event.preventDefault();
+    onDetail();
+  };
   const renderSourceCollectionStageActionIcon = (icon: SourceCollectionStageModule["actionIcon"]) => {
     if (icon === "search") {
       return <Search size={13} />;
@@ -4867,7 +5087,20 @@ export function TeamsRoute({
             </section>
             <section id="source-collection-stage-status" className={styles.sourceCollectionStageModules} aria-label={lang === "zh" ? "知识搜集内部模块" : "Knowledge collection modules"}>
               {sourceCollectionStageModules.map((module, index) => (
-                <article key={module.id} className={`${styles.sourceCollectionStageCard} ${sourceCollectionStepClassName(module.state)}`}>
+                <article
+                  key={module.id}
+                  className={`${styles.sourceCollectionStageCard} ${sourceCollectionStepClassName(module.state)}`}
+                  role="button"
+                  tabIndex={0}
+                  title={module.detailLabel}
+                  onClick={(event) => {
+                    if (event.target instanceof Element && event.target.closest("button")) {
+                      return;
+                    }
+                    module.onDetail();
+                  }}
+                  onKeyDown={(event) => sourceCollectionStageCardKeyDown(event, module.onDetail)}
+                >
                   <div className={styles.sourceCollectionStageCardHead}>
                     <strong>{String(index + 1).padStart(2, "0")}</strong>
                     <span>{module.status}</span>
@@ -4881,6 +5114,7 @@ export function TeamsRoute({
                     className={module.actionTone === "primary" ? styles.sourceCollectionStagePrimaryAction : styles.sourceCollectionStageSecondaryAction}
                     disabled={module.actionDisabled}
                     onClick={module.onAction}
+                    title={module.actionLabel}
                   >
                     {renderSourceCollectionStageActionIcon(module.actionIcon)}
                     {module.actionLabel}

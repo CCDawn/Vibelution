@@ -1270,9 +1270,19 @@
     linear-gradient(90deg, var(--source-step-bg-soft, transparent), transparent 76%),
     var(--source-step-bg, color-mix(in srgb, var(--surface-panel-strong) 72%, transparent));
   color: var(--source-step-fg, var(--fg-muted));
+  cursor: pointer;
   font-size: 0.68rem;
   font-weight: 740;
   overflow: hidden;
+}
+
+.sourceCollectionStageCard:hover,
+.sourceCollectionStageCard:focus-visible {
+  border-color: color-mix(in srgb, var(--accent-cool) 56%, var(--source-step-border, var(--border-soft)));
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, var(--accent-cool) 12%, transparent),
+    0 8px 20px color-mix(in srgb, black 8%, transparent);
+  outline: none;
 }
 
 .sourceCollectionStageCardHead {
