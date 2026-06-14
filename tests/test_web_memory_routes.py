@@ -5,7 +5,15 @@ from fastapi.testclient import TestClient
 
 from core.web.app import create_app
 from core.web.control import CONTROL_TOKEN_HEADER, get_control_token
-from core.web.services import agent_directory_service, memory_graph_service, memory_service, runtime_scene_service, team_knowledge_service, team_service
+from core.web.services import (
+    agent_directory_service,
+    memory_cleanup_service,
+    memory_graph_service,
+    memory_service,
+    runtime_scene_service,
+    team_knowledge_service,
+    team_service,
+)
 
 
 client = TestClient(create_app(), headers={CONTROL_TOKEN_HEADER: get_control_token()})
@@ -979,6 +987,47 @@ def test_memory_management_api_persists_user_items_and_system_overrides(tmp_path
     assert all(event["phase"] == "memory_management" for event in management_events)
     assert all(event["lifecycle"] is True for event in management_events)
     assert all("content" not in event.get("fields", {}) for event in management_events)
+
+
+def test_memory_cleanup_api_previews_and_requires_hard_delete_confirmation(tmp_path, monkeypatch):
+    monkeypatch.setattr(memory_cleanup_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(memory_service, "PROJECT_ROOT", tmp_path)
+    runtime_memory = tmp_path / "workspace" / "memory" / "memory.json"
+    runtime_memory.parent.mkdir(parents=True, exist_ok=True)
+    runtime_memory.write_text('{"noise": true}', encoding="utf-8")
+
+    preview_response = client.post(
+        "/api/memory/cleanup/preview",
+        json={"targets": [{"targetType": "global_runtime_memory"}]},
+    )
+
+    assert preview_response.status_code == 200
+    preview = preview_response.json()
+    assert preview["hardDelete"] is True
+    assert preview["confirmationPhrase"] == memory_cleanup_service.CONFIRMATION_PHRASE
+    assert preview["totals"]["targetCount"] == 1
+
+    rejected_response = client.post(
+        "/api/memory/cleanup/execute",
+        json={
+            "targets": [{"targetType": "global_runtime_memory"}],
+            "confirmationPhrase": "delete",
+        },
+    )
+
+    assert rejected_response.status_code == 422
+    assert runtime_memory.exists()
+
+    execute_response = client.post(
+        "/api/memory/cleanup/execute",
+        json={
+            "targets": [{"targetType": "global_runtime_memory"}],
+            "confirmationPhrase": memory_cleanup_service.CONFIRMATION_PHRASE,
+        },
+    )
+
+    assert execute_response.status_code == 200
+    assert not runtime_memory.exists()
 
 
 def test_memory_overview_base_sections_reuse_recent_cache(tmp_path, monkeypatch):
