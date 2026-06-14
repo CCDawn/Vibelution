@@ -228,7 +228,7 @@ def create_key_tools() -> List[BaseTool]:
         全局正则表达式搜索 (Cursor/Aider 范式)。
 
         在项目中快速搜索代码，支持正则表达式。普通 Chat/Coding Agent 默认用 cli_tool + rg；
-        该工具保留给显式授权策略或专用 Agent 使用。
+        该工具保留给需要结构化搜索结果的专用 Agent 使用。
 
         Args:
             regex_pattern: 正则表达式模式
@@ -650,7 +650,7 @@ def create_key_tools() -> List[BaseTool]:
         【读取文件】读取本地文件的全部或部分内容。
 
         支持编码自动检测、行号显示、分页读取。普通 Chat/Coding Agent 默认用 cli_tool 读取；
-        该工具保留给显式授权策略或专用 Agent 使用。
+        该工具保留给需要结构化文件读取结果的专用 Agent 使用。
 
         Args:
             file_path: 文件路径（相对或绝对）
@@ -1154,15 +1154,15 @@ def create_key_tools() -> List[BaseTool]:
         """
         【Agent 工具权限申请】提交受控工具权限请求，目标留空时申请当前 Agent 自己使用。
 
-        当前 Agent 缺少某个工具时，用此工具申请临时启用；请求会进入当前会话审批弹窗，
-        用户批准前不会改变可见工具。配置页发起的治理请求可使用 persistent 做长期策略变更。
+        旧 ToolPolicy 治理兼容入口。当前对话链路不再要求 Agent 先申请工具；
+        如需保留审计记录，可用它提交配置变更请求。
 
         Args:
             target_agent: 目标 Agent 的 agentId、稳定代号或唯一名称；留空表示当前 Agent
-            grant_tools: 要加入 allowedTools 的工具名，多个用逗号或换行分隔
-            revoke_tools: 要从 allowedTools 移除的工具名，多个用逗号或换行分隔
-            block_tools: 要加入 blockedTools 的工具名，多个用逗号或换行分隔
-            unblock_tools: 要从 blockedTools 移除的工具名，多个用逗号或换行分隔
+            grant_tools: 兼容旧配置的 allowedTools 工具名，多个用逗号或换行分隔
+            revoke_tools: 兼容旧配置的移除工具名，多个用逗号或换行分隔
+            block_tools: 兼容旧配置的 blockedTools 工具名，多个用逗号或换行分隔
+            unblock_tools: 兼容旧配置的解除阻断工具名，多个用逗号或换行分隔
             reason: 变更理由，说明角色职责和任务场景
             apply_mode: auto 或 review；auto 仍会让高风险变更等待审批
             grant_scope: session、turn 或 persistent；自助申请默认用 session
@@ -1363,8 +1363,7 @@ def create_key_tools() -> List[BaseTool]:
         【受控电脑操作】在沙盒浏览器中执行一次受限 Computer Use 任务。
 
         该工具不会控制用户真实鼠标；v1 只支持 browser 模式。需要提供目标域名边界，高风险操作会返回
-        need_confirmation 等待用户确认。只有 Agent 的 ToolPolicy.allowedTools 显式包含
-        computer_use_task_tool 时才可调用。
+        need_confirmation 等待用户确认。调用前应说明目标域名边界和预期副作用。
 
         Args:
             task: 要完成的浏览器操作任务
@@ -1402,7 +1401,7 @@ def create_key_tools() -> List[BaseTool]:
 
         适合在 computer_use_task_tool 返回 sessionId 后继续闭环：查看最新状态、对 need_confirmation
         会话确认继续，或取消 running/need_confirmation 会话。该工具仍属于高风险 Computer Use 边界，
-        只有 Agent 的 ToolPolicy.allowedTools 显式包含 computer_use_session_tool 时才可调用。
+        需要沿用 Computer Use 的确认和审计流程。
 
         Args:
             session_id: Computer Use 会话 ID
@@ -1432,8 +1431,7 @@ def create_key_tools() -> List[BaseTool]:
         【科研知识库查询】只读查询 Vibelution 的科研知识库。
 
         适合检索已沉淀的论文、GitHub、数据集、网页来源，以及从这些来源抽取出的 claims、evidence 和 gaps。
-        该工具涉及跨会话科研资料，默认不对所有 Agent 开放；只有 Agent 的 ToolPolicy.allowedTools 显式包含
-        research_knowledge_query_tool 时才可调用。
+        该工具只读，返回科研知识库中的结构化资料。
 
         Args:
             query: 查询关键词或短语，可为空以查看最近资料
@@ -1459,7 +1457,7 @@ def create_key_tools() -> List[BaseTool]:
         【团队知识库查询】只读检索已审核落盘的团队正式知识。
 
         该工具只返回正式 KnowledgeItem，不读取 pending proposal，也不写入知识库。
-        只有 Agent 的 ToolPolicy.allowedTools 显式包含 knowledge_query_tool，且其团队/MemoryPolicy 允许读取目标知识库时才可用。
+        是否能读取目标知识库由团队访问边界和 MemoryPolicy 决定。
 
         Args:
             query: 查询关键词，可为空以查看最近正式知识
@@ -1486,7 +1484,7 @@ def create_key_tools() -> List[BaseTool]:
         【正式知识 RAG 检索】只读检索已审核 Team/Agent 正式知识，并返回可引用的紧凑上下文候选。
 
         该工具返回 contexts 与 citations，不读取 pending proposal，不写入知识库，也不会默认注入 prompt。
-        只有 Agent 的 ToolPolicy.allowedTools 显式包含 knowledge_rag_retrieve_tool，且其 Owner ACL/MemoryPolicy 允许读取目标知识库时才可用。
+        是否能读取目标知识库由 Owner ACL 和 MemoryPolicy 决定。
 
         Args:
             query: 查询关键词，可为空以查看最近正式知识
@@ -1528,7 +1526,7 @@ def create_key_tools() -> List[BaseTool]:
 
         Agent 只需要指定 query_mode 和 query；平台会路由到 local exact / token overlap / metadata / regex / RAG backend，
         并统一返回 results、citations、source ids 和 searchBackend。该工具不读取 pending proposal，不写入知识库，也不会默认注入 prompt。
-        只有 Agent 的 ToolPolicy.allowedTools 显式包含 unified_knowledge_search_tool，且其 Owner ACL/MemoryPolicy 允许读取目标知识库时才可用。
+        是否能读取目标知识库由 Owner ACL 和 MemoryPolicy 决定。
 
         Args:
             query: 查询内容；metadata 模式可为空
@@ -1574,7 +1572,7 @@ def create_key_tools() -> List[BaseTool]:
         【团队知识候选提交】挂接中央来源并提交精炼提案，等待审核后才会落为正式知识。
 
         该工具不会直接创建 KnowledgeItem；原始群聊、PDF、外部搜索、运行证据或手写内容需要先进入 Owner source inbox 并由 Steward 晋升为中央来源。
-        只有 Agent 的 ToolPolicy.allowedTools 显式包含 knowledge_proposal_tool，且其团队/MemoryPolicy 允许向目标知识库提交时才可用。
+        是否能向目标知识库提交由团队访问边界和 MemoryPolicy 决定。
 
         Args:
             knowledge_base_id: 目标团队知识库 ID
@@ -1631,7 +1629,7 @@ def create_key_tools() -> List[BaseTool]:
 
         该工具不联网搜索、不解析 PDF、不收集原始来源、不直接创建正式知识；parser/searcher 需要先把原始材料交给 Owner source inbox。
         正式 SourceArtifact 溯源以 central_source_id 对应的中央来源为准。
-        只有 Agent 的 ToolPolicy.allowedTools 显式包含 knowledge_ingestion_tool，且其团队/MemoryPolicy 允许向目标知识库提交时才可用。
+        是否能向目标知识库提交由团队访问边界和 MemoryPolicy 决定。
 
         Args:
             knowledge_base_id: 目标团队知识库 ID
@@ -1673,7 +1671,6 @@ def create_key_tools() -> List[BaseTool]:
         【团队知识治理任务】读取当前 Agent 可见的知识治理任务队列。
 
         队列由 pending proposal、pending rating suggestion 和尚未生成提案的 source artifact 派生；本工具只读，不会应用审核。
-        只有 Agent 的 ToolPolicy.allowedTools 显式包含 knowledge_governance_tasks_tool 时才可用。
 
         Args:
             status: open / closed / all，默认 open
@@ -1689,7 +1686,6 @@ def create_key_tools() -> List[BaseTool]:
         【知识库运行健康】读取当前 Agent 可见团队知识库的来源、提案、评级和正式知识健康状态。
 
         本工具只读，不会审核、应用、删除、改 ACL 或写入正式知识。
-        只有 Agent 的 ToolPolicy.allowedTools 显式包含 knowledge_operations_health_tool 时才可用。
 
         Returns:
             JSON 格式的知识库运行健康摘要和 finding 列表
@@ -1702,7 +1698,6 @@ def create_key_tools() -> List[BaseTool]:
         【知识库治理计划】读取只读治理计划和下一步建议。
 
         计划会引用推荐工具，但不会直接执行审核、应用、删除、改 ACL 或写入正式知识；正式知识仍需要 reviewer 确认。
-        只有 Agent 的 ToolPolicy.allowedTools 显式包含 knowledge_governance_plan_tool 时才可用。
 
         Args:
             limit: 返回计划动作数量上限，默认 8
@@ -1719,7 +1714,6 @@ def create_key_tools() -> List[BaseTool]:
 
         建议由 open governance tasks 派生，只读返回 review_proposal、review_rating_suggestion、draft_refinement_proposal 等下一步动作。
         本工具不会审核、应用、删除、改 ACL 或直接写正式知识；正式知识仍需要 reviewer 确认。
-        只有 Agent 的 ToolPolicy.allowedTools 显式包含 knowledge_steward_recommendations_tool 时才可用。
 
         Args:
             limit: 返回建议数量上限，默认 8
@@ -1735,7 +1729,6 @@ def create_key_tools() -> List[BaseTool]:
         【知识库管理员工作台】读取 Knowledge Steward 的统一治理工作台。
 
         返回管理员身份、治理阶段、下一步建议、验收清单和权限边界；只读，不会审核、应用、删除、改 ACL 或直接写正式知识。
-        只有 Agent 的 ToolPolicy.allowedTools 显式包含 knowledge_steward_workbench_tool 时才可用。
 
         Args:
             limit: 每批返回建议数量上限，默认 8
@@ -1761,7 +1754,7 @@ def create_key_tools() -> List[BaseTool]:
         【团队知识评级建议】为候选或正式知识提交可审核的评级建议。
 
         该工具只创建 RatingSuggestion，不会直接修改正式 KnowledgeItem。需要 Reviewer 在记忆库治理页或 API 中应用。
-        只有 Agent 的 ToolPolicy.allowedTools 显式包含 knowledge_rating_suggestion_tool，且其团队/MemoryPolicy 允许评级目标知识库时才可用。
+        是否能评级目标知识库由团队访问边界和 MemoryPolicy 决定。
 
         Args:
             knowledge_base_id: 目标团队知识库 ID
@@ -1955,7 +1948,8 @@ def create_llm_facing_tools() -> List[BaseTool]:
         "clean_workspace_debris_tool",
         "get_session_files_tool",
         # 自我建模类工具默认不常驻，避免在普通轮次抢占操作面。
-        # 长期记忆工具保留在 LLM-facing 目录中，再由 Agent ToolPolicy 控制可见性。
+        # ToolPolicy 申请入口保留为配置兼容工具，不再默认暴露给 LLM。
+        "agent_tool_permission_request_tool",
         "update_diagnosis_rules_tool",
         "update_self_model_tool",
         "get_self_model_tool",

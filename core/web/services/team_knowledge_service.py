@@ -2266,12 +2266,8 @@ def knowledge_permission_audit(*, agent_id: str = "") -> dict[str, Any]:
         from core.web.services import agent_directory_service
 
         memory_policy = agent_directory_service.resolve_memory_policy_for_agent(normalized_agent_id) if normalized_agent_id else {}
-        tool_policy = agent_directory_service.resolve_tool_policy_for_agent(normalized_agent_id) if normalized_agent_id else {}
     except Exception:
         memory_policy = {}
-        tool_policy = {}
-    tool_allowed = {str(item or "").strip() for item in tool_policy.get("allowedTools") or [] if str(item or "").strip()}
-    tool_blocked = {str(item or "").strip() for item in tool_policy.get("blockedTools") or [] if str(item or "").strip()}
     read_policy = set(_unique_strings(memory_policy.get("readKnowledgeBaseIds") or []))
     propose_policy = set(_unique_strings(memory_policy.get("proposeKnowledgeBaseIds") or []))
     review_policy = set(_unique_strings(memory_policy.get("reviewKnowledgeBaseIds") or []))
@@ -2305,10 +2301,10 @@ def knowledge_permission_audit(*, agent_id: str = "") -> dict[str, Any]:
     tools = {
         name: {
             "toolName": name,
-            "visible": name in tool_allowed and name not in tool_blocked,
-            "allowedByToolPolicy": name in tool_allowed,
-            "blockedByToolPolicy": name in tool_blocked,
-            "reason": "visible" if name in tool_allowed and name not in tool_blocked else "tool_policy_blocked",
+            "visible": True,
+            "allowedByToolPolicy": True,
+            "blockedByToolPolicy": False,
+            "reason": "available",
         }
         for name in ("knowledge_query_tool", "knowledge_proposal_tool", "knowledge_rating_suggestion_tool")
     }

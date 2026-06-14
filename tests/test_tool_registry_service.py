@@ -34,15 +34,15 @@ def test_tool_registry_lists_builtins_as_protected(tmp_path, monkeypatch):
     edge_tool = next(item for item in payload["tools"] if item["name"] == "research_communication_edge_proposal_tool")
     assert edge_tool["category"] == "agent_collaboration"
     assert edge_tool["permissionTier"] == "high"
-    assert edge_tool["permissionPolicy"]["requiresExplicitAllow"] is True
+    assert edge_tool["permissionPolicy"]["requiresExplicitAllow"] is False
     creation_tool = next(item for item in payload["tools"] if item["name"] == "research_agent_creation_proposal_tool")
     assert creation_tool["category"] == "agent_collaboration"
     assert creation_tool["permissionTier"] == "high"
-    assert creation_tool["permissionPolicy"]["requiresExplicitAllow"] is True
+    assert creation_tool["permissionPolicy"]["requiresExplicitAllow"] is False
     apply_tool = next(item for item in payload["tools"] if item["name"] == "research_proposal_apply_tool")
     assert apply_tool["category"] == "agent_collaboration"
     assert apply_tool["permissionTier"] == "high"
-    assert apply_tool["permissionPolicy"]["requiresExplicitAllow"] is True
+    assert apply_tool["permissionPolicy"]["requiresExplicitAllow"] is False
     child_tool = next(item for item in payload["tools"] if item["name"] == "create_child_session_tool")
     assert child_tool["category"] == "agent_collaboration"
     assert child_tool["permissionTier"] == "high"
@@ -60,9 +60,9 @@ def test_tool_registry_lists_builtins_as_protected(tmp_path, monkeypatch):
     assert "research_proposal_apply_tool" in bundles["collaboration"]["toolNames"]
     assert "create_child_session_tool" in bundles["collaboration"]["toolNames"]
     assert "list_child_sessions_tool" in bundles["collaboration"]["toolNames"]
-    assert bundles["research"]["explicitAllowToolCount"] >= 1
-    assert bundles["collaboration"]["explicitAllowToolCount"] >= 1
-    assert bundles["memory_context"]["explicitAllowToolCount"] >= 3
+    assert bundles["research"]["explicitAllowToolCount"] == 0
+    assert bundles["collaboration"]["explicitAllowToolCount"] == 0
+    assert bundles["memory_context"]["explicitAllowToolCount"] == 0
     assert bundles["coding"]["highRiskToolCount"] >= 1
     assert bundles["core"]["label"] == "会话 Agent 基础包"
     assert "conversation_log_inspect_tool" in bundles["core"]["toolNames"]
@@ -92,7 +92,7 @@ def test_tool_registry_exposes_tool_bundle_membership_without_duplicating_genera
     assert generated["bundleIds"] == []
 
 
-def test_tool_registry_marks_research_knowledge_tool_as_explicit_allow(tmp_path, monkeypatch):
+def test_tool_registry_does_not_mark_research_knowledge_tools_as_explicit_allow(tmp_path, monkeypatch):
     monkeypatch.setattr(registry, "GENERATED_TOOLS_PATH", tmp_path / "generated_tools.json")
 
     payload = registry.get_tool_registry()
@@ -100,22 +100,19 @@ def test_tool_registry_marks_research_knowledge_tool_as_explicit_allow(tmp_path,
     tool = next(item for item in payload["tools"] if item["name"] == "research_knowledge_query_tool")
     assert tool["source"] == "built_in"
     assert tool["llmVisible"] is True
-    assert tool["permissionPolicy"]["requiresExplicitAllow"] is True
-    assert "ToolPolicy.allowedTools" in tool["permissionPolicy"]["reason"]
+    assert tool["permissionPolicy"]["requiresExplicitAllow"] is False
 
     rag_tool = next(item for item in payload["tools"] if item["name"] == "knowledge_rag_retrieve_tool")
     assert rag_tool["source"] == "built_in"
     assert rag_tool["llmVisible"] is True
     assert rag_tool["category"] == "memory_context"
-    assert rag_tool["permissionPolicy"]["requiresExplicitAllow"] is True
-    assert "ToolPolicy.allowedTools" in rag_tool["permissionPolicy"]["reason"]
+    assert rag_tool["permissionPolicy"]["requiresExplicitAllow"] is False
     unified_tool = next(item for item in payload["tools"] if item["name"] == "unified_knowledge_search_tool")
     assert unified_tool["source"] == "built_in"
     assert unified_tool["llmVisible"] is True
     assert unified_tool["category"] == "memory_context"
     assert "unified_search" in unified_tool["capabilityTags"]
-    assert unified_tool["permissionPolicy"]["requiresExplicitAllow"] is True
-    assert "ToolPolicy.allowedTools" in unified_tool["permissionPolicy"]["reason"]
+    assert unified_tool["permissionPolicy"]["requiresExplicitAllow"] is False
 
 
 def test_tool_registry_exposes_agent_scoped_tool_views(tmp_path, monkeypatch):
@@ -341,7 +338,7 @@ def test_builtin_tool_test_uses_fixed_args_for_allowlisted_tool(tmp_path, monkey
     }
 
 
-def test_tool_test_honors_selected_agent_blocked_policy(tmp_path, monkeypatch):
+def test_tool_test_ignores_selected_agent_tool_policy_blocks(tmp_path, monkeypatch):
     monkeypatch.setattr(registry, "GENERATED_TOOLS_PATH", tmp_path / "generated_tools.json")
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(agent_directory_service, "record_runtime_scene_event", lambda *args, **kwargs: None)
@@ -356,18 +353,18 @@ def test_tool_test_honors_selected_agent_blocked_policy(tmp_path, monkeypatch):
     )
 
     def fail_execute(self, tool_name, tool_args):
-        raise AssertionError("blocked Agent ToolPolicy should stop before runtime execution")
+        return ("ran despite blocked policy", None)
 
     monkeypatch.setattr("core.infrastructure.tool_executor.ToolExecutor.execute", fail_execute)
 
     result = registry.test_tool("get_current_goal_tool", agent_id=agent["agentId"])
 
-    assert result["status"] == "blocked"
-    assert result["called"] is False
-    assert result["callable"] is False
+    assert result["status"] == "succeeded"
+    assert result["called"] is True
+    assert result["callable"] is True
     assert result["agent"]["agentId"] == agent["agentId"]
-    assert result["agentCompatibility"]["status"] == "blocked"
-    assert "ToolPolicy" in result["message"] or "工具策略" in result["message"]
+    assert result["agentCompatibility"]["status"] == "succeeded"
+    assert result["resultPreview"] == "ran despite blocked policy"
 
 
 def test_tool_test_runs_safe_builtin_inside_selected_agent_runtime(tmp_path, monkeypatch):

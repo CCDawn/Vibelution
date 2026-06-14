@@ -931,7 +931,7 @@ def test_computer_use_bridge_cleanup_retries_locked_temp_dir(monkeypatch, tmp_pa
     assert calls == [(tmp_path, False), (tmp_path, False)]
 
 
-def test_computer_use_tool_requires_explicit_tool_policy(computer_use_tmp, monkeypatch):
+def test_computer_use_tool_no_longer_requires_explicit_tool_policy(computer_use_tmp, monkeypatch):
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", computer_use_tmp)
     monkeypatch.setattr(agent_directory_service, "record_runtime_scene_event", lambda *args, **kwargs: None)
     agent = agent_directory_service.create_agent_instance(
@@ -945,10 +945,10 @@ def test_computer_use_tool_requires_explicit_tool_policy(computer_use_tmp, monke
             {"task": "Open example", "target_url": "https://example.com", "allowed_domains": "example.com"},
         )
 
-    assert "ToolPolicy.allowedTools" in result
+    assert "ToolPolicy.allowedTools" not in result
 
 
-def test_computer_use_session_tool_requires_explicit_tool_policy(computer_use_tmp, monkeypatch):
+def test_computer_use_session_tool_no_longer_requires_explicit_tool_policy(computer_use_tmp, monkeypatch):
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", computer_use_tmp)
     monkeypatch.setattr(agent_directory_service, "record_runtime_scene_event", lambda *args, **kwargs: None)
     agent = agent_directory_service.create_agent_instance(
@@ -962,10 +962,10 @@ def test_computer_use_session_tool_requires_explicit_tool_policy(computer_use_tm
             {"session_id": "cu-test", "action": "get"},
         )
 
-    assert "ToolPolicy.allowedTools" in result
+    assert "ToolPolicy.allowedTools" not in result
 
 
-def test_tool_registry_marks_computer_use_as_high_risk_explicit_allow(tmp_path, monkeypatch):
+def test_tool_registry_marks_computer_use_as_high_risk_without_tool_policy_gate(tmp_path, monkeypatch):
     monkeypatch.setattr(registry, "GENERATED_TOOLS_PATH", tmp_path / "generated_tools.json")
 
     payload = registry.get_tool_registry()
@@ -976,10 +976,10 @@ def test_tool_registry_marks_computer_use_as_high_risk_explicit_allow(tmp_path, 
     assert tool["category"] == "task_runtime"
     assert tool["permissionTier"] == "high"
     assert {"computer_control", "network_access", "external_automation"}.issubset(set(tool["riskTags"]))
-    assert tool["permissionPolicy"]["requiresExplicitAllow"] is True
+    assert tool["permissionPolicy"]["requiresExplicitAllow"] is False
     assert session_tool["category"] == "task_runtime"
     assert session_tool["permissionTier"] == "high"
     assert {"computer_control", "external_automation", "session_state_write"}.issubset(set(session_tool["riskTags"]))
-    assert session_tool["permissionPolicy"]["requiresExplicitAllow"] is True
+    assert session_tool["permissionPolicy"]["requiresExplicitAllow"] is False
     assert "computer_use_task_tool" in operations["toolNames"]
     assert "computer_use_session_tool" in operations["toolNames"]

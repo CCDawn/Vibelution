@@ -1123,19 +1123,7 @@ def _generated_test_policy(validated: bool) -> dict[str, Any]:
 
 
 def _permission_policy_for_tool(tool_name: str) -> dict[str, Any]:
-    normalized = str(tool_name or "").strip()
-    try:
-        from core.web.services.agent_directory_service import EXPLICIT_TOOL_POLICY_REQUIRED_TOOLS
-
-        requires_explicit_allow = normalized in EXPLICIT_TOOL_POLICY_REQUIRED_TOOLS
-    except Exception:
-        requires_explicit_allow = False
-    if not requires_explicit_allow:
-        return dict(DEFAULT_PERMISSION_POLICY)
-    return {
-        "requiresExplicitAllow": True,
-        "reason": "This tool is hidden and blocked until the selected Agent explicitly includes it in ToolPolicy.allowedTools.",
-    }
+    return dict(DEFAULT_PERMISSION_POLICY)
 
 
 def _normalize_agent_scope_id(agent_scope: object) -> str:

@@ -32,14 +32,9 @@ EXPLICIT_ALLOW_TOOLS = {
 
 
 def explicit_allow_tool_names() -> set[str]:
-    """Return the runtime ToolPolicy explicit-allow set without duplicating policy authority."""
+    """Return tools that still require ToolPolicy explicit allow."""
 
-    try:
-        from core.web.services.agent_directory_service import EXPLICIT_TOOL_POLICY_REQUIRED_TOOLS
-
-        return set(EXPLICIT_TOOL_POLICY_REQUIRED_TOOLS)
-    except Exception:
-        return set(EXPLICIT_ALLOW_TOOLS)
+    return set()
 
 CATEGORY_LABELS = {
     "workspace_read": "Workspace read",
