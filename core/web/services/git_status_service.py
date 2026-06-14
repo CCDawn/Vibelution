@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import re
 import threading
 import time
 from dataclasses import asdict, is_dataclass
@@ -452,6 +453,173 @@ def get_git_file_diff(path: str) -> dict[str, Any]:
         "truncated": truncated,
         "binary": binary,
     }
+
+
+def get_git_object_detail(kind: str, ref: str, path: str = "") -> dict[str, Any]:
+    """Return a read-only Git object/worktree preview for the Git route."""
+
+    service = get_git_memory_service()
+    normalized_kind = str(kind or "").strip().lower()
+    normalized_ref = str(ref or "").strip()
+    available, error = service.is_git_available()
+    if not available:
+        return _git_object_detail_payload(
+            kind=normalized_kind,
+            ref=normalized_ref,
+            path=path,
+            status_label="unavailable",
+            summary="Git unavailable",
+            content=error or "git unavailable",
+            available=False,
+            error=error or "git unavailable",
+        )
+
+    if normalized_kind == "commit":
+        return _git_commit_detail(service, normalized_ref)
+    if normalized_kind == "branch":
+        return _git_branch_detail(service, normalized_ref)
+    if normalized_kind == "worktree":
+        return _git_worktree_detail(service, normalized_ref, path)
+    raise ValueError("Unsupported Git detail kind")
+
+
+def _git_commit_detail(service: Any, ref: str) -> dict[str, Any]:
+    commit_ref = _normalize_commit_ref(ref)
+    verify = _safe_run_git(service, ["rev-parse", "--verify", f"{commit_ref}^{{commit}}"])
+    if verify is None or verify.returncode != 0:
+        raise ValueError(_git_error(verify) or "Commit was not found")
+    commit_sha = verify.stdout.strip() or commit_ref
+    meta_result = _run_git_or_raise(
+        service,
+        ["show", "--no-patch", "--date=iso-strict", "--pretty=format:%H%x1f%h%x1f%aN%x1f%aI%x1f%s", commit_sha],
+        "git show failed",
+    )
+    commits = _parse_commit_lines(meta_result.stdout)
+    commit = commits[0] if commits else {"shortSha": _short_rev(commit_sha), "subject": commit_sha}
+    patch = _git_stdout(
+        service,
+        ["show", "--stat", "--patch", "--no-ext-diff", "--no-color", "--find-renames", "--format=", commit_sha],
+    )
+    body = _join_git_object_sections(
+        [
+            (
+                f"# commit {commit.get('shortSha', _short_rev(commit_sha))}",
+                "\n".join(
+                    [
+                        f"subject: {commit.get('subject', '')}",
+                        f"author: {commit.get('author', '')}",
+                        f"authored: {commit.get('authoredAt', '')}",
+                        f"sha: {commit_sha}",
+                    ]
+                ).strip(),
+            ),
+            ("# patch", patch or "No textual patch is available for this commit."),
+        ]
+    )
+    display, truncated = _truncate_git_preview(body)
+    return _git_object_detail_payload(
+        kind="commit",
+        ref=commit_sha,
+        path=str(commit.get("subject") or commit_sha),
+        status_label="commit",
+        summary=f"Commit {_short_rev(commit_sha)}",
+        diff=display,
+        truncated=truncated,
+        meta={"commit": commit},
+    )
+
+
+def _git_branch_detail(service: Any, ref: str) -> dict[str, Any]:
+    branch = _normalize_branch_ref(service, ref)
+    relation = _branch_main_relation(service, branch)
+    log_result = _safe_run_git(
+        service,
+        [
+            "log",
+            "--max-count=12",
+            "--date=iso-strict",
+            "--pretty=format:%H%x1f%h%x1f%aN%x1f%aI%x1f%s",
+            f"main..{branch}",
+        ],
+    )
+    commits = _parse_commit_lines(log_result.stdout if log_result is not None and log_result.returncode == 0 else "")
+    commit_lines = "\n".join(
+        f"{item['shortSha']} {item['subject']} ({item['author']}, {item['authoredAt']})" for item in commits
+    )
+    patch = _git_stdout(service, ["diff", "--stat", "--patch", "--no-ext-diff", "--no-color", f"main...{branch}"])
+    body = _join_git_object_sections(
+        [
+            (
+                f"# branch {branch}",
+                "\n".join(
+                    [
+                        f"ahead main: {relation['ahead']}",
+                        f"behind main: {relation['behind']}",
+                    ]
+                ),
+            ),
+            ("# commits main..branch", commit_lines or "No commits ahead of main."),
+            ("# diff main...branch", patch or "No textual branch diff is available."),
+        ]
+    )
+    display, truncated = _truncate_git_preview(body)
+    return _git_object_detail_payload(
+        kind="branch",
+        ref=branch,
+        path=branch,
+        status_label="branch",
+        summary=f"Branch {branch}: +{relation['ahead']} / -{relation['behind']} vs main",
+        diff=display,
+        truncated=truncated,
+        meta={"aheadMain": relation["ahead"], "behindMain": relation["behind"], "commits": commits},
+    )
+
+
+def _git_worktree_detail(service: Any, ref: str, path: str) -> dict[str, Any]:
+    entry = _registered_worktree_entry(service, ref=ref, path=path)
+    worktree_path = str(entry.get("worktree") or "").strip()
+    branch = _display_branch(str(entry.get("branch") or "").strip())
+    head_rev = str(entry.get("HEAD") or "").strip()
+    display_name = branch or (f"detached@{_short_rev(head_rev)}" if head_rev else Path(worktree_path).name)
+    status = _git_stdout(service, ["-C", worktree_path, "status", "--short", "--branch"])
+    branch_patch = ""
+    relation = {"ahead": 0, "behind": 0}
+    if branch and _is_valid_branch_ref(service, branch):
+        relation = _branch_main_relation(service, branch)
+        branch_patch = _git_stdout(service, ["diff", "--stat", "--patch", "--no-ext-diff", "--no-color", f"main...{branch}"])
+    staged = _git_stdout(service, ["-C", worktree_path, "diff", "--cached", "--no-ext-diff", "--no-color"])
+    unstaged = _git_stdout(service, ["-C", worktree_path, "diff", "--no-ext-diff", "--no-color"])
+    body = _join_git_object_sections(
+        [
+            (
+                f"# worktree {display_name}",
+                "\n".join(
+                    [
+                        f"path: {worktree_path}",
+                        f"branch: {branch or '-'}",
+                        f"head: {_short_rev(head_rev)}",
+                        f"ahead main: {relation['ahead']}",
+                        f"behind main: {relation['behind']}",
+                    ]
+                ),
+            ),
+            ("# status", status or "Worktree status is clean."),
+            ("# branch diff main...worktree", branch_patch or "No textual branch diff is available."),
+            ("# staged", staged),
+            ("# unstaged", unstaged),
+        ]
+    )
+    display, truncated = _truncate_git_preview(body)
+    return _git_object_detail_payload(
+        kind="worktree",
+        ref=branch or head_rev,
+        path=worktree_path,
+        status_label="worktree",
+        summary=f"Worktree {display_name}: +{relation['ahead']} / -{relation['behind']} vs main",
+        diff=display,
+        truncated=truncated,
+        meta={"branch": branch, "headRev": head_rev, "aheadMain": relation["ahead"], "behindMain": relation["behind"]},
+    )
 
 
 def generate_git_commit_message(
@@ -1037,6 +1205,98 @@ def _normalize_git_path(path: str) -> str:
     except ValueError as exc:
         raise ValueError("Path must stay inside the project root") from exc
     return candidate.as_posix()
+
+
+def _normalize_commit_ref(ref: str) -> str:
+    normalized = str(ref or "").strip()
+    if not re.fullmatch(r"[0-9a-fA-F]{7,40}", normalized):
+        raise ValueError("Commit ref must be a 7-40 character hexadecimal SHA")
+    return normalized
+
+
+def _normalize_branch_ref(service: Any, ref: str) -> str:
+    normalized = str(ref or "").strip()
+    if not normalized or normalized.startswith("-") or "\x00" in normalized or "\n" in normalized or "\r" in normalized:
+        raise ValueError("Branch ref is invalid")
+    if not _is_valid_branch_ref(service, normalized):
+        raise ValueError("Branch ref is invalid")
+    return normalized
+
+
+def _is_valid_branch_ref(service: Any, ref: str) -> bool:
+    normalized = str(ref or "").strip()
+    if not normalized or normalized.startswith("-") or "\x00" in normalized or "\n" in normalized or "\r" in normalized:
+        return False
+    result = _safe_run_git(service, ["check-ref-format", "--branch", normalized])
+    return bool(result is not None and result.returncode == 0)
+
+
+def _registered_worktree_entry(service: Any, *, ref: str, path: str) -> dict[str, str]:
+    ref_text = str(ref or "").strip()
+    path_text = str(path or "").strip()
+    result = _safe_run_git(service, ["worktree", "list", "--porcelain"])
+    if result is None or result.returncode != 0:
+        raise ValueError(_git_error(result) or "git worktree list failed")
+    entries = _parse_worktree_list(result.stdout)
+    for entry in entries:
+        worktree_path = str(entry.get("worktree") or "").strip()
+        branch = _display_branch(str(entry.get("branch") or "").strip())
+        head_rev = str(entry.get("HEAD") or "").strip()
+        if path_text and _same_path(worktree_path, Path(path_text)):
+            return entry
+        if ref_text and ref_text in {branch, head_rev, _short_rev(head_rev)}:
+            return entry
+    raise ValueError("Worktree was not found")
+
+
+def _join_git_object_sections(sections: list[tuple[str, str]]) -> str:
+    chunks: list[str] = []
+    for heading, body in sections:
+        normalized_body = str(body or "").strip()
+        if not normalized_body:
+            continue
+        chunks.append(f"{heading}\n{normalized_body}".rstrip())
+    return "\n\n".join(chunks).strip()
+
+
+def _truncate_git_preview(value: str) -> tuple[str, bool]:
+    text = str(value or "").strip()
+    truncated = len(text) > MAX_DIFF_CHARS
+    if truncated:
+        text = text[:MAX_DIFF_CHARS] + "\n\n... git preview truncated ..."
+    return text, truncated
+
+
+def _git_object_detail_payload(
+    *,
+    kind: str,
+    ref: str,
+    path: str,
+    status_label: str,
+    summary: str,
+    diff: str = "",
+    content: str = "",
+    available: bool = True,
+    error: str = "",
+    truncated: bool = False,
+    meta: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    return {
+        "available": available,
+        "error": error,
+        "kind": kind,
+        "ref": ref,
+        "path": path,
+        "status": "",
+        "statusLabel": status_label,
+        "summary": summary,
+        "diff": diff,
+        "content": content,
+        "language": "diff" if diff else "text",
+        "truncated": truncated,
+        "binary": False,
+        "meta": meta or {},
+    }
 
 
 def _git_commit_config() -> dict[str, str]:

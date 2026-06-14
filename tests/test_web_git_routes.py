@@ -307,6 +307,49 @@ def test_git_diff_endpoint_rejects_path_escape():
     assert "project root" in response.json()["detail"]
 
 
+def test_git_object_detail_endpoint_exposes_commit_payload(monkeypatch):
+    monkeypatch.setattr(
+        git_routes,
+        "get_git_object_detail",
+        lambda kind, ref, path: {
+            "available": True,
+            "error": "",
+            "kind": kind,
+            "ref": ref,
+            "path": path or "feat: git detail",
+            "status": "",
+            "statusLabel": "commit",
+            "summary": "Commit abcdef1",
+            "diff": "# commit abcdef1\nsubject: feat: git detail\n\n# patch\n+detail",
+            "content": "",
+            "language": "diff",
+            "truncated": False,
+            "binary": False,
+            "meta": {},
+        },
+    )
+
+    response = client.get("/api/git/object-detail", params={"kind": "commit", "ref": "abcdef1"})
+
+    assert response.status_code == 200, response.json()
+    payload = response.json()
+    assert payload["kind"] == "commit"
+    assert payload["statusLabel"] == "commit"
+    assert "# patch" in payload["diff"]
+
+
+def test_git_object_detail_endpoint_rejects_invalid_ref(monkeypatch):
+    def fake_detail(kind, ref, path):
+        raise ValueError("Commit ref must be a 7-40 character hexadecimal SHA")
+
+    monkeypatch.setattr(git_routes, "get_git_object_detail", fake_detail)
+
+    response = client.get("/api/git/object-detail", params={"kind": "commit", "ref": "--help"})
+
+    assert response.status_code == 400
+    assert "hexadecimal SHA" in response.json()["detail"]
+
+
 def test_git_commit_message_endpoint_generates_ai_draft(monkeypatch):
     captured_profiles = []
 

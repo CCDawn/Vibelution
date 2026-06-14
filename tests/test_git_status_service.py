@@ -80,6 +80,15 @@ def test_get_git_status_reuses_cached_snapshot_and_metadata_within_ttl(monkeypat
             ("branch", "--show-current"): ok("codex/git-status-cache\n"),
             ("rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"): ok("origin/codex/git-status-cache\n"),
             ("rev-list", "--left-right", "--count", "origin/codex/git-status-cache...HEAD"): ok("0\t1\n"),
+            (
+                "log",
+                "--max-count=5",
+                "--date=iso-strict",
+                "--pretty=format:%H%x1f%h%x1f%aN%x1f%aI%x1f%s",
+                "origin/codex/git-status-cache..HEAD",
+            ): ok(),
+            ("worktree", "list", "--porcelain"): ok(),
+            ("branch", "--no-merged", "main", "--format=%(refname:short)"): ok(),
         },
     )
     monkeypatch.setattr(git_status_service, "get_git_memory_service", lambda: service)
@@ -93,6 +102,15 @@ def test_get_git_status_reuses_cached_snapshot_and_metadata_within_ttl(monkeypat
         ["branch", "--show-current"],
         ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"],
         ["rev-list", "--left-right", "--count", "origin/codex/git-status-cache...HEAD"],
+        [
+            "log",
+            "--max-count=5",
+            "--date=iso-strict",
+            "--pretty=format:%H%x1f%h%x1f%aN%x1f%aI%x1f%s",
+            "origin/codex/git-status-cache..HEAD",
+        ],
+        ["worktree", "list", "--porcelain"],
+        ["branch", "--no-merged", "main", "--format=%(refname:short)"],
     ]
     assert first["totalFiles"] == 2
     assert first["truncated"] is True
@@ -116,6 +134,15 @@ def test_get_git_status_refreshes_working_tree_after_ttl_without_repeating_metad
             ("branch", "--show-current"): ok("codex/git-status-cache\n"),
             ("rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"): ok("origin/codex/git-status-cache\n"),
             ("rev-list", "--left-right", "--count", "origin/codex/git-status-cache...HEAD"): ok("0\t1\n"),
+            (
+                "log",
+                "--max-count=5",
+                "--date=iso-strict",
+                "--pretty=format:%H%x1f%h%x1f%aN%x1f%aI%x1f%s",
+                "origin/codex/git-status-cache..HEAD",
+            ): ok(),
+            ("worktree", "list", "--porcelain"): ok(),
+            ("branch", "--no-merged", "main", "--format=%(refname:short)"): ok(),
         },
     )
     ticks = iter([100.0, 100.0, 102.0, 102.0])
@@ -134,6 +161,15 @@ def test_get_git_status_refreshes_working_tree_after_ttl_without_repeating_metad
         ["branch", "--show-current"],
         ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"],
         ["rev-list", "--left-right", "--count", "origin/codex/git-status-cache...HEAD"],
+        [
+            "log",
+            "--max-count=5",
+            "--date=iso-strict",
+            "--pretty=format:%H%x1f%h%x1f%aN%x1f%aI%x1f%s",
+            "origin/codex/git-status-cache..HEAD",
+        ],
+        ["worktree", "list", "--porcelain"],
+        ["branch", "--no-merged", "main", "--format=%(refname:short)"],
     ]
     assert first["totalFiles"] == 1
     assert second["totalFiles"] == 2
@@ -147,6 +183,50 @@ def test_commit_git_changes_rejects_windows_absolute_paths(monkeypatch):
         git_status_service.commit_git_changes([r"C:\Users\17533\secret.txt"], "feat: nope")
 
     assert service.calls == []
+
+
+def test_get_git_object_detail_rejects_unsafe_commit_ref(monkeypatch):
+    service = FakeGitService([])
+    monkeypatch.setattr(git_status_service, "get_git_memory_service", lambda: service)
+
+    with pytest.raises(ValueError, match="hexadecimal SHA"):
+        git_status_service.get_git_object_detail("commit", "--help")
+
+    assert service.calls == []
+
+
+def test_get_git_object_detail_exposes_registered_worktree_status(monkeypatch):
+    worktree_path = "C:/Users/17533/Desktop/Vibelution-worktrees/demo"
+    service = FakeGitService(
+        [],
+        results={
+            ("worktree", "list", "--porcelain"): ok(
+                f"worktree {worktree_path}\n"
+                "HEAD 1111111111111111\n"
+                "branch refs/heads/codex/demo\n"
+            ),
+            ("-C", worktree_path, "status", "--short", "--branch"): ok("## codex/demo\n M web/src/routes/GitRoute.tsx\n"),
+            ("check-ref-format", "--branch", "codex/demo"): ok("codex/demo\n"),
+            ("rev-list", "--left-right", "--count", "main...codex/demo"): ok("3\t2\n"),
+            ("diff", "--stat", "--patch", "--no-ext-diff", "--no-color", "main...codex/demo"): ok(
+                "diff --git a/web/src/routes/GitRoute.tsx b/web/src/routes/GitRoute.tsx\n+detail\n"
+            ),
+            ("-C", worktree_path, "diff", "--cached", "--no-ext-diff", "--no-color"): ok(""),
+            ("-C", worktree_path, "diff", "--no-ext-diff", "--no-color"): ok(""),
+        },
+    )
+    monkeypatch.setattr(git_status_service, "get_git_memory_service", lambda: service)
+
+    payload = git_status_service.get_git_object_detail("worktree", "codex/demo", worktree_path)
+
+    assert payload["available"] is True
+    assert payload["kind"] == "worktree"
+    assert payload["statusLabel"] == "worktree"
+    assert payload["meta"]["branch"] == "codex/demo"
+    assert payload["meta"]["aheadMain"] == 2
+    assert "# status" in payload["diff"]
+    assert "# branch diff main...worktree" in payload["diff"]
+    assert "web/src/routes/GitRoute.tsx" in payload["diff"]
 
 
 def test_commit_git_changes_stages_selected_untracked_files(monkeypatch):
