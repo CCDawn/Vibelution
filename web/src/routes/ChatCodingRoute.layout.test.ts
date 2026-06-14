@@ -47,6 +47,20 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.runtimeNoticeMessage).toBeTypeOf("string");
   });
 
+  it("surfaces pending tool approvals as an in-session dialog", () => {
+    expect(routeSource).toContain("pendingToolGovernanceRequests");
+    expect(routeSource).toContain("resolveToolApprovalMutation");
+    expect(routeSource).toContain("styles.toolApprovalOverlay");
+    expect(routeSource).toContain("role=\"dialog\"");
+    expect(routeSource).toContain("/tool-governance-requests/");
+    expect(routeSource.indexOf("styles.toolApprovalOverlay")).toBeLessThan(
+      routeSource.indexOf("<LazyConversationView"),
+    );
+    expect(routeStyles.toolApprovalOverlay).toBeTypeOf("string");
+    expect(routeStyles.toolApprovalDialog).toBeTypeOf("string");
+    expect(routeStyles.toolApprovalActions).toBeTypeOf("string");
+  });
+
   it("loads the heavy conversation renderer through a lazy bridge", () => {
     expect(routeSource).toContain("LazyConversationView");
     expect(routeSource).toContain("conversationConstants");
