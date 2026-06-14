@@ -39,7 +39,7 @@
         <aside class="dashboard-panel">
           <h2>审核摘要</h2>
           <div class="kpi-grid">
-            <div class="kpi"><b>当前阶段</b><strong>M6.33</strong><span>候选库主入口已改为可视化二级索引，底层 JSON 只保留为维护入口。</span></div>
+            <div class="kpi"><b>当前阶段</b><strong>M6.34</strong><span>知识搜集一级工作台已改为当前判断、阶段颜色、关键数量和下一步按钮。</span></div>
             <div class="kpi"><b>流程节点</b><strong>13</strong><span>1-9 为知识入库主线，10-13 保留占位与维护节点。</span></div>
             <div class="kpi"><b>候选资料</b><strong>10</strong><span>第一轮 source_manifest 已进入 candidate-only 工作区。</span></div>
             <div class="kpi"><b>正式写入</b><strong>0</strong><span>未写正式 Team Knowledge、RAG 或 official graph。</span></div>
@@ -729,6 +729,11 @@
       </div>
       <div class="agent-matrix">
         <div class="feature-row">
+        <strong>知识搜集一级工作台</strong>
+        <span>顶部展示当前判断、未完成任务、候选资料、搜索问题、缓存状态；5 个阶段卡用颜色区分进行中/完成/失败/待处理/未进行，并把详情内容下沉到二级区</span>
+        <b class="status-pill">已接入前端</b>
+      </div>
+<div class="feature-row">
         <strong>资料与候选存储</strong>
         <span>source_manifest、knowledge_candidates/index、候选 JSON 命名与状态流</span>
         <b class="status-pill">需新设计</b>
@@ -1257,7 +1262,7 @@
           <div class="service-row"><b>团队群聊</b><span>room-20260529-090009-757107-6a747d62 · research_coordination</span></div>
           <div class="service-row"><b>流程文件</b><span>workspace/teams/research-team/workflow_orchestration.json</span></div>
           <div class="service-row"><b>候选仓库</b><span>workspace/teams/research-team/candidate_store/index.json</span></div>
-          <div class="service-row"><b>策略</b><span>挑战杯科研流程直接绑定当前 Vibelution ai科学研究团队，不另建新团队；Teams 页顶部只保留 AI 搜索范围团队和 ai科学研究团队两个固定入口，左侧栏删除，不再展示创建团队、模板创建或完整团队列表；选择 ai科学研究团队后直接进入团队专属科研工作台，默认只显示科研控制台：知识搜集、实验、迭代三张阶段卡各保留一个主操作和阶段详情入口；资料搜集已折叠进知识搜集阶段页，组织画布仅保留为附属结构视图。</span></div>
+          <div class="service-row"><b>策略</b><span>挑战杯科研流程直接绑定当前 Vibelution ai科学研究团队，不另建新团队；Teams 页顶部只保留 AI 搜索范围团队和 ai科学研究团队两个固定入口，左侧栏删除，不再展示创建团队、模板创建或完整团队列表；选择 ai科学研究团队后直接进入团队专属科研工作台，默认只显示科研控制台：知识搜集、实验、迭代三张阶段卡各保留一个主操作和阶段详情入口；资料搜集已折叠进知识搜集阶段页，组织画布仅保留为附属结构视图；知识搜集一级工作台只展示当前判断、关键数量、阶段颜色和下一步按钮，详细追踪放入详情区。</span></div>
         </div>
       </div>
       <div class="runbook-grid">
