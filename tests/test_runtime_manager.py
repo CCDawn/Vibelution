@@ -4332,12 +4332,19 @@ def test_handle_open_workbench_restarts_headless_session(monkeypatch):
 
     opened = {}
     events = []
+    launcher_state_syncs = []
 
     def fake_open_workbench(*, no_browser: bool, cancel_check=None):
         opened["no_browser"] = no_browser
         return subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
 
     monkeypatch.setattr(daemon, "open_workbench", fake_open_workbench)
+    monkeypatch.setattr(
+        daemon,
+        "persist_workbench_launcher_state_after_open",
+        lambda observation, **kwargs: launcher_state_syncs.append((dict(observation), kwargs))
+        or {"updatedState": True, "reason": "workbench_open"},
+    )
     monkeypatch.setattr(daemon, "_start_background_thread", lambda **kwargs: None)
     monkeypatch.setattr(daemon, "_append_event", lambda event_type, payload: events.append((event_type, payload)))
 
@@ -4374,6 +4381,12 @@ def test_handle_open_workbench_restarts_headless_session(monkeypatch):
     assert backup_event["reason"] == "launcher_open_success"
     assert result["stableBackup"]["status"] == "queued"
     assert result["stableBackup"]["mode"] == "background"
+    assert result["launcherStateSync"]["updatedState"] is True
+    assert launcher_state_syncs[0][0]["sessionId"] == "browser-session"
+    assert launcher_state_syncs[0][1] == {
+        "last_reason": "explicit_open",
+        "last_source": "runtime_manager",
+    }
 
 
 def test_handle_open_workbench_fails_when_launcher_exits_before_workbench_is_ready(monkeypatch):
@@ -6558,6 +6571,82 @@ def test_clear_workbench_launcher_state_after_fast_close_preserves_launcher_cont
     assert saved["runtimeSceneId"] is None
     assert saved["runtimeSceneDir"] is None
     assert saved["startedAt"] == "2026-06-12T10:30:00+00:00"
+
+
+def test_persist_workbench_launcher_state_after_open_replaces_control_surface_snapshot(tmp_path, monkeypatch):
+    state_path = tmp_path / "state.json"
+    state_path.write_text(
+        json.dumps(
+            {
+                "sessionRole": "launcher_control_surface",
+                "sessionId": "control-session",
+                "desiredState": "open",
+                "observedState": "open",
+                "phase": "steady",
+                "backendPid": 0,
+                "backendLaunchPid": 0,
+                "launcherBackendPid": 38312,
+                "launcherBackendLaunchPid": 38312,
+                "launcherControlPort": 8765,
+                "launcherControlUrl": "http://127.0.0.1:8765/launcher",
+                "browserManaged": True,
+                "browserProfileDir": "launcher-profile",
+                "workbenchBrowserProfileDir": "workbench-profile",
+                "launcherBrowserProfileDir": "launcher-profile",
+                "browserLaunchPid": 3300,
+                "browserWindowPid": 3300,
+                "workbenchBrowserLaunchPid": 0,
+                "workbenchBrowserWindowPid": 0,
+                "launcherBrowserLaunchPid": 3300,
+                "launcherBrowserWindowPid": 3300,
+                "url": "http://127.0.0.1:8000",
+                "statusLine": "Workbench is running.",
+                "lastReason": "python_launcher_start",
+                "lastSource": "python_launcher",
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(workbench_controller, "LAUNCHER_STATE_PATH", state_path)
+    events: list[tuple[str, dict]] = []
+    monkeypatch.setattr(
+        workbench_controller,
+        "append_runtime_manager_file_event",
+        lambda event_type, payload, **_kwargs: events.append((event_type, payload)),
+    )
+
+    result = workbench_controller.persist_workbench_launcher_state_after_open(
+        {
+            "sessionId": "workbench-session",
+            "backendPid": 54856,
+            "backendLaunchPid": 54856,
+            "backendPort": 8000,
+            "browserManaged": True,
+            "browserLaunchPid": 59400,
+            "browserWindowPid": 59400,
+            "browserProfileDir": "workbench-profile",
+            "url": "http://127.0.0.1:8000",
+        },
+        last_reason="launcher_restart_button",
+        last_source="launcher_api",
+    )
+    saved = json.loads(state_path.read_text(encoding="utf-8"))
+
+    assert result["updatedState"] is True
+    assert saved["sessionRole"] == "workbench"
+    assert saved["sessionId"] == "workbench-session"
+    assert saved["backendPid"] == 54856
+    assert saved["backendLaunchPid"] == 54856
+    assert saved["browserProfileDir"] == "workbench-profile"
+    assert saved["browserWindowPid"] == 59400
+    assert saved["workbenchBrowserLaunchPid"] == 59400
+    assert saved["workbenchBrowserWindowPid"] == 59400
+    assert saved["launcherBackendPid"] == 38312
+    assert saved["launcherBrowserWindowPid"] == 3300
+    assert saved["lastReason"] == "launcher_restart_button"
+    assert saved["lastSource"] == "launcher_api"
+    assert saved["statusLine"] == "Workbench is running."
+    assert events[-1][0] == "launcher.state.workbench_open_persisted"
 
 
 def test_handle_force_close_workbench_marks_work_runs_and_verifies_close(monkeypatch):

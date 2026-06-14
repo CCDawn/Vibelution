@@ -1035,6 +1035,91 @@ def test_launcher_status_keeps_project_open_when_launcher_control_surface_stays_
     assert bundle["statusLine"] == "工作台正在运行。"
 
 
+def test_launcher_status_uses_fresh_runtime_manager_state_without_deep_observation(tmp_path, monkeypatch):
+    now = datetime.now(timezone.utc).isoformat()
+    runtime_state = {
+        "runtimeState": "running",
+        "managerPid": 3210,
+        "stateVersion": 18,
+        "updatedAt": now,
+        "command": {
+            "activeCommandId": "",
+            "activeType": "",
+        },
+        "workbench": {
+            "sessionRole": "workbench",
+            "desiredState": "open",
+            "observedState": "open",
+            "phase": "steady",
+            "backendPid": 46284,
+            "backendAlive": True,
+            "backendHealthy": True,
+            "backendObserved": True,
+            "backendPort": 8000,
+            "backendPortListening": True,
+            "backendPortOwnerPid": 46284,
+            "backendPortConflict": False,
+            "browserManaged": True,
+            "browserWindowPid": 59400,
+            "browserWindowAlive": True,
+            "lifecycleConsistency": "consistent",
+            "url": "http://127.0.0.1:8000",
+            "lastReason": "launcher_restart_button",
+            "lastSource": "launcher_api",
+        },
+    }
+    state_path = tmp_path / ".runtime" / "runtime-manager" / "state.json"
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    state_path.write_text(json.dumps(runtime_state), encoding="utf-8")
+    launcher_state_path = tmp_path / ".runtime" / "launcher" / "state.json"
+    launcher_state_path.parent.mkdir(parents=True, exist_ok=True)
+    launcher_state_path.write_text(
+        json.dumps(
+            {
+                "sessionRole": "launcher_control_surface",
+                "desiredState": "open",
+                "observedState": "open",
+                "phase": "steady",
+                "backendPid": 0,
+                "browserWindowPid": 3300,
+                "workbenchBrowserWindowPid": 0,
+                "launcherBrowserWindowPid": 3300,
+                "launcherControlUrl": "http://127.0.0.1:8765/launcher",
+                "launcherControlPort": 8765,
+                "url": "http://127.0.0.1:8000",
+                "statusLine": "Workbench is running.",
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(launcher_service, "STATE_PATH", state_path)
+    monkeypatch.setattr(launcher_service, "INBOX_DIR", tmp_path / ".runtime" / "runtime-manager" / "inbox")
+    monkeypatch.setattr(launcher_service, "PROCESSING_DIR", tmp_path / ".runtime" / "runtime-manager" / "processing")
+    monkeypatch.setattr(launcher_service, "RESULTS_DIR", tmp_path / ".runtime" / "runtime-manager" / "results")
+    monkeypatch.setattr(launcher_service, "EVENTS_PATH", tmp_path / ".runtime" / "runtime-manager" / "events.jsonl")
+    monkeypatch.setattr(launcher_service, "LAUNCHER_STATE_PATH", launcher_state_path)
+    monkeypatch.setattr(launcher_service, "load_state", lambda: runtime_state)
+    monkeypatch.setattr(launcher_service, "load_pid", lambda: 3210)
+    monkeypatch.setattr(launcher_service, "_is_process_alive", lambda pid: int(pid) == 3210)
+    monkeypatch.setattr(launcher_service, "launcher_active_work_runs", lambda: [])
+    observe_calls = []
+    monkeypatch.setattr(
+        launcher_service,
+        "observe_workbench",
+        lambda: observe_calls.append("observe") or {},
+    )
+
+    payload = launcher_service.get_launcher_status()
+
+    bundle = payload["projectBundle"]
+    assert bundle["sessionRole"] == "workbench"
+    assert bundle["overallState"] == "ready"
+    assert bundle["backend"]["pid"] == 46284
+    assert bundle["browser"]["windowPid"] == 59400
+    assert bundle["statusLine"] == "工作台正在运行。"
+    assert observe_calls == []
+
+
 def test_launcher_status_reclassifies_control_surface_with_managed_backend_as_partial(tmp_path, monkeypatch):
     launcher_state_path = tmp_path / ".runtime" / "launcher" / "state.json"
     launcher_state_path.parent.mkdir(parents=True, exist_ok=True)
