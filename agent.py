@@ -1274,9 +1274,22 @@ class SelfEvolvingAgent:
         if summary:
             try:
                 self.prompt_manager.update_state_memory(
-                    f"[压缩摘要 | iter={iteration} | {level.value}]\n{summary}"
+                    f"[上下文检查点 | iter={iteration} | {level.value}]\n{summary}"
                 )
                 summary_written = True
+            except Exception:
+                pass
+            try:
+                runtime_binding = getattr(self, "runtime_agent_binding", {}) or {}
+                session_id = str(runtime_binding.get("directSessionId") or "").strip()
+                if session_id and self._get_mode_policy().mode == AgentMode.CHAT:
+                    from tools.conversation_history_tools import append_history_checkpoint
+
+                    append_history_checkpoint(
+                        session_id=session_id,
+                        summary=summary,
+                        reason=combined_reason,
+                    )
             except Exception:
                 pass
 

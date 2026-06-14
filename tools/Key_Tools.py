@@ -81,6 +81,12 @@ from tools.python_intelligence_tools import (
 )
 from tools.plan_tools import plan_update_tool as _plan_update_impl
 from tools.conversation_log_tools import conversation_log_inspect_tool as _conversation_log_inspect_impl
+from tools.conversation_history_tools import (
+    history_checkpoint_tool as _history_checkpoint_impl,
+    history_fetch_tool as _history_fetch_impl,
+    history_search_tool as _history_search_impl,
+    history_timeline_tool as _history_timeline_impl,
+)
 from tools.session_reference_tools import session_reference_query_tool as _session_reference_query_impl
 from tools.session_child_tools import (
     create_child_session_tool as _create_child_session_impl,
@@ -519,6 +525,90 @@ def create_key_tools() -> List[BaseTool]:
             limit=limit,
             max_events=max_events,
         )
+
+    @tool
+    def history_search_tool(
+        query: str = "",
+        event_type: str = "",
+        tool_name: str = "",
+        role: str = "",
+        limit: int = 8,
+        session_id: str = "",
+    ) -> str:
+        """
+        【会话历史搜索】搜索当前会话的历史事件。
+
+        用于查找旧用户请求、旧回答、历史工具调用和工具结果，避免重复调用工具。
+        默认使用当前 Agent runtime 的会话 ID；只有明确需要查其他会话时才传 session_id。
+
+        Args:
+            query: 关键词，留空时按过滤条件返回最近事件
+            event_type: 可选，user_message / assistant_message / tool_call / tool_result / checkpoint
+            tool_name: 可选，按工具名过滤
+            role: 可选，user 或 assistant
+            limit: 返回数量，默认 8，最多 30
+            session_id: 可选目标会话 ID
+
+        Returns:
+            JSON 格式的历史事件列表，包含 eventId，可用 history_fetch_tool 精确读取。
+        """
+        return _history_search_impl(
+            query=query,
+            event_type=event_type,
+            tool_name=tool_name,
+            role=role,
+            limit=limit,
+            session_id=session_id,
+        )
+
+    @tool
+    def history_fetch_tool(event_id: str, session_id: str = "") -> str:
+        """
+        【会话历史读取】按 event_id 精确读取一条历史事件。
+
+        先用 history_search_tool 或 history_timeline_tool 找到 eventId，再用本工具读取原始片段。
+
+        Args:
+            event_id: 历史事件 ID
+            session_id: 可选目标会话 ID，默认当前会话
+
+        Returns:
+            JSON 格式的历史事件详情。
+        """
+        return _history_fetch_impl(event_id=event_id, session_id=session_id)
+
+    @tool
+    def history_timeline_tool(start: int = 0, limit: int = 20, include_tools: bool = False, session_id: str = "") -> str:
+        """
+        【会话时间线】浏览当前会话历史事件时间线。
+
+        适合在不知道关键词时先定位旧轮次。默认不展开工具事件，避免输出过密。
+
+        Args:
+            start: 起始事件偏移
+            limit: 返回数量，默认 20，最多 50
+            include_tools: 是否包含工具调用和工具结果事件
+            session_id: 可选目标会话 ID，默认当前会话
+
+        Returns:
+            JSON 格式的事件时间线。
+        """
+        return _history_timeline_impl(start=start, limit=limit, include_tools=include_tools, session_id=session_id)
+
+    @tool
+    def history_checkpoint_tool(session_id: str = "") -> str:
+        """
+        【会话检查点】读取当前会话最近的历史检查点。
+
+        检查点只用于导航旧历史；原始历史不会被删除或改写。
+
+        Args:
+            session_id: 可选目标会话 ID，默认当前会话
+
+        Returns:
+            JSON 格式的检查点事件；没有检查点时返回空结果说明。
+        """
+        return _history_checkpoint_impl(session_id=session_id)
 
     # ── 文件操作工具 ────────────────────────────────────────────────────────
 
@@ -1751,13 +1841,13 @@ def create_key_tools() -> List[BaseTool]:
     @tool
     def compress_context_tool(reason: str = "主动压缩") -> str:
         """
-        【上下文压缩】主动压缩上下文，释放思维空间。
+        【上下文检查点】请求为当前运行时上下文生成检查点或触发压缩 fallback。
 
-        当你感到思绪拥挤、上下文混乱、或需要更多空间思考时调用。
-        压缩会保留最近的关键对话，将旧内容压缩为摘要。
+        当上下文过长时调用。它不会删除、改写或清空原始会话历史；
+        旧历史仍应通过 history_search_tool / history_fetch_tool 主动查询。
 
         Args:
-            reason: 压缩原因（如"上下文太长"、"需要更多空间"）
+            reason: 请求原因（如"上下文太长"、"需要建立历史检查点"）
 
         Returns:
             确认信息
@@ -1786,6 +1876,10 @@ def create_key_tools() -> List[BaseTool]:
         open_evolution_transaction_tool,
         close_evolution_transaction_tool,
         conversation_log_inspect_tool,
+        history_search_tool,
+        history_fetch_tool,
+        history_timeline_tool,
+        history_checkpoint_tool,
         # 文件操作
         cli_tool,
         cli_agent_run_tool,

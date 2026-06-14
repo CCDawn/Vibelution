@@ -3219,7 +3219,7 @@ def test_session_detail_marks_agent_direct_session_mismatch(tmp_path, monkeypatc
     payload = response.json()
     assert payload["agentDirectSessionMismatch"] is True
     assert payload["agentPrimaryDirectSessionId"] == "session-current"
-    assert payload["activeTask"]["latestSummary"] == "旧会话残留任务"
+    assert payload["activeTask"] is None
     assert agent_directory_service.get_agent("agent-live")["directSessionId"] == "session-current"
 
 
@@ -4151,6 +4151,32 @@ def test_history_seed_omits_state_only_assistant_messages():
     ]
 
 
+def test_history_seed_keeps_empty_assistant_message_with_tool_calls():
+    history = session_service._history_messages_for_agent_seed(
+        [
+            {"role": "user", "content": "继续验证"},
+            {
+                "role": "assistant",
+                "content": "",
+                "toolCalls": [
+                    {
+                        "toolName": "cli_tool",
+                        "toolCallId": "call_test",
+                        "status": "failed",
+                        "resultPreview": "Windows detected Unix shell fragment.",
+                    }
+                ],
+            },
+        ]
+    )
+
+    assert len(history) == 2
+    assert history[1]["role"] == "assistant"
+    assert history[1]["content"] == ""
+    assert history[1]["tool_calls"][0]["name"] == "cli_tool"
+    assert history[1]["tool_calls"][0]["resultPreview"] == "Windows detected Unix shell fragment."
+
+
 def test_history_seed_omits_turn_error_messages():
     history = session_service._history_messages_for_agent_seed(
         [
@@ -4989,9 +5015,7 @@ def test_session_detail_overrides_active_task_status_from_running_work_run(tmp_p
     assert response.status_code == 200
     payload = response.json()
     assert payload["currentPhase"] == "running"
-    assert payload["activeTask"]["status"] == "running"
-    assert payload["activeTask"]["latestSummary"] == "正在请求模型，等待首个响应片段..."
-    assert payload["activeTask"]["metadata"]["liveWorkRunId"] == "turn-active-task"
+    assert payload["activeTask"] is None
 
 
 def test_session_detail_hydrates_file_context_from_saved_active_task(tmp_path, monkeypatch):
@@ -5011,6 +5035,7 @@ def test_session_detail_hydrates_file_context_from_saved_active_task(tmp_path, m
             "verification_status": "passed",
             "verification_summary": "2 passed in 0.31s",
             "default_file_context": "core/web/services/session_service.py",
+            "metadata": {"source": "task_tool"},
         },
     )
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
@@ -5442,18 +5467,13 @@ def test_submit_session_message_runs_turn_and_persists_reply(tmp_path, monkeypat
     ]
     assert payload["taskSummary"] == "已完成网页对话提交接线。"
     assert payload["currentPhase"] == "ready"
-    assert payload["readFiles"] == ["web/src/routes/ChatCodingRoute.tsx"]
-    assert payload["changedFiles"] == ["core/web/services/session_service.py"]
-    assert payload["defaultFileContext"] == "core/web/services/session_service.py"
-    assert payload["previewTabs"] == [
-        "core/web/services/session_service.py",
-        "web/src/routes/ChatCodingRoute.tsx",
-    ]
-    assert payload["activePreviewPath"] == "core/web/services/session_service.py"
-    assert payload["activeTask"]["goal"] == "请继续修复 web/src/routes/ChatCodingRoute.tsx 并验证"
-    assert payload["activeTask"]["latestSummary"] == "已完成网页对话提交接线。"
-    assert payload["activeTask"]["changedFiles"] == ["core/web/services/session_service.py"]
-    assert payload["activeTask"]["verificationStatus"] == "passed"
+    assert payload["readFiles"] == []
+    assert payload["changedFiles"] == []
+    assert payload["defaultFileContext"] == ""
+    assert payload["previewTabs"] == []
+    assert payload["activePreviewPath"] == "agent"
+    assert payload["activeTask"] is None
+    assert "active_task" not in load_chat_state(tmp_path)["conversations"][0]
     turn_events = [
         (args[2], kwargs)
         for args, kwargs in recorded_scene_events
@@ -5618,19 +5638,20 @@ def test_session_worker_seeds_slash_skill_runtime_context(tmp_path, monkeypatch)
 
     assert response.status_code == 202
     assert seen_prompt["value"] == "/brt 设计斜杠 skill 调用"
-    assert len(seen_contexts) == 2
+    assert len(seen_contexts) == 3
     assert seen_contexts[0] == "static:## Agent Static Context\nstable"
-    assert seen_contexts[1].startswith("volatile:## Slash Skill Context")
-    assert "Command: /brt" in seen_contexts[1]
-    assert "Ask one question at a time." in seen_contexts[1]
+    assert seen_contexts[1] == "volatile:## Agent Runtime Context\nvolatile"
+    assert seen_contexts[2].startswith("volatile:## Slash Skill Context")
+    assert "Command: /brt" in seen_contexts[2]
+    assert "Ask one question at a time." in seen_contexts[2]
     assert marker_calls
     history_seeded_events = [event for event in lifecycle_events if event["phase"] == "history_seeded"]
     assert history_seeded_events
     history_fields = history_seeded_events[-1]["fields"]
     assert history_fields["staticRuntimeContextIncluded"] is True
-    assert history_fields["dynamicRuntimeContextIncluded"] is False
+    assert history_fields["dynamicRuntimeContextIncluded"] is True
     assert history_fields["dynamicRuntimeContextAvailable"] is True
-    assert history_fields["dynamicRuntimeContextOmittedFromModelInput"] is True
+    assert history_fields["dynamicRuntimeContextOmittedFromModelInput"] is False
     assert history_fields["skillRuntimeContextIncluded"] is True
     assert history_fields["skillRuntimeContextAvailable"] is True
     assert history_fields["skillRuntimeContextOmittedFromModelInput"] is False
@@ -7005,6 +7026,7 @@ def test_submit_session_message_preserves_short_dialogue_prompt_without_task_fal
             "goal": "继续前端开发",
             "read_files": ["web/src/routes/ChatCodingRoute.tsx"],
             "default_file_context": "web/src/routes/ChatCodingRoute.tsx",
+            "metadata": {"source": "task_tool"},
         },
     )
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
@@ -7052,16 +7074,16 @@ def test_submit_session_message_preserves_short_dialogue_prompt_without_task_fal
     assert "conversation.user_message_filtered" not in event_codes
 
 
-def test_lightweight_chat_tool_intent_uses_token_aware_english_markers():
+def test_lightweight_chat_does_not_classify_user_text_or_disable_tools():
     enabled, reason = session_service._lightweight_chat_payload_decision(
         {"raw_user_message": "Capital ok?", "user_message": "Capital ok?"}
     )
-    assert (enabled, reason) == (True, "short_dialogue")
+    assert (enabled, reason) == (False, "unified_conversation_chain")
 
     enabled, reason = session_service._lightweight_chat_payload_decision(
         {"raw_user_message": "API ok?", "user_message": "API ok?"}
     )
-    assert (enabled, reason) == (False, "tool_intent_marker")
+    assert (enabled, reason) == (False, "unified_conversation_chain")
 
 
 def test_lightweight_chat_keeps_active_skill_contract_in_full_payload():
@@ -7095,6 +7117,7 @@ def test_submit_session_message_continue_preserves_raw_prompt_and_dialogue_histo
             "goal": "修复对话消息流程",
             "read_files": ["core/web/services/session_service.py"],
             "default_file_context": "core/web/services/session_service.py",
+            "metadata": {"source": "task_tool"},
         },
     )
     state = load_chat_state(tmp_path)
@@ -7147,6 +7170,7 @@ def test_submit_session_message_does_not_promote_contextual_confirmation_to_task
             "title": "优化日志摘要入口",
             "goal": "优化日志摘要入口",
             "latest_summary": "已经形成日志摘要优化计划。",
+            "metadata": {"source": "task_tool"},
         },
     )
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
@@ -7196,7 +7220,7 @@ def test_submit_session_contextual_confirmation_preserves_raw_prompt(tmp_path, m
             "changed_files": ["workspace/avatars/avatars.json"],
             "latest_summary": "Agent 目前不能设置默认图片头像。要我现在开始实现吗？",
             "next_action": "",
-            "metadata": {"outcome": "no_change"},
+            "metadata": {"source": "task_tool", "outcome": "no_change"},
         },
     )
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
@@ -7246,7 +7270,7 @@ def test_submit_session_plain_confirmation_preserves_raw_prompt_without_agent_in
             "goal": "[Agent 私信回复]\n来源 Agent: A013 · 白予安",
             "latest_summary": "白予安回复说需要 CEO 确认后继续推进记忆系统开发。",
             "read_files": ["core/web/services/session_service.py"],
-            "metadata": {"last_user_message_filtered": True},
+            "metadata": {"source": "task_tool", "last_user_message_filtered": True},
         },
     )
     state = load_chat_state(tmp_path)
@@ -7327,6 +7351,7 @@ def test_submit_session_agent_inbox_turn_preserves_inbox_prompt_without_history_
             "title": "只需要创建记忆库管理员",
             "goal": "只需要创建记忆库管理员",
             "latest_summary": "等待团队私信回复。",
+            "metadata": {"source": "task_tool"},
         },
     )
     state = load_chat_state(tmp_path)
@@ -7414,6 +7439,7 @@ def test_submit_session_continue_preserves_raw_prompt_when_active_task_goal_is_c
             "title": "好的开始修改",
             "goal": "好的开始修改",
             "read_files": ["core/web/services/runtime_scene_service.py"],
+            "metadata": {"source": "task_tool"},
         },
     )
     state = load_chat_state(tmp_path)
@@ -7492,6 +7518,7 @@ def test_submit_session_continue_keeps_raw_prompt_while_task_state_prefers_newer
             "latest_summary": "很抱歉，我现在无法执行任何工具操作，所有工具不可用。",
             "last_user_message": "继续",
             "metadata": {
+                "source": "task_tool",
                 "outcome": "no_change",
                 "last_user_message_filtered": True,
                 "last_user_message_reason": "non_meaningful_user_message",
@@ -7581,7 +7608,7 @@ def test_submit_session_continue_keeps_raw_prompt_while_task_state_ignores_retry
             "goal": "好了应该恢复了你再试试",
             "latest_summary": "模型服务上游暂时失败，本轮没有完成。完整 provider 错误已写入运行日志；可以稍后直接重试或发送“继续”。",
             "last_user_message": "好了应该恢复了你再试试",
-            "metadata": {"outcome": "failed_runtime"},
+            "metadata": {"source": "task_tool", "outcome": "failed_runtime"},
         },
     )
     state = load_chat_state(tmp_path)
@@ -7983,7 +8010,8 @@ def test_persist_turn_result_blocks_phantom_image_generation_success(tmp_path, m
     assert message["role"] == "assistant"
     assert "没有实际生成新的图片" in message["content"]
     assert not message.get("tool_calls")
-    assert message.get("metadata") is None
+    assert message.get("metadata", {}).get("kind") == "turn_error"
+    assert message.get("metadata", {}).get("turnId") == turn_id
     assert conversation["last_turn_status"] == "failed"
     assert any(
         event["args"][:3]
@@ -8721,10 +8749,12 @@ def test_runtime_summary_exposes_work_run_kinds(monkeypatch):
         "chat_turn",
         "chat_room_round",
         "self_evolution_run",
+        "source_collection_run",
         "supervised_evolution_run",
         "supervised_worktree_evolution_run",
     }
     assert payload["workRuns"]["active"]["chat_room_round"] is None
+    assert payload["workRuns"]["active"]["source_collection_run"] is None
     assert payload["workRuns"]["active"]["self_evolution_run"]["runKind"] == "self_evolution_run"
     assert payload["workRuns"]["active"]["self_evolution_run"]["leases"] == [
         "evolution_transaction",
@@ -9221,7 +9251,8 @@ def test_submit_session_message_recovers_when_scheduler_fails(tmp_path, monkeypa
     assert payload["messages"][-2]["content"] == "继续检查调度失败恢复"
     assert payload["messages"][-1]["role"] == "assistant"
     assert "scheduler unavailable" in payload["messages"][-1]["content"]
-    assert payload["lastTurnError"] is None
+    assert payload["lastTurnError"]["errorType"] == "RuntimeError"
+    assert "scheduler unavailable" in payload["lastTurnError"]["message"]
     assert session_service._is_session_running("session-live") is False
     assert session_service._get_session_turn_control("session-live") is None
     assert session_service._WORK_RUN_STORE.load_active_snapshot("chat_turn") is None
@@ -9532,6 +9563,7 @@ def test_stop_session_turn_persists_partial_snapshot_and_allows_immediate_contin
             "read_files": ["tests/prompt_debugger.py"],
             "latest_summary": "已定位停止按钮问题。",
             "updated_at": "2026-05-20T16:24:53",
+            "metadata": {"source": "task_tool"},
         },
     )
     (tmp_path / "tests").mkdir(parents=True, exist_ok=True)
@@ -9964,6 +9996,7 @@ def test_session_detail_sanitizes_persisted_protocol_messages_and_active_task(tm
             "latest_summary": "继续检查。\n</parameter>",
             "next_action": "<parameter name=\"file_path\">secret.py</parameter>",
             "updated_at": "2026-05-20T17:54:06",
+            "metadata": {"source": "task_tool"},
         },
     )
     state = load_chat_state(tmp_path)
@@ -10244,8 +10277,7 @@ def test_submit_session_message_allows_follow_up_when_previous_turn_finished(tmp
     assert payload["messages"][-1]["role"] == "assistant"
     assert payload["messages"][-1]["content"] == "继续推进并给出下一步建议。"
     assert payload["currentPhase"] == "ready"
-    assert payload["activeTask"]["goal"] == "继续修复 web/src/routes/ChatCodingRoute.tsx"
-    assert payload["activeTask"]["latestSummary"] == "继续推进并给出下一步建议。"
+    assert payload["activeTask"] is None
 
 
 def test_submit_session_message_keeps_streamed_reply_when_final_result_is_control_marker(tmp_path, monkeypatch):
@@ -10294,7 +10326,7 @@ def test_submit_session_message_keeps_streamed_reply_when_final_result_is_contro
     assistant = payload["messages"][-1]
     assert assistant["content"] == "项目审查完成：核心问题集中在会话持久化和前端状态冗余。"
     assert "[outcome=done]" not in json.dumps(payload, ensure_ascii=False)
-    assert payload["activeTask"]["latestSummary"] == "项目审查完成：核心问题集中在会话持久化和前端状态冗余。"
+    assert payload["activeTask"] is None
 
 
 def test_submit_session_message_keeps_fallback_streamed_reply_when_final_result_is_control_marker(tmp_path, monkeypatch):
@@ -10339,7 +10371,7 @@ def test_submit_session_message_keeps_fallback_streamed_reply_when_final_result_
     payload = response.json()
     assistant = payload["messages"][-1]
     assert assistant["content"] == "非流式回答已返回：这是最终可见正文。"
-    assert payload["activeTask"]["latestSummary"] == "非流式回答已返回：这是最终可见正文。"
+    assert payload["activeTask"] is None
 
 
 def test_submit_session_message_marks_completed_file_artifact_task_done(tmp_path, monkeypatch):
@@ -10369,13 +10401,15 @@ def test_submit_session_message_marks_completed_file_artifact_task_done(tmp_path
                 "status": "completed",
                 "summary": "文件已成功创建：workspace/agents/agent-a/outputs/presentation_structure.html\n任务完成：10页HTML演示文稿已生成。",
                 "raw_output": "文件已成功创建：workspace/agents/agent-a/outputs/presentation_structure.html\n任务完成：10页HTML演示文稿已生成。",
-                "tool_call_count": 1,
+                "outcome": "done",
+                "tool_call_count": 2,
                 "tool_trace": [
                     {
                         "name": "write_file_tool",
                         "args": {"file_path": "workspace/agents/agent-a/outputs/presentation_structure.html"},
                         "result_preview": "[创建文件] [OK] 成功",
-                    }
+                    },
+                    {"name": "task_complete_tool", "args": {"status": "done"}},
                 ],
             }
 
@@ -10653,8 +10687,7 @@ def test_submit_session_message_keeps_previous_continuation_reply_when_done_mark
     assert len(calls) == 2
     assert assistant["content"] == "已审查当前项目。以下是汇报结果。\n\n核心问题是回答持久化和 UI 区分度。"
     assert "[outcome=done]" not in json.dumps(payload, ensure_ascii=False)
-    assert payload["activeTask"]["latestSummary"] == "已审查当前项目。以下是汇报结果。\n核心问题是回答持久化和 UI 区分度。"
-    assert payload["activeTask"]["readFiles"] == ["README.md"]
+    assert payload["activeTask"] is None
 
 
 def test_submit_session_message_never_persists_empty_assistant_reply(tmp_path, monkeypatch):
@@ -10793,10 +10826,7 @@ def test_submit_session_message_does_not_persist_xml_protocol_as_reply_or_task(t
     assert "<parameter" not in persisted_json
     assert "</parameter>" not in persisted_json
     assert "<state" not in persisted_json
-    active_task = state["conversations"][0]["active_task"]
-    assert active_task["latest_summary"] == "继续检查文件。"
-    assert active_task["title"] == "请继续检查 BDD 调试工具规划"
-    assert active_task["goal"] == "请继续检查 BDD 调试工具规划"
+    assert "active_task" not in state["conversations"][0]
 
 
 def test_submit_session_message_ignores_configured_continuation_limit_until_done(tmp_path, monkeypatch):
@@ -10920,9 +10950,7 @@ def test_submit_session_message_preserves_visible_progress_without_limit_prompt(
     latest_run = session_service.load_chat_turn_work_run_summary()["latest"]
     assert latest_run["status"] == "completed"
     state = load_chat_state(tmp_path)
-    active_task = state["conversations"][0]["active_task"]
-    assert active_task["latest_summary"] == "我已经完成第一项优化，并通过基础验证。下一步继续收口剩余日志路径。"
-    assert active_task.get("next_action", "") == ""
+    assert "active_task" not in state["conversations"][0]
 
 
 def test_submit_session_message_continues_repeated_visible_progress_until_done(tmp_path, monkeypatch):
@@ -11100,6 +11128,7 @@ def test_submit_session_continue_preserves_raw_prompt_and_unfinished_task_state(
             "read_files": ["tests/prompt_debugger.py"],
             "latest_summary": "已读取测试工具结构。",
             "updated_at": "2026-05-20T16:24:53",
+            "metadata": {"source": "task_tool"},
         },
     )
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
@@ -11161,6 +11190,7 @@ def test_submit_session_continue_clears_stale_next_action_after_visible_reply(tm
             "latest_summary": "已完成前半段汇报。",
             "next_action": "发送“继续”以恢复停止前的现场。",
             "updated_at": "2026-05-24T20:10:41",
+            "metadata": {"source": "task_tool"},
         },
     )
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
@@ -11221,6 +11251,7 @@ def test_submit_session_continue_keeps_raw_prompt_when_active_task_is_continue(t
             "read_files": ["tests/prompt_debugger.py"],
             "latest_summary": "<state",
             "updated_at": "2026-05-20T17:54:06",
+            "metadata": {"source": "task_tool"},
         },
     )
     state = load_chat_state(tmp_path)
@@ -11321,6 +11352,7 @@ def test_persist_turn_result_cleans_parameter_and_requires_real_stop(tmp_path, m
             "read_files": ["tests/prompt_debugger.py"],
             "latest_summary": "已读取测试工具结构。",
             "updated_at": "2026-05-20T16:24:53",
+            "metadata": {"source": "task_tool"},
         },
     )
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
@@ -15021,7 +15053,7 @@ def test_config_workspace_discovers_custom_public_relay_models(monkeypatch):
         "api_base": "https://relay.example.com/v1",
         "api_key": "draft-secret",
         "api_key_source": "手动输入",
-        "timeout": 10,
+        "timeout": config_service._MODEL_DISCOVERY_DEFAULT_TIMEOUT_SECONDS,
     }
 
 
