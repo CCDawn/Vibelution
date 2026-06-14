@@ -1203,6 +1203,42 @@ function cacheCompositionSegmentLabel(key: string, fallback: string, t: (key: Tr
   return translated === dictionaryKey ? (fallback || key) : translated;
 }
 
+function cacheObservedStatusLabel(status: string | undefined, lang: "zh" | "en") {
+  switch ((status || "").trim()) {
+    case "observed_hit":
+      return lang === "zh" ? "厂商命中" : "provider hit";
+    case "observed_partial":
+      return lang === "zh" ? "部分命中" : "partial hit";
+    case "observed_miss":
+      return lang === "zh" ? "厂商未命中" : "provider miss";
+    case "computed_write":
+      return lang === "zh" ? "计算写入" : "computed write";
+    case "computed_miss":
+      return lang === "zh" ? "计算未命中" : "computed miss";
+    case "not_observed":
+      return lang === "zh" ? "未观测" : "not observed";
+    default:
+      return lang === "zh" ? "未标记" : "unmarked";
+  }
+}
+
+function cacheComputedStatusLabel(status: string | undefined, lang: "zh" | "en") {
+  switch ((status || "").trim()) {
+    case "computed_hit":
+      return lang === "zh" ? "计算命中" : "computed hit";
+    case "computed_write":
+      return lang === "zh" ? "计算写入" : "computed write";
+    case "computed_miss":
+      return lang === "zh" ? "计算未命中" : "computed miss";
+    case "computed_unknown":
+      return lang === "zh" ? "计算未知" : "computed unknown";
+    case "provider_extra_hit":
+      return lang === "zh" ? "厂商额外命中" : "provider extra hit";
+    default:
+      return status || (lang === "zh" ? "未知" : "unknown");
+  }
+}
+
 function contextWindowSegmentWidth(value: number, total: number) {
   if (total <= 0 || value <= 0) {
     return "0%";
@@ -1287,9 +1323,14 @@ function cacheDonutSegmentTitle(
   const percent = Math.round(segment.actualPercent);
   const parts = [
     `${segment.label || segment.key}: ${numberFormatter.format(segment.tokens)} / ${numberFormatter.format(totalTokens)} · ${percent}%`,
+    segment.observedStatus ? `${lang === "zh" ? "真实状态" : "observed"} ${cacheObservedStatusLabel(segment.observedStatus, lang)}` : "",
+    segment.observedCachedInputTokens ? `${lang === "zh" ? "真实命中" : "observed hit"} ${numberFormatter.format(segment.observedCachedInputTokens)}` : "",
+    segment.observedMissedInputTokens ? `${lang === "zh" ? "真实未命中" : "observed miss"} ${numberFormatter.format(segment.observedMissedInputTokens)}` : "",
+    segment.computedOverestimatedInputTokens ? `${lang === "zh" ? "预测未兑现" : "predicted not observed"} ${numberFormatter.format(segment.computedOverestimatedInputTokens)}` : "",
     segment.cachePolicy ? `${lang === "zh" ? "缓存策略" : "cache policy"} ${segment.cachePolicy}` : "",
     segment.source ? `${lang === "zh" ? "来源" : "source"} ${segment.source}` : "",
     segment.contentPreview ? `${lang === "zh" ? "内容" : "content"} ${segment.contentPreview}` : "",
+    segment.calibrationReason || "",
     segment.description || "",
     segment.visuallyAmplified ? (lang === "zh" ? "视觉段已放大，便于鼠标锁定。" : "Visual arc is amplified for hover targeting.") : "",
   ];
@@ -4032,12 +4073,22 @@ export function ChatCodingRoute() {
       activeSkillContract.skillPath || "",
     ].filter(Boolean).join(" · ")
     : "";
-  const providerCacheInputTokens = Math.max(0, lastCacheComposition?.inputTokens ?? 0);
-  const providerCachedInputTokens = Math.max(0, Math.min(lastCacheComposition?.cachedInputTokens ?? 0, providerCacheInputTokens));
+  const providerCacheInputTokens = Math.max(0, lastCacheComposition?.inputTokens ?? lastCacheComposition?.calibratedInputTokens ?? 0);
+  const providerCachedInputTokens = Math.max(
+    0,
+    Math.min(
+      lastCacheComposition?.calibratedCachedInputTokens ?? lastCacheComposition?.cachedInputTokens ?? 0,
+      providerCacheInputTokens,
+    ),
+  );
   const providerUncachedInputTokens = Math.max(
     0,
     lastCacheComposition?.uncachedInputTokens ?? (providerCacheInputTokens - providerCachedInputTokens),
   );
+  const cacheCalibrationStatus = lastCacheComposition?.calibrationStatus || "";
+  const cacheCalibrationReason = lastCacheComposition?.calibrationReason || "";
+  const cacheComputedOverestimatedInputTokens = Math.max(0, lastCacheComposition?.computedOverestimatedInputTokens ?? 0);
+  const cacheProviderExtraCachedInputTokens = Math.max(0, lastCacheComposition?.providerExtraCachedInputTokens ?? 0);
   const trueCacheDonutSegments = useMemo(
     () => buildCacheDonutSegments(
       [
@@ -4080,16 +4131,51 @@ export function ChatCodingRoute() {
     lastCacheComposition?.computedInputTokens ?? 0,
     computedCacheCompositionSegments.reduce((total, segment) => total + Math.max(0, segment.tokens ?? 0), 0),
   );
-  const computedCacheDonutSegments = useMemo(
-    () => buildCacheDonutSegments(computedCacheCompositionSegments, computedCacheCompositionTotalTokens),
-    [computedCacheCompositionSegments, computedCacheCompositionTotalTokens],
+  const cachePromptCompositionSegments = useMemo(() => {
+    const segments = (lastCacheComposition?.calibratedSegments?.length
+      ? (lastCacheComposition.calibratedSegments ?? [])
+      : computedCacheCompositionSegments
+    );
+    return segments
+      .filter((segment: SessionCacheCompositionSegment) => (segment.tokens ?? 0) > 0 || segment.key === "computed_missing")
+      .map((segment) => {
+        const translatedLabel = segment.key === "system_prompt_overhead"
+          ? (lang === "zh" ? "system / tools" : "system / tools")
+          : segment.key === "provider_extra_hit"
+            ? (lang === "zh" ? "provider extra" : "provider extra")
+          : contextCompositionSegmentLabel(segment.key, segment.label, t);
+        return {
+          ...segment,
+          label: translatedLabel,
+        };
+      });
+  }, [computedCacheCompositionSegments, lang, lastCacheComposition, t]);
+  const cachePromptCompositionTotalTokens = Math.max(
+    computedCacheCompositionTotalTokens,
+    cachePromptCompositionSegments.reduce((total, segment) => total + Math.max(0, segment.tokens ?? 0), 0),
+  );
+  const cachePromptDonutSegments = useMemo(
+    () => buildCacheDonutSegments(cachePromptCompositionSegments, cachePromptCompositionTotalTokens),
+    [cachePromptCompositionSegments, cachePromptCompositionTotalTokens],
   );
   const cacheCompositionPercent = Math.round(Math.max(0, Math.min(1, lastCacheComposition?.cacheHitRate ?? 0)) * 100);
   const computedCacheCompositionPercent = Math.round(Math.max(0, Math.min(1, lastCacheComposition?.computedCacheHitRate ?? 0)) * 100);
-  const averageCacheCompositionPercent = Math.round(Math.max(0, Math.min(1, lastCacheComposition?.averageCacheHitRate ?? 0)) * 100);
-  const averageCacheObservedTurnCount = Math.max(0, lastCacheComposition?.averageObservedTurnCount ?? 0);
-  const averageCacheInputTokens = Math.max(0, lastCacheComposition?.averageInputTokens ?? 0);
-  const averageCachedInputTokens = Math.max(0, lastCacheComposition?.averageCachedInputTokens ?? 0);
+  const averageCacheObservedTurnCount = Math.max(
+    0,
+    lastCacheComposition?.averageObservedTurnCount || detail?.cacheUsage?.totalObservedTurnCount || 0,
+  );
+  const averageCacheInputTokens = Math.max(
+    0,
+    lastCacheComposition?.averageInputTokens || detail?.cacheUsage?.totalInputTokens || 0,
+  );
+  const averageCachedInputTokens = Math.max(
+    0,
+    lastCacheComposition?.averageCachedInputTokens || detail?.cacheUsage?.totalCachedInputTokens || 0,
+  );
+  const averageCacheHitRate = averageCacheInputTokens > 0
+    ? averageCachedInputTokens / averageCacheInputTokens
+    : (detail?.cacheUsage?.totalCacheHitRate ?? lastCacheComposition?.averageCacheHitRate ?? 0);
+  const averageCacheCompositionPercent = Math.round(Math.max(0, Math.min(1, averageCacheHitRate)) * 100);
   const cacheCompositionTrueLabel = lang === "zh" ? "真" : "true";
   const cacheCompositionComputedLabel = lang === "zh" ? "计" : "calc";
   const cacheCompositionAverageLabel = lang === "zh" ? "均" : "avg";
@@ -4111,9 +4197,13 @@ export function ChatCodingRoute() {
         `${cacheCompositionComputedLabel} ${numberFormatter.format(lastCacheComposition.computedCachedInputTokens ?? 0)} / ${numberFormatter.format(computedCacheCompositionTotalTokens)} · ${computedCacheCompositionPercent}%`,
         `${cacheCompositionAverageLabel} ${numberFormatter.format(averageCachedInputTokens)} / ${numberFormatter.format(averageCacheInputTokens)} · ${cacheCompositionAverageValue}`,
         `${lang === "zh" ? "观测轮次" : "observed turns"} ${numberFormatter.format(averageCacheObservedTurnCount)}`,
+        cacheComputedOverestimatedInputTokens > 0 ? `${lang === "zh" ? "预测未兑现" : "predicted not observed"} ${numberFormatter.format(cacheComputedOverestimatedInputTokens)}` : "",
+        cacheProviderExtraCachedInputTokens > 0 ? `${lang === "zh" ? "厂商额外命中" : "provider extra hit"} ${numberFormatter.format(cacheProviderExtraCachedInputTokens)}` : "",
+        cacheCalibrationStatus ? `${lang === "zh" ? "校准" : "calibration"} ${cacheCalibrationStatus}` : "",
         `write ${numberFormatter.format(lastCacheComposition.cacheCreationInputTokens ?? 0)}`,
         `uncached ${numberFormatter.format(providerUncachedInputTokens)}`,
-      ].join(" · ")
+        cacheCalibrationReason,
+      ].filter(Boolean).join(" · ")
       : lastCacheComposition.source === "not_called"
         ? t("cacheHitNotCalled")
       : t("cacheHitMissing")
@@ -5934,7 +6024,7 @@ export function ChatCodingRoute() {
                         aria-label={cacheCompositionTitle}
                       >
                         <circle className={`${styles.cacheDonutTrack} ${styles.cacheDonutOuterTrack}`} cx="50" cy="50" r="42" pathLength={100} />
-                        {computedCacheDonutSegments.map((segment, index) => (
+                        {cachePromptDonutSegments.map((segment, index) => (
                           <circle
                             key={`computed-${segment.key}-${segment.status}-${index}`}
                             className={`${styles.cacheDonutSegment} ${styles.cacheDonutOuterSegment} ${cacheDonutComputedSegmentClass(segment.key)}`}
@@ -5942,7 +6032,7 @@ export function ChatCodingRoute() {
                             cy="50"
                             r="42"
                             pathLength={100}
-                            style={cacheDonutSegmentStyle(segment, computedCacheDonutSegments.length > 1 ? 0.55 : 0)}
+                            style={cacheDonutSegmentStyle(segment, cachePromptDonutSegments.length > 1 ? 0.55 : 0)}
                           />
                         ))}
                         <circle className={`${styles.cacheDonutTrack} ${styles.cacheDonutInnerTrack}`} cx="50" cy="50" r="31" pathLength={100} />
@@ -5981,12 +6071,12 @@ export function ChatCodingRoute() {
                       </span>
                     </div>
                   </div>
-                  {computedCacheDonutSegments.length ? (
+                  {cachePromptDonutSegments.length ? (
                     <div className={styles.contextCompositionLegend}>
-                      {computedCacheDonutSegments.map((segment, index) => (
+                      {cachePromptDonutSegments.map((segment, index) => (
                         <span
                           key={`${segment.key}-${segment.status}-${index}-legend`}
-                          title={cacheDonutSegmentTitle(segment, computedCacheCompositionTotalTokens, numberFormatter, lang)}
+                          title={cacheDonutSegmentTitle(segment, cachePromptCompositionTotalTokens, numberFormatter, lang)}
                         >
                           <i className={computedCacheLegendSegmentClass(segment.key)} />
                           {segment.key === "computed_missing" ? cacheCompositionSegmentLabel("missing", segment.label, t) : segment.label}
@@ -7424,6 +7514,20 @@ export function ChatCodingRoute() {
               </div>
             </div>
 
+            {cacheCalibrationReason || cacheComputedOverestimatedInputTokens > 0 || cacheProviderExtraCachedInputTokens > 0 ? (
+              <div className={styles.cacheDetailCalibrationNote}>
+                <strong>{lang === "zh" ? "厂商校准" : "Provider calibration"}</strong>
+                <span>
+                  {cacheCalibrationReason || (lang === "zh" ? "已按厂商返回的真实缓存字段校准。" : "Calibrated with provider-reported cache fields.")}
+                </span>
+                <em>
+                  {cacheComputedOverestimatedInputTokens > 0 ? `${lang === "zh" ? "预测未兑现" : "predicted not observed"} ${numberFormatter.format(cacheComputedOverestimatedInputTokens)}` : ""}
+                  {cacheComputedOverestimatedInputTokens > 0 && cacheProviderExtraCachedInputTokens > 0 ? " · " : ""}
+                  {cacheProviderExtraCachedInputTokens > 0 ? `${lang === "zh" ? "厂商额外命中" : "provider extra hit"} ${numberFormatter.format(cacheProviderExtraCachedInputTokens)}` : ""}
+                </em>
+              </div>
+            ) : null}
+
             <div className={styles.cacheDetailBody}>
               <div className={styles.cacheDetailDonutPanel}>
                 <div className={styles.cacheDetailDonutShell}>
@@ -7434,7 +7538,7 @@ export function ChatCodingRoute() {
                     aria-label={cacheCompositionTitle}
                   >
                     <circle className={`${styles.cacheDonutTrack} ${styles.cacheDonutOuterTrack}`} cx="50" cy="50" r="42" pathLength={100} />
-                    {computedCacheDonutSegments.map((segment, index) => (
+                    {cachePromptDonutSegments.map((segment, index) => (
                       <circle
                         key={`detail-computed-${segment.key}-${segment.status}-${index}`}
                         className={`${styles.cacheDonutSegment} ${styles.cacheDonutOuterSegment} ${cacheDonutComputedSegmentClass(segment.key)}`}
@@ -7442,9 +7546,9 @@ export function ChatCodingRoute() {
                         cy="50"
                         r="42"
                         pathLength={100}
-                        style={cacheDonutSegmentStyle(segment, computedCacheDonutSegments.length > 1 ? 0.55 : 0)}
+                        style={cacheDonutSegmentStyle(segment, cachePromptDonutSegments.length > 1 ? 0.55 : 0)}
                       >
-                        <title>{cacheDonutSegmentTitle(segment, computedCacheCompositionTotalTokens, numberFormatter, lang)}</title>
+                        <title>{cacheDonutSegmentTitle(segment, cachePromptCompositionTotalTokens, numberFormatter, lang)}</title>
                       </circle>
                     ))}
                     <circle className={`${styles.cacheDonutTrack} ${styles.cacheDonutInnerTrack}`} cx="50" cy="50" r="31" pathLength={100} />
@@ -7474,23 +7578,48 @@ export function ChatCodingRoute() {
               <div className={styles.cacheDetailSegmentList}>
                 <section className={styles.cacheDetailSegmentGroup}>
                   <div className={styles.cacheDetailSegmentHeader}>
-                    <strong>{lang === "zh" ? "计算拼接段" : "Computed prefix segments"}</strong>
-                    <span>{numberFormatter.format(computedCacheCompositionTotalTokens)} tokens</span>
+                    <strong>{lang === "zh" ? "提示词分段校准" : "Prompt segment calibration"}</strong>
+                    <span>{numberFormatter.format(cachePromptCompositionTotalTokens)} tokens</span>
                   </div>
-                  {computedCacheDonutSegments.length ? (
-                    computedCacheDonutSegments.map((segment, index) => (
+                  {cachePromptDonutSegments.length ? (
+                    cachePromptDonutSegments.map((segment, index) => (
                       <div
                         key={`detail-computed-row-${segment.key}-${segment.status}-${index}`}
                         className={styles.cacheDetailSegmentRow}
-                        title={cacheDonutSegmentTitle(segment, computedCacheCompositionTotalTokens, numberFormatter, lang)}
+                        title={cacheDonutSegmentTitle(segment, cachePromptCompositionTotalTokens, numberFormatter, lang)}
                       >
                         <i className={`${styles.cacheDetailSwatch} ${computedCacheLegendSegmentClass(segment.key)}`} />
                         <div className={styles.cacheDetailSegmentText}>
                           <strong>{segment.key === "computed_missing" ? cacheCompositionSegmentLabel("missing", segment.label, t) : segment.label}</strong>
                           <span>{segment.cachePolicy || segment.source || segment.status || segment.key}</span>
+                          <span className={styles.cacheDetailSegmentMeta}>
+                            <b>{cacheComputedStatusLabel(segment.status, lang)}</b>
+                            <b data-status={segment.observedStatus || "not_observed"}>
+                              {cacheObservedStatusLabel(segment.observedStatus, lang)}
+                            </b>
+                            {(segment.computedOverestimatedInputTokens ?? 0) > 0 ? (
+                              <b data-status="observed_miss">
+                                {lang === "zh" ? "预测未兑现" : "not observed"} {numberFormatter.format(segment.computedOverestimatedInputTokens ?? 0)}
+                              </b>
+                            ) : null}
+                            {(segment.providerExtraCachedInputTokens ?? 0) > 0 ? (
+                              <b data-status="observed_hit">
+                                {lang === "zh" ? "厂商额外" : "provider extra"} {numberFormatter.format(segment.providerExtraCachedInputTokens ?? 0)}
+                              </b>
+                            ) : null}
+                          </span>
                           {segment.contentPreview ? <small>{segment.contentPreview}</small> : null}
                         </div>
-                        <em>{numberFormatter.format(segment.tokens ?? 0)} · {Math.round(segment.actualPercent)}%</em>
+                        <em>
+                          {numberFormatter.format(segment.tokens ?? 0)} · {Math.round(segment.actualPercent)}%
+                          {(segment.observedCachedInputTokens ?? 0) > 0 || (segment.observedMissedInputTokens ?? 0) > 0 ? (
+                            <small>
+                              {lang === "zh" ? "真" : "obs"} {numberFormatter.format(segment.observedCachedInputTokens ?? 0)}
+                              {" / "}
+                              {numberFormatter.format(segment.observedMissedInputTokens ?? 0)}
+                            </small>
+                          ) : null}
+                        </em>
                       </div>
                     ))
                   ) : (

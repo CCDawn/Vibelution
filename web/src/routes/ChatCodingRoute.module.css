@@ -2235,6 +2235,16 @@
     grid-template-columns: minmax(0, 1fr);
   }
 
+  .cacheDetailCalibrationNote {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .cacheDetailCalibrationNote strong,
+  .cacheDetailCalibrationNote em,
+  .cacheDetailCalibrationNote span {
+    white-space: normal;
+  }
+
   .cacheDetailDonutShell,
   .cacheDetailDonutSvg {
     width: 148px;
@@ -2756,6 +2766,35 @@
   white-space: nowrap;
 }
 
+.cacheDetailCalibrationNote {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--accent-cool) 26%, var(--border-soft));
+  border-radius: 8px;
+  color: var(--fg-secondary);
+  background: color-mix(in srgb, var(--accent-cool) 8%, var(--surface-panel-muted));
+  font-size: 0.72rem;
+}
+
+.cacheDetailCalibrationNote strong,
+.cacheDetailCalibrationNote em {
+  color: var(--fg-primary);
+  font-style: normal;
+  font-weight: 760;
+  white-space: nowrap;
+}
+
+.cacheDetailCalibrationNote span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .cacheDetailBody {
   display: grid;
   grid-template-columns: 210px minmax(0, 1fr);
@@ -2904,11 +2943,59 @@
   white-space: normal;
 }
 
+.cacheDetailSegmentMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.cacheDetailSegmentMeta b {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  max-width: 100%;
+  padding: 1px 5px;
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  color: var(--fg-secondary);
+  background: var(--surface-panel-muted);
+  font-size: 0.62rem;
+  font-weight: 720;
+  line-height: 1.25;
+}
+
+.cacheDetailSegmentMeta b[data-status="observed_hit"] {
+  color: #17764b;
+  border-color: color-mix(in srgb, #31b977 36%, var(--border-soft));
+  background: color-mix(in srgb, #31b977 12%, transparent);
+}
+
+.cacheDetailSegmentMeta b[data-status="observed_partial"] {
+  color: #8a5b11;
+  border-color: color-mix(in srgb, #d19a3f 38%, var(--border-soft));
+  background: color-mix(in srgb, #d19a3f 13%, transparent);
+}
+
+.cacheDetailSegmentMeta b[data-status="observed_miss"],
+.cacheDetailSegmentMeta b[data-status="computed_miss"] {
+  color: #6d7480;
+  border-color: color-mix(in srgb, #8c96a6 38%, var(--border-soft));
+  background: color-mix(in srgb, #8c96a6 12%, transparent);
+}
+
 .cacheDetailSegmentRow em {
   color: var(--fg-secondary);
   font-size: 0.72rem;
   font-style: normal;
   white-space: nowrap;
+}
+
+.cacheDetailSegmentRow em small {
+  display: block;
+  margin-top: 2px;
+  color: var(--fg-tertiary);
+  font-size: 0.64rem;
+  font-style: normal;
 }
 
 .cacheDetailEmpty {

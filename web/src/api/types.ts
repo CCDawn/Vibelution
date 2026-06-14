@@ -4420,12 +4420,23 @@ export type SessionCacheCompositionSegment = {
   contentPreview?: string;
   cachePolicy?: string;
   order?: number;
+  observedStatus?: string;
+  observedCachedInputTokens?: number;
+  observedMissedInputTokens?: number;
+  computedOverestimatedInputTokens?: number;
+  providerExtraCachedInputTokens?: number;
+  calibrationReason?: string;
 };
 
 export type SessionCacheComposition = {
   turnId: string;
   recordedAt: string;
   source: string;
+  provider?: string;
+  model?: string;
+  llmModelId?: string;
+  promptCacheScope?: string;
+  promptCachePartition?: string;
   inputTokens: number;
   cachedInputTokens: number;
   cacheReadInputTokens?: number;
@@ -4438,6 +4449,14 @@ export type SessionCacheComposition = {
   computedUncachedInputTokens?: number;
   computedCacheHitRate?: number;
   computedSegments?: SessionCacheCompositionSegment[];
+  calibratedInputTokens?: number;
+  calibratedCachedInputTokens?: number;
+  calibratedCacheHitRate?: number;
+  calibratedSegments?: SessionCacheCompositionSegment[];
+  computedOverestimatedInputTokens?: number;
+  providerExtraCachedInputTokens?: number;
+  calibrationStatus?: string;
+  calibrationReason?: string;
   averageInputTokens?: number;
   averageCachedInputTokens?: number;
   averageCacheHitRate?: number;
