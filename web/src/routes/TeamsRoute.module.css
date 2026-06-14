@@ -1425,6 +1425,13 @@
   font-weight: 780;
 }
 
+.sourceCollectionPanelActions {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
+  gap: 8px;
+  margin-top: 10px;
+}
+
 .sourceCollectionStepActive {
   --source-step-border: color-mix(in srgb, var(--accent-cool) 58%, var(--border-strong));
   --source-step-bg: color-mix(in srgb, var(--accent-cool) 12%, var(--surface-panel-strong));
@@ -3783,6 +3790,7 @@
   }
 
   .sourceCollectionCommandBar,
+  .sourceCollectionPanelActions,
   .sourceCollectionPageGrid {
     grid-template-columns: 1fr;
   }
