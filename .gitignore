@@ -58,6 +58,9 @@ log_info/
 /web/.vite-*.log
 /web/vite-*.log
 
+# Rust build outputs
+/crates/*/target/
+
 # Root-level review artifacts
 /.codex-temp/
 /.codex/
