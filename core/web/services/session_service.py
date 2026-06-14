@@ -2040,11 +2040,24 @@ def append_cli_agent_lifecycle_event(
     label = str(terminal.get("label") or terminal.get("adapterId") or terminal.get("agentType") or "CLI Agent").strip()
     lang = get_web_language()
     timestamp = _now_timestamp()
-    content = text_for(
-        lang,
-        zh=f"{label} 已关闭。",
-        en=f"{label} closed.",
-    )
+    if normalized_event in {"linked", "session_linked"}:
+        content = text_for(
+            lang,
+            zh=f"{label} 已连接 CLI 会话。",
+            en=f"{label} linked to a CLI session.",
+        )
+    elif normalized_event == "resumed":
+        content = text_for(
+            lang,
+            zh=f"{label} 已恢复 CLI 会话。",
+            en=f"{label} resumed the CLI session.",
+        )
+    else:
+        content = text_for(
+            lang,
+            zh=f"{label} 已关闭。",
+            en=f"{label} closed.",
+        )
     metadata = {
         "kind": "cli_agent_lifecycle",
         "event": normalized_event,
@@ -2060,7 +2073,11 @@ def append_cli_agent_lifecycle_event(
         "linkedSourceRunIds": list(terminal.get("linkedSourceRunIds") or []),
         "cwd": str(terminal.get("cwd") or "").strip(),
         "cliSessionId": str(terminal.get("cliSessionId") or "").strip(),
-        "closedAt": timestamp,
+        "cliSessionIdSource": str(terminal.get("cliSessionIdSource") or "").strip(),
+        "eventAt": timestamp,
+        "closedAt": timestamp if normalized_event == "closed" else "",
+        "linkedAt": timestamp if normalized_event in {"linked", "session_linked"} else "",
+        "resumedAt": timestamp if normalized_event == "resumed" else "",
         "folded": True,
     }
     with _CHAT_STATE_LOCK:
@@ -11163,6 +11180,8 @@ def _record_cli_agent_lifecycle_event(
                 "terminalSessionId": str(metadata.get("terminalSessionId") or "").strip(),
                 "adapterId": str(metadata.get("adapterId") or "").strip(),
                 "sourceRunId": str(metadata.get("sourceRunId") or "").strip(),
+                "cliSessionIdPresent": bool(str(metadata.get("cliSessionId") or "").strip()),
+                "cliSessionIdSource": str(metadata.get("cliSessionIdSource") or "").strip(),
                 "linkedSourceRunCount": len(list(metadata.get("linkedSourceRunIds") or [])),
             },
             lifecycle=True,
