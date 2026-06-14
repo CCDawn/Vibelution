@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Query, status
 from pydantic import BaseModel, Field
 
 from core.web.services.data_processing_service import (
@@ -95,8 +95,25 @@ def data_processing_run_create(payload: DataProcessingRunCreatePayload) -> dict:
 
 
 @router.get("/data-processing/runs")
-def data_processing_run_list(limit: int = 50) -> dict:
-    return list_processing_runs(limit=limit)
+def data_processing_run_list(
+    limit: int = Query(50, ge=1, le=200),
+    profile_id: str = Query("", alias="profileId", max_length=120),
+    team_id: str = Query("", alias="teamId", max_length=160),
+    started_from: str = Query("", alias="startedFrom", max_length=160),
+) -> dict:
+    metadata_filters: dict[str, Any] = {}
+    scope_filters: dict[str, Any] = {}
+    if team_id:
+        metadata_filters["teamId"] = team_id
+        scope_filters["teamId"] = team_id
+    if started_from:
+        metadata_filters["startedFrom"] = started_from
+    return list_processing_runs(
+        limit=limit,
+        profile_id=profile_id,
+        metadata_filters=metadata_filters,
+        scope_filters=scope_filters,
+    )
 
 
 @router.get("/data-processing/runs/{run_id}")
