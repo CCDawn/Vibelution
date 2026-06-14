@@ -69,8 +69,37 @@ TOOL_INTENTS = {
 }
 
 
-def get_tool_intent(name: str) -> ToolIntent | None:
-    return TOOL_INTENTS.get(name)
+def _current_agent_visible_tool_names() -> set[str] | None:
+    try:
+        from core.web.services.agent_directory_service import (
+            current_agent_runtime,
+            effective_visible_tool_names_for_current_agent,
+        )
+
+        runtime = current_agent_runtime()
+        if not str((runtime or {}).get("agentId") or "").strip():
+            return None
+        return set(effective_visible_tool_names_for_current_agent())
+    except Exception:
+        return None
+
+
+def _filter_for_current_agent(tool_names: List[str]) -> List[str]:
+    visible = _current_agent_visible_tool_names()
+    if visible is None:
+        return list(tool_names)
+    return [name for name in tool_names if name in visible]
+
+
+def get_tool_intent(name: str, *, respect_current_agent_policy: bool = True) -> ToolIntent | None:
+    intent = TOOL_INTENTS.get(name)
+    if intent is None or not respect_current_agent_policy:
+        return intent
+    return ToolIntent(
+        name=intent.name,
+        recommended_tools=_filter_for_current_agent(intent.recommended_tools),
+        description=intent.description,
+    )
 
 
 def humanize_reading_task(task: str) -> str:
