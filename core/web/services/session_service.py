@@ -6146,6 +6146,58 @@ def _build_lightweight_session_detail(conversation: dict[str, Any]) -> dict[str,
     return _build_session_detail_from_summary(conversation, summary, hydrate_agent=False)
 
 
+def _pending_tool_governance_requests_for_session(agent_id: str, *, limit: int = 3) -> list[dict[str, Any]]:
+    normalized_agent_id = str(agent_id or "").strip()
+    if not normalized_agent_id:
+        return []
+    try:
+        from core.web.services import agent_tool_governance_service
+
+        requests = agent_tool_governance_service.list_tool_governance_requests(
+            agent_id=normalized_agent_id,
+            status="pending_review",
+            limit=limit,
+        )
+    except Exception:
+        return []
+    result: list[dict[str, Any]] = []
+    for item in requests:
+        if not isinstance(item, dict):
+            continue
+        result.append(
+            {
+                "eventId": str(item.get("eventId") or "").strip(),
+                "requestId": str(item.get("requestId") or item.get("eventId") or "").strip(),
+                "kind": str(item.get("kind") or "tool_governance_request").strip(),
+                "status": str(item.get("status") or "pending_review").strip(),
+                "grantScope": str(item.get("grantScope") or "persistent").strip(),
+                "sourceSessionId": str(item.get("sourceSessionId") or "").strip(),
+                "sourceTurnId": str(item.get("sourceTurnId") or "").strip(),
+                "targetAgentId": str(item.get("targetAgentId") or "").strip(),
+                "targetAgentCode": str(item.get("targetAgentCode") or "").strip(),
+                "targetAgentName": str(item.get("targetAgentName") or "").strip(),
+                "proposedByAgentId": str(item.get("proposedByAgentId") or "").strip(),
+                "proposedByAgentCode": str(item.get("proposedByAgentCode") or "").strip(),
+                "proposedByAgentName": str(item.get("proposedByAgentName") or "").strip(),
+                "policyDelta": item.get("policyDelta") if isinstance(item.get("policyDelta"), dict) else {},
+                "reason": str(item.get("reason") or "").strip(),
+                "authority": item.get("authority") if isinstance(item.get("authority"), dict) else {},
+                "riskLevel": str(item.get("riskLevel") or "low").strip(),
+                "riskTags": list(item.get("riskTags") or []),
+                "requiresApproval": bool(item.get("requiresApproval", True)),
+                "approvalReason": str(item.get("approvalReason") or "").strip(),
+                "createdAt": str(item.get("createdAt") or "").strip(),
+                "resolvedAt": str(item.get("resolvedAt") or "").strip(),
+                "resolvedBy": str(item.get("resolvedBy") or "").strip(),
+                "resolutionNote": str(item.get("resolutionNote") or "").strip(),
+                "appliedToolPolicyId": str(item.get("appliedToolPolicyId") or "").strip(),
+                "temporaryGrant": item.get("temporaryGrant") if isinstance(item.get("temporaryGrant"), dict) else {},
+                "after": item.get("after") if isinstance(item.get("after"), dict) else {},
+            }
+        )
+    return result
+
+
 def _build_session_detail_from_summary(
     conversation: dict[str, Any],
     summary: dict[str, Any],
@@ -6211,6 +6263,9 @@ def _build_session_detail_from_summary(
         if available_agent_id and hydrate_agent
         else [],
         "agentInboxMessages": list_agent_inbox_messages_for_agent(available_agent_id, limit=8, status="pending")
+        if available_agent_id and hydrate_agent
+        else [],
+        "pendingToolGovernanceRequests": _pending_tool_governance_requests_for_session(available_agent_id)
         if available_agent_id and hydrate_agent
         else [],
         "toolPolicy": (available_agent or {}).get("toolPolicy") if available_agent_id else None,

@@ -57,6 +57,7 @@ DEFAULT_SESSION_AGENT_ALLOWED_TOOLS = (
     "list_child_sessions_tool",
     "session_reference_query_tool",
     "agent_message_tool",
+    "agent_tool_permission_request_tool",
     "get_core_context_tool",
     "get_current_goal_tool",
     "search_memory_tool",
@@ -1424,7 +1425,7 @@ def _agent_runtime_from_env() -> dict[str, Any]:
         "roundId": "",
         "supervisedRole": str(os.environ.get("VIBELUTION_SUPERVISED_ROLE") or "").strip(),
         "agent": agent,
-        "toolPolicy": resolve_tool_policy_for_agent(agent_id),
+        "toolPolicy": resolve_tool_policy_for_agent(agent_id, session_id=session_id),
         "memoryPolicy": resolve_memory_policy_for_agent(agent_id),
         "delegationPolicy": resolve_delegation_policy_for_agent(agent_id),
         "supervisionPolicy": resolve_supervision_policy_for_agent(agent_id),
@@ -1486,7 +1487,7 @@ def active_agent_runtime(
         "roomId": str(room_id or "").strip(),
         "roundId": str(round_id or "").strip(),
         "agent": agent or {},
-        "toolPolicy": resolve_tool_policy_for_agent(agent_id),
+        "toolPolicy": resolve_tool_policy_for_agent(agent_id, session_id=session_id, turn_id=turn_id),
         "memoryPolicy": resolve_memory_policy_for_agent(agent_id),
         "delegationPolicy": resolve_delegation_policy_for_agent(agent_id),
         "supervisionPolicy": resolve_supervision_policy_for_agent(agent_id),
@@ -1597,14 +1598,60 @@ def filter_llm_tools_for_current_agent(tools: Iterable[Any]) -> list[Any]:
     ]
 
 
-def resolve_tool_policy_for_agent(agent_id: str) -> dict[str, Any]:
+def resolve_tool_policy_for_agent(agent_id: str, *, session_id: str = "", turn_id: str = "") -> dict[str, Any]:
     agent = _find_agent(load_state(), agent_id)
     if agent is None:
         return default_tool_policy(DEFAULT_TOOL_POLICY_ID)
     state = load_state()
     policy_id = str(agent.get("toolPolicyId") or DEFAULT_TOOL_POLICY_ID).strip() or DEFAULT_TOOL_POLICY_ID
     policy = _tool_policies(state).get(policy_id) or default_tool_policy(policy_id)
-    return normalize_tool_policy(policy, policy_id)
+    normalized = normalize_tool_policy(policy, policy_id)
+    return _with_temporary_tool_grants(
+        normalized,
+        agent_id=agent_id,
+        session_id=session_id,
+        turn_id=turn_id,
+    )
+
+
+def _with_temporary_tool_grants(
+    policy: dict[str, Any],
+    *,
+    agent_id: str,
+    session_id: str = "",
+    turn_id: str = "",
+) -> dict[str, Any]:
+    normalized_session_id = str(session_id or "").strip()
+    if not normalized_session_id:
+        return policy
+    try:
+        from core.web.services import agent_tool_governance_service
+
+        temporary_grants = agent_tool_governance_service.temporary_granted_tools_for_agent(
+            agent_id,
+            session_id=normalized_session_id,
+            turn_id=turn_id,
+        )
+    except Exception:
+        return policy
+    if not temporary_grants:
+        return policy
+
+    allowed = _tool_name_list(policy.get("allowedTools") or [])
+    blocked = set(_tool_name_list(policy.get("blockedTools") or []))
+    temporary_allowed: list[str] = []
+    for tool in _tool_name_list(temporary_grants):
+        if not tool or tool in blocked or tool in allowed:
+            continue
+        allowed.append(tool)
+        temporary_allowed.append(tool)
+    if not temporary_allowed:
+        return policy
+    return {
+        **policy,
+        "allowedTools": allowed,
+        "temporaryAllowedTools": _tool_name_list(list(policy.get("temporaryAllowedTools") or []) + temporary_allowed),
+    }
 
 
 def resolve_memory_policy_for_agent(agent_id: str) -> dict[str, Any]:

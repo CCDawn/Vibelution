@@ -193,6 +193,9 @@ class AgentToolGovernanceRequestPayload(BaseModel):
     unblockTools: list[str] = Field(default_factory=list)
     reason: str = ""
     applyMode: str = "auto"
+    grantScope: str = "persistent"
+    sourceSessionId: str = ""
+    sourceTurnId: str = ""
 
 
 class AgentToolGovernanceResolvePayload(BaseModel):
@@ -505,6 +508,9 @@ def agent_tool_governance_request_create(agent_id: str, payload: AgentToolGovern
             unblock_tools=payload.unblockTools,
             reason=payload.reason,
             apply_mode=payload.applyMode,
+            grant_scope=payload.grantScope,
+            source_session_id=payload.sourceSessionId,
+            source_turn_id=payload.sourceTurnId,
         )
     except agent_directory_service.AgentNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
