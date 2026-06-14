@@ -1992,51 +1992,6 @@
   background: rgba(38, 10, 12, 0.92);
 }
 
-.cliAgentTerminalInputRow {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  gap: 8px;
-  align-items: center;
-  min-height: 42px;
-  padding: 7px 8px;
-  border-top: 1px solid rgba(122, 202, 169, 0.14);
-  color: #a9f0ce;
-  background: #071713;
-  font-family: "Cascadia Mono", "Consolas", monospace;
-}
-
-.cliAgentTerminalInputRow input {
-  min-width: 0;
-  height: 28px;
-  border: 1px solid rgba(122, 202, 169, 0.18);
-  border-radius: 6px;
-  padding: 0 8px;
-  color: #d7f7e8;
-  background: #091d18;
-  font: inherit;
-}
-
-.cliAgentTerminalInputRow input:disabled {
-  opacity: 0.54;
-}
-
-.cliAgentTerminalInputRow button {
-  height: 28px;
-  border: 1px solid rgba(122, 202, 169, 0.28);
-  border-radius: 6px;
-  padding: 0 10px;
-  color: #bdf6dc;
-  background: rgba(58, 144, 109, 0.24);
-  font-size: 0.74rem;
-  font-weight: 780;
-  cursor: pointer;
-}
-
-.cliAgentTerminalInputRow button:disabled {
-  cursor: not-allowed;
-  opacity: 0.44;
-}
-
 .inlineNotice {
   margin: 10px 14px 0;
   padding: 8px 11px;

@@ -30,7 +30,6 @@ import {
   useState,
   type CSSProperties,
   type DragEvent,
-  type FormEvent,
   type KeyboardEvent,
   type MouseEvent as ReactMouseEvent,
   type PointerEvent,
@@ -477,7 +476,6 @@ function CliAgentRunTerminalPanel({
   onTerminalSessionChange?: (runId: string, session: CliAgentTerminalSession) => void;
 }) {
   const [terminalSession, setTerminalSession] = useState<CliAgentTerminalSession | null>(null);
-  const [terminalInput, setTerminalInput] = useState("");
   const [terminalError, setTerminalError] = useState("");
   const [connecting, setConnecting] = useState(false);
   const [terminalHasOutput, setTerminalHasOutput] = useState(false);
@@ -745,17 +743,6 @@ function CliAgentRunTerminalPanel({
     };
   }, [terminalSessionId, writeTerminalChunk]);
 
-  const sendTerminalInput = useCallback((event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    const data = terminalInput.trimEnd();
-    if (!terminalSessionId || !data) {
-      return;
-    }
-    setTerminalInput("");
-    setTerminalError("");
-    sendTerminalRawInput(`${data}\r\n`);
-  }, [sendTerminalRawInput, terminalInput, terminalSessionId]);
-
   return (
     <section className={styles.cliAgentRunPanel} aria-label={`${run.title} ${lang === "zh" ? "终端" : "terminal"}`}>
       <div className={styles.cliAgentTerminalFrame}>
@@ -774,19 +761,6 @@ function CliAgentRunTerminalPanel({
             </div>
           ) : null}
         </div>
-        <form className={styles.cliAgentTerminalInputRow} onSubmit={sendTerminalInput}>
-          <span aria-hidden="true">$</span>
-          <input
-            value={terminalInput}
-            onChange={(event) => setTerminalInput(event.target.value)}
-            disabled={!terminalSession?.alive}
-            placeholder={lang === "zh" ? "输入命令或回复" : "Type input"}
-            aria-label={lang === "zh" ? "终端输入" : "Terminal input"}
-          />
-          <button type="submit" disabled={!terminalSession?.alive || !terminalInput.trim()}>
-            {lang === "zh" ? "发送" : "Send"}
-          </button>
-        </form>
       </div>
     </section>
   );
