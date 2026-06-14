@@ -1886,11 +1886,13 @@ function policyTokenLabel(value: string | undefined, lang: "zh" | "en") {
 }
 
 function memoryDomainDisplayLabel(label: string | undefined, domainId: string | undefined, lang: "zh" | "en") {
-  const key = String(domainId || label || "").trim().toLowerCase().replace(/\s+/g, "_");
+  const candidates = [domainId, label].map((value) => String(value || "").trim().toLowerCase().replace(/\s+/g, "_")).filter(Boolean);
   const zh: Record<string, string> = {
     agent_private_memory: "Agent 私有",
     agent_formal_knowledge_base: "Agent 正式知识",
+    agent_formal_knowledge: "Agent 正式知识",
     team_knowledge_base: "团队知识库",
+    team_knowledge: "团队知识库",
     team_chat_refinement: "群聊精炼",
     self_evolution_evidence: "自进化证据",
     supervised_evolution_evidence: "监督证据",
@@ -1899,13 +1901,54 @@ function memoryDomainDisplayLabel(label: string | undefined, domainId: string | 
   const en: Record<string, string> = {
     agent_private_memory: "Agent private",
     agent_formal_knowledge_base: "Agent knowledge",
+    agent_formal_knowledge: "Agent knowledge",
     team_knowledge_base: "Team knowledge",
+    team_knowledge: "Team knowledge",
     team_chat_refinement: "Chat refinement",
     self_evolution_evidence: "Self-evolution",
     supervised_evolution_evidence: "Supervised evidence",
     external_search_and_pdf: "External/PDF",
   };
-  return (lang === "zh" ? zh : en)[key] || label || domainId || "-";
+  const map = lang === "zh" ? zh : en;
+  const match = candidates.map((key) => map[key]).find(Boolean);
+  return match || label || domainId || "-";
+}
+
+function memoryDomainOwnerLabel(owner: string | undefined, lang: "zh" | "en") {
+  const normalized = String(owner ?? "").trim().toLowerCase();
+  if (!normalized) return "-";
+  if (lang !== "zh") return owner || "-";
+  if (normalized.includes("agent")) return "Agent";
+  if (normalized.includes("team")) return "团队";
+  if (normalized.includes("research") || normalized.includes("parser")) return "研究管线";
+  if (normalized.includes("self evolution")) return "自进化";
+  if (normalized.includes("supervised")) return "监督进化";
+  return owner || "-";
+}
+
+function memoryBoundaryLabel(boundary: string | undefined, lang: "zh" | "en") {
+  const normalized = String(boundary ?? "").trim().toLowerCase();
+  if (!normalized) return "-";
+  const token = policyTokenLabel(boundary, lang);
+  if (token !== normalized) return token;
+  if (lang !== "zh") return boundary || "-";
+  if (normalized.includes("private identity") || normalized.includes("working notes")) return "私有边界";
+  if (normalized.includes("group chat") || normalized.includes("proposal material")) return "仅作来源";
+  if (normalized.includes("review")) return "需审核";
+  return "受控写入";
+}
+
+function stewardStageDisplayTitle(stageId: string | undefined, title: string | undefined, lang: "zh" | "en") {
+  if (lang !== "zh") return title || stageId || "-";
+  const candidates = [stageId, title].map((value) => String(value || "").trim().toLowerCase().replace(/\s+/g, "_")).filter(Boolean);
+  const zh: Record<string, string> = {
+    source_evidence_to_proposal: "来源提案",
+    source_to_proposal: "来源提案",
+    proposal_review: "提案审核",
+    rating_review: "评级审核",
+  };
+  const match = candidates.map((key) => zh[key]).find(Boolean);
+  return match || title || stageId || "-";
 }
 
 function compactInlineList(items: string[] | undefined, limit: number) {
@@ -4474,9 +4517,9 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
             >
               <div>
                 <strong>{memoryDomainDisplayLabel(domain.label, domain.domainId, lang)}</strong>
-                <small>{domain.owner}</small>
+                <small>{memoryDomainOwnerLabel(domain.owner, lang)}</small>
               </div>
-              <span>{domain.canCreateFormalKnowledge ? copy.reviewerRequired : policyTokenLabel(domain.boundary, lang)}</span>
+              <span>{domain.canCreateFormalKnowledge ? (lang === "zh" ? "需审核" : copy.reviewerRequired) : memoryBoundaryLabel(domain.boundary, lang)}</span>
               <code>{policyTokenLabel(domain.promptDefault, lang)}</code>
             </section>
           ))}
@@ -4534,7 +4577,9 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
         <div className={styles.stewardGrid}>
           <div className={styles.stewardMission}>
             <span>{copy.stewardMission}</span>
-            <strong>{knowledgeSteward?.steward.taskProfile.mission || knowledgeSteward?.steward.displayName || copy.loading}</strong>
+            <strong title={knowledgeSteward?.steward.taskProfile.mission || knowledgeSteward?.steward.displayName || copy.loading}>
+              {lang === "zh" ? "知识治理" : knowledgeSteward?.steward.taskProfile.mission || knowledgeSteward?.steward.displayName || copy.loading}
+            </strong>
             <small>{knowledgeSteward?.steward.taskProfile.avoidTasks || copy.noDirectApply}</small>
           </div>
           <div className={styles.stewardMetric}>
@@ -4556,49 +4601,46 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
           {(() => {
             const preferred = compactInlineList(knowledgeSteward?.steward.toolPolicy.preferredTools, 3);
             const allowed = compactInlineList(knowledgeSteward?.steward.toolPolicy.allowedTools, 2);
+            const preferredCount = (knowledgeSteward?.steward.toolPolicy.preferredTools ?? []).length;
+            const allowedCount = (knowledgeSteward?.steward.toolPolicy.allowedTools ?? []).length;
             return (
               <>
                 <span title={preferred.title}>{copy.preferredTools}</span>
-                {preferred.visible.map((tool) => (
-                  <code key={`preferred:${tool}`} title={tool}>{tool}</code>
-                ))}
-                {preferred.overflow ? <small title={preferred.title}>+{preferred.overflow}</small> : null}
+                <code title={preferred.title}>{preferredCount} {lang === "zh" ? "项" : "items"}</code>
                 <span title={allowed.title}>{copy.allowedTools}</span>
-                <small title={allowed.title}>
-                  {allowed.visible.join(", ") || "-"}{allowed.overflow ? ` +${allowed.overflow}` : ""}
-                </small>
+                <small title={allowed.title}>{allowedCount} {lang === "zh" ? "项" : "items"}</small>
               </>
             );
           })()}
         </div>
-        <div className={styles.stewardRecommendations}>
-          <div className={styles.stewardRecommendationHeader}>
-            <span>{copy.stewardRecommendations}</span>
-            <small>
-              {knowledgeDashboardSnapshot?.recommendations.operatingBoundary.recommendationsOnly ? copy.recommendationsOnly : copy.stewardRecommendationHint}
-            </small>
-          </div>
-          {knowledgeStewardRecommendations.map((recommendation) => (
-            <section key={recommendation.recommendationId} className={styles.stewardRecommendationRow}>
-              <span className={styles.statusPill}>{recommendation.priority}</span>
-              <strong>{recommendation.title}</strong>
-              <span>{recommendation.reason}</span>
+        {knowledgeStewardRecommendations.length ? (
+          <div className={styles.stewardRecommendations}>
+            <div className={styles.stewardRecommendationHeader}>
+              <span>{copy.stewardRecommendations}</span>
               <small>
-                {copy.recommendedAction}: {recommendation.recommendedAction} · {recommendation.knowledgeBaseName}
+                {knowledgeDashboardSnapshot?.recommendations.operatingBoundary.recommendationsOnly ? copy.recommendationsOnly : copy.stewardRecommendationHint}
               </small>
-              <button type="button" className={styles.detailActionButton} onClick={() => setTraceTargetId(recommendation.targetId)}>
-                <Eye size={14} />
-                <span>{copy.traceability}</span>
-              </button>
-            </section>
-          ))}
-          {!knowledgeDashboardSnapshotQuery.isPending && !knowledgeStewardRecommendations.length ? (
-            <section className={styles.emptyDetail}>
-              <CheckCircle2 size={20} />
-              <strong>{copy.noIssues}</strong>
-            </section>
-          ) : null}
-        </div>
+            </div>
+            {knowledgeStewardRecommendations.map((recommendation) => (
+              <section
+                key={recommendation.recommendationId}
+                className={styles.stewardRecommendationRow}
+                title={[recommendation.reason, recommendation.recommendedAction, recommendation.knowledgeBaseName].filter(Boolean).join("\n")}
+              >
+                <span className={styles.statusPill}>{recommendation.priority}</span>
+                <strong>{recommendation.title}</strong>
+                <span>{recommendation.reason}</span>
+                <small>
+                  {copy.recommendedAction}: {recommendation.recommendedAction} · {recommendation.knowledgeBaseName}
+                </small>
+                <button type="button" className={styles.detailActionButton} onClick={() => setTraceTargetId(recommendation.targetId)}>
+                  <Eye size={14} />
+                  <span>{copy.traceability}</span>
+                </button>
+              </section>
+            ))}
+          </div>
+        ) : null}
         <div className={styles.stewardWorkbench}>
           <div className={styles.stewardRecommendationHeader}>
             <span>{copy.stewardWorkbench}</span>
@@ -4606,12 +4648,12 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
           </div>
           <div className={styles.stewardStageGrid} aria-label={copy.stewardStages}>
             {(knowledgeStewardWorkbench?.stages ?? []).slice(0, 2).map((stage) => (
-              <section key={stage.stageId} className={styles.stewardStageCard}>
+              <section key={stage.stageId} className={styles.stewardStageCard} title={[stage.title, stage.description, stage.nextTool].filter(Boolean).join("\n")}>
                 <div>
                   <span className={stage.status === "clear" ? styles.statusPillMuted : styles.statusPill} title={stage.status}>
                     {policyTokenLabel(stage.status, lang)}
                   </span>
-                  <strong>{stage.title}</strong>
+                  <strong>{stewardStageDisplayTitle(stage.stageId, stage.title, lang)}</strong>
                 </div>
                 <p title={stage.description}>{stage.description}</p>
                 <small>
@@ -4657,11 +4699,24 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
           <p className={styles.panelLead}>{copy.knowledgeHint}</p>
           <section className={styles.governanceMiniPanel} aria-label={copy.toolVisibility}>
             <strong>{copy.toolVisibility}</strong>
-            {Object.values(permissionAudit?.tools ?? {}).map((tool) => (
-              <span key={tool.toolName} className={tool.visible ? styles.statusPill : styles.statusPillMuted}>
-                {tool.toolName}: {tool.visible ? copy.yes : tool.reason}
-              </span>
-            ))}
+            {(() => {
+              const tools = Object.values(permissionAudit?.tools ?? {});
+              const visibleTools = tools.filter((tool) => tool.visible);
+              const hiddenTools = tools.filter((tool) => !tool.visible);
+              return (
+                <>
+                  <span className={styles.statusPill} title={visibleTools.map((tool) => tool.toolName).join("\n")}>
+                    {copy.yes}: {visibleTools.length}
+                  </span>
+                  <span
+                    className={hiddenTools.length ? styles.statusPillMuted : styles.statusPill}
+                    title={hiddenTools.map((tool) => `${tool.toolName}: ${tool.reason}`).join("\n")}
+                  >
+                    {copy.missing}: {hiddenTools.length}
+                  </span>
+                </>
+              );
+            })()}
           </section>
           {knowledgeDashboardSnapshotQuery.isPending ? <div className={styles.emptyState}>{copy.loading}</div> : null}
           {!knowledgeDashboardSnapshotQuery.isPending && !knowledgeBases.length ? (

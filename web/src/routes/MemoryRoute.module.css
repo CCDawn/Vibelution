@@ -2493,16 +2493,16 @@
 .knowledgeGovernanceDeck {
   display: grid;
   grid-template-columns: minmax(0, 1.04fr) minmax(0, 0.96fr);
-  gap: 6px;
-  margin: 4px 10px 0;
+  gap: 5px;
+  margin: 3px 10px 0;
   align-items: start;
 }
 
 .usageContractPanel {
   display: grid;
-  gap: 5px;
+  gap: 4px;
   min-width: 0;
-  padding: 6px 7px;
+  padding: 5px 6px;
   border: 1px solid color-mix(in srgb, var(--accent-warm) 24%, var(--border-soft));
   border-radius: 8px;
   background: color-mix(in srgb, var(--surface-panel) 90%, transparent);
@@ -2522,7 +2522,7 @@
   align-items: center;
   gap: 4px;
   max-width: 100%;
-  padding: 2px 5px;
+  padding: 1px 5px;
   overflow: hidden;
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-control);
@@ -2536,7 +2536,7 @@
 .contractDomainGrid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 4px;
+  gap: 3px;
   min-width: 0;
 }
 
@@ -2544,9 +2544,9 @@
   display: grid;
   grid-template-columns: minmax(116px, 1fr) minmax(96px, 0.8fr) auto;
   align-items: center;
-  gap: 4px;
+  gap: 3px;
   min-width: 0;
-  padding: 4px 5px;
+  padding: 3px 5px;
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-control);
   background: var(--surface-panel);
@@ -2554,7 +2554,8 @@
 
 .contractDomainRow div,
 .contractDomainRow span,
-.contractDomainRow small {
+.contractDomainRow small,
+.contractDomainRow code {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2576,17 +2577,23 @@
   font-size: 0.65rem;
 }
 
+.contractDomainRow code {
+  max-width: 76px;
+  color: var(--fg-primary);
+  font-size: 0.65rem;
+}
+
 .contractStateGrid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 4px;
+  gap: 3px;
 }
 
 .contractStateGrid section {
   display: grid;
-  gap: 2px;
+  gap: 1px;
   min-width: 0;
-  padding: 4px 5px;
+  padding: 3px 5px;
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-control);
   background: var(--surface-panel-muted);
@@ -3060,9 +3067,9 @@
 
 .knowledgeStewardPanel {
   display: grid;
-  gap: 5px;
+  gap: 4px;
   min-width: 0;
-  padding: 6px 7px;
+  padding: 5px 6px;
   border: 1px solid color-mix(in srgb, var(--accent-cool) 22%, var(--border-soft));
   border-radius: 8px;
   background: color-mix(in srgb, var(--surface-panel) 86%, transparent);
@@ -3070,16 +3077,16 @@
 
 .stewardGrid {
   display: grid;
-  grid-template-columns: minmax(170px, 1fr) repeat(2, minmax(104px, 0.58fr));
-  gap: 4px;
+  grid-template-columns: minmax(150px, 1fr) repeat(2, minmax(92px, 0.56fr));
+  gap: 3px;
 }
 
 .stewardMission,
 .stewardMetric {
   display: grid;
-  gap: 2px;
+  gap: 1px;
   min-width: 0;
-  padding: 5px;
+  padding: 4px 5px;
   border: 1px solid color-mix(in srgb, var(--border-soft) 72%, transparent);
   border-radius: 8px;
   background: color-mix(in srgb, var(--surface-elevated) 68%, transparent);
@@ -3121,10 +3128,15 @@
   white-space: nowrap;
 }
 
+.stewardMission small,
+.stewardMetric small {
+  display: none;
+}
+
 .stewardToolRows {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 3px;
   min-width: 0;
   overflow: hidden;
 }
@@ -3212,9 +3224,9 @@
 
 .stewardWorkbench {
   display: grid;
-  gap: 5px;
+  gap: 3px;
   min-width: 0;
-  padding-top: 2px;
+  padding-top: 1px;
   border-top: 1px solid color-mix(in srgb, var(--border-soft) 68%, transparent);
 }
 
@@ -3222,7 +3234,7 @@
 .stewardActionGrid,
 .stewardChecklist {
   display: grid;
-  gap: 4px;
+  gap: 3px;
   min-width: 0;
 }
 
@@ -3233,7 +3245,7 @@
 .stewardStageCard,
 .stewardActionRow {
   min-width: 0;
-  padding: 5px;
+  padding: 3px 5px;
   border: 1px solid color-mix(in srgb, var(--border-soft) 72%, transparent);
   border-radius: 8px;
   background: color-mix(in srgb, var(--surface-elevated) 62%, transparent);
@@ -3241,13 +3253,13 @@
 
 .stewardStageCard {
   display: grid;
-  gap: 3px;
+  gap: 1px;
 }
 
 .stewardStageCard div {
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: 4px;
   min-width: 0;
 }
 
