@@ -26,6 +26,7 @@ import {
   useState,
   type CSSProperties,
   type DragEvent,
+  type FormEvent,
   type KeyboardEvent,
   type MouseEvent as ReactMouseEvent,
   type PointerEvent,
@@ -210,6 +211,7 @@ type CliAgentRunResult = {
   stdoutPreview?: string;
   stderrPreview?: string;
   logPath?: string;
+  cliSessionId?: string;
 };
 
 type CliAgentRunView = CliAgentRunTab & {
@@ -223,6 +225,37 @@ type CliAgentRunView = CliAgentRunTab & {
   error: string;
   tracePath: string;
   durationMs?: number;
+};
+
+type CliAgentTerminalSession = {
+  terminalSessionId?: string;
+  adapterId?: string;
+  label?: string;
+  sourceSessionId?: string;
+  sourceMessageId?: string;
+  sourceRunId?: string;
+  cwd?: string;
+  mode?: string;
+  taskHash?: string;
+  taskPreview?: string;
+  cliSessionId?: string;
+  commandPreview?: string[];
+  resumed?: boolean;
+  status?: string;
+  alive?: boolean;
+  transport?: string;
+  rows?: number;
+  cols?: number;
+  transcriptPath?: string;
+  transcriptTail?: string;
+  createdAt?: string;
+  updatedAt?: string;
+};
+
+type CliAgentTerminalEvent = {
+  type?: string;
+  chunk?: string;
+  session?: CliAgentTerminalSession;
 };
 
 function textArg(args: Record<string, unknown> | undefined, key: string) {
@@ -326,74 +359,279 @@ function formatDurationMs(durationMs: number | undefined) {
   return value >= 1000 ? `${(value / 1000).toFixed(1)}s` : `${Math.round(value)}ms`;
 }
 
-function CliAgentRunCommandPanel({
+const TERMINAL_ANSI_PATTERN = /\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1B\\))/g;
+
+function terminalTextForDisplay(value: string) {
+  return String(value || "")
+    .replace(TERMINAL_ANSI_PATTERN, "")
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n");
+}
+
+function terminalStatusText(session: CliAgentTerminalSession | null, connecting: boolean, lang: "zh" | "en") {
+  if (connecting && !session) {
+    return lang === "zh" ? "连接中" : "Connecting";
+  }
+  if (!session) {
+    return lang === "zh" ? "未连接" : "Disconnected";
+  }
+  if (session.alive) {
+    return session.resumed ? (lang === "zh" ? "已恢复" : "Resumed") : (lang === "zh" ? "运行中" : "Running");
+  }
+  const status = String(session.status || "").trim();
+  if (status === "exited") {
+    return lang === "zh" ? "已退出" : "Exited";
+  }
+  if (status === "stopping") {
+    return lang === "zh" ? "停止中" : "Stopping";
+  }
+  return lang === "zh" ? "未运行" : "Stopped";
+}
+
+function CliAgentRunTerminalPanel({
   run,
+  sourceSessionId,
   lang,
   statusLabel,
 }: {
   run: CliAgentRunView;
+  sourceSessionId: string;
   lang: "zh" | "en";
   statusLabel: (status: string) => string;
 }) {
-  const result = run.result;
-  const stdout = String(result?.stdoutPreview ?? "").trim();
-  const stderr = String(result?.stderrPreview ?? run.error ?? "").trim();
-  const rawResult = !stdout && !stderr ? run.resultPreview : "";
-  const metaRows = [
-    { label: lang === "zh" ? "适配器" : "Adapter", value: run.agentType || run.title },
-    { label: lang === "zh" ? "模式" : "Mode", value: run.mode },
-    { label: "cwd", value: run.cwd },
-    {
-      label: lang === "zh" ? "退出码" : "Exit",
-      value: result?.exitCode === undefined || result?.exitCode === null ? "" : String(result.exitCode),
-    },
-    { label: lang === "zh" ? "耗时" : "Duration", value: formatDurationMs(run.durationMs) },
-    { label: lang === "zh" ? "记录" : "Log", value: run.tracePath },
-  ].filter((row) => row.value);
-  const sections = [
-    { id: "task", label: lang === "zh" ? "任务" : "Task", value: run.task },
-    { id: "stdout", label: "stdout", value: stdout },
-    { id: "stderr", label: "stderr", value: stderr },
-    { id: "result", label: lang === "zh" ? "原始结果" : "Raw result", value: rawResult },
-  ].filter((section) => section.value);
+  const [terminalSession, setTerminalSession] = useState<CliAgentTerminalSession | null>(null);
+  const [terminalText, setTerminalText] = useState("");
+  const [terminalInput, setTerminalInput] = useState("");
+  const [terminalError, setTerminalError] = useState("");
+  const [connecting, setConnecting] = useState(false);
+  const outputRef = useRef<HTMLPreElement | null>(null);
+  const terminalSessionId = String(terminalSession?.terminalSessionId || "").trim();
+  const transportLabel = terminalSession?.transport === "conpty"
+    ? (lang === "zh" ? "真实终端" : "PTY")
+    : terminalSession?.transport === "pipe"
+      ? (lang === "zh" ? "兼容通道" : "Pipe")
+      : "";
+  const statusText = terminalStatusText(terminalSession, connecting, lang);
+  const rawTerminalText = terminalText || String(terminalSession?.transcriptTail || "");
+  const displayTerminalText = terminalTextForDisplay(rawTerminalText);
+  const visibleCommand = Array.isArray(terminalSession?.commandPreview) && terminalSession?.commandPreview.length
+    ? terminalSession.commandPreview.join(" ")
+    : run.commandLine;
+  const emptyText = terminalError
+    || (connecting
+      ? (lang === "zh" ? "正在连接命令会话..." : "Connecting terminal session...")
+      : (lang === "zh" ? "命令会话还没有输出。" : "No terminal output yet."));
+
+  useEffect(() => {
+    let disposed = false;
+    const controller = new AbortController();
+    setConnecting(true);
+    setTerminalError("");
+    setTerminalText("");
+    setTerminalSession(null);
+
+    fetchJson<CliAgentTerminalSession>("/api/cli-agents/terminal-sessions/ensure", {
+      method: "POST",
+      signal: controller.signal,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        agentType: run.agentType,
+        task: run.task,
+        cwd: run.cwd,
+        mode: run.mode || "readonly",
+        sourceSessionId,
+        sourceMessageId: run.messageId,
+        sourceRunId: run.id,
+        cliSessionId: String(run.result?.cliSessionId || ""),
+        rows: 28,
+        cols: 100,
+      }),
+    })
+      .then((session) => {
+        if (disposed) {
+          return;
+        }
+        setTerminalSession(session);
+        setTerminalText(String(session.transcriptTail || ""));
+      })
+      .catch((error) => {
+        if (disposed || controller.signal.aborted) {
+          return;
+        }
+        setTerminalError(error instanceof Error ? error.message : String(error));
+      })
+      .finally(() => {
+        if (!disposed) {
+          setConnecting(false);
+        }
+      });
+
+    return () => {
+      disposed = true;
+      controller.abort();
+    };
+  }, [run.agentType, run.cwd, run.id, run.messageId, run.mode, run.result, run.task, sourceSessionId]);
+
+  useEffect(() => {
+    if (!terminalSessionId || typeof EventSource === "undefined") {
+      return;
+    }
+    const stream = new EventSource(`/api/cli-agents/terminal-sessions/${encodeURIComponent(terminalSessionId)}/events`);
+    const handleEvent = (event: MessageEvent) => {
+      try {
+        const payload = JSON.parse(String(event.data || "{}")) as CliAgentTerminalEvent;
+        if (payload.session) {
+          setTerminalSession(payload.session);
+          if (payload.type === "terminal_snapshot") {
+            setTerminalText(String(payload.session.transcriptTail || ""));
+          }
+        }
+        if (payload.type === "terminal_output" && payload.chunk) {
+          setTerminalText((current) => `${current}${payload.chunk}`);
+        }
+      } catch {
+        return;
+      }
+    };
+    stream.addEventListener("terminal_snapshot", handleEvent as EventListener);
+    stream.addEventListener("terminal_output", handleEvent as EventListener);
+    stream.addEventListener("terminal_status", handleEvent as EventListener);
+    stream.onerror = () => {
+      setTerminalSession((current) => current ? { ...current, alive: false } : current);
+    };
+    return () => {
+      stream.removeEventListener("terminal_snapshot", handleEvent as EventListener);
+      stream.removeEventListener("terminal_output", handleEvent as EventListener);
+      stream.removeEventListener("terminal_status", handleEvent as EventListener);
+      stream.close();
+    };
+  }, [terminalSessionId]);
+
+  useEffect(() => {
+    const element = outputRef.current;
+    if (!element) {
+      return;
+    }
+    element.scrollTop = element.scrollHeight;
+  }, [displayTerminalText]);
+
+  const sendTerminalInput = useCallback((event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const data = terminalInput.trimEnd();
+    if (!terminalSessionId || !data) {
+      return;
+    }
+    setTerminalInput("");
+    setTerminalError("");
+    fetchJson<CliAgentTerminalSession>(`/api/cli-agents/terminal-sessions/${encodeURIComponent(terminalSessionId)}/input`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ data: `${data}\r\n` }),
+    })
+      .then((session) => setTerminalSession(session))
+      .catch((error) => setTerminalError(error instanceof Error ? error.message : String(error)));
+  }, [terminalInput, terminalSessionId]);
+
+  const stopTerminal = useCallback(() => {
+    if (!terminalSessionId) {
+      return;
+    }
+    setTerminalError("");
+    fetchJson<CliAgentTerminalSession>(`/api/cli-agents/terminal-sessions/${encodeURIComponent(terminalSessionId)}/stop`, {
+      method: "POST",
+    })
+      .then((session) => setTerminalSession(session))
+      .catch((error) => setTerminalError(error instanceof Error ? error.message : String(error)));
+  }, [terminalSessionId]);
+
+  const reconnectTerminal = useCallback(() => {
+    setTerminalSession(null);
+    setTerminalText("");
+    setTerminalError("");
+    setConnecting(true);
+    fetchJson<CliAgentTerminalSession>("/api/cli-agents/terminal-sessions/ensure", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        agentType: run.agentType,
+        task: run.task,
+        cwd: run.cwd,
+        mode: run.mode || "readonly",
+        sourceSessionId,
+        sourceMessageId: run.messageId,
+        sourceRunId: run.id,
+        cliSessionId: terminalSession?.cliSessionId || "",
+        rows: 28,
+        cols: 100,
+      }),
+    })
+      .then((session) => {
+        setTerminalSession(session);
+        setTerminalText(String(session.transcriptTail || ""));
+      })
+      .catch((error) => setTerminalError(error instanceof Error ? error.message : String(error)))
+      .finally(() => setConnecting(false));
+  }, [run.agentType, run.cwd, run.id, run.messageId, run.mode, run.task, sourceSessionId, terminalSession?.cliSessionId]);
 
   return (
-    <section className={styles.cliAgentRunPanel} aria-label={lang === "zh" ? "CLI Agent 工具运行" : "CLI Agent tool run"}>
+    <section className={styles.cliAgentRunPanel} aria-label={lang === "zh" ? "命令终端" : "CLI Agent terminal"}>
       <header className={styles.cliAgentRunHeader}>
         <span className={styles.cliAgentRunIcon} aria-hidden="true">
           <SquareTerminal size={18} />
         </span>
         <div className={styles.cliAgentRunHeading}>
-          <p>{lang === "zh" ? "工具命令行" : "Tool command line"}</p>
+          <p>{lang === "zh" ? "命令终端" : "Terminal"}</p>
           <h2>{run.title}</h2>
         </div>
-        <span className={styles.cliAgentRunStatus}>{statusLabel(run.status)}</span>
+        <div className={styles.cliAgentRunActions}>
+          <span className={styles.cliAgentRunStatus}>{statusText}</span>
+          <button
+            type="button"
+            className={styles.cliAgentRunIconButton}
+            onClick={reconnectTerminal}
+            title={lang === "zh" ? "重新连接" : "Reconnect"}
+            aria-label={lang === "zh" ? "重新连接命令终端" : "Reconnect terminal"}
+          >
+            <RotateCcw size={14} />
+          </button>
+          <button
+            type="button"
+            className={styles.cliAgentRunIconButton}
+            onClick={stopTerminal}
+            disabled={!terminalSession?.alive}
+            title={lang === "zh" ? "停止" : "Stop"}
+            aria-label={lang === "zh" ? "停止命令终端" : "Stop terminal"}
+          >
+            <Square size={14} />
+          </button>
+        </div>
       </header>
-      <div className={styles.cliAgentRunCommand}>
-        <span aria-hidden="true">$</span>
-        <code>{run.commandLine}</code>
+      <div className={styles.cliAgentRunMetaBar}>
+        <span>{transportLabel || statusLabel(run.status)}</span>
+        {terminalSession?.cliSessionId ? <span title={terminalSession.cliSessionId}>{lang === "zh" ? "已绑定上次会话" : "Session bound"}</span> : null}
+        {formatDurationMs(run.durationMs) ? <span>{formatDurationMs(run.durationMs)}</span> : null}
       </div>
-      {metaRows.length > 0 ? (
-        <dl className={styles.cliAgentRunMeta}>
-          {metaRows.map((row) => (
-            <div key={row.label} className={styles.cliAgentRunMetaItem}>
-              <dt>{row.label}</dt>
-              <dd title={row.value}>{row.value}</dd>
-            </div>
-          ))}
-        </dl>
-      ) : null}
-      <div className={styles.cliAgentRunOutput}>
-        {sections.length > 0 ? sections.map((section) => (
-          <section key={section.id} className={styles.cliAgentRunOutputSection}>
-            <h3>{section.label}</h3>
-            <pre>{section.value}</pre>
-          </section>
-        )) : (
-          <p className={styles.cliAgentRunEmpty}>
-            {lang === "zh" ? "工具还没有返回可显示的输出。" : "No tool output is available yet."}
-          </p>
-        )}
+      <div className={styles.cliAgentTerminalFrame}>
+        <div className={styles.cliAgentTerminalCommand} title={visibleCommand}>
+          <span aria-hidden="true">$</span>
+          <code>{visibleCommand}</code>
+        </div>
+        <pre ref={outputRef} className={styles.cliAgentTerminalOutput}>
+          {displayTerminalText || emptyText}
+        </pre>
+        <form className={styles.cliAgentTerminalInputRow} onSubmit={sendTerminalInput}>
+          <span aria-hidden="true">$</span>
+          <input
+            value={terminalInput}
+            onChange={(event) => setTerminalInput(event.target.value)}
+            disabled={!terminalSession?.alive}
+            placeholder={lang === "zh" ? "输入命令或回复" : "Type input"}
+            aria-label={lang === "zh" ? "终端输入" : "Terminal input"}
+          />
+          <button type="submit" disabled={!terminalSession?.alive || !terminalInput.trim()}>
+            {lang === "zh" ? "发送" : "Send"}
+          </button>
+        </form>
       </div>
     </section>
   );
@@ -5676,8 +5914,9 @@ export function ChatCodingRoute() {
               <div className={styles.emptySurface}>{t("loadingSession")}</div>
             )
           ) : activeCliAgentRun ? (
-            <CliAgentRunCommandPanel
+            <CliAgentRunTerminalPanel
               run={activeCliAgentRun}
+              sourceSessionId={activeSessionId || ""}
               lang={lang}
               statusLabel={statusLabel}
             />
