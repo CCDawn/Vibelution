@@ -108,6 +108,19 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeCssSource).not.toContain(".sessionAgentStatusControl");
   });
 
+  it("uses the unified Agent session tab strip for both single and multi-session states", () => {
+    expect(routeSource).toContain("agentSessionTabs.length > 0 || cliAgentRunTabs.length > 0");
+    expect(routeSource).not.toContain("agentSessionTabs.length > 1 || cliAgentRunTabs.length > 0");
+    expect(agentSessionTabStripSource).toContain("sessions.length === 0 && cliAgentRuns.length === 0");
+    expect(agentSessionTabStripSource).not.toContain("sessions.length <= 1 && cliAgentRuns.length === 0");
+
+    expect(routeStyles.agentSessionTabGroup).toBeTypeOf("string");
+    expect(routeStyles.agentSessionTab).toBeTypeOf("string");
+    expect(routeStyles.agentSessionTabRoot).toBeTypeOf("string");
+    expect(routeStyles.agentSessionTabChild).toBeTypeOf("string");
+    expect(routeStyles.agentSessionTabActive).toBeTypeOf("string");
+  });
+
   it("keeps the conversation index compact enough for 1024px workbench use", () => {
     expect(routeCssSource).toContain("grid-template-columns: 32px minmax(0, 1fr)");
     expect(routeCssSource).toContain("min-height: 46px");

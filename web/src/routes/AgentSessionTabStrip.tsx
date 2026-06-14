@@ -73,7 +73,7 @@ export function AgentSessionTabStrip({
   onSetActiveTab,
   onSubmitRename,
 }: AgentSessionTabStripProps) {
-  if (sessions.length <= 1 && cliAgentRuns.length === 0) {
+  if (sessions.length === 0 && cliAgentRuns.length === 0) {
     return null;
   }
 
