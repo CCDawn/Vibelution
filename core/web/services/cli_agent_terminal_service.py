@@ -275,6 +275,7 @@ def ensure_cli_agent_terminal_session(
                 source_message_id=normalized_source_message_id,
                 source_run_id=normalized_source_run_id,
             )
+            _supersede_related_terminal_states(runtime.state, keep_terminal_session_id=terminal_session_id)
             snapshot = runtime.snapshot()
             snapshot["reusedActiveLock"] = True
             return snapshot
@@ -344,6 +345,10 @@ def ensure_cli_agent_terminal_session(
                 source_message_id=normalized_source_message_id,
                 source_run_id=normalized_source_run_id,
             )
+            _supersede_related_terminal_states(
+                locked_runtime.state,
+                keep_terminal_session_id=str(locked_runtime.state.get("terminalSessionId") or ""),
+            )
             snapshot = locked_runtime.snapshot()
             snapshot["reusedActiveLock"] = True
             return snapshot
@@ -367,6 +372,7 @@ def ensure_cli_agent_terminal_session(
         transcript_path = _transcript_path(terminal_session_id)
         state["transcriptPath"] = _relative_to_project(transcript_path)
         _write_state(state)
+        _supersede_related_terminal_states(state, keep_terminal_session_id=terminal_session_id)
         runtime = _TerminalRuntime(
             state=state,
             process=process,
@@ -853,6 +859,35 @@ def _mark_terminal_state_closed(state: dict[str, Any], *, closed_at: str, closed
     state["closedAt"] = closed_at
     state["updatedAt"] = closed_at
     state["closedTerminalSessionIds"] = list(closed_ids)
+
+
+def _supersede_related_terminal_states(state: dict[str, Any], *, keep_terminal_session_id: str) -> None:
+    keep_id = str(keep_terminal_session_id or "").strip()
+    if not keep_id:
+        return
+    related_ids = [item for item in _related_terminal_session_ids(state) if item and item != keep_id]
+    if not related_ids:
+        return
+    now = _now_iso()
+    for related_id in related_ids:
+        related_runtime = _RUNTIMES.get(related_id)
+        if related_runtime is not None and related_runtime.is_alive():
+            related_runtime.stop()
+        related_state = dict(related_runtime.state) if related_runtime is not None else _read_state(related_id)
+        if not related_state:
+            continue
+        related_state["status"] = "closed"
+        related_state["alive"] = False
+        related_state["closedAt"] = now
+        related_state["updatedAt"] = now
+        related_state["closeReason"] = "superseded_by_idempotent_terminal"
+        related_state["supersededByTerminalSessionId"] = keep_id
+        if related_runtime is not None:
+            with related_runtime.lock:
+                related_runtime.state.update(related_state)
+                _write_state(related_runtime.state)
+        else:
+            _write_state(related_state)
 
 
 def _timestamp_sort_key(value: str) -> float:
