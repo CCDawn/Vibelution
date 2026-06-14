@@ -204,6 +204,7 @@ type Copy = {
   manageConfigHint: string;
   manageListHint: string;
   selectedMemory: string;
+  selectedKnowledgeDetail: string;
   sourceAudit: string;
   reviewQueue: string;
   reviewQueueHint: string;
@@ -523,6 +524,7 @@ type KnowledgeSearchDraft = {
 };
 type RatingSuggestionStatusFilter = "pending" | "applied" | "rejected" | "all";
 type RatingSuggestionPriorityFilter = "all" | "urgent" | "elevated" | "normal";
+type KnowledgeWorkspaceMode = "sources" | "search" | "review" | "governance" | "permissions";
 type KnowledgePermissionEntry = KnowledgePermissionAuditPayload["knowledgeBases"][number]["permissions"][string] | string | null | undefined;
 
 function normalizeKnowledgePermission(permission: KnowledgePermissionEntry): { allowed: boolean; reason: string } {
@@ -662,6 +664,7 @@ const COPY: Record<"zh" | "en", Copy> = {
     manageConfigHint: "先在左侧选择一条记忆，再在这里编辑、禁用、恢复或新增用户记忆。系统来源只保存覆盖状态，原始文件保持不变。",
     manageListHint: "选择一条记忆后在中间配置；右侧只负责查看来源、影响和原文。",
     selectedMemory: "选中记忆",
+    selectedKnowledgeDetail: "选中知识 / 证据",
     sourceAudit: "来源审计",
     reviewQueue: "优先检查队列",
     reviewQueueHint: "按风险和运行影响排序，先看会改变 agent 行为或证据不完整的记忆。",
@@ -708,8 +711,8 @@ const COPY: Record<"zh" | "en", Copy> = {
     sourceArtifacts: "来源登记",
     formalKnowledge: "正式知识",
     sourceGovernance: "来源治理",
-    ownerSourceInbox: "Owner 来源 inbox",
-    centralSourceRegistry: "中央来源注册表",
+    ownerSourceInbox: "来源收件箱",
+    centralSourceRegistry: "中央来源",
     centralSources: "中央来源",
     ownerScope: "Owner 范围",
     ownerTeam: "团队",
@@ -721,7 +724,7 @@ const COPY: Record<"zh" | "en", Copy> = {
     rejectedSources: "已拒绝来源",
     duplicateSources: "重复来源",
     needsMoreContextSources: "需补充上下文",
-    collectOwnerSource: "收集到 owner inbox",
+    collectOwnerSource: "登记来源",
     originalContent: "源文件内容",
     originalFilename: "源文件名",
     reviewSource: "审核来源",
@@ -762,7 +765,7 @@ const COPY: Record<"zh" | "en", Copy> = {
     reviewPriority: "评审优先级",
     markingReason: "标记原因",
     noKnowledgeBases: "当前没有可访问的团队知识库。",
-    knowledgeHint: "P1 只登记来源、提交候选并审核落盘；正式知识默认可检索，不默认注入 prompt。",
+    knowledgeHint: "来源、提案、审核、正式知识分层治理。",
     platformPipeline: "记忆平台流水线",
     pipelineSource: "来源登记",
     pipelineProposal: "精炼提案",
@@ -777,7 +780,7 @@ const COPY: Record<"zh" | "en", Copy> = {
     knowledgeSearch: "知识检索",
     ragRetrieval: "RAG 检索",
     ragContextCandidates: "上下文候选",
-    ragRetrievalHint: "基于已审核正式知识生成带引用的上下文候选；不会自动注入 prompt。",
+    ragRetrievalHint: "从正式知识生成带引用的候选，不自动注入 prompt。",
     ragHealth: "健康态",
     ragProvider: "Provider",
     ragVector: "向量",
@@ -845,8 +848,8 @@ const COPY: Record<"zh" | "en", Copy> = {
     semanticSearch: "语义",
     hybridSearch: "混合",
     semanticScore: "相关度",
-    usageContract: "使用契约",
-    memoryDomains: "系统域",
+    usageContract: "边界策略",
+    memoryDomains: "知识边界",
     allowedUse: "允许使用",
     writeBoundary: "写入边界",
     forbiddenActions: "禁止动作",
@@ -1026,6 +1029,7 @@ const COPY: Record<"zh" | "en", Copy> = {
     manageConfigHint: "Select one memory on the left, then edit, disable, restore, or add user memory here. System sources keep reversible overrides and original files stay unchanged.",
     manageListHint: "Select a memory to configure it in the middle; the right pane is for source, impact, and raw inspection.",
     selectedMemory: "Selected memory",
+    selectedKnowledgeDetail: "Selected knowledge / evidence",
     sourceAudit: "Source audit",
     reviewQueue: "Priority review queue",
     reviewQueueHint: "Sorted by risk and runtime impact so behavior-changing or incomplete evidence appears first.",
@@ -1072,8 +1076,8 @@ const COPY: Record<"zh" | "en", Copy> = {
     sourceArtifacts: "Source artifacts",
     formalKnowledge: "Formal knowledge",
     sourceGovernance: "Source governance",
-    ownerSourceInbox: "Owner source inbox",
-    centralSourceRegistry: "Central source registry",
+    ownerSourceInbox: "Source inbox",
+    centralSourceRegistry: "Central sources",
     centralSources: "Central sources",
     ownerScope: "Owner scope",
     ownerTeam: "Team",
@@ -1085,7 +1089,7 @@ const COPY: Record<"zh" | "en", Copy> = {
     rejectedSources: "Rejected sources",
     duplicateSources: "Duplicate sources",
     needsMoreContextSources: "Needs more context",
-    collectOwnerSource: "Collect to owner inbox",
+    collectOwnerSource: "Register source",
     originalContent: "Source file content",
     originalFilename: "Source filename",
     reviewSource: "Review source",
@@ -1126,7 +1130,7 @@ const COPY: Record<"zh" | "en", Copy> = {
     reviewPriority: "Review priority",
     markingReason: "Marking reason",
     noKnowledgeBases: "No accessible team knowledge bases yet.",
-    knowledgeHint: "P1 registers sources, submits candidates, and reviews batches; formal knowledge is tool-readable, not prompt-injected.",
+    knowledgeHint: "Sources, proposals, review, and formal knowledge stay separated.",
     platformPipeline: "Memory platform pipeline",
     pipelineSource: "Source registration",
     pipelineProposal: "Refinement proposal",
@@ -1141,7 +1145,7 @@ const COPY: Record<"zh" | "en", Copy> = {
     knowledgeSearch: "Knowledge search",
     ragRetrieval: "RAG retrieval",
     ragContextCandidates: "Context candidates",
-    ragRetrievalHint: "Builds cited context candidates from reviewed formal knowledge; it does not inject them into prompts.",
+    ragRetrievalHint: "Builds cited candidates from formal knowledge without prompt injection.",
     ragHealth: "Health",
     ragProvider: "Provider",
     ragVector: "Vector",
@@ -1209,8 +1213,8 @@ const COPY: Record<"zh" | "en", Copy> = {
     semanticSearch: "Semantic",
     hybridSearch: "Hybrid",
     semanticScore: "Relevance",
-    usageContract: "Usage contract",
-    memoryDomains: "System domains",
+    usageContract: "Boundary policy",
+    memoryDomains: "Knowledge boundary",
     allowedUse: "Allowed use",
     writeBoundary: "Write boundary",
     forbiddenActions: "Forbidden actions",
@@ -2123,6 +2127,8 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
   });
   const [bulkActionPending, setBulkActionPending] = useState<BulkMemoryAction | null>(null);
   const [activeKnowledgeBaseId, setActiveKnowledgeBaseId] = useState("");
+  const [activeKnowledgeWorkspaceMode, setActiveKnowledgeWorkspaceMode] = useState<KnowledgeWorkspaceMode>("sources");
+  const [showOwnerSourceForm, setShowOwnerSourceForm] = useState(false);
   const [sourceOwnerType, setSourceOwnerType] = useState<SourceOwnerType>("team");
   const [sourceOwnerId, setSourceOwnerId] = useState("");
   const [sourceInboxStatus, setSourceInboxStatus] = useState<SourceInboxStatusFilter>("pending");
@@ -5043,6 +5049,54 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
         </aside>
 
         <main className={styles.knowledgeMain}>
+          <div className={styles.knowledgeModeTabs} role="tablist" aria-label={copy.governance}>
+            {([
+              {
+                key: "sources",
+                label: lang === "zh" ? "来源" : "Sources",
+                hint: `${copy.ownerSourceInbox} / ${copy.centralSources}`,
+                count: (sourceInboxQuery.data?.summary.sourceCount ?? ownerInboxSources.length) + (centralSourcesQuery.data?.summary.centralSourceCount ?? centralSources.length),
+              },
+              {
+                key: "search",
+                label: lang === "zh" ? "检索" : "Search",
+                hint: `${copy.knowledgeSearch} / ${copy.ragRetrieval}`,
+                count: (knowledgeSearchQuery.data?.summary.resultCount ?? 0) + (knowledgeRagRetrieveQuery.data?.summary.contextCount ?? 0),
+              },
+              {
+                key: "review",
+                label: lang === "zh" ? "审核" : "Review",
+                hint: `${copy.pendingProposals} / ${copy.ratingSuggestions}`,
+                count: (activeKnowledgeBase?.pendingProposals.length ?? 0) + ratingSuggestions.length,
+              },
+              {
+                key: "governance",
+                label: lang === "zh" ? "治理" : "Governance",
+                hint: `${copy.operationsHealth} / ${copy.governanceTasks}`,
+                count: (knowledgeOperationsHealth?.summary.findingCount ?? 0) + (governanceTasksQuery.data?.summary.openTaskCount ?? 0),
+              },
+              {
+                key: "permissions",
+                label: lang === "zh" ? "权限" : "Permissions",
+                hint: `${copy.permissionAudit} / ${copy.ingestionAdapters}`,
+                count: (permissionAudit?.summary.knowledgeBaseCount ?? 0) + ingestionAdapters.length,
+              },
+            ] satisfies Array<{ key: KnowledgeWorkspaceMode; label: string; hint: string; count: number }>).map((mode) => (
+              <button
+                key={mode.key}
+                type="button"
+                role="tab"
+                aria-selected={activeKnowledgeWorkspaceMode === mode.key}
+                className={activeKnowledgeWorkspaceMode === mode.key ? styles.knowledgeModeTabActive : styles.knowledgeModeTab}
+                title={mode.hint}
+                onClick={() => setActiveKnowledgeWorkspaceMode(mode.key)}
+              >
+                <span>{mode.label}</span>
+                <strong>{mode.count}</strong>
+              </button>
+            ))}
+          </div>
+          {activeKnowledgeWorkspaceMode === "sources" ? (
           <section className={styles.managementPanel}>
             <div className={styles.managementHeader}>
               <div>
@@ -5083,11 +5137,13 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
                     <p className={styles.panelEyebrow}>{copy.collectOwnerSource}</p>
                     <h3>{copy.ownerSourceInbox}</h3>
                   </div>
-                  <button type="button" className={styles.primaryActionButton} onClick={submitOwnerSource} disabled={knowledgeBusy || !activeSourceOwnerId}>
-                    <Link2 size={15} />
-                    <span>{copy.collectOwnerSource}</span>
+                  <button type="button" className={styles.primaryActionButton} onClick={() => setShowOwnerSourceForm((value) => !value)}>
+                    <Pencil size={15} />
+                    <span>{showOwnerSourceForm ? copy.cancelEdit : copy.submitSource}</span>
                   </button>
                 </div>
+                {showOwnerSourceForm ? (
+                <>
                 <div className={styles.knowledgeFormGrid}>
                   <label>
                     <span>{copy.sourceType}</span>
@@ -5134,6 +5190,20 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
                     <textarea rows={4} value={ownerSourceDraft.originalContent} onChange={(event) => setOwnerSourceDraft({ ...ownerSourceDraft, originalContent: event.target.value })} />
                   </label>
                 </div>
+                <div className={styles.formActionRow}>
+                  <button type="button" className={styles.primaryActionButton} onClick={submitOwnerSource} disabled={knowledgeBusy || !activeSourceOwnerId}>
+                    <Link2 size={15} />
+                    <span>{copy.collectOwnerSource}</span>
+                  </button>
+                </div>
+                </>
+                ) : (
+                <button type="button" className={styles.collapsedFormButton} onClick={() => setShowOwnerSourceForm(true)}>
+                  <Pencil size={15} />
+                  <span>{copy.submitSource}</span>
+                  <small>{ownerSourceDraft.sourceType}</small>
+                </button>
+                )}
               </div>
               <div className={styles.sourceGovernanceColumn}>
                 <div className={styles.managementHeader}>
@@ -5254,7 +5324,9 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
               ) : null}
             </div>
           </section>
+          ) : null}
 
+          {activeKnowledgeWorkspaceMode === "search" ? (
           <section className={styles.managementPanel}>
             <div className={styles.managementHeader}>
               <div>
@@ -5381,7 +5453,10 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
               </div>
             </section>
           </section>
+          ) : null}
 
+          {activeKnowledgeWorkspaceMode === "governance" ? (
+          <>
           <section className={styles.managementPanel}>
             <div className={styles.managementHeader}>
               <div>
@@ -5476,7 +5551,10 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
               ) : null}
             </div>
           </section>
+          </>
+          ) : null}
 
+          {activeKnowledgeWorkspaceMode === "permissions" ? (
           <section className={styles.managementPanel}>
             <div className={styles.managementHeader}>
               <div>
@@ -5496,7 +5574,10 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
               ))}
             </div>
           </section>
+          ) : null}
 
+          {activeKnowledgeWorkspaceMode === "review" ? (
+          <>
           <section className={styles.managementPanel}>
             <div className={styles.managementHeader}>
               <div>
@@ -5674,7 +5755,10 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
               ) : null}
             </div>
           </section>
+          </>
+          ) : null}
 
+          {activeKnowledgeWorkspaceMode === "permissions" ? (
           <section className={styles.managementPanel}>
             <div className={styles.managementHeader}>
               <div>
@@ -5705,12 +5789,13 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
               ))}
             </div>
           </section>
+          ) : null}
         </main>
 
         <aside className={styles.detailPanel}>
           <div className={styles.detailHeader}>
             <p className={styles.panelEyebrow}>{copy.formalKnowledge}</p>
-            <h2>{activeKnowledgeBase?.name ?? copy.selectedMemory}</h2>
+            <h2>{activeKnowledgeBase?.name ?? copy.selectedKnowledgeDetail}</h2>
           </div>
           <section className={styles.managementPanel}>
             <div className={styles.managementHeader}>
@@ -6208,6 +6293,13 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
     </>
   );
 
+  const viewStackClassName =
+    forcedView === "graph"
+      ? `${styles.viewStack} ${styles.graphViewStack}`
+      : forcedView === "knowledge"
+        ? `${styles.viewStack} ${styles.knowledgeViewStack}`
+        : styles.viewStack;
+
   return (
     <section className={styles.route}>
       <header className={styles.header}>
@@ -6226,7 +6318,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
         {renderSubnav()}
       </div>
 
-      <div className={forcedView === "graph" ? `${styles.viewStack} ${styles.graphViewStack}` : styles.viewStack}>
+      <div className={viewStackClassName}>
         {forcedView === "overview"
           ? renderOverviewView()
           : forcedView === "effective"

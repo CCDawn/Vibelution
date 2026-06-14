@@ -136,6 +136,34 @@
   overflow: hidden;
 }
 
+.knowledgeViewStack {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.knowledgeViewStack > .summaryGrid,
+.knowledgeViewStack > .pipelinePanel,
+.knowledgeViewStack > .knowledgeGovernanceDeck,
+.knowledgeViewStack > .panelError,
+.knowledgeViewStack > .panelNotice {
+  flex: 0 0 auto;
+}
+
+.knowledgeViewStack > .summaryGrid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.knowledgeViewStack > .knowledgeWorkspace {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.knowledgeViewStack > .knowledgeGovernanceDeck {
+  display: none;
+}
+
 .summaryGrid {
   display: grid;
   grid-template-columns: repeat(6, minmax(0, 1fr));
@@ -195,32 +223,32 @@
 
 .pipelinePanel {
   display: grid;
-  gap: 5px;
+  grid-template-columns: minmax(150px, 0.22fr) minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
   margin: 4px 12px 0;
-  padding: 6px 8px;
+  padding: 5px 8px;
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-control);
   background: color-mix(in srgb, var(--surface-panel) 90%, var(--surface-card));
 }
 
 .pipelineHeader {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
+  display: grid;
+  gap: 2px;
   min-width: 0;
 }
 
 .pipelineHeader h2 {
   margin: 0;
-  font-size: 0.86rem;
+  overflow: hidden;
+  font-size: 0.84rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .pipelineBoundary {
-  display: inline-flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: 4px;
+  display: none;
 }
 
 .pipelineBoundary span,
@@ -241,7 +269,8 @@
 .pipelineSteps {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 3px;
+  gap: 4px;
+  min-width: 0;
 }
 
 .pipelineStep {
@@ -2455,9 +2484,72 @@
 
 .knowledgeMain {
   display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
   gap: 6px;
   min-height: 0;
+  overflow: hidden;
+}
+
+.knowledgeMain > .managementPanel {
+  align-content: start;
+  min-height: 0;
   overflow: auto;
+}
+
+.knowledgeModeTabs {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 5px;
+  min-width: 0;
+}
+
+.knowledgeModeTab,
+.knowledgeModeTabActive {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  min-height: 30px;
+  padding: 0 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--surface-panel) 88%, transparent);
+  color: var(--fg-secondary);
+  font: inherit;
+  font-size: 0.72rem;
+  font-weight: 720;
+  text-align: left;
+  cursor: pointer;
+}
+
+.knowledgeModeTabActive {
+  border-color: color-mix(in srgb, var(--accent-cool) 42%, var(--border-soft));
+  background: color-mix(in srgb, var(--accent-cool) 12%, var(--surface-panel));
+  color: var(--fg-primary);
+}
+
+.knowledgeModeTab span,
+.knowledgeModeTabActive span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.knowledgeModeTab strong,
+.knowledgeModeTabActive strong {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  min-height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface-elevated) 80%, transparent);
+  color: var(--fg-primary);
+  font-size: 0.68rem;
+  font-variant-numeric: tabular-nums;
 }
 
 .knowledgeWorkspace .sourcePanel,
@@ -2492,9 +2584,9 @@
 
 .knowledgeGovernanceDeck {
   display: grid;
-  grid-template-columns: minmax(0, 1.04fr) minmax(0, 0.96fr);
+  grid-template-columns: minmax(0, 0.94fr) minmax(0, 1.06fr);
   gap: 5px;
-  margin: 3px 10px 0;
+  margin: 3px 12px 0;
   align-items: start;
 }
 
@@ -2503,6 +2595,8 @@
   gap: 4px;
   min-width: 0;
   padding: 5px 6px;
+  max-height: 92px;
+  overflow: hidden;
   border: 1px solid color-mix(in srgb, var(--accent-warm) 24%, var(--border-soft));
   border-radius: 8px;
   background: color-mix(in srgb, var(--surface-panel) 90%, transparent);
@@ -2514,6 +2608,10 @@
   flex-wrap: wrap;
   gap: 4px;
   min-width: 0;
+}
+
+.contractForbiddenList {
+  display: none;
 }
 
 .contractPrinciples span,
@@ -2535,7 +2633,7 @@
 
 .contractDomainGrid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 3px;
   min-width: 0;
 }
@@ -2584,7 +2682,7 @@
 }
 
 .contractStateGrid {
-  display: grid;
+  display: none;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 3px;
 }
@@ -2670,6 +2768,45 @@
 
 .wideField {
   grid-column: 1 / -1;
+}
+
+.formActionRow {
+  display: flex;
+  justify-content: flex-end;
+  min-width: 0;
+}
+
+.collapsedFormButton {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  min-height: 42px;
+  padding: 0 9px;
+  border: 1px dashed color-mix(in srgb, var(--accent-cool) 34%, var(--border-soft));
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--surface-panel-muted) 84%, transparent);
+  color: var(--fg-primary);
+  font: inherit;
+  font-size: 0.76rem;
+  font-weight: 740;
+  text-align: left;
+  cursor: pointer;
+}
+
+.collapsedFormButton span,
+.collapsedFormButton small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.collapsedFormButton small {
+  color: var(--fg-tertiary);
+  font-size: 0.68rem;
+  font-weight: 650;
 }
 
 .sourceGovernanceControls {
@@ -3070,6 +3207,8 @@
   gap: 4px;
   min-width: 0;
   padding: 5px 6px;
+  max-height: 92px;
+  overflow: hidden;
   border: 1px solid color-mix(in srgb, var(--accent-cool) 22%, var(--border-soft));
   border-radius: 8px;
   background: color-mix(in srgb, var(--surface-panel) 86%, transparent);
@@ -3156,7 +3295,7 @@
 }
 
 .stewardRecommendations {
-  display: grid;
+  display: none;
   gap: 4px;
   min-width: 0;
 }
@@ -3223,7 +3362,7 @@
 }
 
 .stewardWorkbench {
-  display: grid;
+  display: none;
   gap: 3px;
   min-width: 0;
   padding-top: 1px;
@@ -4065,6 +4204,10 @@
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
+  .knowledgeModeTabs {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
   .stewardGrid {
     grid-template-columns: 1fr;
   }
@@ -4204,6 +4347,7 @@
 
   .summaryGrid,
   .pipelineSteps,
+  .knowledgeModeTabs,
   .projectMemoryQueueStats,
   .matrixGrid,
   .overviewGrid,
