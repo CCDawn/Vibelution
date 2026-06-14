@@ -132,7 +132,29 @@ python tests/test_runner.py --parallel --workers 4
 - 不把 `-n auto` 作为默认；本地开发建议先用 `--workers 2` 或 `--workers 4`，再根据耗时和稳定性调整。
 - 广义全量回归仍应保留串行兜底；并行适合日常快速反馈和已标注边界的稳定子集。
 
-### 3.4 使用 prompt_debugger.py（工具变更时必用）
+### 3.4 使用影响面测试选择器
+
+`tests/test_matrix.yaml` 记录高频改动范围到验证命令的映射，`tests/select_tests.py` 根据变更文件输出建议测试命令。它只做选择和解释，不自动执行命令，也不改变默认 pytest 串行策略。
+
+```bash
+# 手动输入变更文件并查看结构化结果
+python tests/select_tests.py --changed-file core/web/services/session_service.py --json
+
+# 从 git diff 读取变更文件
+python tests/select_tests.py --from-git HEAD~1
+
+# 只输出命令，便于复制到当前 worktree 执行
+python tests/select_tests.py --from-git main --commands-only
+```
+
+使用原则：
+
+- 先运行 selector 给出的聚焦命令，再按风险扩大到相关文件或全量回归。
+- selector 输出的是建议，不替代工程判断；涉及 Launcher、真实进程、外部 config、Git 副作用或共享 workspace 的测试仍按 `serial` 边界处理。
+- 没有规则命中时，默认输出轻量 runner smoke、collect-only 和 `git diff --check`，帮助 Agent 先判断测试集合是否可收集。
+- 新增高频模块或拆分测试文件后，同步补充 `tests/test_matrix.yaml` 和 `tests/test_select_tests.py`。
+
+### 3.5 使用 prompt_debugger.py（工具变更时必用）
 
 验证模型能够正确理解并调用工具。**每次添加或修改工具后必须运行**。
 
