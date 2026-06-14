@@ -513,6 +513,46 @@ def shutdown_cli_agent_terminal_sessions() -> None:
         runtime.stop()
 
 
+def reconcile_cli_agent_terminal_states_on_startup(*, reason: str = "backend_startup") -> dict[str, Any]:
+    """Mark persisted running terminal states stale when no in-memory runtime owns them."""
+
+    now = _now_iso()
+    stale_ids: list[str] = []
+    with _RUNTIMES_LOCK:
+        live_ids = {
+            terminal_session_id
+            for terminal_session_id, runtime in list(_RUNTIMES.items())
+            if runtime.is_alive()
+        }
+        for state in _iter_terminal_states():
+            terminal_session_id = str(state.get("terminalSessionId") or "").strip()
+            if not terminal_session_id or terminal_session_id in live_ids:
+                continue
+            status = str(state.get("status") or "").strip().lower()
+            if bool(state.get("userClosed")) or status in {"closed", "stopped", "exited", "stale"}:
+                continue
+            if not bool(state.get("alive")) and status not in {"running", "starting", "stopping"}:
+                continue
+            state["status"] = "stale"
+            state["alive"] = False
+            state["staleAt"] = now
+            state["staleReason"] = str(reason or "backend_startup")
+            state["updatedAt"] = now
+            _write_state(state)
+            stale_ids.append(terminal_session_id)
+    if stale_ids:
+        cli_agent_service._record_event(
+            "cli_agent.terminal.startup_reconciled",
+            outcome="stale_states_marked",
+            fields={
+                "staleCount": len(stale_ids),
+                "staleTerminalSessionIds": stale_ids[:20],
+                "reason": str(reason or "backend_startup"),
+            },
+        )
+    return {"staleCount": len(stale_ids), "staleTerminalSessionIds": stale_ids}
+
+
 def _require_runtime(terminal_session_id: str) -> _TerminalRuntime:
     session_id = _normalize_terminal_session_id(terminal_session_id)
     with _RUNTIMES_LOCK:
@@ -830,10 +870,7 @@ def _terminal_state_matches_scope(
     if lock_key and str(state.get("lockKey") or "").strip() == lock_key:
         return True
     state_adapter = str(state.get("adapterId") or state.get("agentType") or "").strip()
-    state_source_session_id = str(state.get("sourceSessionId") or "").strip()
     if not adapter_id or state_adapter != adapter_id:
-        return False
-    if source_session_id and state_source_session_id != source_session_id:
         return False
     return _normalize_path_for_match(str(state.get("cwd") or "")) == _normalize_path_for_match(cwd)
 
@@ -1186,11 +1223,8 @@ def _cli_scope_basis(
     cwd: str,
     task: str,
 ) -> str:
-    source_scope = str(source_session_id or "").strip()
-    if not source_scope:
-        source_scope = f"standalone:{source_message_id or source_run_id or cli_agent_service._task_hash(str(task or ''))}"
     normalized_cwd = str(cwd or "").strip().replace("\\", "/").lower()
-    return "\n".join(["cli-run-v1", str(adapter_id or "").strip(), source_scope, normalized_cwd])
+    return "\n".join(["cli-run-v2", str(adapter_id or "").strip(), normalized_cwd])
 
 
 def _fnv1a_hex(value: str) -> str:
