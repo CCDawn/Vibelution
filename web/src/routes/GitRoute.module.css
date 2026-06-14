@@ -117,6 +117,22 @@
   gap: 8px;
   min-width: 0;
   padding: var(--route-summary-padding);
+  color: inherit;
+  text-align: left;
+}
+
+button.summaryCard {
+  cursor: pointer;
+}
+
+button.summaryCard:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--accent-cool) 28%, transparent);
+  background: color-mix(in srgb, var(--accent-cool) 7%, var(--surface-panel, rgba(27, 31, 35, 0.78)));
+}
+
+button.summaryCard:disabled {
+  opacity: 0.76;
+  cursor: default;
 }
 
 .summaryCard span {
@@ -154,7 +170,7 @@
 }
 
 .workspaceOverview {
-  grid-template-columns: minmax(0, 1fr) minmax(300px, 360px);
+  grid-template-columns: minmax(340px, 0.9fr) minmax(500px, 1.18fr) minmax(270px, 0.62fr);
   gap: 8px;
 }
 
@@ -221,8 +237,17 @@
   grid-template-columns: minmax(170px, auto) minmax(0, 1fr);
   align-items: center;
   gap: 12px;
+  width: 100%;
   min-width: 0;
   padding: 10px 12px;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.cleanStateStrip:hover {
+  border-color: color-mix(in srgb, var(--accent-cool) 30%, transparent);
+  background: color-mix(in srgb, var(--accent-cool) 7%, var(--surface-panel, rgba(27, 31, 35, 0.78)));
 }
 
 .cleanStateStrip h2,
@@ -275,11 +300,21 @@
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 10px;
+  width: 100%;
   min-width: 0;
   padding: 8px 9px;
   border: 1px solid var(--border-soft);
   border-radius: 8px;
   background: var(--surface-panel-muted, rgba(21, 24, 27, 0.82));
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.worktreeItem:hover,
+.commitItem:hover {
+  border-color: color-mix(in srgb, var(--accent-cool) 32%, transparent);
+  background: var(--surface-panel-strong, rgba(34, 39, 44, 0.92));
 }
 
 .worktreeItem div {
@@ -516,6 +551,11 @@
   min-height: 0;
 }
 
+.objectDetailPanel {
+  min-width: 0;
+  min-height: 0;
+}
+
 .emptyPreview {
   height: 100%;
   display: grid;
@@ -542,10 +582,20 @@
 .commitItem {
   display: grid;
   gap: 6px;
+  width: 100%;
   padding: 9px;
   border: 1px solid var(--border-soft);
   border-radius: 8px;
   background: var(--surface-panel-muted, rgba(21, 24, 27, 0.82));
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.objectItemActive {
+  border-color: color-mix(in srgb, var(--accent-cool) 40%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent-cool) 18%, transparent);
+  background: color-mix(in srgb, var(--accent-cool) 10%, var(--surface-panel-muted, rgba(21, 24, 27, 0.82)));
 }
 
 .manualCommitPanel {
@@ -792,8 +842,8 @@
 
 @media (max-width: 1200px) {
   .workspace.workspaceOverview {
-    grid-template-columns: 1fr;
-    grid-template-rows: minmax(0, 1fr) minmax(210px, 34vh);
+    grid-template-columns: minmax(0, 1fr) minmax(280px, 340px);
+    grid-template-rows: minmax(260px, 0.92fr) minmax(240px, 0.8fr);
   }
 
   .workspace {
@@ -802,9 +852,19 @@
     row-gap: 8px;
   }
 
-  .workspace.workspaceOverview .historyPanel {
+  .workspace.workspaceOverview .gitOverviewPanel {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .workspace.workspaceOverview .objectDetailPanel {
     grid-column: 1;
     grid-row: 2;
+  }
+
+  .workspace.workspaceOverview .historyPanel {
+    grid-column: 2;
+    grid-row: 1 / span 2;
     grid-template-columns: 1fr;
     grid-template-rows: auto minmax(0, 1fr);
   }
@@ -854,6 +914,18 @@
   .gitSituationGrid,
   .cleanStateStrip {
     grid-template-columns: 1fr;
+  }
+
+  .workspace.workspaceOverview {
+    grid-template-columns: 1fr;
+    grid-template-rows: none;
+  }
+
+  .workspace.workspaceOverview .gitOverviewPanel,
+  .workspace.workspaceOverview .objectDetailPanel,
+  .workspace.workspaceOverview .historyPanel {
+    grid-column: auto;
+    grid-row: auto;
   }
 
   .resizeHandle {
