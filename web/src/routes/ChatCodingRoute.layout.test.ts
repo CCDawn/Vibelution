@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { readFileSync } from "node:fs";
 import conversationStyles from "../components/conversation/ConversationView.module.css";
+import conversationViewSource from "../components/conversation/ConversationView.tsx?raw";
 import shellStoreSource from "../store/shellStore.ts?raw";
 import agentSessionTabStripSource from "./AgentSessionTabStrip.tsx?raw";
 import routeSource from "./ChatCodingRoute.tsx?raw";
@@ -891,9 +892,14 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("function cliAgentRunTabId");
     expect(routeSource).toContain("function cliAgentRunIdFromTabId");
     expect(routeSource).toContain("function buildCliAgentRunViews");
+    expect(routeSource).toContain("function cliAgentRunIdForSource");
+    expect(routeSource).toContain("closedCliAgentRunIdFromMessage");
+    expect(routeSource).toContain("function cliAgentRunCloseToken");
+    expect(routeSource).toContain("const runsById = new Map<string, CliAgentRunView>()");
+    expect(routeSource).toContain("closedRunIds.add(closedRunId)");
     expect(routeSource).toContain("toolCall.name !== CLI_AGENT_TOOL_NAME");
     expect(routeSource).toContain("function isCliAgentRunActiveForClose");
-    expect(routeSource).toContain("const [closedCliAgentRunIdsBySession");
+    expect(routeSource).toContain("const [closedCliAgentRunTokensBySession");
     expect(routeSource).toContain("const [cliAgentTerminalSessions");
     expect(routeSource).toContain('const activeFilePath = workspace.activeTab !== "agent" && !activeCliAgentRunId ? workspace.activeTab : null;');
     expect(routeSource).toContain("cliAgentRuns={cliAgentRunTabs}");
@@ -905,6 +911,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("onTerminalSessionChange={handleCliAgentTerminalSessionChange}");
     expect(routeSource).toContain(") : activeCliAgentRun ? (");
     expect(routeSource).toContain('"/api/cli-agents/terminal-sessions/ensure"');
+    expect(routeSource).toContain("sourceRunId: run.sourceRunId");
+    expect(routeSource).toContain("void sessionDetailQuery.refetch()");
     expect(routeSource).toContain("new EventSource(`/api/cli-agents/terminal-sessions/${encodeURIComponent(terminalSessionId)}/events`)");
     expect(routeSource).toContain("terminal_output");
     expect(routeSource).toContain('import { Terminal } from "@xterm/xterm"');
@@ -925,6 +933,11 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeCssSource).toContain(".agentSessionTabCloseButton");
     expect(routeCssSource).not.toContain(".cliAgentRunIconButton");
     expect(routeCssSource).not.toContain(".cliAgentRunMetaBar");
+    expect(conversationViewSource).toContain("isCliAgentLifecycleMessage");
+    expect(conversationViewSource).toContain("cliAgentLifecycleLabel");
+    expect(conversationViewSource).toContain("styles.cliAgentLifecycleTurn");
+    expect(conversationCssSource).toContain(".cliAgentLifecycleTurn");
+    expect(conversationCssSource).toContain(".cliAgentLifecycleMeta");
     expect(agentSessionTabStripSource).toContain("export type CliAgentRunTab");
     expect(agentSessionTabStripSource).toContain("cliAgentRuns.map");
     expect(agentSessionTabStripSource).toContain("SquareTerminal");

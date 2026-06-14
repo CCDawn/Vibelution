@@ -352,6 +352,55 @@
   overflow-wrap: anywhere;
 }
 
+.cliAgentLifecycleTurn {
+  display: inline-grid;
+  grid-template-columns: 18px minmax(0, auto) minmax(0, auto) auto;
+  gap: 7px;
+  align-items: center;
+  justify-self: start;
+  max-width: min(100%, 860px);
+  padding: 4px 9px;
+  border: 1px solid color-mix(in srgb, var(--accent-cool) 18%, transparent);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--surface-card) 86%, var(--accent-cool) 5%);
+  color: var(--fg-tertiary);
+  font-size: 0.76rem;
+  line-height: 1.35;
+}
+
+.cliAgentLifecycleIcon {
+  display: grid;
+  place-items: center;
+  color: var(--accent-cool);
+}
+
+.cliAgentLifecycleText {
+  min-width: 0;
+  color: var(--fg-secondary);
+  font-weight: 720;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cliAgentLifecycleMeta {
+  min-width: 0;
+  max-width: 220px;
+  overflow: hidden;
+  color: var(--fg-tertiary);
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cliAgentLifecycleTime {
+  color: var(--fg-tertiary);
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  white-space: nowrap;
+}
+
 .turnEditing .turnContent {
   padding: 10px 12px;
   border: 1px solid color-mix(in srgb, var(--accent-warm) 42%, transparent);

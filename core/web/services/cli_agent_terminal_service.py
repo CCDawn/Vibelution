@@ -226,11 +226,14 @@ def ensure_cli_agent_terminal_session(
     normalized_type = cli_agent_service._normalize_id(agent_type)
     if not normalized_type:
         raise CliAgentTerminalError("MISSING_CLI_AGENT", "CLI Agent type is required.")
+    normalized_source_session_id = str(source_session_id or "").strip()
+    normalized_source_message_id = str(source_message_id or "").strip()
+    normalized_source_run_id = str(source_run_id or "").strip()
     terminal_session_id = _stable_terminal_session_id(
         adapter_id=normalized_type,
-        source_session_id=source_session_id,
-        source_message_id=source_message_id,
-        source_run_id=source_run_id,
+        source_session_id=normalized_source_session_id,
+        source_message_id=normalized_source_message_id,
+        source_run_id=normalized_source_run_id,
         cwd=cwd,
         mode=mode,
         task=task,
@@ -244,6 +247,9 @@ def ensure_cli_agent_terminal_session(
             return snapshot
 
         existing_state = _read_state(terminal_session_id)
+        normalized_source_session_id = normalized_source_session_id or str(existing_state.get("sourceSessionId") or "").strip()
+        normalized_source_message_id = normalized_source_message_id or str(existing_state.get("sourceMessageId") or "").strip()
+        normalized_source_run_id = normalized_source_run_id or str(existing_state.get("sourceRunId") or "").strip()
         command = _build_terminal_command(
             agent_type=normalized_type,
             task=task or str(existing_state.get("task") or ""),
@@ -253,13 +259,41 @@ def ensure_cli_agent_terminal_session(
             agent=agent or str(existing_state.get("agent") or ""),
             cli_session_id=cli_session_id or str(existing_state.get("cliSessionId") or ""),
         )
+        lock_key = _stable_cli_lock_key(
+            adapter_id=normalized_type,
+            source_session_id=normalized_source_session_id,
+            source_message_id=normalized_source_message_id,
+            source_run_id=normalized_source_run_id,
+            cwd=str(command.get("cwd") or cwd or ""),
+            task=task or str(existing_state.get("task") or ""),
+        )
+        cli_run_id = _stable_cli_run_id(
+            adapter_id=normalized_type,
+            source_session_id=normalized_source_session_id,
+            source_message_id=normalized_source_message_id,
+            source_run_id=normalized_source_run_id,
+            cwd=str(command.get("cwd") or cwd or ""),
+            task=task or str(existing_state.get("task") or ""),
+        )
+        locked_runtime = _find_active_locked_runtime(lock_key, exclude_terminal_session_id=terminal_session_id)
+        if locked_runtime is not None:
+            _link_runtime_source(
+                locked_runtime,
+                source_message_id=normalized_source_message_id,
+                source_run_id=normalized_source_run_id,
+            )
+            snapshot = locked_runtime.snapshot()
+            snapshot["reusedActiveLock"] = True
+            return snapshot
         state = _initial_state(
             terminal_session_id=terminal_session_id,
             command=command,
             task=task or str(existing_state.get("task") or ""),
-            source_session_id=source_session_id or str(existing_state.get("sourceSessionId") or ""),
-            source_message_id=source_message_id or str(existing_state.get("sourceMessageId") or ""),
-            source_run_id=source_run_id or str(existing_state.get("sourceRunId") or ""),
+            source_session_id=normalized_source_session_id,
+            source_message_id=normalized_source_message_id,
+            source_run_id=normalized_source_run_id,
+            cli_run_id=cli_run_id,
+            lock_key=lock_key,
             rows=rows,
             cols=cols,
             previous_state=existing_state,
@@ -286,6 +320,8 @@ def ensure_cli_agent_terminal_session(
             outcome="started",
             fields={
                 "terminalSessionId": terminal_session_id,
+                "cliRunId": cli_run_id,
+                "lockKey": lock_key,
                 "adapterId": normalized_type,
                 "cwd": str(command.get("cwd") or ""),
                 "mode": str(command.get("mode") or ""),
@@ -363,7 +399,11 @@ def resize_cli_agent_terminal_session(terminal_session_id: str, rows: int, cols:
 def stop_cli_agent_terminal_session(terminal_session_id: str) -> dict[str, Any]:
     runtime = _require_runtime(terminal_session_id)
     runtime.stop()
-    _touch_state(_normalize_terminal_session_id(terminal_session_id), status="stopping", alive=False)
+    with runtime.lock:
+        runtime.state["status"] = "stopping"
+        runtime.state["alive"] = False
+        runtime.state["updatedAt"] = _now_iso()
+        _write_state(runtime.state)
     return runtime.snapshot()
 
 
@@ -499,6 +539,8 @@ def _initial_state(
     source_session_id: str,
     source_message_id: str,
     source_run_id: str,
+    cli_run_id: str,
+    lock_key: str,
     rows: int,
     cols: int,
     previous_state: dict[str, Any],
@@ -513,6 +555,10 @@ def _initial_state(
         "sourceSessionId": source_session_id,
         "sourceMessageId": source_message_id,
         "sourceRunId": source_run_id,
+        "linkedSourceMessageIds": _append_unique(previous_state.get("linkedSourceMessageIds") or [], source_message_id),
+        "linkedSourceRunIds": _append_unique(previous_state.get("linkedSourceRunIds") or [], source_run_id),
+        "cliRunId": cli_run_id,
+        "lockKey": lock_key,
         "cwd": str(command.get("cwd") or ""),
         "mode": str(command.get("mode") or "readonly"),
         "model": str(command.get("model") or ""),
@@ -532,6 +578,97 @@ def _initial_state(
         "createdAt": str(previous_state.get("createdAt") or now),
         "updatedAt": now,
     }
+
+
+def _find_active_locked_runtime(lock_key: str, *, exclude_terminal_session_id: str = "") -> _TerminalRuntime | None:
+    normalized_lock_key = str(lock_key or "").strip()
+    if not normalized_lock_key:
+        return None
+    excluded = str(exclude_terminal_session_id or "").strip()
+    for terminal_session_id, runtime in list(_RUNTIMES.items()):
+        if excluded and terminal_session_id == excluded:
+            continue
+        if not runtime.is_alive():
+            continue
+        with runtime.lock:
+            runtime_lock_key = str(runtime.state.get("lockKey") or "").strip()
+        if runtime_lock_key == normalized_lock_key:
+            return runtime
+    return None
+
+
+def _link_runtime_source(runtime: _TerminalRuntime, *, source_message_id: str, source_run_id: str) -> None:
+    with runtime.lock:
+        runtime.state["linkedSourceMessageIds"] = _append_unique(
+            runtime.state.get("linkedSourceMessageIds") or [],
+            source_message_id,
+        )
+        runtime.state["linkedSourceRunIds"] = _append_unique(
+            runtime.state.get("linkedSourceRunIds") or [],
+            source_run_id,
+        )
+        runtime.state["updatedAt"] = _now_iso()
+        _write_state(runtime.state)
+
+
+def _stable_cli_lock_key(
+    *,
+    adapter_id: str,
+    source_session_id: str,
+    source_message_id: str,
+    source_run_id: str,
+    cwd: str,
+    task: str,
+) -> str:
+    return f"cli-lock-{_fnv1a_hex(_cli_scope_basis(adapter_id=adapter_id, source_session_id=source_session_id, source_message_id=source_message_id, source_run_id=source_run_id, cwd=cwd, task=task))}"
+
+
+def _stable_cli_run_id(
+    *,
+    adapter_id: str,
+    source_session_id: str,
+    source_message_id: str,
+    source_run_id: str,
+    cwd: str,
+    task: str,
+) -> str:
+    return f"cli-run-{_fnv1a_hex(_cli_scope_basis(adapter_id=adapter_id, source_session_id=source_session_id, source_message_id=source_message_id, source_run_id=source_run_id, cwd=cwd, task=task))}"
+
+
+def _cli_scope_basis(
+    *,
+    adapter_id: str,
+    source_session_id: str,
+    source_message_id: str,
+    source_run_id: str,
+    cwd: str,
+    task: str,
+) -> str:
+    source_scope = str(source_session_id or "").strip()
+    if not source_scope:
+        source_scope = f"standalone:{source_message_id or source_run_id or cli_agent_service._task_hash(str(task or ''))}"
+    normalized_cwd = str(cwd or "").strip().replace("\\", "/").lower()
+    return "\n".join(["cli-run-v1", str(adapter_id or "").strip(), source_scope, normalized_cwd])
+
+
+def _fnv1a_hex(value: str) -> str:
+    hash_value = 0x811C9DC5
+    for char in str(value or ""):
+        hash_value ^= ord(char)
+        hash_value = (hash_value * 0x01000193) & 0xFFFFFFFF
+    return f"{hash_value:08x}"
+
+
+def _append_unique(items: Any, value: str) -> list[str]:
+    result: list[str] = []
+    for item in list(items or []):
+        text = str(item or "").strip()
+        if text and text not in result:
+            result.append(text)
+    text = str(value or "").strip()
+    if text and text not in result:
+        result.append(text)
+    return result
 
 
 def _stable_terminal_session_id(
@@ -680,6 +817,10 @@ def _public_state(state: dict[str, Any]) -> dict[str, Any]:
         "sourceSessionId",
         "sourceMessageId",
         "sourceRunId",
+        "linkedSourceMessageIds",
+        "linkedSourceRunIds",
+        "cliRunId",
+        "lockKey",
         "cwd",
         "mode",
         "taskHash",
