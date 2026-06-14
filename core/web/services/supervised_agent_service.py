@@ -572,6 +572,9 @@ def _ensure_supervised_role(role: SupervisedAgentRole) -> tuple[dict[str, Any] |
     metadata = dict(existing.get("metadata") or {})
     existing_llm_bindings = agent_directory_service.normalize_agent_llm_bindings(existing.get("llmBindings"))
     expected_llm_bindings = agent_directory_service.normalize_agent_llm_bindings(seed_llm_bindings)
+    existing_dialogue_model_id = agent_directory_service.agent_dialogue_model_id(
+        {"llmBindings": existing_llm_bindings}
+    )
     expected_metadata = {
         "agentMode": "supervised_evolution",
         "configSurface": "model_config",
@@ -592,7 +595,7 @@ def _ensure_supervised_role(role: SupervisedAgentRole) -> tuple[dict[str, Any] |
             status="active",
         )
         changed = True
-    if expected_llm_bindings and existing_llm_bindings != expected_llm_bindings:
+    if expected_llm_bindings and not existing_dialogue_model_id:
         existing = agent_directory_service.update_agent_instance(
             str(existing.get("agentId") or ""),
             llm_bindings=expected_llm_bindings,

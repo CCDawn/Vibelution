@@ -137,7 +137,7 @@ def test_ensure_supervised_agent_instances_creates_fixed_role_agents_without_ste
     assert state["active_conversation_id"] == "session-user"
 
 
-def test_ensure_supervised_agent_instances_is_idempotent_and_repairs_active_metadata(tmp_path, monkeypatch):
+def test_ensure_supervised_agent_instances_preserves_user_llm_binding_when_repairing_metadata(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     monkeypatch.setattr(supervised_agent_service, "_current_config", lambda: _model_config())
     events = []
@@ -166,7 +166,7 @@ def test_ensure_supervised_agent_instances_is_idempotent_and_repairs_active_meta
     assert repaired["status"] == "active"
     assert repaired["metadata"]["supervisedRoleLabel"] == "监督进化基线 Agent"
     assert repaired["metadata"]["functionalDisplayName"] == "监督进化基线 Agent"
-    assert repaired["llmBindings"]["dialogue"]["modelId"] == "xiaomi_mimo_v2_5_pro_token_plan"
+    assert repaired["llmBindings"]["dialogue"]["modelId"] == "model-primary"
 
 
 def test_ensure_supervised_agent_instances_prefers_xiaomi_when_role_profile_missing(tmp_path, monkeypatch):
@@ -473,7 +473,7 @@ def test_child_process_agent_runtime_falls_back_to_supervised_env(tmp_path, monk
     assert runtime["supervisedRole"] == "baseline"
     assert runtime["supervisionPolicy"]["reviewMode"] == "required"
     assert runtime["supervisionPolicy"]["evidenceLevel"] == "strict"
-    assert [tool.name for tool in visible_tools] == ["read_file_tool"]
+    assert [tool.name for tool in visible_tools] == ["read_file_tool", "cli_tool"]
 
 
 def test_child_process_agent_runtime_uses_env_llm_snapshot_when_registry_missing(tmp_path, monkeypatch):
