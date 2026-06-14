@@ -153,6 +153,11 @@
   padding: var(--route-workspace-padding);
 }
 
+.workspaceOverview {
+  grid-template-columns: minmax(0, 1fr) minmax(300px, 360px);
+  gap: 8px;
+}
+
 .resizeHandle {
   position: relative;
   min-width: 10px;
@@ -194,6 +199,122 @@
 
 .commitPanel {
   grid-template-rows: auto auto minmax(0, 1fr);
+}
+
+.gitOverviewPanel {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 8px;
+  min-width: 0;
+  min-height: 0;
+}
+
+.cleanStateStrip,
+.gitSituationCard {
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--surface-panel, rgba(27, 31, 35, 0.78));
+}
+
+.cleanStateStrip {
+  display: grid;
+  grid-template-columns: minmax(170px, auto) minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  padding: 10px 12px;
+}
+
+.cleanStateStrip h2,
+.gitSituationCard h2 {
+  margin: 0;
+  color: var(--fg-primary);
+  font-family: var(--font-display);
+  font-size: 0.98rem;
+}
+
+.cleanStateStrip > span {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg-secondary);
+  font-size: 0.8rem;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gitSituationGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 0.92fr) minmax(0, 1.08fr);
+  gap: 8px;
+  min-width: 0;
+  min-height: 0;
+}
+
+.gitSituationCard {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 8px;
+  min-width: 0;
+  min-height: 0;
+  padding: 10px;
+}
+
+.situationList,
+.worktreeList {
+  display: grid;
+  align-content: start;
+  gap: 6px;
+  min-height: 0;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.worktreeItem {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 8px 9px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--surface-panel-muted, rgba(21, 24, 27, 0.82));
+}
+
+.worktreeItem div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.worktreeItem strong,
+.worktreeItem span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.worktreeItem strong {
+  color: var(--fg-primary);
+  font-size: 0.8rem;
+}
+
+.worktreeItem span {
+  color: var(--fg-tertiary);
+  font-size: 0.72rem;
+}
+
+.worktreeItem code {
+  color: var(--accent-warm-2);
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
+.historyPanel {
+  grid-template-rows: auto minmax(0, 1fr);
 }
 
 .paneCollapsed {
@@ -670,10 +791,22 @@
 }
 
 @media (max-width: 1200px) {
+  .workspace.workspaceOverview {
+    grid-template-columns: 1fr;
+    grid-template-rows: minmax(0, 1fr) minmax(210px, 34vh);
+  }
+
   .workspace {
     grid-template-columns: minmax(280px, var(--git-change-panel-width, 320px)) 8px minmax(420px, 1fr);
     grid-template-rows: minmax(0, 1fr) minmax(210px, 34vh);
     row-gap: 8px;
+  }
+
+  .workspace.workspaceOverview .historyPanel {
+    grid-column: 1;
+    grid-row: 2;
+    grid-template-columns: 1fr;
+    grid-template-rows: auto minmax(0, 1fr);
   }
 
   .commitPanel {
@@ -715,6 +848,11 @@
 
   .summaryGrid,
   .workspace {
+    grid-template-columns: 1fr;
+  }
+
+  .gitSituationGrid,
+  .cleanStateStrip {
     grid-template-columns: 1fr;
   }
 

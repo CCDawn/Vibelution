@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import { dictionary } from "../i18n/dictionary";
@@ -7,6 +8,8 @@ import logicSource from "./gitRouteLogic.ts?raw";
 import { gitRouteDictionary } from "./gitRouteI18n";
 import gitRouteI18nSource from "./gitRouteI18n.ts?raw";
 import shellDictionarySource from "../i18n/shellDictionary.ts?raw";
+
+const stylesSource = readFileSync(new URL("./GitRoute.module.css", import.meta.url), "utf-8");
 
 describe("GitRoute layout contract", () => {
   it("uses shell language state without loading the full app dictionary", () => {
@@ -56,5 +59,21 @@ describe("GitRoute layout contract", () => {
     expect(routeSource).toContain("worktreeBranchCount");
     expect(routeSource).toContain('t("gitLocalCommits")');
     expect(routeSource).toContain('t("gitWorktreeBranches")');
+  });
+
+  it("switches clean worktrees to a Git situation overview instead of an empty diff workspace", () => {
+    expect(routeSource).toContain("noChangedFiles");
+    expect(routeSource).toContain("styles.workspaceOverview");
+    expect(routeSource).toContain("styles.gitOverviewPanel");
+    expect(routeSource).toContain("styles.cleanStateStrip");
+    expect(routeSource).toContain("styles.gitSituationGrid");
+    expect(routeSource).toContain("pendingWorktreePreview");
+    expect(routeSource).toContain("localCommitPreview.map(renderCommitItem)");
+  });
+
+  it("keeps the clean Git overview history panel single-column at narrow desktop widths", () => {
+    expect(stylesSource).toContain(".workspace.workspaceOverview .historyPanel");
+    expect(stylesSource).toContain("grid-template-columns: 1fr");
+    expect(stylesSource).toContain("grid-template-rows: auto minmax(0, 1fr)");
   });
 });
