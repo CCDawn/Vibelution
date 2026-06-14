@@ -73,8 +73,8 @@ const SOURCE_COLLECTION_RUN_PREVIEW_LIMIT = 20;
 const SOURCE_COLLECTION_DEFAULT_ROLES = ["data_discovery", "source_acquisition", "content_extraction", "source_quality"];
 const SOURCE_COLLECTION_PROMPT_CACHE_POLICY = {
   requirement: "required_for_llm_execution",
-  modelId: "houmo_qwen35_9b_agent",
 };
+const SOURCE_COLLECTION_PROMPT_CACHE_MODEL_LABEL = "configured prompt-cache model";
 
 const researchStageRoundStatusQueryKey = (id: string) => ["teams", id, "workflow-orchestration", "stage-rounds", "status"] as const;
 const officialModelEvidenceStatusQueryKey = (id: string) => ["teams", id, "workflow-orchestration", "official-model-evidence", "status"] as const;
@@ -4985,8 +4985,8 @@ export function TeamsRoute({
         agentRole: "Research Coordination Agent",
         title: lang === "zh" ? "KV 缓存门禁已写入本轮搜集" : "KV cache gate attached to this run",
         body: lang === "zh"
-          ? `本轮使用 ${sourceCollectionPromptCachePolicy?.modelName || sourceCollectionPromptCachePolicyRef?.modelId || SOURCE_COLLECTION_PROMPT_CACHE_POLICY.modelId}，稳定前缀只放团队规则、结构契约和回写边界；每次搜索只传当前搜索词、结果引用和存储位置，避免反复重放网页全文。`
-          : `This run uses ${sourceCollectionPromptCachePolicy?.modelName || sourceCollectionPromptCachePolicyRef?.modelId || SOURCE_COLLECTION_PROMPT_CACHE_POLICY.modelId}. The stable prefix keeps team rules, schemas, and writeback boundaries; each search sends only the current query, result refs, and storage location.`,
+          ? `本轮使用 ${sourceCollectionPromptCachePolicy?.modelName || sourceCollectionPromptCachePolicyRef?.modelId || "当前可用 KV 模型"}，稳定前缀只放团队规则、结构契约和回写边界；每次搜索只传当前搜索词、结果引用和存储位置，避免反复重放网页全文。`
+          : `This run uses ${sourceCollectionPromptCachePolicy?.modelName || sourceCollectionPromptCachePolicyRef?.modelId || SOURCE_COLLECTION_PROMPT_CACHE_MODEL_LABEL}. The stable prefix keeps team rules, schemas, and writeback boundaries; each search sends only the current query, result refs, and storage location.`,
         status: sourceCollectionPromptCacheStatusLabel(promptCacheGateStatus, lang),
         tone: promptCacheGateStatus === "blocked" ? "blocked" : "cache",
         refs: (lang === "zh"
@@ -5234,6 +5234,7 @@ export function TeamsRoute({
     sourceCollectionRunStatusValue === "failed"
     || sourceCollectionRunStatusValue === "blocked"
     || sourceCollectionAcceptedBackgroundFailed
+    || selectedTeamStartResearchStageError
     || selectedTeamStartSourceCollectionError
     || selectedTeamExecuteSourceCollectionSearchError
     || selectedTeamRecordSourceCollectionOutputError
