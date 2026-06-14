@@ -2485,11 +2485,24 @@
   padding: 10px;
 }
 
-.usageContractPanel {
+.knowledgeStewardPanel .emptyDetail {
+  min-height: 44px;
+  padding: 6px;
+}
+
+.knowledgeGovernanceDeck {
   display: grid;
+  grid-template-columns: minmax(0, 1.04fr) minmax(0, 0.96fr);
   gap: 6px;
   margin: 4px 10px 0;
-  padding: 7px 8px;
+  align-items: start;
+}
+
+.usageContractPanel {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  padding: 6px 7px;
   border: 1px solid color-mix(in srgb, var(--accent-warm) 24%, var(--border-soft));
   border-radius: 8px;
   background: color-mix(in srgb, var(--surface-panel) 90%, transparent);
@@ -2499,7 +2512,7 @@
 .contractForbiddenList {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 4px;
   min-width: 0;
 }
 
@@ -2507,15 +2520,15 @@
 .contractForbiddenList span {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: 4px;
   max-width: 100%;
-  padding: 3px 6px;
+  padding: 2px 5px;
   overflow: hidden;
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-control);
   background: var(--surface-panel-muted);
   color: var(--fg-secondary);
-  font-size: 0.69rem;
+  font-size: 0.66rem;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -2523,17 +2536,17 @@
 .contractDomainGrid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 5px;
+  gap: 4px;
   min-width: 0;
 }
 
 .contractDomainRow {
   display: grid;
-  grid-template-columns: minmax(130px, 0.72fr) minmax(0, 0.9fr) minmax(0, 1fr) auto;
+  grid-template-columns: minmax(116px, 1fr) minmax(96px, 0.8fr) auto;
   align-items: center;
-  gap: 5px;
+  gap: 4px;
   min-width: 0;
-  padding: 5px 6px;
+  padding: 4px 5px;
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-control);
   background: var(--surface-panel);
@@ -2552,7 +2565,7 @@
   display: block;
   overflow: hidden;
   color: var(--fg-primary);
-  font-size: 0.78rem;
+  font-size: 0.74rem;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -2560,20 +2573,20 @@
 .contractDomainRow span,
 .contractDomainRow small {
   color: var(--fg-tertiary);
-  font-size: 0.68rem;
+  font-size: 0.65rem;
 }
 
 .contractStateGrid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 5px;
+  gap: 4px;
 }
 
 .contractStateGrid section {
   display: grid;
   gap: 2px;
   min-width: 0;
-  padding: 5px 6px;
+  padding: 4px 5px;
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-control);
   background: var(--surface-panel-muted);
@@ -2583,7 +2596,7 @@
 .contractStateGrid small {
   overflow: hidden;
   color: var(--fg-tertiary);
-  font-size: 0.67rem;
+  font-size: 0.64rem;
   text-overflow: ellipsis;
   text-transform: uppercase;
   white-space: nowrap;
@@ -2591,7 +2604,7 @@
 
 .contractStateGrid strong {
   color: var(--fg-primary);
-  font-size: 1rem;
+  font-size: 0.92rem;
 }
 
 .knowledgeFormGrid {
@@ -3047,9 +3060,9 @@
 
 .knowledgeStewardPanel {
   display: grid;
-  gap: 6px;
-  margin: 4px 10px 0;
-  padding: 7px 8px;
+  gap: 5px;
+  min-width: 0;
+  padding: 6px 7px;
   border: 1px solid color-mix(in srgb, var(--accent-cool) 22%, var(--border-soft));
   border-radius: 8px;
   background: color-mix(in srgb, var(--surface-panel) 86%, transparent);
@@ -3057,16 +3070,16 @@
 
 .stewardGrid {
   display: grid;
-  grid-template-columns: minmax(280px, 1.2fr) repeat(2, minmax(180px, 0.6fr));
-  gap: 7px;
+  grid-template-columns: minmax(170px, 1fr) repeat(2, minmax(104px, 0.58fr));
+  gap: 4px;
 }
 
 .stewardMission,
 .stewardMetric {
   display: grid;
-  gap: 3px;
+  gap: 2px;
   min-width: 0;
-  padding: 7px;
+  padding: 5px;
   border: 1px solid color-mix(in srgb, var(--border-soft) 72%, transparent);
   border-radius: 8px;
   background: color-mix(in srgb, var(--surface-elevated) 68%, transparent);
@@ -3076,7 +3089,7 @@
 .stewardMetric span,
 .stewardToolRows span {
   color: var(--fg-tertiary);
-  font-size: 0.68rem;
+  font-size: 0.64rem;
   font-weight: 760;
   text-transform: uppercase;
 }
@@ -3086,13 +3099,13 @@
   min-width: 0;
   overflow: hidden;
   color: var(--fg-primary);
-  font-size: 0.84rem;
+  font-size: 0.76rem;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .stewardMetric strong {
-  font-size: 1.1rem;
+  font-size: 0.96rem;
   font-variant-numeric: tabular-nums;
 }
 
@@ -3102,7 +3115,7 @@
   min-width: 0;
   overflow: hidden;
   color: var(--fg-secondary);
-  font-size: 0.72rem;
+  font-size: 0.66rem;
   line-height: 1.3;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -3111,48 +3124,48 @@
 .stewardToolRows {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
   min-width: 0;
   overflow: hidden;
 }
 
 .stewardToolRows code {
   flex: 0 0 auto;
-  max-width: 180px;
+  max-width: 142px;
   overflow: hidden;
-  padding: 2px 5px;
+  padding: 1px 5px;
   border: 1px solid color-mix(in srgb, var(--accent-warm) 24%, transparent);
   border-radius: 6px;
   background: color-mix(in srgb, var(--accent-warm) 8%, transparent);
   color: var(--fg-secondary);
-  font-size: 0.68rem;
+  font-size: 0.64rem;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .stewardRecommendations {
   display: grid;
-  gap: 6px;
+  gap: 4px;
   min-width: 0;
 }
 
 .stewardRecommendationHeader,
 .stewardRecommendationRow {
   display: grid;
-  grid-template-columns: auto minmax(160px, 0.8fr) minmax(220px, 1.4fr) minmax(180px, 1fr) auto;
+  grid-template-columns: auto minmax(116px, 0.75fr) minmax(150px, 1.2fr) auto;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
   min-width: 0;
 }
 
 .stewardRecommendationHeader {
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1.5fr);
+  grid-template-columns: minmax(0, 1fr) auto;
   padding: 0 2px;
 }
 
 .stewardRecommendationHeader span {
   color: var(--fg-tertiary);
-  font-size: 0.68rem;
+  font-size: 0.64rem;
   font-weight: 760;
   text-transform: uppercase;
 }
@@ -3160,14 +3173,14 @@
 .stewardRecommendationHeader small {
   overflow: hidden;
   color: var(--fg-secondary);
-  font-size: 0.72rem;
+  font-size: 0.66rem;
   text-align: right;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .stewardRecommendationRow {
-  padding: 6px;
+  padding: 5px;
   border: 1px solid color-mix(in srgb, var(--border-soft) 72%, transparent);
   border-radius: 8px;
   background: color-mix(in srgb, var(--surface-elevated) 64%, transparent);
@@ -3182,20 +3195,24 @@
   white-space: nowrap;
 }
 
+.stewardRecommendationRow small {
+  display: none;
+}
+
 .stewardRecommendationRow strong {
   color: var(--fg-primary);
-  font-size: 0.76rem;
+  font-size: 0.72rem;
 }
 
 .stewardRecommendationRow span,
 .stewardRecommendationRow small {
   color: var(--fg-secondary);
-  font-size: 0.71rem;
+  font-size: 0.66rem;
 }
 
 .stewardWorkbench {
   display: grid;
-  gap: 7px;
+  gap: 5px;
   min-width: 0;
   padding-top: 2px;
   border-top: 1px solid color-mix(in srgb, var(--border-soft) 68%, transparent);
@@ -3205,7 +3222,7 @@
 .stewardActionGrid,
 .stewardChecklist {
   display: grid;
-  gap: 6px;
+  gap: 4px;
   min-width: 0;
 }
 
@@ -3216,7 +3233,7 @@
 .stewardStageCard,
 .stewardActionRow {
   min-width: 0;
-  padding: 6px;
+  padding: 5px;
   border: 1px solid color-mix(in srgb, var(--border-soft) 72%, transparent);
   border-radius: 8px;
   background: color-mix(in srgb, var(--surface-elevated) 62%, transparent);
@@ -3224,7 +3241,7 @@
 
 .stewardStageCard {
   display: grid;
-  gap: 4px;
+  gap: 3px;
 }
 
 .stewardStageCard div {
@@ -3239,7 +3256,7 @@
   min-width: 0;
   overflow: hidden;
   color: var(--fg-primary);
-  font-size: 0.75rem;
+  font-size: 0.7rem;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -3251,23 +3268,28 @@
   min-width: 0;
   overflow: hidden;
   color: var(--fg-secondary);
-  font-size: 0.7rem;
+  font-size: 0.64rem;
   line-height: 1.3;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+.stewardStageCard p,
+.stewardStageCard code {
+  display: none;
+}
+
 .stewardStageCard code {
   overflow: hidden;
   color: var(--fg-tertiary);
-  font-size: 0.68rem;
+  font-size: 0.62rem;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .stewardActionRow {
   display: grid;
-  grid-template-columns: auto minmax(140px, 0.6fr) minmax(220px, 1.4fr);
+  grid-template-columns: auto minmax(110px, 0.7fr) minmax(140px, 1fr);
   align-items: center;
   gap: 6px;
   width: 100%;
@@ -3276,7 +3298,7 @@
 }
 
 .stewardChecklist {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .stewardChecklist span {
@@ -3724,6 +3746,10 @@
 @media (max-width: 1180px) {
   .summaryGrid {
     grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .knowledgeGovernanceDeck {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .pipelineSteps {
