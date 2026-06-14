@@ -30,6 +30,8 @@ from core.infrastructure.event_bus import (
     get_event_bus,
 )
 
+pytestmark = pytest.mark.serial
+
 
 # ============================================================================
 # Event 类测试
