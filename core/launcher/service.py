@@ -65,6 +65,7 @@ _WORKBENCH_WINDOW_MODE_DETAILS = {
         "en": "Open the workbench in a normal desktop window on the next start.",
     },
 }
+_RUNTIME_MANAGER_STATUS_FAST_PATH_MAX_AGE_SECONDS = 15.0
 
 
 class LauncherActiveWorkBlocked(Exception):
@@ -110,7 +111,7 @@ def get_launcher_status() -> dict[str, Any]:
 
     runtime_state = _runtime_manager_state()
     launcher_state = _load_launcher_state()
-    observed_workbench = _observed_workbench()
+    observed_workbench = _status_observed_workbench(runtime_state)
     workbench = _workbench_payload(runtime_state=runtime_state, observed_workbench=observed_workbench)
     active_work_runs = launcher_active_work_runs()
     runtime_manager = _runtime_manager_payload(runtime_state)
@@ -1036,6 +1037,38 @@ def _observed_workbench() -> dict[str, Any]:
     except Exception:
         return {}
     return observed if isinstance(observed, dict) else {}
+
+
+def _status_observed_workbench(runtime_state: dict[str, Any]) -> dict[str, Any]:
+    if _runtime_manager_state_is_fresh(runtime_state):
+        return {}
+    return _observed_workbench()
+
+
+def _runtime_manager_state_is_fresh(runtime_state: dict[str, Any]) -> bool:
+    if not bool(runtime_state.get("daemonRunning")):
+        return False
+    workbench = runtime_state.get("workbench") if isinstance(runtime_state.get("workbench"), dict) else {}
+    if not workbench:
+        return False
+    updated_at = str(runtime_state.get("updatedAt") or "").strip()
+    if not updated_at:
+        return False
+    try:
+        parsed = datetime.fromisoformat(updated_at.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    age_seconds = (datetime.now(timezone.utc) - parsed.astimezone(timezone.utc)).total_seconds()
+    if age_seconds < 0:
+        age_seconds = 0
+    if age_seconds > _RUNTIME_MANAGER_STATUS_FAST_PATH_MAX_AGE_SECONDS:
+        return False
+    phase = str(workbench.get("phase") or "").strip()
+    desired_state = str(workbench.get("desiredState") or "").strip()
+    observed_state = str(workbench.get("observedState") or "").strip()
+    return bool(phase and desired_state and observed_state)
 
 
 def _workbench_payload(*, runtime_state: dict[str, Any], observed_workbench: dict[str, Any]) -> dict[str, Any]:
