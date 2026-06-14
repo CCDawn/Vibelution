@@ -209,6 +209,8 @@ type CliAgentRunResult = {
   code?: string;
   runId?: string;
   cliRunId?: string;
+  terminalSessionId?: string;
+  terminalReuse?: boolean;
   agentType?: string;
   label?: string;
   mode?: string;
@@ -485,6 +487,9 @@ function buildCliAgentRunViews(messages: ConversationMessage[], sourceSessionId 
         task,
       });
       const lifecyclePatchForRun = lifecycleByRunId.get(cliRunId) ?? lifecycleByRunId.get(sourceRunId);
+      if (!shouldRenderCliAgentRunTab(result, status, lifecyclePatchForRun)) {
+        continue;
+      }
       const run: CliAgentRunView = {
         id: cliRunId,
         messageId: message.id,
@@ -511,6 +516,26 @@ function buildCliAgentRunViews(messages: ConversationMessage[], sourceSessionId 
     }
   }
   return Array.from(runsById.values()).filter((run) => !closedRunIds.has(run.id) && !closedRunIds.has(run.sourceRunId));
+}
+
+function shouldRenderCliAgentRunTab(result: CliAgentRunResult | null, status: string, lifecyclePatch?: CliAgentLifecyclePatch) {
+  const code = String(result?.code || "").trim();
+  if (
+    code === "CLI_AGENT_TERMINAL_ACTIVE"
+    || Boolean(result?.terminalSessionId)
+    || Boolean(result?.terminalReuse)
+    || Boolean(lifecyclePatch?.terminalSessionId)
+  ) {
+    return true;
+  }
+  const normalizedStatus = String(result?.status || status || "").trim().toLowerCase();
+  if (["error", "failed", "failure", "timeout"].includes(normalizedStatus)) {
+    return false;
+  }
+  if (code === "CLI_AGENT_EXITED_NONZERO" || code === "CLI_AGENT_LAUNCH_FAILED" || code === "CLI_AGENT_TIMEOUT") {
+    return false;
+  }
+  return true;
 }
 
 function terminalStatusText(session: CliAgentTerminalSession | null, connecting: boolean, lang: "zh" | "en") {
