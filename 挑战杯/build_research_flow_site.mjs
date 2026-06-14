@@ -434,6 +434,7 @@ const knowledgeRunbook = {
     ["团队协调队列", "coordination/status 聚合 pendingTransfers、needsRework、stewardship、blocked、active 队列，并输出 communicationBrief；Teams 科研流程面板已显示协调状态、目标 Agent、建议通道与只读策略边界", "已接入前端/API"],
     ["资料质量筛选", "source-quality/status 与 source-quality/assess 聚合/写回 source_manifest 质量评估；Teams 候选资料页可通过筛选或退回补资料", "已接入前端/API"],
     ["paper_note 分块计划", "paper-note-chunks/status 与 paper-note-chunks/plan 聚合/生成长论文 chunk seeds；Teams 候选资料页可生成或重建分块计划", "已接入前端/API"],
+    ["阶段 Agent 配置面板", "知识搜集、实验、迭代阶段页从 Team canvas / Team members / Agent config workspace 推导本阶段功能 Agent，并跳转复用 Agent 管理配置", "已接入前端"],
     ["评级建议", "knowledge_rating_suggestion_tool 只提交 reviewable rating suggestion", "已有能力"],
     ["候选图谱预览", "CandidateStore candidate_graph payload、断链报告、候选/正式边界显示；Teams 工作台已接入首版 SVG 读取面，现有 Memory Graph 只承接正式知识结构视图", "已接入首版"],
     ["正式图谱同步", "approved 后进入 Team Knowledge/RAG，并把正式科研边写入 KnowledgeItem metadata.officialResearchGraph；Memory Graph 请求 include=officialResearchGraph 后显式展开", "已接线"],
@@ -530,6 +531,7 @@ const implementationBlueprint = {
     ["M6.33", "候选库可视化二级索引", "知识搜集阶段的资料搜集、资料筛选、候选入库、候选图谱、共享记忆前审五张步骤卡都可点击进入对应页内详情；候选入库主按钮改为查看可视化候选库，不再直接打开 candidate_store/index.json。", "底层 candidate_store/index.json 仍保留在“更多证据文件”中作为维护入口；用户主路径只看到候选卡片、筛选状态、图谱预览和共享记忆前审，不再被 JSON 文件打断。"],
     ["M6.35", "知识搜集阶段子页控制台", "知识搜集阶段的五张步骤卡升级为页内子页索引，点击资料搜集、资料筛选、候选入库、候选图谱或共享记忆前审时，底部只显示该阶段内容。", "右侧控制台按当前阶段切换主操作按钮和关键数量；资料搜集保留配置/批次/回写折叠区，其余阶段只显示对应查看、筛选、刷新或前审动作，避免所有阶段信息同屏堆叠。"],
     ["M6.36", "资料筛选 Agent 复审入口", "资料筛选已完成时，步骤卡和右侧控制台主按钮不再只显示查看结果，而是显示 Agent 重新筛选，并通过 source-quality/assess-batch force=true 重新审查已筛候选。", "资料筛选详情页保留查看结果入口，同时新增显眼的 Agent 批量审查按钮；复审仍只写 CandidateStore 的 sourceQualityAssessment，不写正式 Team Knowledge、RAG 或 official graph。"],
+    ["M6.37", "阶段 Agent 配置面板", "科研总览卡显示阶段 Agent 可用数；知识搜集、实验和迭代阶段页展示本阶段功能 Agent、绑定状态、模型摘要和配置入口。", "绑定来源复用 Team canvas / Team members / Agent config workspace；点击配置跳转 Agent 管理，不复制第二套 Agent 配置表单；缺绑定时显示待绑定或引用失效。"],
   ],
   schemas: [
     "DataProcessingRun",

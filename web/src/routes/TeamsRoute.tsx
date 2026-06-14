@@ -16,6 +16,7 @@ import {
 import { queryKeys } from "../api/queryKeys";
 import {
   AgentConfigWorkspace,
+  AgentConfigWorkspaceAgent,
   AiSearchRun,
   AiSearchRunListPayload,
   AiSearchRunSummary,
@@ -337,6 +338,155 @@ type TeamWorkflowSourceCollectionSearchExecutionPayload = {
 };
 
 type ResearchStageType = "knowledge_collection" | "experiment" | "iteration";
+
+type ResearchStageAgentRoleDefinition = {
+  key: string;
+  roleKeys: string[];
+  zh: string;
+  en: string;
+  zhFocus: string;
+  enFocus: string;
+  fallbackAgentId?: string;
+};
+
+const RESEARCH_STAGE_AGENT_ROLES: Record<ResearchStageType, ResearchStageAgentRoleDefinition[]> = {
+  knowledge_collection: [
+    {
+      key: "research_coordination",
+      roleKeys: ["research_coordination", "data_intake_coordinator", "ceo", "organization_coordinator"],
+      zh: "科研协调",
+      en: "Research coordination",
+      zhFocus: "阶段调度与分工",
+      enFocus: "Stage coordination",
+    },
+    {
+      key: "data_discovery",
+      roleKeys: ["data_discovery"],
+      zh: "资料发现",
+      en: "Data discovery",
+      zhFocus: "搜索问题与来源范围",
+      enFocus: "Queries and scope",
+    },
+    {
+      key: "source_acquisition",
+      roleKeys: ["source_acquisition"],
+      zh: "来源获取",
+      en: "Source acquisition",
+      zhFocus: "网页、论文和数据集元信息",
+      enFocus: "Source metadata",
+    },
+    {
+      key: "content_extraction",
+      roleKeys: ["content_extraction"],
+      zh: "内容提炼",
+      en: "Content extraction",
+      zhFocus: "摘要、页码与证据片段",
+      enFocus: "Summary and anchors",
+    },
+    {
+      key: "source_quality",
+      roleKeys: ["source_quality"],
+      zh: "资料质量评估",
+      en: "Source quality",
+      zhFocus: "筛选、复审与退回",
+      enFocus: "Screen and review",
+    },
+    {
+      key: "knowledge_steward",
+      roleKeys: ["knowledge_steward", "steward", "ingestion_approval"],
+      zh: "共享记忆前审",
+      en: "Memory steward",
+      zhFocus: "入共享记忆前门禁",
+      enFocus: "Shared memory gate",
+      fallbackAgentId: "agent-knowledge-steward",
+    },
+  ],
+  experiment: [
+    {
+      key: "paper_note_extraction",
+      roleKeys: ["paper_note_extraction", "paper_note", "source_extraction"],
+      zh: "论文笔记",
+      en: "Paper notes",
+      zhFocus: "把资料转成可引用笔记",
+      enFocus: "Citable notes",
+    },
+    {
+      key: "neuro_mechanism",
+      roleKeys: ["neuro_mechanism", "neuro_mechanism_extraction"],
+      zh: "神经机制提取",
+      en: "Neuro mechanism",
+      zhFocus: "机制、证据和不确定性",
+      enFocus: "Mechanism evidence",
+    },
+    {
+      key: "mechanism_mapping",
+      roleKeys: ["mechanism_mapping"],
+      zh: "机制映射",
+      en: "Mechanism mapping",
+      zhFocus: "机制到计算抽象",
+      enFocus: "Mechanism to computation",
+    },
+    {
+      key: "algorithm_hypothesis",
+      roleKeys: ["algorithm_hypothesis", "algorithm_hypothesis_draft"],
+      zh: "算法假设",
+      en: "Algorithm hypothesis",
+      zhFocus: "baseline、指标与实验计划",
+      enFocus: "Baseline and plan",
+    },
+    {
+      key: "evidence_review",
+      roleKeys: ["evidence_review", "review", "quality_review"],
+      zh: "证据审查",
+      en: "Evidence review",
+      zhFocus: "可测性、风险和返工",
+      enFocus: "Risk and rework",
+    },
+  ],
+  iteration: [
+    {
+      key: "research_coordination",
+      roleKeys: ["research_coordination", "ceo", "organization_coordinator"],
+      zh: "科研协调",
+      en: "Research coordination",
+      zhFocus: "复盘调度与下一轮任务",
+      enFocus: "Review coordination",
+    },
+    {
+      key: "iteration_versioning",
+      roleKeys: ["iteration_versioning", "versioning", "iteration"],
+      zh: "迭代版本化",
+      en: "Iteration versioning",
+      zhFocus: "版本、参数和变更边界",
+      enFocus: "Version boundaries",
+    },
+    {
+      key: "evidence_review",
+      roleKeys: ["evidence_review", "review", "quality_review"],
+      zh: "结果审查",
+      en: "Result review",
+      zhFocus: "实验结论和保留假设",
+      enFocus: "Results and hypotheses",
+    },
+    {
+      key: "challenge_cup_delivery",
+      roleKeys: ["challenge_cup_delivery", "delivery", "submission"],
+      zh: "挑战杯交付",
+      en: "Challenge Cup delivery",
+      zhFocus: "材料、复现和交付门禁",
+      enFocus: "Delivery gate",
+    },
+    {
+      key: "knowledge_steward",
+      roleKeys: ["knowledge_steward", "steward", "ingestion_approval"],
+      zh: "知识治理",
+      en: "Knowledge steward",
+      zhFocus: "正式入库建议与审核边界",
+      enFocus: "Knowledge governance",
+      fallbackAgentId: "agent-knowledge-steward",
+    },
+  ],
+};
 
 type ResearchStageRound = {
   stageRoundId: string;
@@ -1076,6 +1226,55 @@ function sourceCollectionOwnerAgentIdFromCanvas(canvas: TeamOrganizationCanvas |
     }
   }
   return "";
+}
+
+function normalizeAgentRoleKey(value: string | undefined | null) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function researchStageAgentManagementRoute(agentId: string) {
+  const params = new URLSearchParams({ pane: "config" });
+  const normalized = String(agentId || "").trim();
+  if (normalized) {
+    params.set("agent", normalized);
+  }
+  return `/agents?${params.toString()}`;
+}
+
+function researchStageAgentModelLabel(agent: AgentConfigWorkspaceAgent | null | undefined, lang: "zh" | "en") {
+  if (!agent) {
+    return lang === "zh" ? "未绑定" : "not bound";
+  }
+  return agent.dialogueModel?.label
+    || agent.llmBindings?.dialogue?.modelId
+    || agent.llmBindings?.mentalModel?.modelId
+    || (lang === "zh" ? "未配置模型" : "model missing");
+}
+
+function researchStageAgentConfigStatusLabel(agent: AgentConfigWorkspaceAgent | null | undefined, lang: "zh" | "en") {
+  if (!agent) {
+    return lang === "zh" ? "待绑定" : "missing";
+  }
+  if (agent.health?.some((issue) => issue.severity === "blocking")) {
+    return lang === "zh" ? "需修复" : "blocked";
+  }
+  if (agent.health?.length) {
+    return lang === "zh" ? "需检查" : "needs check";
+  }
+  return lang === "zh" ? "可用" : "ready";
+}
+
+function researchStageAgentConfigTone(agent: AgentConfigWorkspaceAgent | null | undefined) {
+  if (!agent) {
+    return "missing";
+  }
+  if (agent.health?.some((issue) => issue.severity === "blocking")) {
+    return "blocked";
+  }
+  if (agent.health?.length) {
+    return "warning";
+  }
+  return "ready";
 }
 
 function canvasViewStyle(nodes: TeamCanvasNode[], frameSize?: CanvasFrameSize): CanvasViewportStyle {
@@ -1845,6 +2044,7 @@ export function TeamsRoute({
     () => (workspaceQuery.data?.agents ?? []).filter((agent) => agent.status !== "archived"),
     [workspaceQuery.data],
   );
+  const activeAgentsById = useMemo(() => new Map(activeAgents.map((agent) => [agent.agentId, agent])), [activeAgents]);
   const teams = teamsQuery.data?.teams ?? [];
   const visibleTeams = useMemo(() => {
     const teamsById = new Map(teams.filter((team) => !isEvolutionSystemTeam(team)).map((team) => [team.teamId, team]));
@@ -2033,6 +2233,50 @@ export function TeamsRoute({
   const sourceCollectionAgentIds = useMemo(() => sourceCollectionAgentIdsFromCanvas(canvas), [canvas]);
   const sourceCollectionOwnerAgentId = useMemo(() => sourceCollectionOwnerAgentIdFromCanvas(canvas), [canvas]);
   const sourceCollectionQualityAgentId = sourceCollectionAgentIds.source_quality || sourceCollectionOwnerAgentId || "Source Quality Assessment Agent";
+  const researchStageAgentBindingsByStage = useMemo(() => {
+    const roleBindings = new Map<string, { agentId: string; label: string; source: "canvas" | "member" | "fallback" }>();
+
+    for (const node of canvas?.nodes ?? []) {
+      const role = normalizeAgentRoleKey(node.role);
+      if (role && node.agentId && !roleBindings.has(role)) {
+        roleBindings.set(role, { agentId: node.agentId, label: node.label || node.agentName || node.agentCode || node.agentId, source: "canvas" });
+      }
+    }
+
+    for (const member of selectedTeam?.members ?? []) {
+      const role = normalizeAgentRoleKey(member.role);
+      if (role && member.agentId && !roleBindings.has(role)) {
+        roleBindings.set(role, { agentId: member.agentId, label: member.agentName || member.agentCode || member.agentId, source: "member" });
+      }
+    }
+
+    return Object.fromEntries(
+      (Object.keys(RESEARCH_STAGE_AGENT_ROLES) as ResearchStageType[]).map((stageType) => {
+        const bindings = RESEARCH_STAGE_AGENT_ROLES[stageType].map((definition) => {
+          const matched = definition.roleKeys
+            .map((role) => roleBindings.get(normalizeAgentRoleKey(role)))
+            .find(Boolean);
+          const fallbackAgentId = definition.fallbackAgentId && activeAgentsById.has(definition.fallbackAgentId)
+            ? definition.fallbackAgentId
+            : "";
+          const agentId = matched?.agentId || fallbackAgentId || "";
+          return {
+            ...definition,
+            agentId,
+            agent: agentId ? activeAgentsById.get(agentId) ?? null : null,
+            bindingLabel: matched?.label || "",
+            bindingSource: matched?.source || (fallbackAgentId ? "fallback" : ""),
+          };
+        });
+        return [stageType, bindings];
+      }),
+    ) as Record<ResearchStageType, Array<ResearchStageAgentRoleDefinition & {
+      agentId: string;
+      agent: AgentConfigWorkspaceAgent | null;
+      bindingLabel: string;
+      bindingSource: string;
+    }>>;
+  }, [activeAgentsById, canvas, selectedTeam?.members]);
   const selectedSourceCollectionRun =
     sourceCollectionRuns.find((run) => run.runId === selectedSourceCollectionRunId) ?? sourceCollectionRuns[0] ?? null;
   const selectedSourceCollectionRunEffectiveId = selectedSourceCollectionRun?.runId ?? "";
@@ -2653,6 +2897,98 @@ export function TeamsRoute({
     });
   }
 
+  function renderResearchStageAgentSummary(stageType: ResearchStageType) {
+    const bindings = researchStageAgentBindingsByStage[stageType] ?? [];
+    const readyCount = bindings.filter((binding) => binding.agent && researchStageAgentConfigTone(binding.agent) === "ready").length;
+    const blockedCount = bindings.filter((binding) => binding.agentId && !binding.agent).length
+      + bindings.filter((binding) => binding.agent && researchStageAgentConfigTone(binding.agent) === "blocked").length;
+    const missingCount = bindings.filter((binding) => !binding.agentId).length;
+    const toneClass = blockedCount > 0
+      ? styles.researchStageAgentSummaryBlocked
+      : missingCount > 0
+        ? styles.researchStageAgentSummaryMissing
+        : styles.researchStageAgentSummaryReady;
+    return (
+      <div className={`${styles.researchStageAgentSummary} ${toneClass}`}>
+        <Bot size={13} />
+        <span>{lang === "zh" ? "阶段 Agent" : "Stage Agents"}</span>
+        <strong>{readyCount}/{bindings.length}</strong>
+      </div>
+    );
+  }
+
+  function renderResearchStageAgentPanel(stageType: ResearchStageType, variant: "compact" | "page" = "page") {
+    const bindings = researchStageAgentBindingsByStage[stageType] ?? [];
+    const readyCount = bindings.filter((binding) => binding.agent && researchStageAgentConfigTone(binding.agent) === "ready").length;
+    const panelClassName = [
+      styles.researchStageAgentPanel,
+      variant === "compact" ? styles.researchStageAgentPanelCompact : "",
+    ].filter(Boolean).join(" ");
+
+    return (
+      <section className={panelClassName} aria-label={lang === "zh" ? "阶段 Agent 配置" : "Stage Agent configuration"}>
+        <div className={styles.researchStageAgentPanelHeader}>
+          <div>
+            <strong>{lang === "zh" ? "本阶段 Agent" : "Stage Agents"}</strong>
+            <span>{readyCount}/{bindings.length} {lang === "zh" ? "可用" : "ready"}</span>
+          </div>
+          <Link to="/agents">
+            <Link2 size={13} />
+            {lang === "zh" ? "Agent 管理" : "Agent management"}
+          </Link>
+        </div>
+        <div className={styles.researchStageAgentGrid}>
+          {bindings.map((binding) => {
+            const tone = binding.agent
+              ? researchStageAgentConfigTone(binding.agent)
+              : binding.agentId
+                ? "blocked"
+                : "missing";
+            const info = agentDisplayInfo(binding.agent, lang, {
+              name: binding.bindingLabel || (lang === "zh" ? binding.zh : binding.en),
+            });
+            const agentName = binding.agent
+              ? info.name
+              : binding.agentId
+                ? binding.agentId
+                : (lang === "zh" ? "未绑定" : "Not bound");
+            const statusLabel = binding.agent
+              ? researchStageAgentConfigStatusLabel(binding.agent, lang)
+              : binding.agentId
+                ? (lang === "zh" ? "引用失效" : "missing reference")
+                : (lang === "zh" ? "待绑定" : "missing");
+
+            return (
+              <article
+                key={`${stageType}-${binding.key}`}
+                className={[
+                  styles.researchStageAgentCard,
+                  styles[`researchStageAgentCard_${tone}`],
+                ].filter(Boolean).join(" ")}
+              >
+                <div className={styles.researchStageAgentRole}>
+                  <small>{lang === "zh" ? binding.zh : binding.en}</small>
+                  <strong>{agentName}</strong>
+                </div>
+                <div className={styles.researchStageAgentMeta}>
+                  <span>{lang === "zh" ? binding.zhFocus : binding.enFocus}</span>
+                  <span>{researchStageAgentModelLabel(binding.agent, lang)}</span>
+                </div>
+                <div className={styles.researchStageAgentActions}>
+                  <span>{statusLabel}</span>
+                  <Link to={binding.agentId ? researchStageAgentManagementRoute(binding.agentId) : "/agents"}>
+                    <Link2 size={12} />
+                    {binding.agent ? (lang === "zh" ? "配置" : "Configure") : (lang === "zh" ? "绑定" : "Bind")}
+                  </Link>
+                </div>
+              </article>
+            );
+          })}
+        </div>
+      </section>
+    );
+  }
+
   function renderResearchStageLauncher() {
     if (!researchWorkflowTeamSelected) {
       return null;
@@ -2845,6 +3181,7 @@ export function TeamsRoute({
                 ) : (
                   <em>{navItem ? (lang === "zh" ? navItem.zhModules : navItem.enModules) : ""}</em>
                 )}
+                {renderResearchStageAgentSummary(stageType)}
                 <div className={styles.researchStageActions}>
                   <button type="button" onClick={() => runStagePrimaryAction(stageType)} disabled={disabled}>
                     {stageType === "knowledge_collection" && selectedSourceCollectionRun && sourceCollectionOpenAssignmentCount > 0 ? <Search size={13} /> : <Play size={13} />}
@@ -4084,6 +4421,7 @@ export function TeamsRoute({
               </span>
             </div>
           </section>
+          {renderResearchStageAgentPanel(stageType)}
           <section className={styles.researchStageActionPanel}>
             <div>
               <strong>{lang === "zh" ? "阶段启动" : "Stage launch"}</strong>
@@ -5274,6 +5612,7 @@ export function TeamsRoute({
                 <span>{lang === "zh" ? "缓存状态" : "cache"} <strong>{sourceCollectionPromptCacheStatusLabel(sourceCollectionPromptCacheStatus, lang)}</strong></span>
               </div>
             </section>
+            {renderResearchStageAgentPanel("knowledge_collection", "compact")}
             <section id="source-collection-stage-status" className={styles.sourceCollectionStageModules} aria-label={lang === "zh" ? "知识搜集内部模块" : "Knowledge collection modules"}>
               {sourceCollectionStageModules.map((module, index) => (
                 <article
