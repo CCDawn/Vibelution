@@ -728,6 +728,59 @@ describe("systemStatus", () => {
     expect(indicator?.items[1]).toMatchObject({ kind: "chat", summary: "继续" });
   });
 
+  it("shows research source collection before an active agent room round", () => {
+    const indicator = deriveActiveWorkIndicator(
+      runtimeWithActiveWork(
+        {
+          source_collection_run: {
+            runId: "dprun-20260614-source",
+            runKind: "source_collection_run",
+            status: "queued",
+            topic: "神经预测编码",
+            summary: "后台搜索已排队",
+          },
+          chat_room_round: {
+            runId: "room-compat",
+            runKind: "chat_room_round",
+            status: "running",
+            topic: "知识搜集团队沟通",
+          },
+        },
+        {
+          activeItems: {
+            chat_room_round: [
+              {
+                runId: "room-active",
+                runKind: "chat_room_round",
+                status: "running",
+                topic: "知识搜集团队沟通",
+              },
+            ],
+            source_collection_run: [
+              {
+                runId: "dprun-20260614-source",
+                runKind: "source_collection_run",
+                status: "queued",
+                topic: "神经预测编码",
+                summary: "后台搜索已排队",
+              },
+            ],
+          },
+        },
+      ),
+    );
+
+    expect(indicator).toMatchObject({
+      kind: "source_collection",
+      label: "知识搜集",
+      runId: "dprun-20260614-source",
+      status: "queued",
+      tone: "caution",
+      count: 2,
+    });
+    expect(indicator?.items[1]).toMatchObject({ kind: "chat_room", runId: "room-active" });
+  });
+
   it("falls back to the runtime task summary for chat work", () => {
     const indicator = deriveActiveWorkIndicator(
       runtimeWithActiveWork(

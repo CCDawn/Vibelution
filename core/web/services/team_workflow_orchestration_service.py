@@ -1174,7 +1174,28 @@ def start_research_stage_round(team_id: str, payload: dict[str, Any] | None = No
         if stage_type == "knowledge_collection":
             source_payload = _stage_source_collection_payload(round_payload, request_payload, team)
             source_result = start_source_collection_run(normalized_team_id, source_payload)
+            search_execution = start_source_collection_search_background(
+                normalized_team_id,
+                source_result["run"]["runId"],
+                {
+                    "backgroundExecution": True,
+                    "provider": SOURCE_COLLECTION_SEARCH_PROVIDER_CROSSREF,
+                    "maxQueries": _normalize_int(
+                        request_payload.get("maxQueries"),
+                        default=SOURCE_COLLECTION_SEARCH_EXECUTION_DEFAULT_MAX_QUERIES,
+                        minimum=1,
+                        maximum=SOURCE_COLLECTION_SEARCH_EXECUTION_MAX_QUERIES,
+                    ),
+                    "maxResultsPerQuery": _normalize_int(
+                        request_payload.get("maxResultsPerQuery"),
+                        default=SOURCE_COLLECTION_SEARCH_EXECUTION_DEFAULT_RESULTS_PER_QUERY,
+                        minimum=1,
+                        maximum=SOURCE_COLLECTION_SEARCH_EXECUTION_MAX_RESULTS_PER_QUERY,
+                    ),
+                },
+            )
             result_payload["sourceCollectionRun"] = source_result
+            result_payload["sourceCollectionSearchExecution"] = search_execution
             result_payload["run"] = source_result["run"]
             result_payload["searchPlan"] = source_result["searchPlan"]
             result_payload["promptCachePolicy"] = source_result.get("promptCachePolicy", {})
@@ -1182,6 +1203,14 @@ def start_research_stage_round(team_id: str, payload: dict[str, Any] | None = No
             round_payload["sourceRunIds"] = [source_result["run"]["runId"]]
             round_payload["dataSearchPlanRef"] = _source_collection_search_plan_ref(source_result["searchPlan"])
             round_payload["promptCachePolicy"] = source_result.get("promptCachePolicy", {})
+            round_payload["sourceCollectionSearchExecution"] = {
+                "runId": search_execution["runId"],
+                "status": search_execution["status"],
+                "executionMode": search_execution["executionMode"],
+                "accepted": bool(search_execution.get("accepted")),
+                "provider": search_execution["provider"],
+                "activeWorkRunId": str((search_execution.get("activeWorkRun") or {}).get("runId") or ""),
+            }
             round_payload["assignmentIds"] = [str(item.get("assignmentId") or "") for item in source_result["assignments"] if item.get("assignmentId")]
             round_payload["agentRoleAssignments"] = [
                 {
@@ -1247,6 +1276,7 @@ def start_research_stage_round(team_id: str, payload: dict[str, Any] | None = No
             "coordinationRoomId": str(coordination_result.get("roomId") or ""),
             "coordinationRoundId": str(coordination_result.get("roundId") or ""),
             "coordinationErrorType": str(coordination_result.get("errorType") or ""),
+            "sourceSearchAccepted": bool((result_payload.get("sourceCollectionSearchExecution") or {}).get("accepted")),
             "requestedByAgent": requested_by_agent,
         },
     )

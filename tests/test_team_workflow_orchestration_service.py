@@ -76,6 +76,62 @@ def _use_tmp_project_root(tmp_path, monkeypatch):
     monkeypatch.setattr(chat_room_service, "_CHAT_ROOM_EXECUTOR", _NoopBackgroundExecutor())
 
 
+def _stub_source_collection_search_background(monkeypatch):
+    calls = []
+
+    def fake_start(team_id, run_id, payload=None):
+        calls.append({"teamId": team_id, "runId": run_id, "payload": dict(payload or {})})
+        run = data_processing_service.get_processing_run(run_id)
+        assignments = data_processing_service.list_collection_assignments(run_id)["assignments"]
+        run_status = data_processing_service.get_processing_status(run_id)
+        return {
+            "schemaVersion": 1,
+            "teamId": team_id,
+            "runId": run_id,
+            "status": "accepted",
+            "executionMode": "background",
+            "accepted": True,
+            "provider": team_workflow_orchestration_service.SOURCE_COLLECTION_SEARCH_PROVIDER_CROSSREF,
+            "executedQueryCount": 0,
+            "skippedQueryCount": 0,
+            "failedQueryCount": 0,
+            "resultCount": 0,
+            "recordCount": 0,
+            "outputCount": 0,
+            "importedCount": 0,
+            "run": run,
+            "runStatus": run_status,
+            "storageArtifacts": {"runDirectory": f"workspace/teams/{team_id}/source_collection_runs/{run_id}"},
+            "assignments": assignments,
+            "outputs": [],
+            "createdRecords": [],
+            "imported": [],
+            "executionEvents": [],
+            "activeWorkRun": {
+                "runId": run_id,
+                "status": "queued",
+                "currentPhase": "queued",
+                "summary": "资料搜集已进入后台执行，页面可继续操作。",
+                "openAssignmentCount": len(assignments),
+                "recordCount": 0,
+                "queryCount": 1,
+                "storagePath": f"workspace/teams/{team_id}/source_collection_runs/{run_id}",
+            },
+            "boundaries": {
+                "externalSearchTriggered": False,
+                "externalSearchQueued": True,
+                "metadataOnlyDownload": True,
+                "writesFormalKnowledge": False,
+                "writesRag": False,
+                "writesOfficialGraph": False,
+            },
+            "nextActions": [],
+        }
+
+    monkeypatch.setattr(team_workflow_orchestration_service, "start_source_collection_search_background", fake_start)
+    return calls
+
+
 def _use_fake_local_research_config(monkeypatch):
     monkeypatch.setattr(
         team_workflow_orchestration_service,
@@ -591,6 +647,7 @@ def test_execute_source_collection_search_skips_existing_query_without_force(tmp
 
 def test_start_research_stage_round_creates_knowledge_collection_round(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
+    search_calls = _stub_source_collection_search_background(monkeypatch)
     team = team_service.create_team(name="ai科学研究团队")
 
     response = team_workflow_orchestration_service.start_research_stage_round(
@@ -610,6 +667,21 @@ def test_start_research_stage_round_creates_knowledge_collection_round(tmp_path,
     assert response["created"] is True
     assert stage_round["stageType"] == "knowledge_collection"
     assert stage_round["status"] == "needs_attention"
+    assert response["sourceCollectionSearchExecution"]["accepted"] is True
+    assert response["sourceCollectionSearchExecution"]["executionMode"] == "background"
+    assert stage_round["sourceCollectionSearchExecution"]["status"] == "accepted"
+    assert search_calls == [
+        {
+            "teamId": team["teamId"],
+            "runId": response["run"]["runId"],
+            "payload": {
+                "backgroundExecution": True,
+                "provider": team_workflow_orchestration_service.SOURCE_COLLECTION_SEARCH_PROVIDER_CROSSREF,
+                "maxQueries": team_workflow_orchestration_service.SOURCE_COLLECTION_SEARCH_EXECUTION_DEFAULT_MAX_QUERIES,
+                "maxResultsPerQuery": team_workflow_orchestration_service.SOURCE_COLLECTION_SEARCH_EXECUTION_DEFAULT_RESULTS_PER_QUERY,
+            },
+        }
+    ]
     assert stage_round["roundNumber"] == 1
     assert stage_round["sourceRunIds"] == [response["run"]["runId"]]
     assert stage_round["dataSearchPlanRef"]["planId"] == response["searchPlan"]["planId"]
@@ -629,6 +701,7 @@ def test_start_research_stage_round_creates_knowledge_collection_round(tmp_path,
 
 def test_start_research_stage_round_reuses_active_knowledge_collection_round(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
+    search_calls = _stub_source_collection_search_background(monkeypatch)
     team = team_service.create_team(name="ai科学研究团队")
 
     first = team_workflow_orchestration_service.start_research_stage_round(
@@ -642,6 +715,7 @@ def test_start_research_stage_round_reuses_active_knowledge_collection_round(tmp
 
     assert duplicate["created"] is False
     assert duplicate["continued"] is True
+    assert len(search_calls) == 1
     assert duplicate["stageRound"]["stageRoundId"] == first["stageRound"]["stageRoundId"]
     assert duplicate["run"]["runId"] == first["run"]["runId"]
     assert duplicate["continuedSourceRunRef"]["runId"] == first["run"]["runId"]
@@ -656,6 +730,7 @@ def test_start_research_stage_round_reuses_active_knowledge_collection_round(tmp
 
 def test_start_research_stage_round_auto_starts_team_coordination_round(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
+    _stub_source_collection_search_background(monkeypatch)
     agent = agent_directory_service.create_agent_instance(display_name="Coordinator", direct_session_id="session-coordinator")
     team = team_service.create_team(name="ai科学研究团队", members=[{"agentId": agent["agentId"], "role": "research_coordination"}])
 
@@ -679,6 +754,7 @@ def test_start_research_stage_round_auto_starts_team_coordination_round(tmp_path
 
 def test_retry_research_stage_round_coordination_starts_room_and_clears_warning(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
+    _stub_source_collection_search_background(monkeypatch)
     team = team_service.create_team(name="ai科学研究团队")
     start = team_workflow_orchestration_service.start_research_stage_round(
         team["teamId"],
@@ -700,6 +776,7 @@ def test_retry_research_stage_round_coordination_starts_room_and_clears_warning(
 
 def test_start_research_stage_round_new_round_inherits_previous_topic_and_links_upstream(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
+    search_calls = _stub_source_collection_search_background(monkeypatch)
     team = team_service.create_team(name="ai科学研究团队")
     first = team_workflow_orchestration_service.start_research_stage_round(
         team["teamId"],
@@ -722,6 +799,7 @@ def test_start_research_stage_round_new_round_inherits_previous_topic_and_links_
     assert second["stageRound"]["goal"] == "Collect gating sources."
     assert second["stageRound"]["upstreamRoundIds"] == [first["stageRound"]["stageRoundId"]]
     assert "thalamic gating missing evidence" in second["stageRound"]["querySeeds"]
+    assert len(search_calls) == 2
 
 
 def test_start_research_stage_round_creates_experiment_planning_placeholder(tmp_path, monkeypatch):
@@ -745,6 +823,7 @@ def test_start_research_stage_round_creates_experiment_planning_placeholder(tmp_
 
 def test_start_research_stage_round_keeps_experiment_plan_when_coordination_busy(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
+    _stub_source_collection_search_background(monkeypatch)
     agent = agent_directory_service.create_agent_instance(display_name="Coordinator", direct_session_id="session-coordinator")
     team = team_service.create_team(name="ai科学研究团队", members=[{"agentId": agent["agentId"], "role": "research_coordination"}])
     knowledge = team_workflow_orchestration_service.start_research_stage_round(

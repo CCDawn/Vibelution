@@ -49,6 +49,52 @@ def _use_tmp_project_root(tmp_path, monkeypatch):
     monkeypatch.setattr(team_workflow_orchestration_service, "load_public_config", _fake_local_research_public_config)
 
 
+def _stub_source_collection_search_background(monkeypatch):
+    calls = []
+
+    def fake_start(team_id, run_id, payload=None):
+        calls.append({"teamId": team_id, "runId": run_id, "payload": dict(payload or {})})
+        run = data_processing_service.get_processing_run(run_id)
+        assignments = data_processing_service.list_collection_assignments(run_id)["assignments"]
+        return {
+            "schemaVersion": 1,
+            "teamId": team_id,
+            "runId": run_id,
+            "status": "accepted",
+            "executionMode": "background",
+            "accepted": True,
+            "provider": team_workflow_orchestration_service.SOURCE_COLLECTION_SEARCH_PROVIDER_CROSSREF,
+            "executedQueryCount": 0,
+            "skippedQueryCount": 0,
+            "failedQueryCount": 0,
+            "resultCount": 0,
+            "recordCount": 0,
+            "outputCount": 0,
+            "importedCount": 0,
+            "run": run,
+            "runStatus": data_processing_service.get_processing_status(run_id),
+            "storageArtifacts": {"runDirectory": f"workspace/teams/{team_id}/source_collection_runs/{run_id}"},
+            "assignments": assignments,
+            "outputs": [],
+            "createdRecords": [],
+            "imported": [],
+            "executionEvents": [],
+            "activeWorkRun": {"runId": run_id, "status": "queued", "currentPhase": "queued"},
+            "boundaries": {
+                "externalSearchTriggered": False,
+                "externalSearchQueued": True,
+                "metadataOnlyDownload": True,
+                "writesFormalKnowledge": False,
+                "writesRag": False,
+                "writesOfficialGraph": False,
+            },
+            "nextActions": [],
+        }
+
+    monkeypatch.setattr(team_workflow_orchestration_service, "start_source_collection_search_background", fake_start)
+    return calls
+
+
 def _submit_steward_pack_through_source_review_route(
     client: TestClient,
     *,
@@ -425,6 +471,7 @@ def test_team_workflow_route_blocks_source_collection_without_prompt_cache(tmp_p
 
 def test_team_workflow_route_starts_research_stage_round(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
+    search_calls = _stub_source_collection_search_background(monkeypatch)
     client = _client()
     team = client.post("/api/teams", json={"name": "ai科学研究团队"}).json()
 
@@ -443,6 +490,9 @@ def test_team_workflow_route_starts_research_stage_round(tmp_path, monkeypatch):
     assert response.json()["created"] is True
     assert response.json()["stageRound"]["status"] == "needs_attention"
     assert response.json()["stageRound"]["sourceRunIds"] == [response.json()["run"]["runId"]]
+    assert response.json()["sourceCollectionSearchExecution"]["accepted"] is True
+    assert response.json()["sourceCollectionSearchExecution"]["executionMode"] == "background"
+    assert search_calls[0]["runId"] == response.json()["run"]["runId"]
     assert response.json()["stageRound"]["teamMemoryRecord"]["recordKind"] == "team_workflow_stage_record"
     assert response.json()["stageRound"]["coordinationContract"]["autoStarted"] is True
     assert response.json()["stageRound"]["coordinationContract"]["startResult"]["started"] is False
@@ -454,6 +504,7 @@ def test_team_workflow_route_starts_research_stage_round(tmp_path, monkeypatch):
 
 def test_team_workflow_route_resolves_stale_prompt_cache_model_for_stage_round(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
+    _stub_source_collection_search_background(monkeypatch)
     monkeypatch.setattr(
         team_workflow_orchestration_service,
         "load_public_config",
@@ -506,6 +557,7 @@ def test_team_workflow_route_resolves_stale_prompt_cache_model_for_stage_round(t
 
 def test_team_workflow_route_retries_research_stage_coordination(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
+    _stub_source_collection_search_background(monkeypatch)
     client = _client()
     team = client.post("/api/teams", json={"name": "ai科学研究团队"}).json()
     start_response = client.post(
