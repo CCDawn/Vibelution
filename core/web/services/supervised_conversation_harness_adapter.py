@@ -28,6 +28,21 @@ from .session_service import (
 
 CONVERSATION_HARNESS_CANCEL_GRACE_SECONDS = 8.0
 _CONVERSATION_HARNESS_TRANSCRIPT_LIMIT = 8
+_CONVERSATION_HARNESS_MESSAGE_FIELDS = {
+    "id",
+    "role",
+    "content",
+    "timestamp",
+    "thought",
+    "streamStage",
+    "mentalSnapshot",
+    "feedbackEvents",
+    "streaming",
+    "toolCalls",
+    "attachments",
+    "references",
+    "metadata",
+}
 
 
 def run_supervised_conversation_harness(
@@ -90,25 +105,29 @@ def run_supervised_conversation_harness(
     )
     session_id = str(session.get("id") or "").strip()
     turn_id = ""
+    created_at = _now_timestamp()
     if callable(progress_callback):
         progress_callback(
             {
                 "phase": "conversation_session_created",
                 "conversation_path": f"session:{session_id}",
+                "conversation_session_id": session_id,
+                "conversation_turn_id": "",
                 "latest_input": prompt_text,
                 "latest_output": "",
                 "latest_output_kind": "status",
                 "latest_output_label": "conversation_session_created",
-                "updated_at": _now_timestamp(),
+                "updated_at": created_at,
                 "transcript": [
                     {
-                        "timestamp": _now_timestamp(),
+                        "timestamp": created_at,
                         "kind": "input",
                         "label": "supervised prompt",
                         "content": prompt_text,
                         "status": "submitted",
                     }
                 ],
+                "conversation_messages": _conversation_harness_prompt_messages(session_id, prompt_text, created_at),
                 "mental_model_mode": normalized_mental_mode,
                 "mental_model_enabled": mental_model_enabled,
             }
@@ -171,12 +190,15 @@ def run_supervised_conversation_harness(
                     {
                         "phase": "conversation_cancel_requested",
                         "conversation_path": f"session:{session_id}",
+                        "conversation_session_id": session_id,
+                        "conversation_turn_id": turn_id,
                         "latest_input": prompt_text,
                         "latest_output": cancel_reason,
                         "latest_output_kind": "status",
                         "latest_output_label": "cancel_requested",
                         "updated_at": _now_timestamp(),
                         "transcript": _conversation_harness_transcript(latest_detail),
+                        "conversation_messages": _conversation_harness_messages(latest_detail),
                         "mental_model_mode": normalized_mental_mode,
                         "mental_model_enabled": mental_model_enabled,
                     }
@@ -189,12 +211,15 @@ def run_supervised_conversation_harness(
                 {
                     "phase": "conversation_turn_running" if last_status in {"queued", "running"} else "conversation_turn_finished",
                     "conversation_path": f"session:{session_id}",
+                    "conversation_session_id": session_id,
+                    "conversation_turn_id": turn_id,
                     "latest_input": prompt_text,
                     "latest_output": latest_output,
                     "latest_output_kind": "assistant" if latest_output else "status",
                     "latest_output_label": "hidden conversation",
                     "updated_at": str(latest_detail.get("updatedAt") or _now_timestamp()),
                     "transcript": _conversation_harness_transcript(latest_detail),
+                    "conversation_messages": _conversation_harness_messages(latest_detail),
                     "turn_id": turn_id,
                     "last_turn_status": last_status,
                     "mental_model_mode": normalized_mental_mode,
@@ -215,12 +240,15 @@ def run_supervised_conversation_harness(
                     {
                         "phase": "conversation_cancelled",
                         "conversation_path": f"session:{session_id}",
+                        "conversation_session_id": session_id,
+                        "conversation_turn_id": turn_id,
                         "latest_input": prompt_text,
                         "latest_output": cancel_reason_text or "监督运行已按请求终止。",
                         "latest_output_kind": "status",
                         "latest_output_label": "cancelled",
                         "updated_at": str(latest_detail.get("updatedAt") or _now_timestamp()),
                         "transcript": _conversation_harness_transcript(latest_detail),
+                        "conversation_messages": _conversation_harness_messages(latest_detail),
                         "turn_id": turn_id,
                         "last_turn_status": last_status,
                         "mental_model_mode": normalized_mental_mode,
@@ -426,6 +454,42 @@ def _conversation_harness_transcript(detail: dict[str, Any]) -> list[dict[str, A
             }
         )
     return transcript
+
+
+def _conversation_harness_prompt_messages(session_id: str, prompt_text: str, timestamp: str) -> list[dict[str, Any]]:
+    if not prompt_text:
+        return []
+    return [
+        {
+            "id": f"{session_id or 'supervised'}-prompt",
+            "role": "user",
+            "content": prompt_text,
+            "timestamp": timestamp,
+            "metadata": {"status": "submitted", "source": "supervised_evolution"},
+        }
+    ]
+
+
+def _conversation_harness_messages(detail: dict[str, Any]) -> list[dict[str, Any]]:
+    session_id = str((detail or {}).get("id") or (detail or {}).get("sessionId") or "supervised").strip() or "supervised"
+    messages: list[dict[str, Any]] = []
+    for index, raw in enumerate(list((detail or {}).get("messages") or [])):
+        if not isinstance(raw, dict):
+            continue
+        role = str(raw.get("role") or "").strip().lower()
+        content = str(raw.get("content") or "").strip()
+        if role not in {"user", "assistant"} and not content:
+            continue
+        message: dict[str, Any] = {}
+        for key in _CONVERSATION_HARNESS_MESSAGE_FIELDS:
+            if key in raw:
+                message[key] = raw[key]
+        message["id"] = str(message.get("id") or f"{session_id}-message-{index + 1}").strip()
+        message["role"] = role if role in {"user", "assistant"} else "assistant"
+        message["content"] = str(message.get("content") or content)
+        message["timestamp"] = str(message.get("timestamp") or "").strip()
+        messages.append(message)
+    return messages
 
 
 def _conversation_harness_latest_assistant(detail: dict[str, Any]) -> str:

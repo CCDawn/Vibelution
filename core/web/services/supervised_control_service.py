@@ -2636,25 +2636,59 @@ def _case_io_payload(event: dict[str, Any]) -> dict[str, Any] | None:
             }
         )
 
+    conversation_message_session_id = str(
+        event.get("conversation_session_id")
+        or event.get("conversationSessionId")
+        or event.get("conversation_path")
+        or event.get("conversationPath")
+        or "supervised-case"
+    ).strip() or "supervised-case"
+    conversation_messages = []
+    for index, raw in enumerate(list(event.get("conversation_messages") or event.get("conversationMessages") or [])):
+        if not isinstance(raw, dict):
+            continue
+        role = str(raw.get("role") or "").strip().lower()
+        content = str(raw.get("content") or "")
+        if role not in {"user", "assistant"} and not content.strip():
+            continue
+        message = dict(raw)
+        message["id"] = str(message.get("id") or f"{conversation_message_session_id}-message-{index + 1}").strip()
+        message["role"] = role if role in {"user", "assistant"} else "assistant"
+        message["content"] = content
+        message["timestamp"] = str(message.get("timestamp") or "").strip()
+        conversation_messages.append(message)
+
     payload = {
         "conversationPath": str(event.get("conversation_path") or "").strip(),
+        "conversationSessionId": str(event.get("conversation_session_id") or event.get("conversationSessionId") or "").strip(),
+        "conversationTurnId": str(
+            event.get("conversation_turn_id")
+            or event.get("conversationTurnId")
+            or event.get("turn_id")
+            or event.get("turnId")
+            or ""
+        ).strip(),
         "latestInput": str(event.get("latest_input") or "").strip(),
         "latestOutput": str(event.get("latest_output") or "").strip(),
         "latestOutputKind": str(event.get("latest_output_kind") or "").strip(),
         "latestOutputLabel": str(event.get("latest_output_label") or "").strip(),
         "updatedAt": str(event.get("updated_at") or "").strip(),
         "transcript": transcript_items,
+        "conversationMessages": conversation_messages,
     }
 
     if any(
         [
             payload["conversationPath"],
+            payload["conversationSessionId"],
+            payload["conversationTurnId"],
             payload["latestInput"],
             payload["latestOutput"],
             payload["latestOutputKind"],
             payload["latestOutputLabel"],
             payload["updatedAt"],
             transcript_items,
+            conversation_messages,
         ]
     ):
         return payload
