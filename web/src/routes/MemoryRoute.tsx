@@ -407,6 +407,12 @@ type Copy = {
   cleanupNoBackup: string;
   cleanupSelectedTargets: string;
   cleanupGlobalRuntime: string;
+  cleanupSqliteCompact: string;
+  cleanupEvaluationArtifacts: string;
+  cleanupSessionArtifacts: string;
+  cleanupLegacyLogInfo: string;
+  cleanupRuntimeSceneLogs: string;
+  cleanupTeamArchiveArtifacts: string;
   cleanupAgentPrivate: string;
   cleanupAgentFormalKnowledge: string;
   cleanupAgentMemoryPolicy: string;
@@ -867,6 +873,12 @@ const COPY: Record<"zh" | "en", Copy> = {
     cleanupNoBackup: "不进入回收站，也不生成兼容副本。",
     cleanupSelectedTargets: "选中目标",
     cleanupGlobalRuntime: "全局运行记忆",
+    cleanupSqliteCompact: "SQLite 数据库压缩",
+    cleanupEvaluationArtifacts: "评测候选与队列",
+    cleanupSessionArtifacts: "历史会话与附件",
+    cleanupLegacyLogInfo: "旧 log_info 日志",
+    cleanupRuntimeSceneLogs: "运行现场日志",
+    cleanupTeamArchiveArtifacts: "团队归档证据",
     cleanupAgentPrivate: "Agent 私有记忆",
     cleanupAgentFormalKnowledge: "Agent 正式知识",
     cleanupAgentMemoryPolicy: "Agent MemoryPolicy",
@@ -1232,6 +1244,12 @@ const COPY: Record<"zh" | "en", Copy> = {
     cleanupNoBackup: "No recycle bin and no compatibility copy.",
     cleanupSelectedTargets: "Selected targets",
     cleanupGlobalRuntime: "Global runtime memory",
+    cleanupSqliteCompact: "SQLite database compact",
+    cleanupEvaluationArtifacts: "Evaluation candidates and queues",
+    cleanupSessionArtifacts: "Historical sessions and artifacts",
+    cleanupLegacyLogInfo: "Legacy log_info logs",
+    cleanupRuntimeSceneLogs: "Runtime scene logs",
+    cleanupTeamArchiveArtifacts: "Team archive evidence",
     cleanupAgentPrivate: "Agent private memory",
     cleanupAgentFormalKnowledge: "Agent formal knowledge",
     cleanupAgentMemoryPolicy: "Agent MemoryPolicy",
@@ -2555,6 +2573,48 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
         label: copy.cleanupGlobalRuntime,
         detail: "workspace/memory, STATE_MEMORY.md, workspace/agent_brain.db memory tables",
         target: { targetType: "global_runtime_memory" },
+        risk: "critical",
+      },
+      {
+        key: "sqlite_database_compact",
+        label: copy.cleanupSqliteCompact,
+        detail: "workspace/agent_brain.db VACUUM; reclaims free pages without deleting rows",
+        target: { targetType: "sqlite_database_compact" },
+        risk: "high",
+      },
+      {
+        key: "evaluation_artifacts",
+        label: copy.cleanupEvaluationArtifacts,
+        detail: "workspace/evaluation",
+        target: { targetType: "evaluation_artifacts" },
+        risk: "critical",
+      },
+      {
+        key: "session_artifacts",
+        label: copy.cleanupSessionArtifacts,
+        detail: "workspace/sessions",
+        target: { targetType: "session_artifacts" },
+        risk: "critical",
+      },
+      {
+        key: "legacy_log_info",
+        label: copy.cleanupLegacyLogInfo,
+        detail: "log_info",
+        target: { targetType: "legacy_log_info" },
+        risk: "critical",
+      },
+      {
+        key: "runtime_scene_logs",
+        label: copy.cleanupRuntimeSceneLogs,
+        detail: "logs/runtime_scenes",
+        target: { targetType: "runtime_scene_logs" },
+        risk: "critical",
+      },
+      {
+        key: "team_archive_artifacts",
+        label: copy.cleanupTeamArchiveArtifacts,
+        detail: "workspace/teams/*/archives",
+        target: { targetType: "team_archive_artifacts" },
         risk: "critical",
       },
     ];

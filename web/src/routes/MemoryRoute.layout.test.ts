@@ -272,6 +272,12 @@ describe("MemoryRoute layout contract", () => {
     expect(routeSource).toContain("copy.cleanupNoBackup");
     expect(routeSource).toContain("copy.cleanupCentralSourceBoundary");
     expect(routeSource).toContain("targetType: \"global_runtime_memory\"");
+    expect(routeSource).toContain("targetType: \"sqlite_database_compact\"");
+    expect(routeSource).toContain("targetType: \"evaluation_artifacts\"");
+    expect(routeSource).toContain("targetType: \"session_artifacts\"");
+    expect(routeSource).toContain("targetType: \"legacy_log_info\"");
+    expect(routeSource).toContain("targetType: \"runtime_scene_logs\"");
+    expect(routeSource).toContain("targetType: \"team_archive_artifacts\"");
     expect(routeSource).toContain("targetType: \"agent_private_memory\"");
     expect(routeSource).toContain("targetType: \"agent_formal_knowledge\"");
     expect(routeSource).toContain("targetType: \"agent_memory_policy\"");
