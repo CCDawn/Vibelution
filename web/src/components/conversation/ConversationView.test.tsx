@@ -296,7 +296,7 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).toContain("Agent 私信 · A014 · 能力管家");
   });
 
-  it("keeps completed feedback timelines collapsed to a compact execution summary by default", () => {
+  it("keeps completed feedback timelines collapsed without step counters by default", () => {
     const feedbackEvents = Array.from({ length: 40 }, (_, index) => ({
       sequence: index + 1,
       kind: "tool" as const,
@@ -314,9 +314,10 @@ describe("ConversationView edit resend affordance", () => {
       },
     ]);
 
-    expect(html).toContain("40 步");
+    expect(html).toContain("执行过程");
     expect(html).toContain("已完成");
-    expect(html).toContain("40/40");
+    expect(html).not.toContain("40 步");
+    expect(html).not.toContain("40/40");
     expect(html).not.toContain("+33");
     expect(html).not.toContain("tool_40");
     expect(html).not.toContain("已折叠更早 4 步执行记录");
@@ -352,8 +353,9 @@ describe("ConversationView edit resend affordance", () => {
 
     expect(html).toContain("执行过程");
     expect(html).not.toContain("+");
-    expect(html).toContain("9 步");
-    expect(html).toContain("9/9");
+    expect(html).toContain("已完成");
+    expect(html).not.toContain("9 步");
+    expect(html).not.toContain("9/9");
     expect(html).not.toContain("命令");
     expect(html.match(/title="命令 · 已完成"/g)?.length ?? 0).toBe(0);
   });
@@ -408,10 +410,11 @@ describe("ConversationView edit resend affordance", () => {
 
     expect(html).toContain("执行失败");
     expect(html).toContain("命令");
-    expect(html).toContain("4/5");
+    expect(html).toContain("行动");
+    expect(html).toContain("结果");
+    expect(html).not.toContain("4/5");
     expect(html).toContain("[超时] cli_tool 执行超时");
-    expect(html).toContain("第 1 轮");
-    expect(html).toContain('title="命令 · 失败"');
+    expect(html).not.toContain("第 1 轮");
     expect(html).not.toContain("已折叠更早");
   });
 
@@ -1350,8 +1353,8 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).toContain("工具调用 1");
     expect(html).toContain("read_file");
     expect(html).toContain("opened session_service.py");
-    expect(html).toContain("operationItemTool");
-    expect(html).not.toContain("operationIcon_tool");
+    expect(html).not.toContain("operationItemTool");
+    expect(html).toContain("operationIcon_tool");
     expect(html).not.toContain("执行了 1 个操作");
   });
 
@@ -1405,7 +1408,7 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).toContain('title="展开思考过程"');
   });
 
-  it("renders ordered feedback events as a collapsed timeline with ReAct pass count", () => {
+  it("renders ordered feedback events as a collapsed execution package without counts", () => {
     const html = renderConversation([
       {
         id: "message-feedback",
@@ -1442,10 +1445,10 @@ describe("ConversationView edit resend affordance", () => {
     ]);
 
     expect(html).toContain("执行过程");
-    expect(html).toContain("3 步");
-    expect(html).toContain("2 轮");
     expect(html).toContain("已完成");
-    expect(html).toContain("3/3");
+    expect(html).not.toContain("3 步");
+    expect(html).not.toContain("2 轮");
+    expect(html).not.toContain("3/3");
     expect(html).not.toContain("思考过程");
     expect(html).not.toContain("读取");
     expect(html).toContain('title="展开执行明细"');
@@ -1501,10 +1504,12 @@ describe("ConversationView edit resend affordance", () => {
     ]);
 
     expect(html).toContain("执行过程");
-    expect(html).toContain("4 步");
-    expect(html).toContain("2 轮");
-    expect(html).toContain("第 1 轮");
-    expect(html).toContain("第 2 轮");
+    expect(html).not.toContain("4 步");
+    expect(html).not.toContain("2 轮");
+    expect(html).not.toContain("第 1 轮");
+    expect(html).not.toContain("第 2 轮");
+    expect(html).toContain("思考");
+    expect(html).toContain("行动");
     expect(html).toContain("再查会话链路");
     expect(html).toContain("running rg");
     expect(html).not.toContain("opened latest log");
@@ -1532,10 +1537,11 @@ describe("ConversationView edit resend affordance", () => {
 
     expect(html).toContain("执行过程");
     expect(html).toContain("模型思考");
-    expect(html).toContain("1 步");
     expect(html).toContain("执行中");
-    expect(html).toContain("0/1");
-    expect(html).toContain("第 1 轮");
+    expect(html).toContain("行动");
+    expect(html).not.toContain("1 步");
+    expect(html).not.toContain("0/1");
+    expect(html).not.toContain("第 1 轮");
     expect(html).toContain("reasoning 已开始返回");
     expect(html).not.toContain('title="展开工具详情"');
     expect(html).not.toContain("正在思考，已收到思考片段");
@@ -1579,8 +1585,9 @@ describe("ConversationView edit resend affordance", () => {
 
     expect(html).toContain("执行过程");
     expect(html).toContain("执行中");
-    expect(html).toContain("2/3");
-    expect(html).toContain("第 1 轮");
+    expect(html).toContain("行动");
+    expect(html).not.toContain("2/3");
+    expect(html).not.toContain("第 1 轮");
     expect(html).toContain("准备上下文");
     expect(html).toContain("绑定 Agent");
     expect(html).toContain("请求模型");
@@ -1625,9 +1632,10 @@ describe("ConversationView edit resend affordance", () => {
 
     expect(html).toContain("执行中");
     expect(html).toContain("命令");
-    expect(html).toContain("1/2");
     expect(html).toContain("1m 15s");
-    expect(html).toContain("第 1 轮");
+    expect(html).toContain("行动");
+    expect(html).not.toContain("1/2");
+    expect(html).not.toContain("第 1 轮");
     expect(html).not.toContain("当前位置");
     expect(html).not.toContain("最后事件");
     expect(html).not.toContain("超时阈值");
@@ -1656,9 +1664,9 @@ describe("ConversationView edit resend affordance", () => {
     ]);
 
     expect(html).not.toContain("搜索");
-    expect(html).toContain("1 步");
     expect(html).toContain("已完成");
-    expect(html).toContain("1/1");
+    expect(html).not.toContain("1 步");
+    expect(html).not.toContain("1/1");
     expect(html).not.toContain('title="展开工具详情"');
     expect(html).not.toContain("grep_search_tool raw result");
   });

@@ -880,85 +880,6 @@
   white-space: nowrap;
 }
 
-.operationProgressRail {
-  display: flex;
-  flex-wrap: nowrap;
-  align-items: center;
-  min-width: 0;
-  max-width: 100%;
-  gap: 0;
-  padding: 1px 0 2px 2px;
-  overflow: hidden;
-  white-space: nowrap;
-}
-
-.operationRailStep {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  min-width: 0;
-  max-width: 128px;
-  color: var(--fg-tertiary);
-  font-size: 0.66rem;
-  font-weight: 500;
-}
-
-.operationRailDot {
-  flex: 0 0 auto;
-  width: 7px;
-  height: 7px;
-  margin-right: 5px;
-  border: 1px solid color-mix(in srgb, var(--fg-tertiary) 46%, transparent);
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--surface-card) 72%, transparent);
-}
-
-.operationRailLabel {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.operationRailConnector {
-  flex: 0 0 22px;
-  height: 1px;
-  margin: 0 7px;
-  background: color-mix(in srgb, var(--fg-tertiary) 18%, transparent);
-}
-
-.operationRailStep_done .operationRailDot {
-  border-color: color-mix(in srgb, var(--state-success) 38%, transparent);
-  background: color-mix(in srgb, var(--state-success) 26%, transparent);
-}
-
-.operationRailStep_running {
-  color: color-mix(in srgb, var(--accent-cool-2) 88%, var(--fg-secondary));
-}
-
-.operationRailStep_running .operationRailDot {
-  border-color: color-mix(in srgb, var(--accent-cool-2) 72%, transparent);
-  background: var(--accent-cool-2);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-cool-2) 14%, transparent);
-}
-
-.operationRailStep_failed {
-  color: color-mix(in srgb, var(--danger) 86%, var(--fg-secondary));
-}
-
-.operationRailStep_failed .operationRailDot {
-  border-color: color-mix(in srgb, var(--danger) 68%, transparent);
-  background: color-mix(in srgb, var(--danger) 72%, transparent);
-}
-
-.operationTableWrap {
-  display: grid;
-  gap: 4px;
-  min-width: 0;
-  max-width: 100%;
-  margin-top: 1px;
-}
-
 .reActOperationList {
   display: grid;
   gap: 6px;
@@ -993,12 +914,12 @@
 
 .reActOperationSummary {
   display: grid;
-  grid-template-columns: auto minmax(0, auto) minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 7px;
   min-width: 0;
   min-height: 26px;
-  padding: 2px 6px;
+  padding: 2px 7px;
   border: 1px solid color-mix(in srgb, var(--fg-tertiary) 10%, transparent);
   border-radius: var(--radius-control);
   background: color-mix(in srgb, var(--surface-card) 38%, transparent);
@@ -1013,145 +934,86 @@
   color: var(--fg-primary);
 }
 
-.reActOperationBadge {
-  color: color-mix(in srgb, var(--accent-cool-2) 84%, var(--fg-secondary));
-  font-size: 0.72rem;
-  font-weight: 680;
-  white-space: nowrap;
-}
-
-.reActOperationMeta,
-.reActOperationPreview {
+.reActOperationMeta {
   min-width: 0;
   overflow: hidden;
   color: var(--fg-tertiary);
-  font-size: 0.68rem;
-  font-weight: 520;
+  font-size: 0.72rem;
+  font-weight: 610;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.reActOperationPreview {
-  color: color-mix(in srgb, var(--fg-tertiary) 72%, transparent);
-  font-weight: 450;
-}
-
-.operationTable {
+.reActOperationBody {
   display: grid;
+  gap: 8px;
   min-width: 0;
   max-width: 100%;
-  overflow: hidden;
-  border: 1px solid color-mix(in srgb, var(--fg-tertiary) 12%, transparent);
-  border-radius: var(--radius-control);
-  background: color-mix(in srgb, var(--surface-card) 44%, transparent);
+  padding: 2px 0 4px 8px;
 }
 
-.operationTableItem {
+.reActOperationSection {
   display: grid;
+  gap: 5px;
   min-width: 0;
+  max-width: 100%;
 }
 
-.operationTableRow {
-  display: grid;
-  grid-template-columns: minmax(118px, 0.9fr) 86px minmax(160px, 1.6fr) 48px 24px;
-  align-items: center;
-  min-width: 0;
-  min-height: 28px;
-  border-top: 1px solid color-mix(in srgb, var(--fg-tertiary) 9%, transparent);
-  color: var(--fg-secondary);
-  font-size: 0.72rem;
-}
-
-.operationTableHead {
-  min-height: 24px;
-  border-top: 0;
-  background: color-mix(in srgb, var(--fg-tertiary) 5%, transparent);
+.reActOperationSectionLabel {
   color: var(--fg-tertiary);
-  font-size: 0.66rem;
+  font-size: 0.68rem;
   font-weight: 680;
 }
 
-.operationTableHead span,
-.operationTableStage,
-.operationTableStatus,
-.operationTableSummary,
-.operationTableDuration,
-.operationTableAction {
-  min-width: 0;
-  padding: 4px 7px;
-}
-
-.operationTableStage {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--fg-secondary);
-  font-weight: 620;
-}
-
-.operationTableStage span:last-child,
-.operationTableSummary {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.operationTableStageIcon {
-  display: inline-grid;
-  flex: 0 0 auto;
-  place-items: center;
-  width: 16px;
-  color: var(--fg-tertiary);
-}
-
-.operationTableStageIcon svg {
-  width: 14px;
-  height: 14px;
-}
-
-.operationTableStatus {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  color: var(--fg-tertiary);
-  white-space: nowrap;
-}
-
-.operationTableSummary {
-  color: var(--fg-tertiary);
-}
-
-.operationTableDuration {
-  color: var(--fg-tertiary);
-  font-family: var(--font-mono);
-  font-size: 0.66rem;
-  text-align: right;
-  white-space: nowrap;
-}
-
-.operationTableAction {
+.reActThoughtStack,
+.reActResultList {
   display: grid;
-  place-items: center;
-  padding-left: 2px;
-  padding-right: 4px;
+  gap: 5px;
+  min-width: 0;
+  max-width: 100%;
 }
 
-.operationTableRow_running {
-  background: color-mix(in srgb, var(--accent-cool) 8%, transparent);
+.reActThoughtText,
+.reActResultValue {
+  min-width: 0;
+  max-width: 100%;
+  margin: 0;
+  overflow: auto;
+  color: var(--fg-secondary);
+  font-family: inherit;
+  font-size: 0.78rem;
+  line-height: 1.62;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
-.operationTableRow_running .operationTableStage,
-.operationTableRow_running .operationTableStatus {
-  color: color-mix(in srgb, var(--accent-cool-2) 88%, var(--fg-secondary));
+.reActThoughtText {
+  max-height: 220px;
+  padding: 6px 8px;
+  border-left: 2px solid color-mix(in srgb, var(--accent-warm) 42%, transparent);
+  background: color-mix(in srgb, var(--accent-warm) 4%, transparent);
 }
 
-.operationTableRow_failed {
-  background: color-mix(in srgb, var(--danger) 7%, transparent);
+.reActResultItem {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  max-width: 100%;
+  padding: 6px 8px;
+  border: 1px solid color-mix(in srgb, var(--fg-tertiary) 10%, transparent);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--surface-card) 46%, transparent);
 }
 
-.operationTableRow_failed .operationTableStage,
-.operationTableRow_failed .operationTableStatus {
-  color: color-mix(in srgb, var(--danger) 82%, var(--fg-secondary));
+.reActResultItem_failed {
+  border-color: color-mix(in srgb, var(--danger) 20%, transparent);
+  background: color-mix(in srgb, var(--danger) 5%, transparent);
+}
+
+.reActResultLabel {
+  color: var(--fg-tertiary);
+  font-size: 0.68rem;
+  font-weight: 680;
 }
 
 .operationTimeline {
