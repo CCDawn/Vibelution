@@ -118,6 +118,25 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("copy.references");
   });
 
+  it("lets each Agent inherit or override its context compression policy", () => {
+    expect(routeSource).toContain("AgentContextCompressionPolicy");
+    expect(routeSource).toContain("contextCompressionPolicy: AgentContextCompressionPolicyDraft");
+    expect(routeSource).toContain("function contextCompressionDraftFromAgent");
+    expect(routeSource).toContain("function contextCompressionPolicyFromDraft");
+    expect(routeSource).toContain("contextCompressionPolicy: contextCompressionPolicyFromDraft(payload.draft.contextCompressionPolicy)");
+    expect(routeSource).toContain("updateContextCompressionDraft");
+    expect(routeSource).toContain("copy.contextCompressionPolicy");
+    expect(routeSource).toContain("copy.contextCompressionInherit");
+    expect(routeSource).toContain("copy.contextCompressionCustom");
+    expect(routeSource).toContain("contextCompressionPolicyLine");
+    expect(routeSource).toContain("styles.compressionPolicyGrid");
+    expect(routeSource).toContain("styles.compressionPolicySubgrid");
+    expect(routeSource).toContain("styles.compressionPolicyFooter");
+    expect(styles.compressionPolicyGrid).toBeTruthy();
+    expect(styles.compressionPolicySubgrid).toBeTruthy();
+    expect(styles.compressionPolicyFooter).toBeTruthy();
+  });
+
   it("shows LLM names in model selectors instead of role-prefixed profile labels", () => {
     expect(routeSource).toContain("AgentModelChoice");
     expect(routeSource).toContain("model.model");
