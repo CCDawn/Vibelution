@@ -22,7 +22,7 @@ import {
   X,
 } from "lucide-react";
 import { Suspense, lazy, type CSSProperties, type KeyboardEvent, type PointerEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 
 import { fetchJson } from "../api/client";
 import { queryKeys } from "../api/queryKeys";
@@ -305,6 +305,19 @@ function supervisedMemberModelLabel(
   resolveModelLabel?: (modelId: string) => string | undefined,
 ) {
   return modelDisplayLabel(supervisedMemberModelId(binding), resolveModelLabel) || "--";
+}
+
+function supervisedMemberAgentManagementRoute(agentId: string, returnTo: string) {
+  const params = new URLSearchParams({ pane: "config", returnLabel: "supervised_evolution" });
+  const normalizedAgentId = String(agentId || "").trim();
+  const normalizedReturnTo = String(returnTo || "").trim();
+  if (normalizedAgentId) {
+    params.set("agent", normalizedAgentId);
+  }
+  if (normalizedReturnTo) {
+    params.set("returnTo", normalizedReturnTo);
+  }
+  return `/agents?${params.toString()}`;
 }
 
 function supervisedPreflightIssue(run: EvolutionActiveRun | null | undefined, lang: "zh" | "en"): SupervisedPreflightIssue | null {
@@ -1139,6 +1152,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   const monitoredStatusLabel = monitoredRun?.decision === "INCONCLUSIVE"
     ? displayDecisionLabel(monitoredRun.decision)
     : statusLabel(monitoredRun?.status || "");
+  const supervisedMemberReturnTo = `${location.pathname}${location.search}` || "/supervised-evolution";
   const supervisedRunMembers = useMemo<SupervisedRunMember[]>(() => {
     const bindings = supervisedMembersBindingRun?.agentBindings ?? {};
     const currentRole = String(supervisedMembersRun?.currentRole || "").trim().toLowerCase();
@@ -2846,36 +2860,51 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
               <div className={styles.supervisedMembersHeader}>
                 <div>
                   <p className={styles.eyebrow}>{lang === "zh" ? "运行成员" : "Run members"}</p>
-                  <h2 className={styles.sectionTitle}>{lang === "zh" ? "本轮监督成员" : "Supervised members"}</h2>
+                  <h2 className={styles.sectionTitle}>{lang === "zh" ? "监督成员" : "Supervised members"}</h2>
                 </div>
                 <span className={styles.secondaryPill}>
                   {supervisedMembersRun ? supervisedMembersRunStatusLabel : lang === "zh" ? "等待启动" : "Waiting"}
                 </span>
               </div>
               <div className={styles.supervisedMembersList}>
-                {supervisedRunMembers.map((member) => (
-                  <article
-                    key={member.role}
-                    className={
+                {supervisedRunMembers.map((member) => {
+                  const rowClassName =
                       member.status === "active"
                         ? `${styles.supervisedMemberRow} ${styles.supervisedMemberRowActive}`
                         : member.status === "missing"
                           ? `${styles.supervisedMemberRow} ${styles.supervisedMemberRowMissing}`
-                          : styles.supervisedMemberRow
-                    }
-                  >
-                    <div className={styles.supervisedMemberRole}>
-                      <span>{member.label}</span>
-                      {member.status === "active" ? (
-                        <strong>{lang === "zh" ? "当前执行" : "Active"}</strong>
-                      ) : null}
-                    </div>
-                    <div className={styles.supervisedMemberIdentity}>
-                      <strong>{member.name}</strong>
-                      <span title={member.modelId || member.model}>{member.model}</span>
-                    </div>
-                  </article>
-                ))}
+                          : styles.supervisedMemberRow;
+                  const memberBody = (
+                    <>
+                      <div className={styles.supervisedMemberRole}>
+                        <span>{member.label}</span>
+                        {member.status === "active" ? (
+                          <strong>{lang === "zh" ? "当前执行" : "Active"}</strong>
+                        ) : null}
+                      </div>
+                      <div className={styles.supervisedMemberIdentity}>
+                        <strong>{member.name}</strong>
+                        <span title={member.modelId || member.model}>{member.model}</span>
+                      </div>
+                    </>
+                  );
+                  return member.agentId ? (
+                    <Link
+                      key={member.role}
+                      className={`${rowClassName} ${styles.supervisedMemberLink}`}
+                      to={supervisedMemberAgentManagementRoute(member.agentId, supervisedMemberReturnTo)}
+                      title={lang === "zh" ? `配置 ${member.name}` : `Configure ${member.name}`}
+                      aria-label={lang === "zh" ? `配置监督成员 ${member.name}` : `Configure supervised member ${member.name}`}
+                    >
+                      {memberBody}
+                      <ArrowUpRight size={13} aria-hidden="true" />
+                    </Link>
+                  ) : (
+                    <article key={member.role} className={rowClassName}>
+                      {memberBody}
+                    </article>
+                  );
+                })}
               </div>
               {!supervisedMembersRun ? (
                 <p className={styles.noticeTextCompact}>
