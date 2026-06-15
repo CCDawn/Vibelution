@@ -20,7 +20,17 @@ from core.evaluation.dataset_environment import (
 from core.evaluation.self_evolution_candidate_pool import append_candidate_record
 
 
-def test_default_dataset_registry_lists_builtin_and_swe(tmp_path: Path):
+def test_default_dataset_registry_lists_builtin_and_swe(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    monkeypatch.setattr(
+        "core.evaluation.dataset_adapters.preflight_environment_contract",
+        lambda *args, **kwargs: {
+            "status": "available",
+            "available": True,
+            "checked": [],
+            "missing": [],
+            "official_verifier": {"missing": [], "available": True},
+        },
+    )
     path = ensure_dataset_registry(tmp_path)
 
     assert path.exists()
@@ -79,6 +89,36 @@ def test_default_dataset_registry_lists_builtin_and_swe(tmp_path: Path):
     assert "纯 agent" in by_name["terminal_bench_agent_judged"]["usability_reason"]
     assert by_name["swe_bench_lite"]["runnable"] is False
     assert by_name["swe_bench_lite"]["adapter_status"] == "requires_swe_harness"
+
+
+def test_terminal_bench_core_hidden_when_environment_preflight_fails(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    monkeypatch.setattr(
+        "core.evaluation.dataset_adapters.preflight_environment_contract",
+        lambda *args, **kwargs: {
+            "status": "missing_verifier_dependency",
+            "available": False,
+            "checked": [],
+            "missing": [],
+            "official_verifier": {
+                "missing": [{"name": "docker daemon", "available": False}],
+                "available": False,
+            },
+        },
+    )
+    ensure_dataset_registry(tmp_path)
+
+    rows = list_dataset_status(tmp_path)
+    by_name = {item["name"]: item for item in rows}
+
+    assert by_name["terminal_bench_core"]["usability_status"] == "custom_harness_ready"
+    assert by_name["terminal_bench_core"]["environment_preflight"]["status"] == "missing_verifier_dependency"
+    assert by_name["terminal_bench_core"]["effective"] is False
+    assert by_name["terminal_bench_core"]["selectable"] is False
+    assert by_name["terminal_bench_core"]["visibility"] == "hidden"
+    assert "任务环境预检未通过" in by_name["terminal_bench_core"]["visibility_reason"]
 
 
 def test_ensure_dataset_registry_backfills_missing_builtin_datasets(tmp_path: Path):
@@ -313,7 +353,20 @@ def test_ensure_dataset_registry_does_not_overwrite_customized_terminal_smoke_so
     assert terminal_path.read_text(encoding="utf-8") == "\n".join(custom_lines) + "\n"
 
 
-def test_dataset_status_distinguishes_effective_empty_missing_and_harness(tmp_path: Path):
+def test_dataset_status_distinguishes_effective_empty_missing_and_harness(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    monkeypatch.setattr(
+        "core.evaluation.dataset_adapters.preflight_environment_contract",
+        lambda *args, **kwargs: {
+            "status": "available",
+            "available": True,
+            "checked": [],
+            "missing": [],
+            "official_verifier": {"missing": [], "available": True},
+        },
+    )
     ensure_dataset_registry(tmp_path)
     custom_path = tmp_path / "workspace" / "evaluation" / "datasets" / "custom_prompt_tasks.jsonl"
     custom_path.parent.mkdir(parents=True, exist_ok=True)
