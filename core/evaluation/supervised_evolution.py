@@ -60,6 +60,10 @@ def normalize_supervised_mental_model_mode(value: Any) -> str:
     return normalized if normalized in SUPERVISED_MENTAL_MODEL_MODES else SUPERVISED_MENTAL_MODEL_DEFAULT
 
 
+def _normalize_status_value(value: Any) -> str:
+    return str(value or "").lstrip("\ufeff").strip().lower()
+
+
 def supervised_mental_model_enabled_for_mode(mode: Any) -> bool | None:
     normalized = normalize_supervised_mental_model_mode(mode)
     if normalized == "enabled":
@@ -664,7 +668,7 @@ def _extract_run_metrics(item: SupervisedEvolutionRun) -> Dict[str, Any]:
         "restart_guarded_tools": int(guarded.get("restart_guarded") or 0),
         "transaction_opened": bool(transaction.get("opened")),
         "transaction_closed": bool(transaction.get("closed")),
-        "transaction_status": str(transaction.get("status") or ""),
+        "transaction_status": _normalize_status_value(transaction.get("status")),
         "commit_detected": bool(git.get("commit_detected")),
         "restart_expected": bool(restart.get("expected")),
         "restart_triggered": bool(restart.get("triggered")),
@@ -1367,7 +1371,7 @@ def _has_transaction_issue(metrics: Dict[str, Any]) -> bool:
     return (
         not bool(metrics.get("transaction_opened"))
         or not bool(metrics.get("transaction_closed"))
-        or str(metrics.get("transaction_status") or "") not in {"", "success"}
+        or _normalize_status_value(metrics.get("transaction_status")) not in {"", "success"}
     )
 
 

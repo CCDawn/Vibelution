@@ -366,6 +366,117 @@ class TestToolExecutorInit:
         assert events[-1][1]["fields"]["semanticStatus"] == "blocked"
         assert events[-1][1]["fields"]["toolResultStatus"] == "blocked"
 
+    def test_tool_dict_close_transaction_failed_if_transaction_status_failed(self, monkeypatch):
+        """close_evolution_transaction_tool should fail when transaction_status is not success."""
+        from core.infrastructure import tool_executor as tool_executor_module
+
+        events = []
+        monkeypatch.setattr(
+            tool_executor_module,
+            "_record_tool_scene_event",
+            lambda *args, **kwargs: events.append((args, kwargs)),
+        )
+
+        executor = ToolExecutor()
+        executor.register_tool(
+            "close_evolution_transaction_tool",
+            lambda: {"status": "success", "transaction_status": "failed", "txn_id": "txn_1"},
+            timeout=5,
+        )
+
+        result, action = executor.execute("close_evolution_transaction_tool", {})
+
+        assert action is None
+        assert isinstance(result, dict)
+        assert result["status"] == "success"
+        assert events[-1][0][1] == "tool.execute.failed"
+        assert events[-1][1]["outcome"] == "failed"
+        assert events[-1][1]["fields"]["semanticStatus"] == "failed"
+        assert events[-1][1]["fields"]["toolResultStatus"] == "failed"
+
+    def test_tool_dict_close_transaction_blocked_if_transaction_status_blocked(self, monkeypatch):
+        """close_evolution_transaction_tool should be blocked when transaction_status is blocked."""
+        from core.infrastructure import tool_executor as tool_executor_module
+
+        events = []
+        monkeypatch.setattr(
+            tool_executor_module,
+            "_record_tool_scene_event",
+            lambda *args, **kwargs: events.append((args, kwargs)),
+        )
+
+        executor = ToolExecutor()
+        executor.register_tool(
+            "close_evolution_transaction_tool",
+            lambda: {"status": "ok", "transaction_status": "\ufeffblocked", "txn_id": "txn_2"},
+            timeout=5,
+        )
+
+        result, action = executor.execute("close_evolution_transaction_tool", {})
+
+        assert action is None
+        assert isinstance(result, dict)
+        assert result["status"] == "ok"
+        assert events[-1][0][1] == "tool.execute.blocked"
+        assert events[-1][1]["outcome"] == "blocked"
+        assert events[-1][1]["fields"]["semanticStatus"] == "blocked"
+        assert events[-1][1]["fields"]["toolResultStatus"] == "blocked"
+
+    def test_tool_dict_bom_blocked_status_is_recorded_as_blocked_scene_event(self, monkeypatch):
+        """Tools returning BOM-prefixed blocked status dicts should still emit blocked event."""
+        from core.infrastructure import tool_executor as tool_executor_module
+
+        events = []
+        monkeypatch.setattr(
+            tool_executor_module,
+            "_record_tool_scene_event",
+            lambda *args, **kwargs: events.append((args, kwargs)),
+        )
+
+        executor = ToolExecutor()
+        executor.register_tool(
+            "fake_dict_bom_blocked_tool",
+            lambda: {"status": "\ufeffblocked", "message": "policy denied"},
+            timeout=5,
+        )
+
+        result, action = executor.execute("fake_dict_bom_blocked_tool", {})
+
+        assert action is None
+        assert isinstance(result, dict)
+        assert result["status"] == "\ufeffblocked"
+        assert events[-1][0][1] == "tool.execute.blocked"
+        assert events[-1][1]["outcome"] == "blocked"
+        assert events[-1][1]["fields"]["semanticStatus"] == "blocked"
+        assert events[-1][1]["fields"]["toolResultStatus"] == "blocked"
+
+    def test_tool_dict_close_transaction_success_when_only_transaction_status_present(self, monkeypatch):
+        """close_evolution_transaction_tool should treat missing status as successful when transaction_status is success."""
+        from core.infrastructure import tool_executor as tool_executor_module
+
+        events = []
+        monkeypatch.setattr(
+            tool_executor_module,
+            "_record_tool_scene_event",
+            lambda *args, **kwargs: events.append((args, kwargs)),
+        )
+
+        executor = ToolExecutor()
+        executor.register_tool(
+            "close_evolution_transaction_tool",
+            lambda: {"transaction_status": "success", "txn_id": "txn_3"},
+            timeout=5,
+        )
+
+        result, action = executor.execute("close_evolution_transaction_tool", {})
+
+        assert action is None
+        assert isinstance(result, dict)
+        assert events[-1][0][1] == "tool.execute.succeeded"
+        assert events[-1][1]["outcome"] == "succeeded"
+        assert events[-1][1]["fields"]["semanticStatus"] == "succeeded"
+        assert events[-1][1]["fields"]["toolResultStatus"] == "success"
+
     def test_tool_json_no_result_is_recorded_as_failed_scene_event(self, monkeypatch):
         """Tools returning no_result JSON should not be marked as succeeded."""
         from core.infrastructure import tool_executor as tool_executor_module
@@ -391,6 +502,34 @@ class TestToolExecutorInit:
         assert events[-1][0][1] == "tool.execute.failed"
         assert events[-1][1]["outcome"] == "failed"
         assert events[-1][1]["fields"]["semanticStatus"] == "failed"
+
+    def test_tool_bom_prefixed_json_status_is_normalized_for_semantic_outcome(self, monkeypatch):
+        """BOM-prefixed JSON text should still be parsed for semantic status fields."""
+        from core.infrastructure import tool_executor as tool_executor_module
+
+        events = []
+        monkeypatch.setattr(
+            tool_executor_module,
+            "_record_tool_scene_event",
+            lambda *args, **kwargs: events.append((args, kwargs)),
+        )
+
+        executor = ToolExecutor()
+        executor.register_tool(
+            "fake_json_bom_blocked_tool",
+            lambda: "\ufeff" + json.dumps({"status": "blocked", "message": "policy denied"}),
+            timeout=5,
+        )
+
+        result, action = executor.execute("fake_json_bom_blocked_tool", {})
+
+        assert action is None
+        assert isinstance(result, str)
+        assert "status" in result
+        assert events[-1][0][1] == "tool.execute.blocked"
+        assert events[-1][1]["outcome"] == "blocked"
+        assert events[-1][1]["fields"]["semanticStatus"] == "blocked"
+        assert events[-1][1]["fields"]["toolResultStatus"] == "blocked"
 
     def test_default_timeouts_configured(self):
         """测试默认超时配置"""

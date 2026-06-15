@@ -3070,73 +3070,18 @@ export function TeamsRoute({
     return (researchStageAgentBindingsByStage.knowledge_collection ?? []).filter((binding) => targetKeys.has(binding.key));
   }
 
-  function renderSourceCollectionStageAgentStrip(stageId: SourceCollectionStageModuleId) {
-    const bindings = sourceCollectionStageAgentBindings(stageId);
-    if (!bindings.length) {
-      return null;
-    }
-    const readyCount = bindings.filter((binding) => binding.agent && researchStageAgentConfigTone(binding.agent) === "ready").length;
-    const blockedCount = bindings.filter((binding) => binding.agentId && !binding.agent).length
-      + bindings.filter((binding) => binding.agent && researchStageAgentConfigTone(binding.agent) === "blocked").length;
-    const missingCount = bindings.filter((binding) => !binding.agentId).length;
-    const toneClass = blockedCount > 0
-      ? styles.sourceCollectionStageAgentStripBlocked
-      : missingCount > 0
-        ? styles.sourceCollectionStageAgentStripMissing
-        : styles.sourceCollectionStageAgentStripReady;
-
-    return (
-      <div className={`${styles.sourceCollectionStageAgentStrip} ${toneClass}`} aria-label={lang === "zh" ? "本步骤 Agent" : "Step Agents"}>
-        <div className={styles.sourceCollectionStageAgentStripHead}>
-          <Bot size={12} />
-          <span>{lang === "zh" ? "Agent" : "Agents"}</span>
-          <strong>{readyCount}/{bindings.length}</strong>
-        </div>
-        <div className={styles.sourceCollectionStageAgentChips}>
-          {bindings.map((binding) => {
-            const tone = binding.agent
-              ? researchStageAgentConfigTone(binding.agent)
-              : binding.agentId
-                ? "blocked"
-                : "missing";
-            const info = agentDisplayInfo(binding.agent, lang, {
-              name: binding.bindingLabel || (lang === "zh" ? binding.zh : binding.en),
-            });
-            const agentName = binding.agent
-              ? info.name
-              : binding.agentId
-                ? binding.agentId
-                : (lang === "zh" ? "未绑定" : "Not bound");
-            return (
-              <Link
-                key={`source-step-strip-${stageId}-${binding.key}`}
-                className={[
-                  styles.sourceCollectionStageAgentChip,
-                  styles[`researchStageAgentCard_${tone}`],
-                ].filter(Boolean).join(" ")}
-                to={binding.agentId ? researchStageAgentManagementRoute(binding.agentId) : "/agents"}
-                title={`${lang === "zh" ? binding.zh : binding.en} · ${agentName}`}
-                aria-label={`${lang === "zh" ? "配置" : "Configure"} ${lang === "zh" ? binding.zh : binding.en}`}
-              >
-                <span>{lang === "zh" ? binding.zh : binding.en}</span>
-                <strong>{agentName}</strong>
-              </Link>
-            );
-          })}
-        </div>
-      </div>
-    );
-  }
-
   function renderSourceCollectionStageAgents(stageId: SourceCollectionStageModuleId) {
     const bindings = sourceCollectionStageAgentBindings(stageId);
     if (!bindings.length) {
       return null;
     }
     return (
-      <section className={styles.sourceCollectionStageAgentPanel} aria-label={lang === "zh" ? "当前步骤 Agent" : "Current step Agents"}>
+      <section className={styles.sourceCollectionStageAgentPanel} aria-label={lang === "zh" ? "当前步骤 Agent 配置" : "Current step Agent configuration"}>
         <div className={styles.sourceCollectionStageAgentHeader}>
-          <strong>{lang === "zh" ? "当前步骤 Agent" : "Step Agents"}</strong>
+          <div>
+            <strong>{lang === "zh" ? "当前步骤 Agent 配置" : "Step Agent configuration"}</strong>
+            <span>{bindings.length} {lang === "zh" ? "个功能 Agent" : "functional Agents"}</span>
+          </div>
           <Link to="/agents">
             <Link2 size={12} />
             {lang === "zh" ? "Agent 管理" : "Agent management"}
@@ -3162,6 +3107,7 @@ export function TeamsRoute({
               : binding.agentId
                 ? (lang === "zh" ? "引用失效" : "missing reference")
                 : (lang === "zh" ? "待绑定" : "missing");
+            const modelLabel = researchStageAgentModelLabel(binding.agent, lang);
             return (
               <article
                 key={`source-step-${stageId}-${binding.key}`}
@@ -3170,15 +3116,27 @@ export function TeamsRoute({
                   styles[`researchStageAgentCard_${tone}`],
                 ].filter(Boolean).join(" ")}
               >
-                <div>
-                  <small>{lang === "zh" ? binding.zh : binding.en}</small>
-                  <strong>{agentName}</strong>
+                <div className={styles.sourceCollectionStageAgentCardBody}>
+                  <span>
+                    <small>{lang === "zh" ? "职责" : "Role"}</small>
+                    <strong>{lang === "zh" ? binding.zh : binding.en}</strong>
+                  </span>
+                  <span>
+                    <small>Agent</small>
+                    <strong>{agentName}</strong>
+                  </span>
+                  <span>
+                    <small>{lang === "zh" ? "模型" : "Model"}</small>
+                    <strong>{modelLabel}</strong>
+                  </span>
                 </div>
-                <span>{statusLabel}</span>
-                <Link to={binding.agentId ? researchStageAgentManagementRoute(binding.agentId) : "/agents"}>
-                  <Link2 size={12} />
-                  {binding.agent ? (lang === "zh" ? "配置" : "Configure") : (lang === "zh" ? "绑定" : "Bind")}
-                </Link>
+                <div className={styles.sourceCollectionStageAgentCardActions}>
+                  <span>{statusLabel}</span>
+                  <Link to={binding.agentId ? researchStageAgentManagementRoute(binding.agentId) : "/agents"}>
+                    <Link2 size={12} />
+                    {binding.agent ? (lang === "zh" ? "配置" : "Configure") : (lang === "zh" ? "绑定" : "Bind")}
+                  </Link>
+                </div>
               </article>
             );
           })}
@@ -3760,16 +3718,16 @@ export function TeamsRoute({
             <div className={styles.empty}>{lang === "zh" ? "还没有正在执行的搜集动作。" : "No active collection action yet."}</div>
           )}
         </div>
-        <section id="source-collection-results" className={styles.sourceCollectionResultsPanel} aria-label={lang === "zh" ? "搜集结果" : "Collected results"}>
+        <section id="source-collection-results" className={styles.sourceCollectionResultsPanel} aria-label={lang === "zh" ? "已收集资料" : "Collected sources"}>
           <div className={styles.sourceCollectionResultsHeader}>
-            <strong>{lang === "zh" ? "搜集结果" : "Collected results"}</strong>
+            <strong>{lang === "zh" ? "已收集资料" : "Collected sources"}</strong>
             <span>{sourceManifestCandidates.length} {lang === "zh" ? "条候选资料" : "candidate sources"}</span>
           </div>
           <div className={styles.sourceCollectionResultStats}>
-            <span>{lang === "zh" ? "已收集" : "collected"} <strong>{sourceCollectionCollectedCount}</strong></span>
-            <span>{lang === "zh" ? "候选资料" : "candidates"} <strong>{sourceManifestCandidates.length}</strong></span>
-            <span>{lang === "zh" ? "已通过" : "approved"} <strong>{sourceCollectionApprovedCount}</strong></span>
-            <span>{lang === "zh" ? "待筛选" : "screening"} <strong>{sourceQualityUnassessedCount}</strong></span>
+            <span>{lang === "zh" ? "原始资料记录" : "raw source records"} <strong>{sourceCollectionCollectedCount}</strong></span>
+            <span>{lang === "zh" ? "候选资料" : "candidate sources"} <strong>{sourceManifestCandidates.length}</strong></span>
+            <span>{lang === "zh" ? "已通过筛选" : "approved by screening"} <strong>{sourceCollectionApprovedCount}</strong></span>
+            <span>{lang === "zh" ? "待 Agent 筛选" : "waiting for Agent screening"} <strong>{sourceQualityUnassessedCount}</strong></span>
           </div>
           {visibleResults.length ? (
             <div className={styles.sourceCollectionResultList}>
@@ -3794,7 +3752,7 @@ export function TeamsRoute({
               })}
             </div>
           ) : (
-            <div className={styles.empty}>{lang === "zh" ? "暂无搜集结果。点击资料搜集卡的开始按钮后，结果会出现在这里。" : "No collected results yet."}</div>
+            <div className={styles.empty}>{lang === "zh" ? "暂无已收集资料。点击资料搜集卡的开始按钮后，结果会出现在这里。" : "No collected sources yet."}</div>
           )}
         </section>
       </section>
@@ -4268,7 +4226,6 @@ export function TeamsRoute({
             {activeModule.actionLabel}
           </button>
         </section>
-        {renderSourceCollectionStageAgents(activeModule.id)}
         {selectedSourceCollectionStageId === "collection" ? (
         <>
         <details className={styles.workflowSourceCollectionDetails} open={!selectedSourceCollectionRun}>
@@ -4582,6 +4539,7 @@ export function TeamsRoute({
             ) : null}
           </>
         ) : null}
+        {renderSourceCollectionStageAgents(activeModule.id)}
       </section>
     );
   }
@@ -5749,7 +5707,7 @@ export function TeamsRoute({
     {
       id: "collection",
       label: lang === "zh" ? "资料搜集" : "Collection",
-      metric: lang === "zh" ? `已收集 ${sourceCollectionCollectedCount} 条` : `${sourceCollectionCollectedCount} collected`,
+      metric: lang === "zh" ? `原始资料 ${sourceCollectionCollectedCount} 条` : `${sourceCollectionCollectedCount} raw sources`,
       summary: !selectedSourceCollectionRun
         ? (lang === "zh" ? "点击开始生成本轮任务" : "Start to create this run")
         : sourceCollectionSearchOpenAssignmentCount > 0
@@ -5787,7 +5745,7 @@ export function TeamsRoute({
     {
       id: "candidate",
       label: lang === "zh" ? "候选入库" : "Candidates",
-      metric: lang === "zh" ? `候选资料 ${sourceManifestCandidates.length}` : `${sourceManifestCandidates.length} candidates`,
+      metric: lang === "zh" ? `候选资料 ${sourceManifestCandidates.length} 条` : `${sourceManifestCandidates.length} candidates`,
       summary: sourceManifestCandidates.length > 0
         ? (lang === "zh" ? "候选库可视化查看" : "Open the visual library")
         : (lang === "zh" ? "等待资料入候选" : "Waiting for candidates"),
@@ -5933,8 +5891,8 @@ export function TeamsRoute({
                 <span>{lang === "zh" ? "下一步" : "next"} <strong>{sourceCollectionStageFocusLabel}</strong></span>
                 <span>{lang === "zh" ? "可搜索" : "search"} <strong>{lang === "zh" ? `${sourceCollectionSearchOpenAssignmentCount} 项` : sourceCollectionSearchOpenAssignmentCount}</strong></span>
                 <span>{lang === "zh" ? "后续" : "next work"} <strong>{lang === "zh" ? `${sourceCollectionDownstreamOpenAssignmentCount} 项` : sourceCollectionDownstreamOpenAssignmentCount}</strong></span>
-                <span>{lang === "zh" ? "搜集结果" : "results"} <strong>{lang === "zh" ? `${sourceCollectionCollectedCount} 条` : sourceCollectionCollectedCount}</strong></span>
-                <span>{lang === "zh" ? "搜索范围" : "search scope"} <strong>{lang === "zh" ? `${sourceCollectionQueryCount} 题` : sourceCollectionQueryCount}</strong></span>
+                <span>{lang === "zh" ? "原始资料" : "raw sources"} <strong>{lang === "zh" ? `${sourceCollectionCollectedCount} 条` : sourceCollectionCollectedCount}</strong></span>
+                <span>{lang === "zh" ? "搜索问题" : "search questions"} <strong>{lang === "zh" ? `${sourceCollectionQueryCount} 个` : sourceCollectionQueryCount}</strong></span>
                 <span>{lang === "zh" ? "缓存" : "cache"} <strong>{sourceCollectionPromptCacheStatusLabel(sourceCollectionPromptCacheStatus, lang)}</strong></span>
               </div>
             </section>
@@ -5968,7 +5926,6 @@ export function TeamsRoute({
                     <em>{module.metric}</em>
                     <small>{module.summary}</small>
                   </span>
-                  {renderSourceCollectionStageAgentStrip(module.id)}
                   <button
                     type="button"
                     className={module.actionTone === "primary" ? styles.sourceCollectionStagePrimaryAction : styles.sourceCollectionStageSecondaryAction}

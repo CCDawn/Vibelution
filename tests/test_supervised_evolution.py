@@ -10,6 +10,7 @@ import pytest
 from core.evaluation.supervised_evolution import (
     DEFAULT_BUNDLE_NAME,
     SupervisedEvolutionCancelled,
+    _has_transaction_issue,
     format_decision_record_summary,
     load_supervised_bundle,
     run_supervised_evolution_session,
@@ -2437,3 +2438,27 @@ def test_run_supervised_evolution_session_holds_promotion_when_gym_gate_observes
     assert decision.gates[-1].status == "hold"
     assert decision.policy_action["action"] == "HOLD"
     assert '"baseline_prompt": "baseline"' in bundle_path.read_text(encoding="utf-8")
+
+
+def test_transaction_issue_check_tolerates_bom_transaction_status():
+    metrics = {
+        "transaction_required": True,
+        "llm_failure_detected": False,
+        "transaction_opened": True,
+        "transaction_closed": True,
+        "transaction_status": "\ufeffsuccess",
+        "environment_unavailable": False,
+    }
+    assert _has_transaction_issue(metrics) is False
+
+
+def test_transaction_issue_check_rejects_bom_failed_transaction_status():
+    metrics = {
+        "transaction_required": True,
+        "llm_failure_detected": False,
+        "transaction_opened": True,
+        "transaction_closed": True,
+        "transaction_status": "\ufefffailed",
+        "environment_unavailable": False,
+    }
+    assert _has_transaction_issue(metrics) is True
