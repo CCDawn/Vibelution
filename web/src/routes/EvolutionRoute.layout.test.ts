@@ -354,7 +354,17 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(worktreeReviewStylesSource).toContain(".worktreeReviewSurface");
   });
 
-  it("renders supervised case transcript as expandable chat-style trace items", () => {
+  it("renders supervised case transcript with a read-only conversation view and trace fallback", () => {
+    expect(routeSource).toContain("LazyConversationView");
+    expect(routeSource).toContain("monitoredCaseConversationMessages");
+    expect(routeSource).toContain("monitoredCaseHasConversationMessages");
+    expect(routeSource).toContain("showComposer={false}");
+    expect(routeSource).toContain("conversationMessages");
+    expect(routeSource).toContain("styles.caseConversationShell");
+    expect(routeSource).toContain("styles.caseConversationTranscript");
+    expect(stylesSource).toContain(".caseConversationShell");
+    expect(stylesSource).toContain(".caseConversationTranscript");
+    expect(stylesSource).toContain(".caseConversationFallback");
     expect(routeSource).toContain("buildSupervisedCaseTraceItems");
     expect(routeSource).toContain("caseTraceItemExpanded");
     expect(routeSource).toContain("toggleCaseTraceItem");
