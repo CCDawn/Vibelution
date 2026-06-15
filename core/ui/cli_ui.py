@@ -45,6 +45,7 @@ from core.infrastructure.tool_intents import (
     humanize_tool_name,
     humanize_tool_chain,
 )
+from core.logging.logger import debug as _debug_logger
 from core.ui.ascii_art import get_avatar_manager
 from core.ui.token_display import format_token_count
 from core.ui.theme import get_style, get_theme
@@ -290,8 +291,8 @@ class UIManager:
                 json.dumps(payload, ensure_ascii=False, indent=2),
                 encoding="utf-8",
             )
-        except Exception:
-            pass
+        except Exception as exc:
+            _debug_logger.warning(f"Failed to persist ui runtime totals. error={exc}")
 
     def _save_runtime_totals(self):
         self._save_runtime_state()
@@ -349,13 +350,13 @@ class UIManager:
                 stream.flush()
                 resized = True
         except Exception:
-            pass
+            _debug_logger.warning("Failed to request terminal resize via ANSI escape sequence.")
         if os.name == "nt":
             try:
                 exit_code = os.system(f"mode con: cols={cols} lines={rows} > nul")
                 resized = resized or exit_code == 0
-            except Exception:
-                pass
+            except Exception as exc:
+                _debug_logger.warning(f"Failed to request terminal resize via Windows mode command. error={exc}")
         return resized
 
     def _ensure_terminal_footprint(self, mode: str | None = None) -> bool:
@@ -502,8 +503,8 @@ class UIManager:
         try:
             sys.__stdout__.write(plain + "\n")
             sys.__stdout__.flush()
-        except Exception:
-            pass
+        except Exception as exc:
+            _debug_logger.warning(f"Failed to write plain console fallback. error={exc}")
 
     def _safe_console_render(self, renderable: Any, *, fallback_text: str = ""):
         try:
@@ -1460,8 +1461,8 @@ class UIManager:
                     "total_tokens": pet.data.hunger.total_tokens,
                 }
             )
-        except Exception:
-            pass
+        except Exception as exc:
+            _debug_logger.warning(f"Failed to snapshot pet runtime metrics. error={exc}")
         return snapshot
 
     @staticmethod
@@ -2586,8 +2587,8 @@ class UIManager:
                 if sys.platform.startswith("win"):
                     return self._read_chat_input_inline_windows(bounds)
                 return self._read_chat_input_inline_posix(bounds)
-            except Exception:
-                pass
+            except Exception as exc:
+                _debug_logger.warning(f"Failed to read inline chat input; fallback to rich input. error={exc}")
         positioned = self.position_chat_prompt_cursor()
         if positioned and bounds is not None:
             self._paint_chat_input_buffer("", bounds)
@@ -2833,8 +2834,8 @@ class UIManager:
                 from core.logging.logger import reset_token_console
 
                 reset_token_console()
-            except Exception:
-                pass
+            except Exception as exc:
+                _debug_logger.warning(f"Failed to reset token console before starting live UI. error={exc}")
 
             self._live = Live(
                 self._status_renderable(),
@@ -2860,8 +2861,8 @@ class UIManager:
         if self._live and not UIManager._test_mode:
             try:
                 self._live.update(self._status_renderable(), refresh=True)
-            except Exception:
-                pass
+            except Exception as exc:
+                _debug_logger.warning(f"Failed to update live ui status line. error={exc}")
 
     # ======================== 对外接口 ========================
 

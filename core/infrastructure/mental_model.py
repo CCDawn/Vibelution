@@ -30,6 +30,7 @@ from typing import Optional, Dict, Any, List
 
 from core.infrastructure.event_bus import get_event_bus, EventNames, Event
 from core.infrastructure.state import get_state_manager
+from core.logging.logger import debug as _debug_logger
 
 
 _ACTIVE_MENTAL_WORKSPACE_ROOT: ContextVar[str] = ContextVar("vibelution_active_mental_workspace_root", default="")
@@ -277,8 +278,8 @@ class MentalModel:
                 rules = _default_rules()
                 rules.update(custom_rules)
                 return rules
-            except (json.JSONDecodeError, IOError):
-                pass
+            except (json.JSONDecodeError, IOError) as exc:
+                _debug_logger.warning(f"Failed to load custom mental model rules. error={exc}")
 
         return _default_rules()
 
@@ -331,8 +332,8 @@ class MentalModel:
                 self._on_tool_result(event, success=False)
             elif event.name == "state:change":
                 pass  # 保留用于未来扩展
-        except Exception:
-            pass  # 监听器静默失败，不干扰主流程
+        except Exception as exc:
+            _debug_logger.warning(f"Failed to process mental model event bus event. event={event.name if 'event' in locals() else ''}. error={exc}")
 
     def _is_active_workspace_collector(self) -> bool:
         active = _ACTIVE_MENTAL_WORKSPACE_ROOT.get("").strip()
@@ -351,8 +352,8 @@ class MentalModel:
                 self._touched_files[path] = self._touched_files.get(path, 0) + 1
             for entity in attention.get("modified_entities", []):
                 self._touched_entities[entity] = self._touched_entities.get(entity, 0) + 1
-        except Exception:
-            pass
+        except Exception as exc:
+            _debug_logger.warning(f"Failed to update file/entity touch stats. error={exc}")
 
     def _on_validation_completed(self, event: Event):
         """记录最近一次验证结果。"""
@@ -436,8 +437,8 @@ class MentalModel:
                     "variant_base": is_variant,
                     "message": f"检测到版本增殖: {abs_path} (基础文件: {is_variant})",
                 })
-        except Exception:
-            pass
+        except Exception as exc:
+            _debug_logger.warning(f"Failed to inspect workspace file variant for {abs_path}. error={exc}")
 
     def _detect_version_proliferation(self, file_path: str) -> Optional[str]:
         """检测文件是否为版本增殖，返回基础文件名或 None"""
@@ -699,8 +700,8 @@ class MentalModel:
             try:
                 with open(full_path, 'r', encoding='utf-8') as f:
                     return json.load(f)
-            except (json.JSONDecodeError, IOError):
-                pass
+            except (json.JSONDecodeError, IOError) as exc:
+                _debug_logger.warning(f"Failed to load mental model self-model file. error={exc}")
 
         return {
             "strengths": [],
@@ -857,8 +858,8 @@ class MentalModel:
                 state_block = self._stabilize_state_with_conversation_context(state_block)
                 self._last_state_output = state_block
                 return f"<state>\n{json.dumps(state_block, ensure_ascii=False, indent=2)}\n</state>"
-        except Exception:
-            pass
+        except Exception as exc:
+            _debug_logger.warning(f"Failed to build mental model state output. error={exc}")
         return self._fallback_state(token_ratio=token_ratio)
 
     def _load_mental_soul(self) -> str:
@@ -892,8 +893,8 @@ class MentalModel:
         if match:
             try:
                 return json.loads(match.group())
-            except json.JSONDecodeError:
-                pass
+            except json.JSONDecodeError as exc:
+                _debug_logger.warning(f"Failed to parse mental model state block JSON. error={exc}")
         return {}
 
     def _fallback_state(self, token_ratio: float = 0.0) -> str:

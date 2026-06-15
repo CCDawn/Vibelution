@@ -24,6 +24,7 @@ from core.research import ResearchThemeDiscoveryService
 from core.infrastructure.workspace_manager import get_workspace
 from core.chat.chat_task_types import trim_lines
 from core.ui.chat_state import load_chat_state
+from core.logging.logger import debug as _debug_logger
 from config.public_config import build_effective_config, load_public_config
 from . import agent_directory_service, agent_mode_binding_service, prompt_template_service, research_organization_service, session_service, team_service
 from .config_service import _profile_label
@@ -790,13 +791,15 @@ def _ensure_research_agent_instances(agent_config: dict[str, Any]) -> dict[str, 
                                     direct_session_id,
                                     title=label,
                                 )
-                        except Exception:
-                            pass
+                        except Exception as exc:
+                            _debug_logger.warning(
+                                f"Failed to update direct session title for research agent={label}, direct_session_id={direct_session_id}. error={exc}"
+                            )
                         if agent.get("directSessionId") != direct_session_id:
                             agent["directSessionId"] = direct_session_id
                             changed = True
-                except Exception:
-                    pass
+                except Exception as exc:
+                    _debug_logger.warning(f"Failed to sync research agent template instances. error={exc}")
         if changed:
             next_config = {
                 "schemaVersion": 1,
@@ -1351,8 +1354,8 @@ def delete_research_agent_binding(key: str) -> dict[str, Any]:
     if agent_instance_id:
         try:
             agent_directory_service.archive_agent_instance(agent_instance_id)
-        except Exception:
-            pass
+        except Exception as exc:
+            _debug_logger.warning(f"Failed to archive research agent instance={agent_instance_id}. error={exc}")
     _record_research_config_event(
         "research.agent_binding.deleted",
         phase="agent_template_config",
@@ -1647,8 +1650,8 @@ def _sync_research_flow_canvas_with_session_payload(payload: dict[str, Any]) -> 
         if changed:
             _persist_research_flow_canvas_state(canvas, nodes, edges)
             _record_research_flow_sync_event(payload, changed)
-    except Exception:
-        pass
+    except Exception as exc:
+        _debug_logger.warning(f"Failed to sync research flow canvas status from payload. error={exc}")
     return payload
 
 
@@ -1751,8 +1754,8 @@ def _record_research_flow_sync_event(payload: dict[str, Any], changed: list[dict
             fields={"sessionId": session_id, "changedNodes": changed[:20], "changedNodeCount": len(changed)},
             session_id=session_id,
         )
-    except Exception:
-        pass
+    except Exception as exc:
+        _debug_logger.warning(f"Failed to record research flow sync event. error={exc}")
 def _select_flow_execution_node(nodes: list[dict[str, Any]], node_id: str | None) -> dict[str, Any] | None:
     requested = _safe_token(node_id, default="") if node_id else ""
     runnable_statuses = {"ready", "needs_review", "needs_evidence"}
@@ -2085,8 +2088,10 @@ def _record_research_flow_execution_event(
             session_id=session_id,
             agent_key=action_key,
         )
-    except Exception:
-        pass
+    except Exception as exc:
+        _debug_logger.warning(
+            f"Failed to record research capability transition event session_id={session_id}, action={action_key}. error={exc}"
+        )
 
 
 def _record_research_capability_event(session_id: str, event_code: str, fields: dict[str, Any]) -> None:
@@ -2099,8 +2104,8 @@ def _record_research_capability_event(session_id: str, event_code: str, fields: 
                 "fields": fields,
             },
         )
-    except Exception:
-        pass
+    except Exception as exc:
+        _debug_logger.warning(f"Failed to append research capability event to repository. event_code={event_code}. error={exc}")
     try:
         record_research_scene_event(
             event_code,
@@ -2111,8 +2116,8 @@ def _record_research_capability_event(session_id: str, event_code: str, fields: 
             session_id=session_id,
             agent_key=str(fields.get("agentKey") or ""),
         )
-    except Exception:
-        pass
+    except Exception as exc:
+        _debug_logger.warning(f"Failed to record research capability scene event. event_code={event_code}. error={exc}")
 
 
 def _with_default_research_flow_canvas_migrations(raw: dict[str, Any]) -> dict[str, Any]:
@@ -3020,5 +3025,5 @@ def _record_research_config_event(
             session_id=str(fields.get("sessionId") or ""),
             agent_key=agent_key or str(fields.get("agentKey") or ""),
         )
-    except Exception:
-        pass
+    except Exception as exc:
+        _debug_logger.warning(f"Failed to record research scene event generic for code={event_code}. error={exc}")
