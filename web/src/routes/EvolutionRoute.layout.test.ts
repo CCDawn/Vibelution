@@ -157,29 +157,22 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).toContain("正在加载自进化工作台");
   });
 
-  it("moves evolution system Team canvases into their own mode pages", () => {
-    const canvasPanelCallCount = routeSource.match(/renderModeTeamCanvasPanel\(\)/g)?.length ?? 0;
-    expect(routeSource).toContain("SELF_EVOLUTION_SYSTEM_TEAM_ID");
-    expect(routeSource).toContain("SUPERVISED_EVOLUTION_SYSTEM_TEAM_ID");
-    expect(routeSource).toContain('"self-evolution-team"');
-    expect(routeSource).toContain('"supervised-evolution-team"');
-    expect(routeSource).toContain("fetchEvolutionSystemTeam");
-    expect(routeSource).toContain('fetchJson<TeamListPayload>("/api/teams")');
-    expect(routeSource).toContain("fetchJson<Team>(`/api/teams/${encodeURIComponent(teamId)}`)");
-    expect(routeSource).toContain("modeSystemTeamQuery");
-    expect(routeSource).toContain("teamOrganizationCanvas(modeSystemTeam)");
-    expect(routeSource).toContain("function renderModeTeamCanvasPanel()");
-    expect(canvasPanelCallCount).toBeGreaterThanOrEqual(2);
+  it("keeps evolution tracks from duplicating their fixed agents as system Team canvases", () => {
+    expect(routeSource).not.toContain("SELF_EVOLUTION_SYSTEM_TEAM_ID");
+    expect(routeSource).not.toContain("SUPERVISED_EVOLUTION_SYSTEM_TEAM_ID");
+    expect(routeSource).not.toContain('"self-evolution-team"');
+    expect(routeSource).not.toContain('"supervised-evolution-team"');
+    expect(routeSource).not.toContain("fetchEvolutionSystemTeam");
+    expect(routeSource).not.toContain('fetchJson<TeamListPayload>("/api/teams")');
+    expect(routeSource).not.toContain("fetchJson<Team>(`/api/teams/${encodeURIComponent(teamId)}`)");
+    expect(routeSource).not.toContain("modeSystemTeamQuery");
+    expect(routeSource).not.toContain("teamOrganizationCanvas(modeSystemTeam)");
+    expect(routeSource).not.toContain("function renderModeTeamCanvasPanel()");
+    expect(routeSource).not.toContain("renderModeTeamCanvasPanel()");
     expect(routeSource).toContain("styles.selfModeStack");
-    expect(routeSource).toContain("系统团队画布");
-    expect(routeSource).toContain("自进化系统团队");
-    expect(routeSource).toContain("监督进化系统团队");
-    expect(routeSource).toContain("只读");
-    expect(stylesSource).toContain(".selfModeStack");
-    expect(stylesSource).toContain(".modeTeamPanel");
-    expect(stylesSource).toContain(".modeTeamCanvasMap");
-    expect(stylesSource).toContain(".modeTeamNodeBound");
-    expect(stylesSource).toContain(".modeTeamEdges");
+    expect(routeSource).not.toContain("系统团队画布");
+    expect(routeSource).not.toContain("自进化系统团队");
+    expect(routeSource).not.toContain("监督进化系统团队");
   });
 
   it("labels supervised retry as rerunning failed items", () => {
