@@ -1,5 +1,9 @@
+import queue
+from types import SimpleNamespace
 import subprocess
 import sqlite3
+
+import pytest
 
 from core.ui.chat_state import build_chat_state, load_chat_state, save_chat_state
 from core.web.services import cli_agent_service as service
@@ -266,6 +270,116 @@ def test_missing_cli_agent_executable_returns_error(monkeypatch, tmp_path):
     assert result["executableCandidates"] == ["codex.exe", "codex"]
 
 
+def test_run_cli_agent_timeout_returns_timeout_payload(monkeypatch, tmp_path):
+    project_root = _configure_roots(monkeypatch, tmp_path)
+    adapters = service._load_adapter_definitions()
+    adapters["codex_code"]["terminal"] = {"enabled": False}
+    monkeypatch.setattr(service, "_load_adapter_definitions", lambda: adapters)
+    monkeypatch.setattr(service.shutil, "which", lambda candidate: r"C:\tools\codex.exe" if candidate == "codex.exe" else "")
+
+    def fake_run(*args, **kwargs):
+        raise subprocess.TimeoutExpired(args[0], kwargs.get("timeout", 1), output="long stdout output", stderr="long stderr output")
+
+    monkeypatch.setattr(service.subprocess, "run", fake_run)
+
+    result = service.run_cli_agent(
+        agent_type="codex_code",
+        task="执行一个可能超时的任务",
+        cwd=str(project_root),
+        mode="readonly",
+        timeout=5,
+    )
+
+    assert result["status"] == "timeout"
+    assert result["code"] == "CLI_AGENT_TIMEOUT"
+    assert result["timedOut"] is True
+    assert result["timeoutSeconds"] == 5
+    assert result["stdoutPreview"] == "long stdout output"
+    assert result["stderrPreview"] == "long stderr output"
+    assert result["logPath"].startswith(".runtime/cli_agents/runs/")
+    assert result["durationMs"] >= 0
+
+
+def test_run_cli_agent_launch_failure_returns_error_payload(monkeypatch, tmp_path):
+    project_root = _configure_roots(monkeypatch, tmp_path)
+    adapters = service._load_adapter_definitions()
+    adapters["codex_code"]["terminal"] = {"enabled": False}
+    monkeypatch.setattr(service, "_load_adapter_definitions", lambda: adapters)
+    monkeypatch.setattr(service.shutil, "which", lambda candidate: r"C:\tools\codex.exe" if candidate == "codex.exe" else "")
+
+    def fake_run(*_args, **_kwargs):
+        raise OSError("launch failed")
+
+    monkeypatch.setattr(service.subprocess, "run", fake_run)
+
+    result = service.run_cli_agent(
+        agent_type="codex_code",
+        task="执行一个需要启动进程的任务",
+        cwd=str(project_root),
+    )
+
+    assert result["status"] == "error"
+    assert result["code"] == "CLI_AGENT_LAUNCH_FAILED"
+    assert "launch failed" in result["message"]
+    assert result["logPath"].startswith(".runtime/cli_agents/runs/")
+
+
+def test_resolve_run_cwd_rejects_missing_directory(tmp_path, monkeypatch):
+    _configure_roots(monkeypatch, tmp_path)
+    missing = tmp_path / "Vibelution" / "no-such-dir"
+
+    result = service._resolve_run_cwd(str(missing), mode="readonly")
+
+    assert result["ok"] is False
+    assert result["code"] == "CWD_NOT_FOUND"
+
+
+def test_resolve_run_cwd_rejects_outside_allowed_roots(tmp_path, monkeypatch):
+    project_root = _configure_roots(monkeypatch, tmp_path)
+    outside = project_root.parent / "outside-project-root"
+    outside.mkdir()
+
+    result = service._resolve_run_cwd(str(outside), mode="readonly")
+
+    assert result["ok"] is False
+    assert result["code"] == "CWD_OUTSIDE_ALLOWED_ROOTS"
+
+
+def test_build_command_args_rejects_unknown_adapter_id(tmp_path):
+    try:
+        service._build_command_args(
+            {"id": "unsupported"},
+            executable="agent",
+            cwd=tmp_path,
+            task="run",
+            task_hash="abc123456789",
+            mode="readonly",
+            model="",
+            agent="",
+            allow_unsafe_permissions=False,
+        )
+    except ValueError as exc:
+        assert str(exc) == "Unsupported adapter id: unsupported"
+    else:
+        raise AssertionError("expected ValueError for unsupported adapter id")
+
+
+def test_terminal_runtime_publish_replaces_oldest_event_when_queue_is_full(tmp_path):
+    runtime = terminal_service._TerminalRuntime(
+        state={"terminalSessionId": "cli-term-1", "rows": 28, "cols": 100},
+        process=SimpleNamespace(),
+        transport="conpty",
+        transcript_path=tmp_path / "transcript.txt",
+        session_id_regex=r"",
+    )
+    bounded = queue.Queue(maxsize=1)
+    runtime.subscribers = [bounded]
+    bounded.put_nowait({"type": "old_event"})
+
+    runtime._publish({"type": "new_event"})
+
+    assert bounded.qsize() == 1
+    assert bounded.get_nowait()["type"] == "new_event"
 def test_cli_agent_run_tool_does_not_reuse_persisted_running_state_without_runtime(monkeypatch, tmp_path):
     project_root = _configure_roots(monkeypatch, tmp_path)
     state_dir = project_root / ".runtime" / "cli_agents" / "sessions"
@@ -783,6 +897,83 @@ def test_cli_agent_terminal_ensure_writes_runtime_state_without_project_config(m
     assert not (project_root / "workspace" / "cli_agents" / "cli_agents.json").exists()
 
 
+def test_cli_agent_terminal_input_and_resize_return_lightweight_ack(monkeypatch, tmp_path):
+    project_root = _configure_roots(monkeypatch, tmp_path)
+    monkeypatch.setattr(service.shutil, "which", lambda candidate: r"C:\tools\mimo.cmd" if candidate == "mimo.cmd" else "")
+    writes = []
+    sizes = []
+
+    class FakeProcess:
+        def isalive(self):
+            return True
+
+        def write(self, data):
+            writes.append(data)
+
+        def setwinsize(self, rows, cols):
+            sizes.append((rows, cols))
+
+    monkeypatch.setattr(terminal_service, "_spawn_terminal_process", lambda *args, **kwargs: (FakeProcess(), "conpty"))
+    monkeypatch.setattr(terminal_service._TerminalRuntime, "start", lambda self: None)
+    monkeypatch.setattr(terminal_service, "_send_initial_task", lambda *args, **kwargs: None)
+
+    session = terminal_service.ensure_cli_agent_terminal_session(
+        agent_type="mimo_code",
+        task="列出 Python 文件",
+        cwd=str(project_root),
+        mode="readonly",
+        source_session_id="session-1",
+        source_message_id="message-1",
+        source_run_id="run-1",
+    )
+
+    input_ack = terminal_service.write_cli_agent_terminal_input(session["terminalSessionId"], "\x1b[A")
+    resize_ack = terminal_service.resize_cli_agent_terminal_session(session["terminalSessionId"], 32, 120)
+
+    assert writes == ["\x1b[A"]
+    assert sizes == [(32, 120)]
+    assert input_ack["code"] == "CLI_AGENT_TERMINAL_INPUT_ACCEPTED"
+    assert resize_ack["code"] == "CLI_AGENT_TERMINAL_RESIZE_ACCEPTED"
+    assert input_ack["terminalSessionId"] == session["terminalSessionId"]
+    assert resize_ack["rows"] == 32
+    assert resize_ack["cols"] == 120
+    assert "transcriptTail" not in input_ack
+    assert "screenReplay" not in resize_ack
+
+
+def test_cli_agent_terminal_output_event_streams_chunk_without_session_snapshot(monkeypatch, tmp_path):
+    from core.web.services import cli_agent_task_kernel
+
+    monkeypatch.setattr(cli_agent_task_kernel, "ingest_terminal_output", lambda *args, **kwargs: None)
+
+    class FakeProcess:
+        def isalive(self):
+            return True
+
+    runtime = terminal_service._TerminalRuntime(
+        state={
+            "terminalSessionId": "cli-term-one",
+            "adapterId": "mimo_code",
+            "agentType": "mimo_code",
+            "label": "MiMo Code",
+            "status": "running",
+            "alive": True,
+            "rows": 10,
+            "cols": 40,
+        },
+        process=FakeProcess(),
+        transport="conpty",
+        transcript_path=tmp_path / "terminal.log",
+        session_id_regex="",
+    )
+    subscriber = runtime.subscribe()
+
+    runtime._record_output("hello")
+
+    event = subscriber.get_nowait()
+    assert event == {"type": "terminal_output", "chunk": "hello"}
+
+
 def test_cli_agent_terminal_reuses_active_lock_for_same_session_adapter_and_cwd(monkeypatch, tmp_path):
     project_root = _configure_roots(monkeypatch, tmp_path)
     monkeypatch.setattr(service.shutil, "which", lambda candidate: r"C:\tools\mimo.cmd" if candidate == "mimo.cmd" else "")
@@ -1141,6 +1332,124 @@ def test_cli_agent_terminal_source_bound_attach_does_not_resume_stale_session(mo
     assert session["status"] == "stale"
     assert session["alive"] is False
     assert session["cliSessionId"] == "ses_restart"
+    assert session["interactionState"] == "resumable"
+    assert session["canInput"] is False
+    assert session["canResume"] is True
+    assert session["resumeAction"] == "resume_session"
+    assert session["displayMode"] == "readonly_replay"
+
+
+def test_cli_agent_terminal_input_on_stale_session_returns_resume_details(monkeypatch, tmp_path):
+    project_root = _configure_roots(monkeypatch, tmp_path)
+    terminal_service._write_state(
+        {
+            "terminalSessionId": "cli-term-stale-input",
+            "adapterId": "mimo_code",
+            "agentType": "mimo_code",
+            "label": "MiMo Code",
+            "cwd": str(project_root),
+            "mode": "readonly",
+            "cliSessionId": "ses_restart",
+            "status": "stale",
+            "alive": False,
+            "staleReason": "backend_startup",
+            "updatedAt": "2026-06-15T01:40:00+00:00",
+        }
+    )
+
+    with pytest.raises(terminal_service.CliAgentTerminalError) as exc_info:
+        terminal_service.write_cli_agent_terminal_input("cli-term-stale-input", "hello\r")
+
+    assert exc_info.value.code == "TERMINAL_SESSION_NOT_RUNNING"
+    assert exc_info.value.details["terminalSessionId"] == "cli-term-stale-input"
+    assert exc_info.value.details["interactionState"] == "resumable"
+    assert exc_info.value.details["canInput"] is False
+    assert exc_info.value.details["canResume"] is True
+    assert exc_info.value.details["resumeAction"] == "resume_session"
+
+
+def test_cli_agent_terminal_resume_intent_spawns_stale_session(monkeypatch, tmp_path):
+    project_root = _configure_roots(monkeypatch, tmp_path)
+    monkeypatch.setattr(service.shutil, "which", lambda candidate: r"C:\tools\mimo.cmd" if candidate == "mimo.cmd" else "")
+    task = "继续审查启动弹窗"
+    terminal_session_id = terminal_service._stable_terminal_session_id(
+        adapter_id="mimo_code",
+        source_session_id="session-1",
+        source_message_id="message-1",
+        source_run_id="run-1",
+        cwd=str(project_root),
+        mode="readonly",
+        task=task,
+    )
+    terminal_service._write_state(
+        {
+            "terminalSessionId": terminal_session_id,
+            "adapterId": "mimo_code",
+            "agentType": "mimo_code",
+            "label": "MiMo Code",
+            "sourceSessionId": "session-1",
+            "sourceMessageId": "message-1",
+            "sourceRunId": "run-1",
+            "cliRunId": "cli-run-stale",
+            "lockKey": "cli-lock-stale",
+            "cwd": str(project_root),
+            "mode": "readonly",
+            "task": task,
+            "cliSessionId": "ses_restart",
+            "cliSessionIdSource": "session_discovery_existing",
+            "status": "stale",
+            "alive": False,
+            "staleReason": "backend_startup",
+            "updatedAt": "2026-06-15T01:40:00+00:00",
+        }
+    )
+    transcript_path = terminal_service._transcript_path(terminal_session_id)
+    transcript_path.parent.mkdir(parents=True, exist_ok=True)
+    transcript_path.write_text("旧尺寸历史画面\r\n\x1b[57;6H", encoding="utf-8")
+    spawned = []
+
+    class FakeProcess:
+        def isalive(self):
+            return True
+
+    def fake_spawn(args, **kwargs):
+        spawned.append({"args": list(args), "kwargs": dict(kwargs)})
+        return FakeProcess(), "conpty"
+
+    monkeypatch.setattr(terminal_service, "_spawn_terminal_process", fake_spawn)
+    monkeypatch.setattr(terminal_service._TerminalRuntime, "start", lambda self: None)
+    monkeypatch.setattr(terminal_service, "_send_initial_task", lambda *args, **kwargs: None)
+    monkeypatch.setattr(terminal_service, "_schedule_session_id_discovery", lambda *args, **kwargs: None)
+
+    session = terminal_service.ensure_cli_agent_terminal_session(
+        agent_type="mimo_code",
+        task=task,
+        cwd=str(project_root),
+        mode="readonly",
+        source_session_id="session-1",
+        source_message_id="message-1",
+        source_run_id="run-1",
+        intent="resume",
+        rows=55,
+        cols=180,
+    )
+
+    assert spawned == [
+        {
+            "args": [r"C:\tools\mimo.cmd", str(project_root), "--session", "ses_restart"],
+            "kwargs": {"cwd": str(project_root), "rows": 55, "cols": 180},
+        }
+    ]
+    assert session["terminalSessionId"] == terminal_session_id
+    assert session["status"] == "running"
+    assert session["alive"] is True
+    assert session["resumed"] is True
+    assert session["transcriptTail"] == ""
+    assert session["transcriptTailReplayable"] is False
+    assert session["transcriptTailRenderReason"] == "live_runtime_no_history_replay"
+    assert session["interactionState"] == "live"
+    assert session["canInput"] is True
+    assert session["canResume"] is False
 
 
 def test_cli_agent_lifecycle_close_event_persists_once(monkeypatch, tmp_path):
@@ -1330,7 +1639,7 @@ def test_cli_agent_terminal_marks_plain_transcript_tail_replayable(tmp_path):
     assert snapshot["transcriptTailRenderReason"] == "raw_transcript_tail"
 
 
-def test_cli_agent_terminal_replays_unsafe_tui_transcript_tail_as_raw_xterm_input(tmp_path):
+def test_cli_agent_terminal_blocks_unsafe_tui_transcript_tail_replay(tmp_path):
     transcript = tmp_path / "terminal.log"
     spinner_tail = "".join(
         f"\x1b[?2026h\x1b[?25l\x1b[34;6H\x1b[38;2;128;128;128m⠋\x1b[0m\x1b[57;6H\x1b[?25h\x1b[?2026l"
@@ -1340,25 +1649,25 @@ def test_cli_agent_terminal_replays_unsafe_tui_transcript_tail_as_raw_xterm_inpu
 
     snapshot = terminal_service._read_transcript_snapshot(transcript, limit=120000)
 
-    assert snapshot["transcriptTail"] == spinner_tail
-    assert snapshot["transcriptTailReplayable"] is True
-    assert snapshot["transcriptTailRenderReason"] == "raw_transcript_tail"
+    assert snapshot["transcriptTail"] == ""
+    assert snapshot["transcriptTailReplayable"] is False
+    assert snapshot["transcriptTailRenderReason"] == "unsafe_tui_control_tail"
 
 
-def test_cli_agent_terminal_unsafe_tui_snapshot_prefers_raw_replay(tmp_path):
+def test_cli_agent_terminal_unsafe_tui_snapshot_does_not_send_raw_replay(tmp_path):
     transcript = tmp_path / "terminal.log"
     cursor_noise = "".join(f"\x1b[{row};5H" for row in range(1, 28))
     transcript.write_text(cursor_noise + "\x1b[2J\x1b[3;4H结论：模块拆分未完成", encoding="utf-8")
 
     snapshot = terminal_service._read_transcript_snapshot(transcript, limit=120000, rows=10, cols=40)
 
-    assert snapshot["transcriptTail"].endswith("\x1b[2J\x1b[3;4H结论：模块拆分未完成")
-    assert snapshot["transcriptTailReplayable"] is True
-    assert snapshot["transcriptTailRenderReason"] == "raw_transcript_tail"
+    assert snapshot["transcriptTail"] == ""
+    assert snapshot["transcriptTailReplayable"] is False
+    assert snapshot["transcriptTailRenderReason"] == "unsafe_tui_control_tail"
     assert "screenText" not in snapshot
 
 
-def test_cli_agent_terminal_unsafe_tui_snapshot_strips_leading_csi_fragment(tmp_path):
+def test_cli_agent_terminal_unsafe_tui_snapshot_blocks_leading_csi_fragment(tmp_path):
     transcript = tmp_path / "terminal.log"
     cursor_noise = "".join(f"\x1b[{row};5H" for row in range(1, 28))
     transcript.write_text(
@@ -1368,12 +1677,12 @@ def test_cli_agent_terminal_unsafe_tui_snapshot_strips_leading_csi_fragment(tmp_
 
     snapshot = terminal_service._read_transcript_snapshot(transcript, limit=120000, rows=10, cols=40)
 
-    assert snapshot["transcriptTailReplayable"] is True
-    assert not snapshot["transcriptTail"].startswith("2026h")
-    assert "结论：模块拆分未完成" in snapshot["transcriptTail"]
+    assert snapshot["transcriptTail"] == ""
+    assert snapshot["transcriptTailReplayable"] is False
+    assert snapshot["transcriptTailRenderReason"] == "unsafe_tui_control_tail"
 
 
-def test_cli_agent_terminal_unsafe_tui_snapshot_strips_leading_parameter_fragment(tmp_path):
+def test_cli_agent_terminal_unsafe_tui_snapshot_blocks_leading_parameter_fragment(tmp_path):
     transcript = tmp_path / "terminal.log"
     cursor_noise = "".join(f"\x1b[{row};5H" for row in range(1, 28))
     transcript.write_text(
@@ -1383,9 +1692,9 @@ def test_cli_agent_terminal_unsafe_tui_snapshot_strips_leading_parameter_fragmen
 
     snapshot = terminal_service._read_transcript_snapshot(transcript, limit=120000, rows=10, cols=40)
 
-    assert snapshot["transcriptTailReplayable"] is True
-    assert not snapshot["transcriptTail"].startswith(";10;1")
-    assert "结论：模块拆分未完成" in snapshot["transcriptTail"]
+    assert snapshot["transcriptTail"] == ""
+    assert snapshot["transcriptTailReplayable"] is False
+    assert snapshot["transcriptTailRenderReason"] == "unsafe_tui_control_tail"
 
 
 def test_terminal_screen_buffer_keeps_split_escape_sequences_out_of_screen_text():
@@ -1425,9 +1734,37 @@ def test_cli_agent_terminal_preserves_current_screen_when_transcript_snapshot_is
         terminal_service._read_transcript_snapshot(transcript, limit=120000, rows=10, cols=40),
     )
 
-    assert merged["transcriptTailReplayable"] is True
+    assert merged["transcriptTail"] == ""
+    assert merged["transcriptTailReplayable"] is False
     assert merged["screenText"] == "已有可见画面"
     assert merged["screenParserVersion"] == terminal_service.SCREEN_BUFFER_PARSER_VERSION
+
+
+def test_cli_agent_live_snapshot_prefers_screen_without_reading_transcript_tail(monkeypatch, tmp_path):
+    transcript = tmp_path / "terminal.log"
+    transcript.write_text("line 1\nline 2\n", encoding="utf-8")
+    state = {
+        "rows": 10,
+        "cols": 40,
+        "screenText": "当前屏幕",
+        "screenReplay": "\x1b[2J\x1b[H当前屏幕",
+        "screenParserVersion": terminal_service.SCREEN_BUFFER_PARSER_VERSION,
+    }
+
+    def fail_read_tail(*args, **kwargs):
+        raise AssertionError("live screen snapshots should not read transcript tail")
+
+    monkeypatch.setattr(terminal_service, "_read_transcript_tail", fail_read_tail)
+
+    snapshot = terminal_service._read_transcript_snapshot_for_state(
+        transcript,
+        state,
+        include_transcript_tail=False,
+    )
+
+    assert snapshot["transcriptTail"] == ""
+    assert snapshot["transcriptTailReplayable"] is False
+    assert snapshot["transcriptTailRenderReason"] == "screen_snapshot_preferred"
 
 
 def test_cli_agent_terminal_discards_legacy_screen_when_transcript_snapshot_is_empty(tmp_path):
@@ -1446,7 +1783,8 @@ def test_cli_agent_terminal_discards_legacy_screen_when_transcript_snapshot_is_e
         terminal_service._read_transcript_snapshot(transcript, limit=120000, rows=10, cols=40),
     )
 
-    assert merged["transcriptTailReplayable"] is True
+    assert merged["transcriptTail"] == ""
+    assert merged["transcriptTailReplayable"] is False
     assert merged["screenText"] == ""
     assert not terminal_service._screen_initial_text(state)
 

@@ -25,6 +25,7 @@ from core.infrastructure.image_model_discovery import resolve_image_model, shoul
 from core.infrastructure.llm_utils import parse_tool_args
 from core.orchestration.tool_lifecycle import ToolLifecycleBridge
 from core.web.services.tool_catalog import bundle_ids_for_tool, explicit_allow_tool_names, list_tool_bundles, metadata_for_tool
+from core.infrastructure.tool_result import infer_tool_business_success
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -505,8 +506,14 @@ def _test_safe_builtin_tool(
     parsed_args = _agent_parse_tool_args(tool_name, test_args)
     with runtime_context:
         result, action = executor.execute(tool_name, parsed_args)
-    result_text = str(result or "")
-    status = "failed" if _is_tool_failure_result(result_text) else "succeeded"
+    if isinstance(result, (bytes, bytearray)):
+        try:
+            result_text = result.decode("utf-8", errors="replace")
+        except Exception:
+            result_text = str(result)
+    else:
+        result_text = str(result if result is not None else "")
+    status = "failed" if _is_tool_failure_result(result) else "succeeded"
     compatibility = _build_tool_message_compatibility(
         tool_name,
         parsed_args,
@@ -565,19 +572,20 @@ def _test_generated_tool_manifest(
             },
         }
 
+    status = "failed" if _is_tool_failure_result(result_text) else "succeeded"
     compatibility = _build_tool_message_compatibility(
         tool_name,
         parsed_args,
         result_text,
-        status="succeeded",
+        status=status,
         message="Generated manifest is compatible with an agent-style tool call.",
     )
     return {
         "toolId": tool_name,
         "source": "generated",
-        "status": "succeeded",
+        "status": status,
         "called": True,
-        "callable": True,
+        "callable": status == "succeeded",
         "message": "Generated tool manifest test executed without runtime code execution.",
         "resultPreview": result_text[:800],
         "argsUsed": parsed_args,
@@ -979,38 +987,7 @@ def _value_matches_schema_type(value: Any, expected: str) -> bool:
 
 
 def _is_tool_failure_result(result_text: Any) -> bool:
-    if isinstance(result_text, dict):
-        payload = result_text
-    elif isinstance(result_text, str):
-        if result_text.startswith("[错误]") or result_text.startswith("[超时]") or result_text.startswith("[短路]"):
-            return True
-        stripped = str(result_text).strip()
-        if not stripped.startswith("{"):
-            return False
-        try:
-            parsed = json.loads(stripped)
-        except Exception:
-            return False
-        if not isinstance(parsed, dict):
-            return False
-        payload = parsed
-    else:
-        return False
-
-    status = str(payload.get("status") or "").strip().lower()
-    if status in {
-        "failed",
-        "error",
-        "blocked",
-        "cancelled",
-        "no_result",
-        "submitted",
-        "in_progress",
-        "timeout",
-        "timed_out",
-    }:
-        return True
-    return payload.get("ok") is False or payload.get("success") is False
+    return not infer_tool_business_success(result_text)
 
 
 def _builtin_tool_items() -> list[dict[str, Any]]:

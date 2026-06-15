@@ -2039,6 +2039,9 @@ export type RuntimeSummary = {
   contextCompression: {
     enabled: boolean;
     source?: "runtime_state" | string;
+    policyMode?: "inherit" | "custom" | string;
+    policySource?: "global" | "agent_custom" | string;
+    policyAgentId?: string;
     scope?: "runtime_prompt_estimate" | string;
     tokenBasis?: "current_context_tokens" | string;
     limitBasis?: "effective_token_limit" | string;
@@ -2448,6 +2451,7 @@ export type SessionSummary = {
   agentRoleKey?: string;
   agentPromptTemplateId?: string;
   dialogueModelId?: string;
+  agentInboxPendingCount?: number;
   agentPrimaryDirectSessionId?: string;
   agentDirectSessionMismatch?: boolean;
   workspacePath?: string;
@@ -2802,6 +2806,37 @@ export type AgentTaskProfile = {
   handoffNotes: string;
 };
 
+export type AgentContextCompressionPolicy = {
+  mode: "inherit" | "custom" | string;
+  enabled?: boolean;
+  maxTokenLimit?: number;
+  maxCompressionsPerSession?: number;
+  levels?: {
+    light?: number;
+    standard?: number;
+    deep?: number;
+    emergency?: number;
+  };
+  summaryChars?: {
+    light?: number;
+    standard?: number;
+    deep?: number;
+    emergency?: number;
+  };
+  preservation?: {
+    keepAiMessages?: number;
+    preserveErrors?: boolean;
+    extractKeyDecisions?: boolean;
+  };
+};
+
+export type AgentContextCompressionEffectivePolicy = AgentContextCompressionPolicy & {
+  source: "global" | "agent_custom" | string;
+  effectiveTokenLimit: number;
+  contextWindowLimit: number;
+  agentPolicy?: AgentContextCompressionPolicy;
+};
+
 export type AgentInstance = {
   agentId: string;
   agentCode: string;
@@ -2810,6 +2845,8 @@ export type AgentInstance = {
   primaryMode: "chat" | "research" | "self_evolution" | "supervised_evolution" | "general" | string;
   roleKey: string;
   llmBindings: AgentLlmBindings;
+  contextCompressionPolicy?: AgentContextCompressionPolicy;
+  contextCompressionEffectivePolicy?: AgentContextCompressionEffectivePolicy;
   promptTemplateId: string;
   directSessionId: string;
   workspacePath: string;
@@ -4208,6 +4245,7 @@ export type ConversationSummary = {
   agentRoleKey?: string;
   agentPromptTemplateId?: string;
   dialogueModelId?: string;
+  agentInboxPendingCount?: number;
   agentMissing?: boolean;
   agentStatusCode?: string;
   agentStatusMessage?: string;

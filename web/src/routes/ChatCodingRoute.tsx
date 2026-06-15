@@ -209,6 +209,7 @@ type CliAgentRunResult = {
   semanticStatus?: string;
   internalStatus?: string;
   code?: string;
+  message?: string;
   runId?: string;
   cliRunId?: string;
   lockKey?: string;
@@ -273,6 +274,13 @@ type CliAgentTerminalSession = {
   resumed?: boolean;
   status?: string;
   semanticStatus?: string;
+  interactionState?: "live" | "history" | "resumable" | "closed" | string;
+  canInput?: boolean;
+  canResume?: boolean;
+  canStart?: boolean;
+  resumeAction?: "none" | "resume_session" | "start_new" | string;
+  displayMode?: "live_terminal" | "readonly_replay" | string;
+  stateReason?: string;
   alive?: boolean;
   userClosed?: boolean;
   closedTerminalSessionIds?: string[];
@@ -297,6 +305,25 @@ type CliAgentTerminalEvent = {
   type?: string;
   chunk?: string;
   session?: CliAgentTerminalSession;
+};
+
+type CliAgentTerminalAck = {
+  status?: string;
+  semanticStatus?: string;
+  code?: string;
+  action?: string;
+  terminalSessionId?: string;
+  alive?: boolean;
+  interactionState?: string;
+  canInput?: boolean;
+  canResume?: boolean;
+  canStart?: boolean;
+  resumeAction?: string;
+  displayMode?: string;
+  stateReason?: string;
+  rows?: number;
+  cols?: number;
+  updatedAt?: string;
 };
 
 function textArg(args: Record<string, unknown> | undefined, key: string) {
@@ -758,10 +785,20 @@ function terminalStatusText(session: CliAgentTerminalSession | null, connecting:
   if (!session) {
     return lang === "zh" ? "未连接" : "Disconnected";
   }
-  if (session.alive) {
+  const interactionState = String(session.interactionState || "").trim().toLowerCase();
+  if (session.canInput === true || interactionState === "live" || session.alive) {
     return session.resumed ? (lang === "zh" ? "已恢复" : "Resumed") : (lang === "zh" ? "运行中" : "Running");
   }
-  const status = String(session.status || "").trim();
+  if (interactionState === "resumable" || session.canResume) {
+    return lang === "zh" ? "可恢复" : "Resumable";
+  }
+  if (interactionState === "history") {
+    return lang === "zh" ? "只读历史" : "History";
+  }
+  const status = String(session.status || "").trim().toLowerCase();
+  if (interactionState === "closed" || session.userClosed || status === "closed") {
+    return lang === "zh" ? "已关闭" : "Closed";
+  }
   if (status === "exited") {
     return lang === "zh" ? "已退出" : "Exited";
   }
@@ -771,8 +808,60 @@ function terminalStatusText(session: CliAgentTerminalSession | null, connecting:
   return lang === "zh" ? "未运行" : "Stopped";
 }
 
+function canInputTerminal(session: CliAgentTerminalSession | null) {
+  if (!session) {
+    return false;
+  }
+  if (typeof session.canInput === "boolean") {
+    return session.canInput;
+  }
+  return Boolean(session.alive);
+}
+
+function parseTerminalErrorSession(error: unknown): Partial<CliAgentTerminalSession> | null {
+  const message = error instanceof Error ? error.message : String(error || "");
+  if (!message.trim()) {
+    return null;
+  }
+  try {
+    const payload = JSON.parse(message) as { detail?: unknown };
+    const detail = payload.detail;
+    if (!detail || typeof detail !== "object") {
+      return null;
+    }
+    const record = detail as Record<string, unknown>;
+    return {
+      terminalSessionId: typeof record.terminalSessionId === "string" ? record.terminalSessionId : undefined,
+      cliSessionId: typeof record.cliSessionId === "string" ? record.cliSessionId : undefined,
+      status: typeof record.status === "string" ? record.status : undefined,
+      alive: typeof record.alive === "boolean" ? record.alive : undefined,
+      interactionState: typeof record.interactionState === "string" ? record.interactionState : undefined,
+      canInput: typeof record.canInput === "boolean" ? record.canInput : undefined,
+      canResume: typeof record.canResume === "boolean" ? record.canResume : undefined,
+      canStart: typeof record.canStart === "boolean" ? record.canStart : undefined,
+      resumeAction: typeof record.resumeAction === "string" ? record.resumeAction : undefined,
+      displayMode: typeof record.displayMode === "string" ? record.displayMode : undefined,
+      stateReason: typeof record.stateReason === "string" ? record.stateReason : undefined,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function terminalErrorMessage(error: unknown, lang: "zh" | "en") {
+  const patch = parseTerminalErrorSession(error);
+  if (patch?.interactionState === "resumable" || patch?.canResume) {
+    return lang === "zh" ? "终端未运行，恢复会话后才能继续输入。" : "Terminal is not running. Resume the session before typing.";
+  }
+  if (patch?.interactionState === "closed") {
+    return lang === "zh" ? "终端已关闭，不能继续输入。" : "Terminal is closed and cannot accept input.";
+  }
+  const message = error instanceof Error ? error.message : String(error || "");
+  return message.trim() || (lang === "zh" ? "终端请求失败。" : "Terminal request failed.");
+}
+
 function isCliAgentRunActiveForClose(run: CliAgentRunView, session?: CliAgentTerminalSession) {
-  if (session?.alive) {
+  if (canInputTerminal(session || null)) {
     return true;
   }
   const status = String(session?.status || run.result?.terminalStatus || run.status || "").trim().toLowerCase();
@@ -812,29 +901,50 @@ function CliAgentRunTerminalPanel({
   const fitAddonRef = useRef<FitAddon | null>(null);
   const pendingReplayRef = useRef("");
   const terminalSessionIdRef = useRef("");
-  const terminalAliveRef = useRef(false);
+  const terminalCliSessionIdRef = useRef("");
+  const terminalCanInputRef = useRef(false);
   const terminalHasOutputRef = useRef(false);
   const lastPostedSizeRef = useRef<{ rows: number; cols: number } | null>(null);
   const terminalSessionId = String(terminalSession?.terminalSessionId || "").trim();
-  const statusText = terminalStatusText(terminalSession, connecting, lang);
-  const visibleCommand = Array.isArray(terminalSession?.commandPreview) && terminalSession?.commandPreview.length
+  const terminalCanInput = canInputTerminal(terminalSession);
+  const terminalCanResume = Boolean(terminalSession?.canResume && terminalSession?.resumeAction === "resume_session");
+  const terminalCanStart = Boolean(terminalSession?.canStart && terminalSession?.resumeAction === "start_new");
+  const terminalReadonly = Boolean(terminalSession && !terminalCanInput && terminalSession.displayMode === "readonly_replay");
+  const terminalCliSessionId = String(terminalSession?.cliSessionId || run.cliSessionId || run.result?.cliSessionId || "").trim();
+  const taskLocked = String(run.result?.semanticStatus || run.result?.status || run.status || "").trim().toLowerCase() === "task_locked"
+    || String(run.result?.code || "").trim() === "CLI_AGENT_TASK_LOCKED";
+  const taskLockedMessage = taskLocked
+    ? String(run.result?.message || (lang === "zh" ? "指令未发送：当前 CLI Agent 终端已有任务在运行。" : "Instruction was not sent: this CLI Agent terminal already has a running task.")).trim()
+    : "";
+  const statusText = taskLocked
+    ? (lang === "zh" ? "未发送" : "Not sent")
+    : terminalStatusText(terminalSession, connecting, lang);
+  const visibleCommand = taskLockedMessage || (Array.isArray(terminalSession?.commandPreview) && terminalSession?.commandPreview.length
     ? terminalSession.commandPreview.join(" ")
-    : run.commandLine;
+    : run.commandLine);
   const snapshotFallbackAvailable = Boolean(String(terminalSession?.screenText || "").trim());
-  const transcriptReplayBlocked = terminalSession?.transcriptTailReplayable === false && !snapshotFallbackAvailable;
+  const transcriptReplayBlocked = terminalReadonly && terminalSession?.transcriptTailReplayable === false && !snapshotFallbackAvailable;
   const emptyText = terminalError
+    || (terminalReadonly
+      ? (terminalCanResume
+        ? (lang === "zh" ? "当前显示的是历史终端。恢复会话后才能继续输入。" : "This is terminal history. Resume the session before typing.")
+        : (lang === "zh" ? "当前显示的是只读历史。新开 CLI 后才能输入。" : "This is read-only history. Start a new CLI before typing."))
+      : "")
     || (connecting
       ? (lang === "zh" ? "正在连接命令会话..." : "Connecting terminal session...")
       : transcriptReplayBlocked
         ? (lang === "zh"
           ? "终端已连接；历史 TUI 画面无法安全重放，等待新的可渲染输出。"
           : "Terminal connected; the historical TUI screen cannot be safely replayed. Waiting for new renderable output.")
+        : terminalSession?.interactionState === "live" && terminalSession?.resumed
+          ? (lang === "zh" ? "已恢复，等待终端输出。" : "Resumed. Waiting for terminal output.")
       : (lang === "zh" ? "命令会话还没有输出。" : "No terminal output yet."));
 
   useEffect(() => {
     terminalSessionIdRef.current = terminalSessionId;
-    terminalAliveRef.current = Boolean(terminalSession?.alive);
-  }, [terminalSession?.alive, terminalSessionId]);
+    terminalCliSessionIdRef.current = terminalCliSessionId;
+    terminalCanInputRef.current = terminalCanInput;
+  }, [terminalCanInput, terminalCliSessionId, terminalSessionId]);
 
   const markTerminalHasOutput = useCallback(() => {
     if (terminalHasOutputRef.current) {
@@ -889,22 +999,36 @@ function CliAgentRunTerminalPanel({
 
   const sendTerminalRawInput = useCallback((data: string) => {
     const sessionId = terminalSessionIdRef.current;
-    if (!sessionId || !terminalAliveRef.current || !data) {
+    if (!data) {
+      return;
+    }
+    if (!sessionId || !terminalCanInputRef.current) {
+      setTerminalError(lang === "zh" ? "终端未运行，请先恢复会话。" : "Terminal is not running. Resume the session first.");
       return;
     }
     setTerminalError("");
-    fetchJson<CliAgentTerminalSession>(`/api/cli-agents/terminal-sessions/${encodeURIComponent(sessionId)}/input`, {
+    fetchJson<CliAgentTerminalAck>(`/api/cli-agents/terminal-sessions/${encodeURIComponent(sessionId)}/input`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ data }),
     })
-      .then((session) => setTerminalSession(session))
-      .catch((error) => setTerminalError(error instanceof Error ? error.message : String(error)));
-  }, []);
+      .then((ack) => {
+        if (ack.alive === false) {
+          setTerminalSession((current) => current ? { ...current, ...ack, alive: false } : current);
+        }
+      })
+      .catch((error) => {
+        const errorSession = parseTerminalErrorSession(error);
+        if (errorSession) {
+          setTerminalSession((current) => current ? { ...current, ...errorSession } : current);
+        }
+        setTerminalError(terminalErrorMessage(error, lang));
+      });
+  }, [lang]);
 
   const postTerminalSize = useCallback((rows: number, cols: number) => {
     const sessionId = terminalSessionIdRef.current;
-    if (!sessionId || rows <= 0 || cols <= 0) {
+    if (!sessionId || !terminalCanInputRef.current || rows <= 0 || cols <= 0) {
       return;
     }
     const previous = lastPostedSizeRef.current;
@@ -912,12 +1036,25 @@ function CliAgentRunTerminalPanel({
       return;
     }
     lastPostedSizeRef.current = { rows, cols };
-    fetchJson<CliAgentTerminalSession>(`/api/cli-agents/terminal-sessions/${encodeURIComponent(sessionId)}/resize`, {
+    fetchJson<CliAgentTerminalAck>(`/api/cli-agents/terminal-sessions/${encodeURIComponent(sessionId)}/resize`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ rows, cols }),
     })
-      .then((session) => setTerminalSession(session))
+      .then((ack) => {
+        setTerminalSession((current) => {
+          if (!current || ack.terminalSessionId !== current.terminalSessionId) {
+            return current;
+          }
+          return {
+            ...current,
+            alive: typeof ack.alive === "boolean" ? ack.alive : current.alive,
+            rows: typeof ack.rows === "number" ? ack.rows : current.rows,
+            cols: typeof ack.cols === "number" ? ack.cols : current.cols,
+            updatedAt: ack.updatedAt || current.updatedAt,
+          };
+        });
+      })
       .catch(() => undefined);
   }, []);
 
@@ -934,6 +1071,20 @@ function CliAgentRunTerminalPanel({
       return;
     }
   }, [postTerminalSize]);
+
+  const terminalSizeForRequest = useCallback(() => {
+    const terminal = terminalRef.current;
+    const fitAddon = fitAddonRef.current;
+    if (!terminal || !fitAddon) {
+      return { rows: 28, cols: 100 };
+    }
+    try {
+      fitAddon.fit();
+    } catch {
+      return { rows: terminal.rows || 28, cols: terminal.cols || 100 };
+    }
+    return { rows: terminal.rows || 28, cols: terminal.cols || 100 };
+  }, []);
 
   useEffect(() => {
     const element = terminalElementRef.current;
@@ -1018,6 +1169,52 @@ function CliAgentRunTerminalPanel({
     });
   }, [active, fitTerminal, terminalSessionId]);
 
+  const fetchTerminalSession = useCallback((intent: "view" | "resume" | "start", signal?: AbortSignal) => {
+    const terminalSize = terminalSizeForRequest();
+    return fetchJson<CliAgentTerminalSession>("/api/cli-agents/terminal-sessions/ensure", {
+      method: "POST",
+      signal,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        agentType: run.agentType,
+        task: run.task,
+        cwd: run.cwd,
+        mode: run.mode || "readonly",
+        intent,
+        sourceSessionId,
+        sourceMessageId: run.messageId,
+        sourceRunId: run.sourceRunId,
+        cliSessionId: intent === "start" ? "" : terminalCliSessionIdRef.current,
+        rows: terminalSize.rows,
+        cols: terminalSize.cols,
+      }),
+    })
+      .then((session) => {
+        setTerminalSession(session);
+        if (intent === "view" || !canInputTerminal(session)) {
+          replayTerminalSnapshot(session);
+        } else {
+          writeTerminalChunk("", { reset: true });
+          window.requestAnimationFrame(fitTerminal);
+        }
+        return session;
+      });
+  }, [fitTerminal, replayTerminalSnapshot, run.agentType, run.cwd, run.messageId, run.mode, run.sourceRunId, run.task, sourceSessionId, terminalSizeForRequest, writeTerminalChunk]);
+
+  const requestTerminalSession = useCallback((intent: "resume" | "start") => {
+    setConnecting(true);
+    setTerminalError("");
+    fetchTerminalSession(intent)
+      .catch((error) => {
+        const errorSession = parseTerminalErrorSession(error);
+        if (errorSession) {
+          setTerminalSession((current) => current ? { ...current, ...errorSession } : current);
+        }
+        setTerminalError(terminalErrorMessage(error, lang));
+      })
+      .finally(() => setConnecting(false));
+  }, [fetchTerminalSession, lang]);
+
   useEffect(() => {
     let disposed = false;
     const controller = new AbortController();
@@ -1027,35 +1224,17 @@ function CliAgentRunTerminalPanel({
     lastPostedSizeRef.current = null;
     writeTerminalChunk("", { reset: true });
 
-    fetchJson<CliAgentTerminalSession>("/api/cli-agents/terminal-sessions/ensure", {
-      method: "POST",
-      signal: controller.signal,
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        agentType: run.agentType,
-        task: run.task,
-        cwd: run.cwd,
-        mode: run.mode || "readonly",
-        sourceSessionId,
-        sourceMessageId: run.messageId,
-        sourceRunId: run.sourceRunId,
-        cliSessionId: String(run.cliSessionId || run.result?.cliSessionId || ""),
-        rows: 28,
-        cols: 100,
-      }),
-    })
-      .then((session) => {
+    fetchTerminalSession("view", controller.signal)
+      .then(() => {
         if (disposed) {
           return;
         }
-        setTerminalSession(session);
-        replayTerminalSnapshot(session);
       })
       .catch((error) => {
         if (disposed || controller.signal.aborted) {
           return;
         }
-        setTerminalError(error instanceof Error ? error.message : String(error));
+        setTerminalError(terminalErrorMessage(error, lang));
       })
       .finally(() => {
         if (!disposed) {
@@ -1067,7 +1246,7 @@ function CliAgentRunTerminalPanel({
       disposed = true;
       controller.abort();
     };
-  }, [replayTerminalSnapshot, run.agentType, run.cliSessionId, run.cwd, run.messageId, run.mode, run.sourceRunId, run.task, sourceSessionId, writeTerminalChunk]);
+  }, [fetchTerminalSession, lang, writeTerminalChunk]);
 
   useEffect(() => {
     if (terminalSession) {
@@ -1083,14 +1262,15 @@ function CliAgentRunTerminalPanel({
     const handleEvent = (event: MessageEvent) => {
       try {
         const payload = JSON.parse(String(event.data || "{}")) as CliAgentTerminalEvent;
-        if (payload.session) {
-          setTerminalSession(payload.session);
-          if (payload.type === "terminal_snapshot") {
-            replayTerminalSnapshot(payload.session);
-          }
-        }
         if (payload.type === "terminal_output" && payload.chunk) {
           writeTerminalChunk(payload.chunk);
+          return;
+        }
+        if (payload.session) {
+          setTerminalSession(payload.session);
+          if (payload.type === "terminal_snapshot" && !canInputTerminal(payload.session)) {
+            replayTerminalSnapshot(payload.session);
+          }
         }
       } catch {
         return;
@@ -1100,7 +1280,7 @@ function CliAgentRunTerminalPanel({
     stream.addEventListener("terminal_output", handleEvent as EventListener);
     stream.addEventListener("terminal_status", handleEvent as EventListener);
     stream.onerror = () => {
-      setTerminalSession((current) => current ? { ...current, alive: false } : current);
+      setTerminalSession((current) => current ? { ...current, alive: false, canInput: false } : current);
     };
     return () => {
       stream.removeEventListener("terminal_snapshot", handleEvent as EventListener);
@@ -1125,10 +1305,24 @@ function CliAgentRunTerminalPanel({
             <span>{statusText}</span>
           </span>
           <code>{visibleCommand}</code>
+          {terminalCanResume || terminalCanStart ? (
+            <button
+              type="button"
+              className={styles.cliAgentTerminalAction}
+              onClick={() => requestTerminalSession(terminalCanResume ? "resume" : "start")}
+              disabled={connecting}
+              title={terminalCanResume
+                ? (lang === "zh" ? "恢复这个 CLI 会话" : "Resume this CLI session")
+                : (lang === "zh" ? "新开一个 CLI 会话" : "Start a new CLI session")}
+            >
+              <RotateCcw size={13} aria-hidden="true" />
+              <span>{terminalCanResume ? (lang === "zh" ? "恢复" : "Resume") : (lang === "zh" ? "新开" : "Start")}</span>
+            </button>
+          ) : null}
         </div>
         <div className={styles.cliAgentTerminalOutputShell}>
           <div ref={terminalElementRef} className={styles.cliAgentTerminalOutput} />
-          {terminalError || !terminalHasOutput ? (
+          {terminalError || terminalReadonly || !terminalHasOutput ? (
             <div className={styles.cliAgentTerminalOverlay} data-tone={terminalError ? "error" : "muted"}>
               {emptyText}
             </div>
@@ -4769,7 +4963,9 @@ export function ChatCodingRoute() {
       ? t("cacheHitNotCalled")
     : t("cacheHitMissing");
   const llmUsageLine = hasProviderLlmUsage
-    ? `${numberFormatter.format(sessionLlmUsage.inputTokens)} tokens · ${numberFormatter.format(sessionLlmUsage.cachedInputTokens)} cached`
+    ? lang === "zh"
+      ? `${numberFormatter.format(sessionLlmUsage.inputTokens)} · 缓 ${numberFormatter.format(sessionLlmUsage.cachedInputTokens)}`
+      : `${numberFormatter.format(sessionLlmUsage.inputTokens)} in · ${numberFormatter.format(sessionLlmUsage.cachedInputTokens)} cached`
     : llmUsageNotCalled
       ? t("llmUsageNotCalled")
     : t("llmUsageMissing");
@@ -4803,14 +4999,19 @@ export function ChatCodingRoute() {
   const compressionMainLine = compression
     ? `${numberFormatter.format(compression.currentTokens)} / ${numberFormatter.format(compression.effectiveTokenLimit)} · ${compressionCurrentPercent}%`
     : t("loadingContext");
+  const compressionPolicySourceLine = compression
+    ? compression.policySource === "agent_custom"
+      ? (lang === "zh" ? "Agent 自定义策略" : "Agent custom policy")
+      : (lang === "zh" ? "继承全局策略" : "Inherited global policy")
+    : t("loadingContext");
   const compressionScopeLine = compression
-    ? `${t("compressionScopeRuntime")} · ${t("compressionLimitBasisEffective")}`
+    ? `${t("compressionScopeRuntime")} · ${compressionPolicySourceLine}`
     : t("loadingContext");
   const compressionModelWindowLine = compression
     ? numberFormatter.format(compression.contextWindowLimit)
     : "--";
   const compressionTitleLine = compression
-    ? `${compressionMainLine} · ${compressionScopeLine} · window ${numberFormatter.format(compression.contextWindowLimit)} · source ${compression.source || "runtime_state"}`
+    ? `${compressionMainLine} · ${compressionScopeLine} · ${t("compressionLimitBasisEffective")} · window ${numberFormatter.format(compression.contextWindowLimit)} · source ${compression.source || "runtime_state"}`
     : t("loadingContext");
   const lastCompression = compression?.lastCompression ?? null;
   const lastCompressionSourceText = (() => {
@@ -4903,16 +5104,6 @@ export function ChatCodingRoute() {
     : "";
   const sessionCompactRows = buildVisiblePanelRows(
     [
-      ...(tokenSpeedTracker ? [{
-        label: t("tokenSpeed"),
-        value: tokenSpeedValue,
-        title: tokenSpeedTitle,
-      }] : []),
-      {
-        label: t("llmInputTokens"),
-        value: llmUsageLine,
-        title: llmUsageTitle,
-      },
       {
         label: t("fileContext"),
         value: fileContextValue,
@@ -4928,21 +5119,71 @@ export function ChatCodingRoute() {
         value: latestControlSignalLine,
         title: latestControlSignalTitle,
       }] : []),
-      {
-        label: t("currentTask"),
-        value: currentTaskSummary,
-        title: currentTaskSummary,
-      },
-      {
-        label: t("promptCache"),
-        value: cacheHitLine,
-        title: sessionCacheUsage
-          ? `${t("promptCacheLast")} ${numberFormatter.format(sessionCacheUsage.lastCachedInputTokens)} / ${numberFormatter.format(sessionCacheUsage.lastInputTokens)} · ${t("promptCacheTotal")} ${numberFormatter.format(sessionCacheUsage.totalCachedInputTokens)} / ${numberFormatter.format(sessionCacheUsage.totalInputTokens)}`
-          : t("cacheObservationPending"),
-      },
     ],
     [t("preparingShell"), t("loadingSession"), t("loadingContext")],
   );
+  const tokenCompressionStrategyLevels = compression?.strategy?.levels ?? [];
+  const tokenCompressionStrategyKeywords = (compression?.strategy?.errorProtectionKeywords ?? []).join(" / ") || "--";
+  const tokenCompressionLevelLabel = compressionLevelLabel === "--"
+    ? (lang === "zh" ? "默认" : "Default")
+    : compressionLevelLabel;
+  const tokenCompressionCurrentMeta = compressionCurrentLine === "-- · --" ? "" : compressionCurrentLine;
+  const tokenCompressionRows: Array<{ key: string; label: string; value: string; meta?: string; title?: string }> = [
+    {
+      key: "llm",
+      label: "Token",
+      value: hasProviderLlmUsage
+        ? `${numberFormatter.format(sessionLlmUsage.inputTokens)} / ${numberFormatter.format(sessionLlmUsage.outputTokens ?? 0)}`
+        : llmUsageLine,
+      meta: hasProviderLlmUsage
+        ? (lang === "zh"
+          ? `缓存 ${numberFormatter.format(sessionLlmUsage.cachedInputTokens)} · 写 ${numberFormatter.format(sessionLlmUsage.cacheCreationInputTokens ?? 0)}`
+          : `cached ${numberFormatter.format(sessionLlmUsage.cachedInputTokens)} · write ${numberFormatter.format(sessionLlmUsage.cacheCreationInputTokens ?? 0)}`)
+        : "",
+      title: llmUsageTitle,
+    },
+    ...(tokenSpeedTracker ? [{
+      key: "speed",
+      label: lang === "zh" ? "速度" : "Speed",
+      value: tokenSpeedValue,
+      meta: tokenSpeedTracker.tokenCount > 0 ? numberFormatter.format(tokenSpeedTracker.tokenCount) : "",
+      title: tokenSpeedTitle,
+    }] : []),
+    {
+      key: "cache",
+      label: lang === "zh" ? "缓存" : "Cache",
+      value: cacheHitLine,
+      meta: hasProviderCacheUsage && sessionCacheUsage
+        ? `${t("promptCacheTotal")} ${numberFormatter.format(sessionCacheUsage.totalCachedInputTokens)} / ${numberFormatter.format(sessionCacheUsage.totalInputTokens)}`
+        : cacheCompositionSummary,
+      title: sessionCacheUsage
+        ? `${t("promptCacheLast")} ${numberFormatter.format(sessionCacheUsage.lastCachedInputTokens)} / ${numberFormatter.format(sessionCacheUsage.lastInputTokens)} · ${t("promptCacheTotal")} ${numberFormatter.format(sessionCacheUsage.totalCachedInputTokens)} / ${numberFormatter.format(sessionCacheUsage.totalInputTokens)}`
+        : cacheCompositionTitle,
+    },
+    {
+      key: "context",
+      label: lang === "zh" ? "上下文" : "Context",
+      value: contextStatusLine,
+      meta: contextCompositionSummary,
+      title: contextCompositionTitle,
+    },
+    {
+      key: "compression",
+      label: lang === "zh" ? "阈值" : "Limit",
+      value: compressionMainLine,
+      meta: tokenCompressionCurrentMeta,
+      title: compressionTitleLine,
+    },
+    {
+      key: "strategy",
+      label: lang === "zh" ? "策略" : "Policy",
+      value: tokenCompressionLevelLabel,
+      meta: tokenCompressionStrategyLevels.length
+        ? `${numberFormatter.format(tokenCompressionStrategyLevels.length)} ${lang === "zh" ? "档" : "levels"}`
+        : (tokenCompressionStrategyKeywords !== "--" ? tokenCompressionStrategyKeywords : ""),
+      title: tokenCompressionStrategyKeywords,
+    },
+  ].filter((row) => row.label.trim() && row.value.trim());
   const mental = runtime?.mentalState;
   const mentalCognitiveStateValue = String(mental?.cognitiveState ?? "unknown").trim().toLowerCase() || "unknown";
   const mentalSourceValue = String(mental?.source ?? "unavailable").trim().toLowerCase() || "unavailable";
@@ -6347,187 +6588,158 @@ export function ChatCodingRoute() {
           </div>
         </section>
 
-        <section className={`${styles.leftBlock} ${styles.contextStatusCard}`}>
+        <section className={`${styles.leftBlock} ${styles.tokenCompressionCard}`}>
           <div className={styles.sectionHeader}>
             <div className={styles.sectionIdentity}>
-              <p className={styles.blockEyebrow}>{t("contextDiagnostics")}</p>
-              <h3 className={styles.sectionTitle}>{t("sessionContextEstimate")}</h3>
-            </div>
-            <span className={styles.metricValue}>{contextPercent}%</span>
-          </div>
-          <div className={styles.resourceSplit}>
-            <div className={styles.resourceMetric}>
-              <span>{contextSourceLine}</span>
-              <strong title={contextStatusLine}>{contextStatusLine}</strong>
-            </div>
-            <div className={styles.resourceMetric}>
-              <span>{t("previousContextComposition")}</span>
-              <strong title={contextCompositionTitle}>{contextCompositionSummary}</strong>
-            </div>
-          </div>
-          <section className={styles.contextCompositionPanel} aria-label={lang === "zh" ? "状态栏上一轮上下文事实" : "Status bar previous turn context facts"}>
-            <div className={styles.contextCompositionItem} title={contextCompositionTitle}>
-              <div className={styles.contextCompositionBar} aria-hidden="true">
-                {contextCompositionSegments.length ? (
-                  contextCompositionSegments.map((segment) => (
-                    <span
-                      key={`${segment.key}-${segment.source}`}
-                      className={`${styles.contextCompositionSegment} ${styles.contextCompositionSegmentExact} ${contextCompositionSegmentClass(segment.key)}`}
-                      style={{ width: contextWindowSegmentWidth(segment.tokens ?? 0, contextCompositionLimitTokens) }}
-                    />
-                  ))
-                ) : (
-                  <span className={`${styles.contextCompositionSegment} ${styles.contextCompositionSegmentMissing}`} />
-                )}
-                {contextCompositionRemainingTokens > 0 ? (
-                  <span
-                    className={`${styles.contextCompositionSegment} ${styles.contextCompositionSegmentExact} ${styles.contextCompositionSegmentUnused}`}
-                    style={{ width: contextWindowSegmentWidth(contextCompositionRemainingTokens, contextCompositionLimitTokens) }}
-                  />
-                ) : null}
-              </div>
-              {contextCompositionSegments.length ? (
-                <div className={styles.contextCompositionLegend}>
-                  {contextCompositionSegments.map((segment) => (
-                    <span key={`${segment.key}-${segment.source}-legend`} title={segment.description || segment.source}>
-                      <i className={contextCompositionSegmentClass(segment.key)} />
-                      {contextCompositionSegmentLabel(segment.key, segment.label, t)}
-                      {" "}
-                      {numberFormatter.format(segment.tokens ?? 0)}
-                    </span>
-                  ))}
-                </div>
-              ) : null}
-            </div>
-          </section>
-        </section>
-
-        <section className={`${styles.leftBlock} ${styles.cacheStatusCard}`}>
-          <div className={styles.sectionHeader}>
-            <div className={styles.sectionIdentity}>
-              <p className={styles.blockEyebrow}>{t("promptCache")}</p>
-              <h3 className={styles.sectionTitle}>{t("previousCacheHit")}</h3>
-            </div>
-            <span className={styles.metricValue}>{cacheCompositionPercent}%</span>
-          </div>
-          <div className={styles.cacheDonutPanel}>
-            <button
-              type="button"
-              className={styles.cacheDonutTrigger}
-              onClick={openCacheDetail}
-              disabled={!cacheDetailAvailable}
-              aria-label={cacheDetailOpenLabel}
-              aria-expanded={cacheDetailOpen}
-              aria-controls={cacheDetailOpen ? "cache-detail-dialog" : undefined}
-              title={cacheDetailOpenLabel}
-            >
-              <span className={styles.cacheDonutShell}>
-                <svg
-                  className={styles.cacheDonutSvg}
-                  viewBox="0 0 100 100"
-                  role="img"
-                  aria-label={cacheCompositionTitle}
-                >
-                  <circle className={`${styles.cacheDonutTrack} ${styles.cacheDonutOuterTrack}`} cx="50" cy="50" r="42" pathLength={100} />
-                  {cachePromptDonutSegments.map((segment, index) => (
-                    <circle
-                      key={`computed-${segment.key}-${segment.status}-${index}`}
-                      className={`${styles.cacheDonutSegment} ${styles.cacheDonutOuterSegment} ${cachePromptSegmentClass(segment)}`}
-                      cx="50"
-                      cy="50"
-                      r="42"
-                      pathLength={100}
-                      style={cacheDonutSegmentStyle(segment, cachePromptDonutSegments.length > 1 ? 0.55 : 0)}
-                    >
-                      <title>{cachePromptSegmentHoverTitle(segment, cachePromptCompositionTotalTokens, numberFormatter, lang, t)}</title>
-                    </circle>
-                  ))}
-                  <circle className={`${styles.cacheDonutTrack} ${styles.cacheDonutInnerTrack}`} cx="50" cy="50" r="31" pathLength={100} />
-                  {trueCacheDonutSegments.map((segment, index) => (
-                    <circle
-                      key={`true-${segment.key}-${segment.status}-${index}`}
-                      className={`${styles.cacheDonutSegment} ${styles.cacheDonutInnerSegment} ${cacheDonutSegmentClass(segment.status || segment.key)}`}
-                      cx="50"
-                      cy="50"
-                      r="31"
-                      pathLength={100}
-                      style={cacheDonutSegmentStyle(segment, trueCacheDonutSegments.length > 1 ? 0.4 : 0)}
-                    />
-                  ))}
-                </svg>
-                <div className={styles.cacheDonutCenter} title={cacheDetailOpenLabel}>
-                  <strong>{cacheCompositionPercent}%</strong>
-                  <span>{cacheCompositionComputedLabel} {computedCacheCompositionPercent}%</span>
-                  <small>{cacheCompositionAverageLabel} {cacheCompositionAverageValue}</small>
-                </div>
-              </span>
-            </button>
-            <div className={styles.cacheDonutStats}>
-              <span title={cacheDetailOpenLabel}>
-                <b>{lang === "zh" ? "真实" : "true"}</b>
-                {numberFormatter.format(providerCachedInputTokens)} / {numberFormatter.format(providerCacheInputTokens)}
-              </span>
-              <span title={cacheDetailOpenLabel}>
-                <b>{lang === "zh" ? "计算" : "calc"}</b>
-                {numberFormatter.format(lastCacheComposition?.computedCachedInputTokens ?? 0)} / {numberFormatter.format(computedCacheCompositionTotalTokens)}
-              </span>
-              <span title={cacheDetailOpenLabel}>
-                <b>{lang === "zh" ? "总均" : "avg"}</b>
-                {cacheCompositionAverageValue}
-                {averageCacheObservedTurnCount > 0 ? ` · ${numberFormatter.format(averageCacheObservedTurnCount)}` : ""}
-              </span>
-            </div>
-          </div>
-        </section>
-
-        <section className={`${styles.leftBlock} ${styles.resourceBlock} ${styles.compressionStatusCard}`}>
-          <div className={styles.sectionHeader}>
-            <div className={styles.sectionIdentity}>
-              <p className={styles.blockEyebrow}>{t("contextCompression")}</p>
-              <h3 className={styles.sectionTitle} title={compressionTitleLine}>{compressionCurrentLine}</h3>
+              <p className={styles.blockEyebrow}>{lang === "zh" ? "Token / 压缩" : "Token / Compression"}</p>
+              <h3 className={styles.sectionTitle}>{lang === "zh" ? "状态矩阵" : "Status matrix"}</h3>
             </div>
             <span className={styles.metricValue}>{compressionCurrentPercent}%</span>
           </div>
-          <div className={styles.compressionFactGrid} title={compressionTitleLine}>
-            <div className={styles.compressionFact}>
-              <span title={t("runtimeContextEstimate")}>{lang === "zh" ? "当前" : "Now"}</span>
-              <strong>{compressionMainLine}</strong>
-            </div>
-            <div className={styles.compressionFact}>
-              <span title={t("compressionModelWindow")}>{lang === "zh" ? "窗口" : "Window"}</span>
-              <strong>{compressionModelWindowLine}</strong>
-            </div>
-            <div className={`${styles.compressionFact} ${styles.compressionFactWide}`}>
-              <span title={t("compressionThresholdBasis")}>{lang === "zh" ? "口径" : "Basis"}</span>
-              <strong>{compressionScopeLine}</strong>
-            </div>
+          <div className={styles.tokenCompressionTable}>
+            {tokenCompressionRows.map((row) => (
+              <div key={row.key} className={styles.tokenCompressionRow} title={row.title ?? row.value}>
+                <span>{row.label}</span>
+                <strong>{row.value}</strong>
+                {row.meta ? <small>{row.meta}</small> : null}
+              </div>
+            ))}
           </div>
-          <p className={styles.oneLineValue} title={lastCompression?.reason || lastCompressionLine}>
-            <span>{lang === "zh" ? "最近" : "Last"}</span>
-            {lastCompressionLine}
-          </p>
-        </section>
 
-        <section className={`${styles.leftBlock} ${styles.compressionStrategyCard}`}>
-          <div className={styles.sectionHeader}>
-            <div className={styles.sectionIdentity}>
-              <p className={styles.blockEyebrow}>{t("compressionStrategy")}</p>
-              <h3 className={styles.sectionTitle} title={compressionTitleLine}>{compressionLevelLabel}</h3>
+          <div className={styles.tokenCompressionVisuals}>
+            <div className={styles.tokenCompressionMiniPanel} title={contextCompositionTitle}>
+              <div className={styles.tokenCompressionMiniHeader}>
+                <span>{t("previousContextComposition")}</span>
+                <strong>{contextCompositionUsedPercent}%</strong>
+              </div>
+              <section className={styles.contextCompositionPanel} aria-label={lang === "zh" ? "状态栏上一轮上下文事实" : "Status bar previous turn context facts"}>
+                <div className={styles.contextCompositionItem}>
+                  <div className={styles.contextCompositionBar} aria-hidden="true">
+                    {contextCompositionSegments.length ? (
+                      contextCompositionSegments.map((segment) => (
+                        <span
+                          key={`${segment.key}-${segment.source}`}
+                          className={`${styles.contextCompositionSegment} ${styles.contextCompositionSegmentExact} ${contextCompositionSegmentClass(segment.key)}`}
+                          style={{ width: contextWindowSegmentWidth(segment.tokens ?? 0, contextCompositionLimitTokens) }}
+                        />
+                      ))
+                    ) : (
+                      <span className={`${styles.contextCompositionSegment} ${styles.contextCompositionSegmentMissing}`} />
+                    )}
+                    {contextCompositionRemainingTokens > 0 ? (
+                      <span
+                        className={`${styles.contextCompositionSegment} ${styles.contextCompositionSegmentExact} ${styles.contextCompositionSegmentUnused}`}
+                        style={{ width: contextWindowSegmentWidth(contextCompositionRemainingTokens, contextCompositionLimitTokens) }}
+                      />
+                    ) : null}
+                  </div>
+                  {contextCompositionSegments.length ? (
+                    <div className={styles.contextCompositionLegend}>
+                      {contextCompositionSegments.map((segment) => (
+                        <span key={`${segment.key}-${segment.source}-legend`} title={segment.description || segment.source}>
+                          <i className={contextCompositionSegmentClass(segment.key)} />
+                          {contextCompositionSegmentLabel(segment.key, segment.label, t)}
+                          {" "}
+                          {numberFormatter.format(segment.tokens ?? 0)}
+                        </span>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+              </section>
             </div>
-            <span className={styles.metricValue}>{compression?.strategy.levels.length ?? 0}</span>
+            <div className={styles.tokenCompressionMiniPanel}>
+              <div className={styles.tokenCompressionMiniHeader}>
+                <span>{t("previousCacheHit")}</span>
+                <strong>{cacheCompositionPercent}%</strong>
+              </div>
+              <div className={styles.cacheDonutPanel}>
+                <button
+                  type="button"
+                  className={styles.cacheDonutTrigger}
+                  onClick={openCacheDetail}
+                  disabled={!cacheDetailAvailable}
+                  aria-label={cacheDetailOpenLabel}
+                  aria-expanded={cacheDetailOpen}
+                  aria-controls={cacheDetailOpen ? "cache-detail-dialog" : undefined}
+                  title={cacheDetailOpenLabel}
+                >
+                  <span className={styles.cacheDonutShell}>
+                    <svg
+                      className={styles.cacheDonutSvg}
+                      viewBox="0 0 100 100"
+                      role="img"
+                      aria-label={cacheCompositionTitle}
+                    >
+                      <circle className={`${styles.cacheDonutTrack} ${styles.cacheDonutOuterTrack}`} cx="50" cy="50" r="42" pathLength={100} />
+                      {cachePromptDonutSegments.map((segment, index) => (
+                        <circle
+                          key={`computed-${segment.key}-${segment.status}-${index}`}
+                          className={`${styles.cacheDonutSegment} ${styles.cacheDonutOuterSegment} ${cachePromptSegmentClass(segment)}`}
+                          cx="50"
+                          cy="50"
+                          r="42"
+                          pathLength={100}
+                          style={cacheDonutSegmentStyle(segment, cachePromptDonutSegments.length > 1 ? 0.55 : 0)}
+                        >
+                          <title>{cachePromptSegmentHoverTitle(segment, cachePromptCompositionTotalTokens, numberFormatter, lang, t)}</title>
+                        </circle>
+                      ))}
+                      <circle className={`${styles.cacheDonutTrack} ${styles.cacheDonutInnerTrack}`} cx="50" cy="50" r="31" pathLength={100} />
+                      {trueCacheDonutSegments.map((segment, index) => (
+                        <circle
+                          key={`true-${segment.key}-${segment.status}-${index}`}
+                          className={`${styles.cacheDonutSegment} ${styles.cacheDonutInnerSegment} ${cacheDonutSegmentClass(segment.status || segment.key)}`}
+                          cx="50"
+                          cy="50"
+                          r="31"
+                          pathLength={100}
+                          style={cacheDonutSegmentStyle(segment, trueCacheDonutSegments.length > 1 ? 0.4 : 0)}
+                        />
+                      ))}
+                    </svg>
+                    <div className={styles.cacheDonutCenter} title={cacheDetailOpenLabel}>
+                      <strong>{cacheCompositionPercent}%</strong>
+                      <span>{cacheCompositionComputedLabel} {computedCacheCompositionPercent}%</span>
+                      <small>{cacheCompositionAverageLabel} {cacheCompositionAverageValue}</small>
+                    </div>
+                  </span>
+                </button>
+                <div className={styles.cacheDonutStats}>
+                  <span title={cacheDetailOpenLabel}>
+                    <b>{lang === "zh" ? "真实" : "true"}</b>
+                    {numberFormatter.format(providerCachedInputTokens)} / {numberFormatter.format(providerCacheInputTokens)}
+                  </span>
+                  <span title={cacheDetailOpenLabel}>
+                    <b>{lang === "zh" ? "计算" : "calc"}</b>
+                    {numberFormatter.format(lastCacheComposition?.computedCachedInputTokens ?? 0)} / {numberFormatter.format(computedCacheCompositionTotalTokens)}
+                  </span>
+                  <span title={cacheDetailOpenLabel}>
+                    <b>{lang === "zh" ? "总均" : "avg"}</b>
+                    {cacheCompositionAverageValue}
+                    {averageCacheObservedTurnCount > 0 ? ` · ${numberFormatter.format(averageCacheObservedTurnCount)}` : ""}
+                  </span>
+                </div>
+              </div>
+            </div>
           </div>
-          <div className={styles.compressionStrategyList}>
-            {(compression?.strategy.levels ?? []).map((level) => (
+
+          {tokenCompressionStrategyLevels.length ? (
+            <div className={styles.tokenCompressionStrategyStrip}>
+              {tokenCompressionStrategyLevels.map((level) => (
               <div key={level.level} className={styles.compressionStrategyRow} title={`${t("compressionThreshold")} ${Math.round(level.thresholdRatio * 100)}% / ${numberFormatter.format(level.thresholdTokens)} · ${t("compressionKeepAi")} ${level.keepAiMessages} · ${t("compressionSummary")} ${numberFormatter.format(level.summaryMaxChars)}`}>
                 <strong>{level.level}</strong>
                 <span>{Math.round(level.thresholdRatio * 100)}% / {numberFormatter.format(level.thresholdTokens)}</span>
               </div>
-            ))}
-          </div>
-          <p className={styles.detailNote} title={(compression?.strategy.errorProtectionKeywords ?? []).join(" / ") || "--"}>
-            <span>{t("compressionErrorProtection")}</span>
-            <strong>{(compression?.strategy.errorProtectionKeywords ?? []).join(" / ") || "--"}</strong>
-          </p>
+              ))}
+            </div>
+          ) : null}
+          {tokenCompressionStrategyKeywords !== "--" ? (
+            <p className={styles.detailNote} title={tokenCompressionStrategyKeywords}>
+              <span>{t("compressionErrorProtection")}</span>
+              <strong>{tokenCompressionStrategyKeywords}</strong>
+            </p>
+          ) : null}
         </section>
 
         <section className={`${styles.leftBlock} ${styles.companionBlock}`}>
