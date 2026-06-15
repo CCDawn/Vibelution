@@ -70,8 +70,10 @@ def _looks_like_business_failure(payload: Any) -> bool:
         return True
 
     status_value = payload.get("status")
-    if isinstance(status_value, str) and status_value.strip().lower() in BUSINESS_FAILURE_STATUSES:
-        return True
+    if isinstance(status_value, str):
+        normalized_status = _normalize_text_payload(status_value)
+        if normalized_status.lower() in BUSINESS_FAILURE_STATUSES:
+            return True
 
     error_value = payload.get("error")
     if error_value and ok_value is not True and success_value is not True:
