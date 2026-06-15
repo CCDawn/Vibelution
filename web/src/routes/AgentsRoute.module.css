@@ -470,6 +470,40 @@
   min-width: 0;
 }
 
+.detailHeaderActions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+  min-width: 0;
+}
+
+.returnButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 28px;
+  width: fit-content;
+  max-width: 100%;
+  padding: 0 9px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-control);
+  background: var(--surface-panel);
+  color: var(--fg-secondary);
+  font-size: 0.72rem;
+  font-weight: 760;
+  white-space: nowrap;
+}
+
+.returnButton:hover,
+.returnButton:focus-visible {
+  border-color: color-mix(in srgb, var(--accent-cool) 42%, var(--border-soft));
+  background: color-mix(in srgb, var(--accent-cool) 8%, var(--surface-panel));
+  color: var(--fg-primary);
+  outline: none;
+}
+
 .panelHeader h2,
 .detailHeader h2,
 .detailSection h3 {

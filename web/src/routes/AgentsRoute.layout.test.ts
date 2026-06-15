@@ -38,6 +38,28 @@ describe("AgentsRoute layout contract", () => {
     );
   });
 
+  it("opens deep-linked Agent configuration and offers a governed return action", () => {
+    expect(routeSource).toContain("useSearchParams");
+    expect(routeSource).toContain("normalizeAgentConfigPane(searchParams.get(\"pane\"))");
+    expect(routeSource).toContain("safeAgentCenterReturnTo(searchParams.get(\"returnTo\"))");
+    expect(routeSource).toContain("agentCenterReturnLabel(searchParams.get(\"returnLabel\"), lang)");
+    expect(routeSource).toContain('normalized === "config" || normalized === "activity" || normalized === "overview"');
+    expect(routeSource).toContain('normalized.startsWith("/")');
+    expect(routeSource).toContain('normalized.startsWith("//")');
+    expect(routeSource).toContain("const routeTargetKey = requestedAgentId ? `${requestedAgentId}:${requestedPane}` : \"\"");
+    expect(routeSource).toContain("workspace.agents.find((agent) => agent.agentId === requestedAgentId)");
+    expect(routeSource).toContain("setSelectedAgentId(targetAgent.agentId)");
+    expect(routeSource).toContain("setActivePane(requestedPane)");
+    expect(routeSource).toContain('setActiveFilter(targetAgent.status === "archived" ? "archived" : "active")');
+    expect(routeSource).toContain('normalized === "supervised_evolution"');
+    expect(routeSource).toContain("返回监督进化");
+    expect(routeSource).toContain("className={styles.returnButton}");
+    expect(routeSource).toContain("onClick={() => navigate(returnToPath)}");
+    expect(routeSource).toContain("if (requestedAgentId && selectedAgent?.agentId === requestedAgentId)");
+    expect(styles.detailHeaderActions).toBeTruthy();
+    expect(styles.returnButton).toBeTruthy();
+  });
+
   it("uses filter, table, and detail panels instead of a card wall", () => {
     expect(routeSource).toContain("styles.filterPanel");
     expect(routeSource).toContain("styles.agentPanel");
