@@ -587,6 +587,8 @@ def test_model_preset_options_include_codex_preset():
     assert presets["xiaomi_mimo_v2_5_pro_token_plan"]["provider"]["base_url"] == (
         "https://token-plan-cn.xiaomimimo.com/v1"
     )
+    assert presets["xiaomi_mimo_v2_5_pro_token_plan"]["model"]["supports_image_input"] is False
+    assert presets["xiaomi_mimo_v2_5_pro_token_plan"]["model"]["capability_status"] == "unsupported"
     assert "xiaomi_mimo_v2_5_multimodal" in presets
     assert presets["xiaomi_mimo_v2_5_multimodal"]["category"] == "official"
     assert presets["xiaomi_mimo_v2_5_multimodal"]["model"]["model"] == "mimo-v2.5"
@@ -807,6 +809,8 @@ def test_apply_xiaomi_mimo_token_plan_preset_materializes_provider():
     assert model["model"] == "mimo-v2.5-pro"
     assert model["transport"] == "chat_completions"
     assert model["contract"] == "tool_chat"
+    assert model["supports_image_input"] is False
+    assert model["capability_status"] == "unsupported"
     assert model["api_key_env"] == "VIBELUTION_LLM_MODEL_XIAOMI_MIMO_V2_5_PRO_TOKEN_PLAN_API_KEY"
     build_effective_config(updated)
 

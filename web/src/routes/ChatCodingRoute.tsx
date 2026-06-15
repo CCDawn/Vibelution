@@ -2193,6 +2193,7 @@ function submitTelemetryFields(
     sessionBusy?: boolean;
     activePhase?: string;
     guardReason?: string;
+    imageInputModelId?: string;
     uploadedAttachmentCount?: number;
     error?: unknown;
   } = {},
@@ -2230,6 +2231,9 @@ function submitTelemetryFields(
   }
   if (options.guardReason !== undefined) {
     fields.guardReason = options.guardReason;
+  }
+  if (options.imageInputModelId !== undefined) {
+    fields.imageInputModelId = options.imageInputModelId;
   }
   if (options.error instanceof Error) {
     fields.errorName = options.error.name;
@@ -2376,6 +2380,27 @@ function avatarImageUrlFrom(...sources: unknown[]) {
     }
   }
   return "";
+}
+
+function imageInputModelIdForAgent(agent: AgentInstance | undefined, fallbackDialogueModelId = "") {
+  const visionModelId = String(agent?.llmBindings?.vision?.modelId ?? "").trim();
+  if (visionModelId) {
+    return visionModelId;
+  }
+  const dialogueModelId = String(agent?.llmBindings?.dialogue?.modelId ?? "").trim();
+  return dialogueModelId || String(fallbackDialogueModelId || "").trim();
+}
+
+function modelImageInputSupport(
+  supportByModelId: Map<string, boolean | null>,
+  modelId: string,
+): boolean | null {
+  const normalizedModelId = String(modelId || "").trim();
+  if (!normalizedModelId || !supportByModelId.has(normalizedModelId)) {
+    return null;
+  }
+  const support = supportByModelId.get(normalizedModelId);
+  return typeof support === "boolean" ? support : null;
 }
 
 function conversationMetadataText(metadata: Record<string, unknown> | undefined, key: string) {
@@ -2793,6 +2818,10 @@ export function ChatCodingRoute() {
   const modelLabelsById = useMemo(
     () => new Map(Object.entries(configSummaryQuery.data?.modelLabels ?? {})),
     [configSummaryQuery.data?.modelLabels],
+  );
+  const modelImageInputSupportById = useMemo(
+    () => new Map(Object.entries(configSummaryQuery.data?.modelImageInputSupport ?? {})),
+    [configSummaryQuery.data?.modelImageInputSupport],
   );
   const resolveModelLabel = useCallback(
     (modelId: string) => modelLabelsById.get(modelId),
@@ -4869,6 +4898,9 @@ export function ChatCodingRoute() {
   const activeImageUploadPending = activeSessionId ? Boolean(sessionImageUploadPending[activeSessionId]) : false;
   const activeAgentId = detail?.agentId || "";
   const activeSessionAgent = activeAgentId ? (agentsQuery.data ?? []).find((agent) => agent.agentId === activeAgentId) : undefined;
+  const activeImageInputModelId = imageInputModelIdForAgent(activeSessionAgent, detail?.dialogueModelId);
+  const activeAgentImageInputSupported = modelImageInputSupport(modelImageInputSupportById, activeImageInputModelId);
+  const activeAgentImageInputUnsupported = activeAgentImageInputSupported === false;
   const activeAgentDisplay = detail
     ? sessionAgentDisplayInfo(detail, activeSessionAgent, lang, resolveModelLabel)
     : { name: pet?.name || "Agent", functionLabel: "", tone: "chat" as const, meta: "" };
@@ -4971,6 +5003,14 @@ export function ChatCodingRoute() {
           : resolvedEditTarget
             ? t("editMessagePlaceholder")
           : t("messageInputPlaceholder");
+
+  useEffect(() => {
+    if (!activeSessionId || !activeAgentImageInputUnsupported || !activeImageAttachments.length) {
+      return;
+    }
+    setSessionImageAttachments((current) => clearSessionImageAttachments(current, activeSessionId));
+  }, [activeAgentImageInputUnsupported, activeImageAttachments.length, activeSessionId]);
+
   const sessionContextUsage = detail?.contextUsage;
   const panelContextUsed = lastContextComposition?.totalTokens ?? sessionContextUsage?.used ?? 0;
   const panelContextLimit = lastContextComposition?.limitTokens ?? sessionContextUsage?.limit ?? 0;
@@ -5574,6 +5614,13 @@ export function ChatCodingRoute() {
     if (!activeSessionId) {
       return;
     }
+    if (activeAgentImageInputUnsupported) {
+      setSessionComposerErrors((current) => ({
+        ...current,
+        [activeSessionId]: lang === "zh" ? "当前 Agent 模型不支持图片输入。" : "The current Agent model does not support image input.",
+      }));
+      return;
+    }
     const incoming = Array.from(files || []).filter((file) => file.type.startsWith("image/"));
     if (!incoming.length) {
       return;
@@ -5808,6 +5855,31 @@ export function ChatCodingRoute() {
         activePhase: detail?.currentPhase,
       },
     );
+    if (activeImageAttachments.length && activeAgentImageInputUnsupported) {
+      postSubmitTelemetry(
+        "browser.chat_submit.blocked",
+        "Direct chat submit image upload was blocked because the active Agent model does not support image input.",
+        activeSessionId,
+        {
+          content,
+          attachmentCount: activeImageAttachments.length,
+          referenceCount: activeReferenceAttachments.length,
+          mentalModelEnabled: mentalModelEnabledForNextTurn,
+          editTargetId: resolvedEditTarget?.messageId,
+          composerDisabled,
+          sessionBusy,
+          activePhase: detail?.currentPhase,
+          guardReason: "image_input_unsupported",
+          imageInputModelId: activeImageInputModelId,
+        },
+        "warning",
+      );
+      setSessionComposerErrors((current) => ({
+        ...current,
+        [activeSessionId]: lang === "zh" ? "当前 Agent 模型不支持图片输入。" : "The current Agent model does not support image input.",
+      }));
+      return;
+    }
     const guardReason = composerDisabled
       ? "composer_disabled"
       : !content && !activeImageAttachments.length && !activeReferenceAttachments.length
@@ -7653,7 +7725,7 @@ export function ChatCodingRoute() {
                     contentType: attachment.contentType,
                   }))}
                   composerReferences={activeReferenceAttachments}
-                  composerAttachmentInputDisabled={composerDisabled || Boolean(resolvedEditTarget)}
+                  composerAttachmentInputDisabled={composerDisabled || Boolean(resolvedEditTarget) || activeAgentImageInputUnsupported}
                   composerModeNotice={resolvedEditTarget ? t("editMessageModeNotice") : ""}
                   cancelComposerModeLabel={t("cancelEditMessage")}
                   turnError={detail.lastTurnError}

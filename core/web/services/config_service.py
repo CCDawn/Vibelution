@@ -543,6 +543,36 @@ def _model_label_map(public_config: dict[str, Any]) -> dict[str, str]:
     return labels
 
 
+def _image_input_support_from_model_record(record: dict[str, Any]) -> bool | None:
+    details = record.get("details") if isinstance(record.get("details"), dict) else {}
+    supports = record.get("supports_image_input")
+    if not isinstance(supports, bool):
+        supports = details.get("supports_image_input")
+    if isinstance(supports, bool):
+        return supports
+    capability_status = str(record.get("capability_status") or details.get("capability_status") or "").strip().lower()
+    if capability_status == "supported":
+        return True
+    if capability_status == "unsupported":
+        return False
+    return None
+
+
+def _model_image_input_support_map(public_config: dict[str, Any]) -> dict[str, bool | None]:
+    supports_by_model: dict[str, bool | None] = {}
+    for option in list_llm_model_options(public_config):
+        model_id = str(option.get("model_id") or "").strip()
+        if model_id:
+            supports_by_model[model_id] = _image_input_support_from_model_record(option)
+    llm_cfg = public_config.get("llm", {}) if isinstance(public_config, dict) else {}
+    model_library = llm_cfg.get("model_library", {}) if isinstance(llm_cfg, dict) else {}
+    if isinstance(model_library, dict):
+        for model_id, entry in model_library.items():
+            if isinstance(entry, dict):
+                supports_by_model[str(model_id)] = _image_input_support_from_model_record(entry)
+    return supports_by_model
+
+
 def _image_input_capability_result_details(result: dict[str, Any]) -> dict[str, Any]:
     status = str(result.get("capability_status") or "").strip().lower()
     if status not in {"supported", "unsupported", "unknown"}:
@@ -1378,6 +1408,7 @@ def get_config_summary() -> dict[str, Any]:
         "domainAvailability": contract["domainAvailability"],
         "modelLibraryCount": len(model_library) if isinstance(model_library, dict) else 0,
         "modelLabels": _model_label_map(public_config),
+        "modelImageInputSupport": _model_image_input_support_map(public_config),
         "blockingCount": len(blocking),
         "warningCount": len(warnings),
         "sections": _config_sections(lang, build_editor_sections(public_config, lang)),
