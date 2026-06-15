@@ -55,6 +55,7 @@ import {
 } from "../api/types";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
 import { PaneCollapseHandle } from "../components/layout/PaneCollapseHandle";
+import { LazyConversationView } from "../components/conversation/LazyConversationView";
 import { useAppI18n } from "../i18n/useAppI18n";
 import { useShellStore } from "../store/shellStore";
 import { SupervisedWorkspaceControls } from "./SupervisedWorkspaceControls";
@@ -338,7 +339,9 @@ function supervisedPreflightIssue(run: EvolutionActiveRun | null | undefined, la
     Boolean(latestPreflightEvent)
     || /missing_verifier_dependency|环境预检|预检状态|未启动 agent|not start(ed)? agent/i.test(`${runReason}\n${latestMessage}`);
   const terminal = ["done", "failed", "cancelled"].includes(String(run?.status || "").trim().toLowerCase());
-  const noCaseIo = !run?.currentCaseIo?.latestOutput && !(run?.currentCaseIo?.transcript ?? []).length;
+  const noCaseIo = !run?.currentCaseIo?.latestOutput
+    && !(run?.currentCaseIo?.transcript ?? []).length
+    && !(run?.currentCaseIo?.conversationMessages ?? []).length;
   if (!hasPreflightFailure || !terminal || !noCaseIo) {
     return null;
   }
@@ -1112,6 +1115,13 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   );
   const monitoredRunStatus = String(monitoredRun?.status || "").toLowerCase();
   const monitoredCaseTranscript = monitoredRun?.currentCaseIo?.transcript ?? [];
+  const monitoredCaseConversationMessages = monitoredRun?.currentCaseIo?.conversationMessages ?? [];
+  const monitoredCaseHasConversationMessages = monitoredCaseConversationMessages.length > 0;
+  const monitoredCaseConversationSessionId =
+    monitoredRun?.currentCaseIo?.conversationSessionId
+    || monitoredRun?.currentCaseIo?.conversationPath?.replace(/^session:/, "")
+    || monitoredRun?.runId
+    || "supervised-case";
   const monitoredCaseTraceItems = useMemo(
     () =>
       buildSupervisedCaseTraceItems(monitoredCaseTranscript, {
@@ -1135,7 +1145,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     timeline.scrollTop = timeline.scrollHeight;
   }, [latestCaseTraceKey, monitoredCaseTraceItems.length]);
   const monitoredCaseHasOutput = Boolean(
-    monitoredRun?.currentCaseIo?.latestOutput || monitoredCaseTraceItems.length > 0,
+    monitoredRun?.currentCaseIo?.latestOutput || monitoredCaseHasConversationMessages || monitoredCaseTraceItems.length > 0,
   );
   const monitoredPreflightIssue = supervisedPreflightIssue(monitoredRun, lang);
   const monitoredCaseHasVisibleIo = Boolean(
@@ -3214,74 +3224,109 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
               <div className={styles.liveIoPane}>
                 {monitoredCaseHasVisibleIo ? (
                   <div className={styles.ioStack}>
-                    {monitoredRun?.currentCasePrompt ? (
-                      <details className={`${styles.rawBlock} ${styles.collapsibleEvidence}`}>
-                        <summary>{t("currentCasePrompt")}</summary>
-                        <pre className={styles.ioContent}>{monitoredRun.currentCasePrompt}</pre>
-                      </details>
-                    ) : null}
+                    {monitoredCaseHasConversationMessages ? (
+                      <div className={styles.caseConversationShell}>
+                        <LazyConversationView
+                          sessionId={monitoredCaseConversationSessionId}
+                          className={styles.caseConversationTranscript}
+                          density="compact"
+                          eyebrowLabel={t("currentCaseTranscript")}
+                          title={monitoredRun?.currentCaseId || t("currentCaseOutput")}
+                          phase={monitoredRun?.currentPhase || monitoredRun?.status || ""}
+                          messages={monitoredCaseConversationMessages}
+                          assistantDisplayName={
+                            monitoredRun?.currentAgentBinding?.displayName
+                            || runRoleLabel(monitoredRun?.currentRole || "")
+                          }
+                          userDisplayName={lang === "zh" ? "监督任务" : "Supervised task"}
+                          taskSummary={monitoredRun?.currentCasePrompt || monitoredRun?.currentTask || ""}
+                          defaultFileContext={monitoredRun?.currentCaseScenario || "supervised"}
+                          summaryItems={[]}
+                          showHeader={false}
+                          showSessionOverview={false}
+                          showComposer={false}
+                          autoScrollToLatest={true}
+                          composerValue=""
+                          composerPlaceholder={t("caseIoWaiting")}
+                          composerDisabled={true}
+                          composerPending={false}
+                          onComposerChange={() => undefined}
+                          onSubmit={() => undefined}
+                          fallback={<div className={styles.caseConversationFallback}>{t("loadingSession")}</div>}
+                        />
+                      </div>
+                    ) : (
+                      <>
+                        {monitoredRun?.currentCasePrompt ? (
+                          <details className={`${styles.rawBlock} ${styles.collapsibleEvidence}`}>
+                            <summary>{t("currentCasePrompt")}</summary>
+                            <pre className={styles.ioContent}>{monitoredRun.currentCasePrompt}</pre>
+                          </details>
+                        ) : null}
 
-                    <div className={`${styles.detailSection} ${styles.detailSectionCompact} ${styles.transcriptSection}`}>
-                      {monitoredCaseTraceItems.length > 0 ? (
-                        <div ref={caseTraceTimelineRef} className={styles.caseTraceTimeline}>
-                          <div className={styles.caseTraceStack}>
-                            {monitoredCaseTraceItems.map((entry) => {
-                              const expanded = caseTraceItemExpanded(entry);
-                              return (
-                                <article
-                                  key={entry.key}
-                                  className={`${styles.caseTraceTurn} ${styles[`caseTraceTurn_${entry.tone}`]}`}
-                                >
-                                  <button
-                                    type="button"
-                                    className={styles.caseTraceSummary}
-                                    aria-expanded={expanded}
-                                    onClick={() => toggleCaseTraceItem(entry)}
-                                  >
-                                    <span className={styles.caseTraceIcon}>{caseTraceIcon(entry)}</span>
-                                    <span className={styles.caseTraceMessage}>
-                                      <span className={styles.caseTraceTitle}>{entry.title}</span>
-                                      <span className={styles.caseTracePreview}>{entry.preview}</span>
-                                    </span>
-                                    <span className={styles.caseTraceMeta}>
-                                      {entry.status ? (
-                                        <span className={styles.caseTraceStatus}>{statusLabel(entry.status)}</span>
+                        <div className={`${styles.detailSection} ${styles.detailSectionCompact} ${styles.transcriptSection}`}>
+                          {monitoredCaseTraceItems.length > 0 ? (
+                            <div ref={caseTraceTimelineRef} className={styles.caseTraceTimeline}>
+                              <div className={styles.caseTraceStack}>
+                                {monitoredCaseTraceItems.map((entry) => {
+                                  const expanded = caseTraceItemExpanded(entry);
+                                  return (
+                                    <article
+                                      key={entry.key}
+                                      className={`${styles.caseTraceTurn} ${styles[`caseTraceTurn_${entry.tone}`]}`}
+                                    >
+                                      <button
+                                        type="button"
+                                        className={styles.caseTraceSummary}
+                                        aria-expanded={expanded}
+                                        onClick={() => toggleCaseTraceItem(entry)}
+                                      >
+                                        <span className={styles.caseTraceIcon}>{caseTraceIcon(entry)}</span>
+                                        <span className={styles.caseTraceMessage}>
+                                          <span className={styles.caseTraceTitle}>{entry.title}</span>
+                                          <span className={styles.caseTracePreview}>{entry.preview}</span>
+                                        </span>
+                                        <span className={styles.caseTraceMeta}>
+                                          {entry.status ? (
+                                            <span className={styles.caseTraceStatus}>{statusLabel(entry.status)}</span>
+                                          ) : null}
+                                          {entry.timestamp ? (
+                                            <span className={styles.caseTraceTime}>{compactTimestamp(entry.timestamp)}</span>
+                                          ) : null}
+                                        </span>
+                                        <span className={styles.caseTraceChevron}>
+                                          {expanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                                        </span>
+                                      </button>
+                                      {expanded ? (
+                                        <div className={styles.caseTraceBody}>
+                                          {entry.sections.map((section, sectionIndex) => renderCaseTraceSection(section, sectionIndex))}
+                                        </div>
                                       ) : null}
-                                      {entry.timestamp ? (
-                                        <span className={styles.caseTraceTime}>{compactTimestamp(entry.timestamp)}</span>
-                                      ) : null}
-                                    </span>
-                                    <span className={styles.caseTraceChevron}>
-                                      {expanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-                                    </span>
-                                  </button>
-                                  {expanded ? (
-                                    <div className={styles.caseTraceBody}>
-                                      {entry.sections.map((section, sectionIndex) => renderCaseTraceSection(section, sectionIndex))}
-                                    </div>
-                                  ) : null}
-                                </article>
-                              );
-                            })}
-                          </div>
+                                    </article>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          ) : monitoredPreflightIssue ? (
+                            <div className={styles.casePreflightIssue}>
+                              <strong>{monitoredPreflightIssue.title}</strong>
+                              <span>{monitoredPreflightIssue.detail}</span>
+                              {monitoredPreflightIssue.reason ? <small>{monitoredPreflightIssue.reason}</small> : null}
+                            </div>
+                          ) : (
+                            <p className={styles.noticeText}>{t("caseIoWaiting")}</p>
+                          )}
                         </div>
-                      ) : monitoredPreflightIssue ? (
-                        <div className={styles.casePreflightIssue}>
-                          <strong>{monitoredPreflightIssue.title}</strong>
-                          <span>{monitoredPreflightIssue.detail}</span>
-                          {monitoredPreflightIssue.reason ? <small>{monitoredPreflightIssue.reason}</small> : null}
-                        </div>
-                      ) : (
-                        <p className={styles.noticeText}>{t("caseIoWaiting")}</p>
-                      )}
-                    </div>
 
-                    {monitoredRun?.currentCaseIo?.latestOutput ? (
-                      <details className={`${styles.rawBlock} ${styles.collapsibleEvidence} ${styles.caseRawEvidence}`}>
-                        <summary>{currentCaseOutputLabel(monitoredRun)}</summary>
-                        <pre className={styles.ioContent}>{monitoredRun.currentCaseIo.latestOutput}</pre>
-                      </details>
-                    ) : null}
+                        {monitoredRun?.currentCaseIo?.latestOutput ? (
+                          <details className={`${styles.rawBlock} ${styles.collapsibleEvidence} ${styles.caseRawEvidence}`}>
+                            <summary>{currentCaseOutputLabel(monitoredRun)}</summary>
+                            <pre className={styles.ioContent}>{monitoredRun.currentCaseIo.latestOutput}</pre>
+                          </details>
+                        ) : null}
+                      </>
+                    )}
                   </div>
                 ) : (
                   <div className={styles.ioWaitingState}>

@@ -1542,6 +1542,28 @@
   flex: 1 1 0;
 }
 
+.caseConversationShell {
+  display: flex;
+  flex: 1 1 0;
+  min-height: 0;
+}
+
+.caseConversationTranscript {
+  flex: 1 1 0;
+  min-height: 0;
+  padding: 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.caseConversationFallback {
+  display: grid;
+  min-height: 180px;
+  place-items: center;
+  color: var(--fg-secondary);
+}
+
 .caseTraceTimeline {
   position: relative;
   display: flex;

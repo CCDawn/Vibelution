@@ -618,7 +618,14 @@ def test_conversation_harness_treats_completed_session_turn_as_success(monkeypat
             "updatedAt": "2026-06-11T00:00:03Z",
             "messages": [
                 {"role": "user", "content": "inspect current state", "timestamp": "2026-06-11T00:00:01Z"},
-                {"role": "assistant", "content": "state inspected", "timestamp": "2026-06-11T00:00:03Z"},
+                {
+                    "role": "assistant",
+                    "content": "state inspected",
+                    "timestamp": "2026-06-11T00:00:03Z",
+                    "thought": "inspect first",
+                    "toolCalls": [{"name": "inspect_state", "status": "success"}],
+                    "mentalSnapshot": {"mood": "focused"},
+                },
             ],
         },
     )
@@ -645,6 +652,13 @@ def test_conversation_harness_treats_completed_session_turn_as_success(monkeypat
     assert captured_submit["message_source"] == "supervised_evolution"
     assert captured_submit["mental_model_enabled"] is True
     assert events[-1]["phase"] == "conversation_turn_finished"
+    assert events[-1]["conversation_session_id"] == "session-hidden"
+    assert events[-1]["conversation_turn_id"] == "turn-1"
+    assert events[-1]["conversation_messages"][0]["id"] == "session-hidden-message-1"
+    assert events[-1]["conversation_messages"][0]["role"] == "user"
+    assert events[-1]["conversation_messages"][1]["thought"] == "inspect first"
+    assert events[-1]["conversation_messages"][1]["toolCalls"][0]["name"] == "inspect_state"
+    assert events[-1]["conversation_messages"][1]["mentalSnapshot"]["mood"] == "focused"
 
 
 def test_conversation_harness_returns_cancelled_after_stop_grace(monkeypatch, tmp_path):
@@ -823,6 +837,8 @@ def test_handle_progress_event_updates_current_case_io_snapshot():
             "mode": "single_turn",
             "prompt": "compare the candidate behavior",
             "conversation_path": "log_info/conversation_case_1.jsonl",
+            "conversation_session_id": "session-hidden-case-1",
+            "conversation_turn_id": "turn-case-1",
             "latest_input": "compare the candidate behavior",
             "latest_output": "assistant produced a live update",
             "latest_output_kind": "assistant",
@@ -849,6 +865,22 @@ def test_handle_progress_event_updates_current_case_io_snapshot():
                     "content": "assistant produced a live update",
                 },
             ],
+            "conversation_messages": [
+                {
+                    "id": "message-user-1",
+                    "role": "user",
+                    "content": "compare the candidate behavior",
+                    "timestamp": "2026-05-19T12:00:01Z",
+                },
+                {
+                    "id": "message-assistant-1",
+                    "role": "assistant",
+                    "content": "assistant produced a live update",
+                    "timestamp": "2026-05-19T12:00:03Z",
+                    "thought": "compare baseline and candidate",
+                    "toolCalls": [{"name": "inspect_case", "status": "success"}],
+                },
+            ],
         },
     )
 
@@ -859,6 +891,11 @@ def test_handle_progress_event_updates_current_case_io_snapshot():
     assert snapshot["currentCaseMode"] == "single_turn"
     assert snapshot["currentCaseIo"]["latestOutput"] == "assistant produced a live update"
     assert snapshot["currentCaseIo"]["latestOutputKind"] == "assistant"
+    assert snapshot["currentCaseIo"]["conversationSessionId"] == "session-hidden-case-1"
+    assert snapshot["currentCaseIo"]["conversationTurnId"] == "turn-case-1"
+    assert snapshot["currentCaseIo"]["conversationMessages"][0]["role"] == "user"
+    assert snapshot["currentCaseIo"]["conversationMessages"][1]["thought"] == "compare baseline and candidate"
+    assert snapshot["currentCaseIo"]["conversationMessages"][1]["toolCalls"][0]["name"] == "inspect_case"
     assert snapshot["currentCaseIo"]["transcript"][0]["kind"] == "input"
     assert snapshot["currentCaseIo"]["transcript"][1]["status"] == "recovered"
     assert snapshot["latestMessage"] == "assistant produced a live update"

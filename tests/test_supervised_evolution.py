@@ -1362,6 +1362,8 @@ def test_run_supervised_evolution_session_forwards_live_case_events(tmp_path: Pa
                 "latest_output": f"{kwargs['prompt']} output",
                 "latest_output_kind": "assistant",
                 "latest_output_label": "assistant",
+                "conversation_session_id": f"session-{kwargs['prompt']}",
+                "conversation_turn_id": f"turn-{kwargs['prompt']}",
                 "updated_at": "2026-05-14T00:00:03Z",
                 "transcript": [
                     {
@@ -1375,6 +1377,21 @@ def test_run_supervised_evolution_session_forwards_live_case_events(tmp_path: Pa
                         "kind": "assistant",
                         "label": "assistant",
                         "content": f"{kwargs['prompt']} output",
+                    },
+                ],
+                "conversation_messages": [
+                    {
+                        "id": f"{kwargs['prompt']}-user",
+                        "role": "user",
+                        "content": kwargs["prompt"],
+                        "timestamp": "2026-05-14T00:00:01Z",
+                    },
+                    {
+                        "id": f"{kwargs['prompt']}-assistant",
+                        "role": "assistant",
+                        "content": f"{kwargs['prompt']} output",
+                        "timestamp": "2026-05-14T00:00:03Z",
+                        "thought": f"{kwargs['prompt']} thought",
                     },
                 ],
             }
@@ -1396,6 +1413,9 @@ def test_run_supervised_evolution_session_forwards_live_case_events(tmp_path: Pa
     assert live_events[0]["prompt"] == "baseline"
     assert live_events[0]["latest_output"] == "baseline output"
     assert live_events[0]["transcript"][1]["kind"] == "assistant"
+    assert live_events[0]["conversation_session_id"] == "session-baseline"
+    assert live_events[0]["conversation_turn_id"] == "turn-baseline"
+    assert live_events[0]["conversation_messages"][1]["thought"] == "baseline thought"
     assert live_events[0]["mental_model_mode"] == "enabled"
     assert live_events[0]["mental_model_enabled"] is True
     assert live_events[1]["role"] == "candidate"

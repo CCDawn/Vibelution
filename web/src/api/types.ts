@@ -5037,12 +5037,15 @@ export type EvolutionActiveRunIoEntry = {
 
 export type EvolutionActiveRunCaseIo = {
   conversationPath: string;
+  conversationSessionId?: string;
+  conversationTurnId?: string;
   latestInput: string;
   latestOutput: string;
   latestOutputKind: string;
   latestOutputLabel: string;
   updatedAt: string;
   transcript: EvolutionActiveRunIoEntry[];
+  conversationMessages?: ConversationMessage[];
 };
 
 export type EvolutionActiveRunAgentBinding = {
