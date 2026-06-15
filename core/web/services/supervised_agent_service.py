@@ -595,7 +595,7 @@ def _ensure_supervised_role(role: SupervisedAgentRole) -> tuple[dict[str, Any] |
             status="active",
         )
         changed = True
-    if expected_llm_bindings and not existing_dialogue_model_id:
+    if expected_llm_bindings and existing_llm_bindings != expected_llm_bindings:
         existing = agent_directory_service.update_agent_instance(
             str(existing.get("agentId") or ""),
             llm_bindings=expected_llm_bindings,
