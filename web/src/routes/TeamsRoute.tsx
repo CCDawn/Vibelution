@@ -3737,7 +3737,7 @@ export function TeamsRoute({
                       <strong>{candidate.title || candidate.candidateId}</strong>
                       <p>{candidate.summary || candidate.candidateId}</p>
                     </div>
-                    <span className={`${styles.workflowTag} ${workflowQualityTone(candidate.qualityStatus)}`}>
+                    <span className={`${styles.workflowTag} ${styles.sourceCollectionResultStatus} ${workflowQualityTone(candidate.qualityStatus)}`}>
                       {sourceQualitySummary
                         ? workflowIngestionStatusLabel(sourceQualitySummary.decision, lang)
                         : workflowStateLabel(candidate.currentState, lang)}
