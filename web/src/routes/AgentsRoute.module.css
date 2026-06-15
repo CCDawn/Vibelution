@@ -478,32 +478,6 @@
   min-width: 0;
 }
 
-.returnButton {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  min-height: 28px;
-  width: fit-content;
-  max-width: 100%;
-  padding: 0 9px;
-  border: 1px solid var(--border-soft);
-  border-radius: var(--radius-control);
-  background: var(--surface-panel);
-  color: var(--fg-secondary);
-  font-size: 0.72rem;
-  font-weight: 760;
-  white-space: nowrap;
-}
-
-.returnButton:hover,
-.returnButton:focus-visible {
-  border-color: color-mix(in srgb, var(--accent-cool) 42%, var(--border-soft));
-  background: color-mix(in srgb, var(--accent-cool) 8%, var(--surface-panel));
-  color: var(--fg-primary);
-  outline: none;
-}
-
 .panelHeader h2,
 .detailHeader h2,
 .detailSection h3 {
@@ -517,6 +491,73 @@
 .panelHeader h2,
 .detailHeader h2 {
   font-size: 1rem;
+}
+
+.returnBanner {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 9px 10px;
+  border: 1px solid color-mix(in srgb, var(--accent-cool) 38%, var(--border-soft));
+  border-radius: 8px;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--accent-cool) 13%, var(--surface-panel)), var(--surface-panel));
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--fg-primary) 7%, transparent);
+}
+
+.returnBannerCopy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.returnBannerCopy strong,
+.returnBannerCopy span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.returnBannerCopy strong {
+  color: var(--fg-primary);
+  font-size: 0.82rem;
+  font-weight: 820;
+}
+
+.returnBannerCopy span {
+  color: var(--fg-secondary);
+  font-size: 0.72rem;
+  line-height: 1.25;
+}
+
+.returnBannerButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 116px;
+  min-height: 34px;
+  max-width: 100%;
+  padding: 0 12px;
+  border: 1px solid color-mix(in srgb, var(--accent-cool) 68%, var(--border-soft));
+  border-radius: var(--radius-control);
+  background: var(--accent-cool);
+  color: var(--accent-cool-contrast, #fff);
+  font-size: 0.78rem;
+  font-weight: 800;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.returnBannerButton:hover,
+.returnBannerButton:focus-visible {
+  border-color: color-mix(in srgb, var(--accent-cool) 86%, var(--border-soft));
+  background: color-mix(in srgb, var(--accent-cool) 90%, var(--fg-primary));
+  outline: none;
+  box-shadow: var(--focus-ring);
 }
 
 .bulkActionBar {
@@ -3215,5 +3256,17 @@
   .detailPanel {
     min-height: 420px;
     max-height: none;
+  }
+
+  .returnBanner {
+    grid-template-columns: 1fr;
+  }
+
+  .returnBannerButton {
+    width: 100%;
+  }
+
+  .returnBannerCopy span {
+    white-space: normal;
   }
 }
