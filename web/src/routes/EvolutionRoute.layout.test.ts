@@ -222,9 +222,18 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).toContain("modelDisplayLabel(supervisedMemberModelId(binding), resolveModelLabel)");
     expect(routeSource).toContain("configQuery.data?.modelLabels");
     expect(routeSource).toContain("title={member.modelId || member.model}");
+    expect(routeSource).toContain("supervisedMemberAgentManagementRoute");
+    expect(routeSource).toContain('new URLSearchParams({ pane: "config", returnLabel: "supervised_evolution" })');
+    expect(routeSource).toContain('params.set("agent", normalizedAgentId)');
+    expect(routeSource).toContain('params.set("returnTo", normalizedReturnTo)');
+    expect(routeSource).toContain("const supervisedMemberReturnTo = `${location.pathname}${location.search}`");
+    expect(routeSource).toContain("to={supervisedMemberAgentManagementRoute(member.agentId, supervisedMemberReturnTo)}");
+    expect(routeSource).toContain("styles.supervisedMemberLink");
+    expect(routeSource).toContain("<ArrowUpRight size={13} aria-hidden=\"true\" />");
     expect(routeSource).toContain("styles.supervisedMembersPanel");
-    expect(routeSource).toContain("本轮监督成员");
+    expect(routeSource).toContain("监督成员");
     expect(stylesSource).toContain(".supervisedMembersPanel");
+    expect(stylesSource).toContain(".supervisedMemberLink");
     expect(stylesSource).toContain(".supervisedMemberRowActive");
   });
 

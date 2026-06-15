@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
   Archive,
+  ArrowLeft,
   Bot,
   Brain,
   CheckSquare,
@@ -22,7 +23,7 @@ import {
   Wrench,
 } from "lucide-react";
 import { type MouseEvent, useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 
 import { fetchJson } from "../api/client";
 import { queryKeys } from "../api/queryKeys";
@@ -1212,6 +1213,29 @@ function selectedAgentFromList(
     fallbackCandidates[0] ??
     null
   );
+}
+
+function normalizeAgentConfigPane(value: string | null | undefined): AgentConfigPaneId {
+  const normalized = String(value || "").trim();
+  return normalized === "config" || normalized === "activity" || normalized === "overview"
+    ? normalized
+    : "overview";
+}
+
+function safeAgentCenterReturnTo(value: string | null | undefined) {
+  const normalized = String(value || "").trim();
+  if (!normalized || !normalized.startsWith("/") || normalized.startsWith("//")) {
+    return "";
+  }
+  return normalized;
+}
+
+function agentCenterReturnLabel(value: string | null | undefined, lang: "zh" | "en") {
+  const normalized = String(value || "").trim();
+  if (normalized === "supervised_evolution") {
+    return lang === "zh" ? "返回监督进化" : "Back to supervised evolution";
+  }
+  return lang === "zh" ? "返回来源页" : "Back";
 }
 
 function teamIndexesWithoutAgentIds(
@@ -3632,9 +3656,14 @@ export function AgentsRoute() {
   const queryClient = useQueryClient();
   const chatWorkspaceCache = useMemo(() => createChatWorkspaceCache(queryClient), [queryClient]);
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const pageVisible = usePageVisibility();
   const copy = useMemo(() => agentsRouteCopy(lang), [lang]);
   const numberFormatter = useMemo(() => new Intl.NumberFormat(lang === "zh" ? "zh-CN" : "en-US"), [lang]);
+  const requestedAgentId = useMemo(() => String(searchParams.get("agent") || "").trim(), [searchParams]);
+  const requestedPane = useMemo(() => normalizeAgentConfigPane(searchParams.get("pane")), [searchParams]);
+  const returnToPath = useMemo(() => safeAgentCenterReturnTo(searchParams.get("returnTo")), [searchParams]);
+  const returnToLabel = useMemo(() => agentCenterReturnLabel(searchParams.get("returnLabel"), lang), [lang, searchParams]);
   const [activeFilter, setActiveFilter] = useState<FilterId>("active");
   const [searchText, setSearchText] = useState("");
   const [selectedAgentId, setSelectedAgentId] = useState("");
@@ -3663,6 +3692,7 @@ export function AgentsRoute() {
   const [bulkConfigApply, setBulkConfigApply] = useState<AgentBulkConfigApply>(DEFAULT_BULK_CONFIG_APPLY);
   const [bulkAgentPending, setBulkAgentPending] = useState(false);
   const draftSyncSourceRef = useRef<AgentDraftSyncSource | null>(null);
+  const appliedRouteTargetRef = useRef("");
 
   const workspaceQuery = useQuery({
     queryKey: queryKeys.agentConfigWorkspace(),
@@ -3820,6 +3850,34 @@ export function AgentsRoute() {
   };
 
   useEffect(() => {
+    const routeTargetKey = requestedAgentId ? `${requestedAgentId}:${requestedPane}` : "";
+    if (!routeTargetKey) {
+      appliedRouteTargetRef.current = "";
+      return;
+    }
+    if (!workspace || appliedRouteTargetRef.current === routeTargetKey) {
+      return;
+    }
+    const targetAgent = workspace.agents.find((agent) => agent.agentId === requestedAgentId);
+    if (!targetAgent) {
+      setNotice({
+        tone: "error",
+        text: lang === "zh" ? "目标 Agent 不存在或已被移除。" : "The requested Agent does not exist or was removed.",
+      });
+      appliedRouteTargetRef.current = routeTargetKey;
+      return;
+    }
+    setSelectedAgentId(targetAgent.agentId);
+    setActivePane(requestedPane);
+    setActiveFilter(targetAgent.status === "archived" ? "archived" : "active");
+    setSearchText("");
+    setCreateOpen(false);
+    setSelectedBulkAgentIds(new Set());
+    setBulkSelectionAnchorAgentId(targetAgent.agentId);
+    appliedRouteTargetRef.current = routeTargetKey;
+  }, [lang, requestedAgentId, requestedPane, workspace]);
+
+  useEffect(() => {
     setBulkConfigDraft(bulkConfigDraftFromAgents(selectedBulkAgents));
     setBulkConfigApply(DEFAULT_BULK_CONFIG_APPLY);
   }, [selectedBulkAgentKey]);
@@ -3863,9 +3921,13 @@ export function AgentsRoute() {
   }, [selectedAgent, workspace]);
 
   useEffect(() => {
+    if (requestedAgentId && selectedAgent?.agentId === requestedAgentId) {
+      setResetOptions(DEFAULT_AGENT_RESET_OPTIONS);
+      return;
+    }
     setActivePane("overview");
     setResetOptions(DEFAULT_AGENT_RESET_OPTIONS);
-  }, [selectedAgent?.agentId]);
+  }, [requestedAgentId, selectedAgent?.agentId]);
 
   useEffect(() => {
     setCreateDraft((current) => {
@@ -5880,12 +5942,25 @@ export function AgentsRoute() {
                   </span>
                   <p>{copy.routeHint}</p>
                 </div>
-                <span className={styles.detailHealthStatus}>
-                  <span className={`${styles.issuePill} ${styles[`issue_${issueTone(selectedAgent.health)}`]}`}>
-                    {issueLabel(selectedAgent.health, lang)}
+                <div className={styles.detailHeaderActions}>
+                  {returnToPath ? (
+                    <button
+                      type="button"
+                      className={styles.returnButton}
+                      onClick={() => navigate(returnToPath)}
+                      title={returnToLabel}
+                    >
+                      <ArrowLeft size={14} />
+                      {returnToLabel}
+                    </button>
+                  ) : null}
+                  <span className={styles.detailHealthStatus}>
+                    <span className={`${styles.issuePill} ${styles[`issue_${issueTone(selectedAgent.health)}`]}`}>
+                      {issueLabel(selectedAgent.health, lang)}
+                    </span>
+                    <small>{issueSummary(selectedAgent.health, lang)}</small>
                   </span>
-                  <small>{issueSummary(selectedAgent.health, lang)}</small>
-                </span>
+                </div>
               </section>
 
               <nav className={styles.detailTabs} aria-label={copy.title}>
