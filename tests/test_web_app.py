@@ -822,25 +822,54 @@ def test_persist_turn_result_exposes_previous_context_and_cache_composition(tmp_
     assert detail["lastCacheComposition"]["averageObservedTurnCount"] == 2
     assert detail["lastCacheComposition"]["averageCacheHitRate"] == pytest.approx(350 / 1500)
     computed_segments = detail["lastCacheComposition"]["computedSegments"]
-    assert [item["key"] for item in computed_segments] == ["system_prompt_overhead", "history", "current_user"]
-    assert computed_segments[0]["tokens"] == 946
+    assert [item["key"] for item in computed_segments] == [
+        "system_prompt",
+        "agent_protocol",
+        "tool_descriptions",
+        "tool_schema",
+        "provider_unmapped",
+        "history",
+        "current_user",
+    ]
+    assert sum(item["tokens"] for item in computed_segments[:5]) == 946
+    assert computed_segments[0]["tokens"] == 132
     assert computed_segments[0]["status"] == "computed_hit"
     assert computed_segments[0]["source"] == "provider_input_remainder"
-    assert "system prompt" in computed_segments[0]["contentPreview"]
-    assert computed_segments[1]["status"] == "computed_hit"
-    assert computed_segments[1]["contentPreview"] == "历史摘要：上一轮确认要显示真实/计算/总均命中"
-    assert computed_segments[2]["status"] == "computed_miss"
-    assert computed_segments[2]["contentPreview"] == "本轮输入：请审查缓存圆环的外圈分段"
+    assert computed_segments[0]["promptCategory"] == "system_prompt"
+    assert computed_segments[0]["estimated"] is True
+    assert "系统提示词估算段" in computed_segments[0]["contentPreview"]
+    assert computed_segments[2]["promptCategory"] == "tool_descriptions"
+    assert computed_segments[3]["promptCategory"] == "tool_schema"
+    assert computed_segments[5]["status"] == "computed_hit"
+    assert computed_segments[5]["contentPreview"] == "历史摘要：上一轮确认要显示真实/计算/总均命中"
+    assert computed_segments[6]["status"] == "computed_miss"
+    assert computed_segments[6]["contentPreview"] == "本轮输入：请审查缓存圆环的外圈分段"
     calibrated_segments = detail["lastCacheComposition"]["calibratedSegments"]
-    assert [item["key"] for item in calibrated_segments] == ["system_prompt_overhead", "history", "current_user"]
-    assert calibrated_segments[0]["observedStatus"] == "observed_partial"
-    assert calibrated_segments[0]["observedCachedInputTokens"] == 200
-    assert calibrated_segments[0]["observedMissedInputTokens"] == 746
-    assert calibrated_segments[0]["computedOverestimatedInputTokens"] == 746
-    assert calibrated_segments[1]["observedStatus"] == "observed_hit"
-    assert calibrated_segments[1]["observedCachedInputTokens"] == 50
-    assert calibrated_segments[2]["observedStatus"] == "computed_miss"
-    assert calibrated_segments[2]["observedMissedInputTokens"] == 4
+    assert [item["key"] for item in calibrated_segments] == [
+        "system_prompt",
+        "agent_protocol",
+        "tool_descriptions",
+        "tool_schema",
+        "provider_unmapped",
+        "history",
+        "current_user",
+    ]
+    assert calibrated_segments[0]["observedStatus"] == "observed_miss"
+    assert calibrated_segments[0]["observedMissedInputTokens"] == 132
+    assert calibrated_segments[1]["observedStatus"] == "observed_miss"
+    assert calibrated_segments[1]["observedMissedInputTokens"] == 132
+    assert calibrated_segments[2]["observedStatus"] == "observed_miss"
+    assert calibrated_segments[2]["observedMissedInputTokens"] == 189
+    assert calibrated_segments[3]["observedStatus"] == "observed_partial"
+    assert calibrated_segments[3]["observedCachedInputTokens"] == 104
+    assert calibrated_segments[3]["observedMissedInputTokens"] == 293
+    assert sum(item["computedOverestimatedInputTokens"] for item in calibrated_segments) == 746
+    assert calibrated_segments[4]["observedStatus"] == "observed_hit"
+    assert calibrated_segments[4]["observedCachedInputTokens"] == 96
+    assert calibrated_segments[5]["observedStatus"] == "observed_hit"
+    assert calibrated_segments[5]["observedCachedInputTokens"] == 50
+    assert calibrated_segments[6]["observedStatus"] == "computed_miss"
+    assert calibrated_segments[6]["observedMissedInputTokens"] == 4
 
 
 def test_cache_composition_context_manifest_adds_bounded_content_previews(tmp_path, monkeypatch):
@@ -872,6 +901,59 @@ def test_cache_composition_context_manifest_adds_bounded_content_previews(tmp_pa
     assert "上一轮我要求用圆圈显示计算命中" in by_key["history"]["contentPreview"]
     assert by_key["agent_context"]["contentPreview"] == "Agent 上下文：稳定系统前缀。"
     assert by_key["guidance"]["contentPreview"] == "最近操作指导：按顺序修复。"
+
+
+def test_context_manifest_expands_agent_context_segments_for_cache_audit(tmp_path, monkeypatch):
+    _seed_chat_state(tmp_path, task_status="done")
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    conversation = load_chat_state(tmp_path)["conversations"][0]
+
+    manifest = session_service._build_last_context_composition(
+        conversation=conversation,
+        turn_id="turn-agent-context-segments",
+        user_message="审查外环提示词分段",
+        history_messages=[],
+        active_task=None,
+        runtime_context_block="agent static + project rules",
+        dynamic_runtime_context_block="registry dynamic state",
+        dynamic_runtime_context_included=True,
+        runtime_context_segments=[
+            {
+                "key": "agent_runtime",
+                "block": "Agent Runtime Context\nAgentCode: A014",
+                "placement": "cache_prefix",
+                "stability": "agent_static",
+                "chars": 38,
+                "hash": "agent-hash",
+            },
+            {
+                "key": "prompt_template",
+                "block": "Agent prompt template\nFollow project rules.",
+                "placement": "cache_prefix",
+                "stability": "agent_static",
+                "chars": 43,
+                "hash": "prompt-hash",
+            },
+            {
+                "key": "project_agent_registry",
+                "block": "Registry active work snapshot",
+                "placement": "volatile_turn",
+                "stability": "turn_dynamic",
+                "chars": 29,
+                "hash": "registry-hash",
+            },
+        ],
+    )
+
+    by_key = {item["key"]: item for item in manifest["segments"]}
+    assert "agent_context" not in by_key
+    assert by_key["agent_runtime"]["kind"] == "agent_spec"
+    assert by_key["agent_runtime"]["cachePolicy"] == "cacheable"
+    assert by_key["agent_runtime"]["contentPreview"].startswith("Agent Runtime Context")
+    assert by_key["prompt_template"]["kind"] == "agent_spec"
+    assert by_key["project_agent_registry"]["includedInModelInput"] is True
+    assert by_key["project_agent_registry"]["cachePolicy"] == "volatile"
+    assert by_key["project_agent_registry"]["contentPreview"] == "Registry active work snapshot"
 
 
 def test_session_detail_live_context_uses_current_missing_cache_composition(tmp_path, monkeypatch):

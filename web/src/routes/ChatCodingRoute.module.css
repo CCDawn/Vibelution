@@ -2640,6 +2640,22 @@
   stroke: #36a86f;
 }
 
+.cacheDonutSegmentProjectRules {
+  stroke: #b47a20;
+}
+
+.cacheDonutSegmentToolDescriptions {
+  stroke: #0f9f8f;
+}
+
+.cacheDonutSegmentToolSchema {
+  stroke: #2f7bdc;
+}
+
+.cacheDonutSegmentProviderUnmapped {
+  stroke: #9aa3b2;
+}
+
 .cacheDonutSegmentGuidance {
   stroke: #c26ad8;
 }
@@ -2819,6 +2835,34 @@
   background: var(--surface-panel-muted);
 }
 
+.cacheDetailDonutLegend {
+  display: grid;
+  gap: 5px;
+  width: 100%;
+  padding: 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--surface-panel-muted);
+  color: var(--fg-secondary);
+  font-size: 0.72rem;
+  line-height: 1.25;
+}
+
+.cacheDetailDonutLegend span {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.cacheDetailDonutLegend b {
+  flex: 0 0 auto;
+  color: var(--fg-tertiary);
+  font-size: 0.66rem;
+  font-weight: 760;
+}
+
 .cacheDetailDonutShell {
   position: relative;
   width: 168px;
@@ -2939,6 +2983,10 @@
   white-space: nowrap;
 }
 
+.cacheDetailSegmentSource {
+  display: block;
+}
+
 .cacheDetailSegmentText small {
   white-space: normal;
 }
@@ -3023,6 +3071,22 @@
 
 .contextCompositionSegmentAgent {
   background: #36a86f;
+}
+
+.contextCompositionSegmentProjectRules {
+  background: #b47a20;
+}
+
+.contextCompositionSegmentToolDescriptions {
+  background: #0f9f8f;
+}
+
+.contextCompositionSegmentToolSchema {
+  background: #2f7bdc;
+}
+
+.contextCompositionSegmentProviderUnmapped {
+  background: #9aa3b2;
 }
 
 .contextCompositionSegmentGuidance {
