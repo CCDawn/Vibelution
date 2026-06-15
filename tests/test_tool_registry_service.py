@@ -353,6 +353,8 @@ def test_builtin_tool_test_marks_structured_failure_status_as_failed(tmp_path, m
     "result,status",
     [
         ({"status": "fail"}, "failed"),
+        ({"status": "blocked"}, "failed"),
+        ({"status": "policy_blocked"}, "failed"),
         ({"status": "error"}, "failed"),
         ({"ok": False}, "failed"),
         ({"status": "succeeded"}, "succeeded"),

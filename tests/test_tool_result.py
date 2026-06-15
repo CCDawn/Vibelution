@@ -213,6 +213,16 @@ class TestInferToolBusinessSuccess:
     def test_non_success_status_is_business_failure_json(self, result):
         assert infer_tool_business_success(result) is False
 
+    @pytest.mark.parametrize(
+        "result",
+        [
+            "blocked",
+            "policy_blocked",
+        ],
+    )
+    def test_plain_status_text_is_business_failure(self, result):
+        assert infer_tool_business_success(result) is False
+
     def test_timeout_plain_text_is_business_failure(self):
         assert infer_tool_business_success("timeout") is False
 
