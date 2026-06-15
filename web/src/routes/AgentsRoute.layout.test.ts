@@ -53,11 +53,15 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain('setActiveFilter(targetAgent.status === "archived" ? "archived" : "active")');
     expect(routeSource).toContain('normalized === "supervised_evolution"');
     expect(routeSource).toContain("返回监督进化");
-    expect(routeSource).toContain("className={styles.returnButton}");
+    expect(routeSource).toContain("returnBannerTitle: \"返回跳转前页面\"");
+    expect(routeSource).toContain("className={styles.returnBanner}");
+    expect(routeSource).toContain("className={styles.returnBannerButton}");
     expect(routeSource).toContain("onClick={() => navigate(returnToPath)}");
     expect(routeSource).toContain("if (requestedAgentId && selectedAgent?.agentId === requestedAgentId)");
-    expect(styles.detailHeaderActions).toBeTruthy();
-    expect(styles.returnButton).toBeTruthy();
+    expect(routeSource).not.toContain("className={styles.returnButton}");
+    expect(styles.returnBanner).toBeTruthy();
+    expect(styles.returnBannerCopy).toBeTruthy();
+    expect(styles.returnBannerButton).toBeTruthy();
   });
 
   it("uses filter, table, and detail panels instead of a card wall", () => {
