@@ -179,8 +179,13 @@ class TestInferToolBusinessSuccess:
     @pytest.mark.parametrize(
         "result",
         [
+            {"status": "blocked", "message": "policy blocked"},
+            {"status": "policy_blocked", "message": "policy blocked"},
             {"status": "failed", "message": "send failed"},
             {"status": "cancelled", "message": "interrupted"},
+            {"status": "fail", "message": "legacy failure token"},
+            {"status": "failure", "message": "legacy failure token"},
+            {"status": "error", "message": "runtime error"},
             {"status": "no_result", "message": "empty payload"},
             {"status": "submitted", "message": "async accepted"},
             {"status": "in_progress", "message": "still running"},
@@ -194,6 +199,8 @@ class TestInferToolBusinessSuccess:
     @pytest.mark.parametrize(
         "result",
         [
+            '{"status":"blocked","error":"policy limited"}',
+            '{"status":"policy_blocked","error":"policy limited"}',
             '{"error":"RuntimeError","status":"failed"}',
             '{"status":"cancelled","error":"User stop requested"}',
             '{"status":"no_result"}',
@@ -206,8 +213,33 @@ class TestInferToolBusinessSuccess:
     def test_non_success_status_is_business_failure_json(self, result):
         assert infer_tool_business_success(result) is False
 
+    @pytest.mark.parametrize(
+        "result",
+        [
+            "blocked",
+            "policy_blocked",
+        ],
+    )
+    def test_plain_status_text_is_business_failure(self, result):
+        assert infer_tool_business_success(result) is False
+
     def test_timeout_plain_text_is_business_failure(self):
         assert infer_tool_business_success("timeout") is False
+
+    def test_prefixed_plain_text_is_business_failure(self):
+        assert infer_tool_business_success(" [错误] something failed") is False
+
+    def test_binary_plain_text_is_business_failure_prefix(self):
+        assert infer_tool_business_success("[错误] binary failure".encode("utf-8")) is False
+
+    def test_bytearray_plain_text_is_business_failure_prefix(self):
+        assert infer_tool_business_success(bytearray("[错误] bytearray failure".encode("utf-8"))) is False
+
+    def test_truncate_result_decodes_binary_payload(self):
+        result, truncated = truncate_result("[错误] binary payload".encode("utf-8"))
+
+        assert truncated is False
+        assert result == "[错误] binary payload"
 
     def test_ok_false_json_string_is_business_failure(self):
         result = '{"error":"RuntimeError","message":"cannot schedule new futures after shutdown","ok":false,"status":"failed"}'

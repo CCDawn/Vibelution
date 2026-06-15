@@ -32,12 +32,18 @@ describe("ChatCodingRoute layout contract", () => {
     const currentSessionBlock = cssRule(".currentSessionBlock");
     const currentSessionLine = cssRule(".currentSessionLine");
     const currentSessionMetaList = cssRule(".currentSessionMetaList");
+    const currentSessionMetaPill = cssRule(".currentSessionMetaList .inlineMetaPill");
+    const currentSessionMetaValue = cssRule(".currentSessionMetaList .inlineMetaPill strong");
 
     expect(chatRoute).toContain("styles.currentSessionBlock");
     expect(chatRoute).toContain("styles.currentSessionLine");
     expect(chatRoute).toContain("styles.currentSessionMetaList");
     expect(currentSessionBlock).toContain("gap: 4px");
-    expect(currentSessionLine).toContain("-webkit-line-clamp: 1");
-    expect(currentSessionMetaList).toContain("repeat(2, minmax(0, 1fr))");
+    expect(currentSessionLine).toContain("display: none");
+    expect(currentSessionMetaList).toContain("grid-template-columns: minmax(0, 1fr)");
+    expect(currentSessionMetaPill).toContain("grid-template-columns: minmax(52px, 0.42fr) minmax(0, 1fr)");
+    expect(currentSessionMetaValue).toContain("white-space: normal");
+    expect(currentSessionMetaValue).not.toContain("text-overflow: ellipsis");
+    expect(chatRoute).not.toContain('label: t("currentTask"),\n        value: currentTaskSummary');
   });
 });

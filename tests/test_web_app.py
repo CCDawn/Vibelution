@@ -2260,6 +2260,72 @@ def test_cli_agent_terminal_stop_route_records_lifecycle_event(monkeypatch):
     assert recorded == [("session-live", "closed", {**terminal_session, "terminalSessionId": "term-1"})]
 
 
+def test_cli_agent_terminal_detail_route_returns_404_for_missing_session(monkeypatch):
+    def raise_not_found(*_args, **_kwargs):
+        raise cli_agent_routes.CliAgentTerminalError(
+            "TERMINAL_SESSION_NOT_FOUND",
+            "Terminal session not found.",
+        )
+
+    monkeypatch.setattr(cli_agent_routes, "get_cli_agent_terminal_session", raise_not_found)
+
+    response = client.get("/api/cli-agents/terminal-sessions/missing-term")
+
+    assert response.status_code == 404
+    assert response.json()["detail"]["code"] == "TERMINAL_SESSION_NOT_FOUND"
+
+
+def test_cli_agent_terminal_events_route_returns_409_when_session_not_running(monkeypatch):
+    def raise_not_running(*_args, **_kwargs):
+        raise cli_agent_routes.CliAgentTerminalError(
+            "TERMINAL_SESSION_NOT_RUNNING",
+            "Terminal session is not running.",
+        )
+
+    monkeypatch.setattr(cli_agent_routes, "get_cli_agent_terminal_session", raise_not_running)
+
+    response = client.get("/api/cli-agents/terminal-sessions/term-1/events")
+
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "TERMINAL_SESSION_NOT_RUNNING"
+
+
+def test_cli_agent_terminal_input_route_returns_409_when_session_not_running(monkeypatch):
+    def raise_not_running(_terminal_session_id, _data):
+        raise cli_agent_routes.CliAgentTerminalError(
+            "TERMINAL_SESSION_NOT_RUNNING",
+            "Terminal session is not running.",
+        )
+
+    monkeypatch.setattr(cli_agent_routes, "write_cli_agent_terminal_input", raise_not_running)
+
+    response = client.post(
+        "/api/cli-agents/terminal-sessions/term-1/input",
+        json={"data": "pwd"},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "TERMINAL_SESSION_NOT_RUNNING"
+
+
+def test_cli_agent_terminal_resize_route_returns_404_for_missing_session(monkeypatch):
+    def raise_not_found(_terminal_session_id, _rows, _cols):
+        raise cli_agent_routes.CliAgentTerminalError(
+            "TERMINAL_SESSION_NOT_FOUND",
+            "Terminal session not found.",
+        )
+
+    monkeypatch.setattr(cli_agent_routes, "resize_cli_agent_terminal_session", raise_not_found)
+
+    response = client.post(
+        "/api/cli-agents/terminal-sessions/term-1/resize",
+        json={"rows": 24, "cols": 80},
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"]["code"] == "TERMINAL_SESSION_NOT_FOUND"
+
+
 def test_submit_session_message_rejects_archived_agent_without_mutating_session(tmp_path, monkeypatch):
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)

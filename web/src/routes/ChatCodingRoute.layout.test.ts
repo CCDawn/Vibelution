@@ -324,6 +324,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("styles.currentSessionBlock");
     expect(routeSource).toContain("styles.currentSessionLine");
     expect(routeSource).toContain("styles.currentSessionMetaList");
+    expect(routeSource).toContain("· 缓 ${numberFormatter.format(sessionLlmUsage.cachedInputTokens)}");
+    expect(routeSource).not.toContain("${numberFormatter.format(sessionLlmUsage.inputTokens)} tokens · ${numberFormatter.format(sessionLlmUsage.cachedInputTokens)} cached");
     expect(routeSource.indexOf("styles.runModeBlock")).toBeGreaterThan(routeSource.indexOf("sessionCompactRows.map"));
     expect(routeSource.indexOf("styles.contextStatusCard")).toBeGreaterThan(routeSource.indexOf("styles.runModeBlock"));
     expect(routeSource.indexOf("styles.cacheStatusCard")).toBeGreaterThan(routeSource.indexOf("styles.contextStatusCard"));
@@ -511,8 +513,9 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("tokenSpeedSampling");
     expect(routeSource).toContain("tok/s");
     expect(routeSource.indexOf("label: t(\"tokenSpeed\")")).toBeLessThan(
-      routeSource.indexOf("label: t(\"currentTask\")"),
+      routeSource.indexOf("label: t(\"promptCache\")"),
     );
+    expect(routeSource).not.toContain("label: t(\"currentTask\")");
   });
 
   it("shows direct-session mismatch as a status-strip notice with a switch action", () => {
@@ -522,8 +525,9 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("handleOpenDirectSession(agentPrimaryDirectSessionId)");
     expect(routeSource).toContain("label: t(\"sessionBinding\")");
     expect(routeSource.indexOf("label: t(\"sessionBinding\")")).toBeLessThan(
-      routeSource.indexOf("label: t(\"currentTask\")"),
+      routeSource.indexOf("label: t(\"promptCache\")"),
     );
+    expect(routeSource).not.toContain("label: t(\"currentTask\")");
   });
 
   it("records direct chat submit lifecycle telemetry before backend acceptance", () => {
@@ -1039,8 +1043,14 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("onTerminalSessionChange={handleCliAgentTerminalSessionChange}");
     expect(routeSource).not.toContain(") : activeCliAgentRun ? (");
     expect(routeSource).toContain('"/api/cli-agents/terminal-sessions/ensure"');
+    expect(routeSource).toContain('intent,');
+    expect(routeSource).toContain('fetchTerminalSession("view", controller.signal)');
+    expect(routeSource).toContain('requestTerminalSession(terminalCanResume ? "resume" : "start")');
+    expect(routeSource).toContain("function canInputTerminal");
+    expect(routeSource).toContain("terminalCanInputRef.current");
+    expect(routeSource).toContain("终端未运行，请先恢复会话。");
     expect(routeSource).toContain("sourceRunId: run.sourceRunId");
-    expect(routeSource).toContain("cliSessionId: String(run.cliSessionId || run.result?.cliSessionId || \"\")");
+    expect(routeSource).toContain('cliSessionId: intent === "start" ? "" : terminalCliSessionIdRef.current');
     expect(routeSource).toContain("void sessionDetailQuery.refetch()");
     expect(routeSource).toContain("new EventSource(`/api/cli-agents/terminal-sessions/${encodeURIComponent(terminalSessionId)}/events`)");
     expect(routeSource).toContain("terminal_output");
@@ -1049,6 +1059,14 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("screenText");
     expect(routeSource).toContain("const replayTerminalSnapshot");
     expect(routeSource).toContain("历史 TUI 画面无法安全重放");
+    expect(routeSource).toContain("type CliAgentTerminalAck");
+    expect(routeSource).toContain("fetchJson<CliAgentTerminalAck>");
+    expect(routeSource).toContain("CLI_AGENT_TASK_LOCKED");
+    expect(routeSource).toContain("指令未发送：当前 CLI Agent 终端已有任务在运行。");
+    expect(routeSource).not.toContain(".then((session) => setTerminalSession(session))");
+    expect(routeSource.indexOf('if (payload.type === "terminal_output" && payload.chunk)')).toBeLessThan(
+      routeSource.indexOf("if (payload.session)"),
+    );
     expect(routeSource).toContain('import { Terminal } from "@xterm/xterm"');
     expect(routeSource).toContain("terminal.write(");
     expect(routeSource).not.toContain("terminalTextForDisplay");

@@ -310,6 +310,62 @@ class TestToolExecutorInit:
         assert events[-1][1]["outcome"] == "timeout"
         assert events[-1][1]["fields"]["semanticStatus"] == "timeout"
 
+    def test_tool_dict_fail_status_is_recorded_as_failed_scene_event(self, monkeypatch):
+        """Tools returning failure dicts should be recognized even without JSON string encoding."""
+        from core.infrastructure import tool_executor as tool_executor_module
+
+        events = []
+        monkeypatch.setattr(
+            tool_executor_module,
+            "_record_tool_scene_event",
+            lambda *args, **kwargs: events.append((args, kwargs)),
+        )
+
+        executor = ToolExecutor()
+        executor.register_tool(
+            "fake_dict_fail_tool",
+            lambda: {"status": "fail", "message": "legacy failure"},
+            timeout=5,
+        )
+
+        result, action = executor.execute("fake_dict_fail_tool", {})
+
+        assert action is None
+        assert isinstance(result, dict)
+        assert result["status"] == "fail"
+        assert events[-1][0][1] == "tool.execute.failed"
+        assert events[-1][1]["outcome"] == "failed"
+        assert events[-1][1]["fields"]["semanticStatus"] == "failed"
+        assert events[-1][1]["fields"]["toolResultStatus"] == "fail"
+
+    def test_tool_dict_blocked_status_is_recorded_as_blocked_scene_event(self, monkeypatch):
+        """Tools returning blocked dicts should map to blocked scene event."""
+        from core.infrastructure import tool_executor as tool_executor_module
+
+        events = []
+        monkeypatch.setattr(
+            tool_executor_module,
+            "_record_tool_scene_event",
+            lambda *args, **kwargs: events.append((args, kwargs)),
+        )
+
+        executor = ToolExecutor()
+        executor.register_tool(
+            "fake_dict_blocked_tool",
+            lambda: {"status": "blocked", "message": "policy denied"},
+            timeout=5,
+        )
+
+        result, action = executor.execute("fake_dict_blocked_tool", {})
+
+        assert action is None
+        assert isinstance(result, dict)
+        assert result["status"] == "blocked"
+        assert events[-1][0][1] == "tool.execute.blocked"
+        assert events[-1][1]["outcome"] == "blocked"
+        assert events[-1][1]["fields"]["semanticStatus"] == "blocked"
+        assert events[-1][1]["fields"]["toolResultStatus"] == "blocked"
+
     def test_tool_json_no_result_is_recorded_as_failed_scene_event(self, monkeypatch):
         """Tools returning no_result JSON should not be marked as succeeded."""
         from core.infrastructure import tool_executor as tool_executor_module
