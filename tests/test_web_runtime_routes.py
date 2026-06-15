@@ -4,6 +4,7 @@ import shutil
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
@@ -431,6 +432,945 @@ def test_runtime_summary_exposes_real_context_compression_snapshot(monkeypatch):
     assert compression["lastCompression"]["triggerSource"] == "manual"
     assert compression["lastCompression"]["summaryWritten"] is True
     assert compression["strategy"]["levels"][0]["thresholdTokens"] == 7200
+
+
+def test_runtime_summary_prefers_current_phase_over_stale_task_progress(monkeypatch):
+    monkeypatch.setattr(
+        runtime_service,
+        "get_active_session_summary",
+        lambda: {
+            "title": "真实会话",
+            "taskSummary": "继续前端开发",
+            "currentPhase": "ready",
+            "changedFiles": ["web/src/routes/ChatCodingRoute.tsx"],
+        },
+    )
+    monkeypatch.setattr(runtime_service, "_load_runtime_state", lambda: {})
+
+    payload = runtime_service.get_runtime_summary()
+
+    assert payload["status"] == "success"
+    assert payload["currentPhase"] == "ready"
+
+
+def test_runtime_summary_exposes_runtime_manager_workbench_state(monkeypatch):
+    monkeypatch.setattr(runtime_service, "get_active_session_summary", lambda: {})
+    monkeypatch.setattr(runtime_service, "_load_runtime_state", lambda: {})
+    monkeypatch.setattr(
+        runtime_service,
+        "_load_runtime_manager_snapshot",
+        lambda: {
+            "daemonRunning": True,
+            "runtimeState": "running",
+            "managerPid": 9912,
+            "stateVersion": 17,
+            "workbench": {
+                "desiredState": "closed",
+                "observedState": "open",
+                "phase": "closing",
+                "backendPid": 3001,
+                "browserWindowPid": 4002,
+                "browserManaged": True,
+                "url": "http://127.0.0.1:8000",
+                "lastReason": "web_close_button",
+                "failureMessage": "",
+            },
+        },
+    )
+
+    payload = runtime_service.get_runtime_summary()
+
+    assert payload["runtimeManager"]["running"] is True
+    assert payload["runtimeManager"]["managerPid"] == 9912
+    assert payload["workbench"]["desiredState"] == "closed"
+    assert payload["workbench"]["observedState"] == "open"
+    assert payload["workbench"]["phase"] == "closing"
+    assert payload["workbench"]["backendPid"] == 3001
+
+
+def test_runtime_summary_uses_light_runtime_manager_snapshot(monkeypatch):
+    monkeypatch.setattr(runtime_service, "get_active_session_summary", lambda: {})
+    monkeypatch.setattr(runtime_service, "_load_runtime_state", lambda: {})
+    monkeypatch.setattr(
+        runtime_service,
+        "load_runtime_manager_state",
+        lambda: {
+            "runtimeState": "running",
+            "managerPid": 9912,
+            "stateVersion": 17,
+            "workbench": {
+                "desiredState": "open",
+                "observedState": "open",
+                "phase": "steady",
+                "backendPid": 3001,
+                "browserWindowPid": 4002,
+                "browserManaged": True,
+                "url": "http://127.0.0.1:8000",
+            },
+        },
+    )
+    monkeypatch.setattr(runtime_service, "current_runtime_manager_pid", lambda project_root: 9912)
+    monkeypatch.setattr(
+        runtime_service,
+        "load_runtime_snapshot",
+        lambda: (_ for _ in ()).throw(AssertionError("runtime summary must not perform full runtime snapshot observation")),
+        raising=False,
+    )
+
+    payload = runtime_service.get_runtime_summary()
+
+    assert payload["runtimeManager"]["running"] is True
+    assert payload["runtimeManager"]["managerPid"] == 9912
+    assert payload["workbench"]["observedState"] == "open"
+    assert payload["lifecycleProof"]["projectRootMatches"] is True
+
+
+def test_runtime_summary_labels_launcher_control_surface_separately(monkeypatch):
+    monkeypatch.setattr(runtime_service, "get_active_session_summary", lambda: {})
+    monkeypatch.setattr(runtime_service, "_load_runtime_state", lambda: {})
+    monkeypatch.setattr(
+        runtime_service,
+        "_load_runtime_manager_snapshot",
+        lambda: {
+            "daemonRunning": True,
+            "runtimeState": "running",
+            "managerPid": 9912,
+            "stateVersion": 19,
+            "workbench": {
+                "sessionRole": "launcher_control_surface",
+                "desiredState": "closed",
+                "observedState": "closed",
+                "phase": "steady",
+                "backendPid": 3001,
+                "backendAlive": True,
+                "backendHealthy": True,
+                "backendObserved": True,
+                "browserWindowPid": 4002,
+                "browserWindowAlive": True,
+                "browserManaged": True,
+                "url": "http://127.0.0.1:8000",
+            },
+        },
+    )
+
+    payload = runtime_service.get_runtime_summary()
+
+    assert payload["workbench"]["sessionRole"] == "launcher_control_surface"
+    assert payload["workbench"]["observedState"] == "closed"
+    assert "Launcher 控制台正在运行" in payload["workbench"]["statusLine"]
+    assert payload["lifecycleProof"]["overallState"] == "partial"
+
+
+def test_runtime_summary_exposes_orphaned_browser_status(monkeypatch):
+    monkeypatch.setattr(runtime_service, "get_active_session_summary", lambda: {})
+    monkeypatch.setattr(runtime_service, "_load_runtime_state", lambda: {})
+    monkeypatch.setattr(
+        runtime_service,
+        "_load_runtime_manager_snapshot",
+        lambda: {
+            "daemonRunning": True,
+            "runtimeState": "running",
+            "managerPid": 9912,
+            "stateVersion": 18,
+            "workbench": {
+                "desiredState": "closed",
+                "observedState": "open",
+                "phase": "failed",
+                "backendPid": 0,
+                "browserWindowPid": 12132,
+                "backendObserved": False,
+                "backendPortListening": False,
+                "browserWindowAlive": True,
+                "browserManaged": True,
+                "backendMissing": True,
+                "frontendOrphaned": True,
+                "lifecycleConsistency": "orphaned_browser",
+                "url": "http://127.0.0.1:8000",
+                "lastReason": "external_close",
+                "failureMessage": "",
+            },
+        },
+    )
+
+    payload = runtime_service.get_runtime_summary()
+
+    assert payload["workbench"]["frontendOrphaned"] is True
+    assert payload["workbench"]["backendMissing"] is True
+    assert payload["workbench"]["lifecycleConsistency"] == "orphaned_browser"
+    assert "后端服务已经离线" in payload["workbench"]["statusLine"]
+    assert payload["lifecycleProof"]["overallState"] == "failed"
+
+
+def test_runtime_summary_marks_missing_managed_window_as_partial(monkeypatch):
+    monkeypatch.setattr(runtime_service, "get_active_session_summary", lambda: {})
+    monkeypatch.setattr(runtime_service, "_load_runtime_state", lambda: {})
+    monkeypatch.setattr(
+        runtime_service,
+        "_work_run_summary",
+        lambda: {
+            "active": {
+                "chat_turn": None,
+                "self_evolution_run": None,
+                "supervised_evolution_run": None,
+            },
+            "latest": {
+                "chat_turn": None,
+                "self_evolution_run": None,
+                "supervised_evolution_run": None,
+            },
+        },
+    )
+    monkeypatch.setattr(
+        runtime_service,
+        "_load_runtime_manager_snapshot",
+        lambda: {
+            "daemonRunning": True,
+            "runtimeState": "running",
+            "managerPid": 9912,
+            "stateVersion": 18,
+            "projectRoot": str(runtime_service.PROJECT_ROOT),
+            "runtimeManager": {"sourceMatches": True},
+            "workbench": {
+                "desiredState": "open",
+                "observedState": "partial",
+                "phase": "steady",
+                "backendPid": 3001,
+                "backendAlive": True,
+                "backendHealthy": True,
+                "backendObserved": True,
+                "backendPort": 8000,
+                "backendPortListening": True,
+                "backendPortOwnerPid": 3001,
+                "backendPortOwnerTrusted": True,
+                "backendPortConflict": False,
+                "browserWindowPid": 4002,
+                "browserWindowAlive": False,
+                "browserManaged": True,
+                "lifecycleConsistency": "browser_missing",
+                "url": "http://127.0.0.1:8000",
+                "lastReason": "start",
+                "failureMessage": "",
+            },
+        },
+    )
+
+    payload = runtime_service.get_runtime_summary()
+
+    assert payload["workbench"]["observedState"] == "partial"
+    assert payload["workbench"]["lifecycleConsistency"] == "browser_missing"
+    assert payload["workbench"]["statusLine"] == "工作台窗口已关闭，后端仍在运行。"
+    proof = payload["lifecycleProof"]
+    assert proof["overallState"] == "partial"
+    backend = next(component for component in proof["components"] if component["id"] == "backend")
+    window = next(component for component in proof["components"] if component["id"] == "workbench_window")
+    assert backend["ok"] is True
+    assert window["state"] == "missing"
+
+
+def test_runtime_lifecycle_proof_marks_ready_when_components_agree(monkeypatch):
+    monkeypatch.setattr(runtime_service, "get_active_session_summary", lambda: {})
+    monkeypatch.setattr(runtime_service, "_load_runtime_state", lambda: {})
+    monkeypatch.setattr(
+        runtime_service,
+        "_work_run_summary",
+        lambda: {
+            "active": {
+                "chat_turn": None,
+                "self_evolution_run": None,
+                "supervised_evolution_run": None,
+            },
+            "latest": {
+                "chat_turn": None,
+                "self_evolution_run": None,
+                "supervised_evolution_run": None,
+            },
+        },
+    )
+    monkeypatch.setattr(
+        runtime_service,
+        "_load_runtime_manager_snapshot",
+        lambda: {
+            "daemonRunning": True,
+            "runtimeState": "running",
+            "managerPid": 9912,
+            "stateVersion": 17,
+            "projectRoot": str(runtime_service.PROJECT_ROOT),
+            "runtimeManager": {"sourceMatches": True},
+            "workbench": {
+                "desiredState": "open",
+                "observedState": "open",
+                "phase": "steady",
+                "backendPid": 3001,
+                "browserWindowPid": 4002,
+                "browserManaged": True,
+                "url": "http://127.0.0.1:8000",
+                "lastReason": "start",
+                "failureMessage": "",
+            },
+        },
+    )
+
+    payload = runtime_service.get_runtime_summary()
+
+    proof = payload["lifecycleProof"]
+    assert proof["overallState"] == "ready"
+    assert proof["projectRootMatches"] is True
+    assert proof["activeWorkRuns"]["count"] == 0
+    assert {component["id"] for component in proof["components"]} >= {
+        "runtime_manager",
+        "backend",
+        "workbench_window",
+        "project_root",
+        "active_work_runs",
+    }
+
+
+def test_runtime_lifecycle_proof_keeps_advisory_source_staleness_non_blocking(monkeypatch):
+    monkeypatch.setattr(runtime_service, "get_active_session_summary", lambda: {})
+    monkeypatch.setattr(runtime_service, "_load_runtime_state", lambda: {})
+    monkeypatch.setattr(
+        runtime_service,
+        "_work_run_summary",
+        lambda: {
+            "active": {
+                "chat_turn": None,
+                "self_evolution_run": None,
+                "supervised_evolution_run": None,
+            },
+            "latest": {
+                "chat_turn": None,
+                "self_evolution_run": None,
+                "supervised_evolution_run": None,
+            },
+        },
+    )
+    monkeypatch.setattr(
+        runtime_service,
+        "_load_runtime_manager_snapshot",
+        lambda: {
+            "daemonRunning": True,
+            "runtimeState": "running",
+            "managerPid": 9912,
+            "stateVersion": 18,
+            "projectRoot": str(runtime_service.PROJECT_ROOT),
+            "runtimeManager": {"sourceMatches": False},
+            "workbench": {
+                "desiredState": "open",
+                "observedState": "open",
+                "phase": "steady",
+                "backendPid": 3001,
+                "backendAlive": True,
+                "backendHealthy": True,
+                "backendObserved": True,
+                "backendPort": 8000,
+                "backendPortListening": True,
+                "backendPortOwnerPid": 3001,
+                "backendPortOwnerTrusted": True,
+                "backendPortConflict": False,
+                "browserWindowPid": 0,
+                "browserWindowAlive": False,
+                "browserManaged": True,
+                "url": "http://127.0.0.1:8000",
+                "lastReason": "start",
+                "failureMessage": "",
+            },
+        },
+    )
+
+    payload = runtime_service.get_runtime_summary()
+
+    proof = payload["lifecycleProof"]
+    source_component = next(component for component in proof["components"] if component["id"] == "source_freshness")
+    assert proof["overallState"] == "ready"
+    assert source_component["state"] == "failed"
+    assert source_component["requiredForOpen"] is False
+
+
+def test_runtime_lifecycle_proof_does_not_mark_closed_with_active_work_runs(monkeypatch):
+    monkeypatch.setattr(runtime_service, "get_active_session_summary", lambda: {})
+    monkeypatch.setattr(runtime_service, "_load_runtime_state", lambda: {})
+    monkeypatch.setattr(
+        runtime_service,
+        "_work_run_summary",
+        lambda: {
+            "active": {
+                "chat_turn": {
+                    "runId": "turn-live",
+                    "runKind": "chat_turn",
+                    "status": "running",
+                },
+                "self_evolution_run": None,
+                "supervised_evolution_run": None,
+            },
+            "latest": {
+                "chat_turn": None,
+                "self_evolution_run": None,
+                "supervised_evolution_run": None,
+            },
+        },
+    )
+    monkeypatch.setattr(
+        runtime_service,
+        "_load_runtime_manager_snapshot",
+        lambda: {
+            "daemonRunning": False,
+            "runtimeState": "idle",
+            "managerPid": 0,
+            "stateVersion": 17,
+            "projectRoot": str(runtime_service.PROJECT_ROOT),
+            "workbench": {
+                "desiredState": "closed",
+                "observedState": "closed",
+                "phase": "steady",
+                "backendPid": 0,
+                "browserWindowPid": 0,
+                "browserManaged": True,
+                "url": "http://127.0.0.1:8000",
+                "lastReason": "web_close_button",
+                "failureMessage": "",
+            },
+        },
+    )
+
+    payload = runtime_service.get_runtime_summary()
+
+    proof = payload["lifecycleProof"]
+    assert proof["overallState"] == "partial"
+    assert proof["activeWorkRuns"]["count"] == 1
+    assert proof["activeWorkRuns"]["kinds"] == ["chat_turn"]
+
+
+def test_runtime_lifecycle_proof_ignores_finished_needs_continue_work_run(monkeypatch):
+    monkeypatch.setattr(runtime_service, "get_active_session_summary", lambda: {})
+    monkeypatch.setattr(runtime_service, "_load_runtime_state", lambda: {})
+    monkeypatch.setattr(runtime_service, "list_active_session_work_runs", lambda: [])
+    finished_run = {
+        "runId": "turn-needs-continue",
+        "runKind": "chat_turn",
+        "sessionId": "session-a",
+        "status": "needs_continue",
+        "currentPhase": "needs_continue",
+        "updatedAt": "2026-06-05T11:30:33Z",
+        "finishedAt": "2026-06-05T11:30:33Z",
+    }
+    monkeypatch.setattr(
+        runtime_service,
+        "_work_run_summary",
+        lambda: {
+            "active": {
+                "chat_turn": finished_run,
+                "self_evolution_run": None,
+                "supervised_evolution_run": None,
+                "supervised_worktree_evolution_run": None,
+            },
+            "latest": {
+                "chat_turn": finished_run,
+                "self_evolution_run": None,
+                "supervised_evolution_run": None,
+                "supervised_worktree_evolution_run": None,
+            },
+            "activeItems": {
+                "chat_turn": [finished_run],
+            },
+        },
+    )
+    monkeypatch.setattr(
+        runtime_service,
+        "_load_runtime_manager_snapshot",
+        lambda: {
+            "daemonRunning": False,
+            "runtimeState": "idle",
+            "managerPid": 0,
+            "stateVersion": 17,
+            "projectRoot": str(runtime_service.PROJECT_ROOT),
+            "workbench": {
+                "desiredState": "closed",
+                "observedState": "closed",
+                "phase": "steady",
+                "backendPid": 0,
+                "browserWindowPid": 0,
+                "browserManaged": True,
+                "url": "http://127.0.0.1:8000",
+                "lastReason": "web_close_button",
+                "failureMessage": "",
+            },
+        },
+    )
+
+    payload = runtime_service.get_runtime_summary()
+
+    proof = payload["lifecycleProof"]
+    assert proof["overallState"] == "closed"
+    assert proof["activeWorkRuns"]["count"] == 0
+    assert runtime_service._restart_guard_active_work_runs() == []
+
+
+def test_runtime_lifecycle_proof_does_not_mark_closed_when_backend_port_is_still_owned(monkeypatch):
+    monkeypatch.setattr(runtime_service, "get_active_session_summary", lambda: {})
+    monkeypatch.setattr(runtime_service, "_load_runtime_state", lambda: {})
+    monkeypatch.setattr(
+        runtime_service,
+        "_work_run_summary",
+        lambda: {
+            "active": {
+                "chat_turn": None,
+                "self_evolution_run": None,
+                "supervised_evolution_run": None,
+            },
+            "latest": {
+                "chat_turn": None,
+                "self_evolution_run": None,
+                "supervised_evolution_run": None,
+            },
+        },
+    )
+    monkeypatch.setattr(
+        runtime_service,
+        "_load_runtime_manager_snapshot",
+        lambda: {
+            "daemonRunning": True,
+            "runtimeState": "running",
+            "managerPid": 9912,
+            "stateVersion": 18,
+            "projectRoot": str(runtime_service.PROJECT_ROOT),
+            "runtimeManager": {"sourceMatches": True},
+            "workbench": {
+                "desiredState": "closed",
+                "observedState": "closed",
+                "phase": "steady",
+                "backendPid": 19964,
+                "backendAlive": False,
+                "backendHealthy": False,
+                "backendObserved": True,
+                "backendPort": 8766,
+                "backendPortListening": True,
+                "backendPortOwnerPid": 52396,
+                "backendPortOwnerTrusted": False,
+                "backendPortConflict": True,
+                "browserWindowPid": 0,
+                "browserWindowAlive": False,
+                "browserManaged": True,
+                "url": "http://127.0.0.1:8766",
+                "lastReason": "web_close_button",
+                "failureMessage": "",
+            },
+        },
+    )
+
+    payload = runtime_service.get_runtime_summary()
+
+    proof = payload["lifecycleProof"]
+    backend_component = next(component for component in proof["components"] if component["id"] == "backend")
+    assert proof["overallState"] == "partial"
+    assert backend_component["ok"] is False
+    assert backend_component["state"] == "closing"
+    assert backend_component["pid"] == 19964
+    assert "52396" in backend_component["detail"]
+
+
+def test_runtime_lifecycle_proof_does_not_mark_closed_with_residual_repo_processes(monkeypatch):
+    monkeypatch.setattr(runtime_service, "get_active_session_summary", lambda: {})
+    monkeypatch.setattr(runtime_service, "_load_runtime_state", lambda: {})
+    monkeypatch.setattr(
+        runtime_service,
+        "_work_run_summary",
+        lambda: {
+            "active": {
+                "chat_turn": None,
+                "self_evolution_run": None,
+                "supervised_evolution_run": None,
+            },
+            "latest": {
+                "chat_turn": None,
+                "self_evolution_run": None,
+                "supervised_evolution_run": None,
+            },
+        },
+    )
+    monkeypatch.setattr(
+        runtime_service,
+        "_load_runtime_manager_snapshot",
+        lambda: {
+            "daemonRunning": False,
+            "runtimeState": "idle",
+            "managerPid": 0,
+            "stateVersion": 19,
+            "projectRoot": str(runtime_service.PROJECT_ROOT),
+            "runtimeManager": {"sourceMatches": True},
+            "workbench": {
+                "desiredState": "closed",
+                "observedState": "closed",
+                "phase": "steady",
+                "backendPid": 0,
+                "backendAlive": False,
+                "backendHealthy": False,
+                "backendObserved": False,
+                "backendPort": 8766,
+                "backendPortListening": False,
+                "backendPortOwnerPid": 0,
+                "browserWindowPid": 0,
+                "browserWindowAlive": False,
+                "browserManaged": True,
+                "url": "http://127.0.0.1:8766",
+                "lastReason": "web_close_button",
+                "failureMessage": "",
+            },
+            "residualProcesses": {
+                "count": 1,
+                "items": [
+                    {
+                        "pid": 49780,
+                        "parentPid": 0,
+                        "kind": "unmanaged_workbench",
+                        "name": "python.exe",
+                        "commandLine": "python scripts/web_workbench.py --port 8001 --no-browser",
+                        "cwd": str(runtime_service.PROJECT_ROOT),
+                        "port": 8001,
+                    }
+                ],
+            },
+        },
+    )
+
+    payload = runtime_service.get_runtime_summary()
+
+    proof = payload["lifecycleProof"]
+    residual_component = next(component for component in proof["components"] if component["id"] == "residual_processes")
+    assert proof["overallState"] == "partial"
+    assert proof["residualProcesses"]["count"] == 1
+    assert residual_component["ok"] is False
+    assert residual_component["state"] == "running"
+    assert residual_component["pid"] == 49780
+
+
+def test_runtime_lifecycle_proof_detects_unmanaged_frontend_dev_server(monkeypatch):
+    monkeypatch.setattr(runtime_service, "get_active_session_summary", lambda: {})
+    monkeypatch.setattr(runtime_service, "_load_runtime_state", lambda: {})
+    monkeypatch.setattr(
+        runtime_service,
+        "_work_run_summary",
+        lambda: {
+            "active": {
+                "chat_turn": None,
+                "self_evolution_run": None,
+                "supervised_evolution_run": None,
+            },
+            "latest": {
+                "chat_turn": None,
+                "self_evolution_run": None,
+                "supervised_evolution_run": None,
+            },
+        },
+    )
+    monkeypatch.setattr(
+        runtime_service,
+        "_load_runtime_manager_snapshot",
+        lambda: {
+            "daemonRunning": False,
+            "runtimeState": "idle",
+            "managerPid": 0,
+            "stateVersion": 19,
+            "projectRoot": str(runtime_service.PROJECT_ROOT),
+            "runtimeManager": {"sourceMatches": True},
+            "workbench": {
+                "desiredState": "closed",
+                "observedState": "closed",
+                "phase": "steady",
+                "backendPid": 0,
+                "backendAlive": False,
+                "backendHealthy": False,
+                "backendObserved": False,
+                "backendPort": 8766,
+                "backendPortListening": False,
+                "backendPortOwnerPid": 0,
+                "browserWindowPid": 0,
+                "browserWindowAlive": False,
+                "browserManaged": True,
+                "url": "http://127.0.0.1:8766",
+                "lastReason": "web_close_button",
+                "failureMessage": "",
+            },
+            "residualProcesses": {
+                "count": 1,
+                "items": [
+                    {
+                        "pid": 51517,
+                        "parentPid": 1,
+                        "kind": "unmanaged_frontend_dev_server",
+                        "name": "python.exe",
+                        "commandLine": "python -m http.server 5173 -d frontend",
+                        "cwd": str(runtime_service.PROJECT_ROOT),
+                        "port": 5173,
+                    }
+                ],
+            },
+        },
+    )
+
+    payload = runtime_service.get_runtime_summary()
+
+    proof = payload["lifecycleProof"]
+    residual_component = next(component for component in proof["components"] if component["id"] == "residual_processes")
+    assert proof["overallState"] == "partial"
+    assert proof["residualProcesses"]["count"] == 1
+    assert proof["residualProcesses"]["items"][0]["kind"] == "unmanaged_frontend_dev_server"
+    assert residual_component["ok"] is False
+    assert residual_component["pid"] == 51517
+    assert "5173" in residual_component["detail"]
+
+
+def test_runtime_summary_exposes_tool_call_session_state(monkeypatch):
+    monkeypatch.setattr(
+        runtime_service,
+        "get_active_session_summary",
+        lambda: {
+            "title": "真实会话",
+            "taskSummary": "继续前端开发",
+            "currentPhase": "running",
+        },
+    )
+    monkeypatch.setattr(
+        runtime_service,
+        "_load_runtime_state",
+        lambda: {
+            "status": "THINKING",
+            "runtime_status": "ACTING",
+            "last_tool_name": "read_file_tool",
+        },
+    )
+
+    payload = runtime_service.get_runtime_summary()
+
+    assert payload["sessionState"] == "tooling"
+    assert payload["sessionNeedsResponse"] is False
+    assert payload["sessionToolName"] == "read_file_tool"
+    assert "tool" in payload["sessionStateLine"].lower() or "工具" in payload["sessionStateLine"]
+
+
+def test_runtime_summary_exposes_thinking_session_state(monkeypatch):
+    monkeypatch.setattr(
+        runtime_service,
+        "get_active_session_summary",
+        lambda: {
+            "title": "真实会话",
+            "taskSummary": "继续前端开发",
+            "currentPhase": "running",
+        },
+    )
+    monkeypatch.setattr(
+        runtime_service,
+        "_load_runtime_state",
+        lambda: {
+            "status": "THINKING",
+            "runtime_status": "WORKING",
+            "last_tool_name": "grep_search_tool",
+        },
+    )
+
+    payload = runtime_service.get_runtime_summary()
+
+    assert payload["sessionState"] == "thinking"
+    assert payload["sessionNeedsResponse"] is False
+    assert payload["sessionToolName"] == "grep_search_tool"
+
+
+def test_runtime_summary_exposes_answering_session_state(monkeypatch):
+    monkeypatch.setattr(
+        runtime_service,
+        "get_active_session_summary",
+        lambda: {
+            "title": "真实会话",
+            "taskSummary": "继续前端开发",
+            "currentPhase": "running",
+        },
+    )
+    monkeypatch.setattr(
+        runtime_service,
+        "_load_runtime_state",
+        lambda: {
+            "status": "WORKING",
+            "runtime_status": "WORKING",
+            "turn_output_tokens": 64,
+            "last_tool_name": "",
+        },
+    )
+
+    payload = runtime_service.get_runtime_summary()
+
+    assert payload["sessionState"] == "answering"
+    assert payload["sessionNeedsResponse"] is False
+
+
+def test_runtime_summary_treats_stopping_session_as_active(monkeypatch):
+    monkeypatch.setattr(
+        runtime_service,
+        "get_active_session_summary",
+        lambda: {
+            "title": "真实会话",
+            "taskSummary": "正在收束当前轮。",
+            "currentPhase": "stopping",
+        },
+    )
+    monkeypatch.setattr(runtime_service, "_load_runtime_state", lambda: {})
+
+    payload = runtime_service.get_runtime_summary()
+
+    assert payload["status"] == "running"
+    assert payload["sessionState"] == "running"
+    assert payload["sessionNeedsResponse"] is False
+
+
+def test_runtime_summary_marks_ready_session_as_needing_response(monkeypatch):
+    monkeypatch.setattr(
+        runtime_service,
+        "get_active_session_summary",
+        lambda: {
+            "title": "真实会话",
+            "taskSummary": "继续前端开发",
+            "currentPhase": "ready",
+        },
+    )
+    monkeypatch.setattr(runtime_service, "_load_runtime_state", lambda: {})
+
+    payload = runtime_service.get_runtime_summary()
+
+    assert payload["sessionState"] == "ready"
+    assert payload["sessionNeedsResponse"] is True
+    assert "继续" in payload["sessionStateLine"] or "ready" in payload["sessionStateLine"].lower()
+
+
+def test_runtime_summary_marks_failed_session_as_needing_response(monkeypatch):
+    monkeypatch.setattr(
+        runtime_service,
+        "get_active_session_summary",
+        lambda: {
+            "title": "真实会话",
+            "taskSummary": "测试失败，需要你决定先修测试还是先回退。",
+            "currentPhase": "failed",
+            "updatedAt": "2026-05-18T20:00:00",
+        },
+    )
+    monkeypatch.setattr(
+        runtime_service,
+        "_load_runtime_state",
+        lambda: {
+            "status": "ERROR",
+            "runtime_status": "ERROR",
+            "updated_at": "2026-05-18T20:00:01",
+        },
+    )
+
+    payload = runtime_service.get_runtime_summary()
+
+    assert payload["sessionState"] == "failed"
+    assert payload["sessionNeedsResponse"] is True
+    assert payload["sessionUpdatedAt"] == "2026-05-18T20:00:00"
+
+
+def test_runtime_summary_ready_session_ignores_stale_runtime_error(monkeypatch):
+    monkeypatch.setattr(
+        runtime_service,
+        "get_active_session_summary",
+        lambda: {
+            "title": "真实会话",
+            "taskSummary": "继续前端开发",
+            "currentPhase": "ready",
+            "updatedAt": "2026-05-18T20:30:00",
+        },
+    )
+    monkeypatch.setattr(
+        runtime_service,
+        "_load_runtime_state",
+        lambda: {
+            "status": "ERROR",
+            "runtime_status": "IDLE",
+            "updated_at": "2026-05-18T20:29:59",
+        },
+    )
+
+    payload = runtime_service.get_runtime_summary()
+
+    assert payload["status"] == "success"
+    assert payload["sessionState"] == "ready"
+    assert payload["sessionNeedsResponse"] is True
+
+
+def test_runtime_summary_exposes_latest_mental_state(monkeypatch):
+    monkeypatch.setattr(runtime_service, "get_active_session_summary", lambda: {})
+    monkeypatch.setattr(runtime_service, "_load_runtime_state", lambda: {})
+
+    class DummyMentalModel:
+        def get_last_state(self):
+            return {
+                "mood": "专注",
+                "feeling": "规则感知: normal",
+                "whisper": "继续推进",
+                "timestamp": "2026-05-18T20:00:02",
+            }
+
+        def diagnose(self):
+            return SimpleNamespace(
+                state="normal",
+                confidence=0.82,
+                metrics={"sample_size": 6, "intervention_count": 1},
+                timestamp="2026-05-18T20:00:02",
+            )
+
+    monkeypatch.setattr(runtime_service, "get_mental_model", lambda *args, **kwargs: DummyMentalModel())
+
+    payload = runtime_service.get_runtime_summary()
+
+    assert payload["mentalState"]["mood"] == "专注"
+    assert payload["mentalState"]["feeling"] == "规则感知: normal"
+    assert payload["mentalState"]["whisper"] == "继续推进"
+    assert payload["mentalState"]["cognitiveState"] == "normal"
+    assert payload["mentalState"]["source"] == "state"
+    assert payload["mentalState"]["confidence"] == pytest.approx(0.82)
+    assert payload["mentalState"]["sampleSize"] == 6
+    assert payload["mentalState"]["updatedAt"] == "2026-05-18T20:00:02"
+
+
+def test_runtime_summary_reports_disabled_mental_model(monkeypatch):
+    public_config = copy.deepcopy(load_public_config())
+    public_config["mental_model"] = {"enabled": False}
+
+    monkeypatch.setattr(runtime_service, "load_public_config", lambda: copy.deepcopy(public_config))
+    monkeypatch.setattr(runtime_service, "get_active_session_summary", lambda: {})
+    monkeypatch.setattr(runtime_service, "_load_runtime_state", lambda: {})
+    monkeypatch.setattr(runtime_service, "_load_runtime_manager_snapshot", lambda: {})
+
+    payload = runtime_service.get_runtime_summary()
+
+    assert payload["mentalState"]["source"] == "disabled"
+    assert "关闭" in payload["mentalState"]["summary"] or "disabled" in payload["mentalState"]["summary"].lower()
+
+
+def test_runtime_summary_falls_back_to_mental_diagnosis_when_state_is_empty(monkeypatch):
+    monkeypatch.setattr(runtime_service, "get_active_session_summary", lambda: {})
+    monkeypatch.setattr(runtime_service, "_load_runtime_state", lambda: {})
+
+    class DummyMentalModel:
+        def get_last_state(self):
+            return {}
+
+        def diagnose(self):
+            return SimpleNamespace(
+                state="thrashing",
+                confidence=0.71,
+                metrics={"sample_size": 8, "intervention_count": 3},
+                timestamp="2026-05-18T20:00:03",
+            )
+
+    monkeypatch.setattr(runtime_service, "get_mental_model", lambda *args, **kwargs: DummyMentalModel())
+
+    payload = runtime_service.get_runtime_summary()
+
+    assert payload["mentalState"]["mood"] == ""
+    assert payload["mentalState"]["cognitiveState"] == "thrashing"
+    assert payload["mentalState"]["source"] == "diagnosis"
+    assert payload["mentalState"]["confidence"] == pytest.approx(0.71)
+    assert payload["mentalState"]["sampleSize"] == 8
+    assert payload["mentalState"]["updatedAt"] == "2026-05-18T20:00:03"
 
 def test_ignores_windows_proactor_disconnect_noise(monkeypatch):
     monkeypatch.setattr(web_app.os, "name", "nt", raising=False)
