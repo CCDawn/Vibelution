@@ -260,7 +260,15 @@ def test_supervised_agent_session_is_hidden_and_preserves_prompt_with_mental_ove
     assert session_id not in {item["id"] for item in session_service.list_sessions()}
     assert (agent_directory_service.get_agent("agent-supervised") or {}).get("directSessionId") != session_id
 
-    prompt = "继续。这个监督 case 必须逐字保留，不要改写成上一轮任务。"
+    prompt = "\n".join(
+        [
+            "Run this Terminal-Bench-style local smoke case.",
+            "- Case: tb2_fix_code_vulnerability",
+            "- Docker image: alexgshaw/fix-code-vulnerability:20251031",
+            "This is a Vibelution custom-harness run; preserve the prompt as the case input.",
+        ]
+    )
+    assert session_service._has_recent_image_attachment_reference(prompt) is True
     response = session_service.submit_session_message(
         session_id,
         prompt,
@@ -273,6 +281,9 @@ def test_supervised_agent_session_is_hidden_and_preserves_prompt_with_mental_ove
     assert scheduled_contexts[-1]["user_message_source"] == "supervised_evolution"
     assert scheduled_contexts[-1]["mental_model_enabled"] is False
     assert scheduled_contexts[-1]["leases"] == ["readonly_chat"]
+    latest_user = [item for item in response["messages"] if item["role"] == "user"][-1]
+    assert latest_user["content"] == prompt
+    assert "resolvedRecentImageReference" not in (latest_user.get("metadata") or {})
     assert session_id not in {item["id"] for item in session_service.list_sessions()}
     assert (agent_directory_service.get_agent("agent-supervised") or {}).get("directSessionId") != session_id
 def test_session_query_keeps_active_session_on_default_first_page(tmp_path, monkeypatch):
