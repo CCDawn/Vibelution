@@ -1045,6 +1045,14 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("screenText");
     expect(routeSource).toContain("const replayTerminalSnapshot");
     expect(routeSource).toContain("历史 TUI 画面无法安全重放");
+    expect(routeSource).toContain("type CliAgentTerminalAck");
+    expect(routeSource).toContain("fetchJson<CliAgentTerminalAck>");
+    expect(routeSource).toContain("CLI_AGENT_TASK_LOCKED");
+    expect(routeSource).toContain("指令未发送：当前 CLI Agent 终端已有任务在运行。");
+    expect(routeSource).not.toContain(".then((session) => setTerminalSession(session))");
+    expect(routeSource.indexOf('if (payload.type === "terminal_output" && payload.chunk)')).toBeLessThan(
+      routeSource.indexOf("if (payload.session)"),
+    );
     expect(routeSource).toContain('import { Terminal } from "@xterm/xterm"');
     expect(routeSource).toContain("terminal.write(");
     expect(routeSource).not.toContain("terminalTextForDisplay");
