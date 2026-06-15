@@ -230,6 +230,19 @@ type SourceCollectionTraceMessage = {
 type SourceCollectionStepState = "active" | "done" | "failed" | "idle" | "pending";
 type SourceCollectionStageModuleId = "collection" | "screening" | "candidate" | "graph" | "memory";
 
+type SourceCollectionCandidateWithSource = TeamWorkflowCandidate & {
+  sourcePath?: string;
+  sourceRef?: string;
+  sourceUrl?: string;
+};
+
+type SourceCollectionCandidateProvenance = {
+  kind: "doi" | "file" | "missing" | "ref" | "url";
+  label: string;
+  value: string;
+  href: string;
+};
+
 type SourceCollectionStageModule = {
   id: SourceCollectionStageModuleId;
   label: string;
@@ -1081,6 +1094,96 @@ function sourceCollectionSourceTypeLabel(value: string | undefined | null, lang:
     url: "url",
   };
   return (lang === "zh" ? zh : en)[normalized] ?? (value || "-");
+}
+
+function metadataString(metadata: Record<string, unknown>, key: string) {
+  const value = metadata[key];
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function normalizedDoi(value: string | undefined | null) {
+  const text = String(value || "").trim();
+  if (!text) {
+    return "";
+  }
+  const doiUrl = text.match(/^https?:\/\/(?:dx\.)?doi\.org\/(.+)$/i);
+  const candidate = doiUrl ? doiUrl[1] : text.replace(/^doi:\s*/i, "");
+  const match = candidate.match(/10\.\d{4,9}\/[^\s"'<>]+/i);
+  return match ? match[0].replace(/[).,;]+$/, "") : "";
+}
+
+function compactSourceUrl(value: string) {
+  try {
+    const url = new URL(value);
+    const pathname = url.pathname.length > 42 ? `${url.pathname.slice(0, 39)}...` : url.pathname;
+    return `${url.hostname}${pathname}`;
+  } catch {
+    return value;
+  }
+}
+
+function sourceCollectionCandidateProvenance(
+  candidate: TeamWorkflowCandidate,
+  lang: "zh" | "en",
+): SourceCollectionCandidateProvenance {
+  const sourceCandidate = candidate as SourceCollectionCandidateWithSource;
+  const metadata = isRecord(candidate.metadata) ? candidate.metadata : {};
+  const sourceUrl =
+    String(sourceCandidate.sourceUrl || "").trim()
+    || metadataString(metadata, "sourceUrl")
+    || metadataString(metadata, "sourceRef")
+    || metadataString(metadata, "url");
+  const sourcePath =
+    String(sourceCandidate.sourcePath || "").trim()
+    || metadataString(metadata, "sourcePath")
+    || metadataString(metadata, "path");
+  const doi =
+    normalizedDoi(metadataString(metadata, "doi"))
+    || normalizedDoi(sourceCandidate.sourceRef)
+    || normalizedDoi(sourceUrl);
+
+  if (doi) {
+    return {
+      kind: "doi",
+      label: "DOI",
+      value: doi,
+      href: `https://doi.org/${doi}`,
+    };
+  }
+
+  if (/^https?:\/\//i.test(sourceUrl)) {
+    return {
+      kind: "url",
+      label: lang === "zh" ? "网页链接" : "Web link",
+      value: compactSourceUrl(sourceUrl),
+      href: sourceUrl,
+    };
+  }
+
+  if (sourcePath) {
+    return {
+      kind: "file",
+      label: lang === "zh" ? "本地文件" : "Local file",
+      value: sourcePath,
+      href: "",
+    };
+  }
+
+  if (sourceUrl) {
+    return {
+      kind: "ref",
+      label: lang === "zh" ? "来源标识" : "Source ref",
+      value: sourceUrl,
+      href: "",
+    };
+  }
+
+  return {
+    kind: "missing",
+    label: lang === "zh" ? "缺少来源" : "Missing source",
+    value: lang === "zh" ? "没有 sourceUrl/sourcePath/DOI" : "No sourceUrl/sourcePath/DOI",
+    href: "",
+  };
 }
 
 function sourceCollectionLanguageLabel(value: string | undefined | null, lang: "zh" | "en") {
@@ -3724,29 +3827,52 @@ export function TeamsRoute({
             <span>{sourceManifestCandidates.length} {lang === "zh" ? "条候选资料" : "candidate sources"}</span>
           </div>
           <div className={styles.sourceCollectionResultStats}>
-            <span>{lang === "zh" ? "原始资料记录" : "raw source records"} <strong>{sourceCollectionCollectedCount}</strong></span>
-            <span>{lang === "zh" ? "候选资料" : "candidate sources"} <strong>{sourceManifestCandidates.length}</strong></span>
-            <span>{lang === "zh" ? "已通过筛选" : "approved by screening"} <strong>{sourceCollectionApprovedCount}</strong></span>
+            <span>{lang === "zh" ? "已搜到" : "collected"} <strong>{sourceCollectionCollectedCount}</strong></span>
+            <span>{lang === "zh" ? "可点击来源" : "clickable sources"} <strong>{sourceCollectionClickableSourceCount}</strong></span>
+            <span>{lang === "zh" ? "本地文件" : "local files"} <strong>{sourceCollectionLocalFileCount}</strong></span>
             <span>{lang === "zh" ? "待 Agent 筛选" : "waiting for Agent screening"} <strong>{sourceQualityUnassessedCount}</strong></span>
           </div>
+          {sourceCollectionMissingSourceCount > 0 ? (
+            <div className={styles.sourceCollectionResultWarning}>
+              {lang === "zh"
+                ? `${sourceCollectionMissingSourceCount} 条资料缺少 DOI、链接或本地文件路径，不能视为可溯源结果。`
+                : `${sourceCollectionMissingSourceCount} sources are missing DOI, link, or local file path.`}
+            </div>
+          ) : null}
           {visibleResults.length ? (
             <div className={styles.sourceCollectionResultList}>
               {visibleResults.map((candidate) => {
                 const sourceQualitySummary = candidateSourceQualityAssessmentSummary(candidate);
+                const provenance = sourceCollectionCandidateProvenance(candidate, lang);
                 return (
                   <article key={candidate.candidateId} className={styles.sourceCollectionResultItem}>
-                    <div>
+                    <div className={styles.sourceCollectionResultContent}>
                       <strong>{candidate.title || candidate.candidateId}</strong>
                       <p>{candidate.summary || candidate.candidateId}</p>
+                      <div className={styles.sourceCollectionResultMeta}>
+                        <span>{sourceCollectionSourceTypeLabel(candidate.sourceKind || candidate.candidateType, lang)}</span>
+                        <span>{formatTime(candidate.updatedAt, lang)}</span>
+                        {sourceQualitySummary ? (
+                          <span>{lang === "zh" ? "评分" : "score"} {sourceQualitySummary.overallScore}/100</span>
+                        ) : null}
+                      </div>
                     </div>
                     <span className={`${styles.workflowTag} ${styles.sourceCollectionResultStatus} ${workflowQualityTone(candidate.qualityStatus)}`}>
                       {sourceQualitySummary
                         ? workflowIngestionStatusLabel(sourceQualitySummary.decision, lang)
                         : workflowStateLabel(candidate.currentState, lang)}
                     </span>
-                    <small>
-                      {sourceCollectionSourceTypeLabel(candidate.sourceKind || candidate.candidateType, lang)} · {formatTime(candidate.updatedAt, lang)}
-                    </small>
+                    <div className={`${styles.sourceCollectionResultSource} ${provenance.kind === "missing" ? styles.sourceCollectionResultSourceMissing : ""}`}>
+                      <span>{provenance.label}</span>
+                      {provenance.href ? (
+                        <a href={provenance.href} target="_blank" rel="noreferrer" title={provenance.href}>
+                          <Link2 size={12} />
+                          {provenance.value}
+                        </a>
+                      ) : (
+                        <code title={provenance.value}>{provenance.value}</code>
+                      )}
+                    </div>
                   </article>
                 );
               })}
@@ -5070,6 +5196,13 @@ export function TeamsRoute({
     () => teamWorkflowCandidates.filter((candidate) => candidate.candidateType === "source_manifest"),
     [teamWorkflowCandidates],
   );
+  const sourceCollectionCandidateProvenances = useMemo(
+    () => sourceManifestCandidates.map((candidate) => sourceCollectionCandidateProvenance(candidate, lang)),
+    [lang, sourceManifestCandidates],
+  );
+  const sourceCollectionClickableSourceCount = sourceCollectionCandidateProvenances.filter((item) => item.href).length;
+  const sourceCollectionLocalFileCount = sourceCollectionCandidateProvenances.filter((item) => item.kind === "file").length;
+  const sourceCollectionMissingSourceCount = sourceCollectionCandidateProvenances.filter((item) => item.kind === "missing").length;
   const sourceCollectionCollectedCount = Math.max(sourceCollectionRunSummary?.recordCount ?? 0, sourceManifestCandidates.length);
   const sourceCollectionQueryCount =
     sourceCollectionSearchPlanRef?.queryCount
@@ -5707,7 +5840,7 @@ export function TeamsRoute({
     {
       id: "collection",
       label: lang === "zh" ? "资料搜集" : "Collection",
-      metric: lang === "zh" ? `原始资料 ${sourceCollectionCollectedCount} 条` : `${sourceCollectionCollectedCount} raw sources`,
+      metric: lang === "zh" ? `已搜到 ${sourceCollectionCollectedCount} 条` : `${sourceCollectionCollectedCount} collected`,
       summary: !selectedSourceCollectionRun
         ? (lang === "zh" ? "点击开始生成本轮任务" : "Start to create this run")
         : sourceCollectionSearchOpenAssignmentCount > 0
@@ -5891,7 +6024,7 @@ export function TeamsRoute({
                 <span>{lang === "zh" ? "下一步" : "next"} <strong>{sourceCollectionStageFocusLabel}</strong></span>
                 <span>{lang === "zh" ? "可搜索" : "search"} <strong>{lang === "zh" ? `${sourceCollectionSearchOpenAssignmentCount} 项` : sourceCollectionSearchOpenAssignmentCount}</strong></span>
                 <span>{lang === "zh" ? "后续" : "next work"} <strong>{lang === "zh" ? `${sourceCollectionDownstreamOpenAssignmentCount} 项` : sourceCollectionDownstreamOpenAssignmentCount}</strong></span>
-                <span>{lang === "zh" ? "原始资料" : "raw sources"} <strong>{lang === "zh" ? `${sourceCollectionCollectedCount} 条` : sourceCollectionCollectedCount}</strong></span>
+                <span>{lang === "zh" ? "搜集结果" : "results"} <strong>{lang === "zh" ? `${sourceCollectionCollectedCount} 条` : sourceCollectionCollectedCount}</strong></span>
                 <span>{lang === "zh" ? "搜索问题" : "search questions"} <strong>{lang === "zh" ? `${sourceCollectionQueryCount} 个` : sourceCollectionQueryCount}</strong></span>
                 <span>{lang === "zh" ? "缓存" : "cache"} <strong>{sourceCollectionPromptCacheStatusLabel(sourceCollectionPromptCacheStatus, lang)}</strong></span>
               </div>

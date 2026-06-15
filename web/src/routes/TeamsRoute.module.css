@@ -2110,6 +2110,17 @@
   font-size: 0.78rem;
 }
 
+.sourceCollectionResultWarning {
+  min-width: 0;
+  padding: 7px 9px;
+  border: 1px solid color-mix(in srgb, var(--accent-warm) 30%, var(--border-soft));
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--accent-warm) 8%, var(--surface-card));
+  color: var(--fg-secondary);
+  font-size: 0.68rem;
+  font-weight: 760;
+}
+
 .sourceCollectionResultList {
   display: grid;
   gap: 7px;
@@ -2129,7 +2140,7 @@
     color-mix(in srgb, var(--surface-card) 78%, transparent);
 }
 
-.sourceCollectionResultItem div {
+.sourceCollectionResultContent {
   display: grid;
   gap: 3px;
   min-width: 0;
@@ -2137,7 +2148,8 @@
 
 .sourceCollectionResultItem strong,
 .sourceCollectionResultItem p,
-.sourceCollectionResultItem small {
+.sourceCollectionResultMeta,
+.sourceCollectionResultSource {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2159,6 +2171,23 @@
   -webkit-box-orient: vertical;
 }
 
+.sourceCollectionResultMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.sourceCollectionResultMeta span {
+  max-width: 100%;
+  padding: 2px 6px;
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  color: var(--fg-muted);
+  font-size: 0.62rem;
+  font-weight: 760;
+  white-space: nowrap;
+}
+
 .sourceCollectionResultStatus {
   justify-self: end;
   align-self: start;
@@ -2172,12 +2201,55 @@
   text-overflow: ellipsis;
 }
 
-.sourceCollectionResultItem small {
+.sourceCollectionResultSource {
   grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 7px;
+  align-items: center;
+  padding-top: 2px;
+}
+
+.sourceCollectionResultSource > span {
   color: var(--fg-muted);
-  font-size: 0.64rem;
-  font-weight: 720;
+  font-size: 0.62rem;
+  font-weight: 800;
   white-space: nowrap;
+}
+
+.sourceCollectionResultSource a,
+.sourceCollectionResultSource code {
+  display: inline-flex;
+  min-width: 0;
+  max-width: 100%;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 7px;
+  border: 1px solid color-mix(in srgb, var(--accent-cool) 28%, var(--border-soft));
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--accent-cool) 7%, var(--surface-card));
+  color: var(--accent-cool-2);
+  font-family: inherit;
+  font-size: 0.66rem;
+  font-weight: 820;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sourceCollectionResultSource a {
+  text-decoration: none;
+}
+
+.sourceCollectionResultSource code {
+  color: var(--fg-secondary);
+}
+
+.sourceCollectionResultSourceMissing a,
+.sourceCollectionResultSourceMissing code {
+  border-color: color-mix(in srgb, var(--accent-warm) 32%, var(--border-soft));
+  background: color-mix(in srgb, var(--accent-warm) 8%, var(--surface-card));
+  color: var(--fg-secondary);
 }
 
 .sourceCollectionUnavailable {
