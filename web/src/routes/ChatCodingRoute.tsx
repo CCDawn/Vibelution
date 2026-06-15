@@ -272,6 +272,11 @@ type CliAgentTerminalSession = {
   transcriptTail?: string;
   transcriptTailReplayable?: boolean;
   transcriptTailRenderReason?: string;
+  screenText?: string;
+  screenReplay?: string;
+  screenQuality?: string;
+  screenRows?: number;
+  screenCols?: number;
   createdAt?: string;
   updatedAt?: string;
 };
@@ -683,7 +688,8 @@ function CliAgentRunTerminalPanel({
   const visibleCommand = Array.isArray(terminalSession?.commandPreview) && terminalSession?.commandPreview.length
     ? terminalSession.commandPreview.join(" ")
     : run.commandLine;
-  const transcriptReplayBlocked = terminalSession?.transcriptTailReplayable === false;
+  const snapshotFallbackAvailable = Boolean(String(terminalSession?.screenText || "").trim());
+  const transcriptReplayBlocked = terminalSession?.transcriptTailReplayable === false && !snapshotFallbackAvailable;
   const emptyText = terminalError
     || (connecting
       ? (lang === "zh" ? "正在连接命令会话..." : "Connecting terminal session...")
@@ -728,6 +734,16 @@ function CliAgentRunTerminalPanel({
 
   const replayTerminalSnapshot = useCallback((session: CliAgentTerminalSession) => {
     if (session.transcriptTailReplayable === false) {
+      const screenText = String(session.screenText || "").trim();
+      const screenReplay = String(session.screenReplay || "");
+      if (screenText && screenReplay.trim()) {
+        writeTerminalChunk(screenReplay, { reset: true });
+        return;
+      }
+      if (screenText) {
+        writeTerminalChunk(screenText.replace(/\n/g, "\r\n"), { reset: true });
+        return;
+      }
       writeTerminalChunk("", { reset: true });
       return;
     }
