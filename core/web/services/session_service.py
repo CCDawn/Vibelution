@@ -6894,6 +6894,11 @@ def _normalize_session_cache_composition_segment(item: Any, *, default_status: s
     key = str(item.get("key") or "").strip()
     if not key:
         return None
+    estimated_raw = item.get("estimated")
+    if isinstance(estimated_raw, str):
+        estimated = estimated_raw.strip().lower() in {"1", "true", "yes", "on"}
+    else:
+        estimated = bool(estimated_raw)
     return {
         "key": key,
         "label": str(item.get("label") or key).strip() or key,
@@ -6904,6 +6909,11 @@ def _normalize_session_cache_composition_segment(item: Any, *, default_status: s
         "cachePolicy": str(item.get("cachePolicy") or item.get("cache_policy") or "").strip(),
         "order": _coerce_nonnegative_int(item.get("order") or 0),
         "contentPreview": _context_segment_content_preview(item),
+        "promptCategory": str(item.get("promptCategory") or item.get("prompt_category") or "").strip(),
+        "segmentKind": str(item.get("segmentKind") or item.get("segment_kind") or "").strip(),
+        "accuracy": str(item.get("accuracy") or "").strip(),
+        "parentKey": str(item.get("parentKey") or item.get("parent_key") or "").strip(),
+        "estimated": estimated,
         "observedStatus": str(item.get("observedStatus") or item.get("observed_status") or "").strip(),
         "observedCachedInputTokens": _coerce_nonnegative_int(
             item.get("observedCachedInputTokens") or item.get("observed_cached_input_tokens") or 0
@@ -7122,25 +7132,7 @@ def _build_computed_cache_segments(
     prefix_open = True
     unexplained_tokens = max(0, total_input_tokens - context_tokens)
     if unexplained_tokens:
-        segments.append(
-            {
-                "key": "system_prompt_overhead",
-                "label": "system prompt / tool schema",
-                "tokens": unexplained_tokens,
-                "status": "computed_hit",
-                "source": "provider_input_remainder",
-                "description": (
-                    "Input tokens not covered by the session context manifest; "
-                    "treated as stable prompt/tool-schema prefix for computed cache comparison."
-                ),
-                "cachePolicy": "assumed_stable_prefix",
-                "order": 0,
-                "contentPreview": (
-                    "Provider input not covered by the context manifest, usually stable system prompt, "
-                    "developer instructions, or tool schema. Raw text is not expanded here."
-                ),
-            }
-        )
+        segments.extend(_estimated_provider_prefix_cache_segments(unexplained_tokens))
         computed_cached_tokens += unexplained_tokens
     stable_policies = {"cacheable", "prefix_candidate", "assumed_stable_prefix"}
     volatile_policies = {"volatile", "never_cache", "dynamic"}
@@ -7172,10 +7164,118 @@ def _build_computed_cache_segments(
                 "cachePolicy": cache_policy,
                 "order": index,
                 "contentPreview": _context_segment_content_preview(item),
+                "promptCategory": str(item.get("promptCategory") or item.get("prompt_category") or _context_prompt_category(key)).strip(),
+                "segmentKind": "prompt_source",
+                "accuracy": "manifest",
             }
         )
     computed_cached_tokens = min(computed_cached_tokens, total_input_tokens)
     return segments, computed_cached_tokens, max(0, total_input_tokens - computed_cached_tokens)
+
+
+def _weighted_token_allocation(total_tokens: int, weights: list[int]) -> list[int]:
+    total = _coerce_nonnegative_int(total_tokens)
+    normalized_weights = [max(0, _coerce_nonnegative_int(weight)) for weight in weights]
+    weight_total = sum(normalized_weights)
+    if total <= 0 or weight_total <= 0:
+        return [0 for _ in normalized_weights]
+    allocations: list[int] = []
+    used = 0
+    for index, weight in enumerate(normalized_weights):
+        if weight <= 0:
+            allocations.append(0)
+            continue
+        if index == len(normalized_weights) - 1:
+            value = max(0, total - used)
+        else:
+            value = int((total * weight) // weight_total)
+        allocations.append(value)
+        used += value
+    remainder = total - sum(allocations)
+    index = 0
+    while remainder > 0 and allocations:
+        allocations[index % len(allocations)] += 1
+        remainder -= 1
+        index += 1
+    return allocations
+
+
+def _estimated_provider_prefix_cache_segments(tokens: int) -> list[dict[str, Any]]:
+    normalized_tokens = _coerce_nonnegative_int(tokens)
+    if normalized_tokens <= 0:
+        return []
+    definitions = [
+        {
+            "key": "system_prompt",
+            "label": "system prompt",
+            "promptCategory": "system_prompt",
+            "weight": 14,
+            "description": "Estimated stable system prompt portion inside provider input not mapped by the session manifest.",
+            "contentPreview": "系统提示词估算段；原文未展开。",
+        },
+        {
+            "key": "agent_protocol",
+            "label": "agent protocol",
+            "promptCategory": "agent_spec",
+            "weight": 14,
+            "description": "Estimated agent behavior/protocol instructions inside provider input not mapped by the session manifest.",
+            "contentPreview": "Agent 规范/协议估算段；原文未展开。",
+        },
+        {
+            "key": "tool_descriptions",
+            "label": "tool descriptions",
+            "promptCategory": "tool_descriptions",
+            "weight": 20,
+            "description": "Estimated natural-language tool descriptions inside provider input not mapped by the session manifest.",
+            "contentPreview": "工具描述估算段；原文未展开。",
+        },
+        {
+            "key": "tool_schema",
+            "label": "tool schema",
+            "promptCategory": "tool_schema",
+            "weight": 42,
+            "description": "Estimated provider tool/function schema tokens inside provider input not mapped by the session manifest.",
+            "contentPreview": "工具 schema / 函数定义估算段；原文未展开。",
+        },
+        {
+            "key": "provider_unmapped",
+            "label": "provider unmapped",
+            "promptCategory": "provider_unmapped",
+            "weight": 10,
+            "description": "Provider input tokens not attributable to a known prompt segment category.",
+            "contentPreview": "Provider 输入剩余未映射段；用于提示这里仍是估算边界。",
+        },
+    ]
+    if normalized_tokens < len(definitions):
+        definitions = definitions[:normalized_tokens]
+    allocations = _weighted_token_allocation(
+        normalized_tokens,
+        [_coerce_nonnegative_int(item["weight"]) for item in definitions],
+    )
+    segments: list[dict[str, Any]] = []
+    for index, (definition, allocation) in enumerate(zip(definitions, allocations), start=0):
+        token_count = _coerce_nonnegative_int(allocation)
+        if token_count <= 0:
+            continue
+        segments.append(
+            {
+                "key": str(definition["key"]),
+                "label": str(definition["label"]),
+                "tokens": token_count,
+                "status": "computed_hit",
+                "source": "provider_input_remainder",
+                "description": str(definition["description"]),
+                "cachePolicy": "assumed_stable_prefix",
+                "order": index,
+                "contentPreview": str(definition["contentPreview"]),
+                "promptCategory": str(definition["promptCategory"]),
+                "segmentKind": "prompt_source",
+                "accuracy": "estimated",
+                "parentKey": "provider_input_remainder",
+                "estimated": True,
+            }
+        )
+    return segments
 
 
 def _provider_cache_calibration_reason(
@@ -7609,6 +7709,7 @@ def _context_segment(
     retention: str = "",
     included_in_model_input: bool = True,
     evidence_ref: str = "",
+    content_hash: str = "",
     stale: bool = False,
 ) -> dict[str, Any]:
     return build_context_segment(
@@ -7631,8 +7732,112 @@ def _context_segment(
         retention=retention,
         included_in_model_input=included_in_model_input,
         evidence_ref=evidence_ref,
+        content_hash=content_hash,
         stale=stale,
     )
+
+
+_AGENT_CONTEXT_SEGMENT_LABELS = {
+    "agent_runtime": "agent runtime rules",
+    "research_organization": "research organization context",
+    "prompt_template": "agent prompt template",
+    "project_rules": "project rules",
+    "project_agent_registry": "agent registry",
+    "agent_messages": "agent messages",
+}
+
+_AGENT_CONTEXT_SEGMENT_CATEGORIES = {
+    "agent_runtime": "agent_spec",
+    "research_organization": "project_context",
+    "prompt_template": "agent_spec",
+    "project_rules": "developer_instructions",
+    "project_agent_registry": "agent_registry",
+    "agent_messages": "agent_messages",
+}
+
+_CONTEXT_PROMPT_CATEGORIES = {
+    "current_user": "current_user",
+    "history": "history",
+    "active_task": "task_state",
+    "agent_context": "agent_context",
+    "dynamic_runtime_context": "runtime_context",
+    "guidance": "operator_guidance",
+    "skill": "skill_context",
+    "active_skill": "skill_context",
+    "attachments": "attachments",
+}
+
+
+def _agent_context_segment_label(key: str) -> str:
+    normalized = str(key or "").strip()
+    return _AGENT_CONTEXT_SEGMENT_LABELS.get(normalized, normalized.replace("_", " ") or "agent context")
+
+
+def _agent_context_prompt_category(key: str) -> str:
+    normalized = str(key or "").strip()
+    return _AGENT_CONTEXT_SEGMENT_CATEGORIES.get(normalized, "agent_context")
+
+
+def _context_prompt_category(key: str) -> str:
+    normalized = str(key or "").strip()
+    if normalized in _AGENT_CONTEXT_SEGMENT_CATEGORIES:
+        return _agent_context_prompt_category(normalized)
+    return _CONTEXT_PROMPT_CATEGORIES.get(normalized, normalized or "context")
+
+
+def _agent_context_manifest_segments(
+    runtime_context_segments: list[dict[str, Any]] | None,
+    *,
+    dynamic_runtime_context_included: bool,
+) -> tuple[list[dict[str, Any]], dict[str, str]]:
+    segments: list[dict[str, Any]] = []
+    previews: dict[str, str] = {}
+    for index, item in enumerate(list(runtime_context_segments or [])):
+        if not isinstance(item, dict):
+            continue
+        key = str(item.get("key") or "").strip()
+        block = str(item.get("block") or "").strip()
+        if not key or not block:
+            continue
+        placement = str(item.get("placement") or "").strip()
+        is_static = placement == "cache_prefix"
+        is_dynamic = placement == "volatile_turn"
+        if not is_static and not is_dynamic:
+            continue
+        included = bool(is_static or (is_dynamic and dynamic_runtime_context_included))
+        segment = _context_segment(
+            key,
+            _agent_context_segment_label(key),
+            content=block,
+            chars=_coerce_nonnegative_int(item.get("chars") or len(block)),
+            item_count=1,
+            status="included" if included else "omitted",
+            source="context_engine",
+            description=(
+                "ContextEngine prompt segment seeded into the stable system prefix."
+                if is_static
+                else "ContextEngine turn-local prompt segment."
+            ),
+            kind=_agent_context_prompt_category(key),
+            lifecycle="stable" if is_static else "turn",
+            authority=82 if is_static else 58,
+            volatility=15 if is_static else 88,
+            relevance=76,
+            placement="system_prefix" if is_static else "before_current_user",
+            cache_policy="cacheable" if is_static else "volatile",
+            retention="persist" if is_static else "current_turn_only",
+            included_in_model_input=included,
+            content_hash=str(item.get("hash") or "").strip(),
+        )
+        segment["promptCategory"] = _agent_context_prompt_category(key)
+        segment["segmentKind"] = "prompt_source"
+        segment["accuracy"] = "manifest"
+        segment["order"] = index
+        segments.append(segment)
+        preview = _compact_preview_text(block, max_lines=3, max_chars=240)
+        if preview:
+            previews[key] = preview
+    return segments, previews
 
 
 def _build_last_context_composition(
@@ -7644,6 +7849,8 @@ def _build_last_context_composition(
     active_task: Any,
     runtime_context_block: str = "",
     dynamic_runtime_context_block: str = "",
+    dynamic_runtime_context_included: bool = False,
+    runtime_context_segments: list[dict[str, Any]] | None = None,
     guidance_context_block: str = "",
     guidance_context_included: bool = False,
     skill_runtime_context_block: str = "",
@@ -7710,7 +7917,13 @@ def _build_last_context_composition(
                 included_in_model_input=False,
             )
         )
-    if runtime_context_block:
+    agent_context_segments, agent_context_previews = _agent_context_manifest_segments(
+        runtime_context_segments,
+        dynamic_runtime_context_included=dynamic_runtime_context_included,
+    )
+    if agent_context_segments:
+        segments.extend(agent_context_segments)
+    elif runtime_context_block:
         segments.append(
             _context_segment(
                 "agent_context",
@@ -7731,6 +7944,7 @@ def _build_last_context_composition(
             )
         )
     if dynamic_runtime_context_block:
+        dynamic_included = bool(dynamic_runtime_context_included)
         segments.append(
             _context_segment(
                 "dynamic_runtime_context",
@@ -7738,18 +7952,22 @@ def _build_last_context_composition(
                 content=dynamic_runtime_context_block,
                 chars=len(dynamic_runtime_context_block),
                 item_count=1,
-                status="omitted",
+                status="included" if dynamic_included else "omitted",
                 source="context_engine",
-                description="Dynamic runtime context was available but omitted from model input.",
+                description=(
+                    "Dynamic runtime context inserted into model input."
+                    if dynamic_included
+                    else "Dynamic runtime context was available but omitted from model input."
+                ),
                 kind="runtime_observation",
                 lifecycle="turn",
                 authority=50,
                 volatility=90,
                 relevance=55,
-                placement="omitted",
+                placement="before_current_user" if dynamic_included else "omitted",
                 cache_policy="never_cache",
                 retention="current_turn_only",
-                included_in_model_input=False,
+                included_in_model_input=dynamic_included,
             )
         )
     if guidance_context_block:
@@ -7880,6 +8098,7 @@ def _build_last_context_composition(
             max_chars=240,
         ),
     }
+    content_previews.update(agent_context_previews)
     normalized = _attach_context_segment_content_previews(
         normalized,
         {key: value for key, value in content_previews.items() if value},
@@ -9990,6 +10209,8 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                     active_task=context.get("active_task"),
                     runtime_context_block=static_runtime_context_block,
                     dynamic_runtime_context_block=dynamic_runtime_context_block,
+                    dynamic_runtime_context_included=dynamic_runtime_context_included,
+                    runtime_context_segments=runtime_context_segments,
                     guidance_context_block=guidance_context_block,
                     guidance_context_included=False,
                     skill_runtime_context_block=skill_runtime_context_block,
