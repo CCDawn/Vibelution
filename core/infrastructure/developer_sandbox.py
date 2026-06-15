@@ -41,13 +41,11 @@ VALID_WRITE_POLICIES = {
 
 LEGACY_DIRECT_WORKSPACE_WRITE_SURFACES = {
     "core/infrastructure/workspace_manager.py": "memory",
-    "core/prompt_manager/prompt_manager.py": "prompt_manager",
     "core/web/services/memory_service.py": "memory",
     "core/web/services/team_knowledge_service.py": "team_knowledge",
     "core/web/services/rag_vector_index_service.py": "rag",
     "core/web/services/project_agent_bus_service.py": "project_agent_bus",
     "core/web/services/agent_directory_service.py": "agent_directory",
-    "core/gym/episodes.py": "gym",
     "core/gym/promotion.py": "gym",
     "core/evaluation/dataset_registry.py": "evaluation_dataset",
 }

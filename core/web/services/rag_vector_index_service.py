@@ -321,7 +321,16 @@ def _items_dir() -> Path:
 
 
 def _index_root() -> Path:
-    return _project_root() / "workspace" / "knowledge" / "rag"
+    from core.infrastructure import developer_sandbox
+
+    return developer_sandbox.route_workspace_path(
+        _project_root(),
+        "rag",
+        "knowledge",
+        "rag",
+        intent="state",
+        seed=True,
+    )
 
 
 def _project_root() -> Path:
