@@ -302,8 +302,11 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("buildCacheDonutSegments(cachePromptCompositionSegments, cachePromptCompositionTotalTokens)");
     expect(routeSource).toContain("lastCacheComposition?.computedSegments");
     expect(routeSource).toContain("lastCacheComposition?.calibratedSegments");
-    expect(routeSource).toContain("computedCacheHitRate");
     expect(routeSource).toContain("calibratedCachedInputTokens");
+    expect(routeSource).toContain("upperBoundCachedInputTokens");
+    expect(routeSource).toContain("upperBoundCacheHitRate");
+    expect(routeSource).toContain("predictedCachedInputTokens");
+    expect(routeSource).toContain("predictedCacheHitRate");
     expect(routeSource).toContain("computedOverestimatedInputTokens");
     expect(routeSource).toContain("calibrationReason");
     expect(routeSource).toContain("averageCacheHitRate");
@@ -331,6 +334,9 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("cacheObservedStatusLabel(segment.observedStatus, lang)");
     expect(routeSource).toContain("cacheComputedStatusLabel(segment.status, lang)");
     expect(routeSource).toContain("segment.contentPreview");
+    expect(routeSource).toContain("{lang === \"zh\" ? \"预测命中\" : \"Predicted hit\"}");
+    expect(routeSource).toContain("{lang === \"zh\" ? \"计算上界\" : \"Computed upper bound\"}");
+    expect(routeSource).toContain("{lang === \"zh\" ? \"上界未兑现\" : \"upper bound gap\"}");
     expect(routeSource).not.toContain("styles.cacheDonutLegendPreview");
     expect(routeSource).not.toContain("key={`${segment.key}-${segment.status}-${index}-legend`}");
     expect(routeSource).toContain("styles.cacheDetailOverlay");
