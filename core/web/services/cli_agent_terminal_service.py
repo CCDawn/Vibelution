@@ -40,6 +40,15 @@ DEFAULT_DISCOVERY_POLL_ATTEMPTS = 8
 DEFAULT_DISCOVERY_POLL_INTERVAL_SECONDS = 0.75
 DEFAULT_DISCOVERY_CREATED_GRACE_MS = 5000
 DEFAULT_DISCOVERY_MAX_ROWS = 80
+SCREEN_BUFFER_PARSER_VERSION = 2
+SCREEN_STATE_FIELD_KEYS = (
+    "screenText",
+    "screenReplay",
+    "screenQuality",
+    "screenRows",
+    "screenCols",
+    "screenParserVersion",
+)
 
 
 class CliAgentTerminalError(Exception):
@@ -69,7 +78,7 @@ class _TerminalRuntime:
         self.screen = TerminalScreenBuffer(
             rows=_clamp_int(state.get("rows"), DEFAULT_ROWS, 4, 120),
             cols=_clamp_int(state.get("cols"), DEFAULT_COLS, 20, 240),
-            initial_text=str(state.get("screenText") or ""),
+            initial_text=_screen_initial_text(state),
         )
         self.subscribers: list[queue.Queue[dict[str, Any]]] = []
         self.stop_requested = threading.Event()
@@ -148,12 +157,13 @@ class _TerminalRuntime:
             payload = dict(self.state)
         payload["alive"] = self.is_alive()
         payload["transport"] = self.transport
-        payload.update(
+        payload = _merge_transcript_snapshot(
+            payload,
             _read_transcript_snapshot(
                 self.transcript_path,
                 rows=_clamp_int(payload.get("rows"), DEFAULT_ROWS, 4, 120),
                 cols=_clamp_int(payload.get("cols"), DEFAULT_COLS, 20, 240),
-            )
+            ),
         )
         return _public_state(payload)
 
@@ -315,10 +325,12 @@ def ensure_cli_agent_terminal_session(
             source_session_id=normalized_source_session_id,
         ):
             public_state = _public_state(
-                {
-                    **existing_state,
-                    **_read_transcript_snapshot(_transcript_path(str(existing_state.get("terminalSessionId") or terminal_session_id))),
-                }
+                _merge_transcript_snapshot(
+                    existing_state,
+                    _read_transcript_snapshot(
+                        _transcript_path(str(existing_state.get("terminalSessionId") or terminal_session_id))
+                    ),
+                )
             )
             cli_agent_service._record_event(
                 "cli_agent.terminal.stale_attach_skipped",
@@ -456,14 +468,14 @@ def get_cli_agent_terminal_session(terminal_session_id: str) -> dict[str, Any]:
         raise CliAgentTerminalError("TERMINAL_SESSION_NOT_FOUND", "Terminal session not found.")
     state["alive"] = False
     return _public_state(
-        {
-            **state,
-            **_read_transcript_snapshot(
+        _merge_transcript_snapshot(
+            state,
+            _read_transcript_snapshot(
                 _transcript_path(session_id),
                 rows=_clamp_int(state.get("rows"), DEFAULT_ROWS, 4, 120),
                 cols=_clamp_int(state.get("cols"), DEFAULT_COLS, 20, 240),
             ),
-        }
+        )
     )
 
 
@@ -559,10 +571,10 @@ def stop_cli_agent_terminal_session(terminal_session_id: str) -> dict[str, Any]:
     final_state = _read_state(session_id) or state
     final_state["closedTerminalSessionIds"] = closed_ids
     return _public_state(
-        {
-            **final_state,
-            **_read_transcript_snapshot(_transcript_path(session_id)),
-        }
+        _merge_transcript_snapshot(
+            final_state,
+            _read_transcript_snapshot(_transcript_path(session_id)),
+        )
     )
 
 
@@ -804,6 +816,7 @@ def _initial_state(
     now = _now_iso()
     process_started_at_ms = _now_epoch_ms()
     cli_session_id = str(command.get("cliSessionId") or previous_state.get("cliSessionId") or "")
+    previous_screen_current = _screen_state_is_current(previous_state)
     return {
         "schemaVersion": 1,
         "terminalSessionId": terminal_session_id,
@@ -835,11 +848,12 @@ def _initial_state(
         "rows": _clamp_int(rows, DEFAULT_ROWS, 4, 120),
         "cols": _clamp_int(cols, DEFAULT_COLS, 20, 240),
         "transcriptPath": str(previous_state.get("transcriptPath") or ""),
-        "screenText": str(previous_state.get("screenText") or ""),
-        "screenReplay": str(previous_state.get("screenReplay") or ""),
-        "screenQuality": str(previous_state.get("screenQuality") or ""),
-        "screenRows": previous_state.get("screenRows"),
-        "screenCols": previous_state.get("screenCols"),
+        "screenText": str(previous_state.get("screenText") or "") if previous_screen_current else "",
+        "screenReplay": str(previous_state.get("screenReplay") or "") if previous_screen_current else "",
+        "screenQuality": str(previous_state.get("screenQuality") or "") if previous_screen_current else "",
+        "screenRows": previous_state.get("screenRows") if previous_screen_current else None,
+        "screenCols": previous_state.get("screenCols") if previous_screen_current else None,
+        "screenParserVersion": SCREEN_BUFFER_PARSER_VERSION,
         "processStartedAt": now,
         "processStartedAtMs": process_started_at_ms,
         "createdAt": str(previous_state.get("createdAt") or now),
@@ -1524,6 +1538,30 @@ def _strip_leading_ansi_fragment(text: str) -> str:
     return result
 
 
+def _screen_state_is_current(state: dict[str, Any]) -> bool:
+    try:
+        version = int(state.get("screenParserVersion") or 0)
+    except (TypeError, ValueError):
+        version = 0
+    return version >= SCREEN_BUFFER_PARSER_VERSION
+
+
+def _screen_initial_text(state: dict[str, Any]) -> str:
+    return str(state.get("screenText") or "") if _screen_state_is_current(state) else ""
+
+
+def _merge_transcript_snapshot(state: dict[str, Any], snapshot: dict[str, Any]) -> dict[str, Any]:
+    merged = {**state, **snapshot}
+    if str(snapshot.get("screenText") or "").strip():
+        return merged
+    if not str(state.get("screenText") or "").strip() or not _screen_state_is_current(state):
+        return merged
+    for key in SCREEN_STATE_FIELD_KEYS:
+        if key in state:
+            merged[key] = state.get(key)
+    return merged
+
+
 def _read_transcript_snapshot(
     path: Path,
     limit: int = MAX_TRANSCRIPT_TAIL_CHARS,
@@ -1596,6 +1634,7 @@ def _terminal_screen_state_fields(snapshot: TerminalScreenSnapshot) -> dict[str,
         "screenQuality": snapshot.quality,
         "screenRows": snapshot.rows,
         "screenCols": snapshot.cols,
+        "screenParserVersion": SCREEN_BUFFER_PARSER_VERSION,
     }
 
 
@@ -1635,6 +1674,7 @@ def _public_state(state: dict[str, Any]) -> dict[str, Any]:
         "screenQuality",
         "screenRows",
         "screenCols",
+        "screenParserVersion",
         "processStartedAt",
         "processStartedAtMs",
         "userClosed",
