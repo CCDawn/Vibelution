@@ -58,8 +58,9 @@ def test_context_assembler_keeps_recent_tail_and_omits_old_events():
     assert assembled.dynamic_context_hash
 
 
-def test_context_assembler_compacts_recent_tool_results_for_model_input():
+def test_context_assembler_keeps_recent_tool_results_complete_for_model_input():
     huge_output = "terminal-line\n" * 1000
+    full_result = f"[EXEC FAILURE | Exit Code: 1]\n{huge_output}"
     messages = [
         {"role": "user", "content": "分析失败"},
         {
@@ -71,7 +72,7 @@ def test_context_assembler_compacts_recent_tool_results_for_model_input():
                     "toolCallId": "call-heavy",
                     "status": "failed",
                     "arguments": {"command": "pytest -q", "timeout": 120},
-                    "result": f"[EXEC FAILURE | Exit Code: 1]\n{huge_output}",
+                    "result": full_result,
                 }
             ],
         },
@@ -82,10 +83,10 @@ def test_context_assembler_compacts_recent_tool_results_for_model_input():
 
     assert tool_call["toolName"] == "cli_tool"
     assert tool_call["status"] == "failed"
-    assert tool_call["argKeys"] == ["command", "timeout"]
-    assert "[EXEC FAILURE | Exit Code: 1]" in tool_call["resultPreview"]
-    assert len(tool_call["resultPreview"]) < 900
-    assert "terminal-line\nterminal-line\nterminal-line\nterminal-line\nterminal-line\nterminal-line\nterminal-line\nterminal-line\nterminal-line\nterminal-line\nterminal-line\nterminal-line\nterminal-line\nterminal-line\nterminal-line\nterminal-line\nterminal-line\nterminal-line\nterminal-line\nterminal-line\n" not in str(assembled.history_messages)
+    assert tool_call["arguments"] == {"command": "pytest -q", "timeout": 120}
+    assert tool_call["result"] == full_result
+    assert "resultPreview" not in tool_call
+    assert "terminal-line\n" * 20 in tool_call["result"]
 
 
 def test_context_assembler_uses_checkpoint_as_navigation_not_replacing_history():
