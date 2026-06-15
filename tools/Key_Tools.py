@@ -11,7 +11,9 @@ from tools.rebirth_tools import trigger_self_restart_tool as _restart_impl
 from tools.memory_tools import (
     commit_compressed_memory_tool as _commit_compressed_impl,
     get_core_context_tool as _get_core_context_impl,
+    get_memory_summary_tool as _get_memory_summary_impl,
     get_current_goal_tool as _get_current_goal_impl,
+    read_memory_tool as _read_memory_impl,
 )
 from tools.memory_tools import (
     task_create_tool as _task_create_impl,
@@ -218,6 +220,26 @@ def create_key_tools() -> List[BaseTool]:
             当前目标描述
         """
         return _get_current_goal_impl()
+
+    @tool
+    def read_memory_tool() -> str:
+        """
+        【记忆读取】读取当前记忆索引（轻量 JSON）。
+
+        Returns:
+            JSON 字符串，包含 core_wisdom/current_goal 等字段。
+        """
+        return _read_memory_impl()
+
+    @tool
+    def get_memory_summary_tool() -> str:
+        """
+        【记忆摘要】读取可直接复用的记忆摘要文本。
+
+        Returns:
+            人类可读的记忆摘要。
+        """
+        return _get_memory_summary_impl()
 
     # ── 代码分析工具 ────────────────────────────────────────────────────────
 
@@ -1883,6 +1905,8 @@ def create_key_tools() -> List[BaseTool]:
         read_file_tool,
         write_file_tool,
         glob_tool,
+        read_memory_tool,
+        get_memory_summary_tool,
         # TaskManager（tasks.json）
         task_create_tool,
         task_update_tool,

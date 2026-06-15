@@ -35,6 +35,7 @@ class ToolLifecycleBridge:
     READONLY_TOOL_NAMES: ClassVar[set[str]] = {
         "read_file_tool",
         "grep_search_tool",
+        "glob_tool",
         "glob_search_tool",
         "list_directory_tool",
         "list_files_tool",
@@ -45,18 +46,19 @@ class ToolLifecycleBridge:
         "get_recent_changes_tool",
         "get_current_goal_tool",
         "get_core_context_tool",
-        "get_memory_summary_tool",
         "task_list_tool",
+        "read_memory_tool",
+        "get_memory_summary_tool",
         "code_symbol_tool",
-        "code_analysis_tool",
-        "codebase_analyzer_tool",
+        "code_analysis_tool",  # legacy alias, kept for compatibility with older prompts
+        "codebase_analyzer_tool",  # legacy alias, kept for compatibility with older prompts
         "conversation_log_inspect_tool",
         "history_search_tool",
         "history_fetch_tool",
         "history_timeline_tool",
         "history_checkpoint_tool",
         "search_memory_tool",
-        "key_info_extractor_tool",
+        "key_info_extractor_tool",  # legacy alias
     }
 
     DEFAULT_PARALLEL_READONLY_WORKERS: ClassVar[int] = 4

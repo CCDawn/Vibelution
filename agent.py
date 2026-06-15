@@ -2184,6 +2184,7 @@ class SelfEvolvingAgent:
                         for xtc in response_preview.xml_tool_calls
                         if str(xtc.get("name") or "").strip()
                     ]
+                    lifecycle_action: Optional[str] = None
                     for xtc in response_preview.xml_tool_calls:
                         tool_name = str(xtc.get("name") or "").strip()
                         if tool_name:
@@ -2212,8 +2213,21 @@ class SelfEvolvingAgent:
                             self._remember_tool_output(xtc, result, None)
                             self.tool_lifecycle.handle_tool_result(xtc, result, None, messages)
                             continue
-                        self.tool_lifecycle.execute_tool(xtc, messages)
+                        result, lifecycle_action = self.tool_lifecycle.execute_tool(xtc, messages)
+                        self.tool_lifecycle.handle_tool_result(xtc, result, lifecycle_action, messages)
+                        if lifecycle_action in ("restart", "hibernated", "turn_complete"):
+                            break
                     messages.append(AIMessage(content=raw_content))
+                    if lifecycle_action in ("restart", "hibernated", "turn_complete"):
+                        lifecycle_decision = self._get_turn_outcome_controller().handle_lifecycle_action(lifecycle_action)
+                        if lifecycle_decision.pending_action:
+                            self._pending_lifecycle_action = lifecycle_decision.pending_action
+                        if lifecycle_decision.info_log:
+                            ui.add_log(lifecycle_decision.info_log, "INFO")
+                        if not lifecycle_decision.continue_main_loop:
+                            return False
+                        if lifecycle_decision.break_round:
+                            break
                     # 补齐 round_state 的工具使用统计与 token usage telemetry，
                     # 防止 XML fast-path 让 convergence/命中率统计成为盲区。
                     round_state.note_response_tools(
