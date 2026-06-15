@@ -261,6 +261,7 @@ def ensure_cli_agent_terminal_session(
     rows: int = DEFAULT_ROWS,
     cols: int = DEFAULT_COLS,
     send_initial_task: bool = False,
+    allow_unsafe_permissions: bool = False,
 ) -> dict[str, Any]:
     """Return an attached or newly started terminal session for a configured CLI Agent."""
 
@@ -378,6 +379,7 @@ def ensure_cli_agent_terminal_session(
             model=requested_model,
             agent=requested_agent,
             cli_session_id=existing_cli_session_id,
+            allow_unsafe_permissions=allow_unsafe_permissions,
         )
         lock_key = _stable_cli_lock_key(
             adapter_id=normalized_type,
@@ -649,6 +651,7 @@ def _build_terminal_command(
     model: str,
     agent: str,
     cli_session_id: str,
+    allow_unsafe_permissions: bool = False,
 ) -> dict[str, Any]:
     adapters = cli_agent_service._load_adapter_definitions()
     adapter = adapters.get(agent_type)
@@ -693,6 +696,12 @@ def _build_terminal_command(
     initial_input = "" if use_resume else _render_template_arg(str(terminal.get("initialInput") or ""), context)
     session_id_spec = terminal.get("sessionId") if isinstance(terminal.get("sessionId"), dict) else {}
     session_discovery_spec = terminal.get("sessionDiscovery") if isinstance(terminal.get("sessionDiscovery"), dict) else {}
+    if (
+        str(mode or "").strip().lower() == "worktree"
+        and bool(allow_unsafe_permissions)
+        and cli_agent_service._normalize_id(agent_type) == "claude_code"
+    ):
+        args.append("--dangerously-skip-permissions")
     return {
         "adapterId": agent_type,
         "label": str(adapter.get("label") or agent_type),
