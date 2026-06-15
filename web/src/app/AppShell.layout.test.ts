@@ -238,6 +238,16 @@ describe("AppShell layout contract", () => {
     expect(shellStyles).toContain("white-space: pre-line");
   });
 
+  it("keeps restart completion dismissal stable across runtime polling refreshes", () => {
+    expect(shellSource).toContain("restartCompletionDismissTimerRef");
+    expect(shellSource).toContain("if (restartCompletionDismissTimerRef.current === null)");
+    expect(shellSource).toContain("restartCompletionDismissTimerRef.current = window.setTimeout");
+    expect(shellSource).toContain("restartCompletionDismissTimerRef.current = null");
+    expect(shellSource).toContain("const clearRestartCompletionDismissTimer = useCallback");
+    expect(shellSource).toContain("useEffect(() => clearRestartCompletionDismissTimer, [clearRestartCompletionDismissTimer])");
+    expect(shellSource).not.toContain("return () => window.clearTimeout(timer)");
+  });
+
   it("renders a startup progress overlay from loading and lifecycle state", () => {
     expect(shellSource).toContain("deriveStartupLoadingState");
     expect(shellSource).toContain("deriveStartupProgressState");
