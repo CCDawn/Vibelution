@@ -1979,7 +1979,16 @@ def _load_json(path: Path, *, fallback: Any) -> Any:
 
 
 def _managed_memory_path(root: Path) -> Path:
-    return root / "workspace" / "memory" / USER_MANAGED_MEMORY_FILENAME
+    from core.infrastructure import developer_sandbox
+
+    return developer_sandbox.route_workspace_path(
+        root,
+        "memory",
+        "memory",
+        USER_MANAGED_MEMORY_FILENAME,
+        intent="state",
+        seed=True,
+    )
 
 
 def _load_managed_memory(root: Path, *, warnings: list[str] | None = None) -> dict[str, Any]:

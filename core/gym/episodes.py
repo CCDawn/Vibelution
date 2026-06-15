@@ -26,7 +26,15 @@ _WINDOWS_RESERVED_FILE_STEMS = {
 
 def _gym_workspace(project_root: Optional[Path] = None) -> Path:
     root = (project_root or get_workspace().project_root).resolve()
-    return root / "workspace" / "gym"
+    from core.infrastructure import developer_sandbox
+
+    return developer_sandbox.route_workspace_path(
+        root,
+        "gym",
+        "gym",
+        intent="state",
+        seed=True,
+    )
 
 
 def decision_path_for_episode_id(episode_id: str, *, project_root: Optional[Path] = None) -> Path:

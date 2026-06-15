@@ -408,7 +408,16 @@ def _normalize_mention_token(value: Any) -> str:
 
 
 def _bus_events_path() -> Path:
-    return _project_root() / "workspace" / "project_agent_bus" / "events.jsonl"
+    from core.infrastructure import developer_sandbox
+
+    return developer_sandbox.route_workspace_path(
+        _project_root(),
+        "project_agent_bus",
+        "project_agent_bus",
+        "events.jsonl",
+        intent="state",
+        seed=True,
+    )
 
 
 def _project_root() -> Path:
