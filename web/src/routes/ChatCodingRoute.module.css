@@ -2138,7 +2138,7 @@
 
 .cliAgentTerminalCommand {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-columns: auto minmax(0, 1fr) auto;
   gap: 8px;
   align-items: center;
   min-height: 34px;
@@ -2158,6 +2158,36 @@
   color: #a9f0ce;
   font-weight: 780;
   white-space: nowrap;
+}
+
+.cliAgentTerminalAction {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  width: fit-content;
+  min-width: 0;
+  height: 24px;
+  padding: 0 8px;
+  border: 1px solid rgba(122, 202, 169, 0.32);
+  border-radius: 6px;
+  color: #bdf6dc;
+  background: rgba(14, 58, 45, 0.7);
+  font-family: inherit;
+  font-size: 0.74rem;
+  font-weight: 760;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.cliAgentTerminalAction:hover:not(:disabled) {
+  border-color: rgba(189, 246, 220, 0.58);
+  background: rgba(20, 88, 68, 0.82);
+}
+
+.cliAgentTerminalAction:disabled {
+  cursor: wait;
+  opacity: 0.58;
 }
 
 .cliAgentTerminalCommand code {

@@ -89,6 +89,7 @@ class AgentCreatePayload(BaseModel):
     primaryMode: str = ""
     roleKey: str = ""
     promptTemplateId: str = ""
+    contextCompressionPolicy: dict[str, Any] = Field(default_factory=dict)
     toolPolicy: dict[str, Any] = Field(default_factory=dict)
     personaProfile: dict[str, Any] = Field(default_factory=dict)
     taskProfile: dict[str, Any] = Field(default_factory=dict)
@@ -107,6 +108,7 @@ class AgentUpdatePayload(BaseModel):
     memoryPolicyId: str | None = None
     toolPolicy: dict[str, Any] | None = None
     memoryPolicy: dict[str, Any] | None = None
+    contextCompressionPolicy: dict[str, Any] | None = None
     delegationPolicy: dict[str, Any] | None = None
     supervisionPolicy: dict[str, Any] | None = None
     personaProfile: dict[str, Any] | None = None
@@ -387,13 +389,14 @@ def agent_create(payload: AgentCreatePayload) -> dict:
             raise AgentDirectoryError("Agent was not created for the direct session.")
         if metadata:
             agent = update_agent_instance(agent_id, metadata=metadata)
-        if payload.primaryMode or payload.roleKey or payload.promptTemplateId:
+        if payload.primaryMode or payload.roleKey or payload.promptTemplateId or payload.contextCompressionPolicy:
             agent = update_agent_instance(
                 agent_id,
                 llm_bindings=llm_bindings,
                 primary_mode=payload.primaryMode or None,
                 role_key=payload.roleKey or None,
                 prompt_template_id=payload.promptTemplateId or None,
+                context_compression_policy=payload.contextCompressionPolicy,
             )
         if persona_profile:
             agent = update_agent_instance(agent_id, persona_profile=persona_profile)
@@ -643,6 +646,7 @@ def agent_update(agent_id: str, payload: AgentUpdatePayload) -> dict:
             memory_policy_id=payload.memoryPolicyId,
             tool_policy=payload.toolPolicy,
             memory_policy=payload.memoryPolicy,
+            context_compression_policy=payload.contextCompressionPolicy,
             delegation_policy=payload.delegationPolicy,
             supervision_policy=payload.supervisionPolicy,
             persona_profile=payload.personaProfile,

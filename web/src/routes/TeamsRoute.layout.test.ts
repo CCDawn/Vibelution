@@ -360,6 +360,7 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("sourceCollectionResultsPanel");
     expect(routeSource).toContain("source-collection-results");
     expect(routeSource).toContain("sourceCollectionResultList");
+    expect(routeSource).toContain("sourceCollectionResultStatus");
     expect(routeSource).not.toContain("workflowSourceCollectionPrimaryButton");
     expect(routeSource).toContain("启动实验规划");
     expect(routeSource).toContain("启动迭代");
@@ -499,6 +500,10 @@ describe("TeamsRoute layout contract", () => {
     expect(routeStyles.sourceCollectionResultStats).toBeTypeOf("string");
     expect(routeStyles.sourceCollectionResultList).toBeTypeOf("string");
     expect(routeStyles.sourceCollectionResultItem).toBeTypeOf("string");
+    expect(routeStyles.sourceCollectionResultStatus).toBeTypeOf("string");
+    expect(routeStylesSource).toContain(".sourceCollectionResultStatus");
+    expect(routeStylesSource).toContain("white-space: nowrap");
+    expect(routeStylesSource).toContain("writing-mode: horizontal-tb");
     expect(routeStyles.sourceCollectionControlPanel).toBeTypeOf("string");
     expect(routeStyles.sourceCollectionStageModules).toBeTypeOf("string");
     expect(routeStyles.sourceCollectionStageCard).toBeTypeOf("string");
