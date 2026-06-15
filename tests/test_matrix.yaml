@@ -92,6 +92,7 @@ rules:
       - "config/**"
       - "core/llm/**"
       - "core/web/services/config_service.py"
+      - "tests/test_web_config_routes.py"
       - "tests/test_config_panel.py"
       - "tests/test_config_sync.py"
       - "tests/test_public_config_model_refs.py"
@@ -99,7 +100,7 @@ rules:
       - "tests/test_prompt_cache_hit_optimization.py"
       - "tests/test_llm_invocation_context.py"
     commands:
-      - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_config_panel.py tests/test_config_sync.py tests/test_public_config_model_refs.py tests/test_llm_client.py tests/test_prompt_cache_hit_optimization.py tests/test_llm_invocation_context.py -q"
+      - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_web_config_routes.py tests/test_config_panel.py tests/test_config_sync.py tests/test_public_config_model_refs.py tests/test_llm_client.py tests/test_prompt_cache_hit_optimization.py tests/test_llm_invocation_context.py -q"
     notes:
       - "Verify effective config behavior, not only source defaults."
 
