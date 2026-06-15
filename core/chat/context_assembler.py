@@ -18,10 +18,6 @@ from .history_ledger import (
 
 
 DEFAULT_RECENT_MESSAGE_LIMIT = 8
-MAX_RECENT_TOOL_COUNT = 6
-MAX_RECENT_TOOL_PREVIEW_CHARS = 700
-MAX_RECENT_TOOL_ARGS_CHARS = 320
-MAX_RECENT_MESSAGE_CONTENT_CHARS = 6000
 
 
 @dataclass(frozen=True)
@@ -91,7 +87,7 @@ def assemble_conversation_context(
     bounded_recent_limit = max(1, min(int(recent_message_limit or DEFAULT_RECENT_MESSAGE_LIMIT), 40))
     recent_start_index = max(0, len(normalized_messages) - bounded_recent_limit)
     recent_raw_messages = normalized_messages[recent_start_index:]
-    recent_messages = _compact_recent_messages(recent_raw_messages)
+    recent_messages = recent_raw_messages
     checkpoint = latest_checkpoint(events)
     checkpoint_message = _checkpoint_seed_message(checkpoint)
     retrieved_list = list(retrieved_events or [])
@@ -185,112 +181,6 @@ def _event_seed_message(event: HistoryEvent) -> dict[str, Any]:
     }
 
 
-def _compact_recent_messages(messages: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
-    return [_compact_recent_message(message) for message in list(messages or []) if isinstance(message, dict)]
-
-
-def _compact_recent_message(message: dict[str, Any]) -> dict[str, Any]:
-    compacted = dict(message)
-    content = str(compacted.get("content") or "")
-    if len(content) > MAX_RECENT_MESSAGE_CONTENT_CHARS:
-        compacted["content"] = _clip_text(content, MAX_RECENT_MESSAGE_CONTENT_CHARS)
-
-    for key in ("toolCalls", "tool_calls", "tools"):
-        entries = compacted.get(key)
-        if not isinstance(entries, list):
-            continue
-        compacted[key] = _compact_tool_entries(entries)
-
-    return compacted
-
-
-def _compact_tool_entries(entries: list[Any]) -> list[dict[str, Any]]:
-    compacted: list[dict[str, Any]] = []
-    omitted = max(0, len(entries) - MAX_RECENT_TOOL_COUNT)
-    for entry in entries[-MAX_RECENT_TOOL_COUNT:]:
-        if not isinstance(entry, dict):
-            continue
-        name = str(entry.get("name") or entry.get("toolName") or entry.get("tool_name") or "").strip()
-        status = _extract_tool_status(entry)
-        item: dict[str, Any] = {
-            "name": name,
-            "toolName": name,
-            "status": status,
-            "semanticStatus": str(entry.get("semanticStatus") or entry.get("semantic_status") or status or "").strip(),
-        }
-        for id_key in ("id", "toolCallId", "tool_call_id"):
-            if entry.get(id_key):
-                item[id_key] = str(entry.get(id_key))
-        preview = _extract_tool_result_preview(entry)
-        if preview:
-            item["resultPreview"] = _clip_text(preview, MAX_RECENT_TOOL_PREVIEW_CHARS)
-        error = str(entry.get("error") or "").strip()
-        if error:
-            item["error"] = _clip_text(error, MAX_RECENT_TOOL_PREVIEW_CHARS)
-        arg_keys = _extract_tool_arg_keys(entry)
-        if arg_keys:
-            item["argKeys"] = arg_keys[:24]
-        elif entry.get("args") is not None or entry.get("arguments") is not None:
-            item["argsPreview"] = _clip_text(str(entry.get("args") or entry.get("arguments") or ""), MAX_RECENT_TOOL_ARGS_CHARS)
-        compacted.append(item)
-    if omitted:
-        compacted.insert(
-            0,
-            {
-                "name": "omitted_tool_history",
-                "toolName": "omitted_tool_history",
-                "status": "omitted",
-                "resultPreview": f"已省略 {omitted} 条更早的工具证据；完整记录保留在历史账本中。",
-            },
-        )
-    return compacted
-
-
-def _extract_tool_status(entry: dict[str, Any]) -> str:
-    for key in ("semanticStatus", "semantic_status", "status", "state", "outcome"):
-        value = str(entry.get(key) or "").strip()
-        if value:
-            return value
-    result = entry.get("result")
-    if isinstance(result, dict):
-        return str(result.get("semanticStatus") or result.get("status") or result.get("outcome") or "").strip()
-    return ""
-
-
-def _extract_tool_result_preview(entry: dict[str, Any]) -> str:
-    for key in ("resultPreview", "result_preview", "summary", "stdoutPreview", "stdout_preview"):
-        value = str(entry.get(key) or "").strip()
-        if value:
-            return value
-    result = entry.get("result")
-    if isinstance(result, dict):
-        for key in ("resultPreview", "summary", "message", "error", "stdoutPreview", "content"):
-            value = str(result.get(key) or "").strip()
-            if value:
-                return value
-    elif result is not None:
-        return str(result)
-    return ""
-
-
-def _extract_tool_arg_keys(entry: dict[str, Any]) -> list[str]:
-    args = entry.get("args")
-    if args is None:
-        args = entry.get("arguments")
-    if isinstance(args, dict):
-        return sorted(str(key) for key in args.keys() if str(key) != "_cancel_checker")
-    return []
-
-
-def _clip_text(text: str, max_chars: int) -> str:
-    raw = str(text or "")
-    if len(raw) <= max_chars:
-        return raw
-    suffix = f"\n[...已压缩，原长度 {len(raw)} 字符...]"
-    budget = max(0, max_chars - len(suffix))
-    return raw[:budget] + suffix
-
-
 def _included_event_ids(
     events: list[HistoryEvent],
     *,
@@ -316,7 +206,7 @@ def _message_chars(messages: Iterable[dict[str, Any]]) -> int:
         for tool in list(message.get("toolCalls") or message.get("tool_calls") or []):
             if isinstance(tool, dict):
                 total += len(str(tool.get("name") or tool.get("toolName") or ""))
-                total += len(str(tool.get("summary") or tool.get("resultPreview") or tool.get("error") or ""))
+                total += len(str(tool.get("result") or tool.get("summary") or tool.get("resultPreview") or tool.get("error") or ""))
     return total
 
 
@@ -330,7 +220,7 @@ def _hash_messages(messages: Iterable[dict[str, Any]]) -> str:
             if isinstance(tool, dict):
                 parts.append(str(tool.get("name") or tool.get("toolName") or ""))
                 parts.append(str(tool.get("status") or tool.get("semanticStatus") or ""))
-                parts.append(str(tool.get("resultPreview") or tool.get("error") or ""))
+                parts.append(str(tool.get("result") or tool.get("resultPreview") or tool.get("error") or ""))
     return _hash_text("\n".join(parts))
 
 
