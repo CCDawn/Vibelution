@@ -959,6 +959,83 @@
   margin-top: 1px;
 }
 
+.reActOperationList {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.reActOperationGroup {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  max-width: 100%;
+  padding-left: 2px;
+  border-left: 2px solid color-mix(in srgb, var(--fg-tertiary) 14%, transparent);
+}
+
+.reActOperationGroup_running {
+  border-left-color: color-mix(in srgb, var(--accent-cool-2) 64%, transparent);
+}
+
+.reActOperationGroup_failed {
+  border-left-color: color-mix(in srgb, var(--danger) 64%, transparent);
+}
+
+.reActOperationGroup_done {
+  border-left-color: color-mix(in srgb, var(--state-success) 36%, transparent);
+}
+
+.reActOperationGroup_pending {
+  border-left-color: color-mix(in srgb, var(--fg-tertiary) 30%, transparent);
+}
+
+.reActOperationSummary {
+  display: grid;
+  grid-template-columns: auto minmax(0, auto) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  min-height: 26px;
+  padding: 2px 6px;
+  border: 1px solid color-mix(in srgb, var(--fg-tertiary) 10%, transparent);
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--surface-card) 38%, transparent);
+  color: var(--fg-secondary);
+  cursor: pointer;
+  font: inherit;
+}
+
+.reActOperationSummary:hover {
+  border-color: color-mix(in srgb, var(--accent-warm) 22%, transparent);
+  background: color-mix(in srgb, var(--surface-card) 66%, var(--accent-warm) 5%);
+  color: var(--fg-primary);
+}
+
+.reActOperationBadge {
+  color: color-mix(in srgb, var(--accent-cool-2) 84%, var(--fg-secondary));
+  font-size: 0.72rem;
+  font-weight: 680;
+  white-space: nowrap;
+}
+
+.reActOperationMeta,
+.reActOperationPreview {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg-tertiary);
+  font-size: 0.68rem;
+  font-weight: 520;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.reActOperationPreview {
+  color: color-mix(in srgb, var(--fg-tertiary) 72%, transparent);
+  font-weight: 450;
+}
+
 .operationTable {
   display: grid;
   min-width: 0;

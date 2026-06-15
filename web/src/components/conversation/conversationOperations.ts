@@ -38,6 +38,13 @@ export type ConversationOperationGroups = {
   tools: ConversationOperation[];
 };
 
+export type ConversationReActOperationGroup = {
+  id: string;
+  index: number;
+  operations: ConversationOperation[];
+  thoughtSequence?: number;
+};
+
 const FEEDBACK_OPERATION_CACHE_LIMIT = 200;
 const feedbackOperationCache = new Map<string, ConversationOperation[]>();
 
@@ -156,6 +163,48 @@ export function buildConversationOperationGroups(
     status: operations.filter((operation) => operation.kind === "status"),
     tools: operations.filter((operation) => operation.kind === "tool"),
   };
+}
+
+export function buildConversationReActOperationGroups(
+  operations: ConversationOperation[],
+): ConversationReActOperationGroup[] {
+  const groups: ConversationReActOperationGroup[] = [];
+  let current: ConversationReActOperationGroup | null = null;
+
+  const startGroup = (operation: ConversationOperation) => {
+    const group: ConversationReActOperationGroup = {
+      id: `react-${groups.length + 1}-${operation.id}`,
+      index: groups.length + 1,
+      operations: [],
+      thoughtSequence: operation.kind === "thought" ? operation.sequence : undefined,
+    };
+    groups.push(group);
+    current = group;
+    return group;
+  };
+
+  for (const operation of operations) {
+    let target: ConversationReActOperationGroup | null = current;
+    if (!target) {
+      target = startGroup(operation);
+    } else if (operation.kind === "thought" && reactGroupHasThought(target)) {
+      target = startGroup(operation);
+    }
+    if (!target) {
+      continue;
+    }
+
+    target.operations.push(operation);
+    if (operation.kind === "thought" && target.thoughtSequence === undefined) {
+      target.thoughtSequence = operation.sequence;
+    }
+  }
+
+  return groups;
+}
+
+function reactGroupHasThought(group: ConversationReActOperationGroup) {
+  return group.operations.some((operation) => operation.kind === "thought");
 }
 
 function buildOperationsFromFeedbackEvents(
