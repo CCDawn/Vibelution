@@ -97,6 +97,61 @@ def test_work_run_store_lists_snapshots_for_kind(tmp_path):
     assert [item["runId"] for item in snapshots] == ["chat_1", "chat_2"]
 
 
+def test_work_run_store_quarantines_nul_snapshot_and_falls_back_to_valid_latest(tmp_path):
+    store = WorkRunStore(root=tmp_path / ".runtime" / "work_runs")
+    store.persist_snapshot(
+        "chat_turn",
+        {
+            "runId": "chat_ok",
+            "status": "completed",
+            "updatedAt": "2026-06-08T00:01:00Z",
+        },
+    )
+    corrupt_path = store.runs_dir("chat_turn") / "chat_bad.json"
+    corrupt_path.parent.mkdir(parents=True, exist_ok=True)
+    corrupt_path.write_bytes(b"\x00" * 128)
+    store.save_run_index(
+        "chat_turn",
+        active_run_id="chat_bad",
+        latest_run_id="chat_bad",
+        recent_run_ids=["chat_bad", "chat_ok"],
+        emit_event=False,
+    )
+
+    assert store.load_snapshot("chat_turn", "chat_bad") is None
+
+    assert not corrupt_path.exists()
+    quarantined = list(corrupt_path.parent.glob("chat_bad.json.corrupt-*"))
+    assert len(quarantined) == 1
+    assert quarantined[0].read_bytes() == b"\x00" * 128
+    assert store.load_latest_snapshot("chat_turn")["runId"] == "chat_ok"
+    assert [item["runId"] for item in store.list_snapshots("chat_turn")] == ["chat_ok"]
+
+
+def test_work_run_store_quarantines_nul_index_and_rebuilds_on_next_persist(tmp_path):
+    store = WorkRunStore(root=tmp_path / ".runtime" / "work_runs")
+    index_path = store.index_path("chat_turn")
+    index_path.parent.mkdir(parents=True, exist_ok=True)
+    index_path.write_bytes(b"\x00" * 64)
+
+    index = store.load_run_index("chat_turn")
+
+    assert index["activeRunId"] == ""
+    assert index["latestRunId"] == ""
+    assert index["recentRunIds"] == []
+    assert not index_path.exists()
+    quarantined = list(index_path.parent.glob("index.json.corrupt-*"))
+    assert len(quarantined) == 1
+    assert quarantined[0].read_bytes() == b"\x00" * 64
+
+    store.persist_snapshot("chat_turn", {"runId": "chat_rebuilt", "status": "running"}, active_run_id="chat_rebuilt")
+
+    rebuilt = json.loads(index_path.read_text(encoding="utf-8"))
+    assert rebuilt["activeRunId"] == "chat_rebuilt"
+    assert rebuilt["latestRunId"] == "chat_rebuilt"
+    assert rebuilt["recentRunIds"] == ["chat_rebuilt"]
+
+
 def test_work_run_store_lists_recent_snapshots_from_index_without_full_scan(tmp_path, monkeypatch):
     store = WorkRunStore(root=tmp_path / ".runtime" / "work_runs")
 
