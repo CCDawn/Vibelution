@@ -923,7 +923,7 @@ function CliAgentRunTerminalPanel({
     ? terminalSession.commandPreview.join(" ")
     : run.commandLine);
   const snapshotFallbackAvailable = Boolean(String(terminalSession?.screenText || "").trim());
-  const transcriptReplayBlocked = terminalSession?.transcriptTailReplayable === false && !snapshotFallbackAvailable;
+  const transcriptReplayBlocked = terminalReadonly && terminalSession?.transcriptTailReplayable === false && !snapshotFallbackAvailable;
   const emptyText = terminalError
     || (terminalReadonly
       ? (terminalCanResume
@@ -936,6 +936,8 @@ function CliAgentRunTerminalPanel({
         ? (lang === "zh"
           ? "终端已连接；历史 TUI 画面无法安全重放，等待新的可渲染输出。"
           : "Terminal connected; the historical TUI screen cannot be safely replayed. Waiting for new renderable output.")
+        : terminalSession?.interactionState === "live" && terminalSession?.resumed
+          ? (lang === "zh" ? "已恢复，等待终端输出。" : "Resumed. Waiting for terminal output.")
       : (lang === "zh" ? "命令会话还没有输出。" : "No terminal output yet."));
 
   useEffect(() => {
@@ -1070,6 +1072,20 @@ function CliAgentRunTerminalPanel({
     }
   }, [postTerminalSize]);
 
+  const terminalSizeForRequest = useCallback(() => {
+    const terminal = terminalRef.current;
+    const fitAddon = fitAddonRef.current;
+    if (!terminal || !fitAddon) {
+      return { rows: 28, cols: 100 };
+    }
+    try {
+      fitAddon.fit();
+    } catch {
+      return { rows: terminal.rows || 28, cols: terminal.cols || 100 };
+    }
+    return { rows: terminal.rows || 28, cols: terminal.cols || 100 };
+  }, []);
+
   useEffect(() => {
     const element = terminalElementRef.current;
     if (!element) {
@@ -1154,6 +1170,7 @@ function CliAgentRunTerminalPanel({
   }, [active, fitTerminal, terminalSessionId]);
 
   const fetchTerminalSession = useCallback((intent: "view" | "resume" | "start", signal?: AbortSignal) => {
+    const terminalSize = terminalSizeForRequest();
     return fetchJson<CliAgentTerminalSession>("/api/cli-agents/terminal-sessions/ensure", {
       method: "POST",
       signal,
@@ -1168,16 +1185,21 @@ function CliAgentRunTerminalPanel({
         sourceMessageId: run.messageId,
         sourceRunId: run.sourceRunId,
         cliSessionId: intent === "start" ? "" : terminalCliSessionIdRef.current,
-        rows: 28,
-        cols: 100,
+        rows: terminalSize.rows,
+        cols: terminalSize.cols,
       }),
     })
       .then((session) => {
         setTerminalSession(session);
-        replayTerminalSnapshot(session);
+        if (intent === "view" || !canInputTerminal(session)) {
+          replayTerminalSnapshot(session);
+        } else {
+          writeTerminalChunk("", { reset: true });
+          window.requestAnimationFrame(fitTerminal);
+        }
         return session;
       });
-  }, [replayTerminalSnapshot, run.agentType, run.cwd, run.messageId, run.mode, run.sourceRunId, run.task, sourceSessionId]);
+  }, [fitTerminal, replayTerminalSnapshot, run.agentType, run.cwd, run.messageId, run.mode, run.sourceRunId, run.task, sourceSessionId, terminalSizeForRequest, writeTerminalChunk]);
 
   const requestTerminalSession = useCallback((intent: "resume" | "start") => {
     setConnecting(true);
@@ -1246,7 +1268,7 @@ function CliAgentRunTerminalPanel({
         }
         if (payload.session) {
           setTerminalSession(payload.session);
-          if (payload.type === "terminal_snapshot") {
+          if (payload.type === "terminal_snapshot" && !canInputTerminal(payload.session)) {
             replayTerminalSnapshot(payload.session);
           }
         }
@@ -5082,16 +5104,6 @@ export function ChatCodingRoute() {
     : "";
   const sessionCompactRows = buildVisiblePanelRows(
     [
-      ...(tokenSpeedTracker ? [{
-        label: t("tokenSpeed"),
-        value: tokenSpeedValue,
-        title: tokenSpeedTitle,
-      }] : []),
-      {
-        label: t("llmInputTokens"),
-        value: llmUsageLine,
-        title: llmUsageTitle,
-      },
       {
         label: t("fileContext"),
         value: fileContextValue,
@@ -5107,16 +5119,71 @@ export function ChatCodingRoute() {
         value: latestControlSignalLine,
         title: latestControlSignalTitle,
       }] : []),
-      {
-        label: t("promptCache"),
-        value: cacheHitLine,
-        title: sessionCacheUsage
-          ? `${t("promptCacheLast")} ${numberFormatter.format(sessionCacheUsage.lastCachedInputTokens)} / ${numberFormatter.format(sessionCacheUsage.lastInputTokens)} · ${t("promptCacheTotal")} ${numberFormatter.format(sessionCacheUsage.totalCachedInputTokens)} / ${numberFormatter.format(sessionCacheUsage.totalInputTokens)}`
-          : t("cacheObservationPending"),
-      },
     ],
     [t("preparingShell"), t("loadingSession"), t("loadingContext")],
   );
+  const tokenCompressionStrategyLevels = compression?.strategy?.levels ?? [];
+  const tokenCompressionStrategyKeywords = (compression?.strategy?.errorProtectionKeywords ?? []).join(" / ") || "--";
+  const tokenCompressionLevelLabel = compressionLevelLabel === "--"
+    ? (lang === "zh" ? "默认" : "Default")
+    : compressionLevelLabel;
+  const tokenCompressionCurrentMeta = compressionCurrentLine === "-- · --" ? "" : compressionCurrentLine;
+  const tokenCompressionRows: Array<{ key: string; label: string; value: string; meta?: string; title?: string }> = [
+    {
+      key: "llm",
+      label: "Token",
+      value: hasProviderLlmUsage
+        ? `${numberFormatter.format(sessionLlmUsage.inputTokens)} / ${numberFormatter.format(sessionLlmUsage.outputTokens ?? 0)}`
+        : llmUsageLine,
+      meta: hasProviderLlmUsage
+        ? (lang === "zh"
+          ? `缓存 ${numberFormatter.format(sessionLlmUsage.cachedInputTokens)} · 写 ${numberFormatter.format(sessionLlmUsage.cacheCreationInputTokens ?? 0)}`
+          : `cached ${numberFormatter.format(sessionLlmUsage.cachedInputTokens)} · write ${numberFormatter.format(sessionLlmUsage.cacheCreationInputTokens ?? 0)}`)
+        : "",
+      title: llmUsageTitle,
+    },
+    ...(tokenSpeedTracker ? [{
+      key: "speed",
+      label: lang === "zh" ? "速度" : "Speed",
+      value: tokenSpeedValue,
+      meta: tokenSpeedTracker.tokenCount > 0 ? numberFormatter.format(tokenSpeedTracker.tokenCount) : "",
+      title: tokenSpeedTitle,
+    }] : []),
+    {
+      key: "cache",
+      label: lang === "zh" ? "缓存" : "Cache",
+      value: cacheHitLine,
+      meta: hasProviderCacheUsage && sessionCacheUsage
+        ? `${t("promptCacheTotal")} ${numberFormatter.format(sessionCacheUsage.totalCachedInputTokens)} / ${numberFormatter.format(sessionCacheUsage.totalInputTokens)}`
+        : cacheCompositionSummary,
+      title: sessionCacheUsage
+        ? `${t("promptCacheLast")} ${numberFormatter.format(sessionCacheUsage.lastCachedInputTokens)} / ${numberFormatter.format(sessionCacheUsage.lastInputTokens)} · ${t("promptCacheTotal")} ${numberFormatter.format(sessionCacheUsage.totalCachedInputTokens)} / ${numberFormatter.format(sessionCacheUsage.totalInputTokens)}`
+        : cacheCompositionTitle,
+    },
+    {
+      key: "context",
+      label: lang === "zh" ? "上下文" : "Context",
+      value: contextStatusLine,
+      meta: contextCompositionSummary,
+      title: contextCompositionTitle,
+    },
+    {
+      key: "compression",
+      label: lang === "zh" ? "阈值" : "Limit",
+      value: compressionMainLine,
+      meta: tokenCompressionCurrentMeta,
+      title: compressionTitleLine,
+    },
+    {
+      key: "strategy",
+      label: lang === "zh" ? "策略" : "Policy",
+      value: tokenCompressionLevelLabel,
+      meta: tokenCompressionStrategyLevels.length
+        ? `${numberFormatter.format(tokenCompressionStrategyLevels.length)} ${lang === "zh" ? "档" : "levels"}`
+        : (tokenCompressionStrategyKeywords !== "--" ? tokenCompressionStrategyKeywords : ""),
+      title: tokenCompressionStrategyKeywords,
+    },
+  ].filter((row) => row.label.trim() && row.value.trim());
   const mental = runtime?.mentalState;
   const mentalCognitiveStateValue = String(mental?.cognitiveState ?? "unknown").trim().toLowerCase() || "unknown";
   const mentalSourceValue = String(mental?.source ?? "unavailable").trim().toLowerCase() || "unavailable";
@@ -6521,187 +6588,158 @@ export function ChatCodingRoute() {
           </div>
         </section>
 
-        <section className={`${styles.leftBlock} ${styles.contextStatusCard}`}>
+        <section className={`${styles.leftBlock} ${styles.tokenCompressionCard}`}>
           <div className={styles.sectionHeader}>
             <div className={styles.sectionIdentity}>
-              <p className={styles.blockEyebrow}>{t("contextDiagnostics")}</p>
-              <h3 className={styles.sectionTitle}>{t("sessionContextEstimate")}</h3>
-            </div>
-            <span className={styles.metricValue}>{contextPercent}%</span>
-          </div>
-          <div className={styles.resourceSplit}>
-            <div className={styles.resourceMetric}>
-              <span>{contextSourceLine}</span>
-              <strong title={contextStatusLine}>{contextStatusLine}</strong>
-            </div>
-            <div className={styles.resourceMetric}>
-              <span>{t("previousContextComposition")}</span>
-              <strong title={contextCompositionTitle}>{contextCompositionSummary}</strong>
-            </div>
-          </div>
-          <section className={styles.contextCompositionPanel} aria-label={lang === "zh" ? "状态栏上一轮上下文事实" : "Status bar previous turn context facts"}>
-            <div className={styles.contextCompositionItem} title={contextCompositionTitle}>
-              <div className={styles.contextCompositionBar} aria-hidden="true">
-                {contextCompositionSegments.length ? (
-                  contextCompositionSegments.map((segment) => (
-                    <span
-                      key={`${segment.key}-${segment.source}`}
-                      className={`${styles.contextCompositionSegment} ${styles.contextCompositionSegmentExact} ${contextCompositionSegmentClass(segment.key)}`}
-                      style={{ width: contextWindowSegmentWidth(segment.tokens ?? 0, contextCompositionLimitTokens) }}
-                    />
-                  ))
-                ) : (
-                  <span className={`${styles.contextCompositionSegment} ${styles.contextCompositionSegmentMissing}`} />
-                )}
-                {contextCompositionRemainingTokens > 0 ? (
-                  <span
-                    className={`${styles.contextCompositionSegment} ${styles.contextCompositionSegmentExact} ${styles.contextCompositionSegmentUnused}`}
-                    style={{ width: contextWindowSegmentWidth(contextCompositionRemainingTokens, contextCompositionLimitTokens) }}
-                  />
-                ) : null}
-              </div>
-              {contextCompositionSegments.length ? (
-                <div className={styles.contextCompositionLegend}>
-                  {contextCompositionSegments.map((segment) => (
-                    <span key={`${segment.key}-${segment.source}-legend`} title={segment.description || segment.source}>
-                      <i className={contextCompositionSegmentClass(segment.key)} />
-                      {contextCompositionSegmentLabel(segment.key, segment.label, t)}
-                      {" "}
-                      {numberFormatter.format(segment.tokens ?? 0)}
-                    </span>
-                  ))}
-                </div>
-              ) : null}
-            </div>
-          </section>
-        </section>
-
-        <section className={`${styles.leftBlock} ${styles.cacheStatusCard}`}>
-          <div className={styles.sectionHeader}>
-            <div className={styles.sectionIdentity}>
-              <p className={styles.blockEyebrow}>{t("promptCache")}</p>
-              <h3 className={styles.sectionTitle}>{t("previousCacheHit")}</h3>
-            </div>
-            <span className={styles.metricValue}>{cacheCompositionPercent}%</span>
-          </div>
-          <div className={styles.cacheDonutPanel}>
-            <button
-              type="button"
-              className={styles.cacheDonutTrigger}
-              onClick={openCacheDetail}
-              disabled={!cacheDetailAvailable}
-              aria-label={cacheDetailOpenLabel}
-              aria-expanded={cacheDetailOpen}
-              aria-controls={cacheDetailOpen ? "cache-detail-dialog" : undefined}
-              title={cacheDetailOpenLabel}
-            >
-              <span className={styles.cacheDonutShell}>
-                <svg
-                  className={styles.cacheDonutSvg}
-                  viewBox="0 0 100 100"
-                  role="img"
-                  aria-label={cacheCompositionTitle}
-                >
-                  <circle className={`${styles.cacheDonutTrack} ${styles.cacheDonutOuterTrack}`} cx="50" cy="50" r="42" pathLength={100} />
-                  {cachePromptDonutSegments.map((segment, index) => (
-                    <circle
-                      key={`computed-${segment.key}-${segment.status}-${index}`}
-                      className={`${styles.cacheDonutSegment} ${styles.cacheDonutOuterSegment} ${cachePromptSegmentClass(segment)}`}
-                      cx="50"
-                      cy="50"
-                      r="42"
-                      pathLength={100}
-                      style={cacheDonutSegmentStyle(segment, cachePromptDonutSegments.length > 1 ? 0.55 : 0)}
-                    >
-                      <title>{cachePromptSegmentHoverTitle(segment, cachePromptCompositionTotalTokens, numberFormatter, lang, t)}</title>
-                    </circle>
-                  ))}
-                  <circle className={`${styles.cacheDonutTrack} ${styles.cacheDonutInnerTrack}`} cx="50" cy="50" r="31" pathLength={100} />
-                  {trueCacheDonutSegments.map((segment, index) => (
-                    <circle
-                      key={`true-${segment.key}-${segment.status}-${index}`}
-                      className={`${styles.cacheDonutSegment} ${styles.cacheDonutInnerSegment} ${cacheDonutSegmentClass(segment.status || segment.key)}`}
-                      cx="50"
-                      cy="50"
-                      r="31"
-                      pathLength={100}
-                      style={cacheDonutSegmentStyle(segment, trueCacheDonutSegments.length > 1 ? 0.4 : 0)}
-                    />
-                  ))}
-                </svg>
-                <div className={styles.cacheDonutCenter} title={cacheDetailOpenLabel}>
-                  <strong>{cacheCompositionPercent}%</strong>
-                  <span>{cacheCompositionComputedLabel} {computedCacheCompositionPercent}%</span>
-                  <small>{cacheCompositionAverageLabel} {cacheCompositionAverageValue}</small>
-                </div>
-              </span>
-            </button>
-            <div className={styles.cacheDonutStats}>
-              <span title={cacheDetailOpenLabel}>
-                <b>{lang === "zh" ? "真实" : "true"}</b>
-                {numberFormatter.format(providerCachedInputTokens)} / {numberFormatter.format(providerCacheInputTokens)}
-              </span>
-              <span title={cacheDetailOpenLabel}>
-                <b>{lang === "zh" ? "计算" : "calc"}</b>
-                {numberFormatter.format(lastCacheComposition?.computedCachedInputTokens ?? 0)} / {numberFormatter.format(computedCacheCompositionTotalTokens)}
-              </span>
-              <span title={cacheDetailOpenLabel}>
-                <b>{lang === "zh" ? "总均" : "avg"}</b>
-                {cacheCompositionAverageValue}
-                {averageCacheObservedTurnCount > 0 ? ` · ${numberFormatter.format(averageCacheObservedTurnCount)}` : ""}
-              </span>
-            </div>
-          </div>
-        </section>
-
-        <section className={`${styles.leftBlock} ${styles.resourceBlock} ${styles.compressionStatusCard}`}>
-          <div className={styles.sectionHeader}>
-            <div className={styles.sectionIdentity}>
-              <p className={styles.blockEyebrow}>{t("contextCompression")}</p>
-              <h3 className={styles.sectionTitle} title={compressionTitleLine}>{compressionCurrentLine}</h3>
+              <p className={styles.blockEyebrow}>{lang === "zh" ? "Token / 压缩" : "Token / Compression"}</p>
+              <h3 className={styles.sectionTitle}>{lang === "zh" ? "状态矩阵" : "Status matrix"}</h3>
             </div>
             <span className={styles.metricValue}>{compressionCurrentPercent}%</span>
           </div>
-          <div className={styles.compressionFactGrid} title={compressionTitleLine}>
-            <div className={styles.compressionFact}>
-              <span title={t("runtimeContextEstimate")}>{lang === "zh" ? "当前" : "Now"}</span>
-              <strong>{compressionMainLine}</strong>
-            </div>
-            <div className={styles.compressionFact}>
-              <span title={t("compressionModelWindow")}>{lang === "zh" ? "窗口" : "Window"}</span>
-              <strong>{compressionModelWindowLine}</strong>
-            </div>
-            <div className={`${styles.compressionFact} ${styles.compressionFactWide}`}>
-              <span title={t("compressionThresholdBasis")}>{lang === "zh" ? "口径" : "Basis"}</span>
-              <strong>{compressionScopeLine}</strong>
-            </div>
+          <div className={styles.tokenCompressionTable}>
+            {tokenCompressionRows.map((row) => (
+              <div key={row.key} className={styles.tokenCompressionRow} title={row.title ?? row.value}>
+                <span>{row.label}</span>
+                <strong>{row.value}</strong>
+                {row.meta ? <small>{row.meta}</small> : null}
+              </div>
+            ))}
           </div>
-          <p className={styles.oneLineValue} title={lastCompression?.reason || lastCompressionLine}>
-            <span>{lang === "zh" ? "最近" : "Last"}</span>
-            {lastCompressionLine}
-          </p>
-        </section>
 
-        <section className={`${styles.leftBlock} ${styles.compressionStrategyCard}`}>
-          <div className={styles.sectionHeader}>
-            <div className={styles.sectionIdentity}>
-              <p className={styles.blockEyebrow}>{t("compressionStrategy")}</p>
-              <h3 className={styles.sectionTitle} title={compressionTitleLine}>{compressionLevelLabel}</h3>
+          <div className={styles.tokenCompressionVisuals}>
+            <div className={styles.tokenCompressionMiniPanel} title={contextCompositionTitle}>
+              <div className={styles.tokenCompressionMiniHeader}>
+                <span>{t("previousContextComposition")}</span>
+                <strong>{contextCompositionUsedPercent}%</strong>
+              </div>
+              <section className={styles.contextCompositionPanel} aria-label={lang === "zh" ? "状态栏上一轮上下文事实" : "Status bar previous turn context facts"}>
+                <div className={styles.contextCompositionItem}>
+                  <div className={styles.contextCompositionBar} aria-hidden="true">
+                    {contextCompositionSegments.length ? (
+                      contextCompositionSegments.map((segment) => (
+                        <span
+                          key={`${segment.key}-${segment.source}`}
+                          className={`${styles.contextCompositionSegment} ${styles.contextCompositionSegmentExact} ${contextCompositionSegmentClass(segment.key)}`}
+                          style={{ width: contextWindowSegmentWidth(segment.tokens ?? 0, contextCompositionLimitTokens) }}
+                        />
+                      ))
+                    ) : (
+                      <span className={`${styles.contextCompositionSegment} ${styles.contextCompositionSegmentMissing}`} />
+                    )}
+                    {contextCompositionRemainingTokens > 0 ? (
+                      <span
+                        className={`${styles.contextCompositionSegment} ${styles.contextCompositionSegmentExact} ${styles.contextCompositionSegmentUnused}`}
+                        style={{ width: contextWindowSegmentWidth(contextCompositionRemainingTokens, contextCompositionLimitTokens) }}
+                      />
+                    ) : null}
+                  </div>
+                  {contextCompositionSegments.length ? (
+                    <div className={styles.contextCompositionLegend}>
+                      {contextCompositionSegments.map((segment) => (
+                        <span key={`${segment.key}-${segment.source}-legend`} title={segment.description || segment.source}>
+                          <i className={contextCompositionSegmentClass(segment.key)} />
+                          {contextCompositionSegmentLabel(segment.key, segment.label, t)}
+                          {" "}
+                          {numberFormatter.format(segment.tokens ?? 0)}
+                        </span>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+              </section>
             </div>
-            <span className={styles.metricValue}>{compression?.strategy.levels.length ?? 0}</span>
+            <div className={styles.tokenCompressionMiniPanel}>
+              <div className={styles.tokenCompressionMiniHeader}>
+                <span>{t("previousCacheHit")}</span>
+                <strong>{cacheCompositionPercent}%</strong>
+              </div>
+              <div className={styles.cacheDonutPanel}>
+                <button
+                  type="button"
+                  className={styles.cacheDonutTrigger}
+                  onClick={openCacheDetail}
+                  disabled={!cacheDetailAvailable}
+                  aria-label={cacheDetailOpenLabel}
+                  aria-expanded={cacheDetailOpen}
+                  aria-controls={cacheDetailOpen ? "cache-detail-dialog" : undefined}
+                  title={cacheDetailOpenLabel}
+                >
+                  <span className={styles.cacheDonutShell}>
+                    <svg
+                      className={styles.cacheDonutSvg}
+                      viewBox="0 0 100 100"
+                      role="img"
+                      aria-label={cacheCompositionTitle}
+                    >
+                      <circle className={`${styles.cacheDonutTrack} ${styles.cacheDonutOuterTrack}`} cx="50" cy="50" r="42" pathLength={100} />
+                      {cachePromptDonutSegments.map((segment, index) => (
+                        <circle
+                          key={`computed-${segment.key}-${segment.status}-${index}`}
+                          className={`${styles.cacheDonutSegment} ${styles.cacheDonutOuterSegment} ${cachePromptSegmentClass(segment)}`}
+                          cx="50"
+                          cy="50"
+                          r="42"
+                          pathLength={100}
+                          style={cacheDonutSegmentStyle(segment, cachePromptDonutSegments.length > 1 ? 0.55 : 0)}
+                        >
+                          <title>{cachePromptSegmentHoverTitle(segment, cachePromptCompositionTotalTokens, numberFormatter, lang, t)}</title>
+                        </circle>
+                      ))}
+                      <circle className={`${styles.cacheDonutTrack} ${styles.cacheDonutInnerTrack}`} cx="50" cy="50" r="31" pathLength={100} />
+                      {trueCacheDonutSegments.map((segment, index) => (
+                        <circle
+                          key={`true-${segment.key}-${segment.status}-${index}`}
+                          className={`${styles.cacheDonutSegment} ${styles.cacheDonutInnerSegment} ${cacheDonutSegmentClass(segment.status || segment.key)}`}
+                          cx="50"
+                          cy="50"
+                          r="31"
+                          pathLength={100}
+                          style={cacheDonutSegmentStyle(segment, trueCacheDonutSegments.length > 1 ? 0.4 : 0)}
+                        />
+                      ))}
+                    </svg>
+                    <div className={styles.cacheDonutCenter} title={cacheDetailOpenLabel}>
+                      <strong>{cacheCompositionPercent}%</strong>
+                      <span>{cacheCompositionComputedLabel} {computedCacheCompositionPercent}%</span>
+                      <small>{cacheCompositionAverageLabel} {cacheCompositionAverageValue}</small>
+                    </div>
+                  </span>
+                </button>
+                <div className={styles.cacheDonutStats}>
+                  <span title={cacheDetailOpenLabel}>
+                    <b>{lang === "zh" ? "真实" : "true"}</b>
+                    {numberFormatter.format(providerCachedInputTokens)} / {numberFormatter.format(providerCacheInputTokens)}
+                  </span>
+                  <span title={cacheDetailOpenLabel}>
+                    <b>{lang === "zh" ? "计算" : "calc"}</b>
+                    {numberFormatter.format(lastCacheComposition?.computedCachedInputTokens ?? 0)} / {numberFormatter.format(computedCacheCompositionTotalTokens)}
+                  </span>
+                  <span title={cacheDetailOpenLabel}>
+                    <b>{lang === "zh" ? "总均" : "avg"}</b>
+                    {cacheCompositionAverageValue}
+                    {averageCacheObservedTurnCount > 0 ? ` · ${numberFormatter.format(averageCacheObservedTurnCount)}` : ""}
+                  </span>
+                </div>
+              </div>
+            </div>
           </div>
-          <div className={styles.compressionStrategyList}>
-            {(compression?.strategy.levels ?? []).map((level) => (
+
+          {tokenCompressionStrategyLevels.length ? (
+            <div className={styles.tokenCompressionStrategyStrip}>
+              {tokenCompressionStrategyLevels.map((level) => (
               <div key={level.level} className={styles.compressionStrategyRow} title={`${t("compressionThreshold")} ${Math.round(level.thresholdRatio * 100)}% / ${numberFormatter.format(level.thresholdTokens)} · ${t("compressionKeepAi")} ${level.keepAiMessages} · ${t("compressionSummary")} ${numberFormatter.format(level.summaryMaxChars)}`}>
                 <strong>{level.level}</strong>
                 <span>{Math.round(level.thresholdRatio * 100)}% / {numberFormatter.format(level.thresholdTokens)}</span>
               </div>
-            ))}
-          </div>
-          <p className={styles.detailNote} title={(compression?.strategy.errorProtectionKeywords ?? []).join(" / ") || "--"}>
-            <span>{t("compressionErrorProtection")}</span>
-            <strong>{(compression?.strategy.errorProtectionKeywords ?? []).join(" / ") || "--"}</strong>
-          </p>
+              ))}
+            </div>
+          ) : null}
+          {tokenCompressionStrategyKeywords !== "--" ? (
+            <p className={styles.detailNote} title={tokenCompressionStrategyKeywords}>
+              <span>{t("compressionErrorProtection")}</span>
+              <strong>{tokenCompressionStrategyKeywords}</strong>
+            </p>
+          ) : null}
         </section>
 
         <section className={`${styles.leftBlock} ${styles.companionBlock}`}>
