@@ -6656,6 +6656,7 @@ def test_handle_force_close_workbench_marks_work_runs_and_verifies_close(monkeyp
     saved_states: list[dict] = []
     events: list[tuple[str, dict]] = []
     cleanup_calls: list[dict] = []
+    state_cleanup_calls: list[str] = []
     state_holder = {
         "value": {
             "command": {"activeCommandId": "cmd-force"},
@@ -6739,6 +6740,11 @@ def test_handle_force_close_workbench_marks_work_runs_and_verifies_close(monkeyp
         "_wait_for_close_verification",
         lambda: (True, dict(closed_observation), 1),
     )
+    monkeypatch.setattr(
+        daemon,
+        "clear_workbench_launcher_state_after_close",
+        lambda: state_cleanup_calls.append("cleanup") or {"preservedLauncherControlState": True, "reason": "launcher_control_process_alive"},
+    )
 
     def fake_cleanup(self, observation=None):
         cleanup_calls.append(dict(observation or {}))
@@ -6754,11 +6760,13 @@ def test_handle_force_close_workbench_marks_work_runs_and_verifies_close(monkeyp
     assert result["ok"] is True
     assert result["message"] == "Workbench force closed."
     assert result["residualCleanup"]["terminated"] == [28888, 29999]
+    assert result["launcherStateCleanup"]["reason"] == "launcher_control_process_alive"
     assert result["closedEvolutionRuns"] == [{"kind": "self_evolution_run", "runId": "self-live", "status": "cancelled"}]
     assert result["forceStoppedWorkRuns"] == [
         {"kind": "chat_turn", "runId": "chat-live", "status": "stopped_by_user", "reason": "launcher_force_stop_button"}
     ]
     assert cleanup_calls[0]["browserWindowPid"] == 29999
+    assert state_cleanup_calls == ["cleanup"]
     assert saved_states[0]["workbench"]["desiredState"] == "closed"
     assert saved_states[0]["workbench"]["phase"] == "force_stopping"
     assert saved_states[0]["workbench"]["lastReason"] == "launcher_force_stop_button"
@@ -6769,6 +6777,64 @@ def test_handle_force_close_workbench_marks_work_runs_and_verifies_close(monkeyp
     succeeded_event = next(payload for event_type, payload in events if event_type == "workbench.force_close.verification_succeeded")
     assert requested_event["activeWorkCount"] == 1
     assert succeeded_event["attempts"] == 1
+
+
+def test_handle_force_close_workbench_cleans_launcher_state_when_already_satisfied(monkeypatch):
+    runtime_daemon = daemon.RuntimeManagerDaemon()
+    state = {
+        "command": {"activeCommandId": "cmd-force"},
+        "workbench": {
+            "desiredState": "closed",
+            "observedState": "closed",
+            "phase": "steady",
+        },
+    }
+    state_cleanup_calls: list[str] = []
+
+    monkeypatch.setattr(daemon, "load_state", lambda: state)
+    monkeypatch.setattr(daemon, "save_state", lambda next_state: next_state)
+    monkeypatch.setattr(daemon, "now_iso", lambda: "2026-06-15T01:45:00+00:00")
+    monkeypatch.setattr(
+        daemon,
+        "observe_workbench",
+        lambda: {
+            "observedState": "closed",
+            "backendAlive": False,
+            "backendHealthy": False,
+            "backendObserved": False,
+            "backendPortListening": False,
+            "backendPortOwnerPid": 0,
+            "backendPortOwnerResidual": False,
+            "lifecycleConsistency": "consistent",
+            "browserWindowAlive": False,
+        },
+    )
+    monkeypatch.setattr(daemon, "build_evolution_summary", lambda: {"self": {}, "supervised": {}})
+    monkeypatch.setattr(daemon, "_persistent_active_work_run_snapshots", lambda: [])
+    monkeypatch.setattr(daemon, "_mark_persistent_active_work_runs_force_stopped", lambda reason: [])
+    monkeypatch.setattr(daemon, "_close_active_evolution_runs_for_shutdown", lambda: [])
+    monkeypatch.setattr(daemon, "_append_event", lambda event_type, payload: None)
+    monkeypatch.setattr(
+        daemon,
+        "clear_workbench_launcher_state_after_close",
+        lambda: state_cleanup_calls.append("cleanup") or {"preservedLauncherControlState": True, "reason": "launcher_control_process_alive"},
+    )
+    monkeypatch.setattr(
+        runtime_daemon,
+        "_force_cleanup_workbench_processes",
+        lambda observation=None: (_ for _ in ()).throw(AssertionError("already-satisfied force close should not scan processes")),
+    )
+
+    result = runtime_daemon._handle_force_close_workbench(
+        command_id="cmd-force",
+        args={"reason": "launcher_force_stop_button", "source": "launcher_api"},
+    )
+
+    assert result["ok"] is True
+    assert result["message"] == "Workbench is already closed."
+    assert result["alreadySatisfied"] is True
+    assert result["launcherStateCleanup"]["reason"] == "launcher_control_process_alive"
+    assert state_cleanup_calls == ["cleanup"]
 
 
 def test_force_close_marks_parallel_persistent_work_runs(tmp_path, monkeypatch):
@@ -7524,6 +7590,7 @@ def test_handle_close_workbench_skips_residual_cleanup_for_plain_close_when_alre
         },
     }
     close_calls = []
+    state_cleanup_calls = []
 
     monkeypatch.setattr(daemon, "load_state", lambda: state)
     monkeypatch.setattr(daemon, "save_state", lambda next_state: next_state)
@@ -7553,6 +7620,11 @@ def test_handle_close_workbench_skips_residual_cleanup_for_plain_close_when_alre
         "_cleanup_residual_workbench_processes",
         lambda: (_ for _ in ()).throw(AssertionError("already-closed clean path should not scan residual processes")),
     )
+    monkeypatch.setattr(
+        daemon,
+        "clear_workbench_launcher_state_after_close",
+        lambda: state_cleanup_calls.append("cleanup") or {"preservedLauncherControlState": True, "reason": "launcher_control_process_alive"},
+    )
 
     result = runtime_daemon._handle_close_workbench(
         command_id="cmd-close",
@@ -7563,6 +7635,8 @@ def test_handle_close_workbench_skips_residual_cleanup_for_plain_close_when_alre
     assert result["message"] == "Workbench is already closed."
     assert result["stopDaemon"] is False
     assert result["residualCleanup"]["skipped"] == "already_closed_no_residual"
+    assert result["launcherStateCleanup"]["reason"] == "launcher_control_process_alive"
+    assert state_cleanup_calls == ["cleanup"]
     assert close_calls == []
 
 
@@ -7578,6 +7652,7 @@ def test_handle_close_workbench_cleans_residual_processes_when_already_closed_wi
     }
     cleanup_calls = []
     close_calls = []
+    state_cleanup_calls = []
 
     monkeypatch.setattr(daemon, "load_state", lambda: state)
     monkeypatch.setattr(daemon, "save_state", lambda next_state: next_state)
@@ -7607,6 +7682,11 @@ def test_handle_close_workbench_cleans_residual_processes_when_already_closed_wi
         "_cleanup_residual_workbench_processes",
         lambda: cleanup_calls.append("cleanup") or {"supported": True, "requested": [49128], "terminated": [49128], "remaining": []},
     )
+    monkeypatch.setattr(
+        daemon,
+        "clear_workbench_launcher_state_after_close",
+        lambda: state_cleanup_calls.append("cleanup") or {"preservedLauncherControlState": True, "reason": "launcher_control_process_alive"},
+    )
 
     result = runtime_daemon._handle_close_workbench(
         command_id="cmd-close",
@@ -7617,7 +7697,9 @@ def test_handle_close_workbench_cleans_residual_processes_when_already_closed_wi
     assert result["message"] == "Workbench is already closed."
     assert result["stopDaemon"] is True
     assert result["residualCleanup"]["terminated"] == [49128]
+    assert result["launcherStateCleanup"]["reason"] == "launcher_control_process_alive"
     assert cleanup_calls == ["cleanup"]
+    assert state_cleanup_calls == ["cleanup"]
     assert close_calls == []
 
 

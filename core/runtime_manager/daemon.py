@@ -1104,6 +1104,33 @@ def _closed_observation_has_residual_evidence(observation: dict[str, Any]) -> bo
     }
 
 
+def _clear_launcher_state_after_verified_close(
+    observation: dict[str, Any],
+    *,
+    command_id: str,
+    cleanup_result: dict[str, Any],
+    event_type: str,
+) -> dict[str, Any]:
+    try:
+        state_cleanup = clear_workbench_launcher_state_after_close()
+    except Exception as exc:
+        state_cleanup = {
+            "ok": False,
+            "errorType": type(exc).__name__,
+            "message": str(exc),
+        }
+    _append_event(
+        event_type,
+        _close_verification_event_payload(
+            observation,
+            command_id=command_id,
+            cleanup_result=cleanup_result,
+        )
+        | {"stateCleanup": state_cleanup},
+    )
+    return state_cleanup
+
+
 def _close_verification_failure_message(observation: dict[str, Any]) -> str:
     parts = [
         "Workbench launcher exited successfully, but the workbench is not fully stopped.",
@@ -3168,6 +3195,7 @@ class RuntimeManagerDaemon:
                 "launcherResult": None,
                 "lifecycleTimingsMs": lifecycle_timings_ms,
                 "fastClose": fast_close,
+                "stateCleanup": fast_close.get("stateCleanup") if isinstance(fast_close.get("stateCleanup"), dict) else {},
             }
 
         fallback_reason = str(fast_close.get("fallbackReason") or "fast_path_failed")
@@ -3216,6 +3244,12 @@ class RuntimeManagerDaemon:
             cleanup_result = {"supported": True, "requested": [], "terminated": [], "remaining": [], "skipped": "already_closed_no_residual"}
             if bool(args.get("stopManager")) or _closed_observation_has_residual_evidence(observation):
                 cleanup_result = self._cleanup_residual_workbench_processes()
+            launcher_state_cleanup = _clear_launcher_state_after_verified_close(
+                observation,
+                command_id=command_id,
+                cleanup_result=cleanup_result,
+                event_type="workbench.close.already_satisfied_state_cleanup",
+            )
             reopen_intent = _claim_workbench_reopen_intent() if bool(args.get("stopManager")) else None
             if bool(args.get("stopManager")):
                 if reopen_intent:
@@ -3235,6 +3269,7 @@ class RuntimeManagerDaemon:
                     "stopDaemon": bool(args.get("stopManager")) and not bool(reopen_intent),
                     "runDeferredWorkbenchOpen": bool(reopen_intent),
                     "restartIntent": reopen_intent or {},
+                    "launcherStateCleanup": launcher_state_cleanup,
                 },
                 reconcile_observation=observation,
             )
@@ -3295,6 +3330,14 @@ class RuntimeManagerDaemon:
                 "fastClose": close_outcome.get("fastClose") if isinstance(close_outcome.get("fastClose"), dict) else {},
             },
         )
+        launcher_state_cleanup = close_outcome.get("stateCleanup") if isinstance(close_outcome.get("stateCleanup"), dict) else {}
+        if not launcher_state_cleanup:
+            launcher_state_cleanup = _clear_launcher_state_after_verified_close(
+                verification,
+                command_id=command_id,
+                cleanup_result=cleanup_result,
+                event_type="workbench.close.launcher_state_cleanup",
+            )
         reopen_intent = _claim_workbench_reopen_intent() if bool(args.get("stopManager")) else None
         final_result = self._finish_command(
             command_id,
@@ -3308,6 +3351,7 @@ class RuntimeManagerDaemon:
                 "restartIntent": reopen_intent or {},
                 "lifecycleTimingsMs": lifecycle_timings_ms,
                 "closeStrategy": close_strategy,
+                "launcherStateCleanup": launcher_state_cleanup,
             },
             reconcile_observation=verification,
         )
@@ -3377,6 +3421,12 @@ class RuntimeManagerDaemon:
                 "remaining": [],
                 "skipped": "already_closed_no_residual",
             }
+            launcher_state_cleanup = _clear_launcher_state_after_verified_close(
+                initial_observation,
+                command_id=command_id,
+                cleanup_result=cleanup_result,
+                event_type="workbench.force_close.already_satisfied_state_cleanup",
+            )
             _append_event(
                 "workbench.force_close.already_satisfied",
                 _close_verification_event_payload(
@@ -3396,6 +3446,7 @@ class RuntimeManagerDaemon:
                     "closedEvolutionRuns": closed_runs,
                     "forceStoppedWorkRuns": force_stopped_runs,
                     "alreadySatisfied": True,
+                    "launcherStateCleanup": launcher_state_cleanup,
                 },
                 reconcile_observation=initial_observation,
             )
@@ -3456,6 +3507,12 @@ class RuntimeManagerDaemon:
             }
         )
         save_state(self._reconcile_observation(state, observation=verification))
+        launcher_state_cleanup = _clear_launcher_state_after_verified_close(
+            verification,
+            command_id=command_id,
+            cleanup_result=cleanup_result,
+            event_type="workbench.force_close.launcher_state_cleanup",
+        )
         return self._finish_command(
             command_id,
             ok=True,
@@ -3464,6 +3521,7 @@ class RuntimeManagerDaemon:
                 "residualCleanup": cleanup_result,
                 "closedEvolutionRuns": closed_runs,
                 "forceStoppedWorkRuns": force_stopped_runs,
+                "launcherStateCleanup": launcher_state_cleanup,
             },
             reconcile_observation=verification,
         )
