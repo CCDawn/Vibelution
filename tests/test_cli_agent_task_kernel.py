@@ -142,20 +142,44 @@ def test_mimo_prompt_echo_completion_text_does_not_complete_task(monkeypatch, tm
     assert state.get("completionReason") is None
 
 
-def test_mimo_marker_required_protocol_does_not_idle_complete_without_marker(monkeypatch, tmp_path):
+def test_mimo_marker_protocol_idle_completes_non_echo_output_without_marker(monkeypatch, tmp_path):
     project_root = tmp_path / "Vibelution"
     project_root.mkdir()
     monkeypatch.setattr(task_kernel, "PROJECT_ROOT", project_root)
     monkeypatch.setattr(task_kernel, "TASK_STATE_DIR", project_root / ".runtime" / "cli_agents" / "tasks")
 
-    old_epoch_iso = "2026-06-14T10:00:00+00:00"
+    old_epoch_iso = "1970-01-01T00:00:01+00:00"
     task_state = {
         "adapterId": "mimo_code",
         "status": "running",
-        "output": "Answer: 还在执行，没有结束标记",
+        "task": "分析原因",
+        "sentInput": "分析原因\r\n",
+        "output": "Answer: 已分析完成，没有结束标记",
         "createdAt": old_epoch_iso,
         "lastOutputAt": old_epoch_iso,
         "timeoutSeconds": 3600,
     }
 
-    assert task_kernel._task_timeout_or_idle_status(task_state, now=1781431400.0) == ""
+    assert task_kernel._task_timeout_or_idle_status(task_state, now=31.0) == "completed"
+
+
+def test_mimo_marker_protocol_does_not_idle_complete_prompt_echo(monkeypatch, tmp_path):
+    project_root = tmp_path / "Vibelution"
+    project_root.mkdir()
+    monkeypatch.setattr(task_kernel, "PROJECT_ROOT", project_root)
+    monkeypatch.setattr(task_kernel, "TASK_STATE_DIR", project_root / ".runtime" / "cli_agents" / "tasks")
+
+    old_epoch_iso = "1970-01-01T00:00:01+00:00"
+    sent_input = "分析原因\n\n完成本任务后，请在最终回复最后单独输出结束标记。"
+    task_state = {
+        "adapterId": "mimo_code",
+        "status": "running",
+        "task": "分析原因",
+        "sentInput": sent_input,
+        "output": sent_input,
+        "createdAt": old_epoch_iso,
+        "lastOutputAt": old_epoch_iso,
+        "timeoutSeconds": 3600,
+    }
+
+    assert task_kernel._task_timeout_or_idle_status(task_state, now=31.0) == ""

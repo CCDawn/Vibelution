@@ -80,9 +80,9 @@ def cli_agent_terminal_ensure(payload: CliAgentTerminalEnsurePayload) -> dict[st
 
 
 @router.get("/cli-agents/terminal-sessions/{terminal_session_id}")
-def cli_agent_terminal_detail(terminal_session_id: str) -> dict[str, Any]:
+def cli_agent_terminal_detail(terminal_session_id: str, includeTranscriptTail: bool = False) -> dict[str, Any]:
     try:
-        return get_cli_agent_terminal_session(terminal_session_id)
+        return get_cli_agent_terminal_session(terminal_session_id, include_transcript_tail=includeTranscriptTail)
     except CliAgentTerminalError as exc:
         _raise_terminal_error(exc)
 

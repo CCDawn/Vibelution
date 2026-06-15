@@ -209,6 +209,7 @@ type CliAgentRunResult = {
   semanticStatus?: string;
   internalStatus?: string;
   code?: string;
+  message?: string;
   runId?: string;
   cliRunId?: string;
   lockKey?: string;
@@ -297,6 +298,18 @@ type CliAgentTerminalEvent = {
   type?: string;
   chunk?: string;
   session?: CliAgentTerminalSession;
+};
+
+type CliAgentTerminalAck = {
+  status?: string;
+  semanticStatus?: string;
+  code?: string;
+  action?: string;
+  terminalSessionId?: string;
+  alive?: boolean;
+  rows?: number;
+  cols?: number;
+  updatedAt?: string;
 };
 
 function textArg(args: Record<string, unknown> | undefined, key: string) {
@@ -816,10 +829,17 @@ function CliAgentRunTerminalPanel({
   const terminalHasOutputRef = useRef(false);
   const lastPostedSizeRef = useRef<{ rows: number; cols: number } | null>(null);
   const terminalSessionId = String(terminalSession?.terminalSessionId || "").trim();
-  const statusText = terminalStatusText(terminalSession, connecting, lang);
-  const visibleCommand = Array.isArray(terminalSession?.commandPreview) && terminalSession?.commandPreview.length
+  const taskLocked = String(run.result?.semanticStatus || run.result?.status || run.status || "").trim().toLowerCase() === "task_locked"
+    || String(run.result?.code || "").trim() === "CLI_AGENT_TASK_LOCKED";
+  const taskLockedMessage = taskLocked
+    ? String(run.result?.message || (lang === "zh" ? "指令未发送：当前 CLI Agent 终端已有任务在运行。" : "Instruction was not sent: this CLI Agent terminal already has a running task.")).trim()
+    : "";
+  const statusText = taskLocked
+    ? (lang === "zh" ? "未发送" : "Not sent")
+    : terminalStatusText(terminalSession, connecting, lang);
+  const visibleCommand = taskLockedMessage || (Array.isArray(terminalSession?.commandPreview) && terminalSession?.commandPreview.length
     ? terminalSession.commandPreview.join(" ")
-    : run.commandLine;
+    : run.commandLine);
   const snapshotFallbackAvailable = Boolean(String(terminalSession?.screenText || "").trim());
   const transcriptReplayBlocked = terminalSession?.transcriptTailReplayable === false && !snapshotFallbackAvailable;
   const emptyText = terminalError
@@ -893,12 +913,16 @@ function CliAgentRunTerminalPanel({
       return;
     }
     setTerminalError("");
-    fetchJson<CliAgentTerminalSession>(`/api/cli-agents/terminal-sessions/${encodeURIComponent(sessionId)}/input`, {
+    fetchJson<CliAgentTerminalAck>(`/api/cli-agents/terminal-sessions/${encodeURIComponent(sessionId)}/input`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ data }),
     })
-      .then((session) => setTerminalSession(session))
+      .then((ack) => {
+        if (ack.alive === false) {
+          setTerminalSession((current) => current ? { ...current, alive: false } : current);
+        }
+      })
       .catch((error) => setTerminalError(error instanceof Error ? error.message : String(error)));
   }, []);
 
@@ -912,12 +936,25 @@ function CliAgentRunTerminalPanel({
       return;
     }
     lastPostedSizeRef.current = { rows, cols };
-    fetchJson<CliAgentTerminalSession>(`/api/cli-agents/terminal-sessions/${encodeURIComponent(sessionId)}/resize`, {
+    fetchJson<CliAgentTerminalAck>(`/api/cli-agents/terminal-sessions/${encodeURIComponent(sessionId)}/resize`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ rows, cols }),
     })
-      .then((session) => setTerminalSession(session))
+      .then((ack) => {
+        setTerminalSession((current) => {
+          if (!current || ack.terminalSessionId !== current.terminalSessionId) {
+            return current;
+          }
+          return {
+            ...current,
+            alive: typeof ack.alive === "boolean" ? ack.alive : current.alive,
+            rows: typeof ack.rows === "number" ? ack.rows : current.rows,
+            cols: typeof ack.cols === "number" ? ack.cols : current.cols,
+            updatedAt: ack.updatedAt || current.updatedAt,
+          };
+        });
+      })
       .catch(() => undefined);
   }, []);
 
@@ -1083,14 +1120,15 @@ function CliAgentRunTerminalPanel({
     const handleEvent = (event: MessageEvent) => {
       try {
         const payload = JSON.parse(String(event.data || "{}")) as CliAgentTerminalEvent;
+        if (payload.type === "terminal_output" && payload.chunk) {
+          writeTerminalChunk(payload.chunk);
+          return;
+        }
         if (payload.session) {
           setTerminalSession(payload.session);
           if (payload.type === "terminal_snapshot") {
             replayTerminalSnapshot(payload.session);
           }
-        }
-        if (payload.type === "terminal_output" && payload.chunk) {
-          writeTerminalChunk(payload.chunk);
         }
       } catch {
         return;
