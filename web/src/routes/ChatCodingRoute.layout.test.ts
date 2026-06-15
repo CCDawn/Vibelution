@@ -143,8 +143,11 @@ describe("ChatCodingRoute layout contract", () => {
 
   it("compresses the left rail into primary controls plus auxiliary status groups", () => {
     expect(routeSource).toContain("styles.tokenCompressionCard");
+    expect(routeSource).toContain("styles.tokenCompressionBadges");
     expect(routeSource).toContain("styles.tokenCompressionTable");
     expect(routeSource).toContain("styles.tokenCompressionRow");
+    expect(routeSource).toContain("styles.tokenCompressionRowWide");
+    expect(routeSource).toContain("styles.tokenCompressionDetails");
     expect(routeSource).toContain("styles.tokenCompressionVisuals");
     expect(routeSource).toContain("styles.tokenCompressionMiniPanel");
     expect(routeSource).toContain("styles.tokenCompressionStrategyStrip");
@@ -161,12 +164,16 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("styles.featureChipPrimary");
     expect(routeSource).toContain("styles.featureChipRow");
     expect(routeSource).toContain("styles.featureChip");
+    expect(routeSource).toContain("<em>{enabled ? (lang === \"zh\" ? \"开\" : \"On\") : (lang === \"zh\" ? \"关\" : \"Off\")}</em>");
     expect(routeSource).not.toContain("<section className={styles.petShowcase}");
     expect(routeSource).not.toContain("styles.featurePresetGrid");
 
     expect(routeStyles.tokenCompressionCard).toBeTypeOf("string");
+    expect(routeStyles.tokenCompressionBadges).toBeTypeOf("string");
     expect(routeStyles.tokenCompressionTable).toBeTypeOf("string");
     expect(routeStyles.tokenCompressionRow).toBeTypeOf("string");
+    expect(routeStyles.tokenCompressionRowWide).toBeTypeOf("string");
+    expect(routeStyles.tokenCompressionDetails).toBeTypeOf("string");
     expect(routeStyles.tokenCompressionVisuals).toBeTypeOf("string");
     expect(routeStyles.tokenCompressionMiniPanel).toBeTypeOf("string");
     expect(routeStyles.tokenCompressionStrategyStrip).toBeTypeOf("string");
@@ -262,16 +269,27 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).not.toContain("<details className={styles.sessionDiagnosticsDetails}>");
     expect(routeSource).not.toContain("<summary className={styles.sessionDiagnosticsSummary}>");
     expect(routeSource).toContain("label: lang === \"zh\" ? \"上下文\" : \"Context\"");
+    expect(routeSource).toContain("const tokenCompressionContextBadge");
+    expect(routeSource).toContain("const tokenCompressionThresholdBadge");
+    expect(routeSource).toContain("styles.tokenCompressionBadges");
+    expect(routeSource).not.toContain("<span className={styles.metricValue}>{compressionCurrentPercent}%</span>");
     expect(routeSource).toContain("styles.tokenCompressionCard");
     expect(routeSource).toContain("styles.tokenCompressionTable");
     expect(routeSource).toContain("styles.tokenCompressionRow");
+    expect(routeSource).toContain("styles.tokenCompressionRowWide");
+    expect(routeSource).toContain("styles.tokenCompressionDetails");
     expect(routeSource).toContain("styles.tokenCompressionVisuals");
     expect(routeSource).toContain("const tokenCompressionRows");
     expect(routeSource).toContain("key: \"llm\"");
+    expect(routeSource).toContain("key: \"output\"");
     expect(routeSource).toContain("key: \"cache\"");
     expect(routeSource).toContain("key: \"context\"");
     expect(routeSource).toContain("key: \"compression\"");
     expect(routeSource).toContain("key: \"strategy\"");
+    expect(routeSource).toContain("label: lang === \"zh\" ? \"输入\" : \"Input\"");
+    expect(routeSource).toContain("label: lang === \"zh\" ? \"输出\" : \"Output\"");
+    expect(routeSource).toContain("样本 ${numberFormatter.format(tokenSpeedTracker.tokenCount)} tok");
+    expect(routeSource).toContain("压缩阈值 ${compressionCurrentPercent}%");
     expect(routeSource).toContain("styles.contextCompositionPanel");
     expect(routeSource).toContain("t(\"previousContextComposition\")");
     expect(routeSource).toContain("t(\"previousCacheHit\")");
@@ -327,6 +345,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("styles.cacheDetailDonutPanel");
     expect(routeSource).toContain("case \"cache_write\"");
     expect(routeSource).toContain("cacheCreationInputTokens");
+    expect(routeSource).toContain("styles.compressionStrategyRowActive");
+    expect(routeSource).toContain("{lang === \"zh\" ? \"已启用\" : \"Enabled\"}");
     expect(routeSource).toContain("styles.currentSessionBlock");
     expect(routeSource).toContain("styles.currentSessionLine");
     expect(routeSource).toContain("styles.currentSessionMetaList");
@@ -342,8 +362,11 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource.indexOf("styles.contextCompositionPanel")).toBeLessThan(routeSource.indexOf("<aside className={rightPaneCollapsed"));
 
     expect(routeStyles.tokenCompressionCard).toBeTypeOf("string");
+    expect(routeStyles.tokenCompressionBadges).toBeTypeOf("string");
     expect(routeStyles.tokenCompressionTable).toBeTypeOf("string");
     expect(routeStyles.tokenCompressionRow).toBeTypeOf("string");
+    expect(routeStyles.tokenCompressionRowWide).toBeTypeOf("string");
+    expect(routeStyles.tokenCompressionDetails).toBeTypeOf("string");
     expect(routeStyles.tokenCompressionVisuals).toBeTypeOf("string");
     expect(routeStyles.tokenCompressionMiniPanel).toBeTypeOf("string");
     expect(routeStyles.tokenCompressionMiniHeader).toBeTypeOf("string");
@@ -452,7 +475,11 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("sessionLlmUsage?.source === \"provider_usage\"");
     expect(routeSource).toContain("sessionLlmUsage?.source === \"not_called\"");
     expect(routeSource).toContain("key: \"llm\"");
-    expect(routeSource).toContain("label: \"Token\"");
+    expect(routeSource).toContain("key: \"output\"");
+    expect(routeSource).toContain("label: lang === \"zh\" ? \"输入\" : \"Input\"");
+    expect(routeSource).toContain("label: lang === \"zh\" ? \"输出\" : \"Output\"");
+    expect(routeSource).toContain("const tokenInputLine = hasProviderLlmUsage");
+    expect(routeSource).toContain("const tokenOutputLine = hasProviderLlmUsage");
     expect(routeSource).toContain("numberFormatter.format(sessionLlmUsage.outputTokens ?? 0)");
     expect(routeSource).toContain("t(\"llmUsageNotCalled\")");
     expect(routeSource).toContain("t(\"llmUsageMissing\")");
@@ -505,7 +532,10 @@ describe("ChatCodingRoute layout contract", () => {
   it("moves recent control signals into the current session status bar", () => {
     expect(routeSource).toContain("const activeControlSignals = useMemo<ChatNextStateSignalSummary[]>");
     expect(routeSource).toContain("shouldShowNextStateSignalInConversation(signal, phase)");
+    expect(routeSource).toContain("const latestControlSignalKindLabel = (() =>");
     expect(routeSource).toContain("const latestControlSignalLine = latestControlSignal");
+    expect(routeSource).toContain("return lang === \"zh\" ? \"工具失败\" : \"Tool failed\"");
+    expect(routeSource).toContain("latestControlSignalTitle");
     expect(routeSource).toContain("label: t(\"nextStateSignalsLabel\")");
     expect(routeSource).toContain("value: latestControlSignalLine");
     expect(routeSource).toContain("title: latestControlSignalTitle");
