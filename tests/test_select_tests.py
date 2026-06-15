@@ -39,6 +39,18 @@ def test_selector_matches_web_config_routes_to_config_validation_commands():
     assert not any("tests/test_web_app.py" in command for command in result["commands"])
 
 
+def test_selector_matches_web_runtime_routes_to_runtime_validation_commands():
+    result = select_tests.select_tests(
+        ["tests/test_web_runtime_routes.py"],
+        select_tests.load_matrix(),
+    )
+
+    assert result["matchedRules"][0]["id"] == "web-runtime-launcher"
+    assert "tests/test_web_runtime_routes.py" in result["matchedRules"][0]["matchedFiles"]
+    assert any("tests/test_web_runtime_routes.py" in command for command in result["commands"])
+    assert not any("tests/test_web_app.py" in command for command in result["commands"])
+
+
 def test_selector_uses_default_when_no_rule_matches():
     result = select_tests.select_tests(["workspace/runtime-cache/example.json"], select_tests.load_matrix())
 
