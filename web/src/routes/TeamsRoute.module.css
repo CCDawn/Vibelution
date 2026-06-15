@@ -2227,6 +2227,19 @@
   -webkit-box-orient: vertical;
 }
 
+.sourceCollectionResultStatus {
+  justify-self: end;
+  align-self: start;
+  min-width: max-content;
+  max-width: 8rem;
+  white-space: nowrap;
+  writing-mode: horizontal-tb;
+  word-break: keep-all;
+  text-align: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .sourceCollectionResultItem small {
   grid-column: 1 / -1;
   color: var(--fg-muted);

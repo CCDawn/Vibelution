@@ -246,6 +246,27 @@ def test_generated_tool_manifest_test_does_not_execute_code(tmp_path, monkeypatc
     assert result["agentCompatibility"]["messageType"] == "tool"
 
 
+def test_generated_tool_manifest_test_flags_failure_result_text(tmp_path, monkeypatch):
+    monkeypatch.setattr(registry, "GENERATED_TOOLS_PATH", tmp_path / "generated_tools.json")
+    registry.create_generated_tool(
+        {
+            "name": "manifest_fail_tool",
+            "description": "Generate a manifest whose template indicates failure.",
+            "argsSchema": {"type": "object", "properties": {}},
+            "responseTemplate": json.dumps({"status": "failed", "message": "template says failed"}),
+        }
+    )
+
+    result = registry.test_tool("manifest_fail_tool")
+
+    assert result["status"] == "failed"
+    assert result["called"] is True
+    assert result["callable"] is False
+    assert result["resultPreview"] == '{"status": "failed", "message": "template says failed"}'
+    assert result["agentCompatibility"]["status"] == "failed"
+    assert result["agentCompatibility"]["callable"] is False
+
+
 def test_generated_tool_agent_compatibility_rejects_missing_required_arg(tmp_path, monkeypatch):
     monkeypatch.setattr(registry, "GENERATED_TOOLS_PATH", tmp_path / "generated_tools.json")
     registry.create_generated_tool(
@@ -311,7 +332,7 @@ def test_builtin_tool_test_runs_allowlisted_tool(tmp_path, monkeypatch):
     assert result["agentCompatibility"]["toolCall"]["name"] == "get_current_goal_tool"
 
 
-@pytest.mark.parametrize("status", ["failed", "cancelled", "no_result", "submitted", "in_progress", "timed_out"])
+@pytest.mark.parametrize("status", ["blocked", "policy_blocked", "failed", "failure", "fail", "cancelled", "no_result", "submitted", "in_progress", "timed_out"])
 def test_builtin_tool_test_marks_structured_failure_status_as_failed(tmp_path, monkeypatch, status):
     monkeypatch.setattr(registry, "GENERATED_TOOLS_PATH", tmp_path / "generated_tools.json")
 
@@ -326,6 +347,41 @@ def test_builtin_tool_test_marks_structured_failure_status_as_failed(tmp_path, m
     assert json.loads(result["resultPreview"])["status"] == status
     assert result["called"] is True
     assert result["agentCompatibility"]["status"] in {"succeeded", "failed"}
+
+
+@pytest.mark.parametrize(
+    "result,status",
+    [
+        ({"status": "fail"}, "failed"),
+        ({"status": "blocked"}, "failed"),
+        ({"status": "policy_blocked"}, "failed"),
+        ({"status": "error"}, "failed"),
+        ({"ok": False}, "failed"),
+        ({"status": "succeeded"}, "succeeded"),
+        ({"status": "success"}, "succeeded"),
+        (None, "failed"),
+        ("[错误] binary failure".encode("utf-8"), "failed"),
+        (b"done", "succeeded"),
+    ],
+)
+def test_builtin_tool_test_marks_structured_result_object_as_failure_when_applicable(tmp_path, monkeypatch, result, status):
+    monkeypatch.setattr(registry, "GENERATED_TOOLS_PATH", tmp_path / "generated_tools.json")
+
+    monkeypatch.setattr(
+        "core.infrastructure.tool_executor.ToolExecutor.execute",
+        lambda self, tool_name, tool_args: (result, None),
+    )
+
+    tested = registry.test_tool("get_current_goal_tool")
+
+    assert tested["status"] == status
+    assert tested["called"] is True
+    if isinstance(result, (bytes, bytearray)):
+        assert tested["resultPreview"].startswith("[错误]") if status == "failed" else tested["resultPreview"] == "done"
+    if status == "failed":
+        assert tested["agentCompatibility"]["status"] in {"failed", "timeout"}
+    else:
+        assert tested["agentCompatibility"]["status"] == "succeeded"
 
 
 def test_builtin_tool_test_uses_fixed_args_for_allowlisted_tool(tmp_path, monkeypatch):
