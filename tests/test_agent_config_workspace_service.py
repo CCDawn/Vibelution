@@ -285,6 +285,69 @@ def test_agent_config_workspace_summary_counts_only_actionable_health_issues():
     assert summary["inboxPendingCount"] == 3
 
 
+def test_agent_config_workspace_persists_context_compression_policy(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setattr(config_service, "get_config_workspace", _fake_config_workspace)
+    agent = agent_directory_service.create_agent_instance(display_name="压缩策略 Agent")
+
+    workspace_before = agent_config_workspace_service.get_agent_config_workspace()
+    before_agent = next(item for item in workspace_before["agents"] if item["agentId"] == agent["agentId"])
+    assert before_agent["contextCompressionPolicy"] == {"mode": "inherit"}
+    assert before_agent["contextCompressionEffectivePolicy"]["source"] == "global"
+
+    inherited = agent_directory_service.effective_agent_context_compression_policy(
+        {"contextCompressionPolicy": {"mode": "inherit"}},
+        {
+            "max_token_limit": 32000,
+            "max_compressions_per_session": 20,
+            "levels": {},
+            "summary_chars": {},
+            "preservation": {},
+        },
+        context_window_limit=12000,
+    )
+    assert inherited["maxTokenLimit"] == 32000
+    assert inherited["effectiveTokenLimit"] == 12000
+
+    response = client.patch(
+        f"/api/agents/{agent['agentId']}",
+        json={
+            "contextCompressionPolicy": {
+                "mode": "custom",
+                "enabled": False,
+                "maxTokenLimit": 9000,
+                "maxCompressionsPerSession": 4,
+                "levels": {"light": 0.5, "standard": 0.7, "deep": 0.85, "emergency": 0.93},
+                "summaryChars": {"light": 400, "standard": 800, "deep": 1200, "emergency": 1600},
+                "preservation": {
+                    "keepAiMessages": 3,
+                    "preserveErrors": True,
+                    "extractKeyDecisions": False,
+                },
+            }
+        },
+    )
+
+    assert response.status_code == 200
+    updated = response.json()
+    assert updated["contextCompressionPolicy"]["mode"] == "custom"
+    assert updated["contextCompressionPolicy"]["enabled"] is False
+    assert updated["contextCompressionEffectivePolicy"]["source"] == "agent_custom"
+    assert updated["contextCompressionEffectivePolicy"]["effectiveTokenLimit"] == 9000
+    assert updated["contextCompressionEffectivePolicy"]["levels"]["standard"] == 0.7
+    assert updated["contextCompressionEffectivePolicy"]["summaryChars"]["deep"] == 1200
+    assert updated["contextCompressionEffectivePolicy"]["preservation"]["extractKeyDecisions"] is False
+
+    workspace_after = agent_config_workspace_service.get_agent_config_workspace()
+    workspace_agent = next(item for item in workspace_after["agents"] if item["agentId"] == agent["agentId"])
+    assert workspace_agent["contextCompressionEffectivePolicy"]["source"] == "agent_custom"
+    assert workspace_agent["contextCompressionEffectivePolicy"]["maxCompressionsPerSession"] == 4
+
+    stored = agent_directory_service.get_agent(agent["agentId"])
+    assert stored["contextCompressionPolicy"]["mode"] == "custom"
+    assert stored["contextCompressionPolicy"]["maxTokenLimit"] == 9000
+
+
 def test_agent_directory_reuses_repaired_snapshot_for_repeated_reads(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     monkeypatch.setattr(config_service, "get_config_workspace", _fake_config_workspace)

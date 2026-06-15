@@ -69,7 +69,15 @@ class CompressionStrategy:
     根据当前 Token 使用情况和压缩次数，智能选择压缩策略。
     """
 
-    def __init__(self, thresholds: Optional[CompressionThresholds] = None):
+    def __init__(
+        self,
+        thresholds: Optional[CompressionThresholds] = None,
+        *,
+        summary_chars: Optional[dict[str, int]] = None,
+        keep_ai_messages: Optional[int] = None,
+        preserve_errors: Optional[bool] = None,
+        extract_key_decisions: Optional[bool] = None,
+    ):
         """
         初始化压缩策略管理器
 
@@ -83,30 +91,36 @@ class CompressionStrategy:
             from config import get_config
             cfg = get_config()
             cc = cfg.context_compression
-            self._summary_chars = {
-                CompressionLevel.LIGHT: cc.summary_chars.light,
-                CompressionLevel.STANDARD: cc.summary_chars.standard,
-                CompressionLevel.DEEP: cc.summary_chars.deep,
-                CompressionLevel.EMERGENCY: cc.summary_chars.emergency,
+            source_summary_chars = summary_chars or {
+                "light": cc.summary_chars.light,
+                "standard": cc.summary_chars.standard,
+                "deep": cc.summary_chars.deep,
+                "emergency": cc.summary_chars.emergency,
             }
+            self._summary_chars = _summary_chars_by_level(source_summary_chars)
+            base_keep_ai_messages = int(keep_ai_messages if keep_ai_messages is not None else cc.preservation.keep_ai_messages)
+            self._preserve_errors = bool(
+                preserve_errors if preserve_errors is not None else cc.preservation.preserve_errors
+            )
+            self._extract_key_decisions = bool(
+                extract_key_decisions if extract_key_decisions is not None else cc.preservation.extract_key_decisions
+            )
             self._keep_ai_messages = {
-                CompressionLevel.LIGHT: cc.preservation.keep_ai_messages,
-                CompressionLevel.STANDARD: max(cc.preservation.keep_ai_messages - 2, 1),
-                CompressionLevel.DEEP: max(cc.preservation.keep_ai_messages - 3, 1),
+                CompressionLevel.LIGHT: base_keep_ai_messages,
+                CompressionLevel.STANDARD: max(base_keep_ai_messages - 2, 1),
+                CompressionLevel.DEEP: max(base_keep_ai_messages - 3, 1),
                 CompressionLevel.EMERGENCY: 1,
             }
         except Exception:
             # 兜底默认值
-            self._summary_chars = {
-                CompressionLevel.LIGHT: 500,
-                CompressionLevel.STANDARD: 1000,
-                CompressionLevel.DEEP: 2000,
-                CompressionLevel.EMERGENCY: 3000,
-            }
+            self._summary_chars = _summary_chars_by_level(summary_chars or {})
+            base_keep_ai_messages = int(keep_ai_messages if keep_ai_messages is not None else 5)
+            self._preserve_errors = bool(preserve_errors if preserve_errors is not None else True)
+            self._extract_key_decisions = bool(extract_key_decisions if extract_key_decisions is not None else True)
             self._keep_ai_messages = {
-                CompressionLevel.LIGHT: 5,
-                CompressionLevel.STANDARD: 3,
-                CompressionLevel.DEEP: 2,
+                CompressionLevel.LIGHT: base_keep_ai_messages,
+                CompressionLevel.STANDARD: max(base_keep_ai_messages - 2, 1),
+                CompressionLevel.DEEP: max(base_keep_ai_messages - 3, 1),
                 CompressionLevel.EMERGENCY: 1,
             }
 
@@ -132,8 +146,8 @@ class CompressionStrategy:
             summary_max_chars=self._summary_chars.get(level, 1000),
             keep_ai_messages=self._keep_ai_messages.get(level, 3),
             keep_tool_results=True,
-            extract_key_decisions=level in (CompressionLevel.STANDARD, CompressionLevel.DEEP),
-            preserve_errors=True,
+            extract_key_decisions=self._extract_key_decisions and level in (CompressionLevel.STANDARD, CompressionLevel.DEEP),
+            preserve_errors=self._preserve_errors,
             preserve_system_prompt=True,
         )
 
@@ -322,6 +336,11 @@ _strategy_instance: Optional[CompressionStrategy] = None
 
 def get_compression_strategy(
     thresholds: Optional[CompressionThresholds] = None,
+    *,
+    summary_chars: Optional[dict[str, int]] = None,
+    keep_ai_messages: Optional[int] = None,
+    preserve_errors: Optional[bool] = None,
+    extract_key_decisions: Optional[bool] = None,
 ) -> CompressionStrategy:
     """
     获取压缩策略管理器单例
@@ -333,9 +352,31 @@ def get_compression_strategy(
         压缩策略管理器实例
     """
     global _strategy_instance
-    if _strategy_instance is None or thresholds is not None:
-        _strategy_instance = CompressionStrategy(thresholds)
+    if (
+        _strategy_instance is None
+        or thresholds is not None
+        or summary_chars is not None
+        or keep_ai_messages is not None
+        or preserve_errors is not None
+        or extract_key_decisions is not None
+    ):
+        _strategy_instance = CompressionStrategy(
+            thresholds,
+            summary_chars=summary_chars,
+            keep_ai_messages=keep_ai_messages,
+            preserve_errors=preserve_errors,
+            extract_key_decisions=extract_key_decisions,
+        )
     return _strategy_instance
+
+
+def _summary_chars_by_level(summary_chars: dict[str, int]) -> dict[CompressionLevel, int]:
+    return {
+        CompressionLevel.LIGHT: int(summary_chars.get("light") or 500),
+        CompressionLevel.STANDARD: int(summary_chars.get("standard") or 1000),
+        CompressionLevel.DEEP: int(summary_chars.get("deep") or 2000),
+        CompressionLevel.EMERGENCY: int(summary_chars.get("emergency") or 3000),
+    }
 
 
 def reset_compression_strategy() -> None:

@@ -1,11 +1,7 @@
 name: CI
 
 on:
-  pull_request:
-  push:
-    branches:
-      - main
-      - master
+  # Manual only: automatic push/PR CI is disabled to avoid consuming GitHub Actions minutes.
   workflow_dispatch:
 
 concurrency:

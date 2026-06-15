@@ -102,6 +102,8 @@ from tools.token_manager import (
 )
 from tools.compression_strategy import (
     CompressionLevel,
+    CompressionStrategy,
+    CompressionThresholds,
     get_compression_strategy,
 )
 from tools.memory_tools import get_current_goal
@@ -575,9 +577,12 @@ class SelfEvolvingAgent:
         }
         _record_agent_tool_surface_event(sorted(self.key_tool_maps))
         self._bound_llm_cache: Dict[str, Any] = {}
+        self._context_compression_policy: Dict[str, Any] = {}
+        self._compression_strategy: Optional[CompressionStrategy] = None
 
         # 模型动态发现
         self._effective_max_token_limit = self._init_model_discovery()
+        self._apply_runtime_agent_context_compression_policy()
         # LLM 初始化（使用工厂）
         self._init_llm()
         # Token 压缩器
@@ -853,6 +858,102 @@ class SelfEvolvingAgent:
         except Exception:
             pass
         return self._effective_max_token_limit
+
+    def _apply_runtime_agent_context_compression_policy(self) -> None:
+        """Apply the bound Agent's context-compression policy to this runtime instance."""
+
+        agent_id = str(self.runtime_agent_binding.get("agentId") or "").strip()
+        if not agent_id:
+            return
+        try:
+            from core.web.services import agent_directory_service
+
+            agent = agent_directory_service.get_agent(agent_id, include_archived=False)
+            if not isinstance(agent, dict) or not agent:
+                return
+            policy = agent_directory_service.effective_agent_context_compression_policy(
+                agent,
+                self.config.context_compression,
+                context_window_limit=int(getattr(self, "_context_window_limit", 0) or 0),
+            )
+        except Exception as exc:
+            _record_agent_scene_event(
+                "startup",
+                "agent.context_compression_policy_failed",
+                message="运行时 Agent 上下文压缩策略解析失败，继续使用全局策略。",
+                level="warning",
+                outcome="fallback",
+                fields={
+                    "agentId": agent_id,
+                    "errorType": type(exc).__name__,
+                    "errorPreview": str(exc)[:300],
+                },
+            )
+            return
+
+        self.config = copy.deepcopy(self.config)
+        cc = self.config.context_compression
+        effective_limit = int(policy.get("effectiveTokenLimit") or getattr(cc, "max_token_limit", 0) or 0)
+        if effective_limit > 0:
+            cc.max_token_limit = effective_limit
+            self._effective_max_token_limit = effective_limit
+        cc.enabled = bool(policy.get("enabled", getattr(cc, "enabled", True)))
+        max_compressions = policy.get("maxCompressionsPerSession")
+        cc.max_compressions_per_session = int(
+            max_compressions
+            if max_compressions is not None
+            else getattr(cc, "max_compressions_per_session", 20) or 20
+        )
+        levels = policy.get("levels") if isinstance(policy.get("levels"), dict) else {}
+        for key in ("light", "standard", "deep", "emergency"):
+            if key in levels:
+                setattr(cc.levels, key, float(levels[key]))
+        summary_chars = policy.get("summaryChars") if isinstance(policy.get("summaryChars"), dict) else {}
+        for key in ("light", "standard", "deep", "emergency"):
+            if key in summary_chars:
+                setattr(cc.summary_chars, key, int(summary_chars[key]))
+        preservation = policy.get("preservation") if isinstance(policy.get("preservation"), dict) else {}
+        if "keepAiMessages" in preservation:
+            cc.preservation.keep_ai_messages = int(preservation.get("keepAiMessages") or 0)
+        if "preserveErrors" in preservation:
+            cc.preservation.preserve_errors = bool(preservation.get("preserveErrors"))
+        if "extractKeyDecisions" in preservation:
+            cc.preservation.extract_key_decisions = bool(preservation.get("extractKeyDecisions"))
+
+        self._context_compression_policy = dict(policy)
+        keep_ai_messages = (policy.get("preservation") or {}).get("keepAiMessages")
+        if keep_ai_messages is None:
+            keep_ai_messages = getattr(cc.preservation, "keep_ai_messages", 5) or 5
+        self._compression_strategy = CompressionStrategy(
+            CompressionThresholds(
+                light_threshold=float(getattr(cc.levels, "light", 0.6)),
+                standard_threshold=float(getattr(cc.levels, "standard", 0.8)),
+                deep_threshold=float(getattr(cc.levels, "deep", 0.9)),
+                emergency_threshold=float(getattr(cc.levels, "emergency", 0.95)),
+            ),
+            summary_chars=dict(policy.get("summaryChars") or {}),
+            keep_ai_messages=int(keep_ai_messages),
+            preserve_errors=bool((policy.get("preservation") or {}).get("preserveErrors", getattr(cc.preservation, "preserve_errors", True))),
+            extract_key_decisions=bool(
+                (policy.get("preservation") or {}).get(
+                    "extractKeyDecisions",
+                    getattr(cc.preservation, "extract_key_decisions", True),
+                )
+            ),
+        )
+        _record_agent_scene_event(
+            "startup",
+            "agent.context_compression_policy_applied",
+            message="运行时 Agent 上下文压缩策略已应用。",
+            fields={
+                "agentId": agent_id,
+                "policyMode": str(policy.get("mode") or "inherit"),
+                "policySource": str(policy.get("source") or "global"),
+                "enabled": bool(policy.get("enabled", True)),
+                "effectiveTokenLimit": self._effective_max_token_limit,
+                "contextWindowLimit": int(getattr(self, "_context_window_limit", 0) or 0),
+            },
+        )
 
     def _init_llm(self):
         """初始化统一 LLM client。"""
@@ -1284,7 +1385,7 @@ class SelfEvolvingAgent:
         budget = self._effective_max_token_limit
 
         # 确定压缩级别
-        strategy = get_compression_strategy()
+        strategy = getattr(self, "_compression_strategy", None) or get_compression_strategy()
         level = strategy.determine_level_with_iteration(
             current_tokens, budget, iteration, self._compression_count_this_turn
         )

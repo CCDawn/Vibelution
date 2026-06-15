@@ -4,7 +4,7 @@
 import pytest
 
 from core.infrastructure.tool_recommender import decide_next_tools
-from core.infrastructure.tool_intents import TOOL_INTENTS, humanize_tool_name
+from core.infrastructure.tool_intents import TOOL_INTENTS, get_tool_intent, humanize_tool_name
 from tools.Key_Tools import create_llm_facing_tools
 
 pytestmark = pytest.mark.serial
@@ -28,6 +28,21 @@ LEGACY_AGENT_TOOL_NAMES = {
 }
 
 
+def _bind_visible_tools(monkeypatch, visible_tools):
+    from core.web.services import agent_directory_service
+
+    monkeypatch.setattr(
+        agent_directory_service,
+        "current_agent_runtime",
+        lambda: {"agentId": "agent-test"},
+    )
+    monkeypatch.setattr(
+        agent_directory_service,
+        "effective_visible_tool_names_for_current_agent",
+        lambda _tools=None: list(visible_tools),
+    )
+
+
 def test_locate_defaults_to_search_then_symbol():
     decision = decide_next_tools({
         "reading_task": "locate",
@@ -44,13 +59,18 @@ def test_locate_defaults_to_search_then_symbol():
     assert "cli_tool" in decision.avoid_tools
 
 
-def test_tool_intents_recommend_only_llm_facing_canonical_tools():
-    visible_names = {tool.name for tool in create_llm_facing_tools()}
+def test_tool_intents_recommend_only_llm_facing_canonical_tools(monkeypatch):
+    _bind_visible_tools(monkeypatch, {tool.name for tool in create_llm_facing_tools()})
 
-    for intent in TOOL_INTENTS.values():
+    visible_names = {tool.name for tool in create_llm_facing_tools()}
+    for name in TOOL_INTENTS:
+        intent = get_tool_intent(name)
+        assert intent is not None
         recommended = set(intent.recommended_tools)
         assert not (recommended & LEGACY_AGENT_TOOL_NAMES)
         assert recommended <= visible_names
+
+
 
     for legacy_name in LEGACY_AGENT_TOOL_NAMES:
         assert humanize_tool_name(legacy_name) == legacy_name
