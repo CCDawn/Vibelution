@@ -1076,8 +1076,9 @@ def _find_related_terminal_state(
         return {}
     candidates.sort(
         key=lambda item: (
+            not bool(item.get("userClosed")) and str(item.get("status") or "").strip().lower() != "closed",
+            bool(item.get("alive")) or str(item.get("status") or "").strip().lower() == "running",
             bool(str(item.get("cliSessionId") or "").strip()),
-            not bool(item.get("userClosed")),
             _timestamp_sort_key(str(item.get("updatedAt") or item.get("createdAt") or "")),
         ),
         reverse=True,
@@ -1875,6 +1876,7 @@ def _terminal_interaction_fields(state: dict[str, Any]) -> dict[str, Any]:
     alive = bool(state.get("alive"))
     cli_session_id = str(state.get("cliSessionId") or "").strip()
     user_closed = bool(state.get("userClosed"))
+    tui_state = _infer_terminal_tui_state(state)
     state_reason = (
         str(state.get("staleReason") or "").strip()
         or str(state.get("closeReason") or "").strip()
@@ -1890,6 +1892,7 @@ def _terminal_interaction_fields(state: dict[str, Any]) -> dict[str, Any]:
             "resumeAction": "none",
             "displayMode": "live_terminal",
             "stateReason": "runtime_alive",
+            "tuiState": tui_state,
         }
     if user_closed or status == "closed":
         return {
@@ -1900,6 +1903,7 @@ def _terminal_interaction_fields(state: dict[str, Any]) -> dict[str, Any]:
             "resumeAction": "none",
             "displayMode": "readonly_replay",
             "stateReason": state_reason,
+            "tuiState": tui_state,
         }
     if status in {"stale", "stopped", "exited"} and cli_session_id:
         return {
@@ -1910,6 +1914,7 @@ def _terminal_interaction_fields(state: dict[str, Any]) -> dict[str, Any]:
             "resumeAction": "resume_session",
             "displayMode": "readonly_replay",
             "stateReason": state_reason,
+            "tuiState": tui_state,
         }
     return {
         "interactionState": "history",
@@ -1919,7 +1924,25 @@ def _terminal_interaction_fields(state: dict[str, Any]) -> dict[str, Any]:
         "resumeAction": "start_new",
         "displayMode": "readonly_replay",
         "stateReason": state_reason,
+        "tuiState": tui_state,
     }
+
+
+def _infer_terminal_tui_state(state: dict[str, Any]) -> str:
+    text = str(state.get("screenText") or state.get("transcriptTail") or "").strip()
+    lowered = text.lower()
+    status = str(state.get("status") or "").strip().lower()
+    if bool(state.get("userClosed")) or status == "closed":
+        return "closed"
+    if "interrupted" in lowered or "已中断" in text or "中断" in text:
+        return "interrupted"
+    if "vibelution_cli_done:" in lowered or "已完成" in text or status in {"completed", "done"}:
+        return "task_done"
+    if bool(state.get("alive")) and status not in {"closed", "stale", "stopped", "exited"}:
+        return "live"
+    if status in {"stale", "stopped", "exited"}:
+        return "history"
+    return status or "unknown"
 
 
 def _terminal_not_running_details(terminal_session_id: str) -> dict[str, Any]:
@@ -1937,6 +1960,7 @@ def _terminal_not_running_details(terminal_session_id: str) -> dict[str, Any]:
             "resumeAction": "none",
             "displayMode": "readonly_replay",
             "stateReason": "not_found",
+            "tuiState": "missing",
         }
         return details
     public_state = _public_state({**state, "alive": False})
@@ -1952,6 +1976,7 @@ def _terminal_not_running_details(terminal_session_id: str) -> dict[str, Any]:
         "resumeAction",
         "displayMode",
         "stateReason",
+        "tuiState",
     }
     return {key: public_state.get(key) for key in keys if key in public_state}
 
@@ -2008,6 +2033,7 @@ def _public_state(state: dict[str, Any]) -> dict[str, Any]:
         "resumeAction",
         "displayMode",
         "stateReason",
+        "tuiState",
         "createdAt",
         "updatedAt",
     }

@@ -548,9 +548,9 @@ def _parse_diff_blocks(diff_text: str) -> List[Tuple[str, str]]:
             if line.startswith('- '):
                 if new_lines:
                     flush_current_block()
-                old_lines.append(line[2:].strip())
+                old_lines.append(line[2:])
             elif line.startswith('+ '):
-                new_lines.append(line[2:].strip())
+                new_lines.append(line[2:])
             else:
                 flush_current_block()
         
@@ -643,15 +643,31 @@ def _parse_patch_update_operations(diff_text: str) -> List[Tuple[str, str, str]]
         if line.startswith("- "):
             if new_lines:
                 flush_current_block()
-            old_lines.append(line[2:].strip())
+            old_lines.append(line[2:])
             continue
         if line.startswith("+ "):
-            new_lines.append(line[2:].strip())
+            new_lines.append(line[2:])
             continue
 
         flush_current_block()
 
     return operations
+
+
+def _validate_python_after_diff(path: Path, content: str) -> Optional[str]:
+    """Return a readable syntax error if a Python edit would corrupt the file."""
+    if path.suffix.lower() != ".py":
+        return None
+    try:
+        compile(content, str(path), "exec")
+    except SyntaxError as exc:
+        location = f"{exc.lineno}:{exc.offset}" if exc.lineno else "unknown"
+        line = (exc.text or "").strip()
+        return (
+            f"Python 语法校验失败 - {exc.msg} ({location})"
+            + (f"\n[错误行] {line}" if line else "")
+        )
+    return None
 
 
 def apply_diff_edit(file_path: str, diff_text: str, allow_fuzzy: bool = False) -> str:
@@ -728,9 +744,6 @@ def apply_diff_edit(file_path: str, diff_text: str, allow_fuzzy: bool = False) -
             match_pos = _find_match_position(new_content, search_block, allow_fuzzy=True)
 
         if match_pos is None:
-            match_pos = _find_match_position(new_content, search_block, allow_fuzzy=True)
-
-        if match_pos is None:
             similar = _find_similar_snippet(new_content, search_block)
             return (
                 f"[编辑] 错误: 在文件中找不到匹配的代码块\n\n"
@@ -742,6 +755,13 @@ def apply_diff_edit(file_path: str, diff_text: str, allow_fuzzy: bool = False) -
         start_pos, end_pos = match_pos
         new_content = new_content[:start_pos] + replace_block + new_content[end_pos:]
         changes_made.append(f"块 {idx + 1}: 替换成功")
+
+    syntax_error = _validate_python_after_diff(path, new_content)
+    if syntax_error:
+        return (
+            f"[编辑] 错误: {syntax_error}\n"
+            "已取消写入；请重新生成更小、更精确的 SEARCH/REPLACE 块。"
+        )
 
     try:
         with open(path, 'w', encoding='utf-8', newline='') as f:
