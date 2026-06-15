@@ -809,8 +809,7 @@
 }
 
 .featureChipActive {
-  border-color: color-mix(in srgb, var(--accent-cool) 42%, var(--border-soft));
-  background: color-mix(in srgb, var(--accent-cool) 15%, var(--surface-card));
+  border-color: color-mix(in srgb, var(--accent-cool) 34%, var(--border-soft));
   color: var(--fg-primary);
 }
 
@@ -820,8 +819,7 @@
 }
 
 .featureChipPrimary.featureChipActive {
-  border-color: color-mix(in srgb, var(--accent-warm) 46%, var(--border-soft));
-  background: color-mix(in srgb, var(--accent-warm) 16%, var(--surface-card));
+  border-color: color-mix(in srgb, var(--accent-warm) 36%, var(--border-soft));
 }
 
 .featureChipPrimary.featureChipActive span {
