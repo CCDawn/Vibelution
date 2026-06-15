@@ -35,8 +35,10 @@ import { shouldSubmitComposerOnKeydown } from "./composerShortcuts";
 import { COMPOSER_SESSION_REFERENCE_MIME } from "./conversationConstants";
 import {
   buildConversationOperationGroups,
-  ConversationOperation,
-  ConversationOperationKind,
+  buildConversationReActOperationGroups,
+  type ConversationOperation,
+  type ConversationOperationKind,
+  type ConversationReActOperationGroup,
 } from "./conversationOperations";
 import {
   hasResponseBlock,
@@ -1290,6 +1292,66 @@ export function ConversationView({
     ].filter(Boolean);
   }
 
+  function reActGroupTone(group: ConversationReActOperationGroup) {
+    if (group.operations.some((operation) => operationStatusTone(operation) === "failed")) {
+      return "failed";
+    }
+    if (group.operations.some((operation) => operationStatusTone(operation) === "running")) {
+      return "running";
+    }
+    if (group.operations.every((operation) => operationStatusTone(operation) === "done")) {
+      return "done";
+    }
+    return "pending";
+  }
+
+  function reActGroupTitle(group: ConversationReActOperationGroup) {
+    return lang === "zh" ? `第 ${group.index} 轮` : `Pass ${group.index}`;
+  }
+
+  function reActGroupCountLabel(count: number) {
+    if (count <= 1) {
+      return "";
+    }
+    return lang === "zh" ? `${count} 轮` : `${count} passes`;
+  }
+
+  function reActGroupPreview(group: ConversationReActOperationGroup) {
+    const thought = group.operations.find((operation) => operation.kind === "thought" && operation.summary);
+    if (thought?.summary) {
+      return thought.summary;
+    }
+    const concrete = group.operations.find((operation) => operation.kind !== "status" && operation.summary);
+    if (concrete?.summary) {
+      return concrete.summary;
+    }
+    return group.operations.find((operation) => operation.summary)?.summary ?? "";
+  }
+
+  function reActGroupSummaryItems(group: ConversationReActOperationGroup) {
+    const tone = reActGroupTone(group);
+    const active = group.operations.find((operation) => isRunningOperationStatus(operation.status));
+    const failed = group.operations.find((operation) => operationStatusTone(operation) === "failed");
+    const focus = active ?? failed ?? group.operations.find((operation) => operation.kind === "thought") ?? group.operations[0];
+    const stateLabel = tone === "running"
+      ? lang === "zh" ? "执行中" : "Running"
+      : tone === "failed"
+        ? lang === "zh" ? "执行失败" : "Failed"
+        : tone === "done"
+          ? lang === "zh" ? "已完成" : "Done"
+          : lang === "zh" ? "待处理" : "Pending";
+    return [
+      stateLabel,
+      focus ? operationLabel(focus) : "",
+      operationStepCountLabel(group.operations.length),
+    ].filter(Boolean);
+  }
+
+  function shouldExpandReActGroupByDefault(group: ConversationReActOperationGroup) {
+    const tone = reActGroupTone(group);
+    return tone === "running" || tone === "failed" || tone === "pending";
+  }
+
   function hasOperationDetails(operation: ConversationOperation) {
     return Boolean(
       Object.keys(operation.arguments ?? {}).length
@@ -1509,6 +1571,8 @@ export function ConversationView({
           const computerUseResult = renderComputerUseResult(operation);
           const detailToggleTitle = operation.kind === "thought"
             ? detailsExpanded ? t("thoughtProcessVisible") : t("thoughtProcessHidden")
+            : operation.kind === "status"
+              ? detailsExpanded ? t("executionDetailsVisible") : t("executionDetailsHidden")
             : detailsExpanded ? t("toolCallDetailsVisible") : t("toolCallDetailsHidden");
           const operationClassName = [
             styles.operationItem,
@@ -1631,6 +1695,8 @@ export function ConversationView({
             const computerUseResult = renderComputerUseResult(operation);
             const detailToggleTitle = operation.kind === "thought"
               ? detailsExpanded ? t("thoughtProcessVisible") : t("thoughtProcessHidden")
+              : operation.kind === "status"
+                ? detailsExpanded ? t("executionDetailsVisible") : t("executionDetailsHidden")
               : detailsExpanded ? t("toolCallDetailsVisible") : t("toolCallDetailsHidden");
             const tone = operationStatusTone(operation);
             return (
@@ -1696,6 +1762,40 @@ export function ConversationView({
     );
   }
 
+  function renderReActOperationGroup(messageId: string, group: ConversationReActOperationGroup) {
+    if (group.operations.length === 0) {
+      return null;
+    }
+    const sectionId = `feedback-react-${group.id}`;
+    const defaultExpanded = shouldExpandReActGroupByDefault(group);
+    const expanded = getExpansionState(messageId, sectionId, defaultExpanded);
+    const tone = reActGroupTone(group);
+    const summaryItems = reActGroupSummaryItems(group);
+    const preview = reActGroupPreview(group);
+    const label = reActGroupTitle(group);
+    return (
+      <section className={`${styles.reActOperationGroup} ${styles[`reActOperationGroup_${tone}`]}`}>
+        <button
+          type="button"
+          className={styles.reActOperationSummary}
+          aria-expanded={expanded}
+          onClick={() => toggleSection(messageId, sectionId, defaultExpanded)}
+          title={expanded ? t("executionDetailsVisible") : t("executionDetailsHidden")}
+        >
+          <span className={styles.reActOperationBadge}>{label}</span>
+          {summaryItems.length > 0 ? (
+            <span className={styles.reActOperationMeta}>
+              {summaryItems.join(" · ")}
+            </span>
+          ) : null}
+          {!expanded && preview ? <span className={styles.reActOperationPreview}>{preview}</span> : null}
+          {expanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+        </button>
+        {expanded ? renderFeedbackOperationTable(group.operations) : null}
+      </section>
+    );
+  }
+
   function renderOperationGroup(
     messageId: string,
     section: "thought" | "mental" | "tools",
@@ -1748,18 +1848,23 @@ export function ConversationView({
     if (operations.length === 0) {
       return null;
     }
-    const expanded = getExpansionState(messageId, "feedback", defaultExpanded);
+    const reActGroups = buildConversationReActOperationGroups(operations);
+    const defaultTimelineExpanded = defaultExpanded || reActGroups.some((group) => shouldExpandReActGroupByDefault(group));
+    const expanded = getExpansionState(messageId, "feedback", defaultTimelineExpanded);
     const title = operationTimelineTitle(operations);
     const progress = operationProgressMeta(operations);
     const summaryItems = operationProgressSummaryItems(progress, operations.length);
-    const stepCount = operationStepCountLabel(operations.length);
+    const stepCount = [
+      operationStepCountLabel(operations.length),
+      reActGroupCountLabel(reActGroups.length),
+    ].filter(Boolean).join(" · ");
     return (
       <section className={`${styles.operationGroup} ${styles.executionTraceGroup}`}>
         <button
           type="button"
           className={styles.operationSummary}
           aria-expanded={expanded}
-          onClick={() => toggleSection(messageId, "feedback", defaultExpanded)}
+          onClick={() => toggleSection(messageId, "feedback", defaultTimelineExpanded)}
           title={expanded ? t("executionDetailsVisible") : t("executionDetailsHidden")}
         >
           {operationIcon(operations[0]?.kind ?? "tool", title)}
@@ -1782,7 +1887,13 @@ export function ConversationView({
         {expanded ? (
           <>
             {renderOperationProgressRail(operations)}
-            {renderFeedbackOperationTable(operations, { limitInitialRows: true })}
+            <div className={styles.reActOperationList}>
+              {reActGroups.map((group) => (
+                <div key={group.id}>
+                  {renderReActOperationGroup(messageId, group)}
+                </div>
+              ))}
+            </div>
           </>
         ) : null}
       </section>
