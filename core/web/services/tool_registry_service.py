@@ -24,6 +24,7 @@ from config.settings import reload_config
 from core.infrastructure.image_model_discovery import resolve_image_model, should_discover_image_model
 from core.infrastructure.llm_utils import parse_tool_args
 from core.orchestration.tool_lifecycle import ToolLifecycleBridge
+from core.logging import debug as _debug_logger
 from core.web.services.tool_catalog import bundle_ids_for_tool, explicit_allow_tool_names, list_tool_bundles, metadata_for_tool
 from core.infrastructure.tool_result import infer_tool_business_success
 
@@ -510,6 +511,10 @@ def _test_safe_builtin_tool(
         try:
             result_text = result.decode("utf-8", errors="replace")
         except Exception:
+            _debug_logger.warning(
+                f"[工具注册] 安全内置工具结果解码失败: tool={tool_name}, resultType={type(result).__name__}",
+                tag="TOOL_REGISTRY",
+            )
             result_text = str(result)
     else:
         result_text = str(result if result is not None else "")
@@ -619,6 +624,10 @@ def _tool_test_agent_summary(agent_id: str | None) -> dict[str, Any]:
     except ToolRegistryError:
         raise
     except Exception as exc:
+        _debug_logger.warning(
+            f"[工具注册] Agent 汇总失败: agentId={normalized}, {type(exc).__name__}: {exc}",
+            tag="TOOL_REGISTRY",
+        )
         raise ToolRegistryError(f"Unable to resolve Agent for tool test: {type(exc).__name__}") from exc
 
 
@@ -637,6 +646,10 @@ def _agent_policy_test_block(tool_name: str, args: dict[str, Any], agent: dict[s
             agent_id=agent_id,
         )
     except Exception as exc:
+        _debug_logger.warning(
+            f"[工具注册] ToolPolicy 检查失败: tool={tool_name}, agent={agent_id}, {type(exc).__name__}: {exc}",
+            tag="TOOL_REGISTRY",
+        )
         return f"[工具策略提示] 当前工具测试无法验证该 Agent 的 ToolPolicy: {type(exc).__name__}。"
     if getattr(decision, "allowed", True):
         return ""
@@ -861,7 +874,11 @@ def _record_completed_tool_test(
 def _effective_tool_test_timeout() -> float:
     try:
         timeout = float(TOOL_TEST_TIMEOUT_SECONDS)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError) as exc:
+        _debug_logger.warning(
+            f"[工具注册] 测试超时配置解析失败: raw={TOOL_TEST_TIMEOUT_SECONDS}, {type(exc).__name__}: {exc}",
+            tag="TOOL_REGISTRY",
+        )
         timeout = 3.0
     return max(0.01, min(timeout, 10.0))
 
@@ -891,6 +908,10 @@ def _build_tool_message_compatibility(
     try:
         ToolLifecycleBridge.handle_tool_result(tool_call, result_text, None, messages)
     except Exception as exc:
+        _debug_logger.warning(
+            f"[工具注册] 工具兼容性转换失败: tool={tool_name}, resultType={type(result_text).__name__}, {type(exc).__name__}: {exc}",
+            tag="TOOL_REGISTRY",
+        )
         return _agent_compatibility_result(
             status="failed",
             callable=False,
@@ -1222,7 +1243,11 @@ def _readonly_subagent_block_reason(tool_name: str) -> str:
         from core.infrastructure.tool_executor import ToolExecutor
 
         blocked_tools = ToolExecutor._READ_ONLY_BLOCKED_TOOLS
-    except Exception:
+    except Exception as exc:
+        _debug_logger.warning(
+            f"[工具注册] 读取只读子代理白名单失败: tool={normalized}, {type(exc).__name__}: {exc}",
+            tag="TOOL_REGISTRY",
+        )
         blocked_tools = set()
     if normalized not in blocked_tools:
         return ""
@@ -1298,7 +1323,11 @@ def _load_generated_tools() -> list[dict[str, Any]]:
         payload = json.loads(GENERATED_TOOLS_PATH.read_text(encoding="utf-8-sig"))
     except FileNotFoundError:
         return []
-    except json.JSONDecodeError:
+    except json.JSONDecodeError as exc:
+        _debug_logger.warning(
+            f"[工具注册] 生成工具配置 JSON 解析失败: path={GENERATED_TOOLS_PATH}, {type(exc).__name__}: {exc}",
+            tag="TOOL_REGISTRY",
+        )
         return []
     rows = payload.get("tools") if isinstance(payload, dict) else payload
     if not isinstance(rows, list):
@@ -1422,7 +1451,11 @@ def _read_registry_env_var(name: str) -> str:
         from config.models import _read_env_var
 
         return str(_read_env_var(token) or "")
-    except Exception:
+    except Exception as exc:
+        _debug_logger.warning(
+            f"[工具注册] image2 环境变量读取失败，回退系统环境: env={token}, {type(exc).__name__}: {exc}",
+            tag="TOOL_REGISTRY",
+        )
         return str(os.environ.get(token) or "")
 
 
@@ -1492,7 +1525,11 @@ def _record_registry_event(
                 **(fields or {}),
             },
         )
-    except Exception:
+    except Exception as exc:
+        _debug_logger.warning(
+            f"[工具注册] 记录 registry runtime scene 失败: event={event_code}, toolId={tool_id}, {type(exc).__name__}: {exc}",
+            tag="TOOL_REGISTRY",
+        )
         return
 
 

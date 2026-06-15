@@ -133,7 +133,8 @@ class ResponseSurfaceController:
                 token_ratio=token_ratio,
                 iteration=iteration,
             )
-        except Exception:
+        except Exception as exc:
+            self._debug_logger.warning(f"[响应感知] 构建工具感知 block 失败: {type(exc).__name__}: {exc}")
             return ""
 
     def apply_state_feedback(
@@ -241,7 +242,8 @@ class ResponseSurfaceController:
                 pet = self._pet_getter()
                 pet.record_tokens(input_tokens, output_tokens)
                 pet.trigger_heartbeat()
-            except Exception:
+            except Exception as exc:
+                self._debug_logger.warning(f"[响应感知] PET 记录 token 心跳失败: {type(exc).__name__}: {exc}")
                 pass
             ui.note_token_usage(
                 input_tokens,

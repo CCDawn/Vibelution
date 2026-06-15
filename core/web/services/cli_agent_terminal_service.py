@@ -18,6 +18,7 @@ from typing import Any
 from . import cli_agent_service
 from . import cli_agent_task_kernel
 from .terminal_screen_buffer import TerminalScreenBuffer, TerminalScreenSnapshot
+from core.logging import debug as _debug_logger
 
 try:  # pragma: no cover - availability is platform/package dependent
     from winpty import PtyProcess
@@ -141,8 +142,11 @@ class _TerminalRuntime:
                     self.process.terminate()
             else:
                 self.process.terminate()
-        except Exception:
-            pass
+        except Exception as exc:
+            _debug_logger.warning(
+                f"Failed to terminate terminal process (transport={self.transport}): {exc}",
+                tag="cli_terminal_process_stop",
+            )
 
     def is_alive(self) -> bool:
         try:
@@ -1473,8 +1477,11 @@ def _claude_project_dir_name(cwd: str) -> str:
         return ""
     try:
         text = str(Path(text).resolve())
-    except Exception:
-        pass
+    except Exception as exc:
+        _debug_logger.warning(
+            f"Failed to resolve Claude project directory name for '{text}': {exc}",
+            tag="cli_terminal_path_resolve",
+        )
     text = text.replace("\\", "/").rstrip("/")
     return re.sub(r"[^A-Za-z0-9._-]", "-", text).strip("-")
 
@@ -1491,8 +1498,11 @@ def _normalize_path_for_match(value: str) -> str:
         return ""
     try:
         text = str(Path(text).resolve())
-    except Exception:
-        pass
+    except Exception as exc:
+        _debug_logger.warning(
+            f"Failed to normalize path for matching for '{text}': {exc}",
+            tag="cli_terminal_path_normalize",
+        )
     return text.replace("\\", "/").rstrip("/").lower()
 
 

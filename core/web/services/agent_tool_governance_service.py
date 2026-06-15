@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from core.chat.chat_task_types import trim_lines
+from core.logging import debug as _debug_logger
 
 from . import agent_directory_service
 from .runtime_scene_service import record_runtime_scene_event
@@ -642,7 +643,11 @@ def _read_requests(agent: dict[str, Any]) -> list[dict[str, Any]]:
             continue
         try:
             payload = json.loads(line)
-        except json.JSONDecodeError:
+        except json.JSONDecodeError as exc:
+            _debug_logger.warning(
+                f"[工具治理] 治理事件日志 JSON 解析失败: path={path}, {type(exc).__name__}: {exc}",
+                tag="TOOL_GOVERNANCE",
+            )
             continue
         if isinstance(payload, dict):
             items.append(payload)
@@ -693,5 +698,9 @@ def _record_tool_governance_event(event_code: str, request: dict[str, Any], *, o
             },
             lifecycle=True,
         )
-    except Exception:
+    except Exception as exc:
+        _debug_logger.warning(
+            f"[工具治理] 记录 runtime scene 失败: event={event_code}, target={request.get('targetAgentId')}, {type(exc).__name__}: {exc}",
+            tag="TOOL_GOVERNANCE",
+        )
         return

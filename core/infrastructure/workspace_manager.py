@@ -140,7 +140,9 @@ class WorkspaceManager:
             sv = get_security_validator()
             for d in dirs:
                 sv.path_sandbox.add_allowed_directory(str(d))
-        except Exception:
+        except Exception as exc:
+            from core.logging import debug_logger
+            debug_logger.warning(f"[Workspace] 注册合法目录到安全沙箱失败: {type(exc).__name__}: {exc}")
             pass
 
     def _init_database(self):

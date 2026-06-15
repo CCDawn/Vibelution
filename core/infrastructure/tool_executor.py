@@ -28,6 +28,7 @@ from core.infrastructure.evolution_governor import get_evolution_governor
 from core.infrastructure.llm_utils import parse_tool_args
 from core.infrastructure.tool_recommender import decide_next_tools
 from core.infrastructure.tool_result import extract_tool_result_semantics, infer_tool_business_success
+from core.logging import debug as _debug_logger
 
 
 IMAGE2_TOOL_TIMEOUT_SECONDS = 300
@@ -60,7 +61,8 @@ def _record_tool_scene_event(
             fields=event_fields,
             lifecycle=lifecycle,
         )
-    except Exception:
+    except Exception as exc:
+        _debug_logger.warning(f"[工具场景] 记录 tool scene 事件失败: {type(exc).__name__}: {exc}")
         return
 
 
@@ -118,7 +120,8 @@ def _record_current_agent_tool_observation(tool_name: str, status: str, tool_arg
             summary=summary,
             arg_keys=sorted(str(key) for key in (tool_args or {}).keys() if str(key) != "_cancel_checker"),
         )
-    except Exception:
+    except Exception as exc:
+        _debug_logger.warning(f"[工具观测] 记录当前工具观测失败: {type(exc).__name__}: {exc}")
         return
 
 
@@ -918,7 +921,8 @@ class ToolExecutor:
             from core.web.services.agent_directory_service import evaluate_current_tool_policy
 
             decision = evaluate_current_tool_policy(tool_name, tool_args or {})
-        except Exception:
+        except Exception as exc:
+            _debug_logger.warning(f"[工具策略] 查询当前 tool policy 失败: {type(exc).__name__}: {exc}")
             return None
         if getattr(decision, "allowed", True):
             return None
@@ -982,7 +986,8 @@ class ToolExecutor:
                 context_mode=str((tool_args or {}).get("context_mode") or (tool_args or {}).get("contextMode") or "isolated"),
                 requested_depth=None,
             )
-        except Exception:
+        except Exception as exc:
+            _debug_logger.warning(f"[委托策略] 查询 delegation policy 失败: {type(exc).__name__}: {exc}")
             return None
         if getattr(decision, "allowed", True):
             return None
@@ -1353,8 +1358,8 @@ class ToolExecutor:
                     })
                     on_file_modified(filepath)
                     get_git_memory_service().note_file_modified(filepath)
-        except Exception:
-            pass
+        except Exception as exc:
+            _debug_logger.warning(f"[工具副作用] 文件修改后通知失败: {type(exc).__name__}: {exc}")
 
 
 # 全局工具执行器单例

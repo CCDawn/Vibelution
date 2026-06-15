@@ -18,6 +18,8 @@ import re
 from dataclasses import dataclass
 from typing import Dict, Any, Optional, List
 
+from core.logging import debug as _debug_logger
+
 
 # 默认截断阈值
 DEFAULT_MAX_CHARS = 4000
@@ -76,7 +78,11 @@ def extract_tool_result_semantics(result: Any) -> dict[str, Any]:
     if isinstance(result, (bytes, bytearray)):
         try:
             result = result.decode("utf-8", errors="replace")
-        except Exception:
+        except Exception as exc:
+            _debug_logger.warning(
+                f"[工具结果] bytes 结果转文本失败: {type(result).__name__}: {exc}",
+                tag="TOOL_RESULT",
+            )
             result = str(result)
 
     text = _normalize_text_payload(str(result or ""))
@@ -89,7 +95,11 @@ def extract_tool_result_semantics(result: Any) -> dict[str, Any]:
             if key in payload:
                 try:
                     semantics["exitCode"] = int(payload.get(key))
-                except (TypeError, ValueError):
+                except (TypeError, ValueError) as exc:
+                    _debug_logger.warning(
+                        f"[工具结果] exitCode 解析失败(key={key}, value={payload.get(key)!r}): {type(exc).__name__}: {exc}",
+                        tag="TOOL_RESULT",
+                    )
                     pass
                 break
         if bool(payload.get("timedOut") or payload.get("timed_out")) or status in {"timeout", "timed_out"}:
@@ -106,7 +116,11 @@ def extract_tool_result_semantics(result: Any) -> dict[str, Any]:
         semantics["failureClass"] = "process_exit"
         try:
             semantics["exitCode"] = int(exec_failure_match.group(1))
-        except (TypeError, ValueError):
+        except (TypeError, ValueError) as exc:
+            _debug_logger.warning(
+                f"[工具结果] EXEC FAILURE exitCode 解析失败({exec_failure_match.group(0)}): {type(exc).__name__}: {exc}",
+                tag="TOOL_RESULT",
+            )
             pass
     elif text.startswith(("[执行失败", "[EXEC FAILURE")):
         semantics["semanticStatus"] = "failed"
@@ -164,7 +178,11 @@ def infer_tool_business_success(result: Any) -> bool:
     if isinstance(result, (bytes, bytearray)):
         try:
             decoded = result.decode("utf-8", errors="replace")
-        except Exception:
+        except Exception as exc:
+            _debug_logger.warning(
+                f"[工具结果] 业务成功性检查 decode 失败: {type(result).__name__}: {exc}",
+                tag="TOOL_RESULT",
+            )
             return False
         return infer_tool_business_success(decoded)
     if isinstance(result, dict):
@@ -178,7 +196,11 @@ def infer_tool_business_success(result: Any) -> bool:
         if stripped.startswith("{"):
             try:
                 return not _looks_like_business_failure(json.loads(stripped))
-            except Exception:
+            except Exception as exc:
+                _debug_logger.warning(
+                    f"[工具结果] 工具结果 JSON 解析失败: {type(exc).__name__}: {exc}",
+                    tag="TOOL_RESULT",
+                )
                 return True
     return True
 
@@ -301,7 +323,11 @@ def package_tool_result(
     if isinstance(result, (bytes, bytearray)):
         try:
             result_str = result.decode("utf-8", errors="replace")
-        except Exception:
+        except Exception as exc:
+            _debug_logger.warning(
+                f"[工具结果] 打包结果 decode 失败: {type(result).__name__}: {exc}",
+                tag="TOOL_RESULT",
+            )
             result_str = str(result)
     else:
         result_str = str(result)

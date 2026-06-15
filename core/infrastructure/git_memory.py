@@ -132,14 +132,16 @@ class GitMemoryService:
         """订阅关键运行时事件，保持 Git attention 缓存新鲜。"""
         try:
             self._bus.subscribe(EventNames.VALIDATION_COMPLETED, self._on_validation_completed)
-        except Exception:
+        except Exception as exc:
+            debug_logger.warning(f"[GitMemory] 订阅验证完成事件失败: {type(exc).__name__}: {exc}")
             pass
 
     def _on_validation_completed(self, event: Any) -> None:
         """验证完成后同步 attention cache，写入最近验证摘要。"""
         try:
             self._sync_attention_cache()
-        except Exception:
+        except Exception as exc:
+            debug_logger.warning(f"[GitMemory] 同步 attention cache 失败: {type(exc).__name__}: {exc}")
             pass
 
     def _ensure_tables(self) -> None:
