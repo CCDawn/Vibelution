@@ -1235,6 +1235,21 @@ function agentCenterReturnLabel(value: string | null | undefined, lang: "zh" | "
   if (normalized === "supervised_evolution") {
     return lang === "zh" ? "返回监督进化" : "Back to supervised evolution";
   }
+  if (normalized === "tools") {
+    return lang === "zh" ? "返回工具配置" : "Back to tools";
+  }
+  if (normalized === "teams") {
+    return lang === "zh" ? "返回团队" : "Back to teams";
+  }
+  if (normalized === "chat") {
+    return lang === "zh" ? "返回会话" : "Back to chat";
+  }
+  if (normalized === "memory") {
+    return lang === "zh" ? "返回记忆库" : "Back to memory";
+  }
+  if (normalized === "research_flow") {
+    return lang === "zh" ? "返回科研流程画布" : "Back to research flow";
+  }
   return lang === "zh" ? "返回来源页" : "Back";
 }
 
