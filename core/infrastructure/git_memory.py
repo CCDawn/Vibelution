@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import subprocess
 import threading
 import uuid
 import ast
@@ -9,7 +10,6 @@ from dataclasses import dataclass, asdict
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
-
 from core.infrastructure import git_process
 from core.infrastructure.agent_session import get_session_state
 from core.infrastructure.event_bus import EventNames, get_event_bus

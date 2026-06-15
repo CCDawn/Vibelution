@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, Optional
@@ -160,6 +161,9 @@ class TurnOutcomeController:
 
     @staticmethod
     def has_successful_close_without_restart(messages: list) -> bool:
+        def normalize_status(value: Any) -> str:
+            return str(value or "").lstrip("\ufeff").strip().lower()
+
         close_seen = False
         restart_seen = False
         for msg in messages:
@@ -168,12 +172,47 @@ class TurnOutcomeController:
             if isinstance(content, list):
                 content = "\n".join(str(item) for item in content)
             text = str(content or "")
+            normalized_content_text = text.replace("\ufeff", "")
             if "close_evolution_transaction_tool" in tool_name:
-                close_seen = True
+                payload = None
+                if isinstance(content, str):
+                    try:
+                        parsed = json.loads(text.strip())
+                    except (json.JSONDecodeError, TypeError, ValueError):
+                        parsed = None
+                    else:
+                        if isinstance(parsed, dict):
+                            payload = parsed
+                elif isinstance(content, dict):
+                    payload = content
+                success_statuses = {"success", "ok"}
+                if isinstance(payload, dict):
+                    status = normalize_status(payload.get("status"))
+                    transaction_status = normalize_status(payload.get("transaction_status"))
+                    if status and status not in {"success", "ok"}:
+                        continue
+                    if transaction_status and transaction_status not in success_statuses:
+                        continue
+                    if status in success_statuses or transaction_status in success_statuses:
+                        close_seen = True
+                else:
+                    status_match = re.search(r'"status"\s*:\s*"([^"]+)"', normalized_content_text, re.IGNORECASE)
+                    if status_match:
+                        if normalize_status(status_match.group(1)) in {"success", "ok"}:
+                            close_seen = True
+                        continue
+                    transaction_status_match = re.search(
+                        r'"transaction_status"\s*:\s*"([^"]+)"',
+                        normalized_content_text,
+                        re.IGNORECASE,
+                    )
+                    if (
+                        transaction_status_match
+                        and normalize_status(transaction_status_match.group(1)) in {"success", "ok"}
+                    ):
+                        close_seen = True
             if "trigger_self_restart_tool" in tool_name:
                 restart_seen = True
-            if '"transaction_status": "success"' in text or '"transaction_status":"success"' in text:
-                close_seen = True
             if "重启触发成功" in text or "触发自我重启" in text:
                 restart_seen = True
 

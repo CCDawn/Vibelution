@@ -1998,7 +1998,7 @@ def assess_source_quality_batch(team_id: str, payload: dict[str, Any] | None = N
                     "evidenceRefs": evidence_refs,
                 },
             )
-        except (TeamServiceError, TeamWorkflowOrchestrationError) as exc:
+        except (team_service.TeamServiceError, TeamWorkflowOrchestrationError) as exc:
             failed_candidates.append({"candidateId": candidate_id, "error": str(exc)})
             continue
         assessments.append(

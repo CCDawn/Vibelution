@@ -1964,6 +1964,38 @@ class TestToolMessageFlow:
 
         assert action is None
 
+    def test_close_transaction_action_tolerates_bom_status_and_transaction_status(self):
+        action = ToolLifecycleBridge.derive_lifecycle_action(
+            "close_evolution_transaction_tool",
+            '{"status":"\\ufeffsuccess","transaction_status":"\\ufeffsuccess","txn_id":"demo"}',
+        )
+
+        assert action == "turn_complete"
+
+    def test_close_transaction_action_tolerates_dict_result(self):
+        action = ToolLifecycleBridge.derive_lifecycle_action(
+            "close_evolution_transaction_tool",
+            {"status": "success", "transaction_status": "success", "txn_id": "demo"},
+        )
+
+        assert action == "turn_complete"
+
+    def test_close_transaction_action_tolerates_utf8_bytes_result(self):
+        action = ToolLifecycleBridge.derive_lifecycle_action(
+            "close_evolution_transaction_tool",
+            b'{"status":"success","transaction_status":"success","txn_id":"demo"}',
+        )
+
+        assert action == "turn_complete"
+
+    def test_close_transaction_action_tolerates_ok_status_alias(self):
+        action = ToolLifecycleBridge.derive_lifecycle_action(
+            "close_evolution_transaction_tool",
+            {"status": "ok", "transaction_status": "ok", "txn_id": "demo"},
+        )
+
+        assert action == "turn_complete"
+
     def test_response_surface_controller_emits_visible_text_and_token_usage(self):
         captured = {"thoughts": [], "contents": [], "tokens": []}
 
@@ -4676,6 +4708,16 @@ class TestDelegationExposure:
 
         assert violations == []
 
+    def test_close_evolution_transaction_tool_description_matches_return_contract(self):
+        tools_by_name = {tool.name: tool for tool in create_llm_facing_tools()}
+        description = str(getattr(tools_by_name["close_evolution_transaction_tool"], "description", "") or "")
+
+        assert "transaction_status" in description
+        assert "success" in description
+        assert "failed" in description
+        assert "cancelled" in description
+        assert "status" in description
+
 
 class TestResolvedApiKeyUsage:
     """解析后的 API Key 使用一致性测试"""
@@ -5293,6 +5335,63 @@ class TestRuntimeStateMemoryFlow:
                 name="trigger_self_restart_tool",
             )
         )
+
+        assert TurnOutcomeController.should_skip_convergence_stop_for_pending_restart(
+            expects_restart_after_transaction_close=DelegationGovernor.is_full_evolution_goal(active_goal),
+            messages=messages,
+        ) is False
+
+    def test_full_evolution_goal_detects_bom_prefixed_successful_close_without_restart(self):
+        active_goal = (
+            "执行一轮完整自进化闭环探针："
+            "调用 close_evolution_transaction_tool 关账，"
+            "关账成功后立即调用 trigger_self_restart_tool 完成重启。"
+        )
+        messages = [
+            ToolMessage(
+                content='{"status":"\\ufeffsuccess","transaction_status":"\\ufeffsuccess","txn_id":"demo"}',
+                tool_call_id="call_close",
+                name="close_evolution_transaction_tool",
+            )
+        ]
+
+        assert TurnOutcomeController.should_skip_convergence_stop_for_pending_restart(
+            expects_restart_after_transaction_close=DelegationGovernor.is_full_evolution_goal(active_goal),
+            messages=messages,
+        ) is True
+
+    def test_full_evolution_goal_detects_ok_successful_close_without_restart(self):
+        active_goal = (
+            "执行一轮完整自进化闭环探针："
+            "调用 close_evolution_transaction_tool 关账，"
+            "关账成功后立即调用 trigger_self_restart_tool 完成重启。"
+        )
+        messages = [
+            ToolMessage(
+                content='{"status":"ok","transaction_status":"ok","txn_id":"demo"}',
+                tool_call_id="call_close",
+                name="close_evolution_transaction_tool",
+            )
+        ]
+
+        assert TurnOutcomeController.should_skip_convergence_stop_for_pending_restart(
+            expects_restart_after_transaction_close=DelegationGovernor.is_full_evolution_goal(active_goal),
+            messages=messages,
+        ) is True
+
+    def test_full_evolution_goal_does_not_skip_convergence_when_close_transaction_failed(self):
+        active_goal = (
+            "执行一轮完整自进化闭环探针："
+            "调用 close_evolution_transaction_tool 关账，"
+            "关账成功后立即调用 trigger_self_restart_tool 完成重启。"
+        )
+        messages = [
+            ToolMessage(
+                content='{"status":"failed","transaction_status":"failed","txn_id":"demo"}',
+                tool_call_id="call_close",
+                name="close_evolution_transaction_tool",
+            )
+        ]
 
         assert TurnOutcomeController.should_skip_convergence_stop_for_pending_restart(
             expects_restart_after_transaction_close=DelegationGovernor.is_full_evolution_goal(active_goal),
