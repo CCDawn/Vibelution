@@ -1236,12 +1236,12 @@
   position: absolute;
   top: calc(100% + 10px);
   right: 0;
-  width: min(420px, calc(100vw - 40px));
+  width: min(640px, calc(100vw - 40px));
   display: grid;
-  gap: 12px;
-  padding: 14px;
+  gap: 8px;
+  padding: 10px;
   border: 1px solid var(--border-strong);
-  border-radius: 12px;
+  border-radius: 10px;
   background:
     linear-gradient(180deg, var(--shell-panel-soft), var(--shell-panel)),
     var(--shell-panel);
@@ -1260,33 +1260,30 @@
 }
 
 .statusGuideHeader {
-  display: grid;
-  gap: 4px;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
 }
 
 .statusGuideHeader strong {
   font-size: 0.92rem;
 }
 
-.statusGuideHeader span {
-  color: var(--fg-secondary);
-  font-size: 0.8rem;
-  line-height: 1.45;
-}
-
 .statusGuideGrid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
 }
 
 .statusGuideCard {
   display: grid;
-  gap: 8px;
+  gap: 6px;
   min-width: 0;
-  padding: 10px 11px;
+  padding: 8px;
   border: 1px solid var(--border-soft);
-  border-radius: 10px;
+  border-radius: 8px;
   background: var(--shell-card);
 }
 
@@ -1305,28 +1302,37 @@
 .statusGuideCardHeader strong {
   color: var(--fg-primary);
   font-size: 0.84rem;
-}
-
-.statusGuideNote {
-  margin: 0;
-  color: var(--fg-secondary);
-  font-size: 0.78rem;
-  line-height: 1.45;
+  overflow: hidden;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .statusGuideList {
-  display: grid;
-  gap: 7px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
   margin: 0;
   padding: 0;
   list-style: none;
 }
 
 .statusGuideListItem {
-  display: grid;
-  grid-template-columns: auto auto minmax(0, 1fr);
-  align-items: start;
-  gap: 8px;
+  display: inline-grid;
+  grid-template-columns: auto max-content;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  min-height: 23px;
+  padding: 3px 6px;
+  border: 1px solid color-mix(in srgb, var(--border-soft) 74%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--shell-card) 78%, transparent);
+}
+
+.statusGuideListItem[data-current="true"] {
+  border-color: color-mix(in srgb, var(--accent-cool) 48%, var(--border-soft));
+  background: color-mix(in srgb, var(--accent-cool) 10%, var(--shell-card));
 }
 
 .statusGuideStateLabel {
@@ -1336,19 +1342,13 @@
   white-space: nowrap;
 }
 
-.statusGuideStateDetail {
-  color: var(--fg-secondary);
-  font-size: 0.76rem;
-  line-height: 1.4;
-}
-
 .lifecycleProofCard {
   display: grid;
-  gap: 9px;
+  gap: 7px;
   min-width: 0;
-  padding: 10px 11px;
+  padding: 8px;
   border: 1px solid var(--border-soft);
-  border-radius: 10px;
+  border-radius: 8px;
   background: var(--shell-card);
 }
 
@@ -1376,15 +1376,21 @@
 
 .lifecycleProofMeta {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  gap: 6px 10px;
-  padding: 8px;
-  border: 1px solid var(--border-soft);
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--shell-card) 80%, transparent);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  min-width: 0;
 }
 
 .lifecycleProofMeta span {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 5px 7px;
+  border: 1px solid color-mix(in srgb, var(--border-soft) 78%, transparent);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--shell-card) 76%, transparent);
   color: var(--fg-tertiary);
   font-size: 0.74rem;
 }
@@ -1400,7 +1406,8 @@
 
 .lifecycleProofList {
   display: grid;
-  gap: 7px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 5px;
   margin: 0;
   padding: 0;
   list-style: none;
@@ -1408,10 +1415,15 @@
 
 .lifecycleProofItem {
   display: grid;
-  grid-template-columns: auto minmax(78px, auto) auto minmax(0, 1fr);
-  align-items: start;
-  gap: 8px;
+  grid-template-columns: auto minmax(0, 1fr) max-content;
+  align-items: center;
+  gap: 6px;
   min-width: 0;
+  min-height: 25px;
+  padding: 4px 6px;
+  border: 1px solid color-mix(in srgb, var(--border-soft) 70%, transparent);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--shell-card) 70%, transparent);
 }
 
 .lifecycleProofName {
@@ -1427,16 +1439,6 @@
 .lifecycleProofItem strong {
   color: var(--accent-warm-2);
   font-size: 0.74rem;
-  white-space: nowrap;
-}
-
-.lifecycleProofItem span:last-child {
-  min-width: 0;
-  overflow: hidden;
-  color: var(--fg-secondary);
-  font-size: 0.74rem;
-  line-height: 1.35;
-  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
@@ -1729,7 +1731,11 @@
   }
 
   .statusGuideGrid {
-    grid-template-columns: minmax(0, 1fr);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .lifecycleProofList {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
@@ -1785,6 +1791,12 @@
   .statusGuidePanel {
     right: -10px;
     width: calc(100vw - 20px);
+  }
+
+  .statusGuideGrid,
+  .lifecycleProofMeta,
+  .lifecycleProofList {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .gitMiniHeader {
