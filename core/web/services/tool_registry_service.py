@@ -24,7 +24,7 @@ from config.settings import reload_config
 from core.infrastructure.image_model_discovery import resolve_image_model, should_discover_image_model
 from core.infrastructure.llm_utils import parse_tool_args
 from core.orchestration.tool_lifecycle import ToolLifecycleBridge
-from core.web.services.tool_catalog import bundle_ids_for_tool, list_tool_bundles, metadata_for_tool
+from core.web.services.tool_catalog import bundle_ids_for_tool, explicit_allow_tool_names, list_tool_bundles, metadata_for_tool
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -1085,7 +1085,7 @@ def _generated_tool_item(record: dict[str, Any], *, builtin_names: set[str]) -> 
         "argsSchema": _normalize_schema(item.get("argsSchema")),
         "responseTemplate": str(item.get("responseTemplate") or "").strip(),
         "testPolicy": _generated_test_policy(status == "validated"),
-        "permissionPolicy": dict(DEFAULT_PERMISSION_POLICY),
+        "permissionPolicy": _permission_policy_for_tool(name),
         "createdAt": str(item.get("createdAt") or ""),
         "updatedAt": str(item.get("updatedAt") or ""),
     }
@@ -1123,6 +1123,12 @@ def _generated_test_policy(validated: bool) -> dict[str, Any]:
 
 
 def _permission_policy_for_tool(tool_name: str) -> dict[str, Any]:
+    normalized_name = str(tool_name or "").strip()
+    if normalized_name in explicit_allow_tool_names():
+        return {
+            "requiresExplicitAllow": True,
+            "reason": "Tool requires explicit allow.",
+        }
     return dict(DEFAULT_PERMISSION_POLICY)
 
 

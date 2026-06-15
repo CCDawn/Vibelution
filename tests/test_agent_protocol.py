@@ -3724,6 +3724,54 @@ class TestToolMessageFlow:
         assert scene_events[0][0:2] == ("delegation", "agent.delegation.blocked")
         assert scene_events[0][2]["fields"]["reason"] == "runtime_goal_disallows_subagents"
 
+    def test_session_agent_auto_delegation_is_closed_by_default(self, monkeypatch):
+        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+        agent.prompt_manager = SimpleNamespace(get_runtime_goal_packet=lambda: None)
+        agent._get_delegation_governor = MagicMock(side_effect=AssertionError("delegation should be closed"))
+        scene_events = []
+        monkeypatch.setattr(
+            agent_module,
+            "_record_agent_scene_event",
+            lambda phase, event_code, **kwargs: scene_events.append((phase, event_code, kwargs)),
+        )
+
+        outcome = agent._maybe_delegate(
+            goal="让外部代码 Agent 检查 CLI 页面",
+            iteration=1,
+            total_tool_calls=0,
+            messages=[],
+        )
+
+        assert outcome is None
+        agent._get_delegation_governor.assert_not_called()
+        assert scene_events[0][0:2] == ("delegation", "agent.delegation.blocked")
+        assert scene_events[0][2]["fields"]["reason"] == "session_agent_auto_delegation_disabled"
+        assert scene_events[0][2]["fields"]["replacementTool"] == "cli_agent_run_tool"
+
+    def test_non_session_agent_runtime_keeps_governor_delegation_path(self, monkeypatch):
+        from core.web.services import agent_directory_service
+
+        monkeypatch.setattr(
+            agent_directory_service,
+            "current_agent_runtime",
+            lambda: {"agentId": "research-agent", "agent": {"primaryMode": "research"}},
+        )
+        governor = MagicMock()
+        governor.maybe_delegate.return_value = {"delegated": True, "useful": False}
+        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+        agent.prompt_manager = SimpleNamespace(get_runtime_goal_packet=lambda: None)
+        agent._get_delegation_governor = MagicMock(return_value=governor)
+
+        outcome = agent._maybe_delegate(
+            goal="分析资料",
+            iteration=1,
+            total_tool_calls=0,
+            messages=[],
+        )
+
+        assert outcome == {"delegated": True, "useful": False}
+        governor.maybe_delegate.assert_called_once()
+
     def test_apply_delegation_result_surfaces_timeout_instead_of_parse_failure(self, monkeypatch):
         captured = {"finish": []}
 
@@ -4513,6 +4561,8 @@ class TestDelegationExposure:
         assert "create_child_session_tool" in names
         assert "list_child_sessions_tool" in names
         assert "claude_code" in descriptions["cli_agent_run_tool"]
+        assert "外部代码 Agent" in descriptions["cli_agent_run_tool"]
+        assert "内部子 Agent 自动派遣" in descriptions["cli_agent_run_tool"]
 
     def test_child_session_tool_description_guides_autostart_handoff(self):
         tools_by_name = {tool.name: tool for tool in create_llm_facing_tools()}
