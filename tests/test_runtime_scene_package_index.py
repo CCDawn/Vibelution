@@ -13,6 +13,41 @@ def _local_index_key_prefix(iso_value: str) -> str:
     return parsed.strftime("%Y-%m-%d_%H-%M-%S")
 
 
+def test_runtime_scene_jsonl_reader_reuses_cache_until_file_signature_changes(tmp_path, monkeypatch):
+    path = tmp_path / "timeline.jsonl"
+    path.write_text(
+        json.dumps({"event_code": "alpha", "fields": {"count": 1}}, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+    read_count = 0
+    original_read_text = runtime_scene_service.Path.read_text
+
+    def counting_read_text(self, *args, **kwargs):
+        nonlocal read_count
+        if self == path:
+            read_count += 1
+        return original_read_text(self, *args, **kwargs)
+
+    monkeypatch.setattr(runtime_scene_service.Path, "read_text", counting_read_text)
+
+    first = runtime_scene_service._read_jsonl_file(path)
+    first[0]["fields"]["count"] = 999
+    second = runtime_scene_service._read_jsonl_file(path)
+
+    assert read_count == 1
+    assert second[0]["event_code"] == "alpha"
+    assert second[0]["fields"]["count"] == 1
+
+    path.write_text(
+        json.dumps({"event_code": "beta", "fields": {"count": 2}}, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+    third = runtime_scene_service._read_jsonl_file(path)
+
+    assert read_count == 2
+    assert third[0]["event_code"] == "beta"
+
+
 def test_runtime_scene_event_writes_standalone_package_index(tmp_path, monkeypatch):
     scene_id = "scene-package-index"
     scene_dir = tmp_path / "logs" / "runtime_scenes" / f"20260518T120000Z__{scene_id}"
