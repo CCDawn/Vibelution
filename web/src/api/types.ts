@@ -253,6 +253,12 @@ export type MemoryCleanupTargetRequest = {
     | "team_knowledge"
     | "knowledge_base"
     | "agent_memory_policy"
+    | "sqlite_database_compact"
+    | "evaluation_artifacts"
+    | "session_artifacts"
+    | "legacy_log_info"
+    | "runtime_scene_logs"
+    | "team_archive_artifacts"
     | string;
   agentId?: string;
   teamId?: string;

@@ -131,6 +131,78 @@ def test_memory_cleanup_global_runtime_memory_preserves_non_memory_database_tabl
     assert (cleanup_project / "logs" / "memory_cleanup" / "memory_cleanup_audit.jsonl").exists()
 
 
+def test_memory_cleanup_sqlite_compact_reclaims_free_pages_without_deleting_rows(cleanup_project: Path):
+    db_file = cleanup_project / "workspace" / "agent_brain.db"
+    db_file.parent.mkdir(parents=True, exist_ok=True)
+    with sqlite3.connect(str(db_file)) as conn:
+        conn.execute("CREATE TABLE GitCommit (commit_sha TEXT PRIMARY KEY, subject TEXT)")
+        conn.executemany(
+            "INSERT INTO GitCommit (commit_sha, subject) VALUES (?, ?)",
+            [(f"sha-{index}", "x" * 4096) for index in range(600)],
+        )
+        conn.execute("DELETE FROM GitCommit WHERE commit_sha != 'sha-0'")
+        conn.commit()
+
+    preview = memory_cleanup_service.preview_memory_cleanup([{"targetType": "sqlite_database_compact"}])
+
+    assert preview["totals"]["rowCount"] == 0
+    assert preview["totals"]["databaseRowCount"] == 0
+    assert preview["totals"]["byteCount"] > 0
+    assert preview["targets"][0]["paths"][0]["kind"] == "database_compact"
+
+    result = memory_cleanup_service.execute_memory_cleanup(
+        [{"targetType": "sqlite_database_compact"}],
+        confirmation_phrase=memory_cleanup_service.CONFIRMATION_PHRASE,
+    )
+
+    assert result["totals"]["byteCount"] > 0
+    with sqlite3.connect(str(db_file)) as conn:
+        assert conn.execute("PRAGMA quick_check").fetchone()[0] == "ok"
+        assert conn.execute("PRAGMA freelist_count").fetchone()[0] == 0
+        assert conn.execute("SELECT COUNT(*) FROM GitCommit").fetchone()[0] == 1
+
+
+def test_memory_cleanup_maintenance_artifacts_delete_noise_without_touching_protected_state(cleanup_project: Path):
+    project_memory = _write(cleanup_project / ".docs" / "project-memory" / "memory.json", '{"keep":true}')
+    current_team_run = _write(
+        cleanup_project / "workspace" / "teams" / "research-team" / "source_collection_runs" / "current" / "records.jsonl",
+        "{}\n",
+    )
+    cleanup_paths = [
+        cleanup_project / "workspace" / "evaluation" / "chat_candidates" / "noise.json",
+        cleanup_project / "workspace" / "sessions" / "session-a" / "logs" / "conversation.jsonl",
+        cleanup_project / "log_info" / "debug.log",
+        cleanup_project / "logs" / "runtime_scenes" / "scene-a" / "timeline.jsonl",
+        cleanup_project / "workspace" / "teams" / "research-team" / "archives" / "old-run" / "records.jsonl",
+    ]
+    for path in cleanup_paths:
+        _write(path, "noise")
+    targets = [
+        {"targetType": "evaluation_artifacts"},
+        {"targetType": "session_artifacts"},
+        {"targetType": "legacy_log_info"},
+        {"targetType": "runtime_scene_logs"},
+        {"targetType": "team_archive_artifacts"},
+    ]
+
+    preview = memory_cleanup_service.preview_memory_cleanup(targets)
+
+    assert preview["totals"]["targetCount"] == 5
+    assert preview["totals"]["fileCount"] == 5
+    assert any(target["warnings"] for target in preview["targets"])
+
+    result = memory_cleanup_service.execute_memory_cleanup(
+        targets,
+        confirmation_phrase=memory_cleanup_service.CONFIRMATION_PHRASE,
+    )
+
+    assert result["totals"]["fileCount"] == 5
+    for path in cleanup_paths:
+        assert not path.exists()
+    assert project_memory.exists()
+    assert current_team_run.exists()
+
+
 def test_memory_cleanup_knowledge_base_removes_owner_records_and_vector_metadata(cleanup_project: Path):
     env = _knowledge_env()
     reviewed_item = _promote_source_to_item(env)
