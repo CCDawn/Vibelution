@@ -31,6 +31,7 @@ from core.evaluation.supervised_evolution import (
     normalize_supervised_mental_model_mode,
     supervised_mental_model_enabled_for_mode,
 )
+from core.evaluation.supervised_workbench import bundle_environment_preflight_block_message
 from core.runtime_manager.constants import RESULTS_DIR
 from core.runtime_manager.command_queue import submit_command, wait_for_result
 from core.runtime_manager.evolution_store import (
@@ -349,6 +350,30 @@ def _record_custom_harness_evaluation_notice(
     return notice
 
 
+def _record_supervised_environment_preflight_block(
+    *,
+    message: str,
+    bundle_name: str,
+    source_kind: str,
+    dataset_name: str = "",
+    retry_of_run_id: str = "",
+) -> None:
+    _record_supervised_scene_event(
+        "preflight",
+        "supervised_run.preflight.environment_unavailable_blocked",
+        message=message,
+        level="warning",
+        outcome="blocked",
+        fields={
+            "bundleName": bundle_name,
+            "sourceKind": source_kind,
+            "datasetName": dataset_name,
+            "retryOfRunId": retry_of_run_id,
+        },
+        lifecycle=True,
+    )
+
+
 def _docker_daemon_available() -> bool:
     docker = shutil.which("docker")
     if not docker:
@@ -398,9 +423,20 @@ def start_supervised_run(payload: dict[str, Any]) -> dict[str, Any]:
             )
         prepared = prepare_dataset_run(PROJECT_ROOT, dataset_name, dataset_limit)
         if not prepared.runnable:
+            block_message = prepared.blocked_message or text_for(
+                lang,
+                zh="当前数据集暂不可运行。",
+                en="This dataset is not runnable right now.",
+            )
+            if str(prepared.blocked_message or "").startswith("任务环境预检未通过"):
+                _record_supervised_environment_preflight_block(
+                    message=block_message,
+                    bundle_name=prepared.bundle_name,
+                    source_kind=source_kind,
+                    dataset_name=dataset_name,
+                )
             raise SupervisedRunValidationError(
-                prepared.blocked_message
-                or text_for(lang, zh="当前数据集暂不可运行。", en="This dataset is not runnable right now.")
+                block_message
             )
         bundle_name = prepared.bundle_name
     else:
@@ -417,6 +453,14 @@ def start_supervised_run(payload: dict[str, Any]) -> dict[str, Any]:
                     en=f"Supervised bundle does not exist: {bundle_name}",
                 )
             )
+        environment_block_reason = bundle_environment_preflight_block_message(bundle_path, project_root=PROJECT_ROOT)
+        if environment_block_reason:
+            _record_supervised_environment_preflight_block(
+                message=environment_block_reason,
+                bundle_name=bundle_name,
+                source_kind=source_kind,
+            )
+            raise SupervisedRunValidationError(environment_block_reason)
         block_reason = _official_task_environment_block_reason(bundle_path, lang=lang, require_official=require_official)
         if block_reason:
             _record_supervised_scene_event(
@@ -552,6 +596,15 @@ def _local_retry_supervised_run(run_id: str) -> dict[str, Any]:
             text_for(lang, zh="这条监督记录缺少 bundle 名称，不能重跑失败项。", en="This supervised run has no bundle name to rerun.")
         )
     bundle_path = resolve_workbench_bundle_path(PROJECT_ROOT, context["bundleName"])
+    environment_block_reason = bundle_environment_preflight_block_message(bundle_path, project_root=PROJECT_ROOT)
+    if environment_block_reason:
+        _record_supervised_environment_preflight_block(
+            message=environment_block_reason,
+            bundle_name=context["bundleName"],
+            source_kind=context["sourceKind"],
+            retry_of_run_id=normalized,
+        )
+        raise SupervisedRunValidationError(environment_block_reason)
     block_reason = _official_task_environment_block_reason(bundle_path, lang=lang, require_official=False)
     if block_reason:
         _record_supervised_scene_event(
