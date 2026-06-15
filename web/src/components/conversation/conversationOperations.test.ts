@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import { ConversationMessage } from "../../api/types";
-import { buildConversationOperationGroups, buildConversationOperations } from "./conversationOperations";
+import {
+  buildConversationOperationGroups,
+  buildConversationOperations,
+  buildConversationReActOperationGroups,
+} from "./conversationOperations";
 
 const labels = {
   thought: "Deep thinking",
@@ -197,6 +201,50 @@ describe("conversationOperations", () => {
     expect(grouped.timeline[1].resultPreview).toBe("正在请求模型");
     expect(grouped.status.map((item) => item.kind)).toEqual(["status", "status"]);
     expect(grouped.mental).toEqual([]);
+  });
+
+  it("splits feedback timelines into ReAct operation groups", () => {
+    const message: ConversationMessage = {
+      id: "message-react-groups",
+      role: "assistant",
+      content: "",
+      timestamp: "2026-06-05T00:00:00Z",
+      feedbackEvents: [
+        { sequence: 1, kind: "status", status: "done", name: "context_prepare", summary: "准备上下文" },
+        { sequence: 2, kind: "thought", status: "done", summary: "先读代码", resultPreview: "先读代码" },
+        { sequence: 3, kind: "tool", status: "done", name: "read_file_tool", summary: "opened ConversationView.tsx", relatedThoughtSequence: 2 },
+        { sequence: 4, kind: "thought", status: "running", summary: "再改测试", resultPreview: "再改测试" },
+        { sequence: 5, kind: "tool", status: "running", name: "cli_tool", summary: "running vitest", relatedThoughtSequence: 4 },
+      ],
+      streaming: true,
+    };
+
+    const operations = buildConversationOperations(message, labels);
+    const groups = buildConversationReActOperationGroups(operations);
+
+    expect(groups.map((group) => group.operations.map((operation) => operation.sequence))).toEqual([
+      [1, 2, 3],
+      [4, 5],
+    ]);
+    expect(groups.map((group) => group.thoughtSequence)).toEqual([2, 4]);
+  });
+
+  it("keeps tool-only timelines in one ReAct operation group", () => {
+    const message: ConversationMessage = {
+      id: "message-tool-only-react-group",
+      role: "assistant",
+      content: "",
+      timestamp: "2026-06-05T00:00:00Z",
+      feedbackEvents: [
+        { sequence: 1, kind: "tool", status: "done", name: "cli_tool", summary: "git status" },
+        { sequence: 2, kind: "tool", status: "done", name: "cli_tool", summary: "npm test" },
+      ],
+    };
+
+    const groups = buildConversationReActOperationGroups(buildConversationOperations(message, labels));
+
+    expect(groups).toHaveLength(1);
+    expect(groups[0].operations.map((operation) => operation.sequence)).toEqual([1, 2]);
   });
 
   it("merges cumulative thought prefixes from mixed LLM providers without dropping final detail", () => {
