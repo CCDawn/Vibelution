@@ -41,6 +41,32 @@
   background: var(--surface-panel);
 }
 
+.currentSessionBlock {
+  display: grid;
+  gap: 4px;
+  padding: 6px;
+}
+
+.currentSessionBlock .sectionIdentity {
+  gap: 1px;
+}
+
+.currentSessionBlock .blockEyebrow {
+  font-size: 0.62rem;
+  letter-spacing: 0.04em;
+}
+
+.currentSessionBlock .sectionTitle {
+  font-size: 0.77rem;
+}
+
+.currentSessionLine {
+  margin-top: 0;
+  font-size: 0.67rem;
+  line-height: 1.18;
+  -webkit-line-clamp: 1;
+}
+
 .blockEyebrow {
   margin: 0;
   color: var(--fg-tertiary);
@@ -301,6 +327,26 @@
   white-space: nowrap;
 }
 
+.currentSessionMetaList {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 3px;
+  margin-top: 0;
+}
+
+.currentSessionMetaList .inlineMetaPill {
+  grid-template-columns: minmax(0, 0.72fr) minmax(0, 1fr);
+  gap: 4px;
+  min-height: 20px;
+  padding: 2px 4px;
+  border-radius: 6px;
+  font-size: 0.65rem;
+}
+
+.currentSessionMetaList .inlineMetaPill strong {
+  font-size: 0.65rem;
+  line-height: 1.12;
+}
+
 .sessionBindingNotice {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -498,6 +544,26 @@
 
 .leftBlock > .activeSkillStatus {
   margin-top: 6px;
+}
+
+.currentSessionBlock > .activeSkillStatus {
+  margin-top: 0;
+  gap: 5px;
+  padding: 4px 5px;
+  border-radius: 6px;
+}
+
+.currentSessionBlock .activeSkillIdentity {
+  gap: 1px;
+}
+
+.currentSessionBlock .activeSkillIdentity strong {
+  font-size: 0.68rem;
+}
+
+.currentSessionBlock .activeSkillMeta {
+  gap: 3px;
+  font-size: 0.6rem;
 }
 
 .contextStatusCard,
