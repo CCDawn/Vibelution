@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import json
 import shutil
 from datetime import datetime, timezone
@@ -17,6 +18,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[3]
 LAUNCHER_STATE_PATH = PROJECT_ROOT / ".runtime" / "launcher" / "state.json"
 MAX_TEXT_CHARS = 200_000
 MAX_PACKAGE_INDEX_SEARCH_TEXT_CHARS = 6_000
+JSONL_FILE_CACHE_LIMIT = 256
 BROWSER_TELEMETRY_RAW_PATH = "raw/browser.telemetry.log"
 BROWSER_TELEMETRY_COMPONENT = "browser_page"
 BROWSER_MEMORY_INDEX_MIN_SECONDS = 300.0
@@ -82,6 +84,8 @@ SENSITIVE_FIELD_KEYWORDS = (
     "cookie",
     "bearer",
 )
+_JSONL_FILE_CACHE_LOCK = Lock()
+_JSONL_FILE_CACHE: dict[tuple[str, bool, int, int], list[dict[str, Any]]] = {}
 NON_PROBLEM_NEXT_STATE_KINDS = {
     "assistant_output_edited",
     "user_continues",
@@ -2459,6 +2463,12 @@ def _event_payload_to_client_item(entry: dict[str, Any], scene_dir: Path, compon
 
 
 def _read_jsonl_file(path: Path) -> list[dict]:
+    signature = _jsonl_file_signature(path)
+    if not signature[1]:
+        return []
+    cached = _get_jsonl_file_cache(signature)
+    if cached is not None:
+        return cached
     rows: list[dict] = []
     try:
         lines = path.read_text(encoding="utf-8-sig").splitlines()
@@ -2474,7 +2484,33 @@ def _read_jsonl_file(path: Path) -> list[dict]:
             continue
         if isinstance(payload, dict):
             rows.append(payload)
-    return rows
+    _remember_jsonl_file_cache(signature, rows)
+    return _copy_jsonl_rows(rows)
+
+
+def _jsonl_file_signature(path: Path) -> tuple[str, bool, int, int]:
+    try:
+        stat = path.stat()
+    except OSError:
+        return (str(path), False, 0, 0)
+    return (str(path), True, int(stat.st_mtime_ns), int(stat.st_size))
+
+
+def _get_jsonl_file_cache(signature: tuple[str, bool, int, int]) -> list[dict] | None:
+    with _JSONL_FILE_CACHE_LOCK:
+        rows = _JSONL_FILE_CACHE.get(signature)
+    return _copy_jsonl_rows(rows) if rows is not None else None
+
+
+def _remember_jsonl_file_cache(signature: tuple[str, bool, int, int], rows: list[dict]) -> None:
+    with _JSONL_FILE_CACHE_LOCK:
+        if len(_JSONL_FILE_CACHE) > JSONL_FILE_CACHE_LIMIT:
+            _JSONL_FILE_CACHE.clear()
+        _JSONL_FILE_CACHE[signature] = _copy_jsonl_rows(rows)
+
+
+def _copy_jsonl_rows(rows: list[dict]) -> list[dict]:
+    return copy.deepcopy(rows)
 
 
 def _load_launcher_state() -> dict[str, Any]:
