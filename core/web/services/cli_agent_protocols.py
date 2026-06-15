@@ -7,7 +7,14 @@ from dataclasses import dataclass
 from typing import Any
 
 
-ANSI_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
+ANSI_RE = re.compile(
+    r"(?:"
+    r"\x1b\][^\x07]*(?:\x07|\x1b\\)"  # OSC
+    r"|\x1b[P_X^][\s\S]*?\x1b\\"  # DCS/SOS/PM/APC
+    r"|\x1b\[[0-?]*[ -/]*[@-~]"  # CSI
+    r"|\x1b[@-Z\\-_]"  # single-character ESC
+    r")"
+)
 COMPLETION_MARKER_RE = re.compile(r"\[VIBELUTION_CLI_DONE:[A-Za-z0-9_.:-]+\]")
 
 
