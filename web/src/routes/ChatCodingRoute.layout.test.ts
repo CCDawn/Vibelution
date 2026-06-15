@@ -947,6 +947,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain('const CLI_AGENT_RUN_TAB_PREFIX = "cli-agent-run:"');
     expect(routeSource).toContain("function cliAgentRunTabId");
     expect(routeSource).toContain("function cliAgentRunIdFromTabId");
+    expect(routeSource).toContain('return "Claude Code"');
     expect(routeSource).toContain("function buildCliAgentRunViews");
     expect(routeSource).toContain("function parseCliAgentResultText");
     expect(routeSource).toContain("for (const candidate of [toolCall.resultPreview, toolCall.summary])");

@@ -327,6 +327,9 @@ function cliAgentTitle(agentType: string, result: CliAgentRunResult | null) {
   if (agentType === "codex_code") {
     return "Codex Code";
   }
+  if (agentType === "claude_code") {
+    return "Claude Code";
+  }
   return agentType || "CLI Agent";
 }
 

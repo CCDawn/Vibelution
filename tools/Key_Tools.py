@@ -121,11 +121,12 @@ Args:
 """
 
 _CLI_AGENT_RUN_TOOL_DOCSTRING = """
-【CLI Agent 调用】受控调用外部非交互式代码 Agent。
+【CLI Agent 调用】受控调用外部代码 Agent。
 
 只支持内置适配器：
 1. `mimo_code`：调用 `mimo run`
 2. `codex_code`：调用 `codex exec`
+3. `claude_code`：调用 Claude Code CLI
 
 默认 `mode=readonly`，会使用只读/低风险参数运行。需要允许外部 Agent 写代码时，
 需要使用 `mode=worktree` 并传入独立 worktree 的 `cwd`；主项目工作区会被拒绝。
@@ -133,7 +134,7 @@ _CLI_AGENT_RUN_TOOL_DOCSTRING = """
 只在运行记录中保留有界 stdout/stderr 摘要、命令预览和 task hash。
 
 Args:
-    agent_type: `mimo_code` 或 `codex_code`
+    agent_type: `mimo_code`、`codex_code` 或 `claude_code`
     task: 要交给外部 CLI Agent 的任务说明
     cwd: 运行目录；只读可用项目内目录，可写使用 sibling worktree
     mode: `readonly` 或 `worktree`
