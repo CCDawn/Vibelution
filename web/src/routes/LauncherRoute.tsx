@@ -258,6 +258,8 @@ type LauncherCopy = {
   diagnosticsCollapsedHint: string;
   developerModeTitle: string;
   developerModeHint: string;
+  developerModeCurrentState: string;
+  developerModeLastUpdated: string;
   developerModeOn: string;
   developerModeOff: string;
   developerModeEnable: string;
@@ -888,6 +890,10 @@ function DeveloperModePanel({
   const targetRows = plan?.targets.slice(0, 4) ?? [];
   const canPreview = enabled && !controlsDisabled && !previewPending && !applyPending;
   const canApply = enabled && Boolean(plan) && plan?.action === selectedAction && !controlsDisabled && !previewPending && !applyPending;
+  const developerModeStateLabel = enabled ? copy.developerModeOn : copy.developerModeOff;
+  const developerModeUpdatedLabel = setting?.updatedAt
+    ? `${copy.developerModeLastUpdated}: ${compactDate(setting.updatedAt, "zh-CN")}`
+    : copy.developerModeSettingsReadonly;
 
   return (
     <section className={styles.developerPanel} data-enabled={enabled}>
@@ -908,9 +914,10 @@ function DeveloperModePanel({
         </button>
       </div>
       <div className={styles.developerGrid}>
-        <div className={styles.developerStatus} data-tone={enabled ? "warning" : "neutral"}>
-          <span>{enabled ? copy.developerModeOn : copy.developerModeOff}</span>
-          <strong>{setting?.updatedAt ? compactDate(setting.updatedAt, "zh-CN") : copy.developerModeSettingsReadonly}</strong>
+        <div className={styles.developerStatus} data-tone={enabled ? "warning" : "neutral"} aria-label={`${copy.developerModeCurrentState}: ${developerModeStateLabel}`}>
+          <span>{copy.developerModeCurrentState}</span>
+          <strong>{developerModeStateLabel}</strong>
+          <small>{developerModeUpdatedLabel}</small>
         </div>
         <div className={styles.developerNoise}>
           <div className={styles.developerNoiseHeader}>
@@ -1421,6 +1428,8 @@ export function LauncherRoute() {
         diagnosticsCollapsedHint: "排查时展开",
         developerModeTitle: "开发者模式",
         developerModeHint: "Launcher 控制开发期清理能力；关闭时只显示噪声概览，不生成或执行清理计划。",
+        developerModeCurrentState: "当前状态",
+        developerModeLastUpdated: "最近保存",
         developerModeOn: "已开启",
         developerModeOff: "已关闭",
         developerModeEnable: "开启开发者模式",
@@ -1629,6 +1638,8 @@ export function LauncherRoute() {
         diagnosticsCollapsedHint: "Open when troubleshooting",
         developerModeTitle: "Developer Mode",
         developerModeHint: "Launcher owns development cleanup. When off, this shows noise only and cannot create or apply cleanup plans.",
+        developerModeCurrentState: "Current state",
+        developerModeLastUpdated: "Last saved",
         developerModeOn: "Enabled",
         developerModeOff: "Disabled",
         developerModeEnable: "Enable developer mode",

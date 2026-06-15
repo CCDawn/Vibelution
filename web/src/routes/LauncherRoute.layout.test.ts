@@ -376,6 +376,10 @@ describe("LauncherRoute layout contract", () => {
     expect(routeSource).toContain("confirm: true");
     expect(routeSource).toContain("window.confirm(copy.cleanupRequiresConfirm)");
     expect(routeSource).toContain("开发者模式");
+    expect(routeSource).toContain("当前状态");
+    expect(routeSource).toContain("最近保存");
+    expect(routeSource).toContain("developerModeStateLabel");
+    expect(routeSource).toContain("developerModeCurrentState}: ${developerModeStateLabel}");
     expect(routeSource).toContain("设置页只读展示，不能在工作台设置里改动");
     expect(launcherApiSource).toContain("developer-mode/cleanup/preview");
     expect(launcherApiSource).toContain("developer-mode/cleanup/apply");
