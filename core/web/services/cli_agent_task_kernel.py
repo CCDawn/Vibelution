@@ -70,7 +70,11 @@ def submit_cli_agent_task(
         )
         _write_task_state(task_state)
 
-    payload = protocols.task_input_for_adapter(adapter_id, normalized_task)
+    payload = protocols.task_input_for_adapter(
+        adapter_id,
+        normalized_task,
+        completion_marker=str(task_state.get("completionMarker") or ""),
+    )
     try:
         from . import cli_agent_terminal_service
 
@@ -113,9 +117,14 @@ def ingest_terminal_output(terminal_session: dict[str, Any], chunk: str) -> None
         task_state["updatedAt"] = _now_iso()
         task_state["lastOutputAt"] = task_state["updatedAt"]
         task_state["output"] = _bounded_output(str(task_state.get("output") or "") + str(chunk or ""))
-        segments = protocols.split_semantic_segments(adapter_id, task_state["output"])
+        _capture_terminal_screen(task_state, terminal_session)
+        segments = protocols.split_semantic_segments(adapter_id, _task_parse_text(task_state))
         task_state["segments"] = segments[-50:]
-        detected = protocols.detect_task_status(adapter_id, task_state["output"])
+        detected = protocols.detect_task_status(
+            adapter_id,
+            task_state["output"],
+            completion_marker=str(task_state.get("completionMarker") or ""),
+        )
         if detected:
             _complete_task_state(
                 task_state,
@@ -236,6 +245,8 @@ def _initial_task_state(
     adapter_id = cli_agent_service._normalize_id(terminal_session.get("adapterId") or terminal_session.get("agentType") or "")
     terminal_session_id = str(terminal_session.get("terminalSessionId") or "").strip()
     task_id = _stable_task_id(terminal_session_id=terminal_session_id, task=task, created_at=created_at)
+    protocol = protocols.protocol_for_adapter(adapter_id)
+    completion_marker = protocols.completion_marker_for_task(task_id) if protocol.marker_completion_required else ""
     return {
         "schemaVersion": 1,
         "taskId": task_id,
@@ -256,6 +267,10 @@ def _initial_task_state(
         "task": task,
         "taskHash": cli_agent_service._task_hash(task),
         "taskPreview": cli_agent_service._clip(task, 500),
+        "completionMarker": completion_marker,
+        "screenTextBaseline": str(terminal_session.get("screenText") or "").strip(),
+        "screenText": "",
+        "screenTextDelta": "",
         "timeoutSeconds": timeout_seconds,
         "outputLimit": output_limit,
         "output": "",
@@ -273,7 +288,7 @@ def _complete_task_state(task_state: dict[str, Any], *, status: str, code: str, 
     task_state["completedAt"] = now
     task_state["updatedAt"] = now
     adapter_id = str(task_state.get("adapterId") or "").strip()
-    segments = protocols.tail_semantic_segments(adapter_id, str(task_state.get("output") or ""))
+    segments = protocols.tail_semantic_segments(adapter_id, _task_parse_text(task_state))
     task_state["resultSegments"] = segments
     task_state["resultSummary"] = protocols.summarize_segments(segments)
 
@@ -316,9 +331,11 @@ def _public_task_result(
     limit = int(output_limit or task_state.get("outputLimit") or cli_agent_service.DEFAULT_OUTPUT_LIMIT)
     adapter_id = str(task_state.get("adapterId") or terminal.get("adapterId") or "").strip()
     segments = list(task_state.get("resultSegments") or task_state.get("segments") or [])
+    parse_text = _task_parse_text(task_state)
     if not task_state.get("resultSegments"):
-        segments = protocols.tail_semantic_segments(adapter_id, str(task_state.get("output") or ""), limit=protocols.protocol_for_adapter(adapter_id).max_tail_segments)
-    stdout_preview = protocols.summarize_segments(segments) or protocols.strip_terminal_controls(str(task_state.get("output") or ""))
+        segments = protocols.tail_semantic_segments(adapter_id, parse_text, limit=protocols.protocol_for_adapter(adapter_id).max_tail_segments)
+    stdout_preview = protocols.summarize_segments(segments) or protocols.remove_protocol_markers(protocols.strip_terminal_controls(parse_text))
+    result_source = _task_result_source(task_state)
     result = {
         "status": str(task_state.get("status") or "").strip() or "unknown",
         "code": code or str(task_state.get("code") or "").strip() or "CLI_AGENT_TASK",
@@ -347,6 +364,8 @@ def _public_task_result(
         "terminalStatus": str(terminal.get("status") or "").strip(),
         "terminalReuse": bool(terminal.get("reusedActiveLock")),
         "resultSegments": segments,
+        "resultSource": result_source,
+        "parserConfidence": "high" if result_source.startswith("screen") else "medium",
         "stdoutPreview": cli_agent_service._clip(stdout_preview, limit),
         "stderrPreview": "",
         "exitCode": None,
@@ -354,6 +373,50 @@ def _public_task_result(
         "logPath": _relative_to_project(task_state_path(str(task_state.get("taskId") or ""))),
     }
     return result
+
+
+def _capture_terminal_screen(task_state: dict[str, Any], terminal_session: dict[str, Any]) -> None:
+    screen_text = str(terminal_session.get("screenText") or "").strip()
+    if not screen_text:
+        return
+    baseline = str(task_state.get("screenTextBaseline") or "").strip()
+    delta = _screen_delta_text(screen_text, baseline)
+    task_state["screenText"] = screen_text
+    task_state["screenTextDelta"] = delta
+    task_state["screenQuality"] = str(terminal_session.get("screenQuality") or "").strip()
+
+
+def _task_parse_text(task_state: dict[str, Any]) -> str:
+    for key in ("screenTextDelta", "screenText", "output"):
+        value = protocols.remove_protocol_markers(str(task_state.get(key) or "")).strip()
+        if value:
+            return value
+    return ""
+
+
+def _task_result_source(task_state: dict[str, Any]) -> str:
+    if str(task_state.get("screenTextDelta") or "").strip():
+        return "screen_delta"
+    if str(task_state.get("screenText") or "").strip():
+        return "screen_buffer"
+    return "terminal_output"
+
+
+def _screen_delta_text(current: str, baseline: str) -> str:
+    current_text = str(current or "").strip()
+    baseline_text = str(baseline or "").strip()
+    if not current_text or not baseline_text:
+        return current_text
+    if current_text.startswith(baseline_text):
+        return current_text[len(baseline_text):].strip()
+    current_lines = current_text.splitlines()
+    baseline_lines = baseline_text.splitlines()
+    index = 0
+    max_common = min(len(current_lines), len(baseline_lines))
+    while index < max_common and current_lines[index].strip() == baseline_lines[index].strip():
+        index += 1
+    delta = "\n".join(current_lines[index:]).strip()
+    return delta or current_text
 
 
 def _active_task_for_terminal(terminal_session_id: str) -> dict[str, Any]:
@@ -451,4 +514,3 @@ def _relative_to_project(path: Path) -> str:
         return path.resolve().relative_to(Path(PROJECT_ROOT).resolve()).as_posix()
     except ValueError:
         return str(path)
-

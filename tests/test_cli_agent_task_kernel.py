@@ -39,7 +39,10 @@ def test_submit_cli_agent_task_locks_one_active_task_per_terminal(monkeypatch, t
 
     assert first["status"] == "sent"
     assert first["code"] == "CLI_AGENT_TASK_SENT"
-    assert writes == ["分析当前问题\r\n"]
+    assert len(writes) == 1
+    assert "分析当前问题" in writes[0]
+    assert "VIBELUTION_CLI_DONE:" in writes[0]
+    assert "[VIBELUTION_CLI_DONE:" not in writes[0]
     assert second["code"] == "CLI_AGENT_TASK_LOCKED"
     assert second["terminalSessionId"] == "cli-term-one"
 
@@ -54,7 +57,8 @@ def test_terminal_output_completion_returns_semantic_segments(monkeypatch, tmp_p
 
     from core.web.services import cli_agent_terminal_service, session_service
 
-    monkeypatch.setattr(cli_agent_terminal_service, "write_cli_agent_terminal_input", lambda *_args, **_kwargs: {})
+    writes = []
+    monkeypatch.setattr(cli_agent_terminal_service, "write_cli_agent_terminal_input", lambda _session_id, data: writes.append(data) or {})
     monkeypatch.setattr(session_service, "append_cli_agent_task_result_event", lambda session_id, **kwargs: delivered.append((session_id, kwargs)))
     terminal = {
         "terminalSessionId": "cli-term-two",
@@ -66,16 +70,21 @@ def test_terminal_output_completion_returns_semantic_segments(monkeypatch, tmp_p
         "alive": True,
         "status": "running",
     }
-    task_kernel.submit_cli_agent_task(
+    first = task_kernel.submit_cli_agent_task(
         terminal_session=terminal,
         task="跑测试",
         timeout_seconds=60,
         output_limit=8000,
     )
 
+    marker = task_kernel._read_task_state(first["taskId"])["completionMarker"]
     task_kernel.ingest_terminal_output(
-        {**terminal, "cliRunId": "cli-run-two"},
-        "Thought: checking\n\nAnswer: 已完成，测试通过\n",
+        {
+            **terminal,
+            "cliRunId": "cli-run-two",
+            "screenText": "Thought: checking\n\nAnswer: 已完成，测试通过\n" + marker,
+        },
+        "\x1b[?2026h" + marker + "\x1b[?2026l",
     )
 
     assert delivered
@@ -85,3 +94,46 @@ def test_terminal_output_completion_returns_semantic_segments(monkeypatch, tmp_p
     assert result["status"] == "completed"
     assert result["code"] == "CLI_AGENT_TASK_COMPLETED"
     assert [segment["kind"] for segment in result["resultSegments"]] == ["thought", "answer"]
+    assert "[VIBELUTION_CLI_DONE:" not in result["stdoutPreview"]
+    assert "\x1b" not in result["stdoutPreview"]
+
+
+def test_mimo_prompt_echo_completion_text_does_not_complete_task(monkeypatch, tmp_path):
+    project_root = tmp_path / "Vibelution"
+    project_root.mkdir()
+    monkeypatch.setattr(task_kernel, "PROJECT_ROOT", project_root)
+    monkeypatch.setattr(task_kernel, "TASK_STATE_DIR", project_root / ".runtime" / "cli_agents" / "tasks")
+    monkeypatch.setattr(task_kernel, "_ensure_watcher_started", lambda: None)
+    delivered = []
+    writes = []
+
+    from core.web.services import cli_agent_terminal_service, session_service
+
+    monkeypatch.setattr(cli_agent_terminal_service, "write_cli_agent_terminal_input", lambda _session_id, data: writes.append(data) or {})
+    monkeypatch.setattr(session_service, "append_cli_agent_task_result_event", lambda session_id, **kwargs: delivered.append((session_id, kwargs)))
+    terminal = {
+        "terminalSessionId": "cli-term-three",
+        "adapterId": "mimo_code",
+        "label": "MiMo Code",
+        "sourceSessionId": "session-1",
+        "cwd": str(project_root),
+        "mode": "readonly",
+        "alive": True,
+        "status": "running",
+    }
+    result = task_kernel.submit_cli_agent_task(
+        terminal_session=terminal,
+        task="最后给出结论：拆分是否已经完成",
+        timeout_seconds=60,
+        output_limit=8000,
+    )
+
+    task_kernel.ingest_terminal_output(
+        {**terminal, "screenText": "用户任务：最后给出结论：拆分是否已经完成\n正在分析..."},
+        writes[0],
+    )
+
+    state = task_kernel._read_task_state(result["taskId"])
+    assert delivered == []
+    assert state["status"] == "running"
+    assert state.get("completionReason") is None

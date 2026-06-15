@@ -17,6 +17,7 @@ from typing import Any
 
 from . import cli_agent_service
 from . import cli_agent_task_kernel
+from .terminal_screen_buffer import TerminalScreenBuffer, TerminalScreenSnapshot
 
 try:  # pragma: no cover - availability is platform/package dependent
     from winpty import PtyProcess
@@ -65,6 +66,11 @@ class _TerminalRuntime:
         self.transport = transport
         self.transcript_path = transcript_path
         self.session_id_regex = session_id_regex
+        self.screen = TerminalScreenBuffer(
+            rows=_clamp_int(state.get("rows"), DEFAULT_ROWS, 4, 120),
+            cols=_clamp_int(state.get("cols"), DEFAULT_COLS, 20, 240),
+            initial_text=str(state.get("screenText") or ""),
+        )
         self.subscribers: list[queue.Queue[dict[str, Any]]] = []
         self.stop_requested = threading.Event()
         self.lock = threading.RLock()
@@ -105,6 +111,8 @@ class _TerminalRuntime:
         with self.lock:
             self.state["rows"] = rows
             self.state["cols"] = cols
+            self.screen.resize(rows=rows, cols=cols)
+            self.state.update(_terminal_screen_state_fields(self.screen.snapshot()))
             self.state["updatedAt"] = _now_iso()
             _write_state(self.state)
         if self.transport == "conpty":
@@ -136,10 +144,17 @@ class _TerminalRuntime:
 
     def snapshot(self) -> dict[str, Any]:
         with self.lock:
+            self.state.update(_terminal_screen_state_fields(self.screen.snapshot()))
             payload = dict(self.state)
         payload["alive"] = self.is_alive()
         payload["transport"] = self.transport
-        payload.update(_read_transcript_snapshot(self.transcript_path))
+        payload.update(
+            _read_transcript_snapshot(
+                self.transcript_path,
+                rows=_clamp_int(payload.get("rows"), DEFAULT_ROWS, 4, 120),
+                cols=_clamp_int(payload.get("cols"), DEFAULT_COLS, 20, 240),
+            )
+        )
         return _public_state(payload)
 
     def _reader_loop(self) -> None:
@@ -194,6 +209,7 @@ class _TerminalRuntime:
                 linked_session_id = next_cli_session_id
             self.state["status"] = "running"
             self.state["alive"] = True
+            self.state.update(_terminal_screen_state_fields(self.screen.feed(chunk)))
             self.state["updatedAt"] = _now_iso()
             _write_state(self.state)
             public_state = _public_state(dict(self.state))
@@ -417,7 +433,16 @@ def get_cli_agent_terminal_session(terminal_session_id: str) -> dict[str, Any]:
     if not state:
         raise CliAgentTerminalError("TERMINAL_SESSION_NOT_FOUND", "Terminal session not found.")
     state["alive"] = False
-    return _public_state({**state, **_read_transcript_snapshot(_transcript_path(session_id))})
+    return _public_state(
+        {
+            **state,
+            **_read_transcript_snapshot(
+                _transcript_path(session_id),
+                rows=_clamp_int(state.get("rows"), DEFAULT_ROWS, 4, 120),
+                cols=_clamp_int(state.get("cols"), DEFAULT_COLS, 20, 240),
+            ),
+        }
+    )
 
 
 def stream_cli_agent_terminal_events(terminal_session_id: str):
@@ -777,6 +802,11 @@ def _initial_state(
         "rows": _clamp_int(rows, DEFAULT_ROWS, 4, 120),
         "cols": _clamp_int(cols, DEFAULT_COLS, 20, 240),
         "transcriptPath": str(previous_state.get("transcriptPath") or ""),
+        "screenText": str(previous_state.get("screenText") or ""),
+        "screenReplay": str(previous_state.get("screenReplay") or ""),
+        "screenQuality": str(previous_state.get("screenQuality") or ""),
+        "screenRows": previous_state.get("screenRows"),
+        "screenCols": previous_state.get("screenCols"),
         "processStartedAt": now,
         "processStartedAtMs": process_started_at_ms,
         "createdAt": str(previous_state.get("createdAt") or now),
@@ -1448,14 +1478,24 @@ def _read_transcript_tail(path: Path, limit: int = MAX_TRANSCRIPT_TAIL_CHARS) ->
     return text[-limit:]
 
 
-def _read_transcript_snapshot(path: Path, limit: int = MAX_TRANSCRIPT_TAIL_CHARS) -> dict[str, Any]:
+def _read_transcript_snapshot(
+    path: Path,
+    limit: int = MAX_TRANSCRIPT_TAIL_CHARS,
+    *,
+    rows: int = DEFAULT_ROWS,
+    cols: int = DEFAULT_COLS,
+) -> dict[str, Any]:
     tail = _read_transcript_tail(path, limit=limit)
     replayable, reason = _classify_transcript_tail_replay(tail)
-    return {
+    snapshot = {
         "transcriptTail": tail if replayable else "",
         "transcriptTailReplayable": replayable,
         "transcriptTailRenderReason": reason,
     }
+    if tail and not replayable:
+        buffer = TerminalScreenBuffer(rows=rows, cols=cols)
+        snapshot.update(_terminal_screen_state_fields(buffer.feed(tail)))
+    return snapshot
 
 
 def _classify_transcript_tail_replay(text: str) -> tuple[bool, str]:
@@ -1503,6 +1543,16 @@ def _trim_transcript_file(path: Path) -> None:
         return
 
 
+def _terminal_screen_state_fields(snapshot: TerminalScreenSnapshot) -> dict[str, Any]:
+    return {
+        "screenText": snapshot.text,
+        "screenReplay": snapshot.replay,
+        "screenQuality": snapshot.quality,
+        "screenRows": snapshot.rows,
+        "screenCols": snapshot.cols,
+    }
+
+
 def _public_state(state: dict[str, Any]) -> dict[str, Any]:
     keys = {
         "terminalSessionId",
@@ -1534,6 +1584,11 @@ def _public_state(state: dict[str, Any]) -> dict[str, Any]:
         "transcriptTail",
         "transcriptTailReplayable",
         "transcriptTailRenderReason",
+        "screenText",
+        "screenReplay",
+        "screenQuality",
+        "screenRows",
+        "screenCols",
         "processStartedAt",
         "processStartedAtMs",
         "userClosed",
