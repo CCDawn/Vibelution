@@ -713,7 +713,7 @@ def test_start_research_stage_round_creates_knowledge_collection_round(tmp_path,
 
     assert response["created"] is True
     assert stage_round["stageType"] == "knowledge_collection"
-    assert stage_round["status"] == "needs_attention"
+    assert stage_round["status"] == "running"
     assert response["sourceCollectionSearchExecution"]["accepted"] is True
     assert response["sourceCollectionSearchExecution"]["executionMode"] == "background"
     assert stage_round["sourceCollectionSearchExecution"]["status"] == "accepted"
@@ -736,9 +736,11 @@ def test_start_research_stage_round_creates_knowledge_collection_round(tmp_path,
     assert stage_round["teamMemoryRecord"]["promptCachePolicyRef"]["gateStatus"] == "satisfied"
     assert stage_round["teamMemoryRecord"]["recordKind"] == "team_workflow_stage_record"
     assert stage_round["teamMemoryRecord"]["boundary"] == "runtime_stage_record_only_not_formal_team_knowledge"
-    assert stage_round["coordinationContract"]["autoStarted"] is True
+    assert stage_round["coordinationContract"]["autoStarted"] is False
+    assert stage_round["coordinationContract"]["trigger"] == "manual"
     assert stage_round["coordinationContract"]["startResult"]["started"] is False
-    assert "coordination_round_not_started" in {item["code"] for item in stage_round["warnings"]}
+    assert stage_round["coordinationContract"]["startResult"]["skipReason"] == "manual_only"
+    assert "coordination_round_not_started" not in {item["code"] for item in stage_round["warnings"]}
     assert response["boundaries"]["writesFormalKnowledge"] is False
     assert response["searchPlan"]["boundaries"]["externalSearchTriggered"] is False
     assert response["searchPlan"]["promptCachePolicy"]["requirement"] == "required_for_llm_execution"
@@ -775,7 +777,7 @@ def test_start_research_stage_round_reuses_active_knowledge_collection_round(tmp
     assert team_workflow_orchestration_service.get_research_stage_round_status(team["teamId"])["roundCount"] == 1
 
 
-def test_start_research_stage_round_auto_starts_team_coordination_round(tmp_path, monkeypatch):
+def test_start_research_stage_round_does_not_auto_start_team_coordination_round(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _stub_source_collection_search_background(monkeypatch)
     agent = agent_directory_service.create_agent_instance(display_name="Coordinator", direct_session_id="session-coordinator")
@@ -793,10 +795,11 @@ def test_start_research_stage_round_auto_starts_team_coordination_round(tmp_path
     room = chat_room_service.get_chat_room_detail(team["linkedChatRoomId"])
 
     assert response["stageRound"]["status"] == "running"
-    assert response["stageRound"]["coordinationRoundId"]
-    assert response["stageRound"]["coordinationContract"]["startResult"]["started"] is True
-    assert response["stageRound"]["coordinationContract"]["startResult"]["roundId"] == response["stageRound"]["coordinationRoundId"]
-    assert room["activeRoundId"] == response["stageRound"]["coordinationRoundId"]
+    assert not response["stageRound"].get("coordinationRoundId")
+    assert response["stageRound"]["coordinationContract"]["autoStarted"] is False
+    assert response["stageRound"]["coordinationContract"]["startResult"]["started"] is False
+    assert response["stageRound"]["coordinationContract"]["startResult"]["skipReason"] == "manual_only"
+    assert not room["activeRoundId"]
 
 
 def test_retry_research_stage_round_coordination_starts_room_and_clears_warning(tmp_path, monkeypatch):
@@ -816,6 +819,8 @@ def test_retry_research_stage_round_coordination_starts_room_and_clears_warning(
     )
 
     assert retry["stageRound"]["status"] == "running"
+    assert retry["stageRound"]["coordinationContract"]["autoStarted"] is False
+    assert retry["stageRound"]["coordinationContract"]["trigger"] == "explicit_retry"
     assert retry["stageRound"]["coordinationContract"]["startResult"]["started"] is True
     assert retry["stageRound"]["coordinationRoundId"]
     assert "coordination_round_not_started" not in {item["code"] for item in retry["stageRound"]["warnings"]}
@@ -884,11 +889,12 @@ def test_start_research_stage_round_keeps_experiment_plan_when_coordination_busy
     )
 
     assert experiment["stageRound"]["stageType"] == "experiment"
-    assert experiment["stageRound"]["status"] == "needs_attention"
+    assert experiment["stageRound"]["status"] == "planning"
     assert experiment["stageRound"]["upstreamRoundIds"] == [knowledge["stageRound"]["stageRoundId"]]
     assert experiment["stageRound"]["planningContract"]["requiresUserDecision"] is True
     assert experiment["stageRound"]["coordinationContract"]["startResult"]["started"] is False
-    assert "coordination_round_not_started" in {item["code"] for item in experiment["stageRound"]["warnings"]}
+    assert experiment["stageRound"]["coordinationContract"]["startResult"]["skipReason"] == "manual_only"
+    assert "coordination_round_not_started" not in {item["code"] for item in experiment["stageRound"]["warnings"]}
 
 
 def test_transfer_decision_rejects_non_owner_agent(tmp_path, monkeypatch):
