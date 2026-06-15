@@ -156,7 +156,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("styles.companionBlock");
     expect(routeSource).toContain("styles.companionCompact");
     expect(routeSource).toContain("styles.petMiniAvatar");
-    expect(routeSource).toContain("styles.featurePrimarySlot");
+    expect(routeSource).toContain("styles.featureChipPrimary");
     expect(routeSource).toContain("styles.featureChipRow");
     expect(routeSource).toContain("styles.featureChip");
     expect(routeSource).not.toContain("<section className={styles.petShowcase}");
@@ -175,7 +175,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.companionBlock).toBeTypeOf("string");
     expect(routeStyles.companionCompact).toBeTypeOf("string");
     expect(routeStyles.petMiniAvatar).toBeTypeOf("string");
-    expect(routeStyles.featurePrimarySlot).toBeTypeOf("string");
+    expect(routeStyles.featureChipPrimary).toBeTypeOf("string");
     expect(routeStyles.featureChipRow).toBeTypeOf("string");
     expect(routeStyles.featureChip).toBeTypeOf("string");
   });
@@ -321,7 +321,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("styles.cacheDetailDonutPanel");
     expect(routeSource).toContain("case \"cache_write\"");
     expect(routeSource).toContain("cacheCreationInputTokens");
-    expect(routeSource.indexOf("styles.contextStatusCard")).toBeGreaterThan(routeSource.indexOf("sessionCompactRows.map"));
+    expect(routeSource.indexOf("styles.runModeBlock")).toBeGreaterThan(routeSource.indexOf("sessionCompactRows.map"));
+    expect(routeSource.indexOf("styles.contextStatusCard")).toBeGreaterThan(routeSource.indexOf("styles.runModeBlock"));
     expect(routeSource.indexOf("styles.cacheStatusCard")).toBeGreaterThan(routeSource.indexOf("styles.contextStatusCard"));
     expect(routeSource.indexOf("styles.compressionStatusCard")).toBeGreaterThan(routeSource.indexOf("styles.cacheStatusCard"));
     expect(routeSource.indexOf("styles.compressionStrategyCard")).toBeGreaterThan(routeSource.indexOf("styles.compressionStatusCard"));

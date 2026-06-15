@@ -6302,6 +6302,49 @@ export function ChatCodingRoute() {
           ) : null}
         </section>
 
+        <section className={`${styles.leftBlock} ${styles.featurePresetBlock} ${styles.runModeBlock}`}>
+          <div className={styles.sectionHeader}>
+            <div className={styles.sectionIdentity}>
+              <p className={styles.blockEyebrow}>{lang === "zh" ? "模式控制" : "Mode controls"}</p>
+              <h3 className={styles.sectionTitle}>{lang === "zh" ? "运行模式" : "Run modes"}</h3>
+            </div>
+            <span className={styles.featurePresetScope} title={t("chatFeaturePanelHint")}>{lang === "zh" ? "下轮生效" : "Next turn"}</span>
+          </div>
+          <div className={styles.featureChipRow}>
+            <button
+              type="button"
+              className={
+                mentalModelEnabledForNextTurn
+                  ? `${styles.featureChip} ${styles.featureChipPrimary} ${styles.featureChipActive}`
+                  : `${styles.featureChip} ${styles.featureChipPrimary}`
+              }
+              aria-pressed={mentalModelEnabledForNextTurn}
+              disabled={!activeSessionId}
+              onClick={() => handleMentalModelEnabledChange(!mentalModelEnabledForNextTurn)}
+              title={t("chatFeatureMentalModelHint")}
+            >
+              <strong>{t("chatFeatureMentalModel")}</strong>
+              <span aria-hidden="true" />
+            </button>
+            {CHAT_FEATURE_PRESETS.map((item) => {
+              const enabled = featurePresetState[item.key];
+              return (
+                <button
+                  key={item.key}
+                  type="button"
+                  className={enabled ? `${styles.featureChip} ${styles.featureChipActive}` : styles.featureChip}
+                  aria-pressed={enabled}
+                  onClick={() => toggleFeaturePreset(item.key)}
+                  title={t(item.hintKey)}
+                >
+                  <strong>{t(item.labelKey)}</strong>
+                  <span aria-hidden="true" />
+                </button>
+              );
+            })}
+          </div>
+        </section>
+
         <section className={`${styles.leftBlock} ${styles.contextStatusCard}`}>
           <div className={styles.sectionHeader}>
             <div className={styles.sectionIdentity}>
@@ -6445,20 +6488,20 @@ export function ChatCodingRoute() {
           </div>
           <div className={styles.compressionFactGrid} title={compressionTitleLine}>
             <div className={styles.compressionFact}>
-              <span>{t("runtimeContextEstimate")}</span>
+              <span title={t("runtimeContextEstimate")}>{lang === "zh" ? "当前" : "Now"}</span>
               <strong>{compressionMainLine}</strong>
             </div>
             <div className={styles.compressionFact}>
-              <span>{t("compressionModelWindow")}</span>
+              <span title={t("compressionModelWindow")}>{lang === "zh" ? "窗口" : "Window"}</span>
               <strong>{compressionModelWindowLine}</strong>
             </div>
             <div className={`${styles.compressionFact} ${styles.compressionFactWide}`}>
-              <span>{t("compressionThresholdBasis")}</span>
+              <span title={t("compressionThresholdBasis")}>{lang === "zh" ? "口径" : "Basis"}</span>
               <strong>{compressionScopeLine}</strong>
             </div>
           </div>
           <p className={styles.oneLineValue} title={lastCompression?.reason || lastCompressionLine}>
-            <span>{t("compressionLastRun")}</span>
+            <span>{lang === "zh" ? "最近" : "Last"}</span>
             {lastCompressionLine}
           </p>
         </section>
@@ -6476,7 +6519,6 @@ export function ChatCodingRoute() {
               <div key={level.level} className={styles.compressionStrategyRow} title={`${t("compressionThreshold")} ${Math.round(level.thresholdRatio * 100)}% / ${numberFormatter.format(level.thresholdTokens)} · ${t("compressionKeepAi")} ${level.keepAiMessages} · ${t("compressionSummary")} ${numberFormatter.format(level.summaryMaxChars)}`}>
                 <strong>{level.level}</strong>
                 <span>{Math.round(level.thresholdRatio * 100)}% / {numberFormatter.format(level.thresholdTokens)}</span>
-                <span>{t("compressionKeepAi")} {level.keepAiMessages} · {t("compressionSummary")} {numberFormatter.format(level.summaryMaxChars)}</span>
               </div>
             ))}
           </div>
@@ -6484,55 +6526,6 @@ export function ChatCodingRoute() {
             <span>{t("compressionErrorProtection")}</span>
             <strong>{(compression?.strategy.errorProtectionKeywords ?? []).join(" / ") || "--"}</strong>
           </p>
-        </section>
-
-        <section className={`${styles.leftBlock} ${styles.featurePresetBlock} ${styles.runModeBlock}`}>
-          <div className={styles.sectionHeader}>
-            <div className={styles.sectionIdentity}>
-              <p className={styles.blockEyebrow}>{lang === "zh" ? "模式控制" : "Mode controls"}</p>
-              <h3 className={styles.sectionTitle}>{lang === "zh" ? "运行模式" : "Run modes"}</h3>
-            </div>
-            <span className={styles.featurePresetScope} title={t("chatFeaturePanelHint")}>{lang === "zh" ? "下轮生效" : "Next turn"}</span>
-          </div>
-          <div className={styles.featurePrimarySlot}>
-            <button
-              type="button"
-              className={
-                mentalModelEnabledForNextTurn
-                  ? `${styles.featureToggle} ${styles.featureToggleActive} ${styles.featureTogglePrimary}`
-                  : `${styles.featureToggle} ${styles.featureTogglePrimary}`
-              }
-              aria-pressed={mentalModelEnabledForNextTurn}
-              disabled={!activeSessionId}
-              onClick={() => handleMentalModelEnabledChange(!mentalModelEnabledForNextTurn)}
-              title={t("chatFeatureMentalModelHint")}
-            >
-              <span className={styles.featureToggleText}>
-                <strong>{t("chatFeatureMentalModel")}</strong>
-              </span>
-              <span className={styles.featureToggleState}>
-                {mentalModelEnabledForNextTurn ? t("mentalModelNextTurnOn") : t("mentalModelNextTurnOff")}
-              </span>
-            </button>
-          </div>
-          <div className={styles.featureChipRow}>
-            {CHAT_FEATURE_PRESETS.map((item) => {
-              const enabled = featurePresetState[item.key];
-              return (
-                <button
-                  key={item.key}
-                  type="button"
-                  className={enabled ? `${styles.featureChip} ${styles.featureChipActive}` : styles.featureChip}
-                  aria-pressed={enabled}
-                  onClick={() => toggleFeaturePreset(item.key)}
-                  title={t(item.hintKey)}
-                >
-                  <strong>{t(item.labelKey)}</strong>
-                  <span aria-hidden="true" />
-                </button>
-              );
-            })}
-          </div>
         </section>
 
         <section className={`${styles.leftBlock} ${styles.companionBlock}`}>
