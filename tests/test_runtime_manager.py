@@ -5710,6 +5710,38 @@ def test_restart_build_preflight_skips_when_frontend_build_is_current(monkeypatc
     ]
 
 
+def test_restart_build_preflight_restores_missing_frontend_dependencies(monkeypatch):
+    calls: list[list[str]] = []
+    events: list[tuple[str, dict]] = []
+    missing_checks = [
+        [{"step": "tsc -b", "path": r"C:\repo\web\node_modules\typescript\bin\tsc"}],
+        [],
+    ]
+
+    def fake_run(command, **kwargs):
+        calls.append(list(command))
+        return subprocess.CompletedProcess(args=command, returncode=0, stdout="ok", stderr="")
+
+    monkeypatch.setattr(
+        daemon,
+        "_frontend_build_current",
+        lambda: (False, "frontend sources changed", {"distIndex": "web/dist/index.html", "distMtime": 10.0, "inputMtime": 20.0}),
+    )
+    monkeypatch.setattr(daemon, "_frontend_dependency_restore_command", lambda: ("node npm-cli.js install", [r"C:\node\node.exe", r"C:\node\npm-cli.js", "install"]))
+    monkeypatch.setattr(daemon, "_frontend_build_preflight_missing_dependency_entries", lambda commands: missing_checks.pop(0))
+    monkeypatch.setattr(daemon.subprocess, "run", fake_run)
+    monkeypatch.setattr(daemon, "_append_event", lambda event_type, payload: events.append((event_type, payload)))
+
+    result = daemon._preflight_frontend_build_for_restart("cmd-restart")
+
+    assert calls[0] == [r"C:\node\node.exe", r"C:\node\npm-cli.js", "install"]
+    assert result["completedSteps"][0] == "node npm-cli.js install"
+    assert result["completedSteps"][-2:] == ["tsc -b", "vite build"]
+    assert events[0][0] == "workbench.restart.frontend_dependencies_missing"
+    assert events[1][0] == "workbench.restart.frontend_dependency_restore_succeeded"
+    assert events[-1][0] == "workbench.restart.build_preflight_succeeded"
+
+
 def test_restart_build_preflight_uses_hidden_node_entrypoints_on_windows(monkeypatch):
     calls: list[dict[str, object]] = []
     events: list[tuple[str, dict]] = []
@@ -5733,6 +5765,7 @@ def test_restart_build_preflight_uses_hidden_node_entrypoints_on_windows(monkeyp
     monkeypatch.setattr(daemon.subprocess, "STARTUPINFO", DummyStartupInfo, raising=False)
     monkeypatch.setattr(daemon.subprocess, "run", fake_run)
     monkeypatch.setattr(daemon, "_append_event", lambda event_type, payload: events.append((event_type, payload)))
+    monkeypatch.setattr(daemon, "_frontend_build_preflight_missing_dependency_entries", lambda commands: [])
     monkeypatch.setattr(
         daemon,
         "_frontend_build_current",
