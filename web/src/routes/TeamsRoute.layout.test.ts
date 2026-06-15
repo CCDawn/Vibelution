@@ -340,7 +340,12 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("researchStageAgentManagementRoute(binding.agentId)");
     expect(routeSource).toContain("Agent 管理");
     expect(routeSource).toContain("还需补充资料");
-    expect(routeSource).toContain("个搜集任务待执行");
+    expect(routeSource).toContain("sourceCollectionSearchOpenAssignmentCount");
+    expect(routeSource).toContain("sourceCollectionDownstreamOpenAssignmentCount");
+    expect(routeSource).toContain("SOURCE_COLLECTION_SEARCH_EXECUTION_ROLES");
+    expect(routeSource).toContain("个搜索任务待执行");
+    expect(routeSource).toContain("搜索已停止，还有");
+    expect(routeSource).not.toContain("sourceCollectionOpenAssignmentCount > 0 ? <Search");
     expect(routeSource).toContain("条已通过");
     expect(routeSource).toContain("Agent 重新筛选");
     expect(routeSource).toContain("forceRescreen");

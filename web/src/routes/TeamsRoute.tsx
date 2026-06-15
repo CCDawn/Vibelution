@@ -71,6 +71,7 @@ const WORKFLOW_GRAPH_MARGIN_X = 22;
 const WORKFLOW_GRAPH_MARGIN_Y = 28;
 const SOURCE_COLLECTION_RUN_PREVIEW_LIMIT = 20;
 const SOURCE_COLLECTION_DEFAULT_ROLES = ["data_discovery", "source_acquisition", "content_extraction", "source_quality"];
+const SOURCE_COLLECTION_SEARCH_EXECUTION_ROLES = new Set(["data_discovery", "source_acquisition"]);
 const SOURCE_COLLECTION_PROMPT_CACHE_POLICY = {
   requirement: "required_for_llm_execution",
 };
@@ -328,6 +329,16 @@ type TeamWorkflowSourceCollectionSearchExecutionPayload = {
   importedCount: number;
   run: TeamWorkflowSourceCollectionRunStartPayload["run"];
   runStatus: DataProcessingStatus;
+  sourceCollectionSummary?: {
+    assignmentCount: number;
+    openAssignmentCount: number;
+    searchAssignmentCount: number;
+    searchOpenAssignmentCount: number;
+    collectionAssignmentCount: number;
+    collectionOpenAssignmentCount: number;
+    downstreamAssignmentCount: number;
+    downstreamOpenAssignmentCount: number;
+  };
   storageArtifacts: SourceCollectionStorageArtifacts;
   assignments: TeamWorkflowSourceCollectionRunStartPayload["assignments"];
   outputs: Array<DataProcessingCollectionOutputPayload["output"]>;
@@ -341,6 +352,12 @@ type TeamWorkflowSourceCollectionSearchExecutionPayload = {
     currentTask?: string;
     summary?: string;
     openAssignmentCount?: number;
+    searchAssignmentCount?: number;
+    searchOpenAssignmentCount?: number;
+    collectionAssignmentCount?: number;
+    collectionOpenAssignmentCount?: number;
+    downstreamAssignmentCount?: number;
+    downstreamOpenAssignmentCount?: number;
     recordCount?: number;
     queryCount?: number;
     error?: string;
@@ -587,6 +604,9 @@ type ResearchStageRoundStartPayload = {
     recordCount: number;
     assignmentCount: number;
     openAssignmentCount: number;
+    searchOpenAssignmentCount?: number;
+    collectionOpenAssignmentCount?: number;
+    downstreamOpenAssignmentCount?: number;
     queryCount?: number;
     planId?: string;
     externalSearchTriggered?: boolean;
@@ -2609,7 +2629,13 @@ export function TeamsRoute({
           }));
         }
         if (searchExecution?.runStatus) {
-          queryClient.setQueryData(queryKeys.dataProcessingRunStatus(sourceRunId), searchExecution.runStatus);
+          queryClient.setQueryData(queryKeys.dataProcessingRunStatus(sourceRunId), {
+            ...searchExecution.runStatus,
+            summary: {
+              ...searchExecution.runStatus.summary,
+              ...(searchExecution.sourceCollectionSummary ?? {}),
+            },
+          });
         } else if (payload.run) {
           queryClient.setQueryData(queryKeys.dataProcessingRunStatus(sourceRunId), {
             schemaVersion: 1,
@@ -2620,6 +2646,9 @@ export function TeamsRoute({
               recordCount: 0,
               assignmentCount: payload.assignmentCount ?? payload.assignments?.length ?? 0,
               openAssignmentCount: payload.continuedSourceRunRef?.openAssignmentCount ?? 0,
+              searchOpenAssignmentCount: payload.continuedSourceRunRef?.searchOpenAssignmentCount ?? 0,
+              collectionOpenAssignmentCount: payload.continuedSourceRunRef?.collectionOpenAssignmentCount ?? 0,
+              downstreamOpenAssignmentCount: payload.continuedSourceRunRef?.downstreamOpenAssignmentCount ?? 0,
               outputCount: 0,
               recordStatusCounts: {},
               sourceTypeCounts: {},
@@ -2759,7 +2788,13 @@ export function TeamsRoute({
       ),
     onSuccess: (payload, variables) => {
       setSelectedSourceCollectionRunId(payload.runId);
-      queryClient.setQueryData(queryKeys.dataProcessingRunStatus(payload.runId), payload.runStatus);
+      queryClient.setQueryData(queryKeys.dataProcessingRunStatus(payload.runId), {
+        ...payload.runStatus,
+        summary: {
+          ...payload.runStatus.summary,
+          ...(payload.sourceCollectionSummary ?? {}),
+        },
+      });
       queryClient.setQueryData(queryKeys.dataProcessingCollectionAssignments(payload.runId), {
         schemaVersion: payload.schemaVersion,
         runId: payload.runId,
@@ -3175,8 +3210,10 @@ export function TeamsRoute({
       ? (lang === "zh" ? "未开始" : "not started")
       : selectedTeamExecuteSourceCollectionSearchPending
         ? (lang === "zh" ? "搜索中" : "searching")
-        : sourceCollectionOpenAssignmentCount > 0
+        : sourceCollectionSearchOpenAssignmentCount > 0
           ? (lang === "zh" ? "需补充资料" : "more sources needed")
+          : sourceCollectionDownstreamOpenAssignmentCount > 0
+            ? (lang === "zh" ? "待提炼/筛选" : "downstream pending")
           : sourceManifestCandidates.length > sourceCollectionApprovedCount
             ? (lang === "zh" ? "资料待筛选" : "needs screening")
             : sourceManifestCandidates.length > 0
@@ -3184,16 +3221,18 @@ export function TeamsRoute({
               : (lang === "zh" ? "等待回写" : "waiting for writeback");
     const knowledgeCollectionPrimaryActionLabel = !selectedSourceCollectionRun
       ? (lang === "zh" ? "开始知识搜集" : "Start knowledge")
-      : sourceCollectionOpenAssignmentCount > 0
+      : sourceCollectionSearchOpenAssignmentCount > 0
         ? (selectedTeamExecuteSourceCollectionSearchPending
           ? (lang === "zh" ? "搜索中" : "Searching")
           : (lang === "zh" ? "搜索下一批" : "Search next batch"))
+        : sourceCollectionDownstreamOpenAssignmentCount > 0
+          ? (lang === "zh" ? "进入阶段详情" : "Open stage details")
         : sourceManifestCandidates.length > sourceCollectionApprovedCount
           ? (lang === "zh" ? "进入资料筛选" : "Open screening")
           : (lang === "zh" ? "进入搜集工作台" : "Open collection workspace");
     const knowledgeCollectionPrimaryDisabled = !selectedSourceCollectionRun
       ? selectedTeamStartResearchStagePending || !researchStageCanLaunch
-      : sourceCollectionOpenAssignmentCount > 0
+      : sourceCollectionSearchOpenAssignmentCount > 0
         ? !canExecuteSourceCollectionSearch
         : false;
     const runSourceCollectionSearchFromConsole = () => {
@@ -3202,6 +3241,7 @@ export function TeamsRoute({
       }
       const selectedAssignmentIsRunnable = selectedSourceCollectionAssignment
         ? ["open", "in_progress", "returned"].includes(selectedSourceCollectionAssignment.status)
+          && SOURCE_COLLECTION_SEARCH_EXECUTION_ROLES.has(selectedSourceCollectionAssignment.agentRole)
         : false;
       executeSourceCollectionSearchMutation.mutate({
         teamId: selectedTeam.teamId,
@@ -3219,7 +3259,7 @@ export function TeamsRoute({
         launchResearchStage("knowledge_collection");
         return;
       }
-      if (sourceCollectionOpenAssignmentCount > 0) {
+      if (sourceCollectionSearchOpenAssignmentCount > 0) {
         runSourceCollectionSearchFromConsole();
         return;
       }
@@ -3264,8 +3304,11 @@ export function TeamsRoute({
         if (selectedTeamExecuteSourceCollectionSearchPending) {
           return lang === "zh" ? "正在执行搜索，结果会写入资料记录和候选资料仓库。" : "Searching now; results will be written into DataRecords and candidates.";
         }
-        if (sourceCollectionOpenAssignmentCount > 0) {
-          return lang === "zh" ? "待处理任务可继续搜索。" : "Open tasks are ready for another search batch.";
+        if (sourceCollectionSearchOpenAssignmentCount > 0) {
+          return lang === "zh" ? "还有搜索任务，可继续跑下一批。" : "Search tasks are ready for another batch.";
+        }
+        if (sourceCollectionDownstreamOpenAssignmentCount > 0) {
+          return lang === "zh" ? "搜索已停，后续进入提炼或筛选。" : "Search is idle; extraction or screening is next.";
         }
         if (sourceManifestCandidates.length > sourceCollectionApprovedCount) {
           return lang === "zh" ? "已有候选资料，下一步进入筛选。" : "Candidate sources are ready for screening.";
@@ -3337,7 +3380,8 @@ export function TeamsRoute({
                 {stageType === "knowledge_collection" && selectedSourceCollectionRun ? (
                   <div className={styles.researchStageCardMetrics}>
                     <span>{sourceCollectionRunLabel(selectedSourceCollectionRun.runId)}</span>
-                    <span>{lang === "zh" ? `待处理 ${sourceCollectionOpenAssignmentCount}` : `open ${sourceCollectionOpenAssignmentCount}`}</span>
+                    <span>{lang === "zh" ? `可搜索 ${sourceCollectionSearchOpenAssignmentCount}` : `search ${sourceCollectionSearchOpenAssignmentCount}`}</span>
+                    <span>{lang === "zh" ? `后续 ${sourceCollectionDownstreamOpenAssignmentCount}` : `next ${sourceCollectionDownstreamOpenAssignmentCount}`}</span>
                     <span>{lang === "zh" ? `候选 ${sourceManifestCandidates.length}` : `candidates ${sourceManifestCandidates.length}`}</span>
                     <span>{lang === "zh" ? `查询 ${sourceCollectionQueryCount}` : `queries ${sourceCollectionQueryCount}`}</span>
                   </div>
@@ -3347,7 +3391,7 @@ export function TeamsRoute({
                 {renderResearchStageAgentSummary(stageType)}
                 <div className={styles.researchStageActions}>
                   <button type="button" onClick={() => runStagePrimaryAction(stageType)} disabled={disabled}>
-                    {stageType === "knowledge_collection" && selectedSourceCollectionRun && sourceCollectionOpenAssignmentCount > 0 ? <Search size={13} /> : <Play size={13} />}
+                    {stageType === "knowledge_collection" && selectedSourceCollectionRun && sourceCollectionSearchOpenAssignmentCount > 0 ? <Search size={13} /> : <Play size={13} />}
                     {primaryLabel}
                   </button>
                   {stageType === "knowledge_collection" ? (
@@ -3647,7 +3691,7 @@ export function TeamsRoute({
       ?? sourceCollectionTraceMessages.find((message) => message.id.startsWith("writeback-"))
       ?? (sourceCollectionOperationFailed ? sourceCollectionTraceMessages.find((message) => message.tone === "blocked") : null)
       ?? (!selectedSourceCollectionRun ? sourceCollectionTraceMessages.find((message) => message.id === "coordination-plan") : null)
-      ?? (sourceCollectionOpenAssignmentCount > 0 ? sourceCollectionTraceMessages.find((message) => message.id === "assignment-summary") : null)
+      ?? (sourceCollectionSearchOpenAssignmentCount > 0 || sourceCollectionDownstreamOpenAssignmentCount > 0 ? sourceCollectionTraceMessages.find((message) => message.id === "assignment-summary") : null)
       ?? (sourceManifestCandidates.length ? sourceCollectionTraceMessages.find((message) => message.id.startsWith("candidate-")) : null)
       ?? sourceCollectionTraceMessages[0]
       ?? null;
@@ -5049,15 +5093,26 @@ export function TeamsRoute({
       target,
     });
   };
+  const sourceCollectionRunSummary = sourceCollectionRunStatus?.summary as (DataProcessingStatus["summary"] & {
+    searchOpenAssignmentCount?: number;
+    collectionOpenAssignmentCount?: number;
+    downstreamOpenAssignmentCount?: number;
+  }) | undefined;
+  const sourceCollectionOpenAssignments = sourceCollectionAssignments.filter((assignment) => ["open", "in_progress", "returned"].includes(assignment.status));
   const sourceCollectionOpenAssignmentCount =
-    sourceCollectionRunStatus?.summary.openAssignmentCount
-    ?? sourceCollectionAssignments.filter((assignment) => ["open", "in_progress", "returned"].includes(assignment.status)).length;
+    sourceCollectionRunSummary?.openAssignmentCount
+    ?? sourceCollectionOpenAssignments.length;
+  const sourceCollectionSearchOpenAssignmentCount =
+    sourceCollectionRunSummary?.searchOpenAssignmentCount
+    ?? sourceCollectionOpenAssignments.filter((assignment) => SOURCE_COLLECTION_SEARCH_EXECUTION_ROLES.has(assignment.agentRole)).length;
+  const sourceCollectionDownstreamOpenAssignmentCount =
+    sourceCollectionRunSummary?.downstreamOpenAssignmentCount
+    ?? Math.max(0, sourceCollectionOpenAssignmentCount - sourceCollectionSearchOpenAssignmentCount);
   const sourceManifestCandidates = useMemo(
     () => teamWorkflowCandidates.filter((candidate) => candidate.candidateType === "source_manifest"),
     [teamWorkflowCandidates],
   );
-  const sourceCollectionCollectedCount = Math.max(sourceCollectionRunStatus?.summary.recordCount ?? 0, sourceManifestCandidates.length);
-  const sourceCollectionAssignmentCount = sourceCollectionRunStatus?.summary.assignmentCount ?? sourceCollectionAssignments.length;
+  const sourceCollectionCollectedCount = Math.max(sourceCollectionRunSummary?.recordCount ?? 0, sourceManifestCandidates.length);
   const sourceCollectionQueryCount =
     sourceCollectionSearchPlanRef?.queryCount
     ?? selectedTeamStartSourceCollectionResult?.searchPlan.queryCount
@@ -5065,13 +5120,23 @@ export function TeamsRoute({
   const sourceCollectionApprovedCount = teamWorkflowSourceQualityStatus?.summary.approvedSourceCandidateCount ?? 0;
   const sourceCollectionStageFocusLabel = !selectedSourceCollectionRun
     ? (lang === "zh" ? "尚未启动" : "not started")
-    : sourceCollectionOpenAssignmentCount > 0
+    : sourceCollectionSearchOpenAssignmentCount > 0
       ? (lang === "zh" ? "还需补充资料" : "more sources needed")
+      : sourceCollectionDownstreamOpenAssignmentCount > 0
+        ? (lang === "zh" ? "等待提炼/筛选" : "downstream pending")
       : sourceManifestCandidates.length > sourceCollectionApprovedCount
         ? (lang === "zh" ? "资料待筛选" : "screening needed")
         : sourceManifestCandidates.length > 0
           ? (lang === "zh" ? "可进入实验规划" : "ready for experiment")
           : (lang === "zh" ? "等待结果回写" : "waiting for writeback");
+  const sourceCollectionRunStatusValue = String(sourceCollectionRunStatus?.runStatus || selectedSourceCollectionRun?.status || "").toLowerCase();
+  const sourceCollectionAcceptedBackgroundActive = Boolean(
+    selectedSourceCollectionSearchAccepted
+    && selectedSourceCollectionActiveWorkRun
+    && ["running", "queued"].includes(String(selectedSourceCollectionActiveWorkRun.status || "").toLowerCase())
+    && (!sourceCollectionRunStatus || sourceCollectionSearchOpenAssignmentCount > 0)
+    && (!sourceCollectionRunStatus || ["collecting", "processing"].includes(sourceCollectionRunStatusValue)),
+  );
   const sourceCollectionTraceMessages = useMemo<SourceCollectionTraceMessage[]>(() => {
     const messages: SourceCollectionTraceMessage[] = [];
     messages.push({
@@ -5159,7 +5224,7 @@ export function TeamsRoute({
         ].filter(Boolean),
       });
     }
-    if (selectedSourceCollectionActiveWorkRun && ["running", "queued"].includes(String(selectedSourceCollectionActiveWorkRun.status || "").toLowerCase())) {
+    if (sourceCollectionAcceptedBackgroundActive && selectedSourceCollectionActiveWorkRun) {
       messages.push({
         id: `active-work-${selectedSourceCollectionActiveWorkRun.runId}`,
         agentRole: "Source Collection Agent",
@@ -5168,8 +5233,9 @@ export function TeamsRoute({
         status: selectedSourceCollectionActiveWorkRun.status,
         tone: "search",
         refs: [
-          `${selectedSourceCollectionActiveWorkRun.openAssignmentCount ?? sourceCollectionOpenAssignmentCount} ${lang === "zh" ? "个未完成任务" : "open assignments"}`,
-          `${selectedSourceCollectionActiveWorkRun.recordCount ?? sourceCollectionRunStatus?.summary.recordCount ?? 0} ${lang === "zh" ? "条资料记录" : "records"}`,
+          `${selectedSourceCollectionActiveWorkRun.searchOpenAssignmentCount ?? sourceCollectionSearchOpenAssignmentCount} ${lang === "zh" ? "个可搜索任务" : "searchable assignments"}`,
+          `${selectedSourceCollectionActiveWorkRun.downstreamOpenAssignmentCount ?? sourceCollectionDownstreamOpenAssignmentCount} ${lang === "zh" ? "个后续任务" : "downstream assignments"}`,
+          `${selectedSourceCollectionActiveWorkRun.recordCount ?? sourceCollectionRunSummary?.recordCount ?? 0} ${lang === "zh" ? "条资料记录" : "records"}`,
           `${selectedSourceCollectionActiveWorkRun.queryCount ?? sourceCollectionQueryCount} ${lang === "zh" ? "条搜索问题" : "queries"}`,
         ],
         storageRefs: [selectedSourceCollectionActiveWorkRun.storagePath || selectedSourceCollectionStorageArtifacts?.runDirectory || ""].filter(Boolean),
@@ -5212,10 +5278,10 @@ export function TeamsRoute({
         agentRole: "Research Coordination Agent",
         title: lang === "zh" ? "已把搜集任务分配给功能 Agent" : "Assigned collection work to functional Agents",
         body: lang === "zh"
-          ? `${sourceCollectionAssignments.length} 个任务已分配，${sourceCollectionOpenAssignmentCount} 个仍可执行；功能 Agent 需要按对话式轨迹回写搜索词、来源、提炼结果和候选位置。`
-          : `${sourceCollectionAssignments.length} assignments are allocated and ${sourceCollectionOpenAssignmentCount} remain runnable; functional Agents must write back searched terms, sources, extracted results, and candidate locations as trace messages.`,
-        status: sourceCollectionOpenAssignmentCount ? "open" : "ready_for_screening",
-        tone: sourceCollectionOpenAssignmentCount ? "acquire" : "quality",
+          ? `${sourceCollectionAssignments.length} 个任务已分配：${sourceCollectionSearchOpenAssignmentCount} 个还能继续搜索，${sourceCollectionDownstreamOpenAssignmentCount} 个等待提炼或筛选。`
+          : `${sourceCollectionAssignments.length} assignments are allocated: ${sourceCollectionSearchOpenAssignmentCount} can still search and ${sourceCollectionDownstreamOpenAssignmentCount} wait for extraction or screening.`,
+        status: sourceCollectionSearchOpenAssignmentCount ? "open" : "ready_for_screening",
+        tone: sourceCollectionSearchOpenAssignmentCount ? "acquire" : "quality",
         refs: [
           ...visibleAssignments.map((assignment) => `${sourceCollectionAgentRoleLabel(assignment.agentRole, lang)}：${sourceCollectionStatusLabel(assignment.status, lang)}`),
           ...assignedQueries.slice(0, 4).map((query) => translateResearchPhrase(query.query, lang)),
@@ -5284,6 +5350,8 @@ export function TeamsRoute({
     selectedTeamStartResearchStageResult,
     selectedTeamStartSourceCollectionResult,
     sourceCollectionAssignments,
+    sourceCollectionAcceptedBackgroundActive,
+    sourceCollectionDownstreamOpenAssignmentCount,
     sourceCollectionDraft.goal,
     sourceCollectionDraft.topic,
     sourceCollectionOpenAssignmentCount,
@@ -5292,8 +5360,9 @@ export function TeamsRoute({
     sourceCollectionPromptCacheRequirement,
     sourceCollectionPromptCacheStatus,
     sourceCollectionSearchPlanRef,
+    sourceCollectionSearchOpenAssignmentCount,
     sourceCollectionQueryCount,
-    sourceCollectionRunStatus?.summary.recordCount,
+    sourceCollectionRunSummary?.recordCount,
     sourceManifestCandidates,
     teamWorkflow?.candidateStore.storagePath,
     teamWorkflowSourceQualityStatus,
@@ -5308,7 +5377,7 @@ export function TeamsRoute({
   const canExecuteSourceCollectionSearch = Boolean(
     selectedTeam?.teamId
     && selectedSourceCollectionRunEffectiveId
-    && sourceCollectionOpenAssignmentCount > 0
+    && sourceCollectionSearchOpenAssignmentCount > 0
     && !selectedTeamExecuteSourceCollectionSearchPending,
   );
   const selectedTeamBuildCandidateGraphPending =
@@ -5337,18 +5406,11 @@ export function TeamsRoute({
       : null;
   const selectedTeamSourceQualityPending = selectedTeamAssessSourceQualityPending || selectedTeamAssessSourceQualityBatchPending;
   const selectedTeamSourceQualityError = selectedTeamAssessSourceQualityError || selectedTeamAssessSourceQualityBatchError;
-  const sourceCollectionRunStatusValue = String(sourceCollectionRunStatus?.runStatus || selectedSourceCollectionRun?.status || "").toLowerCase();
-  const sourceCollectionAcceptedBackgroundActive = Boolean(
-    selectedSourceCollectionSearchAccepted
-    && selectedSourceCollectionActiveWorkRun
-    && ["running", "queued"].includes(String(selectedSourceCollectionActiveWorkRun.status || "").toLowerCase())
-    && (!sourceCollectionRunStatus || ["collecting", "processing"].includes(sourceCollectionRunStatusValue)),
-  );
   const sourceCollectionAcceptedBackgroundFailed = Boolean(
     selectedSourceCollectionActiveWorkRun
     && ["failed", "blocked"].includes(String(selectedSourceCollectionActiveWorkRun.status || "").toLowerCase()),
   );
-  const sourceCollectionRecordCount = sourceCollectionRunStatus?.summary.recordCount ?? 0;
+  const sourceCollectionRecordCount = sourceCollectionRunSummary?.recordCount ?? 0;
   const sourceCollectionOperationActive = Boolean(
     selectedTeamStartResearchStagePending
     || selectedTeamStartSourceCollectionPending
@@ -5505,6 +5567,7 @@ export function TeamsRoute({
     }
     const selectedAssignmentIsRunnable = selectedSourceCollectionAssignment
       ? ["open", "in_progress", "returned"].includes(selectedSourceCollectionAssignment.status)
+        && SOURCE_COLLECTION_SEARCH_EXECUTION_ROLES.has(selectedSourceCollectionAssignment.agentRole)
       : false;
     executeSourceCollectionSearchMutation.mutate({
       teamId: selectedTeam.teamId,
@@ -5523,7 +5586,7 @@ export function TeamsRoute({
       launchResearchStage("knowledge_collection");
       return;
     }
-    if (sourceCollectionOpenAssignmentCount > 0) {
+    if (sourceCollectionSearchOpenAssignmentCount > 0) {
       runSourceCollectionSearchFromHeader();
       return;
     }
@@ -5535,7 +5598,7 @@ export function TeamsRoute({
       ? "active"
       : !selectedSourceCollectionRun
         ? "idle"
-        : sourceCollectionOpenAssignmentCount > 0 || sourceManifestCandidates.length > sourceCollectionApprovedCount
+        : sourceCollectionSearchOpenAssignmentCount > 0 || sourceCollectionDownstreamOpenAssignmentCount > 0 || sourceManifestCandidates.length > sourceCollectionApprovedCount
           ? "pending"
           : sourceManifestCandidates.length > 0
             ? "done"
@@ -5554,8 +5617,10 @@ export function TeamsRoute({
               ? (lang === "zh" ? "处理失败" : "Failed")
               : !selectedSourceCollectionRun
                 ? (lang === "zh" ? "未开始" : "Not started")
-                : sourceCollectionOpenAssignmentCount > 0
+                : sourceCollectionSearchOpenAssignmentCount > 0
                   ? (lang === "zh" ? "需补充资料" : "More sources needed")
+                  : sourceCollectionDownstreamOpenAssignmentCount > 0
+                    ? (lang === "zh" ? "待提炼/筛选" : "Extraction or screening pending")
                   : sourceManifestCandidates.length > sourceCollectionApprovedCount
                     ? (lang === "zh" ? "待筛选资料" : "Needs screening")
                     : sourceManifestCandidates.length > 0
@@ -5574,10 +5639,15 @@ export function TeamsRoute({
     if (!selectedSourceCollectionRun) {
       return lang === "zh" ? "点击开始搜集，生成本轮搜索任务和存储目录。" : "Start collection to create the search work and storage folder.";
     }
-    if (sourceCollectionOpenAssignmentCount > 0) {
+    if (sourceCollectionSearchOpenAssignmentCount > 0) {
       return lang === "zh"
-        ? `还有 ${sourceCollectionOpenAssignmentCount} 个搜集任务未完成，继续搜索即可推进。`
-        : `${sourceCollectionOpenAssignmentCount} collection assignments remain. Run the next search to proceed.`;
+        ? `还有 ${sourceCollectionSearchOpenAssignmentCount} 个搜索任务未完成，点击搜索下一批推进。`
+        : `${sourceCollectionSearchOpenAssignmentCount} search assignments remain. Run the next search to proceed.`;
+    }
+    if (sourceCollectionDownstreamOpenAssignmentCount > 0) {
+      return lang === "zh"
+        ? `搜索已停止，还有 ${sourceCollectionDownstreamOpenAssignmentCount} 个后续任务等待提炼或筛选。`
+        : `Search is idle; ${sourceCollectionDownstreamOpenAssignmentCount} downstream tasks wait for extraction or screening.`;
     }
     if (sourceManifestCandidates.length > sourceCollectionApprovedCount) {
       return lang === "zh"
@@ -5622,7 +5692,7 @@ export function TeamsRoute({
       ? "active"
       : !selectedSourceCollectionRun
         ? "idle"
-        : sourceCollectionOpenAssignmentCount > 0
+        : sourceCollectionSearchOpenAssignmentCount > 0
           ? "pending"
           : sourceCollectionRecordCount || sourceManifestCandidates.length
             ? "done"
@@ -5633,7 +5703,7 @@ export function TeamsRoute({
       ? "active"
       : sourceQualityAssessedCount > 0
         ? "done"
-        : sourceManifestCandidates.length > 0 && sourceCollectionOpenAssignmentCount <= 0
+        : sourceManifestCandidates.length > 0 && sourceCollectionSearchOpenAssignmentCount <= 0
           ? "pending"
           : "idle";
   const sourceCollectionCandidateStepState: SourceCollectionStepState = selectedTeamRecordSourceCollectionOutputError
@@ -5667,12 +5737,12 @@ export function TeamsRoute({
     ? (lang === "zh" ? "开始搜集" : "Start")
     : selectedTeamExecuteSourceCollectionSearchPending
       ? (lang === "zh" ? "搜索中" : "Searching")
-      : sourceCollectionOpenAssignmentCount > 0
+      : sourceCollectionSearchOpenAssignmentCount > 0
         ? (lang === "zh" ? "搜索下一批" : "Search next")
-        : (lang === "zh" ? "新一轮搜集" : "New round");
+      : (lang === "zh" ? "新一轮搜集" : "New round");
   const sourceCollectionCollectionActionDisabled = !selectedSourceCollectionRun
     ? selectedTeamStartResearchStagePending || !researchStageCanLaunch
-    : sourceCollectionOpenAssignmentCount > 0
+    : sourceCollectionSearchOpenAssignmentCount > 0
       ? !canExecuteSourceCollectionSearch
       : selectedTeamStartResearchStagePending || !researchStageCanLaunch;
   const sourceCollectionStageModules: SourceCollectionStageModule[] = [
@@ -5682,8 +5752,8 @@ export function TeamsRoute({
       metric: lang === "zh" ? `已收集 ${sourceCollectionCollectedCount} 条` : `${sourceCollectionCollectedCount} collected`,
       summary: !selectedSourceCollectionRun
         ? (lang === "zh" ? "点击开始生成本轮任务" : "Start to create this run")
-        : sourceCollectionOpenAssignmentCount > 0
-          ? (lang === "zh" ? `${sourceCollectionOpenAssignmentCount} 个搜集任务待执行` : `${sourceCollectionOpenAssignmentCount} collection tasks remain`)
+        : sourceCollectionSearchOpenAssignmentCount > 0
+          ? (lang === "zh" ? `${sourceCollectionSearchOpenAssignmentCount} 个搜索任务待执行` : `${sourceCollectionSearchOpenAssignmentCount} search tasks remain`)
           : (lang === "zh" ? `${sourceCollectionQueryCount} 个搜索问题已处理` : `${sourceCollectionQueryCount} search questions handled`),
       state: sourceCollectionSearchStepState,
       status: sourceCollectionStepStatusText(sourceCollectionSearchStepState),
@@ -5691,7 +5761,7 @@ export function TeamsRoute({
       actionLabel: sourceCollectionCollectionActionLabel,
       actionDisabled: sourceCollectionCollectionActionDisabled,
       actionTone: "primary",
-      actionIcon: selectedSourceCollectionRun && sourceCollectionOpenAssignmentCount > 0 ? "search" : "play",
+      actionIcon: selectedSourceCollectionRun && sourceCollectionSearchOpenAssignmentCount > 0 ? "search" : "play",
       onAction: runSourceCollectionCollectionAction,
       onDetail: () => scrollSourceCollectionPanelIntoView("source-collection-process"),
     },
@@ -5861,7 +5931,8 @@ export function TeamsRoute({
               </div>
               <div className={styles.sourceCollectionCommandStats}>
                 <span>{lang === "zh" ? "下一步" : "next"} <strong>{sourceCollectionStageFocusLabel}</strong></span>
-                <span>{lang === "zh" ? "待执行" : "open"} <strong>{lang === "zh" ? `${sourceCollectionOpenAssignmentCount} 项` : sourceCollectionOpenAssignmentCount}</strong></span>
+                <span>{lang === "zh" ? "可搜索" : "search"} <strong>{lang === "zh" ? `${sourceCollectionSearchOpenAssignmentCount} 项` : sourceCollectionSearchOpenAssignmentCount}</strong></span>
+                <span>{lang === "zh" ? "后续" : "next work"} <strong>{lang === "zh" ? `${sourceCollectionDownstreamOpenAssignmentCount} 项` : sourceCollectionDownstreamOpenAssignmentCount}</strong></span>
                 <span>{lang === "zh" ? "搜集结果" : "results"} <strong>{lang === "zh" ? `${sourceCollectionCollectedCount} 条` : sourceCollectionCollectedCount}</strong></span>
                 <span>{lang === "zh" ? "搜索范围" : "search scope"} <strong>{lang === "zh" ? `${sourceCollectionQueryCount} 题` : sourceCollectionQueryCount}</strong></span>
                 <span>{lang === "zh" ? "缓存" : "cache"} <strong>{sourceCollectionPromptCacheStatusLabel(sourceCollectionPromptCacheStatus, lang)}</strong></span>
@@ -6354,7 +6425,9 @@ export function TeamsRoute({
                             <strong>{lang === "zh" ? "资料搜集执行" : "Source collection"}</strong>
                             <span>
                               {selectedSourceCollectionRun
-                                ? `${sourceCollectionRunLabel(selectedSourceCollectionRun.runId)} · ${sourceCollectionRunStatus?.summary.recordCount ?? 0} records / ${sourceCollectionAssignments.length} assignments`
+                                ? lang === "zh"
+                                  ? `${sourceCollectionRunLabel(selectedSourceCollectionRun.runId)} · ${sourceCollectionRunSummary?.recordCount ?? 0} 条资料 / ${sourceCollectionAssignments.length} 个任务`
+                                  : `${sourceCollectionRunLabel(selectedSourceCollectionRun.runId)} · ${sourceCollectionRunSummary?.recordCount ?? 0} records / ${sourceCollectionAssignments.length} assignments`
                                 : sourceCollectionRunsQuery.isPending
                                 ? (lang === "zh" ? "读取批次中" : "loading runs")
                                 : (lang === "zh" ? "等待启动批次" : "waiting for run")}
@@ -6472,10 +6545,10 @@ export function TeamsRoute({
                             </select>
                           </label>
                           <div className={styles.workflowSourceCollectionStats}>
-                            <span>{lang === "zh" ? "记录" : "records"} <strong>{sourceCollectionRunStatus?.summary.recordCount ?? 0}</strong></span>
-                            <span>{lang === "zh" ? "任务" : "assignments"} <strong>{sourceCollectionRunStatus?.summary.assignmentCount ?? sourceCollectionAssignments.length}</strong></span>
-                            <span>{lang === "zh" ? "未完成" : "open"} <strong>{sourceCollectionRunStatus?.summary.openAssignmentCount ?? 0}</strong></span>
-                            <span>{lang === "zh" ? "queries" : "queries"} <strong>{sourceCollectionSearchPlanRef?.queryCount ?? selectedTeamStartSourceCollectionResult?.searchPlan.queryCount ?? 0}</strong></span>
+                            <span>{lang === "zh" ? "资料" : "records"} <strong>{sourceCollectionRunSummary?.recordCount ?? 0}</strong></span>
+                            <span>{lang === "zh" ? "可搜索" : "search"} <strong>{sourceCollectionSearchOpenAssignmentCount}</strong></span>
+                            <span>{lang === "zh" ? "后续" : "next work"} <strong>{sourceCollectionDownstreamOpenAssignmentCount}</strong></span>
+                            <span>{lang === "zh" ? "搜索问题" : "queries"} <strong>{sourceCollectionSearchPlanRef?.queryCount ?? selectedTeamStartSourceCollectionResult?.searchPlan.queryCount ?? 0}</strong></span>
                             <span>KV <strong>{sourceCollectionPromptCacheStatusLabel(sourceCollectionPromptCacheStatus, lang)}{sourceCollectionPromptCacheMode ? ` · ${sourceCollectionPromptCacheMode}` : ""}</strong></span>
                           </div>
                         </div>

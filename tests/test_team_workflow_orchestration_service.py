@@ -614,6 +614,53 @@ def test_execute_source_collection_search_publishes_runtime_work_run(tmp_path, m
     assert summary["latest"]["importedCount"] == 1
 
 
+def test_execute_source_collection_search_does_not_mark_downstream_assignments_as_running_search(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    source_work_runs = WorkRunStore(root=tmp_path / ".runtime" / "work_runs")
+    monkeypatch.setattr(
+        team_workflow_orchestration_service,
+        "_source_collection_work_run_store",
+        lambda: source_work_runs,
+    )
+    monkeypatch.setattr(
+        team_workflow_orchestration_service,
+        "_execute_source_collection_query",
+        lambda query, *, max_results, provider: _fake_source_search_response(query, max_results=max_results, provider=provider),
+    )
+    team = team_service.create_team(name="ai科学研究团队")
+    run_response = team_workflow_orchestration_service.start_source_collection_run(
+        team["teamId"],
+        {
+            "title": "Neural algorithm source batch",
+            "topic": "neural predictive coding",
+            "querySeeds": ["neural predictive coding"],
+            "searchLanguages": ["en"],
+            "sourceTypes": ["paper"],
+            "agentRoles": ["data_discovery", "content_extraction", "source_quality"],
+        },
+    )
+
+    execution = team_workflow_orchestration_service.execute_source_collection_search(
+        team["teamId"],
+        run_response["run"]["runId"],
+        {"maxQueries": 1, "maxResultsPerQuery": 1},
+    )
+    summary = team_workflow_orchestration_service.load_source_collection_work_run_summary()
+
+    assert execution["executedQueryCount"] == 1
+    assert execution["sourceCollectionSummary"]["openAssignmentCount"] == 2
+    assert execution["sourceCollectionSummary"]["searchOpenAssignmentCount"] == 0
+    assert execution["sourceCollectionSummary"]["downstreamOpenAssignmentCount"] == 2
+    assert execution["runStatus"]["summary"]["searchOpenAssignmentCount"] == 0
+    assert execution["runStatus"]["summary"]["downstreamOpenAssignmentCount"] == 2
+    assert summary["active"] is None
+    assert summary["latest"]["status"] == "completed"
+    assert summary["latest"]["currentPhase"] == "completed"
+    assert summary["latest"]["openAssignmentCount"] == 2
+    assert summary["latest"]["searchOpenAssignmentCount"] == 0
+    assert summary["latest"]["downstreamOpenAssignmentCount"] == 2
+
+
 def test_execute_source_collection_search_skips_existing_query_without_force(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     calls = []

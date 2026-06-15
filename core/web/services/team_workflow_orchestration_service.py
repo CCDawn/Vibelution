@@ -79,6 +79,8 @@ SOURCE_COLLECTION_DEFAULT_AGENT_ROLES = (
     "content_extraction",
     "source_quality",
 )
+SOURCE_COLLECTION_SEARCH_EXECUTION_AGENT_ROLES = {"data_discovery", "source_acquisition"}
+SOURCE_COLLECTION_COLLECTION_STAGE_AGENT_ROLES = {"data_discovery", "source_acquisition", "content_extraction"}
 SOURCE_COLLECTION_DEFAULT_SEARCH_LANGUAGES = ("en", "zh")
 SOURCE_COLLECTION_DEFAULT_SOURCE_TYPES = ("paper", "review", "dataset", "preprint")
 SOURCE_COLLECTION_DEFAULT_MAX_RESULTS_PER_QUERY = 10
@@ -795,6 +797,8 @@ def _execute_source_collection_search_impl(team_id: str, run_id: str, payload: d
             break
         assignment_id = _trim_text(assignment.get("assignmentId"), max_length=128)
         agent_role = _trim_text(assignment.get("agentRole"), max_length=80)
+        if agent_role not in SOURCE_COLLECTION_SEARCH_EXECUTION_AGENT_ROLES:
+            continue
         if target_assignment_ids and assignment_id not in target_assignment_ids:
             continue
         if target_agent_role and agent_role != target_agent_role:
@@ -964,6 +968,12 @@ def _execute_source_collection_search_impl(team_id: str, run_id: str, payload: d
     final_run = data_processing_service.get_processing_run(normalized_run_id)
     final_assignments = data_processing_service.list_collection_assignments(normalized_run_id)["assignments"]
     final_status = data_processing_service.get_processing_status(normalized_run_id)
+    source_collection_summary = _source_collection_assignment_stage_summary(
+        [item for item in list(final_assignments or []) if isinstance(item, dict)]
+    )
+    final_status_summary = final_status.get("summary") if isinstance(final_status.get("summary"), dict) else {}
+    final_status_summary.update(source_collection_summary)
+    final_status["summary"] = final_status_summary
     _append_source_collection_execution_artifacts(
         normalized_team_id,
         normalized_run_id,
@@ -1001,6 +1011,7 @@ def _execute_source_collection_search_impl(team_id: str, run_id: str, payload: d
         "importedCount": len(imported),
         "run": final_run,
         "runStatus": final_status,
+        "sourceCollectionSummary": source_collection_summary,
         "storageArtifacts": storage_artifacts,
         "assignments": final_assignments,
         "outputs": outputs,
@@ -6494,6 +6505,51 @@ def _source_collection_assigned_queries(assignment: dict[str, Any]) -> list[dict
     return [item for item in list(scope.get("assignedQueries") or []) if isinstance(item, dict)]
 
 
+def _source_collection_open_assignments(assignments: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        item for item in assignments
+        if str(item.get("status") or "").strip().lower() in {"open", "in_progress", "returned"}
+    ]
+
+
+def _source_collection_assignment_stage_summary(assignments: list[dict[str, Any]]) -> dict[str, int]:
+    open_assignments = _source_collection_open_assignments(assignments)
+    search_assignments = [
+        item for item in assignments
+        if _trim_text(item.get("agentRole"), max_length=80) in SOURCE_COLLECTION_SEARCH_EXECUTION_AGENT_ROLES
+    ]
+    search_open_assignments = [
+        item for item in open_assignments
+        if _trim_text(item.get("agentRole"), max_length=80) in SOURCE_COLLECTION_SEARCH_EXECUTION_AGENT_ROLES
+    ]
+    collection_assignments = [
+        item for item in assignments
+        if _trim_text(item.get("agentRole"), max_length=80) in SOURCE_COLLECTION_COLLECTION_STAGE_AGENT_ROLES
+    ]
+    collection_open_assignments = [
+        item for item in open_assignments
+        if _trim_text(item.get("agentRole"), max_length=80) in SOURCE_COLLECTION_COLLECTION_STAGE_AGENT_ROLES
+    ]
+    downstream_assignments = [
+        item for item in assignments
+        if _trim_text(item.get("agentRole"), max_length=80) not in SOURCE_COLLECTION_SEARCH_EXECUTION_AGENT_ROLES
+    ]
+    downstream_open_assignments = [
+        item for item in open_assignments
+        if _trim_text(item.get("agentRole"), max_length=80) not in SOURCE_COLLECTION_SEARCH_EXECUTION_AGENT_ROLES
+    ]
+    return {
+        "assignmentCount": len(assignments),
+        "openAssignmentCount": len(open_assignments),
+        "searchAssignmentCount": len(search_assignments),
+        "searchOpenAssignmentCount": len(search_open_assignments),
+        "collectionAssignmentCount": len(collection_assignments),
+        "collectionOpenAssignmentCount": len(collection_open_assignments),
+        "downstreamAssignmentCount": len(downstream_assignments),
+        "downstreamOpenAssignmentCount": len(downstream_open_assignments),
+    }
+
+
 def _source_collection_existing_query_ids(records: list[dict[str, Any]]) -> set[str]:
     query_ids: set[str] = set()
     for record in records:
@@ -6736,10 +6792,7 @@ def _persist_source_collection_work_run(
     now = utc_now_iso()
     run_scope = run.get("scope") if isinstance(run.get("scope"), dict) else {}
     run_metadata = run.get("metadata") if isinstance(run.get("metadata"), dict) else {}
-    open_assignments = [
-        item for item in assignments
-        if str(item.get("status") or "").strip().lower() in {"open", "in_progress", "returned"}
-    ]
+    assignment_summary = _source_collection_assignment_stage_summary(assignments)
     search_plan_ref = run_scope.get("dataSearchPlanRef") if isinstance(run_scope.get("dataSearchPlanRef"), dict) else {}
     query_count = _normalize_int(
         run_metadata.get("queryCount") or search_plan_ref.get("queryCount"),
@@ -6761,7 +6814,13 @@ def _persist_source_collection_work_run(
         "summary": _trim_text(summary, max_length=500),
         "currentTask": _trim_text(summary, max_length=500),
         "assignmentCount": len(assignments),
-        "openAssignmentCount": len(open_assignments),
+        "openAssignmentCount": assignment_summary["openAssignmentCount"],
+        "searchAssignmentCount": assignment_summary["searchAssignmentCount"],
+        "searchOpenAssignmentCount": assignment_summary["searchOpenAssignmentCount"],
+        "collectionAssignmentCount": assignment_summary["collectionAssignmentCount"],
+        "collectionOpenAssignmentCount": assignment_summary["collectionOpenAssignmentCount"],
+        "downstreamAssignmentCount": assignment_summary["downstreamAssignmentCount"],
+        "downstreamOpenAssignmentCount": assignment_summary["downstreamOpenAssignmentCount"],
         "recordCount": len(records),
         "queryCount": query_count,
         "storagePath": _source_collection_storage_artifacts(team_id, run_id)["runDirectory"],
@@ -6769,7 +6828,13 @@ def _persist_source_collection_work_run(
         "sourceCollection": {
             "teamId": team_id,
             "stageType": "knowledge_collection",
-            "openAssignmentCount": len(open_assignments),
+            "openAssignmentCount": assignment_summary["openAssignmentCount"],
+            "searchAssignmentCount": assignment_summary["searchAssignmentCount"],
+            "searchOpenAssignmentCount": assignment_summary["searchOpenAssignmentCount"],
+            "collectionAssignmentCount": assignment_summary["collectionAssignmentCount"],
+            "collectionOpenAssignmentCount": assignment_summary["collectionOpenAssignmentCount"],
+            "downstreamAssignmentCount": assignment_summary["downstreamAssignmentCount"],
+            "downstreamOpenAssignmentCount": assignment_summary["downstreamOpenAssignmentCount"],
             "recordCount": len(records),
             "queryCount": query_count,
         },
@@ -6798,9 +6863,8 @@ def _persist_source_collection_work_run(
 def _source_collection_work_run_terminal_status(result: dict[str, Any]) -> str:
     if _source_collection_count(result.get("failedQueryCount")) and not _source_collection_count(result.get("executedQueryCount")):
         return "failed"
-    run_status = result.get("runStatus") if isinstance(result.get("runStatus"), dict) else {}
-    summary = run_status.get("summary") if isinstance(run_status.get("summary"), dict) else {}
-    if _source_collection_count(summary.get("openAssignmentCount")):
+    source_collection_summary = result.get("sourceCollectionSummary") if isinstance(result.get("sourceCollectionSummary"), dict) else {}
+    if _source_collection_count(source_collection_summary.get("searchOpenAssignmentCount")):
         return "needs_continue"
     return "completed"
 
@@ -7197,6 +7261,7 @@ def _continued_stage_round_payload(stage_round: dict[str, Any], stage_type: str)
             }
         }
     assignments = [item for item in list(assignment_payload.get("assignments") or []) if isinstance(item, dict)]
+    assignment_summary = _source_collection_assignment_stage_summary(assignments)
     summary = run.get("summary") if isinstance(run.get("summary"), dict) else {}
     scope = run.get("scope") if isinstance(run.get("scope"), dict) else {}
     data_search_plan_ref = scope.get("dataSearchPlanRef") if isinstance(scope.get("dataSearchPlanRef"), dict) else {}
@@ -7210,6 +7275,9 @@ def _continued_stage_round_payload(stage_round: dict[str, Any], stage_type: str)
             "recordCount": _normalize_int(summary.get("recordCount"), default=0, minimum=0, maximum=100000),
             "assignmentCount": _normalize_int(summary.get("assignmentCount"), default=len(assignments), minimum=0, maximum=100000),
             "openAssignmentCount": _normalize_int(summary.get("openAssignmentCount"), default=0, minimum=0, maximum=100000),
+            "searchOpenAssignmentCount": assignment_summary["searchOpenAssignmentCount"],
+            "collectionOpenAssignmentCount": assignment_summary["collectionOpenAssignmentCount"],
+            "downstreamOpenAssignmentCount": assignment_summary["downstreamOpenAssignmentCount"],
             "queryCount": _normalize_int(data_search_plan_ref.get("queryCount"), default=0, minimum=0, maximum=SOURCE_COLLECTION_MAX_QUERIES),
             "planId": _trim_text(data_search_plan_ref.get("planId"), max_length=160),
             "externalSearchTriggered": bool(data_search_plan_ref.get("externalSearchTriggered")),
