@@ -212,6 +212,28 @@
   background: var(--surface-card-subtle);
 }
 
+.supervisedMemberLink {
+  grid-template-columns: minmax(86px, 0.44fr) minmax(0, 1fr) auto;
+  color: inherit;
+  text-decoration: none;
+  transition: border-color 120ms ease, background 120ms ease, transform 120ms ease;
+}
+
+.supervisedMemberLink:hover,
+.supervisedMemberLink:focus-visible {
+  border-color: color-mix(in srgb, var(--accent-cool) 42%, var(--border-soft));
+  background: color-mix(in srgb, var(--accent-cool) 8%, var(--surface-card-subtle));
+  outline: none;
+}
+
+.supervisedMemberLink:focus-visible {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-cool) 18%, transparent);
+}
+
+.supervisedMemberLink svg {
+  color: var(--fg-tertiary);
+}
+
 .supervisedMemberRowActive {
   border-color: color-mix(in srgb, var(--accent-warm) 44%, var(--border-soft));
   background: color-mix(in srgb, var(--accent-warm) 10%, var(--surface-card-subtle));
