@@ -34,7 +34,7 @@ EXPLICIT_ALLOW_TOOLS = {
 def explicit_allow_tool_names() -> set[str]:
     """Return tools that still require ToolPolicy explicit allow."""
 
-    return set()
+    return set(EXPLICIT_ALLOW_TOOLS)
 
 CATEGORY_LABELS = {
     "workspace_read": "Workspace read",

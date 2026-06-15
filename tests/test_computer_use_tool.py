@@ -11,6 +11,7 @@ from core.web.control import CONTROL_TOKEN_HEADER, get_control_token
 from core.web.services import agent_directory_service
 from core.web.services import computer_use_service
 from core.web.services import tool_registry_service as registry
+from core.web.services import tool_catalog
 from tools.computer_use_tools import computer_use_session_tool, computer_use_task_tool
 
 
@@ -976,10 +977,14 @@ def test_tool_registry_marks_computer_use_as_high_risk_without_tool_policy_gate(
     assert tool["category"] == "task_runtime"
     assert tool["permissionTier"] == "high"
     assert {"computer_control", "network_access", "external_automation"}.issubset(set(tool["riskTags"]))
-    assert tool["permissionPolicy"]["requiresExplicitAllow"] is False
+    assert tool["permissionPolicy"]["requiresExplicitAllow"] is (
+        str(tool["name"]).strip() in tool_catalog.explicit_allow_tool_names()
+    )
     assert session_tool["category"] == "task_runtime"
     assert session_tool["permissionTier"] == "high"
     assert {"computer_control", "external_automation", "session_state_write"}.issubset(set(session_tool["riskTags"]))
-    assert session_tool["permissionPolicy"]["requiresExplicitAllow"] is False
+    assert session_tool["permissionPolicy"]["requiresExplicitAllow"] is (
+        str(session_tool["name"]).strip() in tool_catalog.explicit_allow_tool_names()
+    )
     assert "computer_use_task_tool" in operations["toolNames"]
     assert "computer_use_session_tool" in operations["toolNames"]

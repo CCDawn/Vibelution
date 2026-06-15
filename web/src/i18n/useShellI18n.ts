@@ -10,6 +10,8 @@ const statusKeyMap: Record<string, ShellTranslationKey> = {
   running: "status_running",
   failed: "status_failed",
   waiting: "status_waiting",
+  timeout: "status_timeout",
+  timed_out: "status_timeout",
   inconclusive: "status_inconclusive",
   done: "status_done",
   success: "status_success",
