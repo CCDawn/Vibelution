@@ -1528,6 +1528,28 @@ function cacheDonutSegmentTitle(
   return parts.filter(Boolean).join(" · ");
 }
 
+function cachePromptSegmentHoverTitle(
+  segment: CacheDonutSegment,
+  totalTokens: number,
+  numberFormatter: Intl.NumberFormat,
+  lang: "zh" | "en",
+  t: (key: TranslationKey) => string,
+) {
+  const label = segment.key === "computed_missing"
+    ? cacheCompositionSegmentLabel("missing", segment.label, t)
+    : promptSegmentDisplayLabel(segment, lang, t);
+  const percent = Math.round(segment.actualPercent);
+  const tokenLabel = lang === "zh" ? "tokens" : "tokens";
+  const amplifiedLabel = segment.visuallyAmplified
+    ? lang === "zh" ? "小段已放大便于定位" : "small segment enlarged"
+    : "";
+  return [
+    `${label} · ${numberFormatter.format(segment.tokens)} ${tokenLabel} · ${percent}%`,
+    totalTokens > 0 ? `${numberFormatter.format(segment.tokens)} / ${numberFormatter.format(totalTokens)}` : "",
+    amplifiedLabel,
+  ].filter(Boolean).join(" · ");
+}
+
 function cacheDonutSegmentStyle(segment: CacheDonutSegment, gapPercent = 0): CSSProperties {
   const gap = Math.max(0, Math.min(1, gapPercent));
   const visiblePercent = segment.visualPercent > gap
@@ -6224,7 +6246,9 @@ export function ChatCodingRoute() {
                             r="42"
                             pathLength={100}
                             style={cacheDonutSegmentStyle(segment, cachePromptDonutSegments.length > 1 ? 0.55 : 0)}
-                          />
+                          >
+                            <title>{cachePromptSegmentHoverTitle(segment, cachePromptCompositionTotalTokens, numberFormatter, lang, t)}</title>
+                          </circle>
                         ))}
                         <circle className={`${styles.cacheDonutTrack} ${styles.cacheDonutInnerTrack}`} cx="50" cy="50" r="31" pathLength={100} />
                         {trueCacheDonutSegments.map((segment, index) => (
@@ -6262,26 +6286,6 @@ export function ChatCodingRoute() {
                       </span>
                     </div>
                   </div>
-                  {cachePromptDonutSegments.length ? (
-                    <div className={styles.contextCompositionLegend}>
-                      {cachePromptDonutSegments.map((segment, index) => (
-                        <span
-                          key={`${segment.key}-${segment.status}-${index}-legend`}
-                          title={cacheDonutSegmentTitle(segment, cachePromptCompositionTotalTokens, numberFormatter, lang)}
-                        >
-                          <i className={cachePromptLegendSegmentClass(segment)} />
-                          {segment.key === "computed_missing" ? cacheCompositionSegmentLabel("missing", segment.label, t) : segment.label}
-                          {" "}
-                          {segment.key === "computed_missing" ? "" : numberFormatter.format(segment.tokens ?? 0)}
-                          {segment.contentPreview ? (
-                            <em className={styles.cacheDonutLegendPreview}>
-                              {segment.contentPreview}
-                            </em>
-                          ) : null}
-                        </span>
-                      ))}
-                    </div>
-                  ) : null}
                 </div>
               </section>
 
@@ -7737,7 +7741,7 @@ export function ChatCodingRoute() {
                         pathLength={100}
                         style={cacheDonutSegmentStyle(segment, cachePromptDonutSegments.length > 1 ? 0.55 : 0)}
                       >
-                        <title>{cacheDonutSegmentTitle(segment, cachePromptCompositionTotalTokens, numberFormatter, lang)}</title>
+                        <title>{cachePromptSegmentHoverTitle(segment, cachePromptCompositionTotalTokens, numberFormatter, lang, t)}</title>
                       </circle>
                     ))}
                     <circle className={`${styles.cacheDonutTrack} ${styles.cacheDonutInnerTrack}`} cx="50" cy="50" r="31" pathLength={100} />
@@ -7774,15 +7778,19 @@ export function ChatCodingRoute() {
                     <span>{numberFormatter.format(cachePromptCompositionTotalTokens)} tokens</span>
                   </div>
                   {cachePromptDonutSegments.length ? (
-                    cachePromptDonutSegments.map((segment, index) => (
-                      <div
-                        key={`detail-computed-row-${segment.key}-${segment.status}-${index}`}
-                        className={styles.cacheDetailSegmentRow}
-                        title={cacheDonutSegmentTitle(segment, cachePromptCompositionTotalTokens, numberFormatter, lang)}
-                      >
-                        <i className={`${styles.cacheDetailSwatch} ${cachePromptLegendSegmentClass(segment)}`} />
-                        <div className={styles.cacheDetailSegmentText}>
-                          <strong>{segment.key === "computed_missing" ? cacheCompositionSegmentLabel("missing", segment.label, t) : segment.label}</strong>
+                    cachePromptDonutSegments.map((segment, index) => {
+                      const segmentDisplayLabel = segment.key === "computed_missing"
+                        ? cacheCompositionSegmentLabel("missing", segment.label, t)
+                        : promptSegmentDisplayLabel(segment, lang, t);
+                      return (
+                        <div
+                          key={`detail-computed-row-${segment.key}-${segment.status}-${index}`}
+                          className={styles.cacheDetailSegmentRow}
+                          title={cacheDonutSegmentTitle(segment, cachePromptCompositionTotalTokens, numberFormatter, lang)}
+                        >
+                          <i className={`${styles.cacheDetailSwatch} ${cachePromptLegendSegmentClass(segment)}`} />
+                          <div className={styles.cacheDetailSegmentText}>
+                            <strong>{segmentDisplayLabel}</strong>
                           <span className={styles.cacheDetailSegmentSource}>
                             {promptSegmentCategoryLabel(segment, lang)}
                             {promptSegmentAccuracyLabel(segment, lang) ? ` · ${promptSegmentAccuracyLabel(segment, lang)}` : ""}
@@ -7817,35 +7825,10 @@ export function ChatCodingRoute() {
                           ) : null}
                         </em>
                       </div>
-                    ))
+                      );
+                    })
                   ) : (
                     <div className={styles.cacheDetailEmpty}>{lang === "zh" ? "暂无计算段数据" : "No computed segment data"}</div>
-                  )}
-                </section>
-
-                <section className={styles.cacheDetailSegmentGroup}>
-                  <div className={styles.cacheDetailSegmentHeader}>
-                    <strong>{lang === "zh" ? "Provider 真实命中" : "Provider true hits"}</strong>
-                    <span>{numberFormatter.format(providerCacheInputTokens)} tokens</span>
-                  </div>
-                  {trueCacheDonutSegments.length ? (
-                    trueCacheDonutSegments.map((segment, index) => (
-                      <div
-                        key={`detail-true-row-${segment.key}-${segment.status}-${index}`}
-                        className={styles.cacheDetailSegmentRow}
-                        title={cacheDonutSegmentTitle(segment, providerCacheInputTokens, numberFormatter, lang)}
-                      >
-                        <i className={`${styles.cacheDetailSwatch} ${cacheDonutSegmentClass(segment.status || segment.key)}`} />
-                        <div className={styles.cacheDetailSegmentText}>
-                          <strong>{segment.label || segment.key}</strong>
-                          <span>{segment.source || segment.status || segment.key}</span>
-                          {segment.description ? <small>{segment.description}</small> : null}
-                        </div>
-                        <em>{numberFormatter.format(segment.tokens ?? 0)} · {Math.round(segment.actualPercent)}%</em>
-                      </div>
-                    ))
-                  ) : (
-                    <div className={styles.cacheDetailEmpty}>{lang === "zh" ? "暂无真实命中数据" : "No provider hit data"}</div>
                   )}
                 </section>
               </div>

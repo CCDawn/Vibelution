@@ -295,11 +295,13 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("promptSegmentCategoryLabel(segment, lang)");
     expect(routeSource).toContain("promptSegmentAccuracyLabel(segment, lang)");
     expect(routeSource).toContain("cacheDonutSegmentStyle(segment, cachePromptDonutSegments.length > 1 ? 0.55 : 0)");
+    expect(routeSource).toContain("cachePromptSegmentHoverTitle(segment, cachePromptCompositionTotalTokens, numberFormatter, lang, t)");
     expect(routeSource).toContain("cacheDonutSegmentTitle(segment, cachePromptCompositionTotalTokens, numberFormatter, lang)");
     expect(routeSource).toContain("cacheObservedStatusLabel(segment.observedStatus, lang)");
     expect(routeSource).toContain("cacheComputedStatusLabel(segment.status, lang)");
     expect(routeSource).toContain("segment.contentPreview");
-    expect(routeSource).toContain("styles.cacheDonutLegendPreview");
+    expect(routeSource).not.toContain("styles.cacheDonutLegendPreview");
+    expect(routeSource).not.toContain("key={`${segment.key}-${segment.status}-${index}-legend`}");
     expect(routeSource).toContain("styles.cacheDetailOverlay");
     expect(routeSource).toContain("className={styles.cacheDetailDialog}");
     expect(routeSource).toContain("aria-modal=\"true\"");
@@ -355,7 +357,6 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.cacheDonutSegmentGuidance).toBeTypeOf("string");
     expect(routeStyles.cacheDonutSegmentSkill).toBeTypeOf("string");
     expect(routeStyles.cacheDonutSegmentAttachments).toBeTypeOf("string");
-    expect(routeStyles.cacheDonutLegendPreview).toBeTypeOf("string");
     expect(routeStyles.cacheDetailOverlay).toBeTypeOf("string");
     expect(routeStyles.cacheDetailDialog).toBeTypeOf("string");
     expect(routeStyles.cacheDetailHeader).toBeTypeOf("string");
@@ -377,6 +378,11 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.cacheDetailSegmentSource).toBeTypeOf("string");
     expect(routeStyles.cacheDetailSegmentMeta).toBeTypeOf("string");
     expect(routeStyles.cacheDetailEmpty).toBeTypeOf("string");
+    expect(routeCssSource).toContain("max-height: min(740px, calc(100dvh - 88px));");
+    expect(routeCssSource).toContain("max-height: min(430px, calc(100dvh - 300px));");
+    expect(routeCssSource).toContain("scrollbar-gutter: stable;");
+    expect(routeCssSource).toContain(".cacheDonutSegmentToolDescriptions {\n  stroke: #8b5cf6;");
+    expect(routeCssSource).toContain(".cacheDonutSegmentToolSchema {\n  stroke: #0ea5e9;");
     expect(routeStyles.contextCompositionSegmentSystem).toBeTypeOf("string");
     expect(routeStyles.contextCompositionSegmentProjectRules).toBeTypeOf("string");
     expect(routeStyles.contextCompositionSegmentToolDescriptions).toBeTypeOf("string");
