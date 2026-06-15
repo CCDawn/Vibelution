@@ -8222,6 +8222,22 @@ export function ChatCodingRoute() {
                       const segmentDisplayLabel = segment.key === "computed_missing"
                         ? cacheCompositionSegmentLabel("missing", segment.label, t)
                         : promptSegmentDisplayLabel(segment, lang, t);
+                      const observedCachedTokens = Math.max(0, segment.observedCachedInputTokens ?? 0);
+                      const observedMissedTokens = Math.max(0, segment.observedMissedInputTokens ?? 0);
+                      const observedMeasuredTokens = observedCachedTokens + observedMissedTokens;
+                      const observedBoundaryTotal = Math.max(observedMeasuredTokens, segment.tokens ?? 0, 1);
+                      const observedUnknownTokens = Math.max(0, observedBoundaryTotal - observedMeasuredTokens);
+                      const observedCachedPercent = Math.round((observedCachedTokens / observedBoundaryTotal) * 1000) / 10;
+                      const observedMissedPercent = Math.round((observedMissedTokens / observedBoundaryTotal) * 1000) / 10;
+                      const observedUnknownPercent = Math.max(
+                        0,
+                        Math.round((100 - observedCachedPercent - observedMissedPercent) * 10) / 10,
+                      );
+                      const observedBoundaryTitle = [
+                        `${lang === "zh" ? "命中" : "hit"} ${numberFormatter.format(observedCachedTokens)}`,
+                        `${lang === "zh" ? "未命中" : "miss"} ${numberFormatter.format(observedMissedTokens)}`,
+                        observedUnknownTokens > 0 ? `${lang === "zh" ? "未观测" : "unobserved"} ${numberFormatter.format(observedUnknownTokens)}` : "",
+                      ].filter(Boolean).join(" · ");
                       return (
                         <div
                           key={`detail-computed-row-${segment.key}-${segment.status}-${index}`}
@@ -8252,6 +8268,41 @@ export function ChatCodingRoute() {
                               </b>
                             ) : null}
                           </span>
+                          <div className={styles.cacheDetailBoundary} title={observedBoundaryTitle}>
+                            <div className={styles.cacheDetailBoundaryLabels}>
+                              <span data-kind="hit">
+                                {lang === "zh" ? "命中" : "hit"} {numberFormatter.format(observedCachedTokens)}
+                              </span>
+                              <span data-kind="miss">
+                                {lang === "zh" ? "未命中" : "miss"} {numberFormatter.format(observedMissedTokens)}
+                              </span>
+                              {observedUnknownTokens > 0 ? (
+                                <span data-kind="unknown">
+                                  {lang === "zh" ? "未观测" : "unobserved"} {numberFormatter.format(observedUnknownTokens)}
+                                </span>
+                              ) : null}
+                            </div>
+                            <div
+                              className={styles.cacheDetailBoundaryTrack}
+                              role="img"
+                              aria-label={observedBoundaryTitle}
+                            >
+                              <span
+                                className={styles.cacheDetailBoundaryHit}
+                                style={{ width: `${observedCachedPercent}%` }}
+                              />
+                              <span
+                                className={styles.cacheDetailBoundaryMiss}
+                                style={{ width: `${observedMissedPercent}%` }}
+                              />
+                              {observedUnknownTokens > 0 ? (
+                                <span
+                                  className={styles.cacheDetailBoundaryUnknown}
+                                  style={{ width: `${observedUnknownPercent}%` }}
+                                />
+                              ) : null}
+                            </div>
+                          </div>
                           {segment.contentPreview ? <small>{segment.contentPreview}</small> : null}
                         </div>
                         <em>
