@@ -511,6 +511,7 @@ export type ConversationViewProps = {
   showHeader?: boolean;
   showSessionOverview?: boolean;
   showMentalSnapshots?: boolean;
+  showComposer?: boolean;
   autoScrollToLatest?: boolean;
   composerValue: string;
   composerPlaceholder: string;
@@ -577,6 +578,7 @@ export function ConversationView({
   showHeader = true,
   showSessionOverview = true,
   showMentalSnapshots = true,
+  showComposer = true,
   autoScrollToLatest = true,
   composerValue,
   composerPlaceholder,
@@ -2833,6 +2835,7 @@ export function ConversationView({
         </div>
       ) : null}
 
+      {showComposer ? (
       <div className={styles.composer}>
         <div
           className={
@@ -3029,6 +3032,7 @@ export function ConversationView({
           </button>
         ) : null}
       </div>
+      ) : null}
       {previewImage ? (
         <div
           className={styles.imagePreviewOverlay}

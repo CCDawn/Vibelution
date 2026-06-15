@@ -54,6 +54,7 @@ function renderConversation(
     onSafeGuidance?: () => void;
     onInterruptGuidance?: () => void;
     showMentalSnapshots?: boolean;
+    showComposer?: boolean;
   } = {},
 ) {
   const queryClient = new QueryClient({
@@ -74,6 +75,7 @@ function renderConversation(
         showHeader={false}
         showSessionOverview={false}
         showMentalSnapshots={options.showMentalSnapshots}
+        showComposer={options.showComposer}
         composerValue={options.composerValue ?? ""}
         composerPlaceholder="Type"
         composerDisabled={options.composerDisabled ?? false}
@@ -112,6 +114,24 @@ describe("ConversationView edit resend affordance", () => {
     const html = renderConversation([], { density: "compact" });
 
     expect(html).toContain("surfaceCompact");
+  });
+
+  it("can render a read-only transcript without the composer", () => {
+    const html = renderConversation(
+      [
+        {
+          id: "message-1",
+          role: "assistant",
+          content: "supervised transcript output",
+          timestamp: "2026-06-16T00:00:00Z",
+        },
+      ],
+      { showComposer: false },
+    );
+
+    expect(html).toContain("supervised transcript output");
+    expect(html).not.toContain("<textarea");
+    expect(html).not.toContain("placeholder=\"Type\"");
   });
 
   it("renders composer session reference chips", () => {
