@@ -29,6 +29,7 @@ BUSINESS_FAILURE_STATUSES = {
     "error",
     "errored",
     "cancelled",
+    "timeout",
     "no_result",
     "submitted",
     "in_progress",
@@ -85,6 +86,8 @@ def infer_tool_business_success(result: Any) -> bool:
         return not _looks_like_business_failure(result)
     if isinstance(result, str):
         stripped = result.strip()
+        if stripped.lower() in BUSINESS_FAILURE_STATUSES:
+            return False
         if stripped.startswith(("[错误]", "[超时]", "[短路]")):
             return False
         if stripped.startswith("{"):

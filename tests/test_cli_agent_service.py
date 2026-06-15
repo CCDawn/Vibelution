@@ -461,6 +461,31 @@ def test_claude_cli_terminal_launch_uses_cwd_and_plan_permission(monkeypatch, tm
     assert command["initialInput"] == "只读审查当前项目\r\n"
 
 
+def test_claude_cli_terminal_launch_worktree_mode_with_allow_unsafe_appends_dangerous_permission_flag(monkeypatch, tmp_path):
+    project_root = _configure_roots(monkeypatch, tmp_path)
+    worktree_root = project_root.parent / f"{project_root.name}-worktrees" / "unsafe-permission-task"
+    worktree_root.mkdir(parents=True)
+    monkeypatch.setattr(service.shutil, "which", lambda candidate: r"C:\tools\claude.cmd" if candidate == "claude.cmd" else "")
+
+    command = terminal_service._build_terminal_command(
+        agent_type="claude_code",
+        task="继续修改",
+        cwd=str(worktree_root),
+        mode="worktree",
+        model="",
+        agent="",
+        cli_session_id="",
+        allow_unsafe_permissions=True,
+    )
+
+    assert command["args"] == [
+        r"C:\tools\claude.cmd",
+        "--permission-mode",
+        "auto",
+        "--dangerously-skip-permissions",
+    ]
+
+
 def test_claude_cli_terminal_real_cmd_shim_uses_native_exe_without_node(monkeypatch, tmp_path):
     project_root = _configure_roots(monkeypatch, tmp_path)
     claude_cmd, claude_exe = _write_fake_claude_native_cmd_shim(tmp_path)
