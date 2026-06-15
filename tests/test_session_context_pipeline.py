@@ -58,6 +58,36 @@ def test_context_assembler_keeps_recent_tail_and_omits_old_events():
     assert assembled.dynamic_context_hash
 
 
+def test_context_assembler_compacts_recent_tool_results_for_model_input():
+    huge_output = "terminal-line\n" * 1000
+    messages = [
+        {"role": "user", "content": "分析失败"},
+        {
+            "role": "assistant",
+            "content": "",
+            "toolCalls": [
+                {
+                    "toolName": "cli_tool",
+                    "toolCallId": "call-heavy",
+                    "status": "failed",
+                    "arguments": {"command": "pytest -q", "timeout": 120},
+                    "result": f"[EXEC FAILURE | Exit Code: 1]\n{huge_output}",
+                }
+            ],
+        },
+    ]
+
+    assembled = assemble_conversation_context(messages, session_id="session-a", recent_message_limit=2)
+    tool_call = assembled.history_messages[-1]["toolCalls"][0]
+
+    assert tool_call["toolName"] == "cli_tool"
+    assert tool_call["status"] == "failed"
+    assert tool_call["argKeys"] == ["command", "timeout"]
+    assert "[EXEC FAILURE | Exit Code: 1]" in tool_call["resultPreview"]
+    assert len(tool_call["resultPreview"]) < 900
+    assert "terminal-line\nterminal-line\nterminal-line\nterminal-line\nterminal-line\nterminal-line\nterminal-line\nterminal-line\nterminal-line\nterminal-line\nterminal-line\nterminal-line\nterminal-line\nterminal-line\nterminal-line\nterminal-line\nterminal-line\nterminal-line\nterminal-line\nterminal-line\n" not in str(assembled.history_messages)
+
+
 def test_context_assembler_uses_checkpoint_as_navigation_not_replacing_history():
     messages = [
         {"role": "user", "content": "旧请求"},
@@ -80,6 +110,23 @@ def test_context_assembler_uses_checkpoint_as_navigation_not_replacing_history()
     assert assembled.history_messages[0]["metadata"]["kind"] == "history_checkpoint_seed"
     assert assembled.history_messages[-1]["content"] == "最新请求"
     assert len(events) >= len(messages)
+
+
+def test_auto_continue_pause_result_preserves_visible_reply_without_internal_prompt():
+    result = {
+        "status": "completed",
+        "outcome": "progress",
+        "raw_output": "已经完成读取，下一步准备修改。",
+        "tool_call_count": 1,
+    }
+
+    paused = session_service._build_auto_continue_paused_result(result, None, 1)
+
+    assert paused["status"] == "completed"
+    assert paused["outcome"] == "needs_input"
+    assert paused["raw_output"] == "已经完成读取，下一步准备修改。"
+    assert paused["metadata"]["internal_auto_continue_blocked"] is True
+    assert "继续完成同一个用户目标" not in str(paused)
 
 
 def test_history_search_tool_uses_current_runtime_session(tmp_path, monkeypatch):

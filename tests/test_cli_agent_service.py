@@ -1405,6 +1405,67 @@ def test_cli_agent_terminal_stop_closes_related_duplicate_states(monkeypatch, tm
     assert second["status"] == "closed"
 
 
+def test_cli_agent_related_state_prefers_open_scope_over_closed_with_cli_session(monkeypatch, tmp_path):
+    project_root = _configure_roots(monkeypatch, tmp_path)
+    terminal_service._write_state(
+        {
+            "terminalSessionId": "cli-term-closed",
+            "adapterId": "mimo_code",
+            "agentType": "mimo_code",
+            "cwd": str(project_root),
+            "mode": "readonly",
+            "cliSessionId": "ses-old",
+            "status": "closed",
+            "alive": False,
+            "userClosed": True,
+            "updatedAt": "2026-06-15T02:00:00+00:00",
+        }
+    )
+    terminal_service._write_state(
+        {
+            "terminalSessionId": "cli-term-open",
+            "adapterId": "mimo_code",
+            "agentType": "mimo_code",
+            "cwd": str(project_root),
+            "mode": "readonly",
+            "status": "stale",
+            "alive": False,
+            "updatedAt": "2026-06-15T01:00:00+00:00",
+        }
+    )
+
+    state = terminal_service._find_related_terminal_state(
+        cli_run_id="",
+        lock_key="",
+        adapter_id="mimo_code",
+        source_session_id="session-1",
+        cwd=str(project_root),
+        mode="readonly",
+    )
+
+    assert state["terminalSessionId"] == "cli-term-open"
+
+
+def test_cli_agent_public_state_exposes_tui_interrupted_separately():
+    state = terminal_service._public_state(
+        {
+            "terminalSessionId": "cli-term-interrupted",
+            "adapterId": "mimo_code",
+            "agentType": "mimo_code",
+            "cwd": r"C:\project",
+            "mode": "readonly",
+            "status": "running",
+            "alive": True,
+            "screenText": "Build · MiMo Auto\ninterrupted\n",
+        }
+    )
+
+    assert state["interactionState"] == "live"
+    assert state["canInput"] is True
+    assert state["tuiState"] == "interrupted"
+    assert state["semanticStatus"] == "attached"
+
+
 def test_cli_agent_terminal_startup_reconcile_marks_orphan_running_state_stale(monkeypatch, tmp_path):
     project_root = _configure_roots(monkeypatch, tmp_path)
     terminal_service._write_state(

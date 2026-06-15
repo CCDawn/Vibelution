@@ -55,6 +55,76 @@ class ToolResultEnvelope:
     strategy: str = "passthrough"
     range_info: str = ""
     continuation_hint: str = ""
+    transport_status: str = "returned"
+    semantic_status: str = "succeeded"
+    exit_code: int | None = None
+    timed_out: bool = False
+    failure_class: str = ""
+
+
+def extract_tool_result_semantics(result: Any) -> dict[str, Any]:
+    """Extract transport/business semantics from common tool result shapes."""
+    semantics: dict[str, Any] = {
+        "transportStatus": "returned",
+        "semanticStatus": "succeeded",
+        "exitCode": None,
+        "timedOut": False,
+        "failureClass": "",
+    }
+
+    payload: dict[str, Any] = result if isinstance(result, dict) else {}
+    if isinstance(result, (bytes, bytearray)):
+        try:
+            result = result.decode("utf-8", errors="replace")
+        except Exception:
+            result = str(result)
+
+    text = _normalize_text_payload(str(result or ""))
+    lowered = text.lower()
+    if payload:
+        status = _normalize_text_payload(str(payload.get("status") or "")).lower()
+        if status:
+            semantics["semanticStatus"] = status
+        for key in ("exitCode", "exit_code", "returncode", "return_code"):
+            if key in payload:
+                try:
+                    semantics["exitCode"] = int(payload.get(key))
+                except (TypeError, ValueError):
+                    pass
+                break
+        if bool(payload.get("timedOut") or payload.get("timed_out")) or status in {"timeout", "timed_out"}:
+            semantics["timedOut"] = True
+            semantics["failureClass"] = semantics["failureClass"] or "timeout"
+        if _looks_like_business_failure(payload):
+            if semantics["semanticStatus"] == "succeeded":
+                semantics["semanticStatus"] = "failed"
+            semantics["failureClass"] = semantics["failureClass"] or status or "business_failure"
+
+    exec_failure_match = re.search(r"\[EXEC FAILURE\s*\|\s*Exit Code:\s*(-?\d+)\]", text, flags=re.IGNORECASE)
+    if exec_failure_match:
+        semantics["semanticStatus"] = "failed"
+        semantics["failureClass"] = "process_exit"
+        try:
+            semantics["exitCode"] = int(exec_failure_match.group(1))
+        except (TypeError, ValueError):
+            pass
+    elif text.startswith(("[执行失败", "[EXEC FAILURE")):
+        semantics["semanticStatus"] = "failed"
+        semantics["failureClass"] = "process_exit"
+
+    if text.startswith(("[超时]", "[TIMEOUT]")) or "timed out" in lowered:
+        semantics["semanticStatus"] = "timeout"
+        semantics["timedOut"] = True
+        semantics["failureClass"] = "timeout"
+    elif text.startswith(("[错误]", "[短路]")):
+        semantics["semanticStatus"] = "failed"
+        semantics["failureClass"] = semantics["failureClass"] or "tool_error"
+
+    if semantics["semanticStatus"] in BUSINESS_FAILURE_STATUSES and not semantics["failureClass"]:
+        semantics["failureClass"] = str(semantics["semanticStatus"])
+    if semantics["semanticStatus"] in {"ok", "success", "succeeded"}:
+        semantics["semanticStatus"] = "succeeded"
+    return semantics
 
 
 def _looks_like_business_failure(payload: Any) -> bool:
@@ -103,7 +173,7 @@ def infer_tool_business_success(result: Any) -> bool:
         stripped = _normalize_text_payload(result)
         if stripped.lower() in BUSINESS_FAILURE_STATUSES:
             return False
-        if stripped.startswith(("[错误]", "[超时]", "[短路]")):
+        if stripped.startswith(("[错误]", "[超时]", "[短路]", "[EXEC FAILURE", "[执行失败")):
             return False
         if stripped.startswith("{"):
             try:
@@ -238,6 +308,7 @@ def package_tool_result(
     result_kind = _infer_result_kind(tool_name, result_str)
     range_info = _extract_range_info(result_kind, result_str)
     continuation_hint = _extract_continuation_hint(result_kind, result_str)
+    semantics = extract_tool_result_semantics(result)
 
     if len(result_str) <= max_chars:
         return ToolResultEnvelope(
@@ -248,6 +319,11 @@ def package_tool_result(
             strategy="passthrough",
             range_info=range_info,
             continuation_hint=continuation_hint,
+            transport_status=str(semantics["transportStatus"]),
+            semantic_status=str(semantics["semanticStatus"]),
+            exit_code=semantics["exitCode"],
+            timed_out=bool(semantics["timedOut"]),
+            failure_class=str(semantics["failureClass"] or ""),
         )
 
     compact_content: Optional[str] = None
@@ -264,6 +340,11 @@ def package_tool_result(
             strategy="structured_compact",
             range_info=range_info,
             continuation_hint=continuation_hint,
+            transport_status=str(semantics["transportStatus"]),
+            semantic_status=str(semantics["semanticStatus"]),
+            exit_code=semantics["exitCode"],
+            timed_out=bool(semantics["timedOut"]),
+            failure_class=str(semantics["failureClass"] or ""),
         )
 
     suffix_lines = [
@@ -286,6 +367,11 @@ def package_tool_result(
             strategy="legacy_prefix_truncate",
             range_info=range_info,
             continuation_hint=continuation_hint,
+            transport_status=str(semantics["transportStatus"]),
+            semantic_status=str(semantics["semanticStatus"]),
+            exit_code=semantics["exitCode"],
+            timed_out=bool(semantics["timedOut"]),
+            failure_class=str(semantics["failureClass"] or ""),
         )
     content = result_str[:budget] + suffix if budget > 0 else suffix.lstrip()
 
@@ -297,6 +383,11 @@ def package_tool_result(
         strategy="annotated_truncate",
         range_info=range_info,
         continuation_hint=continuation_hint,
+        transport_status=str(semantics["transportStatus"]),
+        semantic_status=str(semantics["semanticStatus"]),
+        exit_code=semantics["exitCode"],
+        timed_out=bool(semantics["timedOut"]),
+        failure_class=str(semantics["failureClass"] or ""),
     )
 
 
@@ -414,6 +505,7 @@ def format_tool_message(
 __all__ = [
     "truncate_result",
     "package_tool_result",
+    "extract_tool_result_semantics",
     "ToolResultEnvelope",
     "format_tool_message",
     "compact_tool_output_for_diagnosis",

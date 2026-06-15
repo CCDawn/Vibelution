@@ -14,6 +14,7 @@ from pathlib import Path
 
 import pytest
 from core.infrastructure.tool_result import (
+    extract_tool_result_semantics,
     truncate_result,
     package_tool_result,
     format_tool_message,
@@ -265,6 +266,19 @@ class TestInferToolBusinessSuccess:
     def test_bom_prefixed_json_bytes_is_business_failure(self):
         payload = b"\xef\xbb\xbf{\"status\":\"failed\",\"error\":\"policy limited\"}"
         assert infer_tool_business_success(payload) is False
+
+    def test_exec_failure_text_is_business_failure_with_exit_code(self):
+        payload = "[EXEC FAILURE | Exit Code: 1]\npytest failed"
+
+        assert infer_tool_business_success(payload) is False
+        semantics = extract_tool_result_semantics(payload)
+        envelope = package_tool_result(payload)
+
+        assert semantics["semanticStatus"] == "failed"
+        assert semantics["exitCode"] == 1
+        assert semantics["failureClass"] == "process_exit"
+        assert envelope.semantic_status == "failed"
+        assert envelope.exit_code == 1
 
 
 if __name__ == "__main__":
