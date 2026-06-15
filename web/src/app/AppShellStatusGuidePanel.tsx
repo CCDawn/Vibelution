@@ -134,31 +134,33 @@ export function AppShellStatusGuidePanel({
 
   return (
     <div className={styles.statusGuidePanel} role="note" aria-live="polite">
-      <div className={styles.statusGuideHeader}>
+      <div className={styles.statusGuideHeader} title={t("systemStatusGuideHint")}>
         <strong>{t("systemStatusGuide")}</strong>
-        <span>{t("systemStatusGuideHint")}</span>
       </div>
       <div className={styles.statusGuideGrid}>
         {detailCards.map((item) => (
-          <section key={item.id} className={styles.statusGuideCard}>
+          <section key={item.id} className={styles.statusGuideCard} title={item.note}>
             <div className={styles.statusGuideCardHeader}>
               <span>{item.label}</span>
               <strong>{item.value}</strong>
             </div>
-            <p className={styles.statusGuideNote}>{item.note}</p>
             <ul className={styles.statusGuideList}>
               {item.states.map((state) => (
-                <li key={`${item.id}-${state.label}`} className={styles.statusGuideListItem}>
+                <li
+                  key={`${item.id}-${state.label}`}
+                  className={styles.statusGuideListItem}
+                  data-current={state.label === item.value ? "true" : undefined}
+                  title={state.detail}
+                >
                   <span className={`${styles.statusDot} ${styles[`status_${state.tone}`]}`} />
                   <span className={styles.statusGuideStateLabel}>{state.label}</span>
-                  <span className={styles.statusGuideStateDetail}>{state.detail}</span>
                 </li>
               ))}
             </ul>
           </section>
         ))}
       </div>
-      <section className={styles.lifecycleProofCard}>
+      <section className={styles.lifecycleProofCard} title={lifecycleProof?.summary || t("lifecycleProofUnavailable")}>
         <div className={styles.lifecycleProofHeader}>
           <span>{t("lifecycleProofTitle")}</span>
           <strong>
@@ -168,28 +170,28 @@ export function AppShellStatusGuidePanel({
             {lifecycleProof?.overallLabel || t("lifecycleProofUnavailable")}
           </strong>
         </div>
-        <p className={styles.statusGuideNote}>
-          {lifecycleProof?.summary || t("lifecycleProofUnavailable")}
-        </p>
         {lifecycleProof ? (
           <>
             <div className={styles.lifecycleProofMeta}>
-              <span>{t("lifecycleProofDesiredObserved")}</span>
-              <strong>
-                {lifecycleProof.desiredState} / {lifecycleProof.observedState}
-              </strong>
-              <span>{t("lifecycleProofVerifiedAt")}</span>
-              <strong>{lifecycleProof.verifiedAt || "-"}</strong>
+              <span title={`${t("lifecycleProofDesiredObserved")}: ${lifecycleProof.desiredState} / ${lifecycleProof.observedState}`}>
+                {t("lifecycleProofDesiredObserved")}
+                <strong>
+                  {lifecycleProof.desiredState} / {lifecycleProof.observedState}
+                </strong>
+              </span>
+              <span title={`${t("lifecycleProofVerifiedAt")}: ${lifecycleProof.verifiedAt || "-"}`}>
+                {t("lifecycleProofVerifiedAt")}
+                <strong>{lifecycleProof.verifiedAt || "-"}</strong>
+              </span>
             </div>
             <ul className={styles.lifecycleProofList}>
               {lifecycleProof.components.map((component) => (
-                <li key={component.id} className={styles.lifecycleProofItem}>
+                <li key={component.id} className={styles.lifecycleProofItem} title={component.detail}>
                   <span
                     className={`${styles.statusDot} ${styles[`status_${lifecycleStateTone(component.state)}`]}`}
                   />
                   <span className={styles.lifecycleProofName}>{component.label}</span>
                   <strong>{lifecycleStateLabel(component.state, lang)}</strong>
-                  <span>{component.detail}</span>
                 </li>
               ))}
             </ul>
