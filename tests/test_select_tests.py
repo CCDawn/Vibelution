@@ -27,6 +27,24 @@ def test_selector_matches_session_service_to_chat_validation_commands():
     assert any("ChatCodingRoute.layout.test.ts" in command for command in result["commands"])
 
 
+def test_selector_matches_real_session_route_files_to_chat_validation_commands():
+    result = select_tests.select_tests(
+        [
+            "core/web/routes/sessions.py",
+            "core/web/routes/chat_rooms.py",
+        ],
+        select_tests.load_matrix(),
+    )
+
+    assert result["matchedRules"][0]["id"] == "web-session-chat"
+    assert result["matchedRules"][0]["matchedFiles"] == [
+        "core/web/routes/sessions.py",
+        "core/web/routes/chat_rooms.py",
+    ]
+    assert any("tests/test_web_session_routes.py" in command for command in result["commands"])
+    assert any("ChatCodingRoute.layout.test.ts" in command for command in result["commands"])
+
+
 def test_selector_matches_web_config_routes_to_config_validation_commands():
     result = select_tests.select_tests(
         ["tests/test_web_config_routes.py"],
@@ -47,6 +65,18 @@ def test_selector_matches_web_runtime_routes_to_runtime_validation_commands():
 
     assert result["matchedRules"][0]["id"] == "web-runtime-launcher"
     assert "tests/test_web_runtime_routes.py" in result["matchedRules"][0]["matchedFiles"]
+    assert any("tests/test_web_runtime_routes.py" in command for command in result["commands"])
+    assert not any("tests/test_web_app.py" in command for command in result["commands"])
+
+
+def test_selector_matches_real_runtime_route_to_runtime_validation_commands():
+    result = select_tests.select_tests(
+        ["core/web/routes/runtime.py"],
+        select_tests.load_matrix(),
+    )
+
+    assert result["matchedRules"][0]["id"] == "web-runtime-launcher"
+    assert "core/web/routes/runtime.py" in result["matchedRules"][0]["matchedFiles"]
     assert any("tests/test_web_runtime_routes.py" in command for command in result["commands"])
     assert not any("tests/test_web_app.py" in command for command in result["commands"])
 

@@ -32,8 +32,8 @@ rules:
     paths:
       - "core/web/services/session_service.py"
       - "core/web/services/chat_room_service.py"
-      - "core/web/routes/session_routes.py"
-      - "core/web/routes/chat_room_routes.py"
+      - "core/web/routes/sessions.py"
+      - "core/web/routes/chat_rooms.py"
       - "tests/test_web_app.py"
       - "tests/test_web_session_routes.py"
       - "tests/test_chat_room_service.py"
@@ -55,7 +55,7 @@ rules:
     paths:
       - "core/runtime_manager/**"
       - "core/web/services/runtime_scene_service.py"
-      - "core/web/routes/runtime_routes.py"
+      - "core/web/routes/runtime.py"
       - "scripts/vibelution_launcher.ps1"
       - "scripts/vibelution_launcher.py"
       - "tests/test_runtime_manager.py"
