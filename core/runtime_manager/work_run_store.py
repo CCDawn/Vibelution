@@ -99,18 +99,108 @@ def _read_text_with_retry(path: Path) -> str:
     raise OSError(f"Unable to read {path}")
 
 
+def _corrupt_json_reason(text: str) -> str:
+    if text and all(char == "\x00" for char in text):
+        return "nul_bytes"
+    if not str(text or "").strip():
+        return "empty_json"
+    if "\x00" in text and not text.replace("\x00", "").strip():
+        return "nul_bytes"
+    return "json_decode_error"
+
+
+def _store_path_run_kind(path: Path) -> str:
+    if path.name == "index.json":
+        return path.parent.name
+    if path.parent.name == "runs":
+        return path.parent.parent.name
+    return ""
+
+
+def _store_path_run_id(path: Path) -> str:
+    if path.parent.name == "runs" and path.suffix == ".json":
+        return path.stem
+    return ""
+
+
+def _quarantine_corrupt_json(path: Path, *, reason: str, error: str = "") -> Path | None:
+    if not path.exists():
+        return None
+    try:
+        size_bytes = path.stat().st_size
+    except OSError:
+        size_bytes = 0
+    timestamp = int(time.time() * 1000)
+    target = path.with_name(f"{path.name}.corrupt-{timestamp}")
+    suffix = 1
+    while target.exists():
+        target = path.with_name(f"{path.name}.corrupt-{timestamp}-{suffix}")
+        suffix += 1
+    try:
+        os.replace(path, target)
+    except OSError as exc:
+        _record_work_run_event(
+            "state",
+            "work_run.store.corrupt_json_quarantine_failed",
+            run_kind=_store_path_run_kind(path),
+            run_id=_store_path_run_id(path),
+            fields={
+                "path": str(path),
+                "reason": reason,
+                "sizeBytes": size_bytes,
+                "errorType": type(exc).__name__,
+            },
+            message="Work run store could not quarantine corrupt JSON.",
+            outcome="failed",
+            level="warning",
+            lifecycle=True,
+        )
+        return None
+    _record_work_run_event(
+        "state",
+        "work_run.store.corrupt_json_quarantined",
+        run_kind=_store_path_run_kind(path),
+        run_id=_store_path_run_id(path),
+        fields={
+            "path": str(path),
+            "quarantinePath": str(target),
+            "reason": reason,
+            "sizeBytes": size_bytes,
+            "errorType": error.split(":", 1)[0] if error else "",
+        },
+        message="Work run store quarantined corrupt JSON.",
+        outcome="repaired",
+        level="warning",
+        lifecycle=True,
+    )
+    return target
+
+
 def _load_json(path: Path) -> dict[str, Any]:
     if not path.exists():
         return {}
+    last_text = ""
+    last_error = ""
     for attempt in range(READ_RETRY_ATTEMPTS):
         try:
-            payload = json.loads(_read_text_with_retry(path))
-        except (OSError, json.JSONDecodeError):
+            last_text = _read_text_with_retry(path)
+            payload = json.loads(last_text)
+        except OSError:
             if attempt + 1 >= READ_RETRY_ATTEMPTS:
                 return {}
             time.sleep(READ_RETRY_DELAY_SECONDS)
             continue
-        return payload if isinstance(payload, dict) else {}
+        except json.JSONDecodeError as exc:
+            last_error = f"{type(exc).__name__}: {exc}"
+            if attempt + 1 >= READ_RETRY_ATTEMPTS:
+                _quarantine_corrupt_json(path, reason=_corrupt_json_reason(last_text), error=last_error)
+                return {}
+            time.sleep(READ_RETRY_DELAY_SECONDS)
+            continue
+        if isinstance(payload, dict):
+            return payload
+        _quarantine_corrupt_json(path, reason="non_object_json")
+        return {}
     return {}
 
 
