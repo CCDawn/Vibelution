@@ -2222,11 +2222,13 @@
   .cacheDetailOverlay {
     align-items: start;
     padding: 12px;
+    overflow: hidden;
   }
 
   .cacheDetailDialog {
     width: calc(100vw - 24px);
     max-height: calc(100vh - 24px);
+    max-height: calc(100dvh - 24px);
     padding: 12px;
   }
 
@@ -2247,12 +2249,22 @@
 
   .cacheDetailDonutShell,
   .cacheDetailDonutSvg {
-    width: 148px;
-    height: 148px;
+    width: 136px;
+    height: 136px;
   }
 
   .cacheDetailDonutCenter {
-    inset: 40px;
+    inset: 37px;
+  }
+
+  .cacheDetailBody,
+  .cacheDetailSegmentList {
+    min-height: 0;
+  }
+
+  .cacheDetailSegmentList {
+    max-height: calc(100dvh - 300px);
+    overflow: auto;
   }
 
   .cacheDetailSegmentRow {
@@ -2617,61 +2629,55 @@
 }
 
 .cacheDonutSegmentOther {
-  stroke: #6f7dd9;
+  stroke: #6366f1;
 }
 
 .cacheDonutSegmentSystem {
-  stroke: #27b4a6;
+  stroke: #14b8a6;
 }
 
 .cacheDonutSegmentUser {
-  stroke: #4f8cff;
+  stroke: #3b82f6;
 }
 
 .cacheDonutSegmentHistory {
-  stroke: #7a8494;
+  stroke: #64748b;
 }
 
 .cacheDonutSegmentTask {
-  stroke: #d19a3f;
+  stroke: #f59e0b;
 }
 
 .cacheDonutSegmentAgent {
-  stroke: #36a86f;
+  stroke: #22c55e;
 }
 
 .cacheDonutSegmentProjectRules {
-  stroke: #b47a20;
+  stroke: #d97706;
 }
 
 .cacheDonutSegmentToolDescriptions {
-  stroke: #0f9f8f;
+  stroke: #8b5cf6;
 }
 
 .cacheDonutSegmentToolSchema {
-  stroke: #2f7bdc;
+  stroke: #0ea5e9;
 }
 
 .cacheDonutSegmentProviderUnmapped {
-  stroke: #9aa3b2;
+  stroke: #94a3b8;
 }
 
 .cacheDonutSegmentGuidance {
-  stroke: #c26ad8;
+  stroke: #ec4899;
 }
 
 .cacheDonutSegmentSkill {
-  stroke: #d6655a;
+  stroke: #ef4444;
 }
 
 .cacheDonutSegmentAttachments {
-  stroke: #3fb8c8;
-}
-
-.cacheDonutLegendPreview::before {
-  content: "·";
-  margin-right: 3px;
-  color: color-mix(in srgb, var(--fg-tertiary) 55%, transparent);
+  stroke: #06b6d4;
 }
 
 .cacheDetailOverlay {
@@ -2679,19 +2685,22 @@
   inset: 0;
   z-index: 60;
   display: grid;
-  place-items: center;
-  padding: 18px;
+  place-items: start center;
+  overflow: hidden;
+  padding: 54px 18px 24px;
   background: rgba(15, 23, 42, 0.38);
   backdrop-filter: blur(3px);
 }
 
 .cacheDetailDialog {
   display: grid;
-  gap: 12px;
-  width: min(900px, calc(100vw - 36px));
-  max-height: calc(100vh - 36px);
-  overflow: auto;
-  padding: 14px;
+  grid-template-rows: auto auto auto minmax(0, 1fr);
+  gap: 10px;
+  width: min(860px, calc(100vw - 36px));
+  max-height: min(740px, calc(100vh - 88px));
+  max-height: min(740px, calc(100dvh - 88px));
+  overflow: hidden;
+  padding: 12px;
   border: 1px solid var(--border-strong);
   border-radius: 8px;
   background: color-mix(in srgb, var(--surface-panel) 98%, var(--surface-page));
@@ -2703,7 +2712,7 @@
   align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
-  padding-bottom: 10px;
+  padding-bottom: 8px;
   border-bottom: 1px solid var(--border-soft);
 }
 
@@ -2749,14 +2758,14 @@
 .cacheDetailSummaryGrid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 8px;
+  gap: 6px;
 }
 
 .cacheDetailSummaryGrid div {
   display: grid;
-  gap: 3px;
+  gap: 2px;
   min-width: 0;
-  padding: 9px;
+  padding: 7px 8px;
   border: 1px solid var(--border-soft);
   border-radius: 8px;
   background: color-mix(in srgb, var(--surface-card) 82%, transparent);
@@ -2769,7 +2778,7 @@
 
 .cacheDetailSummaryGrid strong {
   color: var(--fg-primary);
-  font-size: 1.28rem;
+  font-size: 1.08rem;
   line-height: 1.1;
 }
 
@@ -2786,9 +2795,9 @@
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
-  gap: 8px;
+  gap: 7px;
   min-width: 0;
-  padding: 8px 10px;
+  padding: 6px 9px;
   border: 1px solid color-mix(in srgb, var(--accent-cool) 26%, var(--border-soft));
   border-radius: 8px;
   color: var(--fg-secondary);
@@ -2813,15 +2822,18 @@
 
 .cacheDetailBody {
   display: grid;
-  grid-template-columns: 210px minmax(0, 1fr);
-  gap: 14px;
+  grid-template-columns: 184px minmax(0, 1fr);
+  gap: 12px;
   align-items: start;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .cacheDetailDonutPanel {
   display: grid;
   justify-items: center;
-  gap: 8px;
+  gap: 7px;
+  align-self: start;
   min-width: 0;
 }
 
@@ -2837,9 +2849,9 @@
 
 .cacheDetailDonutLegend {
   display: grid;
-  gap: 5px;
+  gap: 4px;
   width: 100%;
-  padding: 8px;
+  padding: 7px;
   border: 1px solid var(--border-soft);
   border-radius: 8px;
   background: var(--surface-panel-muted);
@@ -2865,21 +2877,21 @@
 
 .cacheDetailDonutShell {
   position: relative;
-  width: 168px;
-  height: 168px;
+  width: 148px;
+  height: 148px;
 }
 
 .cacheDetailDonutSvg {
-  width: 168px;
-  height: 168px;
+  width: 148px;
+  height: 148px;
 }
 
 .cacheDetailDonutCenter {
-  inset: 47px;
+  inset: 41px;
 }
 
 .cacheDetailDonutCenter strong {
-  font-size: 1.25rem;
+  font-size: 1.08rem;
 }
 
 .cacheDetailDonutCenter span,
@@ -2890,13 +2902,19 @@
 
 .cacheDetailSegmentList {
   display: grid;
-  gap: 12px;
+  gap: 8px;
   min-width: 0;
+  min-height: 0;
+  max-height: min(430px, calc(100vh - 300px));
+  max-height: min(430px, calc(100dvh - 300px));
+  overflow: auto;
+  padding-right: 4px;
+  scrollbar-gutter: stable;
 }
 
 .cacheDetailSegmentGroup {
   display: grid;
-  gap: 6px;
+  gap: 4px;
   min-width: 0;
 }
 
@@ -2921,17 +2939,17 @@
 
 .cacheDetailSegmentRow {
   display: grid;
-  grid-template-columns: 8px minmax(0, 1fr) auto;
-  gap: 8px;
+  grid-template-columns: 7px minmax(0, 1fr) auto;
+  gap: 7px;
   align-items: start;
   min-width: 0;
-  padding: 8px 0;
+  padding: 6px 0;
   border-top: 1px solid var(--border-soft);
 }
 
 .cacheDetailSwatch {
-  width: 8px;
-  height: 36px;
+  width: 7px;
+  height: 30px;
   margin-top: 2px;
   border-radius: 999px;
   background: color-mix(in srgb, var(--fg-tertiary) 48%, transparent);
@@ -2967,7 +2985,7 @@
   min-width: 0;
   overflow: hidden;
   color: var(--fg-primary);
-  font-size: 0.78rem;
+  font-size: 0.76rem;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -2977,8 +2995,8 @@
   min-width: 0;
   overflow: hidden;
   color: var(--fg-tertiary);
-  font-size: 0.7rem;
-  line-height: 1.35;
+  font-size: 0.68rem;
+  line-height: 1.3;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -2988,6 +3006,9 @@
 }
 
 .cacheDetailSegmentText small {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
   white-space: normal;
 }
 
@@ -3033,7 +3054,7 @@
 
 .cacheDetailSegmentRow em {
   color: var(--fg-secondary);
-  font-size: 0.72rem;
+  font-size: 0.7rem;
   font-style: normal;
   white-space: nowrap;
 }
@@ -3053,52 +3074,100 @@
   font-size: 0.72rem;
 }
 
+@media (max-width: 720px) {
+  .cacheDetailOverlay {
+    place-items: start center;
+    padding: 12px;
+    overflow: hidden;
+  }
+
+  .cacheDetailDialog {
+    width: calc(100vw - 24px);
+    max-height: calc(100vh - 24px);
+    max-height: calc(100dvh - 24px);
+  }
+
+  .cacheDetailSummaryGrid,
+  .cacheDetailBody {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .cacheDetailBody,
+  .cacheDetailSegmentList {
+    min-height: 0;
+  }
+
+  .cacheDetailSegmentList {
+    max-height: calc(100dvh - 300px);
+    overflow: auto;
+  }
+
+  .cacheDetailDonutShell,
+  .cacheDetailDonutSvg {
+    width: 136px;
+    height: 136px;
+  }
+
+  .cacheDetailDonutCenter {
+    inset: 37px;
+  }
+
+  .cacheDetailSegmentRow {
+    grid-template-columns: 7px minmax(0, 1fr);
+  }
+
+  .cacheDetailSegmentRow em {
+    grid-column: 2;
+    justify-self: start;
+  }
+}
+
 .contextCompositionSegmentSystem {
-  background: #27b4a6;
+  background: #14b8a6;
 }
 
 .contextCompositionSegmentUser {
-  background: #4f8cff;
+  background: #3b82f6;
 }
 
 .contextCompositionSegmentHistory {
-  background: #7a8494;
+  background: #64748b;
 }
 
 .contextCompositionSegmentTask {
-  background: #d19a3f;
+  background: #f59e0b;
 }
 
 .contextCompositionSegmentAgent {
-  background: #36a86f;
+  background: #22c55e;
 }
 
 .contextCompositionSegmentProjectRules {
-  background: #b47a20;
+  background: #d97706;
 }
 
 .contextCompositionSegmentToolDescriptions {
-  background: #0f9f8f;
+  background: #8b5cf6;
 }
 
 .contextCompositionSegmentToolSchema {
-  background: #2f7bdc;
+  background: #0ea5e9;
 }
 
 .contextCompositionSegmentProviderUnmapped {
-  background: #9aa3b2;
+  background: #94a3b8;
 }
 
 .contextCompositionSegmentGuidance {
-  background: #c26ad8;
+  background: #ec4899;
 }
 
 .contextCompositionSegmentSkill {
-  background: #d6655a;
+  background: #ef4444;
 }
 
 .contextCompositionSegmentAttachments {
-  background: #3fb8c8;
+  background: #06b6d4;
 }
 
 .contextCompositionSegmentCached {
@@ -3128,7 +3197,7 @@
 }
 
 .contextCompositionSegmentOther {
-  background: #6f7dd9;
+  background: #6366f1;
 }
 
 .memberIndexSummary {
