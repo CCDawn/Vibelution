@@ -7,7 +7,7 @@ import unicodedata
 from dataclasses import dataclass
 
 
-CSI_RE = re.compile(r"\x1b\[([0-9;?]*)([@-~])")
+CSI_RE = re.compile(r"\x1b\[([0-?]*)(?:[ -/]*)?([@-~])")
 
 
 @dataclass(frozen=True)
@@ -28,6 +28,7 @@ class TerminalScreenBuffer:
         self.cursor_row = 0
         self.cursor_col = 0
         self._cells = [[" " for _ in range(self.cols)] for _ in range(self.rows)]
+        self._pending_escape = ""
         if initial_text:
             self.feed_text(initial_text)
 
@@ -47,12 +48,16 @@ class TerminalScreenBuffer:
         self.cursor_col = min(self.cursor_col, self.cols - 1)
 
     def feed(self, chunk: str) -> TerminalScreenSnapshot:
-        text = str(chunk or "")
+        text = self._pending_escape + str(chunk or "")
+        self._pending_escape = ""
         index = 0
         while index < len(text):
             char = text[index]
             if char == "\x1b":
-                consumed = self._consume_escape(text, index)
+                consumed, complete = self._consume_escape(text, index)
+                if not complete:
+                    self._pending_escape = text[index:]
+                    break
                 index = consumed if consumed > index else index + 1
                 continue
             self._put_control_or_text(char)
@@ -78,22 +83,26 @@ class TerminalScreenBuffer:
             quality="screen_buffer",
         )
 
-    def _consume_escape(self, text: str, index: int) -> int:
+    def _consume_escape(self, text: str, index: int) -> tuple[int, bool]:
         if index + 1 >= len(text):
-            return index + 1
+            return len(text), False
         if text[index + 1] == "[":
             match = CSI_RE.match(text, index)
             if not match:
-                return index + 2
+                if not _has_csi_final(text[index + 2 :]):
+                    return len(text), False
+                return index + 2, True
             self._apply_csi(match.group(1), match.group(2))
-            return match.end()
+            return match.end(), True
         if text[index + 1] == "]":
             end = text.find("\x07", index + 2)
             if end == -1:
                 end = text.find("\x1b\\", index + 2)
-                return len(text) if end == -1 else end + 2
-            return end + 1
-        return index + 2
+                if end == -1:
+                    return len(text), False
+                return end + 2, True
+            return end + 1, True
+        return index + 2, True
 
     def _apply_csi(self, raw_params: str, final: str) -> None:
         params = _parse_params(raw_params)
@@ -216,6 +225,10 @@ def _char_width(char: str) -> int:
     if unicodedata.combining(char):
         return 0
     return 2 if unicodedata.east_asian_width(char) in {"F", "W"} else 1
+
+
+def _has_csi_final(text: str) -> bool:
+    return any("@" <= char <= "~" for char in text)
 
 
 def _clamp(value: int, default: int, minimum: int, maximum: int) -> int:
