@@ -155,6 +155,7 @@ _INTERNAL_TOOL_PROTOCOL_MARKERS = (
     "spawn_agent_tool",
     "_internal_delegate",
 )
+_SESSION_AGENT_DELEGATION_REPLACEMENT_TOOL = "cli_agent_run_tool"
 _TOOL_POLICY_FAILURE_RE = re.compile(
     r"\[工具策略提示\]\s*`[^`]+`\s*不在该 Agent 的可见工具策略中。?",
 )
@@ -1106,6 +1107,46 @@ class SelfEvolvingAgent:
         governor = self._get_delegation_governor()
         return governor.apply_result(payload, result_text, messages)
 
+    def _is_session_agent_runtime(self) -> bool:
+        try:
+            from core.web.services import agent_directory_service
+            runtime = agent_directory_service.current_agent_runtime()
+        except Exception:
+            runtime = {}
+        if not isinstance(runtime, dict) or not runtime:
+            return True
+        agent = runtime.get("agent") if isinstance(runtime.get("agent"), dict) else {}
+        primary_mode = str(
+            agent.get("primaryMode")
+            or runtime.get("primaryMode")
+            or ""
+        ).strip().lower()
+        return primary_mode in {"", "chat"}
+
+    def _session_agent_auto_delegation_enabled(self) -> bool:
+        if not self._is_session_agent_runtime():
+            return True
+        return bool(getattr(self, "_allow_session_subagent_auto_delegation", False))
+
+    def _record_session_agent_auto_delegation_disabled(self) -> None:
+        if bool(getattr(self, "_session_agent_auto_delegation_disabled_logged", False)):
+            return
+        self._session_agent_auto_delegation_disabled_logged = True
+        _debug_logger.info(
+            "[Delegation] 会话 Agent 自动子 Agent 派遣已关闭，外部代码 Agent 工作改走 cli_agent_run_tool。",
+            tag="DELEGATE",
+        )
+        _record_agent_scene_event(
+            "delegation",
+            "agent.delegation.blocked",
+            message="会话 Agent 自动子 Agent 派遣已关闭，外部代码 Agent 工作改走 cli_agent_run_tool。",
+            fields={
+                "reason": "session_agent_auto_delegation_disabled",
+                "replacementTool": _SESSION_AGENT_DELEGATION_REPLACEMENT_TOOL,
+                "autoDelegationEnabled": False,
+            },
+        )
+
     def _maybe_delegate(
         self,
         *,
@@ -1133,6 +1174,9 @@ class SelfEvolvingAgent:
                     },
                 )
                 return None
+        if not self._session_agent_auto_delegation_enabled():
+            self._record_session_agent_auto_delegation_disabled()
+            return None
         governor = self._get_delegation_governor()
         return governor.maybe_delegate(
             goal=goal,
@@ -2015,6 +2059,7 @@ class SelfEvolvingAgent:
         logger.log_llm_request(messages, model=model_name)
         self._compression_count_this_turn = 0
         self._last_compression_iteration = 0
+        self._session_agent_auto_delegation_disabled_logged = False
 
         round_state = self._create_round_state()
         lifecycle_action: Optional[str] = None
