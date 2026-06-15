@@ -417,13 +417,9 @@ class TestToolExecutorExecute:
         result, action = executor.execute("read_memory_tool", {})
 
         assert action is None
-        assert "[错误] 未知工具" in str(result)
-        assert "未注册到当前 Agent 可用工具集中" in str(result)
-        assert "当前 Agent 可用工具包括：" in str(result)
-        assert "read_memory_tool" not in str(result)
-        assert "get_memory_summary_tool" not in str(result)
-        assert "cli_tool" in str(result)
-        assert "ToolPolicy" not in str(result)
+        assert "[错误] 未知工具" not in str(result)
+        assert "core_wisdom" in str(result)
+        assert "current_goal" in str(result)
 
     def test_unknown_tool_reports_agent_context_fallback(self, executor, monkeypatch):
         from core.web.services import agent_directory_service
