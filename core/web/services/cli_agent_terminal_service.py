@@ -613,6 +613,7 @@ def _build_terminal_command(
         "model": str(model or adapter.get("defaultModel") or ""),
         "agent": str(agent or adapter.get("defaultAgent") or ""),
         "cliSessionId": str(cli_session_id or ""),
+        "permissionMode": _terminal_permission_mode(agent_type, normalized_mode),
     }
     executable_args = _terminal_executable_args(executable)
     args = _render_terminal_argv_template(argv_template, context, executable_args)
@@ -1097,6 +1098,8 @@ def _discover_cli_session_id_for_state(state: dict[str, Any], spec: dict[str, An
     source = str(spec.get("source") or "").strip().lower()
     if source in {"mimocode_sqlite", "sqlite_latest_by_cwd"}:
         return _discover_mimocode_sqlite_session_id(state, spec, existing=existing)
+    if source in {"claude_code_project_jsonl", "claude_project_jsonl"}:
+        return _discover_claude_project_jsonl_session_id(state, spec, existing=existing)
     return ""
 
 
@@ -1145,10 +1148,87 @@ def _discover_mimocode_sqlite_session_id(state: dict[str, Any], spec: dict[str, 
     return ""
 
 
-def _render_discovery_path(template: str) -> Path:
+def _discover_claude_project_jsonl_session_id(state: dict[str, Any], spec: dict[str, Any], *, existing: bool) -> str:
+    cwd = str(state.get("cwd") or "").strip()
+    if not cwd:
+        return ""
+    project_dir = _render_discovery_path(
+        str(spec.get("projectDir") or "{home}/.claude/projects/{encodedCwd}"),
+        cwd=cwd,
+    )
+    if not project_dir.exists() or not project_dir.is_dir():
+        return ""
+    started_at_ms = _state_started_at_ms(state)
+    created_grace_ms = _clamp_int(spec.get("createdGraceMs"), DEFAULT_DISCOVERY_CREATED_GRACE_MS, 0, 86_400_000)
+    min_timestamp_ms = max(0, started_at_ms - created_grace_ms) if started_at_ms else 0
+    max_rows = _clamp_int(spec.get("maxRows"), DEFAULT_DISCOVERY_MAX_ROWS, 1, 500)
+    try:
+        candidates = sorted(project_dir.glob("*.jsonl"), key=lambda path: path.stat().st_mtime, reverse=True)[:max_rows]
+    except OSError:
+        return ""
+    for path in candidates:
+        try:
+            latest_at_ms = int(path.stat().st_mtime * 1000)
+        except OSError:
+            continue
+        if min_timestamp_ms and latest_at_ms < min_timestamp_ms:
+            if existing:
+                continue
+            return ""
+        session_id = _claude_session_id_from_jsonl(path, spec)
+        if session_id:
+            return session_id
+    return ""
+
+
+def _claude_session_id_from_jsonl(path: Path, spec: dict[str, Any]) -> str:
+    stem = path.stem.strip()
+    if _valid_discovered_session_id(stem, spec):
+        return stem
+    try:
+        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return ""
+    sample = lines[:8] + lines[-8:]
+    for line in sample:
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(payload, dict):
+            continue
+        session_id = str(payload.get("sessionId") or payload.get("session_id") or "").strip()
+        if _valid_discovered_session_id(session_id, spec):
+            return session_id
+    return ""
+
+
+def _render_discovery_path(template: str, *, cwd: str = "") -> Path:
     raw = template or "{home}/.local/share/mimocode/mimocode.db"
-    rendered = raw.replace("{home}", str(Path.home())).replace("{projectRoot}", str(Path(PROJECT_ROOT)))
+    rendered = (
+        raw.replace("{home}", str(Path.home()))
+        .replace("{projectRoot}", str(Path(PROJECT_ROOT)))
+        .replace("{encodedCwd}", _claude_project_dir_name(cwd))
+    )
     return Path(rendered).expanduser()
+
+
+def _claude_project_dir_name(cwd: str) -> str:
+    text = str(cwd or "").strip()
+    if not text:
+        return ""
+    try:
+        text = str(Path(text).resolve())
+    except Exception:
+        pass
+    text = text.replace("\\", "/").rstrip("/")
+    return re.sub(r"[^A-Za-z0-9._-]", "-", text).strip("-")
+
+
+def _terminal_permission_mode(agent_type: str, mode: str) -> str:
+    if cli_agent_service._normalize_id(agent_type) != "claude_code":
+        return ""
+    return "plan" if str(mode or "").strip().lower() == "readonly" else "auto"
 
 
 def _normalize_path_for_match(value: str) -> str:

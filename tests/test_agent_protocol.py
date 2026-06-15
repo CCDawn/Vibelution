@@ -3720,7 +3720,9 @@ class TestDelegationExposure:
         assert "spawn_agent_tool" not in names
 
     def test_llm_facing_tools_hide_long_tail_admin_tools(self):
-        names = [tool.name for tool in create_llm_facing_tools()]
+        tools = create_llm_facing_tools()
+        names = [tool.name for tool in tools]
+        descriptions = {tool.name: getattr(tool, "description", "") for tool in tools}
 
         assert "research_agent_creation_proposal_tool" in names
         assert "research_communication_edge_proposal_tool" in names
@@ -3740,6 +3742,7 @@ class TestDelegationExposure:
         assert "run_test_for_tool" in names
         assert "create_child_session_tool" in names
         assert "list_child_sessions_tool" in names
+        assert "claude_code" in descriptions["cli_agent_run_tool"]
 
     def test_child_session_tool_description_guides_autostart_handoff(self):
         tools_by_name = {tool.name: tool for tool in create_llm_facing_tools()}

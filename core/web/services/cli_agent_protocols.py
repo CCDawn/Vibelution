@@ -65,6 +65,20 @@ PROTOCOLS: dict[str, CliTaskProtocol] = {
             r"(已完成|完成|成功)",
         ),
     ),
+    "claude_code": CliTaskProtocol(
+        adapter_id="claude_code",
+        idle_completion_seconds=35.0,
+        min_completion_seconds=4.0,
+        max_tail_segments=10,
+        failure_patterns=(
+            r"(?i)\b(error|failed|exception|traceback|permission denied|aborted|tool use failed)\b",
+            r"(执行失败|运行失败|报错|异常|失败|权限被拒绝|已中止)",
+        ),
+        completion_patterns=(
+            r"(?i)\b(done|completed|finished|success)\b",
+            r"(已完成|完成|成功)",
+        ),
+    ),
 }
 
 
