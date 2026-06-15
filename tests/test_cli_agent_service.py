@@ -1,3 +1,5 @@
+import queue
+from types import SimpleNamespace
 import subprocess
 import sqlite3
 
@@ -266,6 +268,116 @@ def test_missing_cli_agent_executable_returns_error(monkeypatch, tmp_path):
     assert result["executableCandidates"] == ["codex.exe", "codex"]
 
 
+def test_run_cli_agent_timeout_returns_timeout_payload(monkeypatch, tmp_path):
+    project_root = _configure_roots(monkeypatch, tmp_path)
+    adapters = service._load_adapter_definitions()
+    adapters["codex_code"]["terminal"] = {"enabled": False}
+    monkeypatch.setattr(service, "_load_adapter_definitions", lambda: adapters)
+    monkeypatch.setattr(service.shutil, "which", lambda candidate: r"C:\tools\codex.exe" if candidate == "codex.exe" else "")
+
+    def fake_run(*args, **kwargs):
+        raise subprocess.TimeoutExpired(args[0], kwargs.get("timeout", 1), output="long stdout output", stderr="long stderr output")
+
+    monkeypatch.setattr(service.subprocess, "run", fake_run)
+
+    result = service.run_cli_agent(
+        agent_type="codex_code",
+        task="执行一个可能超时的任务",
+        cwd=str(project_root),
+        mode="readonly",
+        timeout=5,
+    )
+
+    assert result["status"] == "timeout"
+    assert result["code"] == "CLI_AGENT_TIMEOUT"
+    assert result["timedOut"] is True
+    assert result["timeoutSeconds"] == 5
+    assert result["stdoutPreview"] == "long stdout output"
+    assert result["stderrPreview"] == "long stderr output"
+    assert result["logPath"].startswith(".runtime/cli_agents/runs/")
+    assert result["durationMs"] >= 0
+
+
+def test_run_cli_agent_launch_failure_returns_error_payload(monkeypatch, tmp_path):
+    project_root = _configure_roots(monkeypatch, tmp_path)
+    adapters = service._load_adapter_definitions()
+    adapters["codex_code"]["terminal"] = {"enabled": False}
+    monkeypatch.setattr(service, "_load_adapter_definitions", lambda: adapters)
+    monkeypatch.setattr(service.shutil, "which", lambda candidate: r"C:\tools\codex.exe" if candidate == "codex.exe" else "")
+
+    def fake_run(*_args, **_kwargs):
+        raise OSError("launch failed")
+
+    monkeypatch.setattr(service.subprocess, "run", fake_run)
+
+    result = service.run_cli_agent(
+        agent_type="codex_code",
+        task="执行一个需要启动进程的任务",
+        cwd=str(project_root),
+    )
+
+    assert result["status"] == "error"
+    assert result["code"] == "CLI_AGENT_LAUNCH_FAILED"
+    assert "launch failed" in result["message"]
+    assert result["logPath"].startswith(".runtime/cli_agents/runs/")
+
+
+def test_resolve_run_cwd_rejects_missing_directory(tmp_path, monkeypatch):
+    _configure_roots(monkeypatch, tmp_path)
+    missing = tmp_path / "Vibelution" / "no-such-dir"
+
+    result = service._resolve_run_cwd(str(missing), mode="readonly")
+
+    assert result["ok"] is False
+    assert result["code"] == "CWD_NOT_FOUND"
+
+
+def test_resolve_run_cwd_rejects_outside_allowed_roots(tmp_path, monkeypatch):
+    project_root = _configure_roots(monkeypatch, tmp_path)
+    outside = project_root.parent / "outside-project-root"
+    outside.mkdir()
+
+    result = service._resolve_run_cwd(str(outside), mode="readonly")
+
+    assert result["ok"] is False
+    assert result["code"] == "CWD_OUTSIDE_ALLOWED_ROOTS"
+
+
+def test_build_command_args_rejects_unknown_adapter_id(tmp_path):
+    try:
+        service._build_command_args(
+            {"id": "unsupported"},
+            executable="agent",
+            cwd=tmp_path,
+            task="run",
+            task_hash="abc123456789",
+            mode="readonly",
+            model="",
+            agent="",
+            allow_unsafe_permissions=False,
+        )
+    except ValueError as exc:
+        assert str(exc) == "Unsupported adapter id: unsupported"
+    else:
+        raise AssertionError("expected ValueError for unsupported adapter id")
+
+
+def test_terminal_runtime_publish_replaces_oldest_event_when_queue_is_full(tmp_path):
+    runtime = terminal_service._TerminalRuntime(
+        state={"terminalSessionId": "cli-term-1", "rows": 28, "cols": 100},
+        process=SimpleNamespace(),
+        transport="conpty",
+        transcript_path=tmp_path / "transcript.txt",
+        session_id_regex=r"",
+    )
+    bounded = queue.Queue(maxsize=1)
+    runtime.subscribers = [bounded]
+    bounded.put_nowait({"type": "old_event"})
+
+    runtime._publish({"type": "new_event"})
+
+    assert bounded.qsize() == 1
+    assert bounded.get_nowait()["type"] == "new_event"
 def test_cli_agent_run_tool_does_not_reuse_persisted_running_state_without_runtime(monkeypatch, tmp_path):
     project_root = _configure_roots(monkeypatch, tmp_path)
     state_dir = project_root / ".runtime" / "cli_agents" / "sessions"
