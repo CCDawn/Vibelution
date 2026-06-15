@@ -125,6 +125,9 @@ Args:
 _CLI_AGENT_RUN_TOOL_DOCSTRING = """
 【CLI Agent 调用】受控调用外部代码 Agent。
 
+会话 Agent 需要把独立代码分析、实现或验证交给外部代码 Agent 时，使用这个入口；
+内部子 Agent 自动派遣不再作为会话 Agent 的默认路径。
+
 只支持内置适配器：
 1. `mimo_code`：调用 `mimo run`
 2. `codex_code`：调用 `codex exec`
