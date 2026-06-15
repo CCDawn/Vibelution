@@ -805,6 +805,69 @@ def test_agent_directory_full_list_reuses_hydration_until_event_signature_change
     assert updated_agent["agentInboxPendingCount"] == 2
 
 
+def test_agent_directory_full_list_fast_cache_skips_event_signature_scan_on_hit(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    agent = agent_directory_service.create_agent_instance(display_name="Fast Cached Hydration Agent", primary_mode="chat")
+    agent_directory_service.write_agent_inbox_message(
+        agent["agentId"],
+        content="首条待办。",
+        created_by="test",
+    )
+    first = agent_directory_service.list_agents(include_archived=True)
+    signature_paths: list[str] = []
+    original_signature = agent_directory_service._jsonl_signature
+
+    def counting_signature(path):
+        signature_paths.append(str(path).replace("\\", "/"))
+        return original_signature(path)
+
+    monkeypatch.setattr(agent_directory_service, "_jsonl_signature", counting_signature)
+
+    second = agent_directory_service.list_agents(include_archived=True)
+
+    assert second == first
+    assert signature_paths == []
+
+    agent_directory_service.write_agent_inbox_message(
+        agent["agentId"],
+        content="第二条待办。",
+        created_by="test",
+    )
+    signature_paths.clear()
+    updated = agent_directory_service.list_agents(include_archived=True)
+
+    assert any(path.endswith("agent_inbox_messages.jsonl") for path in signature_paths)
+    updated_agent = next(item for item in updated if item["agentId"] == agent["agentId"])
+    assert updated_agent["agentInboxPendingCount"] == 2
+
+
+def test_agent_directory_full_list_fast_cache_invalidates_after_tool_governance_write(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    agent = agent_directory_service.create_agent_instance(display_name="Governance Cached Hydration Agent", primary_mode="chat")
+    agent_directory_service.list_agents(include_archived=True)
+    signature_paths: list[str] = []
+    original_signature = agent_directory_service._jsonl_signature
+
+    def counting_signature(path):
+        signature_paths.append(str(path).replace("\\", "/"))
+        return original_signature(path)
+
+    monkeypatch.setattr(agent_directory_service, "_jsonl_signature", counting_signature)
+    agent_tool_governance_service.submit_tool_governance_request(
+        agent["agentId"],
+        grant_tools=["grep_search_tool"],
+        reason="low-risk check",
+        apply_mode="review",
+    )
+
+    signature_paths.clear()
+    updated = agent_directory_service.list_agents(include_archived=True)
+
+    assert any(path.endswith("tool_governance_requests.jsonl") for path in signature_paths)
+    updated_agent = next(item for item in updated if item["agentId"] == agent["agentId"])
+    assert len(updated_agent["toolGovernanceRequests"]) == 1
+
+
 def test_agent_config_workspace_recent_jsonl_preserves_older_pending_messages(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     monkeypatch.setattr(config_service, "get_config_workspace", _fake_config_workspace)

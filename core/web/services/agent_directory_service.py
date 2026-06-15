@@ -282,7 +282,18 @@ _JSONL_RECENT_CACHE: dict[tuple[str, bool, int, int, int, str, bool], list[dict[
 _JSONL_COUNT_CACHE: dict[tuple[str, bool, int, int, str], int] = {}
 _AGENT_API_HYDRATION_CACHE_LOCK = threading.RLock()
 _AGENT_API_HYDRATION_CACHE_SIGNATURE: tuple[Any, ...] | None = None
+_AGENT_API_HYDRATION_CACHE_FAST_SIGNATURE: tuple[Any, ...] | None = None
+_AGENT_API_HYDRATION_CACHE_VALIDATED_AT = 0.0
+_AGENT_API_HYDRATION_EVENT_VERSION = 0
 _AGENT_API_HYDRATION_CACHE: AgentApiHydrationContext | None = None
+_AGENT_API_HYDRATION_FAST_TTL_SECONDS = 5.0
+_AGENT_API_HYDRATION_EVENT_FILENAMES = frozenset(
+    {
+        "tool_governance_requests.jsonl",
+        "group_context_events.jsonl",
+        "agent_inbox_messages.jsonl",
+    }
+)
 _CURRENT_AGENT_RUNTIME: ContextVar[dict[str, Any]] = ContextVar(
     "vibelution_current_agent_runtime",
     default={},
@@ -3972,13 +3983,23 @@ def _build_agent_api_hydration_context(
 ) -> AgentApiHydrationContext:
     timings_ref = timings if timings is not None else {}
     started = time.perf_counter()
+    fast_signature = _agent_api_hydration_fast_signature(agents)
+    cached = _get_agent_api_hydration_fast_cache(fast_signature, now=started)
+    if cached is not None:
+        timings_ref["cache_lookup"] = round((time.perf_counter() - started) * 1000, 1)
+        timings_ref["cache_hit"] = 1.0
+        timings_ref["cache_fast_hit"] = 1.0
+        return cached
     signature = _agent_api_hydration_signature(agents)
     cached = _get_agent_api_hydration_cache(signature)
     timings_ref["cache_lookup"] = round((time.perf_counter() - started) * 1000, 1)
     if cached is not None:
         timings_ref["cache_hit"] = 1.0
+        timings_ref["cache_fast_hit"] = 0.0
+        _refresh_agent_api_hydration_fast_cache(fast_signature)
         return cached
     timings_ref["cache_hit"] = 0.0
+    timings_ref["cache_fast_hit"] = 0.0
     started = time.perf_counter()
     tool_policies = _tool_policies(state)
     timings_ref["tool_policies"] = round((time.perf_counter() - started) * 1000, 1)
@@ -4023,8 +4044,22 @@ def _build_agent_api_hydration_context(
         agent_inbox_messages_by_agent=agent_inbox_messages_by_agent,
         agent_inbox_pending_count_by_agent=agent_inbox_pending_count_by_agent,
     )
-    _remember_agent_api_hydration_cache(signature, context)
+    _remember_agent_api_hydration_cache(signature, fast_signature, context)
     return context
+
+
+def _agent_api_hydration_fast_signature(agents: list[dict[str, Any]]) -> tuple[Any, ...]:
+    agent_keys: list[tuple[str, str]] = []
+    for agent in agents:
+        if not isinstance(agent, dict):
+            continue
+        agent_keys.append(
+            (
+                str(agent.get("agentId") or "").strip(),
+                str(agent.get("workspacePath") or "").strip(),
+            )
+        )
+    return (_registry_state_signature(), _agent_api_hydration_event_version(), tuple(agent_keys))
 
 
 def _agent_api_hydration_signature(agents: list[dict[str, Any]]) -> tuple[Any, ...]:
@@ -4043,7 +4078,41 @@ def _agent_api_hydration_signature(agents: list[dict[str, Any]]) -> tuple[Any, .
                 _jsonl_signature(_agent_workspace_event_path(agent, "agent_inbox_messages.jsonl")),
             )
         )
-    return (_registry_state_signature(), tuple(agent_signatures))
+    return (_registry_state_signature(), _agent_api_hydration_event_version(), tuple(agent_signatures))
+
+
+def _agent_api_hydration_event_version() -> int:
+    with _AGENT_API_HYDRATION_CACHE_LOCK:
+        return _AGENT_API_HYDRATION_EVENT_VERSION
+
+
+def record_agent_api_hydration_event_file_changed(path: Path | str) -> None:
+    """Invalidate the fast Agent API hydration cache when Agent event logs change."""
+
+    global _AGENT_API_HYDRATION_EVENT_VERSION
+    try:
+        filename = Path(path).name
+    except TypeError:
+        filename = ""
+    if filename not in _AGENT_API_HYDRATION_EVENT_FILENAMES:
+        return
+    with _AGENT_API_HYDRATION_CACHE_LOCK:
+        _AGENT_API_HYDRATION_EVENT_VERSION += 1
+
+
+def _get_agent_api_hydration_fast_cache(
+    fast_signature: tuple[Any, ...],
+    *,
+    now: float,
+) -> AgentApiHydrationContext | None:
+    with _AGENT_API_HYDRATION_CACHE_LOCK:
+        if _AGENT_API_HYDRATION_CACHE is None:
+            return None
+        if _AGENT_API_HYDRATION_CACHE_FAST_SIGNATURE != fast_signature:
+            return None
+        if now - _AGENT_API_HYDRATION_CACHE_VALIDATED_AT > _AGENT_API_HYDRATION_FAST_TTL_SECONDS:
+            return None
+        return _AGENT_API_HYDRATION_CACHE
 
 
 def _get_agent_api_hydration_cache(signature: tuple[Any, ...]) -> AgentApiHydrationContext | None:
@@ -4053,11 +4122,27 @@ def _get_agent_api_hydration_cache(signature: tuple[Any, ...]) -> AgentApiHydrat
     return None
 
 
-def _remember_agent_api_hydration_cache(signature: tuple[Any, ...], context: AgentApiHydrationContext) -> None:
+def _refresh_agent_api_hydration_fast_cache(fast_signature: tuple[Any, ...]) -> None:
+    global _AGENT_API_HYDRATION_CACHE_FAST_SIGNATURE
+    global _AGENT_API_HYDRATION_CACHE_VALIDATED_AT
+    with _AGENT_API_HYDRATION_CACHE_LOCK:
+        _AGENT_API_HYDRATION_CACHE_FAST_SIGNATURE = fast_signature
+        _AGENT_API_HYDRATION_CACHE_VALIDATED_AT = time.perf_counter()
+
+
+def _remember_agent_api_hydration_cache(
+    signature: tuple[Any, ...],
+    fast_signature: tuple[Any, ...],
+    context: AgentApiHydrationContext,
+) -> None:
     global _AGENT_API_HYDRATION_CACHE_SIGNATURE
+    global _AGENT_API_HYDRATION_CACHE_FAST_SIGNATURE
+    global _AGENT_API_HYDRATION_CACHE_VALIDATED_AT
     global _AGENT_API_HYDRATION_CACHE
     with _AGENT_API_HYDRATION_CACHE_LOCK:
         _AGENT_API_HYDRATION_CACHE_SIGNATURE = signature
+        _AGENT_API_HYDRATION_CACHE_FAST_SIGNATURE = fast_signature
+        _AGENT_API_HYDRATION_CACHE_VALIDATED_AT = time.perf_counter()
         _AGENT_API_HYDRATION_CACHE = context
 
 
@@ -4739,6 +4824,7 @@ def _append_jsonl(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8", newline="\n") as handle:
         handle.write(json.dumps(payload, ensure_ascii=False, sort_keys=True) + "\n")
+    record_agent_api_hydration_event_file_changed(path)
 
 
 def _write_jsonl(path: Path, payloads: list[dict[str, Any]]) -> None:
@@ -4749,6 +4835,7 @@ def _write_jsonl(path: Path, payloads: list[dict[str, Any]]) -> None:
         if isinstance(item, dict)
     ]
     path.write_text(("\n".join(lines) + "\n") if lines else "", encoding="utf-8", newline="\n")
+    record_agent_api_hydration_event_file_changed(path)
 
 
 def _read_jsonl(path: Path) -> list[dict[str, Any]]:
