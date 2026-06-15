@@ -206,12 +206,16 @@ function cliAgentRunCloseToken(run: Pick<CliAgentRunView, "id" | "sourceRunId">)
 
 type CliAgentRunResult = {
   status?: string;
+  semanticStatus?: string;
+  internalStatus?: string;
   code?: string;
   runId?: string;
   cliRunId?: string;
+  lockKey?: string;
   terminalSessionId?: string;
   terminalReuse?: boolean;
   agentType?: string;
+  adapterId?: string;
   label?: string;
   mode?: string;
   cwd?: string;
@@ -222,8 +226,12 @@ type CliAgentRunResult = {
   timeoutSeconds?: number;
   stdoutPreview?: string;
   stderrPreview?: string;
+  resultSegments?: Array<{ index?: number; kind?: string; text?: string }>;
   logPath?: string;
   cliSessionId?: string;
+  sourceSessionId?: string;
+  sourceMessageId?: string;
+  sourceRunId?: string;
   terminalStatus?: string;
   terminalAlive?: boolean;
 };
@@ -264,7 +272,11 @@ type CliAgentTerminalSession = {
   commandPreview?: string[];
   resumed?: boolean;
   status?: string;
+  semanticStatus?: string;
   alive?: boolean;
+  userClosed?: boolean;
+  closedTerminalSessionIds?: string[];
+  closeReason?: string;
   transport?: string;
   rows?: number;
   cols?: number;
@@ -364,28 +376,32 @@ function stableCliHash(value: string) {
 function cliAgentRunIdForSource({
   agentType,
   cwd,
+  mode,
   sourceMessageId,
   sourceRunId,
   task,
 }: {
   agentType: string;
   cwd: string;
+  mode: string;
   sourceMessageId: string;
   sourceRunId: string;
   task: string;
 }) {
   const normalizedCwd = cwd.trim().replace(/\\/g, "/").toLowerCase();
+  const normalizedMode = (mode.trim().toLowerCase() || "readonly");
   if (!agentType.trim() || !normalizedCwd) {
     const sourceScope = sourceMessageId.trim() || sourceRunId.trim() || stableCliHash(task.trim());
-    return `cli-run-${stableCliHash(["cli-run-v1", agentType.trim(), sourceScope, normalizedCwd].join("\n"))}`;
+    return `cli-run-${stableCliHash(["cli-run-v1", agentType.trim(), sourceScope, normalizedCwd, normalizedMode].join("\n"))}`;
   }
-  return `cli-run-${stableCliHash(["cli-run-v2", agentType.trim(), normalizedCwd].join("\n"))}`;
+  return `cli-run-${stableCliHash(["cli-run-v3", agentType.trim(), normalizedCwd, normalizedMode].join("\n"))}`;
 }
 
-function cliAgentCanonicalKey(agentType: string, cwd: string) {
+function cliAgentCanonicalKey(agentType: string, cwd: string, mode: string) {
   const normalizedAgentType = agentType.trim().toLowerCase().replace(/-/g, "_");
   const normalizedCwd = cwd.trim().replace(/\\/g, "/").toLowerCase();
-  return normalizedAgentType && normalizedCwd ? `${normalizedAgentType}|${normalizedCwd}` : "";
+  const normalizedMode = mode.trim().toLowerCase() || "readonly";
+  return normalizedAgentType && normalizedCwd ? `${normalizedAgentType}|${normalizedCwd}|${normalizedMode}` : "";
 }
 
 function cliAgentLifecycleText(message: ConversationMessage, key: string) {
@@ -418,7 +434,10 @@ type CliAgentLifecyclePatch = {
   terminalSessionId: string;
   cliSessionId: string;
   adapterId: string;
+  label: string;
   cwd: string;
+  mode: string;
+  lockKey: string;
   status: string;
 };
 
@@ -438,7 +457,10 @@ function cliAgentLifecyclePatchFromMessage(message: ConversationMessage): CliAge
     terminalSessionId: cliAgentLifecycleText(message, "terminalSessionId"),
     cliSessionId: cliAgentLifecycleText(message, "cliSessionId"),
     adapterId: cliAgentLifecycleText(message, "adapterId"),
+    label: cliAgentLifecycleText(message, "label"),
     cwd: cliAgentLifecycleText(message, "cwd"),
+    mode: cliAgentLifecycleText(message, "mode") || "readonly",
+    lockKey: cliAgentLifecycleText(message, "lockKey"),
     status: cliAgentLifecycleText(message, "status") || event,
   };
 }
@@ -449,6 +471,9 @@ function applyCliAgentLifecyclePatch(run: CliAgentRunView, patch: CliAgentLifecy
   }
   if (patch.cliSessionId) {
     run.cliSessionId = patch.cliSessionId;
+  }
+  if (patch.status) {
+    run.status = patch.status;
   }
 }
 
@@ -470,8 +495,96 @@ function applyCliAgentLifecyclePatchToRuns(
   }
 }
 
+function reopenCliAgentScope(
+  closedRunIds: Set<string>,
+  closedCanonicalKeys: Set<string>,
+  canonicalKey: string,
+  runIds: string[],
+) {
+  if (canonicalKey) {
+    closedCanonicalKeys.delete(canonicalKey);
+  }
+  for (const runId of runIds) {
+    closedRunIds.delete(runId);
+  }
+}
+
+function buildCliAgentLifecycleRunView(
+  message: ConversationMessage,
+  patch: CliAgentLifecyclePatch,
+  sourceSessionId: string,
+): CliAgentRunView | null {
+  if (!patch.terminalSessionId || !patch.adapterId || !patch.cwd) {
+    return null;
+  }
+  const mode = patch.mode || "readonly";
+  const sourceRunId = patch.sourceRunId || `${message.id}-${CLI_AGENT_TOOL_NAME}-lifecycle`;
+  const cliRunId = patch.cliRunId || cliAgentRunIdForSource({
+    agentType: patch.adapterId,
+    cwd: patch.cwd,
+    mode,
+    sourceMessageId: message.id,
+    sourceRunId,
+    task: "",
+  });
+  const result: CliAgentRunResult = {
+    status: patch.status || "attached",
+    semanticStatus: patch.status || "attached",
+    internalStatus: patch.status || "attached",
+    code: "CLI_AGENT_TERMINAL_ACTIVE",
+    cliRunId,
+    terminalSessionId: patch.terminalSessionId,
+    cliSessionId: patch.cliSessionId,
+    lockKey: patch.lockKey,
+    terminalReuse: true,
+    agentType: patch.adapterId,
+    adapterId: patch.adapterId,
+    label: patch.label,
+    mode,
+    cwd: patch.cwd,
+    sourceSessionId,
+    sourceMessageId: message.id,
+    sourceRunId,
+  };
+  const toolCall: ToolCall = {
+    name: CLI_AGENT_TOOL_NAME,
+    status: patch.status || "running",
+    summary: patch.event,
+    arguments: {
+      agent_type: patch.adapterId,
+      cwd: patch.cwd,
+      mode,
+    },
+    resultPreview: JSON.stringify(result),
+  };
+  const title = patch.label || cliAgentTitle(patch.adapterId, result);
+  const canonicalKey = cliAgentCanonicalKey(patch.adapterId, patch.cwd, mode);
+  const run: CliAgentRunView = {
+    id: cliRunId,
+    messageId: message.id,
+    sourceRunId,
+    toolCall,
+    result,
+    terminalSessionId: patch.terminalSessionId,
+    cliSessionId: patch.cliSessionId,
+    title,
+    summary: patch.event || patch.status,
+    status: patch.status || "attached",
+    agentType: patch.adapterId,
+    mode,
+    cwd: patch.cwd,
+    canonicalKey,
+    task: "",
+    commandLine: "",
+    resultPreview: String(toolCall.resultPreview ?? "").trim(),
+    error: "",
+    tracePath: "",
+  };
+  run.commandLine = compactCliCommand(run);
+  return run;
+}
+
 function buildCliAgentRunViews(messages: ConversationMessage[], sourceSessionId = ""): CliAgentRunView[] {
-  void sourceSessionId;
   const runsById = new Map<string, CliAgentRunView>();
   const runsByCanonicalKey = new Map<string, CliAgentRunView>();
   const lifecycleByRunId = new Map<string, CliAgentLifecyclePatch>();
@@ -486,7 +599,7 @@ function buildCliAgentRunViews(messages: ConversationMessage[], sourceSessionId 
         lifecyclePatch.sourceRunId,
         ...lifecyclePatch.linkedSourceRunIds,
       ].filter(Boolean);
-      const lifecycleCanonicalKey = cliAgentCanonicalKey(lifecyclePatch.adapterId, lifecyclePatch.cwd);
+      const lifecycleCanonicalKey = cliAgentCanonicalKey(lifecyclePatch.adapterId, lifecyclePatch.cwd, lifecyclePatch.mode);
       if (lifecyclePatch.event === "closed") {
         if (lifecycleCanonicalKey) {
           closedCanonicalKeys.add(lifecycleCanonicalKey);
@@ -509,6 +622,7 @@ function buildCliAgentRunViews(messages: ConversationMessage[], sourceSessionId 
           }
         }
       } else {
+        reopenCliAgentScope(closedRunIds, closedCanonicalKeys, lifecycleCanonicalKey, lifecycleRunIds);
         for (const runId of lifecycleRunIds) {
           lifecycleByRunId.set(runId, lifecyclePatch);
         }
@@ -516,6 +630,22 @@ function buildCliAgentRunViews(messages: ConversationMessage[], sourceSessionId 
           lifecycleByCanonicalKey.set(lifecycleCanonicalKey, lifecyclePatch);
         }
         applyCliAgentLifecyclePatchToRuns(runsById, lifecycleRunIds, lifecyclePatch);
+        const lifecycleRun = buildCliAgentLifecycleRunView(message, lifecyclePatch, sourceSessionId);
+        if (
+          lifecycleRun
+          && !closedRunIds.has(lifecycleRun.id)
+          && !closedRunIds.has(lifecycleRun.sourceRunId)
+          && !(lifecycleRun.canonicalKey && closedCanonicalKeys.has(lifecycleRun.canonicalKey))
+        ) {
+          const previousRun = lifecycleRun.canonicalKey ? runsByCanonicalKey.get(lifecycleRun.canonicalKey) : undefined;
+          if (previousRun) {
+            runsById.delete(previousRun.id);
+          }
+          if (lifecycleRun.canonicalKey) {
+            runsByCanonicalKey.set(lifecycleRun.canonicalKey, lifecycleRun);
+          }
+          runsById.set(lifecycleRun.id, lifecycleRun);
+        }
       }
       continue;
     }
@@ -532,21 +662,23 @@ function buildCliAgentRunViews(messages: ConversationMessage[], sourceSessionId 
       const result = parseCliAgentResult(toolCall);
       const args = toolCall.arguments;
       const agentType = textArg(args, "agent_type") || textArg(args, "agentType") || String(result?.agentType ?? "").trim();
-      const mode = textArg(args, "mode") || String(result?.mode ?? "").trim();
+      const mode = textArg(args, "mode") || String(result?.mode ?? "").trim() || "readonly";
       const cwd = textArg(args, "cwd") || String(result?.cwd ?? "").trim();
       const task = textArg(args, "task");
-      const status = String(result?.status || toolCall.status || "running").trim();
+      const status = String(result?.semanticStatus || result?.status || toolCall.status || "running").trim();
       const title = cliAgentTitle(agentType, result);
       const summary = String(result?.code || toolCall.summary || task || cwd || "").trim();
       const sourceRunId = `${message.id}-${CLI_AGENT_TOOL_NAME}-${index}`;
       const cliRunId = String(result?.cliRunId || "").trim() || cliAgentRunIdForSource({
         agentType,
         cwd,
+        mode,
         sourceMessageId: message.id,
         sourceRunId,
         task,
       });
-      const canonicalKey = cliAgentCanonicalKey(agentType, cwd);
+      const canonicalKey = cliAgentCanonicalKey(agentType, cwd, mode);
+      reopenCliAgentScope(closedRunIds, closedCanonicalKeys, canonicalKey, [cliRunId, sourceRunId]);
       if (canonicalKey && closedCanonicalKeys.has(canonicalKey)) {
         continue;
       }
@@ -644,7 +776,7 @@ function isCliAgentRunActiveForClose(run: CliAgentRunView, session?: CliAgentTer
     return true;
   }
   const status = String(session?.status || run.result?.terminalStatus || run.status || "").trim().toLowerCase();
-  if (["active", "pending", "queued", "sent", "running", "starting", "stopping"].includes(status)) {
+  if (["active", "attached", "pending", "queued", "sent", "task_sent", "running", "starting", "stopping"].includes(status)) {
     return true;
   }
   if (["closed", "stopped", "exited", "stale"].includes(status)) {
@@ -733,6 +865,11 @@ function CliAgentRunTerminalPanel({
   }, [markTerminalHasOutput]);
 
   const replayTerminalSnapshot = useCallback((session: CliAgentTerminalSession) => {
+    const transcriptTail = String(session.transcriptTail || "");
+    if (transcriptTail) {
+      writeTerminalChunk(transcriptTail, { reset: true });
+      return;
+    }
     if (session.transcriptTailReplayable === false) {
       const screenText = String(session.screenText || "").trim();
       const screenReplay = String(session.screenReplay || "");
