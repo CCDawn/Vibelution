@@ -93,6 +93,18 @@ export function isAgentRootSession(session: SessionSummary | undefined | null) {
   return Boolean(String(session?.agentId ?? "").trim()) && !isChildSession(session);
 }
 
+export function sessionUnreadCount(session: Pick<SessionSummary, "agentInboxPendingCount"> | undefined | null) {
+  const count = Number(session?.agentInboxPendingCount ?? 0);
+  return Number.isFinite(count) && count > 0 ? Math.floor(count) : 0;
+}
+
+export function sessionUnreadBadgeTitle(count: number, lang: "zh" | "en") {
+  if (count <= 0) {
+    return "";
+  }
+  return lang === "zh" ? `未读信息：${count} 条` : `${count} unread message${count === 1 ? "" : "s"}`;
+}
+
 export type DirectSessionIndexViewModel = {
   itemIsNotice: boolean;
   itemMessage: string;
@@ -222,6 +234,8 @@ export function DirectSessionIndexItem({
   const sessionFunctionVisible = showSessionFunctionLabel(sessionDisplay, lang);
   const sessionModelTitle = sessionModelTooltip(sessionDisplay.modelLabel, lang);
   const sessionSummaryVisible = showSessionSummaryInline(sessionSummary, lang, sessionIsChild);
+  const unreadCount = sessionUnreadCount(session);
+  const unreadTitle = sessionUnreadBadgeTitle(unreadCount, lang);
   const sessionItemClassName = active
     ? `${styles.sessionItem} ${styles.directSessionItem} ${sessionIsChild ? styles.childTopLevelSessionItem : ""} ${styles.sessionItemActive}`
     : `${styles.sessionItem} ${styles.directSessionItem} ${sessionIsChild ? styles.childTopLevelSessionItem : ""}`;
@@ -264,6 +278,11 @@ export function DirectSessionIndexItem({
                 aria-label={renameLabel}
               />
               {active ? <span className={styles.sessionCurrentBadge}>{t("currentSession")}</span> : null}
+              {unreadCount > 0 ? (
+                <span className={styles.sessionCurrentBadge} title={unreadTitle} aria-label={unreadTitle}>
+                  {unreadCount}
+                </span>
+              ) : null}
               <span className={styles.sessionState} title={statusTitle} aria-label={statusTitle}>
                 <CircleDot size={10} aria-hidden="true" />
               </span>
@@ -309,6 +328,11 @@ export function DirectSessionIndexItem({
             <span className={styles.conversationTitleRow}>
               <span className={styles.sessionItemTitle}>{sessionTitle}</span>
               {active ? <span className={styles.sessionCurrentBadge}>{t("currentSession")}</span> : null}
+              {unreadCount > 0 ? (
+                <span className={styles.sessionCurrentBadge} title={unreadTitle} aria-label={unreadTitle}>
+                  {unreadCount}
+                </span>
+              ) : null}
               <span className={styles.sessionState} title={statusTitle} aria-label={statusTitle}>
                 <CircleDot size={10} aria-hidden="true" />
               </span>

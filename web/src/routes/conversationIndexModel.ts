@@ -77,6 +77,7 @@ export function sessionToConversationSummary(session: SessionSummary): Conversat
     agentRoleKey: session.agentRoleKey,
     agentPromptTemplateId: session.agentPromptTemplateId,
     dialogueModelId: session.dialogueModelId,
+    agentInboxPendingCount: session.agentInboxPendingCount,
   };
 }
 

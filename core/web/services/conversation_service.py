@@ -39,6 +39,7 @@ def list_conversations() -> list[dict[str, Any]]:
                 "agentPrimaryMode": str(session.get("agentPrimaryMode") or "").strip(),
                 "agentRoleKey": str(session.get("agentRoleKey") or "").strip(),
                 "agentPromptTemplateId": str(session.get("agentPromptTemplateId") or "").strip(),
+                "agentInboxPendingCount": int(session.get("agentInboxPendingCount") or 0),
             }
         )
     filtered_archived_team_room_count = 0

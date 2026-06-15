@@ -166,7 +166,7 @@ _SESSION_MISSING_INDEX_EVENT_KEYS: set[tuple[str, str, str, str, str]] = set()
 _SESSION_MISSING_INDEX_BATCH_EVENT_KEYS: set[tuple[Any, ...]] = set()
 _AGENT_DIRECTORY_INDEX_EVENT_KEYS: set[tuple[str, str, str]] = set()
 _DIRECT_SESSION_COLLISION_REPAIR_LOCK = threading.Lock()
-_DIRECT_SESSION_COLLISION_REPAIR_SIGNATURE: tuple[tuple[str, int, int], tuple[str, int, int]] | None = None
+_DIRECT_SESSION_COLLISION_REPAIR_SIGNATURE: tuple[Any, ...] | None = None
 _SESSION_IMAGE_ARTIFACT_CONTENT_TYPES = {
     "png": "image/png",
     "jpg": "image/jpeg",
@@ -183,7 +183,7 @@ def _perf_counter() -> float:
     return time.perf_counter()
 
 
-def _session_list_source_signature() -> tuple[tuple[str, int, int], tuple[str, int, int]]:
+def _session_list_source_signature() -> tuple[Any, ...]:
     """Return cheap file signatures for the read-only session index inputs."""
 
     def signature(path: Path) -> tuple[str, int, int]:
@@ -193,9 +193,30 @@ def _session_list_source_signature() -> tuple[tuple[str, int, int], tuple[str, i
             return (str(path), -1, -1)
         return (str(path), int(stat.st_mtime_ns), int(stat.st_size))
 
+    inbox_signatures: list[tuple[str, tuple[str, bool, int, int]]] = []
+    state = agent_directory_service.load_state()
+    agents = list(state.get("agents") or []) if isinstance(state, dict) else []
+    for agent in agents:
+        if not isinstance(agent, dict):
+            continue
+        agent_id = str(agent.get("agentId") or "").strip()
+        if not agent_id:
+            continue
+        inbox_path = agent_directory_service._agent_workspace_event_path(
+            agent,
+            "agent_inbox_messages.jsonl",
+        )
+        inbox_signatures.append(
+            (
+                agent_id,
+                agent_directory_service._jsonl_signature(inbox_path),
+            )
+        )
+
     return (
         signature(chat_state_path(PROJECT_ROOT)),
         signature(agent_directory_service.registry_path()),
+        tuple(inbox_signatures),
     )
 
 
@@ -224,7 +245,7 @@ def _copy_session_summary_snapshot(item: dict[str, Any]) -> dict[str, Any]:
 def _get_session_list_cache(
     *,
     now: float,
-    signature: tuple[tuple[str, int, int], tuple[str, int, int]],
+    signature: tuple[Any, ...],
     allow_stale_matching_signature: bool = False,
 ) -> tuple[list[dict[str, Any]], int, int, int] | None:
     with _SESSION_LIST_CACHE_LOCK:
@@ -253,7 +274,7 @@ def _get_session_list_cache(
 def _get_session_list_cache_locked(
     *,
     now: float,
-    signature: tuple[tuple[str, int, int], tuple[str, int, int]],
+    signature: tuple[Any, ...],
     allow_stale_matching_signature: bool = False,
 ) -> tuple[list[dict[str, Any]], int, int, int] | None:
     snapshot = _SESSION_LIST_CACHE.get("sessions")
@@ -281,7 +302,7 @@ def _get_session_list_cache_locked(
 def _begin_session_list_cache_build(
     *,
     now: float,
-    signature: tuple[tuple[str, int, int], tuple[str, int, int]],
+    signature: tuple[Any, ...],
     allow_stale_matching_signature: bool = False,
 ) -> tuple[tuple[list[dict[str, Any]], int, int, int] | None, bool, bool]:
     """Return cached sessions or reserve this caller as the index builder."""
@@ -313,7 +334,7 @@ def _begin_session_list_cache_build(
 
 def _finish_session_list_cache_build(
     *,
-    signature: tuple[tuple[str, int, int], tuple[str, int, int]],
+    signature: tuple[Any, ...],
     sessions: list[dict[str, Any]] | None = None,
     started_at: float | None = None,
     conversation_count: int = 0,
@@ -340,7 +361,7 @@ def _set_session_list_cache(
     sessions: list[dict[str, Any]],
     *,
     now: float,
-    signature: tuple[tuple[str, int, int], tuple[str, int, int]],
+    signature: tuple[Any, ...],
     conversation_count: int,
     agent_count: int,
 ) -> None:
@@ -4615,7 +4636,7 @@ def _load_conversation_detail_target(
 
 def _repair_agent_direct_session_collisions(
     *,
-    source_signature: tuple[tuple[str, int, int], tuple[str, int, int]] | None = None,
+    source_signature: tuple[Any, ...] | None = None,
 ) -> bool:
     global _DIRECT_SESSION_COLLISION_REPAIR_SIGNATURE
     _sync_agent_directory_project_root()
@@ -6308,6 +6329,19 @@ def _active_task_to_api(value: dict[str, Any] | None) -> dict[str, Any] | None:
     }
 
 
+def _agent_inbox_pending_count_for_summary(agent: dict[str, Any] | None) -> int:
+    if not isinstance(agent, dict):
+        return 0
+    inbox_path = agent_directory_service._agent_workspace_event_path(
+        agent,
+        "agent_inbox_messages.jsonl",
+    )
+    return agent_directory_service._count_jsonl_matching_status(
+        inbox_path,
+        status="pending",
+    )
+
+
 def _build_session_summary(conversation: dict[str, Any], *, hydrate_agent: bool = True) -> dict[str, Any]:
     status = _conversation_phase(conversation["id"], conversation)
     summary = _latest_message_summary(conversation.get("messages") or [])
@@ -6324,6 +6358,7 @@ def _build_session_summary(conversation: dict[str, Any], *, hydrate_agent: bool 
     agent_role_key = str((agent or {}).get("roleKey") or "").strip()
     agent_prompt_template_id = str((agent or {}).get("promptTemplateId") or "").strip()
     dialogue_model_id = agent_dialogue_model_id(agent) if agent else ""
+    agent_inbox_pending_count = _agent_inbox_pending_count_for_summary(agent)
     agent_primary_direct_session_id = str((agent or {}).get("directSessionId") or "").strip()
     agent_direct_session_mismatch = bool(
         agent_id
@@ -6369,6 +6404,7 @@ def _build_session_summary(conversation: dict[str, Any], *, hydrate_agent: bool 
         "agentPrimaryMode": agent_primary_mode,
         "agentRoleKey": agent_role_key,
         "agentPromptTemplateId": agent_prompt_template_id,
+        "agentInboxPendingCount": agent_inbox_pending_count,
         "agentMissingId": agent_missing_id,
         "agentDirectSessionMismatch": agent_direct_session_mismatch,
         "agentPrimaryDirectSessionId": agent_primary_direct_session_id,
