@@ -27,12 +27,25 @@ describe("AppShell layout contract", () => {
     expect(statusGuideSource).toContain("lifecycleProofCard");
     expect(statusGuideSource).toContain("lifecycleStateLabel");
     expect(statusGuideSource).toContain("systemFrontendPossible_connected");
+    expect(statusGuideSource).toContain('title={t("systemStatusGuideHint")}');
+    expect(statusGuideSource).toContain("title={item.note}");
+    expect(statusGuideSource).toContain("data-current={state.label === item.value ? \"true\" : undefined}");
+    expect(statusGuideSource).toContain("title={state.detail}");
+    expect(statusGuideSource).toContain("title={component.detail}");
+    expect(statusGuideSource).not.toContain("statusGuideNote");
     expect(shellSource).not.toContain("rightStatusCards.map((item) => (\n                <span key={item.id} className={styles.statusBadge}>");
   });
 
   it("keeps the global shell top bar compact", () => {
     expect(styles.statusSummaryChip).toBeTypeOf("string");
     expect(styles.statusSummaryCount).toBeTypeOf("string");
+    expect(styles.statusGuideGrid).toBeTypeOf("string");
+    expect(styles.lifecycleProofMeta).toBeTypeOf("string");
+    expect(styles.lifecycleProofList).toBeTypeOf("string");
+    expect(shellStyles).toContain("width: min(640px, calc(100vw - 40px))");
+    expect(shellStyles).toContain("grid-template-columns: repeat(3, minmax(0, 1fr))");
+    expect(shellStyles).toContain(".statusGuideListItem[data-current=\"true\"]");
+    expect(shellStyles).toContain("grid-template-columns: repeat(2, minmax(0, 1fr))");
     expect(shellStyles).toContain("flex-wrap: nowrap");
     expect(shellStyles).toContain("@media (max-width: 1180px)");
     expect(shellStyles).toContain(".topClock span:last-child");
