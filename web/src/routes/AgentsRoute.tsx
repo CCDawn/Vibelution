@@ -44,6 +44,7 @@ import {
   AgentConfigWorkspace,
   AgentConfigWorkspaceAgent,
   AgentConfigWorkspaceGroup,
+  AgentContextCompressionPolicy,
   AgentLlmBindings,
   AgentLlmSlotDefinition,
   AgentModelChoice,
@@ -69,7 +70,26 @@ type AgentConfigDraft = {
   promptTemplateId: string;
   toolPolicyId: string;
   memoryPolicyId: string;
+  contextCompressionPolicy: AgentContextCompressionPolicyDraft;
   status: string;
+};
+
+type AgentContextCompressionPolicyDraft = {
+  mode: "inherit" | "custom";
+  enabled: boolean;
+  maxTokenLimit: string;
+  maxCompressionsPerSession: string;
+  lightThreshold: string;
+  standardThreshold: string;
+  deepThreshold: string;
+  emergencyThreshold: string;
+  lightSummaryChars: string;
+  standardSummaryChars: string;
+  deepSummaryChars: string;
+  emergencySummaryChars: string;
+  keepAiMessages: string;
+  preserveErrors: boolean;
+  extractKeyDecisions: boolean;
 };
 
 type AgentPersonaDraft = Omit<AgentPersonaProfile, "expertise"> & {
@@ -337,6 +357,23 @@ const DEFAULT_AGENT_RESET_OPTIONS: AgentResetOptions = {
   resetToolPolicy: false,
   resetMemoryPolicy: false,
   resetRuntimePolicy: false,
+};
+const DEFAULT_AGENT_CONTEXT_COMPRESSION_DRAFT: AgentContextCompressionPolicyDraft = {
+  mode: "inherit",
+  enabled: true,
+  maxTokenLimit: "16000",
+  maxCompressionsPerSession: "20",
+  lightThreshold: "60",
+  standardThreshold: "80",
+  deepThreshold: "90",
+  emergencyThreshold: "95",
+  lightSummaryChars: "500",
+  standardSummaryChars: "1000",
+  deepSummaryChars: "2000",
+  emergencySummaryChars: "3000",
+  keepAiMessages: "5",
+  preserveErrors: true,
+  extractKeyDecisions: true,
 };
 const DEFAULT_BULK_CONFIG_DRAFT: AgentBulkConfigDraft = {
   dialogueModelId: "",
@@ -1439,6 +1476,93 @@ function groupAriaLabel(
     : `${label}, ${group.count} Agents, ${countLabel} ${group.healthCount}`;
 }
 
+function numericText(value: unknown, fallback: number) {
+  const parsed = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(parsed) ? String(Math.round(parsed)) : String(fallback);
+}
+
+function percentText(value: unknown, fallbackRatio: number) {
+  const parsed = typeof value === "number" ? value : Number(value);
+  const ratio = Number.isFinite(parsed) ? parsed : fallbackRatio;
+  return String(Math.round(Math.max(0, Math.min(1, ratio)) * 100));
+}
+
+function percentToRatio(value: string, fallback: number) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? Math.max(0, Math.min(1, parsed / 100)) : fallback;
+}
+
+function positiveIntegerFromText(value: string, fallback: number) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? Math.max(0, Math.round(parsed)) : fallback;
+}
+
+function contextCompressionDraftFromAgent(agent: AgentConfigWorkspaceAgent | null | undefined): AgentContextCompressionPolicyDraft {
+  const stored = agent?.contextCompressionPolicy;
+  const effective = agent?.contextCompressionEffectivePolicy;
+  const source: AgentContextCompressionPolicy | undefined = stored?.mode === "custom" ? stored : effective;
+  const levels = source?.levels ?? effective?.levels ?? {};
+  const summaryChars = source?.summaryChars ?? effective?.summaryChars ?? {};
+  const preservation = source?.preservation ?? effective?.preservation ?? {};
+  const defaults = DEFAULT_AGENT_CONTEXT_COMPRESSION_DRAFT;
+  return {
+    mode: stored?.mode === "custom" ? "custom" : "inherit",
+    enabled: source?.enabled ?? effective?.enabled ?? defaults.enabled,
+    maxTokenLimit: numericText(source?.maxTokenLimit ?? effective?.effectiveTokenLimit, Number(defaults.maxTokenLimit)),
+    maxCompressionsPerSession: numericText(
+      source?.maxCompressionsPerSession ?? effective?.maxCompressionsPerSession,
+      Number(defaults.maxCompressionsPerSession),
+    ),
+    lightThreshold: percentText(levels.light, 0.6),
+    standardThreshold: percentText(levels.standard, 0.8),
+    deepThreshold: percentText(levels.deep, 0.9),
+    emergencyThreshold: percentText(levels.emergency, 0.95),
+    lightSummaryChars: numericText(summaryChars.light, Number(defaults.lightSummaryChars)),
+    standardSummaryChars: numericText(summaryChars.standard, Number(defaults.standardSummaryChars)),
+    deepSummaryChars: numericText(summaryChars.deep, Number(defaults.deepSummaryChars)),
+    emergencySummaryChars: numericText(summaryChars.emergency, Number(defaults.emergencySummaryChars)),
+    keepAiMessages: numericText(preservation.keepAiMessages, Number(defaults.keepAiMessages)),
+    preserveErrors: preservation.preserveErrors ?? defaults.preserveErrors,
+    extractKeyDecisions: preservation.extractKeyDecisions ?? defaults.extractKeyDecisions,
+  };
+}
+
+function contextCompressionPolicyFromDraft(draft: AgentContextCompressionPolicyDraft): AgentContextCompressionPolicy {
+  if (draft.mode !== "custom") {
+    return { mode: "inherit" };
+  }
+  return {
+    mode: "custom",
+    enabled: draft.enabled,
+    maxTokenLimit: positiveIntegerFromText(draft.maxTokenLimit, Number(DEFAULT_AGENT_CONTEXT_COMPRESSION_DRAFT.maxTokenLimit)),
+    maxCompressionsPerSession: positiveIntegerFromText(
+      draft.maxCompressionsPerSession,
+      Number(DEFAULT_AGENT_CONTEXT_COMPRESSION_DRAFT.maxCompressionsPerSession),
+    ),
+    levels: {
+      light: percentToRatio(draft.lightThreshold, 0.6),
+      standard: percentToRatio(draft.standardThreshold, 0.8),
+      deep: percentToRatio(draft.deepThreshold, 0.9),
+      emergency: percentToRatio(draft.emergencyThreshold, 0.95),
+    },
+    summaryChars: {
+      light: positiveIntegerFromText(draft.lightSummaryChars, Number(DEFAULT_AGENT_CONTEXT_COMPRESSION_DRAFT.lightSummaryChars)),
+      standard: positiveIntegerFromText(draft.standardSummaryChars, Number(DEFAULT_AGENT_CONTEXT_COMPRESSION_DRAFT.standardSummaryChars)),
+      deep: positiveIntegerFromText(draft.deepSummaryChars, Number(DEFAULT_AGENT_CONTEXT_COMPRESSION_DRAFT.deepSummaryChars)),
+      emergency: positiveIntegerFromText(draft.emergencySummaryChars, Number(DEFAULT_AGENT_CONTEXT_COMPRESSION_DRAFT.emergencySummaryChars)),
+    },
+    preservation: {
+      keepAiMessages: positiveIntegerFromText(draft.keepAiMessages, Number(DEFAULT_AGENT_CONTEXT_COMPRESSION_DRAFT.keepAiMessages)),
+      preserveErrors: draft.preserveErrors,
+      extractKeyDecisions: draft.extractKeyDecisions,
+    },
+  };
+}
+
+function contextCompressionDraftEqualsDraft(left: AgentContextCompressionPolicyDraft, right: AgentContextCompressionPolicyDraft) {
+  return JSON.stringify(contextCompressionPolicyFromDraft(left)) === JSON.stringify(contextCompressionPolicyFromDraft(right));
+}
+
 function draftFromAgent(agent: AgentConfigWorkspaceAgent | null | undefined): AgentConfigDraft {
   return {
     displayName: agent?.displayName ?? "",
@@ -1447,6 +1571,7 @@ function draftFromAgent(agent: AgentConfigWorkspaceAgent | null | undefined): Ag
     promptTemplateId: agent?.promptTemplateId ?? "",
     toolPolicyId: agent?.toolPolicyId ?? "",
     memoryPolicyId: agent?.memoryPolicyId ?? "",
+    contextCompressionPolicy: contextCompressionDraftFromAgent(agent),
     status: agent?.status ?? "active",
   };
 }
@@ -1463,6 +1588,7 @@ function draftEqualsAgent(draft: AgentConfigDraft, agent: AgentConfigWorkspaceAg
     && draft.promptTemplateId === base.promptTemplateId
     && draft.toolPolicyId === base.toolPolicyId
     && draft.memoryPolicyId === base.memoryPolicyId
+    && contextCompressionDraftEqualsDraft(draft.contextCompressionPolicy, base.contextCompressionPolicy)
     && draft.status === base.status
   );
 }
@@ -1894,6 +2020,7 @@ function configDraftEqualsDraft(left: AgentConfigDraft, right: AgentConfigDraft)
     && left.promptTemplateId === right.promptTemplateId
     && left.toolPolicyId === right.toolPolicyId
     && left.memoryPolicyId === right.memoryPolicyId
+    && contextCompressionDraftEqualsDraft(left.contextCompressionPolicy, right.contextCompressionPolicy)
     && left.status === right.status
   );
 }
@@ -2857,6 +2984,20 @@ function agentsRouteCopy(lang: "zh" | "en") {
         prompt: "提示词",
         tools: "工具能力",
         memory: "记忆设置",
+        contextCompressionPolicy: "上下文压缩",
+        contextCompressionInherit: "继承全局",
+        contextCompressionCustom: "Agent 自定义",
+        contextCompressionEnabled: "启用压缩",
+        contextCompressionMaxTokenLimit: "压缩阈值",
+        contextCompressionMaxCount: "每会话上限",
+        contextCompressionThresholds: "触发阈值 %",
+        contextCompressionSummaryChars: "摘要长度",
+        contextCompressionKeepAi: "保留 AI 消息",
+        contextCompressionPreserveErrors: "保留错误",
+        contextCompressionExtractDecisions: "提取决策",
+        contextCompressionEffective: "有效策略",
+        contextCompressionSourceGlobal: "继承全局策略",
+        contextCompressionSourceCustom: "当前 Agent 自定义策略",
         territory: "工作空间",
         privateTerritory: "私人工作区",
         sharedTerritory: "共享资料区",
@@ -3237,6 +3378,20 @@ function agentsRouteCopy(lang: "zh" | "en") {
         prompt: "Prompt",
         tools: "Tool policy",
         memory: "Memory policy",
+        contextCompressionPolicy: "Context compression",
+        contextCompressionInherit: "Inherit global",
+        contextCompressionCustom: "Agent custom",
+        contextCompressionEnabled: "Enable compression",
+        contextCompressionMaxTokenLimit: "Compression limit",
+        contextCompressionMaxCount: "Max per session",
+        contextCompressionThresholds: "Trigger thresholds %",
+        contextCompressionSummaryChars: "Summary chars",
+        contextCompressionKeepAi: "Keep AI messages",
+        contextCompressionPreserveErrors: "Preserve errors",
+        contextCompressionExtractDecisions: "Extract decisions",
+        contextCompressionEffective: "Effective policy",
+        contextCompressionSourceGlobal: "Inherited global policy",
+        contextCompressionSourceCustom: "This Agent uses a custom policy",
         territory: "Workspace territory",
         privateTerritory: "Private write root",
         sharedTerritory: "Shared read area",
@@ -3479,6 +3634,7 @@ export function AgentsRoute() {
   const navigate = useNavigate();
   const pageVisible = usePageVisibility();
   const copy = useMemo(() => agentsRouteCopy(lang), [lang]);
+  const numberFormatter = useMemo(() => new Intl.NumberFormat(lang === "zh" ? "zh-CN" : "en-US"), [lang]);
   const [activeFilter, setActiveFilter] = useState<FilterId>("active");
   const [searchText, setSearchText] = useState("");
   const [selectedAgentId, setSelectedAgentId] = useState("");
@@ -3773,6 +3929,17 @@ export function AgentsRoute() {
   const canResetAgent = Boolean(selectedAgent?.agentId && selectedAgent.status !== "archived");
   const canArchiveAgent = Boolean(selectedAgent?.agentId && selectedAgent.status !== "archived" && !selectedAgentProtected);
   const canPurgeAgent = Boolean(selectedAgent?.agentId && selectedAgent.status === "archived" && !selectedAgentProtected);
+  const contextCompressionCustom = configDraft.contextCompressionPolicy.mode === "custom";
+  const contextCompressionEffectivePolicy = selectedAgent?.contextCompressionEffectivePolicy;
+  const contextCompressionEffectiveLimit = contextCompressionEffectivePolicy?.effectiveTokenLimit
+    ?? contextCompressionEffectivePolicy?.maxTokenLimit
+    ?? Number(configDraft.contextCompressionPolicy.maxTokenLimit || DEFAULT_AGENT_CONTEXT_COMPRESSION_DRAFT.maxTokenLimit);
+  const contextCompressionPolicySource = contextCompressionCustom
+    ? copy.contextCompressionSourceCustom
+    : copy.contextCompressionSourceGlobal;
+  const contextCompressionPolicyLine = `${contextCompressionPolicySource} · ${copy.contextCompressionEffective}: ${numberFormatter.format(
+    Math.max(0, Number(contextCompressionEffectiveLimit) || 0),
+  )}`;
 
   const createAgentMutation = useMutation({
     mutationFn: (draft: AgentCreateDraft) => {
@@ -3866,6 +4033,7 @@ export function AgentsRoute() {
           promptTemplateId: payload.draft.promptTemplateId,
           toolPolicyId: payload.draft.toolPolicyId,
           memoryPolicyId: payload.draft.memoryPolicyId,
+          contextCompressionPolicy: contextCompressionPolicyFromDraft(payload.draft.contextCompressionPolicy),
           metadata: agentMetadataWithReasoningEffort(payload.draft, payload.modelChoices),
           status: payload.draft.status,
         }),
@@ -4370,6 +4538,13 @@ export function AgentsRoute() {
 
   const updateDraft = (patch: Partial<AgentConfigDraft>) => {
     setConfigDraft((current) => ({ ...current, ...patch }));
+  };
+
+  const updateContextCompressionDraft = (patch: Partial<AgentContextCompressionPolicyDraft>) => {
+    setConfigDraft((current) => ({
+      ...current,
+      contextCompressionPolicy: { ...current.contextCompressionPolicy, ...patch },
+    }));
   };
 
   const updateCreateDraft = (patch: Partial<AgentCreateDraft>) => {
@@ -6059,6 +6234,169 @@ export function AgentsRoute() {
                     </select>
                     <small>{copy.memoryPolicyPickerHint}</small>
                   </label>
+                  <section className={styles.fieldWide}>
+                    <span>{copy.contextCompressionPolicy}</span>
+                    <small>{contextCompressionPolicyLine}</small>
+                    <div className={styles.compressionPolicyGrid}>
+                      <label className={styles.field}>
+                        <span>{copy.contextCompressionPolicy}</span>
+                        <select
+                          value={configDraft.contextCompressionPolicy.mode}
+                          onChange={(event) => updateContextCompressionDraft({
+                            mode: event.target.value === "custom" ? "custom" : "inherit",
+                          })}
+                        >
+                          <option value="inherit">{copy.contextCompressionInherit}</option>
+                          <option value="custom">{copy.contextCompressionCustom}</option>
+                        </select>
+                      </label>
+                      <label className={`${styles.field} ${styles.compressionToggleField}`}>
+                        <span>{copy.contextCompressionEnabled}</span>
+                        <input
+                          type="checkbox"
+                          checked={configDraft.contextCompressionPolicy.enabled}
+                          disabled={!contextCompressionCustom}
+                          onChange={(event) => updateContextCompressionDraft({ enabled: event.target.checked })}
+                        />
+                      </label>
+                      <label className={styles.field}>
+                        <span>{copy.contextCompressionMaxTokenLimit}</span>
+                        <input
+                          type="number"
+                          min={1}
+                          value={configDraft.contextCompressionPolicy.maxTokenLimit}
+                          disabled={!contextCompressionCustom}
+                          onChange={(event) => updateContextCompressionDraft({ maxTokenLimit: event.target.value })}
+                        />
+                      </label>
+                      <label className={styles.field}>
+                        <span>{copy.contextCompressionMaxCount}</span>
+                        <input
+                          type="number"
+                          min={0}
+                          value={configDraft.contextCompressionPolicy.maxCompressionsPerSession}
+                          disabled={!contextCompressionCustom}
+                          onChange={(event) => updateContextCompressionDraft({ maxCompressionsPerSession: event.target.value })}
+                        />
+                      </label>
+                    </div>
+                    <div className={styles.compressionPolicySubgrid}>
+                      <label className={styles.field}>
+                        <span>{copy.contextCompressionThresholds} · {lang === "zh" ? "轻量" : "Light"}</span>
+                        <input
+                          type="number"
+                          min={1}
+                          max={100}
+                          value={configDraft.contextCompressionPolicy.lightThreshold}
+                          disabled={!contextCompressionCustom}
+                          onChange={(event) => updateContextCompressionDraft({ lightThreshold: event.target.value })}
+                        />
+                      </label>
+                      <label className={styles.field}>
+                        <span>{copy.contextCompressionThresholds} · {lang === "zh" ? "标准" : "Standard"}</span>
+                        <input
+                          type="number"
+                          min={1}
+                          max={100}
+                          value={configDraft.contextCompressionPolicy.standardThreshold}
+                          disabled={!contextCompressionCustom}
+                          onChange={(event) => updateContextCompressionDraft({ standardThreshold: event.target.value })}
+                        />
+                      </label>
+                      <label className={styles.field}>
+                        <span>{copy.contextCompressionThresholds} · {lang === "zh" ? "深度" : "Deep"}</span>
+                        <input
+                          type="number"
+                          min={1}
+                          max={100}
+                          value={configDraft.contextCompressionPolicy.deepThreshold}
+                          disabled={!contextCompressionCustom}
+                          onChange={(event) => updateContextCompressionDraft({ deepThreshold: event.target.value })}
+                        />
+                      </label>
+                      <label className={styles.field}>
+                        <span>{copy.contextCompressionThresholds} · {lang === "zh" ? "紧急" : "Emergency"}</span>
+                        <input
+                          type="number"
+                          min={1}
+                          max={100}
+                          value={configDraft.contextCompressionPolicy.emergencyThreshold}
+                          disabled={!contextCompressionCustom}
+                          onChange={(event) => updateContextCompressionDraft({ emergencyThreshold: event.target.value })}
+                        />
+                      </label>
+                      <label className={styles.field}>
+                        <span>{copy.contextCompressionSummaryChars} · {lang === "zh" ? "轻量" : "Light"}</span>
+                        <input
+                          type="number"
+                          min={1}
+                          value={configDraft.contextCompressionPolicy.lightSummaryChars}
+                          disabled={!contextCompressionCustom}
+                          onChange={(event) => updateContextCompressionDraft({ lightSummaryChars: event.target.value })}
+                        />
+                      </label>
+                      <label className={styles.field}>
+                        <span>{copy.contextCompressionSummaryChars} · {lang === "zh" ? "标准" : "Standard"}</span>
+                        <input
+                          type="number"
+                          min={1}
+                          value={configDraft.contextCompressionPolicy.standardSummaryChars}
+                          disabled={!contextCompressionCustom}
+                          onChange={(event) => updateContextCompressionDraft({ standardSummaryChars: event.target.value })}
+                        />
+                      </label>
+                      <label className={styles.field}>
+                        <span>{copy.contextCompressionSummaryChars} · {lang === "zh" ? "深度" : "Deep"}</span>
+                        <input
+                          type="number"
+                          min={1}
+                          value={configDraft.contextCompressionPolicy.deepSummaryChars}
+                          disabled={!contextCompressionCustom}
+                          onChange={(event) => updateContextCompressionDraft({ deepSummaryChars: event.target.value })}
+                        />
+                      </label>
+                      <label className={styles.field}>
+                        <span>{copy.contextCompressionSummaryChars} · {lang === "zh" ? "紧急" : "Emergency"}</span>
+                        <input
+                          type="number"
+                          min={1}
+                          value={configDraft.contextCompressionPolicy.emergencySummaryChars}
+                          disabled={!contextCompressionCustom}
+                          onChange={(event) => updateContextCompressionDraft({ emergencySummaryChars: event.target.value })}
+                        />
+                      </label>
+                    </div>
+                    <div className={styles.compressionPolicyFooter}>
+                      <label className={styles.field}>
+                        <span>{copy.contextCompressionKeepAi}</span>
+                        <input
+                          type="number"
+                          min={0}
+                          value={configDraft.contextCompressionPolicy.keepAiMessages}
+                          disabled={!contextCompressionCustom}
+                          onChange={(event) => updateContextCompressionDraft({ keepAiMessages: event.target.value })}
+                        />
+                      </label>
+                      <label className={styles.compressionInlineCheck}>
+                        <input
+                          type="checkbox"
+                          checked={configDraft.contextCompressionPolicy.preserveErrors}
+                          disabled={!contextCompressionCustom}
+                          onChange={(event) => updateContextCompressionDraft({ preserveErrors: event.target.checked })}
+                        />
+                        <span>{copy.contextCompressionPreserveErrors}</span>
+                      </label>
+                      <label className={styles.compressionInlineCheck}>
+                        <input
+                          type="checkbox"
+                          checked={configDraft.contextCompressionPolicy.extractKeyDecisions}
+                          disabled={!contextCompressionCustom}
+                          onChange={(event) => updateContextCompressionDraft({ extractKeyDecisions: event.target.checked })}
+                        />
+                        <span>{copy.contextCompressionExtractDecisions}</span>
+                      </label>
+                    </div>
+                  </section>
                 </div>
                 {notice ? (
                   <p className={notice.tone === "error" ? styles.errorText : styles.successText}>{notice.text}</p>
