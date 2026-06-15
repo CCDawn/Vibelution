@@ -144,10 +144,15 @@ describe("ChatCodingRoute layout contract", () => {
   it("compresses the left rail into primary controls plus auxiliary status groups", () => {
     expect(routeSource).toContain("styles.resourceBlock");
     expect(routeSource).toContain("styles.resourceSplit");
+    expect(routeSource).toContain("styles.contextStatusCard");
+    expect(routeSource).toContain("styles.cacheStatusCard");
+    expect(routeSource).toContain("styles.compressionStatusCard");
+    expect(routeSource).toContain("styles.compressionStrategyCard");
+    expect(routeSource).toContain("styles.runModeBlock");
     expect(routeSource).toContain("styles.compressionFactGrid");
     expect(routeSource).toContain("styles.compressionFactWide");
-    expect(routeSource).toContain("styles.sessionDiagnosticsDetails");
-    expect(routeSource).toContain("styles.sessionResourceDiagnostics");
+    expect(routeSource).not.toContain("<details className={styles.sessionDiagnosticsDetails}>");
+    expect(routeSource).not.toContain("styles.sessionResourceDiagnostics");
     expect(routeSource).toContain("styles.companionBlock");
     expect(routeSource).toContain("styles.companionCompact");
     expect(routeSource).toContain("styles.petMiniAvatar");
@@ -159,14 +164,14 @@ describe("ChatCodingRoute layout contract", () => {
 
     expect(routeStyles.resourceBlock).toBeTypeOf("string");
     expect(routeStyles.resourceSplit).toBeTypeOf("string");
+    expect(routeStyles.contextStatusCard).toBeTypeOf("string");
+    expect(routeStyles.cacheStatusCard).toBeTypeOf("string");
+    expect(routeStyles.compressionStatusCard).toBeTypeOf("string");
+    expect(routeStyles.compressionStrategyCard).toBeTypeOf("string");
+    expect(routeStyles.runModeBlock).toBeTypeOf("string");
     expect(routeStyles.compressionFactGrid).toBeTypeOf("string");
     expect(routeStyles.compressionFact).toBeTypeOf("string");
     expect(routeStyles.compressionFactWide).toBeTypeOf("string");
-    expect(routeStyles.sessionDiagnosticsDetails).toBeTypeOf("string");
-    expect(routeStyles.sessionDiagnosticsSummary).toBeTypeOf("string");
-    expect(routeStyles.sessionDiagnosticsSnapshot).toBeTypeOf("string");
-    expect(routeStyles.sessionDiagnosticsBody).toBeTypeOf("string");
-    expect(routeStyles.sessionResourceDiagnostics).toBeTypeOf("string");
     expect(routeStyles.companionBlock).toBeTypeOf("string");
     expect(routeStyles.companionCompact).toBeTypeOf("string");
     expect(routeStyles.petMiniAvatar).toBeTypeOf("string");
@@ -251,14 +256,16 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("cacheHitMissing");
   });
 
-  it("folds previous-turn context and cache composition into session diagnostics", () => {
+  it("separates previous-turn context, cache, and compression into status cards", () => {
     expect(routeSource).toContain("const lastContextComposition = detail?.lastContextComposition ?? null");
     expect(routeSource).toContain("const lastCacheComposition = detail?.lastCacheComposition ?? null");
-    expect(routeSource).toContain("<details className={styles.sessionDiagnosticsDetails}>");
-    expect(routeSource).toContain("<summary className={styles.sessionDiagnosticsSummary}>");
-    expect(routeSource).not.toContain("<details className={styles.sessionDiagnosticsDetails} open");
+    expect(routeSource).not.toContain("<details className={styles.sessionDiagnosticsDetails}>");
+    expect(routeSource).not.toContain("<summary className={styles.sessionDiagnosticsSummary}>");
     expect(routeSource).toContain("t(\"contextDiagnostics\")");
-    expect(routeSource).toContain("styles.sessionDiagnosticsSnapshot");
+    expect(routeSource).toContain("styles.contextStatusCard");
+    expect(routeSource).toContain("styles.cacheStatusCard");
+    expect(routeSource).toContain("styles.compressionStatusCard");
+    expect(routeSource).toContain("styles.compressionStrategyCard");
     expect(routeSource).toContain("styles.contextCompositionPanel");
     expect(routeSource).toContain("t(\"previousContextComposition\")");
     expect(routeSource).toContain("t(\"previousCacheHit\")");
@@ -314,17 +321,17 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("styles.cacheDetailDonutPanel");
     expect(routeSource).toContain("case \"cache_write\"");
     expect(routeSource).toContain("cacheCreationInputTokens");
-    expect(routeSource.indexOf("styles.sessionDiagnosticsDetails")).toBeGreaterThan(routeSource.indexOf("sessionCompactRows.map"));
-    expect(routeSource.indexOf("styles.contextCompositionPanel")).toBeGreaterThan(routeSource.indexOf("styles.sessionDiagnosticsBody"));
+    expect(routeSource.indexOf("styles.contextStatusCard")).toBeGreaterThan(routeSource.indexOf("sessionCompactRows.map"));
+    expect(routeSource.indexOf("styles.cacheStatusCard")).toBeGreaterThan(routeSource.indexOf("styles.contextStatusCard"));
+    expect(routeSource.indexOf("styles.compressionStatusCard")).toBeGreaterThan(routeSource.indexOf("styles.cacheStatusCard"));
+    expect(routeSource.indexOf("styles.compressionStrategyCard")).toBeGreaterThan(routeSource.indexOf("styles.compressionStatusCard"));
     expect(routeSource).toContain("lastCacheComposition.source === \"not_called\"");
-    expect(routeSource.indexOf("styles.contextCompositionPanel")).toBeGreaterThan(routeSource.indexOf("sessionCompactRows.map"));
     expect(routeSource.indexOf("styles.contextCompositionPanel")).toBeLessThan(routeSource.indexOf("<aside className={rightPaneCollapsed"));
 
-    expect(routeStyles.sessionDiagnosticsDetails).toBeTypeOf("string");
-    expect(routeStyles.sessionDiagnosticsSummary).toBeTypeOf("string");
-    expect(routeStyles.sessionDiagnosticsSummaryText).toBeTypeOf("string");
-    expect(routeStyles.sessionDiagnosticsSnapshot).toBeTypeOf("string");
-    expect(routeStyles.sessionDiagnosticsBody).toBeTypeOf("string");
+    expect(routeStyles.contextStatusCard).toBeTypeOf("string");
+    expect(routeStyles.cacheStatusCard).toBeTypeOf("string");
+    expect(routeStyles.compressionStatusCard).toBeTypeOf("string");
+    expect(routeStyles.compressionStrategyCard).toBeTypeOf("string");
     expect(routeStyles.contextCompositionPanel).toBeTypeOf("string");
     expect(routeStyles.contextCompositionBar).toBeTypeOf("string");
     expect(routeStyles.contextCompositionLegend).toBeTypeOf("string");
@@ -396,7 +403,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.contextCompositionSegmentUnused).toBeTypeOf("string");
   });
 
-  it("shows the active skill contract inside session diagnostics", () => {
+  it("shows the active skill contract before the context status cards", () => {
     expect(routeSource).toContain("type ActiveSkillContract = {");
     expect(routeSource).toContain("type SessionDetailWithActiveSkill = SessionDetail &");
     expect(routeSource).toContain("const activeSkillContract = (detail as SessionDetailWithActiveSkill | undefined)?.activeSkillContract ?? null");
@@ -409,8 +416,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("styles.activeSkillMeta");
     expect(routeSource).toContain("case \"active_skill\":");
     const renderedActiveSkillIndex = routeSource.indexOf("className={`${styles.activeSkillStatus} ${activeSkillStatusClass}`}");
-    expect(renderedActiveSkillIndex).toBeGreaterThan(routeSource.indexOf("styles.sessionDiagnosticsBody"));
-    expect(renderedActiveSkillIndex).toBeLessThan(routeSource.indexOf("styles.contextCompositionPanel"));
+    expect(renderedActiveSkillIndex).toBeGreaterThan(routeSource.indexOf("sessionCompactRows.map"));
+    expect(renderedActiveSkillIndex).toBeLessThan(routeSource.indexOf("styles.contextStatusCard"));
 
     expect(routeStyles.activeSkillStatus).toBeTypeOf("string");
     expect(routeStyles.activeSkillStatus_active).toBeTypeOf("string");
@@ -441,6 +448,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("t(\"compressionThresholdBasis\")");
     expect(routeSource).toContain("const compressionModelWindowLine = compression");
     expect(routeSource).toContain("styles.compressionFactGrid");
+    expect(routeSource).toContain("styles.compressionStrategyCard");
+    expect(routeSource).toContain("styles.compressionStrategyList");
     expect(routeSource).toContain("compressionTitleLine");
     expect(routeSource).toContain("compression.contextWindowLimit");
     expect(routeSource).toContain("compression.source || \"runtime_state\"");
