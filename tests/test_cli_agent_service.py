@@ -242,7 +242,10 @@ def test_mimo_worktree_mode_builds_dir_and_agent_args(monkeypatch, tmp_path):
     args, kwargs = spawned[0]
     assert args == [r"C:\tools\mimo.cmd", str(worktree)]
     assert kwargs["cwd"] == str(worktree)
-    assert writes == ["Implement in this worktree.\r\n"]
+    assert len(writes) == 1
+    assert "Implement in this worktree." in writes[0]
+    assert "VIBELUTION_CLI_DONE:" in writes[0]
+    assert "[VIBELUTION_CLI_DONE:" not in writes[0]
 
 
 def test_missing_cli_agent_executable_returns_error(monkeypatch, tmp_path):
@@ -1286,6 +1289,20 @@ def test_cli_agent_terminal_suppresses_unsafe_tui_transcript_tail(tmp_path):
     assert snapshot["transcriptTail"] == ""
     assert snapshot["transcriptTailReplayable"] is False
     assert snapshot["transcriptTailRenderReason"] == "unsafe_tui_control_tail"
+
+
+def test_cli_agent_terminal_unsafe_tui_snapshot_keeps_screen_replay(tmp_path):
+    transcript = tmp_path / "terminal.log"
+    cursor_noise = "".join(f"\x1b[{row};5H" for row in range(1, 28))
+    transcript.write_text(cursor_noise + "\x1b[2J\x1b[3;4H结论：模块拆分未完成", encoding="utf-8")
+
+    snapshot = terminal_service._read_transcript_snapshot(transcript, limit=120000, rows=10, cols=40)
+
+    assert snapshot["transcriptTail"] == ""
+    assert snapshot["transcriptTailReplayable"] is False
+    assert snapshot["transcriptTailRenderReason"] == "unsafe_tui_control_tail"
+    assert snapshot["screenReplay"].startswith("\x1b[2J\x1b[H")
+    assert "结论：模块拆分未完成" in snapshot["screenText"]
 
 
 def test_cli_agent_terminal_trims_large_tui_transcript(monkeypatch, tmp_path):
