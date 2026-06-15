@@ -10316,6 +10316,7 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                         llm_slot=llm_slot,
                         llm_model_id=llm_model_id_for_turn,
                         disable_tools=lightweight_chat_payload,
+                        allow_internal_auto_continue=bool(context.get("allow_internal_auto_continue")),
                     )
                 if isinstance(result, dict):
                     result["context_composition"] = context_composition
@@ -10589,6 +10590,7 @@ def _run_session_continuation_loop(
     llm_slot: str = SESSION_LLM_SLOT_DIALOGUE,
     llm_model_id: str = "",
     disable_tools: bool = False,
+    allow_internal_auto_continue: bool = False,
 ) -> Any:
     prompt = str(initial_prompt or "").strip()
     has_initial_attachments = bool(list(attachments or []))
@@ -10795,6 +10797,21 @@ def _run_session_continuation_loop(
                 },
             )
             return _annotate_continuation_result(result, turn_index, reached_limit=False)
+
+        if not allow_internal_auto_continue:
+            paused_result = _build_auto_continue_paused_result(result, last_visible_result, turn_index)
+            _record_session_turn_lifecycle_event(
+                session_id,
+                "followup_prompt_blocked",
+                turn_id=getattr(turn_control, "turn_id", ""),
+                outcome="paused",
+                fields={
+                    "turnIndex": turn_index,
+                    "reason": "internal_auto_continue_not_authorized",
+                    "userMessageSource": normalized_user_message_source,
+                },
+            )
+            return paused_result
 
         prompt = _build_followup_prompt(
             original_prompt=initial_prompt,
@@ -16489,6 +16506,35 @@ def _annotate_continuation_result(
     metadata.pop("continuation_limit_reached", None)
     result["metadata"] = metadata
     return result
+
+
+def _build_auto_continue_paused_result(
+    result: Any,
+    visible_result: dict[str, Any] | None,
+    turn_count: int,
+) -> Any:
+    if not isinstance(result, dict):
+        return result
+    merged = _merge_continuation_visible_result(dict(result), visible_result)
+    visible = _visible_reply_summary_candidate(merged) if isinstance(merged, dict) else ""
+    if not visible:
+        visible = "本轮已完成阶段性处理，等待你的下一条消息继续。"
+    paused = dict(merged)
+    metadata = dict(paused.get("metadata") or {}) if isinstance(paused.get("metadata"), dict) else {}
+    metadata.update(
+        {
+            "continuation_turn_count": turn_count,
+            "internal_auto_continue_blocked": True,
+            "continuation_pause_reason": "internal_auto_continue_not_authorized",
+        }
+    )
+    paused["metadata"] = metadata
+    paused["status"] = "completed"
+    paused["outcome"] = "needs_input"
+    paused["task_outcome"] = "needs_input"
+    paused["summary"] = visible
+    paused["raw_output"] = visible
+    return paused
 
 
 def _chat_turn_result_status(result_status: str, result: Any, *, stop_requested: bool) -> str:

@@ -275,7 +275,7 @@ def create_key_tools() -> List[BaseTool]:
         )
 
     @tool
-    def apply_diff_edit_tool(file_path: str, diff_text: str) -> str:
+    def apply_diff_edit_tool(file_path: str, diff_text: str, allow_fuzzy: bool = False) -> str:
         """
         SEARCH/REPLACE 代码编辑器。适合对单个文件做局部替换。
 
@@ -291,6 +291,7 @@ def create_key_tools() -> List[BaseTool]:
         Args:
             file_path: 要编辑的文件路径
             diff_text: SEARCH/REPLACE 块文本
+            allow_fuzzy: 是否允许相似片段匹配；默认关闭，避免误改相邻代码。
 
         Returns:
             操作结果。格式错误时返回具体原因。
@@ -299,7 +300,7 @@ def create_key_tools() -> List[BaseTool]:
         is_valid, msg = validate_diff_format(diff_text)
         if not is_valid:
             return f"[编辑] 格式验证失败: {msg}"
-        return apply_diff_edit(file_path=file_path, diff_text=diff_text, allow_fuzzy=True)
+        return apply_diff_edit(file_path=file_path, diff_text=diff_text, allow_fuzzy=allow_fuzzy)
 
     @tool
     def apply_patch_tool(patch_text: str, cwd: str = ".") -> str:

@@ -808,6 +808,50 @@ class TestApplyDiffEdit:
         with open(file2, 'r') as f:
             assert f.read() == "updated2"
 
+    def test_apply_diff_rejects_python_syntax_error_without_writing(self, temp_test_dir):
+        """Python 文件编辑后语法错误时不写盘。"""
+        file_path = os.path.join(temp_test_dir, "safe.py")
+        original = "from dataclasses import dataclass\n\n@dataclass\nclass Item:\n    name: str\n"
+        with open(file_path, 'w', encoding='utf-8') as f:
+            f.write(original)
+
+        diff_text = "\n".join([
+            "<<<<<<< SEARCH",
+            "from dataclasses import dataclass",
+            "=======",
+            "astfrom dataclasses import dataclass",
+            ">>>>>>> REPLACE",
+        ])
+
+        result = apply_diff_edit(diff_text=diff_text, file_path=file_path)
+
+        assert "Python 语法校验失败" in result
+        with open(file_path, 'r', encoding='utf-8') as f:
+            assert f.read() == original
+
+    def test_apply_diff_does_not_use_fuzzy_matching_by_default(self, temp_test_dir):
+        """默认严格匹配，避免相似片段误写。"""
+        file_path = os.path.join(temp_test_dir, "strict.py")
+        original = "def build_value():\n    return 1\n"
+        with open(file_path, 'w', encoding='utf-8') as f:
+            f.write(original)
+
+        diff_text = "\n".join([
+            "<<<<<<< SEARCH",
+            "def build_value():",
+            "    return 2",
+            "=======",
+            "def build_value():",
+            "    return 3",
+            ">>>>>>> REPLACE",
+        ])
+
+        result = apply_diff_edit(diff_text=diff_text, file_path=file_path)
+
+        assert "找不到匹配" in result
+        with open(file_path, 'r', encoding='utf-8') as f:
+            assert f.read() == original
+
 
 # ============================================================================
 # preview_diff 测试

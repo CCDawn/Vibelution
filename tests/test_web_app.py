@@ -2502,7 +2502,7 @@ def test_submit_session_message_runs_turn_and_persists_reply(tmp_path, monkeypat
 
     response = client.post(
         "/api/sessions/session-live/messages",
-        json={"content": "请继续修复 web/src/routes/ChatCodingRoute.tsx 并验证"},
+        json={"content": "请继续修复 web/src/routes/ChatCodingRoute.tsx 并验证", "mentalModelEnabled": True},
     )
 
     assert response.status_code == 202
@@ -7551,9 +7551,9 @@ def test_submit_session_message_continues_progress_until_done(tmp_path, monkeypa
 
     assert response.status_code == 202
     payload = response.json()
-    assert len(calls) == 2
-    assert "继续完成同一个用户目标" in calls[1]
-    assert payload["messages"][-1]["content"] == "规划完成：先复用 prompt_debugger，再包装 BDD 调试入口。"
+    assert len(calls) == 1
+    assert "继续完成同一个用户目标" not in str(calls)
+    assert payload["messages"][-1]["content"] == "已查看：tests/prompt_debugger.py\n下一步：继续读取测试工具结构并形成规划。"
     assert payload["currentPhase"] == "ready"
 
 
@@ -7610,10 +7610,9 @@ def test_submit_session_message_continues_after_bookkeeping_progress(tmp_path, m
 
     assert response.status_code == 202, response.json()
     payload = response.json()
-    assert len(calls) == 2
-    assert "继续完成同一个用户目标" in calls[1]
-    assert "继续读取证据或直接给出结论" in calls[1]
-    assert payload["messages"][-1]["content"] == "已找到优化点：任务管理工具不应算作有效证据推进。"
+    assert len(calls) == 1
+    assert "继续完成同一个用户目标" not in str(calls)
+    assert payload["messages"][-1]["content"] == "下一步：继续读取证据或直接给出结论。"
     assert payload["currentPhase"] == "ready"
 
 
@@ -7672,15 +7671,10 @@ def test_submit_session_message_keeps_tools_available_after_tool_progress(tmp_pa
 
     assert response.status_code == 202, response.json()
     payload = response.json()
-    assert len(calls) == 2
+    assert len(calls) == 1
     assert calls[0]["disable_tools"] is False
-    assert calls[1]["disable_tools"] is False
-    assert "继续完成同一个用户目标" in calls[1]["prompt"]
-    assert "基于已读证据给出可见结论" in calls[1]["prompt"]
-    assert "工具结果是否真正服务于用户目标" not in calls[1]["prompt"]
-    assert "禁用工具" not in calls[1]["prompt"]
-    assert "工具循环保护" not in calls[1]["prompt"]
-    assert payload["messages"][-1]["content"] == "已修正工具路径并收束：runtime scene 摘要需要基于返回内容继续推进。"
+    assert "继续完成同一个用户目标" not in str(calls)
+    assert payload["messages"][-1]["content"] == "已读取 core/web/services/runtime_scene_service.py，下一步继续校准 runtime scene 摘要。"
     assert payload["currentPhase"] == "ready"
 
 
@@ -7737,7 +7731,7 @@ def test_submit_session_message_keeps_previous_continuation_reply_when_done_mark
     assert response.status_code == 202, response.json()
     payload = response.json()
     assistant = payload["messages"][-1]
-    assert len(calls) == 2
+    assert len(calls) == 1
     assert assistant["content"] == "已审查当前项目。以下是汇报结果。\n\n核心问题是回答持久化和 UI 区分度。"
     assert "[outcome=done]" not in json.dumps(payload, ensure_ascii=False)
     assert payload["activeTask"] is None
@@ -7937,9 +7931,9 @@ def test_submit_session_message_ignores_configured_continuation_limit_until_done
 
     assert response.status_code == 202
     payload = response.json()
-    assert len(calls) == 3
+    assert len(calls) == 1
     assert "任务级持续上限" not in payload["messages"][-1]["content"]
-    assert payload["messages"][-1]["content"] == "规划完成：包装 prompt_debugger 的 BDD 场景过滤能力。"
+    assert payload["messages"][-1]["content"] == "已查看：tests/prompt_debugger.py\n下一步：继续读取测试工具结构并形成规划。"
     assert payload["currentPhase"] == "ready"
     latest_run = session_service.load_chat_turn_work_run_summary()["latest"]
     assert latest_run["status"] == "completed"
@@ -7996,7 +7990,7 @@ def test_submit_session_message_preserves_visible_progress_without_limit_prompt(
     assert response.status_code == 202
     payload = response.json()
     assistant = payload["messages"][-1]
-    assert len(calls) == 2
+    assert len(calls) == 1
     assert assistant["content"] == "我已经完成第一项优化，并通过基础验证。下一步继续收口剩余日志路径。"
     assert "任务级持续上限" not in assistant["content"]
     assert payload["currentPhase"] == "ready"
@@ -8057,7 +8051,7 @@ def test_submit_session_message_continues_repeated_visible_progress_until_done(t
     assert response.status_code == 202
     payload = response.json()
     assistant = payload["messages"][-1]
-    assert len(calls) == 3
+    assert len(calls) == 1
     assert assistant["content"] == repeated_reply
     assert assistant["content"].count(repeated_reply) == 1
     assert "任务级持续上限" not in assistant["content"]
@@ -8378,16 +8372,16 @@ def test_submit_session_continue_keeps_raw_prompt_when_active_task_is_continue(t
     assert response.status_code == 202
     assert prompts[0] == "继续"
     payload = response.json()
-    assert len(prompts) == 2
-    assert prompts[1] == "继续完成同一个用户目标：做一个测试工具吧,能够更快速的进行BDD调试,先规划一下,然后向我汇报\n上一内部回合仍未完成用户目标（第 1 轮）。\n不要只输出 <state>；如果目标已完成，请给出可见汇报并标记 outcome=done。\n优先执行上一轮下一步：继续读取测试工具结构并形成规划。"
-    assert payload["messages"][-1]["content"] == "规划已恢复：先包装 prompt_debugger 的 BDD 场景过滤能力。"
+    assert len(prompts) == 1
+    assert "继续完成同一个用户目标" not in str(prompts)
+    assert payload["messages"][-1]["content"] == "已查看：tests/prompt_debugger.py\n下一步：继续读取测试工具结构并形成规划。"
     assert "任务级持续上限" not in payload["messages"][-1]["content"]
     assert "<state" not in payload["messages"][-1]["content"]
     state = load_chat_state(tmp_path)
     active_task = state["conversations"][0]["active_task"]
     assert active_task["goal"] == "做一个测试工具吧,能够更快速的进行BDD调试,先规划一下,然后向我汇报"
     assert active_task["title"] == "做一个测试工具吧,能够更快速的进行BDD调试,先规划一下,然后向我汇报"
-    assert active_task["latest_summary"] == "规划已恢复：先包装 prompt_debugger 的 BDD 场景过滤能力。"
+    assert active_task["latest_summary"] == "已查看：tests/prompt_debugger.py\n下一步：继续读取测试工具结构并形成规划。"
 
 
 def test_persist_turn_result_cleans_parameter_and_requires_real_stop(tmp_path, monkeypatch):
@@ -9131,7 +9125,7 @@ def test_submit_session_message_includes_stream_friendly_tool_and_mental_payload
 
     response = client.post(
         "/api/sessions/session-live/messages",
-        json={"content": "继续把对话展示改成四段式"},
+        json={"content": "继续把对话展示改成四段式", "mentalModelEnabled": True},
     )
 
     assert response.status_code == 202
