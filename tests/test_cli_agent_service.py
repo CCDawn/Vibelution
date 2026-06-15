@@ -101,6 +101,30 @@ def _write_cli_agent_config_with_mimo_db(path, db_path):
     )
 
 
+def _write_cli_agent_config_with_claude_project(path, project_dir):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        """
+{
+  "adapters": {
+    "claude_code": {
+      "terminal": {
+        "sessionDiscovery": {
+          "source": "claude_code_project_jsonl",
+          "projectDir": "__PROJECT_DIR__",
+          "createdGraceMs": 5000,
+          "pollAttempts": 1,
+          "pollIntervalSeconds": 0.1
+        }
+      }
+    }
+  }
+}
+""".strip().replace("__PROJECT_DIR__", project_dir.as_posix()),
+        encoding="utf-8",
+    )
+
+
 def test_codex_readonly_uses_exec_with_readonly_sandbox(monkeypatch, tmp_path):
     project_root = _configure_roots(monkeypatch, tmp_path)
     spawned = []
@@ -303,7 +327,11 @@ def test_list_cli_agent_adapters_reports_availability(monkeypatch, tmp_path):
     _configure_roots(monkeypatch, tmp_path)
 
     def fake_which(candidate):
-        return r"C:\tools\mimo.cmd" if candidate == "mimo.cmd" else ""
+        if candidate == "mimo.cmd":
+            return r"C:\tools\mimo.cmd"
+        if candidate == "claude.cmd":
+            return r"C:\tools\claude.cmd"
+        return ""
 
     monkeypatch.setattr(service.shutil, "which", fake_which)
 
@@ -311,9 +339,11 @@ def test_list_cli_agent_adapters_reports_availability(monkeypatch, tmp_path):
 
     assert adapters["mimo_code"]["available"] is True
     assert adapters["codex_code"]["available"] is False
+    assert adapters["claude_code"]["available"] is True
     assert adapters["mimo_code"]["configPath"].endswith("cli_agents.json")
     assert adapters["mimo_code"]["terminal"]["enabled"] is True
     assert adapters["mimo_code"]["terminal"]["capabilities"]["pty"] is True
+    assert adapters["claude_code"]["terminal"]["capabilities"]["resume"] is True
 
 
 def test_mimo_cli_terminal_launch_uses_tui_project_protocol(monkeypatch, tmp_path):
@@ -382,6 +412,49 @@ def test_mimo_cli_terminal_resume_uses_session_option(monkeypatch, tmp_path):
     assert command["initialInput"] == ""
 
 
+def test_claude_cli_terminal_launch_uses_cwd_and_plan_permission(monkeypatch, tmp_path):
+    project_root = _configure_roots(monkeypatch, tmp_path)
+    monkeypatch.setattr(service.shutil, "which", lambda candidate: r"C:\tools\claude.cmd" if candidate == "claude.cmd" else "")
+
+    command = terminal_service._build_terminal_command(
+        agent_type="claude_code",
+        task="只读审查当前项目",
+        cwd=str(project_root),
+        mode="readonly",
+        model="",
+        agent="",
+        cli_session_id="",
+    )
+
+    assert command["args"] == [r"C:\tools\claude.cmd", "--permission-mode", "plan"]
+    assert command["cwd"] == str(project_root)
+    assert command["resumed"] is False
+    assert command["initialInput"] == "只读审查当前项目\r\n"
+
+
+def test_claude_cli_terminal_resume_uses_session_option(monkeypatch, tmp_path):
+    project_root = _configure_roots(monkeypatch, tmp_path)
+    worktree = project_root.parent / "Vibelution-worktrees" / "claude-task"
+    worktree.mkdir(parents=True)
+    monkeypatch.setattr(service.shutil, "which", lambda candidate: r"C:\tools\claude.cmd" if candidate == "claude.cmd" else "")
+    session_id = "6d9ae669-28b4-42a0-8767-0e78f406a2b1"
+
+    command = terminal_service._build_terminal_command(
+        agent_type="claude_code",
+        task="继续修改",
+        cwd=str(worktree),
+        mode="worktree",
+        model="",
+        agent="",
+        cli_session_id=session_id,
+    )
+
+    assert command["args"] == [r"C:\tools\claude.cmd", "--resume", session_id, "--permission-mode", "auto"]
+    assert command["cwd"] == str(worktree)
+    assert command["resumed"] is True
+    assert command["initialInput"] == ""
+
+
 def test_cli_agent_terminal_resume_uses_user_level_protocol(monkeypatch, tmp_path):
     project_root = _configure_roots(monkeypatch, tmp_path)
     service.CLI_AGENT_REGISTRY_PATH.parent.mkdir(parents=True)
@@ -433,6 +506,102 @@ def test_mimo_cli_terminal_discovers_session_id_from_user_level_sqlite(monkeypat
     )
 
     assert discovered == "ses_current"
+
+
+def test_claude_cli_terminal_discovers_session_id_from_project_jsonl(monkeypatch, tmp_path):
+    project_root = _configure_roots(monkeypatch, tmp_path)
+    session_id = "6d9ae669-28b4-42a0-8767-0e78f406a2b1"
+    project_dir = tmp_path / ".claude" / "projects" / terminal_service._claude_project_dir_name(str(project_root))
+    project_dir.mkdir(parents=True)
+    (project_dir / f"{session_id}.jsonl").write_text(
+        '{"type":"mode","sessionId":"6d9ae669-28b4-42a0-8767-0e78f406a2b1"}\n',
+        encoding="utf-8",
+    )
+    spec = {
+        "source": "claude_code_project_jsonl",
+        "projectDir": str(project_dir),
+        "idRegex": r"^[0-9a-fA-F-]{36}$",
+        "maxRows": 10,
+    }
+
+    discovered = terminal_service._discover_cli_session_id_for_state(
+        {"cwd": str(project_root), "processStartedAtMs": 0},
+        spec,
+        existing=False,
+    )
+
+    assert discovered == session_id
+
+
+def test_cli_agent_terminal_ensure_resumes_discovered_claude_session_after_restart(monkeypatch, tmp_path):
+    project_root = _configure_roots(monkeypatch, tmp_path)
+    session_id = "6d9ae669-28b4-42a0-8767-0e78f406a2b1"
+    project_dir = tmp_path / ".claude" / "projects" / "vibelution"
+    project_dir.mkdir(parents=True)
+    (project_dir / f"{session_id}.jsonl").write_text(
+        '{"type":"mode","sessionId":"6d9ae669-28b4-42a0-8767-0e78f406a2b1"}\n',
+        encoding="utf-8",
+    )
+    _write_cli_agent_config_with_claude_project(service.CLI_AGENT_REGISTRY_PATH, project_dir)
+    monkeypatch.setattr(service.shutil, "which", lambda candidate: r"C:\tools\claude.cmd" if candidate == "claude.cmd" else "")
+
+    task = "继续 Claude Code 会话"
+    terminal_session_id = terminal_service._stable_terminal_session_id(
+        adapter_id="claude_code",
+        source_session_id="session-1",
+        source_message_id="message-1",
+        source_run_id="run-1",
+        cwd=str(project_root),
+        mode="readonly",
+        task=task,
+    )
+    terminal_service._write_state(
+        {
+            "terminalSessionId": terminal_session_id,
+            "adapterId": "claude_code",
+            "agentType": "claude_code",
+            "label": "Claude Code",
+            "sourceSessionId": "session-1",
+            "sourceMessageId": "message-1",
+            "sourceRunId": "run-1",
+            "cwd": str(project_root),
+            "mode": "readonly",
+            "task": task,
+            "processStartedAtMs": 0,
+            "status": "exited",
+            "alive": False,
+            "cliSessionId": "",
+        },
+    )
+    spawned = []
+
+    class FakeProcess:
+        def isalive(self):
+            return True
+
+    def fake_spawn(args, **kwargs):
+        spawned.append(args)
+        return FakeProcess(), "conpty"
+
+    monkeypatch.setattr(terminal_service, "_spawn_terminal_process", fake_spawn)
+    monkeypatch.setattr(terminal_service._TerminalRuntime, "start", lambda self: None)
+    monkeypatch.setattr(terminal_service, "_send_initial_task", lambda *args, **kwargs: None)
+    monkeypatch.setattr(terminal_service, "_schedule_session_id_discovery", lambda *args, **kwargs: None)
+
+    session = terminal_service.ensure_cli_agent_terminal_session(
+        agent_type="claude_code",
+        task=task,
+        cwd=str(project_root),
+        mode="readonly",
+        source_session_id="session-1",
+        source_message_id="message-1",
+        source_run_id="run-1",
+    )
+
+    assert session["cliSessionId"] == session_id
+    assert session["cliSessionIdSource"] == "session_discovery_existing"
+    assert session["resumed"] is True
+    assert spawned == [[r"C:\tools\claude.cmd", "--resume", session_id, "--permission-mode", "plan"]]
 
 
 def test_cli_agent_terminal_ensure_resumes_discovered_existing_session_after_restart(monkeypatch, tmp_path):
