@@ -3,6 +3,8 @@ from types import SimpleNamespace
 import subprocess
 import sqlite3
 
+import pytest
+
 from core.ui.chat_state import build_chat_state, load_chat_state, save_chat_state
 from core.web.services import cli_agent_service as service
 from core.web.services import cli_agent_terminal_service as terminal_service
@@ -1330,6 +1332,111 @@ def test_cli_agent_terminal_source_bound_attach_does_not_resume_stale_session(mo
     assert session["status"] == "stale"
     assert session["alive"] is False
     assert session["cliSessionId"] == "ses_restart"
+    assert session["interactionState"] == "resumable"
+    assert session["canInput"] is False
+    assert session["canResume"] is True
+    assert session["resumeAction"] == "resume_session"
+    assert session["displayMode"] == "readonly_replay"
+
+
+def test_cli_agent_terminal_input_on_stale_session_returns_resume_details(monkeypatch, tmp_path):
+    project_root = _configure_roots(monkeypatch, tmp_path)
+    terminal_service._write_state(
+        {
+            "terminalSessionId": "cli-term-stale-input",
+            "adapterId": "mimo_code",
+            "agentType": "mimo_code",
+            "label": "MiMo Code",
+            "cwd": str(project_root),
+            "mode": "readonly",
+            "cliSessionId": "ses_restart",
+            "status": "stale",
+            "alive": False,
+            "staleReason": "backend_startup",
+            "updatedAt": "2026-06-15T01:40:00+00:00",
+        }
+    )
+
+    with pytest.raises(terminal_service.CliAgentTerminalError) as exc_info:
+        terminal_service.write_cli_agent_terminal_input("cli-term-stale-input", "hello\r")
+
+    assert exc_info.value.code == "TERMINAL_SESSION_NOT_RUNNING"
+    assert exc_info.value.details["terminalSessionId"] == "cli-term-stale-input"
+    assert exc_info.value.details["interactionState"] == "resumable"
+    assert exc_info.value.details["canInput"] is False
+    assert exc_info.value.details["canResume"] is True
+    assert exc_info.value.details["resumeAction"] == "resume_session"
+
+
+def test_cli_agent_terminal_resume_intent_spawns_stale_session(monkeypatch, tmp_path):
+    project_root = _configure_roots(monkeypatch, tmp_path)
+    monkeypatch.setattr(service.shutil, "which", lambda candidate: r"C:\tools\mimo.cmd" if candidate == "mimo.cmd" else "")
+    task = "继续审查启动弹窗"
+    terminal_session_id = terminal_service._stable_terminal_session_id(
+        adapter_id="mimo_code",
+        source_session_id="session-1",
+        source_message_id="message-1",
+        source_run_id="run-1",
+        cwd=str(project_root),
+        mode="readonly",
+        task=task,
+    )
+    terminal_service._write_state(
+        {
+            "terminalSessionId": terminal_session_id,
+            "adapterId": "mimo_code",
+            "agentType": "mimo_code",
+            "label": "MiMo Code",
+            "sourceSessionId": "session-1",
+            "sourceMessageId": "message-1",
+            "sourceRunId": "run-1",
+            "cliRunId": "cli-run-stale",
+            "lockKey": "cli-lock-stale",
+            "cwd": str(project_root),
+            "mode": "readonly",
+            "task": task,
+            "cliSessionId": "ses_restart",
+            "cliSessionIdSource": "session_discovery_existing",
+            "status": "stale",
+            "alive": False,
+            "staleReason": "backend_startup",
+            "updatedAt": "2026-06-15T01:40:00+00:00",
+        }
+    )
+    spawned = []
+
+    class FakeProcess:
+        def isalive(self):
+            return True
+
+    def fake_spawn(args, **kwargs):
+        spawned.append(list(args))
+        return FakeProcess(), "conpty"
+
+    monkeypatch.setattr(terminal_service, "_spawn_terminal_process", fake_spawn)
+    monkeypatch.setattr(terminal_service._TerminalRuntime, "start", lambda self: None)
+    monkeypatch.setattr(terminal_service, "_send_initial_task", lambda *args, **kwargs: None)
+    monkeypatch.setattr(terminal_service, "_schedule_session_id_discovery", lambda *args, **kwargs: None)
+
+    session = terminal_service.ensure_cli_agent_terminal_session(
+        agent_type="mimo_code",
+        task=task,
+        cwd=str(project_root),
+        mode="readonly",
+        source_session_id="session-1",
+        source_message_id="message-1",
+        source_run_id="run-1",
+        intent="resume",
+    )
+
+    assert spawned == [[r"C:\tools\mimo.cmd", str(project_root), "--session", "ses_restart"]]
+    assert session["terminalSessionId"] == terminal_session_id
+    assert session["status"] == "running"
+    assert session["alive"] is True
+    assert session["resumed"] is True
+    assert session["interactionState"] == "live"
+    assert session["canInput"] is True
+    assert session["canResume"] is False
 
 
 def test_cli_agent_lifecycle_close_event_persists_once(monkeypatch, tmp_path):
