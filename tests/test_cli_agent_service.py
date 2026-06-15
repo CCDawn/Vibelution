@@ -1,4 +1,5 @@
 import queue
+import json
 from types import SimpleNamespace
 import subprocess
 import sqlite3
@@ -1059,6 +1060,163 @@ def test_cli_agent_terminal_reuses_active_lock_across_source_sessions(monkeypatc
     assert second["cliRunId"] == first["cliRunId"]
     assert second["lockKey"] == first["lockKey"]
     assert second["linkedSourceRunIds"] == ["run-1", "run-2"]
+
+
+def test_cli_agent_terminal_view_rebinds_stale_history_to_live_runtime(monkeypatch, tmp_path):
+    project_root = _configure_roots(monkeypatch, tmp_path)
+    task = "继续分析 CLI 在线状态"
+    stale_id = terminal_service._stable_terminal_session_id(
+        adapter_id="mimo_code",
+        source_session_id="session-old",
+        source_message_id="message-old",
+        source_run_id="run-old",
+        cwd=str(project_root),
+        mode="readonly",
+        task=task,
+    )
+    live_id = "cli-term-live-rebind"
+
+    class FakeProcess:
+        def isalive(self):
+            return True
+
+    live_runtime = terminal_service._TerminalRuntime(
+        state={
+            "terminalSessionId": live_id,
+            "adapterId": "mimo_code",
+            "agentType": "mimo_code",
+            "label": "MiMo Code",
+            "sourceSessionId": "session-live",
+            "sourceMessageId": "message-live",
+            "sourceRunId": "run-live",
+            "linkedSourceMessageIds": ["message-live"],
+            "linkedSourceRunIds": ["run-live"],
+            "cliRunId": "cli-run-live",
+            "lockKey": "cli-lock-live",
+            "cwd": str(project_root),
+            "mode": "readonly",
+            "status": "running",
+            "alive": True,
+            "rows": 32,
+            "cols": 120,
+            "updatedAt": "2026-06-15T08:40:00+00:00",
+        },
+        process=FakeProcess(),
+        transport="conpty",
+        transcript_path=terminal_service._transcript_path(live_id),
+        session_id_regex="",
+    )
+    terminal_service._RUNTIMES[live_id] = live_runtime
+    terminal_service._write_state(
+        {
+            "terminalSessionId": stale_id,
+            "adapterId": "mimo_code",
+            "agentType": "mimo_code",
+            "label": "MiMo Code",
+            "sourceSessionId": "session-old",
+            "sourceMessageId": "message-old",
+            "sourceRunId": "run-old",
+            "cliRunId": "cli-run-old",
+            "lockKey": "cli-lock-old",
+            "cwd": str(project_root),
+            "mode": "readonly",
+            "task": task,
+            "cliSessionId": "ses_old",
+            "status": "stale",
+            "alive": False,
+            "staleReason": "backend_startup",
+            "updatedAt": "2026-06-15T08:30:00+00:00",
+        }
+    )
+    monkeypatch.setattr(
+        terminal_service,
+        "_spawn_terminal_process",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("view rebind must not spawn")),
+    )
+
+    session = terminal_service.ensure_cli_agent_terminal_session(
+        agent_type="mimo_code",
+        task=task,
+        cwd=str(project_root),
+        mode="readonly",
+        source_session_id="session-old",
+        source_message_id="message-old",
+        source_run_id="run-old",
+        intent="view",
+    )
+
+    stale_state = terminal_service._read_state(stale_id)
+    assert session["terminalSessionId"] == live_id
+    assert session["interactionState"] == "live"
+    assert session["canInput"] is True
+    assert session["reusedActiveLock"] is True
+    assert session["reboundFromTerminalSessionId"] == stale_id
+    assert session["linkedSourceRunIds"] == ["run-live", "run-old"]
+    assert stale_state["status"] == "closed"
+    assert stale_state["alive"] is False
+    assert stale_state["closeReason"] == "superseded_by_idempotent_terminal"
+    assert stale_state["supersededByTerminalSessionId"] == live_id
+
+
+def test_cli_agent_terminal_detail_and_events_rebind_old_id_to_live_runtime(monkeypatch, tmp_path):
+    project_root = _configure_roots(monkeypatch, tmp_path)
+    old_id = "cli-term-old-history"
+    live_id = "cli-term-live-events"
+
+    class FakeProcess:
+        def isalive(self):
+            return True
+
+    terminal_service._write_state(
+        {
+            "terminalSessionId": old_id,
+            "adapterId": "mimo_code",
+            "agentType": "mimo_code",
+            "label": "MiMo Code",
+            "cliRunId": "cli-run-old",
+            "lockKey": "cli-lock-old",
+            "cwd": str(project_root),
+            "mode": "readonly",
+            "status": "stale",
+            "alive": False,
+            "staleReason": "backend_startup",
+            "updatedAt": "2026-06-15T08:30:00+00:00",
+        }
+    )
+    terminal_service._RUNTIMES[live_id] = terminal_service._TerminalRuntime(
+        state={
+            "terminalSessionId": live_id,
+            "adapterId": "mimo_code",
+            "agentType": "mimo_code",
+            "label": "MiMo Code",
+            "cliRunId": "cli-run-live",
+            "lockKey": "cli-lock-live",
+            "cwd": str(project_root),
+            "mode": "readonly",
+            "status": "running",
+            "alive": True,
+            "rows": 32,
+            "cols": 120,
+            "updatedAt": "2026-06-15T08:40:00+00:00",
+        },
+        process=FakeProcess(),
+        transport="conpty",
+        transcript_path=terminal_service._transcript_path(live_id),
+        session_id_regex="",
+    )
+
+    detail = terminal_service.get_cli_agent_terminal_session(old_id)
+    stream = terminal_service.stream_cli_agent_terminal_events(old_id)
+    first_event = next(stream)
+    stream.close()
+
+    payload = json.loads(first_event.split("data: ", 1)[1].strip())
+    assert detail["terminalSessionId"] == live_id
+    assert detail["interactionState"] == "live"
+    assert detail["reboundFromTerminalSessionId"] == old_id
+    assert payload["type"] == "terminal_snapshot"
+    assert payload["session"]["terminalSessionId"] == live_id
+    assert payload["session"]["interactionState"] == "live"
 
 
 def test_cli_agent_terminal_ensure_supersedes_legacy_duplicate_states(monkeypatch, tmp_path):

@@ -330,6 +330,33 @@ def ensure_cli_agent_terminal_session(
                 mode=mode,
                 exclude_terminal_session_id=terminal_session_id,
             )
+        related_live_runtime = _find_active_related_runtime(
+            existing_state,
+            cli_run_id=cli_run_id,
+            lock_key=lock_key,
+            adapter_id=normalized_type,
+            source_session_id=normalized_source_session_id,
+            cwd=scope_cwd or cwd,
+            mode=mode,
+            exclude_terminal_session_id=terminal_session_id,
+        )
+        if related_live_runtime is not None:
+            _link_runtime_source(
+                related_live_runtime,
+                source_message_id=normalized_source_message_id,
+                source_run_id=normalized_source_run_id,
+            )
+            keep_terminal_session_id = str(related_live_runtime.state.get("terminalSessionId") or "")
+            _supersede_related_terminal_states(
+                related_live_runtime.state,
+                keep_terminal_session_id=keep_terminal_session_id,
+            )
+            snapshot = related_live_runtime.snapshot()
+            snapshot["reusedActiveLock"] = True
+            snapshot["reboundFromTerminalSessionId"] = str(
+                (existing_state or {}).get("terminalSessionId") or terminal_session_id
+            )
+            return snapshot
         if normalized_intent == "view":
             if existing_state:
                 return _public_state(
@@ -509,9 +536,18 @@ def get_cli_agent_terminal_session(terminal_session_id: str, *, include_transcri
         runtime = _RUNTIMES.get(session_id)
         if runtime:
             return runtime.snapshot(include_transcript_tail=include_transcript_tail)
-    state = _read_state(session_id)
-    if not state:
-        raise CliAgentTerminalError("TERMINAL_SESSION_NOT_FOUND", "Terminal session not found.")
+        state = _read_state(session_id)
+        if not state:
+            raise CliAgentTerminalError("TERMINAL_SESSION_NOT_FOUND", "Terminal session not found.")
+        related_live_runtime = _find_active_related_runtime(
+            state,
+            exclude_terminal_session_id=session_id,
+        )
+        if related_live_runtime is not None:
+            snapshot = related_live_runtime.snapshot(include_transcript_tail=include_transcript_tail)
+            snapshot["reusedActiveLock"] = True
+            snapshot["reboundFromTerminalSessionId"] = session_id
+            return snapshot
     state["alive"] = False
     return _public_state(
         _merge_transcript_snapshot(
@@ -565,6 +601,9 @@ def stream_cli_agent_terminal_events(terminal_session_id: str):
     session_id = _normalize_terminal_session_id(terminal_session_id)
     with _RUNTIMES_LOCK:
         runtime = _RUNTIMES.get(session_id)
+        if runtime is None:
+            state = _read_state(session_id)
+            runtime = _find_active_related_runtime(state, exclude_terminal_session_id=session_id)
     if runtime is None:
         yield _encode_sse_event(
             "terminal_snapshot",
@@ -958,6 +997,50 @@ def _find_active_locked_runtime(lock_key: str, *, exclude_terminal_session_id: s
         with runtime.lock:
             runtime_lock_key = str(runtime.state.get("lockKey") or "").strip()
         if runtime_lock_key == normalized_lock_key:
+            return runtime
+    return None
+
+
+def _find_active_related_runtime(
+    state: dict[str, Any] | None,
+    *,
+    cli_run_id: str = "",
+    lock_key: str = "",
+    adapter_id: str = "",
+    source_session_id: str = "",
+    cwd: str = "",
+    mode: str = "",
+    exclude_terminal_session_id: str = "",
+) -> _TerminalRuntime | None:
+    state = state or {}
+    normalized_lock_key = str(lock_key or state.get("lockKey") or "").strip()
+    locked_runtime = _find_active_locked_runtime(
+        normalized_lock_key,
+        exclude_terminal_session_id=exclude_terminal_session_id,
+    )
+    if locked_runtime is not None:
+        return locked_runtime
+
+    excluded = str(exclude_terminal_session_id or "").strip()
+    scope = {
+        "cli_run_id": str(cli_run_id or state.get("cliRunId") or "").strip(),
+        "lock_key": normalized_lock_key,
+        "adapter_id": str(adapter_id or state.get("adapterId") or state.get("agentType") or "").strip(),
+        "source_session_id": str(source_session_id or state.get("sourceSessionId") or "").strip(),
+        "cwd": str(cwd or state.get("cwd") or "").strip(),
+        "mode": str(mode or state.get("mode") or "").strip(),
+    }
+    if not scope["adapter_id"] or not scope["cwd"]:
+        return None
+
+    for terminal_session_id, runtime in list(_RUNTIMES.items()):
+        if excluded and terminal_session_id == excluded:
+            continue
+        if not runtime.is_alive():
+            continue
+        with runtime.lock:
+            runtime_state = dict(runtime.state)
+        if _terminal_state_matches_scope(runtime_state, **scope):
             return runtime
     return None
 
