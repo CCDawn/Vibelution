@@ -12,9 +12,10 @@ _MENTAL_MODEL_ENABLED_OVERRIDE: ContextVar[bool | None] = ContextVar(
     "mental_model_enabled_override",
     default=None,
 )
+_DEFAULT_MENTAL_MODEL_ENABLED = False
 
 
-def _coerce_bool(value: Any, default: bool = True) -> bool:
+def _coerce_bool(value: Any, default: bool = _DEFAULT_MENTAL_MODEL_ENABLED) -> bool:
     if isinstance(value, bool):
         return value
     if value is None:
@@ -46,19 +47,19 @@ def is_mental_model_enabled(public_config: dict[str, Any] | None = None) -> bool
             config = {}
 
     if not isinstance(config, dict):
-        return True
+        return _DEFAULT_MENTAL_MODEL_ENABLED
 
     section = config.get("mental_model")
     if isinstance(section, dict) and "enabled" in section:
-        return _coerce_bool(section.get("enabled"), default=True)
+        return _coerce_bool(section.get("enabled"))
 
     agent_section = config.get("agent")
     if isinstance(agent_section, dict):
         nested = agent_section.get("mental_model")
         if isinstance(nested, dict) and "enabled" in nested:
-            return _coerce_bool(nested.get("enabled"), default=True)
+            return _coerce_bool(nested.get("enabled"))
 
-    return True
+    return _DEFAULT_MENTAL_MODEL_ENABLED
 
 
 @contextmanager

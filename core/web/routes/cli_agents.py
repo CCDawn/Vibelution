@@ -28,6 +28,7 @@ class CliAgentTerminalEnsurePayload(BaseModel):
     task: str = ""
     cwd: str = ""
     mode: str = "readonly"
+    intent: str = "task"
     model: str = ""
     agent: str = ""
     sourceSessionId: str = ""
@@ -52,9 +53,11 @@ def _raise_terminal_error(exc: CliAgentTerminalError) -> None:
     status_code = status.HTTP_422_UNPROCESSABLE_ENTITY
     if exc.code in {"TERMINAL_SESSION_NOT_FOUND", "UNSUPPORTED_CLI_AGENT"}:
         status_code = status.HTTP_404_NOT_FOUND
-    if exc.code in {"TERMINAL_SESSION_NOT_RUNNING", "WORKTREE_REQUIRED", "CWD_OUTSIDE_ALLOWED_ROOTS"}:
+    if exc.code in {"TERMINAL_SESSION_NOT_RUNNING", "TERMINAL_SESSION_CLOSED", "WORKTREE_REQUIRED", "CWD_OUTSIDE_ALLOWED_ROOTS"}:
         status_code = status.HTTP_409_CONFLICT
-    raise HTTPException(status_code=status_code, detail={"code": exc.code, "message": exc.message}) from exc
+    detail = {"code": exc.code, "message": exc.message}
+    detail.update(getattr(exc, "details", {}) or {})
+    raise HTTPException(status_code=status_code, detail=detail) from exc
 
 
 @router.post("/cli-agents/terminal-sessions/ensure")
@@ -74,6 +77,7 @@ def cli_agent_terminal_ensure(payload: CliAgentTerminalEnsurePayload) -> dict[st
             rows=payload.rows,
             cols=payload.cols,
             send_initial_task=payload.sendInitialTask,
+            intent=payload.intent,
         )
     except CliAgentTerminalError as exc:
         _raise_terminal_error(exc)

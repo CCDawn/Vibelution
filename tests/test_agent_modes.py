@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 import agent as agent_module
 from agent import SelfEvolvingAgent
+from core.mental_model_flags import is_mental_model_enabled, mental_model_enabled_override
 from core.orchestration.agent_modes import AgentMode, resolve_mode_policy
 
 
@@ -66,6 +67,7 @@ def test_seed_chat_history_seeds_mental_conversation_context():
     agent.config = _make_config()
     agent.mode = AgentMode.CHAT
     agent.mode_policy = resolve_mode_policy("chat", agent.config)
+    agent._mental_model_enabled_override = True
     captured = {}
     agent.mental_model = SimpleNamespace(
         seed_conversation_context=lambda messages: captured.setdefault("messages", list(messages))
@@ -112,6 +114,23 @@ def test_seed_chat_history_skips_mental_context_when_turn_disables_mental_model(
 
     assert captured == {"cleared": True}
     assert agent._active_turn_goal == "__chat_session__"
+
+
+def test_mental_model_is_globally_disabled_by_default():
+    assert is_mental_model_enabled({}) is False
+    assert is_mental_model_enabled({"agent": {}}) is False
+    assert is_mental_model_enabled({"mental_model": {"enabled": ""}}) is False
+    assert is_mental_model_enabled({"mental_model": {"enabled": True}}) is True
+    assert is_mental_model_enabled({"agent": {"mental_model": {"enabled": "on"}}}) is True
+
+
+def test_mental_model_context_override_can_enable_default_disabled_flag():
+    assert is_mental_model_enabled({}) is False
+
+    with mental_model_enabled_override(True):
+        assert is_mental_model_enabled({}) is True
+
+    assert is_mental_model_enabled({}) is False
 
 
 def test_supervised_mental_model_env_override_controls_runtime_default(monkeypatch):

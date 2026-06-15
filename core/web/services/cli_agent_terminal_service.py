@@ -54,10 +54,11 @@ SCREEN_STATE_FIELD_KEYS = (
 class CliAgentTerminalError(Exception):
     """Raised when a CLI Agent terminal session cannot be created or used."""
 
-    def __init__(self, code: str, message: str):
+    def __init__(self, code: str, message: str, *, details: dict[str, Any] | None = None):
         super().__init__(message)
         self.code = code
         self.message = message
+        self.details = dict(details or {})
 
 
 class _TerminalRuntime:
@@ -263,9 +264,11 @@ def ensure_cli_agent_terminal_session(
     cols: int = DEFAULT_COLS,
     send_initial_task: bool = False,
     allow_unsafe_permissions: bool = False,
+    intent: str = "task",
 ) -> dict[str, Any]:
     """Return an attached or newly started terminal session for a configured CLI Agent."""
 
+    normalized_intent = _normalize_terminal_intent(intent)
     normalized_type = cli_agent_service._normalize_id(agent_type)
     if not normalized_type:
         raise CliAgentTerminalError("MISSING_CLI_AGENT", "CLI Agent type is required.")
@@ -325,10 +328,33 @@ def ensure_cli_agent_terminal_session(
                 mode=mode,
                 exclude_terminal_session_id=terminal_session_id,
             )
+        if normalized_intent == "view":
+            if existing_state:
+                return _public_state(
+                    _merge_transcript_snapshot(
+                        existing_state,
+                        _read_transcript_snapshot(
+                            _transcript_path(str(existing_state.get("terminalSessionId") or terminal_session_id))
+                        ),
+                    )
+                )
+            raise CliAgentTerminalError(
+                "TERMINAL_SESSION_NOT_FOUND",
+                "Terminal session history was not found.",
+                details={
+                    "terminalSessionId": terminal_session_id,
+                    "interactionState": "closed",
+                    "canInput": False,
+                    "canResume": False,
+                    "resumeAction": "none",
+                    "displayMode": "readonly_replay",
+                    "stateReason": "not_found",
+                },
+            )
         if _source_bound_attach_should_not_resume_stale_state(
             existing_state,
             source_session_id=normalized_source_session_id,
-        ):
+        ) and normalized_intent not in {"resume", "start"}:
             public_state = _public_state(
                 _merge_transcript_snapshot(
                     existing_state,
@@ -349,6 +375,14 @@ def ensure_cli_agent_terminal_session(
                 },
             )
             return public_state
+        if normalized_intent == "resume" and existing_state:
+            status = str(existing_state.get("status") or "").strip().lower()
+            if bool(existing_state.get("userClosed")) or status == "closed":
+                raise CliAgentTerminalError(
+                    "TERMINAL_SESSION_CLOSED",
+                    "Terminal session was closed by the user and cannot be resumed automatically.",
+                    details=_terminal_not_running_details(str(existing_state.get("terminalSessionId") or terminal_session_id)),
+                )
         normalized_source_session_id = normalized_source_session_id or str(existing_state.get("sourceSessionId") or "").strip()
         normalized_source_message_id = normalized_source_message_id or str(existing_state.get("sourceMessageId") or "").strip()
         normalized_source_run_id = normalized_source_run_id or str(existing_state.get("sourceRunId") or "").strip()
@@ -357,7 +391,9 @@ def ensure_cli_agent_terminal_session(
         requested_mode = mode or str(existing_state.get("mode") or "readonly")
         requested_model = model or str(existing_state.get("model") or "")
         requested_agent = agent or str(existing_state.get("agent") or "")
-        existing_cli_session_id = cli_session_id or str(existing_state.get("cliSessionId") or "")
+        existing_cli_session_id = str(cli_session_id or "").strip()
+        if normalized_intent != "start":
+            existing_cli_session_id = existing_cli_session_id or str(existing_state.get("cliSessionId") or "")
         if not existing_cli_session_id and existing_state:
             existing_cli_session_id = _discover_existing_cli_session_id(
                 agent_type=normalized_type,
@@ -496,12 +532,19 @@ def _source_bound_attach_should_not_resume_stale_state(state: dict[str, Any], *,
     return bool(str(state.get("terminalSessionId") or "").strip())
 
 
+def _normalize_terminal_intent(intent: str) -> str:
+    normalized = str(intent or "task").strip().lower()
+    if normalized in {"task", "view", "resume", "start"}:
+        return normalized
+    return "task"
+
+
 def _terminal_action_ack(runtime: _TerminalRuntime, *, action: str) -> dict[str, Any]:
     with runtime.lock:
         state = dict(runtime.state)
     rows = _clamp_int(state.get("rows"), DEFAULT_ROWS, 4, 120)
     cols = _clamp_int(state.get("cols"), DEFAULT_COLS, 20, 240)
-    return {
+    payload = {
         "status": "accepted",
         "semanticStatus": "accepted",
         "code": "CLI_AGENT_TERMINAL_INPUT_ACCEPTED" if action == "input" else "CLI_AGENT_TERMINAL_RESIZE_ACCEPTED",
@@ -512,6 +555,8 @@ def _terminal_action_ack(runtime: _TerminalRuntime, *, action: str) -> dict[str,
         "cols": cols,
         "updatedAt": str(state.get("updatedAt") or "").strip(),
     }
+    payload.update(_terminal_interaction_fields({**state, "alive": runtime.is_alive()}))
+    return payload
 
 
 def stream_cli_agent_terminal_events(terminal_session_id: str):
@@ -657,7 +702,11 @@ def _require_runtime(terminal_session_id: str) -> _TerminalRuntime:
     with _RUNTIMES_LOCK:
         runtime = _RUNTIMES.get(session_id)
     if runtime is None or not runtime.is_alive():
-        raise CliAgentTerminalError("TERMINAL_SESSION_NOT_RUNNING", "Terminal session is not running.")
+        raise CliAgentTerminalError(
+            "TERMINAL_SESSION_NOT_RUNNING",
+            "Terminal session is not running.",
+            details=_terminal_not_running_details(session_id),
+        )
     return runtime
 
 
@@ -1722,6 +1771,92 @@ def _terminal_screen_state_fields(snapshot: TerminalScreenSnapshot) -> dict[str,
     }
 
 
+def _terminal_interaction_fields(state: dict[str, Any]) -> dict[str, Any]:
+    status = str(state.get("status") or "").strip().lower()
+    alive = bool(state.get("alive"))
+    cli_session_id = str(state.get("cliSessionId") or "").strip()
+    user_closed = bool(state.get("userClosed"))
+    state_reason = (
+        str(state.get("staleReason") or "").strip()
+        or str(state.get("closeReason") or "").strip()
+        or status
+        or "unknown"
+    )
+    if alive and status not in {"closed", "stale", "stopped", "exited"}:
+        return {
+            "interactionState": "live",
+            "canInput": True,
+            "canResume": False,
+            "canStart": False,
+            "resumeAction": "none",
+            "displayMode": "live_terminal",
+            "stateReason": "runtime_alive",
+        }
+    if user_closed or status == "closed":
+        return {
+            "interactionState": "closed",
+            "canInput": False,
+            "canResume": False,
+            "canStart": False,
+            "resumeAction": "none",
+            "displayMode": "readonly_replay",
+            "stateReason": state_reason,
+        }
+    if status in {"stale", "stopped", "exited"} and cli_session_id:
+        return {
+            "interactionState": "resumable",
+            "canInput": False,
+            "canResume": True,
+            "canStart": False,
+            "resumeAction": "resume_session",
+            "displayMode": "readonly_replay",
+            "stateReason": state_reason,
+        }
+    return {
+        "interactionState": "history",
+        "canInput": False,
+        "canResume": False,
+        "canStart": True,
+        "resumeAction": "start_new",
+        "displayMode": "readonly_replay",
+        "stateReason": state_reason,
+    }
+
+
+def _terminal_not_running_details(terminal_session_id: str) -> dict[str, Any]:
+    session_id = _normalize_terminal_session_id(terminal_session_id)
+    state = _read_state(session_id)
+    if not state:
+        details: dict[str, Any] = {
+            "terminalSessionId": session_id,
+            "status": "missing",
+            "alive": False,
+            "interactionState": "closed",
+            "canInput": False,
+            "canResume": False,
+            "canStart": False,
+            "resumeAction": "none",
+            "displayMode": "readonly_replay",
+            "stateReason": "not_found",
+        }
+        return details
+    public_state = _public_state({**state, "alive": False})
+    keys = {
+        "terminalSessionId",
+        "status",
+        "alive",
+        "cliSessionId",
+        "interactionState",
+        "canInput",
+        "canResume",
+        "canStart",
+        "resumeAction",
+        "displayMode",
+        "stateReason",
+    }
+    return {key: public_state.get(key) for key in keys if key in public_state}
+
+
 def _public_state(state: dict[str, Any]) -> dict[str, Any]:
     keys = {
         "terminalSessionId",
@@ -1767,10 +1902,18 @@ def _public_state(state: dict[str, Any]) -> dict[str, Any]:
         "closeReason",
         "supersededByTerminalSessionId",
         "semanticStatus",
+        "interactionState",
+        "canInput",
+        "canResume",
+        "canStart",
+        "resumeAction",
+        "displayMode",
+        "stateReason",
         "createdAt",
         "updatedAt",
     }
     payload = {key: state.get(key) for key in keys if key in state}
+    payload.update(_terminal_interaction_fields(payload))
     if "semanticStatus" not in payload and str(payload.get("terminalSessionId") or "").strip():
         status = str(payload.get("status") or "").strip().lower()
         payload["semanticStatus"] = status if status in {"closed", "stopped", "exited", "stale"} else "attached"
