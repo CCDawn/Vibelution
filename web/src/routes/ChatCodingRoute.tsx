@@ -4769,7 +4769,9 @@ export function ChatCodingRoute() {
       ? t("cacheHitNotCalled")
     : t("cacheHitMissing");
   const llmUsageLine = hasProviderLlmUsage
-    ? `${numberFormatter.format(sessionLlmUsage.inputTokens)} tokens · ${numberFormatter.format(sessionLlmUsage.cachedInputTokens)} cached`
+    ? lang === "zh"
+      ? `${numberFormatter.format(sessionLlmUsage.inputTokens)} · 缓 ${numberFormatter.format(sessionLlmUsage.cachedInputTokens)}`
+      : `${numberFormatter.format(sessionLlmUsage.inputTokens)} in · ${numberFormatter.format(sessionLlmUsage.cachedInputTokens)} cached`
     : llmUsageNotCalled
       ? t("llmUsageNotCalled")
     : t("llmUsageMissing");
@@ -4928,11 +4930,6 @@ export function ChatCodingRoute() {
         value: latestControlSignalLine,
         title: latestControlSignalTitle,
       }] : []),
-      {
-        label: t("currentTask"),
-        value: currentTaskSummary,
-        title: currentTaskSummary,
-      },
       {
         label: t("promptCache"),
         value: cacheHitLine,
