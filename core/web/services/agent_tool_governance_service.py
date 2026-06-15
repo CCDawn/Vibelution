@@ -621,6 +621,7 @@ def _append_request(agent: dict[str, Any], request: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8", newline="\n") as handle:
         handle.write(json.dumps(request, ensure_ascii=False, sort_keys=True) + "\n")
+    agent_directory_service.record_agent_api_hydration_event_file_changed(path)
 
 
 def _write_requests(path: Path, requests: list[dict[str, Any]]) -> None:
@@ -631,6 +632,7 @@ def _write_requests(path: Path, requests: list[dict[str, Any]]) -> None:
         if isinstance(item, dict)
     ]
     path.write_text(("\n".join(lines) + "\n") if lines else "", encoding="utf-8", newline="\n")
+    agent_directory_service.record_agent_api_hydration_event_file_changed(path)
 
 
 def _read_requests(agent: dict[str, Any]) -> list[dict[str, Any]]:
