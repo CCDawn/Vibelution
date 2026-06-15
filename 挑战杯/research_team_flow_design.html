@@ -465,7 +465,7 @@
           <div class="plan-summary">
             <div class="service-row"><strong>知识搜集主线</strong><span>只跑通知识搜集、筛选、候选入库、知识治理 Agent 和图谱同步设计；不进入训练实验、算法实现或比赛交付。</span></div>
             <div class="service-row"><strong>实施目标</strong><span>复用 Vibelution 现有 Research、Team Knowledge、RAG、Knowledge Steward 和 Memory Graph 能力，把 01-09 做成可运行 MVP。</span></div>
-            <div class="service-row"><strong>团队入口</strong><span>/teams?team=research-team · 选中 ai科学研究团队后，团队内容区显示科研控制台：研究主题、当前阶段、知识搜集/实验/迭代三张阶段卡、每卡一个主按钮和一个阶段详情入口；知识搜集卡会按未开始、待继续搜索、搜索中、待筛选、可进入实验、等待回写显示状态，并提供“新一轮搜集”；点击知识搜集主按钮会创建/续用阶段轮次，并立即排队第一批后台资料搜索；知识搜集独立页的资料搜集、资料筛选、候选入库、候选图谱、共享记忆前审五张步骤卡只承载状态和主操作，当前步骤的功能 Agent 名称、模型、状态和配置入口集中显示在右侧详情底部；资料筛选主按钮会让资料质量评估 Agent 批量执行待筛候选；若已筛完，则显示 Agent 重新筛选并 force 复审已筛候选；批次列表按 teamId/startedFrom 在服务端过滤，后台 activeWorkRun 会持续显示正在团队搜索，AppShell 顶部优先显示知识搜集而不是团队群聊；知识搜集页不再把本阶段 Agent 统一堆在顶部，点击每张步骤卡才查看该步骤内容和操作；资料搜集子页把当前动作和已收集资料分开：过程区只显示当前正在执行的一条动作，结果区集中展示已进入候选仓库的资料，统计使用原始资料记录、候选资料、已通过筛选和待 Agent 筛选；知识搜集启动不再依赖旧的 houmo_qwen35_9b_agent 固定 ID，而是由后端从当前模型库解析可用 KV 模型；模型证据、候选、路径、校验和内部状态默认移到阶段详情页或高级信息中。</span></div>
+            <div class="service-row"><strong>团队入口</strong><span>/teams?team=research-team · 选中 ai科学研究团队后，团队内容区显示科研控制台：研究主题、当前阶段、知识搜集/实验/迭代三张阶段卡、每卡一个主按钮和一个阶段详情入口；知识搜集卡会按未开始、待继续搜索、搜索中、待筛选、可进入实验、等待回写显示状态，并提供“新一轮搜集”；点击知识搜集主按钮会创建/续用阶段轮次，并立即排队第一批后台资料搜索；知识搜集独立页的资料搜集、资料筛选、候选入库、候选图谱、共享记忆前审五张步骤卡只承载状态和主操作，当前步骤的功能 Agent 名称、模型、状态和配置入口集中显示在右侧详情底部；资料筛选主按钮会让资料质量评估 Agent 批量执行待筛候选；若已筛完，则显示 Agent 重新筛选并 force 复审已筛候选；批次列表按 teamId/startedFrom 在服务端过滤，后台 activeWorkRun 会持续显示正在团队搜索，AppShell 顶部优先显示知识搜集而不是团队群聊；知识搜集页不再把本阶段 Agent 统一堆在顶部，点击每张步骤卡才查看该步骤内容和操作；资料搜集子页把当前动作和已收集资料分开：过程区只显示当前正在执行的一条动作，结果区集中展示已进入候选仓库的资料；资料结果统计使用已搜到、可点击来源、本地文件和待 Agent 筛选，列表内 DOI 单独显示为 DOI 链接，网页显示可点击来源，本地文件显示路径，缺少来源直接标出；知识搜集启动不再依赖旧的 houmo_qwen35_9b_agent 固定 ID，而是由后端从当前模型库解析可用 KV 模型；模型证据、候选、路径、校验和内部状态默认移到阶段详情页或高级信息中。</span></div>
           </div>
           <div class="dashboard-panel">
             <h2>边界提醒</h2>
@@ -538,7 +538,7 @@
             <div class="state-row">
                   <b>source_registered</b>
                   <strong>资料已登记</strong>
-                  <span>原始资料可追溯，允许进入笔记生成。</span>
+                  <span>资料来源可追溯，允许进入笔记生成。</span>
                 </div>
 <div class="state-row">
                   <b>paper_note_draft</b>
@@ -659,8 +659,8 @@
         <div class="agent-row">
         <b>01</b>
         <strong>Source Intake Agent</strong>
-        <span>可复用通用 data-processing assignment / source-extraction / source-quality 后端已接入；Teams 资料搜集执行台、候选资料筛选台、科研总览控制台、KV 缓存对话轨迹、启动复用反馈、metadata-only 搜索执行闭环、高价值信息层、中文控制台、默认层去说明化、步骤卡主操作入口、右侧当前步骤 Agent 配置、资料筛选页内反馈、资料筛选 Agent 批量执行、候选库可视化二级索引、知识搜集阶段子页控制台、资料筛选 Agent 复审入口、一键排队首批后台搜索、资料搜集当前动作和已收集资料分层、搜集结果状态徽标完整显示、阶段协调显式启动已接入</span>
-        <span>ResearchStageRound 建立 / 科研控制台一键进入知识搜集 / 总览页只显示三阶段主操作 / 知识搜集状态驱动按钮 / 知识搜集中文展示映射 / 默认层去说明化 / 右侧主操作唯一化 / 资料筛选入口常驻 / 步骤卡主操作入口 / 右侧当前步骤 Agent 配置 / 步骤卡二级索引 / 阶段子页控制台 / 资料搜集当前动作 / 已收集资料结果区 / 搜集结果状态徽标 / 资料筛选 Agent 复审 / 候选库可视化面板 / 资料筛选页内详情 / 资料筛选展开高亮反馈 / 资料筛选 Agent 批量执行 / source-quality/assess-batch / source-quality force 重筛 / 新一轮搜集入口 / active 知识搜集轮次复用反馈 / 一键排队首批搜索 / 全局运行态知识搜集优先 / 步骤功能 Agent 聚焦 / 阶段协调显式启动 / DataProcessingRun 建立 / DataProcessingRun reviewing 收口 / DataSearchPlan/querySeeds 搜索计划 / KV/prompt cache 启动门禁 / 稳定前缀/动态增量契约 / CollectionAssignment 资料搜集任务 / assignedQueries 角色分配 / promptCachePartition 角色分区 / Teams 启动搜集批次 / Teams 查看 run/assignment/query/KV 状态 / Teams 高价值摘要层 / Teams 搜索下一批 / Crossref 元数据搜索执行器 / 搜索执行事件进入搜集对话流 / DataRecord 通用记录 / DataRecord 自动导入 source_manifest / metadata-only 下载边界 / 手工 CollectionOutput 回写 / 本地资料登记 / source_manifest 写入 / 文件路径/页码/来源可信度记录 / 本地 PDF sha256/pageAnchors/excerpt 抽取 / sourceQualityAssessment 筛选 / 可选 research_knowledge_query_tool 查重</span>
+        <span>可复用通用 data-processing assignment / source-extraction / source-quality 后端已接入；Teams 资料搜集执行台、候选资料筛选台、科研总览控制台、KV 缓存对话轨迹、启动复用反馈、metadata-only 搜索执行闭环、高价值信息层、中文控制台、默认层去说明化、步骤卡主操作入口、右侧当前步骤 Agent 配置、资料筛选页内反馈、资料筛选 Agent 批量执行、候选库可视化二级索引、知识搜集阶段子页控制台、资料筛选 Agent 复审入口、一键排队首批后台搜索、资料搜集当前动作和已收集资料分层、搜集结果状态徽标完整显示、搜集结果 DOI/网页/本地文件来源可溯源、阶段协调显式启动已接入</span>
+        <span>ResearchStageRound 建立 / 科研控制台一键进入知识搜集 / 总览页只显示三阶段主操作 / 知识搜集状态驱动按钮 / 知识搜集中文展示映射 / 默认层去说明化 / 右侧主操作唯一化 / 资料筛选入口常驻 / 步骤卡主操作入口 / 右侧当前步骤 Agent 配置 / 步骤卡二级索引 / 阶段子页控制台 / 资料搜集当前动作 / 已收集资料结果区 / 搜集结果来源溯源 / 搜集结果状态徽标 / 资料筛选 Agent 复审 / 候选库可视化面板 / 资料筛选页内详情 / 资料筛选展开高亮反馈 / 资料筛选 Agent 批量执行 / source-quality/assess-batch / source-quality force 重筛 / 新一轮搜集入口 / active 知识搜集轮次复用反馈 / 一键排队首批搜索 / 全局运行态知识搜集优先 / 步骤功能 Agent 聚焦 / 阶段协调显式启动 / DataProcessingRun 建立 / DataProcessingRun reviewing 收口 / DataSearchPlan/querySeeds 搜索计划 / KV/prompt cache 启动门禁 / 稳定前缀/动态增量契约 / CollectionAssignment 资料搜集任务 / assignedQueries 角色分配 / promptCachePartition 角色分区 / Teams 启动搜集批次 / Teams 查看 run/assignment/query/KV 状态 / Teams 高价值摘要层 / Teams 搜索下一批 / Crossref 元数据搜索执行器 / 搜索执行事件进入搜集对话流 / DataRecord 通用记录 / DataRecord 自动导入 source_manifest / metadata-only 下载边界 / 手工 CollectionOutput 回写 / 本地资料登记 / source_manifest 写入 / 文件路径/页码/来源可信度记录 / 本地 PDF sha256/pageAnchors/excerpt 抽取 / sourceQualityAssessment 筛选 / 可选 research_knowledge_query_tool 查重</span>
         <span>确认资料允许分析、来源可信度和是否纳入本轮。</span>
       </div>
 <div class="agent-row">
@@ -2135,7 +2135,7 @@
               <b>M6.42</b>
               <strong>资料搜集过程与结果分层</strong>
               <span>知识搜集页的资料搜集子页改为两块：当前搜集动作只显示一条正在进行或最近完成的动作，已收集资料集中展示进入 CandidateStore 的候选资料。</span>
-              <span>顶部阶段卡和总览指标使用“原始资料、搜索问题、候选资料、已通过筛选、待 Agent 筛选”等中文业务词，避免把 record/query/assignment 等内部计数暴露成主路径信息。</span>
+              <span>顶部阶段卡和总览指标使用“已搜到、搜索问题、候选资料、已通过筛选、待 Agent 筛选”等中文业务词，避免把 record/query/assignment 等内部计数暴露成主路径信息。</span>
             </div>
 <div class="blueprint-row">
               <b>M6.43</b>
@@ -2152,8 +2152,14 @@
 <div class="blueprint-row">
               <b>M6.45</b>
               <strong>知识搜集信息架构降噪</strong>
-              <span>知识搜集页顶部五张步骤卡删除重复 Agent 槽，右侧详情底部集中展示当前步骤 Agent 配置；搜集结果区改名为已收集资料，并把统计拆成原始资料记录、候选资料、已通过筛选和待 Agent 筛选。</span>
+              <span>知识搜集页顶部五张步骤卡删除重复 Agent 槽，右侧详情底部集中展示当前步骤 Agent 配置；搜集结果区改名为已收集资料，并把统计拆成已搜到、可点击来源、本地文件和待 Agent 筛选。</span>
               <span>用户不需要理解 DataRecord、query、source_manifest 等内部术语，也能判断哪些是流程步骤、哪些是实际资料结果、当前步骤由哪个 Agent 和模型承接。</span>
+            </div>
+<div class="blueprint-row">
+              <b>M6.46</b>
+              <strong>搜集结果来源可溯源</strong>
+              <span>资料搜集结果卡新增来源展示规则：DOI 统一显示为 DOI 并链接 doi.org，网页来源显示为可点击链接，本地资料显示文件路径，缺少 DOI/链接/本地路径时用缺少来源标出。</span>
+              <span>用户能一眼区分论文 DOI、网页元数据和本地文件；不可溯源候选不会和正常结果长得一样，后续筛选 Agent 也能把来源缺失作为退回补资料依据。</span>
             </div>
       </div>
       <div class="tag-row">
