@@ -717,7 +717,8 @@ class DelegationGovernor:
         session = self._session_getter()
         try:
             result = json.loads(result_text or "{}")
-        except Exception:
+        except Exception as exc:
+            _debug_logger.warning(f"[委派治理] 子 agent 结果 JSON 解析失败: {type(exc).__name__}: {exc}")
             fallback_text = str(result_text or "").strip()
             if fallback_text.startswith("[超时]"):
                 result = {
@@ -922,7 +923,8 @@ class DelegationGovernor:
             from core.logging.unified_logger import logger as unified_logger
 
             conversation_logger = unified_logger.conversation
-        except Exception:
+        except Exception as exc:
+            _debug_logger.warning(f"[委派治理] 获取 unified conversation logger 失败: {type(exc).__name__}: {exc}")
             conversation_logger = None
 
         live_stdout_chunks: List[str] = []

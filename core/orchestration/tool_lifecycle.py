@@ -168,7 +168,8 @@ class ToolLifecycleBridge:
             return
         try:
             self._tool_result_observer(tool_call, result, action)
-        except Exception:
+        except Exception as exc:
+            _debug_logger.warning(f"[工具生命周期] 工具结果观察器回调失败: {type(exc).__name__}: {exc}")
             pass
 
     def _has_post_close_action_pending(self) -> bool:
@@ -195,12 +196,14 @@ class ToolLifecycleBridge:
         elif isinstance(result, (bytes, bytearray)):
             try:
                 payload = json.loads(result.decode("utf-8", errors="replace").lstrip("\ufeff").strip())
-            except Exception:
+            except Exception as exc:
+                _debug_logger.warning(f"[工具生命周期] 关闭事务结果解析失败: {type(exc).__name__}: {exc}")
                 return None
         else:
             try:
                 payload = json.loads(str(result or "").lstrip("\ufeff").strip())
-            except Exception:
+            except Exception as exc:
+                _debug_logger.warning(f"[工具生命周期] 关闭事务结果解析失败: {type(exc).__name__}: {exc}")
                 return None
         if not isinstance(payload, dict):
             return None

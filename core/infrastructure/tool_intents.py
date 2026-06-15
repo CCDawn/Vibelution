@@ -8,6 +8,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import List
 
+from core.logging import debug as _debug_logger
+
 
 @dataclass(frozen=True)
 class ToolIntent:
@@ -80,7 +82,8 @@ def _current_agent_visible_tool_names() -> set[str] | None:
         if not str((runtime or {}).get("agentId") or "").strip():
             return None
         return set(effective_visible_tool_names_for_current_agent())
-    except Exception:
+    except Exception as exc:
+        _debug_logger.warning(f"[工具意图] 获取当前 Agent 可见工具失败: {type(exc).__name__}: {exc}")
         return None
 
 
