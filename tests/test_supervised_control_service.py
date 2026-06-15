@@ -1,4 +1,5 @@
 import copy
+import json
 import threading
 from pathlib import Path
 
@@ -9,6 +10,48 @@ from core.web.services import supervised_conversation_harness_adapter as convers
 from tests.helpers.chat_turn_harness import wait_for_condition
 
 pytestmark = pytest.mark.serial
+
+
+def _terminal_bench_environment_contract() -> dict:
+    return {
+        "kind": "terminal_bench_task_environment",
+        "preflight": {"required": True, "strategy": "path_alias"},
+        "required_paths": [],
+        "official_verifier": {
+            "status": "harbor_pending",
+            "requires": ["uv", "docker daemon"],
+        },
+        "official_score_available": False,
+    }
+
+
+def _write_custom_terminal_bench_bundle(tmp_path: Path, bundle_name: str = "terminal_bench_core_v1") -> Path:
+    contract = _terminal_bench_environment_contract()
+    bundle_path = tmp_path / "workspace" / "evaluation" / "bundles" / f"{bundle_name}.json"
+    bundle_path.parent.mkdir(parents=True, exist_ok=True)
+    bundle_path.write_text(
+        json.dumps(
+            {
+                "bundle_name": bundle_name,
+                "dataset": {
+                    "official_verifier_status": "harbor_pending",
+                    "evaluation_mode": "custom_harness",
+                    "score_label": "Vibelution custom score",
+                    "environment_contract": copy.deepcopy(contract),
+                },
+                "cases": [
+                    {
+                        "case_id": "tb2",
+                        "official_runner": "harbor_pending",
+                        "requires_official_task_environment": False,
+                        "environment_contract": copy.deepcopy(contract),
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    return bundle_path
 
 
 @pytest.fixture(autouse=True)
@@ -477,23 +520,54 @@ def test_retry_supervised_run_starts_new_run_from_finished_decision(monkeypatch,
     assert observed["agent_bindings"]["baseline"]["agentId"] == "a-base"
 
 
-def test_start_supervised_run_allows_custom_terminal_bench_bundle(monkeypatch, tmp_path):
+def test_start_supervised_run_blocks_custom_terminal_bench_bundle_when_environment_preflight_fails(
+    monkeypatch,
+    tmp_path,
+):
     monkeypatch.setattr(service, "PROJECT_ROOT", tmp_path)
-    bundle_path = tmp_path / "workspace" / "evaluation" / "bundles" / "terminal_bench_core_v1.json"
-    bundle_path.parent.mkdir(parents=True, exist_ok=True)
-    bundle_path.write_text(
-        (
-            '{"bundle_name":"terminal_bench_core_v1",'
-            '"dataset":{"official_verifier_status":"harbor_pending","evaluation_mode":"custom_harness",'
-            '"score_label":"Vibelution custom score"},'
-            '"cases":[{"case_id":"tb2","official_runner":"harbor_pending",'
-            '"requires_official_task_environment":false}]}'
-        ),
-        encoding="utf-8",
+    _write_custom_terminal_bench_bundle(tmp_path)
+    monkeypatch.setattr(service, "_runtime_manager_live_control_enabled", lambda: False)
+    monkeypatch.setattr(
+        "core.evaluation.supervised_workbench.preflight_environment_contract",
+        lambda *args, **kwargs: {
+            "status": "missing_verifier_dependency",
+            "available": False,
+            "missing": [],
+            "official_verifier": {
+                "missing": [{"name": "docker daemon", "available": False}],
+                "available": False,
+            },
+        },
     )
+
+    with pytest.raises(service.SupervisedRunValidationError, match="docker daemon"):
+        service.start_supervised_run(
+            {
+                "sourceKind": "bundle",
+                "bundleName": "terminal_bench_core_v1",
+                "mentalModelMode": "disabled",
+            }
+        )
+
+
+def test_start_supervised_run_allows_custom_terminal_bench_bundle_when_environment_ready(
+    monkeypatch,
+    tmp_path,
+):
+    monkeypatch.setattr(service, "PROJECT_ROOT", tmp_path)
+    _write_custom_terminal_bench_bundle(tmp_path)
     monkeypatch.setattr(service, "_runtime_manager_live_control_enabled", lambda: False)
     monkeypatch.setattr(service.shutil, "which", lambda name: None)
     monkeypatch.setattr(service, "_docker_daemon_available", lambda: False)
+    monkeypatch.setattr(
+        "core.evaluation.supervised_workbench.preflight_environment_contract",
+        lambda *args, **kwargs: {
+            "status": "available",
+            "available": True,
+            "missing": [],
+            "official_verifier": {"missing": [], "available": True},
+        },
+    )
     monkeypatch.setattr(service, "supervised_agent_bindings", _valid_agent_bindings)
     monkeypatch.setattr(service, "_RUN_EXECUTOR", _ImmediateExecutor())
     calls: list[object] = []
@@ -680,17 +754,7 @@ def test_retry_supervised_run_allows_custom_terminal_bench_bundle(monkeypatch, t
     decision_path = tmp_path / "workspace" / "supervised_evolution" / "decisions" / "supervised_old.json"
     decision_path.parent.mkdir(parents=True)
     decision_path.write_text('{"baseline_runs":[],"candidate_runs":[]}', encoding="utf-8")
-    bundle_path = tmp_path / "workspace" / "evaluation" / "bundles" / "terminal_bench_core_v1.json"
-    bundle_path.parent.mkdir(parents=True, exist_ok=True)
-    bundle_path.write_text(
-        (
-            '{"bundle_name":"terminal_bench_core_v1",'
-            '"dataset":{"official_verifier_status":"harbor_pending","evaluation_mode":"custom_harness"},'
-            '"cases":[{"case_id":"tb2","official_runner":"harbor_pending",'
-            '"requires_official_task_environment":false}]}'
-        ),
-        encoding="utf-8",
-    )
+    _write_custom_terminal_bench_bundle(tmp_path)
     source_run_id = "web-supervised-old"
     service.persist_manager_run_snapshot(
         "supervised",
@@ -706,6 +770,15 @@ def test_retry_supervised_run_allows_custom_terminal_bench_bundle(monkeypatch, t
     monkeypatch.setattr(service, "_runtime_manager_live_control_enabled", lambda: False)
     monkeypatch.setattr(service.shutil, "which", lambda name: None)
     monkeypatch.setattr(service, "_docker_daemon_available", lambda: False)
+    monkeypatch.setattr(
+        "core.evaluation.supervised_workbench.preflight_environment_contract",
+        lambda *args, **kwargs: {
+            "status": "available",
+            "available": True,
+            "missing": [],
+            "official_verifier": {"missing": [], "available": True},
+        },
+    )
     monkeypatch.setattr(service, "supervised_agent_bindings", _valid_agent_bindings)
     monkeypatch.setattr(service, "_RUN_EXECUTOR", _ImmediateExecutor())
     calls: list[object] = []

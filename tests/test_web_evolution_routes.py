@@ -727,6 +727,16 @@ def test_evolution_workbench_route_exposes_dataset_choices_and_saved_state(tmp_p
     _reset_supervised_live_state()
     monkeypatch.setattr(evolution_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(supervised_control_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        "core.evaluation.dataset_adapters.preflight_environment_contract",
+        lambda *args, **kwargs: {
+            "status": "available",
+            "available": True,
+            "checked": [],
+            "missing": [],
+            "official_verifier": {"missing": [], "available": True},
+        },
+    )
 
     response = client.get("/api/evolution/workbench")
 
@@ -1183,6 +1193,16 @@ def test_workbench_dataset_list_backfills_new_builtin_datasets(tmp_path, monkeyp
         encoding="utf-8",
     )
     monkeypatch.setattr(evolution_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        "core.evaluation.dataset_adapters.preflight_environment_contract",
+        lambda *args, **kwargs: {
+            "status": "available",
+            "available": True,
+            "checked": [],
+            "missing": [],
+            "official_verifier": {"missing": [], "available": True},
+        },
+    )
 
     response = client.get("/api/evolution/workbench")
 
