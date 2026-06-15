@@ -254,6 +254,10 @@ class TestInferToolBusinessSuccess:
     def test_error_prefix_is_failure(self):
         assert infer_tool_business_success("[错误] something failed") is False
 
+    def test_bom_prefixed_dict_status_is_business_failure(self):
+        assert infer_tool_business_success({"status": "\ufefffailed", "error": "policy limited"}) is False
+        assert infer_tool_business_success({"status": "\ufeffsuccess", "message": "ok"}) is True
+
     def test_bom_prefixed_string_status_is_business_failure(self):
         assert infer_tool_business_success("\ufeffblocked") is False
         assert infer_tool_business_success("\ufeffpolicy_blocked") is False
