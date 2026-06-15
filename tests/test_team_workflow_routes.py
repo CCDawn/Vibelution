@@ -488,14 +488,16 @@ def test_team_workflow_route_starts_research_stage_round(tmp_path, monkeypatch):
 
     assert response.status_code == 201, response.text
     assert response.json()["created"] is True
-    assert response.json()["stageRound"]["status"] == "needs_attention"
+    assert response.json()["stageRound"]["status"] == "running"
     assert response.json()["stageRound"]["sourceRunIds"] == [response.json()["run"]["runId"]]
     assert response.json()["sourceCollectionSearchExecution"]["accepted"] is True
     assert response.json()["sourceCollectionSearchExecution"]["executionMode"] == "background"
     assert search_calls[0]["runId"] == response.json()["run"]["runId"]
     assert response.json()["stageRound"]["teamMemoryRecord"]["recordKind"] == "team_workflow_stage_record"
-    assert response.json()["stageRound"]["coordinationContract"]["autoStarted"] is True
+    assert response.json()["stageRound"]["coordinationContract"]["autoStarted"] is False
+    assert response.json()["stageRound"]["coordinationContract"]["trigger"] == "manual"
     assert response.json()["stageRound"]["coordinationContract"]["startResult"]["started"] is False
+    assert response.json()["stageRound"]["coordinationContract"]["startResult"]["skipReason"] == "manual_only"
     assert response.json()["searchPlan"]["boundaries"]["externalSearchTriggered"] is False
     assert status_response.status_code == 200, status_response.text
     assert status_response.json()["phases"][0]["activeRoundId"] == response.json()["stageRound"]["stageRoundId"]
