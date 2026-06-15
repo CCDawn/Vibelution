@@ -61,10 +61,7 @@
 }
 
 .currentSessionLine {
-  margin-top: 0;
-  font-size: 0.67rem;
-  line-height: 1.18;
-  -webkit-line-clamp: 1;
+  display: none;
 }
 
 .blockEyebrow {
@@ -328,23 +325,40 @@
 }
 
 .currentSessionMetaList {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1fr);
   gap: 3px;
   margin-top: 0;
 }
 
 .currentSessionMetaList .inlineMetaPill {
-  grid-template-columns: minmax(0, 0.72fr) minmax(0, 1fr);
-  gap: 4px;
-  min-height: 20px;
+  grid-template-columns: minmax(52px, 0.42fr) minmax(0, 1fr);
+  align-items: baseline;
+  gap: 5px;
+  min-height: 22px;
   padding: 2px 4px;
   border-radius: 6px;
   font-size: 0.65rem;
 }
 
+.currentSessionMetaList .inlineMetaPill span,
+.currentSessionMetaList .inlineMetaPill strong {
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.currentSessionMetaList .inlineMetaPill span {
+  line-height: 1.08;
+}
+
 .currentSessionMetaList .inlineMetaPill strong {
   font-size: 0.65rem;
-  line-height: 1.12;
+  line-height: 1.1;
+}
+
+.contextLineCompact.currentSessionLine {
+  display: none;
 }
 
 .sessionBindingNotice {
@@ -570,9 +584,225 @@
 .cacheStatusCard,
 .compressionStatusCard,
 .compressionStrategyCard,
+.tokenCompressionCard,
 .runModeBlock {
   display: grid;
   gap: 6px;
+}
+
+.tokenCompressionCard {
+  padding: 6px;
+}
+
+.tokenCompressionTable {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.tokenCompressionRow {
+  display: grid;
+  grid-template-columns: 43px minmax(0, 1fr);
+  grid-template-areas:
+    "label value"
+    "label meta";
+  align-items: baseline;
+  gap: 1px 6px;
+  min-width: 0;
+  min-height: 27px;
+  padding: 3px 5px;
+  border: 1px solid color-mix(in srgb, var(--accent-cool) 14%, var(--border-soft));
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--surface-card) 70%, transparent);
+  font-size: 0.65rem;
+  line-height: 1.15;
+}
+
+.tokenCompressionRow span,
+.tokenCompressionRow strong,
+.tokenCompressionRow small {
+  min-width: 0;
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.tokenCompressionRow span {
+  grid-area: label;
+  align-self: center;
+  color: var(--fg-tertiary);
+  font-weight: 620;
+  white-space: nowrap;
+}
+
+.tokenCompressionRow strong {
+  grid-area: value;
+  color: var(--fg-primary);
+  font-weight: 760;
+}
+
+.tokenCompressionRow small {
+  grid-area: meta;
+  color: var(--fg-secondary);
+  font-size: 0.61rem;
+}
+
+.tokenCompressionVisuals {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.tokenCompressionMiniPanel {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 5px;
+  border: 1px solid var(--border-soft);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--surface-card) 58%, transparent);
+}
+
+.tokenCompressionMiniHeader {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  font-size: 0.62rem;
+  line-height: 1.05;
+}
+
+.tokenCompressionMiniHeader span,
+.tokenCompressionMiniHeader strong {
+  min-width: 0;
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+}
+
+.tokenCompressionMiniHeader span {
+  color: var(--fg-tertiary);
+  font-weight: 650;
+}
+
+.tokenCompressionMiniHeader strong {
+  color: var(--fg-primary);
+  font-weight: 800;
+}
+
+.tokenCompressionCard .contextCompositionPanel {
+  gap: 4px;
+  padding-top: 0;
+}
+
+.tokenCompressionCard .contextCompositionItem {
+  gap: 3px;
+}
+
+.tokenCompressionCard .contextCompositionBar {
+  height: 6px;
+}
+
+.tokenCompressionCard .contextCompositionLegend {
+  gap: 4px 6px;
+  font-size: 0.58rem;
+}
+
+.tokenCompressionCard .contextCompositionLegend span {
+  max-width: none;
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.tokenCompressionCard .cacheDonutPanel {
+  grid-template-columns: 58px minmax(0, 1fr);
+  gap: 6px;
+}
+
+.tokenCompressionCard .cacheDonutTrigger,
+.tokenCompressionCard .cacheDonutShell,
+.tokenCompressionCard .cacheDonutSvg {
+  width: 58px;
+  height: 58px;
+}
+
+.tokenCompressionCard .cacheDonutShell {
+  min-width: 58px;
+}
+
+.tokenCompressionCard .cacheDonutCenter {
+  inset: 16px;
+}
+
+.tokenCompressionCard .cacheDonutCenter strong {
+  font-size: 0.7rem;
+}
+
+.tokenCompressionCard .cacheDonutCenter span,
+.tokenCompressionCard .cacheDonutCenter small {
+  max-width: 30px;
+  font-size: 0.46rem;
+}
+
+.tokenCompressionCard .cacheDonutStats {
+  gap: 2px;
+  font-size: 0.58rem;
+}
+
+.tokenCompressionCard .cacheDonutStats span {
+  grid-template-columns: 24px minmax(0, 1fr);
+  gap: 4px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.tokenCompressionStrategyStrip {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 3px;
+  min-width: 0;
+}
+
+.tokenCompressionCard .compressionStrategyRow {
+  min-height: 27px;
+  padding: 3px 4px;
+  border-color: color-mix(in srgb, var(--accent-warm-2) 18%, var(--border-soft));
+  font-size: 0.6rem;
+}
+
+.tokenCompressionCard .compressionStrategyRow strong,
+.tokenCompressionCard .compressionStrategyRow span {
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.tokenCompressionCard .detailNote {
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 6px;
+  margin-top: 0;
+  overflow: hidden;
+  font-size: 0.62rem;
+  line-height: 1.15;
+}
+
+.tokenCompressionCard .detailNote span,
+.tokenCompressionCard .detailNote strong {
+  min-width: 0;
+}
+
+.tokenCompressionCard .detailNote strong {
+  overflow: visible;
+  color: var(--fg-secondary);
+  font-weight: 650;
+  text-overflow: clip;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .contextStatusCard .contextCompositionPanel {
@@ -795,8 +1025,7 @@
 }
 
 .featureChipActive {
-  border-color: color-mix(in srgb, var(--accent-cool) 42%, var(--border-soft));
-  background: color-mix(in srgb, var(--accent-cool) 15%, var(--surface-card));
+  border-color: color-mix(in srgb, var(--accent-cool) 34%, var(--border-soft));
   color: var(--fg-primary);
 }
 
@@ -806,8 +1035,7 @@
 }
 
 .featureChipPrimary.featureChipActive {
-  border-color: color-mix(in srgb, var(--accent-warm) 46%, var(--border-soft));
-  background: color-mix(in srgb, var(--accent-warm) 16%, var(--surface-card));
+  border-color: color-mix(in srgb, var(--accent-warm) 36%, var(--border-soft));
 }
 
 .featureChipPrimary.featureChipActive span {
@@ -2126,7 +2354,7 @@
 
 .cliAgentTerminalCommand {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-columns: auto minmax(0, 1fr) auto;
   gap: 8px;
   align-items: center;
   min-height: 34px;
@@ -2146,6 +2374,36 @@
   color: #a9f0ce;
   font-weight: 780;
   white-space: nowrap;
+}
+
+.cliAgentTerminalAction {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  width: fit-content;
+  min-width: 0;
+  height: 24px;
+  padding: 0 8px;
+  border: 1px solid rgba(122, 202, 169, 0.32);
+  border-radius: 6px;
+  color: #bdf6dc;
+  background: rgba(14, 58, 45, 0.7);
+  font-family: inherit;
+  font-size: 0.74rem;
+  font-weight: 760;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.cliAgentTerminalAction:hover:not(:disabled) {
+  border-color: rgba(189, 246, 220, 0.58);
+  background: rgba(20, 88, 68, 0.82);
+}
+
+.cliAgentTerminalAction:disabled {
+  cursor: wait;
+  opacity: 0.58;
 }
 
 .cliAgentTerminalCommand code {

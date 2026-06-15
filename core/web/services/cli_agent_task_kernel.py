@@ -75,6 +75,10 @@ def submit_cli_agent_task(
         normalized_task,
         completion_marker=str(task_state.get("completionMarker") or ""),
     )
+    with _TASK_LOCK:
+        task_state = _read_task_state(str(task_state.get("taskId") or "")) or task_state
+        task_state["sentInput"] = payload
+        _write_task_state(task_state)
     try:
         from . import cli_agent_terminal_service
 
@@ -220,17 +224,19 @@ def _task_timeout_or_idle_status(task_state: dict[str, Any], *, now: float) -> s
         1,
         cli_agent_service.MAX_TIMEOUT_SECONDS,
     )
-    if created_epoch and now - created_epoch >= timeout_seconds:
+    if created_epoch is not None and now - created_epoch >= timeout_seconds:
         return "timeout"
     adapter_id = str(task_state.get("adapterId") or "").strip()
     protocol = protocols.protocol_for_adapter(adapter_id)
     if not str(task_state.get("output") or "").strip():
         return ""
-    if protocol.marker_completion_required:
+    if protocol.marker_completion_required and not protocol.allow_idle_completion_with_marker:
         return ""
-    if created_epoch and now - created_epoch < protocol.min_completion_seconds:
+    if protocol.marker_completion_required and not _task_has_non_echo_output(task_state):
         return ""
-    if last_output_epoch and now - last_output_epoch >= protocol.idle_completion_seconds:
+    if created_epoch is not None and now - created_epoch < protocol.min_completion_seconds:
+        return ""
+    if last_output_epoch is not None and now - last_output_epoch >= protocol.idle_completion_seconds:
         return "completed"
     return ""
 
@@ -421,6 +427,24 @@ def _task_result_source(task_state: dict[str, Any]) -> str:
     return "terminal_output"
 
 
+def _task_has_non_echo_output(task_state: dict[str, Any]) -> bool:
+    output = _normalize_echo_comparison_text(str(task_state.get("output") or ""))
+    if not output:
+        return False
+    sent_input = _normalize_echo_comparison_text(str(task_state.get("sentInput") or ""))
+    if sent_input and (output == sent_input or output in sent_input):
+        return False
+    task = _normalize_echo_comparison_text(str(task_state.get("task") or ""))
+    if task and output == task:
+        return False
+    return True
+
+
+def _normalize_echo_comparison_text(text: str) -> str:
+    cleaned = protocols.remove_protocol_markers(protocols.strip_terminal_controls(str(text or "")))
+    return " ".join(cleaned.split()).strip()
+
+
 def _semantic_task_status(status: str, code: str) -> str:
     normalized = str(status or "").strip().lower()
     normalized_code = str(code or "").strip()
@@ -473,7 +497,10 @@ def _active_task_for_terminal(terminal_session_id: str) -> dict[str, Any]:
     ]
     if not candidates:
         return {}
-    candidates.sort(key=lambda item: _parse_iso_epoch(str(item.get("updatedAt") or item.get("createdAt") or "")), reverse=True)
+    candidates.sort(
+        key=lambda item: _parse_iso_epoch(str(item.get("updatedAt") or item.get("createdAt") or "")) or 0.0,
+        reverse=True,
+    )
     return dict(candidates[0])
 
 
@@ -535,14 +562,14 @@ def _error_result(code: str, message: str, *, adapter_id: str = "") -> dict[str,
     }
 
 
-def _parse_iso_epoch(value: str) -> float:
+def _parse_iso_epoch(value: str) -> float | None:
     text = str(value or "").strip()
     if not text:
-        return 0.0
+        return None
     try:
         return datetime.fromisoformat(text.replace("Z", "+00:00")).timestamp()
     except ValueError:
-        return 0.0
+        return None
 
 
 def _now_iso() -> str:
