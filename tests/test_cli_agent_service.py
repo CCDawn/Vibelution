@@ -5,6 +5,7 @@ from core.ui.chat_state import build_chat_state, load_chat_state, save_chat_stat
 from core.web.services import cli_agent_service as service
 from core.web.services import cli_agent_terminal_service as terminal_service
 from core.web.services import session_service
+from core.web.services.terminal_screen_buffer import TerminalScreenBuffer
 
 
 def _configure_roots(monkeypatch, tmp_path):
@@ -1303,6 +1304,99 @@ def test_cli_agent_terminal_unsafe_tui_snapshot_keeps_screen_replay(tmp_path):
     assert snapshot["transcriptTailRenderReason"] == "unsafe_tui_control_tail"
     assert snapshot["screenReplay"].startswith("\x1b[2J\x1b[H")
     assert "结论：模块拆分未完成" in snapshot["screenText"]
+
+
+def test_cli_agent_terminal_unsafe_tui_snapshot_strips_leading_csi_fragment(tmp_path):
+    transcript = tmp_path / "terminal.log"
+    cursor_noise = "".join(f"\x1b[{row};5H" for row in range(1, 28))
+    transcript.write_text(
+        "2026h" + cursor_noise + "\x1b[2J\x1b[3;4H结论：模块拆分未完成",
+        encoding="utf-8",
+    )
+
+    snapshot = terminal_service._read_transcript_snapshot(transcript, limit=120000, rows=10, cols=40)
+
+    assert snapshot["transcriptTailReplayable"] is False
+    assert "2026h" not in snapshot["screenText"]
+    assert "结论：模块拆分未完成" in snapshot["screenText"]
+
+
+def test_cli_agent_terminal_unsafe_tui_snapshot_strips_leading_parameter_fragment(tmp_path):
+    transcript = tmp_path / "terminal.log"
+    cursor_noise = "".join(f"\x1b[{row};5H" for row in range(1, 28))
+    transcript.write_text(
+        ";10;1\n" + cursor_noise + "\x1b[2J\x1b[3;4H结论：模块拆分未完成",
+        encoding="utf-8",
+    )
+
+    snapshot = terminal_service._read_transcript_snapshot(transcript, limit=120000, rows=10, cols=40)
+
+    assert snapshot["transcriptTailReplayable"] is False
+    assert ";10;1" not in snapshot["screenText"]
+    assert "结论：模块拆分未完成" in snapshot["screenText"]
+
+
+def test_terminal_screen_buffer_keeps_split_escape_sequences_out_of_screen_text():
+    buffer = TerminalScreenBuffer(rows=8, cols=40)
+
+    buffer.feed("\x1b[?")
+    snapshot = buffer.feed("2026h")
+    assert snapshot.text == ""
+
+    buffer.feed("\x1b[2")
+    buffer.feed("J\x1b[3;")
+    snapshot = buffer.feed("4H结论：模块拆分未完成")
+
+    assert "2026h" not in snapshot.text
+    assert "3;4H" not in snapshot.text
+    assert "结论：模块拆分未完成" in snapshot.text
+
+    snapshot = buffer.feed("\x1b[>4;1m可读内容")
+    assert ">4;1m" not in snapshot.text
+    assert "可读内容" in snapshot.text
+
+
+def test_cli_agent_terminal_preserves_current_screen_when_transcript_snapshot_is_empty(tmp_path):
+    transcript = tmp_path / "terminal.log"
+    transcript.write_text("\x1b[?2026h\x1b[?25l\x1b[57;6H\x1b[?25h\x1b[?2026l" * 40, encoding="utf-8")
+    state = {
+        "screenText": "已有可见画面",
+        "screenReplay": "\x1b[2J\x1b[H已有可见画面",
+        "screenQuality": "screen_buffer",
+        "screenRows": 10,
+        "screenCols": 40,
+        "screenParserVersion": terminal_service.SCREEN_BUFFER_PARSER_VERSION,
+    }
+
+    merged = terminal_service._merge_transcript_snapshot(
+        state,
+        terminal_service._read_transcript_snapshot(transcript, limit=120000, rows=10, cols=40),
+    )
+
+    assert merged["transcriptTailReplayable"] is False
+    assert merged["screenText"] == "已有可见画面"
+    assert merged["screenParserVersion"] == terminal_service.SCREEN_BUFFER_PARSER_VERSION
+
+
+def test_cli_agent_terminal_discards_legacy_screen_when_transcript_snapshot_is_empty(tmp_path):
+    transcript = tmp_path / "terminal.log"
+    transcript.write_text("\x1b[?2026h\x1b[?25l\x1b[57;6H\x1b[?25h\x1b[?2026l" * 40, encoding="utf-8")
+    state = {
+        "screenText": "38;2;255;255;255m旧污染画面",
+        "screenReplay": "\x1b[2J\x1b[H38;2;255;255;255m旧污染画面",
+        "screenQuality": "screen_buffer",
+        "screenRows": 10,
+        "screenCols": 40,
+    }
+
+    merged = terminal_service._merge_transcript_snapshot(
+        state,
+        terminal_service._read_transcript_snapshot(transcript, limit=120000, rows=10, cols=40),
+    )
+
+    assert merged["transcriptTailReplayable"] is False
+    assert merged["screenText"] == ""
+    assert not terminal_service._screen_initial_text(state)
 
 
 def test_cli_agent_terminal_trims_large_tui_transcript(monkeypatch, tmp_path):
