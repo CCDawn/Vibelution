@@ -494,11 +494,13 @@ def create_key_tools() -> List[BaseTool]:
 
         Args:
             txn_id: 要关闭的事务 ID
-            status: success / failed / cancelled
+            status: success / failed / cancelled（其他值会被安全地回退为 success）
             summary: 本轮演化结果摘要
 
         Returns:
-            关闭结果 JSON
+            关闭结果 JSON，包含:
+            - status：工具执行返回码，成功关闭时固定为 "success"
+            - transaction_status：具体的事务关账状态（success/failed/cancelled）
         """
         return _close_evolution_transaction_impl(txn_id=txn_id, status=status, summary=summary)
 

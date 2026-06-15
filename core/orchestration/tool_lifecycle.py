@@ -26,6 +26,10 @@ ToolGuardFn = Callable[[str, dict], Optional[str]]
 ToolResultObserverFn = Callable[[Dict[str, Any], Any, Optional[str]], None]
 
 
+def _coerce_result_status(value: Any) -> str:
+    return str(value or "").lstrip("\ufeff").strip().lower()
+
+
 class ToolLifecycleBridge:
     """负责工具调用的执行、结果回写与生命周期动作派生。"""
 
@@ -185,13 +189,26 @@ class ToolLifecycleBridge:
         """根据工具结果推导生命周期动作。"""
         if tool_name != "close_evolution_transaction_tool":
             return None
-        try:
-            payload = json.loads(str(result or ""))
-        except Exception:
+        payload: dict[str, Any] | None
+        if isinstance(result, dict):
+            payload = result
+        elif isinstance(result, (bytes, bytearray)):
+            try:
+                payload = json.loads(result.decode("utf-8", errors="replace").lstrip("\ufeff").strip())
+            except Exception:
+                return None
+        else:
+            try:
+                payload = json.loads(str(result or "").lstrip("\ufeff").strip())
+            except Exception:
+                return None
+        if not isinstance(payload, dict):
             return None
-        if str(payload.get("status") or "").strip().lower() != "success":
+        status = _coerce_result_status(payload.get("status"))
+        transaction_status = _coerce_result_status(payload.get("transaction_status"))
+        if status not in {"success", "ok"}:
             return None
-        if str(payload.get("transaction_status") or "").strip().lower() != "success":
+        if transaction_status not in {"success", "ok"}:
             return None
         if post_close_action_pending:
             _debug_logger.info(

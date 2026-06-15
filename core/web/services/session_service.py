@@ -6409,8 +6409,6 @@ def _build_session_summary(conversation: dict[str, Any], *, hydrate_agent: bool 
         "agentDirectSessionMismatch": agent_direct_session_mismatch,
         "agentPrimaryDirectSessionId": agent_primary_direct_session_id,
         "dialogueModelId": dialogue_model_id,
-        "agentPrimaryDirectSessionId": agent_primary_direct_session_id,
-        "agentDirectSessionMismatch": agent_direct_session_mismatch,
         "workspacePath": str(conversation.get("workspacePath") or _session_workspace_relative_path(conversation["id"])),
         "agentWorkspacePath": agent_workspace_path,
         **agent_status,

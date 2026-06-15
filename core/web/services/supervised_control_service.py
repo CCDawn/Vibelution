@@ -1180,6 +1180,9 @@ def _build_completed_file_supervised_run_snapshot_if_closed_successfully(
 
 
 def _snapshot_has_successful_transaction_close(snapshot: dict[str, Any]) -> bool:
+    def normalize_status(value: Any) -> str:
+        return str(value or "").lstrip("\ufeff").strip().lower()
+
     case_io = snapshot.get("currentCaseIo") if isinstance(snapshot.get("currentCaseIo"), dict) else {}
     for item in case_io.get("transcript") or []:
         if not isinstance(item, dict):
@@ -1188,20 +1191,27 @@ def _snapshot_has_successful_transaction_close(snapshot: dict[str, Any]) -> bool
             continue
         if str(item.get("label") or "").strip() != "close_evolution_transaction_tool":
             continue
-        status = str(item.get("status") or "").strip().lower()
+        status = normalize_status(item.get("status"))
         content = str(item.get("content") or "")
         if status and status not in {"success", "ok"}:
             continue
-        try:
-            payload = json.loads(content)
-        except json.JSONDecodeError:
+        raw_content = item.get("content")
+        if isinstance(raw_content, dict):
+            payload = raw_content
+        else:
+            try:
+                payload = json.loads(content.lstrip("\ufeff").strip())
+            except (TypeError, ValueError, json.JSONDecodeError):
+                payload = {}
+        if not isinstance(payload, dict):
             payload = {}
-        transaction_status = str(payload.get("transaction_status") or "").strip().lower()
-        tool_status = str(payload.get("status") or "").strip().lower()
-        if transaction_status == "success" or tool_status in {"success", "ok"}:
+        success_statuses = {"success", "ok"}
+        transaction_status = normalize_status(payload.get("transaction_status"))
+        tool_status = normalize_status(payload.get("status"))
+        if transaction_status in success_statuses or tool_status in {"success", "ok"}:
             return True
-        lowered = content.lower()
-        if '"transaction_status"' in lowered and '"success"' in lowered:
+        lowered = content.lower().replace("\ufeff", "")
+        if '"transaction_status"' in lowered and ('"success"' in lowered or '"ok"' in lowered):
             return True
     return False
 

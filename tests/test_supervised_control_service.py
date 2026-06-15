@@ -1134,6 +1134,57 @@ def test_runtime_manager_active_supervised_run_finishes_successfully_closed_stal
     assert persisted["eventTail"][-1]["event"] == "run_completed"
 
 
+def test_snapshot_has_successful_transaction_close_accepts_bom_status():
+    snapshot = {
+        "currentCaseIo": {
+            "transcript": [
+                {
+                    "kind": "tool",
+                    "label": "close_evolution_transaction_tool",
+                    "status": "\ufeffsuccess",
+                    "content": '{"status":"\\ufeffsuccess","transaction_status":"\\ufeffsuccess","txn_id":"demo"}',
+                }
+            ]
+        }
+    }
+
+    assert service._snapshot_has_successful_transaction_close(snapshot) is True
+
+
+def test_snapshot_has_successful_transaction_close_accepts_ok_status():
+    snapshot = {
+        "currentCaseIo": {
+            "transcript": [
+                {
+                    "kind": "tool",
+                    "label": "close_evolution_transaction_tool",
+                    "status": "ok",
+                    "content": '{"status":"ok","transaction_status":"ok","txn_id":"demo"}',
+                }
+            ]
+        }
+    }
+
+    assert service._snapshot_has_successful_transaction_close(snapshot) is True
+
+
+def test_snapshot_has_successful_transaction_close_accepts_dict_content_payload():
+    snapshot = {
+        "currentCaseIo": {
+            "transcript": [
+                {
+                    "kind": "tool",
+                    "label": "close_evolution_transaction_tool",
+                    "status": "success",
+                    "content": {"status": "success", "transaction_status": "success", "txn_id": "demo"},
+                }
+            ]
+        }
+    }
+
+    assert service._snapshot_has_successful_transaction_close(snapshot) is True
+
+
 def test_force_cancel_active_supervised_runs_for_shutdown_releases_file_only_snapshot(monkeypatch):
     run_id = "web-supervised-shutdown-active"
     snapshot = {
