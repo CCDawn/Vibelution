@@ -1731,6 +1731,89 @@ def _frontend_build_preflight_commands() -> list[tuple[str, list[str]]]:
     ]
 
 
+def _npm_cli_script_for_node(node_command: str) -> str:
+    npm_command = shutil.which("npm.cmd" if os.name == "nt" else "npm") or shutil.which("npm")
+    candidates: list[Path] = []
+    if npm_command:
+        npm_path = Path(npm_command)
+        candidates.extend([npm_path.parent, npm_path.parent.parent])
+    if node_command:
+        node_path = Path(node_command)
+        candidates.extend([node_path.parent, node_path.parent.parent])
+    for root in candidates:
+        candidate = root / "node_modules" / "npm" / "bin" / "npm-cli.js"
+        if candidate.is_file():
+            return str(candidate)
+    return "npm.cmd" if os.name == "nt" else "npm"
+
+
+def _frontend_dependency_restore_command() -> tuple[str, list[str]]:
+    node_command = shutil.which("node.exe" if os.name == "nt" else "node")
+    if not node_command:
+        node_command = "node.exe" if os.name == "nt" else "node"
+    npm_cli_script = _npm_cli_script_for_node(node_command)
+    if npm_cli_script.endswith("npm-cli.js"):
+        return "node npm-cli.js install", [node_command, npm_cli_script, "install"]
+    return "npm install", [npm_cli_script, "install"]
+
+
+def _frontend_build_preflight_missing_dependency_entries(commands: list[tuple[str, list[str]]]) -> list[dict[str, str]]:
+    missing: list[dict[str, str]] = []
+    for label, command in commands:
+        if len(command) < 2:
+            continue
+        entrypoint = Path(str(command[1]))
+        if not entrypoint.is_file():
+            missing.append({"step": label, "path": str(entrypoint)})
+    return missing
+
+
+def _restore_frontend_dependencies_for_restart(command_id: str, missing_entries: list[dict[str, str]]) -> dict[str, Any]:
+    label, command = _frontend_dependency_restore_command()
+    try:
+        result = subprocess.run(
+            command,
+            cwd=str(PROJECT_ROOT / "web"),
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            timeout=_RESTART_BUILD_PREFLIGHT_TIMEOUT_SECONDS,
+            creationflags=_creation_flags(),
+            startupinfo=_hidden_startup_info(),
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        payload = {
+            "commandId": command_id,
+            "ok": False,
+            "step": label,
+            "errorType": type(exc).__name__,
+            "message": str(exc),
+            "missingEntries": missing_entries,
+        }
+        _append_event("workbench.restart.frontend_dependency_restore_failed", payload)
+        raise RuntimeError(
+            f"Restart preflight failed before closing the workbench during {label}: {type(exc).__name__}: {exc}"
+        ) from exc
+    payload = {
+        "commandId": command_id,
+        "ok": result.returncode == 0,
+        "returnCode": int(result.returncode),
+        "step": label,
+        "missingEntries": missing_entries,
+        "stdoutTail": str(result.stdout or "")[-1000:],
+        "stderrTail": str(result.stderr or "")[-1000:],
+    }
+    if result.returncode != 0:
+        _append_event("workbench.restart.frontend_dependency_restore_failed", payload)
+        raise RuntimeError(
+            "Restart preflight failed before closing the workbench.\n"
+            + _launcher_error_detail(result, "Frontend dependencies are missing and automatic restore failed.")
+        )
+    _append_event("workbench.restart.frontend_dependency_restore_succeeded", payload)
+    return payload
+
+
 def _latest_mtime(paths: list[Path]) -> float:
     latest = 0.0
     for path in paths:
@@ -1798,7 +1881,38 @@ def _preflight_frontend_build_for_restart(command_id: str) -> dict[str, Any]:
     stdout_parts: list[str] = []
     stderr_parts: list[str] = []
     completed_steps: list[str] = []
-    for label, command in _frontend_build_preflight_commands():
+    commands = _frontend_build_preflight_commands()
+    missing_entries = _frontend_build_preflight_missing_dependency_entries(commands)
+    if missing_entries:
+        _append_event(
+            "workbench.restart.frontend_dependencies_missing",
+            {
+                "commandId": command_id,
+                "ok": False,
+                "missingEntries": missing_entries,
+                "reason": "frontend build tool entrypoints are missing",
+            },
+        )
+        restore_payload = _restore_frontend_dependencies_for_restart(command_id, missing_entries)
+        completed_steps.append(str(restore_payload.get("step") or "npm install"))
+        commands = _frontend_build_preflight_commands()
+        missing_after_restore = _frontend_build_preflight_missing_dependency_entries(commands)
+        if missing_after_restore:
+            payload = {
+                "commandId": command_id,
+                "ok": False,
+                "startedAt": started_at,
+                "step": "frontend dependency restore verification",
+                "completedSteps": completed_steps,
+                "missingEntries": missing_after_restore,
+            }
+            _append_event("workbench.restart.build_preflight_failed", payload)
+            raise RuntimeError(
+                "Restart preflight failed before closing the workbench. "
+                "Frontend dependencies are still missing after automatic restore: "
+                + ", ".join(entry["path"] for entry in missing_after_restore)
+            )
+    for label, command in commands:
         try:
             result = subprocess.run(
                 command,
