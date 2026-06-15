@@ -1146,22 +1146,70 @@ function cacheDonutSegmentClass(keyOrStatus: string) {
   }
 }
 
-function cacheDonutComputedSegmentClass(key: string) {
-  switch (key) {
+function promptSegmentCategory(segment: Pick<SessionCacheCompositionSegment, "key" | "promptCategory">) {
+  const category = (segment.promptCategory || "").trim();
+  if (category) {
+    return category;
+  }
+  switch ((segment.key || "").trim()) {
+    case "system_prompt":
     case "system_prompt_overhead":
+      return "system_prompt";
+    case "agent_protocol":
+    case "agent_runtime":
+    case "prompt_template":
+      return "agent_spec";
+    case "project_rules":
+      return "developer_instructions";
+    case "tool_descriptions":
+      return "tool_descriptions";
+    case "tool_schema":
+      return "tool_schema";
+    case "provider_unmapped":
+      return "provider_unmapped";
+    case "current_user":
+      return "current_user";
+    case "history":
+      return "history";
+    case "active_task":
+      return "task_state";
+    case "guidance":
+      return "operator_guidance";
+    case "skill":
+    case "active_skill":
+      return "skill_context";
+    case "attachments":
+      return "attachments";
+    default:
+      return segment.key || "context";
+  }
+}
+
+function cachePromptSegmentClass(segment: Pick<SessionCacheCompositionSegment, "key" | "promptCategory">) {
+  switch (promptSegmentCategory(segment)) {
+    case "system_prompt":
       return styles.cacheDonutSegmentSystem;
+    case "agent_spec":
+    case "agent_context":
+      return styles.cacheDonutSegmentAgent;
+    case "developer_instructions":
+    case "project_context":
+      return styles.cacheDonutSegmentProjectRules;
+    case "tool_descriptions":
+      return styles.cacheDonutSegmentToolDescriptions;
+    case "tool_schema":
+      return styles.cacheDonutSegmentToolSchema;
+    case "provider_unmapped":
+      return styles.cacheDonutSegmentProviderUnmapped;
     case "current_user":
       return styles.cacheDonutSegmentUser;
     case "history":
       return styles.cacheDonutSegmentHistory;
-    case "active_task":
+    case "task_state":
       return styles.cacheDonutSegmentTask;
-    case "agent_context":
-      return styles.cacheDonutSegmentAgent;
-    case "guidance":
+    case "operator_guidance":
       return styles.cacheDonutSegmentGuidance;
-    case "skill":
-    case "active_skill":
+    case "skill_context":
       return styles.cacheDonutSegmentSkill;
     case "attachments":
       return styles.cacheDonutSegmentAttachments;
@@ -1170,22 +1218,31 @@ function cacheDonutComputedSegmentClass(key: string) {
   }
 }
 
-function computedCacheLegendSegmentClass(key: string) {
-  switch (key) {
-    case "system_prompt_overhead":
+function cachePromptLegendSegmentClass(segment: Pick<SessionCacheCompositionSegment, "key" | "promptCategory">) {
+  switch (promptSegmentCategory(segment)) {
+    case "system_prompt":
       return styles.contextCompositionSegmentSystem;
+    case "agent_spec":
+    case "agent_context":
+      return styles.contextCompositionSegmentAgent;
+    case "developer_instructions":
+    case "project_context":
+      return styles.contextCompositionSegmentProjectRules;
+    case "tool_descriptions":
+      return styles.contextCompositionSegmentToolDescriptions;
+    case "tool_schema":
+      return styles.contextCompositionSegmentToolSchema;
+    case "provider_unmapped":
+      return styles.contextCompositionSegmentProviderUnmapped;
     case "current_user":
       return styles.contextCompositionSegmentUser;
     case "history":
       return styles.contextCompositionSegmentHistory;
-    case "active_task":
+    case "task_state":
       return styles.contextCompositionSegmentTask;
-    case "agent_context":
-      return styles.contextCompositionSegmentAgent;
-    case "guidance":
+    case "operator_guidance":
       return styles.contextCompositionSegmentGuidance;
-    case "skill":
-    case "active_skill":
+    case "skill_context":
       return styles.contextCompositionSegmentSkill;
     case "attachments":
       return styles.contextCompositionSegmentAttachments;
@@ -1204,6 +1261,85 @@ function cacheCompositionSegmentLabel(key: string, fallback: string, t: (key: Tr
   const dictionaryKey = `cacheSegment_${key}` as TranslationKey;
   const translated = t(dictionaryKey);
   return translated === dictionaryKey ? (fallback || key) : translated;
+}
+
+function promptSegmentDisplayLabel(
+  segment: Pick<SessionCacheCompositionSegment, "key" | "label" | "promptCategory">,
+  lang: "zh" | "en",
+  t: (key: TranslationKey) => string,
+) {
+  const key = (segment.key || "").trim();
+  switch (key) {
+    case "system_prompt":
+    case "system_prompt_overhead":
+      return lang === "zh" ? "系统提示词" : "system prompt";
+    case "agent_protocol":
+      return lang === "zh" ? "Agent 规范" : "agent protocol";
+    case "tool_descriptions":
+      return lang === "zh" ? "工具描述" : "tool descriptions";
+    case "tool_schema":
+      return lang === "zh" ? "工具 schema" : "tool schema";
+    case "provider_unmapped":
+      return lang === "zh" ? "Provider 未映射" : "provider unmapped";
+    case "agent_runtime":
+      return lang === "zh" ? "Agent 运行规范" : "agent runtime rules";
+    case "prompt_template":
+      return lang === "zh" ? "Agent 提示模板" : "agent prompt template";
+    case "project_rules":
+      return lang === "zh" ? "项目规范" : "project rules";
+    case "research_organization":
+      return lang === "zh" ? "研究组织上下文" : "research organization context";
+    case "project_agent_registry":
+      return lang === "zh" ? "Agent registry" : "agent registry";
+    case "agent_messages":
+      return lang === "zh" ? "Agent 消息" : "agent messages";
+    case "provider_extra_hit":
+      return lang === "zh" ? "厂商额外命中" : "provider extra";
+    default:
+      return contextCompositionSegmentLabel(key, segment.label || key, t);
+  }
+}
+
+function promptSegmentCategoryLabel(segment: Pick<SessionCacheCompositionSegment, "key" | "promptCategory">, lang: "zh" | "en") {
+  switch (promptSegmentCategory(segment)) {
+    case "system_prompt":
+      return lang === "zh" ? "系统" : "system";
+    case "agent_spec":
+    case "agent_context":
+      return lang === "zh" ? "Agent 规范" : "agent spec";
+    case "developer_instructions":
+      return lang === "zh" ? "项目/开发规范" : "developer rules";
+    case "project_context":
+      return lang === "zh" ? "项目上下文" : "project context";
+    case "tool_descriptions":
+      return lang === "zh" ? "工具描述" : "tool descriptions";
+    case "tool_schema":
+      return lang === "zh" ? "工具 schema" : "tool schema";
+    case "provider_unmapped":
+      return lang === "zh" ? "未映射" : "unmapped";
+    case "history":
+      return lang === "zh" ? "历史" : "history";
+    case "current_user":
+      return lang === "zh" ? "本轮输入" : "current input";
+    case "operator_guidance":
+      return lang === "zh" ? "操作指导" : "guidance";
+    case "skill_context":
+      return lang === "zh" ? "技能上下文" : "skill context";
+    case "attachments":
+      return lang === "zh" ? "附件" : "attachments";
+    default:
+      return lang === "zh" ? "上下文" : "context";
+  }
+}
+
+function promptSegmentAccuracyLabel(segment: Pick<SessionCacheCompositionSegment, "accuracy" | "estimated">, lang: "zh" | "en") {
+  if (segment.estimated || segment.accuracy === "estimated") {
+    return lang === "zh" ? "估算" : "estimated";
+  }
+  if (segment.accuracy === "manifest") {
+    return lang === "zh" ? "manifest" : "manifest";
+  }
+  return "";
 }
 
 function cacheObservedStatusLabel(status: string | undefined, lang: "zh" | "en") {
@@ -1240,6 +1376,42 @@ function cacheComputedStatusLabel(status: string | undefined, lang: "zh" | "en")
     default:
       return status || (lang === "zh" ? "未知" : "unknown");
   }
+}
+
+function cacheCalibrationSummaryLabel(
+  status: string,
+  reason: string,
+  overestimatedTokens: number,
+  extraCachedTokens: number,
+  numberFormatter: Intl.NumberFormat,
+  lang: "zh" | "en",
+) {
+  const normalizedStatus = (status || "").trim();
+  const normalizedReason = (reason || "").trim();
+  const providerName = /xiaomi|mimo/i.test(normalizedReason)
+    ? "Xiaomi/MiMo"
+    : /qwen/i.test(normalizedReason)
+      ? "Qwen"
+      : /openai|gpt/i.test(normalizedReason)
+        ? "OpenAI"
+        : lang === "zh" ? "厂商" : "provider";
+  if (normalizedStatus === "aligned") {
+    return lang === "zh" ? `${providerName} 真实命中与计算预测一致` : `${providerName} observed hits match computed estimate`;
+  }
+  if (normalizedStatus === "not_available") {
+    return lang === "zh" ? "厂商没有返回真实缓存字段，本面板仅展示计算预测" : "Provider cache fields were not returned; showing computed estimate only";
+  }
+  if (overestimatedTokens > 0) {
+    return lang === "zh"
+      ? `${providerName} 真实命中低于计算预测，预测未兑现 ${numberFormatter.format(overestimatedTokens)} tokens`
+      : `${providerName} observed hits are below computed estimate by ${numberFormatter.format(overestimatedTokens)} tokens`;
+  }
+  if (extraCachedTokens > 0) {
+    return lang === "zh"
+      ? `${providerName} 返回了计算分段外的额外命中 ${numberFormatter.format(extraCachedTokens)} tokens`
+      : `${providerName} reported ${numberFormatter.format(extraCachedTokens)} extra cached tokens outside mapped segments`;
+  }
+  return lang === "zh" ? "已按厂商返回的真实缓存字段校准" : "Calibrated with provider-reported cache fields";
 }
 
 function contextWindowSegmentWidth(value: number, total: number) {
@@ -4092,6 +4264,14 @@ export function ChatCodingRoute() {
   const cacheCalibrationReason = lastCacheComposition?.calibrationReason || "";
   const cacheComputedOverestimatedInputTokens = Math.max(0, lastCacheComposition?.computedOverestimatedInputTokens ?? 0);
   const cacheProviderExtraCachedInputTokens = Math.max(0, lastCacheComposition?.providerExtraCachedInputTokens ?? 0);
+  const cacheCalibrationSummaryText = cacheCalibrationSummaryLabel(
+    cacheCalibrationStatus,
+    cacheCalibrationReason,
+    cacheComputedOverestimatedInputTokens,
+    cacheProviderExtraCachedInputTokens,
+    numberFormatter,
+    lang,
+  );
   const trueCacheDonutSegments = useMemo(
     () => buildCacheDonutSegments(
       [
@@ -4121,12 +4301,9 @@ export function ChatCodingRoute() {
     return segments
       .filter((segment: SessionCacheCompositionSegment) => (segment.tokens ?? 0) > 0 || segment.key === "computed_missing")
       .map((segment) => {
-        const translatedLabel = segment.key === "system_prompt_overhead"
-          ? (lang === "zh" ? "system / tools" : "system / tools")
-          : contextCompositionSegmentLabel(segment.key, segment.label, t);
         return {
           ...segment,
-          label: translatedLabel,
+          label: promptSegmentDisplayLabel(segment, lang, t),
         };
       });
   }, [lang, lastCacheComposition, t]);
@@ -4142,14 +4319,9 @@ export function ChatCodingRoute() {
     return segments
       .filter((segment: SessionCacheCompositionSegment) => (segment.tokens ?? 0) > 0 || segment.key === "computed_missing")
       .map((segment) => {
-        const translatedLabel = segment.key === "system_prompt_overhead"
-          ? (lang === "zh" ? "system / tools" : "system / tools")
-          : segment.key === "provider_extra_hit"
-            ? (lang === "zh" ? "provider extra" : "provider extra")
-          : contextCompositionSegmentLabel(segment.key, segment.label, t);
         return {
           ...segment,
-          label: translatedLabel,
+          label: promptSegmentDisplayLabel(segment, lang, t),
         };
       });
   }, [computedCacheCompositionSegments, lang, lastCacheComposition, t]);
@@ -6030,7 +6202,7 @@ export function ChatCodingRoute() {
                         {cachePromptDonutSegments.map((segment, index) => (
                           <circle
                             key={`computed-${segment.key}-${segment.status}-${index}`}
-                            className={`${styles.cacheDonutSegment} ${styles.cacheDonutOuterSegment} ${cacheDonutComputedSegmentClass(segment.key)}`}
+                            className={`${styles.cacheDonutSegment} ${styles.cacheDonutOuterSegment} ${cachePromptSegmentClass(segment)}`}
                             cx="50"
                             cy="50"
                             r="42"
@@ -6081,7 +6253,7 @@ export function ChatCodingRoute() {
                           key={`${segment.key}-${segment.status}-${index}-legend`}
                           title={cacheDonutSegmentTitle(segment, cachePromptCompositionTotalTokens, numberFormatter, lang)}
                         >
-                          <i className={computedCacheLegendSegmentClass(segment.key)} />
+                          <i className={cachePromptLegendSegmentClass(segment)} />
                           {segment.key === "computed_missing" ? cacheCompositionSegmentLabel("missing", segment.label, t) : segment.label}
                           {" "}
                           {segment.key === "computed_missing" ? "" : numberFormatter.format(segment.tokens ?? 0)}
@@ -7518,11 +7690,9 @@ export function ChatCodingRoute() {
             </div>
 
             {cacheCalibrationReason || cacheComputedOverestimatedInputTokens > 0 || cacheProviderExtraCachedInputTokens > 0 ? (
-              <div className={styles.cacheDetailCalibrationNote}>
+              <div className={styles.cacheDetailCalibrationNote} title={cacheCalibrationReason || cacheCalibrationSummaryText}>
                 <strong>{lang === "zh" ? "厂商校准" : "Provider calibration"}</strong>
-                <span>
-                  {cacheCalibrationReason || (lang === "zh" ? "已按厂商返回的真实缓存字段校准。" : "Calibrated with provider-reported cache fields.")}
-                </span>
+                <span>{cacheCalibrationSummaryText}</span>
                 <em>
                   {cacheComputedOverestimatedInputTokens > 0 ? `${lang === "zh" ? "预测未兑现" : "predicted not observed"} ${numberFormatter.format(cacheComputedOverestimatedInputTokens)}` : ""}
                   {cacheComputedOverestimatedInputTokens > 0 && cacheProviderExtraCachedInputTokens > 0 ? " · " : ""}
@@ -7544,7 +7714,7 @@ export function ChatCodingRoute() {
                     {cachePromptDonutSegments.map((segment, index) => (
                       <circle
                         key={`detail-computed-${segment.key}-${segment.status}-${index}`}
-                        className={`${styles.cacheDonutSegment} ${styles.cacheDonutOuterSegment} ${cacheDonutComputedSegmentClass(segment.key)}`}
+                        className={`${styles.cacheDonutSegment} ${styles.cacheDonutOuterSegment} ${cachePromptSegmentClass(segment)}`}
                         cx="50"
                         cy="50"
                         r="42"
@@ -7569,13 +7739,16 @@ export function ChatCodingRoute() {
                       </circle>
                     ))}
                   </svg>
-                  <div className={`${styles.cacheDonutCenter} ${styles.cacheDetailDonutCenter}`} title={cacheCompositionTitle}>
-                    <strong>{cacheCompositionPercent}%</strong>
-                    <span>{cacheCompositionComputedLabel} {computedCacheCompositionPercent}%</span>
-                    <small>{cacheCompositionAverageLabel} {cacheCompositionAverageValue}</small>
-                  </div>
+                <div className={`${styles.cacheDonutCenter} ${styles.cacheDetailDonutCenter}`} title={cacheCompositionTitle}>
+                  <strong>{cacheCompositionPercent}%</strong>
+                  <span>{cacheCompositionComputedLabel} {computedCacheCompositionPercent}%</span>
+                  <small>{cacheCompositionAverageLabel} {cacheCompositionAverageValue}</small>
                 </div>
-                <p>{cacheCompositionTitle}</p>
+              </div>
+                <div className={styles.cacheDetailDonutLegend}>
+                  <span><b>{lang === "zh" ? "外环" : "outer"}</b>{lang === "zh" ? "提示词来源" : "prompt sources"}</span>
+                  <span><b>{lang === "zh" ? "内环" : "inner"}</b>{lang === "zh" ? "厂商真实命中" : "provider hits"}</span>
+                </div>
               </div>
 
               <div className={styles.cacheDetailSegmentList}>
@@ -7591,10 +7764,14 @@ export function ChatCodingRoute() {
                         className={styles.cacheDetailSegmentRow}
                         title={cacheDonutSegmentTitle(segment, cachePromptCompositionTotalTokens, numberFormatter, lang)}
                       >
-                        <i className={`${styles.cacheDetailSwatch} ${computedCacheLegendSegmentClass(segment.key)}`} />
+                        <i className={`${styles.cacheDetailSwatch} ${cachePromptLegendSegmentClass(segment)}`} />
                         <div className={styles.cacheDetailSegmentText}>
                           <strong>{segment.key === "computed_missing" ? cacheCompositionSegmentLabel("missing", segment.label, t) : segment.label}</strong>
-                          <span>{segment.cachePolicy || segment.source || segment.status || segment.key}</span>
+                          <span className={styles.cacheDetailSegmentSource}>
+                            {promptSegmentCategoryLabel(segment, lang)}
+                            {promptSegmentAccuracyLabel(segment, lang) ? ` · ${promptSegmentAccuracyLabel(segment, lang)}` : ""}
+                            {segment.cachePolicy ? ` · ${segment.cachePolicy}` : ""}
+                          </span>
                           <span className={styles.cacheDetailSegmentMeta}>
                             <b>{cacheComputedStatusLabel(segment.status, lang)}</b>
                             <b data-status={segment.observedStatus || "not_observed"}>

@@ -4420,6 +4420,11 @@ export type SessionCacheCompositionSegment = {
   contentPreview?: string;
   cachePolicy?: string;
   order?: number;
+  promptCategory?: string;
+  segmentKind?: string;
+  accuracy?: string;
+  parentKey?: string;
+  estimated?: boolean;
   observedStatus?: string;
   observedCachedInputTokens?: number;
   observedMissedInputTokens?: number;
