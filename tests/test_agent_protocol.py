@@ -1213,6 +1213,235 @@ class TestToolMessageFlow:
             for message in agent._active_turn_messages
         )
 
+    def test_think_and_act_xml_tool_call_visibility_filter_blocks_unknown_tool(self, monkeypatch):
+        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+        agent.name = "xml-visibility-filter-tester"
+        agent.config = SimpleNamespace(
+            llm=SimpleNamespace(
+                get_profile=lambda role="primary": SimpleNamespace(model="xml-test-model")
+            )
+        )
+        agent.git_memory = SimpleNamespace(refresh_git_memory=lambda force=False: None)
+        agent.prompt_manager = SimpleNamespace(
+            update_current_goal=lambda goal: None,
+            set_runtime_goal_packet=lambda packet: None,
+            clear_state_memory=lambda persist=True: None,
+            build=lambda: "stable system prompt",
+        )
+        agent._active_turn_messages = []
+        agent._active_turn_goal = None
+        agent._pending_lifecycle_action = None
+        agent._system_prompt_written = False
+        agent._cached_system_prompt = ""
+        agent._context_window_limit = 8192
+        agent._effective_max_token_limit = 8192
+        agent._pending_static_context_blocks = []
+        agent._pending_runtime_context_blocks = []
+        agent._compression_count_this_turn = 0
+        agent._last_compression_iteration = 0
+        agent._last_turn_metadata = {}
+        agent._last_turn_failed = False
+        agent._single_turn_mode_active = False
+        agent._active_goal = None
+        agent._last_runtime_state_memory = ""
+        agent._last_runtime_state_memory_key = ""
+
+        response_xml = '<invoke name="hidden_tool"><parameter name="scope">x</parameter></invoke>'
+        executed_tools: list[str] = []
+
+        class DummyRoundState:
+            max_iterations = 1
+            no_new_evidence_steps = 0
+            consecutive_tool_only_steps = 0
+            consecutive_bookkeeping_tool_only_steps = 0
+            consecutive_failures = 0
+            delegation_failures = 0
+            total_tool_calls = 0
+            substantive_tool_calls = 0
+            turn_had_progress = False
+
+            def __init__(self):
+                self.xml_calls_recorded = None
+
+            def next_iteration(self):
+                return 1
+
+            def current_status(self):
+                return {}
+
+            def thinking_status(self, user_prompt):
+                return {}
+
+            def add_xml_tool_calls(self, count):
+                self.xml_calls_recorded = count
+
+            def note_response_tools(self, *args, **kwargs):
+                return None
+
+        class DummyOutcomeController:
+            def __init__(self):
+                self.lifecycle_actions = []
+
+            def should_stop_for_convergence(self, **kwargs):
+                return None
+
+            def handle_lifecycle_action(self, action):
+                self.lifecycle_actions.append(action)
+                return SimpleNamespace(
+                    pending_action=None,
+                    info_log=None,
+                    continue_main_loop=True,
+                    break_round=False,
+                )
+
+            def finalize_round(self, round_state):
+                return SimpleNamespace(
+                    last_turn_failed=False,
+                    turn_stats={"round_tools": round_state.total_tool_calls},
+                    turn_success=True,
+                    ui_status="SUCCESS",
+                )
+
+        round_state = DummyRoundState()
+        outcome_controller = DummyOutcomeController()
+
+        class DummyResponseProcessor:
+            def preview(self, response):
+                return SimpleNamespace(
+                    raw_content=response.content,
+                    xml_tool_calls=[
+                        {
+                            "name": "hidden_tool",
+                            "id": "xml_hidden",
+                            "args": {"scope": "x"},
+                        }
+                    ],
+                    tool_call_count=0,
+                    has_tool_calls=False,
+                )
+
+        class DummyResponseSurface:
+            def record_token_usage(self, *args, **kwargs):
+                return (0, 0)
+
+        class DummyUI:
+            def update_status(self, *args, **kwargs):
+                return None
+
+            def note_context_window(self, *args, **kwargs):
+                return None
+
+            def add_log(self, *args, **kwargs):
+                return None
+
+            def note_turn_start(self, turn):
+                return None
+
+            def note_turn_result(self, *args, **kwargs):
+                return None
+
+        class DummySessionState:
+            def set_runtime_goal_packet(self, packet):
+                return None
+
+            def reset_runtime_constraints(self):
+                return None
+
+            def get_active_evolution_txn(self):
+                return None
+
+        def tool_executor(_tool_call, _messages):
+            executed_tools.append("hidden_tool")
+            return ("must not call", None)
+
+        logger = MagicMock()
+        monkeypatch.setattr(agent_module, "logger", logger)
+        monkeypatch.setattr(agent_module, "get_ui", lambda: DummyUI())
+        monkeypatch.setattr(agent_module, "get_session_state", lambda: DummySessionState())
+        monkeypatch.setattr(agent_module, "_record_agent_scene_event", lambda *args, **kwargs: None)
+        monkeypatch.setattr(
+            agent_module,
+            "build_runtime_goal_packet",
+            lambda policy, goal: SimpleNamespace(
+                source="xml_unit",
+                objective_type="unit",
+                allow_auto_continue=True,
+                allow_file_writes=True,
+                allow_git_commit=False,
+                allow_evolution_transaction=True,
+                allow_subagents=False,
+            ),
+        )
+        monkeypatch.setattr(agent_module, "build_cacheable_system_prefix_message", lambda sp: SystemMessage(content=str(sp)))
+        monkeypatch.setattr(agent_module, "build_dynamic_system_context_message", lambda current_prompt: None)
+        monkeypatch.setattr(agent_module, "extend_system_message_cacheable_prefix", lambda message, blocks: (message, False))
+        monkeypatch.setattr(TurnOutcomeController, "insert_static_context_after_system", lambda messages, context_messages: list(messages))
+        monkeypatch.setattr(TurnOutcomeController, "insert_volatile_context_before_current_user", lambda messages, context_messages: list(messages))
+        monkeypatch.setattr(agent_module, "is_dynamic_system_context_message", lambda message: False)
+        monkeypatch.setattr(agent_module, "is_volatile_system_context_message", lambda message: False)
+        monkeypatch.setattr(agent_module, "estimate_messages_tokens", lambda messages: 0)
+        monkeypatch.setattr(
+            TurnOutcomeController,
+            "prepare_turn_messages",
+            lambda **kwargs: (
+                [
+                    SystemMessage(content=kwargs["system_prompt"]),
+                    kwargs["build_external_request_message"]("xml task input"),
+                ],
+                False,
+            ),
+        )
+        monkeypatch.setattr(
+            TurnOutcomeController,
+            "finish_turn_message_carryover",
+            lambda messages, lifecycle_action, active_goal: SimpleNamespace(
+                messages=messages,
+                goal=active_goal,
+            ),
+        )
+        policy = SimpleNamespace(
+            mode=AgentMode.SELF_EVOLUTION,
+            orchestrator_kind="agent",
+            runtime_input_builder=lambda content: build_external_request_message(content),
+        )
+        monkeypatch.setattr(agent_module, "to_string", lambda value: str(value))
+
+        agent._get_mode_policy = lambda: policy
+        agent._sync_runtime_state_memory = lambda: None
+        agent._seed_runtime_agent_context_for_turn = lambda run_id: None
+        agent._maybe_delegate = lambda goal, iteration, total_tool_calls, messages: None
+        agent._raise_if_turn_stop_requested = lambda: None
+        agent._create_round_state = lambda: round_state
+        agent._apply_active_components_request = lambda processed: None
+        agent._get_response_processor = lambda: DummyResponseProcessor()
+        agent._get_response_surface_controller = lambda: DummyResponseSurface()
+        agent._get_turn_outcome_controller = lambda: outcome_controller
+        agent._capture_chat_dataset_candidate_if_needed = lambda *args, **kwargs: None
+        agent._refresh_retrospective_state_memory = lambda: None
+        agent._is_tool_visible_to_current_agent = lambda tool_name: False
+        agent._hidden_tool_call_message = lambda tool_name: f"blocked:{tool_name}"
+        agent._remember_tool_output = lambda *args, **kwargs: None
+        agent.tool_lifecycle = SimpleNamespace(
+            execute_tool=tool_executor,
+            handle_tool_result=ToolLifecycleBridge.handle_tool_result,
+        )
+        agent._invoke_llm = lambda messages: SimpleNamespace(
+            content=response_xml,
+            tool_calls=[],
+        )
+
+        result = agent.think_and_act("不可见工具调用")
+
+        assert result is True
+        assert executed_tools == []
+        assert outcome_controller.lifecycle_actions == []
+        assert any(
+            isinstance(message, ToolMessage)
+            and message.tool_call_id == "xml_hidden"
+            and message.content == "blocked:hidden_tool"
+            for message in agent._active_turn_messages
+        )
+
     def test_think_and_act_xml_turn_complete_sets_pending_lifecycle_action(self, monkeypatch):
         agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
         agent.name = "xml-turn-complete-tester"
