@@ -1048,7 +1048,14 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain('requestTerminalSession(terminalCanResume ? "resume" : "start")');
     expect(routeSource).toContain("function canInputTerminal");
     expect(routeSource).toContain("terminalCanInputRef.current");
+    expect(routeSource).toContain("const terminalSizeForRequest = useCallback");
+    expect(routeSource).toContain("const terminalSize = terminalSizeForRequest()");
+    expect(routeSource).toContain("rows: terminalSize.rows");
+    expect(routeSource).toContain("cols: terminalSize.cols");
+    expect(routeSource).toContain('if (intent === "view" || !canInputTerminal(session))');
+    expect(routeSource).toContain('if (payload.type === "terminal_snapshot" && !canInputTerminal(payload.session))');
     expect(routeSource).toContain("终端未运行，请先恢复会话。");
+    expect(routeSource).toContain("已恢复，等待终端输出。");
     expect(routeSource).toContain("sourceRunId: run.sourceRunId");
     expect(routeSource).toContain('cliSessionId: intent === "start" ? "" : terminalCliSessionIdRef.current');
     expect(routeSource).toContain("void sessionDetailQuery.refetch()");

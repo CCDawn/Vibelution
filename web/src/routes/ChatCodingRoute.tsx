@@ -923,7 +923,7 @@ function CliAgentRunTerminalPanel({
     ? terminalSession.commandPreview.join(" ")
     : run.commandLine);
   const snapshotFallbackAvailable = Boolean(String(terminalSession?.screenText || "").trim());
-  const transcriptReplayBlocked = terminalSession?.transcriptTailReplayable === false && !snapshotFallbackAvailable;
+  const transcriptReplayBlocked = terminalReadonly && terminalSession?.transcriptTailReplayable === false && !snapshotFallbackAvailable;
   const emptyText = terminalError
     || (terminalReadonly
       ? (terminalCanResume
@@ -936,6 +936,8 @@ function CliAgentRunTerminalPanel({
         ? (lang === "zh"
           ? "终端已连接；历史 TUI 画面无法安全重放，等待新的可渲染输出。"
           : "Terminal connected; the historical TUI screen cannot be safely replayed. Waiting for new renderable output.")
+        : terminalSession?.interactionState === "live" && terminalSession?.resumed
+          ? (lang === "zh" ? "已恢复，等待终端输出。" : "Resumed. Waiting for terminal output.")
       : (lang === "zh" ? "命令会话还没有输出。" : "No terminal output yet."));
 
   useEffect(() => {
@@ -1070,6 +1072,20 @@ function CliAgentRunTerminalPanel({
     }
   }, [postTerminalSize]);
 
+  const terminalSizeForRequest = useCallback(() => {
+    const terminal = terminalRef.current;
+    const fitAddon = fitAddonRef.current;
+    if (!terminal || !fitAddon) {
+      return { rows: 28, cols: 100 };
+    }
+    try {
+      fitAddon.fit();
+    } catch {
+      return { rows: terminal.rows || 28, cols: terminal.cols || 100 };
+    }
+    return { rows: terminal.rows || 28, cols: terminal.cols || 100 };
+  }, []);
+
   useEffect(() => {
     const element = terminalElementRef.current;
     if (!element) {
@@ -1154,6 +1170,7 @@ function CliAgentRunTerminalPanel({
   }, [active, fitTerminal, terminalSessionId]);
 
   const fetchTerminalSession = useCallback((intent: "view" | "resume" | "start", signal?: AbortSignal) => {
+    const terminalSize = terminalSizeForRequest();
     return fetchJson<CliAgentTerminalSession>("/api/cli-agents/terminal-sessions/ensure", {
       method: "POST",
       signal,
@@ -1168,16 +1185,21 @@ function CliAgentRunTerminalPanel({
         sourceMessageId: run.messageId,
         sourceRunId: run.sourceRunId,
         cliSessionId: intent === "start" ? "" : terminalCliSessionIdRef.current,
-        rows: 28,
-        cols: 100,
+        rows: terminalSize.rows,
+        cols: terminalSize.cols,
       }),
     })
       .then((session) => {
         setTerminalSession(session);
-        replayTerminalSnapshot(session);
+        if (intent === "view" || !canInputTerminal(session)) {
+          replayTerminalSnapshot(session);
+        } else {
+          writeTerminalChunk("", { reset: true });
+          window.requestAnimationFrame(fitTerminal);
+        }
         return session;
       });
-  }, [replayTerminalSnapshot, run.agentType, run.cwd, run.messageId, run.mode, run.sourceRunId, run.task, sourceSessionId]);
+  }, [fitTerminal, replayTerminalSnapshot, run.agentType, run.cwd, run.messageId, run.mode, run.sourceRunId, run.task, sourceSessionId, terminalSizeForRequest, writeTerminalChunk]);
 
   const requestTerminalSession = useCallback((intent: "resume" | "start") => {
     setConnecting(true);
@@ -1246,7 +1268,7 @@ function CliAgentRunTerminalPanel({
         }
         if (payload.session) {
           setTerminalSession(payload.session);
-          if (payload.type === "terminal_snapshot") {
+          if (payload.type === "terminal_snapshot" && !canInputTerminal(payload.session)) {
             replayTerminalSnapshot(payload.session);
           }
         }

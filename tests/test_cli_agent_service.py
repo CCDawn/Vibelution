@@ -1403,6 +1403,9 @@ def test_cli_agent_terminal_resume_intent_spawns_stale_session(monkeypatch, tmp_
             "updatedAt": "2026-06-15T01:40:00+00:00",
         }
     )
+    transcript_path = terminal_service._transcript_path(terminal_session_id)
+    transcript_path.parent.mkdir(parents=True, exist_ok=True)
+    transcript_path.write_text("旧尺寸历史画面\r\n\x1b[57;6H", encoding="utf-8")
     spawned = []
 
     class FakeProcess:
@@ -1410,7 +1413,7 @@ def test_cli_agent_terminal_resume_intent_spawns_stale_session(monkeypatch, tmp_
             return True
 
     def fake_spawn(args, **kwargs):
-        spawned.append(list(args))
+        spawned.append({"args": list(args), "kwargs": dict(kwargs)})
         return FakeProcess(), "conpty"
 
     monkeypatch.setattr(terminal_service, "_spawn_terminal_process", fake_spawn)
@@ -1427,13 +1430,23 @@ def test_cli_agent_terminal_resume_intent_spawns_stale_session(monkeypatch, tmp_
         source_message_id="message-1",
         source_run_id="run-1",
         intent="resume",
+        rows=55,
+        cols=180,
     )
 
-    assert spawned == [[r"C:\tools\mimo.cmd", str(project_root), "--session", "ses_restart"]]
+    assert spawned == [
+        {
+            "args": [r"C:\tools\mimo.cmd", str(project_root), "--session", "ses_restart"],
+            "kwargs": {"cwd": str(project_root), "rows": 55, "cols": 180},
+        }
+    ]
     assert session["terminalSessionId"] == terminal_session_id
     assert session["status"] == "running"
     assert session["alive"] is True
     assert session["resumed"] is True
+    assert session["transcriptTail"] == ""
+    assert session["transcriptTailReplayable"] is False
+    assert session["transcriptTailRenderReason"] == "live_runtime_no_history_replay"
     assert session["interactionState"] == "live"
     assert session["canInput"] is True
     assert session["canResume"] is False

@@ -158,14 +158,16 @@ class _TerminalRuntime:
             payload = dict(self.state)
         payload["alive"] = self.is_alive()
         payload["transport"] = self.transport
-        payload = _merge_transcript_snapshot(
-            payload,
+        snapshot = (
             _read_transcript_snapshot_for_state(
                 self.transcript_path,
                 payload,
-                include_transcript_tail=include_transcript_tail,
-            ),
+                include_transcript_tail=True,
+            )
+            if include_transcript_tail
+            else _live_runtime_transcript_snapshot(payload)
         )
+        payload = _merge_transcript_snapshot(payload, snapshot)
         return _public_state(payload)
 
     def _reader_loop(self) -> None:
@@ -1713,6 +1715,20 @@ def _read_transcript_snapshot_for_state(
         rows=_clamp_int(state.get("rows"), DEFAULT_ROWS, 4, 120),
         cols=_clamp_int(state.get("cols"), DEFAULT_COLS, 20, 240),
     )
+
+
+def _live_runtime_transcript_snapshot(state: dict[str, Any]) -> dict[str, Any]:
+    if _screen_state_is_current(state) and str(state.get("screenText") or "").strip():
+        return {
+            "transcriptTail": "",
+            "transcriptTailReplayable": False,
+            "transcriptTailRenderReason": "live_screen_snapshot",
+        }
+    return {
+        "transcriptTail": "",
+        "transcriptTailReplayable": False,
+        "transcriptTailRenderReason": "live_runtime_no_history_replay",
+    }
 
 
 def _classify_transcript_tail_replay(text: str) -> tuple[bool, str]:
