@@ -445,6 +445,7 @@ export function AppShell() {
   const [shellStartupDataReady, setShellStartupDataReady] = useState(false);
   const shutdownPromiseRef = useRef<Promise<void> | null>(null);
   const restartPromiseRef = useRef<Promise<void> | null>(null);
+  const restartCompletionDismissTimerRef = useRef<number | null>(null);
   const lifecycleRequestSeqRef = useRef(0);
   const lifecycleOverlayDismissedRef = useRef(false);
   const utilityMenuRef = useRef<HTMLDivElement | null>(null);
@@ -615,6 +616,13 @@ export function AppShell() {
   const activeWorkDetailsTitle = activeWorkIndicator?.items.map((item) => item.detail).join(" · ") ?? "";
   const currentTime = clockFormatter.format(clockNow);
   const buildId = __VIBELUTION_BUILD_ID__;
+  const clearRestartCompletionDismissTimer = useCallback(() => {
+    if (restartCompletionDismissTimerRef.current === null) {
+      return;
+    }
+    window.clearTimeout(restartCompletionDismissTimerRef.current);
+    restartCompletionDismissTimerRef.current = null;
+  }, []);
   const closeUtilityMenu = useCallback(() => {
     setUtilityOpen(false);
   }, []);
@@ -781,6 +789,7 @@ export function AppShell() {
     lifecycleRequestSeqRef.current += 1;
     const requestSeq = lifecycleRequestSeqRef.current;
     const task = (async () => {
+      clearRestartCompletionDismissTimer();
       lifecycleOverlayDismissedRef.current = false;
       setShutdownRequested(true);
       setRestartRequested(false);
@@ -862,6 +871,7 @@ export function AppShell() {
   }, [
     activeWorkDetailsTitle,
     cancelSupersededLifecycleCommand,
+    clearRestartCompletionDismissTimer,
     emitBrowserTelemetry,
     lang,
     restartRequested,
@@ -879,6 +889,7 @@ export function AppShell() {
     const requestSeq = lifecycleRequestSeqRef.current;
     shutdownPromiseRef.current = null;
     const task = (async () => {
+      clearRestartCompletionDismissTimer();
       lifecycleOverlayDismissedRef.current = false;
       setShutdownRequested(true);
       setRestartRequested(false);
@@ -952,6 +963,7 @@ export function AppShell() {
     return task;
   }, [
     activeWorkIndicator?.count,
+    clearRestartCompletionDismissTimer,
     emitBrowserTelemetry,
     forceShutdownBody,
     forceShutdownHeading,
@@ -970,6 +982,7 @@ export function AppShell() {
     lifecycleRequestSeqRef.current += 1;
     const requestSeq = lifecycleRequestSeqRef.current;
     const task = (async () => {
+      clearRestartCompletionDismissTimer();
       lifecycleOverlayDismissedRef.current = false;
       setRestartRequested(true);
       setShutdownRequested(false);
@@ -1050,6 +1063,7 @@ export function AppShell() {
   }, [
     activeWorkDetailsTitle,
     cancelSupersededLifecycleCommand,
+    clearRestartCompletionDismissTimer,
     emitBrowserTelemetry,
     lang,
     restartBody,
@@ -1724,10 +1738,13 @@ export function AppShell() {
       setShutdownSettled(true);
       setShutdownTitle(restartCompleteTitle);
       setShutdownDetail(workbench.statusLine || restartCompleteBody);
-      const timer = window.setTimeout(() => {
-        setShutdownOpen(false);
-      }, 1_600);
-      return () => window.clearTimeout(timer);
+      if (restartCompletionDismissTimerRef.current === null) {
+        restartCompletionDismissTimerRef.current = window.setTimeout(() => {
+          restartCompletionDismissTimerRef.current = null;
+          setShutdownOpen(false);
+        }, 1_600);
+      }
+      return;
     }
 
     if (lifecycleOverlayDismissedRef.current) {
@@ -1746,6 +1763,8 @@ export function AppShell() {
     restartRequested,
     workbench,
   ]);
+
+  useEffect(() => clearRestartCompletionDismissTimer, [clearRestartCompletionDismissTimer]);
 
   const rightStatusCards: Array<{
     id: "frontend" | "backend" | "runtime";
