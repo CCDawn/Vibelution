@@ -132,6 +132,16 @@ class DebugLogger:
         """获取 UI 实例，未就绪时返回 None"""
         return _get_ui()
 
+    def _log_internal_warning(self, context: str, error: Exception) -> None:
+        if not self._file_handle:
+            return
+        try:
+            ts = datetime.now().strftime("%H:%M:%S.%f")[:-3]
+            self._file_handle.write(f"[{ts}] [WARN] {context}: {error}\n")
+            self._file_handle.flush()
+        except Exception:
+            pass
+
     def start_session(self, session_id: str):
         """开始会话 — 打开 debug 日志文件"""
         try:
@@ -140,7 +150,8 @@ class DebugLogger:
             log_path = os.path.join(log_dir, f'debug_{session_id}.log')
             self._file_handle = open(log_path, 'a', encoding='utf-8', buffering=1)
             self._write_file("SYS", f"=== Debug session started: {session_id} ===")
-        except Exception:
+        except Exception as exc:
+            self._log_internal_warning("Failed to start debug session", exc)
             self._file_handle = None
 
     def end_session(self):
@@ -149,8 +160,8 @@ class DebugLogger:
             try:
                 self._write_file("SYS", "=== Debug session ended ===")
                 self._file_handle.close()
-            except Exception:
-                pass
+            except Exception as exc:
+                self._log_internal_warning("Failed to close debug session", exc)
             self._file_handle = None
 
     def _write_file(self, tag: str, msg: str):
@@ -160,16 +171,16 @@ class DebugLogger:
                 ts = datetime.now().strftime("%H:%M:%S.%f")[:-3]
                 self._file_handle.write(f"[{ts}] [{tag}] {msg}\n")
                 self._file_handle.flush()
-            except Exception:
-                pass
+            except Exception as exc:
+                self._log_internal_warning("Failed to write debug file", exc)
 
     def debug(self, msg: str, tag: str = "DEBUG"):
         """调试信息"""
         self._write_file("DEBUG", msg)
         try:
             conversation_logger.log_debug(tag, msg, "DEBUG")
-        except Exception:
-            pass
+        except Exception as exc:
+            self._log_internal_warning("Failed to forward debug log", exc)
         if self.verbose and (ui := self._ui_or_none()):
             ui.add_log(msg, "DEBUG")
 
@@ -178,8 +189,8 @@ class DebugLogger:
         self._write_file("INFO", msg)
         try:
             conversation_logger.log_debug(tag, msg, "INFO")
-        except Exception:
-            pass
+        except Exception as exc:
+            self._log_internal_warning("Failed to forward info log", exc)
         if ui := self._ui_or_none():
             ui.add_log(msg, "INFO")
 
@@ -188,8 +199,8 @@ class DebugLogger:
         self._write_file("OK", msg)
         try:
             conversation_logger.log_debug(tag, msg, "OK")
-        except Exception:
-            pass
+        except Exception as exc:
+            self._log_internal_warning("Failed to forward success log", exc)
         if ui := self._ui_or_none():
             ui.add_log(msg, "SUCCESS")
 
@@ -198,8 +209,8 @@ class DebugLogger:
         self._write_file("WARN", msg)
         try:
             conversation_logger.log_debug(tag, msg, "WARN")
-        except Exception:
-            pass
+        except Exception as exc:
+            self._log_internal_warning("Failed to forward warning log", exc)
         if ui := self._ui_or_none():
             ui.print_warning(msg)
 
@@ -210,8 +221,8 @@ class DebugLogger:
             self._write_file("ERROR", exc_info)
         try:
             conversation_logger.log_debug(tag, f"{msg}\n{exc_info}" if exc_info else msg, "ERROR")
-        except Exception:
-            pass
+        except Exception as exc:
+            self._log_internal_warning("Failed to forward error log", exc)
         if ui := self._ui_or_none():
             ui.print_error(msg, exc_info)
 
@@ -220,8 +231,8 @@ class DebugLogger:
         self._write_file("SYS", msg)
         try:
             conversation_logger.log_debug(tag, msg, "SYS")
-        except Exception:
-            pass
+        except Exception as exc:
+            self._log_internal_warning("Failed to forward system log", exc)
         if ui := self._ui_or_none():
             ui.add_log(msg, "SYS")
 
@@ -230,8 +241,8 @@ class DebugLogger:
         self._write_file("TOOL", f"{name} {status} {details}")
         try:
             conversation_logger.log_debug("TOOL", f"{name} {status} {details}", "TOOL")
-        except Exception:
-            pass
+        except Exception as exc:
+            self._log_internal_warning("Failed to forward tool log", exc)
         if ui := self._ui_or_none():
             ui.add_log(f"Tool: {name} {status} {details}", "TOOL")
 
@@ -240,8 +251,8 @@ class DebugLogger:
         self._write_file("LLM", f"{msg} {details}")
         try:
             conversation_logger.log_debug("LLM", f"{msg} {details}", "LLM")
-        except Exception:
-            pass
+        except Exception as exc:
+            self._log_internal_warning("Failed to forward llm log", exc)
         if ui := self._ui_or_none():
             ui.add_log(f"{msg} {details}", "LLM")
 
@@ -251,8 +262,8 @@ class DebugLogger:
         self._write_file("LLM", f"{prefix}: {preview}...")
         try:
             conversation_logger.log_debug("LLM", f"{prefix}: {preview}", "LLM")
-        except Exception:
-            pass
+        except Exception as exc:
+            self._log_internal_warning("Failed to forward llm response log", exc)
         ui = _get_ui()
         if ui is None:
             return
@@ -277,8 +288,8 @@ class DebugLogger:
         self._write_file("TOOL", f"START {tool_name} args={str(args)[:200]}")
         try:
             conversation_logger.log_debug("TOOL", f"START {tool_name} args={args}", "TOOL")
-        except Exception:
-            pass
+        except Exception as exc:
+            self._log_internal_warning("Failed to forward tool start log", exc)
         ui = _get_ui()
         if ui is None:
             return
@@ -291,8 +302,8 @@ class DebugLogger:
         self._write_file("TOOL", f"RESULT {tool_name} {status} len={len(result) if result else 0}")
         try:
             conversation_logger.log_debug("TOOL", f"RESULT {tool_name} {status} len={len(result) if result else 0}", "TOOL")
-        except Exception:
-            pass
+        except Exception as exc:
+            self._log_internal_warning("Failed to forward tool result log", exc)
         ui = _get_ui()
         if ui is None:
             return
@@ -316,8 +327,8 @@ class DebugLogger:
         self._write_file("TURN", f"Turn {turn_num} complete | Tools: {tool_count}")
         try:
             conversation_logger.log_debug("TURN", f"Turn {turn_num} complete | Tools: {tool_count}", "TURN")
-        except Exception:
-            pass
+        except Exception as exc:
+            self._log_internal_warning("Failed to forward turn-end log", exc)
         ui = _get_ui()
         if ui:
             ui.add_log(f"Turn {turn_num} complete | Tools: {tool_count}", "TURN")

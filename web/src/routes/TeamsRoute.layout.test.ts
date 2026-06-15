@@ -272,10 +272,11 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("正在团队搜索");
     expect(routeSource).toContain("知识搜集操作台");
     expect(routeSource).toContain("sourceCollectionDecisionText");
-    expect(routeSource).toContain("当前判断");
-    expect(routeSource).toContain("未完成任务");
-    expect(routeSource).toContain("候选资料");
-    expect(routeSource).toContain("缓存状态");
+    expect(routeSource).toContain("下一步");
+    expect(routeSource).toContain("待执行");
+    expect(routeSource).toContain("搜集结果");
+    expect(routeSource).toContain("搜索范围");
+    expect(routeSource).toContain("缓存");
     expect(routeSource).toContain("sourceCollectionScreeningButtonText");
     expect(routeSource).toContain("sourceCollectionScreeningDisabled");
     expect(routeSource).toContain("openSourceCollectionScreeningPanel");
@@ -316,6 +317,7 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("sourceCollectionStageCardSelected");
     expect(routeSource).toContain("sourceCollectionStageOperationPanel");
     expect(routeSource).toContain("aria-pressed");
+    expect(routeSource).toContain("<small>{module.summary}</small>");
     expect(routeSource).toContain("sourceCollectionStageModules.map");
     expect(routeSource).toContain("sourceCollectionStepClassName");
     expect(routeSource).toContain("阶段详情");
@@ -338,8 +340,8 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("researchStageAgentManagementRoute(binding.agentId)");
     expect(routeSource).toContain("Agent 管理");
     expect(routeSource).toContain("还需补充资料");
-    expect(routeSource).toContain("个任务未完成");
-    expect(routeSource).toContain("全部来源已筛");
+    expect(routeSource).toContain("个搜集任务待执行");
+    expect(routeSource).toContain("条已通过");
     expect(routeSource).toContain("Agent 重新筛选");
     expect(routeSource).toContain("forceRescreen");
     expect(routeSource).toContain("force: forceRescreen");
@@ -354,6 +356,10 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("sourceCollectionStorageTargetForRef");
     expect(routeSource).toContain("sourceCollectionStatusLabel");
     expect(routeSource).toContain("sourceCollectionAgentRoleLabel");
+    expect(routeSource).toContain("currentTraceMessage");
+    expect(routeSource).toContain("sourceCollectionResultsPanel");
+    expect(routeSource).toContain("source-collection-results");
+    expect(routeSource).toContain("sourceCollectionResultList");
     expect(routeSource).not.toContain("workflowSourceCollectionPrimaryButton");
     expect(routeSource).toContain("启动实验规划");
     expect(routeSource).toContain("启动迭代");
@@ -488,6 +494,11 @@ describe("TeamsRoute layout contract", () => {
     expect(routeStyles.sourceCollectionTraceMessage).toBeTypeOf("string");
     expect(routeStyles.sourceCollectionTrace_cache).toBeTypeOf("string");
     expect(routeStyles.sourceCollectionTraceStorage).toBeTypeOf("string");
+    expect(routeStyles.sourceCollectionResultsPanel).toBeTypeOf("string");
+    expect(routeStyles.sourceCollectionResultsHeader).toBeTypeOf("string");
+    expect(routeStyles.sourceCollectionResultStats).toBeTypeOf("string");
+    expect(routeStyles.sourceCollectionResultList).toBeTypeOf("string");
+    expect(routeStyles.sourceCollectionResultItem).toBeTypeOf("string");
     expect(routeStyles.sourceCollectionControlPanel).toBeTypeOf("string");
     expect(routeStyles.sourceCollectionStageModules).toBeTypeOf("string");
     expect(routeStyles.sourceCollectionStageCard).toBeTypeOf("string");
