@@ -3675,6 +3675,8 @@ def submit_session_message(
     lang = get_web_language()
     conversation_id = str(session_id or "").strip()
     message = _resolve_user_message_content(content, content_utf8_base64=content_utf8_base64)
+    normalized_message_source = str(message_source or "").strip() or "raw"
+    recent_image_reference_routing_enabled = normalized_message_source != "supervised_evolution"
     if not conversation_id:
         raise SessionNotFoundError(text_for(lang, zh="未找到当前会话。", en="Session not found."))
     _validate_user_message_not_encoding_replacement(message, lang=lang)
@@ -3702,10 +3704,14 @@ def submit_session_message(
         active_task = _normalize_session_active_task(conversation.get("active_task") or conversation.get("activeTask"))
         if not _is_task_tool_backed_active_task(active_task):
             active_task = None
-        explicit_recent_image_reference = _has_recent_image_attachment_reference(message)
+        explicit_recent_image_reference = (
+            _has_recent_image_attachment_reference(message)
+            if recent_image_reference_routing_enabled
+            else False
+        )
         contextual_recent_image_request = (
             {}
-            if attachments or explicit_recent_image_reference
+            if not recent_image_reference_routing_enabled or attachments or explicit_recent_image_reference
             else _image_context_request_for_retry(
                 message,
                 conversation=conversation,
@@ -3754,7 +3760,7 @@ def submit_session_message(
                 )
             )
 
-        if str(message_source or "").strip() == "supervised_evolution":
+        if normalized_message_source == "supervised_evolution":
             requested_leases = ["readonly_chat"]
         else:
             requested_leases = infer_chat_turn_leases(
@@ -3860,7 +3866,7 @@ def submit_session_message(
         leases=requested_leases,
         user_message=message,
         raw_user_message=message,
-        user_message_source=str(message_source or "raw").strip() or "raw",
+        user_message_source=normalized_message_source,
         attachments=attachments,
     )
     if session_references:
@@ -3880,7 +3886,6 @@ def submit_session_message(
     _publish_session_detail_snapshot(conversation_id)
     submit_timing_fields["initialSnapshotPublishMs"] = _elapsed_ms(publish_started_at)
 
-    normalized_message_source = str(message_source or "").strip() or "raw"
     if recent_image_reference_missing and normalized_message_source != "agent_inbox":
         visible = _recent_image_attachment_missing_message(lang)
         _finish_image_attachment_routed_turn(
