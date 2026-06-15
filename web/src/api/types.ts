@@ -3723,6 +3723,12 @@ export type DataProcessingStatus = {
     recordCount: number;
     assignmentCount: number;
     openAssignmentCount: number;
+    searchAssignmentCount?: number;
+    searchOpenAssignmentCount?: number;
+    collectionAssignmentCount?: number;
+    collectionOpenAssignmentCount?: number;
+    downstreamAssignmentCount?: number;
+    downstreamOpenAssignmentCount?: number;
     outputCount: number;
     recordStatusCounts: Record<string, number>;
     sourceTypeCounts: Record<string, number>;
