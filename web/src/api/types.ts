@@ -2212,8 +2212,20 @@ export type LauncherDeveloperModeSetting = {
   updatedAt: string;
   updatedBy: string;
   controller: "launcher" | string;
+  scope?: "global" | string;
+  mode?: "ephemeral_sandbox" | string;
   configPath: string;
   configHash: string;
+  sandbox?: {
+    sandboxId: string;
+    root: string;
+    statePath: string;
+    active: boolean;
+    createdAt: string;
+    persistedAcrossRestarts: boolean;
+    clearOnDisable: boolean;
+    clearOnReset: boolean;
+  };
   policy: {
     settingsPageMutable: boolean;
     requiresLauncher: boolean;
@@ -2221,6 +2233,14 @@ export type LauncherDeveloperModeSetting = {
     requiresPlanHash: boolean;
     requiresConfirm: boolean;
     defaultWhenMissing: boolean;
+    scope?: "global" | string;
+    noTrace?: boolean;
+    readsFormalState?: boolean;
+    writesSandboxedState?: boolean;
+    logsDiagnosticRecords?: boolean;
+    debugRecordKind?: string;
+    debugRetention?: string;
+    sandboxSurvivesRestart?: boolean;
   };
 };
 

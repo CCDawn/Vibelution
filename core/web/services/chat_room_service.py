@@ -16,6 +16,7 @@ from typing import Any, Callable
 from core.chat.chat_task_types import trim_lines
 from core.chatroom.scheduler import get_scheduler_registry
 from core.chatroom.store import ChatRoomStore, utc_now_iso
+from core.infrastructure import developer_sandbox
 from core.orchestration.context_engine import build_agent_context, record_agent_turn_result
 from core.orchestration.output_boundary import sanitize_assistant_visible_text
 from core.orchestration.turn_runner import prepare_agent_turn, run_existing_agent_single_turn
@@ -3776,8 +3777,9 @@ def _participant_workspace(session_id: Any, room_id: Any, participant_id: Any) -
     normalized_session_id = str(session_id or "").strip()
     if normalized_session_id:
         return session_service._ensure_session_workspace(normalized_session_id)
-    base = (PROJECT_ROOT / "workspace" / "chat_rooms" / _safe_fragment(room_id) / _safe_fragment(participant_id)).resolve()
-    root = (PROJECT_ROOT / "workspace" / "chat_rooms").resolve()
+    chat_rooms_root = developer_sandbox.seeded_sandbox_workspace_path(PROJECT_ROOT, "chat_rooms")
+    base = (chat_rooms_root / _safe_fragment(room_id) / _safe_fragment(participant_id)).resolve()
+    root = chat_rooms_root.resolve()
     if not base.is_relative_to(root):
         raise ChatRoomValidationError("Invalid chat room workspace path.")
     base.mkdir(parents=True, exist_ok=True)

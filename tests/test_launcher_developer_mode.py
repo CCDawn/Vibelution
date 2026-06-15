@@ -90,6 +90,39 @@ def test_developer_cleanup_preview_is_blocked_when_mode_off(tmp_path, monkeypatc
     assert response.json()["detail"]["code"] == "mode_disabled"
 
 
+def test_developer_sandbox_reset_requires_enabled_and_rotates_sandbox(tmp_path, monkeypatch):
+    config_path = tmp_path / "config.toml"
+    config_path.write_text("[launcher]\n", encoding="utf-8")
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    monkeypatch.setattr(developer_mode, "PROJECT_ROOT", project_root)
+
+    try:
+        developer_mode.reset_developer_sandbox(config_path=config_path, project_root=project_root)
+    except developer_mode.DeveloperModeDisabled:
+        pass
+    else:
+        raise AssertionError("expected reset to require developer mode")
+
+    initial = developer_mode.get_developer_mode_setting(config_path=config_path)
+    enabled = developer_mode.update_developer_mode_setting(
+        True,
+        base_hash=initial["configHash"],
+        config_path=config_path,
+    )["setting"]
+    first_sandbox = enabled["sandbox"]["sandboxId"]
+    marker = project_root / ".runtime" / "developer-mode" / "sandboxes" / first_sandbox / "workspace" / "debug.txt"
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text("debug", encoding="utf-8")
+
+    reset = developer_mode.reset_developer_sandbox(config_path=config_path, project_root=project_root)
+
+    assert reset["ok"] is True
+    assert reset["setting"]["enabled"] is True
+    assert reset["sandbox"]["sandboxId"] != first_sandbox
+    assert not marker.exists()
+
+
 def test_developer_cleanup_plan_requires_confirm_and_matching_hash(tmp_path):
     config_path = tmp_path / "config.toml"
     config_path.write_text("[launcher]\n[launcher.developer_mode]\nenabled = true\n", encoding="utf-8")
