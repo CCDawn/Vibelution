@@ -1057,35 +1057,6 @@ export function ConversationView({
     return `${Math.round(seconds)}s`;
   }
 
-  function elapsedSinceTimestampSeconds(timestamp: string | undefined) {
-    const normalized = String(timestamp ?? "").trim();
-    if (!normalized) {
-      return null;
-    }
-    const parsed = Date.parse(normalized);
-    if (!Number.isFinite(parsed)) {
-      return null;
-    }
-    return Math.max(0, (Date.now() - parsed) / 1000);
-  }
-
-  function formatOperationTimestamp(timestamp: string | undefined) {
-    const normalized = String(timestamp ?? "").trim();
-    if (!normalized) {
-      return "";
-    }
-    const parsed = Date.parse(normalized);
-    if (!Number.isFinite(parsed)) {
-      return normalized;
-    }
-    return new Intl.DateTimeFormat(lang === "zh" ? "zh-CN" : "en-US", {
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit",
-      hour12: false,
-    }).format(parsed);
-  }
-
   function operationIcon(kind: ConversationOperationKind, label: string) {
     const normalized = label.trim().toLowerCase();
     if (kind === "thought") {
@@ -1209,130 +1180,24 @@ export function ConversationView({
     return parts.length > 0 ? parts.join(" · ") : `${t("toolProcess")} ${operations.length}`;
   }
 
-  function operationStepCountLabel(count: number) {
-    if (count <= 0) {
-      return "";
-    }
-    return lang === "zh" ? `${count} 步` : `${count} steps`;
-  }
-
-  function compactOperationLabel(operation: ConversationOperation) {
-    const label = operationLabel(operation).trim();
-    if (!label) {
-      return t("toolProcess");
-    }
-    return label;
-  }
-
-  function dedupeProgressOperations(operations: ConversationOperation[]) {
-    const deduped: ConversationOperation[] = [];
-    const indexByKey = new Map<string, number>();
-    operations.forEach((operation) => {
-      const label = compactOperationLabel(operation).trim().toLowerCase();
-      const key = label || `${operation.kind}:${operation.rawLabel ?? operation.label}`;
-      const previousIndex = indexByKey.get(key);
-      if (previousIndex === undefined) {
-        indexByKey.set(key, deduped.length);
-        deduped.push(operation);
-        return;
-      }
-      deduped[previousIndex] = mergeProgressOperationTone(deduped[previousIndex], operation);
-    });
-    return deduped;
-  }
-
-  function mergeProgressOperationTone(previous: ConversationOperation, next: ConversationOperation) {
-    const previousTone = operationStatusTone(previous);
-    const nextTone = operationStatusTone(next);
-    if (nextTone === "failed" && previousTone !== "running") {
-      return next;
-    }
-    if (nextTone === "running" && previousTone !== "failed") {
-      return next;
-    }
-    if (previousTone === "pending" && nextTone === "done") {
-      return next;
-    }
-    return previous;
-  }
-
-  function operationProgressMeta(operations: ConversationOperation[]) {
-    const latestActive = [...operations].reverse().find((operation) => isRunningOperationStatus(operation.status));
-    const latestFailed = [...operations].reverse().find((operation) => operation.status.trim().toLowerCase() === "failed");
-    const latestEvent = [...operations].reverse().find((operation) => operation.timestamp);
-    const completedCount = operations.filter((operation) => operationStatusTone(operation) === "done").length;
-    const currentOperation = latestActive ?? latestFailed;
-    return {
-      latestActive,
-      latestFailed,
-      latestEvent,
-      completedCount,
-      currentLabel: currentOperation ? operationLabel(currentOperation) : "",
-      currentSummary: latestActive?.kind === "status" ? "" : latestActive?.summary || latestFailed?.summary || "",
-    };
-  }
-
-  function operationProgressSummaryItems(progress: ReturnType<typeof operationProgressMeta>, total: number) {
-    const operation = progress.latestActive ?? progress.latestFailed;
-    const elapsed = operation ? operation.durationSeconds ?? elapsedSinceTimestampSeconds(operation.timestamp) : null;
-    const stateLabel = progress.latestActive
-      ? lang === "zh" ? "执行中" : "Running"
-      : progress.latestFailed
-        ? lang === "zh" ? "执行失败" : "Failed"
-        : lang === "zh" ? "已完成" : "Done";
-    const failureSummary = progress.latestFailed && progress.currentSummary
-      ? progress.currentSummary
-      : "";
-    return [
-      stateLabel,
-      progress.currentLabel,
-      `${progress.completedCount}/${total}`,
-      elapsed !== null ? formatDuration(elapsed) : "",
-      failureSummary,
-    ].filter(Boolean);
-  }
-
-  function reActGroupTone(group: ConversationReActOperationGroup) {
-    if (group.operations.some((operation) => operationStatusTone(operation) === "failed")) {
+  function operationCollectionTone(operations: ConversationOperation[]) {
+    if (operations.some((operation) => operationStatusTone(operation) === "failed")) {
       return "failed";
     }
-    if (group.operations.some((operation) => operationStatusTone(operation) === "running")) {
+    if (operations.some((operation) => operationStatusTone(operation) === "running")) {
       return "running";
     }
-    if (group.operations.every((operation) => operationStatusTone(operation) === "done")) {
+    if (operations.length > 0 && operations.every((operation) => operationStatusTone(operation) === "done")) {
       return "done";
     }
     return "pending";
   }
 
-  function reActGroupTitle(group: ConversationReActOperationGroup) {
-    return lang === "zh" ? `第 ${group.index} 轮` : `Pass ${group.index}`;
+  function reActGroupTone(group: ConversationReActOperationGroup) {
+    return operationCollectionTone(group.operations);
   }
 
-  function reActGroupCountLabel(count: number) {
-    if (count <= 1) {
-      return "";
-    }
-    return lang === "zh" ? `${count} 轮` : `${count} passes`;
-  }
-
-  function reActGroupPreview(group: ConversationReActOperationGroup) {
-    const thought = group.operations.find((operation) => operation.kind === "thought" && operation.summary);
-    if (thought?.summary) {
-      return thought.summary;
-    }
-    const concrete = group.operations.find((operation) => operation.kind !== "status" && operation.summary);
-    if (concrete?.summary) {
-      return concrete.summary;
-    }
-    return group.operations.find((operation) => operation.summary)?.summary ?? "";
-  }
-
-  function reActGroupSummaryItems(group: ConversationReActOperationGroup) {
-    const tone = reActGroupTone(group);
-    const active = group.operations.find((operation) => isRunningOperationStatus(operation.status));
-    const failed = group.operations.find((operation) => operationStatusTone(operation) === "failed");
-    const focus = active ?? failed ?? group.operations.find((operation) => operation.kind === "thought") ?? group.operations[0];
+  function operationStateLabel(tone: string) {
     const stateLabel = tone === "running"
       ? lang === "zh" ? "执行中" : "Running"
       : tone === "failed"
@@ -1340,11 +1205,54 @@ export function ConversationView({
         : tone === "done"
           ? lang === "zh" ? "已完成" : "Done"
           : lang === "zh" ? "待处理" : "Pending";
-    return [
-      stateLabel,
-      focus ? operationLabel(focus) : "",
-      operationStepCountLabel(group.operations.length),
-    ].filter(Boolean);
+    return stateLabel;
+  }
+
+  function reActGroupDurationLabel(group: ConversationReActOperationGroup) {
+    const durations = group.operations
+      .map((operation) => operation.durationSeconds)
+      .filter((duration): duration is number => typeof duration === "number" && Number.isFinite(duration) && duration > 0);
+    if (durations.length === 0) {
+      return "";
+    }
+    return formatDuration(durations.reduce((total, duration) => total + duration, 0));
+  }
+
+  function operationDisplayText(operation: ConversationOperation) {
+    return String(operation.resultPreview || operation.summary || "").trim();
+  }
+
+  function reActThoughtOperations(group: ConversationReActOperationGroup) {
+    return group.operations.filter((operation) => ["thought", "mental"].includes(operation.kind) && operationDisplayText(operation));
+  }
+
+  function reActActionOperations(group: ConversationReActOperationGroup) {
+    return group.operations.filter((operation) => !["thought", "mental"].includes(operation.kind));
+  }
+
+  function reActResultItems(group: ConversationReActOperationGroup) {
+    return reActActionOperations(group)
+      .map((operation) => {
+        if (operation.error?.trim()) {
+          return {
+            id: `${operation.id}-error`,
+            label: operationLabel(operation),
+            value: operation.error.trim(),
+            tone: "failed",
+          };
+        }
+        const result = String(operation.resultPreview ?? "").trim();
+        if (!result || result === operation.summary.trim() || operation.kind === "status") {
+          return null;
+        }
+        return {
+          id: `${operation.id}-result`,
+          label: operationLabel(operation),
+          value: result,
+          tone: "default",
+        };
+      })
+      .filter((item): item is { id: string; label: string; value: string; tone: string } => item !== null);
   }
 
   function shouldExpandReActGroupByDefault(group: ConversationReActOperationGroup) {
@@ -1576,18 +1484,15 @@ export function ConversationView({
             : detailsExpanded ? t("toolCallDetailsVisible") : t("toolCallDetailsHidden");
           const operationClassName = [
             styles.operationItem,
-            operation.kind === "tool" ? styles.operationItemTool : "",
             styles[`operationItem_${operationTone(operation)}`],
             isRunningOperationStatus(operation.status) ? styles.operationItemActive : "",
           ].filter(Boolean).join(" ");
           return (
             <div key={operation.id} className={styles.operationItemWrap}>
               <div className={operationClassName}>
-                {operation.kind !== "tool" ? (
-                  <span className={`${styles.operationIcon} ${styles[`operationIcon_${operation.kind}`]}`}>
-                    {operationIcon(operation.kind, operation.label)}
-                  </span>
-                ) : null}
+                <span className={`${styles.operationIcon} ${styles[`operationIcon_${operation.kind}`]}`}>
+                  {operationIcon(operation.kind, operation.label)}
+                </span>
                 <div className={styles.operationText}>
                   <span className={styles.operationName}>{operationLabel(operation)}</span>
                   {operation.summary ? (
@@ -1641,124 +1546,58 @@ export function ConversationView({
     );
   }
 
-  function renderOperationProgressRail(operations: ConversationOperation[]) {
-    const progressOperations = dedupeProgressOperations(operations);
+  function renderReActThoughtSection(group: ConversationReActOperationGroup) {
+    const thoughts = reActThoughtOperations(group);
+    if (thoughts.length === 0) {
+      return null;
+    }
     return (
-      <div className={styles.operationProgressRail} aria-label={lang === "zh" ? "执行进度" : "Execution progress"}>
-        {progressOperations.map((operation, index) => {
-          const tone = operationStatusTone(operation);
-          return (
-            <span
-              key={`${operation.id}-rail`}
-              className={`${styles.operationRailStep} ${styles[`operationRailStep_${tone}`]}`}
-              title={`${operationLabel(operation)} · ${statusLabel(operation.status)}`}
-            >
-              <span className={styles.operationRailDot} aria-hidden="true" />
-              <span className={styles.operationRailLabel}>{compactOperationLabel(operation)}</span>
-              {index < progressOperations.length - 1 ? <span className={styles.operationRailConnector} aria-hidden="true" /> : null}
-            </span>
-          );
-        })}
-      </div>
+      <section className={styles.reActOperationSection}>
+        <span className={styles.reActOperationSectionLabel}>{lang === "zh" ? "思考" : "Thinking"}</span>
+        <div className={styles.reActThoughtStack}>
+          {thoughts.map((operation) => (
+            <pre key={`${operation.id}-thought-text`} className={styles.reActThoughtText}>
+              {operationDisplayText(operation)}
+            </pre>
+          ))}
+        </div>
+      </section>
     );
   }
 
-  function renderFeedbackOperationTable(operations: ConversationOperation[], options: { limitInitialRows?: boolean } = {}) {
-    const shouldLimitRows = options.limitInitialRows && operations.length > INITIAL_VISIBLE_FEEDBACK_OPERATION_COUNT;
-    const hiddenOperationCount = shouldLimitRows ? operations.length - INITIAL_VISIBLE_FEEDBACK_OPERATION_COUNT : 0;
-    const visibleOperations = shouldLimitRows
-      ? operations.slice(-INITIAL_VISIBLE_FEEDBACK_OPERATION_COUNT)
-      : operations;
+  function renderReActActionSection(group: ConversationReActOperationGroup) {
+    const actions = reActActionOperations(group);
+    if (actions.length === 0) {
+      return null;
+    }
     return (
-      <div className={styles.operationTableWrap}>
-        {hiddenOperationCount > 0 ? (
-          <div className={styles.operationTimelineTrimmed}>
-            {lang === "zh"
-              ? `已折叠更早 ${hiddenOperationCount} 步执行记录`
-              : `${hiddenOperationCount} earlier execution steps collapsed`}
-          </div>
-        ) : null}
-        <div className={styles.operationTable} role="table" aria-label={lang === "zh" ? "执行过程明细" : "Execution detail"}>
-          <div className={`${styles.operationTableRow} ${styles.operationTableHead}`} role="row">
-            <span role="columnheader">{lang === "zh" ? "阶段" : "Stage"}</span>
-            <span role="columnheader">{lang === "zh" ? "状态" : "Status"}</span>
-            <span role="columnheader">{lang === "zh" ? "摘要" : "Summary"}</span>
-            <span role="columnheader">{lang === "zh" ? "耗时" : "Time"}</span>
-            <span role="columnheader" aria-label={lang === "zh" ? "详情" : "Details"} />
-          </div>
-          {visibleOperations.map((operation) => {
-            const duration = formatDuration(operation.durationSeconds);
-            const detailsId = `operation-detail-${operation.id}`;
-            const detailsExpanded = getExpansionState(operation.id, "details", false);
-            const detailRows = operationDetailRows(operation);
-            const canExpandDetails = detailRows.length > 0;
-            const computerUseResult = renderComputerUseResult(operation);
-            const detailToggleTitle = operation.kind === "thought"
-              ? detailsExpanded ? t("thoughtProcessVisible") : t("thoughtProcessHidden")
-              : operation.kind === "status"
-                ? detailsExpanded ? t("executionDetailsVisible") : t("executionDetailsHidden")
-              : detailsExpanded ? t("toolCallDetailsVisible") : t("toolCallDetailsHidden");
-            const tone = operationStatusTone(operation);
-            return (
-              <div key={operation.id} className={styles.operationTableItem}>
-                <div
-                  className={`${styles.operationTableRow} ${styles[`operationTableRow_${tone}`]}`}
-                  role="row"
-                >
-                  <span className={styles.operationTableStage} role="cell">
-                    <span className={styles.operationTableStageIcon} aria-hidden="true">
-                      {operationIcon(operation.kind, operation.label)}
-                    </span>
-                    <span>{operationLabel(operation)}</span>
-                  </span>
-                  <span className={styles.operationTableStatus} role="cell">
-                    {operationStatusIcon(operation)}
-                    <span>{statusLabel(operation.status)}</span>
-                  </span>
-                  <span className={styles.operationTableSummary} role="cell">
-                    {operation.summary || (lang === "zh" ? "无摘要" : "No summary")}
-                  </span>
-                  <span className={styles.operationTableDuration} role="cell">
-                    {duration || "--"}
-                  </span>
-                  <span className={styles.operationTableAction} role="cell">
-                    {canExpandDetails ? (
-                      <button
-                        type="button"
-                        className={styles.operationDetailToggle}
-                        aria-expanded={detailsExpanded}
-                        aria-controls={detailsId}
-                        onClick={() => toggleSection(operation.id, "details", false)}
-                        title={detailToggleTitle}
-                      >
-                        {detailsExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-                      </button>
-                    ) : null}
-                  </span>
-                </div>
-                {canExpandDetails && detailsExpanded ? (
-                  <div
-                    id={detailsId}
-                    className={
-                      operation.kind === "thought"
-                        ? `${styles.operationDetails} ${styles.operationDetails_thought}`
-                        : styles.operationDetails
-                    }
-                  >
-                    {detailRows.map((row) => (
-                      <div key={`${operation.id}-${row.label}`} className={styles.operationDetailRow}>
-                        <span className={styles.operationDetailLabel}>{row.label}</span>
-                        <pre className={styles.operationDetailValue}>{row.value}</pre>
-                      </div>
-                    ))}
-                  </div>
-                ) : null}
-                {computerUseResult}
-              </div>
-            );
-          })}
+      <section className={styles.reActOperationSection}>
+        <span className={styles.reActOperationSectionLabel}>{lang === "zh" ? "行动" : "Actions"}</span>
+        {renderOperationTimeline(actions)}
+      </section>
+    );
+  }
+
+  function renderReActResultSection(group: ConversationReActOperationGroup) {
+    const results = reActResultItems(group);
+    if (results.length === 0) {
+      return null;
+    }
+    return (
+      <section className={styles.reActOperationSection}>
+        <span className={styles.reActOperationSectionLabel}>{lang === "zh" ? "结果" : "Results"}</span>
+        <div className={styles.reActResultList}>
+          {results.map((item) => (
+            <div
+              key={item.id}
+              className={`${styles.reActResultItem} ${item.tone === "failed" ? styles.reActResultItem_failed : ""}`}
+            >
+              <span className={styles.reActResultLabel}>{item.label}</span>
+              <pre className={styles.reActResultValue}>{item.value}</pre>
+            </div>
+          ))}
         </div>
-      </div>
+      </section>
     );
   }
 
@@ -1770,9 +1609,10 @@ export function ConversationView({
     const defaultExpanded = shouldExpandReActGroupByDefault(group);
     const expanded = getExpansionState(messageId, sectionId, defaultExpanded);
     const tone = reActGroupTone(group);
-    const summaryItems = reActGroupSummaryItems(group);
-    const preview = reActGroupPreview(group);
-    const label = reActGroupTitle(group);
+    const headerItems = [
+      operationStateLabel(tone),
+      reActGroupDurationLabel(group),
+    ].filter(Boolean);
     return (
       <section className={`${styles.reActOperationGroup} ${styles[`reActOperationGroup_${tone}`]}`}>
         <button
@@ -1782,16 +1622,20 @@ export function ConversationView({
           onClick={() => toggleSection(messageId, sectionId, defaultExpanded)}
           title={expanded ? t("executionDetailsVisible") : t("executionDetailsHidden")}
         >
-          <span className={styles.reActOperationBadge}>{label}</span>
-          {summaryItems.length > 0 ? (
+          {headerItems.length > 0 ? (
             <span className={styles.reActOperationMeta}>
-              {summaryItems.join(" · ")}
+              {headerItems.join(" · ")}
             </span>
           ) : null}
-          {!expanded && preview ? <span className={styles.reActOperationPreview}>{preview}</span> : null}
           {expanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
         </button>
-        {expanded ? renderFeedbackOperationTable(group.operations) : null}
+        {expanded ? (
+          <div className={styles.reActOperationBody}>
+            {renderReActThoughtSection(group)}
+            {renderReActActionSection(group)}
+            {renderReActResultSection(group)}
+          </div>
+        ) : null}
       </section>
     );
   }
@@ -1852,12 +1696,7 @@ export function ConversationView({
     const defaultTimelineExpanded = defaultExpanded || reActGroups.some((group) => shouldExpandReActGroupByDefault(group));
     const expanded = getExpansionState(messageId, "feedback", defaultTimelineExpanded);
     const title = operationTimelineTitle(operations);
-    const progress = operationProgressMeta(operations);
-    const summaryItems = operationProgressSummaryItems(progress, operations.length);
-    const stepCount = [
-      operationStepCountLabel(operations.length),
-      reActGroupCountLabel(reActGroups.length),
-    ].filter(Boolean).join(" · ");
+    const stateLabel = operationStateLabel(operationCollectionTone(operations));
     return (
       <section className={`${styles.operationGroup} ${styles.executionTraceGroup}`}>
         <button
@@ -1869,32 +1708,17 @@ export function ConversationView({
         >
           {operationIcon(operations[0]?.kind ?? "tool", title)}
           <span>{title}</span>
-          {stepCount ? <span className={styles.operationSummaryCount}>{stepCount}</span> : null}
+          <span className={styles.operationSummaryCount}>{stateLabel}</span>
           {expanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
         </button>
-        {summaryItems.length > 0 ? (
-          <div className={styles.operationStatusLine} aria-live="polite">
-            {summaryItems.map((item, index) => (
-              <span
-                key={`${messageId}-operation-status-${index}`}
-                className={index === 0 ? styles.operationStatusLead : styles.operationStatusMeta}
-              >
-                {item}
-              </span>
+        {expanded ? (
+          <div className={styles.reActOperationList}>
+            {reActGroups.map((group) => (
+              <div key={group.id}>
+                {renderReActOperationGroup(messageId, group)}
+              </div>
             ))}
           </div>
-        ) : null}
-        {expanded ? (
-          <>
-            {renderOperationProgressRail(operations)}
-            <div className={styles.reActOperationList}>
-              {reActGroups.map((group) => (
-                <div key={group.id}>
-                  {renderReActOperationGroup(messageId, group)}
-                </div>
-              ))}
-            </div>
-          </>
         ) : null}
       </section>
     );
