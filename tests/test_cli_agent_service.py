@@ -1861,7 +1861,7 @@ def test_cli_agent_terminal_marks_plain_transcript_tail_replayable(tmp_path):
 def test_cli_agent_terminal_blocks_unsafe_tui_transcript_tail_replay(tmp_path):
     transcript = tmp_path / "terminal.log"
     spinner_tail = "".join(
-        f"\x1b[?2026h\x1b[?25l\x1b[34;6H\x1b[38;2;128;128;128m⠋\x1b[0m\x1b[57;6H\x1b[?25h\x1b[?2026l"
+        "\x1b[?2026h\x1b[?25l\x1b[34;6H\x1b[38;2;128;128;128m⠋\x1b[0m\x1b[57;6H\x1b[?25h\x1b[?2026l"
         for _ in range(40)
     )
     transcript.write_text(spinner_tail, encoding="utf-8")

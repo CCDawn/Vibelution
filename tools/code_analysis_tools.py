@@ -238,7 +238,7 @@ def get_code_entity(file_path: str, entity_name: str, include_imports: bool = Fa
 
     result = [
         f"[AST] 实体: {target_entity['name']}",
-        f"[AST] 类型: {target_entity['type']}" + (f" (方法)" if 'class_name' in target_entity else ""),
+        f"[AST] 类型: {target_entity['type']}" + (" (方法)" if 'class_name' in target_entity else ""),
         f"[AST] 位置: 第 {start_line} - {end_line} 行",
     ]
 
@@ -254,11 +254,11 @@ def get_code_entity(file_path: str, entity_name: str, include_imports: bool = Fa
             if line.strip().startswith('import ') or line.strip().startswith('from ')
         ]
         if import_lines:
-            result.append(f"\n[AST] 导入:\n```python")
+            result.append("\n[AST] 导入:\n```python")
             result.append(''.join(import_lines).rstrip())
             result.append("```")
 
-    result.append(f"\n[AST] 代码:\n```python")
+    result.append("\n[AST] 代码:\n```python")
     result.append(code.rstrip())
     result.append("```")
 
@@ -394,7 +394,7 @@ def list_file_entities(file_path: str, entity_type: str = "all") -> str:
 
     result = [
         f"[AST] 文件: {file_path}",
-        f"[AST] 概览:\n",
+        "[AST] 概览:\n",
     ]
 
     all_entities = []
@@ -599,7 +599,7 @@ def _find_similar_snippet(content: str, search_block: str, context_lines: int = 
             line_num = start + idx + 1  # start is 0-indexed, line numbers are 1-indexed
             display_line = line if len(line) <= 80 else line[:77] + "..."
             preview_lines.append(f"  {line_num:>4}: {display_line}")
-        return f"[提示] 文件中相似的代码:\n" + "\n".join(preview_lines)
+        return "[提示] 文件中相似的代码:\n" + "\n".join(preview_lines)
     
     return ""
 
@@ -724,13 +724,13 @@ def apply_diff_edit(file_path: str, diff_text: str, allow_fuzzy: bool = False) -
 
     if not blocks:
         return (
-            f"[编辑] 错误: 无法解析 diff_text\n"
-            f"请确保使用正确的格式:\n"
-            f"<<<<<<< SEARCH\n"
-            f"要替换的旧代码\n"
-            f"=======\n"
-            f"新代码\n"
-            f">>>>>>> REPLACE"
+            "[编辑] 错误: 无法解析 diff_text\n"
+            "请确保使用正确的格式:\n"
+            "<<<<<<< SEARCH\n"
+            "要替换的旧代码\n"
+            "=======\n"
+            "新代码\n"
+            ">>>>>>> REPLACE"
         )
 
     new_content = content
@@ -1063,13 +1063,7 @@ __all__ = [
     'extract_method_from_class',
     # Diff 工具
     'apply_diff_edit',
-    'apply_diff_edit_tool',
     'apply_patch_edit',
     'validate_diff_format',
-    'validate_diff_format_tool',
     'preview_diff',
-    # 工具注册
-    'get_code_analysis_tools',
-    'create_ast_tools',
-    'create_code_tools',
 ]

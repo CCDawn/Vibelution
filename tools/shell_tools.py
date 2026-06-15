@@ -1200,7 +1200,7 @@ def create_file(
             action = "覆盖" if existed_before else "成功"
             return f"[创建文件] [OK] {action}\n文件: {abs_path}\n大小: {file_size} 字节\n行数: {line_count}"
         else:
-            return f"[创建文件] [FAIL] 创建失败"
+            return "[创建文件] [FAIL] 创建失败"
 
     except Exception as e:
         return f"[创建文件] [ERROR] {type(e).__name__}: {str(e)}"
@@ -1260,7 +1260,7 @@ def edit_file(
         # 多匹配检测
         count = old_content.count(search_string)
         if count == 0:
-            return f"[文件编辑] 错误: 未找到目标代码"
+            return "[文件编辑] 错误: 未找到目标代码"
         if count > 1:
             match_lines = []
             for i, line in enumerate(lines, 1):
@@ -1269,7 +1269,7 @@ def edit_file(
             return (
                 f"[文件编辑] 错误: 找到 {count} 个匹配项，非唯一匹配！\n"
                 f"匹配位置:\n" + "\n".join(match_lines) +
-                f"\n\n【必须】提供更长的上下文（目标行及其前后各 2 行）以确保唯一匹配。"
+                "\n\n【必须】提供更长的上下文（目标行及其前后各 2 行）以确保唯一匹配。"
             )
 
         if create_backup:

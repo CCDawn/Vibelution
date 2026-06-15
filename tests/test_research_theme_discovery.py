@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from typing import Any  # noqa: F401
 from types import SimpleNamespace
 
 import pytest

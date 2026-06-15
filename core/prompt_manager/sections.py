@@ -354,8 +354,8 @@ def make_env_info_section(project_root: Path) -> SystemPromptSection:
             f"- 操作系统: {os_name} ({platform.version()}) [{platform.machine()}]",
             *command_discipline(os_name),
             f"- 项目根目录: {project_root}",
-            f"- 静态提示词位置: core/core_prompt/",
-            f"- 动态提示词位置: workspace/prompts/",
+            "- 静态提示词位置: core/core_prompt/",
+            "- 动态提示词位置: workspace/prompts/",
         ])
 
     return SystemPromptSection(

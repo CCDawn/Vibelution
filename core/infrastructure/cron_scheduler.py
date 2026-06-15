@@ -179,7 +179,7 @@ class CronScheduler:
             "job_id": job_id,
             "name": name.strip(),
             "schedule": schedule,
-            "message": f"定时任务已创建，使用 cron_list_tool 查看",
+            "message": "定时任务已创建，使用 cron_list_tool 查看",
         }, ensure_ascii=False)
 
     def list_jobs(self) -> str:

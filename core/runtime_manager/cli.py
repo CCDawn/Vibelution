@@ -35,7 +35,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
 def _print_status(snapshot: dict) -> None:
     workbench = snapshot.get("workbench") or {}
-    print(f"Mode      : runtime_manager")
+    print("Mode      : runtime_manager")
     print(f"Project   : {snapshot.get('projectRoot') or ''}")
     print(f"Manager   : {'running' if snapshot.get('daemonRunning') else 'stopped'} (PID={snapshot.get('managerPid') or 0})")
     print(

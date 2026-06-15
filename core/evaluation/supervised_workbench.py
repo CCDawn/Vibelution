@@ -478,7 +478,7 @@ def execute_gym_promotion_action(
     if action == "apply":
         result = apply_gym_promotion_proposal(lifecycle.proposal_path, project_root=root, approved_by="workbench")
         summary_lines = [
-            f"action: apply",
+            "action: apply",
             f"proposal: {result.proposal_id}",
             f"status: {result.status}",
             f"decision: {result.decision_path}",
@@ -487,7 +487,7 @@ def execute_gym_promotion_action(
     elif action == "activate":
         result = activate_gym_promotion_proposal(lifecycle.proposal_path, project_root=root, activated_by="workbench")
         summary_lines = [
-            f"action: activate",
+            "action: activate",
             f"proposal: {result.proposal_id}",
             f"status: {result.status}",
             f"target: {result.target_key}",
@@ -503,7 +503,7 @@ def execute_gym_promotion_action(
             reason="manual supervised workbench rollback",
         )
         summary_lines = [
-            f"action: rollback",
+            "action: rollback",
             f"proposal: {result.proposal_id}",
             f"status: {result.status}",
             f"reason: {result.reason or '-'}",
