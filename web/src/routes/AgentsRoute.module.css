@@ -2271,6 +2271,69 @@
   -webkit-line-clamp: 2;
 }
 
+.compressionPolicyGrid,
+.compressionPolicySubgrid,
+.compressionPolicyFooter {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+}
+
+.compressionPolicyGrid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.compressionPolicySubgrid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  padding: 7px;
+  border: 1px solid color-mix(in srgb, var(--accent-cool) 14%, var(--border-soft));
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--surface-panel) 70%, transparent);
+}
+
+.compressionPolicyFooter {
+  grid-template-columns: minmax(110px, 1fr) repeat(2, minmax(0, 1fr));
+  align-items: end;
+}
+
+.compressionToggleField input {
+  justify-self: start;
+  width: 18px;
+  min-height: 18px;
+  padding: 0;
+}
+
+.compressionInlineCheck {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  min-height: 30px;
+  padding: 0 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-control);
+  background: var(--surface-panel);
+  color: var(--fg-secondary);
+  font-size: 0.74rem;
+  font-weight: 700;
+}
+
+.compressionInlineCheck input {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  min-height: 16px;
+  margin: 0;
+}
+
+.compressionInlineCheck span {
+  min-width: 0;
+  overflow: hidden;
+  color: inherit;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .checkField {
   display: flex;
   align-items: center;
@@ -3056,6 +3119,9 @@
   .toolBundleList,
   .toolBundleItem,
   .memoryPolicyGrid,
+  .compressionPolicyGrid,
+  .compressionPolicySubgrid,
+  .compressionPolicyFooter,
   .runtimePolicyGrid,
   .contextModeGrid,
   .factGrid,
