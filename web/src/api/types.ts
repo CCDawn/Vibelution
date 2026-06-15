@@ -2451,6 +2451,7 @@ export type SessionSummary = {
   agentRoleKey?: string;
   agentPromptTemplateId?: string;
   dialogueModelId?: string;
+  agentInboxPendingCount?: number;
   agentPrimaryDirectSessionId?: string;
   agentDirectSessionMismatch?: boolean;
   workspacePath?: string;
@@ -4238,6 +4239,7 @@ export type ConversationSummary = {
   agentRoleKey?: string;
   agentPromptTemplateId?: string;
   dialogueModelId?: string;
+  agentInboxPendingCount?: number;
   agentMissing?: boolean;
   agentStatusCode?: string;
   agentStatusMessage?: string;

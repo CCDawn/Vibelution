@@ -79,6 +79,7 @@ describe("conversationIndexModel", () => {
       agentPrimaryMode: "chat",
       agentRoleKey: "knowledge",
       agentPromptTemplateId: "prompt-knowledge",
+      agentInboxPendingCount: 4,
     }));
 
     expect(summary).toMatchObject({
@@ -88,6 +89,7 @@ describe("conversationIndexModel", () => {
       agentDisplayName: "顾明澈",
       dialogueModelId: "gpt-5.5",
       agentRoleKey: "knowledge",
+      agentInboxPendingCount: 4,
     });
   });
 

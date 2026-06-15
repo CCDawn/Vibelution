@@ -6,6 +6,8 @@ import {
   buildDirectSessionIndexViewModel,
   isAgentRootSession,
   isChildSession,
+  sessionUnreadBadgeTitle,
+  sessionUnreadCount,
   sessionModelTooltip,
   sessionAgentMetaLabel,
   sessionListTitle,
@@ -85,6 +87,15 @@ describe("DirectSessionIndexItem helpers", () => {
     expect(isChildSession(root)).toBe(false);
     expect(isAgentRootSession(child)).toBe(false);
     expect(isChildSession(child)).toBe(true);
+  });
+
+  it("normalizes pending inbox messages into a compact unread badge count", () => {
+    expect(sessionUnreadCount(makeSession({ agentInboxPendingCount: 3 }))).toBe(3);
+    expect(sessionUnreadCount(makeSession({ agentInboxPendingCount: 0 }))).toBe(0);
+    expect(sessionUnreadCount(makeSession({ agentInboxPendingCount: -2 }))).toBe(0);
+    expect(sessionUnreadBadgeTitle(3, "zh")).toBe("未读信息：3 条");
+    expect(sessionUnreadBadgeTitle(1, "en")).toBe("1 unread message");
+    expect(sessionUnreadBadgeTitle(2, "en")).toBe("2 unread messages");
   });
 
   it("builds the compact direct session item view model for normal sessions", () => {
