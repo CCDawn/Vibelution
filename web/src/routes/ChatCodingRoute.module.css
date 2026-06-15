@@ -496,6 +496,23 @@
   font-weight: 760;
 }
 
+.leftBlock > .activeSkillStatus {
+  margin-top: 6px;
+}
+
+.contextStatusCard,
+.cacheStatusCard,
+.compressionStatusCard,
+.compressionStrategyCard,
+.runModeBlock {
+  display: grid;
+  gap: 6px;
+}
+
+.contextStatusCard .contextCompositionPanel {
+  padding-top: 0;
+}
+
 .featurePresetBlock {
   display: grid;
   gap: 5px;
@@ -523,6 +540,19 @@
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 3px;
   min-width: 0;
+}
+
+.runModeBlock .featureChipRow {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.runModeBlock .featureToggle {
+  min-height: 28px;
+  padding: 4px 6px;
+}
+
+.runModeBlock .featureToggleText {
+  align-items: center;
 }
 
 .featureToggle {
@@ -607,6 +637,10 @@
   line-height: 1.25;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
+}
+
+.runModeBlock .featureToggleText span {
+  display: none;
 }
 
 .featureChip {
@@ -977,6 +1011,45 @@
   word-break: normal;
 }
 
+.cacheStatusCard .cacheDonutPanel {
+  grid-template-columns: 72px minmax(0, 1fr);
+  gap: 7px;
+}
+
+.cacheStatusCard .cacheDonutTrigger,
+.cacheStatusCard .cacheDonutShell,
+.cacheStatusCard .cacheDonutSvg {
+  width: 72px;
+  height: 72px;
+}
+
+.cacheStatusCard .cacheDonutShell {
+  min-width: 72px;
+}
+
+.cacheStatusCard .cacheDonutCenter {
+  inset: 19px;
+}
+
+.cacheStatusCard .cacheDonutCenter strong {
+  font-size: 0.78rem;
+}
+
+.cacheStatusCard .cacheDonutCenter span,
+.cacheStatusCard .cacheDonutCenter small {
+  max-width: 34px;
+  font-size: 0.48rem;
+}
+
+.cacheStatusCard .cacheDonutStats {
+  gap: 3px;
+}
+
+.cacheStatusCard .cacheDonutStats span {
+  grid-template-columns: 25px minmax(0, 1fr);
+  gap: 4px;
+}
+
 .companionCompact {
   display: grid;
   grid-template-columns: 30px minmax(0, 1fr);
@@ -1123,25 +1196,25 @@
 
 .compressionStrategyList {
   display: grid;
-  gap: 5px;
-  margin-top: 6px;
+  gap: 4px;
+  margin-top: 0;
 }
 
 .compressionStrategyRow {
   display: grid;
-  grid-template-columns: 72px minmax(0, 1fr);
-  gap: 3px 8px;
+  grid-template-columns: 48px minmax(0, 1fr);
+  gap: 2px 6px;
   min-width: 0;
-  padding: 6px 7px;
+  padding: 5px 6px;
   border: 1px solid var(--border-soft);
   border-radius: 7px;
   background: color-mix(in srgb, var(--surface-card) 72%, transparent);
   color: var(--fg-secondary);
-  font-size: 0.72rem;
+  font-size: 0.67rem;
 }
 
 .compressionStrategyRow strong {
-  grid-row: span 3;
+  grid-row: span 2;
   min-width: 0;
   color: var(--accent-warm-2);
   font-weight: 700;
@@ -1150,7 +1223,9 @@
 
 .compressionStrategyRow span {
   min-width: 0;
-  overflow-wrap: anywhere;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .detailNote {
@@ -1160,6 +1235,28 @@
   color: var(--fg-secondary);
   font-size: 0.74rem;
   line-height: 1.35;
+}
+
+.compressionStrategyCard .detailNote {
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 6px;
+  margin-top: 0;
+  overflow: hidden;
+  font-size: 0.66rem;
+  line-height: 1.2;
+}
+
+.compressionStrategyCard .detailNote span,
+.compressionStrategyCard .detailNote strong {
+  min-width: 0;
+}
+
+.compressionStrategyCard .detailNote strong {
+  overflow: hidden;
+  color: var(--fg-secondary);
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .vitalStackCompact {
