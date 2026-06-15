@@ -1355,6 +1355,10 @@ def test_runtime_summary_ready_session_ignores_stale_runtime_error(monkeypatch):
 
 
 def test_runtime_summary_exposes_latest_mental_state(monkeypatch):
+    public_config = copy.deepcopy(load_public_config())
+    public_config["mental_model"] = {"enabled": True}
+
+    monkeypatch.setattr(runtime_service, "load_public_config", lambda: copy.deepcopy(public_config))
     monkeypatch.setattr(runtime_service, "get_active_session_summary", lambda: {})
     monkeypatch.setattr(runtime_service, "_load_runtime_state", lambda: {})
 
@@ -1405,6 +1409,10 @@ def test_runtime_summary_reports_disabled_mental_model(monkeypatch):
 
 
 def test_runtime_summary_falls_back_to_mental_diagnosis_when_state_is_empty(monkeypatch):
+    public_config = copy.deepcopy(load_public_config())
+    public_config["mental_model"] = {"enabled": True}
+
+    monkeypatch.setattr(runtime_service, "load_public_config", lambda: copy.deepcopy(public_config))
     monkeypatch.setattr(runtime_service, "get_active_session_summary", lambda: {})
     monkeypatch.setattr(runtime_service, "_load_runtime_state", lambda: {})
 
