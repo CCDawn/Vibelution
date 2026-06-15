@@ -182,6 +182,21 @@ AGENT_CREATION_REQUIRED_FIELDS = (
     "toolPolicy",
     "memoryPolicy",
 )
+DEFAULT_AGENT_CONTEXT_COMPRESSION_POLICY = {
+    "mode": "inherit",
+}
+DEFAULT_CONTEXT_COMPRESSION_LEVELS = {
+    "light": 0.6,
+    "standard": 0.8,
+    "deep": 0.9,
+    "emergency": 0.95,
+}
+DEFAULT_CONTEXT_COMPRESSION_SUMMARY_CHARS = {
+    "light": 500,
+    "standard": 1000,
+    "deep": 2000,
+    "emergency": 3000,
+}
 AGENT_WORKSPACE_SUBDIRS = (
     "conversation",
     "memory",
@@ -449,6 +464,7 @@ def create_agent_instance(
     workspace_path: str = "",
     created_by: str = "user",
     metadata: dict[str, Any] | None = None,
+    context_compression_policy: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     with _STATE_LOCK:
         state = repair_agent_directory()
@@ -471,6 +487,7 @@ def create_agent_instance(
         normalized_primary_mode = _normalize_primary_mode(primary_mode)
         normalized_role_key = _normalize_role_key(role_key)
         normalized_prompt_template_id = _normalize_prompt_template_id(prompt_template_id)
+        normalized_context_compression_policy = normalize_agent_context_compression_policy(context_compression_policy)
         normalized_direct_session_id = str(direct_session_id or "").strip()
         _ensure_active_direct_session_available(
             state,
@@ -508,6 +525,7 @@ def create_agent_instance(
             "workspacePath": agent_workspace,
             "toolPolicyId": tool_policy_id,
             "memoryPolicyId": memory_policy_id,
+            "contextCompressionPolicy": normalized_context_compression_policy,
             "createdBy": str(created_by or "user").strip() or "user",
             "status": "active",
             "metadata": _with_functional_display_name(metadata_payload, title),
@@ -666,6 +684,7 @@ def update_agent_instance(
     memory_policy_id: str | None = None,
     tool_policy: dict[str, Any] | None = None,
     memory_policy: dict[str, Any] | None = None,
+    context_compression_policy: dict[str, Any] | None = None,
     delegation_policy: dict[str, Any] | None = None,
     supervision_policy: dict[str, Any] | None = None,
     persona_profile: dict[str, Any] | None = None,
@@ -778,6 +797,8 @@ def update_agent_instance(
             policies[policy_id] = updated_memory_policy
             agent["memoryPolicyId"] = policy_id
             state["memoryPolicies"] = policies
+        if context_compression_policy is not None:
+            agent["contextCompressionPolicy"] = normalize_agent_context_compression_policy(context_compression_policy)
         if delegation_policy is not None:
             metadata_payload = dict(agent.get("metadata") or {})
             updated_delegation_policy = normalize_delegation_policy(delegation_policy)
@@ -2806,6 +2827,9 @@ def _agent_creation_missing_fields(
 def _normalize_agent_record_for_storage(agent: dict[str, Any]) -> dict[str, Any]:
     normalized = dict(agent or {})
     normalized["llmBindings"] = normalize_agent_llm_bindings(normalized.get("llmBindings"))
+    normalized["contextCompressionPolicy"] = normalize_agent_context_compression_policy(
+        normalized.get("contextCompressionPolicy") if isinstance(normalized.get("contextCompressionPolicy"), dict) else None
+    )
     metadata = dict(normalized.get("metadata") or {})
     if _is_profileless_session_agent({**normalized, "metadata": metadata}):
         if isinstance(metadata.get("personaProfile"), dict):
@@ -3102,6 +3126,208 @@ def normalize_memory_policy(policy: dict[str, Any], policy_id: str, agent_worksp
     ):
         payload[key] = _unique_string_list(payload.get(key))
     return payload
+
+
+def normalize_agent_context_compression_policy(policy: dict[str, Any] | None) -> dict[str, Any]:
+    source = policy if isinstance(policy, dict) else {}
+    mode = str(source.get("mode") or "").strip().lower()
+    if mode not in {"inherit", "custom"}:
+        mode = "custom" if _has_context_compression_override(source) else "inherit"
+    if mode != "custom":
+        return dict(DEFAULT_AGENT_CONTEXT_COMPRESSION_POLICY)
+
+    payload: dict[str, Any] = {
+        "mode": "custom",
+        "enabled": bool(source.get("enabled", True)),
+    }
+    max_token_limit = _positive_context_compression_int(
+        source.get("maxTokenLimit", source.get("max_token_limit")),
+        default=0,
+        maximum=2_000_000,
+    )
+    if max_token_limit > 0:
+        payload["maxTokenLimit"] = max_token_limit
+    payload["maxCompressionsPerSession"] = _positive_context_compression_int(
+        source.get("maxCompressionsPerSession", source.get("max_compressions_per_session")),
+        default=20,
+        maximum=100,
+    )
+    payload["levels"] = _normalize_context_compression_levels(source.get("levels"))
+    payload["summaryChars"] = _normalize_context_compression_summary_chars(
+        source.get("summaryChars", source.get("summary_chars"))
+    )
+    payload["preservation"] = _normalize_context_compression_preservation(source.get("preservation"))
+    return payload
+
+
+def effective_agent_context_compression_policy(
+    agent: dict[str, Any] | None,
+    base_policy: Any = None,
+    *,
+    context_window_limit: int = 0,
+) -> dict[str, Any]:
+    base = _context_compression_policy_from_config(base_policy, context_window_limit=context_window_limit)
+    raw_agent_policy = normalize_agent_context_compression_policy(
+        (agent or {}).get("contextCompressionPolicy") if isinstance(agent, dict) else None
+    )
+    if raw_agent_policy.get("mode") != "custom":
+        return {
+            **base,
+            "mode": "inherit",
+            "source": "global",
+            "agentPolicy": raw_agent_policy,
+        }
+
+    merged = {
+        **base,
+        "mode": "custom",
+        "source": "agent_custom",
+        "agentPolicy": raw_agent_policy,
+        "enabled": bool(raw_agent_policy.get("enabled", base.get("enabled", True))),
+        "maxCompressionsPerSession": _positive_context_compression_int(
+            raw_agent_policy.get("maxCompressionsPerSession"),
+            default=int(base.get("maxCompressionsPerSession") or 20),
+            maximum=100,
+        ),
+        "levels": {
+            **dict(base.get("levels") or {}),
+            **dict(raw_agent_policy.get("levels") or {}),
+        },
+        "summaryChars": {
+            **dict(base.get("summaryChars") or {}),
+            **dict(raw_agent_policy.get("summaryChars") or {}),
+        },
+        "preservation": {
+            **dict(base.get("preservation") or {}),
+            **dict(raw_agent_policy.get("preservation") or {}),
+        },
+    }
+    raw_limit = _positive_context_compression_int(raw_agent_policy.get("maxTokenLimit"), default=0, maximum=2_000_000)
+    context_window = _positive_context_compression_int(context_window_limit, default=int(base.get("contextWindowLimit") or 0), maximum=2_000_000)
+    if raw_limit > 0:
+        merged["maxTokenLimit"] = raw_limit
+        merged["effectiveTokenLimit"] = min(raw_limit, context_window) if context_window > 0 else raw_limit
+    else:
+        merged["maxTokenLimit"] = int(base.get("maxTokenLimit") or base.get("effectiveTokenLimit") or 0)
+        merged["effectiveTokenLimit"] = int(base.get("effectiveTokenLimit") or merged["maxTokenLimit"])
+    merged["contextWindowLimit"] = context_window or int(merged.get("effectiveTokenLimit") or 0)
+    return merged
+
+
+def _has_context_compression_override(source: dict[str, Any]) -> bool:
+    return any(
+        key in source
+        for key in (
+            "enabled",
+            "maxTokenLimit",
+            "max_token_limit",
+            "maxCompressionsPerSession",
+            "max_compressions_per_session",
+            "levels",
+            "summaryChars",
+            "summary_chars",
+            "preservation",
+        )
+    )
+
+
+def _context_compression_policy_from_config(base_policy: Any, *, context_window_limit: int = 0) -> dict[str, Any]:
+    if base_policy is None:
+        try:
+            from config import get_config
+
+            base_policy = get_config().context_compression
+        except Exception:
+            base_policy = {}
+    effective_limit = _positive_context_compression_int(
+        _get_config_value(base_policy, "max_token_limit", "maxTokenLimit"),
+        default=16_000,
+        maximum=2_000_000,
+    )
+    context_window = _positive_context_compression_int(
+        context_window_limit,
+        default=effective_limit,
+        maximum=2_000_000,
+    )
+    effective_token_limit = min(effective_limit, context_window) if context_window > 0 else effective_limit
+    return {
+        "mode": "inherit",
+        "source": "global",
+        "enabled": bool(_get_config_value(base_policy, "enabled", default=True)),
+        "maxTokenLimit": effective_limit,
+        "effectiveTokenLimit": effective_token_limit,
+        "contextWindowLimit": context_window,
+        "maxCompressionsPerSession": _positive_context_compression_int(
+            _get_config_value(base_policy, "max_compressions_per_session", "maxCompressionsPerSession"),
+            default=20,
+            maximum=100,
+        ),
+        "levels": _normalize_context_compression_levels(_get_config_value(base_policy, "levels", default={})),
+        "summaryChars": _normalize_context_compression_summary_chars(
+            _get_config_value(base_policy, "summary_chars", "summaryChars", default={})
+        ),
+        "preservation": _normalize_context_compression_preservation(
+            _get_config_value(base_policy, "preservation", default={})
+        ),
+    }
+
+
+def _normalize_context_compression_levels(levels: Any) -> dict[str, float]:
+    raw = levels if levels is not None else {}
+    return {
+        "light": _context_compression_ratio(_get_config_value(raw, "light"), DEFAULT_CONTEXT_COMPRESSION_LEVELS["light"]),
+        "standard": _context_compression_ratio(_get_config_value(raw, "standard"), DEFAULT_CONTEXT_COMPRESSION_LEVELS["standard"]),
+        "deep": _context_compression_ratio(_get_config_value(raw, "deep"), DEFAULT_CONTEXT_COMPRESSION_LEVELS["deep"]),
+        "emergency": _context_compression_ratio(_get_config_value(raw, "emergency"), DEFAULT_CONTEXT_COMPRESSION_LEVELS["emergency"]),
+    }
+
+
+def _normalize_context_compression_summary_chars(summary_chars: Any) -> dict[str, int]:
+    raw = summary_chars if summary_chars is not None else {}
+    return {
+        "light": _positive_context_compression_int(_get_config_value(raw, "light"), default=DEFAULT_CONTEXT_COMPRESSION_SUMMARY_CHARS["light"], maximum=20_000),
+        "standard": _positive_context_compression_int(_get_config_value(raw, "standard"), default=DEFAULT_CONTEXT_COMPRESSION_SUMMARY_CHARS["standard"], maximum=20_000),
+        "deep": _positive_context_compression_int(_get_config_value(raw, "deep"), default=DEFAULT_CONTEXT_COMPRESSION_SUMMARY_CHARS["deep"], maximum=20_000),
+        "emergency": _positive_context_compression_int(_get_config_value(raw, "emergency"), default=DEFAULT_CONTEXT_COMPRESSION_SUMMARY_CHARS["emergency"], maximum=20_000),
+    }
+
+
+def _normalize_context_compression_preservation(preservation: Any) -> dict[str, Any]:
+    raw = preservation if preservation is not None else {}
+    return {
+        "keepAiMessages": _positive_context_compression_int(
+            _get_config_value(raw, "keepAiMessages", "keep_ai_messages"),
+            default=5,
+            maximum=50,
+        ),
+        "preserveErrors": bool(_get_config_value(raw, "preserveErrors", "preserve_errors", default=True)),
+        "extractKeyDecisions": bool(_get_config_value(raw, "extractKeyDecisions", "extract_key_decisions", default=True)),
+    }
+
+
+def _context_compression_ratio(value: Any, default: float) -> float:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        parsed = default
+    return max(0.0, min(1.0, parsed))
+
+
+def _positive_context_compression_int(value: Any, *, default: int, maximum: int) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        parsed = default
+    return max(0, min(maximum, parsed))
+
+
+def _get_config_value(source: Any, *keys: str, default: Any = None) -> Any:
+    for key in keys:
+        if isinstance(source, dict) and key in source:
+            return source.get(key)
+        if hasattr(source, key):
+            return getattr(source, key)
+    return default
 
 
 def normalize_delegation_policy(policy: dict[str, Any] | None) -> dict[str, Any]:
@@ -3666,6 +3892,10 @@ def _agent_to_api(agent: dict[str, Any], *, hydration: AgentApiHydrationContext 
         "primaryMode": _normalize_primary_mode(agent.get("primaryMode") or _infer_agent_primary_mode(agent)),
         "roleKey": _normalize_role_key(agent.get("roleKey") or _infer_agent_role_key(agent)),
         "llmBindings": normalize_agent_llm_bindings(agent.get("llmBindings")),
+        "contextCompressionPolicy": normalize_agent_context_compression_policy(
+            agent.get("contextCompressionPolicy") if isinstance(agent.get("contextCompressionPolicy"), dict) else None
+        ),
+        "contextCompressionEffectivePolicy": effective_agent_context_compression_policy(agent),
         "promptTemplateId": _normalize_prompt_template_id(
             agent.get("promptTemplateId") or _infer_agent_prompt_template_id(agent)
         ),
@@ -3710,6 +3940,10 @@ def _agent_to_api_summary(agent: dict[str, Any]) -> dict[str, Any]:
         "primaryMode": _normalize_primary_mode(agent.get("primaryMode") or _infer_agent_primary_mode(agent)),
         "roleKey": _normalize_role_key(agent.get("roleKey") or _infer_agent_role_key(agent)),
         "llmBindings": normalize_agent_llm_bindings(agent.get("llmBindings")),
+        "contextCompressionPolicy": normalize_agent_context_compression_policy(
+            agent.get("contextCompressionPolicy") if isinstance(agent.get("contextCompressionPolicy"), dict) else None
+        ),
+        "contextCompressionEffectivePolicy": effective_agent_context_compression_policy(agent),
         "promptTemplateId": _normalize_prompt_template_id(
             agent.get("promptTemplateId") or _infer_agent_prompt_template_id(agent)
         ),

@@ -456,6 +456,10 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("t(\"compressionModelWindow\")");
     expect(routeSource).toContain("t(\"compressionThresholdBasis\")");
     expect(routeSource).toContain("const compressionModelWindowLine = compression");
+    expect(routeSource).toContain("const compressionPolicySourceLine = compression");
+    expect(routeSource).toContain("compression.policySource === \"agent_custom\"");
+    expect(routeSource).toContain("Agent 自定义策略");
+    expect(routeSource).toContain("继承全局策略");
     expect(routeSource).toContain("styles.compressionFactGrid");
     expect(routeSource).toContain("styles.compressionStrategyCard");
     expect(routeSource).toContain("styles.compressionStrategyList");
@@ -1039,8 +1043,14 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("onTerminalSessionChange={handleCliAgentTerminalSessionChange}");
     expect(routeSource).not.toContain(") : activeCliAgentRun ? (");
     expect(routeSource).toContain('"/api/cli-agents/terminal-sessions/ensure"');
+    expect(routeSource).toContain('intent,');
+    expect(routeSource).toContain('fetchTerminalSession("view", controller.signal)');
+    expect(routeSource).toContain('requestTerminalSession(terminalCanResume ? "resume" : "start")');
+    expect(routeSource).toContain("function canInputTerminal");
+    expect(routeSource).toContain("terminalCanInputRef.current");
+    expect(routeSource).toContain("终端未运行，请先恢复会话。");
     expect(routeSource).toContain("sourceRunId: run.sourceRunId");
-    expect(routeSource).toContain("cliSessionId: String(run.cliSessionId || run.result?.cliSessionId || \"\")");
+    expect(routeSource).toContain('cliSessionId: intent === "start" ? "" : terminalCliSessionIdRef.current');
     expect(routeSource).toContain("void sessionDetailQuery.refetch()");
     expect(routeSource).toContain("new EventSource(`/api/cli-agents/terminal-sessions/${encodeURIComponent(terminalSessionId)}/events`)");
     expect(routeSource).toContain("terminal_output");
