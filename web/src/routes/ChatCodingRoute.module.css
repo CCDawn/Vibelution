@@ -513,6 +513,43 @@
   padding-top: 0;
 }
 
+.contextStatusCard .resourceSplit,
+.compressionStatusCard .compressionFactGrid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+}
+
+.compressionStatusCard .compressionFactGrid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.contextStatusCard .resourceMetric,
+.compressionStatusCard .compressionFact {
+  padding: 4px 5px;
+}
+
+.compressionStatusCard .compressionFact {
+  gap: 1px;
+}
+
+.contextStatusCard .resourceMetric strong,
+.compressionStatusCard .compressionFact strong {
+  overflow: hidden;
+  font-size: 0.68rem;
+  line-height: 1.15;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.compressionStatusCard .compressionFactWide {
+  grid-column: auto;
+}
+
+.compressionStatusCard .oneLineValue {
+  margin-top: 0;
+  -webkit-line-clamp: 1;
+}
+
 .featurePresetBlock {
   display: grid;
   gap: 5px;
@@ -543,16 +580,7 @@
 }
 
 .runModeBlock .featureChipRow {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-}
-
-.runModeBlock .featureToggle {
-  min-height: 28px;
-  padding: 4px 6px;
-}
-
-.runModeBlock .featureToggleText {
-  align-items: center;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .featureToggle {
@@ -663,6 +691,16 @@
     color 140ms ease;
 }
 
+.runModeBlock .featureChip {
+  min-height: 25px;
+  padding: 2px 5px;
+}
+
+.featureChipPrimary {
+  border-color: color-mix(in srgb, var(--accent-warm) 28%, var(--border-soft));
+  background: color-mix(in srgb, var(--accent-warm) 9%, var(--surface-card));
+}
+
 .featureChip strong {
   min-width: 0;
   overflow-wrap: anywhere;
@@ -699,6 +737,15 @@
 .featureChipActive span {
   background: var(--accent-cool);
   opacity: 1;
+}
+
+.featureChipPrimary.featureChipActive {
+  border-color: color-mix(in srgb, var(--accent-warm) 46%, var(--border-soft));
+  background: color-mix(in srgb, var(--accent-warm) 16%, var(--surface-card));
+}
+
+.featureChipPrimary.featureChipActive span {
+  background: var(--accent-warm-2);
 }
 
 .featureToggleState {
@@ -1196,29 +1243,32 @@
 
 .compressionStrategyList {
   display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 4px;
   margin-top: 0;
 }
 
 .compressionStrategyRow {
   display: grid;
-  grid-template-columns: 48px minmax(0, 1fr);
-  gap: 2px 6px;
+  gap: 1px;
   min-width: 0;
-  padding: 5px 6px;
+  min-height: 32px;
+  padding: 4px;
   border: 1px solid var(--border-soft);
   border-radius: 7px;
   background: color-mix(in srgb, var(--surface-card) 72%, transparent);
   color: var(--fg-secondary);
-  font-size: 0.67rem;
+  font-size: 0.64rem;
 }
 
 .compressionStrategyRow strong {
-  grid-row: span 2;
   min-width: 0;
+  overflow: hidden;
   color: var(--accent-warm-2);
   font-weight: 700;
-  overflow-wrap: anywhere;
+  line-height: 1.1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .compressionStrategyRow span {

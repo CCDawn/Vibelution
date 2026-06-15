@@ -20,9 +20,10 @@ describe("ChatCodingRoute layout contract", () => {
   });
 
   it("keeps the next-turn mental model toggle in the left feature card", () => {
-    expect(chatRoute).toContain("mentalModelEnabledForNextTurn ? t(\"mentalModelNextTurnOn\") : t(\"mentalModelNextTurnOff\")");
+    expect(chatRoute).toContain("styles.featureChipPrimary");
     expect(chatRoute).toContain("onClick={() => handleMentalModelEnabledChange(!mentalModelEnabledForNextTurn)}");
     expect(chatRoute).toContain("title={t(\"chatFeatureMentalModelHint\")}");
+    expect(chatRoute.indexOf("styles.featureChipPrimary")).toBeLessThan(chatRoute.indexOf("CHAT_FEATURE_PRESETS.map"));
     expect(chatRoute).not.toContain("mentalModelEnabled={mentalModelEnabledForNextTurn}");
     expect(chatRoute).not.toContain("onMentalModelEnabledChange={handleMentalModelEnabledChange}");
   });
