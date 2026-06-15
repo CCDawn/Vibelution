@@ -27,4 +27,17 @@ describe("ChatCodingRoute layout contract", () => {
     expect(chatRoute).not.toContain("mentalModelEnabled={mentalModelEnabledForNextTurn}");
     expect(chatRoute).not.toContain("onMentalModelEnabledChange={handleMentalModelEnabledChange}");
   });
+
+  it("keeps the current session card in the dense status layout", () => {
+    const currentSessionBlock = cssRule(".currentSessionBlock");
+    const currentSessionLine = cssRule(".currentSessionLine");
+    const currentSessionMetaList = cssRule(".currentSessionMetaList");
+
+    expect(chatRoute).toContain("styles.currentSessionBlock");
+    expect(chatRoute).toContain("styles.currentSessionLine");
+    expect(chatRoute).toContain("styles.currentSessionMetaList");
+    expect(currentSessionBlock).toContain("gap: 4px");
+    expect(currentSessionLine).toContain("-webkit-line-clamp: 1");
+    expect(currentSessionMetaList).toContain("repeat(2, minmax(0, 1fr))");
+  });
 });
