@@ -826,6 +826,43 @@ def test_desktop_entry_python_bridge_replaces_stale_launcher(monkeypatch):
     assert terminated == [111, 112, 222]
 
 
+def test_desktop_entry_python_bridge_terminates_windows_pid_without_taskkill(monkeypatch):
+    bridge = _load_desktop_entry_py()
+    subprocess_calls: list[tuple[tuple[object, ...], dict[str, object]]] = []
+
+    class FakeKernel32:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, int]] = []
+
+        def OpenProcess(self, access: int, inherit: bool, pid: int) -> int:
+            self.calls.append(("OpenProcess", access, pid))
+            return 99
+
+        def TerminateProcess(self, handle: int, exit_code: int) -> int:
+            self.calls.append(("TerminateProcess", handle, exit_code))
+            return 1
+
+        def CloseHandle(self, handle: int) -> int:
+            self.calls.append(("CloseHandle", handle))
+            return 1
+
+    kernel32 = FakeKernel32()
+
+    monkeypatch.setattr(bridge.os, "name", "nt", raising=False)
+    monkeypatch.setattr(bridge, "_pid_alive", lambda pid: True)
+    monkeypatch.setattr(bridge, "_terminate_pid_tree_with_psutil", lambda pid: False, raising=False)
+    monkeypatch.setattr(bridge.shutil, "which", lambda name: r"C:\Windows\System32\taskkill.exe" if name == "taskkill" else "")
+    monkeypatch.setattr(bridge.subprocess, "run", lambda *args, **kwargs: subprocess_calls.append((args, kwargs)))
+    monkeypatch.setattr(bridge.ctypes, "windll", type("FakeWindll", (), {"kernel32": kernel32})(), raising=False)
+
+    bridge._terminate_pid(4321)
+
+    assert subprocess_calls == []
+    assert ("OpenProcess", 0x0001, 4321) in kernel32.calls
+    assert ("TerminateProcess", 99, 1) in kernel32.calls
+    assert ("CloseHandle", 99) in kernel32.calls
+
+
 def _run_launcher_ast_harness(tmp_path: Path, harness_source: str) -> subprocess.CompletedProcess[str]:
     harness_path = tmp_path / "launcher-ast-harness.ps1"
     harness_path.write_text(_normalize_ast_harness_source(harness_source), encoding="utf-8-sig")

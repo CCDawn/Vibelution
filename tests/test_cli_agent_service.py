@@ -53,6 +53,29 @@ endLocal & goto #_undefined_# 2>NUL || title %COMSPEC% & "%_prog%"  "%dp0%\\node
     return cmd_path, cli_script
 
 
+def _write_fake_claude_native_cmd_shim(tmp_path):
+    npm_dir = tmp_path / "npm"
+    cli_exe = npm_dir / "node_modules" / "@anthropic-ai" / "claude-code" / "bin" / "claude.exe"
+    cli_exe.parent.mkdir(parents=True)
+    cli_exe.write_text("", encoding="utf-8")
+    cmd_path = npm_dir / "claude.cmd"
+    cmd_path.write_text(
+        """
+@ECHO off
+GOTO start
+:find_dp0
+SET dp0=%~dp0
+EXIT /b
+:start
+SETLOCAL
+CALL :find_dp0
+"%dp0%\\node_modules\\@anthropic-ai\\claude-code\\bin\\claude.exe"   %*
+""".strip(),
+        encoding="utf-8",
+    )
+    return cmd_path, cli_exe
+
+
 def _write_mimocode_session_db(path, *, cwd, session_id="ses_test", created=10_000, updated=10_000):
     path.parent.mkdir(parents=True, exist_ok=True)
     connection = sqlite3.connect(path)
@@ -430,6 +453,36 @@ def test_claude_cli_terminal_launch_uses_cwd_and_plan_permission(monkeypatch, tm
     assert command["cwd"] == str(project_root)
     assert command["resumed"] is False
     assert command["initialInput"] == "只读审查当前项目\r\n"
+
+
+def test_claude_cli_terminal_real_cmd_shim_uses_native_exe_without_node(monkeypatch, tmp_path):
+    project_root = _configure_roots(monkeypatch, tmp_path)
+    claude_cmd, claude_exe = _write_fake_claude_native_cmd_shim(tmp_path)
+    node_exe = r"C:\tools\node.exe"
+
+    def fake_which(candidate):
+        if candidate == "claude.cmd":
+            return str(claude_cmd)
+        if candidate == "node.exe":
+            return node_exe
+        return ""
+
+    monkeypatch.setattr(terminal_service.os, "name", "nt", raising=False)
+    monkeypatch.setattr(service.shutil, "which", fake_which)
+
+    command = terminal_service._build_terminal_command(
+        agent_type="claude_code",
+        task="只读审查当前项目",
+        cwd=str(project_root),
+        mode="readonly",
+        model="",
+        agent="",
+        cli_session_id="",
+    )
+
+    assert command["args"] == [str(claude_exe), "--permission-mode", "plan"]
+    assert node_exe not in command["args"]
+    assert all(not str(item).lower().endswith(".cmd") for item in command["args"])
 
 
 def test_claude_cli_terminal_resume_uses_session_option(monkeypatch, tmp_path):
@@ -997,6 +1050,66 @@ def test_cli_agent_terminal_startup_reconcile_marks_orphan_running_state_stale(m
     assert state["status"] == "stale"
     assert state["alive"] is False
     assert state["staleReason"] == "test_startup"
+
+
+def test_cli_agent_terminal_source_bound_attach_does_not_resume_stale_session(monkeypatch, tmp_path):
+    project_root = _configure_roots(monkeypatch, tmp_path)
+    monkeypatch.setattr(service.shutil, "which", lambda candidate: r"C:\tools\mimo.cmd" if candidate == "mimo.cmd" else "")
+    task = "继续审查启动弹窗"
+    terminal_session_id = terminal_service._stable_terminal_session_id(
+        adapter_id="mimo_code",
+        source_session_id="session-1",
+        source_message_id="message-1",
+        source_run_id="run-1",
+        cwd=str(project_root),
+        mode="readonly",
+        task=task,
+    )
+    terminal_service._write_state(
+        {
+            "terminalSessionId": terminal_session_id,
+            "adapterId": "mimo_code",
+            "agentType": "mimo_code",
+            "label": "MiMo Code",
+            "sourceSessionId": "session-1",
+            "sourceMessageId": "message-1",
+            "sourceRunId": "run-1",
+            "cliRunId": "cli-run-stale",
+            "lockKey": "cli-lock-stale",
+            "cwd": str(project_root),
+            "mode": "readonly",
+            "task": task,
+            "cliSessionId": "ses_restart",
+            "cliSessionIdSource": "session_discovery_existing",
+            "status": "stale",
+            "alive": False,
+            "staleReason": "backend_startup",
+            "updatedAt": "2026-06-15T01:40:00+00:00",
+        }
+    )
+    spawned = []
+
+    def fake_spawn(*args, **kwargs):
+        spawned.append((args, kwargs))
+        raise AssertionError("source-bound stale terminal attach must not spawn a CLI process")
+
+    monkeypatch.setattr(terminal_service, "_spawn_terminal_process", fake_spawn)
+
+    session = terminal_service.ensure_cli_agent_terminal_session(
+        agent_type="mimo_code",
+        task=task,
+        cwd=str(project_root),
+        mode="readonly",
+        source_session_id="session-1",
+        source_message_id="message-1",
+        source_run_id="run-1",
+    )
+
+    assert spawned == []
+    assert session["terminalSessionId"] == terminal_session_id
+    assert session["status"] == "stale"
+    assert session["alive"] is False
+    assert session["cliSessionId"] == "ses_restart"
 
 
 def test_cli_agent_lifecycle_close_event_persists_once(monkeypatch, tmp_path):

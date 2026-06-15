@@ -294,6 +294,28 @@ def ensure_cli_agent_terminal_session(
                 cwd=scope_cwd or cwd,
                 exclude_terminal_session_id=terminal_session_id,
             )
+        if _source_bound_attach_should_not_resume_stale_state(
+            existing_state,
+            source_session_id=normalized_source_session_id,
+        ):
+            public_state = _public_state(
+                {
+                    **existing_state,
+                    **_read_transcript_snapshot(_transcript_path(str(existing_state.get("terminalSessionId") or terminal_session_id))),
+                }
+            )
+            cli_agent_service._record_event(
+                "cli_agent.terminal.stale_attach_skipped",
+                outcome="skipped",
+                fields={
+                    "terminalSessionId": str(existing_state.get("terminalSessionId") or terminal_session_id),
+                    "adapterId": normalized_type,
+                    "sourceSessionId": normalized_source_session_id,
+                    "status": str(existing_state.get("status") or ""),
+                    "staleReason": str(existing_state.get("staleReason") or ""),
+                },
+            )
+            return public_state
         normalized_source_session_id = normalized_source_session_id or str(existing_state.get("sourceSessionId") or "").strip()
         normalized_source_message_id = normalized_source_message_id or str(existing_state.get("sourceMessageId") or "").strip()
         normalized_source_run_id = normalized_source_run_id or str(existing_state.get("sourceRunId") or "").strip()
@@ -418,6 +440,15 @@ def get_cli_agent_terminal_session(terminal_session_id: str) -> dict[str, Any]:
         raise CliAgentTerminalError("TERMINAL_SESSION_NOT_FOUND", "Terminal session not found.")
     state["alive"] = False
     return _public_state({**state, **_read_transcript_snapshot(_transcript_path(session_id))})
+
+
+def _source_bound_attach_should_not_resume_stale_state(state: dict[str, Any], *, source_session_id: str) -> bool:
+    if not state or not str(source_session_id or "").strip():
+        return False
+    status = str(state.get("status") or "").strip().lower()
+    if status != "stale":
+        return False
+    return bool(str(state.get("terminalSessionId") or "").strip())
 
 
 def stream_cli_agent_terminal_events(terminal_session_id: str):
@@ -681,6 +712,8 @@ def _resolve_windows_npm_cmd_shim(executable: str) -> list[str]:
     script_path = path.parent.joinpath(*relative_parts)
     if not script_path.exists():
         return []
+    if script_path.suffix.lower() == ".exe":
+        return [str(script_path)]
     local_node = path.parent / "node.exe"
     node_path = str(local_node) if local_node.exists() else (
         cli_agent_service.shutil.which("node.exe") or cli_agent_service.shutil.which("node") or ""
