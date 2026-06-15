@@ -6247,7 +6247,7 @@ export function ChatCodingRoute() {
           </section>
         ) : (
           <>
-        <section className={styles.leftBlock}>
+        <section className={`${styles.leftBlock} ${styles.currentSessionBlock}`}>
           <div className={styles.sectionHeader}>
             <div className={styles.sectionIdentity}>
               <p className={styles.blockEyebrow}>{t("currentSession")}</p>
@@ -6257,7 +6257,9 @@ export function ChatCodingRoute() {
               {sessionStateLabel}
             </span>
           </div>
-          <p className={styles.contextLineCompact}>{sessionStateLine}</p>
+          <p className={`${styles.contextLineCompact} ${styles.currentSessionLine}`} title={sessionStateLine}>
+            {sessionStateLine}
+          </p>
           {agentDirectSessionMismatch && agentPrimaryDirectSessionId ? (
             <div className={styles.sessionBindingNotice} role="status">
               <span>{sessionBindingMismatchLine}</span>
@@ -6272,7 +6274,7 @@ export function ChatCodingRoute() {
             </div>
           ) : null}
           {sessionCompactRows.length > 0 ? (
-            <div className={styles.inlineMetaList}>
+            <div className={`${styles.inlineMetaList} ${styles.currentSessionMetaList}`}>
               {sessionCompactRows.map((row) => (
                 <span key={row.label} className={styles.inlineMetaPill} title={row.title ?? row.value}>
                   <span>{row.label}</span>

@@ -321,6 +321,9 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("styles.cacheDetailDonutPanel");
     expect(routeSource).toContain("case \"cache_write\"");
     expect(routeSource).toContain("cacheCreationInputTokens");
+    expect(routeSource).toContain("styles.currentSessionBlock");
+    expect(routeSource).toContain("styles.currentSessionLine");
+    expect(routeSource).toContain("styles.currentSessionMetaList");
     expect(routeSource.indexOf("styles.runModeBlock")).toBeGreaterThan(routeSource.indexOf("sessionCompactRows.map"));
     expect(routeSource.indexOf("styles.contextStatusCard")).toBeGreaterThan(routeSource.indexOf("styles.runModeBlock"));
     expect(routeSource.indexOf("styles.cacheStatusCard")).toBeGreaterThan(routeSource.indexOf("styles.contextStatusCard"));
@@ -333,6 +336,9 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.cacheStatusCard).toBeTypeOf("string");
     expect(routeStyles.compressionStatusCard).toBeTypeOf("string");
     expect(routeStyles.compressionStrategyCard).toBeTypeOf("string");
+    expect(routeStyles.currentSessionBlock).toBeTypeOf("string");
+    expect(routeStyles.currentSessionLine).toBeTypeOf("string");
+    expect(routeStyles.currentSessionMetaList).toBeTypeOf("string");
     expect(routeStyles.contextCompositionPanel).toBeTypeOf("string");
     expect(routeStyles.contextCompositionBar).toBeTypeOf("string");
     expect(routeStyles.contextCompositionLegend).toBeTypeOf("string");
