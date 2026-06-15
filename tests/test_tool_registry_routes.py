@@ -4,6 +4,7 @@ from core.web.app import create_app
 from core.web.control import CONTROL_TOKEN_HEADER, get_control_token
 from core.web.services import agent_directory_service
 from core.web.services import tool_registry_service as registry
+from core.web.services import tool_catalog
 
 
 def _client() -> TestClient:
@@ -23,7 +24,9 @@ def test_tools_api_lists_builtin_tools(tmp_path, monkeypatch):
     cli_agent = next(item for item in payload["tools"] if item["name"] == "cli_agent_run_tool")
     assert cli_agent["category"] == "agent_collaboration"
     assert cli_agent["permissionTier"] == "high"
-    assert cli_agent["permissionPolicy"]["requiresExplicitAllow"] is False
+    assert cli_agent["permissionPolicy"]["requiresExplicitAllow"] is (
+        str(cli_agent["name"]).strip() in tool_catalog.explicit_allow_tool_names()
+    )
     assert "operations" in cli_agent["bundleIds"]
     assert cli_agent["testPolicy"]["callable"] is False
 

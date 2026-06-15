@@ -192,6 +192,7 @@ def run_cli_agent(
                 mode=normalized_mode,
                 model=model,
                 agent=agent,
+                allow_unsafe_permissions=allow_unsafe_permissions,
                 send_initial_task=False,
             )
             task_result = cli_agent_task_kernel.submit_cli_agent_task(
