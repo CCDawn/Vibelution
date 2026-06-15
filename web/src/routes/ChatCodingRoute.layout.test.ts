@@ -108,11 +108,11 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeCssSource).not.toContain(".sessionAgentStatusControl");
   });
 
-  it("uses the unified Agent session tab strip for both single and multi-session states", () => {
+  it("uses the unified Agent session tab strip for multi-session or CLI states", () => {
     expect(routeSource).toContain("agentSessionTabs.length > 0 || cliAgentRunTabs.length > 0");
     expect(routeSource).not.toContain("agentSessionTabs.length > 1 || cliAgentRunTabs.length > 0");
-    expect(agentSessionTabStripSource).toContain("sessions.length === 0 && cliAgentRuns.length === 0");
-    expect(agentSessionTabStripSource).not.toContain("sessions.length <= 1 && cliAgentRuns.length === 0");
+    expect(agentSessionTabStripSource).toContain("cliAgentRuns.length === 0 && sessions.length <= 1");
+    expect(agentSessionTabStripSource).not.toContain("sessions.length === 0 && cliAgentRuns.length === 0");
 
     expect(routeStyles.agentSessionTabGroup).toBeTypeOf("string");
     expect(routeStyles.agentSessionTab).toBeTypeOf("string");
@@ -976,7 +976,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("for (const candidate of [toolCall.resultPreview, toolCall.summary])");
     expect(routeSource).toContain("function cliAgentRunIdForSource");
     expect(routeSource).toContain("function cliAgentCanonicalKey");
-    expect(routeSource).toContain("[\"cli-run-v2\", agentType.trim(), normalizedCwd].join(\"\\n\")");
+    expect(routeSource).toContain("[\"cli-run-v3\", agentType.trim(), normalizedCwd, normalizedMode].join(\"\\n\")");
     expect(routeSource).toContain("closedCliAgentRunIdFromMessage");
     expect(routeSource).toContain("cliAgentLifecyclePatchFromMessage");
     expect(routeSource).toContain("applyCliAgentLifecyclePatchToRuns");
@@ -990,6 +990,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("const runsByCanonicalKey = new Map<string, CliAgentRunView>()");
     expect(routeSource).toContain("const lifecycleByRunId = new Map<string, CliAgentLifecyclePatch>()");
     expect(routeSource).toContain("const lifecycleByCanonicalKey = new Map<string, CliAgentLifecyclePatch>()");
+    expect(routeSource).toContain("function buildCliAgentLifecycleRunView");
+    expect(routeSource).toContain("const normalizedMode = (mode.trim().toLowerCase() || \"readonly\")");
     expect(routeSource).toContain("closedRunIds.add(closedRunId)");
     expect(routeSource).toContain("closedCanonicalKeys.add(lifecycleCanonicalKey)");
     expect(routeSource).toContain("runsByCanonicalKey.set(canonicalKey, run)");

@@ -37,13 +37,16 @@ def test_submit_cli_agent_task_locks_one_active_task_per_terminal(monkeypatch, t
         output_limit=8000,
     )
 
-    assert first["status"] == "sent"
+    assert first["status"] == "task_sent"
+    assert first["internalStatus"] == "sent"
+    assert first["semanticStatus"] == "task_sent"
     assert first["code"] == "CLI_AGENT_TASK_SENT"
     assert len(writes) == 1
     assert "分析当前问题" in writes[0]
     assert "VIBELUTION_CLI_DONE:" in writes[0]
     assert "[VIBELUTION_CLI_DONE:" not in writes[0]
     assert second["code"] == "CLI_AGENT_TASK_LOCKED"
+    assert second["status"] == "task_locked"
     assert second["terminalSessionId"] == "cli-term-one"
 
 
@@ -84,7 +87,7 @@ def test_terminal_output_completion_returns_semantic_segments(monkeypatch, tmp_p
             "cliRunId": "cli-run-two",
             "screenText": "Thought: checking\n\nAnswer: 已完成，测试通过\n" + marker,
         },
-        "\x1b[?2026h" + marker + "\x1b[?2026l",
+        "\x1b[?2026hThought: checking\n\nAnswer: 已完成，测试通过\n" + marker + "\x1b[?2026l",
     )
 
     assert delivered
@@ -137,3 +140,22 @@ def test_mimo_prompt_echo_completion_text_does_not_complete_task(monkeypatch, tm
     assert delivered == []
     assert state["status"] == "running"
     assert state.get("completionReason") is None
+
+
+def test_mimo_marker_required_protocol_does_not_idle_complete_without_marker(monkeypatch, tmp_path):
+    project_root = tmp_path / "Vibelution"
+    project_root.mkdir()
+    monkeypatch.setattr(task_kernel, "PROJECT_ROOT", project_root)
+    monkeypatch.setattr(task_kernel, "TASK_STATE_DIR", project_root / ".runtime" / "cli_agents" / "tasks")
+
+    old_epoch_iso = "2026-06-14T10:00:00+00:00"
+    task_state = {
+        "adapterId": "mimo_code",
+        "status": "running",
+        "output": "Answer: 还在执行，没有结束标记",
+        "createdAt": old_epoch_iso,
+        "lastOutputAt": old_epoch_iso,
+        "timeoutSeconds": 3600,
+    }
+
+    assert task_kernel._task_timeout_or_idle_status(task_state, now=1781431400.0) == ""

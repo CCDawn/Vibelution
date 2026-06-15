@@ -2084,6 +2084,8 @@ def append_cli_agent_lifecycle_event(
         "sourceRunId": str(terminal.get("sourceRunId") or "").strip(),
         "linkedSourceRunIds": list(terminal.get("linkedSourceRunIds") or []),
         "cwd": str(terminal.get("cwd") or "").strip(),
+        "mode": str(terminal.get("mode") or "readonly").strip() or "readonly",
+        "lockKey": str(terminal.get("lockKey") or "").strip(),
         "cliSessionId": str(terminal.get("cliSessionId") or "").strip(),
         "cliSessionIdSource": str(terminal.get("cliSessionIdSource") or "").strip(),
         "eventAt": timestamp,
