@@ -23,12 +23,14 @@ from typing import Dict, Any, Optional, List
 DEFAULT_MAX_CHARS = 4000
 
 BUSINESS_FAILURE_STATUSES = {
+    "blocked",
     "fail",
     "failed",
     "failure",
     "error",
     "errored",
     "cancelled",
+    "policy_blocked",
     "timeout",
     "no_result",
     "submitted",
@@ -82,6 +84,12 @@ def infer_tool_business_success(result: Any) -> bool:
     """
     if result is None:
         return False
+    if isinstance(result, (bytes, bytearray)):
+        try:
+            decoded = result.decode("utf-8", errors="replace")
+        except Exception:
+            return False
+        return infer_tool_business_success(decoded)
     if isinstance(result, dict):
         return not _looks_like_business_failure(result)
     if isinstance(result, str):
@@ -213,7 +221,13 @@ def package_tool_result(
     max_chars: int = DEFAULT_MAX_CHARS,
 ) -> ToolResultEnvelope:
     """将工具结果封装为带元信息的统一结构。"""
-    result_str = str(result)
+    if isinstance(result, (bytes, bytearray)):
+        try:
+            result_str = result.decode("utf-8", errors="replace")
+        except Exception:
+            result_str = str(result)
+    else:
+        result_str = str(result)
     result_kind = _infer_result_kind(tool_name, result_str)
     range_info = _extract_range_info(result_kind, result_str)
     continuation_hint = _extract_continuation_hint(result_kind, result_str)

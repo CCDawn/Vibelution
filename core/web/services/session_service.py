@@ -47,6 +47,7 @@ from core.llm.agent_runtime import (
     AgentLlmResolutionError,
     resolve_agent_llm,
 )
+from core.infrastructure.tool_result import infer_tool_business_success
 from core.mental_model_flags import is_mental_model_enabled
 from core.evaluation.chat_dataset_capture import ChatDatasetCaptureService
 from core.evaluation.chat_next_state_signals import (
@@ -11411,14 +11412,9 @@ def _parse_agent_message_tool_result(tool_call: dict[str, Any]) -> dict[str, Any
 def _agent_message_tool_result_succeeded(payload: dict[str, Any]) -> bool:
     if not isinstance(payload, dict) or not payload:
         return False
-    status = str(payload.get("status") or "").strip().lower()
-    if payload.get("ok") is False:
+    if not infer_tool_business_success(payload):
         return False
-    if status in {"blocked", "failed", "error", "timeout", "invalid_args", "policy_blocked"}:
-        return False
-    if status in {"sent", "delivered", "ok", "success", "succeeded"}:
-        return True
-    return payload.get("ok") is True and bool(str(payload.get("targetAgentId") or "").strip())
+    return bool(str(payload.get("targetAgentId") or "").strip())
 
 
 def _looks_like_agent_message_delivery_confirmation(text: str) -> bool:
