@@ -1249,22 +1249,10 @@ def start_research_stage_round(team_id: str, payload: dict[str, Any] | None = No
         round_payload["warnings"] = warnings
         round_payload["teamMemoryRecord"] = _stage_memory_record(round_payload, workflow)
         round_payload["teamMemoryRecordId"] = round_payload["teamMemoryRecord"]["recordId"]
-        coordination_contract = _stage_coordination_contract(team, round_payload)
-        coordination_result = _try_start_stage_coordination_round(team, coordination_contract)
+        coordination_contract = _stage_coordination_contract(team, round_payload, trigger="manual")
+        coordination_result = _stage_coordination_manual_pending_result(coordination_contract)
         coordination_contract["startResult"] = coordination_result
         round_payload["coordinationContract"] = coordination_contract
-        if not coordination_result.get("started"):
-            warnings.append(
-                {
-                    "code": "coordination_round_not_started",
-                    "severity": "warning",
-                    "message": _trim_text(coordination_result.get("reason"), max_length=240) or "Coordination round was not started.",
-                }
-            )
-            status = "needs_attention"
-        else:
-            round_payload["coordinationRoundId"] = str(coordination_result.get("roundId") or "")
-            round_payload["coordinationRoomId"] = str(coordination_result.get("roomId") or "")
         round_payload["status"] = status
         now = utc_now_iso()
         round_payload["updatedAt"] = now
@@ -1313,7 +1301,7 @@ def retry_research_stage_round_coordination(team_id: str, stage_round_id: str) -
         stage_round = _find_stage_round(rounds, normalized_round_id)
         if stage_round is None:
             raise TeamWorkflowOrchestrationError("Stage round not found.")
-        coordination_contract = _stage_coordination_contract(team, stage_round)
+        coordination_contract = _stage_coordination_contract(team, stage_round, trigger="explicit_retry")
         coordination_result = _try_start_stage_coordination_round(team, coordination_contract)
         coordination_contract["startResult"] = coordination_result
         stage_round["coordinationContract"] = coordination_contract
@@ -7463,12 +7451,13 @@ def _stage_memory_record(stage_round: dict[str, Any], workflow: dict[str, Any]) 
     }
 
 
-def _stage_coordination_contract(team: dict[str, Any], stage_round: dict[str, Any]) -> dict[str, Any]:
+def _stage_coordination_contract(team: dict[str, Any], stage_round: dict[str, Any], *, trigger: str = "manual") -> dict[str, Any]:
     linked_room_id = _trim_text(team.get("linkedChatRoomId"), max_length=160)
     stage_type = str(stage_round.get("stageType") or "")
     topic = str(stage_round.get("topic") or "")
     linked_room = chat_room_service.get_chat_room_compact(linked_room_id) if linked_room_id else None
     room_mode = _trim_text((linked_room or {}).get("mode"), max_length=80) or "round_robin"
+    normalized_trigger = _trim_text(trigger, max_length=80) or "manual"
     return {
         "contractKind": "team_coordination_round_contract",
         "linkedChatRoomId": linked_room_id,
@@ -7477,14 +7466,26 @@ def _stage_coordination_contract(team: dict[str, Any], stage_round: dict[str, An
         "topic": f"{_stage_label(stage_type)}：{topic}",
         "purpose": _stage_coordination_purpose(stage_type),
         "mode": room_mode,
-        "autoStarted": True,
-        "expectedAction": "Start a lightweight background team coordination round for this stage.",
+        "autoStarted": False,
+        "trigger": normalized_trigger,
+        "expectedAction": "Start a lightweight team coordination round only after an explicit user action.",
         "config": {
-            "source": "research_stage_launcher",
+            "source": f"research_stage_{normalized_trigger}",
             "teamId": team.get("teamId", ""),
             "stageRoundId": stage_round.get("stageRoundId", ""),
             "sourceRunIds": list(stage_round.get("sourceRunIds") or []),
         },
+    }
+
+
+def _stage_coordination_manual_pending_result(contract: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "started": False,
+        "roomId": _trim_text(contract.get("linkedChatRoomId"), max_length=160),
+        "reason": "Team coordination is available but was not auto-started. Use the explicit coordination action when discussion is needed.",
+        "errorType": "",
+        "skipped": True,
+        "skipReason": "manual_only",
     }
 
 
