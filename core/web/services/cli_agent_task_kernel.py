@@ -75,6 +75,10 @@ def submit_cli_agent_task(
         normalized_task,
         completion_marker=str(task_state.get("completionMarker") or ""),
     )
+    with _TASK_LOCK:
+        task_state = _read_task_state(str(task_state.get("taskId") or "")) or task_state
+        task_state["sentInput"] = payload
+        _write_task_state(task_state)
     try:
         from . import cli_agent_terminal_service
 
@@ -226,7 +230,9 @@ def _task_timeout_or_idle_status(task_state: dict[str, Any], *, now: float) -> s
     protocol = protocols.protocol_for_adapter(adapter_id)
     if not str(task_state.get("output") or "").strip():
         return ""
-    if protocol.marker_completion_required:
+    if protocol.marker_completion_required and not protocol.allow_idle_completion_with_marker:
+        return ""
+    if protocol.marker_completion_required and not _task_has_non_echo_output(task_state):
         return ""
     if created_epoch is not None and now - created_epoch < protocol.min_completion_seconds:
         return ""
@@ -419,6 +425,24 @@ def _task_result_source(task_state: dict[str, Any]) -> str:
     if str(task_state.get("screenText") or "").strip():
         return "screen_buffer"
     return "terminal_output"
+
+
+def _task_has_non_echo_output(task_state: dict[str, Any]) -> bool:
+    output = _normalize_echo_comparison_text(str(task_state.get("output") or ""))
+    if not output:
+        return False
+    sent_input = _normalize_echo_comparison_text(str(task_state.get("sentInput") or ""))
+    if sent_input and (output == sent_input or output in sent_input):
+        return False
+    task = _normalize_echo_comparison_text(str(task_state.get("task") or ""))
+    if task and output == task:
+        return False
+    return True
+
+
+def _normalize_echo_comparison_text(text: str) -> str:
+    cleaned = protocols.remove_protocol_markers(protocols.strip_terminal_controls(str(text or "")))
+    return " ".join(cleaned.split()).strip()
 
 
 def _semantic_task_status(status: str, code: str) -> str:

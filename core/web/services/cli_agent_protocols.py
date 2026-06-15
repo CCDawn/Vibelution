@@ -27,6 +27,7 @@ class CliTaskProtocol:
     failure_patterns: tuple[str, ...]
     completion_patterns: tuple[str, ...]
     marker_completion_required: bool = False
+    allow_idle_completion_with_marker: bool = False
 
 
 DEFAULT_PROTOCOL = CliTaskProtocol(
@@ -57,6 +58,7 @@ PROTOCOLS: dict[str, CliTaskProtocol] = {
         ),
         completion_patterns=(),
         marker_completion_required=True,
+        allow_idle_completion_with_marker=True,
     ),
     "codex_code": CliTaskProtocol(
         adapter_id="codex_code",

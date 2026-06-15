@@ -151,7 +151,7 @@ class _TerminalRuntime:
         except Exception:
             return False
 
-    def snapshot(self) -> dict[str, Any]:
+    def snapshot(self, *, include_transcript_tail: bool = False) -> dict[str, Any]:
         with self.lock:
             self.state.update(_terminal_screen_state_fields(self.screen.snapshot()))
             payload = dict(self.state)
@@ -159,10 +159,10 @@ class _TerminalRuntime:
         payload["transport"] = self.transport
         payload = _merge_transcript_snapshot(
             payload,
-            _read_transcript_snapshot(
+            _read_transcript_snapshot_for_state(
                 self.transcript_path,
-                rows=_clamp_int(payload.get("rows"), DEFAULT_ROWS, 4, 120),
-                cols=_clamp_int(payload.get("cols"), DEFAULT_COLS, 20, 240),
+                payload,
+                include_transcript_tail=include_transcript_tail,
             ),
         )
         return _public_state(payload)
@@ -225,8 +225,9 @@ class _TerminalRuntime:
             public_state = _public_state(dict(self.state))
         if linked_session_id:
             _record_cli_agent_lifecycle_link(public_state, source="stdout_regex")
+            self._publish({"type": "terminal_status", "session": public_state})
         cli_agent_task_kernel.ingest_terminal_output(public_state, chunk)
-        self._publish({"type": "terminal_output", "chunk": chunk, "session": public_state})
+        self._publish({"type": "terminal_output", "chunk": chunk})
 
     def _publish(self, event: dict[str, Any]) -> None:
         with self.lock:
@@ -464,12 +465,12 @@ def ensure_cli_agent_terminal_session(
         return runtime.snapshot()
 
 
-def get_cli_agent_terminal_session(terminal_session_id: str) -> dict[str, Any]:
+def get_cli_agent_terminal_session(terminal_session_id: str, *, include_transcript_tail: bool = False) -> dict[str, Any]:
     session_id = _normalize_terminal_session_id(terminal_session_id)
     with _RUNTIMES_LOCK:
         runtime = _RUNTIMES.get(session_id)
         if runtime:
-            return runtime.snapshot()
+            return runtime.snapshot(include_transcript_tail=include_transcript_tail)
     state = _read_state(session_id)
     if not state:
         raise CliAgentTerminalError("TERMINAL_SESSION_NOT_FOUND", "Terminal session not found.")
@@ -477,10 +478,10 @@ def get_cli_agent_terminal_session(terminal_session_id: str) -> dict[str, Any]:
     return _public_state(
         _merge_transcript_snapshot(
             state,
-            _read_transcript_snapshot(
+            _read_transcript_snapshot_for_state(
                 _transcript_path(session_id),
-                rows=_clamp_int(state.get("rows"), DEFAULT_ROWS, 4, 120),
-                cols=_clamp_int(state.get("cols"), DEFAULT_COLS, 20, 240),
+                state,
+                include_transcript_tail=include_transcript_tail,
             ),
         )
     )
@@ -493,6 +494,24 @@ def _source_bound_attach_should_not_resume_stale_state(state: dict[str, Any], *,
     if status != "stale":
         return False
     return bool(str(state.get("terminalSessionId") or "").strip())
+
+
+def _terminal_action_ack(runtime: _TerminalRuntime, *, action: str) -> dict[str, Any]:
+    with runtime.lock:
+        state = dict(runtime.state)
+    rows = _clamp_int(state.get("rows"), DEFAULT_ROWS, 4, 120)
+    cols = _clamp_int(state.get("cols"), DEFAULT_COLS, 20, 240)
+    return {
+        "status": "accepted",
+        "semanticStatus": "accepted",
+        "code": "CLI_AGENT_TERMINAL_INPUT_ACCEPTED" if action == "input" else "CLI_AGENT_TERMINAL_RESIZE_ACCEPTED",
+        "action": action,
+        "terminalSessionId": str(state.get("terminalSessionId") or "").strip(),
+        "alive": runtime.is_alive(),
+        "rows": rows,
+        "cols": cols,
+        "updatedAt": str(state.get("updatedAt") or "").strip(),
+    }
 
 
 def stream_cli_agent_terminal_events(terminal_session_id: str):
@@ -536,13 +555,13 @@ def stream_cli_agent_terminal_events(terminal_session_id: str):
 def write_cli_agent_terminal_input(terminal_session_id: str, data: str) -> dict[str, Any]:
     runtime = _require_runtime(terminal_session_id)
     runtime.send_input(str(data or ""))
-    return runtime.snapshot()
+    return _terminal_action_ack(runtime, action="input")
 
 
 def resize_cli_agent_terminal_session(terminal_session_id: str, rows: int, cols: int) -> dict[str, Any]:
     runtime = _require_runtime(terminal_session_id)
     runtime.resize(rows, cols)
-    return runtime.snapshot()
+    return _terminal_action_ack(runtime, action="resize")
 
 
 def stop_cli_agent_terminal_session(terminal_session_id: str) -> dict[str, Any]:
@@ -1610,11 +1629,41 @@ def _read_transcript_snapshot(
 ) -> dict[str, Any]:
     tail = _read_transcript_tail(path, limit=limit)
     replay_tail = _strip_leading_ansi_fragment(tail)
+    replayable, reason = _classify_transcript_tail_replay(replay_tail)
+    if not replayable:
+        return {
+            "transcriptTail": "",
+            "transcriptTailReplayable": False,
+            "transcriptTailRenderReason": reason,
+        }
     return {
         "transcriptTail": replay_tail,
         "transcriptTailReplayable": True,
         "transcriptTailRenderReason": "raw_transcript_tail_boundary_aligned" if replay_tail != tail else ("raw_transcript_tail" if tail else "empty"),
     }
+
+
+def _read_transcript_snapshot_for_state(
+    path: Path,
+    state: dict[str, Any],
+    *,
+    include_transcript_tail: bool,
+) -> dict[str, Any]:
+    if (
+        not include_transcript_tail
+        and _screen_state_is_current(state)
+        and str(state.get("screenText") or "").strip()
+    ):
+        return {
+            "transcriptTail": "",
+            "transcriptTailReplayable": False,
+            "transcriptTailRenderReason": "screen_snapshot_preferred",
+        }
+    return _read_transcript_snapshot(
+        path,
+        rows=_clamp_int(state.get("rows"), DEFAULT_ROWS, 4, 120),
+        cols=_clamp_int(state.get("cols"), DEFAULT_COLS, 20, 240),
+    )
 
 
 def _classify_transcript_tail_replay(text: str) -> tuple[bool, str]:
