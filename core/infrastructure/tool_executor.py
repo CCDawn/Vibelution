@@ -99,6 +99,13 @@ def _coerce_tool_result_payload(result: Any) -> dict[str, Any]:
     return _parse_json_object(str(result or "").strip())
 
 
+def _coerce_result_status(value: Any) -> str:
+    """Normalize tool result status strings to remove common BOM/whitespace noise."""
+    if not isinstance(value, str):
+        return ""
+    return value.lstrip("\ufeff").strip().lower()
+
+
 def _record_current_agent_tool_observation(tool_name: str, status: str, tool_args: dict[str, Any], summary: str = "") -> None:
     try:
         from core.web.services.agent_directory_service import write_current_tool_observation
@@ -219,12 +226,35 @@ def _classify_tool_semantic_result(tool_name: str, result: Any) -> dict[str, Any
     text = str(result or "").strip()
     fields: dict[str, Any] = {"semanticStatus": "succeeded"}
     payload = _coerce_tool_result_payload(result)
-    payload_status = str(payload.get("status") or "").strip().lower()
-    if payload and not infer_tool_business_success(payload):
+    payload_status = _coerce_result_status(payload.get("status"))
+    transaction_status = _coerce_result_status(payload.get("transaction_status")) if payload else ""
+    if tool_name == "close_evolution_transaction_tool" and transaction_status and not payload_status:
+        payload_status = transaction_status
+    if (
+        tool_name == "close_evolution_transaction_tool"
+        and transaction_status
+        and transaction_status not in {"success", "ok"}
+        and payload_status in {"", "ok", "success"}
+    ):
+        payload_status = transaction_status
+    if payload_status and payload.get("status") != payload_status:
+        payload = dict(payload)
+        payload["status"] = payload_status
+    if tool_name == "close_evolution_transaction_tool" and payload_status:
+        fields["toolResultStatus"] = payload_status
+    is_business_success = infer_tool_business_success(payload) if payload else True
+    if tool_name == "close_evolution_transaction_tool" and transaction_status and transaction_status not in {"success", "ok"}:
+        is_business_success = False
+    if not is_business_success:
         outcome = "failed"
         event_code = "tool.execute.failed"
         level = "error"
-        result_status = payload_status if payload_status else "failed"
+        result_status = payload_status
+        if not result_status:
+            if tool_name == "close_evolution_transaction_tool" and transaction_status:
+                result_status = transaction_status
+            else:
+                result_status = "failed"
         if result_status in {"blocked", "policy_blocked"}:
             outcome = "blocked"
             event_code = "tool.execute.blocked"
@@ -312,7 +342,7 @@ def _classify_tool_semantic_result(tool_name: str, result: Any) -> dict[str, Any
 
 def _parse_json_object(text: str) -> dict[str, Any]:
     try:
-        payload = json.loads(text)
+        payload = json.loads(str(text or "").lstrip("\ufeff").strip())
     except (TypeError, json.JSONDecodeError):
         return {}
     return payload if isinstance(payload, dict) else {}
