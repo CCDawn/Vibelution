@@ -147,6 +147,20 @@ class TestToolMessageFlow:
         assert "阅读导航" in messages[0].content or "建议" in messages[0].content
         assert "offset=120" in messages[0].content
 
+    def test_handle_tool_result_decodes_binary_failure_result(self):
+        messages = []
+
+        ToolLifecycleBridge.handle_tool_result(
+            {"name": "get_git_status_summary_tool", "id": "call_binary"},
+            "[错误] binary result".encode("utf-8"),
+            None,
+            messages,
+        )
+
+        assert len(messages) == 1
+        assert messages[0].content == "[错误] binary result"
+        assert messages[0].tool_call_id == "call_binary"
+
     def test_seed_chat_history_restores_persisted_tool_results(self):
         agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
         agent.mode_policy = ModePolicy(

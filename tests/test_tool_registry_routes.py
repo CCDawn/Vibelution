@@ -314,6 +314,24 @@ def test_tools_api_runs_safe_builtin_test_with_fixed_args(tmp_path, monkeypatch)
     }
 
 
+def test_tools_api_runs_safe_builtin_test_with_binary_failure_output(tmp_path, monkeypatch):
+    monkeypatch.setattr(registry, "GENERATED_TOOLS_PATH", tmp_path / "generated_tools.json")
+
+    def fake_execute(self, tool_name, tool_args):
+        return ("[错误] test binary payload".encode("utf-8"), None)
+
+    monkeypatch.setattr("core.infrastructure.tool_executor.ToolExecutor.execute", fake_execute)
+
+    response = _client().post("/api/tools/get_git_status_summary_tool/test", json={"args": {}})
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["status"] == "failed"
+    assert payload["called"] is True
+    assert payload["resultPreview"] == "[错误] test binary payload"
+    assert payload["agentCompatibility"]["status"] == "failed"
+
+
 def test_tools_api_tests_safe_builtin_ignores_selected_agent_tool_policy(tmp_path, monkeypatch):
     monkeypatch.setattr(registry, "GENERATED_TOOLS_PATH", tmp_path / "generated_tools.json")
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
@@ -371,6 +389,30 @@ def test_tools_api_generated_tool_test(tmp_path, monkeypatch):
     assert payload["agentCompatibility"]["status"] == "succeeded"
     assert payload["agentCompatibility"]["toolCall"]["name"] == "route_probe_tool"
     assert payload["timeout"]["timedOut"] is False
+
+
+def test_tools_api_generated_tool_test_flags_failure_template(tmp_path, monkeypatch):
+    monkeypatch.setattr(registry, "GENERATED_TOOLS_PATH", tmp_path / "generated_tools.json")
+    client = _client()
+    client.post(
+        "/api/tools/generated",
+        json={
+            "name": "route_manifest_fail_tool",
+            "description": "Route generated manifest failure probe.",
+            "argsSchema": {"type": "object", "properties": {}},
+            "responseTemplate": "{\"status\": \"failed\"}",
+        },
+    )
+
+    response = client.post("/api/tools/route_manifest_fail_tool/test", json={"args": {}})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "failed"
+    assert payload["callable"] is False
+    assert payload["agentCompatibility"]["status"] == "failed"
+    assert payload["agentCompatibility"]["callable"] is False
+    assert payload["resultPreview"] == '{"status": "failed"}'
 
 
 def test_tools_api_generated_tool_test_reports_agent_arg_failure(tmp_path, monkeypatch):
