@@ -61,10 +61,7 @@
 }
 
 .currentSessionLine {
-  margin-top: 0;
-  font-size: 0.67rem;
-  line-height: 1.18;
-  -webkit-line-clamp: 1;
+  display: none;
 }
 
 .blockEyebrow {
@@ -328,23 +325,40 @@
 }
 
 .currentSessionMetaList {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1fr);
   gap: 3px;
   margin-top: 0;
 }
 
 .currentSessionMetaList .inlineMetaPill {
-  grid-template-columns: minmax(0, 0.72fr) minmax(0, 1fr);
-  gap: 4px;
-  min-height: 20px;
+  grid-template-columns: minmax(52px, 0.42fr) minmax(0, 1fr);
+  align-items: baseline;
+  gap: 5px;
+  min-height: 22px;
   padding: 2px 4px;
   border-radius: 6px;
   font-size: 0.65rem;
 }
 
+.currentSessionMetaList .inlineMetaPill span,
+.currentSessionMetaList .inlineMetaPill strong {
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.currentSessionMetaList .inlineMetaPill span {
+  line-height: 1.08;
+}
+
 .currentSessionMetaList .inlineMetaPill strong {
   font-size: 0.65rem;
-  line-height: 1.12;
+  line-height: 1.1;
+}
+
+.contextLineCompact.currentSessionLine {
+  display: none;
 }
 
 .sessionBindingNotice {
