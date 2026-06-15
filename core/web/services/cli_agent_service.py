@@ -84,6 +84,39 @@ DEFAULT_CLI_AGENT_ADAPTERS: dict[str, dict[str, Any]] = {
             },
         },
     },
+    "claude_code": {
+        "id": "claude_code",
+        "label": "Claude Code",
+        "description": "Run Anthropic Claude Code through the configured CLI Agent protocol.",
+        "protocol": "pty_agent",
+        "executableCandidates": ["claude.cmd", "claude.exe", "claude"],
+        "supportedModes": list(SUPPORTED_MODES),
+        "terminal": {
+            "enabled": True,
+            "launch": {"argv": ["{exe}", "--permission-mode", "{permissionMode}"]},
+            "resume": {"argv": ["{exe}", "--resume", "{cliSessionId}", "--permission-mode", "{permissionMode}"]},
+            "initialInput": "{task}\r\n",
+            "sessionId": {
+                "source": "stdout_regex",
+                "regex": "(?i)(?:session|conversation|thread)[ _-]?id[:=]\\s*([A-Za-z0-9_.:-]+)",
+            },
+            "sessionDiscovery": {
+                "source": "claude_code_project_jsonl",
+                "projectDir": "{home}/.claude/projects/{encodedCwd}",
+                "pollAttempts": 10,
+                "pollIntervalSeconds": 0.75,
+                "createdGraceMs": 5000,
+                "maxRows": 80,
+                "idRegex": r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+            },
+            "capabilities": {
+                "interactive": True,
+                "pty": True,
+                "resume": True,
+                "transcript": True,
+            },
+        },
+    },
 }
 
 
@@ -499,6 +532,30 @@ def _build_command_args(
         if model_value:
             args.extend(["--model", model_value])
             preview.extend(["--model", model_value])
+        args.append(task)
+        preview.append(f"<task:{task_hash}>")
+        return {"args": args, "preview": preview}
+
+    if adapter_id == "claude_code":
+        permission_mode = "plan" if mode == "readonly" else "auto"
+        args = [
+            executable,
+            "--print",
+            "--output-format",
+            "json",
+            "--permission-mode",
+            permission_mode,
+        ]
+        preview = list(args)
+        if model_value:
+            args.extend(["--model", model_value])
+            preview.extend(["--model", model_value])
+        if agent_value:
+            args.extend(["--agent", agent_value])
+            preview.extend(["--agent", agent_value])
+        if mode == "worktree" and allow_unsafe_permissions:
+            args.append("--dangerously-skip-permissions")
+            preview.append("--dangerously-skip-permissions")
         args.append(task)
         preview.append(f"<task:{task_hash}>")
         return {"args": args, "preview": preview}
