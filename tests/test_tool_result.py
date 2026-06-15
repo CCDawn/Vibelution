@@ -185,6 +185,7 @@ class TestInferToolBusinessSuccess:
             {"status": "submitted", "message": "async accepted"},
             {"status": "in_progress", "message": "still running"},
             {"status": "timed_out", "message": "request timed out"},
+            {"status": "timeout", "message": "tool call timed out"},
         ],
     )
     def test_non_success_status_is_business_failure_dict(self, result):
@@ -199,10 +200,14 @@ class TestInferToolBusinessSuccess:
             '{"status":"submitted"}',
             '{"status":"in_progress"}',
             '{"status":"timed_out"}',
+            '{"status":"timeout"}',
         ],
     )
     def test_non_success_status_is_business_failure_json(self, result):
         assert infer_tool_business_success(result) is False
+
+    def test_timeout_plain_text_is_business_failure(self):
+        assert infer_tool_business_success("timeout") is False
 
     def test_ok_false_json_string_is_business_failure(self):
         result = '{"error":"RuntimeError","message":"cannot schedule new futures after shutdown","ok":false,"status":"failed"}'

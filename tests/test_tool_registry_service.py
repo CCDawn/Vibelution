@@ -3,13 +3,19 @@ import json
 import time
 
 from core.web.services import agent_directory_service
+from core.web.services import tool_catalog
 from core.web.services import tool_registry_service as registry
+
+
+def _is_explicitly_allowed_tool(name: str) -> bool:
+    return str(name or "").strip() in tool_catalog.explicit_allow_tool_names()
 
 
 def test_tool_registry_lists_builtins_as_protected(tmp_path, monkeypatch):
     monkeypatch.setattr(registry, "GENERATED_TOOLS_PATH", tmp_path / "generated_tools.json")
 
     payload = registry.get_tool_registry()
+    explicit_allow_tools = tool_catalog.explicit_allow_tool_names()
 
     builtin = next(item for item in payload["tools"] if item["name"] == "grep_search_tool")
     safe_builtin = next(item for item in payload["tools"] if item["name"] == "get_git_status_summary_tool")
@@ -34,15 +40,15 @@ def test_tool_registry_lists_builtins_as_protected(tmp_path, monkeypatch):
     edge_tool = next(item for item in payload["tools"] if item["name"] == "research_communication_edge_proposal_tool")
     assert edge_tool["category"] == "agent_collaboration"
     assert edge_tool["permissionTier"] == "high"
-    assert edge_tool["permissionPolicy"]["requiresExplicitAllow"] is False
+    assert edge_tool["permissionPolicy"]["requiresExplicitAllow"] is _is_explicitly_allowed_tool("research_communication_edge_proposal_tool")
     creation_tool = next(item for item in payload["tools"] if item["name"] == "research_agent_creation_proposal_tool")
     assert creation_tool["category"] == "agent_collaboration"
     assert creation_tool["permissionTier"] == "high"
-    assert creation_tool["permissionPolicy"]["requiresExplicitAllow"] is False
+    assert creation_tool["permissionPolicy"]["requiresExplicitAllow"] is _is_explicitly_allowed_tool("research_agent_creation_proposal_tool")
     apply_tool = next(item for item in payload["tools"] if item["name"] == "research_proposal_apply_tool")
     assert apply_tool["category"] == "agent_collaboration"
     assert apply_tool["permissionTier"] == "high"
-    assert apply_tool["permissionPolicy"]["requiresExplicitAllow"] is False
+    assert apply_tool["permissionPolicy"]["requiresExplicitAllow"] is _is_explicitly_allowed_tool("research_proposal_apply_tool")
     child_tool = next(item for item in payload["tools"] if item["name"] == "create_child_session_tool")
     assert child_tool["category"] == "agent_collaboration"
     assert child_tool["permissionTier"] == "high"
@@ -60,9 +66,15 @@ def test_tool_registry_lists_builtins_as_protected(tmp_path, monkeypatch):
     assert "research_proposal_apply_tool" in bundles["collaboration"]["toolNames"]
     assert "create_child_session_tool" in bundles["collaboration"]["toolNames"]
     assert "list_child_sessions_tool" in bundles["collaboration"]["toolNames"]
-    assert bundles["research"]["explicitAllowToolCount"] == 0
-    assert bundles["collaboration"]["explicitAllowToolCount"] == 0
-    assert bundles["memory_context"]["explicitAllowToolCount"] == 0
+    assert bundles["research"]["explicitAllowToolCount"] == len(
+        [name for name in bundles["research"]["toolNames"] if name in explicit_allow_tools]
+    )
+    assert bundles["collaboration"]["explicitAllowToolCount"] == len(
+        [name for name in bundles["collaboration"]["toolNames"] if name in explicit_allow_tools]
+    )
+    assert bundles["memory_context"]["explicitAllowToolCount"] == len(
+        [name for name in bundles["memory_context"]["toolNames"] if name in explicit_allow_tools]
+    )
     assert bundles["coding"]["highRiskToolCount"] >= 1
     assert bundles["core"]["label"] == "会话 Agent 基础包"
     assert "conversation_log_inspect_tool" in bundles["core"]["toolNames"]
@@ -100,19 +112,19 @@ def test_tool_registry_does_not_mark_research_knowledge_tools_as_explicit_allow(
     tool = next(item for item in payload["tools"] if item["name"] == "research_knowledge_query_tool")
     assert tool["source"] == "built_in"
     assert tool["llmVisible"] is True
-    assert tool["permissionPolicy"]["requiresExplicitAllow"] is False
+    assert tool["permissionPolicy"]["requiresExplicitAllow"] is _is_explicitly_allowed_tool("research_knowledge_query_tool")
 
     rag_tool = next(item for item in payload["tools"] if item["name"] == "knowledge_rag_retrieve_tool")
     assert rag_tool["source"] == "built_in"
     assert rag_tool["llmVisible"] is True
     assert rag_tool["category"] == "memory_context"
-    assert rag_tool["permissionPolicy"]["requiresExplicitAllow"] is False
+    assert rag_tool["permissionPolicy"]["requiresExplicitAllow"] is _is_explicitly_allowed_tool("knowledge_rag_retrieve_tool")
     unified_tool = next(item for item in payload["tools"] if item["name"] == "unified_knowledge_search_tool")
     assert unified_tool["source"] == "built_in"
     assert unified_tool["llmVisible"] is True
     assert unified_tool["category"] == "memory_context"
     assert "unified_search" in unified_tool["capabilityTags"]
-    assert unified_tool["permissionPolicy"]["requiresExplicitAllow"] is False
+    assert unified_tool["permissionPolicy"]["requiresExplicitAllow"] is _is_explicitly_allowed_tool("unified_knowledge_search_tool")
 
 
 def test_tool_registry_exposes_agent_scoped_tool_views(tmp_path, monkeypatch):

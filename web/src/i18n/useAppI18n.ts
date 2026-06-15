@@ -15,6 +15,8 @@ const statusKeyMap: Record<string, TranslationKey> = {
   success: "status_success",
   queued: "status_queued",
   pending: "status_pending",
+  timeout: "status_timeout",
+  timed_out: "status_timeout",
   planning: "status_planning",
   ready: "status_ready",
   reading: "status_reading",
