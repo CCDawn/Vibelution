@@ -27,7 +27,7 @@ from core.infrastructure.agent_session import get_session_state
 from core.infrastructure.evolution_governor import get_evolution_governor
 from core.infrastructure.llm_utils import parse_tool_args
 from core.infrastructure.tool_recommender import decide_next_tools
-from core.infrastructure.tool_result import infer_tool_business_success
+from core.infrastructure.tool_result import extract_tool_result_semantics, infer_tool_business_success
 
 
 IMAGE2_TOOL_TIMEOUT_SECONDS = 300
@@ -81,10 +81,12 @@ def _summarize_tool_args(tool_args: dict) -> dict[str, Any]:
 
 def _summarize_tool_result(result: Any) -> dict[str, Any]:
     text = str(result or "")
+    semantics = extract_tool_result_semantics(result)
     return {
         "resultType": type(result).__name__,
         "resultPreview": text[:320],
         "resultLength": len(text),
+        **{key: value for key, value in semantics.items() if value not in {None, ""}},
     }
 
 
