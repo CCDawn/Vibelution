@@ -324,6 +324,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("styles.currentSessionBlock");
     expect(routeSource).toContain("styles.currentSessionLine");
     expect(routeSource).toContain("styles.currentSessionMetaList");
+    expect(routeSource).toContain("· 缓 ${numberFormatter.format(sessionLlmUsage.cachedInputTokens)}");
+    expect(routeSource).not.toContain("${numberFormatter.format(sessionLlmUsage.inputTokens)} tokens · ${numberFormatter.format(sessionLlmUsage.cachedInputTokens)} cached");
     expect(routeSource.indexOf("styles.runModeBlock")).toBeGreaterThan(routeSource.indexOf("sessionCompactRows.map"));
     expect(routeSource.indexOf("styles.contextStatusCard")).toBeGreaterThan(routeSource.indexOf("styles.runModeBlock"));
     expect(routeSource.indexOf("styles.cacheStatusCard")).toBeGreaterThan(routeSource.indexOf("styles.contextStatusCard"));
@@ -507,8 +509,9 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("tokenSpeedSampling");
     expect(routeSource).toContain("tok/s");
     expect(routeSource.indexOf("label: t(\"tokenSpeed\")")).toBeLessThan(
-      routeSource.indexOf("label: t(\"currentTask\")"),
+      routeSource.indexOf("label: t(\"promptCache\")"),
     );
+    expect(routeSource).not.toContain("label: t(\"currentTask\")");
   });
 
   it("shows direct-session mismatch as a status-strip notice with a switch action", () => {
@@ -518,8 +521,9 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("handleOpenDirectSession(agentPrimaryDirectSessionId)");
     expect(routeSource).toContain("label: t(\"sessionBinding\")");
     expect(routeSource.indexOf("label: t(\"sessionBinding\")")).toBeLessThan(
-      routeSource.indexOf("label: t(\"currentTask\")"),
+      routeSource.indexOf("label: t(\"promptCache\")"),
     );
+    expect(routeSource).not.toContain("label: t(\"currentTask\")");
   });
 
   it("records direct chat submit lifecycle telemetry before backend acceptance", () => {
