@@ -229,6 +229,12 @@ export function updateLauncherDeveloperMode(request: LauncherDeveloperModeUpdate
   });
 }
 
+export function resetLauncherDeveloperSandbox() {
+  return fetchLauncherJson<LauncherDeveloperModeUpdateResponse>("developer-mode/reset-sandbox", {
+    method: "POST",
+  });
+}
+
 export function getLauncherDeveloperNoiseOverview() {
   return fetchLauncherJson<LauncherDeveloperNoiseOverview>("developer-mode/noise-overview");
 }

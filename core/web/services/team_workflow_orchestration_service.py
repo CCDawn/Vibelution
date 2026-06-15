@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any
 
 from config.public_config import build_effective_config, load_public_config
+from core.infrastructure import developer_sandbox
 from core.llm import LLMClient, LLMInvocationContext, invoke_llm
 from core.runtime_manager import work_run_store
 from core.web.services import chat_room_service, data_processing_service, team_knowledge_service, team_service
@@ -6276,7 +6277,11 @@ def _source_collection_prompt_cache_partition(team_id: str, role: str, *, model_
         ]
     )
     digest = hashlib.sha256(raw.encode("utf-8", errors="replace")).hexdigest()[:12]
-    return f"research-team-{normalized_role}-{digest}"
+    return developer_sandbox.sandbox_prompt_cache_partition(
+        f"research-team-{normalized_role}-{digest}",
+        surface="team",
+        project_root=PROJECT_ROOT,
+    )
 
 
 def _source_collection_prompt_cache_policy_ref(policy: dict[str, Any]) -> dict[str, Any]:
@@ -8204,7 +8209,11 @@ def _official_model_evidence_store_path(team_id: str) -> Path:
 
 
 def _team_workflow_root(team_id: str) -> Path:
-    return _project_root() / "workspace" / "teams" / _safe_token(team_id, default="team", max_length=96)
+    return developer_sandbox.seeded_sandbox_workspace_path(
+        _project_root(),
+        "teams",
+        _safe_token(team_id, default="team", max_length=96),
+    )
 
 
 def _project_root() -> Path:

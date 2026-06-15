@@ -9,6 +9,7 @@ import {
   applyLauncherDeveloperCleanup,
   previewLauncherDeveloperCleanup,
   reattachLauncherSupervisor,
+  resetLauncherDeveloperSandbox,
   restartLauncherBundle,
   saveLauncherWorkbenchWindowMode,
   startLauncherBundle,
@@ -264,6 +265,8 @@ type LauncherCopy = {
   developerModeOff: string;
   developerModeEnable: string;
   developerModeDisable: string;
+  developerModeResetSandbox: string;
+  developerModeSandbox: string;
   developerModeControlled: string;
   developerModeSettingsReadonly: string;
   developerModeUpdated: string;
@@ -857,7 +860,9 @@ function DeveloperModePanel({
   noiseLoading,
   previewPending,
   applyPending,
+  resetPending,
   onToggle,
+  onReset,
   onRefreshNoise,
   onSelectAction,
   onPreview,
@@ -872,7 +877,9 @@ function DeveloperModePanel({
   noiseLoading: boolean;
   previewPending: boolean;
   applyPending: boolean;
+  resetPending: boolean;
   onToggle: (enabled: boolean, baseHash: string) => void;
+  onReset: () => void;
   onRefreshNoise: () => void;
   onSelectAction: (action: LauncherDeveloperCleanupAction) => void;
   onPreview: () => void;
@@ -891,8 +898,11 @@ function DeveloperModePanel({
   const canPreview = enabled && !controlsDisabled && !previewPending && !applyPending;
   const canApply = enabled && Boolean(plan) && plan?.action === selectedAction && !controlsDisabled && !previewPending && !applyPending;
   const developerModeStateLabel = enabled ? copy.developerModeOn : copy.developerModeOff;
+  const sandboxId = String(setting?.sandbox?.sandboxId ?? "");
   const developerModeUpdatedLabel = setting?.updatedAt
-    ? `${copy.developerModeLastUpdated}: ${compactDate(setting.updatedAt, "zh-CN")}`
+    ? enabled && sandboxId
+      ? `${copy.developerModeSandbox}: ${sandboxId}`
+      : `${copy.developerModeLastUpdated}: ${compactDate(setting.updatedAt, "zh-CN")}`
     : copy.developerModeSettingsReadonly;
 
   return (
@@ -911,6 +921,16 @@ function DeveloperModePanel({
         >
           {pending ? <LoaderCircle size={15} className={styles.spin} /> : <ShieldCheck size={15} />}
           <span>{enabled ? copy.developerModeDisable : copy.developerModeEnable}</span>
+        </button>
+        <button
+          type="button"
+          className={styles.iconButton}
+          disabled={!enabled || controlsDisabled || resetPending}
+          onClick={onReset}
+          title={copy.developerModeResetSandbox}
+        >
+          {resetPending ? <LoaderCircle size={15} className={styles.spin} /> : <RefreshCw size={15} />}
+          <span>{copy.developerModeResetSandbox}</span>
         </button>
       </div>
       <div className={styles.developerGrid}>
@@ -1426,17 +1446,19 @@ export function LauncherRoute() {
         actionsAvailable: "停止/重启可用",
         actionsStartOnly: "项目已关闭，仅启动可用",
         diagnosticsCollapsedHint: "排查时展开",
-        developerModeTitle: "开发者模式",
-        developerModeHint: "Launcher 控制开发期清理能力；关闭时只显示噪声概览，不生成或执行清理计划。",
+        developerModeTitle: "无痕开发沙盒",
+        developerModeHint: "开启后 Chat/Coding、Team 和监督进化写入开发者沙盒；正式链路只读，日志会标记为调试记录。",
         developerModeCurrentState: "当前状态",
         developerModeLastUpdated: "最近保存",
-        developerModeOn: "已开启",
-        developerModeOff: "已关闭",
-        developerModeEnable: "开启开发者模式",
-        developerModeDisable: "关闭开发者模式",
+        developerModeOn: "沙盒开启",
+        developerModeOff: "正式模式",
+        developerModeEnable: "开启沙盒",
+        developerModeDisable: "关闭并清理沙盒",
+        developerModeResetSandbox: "重置沙盒",
+        developerModeSandbox: "当前沙盒",
         developerModeControlled: "Launcher 控制",
         developerModeSettingsReadonly: "设置页只读展示，不能在工作台设置里改动",
-        developerModeUpdated: "开发者模式已更新",
+        developerModeUpdated: "开发者沙盒已更新",
         developerModeNoiseOverview: "噪声概览",
         developerModeNoiseLoading: "正在扫描噪声来源",
         developerModeRefreshNoise: "刷新概览",
@@ -1455,7 +1477,7 @@ export function LauncherRoute() {
         cleanupEstimated: "预计释放",
         cleanupSkipped: "跳过",
         cleanupRequiresConfirm: "确认执行当前开发者清理计划？执行前会再次校验 planId、planHash、目标白名单和开发者模式状态。",
-        cleanupDisabledOff: "开发者模式关闭时不能生成或执行清理计划",
+        cleanupDisabledOff: "沙盒关闭时不能生成或执行开发期清理计划",
         cleanupApplied: "清理计划已执行",
         technicalDetailAvailable: "技术详情已保留在悬停提示和高级诊断里。",
         workbenchNotReadySummary: "工作台尚未就绪，建议查看关键状态。",
@@ -1636,17 +1658,19 @@ export function LauncherRoute() {
         actionsAvailable: "Stop/restart available",
         actionsStartOnly: "Project is closed; Start is the only lifecycle action",
         diagnosticsCollapsedHint: "Open when troubleshooting",
-        developerModeTitle: "Developer Mode",
-        developerModeHint: "Launcher owns development cleanup. When off, this shows noise only and cannot create or apply cleanup plans.",
+        developerModeTitle: "No-trace Dev Sandbox",
+        developerModeHint: "When enabled, Chat/Coding, Team, and supervised evolution write into the developer sandbox; formal state is read-only and logs are marked debug.",
         developerModeCurrentState: "Current state",
         developerModeLastUpdated: "Last saved",
-        developerModeOn: "Enabled",
-        developerModeOff: "Disabled",
-        developerModeEnable: "Enable developer mode",
-        developerModeDisable: "Disable developer mode",
+        developerModeOn: "Sandbox enabled",
+        developerModeOff: "Formal mode",
+        developerModeEnable: "Enable sandbox",
+        developerModeDisable: "Disable and clear sandbox",
+        developerModeResetSandbox: "Reset sandbox",
+        developerModeSandbox: "Current sandbox",
         developerModeControlled: "Launcher controlled",
         developerModeSettingsReadonly: "Settings shows this read-only and cannot change it",
-        developerModeUpdated: "Developer mode updated",
+        developerModeUpdated: "Developer sandbox updated",
         developerModeNoiseOverview: "Noise overview",
         developerModeNoiseLoading: "Scanning noise sources",
         developerModeRefreshNoise: "Refresh overview",
@@ -1665,7 +1689,7 @@ export function LauncherRoute() {
         cleanupEstimated: "Estimated",
         cleanupSkipped: "skipped",
         cleanupRequiresConfirm: "Apply this developer cleanup plan? Vibelution will re-check planId, planHash, whitelist targets, and developer mode before executing.",
-        cleanupDisabledOff: "Developer mode must be enabled before preview or apply",
+        cleanupDisabledOff: "Sandbox must be enabled before preview or apply",
         cleanupApplied: "Cleanup plan applied",
         technicalDetailAvailable: "Technical detail is kept in hover titles and advanced diagnostics.",
         workbenchNotReadySummary: "Workbench is not ready; check key status.",
@@ -1809,6 +1833,20 @@ export function LauncherRoute() {
     onSuccess: (response) => {
       setCleanupPlan(null);
       setNotice({ tone: response.setting.enabled ? "warning" : "success", text: response.message || copy.developerModeUpdated });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.launcherStatus() });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.launcherDeveloperNoiseOverview() });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.configPublic() });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.configWorkspace() });
+    },
+    onError: (error) => {
+      setNotice({ tone: "error", text: error instanceof Error ? error.message : String(error) });
+    },
+  });
+  const resetDeveloperSandboxMutation = useMutation({
+    mutationFn: resetLauncherDeveloperSandbox,
+    onSuccess: (response) => {
+      setCleanupPlan(null);
+      setNotice({ tone: "success", text: response.message || copy.developerModeUpdated });
       void queryClient.invalidateQueries({ queryKey: queryKeys.launcherStatus() });
       void queryClient.invalidateQueries({ queryKey: queryKeys.launcherDeveloperNoiseOverview() });
       void queryClient.invalidateQueries({ queryKey: queryKeys.configPublic() });
@@ -1989,6 +2027,9 @@ export function LauncherRoute() {
   const guardianProgress = `${guardian?.ownedCount ?? 0}/${guardian?.adapterCount ?? 0}`;
   const toggleDeveloperMode = (enabled: boolean, baseHash: string) => {
     developerModeMutation.mutate({ enabled, baseHash });
+  };
+  const resetDeveloperSandbox = () => {
+    resetDeveloperSandboxMutation.mutate();
   };
   const previewDeveloperCleanup = () => {
     setCleanupPlan(null);
@@ -2273,7 +2314,9 @@ export function LauncherRoute() {
         noiseLoading={developerNoiseQuery.isFetching}
         previewPending={cleanupPreviewMutation.isPending}
         applyPending={cleanupApplyMutation.isPending}
+        resetPending={resetDeveloperSandboxMutation.isPending}
         onToggle={toggleDeveloperMode}
+        onReset={resetDeveloperSandbox}
         onRefreshNoise={() => void developerNoiseQuery.refetch()}
         onSelectAction={(action) => {
           setSelectedCleanupAction(action);

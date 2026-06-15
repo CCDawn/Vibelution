@@ -121,6 +121,14 @@ def developer_mode_noise_overview() -> dict:
     return launcher_service.get_launcher_developer_noise_overview()
 
 
+@router.post("/api/launcher/developer-mode/reset-sandbox")
+def reset_developer_sandbox() -> dict:
+    try:
+        return launcher_service.reset_launcher_developer_sandbox()
+    except launcher_service.DeveloperModeDisabled as exc:
+        raise HTTPException(status_code=409, detail={"code": "mode_disabled", "message": str(exc)}) from exc
+
+
 @router.post("/api/launcher/developer-mode/cleanup/preview")
 def preview_developer_cleanup(payload: DeveloperCleanupPreviewPayload) -> dict:
     try:

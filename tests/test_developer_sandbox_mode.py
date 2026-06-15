@@ -1,0 +1,78 @@
+import json
+
+from core.infrastructure import developer_sandbox
+from core.ui.chat_state import formal_chat_state_path, load_chat_state, save_chat_state
+from core.web.services import team_service
+
+
+def _enable_sandbox(tmp_path, monkeypatch):
+    config_path = tmp_path / "config.toml"
+    config_path.write_text("[launcher]\ncontrol_port = 8765\n", encoding="utf-8")
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    monkeypatch.setattr(developer_sandbox, "CONFIG_PATH", config_path)
+    status = developer_sandbox.get_developer_mode_status(config_path=config_path, project_root=project_root)
+    enabled = developer_sandbox.update_developer_mode_status(
+        True,
+        base_hash=status["configHash"],
+        config_path=config_path,
+        project_root=project_root,
+    )
+    return config_path, project_root, enabled
+
+
+def test_chat_state_writes_to_sandbox_without_mutating_formal_state(tmp_path, monkeypatch):
+    config_path, project_root, enabled = _enable_sandbox(tmp_path, monkeypatch)
+    formal_path = formal_chat_state_path(project_root)
+    formal_path.parent.mkdir(parents=True)
+    formal_payload = {"version": 1, "conversations": [{"conversation_id": "default", "messages": [{"role": "user", "content": "formal"}]}]}
+    formal_path.write_text(json.dumps(formal_payload, ensure_ascii=False), encoding="utf-8")
+
+    assert load_chat_state(project_root)["conversations"][0]["messages"][0]["content"] == "formal"
+
+    debug_payload = {"version": 1, "conversations": [{"conversation_id": "default", "messages": [{"role": "user", "content": "debug"}]}]}
+    save_chat_state(project_root, debug_payload)
+
+    sandbox_path = project_root / ".runtime" / "developer-mode" / "sandboxes" / enabled["sandbox"]["sandboxId"] / "workspace" / "chat" / "chat_state.json"
+    assert sandbox_path.exists()
+    assert json.loads(formal_path.read_text(encoding="utf-8")) == formal_payload
+    assert load_chat_state(project_root)["conversations"][0]["messages"][0]["content"] == "debug"
+
+    developer_sandbox.update_developer_mode_status(
+        False,
+        base_hash=developer_sandbox.get_developer_mode_status(config_path=config_path, project_root=project_root)["configHash"],
+        config_path=config_path,
+        project_root=project_root,
+    )
+
+    assert not sandbox_path.exists()
+    assert load_chat_state(project_root)["conversations"][0]["messages"][0]["content"] == "formal"
+
+
+def test_team_root_is_seeded_into_sandbox_before_writes(tmp_path, monkeypatch):
+    _config_path, project_root, enabled = _enable_sandbox(tmp_path, monkeypatch)
+    formal_teams = project_root / "workspace" / "teams"
+    formal_teams.mkdir(parents=True)
+    (formal_teams / "teams.json").write_text(
+        json.dumps({"schemaVersion": 1, "teams": [{"teamId": "alpha", "name": "Alpha"}]}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(team_service, "PROJECT_ROOT", project_root)
+
+    sandbox_root = team_service._teams_root()
+
+    assert str(sandbox_root).startswith(str(project_root / ".runtime" / "developer-mode" / "sandboxes" / enabled["sandbox"]["sandboxId"]))
+    assert (sandbox_root / "teams.json").exists()
+    assert (formal_teams / "teams.json").exists()
+
+
+def test_debug_log_fields_are_added_only_when_sandbox_enabled(tmp_path, monkeypatch):
+    _config_path, project_root, enabled = _enable_sandbox(tmp_path, monkeypatch)
+
+    fields = developer_sandbox.enrich_debug_fields({"event": "sample"}, project_root=project_root)
+
+    assert fields["event"] == "sample"
+    assert fields["developerMode"] is True
+    assert fields["developerSandboxId"] == enabled["sandbox"]["sandboxId"]
+    assert fields["recordKind"] == "debug"
+    assert fields["retention"] == "diagnostic_only"

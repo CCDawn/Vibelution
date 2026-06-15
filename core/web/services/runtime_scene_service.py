@@ -9,6 +9,7 @@ from pathlib import Path
 from threading import Lock
 from typing import Any
 
+from core.infrastructure import developer_sandbox
 from core.web.services.log_diagnostics import analyze_log_content
 
 
@@ -560,7 +561,7 @@ def record_browser_telemetry(payload: dict[str, Any]) -> dict[str, Any]:
     event_code = _sanitize_token(payload.get("eventCode"), default="browser.telemetry")
     level = _sanitize_token(payload.get("level"), default="info")
     message = _truncate_text(str(payload.get("message") or event_code), 320)
-    fields = _normalize_telemetry_fields(payload.get("fields"))
+    fields = developer_sandbox.enrich_debug_fields(_normalize_telemetry_fields(payload.get("fields")), project_root=PROJECT_ROOT)
 
     raw_line = f"[{timestamp}] {event_code} [{level}] {message}"
     if fields:
@@ -660,7 +661,7 @@ def record_backend_api_event(payload: dict[str, Any]) -> dict[str, Any]:
         str(payload.get("message") or f"{method or 'API'} {path_template or path} -> {status_code or '?'}"),
         320,
     )
-    fields = _normalize_telemetry_fields(
+    fields = developer_sandbox.enrich_debug_fields(_normalize_telemetry_fields(
         {
             "method": method,
             "path": path,
@@ -685,7 +686,7 @@ def record_backend_api_event(payload: dict[str, Any]) -> dict[str, Any]:
             "diagnosticProbe": is_diagnostic_probe,
             "testClientProbe": is_test_client_probe,
         }
-    )
+    ), project_root=PROJECT_ROOT)
 
     raw_line = f"[{timestamp}] {event_code} [{level}] {message}"
     if fields:
@@ -759,7 +760,7 @@ def record_runtime_scene_event(
     level_name = _sanitize_token(level, default="info")
     outcome_name = _sanitize_token(outcome, default="observed")
     message_text = _truncate_text(str(message or event_name), 320)
-    normalized_fields = _normalize_telemetry_fields(fields)
+    normalized_fields = developer_sandbox.enrich_debug_fields(_normalize_telemetry_fields(fields), project_root=PROJECT_ROOT)
     normalized_raw_refs = _normalize_raw_refs(raw_refs)
     normalized_child_path = _safe_optional_relative_path(child_log_path)
     if normalized_child_path:
@@ -775,7 +776,10 @@ def record_runtime_scene_event(
         manifest = _load_scene_manifest(scene_dir)
         scene_id = _scene_id(scene_dir, manifest)
         if normalized_child_path:
-            child_payload = _normalize_telemetry_fields(child_log_payload or {})
+            child_payload = developer_sandbox.enrich_debug_fields(
+                _normalize_telemetry_fields(child_log_payload or {}),
+                project_root=PROJECT_ROOT,
+            )
             child_payload.update(
                 {
                     "schema_version": 1,
@@ -847,7 +851,7 @@ def record_research_scene_event(
     phase_name = _sanitize_token(phase, default="theme_discovery")
     level_name = _sanitize_token(level, default="info")
     outcome_name = _sanitize_token(outcome, default="observed")
-    normalized_fields = _normalize_telemetry_fields(fields)
+    normalized_fields = developer_sandbox.enrich_debug_fields(_normalize_telemetry_fields(fields), project_root=PROJECT_ROOT)
     normalized_session_id = str(session_id or normalized_fields.get("sessionId") or "").strip()
     normalized_agent_key = str(agent_key or normalized_fields.get("agentKey") or "").strip()
     if normalized_session_id:
