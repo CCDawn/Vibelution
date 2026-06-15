@@ -8,6 +8,7 @@ from typing import Any
 
 
 ANSI_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
+COMPLETION_MARKER_RE = re.compile(r"\[VIBELUTION_CLI_DONE:[A-Za-z0-9_.:-]+\]")
 
 
 @dataclass(frozen=True)
@@ -18,6 +19,7 @@ class CliTaskProtocol:
     max_tail_segments: int
     failure_patterns: tuple[str, ...]
     completion_patterns: tuple[str, ...]
+    marker_completion_required: bool = False
 
 
 DEFAULT_PROTOCOL = CliTaskProtocol(
@@ -43,13 +45,11 @@ PROTOCOLS: dict[str, CliTaskProtocol] = {
         min_completion_seconds=4.0,
         max_tail_segments=8,
         failure_patterns=(
-            r"(?i)\b(error|failed|exception|traceback)\b",
-            r"(执行失败|运行失败|报错|异常|失败)",
+            r"(?im)^\s*(error|failed|exception|traceback|fatal)\b",
+            r"(?m)^\s*(执行失败|运行失败|报错|异常)\b",
         ),
-        completion_patterns=(
-            r"(?i)\b(done|completed|finished|success)\b",
-            r"(已完成|完成|成功|你好！我是)",
-        ),
+        completion_patterns=(),
+        marker_completion_required=True,
     ),
     "codex_code": CliTaskProtocol(
         adapter_id="codex_code",
@@ -86,12 +86,28 @@ def protocol_for_adapter(adapter_id: str) -> CliTaskProtocol:
     return PROTOCOLS.get(str(adapter_id or "").strip().lower().replace("-", "_"), DEFAULT_PROTOCOL)
 
 
-def task_input_for_adapter(adapter_id: str, task: str) -> str:
+def task_input_for_adapter(
+    adapter_id: str,
+    task: str,
+    *,
+    completion_marker: str = "",
+) -> str:
     """Return the interactive input payload for one task."""
 
     text = str(task or "").strip()
     if not text:
         return ""
+    protocol = protocol_for_adapter(adapter_id)
+    marker = str(completion_marker or "").strip()
+    if protocol.marker_completion_required and marker:
+        marker_body = marker.strip("[]")
+        text = (
+            f"{text}\n\n"
+            "完成本任务后，请在最终回复最后单独输出结束标记。"
+            "标记格式是：左方括号 + "
+            f"{marker_body}"
+            " + 右方括号。"
+        )
     return f"{text}\r\n"
 
 
@@ -105,7 +121,7 @@ def strip_terminal_controls(text: str) -> str:
 def split_semantic_segments(adapter_id: str, text: str) -> list[dict[str, Any]]:
     """Split output into semantic-ish transcript fragments instead of raw character tails."""
 
-    cleaned = strip_terminal_controls(text)
+    cleaned = remove_protocol_markers(strip_terminal_controls(text))
     if not cleaned.strip():
         return []
     blocks = _paragraph_blocks(cleaned)
@@ -131,14 +147,19 @@ def tail_semantic_segments(adapter_id: str, text: str, *, limit: int | None = No
     return segments[-max_segments:]
 
 
-def detect_task_status(adapter_id: str, text: str) -> str:
+def detect_task_status(adapter_id: str, text: str, *, completion_marker: str = "") -> str:
     cleaned = strip_terminal_controls(text)
     if not cleaned.strip():
         return ""
     protocol = protocol_for_adapter(adapter_id)
+    marker = str(completion_marker or "").strip()
+    if marker and marker in cleaned:
+        return "completed"
     for pattern in protocol.failure_patterns:
         if _safe_search(pattern, cleaned):
             return "failed"
+    if protocol.marker_completion_required:
+        return ""
     for pattern in protocol.completion_patterns:
         if _safe_search(pattern, cleaned):
             return "completed"
@@ -148,7 +169,7 @@ def detect_task_status(adapter_id: str, text: str) -> str:
 def summarize_segments(segments: list[dict[str, Any]]) -> str:
     lines: list[str] = []
     for item in list(segments or []):
-        text = str(item.get("text") or "").strip()
+        text = remove_protocol_markers(str(item.get("text") or "")).strip()
         if not text:
             continue
         kind = str(item.get("kind") or "output").strip() or "output"
@@ -190,7 +211,7 @@ def _looks_like_new_block(line: str) -> bool:
 def _normalize_segment_text(text: str) -> str:
     lines = []
     for line in str(text or "").splitlines():
-        stripped = re.sub(r"\s+", " ", line).strip()
+        stripped = re.sub(r"\s+", " ", remove_protocol_markers(line)).strip()
         if stripped:
             lines.append(stripped)
     return "\n".join(lines).strip()
@@ -214,3 +235,12 @@ def _safe_search(pattern: str, text: str) -> bool:
         return bool(re.search(pattern, text))
     except re.error:
         return False
+
+
+def completion_marker_for_task(task_id: str) -> str:
+    normalized = "".join(ch if ch.isalnum() or ch in {"-", "_", ".", ":"} else "_" for ch in str(task_id or "").strip())
+    return f"[VIBELUTION_CLI_DONE:{normalized}]" if normalized else ""
+
+
+def remove_protocol_markers(text: str) -> str:
+    return COMPLETION_MARKER_RE.sub("", str(text or ""))

@@ -1000,6 +1000,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("new EventSource(`/api/cli-agents/terminal-sessions/${encodeURIComponent(terminalSessionId)}/events`)");
     expect(routeSource).toContain("terminal_output");
     expect(routeSource).toContain("transcriptTailReplayable");
+    expect(routeSource).toContain("screenReplay");
+    expect(routeSource).toContain("screenText");
     expect(routeSource).toContain("const replayTerminalSnapshot");
     expect(routeSource).toContain("历史 TUI 画面无法安全重放");
     expect(routeSource).toContain('import { Terminal } from "@xterm/xterm"');
