@@ -26,6 +26,20 @@ TARGET_TYPES = {
     "team_knowledge",
     "knowledge_base",
     "agent_memory_policy",
+    "sqlite_database_compact",
+    "evaluation_artifacts",
+    "session_artifacts",
+    "legacy_log_info",
+    "runtime_scene_logs",
+    "team_archive_artifacts",
+}
+MAINTENANCE_TARGET_LABELS = {
+    "sqlite_database_compact": "SQLite database compact",
+    "evaluation_artifacts": "Evaluation artifacts",
+    "session_artifacts": "Session artifacts",
+    "legacy_log_info": "Legacy log_info logs",
+    "runtime_scene_logs": "Runtime scene logs",
+    "team_archive_artifacts": "Team archive artifacts",
 }
 _SAFE_ID_FRAGMENT = re.compile(r"[^A-Za-z0-9_.-]+")
 
@@ -148,6 +162,9 @@ def _normalize_target(raw: dict[str, Any]) -> CleanupTarget:
     if target_type == "global_runtime_memory":
         return CleanupTarget(target_type=target_type, label="Global runtime memory")
 
+    if target_type in MAINTENANCE_TARGET_LABELS:
+        return CleanupTarget(target_type=target_type, label=MAINTENANCE_TARGET_LABELS[target_type])
+
     if target_type in {"agent_private_memory", "agent_formal_knowledge", "agent_memory_policy"}:
         agent_id = _safe_token(raw.get("agentId") or raw.get("ownerId"), default="", max_length=128)
         if not agent_id:
@@ -230,6 +247,9 @@ def _execute_target(target: CleanupTarget) -> dict[str, Any]:
     if target.target_type == "global_runtime_memory":
         for cleanup_path in _paths_for_target(target):
             results.append(_execute_global_path(cleanup_path))
+    elif target.target_type == "sqlite_database_compact":
+        for cleanup_path in _paths_for_target(target):
+            results.append(_execute_compact_path(cleanup_path))
     elif target.target_type == "knowledge_base":
         results.extend(_remove_knowledge_base_records(target))
         results.extend(_delete_vector_records_for_target(target))
@@ -256,6 +276,35 @@ def _paths_for_target(target: CleanupTarget) -> list[CleanupPath]:
             CleanupPath(root / "workspace" / "agent_brain.db", "database", "reset", "Clear memory tables only."),
             CleanupPath(root / "workspace" / "memory", "directory", "delete", "Delete runtime memory files."),
             CleanupPath(root / "workspace" / "prompts" / "STATE_MEMORY.md", "file", "reset", "Reset prompt state memory to an empty file."),
+        ]
+    if target.target_type == "sqlite_database_compact":
+        return [
+            CleanupPath(root / "workspace" / "agent_brain.db", "database_compact", "compact", "Reclaim SQLite free pages without deleting rows."),
+        ]
+    if target.target_type == "evaluation_artifacts":
+        return [
+            CleanupPath(root / "workspace" / "evaluation", "directory", "delete", "Delete evaluation bundles, chat candidates, and review queues."),
+        ]
+    if target.target_type == "session_artifacts":
+        return [
+            CleanupPath(root / "workspace" / "sessions", "directory", "delete", "Delete historical session transcripts and artifacts."),
+        ]
+    if target.target_type == "legacy_log_info":
+        return [
+            CleanupPath(root / "log_info", "directory", "delete", "Delete legacy conversation/debug payload logs."),
+        ]
+    if target.target_type == "runtime_scene_logs":
+        return [
+            CleanupPath(root / "logs" / "runtime_scenes", "directory", "delete", "Delete runtime scene diagnostic bundles."),
+        ]
+    if target.target_type == "team_archive_artifacts":
+        teams_root = root / "workspace" / "teams"
+        if not teams_root.exists():
+            return []
+        return [
+            CleanupPath(team_dir / "archives", "directory", "delete", f"Delete archived workflow evidence for team {team_dir.name}.")
+            for team_dir in sorted(teams_root.iterdir())
+            if team_dir.is_dir() and (team_dir / "archives").exists()
         ]
     if target.target_type == "agent_private_memory":
         return [
@@ -285,7 +334,7 @@ def _paths_for_target(target: CleanupTarget) -> list[CleanupPath]:
 
 def _path_preview(cleanup_path: CleanupPath) -> dict[str, Any]:
     resolved = _assert_allowed_cleanup_path(cleanup_path.path, action=cleanup_path.action)
-    stats = _path_stats(resolved)
+    stats = _database_compact_stats(resolved) if cleanup_path.kind == "database_compact" else _path_stats(resolved)
     row_count = _database_memory_row_count(resolved) if cleanup_path.kind == "database" else _json_row_count(resolved)
     return {
         "path": _relative_path(resolved),
@@ -436,6 +485,33 @@ def _execute_delete_path(cleanup_path: CleanupPath) -> dict[str, Any]:
         return _execution_result(path, cleanup_path.kind, cleanup_path.action, "deleted", file_count=1, byte_count=size)
     except OSError as exc:
         return _execution_result(path, cleanup_path.kind, cleanup_path.action, "failed", message=str(exc))
+
+
+def _execute_compact_path(cleanup_path: CleanupPath) -> dict[str, Any]:
+    path = _assert_allowed_cleanup_path(cleanup_path.path, action=cleanup_path.action)
+    if not path.exists():
+        return _execution_result(path, cleanup_path.kind, cleanup_path.action, "skipped", message="missing")
+    try:
+        before_size = path.stat().st_size
+        reclaimable = _database_compact_stats(path)["byteCount"]
+        if reclaimable <= 0:
+            return _execution_result(path, cleanup_path.kind, cleanup_path.action, "skipped", file_count=1, message="no free pages")
+        with sqlite3.connect(str(path), timeout=120) as conn:
+            conn.execute("PRAGMA busy_timeout=120000")
+            conn.execute("VACUUM")
+        after_size = path.stat().st_size
+    except (OSError, sqlite3.Error) as exc:
+        return _execution_result(path, cleanup_path.kind, cleanup_path.action, "failed", message=str(exc))
+    freed = max(0, before_size - after_size)
+    return _execution_result(
+        path,
+        cleanup_path.kind,
+        cleanup_path.action,
+        "deleted" if freed else "skipped",
+        file_count=1,
+        byte_count=freed,
+        message=f"compacted database; estimated reclaimable bytes before compact: {reclaimable}",
+    )
 
 
 def _reset_memory_database(path: Path) -> dict[str, Any]:
@@ -627,6 +703,12 @@ def _warnings_for_target(target: CleanupTarget) -> list[str]:
         return ["Central source files are not deleted by a single knowledge-base cleanup target."]
     if target.target_type == "global_runtime_memory":
         return ["Project governance memory under .docs/project-memory is protected and not included."]
+    if target.target_type == "sqlite_database_compact":
+        return ["SQLite compact reclaims free pages only; it does not delete memory rows or Git/evolution tables."]
+    if target.target_type == "team_archive_artifacts":
+        return ["Team archives can include workflow evidence; preview carefully and do not run while a matching team workflow is active."]
+    if target.target_type in {"evaluation_artifacts", "session_artifacts", "legacy_log_info", "runtime_scene_logs"}:
+        return ["This deletes diagnostic/source-audit evidence, not formal team or Agent knowledge."]
     return []
 
 
@@ -637,6 +719,8 @@ def _operating_boundary() -> dict[str, bool | str]:
         "projectMemoryProtected": True,
         "centralSourcesDeletedByKnowledgeBaseTarget": False,
         "agentManagementMemoryPolicyResetMigrated": True,
+        "maintenanceArtifactsSupported": True,
+        "sqliteCompactSupported": True,
     }
 
 
@@ -711,6 +795,18 @@ def _path_stats(path: Path) -> dict[str, int]:
         except OSError:
             continue
     return {"fileCount": file_count, "byteCount": byte_count}
+
+
+def _database_compact_stats(path: Path) -> dict[str, int]:
+    if not path.exists() or not path.is_file():
+        return {"fileCount": 0, "byteCount": 0}
+    try:
+        with sqlite3.connect(str(path)) as conn:
+            page_size = int(conn.execute("PRAGMA page_size").fetchone()[0])
+            freelist_count = int(conn.execute("PRAGMA freelist_count").fetchone()[0])
+    except sqlite3.Error:
+        return {"fileCount": 1, "byteCount": 0}
+    return {"fileCount": 1, "byteCount": max(0, page_size * freelist_count)}
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -800,12 +896,16 @@ def _assert_allowed_cleanup_path(path: Path, *, action: str) -> Path:
         root / "workspace" / "agents",
         root / "workspace" / "teams",
         root / "workspace" / "knowledge" / "rag",
+        root / "workspace" / "evaluation",
+        root / "workspace" / "sessions",
+        root / "log_info",
+        root / "logs" / "runtime_scenes",
     ]
     if not any(_same_or_child(base.resolve(), resolved) for base in allowed_roots):
         raise MemoryCleanupError(f"Cleanup path is outside the memory cleanup allow-list: {_relative_path(resolved)}")
     if ".docs" in resolved.parts:
         raise MemoryCleanupError("Project governance memory is protected from this cleanup tool.")
-    if action == "delete" and resolved in {root / "workspace", root / "workspace" / "agents", root / "workspace" / "teams", root / "workspace" / "knowledge"}:
+    if action == "delete" and resolved in {root / "workspace", root / "workspace" / "agents", root / "workspace" / "teams", root / "workspace" / "knowledge", root / "logs"}:
         raise MemoryCleanupError(f"Refusing broad cleanup path: {_relative_path(resolved)}")
     return resolved
 
