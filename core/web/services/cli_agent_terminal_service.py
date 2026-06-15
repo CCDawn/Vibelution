@@ -1511,6 +1511,19 @@ def _read_transcript_tail(path: Path, limit: int = MAX_TRANSCRIPT_TAIL_CHARS) ->
     return text[-limit:]
 
 
+LEADING_CSI_FRAGMENT_RE = re.compile(r"^[0-?]+(?:[@-~]|\r?\n)")
+
+
+def _strip_leading_ansi_fragment(text: str) -> str:
+    result = str(text or "")
+    for _ in range(8):
+        match = LEADING_CSI_FRAGMENT_RE.match(result)
+        if not match:
+            break
+        result = result[match.end() :]
+    return result
+
+
 def _read_transcript_snapshot(
     path: Path,
     limit: int = MAX_TRANSCRIPT_TAIL_CHARS,
@@ -1527,7 +1540,7 @@ def _read_transcript_snapshot(
     }
     if tail and not replayable:
         buffer = TerminalScreenBuffer(rows=rows, cols=cols)
-        snapshot.update(_terminal_screen_state_fields(buffer.feed(tail)))
+        snapshot.update(_terminal_screen_state_fields(buffer.feed(_strip_leading_ansi_fragment(tail))))
     return snapshot
 
 
