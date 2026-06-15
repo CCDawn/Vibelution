@@ -9,6 +9,7 @@ import json
 import queue
 import re
 import secrets
+import shutil
 import threading
 import hashlib
 import time
@@ -40,6 +41,7 @@ from core.chat.chat_task_types import trim_lines
 from core.chat.context_assembler import assemble_conversation_context
 from core.chat.skill_registry import build_skill_runtime_context, skill_descriptor_for_log
 from core.chat.slash_commands import SkillSlashCommand, parse_skill_slash_command
+from core.infrastructure import developer_sandbox
 from core.infrastructure.event_bus import EventNames, get_event_bus
 from core.llm.client import llm_status_context
 from core.llm.payload_builder import prompt_cache_partition_scope
@@ -571,10 +573,15 @@ def _session_workspace_relative_path(session_id: str) -> str:
 
 
 def _ensure_session_workspace(session_id: str) -> Path:
-    sessions_root = (PROJECT_ROOT / "workspace" / "sessions").resolve()
-    workspace_path = (PROJECT_ROOT / _session_workspace_relative_path(session_id)).resolve()
+    token = _safe_session_workspace_token(session_id)
+    sessions_root = developer_sandbox.sandboxed_workspace_path(PROJECT_ROOT, "sessions").resolve()
+    workspace_path = (sessions_root / token).resolve()
     if not workspace_path.is_relative_to(sessions_root):
         raise SessionValidationError(f"Invalid session workspace path: {workspace_path}")
+    formal_workspace_path = developer_sandbox.formal_workspace_path(PROJECT_ROOT, "sessions", token)
+    if not workspace_path.exists() and formal_workspace_path.exists():
+        workspace_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(formal_workspace_path, workspace_path)
     workspace_path.mkdir(parents=True, exist_ok=True)
     for subdir in _SESSION_WORKSPACE_SUBDIRS:
         (workspace_path / subdir).mkdir(parents=True, exist_ok=True)
@@ -8888,7 +8895,7 @@ def _session_prompt_cache_partition(
         ]
         raw = "|".join(raw_parts)
         digest = hashlib.sha256(raw.encode("utf-8", errors="replace")).hexdigest()[:16]
-        return f"chat-agent-static-{digest}"
+        return developer_sandbox.sandbox_prompt_cache_partition(f"chat-agent-static-{digest}", surface="chat", project_root=PROJECT_ROOT)
 
     raw_parts = [
         SESSION_PROMPT_CACHE_SCOPE_SESSION_FALLBACK,
@@ -8898,7 +8905,7 @@ def _session_prompt_cache_partition(
     ]
     raw = "|".join(raw_parts)
     digest = hashlib.sha256(raw.encode("utf-8", errors="replace")).hexdigest()[:16]
-    return f"chat-session-{digest}"
+    return developer_sandbox.sandbox_prompt_cache_partition(f"chat-session-{digest}", surface="chat", project_root=PROJECT_ROOT)
 
 
 def _session_prompt_cache_scope(*, agent_id: str = "") -> str:

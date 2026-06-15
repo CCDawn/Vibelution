@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 from config import get_config
+from core.infrastructure import developer_sandbox
 
 DEFAULT_OBSERVATION_BUDGET = 3
 SUPERVISED_BASELINE_SCOPE = "supervised_frozen_evaluator"
@@ -105,6 +106,9 @@ def _resolve_project_path(project_root: Path, path_str: str) -> Path:
     candidate = Path(path_str)
     if candidate.is_absolute():
         return candidate.resolve()
+    parts = candidate.parts
+    if parts and parts[0] == "workspace":
+        return developer_sandbox.seeded_sandbox_workspace_path(project_root, *parts[1:]).resolve()
     return (project_root / candidate).resolve()
 
 
@@ -416,7 +420,7 @@ def execute_supervised_policy(
     bundle_path: Path,
     project_root: Path,
 ) -> PolicyExecutionRecord:
-    base_dir = project_root / "workspace" / "supervised_evolution"
+    base_dir = developer_sandbox.seeded_sandbox_workspace_path(project_root, "supervised_evolution")
     policy_dir = base_dir / "policy"
     policy_dir.mkdir(parents=True, exist_ok=True)
 

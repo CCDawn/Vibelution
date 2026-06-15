@@ -8,6 +8,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from core.infrastructure import developer_sandbox
 from core.orchestration.output_boundary import (
     sanitize_assistant_thought_text,
     sanitize_assistant_visible_text,
@@ -20,7 +21,11 @@ DEFAULT_CHAT_CONVERSATION_TITLE = "默认对话"
 
 
 def chat_state_path(project_root: Path) -> Path:
-    return project_root / "workspace" / "chat" / "chat_state.json"
+    return developer_sandbox.sandboxed_workspace_path(project_root, "chat", "chat_state.json")
+
+
+def formal_chat_state_path(project_root: Path) -> Path:
+    return developer_sandbox.formal_workspace_path(project_root, "chat", "chat_state.json")
 
 
 def normalize_chat_tool_calls(value: Any) -> list[str | dict[str, Any]]:
@@ -192,6 +197,8 @@ def normalize_chat_messages(items: Any) -> list[dict[str, Any]]:
 
 def load_chat_state(project_root: Path) -> dict[str, Any]:
     path = chat_state_path(project_root)
+    if not path.exists() and path != formal_chat_state_path(project_root):
+        path = formal_chat_state_path(project_root)
     if not path.exists():
         return {}
     try:

@@ -12,6 +12,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
+from core.infrastructure import developer_sandbox
+
 from .dataset_environment import preflight_environment_contract
 from .supervised_artifacts import load_project_json_artifact, load_project_json_object
 from .lineage import summarize_lineage
@@ -744,7 +746,11 @@ def select_decision_record(records: list[DecisionHistoryRecord], raw: str) -> De
 
 
 def workbench_state_path(project_root: Path) -> Path:
-    return project_root / "workspace" / "supervised_evolution" / "workbench_state.json"
+    return developer_sandbox.sandboxed_workspace_path(project_root, "supervised_evolution", "workbench_state.json")
+
+
+def formal_workbench_state_path(project_root: Path) -> Path:
+    return developer_sandbox.formal_workspace_path(project_root, "supervised_evolution", "workbench_state.json")
 
 
 def save_workbench_state(project_root: Path, state: dict) -> None:
@@ -755,6 +761,8 @@ def save_workbench_state(project_root: Path, state: dict) -> None:
 
 def load_workbench_state(project_root: Path) -> dict:
     path = workbench_state_path(project_root)
+    if not path.exists() and path != formal_workbench_state_path(project_root):
+        path = formal_workbench_state_path(project_root)
     if not path.exists():
         return {}
     try:

@@ -169,6 +169,12 @@ def get_launcher_developer_noise_overview() -> dict[str, Any]:
     return launcher_developer_mode.get_noise_overview(config_path=CONFIG_PATH, project_root=PROJECT_ROOT)
 
 
+def reset_launcher_developer_sandbox() -> dict[str, Any]:
+    """Reset the active global developer sandbox."""
+
+    return launcher_developer_mode.reset_developer_sandbox(config_path=CONFIG_PATH, project_root=PROJECT_ROOT)
+
+
 def preview_launcher_developer_cleanup(action: str) -> dict[str, Any]:
     """Preview a guarded developer cleanup plan."""
 

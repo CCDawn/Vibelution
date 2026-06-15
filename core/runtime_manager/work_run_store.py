@@ -7,12 +7,14 @@ import os
 import re
 import tempfile
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
-from .constants import RUNTIME_MANAGER_DIR
+from core.infrastructure import developer_sandbox
+
+from .constants import PROJECT_ROOT, RUNTIME_MANAGER_DIR
 
 
 WORK_RUNS_DIR = RUNTIME_MANAGER_DIR / "work_runs"
@@ -33,6 +35,14 @@ _ACTIVE_WORK_BLOCKING_STATUSES = {
     "resuming",
     "force_stopping",
 }
+
+
+def default_work_runs_dir() -> Path:
+    if developer_sandbox.is_developer_mode_enabled():
+        sandbox_root = developer_sandbox.sandbox_root(PROJECT_ROOT, ensure=True)
+        if sandbox_root is not None:
+            return sandbox_root / ".runtime" / "runtime-manager" / "work_runs"
+    return WORK_RUNS_DIR
 _ACTIVE_WORK_NON_BLOCKING_STATUSES = {
     "cancelled",
     "closed",
@@ -383,7 +393,7 @@ def _record_work_run_event(
 
 @dataclass(frozen=True)
 class WorkRunStore:
-    root: Path = WORK_RUNS_DIR
+    root: Path = field(default_factory=default_work_runs_dir)
 
     def kind_dir(self, run_kind: str) -> Path:
         return self.root / normalize_run_kind(run_kind)

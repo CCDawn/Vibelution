@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from config.public_config import CONFIG_PATH, load_public_config, public_config_hash, save_public_config
+from core.infrastructure import developer_sandbox
 from core.infrastructure.git_process import run_git
 from core.runtime_manager.constants import PROJECT_ROOT
 from core.runtime_manager.scene_logging import append_runtime_manager_file_event
@@ -60,30 +61,13 @@ class DeveloperCleanupPlanError(ValueError):
 
 
 def get_developer_mode_setting(*, config_path: Path | None = None) -> dict[str, Any]:
-    """Return the Launcher-owned developer mode state. Missing config means off."""
+    """Return the global developer sandbox setting controlled by Launcher."""
 
-    public_config = _load_public_config(config_path)
-    launcher = _read_section(public_config, "launcher")
-    raw_setting = launcher.get("developer_mode") if isinstance(launcher.get("developer_mode"), dict) else {}
-    enabled = bool(raw_setting.get("enabled", False)) if isinstance(raw_setting, dict) else False
-    return {
-        "schemaVersion": DEVELOPER_MODE_SCHEMA_VERSION,
-        "enabled": enabled,
-        "defaulted": not bool(raw_setting),
-        "updatedAt": str(raw_setting.get("updated_at") or "") if isinstance(raw_setting, dict) else "",
-        "updatedBy": str(raw_setting.get("updated_by") or "") if isinstance(raw_setting, dict) else "",
-        "controller": "launcher",
-        "configPath": str(config_path or CONFIG_PATH),
-        "configHash": public_config_hash(public_config),
-        "policy": {
-            "settingsPageMutable": False,
-            "requiresLauncher": True,
-            "requiresPreview": True,
-            "requiresPlanHash": True,
-            "requiresConfirm": True,
-            "defaultWhenMissing": False,
-        },
-    }
+    return developer_sandbox.get_developer_mode_status(
+        config_path=config_path,
+        project_root=PROJECT_ROOT,
+        ensure_sandbox=False,
+    )
 
 
 def update_developer_mode_setting(
@@ -92,51 +76,48 @@ def update_developer_mode_setting(
     base_hash: str = "",
     config_path: Path | None = None,
 ) -> dict[str, Any]:
-    """Persist developer mode under launcher.developer_mode in external config."""
+    """Persist global developer sandbox mode under launcher.developer_mode."""
 
-    public_config = load_public_config(config_path or CONFIG_PATH)
-    current_hash = public_config_hash(public_config)
-    expected_hash = str(base_hash or "").strip()
-    if expected_hash and expected_hash != current_hash:
+    previous = get_developer_mode_setting(config_path=config_path)
+    try:
+        setting = developer_sandbox.update_developer_mode_status(
+            enabled,
+            base_hash=base_hash,
+            config_path=config_path,
+            project_root=PROJECT_ROOT,
+            updated_by="launcher",
+        )
+    except developer_sandbox.DeveloperSandboxConfigConflict as exc:
         _record_event(
             "launcher.developer_mode.conflict",
             phase="settings",
             outcome="conflict",
             level="warning",
             message="Launcher developer mode update rejected because the config snapshot is stale.",
-            fields={"baseHash": expected_hash, "currentHash": current_hash, "configPath": str(config_path or CONFIG_PATH)},
+            fields={"baseHash": exc.expected_hash, "currentHash": exc.current_hash, "configPath": str(config_path or CONFIG_PATH)},
         )
         raise DeveloperCleanupPlanError(
             "developer_mode_config_conflict",
             "开发者模式保存前配置已被其他页面或进程改动，请刷新 Launcher 后重试。",
         )
-    normalized = _parse_bool(enabled, label="enabled")
-    launcher = _ensure_section(public_config, "launcher")
-    previous = get_developer_mode_setting(config_path=config_path)
-    launcher["developer_mode"] = {
-        "enabled": normalized,
-        "updated_at": _utcnow(),
-        "updated_by": "launcher",
-    }
-    save_public_config(public_config, config_path or CONFIG_PATH)
-    setting = get_developer_mode_setting(config_path=config_path)
     _record_event(
         "launcher.developer_mode.updated",
         phase="settings",
         outcome="succeeded",
-        message="Launcher developer mode setting updated.",
+        message="Global developer sandbox mode setting updated.",
         fields={
             "previousEnabled": previous["enabled"],
             "enabled": setting["enabled"],
             "configPath": setting["configPath"],
-            "previousHash": current_hash,
             "configHash": setting["configHash"],
+            "developerSandboxId": (setting.get("sandbox") or {}).get("sandboxId", ""),
+            "recordKind": "debug" if setting["enabled"] else "control",
         },
     )
     return {
         "ok": True,
         "setting": setting,
-        "message": "开发者模式已由 Launcher 保存。",
+        "message": "开发者模式已由 Launcher 保存；开启时写入会进入无痕开发沙盒。",
     }
 
 
@@ -195,6 +176,35 @@ def get_noise_overview(*, config_path: Path | None = None, project_root: Path | 
         "projectRoot": str(root),
         "items": items,
         "updatedAt": _utcnow(),
+    }
+
+
+def reset_developer_sandbox(*, config_path: Path | None = None, project_root: Path | None = None) -> dict[str, Any]:
+    """Clear the active developer sandbox while keeping developer mode enabled."""
+
+    root = _project_root(project_root)
+    mode = get_developer_mode_setting(config_path=config_path)
+    if not mode.get("enabled"):
+        raise DeveloperModeDisabled("开发者模式未开启，无法重置开发者沙盒。")
+    previous_sandbox_id = str((mode.get("sandbox") or {}).get("sandboxId") or "")
+    reset = developer_sandbox.reset_active_sandbox(project_root=root)
+    setting = get_developer_mode_setting(config_path=config_path)
+    _record_event(
+        "launcher.developer_mode.sandbox.reset",
+        phase="settings",
+        outcome="succeeded",
+        message="Developer sandbox reset.",
+        fields={
+            "previousDeveloperSandboxId": previous_sandbox_id,
+            "developerSandboxId": str((setting.get("sandbox") or {}).get("sandboxId") or reset.get("sandboxId") or ""),
+            "recordKind": "debug",
+        },
+    )
+    return {
+        "ok": True,
+        "setting": setting,
+        "sandbox": setting.get("sandbox") or {},
+        "message": "开发者沙盒已重置；正式链路未被修改。",
     }
 
 
