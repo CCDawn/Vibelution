@@ -3030,9 +3030,71 @@ export function TeamsRoute({
     );
   }
 
-  function renderSourceCollectionStageAgents(stageId: SourceCollectionStageModuleId) {
+  function sourceCollectionStageAgentBindings(stageId: SourceCollectionStageModuleId) {
     const targetKeys = new Set(SOURCE_COLLECTION_STAGE_AGENT_KEYS[stageId]);
-    const bindings = (researchStageAgentBindingsByStage.knowledge_collection ?? []).filter((binding) => targetKeys.has(binding.key));
+    return (researchStageAgentBindingsByStage.knowledge_collection ?? []).filter((binding) => targetKeys.has(binding.key));
+  }
+
+  function renderSourceCollectionStageAgentStrip(stageId: SourceCollectionStageModuleId) {
+    const bindings = sourceCollectionStageAgentBindings(stageId);
+    if (!bindings.length) {
+      return null;
+    }
+    const readyCount = bindings.filter((binding) => binding.agent && researchStageAgentConfigTone(binding.agent) === "ready").length;
+    const blockedCount = bindings.filter((binding) => binding.agentId && !binding.agent).length
+      + bindings.filter((binding) => binding.agent && researchStageAgentConfigTone(binding.agent) === "blocked").length;
+    const missingCount = bindings.filter((binding) => !binding.agentId).length;
+    const toneClass = blockedCount > 0
+      ? styles.sourceCollectionStageAgentStripBlocked
+      : missingCount > 0
+        ? styles.sourceCollectionStageAgentStripMissing
+        : styles.sourceCollectionStageAgentStripReady;
+
+    return (
+      <div className={`${styles.sourceCollectionStageAgentStrip} ${toneClass}`} aria-label={lang === "zh" ? "本步骤 Agent" : "Step Agents"}>
+        <div className={styles.sourceCollectionStageAgentStripHead}>
+          <Bot size={12} />
+          <span>{lang === "zh" ? "Agent" : "Agents"}</span>
+          <strong>{readyCount}/{bindings.length}</strong>
+        </div>
+        <div className={styles.sourceCollectionStageAgentChips}>
+          {bindings.map((binding) => {
+            const tone = binding.agent
+              ? researchStageAgentConfigTone(binding.agent)
+              : binding.agentId
+                ? "blocked"
+                : "missing";
+            const info = agentDisplayInfo(binding.agent, lang, {
+              name: binding.bindingLabel || (lang === "zh" ? binding.zh : binding.en),
+            });
+            const agentName = binding.agent
+              ? info.name
+              : binding.agentId
+                ? binding.agentId
+                : (lang === "zh" ? "未绑定" : "Not bound");
+            return (
+              <Link
+                key={`source-step-strip-${stageId}-${binding.key}`}
+                className={[
+                  styles.sourceCollectionStageAgentChip,
+                  styles[`researchStageAgentCard_${tone}`],
+                ].filter(Boolean).join(" ")}
+                to={binding.agentId ? researchStageAgentManagementRoute(binding.agentId) : "/agents"}
+                title={`${lang === "zh" ? binding.zh : binding.en} · ${agentName}`}
+                aria-label={`${lang === "zh" ? "配置" : "Configure"} ${lang === "zh" ? binding.zh : binding.en}`}
+              >
+                <span>{lang === "zh" ? binding.zh : binding.en}</span>
+                <strong>{agentName}</strong>
+              </Link>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
+
+  function renderSourceCollectionStageAgents(stageId: SourceCollectionStageModuleId) {
+    const bindings = sourceCollectionStageAgentBindings(stageId);
     if (!bindings.length) {
       return null;
     }
@@ -5754,7 +5816,6 @@ export function TeamsRoute({
                 <span>{lang === "zh" ? "缓存状态" : "cache"} <strong>{sourceCollectionPromptCacheStatusLabel(sourceCollectionPromptCacheStatus, lang)}</strong></span>
               </div>
             </section>
-            {renderResearchStageAgentPanel("knowledge_collection", "compact")}
             <section id="source-collection-stage-status" className={styles.sourceCollectionStageModules} aria-label={lang === "zh" ? "知识搜集内部模块" : "Knowledge collection modules"}>
               {sourceCollectionStageModules.map((module, index) => (
                 <article
@@ -5769,7 +5830,7 @@ export function TeamsRoute({
                   aria-pressed={module.id === selectedSourceCollectionStageId}
                   title={module.detailLabel}
                   onClick={(event) => {
-                    if (event.target instanceof Element && event.target.closest("button")) {
+                    if (event.target instanceof Element && event.target.closest("button, a")) {
                       return;
                     }
                     module.onDetail();
@@ -5784,6 +5845,7 @@ export function TeamsRoute({
                     <b>{module.label}</b>
                     <em>{module.metric}</em>
                   </span>
+                  {renderSourceCollectionStageAgentStrip(module.id)}
                   <button
                     type="button"
                     className={module.actionTone === "primary" ? styles.sourceCollectionStagePrimaryAction : styles.sourceCollectionStageSecondaryAction}
