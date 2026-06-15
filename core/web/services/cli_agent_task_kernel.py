@@ -220,7 +220,7 @@ def _task_timeout_or_idle_status(task_state: dict[str, Any], *, now: float) -> s
         1,
         cli_agent_service.MAX_TIMEOUT_SECONDS,
     )
-    if created_epoch and now - created_epoch >= timeout_seconds:
+    if created_epoch is not None and now - created_epoch >= timeout_seconds:
         return "timeout"
     adapter_id = str(task_state.get("adapterId") or "").strip()
     protocol = protocols.protocol_for_adapter(adapter_id)
@@ -228,9 +228,9 @@ def _task_timeout_or_idle_status(task_state: dict[str, Any], *, now: float) -> s
         return ""
     if protocol.marker_completion_required:
         return ""
-    if created_epoch and now - created_epoch < protocol.min_completion_seconds:
+    if created_epoch is not None and now - created_epoch < protocol.min_completion_seconds:
         return ""
-    if last_output_epoch and now - last_output_epoch >= protocol.idle_completion_seconds:
+    if last_output_epoch is not None and now - last_output_epoch >= protocol.idle_completion_seconds:
         return "completed"
     return ""
 
@@ -473,7 +473,10 @@ def _active_task_for_terminal(terminal_session_id: str) -> dict[str, Any]:
     ]
     if not candidates:
         return {}
-    candidates.sort(key=lambda item: _parse_iso_epoch(str(item.get("updatedAt") or item.get("createdAt") or "")), reverse=True)
+    candidates.sort(
+        key=lambda item: _parse_iso_epoch(str(item.get("updatedAt") or item.get("createdAt") or "")) or 0.0,
+        reverse=True,
+    )
     return dict(candidates[0])
 
 
@@ -535,14 +538,14 @@ def _error_result(code: str, message: str, *, adapter_id: str = "") -> dict[str,
     }
 
 
-def _parse_iso_epoch(value: str) -> float:
+def _parse_iso_epoch(value: str) -> float | None:
     text = str(value or "").strip()
     if not text:
-        return 0.0
+        return None
     try:
         return datetime.fromisoformat(text.replace("Z", "+00:00")).timestamp()
     except ValueError:
-        return 0.0
+        return None
 
 
 def _now_iso() -> str:

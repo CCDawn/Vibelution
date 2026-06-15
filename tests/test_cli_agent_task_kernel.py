@@ -1,3 +1,5 @@
+from datetime import datetime, timedelta, timezone
+
 from core.web.services import cli_agent_task_kernel as task_kernel
 
 
@@ -159,3 +161,130 @@ def test_mimo_marker_required_protocol_does_not_idle_complete_without_marker(mon
     }
 
     assert task_kernel._task_timeout_or_idle_status(task_state, now=1781431400.0) == ""
+
+
+def test_task_timeout_or_idle_status_reports_timeout_when_elapsed_exceeds_limit(monkeypatch, tmp_path):
+    task_state = {
+        "adapterId": "codex_code",
+        "status": "running",
+        "output": "",
+        "createdAt": "2026-06-14T10:00:00+00:00",
+        "timeoutSeconds": 5,
+    }
+
+    assert task_kernel._task_timeout_or_idle_status(task_state, now=1781431400.0) == "timeout"
+
+
+def test_task_timeout_or_idle_status_reports_completed_after_idle_for_non_marker_protocol(monkeypatch, tmp_path):
+    base = datetime(2026, 6, 14, 10, 0, 0, tzinfo=timezone.utc)
+    created_at = base.isoformat()
+    task_state = {
+        "adapterId": "codex_code",
+        "status": "running",
+        "output": "Answer: 正在持续分析中",
+        "createdAt": created_at,
+        "lastOutputAt": (base + timedelta(seconds=10)).isoformat(),
+        "timeoutSeconds": 3600,
+    }
+
+    assert task_kernel._task_timeout_or_idle_status(task_state, now=(base + timedelta(seconds=40)).timestamp()) == "completed"
+
+
+def test_task_timeout_or_idle_status_with_epoch_zero_timestamp_still_completes_after_idle(monkeypatch, tmp_path):
+    task_state = {
+        "adapterId": "codex_code",
+        "status": "running",
+        "output": "Answer: 任务继续输出中",
+        "createdAt": "1970-01-01T00:00:00+00:00",
+        "lastOutputAt": "1970-01-01T00:00:10+00:00",
+        "timeoutSeconds": 3600,
+    }
+
+    assert task_kernel._task_timeout_or_idle_status(task_state, now=40.0) == "completed"
+
+
+def test_submit_cli_agent_task_send_failure_fails_task_and_returns_error_like_result(monkeypatch, tmp_path):
+    project_root = tmp_path / "Vibelution"
+    project_root.mkdir()
+    monkeypatch.setattr(task_kernel, "PROJECT_ROOT", project_root)
+    monkeypatch.setattr(task_kernel, "TASK_STATE_DIR", project_root / ".runtime" / "cli_agents" / "tasks")
+    monkeypatch.setattr(task_kernel, "_ensure_watcher_started", lambda: None)
+
+    from core.web.services import cli_agent_terminal_service
+
+    def failing_write(*_args, **_kwargs):
+        raise RuntimeError("terminal pipe closed")
+
+    monkeypatch.setattr(cli_agent_terminal_service, "write_cli_agent_terminal_input", failing_write)
+
+    terminal = {
+        "terminalSessionId": "cli-term-fail",
+        "adapterId": "mimo_code",
+        "label": "MiMo Code",
+        "sourceSessionId": "session-1",
+        "cwd": str(project_root),
+        "mode": "readonly",
+        "alive": True,
+        "status": "running",
+    }
+
+    result = task_kernel.submit_cli_agent_task(
+        terminal_session=terminal,
+        task="请尝试写一个函数",
+        timeout_seconds=60,
+        output_limit=8000,
+    )
+
+    assert result["status"] == "failed"
+    assert result["code"] == "CLI_AGENT_TASK_SEND_FAILED"
+    assert result["internalStatus"] == "failed"
+    assert result["semanticStatus"] == "failed"
+    assert result["timedOut"] is False
+
+
+def test_mark_terminal_closed_marks_active_task_as_failed_and_completes_to_session(monkeypatch, tmp_path):
+    project_root = tmp_path / "Vibelution"
+    project_root.mkdir()
+    monkeypatch.setattr(task_kernel, "PROJECT_ROOT", project_root)
+    monkeypatch.setattr(task_kernel, "TASK_STATE_DIR", project_root / ".runtime" / "cli_agents" / "tasks")
+    monkeypatch.setattr(task_kernel, "_ensure_watcher_started", lambda: None)
+
+    from core.web.services import cli_agent_terminal_service, session_service
+
+    monkeypatch.setattr(cli_agent_terminal_service, "write_cli_agent_terminal_input", lambda _session_id, data: {})
+
+    delivered = []
+    monkeypatch.setattr(
+        session_service,
+        "append_cli_agent_task_result_event",
+        lambda session_id, **kwargs: delivered.append((session_id, kwargs)),
+    )
+
+    terminal = {
+        "terminalSessionId": "cli-term-close",
+        "adapterId": "codex_code",
+        "label": "Codex Code",
+        "sourceSessionId": "session-1",
+        "cwd": str(project_root),
+        "mode": "readonly",
+        "alive": True,
+        "status": "running",
+    }
+    first = task_kernel.submit_cli_agent_task(
+        terminal_session=terminal,
+        task="执行一项需要长时间运行的任务",
+        timeout_seconds=600,
+        output_limit=8000,
+    )
+
+    task_kernel.mark_terminal_closed({"terminalSessionId": "cli-term-close"}, status="exited")
+
+    state = task_kernel._read_task_state(first["taskId"])
+    assert state["status"] == "failed"
+    assert state["code"] == "CLI_AGENT_TERMINAL_CLOSED"
+    assert state["completionReason"] == "exited"
+    assert delivered
+    assert delivered[0][0] == "session-1"
+    payload = delivered[0][1]["task_result"]
+    assert payload["status"] == "failed"
+    assert payload["code"] == "CLI_AGENT_TERMINAL_CLOSED"

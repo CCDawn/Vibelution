@@ -27,6 +27,7 @@ from core.infrastructure.agent_session import get_session_state
 from core.infrastructure.evolution_governor import get_evolution_governor
 from core.infrastructure.llm_utils import parse_tool_args
 from core.infrastructure.tool_recommender import decide_next_tools
+from core.infrastructure.tool_result import infer_tool_business_success
 
 
 IMAGE2_TOOL_TIMEOUT_SECONDS = 300
@@ -85,6 +86,17 @@ def _summarize_tool_result(result: Any) -> dict[str, Any]:
         "resultPreview": text[:320],
         "resultLength": len(text),
     }
+
+
+def _coerce_tool_result_payload(result: Any) -> dict[str, Any]:
+    if isinstance(result, dict):
+        return result
+    if isinstance(result, (bytes, bytearray)):
+        try:
+            return _parse_json_object(result.decode("utf-8", errors="replace"))
+        except Exception:
+            return {}
+    return _parse_json_object(str(result or "").strip())
 
 
 def _record_current_agent_tool_observation(tool_name: str, status: str, tool_args: dict[str, Any], summary: str = "") -> None:
@@ -206,26 +218,9 @@ def _validate_tool_arguments(tool_name: str, func: Callable, tool_args: dict[str
 def _classify_tool_semantic_result(tool_name: str, result: Any) -> dict[str, Any]:
     text = str(result or "").strip()
     fields: dict[str, Any] = {"semanticStatus": "succeeded"}
-    payload = _parse_json_object(text)
+    payload = _coerce_tool_result_payload(result)
     payload_status = str(payload.get("status") or "").strip().lower()
-    business_failure_statuses = {
-        "blocked",
-        "failed",
-        "error",
-        "invalid_args",
-        "policy_blocked",
-        "timeout",
-        "timed_out",
-        "cancelled",
-        "no_result",
-        "submitted",
-        "in_progress",
-    }
-    if payload and (
-        payload.get("ok") is False
-        or payload.get("success") is False
-        or payload_status in business_failure_statuses
-    ):
+    if payload and not infer_tool_business_success(payload):
         outcome = "failed"
         event_code = "tool.execute.failed"
         level = "error"
