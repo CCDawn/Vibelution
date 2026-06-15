@@ -4803,14 +4803,19 @@ export function ChatCodingRoute() {
   const compressionMainLine = compression
     ? `${numberFormatter.format(compression.currentTokens)} / ${numberFormatter.format(compression.effectiveTokenLimit)} · ${compressionCurrentPercent}%`
     : t("loadingContext");
+  const compressionPolicySourceLine = compression
+    ? compression.policySource === "agent_custom"
+      ? (lang === "zh" ? "Agent 自定义策略" : "Agent custom policy")
+      : (lang === "zh" ? "继承全局策略" : "Inherited global policy")
+    : t("loadingContext");
   const compressionScopeLine = compression
-    ? `${t("compressionScopeRuntime")} · ${t("compressionLimitBasisEffective")}`
+    ? `${t("compressionScopeRuntime")} · ${compressionPolicySourceLine}`
     : t("loadingContext");
   const compressionModelWindowLine = compression
     ? numberFormatter.format(compression.contextWindowLimit)
     : "--";
   const compressionTitleLine = compression
-    ? `${compressionMainLine} · ${compressionScopeLine} · window ${numberFormatter.format(compression.contextWindowLimit)} · source ${compression.source || "runtime_state"}`
+    ? `${compressionMainLine} · ${compressionScopeLine} · ${t("compressionLimitBasisEffective")} · window ${numberFormatter.format(compression.contextWindowLimit)} · source ${compression.source || "runtime_state"}`
     : t("loadingContext");
   const lastCompression = compression?.lastCompression ?? null;
   const lastCompressionSourceText = (() => {

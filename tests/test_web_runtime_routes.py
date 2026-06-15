@@ -434,6 +434,65 @@ def test_runtime_summary_exposes_real_context_compression_snapshot(monkeypatch):
     assert compression["strategy"]["levels"][0]["thresholdTokens"] == 7200
 
 
+def test_runtime_summary_uses_active_agent_context_compression_policy(monkeypatch):
+    monkeypatch.setattr(runtime_service, "get_active_session_summary", lambda: {"agentId": "agent-compression"})
+    monkeypatch.setattr(
+        runtime_service,
+        "_load_runtime_state",
+        lambda: {
+            "current_context_tokens": 9000,
+            "context_token_limit": 50000,
+            "updated_at": "2026-05-25T10:00:00",
+        },
+    )
+    fake_config = SimpleNamespace(
+        context_compression=SimpleNamespace(
+            enabled=True,
+            max_token_limit=16000,
+            max_compressions_per_session=20,
+            levels=SimpleNamespace(light=0.6, standard=0.8, deep=0.9, emergency=0.95),
+            summary_chars=SimpleNamespace(light=500, standard=1000, deep=2000, emergency=3000),
+            preservation=SimpleNamespace(
+                keep_ai_messages=5,
+                preserve_errors=True,
+                extract_key_decisions=True,
+            ),
+        )
+    )
+    agent = {
+        "agentId": "agent-compression",
+        "contextCompressionPolicy": {
+            "mode": "custom",
+            "enabled": True,
+            "maxTokenLimit": 10000,
+            "maxCompressionsPerSession": 3,
+            "levels": {"light": 0.45, "standard": 0.7, "deep": 0.85, "emergency": 0.92},
+            "summaryChars": {"light": 333, "standard": 777, "deep": 1111, "emergency": 1555},
+            "preservation": {
+                "keepAiMessages": 2,
+                "preserveErrors": False,
+                "extractKeyDecisions": True,
+            },
+        },
+    }
+    monkeypatch.setattr(runtime_service, "get_config", lambda: fake_config)
+    monkeypatch.setattr(agent_directory_service, "get_agent", lambda agent_id, include_archived=True: agent)
+
+    payload = runtime_service.get_runtime_summary()
+    compression = payload["contextCompression"]
+
+    assert compression["policySource"] == "agent_custom"
+    assert compression["policyMode"] == "custom"
+    assert compression["policyAgentId"] == "agent-compression"
+    assert compression["effectiveTokenLimit"] == 10000
+    assert compression["contextWindowLimit"] == 50000
+    assert compression["usageRatio"] == pytest.approx(0.9)
+    assert compression["strategy"]["levels"][1]["thresholdTokens"] == 7000
+    assert compression["strategy"]["levels"][1]["summaryMaxChars"] == 777
+    assert compression["strategy"]["levels"][0]["keepAiMessages"] == 2
+    assert compression["strategy"]["preserveErrors"] is False
+
+
 def test_runtime_summary_prefers_current_phase_over_stale_task_progress(monkeypatch):
     monkeypatch.setattr(
         runtime_service,

@@ -454,6 +454,10 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("t(\"compressionModelWindow\")");
     expect(routeSource).toContain("t(\"compressionThresholdBasis\")");
     expect(routeSource).toContain("const compressionModelWindowLine = compression");
+    expect(routeSource).toContain("const compressionPolicySourceLine = compression");
+    expect(routeSource).toContain("compression.policySource === \"agent_custom\"");
+    expect(routeSource).toContain("Agent 自定义策略");
+    expect(routeSource).toContain("继承全局策略");
     expect(routeSource).toContain("styles.compressionFactGrid");
     expect(routeSource).toContain("styles.compressionStrategyCard");
     expect(routeSource).toContain("styles.compressionStrategyList");

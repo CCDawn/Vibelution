@@ -4103,6 +4103,84 @@ class TestLocalProviderBootstrap:
         assert llm_for_turn.model == "agent-dialogue-model"
         assert llm_for_turn.bound_tool_count == 1
 
+    def test_runtime_agent_context_compression_policy_overrides_global_config(self, monkeypatch):
+        monkeypatch.setenv("VIBELUTION_AGENT_ID", "agent-compression-runtime")
+        monkeypatch.delenv("VIBELUTION_AGENT_LLM_SLOT", raising=False)
+        monkeypatch.setattr(agent_module.Key_Tools, "create_llm_facing_tools", lambda: [])
+
+        def fake_model_discovery(self):
+            self._context_window_limit = 50000
+            return 16000
+
+        monkeypatch.setattr(SelfEvolvingAgent, "_init_model_discovery", fake_model_discovery)
+        monkeypatch.setattr(SelfEvolvingAgent, "_init_token_compressor", lambda self: None)
+        monkeypatch.setattr(agent_module, "get_prompt_manager", lambda: MagicMock())
+        monkeypatch.setattr(agent_module, "get_state_manager", lambda: MagicMock())
+        monkeypatch.setattr(agent_module, "get_event_bus", lambda: MagicMock())
+        monkeypatch.setattr(agent_module, "get_tool_executor", lambda: MagicMock())
+        monkeypatch.setattr(agent_module, "get_security_validator", lambda *_args, **_kwargs: MagicMock())
+        monkeypatch.setattr(agent_module, "get_git_memory_service", lambda: MagicMock())
+        monkeypatch.setattr(agent_module, "get_mental_model", lambda **_kwargs: MagicMock())
+
+        config = Settings(
+            None,
+            **{
+                "llm.providers.default.kind": "local",
+                "llm.providers.default.api_key": "",
+                "llm.providers.default.api_key_env": "",
+                "llm.providers.default.base_url": "http://localhost:11434/v1",
+                "llm.providers.default.compat_mode": "openai",
+                "llm.providers.default.requires_api_key": False,
+                "llm.profiles.primary.provider_id": "default",
+                "llm.profiles.primary.model": "global-primary-model",
+                "llm.profiles.primary.tool_calling_mode": "disabled",
+            },
+        ).config
+        agent_record = {
+            "agentId": "agent-compression-runtime",
+            "contextCompressionPolicy": {
+                "mode": "custom",
+                "enabled": True,
+                "maxTokenLimit": 9000,
+                "maxCompressionsPerSession": 4,
+                "levels": {"light": 0.5, "standard": 0.7, "deep": 0.86, "emergency": 0.94},
+                "summaryChars": {"light": 300, "standard": 700, "deep": 1300, "emergency": 1900},
+                "preservation": {
+                    "keepAiMessages": 4,
+                    "preserveErrors": False,
+                    "extractKeyDecisions": False,
+                },
+            },
+        }
+        directory_module = __import__(
+            "core.web.services.agent_directory_service",
+            fromlist=["agent_directory_service"],
+        )
+        monkeypatch.setattr(directory_module, "get_agent", lambda _agent_id, include_archived=False: agent_record)
+        monkeypatch.setattr(directory_module, "filter_llm_tools_for_current_agent", lambda tools: list(tools or []))
+
+        class DummyClient:
+            def bind_tools(self, _tools):
+                return self
+
+        monkeypatch.setattr(agent_module, "get_llm_client", lambda role=None, profile_id=None, config=None: DummyClient())
+
+        agent = SelfEvolvingAgent(config=config)
+        strategy_config = agent._compression_strategy.get_config(agent_module.CompressionLevel.STANDARD)
+
+        assert agent._context_compression_policy["source"] == "agent_custom"
+        assert agent.config.context_compression.max_token_limit == 9000
+        assert agent.config.context_compression.max_compressions_per_session == 4
+        assert agent.config.context_compression.levels.standard == 0.7
+        assert agent.config.context_compression.summary_chars.deep == 1300
+        assert agent.config.context_compression.preservation.keep_ai_messages == 4
+        assert agent.config.context_compression.preservation.preserve_errors is False
+        assert agent.config.context_compression.preservation.extract_key_decisions is False
+        assert strategy_config.summary_max_chars == 700
+        assert strategy_config.keep_ai_messages == 2
+        assert strategy_config.preserve_errors is False
+        assert strategy_config.extract_key_decisions is False
+
     def test_runtime_agent_llm_slot_binding_maps_subagent_execution_to_primary(self, monkeypatch):
         monkeypatch.setenv("VIBELUTION_AGENT_ID", "agent-subagent-slot")
         monkeypatch.setenv("VIBELUTION_AGENT_LLM_SLOT", "subagentExecution")
