@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+from core.infrastructure import developer_sandbox
 from core.evaluation import (
     SupervisedEvolutionCancelled,
     build_workbench_state,
@@ -1308,6 +1309,26 @@ def execute_supervised_action(session_id: str, action: str) -> dict[str, Any]:
     """Execute a proposal lifecycle action for a finished supervised run."""
 
     lang = get_web_language()
+    if developer_sandbox.is_developer_mode_enabled():
+        _record_supervised_scene_event(
+            "action",
+            "supervised_run.proposal_action.blocked_by_developer_mode",
+            message="Supervised proposal action blocked in developer sandbox mode.",
+            level="warning",
+            outcome="blocked",
+            fields={
+                "sessionId": str(session_id or "").strip(),
+                "action": str(action or "").strip().lower(),
+                "developerMode": True,
+            },
+        )
+        raise SupervisedRunActionError(
+            text_for(
+                lang,
+                zh="开发者模式开启时不会修改正式监督进化治理链路；请关闭开发者模式后再执行 apply/activate/rollback。",
+                en="Developer mode does not mutate the formal supervised-governance chain. Disable developer mode before apply/activate/rollback.",
+            )
+        )
     if not manual_governance_enabled():
         _record_supervised_scene_event(
             "action",

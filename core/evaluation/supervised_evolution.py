@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
+from core.infrastructure import developer_sandbox
 from core.infrastructure.workspace_manager import get_workspace
 from core.evaluation.dataset_environment import preflight_environment_contract
 from core.evaluation.selection_policy import execute_supervised_policy
@@ -341,7 +342,7 @@ def resolve_supervised_bundle_path(bundle_name: str = DEFAULT_BUNDLE_NAME, *, pr
 
 
 def _ensure_supervised_dirs(project_root: Path) -> Dict[str, Path]:
-    base = project_root / "workspace" / "supervised_evolution"
+    base = developer_sandbox.seeded_sandbox_workspace_path(project_root, "supervised_evolution")
     dirs = {
         "base": base,
         "sessions": base / "sessions",

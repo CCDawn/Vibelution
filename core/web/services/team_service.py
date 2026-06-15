@@ -16,6 +16,7 @@ from uuid import uuid4
 import httpx
 
 from core.chat.chat_task_types import trim_lines
+from core.infrastructure import developer_sandbox
 
 from . import agent_directory_service, chat_room_service, project_agent_bus_service
 from .runtime_scene_service import record_runtime_scene_event
@@ -3715,7 +3716,7 @@ def _write_json(path: Path, payload: dict[str, Any]) -> None:
 
 
 def _teams_root() -> Path:
-    return _project_root() / "workspace" / "teams"
+    return developer_sandbox.seeded_sandbox_workspace_path(_project_root(), "teams")
 
 
 def _teams_index_path() -> Path:
