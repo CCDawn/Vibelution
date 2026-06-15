@@ -1356,6 +1356,49 @@ def test_terminal_screen_buffer_keeps_split_escape_sequences_out_of_screen_text(
     assert "可读内容" in snapshot.text
 
 
+def test_cli_agent_terminal_preserves_current_screen_when_transcript_snapshot_is_empty(tmp_path):
+    transcript = tmp_path / "terminal.log"
+    transcript.write_text("\x1b[?2026h\x1b[?25l\x1b[57;6H\x1b[?25h\x1b[?2026l" * 40, encoding="utf-8")
+    state = {
+        "screenText": "已有可见画面",
+        "screenReplay": "\x1b[2J\x1b[H已有可见画面",
+        "screenQuality": "screen_buffer",
+        "screenRows": 10,
+        "screenCols": 40,
+        "screenParserVersion": terminal_service.SCREEN_BUFFER_PARSER_VERSION,
+    }
+
+    merged = terminal_service._merge_transcript_snapshot(
+        state,
+        terminal_service._read_transcript_snapshot(transcript, limit=120000, rows=10, cols=40),
+    )
+
+    assert merged["transcriptTailReplayable"] is False
+    assert merged["screenText"] == "已有可见画面"
+    assert merged["screenParserVersion"] == terminal_service.SCREEN_BUFFER_PARSER_VERSION
+
+
+def test_cli_agent_terminal_discards_legacy_screen_when_transcript_snapshot_is_empty(tmp_path):
+    transcript = tmp_path / "terminal.log"
+    transcript.write_text("\x1b[?2026h\x1b[?25l\x1b[57;6H\x1b[?25h\x1b[?2026l" * 40, encoding="utf-8")
+    state = {
+        "screenText": "38;2;255;255;255m旧污染画面",
+        "screenReplay": "\x1b[2J\x1b[H38;2;255;255;255m旧污染画面",
+        "screenQuality": "screen_buffer",
+        "screenRows": 10,
+        "screenCols": 40,
+    }
+
+    merged = terminal_service._merge_transcript_snapshot(
+        state,
+        terminal_service._read_transcript_snapshot(transcript, limit=120000, rows=10, cols=40),
+    )
+
+    assert merged["transcriptTailReplayable"] is False
+    assert merged["screenText"] == ""
+    assert not terminal_service._screen_initial_text(state)
+
+
 def test_cli_agent_terminal_trims_large_tui_transcript(monkeypatch, tmp_path):
     transcript = tmp_path / "terminal.log"
     monkeypatch.setattr(terminal_service, "MAX_TRANSCRIPT_BYTES", 200)

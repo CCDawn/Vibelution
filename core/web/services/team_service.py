@@ -20,6 +20,7 @@ from core.chat.chat_task_types import trim_lines
 from . import agent_directory_service, chat_room_service, project_agent_bus_service
 from .runtime_scene_service import record_runtime_scene_event
 from .team_conversation_contract import build_team_conversation_projection
+from core.logging.logger import debug as _debug_logger
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -3872,8 +3873,8 @@ def _record_team_event(event_code: str, team: dict[str, Any], *, fields: dict[st
                 **(fields or {}),
             },
         )
-    except Exception:
-        pass
+    except Exception as exc:
+        _debug_logger.warning(f"Failed to emit team loaded event. error={exc}")
 
 
 def _team_detail_log_fields(team: dict[str, Any], started_at: float) -> dict[str, Any]:
@@ -3999,8 +4000,8 @@ def _record_team_detail_loaded(team: dict[str, Any], started_at: float) -> None:
                 int(state.get("repeatCount") or 0) >= TEAM_DETAIL_LOG_ROLLUP_REPEAT_THRESHOLD
             ):
                 _emit_team_detail_rollup(team_id, state, now=now)
-    except Exception:
-        pass
+    except Exception as exc:
+        _debug_logger.warning(f"Failed to record team detail loaded telemetry. error={exc}")
 
 
 def _record_team_membership_conflict(team_id: str, agent_id: str, conflict: dict[str, Any]) -> None:
@@ -4018,8 +4019,8 @@ def _record_team_membership_conflict(team_id: str, agent_id: str, conflict: dict
                 "conflictTeamName": conflict.get("name"),
             },
         )
-    except Exception:
-        pass
+    except Exception as exc:
+        _debug_logger.warning(f"Failed to record team membership conflict for team={team_id}. error={exc}")
 
 
 def _record_team_archive_rejected(
@@ -4048,8 +4049,8 @@ def _record_team_archive_rejected(
                 "message": str(error) if error else "",
             },
         )
-    except Exception:
-        pass
+    except Exception as exc:
+        _debug_logger.warning(f"Failed to record team archive rejected for team={team.get('teamId')}. error={exc}")
 
 
 def _record_archived_team_member_cascade_repaired(
@@ -4077,8 +4078,10 @@ def _record_archived_team_member_cascade_repaired(
                 "reason": str(reason or "").strip(),
             },
         )
-    except Exception:
-        pass
+    except Exception as exc:
+        _debug_logger.warning(
+            f"Failed to record archived team member cascade repaired for team={team.get('teamId')}. error={exc}"
+        )
 
 
 def _record_compact_chat_room_sync_skipped_busy(team: dict[str, Any], linked_room_id: str, exc: Exception) -> None:
@@ -4102,8 +4105,10 @@ def _record_compact_chat_room_sync_skipped_busy(team: dict[str, Any], linked_roo
                 "message": str(exc),
             },
         )
-    except Exception:
-        pass
+    except Exception as exc:
+        _debug_logger.warning(
+            f"Failed to record compact chat room sync skipped busy for team={team.get('teamId')}, linked_room_id={linked_room_id}. error={exc}"
+        )
 
 
 def _record_system_team_membership_conflict(team_id: str, agent_id: str, conflict: dict[str, Any], *, source: str) -> None:
@@ -4122,8 +4127,8 @@ def _record_system_team_membership_conflict(team_id: str, agent_id: str, conflic
                 "conflictTeamName": conflict.get("name"),
             },
         )
-    except Exception:
-        pass
+    except Exception as exc:
+        _debug_logger.warning(f"Failed to record system team membership conflict for team={team_id}. error={exc}")
 
 
 def _record_system_team_sync_failed(source: str, exc: Exception) -> None:
@@ -4144,5 +4149,5 @@ def _record_system_team_sync_failed(source: str, exc: Exception) -> None:
                 "message": str(exc),
             },
         )
-    except Exception:
-        pass
+    except Exception as exc:
+        _debug_logger.warning(f"Failed to record system team sync failure source={source}. error={exc}")
