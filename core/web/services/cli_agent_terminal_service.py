@@ -286,6 +286,7 @@ def ensure_cli_agent_terminal_session(
         source_message_id=normalized_source_message_id,
         source_run_id=normalized_source_run_id,
         cwd=scope_cwd or cwd,
+        mode=mode,
         task=task,
     )
     cli_run_id = _stable_cli_run_id(
@@ -294,6 +295,7 @@ def ensure_cli_agent_terminal_session(
         source_message_id=normalized_source_message_id,
         source_run_id=normalized_source_run_id,
         cwd=scope_cwd or cwd,
+        mode=mode,
         task=task,
     )
 
@@ -318,6 +320,7 @@ def ensure_cli_agent_terminal_session(
                 adapter_id=normalized_type,
                 source_session_id=normalized_source_session_id,
                 cwd=scope_cwd or cwd,
+                mode=mode,
                 exclude_terminal_session_id=terminal_session_id,
             )
         if _source_bound_attach_should_not_resume_stale_state(
@@ -382,6 +385,7 @@ def ensure_cli_agent_terminal_session(
             source_message_id=normalized_source_message_id,
             source_run_id=normalized_source_run_id,
             cwd=str(command.get("cwd") or cwd or ""),
+            mode=str(command.get("mode") or requested_mode or "readonly"),
             task=requested_task,
         )
         cli_run_id = _stable_cli_run_id(
@@ -390,6 +394,7 @@ def ensure_cli_agent_terminal_session(
             source_message_id=normalized_source_message_id,
             source_run_id=normalized_source_run_id,
             cwd=str(command.get("cwd") or cwd or ""),
+            mode=str(command.get("mode") or requested_mode or "readonly"),
             task=requested_task,
         )
         locked_runtime = _find_active_locked_runtime(lock_key, exclude_terminal_session_id=terminal_session_id)
@@ -885,6 +890,7 @@ def _find_related_terminal_state(
     adapter_id: str,
     source_session_id: str,
     cwd: str,
+    mode: str,
     exclude_terminal_session_id: str = "",
 ) -> dict[str, Any]:
     candidates: list[dict[str, Any]] = []
@@ -900,6 +906,7 @@ def _find_related_terminal_state(
             adapter_id=adapter_id,
             source_session_id=source_session_id,
             cwd=cwd,
+            mode=mode,
         ):
             continue
         candidates.append(state)
@@ -922,6 +929,7 @@ def _related_terminal_session_ids(state: dict[str, Any]) -> list[str]:
     adapter_id = str(state.get("adapterId") or state.get("agentType") or "").strip()
     source_session_id = str(state.get("sourceSessionId") or "").strip()
     cwd = str(state.get("cwd") or "").strip()
+    mode = str(state.get("mode") or "").strip()
     result: list[str] = []
     for candidate in _iter_terminal_states():
         terminal_session_id = str(candidate.get("terminalSessionId") or "").strip()
@@ -934,6 +942,7 @@ def _related_terminal_session_ids(state: dict[str, Any]) -> list[str]:
             adapter_id=adapter_id,
             source_session_id=source_session_id,
             cwd=cwd,
+            mode=mode,
         ):
             result = _append_unique(result, terminal_session_id)
     return result
@@ -947,6 +956,7 @@ def _terminal_state_matches_scope(
     adapter_id: str,
     source_session_id: str,
     cwd: str,
+    mode: str,
 ) -> bool:
     if cli_run_id and str(state.get("cliRunId") or "").strip() == cli_run_id:
         return True
@@ -955,7 +965,11 @@ def _terminal_state_matches_scope(
     state_adapter = str(state.get("adapterId") or state.get("agentType") or "").strip()
     if not adapter_id or state_adapter != adapter_id:
         return False
-    return _normalize_path_for_match(str(state.get("cwd") or "")) == _normalize_path_for_match(cwd)
+    if _normalize_path_for_match(str(state.get("cwd") or "")) != _normalize_path_for_match(cwd):
+        return False
+    state_mode = _normalize_mode_for_scope(str(state.get("mode") or ""))
+    requested_mode = _normalize_mode_for_scope(mode)
+    return not state_mode or not requested_mode or state_mode == requested_mode
 
 
 def _iter_terminal_states() -> list[dict[str, Any]]:
@@ -1359,9 +1373,10 @@ def _stable_cli_lock_key(
     source_message_id: str,
     source_run_id: str,
     cwd: str,
+    mode: str,
     task: str,
 ) -> str:
-    return f"cli-lock-{_fnv1a_hex(_cli_scope_basis(adapter_id=adapter_id, source_session_id=source_session_id, source_message_id=source_message_id, source_run_id=source_run_id, cwd=cwd, task=task))}"
+    return f"cli-lock-{_fnv1a_hex(_cli_scope_basis(adapter_id=adapter_id, source_session_id=source_session_id, source_message_id=source_message_id, source_run_id=source_run_id, cwd=cwd, mode=mode, task=task))}"
 
 
 def _stable_cli_run_id(
@@ -1371,9 +1386,10 @@ def _stable_cli_run_id(
     source_message_id: str,
     source_run_id: str,
     cwd: str,
+    mode: str,
     task: str,
 ) -> str:
-    return f"cli-run-{_fnv1a_hex(_cli_scope_basis(adapter_id=adapter_id, source_session_id=source_session_id, source_message_id=source_message_id, source_run_id=source_run_id, cwd=cwd, task=task))}"
+    return f"cli-run-{_fnv1a_hex(_cli_scope_basis(adapter_id=adapter_id, source_session_id=source_session_id, source_message_id=source_message_id, source_run_id=source_run_id, cwd=cwd, mode=mode, task=task))}"
 
 
 def _cli_scope_basis(
@@ -1383,10 +1399,12 @@ def _cli_scope_basis(
     source_message_id: str,
     source_run_id: str,
     cwd: str,
+    mode: str,
     task: str,
 ) -> str:
     normalized_cwd = str(cwd or "").strip().replace("\\", "/").lower()
-    return "\n".join(["cli-run-v2", str(adapter_id or "").strip(), normalized_cwd])
+    normalized_mode = _normalize_mode_for_scope(mode) or "readonly"
+    return "\n".join(["cli-run-v3", str(adapter_id or "").strip(), normalized_cwd, normalized_mode])
 
 
 def _fnv1a_hex(value: str) -> str:
@@ -1425,9 +1443,17 @@ def _stable_terminal_session_id(
         source_message_id=source_message_id,
         source_run_id=source_run_id,
         cwd=cwd,
+        mode=mode,
         task=task,
     )
     return f"cli-term-{hashlib.sha256(basis.encode('utf-8', errors='replace')).hexdigest()[:16]}"
+
+
+def _normalize_mode_for_scope(mode: str) -> str:
+    normalized = str(mode or "").strip().lower()
+    if not normalized:
+        return ""
+    return normalized if normalized in cli_agent_service.SUPPORTED_MODES else "readonly"
 
 
 def _scope_cwd(cwd: str, *, mode: str) -> str:
@@ -1555,6 +1581,10 @@ def _merge_transcript_snapshot(state: dict[str, Any], snapshot: dict[str, Any]) 
     if str(snapshot.get("screenText") or "").strip():
         return merged
     if not str(state.get("screenText") or "").strip() or not _screen_state_is_current(state):
+        if str(state.get("screenText") or "").strip() and not _screen_state_is_current(state):
+            for key in SCREEN_STATE_FIELD_KEYS:
+                if key in merged:
+                    merged[key] = "" if key in {"screenText", "screenReplay", "screenQuality"} else None
         return merged
     for key in SCREEN_STATE_FIELD_KEYS:
         if key in state:
@@ -1570,16 +1600,12 @@ def _read_transcript_snapshot(
     cols: int = DEFAULT_COLS,
 ) -> dict[str, Any]:
     tail = _read_transcript_tail(path, limit=limit)
-    replayable, reason = _classify_transcript_tail_replay(tail)
-    snapshot = {
-        "transcriptTail": tail if replayable else "",
-        "transcriptTailReplayable": replayable,
-        "transcriptTailRenderReason": reason,
+    replay_tail = _strip_leading_ansi_fragment(tail)
+    return {
+        "transcriptTail": replay_tail,
+        "transcriptTailReplayable": True,
+        "transcriptTailRenderReason": "raw_transcript_tail_boundary_aligned" if replay_tail != tail else ("raw_transcript_tail" if tail else "empty"),
     }
-    if tail and not replayable:
-        buffer = TerminalScreenBuffer(rows=rows, cols=cols)
-        snapshot.update(_terminal_screen_state_fields(buffer.feed(_strip_leading_ansi_fragment(tail))))
-    return snapshot
 
 
 def _classify_transcript_tail_replay(text: str) -> tuple[bool, str]:
@@ -1680,10 +1706,17 @@ def _public_state(state: dict[str, Any]) -> dict[str, Any]:
         "userClosed",
         "closedAt",
         "closedTerminalSessionIds",
+        "closeReason",
+        "supersededByTerminalSessionId",
+        "semanticStatus",
         "createdAt",
         "updatedAt",
     }
-    return {key: state.get(key) for key in keys if key in state}
+    payload = {key: state.get(key) for key in keys if key in state}
+    if "semanticStatus" not in payload and str(payload.get("terminalSessionId") or "").strip():
+        status = str(payload.get("status") or "").strip().lower()
+        payload["semanticStatus"] = status if status in {"closed", "stopped", "exited", "stale"} else "attached"
+    return payload
 
 
 def _encode_sse_event(event_name: str, payload: dict[str, Any]) -> str:

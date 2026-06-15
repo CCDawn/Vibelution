@@ -226,6 +226,8 @@ def _task_timeout_or_idle_status(task_state: dict[str, Any], *, now: float) -> s
     protocol = protocols.protocol_for_adapter(adapter_id)
     if not str(task_state.get("output") or "").strip():
         return ""
+    if protocol.marker_completion_required:
+        return ""
     if created_epoch and now - created_epoch < protocol.min_completion_seconds:
         return ""
     if last_output_epoch and now - last_output_epoch >= protocol.idle_completion_seconds:
@@ -295,6 +297,17 @@ def _complete_task_state(task_state: dict[str, Any], *, status: str, code: str, 
 
 def _finalize_task_result(task_state: dict[str, Any], *, reason: str) -> None:
     session_id = str(task_state.get("sourceSessionId") or "").strip()
+    cli_agent_service._record_event(
+        "cli_agent.task.result_ready",
+        outcome=str(task_state.get("status") or "completed").strip() or "completed",
+        fields={
+            "taskId": str(task_state.get("taskId") or ""),
+            "terminalSessionId": str(task_state.get("terminalSessionId") or ""),
+            "adapterId": str(task_state.get("adapterId") or ""),
+            "completionReason": str(task_state.get("completionReason") or reason or ""),
+            "resultSegmentCount": len(list(task_state.get("resultSegments") or [])),
+        },
+    )
     if not session_id:
         return
     try:
@@ -336,8 +349,11 @@ def _public_task_result(
         segments = protocols.tail_semantic_segments(adapter_id, parse_text, limit=protocols.protocol_for_adapter(adapter_id).max_tail_segments)
     stdout_preview = protocols.summarize_segments(segments) or protocols.remove_protocol_markers(protocols.strip_terminal_controls(parse_text))
     result_source = _task_result_source(task_state)
+    public_status = _semantic_task_status(str(task_state.get("status") or "").strip(), code or str(task_state.get("code") or "").strip())
     result = {
-        "status": str(task_state.get("status") or "").strip() or "unknown",
+        "status": public_status,
+        "semanticStatus": public_status,
+        "internalStatus": str(task_state.get("status") or "").strip() or "unknown",
         "code": code or str(task_state.get("code") or "").strip() or "CLI_AGENT_TASK",
         "message": message or str(task_state.get("message") or "").strip(),
         "taskId": str(task_state.get("taskId") or "").strip(),
@@ -365,7 +381,7 @@ def _public_task_result(
         "terminalReuse": bool(terminal.get("reusedActiveLock")),
         "resultSegments": segments,
         "resultSource": result_source,
-        "parserConfidence": "high" if result_source.startswith("screen") else "medium",
+        "parserConfidence": _parser_confidence(task_state, result_source),
         "stdoutPreview": cli_agent_service._clip(stdout_preview, limit),
         "stderrPreview": "",
         "exitCode": None,
@@ -387,19 +403,45 @@ def _capture_terminal_screen(task_state: dict[str, Any], terminal_session: dict[
 
 
 def _task_parse_text(task_state: dict[str, Any]) -> str:
-    for key in ("screenTextDelta", "screenText", "output"):
-        value = protocols.remove_protocol_markers(str(task_state.get(key) or "")).strip()
+    for key in ("output", "screenTextDelta", "screenText"):
+        raw_value = str(task_state.get(key) or "")
+        value = protocols.remove_protocol_markers(protocols.strip_terminal_controls(raw_value)).strip()
         if value:
-            return value
+            return raw_value
     return ""
 
 
 def _task_result_source(task_state: dict[str, Any]) -> str:
+    if protocols.remove_protocol_markers(protocols.strip_terminal_controls(str(task_state.get("output") or ""))).strip():
+        return "terminal_output"
     if str(task_state.get("screenTextDelta") or "").strip():
         return "screen_delta"
     if str(task_state.get("screenText") or "").strip():
         return "screen_buffer"
     return "terminal_output"
+
+
+def _semantic_task_status(status: str, code: str) -> str:
+    normalized = str(status or "").strip().lower()
+    normalized_code = str(code or "").strip()
+    if normalized_code == "CLI_AGENT_TASK_LOCKED":
+        return "task_locked"
+    if normalized in {"queued", "sent"}:
+        return "task_sent"
+    if normalized in {"completed", "failed", "timeout", "running", "error"}:
+        return normalized
+    return normalized or "unknown"
+
+
+def _parser_confidence(task_state: dict[str, Any], result_source: str) -> str:
+    reason = str(task_state.get("completionReason") or "").strip()
+    if reason == "protocol_pattern":
+        return "high"
+    if result_source == "terminal_output":
+        return "medium"
+    if result_source.startswith("screen"):
+        return "low"
+    return "medium"
 
 
 def _screen_delta_text(current: str, baseline: str) -> str:
@@ -484,6 +526,8 @@ def _stable_task_id(*, terminal_session_id: str, task: str, created_at: str) -> 
 def _error_result(code: str, message: str, *, adapter_id: str = "") -> dict[str, Any]:
     return {
         "status": "error",
+        "semanticStatus": "error",
+        "internalStatus": "error",
         "code": code,
         "message": message,
         "agentType": adapter_id,

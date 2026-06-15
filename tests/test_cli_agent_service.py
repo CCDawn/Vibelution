@@ -179,7 +179,8 @@ def test_codex_readonly_uses_exec_with_readonly_sandbox(monkeypatch, tmp_path):
         timeout=15,
     )
 
-    assert result["status"] == "sent"
+    assert result["status"] == "task_sent"
+    assert result["internalStatus"] == "sent"
     assert result["code"] == "CLI_AGENT_TASK_SENT"
     args, kwargs = spawned[0]
     assert args == [r"C:\tools\codex.exe", "--cd", str(project_root)]
@@ -238,7 +239,8 @@ def test_mimo_worktree_mode_builds_dir_and_agent_args(monkeypatch, tmp_path):
         allow_unsafe_permissions=True,
     )
 
-    assert result["status"] == "sent"
+    assert result["status"] == "task_sent"
+    assert result["internalStatus"] == "sent"
     assert result["code"] == "CLI_AGENT_TASK_SENT"
     args, kwargs = spawned[0]
     assert args == [r"C:\tools\mimo.cmd", str(worktree)]
@@ -1132,12 +1134,14 @@ def test_cli_agent_lifecycle_close_event_persists_once(monkeypatch, tmp_path):
     terminal_session = {
         "terminalSessionId": "term-1",
         "cliRunId": "cli-run-1",
+        "lockKey": "cli-lock-1",
         "adapterId": "mimo_code",
         "label": "MiMo Code",
         "sourceMessageId": "message-1",
         "sourceRunId": "run-1",
         "linkedSourceRunIds": ["run-1", "run-2"],
         "cwd": str(tmp_path),
+        "mode": "readonly",
         "cliSessionId": "MIMO-1",
     }
 
@@ -1164,6 +1168,8 @@ def test_cli_agent_lifecycle_close_event_persists_once(monkeypatch, tmp_path):
     assert len(lifecycle_messages) == 1
     assert lifecycle_messages[0]["content"] == "MiMo Code 已关闭。"
     assert lifecycle_messages[0]["metadata"]["cliRunId"] == "cli-run-1"
+    assert lifecycle_messages[0]["metadata"]["lockKey"] == "cli-lock-1"
+    assert lifecycle_messages[0]["metadata"]["mode"] == "readonly"
     assert lifecycle_messages[0]["metadata"]["linkedSourceRunIds"] == ["run-1", "run-2"]
     sidecar_path = tmp_path / "workspace" / "sessions" / "session-1" / "logs" / "cli_agent_lifecycle.jsonl"
     assert sidecar_path.exists()
@@ -1266,6 +1272,28 @@ def test_cli_agent_terminal_reads_only_bounded_transcript_tail(tmp_path):
     assert "oldold" not in tail
 
 
+def test_cli_agent_terminal_scope_includes_mode(tmp_path):
+    readonly = terminal_service._stable_terminal_session_id(
+        adapter_id="mimo_code",
+        source_session_id="session-1",
+        source_message_id="message-1",
+        source_run_id="run-1",
+        cwd=str(tmp_path),
+        mode="readonly",
+        task="同一个任务",
+    )
+    worktree = terminal_service._stable_terminal_session_id(
+        adapter_id="mimo_code",
+        source_session_id="session-1",
+        source_message_id="message-1",
+        source_run_id="run-1",
+        cwd=str(tmp_path),
+        mode="worktree",
+        task="同一个任务",
+    )
+    assert readonly != worktree
+
+
 def test_cli_agent_terminal_marks_plain_transcript_tail_replayable(tmp_path):
     transcript = tmp_path / "terminal.log"
     transcript.write_text("line 1\nline 2\n", encoding="utf-8")
@@ -1274,10 +1302,10 @@ def test_cli_agent_terminal_marks_plain_transcript_tail_replayable(tmp_path):
 
     assert snapshot["transcriptTail"].splitlines() == ["line 1", "line 2"]
     assert snapshot["transcriptTailReplayable"] is True
-    assert snapshot["transcriptTailRenderReason"] == "replayable"
+    assert snapshot["transcriptTailRenderReason"] == "raw_transcript_tail"
 
 
-def test_cli_agent_terminal_suppresses_unsafe_tui_transcript_tail(tmp_path):
+def test_cli_agent_terminal_replays_unsafe_tui_transcript_tail_as_raw_xterm_input(tmp_path):
     transcript = tmp_path / "terminal.log"
     spinner_tail = "".join(
         f"\x1b[?2026h\x1b[?25l\x1b[34;6H\x1b[38;2;128;128;128m⠋\x1b[0m\x1b[57;6H\x1b[?25h\x1b[?2026l"
@@ -1287,23 +1315,22 @@ def test_cli_agent_terminal_suppresses_unsafe_tui_transcript_tail(tmp_path):
 
     snapshot = terminal_service._read_transcript_snapshot(transcript, limit=120000)
 
-    assert snapshot["transcriptTail"] == ""
-    assert snapshot["transcriptTailReplayable"] is False
-    assert snapshot["transcriptTailRenderReason"] == "unsafe_tui_control_tail"
+    assert snapshot["transcriptTail"] == spinner_tail
+    assert snapshot["transcriptTailReplayable"] is True
+    assert snapshot["transcriptTailRenderReason"] == "raw_transcript_tail"
 
 
-def test_cli_agent_terminal_unsafe_tui_snapshot_keeps_screen_replay(tmp_path):
+def test_cli_agent_terminal_unsafe_tui_snapshot_prefers_raw_replay(tmp_path):
     transcript = tmp_path / "terminal.log"
     cursor_noise = "".join(f"\x1b[{row};5H" for row in range(1, 28))
     transcript.write_text(cursor_noise + "\x1b[2J\x1b[3;4H结论：模块拆分未完成", encoding="utf-8")
 
     snapshot = terminal_service._read_transcript_snapshot(transcript, limit=120000, rows=10, cols=40)
 
-    assert snapshot["transcriptTail"] == ""
-    assert snapshot["transcriptTailReplayable"] is False
-    assert snapshot["transcriptTailRenderReason"] == "unsafe_tui_control_tail"
-    assert snapshot["screenReplay"].startswith("\x1b[2J\x1b[H")
-    assert "结论：模块拆分未完成" in snapshot["screenText"]
+    assert snapshot["transcriptTail"].endswith("\x1b[2J\x1b[3;4H结论：模块拆分未完成")
+    assert snapshot["transcriptTailReplayable"] is True
+    assert snapshot["transcriptTailRenderReason"] == "raw_transcript_tail"
+    assert "screenText" not in snapshot
 
 
 def test_cli_agent_terminal_unsafe_tui_snapshot_strips_leading_csi_fragment(tmp_path):
@@ -1316,9 +1343,9 @@ def test_cli_agent_terminal_unsafe_tui_snapshot_strips_leading_csi_fragment(tmp_
 
     snapshot = terminal_service._read_transcript_snapshot(transcript, limit=120000, rows=10, cols=40)
 
-    assert snapshot["transcriptTailReplayable"] is False
-    assert "2026h" not in snapshot["screenText"]
-    assert "结论：模块拆分未完成" in snapshot["screenText"]
+    assert snapshot["transcriptTailReplayable"] is True
+    assert not snapshot["transcriptTail"].startswith("2026h")
+    assert "结论：模块拆分未完成" in snapshot["transcriptTail"]
 
 
 def test_cli_agent_terminal_unsafe_tui_snapshot_strips_leading_parameter_fragment(tmp_path):
@@ -1331,9 +1358,9 @@ def test_cli_agent_terminal_unsafe_tui_snapshot_strips_leading_parameter_fragmen
 
     snapshot = terminal_service._read_transcript_snapshot(transcript, limit=120000, rows=10, cols=40)
 
-    assert snapshot["transcriptTailReplayable"] is False
-    assert ";10;1" not in snapshot["screenText"]
-    assert "结论：模块拆分未完成" in snapshot["screenText"]
+    assert snapshot["transcriptTailReplayable"] is True
+    assert not snapshot["transcriptTail"].startswith(";10;1")
+    assert "结论：模块拆分未完成" in snapshot["transcriptTail"]
 
 
 def test_terminal_screen_buffer_keeps_split_escape_sequences_out_of_screen_text():
@@ -1373,7 +1400,7 @@ def test_cli_agent_terminal_preserves_current_screen_when_transcript_snapshot_is
         terminal_service._read_transcript_snapshot(transcript, limit=120000, rows=10, cols=40),
     )
 
-    assert merged["transcriptTailReplayable"] is False
+    assert merged["transcriptTailReplayable"] is True
     assert merged["screenText"] == "已有可见画面"
     assert merged["screenParserVersion"] == terminal_service.SCREEN_BUFFER_PARSER_VERSION
 
@@ -1394,7 +1421,7 @@ def test_cli_agent_terminal_discards_legacy_screen_when_transcript_snapshot_is_e
         terminal_service._read_transcript_snapshot(transcript, limit=120000, rows=10, cols=40),
     )
 
-    assert merged["transcriptTailReplayable"] is False
+    assert merged["transcriptTailReplayable"] is True
     assert merged["screenText"] == ""
     assert not terminal_service._screen_initial_text(state)
 
