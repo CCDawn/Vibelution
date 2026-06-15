@@ -17,5 +17,7 @@ from core.logging.setup import (
     print_evolution_time,
 )
 
-# 向后兼容别名
-from core.logging.logger import debug as console_logger
+# 向后兼容别名。部分基础设施模块仍使用 `from core.logging import debug`。
+from core.logging.logger import debug
+
+console_logger = debug
