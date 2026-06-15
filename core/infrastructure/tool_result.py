@@ -39,6 +39,11 @@ BUSINESS_FAILURE_STATUSES = {
 }
 
 
+def _normalize_text_payload(text: str) -> str:
+    """去除常见包装噪音：前后空白与 UTF-8 BOM。"""
+    return text.lstrip("\ufeff").strip()
+
+
 @dataclass
 class ToolResultEnvelope:
     """工具结果的统一封装。"""
@@ -93,7 +98,7 @@ def infer_tool_business_success(result: Any) -> bool:
     if isinstance(result, dict):
         return not _looks_like_business_failure(result)
     if isinstance(result, str):
-        stripped = result.strip()
+        stripped = _normalize_text_payload(result)
         if stripped.lower() in BUSINESS_FAILURE_STATUSES:
             return False
         if stripped.startswith(("[错误]", "[超时]", "[短路]")):

@@ -254,6 +254,14 @@ class TestInferToolBusinessSuccess:
     def test_error_prefix_is_failure(self):
         assert infer_tool_business_success("[错误] something failed") is False
 
+    def test_bom_prefixed_string_status_is_business_failure(self):
+        assert infer_tool_business_success("\ufeffblocked") is False
+        assert infer_tool_business_success("\ufeffpolicy_blocked") is False
+
+    def test_bom_prefixed_json_bytes_is_business_failure(self):
+        payload = b"\xef\xbb\xbf{\"status\":\"failed\",\"error\":\"policy limited\"}"
+        assert infer_tool_business_success(payload) is False
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
