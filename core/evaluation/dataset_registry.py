@@ -719,7 +719,25 @@ def list_dataset_status(
         )
         usability_status = str(usability.get("usability_status") or "blocked")
         usability_reason = str(usability.get("usability_reason") or spec.adapter_status or "当前适配器阻止运行。")
-        effective = usability_status in {"ready", "agent_harness_ready", "custom_harness_ready"}
+        environment_contract = usability.get("environment_contract", {})
+        if not isinstance(environment_contract, dict):
+            environment_contract = {}
+        environment_preflight = usability.get("environment_preflight", {})
+        if not isinstance(environment_preflight, dict):
+            environment_preflight = {}
+        preflight_config = (
+            environment_contract.get("preflight")
+            if isinstance(environment_contract.get("preflight"), dict)
+            else {}
+        )
+        preflight_required = bool(preflight_config.get("required")) or bool(environment_contract.get("required_paths"))
+        preflight_blocks_launch = (
+            include_environment_preflight
+            and preflight_required
+            and bool(environment_preflight)
+            and not bool(environment_preflight.get("available"))
+        )
+        effective = usability_status in {"ready", "agent_harness_ready", "custom_harness_ready"} and not preflight_blocks_launch
         visibility = "primary" if effective and spec.workbench_visible else "hidden"
         if not spec.workbench_visible:
             visibility_reason = "底层数据池不直接作为工作台评测入口展示。"
@@ -731,6 +749,8 @@ def list_dataset_status(
             visibility_reason = "需要外部 harness，已从主选择器隐藏。"
         elif usability_status == "requires_official_task_environment":
             visibility_reason = "需要 Harbor/Docker 官方任务环境，已从主选择器隐藏。"
+        elif preflight_blocks_launch:
+            visibility_reason = "任务环境预检未通过，已从主选择器隐藏。"
         elif usability_status in {"invalid", "blocked"}:
             visibility_reason = "当前不可运行，已从主选择器隐藏。"
         elif usability_status == "custom_harness_ready":
@@ -801,8 +821,8 @@ def list_dataset_status(
                 "formal_supervised_evaluation_allowed": boundary[
                     "formal_supervised_evaluation_allowed"
                 ],
-                "environment_contract": usability.get("environment_contract", {}),
-                "environment_preflight": usability.get("environment_preflight", {}),
+                "environment_contract": environment_contract,
+                "environment_preflight": environment_preflight,
             }
         )
     return rows

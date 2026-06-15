@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
+from .dataset_environment import preflight_environment_contract
 from .supervised_artifacts import load_project_json_artifact, load_project_json_object
 from .lineage import summarize_lineage
 
@@ -160,7 +161,68 @@ def run_workbench_session(
 def list_dataset_choices(project_root: Path) -> list[dict]:
     from .dataset_registry import list_dataset_status
 
-    return list_dataset_status(project_root, include_environment_preflight=False)
+    return list_dataset_status(project_root, include_environment_preflight=True)
+
+
+def _iter_bundle_environment_contracts(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    contracts: list[dict[str, Any]] = []
+    dataset = payload.get("dataset") if isinstance(payload.get("dataset"), dict) else {}
+    dataset_contract = dataset.get("environment_contract") if isinstance(dataset.get("environment_contract"), dict) else {}
+    if dataset_contract:
+        contracts.append(dataset_contract)
+    for case in payload.get("cases") or []:
+        if not isinstance(case, dict):
+            continue
+        case_contract = case.get("environment_contract") if isinstance(case.get("environment_contract"), dict) else {}
+        if case_contract:
+            contracts.append(case_contract)
+    return contracts
+
+
+def _environment_contract_preflight_required(contract: dict[str, Any]) -> bool:
+    preflight = contract.get("preflight") if isinstance(contract.get("preflight"), dict) else {}
+    return bool(preflight.get("required")) or bool(contract.get("required_paths"))
+
+
+def _environment_preflight_missing_names(preflight: dict[str, Any]) -> list[str]:
+    names: list[str] = []
+    for item in preflight.get("missing") or []:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("path") or item.get("name") or "").strip()
+        if name:
+            names.append(name)
+    verifier = preflight.get("official_verifier") if isinstance(preflight.get("official_verifier"), dict) else {}
+    for item in verifier.get("missing") or []:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name") or "").strip()
+        if name:
+            names.append(name)
+    return list(dict.fromkeys(names))
+
+
+def bundle_environment_preflight_block_message(bundle_path: Path, *, project_root: Path) -> str:
+    try:
+        payload = json.loads(bundle_path.read_text(encoding="utf-8"))
+    except Exception:
+        return ""
+    if not isinstance(payload, dict):
+        return ""
+    for contract in _iter_bundle_environment_contracts(payload):
+        if not _environment_contract_preflight_required(contract):
+            continue
+        preflight = preflight_environment_contract(contract, project_root=project_root)
+        if bool(preflight.get("available")):
+            continue
+        missing_names = _environment_preflight_missing_names(preflight)
+        missing_text = "、".join(missing_names) or str(preflight.get("status") or "environment_preflight")
+        return (
+            "任务环境预检未通过，监督运行不会启动。"
+            f"缺少/不可用：{missing_text}。"
+            "请先修复评测环境，或改用不依赖该环境的评测来源。"
+        )
+    return ""
 
 
 def prepare_dataset_run(project_root: Path, dataset_name: str, dataset_limit: int | None) -> DatasetRunPreparation:
@@ -169,7 +231,15 @@ def prepare_dataset_run(project_root: Path, dataset_name: str, dataset_limit: in
     materialized = materialize_dataset_bundle(dataset_name, project_root=project_root, limit=dataset_limit)
     adapter_status = getattr(materialized, "adapter_status", "-")
     runnable = bool(getattr(materialized, "runnable", False))
-    if adapter_status == "requires_harbor_task_environment":
+    environment_block = (
+        bundle_environment_preflight_block_message(Path(getattr(materialized, "bundle_path", "")), project_root=project_root)
+        if runnable
+        else ""
+    )
+    if environment_block:
+        runnable = False
+        blocked_message = environment_block
+    elif adapter_status == "requires_harbor_task_environment":
         blocked_message = (
             f"{dataset_name} 是 Terminal-Bench 官方任务种子，但当前只允许官方 Harbor/Docker /app sandbox "
             "和官方判分器模式；本地自定义 harness 未启用。"
