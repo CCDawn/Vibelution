@@ -60,7 +60,7 @@ class QualityReport:
             格式化的摘要字符串
         """
         lines = [
-            f"## 压缩质量报告",
+            "## 压缩质量报告",
             f"- 原始 Token: {self.original_tokens}",
             f"- 压缩后 Token: {self.compressed_tokens}",
             f"- 压缩比: {self.compression_ratio:.1%}",

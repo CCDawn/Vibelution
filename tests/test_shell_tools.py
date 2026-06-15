@@ -934,7 +934,7 @@ class TestSecurityFeatures:
         """测试路径遍历攻击被阻止"""
         # 尝试访问上级目录
         result = execute_shell_command(
-            command=f"cd .. && dir",
+            command="cd .. && dir",
             cwd=temp_test_dir
         )
         # 安全模块应该限制路径

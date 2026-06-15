@@ -52,14 +52,14 @@ def test_1_cli_error_detection():
     result = execute_shell_command("python -c 'raise ValueError(\"test error\")'")
 
     has_failure_marker = "[EXEC FAILURE" in result
-    print(f"  输入: python -c 'raise ValueError(\"test error\")'")
+    print("  输入: python -c 'raise ValueError(\"test error\")'")
     print(f"  输出: {result[:80]}...")
     print(f"  [EXEC FAILURE] 标记: {'PASS' if has_failure_marker else 'FAIL'}")
 
     # 测试成功的命令
     result_ok = execute_shell_command("echo hello")
     has_warning = "[WARNING" in result_ok or "[EXEC FAILURE" in result_ok
-    print(f"\n  输入: echo hello")
+    print("\n  输入: echo hello")
     print(f"  输出: {result_ok}")
     print(f"  无错误标记: {'PASS' if not has_warning else 'FAIL'}")
 
@@ -204,7 +204,7 @@ def test_5_restart_bootstrap_path():
     os.environ["AGENT_RESTART_REASON"] = "sandbox_restart"
     try:
         should_launch = agent_module.should_launch_workbench(args, None)
-        print(f"  AGENT_RESTART_REASON=sandbox_restart")
+        print("  AGENT_RESTART_REASON=sandbox_restart")
         print(f"  should_launch_workbench(...): {should_launch}")
         print(f"\n  启动路径校验: {'PASS' if not should_launch else 'FAIL'}")
         return should_launch is False

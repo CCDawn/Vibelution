@@ -637,7 +637,7 @@ def _update_map_file(map_path: Path, new_content: str, project_root: Path):
 
     try:
         map_path.write_text(new_content, encoding="utf-8")
-        debug_logger.info(f"[CodebaseMap] 增量更新完成")
+        debug_logger.info("[CodebaseMap] 增量更新完成")
     except Exception as e:
         debug_logger.warning(f"[CodebaseMap] 增量写入失败: {e}")
 
