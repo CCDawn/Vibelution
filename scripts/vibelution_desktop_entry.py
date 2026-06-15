@@ -271,19 +271,47 @@ def _terminate_pid(pid: int) -> None:
         with contextlib.suppress(OSError):
             os.kill(pid, 15)
         return
-    taskkill = shutil.which("taskkill")
-    if taskkill:
-        subprocess.run(
-            [taskkill, "/PID", str(int(pid)), "/T", "/F"],
-            cwd=str(PROJECT_ROOT),
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            creationflags=_hidden_creation_flags(),
-            startupinfo=_hidden_startup_info(),
-            check=False,
-        )
+    if _terminate_pid_tree_with_psutil(int(pid)):
         return
+    _terminate_pid_with_winapi(int(pid))
+
+
+def _terminate_pid_tree_with_psutil(pid: int) -> bool:
+    if os.name != "nt":
+        return False
+    try:
+        import psutil  # type: ignore
+    except Exception:
+        return False
+    try:
+        root = psutil.Process(int(pid))
+        processes = list(root.children(recursive=True))
+        processes.reverse()
+        processes.append(root)
+    except (psutil.NoSuchProcess, psutil.AccessDenied):
+        return False
+    except Exception:
+        return False
+    attempted = False
+    for process in processes:
+        with contextlib.suppress(psutil.NoSuchProcess, psutil.AccessDenied):
+            process.terminate()
+            attempted = True
+    try:
+        _gone, alive = psutil.wait_procs(processes, timeout=1.5)
+    except Exception:
+        alive = []
+    for process in alive:
+        with contextlib.suppress(psutil.NoSuchProcess, psutil.AccessDenied):
+            process.kill()
+            attempted = True
+    if alive:
+        with contextlib.suppress(Exception):
+            psutil.wait_procs(alive, timeout=1.0)
+    return attempted
+
+
+def _terminate_pid_with_winapi(pid: int) -> None:
     kernel32 = ctypes.windll.kernel32
     handle = kernel32.OpenProcess(0x0001, False, int(pid))
     if not handle:
