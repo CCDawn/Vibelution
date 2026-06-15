@@ -3041,6 +3041,8 @@ function agentsRouteCopy(lang: "zh" | "en") {
         policyPending: "协作策略待配置",
         noIssues: "当前没有需处理问题或提醒。",
         routeHint: "这张卡片是 Agent 的唯一配置点；业务页面只引用这里的 Agent。",
+        returnBannerTitle: "返回跳转前页面",
+        returnBannerHint: "你是从其他页面进入 Agent 管理中心的；配置完成后可直接回到原页面继续。",
         managementBriefTitle: "管理完整度",
         managementBriefHint: "按当前 Agent 身份检查必要配置；会话入口 Agent 不要求人物档案和团队归属。",
         managementIdentity: "人物",
@@ -3435,6 +3437,8 @@ function agentsRouteCopy(lang: "zh" | "en") {
         policyPending: "Policy registry pending",
         noIssues: "No issues or reminders.",
         routeHint: "This card is the single Agent config point. Product pages should only reference Agents from here.",
+        returnBannerTitle: "Return to previous page",
+        returnBannerHint: "You arrived from another page. Return there after finishing this Agent configuration.",
         managementBriefTitle: "Management readiness",
         managementBriefHint: "Checks only the fields required by the current Agent identity. Session entry Agents do not require persona profiles or team membership.",
         managementIdentity: "Persona",
@@ -5727,6 +5731,23 @@ export function AgentsRoute() {
         </main>
 
         <aside className={styles.detailPanel}>
+          {returnToPath ? (
+            <section className={styles.returnBanner} aria-label={copy.returnBannerTitle}>
+              <div className={styles.returnBannerCopy}>
+                <strong>{copy.returnBannerTitle}</strong>
+                <span>{copy.returnBannerHint}</span>
+              </div>
+              <button
+                type="button"
+                className={styles.returnBannerButton}
+                onClick={() => navigate(returnToPath)}
+                title={returnToLabel}
+              >
+                <ArrowLeft size={16} />
+                <span>{returnToLabel}</span>
+              </button>
+            </section>
+          ) : null}
           {selectedBulkAgents.length > 1 ? (
             <section className={styles.configEditor}>
               <div className={styles.panelHeader}>
@@ -5943,17 +5964,6 @@ export function AgentsRoute() {
                   <p>{copy.routeHint}</p>
                 </div>
                 <div className={styles.detailHeaderActions}>
-                  {returnToPath ? (
-                    <button
-                      type="button"
-                      className={styles.returnButton}
-                      onClick={() => navigate(returnToPath)}
-                      title={returnToLabel}
-                    >
-                      <ArrowLeft size={14} />
-                      {returnToLabel}
-                    </button>
-                  ) : null}
                   <span className={styles.detailHealthStatus}>
                     <span className={`${styles.issuePill} ${styles[`issue_${issueTone(selectedAgent.health)}`]}`}>
                       {issueLabel(selectedAgent.health, lang)}
