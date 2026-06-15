@@ -594,6 +594,36 @@
   padding: 6px;
 }
 
+.tokenCompressionBadges {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
+  font-size: 0.62rem;
+  line-height: 1;
+}
+
+.tokenCompressionBadges span,
+.tokenCompressionBadges strong {
+  display: inline-flex;
+  align-items: center;
+  min-height: 20px;
+  padding: 3px 5px;
+  border: 1px solid color-mix(in srgb, var(--accent-cool) 18%, var(--border-soft));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface-card) 76%, transparent);
+  color: var(--fg-secondary);
+  font-weight: 720;
+  white-space: nowrap;
+}
+
+.tokenCompressionBadges strong {
+  border-color: color-mix(in srgb, var(--accent-warm-2) 28%, var(--border-soft));
+  background: color-mix(in srgb, var(--accent-warm-2) 10%, var(--surface-card));
+  color: var(--fg-primary);
+}
+
 .tokenCompressionTable {
   display: grid;
   gap: 3px;
@@ -602,7 +632,7 @@
 
 .tokenCompressionRow {
   display: grid;
-  grid-template-columns: 43px minmax(0, 1fr);
+  grid-template-columns: 40px minmax(0, 1fr);
   grid-template-areas:
     "label value"
     "label meta";
@@ -616,6 +646,10 @@
   background: color-mix(in srgb, var(--surface-card) 70%, transparent);
   font-size: 0.65rem;
   line-height: 1.15;
+}
+
+.tokenCompressionRowWide {
+  grid-template-columns: 46px minmax(0, 1fr);
 }
 
 .tokenCompressionRow span,
@@ -646,6 +680,62 @@
   grid-area: meta;
   color: var(--fg-secondary);
   font-size: 0.61rem;
+}
+
+.tokenCompressionDetails {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.tokenCompressionDetails summary {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  min-height: 24px;
+  padding: 3px 4px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  color: var(--fg-tertiary);
+  cursor: pointer;
+  font-size: 0.64rem;
+  font-weight: 700;
+  line-height: 1.05;
+  list-style: none;
+}
+
+.tokenCompressionDetails summary::-webkit-details-marker {
+  display: none;
+}
+
+.tokenCompressionDetails summary svg {
+  transition: transform 140ms ease;
+}
+
+.tokenCompressionDetails[open] summary svg {
+  transform: rotate(90deg);
+}
+
+.tokenCompressionDetails summary:hover {
+  border-color: color-mix(in srgb, var(--accent-cool) 16%, var(--border-soft));
+  background: color-mix(in srgb, var(--surface-card) 62%, transparent);
+  color: var(--fg-secondary);
+}
+
+.tokenCompressionDetails summary span,
+.tokenCompressionDetails summary strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tokenCompressionDetails summary strong {
+  justify-self: end;
+  color: var(--fg-secondary);
+  font-weight: 760;
 }
 
 .tokenCompressionVisuals {
@@ -762,7 +852,7 @@
 
 .tokenCompressionStrategyStrip {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 3px;
   min-width: 0;
 }
@@ -772,6 +862,11 @@
   padding: 3px 4px;
   border-color: color-mix(in srgb, var(--accent-warm-2) 18%, var(--border-soft));
   font-size: 0.6rem;
+}
+
+.tokenCompressionCard .compressionStrategyRowActive {
+  border-color: color-mix(in srgb, var(--accent-cool) 42%, var(--border-soft));
+  background: color-mix(in srgb, var(--accent-cool) 12%, var(--surface-card));
 }
 
 .tokenCompressionCard .compressionStrategyRow strong,
@@ -970,7 +1065,7 @@
 .featureChip {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
+  justify-content: space-between;
   gap: 4px;
   min-width: 0;
   max-width: 100%;
@@ -1004,6 +1099,20 @@
   font-weight: 650;
 }
 
+.featureChip em {
+  flex: 0 0 auto;
+  min-width: 24px;
+  padding: 2px 5px;
+  border: 1px solid color-mix(in srgb, var(--fg-tertiary) 22%, transparent);
+  border-radius: 999px;
+  color: var(--fg-tertiary);
+  font-size: 0.58rem;
+  font-style: normal;
+  font-weight: 760;
+  line-height: 1;
+  text-align: center;
+}
+
 .featureChip span {
   flex: 0 0 auto;
   width: 6px;
@@ -1034,12 +1143,24 @@
   opacity: 1;
 }
 
+.featureChipActive em {
+  border-color: color-mix(in srgb, var(--accent-cool) 38%, transparent);
+  background: color-mix(in srgb, var(--accent-cool) 12%, transparent);
+  color: var(--accent-cool);
+}
+
 .featureChipPrimary.featureChipActive {
   border-color: color-mix(in srgb, var(--accent-warm) 36%, var(--border-soft));
 }
 
 .featureChipPrimary.featureChipActive span {
   background: var(--accent-warm-2);
+}
+
+.featureChipPrimary.featureChipActive em {
+  border-color: color-mix(in srgb, var(--accent-warm-2) 42%, transparent);
+  background: color-mix(in srgb, var(--accent-warm-2) 12%, transparent);
+  color: var(--accent-warm-2);
 }
 
 .featureToggleState {
