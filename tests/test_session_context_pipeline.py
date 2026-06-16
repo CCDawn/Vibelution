@@ -88,15 +88,17 @@ def test_context_assembler_keeps_recent_tool_results_complete_for_model_input():
         },
     ]
 
-    assembled = assemble_conversation_context(messages, session_id="session-a", recent_message_limit=2)
-    tool_call = assembled.history_messages[-1]["toolCalls"][0]
+    assembled = assemble_conversation_context(messages, session_id="session-a", recent_message_limit=3)
+    assistant_message = next(item for item in assembled.history_messages if item.get("tool_calls"))
+    tool_message = next(item for item in assembled.history_messages if item.get("role") == "tool")
+    tool_call = assistant_message["tool_calls"][0]
 
-    assert tool_call["toolName"] == "cli_tool"
-    assert tool_call["status"] == "failed"
-    assert tool_call["arguments"] == {"command": "pytest -q", "timeout": 120}
-    assert tool_call["result"] == full_result
-    assert "resultPreview" not in tool_call
-    assert "terminal-line\n" * 20 in tool_call["result"]
+    assert tool_call["function"]["name"] == "cli_tool"
+    assert json.loads(tool_call["function"]["arguments"]) == {"command": "pytest -q", "timeout": 120}
+    assert tool_message["tool_call_id"] == tool_call["id"]
+    assert full_result in tool_message["content"]
+    assert "terminal-line\n" * 20 in tool_message["content"]
+    assert "Windows detected" not in tool_message["content"]
 
 
 def test_context_assembler_replays_turn_journal_over_message_tail(tmp_path):
@@ -147,8 +149,52 @@ def test_context_assembler_replays_turn_journal_over_message_tail(tmp_path):
     assert "继续刚才中断的修复" in contents
     assert "已经完成一半实现。" in contents
     assert any(TURN_INTERRUPTED_MARKER in content for content in contents)
-    tool_message = next(item for item in assembled.history_messages if item.get("toolCalls"))
-    assert tool_message["toolCalls"][0]["result"] == full_result
+    assistant_tool_message = next(item for item in assembled.history_messages if item.get("tool_calls"))
+    tool_result_message = next(item for item in assembled.history_messages if item.get("role") == "tool")
+    assert assistant_tool_message["tool_calls"][0]["function"]["name"] == "cli_tool"
+    assert full_result in tool_result_message["content"]
+
+
+def test_context_assembler_excludes_current_turn_journal_from_history_seed(tmp_path):
+    append_turn_event(
+        tmp_path,
+        "session-a",
+        "turn-previous",
+        EVENT_USER_MESSAGE,
+        status="recorded",
+        payload={"content": "上一轮用户输入"},
+        source="test",
+    )
+    append_turn_event(
+        tmp_path,
+        "session-a",
+        "turn-previous",
+        EVENT_ASSISTANT_PARTIAL,
+        status="running",
+        payload={"content": "上一轮助手输出"},
+        source="test",
+    )
+    append_turn_event(
+        tmp_path,
+        "session-a",
+        "turn-current",
+        EVENT_USER_MESSAGE,
+        status="recorded",
+        payload={"content": "当前轮用户输入"},
+        source="test",
+    )
+
+    assembled = assemble_conversation_context(
+        [],
+        session_id="session-a",
+        current_turn_id="turn-current",
+        journal_events=load_turn_events(tmp_path, "session-a"),
+    )
+
+    contents = [str(item.get("content") or "") for item in assembled.history_messages]
+    assert "上一轮用户输入" in contents
+    assert "上一轮助手输出" in contents
+    assert "当前轮用户输入" not in contents
 
 
 def test_context_assembler_uses_checkpoint_as_navigation_not_replacing_history():

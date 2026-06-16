@@ -20,6 +20,8 @@ class ModelProtocol(StrEnum):
     ANTHROPIC_CHAT = "anthropic_chat"
     ANTHROPIC_THINKING = "anthropic_thinking"
     DEEPSEEK_REASONING = "deepseek_reasoning"
+    XIAOMI_MIMO_MULTIMODAL_OPENAI_COMPAT = "xiaomi_mimo_multimodal_openai_compat"
+    XIAOMI_MIMO_TOKEN_PLAN_OPENAI_COMPAT = "xiaomi_mimo_token_plan_openai_compat"
     QWEN_OPENAI_COMPAT = "qwen_openai_compat"
     QWEN_THINKING_NO_PREFILL = "qwen_thinking_no_prefill"
     LLAMACPP_BASIC = "llamacpp_basic"
@@ -195,6 +197,14 @@ PROTOCOL_POLICIES: Dict[ModelProtocol, ProtocolPolicy] = {
         allow_explicit_tool_choice=False,
         allow_reasoning_roundtrip=True,
         reasoning_extract_policy="deepseek",
+    ),
+    ModelProtocol.XIAOMI_MIMO_MULTIMODAL_OPENAI_COMPAT: _policy(
+        ModelProtocol.XIAOMI_MIMO_MULTIMODAL_OPENAI_COMPAT,
+        allow_stream_usage_options=True,
+    ),
+    ModelProtocol.XIAOMI_MIMO_TOKEN_PLAN_OPENAI_COMPAT: _policy(
+        ModelProtocol.XIAOMI_MIMO_TOKEN_PLAN_OPENAI_COMPAT,
+        allow_stream_usage_options=True,
     ),
     ModelProtocol.QWEN_OPENAI_COMPAT: _policy(
         ModelProtocol.QWEN_OPENAI_COMPAT,
