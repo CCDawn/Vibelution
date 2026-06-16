@@ -5,6 +5,7 @@ import {
   isLocalBuiltAssetResourceError,
   recoverFromBuiltAssetResourceError,
   recoverFromDynamicImportFetchError,
+  ROUTE_CHUNK_RELOAD_KEY,
 } from "./routeChunkRecovery";
 
 function fakeWindow(pathname = "/teams") {
@@ -47,6 +48,29 @@ describe("route chunk recovery", () => {
     expect(win.location.reload).toHaveBeenCalledTimes(1);
     expect(reports[1].eventCode).toBe("browser.route_chunk_recovery.reload_skipped");
     expect(reports[1].fields?.duplicateRoute).toBe(true);
+  });
+
+  it("does not let legacy route-only reload markers permanently suppress recovery", () => {
+    const win = fakeWindow();
+    const error = new TypeError("Failed to fetch dynamically imported module: http://127.0.0.1:8000/assets/EvolutionRoute-old.js");
+
+    win.sessionStorage.setItem(ROUTE_CHUNK_RELOAD_KEY, "/teams?team=research-core");
+
+    expect(recoverFromDynamicImportFetchError(error, win)).toBe(true);
+    expect(win.location.reload).toHaveBeenCalledTimes(1);
+  });
+
+  it("stores the stale chunk guard by build and target instead of a bare route string", () => {
+    const win = fakeWindow();
+    const error = new TypeError("Failed to fetch dynamically imported module: http://127.0.0.1:8000/assets/EvolutionRoute-old.js");
+
+    expect(recoverFromDynamicImportFetchError(error, win)).toBe(true);
+
+    const stored = JSON.parse(win.sessionStorage.getItem(ROUTE_CHUNK_RELOAD_KEY) || "{}");
+    expect(stored.schemaVersion).toBe(1);
+    expect(stored.target).toBe("/teams?team=research-core");
+    expect(stored.buildId).toBeTypeOf("string");
+    expect(stored.buildId.length).toBeGreaterThan(0);
   });
 
   it("recognizes local built asset resource failures", () => {
