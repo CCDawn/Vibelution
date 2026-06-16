@@ -8,6 +8,7 @@ import re
 from typing import Any
 
 from core.chat.chat_task_types import trim_lines
+from core.logging import debug as _debug_logger
 
 
 def agent_message_tool(
@@ -441,7 +442,8 @@ def _record_agent_message_tool_event(
             fields=fields,
             lifecycle=True,
         )
-    except Exception:
+    except Exception as exc:
+        _debug_logger.warning(f"[Agent消息工具] 记录消息投递场景事件失败: {type(exc).__name__}: {exc}")
         return
 
 

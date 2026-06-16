@@ -98,7 +98,8 @@ def _coerce_tool_result_payload(result: Any) -> dict[str, Any]:
     if isinstance(result, (bytes, bytearray)):
         try:
             return _parse_json_object(result.decode("utf-8", errors="replace"))
-        except Exception:
+        except Exception as exc:
+            _debug_logger.warning(f"[工具结果] bytes 工具结果解析为 JSON payload 失败: {type(exc).__name__}: {exc}")
             return {}
     return _parse_json_object(str(result or "").strip())
 

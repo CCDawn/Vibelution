@@ -28,6 +28,7 @@ from core.llm.agent_runtime import (
     agent_llm_model_id,
     normalize_agent_llm_bindings,
 )
+from core.logging import debug as _debug_logger
 
 from .runtime_scene_service import record_runtime_scene_event
 
@@ -1579,7 +1580,11 @@ def effective_visible_tool_names_for_current_agent(tools: Iterable[Any] | None =
             from tools.Key_Tools import create_llm_facing_tools
 
             tools = create_llm_facing_tools()
-        except Exception:
+        except Exception as exc:
+            _debug_logger.warning(
+                f"Failed to build default LLM-facing tool list. Falling back to empty list. error={type(exc).__name__}: {exc}",
+                tag="AGENT_TOOL_DIRECTORY",
+            )
             tools = []
     visibility = compute_effective_tool_visibility(tools or [], policy=runtime.get("toolPolicy") or {})
     return list(visibility.visible_tools)
@@ -1629,7 +1634,11 @@ def _with_temporary_tool_grants(
             session_id=normalized_session_id,
             turn_id=turn_id,
         )
-    except Exception:
+    except Exception as exc:
+        _debug_logger.warning(
+            f"Failed to load temporary tool grants for agent={agent_id}, session_id={normalized_session_id}, turn_id={turn_id}. error={type(exc).__name__}: {exc}",
+            tag="AGENT_TOOL_DIRECTORY",
+        )
         return policy
     if not temporary_grants:
         return policy
@@ -4248,7 +4257,11 @@ def _load_recent_tool_governance_requests_for_agents(
             continue
         try:
             requests = _read_tool_governance_requests_for_agent(agent, limit=limit)
-        except Exception:
+        except Exception as exc:
+            _debug_logger.warning(
+                f"Failed to read tool governance requests for agent={agent_id}, limit={limit}. error={type(exc).__name__}: {exc}",
+                tag="AGENT_TOOL_DIRECTORY",
+            )
             requests = []
         requests.sort(
             key=lambda item: (
@@ -4292,7 +4305,11 @@ def _list_recent_tool_governance_requests_for_agent(agent_id: str, *, limit: int
         from .agent_tool_governance_service import list_tool_governance_requests
 
         return list_tool_governance_requests(agent_id=agent_id, status="", limit=limit)
-    except Exception:
+    except Exception as exc:
+        _debug_logger.warning(
+            f"Failed to list recent tool governance requests for agent={agent_id}, limit={limit}. error={type(exc).__name__}: {exc}",
+            tag="AGENT_TOOL_DIRECTORY",
+        )
         return []
 
 
