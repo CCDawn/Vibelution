@@ -4540,6 +4540,7 @@ export type SessionCacheComposition = {
 };
 
 export type SessionDetail = SessionSummary & {
+  ledgerSeq?: number;
   activeTask?: SessionActiveTask | null;
   defaultFileContext: string;
   previewTabs: string[];
@@ -4617,6 +4618,7 @@ export type SessionLlmUsage = {
 export type SessionDetailStreamEvent = {
   type: "session_detail";
   sessionId: string;
+  ledgerSeq?: number;
   detail: SessionDetail;
 };
 
@@ -4624,6 +4626,7 @@ export type SessionAssistantDeltaStreamEvent = {
   type: "assistant_delta";
   sessionId: string;
   turnId: string;
+  ledgerSeq?: number;
   stage: string;
   content: string;
   thought: string;

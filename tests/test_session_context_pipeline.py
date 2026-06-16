@@ -13,15 +13,15 @@ from core.chat.history_ledger import (
     build_history_events,
     search_history_events,
 )
-from core.chat.turn_journal import (
+from core.chat.conversation_ledger import (
     EVENT_ASSISTANT_PARTIAL,
     EVENT_TOOL_RESULT,
     EVENT_TURN_INTERRUPTED,
     EVENT_TURN_STARTED,
     EVENT_USER_MESSAGE,
     TURN_INTERRUPTED_MARKER,
-    append_turn_event,
-    load_turn_events,
+    append_conversation_event,
+    load_conversation_events,
 )
 from core.chat.tool_result_replacement import replace_large_tool_results_for_compression
 from core.ui.chat_state import build_chat_state, save_chat_state
@@ -229,10 +229,10 @@ def test_tool_result_replacement_handles_langchain_tool_messages():
     assert state["replacements"][0]["toolCallId"] == "call_langchain"
 
 
-def test_context_assembler_replays_turn_journal_over_message_tail(tmp_path):
-    full_result = "journal-result-line\n" * 80
-    append_turn_event(tmp_path, "session-journal", "turn-a", EVENT_TURN_STARTED, status="running")
-    append_turn_event(
+def test_context_assembler_replays_conversation_ledger_over_message_tail(tmp_path):
+    full_result = "ledger-result-line\n" * 80
+    append_conversation_event(tmp_path, "session-journal", "turn-a", EVENT_TURN_STARTED, status="running")
+    append_conversation_event(
         tmp_path,
         "session-journal",
         "turn-a",
@@ -240,7 +240,7 @@ def test_context_assembler_replays_turn_journal_over_message_tail(tmp_path):
         status="recorded",
         payload={"content": "继续刚才中断的修复"},
     )
-    append_turn_event(
+    append_conversation_event(
         tmp_path,
         "session-journal",
         "turn-a",
@@ -248,7 +248,7 @@ def test_context_assembler_replays_turn_journal_over_message_tail(tmp_path):
         status="done",
         payload={"toolCall": {"name": "cli_tool", "status": "done", "result": full_result}},
     )
-    append_turn_event(
+    append_conversation_event(
         tmp_path,
         "session-journal",
         "turn-a",
@@ -256,7 +256,7 @@ def test_context_assembler_replays_turn_journal_over_message_tail(tmp_path):
         status="running",
         payload={"content": "已经完成一半实现。"},
     )
-    append_turn_event(
+    append_conversation_event(
         tmp_path,
         "session-journal",
         "turn-a",
@@ -268,7 +268,7 @@ def test_context_assembler_replays_turn_journal_over_message_tail(tmp_path):
     assembled = assemble_conversation_context(
         [{"role": "user", "content": "旧 messages 不应作为事实源"}],
         session_id="session-journal",
-        journal_events=load_turn_events(tmp_path, "session-journal"),
+        ledger_events=load_conversation_events(tmp_path, "session-journal"),
         recent_message_limit=8,
     )
 
@@ -283,8 +283,8 @@ def test_context_assembler_replays_turn_journal_over_message_tail(tmp_path):
     assert full_result in tool_result_message["content"]
 
 
-def test_context_assembler_excludes_current_turn_journal_from_history_seed(tmp_path):
-    append_turn_event(
+def test_context_assembler_excludes_current_turn_ledger_from_history_seed(tmp_path):
+    append_conversation_event(
         tmp_path,
         "session-a",
         "turn-previous",
@@ -293,7 +293,7 @@ def test_context_assembler_excludes_current_turn_journal_from_history_seed(tmp_p
         payload={"content": "上一轮用户输入"},
         source="test",
     )
-    append_turn_event(
+    append_conversation_event(
         tmp_path,
         "session-a",
         "turn-previous",
@@ -302,7 +302,7 @@ def test_context_assembler_excludes_current_turn_journal_from_history_seed(tmp_p
         payload={"content": "上一轮助手输出"},
         source="test",
     )
-    append_turn_event(
+    append_conversation_event(
         tmp_path,
         "session-a",
         "turn-current",
@@ -316,7 +316,7 @@ def test_context_assembler_excludes_current_turn_journal_from_history_seed(tmp_p
         [],
         session_id="session-a",
         current_turn_id="turn-current",
-        journal_events=load_turn_events(tmp_path, "session-a"),
+        ledger_events=load_conversation_events(tmp_path, "session-a"),
     )
 
     contents = [str(item.get("content") or "") for item in assembled.history_messages]

@@ -38,10 +38,7 @@ from core.context.skill_contract import (
 from core.chat.chat_result_contract import build_chat_coding_result_contract
 from core.chat.chat_result_formatter import format_chat_reply
 from core.chat.chat_task_types import trim_lines
-from core.chat.context_assembler import assemble_conversation_context
-from core.chat.skill_registry import build_skill_runtime_context, skill_descriptor_for_log
-from core.chat.slash_commands import SkillSlashCommand, parse_skill_slash_command
-from core.chat.turn_journal import (
+from core.chat.conversation_ledger import (
     EVENT_ASSISTANT_MESSAGE,
     EVENT_ASSISTANT_PARTIAL,
     EVENT_CLI_SESSION_LIFECYCLE,
@@ -55,10 +52,14 @@ from core.chat.turn_journal import (
     EVENT_TURN_STARTED,
     EVENT_USER_MESSAGE,
     TURN_INTERRUPTED_MARKER,
-    append_interrupted_if_open,
-    append_turn_event,
-    load_turn_events,
+    append_conversation_event,
+    latest_ledger_sequence,
+    load_conversation_events,
+    reconcile_open_conversation_turn,
 )
+from core.chat.context_assembler import assemble_conversation_context
+from core.chat.skill_registry import build_skill_runtime_context, skill_descriptor_for_log
+from core.chat.slash_commands import SkillSlashCommand, parse_skill_slash_command
 from core.infrastructure import developer_sandbox
 from core.infrastructure.event_bus import EventNames, get_event_bus
 from core.llm.client import llm_status_context
@@ -157,7 +158,7 @@ _SESSION_TURN_CONTROLS_LOCK = threading.Lock()
 _SESSION_TURN_CONTROLS: dict[str, "SessionTurnControl"] = {}
 _SESSION_LIVE_OUTPUTS_LOCK = threading.Lock()
 _SESSION_LIVE_OUTPUTS: dict[str, "SessionLiveOutputState"] = {}
-_SESSION_TURN_JOURNAL_LIVE_SIGNATURES: dict[str, str] = {}
+_SESSION_LEDGER_LIVE_SIGNATURES: dict[str, str] = {}
 _SESSION_UI_CAPTURE_LOCK = threading.Lock()
 _SESSION_UI_CAPTURE_CONTEXT: ContextVar[dict[str, Any]] = ContextVar(
     "vibelution_session_ui_capture_context",
@@ -592,7 +593,7 @@ def _ensure_session_workspace(session_id: str) -> Path:
     return workspace_path
 
 
-def _append_session_turn_journal_event(
+def _append_session_conversation_event(
     session_id: str,
     turn_id: str,
     event_type: str,
@@ -611,7 +612,7 @@ def _append_session_turn_journal_event(
     if not normalized_session_id or not normalized_event_type:
         return
     try:
-        append_turn_event(
+        append_conversation_event(
             PROJECT_ROOT,
             normalized_session_id,
             str(turn_id or "").strip(),
@@ -629,11 +630,11 @@ def _append_session_turn_journal_event(
         try:
             record_runtime_scene_event(
                 "conversation",
-                "turn_journal",
-                "conversation.turn_journal.append_failed",
+                "conversation_ledger",
+                "conversation.ledger.append_failed",
                 level="warning",
                 outcome="failed",
-                message="Failed to append a chat turn journal event.",
+                message="Failed to append a chat conversation ledger event.",
                 fields={
                     "sessionId": normalized_session_id,
                     "turnId": str(turn_id or "").strip(),
@@ -647,7 +648,7 @@ def _append_session_turn_journal_event(
             return
 
 
-def _append_session_live_journal_event(
+def _append_session_live_ledger_event(
     session_id: str,
     turn_id: str,
     state: "SessionLiveOutputState",
@@ -666,10 +667,10 @@ def _append_session_live_journal_event(
         return
     signature = _short_hash(json.dumps(payload, ensure_ascii=False, sort_keys=True))
     signature_key = f"{session_id}:{normalized_turn_id}"
-    if _SESSION_TURN_JOURNAL_LIVE_SIGNATURES.get(signature_key) == signature:
+    if _SESSION_LEDGER_LIVE_SIGNATURES.get(signature_key) == signature:
         return
-    _SESSION_TURN_JOURNAL_LIVE_SIGNATURES[signature_key] = signature
-    _append_session_turn_journal_event(
+    _SESSION_LEDGER_LIVE_SIGNATURES[signature_key] = signature
+    _append_session_conversation_event(
         session_id,
         normalized_turn_id,
         EVENT_ASSISTANT_PARTIAL,
@@ -679,12 +680,12 @@ def _append_session_live_journal_event(
     )
 
 
-def _reconcile_stale_session_turn_journal(session_id: str, *, active_turn_id: str = "", reason: str = "process_restarted") -> None:
+def _reconcile_stale_session_ledger(session_id: str, *, active_turn_id: str = "", reason: str = "process_restarted") -> None:
     normalized_session_id = str(session_id or "").strip()
     if not normalized_session_id:
         return
     try:
-        event = append_interrupted_if_open(
+        event = reconcile_open_conversation_turn(
             PROJECT_ROOT,
             normalized_session_id,
             active_turn_id=str(active_turn_id or "").strip(),
@@ -698,11 +699,11 @@ def _reconcile_stale_session_turn_journal(session_id: str, *, active_turn_id: st
     try:
         record_runtime_scene_event(
             "conversation",
-            "turn_journal",
-            "conversation.turn_journal.reconciled_interrupted",
+            "conversation_ledger",
+            "conversation.ledger.reconciled_interrupted",
             level="warning",
             outcome="interrupted",
-            message="Reconciled an open chat turn journal as interrupted.",
+            message="Reconciled an open chat ledger turn as interrupted.",
             fields={
                 "sessionId": normalized_session_id,
                 "turnId": event.turn_id,
@@ -712,6 +713,16 @@ def _reconcile_stale_session_turn_journal(session_id: str, *, active_turn_id: st
         )
     except Exception:
         return
+
+
+def _session_ledger_sequence(session_id: str) -> int:
+    normalized_session_id = str(session_id or "").strip()
+    if not normalized_session_id:
+        return 0
+    try:
+        return latest_ledger_sequence(PROJECT_ROOT, normalized_session_id)
+    except Exception:
+        return 0
 
 
 def store_session_image_artifact(
@@ -2196,7 +2207,7 @@ def get_session_detail(session_id: str) -> dict | None:
     with _RUNNING_SESSIONS_LOCK:
         active_turn_id = str(_SESSION_ACTIVE_TURN_IDS.get(normalized_session_id) or "").strip()
         session_running = normalized_session_id in _RUNNING_SESSION_IDS
-    _reconcile_stale_session_turn_journal(
+    _reconcile_stale_session_ledger(
         normalized_session_id,
         active_turn_id=active_turn_id if session_running else "",
         reason="detail_loaded_after_restart",
@@ -2412,7 +2423,7 @@ def append_cli_agent_lifecycle_event(
             normalized_messages,
             lifecycle_key=lifecycle_key,
         )
-    _append_session_turn_journal_event(
+    _append_session_conversation_event(
         normalized_session_id,
         str(terminal.get("sourceTurnId") or terminal.get("turnId") or f"cli-lifecycle:{lifecycle_subject}"),
         EVENT_CLI_SESSION_LIFECYCLE,
@@ -2508,7 +2519,7 @@ def append_cli_agent_task_result_event(
         "result": content,
         "resultPreview": trim_lines(content, max_lines=8),
     }
-    _append_session_turn_journal_event(
+    _append_session_conversation_event(
         normalized_session_id,
         journal_turn_id,
         EVENT_CLI_TASK_RESULT,
@@ -4119,7 +4130,7 @@ def submit_session_message(
         previous_messages = normalize_chat_messages(conversation.get("messages") or [])
         skill_command = parse_skill_slash_command(message)
         skill_invocation = _skill_invocation_payload(skill_command) if skill_command is not None else None
-        _reconcile_stale_session_turn_journal(conversation_id, reason="new_turn_submitted")
+        _reconcile_stale_session_ledger(conversation_id, reason="new_turn_submitted")
         turn_control = _create_session_turn_control(conversation_id)
         active_skill_contract = (
             _active_skill_contract_from_invocation(skill_invocation, turn_id=turn_control.turn_id)
@@ -4177,7 +4188,7 @@ def submit_session_message(
             updated_at=user_entry["timestamp"],
         )
         submit_timing_fields["chatStateLockedMs"] = _elapsed_ms_between(lock_acquired_at)
-    _append_session_turn_journal_event(
+    _append_session_conversation_event(
         conversation_id,
         turn_control.turn_id,
         EVENT_TURN_STARTED,
@@ -4189,7 +4200,7 @@ def submit_session_message(
         },
         source="submit_session_message",
     )
-    _append_session_turn_journal_event(
+    _append_session_conversation_event(
         conversation_id,
         turn_control.turn_id,
         EVENT_USER_MESSAGE,
@@ -6923,6 +6934,7 @@ def _build_session_detail_from_summary(
     available_agent = get_agent(available_agent_id) if available_agent_id and hydrate_agent else None
     detail = {
         **summary,
+        "ledgerSeq": _session_ledger_sequence(conversation["id"]),
         "activeTask": _active_task_to_api(active_task),
         "defaultFileContext": default_file_context,
         "previewTabs": preview_tabs,
@@ -10491,12 +10503,12 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                     stop_configurer(lambda: _get_turn_control_stop_reason(turn_control))
                 raw_history_messages = list(context.get("history_messages") or [])
                 seedable_history_messages = _history_messages_for_agent_seed(raw_history_messages)
-                turn_journal_events = load_turn_events(PROJECT_ROOT, session_id)
+                conversation_ledger_events = load_conversation_events(PROJECT_ROOT, session_id)
                 context_assembly = assemble_conversation_context(
                     seedable_history_messages,
                     session_id=session_id,
                     current_turn_id=turn_id,
-                    journal_events=turn_journal_events,
+                    ledger_events=conversation_ledger_events,
                 )
                 history_messages = context_assembly.history_messages
                 full_history_message_count = len(seedable_history_messages)
@@ -10724,14 +10736,14 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                     if isinstance(context_composition.get("cache"), dict)
                     else {}
                 )
-                _append_session_turn_journal_event(
+                _append_session_conversation_event(
                     session_id,
                     turn_id,
                     EVENT_TURN_CONTEXT,
                     status="recorded",
                     payload={
                         "historyMessageCount": len(history_messages),
-                        "journalEventCount": len(turn_journal_events),
+                        "ledgerEventCount": len(conversation_ledger_events),
                         "historyLedgerEventCount": len(context_assembly.events),
                         "includedEventIds": list(context_assembly.included_event_ids),
                         "omittedEventCount": context_assembly.omitted_event_count,
@@ -11513,7 +11525,7 @@ def _persist_session_turn_result(
                 related_event_code="conversation.turn_error",
             )
             if partial_entry:
-                _append_session_turn_journal_event(
+                _append_session_conversation_event(
                     session_id,
                     turn_id,
                     EVENT_ASSISTANT_MESSAGE,
@@ -11526,7 +11538,7 @@ def _persist_session_turn_result(
                     },
                     source="persist_session_turn_result",
                 )
-            _append_session_turn_journal_event(
+            _append_session_conversation_event(
                 session_id,
                 turn_id,
                 EVENT_TURN_FAILED,
@@ -11832,7 +11844,7 @@ def _persist_session_turn_result(
                     "hasImageArtifactEvidence": False,
                 },
             )
-        _append_session_turn_journal_event(
+        _append_session_conversation_event(
             session_id,
             turn_id,
             EVENT_ASSISTANT_MESSAGE,
@@ -11848,7 +11860,7 @@ def _persist_session_turn_result(
         terminal_event = EVENT_TURN_FAILED if final_status in {"failed_provider", "failed_runtime", "failed"} else (
             EVENT_TURN_INTERRUPTED if stop_requested or final_status in {"stopped", "stopped_by_user"} else EVENT_TURN_COMPLETED
         )
-        _append_session_turn_journal_event(
+        _append_session_conversation_event(
             session_id,
             turn_id,
             terminal_event,
@@ -12205,7 +12217,7 @@ def _persist_session_turn_runtime_error(
         raw_error=raw_error,
         status=normalized_status,
     )
-    _append_session_turn_journal_event(
+    _append_session_conversation_event(
         session_id,
         turn_id,
         EVENT_TURN_FAILED,
@@ -12371,7 +12383,7 @@ def _persist_session_turn_failure(session_id: str, context: dict[str, Any], exc:
                 raw_error=raw_error,
                 related_event_code="conversation.turn_error",
             )
-            _append_session_turn_journal_event(
+            _append_session_conversation_event(
                 session_id,
                 turn_id,
                 EVENT_TURN_FAILED,
@@ -12448,7 +12460,7 @@ def _persist_session_turn_failure(session_id: str, context: dict[str, Any], exc:
         event="assistant_turn_error",
         status="failed",
     )
-    _append_session_turn_journal_event(
+    _append_session_conversation_event(
         session_id,
         turn_id,
         EVENT_TURN_FAILED,
@@ -15672,7 +15684,7 @@ def _set_session_live_output(
                 updated_at=state.updated_at,
             )
     if journal_snapshot is not None:
-        _append_session_live_journal_event(session_id, journal_snapshot.turn_id, journal_snapshot)
+        _append_session_live_ledger_event(session_id, journal_snapshot.turn_id, journal_snapshot)
     if assistant_delta_state is not None:
         _publish_session_assistant_delta(session_id, assistant_delta_state)
     if publish_full_snapshot:
@@ -16111,7 +16123,7 @@ def _persist_session_interrupted_snapshot(
                     "messageCount": len(messages),
                 },
             )
-            _append_session_turn_journal_event(
+            _append_session_conversation_event(
                 session_id,
                 turn_id,
                 EVENT_TURN_INTERRUPTED,
@@ -16185,7 +16197,7 @@ def _persist_session_interrupted_snapshot(
         status="stopped",
         active_task=next_active_task,
     )
-    _append_session_turn_journal_event(
+    _append_session_conversation_event(
         session_id,
         turn_id,
         EVENT_ASSISTANT_MESSAGE,
@@ -16198,7 +16210,7 @@ def _persist_session_interrupted_snapshot(
         },
         source="persist_interrupted_snapshot",
     )
-    _append_session_turn_journal_event(
+    _append_session_conversation_event(
         session_id,
         turn_id,
         EVENT_TURN_INTERRUPTED,
@@ -16307,7 +16319,7 @@ def _capture_session_ui_stream(
             duration_ms=data.get("durationMs") or data.get("duration_ms"),
             timeout_seconds=data.get("timeoutSeconds") or data.get("timeout_seconds"),
         )
-        _append_session_turn_journal_event(
+        _append_session_conversation_event(
             session_id,
             capture.turn_id,
             EVENT_TOOL_CALL_STARTED if event.name == EventNames.TOOL_START else EVENT_TOOL_RESULT,
@@ -17571,6 +17583,7 @@ def _publish_session_detail_snapshot(session_id: str, *, detail: dict[str, Any] 
     event = {
         "type": "session_detail",
         "sessionId": session_id,
+        "ledgerSeq": _coerce_nonnegative_int(detail.get("ledgerSeq") or 0) if isinstance(detail, dict) else 0,
         "detail": detail,
     }
     delivered_count = 0
@@ -17618,6 +17631,7 @@ def _publish_session_assistant_delta(
         "type": "assistant_delta",
         "sessionId": session_id,
         "turnId": str(state.turn_id or "").strip(),
+        "ledgerSeq": _session_ledger_sequence(session_id),
         "stage": str(state.stage or "").strip(),
         "content": str(state.content or ""),
         "thought": str(state.thought or ""),
