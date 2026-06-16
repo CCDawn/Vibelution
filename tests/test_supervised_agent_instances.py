@@ -305,6 +305,8 @@ def test_supervised_agent_bindings_are_run_safe_payloads(tmp_path, monkeypatch):
     assert "profileId" not in bindings["baseline"]
     assert bindings["baseline"]["dialogueModelId"]
     assert bindings["baseline"]["llmBindings"]["dialogue"]["modelId"] == bindings["baseline"]["dialogueModelId"]
+    assert bindings["baseline"]["dialogueModelLabel"] == "小米 MiMo"
+    assert bindings["baseline"]["dialogueModelName"] == "mimo-v2.5-pro"
     assert bindings["baseline"]["agentCode"]
     assert bindings["baseline"]["primaryMode"] == "supervised_evolution"
     assert bindings["baseline"]["roleKey"] == "baseline"

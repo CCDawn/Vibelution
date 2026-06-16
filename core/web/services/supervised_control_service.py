@@ -1428,6 +1428,8 @@ def _run_supervised_session(context: dict[str, Any]) -> None:
         _mark_run_failed(run_id, f"{type(exc).__name__}: {exc}")
         return
 
+    decision = result.decision
+    integrity_issue = _supervised_decision_integrity_issue(decision)
     with _RUN_STATE_LOCK:
         state = _RUN_STATES.get(run_id)
         if state is None:
@@ -1435,42 +1437,98 @@ def _run_supervised_session(context: dict[str, Any]) -> None:
         status = str(state.get("status") or "").strip().lower()
         if status in {"done", "failed", "cancelled"}:
             return
-        decision = result.decision
-        state["status"] = "done"
-        state["currentPhase"] = "done"
-        state["runtimeStatus"] = "idle"
-        state["currentTask"] = text_for(
-            get_web_language(),
-            zh="监督运行已完成，可查看结论并决定后续动作。",
-            en="The supervised run is complete. Review the decision and choose the next action.",
-        )
-        state["sessionId"] = str(getattr(decision, "session_id", "") or state.get("sessionId") or "")
-        state["decision"] = str(getattr(decision, "decision", "") or "")
-        state["reason"] = str(getattr(decision, "reason", "") or "")
-        state["decisionPath"] = str(getattr(decision, "decision_path", "") or "")
-        policy_action = getattr(decision, "policy_action", {}) or {}
-        state["policyAction"] = str(policy_action.get("action") or "")
-        state["latestMessage"] = result.decision_summary
-        state["updatedAt"] = _now_timestamp()
-        state["finishedAt"] = state["updatedAt"]
-        state["lineageIndexPath"] = str(result.lineage_index_path or "")
-        state["lineageSummary"] = str(result.lineage_summary or "")
-        _append_event_locked(
-            state,
-            {
-                "timestamp": state["updatedAt"],
-                "event": "run_completed",
-                "title": "监督运行完成",
-                "summary": result.decision_summary,
-                "status": "done",
-                "decision": state["decision"],
-                "reason": state["reason"],
-                "sessionId": state["sessionId"],
-            },
-        )
-        _clear_active_run_locked(run_id)
-        _RUN_CONTROLLERS.pop(run_id, None)
+        if integrity_issue:
+            state["status"] = "failed"
+            state["currentPhase"] = "failed"
+            state["runtimeStatus"] = "failed"
+            state["reason"] = integrity_issue
+            state["latestMessage"] = integrity_issue
+            state["updatedAt"] = _now_timestamp()
+            state["finishedAt"] = state["updatedAt"]
+            state["currentTask"] = text_for(
+                get_web_language(),
+                zh="监督运行未形成完整结论，请检查 decision/history 写入。",
+                en="The supervised run did not produce a complete decision. Inspect decision/history persistence.",
+            )
+            _append_event_locked(
+                state,
+                {
+                    "timestamp": state["updatedAt"],
+                    "event": "decision_integrity_failed",
+                    "title": "监督结论不完整",
+                    "summary": integrity_issue,
+                    "status": "failed",
+                    "reason": integrity_issue,
+                },
+            )
+            _clear_active_run_locked(run_id)
+            _RUN_CONTROLLERS.pop(run_id, None)
+        else:
+            state["status"] = "done"
+            state["currentPhase"] = "done"
+            state["runtimeStatus"] = "idle"
+            state["currentTask"] = text_for(
+                get_web_language(),
+                zh="监督运行已完成，可查看结论并决定后续动作。",
+                en="The supervised run is complete. Review the decision and choose the next action.",
+            )
+            state["sessionId"] = str(getattr(decision, "session_id", "") or state.get("sessionId") or "")
+            state["decision"] = str(getattr(decision, "decision", "") or "")
+            state["reason"] = str(getattr(decision, "reason", "") or "")
+            state["decisionPath"] = str(getattr(decision, "decision_path", "") or "")
+            policy_action = getattr(decision, "policy_action", {}) or {}
+            state["policyAction"] = str(policy_action.get("action") or "")
+            state["latestMessage"] = result.decision_summary
+            state["updatedAt"] = _now_timestamp()
+            state["finishedAt"] = state["updatedAt"]
+            state["lineageIndexPath"] = str(result.lineage_index_path or "")
+            state["lineageSummary"] = str(result.lineage_summary or "")
+            _append_event_locked(
+                state,
+                {
+                    "timestamp": state["updatedAt"],
+                    "event": "run_completed",
+                    "title": "监督运行完成",
+                    "summary": result.decision_summary,
+                    "status": "done",
+                    "decision": state["decision"],
+                    "reason": state["reason"],
+                    "sessionId": state["sessionId"],
+                },
+            )
+            _clear_active_run_locked(run_id)
+            _RUN_CONTROLLERS.pop(run_id, None)
     _publish_run_snapshot(run_id, terminal=True)
+
+
+def _supervised_decision_integrity_issue(decision: Any) -> str:
+    session_id = str(getattr(decision, "session_id", "") or "").strip()
+    decision_path_text = str(getattr(decision, "decision_path", "") or "").strip()
+    if not session_id:
+        return "decision_missing_after_case_reports: missing session_id"
+    if not decision_path_text:
+        return f"decision_missing_after_case_reports: missing decision_path for {session_id}"
+    decision_path = Path(decision_path_text)
+    if not decision_path.is_absolute():
+        decision_path = (PROJECT_ROOT / decision_path).resolve()
+    if not decision_path.exists():
+        return f"decision_missing_after_case_reports: decision file not found for {session_id}"
+    history_path = PROJECT_ROOT / "workspace" / "supervised_evolution" / "history.jsonl"
+    if not history_path.exists():
+        return f"decision_missing_after_case_reports: history record not found for {session_id}"
+    try:
+        for line in history_path.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            try:
+                item = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if str(item.get("session_id") or "").strip() == session_id:
+                return ""
+    except OSError as exc:
+        return f"decision_missing_after_case_reports: cannot read history for {session_id}: {type(exc).__name__}"
+    return f"decision_missing_after_case_reports: history record not found for {session_id}"
 
 
 def _supervised_run_should_execute(run_id: str) -> bool:
@@ -1889,6 +1947,8 @@ def _agent_bindings_snapshot(bindings: dict[str, Any]) -> dict[str, Any]:
             "displayName": str(binding.get("displayName") or "").strip(),
             "profileId": str(binding.get("profileId") or "").strip(),
             "dialogueModelId": str(binding.get("dialogueModelId") or "").strip(),
+            "dialogueModelLabel": str(binding.get("dialogueModelLabel") or "").strip(),
+            "dialogueModelName": str(binding.get("dialogueModelName") or "").strip(),
             "llmBindings": dict(binding.get("llmBindings") or {}) if isinstance(binding.get("llmBindings"), dict) else {},
             "directSessionId": str(binding.get("directSessionId") or "").strip(),
             "workspacePath": str(binding.get("workspacePath") or "").strip(),
@@ -1906,6 +1966,8 @@ def _agent_binding_snapshot(binding: Any) -> dict[str, Any]:
         "displayName": str(binding.get("displayName") or "").strip(),
         "profileId": str(binding.get("profileId") or "").strip(),
         "dialogueModelId": str(binding.get("dialogueModelId") or "").strip(),
+        "dialogueModelLabel": str(binding.get("dialogueModelLabel") or "").strip(),
+        "dialogueModelName": str(binding.get("dialogueModelName") or "").strip(),
         "llmBindings": dict(binding.get("llmBindings") or {}) if isinstance(binding.get("llmBindings"), dict) else {},
         "directSessionId": str(binding.get("directSessionId") or "").strip(),
         "workspacePath": str(binding.get("workspacePath") or "").strip(),

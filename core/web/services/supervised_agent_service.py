@@ -160,6 +160,25 @@ def _preferred_supervised_model_id(config: Any) -> str:
     return ""
 
 
+def _model_library_display(config: Any, model_id: str) -> dict[str, str]:
+    normalized_model_id = str(model_id or "").strip()
+    if not normalized_model_id:
+        return {"label": "", "name": ""}
+    try:
+        model_library = getattr(config.llm, "model_library", {}) or {}
+    except Exception:
+        model_library = {}
+    entry = model_library.get(normalized_model_id) if isinstance(model_library, dict) else None
+    if not isinstance(entry, dict):
+        return {"label": normalized_model_id, "name": normalized_model_id}
+    model_name = str(entry.get("model") or "").strip()
+    label = str(entry.get("label") or model_name or normalized_model_id).strip()
+    return {
+        "label": label,
+        "name": model_name or label or normalized_model_id,
+    }
+
+
 def supervised_agent_bindings() -> dict[str, dict[str, Any]]:
     """Return run-safe AgentInstance bindings keyed by supervised role."""
 
@@ -229,6 +248,7 @@ def supervised_agent_bindings() -> dict[str, dict[str, Any]]:
                 model_id=dialogue_model_id,
                 config=config,
             )
+        model_display = _model_library_display(config, dialogue_model_id)
         bindings[role] = {
             "agentId": str(agent.get("agentId") or "").strip(),
             "agentCode": str(agent.get("agentCode") or "").strip(),
@@ -237,6 +257,8 @@ def supervised_agent_bindings() -> dict[str, dict[str, Any]]:
             "roleKey": str(agent.get("roleKey") or role).strip() or role,
             "llmBindings": llm_bindings,
             "dialogueModelId": dialogue_model_id,
+            "dialogueModelLabel": model_display["label"],
+            "dialogueModelName": model_display["name"],
             "llmSlot": "dialogue",
             "promptTemplateId": str(agent.get("promptTemplateId") or "").strip(),
             "directSessionId": str(agent.get("directSessionId") or "").strip(),
