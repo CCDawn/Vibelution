@@ -8,6 +8,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Optional
 
+from core.infrastructure import developer_sandbox
 from core.infrastructure.workspace_manager import get_workspace
 
 from .episodes import decision_path_for_episode_id, trace_index_path_for_decision
@@ -138,9 +139,10 @@ def apply_gym_promotion_proposal(
 
     trace_index_path = trace_index_path_for_decision(decision_path)
     _validate_trace_index(trace_index_path)
+    _assert_gym_promotion_write_allowed(root, "promotion_apply")
 
     applied_at = utcnow_iso()
-    ledger_path = root / "workspace" / "gym" / "applied_promotions.jsonl"
+    ledger_path = _gym_workspace_path(root, "applied_promotions.jsonl")
     application = GymPromotionApplication(
         proposal_id=proposal_id,
         episode_id=episode_id,
@@ -208,16 +210,17 @@ def rollback_gym_promotion_proposal(
     trace_index_path = Path(str(proposal.get("trace_index_path") or trace_index_path_for_decision(decision_path))).resolve()
     _load_json_object(decision_path, label="Gym decision")
     _validate_trace_index(trace_index_path)
+    _assert_gym_promotion_write_allowed(root, "promotion_rollback")
     registry_path = None
     target_key = None
     if status == "active":
         registry_path = Path(
-            str(proposal.get("activation_registry_path") or root / "workspace" / "gym" / "active_promotions.json")
+            str(proposal.get("activation_registry_path") or _gym_workspace_path(root, "active_promotions.json"))
         ).resolve()
         target_key = str(proposal.get("target_key") or _fallback_target_key(proposal))
 
     rolled_back_at = utcnow_iso()
-    ledger_path = root / "workspace" / "gym" / "rolled_back_promotions.jsonl"
+    ledger_path = _gym_workspace_path(root, "rolled_back_promotions.jsonl")
     rollback = GymPromotionRollback(
         proposal_id=_required_text(proposal, "proposal_id"),
         episode_id=episode_id,
@@ -294,10 +297,11 @@ def activate_gym_promotion_proposal(
 
     trace_index_path = Path(str(proposal.get("trace_index_path") or trace_index_path_for_decision(decision_path))).resolve()
     _validate_trace_index(trace_index_path)
+    _assert_gym_promotion_write_allowed(root, "promotion_activate")
 
     target_key = _target_key(decision, proposal)
-    registry_path = root / "workspace" / "gym" / "active_promotions.json"
-    history_path = root / "workspace" / "gym" / "activation_history.jsonl"
+    registry_path = _gym_workspace_path(root, "active_promotions.json")
+    history_path = _gym_workspace_path(root, "activation_history.jsonl")
     registry = _load_registry(registry_path)
     active_entries = registry.setdefault("active", {})
     previous_entry = active_entries.get(target_key) if isinstance(active_entries, dict) else None
@@ -473,6 +477,21 @@ def _append_ledger_once(path: Path, record: GymPromotionApplication | GymPromoti
                 return
     with open(path, "a", encoding="utf-8") as fh:
         fh.write(json.dumps(record.to_dict(), ensure_ascii=False) + "\n")
+
+
+def _gym_workspace_path(project_root: Path, *parts: str, intent: str = "state", seed: bool = True) -> Path:
+    return developer_sandbox.route_workspace_path(
+        project_root,
+        "gym",
+        "gym",
+        *parts,
+        intent=intent,
+        seed=seed,
+    )
+
+
+def _assert_gym_promotion_write_allowed(project_root: Path, intent: str) -> None:
+    _gym_workspace_path(project_root, intent=intent, seed=False)
 
 
 def _validate_trace_index(path: Path) -> None:

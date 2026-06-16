@@ -75,6 +75,7 @@ _BLOCKED_PROMOTION_INTENTS = {
     "promotion",
     "promotion_activate",
     "promotion_apply",
+    "promotion_rollback",
 }
 _BLOCKED_PROMOTION_SURFACES = {"gym", "knowledge", "rag", "team_knowledge"}
 _DEBUG_ONLY_SURFACES = {"runtime_scene", "diagnostics", "logs"}

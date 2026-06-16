@@ -8,6 +8,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Optional
 
+from core.infrastructure import developer_sandbox
 from core.infrastructure.workspace_manager import get_workspace
 
 
@@ -32,7 +33,7 @@ class ActiveAdvisoryBaseline:
 
 def load_active_advisory_baselines(*, project_root: Optional[Path] = None) -> list[ActiveAdvisoryBaseline]:
     root = (project_root or get_workspace().project_root).resolve()
-    registry_path = root / "workspace" / "gym" / "active_promotions.json"
+    registry_path = developer_sandbox.seeded_sandbox_workspace_path(root, "gym", "active_promotions.json")
     if not registry_path.exists():
         return []
     try:

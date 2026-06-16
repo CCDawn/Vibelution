@@ -4,10 +4,37 @@
 import json
 from pathlib import Path
 
+import pytest
+
+from core.infrastructure import developer_sandbox
 from core.gym import run_gym_collection_episode
 from core.gym.promotion import activate_gym_promotion_proposal, apply_gym_promotion_proposal
 from core.evaluation.supervised_dashboard import build_supervised_dashboard, generate_supervised_dashboard
 from tests.test_gym_runner import RunnerFakeAdapter
+
+
+@pytest.fixture(autouse=True)
+def isolate_developer_sandbox_config(tmp_path: Path, monkeypatch):
+    _set_developer_sandbox(tmp_path, monkeypatch, False)
+
+
+def _enable_developer_sandbox(project_root: Path, monkeypatch) -> dict:
+    return _set_developer_sandbox(project_root, monkeypatch, True)
+
+
+def _set_developer_sandbox(project_root: Path, monkeypatch, enabled: bool) -> dict:
+    config_path = project_root / "config.toml"
+    if not config_path.exists():
+        config_path.write_text("[launcher]\ncontrol_port = 8765\n", encoding="utf-8")
+    monkeypatch.setattr(developer_sandbox, "CONFIG_PATH", config_path)
+    monkeypatch.setattr(developer_sandbox, "PROJECT_ROOT", project_root)
+    status = developer_sandbox.get_developer_mode_status(config_path=config_path, project_root=project_root)
+    return developer_sandbox.update_developer_mode_status(
+        enabled,
+        base_hash=status["configHash"],
+        config_path=config_path,
+        project_root=project_root,
+    )
 
 
 def test_generate_supervised_dashboard_renders_empty_state(tmp_path: Path):
@@ -18,6 +45,25 @@ def test_generate_supervised_dashboard_renders_empty_state(tmp_path: Path):
     assert "暂无监督进化记录" in html
     assert "agent_consumption: advisory" in html
     assert "runtime_authorization: none" in html
+
+
+def test_generate_supervised_dashboard_uses_developer_sandbox_records(tmp_path: Path, monkeypatch):
+    enabled = _enable_developer_sandbox(tmp_path, monkeypatch)
+    sandbox_decisions = developer_sandbox.seeded_sandbox_workspace_path(
+        tmp_path,
+        "supervised_evolution",
+        "decisions",
+    )
+    sandbox_decisions.mkdir(parents=True, exist_ok=True)
+    _write_decision_in_dir(sandbox_decisions, "sandbox_supervised", {"decision": "PROMOTE", "reason": "sandbox only"})
+
+    dashboard = generate_supervised_dashboard(project_root=tmp_path)
+
+    sandbox_workspace = tmp_path / ".runtime" / "developer-mode" / "sandboxes" / enabled["sandbox"]["sandboxId"] / "workspace"
+    assert dashboard.session_count == 1
+    assert Path(dashboard.html_path) == sandbox_workspace / "supervised_evolution" / "dashboard" / "index.html"
+    assert "sandbox_supervised" in Path(dashboard.html_path).read_text(encoding="utf-8")
+    assert not (tmp_path / "workspace" / "supervised_evolution" / "dashboard" / "index.html").exists()
 
 
 def test_generate_supervised_dashboard_renders_normal_decision_summary(tmp_path: Path):
@@ -267,6 +313,10 @@ def test_generate_supervised_dashboard_surfaces_dynamic_and_impossible_case_sche
 def _write_decision(tmp_path: Path, session_id: str, overrides: dict) -> Path:
     decisions_dir = tmp_path / "workspace" / "supervised_evolution" / "decisions"
     decisions_dir.mkdir(parents=True, exist_ok=True)
+    return _write_decision_in_dir(decisions_dir, session_id, overrides)
+
+
+def _write_decision_in_dir(decisions_dir: Path, session_id: str, overrides: dict) -> Path:
     path = decisions_dir / f"{session_id}.json"
     payload = {
         "session_id": session_id,
@@ -302,7 +352,7 @@ def _write_decision(tmp_path: Path, session_id: str, overrides: dict) -> Path:
         ],
         "gates": [],
         "decision_path": str(path),
-        "policy_action": {"lineage_index_path": str(tmp_path / "workspace" / "lineage.json")},
+        "policy_action": {"lineage_index_path": str(decisions_dir.parent / "lineage.json")},
     }
     payload.update(overrides)
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
