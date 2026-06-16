@@ -3414,6 +3414,7 @@ def _promote_owner_source_to_central_locked(
     source_hash = str(source.get("sourceHash") or "").strip()
     if not source_hash:
         raise TeamKnowledgeError("Inbox source requires sourceHash before central promotion.")
+    _assert_central_source_write_allowed()
     existing = _find_central_source_by_hash_locked(source_hash)
     dedupe_status = "reused" if existing else "created"
     if existing:
@@ -3476,6 +3477,7 @@ def _append_owner_ref_for_central_source_locked(
     resolution_note: str,
     dedupe_status: str,
 ) -> dict[str, Any]:
+    _assert_central_source_write_allowed()
     owner = _coerce_owner_context(owner_value)
     central_source_id = str(central_source.get("centralSourceId") or "").strip()
     inbox_source_id = str(source.get("inboxSourceId") or "").strip()
@@ -3536,6 +3538,7 @@ def _append_owner_ref_for_central_source_locked(
 
 
 def _copy_or_write_central_source_file(owner_value: Any, source: dict[str, Any], central_source_id: str) -> Path:
+    _assert_central_source_write_allowed()
     owner = _coerce_owner_context(owner_value)
     accepted_at = str(source.get("reviewedAt") or source.get("capturedAt") or utc_now_iso())
     year = _safe_token(accepted_at[:4], default="undated", max_length=16)
@@ -3798,7 +3801,11 @@ def _iter_knowledge_owners(
 
 
 def _knowledge_root(team_id: str) -> Path:
-    return _project_root() / "workspace" / "teams" / _safe_token(team_id, default="team", max_length=96) / "knowledge"
+    return _route_team_knowledge_workspace_path(
+        "teams",
+        _safe_token(team_id, default="team", max_length=96),
+        "knowledge",
+    )
 
 
 def _knowledge_root_for_owner(owner_value: Any) -> Path:
@@ -3806,7 +3813,11 @@ def _knowledge_root_for_owner(owner_value: Any) -> Path:
     owner_type = str(owner.get("ownerType") or "team")
     owner_id = str(owner.get("ownerId") or "").strip()
     if owner_type == "agent":
-        return _project_root() / "workspace" / "agents" / _safe_token(owner_id, default="agent", max_length=128) / "knowledge"
+        return _route_team_knowledge_workspace_path(
+            "agents",
+            _safe_token(owner_id, default="agent", max_length=128),
+            "knowledge",
+        )
     return _knowledge_root(owner_id)
 
 
@@ -3889,6 +3900,26 @@ def _rating_suggestions_path_for_owner(owner_value: Any) -> Path:
 
 def _rating_suggestions_path(team_id: str) -> Path:
     return _knowledge_root(team_id) / "rating_suggestions.jsonl"
+
+
+def _developer_sandbox_module():
+    from core.infrastructure import developer_sandbox
+
+    return developer_sandbox
+
+
+def _route_team_knowledge_workspace_path(*parts: str, intent: str = "state", seed: bool = True) -> Path:
+    return _developer_sandbox_module().route_workspace_path(
+        _project_root(),
+        "team_knowledge",
+        *parts,
+        intent=intent,
+        seed=seed,
+    )
+
+
+def _assert_central_source_write_allowed() -> None:
+    _route_team_knowledge_workspace_path("knowledge", "sources", intent="central_promotion", seed=False)
 
 
 def _central_knowledge_root() -> Path:

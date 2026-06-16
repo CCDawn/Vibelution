@@ -1,6 +1,21 @@
 import pytest
 
+from core.infrastructure import developer_sandbox
 from core.web.services import agent_directory_service, chat_room_service, memory_graph_service, team_knowledge_service, team_service
+
+
+def _enable_developer_sandbox(project_root, monkeypatch):
+    config_path = project_root / "config.toml"
+    config_path.write_text("[launcher]\ncontrol_port = 8765\n", encoding="utf-8")
+    monkeypatch.setattr(developer_sandbox, "CONFIG_PATH", config_path)
+    monkeypatch.setattr(developer_sandbox, "PROJECT_ROOT", project_root)
+    status = developer_sandbox.get_developer_mode_status(config_path=config_path, project_root=project_root)
+    return developer_sandbox.update_developer_mode_status(
+        True,
+        base_hash=status["configHash"],
+        config_path=config_path,
+        project_root=project_root,
+    )
 
 
 @pytest.fixture()
@@ -201,6 +216,92 @@ def test_owner_inbox_promotes_source_to_central_registry_and_formal_artifact(kno
     assert source_artifact["centralSourceId"] == central_source["centralSourceId"]
     assert proposal["centralSourceIds"] == [central_source["centralSourceId"]]
     assert applied["item"]["centralSourceIds"] == [central_source["centralSourceId"]]
+
+
+def test_developer_mode_routes_owner_knowledge_state_to_sandbox(tmp_path, monkeypatch):
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(team_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(team_knowledge_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(memory_graph_service, "PROJECT_ROOT", tmp_path)
+    enabled = _enable_developer_sandbox(tmp_path, monkeypatch)
+
+    lead = agent_directory_service.create_agent_instance(display_name="Sandbox Lead")
+    team = team_service.create_team(name="Sandbox Team", members=[{"agentId": lead["agentId"], "role": "lead"}])
+    team_knowledge_service.create_knowledge_base(
+        team["teamId"],
+        name="Debug Knowledge",
+        actor_agent_id=lead["agentId"],
+    )
+
+    sandbox_workspace = tmp_path / ".runtime" / "developer-mode" / "sandboxes" / enabled["sandbox"]["sandboxId"] / "workspace"
+    sandbox_bases = sandbox_workspace / "teams" / team["teamId"] / "knowledge" / "knowledge_bases.json"
+    formal_bases = tmp_path / "workspace" / "teams" / team["teamId"] / "knowledge" / "knowledge_bases.json"
+
+    assert sandbox_bases.exists()
+    assert not formal_bases.exists()
+
+
+def test_developer_mode_blocks_owner_source_central_promotion(knowledge_env, tmp_path, monkeypatch):
+    enabled = _enable_developer_sandbox(tmp_path, monkeypatch)
+    inbox_source = team_knowledge_service.collect_source_to_inbox(
+        "team",
+        knowledge_env["team"]["teamId"],
+        source_type="manual_user_entry",
+        source_ref={"note": "debug-only source"},
+        original_content="Debug-only source should not be promoted to central storage.",
+        original_filename="debug-source.txt",
+        title="Debug-only source",
+        actor_agent_id=knowledge_env["member"]["agentId"],
+    )
+
+    with pytest.raises(developer_sandbox.DeveloperSandboxWriteBlocked):
+        team_knowledge_service.review_owner_inbox_source(
+            "team",
+            knowledge_env["team"]["teamId"],
+            inbox_source["inboxSourceId"],
+            decision="accepted",
+            reviewed_by_agent_id=knowledge_env["lead"]["agentId"],
+        )
+
+    sandbox_workspace = tmp_path / ".runtime" / "developer-mode" / "sandboxes" / enabled["sandbox"]["sandboxId"] / "workspace"
+    assert (sandbox_workspace / "teams" / knowledge_env["team"]["teamId"] / "knowledge" / "inbox").exists()
+    assert not (tmp_path / "workspace" / "knowledge" / "sources" / "registry" / "source_registry.jsonl").exists()
+
+
+def test_developer_mode_blocks_duplicate_source_owner_ref_write(knowledge_env, tmp_path, monkeypatch):
+    central_source = _promote_central_source(
+        owner_type="team",
+        owner_id=knowledge_env["team"]["teamId"],
+        actor_agent_id=knowledge_env["member"]["agentId"],
+        reviewer_agent_id=knowledge_env["lead"]["agentId"],
+        title="Formal source",
+        original_content="Formal source created before developer mode.",
+    )
+    owner_refs_path = tmp_path / "workspace" / "knowledge" / "sources" / "registry" / "owner_refs.jsonl"
+    before_owner_refs = owner_refs_path.read_text(encoding="utf-8")
+    _enable_developer_sandbox(tmp_path, monkeypatch)
+    duplicate_source = team_knowledge_service.collect_source_to_inbox(
+        "team",
+        knowledge_env["team"]["teamId"],
+        source_type="manual_user_entry",
+        source_ref={"note": "debug duplicate"},
+        original_content="Debug duplicate source should not append a formal owner ref.",
+        title="Debug duplicate",
+        actor_agent_id=knowledge_env["member"]["agentId"],
+    )
+
+    with pytest.raises(developer_sandbox.DeveloperSandboxWriteBlocked):
+        team_knowledge_service.review_owner_inbox_source(
+            "team",
+            knowledge_env["team"]["teamId"],
+            duplicate_source["inboxSourceId"],
+            decision="duplicate",
+            duplicate_of=central_source["centralSourceId"],
+            reviewed_by_agent_id=knowledge_env["lead"]["agentId"],
+        )
+
+    assert owner_refs_path.read_text(encoding="utf-8") == before_owner_refs
 
 
 def test_agent_inbox_is_private_and_global_steward_can_promote(knowledge_env):

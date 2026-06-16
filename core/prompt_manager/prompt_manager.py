@@ -149,7 +149,15 @@ def _get_static_root() -> Path:
 
 def _get_dynamic_root() -> Path:
     project_root = _resolve_project_root()
-    return project_root / "workspace" / "prompts"
+    from core.infrastructure import developer_sandbox
+
+    return developer_sandbox.route_workspace_path(
+        project_root,
+        "prompt_manager",
+        "prompts",
+        intent="state",
+        seed=True,
+    )
 
 
 def _resolve_project_root() -> Path:

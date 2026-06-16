@@ -11,6 +11,12 @@ from .invocation_context import LLMInvocationContext, prompt_purpose_cache_parti
 from .payload_builder import current_prompt_cache_partition, prompt_cache_partition_scope
 
 
+def _developer_sandbox_module():
+    from core.infrastructure import developer_sandbox
+
+    return developer_sandbox
+
+
 def _context_with_effective_partition(context: LLMInvocationContext) -> LLMInvocationContext:
     explicit_partition = str(context.cache_partition or "").strip()
     base_partition = explicit_partition or str(current_prompt_cache_partition() or "").strip()
@@ -19,13 +25,17 @@ def _context_with_effective_partition(context: LLMInvocationContext) -> LLMInvoc
         if explicit_partition
         else prompt_purpose_cache_partition(base_partition, context.prompt_purpose)
     )
+    effective_partition = _developer_sandbox_module().sandbox_prompt_cache_partition(
+        effective_partition,
+        surface=str(context.surface or "runtime"),
+    )
     return context.with_cache_partition(effective_partition)
 
 
 def _merged_metadata(context: LLMInvocationContext, client: Any, metadata: dict[str, Any] | None = None) -> dict[str, Any]:
     merged = dict(metadata or {})
     merged.update(context.to_metadata(client=client))
-    return merged
+    return _developer_sandbox_module().enrich_debug_fields(merged)
 
 
 def invoke_llm(

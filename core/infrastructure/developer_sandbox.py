@@ -26,6 +26,75 @@ SANDBOXES_DIR = "sandboxes"
 ACTIVE_STATE_NAME = "active.json"
 DEBUG_RECORD_KIND = "debug"
 DEBUG_RETENTION = "diagnostic_only"
+WRITE_POLICY_FORMAL_ONLY = "formal_only"
+WRITE_POLICY_SANDBOXED = "sandboxed"
+WRITE_POLICY_DEBUG_ONLY = "debug_only"
+WRITE_POLICY_BLOCKED_IN_DEV = "blocked_in_dev"
+WRITE_POLICY_OVERLAY = "overlay"
+VALID_WRITE_POLICIES = {
+    WRITE_POLICY_FORMAL_ONLY,
+    WRITE_POLICY_SANDBOXED,
+    WRITE_POLICY_DEBUG_ONLY,
+    WRITE_POLICY_BLOCKED_IN_DEV,
+    WRITE_POLICY_OVERLAY,
+}
+
+LEGACY_DIRECT_WORKSPACE_WRITE_SURFACES = {
+    "core/infrastructure/workspace_manager.py": "memory",
+    "core/web/services/memory_service.py": "memory",
+    "core/web/services/team_knowledge_service.py": "team_knowledge",
+    "core/web/services/rag_vector_index_service.py": "rag",
+    "core/web/services/project_agent_bus_service.py": "project_agent_bus",
+    "core/web/services/agent_directory_service.py": "agent_directory",
+    "core/gym/promotion.py": "gym",
+    "core/evaluation/dataset_registry.py": "evaluation_dataset",
+}
+
+_FORMAL_CONTROL_SURFACES = {
+    "launcher",
+    "launcher_state",
+    "runtime_manager",
+    "runtime_lifecycle",
+}
+_FORMAL_CONTROL_INTENTS = {
+    "control",
+    "control_state",
+    "lifecycle",
+    "lifecycle_state",
+    "formal_save",
+}
+_OVERLAY_SURFACES = {"config", "llm_config", "model_config", "tool_config"}
+_OVERLAY_INTENTS = {"draft", "experiment", "overlay", "probe", "model_probe"}
+_BLOCKED_PROMOTION_INTENTS = {
+    "activation",
+    "advisory_activation",
+    "apply_promotion",
+    "central_promotion",
+    "formal_dataset",
+    "official_graph",
+    "promotion",
+    "promotion_activate",
+    "promotion_apply",
+}
+_BLOCKED_PROMOTION_SURFACES = {"gym", "knowledge", "rag", "team_knowledge"}
+_DEBUG_ONLY_SURFACES = {"runtime_scene", "diagnostics", "logs"}
+_SANDBOXED_SURFACE_DEFAULTS = {
+    "agent_directory",
+    "chat",
+    "chat_dataset",
+    "chat_room",
+    "evaluation_dataset",
+    "gym",
+    "knowledge",
+    "memory",
+    "project_agent_bus",
+    "prompt_manager",
+    "rag",
+    "session",
+    "supervised_evolution",
+    "team",
+    "team_knowledge",
+}
 
 
 class DeveloperSandboxConfigConflict(ValueError):
@@ -35,6 +104,17 @@ class DeveloperSandboxConfigConflict(ValueError):
         super().__init__("Developer mode config changed before save.")
         self.expected_hash = expected_hash
         self.current_hash = current_hash
+
+
+class DeveloperSandboxWriteBlocked(PermissionError):
+    """Raised when developer mode blocks a formal write by policy."""
+
+    def __init__(self, surface: str, intent: str, policy: str = WRITE_POLICY_BLOCKED_IN_DEV) -> None:
+        message = f"Developer mode blocks formal write for surface={surface!r}, intent={intent!r}."
+        super().__init__(message)
+        self.surface = surface
+        self.intent = intent
+        self.policy = policy
 
 
 def get_developer_mode_status(
@@ -90,6 +170,71 @@ def get_developer_mode_status(
             "sandboxSurvivesRestart": True,
         },
     }
+
+
+def developer_write_policy(surface: str, intent: str = "state") -> str:
+    """Return the developer-mode write policy for one product write surface."""
+
+    surface_token = _policy_token(surface, default="runtime")
+    intent_token = _policy_token(intent, default="state")
+    if surface_token in _FORMAL_CONTROL_SURFACES or intent_token in _FORMAL_CONTROL_INTENTS:
+        return WRITE_POLICY_FORMAL_ONLY
+    if surface_token in _OVERLAY_SURFACES or intent_token in _OVERLAY_INTENTS:
+        return WRITE_POLICY_OVERLAY
+    if surface_token in _DEBUG_ONLY_SURFACES:
+        return WRITE_POLICY_DEBUG_ONLY
+    if surface_token in _BLOCKED_PROMOTION_SURFACES and intent_token in _BLOCKED_PROMOTION_INTENTS:
+        return WRITE_POLICY_BLOCKED_IN_DEV
+    if surface_token in _SANDBOXED_SURFACE_DEFAULTS:
+        return WRITE_POLICY_SANDBOXED
+    return WRITE_POLICY_SANDBOXED
+
+
+def route_workspace_path(
+    project_root: Path,
+    surface: str,
+    *parts: str,
+    intent: str = "state",
+    seed: bool = False,
+) -> Path:
+    """Route a product workspace path through the active developer policy."""
+
+    root = _project_root(project_root)
+    policy = developer_write_policy(surface, intent)
+    if policy == WRITE_POLICY_BLOCKED_IN_DEV:
+        if is_developer_mode_enabled():
+            raise DeveloperSandboxWriteBlocked(
+                _policy_token(surface, default="runtime"),
+                _policy_token(intent, default="state"),
+            )
+        return formal_workspace_path(root, *parts)
+    if policy in {WRITE_POLICY_SANDBOXED, WRITE_POLICY_OVERLAY, WRITE_POLICY_DEBUG_ONLY}:
+        return seeded_sandbox_workspace_path(root, *parts) if seed else sandboxed_workspace_path(root, *parts)
+    return formal_workspace_path(root, *parts)
+
+
+def route_runtime_path(
+    project_root: Path,
+    surface: str,
+    *parts: str,
+    intent: str = "state",
+) -> Path:
+    """Route a runtime path while keeping formal lifecycle controls formal."""
+
+    root = _project_root(project_root)
+    policy = developer_write_policy(surface, intent)
+    if policy == WRITE_POLICY_BLOCKED_IN_DEV:
+        if is_developer_mode_enabled():
+            raise DeveloperSandboxWriteBlocked(
+                _policy_token(surface, default="runtime"),
+                _policy_token(intent, default="state"),
+            )
+        return root.joinpath(".runtime", *parts)
+    if policy in {WRITE_POLICY_SANDBOXED, WRITE_POLICY_OVERLAY, WRITE_POLICY_DEBUG_ONLY} and is_developer_mode_enabled():
+        active_root = sandbox_root(root, ensure=True)
+        if active_root is not None:
+            return active_root.joinpath(".runtime", *parts)
+    return root.joinpath(".runtime", *parts)
 
 
 def update_developer_mode_status(
@@ -227,6 +372,8 @@ def sandbox_prompt_cache_partition(partition: str, *, surface: str, project_root
     if not sandbox_id:
         return normalized
     surface_token = _safe_token(surface, default="runtime")
+    if normalized.startswith("dev-") and f"-{sandbox_id}-" in normalized:
+        return normalized
     raw = normalized or "default"
     return f"dev-{surface_token}-{sandbox_id}-{raw}"
 
@@ -343,6 +490,10 @@ def _safe_token(value: Any, *, default: str) -> str:
         return default
     cleaned = "".join(char if char.isalnum() or char in {"-", "_", "."} else "-" for char in text).strip(".-_")
     return cleaned or default
+
+
+def _policy_token(value: Any, *, default: str) -> str:
+    return _safe_token(value, default=default).lower()
 
 
 def _is_relative_to(path: Path, root: Path) -> bool:
