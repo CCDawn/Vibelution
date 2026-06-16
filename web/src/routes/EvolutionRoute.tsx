@@ -128,6 +128,7 @@ type SupervisedSourceOption =
     };
 
 type SupervisedMemberRole = "baseline" | "candidate" | "reviewer" | "auditor" | "judge";
+type SupervisedMemberStepId = "launch" | "results" | "proposal" | "review";
 type SupervisedRunMember = {
   role: SupervisedMemberRole;
   label: string;
@@ -136,6 +137,12 @@ type SupervisedRunMember = {
   modelId: string;
   agentId: string;
   status: "active" | "configured" | "missing";
+};
+type SupervisedMemberStep = {
+  id: SupervisedMemberStepId;
+  zh: string;
+  en: string;
+  roles: SupervisedMemberRole[];
 };
 
 type SupervisedPreflightIssue = {
@@ -172,7 +179,13 @@ const EVOLUTION_LIVE_RUN_DEFAULT_WIDTH = 380;
 const EVOLUTION_LIVE_IO_HEIGHT_KEY = "vibelution.evolution.live-io-height";
 const EVOLUTION_LIVE_IO_HEIGHT_BOUNDS = { min: 260, max: 780 };
 const EVOLUTION_LIVE_IO_DEFAULT_HEIGHT = 340;
-const SUPERVISED_MEMBER_ROLES: SupervisedMemberRole[] = ["baseline", "candidate", "reviewer", "auditor", "judge"];
+const SUPERVISED_RUN_MEMBER_ROLES: SupervisedMemberRole[] = ["baseline", "candidate", "judge"];
+const SUPERVISED_MEMBER_STEPS: SupervisedMemberStep[] = [
+  { id: "launch", zh: "启动与现场", en: "Launch", roles: ["baseline", "candidate"] },
+  { id: "results", zh: "运行结果", en: "Results", roles: ["baseline", "candidate"] },
+  { id: "proposal", zh: "改进提案", en: "Proposal", roles: ["candidate", "judge"] },
+  { id: "review", zh: "样本评审", en: "Review", roles: ["judge"] },
+];
 const LOCAL_SUPERVISED_RUN_PREFIX = "local-supervised-start-";
 const LazySelfEvolutionTrack = lazy(() =>
   import("./SelfEvolutionTrack").then((module) => ({ default: module.SelfEvolutionTrack })),
@@ -291,6 +304,38 @@ function buildSupervisedStartPlaceholder(input: {
 
 function hasSupervisedAgentBindings(bindings: Record<string, EvolutionActiveRunAgentBinding> | null | undefined) {
   return Boolean(bindings && Object.keys(bindings).length > 0);
+}
+
+function supervisedMemberStepLabel(step: SupervisedMemberStep, lang: "zh" | "en") {
+  return lang === "zh" ? step.zh : step.en;
+}
+
+function activeSupervisedMemberStep(run: EvolutionActiveRun | null | undefined): SupervisedMemberStepId {
+  const role = String(run?.currentRole || "").trim().toLowerCase();
+  const phase = String(run?.currentPhase || run?.runtimeStatus || "").trim().toLowerCase();
+  const status = String(run?.status || "").trim().toLowerCase();
+  const decision = String(run?.decision || "").trim().toUpperCase();
+  const hasProposalSignal = Boolean(
+    decision
+    || String(run?.decisionPath || "").trim()
+    || String(run?.policyAction || "").trim(),
+  );
+  if (role === "judge") {
+    return "review";
+  }
+  if (role === "baseline" || role === "candidate") {
+    return "results";
+  }
+  if (hasProposalSignal || (status === "done" && decision)) {
+    return "proposal";
+  }
+  if (
+    ["submitted", "queued", "preflight", "session_start", "starting"].includes(phase)
+    || ["submitted", "queued", "running"].includes(status)
+  ) {
+    return "launch";
+  }
+  return "launch";
 }
 
 function supervisedMemberModelId(binding: EvolutionActiveRunAgentBinding | undefined) {
@@ -1171,7 +1216,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     const bindings = supervisedMembersBindings;
     const currentRole = String(supervisedMembersRun?.currentRole || "").trim().toLowerCase();
     const currentAgentId = String(supervisedMembersRun?.currentAgentBinding?.agentId || "").trim();
-    return SUPERVISED_MEMBER_ROLES.map((role) => {
+    return SUPERVISED_RUN_MEMBER_ROLES.map((role) => {
       const binding = bindings[role] ?? {};
       const agentId = String(binding.agentId || "").trim();
       const roleText = String(binding.roleLabel || "").trim() || runRoleLabel(role);
@@ -1191,6 +1236,22 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
       };
     });
   }, [lang, resolveModelLabel, supervisedMembersBindings, supervisedMembersRun?.currentAgentBinding?.agentId, supervisedMembersRun?.currentRole]);
+  const supervisedRunMemberByRole = useMemo(
+    () => new Map(supervisedRunMembers.map((member) => [member.role, member])),
+    [supervisedRunMembers],
+  );
+  const supervisedActiveMemberStepId = activeSupervisedMemberStep(supervisedMembersRun);
+  const supervisedActiveMemberStep =
+    SUPERVISED_MEMBER_STEPS.find((step) => step.id === supervisedActiveMemberStepId) ?? SUPERVISED_MEMBER_STEPS[0];
+  const supervisedActiveStepMembers = supervisedActiveMemberStep.roles
+    .map((role) => supervisedRunMemberByRole.get(role))
+    .filter((member): member is SupervisedRunMember => Boolean(member));
+  const supervisedStepMemberSummaries = SUPERVISED_MEMBER_STEPS.map((step) => ({
+    step,
+    members: step.roles
+      .map((role) => supervisedRunMemberByRole.get(role))
+      .filter((member): member is SupervisedRunMember => Boolean(member)),
+  }));
   const latestRunStatusLabel = latestRun?.decision
     ? displayDecisionLabel(latestRun.decision)
     : statusLabel(latestRun?.status || "");
@@ -2890,14 +2951,32 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                   <div className={styles.supervisedMembersHeader}>
                     <div>
                       <p className={styles.eyebrow}>
-                        {supervisedMembersSource === "run" ? lang === "zh" ? "运行成员" : "Run members" : lang === "zh" ? "当前配置" : "Current config"}
+                        {supervisedMembersSource === "run" ? lang === "zh" ? "运行绑定" : "Run binding" : lang === "zh" ? "当前配置" : "Current config"}
                       </p>
-                      <h3 className={styles.sectionTitle}>{lang === "zh" ? "监督成员" : "Supervised members"}</h3>
+                      <h3 className={styles.sectionTitle}>{supervisedMemberStepLabel(supervisedActiveMemberStep, lang)}</h3>
                     </div>
-                    <span className={styles.secondaryPill}>{supervisedRunMembers.length}</span>
+                    <span className={styles.secondaryPill}>{supervisedActiveStepMembers.length}</span>
+                  </div>
+                  <div className={styles.supervisedStepMemberRail} aria-label={lang === "zh" ? "监督步骤成员" : "Supervised step members"}>
+                    {supervisedStepMemberSummaries.map(({ step, members }) => {
+                      const active = step.id === supervisedActiveMemberStep.id;
+                      return (
+                        <div
+                          key={step.id}
+                          className={
+                            active
+                              ? `${styles.supervisedStepMemberCard} ${styles.supervisedStepMemberCardActive}`
+                              : styles.supervisedStepMemberCard
+                          }
+                        >
+                          <span>{supervisedMemberStepLabel(step, lang)}</span>
+                          <strong>{members.map((member) => runRoleLabel(member.role)).join(" / ") || "--"}</strong>
+                        </div>
+                      );
+                    })}
                   </div>
                   <div className={styles.supervisedMembersList}>
-                    {supervisedRunMembers.map((member) => {
+                    {supervisedActiveStepMembers.map((member) => {
                       const rowClassName =
                           member.status === "active"
                             ? `${styles.supervisedMemberRow} ${styles.supervisedMemberRowActive}`
