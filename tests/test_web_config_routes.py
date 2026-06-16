@@ -288,6 +288,15 @@ def test_config_workspace_exposes_editor_schema_without_launcher_owned_startup_s
     assert "本地图片" in editor_meta["user_profile.avatar_image_path"]["hint"]
     assert editor_meta["ui.workbench_theme.background_image_path"]["kind"] == "background_image"
     assert "项目外配置资源目录" in editor_meta["ui.workbench_theme.background_image_path"]["hint"]
+    background_options = editor_meta["ui.workbench_theme.background_image_path"]["options"]
+    assert background_options[0]["value"] == theme_background_service.DEFAULT_THEME_BACKGROUND_PATH
+    assert background_options[0]["label"] == "石墨命令中心"
+    assert {option["value"] for option in background_options} >= {
+        "theme_backgrounds/default-graphite-command-center.png",
+        "theme_backgrounds/default-midnight-glass.png",
+        "theme_backgrounds/default-sunrise-research.png",
+        "theme_backgrounds/default-glass-observatory.png",
+    }
     assert editor_meta["ui.workbench_theme.background_readability"]["kind"] == "select"
     assert [option["value"] for option in editor_meta["ui.workbench_theme.background_readability"]["options"]] == [
         "soft",
@@ -334,6 +343,19 @@ def test_config_public_summary_exposes_theme_background_url(monkeypatch):
     assert payload["themeBackgroundImagePath"] == "theme_backgrounds/custom-background.png"
     assert payload["themeBackgroundImageUrl"] == "/api/config/theme-background-image/custom-background.png"
     assert payload["themeBackgroundReadability"] == "strong"
+
+
+def test_config_public_summary_defaults_to_bundled_theme_background(monkeypatch):
+    public_config = copy.deepcopy(load_public_config())
+    public_config.setdefault("ui", {}).setdefault("workbench_theme", {}).pop("background_image_path", None)
+    monkeypatch.setattr(config_service, "load_public_config", lambda: copy.deepcopy(public_config))
+
+    response = client.get("/api/config/public")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["themeBackgroundImagePath"] == theme_background_service.DEFAULT_THEME_BACKGROUND_PATH
+    assert payload["themeBackgroundImageUrl"] == "/api/config/theme-background-image/default-graphite-command-center.png"
 
 
 def test_config_avatar_image_upload_stores_safe_project_file(monkeypatch, tmp_path):
@@ -439,6 +461,21 @@ def test_config_theme_background_image_upload_rejects_disguised_image(monkeypatc
 
     assert response.status_code == 422
     assert not (tmp_path / "theme_backgrounds").exists()
+
+
+def test_config_theme_background_image_route_serves_bundled_default(monkeypatch, tmp_path):
+    monkeypatch.setattr(theme_background_service, "CONFIG_PATH", tmp_path / "config.toml")
+
+    response = client.get(
+        f"/api/config/theme-background-image/{theme_background_service.DEFAULT_THEME_BACKGROUND_FILENAME}"
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("image/png")
+    assert response.content == (
+        theme_background_service.BUNDLED_THEME_BACKGROUND_DIR
+        / theme_background_service.DEFAULT_THEME_BACKGROUND_FILENAME
+    ).read_bytes()
 
 
 def test_health_diagnostics_endpoint_returns_log_helpers(tmp_path, monkeypatch):

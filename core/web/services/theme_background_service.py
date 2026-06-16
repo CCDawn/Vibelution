@@ -19,6 +19,29 @@ from .runtime_scene_service import record_runtime_scene_event
 THEME_BACKGROUND_DIR_NAME = "theme_backgrounds"
 THEME_BACKGROUND_RELATIVE_DIR = PurePosixPath(THEME_BACKGROUND_DIR_NAME)
 MAX_THEME_BACKGROUND_IMAGE_BYTES = 10 * 1024 * 1024
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
+BUNDLED_THEME_BACKGROUND_DIR = PROJECT_ROOT / "assets" / THEME_BACKGROUND_DIR_NAME
+DEFAULT_THEME_BACKGROUND_FILENAME = "default-graphite-command-center.png"
+DEFAULT_THEME_BACKGROUND_PATH = str(THEME_BACKGROUND_RELATIVE_DIR / DEFAULT_THEME_BACKGROUND_FILENAME)
+DEFAULT_THEME_BACKGROUNDS = (
+    {
+        "filename": DEFAULT_THEME_BACKGROUND_FILENAME,
+        "label": {"zh": "石墨命令中心", "en": "Graphite Command Center"},
+    },
+    {
+        "filename": "default-midnight-glass.png",
+        "label": {"zh": "深夜玻璃厅", "en": "Midnight Glass"},
+    },
+    {
+        "filename": "default-sunrise-research.png",
+        "label": {"zh": "清晨研究室", "en": "Sunrise Research"},
+    },
+    {
+        "filename": "default-glass-observatory.png",
+        "label": {"zh": "玻璃观测站", "en": "Glass Observatory"},
+    },
+)
+DEFAULT_THEME_BACKGROUND_FILENAMES = {str(item["filename"]) for item in DEFAULT_THEME_BACKGROUNDS}
 _CONTENT_TYPE_EXTENSIONS = {
     "image/png": ".png",
     "image/jpeg": ".jpg",
@@ -28,6 +51,22 @@ _CONTENT_TYPE_EXTENSIONS = {
 
 def _theme_background_dir() -> Path:
     return Path(CONFIG_PATH).expanduser().resolve().parent / THEME_BACKGROUND_DIR_NAME
+
+
+def list_default_theme_background_options(lang: str) -> list[dict[str, str]]:
+    language = "zh" if str(lang or "").lower().startswith("zh") else "en"
+    options: list[dict[str, str]] = []
+    for item in DEFAULT_THEME_BACKGROUNDS:
+        filename = str(item["filename"])
+        label_map = item["label"] if isinstance(item.get("label"), dict) else {}
+        label = str(label_map.get(language) or label_map.get("en") or filename)
+        options.append(
+            {
+                "value": str(THEME_BACKGROUND_RELATIVE_DIR / filename),
+                "label": label,
+            }
+        )
+    return options
 
 
 def _record_theme_background_event(
@@ -122,6 +161,13 @@ def resolve_theme_background_file(filename: str) -> Path:
     path = (background_dir / safe_filename).resolve()
     if background_dir != path.parent:
         raise FileNotFoundError("invalid theme background image path")
+    if path.exists() and path.is_file():
+        return path
+    if safe_filename in DEFAULT_THEME_BACKGROUND_FILENAMES:
+        bundled_dir = BUNDLED_THEME_BACKGROUND_DIR.resolve()
+        bundled_path = (bundled_dir / safe_filename).resolve()
+        if bundled_dir == bundled_path.parent and bundled_path.exists() and bundled_path.is_file():
+            return bundled_path
     return path
 
 
