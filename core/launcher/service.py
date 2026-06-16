@@ -1656,7 +1656,9 @@ def _recent_result_files(directory: Path, *, limit: int) -> list[dict[str, Any]]
     for path in files[: max(0, limit)]:
         payload = _load_json_file(path)
         if payload:
-            results.append(_result_summary(payload))
+            summary = _result_summary(payload)
+            summary["resultPath"] = path.name
+            results.append(summary)
     return results
 
 
@@ -1687,6 +1689,8 @@ def _recent_runtime_manager_events(path: Path, *, limit: int) -> list[dict[str, 
                 "at": str(payload.get("at") or ""),
                 "commandId": str(event_payload.get("commandId") or ""),
                 "commandType": str(event_payload.get("type") or ""),
+                "requestedBy": str(event_payload.get("requestedBy") or ""),
+                "resultPath": str(event_payload.get("resultPath") or ""),
                 "ok": bool(event_payload.get("ok")) if "ok" in event_payload else None,
                 "message": _truncate(str(event_payload.get("message") or ""), 180),
             }
@@ -1724,6 +1728,7 @@ def _runtime_manager_recovery_summary(
         "recoveredAt": str(recovered.get("at") or ""),
         "resultMessage": result_message,
         "resultOk": result_ok,
+        "resultPath": str(matching_result.get("resultPath") or ""),
         "statusLine": _recovery_status_line(command_id=command_id, result_message=result_message, result_ok=result_ok),
     }
 
