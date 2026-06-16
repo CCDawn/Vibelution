@@ -129,6 +129,20 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeCssSource).toContain("var(--chat-right-pane-width, 284px)");
   });
 
+  it("centers the direct conversation reading track when both side panes are collapsed", () => {
+    expect(routeSource).toContain("const bothSidePanesCollapsed = leftRailCollapsed && rightPaneCollapsed;");
+    expect(routeSource).toContain("const conversationFrameClassName = bothSidePanesCollapsed");
+    expect(routeSource).toContain("styles.conversationFrameFocus");
+    expect(routeSource).toContain("<div className={conversationFrameClassName}>");
+    expect(routeStyles.conversationFrameFocus).toBeTypeOf("string");
+    expect(routeCssSource).toMatch(
+      /\.conversationFrameFocus\s*\{[\s\S]*?justify-self:\s*center;[\s\S]*?width:\s*min\(calc\(100% - 96px\), 1120px\);[\s\S]*?max-width:\s*100%;[\s\S]*?\}/,
+    );
+    expect(routeCssSource).toMatch(
+      /@media \(max-width: 980px\)\s*\{[\s\S]*?\.conversationFrameFocus\s*\{[\s\S]*?width:\s*100%;[\s\S]*?\}/,
+    );
+  });
+
   it("defaults Chat to dense side panes so the center conversation has priority", () => {
     expect(shellStoreSource).toContain("leftPanelWidth: 220");
     expect(shellStoreSource).toContain("rightPanelWidth: 284");
