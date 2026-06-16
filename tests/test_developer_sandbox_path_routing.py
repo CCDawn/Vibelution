@@ -3,7 +3,13 @@ from __future__ import annotations
 from core.infrastructure import developer_sandbox
 from core.gym import episodes as gym_episodes
 from core.prompt_manager import prompt_manager
-from core.web.services import memory_service, project_agent_bus_service, rag_vector_index_service
+from core.web.services import (
+    memory_service,
+    project_agent_bus_service,
+    rag_vector_index_service,
+    supervised_control_service,
+    supervised_worktree_evolution_service,
+)
 
 
 def _enable_sandbox(tmp_path, monkeypatch):
@@ -30,12 +36,17 @@ def test_high_roi_state_paths_route_to_developer_sandbox(tmp_path, monkeypatch):
     monkeypatch.setattr(prompt_manager, "_resolve_project_root", lambda: project_root)
     monkeypatch.setattr(project_agent_bus_service, "PROJECT_ROOT", project_root)
     monkeypatch.setattr(rag_vector_index_service.team_knowledge_service, "PROJECT_ROOT", project_root)
+    monkeypatch.setattr(supervised_control_service, "PROJECT_ROOT", project_root)
 
     assert prompt_manager._get_dynamic_root() == sandbox_workspace / "prompts"
     assert memory_service._managed_memory_path(project_root) == sandbox_workspace / "memory" / "user_memory_overrides.json"
     assert rag_vector_index_service._index_root() == sandbox_workspace / "knowledge" / "rag"
     assert project_agent_bus_service._bus_events_path() == sandbox_workspace / "project_agent_bus" / "events.jsonl"
     assert gym_episodes._gym_workspace(project_root) == sandbox_workspace / "gym"
+    assert supervised_worktree_evolution_service._run_store_root(project_root) == sandbox_workspace / "supervised_evolution" / "worktree_runs"
+    assert supervised_control_service._supervised_decision_path("debug-session") == (
+        sandbox_workspace / "supervised_evolution" / "decisions" / "debug-session.json"
+    )
 
 
 def test_high_roi_state_paths_stay_formal_when_developer_mode_is_off(tmp_path, monkeypatch):
@@ -48,9 +59,14 @@ def test_high_roi_state_paths_stay_formal_when_developer_mode_is_off(tmp_path, m
     monkeypatch.setattr(prompt_manager, "_resolve_project_root", lambda: project_root)
     monkeypatch.setattr(project_agent_bus_service, "PROJECT_ROOT", project_root)
     monkeypatch.setattr(rag_vector_index_service.team_knowledge_service, "PROJECT_ROOT", project_root)
+    monkeypatch.setattr(supervised_control_service, "PROJECT_ROOT", project_root)
 
     assert prompt_manager._get_dynamic_root() == project_root / "workspace" / "prompts"
     assert memory_service._managed_memory_path(project_root) == project_root / "workspace" / "memory" / "user_memory_overrides.json"
     assert rag_vector_index_service._index_root() == project_root / "workspace" / "knowledge" / "rag"
     assert project_agent_bus_service._bus_events_path() == project_root / "workspace" / "project_agent_bus" / "events.jsonl"
     assert gym_episodes._gym_workspace(project_root) == project_root / "workspace" / "gym"
+    assert supervised_worktree_evolution_service._run_store_root(project_root) == project_root / "workspace" / "supervised_evolution" / "worktree_runs"
+    assert supervised_control_service._supervised_decision_path("debug-session") == (
+        project_root / "workspace" / "supervised_evolution" / "decisions" / "debug-session.json"
+    )

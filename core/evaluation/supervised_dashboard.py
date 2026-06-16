@@ -9,6 +9,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from core.infrastructure import developer_sandbox
+
 from .supervised_artifacts import build_decision_record_artifacts, load_policy_proposal_artifact, policy_target_key
 from .supervised_workbench import load_gym_promotion_lifecycle
 
@@ -67,7 +69,12 @@ def generate_supervised_dashboard(
 
     records, skipped_count = load_dashboard_records(project_root=project_root, limit=limit)
     html_text = build_supervised_dashboard(records=records, skipped_count=skipped_count)
-    path = output_path or project_root / "workspace" / "supervised_evolution" / "dashboard" / "index.html"
+    path = output_path or developer_sandbox.sandboxed_workspace_path(
+        project_root,
+        "supervised_evolution",
+        "dashboard",
+        "index.html",
+    )
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(html_text, encoding="utf-8")
     latest = records[0] if records else None
@@ -81,7 +88,7 @@ def generate_supervised_dashboard(
 
 
 def load_dashboard_records(*, project_root: Path, limit: int = 20) -> tuple[list[SupervisedDashboardRecord], int]:
-    decisions_dir = project_root / "workspace" / "supervised_evolution" / "decisions"
+    decisions_dir = developer_sandbox.seeded_sandbox_workspace_path(project_root, "supervised_evolution", "decisions")
     if not decisions_dir.exists():
         return [], 0
     records: list[SupervisedDashboardRecord] = []

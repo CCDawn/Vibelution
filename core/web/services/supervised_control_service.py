@@ -1357,7 +1357,7 @@ def execute_supervised_action(session_id: str, action: str) -> dict[str, Any]:
     if not normalized_session_id:
         raise SupervisedRunNotFoundError(text_for(lang, zh="未找到监督运行。", en="Supervised run not found."))
 
-    decision_path = PROJECT_ROOT / "workspace" / "supervised_evolution" / "decisions" / f"{normalized_session_id}.json"
+    decision_path = _supervised_decision_path(normalized_session_id)
     if not decision_path.exists():
         raise SupervisedRunNotFoundError(text_for(lang, zh="未找到监督运行。", en="Supervised run not found."))
 
@@ -1384,6 +1384,19 @@ def execute_supervised_action(session_id: str, action: str) -> dict[str, Any]:
         "run": run_payload,
         "lifecycle": _lifecycle_payload(lifecycle),
     }
+
+
+def _supervised_decision_path(session_id: str) -> Path:
+    normalized = str(session_id or "").strip()
+    return developer_sandbox.route_workspace_path(
+        PROJECT_ROOT,
+        "supervised_evolution",
+        "supervised_evolution",
+        "decisions",
+        f"{normalized}.json",
+        intent="state",
+        seed=True,
+    )
 
 
 def _run_supervised_session(context: dict[str, Any]) -> None:

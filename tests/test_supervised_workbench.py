@@ -7,6 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from core.infrastructure import developer_sandbox
 from core.gym import run_gym_collection_episode
 from core.gym.promotion import activate_gym_promotion_proposal, apply_gym_promotion_proposal
 from core.evaluation.supervised_workbench import (
@@ -25,6 +26,30 @@ from core.evaluation.supervised_workbench import (
     select_decision_record,
 )
 from tests.test_gym_runner import RunnerFakeAdapter
+
+
+@pytest.fixture(autouse=True)
+def isolate_developer_sandbox_config(tmp_path: Path, monkeypatch):
+    _set_developer_sandbox(tmp_path, monkeypatch, False)
+
+
+def _enable_developer_sandbox(project_root: Path, monkeypatch) -> dict:
+    return _set_developer_sandbox(project_root, monkeypatch, True)
+
+
+def _set_developer_sandbox(project_root: Path, monkeypatch, enabled: bool) -> dict:
+    config_path = project_root / "config.toml"
+    if not config_path.exists():
+        config_path.write_text("[launcher]\ncontrol_port = 8765\n", encoding="utf-8")
+    monkeypatch.setattr(developer_sandbox, "CONFIG_PATH", config_path)
+    monkeypatch.setattr(developer_sandbox, "PROJECT_ROOT", project_root)
+    status = developer_sandbox.get_developer_mode_status(config_path=config_path, project_root=project_root)
+    return developer_sandbox.update_developer_mode_status(
+        enabled,
+        base_hash=status["configHash"],
+        config_path=config_path,
+        project_root=project_root,
+    )
 
 
 def test_format_lineage_summary_reads_index(tmp_path: Path):
@@ -288,6 +313,30 @@ def test_decision_history_helpers_sort_and_select(tmp_path: Path):
     assert select_decision_record(records, "older").session_id == "older"
     assert select_decision_record(records, "missing") is None
     assert "PROMOTE" in rendered
+
+
+def test_decision_history_uses_developer_sandbox_records(tmp_path: Path, monkeypatch):
+    _enable_developer_sandbox(tmp_path, monkeypatch)
+    sandbox_decisions = developer_sandbox.seeded_sandbox_workspace_path(
+        tmp_path,
+        "supervised_evolution",
+        "decisions",
+    )
+    sandbox_decisions.mkdir(parents=True, exist_ok=True)
+    (sandbox_decisions / "sandbox.json").write_text(
+        json.dumps({"session_id": "sandbox", "decision": "PROMOTE", "reason": "debug"}),
+        encoding="utf-8",
+    )
+    formal_decisions = tmp_path / "workspace" / "supervised_evolution" / "decisions"
+    formal_decisions.mkdir(parents=True, exist_ok=True)
+    (formal_decisions / "formal.json").write_text(
+        json.dumps({"session_id": "formal", "decision": "HOLD", "reason": "formal"}),
+        encoding="utf-8",
+    )
+
+    records = list_recent_decision_records(tmp_path)
+
+    assert [item.session_id for item in records] == ["sandbox"]
 
 
 def test_format_bundle_preview_renders_case_summary(tmp_path: Path):
