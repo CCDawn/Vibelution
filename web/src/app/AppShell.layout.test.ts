@@ -61,10 +61,18 @@ describe("AppShell layout contract", () => {
     expect(shellStyles).toContain(".shell::after");
     expect(shellStyles).toContain("radial-gradient(circle at 8% 18%");
     expect(shellSource).toContain("configThemeBackgroundImageUrl(configQuery.data)");
+    expect(shellSource).toContain("configThemeBackgroundReadability(");
     expect(shellSource).toContain('data-theme-background={themeBackgroundImageUrl ? "custom" : "default"}');
+    expect(shellSource).toContain("data-theme-background-readability={themeBackgroundImageUrl ? themeBackgroundReadability : undefined}");
     expect(shellSource).toContain("--workbench-theme-background-image");
     expect(shellSource).toContain("/api/config/theme-background-image/");
+    expect(shellSource).toContain("themeBackgroundReadability");
     expect(shellStyles).toContain('.shell[data-theme-background="custom"]');
+    expect(shellStyles).toContain('[data-theme-background-readability="soft"]');
+    expect(shellStyles).toContain('[data-theme-background-readability="standard"]');
+    expect(shellStyles).toContain('[data-theme-background-readability="strong"]');
+    expect(shellStyles).toContain("--theme-background-blur");
+    expect(shellStyles).toContain("backdrop-filter: blur(var(--theme-background-blur))");
     expect(shellStyles).toContain("var(--workbench-theme-background-image)");
     expect(shellStyles).toContain("background-size: auto, cover, auto");
   });

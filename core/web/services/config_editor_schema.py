@@ -11,6 +11,7 @@ SEGMENTATION_STRATEGY_OPTIONS = ["task_contiguous"]
 AVATAR_PRESET_OPTIONS = ["lobster", "shrimp", "crab", "cat", "chick", "bunny", "slime", "penguin", "moose"]
 USER_AVATAR_PRESET_OPTIONS = ["default", "circle", "spark", "codex", "minimal", "initial"]
 WORKBENCH_WINDOW_MODE_OPTIONS = ["windowed", "fullscreen"]
+WORKBENCH_BACKGROUND_READABILITY_OPTIONS = ["soft", "standard", "strong"]
 
 SECTION_LABELS = {
     "zh": {
@@ -87,6 +88,7 @@ FIELD_LABELS = {
         "ui.show_welcome": "显示欢迎面板",
         "ui.workbench_theme": "工作台主题",
         "ui.workbench_theme.background_image_path": "工作台背景图片",
+        "ui.workbench_theme.background_readability": "背景可读性",
         "network.proxy_enabled": "启用代理",
         "network.proxy_url": "代理地址",
         "evolution.chat_dataset.enabled": "启用 chat 数据采样",
@@ -138,6 +140,7 @@ FIELD_LABELS = {
         "ui.show_welcome": "Show Welcome Panel",
         "ui.workbench_theme": "Workbench Theme",
         "ui.workbench_theme.background_image_path": "Workbench Background Image",
+        "ui.workbench_theme.background_readability": "Background Readability",
         "network.proxy_enabled": "Enable Proxy",
         "network.proxy_url": "Proxy URL",
         "evolution.chat_dataset.enabled": "Enable Chat Dataset Capture",
@@ -280,6 +283,7 @@ FIELD_HINTS = {
         "user_profile.avatar_preset": "用户头像预设，仅用于前端显示，不把图片内容传给模型。",
         "user_profile.avatar_image_path": "上传本地图片后会复制到项目头像目录，仅用于前端显示，不把图片内容传给模型。",
         "ui.workbench_theme.background_image_path": "上传本地图片后会复制到项目外配置资源目录，并作为工作台背景显示。",
+        "ui.workbench_theme.background_readability": "控制背景图片上方的遮罩和面板透明度，保障内容可读性；图片较花时使用增强。",
     },
     "en": {
         "runtime.profile": "Sets the default runtime posture. Start with safe_local or debug in most cases.",
@@ -304,6 +308,7 @@ FIELD_HINTS = {
         "user_profile.avatar_preset": "User avatar preset for frontend display only. Image content is not sent to the model.",
         "user_profile.avatar_image_path": "Local image uploads are copied into the project avatar directory for frontend display only. Image content is not sent to the model.",
         "ui.workbench_theme.background_image_path": "Local image uploads are copied into the external config resource directory and shown as the workbench background.",
+        "ui.workbench_theme.background_readability": "Controls the overlay and panel opacity above the background image. Use Strong for busy images.",
     },
 }
 
@@ -398,6 +403,23 @@ def _field_options(path: str, lang: str) -> list[dict[str, str]]:
         return [{"value": value, "label": value} for value in AVATAR_PRESET_OPTIONS]
     if path == "user_profile.avatar_preset":
         return [{"value": value, "label": value} for value in USER_AVATAR_PRESET_OPTIONS]
+    if path == "ui.workbench_theme.background_readability":
+        labels = {
+            "zh": {
+                "soft": "柔和",
+                "standard": "标准",
+                "strong": "增强",
+            },
+            "en": {
+                "soft": "Soft",
+                "standard": "Standard",
+                "strong": "Strong",
+            },
+        }
+        return [
+            {"value": value, "label": labels.get(lang, labels["en"]).get(value, value)}
+            for value in WORKBENCH_BACKGROUND_READABILITY_OPTIONS
+        ]
     if path == "evolution.chat_dataset.segmentation_strategy":
         return [{"value": value, "label": value} for value in SEGMENTATION_STRATEGY_OPTIONS]
     return []

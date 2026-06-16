@@ -288,6 +288,13 @@ def test_config_workspace_exposes_editor_schema_without_launcher_owned_startup_s
     assert "本地图片" in editor_meta["user_profile.avatar_image_path"]["hint"]
     assert editor_meta["ui.workbench_theme.background_image_path"]["kind"] == "background_image"
     assert "项目外配置资源目录" in editor_meta["ui.workbench_theme.background_image_path"]["hint"]
+    assert editor_meta["ui.workbench_theme.background_readability"]["kind"] == "select"
+    assert [option["value"] for option in editor_meta["ui.workbench_theme.background_readability"]["options"]] == [
+        "soft",
+        "standard",
+        "strong",
+    ]
+    assert "可读" in editor_meta["ui.workbench_theme.background_readability"]["hint"]
     assert editor_meta["network.proxy_enabled"]["kind"] == "boolean"
     assert editor_meta["network.proxy_enabled"]["label"] == "启用代理"
     assert editor_meta["network.proxy_url"]["kind"] == "url"
@@ -317,6 +324,7 @@ def test_config_public_summary_exposes_theme_background_url(monkeypatch):
     public_config.setdefault("ui", {}).setdefault("workbench_theme", {})[
         "background_image_path"
     ] = "theme_backgrounds/custom-background.png"
+    public_config["ui"]["workbench_theme"]["background_readability"] = "strong"
     monkeypatch.setattr(config_service, "load_public_config", lambda: copy.deepcopy(public_config))
 
     response = client.get("/api/config/public")
@@ -325,6 +333,7 @@ def test_config_public_summary_exposes_theme_background_url(monkeypatch):
     payload = response.json()
     assert payload["themeBackgroundImagePath"] == "theme_backgrounds/custom-background.png"
     assert payload["themeBackgroundImageUrl"] == "/api/config/theme-background-image/custom-background.png"
+    assert payload["themeBackgroundReadability"] == "strong"
 
 
 def test_config_avatar_image_upload_stores_safe_project_file(monkeypatch, tmp_path):
