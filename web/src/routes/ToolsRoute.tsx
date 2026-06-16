@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CheckCircle2, CheckSquare, CircleSlash, FlaskConical, Power, RefreshCw, Search, Square, Trash2, Wrench } from "lucide-react";
 import { type CSSProperties, type KeyboardEvent, type PointerEvent, useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 
 import { fetchJson } from "../api/client";
 import { queryKeys } from "../api/queryKeys";
@@ -23,6 +23,7 @@ import { PaneCollapseHandle } from "../components/layout/PaneCollapseHandle";
 import type { TranslationKey } from "../i18n/dictionary";
 import { useAppI18n } from "../i18n/useAppI18n";
 import { AgentManagementNav } from "./AgentManagementNav";
+import { agentCenterConfigRoute } from "./agentCenterRoutes";
 import { clampPaneWidth, keyboardPaneWidth, storedPaneWidth } from "./resizablePane";
 import styles from "./ToolsRoute.module.css";
 
@@ -511,6 +512,7 @@ function optimisticToolEnabled(tool: ToolRegistryItem, enabled: boolean): ToolRe
 
 export function ToolsRoute() {
   const { lang, t } = useAppI18n();
+  const location = useLocation();
   const bulkCopy = useMemo(() => toolsBulkCopy(lang), [lang]);
   const queryClient = useQueryClient();
   const [activeFilter, setActiveFilter] = useState<ToolFilter>("all");
@@ -622,6 +624,19 @@ export function ToolsRoute() {
   const activePolicy = toolPolicyForAgent(activePolicyAgent);
   const activePolicyMode = activeTool && activePolicyAgent ? toolPolicyMode(activePolicy, activeTool) : "inherited";
   const policyModeCounts = useMemo(() => toolPolicyModeCounts(activePolicy, tools), [activePolicy, tools]);
+  const toolsReturnTo = useMemo(
+    () => `${location.pathname}${location.search}${location.hash}`,
+    [location.hash, location.pathname, location.search],
+  );
+  const activePolicyAgentRoute = useMemo(
+    () => agentCenterConfigRoute({
+      agentId: activePolicyAgent?.agentId,
+      pane: "config",
+      returnLabel: "tools",
+      returnTo: toolsReturnTo,
+    }),
+    [activePolicyAgent?.agentId, toolsReturnTo],
+  );
   const scopedTools = useMemo(
     () => tools.filter((tool) => scopeStateForTool(tool, activeAgentScopeId).visible),
     [activeAgentScopeId, tools],
@@ -1219,7 +1234,7 @@ export function ToolsRoute() {
                 <span>{lang === "zh" ? "需授权" : "Explicit"} <strong>{policyModeCounts.explicit_required}</strong></span>
                 <span>{lang === "zh" ? "未列入" : "Excluded"} <strong>{policyModeCounts.excluded}</strong></span>
               </div>
-              <Link className={styles.secondaryButton} to="/agents">
+              <Link className={styles.secondaryButton} to={activePolicyAgentRoute}>
                 <Wrench size={15} />
                 {lang === "zh" ? "去 Agent 中心配置" : "Configure in Agent Center"}
               </Link>
@@ -1286,7 +1301,7 @@ export function ToolsRoute() {
                 <strong className={`${styles.policyStatePill} ${styles[`policy_${activePolicyMode}`]}`}>
                   {toolPolicyModeLabel(activePolicyMode, lang)}
                 </strong>
-                <Link className={styles.secondaryButton} to="/agents">
+                <Link className={styles.secondaryButton} to={activePolicyAgentRoute}>
                   <Wrench size={15} />
                   {lang === "zh" ? "编辑 Agent 策略" : "Edit Agent policy"}
                 </Link>

@@ -101,7 +101,17 @@ describe("ToolsRoute layout contract", () => {
     expect(routeSource).toContain("styles.permissionSummaryCards");
     expect(routeSource).toContain("styles.toolAgentFitPanel");
     expect(routeSource).toContain("styles.policyStatePill");
-    expect(routeSource).toContain("to=\"/agents\"");
+    expect(routeSource).toContain("useLocation");
+    expect(routeSource).toContain("agentCenterConfigRoute");
+    expect(routeSource).toContain("const toolsReturnTo = useMemo(");
+    expect(routeSource).toContain("`${location.pathname}${location.search}${location.hash}`");
+    expect(routeSource).toContain("const activePolicyAgentRoute = useMemo(");
+    expect(routeSource).toContain("agentId: activePolicyAgent?.agentId");
+    expect(routeSource).toContain('pane: "config"');
+    expect(routeSource).toContain('returnLabel: "tools"');
+    expect(routeSource).toContain("returnTo: toolsReturnTo");
+    expect(routeSource.match(/to=\{activePolicyAgentRoute\}/g)?.length).toBe(2);
+    expect(routeSource).not.toContain("to=\"/agents\"");
     expect(routeSource).toContain("去 Agent 中心配置");
     expect(routeSource).toContain("编辑 Agent 策略");
     expect(routeSource).not.toContain("toolPolicyMutation");
