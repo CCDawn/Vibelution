@@ -636,7 +636,6 @@ export function ConversationView({
   const [allMessagesVisible, setAllMessagesVisible] = useState(false);
   const [computerUseSessionResults, setComputerUseSessionResults] = useState<Record<string, ComputerUseResult>>({});
   const [computerUseSessionPending, setComputerUseSessionPending] = useState<Record<string, "confirm" | "cancel" | undefined>>({});
-  const previousStreamingRef = useRef<Record<string, boolean>>({});
   const resolvedActionMode = composerActionMode ?? "send";
   const hasComposerAttachments = composerAttachments.length > 0;
   const hasComposerReferences = composerReferences.length > 0;
@@ -953,40 +952,6 @@ export function ConversationView({
   useEffect(() => {
     setAllMessagesVisible(false);
   }, [sessionId]);
-
-  useEffect(() => {
-    const previous = previousStreamingRef.current;
-    const nextStreaming: Record<string, boolean> = {};
-    let shouldCollapse = false;
-    for (const message of messages) {
-      if (message.role !== "assistant") {
-        continue;
-      }
-      nextStreaming[message.id] = Boolean(message.streaming);
-      if (previous[message.id] && !message.streaming) {
-        shouldCollapse = true;
-      }
-    }
-    previousStreamingRef.current = nextStreaming;
-    if (!shouldCollapse) {
-      return;
-    }
-    setSectionExpansion((current) => {
-      const next = { ...current };
-      for (const message of messages) {
-        if (message.role !== "assistant" || message.streaming) {
-          continue;
-        }
-        next[message.id] = {
-          ...(next[message.id] ?? {}),
-          thought: false,
-          mental: false,
-          tools: false,
-        };
-      }
-      return next;
-    });
-  }, [messages]);
 
   function cognitiveStateLabel(snapshot: MentalStateSnapshot | undefined) {
     const value = String(snapshot?.cognitiveState ?? "").trim().toLowerCase() || "unknown";

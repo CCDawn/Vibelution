@@ -200,11 +200,31 @@ export function buildConversationReActOperationGroups(
     }
   }
 
-  return groups;
+  return groups.map((group) => ({
+    ...group,
+    id: stableReActGroupId(group),
+  }));
 }
 
 function reactGroupHasThought(group: ConversationReActOperationGroup) {
   return group.operations.some((operation) => operation.kind === "thought");
+}
+
+function stableReActGroupId(group: ConversationReActOperationGroup) {
+  const relatedThoughtSequence = group.operations
+    .map((operation) => operation.relatedThoughtSequence)
+    .find((sequence): sequence is number => typeof sequence === "number" && sequence > 0);
+  const thoughtSequence = group.thoughtSequence ?? relatedThoughtSequence;
+  if (thoughtSequence && thoughtSequence > 0) {
+    return `react-thought-${thoughtSequence}`;
+  }
+  const firstSequence = group.operations
+    .map((operation) => operation.sequence)
+    .find((sequence): sequence is number => typeof sequence === "number" && sequence > 0);
+  if (firstSequence && firstSequence > 0) {
+    return `react-operation-${firstSequence}`;
+  }
+  return `react-${group.index}-${group.operations[0]?.id ?? "empty"}`;
 }
 
 function buildOperationsFromFeedbackEvents(

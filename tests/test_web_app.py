@@ -6175,6 +6175,35 @@ def test_capture_session_ui_stream_merges_incremental_thought_updates(tmp_path, 
     assert capture.thought == "先看日志和代码"
 
 
+def test_capture_session_ui_stream_splits_cumulative_thought_after_tool_boundary(tmp_path, monkeypatch):
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(session_service, "_publish_session_detail_snapshot", lambda _session_id: None)
+    stub_ui = SimpleNamespace(
+        stream_thought=lambda *args, **kwargs: None,
+        clear_thought_stream=lambda *args, **kwargs: None,
+        stream_response=lambda *args, **kwargs: None,
+        clear_response_stream=lambda *args, **kwargs: None,
+        set_pet_mental_state=lambda *args, **kwargs: None,
+    )
+    monkeypatch.setattr("core.ui.get_ui", lambda: stub_ui)
+
+    capture = session_service.SessionTurnCapture(session_id="session-live-thought", turn_id="turn-thinking")
+    with session_service._capture_session_ui_stream("session-live-thought", capture):
+        stub_ui.stream_thought("先读日志。", done=False)
+        session_service.get_event_bus().publish(
+            session_service.EventNames.TOOL_START,
+            {"name": "read_log", "args": {"path": "logs/runtime_scenes/latest"}},
+        )
+        stub_ui.stream_thought("先读日志。再检查前端状态。", done=False)
+
+    live_state = session_service._snapshot_session_live_output("session-live-thought")
+    assert live_state is not None
+    thought_events = [item for item in live_state.feedback_events if item["kind"] == "thought"]
+    assert [item["resultPreview"] for item in thought_events] == ["先读日志。", "再检查前端状态。"]
+    assert thought_events[1]["sequence"] > thought_events[0]["sequence"]
+    assert live_state.thought == "先读日志。再检查前端状态。"
+
+
 def test_capture_session_ui_stream_preserves_ordered_feedback_events(tmp_path, monkeypatch):
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(session_service, "_publish_session_detail_snapshot", lambda _session_id: None)
