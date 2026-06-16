@@ -56,7 +56,7 @@ def test_openai_compatible_tool_chat_contract_allows_tools():
         **{
             "llm.providers.default.kind": "xiaomi",
             "llm.providers.default.compat_mode": "openai",
-            "llm.providers.default.base_url": "https://token-plan-cn.xiaomimimo.com/v1",
+            "llm.providers.default.base_url": "https://api.xiaomimimo.com/v1",
             "llm.profiles.primary.provider_id": "default",
             "llm.profiles.primary.model": "mimo-v2.5",
             "llm.profiles.primary.contract": "tool_chat",
@@ -67,10 +67,30 @@ def test_openai_compatible_tool_chat_contract_allows_tools():
     provider = config.llm.get_provider(profile.provider_id)
     route = resolve_model_protocol(profile, provider)
 
-    assert route.protocol == ModelProtocol.OPENAI_CHAT_TOOLS
+    assert route.protocol == ModelProtocol.XIAOMI_MIMO_MULTIMODAL_OPENAI_COMPAT
     assert route.source == "profile_contract"
     assert route.policy.allow_tools is True
     assert "model_protocol.missing_explicit_protocol" in route.warnings
+
+
+def test_xiaomi_token_plan_uses_dedicated_mimo_protocol():
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "xiaomi",
+            "llm.providers.default.compat_mode": "openai",
+            "llm.providers.default.base_url": "https://token-plan-cn.xiaomimimo.com/v1",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "mimo-v2.5-pro",
+            "llm.profiles.primary.contract": "tool_chat",
+        }
+    )
+
+    profile = config.llm.get_profile("primary")
+    provider = config.llm.get_provider(profile.provider_id)
+    route = resolve_model_protocol(profile, provider)
+
+    assert route.protocol == ModelProtocol.XIAOMI_MIMO_TOKEN_PLAN_OPENAI_COMPAT
+    assert route.policy.allow_tools is True
 
 
 def test_llamacpp_qwen_thinking_inferred_from_local_model():
@@ -113,6 +133,27 @@ def test_deepseek_reasoning_contract_selects_reasoning_protocol():
 
     assert route.protocol == ModelProtocol.DEEPSEEK_REASONING
     assert route.compat.reasoning_roundtrip is True
+
+
+def test_reasoning_chat_contract_does_not_force_non_deepseek_to_deepseek():
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "aliyun",
+            "llm.providers.default.compat_mode": "openai",
+            "llm.providers.default.base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "qwen3.6-plus",
+            "llm.profiles.primary.contract": "reasoning_chat",
+            "llm.profiles.primary.thinking_type": "adaptive",
+        }
+    )
+
+    profile = config.llm.get_profile("primary")
+    provider = config.llm.get_provider(profile.provider_id)
+    route = resolve_model_protocol(profile, provider)
+
+    assert route.protocol == ModelProtocol.QWEN_THINKING_NO_PREFILL
+    assert route.protocol != ModelProtocol.DEEPSEEK_REASONING
 
 
 def test_profile_contract_wins_over_model_name_inference():

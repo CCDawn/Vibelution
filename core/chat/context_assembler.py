@@ -15,7 +15,8 @@ from .history_ledger import (
     build_history_events,
     latest_checkpoint,
 )
-from .turn_journal import TurnJournalEvent, model_visible_messages_from_events
+from .model_messages import normalize_model_messages
+from .turn_journal import TurnJournalEvent, model_messages_from_events
 
 
 DEFAULT_RECENT_MESSAGE_LIMIT = 8
@@ -78,14 +79,19 @@ def assemble_conversation_context(
     messages: Iterable[dict[str, Any]] | None,
     *,
     session_id: str = "",
+    current_turn_id: str = "",
     recent_message_limit: int = DEFAULT_RECENT_MESSAGE_LIMIT,
     retrieved_events: Iterable[HistoryEvent] | None = None,
     journal_events: Iterable[TurnJournalEvent] | None = None,
 ) -> ContextAssemblyResult:
     """Return the bounded history view used to seed an agent turn."""
 
-    normalized_messages = [dict(item) for item in list(messages or []) if isinstance(item, dict)]
-    journal_messages = model_visible_messages_from_events(list(journal_events or []))
+    normalized_messages = normalize_model_messages(list(messages or []))
+    journal_event_list = _historical_journal_events(
+        list(journal_events or []),
+        current_turn_id=current_turn_id,
+    )
+    journal_messages = model_messages_from_events(journal_event_list)
     if journal_messages:
         normalized_messages = journal_messages
     events = build_history_events(normalized_messages, session_id=session_id)
@@ -166,6 +172,21 @@ def assemble_conversation_context(
         cacheable_prefix_hash=_hash_text("agent_protocol:v1"),
         dynamic_context_hash=_hash_messages(history_messages),
     )
+
+
+def _historical_journal_events(
+    events: list[TurnJournalEvent],
+    *,
+    current_turn_id: str = "",
+) -> list[TurnJournalEvent]:
+    normalized_current_turn_id = str(current_turn_id or "").strip()
+    if not normalized_current_turn_id:
+        return list(events or [])
+    return [
+        event
+        for event in list(events or [])
+        if str(getattr(event, "turn_id", "") or "").strip() != normalized_current_turn_id
+    ]
 
 
 def _checkpoint_seed_message(event: HistoryEvent | None) -> dict[str, Any] | None:

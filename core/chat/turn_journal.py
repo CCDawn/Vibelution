@@ -12,6 +12,8 @@ from uuid import uuid4
 
 from core.infrastructure import developer_sandbox
 
+from .model_messages import normalize_model_messages
+
 
 SCHEMA_VERSION = 2
 
@@ -355,6 +357,17 @@ def model_visible_messages_from_events(events: Iterable[TurnJournalEvent]) -> li
     return _dedupe_adjacent_messages(messages)
 
 
+def model_messages_from_events(events: Iterable[TurnJournalEvent]) -> list[dict[str, Any]]:
+    """Replay journal events into canonical LLM-facing messages.
+
+    The legacy visible replay keeps UI-era ``toolCalls`` bundles. This model
+    replay splits assistant tool calls from tool results so provider payloads
+    have a single, protocol-valid source.
+    """
+
+    return normalize_model_messages(model_visible_messages_from_events(events))
+
+
 def _assistant_message_from_payload(
     payload: dict[str, Any],
     *,
@@ -637,5 +650,6 @@ __all__ = [
     "latest_open_turn_id",
     "load_turn_events",
     "model_visible_messages_from_events",
+    "model_messages_from_events",
     "turn_journal_path",
 ]

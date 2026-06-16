@@ -883,8 +883,8 @@ def resolve_session_image_artifact(session_id: str, artifact_id: str) -> tuple[P
     if not content_type:
         raise FileNotFoundError("unsupported session artifact")
 
-    sessions_root = (PROJECT_ROOT / "workspace" / "sessions").resolve()
-    workspace_path = (PROJECT_ROOT / _session_workspace_relative_path(normalized_session_id)).resolve()
+    sessions_root = developer_sandbox.sandboxed_workspace_path(PROJECT_ROOT, "sessions").resolve()
+    workspace_path = _ensure_session_workspace(normalized_session_id).resolve()
     if not workspace_path.is_relative_to(sessions_root):
         raise FileNotFoundError("invalid session artifact path")
     images_dir = (workspace_path / "artifacts" / "images").resolve()
@@ -10495,6 +10495,7 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                 context_assembly = assemble_conversation_context(
                     seedable_history_messages,
                     session_id=session_id,
+                    current_turn_id=turn_id,
                     journal_events=turn_journal_events,
                 )
                 history_messages = context_assembly.history_messages

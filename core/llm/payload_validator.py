@@ -52,6 +52,89 @@ def _assistant_prefill_detected(messages: List[Dict[str, Any]]) -> bool:
     return bool(_text(last.get("content")).strip() or last.get("reasoning_content"))
 
 
+def _tool_call_ids(message: Dict[str, Any]) -> list[str]:
+    raw_calls = message.get("tool_calls")
+    if not isinstance(raw_calls, list):
+        return []
+    ids: list[str] = []
+    for index, item in enumerate(raw_calls):
+        if not isinstance(item, dict):
+            continue
+        tool_call_id = str(item.get("id") or "").strip() or f"tool_{index}"
+        ids.append(tool_call_id)
+    return ids
+
+
+def validate_tool_result_pairing(messages: List[Dict[str, Any]]) -> PayloadValidationResult:
+    """Validate assistant tool calls and tool-role results before provider send."""
+
+    pending: list[str] = []
+    seen_tool_call_ids: set[str] = set()
+    seen_tool_result_ids: set[str] = set()
+    for index, message in enumerate(messages):
+        role = _role(message)
+        if role == "assistant":
+            if pending:
+                return PayloadValidationResult(
+                    ok=False,
+                    error_type="missing_tool_result",
+                    message="Assistant tool call is missing a matching tool result before the next assistant message.",
+                    details={"messageIndex": index, "pendingToolCallIds": list(pending)},
+                )
+            for tool_call_id in _tool_call_ids(message):
+                if tool_call_id in seen_tool_call_ids:
+                    return PayloadValidationResult(
+                        ok=False,
+                        error_type="duplicate_tool_call_id",
+                        message="Duplicate assistant tool_call id detected before provider send.",
+                        details={"messageIndex": index, "toolCallId": tool_call_id},
+                    )
+                seen_tool_call_ids.add(tool_call_id)
+                pending.append(tool_call_id)
+            continue
+        if role == "tool":
+            tool_call_id = str(message.get("tool_call_id") or "").strip()
+            if not tool_call_id:
+                return PayloadValidationResult(
+                    ok=False,
+                    error_type="tool_result_missing_id",
+                    message="Tool result message is missing tool_call_id.",
+                    details={"messageIndex": index},
+                )
+            if tool_call_id in seen_tool_result_ids:
+                return PayloadValidationResult(
+                    ok=False,
+                    error_type="duplicate_tool_result",
+                    message="Duplicate tool result detected before provider send.",
+                    details={"messageIndex": index, "toolCallId": tool_call_id},
+                )
+            if tool_call_id not in pending:
+                return PayloadValidationResult(
+                    ok=False,
+                    error_type="orphan_tool_result",
+                    message="Tool result has no pending assistant tool call.",
+                    details={"messageIndex": index, "toolCallId": tool_call_id, "pendingToolCallIds": list(pending)},
+                )
+            seen_tool_result_ids.add(tool_call_id)
+            pending.remove(tool_call_id)
+            continue
+        if pending:
+            return PayloadValidationResult(
+                ok=False,
+                error_type="missing_tool_result",
+                message="Assistant tool call is missing a matching tool result before the next non-tool message.",
+                details={"messageIndex": index, "pendingToolCallIds": list(pending)},
+            )
+    if pending:
+        return PayloadValidationResult(
+            ok=False,
+            error_type="missing_tool_result",
+            message="Assistant tool call is missing a matching tool result at the end of the payload.",
+            details={"pendingToolCallIds": list(pending)},
+        )
+    return PayloadValidationResult(ok=True)
+
+
 def payload_protocol_summary(payload: Dict[str, Any], route: ResolvedProtocolRoute) -> Dict[str, Any]:
     messages = _messages(payload)
     roles = [_role(item) or "unknown" for item in messages]
@@ -140,6 +223,10 @@ def validate_payload_against_protocol(
                     f"Protocol `{route.protocol.value}` does not allow the final payload message to be assistant prefill.",
                 )
 
+    pairing_result = validate_tool_result_pairing(messages)
+    if not pairing_result.ok:
+        return fail(pairing_result.error_type, pairing_result.message, **pairing_result.details)
+
     return PayloadValidationResult(
         ok=True,
         details={**summary, "payloadValidationResult": "passed", "payloadValidationErrorType": ""},
@@ -164,5 +251,6 @@ __all__ = [
     "PayloadValidationResult",
     "assert_payload_valid",
     "payload_protocol_summary",
+    "validate_tool_result_pairing",
     "validate_payload_against_protocol",
 ]

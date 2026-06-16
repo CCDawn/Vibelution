@@ -178,6 +178,7 @@ class TestToolMessageFlow:
         agent._mental_model_enabled_override = False
         agent.mental_model = None
 
+        long_result = "完整工具结果：pytest 输出了 200 行失败日志。\n" + ("failure-line\n" * 260)
         agent.seed_chat_history(
             [
                 {"role": "user", "content": "开始修改"},
@@ -189,7 +190,7 @@ class TestToolMessageFlow:
                             "name": "cli_tool",
                             "arguments": {"command": "python -m pytest"},
                             "status": "failed",
-                            "result": "完整工具结果：pytest 输出了 200 行失败日志。",
+                            "result": long_result,
                             "resultPreview": "Windows detected Unix shell fragment.",
                         }
                     ],
@@ -209,8 +210,46 @@ class TestToolMessageFlow:
         assert ai_tool_messages[0].tool_calls[0]["name"] == "cli_tool"
         assert tool_messages
         assert "完整工具结果" in tool_messages[0].content
+        assert "failure-line\n" * 120 in tool_messages[0].content
         assert "Windows detected Unix shell fragment" not in tool_messages[0].content
         assert any(isinstance(message, AIMessage) and message.content == "运行相关测试验证修改：" for message in restored)
+
+    def test_seed_chat_history_uses_canonical_tool_role_without_duplicate_result(self):
+        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+        agent.mode_policy = ModePolicy(
+            mode=AgentMode.CHAT,
+            orchestrator_kind="chat",
+            keep_multi_turn_context=True,
+            allow_auto_loop=False,
+            capture_chat_dataset_candidates=True,
+            reset_context_before_turn=False,
+            reset_context_between_cases=False,
+            allow_direct_supervised_payload=False,
+            finish_after_direct_response=False,
+            runtime_input_builder=build_chat_user_message,
+        )
+        agent._mental_model_enabled_override = False
+        agent.mental_model = None
+
+        agent.seed_chat_history(
+            [
+                {"role": "assistant", "content": "", "tool_calls": [
+                    {
+                        "id": "call_canonical",
+                        "type": "function",
+                        "function": {"name": "cli_tool", "arguments": "{\"command\":\"pytest\"}"},
+                    }
+                ]},
+                {"role": "tool", "tool_call_id": "call_canonical", "content": "完整 canonical 工具结果"},
+            ]
+        )
+
+        restored = list(agent._active_turn_messages or [])
+        ai_tool_messages = [message for message in restored if isinstance(message, AIMessage) and message.tool_calls]
+        tool_messages = [message for message in restored if isinstance(message, ToolMessage)]
+
+        assert ai_tool_messages[0].tool_calls[0]["args"] == {"command": "pytest"}
+        assert [message.content for message in tool_messages] == ["完整 canonical 工具结果"]
 
     def test_chat_state_normalization_preserves_camel_case_tool_calls(self):
         from core.ui.chat_state import normalize_chat_messages
