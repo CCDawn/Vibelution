@@ -2794,6 +2794,27 @@
   gap: 8px;
 }
 
+.canvasLayoutModeSwitch {
+  display: inline-flex;
+  overflow: hidden;
+  align-items: center;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--surface-panel-strong) 86%, transparent);
+}
+
+.toolbarActions .canvasLayoutModeSwitch button {
+  min-height: 26px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.toolbarActions .canvasLayoutModeSwitch button + button {
+  border-left: 1px solid var(--border-soft);
+}
+
 .saveState {
   color: var(--accent-success);
   font-size: 0.74rem;

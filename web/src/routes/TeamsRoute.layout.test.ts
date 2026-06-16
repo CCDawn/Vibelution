@@ -434,6 +434,16 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("researchCanvasReadOnly ? renderResearchCanvasReadOnlyPanel() : null");
     expect(routeSource).toContain("只读组织画布");
     expect(routeSource).toContain("不会同步群聊或修改节点");
+    expect(routeSource).toContain('useState<ResearchCanvasLayoutMode>("auto")');
+    expect(routeSource).toContain("autoLayoutResearchCanvasNodes(canvasNodes, organizationEdges)");
+    expect(routeSource).toContain("const researchCanvasAutoLayoutActive = researchCanvasReadOnly && researchCanvasLayoutMode === \"auto\"");
+    expect(routeSource).toContain("const displayCanvasNodes = researchCanvasAutoLayoutActive ? autoLayoutCanvasNodes : canvasNodes");
+    expect(routeSource).toContain("自动排版只改变当前显示，不保存坐标");
+    expect(routeSource).toContain("原始坐标");
+    expect(routeSource).toContain("canvasLayoutModeSwitch");
+    expect(routeSource).toContain("RESEARCH_CANVAS_AUTO_LAYOUT_LAYER_GAP");
+    expect(routeSource).toContain("RESEARCH_CANVAS_AUTO_LAYOUT_ROW_GAP");
+    expect(routeSource).toContain("researchCanvasRoleLayer");
     expect(routeSource).toContain("返回三阶段");
     expect(routeSource).toContain("researchCanvasReadOnly ? undefined : (event) => startNodeDrag(event, node)");
     expect(routeSource).toContain("researchCanvasReadOnly ? undefined : moveNodeDrag");
@@ -441,6 +451,7 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("researchCanvasReadOnly ? styles.nodeReadOnly : \"\"");
     expect(routeSource).toContain("styles.canvasReadOnlyPanel");
     expect(routeSource).toContain("styles.canvasReadOnlyBadge");
+    expect(routeSource).toContain("styles.canvasLayoutModeSwitch");
     expect(routeSource).toContain("showNodeBindingPanel");
     expect(routeSource).toContain("showWorkflowPanel");
     expect(routeSource).toContain("showResearchSourceCollection");
@@ -642,6 +653,7 @@ describe("TeamsRoute layout contract", () => {
     expect(routeStyles.researchCanvasPanelHidden).toBeTypeOf("string");
     expect(routeStyles.canvasReadOnlyBadge).toBeTypeOf("string");
     expect(routeStyles.canvasReadOnlyPanel).toBeTypeOf("string");
+    expect(routeStyles.canvasLayoutModeSwitch).toBeTypeOf("string");
     expect(routeStyles.canvasReadOnlyNotice).toBeTypeOf("string");
     expect(routeStyles.canvasReadOnlyNode).toBeTypeOf("string");
     expect(routeStyles.canvasReadOnlyNodeWide).toBeTypeOf("string");
@@ -659,6 +671,7 @@ describe("TeamsRoute layout contract", () => {
     expect(routeStyles.emptyCanvasPanel).toBeTypeOf("string");
     expect(routeStylesSource).toContain("height: 100%");
     expect(routeStylesSource).toContain("overflow: hidden");
+    expect(routeStylesSource).toContain(".canvasLayoutModeSwitch");
   });
 
   it("keeps Team actions scoped to the selected Team or message event", () => {
@@ -683,7 +696,8 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("Q ${line.cx} ${line.cy}");
     expect(routeSource).toContain("nodeBoundaryPoint");
     expect(routeSource).toContain("distanceToRectEdge");
-    expect(routeSource).toContain("edgeLine(edge, canvasNodes, visibleEdges)");
+    expect(routeSource).toContain("edgeLine(edge, displayCanvasNodes, visibleEdges)");
+    expect(routeSource).toContain("sourceFanSpread");
     expect(routeSource).not.toContain("<line key={edge.id}");
     expect(routeSource).toContain("className={styles.edges}");
   });
@@ -717,6 +731,7 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("lockedCanvasViewportStyle");
     expect(routeSource).toContain("setLockedCanvasViewportStyle(canvasViewportStyle)");
     expect(routeSource).toContain("canvasFrameSize");
+    expect(routeSource).toContain("canvasViewStyle(displayCanvasNodes, canvasFrameSize)");
     expect(routeSource).toContain("ResizeObserver");
     expect(routeSource).toContain("styles.canvasViewport");
     expect(routeSource).toContain("--canvas-offset-x");
@@ -729,6 +744,20 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("styles.nodeRoleBadgeLead");
     expect(routeSource).toContain("styles.nodeRoleBadgeAdvisor");
     expect(routeSource).toContain("styles.nodeRoleBadgeSteward");
+  });
+
+  it("keeps read-only research canvas auto layout visual-only and deterministic", () => {
+    expect(routeSource).toContain("function autoLayoutResearchCanvasNodes");
+    expect(routeSource).toContain("researchCanvasRoleLayer");
+    expect(routeSource).toContain("RESEARCH_CANVAS_AUTO_LAYOUT_LAYER_GAP");
+    expect(routeSource).toContain("RESEARCH_CANVAS_AUTO_LAYOUT_ROW_GAP");
+    expect(routeSource).toContain("teamCanvasNodeSortKey");
+    expect(routeSource).toContain("positions.set(node.id");
+    expect(routeSource).toContain("return nodes.map((node) => ({");
+    expect(routeSource).toContain("displayCanvasNodes.map((node)");
+    expect(routeSource).not.toContain("saveCanvas(autoLayoutCanvasNodes");
+    expect(routeSource).not.toContain("saveCanvas(displayCanvasNodes");
+    expect(routeStyles.canvasLayoutModeSwitch).toBeTypeOf("string");
   });
 
   it("lets users drag canvas nodes and persist their positions", () => {
@@ -748,6 +777,6 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("onPointerDown={researchCanvasReadOnly ? undefined : (event) => startNodeDrag(event, node)}");
     expect(routeSource).toContain("onPointerMove={researchCanvasReadOnly ? undefined : moveNodeDrag}");
     expect(routeSource).toContain("onPointerUp={researchCanvasReadOnly ? undefined : finishNodeDrag}");
-    expect(routeSource).toContain("edgeLine(edge, canvasNodes, visibleEdges)");
+    expect(routeSource).toContain("edgeLine(edge, displayCanvasNodes, visibleEdges)");
   });
 });
