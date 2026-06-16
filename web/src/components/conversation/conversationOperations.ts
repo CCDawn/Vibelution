@@ -268,7 +268,6 @@ export function normalizeTimelineOperations(
   messageStreaming: boolean,
 ): ConversationOperation[] {
   const merged: ConversationOperation[] = [];
-  let latestThoughtIndex = -1;
   for (const operation of operations) {
     const next = normalizeOperationDisplay(operation);
     const previous = merged[merged.length - 1];
@@ -277,24 +276,7 @@ export function normalizeTimelineOperations(
         continue;
       }
     }
-    if (next.kind === "thought" && latestThoughtIndex >= 0) {
-      if (mergeThoughtOperation(merged, latestThoughtIndex, next)) {
-        continue;
-      }
-    }
-    if (next.kind === "tool" && next.relatedThoughtSequence !== undefined && latestThoughtIndex >= 0) {
-      const latestThought = merged[latestThoughtIndex];
-      if (
-        latestThought?.kind === "thought"
-        && next.relatedThoughtSequence > (latestThought.sequence ?? 0)
-      ) {
-        next.relatedThoughtSequence = latestThought.sequence;
-      }
-    }
     merged.push(next);
-    if (next.kind === "thought") {
-      latestThoughtIndex = merged.length - 1;
-    }
   }
   const latestRunningIndex = messageStreaming && isRunningStatus(merged[merged.length - 1]?.status)
     ? merged.length - 1
