@@ -2152,6 +2152,46 @@
   font-weight: 760;
 }
 
+.sourceCollectionFilterBar {
+  display: flex;
+  min-width: 0;
+  gap: 5px;
+  overflow-x: auto;
+  padding-bottom: 1px;
+}
+
+.sourceCollectionFilterBar button {
+  display: inline-flex;
+  min-width: 76px;
+  min-height: 28px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--surface-card) 94%, white);
+  color: var(--fg-muted);
+  font-size: 0.64rem;
+  font-weight: 820;
+  cursor: pointer;
+}
+
+.sourceCollectionFilterBar button:hover,
+.sourceCollectionFilterBar button:focus-visible,
+.sourceCollectionFilterActive {
+  border-color: color-mix(in srgb, var(--accent-primary) 48%, var(--border-soft));
+  background: color-mix(in srgb, var(--accent-primary) 9%, var(--surface-card));
+  color: var(--fg-primary);
+  outline: none;
+}
+
+.sourceCollectionFilterBar strong {
+  color: var(--fg-primary);
+  font-size: 0.68rem;
+}
+
 .sourceCollectionResultStats {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(92px, 1fr));
