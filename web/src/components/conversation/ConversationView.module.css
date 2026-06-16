@@ -914,7 +914,7 @@
 
 .reActOperationSummary {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
   align-items: center;
   gap: 7px;
   min-width: 0;
@@ -932,6 +932,16 @@
   border-color: color-mix(in srgb, var(--accent-warm) 22%, transparent);
   background: color-mix(in srgb, var(--surface-card) 66%, var(--accent-warm) 5%);
   color: var(--fg-primary);
+}
+
+.reActOperationTitle {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg-secondary);
+  font-size: 0.72rem;
+  font-weight: 660;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .reActOperationMeta {

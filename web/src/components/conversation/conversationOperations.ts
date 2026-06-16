@@ -43,6 +43,8 @@ export type ConversationReActOperationGroup = {
   index: number;
   operations: ConversationOperation[];
   thoughtSequence?: number;
+  title: string;
+  primaryKind: ConversationOperationKind;
 };
 
 const FEEDBACK_OPERATION_CACHE_LIMIT = 200;
@@ -177,6 +179,8 @@ export function buildConversationReActOperationGroups(
       index: groups.length + 1,
       operations: [],
       thoughtSequence: operation.kind === "thought" ? operation.sequence : undefined,
+      title: "",
+      primaryKind: operation.kind,
     };
     groups.push(group);
     current = group;
@@ -200,10 +204,17 @@ export function buildConversationReActOperationGroups(
     }
   }
 
-  return groups.map((group) => ({
-    ...group,
-    id: stableReActGroupId(group),
-  }));
+  return groups
+    .map((group) => {
+      const primaryKind = reActGroupPrimaryKind(group);
+      return {
+        ...group,
+        id: stableReActGroupId(group),
+        title: reActGroupTitle(group),
+        primaryKind,
+      };
+    })
+    .filter(reActGroupIsDisplayable);
 }
 
 function reactGroupHasThought(group: ConversationReActOperationGroup) {
@@ -225,6 +236,81 @@ function stableReActGroupId(group: ConversationReActOperationGroup) {
     return `react-operation-${firstSequence}`;
   }
   return `react-${group.index}-${group.operations[0]?.id ?? "empty"}`;
+}
+
+function reActGroupIsDisplayable(group: ConversationReActOperationGroup) {
+  if (group.operations.some((operation) => !["thought", "mental"].includes(operation.kind))) {
+    return true;
+  }
+  return group.operations.some((operation) => operation.status !== "done");
+}
+
+function reActGroupPrimaryOperations(group: ConversationReActOperationGroup) {
+  const actions = group.operations.filter((operation) => !["thought", "mental"].includes(operation.kind));
+  const tools = actions.filter((operation) => operation.kind === "tool");
+  if (tools.length > 0) {
+    return tools;
+  }
+  if (actions.length > 0) {
+    return actions;
+  }
+  return group.operations;
+}
+
+function reActGroupPrimaryKind(group: ConversationReActOperationGroup): ConversationOperationKind {
+  return reActGroupPrimaryOperations(group)[0]?.kind ?? group.operations[0]?.kind ?? "tool";
+}
+
+function reActGroupTitle(group: ConversationReActOperationGroup) {
+  const primaryOperations = reActGroupPrimaryOperations(group);
+  const primaryLabels = Array.from(
+    new Set(primaryOperations.map((operation) => operation.label).filter(Boolean)),
+  ).slice(0, 2);
+  const label = primaryLabels.join("/") || "执行";
+  const anchor = primaryOperations.find((operation) => operation.status === "failed")
+    ?? primaryOperations.find((operation) => isRunningStatus(operation.status))
+    ?? primaryOperations[0];
+  const headline = operationHeadline(anchor, label);
+  if (!headline || headline === label) {
+    return label;
+  }
+  return `${label} · ${headline}`;
+}
+
+function operationHeadline(operation: ConversationOperation | undefined, label: string) {
+  if (!operation) {
+    return "";
+  }
+  const source = operation.error?.trim()
+    || operation.summary?.trim()
+    || (operation.kind === "status" ? "" : operation.resultPreview?.trim())
+    || "";
+  const parsed = headlineFromStructuredText(source);
+  const firstLine = parsed || source.split(/\r?\n/).map((line) => line.trim()).find(Boolean) || "";
+  const normalized = firstLine.replace(/\s+/g, " ").trim();
+  if (!normalized || normalized === label) {
+    return "";
+  }
+  return compactPreview(normalized, 72);
+}
+
+function headlineFromStructuredText(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed.startsWith("{")) {
+    return "";
+  }
+  try {
+    const payload = JSON.parse(trimmed) as Record<string, unknown>;
+    for (const key of ["message", "taskPreview", "summary", "code", "status"]) {
+      const candidate = String(payload[key] ?? "").trim();
+      if (candidate) {
+        return candidate.split(/\r?\n/).map((line) => line.trim()).find(Boolean) ?? candidate;
+      }
+    }
+  } catch {
+    return "";
+  }
+  return "";
 }
 
 function buildOperationsFromFeedbackEvents(
