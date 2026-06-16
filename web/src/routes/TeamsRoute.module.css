@@ -1515,9 +1515,9 @@
 
 .sourceCollectionStageCard {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-rows: auto minmax(0, 1fr) auto auto;
   min-width: 0;
-  min-height: 104px;
+  min-height: 122px;
   gap: 5px;
   padding: 7px;
   border: 1px solid var(--source-step-border, var(--border-soft));
@@ -1604,6 +1604,40 @@
   color: var(--source-step-fg, var(--fg-muted));
   font-size: 0.58rem;
   font-weight: 820;
+}
+
+.sourceCollectionStageMiniFlow {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+  min-width: 0;
+}
+
+.sourceCollectionStageMiniFlow span {
+  display: inline-flex;
+  min-width: 0;
+  min-height: 22px;
+  align-items: center;
+  gap: 4px;
+  padding: 0 6px;
+  border: 1px solid color-mix(in srgb, var(--source-step-border, var(--border-soft)) 70%, transparent);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--surface-card) 58%, transparent);
+  color: var(--fg-muted);
+  font-size: 0.56rem;
+  font-weight: 760;
+  overflow: hidden;
+}
+
+.sourceCollectionStageMiniFlow b {
+  flex: 0 0 auto;
+  color: var(--source-step-fg, var(--fg-secondary));
+  font-size: 0.56rem;
+}
+
+.sourceCollectionStageMiniFlow span {
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .sourceCollectionStageActionRow {
@@ -1863,6 +1897,117 @@
   overflow: hidden;
 }
 
+.sourceCollectionStageWorkspace {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.sourceCollectionStageWorkspaceHeader {
+  display: grid;
+  grid-template-columns: minmax(150px, 0.24fr) minmax(0, 1fr);
+  gap: 8px;
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid color-mix(in srgb, var(--accent-cool) 24%, var(--border-soft));
+  border-radius: 8px;
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--accent-cool) 8%, transparent), transparent 72%),
+    color-mix(in srgb, var(--surface-panel) 84%, transparent);
+}
+
+.sourceCollectionStageWorkspaceHeader > div:first-child {
+  display: grid;
+  align-content: center;
+  gap: 2px;
+  min-width: 0;
+}
+
+.sourceCollectionStageWorkspaceHeader strong,
+.sourceCollectionStageWorkspaceHeader span,
+.sourceCollectionStageHandoff b {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sourceCollectionStageWorkspaceHeader strong {
+  color: var(--fg-primary);
+  font-size: 0.82rem;
+}
+
+.sourceCollectionStageWorkspaceHeader > div:first-child > span {
+  color: var(--fg-muted);
+  font-size: 0.64rem;
+  font-weight: 800;
+}
+
+.sourceCollectionStageHandoff {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  min-width: 0;
+}
+
+.sourceCollectionStageHandoff span {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+  padding: 6px 7px;
+  border: 1px solid color-mix(in srgb, var(--accent-cool) 18%, var(--border-soft));
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--surface-card) 64%, transparent);
+  color: var(--fg-primary);
+  font-size: 0.64rem;
+  font-weight: 800;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sourceCollectionStageHandoff b {
+  color: var(--fg-muted);
+  font-size: 0.56rem;
+  font-weight: 780;
+}
+
+.sourceCollectionStageTabs {
+  display: inline-flex;
+  width: max-content;
+  max-width: 100%;
+  min-height: 30px;
+  gap: 4px;
+  padding: 3px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface-card) 74%, transparent);
+}
+
+.sourceCollectionStageTabs button {
+  min-width: 76px;
+  min-height: 24px;
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fg-muted);
+  cursor: pointer;
+  font-size: 0.66rem;
+  font-weight: 840;
+}
+
+.sourceCollectionStageTabs button:hover,
+.sourceCollectionStageTabs button:focus-visible,
+.sourceCollectionStageTabActive {
+  border-color: color-mix(in srgb, var(--accent-cool) 42%, var(--border-soft));
+  background: color-mix(in srgb, var(--accent-cool) 10%, var(--surface-panel-strong));
+  color: var(--fg-primary);
+  outline: none;
+}
+
 .sourceCollectionConversationPanel,
 .sourceCollectionControlPanel,
 .sourceCollectionUnavailable {
@@ -2021,6 +2166,39 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.sourceCollectionTraceHandoff {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 5px;
+  min-width: 0;
+}
+
+.sourceCollectionTraceHandoff span {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  padding: 5px 6px;
+  border: 1px solid color-mix(in srgb, var(--workflow-trace-border, var(--border-soft)) 64%, transparent);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--surface-panel-strong) 56%, transparent);
+  color: var(--fg-primary);
+  font-size: 0.64rem;
+  font-weight: 800;
+  overflow: hidden;
+}
+
+.sourceCollectionTraceHandoff b,
+.sourceCollectionTraceHandoff span {
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sourceCollectionTraceHandoff b {
+  color: var(--fg-muted);
+  font-size: 0.56rem;
+  font-weight: 780;
 }
 
 .sourceCollectionTraceDetails {
@@ -2236,6 +2414,49 @@
   display: grid;
   gap: 4px;
   min-width: 0;
+}
+
+.sourceCollectionPagination {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 1px solid color-mix(in srgb, var(--accent-cool) 18%, var(--border-soft));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface-card) 66%, transparent);
+  color: var(--fg-muted);
+  font-size: 0.64rem;
+  font-weight: 800;
+}
+
+.sourceCollectionPagination div {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.sourceCollectionPagination button {
+  min-height: 24px;
+  padding: 0 8px;
+  border: 1px solid color-mix(in srgb, var(--accent-cool) 26%, var(--border-soft));
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--surface-panel-strong) 72%, transparent);
+  color: var(--fg-primary);
+  cursor: pointer;
+  font-size: 0.62rem;
+  font-weight: 820;
+}
+
+.sourceCollectionPagination button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.sourceCollectionPagination strong {
+  color: var(--fg-primary);
+  font-size: 0.64rem;
 }
 
 .sourceCollectionResultItem {
@@ -4839,6 +5060,27 @@
 
   .sourceCollectionStageCard {
     min-height: 96px;
+  }
+
+  .sourceCollectionStageWorkspaceHeader,
+  .sourceCollectionStageHandoff,
+  .sourceCollectionTraceHandoff,
+  .sourceCollectionStageMiniFlow {
+    grid-template-columns: 1fr;
+  }
+
+  .sourceCollectionStageTabs,
+  .sourceCollectionPagination {
+    width: 100%;
+  }
+
+  .sourceCollectionPagination {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .sourceCollectionPagination div {
+    justify-content: space-between;
   }
 
   .sourceCollectionPageBody {
