@@ -59,7 +59,7 @@ from .i18n import resolve_language, text_for
 from .model_capability_service import model_record_image_input_support
 from .model_reference_service import ModelReferenceConflictError, assert_model_delete_safe
 from .runtime_scene_service import record_runtime_scene_event
-from .theme_background_service import theme_background_image_url
+from .theme_background_service import DEFAULT_THEME_BACKGROUND_PATH, theme_background_image_url
 from .workbench_contract_service import get_workbench_contract
 
 
@@ -215,7 +215,7 @@ def _with_config_workspace_defaults(
     workbench_theme = ui_config.setdefault("workbench_theme", {})
     if not isinstance(workbench_theme, dict):
         ui_config["workbench_theme"] = workbench_theme = {}
-    workbench_theme.setdefault("background_image_path", "")
+    workbench_theme.setdefault("background_image_path", DEFAULT_THEME_BACKGROUND_PATH)
     workbench_theme["background_readability"] = _theme_background_readability(payload)
     return payload
 
