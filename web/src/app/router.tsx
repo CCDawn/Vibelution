@@ -3,6 +3,7 @@ import { createBrowserRouter } from "react-router-dom";
 
 import { AppShell } from "./AppShell";
 import { LauncherShell } from "./LauncherShell";
+import { RouteErrorBoundary, type RouteErrorSurface } from "./RouteErrorBoundary";
 import { LegacyChatRoomsRedirect } from "../routes/LegacyChatRoomsRedirect";
 import { LegacyTeamsRedirect } from "../routes/LegacyTeamsRedirect";
 import { LegacyMemoryRedirect } from "../routes/LegacyMemoryRedirect";
@@ -45,22 +46,35 @@ function lazyElement(element: ReactNode) {
   return <Suspense fallback={null}>{element}</Suspense>;
 }
 
+function routeErrorElement(surface: RouteErrorSurface = "workbench") {
+  return <RouteErrorBoundary surface={surface} />;
+}
+
+function guardedLazyElement(element: ReactNode, surface: RouteErrorSurface = "workbench") {
+  return {
+    element: lazyElement(element),
+    errorElement: routeErrorElement(surface),
+  };
+}
+
 export const router = createBrowserRouter([
   {
     path: "/launcher",
     element: <LauncherShell />,
+    errorElement: routeErrorElement("launcher"),
     children: [
-      { index: true, element: lazyElement(<LauncherRoute />) },
+      { index: true, ...guardedLazyElement(<LauncherRoute />, "launcher") },
     ],
   },
   {
     path: "/",
     element: <AppShell />,
+    errorElement: routeErrorElement("workbench"),
     children: [
       { index: true, element: <HomeRedirect /> },
       {
         path: "chat",
-        element: lazyElement(
+        ...guardedLazyElement(
           <WorkbenchDomainRoute domain="chat">
             <ChatCodingRoute />
           </WorkbenchDomainRoute>,
@@ -72,7 +86,7 @@ export const router = createBrowserRouter([
       },
       {
         path: "supervised-evolution",
-        element: lazyElement(
+        ...guardedLazyElement(
           <WorkbenchModeRoute mode="supervised_evolution">
             <EvolutionRoute forcedTrack="supervised" forcedView="live" />
           </WorkbenchModeRoute>,
@@ -80,7 +94,7 @@ export const router = createBrowserRouter([
       },
       {
         path: "supervised-evolution/runs",
-        element: lazyElement(
+        ...guardedLazyElement(
           <WorkbenchModeRoute mode="supervised_evolution">
             <EvolutionRoute forcedTrack="supervised" forcedView="runs" />
           </WorkbenchModeRoute>,
@@ -88,7 +102,7 @@ export const router = createBrowserRouter([
       },
       {
         path: "supervised-evolution/library",
-        element: lazyElement(
+        ...guardedLazyElement(
           <WorkbenchModeRoute mode="supervised_evolution">
             <EvolutionRoute forcedTrack="supervised" forcedView="library" />
           </WorkbenchModeRoute>,
@@ -96,7 +110,7 @@ export const router = createBrowserRouter([
       },
       {
         path: "supervised-evolution/review",
-        element: lazyElement(
+        ...guardedLazyElement(
           <WorkbenchModeRoute mode="supervised_evolution">
             <SupervisedReviewRoute />
           </WorkbenchModeRoute>,
@@ -104,18 +118,18 @@ export const router = createBrowserRouter([
       },
       {
         path: "self-evolution",
-        element: lazyElement(
+        ...guardedLazyElement(
           <WorkbenchModeRoute mode="self_evolution">
             <EvolutionRoute forcedTrack="self" />
           </WorkbenchModeRoute>,
         ),
       },
       { path: "evolution", element: <LegacyEvolutionRedirect /> },
-      { path: "agents", element: lazyElement(<AgentsRoute />) },
+      { path: "agents", ...guardedLazyElement(<AgentsRoute />) },
       { path: "agents/teams", element: <LegacyTeamsRedirect /> },
-      { path: "agents/prompts", element: lazyElement(<PromptTemplatesRoute />) },
-      { path: "agents/tools", element: lazyElement(<ToolsRoute />) },
-      { path: "agents/skills", element: lazyElement(<SkillsRoute />) },
+      { path: "agents/prompts", ...guardedLazyElement(<PromptTemplatesRoute />) },
+      { path: "agents/tools", ...guardedLazyElement(<ToolsRoute />) },
+      { path: "agents/skills", ...guardedLazyElement(<SkillsRoute />) },
       { path: "agents/memory", element: <LegacyMemoryRedirect to="/memory" /> },
       { path: "agents/memory/effective", element: <LegacyMemoryRedirect to="/memory/effective" /> },
       { path: "agents/memory/manage", element: <LegacyMemoryRedirect to="/memory/manage" /> },
@@ -123,21 +137,21 @@ export const router = createBrowserRouter([
       { path: "agents/memory/knowledge", element: <LegacyMemoryRedirect to="/memory/knowledge" /> },
       { path: "agents/memory/graph", element: <LegacyMemoryRedirect to="/memory/graph" /> },
       { path: "agents/memory/cleanup", element: <LegacyMemoryRedirect to="/memory/cleanup" /> },
-      { path: "memory", element: lazyElement(<MemoryRoute forcedView="overview" />) },
-      { path: "memory/effective", element: lazyElement(<MemoryRoute forcedView="effective" />) },
-      { path: "memory/manage", element: lazyElement(<MemoryRoute forcedView="manage" />) },
-      { path: "memory/sources", element: lazyElement(<MemoryRoute forcedView="sources" />) },
-      { path: "memory/knowledge", element: lazyElement(<MemoryRoute forcedView="knowledge" />) },
-      { path: "memory/graph", element: lazyElement(<MemoryRoute forcedView="graph" />) },
-      { path: "memory/cleanup", element: lazyElement(<MemoryRoute forcedView="cleanup" />) },
-      { path: "teams", element: lazyElement(<TeamsRoute />) },
-      { path: "git", element: lazyElement(<GitRoute />) },
-      { path: "logs", element: lazyElement(<LogsRoute />) },
+      { path: "memory", ...guardedLazyElement(<MemoryRoute forcedView="overview" />) },
+      { path: "memory/effective", ...guardedLazyElement(<MemoryRoute forcedView="effective" />) },
+      { path: "memory/manage", ...guardedLazyElement(<MemoryRoute forcedView="manage" />) },
+      { path: "memory/sources", ...guardedLazyElement(<MemoryRoute forcedView="sources" />) },
+      { path: "memory/knowledge", ...guardedLazyElement(<MemoryRoute forcedView="knowledge" />) },
+      { path: "memory/graph", ...guardedLazyElement(<MemoryRoute forcedView="graph" />) },
+      { path: "memory/cleanup", ...guardedLazyElement(<MemoryRoute forcedView="cleanup" />) },
+      { path: "teams", ...guardedLazyElement(<TeamsRoute />) },
+      { path: "git", ...guardedLazyElement(<GitRoute />) },
+      { path: "logs", ...guardedLazyElement(<LogsRoute />) },
       { path: "research", element: <LegacyTeamsRedirect /> },
-      { path: "research/flow-canvas", element: lazyElement(<ResearchFlowCanvasRoute />) },
-      { path: "pet", element: lazyElement(<PetRoute />) },
-      { path: "reset", element: lazyElement(<ResetRoute />) },
-      { path: "config", element: lazyElement(<ConfigRoute />) },
+      { path: "research/flow-canvas", ...guardedLazyElement(<ResearchFlowCanvasRoute />) },
+      { path: "pet", ...guardedLazyElement(<PetRoute />) },
+      { path: "reset", ...guardedLazyElement(<ResetRoute />) },
+      { path: "config", ...guardedLazyElement(<ConfigRoute />) },
     ],
   },
 ]);
