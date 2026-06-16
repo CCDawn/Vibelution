@@ -5062,7 +5062,17 @@ export type EvolutionActiveRunAgentBinding = {
   role?: string;
   roleLabel?: string;
   dialogueModelId?: string;
+  dialogueModelLabel?: string;
+  dialogueModelName?: string;
   llmBindings?: Record<string, { modelId?: string }>;
+};
+
+export type EvolutionCurrentAgentBindingIssue = {
+  role?: string;
+  agentId?: string;
+  modelId?: string;
+  reason?: string;
+  message?: string;
 };
 
 export type EvolutionActiveRun = {
@@ -5432,6 +5442,10 @@ export type EvolutionWorkspaceSnapshot = {
   workbench: EvolutionWorkbench;
   activeRun: EvolutionActiveRun | null;
   latestRun: EvolutionActiveRun | null;
+  currentAgentBindings: Record<string, EvolutionActiveRunAgentBinding>;
+  currentAgentBindingSource?: string;
+  currentAgentBindingStatus?: string;
+  currentAgentBindingIssues?: EvolutionCurrentAgentBindingIssue[];
   worktreeActiveRun: SupervisedWorktreeRun | null;
   worktreeRuns: SupervisedWorktreeRun[];
   selfOverview: SelfEvolutionOverview;

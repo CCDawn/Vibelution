@@ -271,10 +271,123 @@ def supervised_agent_bindings() -> dict[str, dict[str, Any]]:
     return bindings
 
 
+def current_supervised_agent_bindings_snapshot() -> dict[str, Any]:
+    """Return a read-only view of the current supervised Agent Center bindings."""
+
+    try:
+        return _read_current_supervised_agent_bindings_snapshot()
+    except Exception as exc:
+        return {
+            "agentBindings": {},
+            "bindingSource": "current_agent_config",
+            "status": "error",
+            "issues": [
+                {
+                    "role": "",
+                    "reason": "current_binding_snapshot_failed",
+                    "message": f"{type(exc).__name__}: {exc}",
+                }
+            ],
+        }
+
+
 def _current_config() -> Any:
     from config.settings import get_config
 
     return get_config()
+
+
+def _read_current_supervised_agent_bindings_snapshot() -> dict[str, Any]:
+    raw_slots = _raw_supervised_mode_slots()
+    raw_registry = _load_raw_agent_registry_state()
+    config = _current_config()
+    try:
+        model_library_ids = _configured_model_library_ids(config)
+    except TypeError:
+        model_library_ids = _configured_model_library_ids()
+    raw_agents = {
+        str(agent.get("agentId") or "").strip(): agent
+        for agent in (raw_registry.get("agents") or [])
+        if isinstance(agent, dict) and str(agent.get("agentId") or "").strip()
+    }
+    bindings: dict[str, dict[str, Any]] = {}
+    issues: list[dict[str, str]] = []
+    for role_info in SUPERVISED_AGENT_ROLES:
+        role = role_info.role
+        agent_id = str(raw_slots.get(role) or "").strip()
+        if not agent_id:
+            issues.append(
+                {
+                    "role": role,
+                    "reason": "missing_slot_agent",
+                    "message": f"Supervised role slot is not configured: {role}",
+                }
+            )
+            continue
+        raw_agent = raw_agents.get(agent_id)
+        if not isinstance(raw_agent, dict) or str(raw_agent.get("status") or "active").strip() == "archived":
+            issues.append(
+                {
+                    "role": role,
+                    "agentId": agent_id,
+                    "reason": "missing_or_archived_slot_agent",
+                    "message": f"Supervised role slot points to an archived or missing Agent: {role} ({agent_id})",
+                }
+            )
+            continue
+        metadata = raw_agent.get("metadata") if isinstance(raw_agent.get("metadata"), dict) else {}
+        llm_bindings = agent_directory_service.normalize_agent_llm_bindings(raw_agent.get("llmBindings"))
+        dialogue_model_id = agent_directory_service.agent_dialogue_model_id({"llmBindings": llm_bindings})
+        if not dialogue_model_id:
+            issues.append(
+                {
+                    "role": role,
+                    "agentId": agent_id,
+                    "reason": "missing_dialogue_llm_binding",
+                    "message": f"Supervised role Agent is missing required dialogue LLM binding: {role} ({agent_id})",
+                }
+            )
+        elif model_library_ids and dialogue_model_id not in model_library_ids:
+            issues.append(
+                {
+                    "role": role,
+                    "agentId": agent_id,
+                    "modelId": dialogue_model_id,
+                    "reason": "unresolved_dialogue_model_reference",
+                    "message": (
+                        "Supervised role Agent dialogue model is not present in model library: "
+                        f"{role} ({agent_id}) modelId={dialogue_model_id}"
+                    ),
+                }
+            )
+        model_display = _model_library_display(config, dialogue_model_id)
+        bindings[role] = {
+            "agentId": str(raw_agent.get("agentId") or "").strip(),
+            "agentCode": str(raw_agent.get("agentCode") or "").strip(),
+            "displayName": str(raw_agent.get("displayName") or "").strip(),
+            "primaryMode": str(raw_agent.get("primaryMode") or "").strip(),
+            "roleKey": str(raw_agent.get("roleKey") or role).strip() or role,
+            "llmBindings": llm_bindings,
+            "dialogueModelId": dialogue_model_id,
+            "dialogueModelLabel": model_display["label"],
+            "dialogueModelName": model_display["name"],
+            "llmSlot": "dialogue",
+            "promptTemplateId": str(raw_agent.get("promptTemplateId") or "").strip(),
+            "directSessionId": str(raw_agent.get("directSessionId") or "").strip(),
+            "workspacePath": str(raw_agent.get("workspacePath") or "").strip(),
+            "toolPolicyId": str(raw_agent.get("toolPolicyId") or "").strip(),
+            "memoryPolicyId": str(raw_agent.get("memoryPolicyId") or "").strip(),
+            "role": role,
+            "roleLabel": str(metadata.get("supervisedRoleLabel") or role_info.label or role).strip(),
+        }
+    expected_role_count = len(SUPERVISED_AGENT_ROLES)
+    status = "ready" if len(bindings) == expected_role_count and not issues else "partial" if bindings else "error"
+    return {
+        "agentBindings": bindings,
+        "bindingSource": "current_agent_config",
+        "status": status,
+        "issues": issues,
+    }
 
 
 def _load_raw_agent_registry_state() -> dict[str, Any]:

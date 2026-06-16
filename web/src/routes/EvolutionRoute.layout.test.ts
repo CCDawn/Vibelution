@@ -121,7 +121,10 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).not.toContain("const monitoredRun = effectiveActiveRunSnapshot\n    ?? visibleLiveRunSnapshot\n    ?? latestSupervisedRunSnapshot;");
     expect(routeSource).not.toContain("setLiveActiveRun(latestSupervisedRunSnapshot)");
     expect(routeSource).toContain("const supervisedMembersRun = monitoredRun");
-    expect(routeSource).toContain("?? latestSupervisedRunSnapshot;");
+    expect(routeSource).toContain("const currentSupervisedAgentBindings = workspaceSnapshot?.currentAgentBindings ?? EMPTY_AGENT_BINDINGS");
+    expect(routeSource).toContain("const supervisedMembersBindings = supervisedMembersUseRunBindings");
+    expect(routeSource).not.toContain("supervisedMembersRun = monitoredRun\n    ?? latestSupervisedRunSnapshot");
+    expect(routeSource).not.toContain("latestSupervisedRunSnapshot?.agentBindings");
     expect(routeSource).toContain("styles.latestSupervisedResult");
   });
 
@@ -217,8 +220,10 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).toContain('["baseline", "candidate", "reviewer", "auditor", "judge"]');
     expect(routeSource).toContain("supervisedRunMembers");
     expect(routeSource).toContain("hasSupervisedAgentBindings");
-    expect(routeSource).toContain("supervisedMembersBindingRun?.agentBindings");
+    expect(routeSource).toContain("currentSupervisedAgentBindings");
+    expect(routeSource).toContain("const bindings = supervisedMembersBindings");
     expect(routeSource).toContain("supervisedMembersRun?.currentAgentBinding?.agentId");
+    expect(routeSource).toContain("binding?.dialogueModelLabel || binding?.dialogueModelName");
     expect(routeSource).toContain("modelDisplayLabel(supervisedMemberModelId(binding), resolveModelLabel)");
     expect(routeSource).toContain("configQuery.data?.modelLabels");
     expect(routeSource).toContain("title={member.modelId || member.model}");
@@ -247,8 +252,10 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).toContain("启动命令已排队，等待运行记录刷新。");
     expect(routeSource).toContain("setLiveActiveRun(buildSupervisedStartPlaceholder");
     expect(routeSource).toContain("const placeholderAgentBindings = activeRunSnapshot?.agentBindings");
+    expect(routeSource).toContain("?? workspaceSnapshot?.currentAgentBindings");
+    expect(routeSource).toContain("?? EMPTY_AGENT_BINDINGS");
     expect(routeSource).toContain("agentBindings: placeholderAgentBindings");
-    expect(routeSource).toContain("latestSupervisedRunSnapshot?.agentBindings ?? {}");
+    expect(routeSource).not.toContain("latestSupervisedRunSnapshot?.agentBindings ?? {}");
     expect(routeSource).toContain("evolutionWorkspaceCache.refreshSupervisedActiveRun()");
     expect(routeSource).toContain("visibleLiveRunSnapshot");
     expect(routeSource).toContain("const streamLiveRun = isLocalSupervisedStartPlaceholder(liveActiveRun) ? null : liveActiveRun");

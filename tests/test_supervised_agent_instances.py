@@ -322,6 +322,30 @@ def test_supervised_agent_bindings_are_run_safe_payloads(tmp_path, monkeypatch):
     assert all(binding["agentId"] for binding in bindings.values())
 
 
+def test_current_supervised_agent_bindings_snapshot_reads_current_config_without_sync(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    agents = supervised_agent_service.ensure_supervised_agent_instances()
+    baseline = next(agent for agent in agents if agent["metadata"]["supervisedRole"] == "baseline")
+    agent_directory_service.update_agent_instance(
+        baseline["agentId"],
+        llm_bindings={"dialogue": {"modelId": "model-primary"}},
+    )
+    monkeypatch.setattr(
+        supervised_agent_service,
+        "ensure_supervised_agent_instances",
+        lambda: pytest.fail("current binding snapshot must stay read-only"),
+    )
+
+    snapshot = supervised_agent_service.current_supervised_agent_bindings_snapshot()
+
+    assert snapshot["bindingSource"] == "current_agent_config"
+    assert snapshot["status"] == "ready"
+    assert snapshot["issues"] == []
+    assert snapshot["agentBindings"]["baseline"]["agentId"] == baseline["agentId"]
+    assert snapshot["agentBindings"]["baseline"]["dialogueModelId"] == "model-primary"
+    assert snapshot["agentBindings"]["baseline"]["dialogueModelLabel"] == "model-primary"
+
+
 def test_supervised_agent_bindings_follow_mode_binding_slot_replacement(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     supervised_agent_service.ensure_supervised_agent_instances()

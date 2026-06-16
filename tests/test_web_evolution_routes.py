@@ -383,6 +383,16 @@ def test_evolution_workspace_snapshot_combines_dashboard_payloads(tmp_path, monk
     monkeypatch.setattr(evolution_routes, "get_latest_self_evolution_run", lambda: pytest.fail("default snapshot should not load self latest run"))
     monkeypatch.setattr(evolution_routes, "list_self_evolution_transactions", lambda: [])
     monkeypatch.setattr(
+        evolution_routes,
+        "current_supervised_agent_bindings_snapshot",
+        lambda: {
+            "agentBindings": {},
+            "bindingSource": "current_agent_config",
+            "status": "error",
+            "issues": [],
+        },
+    )
+    monkeypatch.setattr(
         evolution_service,
         "get_workbench_contract",
         lambda: {
@@ -412,11 +422,73 @@ def test_evolution_workspace_snapshot_combines_dashboard_payloads(tmp_path, monk
     assert "bundles" in payload["workbench"]
     assert payload["activeRun"] is None
     assert payload["latestRun"] is None
+    assert payload["currentAgentBindings"] == {}
+    assert payload["currentAgentBindingSource"] == "current_agent_config"
+    assert payload["currentAgentBindingStatus"] == "error"
+    assert payload["currentAgentBindingIssues"] == []
     assert payload["worktreeActiveRun"] is None
     assert payload["worktreeRuns"] == []
     assert payload["selfOverview"]["enabled"] in {True, False}
     assert payload["selfLatestRun"] is None
     assert payload["selfTransactions"] == []
+
+def test_evolution_workspace_snapshot_keeps_current_agent_bindings_separate_from_latest_run(monkeypatch):
+    monkeypatch.setattr(
+        evolution_routes,
+        "get_evolution_workspace_dashboard",
+        lambda: {
+            "overview": {"currentStatus": {"state": "idle"}, "recentRuns": []},
+            "runs": [],
+            "library": {"items": [], "pending": []},
+        },
+    )
+    monkeypatch.setattr(evolution_routes, "get_supervised_workbench", lambda **kwargs: {"activeRun": None})
+    monkeypatch.setattr(evolution_routes, "get_active_supervised_run", lambda: None)
+    monkeypatch.setattr(
+        evolution_routes,
+        "get_latest_supervised_run",
+        lambda **kwargs: {
+            "runId": "old-run",
+            "status": "cancelled",
+            "agentBindings": {
+                "baseline": {
+                    "agentId": "agent-old",
+                    "dialogueModelId": "xiaomi_mimo_v2_5_pro_token_plan",
+                }
+            },
+        },
+    )
+    monkeypatch.setattr(
+        evolution_routes,
+        "current_supervised_agent_bindings_snapshot",
+        lambda: {
+            "agentBindings": {
+                "baseline": {
+                    "agentId": "agent-current",
+                    "dialogueModelId": "mimo_v2_5",
+                    "dialogueModelLabel": "小米 MiMo V2.5",
+                }
+            },
+            "bindingSource": "current_agent_config",
+            "status": "ready",
+            "issues": [],
+        },
+    )
+    monkeypatch.setattr(evolution_routes, "get_active_supervised_worktree_run", lambda: None)
+    monkeypatch.setattr(evolution_routes, "list_supervised_worktree_runs", lambda: [])
+    monkeypatch.setattr(evolution_routes, "get_self_evolution_light_overview", lambda: {"enabled": True})
+    monkeypatch.setattr(evolution_routes, "get_latest_self_evolution_run", lambda: None)
+    monkeypatch.setattr(evolution_routes, "list_self_evolution_transactions", lambda: [])
+    monkeypatch.setattr(evolution_routes, "record_evolution_workspace_snapshot_perf", lambda **kwargs: None)
+
+    response = client.get("/api/evolution/workspace-snapshot")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["latestRun"]["agentBindings"]["baseline"]["dialogueModelId"] == "xiaomi_mimo_v2_5_pro_token_plan"
+    assert payload["currentAgentBindings"]["baseline"]["agentId"] == "agent-current"
+    assert payload["currentAgentBindings"]["baseline"]["dialogueModelId"] == "mimo_v2_5"
+    assert payload["currentAgentBindingStatus"] == "ready"
 
 def test_evolution_workspace_snapshot_reuses_supervised_dashboard_scan(monkeypatch):
     calls: list[str] = []
@@ -448,6 +520,11 @@ def test_evolution_workspace_snapshot_reuses_supervised_dashboard_scan(monkeypat
     monkeypatch.setattr(evolution_routes, "get_self_evolution_overview", lambda: pytest.fail("default snapshot should be light"))
     monkeypatch.setattr(evolution_routes, "get_latest_self_evolution_run", lambda: None)
     monkeypatch.setattr(evolution_routes, "list_self_evolution_transactions", lambda: pytest.fail("default snapshot should not load transactions"))
+    monkeypatch.setattr(
+        evolution_routes,
+        "current_supervised_agent_bindings_snapshot",
+        lambda: {"agentBindings": {}, "bindingSource": "current_agent_config", "status": "error", "issues": []},
+    )
     monkeypatch.setattr(evolution_routes, "record_evolution_workspace_snapshot_perf", lambda **kwargs: None)
 
     response = client.get("/api/evolution/workspace-snapshot")
@@ -477,6 +554,11 @@ def test_evolution_workspace_snapshot_can_include_full_self_payload(monkeypatch)
     monkeypatch.setattr(evolution_routes, "get_self_evolution_overview", lambda: {"enabled": True, "goal": "full"})
     monkeypatch.setattr(evolution_routes, "get_latest_self_evolution_run", lambda: {"runId": "self-latest"})
     monkeypatch.setattr(evolution_routes, "list_self_evolution_transactions", lambda: [{"txnId": "txn-1"}])
+    monkeypatch.setattr(
+        evolution_routes,
+        "current_supervised_agent_bindings_snapshot",
+        lambda: {"agentBindings": {}, "bindingSource": "current_agent_config", "status": "error", "issues": []},
+    )
     monkeypatch.setattr(evolution_routes, "record_evolution_workspace_snapshot_perf", lambda **kwargs: None)
 
     response = client.get("/api/evolution/workspace-snapshot", params={"includeSelf": "true"})
