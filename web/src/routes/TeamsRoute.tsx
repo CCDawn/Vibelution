@@ -237,7 +237,7 @@ type SourceCollectionCandidateWithSource = TeamWorkflowCandidate & {
 };
 
 type SourceCollectionCandidateProvenance = {
-  kind: "doi" | "file" | "missing" | "ref" | "url";
+  kind: "doi" | "file" | "missing" | "ref" | "search_evidence" | "url";
   label: string;
   value: string;
   href: string;
@@ -1134,6 +1134,27 @@ function compactSourceUrl(value: string) {
   }
 }
 
+function sourceCollectionIsMachineEvidenceUrl(value: string) {
+  if (!/^https?:\/\//i.test(value)) {
+    return false;
+  }
+  try {
+    const url = new URL(value);
+    const hostname = url.hostname.toLowerCase();
+    const pathname = url.pathname.toLowerCase();
+    return (
+      hostname === "api.crossref.org"
+      || hostname === "api.openalex.org"
+      || hostname === "api.semanticscholar.org"
+      || hostname === "api.unpaywall.org"
+      || hostname === "export.arxiv.org"
+      || pathname.startsWith("/api/")
+    );
+  } catch {
+    return false;
+  }
+}
+
 function sourceCollectionCandidateProvenance(
   candidate: TeamWorkflowCandidate,
   lang: "zh" | "en",
@@ -1160,6 +1181,15 @@ function sourceCollectionCandidateProvenance(
       label: "DOI",
       value: doi,
       href: `https://doi.org/${doi}`,
+    };
+  }
+
+  if (/^https?:\/\//i.test(sourceUrl) && sourceCollectionIsMachineEvidenceUrl(sourceUrl)) {
+    return {
+      kind: "search_evidence",
+      label: lang === "zh" ? "仅搜索记录" : "Search evidence only",
+      value: compactSourceUrl(sourceUrl),
+      href: "",
     };
   }
 
@@ -1200,13 +1230,16 @@ function sourceCollectionCandidateProvenance(
 
 function sourceCollectionCandidateOpenLabel(provenance: SourceCollectionCandidateProvenance, lang: "zh" | "en") {
   if (provenance.kind === "doi") {
-    return lang === "zh" ? "打开 DOI" : "Open DOI";
+    return lang === "zh" ? "打开论文 DOI" : "Open DOI";
   }
   if (provenance.kind === "url") {
-    return lang === "zh" ? "打开网页" : "Open page";
+    return lang === "zh" ? "打开网页来源" : "Open source page";
   }
   if (provenance.kind === "file") {
-    return lang === "zh" ? "查看本地路径" : "View local path";
+    return lang === "zh" ? "打开本地文件" : "Open local file";
+  }
+  if (provenance.kind === "search_evidence") {
+    return lang === "zh" ? "查看搜索证据" : "View search evidence";
   }
   if (provenance.kind === "missing") {
     return lang === "zh" ? "缺少来源" : "Missing source";
@@ -4031,6 +4064,8 @@ export function TeamsRoute({
     const fileStorageTarget = provenance.kind === "file" && selectedSourceCollectionCandidateStorageArtifacts
       ? sourceCollectionStorageTargetForRef(provenance.value, selectedSourceCollectionCandidateStorageArtifacts)
       : null;
+    const hasReadableSource = Boolean(provenance.href || fileStorageTarget);
+    const hasSearchEvidence = Boolean(trace.searchUrl || trace.query || trace.searchProvider || trace.queryId || trace.assignmentId);
     const traceRows = [
       [lang === "zh" ? "类型" : "Type", sourceCollectionSourceTypeLabel(selectedSourceCollectionCandidate.sourceKind || selectedSourceCollectionCandidate.candidateType, lang)],
       [lang === "zh" ? "来源" : "Source", provenance.value],
@@ -4057,29 +4092,33 @@ export function TeamsRoute({
           </span>
         </div>
         <div className={styles.sourceCollectionSourceDetailActions}>
-          {provenance.href ? (
-            <a href={provenance.href} target="_blank" rel="noreferrer" title={provenance.href}>
-              <Link2 size={12} />
-              {sourceCollectionCandidateOpenLabel(provenance, lang)}
-            </a>
-          ) : null}
-          {fileStorageTarget ? (
-            <button
-              type="button"
-              onClick={() => openSourceCollectionStorageTarget(fileStorageTarget, runId)}
-              disabled={selectedSourceCollectionStorageOpenPending}
-              title={provenance.value}
-            >
-              <Link2 size={12} />
-              {sourceCollectionStorageTargetLabel(fileStorageTarget, lang)}
-            </button>
-          ) : null}
-          {trace.searchUrl && trace.searchUrl !== provenance.href ? (
-            <a href={trace.searchUrl} target="_blank" rel="noreferrer" title={trace.searchUrl}>
-              <Search size={12} />
-              {lang === "zh" ? "打开搜索页" : "Open search"}
-            </a>
-          ) : null}
+          {hasReadableSource ? (
+            <>
+              {provenance.href ? (
+                <a href={provenance.href} target="_blank" rel="noreferrer" title={provenance.href}>
+                  <Link2 size={12} />
+                  {sourceCollectionCandidateOpenLabel(provenance, lang)}
+                </a>
+              ) : null}
+              {fileStorageTarget ? (
+                <button
+                  type="button"
+                  onClick={() => openSourceCollectionStorageTarget(fileStorageTarget, runId)}
+                  disabled={selectedSourceCollectionStorageOpenPending}
+                  title={provenance.value}
+                >
+                  <Link2 size={12} />
+                  {sourceCollectionStorageTargetLabel(fileStorageTarget, lang)}
+                </button>
+              ) : null}
+            </>
+          ) : (
+            <span className={styles.sourceCollectionSourceDetailNotice}>
+              {provenance.kind === "search_evidence"
+                ? (lang === "zh" ? "仅有搜索记录，缺少可读来源" : "Only search evidence is available")
+                : (lang === "zh" ? "缺少可读来源" : "Readable source missing")}
+            </span>
+          )}
           {runId ? storageTargets.map((target) => (
             <button
               key={`${selectedSourceCollectionCandidate.candidateId}-${target}`}
@@ -4092,6 +4131,37 @@ export function TeamsRoute({
             </button>
           )) : null}
         </div>
+        {hasSearchEvidence ? (
+          <details className={styles.sourceCollectionSearchEvidence}>
+            <summary>
+              <Search size={12} />
+              {lang === "zh" ? "查看搜索证据" : "View search evidence"}
+            </summary>
+            <div className={styles.sourceCollectionSearchEvidenceBody}>
+              {trace.query ? (
+                <span>
+                  <b>{lang === "zh" ? "搜索问题" : "Search query"}</b>
+                  <code title={trace.query}>{translateResearchPhrase(trace.query, lang)}</code>
+                </span>
+              ) : null}
+              {trace.searchProvider ? (
+                <span>
+                  <b>{lang === "zh" ? "搜索源" : "Provider"}</b>
+                  <code title={trace.searchProvider}>{trace.searchProvider}</code>
+                </span>
+              ) : null}
+              {trace.searchUrl ? (
+                <span>
+                  <b>{lang === "zh" ? "API 证据" : "API evidence"}</b>
+                  <a href={trace.searchUrl} target="_blank" rel="noreferrer" title={trace.searchUrl}>
+                    <Link2 size={12} />
+                    {lang === "zh" ? "打开 API 原文" : "Open raw API"}
+                  </a>
+                </span>
+              ) : null}
+            </div>
+          </details>
+        ) : null}
         <div className={styles.sourceCollectionSourceDetailFacts}>
           {traceRows.map(([label, value]) => (
             <span key={`${label}-${value}`}>
