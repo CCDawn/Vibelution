@@ -5276,12 +5276,33 @@ export function ChatCodingRoute() {
       ? `压缩阈值 ${compressionCurrentPercent}% · ${compressionLevelLabel}`
       : `threshold ${compressionCurrentPercent}% · ${compressionLevelLabel}`)
     : "";
-  const tokenCompressionContextBadge = lang === "zh"
-    ? `上:${contextCompositionUsedPercent}%`
-    : `Context ${contextCompositionUsedPercent}%`;
-  const tokenCompressionThresholdBadge = lang === "zh"
-    ? `阈:${compression ? `${compressionCurrentPercent}%` : "待"}`
-    : `Threshold ${compression ? `${compressionCurrentPercent}%` : "--"}`;
+  const tokenCompressionContextBadge: {
+    key: string;
+    label: string;
+    value: string;
+    title: string;
+    emphasis?: boolean;
+  } = {
+    key: "previous-context",
+    label: lang === "zh" ? "上轮上下文" : "Prev ctx",
+    value: lastContextComposition
+      ? `${contextCompositionUsedPercent}%`
+      : (lang === "zh" ? "暂无" : "--"),
+    title: contextCompositionTitle,
+  };
+  const tokenCompressionThresholdBadge: typeof tokenCompressionContextBadge = {
+    key: "compression-threshold",
+    label: t("compressionThreshold"),
+    value: compression
+      ? `${compressionCurrentPercent}%`
+      : (lang === "zh" ? "待定" : "pending"),
+    title: compressionTitleLine,
+    emphasis: true,
+  };
+  const tokenCompressionBadges = [
+    tokenCompressionContextBadge,
+    tokenCompressionThresholdBadge,
+  ];
   const tokenCompressionRows: Array<{ key: string; label: string; value: string; meta?: string; title?: string; wide?: boolean }> = [
     {
       key: "llm",
@@ -6790,8 +6811,16 @@ export function ChatCodingRoute() {
               <h3 className={styles.sectionTitle}>{lang === "zh" ? "矩阵" : "Matrix"}</h3>
             </div>
             <div className={styles.tokenCompressionBadges} aria-label={lang === "zh" ? "上下文与压缩阈值" : "Context and compression threshold"}>
-              <span title={contextCompositionTitle}>{tokenCompressionContextBadge}</span>
-              <strong title={compressionTitleLine}>{tokenCompressionThresholdBadge}</strong>
+              {tokenCompressionBadges.map((badge) => (
+                <span
+                  key={badge.key}
+                  className={badge.emphasis ? styles.tokenCompressionBadgeEmphasis : undefined}
+                  title={badge.title}
+                >
+                  <small>{badge.label}</small>
+                  <strong>{badge.value}</strong>
+                </span>
+              ))}
             </div>
           </div>
           <div className={styles.tokenCompressionTable}>
