@@ -161,25 +161,89 @@
 
 .liveLaunchStack {
   display: grid;
-  grid-template-rows: minmax(0, auto) minmax(0, 0.9fr) minmax(150px, 0.82fr);
+  grid-template-rows: minmax(0, 1fr);
   gap: 8px;
   height: 100%;
   min-height: 0;
-  overflow: auto;
+  overflow: hidden;
 }
 
 .liveLaunchStack > .launchSurface {
-  height: auto;
-  max-height: min(430px, 60vh);
+  height: 100%;
+  max-height: none;
   overflow: auto;
+}
+
+.supervisedRunConsole {
+  container-type: inline-size;
+  grid-template-rows: auto auto minmax(0, 1fr);
+}
+
+.supervisedRunConsoleHeader {
+  align-items: flex-start;
+}
+
+.supervisedRunConsoleStatus {
+  display: inline-flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 5px;
+  min-width: 0;
+}
+
+.supervisedRunConsoleGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 7px;
+  min-height: 0;
+}
+
+@container (min-width: 560px) {
+  .supervisedRunConsoleGrid {
+    grid-template-columns: minmax(0, 1.08fr) minmax(214px, 0.72fr);
+    align-items: start;
+  }
+
+  .supervisedRunOptions {
+    grid-template-columns: max-content minmax(140px, 1fr);
+  }
+
+  .supervisedMembersList {
+    max-height: min(238px, 34vh);
+  }
+}
+
+@container (max-width: 430px) {
+  .supervisedRunOptions {
+    grid-template-columns: 1fr;
+  }
+}
+
+.supervisedRunSetup {
+  display: grid;
+  align-content: start;
+  gap: 7px;
+  min-width: 0;
+  min-height: 0;
+}
+
+.supervisedRunOptions {
+  display: grid;
+  grid-template-columns: minmax(0, 0.95fr) minmax(126px, 1.05fr);
+  gap: 6px;
+  align-items: end;
+  min-width: 0;
 }
 
 .supervisedMembersPanel {
   display: grid;
-  gap: 8px;
-  align-self: stretch;
+  gap: 6px;
+  align-self: start;
   min-height: 0;
-  padding: 10px;
+  padding: 8px;
+  border: 1px solid var(--border-hairline);
+  border-radius: 8px;
+  background: var(--surface-card-subtle);
   overflow: hidden;
 }
 
@@ -193,27 +257,27 @@
 
 .supervisedMembersList {
   display: grid;
-  gap: 5px;
+  gap: 4px;
   min-height: 0;
-  max-height: none;
+  max-height: min(178px, 28vh);
   overflow: auto;
 }
 
 .supervisedMemberRow {
   display: grid;
-  grid-template-columns: minmax(86px, 0.44fr) minmax(0, 1fr);
-  gap: 7px;
+  grid-template-columns: minmax(78px, 0.42fr) minmax(0, 1fr);
+  gap: 6px;
   align-items: center;
   min-width: 0;
-  min-height: 40px;
-  padding: 6px 8px;
+  min-height: 34px;
+  padding: 5px 7px;
   border: 1px solid var(--border-hairline);
   border-radius: 7px;
-  background: var(--surface-card-subtle);
+  background: var(--surface-panel);
 }
 
 .supervisedMemberLink {
-  grid-template-columns: minmax(86px, 0.44fr) minmax(0, 1fr) auto;
+  grid-template-columns: minmax(78px, 0.42fr) minmax(0, 1fr) auto;
   color: inherit;
   text-decoration: none;
   transition: border-color 120ms ease, background 120ms ease, transform 120ms ease;
@@ -222,7 +286,7 @@
 .supervisedMemberLink:hover,
 .supervisedMemberLink:focus-visible {
   border-color: color-mix(in srgb, var(--accent-cool) 42%, var(--border-soft));
-  background: color-mix(in srgb, var(--accent-cool) 8%, var(--surface-card-subtle));
+  background: color-mix(in srgb, var(--accent-cool) 8%, var(--surface-panel));
   outline: none;
 }
 
@@ -1154,8 +1218,12 @@
 }
 
 .closedLoopLaunchBlock strong {
+  min-width: 0;
+  overflow: hidden;
   color: var(--fg-primary);
   font-size: 0.82rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .closedLoopLaunchBlock span {
@@ -2730,7 +2798,7 @@
   }
 
   .liveLaunchStack {
-    grid-template-rows: minmax(0, auto) minmax(156px, 0.86fr) minmax(150px, 0.74fr);
+    grid-template-rows: minmax(0, 1fr);
   }
 
   .liveLaunchStack > .launchSurface {
@@ -2749,9 +2817,6 @@
   }
 
   .liveLaunchStack > .launchSurface > .noticeText,
-  .liveLaunchStack > .launchSurface .sourceInventoryBar,
-  .liveLaunchStack > .launchSurface .sourceMetaCompact,
-  .liveLaunchStack > .launchSurface .sourceWarningStrip,
   .liveLaunchStack > .launchSurface .formHint {
     display: none;
   }
