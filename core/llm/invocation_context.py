@@ -44,7 +44,14 @@ def dialogue_chain_mode_for_protocol(protocol: Any, *, transport: str = "", cont
         return "reasoning_chat"
     if value in {"basic_chat_no_tools", "llamacpp_basic"}:
         return "basic_chat"
-    if value in {"openai_chat_tools", "anthropic_chat", "qwen_openai_compat", "minimax_chat"}:
+    if value in {
+        "openai_chat_tools",
+        "anthropic_chat",
+        "qwen_openai_compat",
+        "xiaomi_mimo_multimodal_openai_compat",
+        "xiaomi_mimo_token_plan_openai_compat",
+        "minimax_chat",
+    }:
         return "tool_chat"
 
     normalized_transport = str(transport or "").strip().lower()

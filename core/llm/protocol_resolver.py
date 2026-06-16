@@ -136,6 +136,14 @@ def _protocol_from_provider_api(provider_api: str, provider_kind: str, profile: 
     return None
 
 
+def _xiaomi_mimo_protocol(profile: LLMProfile, provider: ProviderConfig) -> ModelProtocol:
+    model = _read_optional_string(profile, "model").lower()
+    base_url = _read_optional_string(provider, "base_url").lower()
+    if "token-plan" in base_url or "mimo-v2.5-pro" in model or model.endswith("-pro"):
+        return ModelProtocol.XIAOMI_MIMO_TOKEN_PLAN_OPENAI_COMPAT
+    return ModelProtocol.XIAOMI_MIMO_MULTIMODAL_OPENAI_COMPAT
+
+
 def _protocol_from_contract(provider_kind: str, provider: ProviderConfig, profile: LLMProfile) -> ModelProtocol | None:
     transport = _read_optional_string(profile, "transport").lower() or "chat_completions"
     contract = _read_optional_string(profile, "contract").lower() or "tool_chat"
@@ -147,8 +155,15 @@ def _protocol_from_contract(provider_kind: str, provider: ProviderConfig, profil
         return ModelProtocol.RELAY_RESPONSES if provider_kind == "relay" else ModelProtocol.OPENAI_RESPONSES
     if provider_kind == "anthropic":
         return ModelProtocol.ANTHROPIC_THINKING if thinking_enabled else ModelProtocol.ANTHROPIC_CHAT
-    if provider_kind == "deepseek" or contract == "reasoning_chat":
+    if provider_kind == "xiaomi":
+        return _xiaomi_mimo_protocol(profile, provider)
+    if provider_kind == "deepseek" or model_family == "deepseek":
         return ModelProtocol.DEEPSEEK_REASONING
+    if contract == "reasoning_chat":
+        if model_family == "qwen":
+            return ModelProtocol.QWEN_THINKING_NO_PREFILL if thinking_enabled else ModelProtocol.QWEN_OPENAI_COMPAT
+        if _is_openai_compatible_provider(provider_kind, compat_mode):
+            return ModelProtocol.OPENAI_CHAT_TOOLS
     if provider_kind == "minimax":
         return ModelProtocol.MINIMAX_CHAT
     if contract == "basic_chat":

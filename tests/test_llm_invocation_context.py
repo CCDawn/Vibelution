@@ -50,6 +50,19 @@ class _FakeClient:
         yield "chunk"
 
 
+def _disable_sandbox_partition_prefix(monkeypatch):
+    from core.llm import invocation
+
+    monkeypatch.setattr(
+        invocation,
+        "_developer_sandbox_module",
+        lambda: SimpleNamespace(
+            sandbox_prompt_cache_partition=lambda value, surface="": value,
+            enrich_debug_fields=lambda fields: fields,
+        ),
+    )
+
+
 def test_dialogue_chain_mode_maps_protocol_families():
     assert dialogue_chain_mode_for_protocol("openai_responses") == "responses_agent"
     assert dialogue_chain_mode_for_protocol("relay_responses") == "responses_agent"
@@ -69,7 +82,8 @@ def test_prompt_purpose_partition_keeps_main_reply_on_base_partition():
     )
 
 
-def test_invoke_llm_derives_auxiliary_partition_from_current_context():
+def test_invoke_llm_derives_auxiliary_partition_from_current_context(monkeypatch):
+    _disable_sandbox_partition_prefix(monkeypatch)
     client = _FakeClient()
     context = LLMInvocationContext(
         surface="agent_turn",
@@ -90,7 +104,8 @@ def test_invoke_llm_derives_auxiliary_partition_from_current_context():
     assert invocation["metadata"]["selectedProtocol"] == "openai_responses"
 
 
-def test_invoke_llm_does_not_suffix_explicit_research_partition():
+def test_invoke_llm_does_not_suffix_explicit_research_partition(monkeypatch):
+    _disable_sandbox_partition_prefix(monkeypatch)
     client = _FakeClient()
     context = LLMInvocationContext(
         surface="research_agent",
@@ -111,7 +126,8 @@ def test_invoke_llm_does_not_suffix_explicit_research_partition():
     assert invocation["metadata"]["promptPurpose"] == "broad"
 
 
-def test_stream_llm_uses_same_invocation_context_contract():
+def test_stream_llm_uses_same_invocation_context_contract(monkeypatch):
+    _disable_sandbox_partition_prefix(monkeypatch)
     client = _FakeClient()
     context = LLMInvocationContext(
         surface="agent_turn",

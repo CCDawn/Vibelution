@@ -1,4 +1,4 @@
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, ToolMessage
 import pytest
 from types import SimpleNamespace
 import json
@@ -642,13 +642,16 @@ def test_deepseek_payload_preserves_reasoning_content_for_assistant_history():
                 content="",
                 tool_calls=[{"id": "call_1", "name": "read_file", "args": {"path": "agent.py"}}],
                 additional_kwargs={"reasoning_content": "先读文件再决定"},
-            )
+            ),
+            ToolMessage(content="agent.py content", tool_call_id="call_1"),
         ]
     )
 
     assert payload["messages"][0]["role"] == "assistant"
     assert payload["messages"][0]["reasoning_content"] == "先读文件再决定"
     assert payload["messages"][0]["tool_calls"][0]["id"] == "call_1"
+    assert payload["messages"][1]["role"] == "tool"
+    assert payload["messages"][1]["tool_call_id"] == "call_1"
 
 
 def test_deepseek_payload_omits_explicit_tool_choice_in_thinking_mode():
