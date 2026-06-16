@@ -71,7 +71,6 @@ const WORKFLOW_GRAPH_NODE_GAP = 18;
 const WORKFLOW_GRAPH_MARGIN_X = 22;
 const WORKFLOW_GRAPH_MARGIN_Y = 28;
 const SOURCE_COLLECTION_RUN_PREVIEW_LIMIT = 20;
-const SOURCE_COLLECTION_RESULT_PREVIEW_LIMIT = 40;
 const SOURCE_COLLECTION_DEFAULT_ROLES = ["data_discovery", "source_acquisition", "content_extraction", "source_quality"];
 const SOURCE_COLLECTION_SEARCH_EXECUTION_ROLES = new Set(["data_discovery", "source_acquisition"]);
 const SOURCE_COLLECTION_PROMPT_CACHE_POLICY = {
@@ -256,6 +255,10 @@ type SourceCollectionCandidateProvenance = {
   value: string;
   href: string;
 };
+
+type SourceCollectionSourceFilter = "all" | "pdf" | "paper_web" | "dataset" | "local_file" | "missing";
+
+const SOURCE_COLLECTION_SOURCE_FILTERS: SourceCollectionSourceFilter[] = ["all", "pdf", "paper_web", "dataset", "local_file", "missing"];
 
 type SourceCollectionCandidateTrace = {
   assignmentId: string;
@@ -1122,6 +1125,79 @@ function sourceCollectionSourceTypeLabel(value: string | undefined | null, lang:
   return (lang === "zh" ? zh : en)[normalized] ?? (value || "-");
 }
 
+function sourceCollectionSourceFilterLabel(value: SourceCollectionSourceFilter, lang: "zh" | "en") {
+  const zh: Record<SourceCollectionSourceFilter, string> = {
+    all: "全部",
+    dataset: "数据集",
+    local_file: "本地文件",
+    missing: "缺少来源",
+    paper_web: "论文网页/DOI",
+    pdf: "PDF",
+  };
+  const en: Record<SourceCollectionSourceFilter, string> = {
+    all: "All",
+    dataset: "Datasets",
+    local_file: "Local files",
+    missing: "Missing source",
+    paper_web: "Paper page/DOI",
+    pdf: "PDF",
+  };
+  return (lang === "zh" ? zh : en)[value];
+}
+
+function sourceCollectionLooksLikePdf(...values: Array<string | undefined | null>) {
+  return values.some((value) => {
+    const text = String(value || "").trim().toLowerCase();
+    return Boolean(text) && (/\.pdf(?:$|[?#\s])/i.test(text) || text.endsWith(".pdf") || text.includes("application/pdf"));
+  });
+}
+
+function sourceCollectionSourceCategoryFromProvenance(
+  sourceType: string | undefined | null,
+  provenance: SourceCollectionCandidateProvenance,
+  ...extraRefs: Array<string | undefined | null>
+): SourceCollectionSourceFilter {
+  const normalizedSourceType = String(sourceType || "").trim().toLowerCase();
+  const refText = [provenance.value, ...extraRefs].join(" ").toLowerCase();
+  if (provenance.kind === "missing" || provenance.kind === "search_evidence") {
+    return "missing";
+  }
+  if (normalizedSourceType.includes("dataset")) {
+    return "dataset";
+  }
+  if (normalizedSourceType.includes("pdf") || sourceCollectionLooksLikePdf(provenance.value, ...extraRefs)) {
+    return "pdf";
+  }
+  if (provenance.kind === "file" || ["file", "manual", "note"].includes(normalizedSourceType)) {
+    return "local_file";
+  }
+  if (
+    provenance.kind === "doi"
+    || provenance.kind === "url"
+    || ["paper", "review", "url", "journal-article", "proceedings-article"].some((type) => normalizedSourceType.includes(type))
+    || /\bdoi\b|doi\.org|\/abs\/|\/pdf\//i.test(refText)
+  ) {
+    return "paper_web";
+  }
+  return "missing";
+}
+
+function sourceCollectionFilterMatches(activeFilter: SourceCollectionSourceFilter, itemFilter: SourceCollectionSourceFilter) {
+  return activeFilter === "all" || activeFilter === itemFilter;
+}
+
+function sourceCollectionFilterCounts(kinds: SourceCollectionSourceFilter[]) {
+  const counts = SOURCE_COLLECTION_SOURCE_FILTERS.reduce((current, filter) => {
+    current[filter] = 0;
+    return current;
+  }, {} as Record<SourceCollectionSourceFilter, number>);
+  counts.all = kinds.length;
+  kinds.forEach((kind) => {
+    counts[kind] += 1;
+  });
+  return counts;
+}
+
 function metadataString(metadata: Record<string, unknown>, key: string) {
   const value = metadata[key];
   return typeof value === "string" ? value.trim() : "";
@@ -1323,6 +1399,33 @@ function sourceCollectionRecordProvenance(
     value: lang === "zh" ? "没有 DOI、链接或本地文件" : "No DOI, URL, or local file",
     href: "",
   };
+}
+
+function sourceCollectionRecordSourceCategory(record: DataProcessingRecord, lang: "zh" | "en") {
+  const metadata = isRecord(record.metadata) ? record.metadata : {};
+  const provenance = sourceCollectionRecordProvenance(record, lang);
+  return sourceCollectionSourceCategoryFromProvenance(
+    record.sourceType,
+    provenance,
+    record.sourceRef,
+    record.rawLocation,
+    metadataString(metadata, "sourceType"),
+    metadataString(metadata, "contentType"),
+  );
+}
+
+function sourceCollectionCandidateSourceCategory(candidate: TeamWorkflowCandidate, lang: "zh" | "en") {
+  const metadata = isRecord(candidate.metadata) ? candidate.metadata : {};
+  const sourceCandidate = candidate as SourceCollectionCandidateWithSource;
+  const provenance = sourceCollectionCandidateProvenance(candidate, lang);
+  return sourceCollectionSourceCategoryFromProvenance(
+    sourceCandidate.sourceKind || candidate.sourceKind || metadataString(metadata, "sourceType") || candidate.candidateType,
+    provenance,
+    sourceCandidate.sourceRef,
+    sourceCandidate.sourceUrl,
+    sourceCandidate.sourcePath,
+    metadataString(metadata, "contentType"),
+  );
 }
 
 function sourceCollectionCandidateOpenLabel(provenance: SourceCollectionCandidateProvenance, lang: "zh" | "en") {
@@ -2388,6 +2491,7 @@ export function TeamsRoute({
   );
   const [sourceCollectionExpandedPanelId, setSourceCollectionExpandedPanelId] = useState("");
   const [sourceCollectionFocusedPanelId, setSourceCollectionFocusedPanelId] = useState("");
+  const [sourceCollectionSourceFilter, setSourceCollectionSourceFilter] = useState<SourceCollectionSourceFilter>("all");
   const [selectedSourceCollectionCandidateId, setSelectedSourceCollectionCandidateId] = useState("");
   const [nodePositionDrafts, setNodePositionDrafts] = useState<Record<string, { x: number; y: number }>>({});
   const [canvasFrameSize, setCanvasFrameSize] = useState<CanvasFrameSize>({ width: CANVAS_VIEWPORT_WIDTH, height: CANVAS_VIEWPORT_HEIGHT });
@@ -3479,6 +3583,31 @@ export function TeamsRoute({
     );
   }
 
+  function renderSourceCollectionFilterBar(
+    counts: Record<SourceCollectionSourceFilter, number>,
+    label: string,
+  ) {
+    return (
+      <div className={styles.sourceCollectionFilterBar} aria-label={label}>
+        {SOURCE_COLLECTION_SOURCE_FILTERS.map((filter) => {
+          const selected = sourceCollectionSourceFilter === filter;
+          return (
+            <button
+              key={filter}
+              type="button"
+              className={selected ? styles.sourceCollectionFilterActive : ""}
+              onClick={() => setSourceCollectionSourceFilter(filter)}
+              aria-pressed={selected}
+            >
+              <span>{sourceCollectionSourceFilterLabel(filter, lang)}</span>
+              <strong>{counts[filter] ?? 0}</strong>
+            </button>
+          );
+        })}
+      </div>
+    );
+  }
+
   function renderResearchStageLauncher() {
     if (!researchWorkflowTeamSelected) {
       return null;
@@ -3988,7 +4117,7 @@ export function TeamsRoute({
       ?? (sourceCollectionRunCandidateCount ? sourceCollectionTraceMessages.find((message) => message.id.startsWith("candidate-")) : null)
       ?? sourceCollectionTraceMessages[0]
       ?? null;
-    const visibleResults = sourceCollectionRecords.slice(0, SOURCE_COLLECTION_RESULT_PREVIEW_LIMIT);
+    const visibleResults = sourceCollectionFilteredRecords;
     return (
       <section id="source-collection-process" className={styles.sourceCollectionConversationPanel} aria-label={lang === "zh" ? "搜集对话流" : "Collection conversation"}>
         <div className={styles.sourceCollectionConversationHeader}>
@@ -4058,10 +4187,11 @@ export function TeamsRoute({
             <strong>{lang === "zh" ? "本轮原始资料记录" : "Raw records in this run"}</strong>
             <span>
               {lang === "zh"
-                ? `显示 ${visibleResults.length} / 原始总数 ${sourceCollectionRawRecordCount}`
-                : `Showing ${visibleResults.length} / ${sourceCollectionRawRecordCount} raw records`}
+                ? `显示 ${visibleResults.length} / 已过滤 ${sourceCollectionFilteredRecords.length} / 原始总数 ${sourceCollectionRawRecordCount}`
+                : `Showing ${visibleResults.length} / ${sourceCollectionFilteredRecords.length} filtered / ${sourceCollectionRawRecordCount} raw records`}
             </span>
           </div>
+          {renderSourceCollectionFilterBar(sourceCollectionRecordFilterCounts, lang === "zh" ? "资料来源过滤" : "Source filters")}
           <div className={styles.sourceCollectionResultStats}>
             <span>{lang === "zh" ? "原始记录" : "raw records"} <strong>{sourceCollectionCollectedCount}</strong></span>
             <span>{lang === "zh" ? "已入候选" : "imported to candidates"} <strong>{sourceCollectionRunCandidateCount}</strong></span>
@@ -4145,7 +4275,11 @@ export function TeamsRoute({
               })}
             </div>
           ) : (
-            <div className={styles.empty}>{lang === "zh" ? "暂无原始资料记录。点击资料搜集卡的开始按钮后，搜索结果会先写到这里。" : "No raw records yet."}</div>
+            <div className={styles.empty}>
+              {sourceCollectionRecords.length
+                ? (lang === "zh" ? "当前过滤条件下没有原始资料记录。" : "No raw records match this filter.")
+                : (lang === "zh" ? "暂无原始资料记录。点击资料搜集卡的开始按钮后，搜索结果会先写到这里。" : "No raw records yet.")}
+            </div>
           )}
         </section>
       </section>
@@ -4331,7 +4465,7 @@ export function TeamsRoute({
   }
 
   function renderSourceCollectionScreeningPanel() {
-    const screeningCandidates = sourceCollectionRunCandidates.slice(0, 6);
+    const screeningCandidates = sourceCollectionFilteredRunCandidates;
     return (
       <details
         id="source-collection-screening-panel"
@@ -4353,8 +4487,10 @@ export function TeamsRoute({
           <span>{lang === "zh" ? "资料筛选" : "Source screening"}</span>
           <small>{sourceCollectionRunAssessedCount}/{sourceCollectionRunCandidateCount}</small>
         </summary>
+        {renderSourceCollectionFilterBar(sourceCollectionCandidateFilterCounts, lang === "zh" ? "筛选资料过滤" : "Screening source filters")}
         <div id="source-collection-screening-stats" className={styles.workflowSourceQualityStats}>
           <span>{lang === "zh" ? "本轮候选" : "run candidates"} <strong>{sourceCollectionRunCandidateCount}</strong></span>
+          <span>{lang === "zh" ? "当前显示" : "showing"} <strong>{screeningCandidates.length}</strong></span>
           <span>{lang === "zh" ? "已筛" : "assessed"} <strong>{sourceCollectionRunAssessedCount}</strong></span>
           <span>{lang === "zh" ? "通过" : "approved"} <strong>{sourceCollectionRunApprovedCount}</strong></span>
           <span>{lang === "zh" ? "待筛" : "pending"} <strong>{sourceCollectionRunPendingScreeningCount}</strong></span>
@@ -4384,6 +4520,7 @@ export function TeamsRoute({
             {screeningCandidates.map((candidate) => {
               const chunkPlanSummary = candidatePaperNoteChunkPlanSummary(candidate);
               const sourceQualitySummary = candidateSourceQualityAssessmentSummary(candidate);
+              const provenance = sourceCollectionCandidateProvenance(candidate, lang);
               const canPlanPaperNoteChunks = sourceCandidateHasCompletedExtraction(candidate);
               const candidateQualityPending =
                 selectedTeamAssessSourceQualityPending
@@ -4413,7 +4550,7 @@ export function TeamsRoute({
                   </div>
                   <p>{candidate.summary || candidate.candidateType}</p>
                   <div className={styles.workflowCandidateMeta}>
-                    <span>{lang === "zh" ? "资料候选" : sourceCollectionSourceTypeLabel(candidate.candidateType, lang)}</span>
+                    <span>{sourceCollectionSourceFilterLabel(sourceCollectionCandidateSourceCategory(candidate, lang), lang)}</span>
                     <span>{formatTime(candidate.updatedAt, lang)}</span>
                     {sourceQualitySummary ? (
                       <span>{lang === "zh" ? "评分" : "score"} {sourceQualitySummary.overallScore}/100</span>
@@ -4425,6 +4562,22 @@ export function TeamsRoute({
                     ) : canPlanPaperNoteChunks ? (
                       <span>{lang === "zh" ? "可分块" : "chunk ready"}</span>
                     ) : null}
+                  </div>
+                  <div className={`${styles.sourceCollectionResultSource} ${provenance.kind === "missing" ? styles.sourceCollectionResultSourceMissing : ""}`}>
+                    <span>{provenance.label}</span>
+                    {provenance.href ? (
+                      <a
+                        href={provenance.href}
+                        target="_blank"
+                        rel="noreferrer"
+                        title={provenance.href}
+                        onClick={(event) => event.stopPropagation()}
+                      >
+                        {provenance.value}
+                      </a>
+                    ) : (
+                      <code title={provenance.value}>{provenance.value}</code>
+                    )}
                   </div>
                   <div className={styles.workflowCandidateActions}>
                     <button
@@ -4494,7 +4647,11 @@ export function TeamsRoute({
             })}
           </div>
         ) : (
-          <div className={styles.empty}>{lang === "zh" ? "本轮还没有候选资料。先完成资料搜集并导入候选。" : "No candidates from this run yet."}</div>
+          <div className={styles.empty}>
+            {sourceCollectionRunCandidateCount
+              ? (lang === "zh" ? "当前过滤条件下没有候选资料。" : "No candidates match this filter.")
+              : (lang === "zh" ? "本轮还没有候选资料。先完成资料搜集并导入候选。" : "No candidates from this run yet.")}
+          </div>
         )}
         {teamWorkflowSourceQualityStatus?.actionItems.length ? (
           <div className={styles.workflowIngestionActions}>
@@ -4516,7 +4673,7 @@ export function TeamsRoute({
   }
 
   function renderSourceCollectionCandidatePanel() {
-    const visibleCandidates = sourceCollectionRunCandidates.slice(0, 12);
+    const visibleCandidates = sourceCollectionFilteredRunCandidates;
     return (
       <details
         id="source-collection-candidates-panel"
@@ -4537,8 +4694,10 @@ export function TeamsRoute({
           <span>{lang === "zh" ? "候选库" : "Candidate library"}</span>
           <small>{sourceCollectionRunCandidateCount}</small>
         </summary>
+        {renderSourceCollectionFilterBar(sourceCollectionCandidateFilterCounts, lang === "zh" ? "候选资料过滤" : "Candidate source filters")}
         <div className={styles.workflowSourceQualityStats}>
           <span>{lang === "zh" ? "本轮候选" : "run candidates"} <strong>{sourceCollectionRunCandidateCount}</strong></span>
+          <span>{lang === "zh" ? "当前显示" : "showing"} <strong>{visibleCandidates.length}</strong></span>
           <span>{lang === "zh" ? "已筛" : "assessed"} <strong>{sourceCollectionRunAssessedCount}</strong></span>
           <span>{lang === "zh" ? "通过" : "approved"} <strong>{sourceCollectionRunApprovedCount}</strong></span>
           <span>{lang === "zh" ? "待筛" : "pending"} <strong>{sourceCollectionRunPendingScreeningCount}</strong></span>
@@ -4548,6 +4707,7 @@ export function TeamsRoute({
             {visibleCandidates.map((candidate) => {
               const sourceQualitySummary = candidateSourceQualityAssessmentSummary(candidate);
               const chunkPlanSummary = candidatePaperNoteChunkPlanSummary(candidate);
+              const provenance = sourceCollectionCandidateProvenance(candidate, lang);
               const qualityText = sourceQualitySummary
                 ? `${workflowIngestionStatusLabel(sourceQualitySummary.decision, lang)} · ${sourceQualitySummary.overallScore}/100`
                 : (lang === "zh" ? "待筛选" : "pending screening");
@@ -4571,25 +4731,83 @@ export function TeamsRoute({
                   </div>
                   <p>{candidate.summary || candidate.candidateId}</p>
                   <div className={styles.workflowCandidateMeta}>
-                    <span>{sourceCollectionSourceTypeLabel(candidate.sourceKind || candidate.candidateType, lang)}</span>
+                    <span>{sourceCollectionSourceFilterLabel(sourceCollectionCandidateSourceCategory(candidate, lang), lang)}</span>
                     <span>{qualityText}</span>
                     {chunkPlanSummary ? (
                       <span>paper_note {chunkPlanSummary.completedChunkCount}/{chunkPlanSummary.chunkCount}</span>
                     ) : null}
                     <span>{formatTime(candidate.updatedAt, lang)}</span>
                   </div>
+                  <div className={`${styles.sourceCollectionResultSource} ${provenance.kind === "missing" ? styles.sourceCollectionResultSourceMissing : ""}`}>
+                    <span>{provenance.label}</span>
+                    {provenance.href ? (
+                      <a
+                        href={provenance.href}
+                        target="_blank"
+                        rel="noreferrer"
+                        title={provenance.href}
+                        onClick={(event) => event.stopPropagation()}
+                      >
+                        {provenance.value}
+                      </a>
+                    ) : (
+                      <code title={provenance.value}>{provenance.value}</code>
+                    )}
+                  </div>
                 </article>
               );
             })}
           </div>
         ) : (
-          <div className={styles.empty}>{lang === "zh" ? "本轮暂无候选资料。" : "No candidates from this run yet."}</div>
+          <div className={styles.empty}>
+            {sourceCollectionRunCandidateCount
+              ? (lang === "zh" ? "当前过滤条件下没有候选资料。" : "No candidates match this filter.")
+              : (lang === "zh" ? "本轮暂无候选资料。" : "No candidates from this run yet.")}
+          </div>
         )}
       </details>
     );
   }
 
   function renderSourceCollectionGraphPanel() {
+    const graphNodeSourceCategories = (teamWorkflowCandidateGraph?.nodes ?? []).map((node) => {
+      const candidate = teamWorkflowCandidatesById.get(node.candidateId);
+      return candidate ? sourceCollectionCandidateSourceCategory(candidate, lang) : "missing";
+    });
+    const graphFilterCounts = sourceCollectionFilterCounts(graphNodeSourceCategories);
+    const visibleGraphNodeIds = new Set(
+      (teamWorkflowCandidateGraph?.nodes ?? [])
+        .filter((node) => {
+          const candidate = teamWorkflowCandidatesById.get(node.candidateId);
+          const category = candidate ? sourceCollectionCandidateSourceCategory(candidate, lang) : "missing";
+          return sourceCollectionFilterMatches(sourceCollectionSourceFilter, category);
+        })
+        .map((node) => node.candidateId),
+    );
+    const visibleGraph = teamWorkflowCandidateGraph
+      ? {
+          ...teamWorkflowCandidateGraph,
+          nodes: teamWorkflowCandidateGraph.nodes.filter((node) => visibleGraphNodeIds.has(node.candidateId)),
+          edges: teamWorkflowCandidateGraph.edges.filter((edge) =>
+            visibleGraphNodeIds.has(edge.sourceCandidateId) && visibleGraphNodeIds.has(edge.targetCandidateId),
+          ),
+          missingLinks: teamWorkflowCandidateGraph.missingLinks.filter((edge) =>
+            visibleGraphNodeIds.has(edge.sourceCandidateId) || visibleGraphNodeIds.has(edge.targetCandidateId),
+          ),
+          unreviewedNodes: teamWorkflowCandidateGraph.unreviewedNodes.filter((node) => visibleGraphNodeIds.has(node.candidateId)),
+        }
+      : null;
+    const visibleGraphSummary = visibleGraph
+      ? {
+          nodeCount: visibleGraph.nodes.length,
+          edgeCount: visibleGraph.edges.length,
+          missingLinkCount: visibleGraph.missingLinks.length,
+          unreviewedNodeCount: visibleGraph.unreviewedNodes.length,
+        }
+      : null;
+    const visibleGraphLayout = visibleGraph && visibleGraphSummary
+      ? workflowGraphLayout({ ...visibleGraph, summary: { ...visibleGraph.summary, ...visibleGraphSummary } })
+      : null;
     return (
       <details
         id="source-collection-graph-panel"
@@ -4610,21 +4828,22 @@ export function TeamsRoute({
           <span>{lang === "zh" ? "候选图谱" : "Candidate graph"}</span>
           <small>{candidateGraphNodeCount} / {candidateGraphEdgeCount}</small>
         </summary>
-        {teamWorkflowCandidateGraph && teamWorkflowCandidateGraphLayout ? (
+        {renderSourceCollectionFilterBar(graphFilterCounts, lang === "zh" ? "图谱节点过滤" : "Graph source filters")}
+        {visibleGraph && visibleGraphLayout && visibleGraphSummary && visibleGraph.nodes.length ? (
           <>
             <div className={styles.workflowGraphStats}>
-              <span>{lang === "zh" ? "节点" : "nodes"} <strong>{teamWorkflowCandidateGraph.summary.nodeCount}</strong></span>
-              <span>{lang === "zh" ? "边" : "edges"} <strong>{teamWorkflowCandidateGraph.summary.edgeCount}</strong></span>
-              <span>{lang === "zh" ? "缺口" : "missing"} <strong>{teamWorkflowCandidateGraph.summary.missingLinkCount}</strong></span>
-              <span>{lang === "zh" ? "待审" : "review"} <strong>{teamWorkflowCandidateGraph.summary.unreviewedNodeCount}</strong></span>
+              <span>{lang === "zh" ? "当前节点" : "visible nodes"} <strong>{visibleGraphSummary.nodeCount}</strong></span>
+              <span>{lang === "zh" ? "当前关系" : "visible edges"} <strong>{visibleGraphSummary.edgeCount}</strong></span>
+              <span>{lang === "zh" ? "缺口" : "missing"} <strong>{visibleGraphSummary.missingLinkCount}</strong></span>
+              <span>{lang === "zh" ? "待审" : "review"} <strong>{visibleGraphSummary.unreviewedNodeCount}</strong></span>
             </div>
             <div
               className={styles.workflowGraphFrame}
-              style={{ "--workflow-graph-height": `${teamWorkflowCandidateGraphLayout.height}px` } as WorkflowGraphFrameStyle}
+              style={{ "--workflow-graph-height": `${visibleGraphLayout.height}px` } as WorkflowGraphFrameStyle}
             >
               <svg
                 className={styles.workflowGraphSvg}
-                viewBox={`0 0 ${WORKFLOW_GRAPH_WIDTH} ${teamWorkflowCandidateGraphLayout.height}`}
+                viewBox={`0 0 ${WORKFLOW_GRAPH_WIDTH} ${visibleGraphLayout.height}`}
                 preserveAspectRatio="xMinYMin meet"
                 aria-hidden="true"
               >
@@ -4633,8 +4852,8 @@ export function TeamsRoute({
                     <path d="M 0 0 L 10 5 L 0 10 z" />
                   </marker>
                 </defs>
-                {teamWorkflowCandidateGraphLayout.edges.map((edge) => {
-                  const path = workflowGraphEdgePath(edge, teamWorkflowCandidateGraphLayout.nodes);
+                {visibleGraphLayout.edges.map((edge) => {
+                  const path = workflowGraphEdgePath(edge, visibleGraphLayout.nodes);
                   return path ? (
                     <path
                       key={`${edge.sourceCandidateId}-${edge.targetCandidateId}-${edge.relation}`}
@@ -4644,7 +4863,7 @@ export function TeamsRoute({
                   ) : null;
                 })}
               </svg>
-              {teamWorkflowCandidateGraphLayout.nodes.map((node) => (
+              {visibleGraphLayout.nodes.map((node) => (
                 <div
                   key={node.candidateId}
                   className={`${styles.workflowGraphNode} ${workflowGraphNodeTone(node)}`}
@@ -4659,10 +4878,63 @@ export function TeamsRoute({
                 </div>
               ))}
             </div>
+            {visibleGraph.nodes.length ? (
+              <div className={styles.workflowCandidateList}>
+                {visibleGraph.nodes.map((node) => {
+                  const candidate = teamWorkflowCandidatesById.get(node.candidateId) ?? null;
+                  const provenance = candidate ? sourceCollectionCandidateProvenance(candidate, lang) : null;
+                  const selected = candidate ? selectedSourceCollectionCandidateId === candidate.candidateId : false;
+                  return (
+                    <article
+                      key={`graph-node-${node.candidateId}`}
+                      className={`${styles.workflowCandidateItem} ${selected ? styles.workflowCandidateItemSelected : ""}`}
+                      role={candidate ? "button" : undefined}
+                      tabIndex={candidate ? 0 : -1}
+                      aria-pressed={candidate ? selected : undefined}
+                      onClick={candidate ? () => selectSourceCollectionCandidate(candidate) : undefined}
+                      onKeyDown={candidate ? (event) => sourceCollectionCandidateCardKeyDown(event, candidate) : undefined}
+                    >
+                      <div className={styles.workflowCandidateHeader}>
+                        <strong>{node.title || node.candidateId}</strong>
+                        <span className={`${styles.workflowTag} ${workflowQualityTone(node.qualityStatus || node.currentState)}`}>{workflowStateLabel(node.currentState, lang)}</span>
+                      </div>
+                      <p>{node.candidateId}</p>
+                      <div className={styles.workflowCandidateMeta}>
+                        <span>{sourceCollectionSourceTypeLabel(node.candidateType, lang)}</span>
+                        <span>{node.currentWorkflowNode}</span>
+                        {candidate ? (
+                          <span>{sourceCollectionSourceFilterLabel(sourceCollectionCandidateSourceCategory(candidate, lang), lang)}</span>
+                        ) : null}
+                      </div>
+                      {provenance ? (
+                        <div className={`${styles.sourceCollectionResultSource} ${provenance.kind === "missing" ? styles.sourceCollectionResultSourceMissing : ""}`}>
+                          <span>{provenance.label}</span>
+                          {provenance.href ? (
+                            <a
+                              href={provenance.href}
+                              target="_blank"
+                              rel="noreferrer"
+                              title={provenance.href}
+                              onClick={(event) => event.stopPropagation()}
+                            >
+                              {provenance.value}
+                            </a>
+                          ) : (
+                            <code title={provenance.value}>{provenance.value}</code>
+                          )}
+                        </div>
+                      ) : null}
+                    </article>
+                  );
+                })}
+              </div>
+            ) : null}
           </>
         ) : (
           <div className={styles.empty}>
-            {teamWorkflowCandidateGraphQuery.isPending
+            {teamWorkflowCandidateGraph && !visibleGraph?.nodes.length
+              ? (lang === "zh" ? "当前过滤条件下没有候选图谱节点。" : "No graph nodes match this filter.")
+              : teamWorkflowCandidateGraphQuery.isPending
               ? (lang === "zh" ? "正在读取候选图谱..." : "Loading candidate graph...")
               : (lang === "zh" ? "尚未生成候选图谱。" : "No candidate graph yet.")}
           </div>
@@ -4678,6 +4950,21 @@ export function TeamsRoute({
   }
 
   function renderSourceCollectionMemoryPanel() {
+    const actionItems = teamWorkflowKnowledgeIngestionStatus?.actionItems ?? [];
+    const actionItemsByCandidateId = new Map<string, TeamWorkflowKnowledgeIngestionStatus["actionItems"]>();
+    actionItems.forEach((item) => {
+      if (!item.candidateId) {
+        return;
+      }
+      const current = actionItemsByCandidateId.get(item.candidateId) ?? [];
+      current.push(item);
+      actionItemsByCandidateId.set(item.candidateId, current);
+    });
+    const memoryCandidates = sourceCollectionFilteredRunCandidates.filter((candidate) =>
+      sourceCollectionCandidateQualityState(candidate).approved || actionItemsByCandidateId.has(candidate.candidateId),
+    );
+    const visibleMemoryCandidates = memoryCandidates.length ? memoryCandidates : sourceCollectionFilteredRunCandidates;
+    const orphanActionItems = actionItems.filter((item) => !item.candidateId || !teamWorkflowCandidatesById.has(item.candidateId));
     return (
       <details
         id="source-collection-memory-panel"
@@ -4698,14 +4985,81 @@ export function TeamsRoute({
           <span>{lang === "zh" ? "共享记忆前审" : "Memory precheck"}</span>
           <small>{knowledgePendingReviewCount} / {formalKnowledgeItemCount}</small>
         </summary>
+        {renderSourceCollectionFilterBar(sourceCollectionCandidateFilterCounts, lang === "zh" ? "前审资料过滤" : "Memory precheck source filters")}
         <div className={styles.workflowSourceQualityStats}>
           <span>{lang === "zh" ? "待审" : "pending"} <strong>{knowledgePendingReviewCount}</strong></span>
           <span>{lang === "zh" ? "正式" : "formal"} <strong>{formalKnowledgeItemCount}</strong></span>
           <span>{lang === "zh" ? "通过候选" : "approved"} <strong>{sourceCollectionApprovedCount}</strong></span>
+          <span>{lang === "zh" ? "当前显示" : "showing"} <strong>{visibleMemoryCandidates.length}</strong></span>
         </div>
-        {teamWorkflowKnowledgeIngestionStatus?.actionItems.length ? (
+        {visibleMemoryCandidates.length ? (
+          <div className={styles.workflowCandidateList}>
+            {visibleMemoryCandidates.map((candidate) => {
+              const provenance = sourceCollectionCandidateProvenance(candidate, lang);
+              const sourceQualitySummary = candidateSourceQualityAssessmentSummary(candidate);
+              const candidateActionItems = actionItemsByCandidateId.get(candidate.candidateId) ?? [];
+              const selected = selectedSourceCollectionCandidateId === candidate.candidateId;
+              return (
+                <article
+                  key={`memory-${candidate.candidateId}`}
+                  className={`${styles.workflowCandidateItem} ${selected ? styles.workflowCandidateItemSelected : ""}`}
+                  role="button"
+                  tabIndex={0}
+                  aria-pressed={selected}
+                  onClick={() => selectSourceCollectionCandidate(candidate)}
+                  onKeyDown={(event) => sourceCollectionCandidateCardKeyDown(event, candidate)}
+                >
+                  <div className={styles.workflowCandidateHeader}>
+                    <strong>{candidate.title || candidate.candidateId}</strong>
+                    <span className={`${styles.workflowTag} ${workflowQualityTone(candidate.qualityStatus)}`}>
+                      {sourceQualitySummary
+                        ? workflowIngestionStatusLabel(sourceQualitySummary.decision, lang)
+                        : workflowStateLabel(candidate.currentState, lang)}
+                    </span>
+                  </div>
+                  <p>{candidate.summary || candidate.candidateId}</p>
+                  <div className={styles.workflowCandidateMeta}>
+                    <span>{sourceCollectionSourceFilterLabel(sourceCollectionCandidateSourceCategory(candidate, lang), lang)}</span>
+                    {sourceQualitySummary ? (
+                      <span>{lang === "zh" ? "评分" : "score"} {sourceQualitySummary.overallScore}/100</span>
+                    ) : null}
+                    <span>{formatTime(candidate.updatedAt, lang)}</span>
+                  </div>
+                  <div className={`${styles.sourceCollectionResultSource} ${provenance.kind === "missing" ? styles.sourceCollectionResultSourceMissing : ""}`}>
+                    <span>{provenance.label}</span>
+                    {provenance.href ? (
+                      <a
+                        href={provenance.href}
+                        target="_blank"
+                        rel="noreferrer"
+                        title={provenance.href}
+                        onClick={(event) => event.stopPropagation()}
+                      >
+                        {provenance.value}
+                      </a>
+                    ) : (
+                      <code title={provenance.value}>{provenance.value}</code>
+                    )}
+                  </div>
+                  {candidateActionItems.length ? (
+                    <div className={styles.workflowIngestionActions}>
+                      {candidateActionItems.map((item) => (
+                        <span key={`${item.code}-${item.message}`} className={workflowIngestionTone(item.severity)}>
+                          {workflowIngestionStatusLabel(item.severity, lang)} · {item.message}
+                        </span>
+                      ))}
+                    </div>
+                  ) : null}
+                </article>
+              );
+            })}
+          </div>
+        ) : (
+          <div className={styles.empty}>{lang === "zh" ? "当前过滤条件下没有前审资料。" : "No memory precheck items match this filter."}</div>
+        )}
+        {orphanActionItems.length ? (
           <div className={styles.workflowIngestionActions}>
-            {teamWorkflowKnowledgeIngestionStatus.actionItems.slice(0, 4).map((item) => (
+            {orphanActionItems.map((item) => (
               <span key={`${item.code}-${item.message}`} className={workflowIngestionTone(item.severity)}>
                 {workflowIngestionStatusLabel(item.severity, lang)} · {item.message}
               </span>
@@ -5611,6 +5965,13 @@ export function TeamsRoute({
     () => teamWorkflowCandidates.filter((candidate) => candidate.candidateType === "source_manifest"),
     [teamWorkflowCandidates],
   );
+  const teamWorkflowCandidatesById = useMemo(() => {
+    const mapping = new Map<string, TeamWorkflowCandidate>();
+    teamWorkflowCandidates.forEach((candidate) => {
+      mapping.set(candidate.candidateId, candidate);
+    });
+    return mapping;
+  }, [teamWorkflowCandidates]);
   const sourceCollectionRunCandidates = useMemo(
     () => selectedSourceCollectionRunEffectiveId
       ? sourceManifestCandidates.filter((candidate) => sourceCollectionCandidateTrace(candidate).runId === selectedSourceCollectionRunEffectiveId)
@@ -5664,12 +6025,34 @@ export function TeamsRoute({
     () => sourceCollectionRecords.map((record) => sourceCollectionRecordProvenance(record, lang)),
     [lang, sourceCollectionRecords],
   );
+  const sourceCollectionRecordSourceCategories = useMemo(
+    () => sourceCollectionRecords.map((record) => sourceCollectionRecordSourceCategory(record, lang)),
+    [lang, sourceCollectionRecords],
+  );
+  const sourceCollectionFilteredRecords = useMemo(
+    () => sourceCollectionRecords.filter((record) =>
+      sourceCollectionFilterMatches(sourceCollectionSourceFilter, sourceCollectionRecordSourceCategory(record, lang)),
+    ),
+    [lang, sourceCollectionRecords, sourceCollectionSourceFilter],
+  );
+  const sourceCollectionRunCandidateSourceCategories = useMemo(
+    () => sourceCollectionRunCandidates.map((candidate) => sourceCollectionCandidateSourceCategory(candidate, lang)),
+    [lang, sourceCollectionRunCandidates],
+  );
+  const sourceCollectionFilteredRunCandidates = useMemo(
+    () => sourceCollectionRunCandidates.filter((candidate) =>
+      sourceCollectionFilterMatches(sourceCollectionSourceFilter, sourceCollectionCandidateSourceCategory(candidate, lang)),
+    ),
+    [lang, sourceCollectionRunCandidates, sourceCollectionSourceFilter],
+  );
   const sourceCollectionRawRecordCount =
     Number(sourceCollectionRecordsQuery.data?.summary?.recordCount ?? sourceCollectionRunSummary?.recordCount ?? sourceCollectionRecords.length) || 0;
   const sourceCollectionRecordClickableSourceCount = sourceCollectionRecordProvenances.filter((item) => item.href).length;
   const sourceCollectionRecordLocalFileCount = sourceCollectionRecordProvenances.filter((item) => item.kind === "file").length;
   const sourceCollectionRecordMissingSourceCount = sourceCollectionRecordProvenances.filter((item) => item.kind === "missing").length;
   const sourceCollectionRunCandidateCount = sourceCollectionRunCandidates.length;
+  const sourceCollectionRecordFilterCounts = sourceCollectionFilterCounts(sourceCollectionRecordSourceCategories);
+  const sourceCollectionCandidateFilterCounts = sourceCollectionFilterCounts(sourceCollectionRunCandidateSourceCategories);
   const sourceCollectionRunAssessedCount = sourceCollectionRunCandidates.filter((candidate) => sourceCollectionCandidateQualityState(candidate).assessed).length;
   const sourceCollectionRunApprovedCount = sourceCollectionRunCandidates.filter((candidate) => sourceCollectionCandidateQualityState(candidate).approved).length;
   const sourceCollectionRunPendingScreeningCount = Math.max(0, sourceCollectionRunCandidateCount - sourceCollectionRunAssessedCount);
