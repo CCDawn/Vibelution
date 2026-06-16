@@ -59,6 +59,7 @@ from .i18n import resolve_language, text_for
 from .model_capability_service import model_record_image_input_support
 from .model_reference_service import ModelReferenceConflictError, assert_model_delete_safe
 from .runtime_scene_service import record_runtime_scene_event
+from .theme_background_service import theme_background_image_url
 from .workbench_contract_service import get_workbench_contract
 
 
@@ -187,6 +188,28 @@ def _normalize_llm_test_capability(capability: str | None) -> str:
 
 def _resolve_workspace_language(public_config: dict[str, Any]) -> str:
     return resolve_language(public_config.get("ui", {}).get("language", "zh"))
+
+
+def _theme_background_path(public_config: dict[str, Any]) -> str:
+    ui_config = public_config.get("ui", {}) if isinstance(public_config.get("ui"), dict) else {}
+    workbench_theme = ui_config.get("workbench_theme", {}) if isinstance(ui_config.get("workbench_theme"), dict) else {}
+    return str(workbench_theme.get("background_image_path") or "").strip().replace("\\", "/")
+
+
+def _with_config_workspace_defaults(
+    public_config: dict[str, Any],
+    *,
+    repair_stale_model_ref: bool = True,
+) -> dict[str, Any]:
+    payload = with_git_config_defaults(public_config, repair_stale_model_ref=repair_stale_model_ref)
+    ui_config = payload.setdefault("ui", {})
+    if not isinstance(ui_config, dict):
+        payload["ui"] = ui_config = {}
+    workbench_theme = ui_config.setdefault("workbench_theme", {})
+    if not isinstance(workbench_theme, dict):
+        ui_config["workbench_theme"] = workbench_theme = {}
+    workbench_theme.setdefault("background_image_path", "")
+    return payload
 
 
 def _profile_label(profile_id: str, lang: str, profile: dict[str, Any] | None = None) -> str:
@@ -361,7 +384,7 @@ def _draft_meta_has_pending_changes(draft_meta: dict | None) -> bool:
 
 def _llm_test_config_scope(public_config: dict[str, Any], draft_meta: dict | None) -> str:
     try:
-        persisted_hash = public_config_hash(with_git_config_defaults(load_public_config()))
+        persisted_hash = public_config_hash(_with_config_workspace_defaults(load_public_config()))
     except Exception:
         persisted_hash = ""
     draft_hash = public_config_hash(public_config)
@@ -1164,7 +1187,7 @@ def _build_workspace(
     message: str = "",
     raw_toml: str | None = None,
 ) -> dict[str, Any]:
-    public_config = with_git_config_defaults(public_config)
+    public_config = _with_config_workspace_defaults(public_config)
     diagnostics = inspect_public_config(public_config)
     diagnosis = diagnostics.get("diagnosis", {})
     summary = diagnostics.get("summary", {})
@@ -1194,6 +1217,8 @@ def _build_workspace(
         "modelLibraryCount": len(model_library) if isinstance(model_library, dict) else 0,
         "blockingCount": len(blocking),
         "warningCount": len(warnings),
+        "themeBackgroundImagePath": _theme_background_path(public_config),
+        "themeBackgroundImageUrl": theme_background_image_url(_theme_background_path(public_config)),
         "sections": _config_sections(lang, editor_sections),
         "publicConfig": public_config,
         "rawToml": _read_raw_public_config() if raw_toml is None else raw_toml,
@@ -1209,10 +1234,10 @@ def _build_workspace(
 
 
 def _prepare_submitted_public_config(public_config: dict[str, Any] | None, old_public: dict[str, Any]) -> dict[str, Any]:
-    old_with_defaults = with_git_config_defaults(old_public)
+    old_with_defaults = _with_config_workspace_defaults(old_public)
     submitted = copy.deepcopy(public_config) if isinstance(public_config, dict) else copy.deepcopy(old_with_defaults)
     submitted_with_secret_blanks = preserve_secret_blanks(submitted, old_with_defaults)
-    prepared = with_git_config_defaults(submitted_with_secret_blanks, repair_stale_model_ref=False)
+    prepared = _with_config_workspace_defaults(submitted_with_secret_blanks, repair_stale_model_ref=False)
     raw_submitted_git_model_ref = _git_commit_model_ref(submitted_with_secret_blanks)
     old_raw_git_model_ref = _git_commit_model_ref(old_public)
     old_default_git_model_ref = _git_commit_model_ref(old_with_defaults)
@@ -1228,8 +1253,8 @@ def _prepare_submitted_public_config(public_config: dict[str, Any] | None, old_p
 def _normalize_apply_base_config(base_config: dict[str, Any] | None, old_public: dict[str, Any]) -> dict[str, Any] | None:
     if not isinstance(base_config, dict):
         return None
-    old_with_defaults = with_git_config_defaults(old_public)
-    prepared = with_git_config_defaults(preserve_secret_blanks(copy.deepcopy(base_config), old_with_defaults))
+    old_with_defaults = _with_config_workspace_defaults(old_public)
+    prepared = _with_config_workspace_defaults(preserve_secret_blanks(copy.deepcopy(base_config), old_with_defaults))
     return strip_runtime_model_capability_fields(prepared)
 
 
@@ -1368,7 +1393,7 @@ def _merge_submitted_config_changes(
 
 
 def _assert_base_hash_matches(base_hash: str, old_public: dict[str, Any], lang: str) -> str:
-    current_hash = public_config_hash(with_git_config_defaults(old_public))
+    current_hash = public_config_hash(_with_config_workspace_defaults(old_public))
     raw_current_hash = public_config_hash(old_public)
     expected_hash = str(base_hash or "").strip()
     if expected_hash and expected_hash not in {current_hash, raw_current_hash}:
@@ -1383,7 +1408,7 @@ def _assert_base_hash_matches(base_hash: str, old_public: dict[str, Any], lang: 
 
 
 def _assert_apply_base_hash_matches(base_hash: str, base_config: dict[str, Any], lang: str) -> str:
-    base_hash_value = public_config_hash(with_git_config_defaults(base_config))
+    base_hash_value = public_config_hash(_with_config_workspace_defaults(base_config))
     expected_hash = str(base_hash or "").strip()
     if expected_hash and expected_hash != base_hash_value:
         raise ConfigConflictError(
@@ -1399,7 +1424,7 @@ def _assert_apply_base_hash_matches(base_hash: str, base_config: dict[str, Any],
 def get_config_summary() -> dict[str, Any]:
     """Return a condensed config summary for shell-wide consumers."""
 
-    public_config = with_git_config_defaults(load_public_config())
+    public_config = _with_config_workspace_defaults(load_public_config())
     diagnostics = inspect_public_config(public_config)
     diagnosis = diagnostics.get("diagnosis", {})
     contract = get_workbench_contract(public_config)
@@ -1409,6 +1434,7 @@ def get_config_summary() -> dict[str, Any]:
 
     blocking = diagnosis.get("blocking_issues") or []
     warnings = diagnosis.get("warnings") or []
+    theme_background_path = _theme_background_path(public_config)
 
     return {
         "hash": public_config_hash(public_config),
@@ -1422,6 +1448,8 @@ def get_config_summary() -> dict[str, Any]:
         "modelLibraryCount": len(model_library) if isinstance(model_library, dict) else 0,
         "modelLabels": _model_label_map(public_config),
         "modelImageInputSupport": _model_image_input_support_map(public_config),
+        "themeBackgroundImagePath": theme_background_path,
+        "themeBackgroundImageUrl": theme_background_image_url(theme_background_path),
         "blockingCount": len(blocking),
         "warningCount": len(warnings),
         "sections": _config_sections(lang, build_editor_sections(public_config, lang)),
@@ -1431,7 +1459,7 @@ def get_config_summary() -> dict[str, Any]:
 def get_config_workspace() -> dict[str, Any]:
     """Return the full config workspace payload for the Config route."""
 
-    public_config = with_git_config_defaults(load_public_config())
+    public_config = _with_config_workspace_defaults(load_public_config())
     return _build_workspace(public_config)
 
 
@@ -1455,7 +1483,7 @@ def preview_config_workspace(public_config: dict[str, Any] | None, draft_meta: d
 def update_intake_mode(intake_mode: str) -> dict[str, Any]:
     """Persist the evolution intake mode and return the refreshed config summary."""
 
-    public_config = with_git_config_defaults(load_public_config())
+    public_config = _with_config_workspace_defaults(load_public_config())
     evolution_cfg = public_config.setdefault("evolution", {})
     evolution_cfg["intake_mode"] = intake_mode
     save_public_config(public_config)
@@ -1477,7 +1505,7 @@ def update_intake_mode(intake_mode: str) -> dict[str, Any]:
 def update_language(language: str) -> dict[str, Any]:
     """Persist the UI language and return the refreshed config summary."""
 
-    public_config = with_git_config_defaults(load_public_config())
+    public_config = _with_config_workspace_defaults(load_public_config())
     ui_cfg = public_config.setdefault("ui", {})
     ui_cfg["language"] = "en" if str(language or "").strip().lower() == "en" else "zh"
     save_public_config(public_config)
@@ -1510,7 +1538,7 @@ def draft_add_model(
     api_key_env: str = "",
     api_key: str = "",
 ) -> dict[str, Any]:
-    old_public = with_git_config_defaults(load_public_config())
+    old_public = _with_config_workspace_defaults(load_public_config())
     current = _prepare_submitted_public_config(public_config, old_public)
     current_meta = _normalize_draft_meta(draft_meta)
     validate_llm_public_config(current)
@@ -1574,7 +1602,7 @@ def draft_update_model(
     api_key: str = "",
     clear_api_key: bool = False,
 ) -> dict[str, Any]:
-    old_public = with_git_config_defaults(load_public_config())
+    old_public = _with_config_workspace_defaults(load_public_config())
     current = _prepare_submitted_public_config(public_config, old_public)
     current_meta = _normalize_draft_meta(draft_meta)
     validate_llm_public_config(current)
@@ -1617,7 +1645,7 @@ def draft_delete_model(
     base_hash: str = "",
     model_id: str,
 ) -> dict[str, Any]:
-    old_public = with_git_config_defaults(load_public_config())
+    old_public = _with_config_workspace_defaults(load_public_config())
     current = _prepare_submitted_public_config(public_config, old_public)
     current_meta = _normalize_draft_meta(draft_meta)
     current_library = current.get("llm", {}).get("model_library", {}) if isinstance(current.get("llm", {}), dict) else {}
@@ -1648,7 +1676,7 @@ def run_draft_llm_test(
     profile_id: str | None = None,
     capability: str | None = None,
 ) -> dict[str, Any]:
-    old_public = with_git_config_defaults(load_public_config())
+    old_public = _with_config_workspace_defaults(load_public_config())
     submitted = _prepare_submitted_public_config(public_config, old_public)
     validate_llm_public_config(submitted)
     normalized_model_id = str(model_id or "").strip()
@@ -1683,7 +1711,7 @@ def draft_check_model_image_input_capabilities(
     base_hash: str = "",
     model_ids: list[str] | None = None,
 ) -> dict[str, Any]:
-    old_public = with_git_config_defaults(load_public_config())
+    old_public = _with_config_workspace_defaults(load_public_config())
     current = _prepare_submitted_public_config(public_config, old_public)
     current_meta = _normalize_draft_meta(draft_meta)
     validate_llm_public_config(current)
@@ -2288,7 +2316,7 @@ def discover_config_models(
     api_key_env: str = "",
     api_key: str = "",
 ) -> dict[str, Any]:
-    old_public = with_git_config_defaults(load_public_config())
+    old_public = _with_config_workspace_defaults(load_public_config())
     current = _prepare_submitted_public_config(public_config, old_public)
     current_meta = _normalize_draft_meta(draft_meta)
     validate_llm_public_config(current)
@@ -2460,7 +2488,7 @@ def apply_config_workspace(
     base_hash: str = "",
 ) -> dict[str, Any]:
     old_public = load_public_config()
-    current_public = with_git_config_defaults(old_public)
+    current_public = _with_config_workspace_defaults(old_public)
     submitted = _prepare_submitted_public_config(public_config, old_public)
     submitted_base = _normalize_apply_base_config(base_config, old_public)
     lang = _resolve_workspace_language(submitted)
@@ -2510,7 +2538,7 @@ def apply_config_workspace(
         updated_envs.append(str(env_name))
         _drop_pending_api_key_token(api_key)
 
-    persisted = with_git_config_defaults(load_public_config())
+    persisted = _with_config_workspace_defaults(load_public_config())
     reload_config(str(CONFIG_PATH))
     llm_config = persisted.get("llm", {}) if isinstance(persisted.get("llm", {}), dict) else {}
     model_library = llm_config.get("model_library", {}) if isinstance(llm_config, dict) else {}

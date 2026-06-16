@@ -26,6 +26,10 @@ from core.web.services.config_service import (
     update_language,
 )
 from core.web.services.model_reference_service import ModelReferenceConflictError
+from core.web.services.theme_background_service import (
+    resolve_theme_background_file,
+    store_theme_background_image,
+)
 
 
 router = APIRouter(tags=["config"])
@@ -95,6 +99,12 @@ class ConfigAvatarImagePayload(BaseModel):
     dataBase64: str = ""
 
 
+class ConfigThemeBackgroundImagePayload(BaseModel):
+    filename: str = ""
+    contentType: str = ""
+    dataBase64: str = ""
+
+
 def _raise_config_http_error(exc: Exception) -> None:
     if isinstance(exc, ModelReferenceConflictError):
         raise HTTPException(status_code=409, detail=exc.impact) from exc
@@ -141,6 +151,29 @@ def config_get_avatar_image(filename: str) -> FileResponse:
         raise HTTPException(status_code=404, detail="Avatar image not found") from exc
     if not path.exists() or not path.is_file():
         raise HTTPException(status_code=404, detail="Avatar image not found")
+    return FileResponse(path)
+
+
+@router.post("/config/theme-background-image")
+def config_upload_theme_background_image(payload: ConfigThemeBackgroundImagePayload) -> dict:
+    try:
+        return store_theme_background_image(
+            filename=payload.filename,
+            content_type=payload.contentType,
+            data_base64=payload.dataBase64,
+        )
+    except Exception as exc:  # pragma: no cover - routed below
+        _raise_config_http_error(exc)
+
+
+@router.get("/config/theme-background-image/{filename}")
+def config_get_theme_background_image(filename: str) -> FileResponse:
+    try:
+        path = resolve_theme_background_file(filename)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Theme background image not found") from exc
+    if not path.exists() or not path.is_file():
+        raise HTTPException(status_code=404, detail="Theme background image not found")
     return FileResponse(path)
 
 

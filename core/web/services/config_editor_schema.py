@@ -85,6 +85,8 @@ FIELD_LABELS = {
         "ui.refresh_rate": "刷新频率",
         "ui.show_ascii_art": "显示 ASCII Art",
         "ui.show_welcome": "显示欢迎面板",
+        "ui.workbench_theme": "工作台主题",
+        "ui.workbench_theme.background_image_path": "工作台背景图片",
         "network.proxy_enabled": "启用代理",
         "network.proxy_url": "代理地址",
         "evolution.chat_dataset.enabled": "启用 chat 数据采样",
@@ -134,6 +136,8 @@ FIELD_LABELS = {
         "ui.refresh_rate": "Refresh Rate",
         "ui.show_ascii_art": "Show ASCII Art",
         "ui.show_welcome": "Show Welcome Panel",
+        "ui.workbench_theme": "Workbench Theme",
+        "ui.workbench_theme.background_image_path": "Workbench Background Image",
         "network.proxy_enabled": "Enable Proxy",
         "network.proxy_url": "Proxy URL",
         "evolution.chat_dataset.enabled": "Enable Chat Dataset Capture",
@@ -275,6 +279,7 @@ FIELD_HINTS = {
         "user_profile.preferences": "用户偏好列表，会作为 agent 的参考依据进入系统提示词。",
         "user_profile.avatar_preset": "用户头像预设，仅用于前端显示，不把图片内容传给模型。",
         "user_profile.avatar_image_path": "上传本地图片后会复制到项目头像目录，仅用于前端显示，不把图片内容传给模型。",
+        "ui.workbench_theme.background_image_path": "上传本地图片后会复制到项目外配置资源目录，并作为工作台背景显示。",
     },
     "en": {
         "runtime.profile": "Sets the default runtime posture. Start with safe_local or debug in most cases.",
@@ -298,6 +303,7 @@ FIELD_HINTS = {
         "user_profile.preferences": "User preference list included as agent reference context.",
         "user_profile.avatar_preset": "User avatar preset for frontend display only. Image content is not sent to the model.",
         "user_profile.avatar_image_path": "Local image uploads are copied into the project avatar directory for frontend display only. Image content is not sent to the model.",
+        "ui.workbench_theme.background_image_path": "Local image uploads are copied into the external config resource directory and shown as the workbench background.",
     },
 }
 
@@ -419,6 +425,8 @@ def _field_options_for_config(path: str, public_config: dict[str, Any], lang: st
 def _field_kind(path: str, value: Any, options: list[dict[str, str]] | None = None) -> tuple[str, str]:
     if path == "user_profile.avatar_image_path":
         return "image", "Image"
+    if path == "ui.workbench_theme.background_image_path":
+        return "background_image", "Image"
     if path in {"user_profile.bio", "git.commit_message_prompt"}:
         return "multiline", "Multiline"
     if isinstance(value, bool):

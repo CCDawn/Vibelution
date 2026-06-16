@@ -30,6 +30,21 @@
   color: var(--fg-primary);
 }
 
+.shell[data-theme-background="custom"] {
+  --shell-surface-muted: rgba(15, 18, 24, 0.76);
+  --shell-panel: rgba(19, 23, 30, 0.9);
+  --shell-panel-soft: rgba(27, 32, 41, 0.88);
+  --shell-card: rgba(18, 22, 29, 0.7);
+  background:
+    linear-gradient(180deg, rgba(7, 10, 16, 0.68) 0%, rgba(7, 10, 16, 0.54) 44%, rgba(6, 8, 13, 0.78) 100%),
+    var(--workbench-theme-background-image),
+    linear-gradient(180deg, #090b11 0%, var(--bg-canvas) 46%, var(--shell-page-end) 100%);
+  background-position: center, center, center;
+  background-size: auto, cover, auto;
+  background-repeat: no-repeat, no-repeat, no-repeat;
+  background-attachment: fixed, fixed, fixed;
+}
+
 .shell::before,
 .shell::after {
   content: "";
@@ -103,9 +118,28 @@
     linear-gradient(180deg, #ffffff 0%, #f7f7f8 100%);
 }
 
+.shell[data-theme="light"][data-theme-background="custom"] {
+  --shell-surface-muted: rgba(255, 255, 255, 0.8);
+  --shell-panel: rgba(255, 255, 255, 0.94);
+  --shell-panel-soft: rgba(247, 247, 248, 0.9);
+  --shell-card: rgba(247, 247, 248, 0.76);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.66) 0%, rgba(255, 255, 255, 0.5) 48%, rgba(247, 247, 248, 0.82) 100%),
+    var(--workbench-theme-background-image),
+    linear-gradient(180deg, #ffffff 0%, #f7f7f8 100%);
+  background-position: center, center, center;
+  background-size: auto, cover, auto;
+  background-repeat: no-repeat, no-repeat, no-repeat;
+  background-attachment: fixed, fixed, fixed;
+}
+
 .shell[data-theme="light"]::before {
   opacity: 0.34;
   filter: none;
+}
+
+.shell[data-theme-background="custom"]::before {
+  opacity: 0.28;
 }
 
 .shell[data-theme="light"]::after {

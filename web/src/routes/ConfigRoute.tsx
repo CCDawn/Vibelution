@@ -502,6 +502,10 @@ export const CONFIG_COPY = {
     clearAvatarImage: "清除图片",
     avatarImageUploading: "上传头像图片中",
     avatarImageUploadFailed: "头像图片上传失败：",
+    uploadThemeBackgroundImage: "上传背景图片",
+    clearThemeBackgroundImage: "恢复默认背景",
+    themeBackgroundImageUploading: "上传背景图片中",
+    themeBackgroundImageUploadFailed: "背景图片上传失败：",
     avatarCropTitle: "裁剪头像",
     avatarCropHint: "拖动图片调整位置，使用滑杆缩放；确认后会保存 1:1 裁剪结果。",
     avatarCropZoom: "缩放",
@@ -732,6 +736,10 @@ export const CONFIG_COPY = {
     clearAvatarImage: "Clear image",
     avatarImageUploading: "Uploading avatar image",
     avatarImageUploadFailed: "Avatar image upload failed: ",
+    uploadThemeBackgroundImage: "Upload background image",
+    clearThemeBackgroundImage: "Restore default background",
+    themeBackgroundImageUploading: "Uploading background image",
+    themeBackgroundImageUploadFailed: "Background image upload failed: ",
     avatarCropTitle: "Crop avatar",
     avatarCropHint: "Drag the image to reposition it and use the slider to zoom. Confirm saves a 1:1 crop.",
     avatarCropZoom: "Zoom",
@@ -1461,6 +1469,7 @@ type ConfigSectionEditorProps = {
   onUiStateChange: (sectionId: string, nextState: ConfigSectionUiState) => void;
   onSaveSection: (path: string, nextValue: unknown) => Promise<boolean>;
   onAvatarImageUpload: (file: File) => Promise<AvatarImageUploadResponse | null>;
+  onThemeBackgroundImageUpload: (file: File) => Promise<AvatarImageUploadResponse | null>;
 };
 
 type AvatarImageUploadResponse = {
@@ -1506,6 +1515,23 @@ function avatarImagePreviewUrl(value: unknown): string {
   return `/api/config/avatar-image/${encodeURIComponent(filename)}`;
 }
 
+function themeBackgroundImagePreviewUrl(value: unknown): string {
+  const path = getString(value).replace(/\\/g, "/").trim();
+  const prefix = "theme_backgrounds/";
+  if (!path.startsWith(prefix)) {
+    return "";
+  }
+  const filename = path.slice(prefix.length);
+  if (!/^[A-Za-z0-9_.-]+$/.test(filename)) {
+    return "";
+  }
+  return `/api/config/theme-background-image/${encodeURIComponent(filename)}`;
+}
+
+function configEditorFieldKind(meta: ConfigEditorMeta | undefined): ConfigEditorMeta["kind"] | "background_image" {
+  return (meta?.kind ?? "text") as ConfigEditorMeta["kind"] | "background_image";
+}
+
 function ConfigSectionEditor({
   section,
   value,
@@ -1516,6 +1542,7 @@ function ConfigSectionEditor({
   onUiStateChange,
   onSaveSection,
   onAvatarImageUpload,
+  onThemeBackgroundImageUpload,
 }: ConfigSectionEditorProps) {
   const sectionExpanded = uiState.expanded;
   const editing = uiState.editing;
@@ -1631,19 +1658,24 @@ function ConfigSectionEditor({
 
   function renderFieldView(fieldValue: unknown, absolutePath: string) {
     const meta = metaMap[absolutePath];
-    if (meta?.kind === "image") {
-      const previewUrl = avatarImagePreviewUrl(fieldValue);
+    const kind = configEditorFieldKind(meta);
+    if (kind === "image" || kind === "background_image") {
+      const isBackgroundImage = kind === "background_image";
+      const previewUrl = isBackgroundImage ? themeBackgroundImagePreviewUrl(fieldValue) : avatarImagePreviewUrl(fieldValue);
       return (
-        <article key={absolutePath} className={`${styles.treeFieldCard} ${styles.treeFieldCardView} ${styles.avatarImageCard}`}>
+        <article
+          key={absolutePath}
+          className={`${styles.treeFieldCard} ${styles.treeFieldCardView} ${isBackgroundImage ? styles.themeBackgroundImageCard : styles.avatarImageCard}`}
+        >
           <div className={styles.treeFieldHead}>
             <span className={styles.treeFieldLabel}>{configLabel(metaMap, absolutePath)}</span>
           </div>
           {configHint(metaMap, absolutePath) ? <p className={styles.treeHint}>{configHint(metaMap, absolutePath)}</p> : null}
-          <div className={styles.avatarImageValue}>
+          <div className={isBackgroundImage ? styles.themeBackgroundImageValue : styles.avatarImageValue}>
             {previewUrl ? (
-              <img src={previewUrl} alt="" className={styles.avatarImagePreview} />
+              <img src={previewUrl} alt="" className={isBackgroundImage ? styles.themeBackgroundImagePreview : styles.avatarImagePreview} />
             ) : (
-              <span className={styles.avatarImagePlaceholder}>
+              <span className={isBackgroundImage ? styles.themeBackgroundImagePlaceholder : styles.avatarImagePlaceholder}>
                 <ImageIcon size={16} />
               </span>
             )}
@@ -1665,14 +1697,67 @@ function ConfigSectionEditor({
 
   function renderFieldEditor(fieldValue: unknown, absolutePath: string) {
     const meta = metaMap[absolutePath];
-    const kind = meta?.kind ?? "text";
+    const kind = configEditorFieldKind(meta);
     const imageUploading = uploadingImagePath === absolutePath;
     let control;
 
-    if (kind === "image") {
+    if (kind === "background_image") {
+      const previewUrl = themeBackgroundImagePreviewUrl(fieldValue);
+      control = (
+        <div className={styles.themeBackgroundImageEditor}>
+          <div className={styles.themeBackgroundImageValue}>
+            {previewUrl ? (
+              <img src={previewUrl} alt="" className={styles.themeBackgroundImagePreview} />
+            ) : (
+              <span className={styles.themeBackgroundImagePlaceholder}>
+                <ImageIcon size={16} />
+              </span>
+            )}
+            <span>{configLabel(metaMap, absolutePath)}</span>
+          </div>
+          <div className={styles.avatarImageActions}>
+            <label className={`${styles.actionButton} ${styles.compactButton} ${styles.fileUploadButton}`}>
+              <Upload size={14} />
+              {imageUploading ? copy.themeBackgroundImageUploading : copy.uploadThemeBackgroundImage}
+              <input
+                type="file"
+                accept="image/png,image/jpeg,image/webp"
+                disabled={disabled || imageUploading}
+                onChange={async (event) => {
+                  const file = event.currentTarget.files?.[0];
+                  event.currentTarget.value = "";
+                  if (!file) {
+                    return;
+                  }
+                  setUploadingImagePath(absolutePath);
+                  try {
+                    const uploaded = await onThemeBackgroundImageUpload(file);
+                    if (uploaded) {
+                      updateSectionDraft(absolutePath, uploaded.path);
+                    }
+                  } finally {
+                    setUploadingImagePath("");
+                  }
+                }}
+              />
+            </label>
+            {getString(fieldValue) ? (
+              <button
+                type="button"
+                className={`${styles.actionButton} ${styles.compactButton}`}
+                disabled={disabled || imageUploading}
+                onClick={() => updateSectionDraft(absolutePath, "")}
+              >
+                <X size={14} />
+                {copy.clearThemeBackgroundImage}
+              </button>
+            ) : null}
+          </div>
+        </div>
+      );
+    } else if (kind === "image") {
       const previewUrl = avatarImagePreviewUrl(fieldValue);
       const cropDraft = avatarCrop?.absolutePath === absolutePath ? avatarCrop : null;
-      const imageUploading = uploadingImagePath === absolutePath;
       const cropScale = cropDraft
         ? (AVATAR_CROP_FRAME_SIZE / Math.min(cropDraft.imageWidth, cropDraft.imageHeight)) * cropDraft.zoom
         : 1;
@@ -2680,6 +2765,23 @@ export function ConfigRoute() {
     } catch (error) {
       const message = markError(error);
       setNotice({ tone: "error", text: `${copy.avatarImageUploadFailed}${message}` });
+      return null;
+    } finally {
+      setBusyAction("");
+    }
+  }
+
+  async function handleThemeBackgroundImageUpload(file: File): Promise<AvatarImageUploadResponse | null> {
+    setBusyAction(copy.themeBackgroundImageUploading);
+    try {
+      return await requestJson<AvatarImageUploadResponse>("/api/config/theme-background-image", {
+        filename: file.name,
+        contentType: file.type,
+        dataBase64: await fileToBase64(file),
+      });
+    } catch (error) {
+      const message = markError(error);
+      setNotice({ tone: "error", text: `${copy.themeBackgroundImageUploadFailed}${message}` });
       return null;
     } finally {
       setBusyAction("");
@@ -4055,6 +4157,7 @@ export function ConfigRoute() {
             onUiStateChange={updateSectionUiState}
             onSaveSection={saveConfigSection}
             onAvatarImageUpload={handleAvatarImageUpload}
+            onThemeBackgroundImageUpload={handleThemeBackgroundImageUpload}
           />
         ))}
 
