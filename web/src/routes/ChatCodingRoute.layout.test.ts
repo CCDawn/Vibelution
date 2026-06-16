@@ -815,7 +815,8 @@ describe("ChatCodingRoute layout contract", () => {
 
   it("coalesces high-frequency direct session stream snapshots before updating UI cache", () => {
     expect(routeSource).toContain("const SESSION_STREAM_MIN_APPLY_INTERVAL_MS = 350");
-    expect(routeSource).toContain("sessionDetailSnapshotKey(previous) === sessionDetailSnapshotKey(detail)");
+    expect(routeSource).toContain("function sessionDetailWithoutLiveAssistantOverlay(detail: SessionDetail)");
+    expect(routeSource).toContain("sessionDetailSnapshotKey(comparablePrevious) === sessionDetailSnapshotKey(detail)");
     expect(routeSource).toContain("let pendingDetail: SessionDetail | null = null");
     expect(routeSource).toContain("function queueSessionDetail(detail: SessionDetail, payloadLength: number)");
     expect(routeSource).toContain("browser.session_stream.snapshot_queued");
@@ -825,8 +826,13 @@ describe("ChatCodingRoute layout contract", () => {
 
   it("applies lightweight assistant delta stream events without full detail sync", () => {
     expect(routeSource).toContain("function mergeAssistantDeltaIntoSessionDetail(");
-    expect(routeSource).toContain("const contentDelta = payload.contentDelta ?? payload.content ?? \"\"");
+    expect(routeSource).toContain("function liveAssistantMessageId(sessionId: string, turnId: string)");
+    expect(routeSource).toContain("function mergeSessionDetailWithLiveAssistantOverlay(");
+    expect(routeSource).toContain("kind: \"session_live_overlay\"");
+    expect(routeSource).toContain("const contentDelta = payload.contentDelta ?? (payload.replaceContent || !previous ? payload.content ?? \"\" : \"\")");
+    expect(routeSource).toContain("const thoughtDelta = payload.thoughtDelta ?? (payload.replaceThought || !previous ? payload.thought ?? \"\" : \"\")");
     expect(routeSource).toContain("const nextContent = payload.replaceContent");
+    expect(routeSource).toContain("return mergeSessionDetailWithLiveAssistantOverlay(previous, detail)");
     expect(routeSource).toContain("stream.addEventListener(\"assistant_delta\", handleAssistantDelta as EventListener)");
     expect(routeSource).toContain("stream.removeEventListener(\"assistant_delta\", handleAssistantDelta as EventListener)");
     expect(routeSource).toContain("queryClient.setQueryData<SessionDetail>(queryKeys.session(streamSessionId), (detail) =>");
