@@ -675,6 +675,38 @@ def _owner_provider(owner: Any) -> dict[str, Any]:
     return _public_provider_entry(owner.get("provider"))
 
 
+def _first_positive_int(*values: Any) -> int:
+    for value in values:
+        try:
+            parsed = int(value or 0)
+        except (TypeError, ValueError):
+            parsed = 0
+        if parsed > 0:
+            return parsed
+    return 0
+
+
+def _provider_context_window(provider: Any) -> int:
+    if isinstance(provider, dict):
+        return _first_positive_int(provider.get("context_window"), provider.get("contextWindow"))
+    return _first_positive_int(getattr(provider, "context_window", 0), getattr(provider, "contextWindow", 0))
+
+
+def resolve_llm_model_context_window(model_entry: Any, provider: Any = None) -> int:
+    if not isinstance(model_entry, dict):
+        return 0
+    explicit_limit = _first_positive_int(
+        model_entry.get("context_window"),
+        model_entry.get("contextWindow"),
+        model_entry.get("max_model_len"),
+        model_entry.get("context_length"),
+    )
+    if explicit_limit:
+        return explicit_limit
+    owner_provider = provider if provider is not None else _owner_provider(model_entry)
+    return _provider_context_window(owner_provider)
+
+
 def _profile_model_ref(profile: Any) -> str:
     if not isinstance(profile, dict):
         return ""
@@ -1350,6 +1382,7 @@ def list_llm_model_options(public_config: dict) -> list[dict[str, object]]:
                     "model_id": str(model_id),
                     "source": "model_library",
                     "provider": provider,
+                    "contextWindow": resolve_llm_model_context_window(item, provider),
                     "provider_kind": _provider_kind(provider),
                     "provider_api": str(provider.get("api", "") or "").strip().lower().replace("_", "-"),
                     "model": model,
@@ -1385,6 +1418,7 @@ def list_llm_model_options(public_config: dict) -> list[dict[str, object]]:
                     "model_id": generated_model_id,
                     "source": "profile",
                     "provider": provider,
+                    "contextWindow": resolve_llm_model_context_window(profile, provider),
                     "provider_kind": provider_kind,
                     "provider_api": str(provider.get("api", "") or "").strip().lower().replace("_", "-"),
                     "model": model,
@@ -2002,6 +2036,7 @@ __all__ = [
     "public_config_hash",
     "load_public_config",
     "build_effective_config",
+    "resolve_llm_model_context_window",
     "list_llm_model_preset_options",
     "list_llm_provider_preset_options",
     "apply_llm_model_preset",

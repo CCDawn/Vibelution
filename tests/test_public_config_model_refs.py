@@ -306,6 +306,24 @@ def test_list_llm_model_options_exposes_protocol_route_fields():
     assert option["details"]["compat"] == {"streamUsageOptions": True}
 
 
+def test_list_llm_model_options_exposes_provider_context_window():
+    public_config = load_public_config()
+    entry = _openai_gpt_5_5_library_entry()
+    entry["provider"]["context_window"] = 1_050_000
+    public_config["llm"].setdefault("model_library", {})["window_probe_model"] = entry
+
+    options = list_llm_model_options(public_config)
+    option = next(item for item in options if item["model_id"] == "window_probe_model")
+    decorated = next(
+        item
+        for item in _decorate_model_options(public_config, draft_meta=None)
+        if item["model_id"] == "window_probe_model"
+    )
+
+    assert option["contextWindow"] == 1_050_000
+    assert decorated["contextWindow"] == 1_050_000
+
+
 def test_decorated_model_options_expose_resolved_protocol_route():
     public_config = load_public_config()
     entry = _openai_gpt_5_5_library_entry()
