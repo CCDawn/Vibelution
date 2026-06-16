@@ -191,6 +191,10 @@ function teamWorkspaceRoute(teamId = RESEARCH_TEAM_ID) {
   return `/teams?team=${encodeURIComponent(teamId)}`;
 }
 
+function researchCanvasRoute(teamId = RESEARCH_TEAM_ID) {
+  return `/teams?team=${encodeURIComponent(teamId)}&researchView=canvas`;
+}
+
 type NodeDraft = {
   label: string;
   role: string;
@@ -2465,6 +2469,7 @@ export function TeamsRoute({
   const selectedTeam = teamDetailQuery.data ?? visibleTeams.find((team) => team.teamId === effectiveTeamId) ?? null;
   const researchWorkflowTeamSelected = isResearchWorkflowTeam(selectedTeam);
   const aiSearchScopeTeamSelected = isAiSearchScopeTeam(selectedTeam);
+  const researchCanvasReadOnly = researchWorkflowTeamSelected && researchWorkspaceView === "canvas";
   const aiSearchRunsQuery = useQuery({
     queryKey: queryKeys.teamAiSearchRuns(effectiveTeamId || "none", AI_SEARCH_RUN_PREVIEW_LIMIT),
     queryFn: () =>
@@ -3702,6 +3707,17 @@ export function TeamsRoute({
             );
           })}
         </div>
+        <div className={styles.researchCanvasIndex}>
+          <div>
+            <span>{lang === "zh" ? "结构索引" : "Structure index"}</span>
+            <strong>{lang === "zh" ? "组织画布" : "Organization canvas"}</strong>
+            <small>{lang === "zh" ? "只读查看科研团队节点关系" : "Read-only node relationship view"}</small>
+          </div>
+          <Link to={researchCanvasRoute(selectedTeam?.teamId || RESEARCH_TEAM_ID)}>
+            <Eye size={13} />
+            {lang === "zh" ? "查看关系图" : "View graph"}
+          </Link>
+        </div>
         {selectedTeamStartResearchStageError ? (
           <div className={styles.workflowError}>{selectedTeamStartResearchStageError.message}</div>
         ) : null}
@@ -3714,6 +3730,62 @@ export function TeamsRoute({
             )}
           </div>
         ) : null}
+      </section>
+    );
+  }
+
+  function renderResearchCanvasReadOnlyPanel() {
+    const node = selectedNode;
+    const agent = node?.agentId ? activeAgents.find((item) => item.agentId === node.agentId) : null;
+    const display = agent ? agentDisplayInfo(agent, lang) : null;
+    const functionLabel = node ? teamNodeFunctionLabel(node, display?.functionLabel, lang) : "";
+    return (
+      <section className={styles.canvasReadOnlyPanel} aria-label={lang === "zh" ? "只读组织画布详情" : "Read-only organization canvas details"}>
+        <div className={styles.canvasReadOnlyNotice}>
+          <Eye size={15} />
+          <div>
+            <strong>{lang === "zh" ? "只读组织画布" : "Read-only canvas"}</strong>
+            <span>{lang === "zh" ? "这里仅展示科研团队节点关系，不写回画布配置。" : "This view shows research-team relationships without writing canvas config."}</span>
+          </div>
+        </div>
+        {node ? (
+          <div className={styles.canvasReadOnlyNode}>
+            <div>
+              <span>{lang === "zh" ? "节点" : "Node"}</span>
+              <strong>{node.label}</strong>
+            </div>
+            <div>
+              <span>{lang === "zh" ? "职责" : "Role"}</span>
+              <strong>{functionLabel || node.role || node.type}</strong>
+            </div>
+            <div>
+              <span>Agent</span>
+              <strong>{display?.name || node.agentName || node.agentCode || (lang === "zh" ? "未绑定" : "unbound")}</strong>
+            </div>
+            <div>
+              <span>{lang === "zh" ? "状态" : "Status"}</span>
+              <strong>{node.status || (node.agentId ? "bound" : "unbound")}</strong>
+            </div>
+            <div className={styles.canvasReadOnlyNodeWide}>
+              <span>{lang === "zh" ? "目的" : "Purpose"}</span>
+              <strong>{node.purpose || (lang === "zh" ? "暂无说明" : "No purpose yet")}</strong>
+            </div>
+          </div>
+        ) : (
+          <div className={styles.empty}>{lang === "zh" ? "选择一个节点查看详情。" : "Select a node to inspect details."}</div>
+        )}
+        <div className={styles.issueList}>
+          {(validation?.issues ?? []).length ? (
+            validation?.issues.map((issue) => (
+              <div key={`${issue.code}-${issue.nodeId}-${issue.edgeId}`} className={styles.issue}>
+                <strong>{issue.code}</strong>
+                <span>{issue.message}</span>
+              </div>
+            ))
+          ) : (
+            <span>{lang === "zh" ? "画布校验通过" : "Canvas validation passed"}</span>
+          )}
+        </div>
       </section>
     );
   }
@@ -5220,7 +5292,7 @@ export function TeamsRoute({
   }
 
   function addNode() {
-    if (!canvas) {
+    if (!canvas || researchCanvasReadOnly) {
       return;
     }
     const id = nextNodeId(canvas.nodes);
@@ -5247,7 +5319,7 @@ export function TeamsRoute({
   }
 
   function applyNodeDraft() {
-    if (!canvas || !selectedNode) {
+    if (!canvas || !selectedNode || researchCanvasReadOnly) {
       return;
     }
     const membership = nodeDraft.agentId ? agentTeamMembership.get(nodeDraft.agentId) : undefined;
@@ -5276,7 +5348,7 @@ export function TeamsRoute({
   }
 
   function unbindSelectedNode() {
-    if (!canvas || !selectedNode) {
+    if (!canvas || !selectedNode || researchCanvasReadOnly) {
       return;
     }
     saveCanvas({
@@ -5297,7 +5369,7 @@ export function TeamsRoute({
   }
 
   function deleteSelectedNode() {
-    if (!canvas || !selectedNode || canvas.nodes.length <= 1) {
+    if (!canvas || !selectedNode || canvas.nodes.length <= 1 || researchCanvasReadOnly) {
       return;
     }
     const deletedNodeId = selectedNode.id;
@@ -5311,7 +5383,7 @@ export function TeamsRoute({
   }
 
   function connectFromLead() {
-    if (!canvas || !selectedNode || canvas.nodes.length < 2) {
+    if (!canvas || !selectedNode || canvas.nodes.length < 2 || researchCanvasReadOnly) {
       return;
     }
     const source = canvas.nodes[0];
@@ -5334,7 +5406,7 @@ export function TeamsRoute({
   }
 
   function startNodeDrag(event: ReactPointerEvent<HTMLButtonElement>, node: TeamCanvasNode) {
-    if (!canvas || canvasSavePendingForTeam(canvas.teamId)) {
+    if (!canvas || canvasSavePendingForTeam(canvas.teamId) || researchCanvasReadOnly) {
       return;
     }
     event.preventDefault();
@@ -6427,7 +6499,7 @@ export function TeamsRoute({
     return <Play size={13} />;
   };
   const activeWorkflowItemCount = teamWorkflow?.activeWorkflowItems.length ?? 0;
-  const researchCanvasVisible = researchWorkflowTeamSelected && researchWorkspaceView === "canvas";
+  const researchCanvasVisible = researchCanvasReadOnly;
   const workspaceClassName = [
     hasTeams ? styles.workspace : `${styles.workspace} ${styles.workspaceEmpty}`,
     researchWorkflowTeamSelected ? styles.workspaceResearch : "",
@@ -6441,7 +6513,7 @@ export function TeamsRoute({
     styles.inspector,
     researchWorkflowTeamSelected ? styles.researchInspector : "",
   ].filter(Boolean).join(" ");
-  const showNodeBindingPanel = !researchWorkflowTeamSelected || researchCanvasVisible;
+  const showNodeBindingPanel = !researchWorkflowTeamSelected || (researchCanvasVisible && !researchCanvasReadOnly);
   const showWorkflowPanel =
     !aiSearchScopeTeamSelected
     && (!researchWorkflowTeamSelected || (!researchCanvasVisible && researchWorkspaceView !== "discussion" && researchWorkspaceView !== "overview"));
@@ -6646,7 +6718,9 @@ export function TeamsRoute({
                 </small>
               ) : selectedTeam ? (
                 <small className={styles.linkedRoomLine}>
-                  {conversationProjection?.status === "agent_missing"
+                  {researchCanvasReadOnly
+                    ? (lang === "zh" ? "只读关系图：不会同步群聊或修改节点。" : "Read-only graph: room sync and node edits are disabled.")
+                    : conversationProjection?.status === "agent_missing"
                     ? (lang === "zh" ? `成员缺失 ${conversationProjection.missingAgentCount} 个，请先修复 Agent 引用。` : `${conversationProjection.missingAgentCount} missing agents. Repair Agent references first.`)
                     : activeTeamMemberCount > 0
                     ? (lang === "zh" ? "尚未衔接群聊，可同步创建。" : "No linked room yet. Sync to create one.")
@@ -6655,7 +6729,11 @@ export function TeamsRoute({
               ) : null}
             </div>
             <div className={styles.toolbarActions}>
-              {saveLabel ? <span className={styles.saveState}>{saveLabel}</span> : null}
+              {researchCanvasReadOnly ? (
+                <span className={styles.canvasReadOnlyBadge}>{lang === "zh" ? "只读" : "Read only"}</span>
+              ) : saveLabel ? (
+                <span className={styles.saveState}>{saveLabel}</span>
+              ) : null}
               <button
                 type="button"
                 className={showCommunicationEdges ? styles.layerButtonActive : ""}
@@ -6666,35 +6744,44 @@ export function TeamsRoute({
                 <Link2 size={14} />
                 {communicationEdgeButtonLabel}
               </button>
-              {linkedChatRoomId ? (
-                <Link className={styles.toolbarLink} to={`/chat?room=${encodeURIComponent(linkedChatRoomId)}`}>
-                  {lang === "zh" ? "打开群聊" : "Open room"}
+              {researchCanvasReadOnly ? (
+                <Link className={styles.toolbarLink} to={teamWorkspaceRoute(selectedTeam?.teamId || RESEARCH_TEAM_ID)}>
+                  <ArrowLeft size={14} />
+                  {lang === "zh" ? "返回三阶段" : "Back to stages"}
                 </Link>
               ) : (
-                <button
-                  type="button"
-                  onClick={() => selectedTeam?.teamId && syncTeamChatRoomMutation.mutate(selectedTeam.teamId)}
-                  disabled={!selectedTeam || activeTeamMemberCount === 0 || selectedTeamSyncPending}
-                >
-                  <Link2 size={14} />
-                  {selectedTeamSyncPending
-                    ? (lang === "zh" ? "同步中" : "Syncing")
-                    : (lang === "zh" ? "同步群聊" : "Sync room")}
-                </button>
+                <>
+                  {linkedChatRoomId ? (
+                    <Link className={styles.toolbarLink} to={`/chat?room=${encodeURIComponent(linkedChatRoomId)}`}>
+                      {lang === "zh" ? "打开群聊" : "Open room"}
+                    </Link>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => selectedTeam?.teamId && syncTeamChatRoomMutation.mutate(selectedTeam.teamId)}
+                      disabled={!selectedTeam || activeTeamMemberCount === 0 || selectedTeamSyncPending}
+                    >
+                      <Link2 size={14} />
+                      {selectedTeamSyncPending
+                        ? (lang === "zh" ? "同步中" : "Syncing")
+                        : (lang === "zh" ? "同步群聊" : "Sync room")}
+                    </button>
+                  )}
+                  <button type="button" onClick={addNode} disabled={!canvas}>
+                    <Plus size={14} />
+                    {lang === "zh" ? "节点" : "Node"}
+                  </button>
+                  <button
+                    type="button"
+                    className={styles.dangerButton}
+                    onClick={() => selectedTeam?.teamId && archiveTeamMutation.mutate(selectedTeam.teamId)}
+                    disabled={!selectedTeam || selectedTeamArchivePending}
+                  >
+                    <Archive size={14} />
+                    {lang === "zh" ? "归档" : "Archive"}
+                  </button>
+                </>
               )}
-              <button type="button" onClick={addNode} disabled={!canvas}>
-                <Plus size={14} />
-                {lang === "zh" ? "节点" : "Node"}
-              </button>
-              <button
-                type="button"
-                className={styles.dangerButton}
-                onClick={() => selectedTeam?.teamId && archiveTeamMutation.mutate(selectedTeam.teamId)}
-                disabled={!selectedTeam || selectedTeamArchivePending}
-              >
-                <Archive size={14} />
-                {lang === "zh" ? "归档" : "Archive"}
-              </button>
             </div>
           </div>
           {canvas ? (
@@ -6733,13 +6820,18 @@ export function TeamsRoute({
                     <button
                       key={node.id}
                       type="button"
-                      className={`${styles.node} ${nodeTone(node)} ${selectedNode?.id === node.id ? styles.nodeActive : ""}`}
+                      className={[
+                        styles.node,
+                        nodeTone(node),
+                        selectedNode?.id === node.id ? styles.nodeActive : "",
+                        researchCanvasReadOnly ? styles.nodeReadOnly : "",
+                      ].filter(Boolean).join(" ")}
                       style={{ "--node-x": `${node.x}px`, "--node-y": `${node.y}px` } as NodePositionStyle}
-                      title={lang === "zh" ? "拖动调整节点位置" : "Drag to reposition"}
-                      onPointerDown={(event) => startNodeDrag(event, node)}
-                      onPointerMove={moveNodeDrag}
-                      onPointerUp={finishNodeDrag}
-                      onPointerCancel={finishNodeDrag}
+                      title={researchCanvasReadOnly ? (lang === "zh" ? "点击查看节点详情" : "Click to inspect node") : (lang === "zh" ? "拖动调整节点位置" : "Drag to reposition")}
+                      onPointerDown={researchCanvasReadOnly ? undefined : (event) => startNodeDrag(event, node)}
+                      onPointerMove={researchCanvasReadOnly ? undefined : moveNodeDrag}
+                      onPointerUp={researchCanvasReadOnly ? undefined : finishNodeDrag}
+                      onPointerCancel={researchCanvasReadOnly ? undefined : finishNodeDrag}
                       onClick={() => setSelectedNodeId(node.id)}
                     >
                       <span className={styles.nodeIcon}>{node.agentId ? <Bot size={15} /> : <Users size={15} />}</span>
@@ -6776,9 +6868,11 @@ export function TeamsRoute({
             <strong>
               {researchWorkflowTeamSelected && !researchCanvasVisible
                 ? `${lang === "zh" ? "ai科学研究团队" : "AI research team"} · ${researchWorkspaceViewLabel(researchWorkspaceView, lang)}`
+                : researchCanvasReadOnly
+                ? (lang === "zh" ? "组织画布" : "Organization canvas")
                 : (lang === "zh" ? "节点绑定" : "Node binding")}
             </strong>
-            {validation && !validation.valid ? <AlertTriangle size={16} /> : <Link2 size={16} />}
+            {validation && !validation.valid ? <AlertTriangle size={16} /> : researchCanvasReadOnly ? <Eye size={16} /> : <Link2 size={16} />}
           </div>
           <div className={styles.inspectorBody}>
             {researchWorkflowTeamSelected && !researchCanvasVisible ? (
@@ -6786,6 +6880,7 @@ export function TeamsRoute({
                 {renderResearchStageLauncher()}
               </>
             ) : null}
+            {researchCanvasReadOnly ? renderResearchCanvasReadOnlyPanel() : null}
             {showNodeBindingPanel && !selectedTeam ? (
               <section className={`${styles.nodeBindingSection} ${styles.nodeBindingPlaceholder}`}>
                 <div className={styles.empty}>
