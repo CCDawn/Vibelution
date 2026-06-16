@@ -2702,238 +2702,242 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
             }
             aria-hidden={liveLaunchCollapsed}
           >
-            <div className={`${styles.surface} ${styles.launchSurface}`}>
-            <div className={styles.surfaceHeaderCompact}>
-              <div>
-                <p className={styles.eyebrow}>{t("supervisedControl")}</p>
-                <h2 className={styles.sectionTitle}>{t("launchSupervisedRun")}</h2>
-              </div>
-              <span className={styles.secondaryPill}>
-                {lang === "zh" ? "评测来源" : "Evaluation source"}
-              </span>
-            </div>
-            <p className={styles.noticeText}>{t("launchSupervisedRunHint")}</p>
-
-            <div className={styles.sourceInventoryBar}>
-              <span>{lang === "zh" ? "可运行数据集" : "Runnable datasets"} <strong>{primaryDatasets.length}</strong></span>
-              <span>{lang === "zh" ? "已有评测包" : "Bundles"} <strong>{availableBundles.length}</strong></span>
-              {hiddenDatasetCount > 0 ? (
-                <span>{lang === "zh" ? "已隐藏噪声项" : "Hidden noisy sources"} <strong>{hiddenDatasetCount}</strong></span>
-              ) : null}
-            </div>
-
-              <div className={styles.formGrid}>
-                <div className={sourceKind === "dataset" ? styles.compactFieldGrid : styles.formGrid}>
-                  <div className={styles.formField}>
-                    <label htmlFor="supervised-source">{lang === "zh" ? "选择评测来源" : "Evaluation source"}</label>
-                    <select
-                      id="supervised-source"
-                      className={styles.selectInput}
-                      value={selectedSourceValue}
-                      onChange={(event) => {
-                        const [nextKind, ...nameParts] = event.target.value.split(":");
-                        const nextName = nameParts.join(":");
-                        if (nextKind === "bundle") {
-                          setSourceKind("bundle");
-                          setBundleNameInput(nextName);
-                          return;
-                        }
-                        setSourceKind("dataset");
-                        setDatasetName(nextName);
-                      }}
-                    >
-                      {primaryDatasets.length > 0 ? (
-                        <optgroup label={lang === "zh" ? "可运行数据集：运行前自动物化为评测包" : "Runnable datasets: materialized before run"}>
-                          {primaryDatasets.map((item) => (
-                            <option key={`dataset:${item.name}`} value={`dataset:${item.name}`}>
-                              {item.name} [{datasetUsabilityLabel(item, lang)}]
-                            </option>
-                          ))}
-                        </optgroup>
-                      ) : null}
-                      {availableBundles.length > 0 ? (
-                        <optgroup label={lang === "zh" ? "已有评测包：直接运行" : "Existing bundles: run directly"}>
-                          {availableBundles.map((item) => (
-                            <option key={`bundle:${item.name}`} value={`bundle:${item.name}`}>
-                              {item.name} [{item.caseCount} cases]
-                            </option>
-                          ))}
-                        </optgroup>
-                      ) : null}
-                    </select>
-                    <span className={styles.formHint}>
-                      {lang === "zh"
-                        ? "数据集会先物化，评测包可直接运行。"
-                        : "A dataset is materialized first; a bundle runs directly."}
-                    </span>
-                  </div>
-                  {sourceKind === "dataset" ? (
-                    <div className={styles.formField}>
-                      <label htmlFor="supervised-limit">{t("caseLimit")}</label>
-                      <input
-                        id="supervised-limit"
-                        className={styles.textInput}
-                        type="number"
-                        min={1}
-                        placeholder="all"
-                        value={datasetLimitInput}
-                        onChange={(event) => setDatasetLimitInput(event.target.value)}
-                      />
-                      <span className={styles.formHint}>{t("caseLimitHint")}</span>
-                    </div>
-                  ) : null}
-                </div>
-                {selectedSourceOption ? (
-                  <div className={styles.sourceMetaCompact}>
-                    <div className={styles.sourceMetaMain}>
-                      <strong>{selectedSourceOption.label}</strong>
-                      <span>{selectedSourceStatusText}</span>
-                      {selectedSourceEvaluationText ? <span>{selectedSourceEvaluationText}</span> : null}
-                    </div>
-                    <span className={styles.sourceMetaSide}>
-                      {selectedSourceKindLabel} · {selectedSourceCaseText}
-                    </span>
-                  </div>
-                ) : null}
-                {selectedSourceOfficialWarning ? (
-                  <p className={styles.sourceWarningStrip}>{selectedSourceOfficialWarning}</p>
-                ) : null}
-                {sourceKind === "bundle" && !selectedBundleExists ? (
-                  <p className={styles.errorTextCompact}>
-                    {lang === "zh" ? "请选择一个存在的监督评测包。" : "Choose an existing supervised bundle."}
-                  </p>
-                ) : null}
-
-                <label className={styles.checkboxRow}>
-                  <input
-                    type="checkbox"
-                    checked={keepWorktree}
-                    onChange={(event) => setKeepWorktree(event.target.checked)}
-                  />
-                  <span className={styles.checkboxLabel}>{t("keepWorktreeLabel")}</span>
-                </label>
-                <div className={styles.formField}>
-                  <label htmlFor="supervised-mental-mode">{t("supervisedMentalMode")}</label>
-                  <select
-                    id="supervised-mental-mode"
-                    className={styles.selectInput}
-                    value={supervisedMentalModelMode}
-                    onChange={(event) => setSupervisedMentalModelMode(event.target.value as SupervisedMentalModelMode)}
-                  >
-                    <option value="follow">{t("supervisedMentalModeFollow")}</option>
-                    <option value="enabled">{t("supervisedMentalModeEnabled")}</option>
-                    <option value="disabled">{t("supervisedMentalModeDisabled")}</option>
-                  </select>
-                  <span className={styles.formHint}>{t("supervisedMentalModeHint")}</span>
-                </div>
-              </div>
-
-              <div className={styles.controlFooter}>
-                <div className={styles.controlActions}>
-                  <button
-                    type="button"
-                    className={styles.inlineAction}
-                    disabled={
-                      runLocked
-                      || worktreeRunLocked
-                      || startRunMutation.isPending
-                      || (sourceKind === "dataset" && !datasetName)
-                      || (sourceKind === "bundle" && !selectedBundleExists)
-                    }
-                    onClick={() => startRunMutation.mutate()}
-                  >
-                    {startRunMutation.isPending ? <LoaderCircle size={15} /> : <Play size={15} />}
-                    {t("startSupervisedRun")}
-                  </button>
-                </div>
-                <div className={styles.closedLoopLaunchBlock}>
-                  <div>
-                    <strong>{t("closedLoopLaunchPanelTitle")}</strong>
-                    <span>{t("closedLoopLaunchPanelHint")}</span>
-                  </div>
-                  <button
-                    type="button"
-                    className={styles.inlineAction}
-                    disabled={
-                      runLocked
-                      || worktreeRunLocked
-                      || startWorktreeRunMutation.isPending
-                      || (sourceKind === "dataset" && !datasetName)
-                      || (sourceKind === "bundle" && !selectedBundleExists)
-                    }
-                    onClick={() => startWorktreeRunMutation.mutate()}
-                    title={t("startClosedLoopHint")}
-                  >
-                    {startWorktreeRunMutation.isPending ? <LoaderCircle size={15} /> : <Sparkles size={15} />}
-                    {t("startClosedLoopRun")}
-                  </button>
-                </div>
-                {runLocked || worktreeRunLocked ? <p className={styles.noticeText}>{t("runningLockHint")}</p> : null}
-                {supervisedControlError ? (
-                  <p className={styles.errorText}>{supervisedControlError}</p>
-                ) : null}
-              </div>
-            </div>
-
-            <div className={`${styles.surface} ${styles.supervisedMembersPanel}`}>
-              <div className={styles.supervisedMembersHeader}>
+            <div className={`${styles.surface} ${styles.launchSurface} ${styles.supervisedRunConsole}`}>
+              <div className={`${styles.surfaceHeaderCompact} ${styles.supervisedRunConsoleHeader}`}>
                 <div>
-                  <p className={styles.eyebrow}>
-                    {supervisedMembersSource === "run" ? lang === "zh" ? "运行成员" : "Run members" : lang === "zh" ? "当前配置" : "Current config"}
-                  </p>
-                  <h2 className={styles.sectionTitle}>{lang === "zh" ? "监督成员" : "Supervised members"}</h2>
+                  <p className={styles.eyebrow}>{t("supervisedControl")}</p>
+                  <h2 className={styles.sectionTitle}>{lang === "zh" ? "监督运行控制台" : "Supervised run console"}</h2>
                 </div>
-                <span className={styles.secondaryPill}>
-                  {supervisedMembersRun ? supervisedMembersRunStatusLabel : supervisedMembersIdleStatusLabel}
-                </span>
+                <div className={styles.supervisedRunConsoleStatus}>
+                  <span className={styles.secondaryPill}>
+                    {lang === "zh" ? "来源" : "Source"} {primaryDatasets.length + availableBundles.length}
+                  </span>
+                  <span className={styles.secondaryPill}>
+                    {supervisedMembersRun ? supervisedMembersRunStatusLabel : supervisedMembersIdleStatusLabel}
+                  </span>
+                </div>
               </div>
-              <div className={styles.supervisedMembersList}>
-                {supervisedRunMembers.map((member) => {
-                  const rowClassName =
-                      member.status === "active"
-                        ? `${styles.supervisedMemberRow} ${styles.supervisedMemberRowActive}`
-                        : member.status === "missing"
-                          ? `${styles.supervisedMemberRow} ${styles.supervisedMemberRowMissing}`
-                          : styles.supervisedMemberRow;
-                  const memberBody = (
-                    <>
-                      <div className={styles.supervisedMemberRole}>
-                        <span>{member.label}</span>
-                        {member.status === "active" ? (
-                          <strong>{lang === "zh" ? "当前执行" : "Active"}</strong>
-                        ) : null}
-                      </div>
-                      <div className={styles.supervisedMemberIdentity}>
-                        <strong>{member.name}</strong>
-                        <span title={member.modelId || member.model}>{member.model}</span>
-                      </div>
-                    </>
-                  );
-                  return member.agentId ? (
-                    <Link
-                      key={member.role}
-                      className={`${rowClassName} ${styles.supervisedMemberLink}`}
-                      to={supervisedMemberAgentManagementRoute(member.agentId, supervisedMemberReturnTo)}
-                      title={lang === "zh" ? `配置 ${member.name}` : `Configure ${member.name}`}
-                      aria-label={lang === "zh" ? `配置监督成员 ${member.name}` : `Configure supervised member ${member.name}`}
-                    >
-                      {memberBody}
-                      <ArrowUpRight size={13} aria-hidden="true" />
-                    </Link>
-                  ) : (
-                    <article key={member.role} className={rowClassName}>
-                      {memberBody}
-                    </article>
-                  );
-                })}
+
+              <div className={styles.sourceInventoryBar}>
+                <span>{lang === "zh" ? "数据集" : "Datasets"} <strong>{primaryDatasets.length}</strong></span>
+                <span>{lang === "zh" ? "评测包" : "Bundles"} <strong>{availableBundles.length}</strong></span>
+                {hiddenDatasetCount > 0 ? (
+                  <span>{lang === "zh" ? "隐藏" : "Hidden"} <strong>{hiddenDatasetCount}</strong></span>
+                ) : null}
               </div>
-              {!supervisedMembersRun ? (
-                <p className={styles.noticeTextCompact}>
-                  {supervisedMembersSource === "current_config"
-                    ? lang === "zh" ? "当前 Agent 配置；启动后锁定为本轮绑定。" : "Current Agent config; a run locks its own bindings after start."
-                    : ""}
-                </p>
-              ) : null}
+
+              <div className={styles.supervisedRunConsoleGrid}>
+                <div className={styles.supervisedRunSetup}>
+                  <div className={styles.formGrid}>
+                    <div className={sourceKind === "dataset" ? styles.compactFieldGrid : styles.formGrid}>
+                      <div
+                        className={styles.formField}
+                        title={lang === "zh"
+                          ? "数据集会先物化，评测包可直接运行。"
+                          : "A dataset is materialized first; a bundle runs directly."}
+                      >
+                        <label htmlFor="supervised-source">{lang === "zh" ? "评测来源" : "Evaluation source"}</label>
+                        <select
+                          id="supervised-source"
+                          className={styles.selectInput}
+                          value={selectedSourceValue}
+                          onChange={(event) => {
+                            const [nextKind, ...nameParts] = event.target.value.split(":");
+                            const nextName = nameParts.join(":");
+                            if (nextKind === "bundle") {
+                              setSourceKind("bundle");
+                              setBundleNameInput(nextName);
+                              return;
+                            }
+                            setSourceKind("dataset");
+                            setDatasetName(nextName);
+                          }}
+                        >
+                          {primaryDatasets.length > 0 ? (
+                            <optgroup label={lang === "zh" ? "可运行数据集：运行前自动物化为评测包" : "Runnable datasets: materialized before run"}>
+                              {primaryDatasets.map((item) => (
+                                <option key={`dataset:${item.name}`} value={`dataset:${item.name}`}>
+                                  {item.name} [{datasetUsabilityLabel(item, lang)}]
+                                </option>
+                              ))}
+                            </optgroup>
+                          ) : null}
+                          {availableBundles.length > 0 ? (
+                            <optgroup label={lang === "zh" ? "已有评测包：直接运行" : "Existing bundles: run directly"}>
+                              {availableBundles.map((item) => (
+                                <option key={`bundle:${item.name}`} value={`bundle:${item.name}`}>
+                                  {item.name} [{item.caseCount} cases]
+                                </option>
+                              ))}
+                            </optgroup>
+                          ) : null}
+                        </select>
+                      </div>
+                      {sourceKind === "dataset" ? (
+                        <div className={styles.formField} title={t("caseLimitHint")}>
+                          <label htmlFor="supervised-limit">{t("caseLimit")}</label>
+                          <input
+                            id="supervised-limit"
+                            className={styles.textInput}
+                            type="number"
+                            min={1}
+                            placeholder="all"
+                            value={datasetLimitInput}
+                            onChange={(event) => setDatasetLimitInput(event.target.value)}
+                          />
+                        </div>
+                      ) : null}
+                    </div>
+                    {selectedSourceOption ? (
+                      <div className={styles.sourceMetaCompact}>
+                        <div className={styles.sourceMetaMain}>
+                          <strong>{selectedSourceOption.label}</strong>
+                          <span>{selectedSourceStatusText}</span>
+                          {selectedSourceEvaluationText ? <span>{selectedSourceEvaluationText}</span> : null}
+                        </div>
+                        <span className={styles.sourceMetaSide}>
+                          {selectedSourceKindLabel} · {selectedSourceCaseText}
+                        </span>
+                      </div>
+                    ) : null}
+                    {selectedSourceOfficialWarning ? (
+                      <p className={styles.sourceWarningStrip}>{selectedSourceOfficialWarning}</p>
+                    ) : null}
+                    {sourceKind === "bundle" && !selectedBundleExists ? (
+                      <p className={styles.errorTextCompact}>
+                        {lang === "zh" ? "请选择一个存在的监督评测包。" : "Choose an existing supervised bundle."}
+                      </p>
+                    ) : null}
+                  </div>
+
+                  <div className={styles.supervisedRunOptions}>
+                    <label className={styles.checkboxRow} title={t("keepWorktreeLabel")}>
+                      <input
+                        type="checkbox"
+                        checked={keepWorktree}
+                        onChange={(event) => setKeepWorktree(event.target.checked)}
+                      />
+                      <span className={styles.checkboxLabel}>{lang === "zh" ? "保留 worktree" : "Keep worktree"}</span>
+                    </label>
+                    <div className={styles.formField} title={t("supervisedMentalModeHint")}>
+                      <label htmlFor="supervised-mental-mode">{t("supervisedMentalMode")}</label>
+                      <select
+                        id="supervised-mental-mode"
+                        className={styles.selectInput}
+                        value={supervisedMentalModelMode}
+                        onChange={(event) => setSupervisedMentalModelMode(event.target.value as SupervisedMentalModelMode)}
+                      >
+                        <option value="follow">{t("supervisedMentalModeFollow")}</option>
+                        <option value="enabled">{t("supervisedMentalModeEnabled")}</option>
+                        <option value="disabled">{t("supervisedMentalModeDisabled")}</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className={styles.controlFooter}>
+                    <div className={styles.controlActions}>
+                      <button
+                        type="button"
+                        className={styles.inlineAction}
+                        disabled={
+                          runLocked
+                          || worktreeRunLocked
+                          || startRunMutation.isPending
+                          || (sourceKind === "dataset" && !datasetName)
+                          || (sourceKind === "bundle" && !selectedBundleExists)
+                        }
+                        onClick={() => startRunMutation.mutate()}
+                        title={t("launchSupervisedRunHint")}
+                      >
+                        {startRunMutation.isPending ? <LoaderCircle size={15} /> : <Play size={15} />}
+                        {t("startSupervisedRun")}
+                      </button>
+                    </div>
+                    <div className={styles.closedLoopLaunchBlock} title={t("closedLoopLaunchPanelHint")}>
+                      <strong>{t("closedLoopLaunchPanelTitle")}</strong>
+                      <button
+                        type="button"
+                        className={styles.inlineAction}
+                        disabled={
+                          runLocked
+                          || worktreeRunLocked
+                          || startWorktreeRunMutation.isPending
+                          || (sourceKind === "dataset" && !datasetName)
+                          || (sourceKind === "bundle" && !selectedBundleExists)
+                        }
+                        onClick={() => startWorktreeRunMutation.mutate()}
+                        title={t("startClosedLoopHint")}
+                      >
+                        {startWorktreeRunMutation.isPending ? <LoaderCircle size={15} /> : <Sparkles size={15} />}
+                        {t("startClosedLoopRun")}
+                      </button>
+                    </div>
+                    {runLocked || worktreeRunLocked ? <p className={styles.noticeText}>{t("runningLockHint")}</p> : null}
+                    {supervisedControlError ? (
+                      <p className={styles.errorText}>{supervisedControlError}</p>
+                    ) : null}
+                  </div>
+                </div>
+
+                <aside
+                  className={styles.supervisedMembersPanel}
+                  title={
+                    supervisedMembersSource === "current_config"
+                      ? lang === "zh" ? "当前 Agent 配置；启动后锁定为本轮绑定。" : "Current Agent config; a run locks its own bindings after start."
+                      : undefined
+                  }
+                >
+                  <div className={styles.supervisedMembersHeader}>
+                    <div>
+                      <p className={styles.eyebrow}>
+                        {supervisedMembersSource === "run" ? lang === "zh" ? "运行成员" : "Run members" : lang === "zh" ? "当前配置" : "Current config"}
+                      </p>
+                      <h3 className={styles.sectionTitle}>{lang === "zh" ? "监督成员" : "Supervised members"}</h3>
+                    </div>
+                    <span className={styles.secondaryPill}>{supervisedRunMembers.length}</span>
+                  </div>
+                  <div className={styles.supervisedMembersList}>
+                    {supervisedRunMembers.map((member) => {
+                      const rowClassName =
+                          member.status === "active"
+                            ? `${styles.supervisedMemberRow} ${styles.supervisedMemberRowActive}`
+                            : member.status === "missing"
+                              ? `${styles.supervisedMemberRow} ${styles.supervisedMemberRowMissing}`
+                              : styles.supervisedMemberRow;
+                      const memberBody = (
+                        <>
+                          <div className={styles.supervisedMemberRole}>
+                            <span>{member.label}</span>
+                            {member.status === "active" ? (
+                              <strong>{lang === "zh" ? "当前执行" : "Active"}</strong>
+                            ) : null}
+                          </div>
+                          <div className={styles.supervisedMemberIdentity}>
+                            <strong>{member.name}</strong>
+                            <span title={member.modelId || member.model}>{member.model}</span>
+                          </div>
+                        </>
+                      );
+                      return member.agentId ? (
+                        <Link
+                          key={member.role}
+                          className={`${rowClassName} ${styles.supervisedMemberLink}`}
+                          to={supervisedMemberAgentManagementRoute(member.agentId, supervisedMemberReturnTo)}
+                          title={lang === "zh" ? `配置 ${member.name}` : `Configure ${member.name}`}
+                          aria-label={lang === "zh" ? `配置监督成员 ${member.name}` : `Configure supervised member ${member.name}`}
+                        >
+                          {memberBody}
+                          <ArrowUpRight size={13} aria-hidden="true" />
+                        </Link>
+                      ) : (
+                        <article key={member.role} className={rowClassName}>
+                          {memberBody}
+                        </article>
+                      );
+                    })}
+                  </div>
+                </aside>
+              </div>
             </div>
 
           </section>

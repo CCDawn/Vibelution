@@ -184,6 +184,10 @@ describe("EvolutionRoute library user flow contract", () => {
   });
 
   it("keeps the supervised launch panel compact", () => {
+    expect(routeSource).toContain("styles.supervisedRunConsole");
+    expect(routeSource).toContain("styles.supervisedRunConsoleGrid");
+    expect(routeSource).toContain("styles.supervisedRunSetup");
+    expect(routeSource).toContain("styles.supervisedRunOptions");
     expect(routeSource).toContain("sourceMetaSide");
     expect(routeSource).toContain("数据集会先物化，评测包可直接运行。");
     expect(routeSource).toContain("startWorktreeRunMutation");
@@ -213,6 +217,8 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).not.toContain("worktreeReviewPanelHint");
     expect(stylesSource).toContain(".liveLaunchStack");
     expect(stylesSource).toContain(".liveLaunchStack > .launchSurface");
+    expect(stylesSource).toContain(".supervisedRunConsole");
+    expect(stylesSource).toContain(".supervisedRunConsoleGrid");
   });
 
   it("shows the current supervised run members in the left launch rail", () => {
@@ -296,14 +302,22 @@ describe("EvolutionRoute library user flow contract", () => {
 
     expect(stylesSource).toContain("minmax(300px, var(--evolution-live-launch-width, 348px))");
     expect(stylesSource).toContain("minmax(300px, var(--evolution-live-run-width, 360px))");
-    expect(stylesSource).toContain("grid-template-rows: minmax(0, auto) minmax(0, 0.9fr) minmax(150px, 0.82fr)");
-    expect(stylesSource).toContain("grid-template-rows: minmax(0, auto) minmax(156px, 0.86fr) minmax(150px, 0.74fr)");
-    expect(stylesSource).toContain("max-height: min(430px, 60vh)");
+    expect(stylesSource).toContain("container-type: inline-size");
+    expect(stylesSource).toContain("@container (min-width: 560px)");
+    expect(stylesSource).toContain("grid-template-columns: minmax(0, 1.08fr) minmax(214px, 0.72fr)");
+    expect(stylesSource).toContain("grid-template-rows: minmax(0, 1fr)");
+    expect(stylesSource).not.toContain("grid-template-rows: minmax(0, auto) minmax(0, 0.9fr) minmax(150px, 0.82fr)");
+    expect(stylesSource).not.toContain("grid-template-rows: minmax(0, auto) minmax(156px, 0.86fr) minmax(150px, 0.74fr)");
+    expect(stylesSource).not.toContain("max-height: min(430px, 60vh)");
     expect(middleBreakpoint).toContain(".liveLaunchStack > .launchSurface > .noticeText");
     expect(middleBreakpoint).toContain(".liveLaunchStack > .launchSurface .formHint");
+    expect(middleBreakpoint).not.toContain(".liveLaunchStack > .launchSurface .sourceInventoryBar");
+    expect(middleBreakpoint).not.toContain(".liveLaunchStack > .launchSurface .sourceMetaCompact");
     expect(middleBreakpoint).toContain("display: none");
-    expect(stylesSource).toContain("align-self: stretch");
-    expect(stylesSource).toContain("min-height: 40px");
+    expect(stylesSource).toContain("max-height: min(178px, 28vh)");
+    expect(stylesSource).toContain("max-height: min(238px, 34vh)");
+    expect(stylesSource).toContain("min-height: 34px");
+    expect(stylesSource).not.toContain("min-height: 40px");
     expect(stylesSource).toContain("font-family: var(--font-mono)");
     expect(stylesSource).not.toContain("align-self: end");
   });
@@ -348,15 +362,17 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(stylesSource).toContain("var(--state-warning)");
   });
 
-  it("keeps supervised launch from reserving space for worktree review in the left rail", () => {
+  it("keeps supervised launch from reserving an empty worktree-review track", () => {
     const launchStackRule = stylesSource.slice(
       stylesSource.indexOf(".liveLaunchStack {"),
       stylesSource.indexOf(".liveResizeHandleLaunch"),
     );
 
-    expect(launchStackRule).toContain("overflow: auto");
+    expect(launchStackRule).toContain("grid-template-rows: minmax(0, 1fr)");
+    expect(launchStackRule).toContain("overflow: hidden");
     expect(stylesSource).toContain(".liveLaunchStack > .launchSurface");
-    expect(stylesSource).toContain("max-height: min(430px, 60vh)");
+    expect(stylesSource).toContain("max-height: none");
+    expect(stylesSource).not.toContain("max-height: min(430px, 60vh)");
     expect(stylesSource).not.toContain(".worktreeReviewSurface");
     expect(worktreeReviewStylesSource).toContain(".worktreeReviewSurface");
   });
