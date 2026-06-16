@@ -183,14 +183,26 @@ type Copy = {
   mutationFailed: string;
   overviewView: string;
   effectiveView: string;
+  agentMemoryView: string;
   manageView: string;
   sourcesView: string;
   knowledgeView: string;
   overviewSubtitle: string;
   effectiveSubtitle: string;
+  agentMemorySubtitle: string;
   manageSubtitle: string;
   sourcesSubtitle: string;
   knowledgeSubtitle: string;
+  agentMemoryAgents: string;
+  agentMemoryPrivateFiles: string;
+  agentMemoryFormalKnowledge: string;
+  agentMemoryPrivateRoot: string;
+  agentMemorySelectedAgent: string;
+  agentMemorySelectedFile: string;
+  agentMemoryNoAgents: string;
+  agentMemoryNoPrivateMemory: string;
+  agentMemoryNoFileSelected: string;
+  agentMemoryFormalBases: string;
   healthOverview: string;
   affectedRuntimeMemory: string;
   needsReview: string;
@@ -459,9 +471,67 @@ type Copy = {
 
 type FilterMode = "all" | "prompt" | "visible" | "manual" | "missing";
 type ManageFilterMode = "all" | "prompt" | "editable" | "changed" | "missing";
-export type MemoryRouteView = "overview" | "effective" | "manage" | "sources" | "knowledge" | "graph" | "cleanup";
+export type MemoryRouteView = "overview" | "effective" | "agents" | "manage" | "sources" | "knowledge" | "graph" | "cleanup";
 type MemoryChannel = "conversation" | "research" | "self_evolution" | "supervised_evolution" | "explicit_read";
 type ChannelFilter = MemoryChannel | "";
+type AgentMemoryKnowledgeSummary = {
+  knowledgeBaseCount: number;
+  itemCount: number;
+  sourceArtifactCount: number;
+  pendingProposalCount: number;
+  knowledgeBases: Array<{
+    knowledgeBaseId: string;
+    scopedKnowledgeBaseId: string;
+    name: string;
+    description: string;
+    stats: Record<string, number>;
+  }>;
+  error?: string;
+};
+type AgentMemoryFileItem = MemoryItem & {
+  agentId: string;
+  relativePath: string;
+  privateMemoryRoot: string;
+  sizeBytes: number;
+  contentDeferred: boolean;
+  contentLength: number;
+};
+type AgentMemoryInventoryAgent = {
+  agentId: string;
+  agentCode: string;
+  displayName: string;
+  status: string;
+  primaryMode: string;
+  roleKey: string;
+  promptTemplateId: string;
+  workspacePath: string;
+  privateMemoryRoot: string;
+  hasPrivateMemory: boolean;
+  fileCount: number;
+  byteCount: number;
+  latestUpdatedAt: string;
+  createdAt: string;
+  updatedAt: string;
+  knowledgeSummary: AgentMemoryKnowledgeSummary;
+  items: AgentMemoryFileItem[];
+};
+type AgentMemoryInventoryPayload = {
+  schemaVersion: number;
+  generatedAt: string;
+  projectRoot: string;
+  selectedAgentId: string;
+  selectedAgent: AgentMemoryInventoryAgent | null;
+  summary: {
+    agentCount: number;
+    agentWithPrivateMemoryCount: number;
+    privateFileCount: number;
+    privateByteCount: number;
+    formalKnowledgeBaseCount: number;
+    formalKnowledgeItemCount: number;
+    warnings: string[];
+  };
+  agents: AgentMemoryInventoryAgent[];
+};
 type CleanupTargetOption = {
   key: string;
   label: string;
@@ -649,14 +719,26 @@ const COPY: Record<"zh" | "en", Copy> = {
     mutationFailed: "操作失败",
     overviewView: "总览",
     effectiveView: "生效范围",
-    manageView: "Agent 私有记忆",
+    agentMemoryView: "Agent 记忆",
+    manageView: "来源管理",
     sourcesView: "来源审计",
     knowledgeView: "团队知识库",
     overviewSubtitle: "先看记忆健康、运行影响和需要检查的内容；复杂证据放到子页里。",
     effectiveSubtitle: "按对话、自进化、监督进化和显式读取说明哪些记忆会被 agent 感知。",
-    manageSubtitle: "集中新增、编辑、禁用、恢复和删除 Agent 私有或用户可管理的记忆。",
+    agentMemorySubtitle: "逐个查看 Agent 私有 workspace 记忆文件与正式私有知识库，点击文件读取内容。",
+    manageSubtitle: "集中管理可覆盖、可禁用和用户手动新增的来源，不代表单个 Agent 的私有记忆。",
     sourcesSubtitle: "保留完整来源、路径、接口、原文和复制动作，供专业审查使用。",
     knowledgeSubtitle: "管理团队共享知识库、来源登记、精炼提案、审核落盘和重要程度标记。",
+    agentMemoryAgents: "Agent 列表",
+    agentMemoryPrivateFiles: "私有文件",
+    agentMemoryFormalKnowledge: "正式知识",
+    agentMemoryPrivateRoot: "私有目录",
+    agentMemorySelectedAgent: "选中 Agent",
+    agentMemorySelectedFile: "选中文件",
+    agentMemoryNoAgents: "暂无 Agent",
+    agentMemoryNoPrivateMemory: "该 Agent 暂无私有记忆文件",
+    agentMemoryNoFileSelected: "选择一个私有记忆文件查看内容",
+    agentMemoryFormalBases: "正式知识库",
     healthOverview: "记忆健康概览",
     affectedRuntimeMemory: "会影响运行的记忆",
     needsReview: "需要检查",
@@ -1020,14 +1102,26 @@ const COPY: Record<"zh" | "en", Copy> = {
     mutationFailed: "Action failed",
     overviewView: "Overview",
     effectiveView: "Effective scope",
-    manageView: "Agent private memory",
+    agentMemoryView: "Agent memory",
+    manageView: "Source management",
     sourcesView: "Source audit",
     knowledgeView: "Team knowledge",
     overviewSubtitle: "Start with memory health, runtime impact, and items that need review. Detailed evidence stays in subpages.",
     effectiveSubtitle: "Shows how conversation, self-evolution, supervised evolution, and explicit-read memory can be perceived.",
-    manageSubtitle: "Add, edit, disable, restore, and delete Agent-private or user-manageable memory in one place.",
+    agentMemorySubtitle: "Inspect each Agent private workspace memory file and formal private knowledge base, then open files to read their content.",
+    manageSubtitle: "Manage overridable, disable-able, and user-created source records. This is not a single Agent private memory view.",
     sourcesSubtitle: "Keeps the full source, path, API, raw content, and copy actions for professional audit.",
     knowledgeSubtitle: "Manage team knowledge bases, source registration, refinement proposals, review, and importance marking.",
+    agentMemoryAgents: "Agents",
+    agentMemoryPrivateFiles: "Private files",
+    agentMemoryFormalKnowledge: "Formal knowledge",
+    agentMemoryPrivateRoot: "Private root",
+    agentMemorySelectedAgent: "Selected Agent",
+    agentMemorySelectedFile: "Selected file",
+    agentMemoryNoAgents: "No Agents",
+    agentMemoryNoPrivateMemory: "This Agent has no private memory files",
+    agentMemoryNoFileSelected: "Select a private memory file to inspect its content",
+    agentMemoryFormalBases: "Formal knowledge bases",
     healthOverview: "Memory health",
     affectedRuntimeMemory: "Runtime-affecting memory",
     needsReview: "Needs review",
@@ -1802,6 +1896,7 @@ type MemoryRouteProps = {
 const MEMORY_VIEWS: Array<{ key: MemoryRouteView; href: string }> = [
   { key: "overview", href: "/memory" },
   { key: "effective", href: "/memory/effective" },
+  { key: "agents", href: "/memory/agents" },
   { key: "manage", href: "/memory/manage" },
   { key: "sources", href: "/memory/sources" },
   { key: "knowledge", href: "/memory/knowledge" },
@@ -1812,6 +1907,9 @@ const MEMORY_VIEWS: Array<{ key: MemoryRouteView; href: string }> = [
 function memoryViewLabel(copy: Copy, view: MemoryRouteView) {
   if (view === "effective") {
     return copy.effectiveView;
+  }
+  if (view === "agents") {
+    return copy.agentMemoryView;
   }
   if (view === "manage") {
     return copy.manageView;
@@ -1834,6 +1932,9 @@ function memoryViewLabel(copy: Copy, view: MemoryRouteView) {
 function memoryViewSubtitle(copy: Copy, view: MemoryRouteView) {
   if (view === "effective") {
     return copy.effectiveSubtitle;
+  }
+  if (view === "agents") {
+    return copy.agentMemorySubtitle;
   }
   if (view === "manage") {
     return copy.manageSubtitle;
@@ -2118,6 +2219,7 @@ function invalidateKnowledgeDashboard(queryClient: ReturnType<typeof useQueryCli
 function invalidateMemoryQueries(queryClient: ReturnType<typeof useQueryClient>) {
   void queryClient.invalidateQueries({ queryKey: queryKeys.memoryOverview() });
   void queryClient.invalidateQueries({ queryKey: queryKeys.memoryItemDetails() });
+  void queryClient.invalidateQueries({ queryKey: ["memory", "agents"] });
 }
 
 export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
@@ -2160,6 +2262,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
   const [ratingSuggestionPriority, setRatingSuggestionPriority] = useState<RatingSuggestionPriorityFilter>("all");
   const [selectedRatingSuggestionIds, setSelectedRatingSuggestionIds] = useState<string[]>([]);
   const [traceTargetId, setTraceTargetId] = useState("");
+  const [selectedAgentMemoryItemId, setSelectedAgentMemoryItemId] = useState("");
   const [graphSearchText, setGraphSearchText] = useState("");
   const [activeGraphNodeType, setActiveGraphNodeType] = useState("");
   const [selectedGraphNodeId, setSelectedGraphNodeId] = useState("");
@@ -2203,13 +2306,38 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
   const agentsQuery = useQuery({
     queryKey: queryKeys.agents(),
     queryFn: () => fetchJson<AgentInstance[]>("/api/agents?detail=summary"),
-    enabled: forcedView === "knowledge" || forcedView === "graph" || forcedView === "cleanup",
+    enabled: forcedView === "agents" || forcedView === "knowledge" || forcedView === "graph" || forcedView === "cleanup",
     refetchInterval: resolvePollingInterval(pageVisible, 60_000),
+    refetchIntervalInBackground: false,
+  });
+
+  const agentMemoryInventoryQuery = useQuery({
+    queryKey: ["memory", "agents", "inventory"],
+    queryFn: () => fetchJson<AgentMemoryInventoryPayload>("/api/memory/agents"),
+    enabled: forcedView === "agents",
+    refetchInterval: resolvePollingInterval(pageVisible, 45_000),
     refetchIntervalInBackground: false,
   });
 
   const knowledgeActorAgents = agentsQuery.data ?? [];
   const fallbackKnowledgeActorAgentId = requestedKnowledgeActorAgentId || knowledgeActorAgents.find((agent) => agent.status !== "archived")?.agentId || "";
+
+  const agentMemoryInventoryAgents = agentMemoryInventoryQuery.data?.agents ?? [];
+  const requestedAgentMemoryAgent = requestedKnowledgeActorAgentId
+    ? agentMemoryInventoryAgents.find((agent) => agent.agentId === requestedKnowledgeActorAgentId) ?? null
+    : null;
+  const selectedAgentMemoryAgentId =
+    requestedAgentMemoryAgent?.agentId
+    || agentMemoryInventoryAgents.find((agent) => agent.hasPrivateMemory)?.agentId
+    || agentMemoryInventoryAgents.find((agent) => agent.status !== "archived")?.agentId
+    || agentMemoryInventoryAgents[0]?.agentId
+    || "";
+  const agentMemoryDetailQuery = useQuery({
+    queryKey: ["memory", "agents", selectedAgentMemoryAgentId, "detail"],
+    queryFn: () => fetchJson<AgentMemoryInventoryPayload>(`/api/memory/agents/${encodeURIComponent(selectedAgentMemoryAgentId)}`),
+    enabled: forcedView === "agents" && Boolean(selectedAgentMemoryAgentId),
+    refetchInterval: false,
+  });
 
   const knowledgeDashboardSnapshotQuery = useQuery({
     queryKey: queryKeys.knowledgeDashboardSnapshot(fallbackKnowledgeActorAgentId),
@@ -2554,6 +2682,15 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
   const projectMemoryProposalLaneCount = new Set(projectMemoryUpdateProposals.map((proposal) => proposal.laneId).filter(Boolean)).size;
   const memoryUsageContract = memoryUsageContractQuery.data;
   const sections = overview?.sections ?? [];
+  const selectedAgentMemoryListAgent = selectedAgentMemoryAgentId
+    ? agentMemoryInventoryAgents.find((agent) => agent.agentId === selectedAgentMemoryAgentId) ?? null
+    : null;
+  const selectedAgentMemoryAgent = agentMemoryDetailQuery.data?.selectedAgent ?? selectedAgentMemoryListAgent;
+  const selectedAgentMemoryItems = selectedAgentMemoryAgent?.items ?? [];
+  const selectedAgentMemoryItem =
+    selectedAgentMemoryItems.find((item) => item.id === selectedAgentMemoryItemId)
+    ?? selectedAgentMemoryItems[0]
+    ?? null;
   const knowledgeDashboardSnapshot = knowledgeDashboardSnapshotQuery.data;
   const knowledgeOverview = knowledgeDashboardSnapshot?.overview;
   const knowledgeSteward = knowledgeDashboardSnapshot?.steward;
@@ -3332,6 +3469,15 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
   }, [manageablePairs, selectedMemoryKeys]);
 
   useEffect(() => {
+    if (!selectedAgentMemoryItemId) {
+      return;
+    }
+    if (!selectedAgentMemoryItems.some((item) => item.id === selectedAgentMemoryItemId)) {
+      setSelectedAgentMemoryItemId("");
+    }
+  }, [selectedAgentMemoryItemId, selectedAgentMemoryItems]);
+
+  useEffect(() => {
     if (!knowledgeBases.length) {
       if (activeKnowledgeBaseId) {
         setActiveKnowledgeBaseId("");
@@ -3392,6 +3538,19 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
     setActiveSectionId("");
     setActiveItemId("");
     setActiveChannel((current) => (current === channel ? "" : channel));
+  };
+  const selectMemoryAgent = (agentId: string) => {
+    setSelectedAgentMemoryItemId("");
+    const next = buildMemorySearchParams(
+      activeSectionId,
+      activeItemId,
+      activeFilter,
+      activeManageFilter,
+      activeChannel,
+      searchText,
+      agentId,
+    );
+    setSearchParams(next);
   };
   const currentUrl = useMemo(
     () => buildMemoryLink(activeSectionId, activeItemId, activeFilter, activeManageFilter, activeChannel, searchText, requestedKnowledgeActorAgentId),
@@ -4777,6 +4936,207 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
       </div>
     </>
   );
+
+  const renderAgentMemoryView = () => {
+    const summary = agentMemoryInventoryQuery.data?.summary;
+    const agentSearch = searchText.trim().toLowerCase();
+    const visibleAgents = agentMemoryInventoryAgents.filter((agent) =>
+      !agentSearch
+      || [
+        agent.displayName,
+        agent.agentCode,
+        agent.agentId,
+        agent.workspacePath,
+        agent.privateMemoryRoot,
+        agent.primaryMode,
+        agent.roleKey,
+      ].some((value) => String(value || "").toLowerCase().includes(agentSearch)),
+    );
+    return (
+      <>
+        <div className={styles.summaryGrid}>
+          <section className={styles.summaryCard}>
+            <span>{copy.agentMemoryAgents}</span>
+            <strong>{summary?.agentCount ?? 0}</strong>
+          </section>
+          <section className={styles.summaryCard}>
+            <span>{copy.agentMemoryPrivateFiles}</span>
+            <strong>{summary?.privateFileCount ?? 0}</strong>
+            <small>{formatByteCount(summary?.privateByteCount ?? 0)}</small>
+          </section>
+          <section className={styles.summaryCard}>
+            <span>{copy.agentMemoryFormalKnowledge}</span>
+            <strong>{summary?.formalKnowledgeItemCount ?? 0}</strong>
+            <small>{copy.agentMemoryFormalBases}: {summary?.formalKnowledgeBaseCount ?? 0}</small>
+          </section>
+          <section className={styles.summaryCard}>
+            <span>{copy.warnings}</span>
+            <strong>{summary?.warnings.length ?? 0}</strong>
+          </section>
+        </div>
+        <div className={`${styles.workspace} ${styles.agentMemoryWorkspace}`}>
+          <aside className={styles.sourcePanel}>
+            <div className={styles.panelHeader}>
+              <div>
+                <p className={styles.panelEyebrow}>{copy.agentMemoryAgents}</p>
+                <h2>{copy.agentMemorySelectedAgent}</h2>
+              </div>
+              <span className={styles.countPill}>{visibleAgents.length}</span>
+            </div>
+            <label className={styles.searchBox}>
+              <Search size={15} />
+              <input value={searchText} placeholder={copy.searchPlaceholder} onChange={(event) => setSearchText(event.target.value)} />
+            </label>
+            <div className={styles.itemList}>
+              {agentMemoryInventoryQuery.isPending ? <div className={styles.emptyState}>{copy.loading}</div> : null}
+              {agentMemoryInventoryQuery.isError ? (
+                <div className={styles.emptyState}>
+                  {copy.loadFailed}: {agentMemoryInventoryQuery.error instanceof Error ? agentMemoryInventoryQuery.error.message : String(agentMemoryInventoryQuery.error)}
+                </div>
+              ) : null}
+              {!agentMemoryInventoryQuery.isPending && !visibleAgents.length ? <div className={styles.emptyState}>{copy.agentMemoryNoAgents}</div> : null}
+              {visibleAgents.map((agent) => {
+                const active = agent.agentId === selectedAgentMemoryAgentId;
+                return (
+                  <button
+                    key={agent.agentId}
+                    type="button"
+                    className={active ? `${styles.itemButton} ${styles.itemButtonActive}` : styles.itemButton}
+                    onClick={() => selectMemoryAgent(agent.agentId)}
+                  >
+                    <span className={styles.itemHeader}>
+                      <strong>{agent.displayName || agent.agentId}</strong>
+                      <span>{agent.status}</span>
+                    </span>
+                    <span className={styles.itemOrigin}>{agent.agentCode || agent.agentId}</span>
+                    <span className={styles.itemPath}>{agent.privateMemoryRoot || agent.workspacePath}</span>
+                    <span className={styles.itemBadges}>
+                      <span className={agent.hasPrivateMemory ? styles.statusPillVisible : styles.statusPill}>
+                        {copy.agentMemoryPrivateFiles}: {agent.fileCount}
+                      </span>
+                      <span className={styles.statusPill}>
+                        {copy.agentMemoryFormalBases}: {agent.knowledgeSummary.knowledgeBaseCount}
+                      </span>
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </aside>
+
+          <main className={styles.itemPanel}>
+            <div className={styles.panelHeader}>
+              <div>
+                <p className={styles.panelEyebrow}>{copy.agentMemoryPrivateRoot}</p>
+                <h2 title={selectedAgentMemoryAgent?.privateMemoryRoot || selectedAgentMemoryAgent?.workspacePath || ""}>
+                  {selectedAgentMemoryAgent?.displayName ?? copy.agentMemorySelectedAgent}
+                </h2>
+              </div>
+              <span className={styles.countPill}>{selectedAgentMemoryAgent?.fileCount ?? 0}</span>
+            </div>
+            <section className={styles.detailMeta}>
+              <span>{copy.agentMemoryPrivateRoot}: {selectedAgentMemoryAgent?.privateMemoryRoot || "-"}</span>
+              <span>{copy.sourcePath}: {selectedAgentMemoryAgent?.workspacePath || "-"}</span>
+              <span>{copy.agentMemoryFormalKnowledge}: {selectedAgentMemoryAgent?.knowledgeSummary.itemCount ?? 0}</span>
+            </section>
+            <div className={styles.itemList}>
+              {agentMemoryDetailQuery.isPending && selectedAgentMemoryAgentId ? <div className={styles.emptyState}>{copy.loading}</div> : null}
+              {agentMemoryDetailQuery.isError ? (
+                <div className={styles.emptyState}>
+                  {copy.loadFailed}: {agentMemoryDetailQuery.error instanceof Error ? agentMemoryDetailQuery.error.message : String(agentMemoryDetailQuery.error)}
+                </div>
+              ) : null}
+              {!selectedAgentMemoryItems.length && !agentMemoryDetailQuery.isPending ? (
+                <div className={styles.emptyState}>{copy.agentMemoryNoPrivateMemory}</div>
+              ) : null}
+              {selectedAgentMemoryItems.map((item) => {
+                const active = item.id === selectedAgentMemoryItem?.id;
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    className={active ? `${styles.itemButton} ${styles.itemButtonActive}` : styles.itemButton}
+                    onClick={() => setSelectedAgentMemoryItemId(item.id)}
+                  >
+                    <span className={styles.itemHeader}>
+                      <strong>{item.relativePath || item.title}</strong>
+                      <span>{formatTimestamp(item.updatedAt, lang)}</span>
+                    </span>
+                    <span className={styles.itemPath}>{item.path}</span>
+                    <span className={styles.itemSummary}>{item.summary}</span>
+                    <span className={styles.itemBadges}>
+                      <span className={styles.statusPill}>{formatByteCount(item.sizeBytes)}</span>
+                      <span className={styles.statusPill}>{item.contentType}</span>
+                      {item.contentTruncated ? <span className={styles.statusPill}>{copy.truncated}</span> : null}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </main>
+
+          <aside className={styles.detailPanel}>
+            {selectedAgentMemoryAgent ? (
+              <>
+                <div className={styles.detailHeader}>
+                  <div>
+                    <p className={styles.panelEyebrow}>{copy.agentMemorySelectedFile}</p>
+                    <h2>{selectedAgentMemoryItem?.relativePath ?? copy.agentMemoryNoFileSelected}</h2>
+                    <p>{selectedAgentMemoryItem?.path || selectedAgentMemoryAgent.privateMemoryRoot || "-"}</p>
+                  </div>
+                  {selectedAgentMemoryItem ? <span className={styles.countPill}>{formatByteCount(selectedAgentMemoryItem.sizeBytes)}</span> : null}
+                </div>
+                <section className={styles.sectionPanel}>
+                  <div className={styles.panelHeader}>
+                    <div>
+                      <p className={styles.panelEyebrow}>{copy.agentMemoryFormalKnowledge}</p>
+                      <h3>{copy.agentMemoryFormalBases}</h3>
+                    </div>
+                    <span className={styles.countPill}>{selectedAgentMemoryAgent.knowledgeSummary.knowledgeBaseCount}</span>
+                  </div>
+                  {selectedAgentMemoryAgent.knowledgeSummary.error ? <p>{selectedAgentMemoryAgent.knowledgeSummary.error}</p> : null}
+                  {selectedAgentMemoryAgent.knowledgeSummary.knowledgeBases.length ? (
+                    <div className={styles.usageList}>
+                      {selectedAgentMemoryAgent.knowledgeSummary.knowledgeBases.map((base) => (
+                        <span key={base.scopedKnowledgeBaseId || base.knowledgeBaseId} title={base.scopedKnowledgeBaseId || base.knowledgeBaseId}>
+                          <Database size={13} />
+                          {base.name || base.knowledgeBaseId}
+                        </span>
+                      ))}
+                    </div>
+                  ) : (
+                    <p>{copy.noMatches}</p>
+                  )}
+                </section>
+                <details className={styles.rawPanel} open>
+                  <summary>
+                    <FileText size={15} />
+                    <span>{copy.rawContent}</span>
+                    <code>{selectedAgentMemoryItem?.contentType ?? "-"}</code>
+                  </summary>
+                  {agentMemoryDetailQuery.isFetching ? <p>{copy.loading}</p> : null}
+                  {selectedAgentMemoryItem?.content ? (
+                    <pre data-language={contentLanguage(selectedAgentMemoryItem.contentType)}>{selectedAgentMemoryItem.content}</pre>
+                  ) : !agentMemoryDetailQuery.isFetching ? (
+                    <p>{selectedAgentMemoryItem ? copy.noContent : copy.agentMemoryNoFileSelected}</p>
+                  ) : null}
+                </details>
+                <p className={styles.generatedAt}>
+                  {copy.generatedAt}: {formatTimestamp(agentMemoryDetailQuery.data?.generatedAt ?? agentMemoryInventoryQuery.data?.generatedAt ?? "", lang)}
+                </p>
+              </>
+            ) : (
+              <section className={styles.emptyDetail}>
+                <Brain size={24} />
+                <strong>{copy.agentMemorySelectedAgent}</strong>
+                <p>{agentMemoryInventoryQuery.isPending ? copy.loading : copy.agentMemoryNoAgents}</p>
+              </section>
+            )}
+          </aside>
+        </div>
+      </>
+    );
+  };
 
   const renderSourcesView = () => (
     <>
@@ -6344,6 +6704,8 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
   const viewStackClassName =
     forcedView === "graph"
       ? `${styles.viewStack} ${styles.graphViewStack}`
+      : forcedView === "agents"
+        ? `${styles.viewStack} ${styles.agentMemoryViewStack}`
       : forcedView === "knowledge"
         ? `${styles.viewStack} ${styles.knowledgeViewStack}`
         : styles.viewStack;
@@ -6372,15 +6734,17 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
           ? renderOverviewView()
           : forcedView === "effective"
             ? renderEffectiveView()
-            : forcedView === "manage"
-              ? renderManageView()
-              : forcedView === "knowledge"
-                ? renderKnowledgeView()
-                : forcedView === "graph"
-                  ? renderGraphView()
-                  : forcedView === "cleanup"
-                    ? renderCleanupView()
-                    : renderSourcesView()}
+            : forcedView === "agents"
+              ? renderAgentMemoryView()
+              : forcedView === "manage"
+                ? renderManageView()
+                : forcedView === "knowledge"
+                  ? renderKnowledgeView()
+                  : forcedView === "graph"
+                    ? renderGraphView()
+                    : forcedView === "cleanup"
+                      ? renderCleanupView()
+                      : renderSourcesView()}
       </div>
     </section>
   );

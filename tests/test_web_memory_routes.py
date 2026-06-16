@@ -829,6 +829,65 @@ def test_memory_usage_contract_aligns_team_agent_and_evolution_boundaries(tmp_pa
     assert items["summary"]["itemCount"] == 0
 
 
+def test_agent_memory_inventory_lists_private_workspace_without_content(tmp_path, monkeypatch):
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(memory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(team_knowledge_service, "PROJECT_ROOT", tmp_path)
+    agent = agent_directory_service.create_agent_instance(display_name="Private Memory Agent")
+    empty_agent = agent_directory_service.create_agent_instance(display_name="No Memory Agent")
+    memory_root = tmp_path / agent["workspacePath"] / "memory"
+    memory_root.mkdir(parents=True, exist_ok=True)
+    (memory_root / "lesson.md").write_text("PRIVATE MEMORY BODY SHOULD ONLY LOAD IN DETAIL", encoding="utf-8")
+    (memory_root / "nested").mkdir()
+    (memory_root / "nested" / "facts.json").write_text('{"fact":"visible in detail"}', encoding="utf-8")
+    team_knowledge_service.create_agent_knowledge_base(
+        agent["agentId"],
+        name="Private formal KB",
+        actor_agent_id=agent["agentId"],
+    )
+
+    response = client.get("/api/memory/agents")
+
+    assert response.status_code == 200, response.json()
+    payload = response.json()
+    entries = {item["agentId"]: item for item in payload["agents"]}
+    private_entry = entries[agent["agentId"]]
+    empty_entry = entries[empty_agent["agentId"]]
+    payload_text = json.dumps(payload, ensure_ascii=False)
+    assert payload["summary"]["agentCount"] >= 2
+    assert payload["summary"]["agentWithPrivateMemoryCount"] == 1
+    assert payload["summary"]["privateFileCount"] == 2
+    assert payload["summary"]["formalKnowledgeBaseCount"] == 1
+    assert private_entry["privateMemoryRoot"] == f"{agent['workspacePath']}/memory"
+    assert private_entry["fileCount"] == 2
+    assert private_entry["knowledgeSummary"]["knowledgeBaseCount"] == 1
+    assert private_entry["items"][0]["contentDeferred"] is True
+    assert private_entry["items"][0]["content"] == ""
+    assert empty_entry["fileCount"] == 0
+    assert "PRIVATE MEMORY BODY SHOULD ONLY LOAD IN DETAIL" not in payload_text
+
+    detail_response = client.get(f"/api/memory/agents/{agent['agentId']}")
+
+    assert detail_response.status_code == 200, detail_response.json()
+    detail_payload = detail_response.json()
+    detail_agent = detail_payload["selectedAgent"]
+    detail_items = {item["relativePath"]: item for item in detail_agent["items"]}
+    assert detail_agent["agentId"] == agent["agentId"]
+    assert detail_items["lesson.md"]["contentDeferred"] is False
+    assert "PRIVATE MEMORY BODY SHOULD ONLY LOAD IN DETAIL" in detail_items["lesson.md"]["content"]
+    assert detail_items["nested/facts.json"]["contentType"] == "json"
+
+
+def test_agent_memory_inventory_unknown_agent_returns_404(tmp_path, monkeypatch):
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(memory_service, "PROJECT_ROOT", tmp_path)
+
+    response = client.get("/api/memory/agents/missing-agent")
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Agent memory not found."
+
+
 def test_memory_global_overviews_do_not_expose_formal_knowledge_bodies(tmp_path, monkeypatch):
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(memory_service, "PROJECT_ROOT", tmp_path)

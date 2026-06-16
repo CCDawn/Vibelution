@@ -25,6 +25,18 @@ describe("MemoryRoute layout contract", () => {
     expect(routeSource).toContain("queryKeys.memoryItemDetails()");
   });
 
+  it("reads Agent-private memory through the dedicated inventory API", () => {
+    expect(routeSource).toContain("AgentMemoryInventoryPayload");
+    expect(routeSource).toContain('fetchJson<AgentMemoryInventoryPayload>("/api/memory/agents")');
+    expect(routeSource).toContain("`/api/memory/agents/${encodeURIComponent(selectedAgentMemoryAgentId)}`");
+    expect(routeSource).toContain("renderAgentMemoryView()");
+    expect(routeSource).toContain("copy.agentMemoryView");
+    expect(routeSource).toContain("copy.agentMemoryPrivateFiles");
+    expect(routeSource).toContain("styles.agentMemoryViewStack");
+    expect(memoryCssSource).toContain(".agentMemoryViewStack");
+    expect(memoryCssSource).toContain(".agentMemoryWorkspace");
+  });
+
   it("exposes manual memory management actions through guarded API mutations", () => {
     expect(routeSource).toContain("useMutation");
     expect(routeSource).toContain('fetchJson<MemoryMutationResponse>("/api/memory/items"');
@@ -84,14 +96,15 @@ describe("MemoryRoute layout contract", () => {
     expect(routeSource).not.toContain("setActiveItemId(flatVisibleItems[0]?.item.id ?? \"\")");
   });
 
-  it("splits memory into overview, effective scope, management, source audit, team knowledge, graph, and cleanup views", () => {
+  it("splits memory into overview, effective scope, Agent memory, source management, source audit, team knowledge, graph, and cleanup views", () => {
     expect(routeSource).toContain(
-      'export type MemoryRouteView = "overview" | "effective" | "manage" | "sources" | "knowledge" | "graph" | "cleanup"',
+      'export type MemoryRouteView = "overview" | "effective" | "agents" | "manage" | "sources" | "knowledge" | "graph" | "cleanup"',
     );
     expect(routeSource).toContain("MEMORY_VIEWS");
     expect(routeSource).toContain("styles.subnav");
     expect(routeSource).toContain("renderOverviewView()");
     expect(routeSource).toContain("renderEffectiveView()");
+    expect(routeSource).toContain("renderAgentMemoryView()");
     expect(routeSource).toContain("renderManageView()");
     expect(routeSource).toContain("renderSourcesView()");
     expect(routeSource).toContain("renderKnowledgeView()");
@@ -99,6 +112,7 @@ describe("MemoryRoute layout contract", () => {
     expect(routeSource).toContain("renderCleanupView()");
     expect(routeSource).toContain('forcedView === "overview"');
     expect(routeSource).toContain('forcedView === "effective"');
+    expect(routeSource).toContain('forcedView === "agents"');
     expect(routeSource).toContain('forcedView === "manage"');
     expect(routeSource).toContain('forcedView === "knowledge"');
     expect(routeSource).toContain('forcedView === "graph"');
@@ -607,6 +621,8 @@ describe("MemoryRoute layout contract", () => {
     expect(routerSource).toContain('<MemoryRoute forcedView="overview" />');
     expect(routerSource).toContain('path: "memory/effective"');
     expect(routerSource).toContain('<MemoryRoute forcedView="effective" />');
+    expect(routerSource).toContain('path: "memory/agents"');
+    expect(routerSource).toContain('<MemoryRoute forcedView="agents" />');
     expect(routerSource).toContain('path: "memory/manage"');
     expect(routerSource).toContain('<MemoryRoute forcedView="manage" />');
     expect(routerSource).toContain('path: "memory/sources"');
@@ -619,6 +635,8 @@ describe("MemoryRoute layout contract", () => {
     expect(routerSource).toContain('<LegacyMemoryRedirect to="/memory" />');
     expect(routerSource).toContain('path: "agents/memory/effective"');
     expect(routerSource).toContain('<LegacyMemoryRedirect to="/memory/effective" />');
+    expect(routerSource).toContain('path: "agents/memory/agents"');
+    expect(routerSource).toContain('<LegacyMemoryRedirect to="/memory/agents" />');
     expect(routerSource).toContain('path: "agents/memory/manage"');
     expect(routerSource).toContain('<LegacyMemoryRedirect to="/memory/manage" />');
     expect(routerSource).toContain('path: "agents/memory/sources"');

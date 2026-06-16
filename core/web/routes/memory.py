@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 from core.web.services.memory_service import (
     create_user_memory_item,
     delete_memory_item,
+    get_agent_memory_inventory,
     get_memory_item_detail,
     get_memory_overview,
     get_memory_usage_contract,
@@ -62,6 +63,19 @@ def memory_overview(includeContent: bool = True) -> dict:
 @router.get("/memory/usage-contract")
 def memory_usage_contract() -> dict:
     return get_memory_usage_contract()
+
+
+@router.get("/memory/agents")
+def memory_agents(agentId: str = "", includeContent: bool = False) -> dict:
+    return get_agent_memory_inventory(agent_id=agentId, include_content=includeContent)
+
+
+@router.get("/memory/agents/{agent_id}")
+def memory_agent_detail(agent_id: str, includeContent: bool = True) -> dict:
+    payload = get_agent_memory_inventory(agent_id=agent_id, include_content=includeContent)
+    if payload.get("selectedAgent") is None:
+        raise HTTPException(status_code=404, detail="Agent memory not found.")
+    return payload
 
 
 @router.get("/memory/knowledge-graph")

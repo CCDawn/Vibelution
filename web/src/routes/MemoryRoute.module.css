@@ -146,6 +146,23 @@
   overflow: hidden;
 }
 
+.agentMemoryViewStack {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.agentMemoryViewStack > .summaryGrid {
+  flex: 0 0 auto;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.agentMemoryViewStack > .agentMemoryWorkspace {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
 .knowledgeViewStack > .summaryGrid,
 .knowledgeViewStack > .pipelinePanel,
 .knowledgeViewStack > .knowledgeGovernanceDeck,
@@ -919,6 +936,10 @@
 
 .manageWorkspace {
   grid-template-columns: minmax(430px, 1.08fr) minmax(300px, 0.72fr) minmax(330px, 0.72fr);
+}
+
+.agentMemoryWorkspace {
+  grid-template-columns: minmax(280px, 0.72fr) minmax(360px, 0.95fr) minmax(400px, 1.05fr);
 }
 
 .knowledgeWorkspace {
@@ -4274,6 +4295,15 @@
     grid-template-rows: minmax(210px, 0.58fr) minmax(260px, 1fr);
   }
 
+  .agentMemoryWorkspace {
+    grid-template-columns: minmax(300px, 0.72fr) minmax(0, 1fr);
+    grid-template-rows: minmax(210px, 0.56fr) minmax(260px, 1fr);
+  }
+
+  .agentMemoryWorkspace .sourcePanel {
+    grid-row: 1 / 3;
+  }
+
   .manageWorkspace .manageListPanel {
     grid-row: 1 / 3;
   }
@@ -4304,6 +4334,12 @@
   }
 
   .manageWorkspace .detailPanel {
+    grid-column: 2;
+    grid-row: 2;
+    max-height: none;
+  }
+
+  .agentMemoryWorkspace .detailPanel {
     grid-column: 2;
     grid-row: 2;
     max-height: none;
@@ -4403,6 +4439,12 @@
   .itemPanel,
   .detailPanel {
     overflow: visible;
+  }
+
+  .agentMemoryWorkspace .sourcePanel,
+  .agentMemoryWorkspace .detailPanel {
+    grid-column: auto;
+    grid-row: auto;
   }
 
   .graphCanvasShell {
