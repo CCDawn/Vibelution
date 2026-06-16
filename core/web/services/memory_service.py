@@ -14,7 +14,7 @@ from pathlib import Path
 from threading import Lock
 from typing import Any
 
-from core.infrastructure import git_process
+from core.infrastructure import developer_sandbox, git_process
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 CONTENT_LIMIT = 8000
@@ -47,6 +47,19 @@ GIT_SNAPSHOT_CACHE_TTL_SECONDS = 3.0
 GIT_SNAPSHOT_CACHE_LOCK = Lock()
 GIT_SNAPSHOT_CACHE: dict[str, Any] = {"root": "", "expiresAt": 0.0, "payload": None}
 SQLITE_APPEND_ONLY_TABLES = {"GitFileChange", "GitEntityChange"}
+
+
+def _developer_sandbox_cache_token(root: Path) -> str:
+    try:
+        status = developer_sandbox.get_developer_mode_status(project_root=root)
+    except Exception:
+        return "developer:false:"
+    sandbox = status.get("sandbox") if isinstance(status.get("sandbox"), dict) else {}
+    return f"developer:{bool(status.get('enabled'))}:{str(sandbox.get('sandboxId') or '')}"
+
+
+def _sandboxed_workspace_path(root: Path, *parts: str) -> Path:
+    return developer_sandbox.seeded_sandbox_workspace_path(root, *parts)
 
 
 def _path_signature(path: Path) -> str:
@@ -90,8 +103,17 @@ def _memory_overview_section_signature(root: Path, section_id: str) -> str | Non
         return _path_signature(root / "workspace" / "runtime_state.json")
     if normalized == "prompt-memory":
         return _dir_signature(root / "workspace" / "prompts")
-    if normalized in {"workspace-database", "git-memory", "self-evolution-memory"}:
+    if normalized in {"workspace-database", "git-memory"}:
         return _path_signature(root / "workspace" / "agent_brain.db")
+    if normalized == "self-evolution-memory":
+        return "|".join(
+            [
+                _developer_sandbox_cache_token(root),
+                _path_signature(root / "workspace" / "agent_brain.db"),
+                _path_signature(_sandboxed_workspace_path(root, "gym", "active_promotions.json")),
+                _path_signature(_sandboxed_workspace_path(root, "evolution", "audit.jsonl")),
+            ]
+        )
     if normalized == "research-memory":
         return _dir_signature(root / "workspace" / "research")
     if normalized == "team-knowledge":
@@ -104,7 +126,12 @@ def _memory_overview_section_signature(root: Path, section_id: str) -> str | Non
             ]
         )
     if normalized == "supervised-evolution-memory":
-        return _dir_signature(root / "workspace" / "supervised_evolution")
+        return "|".join(
+            [
+                _developer_sandbox_cache_token(root),
+                _dir_signature(_sandboxed_workspace_path(root, "supervised_evolution")),
+            ]
+        )
     if normalized == "runtime-scene-evidence":
         return _dir_signature(root / "logs" / "runtime_scenes")
     return None
@@ -1302,8 +1329,8 @@ def _chat_session_memory_section(root: Path, sub_timings: list[dict[str, Any]] |
 
 def _self_evolution_memory_section(root: Path, sub_timings: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     db_path = root / "workspace" / "agent_brain.db"
-    active_promotions = root / "workspace" / "gym" / "active_promotions.json"
-    audit_path = root / "workspace" / "evolution" / "audit.jsonl"
+    active_promotions = _sandboxed_workspace_path(root, "gym", "active_promotions.json")
+    audit_path = _sandboxed_workspace_path(root, "evolution", "audit.jsonl")
     transaction_payload = _time_memory_overview_step(
         sub_timings,
         "sqlite.EvolutionTransaction",
@@ -1359,7 +1386,7 @@ def _self_evolution_memory_section(root: Path, sub_timings: list[dict[str, Any]]
         "self_evolution_memory",
         "runtime_prompt",
         "自进化 run prompt 显式感知 advisory baseline、worktree snapshot、recent transactions 和 fitness。",
-        "workspace/evolution",
+        _rel(root, audit_path.parent),
         "/api/evolution/self/overview",
         "自进化使用的建议基线、事务历史和审计证据。",
         items,
@@ -1367,7 +1394,7 @@ def _self_evolution_memory_section(root: Path, sub_timings: list[dict[str, Any]]
 
 
 def _supervised_evolution_memory_section(root: Path, sub_timings: list[dict[str, Any]] | None = None) -> dict[str, Any]:
-    supervised_root = root / "workspace" / "supervised_evolution"
+    supervised_root = _sandboxed_workspace_path(root, "supervised_evolution")
     decisions = _time_memory_overview_step(
         sub_timings,
         "latest_files.supervised_decisions",

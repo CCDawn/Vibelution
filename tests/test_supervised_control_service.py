@@ -6,11 +6,47 @@ from types import SimpleNamespace
 
 import pytest
 
+from core.infrastructure import developer_sandbox
 from core.web.services import supervised_control_service as service
 from core.web.services import supervised_conversation_harness_adapter as conversation_adapter
 from tests.helpers.chat_turn_harness import wait_for_condition
 
 pytestmark = pytest.mark.serial
+
+
+@pytest.fixture(autouse=True)
+def isolate_developer_sandbox_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    config_path = tmp_path / "developer-mode-off.toml"
+    config_path.write_text("[launcher]\ncontrol_port = 8765\n", encoding="utf-8")
+    project_root = tmp_path / "developer-mode-project"
+    project_root.mkdir()
+    monkeypatch.setattr(developer_sandbox, "CONFIG_PATH", config_path)
+    monkeypatch.setattr(developer_sandbox, "PROJECT_ROOT", project_root)
+
+
+def _enable_developer_sandbox(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    config_path = tmp_path / "config.toml"
+    config_path.write_text("[launcher]\ncontrol_port = 8765\n", encoding="utf-8")
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    monkeypatch.setattr(developer_sandbox, "CONFIG_PATH", config_path)
+    monkeypatch.setattr(developer_sandbox, "PROJECT_ROOT", project_root)
+    status = developer_sandbox.get_developer_mode_status(config_path=config_path, project_root=project_root)
+    enabled = developer_sandbox.update_developer_mode_status(
+        True,
+        base_hash=status["configHash"],
+        config_path=config_path,
+        project_root=project_root,
+    )
+    sandbox_workspace = (
+        project_root
+        / ".runtime"
+        / "developer-mode"
+        / "sandboxes"
+        / enabled["sandbox"]["sandboxId"]
+        / "workspace"
+    )
+    return project_root, sandbox_workspace
 
 
 def _terminal_bench_environment_contract() -> dict:
@@ -515,6 +551,26 @@ def test_run_supervised_session_fails_when_decision_file_missing(monkeypatch, tm
     assert "decision_missing_after_case_reports" in snapshot["reason"]
     assert snapshot["eventTail"][-1]["event"] == "decision_integrity_failed"
     assert service.get_active_supervised_run() is None
+
+
+def test_supervised_decision_integrity_uses_developer_sandbox_history(monkeypatch, tmp_path):
+    project_root, sandbox_workspace = _enable_developer_sandbox(tmp_path, monkeypatch)
+    monkeypatch.setattr(service, "PROJECT_ROOT", project_root)
+    decision_path = sandbox_workspace / "supervised_evolution" / "decisions" / "sandbox-session.json"
+    decision_path.parent.mkdir(parents=True)
+    decision_path.write_text('{"session_id":"sandbox-session"}', encoding="utf-8")
+    history_path = sandbox_workspace / "supervised_evolution" / "history.jsonl"
+    history_path.parent.mkdir(parents=True, exist_ok=True)
+    history_path.write_text('{"session_id":"sandbox-session"}\n', encoding="utf-8")
+
+    issue = service._supervised_decision_integrity_issue(
+        SimpleNamespace(
+            session_id="sandbox-session",
+            decision_path=str(decision_path),
+        )
+    )
+
+    assert issue == ""
 
 
 def test_retry_supervised_run_starts_new_run_from_finished_decision(monkeypatch, tmp_path):
