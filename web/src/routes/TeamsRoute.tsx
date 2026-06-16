@@ -6222,7 +6222,7 @@ export function TeamsRoute({
         ? "候选资料已到位，下一步执行资料筛选。"
         : "Candidate sources are ready. Run screening next.";
     }
-    if (sourceManifestCandidates.length > 0) {
+    if (sourceCollectionRunCandidateCount > 0) {
       return lang === "zh"
         ? "资料链路已具备，可进入实验规划或继续补充资料。"
         : "The source chain is ready. Move to experiment planning or collect more.";
@@ -6262,16 +6262,16 @@ export function TeamsRoute({
         ? "idle"
         : sourceCollectionSearchOpenAssignmentCount > 0
           ? "pending"
-          : sourceCollectionRecordCount || sourceManifestCandidates.length
+          : sourceCollectionRawRecordCount || sourceCollectionRunCandidateCount
             ? "done"
             : "pending";
   const sourceCollectionScreeningStepState: SourceCollectionStepState = selectedTeamSourceQualityError
     ? "failed"
-    : selectedTeamSourceQualityPending
-      ? "active"
-      : sourceQualityAssessedCount > 0
+      : selectedTeamSourceQualityPending
+        ? "active"
+      : sourceCollectionRunAssessedCount > 0
         ? "done"
-        : sourceManifestCandidates.length > 0 && sourceCollectionSearchOpenAssignmentCount <= 0
+        : sourceCollectionRunCandidateCount > 0 && sourceCollectionSearchOpenAssignmentCount <= 0
           ? "pending"
           : "idle";
   const sourceCollectionCandidateStepState: SourceCollectionStepState = selectedTeamRecordSourceCollectionOutputError
@@ -6285,11 +6285,11 @@ export function TeamsRoute({
           : "idle";
   const sourceCollectionGraphStepState: SourceCollectionStepState = selectedTeamBuildCandidateGraphError || teamWorkflowCandidateGraphQuery.error
     ? "failed"
-    : selectedTeamBuildCandidateGraphPending || teamWorkflowCandidateGraphQuery.isFetching
-      ? "active"
+      : selectedTeamBuildCandidateGraphPending || teamWorkflowCandidateGraphQuery.isFetching
+        ? "active"
       : candidateGraphNodeCount > 0
         ? "done"
-        : sourceManifestCandidates.length > 0
+        : sourceCollectionRunCandidateCount > 0
           ? "pending"
           : "idle";
   const sourceCollectionMemoryStepState: SourceCollectionStepState = teamWorkflowKnowledgeIngestionStatusQuery.error
@@ -6317,12 +6317,12 @@ export function TeamsRoute({
     {
       id: "collection",
       label: lang === "zh" ? "资料搜集" : "Collection",
-      metric: lang === "zh" ? `已搜到 ${sourceCollectionCollectedCount} 条` : `${sourceCollectionCollectedCount} collected`,
+      metric: lang === "zh" ? `原始资料 ${sourceCollectionCollectedCount} 条` : `${sourceCollectionCollectedCount} raw records`,
       summary: !selectedSourceCollectionRun
         ? (lang === "zh" ? "点击开始生成本轮任务" : "Start to create this run")
         : sourceCollectionSearchOpenAssignmentCount > 0
           ? (lang === "zh" ? `${sourceCollectionSearchOpenAssignmentCount} 个搜索任务待执行` : `${sourceCollectionSearchOpenAssignmentCount} search tasks remain`)
-          : (lang === "zh" ? `${sourceCollectionQueryCount} 个搜索问题已处理` : `${sourceCollectionQueryCount} search questions handled`),
+          : (lang === "zh" ? `已入候选 ${sourceCollectionRunCandidateCount} 条` : `${sourceCollectionRunCandidateCount} imported to candidates`),
       state: sourceCollectionSearchStepState,
       status: sourceCollectionStepStatusText(sourceCollectionSearchStepState),
       detailLabel: lang === "zh" ? "查看搜集过程" : "View collection process",
@@ -6336,12 +6336,12 @@ export function TeamsRoute({
     {
       id: "screening",
       label: lang === "zh" ? "资料筛选" : "Screening",
-      metric: lang === "zh" ? `已筛 ${sourceQualityAssessedCount}/${sourceQualityCandidateCount}` : `${sourceQualityAssessedCount}/${sourceQualityCandidateCount} screened`,
-      summary: sourceQualityCandidateCount <= 0
+      metric: lang === "zh" ? `已筛 ${sourceCollectionRunAssessedCount}/${sourceCollectionRunCandidateCount}` : `${sourceCollectionRunAssessedCount}/${sourceCollectionRunCandidateCount} screened`,
+      summary: sourceCollectionRunCandidateCount <= 0
         ? (lang === "zh" ? "先完成资料搜集" : "Collect sources first")
-        : sourceQualityUnassessedCount > 0
-          ? (lang === "zh" ? `${sourceQualityUnassessedCount} 条等待 Agent 审查` : `${sourceQualityUnassessedCount} wait for agent review`)
-          : (lang === "zh" ? `${sourceCollectionApprovedCount} 条已通过` : `${sourceCollectionApprovedCount} approved`),
+        : sourceCollectionRunPendingScreeningCount > 0
+          ? (lang === "zh" ? `${sourceCollectionRunPendingScreeningCount} 条等待 Agent 审查` : `${sourceCollectionRunPendingScreeningCount} wait for agent review`)
+          : (lang === "zh" ? `${sourceCollectionRunApprovedCount} 条已通过` : `${sourceCollectionRunApprovedCount} approved`),
       state: sourceCollectionScreeningStepState,
       status: sourceCollectionStepStatusText(sourceCollectionScreeningStepState),
       detailLabel: lang === "zh" ? "查看筛选详情" : "View screening details",
@@ -6355,8 +6355,8 @@ export function TeamsRoute({
     {
       id: "candidate",
       label: lang === "zh" ? "候选入库" : "Candidates",
-      metric: lang === "zh" ? `候选资料 ${sourceManifestCandidates.length} 条` : `${sourceManifestCandidates.length} candidates`,
-      summary: sourceManifestCandidates.length > 0
+      metric: lang === "zh" ? `本轮候选 ${sourceCollectionRunCandidateCount} 条` : `${sourceCollectionRunCandidateCount} run candidates`,
+      summary: sourceCollectionRunCandidateCount > 0
         ? (lang === "zh" ? "候选库可视化查看" : "Open the visual library")
         : (lang === "zh" ? "等待资料入候选" : "Waiting for candidates"),
       state: sourceCollectionCandidateStepState,
@@ -6501,7 +6501,7 @@ export function TeamsRoute({
                 <span>{lang === "zh" ? "下一步" : "next"} <strong>{sourceCollectionStageFocusLabel}</strong></span>
                 <span>{lang === "zh" ? "可搜索" : "search"} <strong>{lang === "zh" ? `${sourceCollectionSearchOpenAssignmentCount} 项` : sourceCollectionSearchOpenAssignmentCount}</strong></span>
                 <span>{lang === "zh" ? "后续" : "next work"} <strong>{lang === "zh" ? `${sourceCollectionDownstreamOpenAssignmentCount} 项` : sourceCollectionDownstreamOpenAssignmentCount}</strong></span>
-                <span>{lang === "zh" ? "搜集结果" : "results"} <strong>{lang === "zh" ? `${sourceCollectionCollectedCount} 条` : sourceCollectionCollectedCount}</strong></span>
+                <span>{lang === "zh" ? "原始资料" : "raw records"} <strong>{lang === "zh" ? `${sourceCollectionCollectedCount} 条` : sourceCollectionCollectedCount}</strong></span>
                 <span>{lang === "zh" ? "搜索问题" : "search questions"} <strong>{lang === "zh" ? `${sourceCollectionQueryCount} 个` : sourceCollectionQueryCount}</strong></span>
                 <span>{lang === "zh" ? "缓存" : "cache"} <strong>{sourceCollectionPromptCacheStatusLabel(sourceCollectionPromptCacheStatus, lang)}</strong></span>
               </div>
