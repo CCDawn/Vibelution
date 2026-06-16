@@ -7,6 +7,8 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from core.logging import debug as _debug_logger
+
 
 def _json_dump(payload: dict[str, Any]) -> str:
     return json.dumps(payload, ensure_ascii=False, indent=2)
@@ -40,7 +42,8 @@ def _current_session_id(explicit_session_id: str = "") -> str:
         from core.web.services.agent_directory_service import current_agent_runtime
 
         runtime = current_agent_runtime()
-    except Exception:
+    except Exception as exc:
+        _debug_logger.warning(f"[子会话工具] 获取当前 Agent runtime 失败: {type(exc).__name__}: {exc}")
         runtime = {}
     return str((runtime or {}).get("sessionId") or "").strip()
 

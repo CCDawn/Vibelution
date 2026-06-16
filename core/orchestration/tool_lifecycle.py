@@ -177,7 +177,8 @@ class ToolLifecycleBridge:
             return False
         try:
             return bool(self._post_close_action_pending())
-        except Exception:
+        except Exception as exc:
+            _debug_logger.warning(f"[工具生命周期] 查询后续关闭动作失败，按无待处理动作继续: {type(exc).__name__}: {exc}", tag="TOOL")
             return False
 
     @staticmethod

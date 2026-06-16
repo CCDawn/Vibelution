@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Optional, List, Dict, Any
 
 # 导入统一工作区管理器
+from core.logging import debug_logger
 from core.infrastructure.workspace_manager import get_workspace
 from core.orchestration.task_planner import get_task_manager
 
@@ -186,8 +187,8 @@ def get_current_goal_tool() -> str:
         goal = get_prompt_manager().get_current_goal()
         if goal:
             return goal
-    except Exception:
-        pass
+    except Exception as exc:
+        debug_logger.warning(f"[目标读取] PromptManager 当前目标读取失败，回退到文件记忆: {type(exc).__name__}: {exc}")
     return _load_memory().get("current_goal", "")
 
 
@@ -229,8 +230,8 @@ def commit_compressed_memory_tool(new_core_context: str, next_goal: str) -> str:
         pm = get_prompt_manager()
         pm.update_current_goal(next_goal)
         pm.update_state_memory(new_core_context)
-    except Exception:
-        pass
+    except Exception as exc:
+        debug_logger.warning(f"[记忆同步] PromptManager 同步失败，仅保存文件记忆: {type(exc).__name__}: {exc}")
 
     if _save_memory(memory):
         return json.dumps({
@@ -278,8 +279,8 @@ def force_save_current_state(core_wisdom: str = "", next_goal: str = "") -> str:
         try:
             from core.prompt_manager import get_prompt_manager
             get_prompt_manager().update_current_goal(next_goal)
-        except Exception:
-            pass
+        except Exception as exc:
+            debug_logger.warning(f"[强制快照] PromptManager 当前目标同步失败，仅保存文件记忆: {type(exc).__name__}: {exc}")
 
         if _save_memory(memory):
             debug_logger.warning("[强制快照] 记忆已保存")

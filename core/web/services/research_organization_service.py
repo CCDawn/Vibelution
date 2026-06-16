@@ -9,6 +9,7 @@ from typing import Any
 
 from core.chat.chat_task_types import trim_lines
 from core.infrastructure.workspace_manager import get_workspace
+from core.logging import debug as _debug_logger
 
 from . import agent_mode_binding_service, session_service
 from .agent_directory_service import (
@@ -1772,7 +1773,11 @@ def _known_tool_names() -> set[str]:
             for tool in create_llm_facing_tools()
             if str(getattr(tool, "name", "") or "").strip()
         }
-    except Exception:
+    except Exception as exc:
+        _debug_logger.warning(
+            f"Failed to build known research organization tool names. Falling back to empty set. error={type(exc).__name__}: {exc}",
+            tag="RESEARCH_ORGANIZATION",
+        )
         return set()
 
 

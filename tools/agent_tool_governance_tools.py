@@ -203,7 +203,9 @@ def _status_message(request: dict[str, Any]) -> str:
     status = str(request.get("status") or "").strip()
     grant_scope = str(request.get("grantScope") or "persistent").strip()
     if status == "applied":
-        if grant_scope != "persistent":
+        if grant_scope == "turn":
+            return "工具临时权限已批准；仅当前工具轮次会看到这些工具。"
+        if grant_scope == "session":
             return "工具临时权限已批准；后续同一会话运行会看到这些工具。"
         return "工具权限变更已通过治理服务应用到目标 Agent 的 ToolPolicy。"
     if status == "pending_review":

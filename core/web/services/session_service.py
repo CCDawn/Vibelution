@@ -6458,7 +6458,11 @@ def _pending_tool_governance_requests_for_session(agent_id: str, *, limit: int =
             status="pending_review",
             limit=limit,
         )
-    except Exception:
+    except Exception as exc:
+        _debug_logger.warning(
+            f"Failed to list pending tool governance requests for session detail. agent={normalized_agent_id}, limit={limit}, error={type(exc).__name__}: {exc}",
+            tag="AGENT_TOOL_GOVERNANCE",
+        )
         return []
     result: list[dict[str, Any]] = []
     for item in requests:

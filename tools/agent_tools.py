@@ -20,6 +20,7 @@ import time
 import uuid
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
+from core.logging import debug as _debug_logger
 from core.orchestration.subagent_roles import ALLOWED_SUBAGENT_TASK_TYPES
 
 # 子 agent 只允许由主 agent 派发一次，不允许继续级联委派。
@@ -87,7 +88,8 @@ def _terminate_process_tree(process: subprocess.Popen) -> None:
 
     try:
         process.kill()
-    except Exception:
+    except Exception as exc:
+        _debug_logger.warning(f"[子代理] 兜底终止进程失败: {type(exc).__name__}: {exc}")
         pass
 
 
@@ -809,7 +811,8 @@ def spawn_agent(
             env["VIBELUTION_LOG_ACTOR"] = "subagent"
             env["VIBELUTION_LOG_PARENT_TURN"] = parent_turn
             env["VIBELUTION_LOG_ACTOR_LABEL"] = (task_type or "inspect").strip() or "inspect"
-    except Exception:
+    except Exception as exc:
+        _debug_logger.warning(f"[子代理] 继承父会话日志上下文失败: {type(exc).__name__}: {exc}")
         pass
 
     try:
