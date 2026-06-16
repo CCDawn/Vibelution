@@ -484,6 +484,29 @@ def build_llm_payload(
         isinstance(item, dict) and content_blocks_have_image(item.get("content"))
         for item in messages
     )
+    if has_image_content and not build_input.capabilities.supports_image_input:
+        raise LLMError(
+            "capability_error",
+            (
+                f"profile `{build_input.profile_id}` 不支持 image input；"
+                f"provider `{build_input.provider.kind}` model `{profile.model}` "
+                f"protocol `{route.protocol.value}`。请切换到支持图像理解的模型，"
+                "或移除本轮图片输入。"
+            ),
+            retryable=False,
+            provider=str(build_input.provider.kind or ""),
+            model=str(profile.model or ""),
+            details={
+                "profile_id": build_input.profile_id,
+                "provider_kind": str(build_input.provider.kind or ""),
+                "transport": str(getattr(profile, "transport", "") or "chat_completions"),
+                "model": str(profile.model or ""),
+                "protocol": route.protocol.value,
+                "capability": "image_input",
+                "supports_image_input": False,
+                "payloadValidationResult": "blocked_before_provider",
+            },
+        )
     preserve_cache_control = has_prompt_cache_control and prompt_cache_mode == "explicit_cache_control"
     preserve_structured_content = (
         adapter.preserves_structured_content

@@ -67,10 +67,21 @@ def build_history_events(
     """Build a stable event view from persisted conversation messages."""
 
     events: list[HistoryEvent] = []
+    tool_call_lookup: dict[str, dict[str, Any]] = {}
     for index, raw in enumerate(list(messages or [])):
         if not isinstance(raw, dict):
             continue
         role = str(raw.get("role") or "").strip().lower()
+        if role == "tool":
+            tool_result_event = _tool_role_result_event(
+                dict(raw),
+                index=index,
+                session_id=session_id,
+                tool_call_lookup=tool_call_lookup,
+            )
+            if tool_result_event is not None:
+                events.append(tool_result_event)
+            continue
         if role not in {"user", "assistant", "runtime_context", "runtime", "system"}:
             continue
         message = dict(raw)
@@ -113,6 +124,14 @@ def build_history_events(
                 "metadata": {"messageEventId": message_event_id},
                 "source": tool,
             }
+            tool_call_lookup[tool_call_id] = {
+                "tool_name": tool_name,
+                "tool_call_id": tool_call_id,
+                "status": str(tool.get("status") or "").strip(),
+                "message_event_id": message_event_id,
+                "timestamp": str(message.get("timestamp") or "").strip(),
+                "turn_id": turn_id,
+            }
             events.append(
                 HistoryEvent(
                     event_id=_stable_event_id(session_id, index, EVENT_TOOL_CALL, tool, suffix=str(tool_index)),
@@ -131,6 +150,52 @@ def build_history_events(
                     )
                 )
     return events
+
+
+def _tool_role_result_event(
+    message: dict[str, Any],
+    *,
+    index: int,
+    session_id: str,
+    tool_call_lookup: dict[str, dict[str, Any]],
+) -> HistoryEvent | None:
+    metadata = _metadata_dict(message)
+    content = _content_text(message.get("content"))
+    tool_call_id = str(message.get("tool_call_id") or message.get("toolCallId") or message.get("id") or "").strip()
+    if not tool_call_id or not content:
+        return None
+    linked = tool_call_lookup.get(tool_call_id) or {}
+    tool_name = (
+        str(metadata.get("toolName") or metadata.get("tool_name") or "").strip()
+        or str(linked.get("tool_name") or "").strip()
+        or _tool_name_from_result_content(content)
+    )
+    status = (
+        str(metadata.get("toolStatus") or metadata.get("tool_status") or metadata.get("status") or "").strip()
+        or str(linked.get("status") or "").strip()
+    )
+    turn_id = _turn_id(message, metadata) or str(linked.get("turn_id") or "")
+    event_metadata = {
+        "messageEventId": str(linked.get("message_event_id") or ""),
+        "canonicalRole": "tool",
+    }
+    event_metadata.update(metadata)
+    return HistoryEvent(
+        event_id=_stable_event_id(session_id, index, EVENT_TOOL_RESULT, message, suffix=tool_call_id),
+        event_type=EVENT_TOOL_RESULT,
+        session_id=session_id,
+        message_index=index,
+        turn_id=turn_id,
+        role="tool",
+        content=content,
+        timestamp=str(message.get("timestamp") or linked.get("timestamp") or "").strip(),
+        tool_name=tool_name,
+        tool_call_id=tool_call_id,
+        status=status,
+        summary=content[:240],
+        metadata={key: value for key, value in event_metadata.items() if value not in ("", {}, [])},
+        source=message,
+    )
 
 
 def search_history_events(
@@ -323,6 +388,14 @@ def _tool_summary(tool: dict[str, Any]) -> str:
         value = str(tool.get(key) or "").strip()
         if value:
             return value
+    return ""
+
+
+def _tool_name_from_result_content(content: str) -> str:
+    for line in str(content or "").splitlines()[:4]:
+        match = re.match(r"\s*历史工具调用\s*[:：]\s*(?P<name>[^\s]+)", line)
+        if match:
+            return match.group("name").strip()
     return ""
 
 
