@@ -1,4 +1,5 @@
 from core.ui.chat_state import build_chat_state, load_chat_state, save_chat_state
+from core.chat.turn_journal import EVENT_CLI_TASK_RESULT, load_turn_events, model_visible_messages_from_events
 from core.web.services import session_service
 
 
@@ -45,6 +46,11 @@ def test_cli_agent_task_result_event_persists_once_and_enters_history(monkeypatc
     assert "CLI Agent 任务结果回流：MiMo Code" in result_messages[0]["content"]
     assert "状态：超时" in result_messages[0]["content"]
     assert "最后停在读取配置" in result_messages[0]["content"]
+    journal_events = load_turn_events(tmp_path, "session-1")
+    assert [event.event_type for event in journal_events] == [EVENT_CLI_TASK_RESULT]
+    visible = model_visible_messages_from_events(journal_events)
+    assert visible[0]["toolCalls"][0]["name"] == "cli_agent_run_tool"
+    assert visible[0]["toolCalls"][0]["status"] == "timeout"
 
 
 def test_cli_agent_task_result_wake_status_is_returned(monkeypatch, tmp_path):

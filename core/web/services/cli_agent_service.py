@@ -137,11 +137,15 @@ def run_cli_agent(
     model: str = "",
     agent: str = "",
     allow_unsafe_permissions: bool = False,
+    action: str = "task",
+    terminal_session_id: str = "",
+    input_text: str = "",
 ) -> dict[str, Any]:
     """Run a supported CLI agent with bounded non-interactive arguments."""
 
     started_at = time.perf_counter()
     normalized_type = _normalize_id(agent_type)
+    normalized_action = _normalize_action(action)
     adapters = _load_adapter_definitions()
     adapter = adapters.get(normalized_type)
     if not adapter:
@@ -153,7 +157,9 @@ def run_cli_agent(
         )
 
     task_text = str(task or "").strip()
-    if not task_text:
+    if normalized_action == "send" and not str(input_text or "").strip():
+        input_text = task_text
+    if normalized_action in {"task", "send"} and not (str(input_text or "").strip() if normalized_action == "send" else task_text):
         return _error_result("MISSING_TASK", "cli_agent_run_tool requires a non-empty task.", agent_type=normalized_type)
 
     normalized_mode = str(mode or "readonly").strip().lower()
@@ -182,8 +188,32 @@ def run_cli_agent(
     terminal = adapter.get("terminal") if isinstance(adapter.get("terminal"), dict) else {}
     if bool(terminal.get("enabled")):
         try:
-            from . import cli_agent_task_kernel
             from . import cli_agent_terminal_service
+
+            if normalized_action != "task":
+                controller_result = _run_terminal_controller_action(
+                    action=normalized_action,
+                    terminal_session_id=terminal_session_id,
+                    agent_type=normalized_type,
+                    task=task_text,
+                    input_text=input_text,
+                    cwd=str(run_cwd),
+                    mode=normalized_mode,
+                    model=model,
+                    agent=agent,
+                    allow_unsafe_permissions=allow_unsafe_permissions,
+                    started_at=started_at,
+                )
+                controller_result["runId"] = controller_result.get("terminalSessionId") or _new_run_id()
+                controller_result["logPath"] = controller_result.get("logPath") or _write_run_record(controller_result)
+                _record_event(
+                    "cli_agent.run.controller_action",
+                    outcome="succeeded" if controller_result.get("status") != "error" else "failed",
+                    fields=_event_fields(controller_result, task_hash=task_hash),
+                )
+                return controller_result
+
+            from . import cli_agent_task_kernel
 
             terminal_session = cli_agent_terminal_service.ensure_cli_agent_terminal_session(
                 agent_type=normalized_type,
@@ -227,6 +257,15 @@ def run_cli_agent(
             result["logPath"] = _write_run_record(result)
             _record_event("cli_agent.run.task_broker_failed", outcome="failed", fields=_event_fields(result, task_hash=task_hash))
             return result
+    if normalized_action != "task":
+        return _error_result(
+            "CLI_AGENT_TERMINAL_NOT_SUPPORTED",
+            f"{adapter['label']} does not support persistent terminal controller actions.",
+            agent_type=normalized_type,
+            cwd=str(run_cwd),
+            mode=normalized_mode,
+            action=normalized_action,
+        )
 
     executable = _resolve_executable(adapter)
     if not executable:
@@ -341,6 +380,129 @@ def run_cli_agent(
         result["logPath"] = _write_run_record(result)
         _record_event("cli_agent.run.launch_failed", outcome="failed", fields=_event_fields(result, task_hash=task_hash))
         return result
+
+
+def _run_terminal_controller_action(
+    *,
+    action: str,
+    terminal_session_id: str,
+    agent_type: str,
+    task: str,
+    input_text: str,
+    cwd: str,
+    mode: str,
+    model: str,
+    agent: str,
+    allow_unsafe_permissions: bool,
+    started_at: float,
+) -> dict[str, Any]:
+    from . import cli_agent_terminal_service
+
+    normalized_terminal_session_id = str(terminal_session_id or "").strip()
+    terminal_session: dict[str, Any] = {}
+    if normalized_terminal_session_id:
+        if action == "stop":
+            stopped = cli_agent_terminal_service.stop_cli_agent_terminal_session(normalized_terminal_session_id)
+            return _terminal_controller_result(
+                "closed",
+                "CLI_AGENT_TERMINAL_CLOSED",
+                stopped,
+                action=action,
+                message="CLI Agent terminal session was closed.",
+                duration_ms=round((time.perf_counter() - started_at) * 1000, 3),
+            )
+        terminal_session = cli_agent_terminal_service.get_cli_agent_terminal_session(
+            normalized_terminal_session_id,
+            include_transcript_tail=action == "status",
+        )
+    else:
+        intent = "start" if action == "start" else "view"
+        terminal_session = cli_agent_terminal_service.ensure_cli_agent_terminal_session(
+            agent_type=agent_type,
+            task=task,
+            cwd=cwd,
+            mode=mode,
+            model=model,
+            agent=agent,
+            allow_unsafe_permissions=allow_unsafe_permissions,
+            send_initial_task=False,
+            intent=intent,
+        )
+        normalized_terminal_session_id = str(terminal_session.get("terminalSessionId") or "").strip()
+        if action == "stop":
+            stopped = cli_agent_terminal_service.stop_cli_agent_terminal_session(normalized_terminal_session_id)
+            return _terminal_controller_result(
+                "closed",
+                "CLI_AGENT_TERMINAL_CLOSED",
+                stopped,
+                action=action,
+                message="CLI Agent terminal session was closed.",
+                duration_ms=round((time.perf_counter() - started_at) * 1000, 3),
+            )
+
+    if action == "send":
+        data = str(input_text or task or "")
+        if data and not data.endswith(("\n", "\r")):
+            data = f"{data}\r\n"
+        ack = cli_agent_terminal_service.write_cli_agent_terminal_input(normalized_terminal_session_id, data)
+        merged = {**terminal_session, **ack}
+        return _terminal_controller_result(
+            "input_sent",
+            "CLI_AGENT_TERMINAL_INPUT_SENT",
+            merged,
+            action=action,
+            message="Input was sent to the CLI Agent terminal session.",
+            duration_ms=round((time.perf_counter() - started_at) * 1000, 3),
+        )
+
+    alive = bool(terminal_session.get("alive"))
+    status = "attached" if alive else (str(terminal_session.get("status") or "").strip().lower() or "closed")
+    code = "CLI_AGENT_TERMINAL_ATTACHED" if alive else "CLI_AGENT_TERMINAL_HISTORY_ATTACHED"
+    return _terminal_controller_result(
+        status,
+        code,
+        terminal_session,
+        action=action,
+        message="CLI Agent terminal session is available." if alive else "CLI Agent terminal history is available.",
+        duration_ms=round((time.perf_counter() - started_at) * 1000, 3),
+    )
+
+
+def _terminal_controller_result(
+    status: str,
+    code: str,
+    terminal_session: dict[str, Any],
+    *,
+    action: str,
+    message: str,
+    duration_ms: float,
+) -> dict[str, Any]:
+    return {
+        "status": status,
+        "semanticStatus": status,
+        "internalStatus": str(terminal_session.get("status") or status or "").strip(),
+        "code": code,
+        "message": message,
+        "action": action,
+        "agentType": str(terminal_session.get("agentType") or terminal_session.get("adapterId") or "").strip(),
+        "adapterId": str(terminal_session.get("adapterId") or terminal_session.get("agentType") or "").strip(),
+        "label": str(terminal_session.get("label") or terminal_session.get("adapterId") or "CLI Agent").strip(),
+        "mode": str(terminal_session.get("mode") or "").strip(),
+        "cwd": str(terminal_session.get("cwd") or "").strip(),
+        "terminalSessionId": str(terminal_session.get("terminalSessionId") or "").strip(),
+        "cliRunId": str(terminal_session.get("cliRunId") or "").strip(),
+        "lockKey": str(terminal_session.get("lockKey") or "").strip(),
+        "cliSessionId": str(terminal_session.get("cliSessionId") or "").strip(),
+        "terminalAlive": bool(terminal_session.get("alive")),
+        "terminalStatus": str(terminal_session.get("status") or "").strip(),
+        "canInput": bool(terminal_session.get("canInput")),
+        "canResume": bool(terminal_session.get("canResume")),
+        "interactionState": str(terminal_session.get("interactionState") or "").strip(),
+        "resumeAction": str(terminal_session.get("resumeAction") or "").strip(),
+        "terminalReuse": bool(terminal_session.get("reusedActiveLock")),
+        "commandPreview": list(terminal_session.get("commandPreview") or []),
+        "durationMs": duration_ms,
+    }
 
 
 def _load_adapter_definitions() -> dict[str, dict[str, Any]]:
@@ -657,6 +819,24 @@ def _error_result(code: str, message: str, *, agent_type: str = "", **extra: Any
 
 def _normalize_id(value: Any) -> str:
     return str(value or "").strip().lower().replace("-", "_")
+
+
+def _normalize_action(value: Any) -> str:
+    normalized = str(value or "task").strip().lower().replace("-", "_")
+    aliases = {
+        "run": "task",
+        "submit": "task",
+        "message": "send",
+        "input": "send",
+        "close": "stop",
+        "shutdown": "stop",
+        "attach": "status",
+        "view": "status",
+    }
+    normalized = aliases.get(normalized, normalized)
+    if normalized in {"task", "start", "status", "send", "stop"}:
+        return normalized
+    return "task"
 
 
 def _task_hash(task: str) -> str:

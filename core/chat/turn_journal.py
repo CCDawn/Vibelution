@@ -13,16 +13,19 @@ from uuid import uuid4
 from core.infrastructure import developer_sandbox
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 EVENT_TURN_STARTED = "turn_started"
 EVENT_USER_MESSAGE = "user_message"
 EVENT_TURN_CONTEXT = "turn_context"
 EVENT_ASSISTANT_PARTIAL = "assistant_partial"
+EVENT_ASSISTANT_DELTA_COMMITTED = "assistant_delta_committed"
 EVENT_ASSISTANT_MESSAGE = "assistant_message"
 EVENT_TOOL_CALL_STARTED = "tool_call_started"
 EVENT_TOOL_RESULT = "tool_result"
+EVENT_CLI_TASK_SENT = "cli_task_sent"
 EVENT_CLI_TASK_RESULT = "cli_task_result"
+EVENT_CLI_SESSION_LIFECYCLE = "cli_session_lifecycle"
 EVENT_TURN_COMPLETED = "turn_completed"
 EVENT_TURN_FAILED = "turn_failed"
 EVENT_TURN_INTERRUPTED = "turn_interrupted"
@@ -56,6 +59,13 @@ class TurnJournalEvent:
     timestamp: str
     source: str
     payload: dict[str, Any]
+    parent_event_id: str = ""
+    visible_in_model: bool = True
+    projection_kind: str = ""
+    provider_role: str = ""
+    tool_call_id: str = ""
+    correlation_id: str = ""
+    source_kind: str = ""
 
     @classmethod
     def from_dict(cls, value: Any) -> "TurnJournalEvent | None":
@@ -78,6 +88,13 @@ class TurnJournalEvent:
             timestamp=str(value.get("timestamp") or "").strip(),
             source=str(value.get("source") or "").strip(),
             payload=dict(payload),
+            parent_event_id=str(value.get("parentEventId") or value.get("parent_event_id") or "").strip(),
+            visible_in_model=_coerce_bool(value.get("visibleInModel", value.get("visible_in_model", True)), True),
+            projection_kind=str(value.get("projectionKind") or value.get("projection_kind") or "").strip(),
+            provider_role=str(value.get("providerRole") or value.get("provider_role") or "").strip(),
+            tool_call_id=str(value.get("toolCallId") or value.get("tool_call_id") or "").strip(),
+            correlation_id=str(value.get("correlationId") or value.get("correlation_id") or "").strip(),
+            source_kind=str(value.get("sourceKind") or value.get("source_kind") or "").strip(),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -92,6 +109,13 @@ class TurnJournalEvent:
             "timestamp": self.timestamp,
             "source": self.source,
             "payload": dict(self.payload),
+            "parentEventId": self.parent_event_id,
+            "visibleInModel": self.visible_in_model,
+            "projectionKind": self.projection_kind,
+            "providerRole": self.provider_role,
+            "toolCallId": self.tool_call_id,
+            "correlationId": self.correlation_id,
+            "sourceKind": self.source_kind,
         }
 
 
@@ -115,6 +139,13 @@ def append_turn_event(
     payload: dict[str, Any] | None = None,
     source: str = "",
     timestamp: str = "",
+    parent_event_id: str = "",
+    visible_in_model: bool = True,
+    projection_kind: str = "",
+    provider_role: str = "",
+    tool_call_id: str = "",
+    correlation_id: str = "",
+    source_kind: str = "",
 ) -> TurnJournalEvent:
     path = turn_journal_path(project_root, session_id)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -130,6 +161,13 @@ def append_turn_event(
         timestamp=str(timestamp or "").strip() or _now_timestamp(),
         source=str(source or "").strip(),
         payload=dict(payload or {}),
+        parent_event_id=str(parent_event_id or "").strip(),
+        visible_in_model=bool(visible_in_model),
+        projection_kind=str(projection_kind or "").strip(),
+        provider_role=str(provider_role or "").strip(),
+        tool_call_id=str(tool_call_id or "").strip(),
+        correlation_id=str(correlation_id or "").strip(),
+        source_kind=str(source_kind or "").strip(),
     )
     with path.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(event.to_dict(), ensure_ascii=False, separators=(",", ":")))
@@ -201,12 +239,22 @@ def append_interrupted_if_open(
 
 
 def model_visible_messages_from_events(events: Iterable[TurnJournalEvent]) -> list[dict[str, Any]]:
+    event_list = list(events or [])
     messages: list[dict[str, Any]] = []
     latest_partial_by_turn: dict[str, dict[str, Any]] = {}
     final_turn_ids: set[str] = set()
     terminal_turn_ids: set[str] = set()
+    resolved_tool_keys = {
+        key
+        for event in event_list
+        if event.visible_in_model and event.event_type in {EVENT_TOOL_RESULT, EVENT_CLI_TASK_RESULT}
+        for key in [_event_tool_correlation_key(event)]
+        if key
+    }
 
-    for event in list(events or []):
+    for event in event_list:
+        if not event.visible_in_model:
+            continue
         turn_id = str(event.turn_id or "").strip()
         payload = dict(event.payload or {})
         if event.event_type == EVENT_USER_MESSAGE:
@@ -224,7 +272,7 @@ def model_visible_messages_from_events(events: Iterable[TurnJournalEvent]) -> li
                         },
                     }
                 )
-        elif event.event_type == EVENT_ASSISTANT_PARTIAL:
+        elif event.event_type in {EVENT_ASSISTANT_PARTIAL, EVENT_ASSISTANT_DELTA_COMMITTED}:
             partial = _assistant_message_from_payload(
                 payload,
                 kind="journal_assistant_partial",
@@ -245,10 +293,24 @@ def model_visible_messages_from_events(events: Iterable[TurnJournalEvent]) -> li
             if _message_has_visible_payload(message):
                 messages.append(message)
                 final_turn_ids.add(turn_id)
-        elif event.event_type in {EVENT_TOOL_CALL_STARTED, EVENT_TOOL_RESULT, EVENT_CLI_TASK_RESULT}:
+        elif event.event_type == EVENT_COMPACTION_CHECKPOINT:
+            checkpoint_message = _checkpoint_message_from_event(event)
+            if _message_has_visible_payload(checkpoint_message):
+                messages.append(checkpoint_message)
+        elif event.event_type == EVENT_TOOL_CALL_STARTED:
+            if _event_tool_correlation_key(event) in resolved_tool_keys:
+                continue
             tool_message = _tool_message_from_event(event)
             if _message_has_visible_payload(tool_message):
                 messages.append(tool_message)
+        elif event.event_type in {EVENT_TOOL_RESULT, EVENT_CLI_TASK_SENT, EVENT_CLI_TASK_RESULT}:
+            tool_message = _tool_message_from_event(event)
+            if _message_has_visible_payload(tool_message):
+                messages.append(tool_message)
+        elif event.event_type == EVENT_CLI_SESSION_LIFECYCLE:
+            lifecycle_message = _lifecycle_message_from_event(event)
+            if _message_has_visible_payload(lifecycle_message):
+                messages.append(lifecycle_message)
         elif event.event_type in TERMINAL_EVENTS:
             terminal_turn_ids.add(turn_id)
             if event.event_type == EVENT_TURN_INTERRUPTED:
@@ -326,11 +388,17 @@ def _assistant_message_from_payload(
 def _tool_message_from_event(event: TurnJournalEvent) -> dict[str, Any]:
     payload = dict(event.payload or {})
     tool_call = dict(payload.get("toolCall") or payload.get("tool_call") or payload)
+    if event.event_type in {EVENT_CLI_TASK_SENT, EVENT_CLI_TASK_RESULT} and "name" not in tool_call:
+        tool_call["name"] = "cli_agent_run_tool"
     name = str(tool_call.get("name") or tool_call.get("toolName") or tool_call.get("tool_name") or "").strip()
     if not name:
         return {}
     status = str(event.status or tool_call.get("status") or "").strip()
     normalized = {"name": name, "status": status or "running"}
+    tool_call_id = _event_tool_call_id(event)
+    if tool_call_id:
+        normalized["id"] = tool_call_id
+        normalized["toolCallId"] = tool_call_id
     for key in (
         "id",
         "tool_call_id",
@@ -346,6 +414,16 @@ def _tool_message_from_event(event: TurnJournalEvent) -> dict[str, Any]:
         "duration_ms",
         "timeoutSeconds",
         "timeout_seconds",
+        "resultSegments",
+        "resultSource",
+        "parserConfidence",
+        "stdoutPreview",
+        "stderrPreview",
+        "terminalSessionId",
+        "cliRunId",
+        "cliSessionId",
+        "taskId",
+        "completionReason",
     ):
         if key in tool_call:
             normalized[key] = tool_call[key]
@@ -362,6 +440,82 @@ def _tool_message_from_event(event: TurnJournalEvent) -> dict[str, Any]:
             "eventId": event.event_id,
         },
     }
+
+
+def _checkpoint_message_from_event(event: TurnJournalEvent) -> dict[str, Any]:
+    payload = dict(event.payload or {})
+    summary = str(payload.get("summary") or payload.get("content") or "").strip()
+    if not summary:
+        return {}
+    return {
+        "role": "assistant",
+        "content": f"历史检查点：\n{summary}",
+        "metadata": {
+            "kind": EVENT_COMPACTION_CHECKPOINT,
+            "turnId": event.turn_id,
+            "eventId": event.event_id,
+        },
+    }
+
+
+def _lifecycle_message_from_event(event: TurnJournalEvent) -> dict[str, Any]:
+    payload = dict(event.payload or {})
+    lifecycle = dict(payload.get("lifecycle") or payload)
+    event_name = str(lifecycle.get("event") or lifecycle.get("status") or event.status or "").strip().lower()
+    if event_name not in {"closed", "failed", "timeout", "resumed", "linked", "session_linked"}:
+        return {}
+    label = str(lifecycle.get("label") or lifecycle.get("adapterId") or "CLI Agent").strip()
+    if event_name in {"linked", "session_linked"}:
+        content = f"{label} 已连接 CLI 会话。"
+    elif event_name == "resumed":
+        content = f"{label} 已恢复 CLI 会话。"
+    elif event_name == "timeout":
+        content = f"{label} CLI 会话已超时。"
+    elif event_name == "failed":
+        content = f"{label} CLI 会话失败。"
+    else:
+        content = f"{label} 已关闭。"
+    return {
+        "role": "assistant",
+        "content": content,
+        "metadata": {
+            "kind": EVENT_CLI_SESSION_LIFECYCLE,
+            "turnId": event.turn_id,
+            "eventId": event.event_id,
+            "event": event_name,
+            "terminalSessionId": str(lifecycle.get("terminalSessionId") or "").strip(),
+            "cliRunId": str(lifecycle.get("cliRunId") or "").strip(),
+            "adapterId": str(lifecycle.get("adapterId") or "").strip(),
+            "cwd": str(lifecycle.get("cwd") or "").strip(),
+            "mode": str(lifecycle.get("mode") or "").strip(),
+        },
+    }
+
+
+def _event_tool_call_id(event: TurnJournalEvent) -> str:
+    if event.tool_call_id:
+        return event.tool_call_id
+    payload = dict(event.payload or {})
+    tool_call = dict(payload.get("toolCall") or payload.get("tool_call") or payload)
+    return str(
+        tool_call.get("id")
+        or tool_call.get("toolCallId")
+        or tool_call.get("tool_call_id")
+        or tool_call.get("taskId")
+        or ""
+    ).strip()
+
+
+def _event_tool_correlation_key(event: TurnJournalEvent) -> str:
+    tool_call_id = _event_tool_call_id(event)
+    if tool_call_id:
+        return f"id:{tool_call_id}"
+    payload = dict(event.payload or {})
+    tool_call = dict(payload.get("toolCall") or payload.get("tool_call") or payload)
+    name = str(tool_call.get("name") or tool_call.get("toolName") or tool_call.get("tool_name") or "").strip()
+    if not name:
+        return ""
+    return f"turn:{event.turn_id}:{name}"
 
 
 def _normalize_tool_payload(value: Any) -> list[dict[str, Any]]:
@@ -443,13 +597,29 @@ def _coerce_positive_int(value: Any, default: int) -> int:
     return number if number >= 0 else default
 
 
+def _coerce_bool(value: Any, default: bool) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return default
+    normalized = str(value).strip().lower()
+    if normalized in {"1", "true", "yes", "y", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "n", "off"}:
+        return False
+    return default
+
+
 def _now_timestamp() -> str:
     return datetime.now().isoformat(timespec="seconds")
 
 
 __all__ = [
     "EVENT_ASSISTANT_MESSAGE",
+    "EVENT_ASSISTANT_DELTA_COMMITTED",
     "EVENT_ASSISTANT_PARTIAL",
+    "EVENT_CLI_SESSION_LIFECYCLE",
+    "EVENT_CLI_TASK_SENT",
     "EVENT_CLI_TASK_RESULT",
     "EVENT_COMPACTION_CHECKPOINT",
     "EVENT_TOOL_CALL_STARTED",

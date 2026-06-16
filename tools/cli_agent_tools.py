@@ -16,8 +16,11 @@ def cli_agent_run_tool(
     model: str = "",
     agent: str = "",
     allow_unsafe_permissions: bool = False,
+    action: str = "task",
+    terminal_session_id: str = "",
+    input_text: str = "",
 ) -> str:
-    """Run a supported external CLI coding agent and return a bounded JSON result."""
+    """Control a supported external CLI coding agent and return a bounded JSON result."""
 
     from core.web.services.cli_agent_service import run_cli_agent
 
@@ -31,5 +34,8 @@ def cli_agent_run_tool(
         model=model,
         agent=agent,
         allow_unsafe_permissions=allow_unsafe_permissions,
+        action=action,
+        terminal_session_id=terminal_session_id,
+        input_text=input_text,
     )
     return json.dumps(result, ensure_ascii=False)
