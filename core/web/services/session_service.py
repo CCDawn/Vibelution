@@ -2059,6 +2059,104 @@ def get_session_detail(session_id: str) -> dict | None:
     return None
 
 
+def get_session_turn_completion_snapshot(session_id: str, turn_id: str = "") -> dict[str, Any]:
+    """Return a turn-scoped completion snapshot for external harness pollers."""
+
+    normalized_session_id = str(session_id or "").strip()
+    normalized_turn_id = str(turn_id or "").strip()
+    if not normalized_session_id:
+        return {
+            "sessionId": "",
+            "turnId": normalized_turn_id,
+            "terminal": False,
+            "terminalStatus": "",
+            "completionSource": "missing_session_id",
+            "completionRecovered": False,
+            "assistantText": "",
+            "lastTurnStatus": "",
+            "messageCount": 0,
+            "isRunning": False,
+            "activeTurnId": "",
+            "turnCurrent": False,
+        }
+
+    with _RUNNING_SESSIONS_LOCK:
+        is_running = normalized_session_id in _RUNNING_SESSION_IDS
+        active_turn_id = str(_SESSION_ACTIVE_TURN_IDS.get(normalized_session_id) or "").strip()
+    turn_current = bool(is_running and (not normalized_turn_id or active_turn_id == normalized_turn_id))
+
+    with _CHAT_STATE_LOCK:
+        payload = load_chat_state(PROJECT_ROOT)
+        payload = _repair_stale_running_conversations(payload)
+        conversation = _find_conversation_entry(payload, normalized_session_id)
+        if conversation is None:
+            return {
+                "sessionId": normalized_session_id,
+                "turnId": normalized_turn_id,
+                "terminal": False,
+                "terminalStatus": "",
+                "completionSource": "missing_conversation",
+                "completionRecovered": False,
+                "assistantText": "",
+                "lastTurnStatus": "",
+                "messageCount": 0,
+                "isRunning": is_running,
+                "activeTurnId": active_turn_id,
+                "turnCurrent": turn_current,
+            }
+        last_turn_status = str(conversation.get("last_turn_status") or conversation.get("lastTurnStatus") or "").strip().lower()
+        messages = normalize_chat_messages(conversation.get("messages") or [])
+
+    assistant_message = _find_turn_scoped_assistant_message(messages, normalized_turn_id)
+    assistant_text = str((assistant_message or {}).get("content") or "").strip()
+    assistant_turn_id = _message_turn_id(assistant_message)
+    marker_present = _supervised_completion_marker_present(assistant_text)
+    terminal_statuses = {
+        "ready",
+        "completed",
+        "done",
+        "success",
+        "failed",
+        "failed_provider",
+        "failed_runtime",
+        "paused_limit",
+        "stopped",
+        "stopped_by_user",
+        "cancelled",
+        "needs_continue",
+        "superseded",
+    }
+    terminal = False
+    terminal_status = ""
+    completion_source = "running"
+    completion_recovered = False
+    if last_turn_status in terminal_statuses:
+        terminal = True
+        terminal_status = last_turn_status
+        completion_source = "last_turn_status"
+    elif marker_present and assistant_text and not turn_current:
+        terminal = True
+        terminal_status = "ready"
+        completion_source = "assistant_marker"
+        completion_recovered = True
+    return {
+        "sessionId": normalized_session_id,
+        "turnId": normalized_turn_id,
+        "terminal": terminal,
+        "terminalStatus": terminal_status,
+        "completionSource": completion_source,
+        "completionRecovered": completion_recovered,
+        "assistantText": assistant_text,
+        "assistantMessageFound": assistant_message is not None,
+        "assistantTurnId": assistant_turn_id,
+        "lastTurnStatus": last_turn_status,
+        "messageCount": len(messages),
+        "isRunning": is_running,
+        "activeTurnId": active_turn_id,
+        "turnCurrent": turn_current,
+    }
+
+
 def append_cli_agent_lifecycle_event(
     session_id: str,
     *,
@@ -5734,6 +5832,53 @@ def _dedupe_turn_error_messages(messages: list[dict[str, Any]]) -> list[dict[str
                 seen_turn_errors.add(dedupe_key)
         deduped.append(message)
     return deduped
+
+
+def _message_turn_id(message: Any) -> str:
+    if not isinstance(message, dict):
+        return ""
+    metadata = message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
+    return str(
+        metadata.get("turnId")
+        or metadata.get("turn_id")
+        or message.get("turnId")
+        or message.get("turn_id")
+        or ""
+    ).strip()
+
+
+def _find_turn_scoped_assistant_message(messages: list[dict[str, Any]], turn_id: str) -> dict[str, Any] | None:
+    normalized_turn_id = str(turn_id or "").strip()
+    if not messages:
+        return None
+    if normalized_turn_id:
+        for message in reversed(messages):
+            if str(message.get("role") or "").strip().lower() != "assistant":
+                continue
+            if _message_turn_id(message) == normalized_turn_id:
+                return message
+        user_index = -1
+        for index, message in enumerate(messages):
+            if str(message.get("role") or "").strip().lower() == "user" and _message_turn_id(message) == normalized_turn_id:
+                user_index = index
+        if user_index >= 0:
+            for message in reversed(messages[user_index + 1 :]):
+                if str(message.get("role") or "").strip().lower() != "assistant":
+                    continue
+                message_turn_id = _message_turn_id(message)
+                if message_turn_id and message_turn_id != normalized_turn_id:
+                    continue
+                return message
+        return None
+    for message in reversed(messages):
+        if str(message.get("role") or "").strip().lower() == "assistant":
+            return message
+    return None
+
+
+def _supervised_completion_marker_present(text: str) -> bool:
+    normalized = str(text or "")
+    return "SUPERVISED_FINAL_STATE:" in normalized or "SUPERVISED_INFEASIBLE_OUTCOME:" in normalized
 
 
 def _normalize_latest_preview_messages(conversation_id: str, items: Any, *, scan_limit: int = 12) -> list[dict[str, Any]]:
@@ -11246,6 +11391,8 @@ def _persist_session_turn_result(
                 ),
                 metadata={"llmUsage": llm_usage} if llm_usage is not None else None,
             )
+        assistant_metadata = assistant_entry.get("metadata") if isinstance(assistant_entry.get("metadata"), dict) else {}
+        assistant_entry["metadata"] = {**assistant_metadata, "turnId": turn_id}
         if isinstance(result, dict):
             assistant_entry["toolCalls"] = _normalize_message_tool_calls(_extract_chat_tool_calls(result))
             feedback_events = _normalize_message_feedback_events(feedback_events_for_result)

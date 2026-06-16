@@ -22,6 +22,7 @@ from scripts.evolution_harness import (
 from .session_service import (
     create_supervised_agent_session,
     get_session_detail,
+    get_session_turn_completion_snapshot,
     request_stop_session_turn,
     submit_session_message,
 )
@@ -175,6 +176,7 @@ def run_supervised_conversation_harness(
     cancel_reason_text = ""
     cancel_deadline: float | None = None
     latest_detail: dict[str, Any] = {}
+    latest_completion_snapshot: dict[str, Any] = {}
     while True:
         cancel_reason = str(cancel_checker() or "").strip() if callable(cancel_checker) else ""
         if cancel_reason and not cancel_requested:
@@ -204,12 +206,19 @@ def run_supervised_conversation_harness(
                     }
                 )
         latest_detail = get_session_detail(session_id) or {}
-        last_status = str(latest_detail.get("lastTurnStatus") or "").strip().lower()
+        latest_completion_snapshot = get_session_turn_completion_snapshot(session_id, turn_id)
+        completion_terminal = bool(latest_completion_snapshot.get("terminal"))
+        last_status = str(
+            latest_completion_snapshot.get("terminalStatus")
+            or latest_completion_snapshot.get("lastTurnStatus")
+            or latest_detail.get("lastTurnStatus")
+            or ""
+        ).strip().lower()
         if callable(progress_callback):
-            latest_output = _conversation_harness_latest_assistant(latest_detail)
+            latest_output = str(latest_completion_snapshot.get("assistantText") or "").strip() or _conversation_harness_latest_assistant(latest_detail)
             progress_callback(
                 {
-                    "phase": "conversation_turn_running" if last_status in {"queued", "running"} else "conversation_turn_finished",
+                    "phase": "conversation_turn_finished" if completion_terminal or last_status not in {"queued", "running"} else "conversation_turn_running",
                     "conversation_path": f"session:{session_id}",
                     "conversation_session_id": session_id,
                     "conversation_turn_id": turn_id,
@@ -222,14 +231,16 @@ def run_supervised_conversation_harness(
                     "conversation_messages": _conversation_harness_messages(latest_detail),
                     "turn_id": turn_id,
                     "last_turn_status": last_status,
+                    "completion_source": str(latest_completion_snapshot.get("completionSource") or "").strip(),
+                    "completion_recovered": bool(latest_completion_snapshot.get("completionRecovered")),
                     "mental_model_mode": normalized_mental_mode,
                     "mental_model_enabled": mental_model_enabled,
                 }
             )
-        if last_status and last_status not in {"queued", "running"}:
+        if completion_terminal or (last_status and last_status not in {"queued", "running"}):
             break
         if cancel_requested and cancel_deadline is not None and time.monotonic() >= cancel_deadline:
-            assistant_text = _conversation_harness_latest_assistant(latest_detail)
+            assistant_text = str(latest_completion_snapshot.get("assistantText") or "").strip() or _conversation_harness_latest_assistant(latest_detail)
             evolution_summary = _conversation_harness_evolution_summary(
                 latest_detail,
                 assistant_text=assistant_text,
@@ -272,13 +283,18 @@ def run_supervised_conversation_harness(
                 primary_returncode=None,
                 mental_model_mode=normalized_mental_mode,
                 mental_model_enabled=mental_model_enabled,
+                completion_snapshot=latest_completion_snapshot,
             )
         if time.monotonic() >= deadline:
+            latest_completion_snapshot = get_session_turn_completion_snapshot(session_id, turn_id)
+            if bool(latest_completion_snapshot.get("terminal")):
+                latest_detail = get_session_detail(session_id) or latest_detail
+                break
             try:
                 request_stop_session_turn(session_id)
             except Exception:
                 pass
-            assistant_text = _conversation_harness_latest_assistant(latest_detail)
+            assistant_text = str(latest_completion_snapshot.get("assistantText") or "").strip() or _conversation_harness_latest_assistant(latest_detail)
             evolution_summary = _conversation_harness_evolution_summary(
                 latest_detail,
                 assistant_text=assistant_text,
@@ -301,16 +317,22 @@ def run_supervised_conversation_harness(
                 primary_returncode=None,
                 mental_model_mode=normalized_mental_mode,
                 mental_model_enabled=mental_model_enabled,
+                completion_snapshot=latest_completion_snapshot,
             )
         time.sleep(0.5)
 
-    assistant_text = _conversation_harness_latest_assistant(latest_detail)
+    assistant_text = str(latest_completion_snapshot.get("assistantText") or "").strip() or _conversation_harness_latest_assistant(latest_detail)
     evolution_summary = _conversation_harness_evolution_summary(
         latest_detail,
         assistant_text=assistant_text,
         restart_expected=expect_restart,
     )
-    last_status = str(latest_detail.get("lastTurnStatus") or "").strip().lower()
+    last_status = str(
+        latest_completion_snapshot.get("terminalStatus")
+        or latest_completion_snapshot.get("lastTurnStatus")
+        or latest_detail.get("lastTurnStatus")
+        or ""
+    ).strip().lower()
     primary_returncode = 0 if last_status in {"ready", "completed", "done", "success", "paused_limit"} else 1
     inferred_status, inferred_reason = infer_result_status(
         timed_out=False,
@@ -347,6 +369,7 @@ def run_supervised_conversation_harness(
         primary_returncode=primary_returncode,
         mental_model_mode=normalized_mental_mode,
         mental_model_enabled=mental_model_enabled,
+        completion_snapshot=latest_completion_snapshot,
     )
 
 
@@ -368,8 +391,10 @@ def _conversation_harness_result(
     primary_returncode: int | None,
     mental_model_mode: str,
     mental_model_enabled: bool | None,
+    completion_snapshot: dict[str, Any] | None = None,
 ) -> HarnessResult:
     ended_at = _now_timestamp()
+    completion = dict(completion_snapshot or {}) if isinstance(completion_snapshot, dict) else {}
     runtime_env = {
         "VIBELUTION_TURN_MODE": "supervised_evolution",
         "VIBELUTION_TURN_RUN_KIND": "supervised_evaluation",
@@ -426,6 +451,12 @@ def _conversation_harness_result(
                 "session_id": session_id,
                 "mental_model_mode": mental_model_mode,
                 "mental_model_enabled": mental_model_enabled,
+                "completion_source": str(completion.get("completionSource") or "").strip(),
+                "completion_recovered": bool(completion.get("completionRecovered")),
+                "observed_last_turn_status": str(completion.get("lastTurnStatus") or "").strip(),
+                "observed_terminal_status": str(completion.get("terminalStatus") or "").strip(),
+                "observed_active_turn_id": str(completion.get("activeTurnId") or "").strip(),
+                "observed_message_count": int(completion.get("messageCount") or 0),
             },
         },
         agent_binding=agent_binding,

@@ -2,6 +2,7 @@ import copy
 import json
 import threading
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -477,6 +478,42 @@ def test_stop_requested_run_cancels_active_harness_without_waiting_for_checkpoin
     assert snapshot["status"] == "cancelled"
     assert snapshot["runtimeStatus"] == "idle"
     assert snapshot["decision"] == ""
+    assert service.get_active_supervised_run() is None
+
+
+def test_run_supervised_session_fails_when_decision_file_missing(monkeypatch, tmp_path):
+    monkeypatch.setattr(service, "PROJECT_ROOT", tmp_path)
+    run_id = _seed_running_run()
+
+    def fake_run_workbench_session(**kwargs):
+        return SimpleNamespace(
+            decision=SimpleNamespace(
+                session_id="supervised_missing",
+                decision="HOLD",
+                reason="fake decision",
+                decision_path=str(tmp_path / "workspace" / "supervised_evolution" / "decisions" / "missing.json"),
+                policy_action={"action": "HOLD"},
+            ),
+            decision_summary="fake decision summary",
+            lineage_index_path="",
+            lineage_summary="",
+        )
+
+    monkeypatch.setattr(service, "run_workbench_session", fake_run_workbench_session)
+
+    service._run_supervised_session(
+        {
+            "runId": run_id,
+            "bundleName": "manual_bundle",
+            "keepWorktree": False,
+        }
+    )
+
+    snapshot = service.get_supervised_run_snapshot(run_id)
+    assert snapshot["status"] == "failed"
+    assert snapshot["runtimeStatus"] == "failed"
+    assert "decision_missing_after_case_reports" in snapshot["reason"]
+    assert snapshot["eventTail"][-1]["event"] == "decision_integrity_failed"
     assert service.get_active_supervised_run() is None
 
 
