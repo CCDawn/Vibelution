@@ -2345,6 +2345,7 @@ def test_openai_compatible_payload_preserves_image_blocks_for_chat_completions()
             "llm.profiles.primary.provider_id": "default",
             "llm.profiles.primary.model": "gpt-5.5",
             "llm.profiles.primary.transport": "chat_completions",
+            "llm.profiles.primary.supports_image_input": True,
         }
     )
 
@@ -2368,6 +2369,7 @@ def test_responses_transport_converts_image_blocks_to_input_image():
             "llm.profiles.primary.provider_id": "default",
             "llm.profiles.primary.model": "gpt-5.5",
             "llm.profiles.primary.transport": "responses",
+            "llm.profiles.primary.supports_image_input": True,
         }
     )
 

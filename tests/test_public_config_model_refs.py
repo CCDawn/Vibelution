@@ -257,6 +257,19 @@ def test_dashscope_qwen_preset_uses_explicit_cache_control():
 
     assert model["model"] == "qwen3.6-plus"
     assert model["prompt_cache"] == {"mode": "explicit_cache_control"}
+    assert model["protocol"] == "qwen_openai_compat"
+
+
+def test_main_model_presets_declare_protocol_source_of_truth():
+    assert LLM_MODEL_PRESETS["xiaomi_mimo_v2_5_pro_token_plan"]["model"]["protocol"] == (
+        "xiaomi_mimo_token_plan_openai_compat"
+    )
+    assert LLM_MODEL_PRESETS["xiaomi_mimo_v2_5_multimodal"]["model"]["protocol"] == (
+        "xiaomi_mimo_multimodal_openai_compat"
+    )
+    assert LLM_MODEL_PRESETS["deepseek_v4_flash"]["model"]["protocol"] == "deepseek_reasoning"
+    assert LLM_MODEL_PRESETS["deepseek_v4_pro"]["model"]["protocol"] == "deepseek_reasoning"
+    assert LLM_MODEL_PRESETS["anthropic_claude_sonnet"]["model"]["protocol"] == "anthropic_chat"
 
 
 def test_prompt_cache_override_can_change_referenced_model_mode():

@@ -422,6 +422,26 @@ def _context_compression_trigger_source(reason: str) -> str:
     return "manual"
 
 
+def _format_tool_result_replacement_summary(state: Dict[str, Any]) -> str:
+    replacements = list((state or {}).get("replacements") or [])
+    if not replacements:
+        return ""
+    lines = ["工具结果压缩引用:"]
+    for item in replacements[:8]:
+        reference = str(item.get("reference") or "").strip()
+        tool_call_id = str(item.get("toolCallId") or "").strip()
+        tool_name = str(item.get("toolName") or "").strip() or "unknown"
+        original_chars = int(item.get("originalChars") or 0)
+        digest = str(item.get("sha256") or "").strip()[:16]
+        lines.append(
+            f"- {tool_name} tool_call_id={tool_call_id} reference={reference} chars={original_chars} sha256={digest}"
+        )
+    if len(replacements) > 8:
+        lines.append(f"- 其余 {len(replacements) - 8} 个工具结果也已按同一规则替换。")
+    lines.append("说明: 这些替换只发生在上下文压缩输入中，原始工具结果仍以会话历史或 turn journal 为事实源。")
+    return "\n".join(lines)
+
+
 SUBAGENT_RESULT_MARKER = "__VIBELUTION_SUBAGENT_RESULT__"
 
 
@@ -1396,14 +1416,33 @@ class SelfEvolvingAgent:
         # 执行压缩
         combined_reason = reason or f"Level: {level.value}"
         use_llm = level in (CompressionLevel.DEEP, CompressionLevel.EMERGENCY)
+        messages_for_compression = messages
+        tool_result_replacement_state: Dict[str, Any] = {"replacements": []}
+        try:
+            from core.chat.tool_result_replacement import replace_large_tool_results_for_compression
+
+            runtime_binding = getattr(self, "runtime_agent_binding", {}) or {}
+            session_id = str(runtime_binding.get("directSessionId") or "").strip()
+            replacement_limit = max(4_000, int(comp_config.summary_max_chars or 1_000) * 4)
+            messages_for_compression, tool_result_replacement_state = replace_large_tool_results_for_compression(
+                messages,
+                char_limit=replacement_limit,
+                session_id=session_id,
+            )
+        except Exception:
+            messages_for_compression = messages
+            tool_result_replacement_state = {"replacements": []}
         compressed, summary = self.token_compressor.compress(
-            messages,
+            messages_for_compression,
             max_chars=comp_config.summary_max_chars,
             reason=combined_reason,
             keep_count=comp_config.keep_ai_messages,
             preserve_errors=comp_config.preserve_errors,
             use_llm_summary=use_llm,
         )
+        replacement_summary = _format_tool_result_replacement_summary(tool_result_replacement_state)
+        if replacement_summary:
+            summary = f"{summary}\n\n{replacement_summary}".strip() if summary else replacement_summary
 
         # 日志
         after_tokens = estimate_messages_tokens(compressed)

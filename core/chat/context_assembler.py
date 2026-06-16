@@ -16,6 +16,10 @@ from .history_ledger import (
     latest_checkpoint,
 )
 from .model_messages import normalize_model_messages
+from .tool_result_replacement import (
+    empty_tool_result_replacement_state,
+    replace_large_tool_results_for_compression as replace_tool_results_for_compression,
+)
 from .turn_journal import TurnJournalEvent, model_messages_from_events
 
 
@@ -54,6 +58,9 @@ class ContextAssemblyResult:
     segments: list[ContextSegment] = field(default_factory=list)
     cacheable_prefix_hash: str = ""
     dynamic_context_hash: str = ""
+    tool_result_replacement_state: dict[str, Any] = field(
+        default_factory=empty_tool_result_replacement_state
+    )
 
     def to_composition_patch(self) -> dict[str, Any]:
         return {
@@ -72,6 +79,7 @@ class ContextAssemblyResult:
                 ),
             },
             "segments": [segment.to_dict() for segment in self.segments],
+            "toolResultReplacement": dict(self.tool_result_replacement_state or {}),
         }
 
 
@@ -83,6 +91,8 @@ def assemble_conversation_context(
     recent_message_limit: int = DEFAULT_RECENT_MESSAGE_LIMIT,
     retrieved_events: Iterable[HistoryEvent] | None = None,
     journal_events: Iterable[TurnJournalEvent] | None = None,
+    replace_large_tool_results_for_compression: bool = False,
+    tool_result_replacement_char_limit: int = 12_000,
 ) -> ContextAssemblyResult:
     """Return the bounded history view used to seed an agent turn."""
 
@@ -104,6 +114,13 @@ def assemble_conversation_context(
     retrieved_list = list(retrieved_events or [])
     retrieved_messages = [_event_seed_message(event) for event in retrieved_list]
     history_messages = [message for message in [checkpoint_message, *retrieved_messages, *recent_messages] if message]
+    replacement_state = empty_tool_result_replacement_state(char_limit=tool_result_replacement_char_limit)
+    if replace_large_tool_results_for_compression:
+        history_messages, replacement_state = replace_tool_results_for_compression(
+            history_messages,
+            char_limit=tool_result_replacement_char_limit,
+            session_id=session_id,
+        )
     included_event_ids = _included_event_ids(
         events,
         recent_start_index=recent_start_index,
@@ -171,6 +188,7 @@ def assemble_conversation_context(
         segments=segments,
         cacheable_prefix_hash=_hash_text("agent_protocol:v1"),
         dynamic_context_hash=_hash_messages(history_messages),
+        tool_result_replacement_state=replacement_state,
     )
 
 
@@ -252,10 +270,15 @@ def _hash_messages(messages: Iterable[dict[str, Any]]) -> str:
     for message in list(messages or []):
         parts.append(str(message.get("role") or ""))
         parts.append(str(message.get("content") or ""))
+        parts.append(str(message.get("tool_call_id") or message.get("toolCallId") or ""))
         parts.append(str(message.get("metadata") or ""))
         for tool in list(message.get("toolCalls") or message.get("tool_calls") or message.get("tools") or []):
             if isinstance(tool, dict):
+                function_block = tool.get("function") if isinstance(tool.get("function"), dict) else {}
+                parts.append(str(tool.get("id") or tool.get("tool_call_id") or tool.get("toolCallId") or ""))
                 parts.append(str(tool.get("name") or tool.get("toolName") or ""))
+                parts.append(str(function_block.get("name") or ""))
+                parts.append(str(tool.get("arguments") or tool.get("args") or function_block.get("arguments") or ""))
                 parts.append(str(tool.get("status") or tool.get("semanticStatus") or ""))
                 parts.append(str(tool.get("result") or tool.get("resultPreview") or tool.get("error") or ""))
     return _hash_text("\n".join(parts))

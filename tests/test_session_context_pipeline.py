@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 
+from langchain_core.messages import ToolMessage
+
 from core.chat.context_assembler import assemble_conversation_context
 from core.chat.history_ledger import (
     EVENT_CHECKPOINT,
@@ -21,6 +23,7 @@ from core.chat.turn_journal import (
     append_turn_event,
     load_turn_events,
 )
+from core.chat.tool_result_replacement import replace_large_tool_results_for_compression
 from core.ui.chat_state import build_chat_state, save_chat_state
 from core.web.services import session_service
 from tools import conversation_history_tools
@@ -52,6 +55,37 @@ def test_history_ledger_indexes_assistant_tool_results():
     assert matches[0].tool_name == "cli_tool"
     assert matches[0].tool_call_id == "call_test"
     assert "Windows detected" in matches[0].content
+
+
+def test_history_ledger_indexes_canonical_role_tool_results():
+    messages = [
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "call_read",
+                    "type": "function",
+                    "function": {"name": "read_file_tool", "arguments": "{\"path\":\"agent.py\"}"},
+                }
+            ],
+        },
+        {
+            "role": "tool",
+            "tool_call_id": "call_read",
+            "content": "完整工具结果：agent.py 已读取",
+            "metadata": {"toolName": "read_file_tool", "toolStatus": "done"},
+        },
+    ]
+
+    events = build_history_events(messages, session_id="session-canonical")
+    matches = search_history_events(events, query="完整工具结果", event_type="tool_result")
+
+    assert len(matches) == 1
+    assert matches[0].tool_name == "read_file_tool"
+    assert matches[0].tool_call_id == "call_read"
+    assert matches[0].status == "done"
+    assert "agent.py 已读取" in matches[0].content
 
 
 def test_context_assembler_keeps_recent_tail_and_omits_old_events():
@@ -99,6 +133,100 @@ def test_context_assembler_keeps_recent_tool_results_complete_for_model_input():
     assert full_result in tool_message["content"]
     assert "terminal-line\n" * 20 in tool_message["content"]
     assert "Windows detected" not in tool_message["content"]
+
+
+def test_context_hash_tracks_canonical_tool_call_identity():
+    base_messages = [
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "call_a",
+                    "type": "function",
+                    "function": {"name": "read_file_tool", "arguments": "{\"path\":\"agent.py\"}"},
+                }
+            ],
+        },
+        {"role": "tool", "tool_call_id": "call_a", "content": "same result"},
+    ]
+    changed_messages = [
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "call_b",
+                    "type": "function",
+                    "function": {"name": "read_file_tool", "arguments": "{\"path\":\"agent.py\"}"},
+                }
+            ],
+        },
+        {"role": "tool", "tool_call_id": "call_b", "content": "same result"},
+    ]
+
+    base = assemble_conversation_context(base_messages, session_id="session-a", recent_message_limit=4)
+    changed = assemble_conversation_context(changed_messages, session_id="session-a", recent_message_limit=4)
+
+    assert base.dynamic_context_hash != changed.dynamic_context_hash
+
+
+def test_context_assembler_replaces_large_tool_results_only_for_compression():
+    large_result = "terminal-line\n" * 700
+    messages = [
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "call_large",
+                    "type": "function",
+                    "function": {"name": "cli_tool", "arguments": "{\"command\":\"pytest -q\"}"},
+                }
+            ],
+        },
+        {
+            "role": "tool",
+            "tool_call_id": "call_large",
+            "content": large_result,
+            "metadata": {"toolName": "cli_tool", "toolStatus": "failed"},
+        },
+    ]
+
+    normal = assemble_conversation_context(messages, session_id="session-a", recent_message_limit=4)
+    normal_tool = next(item for item in normal.history_messages if item.get("role") == "tool")
+    assert large_result.strip() in normal_tool["content"]
+    assert normal.tool_result_replacement_state["replacements"] == []
+
+    compressed = assemble_conversation_context(
+        messages,
+        session_id="session-a",
+        recent_message_limit=4,
+        replace_large_tool_results_for_compression=True,
+        tool_result_replacement_char_limit=200,
+    )
+    compressed_tool = next(item for item in compressed.history_messages if item.get("role") == "tool")
+
+    assert large_result not in compressed_tool["content"]
+    assert "tool-result-ref:" in compressed_tool["content"]
+    assert "原始工具结果仍保存在会话历史" in compressed_tool["content"]
+    assert compressed.tool_result_replacement_state["replacements"][0]["toolCallId"] == "call_large"
+    assert compressed.tool_result_replacement_state["replacements"][0]["originalChars"] == len(large_result.strip())
+
+
+def test_tool_result_replacement_handles_langchain_tool_messages():
+    tool_message = ToolMessage(content="terminal-line\n" * 80, tool_call_id="call_langchain")
+
+    replaced, state = replace_large_tool_results_for_compression(
+        [tool_message],
+        char_limit=120,
+        session_id="session-langchain",
+    )
+
+    assert replaced[0].type == "tool"
+    assert replaced[0].tool_call_id == "call_langchain"
+    assert "tool-result-ref:session-langchain:call_langchain" in str(replaced[0].content)
+    assert state["replacements"][0]["toolCallId"] == "call_langchain"
 
 
 def test_context_assembler_replays_turn_journal_over_message_tail(tmp_path):
