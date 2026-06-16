@@ -78,6 +78,7 @@ import {
   TeamListPayload,
   ConversationMessage,
   ConversationAttachment,
+  ConversationFeedbackEvent,
   ToolCall,
 } from "../api/types";
 import {
@@ -2567,6 +2568,40 @@ function isLiveAssistantDeltaMessage(message: ConversationMessage) {
   return message.role === "assistant" && String(message.metadata?.kind ?? "").trim() === "session_live_overlay";
 }
 
+function feedbackEventKey(event: ConversationFeedbackEvent) {
+  const sequence = Number(event.sequence ?? 0);
+  if (Number.isFinite(sequence) && sequence > 0) {
+    return `seq:${sequence}`;
+  }
+  return [
+    event.kind ?? "",
+    event.name ?? "",
+    event.status ?? "",
+    event.summary ?? "",
+    event.resultPreview ?? "",
+  ].join(":");
+}
+
+function mergeLiveFeedbackEvents(
+  previous: ConversationFeedbackEvent[] | undefined,
+  incoming: ConversationFeedbackEvent[] | undefined,
+) {
+  if (!incoming) {
+    return previous ?? [];
+  }
+  if (!incoming.length) {
+    return [];
+  }
+  const merged = new Map<string, ConversationFeedbackEvent>();
+  for (const event of previous ?? []) {
+    merged.set(feedbackEventKey(event), event);
+  }
+  for (const event of incoming) {
+    merged.set(feedbackEventKey(event), event);
+  }
+  return [...merged.values()].sort((left, right) => Number(left.sequence ?? 0) - Number(right.sequence ?? 0));
+}
+
 function mergeSessionDetailWithLiveAssistantOverlay(
   previous: SessionDetail | undefined,
   detail: SessionDetail,
@@ -2627,7 +2662,8 @@ function mergeAssistantDeltaIntoSessionDetail(
   const nextThought = payload.replaceThought
     ? thoughtDelta
     : `${previous?.thought ?? ""}${thoughtDelta}`;
-  if (!nextContent && !nextThought && !payload.stage && !(payload.feedbackEvents?.length)) {
+  const nextFeedbackEvents = mergeLiveFeedbackEvents(previous?.feedbackEvents, payload.feedbackEvents);
+  if (!nextContent && !nextThought && !payload.stage && !nextFeedbackEvents.length) {
     return {
       ...detail,
       updatedAt: now,
@@ -2642,7 +2678,7 @@ function mergeAssistantDeltaIntoSessionDetail(
     streaming: !payload.done,
     streamStage: payload.stage || undefined,
     thought: nextThought || undefined,
-    feedbackEvents: payload.feedbackEvents ?? [],
+    feedbackEvents: nextFeedbackEvents,
     metadata: {
       ...(previous?.metadata ?? {}),
       kind: "session_live_overlay",

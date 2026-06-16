@@ -832,6 +832,9 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("const contentDelta = payload.contentDelta ?? (payload.replaceContent || !previous ? payload.content ?? \"\" : \"\")");
     expect(routeSource).toContain("const thoughtDelta = payload.thoughtDelta ?? (payload.replaceThought || !previous ? payload.thought ?? \"\" : \"\")");
     expect(routeSource).toContain("const nextContent = payload.replaceContent");
+    expect(routeSource).toContain("function mergeLiveFeedbackEvents(");
+    expect(routeSource).toContain("feedbackEventKey(event)");
+    expect(routeSource).toContain("const nextFeedbackEvents = mergeLiveFeedbackEvents(previous?.feedbackEvents, payload.feedbackEvents)");
     expect(routeSource).toContain("return mergeSessionDetailWithLiveAssistantOverlay(previous, detail)");
     expect(routeSource).toContain("stream.addEventListener(\"assistant_delta\", handleAssistantDelta as EventListener)");
     expect(routeSource).toContain("stream.removeEventListener(\"assistant_delta\", handleAssistantDelta as EventListener)");

@@ -41,6 +41,22 @@ from core.chat.chat_task_types import trim_lines
 from core.chat.context_assembler import assemble_conversation_context
 from core.chat.skill_registry import build_skill_runtime_context, skill_descriptor_for_log
 from core.chat.slash_commands import SkillSlashCommand, parse_skill_slash_command
+from core.chat.turn_journal import (
+    EVENT_ASSISTANT_MESSAGE,
+    EVENT_ASSISTANT_PARTIAL,
+    EVENT_TOOL_CALL_STARTED,
+    EVENT_TOOL_RESULT,
+    EVENT_TURN_COMPLETED,
+    EVENT_TURN_CONTEXT,
+    EVENT_TURN_FAILED,
+    EVENT_TURN_INTERRUPTED,
+    EVENT_TURN_STARTED,
+    EVENT_USER_MESSAGE,
+    TURN_INTERRUPTED_MARKER,
+    append_interrupted_if_open,
+    append_turn_event,
+    load_turn_events,
+)
 from core.infrastructure import developer_sandbox
 from core.infrastructure.event_bus import EventNames, get_event_bus
 from core.llm.client import llm_status_context
@@ -139,6 +155,7 @@ _SESSION_TURN_CONTROLS_LOCK = threading.Lock()
 _SESSION_TURN_CONTROLS: dict[str, "SessionTurnControl"] = {}
 _SESSION_LIVE_OUTPUTS_LOCK = threading.Lock()
 _SESSION_LIVE_OUTPUTS: dict[str, "SessionLiveOutputState"] = {}
+_SESSION_TURN_JOURNAL_LIVE_SIGNATURES: dict[str, str] = {}
 _SESSION_UI_CAPTURE_LOCK = threading.Lock()
 _SESSION_UI_CAPTURE_CONTEXT: ContextVar[dict[str, Any]] = ContextVar(
     "vibelution_session_ui_capture_context",
@@ -571,6 +588,118 @@ def _ensure_session_workspace(session_id: str) -> Path:
     for subdir in _SESSION_WORKSPACE_SUBDIRS:
         (workspace_path / subdir).mkdir(parents=True, exist_ok=True)
     return workspace_path
+
+
+def _append_session_turn_journal_event(
+    session_id: str,
+    turn_id: str,
+    event_type: str,
+    *,
+    status: str = "",
+    payload: dict[str, Any] | None = None,
+    source: str = "session_service",
+) -> None:
+    normalized_session_id = str(session_id or "").strip()
+    normalized_event_type = str(event_type or "").strip()
+    if not normalized_session_id or not normalized_event_type:
+        return
+    try:
+        append_turn_event(
+            PROJECT_ROOT,
+            normalized_session_id,
+            str(turn_id or "").strip(),
+            normalized_event_type,
+            status=status,
+            payload=payload or {},
+            source=source,
+        )
+    except Exception as exc:
+        try:
+            record_runtime_scene_event(
+                "conversation",
+                "turn_journal",
+                "conversation.turn_journal.append_failed",
+                level="warning",
+                outcome="failed",
+                message="Failed to append a chat turn journal event.",
+                fields={
+                    "sessionId": normalized_session_id,
+                    "turnId": str(turn_id or "").strip(),
+                    "eventType": normalized_event_type,
+                    "errorType": type(exc).__name__,
+                    "errorPreview": trim_lines(str(exc), max_lines=2),
+                },
+                lifecycle=True,
+            )
+        except Exception:
+            return
+
+
+def _append_session_live_journal_event(
+    session_id: str,
+    turn_id: str,
+    state: "SessionLiveOutputState",
+) -> None:
+    normalized_turn_id = str(turn_id or getattr(state, "turn_id", "") or "").strip()
+    if not normalized_turn_id:
+        return
+    payload = {
+        "stage": str(getattr(state, "stage", "") or "").strip(),
+        "content": str(getattr(state, "content", "") or "").strip(),
+        "thought": str(getattr(state, "thought", "") or "").strip(),
+        "toolCalls": _normalize_message_tool_calls(getattr(state, "tool_calls", []) or []),
+        "feedbackEvents": _normalize_message_feedback_events(getattr(state, "feedback_events", []) or []),
+    }
+    if not payload["content"] and not payload["thought"] and not payload["toolCalls"] and not payload["feedbackEvents"]:
+        return
+    signature = _short_hash(json.dumps(payload, ensure_ascii=False, sort_keys=True))
+    signature_key = f"{session_id}:{normalized_turn_id}"
+    if _SESSION_TURN_JOURNAL_LIVE_SIGNATURES.get(signature_key) == signature:
+        return
+    _SESSION_TURN_JOURNAL_LIVE_SIGNATURES[signature_key] = signature
+    _append_session_turn_journal_event(
+        session_id,
+        normalized_turn_id,
+        EVENT_ASSISTANT_PARTIAL,
+        status="running",
+        payload=payload,
+        source="session_live_output",
+    )
+
+
+def _reconcile_stale_session_turn_journal(session_id: str, *, active_turn_id: str = "", reason: str = "process_restarted") -> None:
+    normalized_session_id = str(session_id or "").strip()
+    if not normalized_session_id:
+        return
+    try:
+        event = append_interrupted_if_open(
+            PROJECT_ROOT,
+            normalized_session_id,
+            active_turn_id=str(active_turn_id or "").strip(),
+            reason=reason,
+            source="session_service",
+        )
+    except Exception:
+        return
+    if event is None:
+        return
+    try:
+        record_runtime_scene_event(
+            "conversation",
+            "turn_journal",
+            "conversation.turn_journal.reconciled_interrupted",
+            level="warning",
+            outcome="interrupted",
+            message="Reconciled an open chat turn journal as interrupted.",
+            fields={
+                "sessionId": normalized_session_id,
+                "turnId": event.turn_id,
+                "reason": reason,
+            },
+            lifecycle=True,
+        )
+    except Exception:
+        return
 
 
 def store_session_image_artifact(
@@ -2052,6 +2181,14 @@ def get_session_detail(session_id: str) -> dict | None:
     if not normalized_session_id:
         return None
 
+    with _RUNNING_SESSIONS_LOCK:
+        active_turn_id = str(_SESSION_ACTIVE_TURN_IDS.get(normalized_session_id) or "").strip()
+        session_running = normalized_session_id in _RUNNING_SESSION_IDS
+    _reconcile_stale_session_turn_journal(
+        normalized_session_id,
+        active_turn_id=active_turn_id if session_running else "",
+        reason="detail_loaded_after_restart",
+    )
     _ensure_agent_directory_conversation_materialized(normalized_session_id, source="get_session_detail")
     agent_by_id = _agent_lookup_for_conversations()
     payload = load_chat_state(PROJECT_ROOT)
@@ -3932,6 +4069,7 @@ def submit_session_message(
         previous_messages = normalize_chat_messages(conversation.get("messages") or [])
         skill_command = parse_skill_slash_command(message)
         skill_invocation = _skill_invocation_payload(skill_command) if skill_command is not None else None
+        _reconcile_stale_session_turn_journal(conversation_id, reason="new_turn_submitted")
         turn_control = _create_session_turn_control(conversation_id)
         active_skill_contract = (
             _active_skill_contract_from_invocation(skill_invocation, turn_id=turn_control.turn_id)
@@ -3939,8 +4077,7 @@ def submit_session_message(
             else _active_skill_contract_from_conversation(conversation)
         )
         persisted_message_metadata = dict(message_metadata or {}) if isinstance(message_metadata, dict) else {}
-        if persisted_message_metadata:
-            persisted_message_metadata.setdefault("turnId", turn_control.turn_id)
+        persisted_message_metadata.setdefault("turnId", turn_control.turn_id)
         if session_references:
             persisted_message_metadata["sessionReferences"] = session_references
         if skill_invocation:
@@ -3990,6 +4127,31 @@ def submit_session_message(
             updated_at=user_entry["timestamp"],
         )
         submit_timing_fields["chatStateLockedMs"] = _elapsed_ms_between(lock_acquired_at)
+    _append_session_turn_journal_event(
+        conversation_id,
+        turn_control.turn_id,
+        EVENT_TURN_STARTED,
+        status="running",
+        payload={
+            "agentId": agent_id,
+            "leases": requested_leases,
+            "source": normalized_message_source,
+        },
+        source="submit_session_message",
+    )
+    _append_session_turn_journal_event(
+        conversation_id,
+        turn_control.turn_id,
+        EVENT_USER_MESSAGE,
+        status="recorded",
+        payload={
+            "content": message,
+            "attachments": _normalize_message_attachments(attachments),
+            "references": _normalize_session_references(session_references),
+            "source": normalized_message_source,
+        },
+        source="submit_session_message",
+    )
     _set_session_waiting_live_output(conversation_id, turn_id=turn_control.turn_id)
     _record_session_cycle_message(
         conversation_id,
@@ -10279,9 +10441,11 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                     stop_configurer(lambda: _get_turn_control_stop_reason(turn_control))
                 raw_history_messages = list(context.get("history_messages") or [])
                 seedable_history_messages = _history_messages_for_agent_seed(raw_history_messages)
+                turn_journal_events = load_turn_events(PROJECT_ROOT, session_id)
                 context_assembly = assemble_conversation_context(
                     seedable_history_messages,
                     session_id=session_id,
+                    journal_events=turn_journal_events,
                 )
                 history_messages = context_assembly.history_messages
                 full_history_message_count = len(seedable_history_messages)
@@ -10508,6 +10672,21 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                     context_composition.get("cache")
                     if isinstance(context_composition.get("cache"), dict)
                     else {}
+                )
+                _append_session_turn_journal_event(
+                    session_id,
+                    turn_id,
+                    EVENT_TURN_CONTEXT,
+                    status="recorded",
+                    payload={
+                        "historyMessageCount": len(history_messages),
+                        "journalEventCount": len(turn_journal_events),
+                        "historyLedgerEventCount": len(context_assembly.events),
+                        "includedEventIds": list(context_assembly.included_event_ids),
+                        "omittedEventCount": context_assembly.omitted_event_count,
+                        "contextAssembly": context_assembly.to_composition_patch(),
+                    },
+                    source="session_context_assembler",
                 )
                 _record_session_turn_lifecycle_event(
                     session_id,
@@ -11282,6 +11461,32 @@ def _persist_session_turn_result(
                 raw_error=raw_error,
                 related_event_code="conversation.turn_error",
             )
+            if partial_entry:
+                _append_session_turn_journal_event(
+                    session_id,
+                    turn_id,
+                    EVENT_ASSISTANT_MESSAGE,
+                    status="failed_provider",
+                    payload={
+                        "content": str(partial_entry.get("content") or ""),
+                        "thought": str(partial_entry.get("thought") or ""),
+                        "toolCalls": _normalize_message_tool_calls(partial_entry.get("tool_calls") or partial_entry.get("toolCalls") or []),
+                        "feedbackEvents": _normalize_message_feedback_events(partial_entry.get("feedback_events") or partial_entry.get("feedbackEvents") or []),
+                    },
+                    source="persist_session_turn_result",
+                )
+            _append_session_turn_journal_event(
+                session_id,
+                turn_id,
+                EVENT_TURN_FAILED,
+                status="failed_provider",
+                payload={
+                    "errorType": error_type,
+                    "message": str(turn_error.get("message") or ""),
+                    "rawError": raw_error,
+                },
+                source="persist_session_turn_result",
+            )
             return
         assistant_text = (
             text_for(
@@ -11576,6 +11781,36 @@ def _persist_session_turn_result(
                     "hasImageArtifactEvidence": False,
                 },
             )
+        _append_session_turn_journal_event(
+            session_id,
+            turn_id,
+            EVENT_ASSISTANT_MESSAGE,
+            status=final_status,
+            payload={
+                "content": assistant_text,
+                "thought": str(assistant_entry.get("thought") or ""),
+                "toolCalls": _normalize_message_tool_calls(assistant_entry.get("tool_calls") or assistant_entry.get("toolCalls") or []),
+                "feedbackEvents": _normalize_message_feedback_events(assistant_entry.get("feedback_events") or assistant_entry.get("feedbackEvents") or []),
+            },
+            source="persist_session_turn_result",
+        )
+        terminal_event = EVENT_TURN_FAILED if final_status in {"failed_provider", "failed_runtime", "failed"} else (
+            EVENT_TURN_INTERRUPTED if stop_requested or final_status in {"stopped", "stopped_by_user"} else EVENT_TURN_COMPLETED
+        )
+        _append_session_turn_journal_event(
+            session_id,
+            turn_id,
+            terminal_event,
+            status=final_status,
+            payload={
+                "resultStatus": result_status or "completed",
+                "finalStatus": final_status,
+                "marker": TURN_INTERRUPTED_MARKER if terminal_event == EVENT_TURN_INTERRUPTED else "",
+                "errorType": error_type if runtime_failed else "",
+                "summary": assistant_text,
+            },
+            source="persist_session_turn_result",
+        )
     _record_session_cycle_message(
         session_id,
         assistant_entry,
@@ -11919,6 +12154,18 @@ def _persist_session_turn_runtime_error(
         raw_error=raw_error,
         status=normalized_status,
     )
+    _append_session_turn_journal_event(
+        session_id,
+        turn_id,
+        EVENT_TURN_FAILED,
+        status=normalized_status,
+        payload={
+            "errorType": normalized_error_type,
+            "message": message,
+            "rawError": raw_error,
+        },
+        source="persist_session_turn_runtime_error",
+    )
 
 
 def _make_local_runtime_error_chat_message(turn_error: dict[str, Any], *, turn_id: str = "") -> dict[str, Any]:
@@ -12073,6 +12320,18 @@ def _persist_session_turn_failure(session_id: str, context: dict[str, Any], exc:
                 raw_error=raw_error,
                 related_event_code="conversation.turn_error",
             )
+            _append_session_turn_journal_event(
+                session_id,
+                turn_id,
+                EVENT_TURN_FAILED,
+                status="failed_provider",
+                payload={
+                    "errorType": error_type,
+                    "message": str(turn_error.get("message") or ""),
+                    "rawError": raw_error,
+                },
+                source="persist_session_turn_failure",
+            )
             return
         turn_error = _make_session_turn_error(raw_error, lang=lang, error_type=error_type, turn_id=turn_id)
         error_entry = _make_turn_error_chat_message(
@@ -12137,6 +12396,18 @@ def _persist_session_turn_failure(session_id: str, context: dict[str, Any], exc:
         error_entry,
         event="assistant_turn_error",
         status="failed",
+    )
+    _append_session_turn_journal_event(
+        session_id,
+        turn_id,
+        EVENT_TURN_FAILED,
+        status="failed_runtime",
+        payload={
+            "errorType": error_type,
+            "message": str(turn_error.get("message") or ""),
+            "rawError": raw_error,
+        },
+        source="persist_session_turn_failure",
     )
 
 
@@ -15250,6 +15521,7 @@ def _set_session_live_output(
 ) -> None:
     requested_turn_id = str(turn_id or "").strip()
     assistant_delta_state: SessionLiveOutputState | None = None
+    journal_snapshot: SessionLiveOutputState | None = None
     publish_full_snapshot = not (
         stage is _UNSET
         and mental_snapshot is _UNSET
@@ -15330,6 +15602,26 @@ def _set_session_live_output(
                 feedback_events=list(state.feedback_events or []),
                 updated_at=state.updated_at,
             )
+        if state.turn_id and (
+            content is not _UNSET
+            or thought is not _UNSET
+            or tool_calls is not _UNSET
+            or feedback_events is not _UNSET
+        ):
+            journal_snapshot = SessionLiveOutputState(
+                session_id=state.session_id,
+                turn_id=state.turn_id,
+                stage=state.stage,
+                thought=state.thought,
+                content=state.content,
+                mental_snapshot=dict(state.mental_snapshot or {}) if isinstance(state.mental_snapshot, dict) else None,
+                tool_calls=list(state.tool_calls or []),
+                feedback_events=list(state.feedback_events or []),
+                context_composition=dict(state.context_composition or {}) if isinstance(state.context_composition, dict) else None,
+                updated_at=state.updated_at,
+            )
+    if journal_snapshot is not None:
+        _append_session_live_journal_event(session_id, journal_snapshot.turn_id, journal_snapshot)
     if assistant_delta_state is not None:
         _publish_session_assistant_delta(session_id, assistant_delta_state)
     if publish_full_snapshot:
@@ -15768,6 +16060,18 @@ def _persist_session_interrupted_snapshot(
                     "messageCount": len(messages),
                 },
             )
+            _append_session_turn_journal_event(
+                session_id,
+                turn_id,
+                EVENT_TURN_INTERRUPTED,
+                status="stopped",
+                payload={
+                    "reason": reason or "queued_before_worker_start",
+                    "marker": TURN_INTERRUPTED_MARKER,
+                    "summary": notice_message,
+                },
+                source="persist_interrupted_snapshot",
+            )
             return
         existing_active_task = _normalize_session_active_task(
             conversation.get("active_task") or conversation.get("activeTask")
@@ -15796,6 +16100,7 @@ def _persist_session_interrupted_snapshot(
             thought=live_thought,
             feedback_events=live_feedback_events,
             mental_snapshot=live_mental,
+            metadata={"turnId": turn_id},
         )
         if live_tools:
             assistant_entry["toolCalls"] = live_tools
@@ -15828,6 +16133,31 @@ def _persist_session_interrupted_snapshot(
         event="assistant_interrupted",
         status="stopped",
         active_task=next_active_task,
+    )
+    _append_session_turn_journal_event(
+        session_id,
+        turn_id,
+        EVENT_ASSISTANT_MESSAGE,
+        status="stopped",
+        payload={
+            "content": assistant_text,
+            "thought": live_thought,
+            "toolCalls": live_tools,
+            "feedbackEvents": live_feedback_events,
+        },
+        source="persist_interrupted_snapshot",
+    )
+    _append_session_turn_journal_event(
+        session_id,
+        turn_id,
+        EVENT_TURN_INTERRUPTED,
+        status="stopped",
+        payload={
+            "reason": reason or "user_stop",
+            "marker": TURN_INTERRUPTED_MARKER,
+            "summary": assistant_text,
+        },
+        source="persist_interrupted_snapshot",
     )
 
 
@@ -15925,6 +16255,25 @@ def _capture_session_ui_stream(
             error=error,
             duration_ms=data.get("durationMs") or data.get("duration_ms"),
             timeout_seconds=data.get("timeoutSeconds") or data.get("timeout_seconds"),
+        )
+        _append_session_turn_journal_event(
+            session_id,
+            capture.turn_id,
+            EVENT_TOOL_CALL_STARTED if event.name == EventNames.TOOL_START else EVENT_TOOL_RESULT,
+            status=status,
+            payload={
+                "toolCall": {
+                    "name": name,
+                    "status": status,
+                    "arguments": data.get("args") if isinstance(data.get("args"), dict) else {},
+                    "summary": summary,
+                    "result": result,
+                    "error": error,
+                    "durationMs": data.get("durationMs") or data.get("duration_ms"),
+                    "timeoutSeconds": data.get("timeoutSeconds") or data.get("timeout_seconds"),
+                }
+            },
+            source="session_ui_capture",
         )
         _set_session_live_output(
             session_id,
