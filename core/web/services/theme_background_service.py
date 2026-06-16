@@ -44,6 +44,10 @@ DEFAULT_THEME_BACKGROUNDS = (
         "filename": "default-sunlit-wink.png",
         "label": {"zh": "阳光眨眼", "en": "Sunlit Wink"},
     },
+    {
+        "filename": "default-nika-luffy-poster.png",
+        "label": {"zh": "尼卡海报", "en": "Nika Poster"},
+    },
 )
 DEFAULT_THEME_BACKGROUND_FILENAMES = {str(item["filename"]) for item in DEFAULT_THEME_BACKGROUNDS}
 _CONTENT_TYPE_EXTENSIONS = {
