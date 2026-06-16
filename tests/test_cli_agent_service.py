@@ -7,6 +7,7 @@ import sqlite3
 import pytest
 
 from core.ui.chat_state import build_chat_state, load_chat_state, save_chat_state
+from core.chat.turn_journal import EVENT_CLI_SESSION_LIFECYCLE, load_turn_events, model_visible_messages_from_events
 from core.web.services import cli_agent_service as service
 from core.web.services import cli_agent_terminal_service as terminal_service
 from core.web.services import session_service
@@ -269,6 +270,109 @@ def test_missing_cli_agent_executable_returns_error(monkeypatch, tmp_path):
     assert result["status"] == "error"
     assert result["code"] == "CLI_AGENT_NOT_FOUND"
     assert result["executableCandidates"] == ["codex.exe", "codex"]
+
+
+def test_cli_agent_controller_status_does_not_require_task(monkeypatch, tmp_path):
+    project_root = _configure_roots(monkeypatch, tmp_path)
+
+    monkeypatch.setattr(
+        terminal_service,
+        "get_cli_agent_terminal_session",
+        lambda terminal_session_id, include_transcript_tail=False: {
+            "terminalSessionId": terminal_session_id,
+            "adapterId": "mimo_code",
+            "label": "MiMo Code",
+            "cwd": str(project_root),
+            "mode": "readonly",
+            "status": "running",
+            "alive": True,
+            "canInput": True,
+        },
+    )
+
+    result = service.run_cli_agent(
+        agent_type="mimo_code",
+        action="status",
+        terminal_session_id="cli-term-one",
+        cwd=str(project_root),
+    )
+
+    assert result["status"] == "attached"
+    assert result["code"] == "CLI_AGENT_TERMINAL_ATTACHED"
+    assert result["terminalSessionId"] == "cli-term-one"
+    assert result["canInput"] is True
+
+
+def test_cli_agent_controller_send_uses_existing_terminal(monkeypatch, tmp_path):
+    project_root = _configure_roots(monkeypatch, tmp_path)
+    writes = []
+
+    monkeypatch.setattr(
+        terminal_service,
+        "get_cli_agent_terminal_session",
+        lambda terminal_session_id, include_transcript_tail=False: {
+            "terminalSessionId": terminal_session_id,
+            "adapterId": "mimo_code",
+            "label": "MiMo Code",
+            "cwd": str(project_root),
+            "mode": "readonly",
+            "status": "running",
+            "alive": True,
+            "canInput": True,
+        },
+    )
+    monkeypatch.setattr(
+        terminal_service,
+        "write_cli_agent_terminal_input",
+        lambda terminal_session_id, data: writes.append((terminal_session_id, data)) or {
+            "terminalSessionId": terminal_session_id,
+            "status": "accepted",
+            "alive": True,
+            "canInput": True,
+        },
+    )
+
+    result = service.run_cli_agent(
+        agent_type="mimo_code",
+        action="send",
+        terminal_session_id="cli-term-one",
+        input_text="继续执行验证",
+        cwd=str(project_root),
+    )
+
+    assert result["status"] == "input_sent"
+    assert result["code"] == "CLI_AGENT_TERMINAL_INPUT_SENT"
+    assert writes == [("cli-term-one", "继续执行验证\r\n")]
+
+
+def test_cli_agent_controller_stop_returns_closed(monkeypatch, tmp_path):
+    project_root = _configure_roots(monkeypatch, tmp_path)
+
+    monkeypatch.setattr(
+        terminal_service,
+        "stop_cli_agent_terminal_session",
+        lambda terminal_session_id: {
+            "terminalSessionId": terminal_session_id,
+            "adapterId": "mimo_code",
+            "label": "MiMo Code",
+            "cwd": str(project_root),
+            "mode": "readonly",
+            "status": "closed",
+            "alive": False,
+            "userClosed": True,
+        },
+    )
+
+    result = service.run_cli_agent(
+        agent_type="mimo_code",
+        action="stop",
+        terminal_session_id="cli-term-one",
+        cwd=str(project_root),
+    )
+
+    assert result["status"] == "closed"
+    assert result["code"] == "CLI_AGENT_TERMINAL_CLOSED"
+    assert result["terminalAlive"] is False
 
 
 def test_run_cli_agent_timeout_returns_timeout_payload(monkeypatch, tmp_path):
@@ -1727,6 +1831,10 @@ def test_cli_agent_lifecycle_close_event_persists_once(monkeypatch, tmp_path):
     sidecar_path = tmp_path / "workspace" / "sessions" / "session-1" / "logs" / "cli_agent_lifecycle.jsonl"
     assert sidecar_path.exists()
     assert len(sidecar_path.read_text(encoding="utf-8").splitlines()) == 1
+    journal_events = load_turn_events(tmp_path, "session-1")
+    assert [event.event_type for event in journal_events] == [EVENT_CLI_SESSION_LIFECYCLE]
+    visible = model_visible_messages_from_events(journal_events)
+    assert visible[0]["content"] == "MiMo Code 已关闭。"
 
 
 def test_cli_agent_lifecycle_sidecar_restores_detail_after_message_truncation(monkeypatch, tmp_path):

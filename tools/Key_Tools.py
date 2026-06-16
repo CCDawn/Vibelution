@@ -123,9 +123,10 @@ Args:
 """
 
 _CLI_AGENT_RUN_TOOL_DOCSTRING = """
-【CLI Agent 调用】受控调用外部代码 Agent。
+【CLI Agent 控制器】受控调用和遥控外部代码 Agent。
 
 会话 Agent 需要把独立代码分析、实现或验证交给外部代码 Agent 时，使用这个入口；
+也可以用它查询、启动、发送输入或关闭同一个常驻 CLI 会话。
 内部子 Agent 自动派遣不再作为会话 Agent 的默认路径。
 
 只支持内置适配器：
@@ -140,7 +141,10 @@ _CLI_AGENT_RUN_TOOL_DOCSTRING = """
 
 Args:
     agent_type: `mimo_code`、`codex_code` 或 `claude_code`
+    action: `task` 投递一次受跟踪任务，`start` 启动/复用常驻终端，`status` 查询状态，`send` 发送输入，`stop` 关闭终端
     task: 要交给外部 CLI Agent 的任务说明
+    terminal_session_id: 已知终端会话 ID；`status/send/stop` 可直接操作该终端
+    input_text: `send` 动作用的输入文本；为空时使用 `task`
     cwd: 运行目录；只读可用项目内目录，可写使用 sibling worktree
     mode: `readonly` 或 `worktree`
     timeout: 超时时间，默认 600 秒，最大 1800 秒

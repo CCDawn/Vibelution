@@ -59,11 +59,7 @@ DEFAULT_SESSION_AGENT_ALLOWED_TOOLS = (
     "history_fetch_tool",
     "history_timeline_tool",
     "history_checkpoint_tool",
-    "create_child_session_tool",
-    "list_child_sessions_tool",
     "session_reference_query_tool",
-    "agent_message_tool",
-    "agent_tool_permission_request_tool",
     "get_core_context_tool",
     "get_current_goal_tool",
     "compress_context_tool",
@@ -76,8 +72,6 @@ DEFAULT_SESSION_AGENT_ALLOWED_TOOLS = (
 )
 DEFAULT_SESSION_AGENT_PREFERRED_TOOLS = (
     "cli_tool",
-    "create_child_session_tool",
-    "list_child_sessions_tool",
     "session_reference_query_tool",
     "conversation_log_inspect_tool",
     "history_search_tool",
