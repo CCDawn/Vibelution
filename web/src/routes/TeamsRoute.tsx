@@ -3504,11 +3504,11 @@ export function TeamsRoute({
         ? (lang === "zh" ? "搜索中" : "searching")
         : sourceCollectionSearchOpenAssignmentCount > 0
           ? (lang === "zh" ? "需补充资料" : "more sources needed")
-          : sourceCollectionDownstreamOpenAssignmentCount > 0
+        : sourceCollectionDownstreamOpenAssignmentCount > 0
             ? (lang === "zh" ? "待提炼/筛选" : "downstream pending")
-          : sourceManifestCandidates.length > sourceCollectionApprovedCount
+          : sourceCollectionRunPendingScreeningCount > 0
             ? (lang === "zh" ? "资料待筛选" : "needs screening")
-            : sourceManifestCandidates.length > 0
+            : sourceCollectionRunCandidateCount > 0
               ? (lang === "zh" ? "可进入实验" : "ready for experiment")
               : (lang === "zh" ? "等待回写" : "waiting for writeback");
     const knowledgeCollectionPrimaryActionLabel = !selectedSourceCollectionRun
@@ -3519,7 +3519,7 @@ export function TeamsRoute({
           : (lang === "zh" ? "搜索下一批" : "Search next batch"))
         : sourceCollectionDownstreamOpenAssignmentCount > 0
           ? (lang === "zh" ? "进入阶段详情" : "Open stage details")
-        : sourceManifestCandidates.length > sourceCollectionApprovedCount
+        : sourceCollectionRunPendingScreeningCount > 0
           ? (lang === "zh" ? "进入资料筛选" : "Open screening")
           : (lang === "zh" ? "进入搜集工作台" : "Open collection workspace");
     const knowledgeCollectionPrimaryDisabled = !selectedSourceCollectionRun
@@ -3602,7 +3602,7 @@ export function TeamsRoute({
         if (sourceCollectionDownstreamOpenAssignmentCount > 0) {
           return lang === "zh" ? "搜索已停，后续进入提炼或筛选。" : "Search is idle; extraction or screening is next.";
         }
-        if (sourceManifestCandidates.length > sourceCollectionApprovedCount) {
+        if (sourceCollectionRunPendingScreeningCount > 0) {
           return lang === "zh" ? "已有候选资料，下一步进入筛选。" : "Candidate sources are ready for screening.";
         }
         return lang === "zh" ? "本轮可补充搜集，或由用户决定进入实验。" : "Add another collection round or move to experiments.";
@@ -3674,7 +3674,8 @@ export function TeamsRoute({
                     <span>{sourceCollectionRunLabel(selectedSourceCollectionRun.runId)}</span>
                     <span>{lang === "zh" ? `可搜索 ${sourceCollectionSearchOpenAssignmentCount}` : `search ${sourceCollectionSearchOpenAssignmentCount}`}</span>
                     <span>{lang === "zh" ? `后续 ${sourceCollectionDownstreamOpenAssignmentCount}` : `next ${sourceCollectionDownstreamOpenAssignmentCount}`}</span>
-                    <span>{lang === "zh" ? `候选 ${sourceManifestCandidates.length}` : `candidates ${sourceManifestCandidates.length}`}</span>
+                    <span>{lang === "zh" ? `原始 ${sourceCollectionRawRecordCount}` : `raw ${sourceCollectionRawRecordCount}`}</span>
+                    <span>{lang === "zh" ? `候选 ${sourceCollectionRunCandidateCount}` : `candidates ${sourceCollectionRunCandidateCount}`}</span>
                     <span>{lang === "zh" ? `查询 ${sourceCollectionQueryCount}` : `queries ${sourceCollectionQueryCount}`}</span>
                   </div>
                 ) : (
@@ -3984,7 +3985,7 @@ export function TeamsRoute({
       ?? (sourceCollectionOperationFailed ? sourceCollectionTraceMessages.find((message) => message.tone === "blocked") : null)
       ?? (!selectedSourceCollectionRun ? sourceCollectionTraceMessages.find((message) => message.id === "coordination-plan") : null)
       ?? (sourceCollectionSearchOpenAssignmentCount > 0 || sourceCollectionDownstreamOpenAssignmentCount > 0 ? sourceCollectionTraceMessages.find((message) => message.id === "assignment-summary") : null)
-      ?? (sourceManifestCandidates.length ? sourceCollectionTraceMessages.find((message) => message.id.startsWith("candidate-")) : null)
+      ?? (sourceCollectionRunCandidateCount ? sourceCollectionTraceMessages.find((message) => message.id.startsWith("candidate-")) : null)
       ?? sourceCollectionTraceMessages[0]
       ?? null;
     const visibleResults = sourceCollectionRecords.slice(0, SOURCE_COLLECTION_RESULT_PREVIEW_LIMIT);
@@ -5011,17 +5012,17 @@ export function TeamsRoute({
         ) : null}
         {selectedSourceCollectionStageId === "screening" ? (
           <div className={styles.workflowSourceQualityStats}>
-            <span>{lang === "zh" ? "来源" : "sources"} <strong>{sourceQualityCandidateCount}</strong></span>
-            <span>{lang === "zh" ? "已筛" : "assessed"} <strong>{sourceQualityAssessedCount}</strong></span>
-            <span>{lang === "zh" ? "通过" : "approved"} <strong>{sourceCollectionApprovedCount}</strong></span>
-            <span>{lang === "zh" ? "待筛" : "pending"} <strong>{sourceQualityUnassessedCount}</strong></span>
+            <span>{lang === "zh" ? "本轮候选" : "run candidates"} <strong>{sourceCollectionRunCandidateCount}</strong></span>
+            <span>{lang === "zh" ? "已筛" : "assessed"} <strong>{sourceCollectionRunAssessedCount}</strong></span>
+            <span>{lang === "zh" ? "通过" : "approved"} <strong>{sourceCollectionRunApprovedCount}</strong></span>
+            <span>{lang === "zh" ? "待筛" : "pending"} <strong>{sourceCollectionRunPendingScreeningCount}</strong></span>
           </div>
         ) : null}
         {selectedSourceCollectionStageId === "candidate" ? (
           <>
             <div className={styles.workflowSourceQualityStats}>
-              <span>{lang === "zh" ? "候选" : "candidates"} <strong>{sourceManifestCandidates.length}</strong></span>
-              <span>{lang === "zh" ? "通过筛选" : "approved"} <strong>{sourceCollectionApprovedCount}</strong></span>
+              <span>{lang === "zh" ? "本轮候选" : "run candidates"} <strong>{sourceCollectionRunCandidateCount}</strong></span>
+              <span>{lang === "zh" ? "通过筛选" : "approved"} <strong>{sourceCollectionRunApprovedCount}</strong></span>
             </div>
             {renderSourceCollectionStorageActions()}
           </>
@@ -5649,10 +5650,6 @@ export function TeamsRoute({
     event.preventDefault();
     selectSourceCollectionCandidate(candidate);
   };
-  const sourceCollectionCandidateProvenances = useMemo(
-    () => sourceCollectionRunCandidates.map((candidate) => sourceCollectionCandidateProvenance(candidate, lang)),
-    [lang, sourceCollectionRunCandidates],
-  );
   const sourceCollectionCandidatesByRecordId = useMemo(() => {
     const mapping = new Map<string, TeamWorkflowCandidate>();
     sourceCollectionRunCandidates.forEach((candidate) => {
@@ -5667,9 +5664,6 @@ export function TeamsRoute({
     () => sourceCollectionRecords.map((record) => sourceCollectionRecordProvenance(record, lang)),
     [lang, sourceCollectionRecords],
   );
-  const sourceCollectionClickableSourceCount = sourceCollectionCandidateProvenances.filter((item) => item.href).length;
-  const sourceCollectionLocalFileCount = sourceCollectionCandidateProvenances.filter((item) => item.kind === "file").length;
-  const sourceCollectionMissingSourceCount = sourceCollectionCandidateProvenances.filter((item) => item.kind === "missing").length;
   const sourceCollectionRawRecordCount =
     Number(sourceCollectionRecordsQuery.data?.summary?.recordCount ?? sourceCollectionRunSummary?.recordCount ?? sourceCollectionRecords.length) || 0;
   const sourceCollectionRecordClickableSourceCount = sourceCollectionRecordProvenances.filter((item) => item.href).length;
@@ -5692,9 +5686,9 @@ export function TeamsRoute({
       ? (lang === "zh" ? "还需补充资料" : "more sources needed")
       : sourceCollectionDownstreamOpenAssignmentCount > 0
         ? (lang === "zh" ? "等待提炼/筛选" : "downstream pending")
-      : sourceManifestCandidates.length > sourceCollectionApprovedCount
+      : sourceCollectionRunPendingScreeningCount > 0
         ? (lang === "zh" ? "资料待筛选" : "screening needed")
-        : sourceManifestCandidates.length > 0
+        : sourceCollectionRunCandidateCount > 0
           ? (lang === "zh" ? "可进入实验规划" : "ready for experiment")
           : (lang === "zh" ? "等待结果回写" : "waiting for writeback");
   const sourceCollectionRunStatusValue = String(sourceCollectionRunStatus?.runStatus || selectedSourceCollectionRun?.status || "").toLowerCase();
@@ -5878,7 +5872,7 @@ export function TeamsRoute({
         ],
       });
     }
-    sourceManifestCandidates.slice(0, 4).forEach((candidate) => {
+    sourceCollectionRunCandidates.slice(0, 4).forEach((candidate) => {
       messages.push({
         id: `candidate-${candidate.candidateId}`,
         agentRole: candidate.createdByAgent || "Source Intake Agent",
@@ -5930,8 +5924,8 @@ export function TeamsRoute({
     sourceCollectionSearchPlanRef,
     sourceCollectionSearchOpenAssignmentCount,
     sourceCollectionQueryCount,
+    sourceCollectionRunCandidates,
     sourceCollectionRunSummary?.recordCount,
-    sourceManifestCandidates,
     teamWorkflow?.candidateStore.storagePath,
     teamWorkflowSourceQualityStatus,
   ]);
@@ -5978,7 +5972,6 @@ export function TeamsRoute({
     selectedSourceCollectionActiveWorkRun
     && ["failed", "blocked"].includes(String(selectedSourceCollectionActiveWorkRun.status || "").toLowerCase()),
   );
-  const sourceCollectionRecordCount = sourceCollectionRunSummary?.recordCount ?? 0;
   const sourceCollectionOperationActive = Boolean(
     selectedTeamStartResearchStagePending
     || selectedTeamStartSourceCollectionPending
@@ -5999,28 +5992,23 @@ export function TeamsRoute({
     || selectedTeamSourceQualityError
     || selectedTeamBuildCandidateGraphError,
   );
-  const sourceQualityAssessedCount = teamWorkflowSourceQualityStatus?.summary.assessedSourceCandidateCount ?? 0;
-  const sourceQualityCandidateCount = teamWorkflowSourceQualityStatus?.summary.sourceCandidateCount ?? sourceManifestCandidates.length;
-  const sourceQualityUnassessedCount =
-    teamWorkflowSourceQualityStatus?.summary.unassessedSourceCandidateCount
-    ?? Math.max(0, sourceQualityCandidateCount - sourceQualityAssessedCount);
   const candidateGraphNodeCount = teamWorkflowCandidateGraph?.summary.nodeCount ?? 0;
   const candidateGraphEdgeCount = teamWorkflowCandidateGraph?.summary.edgeCount ?? 0;
   const knowledgePendingReviewCount = teamWorkflowKnowledgeIngestionStatus?.summary.pendingKnowledgeReviewCandidateCount ?? 0;
   const formalKnowledgeItemCount = teamWorkflowKnowledgeIngestionStatus?.summary.formalKnowledgeItemCount ?? 0;
-  const sourceCollectionScreeningDisabled = !selectedTeam?.teamId || sourceQualityCandidateCount <= 0;
+  const sourceCollectionScreeningDisabled = !selectedTeam?.teamId || sourceCollectionRunCandidateCount <= 0;
   const sourceCollectionScreeningButtonText = selectedTeamSourceQualityPending
     ? (lang === "zh" ? "Agent 筛选中" : "Agent screening")
-    : sourceQualityUnassessedCount > 0
+    : sourceCollectionRunPendingScreeningCount > 0
       ? (lang === "zh" ? "Agent 筛选资料" : "Agent screen")
-      : sourceQualityCandidateCount > 0
+      : sourceCollectionRunCandidateCount > 0
         ? (lang === "zh" ? "Agent 重新筛选" : "Agent re-screen")
         : (lang === "zh" ? "资料筛选" : "Screening");
   const sourceCollectionScreeningStatusText = selectedTeamSourceQualityPending
     ? (lang === "zh" ? "进行中" : "running")
-    : sourceQualityUnassessedCount > 0
-      ? `${sourceQualityUnassessedCount} ${lang === "zh" ? "待筛" : "pending"}`
-      : sourceQualityCandidateCount > 0
+    : sourceCollectionRunPendingScreeningCount > 0
+      ? `${sourceCollectionRunPendingScreeningCount} ${lang === "zh" ? "待筛" : "pending"}`
+      : sourceCollectionRunCandidateCount > 0
         ? (lang === "zh" ? "已筛选" : "done")
         : (lang === "zh" ? "暂无候选" : "no candidates");
   const sourceCollectionPanelClassName = (panelId: string) => [
@@ -6097,8 +6085,8 @@ export function TeamsRoute({
     if (!selectedTeam?.teamId || sourceCollectionScreeningDisabled || selectedTeamSourceQualityPending) {
       return;
     }
-    const forceRescreen = sourceQualityUnassessedCount <= 0 && sourceQualityCandidateCount > 0;
-    const maxCandidates = forceRescreen ? sourceQualityCandidateCount : sourceQualityUnassessedCount;
+    const forceRescreen = sourceCollectionRunPendingScreeningCount <= 0 && sourceCollectionRunCandidateCount > 0;
+    const maxCandidates = forceRescreen ? sourceCollectionRunCandidateCount : sourceCollectionRunPendingScreeningCount;
     assessSourceQualityBatchMutation.mutate({
       teamId: selectedTeam.teamId,
       assessedByAgent: sourceCollectionQualityAgentId,
@@ -6116,7 +6104,7 @@ export function TeamsRoute({
     scrollSourceCollectionPanelIntoView("source-collection-candidates-panel");
   };
   const refreshSourceCollectionGraph = () => {
-    if (!selectedTeam?.teamId || sourceManifestCandidates.length <= 0 || selectedTeamBuildCandidateGraphPending) {
+    if (!selectedTeam?.teamId || sourceCollectionRunCandidateCount <= 0 || selectedTeamBuildCandidateGraphPending) {
       return;
     }
     buildCandidateGraphMutation.mutate(selectedTeam.teamId);
@@ -6166,9 +6154,9 @@ export function TeamsRoute({
       ? "active"
       : !selectedSourceCollectionRun
         ? "idle"
-        : sourceCollectionSearchOpenAssignmentCount > 0 || sourceCollectionDownstreamOpenAssignmentCount > 0 || sourceManifestCandidates.length > sourceCollectionApprovedCount
+        : sourceCollectionSearchOpenAssignmentCount > 0 || sourceCollectionDownstreamOpenAssignmentCount > 0 || sourceCollectionRunPendingScreeningCount > 0
           ? "pending"
-          : sourceManifestCandidates.length > 0
+          : sourceCollectionRunCandidateCount > 0
             ? "done"
             : "pending";
   const sourceCollectionConsoleStatusText = selectedTeamExecuteSourceCollectionSearchPending || sourceCollectionAcceptedBackgroundActive
@@ -6189,9 +6177,9 @@ export function TeamsRoute({
                   ? (lang === "zh" ? "需补充资料" : "More sources needed")
                   : sourceCollectionDownstreamOpenAssignmentCount > 0
                     ? (lang === "zh" ? "待提炼/筛选" : "Extraction or screening pending")
-                  : sourceManifestCandidates.length > sourceCollectionApprovedCount
+                  : sourceCollectionRunPendingScreeningCount > 0
                     ? (lang === "zh" ? "待筛选资料" : "Needs screening")
-                    : sourceManifestCandidates.length > 0
+                    : sourceCollectionRunCandidateCount > 0
                       ? (lang === "zh" ? "可进入实验" : "Ready for experiment")
                       : (lang === "zh" ? "待回写" : "Waiting for writeback");
   const sourceCollectionDecisionText = (() => {
@@ -6217,7 +6205,7 @@ export function TeamsRoute({
         ? `搜索已停止，还有 ${sourceCollectionDownstreamOpenAssignmentCount} 个后续任务等待提炼或筛选。`
         : `Search is idle; ${sourceCollectionDownstreamOpenAssignmentCount} downstream tasks wait for extraction or screening.`;
     }
-    if (sourceManifestCandidates.length > sourceCollectionApprovedCount) {
+    if (sourceCollectionRunPendingScreeningCount > 0) {
       return lang === "zh"
         ? "候选资料已到位，下一步执行资料筛选。"
         : "Candidate sources are ready. Run screening next.";
@@ -6278,7 +6266,7 @@ export function TeamsRoute({
     ? "failed"
     : selectedTeamRecordSourceCollectionOutputPending
       ? "active"
-      : sourceManifestCandidates.length > 0
+      : sourceCollectionRunCandidateCount > 0
         ? "done"
         : selectedSourceCollectionRun
           ? "pending"
@@ -6375,14 +6363,14 @@ export function TeamsRoute({
       metric: lang === "zh" ? `节点 ${candidateGraphNodeCount} · 关系 ${candidateGraphEdgeCount}` : `${candidateGraphNodeCount} nodes · ${candidateGraphEdgeCount} edges`,
       summary: candidateGraphNodeCount > 0
         ? (lang === "zh" ? "关系快照已生成" : "Graph snapshot ready")
-        : sourceManifestCandidates.length > 0
+        : sourceCollectionRunCandidateCount > 0
           ? (lang === "zh" ? "可生成候选关系" : "Can build candidate links")
           : (lang === "zh" ? "先有候选资料" : "Needs candidates first"),
       state: sourceCollectionGraphStepState,
       status: sourceCollectionStepStatusText(sourceCollectionGraphStepState),
       detailLabel: lang === "zh" ? "查看图谱详情" : "View graph details",
       actionLabel: selectedTeamBuildCandidateGraphPending ? (lang === "zh" ? "生成中" : "Building") : (lang === "zh" ? "刷新图谱" : "Refresh"),
-      actionDisabled: !selectedTeam?.teamId || sourceManifestCandidates.length <= 0 || selectedTeamBuildCandidateGraphPending,
+      actionDisabled: !selectedTeam?.teamId || sourceCollectionRunCandidateCount <= 0 || selectedTeamBuildCandidateGraphPending,
       actionTone: "secondary",
       actionIcon: "refresh",
       onAction: refreshSourceCollectionGraph,
