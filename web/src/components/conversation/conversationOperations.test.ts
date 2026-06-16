@@ -227,6 +227,7 @@ describe("conversationOperations", () => {
       [4, 5],
     ]);
     expect(groups.map((group) => group.thoughtSequence)).toEqual([2, 4]);
+    expect(groups.map((group) => group.id)).toEqual(["react-thought-2", "react-thought-4"]);
   });
 
   it("keeps tool-only timelines in one ReAct operation group", () => {
@@ -297,78 +298,33 @@ describe("conversationOperations", () => {
     });
   });
 
-  it("keeps interleaved cumulative thought snapshots as ReAct boundaries", () => {
-    const message: ConversationMessage = {
-      id: "message-interleaved-cumulative-thought",
+  it("keeps ReAct group ids stable when status events are inserted before thought events", () => {
+    const baseOperations = buildConversationOperations({
+      id: "message-stable-react-group",
       role: "assistant",
       content: "",
       timestamp: "2026-06-05T00:00:00Z",
       streaming: true,
       feedbackEvents: [
-        {
-          sequence: 1,
-          kind: "thought",
-          status: "running",
-          summary: "I need to inspect the latest session.",
-          resultPreview: "I need to inspect the latest session.",
-        },
-        {
-          sequence: 2,
-          kind: "tool",
-          status: "done",
-          name: "cli_tool",
-          summary: "session.jsonl",
-          relatedThoughtSequence: 1,
-        },
-        {
-          sequence: 3,
-          kind: "thought",
-          status: "running",
-          summary: "I need to inspect the latest session. The first log shows repeated reasoning snapshots.",
-          resultPreview: "I need to inspect the latest session. The first log shows repeated reasoning snapshots.",
-        },
-        {
-          sequence: 4,
-          kind: "tool",
-          status: "done",
-          name: "read_file_tool",
-          summary: "opened session.jsonl",
-          relatedThoughtSequence: 3,
-        },
-        {
-          sequence: 5,
-          kind: "thought",
-          status: "running",
-          summary: "I need to inspect the latest session. The first log shows repeated reasoning snapshots. I can now summarize the display issue.",
-          resultPreview: "I need to inspect the latest session. The first log shows repeated reasoning snapshots. I can now summarize the display issue.",
-        },
+        { sequence: 2, kind: "thought", status: "running", summary: "先读日志", resultPreview: "先读日志" },
+        { sequence: 3, kind: "tool", status: "done", name: "read_log", summary: "opened", relatedThoughtSequence: 2 },
       ],
-    };
+    }, labels);
+    const withPrepStatus = buildConversationOperations({
+      id: "message-stable-react-group",
+      role: "assistant",
+      content: "",
+      timestamp: "2026-06-05T00:00:00Z",
+      streaming: true,
+      feedbackEvents: [
+        { sequence: 1, kind: "status", status: "done", name: "context_prepare", summary: "准备上下文" },
+        { sequence: 2, kind: "thought", status: "running", summary: "先读日志", resultPreview: "先读日志" },
+        { sequence: 3, kind: "tool", status: "done", name: "read_log", summary: "opened", relatedThoughtSequence: 2 },
+      ],
+    }, labels);
 
-    const operations = buildConversationOperations(message, labels);
-
-    expect(operations.map((item) => `${item.sequence}:${item.kind}:${item.summary}`)).toEqual([
-      "1:thought:I need to inspect the latest session.",
-      "2:tool:session.jsonl",
-      "3:thought:I need to inspect the latest session. The first log shows repeated reasoning snapshots.",
-      "4:tool:opened session.jsonl",
-      "5:thought:I need to inspect the latest session. The first log shows repeated reasoning snapshots. I can now summarize the display issue.",
-    ]);
-    expect(operations[0]).toMatchObject({
-      id: "message-interleaved-cumulative-thought-feedback-1",
-      status: "done",
-      rawStatus: "running",
-      resultPreview: "I need to inspect the latest session.",
-    });
-    expect(operations[1].relatedThoughtSequence).toBe(1);
-    expect(operations[3].relatedThoughtSequence).toBe(3);
-    expect(buildConversationReActOperationGroups(operations).map((group) =>
-      group.operations.map((operation) => operation.sequence),
-    )).toEqual([
-      [1, 2],
-      [3, 4],
-      [5],
-    ]);
+    expect(buildConversationReActOperationGroups(baseOperations)[0].id).toBe("react-thought-2");
+    expect(buildConversationReActOperationGroups(withPrepStatus)[0].id).toBe("react-thought-2");
   });
 
   it("keeps only the latest running operation active for legacy timelines", () => {

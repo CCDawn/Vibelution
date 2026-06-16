@@ -1538,37 +1538,62 @@ class SessionTurnCapture:
     def note_thought(self, text: str) -> None:
         cleaned = _sanitize_thought_text(text)
         if cleaned:
-            previous = self._latest_thought_text or self.thought
-            if previous and cleaned == previous:
+            previous_total = self.thought
+            previous_segment = self._latest_thought_text if self._latest_thought_sequence else ""
+            if previous_total and not previous_segment and cleaned == previous_total:
                 return
-            if previous and cleaned.startswith(previous):
-                next_text = cleaned
-            else:
-                next_text = f"{previous}{cleaned}" if previous else cleaned
-            self.thought = next_text
+            next_total, next_text = self._resolve_thought_text_update(cleaned, previous_total, previous_segment)
+            if not next_text:
+                return
+            if previous_segment and next_text == previous_segment:
+                self.thought = next_total
+                return
+            self.thought = next_total
             self._latest_thought_text = next_text
             if self._latest_thought_sequence:
-                for index in range(len(self.feedback_events) - 1, -1, -1):
-                    latest = self.feedback_events[index]
-                    if (
-                        latest.get("kind") == "thought"
-                        and _coerce_nonnegative_int(latest.get("sequence")) == self._latest_thought_sequence
-                    ):
-                        updated = dict(latest)
-                        updated["status"] = "running"
-                        updated["summary"] = trim_lines(next_text, max_lines=2)
-                        updated["resultPreview"] = next_text
-                        updated["timestamp"] = _now_timestamp()
-                        self.feedback_events[index] = updated
-                        return
-            self._latest_thought_sequence = self._append_feedback_event(
-                {
-                    "kind": "thought",
-                    "status": "running",
-                    "summary": trim_lines(next_text, max_lines=2),
-                    "resultPreview": next_text,
-                }
-            )
+                self._update_latest_thought_event(next_text)
+            else:
+                self._latest_thought_sequence = self._append_feedback_event(
+                    {
+                        "kind": "thought",
+                        "status": "running",
+                        "summary": trim_lines(next_text, max_lines=2),
+                        "resultPreview": next_text,
+                    }
+                )
+
+    def _resolve_thought_text_update(self, cleaned: str, previous_total: str, previous_segment: str) -> tuple[str, str]:
+        if not previous_total:
+            return cleaned, cleaned
+        if cleaned.startswith(previous_total):
+            suffix = cleaned[len(previous_total):]
+            if previous_segment:
+                return cleaned, (f"{previous_segment}{suffix}" if suffix else previous_segment).strip()
+            return cleaned, suffix.strip()
+        if previous_segment and cleaned.startswith(previous_segment):
+            if previous_total.endswith(previous_segment):
+                next_total = f"{previous_total[:-len(previous_segment)]}{cleaned}"
+            else:
+                next_total = f"{previous_total}{cleaned}"
+            return next_total, cleaned
+        next_total = f"{previous_total}{cleaned}"
+        next_segment = f"{previous_segment}{cleaned}" if previous_segment else cleaned
+        return next_total, next_segment
+
+    def _update_latest_thought_event(self, text: str) -> None:
+        for index in range(len(self.feedback_events) - 1, -1, -1):
+            latest = self.feedback_events[index]
+            if (
+                latest.get("kind") == "thought"
+                and _coerce_nonnegative_int(latest.get("sequence")) == self._latest_thought_sequence
+            ):
+                updated = dict(latest)
+                updated["status"] = "running"
+                updated["summary"] = trim_lines(text, max_lines=2)
+                updated["resultPreview"] = text
+                updated["timestamp"] = _now_timestamp()
+                self.feedback_events[index] = updated
+                return
 
     def clear_thought(self) -> None:
         self.thought = ""
