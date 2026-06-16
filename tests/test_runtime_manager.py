@@ -56,6 +56,11 @@ def _patch_command_queue_events(monkeypatch, events_path):
     monkeypatch.setattr(command_queue, "record_runtime_manager_scene_event", lambda *args, **kwargs: None)
 
 
+def _patch_daemon_ownership_available(monkeypatch):
+    monkeypatch.setattr(daemon, "_claim_daemon_ownership", lambda pid: True)
+    monkeypatch.setattr(daemon, "_release_daemon_ownership", lambda pid: None)
+
+
 @pytest.fixture(autouse=True)
 def _block_real_process_termination(monkeypatch, tmp_path):
     events_path = tmp_path / "runtime-manager-events.jsonl"
@@ -1387,6 +1392,7 @@ def test_run_forever_refreshes_manager_started_at(monkeypatch):
     timestamps = iter(["2026-05-19T08:00:00+00:00", "2026-05-19T08:00:01+00:00"])
 
     monkeypatch.setattr(daemon, "ensure_runtime_manager_dirs", lambda: None)
+    _patch_daemon_ownership_available(monkeypatch)
     monkeypatch.setattr(daemon, "recover_processing_queue", lambda: None)
     monkeypatch.setattr(daemon, "save_pid", lambda pid: None)
     monkeypatch.setattr(
@@ -1441,6 +1447,7 @@ def test_run_forever_recovers_processing_queue_after_startup_reconcile(monkeypat
     recovered_states: list[dict] = []
 
     monkeypatch.setattr(daemon, "ensure_runtime_manager_dirs", lambda: None)
+    _patch_daemon_ownership_available(monkeypatch)
     monkeypatch.setattr(daemon, "save_pid", lambda pid: None)
     monkeypatch.setattr(daemon, "load_state", lambda: json.loads(json.dumps(state_store)))
     monkeypatch.setattr(daemon, "now_iso", lambda: "2026-06-04T09:20:24+00:00")
@@ -1526,6 +1533,7 @@ def test_run_forever_cleans_descendants_before_completing_stop_daemon(monkeypatc
     order: list[str] = []
 
     monkeypatch.setattr(daemon, "ensure_runtime_manager_dirs", lambda: None)
+    _patch_daemon_ownership_available(monkeypatch)
     monkeypatch.setattr(daemon, "recover_processing_queue", lambda: None)
     monkeypatch.setattr(daemon, "save_pid", lambda pid: None)
     monkeypatch.setattr(
@@ -1610,6 +1618,7 @@ def test_run_forever_marks_runtime_stopping_then_finalizes_idle_before_exit(monk
     }
 
     monkeypatch.setattr(daemon, "ensure_runtime_manager_dirs", lambda: None)
+    _patch_daemon_ownership_available(monkeypatch)
     monkeypatch.setattr(daemon, "recover_processing_queue", lambda: None)
     monkeypatch.setattr(daemon, "save_pid", lambda pid: None)
     monkeypatch.setattr(daemon, "load_state", lambda: json.loads(json.dumps(loaded_state)))
@@ -5857,6 +5866,7 @@ def test_runtime_manager_run_forever_requeues_deferred_restart(monkeypatch, tmp_
     saved_states: list[dict[str, object]] = []
 
     monkeypatch.setattr(daemon, "ensure_runtime_manager_dirs", lambda: None)
+    _patch_daemon_ownership_available(monkeypatch)
     monkeypatch.setattr(daemon, "save_pid", lambda pid: None)
     monkeypatch.setattr(daemon, "clear_pid", lambda pid: None)
     monkeypatch.setattr(daemon, "_mark_daemon_not_running_after_exit", lambda manager_pid: None)
