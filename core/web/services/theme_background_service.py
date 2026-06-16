@@ -40,6 +40,10 @@ DEFAULT_THEME_BACKGROUNDS = (
         "filename": "default-glass-observatory.png",
         "label": {"zh": "玻璃观测站", "en": "Glass Observatory"},
     },
+    {
+        "filename": "default-sunlit-wink.png",
+        "label": {"zh": "阳光眨眼", "en": "Sunlit Wink"},
+    },
 )
 DEFAULT_THEME_BACKGROUND_FILENAMES = {str(item["filename"]) for item in DEFAULT_THEME_BACKGROUNDS}
 _CONTENT_TYPE_EXTENSIONS = {
