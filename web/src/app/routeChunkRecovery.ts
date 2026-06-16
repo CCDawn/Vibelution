@@ -1,4 +1,5 @@
-const ROUTE_CHUNK_RELOAD_KEY = "vibelution:route-chunk-reload";
+export const ROUTE_CHUNK_RELOAD_KEY = "vibelution:route-chunk-reload";
+const ROUTE_CHUNK_RELOAD_RECORD_VERSION = 1;
 
 type ChunkRecoveryWindow = Pick<Window, "location" | "sessionStorage">;
 type ChunkRecoveryReporter = (event: {
@@ -16,12 +17,50 @@ type ChunkRecoveryDetails = {
   errorMessage?: string;
 };
 
+type RouteChunkReloadRecord = {
+  schemaVersion: typeof ROUTE_CHUNK_RELOAD_RECORD_VERSION;
+  buildId: string;
+  target: string;
+};
+
 function compactTelemetryText(value: string | undefined, limit = 300) {
   const text = String(value ?? "").replace(/\s+/g, " ").trim();
   if (text.length <= limit) {
     return text;
   }
   return `${text.slice(0, Math.max(0, limit - 3))}...`;
+}
+
+function currentBuildId() {
+  try {
+    return __VIBELUTION_BUILD_ID__ || "unknown";
+  } catch {
+    return "unknown";
+  }
+}
+
+function parseReloadRecord(rawValue: string | null): RouteChunkReloadRecord | null {
+  if (!rawValue) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(rawValue) as Partial<RouteChunkReloadRecord>;
+    if (
+      parsed &&
+      parsed.schemaVersion === ROUTE_CHUNK_RELOAD_RECORD_VERSION &&
+      typeof parsed.buildId === "string" &&
+      typeof parsed.target === "string"
+    ) {
+      return parsed as RouteChunkReloadRecord;
+    }
+  } catch {
+    // Ignore legacy plain route markers so an upgraded client gets one fresh recovery attempt.
+  }
+  return null;
+}
+
+function stringifyReloadRecord(record: RouteChunkReloadRecord) {
+  return JSON.stringify(record);
 }
 
 export function isDynamicImportFetchError(error: unknown): boolean {
@@ -71,6 +110,7 @@ function reportRouteChunkRecovery(
     fields: {
       reason: details.reason || "",
       routeTarget,
+      buildId: currentBuildId(),
       pathname: browserWindow.location.pathname,
       resourceUrl: compactTelemetryText(details.resourceUrl, 500),
       errorMessage: compactTelemetryText(details.errorMessage, 500),
@@ -89,8 +129,10 @@ export function recoverFromStaleRouteAsset(
   }
 
   const target = `${browserWindow.location.pathname}${browserWindow.location.search}${browserWindow.location.hash}`;
+  const buildId = currentBuildId();
   try {
-    if (browserWindow.sessionStorage.getItem(ROUTE_CHUNK_RELOAD_KEY) === target) {
+    const existingRecord = parseReloadRecord(browserWindow.sessionStorage.getItem(ROUTE_CHUNK_RELOAD_KEY));
+    if (existingRecord?.target === target && existingRecord.buildId === buildId) {
       reportRouteChunkRecovery(details, browserWindow, {
         routeTarget: target,
         reloadRequested: false,
@@ -98,7 +140,14 @@ export function recoverFromStaleRouteAsset(
       });
       return false;
     }
-    browserWindow.sessionStorage.setItem(ROUTE_CHUNK_RELOAD_KEY, target);
+    browserWindow.sessionStorage.setItem(
+      ROUTE_CHUNK_RELOAD_KEY,
+      stringifyReloadRecord({
+        schemaVersion: ROUTE_CHUNK_RELOAD_RECORD_VERSION,
+        buildId,
+        target,
+      }),
+    );
   } catch {
     // Storage can be unavailable in constrained browser profiles; a single reload is still the safest recovery.
   }
