@@ -85,11 +85,14 @@ type RouteLocationLike = {
 
 type ConfigSummaryWithThemeBackground = ConfigSummary & {
   themeBackgroundImageUrl?: unknown;
+  themeBackgroundReadability?: unknown;
 };
 
 type WorkbenchShellStyle = CSSProperties & {
   "--workbench-theme-background-image"?: string;
 };
+
+type ThemeBackgroundReadability = "soft" | "standard" | "strong";
 
 function configThemeBackgroundImageUrl(summary: ConfigSummary | undefined): string {
   const value = (summary as ConfigSummaryWithThemeBackground | undefined)?.themeBackgroundImageUrl;
@@ -98,6 +101,20 @@ function configThemeBackgroundImageUrl(summary: ConfigSummary | undefined): stri
     return "";
   }
   return url;
+}
+
+function configThemeBackgroundReadability(
+  summary: ConfigSummary | undefined,
+  hasBackgroundImage: boolean,
+): ThemeBackgroundReadability {
+  if (!hasBackgroundImage) {
+    return "standard";
+  }
+  const value = (summary as ConfigSummaryWithThemeBackground | undefined)?.themeBackgroundReadability;
+  if (value === "soft" || value === "standard" || value === "strong") {
+    return value;
+  }
+  return "standard";
 }
 
 export function routeLocationKey(location: RouteLocationLike): string {
@@ -479,6 +496,10 @@ export function AppShell() {
     queryFn: () => fetchJson<ConfigSummary>("/api/config/public"),
   });
   const themeBackgroundImageUrl = configThemeBackgroundImageUrl(configQuery.data);
+  const themeBackgroundReadability = configThemeBackgroundReadability(
+    configQuery.data,
+    Boolean(themeBackgroundImageUrl),
+  );
   const shellStyle = useMemo<WorkbenchShellStyle | undefined>(
     () =>
       themeBackgroundImageUrl
@@ -1829,6 +1850,7 @@ export function AppShell() {
       className={styles.shell}
       data-theme={theme}
       data-theme-background={themeBackgroundImageUrl ? "custom" : "default"}
+      data-theme-background-readability={themeBackgroundImageUrl ? themeBackgroundReadability : undefined}
       data-shell="workbench"
       data-browser-role="workbench"
       style={shellStyle}
