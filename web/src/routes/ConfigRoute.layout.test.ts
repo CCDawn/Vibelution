@@ -75,12 +75,18 @@ describe("ConfigRoute layout contract", () => {
 
   it("keeps workbench background image settings separate from avatar cropping", () => {
     expect(routeSource).toContain("themeBackgroundImagePreviewUrl");
+    expect(routeSource).toContain("renderThemeBackgroundControl");
+    expect(routeSource).toContain("uploadThemeBackgroundFile");
+    expect(routeSource).toContain("isCompactConfigObjectPath");
+    expect(routeSource).toContain('path === "ui.workbench_theme"');
     expect(routeSource).toContain('kind === "background_image"');
     expect(routeSource).toContain("/api/config/theme-background-image");
     expect(routeSource).toContain("onThemeBackgroundImageUpload");
     expect(routeSource).toContain("copy.uploadThemeBackgroundImage");
     expect(routeSource).toContain("copy.clearThemeBackgroundImage");
+    expect(stylesSource).toContain(".themeBackgroundDropButton");
     expect(stylesSource).toContain(".themeBackgroundImagePreview");
-    expect(stylesSource).toContain("aspect-ratio: 16 / 7");
+    expect(stylesSource).toContain("aspect-ratio: 16 / 8");
+    expect(stylesSource).toContain("grid-template-columns: minmax(112px, 150px) minmax(0, 1fr)");
   });
 });
