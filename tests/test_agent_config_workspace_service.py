@@ -1,7 +1,9 @@
 import json
 from types import SimpleNamespace
 
+import config as config_package
 from fastapi.testclient import TestClient
+from config import ProviderConfig
 
 from core.web.app import create_app
 from core.web.control import CONTROL_TOKEN_HEADER, get_control_token
@@ -79,7 +81,8 @@ def _fake_config_workspace():
             {
                 "model_id": "model-research",
                 "source": "model",
-                "provider": {"id": "relay"},
+                "provider": {"id": "relay", "context_window": 64000},
+                "contextWindow": 64000,
                 "provider_kind": "relay",
                 "model": "research-test",
                 "label": "Research Test",
@@ -499,6 +502,38 @@ def test_agent_config_workspace_reports_missing_model_key_and_prompt(tmp_path, m
     assert "model-research" in model_option_ids
     assert "model-primary" in agent_model_choice_ids
     assert "model-research" in agent_model_choice_ids
+    research_choice = next(item for item in payload["agentModelChoices"] if item["modelId"] == "model-research")
+    assert research_choice["contextWindow"] == 64000
+
+
+def test_agent_api_effective_compression_uses_dialogue_model_context_window(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    cfg = config_package.get_config().model_copy(deep=True)
+    cfg.context_compression.max_token_limit = 32768
+    cfg.llm.providers["window-test-provider"] = ProviderConfig(
+        provider_id="window-test-provider",
+        kind="openai",
+        api_key_env="WINDOW_TEST_API_KEY",
+        base_url="https://example.test/v1",
+        context_window=900000,
+    )
+    cfg.llm.model_library["window-test-model"] = {
+        "provider_id": "window-test-provider",
+        "model": "window-test",
+        "label": "Window Test",
+    }
+    monkeypatch.setattr(config_package, "get_config", lambda: cfg)
+
+    agent = agent_directory_service.create_agent_instance(
+        display_name="窗口 Agent",
+        llm_bindings={"dialogue": {"modelId": "window-test-model"}},
+    )
+
+    payload = agent_directory_service._agent_to_api_summary(agent)
+    policy = payload["contextCompressionEffectivePolicy"]
+    assert policy["maxTokenLimit"] == 32768
+    assert policy["effectiveTokenLimit"] == 32768
+    assert policy["contextWindowLimit"] == 900000
 
 
 def test_agent_instance_generates_public_person_name_and_keeps_functional_name(tmp_path, monkeypatch):

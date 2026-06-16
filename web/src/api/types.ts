@@ -3164,6 +3164,7 @@ export type AgentModelChoice = {
   modelId: string;
   label: string;
   model: string;
+  contextWindow?: number;
   providerKind: string;
   providerBaseUrl: string;
   source: string;
@@ -5878,6 +5879,7 @@ export type ConfigModelOption = {
   model_id: string;
   source: string;
   provider: Record<string, unknown>;
+  contextWindow?: number;
   provider_kind: string;
   provider_api?: string;
   model: string;
