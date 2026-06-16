@@ -2357,6 +2357,20 @@
   white-space: nowrap;
 }
 
+.sourceCollectionSourceDetailNotice {
+  display: inline-flex;
+  min-height: 26px;
+  align-items: center;
+  border: 1px solid color-mix(in srgb, var(--accent-warm) 34%, var(--border-soft));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent-warm) 8%, var(--surface-card));
+  color: var(--fg-secondary);
+  font-size: 0.64rem;
+  font-weight: 760;
+  line-height: 1.2;
+  padding: 4px 8px;
+}
+
 .sourceCollectionSourceDetailActions a:hover,
 .sourceCollectionSourceDetailActions button:hover:not(:disabled) {
   border-color: color-mix(in srgb, var(--accent-cool) 54%, var(--border-strong));
@@ -2366,6 +2380,68 @@
 .sourceCollectionSourceDetailActions button:disabled {
   cursor: not-allowed;
   opacity: 0.58;
+}
+
+.sourceCollectionSearchEvidence {
+  border: 1px solid color-mix(in srgb, var(--accent-cool) 18%, var(--border-soft));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface-panel) 72%, transparent);
+  padding: 0;
+}
+
+.sourceCollectionSearchEvidence summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--fg-secondary);
+  cursor: pointer;
+  font-size: 0.64rem;
+  font-weight: 820;
+  list-style: none;
+  padding: 6px 8px;
+}
+
+.sourceCollectionSearchEvidence summary::-webkit-details-marker {
+  display: none;
+}
+
+.sourceCollectionSearchEvidenceBody {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 5px;
+  min-width: 0;
+  border-top: 1px solid color-mix(in srgb, var(--border-soft) 72%, transparent);
+  padding: 6px 8px 8px;
+}
+
+.sourceCollectionSearchEvidenceBody span {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.sourceCollectionSearchEvidenceBody b {
+  color: var(--fg-muted);
+  font-size: 0.58rem;
+  font-weight: 780;
+}
+
+.sourceCollectionSearchEvidenceBody code,
+.sourceCollectionSearchEvidenceBody a {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg-primary);
+  font-size: 0.64rem;
+  font-weight: 760;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sourceCollectionSearchEvidenceBody a {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  text-decoration: none;
 }
 
 .sourceCollectionSourceDetailFacts {
