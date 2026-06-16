@@ -2085,6 +2085,72 @@
   flex-wrap: wrap;
 }
 
+.themeBackgroundPresetPanel {
+  display: grid;
+  gap: 7px;
+}
+
+.themeBackgroundPresetPanel > span {
+  color: var(--fg-tertiary);
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0;
+}
+
+.themeBackgroundPresetGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
+  gap: 7px;
+}
+
+.themeBackgroundPresetButton {
+  display: grid;
+  grid-template-rows: minmax(44px, 0.72fr) auto;
+  gap: 5px;
+  min-width: 0;
+  min-height: 0;
+  padding: 5px;
+  border: 1px solid var(--border-hairline);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--surface-card) 82%, transparent);
+  color: var(--fg-secondary);
+  cursor: pointer;
+  text-align: left;
+}
+
+.themeBackgroundPresetButton:hover {
+  border-color: color-mix(in srgb, var(--accent-warm) 36%, var(--border-hairline));
+  background: color-mix(in srgb, var(--accent-warm) 9%, var(--surface-card));
+}
+
+.themeBackgroundPresetButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.themeBackgroundPresetButton[data-active="true"] {
+  border-color: color-mix(in srgb, var(--accent-warm) 62%, var(--border-strong));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent-warm) 28%, transparent);
+}
+
+.themeBackgroundPresetButton img {
+  width: 100%;
+  height: 44px;
+  border-radius: 4px;
+  object-fit: cover;
+}
+
+.themeBackgroundPresetButton > span {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg-secondary);
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .avatarImageActions {
   display: flex;
   align-items: center;

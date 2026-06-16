@@ -5,6 +5,8 @@ from __future__ import annotations
 import copy
 from typing import Any
 
+from .theme_background_service import list_default_theme_background_options
+
 
 RUNTIME_PROFILE_OPTIONS = ["safe_local", "safe_remote", "debug", "ci"]
 SEGMENTATION_STRATEGY_OPTIONS = ["task_contiguous"]
@@ -420,6 +422,8 @@ def _field_options(path: str, lang: str) -> list[dict[str, str]]:
             {"value": value, "label": labels.get(lang, labels["en"]).get(value, value)}
             for value in WORKBENCH_BACKGROUND_READABILITY_OPTIONS
         ]
+    if path == "ui.workbench_theme.background_image_path":
+        return list_default_theme_background_options(lang)
     if path == "evolution.chat_dataset.segmentation_strategy":
         return [{"value": value, "label": value} for value in SEGMENTATION_STRATEGY_OPTIONS]
     return []

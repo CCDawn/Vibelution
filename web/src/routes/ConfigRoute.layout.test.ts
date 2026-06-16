@@ -84,8 +84,13 @@ describe("ConfigRoute layout contract", () => {
     expect(routeSource).toContain("onThemeBackgroundImageUpload");
     expect(routeSource).toContain("copy.uploadThemeBackgroundImage");
     expect(routeSource).toContain("copy.clearThemeBackgroundImage");
+    expect(routeSource).toContain("copy.themeBackgroundPresetTitle");
+    expect(routeSource).toContain("themeBackgroundPresetButton");
+    expect(routeSource).toContain("aria-pressed={active}");
     expect(stylesSource).toContain(".themeBackgroundDropButton");
     expect(stylesSource).toContain(".themeBackgroundImagePreview");
+    expect(stylesSource).toContain(".themeBackgroundPresetGrid");
+    expect(stylesSource).toContain(".themeBackgroundPresetButton[data-active=\"true\"]");
     expect(stylesSource).toContain("aspect-ratio: 16 / 8");
     expect(stylesSource).toContain("grid-template-columns: minmax(112px, 150px) minmax(0, 1fr)");
   });
