@@ -1613,9 +1613,9 @@ class SelfEvolvingAgent:
     def _seeded_history_tool_result_content(name: str, entry: Dict[str, Any]) -> str:
         status = str(entry.get("status") or "").strip()
         result = (
-            entry.get("resultPreview")
+            entry.get("result")
+            or entry.get("resultPreview")
             or entry.get("result_preview")
-            or entry.get("result")
             or entry.get("summary")
             or entry.get("error")
             or ""

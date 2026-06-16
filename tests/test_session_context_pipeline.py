@@ -11,6 +11,16 @@ from core.chat.history_ledger import (
     build_history_events,
     search_history_events,
 )
+from core.chat.turn_journal import (
+    EVENT_ASSISTANT_PARTIAL,
+    EVENT_TOOL_RESULT,
+    EVENT_TURN_INTERRUPTED,
+    EVENT_TURN_STARTED,
+    EVENT_USER_MESSAGE,
+    TURN_INTERRUPTED_MARKER,
+    append_turn_event,
+    load_turn_events,
+)
 from core.ui.chat_state import build_chat_state, save_chat_state
 from core.web.services import session_service
 from tools import conversation_history_tools
@@ -87,6 +97,58 @@ def test_context_assembler_keeps_recent_tool_results_complete_for_model_input():
     assert tool_call["result"] == full_result
     assert "resultPreview" not in tool_call
     assert "terminal-line\n" * 20 in tool_call["result"]
+
+
+def test_context_assembler_replays_turn_journal_over_message_tail(tmp_path):
+    full_result = "journal-result-line\n" * 80
+    append_turn_event(tmp_path, "session-journal", "turn-a", EVENT_TURN_STARTED, status="running")
+    append_turn_event(
+        tmp_path,
+        "session-journal",
+        "turn-a",
+        EVENT_USER_MESSAGE,
+        status="recorded",
+        payload={"content": "继续刚才中断的修复"},
+    )
+    append_turn_event(
+        tmp_path,
+        "session-journal",
+        "turn-a",
+        EVENT_TOOL_RESULT,
+        status="done",
+        payload={"toolCall": {"name": "cli_tool", "status": "done", "result": full_result}},
+    )
+    append_turn_event(
+        tmp_path,
+        "session-journal",
+        "turn-a",
+        EVENT_ASSISTANT_PARTIAL,
+        status="running",
+        payload={"content": "已经完成一半实现。"},
+    )
+    append_turn_event(
+        tmp_path,
+        "session-journal",
+        "turn-a",
+        EVENT_TURN_INTERRUPTED,
+        status="interrupted",
+        payload={"reason": "process_restarted", "marker": TURN_INTERRUPTED_MARKER},
+    )
+
+    assembled = assemble_conversation_context(
+        [{"role": "user", "content": "旧 messages 不应作为事实源"}],
+        session_id="session-journal",
+        journal_events=load_turn_events(tmp_path, "session-journal"),
+        recent_message_limit=8,
+    )
+
+    contents = [str(item.get("content") or "") for item in assembled.history_messages]
+    assert "旧 messages 不应作为事实源" not in contents
+    assert "继续刚才中断的修复" in contents
+    assert "已经完成一半实现。" in contents
+    assert any(TURN_INTERRUPTED_MARKER in content for content in contents)
+    tool_message = next(item for item in assembled.history_messages if item.get("toolCalls"))
+    assert tool_message["toolCalls"][0]["result"] == full_result
 
 
 def test_context_assembler_uses_checkpoint_as_navigation_not_replacing_history():

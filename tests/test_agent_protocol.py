@@ -189,6 +189,7 @@ class TestToolMessageFlow:
                             "name": "cli_tool",
                             "arguments": {"command": "python -m pytest"},
                             "status": "failed",
+                            "result": "完整工具结果：pytest 输出了 200 行失败日志。",
                             "resultPreview": "Windows detected Unix shell fragment.",
                         }
                     ],
@@ -207,7 +208,8 @@ class TestToolMessageFlow:
         assert ai_tool_messages
         assert ai_tool_messages[0].tool_calls[0]["name"] == "cli_tool"
         assert tool_messages
-        assert "Windows detected Unix shell fragment" in tool_messages[0].content
+        assert "完整工具结果" in tool_messages[0].content
+        assert "Windows detected Unix shell fragment" not in tool_messages[0].content
         assert any(isinstance(message, AIMessage) and message.content == "运行相关测试验证修改：" for message in restored)
 
     def test_chat_state_normalization_preserves_camel_case_tool_calls(self):

@@ -15,6 +15,7 @@ from .history_ledger import (
     build_history_events,
     latest_checkpoint,
 )
+from .turn_journal import TurnJournalEvent, model_visible_messages_from_events
 
 
 DEFAULT_RECENT_MESSAGE_LIMIT = 8
@@ -79,10 +80,14 @@ def assemble_conversation_context(
     session_id: str = "",
     recent_message_limit: int = DEFAULT_RECENT_MESSAGE_LIMIT,
     retrieved_events: Iterable[HistoryEvent] | None = None,
+    journal_events: Iterable[TurnJournalEvent] | None = None,
 ) -> ContextAssemblyResult:
     """Return the bounded history view used to seed an agent turn."""
 
     normalized_messages = [dict(item) for item in list(messages or []) if isinstance(item, dict)]
+    journal_messages = model_visible_messages_from_events(list(journal_events or []))
+    if journal_messages:
+        normalized_messages = journal_messages
     events = build_history_events(normalized_messages, session_id=session_id)
     bounded_recent_limit = max(1, min(int(recent_message_limit or DEFAULT_RECENT_MESSAGE_LIMIT), 40))
     recent_start_index = max(0, len(normalized_messages) - bounded_recent_limit)
@@ -112,12 +117,23 @@ def assemble_conversation_context(
         ContextSegment(
             key="history_tail",
             label="history tail",
-            source="conversation_history_assembler",
+            source="turn_journal" if journal_messages else "conversation_history_assembler",
             item_count=len(recent_raw_messages),
             chars=_message_chars(recent_messages),
             cache_policy="dynamic",
         ),
     ]
+    if journal_messages:
+        segments.append(
+            ContextSegment(
+                key="turn_journal",
+                label="turn journal replay",
+                source="turn_journal",
+                item_count=len(journal_messages),
+                chars=_message_chars(journal_messages),
+                cache_policy="dynamic",
+            )
+        )
     if checkpoint is not None:
         segments.append(
             ContextSegment(
