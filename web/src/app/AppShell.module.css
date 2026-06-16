@@ -31,9 +31,9 @@
 }
 
 .shell[data-theme-background="custom"] {
-  --theme-background-overlay-start: rgba(7, 10, 16, 0.74);
-  --theme-background-overlay-mid: rgba(7, 10, 16, 0.64);
-  --theme-background-overlay-end: rgba(6, 8, 13, 0.84);
+  --theme-background-overlay-start: rgba(7, 10, 16, 0.56);
+  --theme-background-overlay-mid: rgba(7, 10, 16, 0.44);
+  --theme-background-overlay-end: rgba(6, 8, 13, 0.68);
   --theme-background-star-opacity: 0.2;
   --theme-background-blur: 1px;
   --shell-surface-muted: rgba(15, 18, 24, 0.82);
@@ -56,9 +56,9 @@
 }
 
 .shell[data-theme-background="custom"][data-theme-background-readability="soft"] {
-  --theme-background-overlay-start: rgba(7, 10, 16, 0.58);
-  --theme-background-overlay-mid: rgba(7, 10, 16, 0.44);
-  --theme-background-overlay-end: rgba(6, 8, 13, 0.68);
+  --theme-background-overlay-start: rgba(7, 10, 16, 0.38);
+  --theme-background-overlay-mid: rgba(7, 10, 16, 0.26);
+  --theme-background-overlay-end: rgba(6, 8, 13, 0.5);
   --theme-background-star-opacity: 0.24;
   --theme-background-blur: 0px;
   --shell-surface-muted: rgba(15, 18, 24, 0.72);
@@ -68,17 +68,17 @@
 }
 
 .shell[data-theme-background="custom"][data-theme-background-readability="standard"] {
-  --theme-background-overlay-start: rgba(7, 10, 16, 0.74);
-  --theme-background-overlay-mid: rgba(7, 10, 16, 0.64);
-  --theme-background-overlay-end: rgba(6, 8, 13, 0.84);
+  --theme-background-overlay-start: rgba(7, 10, 16, 0.56);
+  --theme-background-overlay-mid: rgba(7, 10, 16, 0.44);
+  --theme-background-overlay-end: rgba(6, 8, 13, 0.68);
   --theme-background-star-opacity: 0.2;
   --theme-background-blur: 1px;
 }
 
 .shell[data-theme-background="custom"][data-theme-background-readability="strong"] {
-  --theme-background-overlay-start: rgba(7, 10, 16, 0.86);
-  --theme-background-overlay-mid: rgba(7, 10, 16, 0.78);
-  --theme-background-overlay-end: rgba(6, 8, 13, 0.9);
+  --theme-background-overlay-start: rgba(7, 10, 16, 0.74);
+  --theme-background-overlay-mid: rgba(7, 10, 16, 0.62);
+  --theme-background-overlay-end: rgba(6, 8, 13, 0.82);
   --theme-background-star-opacity: 0.14;
   --theme-background-blur: 2px;
   --shell-surface-muted: rgba(15, 18, 24, 0.9);
@@ -161,9 +161,9 @@
 }
 
 .shell[data-theme="light"][data-theme-background="custom"] {
-  --theme-background-overlay-start: rgba(255, 255, 255, 0.72);
-  --theme-background-overlay-mid: rgba(255, 255, 255, 0.62);
-  --theme-background-overlay-end: rgba(247, 247, 248, 0.86);
+  --theme-background-overlay-start: rgba(255, 255, 255, 0.44);
+  --theme-background-overlay-mid: rgba(255, 255, 255, 0.3);
+  --theme-background-overlay-end: rgba(247, 247, 248, 0.58);
   --theme-background-star-opacity: 0.18;
   --theme-background-blur: 1px;
   --shell-surface-muted: rgba(255, 255, 255, 0.86);
@@ -186,9 +186,9 @@
 }
 
 .shell[data-theme="light"][data-theme-background="custom"][data-theme-background-readability="soft"] {
-  --theme-background-overlay-start: rgba(255, 255, 255, 0.54);
-  --theme-background-overlay-mid: rgba(255, 255, 255, 0.38);
-  --theme-background-overlay-end: rgba(247, 247, 248, 0.7);
+  --theme-background-overlay-start: rgba(255, 255, 255, 0.24);
+  --theme-background-overlay-mid: rgba(255, 255, 255, 0.16);
+  --theme-background-overlay-end: rgba(247, 247, 248, 0.42);
   --theme-background-star-opacity: 0.22;
   --theme-background-blur: 0px;
   --shell-surface-muted: rgba(255, 255, 255, 0.72);
@@ -198,9 +198,9 @@
 }
 
 .shell[data-theme="light"][data-theme-background="custom"][data-theme-background-readability="strong"] {
-  --theme-background-overlay-start: rgba(255, 255, 255, 0.84);
-  --theme-background-overlay-mid: rgba(255, 255, 255, 0.76);
-  --theme-background-overlay-end: rgba(247, 247, 248, 0.92);
+  --theme-background-overlay-start: rgba(255, 255, 255, 0.68);
+  --theme-background-overlay-mid: rgba(255, 255, 255, 0.56);
+  --theme-background-overlay-end: rgba(247, 247, 248, 0.78);
   --theme-background-star-opacity: 0.12;
   --theme-background-blur: 2px;
   --shell-surface-muted: rgba(255, 255, 255, 0.92);
