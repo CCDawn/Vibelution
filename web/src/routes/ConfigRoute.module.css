@@ -1960,7 +1960,9 @@
 }
 
 .themeBackgroundImageCard {
-  grid-template-columns: minmax(156px, 0.36fr) minmax(0, 1fr);
+  grid-template-columns: 1fr;
+  align-content: start;
+  min-height: 0;
 }
 
 .avatarImageValue {
@@ -1975,9 +1977,9 @@
 
 .themeBackgroundImageValue {
   display: grid;
-  grid-template-columns: minmax(144px, 220px) minmax(0, 1fr);
+  grid-template-columns: minmax(112px, 150px) minmax(0, 1fr);
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   min-width: 0;
   color: var(--fg-secondary);
   font-size: 0.84rem;
@@ -2007,10 +2009,10 @@
 .themeBackgroundImagePreview,
 .themeBackgroundImagePlaceholder {
   width: 100%;
-  aspect-ratio: 16 / 7;
-  min-height: 64px;
+  aspect-ratio: 16 / 8;
+  min-height: 54px;
   border: 1px solid var(--border-hairline);
-  border-radius: 7px;
+  border-radius: 6px;
   background: var(--surface-card);
 }
 
@@ -2024,6 +2026,27 @@
   color: var(--fg-tertiary);
 }
 
+.themeBackgroundDropButton {
+  position: relative;
+  display: block;
+  min-width: 0;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.themeBackgroundDropButton:hover .themeBackgroundImagePreview,
+.themeBackgroundDropButton:hover .themeBackgroundImagePlaceholder {
+  border-color: color-mix(in srgb, var(--accent-warm) 34%, var(--border-hairline));
+  background: color-mix(in srgb, var(--accent-warm) 9%, var(--surface-card));
+}
+
+.themeBackgroundDropButton input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
 .avatarImageEditor {
   display: grid;
   gap: 10px;
@@ -2031,7 +2054,35 @@
 
 .themeBackgroundImageEditor {
   display: grid;
-  gap: 10px;
+  gap: 7px;
+}
+
+.themeBackgroundImageMeta {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.themeBackgroundImageMeta strong {
+  color: var(--fg-primary);
+  font-size: 0.84rem;
+}
+
+.themeBackgroundImageMeta > span {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg-tertiary);
+  font-family: var(--font-mono);
+  font-size: 0.76rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.themeBackgroundImageActions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
 }
 
 .avatarImageActions {
@@ -2445,6 +2496,10 @@
   .treeFieldCardView .treeFieldValue {
     grid-column: 1;
     grid-row: auto;
+  }
+
+  .themeBackgroundImageValue {
+    grid-template-columns: 1fr;
   }
 
   .applyBar {
