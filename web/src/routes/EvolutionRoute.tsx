@@ -156,6 +156,7 @@ const LIBRARY_STATUS_FILTERS: LibraryStatusFilter[] = [
 const EMPTY_RUNS: EvolutionRun[] = [];
 const EMPTY_LIBRARY_ENTRIES: EvolutionLibraryEntry[] = [];
 const EMPTY_WORKTREE_RUNS: SupervisedWorktreeRun[] = [];
+const EMPTY_AGENT_BINDINGS: Record<string, EvolutionActiveRunAgentBinding> = {};
 const EVOLUTION_RUNS_QUEUE_WIDTH_KEY = "vibelution.evolution.runs-queue-width";
 const EVOLUTION_RUNS_QUEUE_BOUNDS = { min: 300, max: 520 };
 const EVOLUTION_RUNS_QUEUE_DEFAULT_WIDTH = 380;
@@ -305,7 +306,8 @@ function supervisedMemberModelLabel(
   binding: EvolutionActiveRunAgentBinding | undefined,
   resolveModelLabel?: (modelId: string) => string | undefined,
 ) {
-  return modelDisplayLabel(supervisedMemberModelId(binding), resolveModelLabel) || "--";
+  const bindingLabel = String(binding?.dialogueModelLabel || binding?.dialogueModelName || "").trim();
+  return bindingLabel || modelDisplayLabel(supervisedMemberModelId(binding), resolveModelLabel) || "--";
 }
 
 function supervisedMemberAgentManagementRoute(agentId: string, returnTo: string) {
@@ -729,8 +731,8 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   const startRunMutation = useMutation({
     onMutate: () => {
       const placeholderAgentBindings = activeRunSnapshot?.agentBindings
-        ?? latestSupervisedRunSnapshot?.agentBindings
-        ?? {};
+        ?? workspaceSnapshot?.currentAgentBindings
+        ?? EMPTY_AGENT_BINDINGS;
       setSupervisedStartCommand(null);
       setActionFeedback(lang === "zh" ? "启动请求已提交，正在等待运行记录刷新。" : "Start request submitted; waiting for the run record to refresh.");
       setLiveActiveRun(buildSupervisedStartPlaceholder({
@@ -1060,6 +1062,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   const workbenchState = overview?.workbench ?? workbenchControl?.savedState;
   const activeRunSnapshot = selectRunSnapshotWithRunId(workspaceSnapshot?.activeRun);
   const latestSupervisedRunSnapshot = selectRunSnapshotWithRunId(workspaceSnapshot?.latestRun);
+  const currentSupervisedAgentBindings = workspaceSnapshot?.currentAgentBindings ?? EMPTY_AGENT_BINDINGS;
   const activeWorktreeRun = workspaceSnapshot?.worktreeActiveRun ?? null;
   const worktreeRuns = workspaceSnapshot?.worktreeRuns ?? EMPTY_WORKTREE_RUNS;
   const reviewCandidateWorktree = activeWorktreeRun ?? worktreeRuns[0] ?? null;
@@ -1100,11 +1103,12 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     : null;
   const monitoredRun = effectiveActiveRunSnapshot
     ?? visibleLiveRunSnapshot;
-  const supervisedMembersRun = monitoredRun
-    ?? latestSupervisedRunSnapshot;
-  const supervisedMembersBindingRun = hasSupervisedAgentBindings(supervisedMembersRun?.agentBindings)
-    ? supervisedMembersRun
-    : latestSupervisedRunSnapshot;
+  const supervisedMembersRun = monitoredRun;
+  const supervisedMembersUseRunBindings = hasSupervisedAgentBindings(supervisedMembersRun?.agentBindings);
+  const supervisedMembersBindings = supervisedMembersUseRunBindings
+    ? supervisedMembersRun?.agentBindings ?? EMPTY_AGENT_BINDINGS
+    : currentSupervisedAgentBindings;
+  const supervisedMembersSource = supervisedMembersUseRunBindings ? "run" : "current_config";
   const runningRun = effectiveActiveRunSnapshot ?? (liveActiveRun && isLiveSupervisedRunStatus(liveActiveRun.status)
     ? liveActiveRun
     : null);
@@ -1164,7 +1168,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     : statusLabel(monitoredRun?.status || "");
   const supervisedMemberReturnTo = `${location.pathname}${location.search}` || "/supervised-evolution";
   const supervisedRunMembers = useMemo<SupervisedRunMember[]>(() => {
-    const bindings = supervisedMembersBindingRun?.agentBindings ?? {};
+    const bindings = supervisedMembersBindings;
     const currentRole = String(supervisedMembersRun?.currentRole || "").trim().toLowerCase();
     const currentAgentId = String(supervisedMembersRun?.currentAgentBinding?.agentId || "").trim();
     return SUPERVISED_MEMBER_ROLES.map((role) => {
@@ -1186,13 +1190,18 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
         status: isActive ? "active" : agentId ? "configured" : "missing",
       };
     });
-  }, [lang, resolveModelLabel, supervisedMembersBindingRun?.agentBindings, supervisedMembersRun?.currentAgentBinding?.agentId, supervisedMembersRun?.currentRole]);
+  }, [lang, resolveModelLabel, supervisedMembersBindings, supervisedMembersRun?.currentAgentBinding?.agentId, supervisedMembersRun?.currentRole]);
   const latestRunStatusLabel = latestRun?.decision
     ? displayDecisionLabel(latestRun.decision)
     : statusLabel(latestRun?.status || "");
   const supervisedMembersRunStatusLabel = supervisedMembersRun?.decision === "INCONCLUSIVE"
     ? displayDecisionLabel(supervisedMembersRun.decision)
     : statusLabel(supervisedMembersRun?.status || "");
+  const supervisedMembersIdleStatusLabel = workspaceSnapshot?.currentAgentBindingStatus === "error"
+    ? lang === "zh" ? "配置异常" : "Config issue"
+    : workspaceSnapshot?.currentAgentBindingStatus === "partial"
+      ? lang === "zh" ? "待完善" : "Partial"
+      : lang === "zh" ? "当前配置" : "Current config";
   const monitoredControlSummary = monitoredRun
     ? buildSupervisedRunControlSummary(monitoredRun, lang, {
       statusLabel,
@@ -1610,7 +1619,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
         ...current,
         agentBindings: hasSupervisedAgentBindings(current.agentBindings)
           ? current.agentBindings
-          : latestSupervisedRunSnapshot?.agentBindings ?? {},
+          : currentSupervisedAgentBindings,
         status: "failed",
         currentPhase: "failed",
         runtimeStatus: "failed",
@@ -1644,8 +1653,8 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     void evolutionWorkspaceCache.refreshSupervisedActiveRun();
   }, [
     evolutionWorkspaceCache,
+    currentSupervisedAgentBindings,
     lang,
-    latestSupervisedRunSnapshot?.agentBindings,
     supervisedStartCommand,
     supervisedStartCommandStatusQuery.data,
   ]);
@@ -2869,11 +2878,13 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
             <div className={`${styles.surface} ${styles.supervisedMembersPanel}`}>
               <div className={styles.supervisedMembersHeader}>
                 <div>
-                  <p className={styles.eyebrow}>{lang === "zh" ? "运行成员" : "Run members"}</p>
+                  <p className={styles.eyebrow}>
+                    {supervisedMembersSource === "run" ? lang === "zh" ? "运行成员" : "Run members" : lang === "zh" ? "当前配置" : "Current config"}
+                  </p>
                   <h2 className={styles.sectionTitle}>{lang === "zh" ? "监督成员" : "Supervised members"}</h2>
                 </div>
                 <span className={styles.secondaryPill}>
-                  {supervisedMembersRun ? supervisedMembersRunStatusLabel : lang === "zh" ? "等待启动" : "Waiting"}
+                  {supervisedMembersRun ? supervisedMembersRunStatusLabel : supervisedMembersIdleStatusLabel}
                 </span>
               </div>
               <div className={styles.supervisedMembersList}>
@@ -2918,7 +2929,9 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
               </div>
               {!supervisedMembersRun ? (
                 <p className={styles.noticeTextCompact}>
-                  {lang === "zh" ? "启动监督运行后，这里会显示本轮实际绑定的 Agent 和模型。" : "Start a supervised run to show the bound agents and models for that run."}
+                  {supervisedMembersSource === "current_config"
+                    ? lang === "zh" ? "当前 Agent 配置；启动后锁定为本轮绑定。" : "Current Agent config; a run locks its own bindings after start."
+                    : ""}
                 </p>
               ) : null}
             </div>

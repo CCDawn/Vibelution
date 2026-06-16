@@ -80,7 +80,10 @@ from core.web.services.supervised_control_service import (
     start_supervised_run,
     stream_active_supervised_run_events,
 )
-from core.web.services.supervised_agent_service import SupervisedAgentBindingError
+from core.web.services.supervised_agent_service import (
+    SupervisedAgentBindingError,
+    current_supervised_agent_bindings_snapshot,
+)
 from core.web.services.supervised_worktree_evolution_service import (
     SupervisedWorktreeRunActionError,
     SupervisedWorktreeRunBusyError,
@@ -210,6 +213,17 @@ def evolution_workspace_snapshot(includeSelf: bool = False) -> dict:
     )
     active_run = workbench.get("activeRun") if isinstance(workbench, dict) else None
     latest_run = timed("latest_run", lambda: get_latest_supervised_run(active_run=active_run, active_run_loaded=True))
+    current_agent_bindings = timed("current_agent_bindings", current_supervised_agent_bindings_snapshot)
+    if isinstance(current_agent_bindings, dict):
+        current_agent_binding_payload = current_agent_bindings.get("agentBindings") or {}
+        current_agent_binding_source = current_agent_bindings.get("bindingSource") or ""
+        current_agent_binding_status = current_agent_bindings.get("status") or "error"
+        current_agent_binding_issues = current_agent_bindings.get("issues") or []
+    else:
+        current_agent_binding_payload = {}
+        current_agent_binding_source = ""
+        current_agent_binding_status = "error"
+        current_agent_binding_issues = []
     self_overview = timed(
         "self_overview",
         get_self_evolution_overview if includeSelf else get_self_evolution_light_overview,
@@ -225,6 +239,10 @@ def evolution_workspace_snapshot(includeSelf: bool = False) -> dict:
         "workbench": workbench,
         "activeRun": active_run,
         "latestRun": latest_run,
+        "currentAgentBindings": current_agent_binding_payload,
+        "currentAgentBindingSource": current_agent_binding_source,
+        "currentAgentBindingStatus": current_agent_binding_status,
+        "currentAgentBindingIssues": current_agent_binding_issues,
         "worktreeActiveRun": timed("worktree_active_run", get_active_supervised_worktree_run),
         "worktreeRuns": timed("worktree_runs", list_supervised_worktree_runs),
         "selfOverview": self_overview,
