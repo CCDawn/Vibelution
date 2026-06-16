@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from config import get_config
+from core.infrastructure import developer_sandbox
 from core.evaluation import (
     DEFAULT_SELF_EVOLUTION_GOAL,
     build_self_evolution_snapshot,
@@ -734,6 +735,9 @@ def _audit_log_path(project_root: Path) -> Path:
     raw = Path(str(get_config().evolution.audit_log_path or "workspace/evolution/audit.jsonl"))
     if raw.is_absolute():
         return raw
+    parts = raw.parts
+    if parts and parts[0] == "workspace":
+        return developer_sandbox.seeded_sandbox_workspace_path(project_root, *parts[1:])
     return project_root / raw
 
 

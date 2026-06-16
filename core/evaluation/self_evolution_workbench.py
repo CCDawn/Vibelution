@@ -11,6 +11,7 @@ from typing import Any
 
 from config import get_config
 from core.gym import build_active_advisory_snapshot, summarize_active_advisory_baselines
+from core.infrastructure import developer_sandbox
 from tools.git_tools import (
     explain_current_worktree_tool,
     get_evolution_fitness_tool,
@@ -644,6 +645,9 @@ def _audit_log_path(project_root: Path) -> Path:
     raw = Path(str(get_config().evolution.audit_log_path or "workspace/evolution/audit.jsonl"))
     if raw.is_absolute():
         return raw.resolve()
+    parts = raw.parts
+    if parts and parts[0] == "workspace":
+        return developer_sandbox.seeded_sandbox_workspace_path(Path(project_root).resolve(), *parts[1:]).resolve()
     return (Path(project_root).resolve() / raw).resolve()
 
 
