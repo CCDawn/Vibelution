@@ -11,7 +11,12 @@ import pytest
 
 from core.evaluation.chat_next_state_signals import append_chat_next_state_signal
 from core.chat.slash_commands import parse_skill_slash_command
-from core.chat.turn_journal import EVENT_TURN_INTERRUPTED, EVENT_TURN_STARTED, append_turn_event, load_turn_events
+from core.chat.conversation_ledger import (
+    EVENT_TURN_INTERRUPTED,
+    EVENT_TURN_STARTED,
+    append_conversation_event,
+    load_conversation_events,
+)
 from core.ui.chat_state import load_chat_state, save_chat_state
 from core.runtime_manager import constants as runtime_manager_constants
 from fastapi.testclient import TestClient
@@ -2137,6 +2142,7 @@ def test_session_live_output_publishes_lightweight_assistant_delta_without_detai
     assert event["type"] == "assistant_delta"
     assert event["sessionId"] == "session-live"
     assert event["turnId"] == "turn-running"
+    assert event["ledgerSeq"] >= 2
     assert event["content"] == ""
     assert event["thought"] == ""
     assert event["contentDelta"] == "hello"
@@ -6689,8 +6695,8 @@ def test_stop_session_turn_persists_partial_snapshot_and_allows_immediate_contin
     assert stopped_payload["messages"][-1]["thought"] == "我已经定位到 stop checker。"
     assert stopped_payload["messages"][-1]["toolCalls"][0]["name"] == "read_file_tool"
     assert stopped_payload["messages"][-1]["metadata"]["turnId"] == old_control.turn_id
-    journal_events = load_turn_events(tmp_path, "session-live")
-    assert any(event.event_type == EVENT_TURN_INTERRUPTED and event.turn_id == old_control.turn_id for event in journal_events)
+    ledger_events = load_conversation_events(tmp_path, "session-live")
+    assert any(event.event_type == EVENT_TURN_INTERRUPTED and event.turn_id == old_control.turn_id for event in ledger_events)
 
     continue_response = client.post(
         "/api/sessions/session-live/messages",
@@ -6747,15 +6753,15 @@ def test_stop_session_turn_keeps_old_control_cancel_token_until_worker_observes_
     session_service._clear_session_turn_control("session-live", turn_id=new_control.turn_id)
 
 
-def test_session_detail_reconciles_open_turn_journal_after_restart(tmp_path, monkeypatch):
+def test_session_detail_reconciles_open_conversation_ledger_after_restart(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path, task_status="done")
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
-    append_turn_event(tmp_path, "session-live", "turn-open", EVENT_TURN_STARTED, status="running")
+    append_conversation_event(tmp_path, "session-live", "turn-open", EVENT_TURN_STARTED, status="running")
 
     response = client.get("/api/sessions/session-live")
 
     assert response.status_code == 200
-    events = load_turn_events(tmp_path, "session-live")
+    events = load_conversation_events(tmp_path, "session-live")
     assert any(
         event.event_type == EVENT_TURN_INTERRUPTED
         and event.turn_id == "turn-open"
