@@ -259,8 +259,50 @@
   display: grid;
   gap: 4px;
   min-height: 0;
-  max-height: min(178px, 28vh);
+  max-height: min(118px, 22vh);
   overflow: auto;
+}
+
+.supervisedStepMemberRail {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+  min-width: 0;
+}
+
+.supervisedStepMemberCard {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  min-height: 34px;
+  padding: 5px 7px;
+  border: 1px solid var(--border-hairline);
+  border-radius: 7px;
+  background: var(--surface-panel);
+}
+
+.supervisedStepMemberCardActive {
+  border-color: color-mix(in srgb, var(--accent-cool) 42%, var(--border-soft));
+  background: color-mix(in srgb, var(--accent-cool) 9%, var(--surface-panel));
+}
+
+.supervisedStepMemberCard span,
+.supervisedStepMemberCard strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.supervisedStepMemberCard span {
+  color: var(--fg-secondary);
+  font-size: 0.72rem;
+  font-weight: 650;
+}
+
+.supervisedStepMemberCard strong {
+  color: var(--fg-tertiary);
+  font-size: 0.68rem;
 }
 
 .supervisedMemberRow {

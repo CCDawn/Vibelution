@@ -137,7 +137,7 @@ def test_ensure_supervised_agent_instances_creates_fixed_role_agents_without_ste
     assert state["active_conversation_id"] == "session-user"
 
 
-def test_ensure_supervised_agent_instances_syncs_stale_fixed_role_llm_binding(tmp_path, monkeypatch):
+def test_ensure_supervised_agent_instances_preserves_agent_center_llm_binding(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     monkeypatch.setattr(supervised_agent_service, "_current_config", lambda: _model_config())
     events = []
@@ -166,7 +166,7 @@ def test_ensure_supervised_agent_instances_syncs_stale_fixed_role_llm_binding(tm
     assert repaired["status"] == "active"
     assert repaired["metadata"]["supervisedRoleLabel"] == "监督进化基线 Agent"
     assert repaired["metadata"]["functionalDisplayName"] == "监督进化基线 Agent"
-    assert repaired["llmBindings"]["dialogue"]["modelId"] == "xiaomi_mimo_v2_5_pro_token_plan"
+    assert repaired["llmBindings"]["dialogue"]["modelId"] == "model-primary"
 
 
 def test_ensure_supervised_agent_instances_prefers_xiaomi_when_role_profile_missing(tmp_path, monkeypatch):
@@ -364,8 +364,10 @@ def test_supervised_agent_bindings_follow_mode_binding_slot_replacement(tmp_path
     bindings = supervised_agent_service.supervised_agent_bindings()
 
     assert bindings["baseline"]["agentId"] == replacement["agentId"]
+    assert bindings["baseline"]["dialogueModelId"] == "model-primary"
     assert bindings["baseline"]["displayName"] != "替换基线 Agent"
     assert agent_directory_service.get_agent(replacement["agentId"])["metadata"]["functionalDisplayName"] == "替换基线 Agent"
+    assert agent_directory_service.get_agent(replacement["agentId"])["llmBindings"]["dialogue"]["modelId"] == "model-primary"
 
 
 def test_supervised_agent_bindings_block_archived_slot_replacement(tmp_path, monkeypatch):

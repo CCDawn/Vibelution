@@ -221,9 +221,18 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(stylesSource).toContain(".supervisedRunConsoleGrid");
   });
 
-  it("shows the current supervised run members in the left launch rail", () => {
-    expect(routeSource).toContain("SUPERVISED_MEMBER_ROLES");
-    expect(routeSource).toContain('["baseline", "candidate", "reviewer", "auditor", "judge"]');
+  it("shows supervised members by workflow step in the left launch rail", () => {
+    expect(routeSource).toContain("SUPERVISED_RUN_MEMBER_ROLES");
+    expect(routeSource).toContain('["baseline", "candidate", "judge"]');
+    expect(routeSource).toContain("SUPERVISED_MEMBER_STEPS");
+    expect(routeSource).toContain('{ id: "launch", zh: "启动与现场", en: "Launch", roles: ["baseline", "candidate"] }');
+    expect(routeSource).toContain('{ id: "results", zh: "运行结果", en: "Results", roles: ["baseline", "candidate"] }');
+    expect(routeSource).toContain('{ id: "proposal", zh: "改进提案", en: "Proposal", roles: ["candidate", "judge"] }');
+    expect(routeSource).toContain('{ id: "review", zh: "样本评审", en: "Review", roles: ["judge"] }');
+    expect(routeSource).not.toContain('["baseline", "candidate", "reviewer", "auditor", "judge"]');
+    expect(routeSource).toContain("activeSupervisedMemberStep");
+    expect(routeSource).toContain("supervisedActiveStepMembers");
+    expect(routeSource).toContain("supervisedStepMemberSummaries");
     expect(routeSource).toContain("supervisedRunMembers");
     expect(routeSource).toContain("hasSupervisedAgentBindings");
     expect(routeSource).toContain("currentSupervisedAgentBindings");
@@ -242,8 +251,12 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).toContain("styles.supervisedMemberLink");
     expect(routeSource).toContain("<ArrowUpRight size={13} aria-hidden=\"true\" />");
     expect(routeSource).toContain("styles.supervisedMembersPanel");
-    expect(routeSource).toContain("监督成员");
+    expect(routeSource).toContain("styles.supervisedStepMemberRail");
+    expect(routeSource).toContain("styles.supervisedStepMemberCardActive");
+    expect(routeSource).toContain("监督步骤成员");
     expect(stylesSource).toContain(".supervisedMembersPanel");
+    expect(stylesSource).toContain(".supervisedStepMemberRail");
+    expect(stylesSource).toContain(".supervisedStepMemberCardActive");
     expect(stylesSource).toContain(".supervisedMemberLink");
     expect(stylesSource).toContain(".supervisedMemberRowActive");
   });
@@ -314,7 +327,7 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(middleBreakpoint).not.toContain(".liveLaunchStack > .launchSurface .sourceInventoryBar");
     expect(middleBreakpoint).not.toContain(".liveLaunchStack > .launchSurface .sourceMetaCompact");
     expect(middleBreakpoint).toContain("display: none");
-    expect(stylesSource).toContain("max-height: min(178px, 28vh)");
+    expect(stylesSource).toContain("max-height: min(118px, 22vh)");
     expect(stylesSource).toContain("max-height: min(238px, 34vh)");
     expect(stylesSource).toContain("min-height: 34px");
     expect(stylesSource).not.toContain("min-height: 40px");
