@@ -34,6 +34,7 @@ from .command_queue import (
 from .constants import (
     DAEMON_LOG_BACKUP_COUNT,
     DAEMON_LOG_MAX_BYTES,
+    DAEMON_LOCK_PATH,
     DAEMON_LOOP_INTERVAL_SECONDS,
     DAEMON_STDERR_PATH,
     DAEMON_STDOUT_PATH,
@@ -645,6 +646,72 @@ def _terminate_daemon_process(pid: int) -> None:
         except OSError:
             pass
     clear_pid(pid)
+
+
+def _read_daemon_lock_pid() -> int:
+    try:
+        return int(DAEMON_LOCK_PATH.read_text(encoding="utf-8").strip() or "0")
+    except (OSError, ValueError):
+        return 0
+
+
+def _claim_daemon_ownership(pid: int) -> bool:
+    current_pid = int(pid or 0)
+    try:
+        DAEMON_LOCK_PATH.parent.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        pass
+    existing_pid = load_pid()
+    if existing_pid and existing_pid != current_pid and _is_process_alive(existing_pid):
+        _append_event(
+            "daemon.start_blocked_existing_owner",
+            {"pid": current_pid, "ownerPid": existing_pid, "source": "pid_file"},
+        )
+        return False
+
+    for _attempt in range(2):
+        try:
+            fd = os.open(str(DAEMON_LOCK_PATH), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        except FileExistsError:
+            owner_pid = _read_daemon_lock_pid()
+            if owner_pid == current_pid:
+                save_pid(current_pid)
+                return True
+            if owner_pid and _is_process_alive(owner_pid):
+                _append_event(
+                    "daemon.start_blocked_existing_owner",
+                    {"pid": current_pid, "ownerPid": owner_pid, "source": "lock_file"},
+                )
+                return False
+            try:
+                DAEMON_LOCK_PATH.unlink(missing_ok=True)
+            except OSError:
+                _append_event(
+                    "daemon.start_blocked_existing_owner",
+                    {"pid": current_pid, "ownerPid": owner_pid, "source": "stale_lock_unlink_failed"},
+                )
+                return False
+            continue
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(str(current_pid))
+        save_pid(current_pid)
+        return True
+
+    _append_event(
+        "daemon.start_blocked_existing_owner",
+        {"pid": current_pid, "ownerPid": _read_daemon_lock_pid(), "source": "lock_retry_exhausted"},
+    )
+    return False
+
+
+def _release_daemon_ownership(pid: int) -> None:
+    current_pid = int(pid or 0)
+    if _read_daemon_lock_pid() != current_pid:
+        return
+    try:
+        DAEMON_LOCK_PATH.unlink(missing_ok=True)
+    except OSError:
+        pass
 
 
 def _exit_current_process(exit_code: int = 0) -> None:
@@ -2097,10 +2164,13 @@ def _mark_daemon_not_running_after_exit(*, manager_pid: int) -> None:
 class RuntimeManagerDaemon:
     def __init__(self) -> None:
         self._pid = os.getpid()
+        self._owns_daemon_lock = False
 
     def run_forever(self) -> None:
         ensure_runtime_manager_dirs()
-        save_pid(self._pid)
+        if not _claim_daemon_ownership(self._pid):
+            return
+        self._owns_daemon_lock = True
 
         state = load_state()
         if not isinstance(state, dict):
@@ -2159,6 +2229,8 @@ class RuntimeManagerDaemon:
                 time.sleep(DAEMON_LOOP_INTERVAL_SECONDS)
         finally:
             clear_pid(self._pid)
+            if self._owns_daemon_lock:
+                _release_daemon_ownership(self._pid)
             _mark_daemon_not_running_after_exit(manager_pid=self._pid)
 
     def _handle_command(self, payload: dict[str, Any]) -> dict[str, Any]:
