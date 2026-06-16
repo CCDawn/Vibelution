@@ -1,8 +1,10 @@
 import json
 import sqlite3
 
+import pytest
 from fastapi.testclient import TestClient
 
+from core.infrastructure import developer_sandbox
 from core.web.app import create_app
 from core.web.control import CONTROL_TOKEN_HEADER, get_control_token
 from core.web.services import (
@@ -17,6 +19,42 @@ from core.web.services import (
 
 
 client = TestClient(create_app(), headers={CONTROL_TOKEN_HEADER: get_control_token()})
+
+
+@pytest.fixture(autouse=True)
+def isolate_developer_sandbox_config(tmp_path, monkeypatch):
+    config_path = tmp_path / "developer-mode-off.toml"
+    config_path.write_text("[launcher]\ncontrol_port = 8765\n", encoding="utf-8")
+    project_root = tmp_path / "developer-mode-project"
+    project_root.mkdir()
+    monkeypatch.setattr(developer_sandbox, "CONFIG_PATH", config_path)
+    monkeypatch.setattr(developer_sandbox, "PROJECT_ROOT", project_root)
+    memory_service._clear_memory_overview_section_cache()
+
+
+def _enable_developer_sandbox(tmp_path, monkeypatch):
+    config_path = tmp_path / "config.toml"
+    config_path.write_text("[launcher]\ncontrol_port = 8765\n", encoding="utf-8")
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    monkeypatch.setattr(developer_sandbox, "CONFIG_PATH", config_path)
+    monkeypatch.setattr(developer_sandbox, "PROJECT_ROOT", project_root)
+    status = developer_sandbox.get_developer_mode_status(config_path=config_path, project_root=project_root)
+    enabled = developer_sandbox.update_developer_mode_status(
+        True,
+        base_hash=status["configHash"],
+        config_path=config_path,
+        project_root=project_root,
+    )
+    sandbox_workspace = (
+        project_root
+        / ".runtime"
+        / "developer-mode"
+        / "sandboxes"
+        / enabled["sandbox"]["sandboxId"]
+        / "workspace"
+    )
+    return project_root, sandbox_workspace
 
 
 def _source_artifact(
@@ -283,6 +321,53 @@ def test_memory_overview_can_defer_item_content_to_detail_endpoint(tmp_path, mon
     assert detail_payload["item"]["content"] == "Full prompt memory body."
 
 
+def test_memory_overview_uses_developer_sandbox_evolution_sources(tmp_path, monkeypatch):
+    project_root, sandbox_workspace = _enable_developer_sandbox(tmp_path, monkeypatch)
+    monkeypatch.setattr(memory_service, "PROJECT_ROOT", project_root)
+    memory_service._clear_memory_overview_section_cache()
+
+    formal_gym = project_root / "workspace" / "gym"
+    formal_gym.mkdir(parents=True)
+    (formal_gym / "active_promotions.json").write_text('[{"id":"formal-active"}]', encoding="utf-8")
+    formal_evolution = project_root / "workspace" / "evolution"
+    formal_evolution.mkdir(parents=True)
+    (formal_evolution / "audit.jsonl").write_text('{"id":"formal-audit"}\n', encoding="utf-8")
+    formal_supervised = project_root / "workspace" / "supervised_evolution"
+    (formal_supervised / "decisions").mkdir(parents=True)
+    (formal_supervised / "workbench_state.json").write_text('{"source":"formal"}', encoding="utf-8")
+    (formal_supervised / "decisions" / "formal.json").write_text('{"decision":"formal"}', encoding="utf-8")
+
+    sandbox_gym = sandbox_workspace / "gym"
+    sandbox_gym.mkdir(parents=True)
+    (sandbox_gym / "active_promotions.json").write_text('[{"id":"sandbox-active"}]', encoding="utf-8")
+    sandbox_evolution = sandbox_workspace / "evolution"
+    sandbox_evolution.mkdir(parents=True)
+    (sandbox_evolution / "audit.jsonl").write_text('{"id":"sandbox-audit"}\n', encoding="utf-8")
+    sandbox_supervised = sandbox_workspace / "supervised_evolution"
+    (sandbox_supervised / "decisions").mkdir(parents=True)
+    (sandbox_supervised / "workbench_state.json").write_text('{"source":"sandbox"}', encoding="utf-8")
+    (sandbox_supervised / "history.jsonl").write_text('{"session_id":"sandbox-session"}\n', encoding="utf-8")
+    (sandbox_supervised / "decisions" / "sandbox.json").write_text('{"decision":"sandbox"}', encoding="utf-8")
+
+    payload = memory_service.get_memory_overview()
+    sections = {section["id"]: section for section in payload["sections"]}
+    self_items = {item["id"]: item for item in sections["self-evolution-memory"]["items"]}
+    supervised_items = {item["id"]: item for item in sections["supervised-evolution-memory"]["items"]}
+
+    assert self_items["self-active-advisory"]["path"].startswith(".runtime/developer-mode/")
+    assert "sandbox-active" in self_items["self-active-advisory"]["content"]
+    assert "formal-active" not in self_items["self-active-advisory"]["content"]
+    assert self_items["self-evolution-audit"]["path"].startswith(".runtime/developer-mode/")
+    assert "sandbox-audit" in self_items["self-evolution-audit"]["content"]
+    assert "formal-audit" not in self_items["self-evolution-audit"]["content"]
+    assert supervised_items["supervised-workbench-state"]["path"].startswith(".runtime/developer-mode/")
+    assert "sandbox" in supervised_items["supervised-workbench-state"]["content"]
+    assert "formal" not in supervised_items["supervised-workbench-state"]["content"]
+    assert supervised_items["supervised-decisions"]["path"].startswith(".runtime/developer-mode/")
+    assert "sandbox.json" in supervised_items["supervised-decisions"]["content"]
+    assert "formal.json" not in supervised_items["supervised-decisions"]["content"]
+
+
 def test_memory_item_detail_loads_only_requested_base_section(tmp_path, monkeypatch):
     calls: list[str] = []
 
@@ -353,6 +438,36 @@ def test_memory_knowledge_graph_endpoint_returns_read_only_project_structure(tmp
     assert team_node["contentItems"][0]["title"] == "Graph API proposal"
     assert agent_node["contentItems"] == []
     assert "GRAPH API BODY MUST STAY OUT" not in str(payload)
+
+
+def test_memory_knowledge_graph_uses_developer_sandbox_evolution_domain_paths(tmp_path, monkeypatch):
+    project_root, sandbox_workspace = _enable_developer_sandbox(tmp_path, monkeypatch)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", project_root)
+    monkeypatch.setattr(memory_graph_service, "PROJECT_ROOT", project_root)
+    monkeypatch.setattr(memory_service, "PROJECT_ROOT", project_root)
+    monkeypatch.setattr(team_service, "PROJECT_ROOT", project_root)
+    monkeypatch.setattr(team_knowledge_service, "PROJECT_ROOT", project_root)
+    agent = agent_directory_service.create_agent_instance(display_name="Sandbox Graph Agent")
+    (sandbox_workspace / "evolution").mkdir(parents=True)
+    (sandbox_workspace / "evolution" / "audit.jsonl").write_text('{"id":"sandbox-audit"}\n', encoding="utf-8")
+    (sandbox_workspace / "gym").mkdir(parents=True)
+    (sandbox_workspace / "gym" / "active_promotions.json").write_text("[]", encoding="utf-8")
+    (sandbox_workspace / "supervised_evolution").mkdir(parents=True)
+    (sandbox_workspace / "supervised_evolution" / "history.jsonl").write_text(
+        '{"session_id":"sandbox-session"}\n',
+        encoding="utf-8",
+    )
+
+    response = client.get("/api/memory/knowledge-graph", params={"agentId": agent["agentId"]})
+    payload = response.json()
+
+    assert response.status_code == 200, payload
+    evolution_node = next(node for node in payload["nodes"] if node["type"] == "evolution")
+    supervision_node = next(node for node in payload["nodes"] if node["type"] == "supervision")
+    assert evolution_node["metadata"]["paths"]
+    assert supervision_node["metadata"]["paths"]
+    assert all(path.startswith(".runtime/developer-mode/") for path in evolution_node["metadata"]["paths"])
+    assert all(path.startswith(".runtime/developer-mode/") for path in supervision_node["metadata"]["paths"])
 
 
 def test_memory_knowledge_graph_endpoint_requires_actor_agent(tmp_path, monkeypatch):

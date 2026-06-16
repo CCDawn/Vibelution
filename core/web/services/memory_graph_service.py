@@ -7,6 +7,8 @@ import time
 from pathlib import Path
 from typing import Any
 
+from core.infrastructure import developer_sandbox
+
 from . import agent_directory_service, team_knowledge_service, team_service
 from .runtime_scene_service import record_runtime_scene_event
 
@@ -419,12 +421,13 @@ def _add_file_backed_domain_node(
     edge_type: str,
 ) -> None:
     root = _project_root()
-    existing_paths = [path for path in paths if (root / path).exists()]
+    resolved_paths = [_resolve_file_backed_domain_path(root, path) for path in paths]
+    existing_paths = [path for path in resolved_paths if path.exists()]
     if not existing_paths:
         return
     updated_at = ""
     try:
-        updated_at = max((root / path).stat().st_mtime for path in existing_paths)
+        updated_at = max(path.stat().st_mtime for path in existing_paths)
     except OSError:
         updated_at = ""
     node_id = _node_id(node_type, node_key)
@@ -435,9 +438,17 @@ def _add_file_backed_domain_node(
         summary="只读结构节点；详细证据仍通过对应页面或日志显式读取。",
         status="available",
         updated_at=str(updated_at),
-        metadata={"paths": existing_paths, "fullContentIncluded": False},
+        metadata={"paths": [_rel(path) for path in existing_paths], "fullContentIncluded": False},
     )
     graph.add_edge(project_node_id, node_id, edge_type)
+
+
+def _resolve_file_backed_domain_path(root: Path, path: str) -> Path:
+    normalized = str(path or "").replace("\\", "/").strip("/")
+    if normalized.startswith("workspace/"):
+        parts = [part for part in normalized.split("/")[1:] if part]
+        return developer_sandbox.seeded_sandbox_workspace_path(root, *parts)
+    return root / normalized
 
 
 def _add_official_research_graph_nodes(
