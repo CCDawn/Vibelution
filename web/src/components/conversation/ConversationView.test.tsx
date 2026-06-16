@@ -116,6 +116,12 @@ describe("ConversationView edit resend affordance", () => {
     expect(conversationViewSource).not.toContain("thought: false,\n          mental: false,\n          tools: false");
   });
 
+  it("freezes first-seen expansion defaults so SSE status changes do not fight the UI", () => {
+    expect(conversationViewSource).toContain("defaultExpansionRef");
+    expect(conversationViewSource).toContain("messageDefaults[section] === undefined");
+    expect(conversationViewSource).toContain("return messageDefaults[section]");
+  });
+
   it("can render the opt-in compact workbench density", () => {
     const html = renderConversation([], { density: "compact" });
 
@@ -1535,9 +1541,11 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).not.toContain("第 1 轮");
     expect(html).not.toContain("第 2 轮");
     expect(html).toContain("行动");
-    expect(html).toContain("命令 · running rg");
+    expect(html).toContain("命令");
     expect(html).toContain("running rg");
-    expect(html).toContain("读取 · opened latest log");
+    expect(html).toContain("读取");
+    expect(html).not.toContain("命令 · running rg");
+    expect(html).not.toContain("读取 · opened latest log");
     expect(html).not.toContain("再查会话链路");
   });
 

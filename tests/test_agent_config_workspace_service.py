@@ -1576,8 +1576,6 @@ def test_agent_create_api_allows_work_session_without_persona_task_or_role(tmp_p
     assert "conversation_log_inspect_tool" in created["toolPolicy"]["allowedTools"]
     assert "conversation_log_inspect_tool" in created["toolPolicy"]["preferredTools"]
     assert "cli_tool" in created["toolPolicy"]["allowedTools"]
-    assert "create_child_session_tool" in created["toolPolicy"]["allowedTools"]
-    assert "list_child_sessions_tool" in created["toolPolicy"]["allowedTools"]
     assert "run_test_for_tool" in created["toolPolicy"]["allowedTools"]
     assert "web_search_tool" in created["toolPolicy"]["allowedTools"]
     assert "image2_generate_tool" in created["toolPolicy"]["allowedTools"]
@@ -1592,6 +1590,10 @@ def test_agent_create_api_allows_work_session_without_persona_task_or_role(tmp_p
     assert "research_knowledge_query_tool" not in created["toolPolicy"]["allowedTools"]
     assert "knowledge_proposal_tool" not in created["toolPolicy"]["allowedTools"]
     assert "research_agent_creation_proposal_tool" not in created["toolPolicy"]["allowedTools"]
+    assert "create_child_session_tool" not in created["toolPolicy"]["allowedTools"]
+    assert "list_child_sessions_tool" not in created["toolPolicy"]["allowedTools"]
+    assert "agent_message_tool" not in created["toolPolicy"]["allowedTools"]
+    assert "agent_tool_permission_request_tool" not in created["toolPolicy"]["allowedTools"]
     assert not any(item["code"] == "agent_onboarding_incomplete" for item in created["health"])
 
 
@@ -1618,8 +1620,6 @@ def test_repair_adds_session_default_tools_to_legacy_work_session_agent(tmp_path
     assert "conversation_log_inspect_tool" in policy["preferredTools"]
     assert "cli_tool" in policy["allowedTools"]
     assert "cli_agent_run_tool" in policy["allowedTools"]
-    assert "create_child_session_tool" in policy["allowedTools"]
-    assert "list_child_sessions_tool" in policy["allowedTools"]
     assert "search_memory_tool" not in policy["allowedTools"]
     assert "search_error_archive_tool" not in policy["allowedTools"]
     assert "record_learning_tool" not in policy["allowedTools"]
@@ -1627,6 +1627,10 @@ def test_repair_adds_session_default_tools_to_legacy_work_session_agent(tmp_path
     assert "grep_search_tool" not in policy["allowedTools"]
     assert "glob_tool" not in policy["allowedTools"]
     assert "code_symbol_tool" not in policy["allowedTools"]
+    assert "create_child_session_tool" not in policy["allowedTools"]
+    assert "list_child_sessions_tool" not in policy["allowedTools"]
+    assert "agent_message_tool" not in policy["allowedTools"]
+    assert "agent_tool_permission_request_tool" not in policy["allowedTools"]
     assert repaired_agent["metadata"]["onboardingStatus"] == "complete"
 
 
@@ -2398,9 +2402,11 @@ def test_agent_reset_api_can_reset_session_agent_advanced_policies_without_profi
     assert payload["agent"]["toolPolicyId"].startswith("tool-")
     assert "conversation_log_inspect_tool" in payload["agent"]["toolPolicy"]["allowedTools"]
     assert "cli_tool" in payload["agent"]["toolPolicy"]["allowedTools"]
-    assert "create_child_session_tool" in payload["agent"]["toolPolicy"]["allowedTools"]
-    assert "list_child_sessions_tool" in payload["agent"]["toolPolicy"]["allowedTools"]
     assert "read_file_tool" not in payload["agent"]["toolPolicy"]["allowedTools"]
+    assert "create_child_session_tool" not in payload["agent"]["toolPolicy"]["allowedTools"]
+    assert "list_child_sessions_tool" not in payload["agent"]["toolPolicy"]["allowedTools"]
+    assert "agent_message_tool" not in payload["agent"]["toolPolicy"]["allowedTools"]
+    assert "agent_tool_permission_request_tool" not in payload["agent"]["toolPolicy"]["allowedTools"]
     assert payload["agent"]["memoryPolicy"]["readSharedGroups"] == []
     assert payload["agent"]["memoryPolicy"]["writeSharedGroups"] == []
     assert payload["agent"]["metadata"]["delegationPolicy"]["allowSubagents"] is False
@@ -2575,9 +2581,9 @@ def test_session_agent_policy_id_patch_forks_required_tools_without_mutating_sha
     assert response.status_code == 200, response.text
     payload = response.json()
     assert payload["toolPolicyId"] == f"tool-{agent['agentId']}"
-    assert "agent_message_tool" in payload["toolPolicy"]["allowedTools"]
     assert "cli_agent_run_tool" in payload["toolPolicy"]["allowedTools"]
     assert "conversation_log_inspect_tool" in payload["toolPolicy"]["preferredTools"]
+    assert "agent_message_tool" not in payload["toolPolicy"]["allowedTools"]
     persisted = agent_directory_service.load_state()
     assert persisted["toolPolicies"]["tool-shared-minimal"]["allowedTools"] == ["agent_message_tool"]
 
