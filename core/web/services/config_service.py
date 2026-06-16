@@ -196,6 +196,13 @@ def _theme_background_path(public_config: dict[str, Any]) -> str:
     return str(workbench_theme.get("background_image_path") or "").strip().replace("\\", "/")
 
 
+def _theme_background_readability(public_config: dict[str, Any]) -> str:
+    ui_config = public_config.get("ui", {}) if isinstance(public_config.get("ui"), dict) else {}
+    workbench_theme = ui_config.get("workbench_theme", {}) if isinstance(ui_config.get("workbench_theme"), dict) else {}
+    value = str(workbench_theme.get("background_readability") or "standard").strip().lower()
+    return value if value in {"soft", "standard", "strong"} else "standard"
+
+
 def _with_config_workspace_defaults(
     public_config: dict[str, Any],
     *,
@@ -209,6 +216,7 @@ def _with_config_workspace_defaults(
     if not isinstance(workbench_theme, dict):
         ui_config["workbench_theme"] = workbench_theme = {}
     workbench_theme.setdefault("background_image_path", "")
+    workbench_theme["background_readability"] = _theme_background_readability(payload)
     return payload
 
 
@@ -1219,6 +1227,7 @@ def _build_workspace(
         "warningCount": len(warnings),
         "themeBackgroundImagePath": _theme_background_path(public_config),
         "themeBackgroundImageUrl": theme_background_image_url(_theme_background_path(public_config)),
+        "themeBackgroundReadability": _theme_background_readability(public_config),
         "sections": _config_sections(lang, editor_sections),
         "publicConfig": public_config,
         "rawToml": _read_raw_public_config() if raw_toml is None else raw_toml,
@@ -1450,6 +1459,7 @@ def get_config_summary() -> dict[str, Any]:
         "modelImageInputSupport": _model_image_input_support_map(public_config),
         "themeBackgroundImagePath": theme_background_path,
         "themeBackgroundImageUrl": theme_background_image_url(theme_background_path),
+        "themeBackgroundReadability": _theme_background_readability(public_config),
         "blockingCount": len(blocking),
         "warningCount": len(warnings),
         "sections": _config_sections(lang, build_editor_sections(public_config, lang)),
