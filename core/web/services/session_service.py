@@ -44,6 +44,8 @@ from core.chat.slash_commands import SkillSlashCommand, parse_skill_slash_comman
 from core.chat.turn_journal import (
     EVENT_ASSISTANT_MESSAGE,
     EVENT_ASSISTANT_PARTIAL,
+    EVENT_CLI_SESSION_LIFECYCLE,
+    EVENT_CLI_TASK_RESULT,
     EVENT_TOOL_CALL_STARTED,
     EVENT_TOOL_RESULT,
     EVENT_TURN_COMPLETED,
@@ -598,6 +600,11 @@ def _append_session_turn_journal_event(
     status: str = "",
     payload: dict[str, Any] | None = None,
     source: str = "session_service",
+    visible_in_model: bool = True,
+    projection_kind: str = "",
+    tool_call_id: str = "",
+    correlation_id: str = "",
+    source_kind: str = "",
 ) -> None:
     normalized_session_id = str(session_id or "").strip()
     normalized_event_type = str(event_type or "").strip()
@@ -612,6 +619,11 @@ def _append_session_turn_journal_event(
             status=status,
             payload=payload or {},
             source=source,
+            visible_in_model=visible_in_model,
+            projection_kind=projection_kind,
+            tool_call_id=tool_call_id,
+            correlation_id=correlation_id,
+            source_kind=source_kind,
         )
     except Exception as exc:
         try:
@@ -2400,6 +2412,18 @@ def append_cli_agent_lifecycle_event(
             normalized_messages,
             lifecycle_key=lifecycle_key,
         )
+    _append_session_turn_journal_event(
+        normalized_session_id,
+        str(terminal.get("sourceTurnId") or terminal.get("turnId") or f"cli-lifecycle:{lifecycle_subject}"),
+        EVENT_CLI_SESSION_LIFECYCLE,
+        status=normalized_event,
+        payload={"lifecycle": metadata},
+        source="cli_agent_lifecycle",
+        visible_in_model=normalized_event in {"closed", "failed", "timeout"},
+        projection_kind="cli_agent_lifecycle",
+        correlation_id=lifecycle_key,
+        source_kind="cli_agent",
+    )
     _record_session_cycle_message(
         normalized_session_id,
         event_entry,
@@ -2471,6 +2495,32 @@ def append_cli_agent_task_result_event(
             conversation["updated_at"] = result_entry["timestamp"]
             payload["updated_at"] = result_entry["timestamp"]
             save_chat_state(PROJECT_ROOT, payload)
+    journal_turn_id = str(
+        task_result.get("sourceTurnId")
+        or task_result.get("turnId")
+        or _current_session_turn_id(normalized_session_id)
+        or f"cli-task:{result_subject}"
+    ).strip()
+    journal_tool_call = {
+        "name": "cli_agent_run_tool",
+        **task_result,
+        "status": status,
+        "result": content,
+        "resultPreview": trim_lines(content, max_lines=8),
+    }
+    _append_session_turn_journal_event(
+        normalized_session_id,
+        journal_turn_id,
+        EVENT_CLI_TASK_RESULT,
+        status=status,
+        payload={"toolCall": journal_tool_call},
+        source="cli_agent_task_kernel",
+        visible_in_model=True,
+        projection_kind="cli_agent_task_result",
+        tool_call_id=task_id,
+        correlation_id=result_key,
+        source_kind="cli_agent",
+    )
     _record_session_cycle_message(
         normalized_session_id,
         result_entry,

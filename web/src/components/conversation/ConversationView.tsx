@@ -629,6 +629,7 @@ export function ConversationView({
   const initializedSessionRef = useRef("");
   const atBottomRef = useRef(true);
   const lastComposerFocusSignalRef = useRef("");
+  const defaultExpansionRef = useRef<Record<string, Record<string, boolean>>>({});
   const [sectionExpansion, setSectionExpansion] = useState<Record<string, Record<string, boolean>>>({});
   const [isAtBottom, setIsAtBottom] = useState(true);
   const [previewImage, setPreviewImage] = useState<PreviewImageState | null>(null);
@@ -951,6 +952,8 @@ export function ConversationView({
 
   useEffect(() => {
     setAllMessagesVisible(false);
+    defaultExpansionRef.current = {};
+    setSectionExpansion({});
   }, [sessionId]);
 
   function cognitiveStateLabel(snapshot: MentalStateSnapshot | undefined) {
@@ -983,10 +986,22 @@ export function ConversationView({
   }
 
   function getExpansionState(messageId: string, section: string, defaultExpanded: boolean) {
-    if (section === "response") {
-      return sectionExpansion[messageId]?.[section] ?? defaultExpanded;
+    const explicit = sectionExpansion[messageId]?.[section];
+    if (explicit !== undefined) {
+      return explicit;
     }
-    return sectionExpansion[messageId]?.[section] ?? defaultExpanded;
+    const messageDefaults = defaultExpansionRef.current[messageId] ?? {};
+    if (messageDefaults[section] === undefined) {
+      defaultExpansionRef.current = {
+        ...defaultExpansionRef.current,
+        [messageId]: {
+          ...messageDefaults,
+          [section]: defaultExpanded,
+        },
+      };
+      return defaultExpanded;
+    }
+    return messageDefaults[section];
   }
 
   function toggleSection(messageId: string, section: string, defaultExpanded: boolean) {

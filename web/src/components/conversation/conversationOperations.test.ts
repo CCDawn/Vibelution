@@ -266,7 +266,7 @@ describe("conversationOperations", () => {
     expect(groups).toHaveLength(1);
     expect(groups[0]).toMatchObject({
       id: "react-thought-1",
-      title: "读取 · opened latest log",
+      title: "读取",
       primaryKind: "tool",
     });
     expect(groups[0].operations.map((operation) => operation.sequence)).toEqual([1, 2]);
@@ -288,7 +288,7 @@ describe("conversationOperations", () => {
 
     expect(groups).toHaveLength(1);
     expect(groups[0]).toMatchObject({
-      title: "Deep thinking · 正在判断下一步",
+      title: "Deep thinking",
       primaryKind: "thought",
     });
   });
