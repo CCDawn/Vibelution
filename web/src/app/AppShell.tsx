@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate, useNavigationType } from "react-router-dom";
 import { ChevronDown, LoaderCircle, Moon, Power, RefreshCw, Settings, Sun, Wrench } from "lucide-react";
 
@@ -82,6 +82,23 @@ type RouteLocationLike = {
   search: string;
   hash: string;
 };
+
+type ConfigSummaryWithThemeBackground = ConfigSummary & {
+  themeBackgroundImageUrl?: unknown;
+};
+
+type WorkbenchShellStyle = CSSProperties & {
+  "--workbench-theme-background-image"?: string;
+};
+
+function configThemeBackgroundImageUrl(summary: ConfigSummary | undefined): string {
+  const value = (summary as ConfigSummaryWithThemeBackground | undefined)?.themeBackgroundImageUrl;
+  const url = typeof value === "string" ? value.trim() : "";
+  if (!url.startsWith("/api/config/theme-background-image/")) {
+    return "";
+  }
+  return url;
+}
 
 export function routeLocationKey(location: RouteLocationLike): string {
   return `${location.pathname || "/"}${location.search || ""}${location.hash || ""}`;
@@ -461,6 +478,16 @@ export function AppShell() {
     queryKey: queryKeys.configPublic(),
     queryFn: () => fetchJson<ConfigSummary>("/api/config/public"),
   });
+  const themeBackgroundImageUrl = configThemeBackgroundImageUrl(configQuery.data);
+  const shellStyle = useMemo<WorkbenchShellStyle | undefined>(
+    () =>
+      themeBackgroundImageUrl
+        ? {
+            "--workbench-theme-background-image": `url(${JSON.stringify(themeBackgroundImageUrl)})`,
+          }
+        : undefined,
+    [themeBackgroundImageUrl],
+  );
   const shellStartupWarmupActive = useStartupWarmup(shellStartupDataReady);
   const shellPollingVisible = frontendVisible || shellStartupWarmupActive;
   const lifecycleControlActive = shutdownOpen || shutdownRequested || restartRequested;
@@ -1798,7 +1825,14 @@ export function AppShell() {
   const statusSummaryTitle = rightStatusCards.map((item) => `${item.label}: ${item.value}`).join(" · ");
 
   return (
-    <div className={styles.shell} data-theme={theme} data-shell="workbench" data-browser-role="workbench">
+    <div
+      className={styles.shell}
+      data-theme={theme}
+      data-theme-background={themeBackgroundImageUrl ? "custom" : "default"}
+      data-shell="workbench"
+      data-browser-role="workbench"
+      style={shellStyle}
+    >
       {startupPanel.active && !shutdownOpen ? (
         <div
           className={styles.startupOverlay}

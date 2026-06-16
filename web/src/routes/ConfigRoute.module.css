@@ -1959,10 +1959,25 @@
   grid-template-columns: minmax(132px, 0.38fr) minmax(0, 1fr);
 }
 
+.themeBackgroundImageCard {
+  grid-template-columns: minmax(156px, 0.36fr) minmax(0, 1fr);
+}
+
 .avatarImageValue {
   display: flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
+  color: var(--fg-secondary);
+  font-size: 0.84rem;
+  overflow-wrap: anywhere;
+}
+
+.themeBackgroundImageValue {
+  display: grid;
+  grid-template-columns: minmax(144px, 220px) minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
   min-width: 0;
   color: var(--fg-secondary);
   font-size: 0.84rem;
@@ -1989,7 +2004,32 @@
   color: var(--fg-tertiary);
 }
 
+.themeBackgroundImagePreview,
+.themeBackgroundImagePlaceholder {
+  width: 100%;
+  aspect-ratio: 16 / 7;
+  min-height: 64px;
+  border: 1px solid var(--border-hairline);
+  border-radius: 7px;
+  background: var(--surface-card);
+}
+
+.themeBackgroundImagePreview {
+  object-fit: cover;
+}
+
+.themeBackgroundImagePlaceholder {
+  display: grid;
+  place-items: center;
+  color: var(--fg-tertiary);
+}
+
 .avatarImageEditor {
+  display: grid;
+  gap: 10px;
+}
+
+.themeBackgroundImageEditor {
   display: grid;
   gap: 10px;
 }
