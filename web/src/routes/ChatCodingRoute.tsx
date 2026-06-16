@@ -2554,6 +2554,57 @@ function sessionDetailSnapshotKey(detail: SessionDetail): string {
   ].join("|");
 }
 
+function liveAssistantMessageId(sessionId: string, turnId: string) {
+  const normalizedTurnId = String(turnId || "").trim() || "current";
+  return `${sessionId}-message-live-${normalizedTurnId}`;
+}
+
+function messageTurnId(message: ConversationMessage) {
+  return String(message.metadata?.turnId ?? "").trim();
+}
+
+function isLiveAssistantDeltaMessage(message: ConversationMessage) {
+  return message.role === "assistant" && String(message.metadata?.kind ?? "").trim() === "session_live_overlay";
+}
+
+function mergeSessionDetailWithLiveAssistantOverlay(
+  previous: SessionDetail | undefined,
+  detail: SessionDetail,
+): SessionDetail {
+  const previousLiveMessages = (previous?.messages ?? []).filter(isLiveAssistantDeltaMessage);
+  if (previousLiveMessages.length === 0) {
+    return detail;
+  }
+  const persistedTurnIds = new Set(
+    (detail.messages ?? [])
+      .map(messageTurnId)
+      .filter(Boolean),
+  );
+  const detailMessageIds = new Set((detail.messages ?? []).map((message) => message.id));
+  const liveMessages = previousLiveMessages.filter((message) => {
+    const turnId = messageTurnId(message);
+    return !detailMessageIds.has(message.id) && (!turnId || !persistedTurnIds.has(turnId));
+  });
+  if (liveMessages.length === 0) {
+    return detail;
+  }
+  return {
+    ...detail,
+    messages: [...(detail.messages ?? []), ...liveMessages],
+  };
+}
+
+function sessionDetailWithoutLiveAssistantOverlay(detail: SessionDetail): SessionDetail {
+  const messages = detail.messages ?? [];
+  if (!messages.some(isLiveAssistantDeltaMessage)) {
+    return detail;
+  }
+  return {
+    ...detail,
+    messages: messages.filter((message) => !isLiveAssistantDeltaMessage(message)),
+  };
+}
+
 function mergeAssistantDeltaIntoSessionDetail(
   detail: SessionDetail | undefined,
   payload: Extract<SessionStreamEvent, { type: "assistant_delta" }>,
@@ -2561,13 +2612,15 @@ function mergeAssistantDeltaIntoSessionDetail(
   if (!detail || detail.id !== payload.sessionId) {
     return detail;
   }
-  const liveMessageId = `${payload.sessionId}-message-live`;
+  const liveMessageId = liveAssistantMessageId(payload.sessionId, payload.turnId);
   const now = payload.updatedAt || new Date().toISOString();
-  const messages = detail.messages ?? [];
+  const messages = (detail.messages ?? []).filter((message) =>
+    !isLiveAssistantDeltaMessage(message) || message.id === liveMessageId
+  );
   const liveIndex = messages.findIndex((message) => message.id === liveMessageId);
   const previous = liveIndex >= 0 ? messages[liveIndex] : undefined;
-  const contentDelta = payload.contentDelta ?? payload.content ?? "";
-  const thoughtDelta = payload.thoughtDelta ?? payload.thought ?? "";
+  const contentDelta = payload.contentDelta ?? (payload.replaceContent || !previous ? payload.content ?? "" : "");
+  const thoughtDelta = payload.thoughtDelta ?? (payload.replaceThought || !previous ? payload.thought ?? "" : "");
   const nextContent = payload.replaceContent
     ? contentDelta
     : `${previous?.content ?? ""}${contentDelta}`;
@@ -2590,6 +2643,11 @@ function mergeAssistantDeltaIntoSessionDetail(
     streamStage: payload.stage || undefined,
     thought: nextThought || undefined,
     feedbackEvents: payload.feedbackEvents ?? [],
+    metadata: {
+      ...(previous?.metadata ?? {}),
+      kind: "session_live_overlay",
+      turnId: payload.turnId,
+    },
   };
   if (liveIndex >= 0) {
     const previousLiveMessage = messages[liveIndex];
@@ -2923,11 +2981,12 @@ export function ChatCodingRoute() {
     (detail: SessionDetail) => {
       let shouldSyncSummaries = true;
       queryClient.setQueryData<SessionDetail>(queryKeys.session(detail.id), (previous) => {
-        if (previous && sessionDetailSnapshotKey(previous) === sessionDetailSnapshotKey(detail)) {
+        const comparablePrevious = previous ? sessionDetailWithoutLiveAssistantOverlay(previous) : undefined;
+        if (comparablePrevious && sessionDetailSnapshotKey(comparablePrevious) === sessionDetailSnapshotKey(detail)) {
           shouldSyncSummaries = false;
           return previous;
         }
-        return detail;
+        return mergeSessionDetailWithLiveAssistantOverlay(previous, detail);
       });
       if (!shouldSyncSummaries) {
         return;

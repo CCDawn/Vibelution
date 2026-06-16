@@ -4,6 +4,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
 import { ChatNextStateSignalSummary, ConversationMessage, SessionTurnError } from "../../api/types";
+import conversationViewSource from "./ConversationView.tsx?raw";
 import {
   buildTimelineScrollSignal,
   COMPOSER_SESSION_REFERENCE_MIME,
@@ -110,6 +111,11 @@ function renderConversation(
 }
 
 describe("ConversationView edit resend affordance", () => {
+  it("does not force-collapse thinking sections when streaming settles", () => {
+    expect(conversationViewSource).not.toContain("previousStreamingRef");
+    expect(conversationViewSource).not.toContain("thought: false,\n          mental: false,\n          tools: false");
+  });
+
   it("can render the opt-in compact workbench density", () => {
     const html = renderConversation([], { density: "compact" });
 
