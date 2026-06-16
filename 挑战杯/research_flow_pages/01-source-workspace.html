@@ -89,7 +89,7 @@
       <div class="status-grid">
         <div class="status-item"><b>状态</b><span>source_registered</span></div>
         <div class="status-item"><b>功能岗位</b><span>Source Intake Agent</span></div>
-        <div class="status-item"><b>Agent 状态</b><span>可复用通用 data-processing assignment / source-extraction / source-quality 后端已接入；Teams 资料搜集执行台、候选资料筛选台、科研总览控制台、KV 缓存对话轨迹、启动复用反馈、metadata-only 搜索执行闭环、高价值信息层、中文控制台、默认层去说明化、步骤卡主操作入口、右侧当前步骤 Agent 配置、资料筛选页内反馈、资料筛选 Agent 批量执行、候选库可视化二级索引、知识搜集阶段子页控制台、资料筛选 Agent 复审入口、一键排队首批后台搜索、资料搜集当前动作和已收集资料分层、搜集结果状态徽标完整显示、搜集结果 DOI/网页/本地文件来源可溯源、阶段协调显式启动已接入</span></div>
+        <div class="status-item"><b>Agent 状态</b><span>可复用通用 data-processing assignment / source-extraction / source-quality 后端已接入；Teams 资料搜集执行台、候选资料筛选台、科研总览控制台、KV 缓存对话轨迹、启动复用反馈、metadata-only 搜索执行闭环、高价值信息层、中文控制台、默认层去说明化、步骤卡主操作入口、右侧当前步骤 Agent 配置、资料筛选页内反馈、资料筛选 Agent 批量执行、候选库可视化二级索引、知识搜集阶段子页控制台、资料筛选 Agent 复审入口、一键排队首批后台搜索、资料搜集当前动作和已收集资料分层、搜集结果状态徽标完整显示、搜集结果 DOI/网页/本地文件来源可溯源、五阶段完整列表、来源类型过滤、阶段协调显式启动已接入</span></div>
         <div class="status-item"><b>进入条件</b><span>用户提供 PDF、论文、赛题或补充资料；文件可在挑战杯工作区定位。</span></div>
         <div class="status-item"><b>退出条件</b><span>每个知识搜集轮次有 stageRoundId、roundNumber、teamMemoryRecord、coordinationContract.startResult(manual_only 或显式启动结果)、显式协调后的可选 coordinationRoomId/coordinationRoundId、sourceRunIds、dataSearchPlanRef、planned queries、assignedQueries 和 resultWritebackContract；每个资料项先有 DataRecord/sourceRef/rawLocation/title/qualitySignals/collectionTrace，再有 source_manifest 的 id、path、type、allowedForAnalysis、sha256、pageScope、sourceExtraction.pageAnchors 和 sourceQualityAssessment。</span></div>
         <div class="status-item"><b>审核门禁</b><span>确认资料允许分析、来源可信度和是否纳入本轮。</span></div>
@@ -125,6 +125,8 @@
 <li>一键排队首批搜索</li>
 <li>全局运行态知识搜集优先</li>
 <li>步骤功能 Agent 聚焦</li>
+<li>五阶段完整列表</li>
+<li>来源类型过滤</li>
 <li>阶段协调显式启动</li>
 <li>DataProcessingRun 建立</li>
 <li>DataProcessingRun reviewing 收口</li>
