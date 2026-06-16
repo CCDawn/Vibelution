@@ -18,7 +18,7 @@ describe("TeamsRoute layout contract", () => {
 
   it("is mounted as the top-level Team workspace with legacy redirects", () => {
     expect(routerSource).toContain('path: "teams"');
-    expect(routerSource).toContain("lazyElement(<TeamsRoute />)");
+    expect(routerSource).toContain("guardedLazyElement(<TeamsRoute />)");
     expect(routerSource).toContain('path: "agents/teams"');
     expect(routerSource).toContain('path: "research"');
     expect(routerSource).toContain("<LegacyTeamsRedirect />");
@@ -289,8 +289,12 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("sourceCollectionCandidateTrace");
     expect(routeSource).toContain("selectedSourceCollectionCandidateId");
     expect(routeSource).toContain("sourceCollectionSourceDetailPanel");
-    expect(routeSource).toContain("打开 DOI");
-    expect(routeSource).toContain("打开搜索页");
+    expect(routeSource).toContain("打开论文 DOI");
+    expect(routeSource).toContain("查看搜索证据");
+    expect(routeSource).toContain("打开 API 原文");
+    expect(routeSource).toContain("sourceCollectionIsMachineEvidenceUrl");
+    expect(routeSource).toContain("仅有搜索记录，缺少可读来源");
+    expect(routeSource).not.toContain("打开搜索页");
     expect(routeSource).not.toContain("原始资料记录");
     expect(routeSource).toContain("搜索问题");
     expect(routeSource).toContain("待 Agent 筛选");
@@ -540,6 +544,9 @@ describe("TeamsRoute layout contract", () => {
     expect(routeStyles.sourceCollectionSourceDetailPanel).toBeTypeOf("string");
     expect(routeStyles.sourceCollectionSourceDetailActions).toBeTypeOf("string");
     expect(routeStyles.sourceCollectionSourceDetailFacts).toBeTypeOf("string");
+    expect(routeStyles.sourceCollectionSourceDetailNotice).toBeTypeOf("string");
+    expect(routeStyles.sourceCollectionSearchEvidence).toBeTypeOf("string");
+    expect(routeStyles.sourceCollectionSearchEvidenceBody).toBeTypeOf("string");
     expect(routeStyles.workflowCandidateItemSelected).toBeTypeOf("string");
     expect(routeStylesSource).toContain(".sourceCollectionResultStatus");
     expect(routeStylesSource).toContain(".sourceCollectionResultSource");
