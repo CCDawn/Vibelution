@@ -72,4 +72,15 @@ describe("ConfigRoute layout contract", () => {
     expect(routeSource).not.toContain("updateLauncherDeveloperMode");
     expect(routeSource).not.toContain("developer-mode/cleanup");
   });
+
+  it("keeps workbench background image settings separate from avatar cropping", () => {
+    expect(routeSource).toContain("themeBackgroundImagePreviewUrl");
+    expect(routeSource).toContain('kind === "background_image"');
+    expect(routeSource).toContain("/api/config/theme-background-image");
+    expect(routeSource).toContain("onThemeBackgroundImageUpload");
+    expect(routeSource).toContain("copy.uploadThemeBackgroundImage");
+    expect(routeSource).toContain("copy.clearThemeBackgroundImage");
+    expect(stylesSource).toContain(".themeBackgroundImagePreview");
+    expect(stylesSource).toContain("aspect-ratio: 16 / 7");
+  });
 });
