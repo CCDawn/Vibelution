@@ -483,6 +483,9 @@ LLM_MODEL_PRESETS = {
             "streaming": True,
             "tool_calling_mode": "auto",
             "discovery_enabled": True,
+            "supports_image_input": False,
+            "capability_status": "unsupported",
+            "capability_source": "preset",
         },
     },
     "xiaomi_mimo_v2_5_multimodal": {

@@ -5782,6 +5782,7 @@ export type ConfigSummary = {
   domainAvailability: DomainAvailability;
   modelLibraryCount: number;
   modelLabels: Record<string, string>;
+  modelImageInputSupport: Record<string, boolean | null>;
   blockingCount: number;
   warningCount: number;
   sections: Array<{

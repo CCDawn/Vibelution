@@ -113,6 +113,36 @@ def test_config_summary_exposes_model_labels(monkeypatch):
     assert payload["modelLabels"]["raw_model"] == "raw-model"
 
 
+def test_config_summary_exposes_model_image_input_support(monkeypatch):
+    public_config = copy.deepcopy(load_public_config())
+    public_config.setdefault("llm", {})["model_library"] = {
+        "vision_model": {
+            "provider": {"kind": "relay", "api": "openai", "base_url": "https://example.test/v1"},
+            "model": "vision-model",
+            "supports_image_input": True,
+        },
+        "text_model": {
+            "provider": {"kind": "relay", "api": "openai", "base_url": "https://example.test/v1"},
+            "model": "text-model",
+            "capability_status": "unsupported",
+        },
+        "unknown_model": {
+            "provider": {"kind": "relay", "api": "openai", "base_url": "https://example.test/v1"},
+            "model": "unknown-model",
+        },
+    }
+
+    monkeypatch.setattr(config_service, "load_public_config", lambda: copy.deepcopy(public_config))
+
+    response = client.get("/api/config/public")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["modelImageInputSupport"]["vision_model"] is True
+    assert payload["modelImageInputSupport"]["text_model"] is False
+    assert payload["modelImageInputSupport"]["unknown_model"] is None
+
+
 def test_config_workspace_exposes_unified_config_payload(monkeypatch):
     public_config = copy.deepcopy(load_public_config())
     public_config.setdefault("ui", {})["language"] = "en"
@@ -152,6 +182,8 @@ def test_config_workspace_exposes_unified_config_payload(monkeypatch):
         "https://token-plan-cn.xiaomimimo.com/v1"
     )
     assert preset_options["xiaomi_mimo_v2_5_pro_token_plan"]["model"]["model"] == "mimo-v2.5-pro"
+    assert preset_options["xiaomi_mimo_v2_5_pro_token_plan"]["model"]["supports_image_input"] is False
+    assert preset_options["xiaomi_mimo_v2_5_pro_token_plan"]["model"]["capability_status"] == "unsupported"
     assert preset_options["xiaomi_mimo_v2_5_multimodal"]["category"] == "official"
     assert preset_options["xiaomi_mimo_v2_5_multimodal"]["provider"]["kind"] == "xiaomi"
     assert preset_options["xiaomi_mimo_v2_5_multimodal"]["provider"]["base_url"] == "https://api.xiaomimimo.com/v1"

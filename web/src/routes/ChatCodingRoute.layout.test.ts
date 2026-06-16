@@ -69,6 +69,15 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).not.toContain('import { COMPOSER_SESSION_REFERENCE_MIME, ConversationView } from "../components/conversation/ConversationView"');
   });
 
+  it("disables image attachment affordance when the active Agent image route model cannot read images", () => {
+    expect(routeSource).toContain("modelImageInputSupportById");
+    expect(routeSource).toContain("imageInputModelIdForAgent(activeSessionAgent, detail?.dialogueModelId)");
+    expect(routeSource).toContain("activeAgentImageInputSupported === false");
+    expect(routeSource).toContain("const visionModelId = String(agent?.llmBindings?.vision?.modelId ?? \"\").trim()");
+    expect(routeSource).toContain("composerAttachmentInputDisabled={composerDisabled || Boolean(resolvedEditTarget) || activeAgentImageInputUnsupported}");
+    expect(routeSource).toContain("clearSessionImageAttachments(current, activeSessionId)");
+  });
+
   it("passes agent avatar context into the conversation timeline", () => {
     expect(routeSource).toContain("assistantAvatarImageUrl={activeAgentAvatarImageUrl}");
     expect(routeSource).toContain("assistantAvatarFallback={activeAgentAvatarFallback}");
