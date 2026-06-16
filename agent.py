@@ -1550,6 +1550,15 @@ class SelfEvolvingAgent:
                 restored.extend(restored_tool_messages)
                 if content:
                     restored.append(AIMessage(content=str(content)))
+            elif role == "tool":
+                tool_call_id = str(
+                    item.get("tool_call_id")
+                    or item.get("toolCallId")
+                    or item.get("id")
+                    or ""
+                ).strip()
+                if tool_call_id and content:
+                    restored.append(ToolMessage(content=str(content), tool_call_id=tool_call_id))
         if len(restored) <= 1:
             self._active_turn_messages = None
             self._active_turn_goal = ""
@@ -1584,16 +1593,29 @@ class SelfEvolvingAgent:
                 or entry.get("toolCallId")
                 or f"history_tool_{item_index}_{tool_index}"
             ).strip()
+            function_block = entry.get("function") if isinstance(entry.get("function"), dict) else {}
             arguments = entry.get("arguments") if isinstance(entry.get("arguments"), dict) else entry.get("args")
+            if not isinstance(arguments, dict):
+                raw_function_arguments = function_block.get("arguments")
+                if isinstance(raw_function_arguments, dict):
+                    arguments = raw_function_arguments
+                elif isinstance(raw_function_arguments, str):
+                    try:
+                        parsed_arguments = json.loads(raw_function_arguments)
+                    except json.JSONDecodeError:
+                        parsed_arguments = {}
+                    arguments = parsed_arguments if isinstance(parsed_arguments, dict) else {}
             if not isinstance(arguments, dict):
                 arguments = {}
             tool_calls.append({"name": name, "args": dict(arguments), "id": tool_call_id})
-            tool_messages.append(
-                ToolMessage(
-                    content=cls._seeded_history_tool_result_content(name, entry),
-                    tool_call_id=tool_call_id,
+            result_content = cls._seeded_history_tool_result_content(name, entry)
+            if result_content:
+                tool_messages.append(
+                    ToolMessage(
+                        content=result_content,
+                        tool_call_id=tool_call_id,
+                    )
                 )
-            )
         if not tool_calls:
             return []
         return [AIMessage(content="", tool_calls=tool_calls), *tool_messages]
@@ -1614,20 +1636,26 @@ class SelfEvolvingAgent:
         status = str(entry.get("status") or "").strip()
         result = (
             entry.get("result")
+            or entry.get("error")
+            or entry.get("resultSegments")
+            or entry.get("stdoutPreview")
+            or entry.get("stderrPreview")
+            or entry.get("summary")
             or entry.get("resultPreview")
             or entry.get("result_preview")
-            or entry.get("summary")
-            or entry.get("error")
             or ""
         )
-        result_text = compact_tool_output_for_diagnosis(str(result or ""), max_chars=1600)
+        if isinstance(result, (dict, list)):
+            result_text = json.dumps(result, ensure_ascii=False, sort_keys=True)
+        else:
+            result_text = str(result or "")
+        if not status and not result_text:
+            return ""
         lines = [f"历史工具调用: {name}"]
         if status:
             lines.append(f"状态: {status}")
         if result_text:
             lines.extend(["结果:", result_text])
-        else:
-            lines.append("结果: （无可用摘要）")
         return "\n".join(lines)
 
     @staticmethod

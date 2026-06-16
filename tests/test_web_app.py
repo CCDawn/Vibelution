@@ -3977,7 +3977,7 @@ def test_submit_session_message_preserves_chinese_content_round_trip(tmp_path, m
     assert persisted["role"] == "user"
     assert persisted["content"] == content
 
-    workspace_log = tmp_path / "workspace" / "sessions" / "session-live" / "logs" / "conversation.jsonl"
+    workspace_log = session_service._ensure_session_workspace("session-live") / "logs" / "conversation.jsonl"
     log_records = [json.loads(line) for line in workspace_log.read_text(encoding="utf-8").splitlines()]
     assert log_records[-1]["content"] == content
 

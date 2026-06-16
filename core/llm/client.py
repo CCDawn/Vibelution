@@ -22,6 +22,8 @@ from core.context.volatility import is_volatile_context_text
 from .adapters import get_provider_adapter
 from .discovery import discover_model
 from .errors import classify_exception
+from .message_projector import message_to_openai_dict as project_message_to_openai_dict
+from .message_projector import normalize_messages_for_provider
 from .payload_builder import PayloadBuildInput, build_llm_payload
 from .payload_validator import payload_protocol_summary
 from .protocol_resolver import resolve_model_protocol
@@ -916,48 +918,11 @@ def _message_to_openai_dict(
     preserve_structured_content: bool = False,
     preserve_reasoning_content: bool = False,
 ) -> Dict[str, Any]:
-    def content_value(value: Any) -> Any:
-        if preserve_structured_content and isinstance(value, list):
-            return value
-        return extract_text_content(value)
-
-    def maybe_attach_reasoning(payload: Dict[str, Any], value: Any) -> Dict[str, Any]:
-        if not preserve_reasoning_content or payload.get("role") != "assistant":
-            return payload
-        reasoning_text = extract_text_content(value)
-        if reasoning_text.strip():
-            payload["reasoning_content"] = reasoning_text
-        return payload
-
-    if isinstance(message, SystemMessage):
-        return {"role": "system", "content": content_value(message.content)}
-    if isinstance(message, ToolMessage):
-        payload = {"role": "tool", "content": content_value(message.content)}
-        if getattr(message, "tool_call_id", None):
-            payload["tool_call_id"] = message.tool_call_id
-        return payload
-    if isinstance(message, AIMessage):
-        payload = {"role": "assistant", "content": content_value(message.content)}
-        tool_calls = _normalize_tool_calls(getattr(message, "tool_calls", []) or [])
-        if tool_calls:
-            payload["tool_calls"] = tool_calls
-        additional_kwargs = getattr(message, "additional_kwargs", None) or {}
-        return maybe_attach_reasoning(payload, additional_kwargs.get("reasoning_content"))
-    if isinstance(message, BaseMessage):
-        return {"role": getattr(message, "type", "user"), "content": content_value(getattr(message, "content", ""))}
-    if isinstance(message, dict):
-        payload = {"role": str(message.get("role") or "user"), "content": content_value(message.get("content"))}
-        if payload["role"] == "assistant":
-            tool_calls = _normalize_tool_calls(message.get("tool_calls") or [])
-            if tool_calls:
-                payload["tool_calls"] = tool_calls
-        if payload["role"] == "tool" and message.get("tool_call_id"):
-            payload["tool_call_id"] = message.get("tool_call_id")
-        reasoning = message.get("reasoning_content")
-        if reasoning in (None, "") and isinstance(message.get("additional_kwargs"), dict):
-            reasoning = message["additional_kwargs"].get("reasoning_content")
-        return maybe_attach_reasoning(payload, reasoning)
-    return {"role": "user", "content": content_value(message)}
+    return project_message_to_openai_dict(
+        message,
+        preserve_structured_content=preserve_structured_content,
+        preserve_reasoning_content=preserve_reasoning_content,
+    )
 
 
 def _content_blocks_have_image(value: Any) -> bool:
@@ -1068,9 +1033,10 @@ class LLMClient:
         selected_tools = list(self.bound_tools)
         if tools is not None:
             selected_tools = list(tools or [])
+        provider_messages = normalize_messages_for_provider(list(messages or []))
         built = build_llm_payload(
             PayloadBuildInput(
-                messages=list(messages or []),
+                messages=provider_messages,
                 tools=selected_tools,
                 profile=self.profile,
                 provider=self.provider,
