@@ -53,6 +53,16 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain('setActiveFilter(targetAgent.status === "archived" ? "archived" : "active")');
     expect(routeSource).toContain('normalized === "supervised_evolution"');
     expect(routeSource).toContain("返回监督进化");
+    expect(routeSource).toContain('normalized === "tools"');
+    expect(routeSource).toContain("返回工具配置");
+    expect(routeSource).toContain('normalized === "teams"');
+    expect(routeSource).toContain("返回团队");
+    expect(routeSource).toContain('normalized === "chat"');
+    expect(routeSource).toContain("返回会话");
+    expect(routeSource).toContain('normalized === "memory"');
+    expect(routeSource).toContain("返回记忆库");
+    expect(routeSource).toContain('normalized === "research_flow"');
+    expect(routeSource).toContain("返回科研流程画布");
     expect(routeSource).toContain("returnBannerTitle: \"返回跳转前页面\"");
     expect(routeSource).toContain("className={styles.returnBanner}");
     expect(routeSource).toContain("className={styles.returnBannerButton}");
