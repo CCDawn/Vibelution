@@ -53,6 +53,10 @@ const NODE_WIDTH = 172;
 const NODE_HEIGHT = 92;
 const CANVAS_VIEWPORT_WIDTH = 1180;
 const CANVAS_VIEWPORT_HEIGHT = 760;
+const RESEARCH_CANVAS_AUTO_LAYOUT_START_X = 64;
+const RESEARCH_CANVAS_AUTO_LAYOUT_CENTER_Y = 250;
+const RESEARCH_CANVAS_AUTO_LAYOUT_LAYER_GAP = 216;
+const RESEARCH_CANVAS_AUTO_LAYOUT_ROW_GAP = 122;
 const TEAM_ORGANIZATION_CANVAS_KIND = "team_organization_canvas";
 const RESEARCH_TEAM_ID = "research-team";
 const AI_SEARCH_TEAM_ID = "ai-search-team";
@@ -979,6 +983,8 @@ type CanvasFrameSize = {
   height: number;
 };
 
+type ResearchCanvasLayoutMode = "auto" | "source";
+
 function formatTime(value: string, lang: "zh" | "en") {
   const parsed = new Date(String(value || ""));
   if (Number.isNaN(parsed.getTime())) {
@@ -1672,6 +1678,140 @@ function sourceCollectionOwnerAgentIdFromCanvas(canvas: TeamOrganizationCanvas |
   return "";
 }
 
+function canvasNodeLayoutText(node: TeamCanvasNode) {
+  return [
+    node.id,
+    node.label,
+    node.role,
+    node.purpose,
+    node.agentCode,
+    node.agentName,
+    node.responsibilities?.join(" "),
+  ].filter(Boolean).join(" ").toLowerCase();
+}
+
+function researchCanvasRoleLayer(node: TeamCanvasNode) {
+  const text = canvasNodeLayoutText(node);
+  if (
+    text.includes("ceo")
+    || text.includes("lead")
+    || text.includes("负责人")
+    || text.includes("research_coordination")
+    || text.includes("data_intake_coordinator")
+  ) {
+    return 0;
+  }
+  if (text.includes("organization") || text.includes("advisor") || text.includes("顾问")) {
+    return 1;
+  }
+  if (
+    text.includes("data_discovery")
+    || text.includes("source_discovery")
+    || text.includes("discovery")
+    || text.includes("search")
+    || text.includes("发现")
+    || text.includes("搜集")
+  ) {
+    return 2;
+  }
+  if (
+    text.includes("source_acquisition")
+    || text.includes("acquisition")
+    || text.includes("intake")
+    || text.includes("获取")
+  ) {
+    return 3;
+  }
+  if (text.includes("content_extraction") || text.includes("extract") || text.includes("抽取") || text.includes("提炼")) {
+    return 4;
+  }
+  if (text.includes("source_quality") || text.includes("quality") || text.includes("质评") || text.includes("质检")) {
+    return 5;
+  }
+  if (
+    text.includes("mapping")
+    || text.includes("graph")
+    || text.includes("capability")
+    || text.includes("steward")
+    || text.includes("映射")
+    || text.includes("管家")
+  ) {
+    return 6;
+  }
+  return null;
+}
+
+function teamCanvasNodeSortKey(node: TeamCanvasNode) {
+  return `${researchCanvasRoleLayer(node) ?? 99}:${node.label || ""}:${node.agentCode || ""}:${node.id}`;
+}
+
+function autoLayoutResearchCanvasNodes(
+  nodes: TeamCanvasNode[],
+  edges: Array<{ source: string; target: string; type?: string }>,
+) {
+  if (nodes.length <= 1) {
+    return nodes.map((node) => ({ ...node }));
+  }
+  const nodeIds = new Set(nodes.map((node) => node.id));
+  const outgoing = new Map<string, string[]>();
+  const incomingCount = new Map(nodes.map((node) => [node.id, 0]));
+  edges
+    .filter((edge) => nodeIds.has(edge.source) && nodeIds.has(edge.target) && !isCommunicationEdge({ type: edge.type || "" }))
+    .forEach((edge) => {
+      outgoing.set(edge.source, [...(outgoing.get(edge.source) ?? []), edge.target]);
+      incomingCount.set(edge.target, (incomingCount.get(edge.target) ?? 0) + 1);
+    });
+
+  const graphDepth = new Map(nodes.map((node) => [node.id, 0]));
+  const queue = nodes
+    .filter((node) => (incomingCount.get(node.id) ?? 0) === 0)
+    .sort((left, right) => teamCanvasNodeSortKey(left).localeCompare(teamCanvasNodeSortKey(right)))
+    .map((node) => node.id);
+  const visited = new Set<string>();
+
+  while (queue.length) {
+    const nodeId = queue.shift();
+    if (!nodeId || visited.has(nodeId)) {
+      continue;
+    }
+    visited.add(nodeId);
+    for (const targetId of outgoing.get(nodeId) ?? []) {
+      graphDepth.set(targetId, Math.max(graphDepth.get(targetId) ?? 0, (graphDepth.get(nodeId) ?? 0) + 1));
+      incomingCount.set(targetId, Math.max(0, (incomingCount.get(targetId) ?? 0) - 1));
+      if ((incomingCount.get(targetId) ?? 0) === 0) {
+        queue.push(targetId);
+      }
+    }
+  }
+
+  const layers = new Map<number, TeamCanvasNode[]>();
+  for (const node of nodes) {
+    const roleLayer = researchCanvasRoleLayer(node);
+    const layer = Math.max(roleLayer ?? 0, graphDepth.get(node.id) ?? 0);
+    layers.set(layer, [...(layers.get(layer) ?? []), node]);
+  }
+
+  const positions = new Map<string, { x: number; y: number }>();
+  Array.from(layers.entries())
+    .sort(([leftLayer], [rightLayer]) => leftLayer - rightLayer)
+    .forEach(([layer, layerNodes]) => {
+      const sortedNodes = [...layerNodes].sort((left, right) => teamCanvasNodeSortKey(left).localeCompare(teamCanvasNodeSortKey(right)));
+      const layerHeight = (sortedNodes.length - 1) * RESEARCH_CANVAS_AUTO_LAYOUT_ROW_GAP;
+      const startY = Math.max(56, RESEARCH_CANVAS_AUTO_LAYOUT_CENTER_Y - layerHeight / 2);
+      sortedNodes.forEach((node, index) => {
+        positions.set(node.id, {
+          x: Math.round(RESEARCH_CANVAS_AUTO_LAYOUT_START_X + layer * RESEARCH_CANVAS_AUTO_LAYOUT_LAYER_GAP),
+          y: Math.round(startY + index * RESEARCH_CANVAS_AUTO_LAYOUT_ROW_GAP),
+        });
+      });
+    });
+
+  return nodes.map((node) => ({
+    ...node,
+    ...(positions.get(node.id) ?? {}),
+  }));
+}
+
 function normalizeAgentRoleKey(value: string | undefined | null) {
   return String(value || "").trim().toLowerCase();
 }
@@ -1814,7 +1954,10 @@ function edgeLine(
   );
   const peerIndex = Math.max(0, peerEdges.findIndex((peerEdge) => peerEdge.id === edge.id));
   const pairSpread = peerEdges.length > 1 ? (peerIndex - (peerEdges.length - 1) / 2) * 20 : 0;
-  const curve = (isCommunicationEdge({ type: edge.type || "" }) ? 42 : 24) + pairSpread;
+  const sourcePeerEdges = visiblePeerEdges.filter((peerEdge) => peerEdge.source === edge.source);
+  const sourcePeerIndex = Math.max(0, sourcePeerEdges.findIndex((peerEdge) => peerEdge.id === edge.id));
+  const sourceFanSpread = sourcePeerEdges.length > 1 ? (sourcePeerIndex - (sourcePeerEdges.length - 1) / 2) * 8 : 0;
+  const curve = (isCommunicationEdge({ type: edge.type || "" }) ? 42 : 24) + pairSpread + sourceFanSpread;
   const cx = (x1 + x2) / 2 + normalX * curve;
   const cy = (y1 + y2) / 2 + normalY * curve;
   return { x1, y1, x2, y2, cx, cy };
@@ -2466,6 +2609,7 @@ export function TeamsRoute({
   const [teamInterrupt, setTeamInterrupt] = useState(false);
   const [teamTaskTopic, setTeamTaskTopic] = useState("");
   const [showCommunicationEdges, setShowCommunicationEdges] = useState(false);
+  const [researchCanvasLayoutMode, setResearchCanvasLayoutMode] = useState<ResearchCanvasLayoutMode>("auto");
   const [researchWorkspaceView, setResearchWorkspaceView] = useState<ResearchWorkspaceView>(
     forcedResearchWorkspaceView ?? requestedResearchWorkspaceView ?? "overview",
   );
@@ -2694,12 +2838,18 @@ export function TeamsRoute({
       })),
     [canvas, nodePositionDrafts],
   );
-  const selectedNode = canvasNodes.find((node) => node.id === selectedNodeId) ?? canvasNodes[0] ?? null;
   const organizationEdges = useMemo(() => (canvas?.edges ?? []).filter((edge) => !isCommunicationEdge(edge)), [canvas]);
   const communicationEdges = useMemo(
     () => (canvas?.edges ?? []).filter((edge) => isCommunicationEdge(edge)),
     [canvas],
   );
+  const autoLayoutCanvasNodes = useMemo(
+    () => autoLayoutResearchCanvasNodes(canvasNodes, organizationEdges),
+    [canvasNodes, organizationEdges],
+  );
+  const researchCanvasAutoLayoutActive = researchCanvasReadOnly && researchCanvasLayoutMode === "auto";
+  const displayCanvasNodes = researchCanvasAutoLayoutActive ? autoLayoutCanvasNodes : canvasNodes;
+  const selectedNode = displayCanvasNodes.find((node) => node.id === selectedNodeId) ?? displayCanvasNodes[0] ?? null;
   const visibleCommunicationEdges = useMemo(() => {
     if (!showCommunicationEdges) {
       return [];
@@ -2794,7 +2944,7 @@ export function TeamsRoute({
     enabled: Boolean(researchWorkflowTeamSelected && selectedSourceCollectionRunEffectiveId),
     refetchInterval: () => sourceCollectionRunRefetchInterval(pageVisible, sourceCollectionRunStatusQuery.data?.runStatus || ""),
   });
-  const autoCanvasViewportStyle = useMemo(() => canvasViewStyle(canvasNodes, canvasFrameSize), [canvasFrameSize, canvasNodes]);
+  const autoCanvasViewportStyle = useMemo(() => canvasViewStyle(displayCanvasNodes, canvasFrameSize), [canvasFrameSize, displayCanvasNodes]);
   const canvasViewportStyle = lockedCanvasViewportStyle ?? autoCanvasViewportStyle;
   const canvasScale = canvasStyleScale(canvasViewportStyle);
   const teamBusEvents = useMemo(
@@ -7117,6 +7267,27 @@ export function TeamsRoute({
               ) : saveLabel ? (
                 <span className={styles.saveState}>{saveLabel}</span>
               ) : null}
+              {researchCanvasReadOnly ? (
+                <div className={styles.canvasLayoutModeSwitch} role="group" aria-label={lang === "zh" ? "画布排版模式" : "Canvas layout mode"}>
+                  <button
+                    type="button"
+                    className={researchCanvasAutoLayoutActive ? styles.layerButtonActive : ""}
+                    onClick={() => setResearchCanvasLayoutMode("auto")}
+                    title={lang === "zh" ? "自动排版只改变当前显示，不保存坐标" : "Auto layout only changes the current view and does not save coordinates"}
+                  >
+                    <RefreshCw size={14} />
+                    {lang === "zh" ? "自动排版" : "Auto layout"}
+                  </button>
+                  <button
+                    type="button"
+                    className={!researchCanvasAutoLayoutActive ? styles.layerButtonActive : ""}
+                    onClick={() => setResearchCanvasLayoutMode("source")}
+                    title={lang === "zh" ? "显示画布文件中的原始坐标" : "Show the original coordinates from the canvas file"}
+                  >
+                    {lang === "zh" ? "原始坐标" : "Original"}
+                  </button>
+                </div>
+              ) : null}
               <button
                 type="button"
                 className={showCommunicationEdges ? styles.layerButtonActive : ""}
@@ -7185,7 +7356,7 @@ export function TeamsRoute({
                     </marker>
                   </defs>
                   {visibleEdges.map((edge) => {
-                    const line = edgeLine(edge, canvasNodes, visibleEdges);
+                    const line = edgeLine(edge, displayCanvasNodes, visibleEdges);
                     return line ? (
                       <path
                         key={edge.id}
@@ -7195,7 +7366,7 @@ export function TeamsRoute({
                     ) : null;
                   })}
                 </svg>
-                {canvasNodes.map((node) => {
+                {displayCanvasNodes.map((node) => {
                   const agent = activeAgents.find((item) => item.agentId === node.agentId);
                   const display = agent ? agentDisplayInfo(agent, lang) : null;
                   const functionLabel = teamNodeFunctionLabel(node, display?.functionLabel, lang);
