@@ -19,6 +19,7 @@ from core.infrastructure import developer_sandbox, git_process
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 CONTENT_LIMIT = 8000
 LIST_LIMIT = 20
+AGENT_MEMORY_FILE_LIMIT = 120
 MEMORY_CHANNELS = {"conversation", "research", "self_evolution", "supervised_evolution", "explicit_read"}
 MEMORY_CHANNEL_ORDER = ["conversation", "research", "self_evolution", "supervised_evolution", "explicit_read"]
 VISIBILITY_CLASSES = {"prompt", "agent_visible", "manual", "diagnostic", "missing"}
@@ -185,6 +186,84 @@ def get_memory_overview(*, include_content: bool = True) -> dict[str, Any]:
         phase_timings=phase_timings,
     )
     return overview
+
+
+def get_agent_memory_inventory(*, agent_id: str = "", include_content: bool = False) -> dict[str, Any]:
+    """Return Agent-private workspace memory files and formal private knowledge counts."""
+
+    from core.web.services import agent_directory_service, team_knowledge_service
+
+    root = PROJECT_ROOT.resolve()
+    normalized_agent_id = str(agent_id or "").strip()
+    warnings: list[str] = []
+    agents = agent_directory_service.list_agents(include_archived=True, detail="summary")
+    if normalized_agent_id:
+        agents = [agent for agent in agents if str(agent.get("agentId") or "").strip() == normalized_agent_id]
+        if not agents:
+            return {
+                "schemaVersion": 1,
+                "generatedAt": _now_iso(),
+                "projectRoot": str(root),
+                "selectedAgentId": normalized_agent_id,
+                "selectedAgent": None,
+                "summary": {
+                    "agentCount": 0,
+                    "agentWithPrivateMemoryCount": 0,
+                    "privateFileCount": 0,
+                    "privateByteCount": 0,
+                    "formalKnowledgeBaseCount": 0,
+                    "formalKnowledgeItemCount": 0,
+                    "warnings": [f"Agent not found: {normalized_agent_id}"],
+                },
+                "agents": [],
+            }
+
+    agent_entries: list[dict[str, Any]] = []
+    for agent in agents:
+        entry = _agent_memory_inventory_entry(
+            root,
+            agent,
+            include_content=include_content,
+            team_knowledge_service=team_knowledge_service,
+            warnings=warnings,
+        )
+        agent_entries.append(entry)
+
+    agent_entries.sort(
+        key=lambda item: (
+            1 if item.get("hasPrivateMemory") else 0,
+            str(item.get("latestUpdatedAt") or item.get("updatedAt") or item.get("createdAt") or ""),
+        ),
+        reverse=True,
+    )
+    selected_agent = agent_entries[0] if normalized_agent_id and agent_entries else None
+    private_file_count = sum(int(agent.get("fileCount") or 0) for agent in agent_entries)
+    private_byte_count = sum(int(agent.get("byteCount") or 0) for agent in agent_entries)
+    formal_knowledge_base_count = sum(
+        int(((agent.get("knowledgeSummary") or {}).get("knowledgeBaseCount")) or 0)
+        for agent in agent_entries
+    )
+    formal_knowledge_item_count = sum(
+        int(((agent.get("knowledgeSummary") or {}).get("itemCount")) or 0)
+        for agent in agent_entries
+    )
+    return {
+        "schemaVersion": 1,
+        "generatedAt": _now_iso(),
+        "projectRoot": str(root),
+        "selectedAgentId": normalized_agent_id,
+        "selectedAgent": selected_agent,
+        "summary": {
+            "agentCount": len(agent_entries),
+            "agentWithPrivateMemoryCount": sum(1 for agent in agent_entries if agent.get("hasPrivateMemory")),
+            "privateFileCount": private_file_count,
+            "privateByteCount": private_byte_count,
+            "formalKnowledgeBaseCount": formal_knowledge_base_count,
+            "formalKnowledgeItemCount": formal_knowledge_item_count,
+            "warnings": warnings,
+        },
+        "agents": agent_entries,
+    }
 
 
 def prewarm_memory_overview_cache(*, reason: str = "startup") -> dict[str, Any]:
@@ -1948,6 +2027,202 @@ def _memory_item_payload(
         "contentTruncated": content_truncated,
         "exists": exists,
     }
+
+
+def _agent_memory_inventory_entry(
+    root: Path,
+    agent: dict[str, Any],
+    *,
+    include_content: bool,
+    team_knowledge_service: Any,
+    warnings: list[str],
+) -> dict[str, Any]:
+    agent_id = str(agent.get("agentId") or "").strip()
+    workspace_path = str(agent.get("workspacePath") or _fallback_agent_workspace_path(agent_id)).strip()
+    memory_root = _resolve_agent_memory_root(root, workspace_path)
+    items: list[dict[str, Any]] = []
+    if memory_root is None:
+        warnings.append(f"Agent workspace is outside project root: {agent_id or '-'}")
+        private_memory_root = ""
+    else:
+        private_memory_root = _rel(root, memory_root)
+        items = _agent_private_memory_items(root, agent_id, memory_root, include_content=include_content)
+
+    byte_count = sum(int(item.get("sizeBytes") or 0) for item in items)
+    latest_updated_at = _latest_item_timestamp(items)
+    knowledge_summary = _agent_formal_knowledge_summary(agent_id, team_knowledge_service)
+    return {
+        "agentId": agent_id,
+        "agentCode": str(agent.get("agentCode") or "").strip(),
+        "displayName": _agent_display_name(agent),
+        "status": str(agent.get("status") or "active").strip() or "active",
+        "primaryMode": str(agent.get("primaryMode") or "").strip(),
+        "roleKey": str(agent.get("roleKey") or "").strip(),
+        "promptTemplateId": str(agent.get("promptTemplateId") or "").strip(),
+        "workspacePath": workspace_path,
+        "privateMemoryRoot": private_memory_root,
+        "hasPrivateMemory": bool(items),
+        "fileCount": len(items),
+        "byteCount": byte_count,
+        "latestUpdatedAt": latest_updated_at,
+        "createdAt": str(agent.get("createdAt") or "").strip(),
+        "updatedAt": str(agent.get("updatedAt") or "").strip(),
+        "knowledgeSummary": knowledge_summary,
+        "items": items,
+    }
+
+
+def _agent_private_memory_items(root: Path, agent_id: str, memory_root: Path, *, include_content: bool) -> list[dict[str, Any]]:
+    if not memory_root.exists() or not memory_root.is_dir():
+        return []
+    files: list[Path] = []
+    try:
+        files = [path for path in memory_root.rglob("*") if path.is_file()]
+    except OSError:
+        return []
+    files.sort(key=_path_mtime_seconds, reverse=True)
+    items: list[dict[str, Any]] = []
+    for path in files[:AGENT_MEMORY_FILE_LIMIT]:
+        items.append(_agent_private_memory_item(root, agent_id, memory_root, path, include_content=include_content))
+    return items
+
+
+def _agent_private_memory_item(
+    root: Path,
+    agent_id: str,
+    memory_root: Path,
+    path: Path,
+    *,
+    include_content: bool,
+) -> dict[str, Any]:
+    try:
+        relative_path = path.resolve().relative_to(memory_root.resolve()).as_posix()
+    except (OSError, ValueError):
+        relative_path = path.name
+    try:
+        stat = path.stat()
+        size_bytes = int(stat.st_size)
+    except OSError:
+        size_bytes = 0
+    content_type = _content_type(path)
+    if include_content:
+        read = _read_text(path)
+        content = str(read.get("content") or "")
+        summary = _file_content_summary(path, content, content_type=content_type, exists=path.exists())
+        truncated = bool(read.get("truncated"))
+        content_deferred = False
+    else:
+        content = ""
+        summary = f"Agent 私有记忆文件：{relative_path}"
+        truncated = False
+        content_deferred = True
+    item = _memory_item_payload(
+        item_id=_item_id("agent-private-memory", Path(agent_id or "agent") / relative_path),
+        title=relative_path,
+        kind="agent_private_memory_file",
+        source="agent_private_workspace",
+        path=_rel(root, path),
+        updated_at=_mtime(path),
+        agent_visible=True,
+        in_prompt=False,
+        used_by=["agent_private_memory"],
+        channels=["explicit_read"],
+        visibility_class="agent_visible",
+        summary=summary,
+        content=content,
+        content_type=content_type,
+        content_truncated=truncated,
+        exists=path.exists(),
+    )
+    item.update(
+        {
+            "agentId": agent_id,
+            "relativePath": relative_path,
+            "privateMemoryRoot": _rel(root, memory_root),
+            "sizeBytes": size_bytes,
+            "contentDeferred": content_deferred,
+            "contentLength": len(content) if include_content else size_bytes,
+        }
+    )
+    return item
+
+
+def _agent_formal_knowledge_summary(agent_id: str, team_knowledge_service: Any) -> dict[str, Any]:
+    if not agent_id:
+        return {
+            "knowledgeBaseCount": 0,
+            "itemCount": 0,
+            "sourceArtifactCount": 0,
+            "pendingProposalCount": 0,
+            "knowledgeBases": [],
+        }
+    try:
+        payload = team_knowledge_service.list_agent_knowledge_bases(agent_id, actor_agent_id=agent_id, internal=True)
+    except Exception as exc:
+        return {
+            "knowledgeBaseCount": 0,
+            "itemCount": 0,
+            "sourceArtifactCount": 0,
+            "pendingProposalCount": 0,
+            "knowledgeBases": [],
+            "error": f"{type(exc).__name__}: {exc}",
+        }
+    bases = [base for base in payload.get("knowledgeBases") or [] if isinstance(base, dict)]
+    return {
+        "knowledgeBaseCount": len(bases),
+        "itemCount": sum(int(((base.get("stats") or {}).get("itemCount")) or 0) for base in bases),
+        "sourceArtifactCount": sum(int(((base.get("stats") or {}).get("sourceArtifactCount")) or 0) for base in bases),
+        "pendingProposalCount": sum(int(((base.get("stats") or {}).get("pendingProposalCount")) or 0) for base in bases),
+        "knowledgeBases": [
+            {
+                "knowledgeBaseId": str(base.get("knowledgeBaseId") or ""),
+                "scopedKnowledgeBaseId": str(base.get("scopedKnowledgeBaseId") or ""),
+                "name": str(base.get("name") or ""),
+                "description": str(base.get("description") or ""),
+                "stats": base.get("stats") if isinstance(base.get("stats"), dict) else {},
+            }
+            for base in bases
+        ],
+    }
+
+
+def _resolve_agent_memory_root(root: Path, workspace_path: str) -> Path | None:
+    workspace = str(workspace_path or "").strip()
+    if not workspace:
+        return None
+    candidate = Path(workspace)
+    if not candidate.is_absolute():
+        candidate = root / candidate
+    try:
+        resolved = candidate.resolve()
+        resolved.relative_to(root.resolve())
+    except (OSError, ValueError):
+        return None
+    return resolved / "memory"
+
+
+def _fallback_agent_workspace_path(agent_id: str) -> str:
+    normalized = re.sub(r"[^a-zA-Z0-9_.-]+", "-", str(agent_id or "agent")).strip("-") or "agent"
+    return f"workspace/agents/{normalized}"
+
+
+def _path_mtime_seconds(path: Path) -> float:
+    try:
+        return path.stat().st_mtime
+    except OSError:
+        return 0.0
+
+
+def _agent_display_name(agent: dict[str, Any]) -> str:
+    display_name = str(agent.get("displayName") or "").strip()
+    if display_name:
+        return display_name
+    metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
+    for key in ("functionalDisplayName", "displayName", "name", "roleName"):
+        value = str(metadata.get(key) or "").strip()
+        if value:
+            return value
+    return str(agent.get("agentCode") or agent.get("agentId") or "Agent").strip() or "Agent"
 
 
 def _normalize_channels(channels: list[str] | None, *, agent_visible: bool, in_prompt: bool) -> list[str]:
