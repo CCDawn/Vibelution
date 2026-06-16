@@ -1548,11 +1548,23 @@ class WorkbenchThemeConfig(BaseModel):
         default="",
         description="工作台背景图片的安全相对路径"
     )
+    background_readability: str = Field(
+        default="standard",
+        description="工作台背景图片可读性保护强度（soft、standard、strong）",
+    )
 
     @field_validator("background_image_path")
     @classmethod
     def validate_background_image_path(cls, value: str) -> str:
         return str(value or "").strip().replace("\\", "/")
+
+    @field_validator("background_readability")
+    @classmethod
+    def validate_background_readability(cls, value: str) -> str:
+        normalized = str(value or "standard").strip().lower()
+        if normalized not in {"soft", "standard", "strong"}:
+            return "standard"
+        return normalized
 
 
 class UIConfig(BaseModel):
