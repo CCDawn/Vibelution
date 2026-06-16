@@ -279,6 +279,15 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("可点击来源");
     expect(routeSource).toContain("本地文件");
     expect(routeSource).toContain("缺少来源");
+    expect(routeSource).toContain("SourceCollectionSourceFilter");
+    expect(routeSource).toContain("SOURCE_COLLECTION_SOURCE_FILTERS");
+    expect(routeSource).toContain("sourceCollectionSourceFilterLabel");
+    expect(routeSource).toContain("sourceCollectionSourceFilter");
+    expect(routeSource).toContain("sourceCollectionFilteredRecords");
+    expect(routeSource).toContain("sourceCollectionFilteredRunCandidates");
+    expect(routeSource).toContain("sourceCollectionFilterMatches");
+    expect(routeSource).toContain("论文网页/DOI");
+    expect(routeSource).toContain("PDF");
     expect(routeSource).toContain("sourceCollectionCandidateProvenance");
     expect(routeSource).toContain("sourceCollectionRecordProvenance");
     expect(routeSource).toContain("sourceCollectionRecordClickableSourceCount");
@@ -303,6 +312,7 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("仅有搜索记录，缺少可读来源");
     expect(routeSource).not.toContain("打开搜索页");
     expect(routeSource).toContain("本轮原始资料记录");
+    expect(routeSource).toContain("当前过滤条件下没有原始资料记录");
     expect(routeSource).toContain("搜索问题");
     expect(routeSource).toContain("等待 Agent 审查");
     expect(routeSource).toContain("缓存");
@@ -331,6 +341,9 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("查看候选库");
     expect(routeSource).toContain("openSourceCollectionCandidatePanel");
     expect(routeSource).toContain("renderSourceCollectionCandidatePanel");
+    expect(routeSource).not.toContain("sourceCollectionRunCandidates.slice(0, 6)");
+    expect(routeSource).not.toContain("sourceCollectionRunCandidates.slice(0, 12)");
+    expect(routeSource).not.toContain("SOURCE_COLLECTION_RESULT_PREVIEW_LIMIT");
     expect(routeSource).toContain("sourceCollectionStageCard");
     expect(routeSource).toContain("detailLabel");
     expect(routeSource).toContain("module.onDetail()");
@@ -399,6 +412,9 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("sourceCollectionResultList");
     expect(routeSource).toContain("sourceCollectionResultStatus");
     expect(routeSource).toContain("resultStatusLabel");
+    expect(routeSource).toContain("当前过滤条件下没有候选资料");
+    expect(routeSource).toContain("当前过滤条件下没有候选图谱节点");
+    expect(routeSource).toContain("当前过滤条件下没有前审资料");
     expect(routeSource).toContain("candidate.qualityStatus || candidate.currentState");
     expect(routeSource).toContain("source_needs_quality_revision: \"待质检\"");
     expect(routeSource).toContain("source_screened: \"已筛选\"");
@@ -538,6 +554,8 @@ describe("TeamsRoute layout contract", () => {
     expect(routeStyles.sourceCollectionTraceStorage).toBeTypeOf("string");
     expect(routeStyles.sourceCollectionResultsPanel).toBeTypeOf("string");
     expect(routeStyles.sourceCollectionResultsHeader).toBeTypeOf("string");
+    expect(routeStyles.sourceCollectionFilterBar).toBeTypeOf("string");
+    expect(routeStyles.sourceCollectionFilterActive).toBeTypeOf("string");
     expect(routeStyles.sourceCollectionResultStats).toBeTypeOf("string");
     expect(routeStyles.sourceCollectionResultList).toBeTypeOf("string");
     expect(routeStyles.sourceCollectionResultItem).toBeTypeOf("string");
@@ -558,6 +576,8 @@ describe("TeamsRoute layout contract", () => {
     expect(routeStylesSource).toContain(".sourceCollectionResultStatus");
     expect(routeStylesSource).toContain(".sourceCollectionResultSource");
     expect(routeStylesSource).toContain(".sourceCollectionResultSourceMissing");
+    expect(routeStylesSource).toContain(".sourceCollectionFilterBar");
+    expect(routeStylesSource).toContain(".sourceCollectionFilterActive");
     expect(routeStylesSource).toContain("grid-template-columns: minmax(220px, 1fr) minmax(80px, 112px) minmax(150px, 240px)");
     expect(routeStylesSource).toContain("min-height: 104px");
     expect(routeStylesSource).toContain("grid-template-columns: repeat(5, minmax(0, 1fr))");
