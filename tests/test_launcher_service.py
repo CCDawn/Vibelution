@@ -858,7 +858,14 @@ def test_launcher_status_exposes_control_plane_evidence(tmp_path, monkeypatch):
                     {
                         "type": "command_queue.command_result_written",
                         "at": "2026-06-03T00:00:06+00:00",
-                        "payload": {"commandId": "cmd-recovered", "ok": True, "message": "Workbench restarted."},
+                        "payload": {
+                            "commandId": "cmd-recovered",
+                            "type": "restart_workbench",
+                            "requestedBy": "launcher_api",
+                            "resultPath": "cmd-recovered.json",
+                            "ok": True,
+                            "message": "Workbench restarted.",
+                        },
                     }
                 ),
             ]
@@ -905,10 +912,14 @@ def test_launcher_status_exposes_control_plane_evidence(tmp_path, monkeypatch):
     assert "2" in evidence["restartQueue"]["statusLine"]
     assert evidence["results"]["recent"][0]["commandId"] in {"cmd-result", "cmd-recovered"}
     assert evidence["events"]["recent"][0]["type"] == "command_queue.command_result_written"
+    assert evidence["events"]["recent"][0]["commandType"] == "restart_workbench"
+    assert evidence["events"]["recent"][0]["requestedBy"] == "launcher_api"
+    assert evidence["events"]["recent"][0]["resultPath"] == "cmd-recovered.json"
     assert evidence["recovery"]["active"] is True
     assert evidence["recovery"]["commandId"] == "cmd-recovered"
     assert evidence["recovery"]["commandType"] == "restart_workbench"
     assert evidence["recovery"]["resultOk"] is True
+    assert evidence["recovery"]["resultPath"] == "cmd-recovered.json"
     assert "Workbench restarted." in evidence["recovery"]["statusLine"]
 
 

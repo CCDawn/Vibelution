@@ -623,7 +623,9 @@ def _workbench_is_already_closed(state: Any) -> bool:
 def complete_command(path: Path, result: dict[str, Any]) -> None:
     command_id = str(result.get("commandId") or path.stem).strip() or path.stem
     completed_at = datetime.now(timezone.utc)
-    _atomic_write_json(RESULTS_DIR / f"{command_id}.json", result)
+    result_path = RESULTS_DIR / f"{command_id}.json"
+    command_payload = _load_command_file(path)
+    _atomic_write_json(result_path, result)
     clear_lifecycle_interrupt(command_id)
     try:
         path.unlink(missing_ok=True)
@@ -631,6 +633,9 @@ def complete_command(path: Path, result: dict[str, Any]) -> None:
         pass
     event_payload = {
         "commandId": command_id,
+        "type": str(result.get("type") or command_payload.get("type") or ""),
+        "requestedBy": str(result.get("requestedBy") or command_payload.get("requestedBy") or ""),
+        "resultPath": result_path.name,
         "ok": bool(result.get("ok")),
         "completed": bool(result.get("completed")),
         "message": truncate_event_text(str(result.get("message") or "")),

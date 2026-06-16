@@ -2217,6 +2217,9 @@ def test_command_queue_records_queued_claimed_and_result_written_events(tmp_path
     assert queued_payload["commandId"] == command["commandId"]
     assert queued_payload["args"] == {"argKeys": ["token"], "noBrowser": True, "reason": "launcher_start"}
     assert file_events[1]["payload"]["queuePath"] == f"{command['commandId']}.json"
+    assert file_events[2]["payload"]["type"] == "open_workbench"
+    assert file_events[2]["payload"]["requestedBy"] == "launcher_ps"
+    assert file_events[2]["payload"]["resultPath"] == f"{command['commandId']}.json"
     assert file_events[2]["payload"]["ok"] is True
     assert [event_type for event_type, _, _ in scene_events] == [event["type"] for event in file_events]
     assert {kwargs["phase"] for _, _, kwargs in scene_events} == {"queue"}
@@ -3557,6 +3560,47 @@ def test_ensure_daemon_running_restarts_stale_source_signature(monkeypatch, tmp_
         ),
     ]
     assert popen_calls == [["python-test", "-m", "core.runtime_manager.cli", "daemon"]]
+
+
+def test_claim_daemon_ownership_blocks_existing_live_pid(monkeypatch, tmp_path):
+    events: list[tuple[str, dict]] = []
+    lock_path = tmp_path / "daemon.lock"
+
+    monkeypatch.setattr(daemon, "DAEMON_LOCK_PATH", lock_path)
+    monkeypatch.setattr(daemon, "load_pid", lambda: 12345)
+    monkeypatch.setattr(daemon, "_is_process_alive", lambda pid: int(pid) == 12345)
+    monkeypatch.setattr(daemon, "_append_event", lambda event_type, payload: events.append((event_type, payload)))
+    monkeypatch.setattr(daemon, "save_pid", lambda pid: (_ for _ in ()).throw(AssertionError("must not replace live owner")))
+
+    assert daemon._claim_daemon_ownership(24680) is False
+    assert events == [
+        (
+            "daemon.start_blocked_existing_owner",
+            {"pid": 24680, "ownerPid": 12345, "source": "pid_file"},
+        )
+    ]
+    assert not lock_path.exists()
+
+
+def test_claim_daemon_ownership_recovers_stale_lock(monkeypatch, tmp_path):
+    events: list[tuple[str, dict]] = []
+    saved: list[int] = []
+    lock_path = tmp_path / "daemon.lock"
+    lock_path.write_text("12345", encoding="utf-8")
+
+    monkeypatch.setattr(daemon, "DAEMON_LOCK_PATH", lock_path)
+    monkeypatch.setattr(daemon, "load_pid", lambda: 0)
+    monkeypatch.setattr(daemon, "_is_process_alive", lambda pid: False)
+    monkeypatch.setattr(daemon, "_append_event", lambda event_type, payload: events.append((event_type, payload)))
+    monkeypatch.setattr(daemon, "save_pid", lambda pid: saved.append(pid))
+
+    assert daemon._claim_daemon_ownership(24680) is True
+    assert lock_path.read_text(encoding="utf-8") == "24680"
+    assert saved == [24680]
+    assert events == []
+
+    daemon._release_daemon_ownership(24680)
+    assert not lock_path.exists()
 
 
 def test_rotate_daemon_log_file_rotates_when_exceeding_max_bytes(monkeypatch, tmp_path):
