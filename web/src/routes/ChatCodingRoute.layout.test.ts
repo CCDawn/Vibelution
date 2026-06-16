@@ -34,6 +34,23 @@ describe("ChatCodingRoute layout contract", () => {
     expect(conversationStyles.imageDownloadButton).toBeTypeOf("string");
   });
 
+  it("keeps the workbench theme background visible behind the center conversation", () => {
+    expect(routeCssSource).toMatch(
+      /\.centerPane\s*\{[\s\S]*?background:\s*color-mix\(in srgb, var\(--surface-page\) 34%, transparent\);[\s\S]*?\}/,
+    );
+    expect(routeCssSource).toMatch(
+      /\.centerSurface\s*\{[\s\S]*?background:\s*color-mix\(in srgb, var\(--surface-panel-strong\) 18%, transparent\);[\s\S]*?\}/,
+    );
+    expect(conversationCssSource).toMatch(
+      /\.timeline\s*\{[\s\S]*?color-mix\(in srgb, var\(--surface-panel-strong\) 30%, transparent\);[\s\S]*?backdrop-filter:\s*blur\(8px\);[\s\S]*?\}/,
+    );
+    expect(conversationCssSource).toMatch(
+      /\.surfaceCompact \.timeline\s*\{[\s\S]*?color-mix\(in srgb, var\(--surface-panel-strong\) 34%, transparent\);[\s\S]*?\}/,
+    );
+    expect(routeCssSource).not.toContain("background: color-mix(in srgb, var(--surface-page) 92%, var(--bg-canvas));");
+    expect(routeCssSource).not.toContain(".centerSurface {\n  display: grid;\n  height: 100%;\n  min-height: 0;\n  background: var(--surface-panel-strong);");
+  });
+
   it("renders runtime notices outside the Agent reply timeline", () => {
     expect(routeSource).toContain("detail?.runtimeNotices");
     expect(routeSource).toContain(".slice(-1)");
