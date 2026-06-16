@@ -503,7 +503,8 @@ export const CONFIG_COPY = {
     avatarImageUploading: "上传头像图片中",
     avatarImageUploadFailed: "头像图片上传失败：",
     uploadThemeBackgroundImage: "上传背景图片",
-    clearThemeBackgroundImage: "恢复默认背景",
+    clearThemeBackgroundImage: "清除背景图片",
+    themeBackgroundPresetTitle: "内置背景",
     themeBackgroundImageUploading: "上传背景图片中",
     themeBackgroundImageUploadFailed: "背景图片上传失败：",
     avatarCropTitle: "裁剪头像",
@@ -737,7 +738,8 @@ export const CONFIG_COPY = {
     avatarImageUploading: "Uploading avatar image",
     avatarImageUploadFailed: "Avatar image upload failed: ",
     uploadThemeBackgroundImage: "Upload background image",
-    clearThemeBackgroundImage: "Restore default background",
+    clearThemeBackgroundImage: "Clear background image",
+    themeBackgroundPresetTitle: "Built-in backgrounds",
     themeBackgroundImageUploading: "Uploading background image",
     themeBackgroundImageUploadFailed: "Background image upload failed: ",
     avatarCropTitle: "Crop avatar",
@@ -1683,6 +1685,8 @@ function ConfigSectionEditor({
   function renderThemeBackgroundControl(fieldValue: unknown, absolutePath: string) {
     const previewUrl = themeBackgroundImagePreviewUrl(fieldValue);
     const imageUploading = uploadingImagePath === absolutePath;
+    const currentPath = getString(fieldValue).replace(/\\/g, "/").trim();
+    const presetOptions = metaMap[absolutePath]?.options ?? [];
     return (
       <div className={styles.themeBackgroundImageEditor}>
         <div className={styles.themeBackgroundImageValue}>
@@ -1747,6 +1751,32 @@ function ConfigSectionEditor({
             </div>
           </div>
         </div>
+        {presetOptions.length ? (
+          <div className={styles.themeBackgroundPresetPanel} aria-label={copy.themeBackgroundPresetTitle}>
+            <span>{copy.themeBackgroundPresetTitle}</span>
+            <div className={styles.themeBackgroundPresetGrid}>
+              {presetOptions.map((option) => {
+                const optionPreviewUrl = themeBackgroundImagePreviewUrl(option.value);
+                const active = currentPath === option.value;
+                return (
+                  <button
+                    key={option.value}
+                    type="button"
+                    className={styles.themeBackgroundPresetButton}
+                    data-active={active ? "true" : undefined}
+                    disabled={disabled || imageUploading}
+                    aria-pressed={active}
+                    title={option.label}
+                    onClick={() => updateSectionDraft(absolutePath, option.value)}
+                  >
+                    {optionPreviewUrl ? <img src={optionPreviewUrl} alt="" /> : <ImageIcon size={14} />}
+                    <span>{option.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        ) : null}
       </div>
     );
   }
