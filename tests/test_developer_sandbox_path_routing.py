@@ -47,6 +47,9 @@ def test_high_roi_state_paths_route_to_developer_sandbox(tmp_path, monkeypatch):
     assert supervised_control_service._supervised_decision_path("debug-session") == (
         sandbox_workspace / "supervised_evolution" / "decisions" / "debug-session.json"
     )
+    assert supervised_control_service._supervised_history_path() == (
+        sandbox_workspace / "supervised_evolution" / "history.jsonl"
+    )
 
 
 def test_high_roi_state_paths_stay_formal_when_developer_mode_is_off(tmp_path, monkeypatch):
@@ -69,4 +72,7 @@ def test_high_roi_state_paths_stay_formal_when_developer_mode_is_off(tmp_path, m
     assert supervised_worktree_evolution_service._run_store_root(project_root) == project_root / "workspace" / "supervised_evolution" / "worktree_runs"
     assert supervised_control_service._supervised_decision_path("debug-session") == (
         project_root / "workspace" / "supervised_evolution" / "decisions" / "debug-session.json"
+    )
+    assert supervised_control_service._supervised_history_path() == (
+        project_root / "workspace" / "supervised_evolution" / "history.jsonl"
     )

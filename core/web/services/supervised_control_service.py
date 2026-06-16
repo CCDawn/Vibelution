@@ -1399,6 +1399,17 @@ def _supervised_decision_path(session_id: str) -> Path:
     )
 
 
+def _supervised_history_path() -> Path:
+    return developer_sandbox.route_workspace_path(
+        PROJECT_ROOT,
+        "supervised_evolution",
+        "supervised_evolution",
+        "history.jsonl",
+        intent="state",
+        seed=True,
+    )
+
+
 def _run_supervised_session(context: dict[str, Any]) -> None:
     run_id = context["runId"]
     try:
@@ -1526,7 +1537,7 @@ def _supervised_decision_integrity_issue(decision: Any) -> str:
         decision_path = (PROJECT_ROOT / decision_path).resolve()
     if not decision_path.exists():
         return f"decision_missing_after_case_reports: decision file not found for {session_id}"
-    history_path = PROJECT_ROOT / "workspace" / "supervised_evolution" / "history.jsonl"
+    history_path = _supervised_history_path()
     if not history_path.exists():
         return f"decision_missing_after_case_reports: history record not found for {session_id}"
     try:
