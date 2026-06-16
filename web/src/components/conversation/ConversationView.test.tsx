@@ -1486,7 +1486,7 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).not.toContain("legacy_tool");
   });
 
-  it("expands the active ReAct pass while keeping completed passes folded", () => {
+  it("expands the active ReAct packet while keeping thoughts out of the default display", () => {
     const html = renderConversation([
       {
         id: "message-feedback-active-react",
@@ -1534,11 +1534,11 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).not.toContain("2 轮");
     expect(html).not.toContain("第 1 轮");
     expect(html).not.toContain("第 2 轮");
-    expect(html).toContain("思考");
     expect(html).toContain("行动");
-    expect(html).toContain("再查会话链路");
+    expect(html).toContain("命令 · running rg");
     expect(html).toContain("running rg");
-    expect(html).not.toContain("opened latest log");
+    expect(html).toContain("读取 · opened latest log");
+    expect(html).not.toContain("再查会话链路");
   });
 
   it("keeps runtime status content out of the assistant answer block", () => {

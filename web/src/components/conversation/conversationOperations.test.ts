@@ -248,6 +248,51 @@ describe("conversationOperations", () => {
     expect(groups[0].operations.map((operation) => operation.sequence)).toEqual([1, 2]);
   });
 
+  it("drops completed thought-only packets while keeping titled action packets", () => {
+    const message: ConversationMessage = {
+      id: "message-action-packet-title",
+      role: "assistant",
+      content: "完成。",
+      timestamp: "2026-06-05T00:00:00Z",
+      feedbackEvents: [
+        { sequence: 1, kind: "thought", status: "done", summary: "先看日志", resultPreview: "先看日志" },
+        { sequence: 2, kind: "tool", status: "done", name: "read_log", summary: "opened latest log", relatedThoughtSequence: 1 },
+        { sequence: 3, kind: "thought", status: "done", summary: "最后整理", resultPreview: "最后整理" },
+      ],
+    };
+
+    const groups = buildConversationReActOperationGroups(buildConversationOperations(message, labels));
+
+    expect(groups).toHaveLength(1);
+    expect(groups[0]).toMatchObject({
+      id: "react-thought-1",
+      title: "读取 · opened latest log",
+      primaryKind: "tool",
+    });
+    expect(groups[0].operations.map((operation) => operation.sequence)).toEqual([1, 2]);
+  });
+
+  it("keeps running thought-only packets visible with a semantic title", () => {
+    const message: ConversationMessage = {
+      id: "message-running-thought-packet",
+      role: "assistant",
+      content: "",
+      timestamp: "2026-06-05T00:00:00Z",
+      streaming: true,
+      feedbackEvents: [
+        { sequence: 1, kind: "thought", status: "running", summary: "正在判断下一步", resultPreview: "正在判断下一步" },
+      ],
+    };
+
+    const groups = buildConversationReActOperationGroups(buildConversationOperations(message, labels));
+
+    expect(groups).toHaveLength(1);
+    expect(groups[0]).toMatchObject({
+      title: "Deep thinking · 正在判断下一步",
+      primaryKind: "thought",
+    });
+  });
+
   it("merges cumulative thought prefixes from mixed LLM providers without dropping final detail", () => {
     const message: ConversationMessage = {
       id: "message-cumulative-thought",

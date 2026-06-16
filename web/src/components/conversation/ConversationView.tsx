@@ -1185,14 +1185,6 @@ export function ConversationView({
     return formatDuration(durations.reduce((total, duration) => total + duration, 0));
   }
 
-  function operationDisplayText(operation: ConversationOperation) {
-    return String(operation.resultPreview || operation.summary || "").trim();
-  }
-
-  function reActThoughtOperations(group: ConversationReActOperationGroup) {
-    return group.operations.filter((operation) => ["thought", "mental"].includes(operation.kind) && operationDisplayText(operation));
-  }
-
   function reActActionOperations(group: ConversationReActOperationGroup) {
     return group.operations.filter((operation) => !["thought", "mental"].includes(operation.kind));
   }
@@ -1513,25 +1505,6 @@ export function ConversationView({
     );
   }
 
-  function renderReActThoughtSection(group: ConversationReActOperationGroup) {
-    const thoughts = reActThoughtOperations(group);
-    if (thoughts.length === 0) {
-      return null;
-    }
-    return (
-      <section className={styles.reActOperationSection}>
-        <span className={styles.reActOperationSectionLabel}>{lang === "zh" ? "思考" : "Thinking"}</span>
-        <div className={styles.reActThoughtStack}>
-          {thoughts.map((operation) => (
-            <pre key={`${operation.id}-thought-text`} className={styles.reActThoughtText}>
-              {operationDisplayText(operation)}
-            </pre>
-          ))}
-        </div>
-      </section>
-    );
-  }
-
   function renderReActActionSection(group: ConversationReActOperationGroup) {
     const actions = reActActionOperations(group);
     if (actions.length === 0) {
@@ -1576,6 +1549,7 @@ export function ConversationView({
     const defaultExpanded = shouldExpandReActGroupByDefault(group);
     const expanded = getExpansionState(messageId, sectionId, defaultExpanded);
     const tone = reActGroupTone(group);
+    const groupTitle = group.title || operationLabel(group.operations[0]);
     const headerItems = [
       operationStateLabel(tone),
       reActGroupDurationLabel(group),
@@ -1589,6 +1563,8 @@ export function ConversationView({
           onClick={() => toggleSection(messageId, sectionId, defaultExpanded)}
           title={expanded ? t("executionDetailsVisible") : t("executionDetailsHidden")}
         >
+          {operationIcon(group.primaryKind ?? group.operations[0]?.kind ?? "tool", groupTitle)}
+          <span className={styles.reActOperationTitle}>{groupTitle}</span>
           {headerItems.length > 0 ? (
             <span className={styles.reActOperationMeta}>
               {headerItems.join(" · ")}
@@ -1598,7 +1574,6 @@ export function ConversationView({
         </button>
         {expanded ? (
           <div className={styles.reActOperationBody}>
-            {renderReActThoughtSection(group)}
             {renderReActActionSection(group)}
             {renderReActResultSection(group)}
           </div>
