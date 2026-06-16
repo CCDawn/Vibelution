@@ -1,8 +1,11 @@
 import json
 
+import pytest
+
 from config import Settings
 from core.llm.client import LLMClient
 from core.llm.message_projector import normalize_messages_for_provider
+from core.llm.types import LLMError
 
 
 def make_config(**kwargs):
@@ -112,3 +115,36 @@ def test_responses_payload_converts_images_after_canonical_projection():
         {"type": "input_text", "text": "看图"},
         {"type": "input_image", "image_url": "data:image/png;base64,abc"},
     ]
+
+
+def test_payload_rejects_images_when_profile_disables_image_input():
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "relay",
+            "llm.providers.default.api_key": "test-key",
+            "llm.providers.default.base_url": "https://relay.example.test/v1",
+            "llm.providers.default.api": "openai-responses",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "gpt-5.5",
+            "llm.profiles.primary.transport": "responses",
+            "llm.profiles.primary.supports_image_input": False,
+        }
+    )
+
+    client = LLMClient(config=config, backend=lambda payload: payload)
+
+    with pytest.raises(LLMError) as exc_info:
+        client._build_payload(
+            [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": "看图"},
+                        {"type": "image_url", "image_url": {"url": "data:image/png;base64,abc"}},
+                    ],
+                }
+            ]
+        )
+
+    assert exc_info.value.category == "capability_error"
+    assert exc_info.value.details["capability"] == "image_input"
