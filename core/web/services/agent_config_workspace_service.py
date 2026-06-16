@@ -1374,6 +1374,7 @@ def _agent_model_choices(model_options: list[Any]) -> list[dict[str, Any]]:
             "modelId": model_id,
             "label": str(option.get("label") or option.get("model") or model_id).strip() or model_id,
             "model": str(option.get("model") or "").strip(),
+            "contextWindow": int(option.get("contextWindow") or 0),
             "providerKind": provider_kind,
             "transport": str(option.get("transport") or "").strip(),
             "providerBaseUrl": str(provider.get("base_url") or "").strip(),

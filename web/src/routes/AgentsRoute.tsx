@@ -3029,7 +3029,8 @@ function agentsRouteCopy(lang: "zh" | "en") {
         contextCompressionKeepAi: "保留 AI 消息",
         contextCompressionPreserveErrors: "保留错误",
         contextCompressionExtractDecisions: "提取决策",
-        contextCompressionEffective: "有效策略",
+        contextCompressionEffective: "有效阈值",
+        contextCompressionWindow: "模型窗口",
         contextCompressionSourceGlobal: "继承全局策略",
         contextCompressionSourceCustom: "当前 Agent 自定义策略",
         territory: "工作空间",
@@ -3425,7 +3426,8 @@ function agentsRouteCopy(lang: "zh" | "en") {
         contextCompressionKeepAi: "Keep AI messages",
         contextCompressionPreserveErrors: "Preserve errors",
         contextCompressionExtractDecisions: "Extract decisions",
-        contextCompressionEffective: "Effective policy",
+        contextCompressionEffective: "Effective limit",
+        contextCompressionWindow: "Model window",
         contextCompressionSourceGlobal: "Inherited global policy",
         contextCompressionSourceCustom: "This Agent uses a custom policy",
         territory: "Workspace territory",
@@ -4010,12 +4012,13 @@ export function AgentsRoute() {
   const contextCompressionEffectiveLimit = contextCompressionEffectivePolicy?.effectiveTokenLimit
     ?? contextCompressionEffectivePolicy?.maxTokenLimit
     ?? Number(configDraft.contextCompressionPolicy.maxTokenLimit || DEFAULT_AGENT_CONTEXT_COMPRESSION_DRAFT.maxTokenLimit);
+  const contextCompressionWindowLimit = contextCompressionEffectivePolicy?.contextWindowLimit ?? 0;
   const contextCompressionPolicySource = contextCompressionCustom
     ? copy.contextCompressionSourceCustom
     : copy.contextCompressionSourceGlobal;
   const contextCompressionPolicyLine = `${contextCompressionPolicySource} · ${copy.contextCompressionEffective}: ${numberFormatter.format(
     Math.max(0, Number(contextCompressionEffectiveLimit) || 0),
-  )}`;
+  )} · ${copy.contextCompressionWindow}: ${numberFormatter.format(Math.max(0, Number(contextCompressionWindowLimit) || 0))}`;
 
   const createAgentMutation = useMutation({
     mutationFn: (draft: AgentCreateDraft) => {

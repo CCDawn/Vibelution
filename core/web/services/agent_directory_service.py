@@ -3228,6 +3228,28 @@ def effective_agent_context_compression_policy(
     return merged
 
 
+def _agent_context_window_limit(agent: dict[str, Any] | None) -> int:
+    model_id = agent_dialogue_model_id(agent) if isinstance(agent, dict) else ""
+    if not model_id:
+        return 0
+    try:
+        from config import get_config
+        from config.public_config import resolve_llm_model_context_window
+
+        config = get_config()
+        model_library = getattr(config.llm, "model_library", {}) or {}
+        entry = model_library.get(model_id) if isinstance(model_library, dict) else None
+        if not isinstance(entry, dict):
+            return 0
+        provider = None
+        provider_id = str(entry.get("provider_id") or "").strip()
+        if provider_id:
+            provider = config.llm.get_provider(provider_id)
+        return resolve_llm_model_context_window(entry, provider)
+    except Exception:
+        return 0
+
+
 def _has_context_compression_override(source: dict[str, Any]) -> bool:
     return any(
         key in source
@@ -3909,7 +3931,10 @@ def _agent_to_api(agent: dict[str, Any], *, hydration: AgentApiHydrationContext 
         "contextCompressionPolicy": normalize_agent_context_compression_policy(
             agent.get("contextCompressionPolicy") if isinstance(agent.get("contextCompressionPolicy"), dict) else None
         ),
-        "contextCompressionEffectivePolicy": effective_agent_context_compression_policy(agent),
+        "contextCompressionEffectivePolicy": effective_agent_context_compression_policy(
+            agent,
+            context_window_limit=_agent_context_window_limit(agent),
+        ),
         "promptTemplateId": _normalize_prompt_template_id(
             agent.get("promptTemplateId") or _infer_agent_prompt_template_id(agent)
         ),
@@ -3957,7 +3982,10 @@ def _agent_to_api_summary(agent: dict[str, Any]) -> dict[str, Any]:
         "contextCompressionPolicy": normalize_agent_context_compression_policy(
             agent.get("contextCompressionPolicy") if isinstance(agent.get("contextCompressionPolicy"), dict) else None
         ),
-        "contextCompressionEffectivePolicy": effective_agent_context_compression_policy(agent),
+        "contextCompressionEffectivePolicy": effective_agent_context_compression_policy(
+            agent,
+            context_window_limit=_agent_context_window_limit(agent),
+        ),
         "promptTemplateId": _normalize_prompt_template_id(
             agent.get("promptTemplateId") or _infer_agent_prompt_template_id(agent)
         ),
