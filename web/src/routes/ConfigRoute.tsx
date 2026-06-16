@@ -1656,26 +1656,128 @@ function ConfigSectionEditor({
     }
   }
 
+  function isCompactConfigObjectPath(path: string): boolean {
+    return path === "ui.workbench_theme";
+  }
+
+  async function uploadThemeBackgroundFile(file: File, absolutePath: string) {
+    setUploadingImagePath(absolutePath);
+    try {
+      const uploaded = await onThemeBackgroundImageUpload(file);
+      if (uploaded) {
+        updateSectionDraft(absolutePath, uploaded.path);
+      }
+    } finally {
+      setUploadingImagePath("");
+    }
+  }
+
+  function themeBackgroundDisplayName(value: unknown): string {
+    const path = getString(value).replace(/\\/g, "/").trim();
+    if (!path) {
+      return copy.emptyValue;
+    }
+    return path.split("/").filter(Boolean).at(-1) ?? path;
+  }
+
+  function renderThemeBackgroundControl(fieldValue: unknown, absolutePath: string) {
+    const previewUrl = themeBackgroundImagePreviewUrl(fieldValue);
+    const imageUploading = uploadingImagePath === absolutePath;
+    return (
+      <div className={styles.themeBackgroundImageEditor}>
+        <div className={styles.themeBackgroundImageValue}>
+          <label
+            className={styles.themeBackgroundDropButton}
+            title={copy.uploadThemeBackgroundImage}
+            aria-label={copy.uploadThemeBackgroundImage}
+          >
+            {previewUrl ? (
+              <img src={previewUrl} alt="" className={styles.themeBackgroundImagePreview} />
+            ) : (
+              <span className={styles.themeBackgroundImagePlaceholder}>
+                <ImageIcon size={16} />
+              </span>
+            )}
+            <input
+              type="file"
+              accept="image/png,image/jpeg,image/webp"
+              disabled={disabled || imageUploading}
+              onChange={async (event) => {
+                const file = event.currentTarget.files?.[0];
+                event.currentTarget.value = "";
+                if (!file) {
+                  return;
+                }
+                await uploadThemeBackgroundFile(file, absolutePath);
+              }}
+            />
+          </label>
+          <div className={styles.themeBackgroundImageMeta}>
+            <strong>{configLabel(metaMap, absolutePath)}</strong>
+            <span>{themeBackgroundDisplayName(fieldValue)}</span>
+            <div className={styles.themeBackgroundImageActions}>
+              <label className={`${styles.actionButton} ${styles.compactButton} ${styles.fileUploadButton}`}>
+                <Upload size={14} />
+                {imageUploading ? copy.themeBackgroundImageUploading : copy.uploadThemeBackgroundImage}
+                <input
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp"
+                  disabled={disabled || imageUploading}
+                  onChange={async (event) => {
+                    const file = event.currentTarget.files?.[0];
+                    event.currentTarget.value = "";
+                    if (!file) {
+                      return;
+                    }
+                    await uploadThemeBackgroundFile(file, absolutePath);
+                  }}
+                />
+              </label>
+              {getString(fieldValue) ? (
+                <button
+                  type="button"
+                  className={`${styles.actionButton} ${styles.compactButton}`}
+                  disabled={disabled || imageUploading}
+                  onClick={() => updateSectionDraft(absolutePath, "")}
+                >
+                  <X size={14} />
+                  {copy.clearThemeBackgroundImage}
+                </button>
+              ) : null}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   function renderFieldView(fieldValue: unknown, absolutePath: string) {
     const meta = metaMap[absolutePath];
     const kind = configEditorFieldKind(meta);
-    if (kind === "image" || kind === "background_image") {
-      const isBackgroundImage = kind === "background_image";
-      const previewUrl = isBackgroundImage ? themeBackgroundImagePreviewUrl(fieldValue) : avatarImagePreviewUrl(fieldValue);
+    if (kind === "background_image") {
+      return (
+        <article key={absolutePath} className={`${styles.treeFieldCard} ${styles.treeFieldCardView} ${styles.themeBackgroundImageCard}`}>
+          {configHint(metaMap, absolutePath) ? <p className={styles.treeHint}>{configHint(metaMap, absolutePath)}</p> : null}
+          {renderThemeBackgroundControl(fieldValue, absolutePath)}
+        </article>
+      );
+    }
+    if (kind === "image") {
+      const previewUrl = avatarImagePreviewUrl(fieldValue);
       return (
         <article
           key={absolutePath}
-          className={`${styles.treeFieldCard} ${styles.treeFieldCardView} ${isBackgroundImage ? styles.themeBackgroundImageCard : styles.avatarImageCard}`}
+          className={`${styles.treeFieldCard} ${styles.treeFieldCardView} ${styles.avatarImageCard}`}
         >
           <div className={styles.treeFieldHead}>
             <span className={styles.treeFieldLabel}>{configLabel(metaMap, absolutePath)}</span>
           </div>
           {configHint(metaMap, absolutePath) ? <p className={styles.treeHint}>{configHint(metaMap, absolutePath)}</p> : null}
-          <div className={isBackgroundImage ? styles.themeBackgroundImageValue : styles.avatarImageValue}>
+          <div className={styles.avatarImageValue}>
             {previewUrl ? (
-              <img src={previewUrl} alt="" className={isBackgroundImage ? styles.themeBackgroundImagePreview : styles.avatarImagePreview} />
+              <img src={previewUrl} alt="" className={styles.avatarImagePreview} />
             ) : (
-              <span className={isBackgroundImage ? styles.themeBackgroundImagePlaceholder : styles.avatarImagePlaceholder}>
+              <span className={styles.avatarImagePlaceholder}>
                 <ImageIcon size={16} />
               </span>
             )}
@@ -1702,59 +1804,7 @@ function ConfigSectionEditor({
     let control;
 
     if (kind === "background_image") {
-      const previewUrl = themeBackgroundImagePreviewUrl(fieldValue);
-      control = (
-        <div className={styles.themeBackgroundImageEditor}>
-          <div className={styles.themeBackgroundImageValue}>
-            {previewUrl ? (
-              <img src={previewUrl} alt="" className={styles.themeBackgroundImagePreview} />
-            ) : (
-              <span className={styles.themeBackgroundImagePlaceholder}>
-                <ImageIcon size={16} />
-              </span>
-            )}
-            <span>{configLabel(metaMap, absolutePath)}</span>
-          </div>
-          <div className={styles.avatarImageActions}>
-            <label className={`${styles.actionButton} ${styles.compactButton} ${styles.fileUploadButton}`}>
-              <Upload size={14} />
-              {imageUploading ? copy.themeBackgroundImageUploading : copy.uploadThemeBackgroundImage}
-              <input
-                type="file"
-                accept="image/png,image/jpeg,image/webp"
-                disabled={disabled || imageUploading}
-                onChange={async (event) => {
-                  const file = event.currentTarget.files?.[0];
-                  event.currentTarget.value = "";
-                  if (!file) {
-                    return;
-                  }
-                  setUploadingImagePath(absolutePath);
-                  try {
-                    const uploaded = await onThemeBackgroundImageUpload(file);
-                    if (uploaded) {
-                      updateSectionDraft(absolutePath, uploaded.path);
-                    }
-                  } finally {
-                    setUploadingImagePath("");
-                  }
-                }}
-              />
-            </label>
-            {getString(fieldValue) ? (
-              <button
-                type="button"
-                className={`${styles.actionButton} ${styles.compactButton}`}
-                disabled={disabled || imageUploading}
-                onClick={() => updateSectionDraft(absolutePath, "")}
-              >
-                <X size={14} />
-                {copy.clearThemeBackgroundImage}
-              </button>
-            ) : null}
-          </div>
-        </div>
-      );
+      control = renderThemeBackgroundControl(fieldValue, absolutePath);
     } else if (kind === "image") {
       const previewUrl = avatarImagePreviewUrl(fieldValue);
       const cropDraft = avatarCrop?.absolutePath === absolutePath ? avatarCrop : null;
@@ -2065,8 +2115,9 @@ function ConfigSectionEditor({
           const childIsObject = isPlainObject(childValue);
           if (childIsObject || childIsObjectList) {
             const childExpanded = Boolean(expandedPaths[childPath]);
+            const childUsesWideLayout = childExpanded && !isCompactConfigObjectPath(childPath);
             return (
-              <div key={childPath} className={childExpanded ? styles.treeWide : styles.treeObjectCell}>
+              <div key={childPath} className={childUsesWideLayout ? styles.treeWide : styles.treeObjectCell}>
                 {renderNode(childValue, childPath, mode)}
               </div>
             );
