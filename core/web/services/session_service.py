@@ -97,6 +97,7 @@ from core.ui.chat_state import (
 
 from . import agent_directory_service
 from .i18n import get_web_language, text_for
+from .model_capability_service import model_record_image_input_support
 from .session_turn_scheduler import SessionTurnScheduler
 from .agent_directory_service import (
     AgentNotFoundError,
@@ -511,22 +512,6 @@ _RECENT_IMAGE_TARGET_WORDS = (
     "picture",
     "photo",
     "screenshot",
-)
-_VISION_MODEL_NAME_HINTS = (
-    "gpt-4o",
-    "gpt-4.1",
-    "gpt-5.5",
-    "gpt-5o",
-    "vision",
-    "vl",
-    "qwen-vl",
-    "qvq",
-    "gemini",
-    "claude-3",
-    "claude-4",
-    "glm-4v",
-    "multimodal",
-    "omni",
 )
 _SESSION_USER_IMAGE_MAX_ATTACHMENTS_PER_TURN = 4
 DEFAULT_SESSION_AGENT_PROFILE_ID = "primary"
@@ -9358,26 +9343,19 @@ def _session_agent_supports_image_input(agent_instance: dict[str, Any] | None, *
     if not model_id:
         return None
     try:
-        entry = get_config().llm.model_library.get(model_id)
+        llm_config = get_config().llm
+        entry = llm_config.model_library.get(model_id)
     except Exception:
         return None
     if not isinstance(entry, dict):
         return None
-    explicit = entry.get("supports_image_input")
-    if explicit is not None:
-        return bool(explicit)
-    lowered_model = str(entry.get("model") or "").strip().lower()
     provider_id = str(entry.get("provider_id") or "").strip()
     try:
-        provider = get_config().llm.get_provider(provider_id)
+        provider = llm_config.get_provider(provider_id)
         lowered_provider = str(getattr(provider, "kind", "") or "").strip().lower()
     except Exception:
         lowered_provider = ""
-    if lowered_provider == "xiaomi" and lowered_model == "mimo-v2.5":
-        return True
-    if any(hint in lowered_model for hint in _VISION_MODEL_NAME_HINTS):
-        return True
-    return False
+    return model_record_image_input_support(entry, provider_kind=lowered_provider)
 
 
 def _session_agent_dialogue_model_name(agent_instance: dict[str, Any] | None) -> str:

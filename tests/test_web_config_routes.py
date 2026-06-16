@@ -115,6 +115,9 @@ def test_config_summary_exposes_model_labels(monkeypatch):
 
 def test_config_summary_exposes_model_image_input_support(monkeypatch):
     public_config = copy.deepcopy(load_public_config())
+    public_config.setdefault("llm", {})["providers"] = {
+        "xiaomi_provider": {"kind": "xiaomi", "api": "openai", "base_url": "https://example.test/v1"},
+    }
     public_config.setdefault("llm", {})["model_library"] = {
         "vision_model": {
             "provider": {"kind": "relay", "api": "openai", "base_url": "https://example.test/v1"},
@@ -124,6 +127,19 @@ def test_config_summary_exposes_model_image_input_support(monkeypatch):
         "text_model": {
             "provider": {"kind": "relay", "api": "openai", "base_url": "https://example.test/v1"},
             "model": "text-model",
+            "capability_status": "unsupported",
+        },
+        "mimo_model": {
+            "provider": {"kind": "xiaomi", "api": "openai", "base_url": "https://example.test/v1"},
+            "model": "mimo-v2.5",
+        },
+        "provider_ref_mimo_model": {
+            "provider_id": "xiaomi_provider",
+            "model": "mimo-v2.5",
+        },
+        "blocked_vision_hint_model": {
+            "provider": {"kind": "relay", "api": "openai", "base_url": "https://example.test/v1"},
+            "model": "gpt-5.5-vision-like",
             "capability_status": "unsupported",
         },
         "unknown_model": {
@@ -140,6 +156,9 @@ def test_config_summary_exposes_model_image_input_support(monkeypatch):
     payload = response.json()
     assert payload["modelImageInputSupport"]["vision_model"] is True
     assert payload["modelImageInputSupport"]["text_model"] is False
+    assert payload["modelImageInputSupport"]["mimo_model"] is True
+    assert payload["modelImageInputSupport"]["provider_ref_mimo_model"] is True
+    assert payload["modelImageInputSupport"]["blocked_vision_hint_model"] is False
     assert payload["modelImageInputSupport"]["unknown_model"] is None
 
 

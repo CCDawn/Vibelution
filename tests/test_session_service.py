@@ -1,3 +1,5 @@
+from types import SimpleNamespace
+
 from core.web.services import session_service
 
 
@@ -45,3 +47,40 @@ def test_image_attachment_empty_prompt_still_asks_for_clarification(monkeypatch)
 def test_contextual_image_retry_still_requires_explicit_image_intent():
     assert session_service._is_retriable_image_request_prompt("继续") is False
     assert session_service._is_retriable_image_request_prompt("再看一下刚才那张图") is True
+
+
+def test_session_image_support_uses_shared_model_capability_rules(monkeypatch):
+    class DummyLlm:
+        model_library = {
+            "mimo_model": {
+                "provider_id": "xiaomi_provider",
+                "model": "mimo-v2.5",
+            },
+            "blocked_hint_model": {
+                "provider_id": "relay_provider",
+                "model": "gpt-5.5-vision-like",
+                "capability_status": "unsupported",
+            },
+        }
+
+        def get_provider(self, provider_id):
+            if provider_id == "xiaomi_provider":
+                return SimpleNamespace(kind="xiaomi")
+            return SimpleNamespace(kind="relay")
+
+    monkeypatch.setattr(session_service, "get_config", lambda: SimpleNamespace(llm=DummyLlm()))
+
+    assert (
+        session_service._session_agent_supports_image_input(
+            {"llmBindings": {"vision": {"modelId": "mimo_model"}}},
+            slot=session_service.SESSION_LLM_SLOT_VISION,
+        )
+        is True
+    )
+    assert (
+        session_service._session_agent_supports_image_input(
+            {"llmBindings": {"vision": {"modelId": "blocked_hint_model"}}},
+            slot=session_service.SESSION_LLM_SLOT_VISION,
+        )
+        is False
+    )
