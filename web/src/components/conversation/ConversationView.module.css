@@ -1604,6 +1604,11 @@
   max-width: min(100%, 76ch);
 }
 
+.responseSegment_answer .markdownBody:has(.markdownTableWrap) {
+  width: 100%;
+  max-width: 100%;
+}
+
 .responseSegment_status {
   display: inline-flex;
   align-items: baseline;
@@ -1688,11 +1693,14 @@
 }
 
 .responseSegmentPre {
+  box-sizing: border-box;
+  width: 100%;
   max-width: 100%;
   min-width: 0;
   margin: 0;
   overflow-x: auto;
   overflow-y: hidden;
+  overscroll-behavior-x: contain;
   scrollbar-gutter: stable;
   border-radius: 8px;
   padding: 9px 10px;
@@ -1701,15 +1709,24 @@
     linear-gradient(180deg, color-mix(in srgb, var(--surface-panel-strong) 88%, transparent), var(--surface-page)),
     var(--surface-page);
   color: var(--fg-primary);
-  font-family: var(--font-mono);
+  font-family: "Cascadia Mono", "Cascadia Code", Consolas, var(--font-mono);
   font-size: 0.76rem;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
   line-height: 1.42;
+  tab-size: 2;
+  overflow-wrap: normal;
   white-space: pre;
+  word-break: normal;
 }
 
 .responseSegmentPre code {
   display: block;
   min-width: max-content;
+  font: inherit;
+  overflow-wrap: normal;
+  white-space: inherit;
+  word-break: normal;
 }
 
 .inlineCode {
@@ -1996,22 +2013,28 @@
 .markdownTableWrap {
   max-width: 100%;
   overflow-x: auto;
+  overscroll-behavior-x: contain;
   border: 1px solid color-mix(in srgb, var(--fg-tertiary) 12%, transparent);
   border-radius: 8px;
+  background: color-mix(in srgb, var(--surface-card) 56%, transparent);
 }
 
 .markdownTable {
-  width: 100%;
-  min-width: min(520px, 100%);
+  width: max-content;
+  min-width: min(620px, 100%);
+  max-width: none;
   border-collapse: collapse;
   color: var(--fg-primary);
   font-size: 0.86rem;
+  font-variant-numeric: tabular-nums;
   line-height: 1.42;
+  table-layout: auto;
 }
 
 .markdownTable th,
 .markdownTable td {
-  padding: 7px 9px;
+  max-width: min(44ch, 42vw);
+  padding: 6px 8px;
   border-bottom: 1px solid color-mix(in srgb, var(--fg-tertiary) 10%, transparent);
   text-align: left;
   vertical-align: top;
@@ -2021,6 +2044,20 @@
   color: var(--fg-secondary);
   font-weight: 720;
   background: color-mix(in srgb, var(--surface-panel-strong) 86%, transparent);
+  white-space: nowrap;
+}
+
+.markdownTable th:first-child,
+.markdownTable td:first-child {
+  width: 1%;
+  min-width: 10ch;
+  color: var(--fg-primary);
+  font-weight: 680;
+  white-space: nowrap;
+}
+
+.markdownTable .inlineCode {
+  white-space: nowrap;
 }
 
 .markdownTable tr:last-child td {
