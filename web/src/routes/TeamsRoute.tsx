@@ -23,6 +23,7 @@ import {
   ChatRoomDetail,
   DataProcessingCollectionAssignmentListPayload,
   DataProcessingCollectionOutputPayload,
+  DataProcessingRecord,
   DataProcessingRunListPayload,
   DataProcessingStatus,
   Team,
@@ -59,7 +60,7 @@ const TEAM_PICKER_TEAM_IDS = [AI_SEARCH_TEAM_ID, RESEARCH_TEAM_ID] as const;
 const EVOLUTION_SYSTEM_TEAM_IDS = new Set(["self-evolution-team", "supervised-evolution-team"]);
 const LINKED_ROOM_ACTIVE_REFETCH_MS = 5_000;
 const LINKED_ROOM_IDLE_REFETCH_MS = 30_000;
-const TEAM_WORKFLOW_CANDIDATE_PREVIEW_LIMIT = 8;
+const TEAM_WORKFLOW_CANDIDATE_PREVIEW_LIMIT = 500;
 const TEAM_WORKFLOW_CANDIDATE_GRAPH_LIMIT = 20;
 const AI_SEARCH_RUN_PREVIEW_LIMIT = 6;
 const WORKFLOW_GRAPH_WIDTH = 620;
@@ -70,6 +71,7 @@ const WORKFLOW_GRAPH_NODE_GAP = 18;
 const WORKFLOW_GRAPH_MARGIN_X = 22;
 const WORKFLOW_GRAPH_MARGIN_Y = 28;
 const SOURCE_COLLECTION_RUN_PREVIEW_LIMIT = 20;
+const SOURCE_COLLECTION_RESULT_PREVIEW_LIMIT = 40;
 const SOURCE_COLLECTION_DEFAULT_ROLES = ["data_discovery", "source_acquisition", "content_extraction", "source_quality"];
 const SOURCE_COLLECTION_SEARCH_EXECUTION_ROLES = new Set(["data_discovery", "source_acquisition"]);
 const SOURCE_COLLECTION_PROMPT_CACHE_POLICY = {
@@ -81,6 +83,7 @@ const researchStageRoundStatusQueryKey = (id: string) => ["teams", id, "workflow
 const officialModelEvidenceStatusQueryKey = (id: string) => ["teams", id, "workflow-orchestration", "official-model-evidence", "status"] as const;
 const paperNoteChunkStatusQueryKey = (id: string) => ["teams", id, "workflow-orchestration", "paper-note-chunks", "status"] as const;
 const sourceQualityStatusQueryKey = (id: string) => ["teams", id, "workflow-orchestration", "source-quality", "status"] as const;
+const sourceCollectionRunRecordsQueryKey = (id: string) => ["data-processing", "runs", id, "records"] as const;
 
 type ResearchStageWorkspaceView = "knowledge_collection" | "experiment" | "iteration";
 type ResearchLegacyWorkspaceView = "source_collection" | "coordination" | "ingestion" | "graph" | "candidates" | "discussion" | "canvas";
@@ -214,6 +217,17 @@ type SourceCollectionOutputDraft = {
   rawLocation: string;
   summary: string;
   notes: string;
+};
+
+type DataProcessingRecordListPayload = {
+  schemaVersion: number;
+  runId: string;
+  records: DataProcessingRecord[];
+  summary: Record<string, unknown> & {
+    recordCount?: number;
+    sourceTypeCounts?: Record<string, number>;
+    recordStatusCounts?: Record<string, number>;
+  };
 };
 
 type SourceCollectionTraceMessage = {
@@ -1228,6 +1242,89 @@ function sourceCollectionCandidateProvenance(
   };
 }
 
+function sourceCollectionRecordProvenance(
+  record: DataProcessingRecord,
+  lang: "zh" | "en",
+): SourceCollectionCandidateProvenance {
+  const metadata = isRecord(record.metadata) ? record.metadata : {};
+  const sourceRef =
+    String(record.sourceRef || "").trim()
+    || metadataString(metadata, "sourceRef")
+    || metadataString(metadata, "sourceUrl")
+    || metadataString(metadata, "url");
+  const rawLocation =
+    String(record.rawLocation || "").trim()
+    || metadataString(metadata, "rawLocation")
+    || metadataString(metadata, "sourcePath")
+    || metadataString(metadata, "path");
+  const doi =
+    normalizedDoi(metadataString(metadata, "doi"))
+    || normalizedDoi(sourceRef)
+    || normalizedDoi(rawLocation);
+
+  if (doi) {
+    return {
+      kind: "doi",
+      label: "DOI",
+      value: doi,
+      href: `https://doi.org/${doi}`,
+    };
+  }
+
+  if (/^https?:\/\//i.test(sourceRef) && !sourceCollectionIsMachineEvidenceUrl(sourceRef)) {
+    return {
+      kind: "url",
+      label: lang === "zh" ? "网页链接" : "Web link",
+      value: compactSourceUrl(sourceRef),
+      href: sourceRef,
+    };
+  }
+
+  if (/^https?:\/\//i.test(rawLocation) && !sourceCollectionIsMachineEvidenceUrl(rawLocation)) {
+    return {
+      kind: "url",
+      label: lang === "zh" ? "网页链接" : "Web link",
+      value: compactSourceUrl(rawLocation),
+      href: rawLocation,
+    };
+  }
+
+  if (/^https?:\/\//i.test(sourceRef) || /^https?:\/\//i.test(rawLocation)) {
+    const evidenceUrl = /^https?:\/\//i.test(sourceRef) ? sourceRef : rawLocation;
+    return {
+      kind: "search_evidence",
+      label: lang === "zh" ? "搜索证据" : "Search evidence",
+      value: compactSourceUrl(evidenceUrl),
+      href: "",
+    };
+  }
+
+  if (rawLocation) {
+    return {
+      kind: "file",
+      label: lang === "zh" ? "本地文件" : "Local file",
+      value: rawLocation,
+      href: "",
+    };
+  }
+
+  if (sourceRef) {
+    return {
+      kind: "ref",
+      label: lang === "zh" ? "来源标识" : "Source ref",
+      value: sourceRef,
+      href: "",
+    };
+  }
+
+  return {
+    kind: "missing",
+    label: lang === "zh" ? "缺少来源" : "Missing source",
+    value: lang === "zh" ? "没有 DOI、链接或本地文件" : "No DOI, URL, or local file",
+    href: "",
+  };
+}
+
 function sourceCollectionCandidateOpenLabel(provenance: SourceCollectionCandidateProvenance, lang: "zh" | "en") {
   if (provenance.kind === "doi") {
     return lang === "zh" ? "打开论文 DOI" : "Open DOI";
@@ -2134,6 +2231,24 @@ function candidateSourceQualityAssessmentSummary(candidate: TeamWorkflowCandidat
   };
 }
 
+function sourceCollectionCandidateQualityState(candidate: TeamWorkflowCandidate) {
+  const summary = candidateSourceQualityAssessmentSummary(candidate);
+  const normalized = `${candidate.currentState || ""} ${candidate.qualityStatus || ""}`.toLowerCase();
+  const assessed =
+    Boolean(summary)
+    || normalized.includes("screened")
+    || normalized.includes("approved")
+    || normalized.includes("revision");
+  const approved =
+    summary?.decision === "approved"
+    || normalized.includes("source_screened")
+    || normalized.includes(" approved");
+  return {
+    assessed,
+    approved,
+  };
+}
+
 function latestWorkflowCandidate(candidates: TeamWorkflowCandidate[]) {
   return [...candidates].sort((left, right) => {
     const rightTime = new Date(right.updatedAt || right.createdAt || "").getTime();
@@ -2552,6 +2667,15 @@ export function TeamsRoute({
       return sourceCollectionRunRefetchInterval(pageVisible, status?.runStatus || "");
     },
   });
+  const sourceCollectionRecordsQuery = useQuery({
+    queryKey: sourceCollectionRunRecordsQueryKey(selectedSourceCollectionRunEffectiveId || "none"),
+    queryFn: () =>
+      fetchJson<DataProcessingRecordListPayload>(
+        `/api/data-processing/runs/${encodeURIComponent(selectedSourceCollectionRunEffectiveId)}/records`,
+      ),
+    enabled: Boolean(researchWorkflowTeamSelected && selectedSourceCollectionRunEffectiveId),
+    refetchInterval: () => sourceCollectionRunRefetchInterval(pageVisible, sourceCollectionRunStatusQuery.data?.runStatus || ""),
+  });
   const sourceCollectionAssignmentsQuery = useQuery({
     queryKey: queryKeys.dataProcessingCollectionAssignments(selectedSourceCollectionRunEffectiveId || "none"),
     queryFn: () =>
@@ -2780,6 +2904,7 @@ export function TeamsRoute({
       queryClient.setQueryData(queryKeys.teamWorkflow(variables.teamId), payload.workflow);
       void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflowSourceCollectionRuns(variables.teamId, SOURCE_COLLECTION_RUN_PREVIEW_LIMIT) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.dataProcessingRunStatus(payload.run.runId) });
+      void queryClient.invalidateQueries({ queryKey: sourceCollectionRunRecordsQueryKey(payload.run.runId) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.dataProcessingCollectionAssignments(payload.run.runId) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflowKnowledgeIngestionStatus(variables.teamId) });
       void queryClient.invalidateQueries({ queryKey: sourceQualityStatusQueryKey(variables.teamId) });
@@ -2892,6 +3017,7 @@ export function TeamsRoute({
         }
         void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflowSourceCollectionRuns(variables.teamId, SOURCE_COLLECTION_RUN_PREVIEW_LIMIT) });
         void queryClient.invalidateQueries({ queryKey: queryKeys.dataProcessingRunStatus(sourceRunId) });
+        void queryClient.invalidateQueries({ queryKey: sourceCollectionRunRecordsQueryKey(sourceRunId) });
         void queryClient.invalidateQueries({ queryKey: queryKeys.dataProcessingCollectionAssignments(sourceRunId) });
         void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflowKnowledgeIngestionStatus(variables.teamId) });
       } else if (variables.stageType === "experiment") {
@@ -2967,6 +3093,7 @@ export function TeamsRoute({
         queryClient.setQueryData(queryKeys.teamWorkflow(variables.teamId), payload.imported[0].workflow);
       }
       void queryClient.invalidateQueries({ queryKey: queryKeys.dataProcessingRunStatus(variables.runId) });
+      void queryClient.invalidateQueries({ queryKey: sourceCollectionRunRecordsQueryKey(variables.runId) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.dataProcessingCollectionAssignments(variables.runId) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflowCandidates(variables.teamId, TEAM_WORKFLOW_CANDIDATE_PREVIEW_LIMIT) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflowKnowledgeIngestionStatus(variables.teamId) });
@@ -3017,6 +3144,7 @@ export function TeamsRoute({
         queryClient.setQueryData(queryKeys.teamWorkflow(variables.teamId), payload.imported[0].workflow);
       }
       void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflowSourceCollectionRuns(variables.teamId, SOURCE_COLLECTION_RUN_PREVIEW_LIMIT) });
+      void queryClient.invalidateQueries({ queryKey: sourceCollectionRunRecordsQueryKey(payload.runId) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflowCandidates(variables.teamId, TEAM_WORKFLOW_CANDIDATE_PREVIEW_LIMIT) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflowKnowledgeIngestionStatus(variables.teamId) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflowCoordinationStatus(variables.teamId) });
@@ -3859,7 +3987,7 @@ export function TeamsRoute({
       ?? (sourceManifestCandidates.length ? sourceCollectionTraceMessages.find((message) => message.id.startsWith("candidate-")) : null)
       ?? sourceCollectionTraceMessages[0]
       ?? null;
-    const visibleResults = sourceManifestCandidates.slice(0, 10);
+    const visibleResults = sourceCollectionRecords.slice(0, SOURCE_COLLECTION_RESULT_PREVIEW_LIMIT);
     return (
       <section id="source-collection-process" className={styles.sourceCollectionConversationPanel} aria-label={lang === "zh" ? "搜集对话流" : "Collection conversation"}>
         <div className={styles.sourceCollectionConversationHeader}>
@@ -3924,72 +4052,99 @@ export function TeamsRoute({
             <div className={styles.empty}>{lang === "zh" ? "还没有正在执行的搜集动作。" : "No active collection action yet."}</div>
           )}
         </div>
-        <section id="source-collection-results" className={styles.sourceCollectionResultsPanel} aria-label={lang === "zh" ? "已收集资料" : "Collected sources"}>
+        <section id="source-collection-results" className={styles.sourceCollectionResultsPanel} aria-label={lang === "zh" ? "本轮原始资料记录" : "Raw collected records"}>
           <div className={styles.sourceCollectionResultsHeader}>
-            <strong>{lang === "zh" ? "已收集资料" : "Collected sources"}</strong>
-            <span>{sourceManifestCandidates.length} {lang === "zh" ? "条候选资料" : "candidate sources"}</span>
+            <strong>{lang === "zh" ? "本轮原始资料记录" : "Raw records in this run"}</strong>
+            <span>
+              {lang === "zh"
+                ? `显示 ${visibleResults.length} / 原始总数 ${sourceCollectionRawRecordCount}`
+                : `Showing ${visibleResults.length} / ${sourceCollectionRawRecordCount} raw records`}
+            </span>
           </div>
           <div className={styles.sourceCollectionResultStats}>
-            <span>{lang === "zh" ? "已搜到" : "collected"} <strong>{sourceCollectionCollectedCount}</strong></span>
-            <span>{lang === "zh" ? "可点击来源" : "clickable sources"} <strong>{sourceCollectionClickableSourceCount}</strong></span>
-            <span>{lang === "zh" ? "本地文件" : "local files"} <strong>{sourceCollectionLocalFileCount}</strong></span>
-            <span>{lang === "zh" ? "待 Agent 筛选" : "waiting for Agent screening"} <strong>{sourceQualityUnassessedCount}</strong></span>
+            <span>{lang === "zh" ? "原始记录" : "raw records"} <strong>{sourceCollectionCollectedCount}</strong></span>
+            <span>{lang === "zh" ? "已入候选" : "imported to candidates"} <strong>{sourceCollectionRunCandidateCount}</strong></span>
+            <span>{lang === "zh" ? "可点击来源" : "clickable sources"} <strong>{sourceCollectionRecordClickableSourceCount}</strong></span>
+            <span>{lang === "zh" ? "本地文件" : "local files"} <strong>{sourceCollectionRecordLocalFileCount}</strong></span>
           </div>
-          {sourceCollectionMissingSourceCount > 0 ? (
+          {sourceCollectionPendingCandidateImportCount > 0 ? (
             <div className={styles.sourceCollectionResultWarning}>
               {lang === "zh"
-                ? `${sourceCollectionMissingSourceCount} 条资料缺少 DOI、链接或本地文件路径，不能视为可溯源结果。`
-                : `${sourceCollectionMissingSourceCount} sources are missing DOI, link, or local file path.`}
+                ? `还有 ${sourceCollectionPendingCandidateImportCount} 条原始记录尚未进入候选库，所以“已搜到”和“候选资料”不会相等。`
+                : `${sourceCollectionPendingCandidateImportCount} raw records are not imported into candidates yet, so raw and candidate counts will differ.`}
+            </div>
+          ) : null}
+          {sourceCollectionRecordMissingSourceCount > 0 ? (
+            <div className={styles.sourceCollectionResultWarning}>
+              {lang === "zh"
+                ? `${sourceCollectionRecordMissingSourceCount} 条原始记录缺少 DOI、链接或本地文件路径，暂时不能视为可溯源结果。`
+                : `${sourceCollectionRecordMissingSourceCount} raw records are missing DOI, link, or local file path.`}
             </div>
           ) : null}
           {visibleResults.length ? (
             <div className={styles.sourceCollectionResultList}>
-              {visibleResults.map((candidate) => {
-                const sourceQualitySummary = candidateSourceQualityAssessmentSummary(candidate);
-                const provenance = sourceCollectionCandidateProvenance(candidate, lang);
-                const resultStatusLabel = sourceQualitySummary
-                  ? workflowIngestionStatusLabel(sourceQualitySummary.decision, lang)
-                  : workflowStateLabel(candidate.qualityStatus || candidate.currentState, lang);
-                const resultStatusRaw = sourceQualitySummary?.decision || candidate.qualityStatus || candidate.currentState;
-                const selected = selectedSourceCollectionCandidateId === candidate.candidateId;
+              {visibleResults.map((record) => {
+                const linkedCandidate = sourceCollectionCandidatesByRecordId.get(record.recordId) ?? null;
+                const sourceQualitySummary = linkedCandidate ? candidateSourceQualityAssessmentSummary(linkedCandidate) : null;
+                const provenance = sourceCollectionRecordProvenance(record, lang);
+                const selected = Boolean(linkedCandidate && selectedSourceCollectionCandidateId === linkedCandidate.candidateId);
+                const resultStatusLabel = linkedCandidate
+                  ? sourceQualitySummary
+                    ? workflowIngestionStatusLabel(sourceQualitySummary.decision, lang)
+                    : workflowStateLabel(linkedCandidate.qualityStatus || linkedCandidate.currentState, lang)
+                  : (lang === "zh" ? "待入候选" : "waiting for candidate import");
+                const resultStatusRaw = linkedCandidate
+                  ? (sourceQualitySummary?.decision || linkedCandidate.qualityStatus || linkedCandidate.currentState)
+                  : "candidate_pending";
                 return (
                   <article
-                    key={candidate.candidateId}
+                    key={record.recordId}
                     className={`${styles.sourceCollectionResultItem} ${selected ? styles.sourceCollectionResultItemSelected : ""}`}
-                    role="button"
-                    tabIndex={0}
-                    aria-pressed={selected}
-                    title={lang === "zh" ? "点击查看来源详情" : "Open source detail"}
-                    onClick={() => selectSourceCollectionCandidate(candidate)}
-                    onKeyDown={(event) => sourceCollectionCandidateCardKeyDown(event, candidate)}
+                    role={linkedCandidate ? "button" : undefined}
+                    tabIndex={linkedCandidate ? 0 : -1}
+                    aria-pressed={linkedCandidate ? selected : undefined}
+                    title={linkedCandidate ? (lang === "zh" ? "点击查看候选详情" : "Open candidate detail") : undefined}
+                    onClick={linkedCandidate ? () => selectSourceCollectionCandidate(linkedCandidate) : undefined}
+                    onKeyDown={linkedCandidate ? (event) => sourceCollectionCandidateCardKeyDown(event, linkedCandidate) : undefined}
                   >
                     <div className={styles.sourceCollectionResultContent}>
-                      <strong title={candidate.title || candidate.candidateId}>{candidate.title || candidate.candidateId}</strong>
-                      <p title={candidate.summary || candidate.candidateId}>{candidate.summary || candidate.candidateId}</p>
+                      <strong title={record.title || record.recordId}>{record.title || record.recordId}</strong>
+                      <p title={record.summary || record.recordId}>{record.summary || record.recordId}</p>
                       <div className={styles.sourceCollectionResultMeta}>
-                        <span>{sourceCollectionSourceTypeLabel(candidate.sourceKind || candidate.candidateType, lang)}</span>
-                        {sourceQualitySummary ? (
+                        <span>{sourceCollectionSourceTypeLabel(record.sourceType, lang)}</span>
+                        <span>{formatTime(record.updatedAt || record.createdAt, lang)}</span>
+                        {sourceQualitySummary && linkedCandidate ? (
                           <span>{lang === "zh" ? "评分" : "score"} {sourceQualitySummary.overallScore}/100</span>
                         ) : null}
-                        <span>{formatTime(candidate.updatedAt, lang)}</span>
+                        {linkedCandidate ? (
+                          <span>{lang === "zh" ? "已入候选" : "candidate ready"}</span>
+                        ) : (
+                          <span>{lang === "zh" ? "尚未入候选" : "candidate pending"}</span>
+                        )}
                       </div>
                     </div>
                     <span
-                      className={`${styles.workflowTag} ${styles.sourceCollectionResultStatus} ${workflowQualityTone(candidate.qualityStatus)}`}
+                      className={`${styles.workflowTag} ${styles.sourceCollectionResultStatus} ${linkedCandidate ? workflowQualityTone(linkedCandidate.qualityStatus) : styles.workflowTagWarning}`}
                       title={resultStatusRaw}
                     >
                       {resultStatusLabel}
                     </span>
                     <div className={`${styles.sourceCollectionResultSource} ${provenance.kind === "missing" ? styles.sourceCollectionResultSourceMissing : ""}`}>
                       <span>{provenance.label}</span>
-                      <code title={provenance.href || provenance.value}>{provenance.value}</code>
+                      {provenance.href ? (
+                        <a href={provenance.href} target="_blank" rel="noreferrer" title={provenance.href}>
+                          {provenance.value}
+                        </a>
+                      ) : (
+                        <code title={provenance.value}>{provenance.value}</code>
+                      )}
                     </div>
                   </article>
                 );
               })}
             </div>
           ) : (
-            <div className={styles.empty}>{lang === "zh" ? "暂无已收集资料。点击资料搜集卡的开始按钮后，结果会出现在这里。" : "No collected sources yet."}</div>
+            <div className={styles.empty}>{lang === "zh" ? "暂无原始资料记录。点击资料搜集卡的开始按钮后，搜索结果会先写到这里。" : "No raw records yet."}</div>
           )}
         </section>
       </section>
@@ -4175,7 +4330,7 @@ export function TeamsRoute({
   }
 
   function renderSourceCollectionScreeningPanel() {
-    const screeningCandidates = sourceManifestCandidates.slice(0, 6);
+    const screeningCandidates = sourceCollectionRunCandidates.slice(0, 6);
     return (
       <details
         id="source-collection-screening-panel"
@@ -4195,13 +4350,13 @@ export function TeamsRoute({
       >
         <summary>
           <span>{lang === "zh" ? "资料筛选" : "Source screening"}</span>
-          <small>{sourceQualityAssessedCount}/{sourceQualityCandidateCount}</small>
+          <small>{sourceCollectionRunAssessedCount}/{sourceCollectionRunCandidateCount}</small>
         </summary>
         <div id="source-collection-screening-stats" className={styles.workflowSourceQualityStats}>
-          <span>{lang === "zh" ? "候选" : "sources"} <strong>{sourceQualityCandidateCount}</strong></span>
-          <span>{lang === "zh" ? "已筛" : "assessed"} <strong>{sourceQualityAssessedCount}</strong></span>
-          <span>{lang === "zh" ? "通过" : "approved"} <strong>{sourceCollectionApprovedCount}</strong></span>
-          <span>{lang === "zh" ? "待筛" : "pending"} <strong>{sourceQualityUnassessedCount}</strong></span>
+          <span>{lang === "zh" ? "本轮候选" : "run candidates"} <strong>{sourceCollectionRunCandidateCount}</strong></span>
+          <span>{lang === "zh" ? "已筛" : "assessed"} <strong>{sourceCollectionRunAssessedCount}</strong></span>
+          <span>{lang === "zh" ? "通过" : "approved"} <strong>{sourceCollectionRunApprovedCount}</strong></span>
+          <span>{lang === "zh" ? "待筛" : "pending"} <strong>{sourceCollectionRunPendingScreeningCount}</strong></span>
         </div>
         <div className={styles.sourceCollectionPanelActions}>
           <button
@@ -4338,7 +4493,7 @@ export function TeamsRoute({
             })}
           </div>
         ) : (
-          <div className={styles.empty}>{lang === "zh" ? "暂无候选资料。先在资料搜集卡点击开始搜集或搜索下一批。" : "No source candidates yet."}</div>
+          <div className={styles.empty}>{lang === "zh" ? "本轮还没有候选资料。先完成资料搜集并导入候选。" : "No candidates from this run yet."}</div>
         )}
         {teamWorkflowSourceQualityStatus?.actionItems.length ? (
           <div className={styles.workflowIngestionActions}>
@@ -4360,7 +4515,7 @@ export function TeamsRoute({
   }
 
   function renderSourceCollectionCandidatePanel() {
-    const visibleCandidates = sourceManifestCandidates.slice(0, 12);
+    const visibleCandidates = sourceCollectionRunCandidates.slice(0, 12);
     return (
       <details
         id="source-collection-candidates-panel"
@@ -4379,13 +4534,13 @@ export function TeamsRoute({
       >
         <summary>
           <span>{lang === "zh" ? "候选库" : "Candidate library"}</span>
-          <small>{sourceManifestCandidates.length}</small>
+          <small>{sourceCollectionRunCandidateCount}</small>
         </summary>
         <div className={styles.workflowSourceQualityStats}>
-          <span>{lang === "zh" ? "候选" : "candidates"} <strong>{sourceManifestCandidates.length}</strong></span>
-          <span>{lang === "zh" ? "已筛" : "assessed"} <strong>{sourceQualityAssessedCount}</strong></span>
-          <span>{lang === "zh" ? "通过" : "approved"} <strong>{sourceCollectionApprovedCount}</strong></span>
-          <span>{lang === "zh" ? "待筛" : "pending"} <strong>{sourceQualityUnassessedCount}</strong></span>
+          <span>{lang === "zh" ? "本轮候选" : "run candidates"} <strong>{sourceCollectionRunCandidateCount}</strong></span>
+          <span>{lang === "zh" ? "已筛" : "assessed"} <strong>{sourceCollectionRunAssessedCount}</strong></span>
+          <span>{lang === "zh" ? "通过" : "approved"} <strong>{sourceCollectionRunApprovedCount}</strong></span>
+          <span>{lang === "zh" ? "待筛" : "pending"} <strong>{sourceCollectionRunPendingScreeningCount}</strong></span>
         </div>
         {visibleCandidates.length ? (
           <div className={styles.workflowCandidateList}>
@@ -4427,7 +4582,7 @@ export function TeamsRoute({
             })}
           </div>
         ) : (
-          <div className={styles.empty}>{lang === "zh" ? "暂无候选资料。" : "No source candidates yet."}</div>
+          <div className={styles.empty}>{lang === "zh" ? "本轮暂无候选资料。" : "No candidates from this run yet."}</div>
         )}
       </details>
     );
@@ -5307,6 +5462,7 @@ export function TeamsRoute({
   const teamWorkflowPaperNoteChunkStatus = teamWorkflowPaperNoteChunkStatusQuery.data ?? null;
   const researchStageRoundStatus = researchStageRoundStatusQuery.data ?? null;
   const researchStagePhases = researchStageRoundStatus?.phases ?? [];
+  const sourceCollectionRecords = sourceCollectionRecordsQuery.data?.records ?? [];
   const sourceCollectionAssignments = sourceCollectionAssignmentsQuery.data?.assignments ?? [];
   const sourceCollectionRunStatus = sourceCollectionRunStatusQuery.data ?? null;
   const sourceCollectionSearchPlanRef = selectedSourceCollectionRun?.scope?.dataSearchPlanRef ?? null;
@@ -5409,6 +5565,7 @@ export function TeamsRoute({
     }
     void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflowSourceCollectionRuns(selectedTeam.teamId, SOURCE_COLLECTION_RUN_PREVIEW_LIMIT) });
     void queryClient.invalidateQueries({ queryKey: queryKeys.dataProcessingRunStatus(selectedSourceCollectionRunEffectiveId) });
+    void queryClient.invalidateQueries({ queryKey: sourceCollectionRunRecordsQueryKey(selectedSourceCollectionRunEffectiveId) });
     void queryClient.invalidateQueries({ queryKey: queryKeys.dataProcessingCollectionAssignments(selectedSourceCollectionRunEffectiveId) });
     void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflowCandidates(selectedTeam.teamId, TEAM_WORKFLOW_CANDIDATE_PREVIEW_LIMIT) });
     void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflowKnowledgeIngestionStatus(selectedTeam.teamId) });
@@ -5453,6 +5610,12 @@ export function TeamsRoute({
     () => teamWorkflowCandidates.filter((candidate) => candidate.candidateType === "source_manifest"),
     [teamWorkflowCandidates],
   );
+  const sourceCollectionRunCandidates = useMemo(
+    () => selectedSourceCollectionRunEffectiveId
+      ? sourceManifestCandidates.filter((candidate) => sourceCollectionCandidateTrace(candidate).runId === selectedSourceCollectionRunEffectiveId)
+      : sourceManifestCandidates,
+    [selectedSourceCollectionRunEffectiveId, sourceManifestCandidates],
+  );
   const selectedSourceCollectionCandidate = useMemo(
     () => sourceManifestCandidates.find((candidate) => candidate.candidateId === selectedSourceCollectionCandidateId) ?? null,
     [selectedSourceCollectionCandidateId, sourceManifestCandidates],
@@ -5487,13 +5650,37 @@ export function TeamsRoute({
     selectSourceCollectionCandidate(candidate);
   };
   const sourceCollectionCandidateProvenances = useMemo(
-    () => sourceManifestCandidates.map((candidate) => sourceCollectionCandidateProvenance(candidate, lang)),
-    [lang, sourceManifestCandidates],
+    () => sourceCollectionRunCandidates.map((candidate) => sourceCollectionCandidateProvenance(candidate, lang)),
+    [lang, sourceCollectionRunCandidates],
+  );
+  const sourceCollectionCandidatesByRecordId = useMemo(() => {
+    const mapping = new Map<string, TeamWorkflowCandidate>();
+    sourceCollectionRunCandidates.forEach((candidate) => {
+      const trace = sourceCollectionCandidateTrace(candidate);
+      if (trace.recordId && !mapping.has(trace.recordId)) {
+        mapping.set(trace.recordId, candidate);
+      }
+    });
+    return mapping;
+  }, [sourceCollectionRunCandidates]);
+  const sourceCollectionRecordProvenances = useMemo(
+    () => sourceCollectionRecords.map((record) => sourceCollectionRecordProvenance(record, lang)),
+    [lang, sourceCollectionRecords],
   );
   const sourceCollectionClickableSourceCount = sourceCollectionCandidateProvenances.filter((item) => item.href).length;
   const sourceCollectionLocalFileCount = sourceCollectionCandidateProvenances.filter((item) => item.kind === "file").length;
   const sourceCollectionMissingSourceCount = sourceCollectionCandidateProvenances.filter((item) => item.kind === "missing").length;
-  const sourceCollectionCollectedCount = Math.max(sourceCollectionRunSummary?.recordCount ?? 0, sourceManifestCandidates.length);
+  const sourceCollectionRawRecordCount =
+    Number(sourceCollectionRecordsQuery.data?.summary?.recordCount ?? sourceCollectionRunSummary?.recordCount ?? sourceCollectionRecords.length) || 0;
+  const sourceCollectionRecordClickableSourceCount = sourceCollectionRecordProvenances.filter((item) => item.href).length;
+  const sourceCollectionRecordLocalFileCount = sourceCollectionRecordProvenances.filter((item) => item.kind === "file").length;
+  const sourceCollectionRecordMissingSourceCount = sourceCollectionRecordProvenances.filter((item) => item.kind === "missing").length;
+  const sourceCollectionRunCandidateCount = sourceCollectionRunCandidates.length;
+  const sourceCollectionRunAssessedCount = sourceCollectionRunCandidates.filter((candidate) => sourceCollectionCandidateQualityState(candidate).assessed).length;
+  const sourceCollectionRunApprovedCount = sourceCollectionRunCandidates.filter((candidate) => sourceCollectionCandidateQualityState(candidate).approved).length;
+  const sourceCollectionRunPendingScreeningCount = Math.max(0, sourceCollectionRunCandidateCount - sourceCollectionRunAssessedCount);
+  const sourceCollectionPendingCandidateImportCount = Math.max(0, sourceCollectionRawRecordCount - sourceCollectionRunCandidateCount);
+  const sourceCollectionCollectedCount = sourceCollectionRawRecordCount;
   const sourceCollectionQueryCount =
     sourceCollectionSearchPlanRef?.queryCount
     ?? selectedTeamStartSourceCollectionResult?.searchPlan.queryCount
@@ -6035,7 +6222,7 @@ export function TeamsRoute({
         ? "候选资料已到位，下一步执行资料筛选。"
         : "Candidate sources are ready. Run screening next.";
     }
-    if (sourceManifestCandidates.length > 0) {
+    if (sourceCollectionRunCandidateCount > 0) {
       return lang === "zh"
         ? "资料链路已具备，可进入实验规划或继续补充资料。"
         : "The source chain is ready. Move to experiment planning or collect more.";
@@ -6075,16 +6262,16 @@ export function TeamsRoute({
         ? "idle"
         : sourceCollectionSearchOpenAssignmentCount > 0
           ? "pending"
-          : sourceCollectionRecordCount || sourceManifestCandidates.length
+          : sourceCollectionRawRecordCount || sourceCollectionRunCandidateCount
             ? "done"
             : "pending";
   const sourceCollectionScreeningStepState: SourceCollectionStepState = selectedTeamSourceQualityError
     ? "failed"
-    : selectedTeamSourceQualityPending
-      ? "active"
-      : sourceQualityAssessedCount > 0
+      : selectedTeamSourceQualityPending
+        ? "active"
+      : sourceCollectionRunAssessedCount > 0
         ? "done"
-        : sourceManifestCandidates.length > 0 && sourceCollectionSearchOpenAssignmentCount <= 0
+        : sourceCollectionRunCandidateCount > 0 && sourceCollectionSearchOpenAssignmentCount <= 0
           ? "pending"
           : "idle";
   const sourceCollectionCandidateStepState: SourceCollectionStepState = selectedTeamRecordSourceCollectionOutputError
@@ -6098,11 +6285,11 @@ export function TeamsRoute({
           : "idle";
   const sourceCollectionGraphStepState: SourceCollectionStepState = selectedTeamBuildCandidateGraphError || teamWorkflowCandidateGraphQuery.error
     ? "failed"
-    : selectedTeamBuildCandidateGraphPending || teamWorkflowCandidateGraphQuery.isFetching
-      ? "active"
+      : selectedTeamBuildCandidateGraphPending || teamWorkflowCandidateGraphQuery.isFetching
+        ? "active"
       : candidateGraphNodeCount > 0
         ? "done"
-        : sourceManifestCandidates.length > 0
+        : sourceCollectionRunCandidateCount > 0
           ? "pending"
           : "idle";
   const sourceCollectionMemoryStepState: SourceCollectionStepState = teamWorkflowKnowledgeIngestionStatusQuery.error
@@ -6130,12 +6317,12 @@ export function TeamsRoute({
     {
       id: "collection",
       label: lang === "zh" ? "资料搜集" : "Collection",
-      metric: lang === "zh" ? `已搜到 ${sourceCollectionCollectedCount} 条` : `${sourceCollectionCollectedCount} collected`,
+      metric: lang === "zh" ? `原始资料 ${sourceCollectionCollectedCount} 条` : `${sourceCollectionCollectedCount} raw records`,
       summary: !selectedSourceCollectionRun
         ? (lang === "zh" ? "点击开始生成本轮任务" : "Start to create this run")
         : sourceCollectionSearchOpenAssignmentCount > 0
           ? (lang === "zh" ? `${sourceCollectionSearchOpenAssignmentCount} 个搜索任务待执行` : `${sourceCollectionSearchOpenAssignmentCount} search tasks remain`)
-          : (lang === "zh" ? `${sourceCollectionQueryCount} 个搜索问题已处理` : `${sourceCollectionQueryCount} search questions handled`),
+          : (lang === "zh" ? `已入候选 ${sourceCollectionRunCandidateCount} 条` : `${sourceCollectionRunCandidateCount} imported to candidates`),
       state: sourceCollectionSearchStepState,
       status: sourceCollectionStepStatusText(sourceCollectionSearchStepState),
       detailLabel: lang === "zh" ? "查看搜集过程" : "View collection process",
@@ -6149,12 +6336,12 @@ export function TeamsRoute({
     {
       id: "screening",
       label: lang === "zh" ? "资料筛选" : "Screening",
-      metric: lang === "zh" ? `已筛 ${sourceQualityAssessedCount}/${sourceQualityCandidateCount}` : `${sourceQualityAssessedCount}/${sourceQualityCandidateCount} screened`,
-      summary: sourceQualityCandidateCount <= 0
+      metric: lang === "zh" ? `已筛 ${sourceCollectionRunAssessedCount}/${sourceCollectionRunCandidateCount}` : `${sourceCollectionRunAssessedCount}/${sourceCollectionRunCandidateCount} screened`,
+      summary: sourceCollectionRunCandidateCount <= 0
         ? (lang === "zh" ? "先完成资料搜集" : "Collect sources first")
-        : sourceQualityUnassessedCount > 0
-          ? (lang === "zh" ? `${sourceQualityUnassessedCount} 条等待 Agent 审查` : `${sourceQualityUnassessedCount} wait for agent review`)
-          : (lang === "zh" ? `${sourceCollectionApprovedCount} 条已通过` : `${sourceCollectionApprovedCount} approved`),
+        : sourceCollectionRunPendingScreeningCount > 0
+          ? (lang === "zh" ? `${sourceCollectionRunPendingScreeningCount} 条等待 Agent 审查` : `${sourceCollectionRunPendingScreeningCount} wait for agent review`)
+          : (lang === "zh" ? `${sourceCollectionRunApprovedCount} 条已通过` : `${sourceCollectionRunApprovedCount} approved`),
       state: sourceCollectionScreeningStepState,
       status: sourceCollectionStepStatusText(sourceCollectionScreeningStepState),
       detailLabel: lang === "zh" ? "查看筛选详情" : "View screening details",
@@ -6168,8 +6355,8 @@ export function TeamsRoute({
     {
       id: "candidate",
       label: lang === "zh" ? "候选入库" : "Candidates",
-      metric: lang === "zh" ? `候选资料 ${sourceManifestCandidates.length} 条` : `${sourceManifestCandidates.length} candidates`,
-      summary: sourceManifestCandidates.length > 0
+      metric: lang === "zh" ? `本轮候选 ${sourceCollectionRunCandidateCount} 条` : `${sourceCollectionRunCandidateCount} run candidates`,
+      summary: sourceCollectionRunCandidateCount > 0
         ? (lang === "zh" ? "候选库可视化查看" : "Open the visual library")
         : (lang === "zh" ? "等待资料入候选" : "Waiting for candidates"),
       state: sourceCollectionCandidateStepState,
@@ -6314,7 +6501,7 @@ export function TeamsRoute({
                 <span>{lang === "zh" ? "下一步" : "next"} <strong>{sourceCollectionStageFocusLabel}</strong></span>
                 <span>{lang === "zh" ? "可搜索" : "search"} <strong>{lang === "zh" ? `${sourceCollectionSearchOpenAssignmentCount} 项` : sourceCollectionSearchOpenAssignmentCount}</strong></span>
                 <span>{lang === "zh" ? "后续" : "next work"} <strong>{lang === "zh" ? `${sourceCollectionDownstreamOpenAssignmentCount} 项` : sourceCollectionDownstreamOpenAssignmentCount}</strong></span>
-                <span>{lang === "zh" ? "搜集结果" : "results"} <strong>{lang === "zh" ? `${sourceCollectionCollectedCount} 条` : sourceCollectionCollectedCount}</strong></span>
+                <span>{lang === "zh" ? "原始资料" : "raw records"} <strong>{lang === "zh" ? `${sourceCollectionCollectedCount} 条` : sourceCollectionCollectedCount}</strong></span>
                 <span>{lang === "zh" ? "搜索问题" : "search questions"} <strong>{lang === "zh" ? `${sourceCollectionQueryCount} 个` : sourceCollectionQueryCount}</strong></span>
                 <span>{lang === "zh" ? "缓存" : "cache"} <strong>{sourceCollectionPromptCacheStatusLabel(sourceCollectionPromptCacheStatus, lang)}</strong></span>
               </div>
