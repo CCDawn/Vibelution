@@ -56,6 +56,7 @@ from config.settings import reload_config
 from .config_editor_schema import build_editor_meta, build_editor_sections
 from .git_status_service import validate_git_commit_message_prompt, with_git_config_defaults
 from .i18n import resolve_language, text_for
+from .model_capability_service import model_record_image_input_support
 from .model_reference_service import ModelReferenceConflictError, assert_model_delete_safe
 from .runtime_scene_service import record_runtime_scene_event
 from .workbench_contract_service import get_workbench_contract
@@ -520,9 +521,9 @@ def _decorate_model_options(public_config: dict[str, Any], draft_meta: dict | No
         decorated["protocol_warnings"] = protocol_route.get("protocolWarnings") if isinstance(protocol_route.get("protocolWarnings"), list) else []
         decorated["resolved_provider_api"] = str(protocol_route.get("providerApi") or decorated["provider_api"]).strip()
         decorated["resolved_compat"] = copy.deepcopy(protocol_route.get("compat") if isinstance(protocol_route.get("compat"), dict) else {})
-        decorated["supports_image_input"] = details.get("supports_image_input")
+        decorated["supports_image_input"] = _image_input_support_from_model_record(decorated)
         decorated["capability_status"] = str(details.get("capability_status") or "").strip() or (
-            "supported" if details.get("supports_image_input") is True else "unsupported" if details.get("supports_image_input") is False else "unknown"
+            "supported" if decorated["supports_image_input"] is True else "unsupported" if decorated["supports_image_input"] is False else "unknown"
         )
         decorated["capability_source"] = str(details.get("capability_source") or "").strip()
         decorated["capability_checked_at"] = str(details.get("capability_checked_at") or "").strip()
@@ -543,19 +544,28 @@ def _model_label_map(public_config: dict[str, Any]) -> dict[str, str]:
     return labels
 
 
-def _image_input_support_from_model_record(record: dict[str, Any]) -> bool | None:
-    details = record.get("details") if isinstance(record.get("details"), dict) else {}
-    supports = record.get("supports_image_input")
-    if not isinstance(supports, bool):
-        supports = details.get("supports_image_input")
-    if isinstance(supports, bool):
-        return supports
-    capability_status = str(record.get("capability_status") or details.get("capability_status") or "").strip().lower()
-    if capability_status == "supported":
-        return True
-    if capability_status == "unsupported":
-        return False
-    return None
+def _image_input_support_from_model_record(record: dict[str, Any], *, provider_kind: str = "") -> bool | None:
+    return model_record_image_input_support(record, provider_kind=provider_kind)
+
+
+def _model_record_provider_kind(public_config: dict[str, Any], record: dict[str, Any]) -> str:
+    provider = record.get("provider")
+    if isinstance(provider, dict):
+        kind = str(provider.get("kind") or "").strip()
+        if kind:
+            return kind
+    provider_kind = str(record.get("provider_kind") or "").strip()
+    if provider_kind:
+        return provider_kind
+    provider_id = str(record.get("provider_id") or "").strip()
+    if not provider_id:
+        return ""
+    llm_cfg = public_config.get("llm", {}) if isinstance(public_config, dict) else {}
+    providers = llm_cfg.get("providers", {}) if isinstance(llm_cfg, dict) else {}
+    provider_record = providers.get(provider_id) if isinstance(providers, dict) else None
+    if isinstance(provider_record, dict):
+        return str(provider_record.get("kind") or "").strip()
+    return ""
 
 
 def _model_image_input_support_map(public_config: dict[str, Any]) -> dict[str, bool | None]:
@@ -569,7 +579,10 @@ def _model_image_input_support_map(public_config: dict[str, Any]) -> dict[str, b
     if isinstance(model_library, dict):
         for model_id, entry in model_library.items():
             if isinstance(entry, dict):
-                supports_by_model[str(model_id)] = _image_input_support_from_model_record(entry)
+                supports_by_model[str(model_id)] = _image_input_support_from_model_record(
+                    entry,
+                    provider_kind=_model_record_provider_kind(public_config, entry),
+                )
     return supports_by_model
 
 
