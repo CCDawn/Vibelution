@@ -598,30 +598,51 @@
   display: inline-flex;
   flex: 0 0 auto;
   align-items: center;
-  gap: 3px;
+  gap: 4px;
   min-width: 0;
   font-size: 0.62rem;
   line-height: 1;
 }
 
-.tokenCompressionBadges span,
-.tokenCompressionBadges strong {
-  display: inline-flex;
+.tokenCompressionBadges span {
+  display: grid;
+  grid-template-columns: auto auto;
   align-items: center;
-  min-height: 20px;
-  padding: 3px 5px;
+  gap: 4px;
+  min-width: 0;
+  max-width: 92px;
+  min-height: 22px;
+  padding: 3px 6px;
   border: 1px solid color-mix(in srgb, var(--accent-cool) 18%, var(--border-soft));
   border-radius: 999px;
   background: color-mix(in srgb, var(--surface-card) 76%, transparent);
   color: var(--fg-secondary);
-  font-weight: 720;
   white-space: nowrap;
 }
 
+.tokenCompressionBadges small {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg-tertiary);
+  font-size: 0.58rem;
+  font-weight: 720;
+  line-height: 1;
+  text-overflow: ellipsis;
+}
+
 .tokenCompressionBadges strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg-primary);
+  font-size: 0.62rem;
+  font-weight: 820;
+  line-height: 1;
+  text-overflow: ellipsis;
+}
+
+.tokenCompressionBadgeEmphasis {
   border-color: color-mix(in srgb, var(--accent-warm-2) 28%, var(--border-soft));
   background: color-mix(in srgb, var(--accent-warm-2) 10%, var(--surface-card));
-  color: var(--fg-primary);
 }
 
 .tokenCompressionTable {
