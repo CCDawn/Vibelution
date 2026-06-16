@@ -1351,20 +1351,20 @@
 
 .sourceCollectionPageBody {
   display: grid;
-  grid-template-rows: auto auto auto minmax(0, 1fr);
-  gap: 10px;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  gap: 8px;
   min-height: 0;
   flex: 1 1 0;
-  padding: 10px;
+  padding: 8px 10px 10px;
   overflow: hidden;
 }
 
 .sourceCollectionCommandBar {
   display: grid;
-  grid-template-columns: minmax(260px, 0.72fr) minmax(520px, 1.28fr);
+  grid-template-columns: minmax(260px, 0.62fr) minmax(520px, 1.38fr);
   align-items: center;
-  gap: 10px;
-  padding: 10px;
+  gap: 8px;
+  padding: 8px 10px;
   border: 1px solid var(--source-step-border, color-mix(in srgb, var(--accent-success) 24%, var(--border-soft)));
   border-radius: 8px;
   background:
@@ -1374,7 +1374,7 @@
 
 .sourceCollectionCommandTitle {
   display: grid;
-  gap: 3px;
+  gap: 2px;
   min-width: 0;
 }
 
@@ -1388,29 +1388,29 @@
 
 .sourceCollectionCommandBar strong {
   color: var(--fg-primary);
-  font-size: 0.86rem;
+  font-size: 0.82rem;
 }
 
 .sourceCollectionCommandBar span {
   color: var(--fg-muted);
-  font-size: 0.68rem;
+  font-size: 0.64rem;
   font-weight: 720;
 }
 
 .sourceCollectionCommandStats {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(108px, 1fr));
-  gap: 6px;
+  grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
+  gap: 5px;
 }
 
 .sourceCollectionCommandStats span {
   display: flex;
   min-width: 0;
-  min-height: 30px;
+  min-height: 26px;
   align-items: center;
   justify-content: space-between;
   gap: 6px;
-  padding: 0 8px;
+  padding: 0 7px;
   border: 1px solid color-mix(in srgb, var(--border-soft) 78%, transparent);
   border-radius: 7px;
   background: color-mix(in srgb, var(--surface-card) 70%, transparent);
@@ -1418,7 +1418,7 @@
 
 .sourceCollectionCommandStats strong {
   flex: 0 0 auto;
-  font-size: 0.82rem;
+  font-size: 0.78rem;
 }
 
 .workflowSuccess,
@@ -1452,16 +1452,16 @@
 .sourceCollectionStageModules {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 6px;
+  gap: 5px;
 }
 
 .sourceCollectionStageCard {
   display: grid;
-  grid-template-rows: auto minmax(42px, 1fr) auto auto;
+  grid-template-rows: auto minmax(0, 1fr) auto;
   min-width: 0;
-  min-height: 166px;
-  gap: 8px;
-  padding: 9px;
+  min-height: 104px;
+  gap: 5px;
+  padding: 7px;
   border: 1px solid var(--source-step-border, var(--border-soft));
   border-radius: 7px;
   background:
@@ -1469,7 +1469,7 @@
     var(--source-step-bg, color-mix(in srgb, var(--surface-panel-strong) 72%, transparent));
   color: var(--source-step-fg, var(--fg-muted));
   cursor: pointer;
-  font-size: 0.68rem;
+  font-size: 0.66rem;
   font-weight: 740;
   overflow: hidden;
 }
@@ -1486,7 +1486,7 @@
 .sourceCollectionStageCardSelected {
   border-color: color-mix(in srgb, var(--accent-cool) 72%, var(--border-strong));
   box-shadow:
-    inset 0 -3px 0 color-mix(in srgb, var(--accent-cool) 64%, transparent),
+    inset 0 -2px 0 color-mix(in srgb, var(--accent-cool) 64%, transparent),
     0 0 0 2px color-mix(in srgb, var(--accent-cool) 14%, transparent);
 }
 
@@ -1517,7 +1517,7 @@
 .sourceCollectionStageModuleText {
   display: grid;
   align-content: start;
-  gap: 3px;
+  gap: 2px;
   min-width: 0;
 }
 
@@ -1532,27 +1532,35 @@
 
 .sourceCollectionStageModuleText b {
   color: var(--fg-primary);
-  font-size: 0.76rem;
+  font-size: 0.74rem;
 }
 
 .sourceCollectionStageModuleText em {
   color: var(--fg-muted);
-  font-size: 0.62rem;
+  font-size: 0.6rem;
   font-style: normal;
   font-weight: 760;
 }
 
 .sourceCollectionStageModuleText small {
   color: var(--source-step-fg, var(--fg-muted));
-  font-size: 0.6rem;
+  font-size: 0.58rem;
   font-weight: 820;
+}
+
+.sourceCollectionStageActionRow {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: flex-start;
 }
 
 .sourceCollectionStagePrimaryAction,
 .sourceCollectionStageSecondaryAction {
   display: inline-flex;
   min-width: 0;
-  min-height: 30px;
+  max-width: 100%;
+  min-height: 26px;
   align-items: center;
   justify-content: center;
   gap: 6px;
@@ -1562,7 +1570,7 @@
   background: var(--source-step-action-bg, color-mix(in srgb, var(--surface-panel-strong) 82%, transparent));
   color: var(--fg-primary);
   cursor: pointer;
-  font-size: 0.68rem;
+  font-size: 0.66rem;
   font-weight: 840;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1791,8 +1799,8 @@
 
 .sourceCollectionPageGrid {
   display: grid;
-  grid-template-columns: minmax(620px, 1.35fr) minmax(360px, 0.65fr);
-  gap: 10px;
+  grid-template-columns: minmax(620px, 1fr) minmax(330px, 0.48fr);
+  gap: 8px;
   min-height: 0;
   overflow: hidden;
 }
@@ -1810,9 +1818,14 @@
 .sourceCollectionControlPanel {
   display: grid;
   align-content: start;
-  gap: 8px;
-  padding: 10px;
+  gap: 7px;
+  padding: 8px;
   overflow: auto;
+}
+
+.sourceCollectionControlPanel {
+  align-self: start;
+  max-height: 100%;
 }
 
 .sourceCollectionConversationHeader {
@@ -2048,9 +2061,9 @@
 
 .sourceCollectionResultsPanel {
   display: grid;
-  gap: 8px;
+  gap: 6px;
   min-width: 0;
-  padding-top: 8px;
+  padding-top: 6px;
   border-top: 1px solid var(--border-soft);
 }
 
@@ -2072,77 +2085,91 @@
 
 .sourceCollectionResultsHeader strong {
   color: var(--fg-primary);
-  font-size: 0.84rem;
+  font-size: 0.8rem;
 }
 
 .sourceCollectionResultsHeader span {
   color: var(--fg-muted);
-  font-size: 0.68rem;
+  font-size: 0.66rem;
   font-weight: 760;
 }
 
 .sourceCollectionResultStats {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(104px, 1fr));
-  gap: 6px;
+  grid-template-columns: repeat(auto-fit, minmax(92px, 1fr));
+  gap: 5px;
   min-width: 0;
 }
 
 .sourceCollectionResultStats span {
   display: flex;
   min-width: 0;
-  min-height: 28px;
+  min-height: 24px;
   align-items: center;
   justify-content: space-between;
   gap: 6px;
-  padding: 0 8px;
+  padding: 0 7px;
   border: 1px solid color-mix(in srgb, var(--accent-success) 22%, var(--border-soft));
   border-radius: 7px;
   background: color-mix(in srgb, var(--accent-success) 7%, var(--surface-card));
   color: var(--fg-muted);
-  font-size: 0.66rem;
+  font-size: 0.62rem;
   font-weight: 760;
 }
 
 .sourceCollectionResultStats strong {
   flex: 0 0 auto;
   color: var(--fg-primary);
-  font-size: 0.78rem;
+  font-size: 0.74rem;
 }
 
 .sourceCollectionResultWarning {
   min-width: 0;
-  padding: 7px 9px;
+  padding: 6px 8px;
   border: 1px solid color-mix(in srgb, var(--accent-warm) 30%, var(--border-soft));
   border-radius: 7px;
   background: color-mix(in srgb, var(--accent-warm) 8%, var(--surface-card));
   color: var(--fg-secondary);
-  font-size: 0.68rem;
+  font-size: 0.66rem;
   font-weight: 760;
 }
 
 .sourceCollectionResultList {
   display: grid;
-  gap: 7px;
+  gap: 4px;
   min-width: 0;
 }
 
 .sourceCollectionResultItem {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 6px 10px;
+  grid-template-columns: minmax(220px, 1fr) minmax(80px, 112px) minmax(150px, 240px);
+  gap: 8px;
+  align-items: center;
   min-width: 0;
-  padding: 9px;
-  border: 1px solid color-mix(in srgb, var(--accent-warm) 24%, var(--border-soft));
-  border-radius: 8px;
+  min-height: 54px;
+  padding: 7px 8px;
+  border: 1px solid color-mix(in srgb, var(--border-soft) 92%, transparent);
+  border-radius: 7px;
   background:
-    linear-gradient(90deg, color-mix(in srgb, var(--accent-warm) 7%, transparent), transparent 70%),
-    color-mix(in srgb, var(--surface-card) 78%, transparent);
+    linear-gradient(90deg, color-mix(in srgb, var(--accent-cool) 4%, transparent), transparent 62%),
+    color-mix(in srgb, var(--surface-card) 72%, transparent);
+  cursor: pointer;
+}
+
+.sourceCollectionResultItem:hover,
+.sourceCollectionResultItem:focus-visible,
+.sourceCollectionResultItemSelected {
+  border-color: color-mix(in srgb, var(--accent-cool) 54%, var(--border-strong));
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--accent-cool) 10%, transparent), transparent 68%),
+    color-mix(in srgb, var(--surface-card) 84%, transparent);
+  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--accent-cool) 62%, transparent);
+  outline: none;
 }
 
 .sourceCollectionResultContent {
   display: grid;
-  gap: 3px;
+  gap: 2px;
   min-width: 0;
 }
 
@@ -2157,7 +2184,7 @@
 
 .sourceCollectionResultItem strong {
   color: var(--fg-primary);
-  font-size: 0.78rem;
+  font-size: 0.74rem;
   white-space: nowrap;
 }
 
@@ -2165,34 +2192,35 @@
   display: -webkit-box;
   margin: 0;
   color: var(--fg-secondary);
-  font-size: 0.7rem;
-  line-height: 1.38;
-  -webkit-line-clamp: 2;
+  font-size: 0.64rem;
+  line-height: 1.28;
+  -webkit-line-clamp: 1;
   -webkit-box-orient: vertical;
 }
 
 .sourceCollectionResultMeta {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px;
+  gap: 3px;
 }
 
 .sourceCollectionResultMeta span {
   max-width: 100%;
-  padding: 2px 6px;
+  padding: 1px 5px;
   border: 1px solid var(--border-soft);
   border-radius: 999px;
   color: var(--fg-muted);
-  font-size: 0.62rem;
+  font-size: 0.58rem;
   font-weight: 760;
   white-space: nowrap;
 }
 
 .sourceCollectionResultStatus {
-  justify-self: end;
-  align-self: start;
+  justify-self: stretch;
+  align-self: center;
   min-width: max-content;
-  max-width: 8rem;
+  max-width: 100%;
+  padding: 2px 6px;
   white-space: nowrap;
   writing-mode: horizontal-tb;
   word-break: keep-all;
@@ -2202,17 +2230,17 @@
 }
 
 .sourceCollectionResultSource {
-  grid-column: 1 / -1;
   display: grid;
-  grid-template-columns: max-content minmax(0, 1fr);
-  gap: 7px;
-  align-items: center;
-  padding-top: 2px;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 2px;
+  align-items: start;
+  justify-self: stretch;
+  padding-top: 0;
 }
 
 .sourceCollectionResultSource > span {
   color: var(--fg-muted);
-  font-size: 0.62rem;
+  font-size: 0.56rem;
   font-weight: 800;
   white-space: nowrap;
 }
@@ -2224,13 +2252,14 @@
   max-width: 100%;
   align-items: center;
   gap: 5px;
-  padding: 4px 7px;
+  min-height: 24px;
+  padding: 0 6px;
   border: 1px solid color-mix(in srgb, var(--accent-cool) 28%, var(--border-soft));
   border-radius: 7px;
   background: color-mix(in srgb, var(--accent-cool) 7%, var(--surface-card));
   color: var(--accent-cool-2);
   font-family: inherit;
-  font-size: 0.66rem;
+  font-size: 0.6rem;
   font-weight: 820;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2250,6 +2279,124 @@
   border-color: color-mix(in srgb, var(--accent-warm) 32%, var(--border-soft));
   background: color-mix(in srgb, var(--accent-warm) 8%, var(--surface-card));
   color: var(--fg-secondary);
+}
+
+.sourceCollectionSourceDetailPanel {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 9px;
+  border: 1px solid color-mix(in srgb, var(--accent-cool) 30%, var(--border-soft));
+  border-radius: 8px;
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--accent-cool) 8%, transparent), transparent 70%),
+    color-mix(in srgb, var(--surface-card) 76%, transparent);
+}
+
+.sourceCollectionSourceDetailHeader {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.sourceCollectionSourceDetailHeader div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.sourceCollectionSourceDetailHeader strong,
+.sourceCollectionSourceDetailHeader span,
+.sourceCollectionSourceDetailActions a,
+.sourceCollectionSourceDetailActions button,
+.sourceCollectionSourceDetailFacts code {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sourceCollectionSourceDetailHeader strong {
+  color: var(--fg-primary);
+  font-size: 0.78rem;
+  white-space: nowrap;
+}
+
+.sourceCollectionSourceDetailHeader div > span {
+  color: var(--fg-muted);
+  font-size: 0.6rem;
+  font-weight: 760;
+  white-space: nowrap;
+}
+
+.sourceCollectionSourceDetailActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  min-width: 0;
+}
+
+.sourceCollectionSourceDetailActions a,
+.sourceCollectionSourceDetailActions button {
+  display: inline-flex;
+  max-width: 100%;
+  min-height: 26px;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 0 8px;
+  border: 1px solid color-mix(in srgb, var(--accent-cool) 34%, var(--border-soft));
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--accent-cool) 8%, var(--surface-panel-strong));
+  color: var(--fg-primary);
+  cursor: pointer;
+  font-size: 0.66rem;
+  font-weight: 800;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.sourceCollectionSourceDetailActions a:hover,
+.sourceCollectionSourceDetailActions button:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--accent-cool) 54%, var(--border-strong));
+  background: color-mix(in srgb, var(--accent-cool) 14%, var(--surface-panel-strong));
+}
+
+.sourceCollectionSourceDetailActions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
+.sourceCollectionSourceDetailFacts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 5px;
+  min-width: 0;
+}
+
+.sourceCollectionSourceDetailFacts span {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  padding: 5px 6px;
+  border: 1px solid color-mix(in srgb, var(--border-soft) 78%, transparent);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--surface-panel-strong) 62%, transparent);
+}
+
+.sourceCollectionSourceDetailFacts b {
+  color: var(--fg-muted);
+  font-size: 0.58rem;
+  font-weight: 780;
+}
+
+.sourceCollectionSourceDetailFacts code {
+  color: var(--fg-primary);
+  font-family: inherit;
+  font-size: 0.64rem;
+  font-weight: 760;
+  white-space: nowrap;
 }
 
 .sourceCollectionUnavailable {
@@ -3135,9 +3282,9 @@
 
 .workflowSourceCollectionPanel {
   display: grid;
-  gap: 8px;
+  gap: 6px;
   min-width: 0;
-  padding: 8px;
+  padding: 7px;
   border: 1px solid color-mix(in srgb, var(--accent-success) 26%, var(--border-soft));
   border-radius: 8px;
   background:
@@ -3154,8 +3301,8 @@
 
 .workflowSourceCollectionDetails {
   display: grid;
-  gap: 8px;
-  padding: 7px;
+  gap: 6px;
+  padding: 6px;
 }
 
 .sourceCollectionFocusedPanel {
@@ -3182,13 +3329,13 @@
 
 .workflowSourceCollectionDetails summary {
   display: flex;
-  min-height: 28px;
+  min-height: 24px;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
   color: var(--fg-primary);
   cursor: pointer;
-  font-size: 0.72rem;
+  font-size: 0.68rem;
   font-weight: 780;
   list-style-position: inside;
 }
@@ -3203,7 +3350,7 @@
 
 .workflowSourceCollectionDetails summary small {
   color: var(--fg-muted);
-  font-size: 0.64rem;
+  font-size: 0.6rem;
   font-weight: 720;
 }
 
@@ -3211,7 +3358,7 @@
 .workflowSourceCollectionOutputForm {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 6px;
+  gap: 5px;
   min-width: 0;
 }
 
@@ -3219,10 +3366,10 @@
 .workflowSourceCollectionRuns label,
 .workflowSourceCollectionOutputForm label {
   display: grid;
-  gap: 3px;
+  gap: 2px;
   min-width: 0;
   color: var(--fg-muted);
-  font-size: 0.66rem;
+  font-size: 0.62rem;
   font-weight: 720;
 }
 
@@ -3233,7 +3380,7 @@
 .workflowSourceCollectionOutputForm input,
 .workflowSourceCollectionOutputForm textarea,
 .workflowSourceCollectionOutputForm select {
-  min-height: 26px;
+  min-height: 24px;
   width: 100%;
   min-width: 0;
   border: 1px solid var(--border-soft);
@@ -3241,7 +3388,7 @@
   background: color-mix(in srgb, var(--surface-panel) 86%, transparent);
   color: var(--fg-primary);
   font: inherit;
-  font-size: 0.72rem;
+  font-size: 0.68rem;
 }
 
 .workflowSourceCollectionForm textarea,
@@ -3283,7 +3430,7 @@
 .workflowSourceCollectionAssignments,
 .workflowSourceCollectionQueries {
   display: grid;
-  gap: 6px;
+  gap: 5px;
   min-width: 0;
 }
 
@@ -3324,7 +3471,7 @@
 .workflowSourceCollectionSearchAction {
   grid-template-columns: minmax(0, 1fr);
   align-items: stretch;
-  padding: 8px;
+  padding: 6px;
   border: 1px solid color-mix(in srgb, var(--accent-primary) 30%, var(--border-soft));
   border-radius: 7px;
   background:
@@ -3340,14 +3487,14 @@
 
 .workflowSourceCollectionSearchAction strong {
   color: var(--fg-primary);
-  font-size: 0.76rem;
+  font-size: 0.7rem;
 }
 
 .workflowSourceCollectionSearchAction span {
   color: var(--fg-muted);
-  font-size: 0.66rem;
+  font-size: 0.62rem;
   font-weight: 700;
-  line-height: 1.42;
+  line-height: 1.32;
 }
 
 .workflowSourceCollectionSearchAction button {
@@ -3355,14 +3502,14 @@
   align-items: center;
   justify-content: center;
   gap: 6px;
-  min-height: 30px;
+  min-height: 26px;
   width: 100%;
   padding: 0 12px;
   border: 1px solid color-mix(in srgb, var(--accent-primary) 42%, var(--border-strong));
   border-radius: var(--radius-control);
   background: color-mix(in srgb, var(--accent-primary) 14%, var(--surface-panel-strong));
   color: var(--fg-primary);
-  font-size: 0.74rem;
+  font-size: 0.68rem;
   font-weight: 780;
 }
 
@@ -3372,7 +3519,7 @@
 }
 
 .workflowSourceCollectionStorageActions {
-  padding: 8px;
+  padding: 6px;
   border: 1px solid color-mix(in srgb, var(--accent-cool) 34%, var(--border-soft));
   border-radius: 7px;
   background:
@@ -3388,14 +3535,14 @@
 
 .workflowSourceCollectionStorageActions strong {
   color: var(--fg-primary);
-  font-size: 0.74rem;
+  font-size: 0.7rem;
 }
 
 .workflowSourceCollectionStorageActions span,
 .workflowSourceCollectionStorageActions small {
   min-width: 0;
   color: var(--fg-muted);
-  font-size: 0.64rem;
+  font-size: 0.6rem;
   font-weight: 720;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -3417,13 +3564,13 @@
   align-items: center;
   justify-content: center;
   gap: 5px;
-  min-height: 28px;
+  min-height: 24px;
   padding: 0 8px;
   border: 1px solid color-mix(in srgb, var(--accent-cool) 32%, var(--border-strong));
   border-radius: var(--radius-control);
   background: color-mix(in srgb, var(--accent-cool) 10%, var(--surface-panel-strong));
   color: color-mix(in srgb, var(--accent-cool) 76%, var(--fg-primary));
-  font-size: 0.68rem;
+  font-size: 0.64rem;
   font-weight: 780;
   white-space: nowrap;
 }
@@ -3484,8 +3631,8 @@
   display: grid;
   gap: 2px;
   min-width: 0;
-  min-height: 42px;
-  padding: 6px;
+  min-height: 34px;
+  padding: 5px 6px;
   border: 1px solid var(--border-soft);
   border-radius: 7px;
   background: color-mix(in srgb, var(--surface-card) 70%, transparent);
@@ -3503,12 +3650,12 @@
 
 .workflowSourceCollectionAssignments button strong {
   color: var(--fg-primary);
-  font-size: 0.72rem;
+  font-size: 0.68rem;
 }
 
 .workflowSourceCollectionAssignments button span {
   color: var(--fg-muted);
-  font-size: 0.66rem;
+  font-size: 0.6rem;
 }
 
 .workflowSourceCollectionAssignmentActive {
@@ -3801,6 +3948,21 @@
   font-size: 0.8rem;
 }
 
+.sourceCollectionControlPanel .workflowSourceQualityStats {
+  grid-template-columns: repeat(auto-fit, minmax(74px, 1fr));
+  gap: 4px;
+}
+
+.sourceCollectionControlPanel .workflowSourceQualityStats span {
+  min-height: 24px;
+  padding: 3px 6px;
+  font-size: 0.6rem;
+}
+
+.sourceCollectionControlPanel .workflowSourceQualityStats strong {
+  font-size: 0.72rem;
+}
+
 .workflowSourceQualityQueue {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -4074,6 +4236,18 @@
   border: 1px solid var(--border-soft);
   border-radius: 8px;
   background: color-mix(in srgb, var(--surface-panel-strong) 72%, transparent);
+  cursor: pointer;
+}
+
+.workflowCandidateItem:hover,
+.workflowCandidateItem:focus-visible,
+.workflowCandidateItemSelected {
+  border-color: color-mix(in srgb, var(--accent-cool) 48%, var(--border-strong));
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--accent-cool) 7%, transparent), transparent 72%),
+    color-mix(in srgb, var(--surface-panel-strong) 82%, transparent);
+  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--accent-cool) 56%, transparent);
+  outline: none;
 }
 
 .workflowCandidateHeader {
@@ -4137,6 +4311,56 @@
 .workflowCandidateActions button:disabled {
   cursor: not-allowed;
   opacity: 0.54;
+}
+
+.sourceCollectionControlPanel .workflowCandidateList {
+  gap: 4px;
+}
+
+.sourceCollectionControlPanel .workflowCandidateItem {
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 3px 8px;
+  align-items: center;
+  min-height: 42px;
+  padding: 6px 7px;
+}
+
+.sourceCollectionControlPanel .workflowCandidateHeader {
+  gap: 6px;
+}
+
+.sourceCollectionControlPanel .workflowCandidateHeader strong {
+  font-size: 0.7rem;
+}
+
+.sourceCollectionControlPanel .workflowCandidateItem p {
+  grid-column: 1 / -1;
+  font-size: 0.62rem;
+  line-height: 1.22;
+  -webkit-line-clamp: 1;
+}
+
+.sourceCollectionControlPanel .workflowCandidateMeta {
+  grid-column: 1 / -1;
+  gap: 3px;
+}
+
+.sourceCollectionControlPanel .workflowCandidateMeta span {
+  padding: 1px 5px;
+  font-size: 0.56rem;
+}
+
+.sourceCollectionControlPanel .workflowCandidateActions {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
+  gap: 4px;
+}
+
+.sourceCollectionControlPanel .workflowCandidateActions button {
+  min-height: 24px;
+  padding: 0 7px;
+  font-size: 0.62rem;
 }
 
 .workflowTag {
@@ -4312,6 +4536,14 @@
     grid-template-columns: 1fr;
   }
 
+  .sourceCollectionStageModules {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
+
+  .sourceCollectionStageCard {
+    min-height: 96px;
+  }
+
   .sourceCollectionPageBody {
     overflow: auto;
   }
@@ -4324,6 +4556,15 @@
 
   .sourceCollectionCommandStats {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .sourceCollectionResultItem {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .sourceCollectionResultStatus,
+  .sourceCollectionResultSource {
+    justify-self: start;
   }
 
   .aiSearchWorkflowSummary,

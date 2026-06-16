@@ -243,6 +243,18 @@ type SourceCollectionCandidateProvenance = {
   href: string;
 };
 
+type SourceCollectionCandidateTrace = {
+  assignmentId: string;
+  query: string;
+  queryId: string;
+  rawLocation: string;
+  recordId: string;
+  runId: string;
+  searchProvider: string;
+  searchUrl: string;
+  sourceRef: string;
+};
+
 type SourceCollectionStageModule = {
   id: SourceCollectionStageModuleId;
   label: string;
@@ -1186,6 +1198,55 @@ function sourceCollectionCandidateProvenance(
   };
 }
 
+function sourceCollectionCandidateOpenLabel(provenance: SourceCollectionCandidateProvenance, lang: "zh" | "en") {
+  if (provenance.kind === "doi") {
+    return lang === "zh" ? "打开 DOI" : "Open DOI";
+  }
+  if (provenance.kind === "url") {
+    return lang === "zh" ? "打开网页" : "Open page";
+  }
+  if (provenance.kind === "file") {
+    return lang === "zh" ? "查看本地路径" : "View local path";
+  }
+  if (provenance.kind === "missing") {
+    return lang === "zh" ? "缺少来源" : "Missing source";
+  }
+  return lang === "zh" ? "查看来源标识" : "View source ref";
+}
+
+function sourceCollectionCandidateEvidenceRefs(candidate: TeamWorkflowCandidate) {
+  const refs = (candidate as TeamWorkflowCandidate & { evidenceRefs?: unknown }).evidenceRefs;
+  return Array.isArray(refs) ? refs.filter(isRecord) : [];
+}
+
+function sourceCollectionCandidateTrace(candidate: TeamWorkflowCandidate): SourceCollectionCandidateTrace {
+  const sourceCandidate = candidate as SourceCollectionCandidateWithSource;
+  const metadata = isRecord(candidate.metadata) ? candidate.metadata : {};
+  const recordMetadata = isRecord(metadata.dataProcessingRecordMetadata) ? metadata.dataProcessingRecordMetadata : {};
+  const sourceTraceFromRecord = isRecord(recordMetadata.sourceCollectionTrace) ? recordMetadata.sourceCollectionTrace : {};
+  const sourceTrace = Object.keys(sourceTraceFromRecord).length
+    ? sourceTraceFromRecord
+    : isRecord(metadata.sourceCollectionTrace)
+      ? metadata.sourceCollectionTrace
+      : {};
+  const importedRecord = isRecord(metadata.importedFromDataRecord) ? metadata.importedFromDataRecord : {};
+  const collectionTrace = isRecord(metadata.dataProcessingCollectionTrace) ? metadata.dataProcessingCollectionTrace : {};
+  const evidenceRefs = sourceCollectionCandidateEvidenceRefs(candidate);
+  const dataRecordRef = evidenceRefs.find((ref) => String(ref.type || "") === "data_record");
+  const runRef = evidenceRefs.find((ref) => String(ref.type || "") === "data_processing_run");
+  return {
+    assignmentId: String(sourceTrace.assignmentId || collectionTrace.assignmentId || ""),
+    query: String(sourceTrace.query || metadata.query || ""),
+    queryId: String(sourceTrace.queryId || metadata.queryId || ""),
+    rawLocation: String(importedRecord.rawLocation || sourceTrace.rawLocation || sourceCandidate.sourcePath || ""),
+    recordId: String(importedRecord.recordId || dataRecordRef?.id || ""),
+    runId: String(sourceTrace.runId || importedRecord.runId || runRef?.id || ""),
+    searchProvider: String(sourceTrace.searchProvider || recordMetadata.searchProvider || metadata.searchProvider || ""),
+    searchUrl: String(sourceTrace.searchUrl || recordMetadata.searchUrl || metadata.searchUrl || ""),
+    sourceRef: String(importedRecord.sourceRef || sourceCandidate.sourceRef || sourceCandidate.sourceUrl || metadataString(metadata, "sourceRef")),
+  };
+}
+
 function sourceCollectionLanguageLabel(value: string | undefined | null, lang: "zh" | "en") {
   const normalized = String(value || "").trim().toLowerCase();
   const zh: Record<string, string> = {
@@ -1821,6 +1882,10 @@ function workflowStateLabel(value: string, lang: "zh" | "en") {
     team_memory_ready: "团队共享记忆",
     source_registered: "资料已登记",
     source_needs_confirmation: "资料待确认",
+    source_needs_quality_revision: "待质检",
+    source_screened: "已筛选",
+    source_quality_approved: "已通过",
+    source_quality_rejected: "已退回",
     paper_note_draft: "论文笔记草稿",
     paper_note_needs_revision: "论文笔记待修订",
     mechanism_candidate: "机制候选",
@@ -1846,6 +1911,10 @@ function workflowStateLabel(value: string, lang: "zh" | "en") {
     team_memory_ready: "Team memory ready",
     source_registered: "Source registered",
     source_needs_confirmation: "Source needs confirmation",
+    source_needs_quality_revision: "Quality review",
+    source_screened: "Screened",
+    source_quality_approved: "Approved",
+    source_quality_rejected: "Returned",
     paper_note_draft: "Paper note draft",
     paper_note_needs_revision: "Paper note needs revision",
     mechanism_candidate: "Mechanism candidate",
@@ -2171,6 +2240,7 @@ export function TeamsRoute({
   );
   const [sourceCollectionExpandedPanelId, setSourceCollectionExpandedPanelId] = useState("");
   const [sourceCollectionFocusedPanelId, setSourceCollectionFocusedPanelId] = useState("");
+  const [selectedSourceCollectionCandidateId, setSelectedSourceCollectionCandidateId] = useState("");
   const [nodePositionDrafts, setNodePositionDrafts] = useState<Record<string, { x: number; y: number }>>({});
   const [canvasFrameSize, setCanvasFrameSize] = useState<CanvasFrameSize>({ width: CANVAS_VIEWPORT_WIDTH, height: CANVAS_VIEWPORT_HEIGHT });
   const [lockedCanvasViewportStyle, setLockedCanvasViewportStyle] = useState<CanvasViewportStyle | null>(null);
@@ -3844,34 +3914,42 @@ export function TeamsRoute({
               {visibleResults.map((candidate) => {
                 const sourceQualitySummary = candidateSourceQualityAssessmentSummary(candidate);
                 const provenance = sourceCollectionCandidateProvenance(candidate, lang);
+                const resultStatusLabel = sourceQualitySummary
+                  ? workflowIngestionStatusLabel(sourceQualitySummary.decision, lang)
+                  : workflowStateLabel(candidate.qualityStatus || candidate.currentState, lang);
+                const resultStatusRaw = sourceQualitySummary?.decision || candidate.qualityStatus || candidate.currentState;
+                const selected = selectedSourceCollectionCandidateId === candidate.candidateId;
                 return (
-                  <article key={candidate.candidateId} className={styles.sourceCollectionResultItem}>
+                  <article
+                    key={candidate.candidateId}
+                    className={`${styles.sourceCollectionResultItem} ${selected ? styles.sourceCollectionResultItemSelected : ""}`}
+                    role="button"
+                    tabIndex={0}
+                    aria-pressed={selected}
+                    title={lang === "zh" ? "点击查看来源详情" : "Open source detail"}
+                    onClick={() => selectSourceCollectionCandidate(candidate)}
+                    onKeyDown={(event) => sourceCollectionCandidateCardKeyDown(event, candidate)}
+                  >
                     <div className={styles.sourceCollectionResultContent}>
-                      <strong>{candidate.title || candidate.candidateId}</strong>
-                      <p>{candidate.summary || candidate.candidateId}</p>
+                      <strong title={candidate.title || candidate.candidateId}>{candidate.title || candidate.candidateId}</strong>
+                      <p title={candidate.summary || candidate.candidateId}>{candidate.summary || candidate.candidateId}</p>
                       <div className={styles.sourceCollectionResultMeta}>
                         <span>{sourceCollectionSourceTypeLabel(candidate.sourceKind || candidate.candidateType, lang)}</span>
-                        <span>{formatTime(candidate.updatedAt, lang)}</span>
                         {sourceQualitySummary ? (
                           <span>{lang === "zh" ? "评分" : "score"} {sourceQualitySummary.overallScore}/100</span>
                         ) : null}
+                        <span>{formatTime(candidate.updatedAt, lang)}</span>
                       </div>
                     </div>
-                    <span className={`${styles.workflowTag} ${styles.sourceCollectionResultStatus} ${workflowQualityTone(candidate.qualityStatus)}`}>
-                      {sourceQualitySummary
-                        ? workflowIngestionStatusLabel(sourceQualitySummary.decision, lang)
-                        : workflowStateLabel(candidate.currentState, lang)}
+                    <span
+                      className={`${styles.workflowTag} ${styles.sourceCollectionResultStatus} ${workflowQualityTone(candidate.qualityStatus)}`}
+                      title={resultStatusRaw}
+                    >
+                      {resultStatusLabel}
                     </span>
                     <div className={`${styles.sourceCollectionResultSource} ${provenance.kind === "missing" ? styles.sourceCollectionResultSourceMissing : ""}`}>
                       <span>{provenance.label}</span>
-                      {provenance.href ? (
-                        <a href={provenance.href} target="_blank" rel="noreferrer" title={provenance.href}>
-                          <Link2 size={12} />
-                          {provenance.value}
-                        </a>
-                      ) : (
-                        <code title={provenance.value}>{provenance.value}</code>
-                      )}
+                      <code title={provenance.href || provenance.value}>{provenance.value}</code>
                     </div>
                   </article>
                 );
@@ -3942,6 +4020,90 @@ export function TeamsRoute({
     );
   }
 
+  function renderSourceCollectionSelectedSourcePanel() {
+    if (!selectedSourceCollectionCandidate) {
+      return null;
+    }
+    const provenance = sourceCollectionCandidateProvenance(selectedSourceCollectionCandidate, lang);
+    const trace = selectedSourceCollectionCandidateTrace ?? sourceCollectionCandidateTrace(selectedSourceCollectionCandidate);
+    const sourceQualitySummary = candidateSourceQualityAssessmentSummary(selectedSourceCollectionCandidate);
+    const runId = trace.runId || selectedSourceCollectionRunEffectiveId;
+    const fileStorageTarget = provenance.kind === "file" && selectedSourceCollectionCandidateStorageArtifacts
+      ? sourceCollectionStorageTargetForRef(provenance.value, selectedSourceCollectionCandidateStorageArtifacts)
+      : null;
+    const traceRows = [
+      [lang === "zh" ? "类型" : "Type", sourceCollectionSourceTypeLabel(selectedSourceCollectionCandidate.sourceKind || selectedSourceCollectionCandidate.candidateType, lang)],
+      [lang === "zh" ? "来源" : "Source", provenance.value],
+      [lang === "zh" ? "查询" : "Query", trace.query ? translateResearchPhrase(trace.query, lang) : ""],
+      [lang === "zh" ? "资料记录" : "Record", trace.recordId],
+      [lang === "zh" ? "批次" : "Run", runId ? sourceCollectionRunLabel(runId) : ""],
+      [lang === "zh" ? "分工" : "Assignment", trace.assignmentId],
+      [lang === "zh" ? "搜索源" : "Provider", trace.searchProvider],
+    ].filter(([, value]) => Boolean(value));
+    const storageTargets: SourceCollectionStorageOpenTarget[] = ["run_directory", "search_events", "records", "candidates"];
+    return (
+      <section className={styles.sourceCollectionSourceDetailPanel} aria-label={lang === "zh" ? "资料来源详情" : "Source provenance detail"}>
+        <div className={styles.sourceCollectionSourceDetailHeader}>
+          <div>
+            <strong title={selectedSourceCollectionCandidate.title || selectedSourceCollectionCandidate.candidateId}>
+              {selectedSourceCollectionCandidate.title || selectedSourceCollectionCandidate.candidateId}
+            </strong>
+            <span>{selectedSourceCollectionCandidate.candidateId}</span>
+          </div>
+          <span className={`${styles.workflowTag} ${workflowQualityTone(selectedSourceCollectionCandidate.qualityStatus)}`}>
+            {sourceQualitySummary
+              ? `${workflowIngestionStatusLabel(sourceQualitySummary.decision, lang)} · ${sourceQualitySummary.overallScore}/100`
+              : workflowStateLabel(selectedSourceCollectionCandidate.currentState, lang)}
+          </span>
+        </div>
+        <div className={styles.sourceCollectionSourceDetailActions}>
+          {provenance.href ? (
+            <a href={provenance.href} target="_blank" rel="noreferrer" title={provenance.href}>
+              <Link2 size={12} />
+              {sourceCollectionCandidateOpenLabel(provenance, lang)}
+            </a>
+          ) : null}
+          {fileStorageTarget ? (
+            <button
+              type="button"
+              onClick={() => openSourceCollectionStorageTarget(fileStorageTarget, runId)}
+              disabled={selectedSourceCollectionStorageOpenPending}
+              title={provenance.value}
+            >
+              <Link2 size={12} />
+              {sourceCollectionStorageTargetLabel(fileStorageTarget, lang)}
+            </button>
+          ) : null}
+          {trace.searchUrl && trace.searchUrl !== provenance.href ? (
+            <a href={trace.searchUrl} target="_blank" rel="noreferrer" title={trace.searchUrl}>
+              <Search size={12} />
+              {lang === "zh" ? "打开搜索页" : "Open search"}
+            </a>
+          ) : null}
+          {runId ? storageTargets.map((target) => (
+            <button
+              key={`${selectedSourceCollectionCandidate.candidateId}-${target}`}
+              type="button"
+              onClick={() => openSourceCollectionStorageTarget(target, runId)}
+              disabled={selectedSourceCollectionStorageOpenPending}
+            >
+              <Link2 size={12} />
+              {sourceCollectionStorageTargetLabel(target, lang)}
+            </button>
+          )) : null}
+        </div>
+        <div className={styles.sourceCollectionSourceDetailFacts}>
+          {traceRows.map(([label, value]) => (
+            <span key={`${label}-${value}`}>
+              <b>{label}</b>
+              <code title={value}>{value}</code>
+            </span>
+          ))}
+        </div>
+      </section>
+    );
+  }
+
   function renderSourceCollectionScreeningPanel() {
     const screeningCandidates = sourceManifestCandidates.slice(0, 6);
     return (
@@ -4003,8 +4165,18 @@ export function TeamsRoute({
               const candidatePlanPending =
                 selectedTeamPlanPaperNoteChunksPending
                 && planPaperNoteChunksMutation.variables?.candidateId === candidate.candidateId;
+              const selected = selectedSourceCollectionCandidateId === candidate.candidateId;
               return (
-                <article key={candidate.candidateId} className={styles.workflowCandidateItem}>
+                <article
+                  key={candidate.candidateId}
+                  className={`${styles.workflowCandidateItem} ${selected ? styles.workflowCandidateItemSelected : ""}`}
+                  role="button"
+                  tabIndex={0}
+                  aria-pressed={selected}
+                  title={lang === "zh" ? "点击查看来源详情" : "Open source detail"}
+                  onClick={() => selectSourceCollectionCandidate(candidate)}
+                  onKeyDown={(event) => sourceCollectionCandidateCardKeyDown(event, candidate)}
+                >
                   <div className={styles.workflowCandidateHeader}>
                     <strong>{candidate.title || candidate.candidateId}</strong>
                     <span className={`${styles.workflowTag} ${workflowQualityTone(candidate.qualityStatus)}`}>
@@ -4031,7 +4203,8 @@ export function TeamsRoute({
                   <div className={styles.workflowCandidateActions}>
                     <button
                       type="button"
-                      onClick={() => {
+                      onClick={(event) => {
+                        event.stopPropagation();
                         if (!selectedTeam?.teamId || selectedTeamSourceQualityPending) {
                           return;
                         }
@@ -4050,7 +4223,8 @@ export function TeamsRoute({
                     </button>
                     <button
                       type="button"
-                      onClick={() => {
+                      onClick={(event) => {
+                        event.stopPropagation();
                         if (!selectedTeam?.teamId || selectedTeamSourceQualityPending) {
                           return;
                         }
@@ -4069,7 +4243,8 @@ export function TeamsRoute({
                     </button>
                     <button
                       type="button"
-                      onClick={() => {
+                      onClick={(event) => {
+                        event.stopPropagation();
                         if (!selectedTeam?.teamId || !canPlanPaperNoteChunks || planPaperNoteChunksMutation.isPending) {
                           return;
                         }
@@ -4150,8 +4325,18 @@ export function TeamsRoute({
               const qualityText = sourceQualitySummary
                 ? `${workflowIngestionStatusLabel(sourceQualitySummary.decision, lang)} · ${sourceQualitySummary.overallScore}/100`
                 : (lang === "zh" ? "待筛选" : "pending screening");
+              const selected = selectedSourceCollectionCandidateId === candidate.candidateId;
               return (
-                <article key={candidate.candidateId} className={styles.workflowCandidateItem}>
+                <article
+                  key={candidate.candidateId}
+                  className={`${styles.workflowCandidateItem} ${selected ? styles.workflowCandidateItemSelected : ""}`}
+                  role="button"
+                  tabIndex={0}
+                  aria-pressed={selected}
+                  title={lang === "zh" ? "点击查看来源详情" : "Open source detail"}
+                  onClick={() => selectSourceCollectionCandidate(candidate)}
+                  onKeyDown={(event) => sourceCollectionCandidateCardKeyDown(event, candidate)}
+                >
                   <div className={styles.workflowCandidateHeader}>
                     <strong>{candidate.title || candidate.candidateId}</strong>
                     <span className={`${styles.workflowTag} ${workflowQualityTone(candidate.qualityStatus)}`}>
@@ -4352,6 +4537,7 @@ export function TeamsRoute({
             {activeModule.actionLabel}
           </button>
         </section>
+        {renderSourceCollectionSelectedSourcePanel()}
         {selectedSourceCollectionStageId === "collection" ? (
         <>
         <details className={styles.workflowSourceCollectionDetails} open={!selectedSourceCollectionRun}>
@@ -5167,13 +5353,14 @@ export function TeamsRoute({
     sourceCollectionRunStatus?.runStatus,
     sourceCollectionRunStatus?.summary.recordCount,
   ]);
-  const openSourceCollectionStorageTarget = (target: SourceCollectionStorageOpenTarget) => {
-    if (!selectedTeam?.teamId || !selectedSourceCollectionRunEffectiveId) {
+  const openSourceCollectionStorageTarget = (target: SourceCollectionStorageOpenTarget, runIdOverride?: string) => {
+    const runId = runIdOverride || selectedSourceCollectionRunEffectiveId;
+    if (!selectedTeam?.teamId || !runId) {
       return;
     }
     openSourceCollectionStorageMutation.mutate({
       teamId: selectedTeam.teamId,
-      runId: selectedSourceCollectionRunEffectiveId,
+      runId,
       target,
     });
   };
@@ -5196,6 +5383,39 @@ export function TeamsRoute({
     () => teamWorkflowCandidates.filter((candidate) => candidate.candidateType === "source_manifest"),
     [teamWorkflowCandidates],
   );
+  const selectedSourceCollectionCandidate = useMemo(
+    () => sourceManifestCandidates.find((candidate) => candidate.candidateId === selectedSourceCollectionCandidateId) ?? null,
+    [selectedSourceCollectionCandidateId, sourceManifestCandidates],
+  );
+  const selectedSourceCollectionCandidateTrace = selectedSourceCollectionCandidate
+    ? sourceCollectionCandidateTrace(selectedSourceCollectionCandidate)
+    : null;
+  const selectedSourceCollectionCandidateRunId =
+    selectedSourceCollectionCandidateTrace?.runId || selectedSourceCollectionRunEffectiveId;
+  const selectedSourceCollectionCandidateStorageArtifacts =
+    sourceCollectionStorageArtifactsForRun(selectedTeam?.teamId ?? effectiveTeamId, selectedSourceCollectionCandidateRunId)
+    ?? selectedSourceCollectionStorageArtifacts;
+  useEffect(() => {
+    if (!selectedSourceCollectionCandidateId) {
+      return;
+    }
+    if (!sourceManifestCandidates.some((candidate) => candidate.candidateId === selectedSourceCollectionCandidateId)) {
+      setSelectedSourceCollectionCandidateId("");
+    }
+  }, [selectedSourceCollectionCandidateId, sourceManifestCandidates]);
+  const selectSourceCollectionCandidate = (candidate: TeamWorkflowCandidate) => {
+    setSelectedSourceCollectionCandidateId(candidate.candidateId);
+  };
+  const sourceCollectionCandidateCardKeyDown = (
+    event: ReactKeyboardEvent<HTMLElement>,
+    candidate: TeamWorkflowCandidate,
+  ) => {
+    if (event.key !== "Enter" && event.key !== " ") {
+      return;
+    }
+    event.preventDefault();
+    selectSourceCollectionCandidate(candidate);
+  };
   const sourceCollectionCandidateProvenances = useMemo(
     () => sourceManifestCandidates.map((candidate) => sourceCollectionCandidateProvenance(candidate, lang)),
     [lang, sourceManifestCandidates],
@@ -6059,16 +6279,18 @@ export function TeamsRoute({
                     <em>{module.metric}</em>
                     <small>{module.summary}</small>
                   </span>
-                  <button
-                    type="button"
-                    className={module.actionTone === "primary" ? styles.sourceCollectionStagePrimaryAction : styles.sourceCollectionStageSecondaryAction}
-                    disabled={module.actionDisabled}
-                    onClick={module.onAction}
-                    title={module.actionLabel}
-                  >
-                    {renderSourceCollectionStageActionIcon(module.actionIcon)}
-                    {module.actionLabel}
-                  </button>
+                  <div className={styles.sourceCollectionStageActionRow}>
+                    <button
+                      type="button"
+                      className={module.actionTone === "primary" ? styles.sourceCollectionStagePrimaryAction : styles.sourceCollectionStageSecondaryAction}
+                      disabled={module.actionDisabled}
+                      onClick={module.onAction}
+                      title={module.actionLabel}
+                    >
+                      {renderSourceCollectionStageActionIcon(module.actionIcon)}
+                      {module.actionLabel}
+                    </button>
+                  </div>
                 </article>
               ))}
             </section>
