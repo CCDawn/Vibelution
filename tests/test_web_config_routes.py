@@ -26,6 +26,7 @@ from core.web.services import (
     workbench_contract_service,
 )
 import core.web.services.avatar_image_service as avatar_image_service
+import core.web.services.theme_background_service as theme_background_service
 from tests.helpers.web_chat_state import _seed_chat_state
 from tests.helpers.web_runtime_scene import _seed_runtime_scene_bundle
 
@@ -285,6 +286,8 @@ def test_config_workspace_exposes_editor_schema_without_launcher_owned_startup_s
     assert editor_meta["user_profile.avatar_preset"]["options"]
     assert editor_meta["user_profile.avatar_image_path"]["kind"] == "image"
     assert "本地图片" in editor_meta["user_profile.avatar_image_path"]["hint"]
+    assert editor_meta["ui.workbench_theme.background_image_path"]["kind"] == "background_image"
+    assert "项目外配置资源目录" in editor_meta["ui.workbench_theme.background_image_path"]["hint"]
     assert editor_meta["network.proxy_enabled"]["kind"] == "boolean"
     assert editor_meta["network.proxy_enabled"]["label"] == "启用代理"
     assert editor_meta["network.proxy_url"]["kind"] == "url"
@@ -307,6 +310,21 @@ def test_config_workspace_exposes_editor_schema_without_launcher_owned_startup_s
     assert sections_by_id["health-diagnostics"]["title"] == "健康诊断"
     assert any(section["id"] == "overview" for section in payload["sections"])
     assert any(section["id"] == "shell" for section in payload["sections"])
+
+
+def test_config_public_summary_exposes_theme_background_url(monkeypatch):
+    public_config = copy.deepcopy(load_public_config())
+    public_config.setdefault("ui", {}).setdefault("workbench_theme", {})[
+        "background_image_path"
+    ] = "theme_backgrounds/custom-background.png"
+    monkeypatch.setattr(config_service, "load_public_config", lambda: copy.deepcopy(public_config))
+
+    response = client.get("/api/config/public")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["themeBackgroundImagePath"] == "theme_backgrounds/custom-background.png"
+    assert payload["themeBackgroundImageUrl"] == "/api/config/theme-background-image/custom-background.png"
 
 
 def test_config_avatar_image_upload_stores_safe_project_file(monkeypatch, tmp_path):
@@ -368,6 +386,50 @@ def test_config_avatar_image_upload_rejects_oversized_image(monkeypatch, tmp_pat
 
     assert response.status_code == 422
     assert not (tmp_path / "user_avatars").exists()
+
+
+def test_config_theme_background_image_upload_stores_external_config_resource(monkeypatch, tmp_path):
+    monkeypatch.setattr(theme_background_service, "CONFIG_PATH", tmp_path / "config.toml")
+    png_payload = b"\x89PNG\r\n\x1a\n" + b"\x00" * 16
+
+    response = client.post(
+        "/api/config/theme-background-image",
+        json={
+            "filename": "my background.png",
+            "contentType": "image/png",
+            "dataBase64": base64.b64encode(png_payload).decode("ascii"),
+        },
+    )
+
+    assert response.status_code == 200, response.json()
+    payload = response.json()
+    assert payload["path"].startswith("theme_backgrounds/background-")
+    assert payload["path"].endswith(".png")
+    assert payload["url"].startswith("/api/config/theme-background-image/background-")
+    saved_files = list((tmp_path / "theme_backgrounds").glob("*.png"))
+    assert len(saved_files) == 1
+    assert saved_files[0].read_bytes() == png_payload
+
+    image_response = client.get(payload["url"])
+    assert image_response.status_code == 200
+    assert image_response.headers["content-type"].startswith("image/png")
+    assert image_response.content == png_payload
+
+
+def test_config_theme_background_image_upload_rejects_disguised_image(monkeypatch, tmp_path):
+    monkeypatch.setattr(theme_background_service, "CONFIG_PATH", tmp_path / "config.toml")
+
+    response = client.post(
+        "/api/config/theme-background-image",
+        json={
+            "filename": "not-image.png",
+            "contentType": "image/png",
+            "dataBase64": base64.b64encode(b"not a png").decode("ascii"),
+        },
+    )
+
+    assert response.status_code == 422
+    assert not (tmp_path / "theme_backgrounds").exists()
 
 
 def test_health_diagnostics_endpoint_returns_log_helpers(tmp_path, monkeypatch):

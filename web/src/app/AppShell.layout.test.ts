@@ -60,6 +60,13 @@ describe("AppShell layout contract", () => {
     expect(shellStyles).toContain(".shell::before");
     expect(shellStyles).toContain(".shell::after");
     expect(shellStyles).toContain("radial-gradient(circle at 8% 18%");
+    expect(shellSource).toContain("configThemeBackgroundImageUrl(configQuery.data)");
+    expect(shellSource).toContain('data-theme-background={themeBackgroundImageUrl ? "custom" : "default"}');
+    expect(shellSource).toContain("--workbench-theme-background-image");
+    expect(shellSource).toContain("/api/config/theme-background-image/");
+    expect(shellStyles).toContain('.shell[data-theme-background="custom"]');
+    expect(shellStyles).toContain("var(--workbench-theme-background-image)");
+    expect(shellStyles).toContain("background-size: auto, cover, auto");
   });
 
   it("shows the current app version in the brand area", () => {

@@ -1540,6 +1540,21 @@ class AnalysisConfig(BaseModel):
 # CLI UI 配置
 # ============================================================================
 
+class WorkbenchThemeConfig(BaseModel):
+    """Web workbench theme configuration."""
+    model_config = ConfigDict(extra="ignore")
+
+    background_image_path: str = Field(
+        default="",
+        description="工作台背景图片的安全相对路径"
+    )
+
+    @field_validator("background_image_path")
+    @classmethod
+    def validate_background_image_path(cls, value: str) -> str:
+        return str(value or "").strip().replace("\\", "/")
+
+
 class UIConfig(BaseModel):
     """CLI UI 配置"""
     model_config = ConfigDict(extra="ignore")
@@ -1569,6 +1584,10 @@ class UIConfig(BaseModel):
     show_welcome: bool = Field(
         default=True,
         description="是否显示欢迎面板"
+    )
+    workbench_theme: WorkbenchThemeConfig = Field(
+        default_factory=WorkbenchThemeConfig,
+        description="Web 工作台主题配置"
     )
 
 
