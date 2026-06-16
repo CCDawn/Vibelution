@@ -42,3 +42,37 @@ def test_nika_luffy_poster_is_registered_as_bundled_theme_background():
 
 def test_nika_luffy_poster_bundled_theme_background_file_resolves():
     assert_bundled_background_file_resolves("default-nika-luffy-poster.png")
+
+
+def test_promptsref_top5_backgrounds_are_registered_as_bundled_theme_backgrounds():
+    expected = [
+        (
+            "default-promptsref-candid-lifestyle.png",
+            "PromptsRef 生活随拍",
+            "PromptsRef Candid Lifestyle",
+        ),
+        (
+            "default-promptsref-mirror-cosplay.png",
+            "PromptsRef 镜像角色",
+            "PromptsRef Mirror Characters",
+        ),
+        (
+            "default-promptsref-sunlit-street.png",
+            "PromptsRef 阳光街拍",
+            "PromptsRef Sunlit Street",
+        ),
+        (
+            "default-promptsref-negative-film-street.png",
+            "PromptsRef 胶片街巷",
+            "PromptsRef Negative Film Street",
+        ),
+        (
+            "default-promptsref-tokyo-shadow-snap.png",
+            "PromptsRef 东京光影",
+            "PromptsRef Tokyo Shadow Snap",
+        ),
+    ]
+
+    for filename, zh_label, en_label in expected:
+        assert_bundled_background_registered(filename, zh_label=zh_label, en_label=en_label)
+        assert_bundled_background_file_resolves(filename)
