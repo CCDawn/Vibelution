@@ -349,29 +349,39 @@ def load_gym_promotion_lifecycle(
     proposal_id = _optional_text(proposal, "proposal_id")
     episode_id = _optional_text(proposal, "episode_id")
     status = _optional_text(proposal, "status") or "unknown"
+    default_gym_decision_path = (
+        developer_sandbox.seeded_sandbox_workspace_path(root, "gym", "decisions", f"{episode_id}.json")
+        if episode_id
+        else None
+    )
+    default_trace_index_path = (
+        developer_sandbox.seeded_sandbox_workspace_path(root, "gym", "traces", episode_id, "index.json")
+        if episode_id
+        else None
+    )
     gym_decision_path = _resolve_known_path(
         proposal.get("decision_path"),
-        root / "workspace" / "gym" / "decisions" / f"{episode_id}.json" if episode_id else None,
+        default_gym_decision_path,
     )
     trace_index_path = _resolve_known_path(
         proposal.get("trace_index_path"),
-        root / "workspace" / "gym" / "traces" / episode_id / "index.json" if episode_id else None,
+        default_trace_index_path,
     )
     registry_path = _resolve_known_path(
         proposal.get("activation_registry_path"),
-        root / "workspace" / "gym" / "active_promotions.json",
+        developer_sandbox.seeded_sandbox_workspace_path(root, "gym", "active_promotions.json"),
     )
     history_path = _resolve_known_path(
         proposal.get("activation_history_path"),
-        root / "workspace" / "gym" / "activation_history.jsonl",
+        developer_sandbox.seeded_sandbox_workspace_path(root, "gym", "activation_history.jsonl"),
     )
     apply_ledger_path = _resolve_known_path(
         proposal.get("ledger_path"),
-        root / "workspace" / "gym" / "applied_promotions.jsonl",
+        developer_sandbox.seeded_sandbox_workspace_path(root, "gym", "applied_promotions.jsonl"),
     )
     rollback_ledger_path = _resolve_known_path(
         proposal.get("rollback_ledger_path"),
-        root / "workspace" / "gym" / "rolled_back_promotions.jsonl",
+        developer_sandbox.seeded_sandbox_workspace_path(root, "gym", "rolled_back_promotions.jsonl"),
     )
     target_key = _optional_text(proposal, "target_key")
     runtime_effect = _optional_text(proposal, "runtime_effect") or "not_applied"
@@ -692,7 +702,7 @@ def format_file_excerpt(file_path: str, limit: int = 4000) -> str:
 
 
 def list_recent_decision_records(project_root: Path, limit: int = 8) -> list[DecisionHistoryRecord]:
-    decisions_dir = project_root / "workspace" / "supervised_evolution" / "decisions"
+    decisions_dir = developer_sandbox.seeded_sandbox_workspace_path(project_root, "supervised_evolution", "decisions")
     if not decisions_dir.exists():
         return []
     records = []

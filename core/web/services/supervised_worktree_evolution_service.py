@@ -18,7 +18,7 @@ from typing import Any, Callable
 from uuid import uuid4
 
 from core.evaluation import load_supervised_bundle, prepare_dataset_run
-from core.infrastructure import git_process
+from core.infrastructure import developer_sandbox, git_process
 from core.runtime_manager import work_run_store
 from core.runtime_manager.work_run_leases import (
     EVALUATION_LEASE,
@@ -1515,7 +1515,14 @@ def _snapshot_project_root(snapshot: dict[str, Any]) -> Path:
 
 
 def _run_store_root(project_root: Path) -> Path:
-    return project_root / "workspace" / "supervised_evolution" / "worktree_runs"
+    return developer_sandbox.route_workspace_path(
+        project_root,
+        "supervised_evolution",
+        "supervised_evolution",
+        "worktree_runs",
+        intent="state",
+        seed=True,
+    )
 
 
 def _transition(snapshot: dict[str, Any], status: str, phase: str, message: str) -> None:

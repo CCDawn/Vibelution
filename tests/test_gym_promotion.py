@@ -6,14 +6,40 @@ from pathlib import Path
 
 import pytest
 
+from core.infrastructure import developer_sandbox
 from core.gym.promotion import (
     activate_gym_promotion_proposal,
     apply_gym_promotion_proposal,
     rollback_gym_promotion_proposal,
 )
+from core.gym.advisory import load_active_advisory_baselines
 from tests.test_gym_runner import RunnerFakeAdapter
 from core.gym import CandidateImprovement, run_gym_collection_episode
 from core.gym.runner import main
+
+
+@pytest.fixture(autouse=True)
+def isolate_developer_sandbox_config(tmp_path: Path, monkeypatch):
+    _set_developer_sandbox(tmp_path, monkeypatch, False)
+
+
+def _enable_developer_sandbox(project_root: Path, monkeypatch) -> dict:
+    return _set_developer_sandbox(project_root, monkeypatch, True)
+
+
+def _set_developer_sandbox(project_root: Path, monkeypatch, enabled: bool) -> dict:
+    config_path = project_root / "config.toml"
+    if not config_path.exists():
+        config_path.write_text("[launcher]\ncontrol_port = 8765\n", encoding="utf-8")
+    monkeypatch.setattr(developer_sandbox, "CONFIG_PATH", config_path)
+    monkeypatch.setattr(developer_sandbox, "PROJECT_ROOT", project_root)
+    status = developer_sandbox.get_developer_mode_status(config_path=config_path, project_root=project_root)
+    return developer_sandbox.update_developer_mode_status(
+        enabled,
+        base_hash=status["configHash"],
+        config_path=config_path,
+        project_root=project_root,
+    )
 
 
 def test_apply_gym_promotion_proposal_marks_proposal_applied_and_writes_ledger(tmp_path: Path):
@@ -44,6 +70,76 @@ def test_apply_gym_promotion_proposal_marks_proposal_applied_and_writes_ledger(t
     ledger_rows = [json.loads(line) for line in ledger_path.read_text(encoding="utf-8").splitlines()]
     assert ledger_rows[-1]["proposal_id"] == applied.proposal_id
     assert ledger_rows[-1]["apply_mode"] == "record_only"
+
+
+def test_developer_mode_blocks_gym_promotion_apply_without_formal_trace(tmp_path: Path, monkeypatch):
+    _enable_developer_sandbox(tmp_path, monkeypatch)
+    result = run_gym_collection_episode(
+        collection_id="foundation_local_stability",
+        project_root=tmp_path,
+        adapter=RunnerFakeAdapter(),
+        episode_id="sandbox_apply_episode",
+    )
+
+    with pytest.raises(developer_sandbox.DeveloperSandboxWriteBlocked):
+        apply_gym_promotion_proposal(result.promotion_proposal_path, project_root=tmp_path)
+
+    proposal = json.loads(Path(result.promotion_proposal_path).read_text(encoding="utf-8"))
+    assert proposal["status"] == "proposed"
+    assert not (tmp_path / "workspace" / "gym" / "applied_promotions.jsonl").exists()
+
+
+def test_developer_mode_blocks_gym_promotion_activation_and_rollback(tmp_path: Path, monkeypatch):
+    _set_developer_sandbox(tmp_path, monkeypatch, False)
+    result = run_gym_collection_episode(
+        collection_id="foundation_local_stability",
+        project_root=tmp_path,
+        adapter=RunnerFakeAdapter(),
+        episode_id="formal_before_dev_episode",
+    )
+    apply_gym_promotion_proposal(result.promotion_proposal_path, project_root=tmp_path)
+    _enable_developer_sandbox(tmp_path, monkeypatch)
+
+    with pytest.raises(developer_sandbox.DeveloperSandboxWriteBlocked):
+        activate_gym_promotion_proposal(result.promotion_proposal_path, project_root=tmp_path)
+    with pytest.raises(developer_sandbox.DeveloperSandboxWriteBlocked):
+        rollback_gym_promotion_proposal(result.promotion_proposal_path, project_root=tmp_path)
+
+    proposal = json.loads(Path(result.promotion_proposal_path).read_text(encoding="utf-8"))
+    assert proposal["status"] == "applied"
+    assert not (tmp_path / "workspace" / "gym" / "active_promotions.json").exists()
+    assert not (tmp_path / "workspace" / "gym" / "rolled_back_promotions.jsonl").exists()
+
+
+def test_developer_mode_reads_active_advisory_from_sandbox_registry(tmp_path: Path, monkeypatch):
+    _enable_developer_sandbox(tmp_path, monkeypatch)
+    sandbox_registry = developer_sandbox.seeded_sandbox_workspace_path(tmp_path, "gym", "active_promotions.json")
+    sandbox_registry.parent.mkdir(parents=True, exist_ok=True)
+    sandbox_registry.write_text(
+        json.dumps(
+            {
+                "active": {
+                    "episode:bundle:sandbox": {
+                        "proposal_id": "sandbox-proposal",
+                        "episode_id": "sandbox-episode",
+                        "candidate_improvement_id": "sandbox-improvement",
+                        "activated_at": "2026-06-16T00:00:00Z",
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    formal_registry = tmp_path / "workspace" / "gym" / "active_promotions.json"
+    formal_registry.parent.mkdir(parents=True, exist_ok=True)
+    formal_registry.write_text(
+        json.dumps({"active": {"episode:bundle:formal": {"proposal_id": "formal-proposal"}}}),
+        encoding="utf-8",
+    )
+
+    baselines = load_active_advisory_baselines(project_root=tmp_path)
+
+    assert [item.proposal_id for item in baselines] == ["sandbox-proposal"]
 
 
 def test_apply_gym_promotion_proposal_rejects_missing_trace_index(tmp_path: Path):

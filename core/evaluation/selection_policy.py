@@ -338,7 +338,12 @@ def _write_proposal(
 def _refresh_lineage_index(project_root: Path) -> Path:
     proposals_dir = _proposals_dir(project_root)
     index_path = proposals_dir / "lineage_index.json"
-    baseline_registry_path = project_root / "workspace" / "supervised_evolution" / "policy" / "accepted_baselines.json"
+    baseline_registry_path = developer_sandbox.seeded_sandbox_workspace_path(
+        project_root,
+        "supervised_evolution",
+        "policy",
+        "accepted_baselines.json",
+    )
     baseline_registry = _load_json_if_exists(baseline_registry_path)
     proposals: List[Dict[str, Any]] = []
     for path in sorted(proposals_dir.glob("*.json")):

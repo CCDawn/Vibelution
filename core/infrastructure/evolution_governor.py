@@ -8,6 +8,7 @@ from typing import Any, Iterable, List
 
 from config import get_config
 from core.infrastructure.agent_session import get_session_state
+from core.infrastructure import developer_sandbox
 from core.infrastructure.event_bus import Event, EventNames, get_event_bus
 from core.infrastructure.workspace_manager import get_workspace
 
@@ -290,6 +291,9 @@ class EvolutionGovernor:
         candidate = Path(path_str)
         if candidate.is_absolute():
             return candidate.resolve()
+        parts = candidate.parts
+        if parts and parts[0] == "workspace":
+            return developer_sandbox.seeded_sandbox_workspace_path(get_workspace().project_root, *parts[1:]).resolve()
         return (get_workspace().project_root / candidate).resolve()
 
     @classmethod

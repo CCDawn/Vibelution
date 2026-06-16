@@ -7,6 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from core.infrastructure import developer_sandbox
 from core.evaluation.supervised_evolution import (
     DEFAULT_BUNDLE_NAME,
     SupervisedEvolutionCancelled,
@@ -23,6 +24,21 @@ from scripts.evolution_harness import (
     SUPERVISED_INFEASIBLE_OUTCOME_MARKER,
     infer_evolution_summary,
 )
+
+
+@pytest.fixture(autouse=True)
+def isolate_developer_sandbox_config(tmp_path: Path, monkeypatch):
+    config_path = tmp_path / "config.toml"
+    config_path.write_text("[launcher]\ncontrol_port = 8765\n", encoding="utf-8")
+    monkeypatch.setattr(developer_sandbox, "CONFIG_PATH", config_path)
+    monkeypatch.setattr(developer_sandbox, "PROJECT_ROOT", tmp_path)
+    status = developer_sandbox.get_developer_mode_status(config_path=config_path, project_root=tmp_path)
+    developer_sandbox.update_developer_mode_status(
+        False,
+        base_hash=status["configHash"],
+        config_path=config_path,
+        project_root=tmp_path,
+    )
 
 
 def _fake_result(status: str, reason: str, worktree_name: str) -> HarnessResult:

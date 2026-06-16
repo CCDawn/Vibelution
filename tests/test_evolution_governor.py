@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
+from core.infrastructure import developer_sandbox
 from core.infrastructure import evolution_governor as governor_module
 from core.infrastructure.event_bus import EventNames, get_event_bus
 from tools.git_tools import get_evolution_fitness_tool
@@ -26,8 +27,24 @@ def _patch_runtime(monkeypatch, tmp_path: Path) -> Path:
     )
     monkeypatch.setattr(governor_module, "get_config", lambda: SimpleNamespace(evolution=evolution))
     monkeypatch.setattr(governor_module, "get_workspace", lambda: _FakeWorkspace(project_root))
+    _set_developer_sandbox(project_root, monkeypatch, False)
     governor_module._governor = None
     return project_root
+
+
+def _set_developer_sandbox(project_root: Path, monkeypatch, enabled: bool) -> dict:
+    config_path = project_root / "config.toml"
+    if not config_path.exists():
+        config_path.write_text("[launcher]\ncontrol_port = 8765\n", encoding="utf-8")
+    monkeypatch.setattr(developer_sandbox, "CONFIG_PATH", config_path)
+    monkeypatch.setattr(developer_sandbox, "PROJECT_ROOT", project_root)
+    status = developer_sandbox.get_developer_mode_status(config_path=config_path, project_root=project_root)
+    return developer_sandbox.update_developer_mode_status(
+        enabled,
+        base_hash=status["configHash"],
+        config_path=config_path,
+        project_root=project_root,
+    )
 
 
 def test_governor_blocks_mutation_outside_allowed_dirs(monkeypatch, tmp_path):
@@ -46,6 +63,32 @@ def test_governor_blocks_mutation_outside_allowed_dirs(monkeypatch, tmp_path):
     records = [json.loads(line) for line in audit_path.read_text(encoding="utf-8").splitlines()]
     assert records[-1]["event"] == "mutation_blocked"
     assert records[-1]["target_paths"] == ["core/runtime.py"]
+
+
+def test_governor_audit_uses_developer_sandbox(monkeypatch, tmp_path):
+    project_root = _patch_runtime(monkeypatch, tmp_path)
+    enabled = _set_developer_sandbox(project_root, monkeypatch, True)
+    governor = governor_module.EvolutionGovernor()
+
+    message = governor.check_mutation_allowed(
+        "write_file_tool",
+        {"file_path": "core/runtime.py", "content": "x"},
+        "txn_demo",
+    )
+
+    sandbox_audit = (
+        project_root
+        / ".runtime"
+        / "developer-mode"
+        / "sandboxes"
+        / enabled["sandbox"]["sandboxId"]
+        / "workspace"
+        / "evolution"
+        / "audit.jsonl"
+    )
+    assert message is not None
+    assert sandbox_audit.exists()
+    assert not (project_root / "workspace" / "evolution" / "audit.jsonl").exists()
 
 
 def test_governor_allows_explicit_safe_modify_probe_file(monkeypatch, tmp_path):
