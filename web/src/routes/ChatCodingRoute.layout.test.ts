@@ -17,6 +17,7 @@ import routeStyles from "./ChatCodingRoute.module.css";
 
 const routeCssSource = readFileSync(new URL("./ChatCodingRoute.module.css", import.meta.url), "utf-8");
 const conversationCssSource = readFileSync(new URL("../components/conversation/ConversationView.module.css", import.meta.url), "utf-8");
+const appShellCssSource = readFileSync(new URL("../app/AppShell.module.css", import.meta.url), "utf-8");
 
 describe("ChatCodingRoute layout contract", () => {
   it("keeps the center conversation readable and the composer as a stable bottom layer", () => {
@@ -35,18 +36,23 @@ describe("ChatCodingRoute layout contract", () => {
   });
 
   it("keeps the workbench theme background visible behind the center conversation", () => {
+    expect(appShellCssSource).toContain('--theme-background-overlay-mid: rgba(255, 255, 255, 0.3);');
+    expect(appShellCssSource).toContain('--theme-background-overlay-mid: rgba(255, 255, 255, 0.16);');
+    expect(appShellCssSource).toContain('--theme-background-overlay-mid: rgba(7, 10, 16, 0.44);');
+    expect(appShellCssSource).toContain('--theme-background-overlay-mid: rgba(7, 10, 16, 0.26);');
     expect(routeCssSource).toMatch(
-      /\.centerPane\s*\{[\s\S]*?background:\s*color-mix\(in srgb, var\(--surface-page\) 34%, transparent\);[\s\S]*?\}/,
+      /\.centerPane\s*\{[\s\S]*?background:\s*color-mix\(in srgb, var\(--surface-page\) 10%, transparent\);[\s\S]*?\}/,
     );
     expect(routeCssSource).toMatch(
-      /\.centerSurface\s*\{[\s\S]*?background:\s*color-mix\(in srgb, var\(--surface-panel-strong\) 18%, transparent\);[\s\S]*?\}/,
+      /\.centerSurface\s*\{[\s\S]*?background:\s*color-mix\(in srgb, var\(--surface-panel-strong\) 6%, transparent\);[\s\S]*?\}/,
     );
     expect(conversationCssSource).toMatch(
-      /\.timeline\s*\{[\s\S]*?color-mix\(in srgb, var\(--surface-panel-strong\) 30%, transparent\);[\s\S]*?backdrop-filter:\s*blur\(8px\);[\s\S]*?\}/,
+      /\.timeline\s*\{[\s\S]*?color-mix\(in srgb, var\(--surface-panel-strong\) 10%, transparent\);[\s\S]*?backdrop-filter:\s*blur\(2px\);[\s\S]*?\}/,
     );
     expect(conversationCssSource).toMatch(
-      /\.surfaceCompact \.timeline\s*\{[\s\S]*?color-mix\(in srgb, var\(--surface-panel-strong\) 34%, transparent\);[\s\S]*?\}/,
+      /\.surfaceCompact \.timeline\s*\{[\s\S]*?color-mix\(in srgb, var\(--surface-panel-strong\) 12%, transparent\);[\s\S]*?\}/,
     );
+    expect(appShellCssSource).not.toContain("--theme-background-overlay-mid: rgba(255, 255, 255, 0.62);");
     expect(routeCssSource).not.toContain("background: color-mix(in srgb, var(--surface-page) 92%, var(--bg-canvas));");
     expect(routeCssSource).not.toContain(".centerSurface {\n  display: grid;\n  height: 100%;\n  min-height: 0;\n  background: var(--surface-panel-strong);");
   });
