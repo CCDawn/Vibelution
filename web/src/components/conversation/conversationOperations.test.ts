@@ -297,7 +297,7 @@ describe("conversationOperations", () => {
     });
   });
 
-  it("merges cumulative thought snapshots even when tools are interleaved", () => {
+  it("keeps interleaved cumulative thought snapshots as ReAct boundaries", () => {
     const message: ConversationMessage = {
       id: "message-interleaved-cumulative-thought",
       role: "assistant",
@@ -348,18 +348,27 @@ describe("conversationOperations", () => {
     const operations = buildConversationOperations(message, labels);
 
     expect(operations.map((item) => `${item.sequence}:${item.kind}:${item.summary}`)).toEqual([
-      "1:thought:I need to inspect the latest session. The first log shows repeated reasoning snapshots. I can now summarize the display issue.",
+      "1:thought:I need to inspect the latest session.",
       "2:tool:session.jsonl",
+      "3:thought:I need to inspect the latest session. The first log shows repeated reasoning snapshots.",
       "4:tool:opened session.jsonl",
+      "5:thought:I need to inspect the latest session. The first log shows repeated reasoning snapshots. I can now summarize the display issue.",
     ]);
     expect(operations[0]).toMatchObject({
       id: "message-interleaved-cumulative-thought-feedback-1",
       status: "done",
       rawStatus: "running",
-      resultPreview: "I need to inspect the latest session. The first log shows repeated reasoning snapshots. I can now summarize the display issue.",
+      resultPreview: "I need to inspect the latest session.",
     });
     expect(operations[1].relatedThoughtSequence).toBe(1);
-    expect(operations[2].relatedThoughtSequence).toBe(1);
+    expect(operations[3].relatedThoughtSequence).toBe(3);
+    expect(buildConversationReActOperationGroups(operations).map((group) =>
+      group.operations.map((operation) => operation.sequence),
+    )).toEqual([
+      [1, 2],
+      [3, 4],
+      [5],
+    ]);
   });
 
   it("keeps only the latest running operation active for legacy timelines", () => {
