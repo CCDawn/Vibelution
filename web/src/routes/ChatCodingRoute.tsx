@@ -6560,6 +6560,10 @@ export function ChatCodingRoute() {
       }) as CSSProperties,
     [leftPanelWidth, leftRailCollapsed, rightPanelWidth, rightPaneCollapsed],
   );
+  const bothSidePanesCollapsed = leftRailCollapsed && rightPaneCollapsed;
+  const conversationFrameClassName = bothSidePanesCollapsed
+    ? `${styles.conversationFrame} ${styles.conversationFrameFocus}`
+    : styles.conversationFrame;
 
   const contextMenuSessionIsBusy = contextMenuSession
     ? isBusyPhase(contextMenuSession.currentPhase || contextMenuSession.status)
@@ -7732,7 +7736,7 @@ export function ChatCodingRoute() {
             </div>
           ) : workspace.activeTab === "agent" ? (
             detail ? (
-              <div className={styles.conversationFrame}>
+              <div className={conversationFrameClassName}>
                 {sessionDetailErrorState.transientError ? (
                   <div className={styles.inlineNotice} role="status">
                     {sessionDetailErrorMessage}

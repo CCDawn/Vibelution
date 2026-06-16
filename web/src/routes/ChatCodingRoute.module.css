@@ -2468,6 +2468,12 @@
   overflow: hidden;
 }
 
+.conversationFrameFocus {
+  justify-self: center;
+  width: min(calc(100% - 96px), 1120px);
+  max-width: 100%;
+}
+
 .cliAgentRunPanel {
   display: flex;
   flex-direction: column;
@@ -5745,6 +5751,10 @@ a.teamTreeChild:focus-visible {
 
   .tabStrip {
     padding: 8px 10px 0;
+  }
+
+  .conversationFrameFocus {
+    width: 100%;
   }
 }
 
