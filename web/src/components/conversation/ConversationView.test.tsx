@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -16,6 +18,17 @@ import {
   shouldShowNextStateSignalInConversation,
 } from "./ConversationView";
 import { isAgentInboxMessage } from "./messageSections";
+
+const conversationViewStylesSource = readFileSync(new URL("./ConversationView.module.css", import.meta.url), "utf-8");
+
+function cssRule(selector: string) {
+  const start = conversationViewStylesSource.indexOf(`${selector} {`);
+  if (start === -1) {
+    return "";
+  }
+  const end = conversationViewStylesSource.indexOf("\n}", start);
+  return end === -1 ? conversationViewStylesSource.slice(start) : conversationViewStylesSource.slice(start, end + 2);
+}
 
 function renderConversation(
   messages: ConversationMessage[],
@@ -126,6 +139,20 @@ describe("ConversationView edit resend affordance", () => {
     const html = renderConversation([], { density: "compact" });
 
     expect(html).toContain("surfaceCompact");
+  });
+
+  it("keeps execution tool-call content borderless", () => {
+    const traceSummaryRule = cssRule(".executionTraceGroup .operationSummary");
+    const reactSummaryRule = cssRule(".reActOperationSummary");
+    const reactSummaryHoverRule = cssRule(".reActOperationSummary:hover");
+    const reactResultRule = cssRule(".reActResultItem");
+    const operationDetailsRule = cssRule(".operationDetails");
+
+    expect(traceSummaryRule).toContain("border: 0");
+    expect(reactSummaryRule).toContain("border: 0");
+    expect(reactSummaryHoverRule).not.toContain("border-color");
+    expect(reactResultRule).toContain("border: 0");
+    expect(operationDetailsRule).toContain("border: 0");
   });
 
   it("can render a read-only transcript without the composer", () => {

@@ -815,7 +815,12 @@
 
 .executionTraceGroup .operationSummary {
   min-height: 26px;
+  border: 0;
   background: color-mix(in srgb, var(--surface-card) 54%, transparent);
+}
+
+.executionTraceGroup .operationSummary:hover {
+  border-color: transparent;
 }
 
 .operationSummary:hover,
@@ -921,18 +926,17 @@
   gap: 7px;
   min-width: 0;
   min-height: 26px;
-  padding: 2px 7px;
-  border: 1px solid color-mix(in srgb, var(--fg-tertiary) 10%, transparent);
-  border-radius: var(--radius-control);
-  background: color-mix(in srgb, var(--surface-card) 38%, transparent);
+  padding: 3px 7px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
   color: var(--fg-secondary);
   cursor: pointer;
   font: inherit;
 }
 
 .reActOperationSummary:hover {
-  border-color: color-mix(in srgb, var(--accent-warm) 22%, transparent);
-  background: color-mix(in srgb, var(--surface-card) 66%, var(--accent-warm) 5%);
+  background: color-mix(in srgb, var(--surface-card) 36%, var(--accent-warm) 4%);
   color: var(--fg-primary);
 }
 
@@ -1011,15 +1015,14 @@
   gap: 4px;
   min-width: 0;
   max-width: 100%;
-  padding: 6px 8px;
-  border: 1px solid color-mix(in srgb, var(--fg-tertiary) 10%, transparent);
-  border-radius: 6px;
-  background: color-mix(in srgb, var(--surface-card) 46%, transparent);
+  padding: 5px 8px;
+  border: 0;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--surface-card) 30%, transparent);
 }
 
 .reActResultItem_failed {
-  border-color: color-mix(in srgb, var(--danger) 20%, transparent);
-  background: color-mix(in srgb, var(--danger) 5%, transparent);
+  background: color-mix(in srgb, var(--danger) 7%, transparent);
 }
 
 .reActResultLabel {
@@ -1215,7 +1218,7 @@
 }
 
 .operationDetailToggle:hover {
-  border-color: color-mix(in srgb, var(--accent-warm) 24%, transparent);
+  border-color: transparent;
   background: color-mix(in srgb, var(--surface-card) 72%, var(--accent-warm) 6%);
   color: var(--fg-primary);
 }
@@ -1227,13 +1230,12 @@
   max-width: 100%;
   margin: 0 6px 6px 6px;
   padding: 8px 9px;
-  border: 1px solid color-mix(in srgb, var(--fg-tertiary) 12%, transparent);
-  border-radius: 6px;
-  background: color-mix(in srgb, var(--surface-card) 62%, transparent);
+  border: 0;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--surface-card) 36%, transparent);
 }
 
 .operationDetails_thought {
-  border-color: color-mix(in srgb, var(--accent-warm) 22%, transparent);
   background: color-mix(in srgb, var(--accent-warm) 7%, var(--surface-card));
 }
 
