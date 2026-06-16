@@ -710,6 +710,18 @@ def _ensure_supervised_role(role: SupervisedAgentRole) -> tuple[dict[str, Any] |
     existing_dialogue_model_id = agent_directory_service.agent_dialogue_model_id(
         {"llmBindings": existing_llm_bindings}
     )
+    try:
+        model_library_ids = _configured_model_library_ids(_current_config())
+    except TypeError:
+        model_library_ids = _configured_model_library_ids()
+    except Exception:
+        model_library_ids = set()
+    existing_dialogue_model_registered = bool(
+        existing_dialogue_model_id
+        and (not model_library_ids or existing_dialogue_model_id in model_library_ids)
+    )
+    if existing_dialogue_model_registered:
+        expected_llm_bindings = existing_llm_bindings
     expected_metadata = {
         "agentMode": "supervised_evolution",
         "configSurface": "model_config",
