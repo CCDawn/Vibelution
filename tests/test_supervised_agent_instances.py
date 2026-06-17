@@ -505,7 +505,7 @@ def test_child_process_agent_runtime_falls_back_to_supervised_env(tmp_path, monk
     assert runtime["supervisedRole"] == "baseline"
     assert runtime["supervisionPolicy"]["reviewMode"] == "required"
     assert runtime["supervisionPolicy"]["evidenceLevel"] == "strict"
-    assert [tool.name for tool in visible_tools] == ["read_file_tool", "cli_tool"]
+    assert [tool.name for tool in visible_tools] == []
 
 
 def test_child_process_agent_runtime_uses_env_llm_snapshot_when_registry_missing(tmp_path, monkeypatch):

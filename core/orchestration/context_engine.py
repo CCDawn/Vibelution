@@ -262,14 +262,19 @@ def build_agent_context(agent_id: str, *, session_id: str = "", run_id: str = ""
         run_id=str(run_id or "").strip(),
     )
     timings["projectRulesContextMs"] = _elapsed_ms(stage_started_at)
-    stage_started_at = _perf_counter()
-    project_agent_registry_context_block = _build_project_agent_registry_context_block(
-        agent_directory_service.PROJECT_ROOT,
-        current_agent=agent,
-        session_id=str(session_id or "").strip(),
-        run_id=str(run_id or "").strip(),
-    )
-    timings["projectAgentRegistryContextMs"] = _elapsed_ms(stage_started_at)
+    project_agent_registry_context_block = ""
+    if _agent_allows_project_agent_registry_context(agent):
+        stage_started_at = _perf_counter()
+        project_agent_registry_context_block = _build_project_agent_registry_context_block(
+            agent_directory_service.PROJECT_ROOT,
+            current_agent=agent,
+            session_id=str(session_id or "").strip(),
+            run_id=str(run_id or "").strip(),
+        )
+        timings["projectAgentRegistryContextMs"] = _elapsed_ms(stage_started_at)
+    else:
+        timings["projectAgentRegistryContextMs"] = 0
+        timings["projectAgentRegistryContextSkipped"] = True
     context_segments = [
         segment
         for segment in (
@@ -476,6 +481,23 @@ def _agent_needs_research_organization_context(agent: dict[str, Any]) -> bool:
         return True
     research_role = str(metadata.get("researchOrgRole") or metadata.get("systemRole") or "").strip()
     return bool(research_role)
+
+
+def _agent_allows_project_agent_registry_context(agent: dict[str, Any]) -> bool:
+    """Keep development-lane registry context out of product Agent prompts unless explicitly enabled."""
+
+    metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
+    for key in (
+        "includeProjectAgentRegistryContext",
+        "projectAgentRegistryContextEnabled",
+        "runtimeProjectRegistryContext",
+    ):
+        value = metadata.get(key)
+        if value is True:
+            return True
+        if str(value or "").strip().lower() in {"1", "true", "yes", "on"}:
+            return True
+    return False
 
 
 def prepare_subagent_spawn(

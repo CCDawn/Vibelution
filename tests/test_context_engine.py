@@ -101,6 +101,9 @@ def test_build_chat_agent_context_skips_research_org_context(tmp_path, monkeypat
     assert segments_by_key["agent_messages"]["chars"] > 0
     assert segments_by_key["agent_messages"]["hash"]
     assert "Research Organization Context" not in packet.context_block
+    assert "Project Agent Territory Registry" not in packet.context_block
+    assert "project_agent_registry" not in segments_by_key
+    assert packet.timings["projectAgentRegistryContextSkipped"] is True
     assert packet.timings["totalDurationMs"] >= 0
     assert "runtimeContextBlockMs" in packet.timings
     assert "promptTemplateContextMs" in packet.timings
@@ -349,6 +352,7 @@ def test_build_agent_context_reuses_project_rules_and_registry_file_cache(tmp_pa
         llm_bindings={"dialogue": {"modelId": "model-primary"}},
         primary_mode="chat",
         direct_session_id="session-cache",
+        metadata={"includeProjectAgentRegistryContext": True},
     )
     registry_path.write_text(
         json.dumps(
@@ -451,6 +455,7 @@ def test_build_agent_context_includes_project_agent_territory_registry(tmp_path,
         llm_bindings={"dialogue": {"modelId": "model-primary"}},
         primary_mode="chat",
         direct_session_id="session-runtime",
+        metadata={"includeProjectAgentRegistryContext": True},
     )
     qa_agent = agent_directory_service.create_agent_instance(
         display_name="质量运维 Agent",
@@ -593,6 +598,7 @@ def test_build_agent_context_auto_initializes_project_agent_registry_when_missin
         llm_bindings={"dialogue": {"modelId": "model-primary"}},
         primary_mode="chat",
         direct_session_id="session-lonely",
+        metadata={"includeProjectAgentRegistryContext": True},
     )
     peer = agent_directory_service.create_agent_instance(
         display_name="同项目可推荐 Agent",
@@ -652,6 +658,7 @@ def test_build_agent_context_auto_initializes_project_agent_registry_without_mem
         llm_bindings={"dialogue": {"modelId": "model-primary"}},
         primary_mode="chat",
         direct_session_id="session-no-lanes",
+        metadata={"includeProjectAgentRegistryContext": True},
     )
 
     packet = context_engine.build_agent_context(agent["agentId"], session_id="session-no-lanes", run_id="turn-1")
@@ -676,6 +683,7 @@ def test_build_agent_context_keeps_invalid_project_agent_registry_file(tmp_path,
         llm_bindings={"dialogue": {"modelId": "model-primary"}},
         primary_mode="chat",
         direct_session_id="session-invalid-registry",
+        metadata={"includeProjectAgentRegistryContext": True},
     )
     events = []
     monkeypatch.setattr(
