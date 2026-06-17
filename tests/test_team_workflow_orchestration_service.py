@@ -1961,6 +1961,96 @@ def test_candidate_graph_reports_missing_candidate_links(tmp_path, monkeypatch):
     assert response["graph"]["missingLinks"][0]["relation"] == "inspired_by_mapping"
 
 
+def test_candidate_graph_agent_curation_uses_approved_sources_only(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = team_service.create_team(name="ai科学研究团队")
+    approved_source = team_workflow_orchestration_service.register_candidate_source(
+        team["teamId"],
+        {
+            "title": "Predictive coding neural network evidence",
+            "sourceUrl": "https://doi.org/10.0000/predictive-coding",
+            "sourceKind": "paper",
+            "summary": "Neural predictive coding supports learning and attention mechanisms.",
+            "tags": ["neuro", "algorithm"],
+            "allowedForAnalysis": True,
+            "createdByAgent": "Data Discovery Agent",
+        },
+    )["candidate"]
+    revision_source = team_workflow_orchestration_service.register_candidate_source(
+        team["teamId"],
+        {
+            "title": "Untraceable neuroscience note",
+            "sourceKind": "paper",
+            "summary": "Potentially relevant but missing a source location.",
+            "createdByAgent": "Data Discovery Agent",
+        },
+    )["candidate"]
+    team_workflow_orchestration_service.assess_source_quality_batch(team["teamId"], {})
+
+    response = team_workflow_orchestration_service.build_candidate_graph(
+        team["teamId"],
+        {
+            "createdByAgent": "Source Quality Agent",
+            "curationMode": "agent_approved_only",
+        },
+    )
+
+    graph_node_ids = {node["candidateId"] for node in response["graph"]["nodes"]}
+    assert response["graph"]["summary"]["curationMode"] == "agent_approved_only"
+    assert response["graph"]["summary"]["nodeCount"] == 1
+    assert response["graph"]["summary"]["filteredCandidateCount"] == 1
+    assert approved_source["candidateId"] in graph_node_ids
+    assert revision_source["candidateId"] not in graph_node_ids
+
+
+def test_knowledge_ingestion_precheck_creates_candidate_only_steward_pack(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = team_service.create_team(name="ai科学研究团队")
+    source = team_workflow_orchestration_service.register_candidate_source(
+        team["teamId"],
+        {
+            "title": "Predictive coding neural network evidence",
+            "sourceUrl": "https://doi.org/10.0000/predictive-coding",
+            "sourceKind": "paper",
+            "summary": "Neural predictive coding supports learning and attention mechanisms.",
+            "tags": ["neuro", "algorithm"],
+            "allowedForAnalysis": True,
+            "createdByAgent": "Data Discovery Agent",
+        },
+    )["candidate"]
+    team_workflow_orchestration_service.assess_source_quality_batch(
+        team["teamId"],
+        {"assessedByAgent": "Source Quality Agent"},
+    )
+    graph_response = team_workflow_orchestration_service.build_candidate_graph(
+        team["teamId"],
+        {"createdByAgent": "Source Quality Agent", "curationMode": "agent_approved_only"},
+    )
+
+    response = team_workflow_orchestration_service.run_knowledge_ingestion_precheck(
+        team["teamId"],
+        {
+            "stewardAgentId": "Knowledge Steward Agent",
+            "targetDomain": "神经机制启发神经网络算法",
+        },
+    )
+
+    output = response["candidate"]["metadata"]["output"]
+    assert response["validation"]["valid"] is True
+    assert response["candidate"]["candidateType"] == "review_record"
+    assert response["candidate"]["currentWorkflowNode"] == "steward_ingestion"
+    assert response["candidate"]["currentState"] == "steward_pack_draft"
+    assert response["precheck"]["generatedByAgent"] == "Knowledge Steward Agent"
+    assert response["precheck"]["candidateIds"] == [source["candidateId"]]
+    assert response["precheck"]["candidateGraphId"] == graph_response["candidateGraph"]["candidateId"]
+    assert output["approvalRequired"] is True
+    assert "officialSync" not in output
+    assert response["precheck"]["officialBoundary"]["writesOfficialKnowledge"] is False
+    assert response["precheck"]["officialBoundary"]["writesOfficialRag"] is False
+    assert response["precheck"]["officialBoundary"]["writesOfficialGraph"] is False
+    assert response["status"]["summary"]["stewardPackCandidateCount"] == 1
+
+
 def test_review_prefilter_records_review_record_candidate(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     team = team_service.create_team(name="挑战杯科研团队")

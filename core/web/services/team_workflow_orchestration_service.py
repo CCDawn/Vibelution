@@ -2538,6 +2538,8 @@ def build_candidate_graph(team_id: str, payload: dict[str, Any] | None = None) -
     normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
     team_service.get_team(normalized_team_id)
     payload = payload if isinstance(payload, dict) else {}
+    curation_mode = _trim_text(payload.get("curationMode"), max_length=80) or "all_active"
+    created_by_agent = _trim_text(payload.get("createdByAgent"), max_length=160) or "Candidate Graph Preview Agent"
     now = utc_now_iso()
     with _WORKFLOW_LOCK:
         workflow = _load_or_create_workflow(normalized_team_id)
@@ -2548,9 +2550,18 @@ def build_candidate_graph(team_id: str, payload: dict[str, Any] | None = None) -
             if isinstance(item, dict) and str(item.get("candidateType") or "") != "candidate_graph"
         ]
         archived_candidates = [item for item in all_candidates if _candidate_is_archived(item)]
-        candidates = [item for item in all_candidates if not _candidate_is_archived(item)]
+        active_candidates = [item for item in all_candidates if not _candidate_is_archived(item)]
+        filtered_candidates: list[dict[str, Any]] = []
+        if curation_mode == "agent_approved_only":
+            candidates = [item for item in active_candidates if _candidate_ready_for_agent_graph(item)]
+            filtered_candidates = [item for item in active_candidates if item not in candidates]
+        else:
+            candidates = active_candidates
         graph = _build_candidate_graph_payload(normalized_team_id, workflow["workflowId"], candidates)
         graph["summary"]["archivedCandidateCount"] = len(archived_candidates)
+        graph["summary"]["curationMode"] = curation_mode
+        graph["summary"]["inputCandidateCount"] = len(active_candidates)
+        graph["summary"]["filteredCandidateCount"] = len(filtered_candidates)
         record = {
             "schemaVersion": SCHEMA_VERSION,
             "candidateId": _new_record_id("candidate-graph"),
@@ -2561,18 +2572,21 @@ def build_candidate_graph(team_id: str, payload: dict[str, Any] | None = None) -
             "sourceKind": "candidate_graph_builder",
             "summary": (
                 f"{len(graph['nodes'])} nodes, {len(graph['edges'])} edges, "
-                f"{len(graph['missingLinks'])} missing links, {len(archived_candidates)} archived"
+                f"{len(graph['missingLinks'])} missing links, {len(archived_candidates)} archived, "
+                f"{len(filtered_candidates)} filtered"
             ),
             "sourceRefs": [],
             "evidenceRefs": [],
             "metadata": {
                 "generatedFromCandidateIds": [node["candidateId"] for node in graph["nodes"]],
+                "curationMode": curation_mode,
+                "filteredCandidateIds": [str(item.get("candidateId") or "") for item in filtered_candidates],
                 "graph": graph,
                 "missingLinkCount": len(graph["missingLinks"]),
                 "unreviewedNodeCount": len(graph["unreviewedNodes"]),
                 "officialBoundary": graph["officialBoundary"],
             },
-            "createdByAgent": _trim_text(payload.get("createdByAgent"), max_length=160) or "Candidate Graph Preview Agent",
+            "createdByAgent": created_by_agent,
             "currentWorkflowNode": "candidate_graph",
             "currentState": "candidate_graph_visible",
             "qualityStatus": "broken_links" if graph["missingLinks"] else "preview_ready",
@@ -2602,12 +2616,105 @@ def build_candidate_graph(team_id: str, payload: dict[str, Any] | None = None) -
             "missingLinkCount": len(graph["missingLinks"]),
             "unreviewedNodeCount": len(graph["unreviewedNodes"]),
             "archivedCandidateCount": len(archived_candidates),
+            "filteredCandidateCount": len(filtered_candidates),
+            "curationMode": curation_mode,
+            "createdByAgent": created_by_agent,
         },
     )
     return {
         "candidateGraph": record,
         "graph": graph,
         "workflow": _workflow_to_api(normalized_team_id, workflow, candidate_store),
+    }
+
+
+def run_knowledge_ingestion_precheck(team_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Generate a candidate-only steward precheck pack from approved workflow candidates."""
+
+    normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
+    team_service.get_team(normalized_team_id)
+    payload = payload if isinstance(payload, dict) else {}
+    steward_agent_id = _trim_text(payload.get("stewardAgentId"), max_length=160) or "Knowledge Steward Agent"
+    target_domain = _trim_text(payload.get("targetDomain"), max_length=240) or "神经机制启发神经网络算法"
+    max_candidates = _normalize_int(payload.get("maxCandidates"), default=32, minimum=1, maximum=200)
+    with _WORKFLOW_LOCK:
+        workflow = _load_or_create_workflow(normalized_team_id)
+        candidate_store = _load_candidate_store(normalized_team_id)
+        stored_candidates = [item for item in list(candidate_store.get("candidates") or []) if isinstance(item, dict)]
+        active_candidates = [
+            item
+            for item in stored_candidates
+            if str(item.get("candidateType") or "") != "candidate_graph" and not _candidate_is_archived(item)
+        ]
+        graph_candidates = [
+            item
+            for item in stored_candidates
+            if str(item.get("candidateType") or "") == "candidate_graph" and not _candidate_is_archived(item)
+        ]
+        latest_graph = _latest_candidate_record(graph_candidates)
+        selected_candidates = _dedupe_candidate_sequence(
+            [
+                *[item for item in active_candidates if str(item.get("candidateType") or "") != "source_manifest" and _candidate_ready_for_agent_graph(item)],
+                *[item for item in active_candidates if str(item.get("candidateType") or "") == "source_manifest" and _source_quality_bucket(item) == "approved"],
+            ]
+        )[:max_candidates]
+        workflow_id = str(workflow.get("workflowId") or "")
+        filtered_candidate_count = max(0, len(active_candidates) - len(selected_candidates))
+    if not selected_candidates:
+        raise TeamWorkflowOrchestrationError("No agent-approved candidates are ready for knowledge ingestion precheck.")
+
+    output = _build_knowledge_ingestion_precheck_output(
+        normalized_team_id,
+        workflow_id,
+        selected_candidates,
+        latest_graph,
+        target_domain=target_domain,
+    )
+    record_response = record_local_research_model_output(
+        normalized_team_id,
+        {
+            "taskType": "steward_pack_draft",
+            "title": "共享记忆前审包",
+            "summary": f"由 {steward_agent_id} 汇总 {len(selected_candidates)} 条通过候选，生成 candidate-only 前审包。",
+            "createdByAgent": steward_agent_id,
+            "output": output,
+        },
+    )
+    status_payload = get_knowledge_ingestion_status(normalized_team_id)
+    _record_workflow_event(
+        "knowledge_ingestion.precheck_generated",
+        normalized_team_id,
+        fields={
+            "workflowId": workflow_id,
+            "candidateId": record_response["candidate"]["candidateId"],
+            "selectedCandidateCount": len(selected_candidates),
+            "filteredCandidateCount": filtered_candidate_count,
+            "stewardAgentId": steward_agent_id,
+            "candidateGraphId": str((latest_graph or {}).get("candidateId") or ""),
+            "writesOfficialKnowledge": False,
+            "writesOfficialRag": False,
+            "writesOfficialGraph": False,
+        },
+    )
+    return {
+        "candidate": record_response["candidate"],
+        "validation": record_response["validation"],
+        "precheck": {
+            "status": "steward_pack_draft",
+            "generatedByAgent": steward_agent_id,
+            "selectedCandidateCount": len(selected_candidates),
+            "filteredCandidateCount": filtered_candidate_count,
+            "candidateIds": [str(item.get("candidateId") or "") for item in selected_candidates],
+            "candidateGraphId": str((latest_graph or {}).get("candidateId") or ""),
+            "officialBoundary": {
+                "writesOfficialKnowledge": False,
+                "writesOfficialRag": False,
+                "writesOfficialGraph": False,
+                "requiresReviewBeforeOfficialSync": True,
+            },
+        },
+        "status": status_payload,
+        "workflow": record_response["workflow"],
     }
 
 
@@ -3704,6 +3811,134 @@ def _candidate_graph_edge(source_id: str, target_id: str, relation: str) -> dict
         "targetCandidateId": target_id,
         "relation": relation,
         "edgeState": "candidate_only",
+    }
+
+
+def _candidate_ready_for_agent_graph(candidate: dict[str, Any]) -> bool:
+    candidate_type = str(candidate.get("candidateType") or "")
+    current_state = str(candidate.get("currentState") or "")
+    quality_status = str(candidate.get("qualityStatus") or "")
+    if current_state in ARCHIVED_CANDIDATE_STATES or quality_status in SOURCE_QUALITY_REJECTED_STATUSES:
+        return False
+    if candidate_type == "source_manifest":
+        return _source_quality_bucket(candidate) == "approved"
+    if candidate_type not in {"paper_note", "neuro_mechanism", "mechanism_mapping", "algorithm_hypothesis", "review_record"}:
+        return False
+    if current_state.endswith("_needs_revision") or quality_status in {"needs_revision", "source_quality_needs_revision"}:
+        return False
+    validation = validate_candidate_record(candidate)
+    return bool(validation.get("valid"))
+
+
+def _latest_candidate_record(candidates: list[dict[str, Any]]) -> dict[str, Any] | None:
+    if not candidates:
+        return None
+    return max(
+        candidates,
+        key=lambda item: (
+            str(item.get("updatedAt") or ""),
+            str(item.get("createdAt") or ""),
+            str(item.get("candidateId") or ""),
+        ),
+    )
+
+
+def _dedupe_candidate_sequence(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    seen: set[str] = set()
+    deduped: list[dict[str, Any]] = []
+    for candidate in candidates:
+        candidate_id = str(candidate.get("candidateId") or "")
+        if not candidate_id or candidate_id in seen:
+            continue
+        seen.add(candidate_id)
+        deduped.append(candidate)
+    return deduped
+
+
+def _candidate_precheck_ref(candidate: dict[str, Any]) -> dict[str, str]:
+    candidate_type = str(candidate.get("candidateType") or "candidate")
+    return {
+        "type": candidate_type,
+        "id": str(candidate.get("candidateId") or ""),
+        "label": _source_manifest_label(candidate),
+    }
+
+
+def _build_knowledge_ingestion_precheck_output(
+    team_id: str,
+    workflow_id: str,
+    selected_candidates: list[dict[str, Any]],
+    latest_graph: dict[str, Any] | None,
+    *,
+    target_domain: str,
+) -> dict[str, Any]:
+    candidate_ids = [str(item.get("candidateId") or "") for item in selected_candidates if item.get("candidateId")]
+    source_refs = [_candidate_precheck_ref(item) for item in selected_candidates[:32]]
+    evidence_refs = [
+        {
+            "type": "candidate",
+            "id": ref["id"],
+            "label": ref["label"],
+        }
+        for ref in source_refs[:24]
+    ]
+    if latest_graph:
+        evidence_refs.append(
+            {
+                "type": "candidate_graph",
+                "id": str(latest_graph.get("candidateId") or ""),
+                "label": _trim_text(latest_graph.get("title"), max_length=240) or "Candidate graph snapshot",
+            }
+        )
+    source_ids = [str(item.get("candidateId") or "") for item in selected_candidates if str(item.get("candidateType") or "") == "source_manifest"]
+    local_ids = [str(item.get("candidateId") or "") for item in selected_candidates if str(item.get("candidateType") or "") != "source_manifest"]
+    claims = []
+    for item in selected_candidates[:24]:
+        label = _source_manifest_label(item)
+        summary = _trim_text(item.get("summary"), max_length=600)
+        claims.append(
+            {
+                "claim": summary or f"{label} 可作为 {target_domain} 的候选证据。",
+                "sourceRef": str(item.get("candidateId") or ""),
+            }
+        )
+    proposal_summary = f"本前审包汇总 {len(candidate_ids)} 条已通过候选，用于进入共享记忆前的候选审查。"
+    return {
+        "candidateType": "review_record",
+        "sourceRefs": source_refs,
+        "evidenceRefs": evidence_refs,
+        "claims": claims,
+        "candidateIds": candidate_ids,
+        "targetDomain": target_domain,
+        "sourceTrace": {
+            "teamId": team_id,
+            "workflowId": workflow_id,
+            "sourceCandidateIds": source_ids,
+            "localDraftCandidateIds": local_ids,
+            "candidateGraphId": str((latest_graph or {}).get("candidateId") or ""),
+        },
+        "riskSummary": (
+            "该包仍处于 candidate-only 前审层，只能作为共享记忆入库门禁的输入；"
+            "正式 Team Knowledge、RAG 和正式图谱仍需后续审核节点。"
+        ),
+        "proposalPayload": {
+            "title": "神经算法候选知识前审包",
+            "summary": proposal_summary,
+            "targetDomain": target_domain,
+            "candidateIds": candidate_ids,
+            "content": "；".join(_source_manifest_label(item) for item in selected_candidates[:12]),
+        },
+        "ratingSuggestion": {
+            "rating": "candidate_only_precheck",
+            "score": 0.68,
+            "rationale": "来源已通过 Agent 筛选，但尚未写入正式共享记忆。",
+        },
+        "approvalRequired": True,
+        "uncertainty": ["正式入库前仍需知识治理门禁确认。"],
+        "riskFlags": ["candidate_only", "requires_official_review"],
+        "confidence": 0.68,
+        "nextAction": "submit_steward_pack_to_knowledge_ingestion_after_gate",
+        "requiresReview": True,
     }
 
 
