@@ -77,6 +77,66 @@ function linkClassName({ isActive }: { isActive: boolean }) {
   return isActive ? `${styles.navLink} ${styles.navLinkActive}` : styles.navLink;
 }
 
+let chatRoutePreloadPromise: Promise<unknown> | null = null;
+
+function browserNowMs(): number {
+  return typeof performance === "undefined" ? Date.now() : performance.now();
+}
+
+function browserElapsedMs(startedAt: number): number {
+  return Math.max(0, Math.round(browserNowMs() - startedAt));
+}
+
+function preloadChatRouteForNav(trigger: "pointerenter" | "focus" | "click") {
+  if (typeof window === "undefined") {
+    return;
+  }
+  const alreadyStarted = Boolean(chatRoutePreloadPromise);
+  postBrowserTelemetry({
+    phase: "navigation",
+    eventCode: "browser.chat_route.preload_requested",
+    message: "Chat route preload requested from navigation.",
+    fields: {
+      trigger,
+      alreadyStarted,
+      pathname: window.location.pathname,
+    },
+  });
+  if (alreadyStarted) {
+    return;
+  }
+
+  const startedAt = browserNowMs();
+  chatRoutePreloadPromise = import("../routes/ChatCodingRoute")
+    .then(() => {
+      postBrowserTelemetry({
+        phase: "navigation",
+        eventCode: "browser.chat_route.preload_loaded",
+        message: "Chat route preload loaded.",
+        fields: {
+          trigger,
+          durationMs: browserElapsedMs(startedAt),
+          pathname: window.location.pathname,
+        },
+      });
+    })
+    .catch((error: unknown) => {
+      chatRoutePreloadPromise = null;
+      postBrowserTelemetry({
+        phase: "navigation",
+        eventCode: "browser.chat_route.preload_failed",
+        message: "Chat route preload failed.",
+        level: "warning",
+        fields: {
+          trigger,
+          durationMs: browserElapsedMs(startedAt),
+          pathname: window.location.pathname,
+          errorName: error instanceof Error ? error.name : typeof error,
+        },
+      });
+    });
+}
+
 type RouteLocationLike = {
   pathname: string;
   search: string;
@@ -1963,7 +2023,13 @@ export function AppShell() {
 
         <nav className={styles.nav}>
           {chatEnabled ? (
-            <NavLink to="/chat" className={linkClassName}>
+            <NavLink
+              to="/chat"
+              className={linkClassName}
+              onPointerEnter={() => preloadChatRouteForNav("pointerenter")}
+              onFocus={() => preloadChatRouteForNav("focus")}
+              onClick={() => preloadChatRouteForNav("click")}
+            >
               {t("navChat")}
             </NavLink>
           ) : (

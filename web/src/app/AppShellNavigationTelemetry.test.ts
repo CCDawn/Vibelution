@@ -145,6 +145,17 @@ describe("AppShell navigation telemetry", () => {
     ).toEqual([]);
   });
 
+  it("preloads the chat route from navigation before the user waits on the route chunk", () => {
+    expect(appShellSource).toContain("function preloadChatRouteForNav");
+    expect(appShellSource).toContain("browser.chat_route.preload_requested");
+    expect(appShellSource).toContain("browser.chat_route.preload_loaded");
+    expect(appShellSource).toContain("browser.chat_route.preload_failed");
+    expect(appShellSource).toContain('import("../routes/ChatCodingRoute")');
+    expect(appShellSource).toContain('onPointerEnter={() => preloadChatRouteForNav("pointerenter")}');
+    expect(appShellSource).toContain('onFocus={() => preloadChatRouteForNav("focus")}');
+    expect(appShellSource).toContain('onClick={() => preloadChatRouteForNav("click")}');
+  });
+
   it("recovers when the browser address changes without the router location following", () => {
     expect(appShellSource).toContain("routerLocationDesyncRecoveryPlan(window.location, location)");
     expect(appShellSource).toContain("browser.router_location_desync.recovered");

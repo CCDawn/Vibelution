@@ -2828,12 +2828,65 @@ export function ChatCodingRoute() {
   });
   const groupStreamErrorLoggedRef = useRef<Record<string, boolean>>({});
   const groupStreamPayloadErrorLoggedRef = useRef<Record<string, boolean>>({});
+  const chatRouteMountStartedAtRef = useRef(Date.now());
+  const chatRouteShellMountedLoggedRef = useRef(false);
+  const chatRouteStartupReadyLoggedRef = useRef(false);
+  const chatRouteLongTaskCountRef = useRef(0);
   const requestedSessionId = useMemo(() => {
     return new URLSearchParams(location.search).get("session") ?? "";
   }, [location.search]);
   const requestedRoomId = useMemo(() => {
     return new URLSearchParams(location.search).get("room") ?? "";
   }, [location.search]);
+  useEffect(() => {
+    if (chatRouteShellMountedLoggedRef.current) {
+      return;
+    }
+    chatRouteShellMountedLoggedRef.current = true;
+    postBrowserTelemetry({
+      phase: "navigation",
+      eventCode: "browser.chat_route.shell_mounted",
+      message: "Chat route shell mounted.",
+      fields: {
+        durationMs: Math.max(0, Date.now() - chatRouteMountStartedAtRef.current),
+        pathname: location.pathname,
+        requestedSession: Boolean(requestedSessionId),
+        requestedRoom: Boolean(requestedRoomId),
+        activeSession: Boolean(activeSessionId),
+      },
+    });
+  }, [activeSessionId, location.pathname, requestedRoomId, requestedSessionId]);
+  useEffect(() => {
+    if (typeof PerformanceObserver === "undefined") {
+      return undefined;
+    }
+    const observer = new PerformanceObserver((list) => {
+      for (const entry of list.getEntries()) {
+        if (chatRouteLongTaskCountRef.current >= 8) {
+          observer.disconnect();
+          return;
+        }
+        chatRouteLongTaskCountRef.current += 1;
+        postBrowserTelemetry({
+          phase: "navigation",
+          eventCode: "browser.chat_route.long_task",
+          message: "Chat route long task observed.",
+          fields: {
+            durationMs: Math.round(entry.duration),
+            startTimeMs: Math.round(entry.startTime),
+            count: chatRouteLongTaskCountRef.current,
+          },
+        });
+      }
+      return undefined;
+    });
+    try {
+      observer.observe({ entryTypes: ["longtask"] });
+    } catch {
+      return undefined;
+    }
+    return () => observer.disconnect();
+  }, []);
   const pageVisible = usePageVisibility();
   const [chatStartupDataReady, setChatStartupDataReady] = useState(false);
   const chatStartupWarmupActive = useStartupWarmup(chatStartupDataReady);
@@ -2845,6 +2898,7 @@ export function ChatCodingRoute() {
   const sessionQueryText = sessionFilter.trim();
   const [directSessionBackgroundSyncActive, setDirectSessionBackgroundSyncActive] = useState(false);
   const [groupBackgroundSyncActive, setGroupBackgroundSyncActive] = useState(false);
+  const secondaryChatDataEnabled = chatStartupDataReady;
   const sessionStreamRouteTargetMatches = Boolean(
     activeSessionId
     && !groupPanelActive
@@ -2921,12 +2975,14 @@ export function ChatCodingRoute() {
   const runtimeQuery = useQuery({
     queryKey: queryKeys.runtimeSummary(),
     queryFn: () => fetchJson<RuntimeSummary>("/api/runtime/summary"),
+    enabled: secondaryChatDataEnabled,
     refetchInterval: resolvePollingInterval(chatPollingVisible, 5_000),
     refetchIntervalInBackground: chatStartupWarmupActive,
   });
   const petQuery = useQuery({
     queryKey: queryKeys.petSummary(),
     queryFn: () => fetchJson<PetSummary>("/api/pet/summary"),
+    enabled: secondaryChatDataEnabled,
     refetchInterval: resolvePollingInterval(chatPollingVisible, 10_000),
     refetchIntervalInBackground: chatStartupWarmupActive,
   });
@@ -2968,6 +3024,7 @@ export function ChatCodingRoute() {
   const conversationsQuery = useQuery({
     queryKey: queryKeys.conversations(),
     queryFn: () => fetchJson<ConversationSummary[]>("/api/conversations"),
+    enabled: secondaryChatDataEnabled,
     refetchInterval: resolvePollingInterval(
       chatPollingVisible,
       (sessionStreamConnected && directSessionPanelActive) || (groupStreamConnected && legacyGroupRoomActive)
@@ -2986,13 +3043,14 @@ export function ChatCodingRoute() {
   const teamsQuery = useQuery({
     queryKey: queryKeys.teams(),
     queryFn: () => fetchJson<TeamListPayload>("/api/teams"),
+    enabled: secondaryChatDataEnabled,
     refetchInterval: resolvePollingInterval(chatPollingVisible, directSessionPanelActive ? false : ACTIVE_INDEX_POLL_MS),
     refetchIntervalInBackground: chatStartupWarmupActive,
   });
   const agentsQuery = useQuery({
     queryKey: queryKeys.agents(),
     queryFn: () => fetchJson<AgentInstance[]>("/api/agents?detail=summary"),
-    enabled: groupComposerOpen || Boolean(activeSessionId),
+    enabled: groupComposerOpen || legacyGroupRoomActive || Boolean(activeSessionId && secondaryChatDataEnabled),
   });
   const chatRoomModesQuery = useQuery({
     queryKey: queryKeys.chatRoomModes(),
@@ -3154,12 +3212,41 @@ export function ChatCodingRoute() {
   useEffect(() => {
     const directReady = Boolean(activeSessionId ? sessionDetailQuery.data : sessionsQuery.data);
     const groupReady = !legacyGroupRoomActive || Boolean(activeGroupRoomQuery.data);
-    if (runtimeQuery.data && sessionsQuery.data && conversationsQuery.data && teamsQuery.data && directReady && groupReady) {
+    if (sessionsQuery.data && directReady && groupReady) {
       setChatStartupDataReady(true);
     }
   }, [
     activeGroupRoomQuery.data,
     activeSessionId,
+    legacyGroupRoomActive,
+    sessionDetailQuery.data,
+    sessionsQuery.data,
+  ]);
+  useEffect(() => {
+    if (!chatStartupDataReady || chatRouteStartupReadyLoggedRef.current) {
+      return;
+    }
+    chatRouteStartupReadyLoggedRef.current = true;
+    postBrowserTelemetry({
+      phase: "navigation",
+      eventCode: "browser.chat_route.startup_data_ready",
+      message: "Chat route startup data is ready.",
+      fields: {
+        durationMs: Math.max(0, Date.now() - chatRouteMountStartedAtRef.current),
+        activeSession: Boolean(activeSessionId),
+        legacyGroupRoomActive,
+        runtimeReady: Boolean(runtimeQuery.data),
+        sessionsReady: Boolean(sessionsQuery.data),
+        conversationsReady: Boolean(conversationsQuery.data),
+        teamsReady: Boolean(teamsQuery.data),
+        sessionDetailReady: Boolean(activeSessionId ? sessionDetailQuery.data : true),
+        groupRoomReady: Boolean(!legacyGroupRoomActive || activeGroupRoomQuery.data),
+      },
+    });
+  }, [
+    activeGroupRoomQuery.data,
+    activeSessionId,
+    chatStartupDataReady,
     conversationsQuery.data,
     legacyGroupRoomActive,
     runtimeQuery.data,
