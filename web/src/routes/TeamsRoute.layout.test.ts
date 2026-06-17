@@ -364,6 +364,10 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("SourceCollectionStageViewMode");
     expect(routeSource).toContain("sourceCollectionPageItems");
     expect(routeSource).toContain("renderSourceCollectionPagination");
+    expect(routeSource).toContain("stopSourceCollectionPaginationEvent");
+    expect(routeSource).toContain("preventSourceCollectionPanelSummaryToggle");
+    expect(routeSource).toContain("onMouseDown={stopSourceCollectionPaginationEvent}");
+    expect(routeSource).toContain("onClick={preventSourceCollectionPanelSummaryToggle}");
     expect(routeSource).toContain("sourceCollectionTraceMessagesForStage");
     expect(routeSource).toContain("renderSourceCollectionStageProcessPanel");
     expect(routeSource).toContain("sourceCollectionStageCardSelected");
@@ -649,6 +653,8 @@ describe("TeamsRoute layout contract", () => {
     expect(routeStylesSource).not.toMatch(/\.sourceCollectionTraceBody p \{[\s\S]*?-webkit-line-clamp: 3/);
     expect(routeStylesSource).toContain("grid-template-columns: minmax(0, 1fr) minmax(320px, 380px)");
     expect(routeStylesSource).toContain("isolation: isolate");
+    expect(routeStylesSource).toContain("grid-template-rows: auto auto minmax(0, 1fr)");
+    expect(routeStylesSource).toContain("user-select: none");
     expect(routeStylesSource).toContain("white-space: nowrap");
     expect(routeStylesSource).toContain("writing-mode: horizontal-tb");
     expect(routeStyles.sourceCollectionControlPanel).toBeTypeOf("string");
