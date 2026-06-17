@@ -482,6 +482,14 @@ TOOL_CATALOG: dict[str, dict[str, Any]] = {
 
 TOOL_BUNDLE_DEFINITIONS: tuple[dict[str, Any], ...] = (
     {
+        "bundleId": "pure_chat",
+        "label": "纯聊天 / 无工具",
+        "description": "关闭该 Agent 的全部工具调用，只保留模型对话能力；适合需要彻底禁用默认工具的会话 Agent。",
+        "category": "core",
+        "toolNames": [],
+        "preferredToolNames": [],
+    },
+    {
         "bundleId": "core",
         "label": "会话 Agent 基础包",
         "description": "适合会话 Agent 默认启用：读取项目上下文、查看任务目标、检查当前状态，风险较低。",
@@ -712,7 +720,7 @@ def list_tool_bundles(*, available_tool_names: set[str] | None = None) -> list[d
                 "riskTags": risk_tags,
             }
         )
-    return [bundle for bundle in bundles if bundle["bundleId"] and bundle["toolNames"]]
+    return [bundle for bundle in bundles if bundle["bundleId"]]
 
 
 def _unique_existing_tool_names(values: Any, available: set[str]) -> list[str]:

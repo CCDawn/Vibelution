@@ -58,6 +58,7 @@ import {
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
 import { useShellI18n } from "../i18n/useShellI18n";
 import { AgentManagementNav } from "./AgentManagementNav";
+import { agentCenterToolsRoute } from "./agentCenterRoutes";
 import { agentDisplayInfo } from "./agentDisplay";
 import { createChatWorkspaceCache } from "./chatWorkspaceCache";
 import styles from "./AgentsRoute.module.css";
@@ -389,30 +390,19 @@ const DEFAULT_BULK_CONFIG_APPLY: AgentBulkConfigApply = {
   roleKey: false,
 };
 const DEFAULT_SESSION_AGENT_ALLOWED_TOOLS = [
-  "apply_patch_tool",
-  "apply_diff_edit_tool",
-  "write_file_tool",
-  "cli_tool",
-  "cli_agent_run_tool",
-  "python_lint_tool",
-  "run_test_for_tool",
-  "web_search_tool",
-  "web_fetch_tool",
-  "image2_generate_tool",
-  "conversation_log_inspect_tool",
-  "session_reference_query_tool",
+  "grep_search_tool",
+  "glob_tool",
+  "read_file_tool",
   "get_core_context_tool",
   "get_current_goal_tool",
-  "compress_context_tool",
   "task_list_tool",
   "get_git_status_summary_tool",
   "get_recent_changes_tool",
-  "get_entity_history_tool",
-  "explain_current_worktree_tool",
+  "conversation_log_inspect_tool",
 ];
 const DEFAULT_SESSION_AGENT_PREFERRED_TOOLS = [
-  "cli_tool",
-  "session_reference_query_tool",
+  "grep_search_tool",
+  "read_file_tool",
   "conversation_log_inspect_tool",
   "get_core_context_tool",
 ];
@@ -1825,34 +1815,13 @@ function isWorkSessionCreateDraft(draft: AgentCreateDraft) {
   return primaryMode === "" || primaryMode === "chat";
 }
 
-function isSessionToolPolicyAgent(agent: AgentConfigWorkspaceAgent | null | undefined) {
-  if (!agent) {
-    return false;
-  }
-  const primaryMode = String(agent.primaryMode || "").trim();
-  return isWorkSessionAgent(agent) || primaryMode === "" || primaryMode === "chat";
-}
-
-function isSessionRequiredTool(toolName: string, agent: AgentConfigWorkspaceAgent | null | undefined) {
-  return isSessionToolPolicyAgent(agent) && DEFAULT_SESSION_AGENT_ALLOWED_TOOLS.includes(toolName);
-}
-
 function normalizeToolPolicyDraftForAgent(
   draft: AgentToolPolicyDraft,
-  agent: AgentConfigWorkspaceAgent | null | undefined,
+  _agent: AgentConfigWorkspaceAgent | null | undefined,
 ): AgentToolPolicyDraft {
-  const allowed = new Set(sortedIds(draft.allowedTools));
-  const preferred = new Set(sortedIds(draft.preferredTools));
   const blocked = new Set(sortedIds(draft.blockedTools));
-  if (isSessionToolPolicyAgent(agent)) {
-    for (const tool of DEFAULT_SESSION_AGENT_ALLOWED_TOOLS) {
-      allowed.add(tool);
-      blocked.delete(tool);
-    }
-    for (const tool of DEFAULT_SESSION_AGENT_PREFERRED_TOOLS) {
-      preferred.add(tool);
-    }
-  }
+  const allowed = new Set(sortedIds(draft.allowedTools).filter((tool) => !blocked.has(tool)));
+  const preferred = new Set(sortedIds(draft.preferredTools));
   const allowedTools = sortedIds(Array.from(allowed));
   const allowedSet = new Set(allowedTools);
   return {
@@ -2215,7 +2184,8 @@ function createDraftReady(draft: AgentCreateDraft, bundles: ToolBundle[] = []) {
   const workSession = isWorkSessionCreateDraft(draft);
   const selectedPolicy = toolBundleSelectionToPolicy(draft.selectedToolBundleIds, bundles);
   const fallbackAllowedTools = bundles.length ? [] : expertiseFromDraft(draft.allowedTools);
-  const configuredToolCount = selectedPolicy.allowedTools.length || (workSession ? DEFAULT_SESSION_AGENT_ALLOWED_TOOLS.length : 0) || fallbackAllowedTools.length;
+  const configuredToolCount = selectedPolicy.allowedTools.length || fallbackAllowedTools.length;
+  const hasToolPolicyChoice = selectedPolicy.selectedBundles.length > 0 || fallbackAllowedTools.length > 0;
   return Boolean(
     draft.displayName.trim()
     && agentLlmSlotModelId(draft.llmBindings, FALLBACK_AGENT_LLM_SLOTS[0])
@@ -2224,7 +2194,7 @@ function createDraftReady(draft: AgentCreateDraft, bundles: ToolBundle[] = []) {
     && draft.promptTemplateId.trim()
     && (workSession || draft.personaSummary.trim())
     && (workSession || draft.taskMission.trim())
-    && configuredToolCount > 0
+    && (workSession ? hasToolPolicyChoice : configuredToolCount > 0)
   );
 }
 
@@ -2355,12 +2325,12 @@ function toolBundleMeta(bundle: ToolBundle, lang: "zh" | "en") {
 
 function defaultCreateToolBundleIds(workSession: boolean, bundles: ToolBundle[]) {
   const available = new Set(bundles.map((bundle) => bundle.bundleId));
-  const preferred = workSession ? [] : ["core", "research", "collaboration"];
+  const preferred = workSession ? ["core"] : ["core", "research", "collaboration"];
   const selected = preferred.filter((bundleId) => available.has(bundleId));
   if (selected.length) {
     return selected;
   }
-  return workSession ? [] : bundles[0]?.bundleId ? [bundles[0].bundleId] : [];
+  return bundles[0]?.bundleId ? [bundles[0].bundleId] : [];
 }
 
 function toolBundleIdsForModeChange(draft: AgentCreateDraft, nextPrimaryMode: string, bundles: ToolBundle[]) {
@@ -2410,7 +2380,7 @@ function createToolBundleSummary(
   const bundleLabels = policy.selectedBundles.map((bundle) => bundle.label);
   const label = bundleLabels.length
     ? bundleLabels.join(" / ")
-    : requiredAllowedTools.length ? (lang === "zh" ? "会话必备工具" : "Required session tools") : (lang === "zh" ? "未选择工具包" : "No package selected");
+    : requiredAllowedTools.length ? (lang === "zh" ? "会话推荐默认" : "Recommended session default") : (lang === "zh" ? "未选择工具包" : "No package selected");
   return {
     ...policy,
     allowedTools,
@@ -2487,13 +2457,13 @@ function governanceDeltaSummary(request: AgentToolGovernanceRequest | undefined,
 
 function toolPolicyModeLabel(mode: ToolPolicyMode, lang: "zh" | "en") {
   const zh = {
-    inherited: "跟随默认",
+    inherited: "未允许",
     allowed: "允许",
     blocked: "禁用",
     excluded: "未列入",
   };
   const en = {
-    inherited: "Default",
+    inherited: "Not allowed",
     allowed: "Allowed",
     blocked: "Blocked",
     excluded: "Excluded",
@@ -2933,7 +2903,7 @@ function agentsRouteCopy(lang: "zh" | "en") {
         managementFilterMissingTask: "未配置任务",
         managementFilterMissingTaskHint: "缺少使命、职责、适合任务、完成标准或交接说明。",
         managementFilterMissingTools: "工具使用待确认",
-        managementFilterMissingToolsHint: "未显式配置可用、优先或禁用工具，建议确认它是否应使用默认工具策略。",
+        managementFilterMissingToolsHint: "未显式配置可用、优先或禁用工具；该 Agent 当前不会获得隐藏默认工具。",
         managementFilterNoTeam: "无团队归属",
         managementFilterNoTeamHint: "尚未被任何团队画布引用，适合继续分配组织位置。",
         managementFilterPendingInbox: "有待处理消息",
@@ -3157,7 +3127,7 @@ function agentsRouteCopy(lang: "zh" | "en") {
         saveToolPolicy: "保存工具",
         savingToolPolicy: "保存工具中...",
         toolBundlesTitle: "按工具包配置",
-        toolBundlesHint: "先选适合这个 Agent 的工具包，再在下方微调单个工具；会话 Agent 会保留会话必备工具。",
+        toolBundlesHint: "先选适合这个 Agent 的工具包，再在下方微调单个工具；会话 Agent 默认选基础包，也可以手动关闭。",
         applyBundle: "叠加",
         replaceWithBundle: "重置为此包",
         preferredTools: "优先",
@@ -3184,7 +3154,7 @@ function agentsRouteCopy(lang: "zh" | "en") {
         toolTags: "能力标签",
         allowedTools: "允许",
         blockedTools: "禁用",
-        inheritedTools: "默认",
+        inheritedTools: "未允许",
         workspaceWriteScopes: "保存位置",
         privateWriteScope: "私人工作区",
         sharedWriteScope: "共享空间",
@@ -3330,7 +3300,7 @@ function agentsRouteCopy(lang: "zh" | "en") {
         managementFilterMissingTask: "Missing task profile",
         managementFilterMissingTaskHint: "Missing mission, responsibilities, task fit, success criteria, deliverables, or handoff notes.",
         managementFilterMissingTools: "Tool permissions need review",
-        managementFilterMissingToolsHint: "No explicit allow, prefer, or block tools are configured. Confirm whether the default tool policy is intended.",
+        managementFilterMissingToolsHint: "No explicit allow, prefer, or block tools are configured. This Agent will not receive hidden default tools.",
         managementFilterNoTeam: "No team",
         managementFilterNoTeamHint: "Not referenced by any team canvas yet.",
         managementFilterPendingInbox: "Pending messages",
@@ -3554,7 +3524,7 @@ function agentsRouteCopy(lang: "zh" | "en") {
         saveToolPolicy: "Save permissions",
         savingToolPolicy: "Saving permissions...",
         toolBundlesTitle: "Configure by tool package",
-        toolBundlesHint: "Pick packages for this Agent first, then tune individual tools below. Session Agents keep required session tools.",
+        toolBundlesHint: "Pick packages for this Agent first, then tune individual tools below. Session Agents start with the core package, and you can turn tools off.",
         applyBundle: "Merge",
         replaceWithBundle: "Reset to package",
         preferredTools: "Preferred",
@@ -3581,7 +3551,7 @@ function agentsRouteCopy(lang: "zh" | "en") {
         toolTags: "Capability tags",
         allowedTools: "Allowed",
         blockedTools: "Blocked",
-        inheritedTools: "Default",
+        inheritedTools: "Not allowed",
         workspaceWriteScopes: "Workspace writes",
         privateWriteScope: "Private territory",
         sharedWriteScope: "Shared workspace",
@@ -3818,6 +3788,16 @@ export function AgentsRoute() {
     [lang, toolBundles, toolPolicyDraft, visiblePolicyTools],
   );
   const selectedAgent = selectedAgentFromList(visibleAgents, selectedAgentId, workspace?.agents ?? [], activeFilter);
+  const selectedAgentToolConfigRoute = useMemo(
+    () => selectedAgent?.agentId
+      ? agentCenterToolsRoute({
+          agentId: selectedAgent.agentId,
+          returnLabel: "agents",
+          returnTo: `/agents?agent=${encodeURIComponent(selectedAgent.agentId)}&pane=config`,
+        })
+      : "/agents/tools",
+    [selectedAgent?.agentId],
+  );
   const managementBrief = useMemo(() => buildAgentManagementBrief(selectedAgent, copy, lang), [copy, lang, selectedAgent]);
   const capabilityPreview = useMemo(
     () => buildAgentCapabilityPreview(toolPolicyDraft, visiblePolicyTools, copy),
@@ -3992,8 +3972,6 @@ export function AgentsRoute() {
       createDraft.selectedToolBundleIds,
       toolBundles,
       lang,
-      isWorkSessionCreateDraft(createDraft) ? DEFAULT_SESSION_AGENT_ALLOWED_TOOLS : [],
-      isWorkSessionCreateDraft(createDraft) ? DEFAULT_SESSION_AGENT_PREFERRED_TOOLS : [],
     ),
     [createDraft, lang, toolBundles],
   );
@@ -4026,14 +4004,12 @@ export function AgentsRoute() {
       const roleKey = workSession ? "" : draft.roleKey.trim();
       const selectedToolPolicy = toolBundleSelectionToPolicy(draft.selectedToolBundleIds, toolBundles);
       const fallbackAllowedTools = toolBundles.length ? [] : expertiseFromDraft(draft.allowedTools);
-      const sessionDefaultAllowedTools = workSession ? DEFAULT_SESSION_AGENT_ALLOWED_TOOLS : [];
-      const sessionDefaultPreferredTools = workSession ? DEFAULT_SESSION_AGENT_PREFERRED_TOOLS : [];
       const selectedAllowedTools = selectedToolPolicy.allowedTools.length ? selectedToolPolicy.allowedTools : fallbackAllowedTools;
-      const allowedTools = sortedIds([...sessionDefaultAllowedTools, ...selectedAllowedTools]);
+      const allowedTools = sortedIds(selectedAllowedTools);
       const selectedPreferredTools = selectedToolPolicy.preferredTools.length
         ? selectedToolPolicy.preferredTools
         : fallbackAllowedTools.includes("agent_message_tool") ? ["agent_message_tool"] : [];
-      const preferredTools = sortedIds([...sessionDefaultPreferredTools, ...selectedPreferredTools].filter((tool) => allowedTools.includes(tool)));
+      const preferredTools = sortedIds(selectedPreferredTools.filter((tool) => allowedTools.includes(tool)));
       const personaProfile = workSession
         ? {}
         : {
@@ -4681,11 +4657,14 @@ export function AgentsRoute() {
       const preferred = new Set(current.preferredTools);
       const blocked = new Set(current.blockedTools);
       for (const tool of bundleTools) {
-        allowed.add(tool);
-        blocked.delete(tool);
+        if (!blocked.has(tool)) {
+          allowed.add(tool);
+        }
       }
       for (const tool of bundlePreferred) {
-        preferred.add(tool);
+        if (!blocked.has(tool)) {
+          preferred.add(tool);
+        }
       }
       return normalizeToolPolicyDraftForAgent({
         ...current,
@@ -6598,32 +6577,11 @@ export function AgentsRoute() {
                   </div>
                   <ShieldCheck size={16} />
                 </div>
-                <p className={styles.policyHint}>{copy.toolGovernanceHint}</p>
-                <div className={styles.policySummaryGrid}>
-                  <span>{lang === "zh" ? "新增授权" : "Grant"}: <strong>{toolGovernanceDelta.grantTools.length}</strong></span>
-                  <span>{lang === "zh" ? "撤销授权" : "Revoke"}: <strong>{toolGovernanceDelta.revokeTools.length}</strong></span>
-                  <span>{lang === "zh" ? "禁用变化" : "Block changes"}: <strong>{toolGovernanceDelta.blockTools.length + toolGovernanceDelta.unblockTools.length}</strong></span>
-                </div>
-                <div className={styles.governanceEditorGrid}>
-                  <label className={styles.field}>
-                    <span>{copy.toolGovernanceReason}</span>
-                    <input
-                      value={toolGovernanceDraft.reason}
-                      placeholder={copy.toolGovernanceReasonPlaceholder}
-                      onChange={(event) => updateToolGovernanceDraft({ reason: event.target.value })}
-                    />
-                  </label>
-                  <label className={styles.field}>
-                    <span>Apply mode</span>
-                    <select
-                      value={toolGovernanceDraft.applyMode}
-                      onChange={(event) => updateToolGovernanceDraft({ applyMode: event.target.value === "review" ? "review" : "auto" })}
-                    >
-                      <option value="auto">{copy.toolGovernanceApplyAuto}</option>
-                      <option value="review">{copy.toolGovernanceApplyReview}</option>
-                    </select>
-                  </label>
-                </div>
+                <p className={styles.policyHint}>
+                  {lang === "zh"
+                    ? "工具治理变更从工具页发起；这里保留最近记录和待审批处理。"
+                    : "Tool governance changes start from the Tools page. Recent records and approvals remain visible here."}
+                </p>
                 <div className={styles.toolGovernanceList}>
                   {(selectedAgent.toolGovernanceRequests ?? []).length ? (
                     (selectedAgent.toolGovernanceRequests ?? []).map((request) => {
@@ -6669,10 +6627,10 @@ export function AgentsRoute() {
                   <button
                     type="button"
                     className={styles.primaryButton}
-                    disabled={!canSubmitToolGovernance || selectedAgentToolGovernanceCreatePending}
-                    onClick={submitToolGovernanceRequest}
+                    onClick={() => navigate(selectedAgentToolConfigRoute)}
                   >
-                    {selectedAgentToolGovernanceCreatePending ? copy.toolGovernanceSubmitting : copy.toolGovernanceSubmit}
+                    <Wrench size={15} />
+                    {lang === "zh" ? "去工具页配置" : "Configure in tools"}
                   </button>
                 </div>
               </section>
@@ -6960,165 +6918,27 @@ export function AgentsRoute() {
                     <p className={styles.panelEyebrow}>{copy.toolPolicyTitle}</p>
                     <h3>{selectedAgent.toolPolicyId || "-"}</h3>
                   </div>
-                  <span className={toolPolicyDirty ? styles.dirtyPill : styles.cleanPill}>
-                    {toolPolicyDirty ? (lang === "zh" ? "未保存" : "Unsaved") : (lang === "zh" ? "已同步" : "Synced")}
-                  </span>
+                  <Wrench size={16} />
                 </div>
                 <div className={styles.policySummaryGrid}>
-                  <span>{copy.allowedTools}: <strong>{toolPolicyDraft.allowedTools.length}</strong></span>
-                  <span>{copy.preferredTools}: <strong>{toolPolicyDraft.preferredTools.length}</strong></span>
-                  <span>{copy.blockedTools}: <strong>{toolPolicyDraft.blockedTools.length}</strong></span>
-                  <span>{copy.inheritedTools}: <strong>{Math.max(0, visiblePolicyTools.length - toolPolicyDraft.allowedTools.length - toolPolicyDraft.blockedTools.length)}</strong></span>
-                  <span>{copy.toolCategoryCount}: <strong>{visiblePolicyToolGroups.length}</strong></span>
+                  <span>{copy.allowedTools}: <strong>{selectedAgent.toolPolicy?.allowedTools?.length ?? 0}</strong></span>
+                  <span>{copy.preferredTools}: <strong>{selectedAgent.toolPolicy?.preferredTools?.length ?? 0}</strong></span>
+                  <span>{copy.blockedTools}: <strong>{selectedAgent.toolPolicy?.blockedTools?.length ?? 0}</strong></span>
+                  <span>{copy.toolCategoryCount}: <strong>{toolBundles.length}</strong></span>
                 </div>
-                <section className={styles.capabilityPreviewPanel}>
-                  <div>
-                    <span>{copy.capabilityPreviewTitle}</span>
-                    <small>{copy.capabilityPreviewHint}</small>
-                  </div>
-                  <strong>{copy.effectiveAllowedTools}: {capabilityPreview.effectiveAllowed}</strong>
-                  <strong>{copy.preferredTools}: {capabilityPreview.preferred}</strong>
-                  <strong>{copy.blockedTools}: {capabilityPreview.blocked}</strong>
-                  <strong>{copy.inheritedTools}: {capabilityPreview.inherited}</strong>
-                  <strong>{copy.highRiskAllowedTools}: {capabilityPreview.highRiskAllowed}</strong>
-                  <strong>{copy.explicitAllowedTools}: {capabilityPreview.explicitAllowed}</strong>
-                  <strong>{copy.writeBoundaryPreview}: {capabilityPreview.writeBoundaryLabel}</strong>
-                </section>
-                <section className={styles.workspaceScopePanel}>
-                  <div>
-                    <span>{copy.workspaceWriteScopes}</span>
-                    <strong>{toolPolicyDraft.writeScopes.includes("shared") ? copy.sharedWriteScope : copy.privateWriteScope}</strong>
-                    <small>{copy.sharedWriteHint}</small>
-                  </div>
-                  <label className={styles.checkField}>
-                    <input type="checkbox" checked disabled />
-                    <span>{copy.privateWriteScope}</span>
-                  </label>
-                  <label className={styles.checkField}>
-                    <input
-                      type="checkbox"
-                      checked={toolPolicyDraft.writeScopes.includes("shared")}
-                      onChange={(event) => toggleToolPolicyScope("writeScopes", "shared", event.target.checked)}
-                    />
-                    <span>{copy.sharedWriteScope}</span>
-                  </label>
-                </section>
-                {toolBundles.length ? (
-                  <section className={styles.toolBundlePanel}>
-                    <div className={styles.toolBundlePanelHeader}>
-                      <div>
-                        <strong>{copy.toolBundlesTitle}</strong>
-                        <span>{copy.toolBundlesHint}</span>
-                      </div>
-                    </div>
-                    <div className={styles.toolBundleList}>
-                      {toolBundles.map((bundle) => (
-                        <div key={bundle.bundleId} className={styles.toolBundleItem}>
-                          <span>
-                            <strong>{bundle.label}</strong>
-                            <small>{toolBundleMeta(bundle, lang)}</small>
-                          </span>
-                          <p>{bundle.description}</p>
-                          <div className={styles.toolBundleActions}>
-                            <button type="button" className={styles.secondaryButton} onClick={() => applyToolBundle(bundle, "merge")}>
-                              {copy.applyBundle}
-                            </button>
-                            <button type="button" className={styles.secondaryButton} onClick={() => applyToolBundle(bundle, "replace")}>
-                              {copy.replaceWithBundle}
-                            </button>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </section>
-                ) : null}
-                <label className={styles.searchBox}>
-                  <Search size={15} />
-                  <input value={toolSearchText} placeholder={copy.toolSearch} onChange={(event) => setToolSearchText(event.target.value)} />
-                </label>
-                {visiblePolicyTools.length ? (
-                  <div className={styles.toolPermissionList}>
-                    {visiblePolicyToolGroups.map((group) => (
-                      <section key={group.category} className={styles.toolPermissionGroup}>
-                        <header className={styles.toolPermissionGroupHeader}>
-                          <div>
-                            <strong>{group.label}</strong>
-                            <span>
-                              {group.tools.length} tools · {copy.allowedTools} {group.allowedCount} · {copy.blockedTools} {group.blockedCount} · {copy.inheritedTools} {group.inheritedCount}
-                            </span>
-                          </div>
-                          {group.highRiskCount ? (
-                            <small>{copy.toolHighRisk} {group.highRiskCount}</small>
-                          ) : null}
-                        </header>
-                        <div className={styles.toolPermissionGroupList}>
-                          {group.tools.map((tool) => {
-                            const mode = toolPolicyMode(toolPolicyDraft, tool.name);
-                            const sessionRequiredTool = isSessionRequiredTool(tool.name, selectedAgent);
-                            const tags = [...(tool.capabilityTags ?? []), ...(tool.riskTags ?? [])].slice(0, 4);
-                            return (
-                              <div key={`${tool.source}:${tool.id}`} className={styles.toolPermissionRow}>
-                                <span>
-                                  <strong>{tool.name}</strong>
-                                  <small>{tool.description || tool.source}</small>
-                                  <span className={styles.toolPermissionMeta}>
-                                    <em>{toolTierLabel(tool.permissionTier, lang)}</em>
-                                    <small>{toolCategoryLabel(tool.category, tool.categoryLabel, lang)}</small>
-                                    {sessionRequiredTool ? <small>{lang === "zh" ? "会话必备，不可移除" : "Required for sessions"}</small> : null}
-                                    {tags.length ? <small>{copy.toolTags}: {tags.join(" / ")}</small> : null}
-                                  </span>
-                                </span>
-                                <div className={styles.segmentedControl} aria-label={tool.name}>
-                                  <button
-                                    type="button"
-                                    className={mode === "inherited" || mode === "excluded" ? styles.segmentActive : styles.segmentButton}
-                                    disabled={sessionRequiredTool}
-                                    onClick={() => updateToolPolicyMode(tool.name, "inherited")}
-                                  >
-                                    {toolPolicyModeLabel(mode === "excluded" ? "excluded" : "inherited", lang)}
-                                  </button>
-                                  <button
-                                    type="button"
-                                    className={mode === "allowed" ? styles.segmentActive : styles.segmentButton}
-                                    onClick={() => updateToolPolicyMode(tool.name, "allowed")}
-                                  >
-                                    {toolPolicyModeLabel("allowed", lang)}
-                                  </button>
-                                  <button
-                                    type="button"
-                                    className={mode === "blocked" ? styles.segmentActiveDanger : styles.segmentButton}
-                                    disabled={sessionRequiredTool}
-                                    onClick={() => updateToolPolicyMode(tool.name, "blocked")}
-                                  >
-                                    {toolPolicyModeLabel("blocked", lang)}
-                                  </button>
-                                </div>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      </section>
-                    ))}
-                  </div>
-                ) : (
-                  <p className={styles.emptyText}>{copy.noTools}</p>
-                )}
+                <p className={styles.contextLine}>
+                  {lang === "zh"
+                    ? "工具能力已迁移到 Agent 管理的工具页集中配置；这里保留当前 Agent 的工具摘要和入口。"
+                    : "Tool permissions are configured in the Agent Tools page. This panel keeps only the current Agent summary and entry point."}
+                </p>
                 <div className={styles.editorActions}>
                   <button
                     type="button"
-                    className={styles.secondaryButton}
-                    disabled={!toolPolicyDirty || selectedAgentToolPolicyPending}
-                    onClick={() => setToolPolicyDraft(toolPolicyDraftFromAgent(selectedAgent))}
-                  >
-                    {copy.resetConfig}
-                  </button>
-                  <button
-                    type="button"
                     className={styles.primaryButton}
-                    disabled={!canSaveToolPolicy || selectedAgentToolPolicyPending}
-                    onClick={saveToolPolicy}
+                    onClick={() => navigate(selectedAgentToolConfigRoute)}
                   >
-                    {selectedAgentToolPolicyPending ? copy.savingToolPolicy : copy.saveToolPolicy}
+                    <Wrench size={15} />
+                    {lang === "zh" ? "配置工具能力" : "Configure tools"}
                   </button>
                 </div>
               </section>

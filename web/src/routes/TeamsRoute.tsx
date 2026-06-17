@@ -99,6 +99,27 @@ type TeamsRouteProps = {
   sourceCollectionStandalone?: boolean;
 };
 
+type TeamWorkflowKnowledgeIngestionPrecheckPayload = {
+  candidate: TeamWorkflowCandidate;
+  validation: { valid: boolean; issues: Array<Record<string, unknown>> };
+  precheck: {
+    status: string;
+    generatedByAgent: string;
+    selectedCandidateCount: number;
+    filteredCandidateCount?: number;
+    candidateIds?: string[];
+    candidateGraphId?: string;
+    officialBoundary: {
+      writesOfficialKnowledge: boolean;
+      writesOfficialRag: boolean;
+      writesOfficialGraph: boolean;
+      requiresReviewBeforeOfficialSync?: boolean;
+    };
+  };
+  status: TeamWorkflowKnowledgeIngestionStatus;
+  workflow: TeamWorkflowOrchestration;
+};
+
 const RESEARCH_WORKSPACE_NAV_ITEMS: Array<{
   view: ResearchStageWorkspaceView;
   zh: string;
@@ -2886,6 +2907,7 @@ export function TeamsRoute({
   const sourceCollectionAgentIds = useMemo(() => sourceCollectionAgentIdsFromCanvas(canvas), [canvas]);
   const sourceCollectionOwnerAgentId = useMemo(() => sourceCollectionOwnerAgentIdFromCanvas(canvas), [canvas]);
   const sourceCollectionQualityAgentId = sourceCollectionAgentIds.source_quality || sourceCollectionOwnerAgentId || "Source Quality Assessment Agent";
+  const sourceCollectionKnowledgeStewardAgentId = sourceCollectionAgentIds.knowledge_steward || sourceCollectionOwnerAgentId || "Knowledge Steward Agent";
   const researchStageAgentBindingsByStage = useMemo(() => {
     const roleBindings = new Map<string, { agentId: string; label: string; source: "canvas" | "member" | "fallback" }>();
 
@@ -3529,20 +3551,44 @@ export function TeamsRoute({
   });
 
   const buildCandidateGraphMutation = useMutation({
-    mutationFn: (teamId: string) =>
-      fetchJson<TeamWorkflowCandidateGraphBuildPayload>(`/api/teams/${encodeURIComponent(teamId)}/workflow-orchestration/candidate-graph`, {
+    mutationFn: (variables: { teamId: string; title?: string; createdByAgent?: string; curationMode?: string }) =>
+      fetchJson<TeamWorkflowCandidateGraphBuildPayload>(`/api/teams/${encodeURIComponent(variables.teamId)}/workflow-orchestration/candidate-graph`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          title: "Candidate graph preview",
-          createdByAgent: "Candidate Graph Preview Agent",
+          title: variables.title || "Agent curated candidate graph",
+          createdByAgent: variables.createdByAgent || "Candidate Graph Preview Agent",
+          curationMode: variables.curationMode || "",
         }),
       }),
-    onSuccess: (payload, teamId) => {
-      queryClient.setQueryData(queryKeys.teamWorkflow(teamId), payload.workflow);
-      void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflowCandidates(teamId, TEAM_WORKFLOW_CANDIDATE_PREVIEW_LIMIT) });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflowCandidateGraph(teamId) });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflowKnowledgeIngestionStatus(teamId) });
+    onSuccess: (payload, variables) => {
+      queryClient.setQueryData(queryKeys.teamWorkflow(variables.teamId), payload.workflow);
+      void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflowCandidates(variables.teamId, TEAM_WORKFLOW_CANDIDATE_PREVIEW_LIMIT) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflowCandidateGraph(variables.teamId) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflowKnowledgeIngestionStatus(variables.teamId) });
+    },
+  });
+
+  const runKnowledgeIngestionPrecheckMutation = useMutation({
+    mutationFn: (variables: { teamId: string; stewardAgentId: string; targetDomain?: string; maxCandidates?: number }) =>
+      fetchJson<TeamWorkflowKnowledgeIngestionPrecheckPayload>(
+        `/api/teams/${encodeURIComponent(variables.teamId)}/workflow-orchestration/knowledge-ingestion/precheck`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            stewardAgentId: variables.stewardAgentId,
+            targetDomain: variables.targetDomain || sourceCollectionDraft.topic || "神经机制启发神经网络算法",
+            maxCandidates: variables.maxCandidates || 32,
+          }),
+        },
+      ),
+    onSuccess: (payload, variables) => {
+      queryClient.setQueryData(queryKeys.teamWorkflow(variables.teamId), payload.workflow);
+      queryClient.setQueryData(queryKeys.teamWorkflowKnowledgeIngestionStatus(variables.teamId), payload.status);
+      void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflowCandidates(variables.teamId, TEAM_WORKFLOW_CANDIDATE_PREVIEW_LIMIT) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflowKnowledgeIngestionStatus(variables.teamId) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflowCoordinationStatus(variables.teamId) });
     },
   });
 
@@ -6849,10 +6895,17 @@ export function TeamsRoute({
     && !selectedTeamExecuteSourceCollectionSearchPending,
   );
   const selectedTeamBuildCandidateGraphPending =
-    buildCandidateGraphMutation.isPending && buildCandidateGraphMutation.variables === selectedTeam?.teamId;
+    buildCandidateGraphMutation.isPending && buildCandidateGraphMutation.variables?.teamId === selectedTeam?.teamId;
   const selectedTeamBuildCandidateGraphError =
-    buildCandidateGraphMutation.variables === selectedTeam?.teamId && buildCandidateGraphMutation.error instanceof Error
+    buildCandidateGraphMutation.variables?.teamId === selectedTeam?.teamId && buildCandidateGraphMutation.error instanceof Error
       ? buildCandidateGraphMutation.error
+      : null;
+  const selectedTeamKnowledgePrecheckPending =
+    runKnowledgeIngestionPrecheckMutation.isPending && runKnowledgeIngestionPrecheckMutation.variables?.teamId === selectedTeam?.teamId;
+  const selectedTeamKnowledgePrecheckError =
+    runKnowledgeIngestionPrecheckMutation.variables?.teamId === selectedTeam?.teamId
+    && runKnowledgeIngestionPrecheckMutation.error instanceof Error
+      ? runKnowledgeIngestionPrecheckMutation.error
       : null;
   const selectedTeamPlanPaperNoteChunksPending =
     planPaperNoteChunksMutation.isPending && planPaperNoteChunksMutation.variables?.teamId === selectedTeam?.teamId;
@@ -6885,7 +6938,8 @@ export function TeamsRoute({
     || sourceCollectionAcceptedBackgroundActive
     || selectedTeamRecordSourceCollectionOutputPending
     || selectedTeamSourceQualityPending
-    || selectedTeamBuildCandidateGraphPending,
+    || selectedTeamBuildCandidateGraphPending
+    || selectedTeamKnowledgePrecheckPending,
   );
   const sourceCollectionOperationFailed = Boolean(
     sourceCollectionRunStatusValue === "failed"
@@ -6896,12 +6950,15 @@ export function TeamsRoute({
     || selectedTeamExecuteSourceCollectionSearchError
     || selectedTeamRecordSourceCollectionOutputError
     || selectedTeamSourceQualityError
-    || selectedTeamBuildCandidateGraphError,
+    || selectedTeamBuildCandidateGraphError
+    || selectedTeamKnowledgePrecheckError,
   );
   const candidateGraphNodeCount = teamWorkflowCandidateGraph?.summary.nodeCount ?? 0;
   const candidateGraphEdgeCount = teamWorkflowCandidateGraph?.summary.edgeCount ?? 0;
+  const knowledgeStewardPackCount = teamWorkflowKnowledgeIngestionStatus?.summary.stewardPackCandidateCount ?? 0;
   const knowledgePendingReviewCount = teamWorkflowKnowledgeIngestionStatus?.summary.pendingKnowledgeReviewCandidateCount ?? 0;
   const formalKnowledgeItemCount = teamWorkflowKnowledgeIngestionStatus?.summary.formalKnowledgeItemCount ?? 0;
+  const sourceCollectionPrecheckCandidateCount = Math.max(sourceCollectionApprovedCount, sourceCollectionRunApprovedCount);
   const sourceCollectionScreeningDisabled = !selectedTeam?.teamId || sourceCollectionRunCandidateCount <= 0;
   const sourceCollectionScreeningButtonText = selectedTeamSourceQualityPending
     ? (lang === "zh" ? "Agent 筛选中" : "Agent screening")
@@ -7009,18 +7066,28 @@ export function TeamsRoute({
     }
     openSourceCollectionStage("candidate", "results");
   };
-  const refreshSourceCollectionGraph = () => {
-    if (!selectedTeam?.teamId || sourceCollectionRunCandidateCount <= 0 || selectedTeamBuildCandidateGraphPending) {
+  const runSourceCollectionGraphAction = () => {
+    if (!selectedTeam?.teamId || sourceCollectionRunApprovedCount <= 0 || selectedTeamBuildCandidateGraphPending) {
       return;
     }
-    buildCandidateGraphMutation.mutate(selectedTeam.teamId);
+    buildCandidateGraphMutation.mutate({
+      teamId: selectedTeam.teamId,
+      title: "Agent curated candidate graph",
+      createdByAgent: sourceCollectionQualityAgentId,
+      curationMode: "agent_approved_only",
+    });
     openSourceCollectionStage("graph", "results");
   };
-  const refreshSourceCollectionMemoryPrecheck = () => {
-    if (!selectedTeam?.teamId || teamWorkflowKnowledgeIngestionStatusQuery.isFetching) {
+  const runSourceCollectionMemoryPrecheckAction = () => {
+    if (!selectedTeam?.teamId || sourceCollectionPrecheckCandidateCount <= 0 || selectedTeamKnowledgePrecheckPending) {
       return;
     }
-    void teamWorkflowKnowledgeIngestionStatusQuery.refetch();
+    runKnowledgeIngestionPrecheckMutation.mutate({
+      teamId: selectedTeam.teamId,
+      stewardAgentId: sourceCollectionKnowledgeStewardAgentId,
+      targetDomain: sourceCollectionDraft.topic || "神经机制启发神经网络算法",
+      maxCandidates: Math.max(1, Math.min(80, sourceCollectionPrecheckCandidateCount)),
+    });
     openSourceCollectionStage("memory", "results");
   };
   const runSourceCollectionSearchFromHeader = () => {
@@ -7183,16 +7250,16 @@ export function TeamsRoute({
         ? "active"
       : candidateGraphNodeCount > 0
         ? "done"
-        : sourceCollectionRunCandidateCount > 0
+        : sourceCollectionRunApprovedCount > 0
           ? "pending"
           : "idle";
-  const sourceCollectionMemoryStepState: SourceCollectionStepState = teamWorkflowKnowledgeIngestionStatusQuery.error
+  const sourceCollectionMemoryStepState: SourceCollectionStepState = teamWorkflowKnowledgeIngestionStatusQuery.error || selectedTeamKnowledgePrecheckError
     ? "failed"
-    : teamWorkflowKnowledgeIngestionStatusQuery.isFetching
+    : teamWorkflowKnowledgeIngestionStatusQuery.isFetching || selectedTeamKnowledgePrecheckPending
       ? "active"
-      : formalKnowledgeItemCount > 0
+      : formalKnowledgeItemCount > 0 || knowledgePendingReviewCount > 0 || knowledgeStewardPackCount > 0
         ? "done"
-        : knowledgePendingReviewCount > 0 || sourceCollectionApprovedCount > 0
+        : sourceCollectionPrecheckCandidateCount > 0
           ? "pending"
           : "idle";
   const sourceCollectionCollectionActionLabel = !selectedSourceCollectionRun
@@ -7282,46 +7349,50 @@ export function TeamsRoute({
       metric: lang === "zh" ? `节点 ${candidateGraphNodeCount} · 关系 ${candidateGraphEdgeCount}` : `${candidateGraphNodeCount} nodes · ${candidateGraphEdgeCount} edges`,
       summary: candidateGraphNodeCount > 0
         ? (lang === "zh" ? "关系快照已生成" : "Graph snapshot ready")
-        : sourceCollectionRunCandidateCount > 0
-          ? (lang === "zh" ? "可生成候选关系" : "Can build candidate links")
-          : (lang === "zh" ? "先有候选资料" : "Needs candidates first"),
-      inputLabel: lang === "zh" ? `${sourceCollectionRunCandidateCount} 条候选` : `${sourceCollectionRunCandidateCount} candidates`,
+        : sourceCollectionRunApprovedCount > 0
+          ? (lang === "zh" ? "可由 Agent 生成关系" : "Agent can build links")
+          : (lang === "zh" ? "先完成资料筛选" : "Screen candidates first"),
+      inputLabel: lang === "zh" ? `${sourceCollectionRunApprovedCount} 条通过候选` : `${sourceCollectionRunApprovedCount} approved candidates`,
       outputLabel: lang === "zh" ? `${candidateGraphNodeCount} 节点 / ${candidateGraphEdgeCount} 关系` : `${candidateGraphNodeCount} nodes / ${candidateGraphEdgeCount} edges`,
-      nextLabel: lang === "zh" ? "检查共享记忆前审" : "Check memory precheck",
+      nextLabel: lang === "zh" ? "生成共享记忆前审包" : "Generate memory precheck pack",
       state: sourceCollectionGraphStepState,
       status: sourceCollectionStepStatusText(sourceCollectionGraphStepState),
       detailLabel: lang === "zh" ? "查看图谱详情" : "View graph details",
-      actionLabel: selectedTeamBuildCandidateGraphPending ? (lang === "zh" ? "生成中" : "Building") : (lang === "zh" ? "刷新图谱" : "Refresh"),
-      actionDisabled: !selectedTeam?.teamId || sourceCollectionRunCandidateCount <= 0 || selectedTeamBuildCandidateGraphPending,
-      actionTone: "secondary",
-      actionIcon: "refresh",
-      onAction: refreshSourceCollectionGraph,
+      actionLabel: selectedTeamBuildCandidateGraphPending ? (lang === "zh" ? "Agent 生成中" : "Agent building") : (lang === "zh" ? "Agent 生成图谱" : "Agent build graph"),
+      actionDisabled: !selectedTeam?.teamId || sourceCollectionRunApprovedCount <= 0 || selectedTeamBuildCandidateGraphPending,
+      actionTone: "primary",
+      actionIcon: "play",
+      onAction: runSourceCollectionGraphAction,
       onDetail: () => openSourceCollectionStage("graph", "results"),
     },
     {
       id: "memory",
       label: lang === "zh" ? "共享记忆前审" : "Memory precheck",
-      metric: lang === "zh" ? `待审 ${knowledgePendingReviewCount} · 正式 ${formalKnowledgeItemCount}` : `${knowledgePendingReviewCount} review · ${formalKnowledgeItemCount} formal`,
+      metric: lang === "zh" ? `前审包 ${knowledgeStewardPackCount} · 正式 ${formalKnowledgeItemCount}` : `${knowledgeStewardPackCount} packs · ${formalKnowledgeItemCount} formal`,
       summary: formalKnowledgeItemCount > 0
         ? (lang === "zh" ? "正式知识已同步" : "Formal knowledge synced")
+        : knowledgeStewardPackCount > 0
+          ? (lang === "zh" ? "前审包已生成" : "Precheck pack ready")
         : knowledgePendingReviewCount > 0
           ? (lang === "zh" ? "有待审入库对象" : "Review items pending")
-          : sourceCollectionApprovedCount > 0
-            ? (lang === "zh" ? "可检查入库门槛" : "Ready to check the gate")
+          : sourceCollectionPrecheckCandidateCount > 0
+            ? (lang === "zh" ? "可由 Agent 完成前审" : "Agent can precheck")
             : (lang === "zh" ? "等筛选通过后前审" : "Precheck after approval"),
-      inputLabel: lang === "zh" ? `${sourceCollectionRunApprovedCount} 条通过候选` : `${sourceCollectionRunApprovedCount} approved candidates`,
-      outputLabel: lang === "zh" ? `${knowledgePendingReviewCount} 待审 / ${formalKnowledgeItemCount} 正式` : `${knowledgePendingReviewCount} pending / ${formalKnowledgeItemCount} formal`,
+      inputLabel: lang === "zh" ? `${sourceCollectionPrecheckCandidateCount} 条通过候选` : `${sourceCollectionPrecheckCandidateCount} approved candidates`,
+      outputLabel: lang === "zh" ? `${knowledgeStewardPackCount} 个前审包 / ${formalKnowledgeItemCount} 正式` : `${knowledgeStewardPackCount} packs / ${formalKnowledgeItemCount} formal`,
       nextLabel: formalKnowledgeItemCount > 0
         ? (lang === "zh" ? "进入实验规划" : "Move to experiment planning")
-        : (lang === "zh" ? "等待审核入库" : "Wait for review"),
+        : knowledgeStewardPackCount > 0
+          ? (lang === "zh" ? "等待正式入库门禁" : "Wait for official gate")
+          : (lang === "zh" ? "生成候选前审包" : "Generate candidate precheck pack"),
       state: sourceCollectionMemoryStepState,
       status: sourceCollectionStepStatusText(sourceCollectionMemoryStepState),
       detailLabel: lang === "zh" ? "查看前审详情" : "View precheck details",
-      actionLabel: teamWorkflowKnowledgeIngestionStatusQuery.isFetching ? (lang === "zh" ? "检查中" : "Checking") : (lang === "zh" ? "检查前审" : "Check"),
-      actionDisabled: !selectedTeam?.teamId || teamWorkflowKnowledgeIngestionStatusQuery.isFetching,
-      actionTone: "secondary",
-      actionIcon: "refresh",
-      onAction: refreshSourceCollectionMemoryPrecheck,
+      actionLabel: selectedTeamKnowledgePrecheckPending ? (lang === "zh" ? "Agent 前审中" : "Agent prechecking") : (lang === "zh" ? "Agent 完成前审" : "Agent precheck"),
+      actionDisabled: !selectedTeam?.teamId || sourceCollectionPrecheckCandidateCount <= 0 || selectedTeamKnowledgePrecheckPending,
+      actionTone: "primary",
+      actionIcon: "check",
+      onAction: runSourceCollectionMemoryPrecheckAction,
       onDetail: () => openSourceCollectionStage("memory", "results"),
     },
   ];
@@ -8468,13 +8539,18 @@ export function TeamsRoute({
                           </div>
                           <button
                             type="button"
-                            onClick={() => selectedTeam?.teamId && buildCandidateGraphMutation.mutate(selectedTeam.teamId)}
-                            disabled={!selectedTeam?.teamId || selectedTeamBuildCandidateGraphPending}
+                            onClick={() => selectedTeam?.teamId && buildCandidateGraphMutation.mutate({
+                              teamId: selectedTeam.teamId,
+                              title: "Agent curated candidate graph",
+                              createdByAgent: sourceCollectionQualityAgentId,
+                              curationMode: "agent_approved_only",
+                            })}
+                            disabled={!selectedTeam?.teamId || sourceCollectionRunApprovedCount <= 0 || selectedTeamBuildCandidateGraphPending}
                           >
                             <RefreshCw size={13} />
                             {selectedTeamBuildCandidateGraphPending
-                              ? (lang === "zh" ? "生成中" : "Building")
-                              : (lang === "zh" ? "刷新图谱" : "Refresh graph")}
+                              ? (lang === "zh" ? "Agent 生成中" : "Agent building")
+                              : (lang === "zh" ? "Agent 生成图谱" : "Agent build graph")}
                           </button>
                         </div>
                         {teamWorkflowCandidateGraph && teamWorkflowCandidateGraphLayout ? (

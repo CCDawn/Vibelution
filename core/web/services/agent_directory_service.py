@@ -40,42 +40,20 @@ DEFAULT_TOOL_POLICY_ID = "default"
 DEFAULT_MEMORY_POLICY_ID = "private"
 DEFAULT_AGENT_PRIMARY_MODE = "chat"
 DEFAULT_SESSION_AGENT_ALLOWED_TOOLS = (
-    # Codex-like local work loop: use cli_tool for locate/read/search/verify,
-    # then edit through structured mutation tools.
-    "apply_patch_tool",
-    "apply_diff_edit_tool",
-    "write_file_tool",
-    "cli_tool",
-    "cli_agent_run_tool",
-    "python_lint_tool",
-    "run_test_for_tool",
-    # External and media capabilities stay available when the user intent needs them.
-    "web_search_tool",
-    "web_fetch_tool",
-    "image2_generate_tool",
-    # Conversation diagnostics and bounded context are core Agent capabilities.
-    "conversation_log_inspect_tool",
-    "history_search_tool",
-    "history_fetch_tool",
-    "history_timeline_tool",
-    "history_checkpoint_tool",
-    "session_reference_query_tool",
+    "grep_search_tool",
+    "glob_tool",
+    "read_file_tool",
     "get_core_context_tool",
     "get_current_goal_tool",
-    "compress_context_tool",
-    # Lightweight state and repository evidence.
     "task_list_tool",
     "get_git_status_summary_tool",
     "get_recent_changes_tool",
-    "get_entity_history_tool",
-    "explain_current_worktree_tool",
+    "conversation_log_inspect_tool",
 )
 DEFAULT_SESSION_AGENT_PREFERRED_TOOLS = (
-    "cli_tool",
-    "session_reference_query_tool",
+    "grep_search_tool",
+    "read_file_tool",
     "conversation_log_inspect_tool",
-    "history_search_tool",
-    "history_fetch_tool",
     "get_core_context_tool",
 )
 SYSTEM_NO_TOOL_MODES = {"self_evolution", "supervised_evolution"}
@@ -2655,39 +2633,12 @@ def _ensure_session_agent_tool_policy(state: dict[str, Any], agent: dict[str, An
         return False
     policies = _tool_policies(state)
     current_policy_id = str(agent.get("toolPolicyId") or DEFAULT_TOOL_POLICY_ID).strip() or DEFAULT_TOOL_POLICY_ID
-    current_policy = normalize_tool_policy(policies.get(current_policy_id) or default_tool_policy(current_policy_id), current_policy_id)
-    allowed = set(_tool_name_list(current_policy.get("allowedTools") or []))
-    preferred = set(_tool_name_list(current_policy.get("preferredTools") or []))
-    needs_session_defaults = (
-        current_policy_id == DEFAULT_TOOL_POLICY_ID
-        or not allowed
-        or not set(DEFAULT_SESSION_AGENT_ALLOWED_TOOLS).issubset(allowed)
-    )
-    if not needs_session_defaults:
+    policy_missing = current_policy_id not in policies
+    if current_policy_id != DEFAULT_TOOL_POLICY_ID and not policy_missing:
         return False
 
-    private_policy_id = f"tool-{agent_id}"
-    policy_id = current_policy_id if current_policy_id == private_policy_id else private_policy_id
-    merged_allowed = [
-        *list(current_policy.get("allowedTools") or []),
-        *list(DEFAULT_SESSION_AGENT_ALLOWED_TOOLS),
-    ]
-    merged_preferred = [
-        *list(DEFAULT_SESSION_AGENT_PREFERRED_TOOLS),
-        *list(current_policy.get("preferredTools") or []),
-    ]
-    updated = normalize_tool_policy(
-        {
-            **current_policy,
-            "policyId": policy_id,
-            "allowedTools": merged_allowed,
-            "preferredTools": merged_preferred,
-            "readScopes": current_policy.get("readScopes") or ["private", "shared"],
-            "writeScopes": current_policy.get("writeScopes") or ["private"],
-        },
-        policy_id,
-    )
-    policies[policy_id] = updated
+    policy_id = current_policy_id if policy_missing and current_policy_id != DEFAULT_TOOL_POLICY_ID else f"tool-{agent_id}"
+    policies[policy_id] = default_session_agent_tool_policy(policy_id)
     state["toolPolicies"] = policies
     agent["toolPolicyId"] = policy_id
     return True

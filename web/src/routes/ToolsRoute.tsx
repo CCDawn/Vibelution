@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CheckCircle2, CheckSquare, CircleSlash, FlaskConical, Power, RefreshCw, Search, Square, Trash2, Wrench } from "lucide-react";
+import { ArrowLeft, CheckCircle2, CheckSquare, CircleSlash, FlaskConical, Power, RefreshCw, Search, Square, Trash2, Wrench } from "lucide-react";
 import { type CSSProperties, type KeyboardEvent, type PointerEvent, useEffect, useMemo, useState } from "react";
-import { Link, useLocation } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 
 import { fetchJson } from "../api/client";
 import { queryKeys } from "../api/queryKeys";
@@ -23,7 +23,7 @@ import { PaneCollapseHandle } from "../components/layout/PaneCollapseHandle";
 import type { TranslationKey } from "../i18n/dictionary";
 import { useAppI18n } from "../i18n/useAppI18n";
 import { AgentManagementNav } from "./AgentManagementNav";
-import { agentCenterConfigRoute } from "./agentCenterRoutes";
+import { safeAgentCenterReturnToPath } from "./agentCenterRoutes";
 import { clampPaneWidth, keyboardPaneWidth, storedPaneWidth } from "./resizablePane";
 import styles from "./ToolsRoute.module.css";
 
@@ -36,6 +36,25 @@ type ToolBundleGroup = {
   tools: ToolRegistryItem[];
   highRiskToolCount: number;
   explicitAllowToolCount: number;
+};
+type AgentToolPolicyDraft = {
+  allowedTools: string[];
+  preferredTools: string[];
+  blockedTools: string[];
+  readScopes: string[];
+  writeScopes: string[];
+};
+type ToolPolicyDraftMode = "inherited" | "allowed" | "blocked" | "excluded";
+type ToolPermissionGroup = {
+  bundleId: string;
+  label: string;
+  description: string;
+  category: string;
+  tools: ToolRegistryItem[];
+  allowedCount: number;
+  blockedCount: number;
+  inheritedCount: number;
+  highRiskCount: number;
 };
 type ScopedToolTestResult = {
   key: string;
@@ -50,6 +69,16 @@ const TOOLS_LEFT_PANEL_DEFAULT_WIDTH = 350;
 const MAIN_AGENT_SCOPE_ID = "main_agent";
 const IMAGE2_TOOL_NAME = "image2_generate_tool";
 const WEB_SEARCH_TOOL_NAME = "web_search_tool";
+
+function sortedIds(values: string[]) {
+  return Array.from(new Set(values.map((item) => String(item || "").trim()).filter(Boolean))).sort();
+}
+
+function sameStringSet(left: string[], right: string[]) {
+  const leftSorted = sortedIds(left);
+  const rightSorted = sortedIds(right);
+  return leftSorted.length === rightSorted.length && leftSorted.every((value, index) => value === rightSorted[index]);
+}
 
 function displaySource(source: string, lang: string) {
   if (source === "built_in") {
@@ -251,8 +280,240 @@ function defaultToolPolicy(policyId = "default"): ToolPolicy {
   };
 }
 
+function normalizeToolPolicyDraftForAgent(
+  draft: AgentToolPolicyDraft,
+  _agent: AgentInstance | null | undefined,
+): AgentToolPolicyDraft {
+  const blocked = new Set(sortedIds(draft.blockedTools));
+  const allowed = new Set(sortedIds(draft.allowedTools).filter((tool) => !blocked.has(tool)));
+  const preferred = new Set(sortedIds(draft.preferredTools));
+  const allowedTools = sortedIds(Array.from(allowed));
+  const allowedSet = new Set(allowedTools);
+  return {
+    ...draft,
+    allowedTools,
+    preferredTools: sortedIds(Array.from(preferred).filter((tool) => allowedSet.has(tool))),
+    blockedTools: sortedIds(Array.from(blocked)),
+    readScopes: sortedIds(draft.readScopes),
+    writeScopes: sortedIds(draft.writeScopes),
+  };
+}
+
+function toolPolicyDraftFromAgent(agent: AgentInstance | null | undefined): AgentToolPolicyDraft {
+  return normalizeToolPolicyDraftForAgent({
+    allowedTools: sortedIds(agent?.toolPolicy?.allowedTools ?? []),
+    preferredTools: sortedIds(agent?.toolPolicy?.preferredTools ?? []),
+    blockedTools: sortedIds(agent?.toolPolicy?.blockedTools ?? []),
+    readScopes: sortedIds(agent?.toolPolicy?.readScopes ?? []),
+    writeScopes: sortedIds(agent?.toolPolicy?.writeScopes ?? []),
+  }, agent);
+}
+
+function toolPolicyDraftEqualsAgent(draft: AgentToolPolicyDraft, agent: AgentInstance | null | undefined) {
+  const base = toolPolicyDraftFromAgent(agent);
+  return (
+    sameStringSet(draft.allowedTools, base.allowedTools)
+    && sameStringSet(draft.preferredTools, base.preferredTools)
+    && sameStringSet(draft.blockedTools, base.blockedTools)
+    && sameStringSet(draft.readScopes, base.readScopes)
+    && sameStringSet(draft.writeScopes, base.writeScopes)
+  );
+}
+
 function toolPolicyForAgent(agent: AgentInstance | null | undefined): ToolPolicy {
   return agent?.toolPolicy ?? defaultToolPolicy(agent?.toolPolicyId || "default");
+}
+
+function policyDraftMode(draft: AgentToolPolicyDraft, toolName: string): ToolPolicyDraftMode {
+  if (draft.blockedTools.includes(toolName)) {
+    return "blocked";
+  }
+  if (draft.allowedTools.includes(toolName)) {
+    return "allowed";
+  }
+  if (draft.allowedTools.length > 0) {
+    return "excluded";
+  }
+  return "inherited";
+}
+
+function policyDraftModeLabel(mode: ToolPolicyDraftMode, lang: string) {
+  const zh = {
+    inherited: "未允许",
+    allowed: "允许",
+    blocked: "禁用",
+    excluded: "未列入",
+  };
+  const en = {
+    inherited: "Not allowed",
+    allowed: "Allowed",
+    blocked: "Blocked",
+    excluded: "Excluded",
+  };
+  return (lang === "zh" ? zh : en)[mode];
+}
+
+function toolCategoryLabel(category: string, fallback: string | undefined, lang: string) {
+  const normalized = String(category || "").trim();
+  const zh: Record<string, string> = {
+    workspace_read: "工作区读取",
+    workspace_write: "工作区保存",
+    code_quality: "代码质量",
+    web_research: "网络与检索",
+    git_evolution: "Git 与进化",
+    task_runtime: "任务运行",
+    agent_collaboration: "Agent 协作",
+    memory_context: "记忆与上下文",
+    self_model: "自我模型",
+    media_research: "媒体与科研",
+    custom_generated: "自定义工具",
+    uncategorized: "未分类",
+  };
+  const en: Record<string, string> = {
+    workspace_read: "Workspace read",
+    workspace_write: "Workspace write",
+    code_quality: "Code quality",
+    web_research: "Web and research",
+    git_evolution: "Git and evolution",
+    task_runtime: "Task runtime",
+    agent_collaboration: "Agent collaboration",
+    memory_context: "Memory and context",
+    self_model: "Self model",
+    media_research: "Media and research",
+    custom_generated: "Custom tools",
+    uncategorized: "Uncategorized",
+  };
+  return ((lang === "zh" ? zh : en)[normalized] ?? fallback ?? normalized) || (lang === "zh" ? "未分类" : "Uncategorized");
+}
+
+function toolTierLabel(tier: string, lang: string) {
+  const normalized = String(tier || "").trim();
+  const zh: Record<string, string> = {
+    low: "低风险",
+    medium: "中风险",
+    high: "高风险",
+    generated: "自定义",
+  };
+  const en: Record<string, string> = {
+    low: "Low risk",
+    medium: "Medium risk",
+    high: "High risk",
+    generated: "Generated",
+  };
+  return ((lang === "zh" ? zh : en)[normalized] ?? normalized) || "-";
+}
+
+function toolBundleMeta(bundle: ToolBundle, lang: string) {
+  const parts = [
+    lang === "zh" ? `${bundle.toolCount} 个工具` : `${bundle.toolCount} tools`,
+    lang === "zh" ? `${bundle.preferredToolCount} 个优先` : `${bundle.preferredToolCount} preferred`,
+  ];
+  if (bundle.highRiskToolCount > 0) {
+    parts.push(lang === "zh" ? `${bundle.highRiskToolCount} 个高风险` : `${bundle.highRiskToolCount} high risk`);
+  }
+  if (bundle.explicitAllowToolCount > 0) {
+    parts.push(lang === "zh" ? `${bundle.explicitAllowToolCount} 个需显式授权` : `${bundle.explicitAllowToolCount} explicit allow`);
+  }
+  return parts.join(" · ");
+}
+
+function groupPolicyToolsByBundle(
+  tools: ToolRegistryItem[],
+  bundles: ToolBundle[],
+  draft: AgentToolPolicyDraft,
+  lang: string,
+): ToolPermissionGroup[] {
+  const toolByName = new Map(tools.map((tool) => [tool.name, tool]));
+  const groups: ToolPermissionGroup[] = [];
+  const pushedToolKeys = new Set<string>();
+  const pushTool = (group: ToolPermissionGroup, tool: ToolRegistryItem) => {
+    const mode = policyDraftMode(draft, tool.name);
+    group.tools.push(tool);
+    if (mode === "allowed") {
+      group.allowedCount += 1;
+    } else if (mode === "blocked") {
+      group.blockedCount += 1;
+    } else {
+      group.inheritedCount += 1;
+    }
+    if (tool.permissionTier === "high" || tool.permissionPolicy?.requiresExplicitAllow) {
+      group.highRiskCount += 1;
+    }
+  };
+
+  for (const bundle of bundles) {
+    const group: ToolPermissionGroup = {
+      bundleId: bundle.bundleId,
+      label: bundle.label,
+      description: bundle.description,
+      category: bundle.category,
+      tools: [],
+      allowedCount: 0,
+      blockedCount: 0,
+      inheritedCount: 0,
+      highRiskCount: 0,
+    };
+    for (const toolName of bundle.toolNames) {
+      const tool = toolByName.get(toolName);
+      if (!tool) {
+        continue;
+      }
+      pushedToolKeys.add(tool.name);
+      pushTool(group, tool);
+    }
+    if (group.tools.length) {
+      groups.push(group);
+    }
+  }
+
+  const unbundled: ToolPermissionGroup = {
+    bundleId: "unbundled",
+    label: lang === "zh" ? "未归入工具包" : "Unbundled tools",
+    description: lang === "zh" ? "这些工具暂未归入任何工具包，建议单独审查后再授权。" : "Tools not yet assigned to a package. Review them individually before allowing them.",
+    category: "unbundled",
+    tools: [],
+    allowedCount: 0,
+    blockedCount: 0,
+    inheritedCount: 0,
+    highRiskCount: 0,
+  };
+  for (const tool of tools) {
+    if (!pushedToolKeys.has(tool.name)) {
+      pushTool(unbundled, tool);
+    }
+  }
+  if (unbundled.tools.length) {
+    groups.push(unbundled);
+  }
+
+  return groups.sort((left, right) => {
+    const leftTouched = left.allowedCount + left.blockedCount;
+    const rightTouched = right.allowedCount + right.blockedCount;
+    if (leftTouched !== rightTouched) {
+      return rightTouched - leftTouched;
+    }
+    return left.label.localeCompare(right.label);
+  });
+}
+
+function buildAgentCapabilityPreview(draft: AgentToolPolicyDraft, tools: ToolRegistryItem[], lang: string) {
+  const allowed = new Set(draft.allowedTools);
+  const blocked = new Set(draft.blockedTools);
+  const inherited = Math.max(0, tools.length - allowed.size - blocked.size);
+  const effectiveAllowed = allowed.size;
+  const highRiskAllowed = tools.filter((tool) => allowed.has(tool.name) && (tool.permissionTier === "high" || tool.permissionPolicy?.requiresExplicitAllow)).length;
+  const explicitAllowed = tools.filter((tool) => allowed.has(tool.name) && tool.permissionPolicy?.requiresExplicitAllow).length;
+  return {
+    effectiveAllowed,
+    preferred: draft.preferredTools.length,
+    blocked: draft.blockedTools.length,
+    inherited,
+    highRiskAllowed,
+    explicitAllowed,
+    writeBoundaryLabel: draft.writeScopes.includes("shared")
+      ? lang === "zh" ? "私人与共享" : "Private and shared"
+      : lang === "zh" ? "仅私人" : "Private only",
+  };
 }
 
 function toolPolicyModeCounts(policy: ToolPolicy, tools: ToolRegistryItem[]) {
@@ -287,14 +548,14 @@ function toolPolicyMode(policy: ToolPolicy, tool: ToolRegistryItem | string): To
 
 function toolPolicyModeLabel(mode: ToolPolicyMode, lang: string) {
   const zh = {
-    inherited: "跟随默认",
+    inherited: "未允许",
     explicit_required: "需显式授权",
     allowed: "允许清单",
     blocked: "禁用",
     excluded: "未在允许清单",
   };
   const en = {
-    inherited: "Default",
+    inherited: "Not allowed",
     explicit_required: "Explicit allow required",
     allowed: "Allow-list",
     blocked: "Blocked",
@@ -512,13 +773,15 @@ function optimisticToolEnabled(tool: ToolRegistryItem, enabled: boolean): ToolRe
 
 export function ToolsRoute() {
   const { lang, t } = useAppI18n();
-  const location = useLocation();
+  const [searchParams] = useSearchParams();
   const bulkCopy = useMemo(() => toolsBulkCopy(lang), [lang]);
   const queryClient = useQueryClient();
   const [activeFilter, setActiveFilter] = useState<ToolFilter>("all");
   const [searchText, setSearchText] = useState("");
+  const [toolPolicySearchText, setToolPolicySearchText] = useState("");
   const [activeAgentScopeId, setActiveAgentScopeId] = useState(MAIN_AGENT_SCOPE_ID);
   const [activePolicyAgentId, setActivePolicyAgentId] = useState("");
+  const [toolPolicyDraft, setToolPolicyDraft] = useState<AgentToolPolicyDraft>(() => toolPolicyDraftFromAgent(null));
   const [activeToolId, setActiveToolId] = useState<string | null>(null);
   const [leftPanelWidth, setLeftPanelWidth] = useState(() =>
     storedPaneWidth(TOOLS_LEFT_PANEL_WIDTH_KEY, TOOLS_LEFT_PANEL_DEFAULT_WIDTH, TOOLS_LEFT_PANEL_BOUNDS),
@@ -532,6 +795,15 @@ export function ToolsRoute() {
   });
   const [testResult, setTestResult] = useState<ScopedToolTestResult | null>(null);
   const pageVisible = usePageVisibility();
+  const requestedAgentId = useMemo(() => String(searchParams.get("agent") || "").trim(), [searchParams]);
+  const returnToPath = useMemo(() => safeAgentCenterReturnToPath(searchParams.get("returnTo")), [searchParams]);
+  const returnToLabel = useMemo(() => {
+    const normalized = String(searchParams.get("returnLabel") || "").trim();
+    if (normalized === "agents") {
+      return lang === "zh" ? "返回 Agent 配置" : "Back to Agent config";
+    }
+    return lang === "zh" ? "返回来源页" : "Back";
+  }, [lang, searchParams]);
 
   const toolsQuery = useQuery({
     queryKey: queryKeys.tools(),
@@ -604,14 +876,12 @@ export function ToolsRoute() {
   );
   const allVisibleToolsSelected = visibleTools.length > 0 && selectedTools.length === visibleTools.length;
   const activeTool = tools.find((tool) => tool.id === activeToolId) ?? visibleTools[0] ?? null;
-  const agentPolicyWorkspaceNeeded = Boolean(activeTool);
   const activeToolBundleLabels = activeTool ? bundleLabelsForTool(activeTool, toolBundles, lang) : [];
   const activeScopeState = activeTool ? scopeStateForTool(activeTool, activeAgentScope.id) : null;
 
   const agentsQuery = useQuery({
     queryKey: queryKeys.agents(),
     queryFn: () => fetchJson<AgentInstance[]>("/api/agents?detail=summary"),
-    enabled: agentPolicyWorkspaceNeeded,
     staleTime: 30_000,
     refetchInterval: false,
     refetchIntervalInBackground: false,
@@ -623,19 +893,37 @@ export function ToolsRoute() {
   const activePolicyAgent = activeAgents.find((agent) => agent.agentId === activePolicyAgentId) ?? activeAgents[0] ?? null;
   const activePolicy = toolPolicyForAgent(activePolicyAgent);
   const activePolicyMode = activeTool && activePolicyAgent ? toolPolicyMode(activePolicy, activeTool) : "inherited";
-  const policyModeCounts = useMemo(() => toolPolicyModeCounts(activePolicy, tools), [activePolicy, tools]);
-  const toolsReturnTo = useMemo(
-    () => `${location.pathname}${location.search}${location.hash}`,
-    [location.hash, location.pathname, location.search],
+  const editablePolicyTools = useMemo(() => {
+    const query = toolPolicySearchText.trim().toLowerCase();
+    return tools.filter((tool) => {
+      if (!tool.llmVisible && !tool.runtimeActive) {
+        return false;
+      }
+      if (!query) {
+        return true;
+      }
+      return [
+        tool.name,
+        tool.description,
+        tool.source,
+        tool.status,
+        tool.category,
+        tool.categoryLabel,
+        tool.permissionTier,
+        ...(tool.bundleIds ?? []),
+        ...(tool.capabilityTags ?? []),
+        ...(tool.riskTags ?? []),
+      ].join(" ").toLowerCase().includes(query);
+    });
+  }, [toolPolicySearchText, tools]);
+  const editablePolicyGroups = useMemo(
+    () => groupPolicyToolsByBundle(editablePolicyTools, toolBundles, toolPolicyDraft, lang),
+    [editablePolicyTools, lang, toolBundles, toolPolicyDraft],
   );
-  const activePolicyAgentRoute = useMemo(
-    () => agentCenterConfigRoute({
-      agentId: activePolicyAgent?.agentId,
-      pane: "config",
-      returnLabel: "tools",
-      returnTo: toolsReturnTo,
-    }),
-    [activePolicyAgent?.agentId, toolsReturnTo],
+  const toolPolicyDirty = !toolPolicyDraftEqualsAgent(toolPolicyDraft, activePolicyAgent);
+  const capabilityPreview = useMemo(
+    () => buildAgentCapabilityPreview(toolPolicyDraft, editablePolicyTools, lang),
+    [editablePolicyTools, lang, toolPolicyDraft],
   );
   const scopedTools = useMemo(
     () => tools.filter((tool) => scopeStateForTool(tool, activeAgentScopeId).visible),
@@ -661,10 +949,18 @@ export function ToolsRoute() {
       setActivePolicyAgentId("");
       return;
     }
+    if (requestedAgentId && activeAgents.some((agent) => agent.agentId === requestedAgentId) && activePolicyAgentId !== requestedAgentId) {
+      setActivePolicyAgentId(requestedAgentId);
+      return;
+    }
     if (!activePolicyAgentId || !activeAgents.some((agent) => agent.agentId === activePolicyAgentId)) {
       setActivePolicyAgentId(activeAgents[0].agentId);
     }
-  }, [activeAgents, activePolicyAgentId]);
+  }, [activeAgents, activePolicyAgentId, requestedAgentId]);
+
+  useEffect(() => {
+    setToolPolicyDraft(toolPolicyDraftFromAgent(activePolicyAgent));
+  }, [activePolicyAgent?.agentId, activePolicyAgent?.toolPolicy]);
 
   useEffect(() => {
     if (activeToolId && !visibleTools.some((tool) => tool.id === activeToolId)) {
@@ -771,6 +1067,43 @@ export function ToolsRoute() {
     },
   });
 
+  const updateToolPolicyMutation = useMutation({
+    mutationFn: (payload: { agentId: string; draft: AgentToolPolicyDraft; basePolicy: ToolPolicy | undefined }) =>
+      fetchJson<AgentInstance>(`/api/agents/${encodeURIComponent(payload.agentId)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          toolPolicy: {
+            ...defaultToolPolicy(payload.basePolicy?.policyId || "default"),
+            ...(payload.basePolicy ?? {}),
+            allowedTools: sortedIds(payload.draft.allowedTools),
+            preferredTools: sortedIds(payload.draft.preferredTools),
+            blockedTools: sortedIds(payload.draft.blockedTools),
+            readScopes: sortedIds(payload.draft.readScopes),
+            writeScopes: sortedIds(payload.draft.writeScopes),
+          },
+        }),
+      }),
+    onSuccess: (agent) => {
+      queryClient.setQueryData<AgentInstance[] | undefined>(
+        queryKeys.agents(),
+        (current) => current?.map((item) => item.agentId === agent.agentId ? { ...item, ...agent } : item),
+      );
+      setToolPolicyDraft(toolPolicyDraftFromAgent(agent));
+      setNotice({
+        tone: "success",
+        text: lang === "zh"
+          ? `已保存 ${agent.displayName || agent.agentId} 的工具能力`
+          : `Saved tool permissions for ${agent.displayName || agent.agentId}`,
+      });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.agents() });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.tools() });
+    },
+    onError: (error) => {
+      setNotice({ tone: "error", text: error instanceof Error ? error.message : String(error) });
+    },
+  });
+
   const testMutation = useMutation({
     mutationFn: (payload: { toolId: string; agentScopeId: string; agentId: string }) =>
       fetchJson<ToolTestResponse>(`/api/tools/${encodeURIComponent(payload.toolId)}/test`, {
@@ -827,6 +1160,7 @@ export function ToolsRoute() {
     testMutation.variables?.agentScopeId,
     testMutation.variables?.agentId,
   ) === activeToolTestKey;
+  const activePolicyAgentPending = updateToolPolicyMutation.isPending && updateToolPolicyMutation.variables?.agentId === activePolicyAgent?.agentId;
   const activeCanDelete = Boolean(activeTool?.deleteAllowed) && !activeToolDeletePending;
   const activeCanToggle = Boolean(activeIsGenerated && activeTool?.validated && activeTool.status === "validated");
   const activeIsImage2Tool = activeTool?.name === IMAGE2_TOOL_NAME;
@@ -893,6 +1227,93 @@ export function ToolsRoute() {
     }
     event.preventDefault();
     setLeftPanelWidth(nextWidth);
+  }
+
+  function updateToolPolicyMode(toolName: string, mode: Exclude<ToolPolicyDraftMode, "excluded">) {
+    setToolPolicyDraft((current) => {
+      const allowed = new Set(current.allowedTools);
+      const preferred = new Set(current.preferredTools);
+      const blocked = new Set(current.blockedTools);
+      if (mode === "allowed") {
+        allowed.add(toolName);
+        blocked.delete(toolName);
+      } else if (mode === "blocked") {
+        allowed.delete(toolName);
+        preferred.delete(toolName);
+        blocked.add(toolName);
+      } else {
+        allowed.delete(toolName);
+        preferred.delete(toolName);
+        blocked.delete(toolName);
+      }
+      return normalizeToolPolicyDraftForAgent({
+        ...current,
+        allowedTools: sortedIds(Array.from(allowed)),
+        preferredTools: sortedIds(Array.from(preferred).filter((tool) => allowed.has(tool))),
+        blockedTools: sortedIds(Array.from(blocked)),
+      }, activePolicyAgent);
+    });
+  }
+
+  function toggleToolPolicyScope(field: "readScopes" | "writeScopes", scope: string, selected: boolean) {
+    setToolPolicyDraft((current) => {
+      const scopes = new Set(current[field]);
+      if (selected) {
+        scopes.add(scope);
+      } else {
+        scopes.delete(scope);
+      }
+      return normalizeToolPolicyDraftForAgent({
+        ...current,
+        [field]: sortedIds(Array.from(scopes)),
+      }, activePolicyAgent);
+    });
+  }
+
+  function applyToolBundle(bundle: ToolBundle, mode: "merge" | "replace") {
+    setToolPolicyDraft((current) => {
+      const bundleTools = sortedIds(bundle.toolNames ?? []);
+      const bundlePreferred = sortedIds((bundle.preferredToolNames ?? []).filter((tool) => bundleTools.includes(tool)));
+      if (mode === "replace") {
+        return normalizeToolPolicyDraftForAgent({
+          ...current,
+          allowedTools: bundleTools,
+          preferredTools: bundlePreferred,
+          blockedTools: [],
+        }, activePolicyAgent);
+      }
+      const allowed = new Set(current.allowedTools);
+      const preferred = new Set(current.preferredTools);
+      const blocked = new Set(current.blockedTools);
+      for (const tool of bundleTools) {
+        if (!blocked.has(tool)) {
+          allowed.add(tool);
+        }
+      }
+      for (const tool of bundlePreferred) {
+        if (!blocked.has(tool)) {
+          preferred.add(tool);
+        }
+      }
+      return normalizeToolPolicyDraftForAgent({
+        ...current,
+        allowedTools: sortedIds(Array.from(allowed)),
+        preferredTools: sortedIds(Array.from(preferred).filter((tool) => allowed.has(tool))),
+        blockedTools: sortedIds(Array.from(blocked)),
+      }, activePolicyAgent);
+    });
+  }
+
+  function saveToolPolicy() {
+    if (!activePolicyAgent || !toolPolicyDirty || activePolicyAgentPending) {
+      return;
+    }
+    const saveDraft = normalizeToolPolicyDraftForAgent(toolPolicyDraft, activePolicyAgent);
+    updateToolPolicyMutation.mutate({
+      agentId: activePolicyAgent.agentId,
+      draft: saveDraft,
+      basePolicy: activePolicyAgent.toolPolicy,
+    });
   }
 
   function toggleBulkTool(toolId: string, selected: boolean) {
@@ -1012,6 +1433,12 @@ export function ToolsRoute() {
           <h1 className={styles.title}>{t("toolsPageTitle")}</h1>
           <p className={styles.subtitle}>{t("toolsPageSubtitle")}</p>
         </div>
+        {returnToPath ? (
+          <Link className={styles.returnButton} to={returnToPath} title={returnToLabel}>
+            <ArrowLeft size={15} />
+            <span>{returnToLabel}</span>
+          </Link>
+        ) : null}
         <button type="button" className={styles.refreshButton} onClick={refresh}>
           <RefreshCw size={16} />
           {t("gitRefresh")}
@@ -1204,14 +1631,16 @@ export function ToolsRoute() {
           <section className={styles.agentPermissionSummaryPanel}>
             <div className={styles.panelHeader}>
               <div>
-                <p className={styles.panelEyebrow}>{lang === "zh" ? "Agent 权限边界" : "Agent permission boundary"}</p>
-                <h2>{lang === "zh" ? "这里用于测试工具，不在这里配置 Agent" : "Test tools here, configure Agents in Agent Center"}</h2>
+                <p className={styles.panelEyebrow}>{lang === "zh" ? "Agent 工具配置" : "Agent tool configuration"}</p>
+                <h2>{activePolicyAgent ? `${activePolicyAgent.agentCode || ""} ${activePolicyAgent.displayName || activePolicyAgent.agentId}`.trim() : "-"}</h2>
               </div>
-              <span className={styles.countPill}>{lang === "zh" ? "编辑入口在 Agent 管理" : "Edit in Agent Center"}</span>
+              <span className={toolPolicyDirty ? styles.stateBadge : styles.countPill}>
+                {toolPolicyDirty ? (lang === "zh" ? "未保存" : "Unsaved") : (lang === "zh" ? "已同步" : "Synced")}
+              </span>
             </div>
             <div className={styles.permissionSummaryGrid}>
               <label className={styles.agentPolicySelect}>
-                <span>{lang === "zh" ? "测试 Agent" : "Test Agent"}</span>
+                <span>{lang === "zh" ? "配置 Agent" : "Configure Agent"}</span>
                 <select
                   value={activePolicyAgent?.agentId ?? ""}
                   disabled={!activeAgents.length}
@@ -1228,17 +1657,142 @@ export function ToolsRoute() {
                 </select>
               </label>
               <div className={styles.permissionSummaryCards}>
-                <span>{lang === "zh" ? "允许" : "Allowed"} <strong>{policyModeCounts.allowed}</strong></span>
-                <span>{lang === "zh" ? "禁用" : "Blocked"} <strong>{policyModeCounts.blocked}</strong></span>
-                <span>{lang === "zh" ? "默认" : "Default"} <strong>{policyModeCounts.inherited}</strong></span>
-                <span>{lang === "zh" ? "需授权" : "Explicit"} <strong>{policyModeCounts.explicit_required}</strong></span>
-                <span>{lang === "zh" ? "未列入" : "Excluded"} <strong>{policyModeCounts.excluded}</strong></span>
+                <span>{lang === "zh" ? "允许" : "Allowed"} <strong>{toolPolicyDraft.allowedTools.length}</strong></span>
+                <span>{lang === "zh" ? "优先" : "Preferred"} <strong>{toolPolicyDraft.preferredTools.length}</strong></span>
+                <span>{lang === "zh" ? "禁用" : "Blocked"} <strong>{toolPolicyDraft.blockedTools.length}</strong></span>
+                <span>{lang === "zh" ? "未允许" : "Not allowed"} <strong>{capabilityPreview.inherited}</strong></span>
+                <span>{lang === "zh" ? "高风险允许" : "High-risk allowed"} <strong>{capabilityPreview.highRiskAllowed}</strong></span>
               </div>
-              <Link className={styles.secondaryButton} to={activePolicyAgentRoute}>
-                <Wrench size={15} />
-                {lang === "zh" ? "去 Agent 中心配置" : "Configure in Agent Center"}
-              </Link>
             </div>
+            <section className={styles.policyDraftPanel}>
+              <div className={styles.policyDraftSummary}>
+                <strong>{lang === "zh" ? "实际能力预览" : "Effective capability preview"}</strong>
+                <span>{lang === "zh" ? "实际允许" : "Effective allowed"}: {capabilityPreview.effectiveAllowed}</span>
+                <span>{lang === "zh" ? "需显式授权" : "Explicit grants"}: {capabilityPreview.explicitAllowed}</span>
+                <span>{lang === "zh" ? "写入边界" : "Write boundary"}: {capabilityPreview.writeBoundaryLabel}</span>
+              </div>
+              <div className={styles.workspaceScopePanel}>
+                <span>{lang === "zh" ? "工作空间写入" : "Workspace write"}</span>
+                <label>
+                  <input type="checkbox" checked disabled />
+                  {lang === "zh" ? "私人工作区" : "Private workspace"}
+                </label>
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={toolPolicyDraft.writeScopes.includes("shared")}
+                    onChange={(event) => toggleToolPolicyScope("writeScopes", "shared", event.target.checked)}
+                  />
+                  {lang === "zh" ? "共享资料区" : "Shared workspace"}
+                </label>
+              </div>
+              {toolBundles.length ? (
+                <div className={styles.toolBundleApplyGrid}>
+                  {toolBundles.map((bundle) => (
+                    <article key={bundle.bundleId} className={styles.toolBundleApplyCard}>
+                      <strong>{bundle.label}</strong>
+                      <span>{toolBundleMeta(bundle, lang)}</span>
+                      <p>{bundle.description}</p>
+                      <div>
+                        <button type="button" className={styles.secondaryButton} onClick={() => applyToolBundle(bundle, "merge")}>
+                          {lang === "zh" ? "追加此包" : "Add package"}
+                        </button>
+                        <button type="button" className={styles.secondaryButton} onClick={() => applyToolBundle(bundle, "replace")}>
+                          {lang === "zh" ? "重置为此包" : "Reset to package"}
+                        </button>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              ) : null}
+              <label className={styles.searchBox}>
+                <Search size={15} />
+                <input
+                  value={toolPolicySearchText}
+                  placeholder={lang === "zh" ? "搜索可分配工具" : "Search assignable tools"}
+                  onChange={(event) => setToolPolicySearchText(event.target.value)}
+                />
+              </label>
+              {editablePolicyTools.length ? (
+                <div className={styles.toolPermissionList}>
+                  {editablePolicyGroups.map((group) => (
+                    <section key={group.bundleId} className={styles.toolPermissionGroup}>
+                      <header className={styles.toolPermissionGroupHeader}>
+                        <div>
+                          <strong>{group.label}</strong>
+                          <span>
+                            {group.tools.length} tools · {lang === "zh" ? "允许" : "Allowed"} {group.allowedCount} · {lang === "zh" ? "禁用" : "Blocked"} {group.blockedCount} · {lang === "zh" ? "未允许" : "Not allowed"} {group.inheritedCount}
+                          </span>
+                        </div>
+                        {group.highRiskCount ? <small>{lang === "zh" ? "高风险" : "High risk"} {group.highRiskCount}</small> : null}
+                      </header>
+                      <div className={styles.toolPermissionGroupList}>
+                        {group.tools.map((tool) => {
+                          const mode = policyDraftMode(toolPolicyDraft, tool.name);
+                          const tags = [...(tool.capabilityTags ?? []), ...(tool.riskTags ?? [])].slice(0, 4);
+                          return (
+                            <div key={`${tool.source}:${tool.id}`} className={styles.toolPermissionRow}>
+                              <span>
+                                <strong>{tool.name}</strong>
+                                <small>{tool.description || tool.source}</small>
+                                <span className={styles.toolPermissionMeta}>
+                                  <em>{toolTierLabel(tool.permissionTier, lang)}</em>
+                                  <small>{toolCategoryLabel(tool.category, tool.categoryLabel, lang)}</small>
+                                  {tags.length ? <small>{tags.join(" / ")}</small> : null}
+                                </span>
+                              </span>
+                              <div className={styles.segmentedControl} aria-label={tool.name}>
+                                <button
+                                  type="button"
+                                  className={mode === "inherited" || mode === "excluded" ? styles.segmentActive : styles.segmentButton}
+                                  onClick={() => updateToolPolicyMode(tool.name, "inherited")}
+                                >
+                                  {policyDraftModeLabel(mode === "excluded" ? "excluded" : "inherited", lang)}
+                                </button>
+                                <button
+                                  type="button"
+                                  className={mode === "allowed" ? styles.segmentActive : styles.segmentButton}
+                                  onClick={() => updateToolPolicyMode(tool.name, "allowed")}
+                                >
+                                  {policyDraftModeLabel("allowed", lang)}
+                                </button>
+                                <button
+                                  type="button"
+                                  className={mode === "blocked" ? styles.segmentActiveDanger : styles.segmentButton}
+                                  onClick={() => updateToolPolicyMode(tool.name, "blocked")}
+                                >
+                                  {policyDraftModeLabel("blocked", lang)}
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </section>
+                  ))}
+                </div>
+              ) : (
+                <p className={styles.emptyState}>{lang === "zh" ? "当前没有可分配工具。" : "No assignable tools."}</p>
+              )}
+              <div className={styles.detailActions}>
+                <button
+                  type="button"
+                  className={styles.secondaryButton}
+                  disabled={!toolPolicyDirty || activePolicyAgentPending}
+                  onClick={() => setToolPolicyDraft(toolPolicyDraftFromAgent(activePolicyAgent))}
+                >
+                  {lang === "zh" ? "重置草稿" : "Reset draft"}
+                </button>
+                <button
+                  type="button"
+                  className={styles.primaryButton}
+                  disabled={!activePolicyAgent || !toolPolicyDirty || activePolicyAgentPending}
+                  onClick={saveToolPolicy}
+                >
+                  {activePolicyAgentPending ? (lang === "zh" ? "保存中..." : "Saving...") : (lang === "zh" ? "保存工具配置" : "Save tool config")}
+                </button>
+              </div>
+            </section>
           </section>
           {activeTool ? (
             <>
@@ -1301,10 +1855,9 @@ export function ToolsRoute() {
                 <strong className={`${styles.policyStatePill} ${styles[`policy_${activePolicyMode}`]}`}>
                   {toolPolicyModeLabel(activePolicyMode, lang)}
                 </strong>
-                <Link className={styles.secondaryButton} to={activePolicyAgentRoute}>
-                  <Wrench size={15} />
-                  {lang === "zh" ? "编辑 Agent 策略" : "Edit Agent policy"}
-                </Link>
+                <span className={styles.policyHint}>
+                  {lang === "zh" ? "工具测试使用该 Agent 已保存的 ToolPolicy。" : "Tool tests use this Agent's saved ToolPolicy."}
+                </span>
               </section>
               {activeIsImage2Tool ? (
                 <section className={styles.image2ModelPanel}>
