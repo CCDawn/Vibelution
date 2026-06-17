@@ -866,6 +866,9 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("function liveAssistantMessageId(sessionId: string, turnId: string)");
     expect(routeSource).toContain("function mergeSessionDetailWithLiveAssistantOverlay(");
     expect(routeSource).toContain("kind: \"session_live_overlay\"");
+    expect(routeSource).toContain("function isStaleLedgerUpdate(currentSeq: unknown, incomingSeq: unknown)");
+    expect(routeSource).toContain("if (isStaleLedgerUpdate(detail.ledgerSeq, payload.ledgerSeq))");
+    expect(routeSource).toContain("ledgerSeq: maxLedgerSeq(detail.ledgerSeq, payload.ledgerSeq)");
     expect(routeSource).toContain("const contentDelta = payload.contentDelta ?? (payload.replaceContent || !previous ? payload.content ?? \"\" : \"\")");
     expect(routeSource).toContain("const thoughtDelta = payload.thoughtDelta ?? (payload.replaceThought || !previous ? payload.thought ?? \"\" : \"\")");
     expect(routeSource).toContain("const nextContent = payload.replaceContent");
