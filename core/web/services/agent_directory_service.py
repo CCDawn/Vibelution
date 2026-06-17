@@ -78,6 +78,29 @@ DEFAULT_SESSION_AGENT_PREFERRED_TOOLS = (
     "history_fetch_tool",
     "get_core_context_tool",
 )
+SYSTEM_NO_TOOL_MODES = {"self_evolution", "supervised_evolution"}
+SYSTEM_NO_TOOL_ROLES = {
+    "self_evolution": {"executor", "reviewer", "summarizer"},
+    "supervised_evolution": {"baseline", "candidate", "reviewer", "auditor", "judge"},
+}
+RESEARCH_SOURCE_ROLE_KEYS = {
+    "ai_search_scope_lead",
+    "global_primary_sources",
+    "cn_primary_sources",
+    "signal_quality_gate",
+}
+RESEARCH_SOURCE_ALLOWED_TOOLS = (
+    "agent_message_tool",
+    "research_knowledge_query_tool",
+    "web_search_tool",
+    "web_fetch_tool",
+    "search_memory_tool",
+)
+RESEARCH_SOURCE_PREFERRED_TOOLS = (
+    "research_knowledge_query_tool",
+    "web_search_tool",
+    "agent_message_tool",
+)
 AGENT_LLM_BINDING_SLOTS = AGENT_LLM_SLOTS
 LEGACY_AGENT_MODEL_ID_ALIASES = {
     "gpt_5_5_gpt_5_5": "relay_openai_gpt_5_5",
@@ -1226,6 +1249,7 @@ def repair_agent_directory() -> dict[str, Any]:
         avatar_defaulted_agents: list[dict[str, Any]] = []
         territory_repaired_agents: list[dict[str, Any]] = []
         llm_binding_migrated_agents: list[dict[str, Any]] = []
+        tool_policy_repaired_agents: list[tuple[dict[str, Any], dict[str, Any]]] = []
         model_library_ids = _configured_model_library_ids()
         used_agent_codes: set[str] = set()
         policies = _memory_policies(state)
@@ -1363,6 +1387,10 @@ def repair_agent_directory() -> dict[str, Any]:
                 territory_repaired_agents.append(dict(agent))
             if _ensure_session_agent_tool_policy(state, agent):
                 changed = True
+            fixed_role_policy = _ensure_fixed_role_tool_policy(state, agent)
+            if fixed_role_policy is not None:
+                tool_policy_repaired_agents.append((dict(agent), dict(fixed_role_policy)))
+                changed = True
             _refresh_agent_onboarding_metadata(state, agent)
         state["memoryPolicies"] = policies
         if changed:
@@ -1379,6 +1407,8 @@ def repair_agent_directory() -> dict[str, Any]:
                 )
             if llm_binding_migrated_agents:
                 _record_agent_llm_binding_migration_event(llm_binding_migrated_agents)
+            for repaired_agent, repaired_policy in tool_policy_repaired_agents:
+                _record_agent_tool_policy_event(repaired_agent, repaired_policy)
             for repaired_agent in territory_repaired_agents:
                 _record_agent_territory_event("agent_territory.resolved", repaired_agent, outcome="repaired")
         return state
@@ -2531,6 +2561,25 @@ def default_session_agent_tool_policy(policy_id: str) -> dict[str, Any]:
     return payload
 
 
+def default_system_no_tool_policy(policy_id: str) -> dict[str, Any]:
+    payload = default_tool_policy(policy_id)
+    payload["networkAccess"] = "none"
+    payload["mutationAccess"] = "none"
+    return payload
+
+
+def default_research_source_tool_policy(policy_id: str) -> dict[str, Any]:
+    payload = default_tool_policy(policy_id)
+    payload["allowedTools"] = list(RESEARCH_SOURCE_ALLOWED_TOOLS)
+    payload["preferredTools"] = list(RESEARCH_SOURCE_PREFERRED_TOOLS)
+    payload["readScopes"] = ["private", "shared"]
+    payload["writeScopes"] = []
+    payload["networkAccess"] = "controlled"
+    payload["mutationAccess"] = "none"
+    payload["maxCallsPerTurn"] = 8
+    return payload
+
+
 def _default_tool_policy_id_for_agent(agent_id: str, primary_mode: str) -> str:
     if _is_session_agent_primary_mode(primary_mode):
         return f"tool-{agent_id}"
@@ -2597,6 +2646,57 @@ def _ensure_session_agent_tool_policy(state: dict[str, Any], agent: dict[str, An
     state["toolPolicies"] = policies
     agent["toolPolicyId"] = policy_id
     return True
+
+
+def _ensure_fixed_role_tool_policy(state: dict[str, Any], agent: dict[str, Any]) -> dict[str, Any] | None:
+    desired_kind = _fixed_role_tool_policy_kind(agent)
+    if not desired_kind:
+        return None
+    agent_id = str(agent.get("agentId") or "").strip()
+    if not agent_id:
+        return None
+    policy_id = f"tool-{agent_id}"
+    policies = _tool_policies(state)
+    if desired_kind == "research_source":
+        desired_policy = default_research_source_tool_policy(policy_id)
+    else:
+        desired_policy = default_system_no_tool_policy(policy_id)
+    current_policy_id = str(agent.get("toolPolicyId") or DEFAULT_TOOL_POLICY_ID).strip() or DEFAULT_TOOL_POLICY_ID
+    current_policy = normalize_tool_policy(policies.get(current_policy_id) or default_tool_policy(current_policy_id), current_policy_id)
+    next_policy = normalize_tool_policy(
+        {
+            **desired_policy,
+            "perToolRules": dict(current_policy.get("perToolRules") or {}),
+        },
+        policy_id,
+    )
+    if current_policy_id == policy_id and policies.get(policy_id) == next_policy:
+        return None
+    previous_policy_id = current_policy_id
+    policies[policy_id] = next_policy
+    previous_policy_is_orphaned = (
+        previous_policy_id != DEFAULT_TOOL_POLICY_ID
+        and previous_policy_id != policy_id
+        and _count_policy_refs(state.get("agents") or [], "toolPolicyId", previous_policy_id) == 1
+    )
+    if previous_policy_is_orphaned:
+        policies.pop(previous_policy_id, None)
+    state["toolPolicies"] = policies
+    agent["toolPolicyId"] = policy_id
+    return next_policy
+
+
+def _fixed_role_tool_policy_kind(agent: dict[str, Any]) -> str:
+    primary_mode = _normalize_primary_mode(agent.get("primaryMode") or _infer_agent_primary_mode(agent))
+    role_key = _normalize_role_key(agent.get("roleKey") or _infer_agent_role_key(agent))
+    metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
+    if primary_mode in SYSTEM_NO_TOOL_MODES:
+        system_role = _normalize_role_key(metadata.get("selfEvolutionRole") or metadata.get("supervisedRole") or role_key)
+        if system_role in SYSTEM_NO_TOOL_ROLES.get(primary_mode, set()):
+            return "no_tools"
+    if primary_mode == "research" and role_key in RESEARCH_SOURCE_ROLE_KEYS:
+        return "research_source"
+    return ""
 
 
 def normalize_persona_profile(profile: dict[str, Any] | None) -> dict[str, Any]:
