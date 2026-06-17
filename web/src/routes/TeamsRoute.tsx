@@ -5873,13 +5873,13 @@ export function TeamsRoute({
           <div className={styles.sourceCollectionStageHandoff}>
             <span><b>{lang === "zh" ? "输入" : "Input"}</b>{activeModule.inputLabel}</span>
             <span><b>{lang === "zh" ? "输出" : "Output"}</b>{activeModule.outputLabel}</span>
-            <span><b>{lang === "zh" ? "下一步" : "Next"}</b>{activeModule.nextLabel}</span>
+            <span className={styles.sourceCollectionStageHandoffNext}><b>{lang === "zh" ? "下一步" : "Next"}</b>{activeModule.nextLabel}</span>
           </div>
         </div>
         <div className={styles.sourceCollectionStageTabs} role="tablist" aria-label={lang === "zh" ? "阶段子页" : "Stage tabs"}>
           {([
             ["results", lang === "zh" ? "结果" : "Results"],
-            ["process", lang === "zh" ? "过程" : "Process"],
+            ["process", lang === "zh" ? "Agent过程" : "Agent process"],
           ] as const).map(([mode, label]) => (
             <button
               key={mode}
@@ -7405,10 +7405,6 @@ export function TeamsRoute({
                     <em>{module.metric}</em>
                     <small>{module.summary}</small>
                   </span>
-                  <div className={styles.sourceCollectionStageMiniFlow}>
-                    <span><b>{lang === "zh" ? "入" : "In"}</b>{module.inputLabel}</span>
-                    <span><b>{lang === "zh" ? "出" : "Out"}</b>{module.outputLabel}</span>
-                  </div>
                   <div className={styles.sourceCollectionStageActionRow}>
                     <button
                       type="button"
