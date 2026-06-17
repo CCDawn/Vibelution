@@ -15536,11 +15536,21 @@ def _messages_with_live_output(session_id: str, messages: list[dict[str, Any]]) 
     return detail_messages + [live_message]
 
 
+def _live_assistant_overlay_turn_id(session_id: str, turn_id: str = "") -> str:
+    normalized_turn_id = str(turn_id or "").strip() or _current_session_turn_id(session_id)
+    return normalized_turn_id or "current"
+
+
+def _live_assistant_message_id(session_id: str, turn_id: str = "") -> str:
+    return f"{session_id}-message-live-{_live_assistant_overlay_turn_id(session_id, turn_id)}"
+
+
 def _build_live_output_message(session_id: str) -> dict[str, Any] | None:
     with _SESSION_LIVE_OUTPUTS_LOCK:
         state = _SESSION_LIVE_OUTPUTS.get(session_id)
         if state is None:
             return None
+        turn_id = _live_assistant_overlay_turn_id(session_id, state.turn_id)
         stage = str(state.stage or "").strip()
         thought = str(state.thought or "").strip()
         content = str(state.content or "").strip()
@@ -15551,11 +15561,16 @@ def _build_live_output_message(session_id: str) -> dict[str, Any] | None:
     if not thought and not content and mental_snapshot is None and not tool_calls and not feedback_events:
         return None
     message: dict[str, Any] = {
-        "id": f"{session_id}-message-live",
+        "id": _live_assistant_message_id(session_id, turn_id),
         "role": "assistant",
         "content": content,
         "timestamp": timestamp,
         "streaming": True,
+        "metadata": {
+            "kind": "session_live_overlay",
+            "turnId": turn_id,
+            "ledgerSeq": _session_ledger_sequence(session_id),
+        },
     }
     if stage:
         message["streamStage"] = stage

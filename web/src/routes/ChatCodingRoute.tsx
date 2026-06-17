@@ -2555,8 +2555,13 @@ function sessionDetailSnapshotKey(detail: SessionDetail): string {
   ].join("|");
 }
 
-function liveAssistantMessageId(sessionId: string, turnId: string) {
+function liveAssistantOverlayTurnId(turnId: string) {
   const normalizedTurnId = String(turnId || "").trim() || "current";
+  return normalizedTurnId;
+}
+
+function liveAssistantMessageId(sessionId: string, turnId: string) {
+  const normalizedTurnId = liveAssistantOverlayTurnId(turnId);
   return `${sessionId}-message-live-${normalizedTurnId}`;
 }
 
@@ -2566,6 +2571,22 @@ function messageTurnId(message: ConversationMessage) {
 
 function isLiveAssistantDeltaMessage(message: ConversationMessage) {
   return message.role === "assistant" && String(message.metadata?.kind ?? "").trim() === "session_live_overlay";
+}
+
+function liveAssistantMessageTurnId(message: ConversationMessage) {
+  return messageTurnId(message) || "current";
+}
+
+function isLiveAssistantMessageForTurn(message: ConversationMessage, turnId: string) {
+  return isLiveAssistantDeltaMessage(message) && liveAssistantMessageTurnId(message) === liveAssistantOverlayTurnId(turnId);
+}
+
+function uniqueLiveAssistantMessagesByTurn(messages: ConversationMessage[]) {
+  const byTurnId = new Map<string, ConversationMessage>();
+  for (const message of messages) {
+    byTurnId.set(liveAssistantMessageTurnId(message), message);
+  }
+  return [...byTurnId.values()];
 }
 
 function feedbackEventKey(event: ConversationFeedbackEvent) {
@@ -2609,19 +2630,26 @@ function mergeSessionDetailWithLiveAssistantOverlay(
   if (isStaleLedgerUpdate(previous?.ledgerSeq, detail.ledgerSeq)) {
     return previous ?? detail;
   }
-  const previousLiveMessages = (previous?.messages ?? []).filter(isLiveAssistantDeltaMessage);
+  const previousLiveMessages = uniqueLiveAssistantMessagesByTurn((previous?.messages ?? []).filter(isLiveAssistantDeltaMessage));
   if (previousLiveMessages.length === 0) {
     return detail;
   }
-  const persistedTurnIds = new Set(
+  const settledAssistantTurnIds = new Set(
     (detail.messages ?? [])
+      .filter((message) => message.role === "assistant" && !isLiveAssistantDeltaMessage(message))
       .map(messageTurnId)
+      .filter(Boolean),
+  );
+  const detailLiveTurnIds = new Set(
+    (detail.messages ?? [])
+      .filter(isLiveAssistantDeltaMessage)
+      .map(liveAssistantMessageTurnId)
       .filter(Boolean),
   );
   const detailMessageIds = new Set((detail.messages ?? []).map((message) => message.id));
   const liveMessages = previousLiveMessages.filter((message) => {
-    const turnId = messageTurnId(message);
-    return !detailMessageIds.has(message.id) && (!turnId || !persistedTurnIds.has(turnId));
+    const turnId = liveAssistantMessageTurnId(message);
+    return !detailMessageIds.has(message.id) && !detailLiveTurnIds.has(turnId) && !settledAssistantTurnIds.has(turnId);
   });
   if (liveMessages.length === 0) {
     return detail;
@@ -2654,11 +2682,14 @@ function mergeAssistantDeltaIntoSessionDetail(
     return detail;
   }
   const liveMessageId = liveAssistantMessageId(payload.sessionId, payload.turnId);
+  const liveTurnId = liveAssistantOverlayTurnId(payload.turnId);
   const now = payload.updatedAt || new Date().toISOString();
-  const messages = (detail.messages ?? []).filter((message) =>
-    !isLiveAssistantDeltaMessage(message) || message.id === liveMessageId
+  const originalMessages = detail.messages ?? [];
+  const firstLiveIndex = originalMessages.findIndex((message) => isLiveAssistantMessageForTurn(message, liveTurnId));
+  const messages = originalMessages.filter((message, index) =>
+    !isLiveAssistantDeltaMessage(message) || (index === firstLiveIndex && isLiveAssistantMessageForTurn(message, liveTurnId))
   );
-  const liveIndex = messages.findIndex((message) => message.id === liveMessageId);
+  const liveIndex = messages.findIndex((message) => isLiveAssistantMessageForTurn(message, liveTurnId));
   const previous = liveIndex >= 0 ? messages[liveIndex] : undefined;
   const contentDelta = payload.contentDelta ?? (payload.replaceContent || !previous ? payload.content ?? "" : "");
   const thoughtDelta = payload.thoughtDelta ?? (payload.replaceThought || !previous ? payload.thought ?? "" : "");
@@ -2689,7 +2720,7 @@ function mergeAssistantDeltaIntoSessionDetail(
     metadata: {
       ...(previous?.metadata ?? {}),
       kind: "session_live_overlay",
-      turnId: payload.turnId,
+      turnId: liveTurnId,
       ledgerSeq: maxLedgerSeq(previous?.metadata?.ledgerSeq, payload.ledgerSeq),
     },
   };
