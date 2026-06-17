@@ -377,7 +377,15 @@ def test_team_workflow_route_accepts_source_collection_search_background(tmp_pat
         time.sleep(0.05)
 
     assert data_processing_service.list_records(run_id)["summary"]["recordCount"] == 1
-    assert team_workflow_orchestration_service.load_source_collection_work_run_summary()["latest"]["status"] == "completed"
+    deadline = time.monotonic() + 3.0
+    latest_status = ""
+    while time.monotonic() < deadline:
+        latest_status = team_workflow_orchestration_service.load_source_collection_work_run_summary()["latest"]["status"]
+        if latest_status == "completed":
+            break
+        time.sleep(0.05)
+
+    assert latest_status == "completed"
 
 
 def test_team_workflow_route_assesses_source_quality_batch(tmp_path, monkeypatch):
@@ -785,6 +793,57 @@ def test_team_workflow_route_returns_knowledge_ingestion_status(tmp_path, monkey
     assert payload["summary"]["pendingProposalCount"] == 1
     assert payload["actionItems"][0]["code"] == "knowledge_proposal_pending_review"
     assert payload["officialBoundary"]["candidateGraphWritesOfficialGraph"] is False
+
+
+def test_team_workflow_route_runs_knowledge_ingestion_precheck(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    captured = {}
+
+    def fake_precheck(team_id, payload):
+        captured["teamId"] = team_id
+        captured["payload"] = payload
+        return {
+            "candidate": {
+                "candidateId": "local-model-output-1",
+                "candidateType": "review_record",
+                "currentWorkflowNode": "steward_ingestion",
+                "currentState": "steward_pack_draft",
+            },
+            "validation": {"valid": True, "issues": []},
+            "precheck": {
+                "status": "steward_pack_draft",
+                "generatedByAgent": payload["stewardAgentId"],
+                "selectedCandidateCount": 3,
+                "officialBoundary": {
+                    "writesOfficialKnowledge": False,
+                    "writesOfficialRag": False,
+                    "writesOfficialGraph": False,
+                },
+            },
+            "status": {"status": "ready", "summary": {"stewardPackCandidateCount": 1}},
+            "workflow": {"workflowId": "workflow-1"},
+        }
+
+    monkeypatch.setattr(team_workflows, "run_knowledge_ingestion_precheck", fake_precheck)
+    client = _client()
+    team = client.post("/api/teams", json={"name": "挑战杯科研团队"}).json()
+
+    response = client.post(
+        f"/api/teams/{team['teamId']}/workflow-orchestration/knowledge-ingestion/precheck",
+        json={
+            "stewardAgentId": "Knowledge Steward Agent",
+            "maxCandidates": 24,
+            "targetDomain": "神经机制启发神经网络算法",
+        },
+    )
+
+    assert response.status_code == 201, response.text
+    payload = response.json()
+    assert captured["teamId"] == team["teamId"]
+    assert captured["payload"]["stewardAgentId"] == "Knowledge Steward Agent"
+    assert captured["payload"]["maxCandidates"] == 24
+    assert payload["candidate"]["currentState"] == "steward_pack_draft"
+    assert payload["precheck"]["officialBoundary"]["writesOfficialKnowledge"] is False
 
 
 def test_team_workflow_route_returns_coordination_status(tmp_path, monkeypatch):
