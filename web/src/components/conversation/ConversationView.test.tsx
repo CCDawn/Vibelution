@@ -415,6 +415,7 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).toContain("已完成");
     expect(html).not.toContain("9 步");
     expect(html).not.toContain("9/9");
+    expect(html).not.toContain("准备上下文");
     expect(html).not.toContain("命令");
     expect(html.match(/title="命令 · 已完成"/g)?.length ?? 0).toBe(0);
   });
@@ -472,6 +473,9 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).toContain("行动");
     expect(html).toContain("结果");
     expect(html).not.toContain("4/5");
+    expect(html).not.toContain("准备上下文");
+    expect(html).not.toContain("绑定 Agent");
+    expect(html).not.toContain("请求模型");
     expect(html).toContain("[超时] cli_tool 执行超时");
     expect(html).not.toContain("第 1 轮");
     expect(html).not.toContain("已折叠更早");
@@ -1609,7 +1613,7 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).not.toContain("回答</span>");
   });
 
-  it("summarizes runtime status steps without repeating full status prose", () => {
+  it("hides internal runtime pipeline steps behind a compact request state", () => {
     const fullModelStatus = "正在请求模型，等待首个响应片段... 上下文已组装完成，正在进入 LLM 调用。";
     const html = renderConversation([
       {
@@ -1644,17 +1648,18 @@ describe("ConversationView edit resend affordance", () => {
       },
     ]);
 
-    expect(html).toContain("执行过程");
-    expect(html).toContain("执行中");
-    expect(html).toContain("行动");
+    expect(html).toContain("正在请求");
+    expect(html).not.toContain("执行过程");
+    expect(html).not.toContain("执行中");
+    expect(html).not.toContain("行动");
     expect(html).not.toContain("2/3");
     expect(html).not.toContain("第 1 轮");
-    expect(html).toContain("准备上下文");
-    expect(html).toContain("绑定 Agent");
-    expect(html).toContain("请求模型");
+    expect(html).not.toContain("准备上下文");
+    expect(html).not.toContain("绑定 Agent");
+    expect(html).not.toContain("请求模型");
     expect(html).not.toContain("当前位置");
     expect(html).not.toContain("请求模型中");
-    expect(html).toContain("首个响应片段等待中");
+    expect(html).not.toContain("首个响应片段等待中");
     expect(html).not.toContain("运行状态 3");
     expect(html).not.toContain("回答</span>");
     expect((html.match(new RegExp(fullModelStatus, "g")) ?? [])).toHaveLength(0);
@@ -1691,7 +1696,7 @@ describe("ConversationView edit resend affordance", () => {
       },
     ]);
 
-    expect(html).toContain("执行中");
+    expect(html).toContain("正在请求");
     expect(html).toContain("命令");
     expect(html).toContain("1m 15s");
     expect(html).toContain("行动");
@@ -1700,6 +1705,7 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).not.toContain("当前位置");
     expect(html).not.toContain("最后事件");
     expect(html).not.toContain("超时阈值");
+    expect(html).not.toContain("准备上下文");
     expect(html).toContain("正在搜索最新运行日志");
     expect(html).not.toContain(">当前</span>");
   });
