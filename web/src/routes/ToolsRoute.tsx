@@ -60,6 +60,7 @@ type ScopedToolTestResult = {
   key: string;
   result: ToolTestResponse;
 };
+type ToolDeepLinkFocus = "policy" | "detail" | "bundle" | "test";
 type Translate = (key: TranslationKey) => string;
 
 const FILTERS: ToolFilter[] = ["all", "built_in", "generated", "llm", "enabled"];
@@ -69,6 +70,24 @@ const TOOLS_LEFT_PANEL_DEFAULT_WIDTH = 350;
 const MAIN_AGENT_SCOPE_ID = "main_agent";
 const IMAGE2_TOOL_NAME = "image2_generate_tool";
 const WEB_SEARCH_TOOL_NAME = "web_search_tool";
+
+function normalizeToolDeepLinkFocus(value: string | null): ToolDeepLinkFocus {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (normalized === "detail" || normalized === "bundle" || normalized === "test") {
+    return normalized;
+  }
+  return "policy";
+}
+
+function toolMatchesDeepLink(tool: ToolRegistryItem, target: string) {
+  const normalized = target.trim().toLowerCase();
+  return Boolean(normalized) && [tool.id, tool.name].some((value) => String(value || "").toLowerCase() === normalized);
+}
+
+function agentMatchesDeepLink(agent: AgentInstance, target: string) {
+  const normalized = target.trim().toLowerCase();
+  return Boolean(normalized) && [agent.agentId, agent.agentCode].some((value) => String(value || "").toLowerCase() === normalized);
+}
 
 function sortedIds(values: string[]) {
   return Array.from(new Set(values.map((item) => String(item || "").trim()).filter(Boolean))).sort();
@@ -783,6 +802,7 @@ export function ToolsRoute() {
   const [activePolicyAgentId, setActivePolicyAgentId] = useState("");
   const [toolPolicyDraft, setToolPolicyDraft] = useState<AgentToolPolicyDraft>(() => toolPolicyDraftFromAgent(null));
   const [activeToolId, setActiveToolId] = useState<string | null>(null);
+  const [selectedBundleId, setSelectedBundleId] = useState("");
   const [leftPanelWidth, setLeftPanelWidth] = useState(() =>
     storedPaneWidth(TOOLS_LEFT_PANEL_WIDTH_KEY, TOOLS_LEFT_PANEL_DEFAULT_WIDTH, TOOLS_LEFT_PANEL_BOUNDS),
   );
@@ -796,6 +816,10 @@ export function ToolsRoute() {
   const [testResult, setTestResult] = useState<ScopedToolTestResult | null>(null);
   const pageVisible = usePageVisibility();
   const requestedAgentId = useMemo(() => String(searchParams.get("agent") || "").trim(), [searchParams]);
+  const requestedScopeId = useMemo(() => String(searchParams.get("scope") || "").trim(), [searchParams]);
+  const requestedToolKey = useMemo(() => String(searchParams.get("tool") || searchParams.get("toolId") || "").trim(), [searchParams]);
+  const requestedBundleId = useMemo(() => String(searchParams.get("bundle") || searchParams.get("bundleId") || "").trim(), [searchParams]);
+  const requestedFocus = useMemo(() => normalizeToolDeepLinkFocus(searchParams.get("focus")), [searchParams]);
   const returnToPath = useMemo(() => safeAgentCenterReturnToPath(searchParams.get("returnTo")), [searchParams]);
   const returnToLabel = useMemo(() => {
     const normalized = String(searchParams.get("returnLabel") || "").trim();
@@ -875,7 +899,23 @@ export function ToolsRoute() {
     [selectedToolIds, visibleTools],
   );
   const allVisibleToolsSelected = visibleTools.length > 0 && selectedTools.length === visibleTools.length;
-  const activeTool = tools.find((tool) => tool.id === activeToolId) ?? visibleTools[0] ?? null;
+  const deepLinkTargetTool = useMemo(
+    () => requestedToolKey ? tools.find((tool) => toolMatchesDeepLink(tool, requestedToolKey)) ?? null : null,
+    [requestedToolKey, tools],
+  );
+  const deepLinkTargetBundle = useMemo(
+    () => requestedBundleId ? toolBundles.find((bundle) => bundle.bundleId === requestedBundleId) ?? null : null,
+    [requestedBundleId, toolBundles],
+  );
+  const defaultSelectedBundle = useMemo(
+    () => toolBundles.find((bundle) => bundle.toolCount > 0) ?? toolBundles[0] ?? null,
+    [toolBundles],
+  );
+  const selectedBundle = useMemo(
+    () => toolBundles.find((bundle) => bundle.bundleId === selectedBundleId) ?? deepLinkTargetBundle ?? defaultSelectedBundle,
+    [deepLinkTargetBundle, defaultSelectedBundle, selectedBundleId, toolBundles],
+  );
+  const activeTool = tools.find((tool) => tool.id === activeToolId) ?? deepLinkTargetTool ?? visibleTools[0] ?? null;
   const activeToolBundleLabels = activeTool ? bundleLabelsForTool(activeTool, toolBundles, lang) : [];
   const activeScopeState = activeTool ? scopeStateForTool(activeTool, activeAgentScope.id) : null;
 
@@ -889,6 +929,10 @@ export function ToolsRoute() {
   const activeAgents = useMemo(
     () => (agentsQuery.data ?? []).filter((agent) => agent.status !== "archived"),
     [agentsQuery.data],
+  );
+  const deepLinkTargetAgent = useMemo(
+    () => requestedAgentId ? activeAgents.find((agent) => agentMatchesDeepLink(agent, requestedAgentId)) ?? null : null,
+    [activeAgents, requestedAgentId],
   );
   const activePolicyAgent = activeAgents.find((agent) => agent.agentId === activePolicyAgentId) ?? activeAgents[0] ?? null;
   const activePolicy = toolPolicyForAgent(activePolicyAgent);
@@ -932,41 +976,77 @@ export function ToolsRoute() {
   const filterCounts = useMemo(() => toolFilterCounts(scopedTools), [scopedTools]);
 
   useEffect(() => {
+    if (deepLinkTargetTool && activeToolId !== deepLinkTargetTool.id) {
+      setActiveToolId(deepLinkTargetTool.id);
+      setActiveFilter("all");
+      return;
+    }
     if (!activeToolId || !tools.some((tool) => tool.id === activeToolId)) {
       setActiveToolId(visibleTools[0]?.id ?? null);
     }
-  }, [activeToolId, tools, visibleTools]);
+  }, [activeToolId, deepLinkTargetTool, tools, visibleTools]);
 
   useEffect(() => {
+    if (requestedScopeId && agentScopes.some((scope) => scope.id === requestedScopeId) && activeAgentScopeId !== requestedScopeId) {
+      setActiveAgentScopeId(requestedScopeId);
+      return;
+    }
     if (!agentScopes.length || agentScopes.some((scope) => scope.id === activeAgentScopeId)) {
       return;
     }
     setActiveAgentScopeId(MAIN_AGENT_SCOPE_ID);
-  }, [activeAgentScopeId, agentScopes]);
+  }, [activeAgentScopeId, agentScopes, requestedScopeId]);
 
   useEffect(() => {
     if (!activeAgents.length) {
       setActivePolicyAgentId("");
       return;
     }
-    if (requestedAgentId && activeAgents.some((agent) => agent.agentId === requestedAgentId) && activePolicyAgentId !== requestedAgentId) {
-      setActivePolicyAgentId(requestedAgentId);
+    if (deepLinkTargetAgent && activePolicyAgentId !== deepLinkTargetAgent.agentId) {
+      setActivePolicyAgentId(deepLinkTargetAgent.agentId);
       return;
     }
     if (!activePolicyAgentId || !activeAgents.some((agent) => agent.agentId === activePolicyAgentId)) {
       setActivePolicyAgentId(activeAgents[0].agentId);
     }
-  }, [activeAgents, activePolicyAgentId, requestedAgentId]);
+  }, [activeAgents, activePolicyAgentId, deepLinkTargetAgent]);
 
   useEffect(() => {
     setToolPolicyDraft(toolPolicyDraftFromAgent(activePolicyAgent));
   }, [activePolicyAgent?.agentId, activePolicyAgent?.toolPolicy]);
 
   useEffect(() => {
+    if (requestedToolKey && deepLinkTargetTool?.id === activeToolId) {
+      return;
+    }
     if (activeToolId && !visibleTools.some((tool) => tool.id === activeToolId)) {
       setActiveToolId(visibleTools[0]?.id ?? null);
     }
-  }, [activeToolId, visibleTools]);
+  }, [activeToolId, deepLinkTargetTool?.id, requestedToolKey, visibleTools]);
+
+  useEffect(() => {
+    if (deepLinkTargetBundle && selectedBundleId !== deepLinkTargetBundle.bundleId) {
+      setSelectedBundleId(deepLinkTargetBundle.bundleId);
+      return;
+    }
+    if (!selectedBundleId || !toolBundles.some((bundle) => bundle.bundleId === selectedBundleId)) {
+      setSelectedBundleId(defaultSelectedBundle?.bundleId ?? "");
+    }
+  }, [deepLinkTargetBundle, defaultSelectedBundle, selectedBundleId, toolBundles]);
+
+  useEffect(() => {
+    if (!requestedToolKey && !requestedBundleId && requestedFocus === "policy") {
+      return;
+    }
+    const targetId = requestedFocus === "detail" || requestedFocus === "test"
+      ? "agent-tools-detail"
+      : requestedFocus === "bundle"
+        ? "agent-tools-bundles"
+        : "agent-tools-policy";
+    window.requestAnimationFrame(() => {
+      document.getElementById(targetId)?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    });
+  }, [requestedBundleId, requestedFocus, requestedToolKey]);
 
   useEffect(() => {
     setSelectedToolIds((current) => {
@@ -1165,6 +1245,35 @@ export function ToolsRoute() {
   const activeCanToggle = Boolean(activeIsGenerated && activeTool?.validated && activeTool.status === "validated");
   const activeIsImage2Tool = activeTool?.name === IMAGE2_TOOL_NAME;
   const activeIsWebSearchTool = activeTool?.name === WEB_SEARCH_TOOL_NAME;
+  const deepLinkNotice = useMemo(() => {
+    if (requestedAgentId && !agentsQuery.isPending && !deepLinkTargetAgent) {
+      return lang === "zh"
+        ? `未找到深链指定的 Agent：${requestedAgentId}，已回退到可配置 Agent。`
+        : `Deep-linked Agent was not found: ${requestedAgentId}. Fell back to an available Agent.`;
+    }
+    if (requestedToolKey && !toolsQuery.isPending && !deepLinkTargetTool) {
+      return lang === "zh"
+        ? `未找到深链指定的工具：${requestedToolKey}，已显示当前可见工具。`
+        : `Deep-linked tool was not found: ${requestedToolKey}. Showing the current visible tool.`;
+    }
+    if (requestedBundleId && !toolsQuery.isPending && !deepLinkTargetBundle) {
+      return lang === "zh"
+        ? `未找到深链指定的工具包：${requestedBundleId}，已使用默认工具包。`
+        : `Deep-linked tool package was not found: ${requestedBundleId}. Using the default package.`;
+    }
+    return "";
+  }, [
+    activeAgents,
+    agentsQuery.isPending,
+    deepLinkTargetAgent,
+    deepLinkTargetBundle,
+    deepLinkTargetTool,
+    lang,
+    requestedAgentId,
+    requestedBundleId,
+    requestedToolKey,
+    toolsQuery.isPending,
+  ]);
   const webSearchHealthQuery = useQuery({
     queryKey: queryKeys.toolWebSearchHealth(),
     queryFn: () => fetchJson<ToolDependencyHealth>("/api/tools/web-search/health"),
@@ -1428,10 +1537,9 @@ export function ToolsRoute() {
   return (
     <section className={styles.route}>
       <header className={styles.header}>
-        <div>
+        <div title={t("toolsPageSubtitle")}>
           <p className={styles.eyebrow}>{t("navTools")}</p>
           <h1 className={styles.title}>{t("toolsPageTitle")}</h1>
-          <p className={styles.subtitle}>{t("toolsPageSubtitle")}</p>
         </div>
         {returnToPath ? (
           <Link className={styles.returnButton} to={returnToPath} title={returnToLabel}>
@@ -1470,12 +1578,30 @@ export function ToolsRoute() {
 
       <section className={styles.agentScopeBar}>
         <div className={styles.scopeCopy}>
-          <p className={styles.panelEyebrow}>{t("toolsAgentScope")}</p>
-          <strong>{scopeLabel(activeAgentScope, lang, t)}</strong>
-          <span>{activeAgentScope.isSubagent ? t("toolsScopeModeReadonly") : activeAgentScope.mode}</span>
+          <p className={styles.panelEyebrow}>{lang === "zh" ? "配置 Agent" : "Configure Agent"}</p>
+          <strong>{activePolicyAgent ? `${activePolicyAgent.agentCode || ""} ${activePolicyAgent.displayName || activePolicyAgent.agentId}`.trim() : "-"}</strong>
+          <span>{toolPolicyDirty ? (lang === "zh" ? "未保存" : "Unsaved") : (lang === "zh" ? "已同步" : "Synced")}</span>
         </div>
         <label className={styles.scopeSelect}>
-          <span>{t("toolsSelectedAgent")}</span>
+          <span>{lang === "zh" ? "配置" : "Agent"}</span>
+          <select
+            value={activePolicyAgent?.agentId ?? ""}
+            disabled={!activeAgents.length}
+            aria-label={lang === "zh" ? "配置 Agent" : "Configure Agent"}
+            onChange={(event) => setActivePolicyAgentId(event.target.value)}
+          >
+            {!activeAgents.length ? (
+              <option value="">{agentsQuery.isPending ? t("loading") : "-"}</option>
+            ) : null}
+            {activeAgents.map((agent) => (
+              <option key={agent.agentId} value={agent.agentId}>
+                {agent.agentCode ? `${agent.agentCode} · ` : ""}{agent.displayName || agent.agentId}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className={styles.scopeSelect}>
+          <span>{t("toolsAgentScope")}</span>
           <select
             value={activeAgentScopeId}
             aria-label={t("toolsAgentScope")}
@@ -1499,6 +1625,7 @@ export function ToolsRoute() {
             {t("toolsScopeBlocked")}: <strong>{activeAgentScope.counts.blocked}</strong>
           </span>
         </div>
+        {deepLinkNotice ? <p className={styles.deepLinkNotice}>{deepLinkNotice}</p> : null}
       </section>
 
       <div className={styles.workspace} style={workspaceStyle}>
@@ -1561,17 +1688,16 @@ export function ToolsRoute() {
           </section>
           <div className={styles.toolList}>
             {visibleToolBundleGroups.map((group) => (
-              <section key={group.bundleId} className={styles.toolBundleGroup}>
+              <section key={group.bundleId} className={styles.toolBundleGroup} title={group.description || group.label}>
                 <header className={styles.toolBundleHeader}>
                   <div>
                     <strong>{group.label}</strong>
-                    <span>{group.tools.length} tools</span>
+                    <span>{group.tools.length} {lang === "zh" ? "个工具" : "tools"}</span>
                   </div>
                   <small>
                     {lang === "zh" ? "高风险" : "High risk"} {group.highRiskToolCount} · {lang === "zh" ? "显式授权" : "Explicit"} {group.explicitAllowToolCount}
                   </small>
                 </header>
-                {group.description ? <p className={styles.toolBundleDescription}>{group.description}</p> : null}
                 <div className={styles.toolBundleItems}>
                   {group.tools.map((tool) => {
                     const isActive = tool.id === activeTool?.id;
@@ -1596,7 +1722,9 @@ export function ToolsRoute() {
                         <span className={`${styles.statusDot} ${styles[`status_${statusTone(tool)}`]}`} />
                         <span className={styles.toolCopy}>
                           <strong>{tool.name}</strong>
-                          <span>{tool.description || t("toolsNoDescription")}</span>
+                          <span title={tool.description || t("toolsNoDescription")}>
+                            {toolCategoryLabel(tool.category, tool.categoryLabel, lang)} · {toolTierLabel(tool.permissionTier, lang)}
+                          </span>
                         </span>
                         <span className={styles.toolBadges}>
                           <span className={`${styles.policyStatePill} ${styles[`policy_${policyMode}`]}`}>
@@ -1628,7 +1756,10 @@ export function ToolsRoute() {
         />
 
         <main className={styles.detailPanel}>
-          <section className={styles.agentPermissionSummaryPanel}>
+          <section
+            id="agent-tools-policy"
+            className={`${styles.agentPermissionSummaryPanel} ${requestedFocus === "policy" ? styles.deepLinkFocus : ""}`}
+          >
             <div className={styles.panelHeader}>
               <div>
                 <p className={styles.panelEyebrow}>{lang === "zh" ? "Agent 工具配置" : "Agent tool configuration"}</p>
@@ -1639,23 +1770,6 @@ export function ToolsRoute() {
               </span>
             </div>
             <div className={styles.permissionSummaryGrid}>
-              <label className={styles.agentPolicySelect}>
-                <span>{lang === "zh" ? "配置 Agent" : "Configure Agent"}</span>
-                <select
-                  value={activePolicyAgent?.agentId ?? ""}
-                  disabled={!activeAgents.length}
-                  onChange={(event) => setActivePolicyAgentId(event.target.value)}
-                >
-                  {!activeAgents.length ? (
-                    <option value="">{agentsQuery.isPending ? t("loading") : "-"}</option>
-                  ) : null}
-                  {activeAgents.map((agent) => (
-                    <option key={agent.agentId} value={agent.agentId}>
-                      {agent.agentCode ? `${agent.agentCode} · ` : ""}{agent.displayName || agent.agentId}
-                    </option>
-                  ))}
-                </select>
-              </label>
               <div className={styles.permissionSummaryCards}>
                 <span>{lang === "zh" ? "允许" : "Allowed"} <strong>{toolPolicyDraft.allowedTools.length}</strong></span>
                 <span>{lang === "zh" ? "优先" : "Preferred"} <strong>{toolPolicyDraft.preferredTools.length}</strong></span>
@@ -1687,22 +1801,44 @@ export function ToolsRoute() {
                 </label>
               </div>
               {toolBundles.length ? (
-                <div className={styles.toolBundleApplyGrid}>
-                  {toolBundles.map((bundle) => (
-                    <article key={bundle.bundleId} className={styles.toolBundleApplyCard}>
-                      <strong>{bundle.label}</strong>
-                      <span>{toolBundleMeta(bundle, lang)}</span>
-                      <p>{bundle.description}</p>
-                      <div>
-                        <button type="button" className={styles.secondaryButton} onClick={() => applyToolBundle(bundle, "merge")}>
-                          {lang === "zh" ? "追加此包" : "Add package"}
-                        </button>
-                        <button type="button" className={styles.secondaryButton} onClick={() => applyToolBundle(bundle, "replace")}>
-                          {lang === "zh" ? "重置为此包" : "Reset to package"}
-                        </button>
-                      </div>
-                    </article>
-                  ))}
+                <div
+                  id="agent-tools-bundles"
+                  className={`${styles.toolBundleApplyBar} ${requestedFocus === "bundle" ? styles.deepLinkFocus : ""}`}
+                >
+                  <label className={styles.toolBundleSelect}>
+                    <span>{lang === "zh" ? "工具包" : "Package"}</span>
+                    <select
+                      value={selectedBundle?.bundleId ?? ""}
+                      onChange={(event) => setSelectedBundleId(event.target.value)}
+                    >
+                      {toolBundles.map((bundle) => (
+                        <option key={bundle.bundleId} value={bundle.bundleId}>
+                          {bundle.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <span className={styles.toolBundleSummary} title={selectedBundle?.description || ""}>
+                    {selectedBundle ? toolBundleMeta(selectedBundle, lang) : "-"}
+                  </span>
+                  <div className={styles.toolBundleApplyActions}>
+                    <button
+                      type="button"
+                      className={styles.secondaryButton}
+                      disabled={!selectedBundle}
+                      onClick={() => selectedBundle && applyToolBundle(selectedBundle, "merge")}
+                    >
+                      {lang === "zh" ? "追加" : "Add"}
+                    </button>
+                    <button
+                      type="button"
+                      className={styles.secondaryButton}
+                      disabled={!selectedBundle}
+                      onClick={() => selectedBundle && applyToolBundle(selectedBundle, "replace")}
+                    >
+                      {lang === "zh" ? "替换" : "Replace"}
+                    </button>
+                  </div>
                 </div>
               ) : null}
               <label className={styles.searchBox}>
@@ -1734,7 +1870,7 @@ export function ToolsRoute() {
                             <div key={`${tool.source}:${tool.id}`} className={styles.toolPermissionRow}>
                               <span>
                                 <strong>{tool.name}</strong>
-                                <small>{tool.description || tool.source}</small>
+                                <small title={tool.description || tool.source}>{displaySource(tool.source, lang)}</small>
                                 <span className={styles.toolPermissionMeta}>
                                   <em>{toolTierLabel(tool.permissionTier, lang)}</em>
                                   <small>{toolCategoryLabel(tool.category, tool.categoryLabel, lang)}</small>
@@ -1795,7 +1931,10 @@ export function ToolsRoute() {
             </section>
           </section>
           {activeTool ? (
-            <>
+            <aside
+              id="agent-tools-detail"
+              className={`${styles.toolDetailPanel} ${requestedFocus === "detail" || requestedFocus === "test" ? styles.deepLinkFocus : ""}`}
+            >
               <section className={styles.detailHeader}>
                 <div>
                   <p className={styles.panelEyebrow}>
@@ -2138,7 +2277,7 @@ export function ToolsRoute() {
                 </summary>
                 <pre>{schemaPreview(activeTool)}</pre>
               </details>
-            </>
+            </aside>
           ) : (
             <section className={styles.emptyDetail}>
               <Wrench size={24} />

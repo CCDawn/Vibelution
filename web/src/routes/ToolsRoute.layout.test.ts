@@ -93,6 +93,12 @@ describe("ToolsRoute layout contract", () => {
   it("hosts dedicated Agent ToolPolicy editing with return navigation", () => {
     expect(routeSource).toContain("fetchJson<AgentInstance[]>(\"/api/agents?detail=summary\")");
     expect(routeSource).toContain("const requestedAgentId = useMemo(");
+    expect(routeSource).toContain("agentMatchesDeepLink(agent, requestedAgentId)");
+    expect(routeSource).toContain("const requestedToolKey = useMemo(");
+    expect(routeSource).toContain("const requestedBundleId = useMemo(");
+    expect(routeSource).toContain("normalizeToolDeepLinkFocus(searchParams.get(\"focus\"))");
+    expect(routeSource).toContain("toolMatchesDeepLink(tool, requestedToolKey)");
+    expect(routeSource).toContain("document.getElementById(targetId)?.scrollIntoView");
     expect(routeSource).toContain("safeAgentCenterReturnToPath(searchParams.get(\"returnTo\"))");
     expect(routeSource).toContain("返回 Agent 配置");
     expect(routeSource).toContain("styles.returnButton");
@@ -112,8 +118,11 @@ describe("ToolsRoute layout contract", () => {
     expect(routeSource).toContain("if (!blocked.has(tool))");
     expect(routeSource).toContain("groupPolicyToolsByBundle");
     expect(routeSource).toContain("editablePolicyGroups");
-    expect(routeSource).toContain("applyToolBundle(bundle, \"merge\")");
-    expect(routeSource).toContain("applyToolBundle(bundle, \"replace\")");
+    expect(routeSource).toContain("styles.toolBundleApplyBar");
+    expect(routeSource).toContain("selectedBundle && applyToolBundle(selectedBundle, \"merge\")");
+    expect(routeSource).toContain("selectedBundle && applyToolBundle(selectedBundle, \"replace\")");
+    expect(routeSource).not.toContain("styles.toolBundleApplyGrid");
+    expect(routeSource).not.toContain("styles.toolBundleApplyCard");
     expect(routeSource).toContain("toggleToolPolicyScope(\"writeScopes\", \"shared\"");
     expect(routeSource).toContain("updateToolPolicyMode(tool.name, \"allowed\")");
     expect(routeSource).toContain("updateToolPolicyMode(tool.name, \"blocked\")");
@@ -132,6 +141,9 @@ describe("ToolsRoute layout contract", () => {
     expect(routeSource).not.toContain("activePolicyAgentRoute");
     expect(routeSource).not.toContain("body: JSON.stringify({ toolPolicy: payload.policy })");
     expect(stylesSource).toContain(".returnButton");
+    expect(stylesSource).toContain(".toolBundleApplyBar");
+    expect(stylesSource).toContain(".toolDetailPanel");
+    expect(stylesSource).toContain(".deepLinkFocus");
     expect(stylesSource).toContain(".toolPermissionList");
     expect(stylesSource).toContain(".segmentedControl");
   });
@@ -253,9 +265,13 @@ describe("ToolsRoute layout contract", () => {
 
   it("reflows Agent permission summary before desktop narrow widths squeeze labels vertical", () => {
     expect(stylesSource).toContain(".permissionSummaryGrid");
-    expect(stylesSource).toContain("grid-template-columns: minmax(220px, 0.55fr) minmax(0, 1fr) auto");
+    expect(stylesSource).toContain("display: block");
     expect(stylesSource).toContain("@media (max-width: 1180px)");
-    expect(stylesSource).toContain("grid-template-columns: minmax(0, 1fr) auto");
+    expect(stylesSource).toContain(".detailPanel {\n    grid-template-columns: 1fr;");
+    expect(stylesSource).toContain("grid-auto-rows: max-content;");
+    expect(stylesSource).toContain(".toolDetailPanel {\n    position: static;");
+    expect(stylesSource).toContain("border: 1px solid var(--border-soft);");
+    expect(stylesSource).toContain("background: var(--surface-panel-muted");
     expect(stylesSource).toContain("grid-column: 1 / -1");
     expect(stylesSource).toContain("grid-template-columns: repeat(5, minmax(52px, 1fr))");
   });

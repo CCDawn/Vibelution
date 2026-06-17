@@ -131,7 +131,7 @@
 
 .agentScopeBar {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-template-columns: minmax(180px, 1fr) minmax(210px, 0.8fr) minmax(210px, 0.8fr) auto;
   align-items: center;
   gap: 8px;
   min-width: 0;
@@ -173,13 +173,14 @@
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  min-width: 210px;
+  min-width: 0;
   color: var(--fg-secondary);
   font-size: 0.78rem;
 }
 
 .scopeSelect select {
-  min-width: 132px;
+  min-width: 0;
+  width: 100%;
   min-height: 28px;
   padding: 0 9px;
   border: 1px solid var(--border-soft);
@@ -213,6 +214,19 @@
 .scopeStats strong {
   color: var(--fg-primary);
   font-weight: 650;
+}
+
+.deepLinkNotice {
+  grid-column: 1 / -1;
+  min-width: 0;
+  margin: 0;
+  padding: 5px 8px;
+  border: 1px solid color-mix(in srgb, var(--accent-warm) 28%, transparent);
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--accent-warm) 9%, var(--surface-panel));
+  color: var(--accent-warm-2);
+  font-size: 0.74rem;
+  line-height: 1.25;
 }
 
 .summaryCard,
@@ -326,8 +340,8 @@
 }
 
 .detailPanel {
-  grid-template-rows: none;
-  grid-auto-rows: max-content;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 390px);
+  align-items: start;
   align-content: start;
   overflow: auto;
 }
@@ -751,6 +765,7 @@
 .testPanel,
 .policyPanel,
 .agentPermissionSummaryPanel,
+.toolDetailPanel,
 .toolAgentFitPanel,
 .dependencyHealthPanel,
 .image2ModelPanel {
@@ -761,6 +776,21 @@
   border: 1px solid var(--border-soft);
   border-radius: 8px;
   background: var(--surface-panel-muted, rgba(21, 24, 27, 0.82));
+}
+
+.toolDetailPanel {
+  position: sticky;
+  top: 0;
+  max-height: calc(100vh - 182px);
+  overflow: auto;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.deepLinkFocus {
+  outline: 2px solid color-mix(in srgb, var(--accent-cool) 42%, transparent);
+  outline-offset: 2px;
 }
 
 .testPanel,
@@ -826,50 +856,51 @@
   gap: 6px;
 }
 
-.toolBundleApplyGrid {
+.toolBundleApplyBar {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
-  gap: 8px;
-  max-height: 240px;
-  overflow: auto;
-  padding-right: 2px;
-}
-
-.toolBundleApplyCard {
-  display: grid;
-  gap: 5px;
+  grid-template-columns: minmax(220px, 0.6fr) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 7px;
   min-width: 0;
-  padding: 9px;
+  padding: 7px;
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-control);
   background: var(--surface-card);
 }
 
-.toolBundleApplyCard strong,
-.toolBundleApplyCard span,
-.toolBundleApplyCard p {
+.toolBundleSelect {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 7px;
   min-width: 0;
-  margin: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  color: var(--fg-secondary);
+  font-size: 0.74rem;
 }
 
-.toolBundleApplyCard strong {
+.toolBundleSelect select {
+  min-width: 0;
+  width: 100%;
+  min-height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--surface-input-strong, rgba(14, 17, 20, 0.88));
   color: var(--fg-primary);
-  font-size: 0.82rem;
+}
+
+.toolBundleSummary {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg-secondary);
+  font-size: 0.74rem;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.toolBundleApplyCard span,
-.toolBundleApplyCard p {
-  color: var(--fg-secondary);
-  font-size: 0.72rem;
-  line-height: 1.35;
-}
-
-.toolBundleApplyCard div {
+.toolBundleApplyActions {
   display: flex;
-  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 6px;
 }
 
@@ -1155,10 +1186,7 @@
 }
 
 .permissionSummaryGrid {
-  display: grid;
-  grid-template-columns: minmax(220px, 0.55fr) minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 8px;
+  display: block;
   min-width: 0;
 }
 
@@ -1351,12 +1379,28 @@
     gap: 14px;
   }
 
-  .permissionSummaryGrid {
-    grid-template-columns: minmax(0, 1fr) auto;
+  .agentScopeBar {
+    grid-template-columns: minmax(0, 1fr) minmax(200px, 0.8fr);
   }
 
-  .agentPolicySelect {
+  .scopeStats {
     grid-column: 1 / -1;
+    justify-content: flex-start;
+  }
+
+  .detailPanel {
+    grid-template-columns: 1fr;
+    grid-auto-rows: max-content;
+  }
+
+  .toolDetailPanel {
+    position: static;
+    max-height: none;
+    overflow: visible;
+    padding: 10px;
+    border: 1px solid var(--border-soft);
+    border-radius: 8px;
+    background: var(--surface-panel-muted, rgba(21, 24, 27, 0.82));
   }
 
   .permissionSummaryCards {
@@ -1382,6 +1426,14 @@
   .toolButtonActive {
     grid-template-columns: 9px minmax(0, 1fr) auto;
   }
+
+  .toolBundleApplyBar {
+    grid-template-columns: 1fr auto;
+  }
+
+  .toolBundleSummary {
+    grid-column: 1 / -1;
+  }
 }
 
 @media (max-width: 860px) {
@@ -1403,13 +1455,15 @@
   .agentScopeBar,
   .scopeCopy,
   .workspace,
+  .detailPanel,
   .readinessPanel,
   .resultSummaryGrid,
   .metaGrid,
   .permissionSummaryGrid,
   .permissionSummaryCards,
   .toolAgentFitPanel,
-  .image2ModelControls {
+  .image2ModelControls,
+  .toolBundleApplyBar {
     grid-template-columns: 1fr;
   }
 
