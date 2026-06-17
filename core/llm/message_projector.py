@@ -14,9 +14,9 @@ from .streaming import extract_text_content
 def normalize_messages_for_provider(messages: List[Any]) -> list[Any]:
     """Normalize persisted/UI messages before protocol-specific payload shaping."""
 
-    from core.chat.model_messages import normalize_model_messages
+    from core.chat.model_messages import normalize_provider_turn_messages
 
-    return normalize_model_messages(messages)
+    return normalize_provider_turn_messages(messages)
 
 
 def message_to_openai_dict(

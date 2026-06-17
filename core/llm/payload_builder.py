@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, Iterator, List
 
 from config import AppConfig, LLMProfile, ProviderConfig
+from core.chat.model_messages import normalize_provider_turn_messages
 
 from .adapters import ProviderAdapter
 from .protocol_resolver import ResolvedProtocolRoute
@@ -30,6 +31,7 @@ class PayloadPolicyActions:
     minimal_tool_schema: bool = False
     prompt_cache_provider_strategy: str = "disabled"
     qwen_prompt_cache_markers_added: int = 0
+    provider_tool_chain_repaired: int = 0
 
     def to_log_dict(self) -> Dict[str, Any]:
         return {
@@ -41,6 +43,7 @@ class PayloadPolicyActions:
             "payloadPolicyMinimalToolSchema": self.minimal_tool_schema,
             "promptCacheProviderStrategy": self.prompt_cache_provider_strategy,
             "payloadPolicyQwenPromptCacheMarkersAdded": self.qwen_prompt_cache_markers_added,
+            "payloadPolicyProviderToolChainRepaired": self.provider_tool_chain_repaired,
         }
 
 
@@ -174,6 +177,19 @@ def _default_prompt_cache_retention(strategy: str, *, model: str = "") -> str:
     }:
         return "in_memory"
     return ""
+
+
+def _message_chain_signature(messages: List[Dict[str, Any]]) -> str:
+    parts: list[str] = []
+    for item in list(messages or []):
+        if not isinstance(item, dict):
+            parts.append(repr(item))
+            continue
+        parts.append(str(item.get("role") or ""))
+        parts.append(str(item.get("content") or ""))
+        parts.append(str(item.get("tool_call_id") or ""))
+        parts.append(repr(item.get("tool_calls") or []))
+    return hashlib.sha256("\n".join(parts).encode("utf-8", errors="replace")).hexdigest()[:16]
 
 
 def _apply_system_message_policy(
@@ -524,6 +540,10 @@ def build_llm_payload(
         )
         for item in messages
     ]
+    normalized_signature = _message_chain_signature(normalized_messages)
+    normalized_messages = normalize_provider_turn_messages(normalized_messages)
+    if _message_chain_signature(normalized_messages) != normalized_signature:
+        policy_actions.provider_tool_chain_repaired += 1
     if has_prompt_cache_control and not preserve_cache_control:
         normalized_messages = strip_cache_control_from_messages(normalized_messages)
     if has_image_content:

@@ -123,16 +123,13 @@ def test_context_assembler_keeps_recent_tool_results_complete_for_model_input():
     ]
 
     assembled = assemble_conversation_context(messages, session_id="session-a", recent_message_limit=3)
-    assistant_message = next(item for item in assembled.history_messages if item.get("tool_calls"))
-    tool_message = next(item for item in assembled.history_messages if item.get("role") == "tool")
-    tool_call = assistant_message["tool_calls"][0]
+    assert not any(item.get("tool_calls") for item in assembled.history_messages)
+    assert not any(item.get("role") == "tool" for item in assembled.history_messages)
+    tool_summary = next(item for item in assembled.history_messages if "历史工具结果: cli_tool" in str(item.get("content") or ""))
 
-    assert tool_call["function"]["name"] == "cli_tool"
-    assert json.loads(tool_call["function"]["arguments"]) == {"command": "pytest -q", "timeout": 120}
-    assert tool_message["tool_call_id"] == tool_call["id"]
-    assert full_result in tool_message["content"]
-    assert "terminal-line\n" * 20 in tool_message["content"]
-    assert "Windows detected" not in tool_message["content"]
+    assert full_result.strip() in tool_summary["content"]
+    assert "terminal-line\n" * 20 in tool_summary["content"]
+    assert "Windows detected" not in tool_summary["content"]
 
 
 def test_context_hash_tracks_canonical_tool_call_identity():
@@ -194,7 +191,10 @@ def test_context_assembler_replaces_large_tool_results_only_for_compression():
     ]
 
     normal = assemble_conversation_context(messages, session_id="session-a", recent_message_limit=4)
-    normal_tool = next(item for item in normal.history_messages if item.get("role") == "tool")
+    normal_tool = next(
+        item for item in normal.history_messages if "历史工具结果: cli_tool" in str(item.get("content") or "")
+    )
+    assert normal_tool["role"] == "assistant"
     assert large_result.strip() in normal_tool["content"]
     assert normal.tool_result_replacement_state["replacements"] == []
 
@@ -205,7 +205,9 @@ def test_context_assembler_replaces_large_tool_results_only_for_compression():
         replace_large_tool_results_for_compression=True,
         tool_result_replacement_char_limit=200,
     )
-    compressed_tool = next(item for item in compressed.history_messages if item.get("role") == "tool")
+    compressed_tool = next(
+        item for item in compressed.history_messages if "历史工具结果: cli_tool" in str(item.get("content") or "")
+    )
 
     assert large_result not in compressed_tool["content"]
     assert "tool-result-ref:" in compressed_tool["content"]
@@ -277,10 +279,10 @@ def test_context_assembler_replays_conversation_ledger_over_message_tail(tmp_pat
     assert "继续刚才中断的修复" in contents
     assert "已经完成一半实现。" in contents
     assert any(TURN_INTERRUPTED_MARKER in content for content in contents)
-    assistant_tool_message = next(item for item in assembled.history_messages if item.get("tool_calls"))
-    tool_result_message = next(item for item in assembled.history_messages if item.get("role") == "tool")
-    assert assistant_tool_message["tool_calls"][0]["function"]["name"] == "cli_tool"
-    assert full_result in tool_result_message["content"]
+    assert not any(item.get("tool_calls") for item in assembled.history_messages)
+    assert not any(item.get("role") == "tool" for item in assembled.history_messages)
+    tool_summary = next(item for item in assembled.history_messages if "历史工具结果: cli_tool" in str(item.get("content") or ""))
+    assert full_result.strip() in tool_summary["content"]
 
 
 def test_context_assembler_excludes_current_turn_ledger_from_history_seed(tmp_path):

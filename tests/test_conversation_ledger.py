@@ -48,9 +48,9 @@ def test_conversation_ledger_appends_and_projects_model_messages(tmp_path):
     assert messages[0]["role"] == "user"
     assert messages[0]["content"] == "继续修复单一事实源"
     assert messages[1]["role"] == "assistant"
-    assert messages[2]["role"] == "tool"
-    assert messages[2]["tool_call_id"] == "tool-1"
-    assert "测试通过" in messages[2]["content"]
+    assert not any(message.get("role") == "tool" for message in messages)
+    assert "历史工具结果: cli_tool" in messages[1]["content"]
+    assert "测试通过" in messages[1]["content"]
 
 
 def test_conversation_ledger_preserves_interrupted_partial(tmp_path):

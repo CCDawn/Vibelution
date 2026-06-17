@@ -1,5 +1,3 @@
-import json
-
 import pytest
 
 from config import Settings
@@ -16,7 +14,7 @@ def make_config(**kwargs):
     return Settings(None, **kwargs).config
 
 
-def test_projector_splits_legacy_tool_calls_into_assistant_and_tool_messages():
+def test_projector_demotes_legacy_tool_calls_with_results_to_semantic_history():
     full_result = "line\n" * 300
 
     projected = normalize_messages_for_provider(
@@ -39,16 +37,14 @@ def test_projector_splits_legacy_tool_calls_into_assistant_and_tool_messages():
         ]
     )
 
-    assert [message["role"] for message in projected] == ["user", "assistant", "tool"]
-    assert projected[1]["tool_calls"][0]["id"] == "call_1"
-    assert projected[1]["tool_calls"][0]["function"]["name"] == "cli_tool"
-    assert json.loads(projected[1]["tool_calls"][0]["function"]["arguments"]) == {"command": "pytest -q"}
-    assert projected[2]["tool_call_id"] == "call_1"
-    assert full_result in projected[2]["content"]
-    assert "short preview must not win" not in projected[2]["content"]
+    assert [message["role"] for message in projected] == ["user", "assistant"]
+    assert not any(message.get("role") == "tool" for message in projected)
+    assert "历史工具结果: cli_tool" in projected[1]["content"]
+    assert full_result.strip() in projected[1]["content"]
+    assert "short preview must not win" not in projected[1]["content"]
 
 
-def test_llm_client_payload_accepts_camel_case_tool_calls_after_projection():
+def test_llm_client_payload_demotes_history_tool_results_after_projection():
     config = make_config(
         **{
             "llm.providers.default.kind": "openai_compatible",
@@ -78,10 +74,73 @@ def test_llm_client_payload_accepts_camel_case_tool_calls_after_projection():
         ]
     )
 
-    assert [message["role"] for message in payload["messages"]] == ["assistant", "tool", "user"]
-    assert payload["messages"][0]["tool_calls"][0]["id"] == "call_history"
-    assert payload["messages"][1]["tool_call_id"] == "call_history"
-    assert "完整历史证据" in payload["messages"][1]["content"]
+    assert [message["role"] for message in payload["messages"]] == ["assistant", "user"]
+    assert "tool_calls" not in payload["messages"][0]
+    assert "完整历史证据" in payload["messages"][0]["content"]
+
+
+def test_llm_client_payload_repairs_orphan_tool_result_before_provider():
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "openai_compatible",
+            "llm.providers.default.api_key": "test-key",
+            "llm.providers.default.base_url": "https://example.test/v1",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "gpt-4o",
+        }
+    )
+
+    client = LLMClient(config=config, backend=lambda payload: payload)
+    payload = client._build_payload(
+        [
+            {
+                "role": "tool",
+                "tool_call_id": "call_orphan",
+                "content": "payload_protocol_error: Tool result has no pending assistant tool call.",
+            },
+            {"role": "user", "content": "继续"},
+        ]
+    )
+
+    assert [message["role"] for message in payload["messages"]] == ["assistant", "user"]
+    assert "历史工具结果: unknown_tool" in payload["messages"][0]["content"]
+    assert "pending assistant tool call" in payload["messages"][0]["content"]
+    assert client._last_payload_protocol_summary["payloadValidationResult"] == "passed"
+
+
+def test_llm_client_payload_repairs_unresolved_tool_call_before_provider():
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "openai_compatible",
+            "llm.providers.default.api_key": "test-key",
+            "llm.providers.default.base_url": "https://example.test/v1",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "gpt-4o",
+        }
+    )
+
+    client = LLMClient(config=config, backend=lambda payload: payload)
+    payload = client._build_payload(
+        [
+            {
+                "role": "assistant",
+                "content": "准备读取文件",
+                "tool_calls": [
+                    {
+                        "id": "call_pending",
+                        "type": "function",
+                        "function": {"name": "read_file_tool", "arguments": "{\"file_path\":\"demo.py\"}"},
+                    }
+                ],
+            },
+            {"role": "user", "content": "继续"},
+        ]
+    )
+
+    assert [message["role"] for message in payload["messages"]] == ["assistant", "user"]
+    assert "tool_calls" not in payload["messages"][0]
+    assert "历史工具调用未返回结果: read_file_tool" in payload["messages"][0]["content"]
+    assert client._last_payload_protocol_summary["payloadValidationResult"] == "passed"
 
 
 def test_responses_payload_converts_images_after_canonical_projection():

@@ -8,6 +8,8 @@ import re
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, Optional
 
+from langchain_core.messages import AIMessage
+
 
 @dataclass
 class LifecycleDecision:
@@ -306,7 +308,7 @@ class TurnOutcomeController:
         allow_append_user_message: bool = False,
     ) -> tuple[list, bool]:
         if allow_append_user_message and active_turn_messages:
-            messages = list(active_turn_messages or [])
+            messages = cls.sanitize_provider_turn_carryover(list(active_turn_messages or []))
             if messages:
                 messages[0] = build_system_message(system_prompt)
             else:
@@ -319,7 +321,7 @@ class TurnOutcomeController:
             effective_goal=effective_goal,
             user_prompt=user_prompt,
         ):
-            messages = list(active_turn_messages or [])
+            messages = cls.sanitize_provider_turn_carryover(list(active_turn_messages or []))
             if messages:
                 messages[0] = build_system_message(system_prompt)
             else:
@@ -345,7 +347,7 @@ class TurnOutcomeController:
 
         if not context_messages:
             return list(messages or [])
-        normalized = list(messages or [])
+        normalized = TurnOutcomeController.sanitize_provider_turn_carryover(list(messages or []))
         insert_at = 1 if normalized else 0
         for index in range(len(normalized) - 1, -1, -1):
             item = normalized[index]
@@ -391,7 +393,72 @@ class TurnOutcomeController:
     ) -> TurnMessageCarryover:
         if lifecycle_action in {"restart", "hibernated", "turn_complete"}:
             return TurnMessageCarryover(messages=None, goal="")
-        return TurnMessageCarryover(messages=list(messages), goal=active_goal)
+        return TurnMessageCarryover(
+            messages=TurnOutcomeController.sanitize_provider_turn_carryover(list(messages)),
+            goal=active_goal,
+        )
+
+    @staticmethod
+    def sanitize_provider_turn_carryover(messages: list) -> list:
+        """Keep resumed turn context provider-safe without discarding useful evidence.
+
+        Complete live pairs are preserved as ``assistant.tool_calls`` followed by
+        matching ``ToolMessage``/``role=tool`` messages.  Anything that would be
+        illegal in the next provider payload is demoted to ordinary assistant
+        text, so a later "继续" can still see what happened without sending a
+        dangling tool protocol frame.
+        """
+
+        sanitized: list = []
+        pending_ids: list[str] = []
+        pending_assistant_index = -1
+        pending_result_indices: list[int] = []
+
+        def demote_pending_chain() -> None:
+            nonlocal pending_ids, pending_assistant_index, pending_result_indices
+            if 0 <= pending_assistant_index < len(sanitized):
+                sanitized[pending_assistant_index] = _demote_assistant_tool_calls(
+                    sanitized[pending_assistant_index]
+                )
+            for result_index in pending_result_indices:
+                if 0 <= result_index < len(sanitized):
+                    sanitized[result_index] = _demote_tool_result_message(sanitized[result_index])
+            pending_ids = []
+            pending_assistant_index = -1
+            pending_result_indices = []
+
+        for message in list(messages or []):
+            role = _message_role(message)
+            if role == "assistant":
+                if pending_ids:
+                    demote_pending_chain()
+                sanitized.append(message)
+                tool_call_ids = _message_tool_call_ids(message)
+                if tool_call_ids:
+                    pending_ids = list(tool_call_ids)
+                    pending_assistant_index = len(sanitized) - 1
+                    pending_result_indices = []
+                continue
+            if role == "tool":
+                tool_call_id = _message_tool_result_id(message)
+                if tool_call_id and tool_call_id in pending_ids:
+                    sanitized.append(message)
+                    pending_result_indices.append(len(sanitized) - 1)
+                    pending_ids = [item for item in pending_ids if item != tool_call_id]
+                    if not pending_ids:
+                        pending_assistant_index = -1
+                        pending_result_indices = []
+                    continue
+                if pending_ids:
+                    demote_pending_chain()
+                sanitized.append(_demote_tool_result_message(message))
+                continue
+            if pending_ids:
+                demote_pending_chain()
+            sanitized.append(message)
+        if pending_ids:
+            demote_pending_chain()
+        return sanitized
 
     @staticmethod
     def handle_lifecycle_action(lifecycle_action: Optional[str]) -> LifecycleDecision:
@@ -421,3 +488,104 @@ class TurnOutcomeController:
             ui_status="SUCCESS" if turn_success else ("ERROR" if last_turn_failed else "IDLE"),
             turn_stats=round_state.final_stats(),
         )
+
+
+def _message_role(message: Any) -> str:
+    if isinstance(message, dict):
+        role = str(message.get("role") or "").strip().lower()
+    else:
+        role = str(getattr(message, "type", "") or "").strip().lower()
+    if role == "ai":
+        return "assistant"
+    if role == "human":
+        return "user"
+    return role
+
+
+def _message_tool_call_ids(message: Any) -> list[str]:
+    raw_tool_calls: Any = []
+    if isinstance(message, dict):
+        raw_tool_calls = message.get("tool_calls") or message.get("toolCalls") or []
+    else:
+        raw_tool_calls = getattr(message, "tool_calls", None) or []
+        if not raw_tool_calls:
+            additional_kwargs = getattr(message, "additional_kwargs", None)
+            if isinstance(additional_kwargs, dict):
+                raw_tool_calls = additional_kwargs.get("tool_calls") or []
+    ids: list[str] = []
+    for index, item in enumerate(list(raw_tool_calls or [])):
+        if not isinstance(item, dict):
+            continue
+        tool_call_id = str(item.get("id") or item.get("tool_call_id") or item.get("toolCallId") or "").strip()
+        if not tool_call_id:
+            tool_call_id = f"tool_{index}"
+        ids.append(tool_call_id)
+    return ids
+
+
+def _message_tool_result_id(message: Any) -> str:
+    if isinstance(message, dict):
+        return str(message.get("tool_call_id") or message.get("toolCallId") or message.get("id") or "").strip()
+    return str(getattr(message, "tool_call_id", "") or getattr(message, "id", "") or "").strip()
+
+
+def _message_content_text(message: Any) -> str:
+    content = message.get("content") if isinstance(message, dict) else getattr(message, "content", "")
+    if isinstance(content, list):
+        parts: list[str] = []
+        for item in content:
+            if isinstance(item, dict):
+                parts.append(str(item.get("text") or item.get("content") or ""))
+            else:
+                parts.append(str(item or ""))
+        return "".join(parts).strip()
+    return str(content or "").strip()
+
+
+def _tool_call_name(item: Any) -> str:
+    if not isinstance(item, dict):
+        return "unknown_tool"
+    function = item.get("function") if isinstance(item.get("function"), dict) else {}
+    return str(item.get("name") or item.get("toolName") or function.get("name") or "unknown_tool").strip()
+
+
+def _message_tool_calls(message: Any) -> list[dict[str, Any]]:
+    if isinstance(message, dict):
+        raw_tool_calls = message.get("tool_calls") or message.get("toolCalls") or []
+    else:
+        raw_tool_calls = getattr(message, "tool_calls", None) or []
+        if not raw_tool_calls:
+            additional_kwargs = getattr(message, "additional_kwargs", None)
+            if isinstance(additional_kwargs, dict):
+                raw_tool_calls = additional_kwargs.get("tool_calls") or []
+    return [dict(item) for item in list(raw_tool_calls or []) if isinstance(item, dict)]
+
+
+def _demote_assistant_tool_calls(message: Any) -> AIMessage:
+    content_parts = [_message_content_text(message)]
+    for item in _message_tool_calls(message):
+        content_parts.append(f"历史工具调用未返回结果: {_tool_call_name(item)}")
+    content = "\n\n".join(part for part in content_parts if part).strip()
+    return AIMessage(content=content or "历史工具调用未返回结果: unknown_tool")
+
+
+def _demote_tool_result_message(message: Any) -> AIMessage:
+    content = _message_content_text(message)
+    name = ""
+    if isinstance(message, dict):
+        metadata = message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
+        name = str(metadata.get("toolName") or metadata.get("tool_name") or message.get("name") or "").strip()
+    else:
+        name = str(getattr(message, "name", "") or "").strip()
+    name = name or _tool_name_from_content(content) or "unknown_tool"
+    if content.startswith("历史工具结果:"):
+        return AIMessage(content=content)
+    return AIMessage(content=f"历史工具结果: {name}\n{content}".strip())
+
+
+def _tool_name_from_content(content: str) -> str:
+    first_line = str(content or "").splitlines()[0].strip() if str(content or "").splitlines() else ""
+    for marker in ("历史工具调用:", "历史工具调用：", "历史工具结果:", "历史工具结果："):
+        if first_line.startswith(marker):
+            return first_line[len(marker):].strip().split()[0] if first_line[len(marker):].strip() else ""
+    return ""

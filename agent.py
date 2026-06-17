@@ -1586,18 +1586,12 @@ class SelfEvolvingAgent:
                 else:
                     restored.append(build_chat_user_message(content))
             elif role == "assistant":
-                restored.extend(restored_tool_messages)
                 if content:
                     restored.append(AIMessage(content=str(content)))
+                restored.extend(restored_tool_messages)
             elif role == "tool":
-                tool_call_id = str(
-                    item.get("tool_call_id")
-                    or item.get("toolCallId")
-                    or item.get("id")
-                    or ""
-                ).strip()
-                if tool_call_id and content:
-                    restored.append(ToolMessage(content=str(content), tool_call_id=tool_call_id))
+                if content:
+                    restored.append(AIMessage(content=self._seeded_orphan_tool_result_content(item, content)))
         if len(restored) <= 1:
             self._active_turn_messages = None
             self._active_turn_goal = ""
@@ -1618,46 +1612,19 @@ class SelfEvolvingAgent:
             or message.get("tools")
             or []
         )
-        tool_calls: List[Dict[str, Any]] = []
-        tool_messages: List[ToolMessage] = []
+        tool_messages: List[AIMessage] = []
         for tool_index, entry in enumerate(list(tool_entries or []), start=1):
             if not isinstance(entry, dict):
                 continue
             name = cls._seeded_history_tool_name(entry)
             if not name:
                 continue
-            tool_call_id = str(
-                entry.get("id")
-                or entry.get("tool_call_id")
-                or entry.get("toolCallId")
-                or f"history_tool_{item_index}_{tool_index}"
-            ).strip()
-            function_block = entry.get("function") if isinstance(entry.get("function"), dict) else {}
-            arguments = entry.get("arguments") if isinstance(entry.get("arguments"), dict) else entry.get("args")
-            if not isinstance(arguments, dict):
-                raw_function_arguments = function_block.get("arguments")
-                if isinstance(raw_function_arguments, dict):
-                    arguments = raw_function_arguments
-                elif isinstance(raw_function_arguments, str):
-                    try:
-                        parsed_arguments = json.loads(raw_function_arguments)
-                    except json.JSONDecodeError:
-                        parsed_arguments = {}
-                    arguments = parsed_arguments if isinstance(parsed_arguments, dict) else {}
-            if not isinstance(arguments, dict):
-                arguments = {}
-            tool_calls.append({"name": name, "args": dict(arguments), "id": tool_call_id})
             result_content = cls._seeded_history_tool_result_content(name, entry)
             if result_content:
-                tool_messages.append(
-                    ToolMessage(
-                        content=result_content,
-                        tool_call_id=tool_call_id,
-                    )
-                )
-        if not tool_calls:
-            return []
-        return [AIMessage(content="", tool_calls=tool_calls), *tool_messages]
+                tool_messages.append(AIMessage(content=result_content))
+            else:
+                tool_messages.append(AIMessage(content=f"历史工具结果: {name}\n状态: no_result"))
+        return tool_messages
 
     @staticmethod
     def _seeded_history_tool_name(entry: Dict[str, Any]) -> str:
@@ -1690,12 +1657,31 @@ class SelfEvolvingAgent:
             result_text = str(result or "")
         if not status and not result_text:
             return ""
-        lines = [f"历史工具调用: {name}"]
+        lines = [f"历史工具结果: {name}"]
         if status:
             lines.append(f"状态: {status}")
         if result_text:
             lines.extend(["结果:", result_text])
         return "\n".join(lines)
+
+    @staticmethod
+    def _seeded_orphan_tool_result_content(message: Dict[str, Any], content: Any) -> str:
+        text = str(content or "").strip()
+        first_line = text.splitlines()[0].strip() if text.splitlines() else ""
+        name = ""
+        for marker in ("历史工具调用:", "历史工具调用：", "历史工具结果:", "历史工具结果："):
+            if first_line.startswith(marker):
+                suffix = first_line[len(marker):].strip()
+                name = suffix.split()[0] if suffix else ""
+                break
+        if not name:
+            metadata = message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
+            name = str(metadata.get("toolName") or metadata.get("tool_name") or "").strip()
+        if not name:
+            name = "unknown_tool"
+        if text.startswith("历史工具结果:"):
+            return text
+        return f"历史工具结果: {name}\n{text}".strip()
 
     @staticmethod
     def _sanitize_seeded_chat_content(role: str, content: str) -> str:
