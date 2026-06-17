@@ -75,6 +75,7 @@ const WORKFLOW_GRAPH_NODE_GAP = 18;
 const WORKFLOW_GRAPH_MARGIN_X = 22;
 const WORKFLOW_GRAPH_MARGIN_Y = 28;
 const SOURCE_COLLECTION_RUN_PREVIEW_LIMIT = 20;
+const SOURCE_COLLECTION_RESULT_PAGE_SIZE = 8;
 const SOURCE_COLLECTION_DEFAULT_ROLES = ["data_discovery", "source_acquisition", "content_extraction", "source_quality"];
 const SOURCE_COLLECTION_SEARCH_EXECUTION_ROLES = new Set(["data_discovery", "source_acquisition"]);
 const SOURCE_COLLECTION_PROMPT_CACHE_POLICY = {
@@ -244,12 +245,16 @@ type SourceCollectionTraceMessage = {
   body: string;
   status: string;
   tone: "plan" | "cache" | "search" | "acquire" | "extract" | "quality" | "storage" | "blocked";
+  inputLabel: string;
+  outputLabel: string;
+  nextLabel: string;
   refs: string[];
   storageRefs: string[];
 };
 
 type SourceCollectionStepState = "active" | "done" | "failed" | "idle" | "pending";
 type SourceCollectionStageModuleId = "collection" | "screening" | "candidate" | "graph" | "memory";
+type SourceCollectionStageViewMode = "process" | "results";
 
 type SourceCollectionCandidateWithSource = TeamWorkflowCandidate & {
   sourcePath?: string;
@@ -285,6 +290,9 @@ type SourceCollectionStageModule = {
   label: string;
   metric: string;
   summary: string;
+  inputLabel: string;
+  outputLabel: string;
+  nextLabel: string;
   state: SourceCollectionStepState;
   status: string;
   detailLabel: string;
@@ -2637,6 +2645,14 @@ export function TeamsRoute({
   const [selectedSourceCollectionStageId, setSelectedSourceCollectionStageId] = useState<SourceCollectionStageModuleId>(
     requestedSourceCollectionStage ?? "collection",
   );
+  const [sourceCollectionStageViewMode, setSourceCollectionStageViewMode] = useState<SourceCollectionStageViewMode>("results");
+  const [sourceCollectionResultPageByStage, setSourceCollectionResultPageByStage] = useState<Record<SourceCollectionStageModuleId, number>>({
+    collection: 1,
+    screening: 1,
+    candidate: 1,
+    graph: 1,
+    memory: 1,
+  });
   const [sourceCollectionExpandedPanelId, setSourceCollectionExpandedPanelId] = useState("");
   const [sourceCollectionFocusedPanelId, setSourceCollectionFocusedPanelId] = useState("");
   const [sourceCollectionSourceFilter, setSourceCollectionSourceFilter] = useState<SourceCollectionSourceFilter>("all");
@@ -2975,6 +2991,16 @@ export function TeamsRoute({
       setSelectedSourceCollectionStageId(requestedSourceCollectionStage);
     }
   }, [requestedSourceCollectionStage]);
+
+  useEffect(() => {
+    setSourceCollectionResultPageByStage({
+      collection: 1,
+      screening: 1,
+      candidate: 1,
+      graph: 1,
+      memory: 1,
+    });
+  }, [selectedSourceCollectionRunEffectiveId, sourceCollectionSourceFilter]);
 
   useEffect(() => {
     if (selectedNode) {
@@ -3763,6 +3789,56 @@ export function TeamsRoute({
     );
   }
 
+  function sourceCollectionPageItems<T>(stageId: SourceCollectionStageModuleId, items: T[]) {
+    const pageCount = Math.max(1, Math.ceil(items.length / SOURCE_COLLECTION_RESULT_PAGE_SIZE));
+    const page = Math.min(Math.max(1, sourceCollectionResultPageByStage[stageId] ?? 1), pageCount);
+    const start = (page - 1) * SOURCE_COLLECTION_RESULT_PAGE_SIZE;
+    return {
+      items: items.slice(start, start + SOURCE_COLLECTION_RESULT_PAGE_SIZE),
+      page,
+      pageCount,
+      start: items.length ? start + 1 : 0,
+      end: Math.min(items.length, start + SOURCE_COLLECTION_RESULT_PAGE_SIZE),
+    };
+  }
+
+  function setSourceCollectionResultPage(stageId: SourceCollectionStageModuleId, page: number) {
+    setSourceCollectionResultPageByStage((current) => ({
+      ...current,
+      [stageId]: Math.max(1, page),
+    }));
+  }
+
+  function renderSourceCollectionPagination(stageId: SourceCollectionStageModuleId, total: number) {
+    const pageCount = Math.max(1, Math.ceil(total / SOURCE_COLLECTION_RESULT_PAGE_SIZE));
+    if (pageCount <= 1) {
+      return null;
+    }
+    const page = Math.min(Math.max(1, sourceCollectionResultPageByStage[stageId] ?? 1), pageCount);
+    const start = (page - 1) * SOURCE_COLLECTION_RESULT_PAGE_SIZE + 1;
+    const end = Math.min(total, page * SOURCE_COLLECTION_RESULT_PAGE_SIZE);
+    return (
+      <div className={styles.sourceCollectionPagination} aria-label={lang === "zh" ? "结果分页" : "Result pagination"}>
+        <span>{lang === "zh" ? `第 ${start}-${end} 条 / 共 ${total} 条` : `${start}-${end} of ${total}`}</span>
+        <div>
+          <button type="button" disabled={page <= 1} onClick={() => setSourceCollectionResultPage(stageId, page - 1)}>
+            {lang === "zh" ? "上一页" : "Previous"}
+          </button>
+          <strong>{page}/{pageCount}</strong>
+          <button type="button" disabled={page >= pageCount} onClick={() => setSourceCollectionResultPage(stageId, page + 1)}>
+            {lang === "zh" ? "下一页" : "Next"}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  function openSourceCollectionStage(stageId: SourceCollectionStageModuleId, mode: SourceCollectionStageViewMode = "results") {
+    selectSourceCollectionStage(stageId);
+    setSourceCollectionStageViewMode(mode);
+    setSourceCollectionFocusedPanelId("");
+  }
+
   function renderResearchStageLauncher() {
     if (!researchWorkflowTeamSelected) {
       return null;
@@ -4318,7 +4394,33 @@ export function TeamsRoute({
     );
   }
 
-  function renderSourceCollectionConversation() {
+  function sourceCollectionTraceMessagesForStage(stageId: SourceCollectionStageModuleId) {
+    return sourceCollectionTraceMessages.filter((message) => {
+      if (stageId === "collection") {
+        return (
+          message.id === "coordination-plan"
+          || message.id === "prompt-cache-gate"
+          || message.id === "query-plan"
+          || message.id === "assignment-summary"
+          || message.id === "search-execution-summary"
+          || message.id.startsWith("active-work-")
+          || message.id.startsWith("writeback-")
+        );
+      }
+      if (stageId === "screening") {
+        return message.tone === "quality" || message.id === "assignment-summary";
+      }
+      if (stageId === "candidate") {
+        return message.id.startsWith("candidate-") || message.id.startsWith("writeback-") || message.id === "search-execution-summary";
+      }
+      if (stageId === "graph") {
+        return message.id.startsWith("candidate-") || message.tone === "quality";
+      }
+      return message.tone === "quality" || message.id.startsWith("candidate-");
+    });
+  }
+
+  function renderSourceCollectionStageProcessPanel(stageId: SourceCollectionStageModuleId) {
     const toneClass: Record<SourceCollectionTraceMessage["tone"], string> = {
       plan: styles.sourceCollectionTrace_plan,
       cache: styles.sourceCollectionTrace_cache,
@@ -4329,27 +4431,17 @@ export function TeamsRoute({
       storage: styles.sourceCollectionTrace_storage,
       blocked: styles.sourceCollectionTrace_blocked,
     };
-    const currentTraceMessage =
-      sourceCollectionTraceMessages.find((message) => message.id.startsWith("active-work-"))
-      ?? sourceCollectionTraceMessages.find((message) => message.id === "search-execution-summary")
-      ?? sourceCollectionTraceMessages.find((message) => message.id.startsWith("writeback-"))
-      ?? (sourceCollectionOperationFailed ? sourceCollectionTraceMessages.find((message) => message.tone === "blocked") : null)
-      ?? (!selectedSourceCollectionRun ? sourceCollectionTraceMessages.find((message) => message.id === "coordination-plan") : null)
-      ?? (sourceCollectionSearchOpenAssignmentCount > 0 || sourceCollectionDownstreamOpenAssignmentCount > 0 ? sourceCollectionTraceMessages.find((message) => message.id === "assignment-summary") : null)
-      ?? (sourceCollectionRunCandidateCount ? sourceCollectionTraceMessages.find((message) => message.id.startsWith("candidate-")) : null)
-      ?? sourceCollectionTraceMessages[0]
-      ?? null;
-    const visibleResults = sourceCollectionFilteredRecords;
+    const messages = sourceCollectionTraceMessagesForStage(stageId);
     return (
-      <section id="source-collection-process" className={styles.sourceCollectionConversationPanel} aria-label={lang === "zh" ? "搜集对话流" : "Collection conversation"}>
+      <section className={styles.sourceCollectionConversationPanel} aria-label={lang === "zh" ? "阶段过程" : "Stage process"}>
         <div className={styles.sourceCollectionConversationHeader}>
           <div>
-            <strong>{lang === "zh" ? "当前搜集动作" : "Current collection action"}</strong>
+            <strong>{lang === "zh" ? "Agent 执行过程" : "Agent execution process"}</strong>
           </div>
-          <small>{sourceCollectionConsoleStatusText}</small>
+          <small>{messages.length} {lang === "zh" ? "步" : "steps"}</small>
         </div>
         <div className={styles.sourceCollectionTraceList}>
-          {currentTraceMessage ? [currentTraceMessage].map((message, index) => (
+          {messages.length ? messages.map((message, index) => (
             <article key={message.id} className={`${styles.sourceCollectionTraceMessage} ${toneClass[message.tone]}`}>
               <div className={styles.sourceCollectionTraceAvatar}>
                 <small>{String(index + 1).padStart(2, "0")}</small>
@@ -4357,17 +4449,19 @@ export function TeamsRoute({
               </div>
               <div className={styles.sourceCollectionTraceBody}>
                 <div className={styles.sourceCollectionTraceMeta}>
-                  <strong>{sourceCollectionTraceToneLabel(message.tone, lang)}</strong>
+                  <strong>{sourceCollectionAgentRoleLabel(message.agentRole, lang)}</strong>
                   <span>{sourceCollectionStatusLabel(message.status, lang)}</span>
                 </div>
                 <h3>{message.title}</h3>
-                <p>{message.body}</p>
-                <div className={styles.sourceCollectionTraceOwner}>
-                  <span>{sourceCollectionAgentRoleLabel(message.agentRole, lang)}</span>
+                <div className={styles.sourceCollectionTraceHandoff}>
+                  <span><b>{lang === "zh" ? "输入" : "Input"}</b>{message.inputLabel}</span>
+                  <span><b>{lang === "zh" ? "输出" : "Output"}</b>{message.outputLabel}</span>
+                  <span><b>{lang === "zh" ? "下一步" : "Next"}</b>{message.nextLabel}</span>
                 </div>
+                <p>{message.body}</p>
                 {message.refs.length || message.storageRefs.length ? (
                   <details className={styles.sourceCollectionTraceDetails}>
-                    <summary>{lang === "zh" ? "查看证据与存放位置" : "Evidence and storage"}</summary>
+                    <summary>{lang === "zh" ? "证据与存放位置" : "Evidence and storage"}</summary>
                     {message.refs.length ? (
                       <div className={styles.sourceCollectionTraceRefs}>
                         {message.refs.map((ref) => (
@@ -4401,9 +4495,95 @@ export function TeamsRoute({
               </div>
             </article>
           )) : (
-            <div className={styles.empty}>{lang === "zh" ? "还没有正在执行的搜集动作。" : "No active collection action yet."}</div>
+            <div className={styles.empty}>{lang === "zh" ? "当前阶段还没有可展示的 Agent 过程。" : "No Agent process records for this stage yet."}</div>
           )}
         </div>
+      </section>
+    );
+  }
+
+  function renderSourceCollectionConversation() {
+    const toneClass: Record<SourceCollectionTraceMessage["tone"], string> = {
+      plan: styles.sourceCollectionTrace_plan,
+      cache: styles.sourceCollectionTrace_cache,
+      search: styles.sourceCollectionTrace_search,
+      acquire: styles.sourceCollectionTrace_acquire,
+      extract: styles.sourceCollectionTrace_extract,
+      quality: styles.sourceCollectionTrace_quality,
+      storage: styles.sourceCollectionTrace_storage,
+      blocked: styles.sourceCollectionTrace_blocked,
+    };
+    const visibleTraceMessages = sourceCollectionTraceMessagesForStage("collection");
+    const pagedResults = sourceCollectionPageItems("collection", sourceCollectionFilteredRecords);
+    const visibleResults = pagedResults.items;
+    return (
+      <section id="source-collection-process" className={styles.sourceCollectionConversationPanel} aria-label={lang === "zh" ? "搜集对话流" : "Collection conversation"}>
+        <div className={styles.sourceCollectionConversationHeader}>
+          <div>
+            <strong>{sourceCollectionStageViewMode === "process" ? (lang === "zh" ? "搜集过程" : "Collection process") : (lang === "zh" ? "已收集资料" : "Collected sources")}</strong>
+          </div>
+          <small>{sourceCollectionStageViewMode === "process" ? `${visibleTraceMessages.length} ${lang === "zh" ? "步" : "steps"}` : `${pagedResults.start}-${pagedResults.end} / ${sourceCollectionFilteredRecords.length}`}</small>
+        </div>
+        {sourceCollectionStageViewMode === "process" ? (
+          <div className={styles.sourceCollectionTraceList}>
+            {visibleTraceMessages.length ? visibleTraceMessages.map((message, index) => (
+              <article key={message.id} className={`${styles.sourceCollectionTraceMessage} ${toneClass[message.tone]}`}>
+                <div className={styles.sourceCollectionTraceAvatar}>
+                  <small>{String(index + 1).padStart(2, "0")}</small>
+                  <span>{sourceCollectionTraceToneLabel(message.tone, lang)}</span>
+                </div>
+                <div className={styles.sourceCollectionTraceBody}>
+                  <div className={styles.sourceCollectionTraceMeta}>
+                    <strong>{sourceCollectionAgentRoleLabel(message.agentRole, lang)}</strong>
+                    <span>{sourceCollectionStatusLabel(message.status, lang)}</span>
+                  </div>
+                  <h3>{message.title}</h3>
+                  <div className={styles.sourceCollectionTraceHandoff}>
+                    <span><b>{lang === "zh" ? "输入" : "Input"}</b>{message.inputLabel}</span>
+                    <span><b>{lang === "zh" ? "输出" : "Output"}</b>{message.outputLabel}</span>
+                    <span><b>{lang === "zh" ? "下一步" : "Next"}</b>{message.nextLabel}</span>
+                  </div>
+                  <p>{message.body}</p>
+                  {message.refs.length || message.storageRefs.length ? (
+                    <details className={styles.sourceCollectionTraceDetails}>
+                      <summary>{lang === "zh" ? "证据与存放位置" : "Evidence and storage"}</summary>
+                      {message.refs.length ? (
+                        <div className={styles.sourceCollectionTraceRefs}>
+                          {message.refs.map((ref) => (
+                            <span key={ref}>{ref}</span>
+                          ))}
+                        </div>
+                      ) : null}
+                      {message.storageRefs.length ? (
+                        <div className={styles.sourceCollectionTraceStorage}>
+                          {message.storageRefs.map((ref) => {
+                            const target = sourceCollectionStorageTargetForRef(ref, selectedSourceCollectionStorageArtifacts);
+                            return target ? (
+                              <button
+                                key={ref}
+                                type="button"
+                                disabled={selectedSourceCollectionStorageOpenPending}
+                                onClick={() => openSourceCollectionStorageTarget(target)}
+                                title={ref}
+                              >
+                                <Link2 size={12} />
+                                {sourceCollectionStorageTargetLabel(target, lang)}
+                              </button>
+                            ) : (
+                              <span key={ref}>{ref}</span>
+                            );
+                          })}
+                        </div>
+                      ) : null}
+                    </details>
+                  ) : null}
+                </div>
+              </article>
+            )) : (
+              <div className={styles.empty}>{lang === "zh" ? "还没有搜集过程记录。" : "No collection process records yet."}</div>
+            )}
+          </div>
+        ) : (
         <section id="source-collection-results" className={styles.sourceCollectionResultsPanel} aria-label={lang === "zh" ? "本轮原始资料记录" : "Raw collected records"}>
           <div className={styles.sourceCollectionResultsHeader}>
             <strong>{lang === "zh" ? "本轮原始资料记录" : "Raw records in this run"}</strong>
@@ -4500,10 +4680,12 @@ export function TeamsRoute({
             <div className={styles.empty}>
               {sourceCollectionRecords.length
                 ? (lang === "zh" ? "当前过滤条件下没有原始资料记录。" : "No raw records match this filter.")
-                : (lang === "zh" ? "暂无原始资料记录。点击资料搜集卡的开始按钮后，搜索结果会先写到这里。" : "No raw records yet.")}
+              : (lang === "zh" ? "暂无原始资料记录。点击资料搜集卡的开始按钮后，搜索结果会先写到这里。" : "No raw records yet.")}
             </div>
           )}
+          {renderSourceCollectionPagination("collection", sourceCollectionFilteredRecords.length)}
         </section>
+        )}
       </section>
     );
   }
@@ -4687,7 +4869,9 @@ export function TeamsRoute({
   }
 
   function renderSourceCollectionScreeningPanel() {
-    const screeningCandidates = sourceCollectionFilteredRunCandidates;
+    const filteredScreeningCandidates = sourceCollectionFilteredRunCandidates;
+    const pagedScreeningCandidates = sourceCollectionPageItems("screening", filteredScreeningCandidates);
+    const screeningCandidates = pagedScreeningCandidates.items;
     return (
       <details
         id="source-collection-screening-panel"
@@ -4707,12 +4891,12 @@ export function TeamsRoute({
       >
         <summary>
           <span>{lang === "zh" ? "资料筛选" : "Source screening"}</span>
-          <small>{sourceCollectionRunAssessedCount}/{sourceCollectionRunCandidateCount}</small>
+          <small>{pagedScreeningCandidates.start}-{pagedScreeningCandidates.end}/{filteredScreeningCandidates.length}</small>
         </summary>
         {renderSourceCollectionFilterBar(sourceCollectionCandidateFilterCounts, lang === "zh" ? "筛选资料过滤" : "Screening source filters")}
         <div id="source-collection-screening-stats" className={styles.workflowSourceQualityStats}>
           <span>{lang === "zh" ? "本轮候选" : "run candidates"} <strong>{sourceCollectionRunCandidateCount}</strong></span>
-          <span>{lang === "zh" ? "当前显示" : "showing"} <strong>{screeningCandidates.length}</strong></span>
+          <span>{lang === "zh" ? "当前过滤" : "filtered"} <strong>{filteredScreeningCandidates.length}</strong></span>
           <span>{lang === "zh" ? "已筛" : "assessed"} <strong>{sourceCollectionRunAssessedCount}</strong></span>
           <span>{lang === "zh" ? "通过" : "approved"} <strong>{sourceCollectionRunApprovedCount}</strong></span>
           <span>{lang === "zh" ? "待筛" : "pending"} <strong>{sourceCollectionRunPendingScreeningCount}</strong></span>
@@ -4872,9 +5056,10 @@ export function TeamsRoute({
           <div className={styles.empty}>
             {sourceCollectionRunCandidateCount
               ? (lang === "zh" ? "当前过滤条件下没有候选资料。" : "No candidates match this filter.")
-              : (lang === "zh" ? "本轮还没有候选资料。先完成资料搜集并导入候选。" : "No candidates from this run yet.")}
+            : (lang === "zh" ? "本轮还没有候选资料。先完成资料搜集并导入候选。" : "No candidates from this run yet.")}
           </div>
         )}
+        {renderSourceCollectionPagination("screening", filteredScreeningCandidates.length)}
         {teamWorkflowSourceQualityStatus?.actionItems.length ? (
           <div className={styles.workflowIngestionActions}>
             {teamWorkflowSourceQualityStatus.actionItems.slice(0, 3).map((item) => (
@@ -4895,7 +5080,9 @@ export function TeamsRoute({
   }
 
   function renderSourceCollectionCandidatePanel() {
-    const visibleCandidates = sourceCollectionFilteredRunCandidates;
+    const filteredCandidates = sourceCollectionFilteredRunCandidates;
+    const pagedCandidates = sourceCollectionPageItems("candidate", filteredCandidates);
+    const visibleCandidates = pagedCandidates.items;
     return (
       <details
         id="source-collection-candidates-panel"
@@ -4914,12 +5101,12 @@ export function TeamsRoute({
       >
         <summary>
           <span>{lang === "zh" ? "候选库" : "Candidate library"}</span>
-          <small>{sourceCollectionRunCandidateCount}</small>
+          <small>{pagedCandidates.start}-{pagedCandidates.end}/{filteredCandidates.length}</small>
         </summary>
         {renderSourceCollectionFilterBar(sourceCollectionCandidateFilterCounts, lang === "zh" ? "候选资料过滤" : "Candidate source filters")}
         <div className={styles.workflowSourceQualityStats}>
           <span>{lang === "zh" ? "本轮候选" : "run candidates"} <strong>{sourceCollectionRunCandidateCount}</strong></span>
-          <span>{lang === "zh" ? "当前显示" : "showing"} <strong>{visibleCandidates.length}</strong></span>
+          <span>{lang === "zh" ? "当前过滤" : "filtered"} <strong>{filteredCandidates.length}</strong></span>
           <span>{lang === "zh" ? "已筛" : "assessed"} <strong>{sourceCollectionRunAssessedCount}</strong></span>
           <span>{lang === "zh" ? "通过" : "approved"} <strong>{sourceCollectionRunApprovedCount}</strong></span>
           <span>{lang === "zh" ? "待筛" : "pending"} <strong>{sourceCollectionRunPendingScreeningCount}</strong></span>
@@ -4984,9 +5171,10 @@ export function TeamsRoute({
           <div className={styles.empty}>
             {sourceCollectionRunCandidateCount
               ? (lang === "zh" ? "当前过滤条件下没有候选资料。" : "No candidates match this filter.")
-              : (lang === "zh" ? "本轮暂无候选资料。" : "No candidates from this run yet.")}
+            : (lang === "zh" ? "本轮暂无候选资料。" : "No candidates from this run yet.")}
           </div>
         )}
+        {renderSourceCollectionPagination("candidate", filteredCandidates.length)}
       </details>
     );
   }
@@ -5030,6 +5218,7 @@ export function TeamsRoute({
     const visibleGraphLayout = visibleGraph && visibleGraphSummary
       ? workflowGraphLayout({ ...visibleGraph, summary: { ...visibleGraph.summary, ...visibleGraphSummary } })
       : null;
+    const pagedGraphNodes = sourceCollectionPageItems("graph", visibleGraph?.nodes ?? []);
     return (
       <details
         id="source-collection-graph-panel"
@@ -5048,7 +5237,7 @@ export function TeamsRoute({
       >
         <summary>
           <span>{lang === "zh" ? "候选图谱" : "Candidate graph"}</span>
-          <small>{candidateGraphNodeCount} / {candidateGraphEdgeCount}</small>
+          <small>{visibleGraph ? `${pagedGraphNodes.start}-${pagedGraphNodes.end}/${visibleGraph.nodes.length}` : `${candidateGraphNodeCount} / ${candidateGraphEdgeCount}`}</small>
         </summary>
         {renderSourceCollectionFilterBar(graphFilterCounts, lang === "zh" ? "图谱节点过滤" : "Graph source filters")}
         {visibleGraph && visibleGraphLayout && visibleGraphSummary && visibleGraph.nodes.length ? (
@@ -5102,7 +5291,7 @@ export function TeamsRoute({
             </div>
             {visibleGraph.nodes.length ? (
               <div className={styles.workflowCandidateList}>
-                {visibleGraph.nodes.map((node) => {
+                {pagedGraphNodes.items.map((node) => {
                   const candidate = teamWorkflowCandidatesById.get(node.candidateId) ?? null;
                   const provenance = candidate ? sourceCollectionCandidateProvenance(candidate, lang) : null;
                   const selected = candidate ? selectedSourceCollectionCandidateId === candidate.candidateId : false;
@@ -5151,6 +5340,7 @@ export function TeamsRoute({
                 })}
               </div>
             ) : null}
+            {renderSourceCollectionPagination("graph", visibleGraph.nodes.length)}
           </>
         ) : (
           <div className={styles.empty}>
@@ -5185,7 +5375,8 @@ export function TeamsRoute({
     const memoryCandidates = sourceCollectionFilteredRunCandidates.filter((candidate) =>
       sourceCollectionCandidateQualityState(candidate).approved || actionItemsByCandidateId.has(candidate.candidateId),
     );
-    const visibleMemoryCandidates = memoryCandidates.length ? memoryCandidates : sourceCollectionFilteredRunCandidates;
+    const visibleMemoryCandidates = memoryCandidates;
+    const pagedMemoryCandidates = sourceCollectionPageItems("memory", visibleMemoryCandidates);
     const orphanActionItems = actionItems.filter((item) => !item.candidateId || !teamWorkflowCandidatesById.has(item.candidateId));
     return (
       <details
@@ -5205,18 +5396,18 @@ export function TeamsRoute({
       >
         <summary>
           <span>{lang === "zh" ? "共享记忆前审" : "Memory precheck"}</span>
-          <small>{knowledgePendingReviewCount} / {formalKnowledgeItemCount}</small>
+          <small>{pagedMemoryCandidates.start}-{pagedMemoryCandidates.end}/{visibleMemoryCandidates.length}</small>
         </summary>
         {renderSourceCollectionFilterBar(sourceCollectionCandidateFilterCounts, lang === "zh" ? "前审资料过滤" : "Memory precheck source filters")}
         <div className={styles.workflowSourceQualityStats}>
           <span>{lang === "zh" ? "待审" : "pending"} <strong>{knowledgePendingReviewCount}</strong></span>
           <span>{lang === "zh" ? "正式" : "formal"} <strong>{formalKnowledgeItemCount}</strong></span>
           <span>{lang === "zh" ? "通过候选" : "approved"} <strong>{sourceCollectionApprovedCount}</strong></span>
-          <span>{lang === "zh" ? "当前显示" : "showing"} <strong>{visibleMemoryCandidates.length}</strong></span>
+          <span>{lang === "zh" ? "当前过滤" : "filtered"} <strong>{visibleMemoryCandidates.length}</strong></span>
         </div>
         {visibleMemoryCandidates.length ? (
           <div className={styles.workflowCandidateList}>
-            {visibleMemoryCandidates.map((candidate) => {
+            {pagedMemoryCandidates.items.map((candidate) => {
               const provenance = sourceCollectionCandidateProvenance(candidate, lang);
               const sourceQualitySummary = candidateSourceQualityAssessmentSummary(candidate);
               const candidateActionItems = actionItemsByCandidateId.get(candidate.candidateId) ?? [];
@@ -5279,6 +5470,7 @@ export function TeamsRoute({
         ) : (
           <div className={styles.empty}>{lang === "zh" ? "当前过滤条件下没有前审资料。" : "No memory precheck items match this filter."}</div>
         )}
+        {renderSourceCollectionPagination("memory", visibleMemoryCandidates.length)}
         {orphanActionItems.length ? (
           <div className={styles.workflowIngestionActions}>
             {orphanActionItems.map((item) => (
@@ -5313,7 +5505,7 @@ export function TeamsRoute({
       >
         <div className={styles.workflowIngestionHeader}>
           <div>
-            <strong>{lang === "zh" ? "阶段详情" : "Stage details"}</strong>
+            <strong>{lang === "zh" ? "下一步操作" : "Next action"}</strong>
             <span>
               {selectedSourceCollectionRun
                 ? `${sourceCollectionRunLabel(selectedSourceCollectionRun.runId)} · ${sourceCollectionStageFocusLabel}`
@@ -5659,19 +5851,53 @@ export function TeamsRoute({
   }
 
   function renderSourceCollectionActiveStagePanel() {
-    if (selectedSourceCollectionStageId === "screening") {
-      return renderSourceCollectionScreeningPanel();
-    }
-    if (selectedSourceCollectionStageId === "candidate") {
-      return renderSourceCollectionCandidatePanel();
-    }
-    if (selectedSourceCollectionStageId === "graph") {
-      return renderSourceCollectionGraphPanel();
-    }
-    if (selectedSourceCollectionStageId === "memory") {
-      return renderSourceCollectionMemoryPanel();
-    }
-    return renderSourceCollectionConversation();
+    const activeModule =
+      sourceCollectionStageModules.find((module) => module.id === selectedSourceCollectionStageId)
+      ?? sourceCollectionStageModules[0];
+    const resultPanel = selectedSourceCollectionStageId === "screening"
+      ? renderSourceCollectionScreeningPanel()
+      : selectedSourceCollectionStageId === "candidate"
+        ? renderSourceCollectionCandidatePanel()
+        : selectedSourceCollectionStageId === "graph"
+          ? renderSourceCollectionGraphPanel()
+          : selectedSourceCollectionStageId === "memory"
+            ? renderSourceCollectionMemoryPanel()
+            : renderSourceCollectionConversation();
+    return (
+      <section className={styles.sourceCollectionStageWorkspace} aria-label={lang === "zh" ? "当前阶段子页" : "Current stage workspace"}>
+        <div className={styles.sourceCollectionStageWorkspaceHeader}>
+          <div>
+            <strong>{activeModule.label}</strong>
+            <span>{activeModule.status}</span>
+          </div>
+          <div className={styles.sourceCollectionStageHandoff}>
+            <span><b>{lang === "zh" ? "输入" : "Input"}</b>{activeModule.inputLabel}</span>
+            <span><b>{lang === "zh" ? "输出" : "Output"}</b>{activeModule.outputLabel}</span>
+            <span><b>{lang === "zh" ? "下一步" : "Next"}</b>{activeModule.nextLabel}</span>
+          </div>
+        </div>
+        <div className={styles.sourceCollectionStageTabs} role="tablist" aria-label={lang === "zh" ? "阶段子页" : "Stage tabs"}>
+          {([
+            ["results", lang === "zh" ? "结果" : "Results"],
+            ["process", lang === "zh" ? "过程" : "Process"],
+          ] as const).map(([mode, label]) => (
+            <button
+              key={mode}
+              type="button"
+              role="tab"
+              aria-selected={sourceCollectionStageViewMode === mode}
+              className={sourceCollectionStageViewMode === mode ? styles.sourceCollectionStageTabActive : ""}
+              onClick={() => setSourceCollectionStageViewMode(mode)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        {sourceCollectionStageViewMode === "process"
+          ? renderSourceCollectionStageProcessPanel(selectedSourceCollectionStageId)
+          : resultPanel}
+      </section>
+    );
   }
 
   function renderResearchStageStandalonePage(stageView: Exclude<ResearchStageWorkspaceView, "knowledge_collection">) {
@@ -6317,6 +6543,9 @@ export function TeamsRoute({
         : (lang === "zh" ? "点击启动后会生成查询计划、团队 Agent 分工和回写契约。" : "Starting creates a query plan, team-agent assignments, and a writeback contract."),
       status: selectedSourceCollectionRun?.status || "pending",
       tone: selectedSourceCollectionRun ? "plan" : "blocked",
+      inputLabel: lang === "zh" ? "研究主题与目标" : "Topic and goal",
+      outputLabel: selectedSourceCollectionRun ? (lang === "zh" ? "搜集批次与回写边界" : "Run and writeback boundary") : (lang === "zh" ? "等待创建批次" : "Waiting for run"),
+      nextLabel: lang === "zh" ? "拆分搜索问题" : "Split search queries",
       refs: selectedSourceCollectionRun
         ? [
             `${lang === "zh" ? "批次" : "run"}: ${sourceCollectionRunLabel(selectedSourceCollectionRun.runId)}`,
@@ -6349,6 +6578,9 @@ export function TeamsRoute({
           : `This run uses ${sourceCollectionPromptCachePolicy?.modelName || sourceCollectionPromptCachePolicyRef?.modelId || SOURCE_COLLECTION_PROMPT_CACHE_MODEL_LABEL}. The stable prefix keeps team rules, schemas, and writeback boundaries; each search sends only the current query, result refs, and storage location.`,
         status: sourceCollectionPromptCacheStatusLabel(promptCacheGateStatus, lang),
         tone: promptCacheGateStatus === "blocked" ? "blocked" : "cache",
+        inputLabel: lang === "zh" ? "团队规则、结构契约" : "Team rules and schema",
+        outputLabel: lang === "zh" ? "可复用 KV 前缀" : "Reusable KV prefix",
+        nextLabel: lang === "zh" ? "执行单次搜索增量" : "Run query delta",
         refs: (lang === "zh"
           ? [
               `缓存要求：${sourceCollectionPromptCacheRequirement}`,
@@ -6382,6 +6614,9 @@ export function TeamsRoute({
           : `${plannedQueries.length || sourceCollectionSearchPlanRef?.queryCount || selectedTeamStartSourceCollectionResult?.searchPlan.queryCount || 0} visible queries are assigned by source type and language; queries are dynamic deltas outside the stable cached prefix.`,
         status: "planned",
         tone: "search",
+        inputLabel: lang === "zh" ? "主题、目标、搜索种子" : "Topic, goal, query seeds",
+        outputLabel: lang === "zh" ? "可执行搜索问题" : "Executable queries",
+        nextLabel: lang === "zh" ? "分配给功能 Agent" : "Assign to functional Agents",
         refs: plannedQueries.slice(0, 5).map((query) =>
           `${translateResearchPhrase(query.query, lang)} · ${sourceCollectionSourceTypeLabel(query.sourceType, lang)} · ${sourceCollectionLanguageLabel(query.language, lang)}`
         ),
@@ -6399,6 +6634,9 @@ export function TeamsRoute({
         body: selectedSourceCollectionActiveWorkRun.currentTask || selectedSourceCollectionActiveWorkRun.summary || (lang === "zh" ? "后台正在把搜索结果写成资料记录和候选资料。" : "The background worker is writing search results into records and candidates."),
         status: selectedSourceCollectionActiveWorkRun.status,
         tone: "search",
+        inputLabel: lang === "zh" ? "待执行搜索任务" : "Open search tasks",
+        outputLabel: lang === "zh" ? "资料记录与候选导入" : "Records and candidate imports",
+        nextLabel: lang === "zh" ? "等待后台回写" : "Wait for writeback",
         refs: [
           `${selectedSourceCollectionActiveWorkRun.searchOpenAssignmentCount ?? sourceCollectionSearchOpenAssignmentCount} ${lang === "zh" ? "个可搜索任务" : "searchable assignments"}`,
           `${selectedSourceCollectionActiveWorkRun.downstreamOpenAssignmentCount ?? sourceCollectionDownstreamOpenAssignmentCount} ${lang === "zh" ? "个后续任务" : "downstream assignments"}`,
@@ -6430,6 +6668,9 @@ export function TeamsRoute({
           : `This batch executed ${selectedTeamExecuteSourceCollectionSearchResult.executedQueryCount} queries, wrote ${selectedTeamExecuteSourceCollectionSearchResult.recordCount} DataRecords, and imported ${selectedTeamExecuteSourceCollectionSearchResult.importedCount} source_manifest candidates${failedCount ? `; ${failedCount} need follow-up` : ""}.`,
         status: failedCount ? "needs_attention" : "completed",
         tone: failedCount ? "blocked" : "storage",
+        inputLabel: lang === "zh" ? "本批搜索问题" : "Batch queries",
+        outputLabel: lang === "zh" ? "资料记录与候选资料" : "Records and candidate sources",
+        nextLabel: failedCount ? (lang === "zh" ? "修复失败搜索" : "Repair failed searches") : (lang === "zh" ? "进入资料筛选" : "Move to screening"),
         refs: [
           `${searchedCount} ${lang === "zh" ? "条元数据搜索" : "metadata searches"}`,
           ...evidenceRefs,
@@ -6449,6 +6690,9 @@ export function TeamsRoute({
           : `${sourceCollectionAssignments.length} assignments are allocated: ${sourceCollectionSearchOpenAssignmentCount} can still search and ${sourceCollectionDownstreamOpenAssignmentCount} wait for extraction or screening.`,
         status: sourceCollectionSearchOpenAssignmentCount ? "open" : "ready_for_screening",
         tone: sourceCollectionSearchOpenAssignmentCount ? "acquire" : "quality",
+        inputLabel: lang === "zh" ? "搜索计划" : "Search plan",
+        outputLabel: lang === "zh" ? "Agent 分工任务" : "Agent assignments",
+        nextLabel: sourceCollectionSearchOpenAssignmentCount ? (lang === "zh" ? "继续搜索" : "Continue searching") : (lang === "zh" ? "启动筛选" : "Start screening"),
         refs: [
           ...visibleAssignments.map((assignment) => `${sourceCollectionAgentRoleLabel(assignment.agentRole, lang)}：${sourceCollectionStatusLabel(assignment.status, lang)}`),
           ...assignedQueries.slice(0, 4).map((query) => translateResearchPhrase(query.query, lang)),
@@ -6470,6 +6714,9 @@ export function TeamsRoute({
           : `This writeback created ${records.length} DataRecords and imported ${selectedTeamRecordSourceCollectionOutputResult.imported.length} source_manifest candidates.`,
         status: outputRecord.status,
         tone: "storage",
+        inputLabel: lang === "zh" ? "手工/Agent 回写内容" : "Manual or Agent output",
+        outputLabel: lang === "zh" ? "DataRecord 与候选资料" : "DataRecord and candidate source",
+        nextLabel: lang === "zh" ? "资料筛选" : "Source screening",
         refs: records.slice(0, 4).map((record) => `${record.title || record.recordId} · ${record.sourceRef || record.rawLocation || sourceCollectionSourceTypeLabel(record.sourceType, lang)}`),
         storageRefs: [
           outputRecord.outputId,
@@ -6485,6 +6732,9 @@ export function TeamsRoute({
         body: candidate.summary || (lang === "zh" ? "该资料已作为候选保留，等待质量筛选或内容抽取。" : "This source is retained as a candidate for quality screening or extraction."),
         status: candidate.qualityStatus || candidate.currentState,
         tone: "storage",
+        inputLabel: lang === "zh" ? "资料记录" : "DataRecord",
+        outputLabel: lang === "zh" ? "候选资料" : "Candidate source",
+        nextLabel: lang === "zh" ? "质量筛选" : "Quality screening",
         refs: [candidate.title || candidate.candidateId, candidate.currentState].filter(Boolean),
         storageRefs: [candidate.candidateId, teamWorkflow?.candidateStore.storagePath || ""].filter(Boolean),
       });
@@ -6502,6 +6752,11 @@ export function TeamsRoute({
           : `${candidate.title}: ${workflowIngestionStatusLabel(candidate.decision || candidate.bucket, lang)}, overall ${candidate.overallScore || 0}/100.`,
         status: candidate.decision || candidate.bucket,
         tone: candidate.bucket === "rejected" ? "blocked" : "quality",
+        inputLabel: lang === "zh" ? "候选资料" : "Candidate source",
+        outputLabel: lang === "zh" ? "质量判断" : "Quality decision",
+        nextLabel: candidate.bucket === "approved" || candidate.decision === "approved"
+          ? (lang === "zh" ? "进入候选库" : "Move to candidate library")
+          : (lang === "zh" ? "退回补资料" : "Repair source"),
         refs: candidate.requiredFixes.length ? candidate.requiredFixes.slice(0, 3) : [candidate.sourceKind || "source_manifest"],
         storageRefs: [candidate.candidateId],
       });
@@ -6683,10 +6938,10 @@ export function TeamsRoute({
     if (!selectedTeam?.teamId || sourceCollectionScreeningDisabled) {
       return;
     }
-    scrollSourceCollectionPanelIntoView("source-collection-screening-panel");
+    openSourceCollectionStage("screening", "results");
   };
   const runSourceCollectionScreeningAction = () => {
-    selectSourceCollectionStage("screening");
+    openSourceCollectionStage("screening", "results");
     if (!selectedTeam?.teamId || sourceCollectionScreeningDisabled || selectedTeamSourceQualityPending) {
       return;
     }
@@ -6706,21 +6961,21 @@ export function TeamsRoute({
     if (!selectedTeam?.teamId) {
       return;
     }
-    scrollSourceCollectionPanelIntoView("source-collection-candidates-panel");
+    openSourceCollectionStage("candidate", "results");
   };
   const refreshSourceCollectionGraph = () => {
     if (!selectedTeam?.teamId || sourceCollectionRunCandidateCount <= 0 || selectedTeamBuildCandidateGraphPending) {
       return;
     }
     buildCandidateGraphMutation.mutate(selectedTeam.teamId);
-    scrollSourceCollectionPanelIntoView("source-collection-graph-panel");
+    openSourceCollectionStage("graph", "results");
   };
   const refreshSourceCollectionMemoryPrecheck = () => {
     if (!selectedTeam?.teamId || teamWorkflowKnowledgeIngestionStatusQuery.isFetching) {
       return;
     }
     void teamWorkflowKnowledgeIngestionStatusQuery.refetch();
-    scrollSourceCollectionPanelIntoView("source-collection-memory-panel");
+    openSourceCollectionStage("memory", "results");
   };
   const runSourceCollectionSearchFromHeader = () => {
     if (!selectedTeam?.teamId || !selectedSourceCollectionRunEffectiveId || !canExecuteSourceCollectionSearch) {
@@ -6742,7 +6997,7 @@ export function TeamsRoute({
     if (!selectedTeam?.teamId) {
       return;
     }
-    scrollSourceCollectionPanelIntoView("source-collection-process");
+    openSourceCollectionStage("collection", sourceCollectionSearchOpenAssignmentCount > 0 ? "process" : "results");
     if (!selectedSourceCollectionRun) {
       launchResearchStage("knowledge_collection");
       return;
@@ -6916,6 +7171,11 @@ export function TeamsRoute({
         : sourceCollectionSearchOpenAssignmentCount > 0
           ? (lang === "zh" ? `${sourceCollectionSearchOpenAssignmentCount} 个搜索任务待执行` : `${sourceCollectionSearchOpenAssignmentCount} search tasks remain`)
           : (lang === "zh" ? `已入候选 ${sourceCollectionRunCandidateCount} 条` : `${sourceCollectionRunCandidateCount} imported to candidates`),
+      inputLabel: lang === "zh" ? `${sourceCollectionQueryCount} 个搜索问题` : `${sourceCollectionQueryCount} queries`,
+      outputLabel: lang === "zh" ? `${sourceCollectionCollectedCount} 条原始资料` : `${sourceCollectionCollectedCount} raw records`,
+      nextLabel: sourceCollectionSearchOpenAssignmentCount > 0
+        ? (lang === "zh" ? "继续搜索" : "Continue search")
+        : (lang === "zh" ? "交给资料筛选" : "Send to screening"),
       state: sourceCollectionSearchStepState,
       status: sourceCollectionStepStatusText(sourceCollectionSearchStepState),
       detailLabel: lang === "zh" ? "查看搜集过程" : "View collection process",
@@ -6924,7 +7184,7 @@ export function TeamsRoute({
       actionTone: "primary",
       actionIcon: selectedSourceCollectionRun && sourceCollectionSearchOpenAssignmentCount > 0 ? "search" : "play",
       onAction: runSourceCollectionCollectionAction,
-      onDetail: () => scrollSourceCollectionPanelIntoView("source-collection-process"),
+      onDetail: () => openSourceCollectionStage("collection", "results"),
     },
     {
       id: "screening",
@@ -6935,6 +7195,11 @@ export function TeamsRoute({
         : sourceCollectionRunPendingScreeningCount > 0
           ? (lang === "zh" ? `${sourceCollectionRunPendingScreeningCount} 条等待 Agent 审查` : `${sourceCollectionRunPendingScreeningCount} wait for agent review`)
           : (lang === "zh" ? `${sourceCollectionRunApprovedCount} 条已通过` : `${sourceCollectionRunApprovedCount} approved`),
+      inputLabel: lang === "zh" ? `${sourceCollectionRunCandidateCount} 条候选资料` : `${sourceCollectionRunCandidateCount} candidate sources`,
+      outputLabel: lang === "zh" ? `${sourceCollectionRunApprovedCount} 条通过 / ${sourceCollectionRunPendingScreeningCount} 条待筛` : `${sourceCollectionRunApprovedCount} approved / ${sourceCollectionRunPendingScreeningCount} pending`,
+      nextLabel: sourceCollectionRunPendingScreeningCount > 0
+        ? (lang === "zh" ? "Agent 继续筛选" : "Agent continues screening")
+        : (lang === "zh" ? "进入候选入库" : "Move to candidate library"),
       state: sourceCollectionScreeningStepState,
       status: sourceCollectionStepStatusText(sourceCollectionScreeningStepState),
       detailLabel: lang === "zh" ? "查看筛选详情" : "View screening details",
@@ -6943,15 +7208,18 @@ export function TeamsRoute({
       actionTone: "primary",
       actionIcon: "check",
       onAction: runSourceCollectionScreeningAction,
-      onDetail: () => scrollSourceCollectionPanelIntoView("source-collection-screening-panel"),
+      onDetail: () => openSourceCollectionStage("screening", "results"),
     },
     {
       id: "candidate",
       label: lang === "zh" ? "候选入库" : "Candidates",
-      metric: lang === "zh" ? `本轮候选 ${sourceCollectionRunCandidateCount} 条` : `${sourceCollectionRunCandidateCount} run candidates`,
+      metric: lang === "zh" ? `通过候选 ${sourceCollectionRunApprovedCount} 条` : `${sourceCollectionRunApprovedCount} approved candidates`,
       summary: sourceCollectionRunCandidateCount > 0
-        ? (lang === "zh" ? "候选库可视化查看" : "Open the visual library")
+        ? (lang === "zh" ? `候选库共 ${sourceCollectionRunCandidateCount} 条` : `${sourceCollectionRunCandidateCount} total in library`)
         : (lang === "zh" ? "等待资料入候选" : "Waiting for candidates"),
+      inputLabel: lang === "zh" ? `${sourceCollectionRunApprovedCount} 条通过资料` : `${sourceCollectionRunApprovedCount} approved sources`,
+      outputLabel: lang === "zh" ? `${sourceCollectionRunCandidateCount} 条候选可追溯` : `${sourceCollectionRunCandidateCount} traceable candidates`,
+      nextLabel: lang === "zh" ? "生成候选图谱" : "Build candidate graph",
       state: sourceCollectionCandidateStepState,
       status: sourceCollectionStepStatusText(sourceCollectionCandidateStepState),
       detailLabel: lang === "zh" ? "查看候选库" : "View candidate library",
@@ -6960,7 +7228,7 @@ export function TeamsRoute({
       actionTone: "secondary",
       actionIcon: "archive",
       onAction: openSourceCollectionCandidatePanel,
-      onDetail: openSourceCollectionCandidatePanel,
+      onDetail: () => openSourceCollectionStage("candidate", "results"),
     },
     {
       id: "graph",
@@ -6971,6 +7239,9 @@ export function TeamsRoute({
         : sourceCollectionRunCandidateCount > 0
           ? (lang === "zh" ? "可生成候选关系" : "Can build candidate links")
           : (lang === "zh" ? "先有候选资料" : "Needs candidates first"),
+      inputLabel: lang === "zh" ? `${sourceCollectionRunCandidateCount} 条候选` : `${sourceCollectionRunCandidateCount} candidates`,
+      outputLabel: lang === "zh" ? `${candidateGraphNodeCount} 节点 / ${candidateGraphEdgeCount} 关系` : `${candidateGraphNodeCount} nodes / ${candidateGraphEdgeCount} edges`,
+      nextLabel: lang === "zh" ? "检查共享记忆前审" : "Check memory precheck",
       state: sourceCollectionGraphStepState,
       status: sourceCollectionStepStatusText(sourceCollectionGraphStepState),
       detailLabel: lang === "zh" ? "查看图谱详情" : "View graph details",
@@ -6979,7 +7250,7 @@ export function TeamsRoute({
       actionTone: "secondary",
       actionIcon: "refresh",
       onAction: refreshSourceCollectionGraph,
-      onDetail: () => scrollSourceCollectionPanelIntoView("source-collection-graph-panel"),
+      onDetail: () => openSourceCollectionStage("graph", "results"),
     },
     {
       id: "memory",
@@ -6992,6 +7263,11 @@ export function TeamsRoute({
           : sourceCollectionApprovedCount > 0
             ? (lang === "zh" ? "可检查入库门槛" : "Ready to check the gate")
             : (lang === "zh" ? "等筛选通过后前审" : "Precheck after approval"),
+      inputLabel: lang === "zh" ? `${sourceCollectionRunApprovedCount} 条通过候选` : `${sourceCollectionRunApprovedCount} approved candidates`,
+      outputLabel: lang === "zh" ? `${knowledgePendingReviewCount} 待审 / ${formalKnowledgeItemCount} 正式` : `${knowledgePendingReviewCount} pending / ${formalKnowledgeItemCount} formal`,
+      nextLabel: formalKnowledgeItemCount > 0
+        ? (lang === "zh" ? "进入实验规划" : "Move to experiment planning")
+        : (lang === "zh" ? "等待审核入库" : "Wait for review"),
       state: sourceCollectionMemoryStepState,
       status: sourceCollectionStepStatusText(sourceCollectionMemoryStepState),
       detailLabel: lang === "zh" ? "查看前审详情" : "View precheck details",
@@ -7000,7 +7276,7 @@ export function TeamsRoute({
       actionTone: "secondary",
       actionIcon: "refresh",
       onAction: refreshSourceCollectionMemoryPrecheck,
-      onDetail: () => scrollSourceCollectionPanelIntoView("source-collection-memory-panel"),
+      onDetail: () => openSourceCollectionStage("memory", "results"),
     },
   ];
   const sourceCollectionStageCardKeyDown = (
@@ -7129,6 +7405,10 @@ export function TeamsRoute({
                     <em>{module.metric}</em>
                     <small>{module.summary}</small>
                   </span>
+                  <div className={styles.sourceCollectionStageMiniFlow}>
+                    <span><b>{lang === "zh" ? "入" : "In"}</b>{module.inputLabel}</span>
+                    <span><b>{lang === "zh" ? "出" : "Out"}</b>{module.outputLabel}</span>
+                  </div>
                   <div className={styles.sourceCollectionStageActionRow}>
                     <button
                       type="button"
