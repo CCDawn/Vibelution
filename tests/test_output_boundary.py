@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from core.orchestration.output_boundary import (
+    sanitize_assistant_thought_delta_text,
+    sanitize_assistant_thought_text,
     sanitize_assistant_visible_text,
     strip_llm_protocol_artifacts,
 )
@@ -56,3 +58,9 @@ def test_sanitize_assistant_visible_text_removes_think_and_protocol_markers_toge
     cleaned = sanitize_assistant_visible_text(raw)
 
     assert cleaned == "用户可见回答。"
+
+
+def test_sanitize_assistant_thought_delta_preserves_token_boundary_spaces():
+    assert sanitize_assistant_thought_delta_text(" me") == " me"
+    assert sanitize_assistant_thought_delta_text(" check ") == " check "
+    assert sanitize_assistant_thought_text(" me ") == "me"

@@ -80,6 +80,7 @@ from core.logging.logger import debug as _debug_logger
 from core.logging.unified_logger import logger as unified_logger
 from core.mental_model_flags import mental_model_enabled_override
 from core.orchestration.output_boundary import (
+    sanitize_assistant_thought_delta_text,
     sanitize_assistant_thought_text,
     sanitize_assistant_visible_text,
 )
@@ -1833,7 +1834,7 @@ class SessionTurnCapture:
     _latest_thought_text: str = ""
 
     def note_thought(self, text: str) -> None:
-        cleaned = _sanitize_thought_text(text)
+        cleaned = _sanitize_thought_delta_text(text)
         if cleaned:
             previous_total = self.thought
             previous_segment = self._latest_thought_text if self._latest_thought_sequence else ""
@@ -1865,8 +1866,8 @@ class SessionTurnCapture:
         if cleaned.startswith(previous_total):
             suffix = cleaned[len(previous_total):]
             if previous_segment:
-                return cleaned, (f"{previous_segment}{suffix}" if suffix else previous_segment).strip()
-            return cleaned, suffix.strip()
+                return cleaned, f"{previous_segment}{suffix}" if suffix else previous_segment
+            return cleaned, suffix
         if previous_segment and cleaned.startswith(previous_segment):
             if previous_total.endswith(previous_segment):
                 next_total = f"{previous_total[:-len(previous_segment)]}{cleaned}"
@@ -15303,6 +15304,10 @@ def _sanitize_thought_text(text: Any) -> str:
     return sanitize_assistant_thought_text(text)
 
 
+def _sanitize_thought_delta_text(text: Any) -> str:
+    return sanitize_assistant_thought_delta_text(text)
+
+
 def _thought_duplicates_reply(thought: str, reply: str) -> bool:
     thought_compact = re.sub(r"\s+", " ", str(thought or "")).strip()
     reply_compact = re.sub(r"\s+", " ", str(reply or "")).strip()
@@ -16617,7 +16622,7 @@ def _ensure_session_ui_capture_hooks(ui: Any) -> None:
             session_id = str(context.get("sessionId") or "").strip()
             if not isinstance(capture, SessionTurnCapture) or not session_id:
                 return
-            cleaned = _sanitize_thought_text(text)
+            cleaned = _sanitize_thought_delta_text(text)
             if cleaned and not done:
                 capture.note_thought(cleaned)
                 _set_session_model_thinking_live_output(
@@ -16628,7 +16633,7 @@ def _ensure_session_ui_capture_hooks(ui: Any) -> None:
                 _set_session_live_output(
                     session_id,
                     turn_id=capture.turn_id,
-                    thought=cleaned,
+                    thought=capture.thought,
                     feedback_events=capture.feedback_events,
                 )
 

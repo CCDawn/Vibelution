@@ -70,7 +70,7 @@ def _strip_think_tags_keep_body(text: str) -> str:
     return _strip_trailing_partial_protocol_tag(cleaned, extra_prefixes=("thi", "think", "thinking"))
 
 
-def strip_llm_protocol_artifacts(value: Any) -> str:
+def strip_llm_protocol_artifacts(value: Any, *, trim: bool = True) -> str:
     """Remove internal protocol/control markup while preserving normal text."""
 
     text = _coerce_text(value)
@@ -133,7 +133,7 @@ def strip_llm_protocol_artifacts(value: Any) -> str:
 
     text = _strip_trailing_partial_protocol_tag(text)
     text = re.sub(r"\n{3,}", "\n\n", text)
-    return text.strip()
+    return text.strip() if trim else text
 
 
 def sanitize_assistant_visible_text(value: Any) -> str:
@@ -143,11 +143,25 @@ def sanitize_assistant_visible_text(value: Any) -> str:
     return strip_llm_protocol_artifacts(text)
 
 
+def sanitize_assistant_visible_delta_text(value: Any) -> str:
+    """Return streamed visible text without trimming token-boundary spaces."""
+
+    text = _strip_think_blocks(_coerce_text(value))
+    return strip_llm_protocol_artifacts(text, trim=False)
+
+
 def sanitize_assistant_thought_text(value: Any) -> str:
     """Return thought text with protocol blocks removed but thought body kept."""
 
     text = _strip_think_tags_keep_body(_coerce_text(value))
     return strip_llm_protocol_artifacts(text)
+
+
+def sanitize_assistant_thought_delta_text(value: Any) -> str:
+    """Return streamed thought text without trimming token-boundary spaces."""
+
+    text = _strip_think_tags_keep_body(_coerce_text(value))
+    return strip_llm_protocol_artifacts(text, trim=False)
 
 
 def _strip_trailing_partial_protocol_tag(text: str, *, extra_prefixes: tuple[str, ...] = ()) -> str:
@@ -169,7 +183,9 @@ def _strip_trailing_partial_protocol_tag(text: str, *, extra_prefixes: tuple[str
 
 
 __all__ = [
+    "sanitize_assistant_thought_delta_text",
     "sanitize_assistant_thought_text",
+    "sanitize_assistant_visible_delta_text",
     "sanitize_assistant_visible_text",
     "strip_llm_protocol_artifacts",
 ]
