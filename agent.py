@@ -986,7 +986,10 @@ class SelfEvolvingAgent:
     def _filter_tools_for_current_agent(tools: List[Any]) -> List[Any]:
         try:
             from core.web.services.agent_directory_service import filter_llm_tools_for_current_agent
+            from core.web.services.agent_directory_service import current_agent_runtime
 
+            if not current_agent_runtime().get("agentId"):
+                return list(tools or [])
             return filter_llm_tools_for_current_agent(tools)
         except Exception:
             return list(tools or [])
@@ -1053,7 +1056,7 @@ class SelfEvolvingAgent:
         ]
         allowed_tools = self._filter_tools_for_current_agent(allowed_tools)
         if not allowed_tools:
-            return self.llm_with_tools
+            return self._base_llm
 
         rebound = self._base_llm.bind_tools(allowed_tools)
         self._bound_llm_cache["restart_focus"] = rebound
