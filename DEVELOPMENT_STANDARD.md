@@ -201,7 +201,22 @@ Do not perform broad formatting, opportunistic cleanup, renaming, or splitting i
 - Terminal-popup regressions need automated locks, not only documented lessons: add source or AST tests that forbid naked runtime Git subprocess paths, and add behavior tests for the no-console helper or source-signature freshness path that closed the bug.
 - When a terminal-popup investigation finds interactive Git editor chains such as `git merge --continue -> sh -> vim .git/COMMIT_EDITMSG`, first verify repository state (`MERGE_HEAD`, `git status`) before killing anything. Treat stale editor processes as residual cleanup only after confirming no active merge or commit operation exists.
 
-### 8.1 Rust Accelerator Boundary
+### 8.1 Developer Mode Parity
+
+Architecture, design, workflow, storage, routing, cache, configuration, and runtime-boundary changes must explicitly evaluate developer mode impact before implementation or merge.
+
+When a change affects any source of truth, workspace path, artifact location, cache key, model/tool routing path, lifecycle state, write policy, background task, or user-visible surface, decide whether developer mode and formal mode should share the same behavior or intentionally diverge.
+
+The implementation plan, review notes, or final report must state one of:
+
+- `not affected`: the changed path is unreachable from developer mode or formal mode;
+- `parity preserved`: both modes use the same contract, state transition, and validation path;
+- `intentional divergence`: the difference is deliberate, documented, and guarded so sandbox/developer data cannot leak into formal mode or vice versa;
+- `parity follow-up required`: the current change is incomplete and must not be released as stable until the developer-mode gap is closed or explicitly accepted.
+
+If developer mode is affected, validation should include the smallest useful evidence for both modes: focused tests, route/service assertions, cache-key checks, path-resolution checks, or a manual verification note naming the mode-specific behavior. Do not assume formal-mode correctness implies developer-mode correctness when paths, caches, state files, write scopes, tool routing, or UI data sources changed.
+
+### 8.2 Rust Accelerator Boundary
 
 Python remains the primary runtime for Vibelution business logic, Agent orchestration, web APIs, tests, and evolution workflows. Rust is allowed only as a bounded accelerator layer, not as a replacement for product semantics or the main Agent runtime.
 
