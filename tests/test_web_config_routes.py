@@ -296,6 +296,11 @@ def test_config_workspace_exposes_editor_schema_without_launcher_owned_startup_s
         "theme_backgrounds/default-midnight-glass.png",
         "theme_backgrounds/default-sunrise-research.png",
         "theme_backgrounds/default-glass-observatory.png",
+        "theme_backgrounds/default-promptsref-candid-lifestyle.png",
+        "theme_backgrounds/default-promptsref-mirror-cosplay.png",
+        "theme_backgrounds/default-promptsref-sunlit-street.png",
+        "theme_backgrounds/default-promptsref-negative-film-street.png",
+        "theme_backgrounds/default-promptsref-tokyo-shadow-snap.png",
     }
     assert editor_meta["ui.workbench_theme.background_readability"]["kind"] == "select"
     assert [option["value"] for option in editor_meta["ui.workbench_theme.background_readability"]["options"]] == [

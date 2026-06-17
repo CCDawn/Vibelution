@@ -48,6 +48,26 @@ DEFAULT_THEME_BACKGROUNDS = (
         "filename": "default-nika-luffy-poster.png",
         "label": {"zh": "尼卡海报", "en": "Nika Poster"},
     },
+    {
+        "filename": "default-promptsref-candid-lifestyle.png",
+        "label": {"zh": "PromptsRef 生活随拍", "en": "PromptsRef Candid Lifestyle"},
+    },
+    {
+        "filename": "default-promptsref-mirror-cosplay.png",
+        "label": {"zh": "PromptsRef 镜像角色", "en": "PromptsRef Mirror Characters"},
+    },
+    {
+        "filename": "default-promptsref-sunlit-street.png",
+        "label": {"zh": "PromptsRef 阳光街拍", "en": "PromptsRef Sunlit Street"},
+    },
+    {
+        "filename": "default-promptsref-negative-film-street.png",
+        "label": {"zh": "PromptsRef 胶片街巷", "en": "PromptsRef Negative Film Street"},
+    },
+    {
+        "filename": "default-promptsref-tokyo-shadow-snap.png",
+        "label": {"zh": "PromptsRef 东京光影", "en": "PromptsRef Tokyo Shadow Snap"},
+    },
 )
 DEFAULT_THEME_BACKGROUND_FILENAMES = {str(item["filename"]) for item in DEFAULT_THEME_BACKGROUNDS}
 _CONTENT_TYPE_EXTENSIONS = {

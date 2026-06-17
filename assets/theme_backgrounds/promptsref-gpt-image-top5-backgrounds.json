@@ -1,0 +1,49 @@
+{
+  "source": "PromptsRef GPT Image 2 prompt library",
+  "sourceUrl": "https://promptsref.com/api/library/works?model=gpt-image%2F2.0-text-to-image&page=1&pageSize=5&q=&sortBy=likes-desc",
+  "rawPromptArchive": "promptsref-gpt-image-top5-20260617.json",
+  "generatedAt": "2026-06-17T02:35:40+08:00",
+  "generationMode": "built-in image_gen tool, adapted to 16:9 workbench background with UI-readable negative space",
+  "backgrounds": [
+    {
+      "rank": 1,
+      "shareId": "34e5d6940f58cc3e40266e495bdfe321",
+      "likes": 90,
+      "views": 1671,
+      "filename": "default-promptsref-candid-lifestyle.png",
+      "label": "PromptsRef Candid Lifestyle"
+    },
+    {
+      "rank": 2,
+      "shareId": "db0d19c4f245f1426ef919754e47f73f",
+      "likes": 64,
+      "views": 1006,
+      "filename": "default-promptsref-mirror-cosplay.png",
+      "label": "PromptsRef Mirror Characters"
+    },
+    {
+      "rank": 3,
+      "shareId": "5e27a7dc78ddb659b479f70ea561f0c7",
+      "likes": 61,
+      "views": 1060,
+      "filename": "default-promptsref-sunlit-street.png",
+      "label": "PromptsRef Sunlit Street"
+    },
+    {
+      "rank": 4,
+      "shareId": "df49a553f00484c0942b00746bdd7c26",
+      "likes": 60,
+      "views": 1149,
+      "filename": "default-promptsref-negative-film-street.png",
+      "label": "PromptsRef Negative Film Street"
+    },
+    {
+      "rank": 5,
+      "shareId": "dfae8807d6b22b26a3f26484410f5a4d",
+      "likes": 56,
+      "views": 868,
+      "filename": "default-promptsref-tokyo-shadow-snap.png",
+      "label": "PromptsRef Tokyo Shadow Snap"
+    }
+  ]
+}
