@@ -2006,8 +2006,9 @@ export function ConversationView({
     if (blocks.length === 0) {
       return null;
     }
+    const hasTable = blocks.some((block) => block.type === "table");
     return (
-      <div className={styles.markdownBody}>
+      <div className={`${styles.markdownBody} ${hasTable ? styles.markdownBodyWithTable : ""}`}>
         {blocks.map((block, index) => renderMarkdownBlock(block, index, duplicateImageUrls))}
       </div>
     );
