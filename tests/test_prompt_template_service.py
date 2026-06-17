@@ -82,7 +82,7 @@ def test_build_agent_prompt_template_context_reports_block_and_missing_reasons(t
         "prompt-research-broad",
         project_root=tmp_path,
     )
-    empty = prompt_template_service.build_agent_prompt_template_context(
+    supervised = prompt_template_service.build_agent_prompt_template_context(
         "prompt-supervised-baseline",
         project_root=tmp_path,
     )
@@ -95,9 +95,11 @@ def test_build_agent_prompt_template_context_reports_block_and_missing_reasons(t
     assert "Agent Prompt Template" in block["contextBlock"]
     assert "PromptTemplateId: prompt-research-broad" in block["contextBlock"]
     assert "广撒网探索 agent" in block["contextBlock"]
-    assert empty["reason"] == "empty_template_content"
-    assert empty["sourcePath"] == ""
-    assert empty["sourceExists"] is False
+    assert supervised["reason"] == ""
+    assert "PromptTemplateId: prompt-supervised-baseline" in supervised["contextBlock"]
+    assert "监督进化基线 Agent" in supervised["contextBlock"]
+    assert supervised["sourcePath"] == ""
+    assert supervised["sourceExists"] is False
     assert missing["reason"] == "missing_template"
     assert missing["promptTemplateId"] == "prompt-missing-valid"
 
