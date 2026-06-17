@@ -634,6 +634,10 @@ describe("TeamsRoute layout contract", () => {
     expect(routeStylesSource).toContain("grid-template-columns: repeat(5, minmax(0, 1fr))");
     expect(routeStylesSource).not.toContain("min-height: 122px");
     expect(routeStylesSource).not.toContain("min-height: 96px");
+    expect(routeStylesSource).toContain("grid-template-columns: 44px minmax(0, 1fr)");
+    expect(routeStylesSource).toContain("-webkit-line-clamp: 2");
+    expect(routeStylesSource).not.toContain("grid-template-columns: 58px minmax(0, 1fr)");
+    expect(routeStylesSource).not.toMatch(/\.sourceCollectionTraceBody p \{[\s\S]*?-webkit-line-clamp: 3/);
     expect(routeStylesSource).toContain("white-space: nowrap");
     expect(routeStylesSource).toContain("writing-mode: horizontal-tb");
     expect(routeStyles.sourceCollectionControlPanel).toBeTypeOf("string");
