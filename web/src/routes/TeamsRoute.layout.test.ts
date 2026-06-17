@@ -366,9 +366,9 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("sourceCollectionStageOperationPanel");
     expect(routeSource).toContain("aria-pressed");
     expect(routeSource).toContain("<small>{module.summary}</small>");
-    expect(routeSource).toContain("sourceCollectionStageMiniFlow");
-    expect(routeSource).toContain("module.inputLabel");
-    expect(routeSource).toContain("module.outputLabel");
+    expect(routeSource).not.toContain("className={styles.sourceCollectionStageMiniFlow}");
+    expect(routeSource).toContain("sourceCollectionStageHandoffNext");
+    expect(routeSource).toContain("Agent过程");
     expect(routeSource).toContain("activeModule.nextLabel");
     expect(routeSource).toContain("sourceCollectionStageModules.map");
     expect(routeSource).toContain("sourceCollectionStepClassName");
@@ -638,6 +638,8 @@ describe("TeamsRoute layout contract", () => {
     expect(routeStylesSource).toContain("-webkit-line-clamp: 2");
     expect(routeStylesSource).not.toContain("grid-template-columns: 58px minmax(0, 1fr)");
     expect(routeStylesSource).not.toMatch(/\.sourceCollectionTraceBody p \{[\s\S]*?-webkit-line-clamp: 3/);
+    expect(routeStylesSource).toContain("grid-template-columns: minmax(0, 1fr) minmax(320px, 380px)");
+    expect(routeStylesSource).toContain("isolation: isolate");
     expect(routeStylesSource).toContain("white-space: nowrap");
     expect(routeStylesSource).toContain("writing-mode: horizontal-tb");
     expect(routeStyles.sourceCollectionControlPanel).toBeTypeOf("string");
@@ -649,6 +651,7 @@ describe("TeamsRoute layout contract", () => {
     expect(routeStyles.sourceCollectionStageWorkspace).toBeTypeOf("string");
     expect(routeStyles.sourceCollectionStageWorkspaceHeader).toBeTypeOf("string");
     expect(routeStyles.sourceCollectionStageHandoff).toBeTypeOf("string");
+    expect(routeStyles.sourceCollectionStageHandoffNext).toBeTypeOf("string");
     expect(routeStyles.sourceCollectionStageTabs).toBeTypeOf("string");
     expect(routeStyles.sourceCollectionStageTabActive).toBeTypeOf("string");
     expect(routeStyles.sourceCollectionTraceHandoff).toBeTypeOf("string");
