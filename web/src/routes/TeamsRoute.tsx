@@ -8673,7 +8673,33 @@ export function TeamsRoute({
                         ) : null}
                       </div>
                       {teamWorkflowCandidates.length ? (
-                        <div className={styles.workflowCandidateList} id="research-workflow-candidates">
+                        <div className={styles.workflowCandidateListPanel}>
+                          <div className={styles.workflowCandidateListHeader}>
+                            <div>
+                              <strong>{lang === "zh" ? "候选仓库预览" : "Candidate library preview"}</strong>
+                              <span>
+                                {lang === "zh"
+                                  ? `当前显示 ${teamWorkflowCandidates.length} 条候选；完整筛选、分页和详情在资料工作台中处理。`
+                                  : `${teamWorkflowCandidates.length} candidates shown; use the source workspace for filtering, paging, and details.`}
+                              </span>
+                            </div>
+                            <div>
+                              <button type="button" onClick={openSourceCollectionCandidatePanel} disabled={!selectedTeam?.teamId}>
+                                {lang === "zh" ? "查看完整候选库" : "Full library"}
+                              </button>
+                              <button type="button" onClick={openSourceCollectionScreeningPanel} disabled={sourceCollectionScreeningDisabled}>
+                                {lang === "zh" ? "进入资料筛选" : "Open screening"}
+                              </button>
+                            </div>
+                          </div>
+                          <div
+                            className={styles.workflowCandidateListScroll}
+                            id="research-workflow-candidates"
+                            role="region"
+                            tabIndex={0}
+                            aria-label={lang === "zh" ? "科研流程候选仓库预览，可向下滚动查看更多" : "Research workflow candidate preview, scroll for more"}
+                          >
+                            <div className={styles.workflowCandidateList}>
                           {teamWorkflowCandidates.map((candidate) => {
                             const chunkPlanSummary = candidatePaperNoteChunkPlanSummary(candidate);
                             const sourceQualitySummary = candidateSourceQualityAssessmentSummary(candidate);
@@ -8784,6 +8810,13 @@ export function TeamsRoute({
                               </article>
                             );
                           })}
+                            </div>
+                            {teamWorkflowCandidates.length > SOURCE_COLLECTION_RESULT_PAGE_SIZE ? (
+                              <div className={styles.workflowCandidateListScrollHint} aria-hidden="true">
+                                <span>{lang === "zh" ? "向下滚动查看更多候选，或打开完整候选库分页处理" : "Scroll for more candidates, or open the full paged library"}</span>
+                              </div>
+                            ) : null}
+                          </div>
                         </div>
                       ) : (
                         <div className={styles.empty}>

@@ -16,6 +16,10 @@ describe("ResearchRoute layout contract", () => {
     expect(routeSource).toContain("pauseAutoDraft");
     expect(routeSource).toContain("autoDraftPauseRequested");
     expect(routeSource).toContain("workflowMode");
+    expect(routeSource).toContain('workflowMode === "auto"');
+    expect(routeSource).toContain("autoDraftMutation.mutate");
+    expect(routeSource).toContain("startIndex: autoDraftStartIndex(active)");
+    expect(routeSource).toContain("manualWorkflowStep");
     expect(routeSource).toContain("showFallbackWorkflowModeControl");
     expect(routeSource).toContain("workflowControlsDisabled");
     expect(routeSource).not.toContain("enabled: activeView === \"discovery\"");
