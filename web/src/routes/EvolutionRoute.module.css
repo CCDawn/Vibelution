@@ -255,6 +255,37 @@
   min-width: 0;
 }
 
+.supervisedMembersHeaderActions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  min-width: 0;
+}
+
+.supervisedStepFollowButton {
+  min-height: 24px;
+  padding: 0 8px;
+  border: 1px solid var(--border-hairline);
+  border-radius: 999px;
+  background: var(--surface-card-muted);
+  color: var(--fg-secondary);
+  font: inherit;
+  font-size: 0.74rem;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: border-color 120ms ease, background 120ms ease, color 120ms ease;
+}
+
+.supervisedStepFollowButton:hover,
+.supervisedStepFollowButton:focus-visible {
+  border-color: color-mix(in srgb, var(--accent-cool) 42%, var(--border-soft));
+  background: color-mix(in srgb, var(--accent-cool) 8%, var(--surface-card-muted));
+  color: var(--accent-cool-2);
+  outline: none;
+}
+
 .supervisedMembersList {
   display: grid;
   gap: 4px;
@@ -279,11 +310,28 @@
   border: 1px solid var(--border-hairline);
   border-radius: 7px;
   background: var(--surface-panel);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 120ms ease, background 120ms ease, color 120ms ease;
+}
+
+.supervisedStepMemberCard:hover,
+.supervisedStepMemberCard:focus-visible {
+  border-color: color-mix(in srgb, var(--accent-cool) 34%, var(--border-soft));
+  background: color-mix(in srgb, var(--accent-cool) 6%, var(--surface-panel));
+  outline: none;
 }
 
 .supervisedStepMemberCardActive {
   border-color: color-mix(in srgb, var(--accent-cool) 42%, var(--border-soft));
   background: color-mix(in srgb, var(--accent-cool) 9%, var(--surface-panel));
+}
+
+.supervisedStepMemberCardCurrent {
+  border-color: color-mix(in srgb, var(--accent-warm) 34%, var(--border-soft));
+  background: color-mix(in srgb, var(--accent-warm) 6%, var(--surface-panel));
 }
 
 .supervisedStepMemberCard span,
@@ -294,10 +342,28 @@
   white-space: nowrap;
 }
 
+.supervisedStepMemberLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+
 .supervisedStepMemberCard span {
   color: var(--fg-secondary);
   font-size: 0.72rem;
   font-weight: 650;
+}
+
+.supervisedStepMemberLabel em {
+  flex: 0 0 auto;
+  padding: 1px 5px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent-warm) 14%, transparent);
+  color: var(--accent-warm-2);
+  font-size: 0.62rem;
+  font-style: normal;
+  font-weight: 700;
 }
 
 .supervisedStepMemberCard strong {
@@ -1251,6 +1317,26 @@
   display: grid;
   gap: 2px;
   min-width: 0;
+}
+
+.closedLoopTitleRow {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.closedLoopLaunchBlock .closedLoopModeBadge {
+  flex: 0 0 auto;
+  padding: 2px 6px;
+  border: 1px solid color-mix(in srgb, var(--accent-warm) 36%, var(--border-hairline));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent-warm) 12%, transparent);
+  color: var(--accent-warm-2);
+  font-size: 0.66rem;
+  font-weight: 740;
+  line-height: 1;
+  white-space: nowrap;
 }
 
 .closedLoopLaunchBlock strong,
