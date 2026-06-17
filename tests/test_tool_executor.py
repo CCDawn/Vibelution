@@ -126,8 +126,8 @@ class TestToolExecutorInit:
 
         restricted_visibility = compute_effective_tool_visibility(create_llm_facing_tools(), policy=default_tool_policy())
 
-        assert "cli_agent_run_tool" in restricted_visibility.visible_tools
-        assert restricted_visibility.hidden_restricted_tools == ()
+        assert "cli_agent_run_tool" not in restricted_visibility.visible_tools
+        assert "cli_agent_run_tool" in restricted_visibility.hidden_restricted_tools
 
         session_visibility = compute_effective_tool_visibility(
             create_llm_facing_tools(),
@@ -152,16 +152,32 @@ class TestToolExecutorInit:
 
         visibility = compute_effective_tool_visibility(tools, policy=default_tool_policy())
 
-        assert memory_tool_names.issubset(visibility.visible_tools)
-        assert visibility.hidden_restricted_tools == ()
+        assert memory_tool_names.isdisjoint(visibility.visible_tools)
+        assert memory_tool_names.issubset(visibility.hidden_restricted_tools)
 
         session_visibility = compute_effective_tool_visibility(
             tools,
             policy=default_session_agent_tool_policy("tool-agent-session"),
         )
 
-        assert memory_tool_names.issubset(session_visibility.visible_tools)
-        assert session_visibility.hidden_restricted_tools == ()
+        assert memory_tool_names.isdisjoint(session_visibility.visible_tools)
+        assert memory_tool_names.issubset(session_visibility.hidden_restricted_tools)
+
+    def test_unbound_runtime_exposes_no_llm_facing_tools_by_default(self, monkeypatch):
+        from core.web.services import agent_directory_service
+
+        monkeypatch.delenv("VIBELUTION_AGENT_ID", raising=False)
+        monkeypatch.setattr(agent_directory_service, "current_agent_runtime", lambda: {})
+
+        visible = agent_directory_service.filter_llm_tools_for_current_agent(
+            [
+                SimpleNamespace(name="cli_tool"),
+                SimpleNamespace(name="read_file_tool"),
+                SimpleNamespace(name="agent_message_tool"),
+            ]
+        )
+
+        assert visible == []
 
     def test_tools_package_does_not_reexport_compat_aliases(self):
         """tools 包入口不再把底层 helper 伪装成 agent 工具别名。"""
@@ -864,7 +880,7 @@ class TestToolExecutorTimeout:
         assert "DelegationPolicy" in str(result) or "委托策略" in str(result)
         assert "禁止派发子 Agent" in str(result)
 
-    def test_tool_policy_fields_do_not_block_registered_tool_execution(self, executor, monkeypatch):
+    def test_tool_policy_blocks_registered_tool_not_allowed_for_current_agent(self, executor, monkeypatch):
         from core.web.services import agent_directory_service
 
         monkeypatch.setattr(agent_directory_service, "current_agent_runtime", lambda: {
@@ -879,7 +895,8 @@ class TestToolExecutorTimeout:
         result, action = executor.execute("fake_policy_probe_tool", {})
 
         assert action is None
-        assert str(result) == "ran despite policy"
+        assert "ToolPolicy" in str(result)
+        assert "fake_policy_probe_tool" in str(result)
 
     def test_cli_agent_run_tool_runs_with_session_default_tool_policy(self, executor, monkeypatch):
         from core.web.services import agent_directory_service

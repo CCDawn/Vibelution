@@ -1574,13 +1574,24 @@ def compute_effective_tool_visibility(
         for name in _tool_name_list(normalized_policy.get("blockedTools") or [])
         if name
     )
+    allowed_set = set(allowed)
+    blocked_set = set(blocked)
+    visible = tuple(
+        name
+        for name in tool_names
+        if name in allowed_set and name not in blocked_set
+    )
+    visible_set = set(visible)
     preferred = tuple(
         name
         for name in _tool_name_list(normalized_policy.get("preferredTools") or [])
-        if name in tool_name_set
+        if name in visible_set
     )
-    visible = tuple(tool_names)
-    hidden_restricted: tuple[str, ...] = ()
+    hidden_restricted = tuple(
+        name
+        for name in tool_names
+        if name not in visible_set
+    )
     configured_unavailable = tuple(
         name
         for name in allowed
@@ -1590,7 +1601,7 @@ def compute_effective_tool_visibility(
         policy_id=policy_id,
         visible_tools=visible,
         configured_unavailable_tools=configured_unavailable,
-        blocked_tools=(),
+        blocked_tools=tuple(name for name in blocked if name in tool_name_set),
         hidden_restricted_tools=hidden_restricted,
         preferred_tools=preferred,
         write_scopes=tuple(_normalize_tool_policy_scopes(normalized_policy.get("writeScopes"))),
@@ -1999,6 +2010,40 @@ def evaluate_tool_policy(
 ) -> ToolPolicyDecision:
     normalized_tool = str(tool_name or "").strip()
     policy_id = str(policy.get("policyId") or policy.get("id") or "").strip() or DEFAULT_TOOL_POLICY_ID
+    if not normalized_tool:
+        return _blocked_decision(
+            normalized_tool,
+            "missing_tool",
+            policy_id,
+            agent_id,
+            "[工具策略提示] 当前工具调用缺少工具名称，已被 ToolPolicy 拦截。",
+        )
+    blocked = set(_tool_name_list(policy.get("blockedTools") or []))
+    if normalized_tool in blocked:
+        return _blocked_decision(
+            normalized_tool,
+            "blocked_tool",
+            policy_id,
+            agent_id,
+            f"[工具策略提示] `{normalized_tool}` 已被该 Agent 的 ToolPolicy 禁用。",
+        )
+    allowed = set(_tool_name_list(policy.get("allowedTools") or []))
+    if not allowed:
+        return _blocked_decision(
+            normalized_tool,
+            "no_allowed_tools",
+            policy_id,
+            agent_id,
+            "[工具策略提示] 当前 Agent 未配置可用工具，工具调用已被拦截。",
+        )
+    if normalized_tool not in allowed:
+        return _blocked_decision(
+            normalized_tool,
+            "tool_not_allowed",
+            policy_id,
+            agent_id,
+            f"[工具策略提示] `{normalized_tool}` 不在该 Agent 的可用工具策略中。",
+        )
     return ToolPolicyDecision(True, policy_id=policy_id, agent_id=agent_id)
 
 
