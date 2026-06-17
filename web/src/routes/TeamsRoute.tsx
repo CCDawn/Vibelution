@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, Archive, ArrowLeft, Bot, CheckCircle2, Eye, Link2, Play, Plus, RefreshCw, Save, Search, Send, Trash2, Unlink, Users } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent } from "react";
+import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 
 import { fetchJson } from "../api/client";
@@ -3809,6 +3809,22 @@ export function TeamsRoute({
     }));
   }
 
+  function stopSourceCollectionPaginationEvent(event: ReactMouseEvent<HTMLElement>) {
+    event.stopPropagation();
+  }
+
+  function preventSourceCollectionPanelSummaryToggle(event: ReactMouseEvent<HTMLElement>) {
+    event.preventDefault();
+    event.stopPropagation();
+  }
+
+  function preventSourceCollectionPanelSummaryKeyToggle(event: ReactKeyboardEvent<HTMLElement>) {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      event.stopPropagation();
+    }
+  }
+
   function renderSourceCollectionPagination(stageId: SourceCollectionStageModuleId, total: number) {
     const pageCount = Math.max(1, Math.ceil(total / SOURCE_COLLECTION_RESULT_PAGE_SIZE));
     if (pageCount <= 1) {
@@ -3818,7 +3834,12 @@ export function TeamsRoute({
     const start = (page - 1) * SOURCE_COLLECTION_RESULT_PAGE_SIZE + 1;
     const end = Math.min(total, page * SOURCE_COLLECTION_RESULT_PAGE_SIZE);
     return (
-      <div className={styles.sourceCollectionPagination} aria-label={lang === "zh" ? "结果分页" : "Result pagination"}>
+      <div
+        className={styles.sourceCollectionPagination}
+        aria-label={lang === "zh" ? "结果分页" : "Result pagination"}
+        onClick={stopSourceCollectionPaginationEvent}
+        onMouseDown={stopSourceCollectionPaginationEvent}
+      >
         <span>{lang === "zh" ? `第 ${start}-${end} 条 / 共 ${total} 条` : `${start}-${end} of ${total}`}</span>
         <div>
           <button type="button" disabled={page <= 1} onClick={() => setSourceCollectionResultPage(stageId, page - 1)}>
@@ -4890,7 +4911,10 @@ export function TeamsRoute({
         }}
         tabIndex={-1}
       >
-        <summary>
+        <summary
+          onClick={preventSourceCollectionPanelSummaryToggle}
+          onKeyDown={preventSourceCollectionPanelSummaryKeyToggle}
+        >
           <span>{lang === "zh" ? "资料筛选" : "Source screening"}</span>
           <small>{pagedScreeningCandidates.start}-{pagedScreeningCandidates.end}/{filteredScreeningCandidates.length}</small>
         </summary>
@@ -5112,7 +5136,10 @@ export function TeamsRoute({
         }}
         tabIndex={-1}
       >
-        <summary>
+        <summary
+          onClick={preventSourceCollectionPanelSummaryToggle}
+          onKeyDown={preventSourceCollectionPanelSummaryKeyToggle}
+        >
           <span>{lang === "zh" ? "候选库" : "Candidate library"}</span>
           <small>{pagedCandidates.start}-{pagedCandidates.end}/{filteredCandidates.length}</small>
         </summary>
@@ -5248,7 +5275,10 @@ export function TeamsRoute({
         }}
         tabIndex={-1}
       >
-        <summary>
+        <summary
+          onClick={preventSourceCollectionPanelSummaryToggle}
+          onKeyDown={preventSourceCollectionPanelSummaryKeyToggle}
+        >
           <span>{lang === "zh" ? "候选图谱" : "Candidate graph"}</span>
           <small>{visibleGraph ? `${pagedGraphNodes.start}-${pagedGraphNodes.end}/${visibleGraph.nodes.length}` : `${candidateGraphNodeCount} / ${candidateGraphEdgeCount}`}</small>
         </summary>
@@ -5407,7 +5437,10 @@ export function TeamsRoute({
         }}
         tabIndex={-1}
       >
-        <summary>
+        <summary
+          onClick={preventSourceCollectionPanelSummaryToggle}
+          onKeyDown={preventSourceCollectionPanelSummaryKeyToggle}
+        >
           <span>{lang === "zh" ? "共享记忆前审" : "Memory precheck"}</span>
           <small>{pagedMemoryCandidates.start}-{pagedMemoryCandidates.end}/{visibleMemoryCandidates.length}</small>
         </summary>
