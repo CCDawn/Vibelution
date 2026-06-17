@@ -41,6 +41,7 @@ from .turn_journal import (
     append_turn_event,
     event_has_model_projection,
     event_projection_category,
+    latest_turn_sequence,
     latest_open_turn_id,
     load_turn_events,
     model_messages_from_events,
@@ -155,8 +156,7 @@ def project_conversation_ledger(
 
 
 def latest_ledger_sequence(project_root: Path, session_id: str) -> int:
-    events = load_conversation_events(project_root, session_id)
-    return int(events[-1].sequence or 0) if events else 0
+    return latest_turn_sequence(project_root, session_id)
 
 
 def reconcile_open_conversation_turn(

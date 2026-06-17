@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 from core.chat.conversation_ledger import (
     EVENT_ASSISTANT_PARTIAL,
     EVENT_COMPACTION_CHECKPOINT,
@@ -56,6 +59,56 @@ def test_conversation_ledger_appends_and_projects_model_messages(tmp_path):
     assert not any(message.get("role") == "tool" for message in messages)
     assert "历史工具结果: cli_tool" in messages[1]["content"]
     assert "测试通过" in messages[1]["content"]
+
+
+def test_conversation_ledger_append_does_not_full_scan_existing_journal(tmp_path, monkeypatch):
+    append_conversation_event(tmp_path, "session-fast", "turn-1", EVENT_TURN_STARTED, status="running")
+    journal_path = conversation_ledger_path(tmp_path, "session-fast")
+    original_read_text = Path.read_text
+
+    def fail_journal_read_text(path: Path, *args, **kwargs):
+        if path == journal_path:
+            raise AssertionError("append should not full-read turn_journal.jsonl for the next sequence")
+        return original_read_text(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", fail_journal_read_text)
+
+    append_conversation_event(
+        tmp_path,
+        "session-fast",
+        "turn-1",
+        EVENT_USER_MESSAGE,
+        status="recorded",
+        payload={"content": "second event"},
+    )
+
+    rows = [json.loads(line) for line in journal_path.open(encoding="utf-8") if line.strip()]
+    assert [row["sequence"] for row in rows] == [1, 2]
+
+
+def test_conversation_ledger_load_streams_journal_without_read_text(tmp_path, monkeypatch):
+    append_conversation_event(tmp_path, "session-stream-load", "turn-1", EVENT_TURN_STARTED, status="running")
+    append_conversation_event(
+        tmp_path,
+        "session-stream-load",
+        "turn-1",
+        EVENT_USER_MESSAGE,
+        status="recorded",
+        payload={"content": "load should stream"},
+    )
+    journal_path = conversation_ledger_path(tmp_path, "session-stream-load")
+    original_read_text = Path.read_text
+
+    def fail_journal_read_text(path: Path, *args, **kwargs):
+        if path == journal_path:
+            raise AssertionError("load should stream turn_journal.jsonl instead of read_text().splitlines()")
+        return original_read_text(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", fail_journal_read_text)
+
+    events = load_conversation_events(tmp_path, "session-stream-load")
+
+    assert [event.sequence for event in events] == [1, 2]
 
 
 def test_conversation_ledger_preserves_interrupted_partial(tmp_path):
