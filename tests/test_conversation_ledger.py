@@ -3,6 +3,7 @@ from __future__ import annotations
 from core.chat.conversation_ledger import (
     EVENT_ASSISTANT_PARTIAL,
     EVENT_TOOL_RESULT,
+    EVENT_TURN_COMPLETED,
     EVENT_TURN_INTERRUPTED,
     EVENT_TURN_STARTED,
     EVENT_USER_MESSAGE,
@@ -10,6 +11,8 @@ from core.chat.conversation_ledger import (
     append_conversation_event,
     conversation_ledger_path,
     conversation_model_messages_from_events,
+    event_has_model_projection,
+    event_projection_category,
     latest_ledger_sequence,
     load_conversation_events,
     project_conversation_ledger,
@@ -77,3 +80,15 @@ def test_conversation_ledger_preserves_interrupted_partial(tmp_path):
 
     assert "已经完成前半部分。" in contents
     assert any(TURN_INTERRUPTED_MARKER in content for content in contents)
+
+
+def test_conversation_ledger_event_projection_categories_are_explicit():
+    assert event_projection_category(EVENT_USER_MESSAGE) == "model"
+    assert event_projection_category(EVENT_ASSISTANT_PARTIAL) == "volatile_model"
+    assert event_projection_category(EVENT_TURN_STARTED) == "audit"
+    assert event_projection_category(EVENT_TURN_COMPLETED) == "audit"
+    assert event_projection_category("unknown_event") == "unknown"
+
+    assert event_has_model_projection(EVENT_USER_MESSAGE) is True
+    assert event_has_model_projection(EVENT_ASSISTANT_PARTIAL) is True
+    assert event_has_model_projection(EVENT_TURN_COMPLETED) is False

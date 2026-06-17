@@ -106,6 +106,10 @@ def test_llm_client_payload_repairs_orphan_tool_result_before_provider():
     assert "历史工具结果: unknown_tool" in payload["messages"][0]["content"]
     assert "pending assistant tool call" in payload["messages"][0]["content"]
     assert client._last_payload_protocol_summary["payloadValidationResult"] == "passed"
+    assert client._last_payload_protocol_summary["payloadMessageRoleSequence"] == ["assistant", "user"]
+    assert client._last_payload_protocol_summary["payloadMessageOrphanToolResultCount"] == 0
+    assert client._last_payload_protocol_summary["payloadMessageMissingToolResultCount"] == 0
+    assert client._last_payload_protocol_summary["payloadMessageShapeHash"]
 
 
 def test_llm_client_payload_repairs_unresolved_tool_call_before_provider():
@@ -141,6 +145,9 @@ def test_llm_client_payload_repairs_unresolved_tool_call_before_provider():
     assert "tool_calls" not in payload["messages"][0]
     assert "历史工具调用未返回结果: read_file_tool" in payload["messages"][0]["content"]
     assert client._last_payload_protocol_summary["payloadValidationResult"] == "passed"
+    assert client._last_payload_protocol_summary["payloadMessageAssistantToolCallCount"] == 0
+    assert client._last_payload_protocol_summary["payloadMessageToolResultCount"] == 0
+    assert client._last_payload_protocol_summary["payloadMessageMissingToolResultCount"] == 0
 
 
 def test_responses_payload_converts_images_after_canonical_projection():
