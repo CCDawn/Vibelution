@@ -1256,6 +1256,24 @@ export function ConversationView({
     return group.operations.filter((operation) => !["thought", "mental"].includes(operation.kind));
   }
 
+  function reActThoughtItems(group: ConversationReActOperationGroup) {
+    const seen = new Set<string>();
+    return group.operations
+      .filter((operation) => operation.kind === "thought")
+      .map((operation) => {
+        const value = String(operation.resultPreview || operation.summary || "").trim();
+        if (!value || seen.has(value)) {
+          return null;
+        }
+        seen.add(value);
+        return {
+          id: `${operation.id}-thought`,
+          value,
+        };
+      })
+      .filter((item): item is { id: string; value: string } => item !== null);
+  }
+
   function reActResultItems(group: ConversationReActOperationGroup) {
     return reActActionOperations(group)
       .map((operation) => {
@@ -1585,6 +1603,23 @@ export function ConversationView({
     );
   }
 
+  function renderReActThoughtSection(group: ConversationReActOperationGroup) {
+    const thoughts = reActThoughtItems(group);
+    if (thoughts.length === 0) {
+      return null;
+    }
+    return (
+      <section className={styles.reActOperationSection}>
+        <span className={styles.reActOperationSectionLabel}>{lang === "zh" ? "思考" : "Thinking"}</span>
+        <div className={styles.reActThoughtStack}>
+          {thoughts.map((item) => (
+            <pre key={item.id} className={styles.reActThoughtText}>{item.value}</pre>
+          ))}
+        </div>
+      </section>
+    );
+  }
+
   function renderReActResultSection(group: ConversationReActOperationGroup) {
     const results = reActResultItems(group);
     if (results.length === 0) {
@@ -1641,6 +1676,7 @@ export function ConversationView({
         </button>
         {expanded ? (
           <div className={styles.reActOperationBody}>
+            {renderReActThoughtSection(group)}
             {renderReActActionSection(group)}
             {renderReActResultSection(group)}
           </div>
