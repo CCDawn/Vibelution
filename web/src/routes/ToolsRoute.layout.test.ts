@@ -90,32 +90,44 @@ describe("ToolsRoute layout contract", () => {
     expect(routeSource).toContain("agentId: activePolicyAgent.agentId");
   });
 
-  it("keeps Agent ToolPolicy state lightweight and routes configuration to Agent Center", () => {
+  it("hosts dedicated Agent ToolPolicy editing with return navigation", () => {
     expect(routeSource).toContain("fetchJson<AgentInstance[]>(\"/api/agents?detail=summary\")");
-    expect(routeSource).toContain("const agentPolicyWorkspaceNeeded = Boolean(activeTool)");
-    expect(routeSource).toContain("enabled: agentPolicyWorkspaceNeeded");
-    expect(routeSource).toContain("这里用于测试工具，不在这里配置 Agent");
-    expect(routeSource).toContain("Test tools here, configure Agents in Agent Center");
+    expect(routeSource).toContain("const requestedAgentId = useMemo(");
+    expect(routeSource).toContain("safeAgentCenterReturnToPath(searchParams.get(\"returnTo\"))");
+    expect(routeSource).toContain("返回 Agent 配置");
+    expect(routeSource).toContain("styles.returnButton");
+    expect(routeSource).toContain("Agent 工具配置");
     expect(routeSource).toContain("styles.agentPermissionSummaryPanel");
     expect(routeSource).toContain("styles.permissionSummaryGrid");
     expect(routeSource).toContain("styles.permissionSummaryCards");
+    expect(routeSource).toContain("AgentToolPolicyDraft");
+    expect(routeSource).toContain("toolPolicyDraftFromAgent");
+    expect(routeSource).toContain("normalizeToolPolicyDraftForAgent");
+    expect(routeSource).toContain("updateToolPolicyMutation");
+    expect(routeSource).toContain("allowedTools: sortedIds(payload.draft.allowedTools)");
+    expect(routeSource).toContain("preferredTools: sortedIds(payload.draft.preferredTools)");
+    expect(routeSource).toContain("blockedTools: sortedIds(payload.draft.blockedTools)");
+    expect(routeSource).toContain("writeScopes: sortedIds(payload.draft.writeScopes)");
+    expect(routeSource).toContain("groupPolicyToolsByBundle");
+    expect(routeSource).toContain("editablePolicyGroups");
+    expect(routeSource).toContain("applyToolBundle(bundle, \"merge\")");
+    expect(routeSource).toContain("applyToolBundle(bundle, \"replace\")");
+    expect(routeSource).toContain("toggleToolPolicyScope(\"writeScopes\", \"shared\"");
+    expect(routeSource).toContain("updateToolPolicyMode(tool.name, \"allowed\")");
+    expect(routeSource).toContain("updateToolPolicyMode(tool.name, \"blocked\")");
+    expect(routeSource).toContain("保存工具配置");
+    expect(routeSource).toContain("styles.toolPermissionList");
+    expect(routeSource).toContain("styles.segmentedControl");
     expect(routeSource).toContain("styles.toolAgentFitPanel");
     expect(routeSource).toContain("styles.policyStatePill");
-    expect(routeSource).toContain("useLocation");
-    expect(routeSource).toContain("agentCenterConfigRoute");
-    expect(routeSource).toContain("const toolsReturnTo = useMemo(");
-    expect(routeSource).toContain("`${location.pathname}${location.search}${location.hash}`");
-    expect(routeSource).toContain("const activePolicyAgentRoute = useMemo(");
-    expect(routeSource).toContain("agentId: activePolicyAgent?.agentId");
-    expect(routeSource).toContain('pane: "config"');
-    expect(routeSource).toContain('returnLabel: "tools"');
-    expect(routeSource).toContain("returnTo: toolsReturnTo");
-    expect(routeSource.match(/to=\{activePolicyAgentRoute\}/g)?.length).toBe(2);
-    expect(routeSource).not.toContain("to=\"/agents\"");
-    expect(routeSource).toContain("去 Agent 中心配置");
-    expect(routeSource).toContain("编辑 Agent 策略");
-    expect(routeSource).not.toContain("toolPolicyMutation");
+    expect(routeSource).not.toContain("这里用于测试工具，不在这里配置 Agent");
+    expect(routeSource).not.toContain("Test tools here, configure Agents in Agent Center");
+    expect(routeSource).not.toContain("agentCenterConfigRoute");
+    expect(routeSource).not.toContain("activePolicyAgentRoute");
     expect(routeSource).not.toContain("body: JSON.stringify({ toolPolicy: payload.policy })");
+    expect(stylesSource).toContain(".returnButton");
+    expect(stylesSource).toContain(".toolPermissionList");
+    expect(stylesSource).toContain(".segmentedControl");
   });
 
   it("avoids fixed registry and Agent polling on the Tools workspace", () => {
@@ -130,7 +142,7 @@ describe("ToolsRoute layout contract", () => {
     expect(routeSource).toContain("explicit_required");
     expect(routeSource).toContain("tool.permissionPolicy?.requiresExplicitAllow");
     expect(routeSource).toContain("需显式授权");
-    expect(routeSource).toContain("policyModeCounts.explicit_required");
+    expect(routeSource).toContain("capabilityPreview.explicitAllowed");
     expect(routeSource).toContain("policy_${policyMode}");
     expect(routeSource).toContain("policy_${activePolicyMode}");
   });
@@ -145,7 +157,6 @@ describe("ToolsRoute layout contract", () => {
     expect(routeSource).not.toContain("styles.bulkPolicyToolRow");
     expect(routeSource).not.toContain("styles.bulkPolicyActions");
     expect(routeSource).not.toContain("styles.agentPolicyPanel");
-    expect(routeSource).not.toContain("policyDraft");
     expect(routeSource).not.toContain("setSelectedToolsPolicyMode");
     expect(routeSource).not.toContain("applyPolicyDraft");
   });
@@ -178,11 +189,12 @@ describe("ToolsRoute layout contract", () => {
     expect(routeSource).toContain("styles.toolAgentFitPanel");
     expect(routeSource).toContain("styles.image2ModelPanel");
     expect(routeSource).toContain("styles.detailActions");
-    expect(routeSource.indexOf("styles.detailActions")).toBeGreaterThan(routeSource.indexOf("styles.policyPanel"));
+    const toolTestActionsIndex = routeSource.lastIndexOf("styles.detailActions");
+    expect(toolTestActionsIndex).toBeGreaterThan(routeSource.indexOf("styles.policyPanel"));
     expect(routeSource.indexOf("styles.dependencyHealthPanel")).toBeLessThan(routeSource.indexOf("styles.policyPanel"));
     expect(routeSource.indexOf("styles.agentPermissionSummaryPanel")).toBeLessThan(routeSource.indexOf("styles.detailHeader"));
     expect(routeSource.indexOf("styles.agentPermissionSummaryPanel")).toBeGreaterThan(0);
-    expect(routeSource.indexOf("styles.testPanel")).toBeGreaterThan(routeSource.indexOf("styles.detailActions"));
+    expect(routeSource.indexOf("styles.testPanel")).toBeGreaterThan(toolTestActionsIndex);
   });
 
   it("keeps raw args schema folded behind a disclosure", () => {
