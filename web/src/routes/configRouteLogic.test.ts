@@ -924,4 +924,13 @@ describe("config route copy", () => {
     expect(CONFIG_COPY.en.groupAvatarPetTitle).toBe("User, Terminal Avatar, and Companion");
     expect(CONFIG_COPY.en.groupAvatarPetSummary).toContain("Web user avatar lives under User Info");
   });
+
+  it("keeps Web user avatar image copy explicit and separate from raw config paths", () => {
+    expect(CONFIG_COPY.zh.avatarImageCurrent).toBe("当前头像");
+    expect(CONFIG_COPY.zh.avatarImageEmpty).toBe("未设置头像图片");
+    expect(CONFIG_COPY.zh.avatarImageClickToUpload).toBe("点击头像上传");
+    expect(CONFIG_COPY.en.avatarImageCurrent).toBe("Current avatar");
+    expect(CONFIG_COPY.en.avatarImageEmpty).toBe("No avatar image set");
+    expect(CONFIG_COPY.en.avatarImageClickToUpload).toBe("Click avatar to upload");
+  });
 });
