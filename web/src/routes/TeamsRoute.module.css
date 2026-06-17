@@ -1990,6 +1990,7 @@
 
 .sourceCollectionStageWorkspace {
   display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
   gap: 8px;
   min-width: 0;
   min-height: 0;
@@ -2532,8 +2533,10 @@
   border-radius: 8px;
   background: var(--source-workbench-card);
   color: var(--fg-muted);
+  cursor: default;
   font-size: 0.64rem;
   font-weight: 800;
+  user-select: none;
 }
 
 .sourceCollectionPagination div {
