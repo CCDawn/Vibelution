@@ -69,34 +69,6 @@ const TOOLS_LEFT_PANEL_DEFAULT_WIDTH = 350;
 const MAIN_AGENT_SCOPE_ID = "main_agent";
 const IMAGE2_TOOL_NAME = "image2_generate_tool";
 const WEB_SEARCH_TOOL_NAME = "web_search_tool";
-const DEFAULT_SESSION_AGENT_ALLOWED_TOOLS = [
-  "apply_patch_tool",
-  "apply_diff_edit_tool",
-  "write_file_tool",
-  "cli_tool",
-  "cli_agent_run_tool",
-  "python_lint_tool",
-  "run_test_for_tool",
-  "web_search_tool",
-  "web_fetch_tool",
-  "image2_generate_tool",
-  "conversation_log_inspect_tool",
-  "session_reference_query_tool",
-  "get_core_context_tool",
-  "get_current_goal_tool",
-  "compress_context_tool",
-  "task_list_tool",
-  "get_git_status_summary_tool",
-  "get_recent_changes_tool",
-  "get_entity_history_tool",
-  "explain_current_worktree_tool",
-];
-const DEFAULT_SESSION_AGENT_PREFERRED_TOOLS = [
-  "cli_tool",
-  "session_reference_query_tool",
-  "conversation_log_inspect_tool",
-  "get_core_context_tool",
-];
 
 function sortedIds(values: string[]) {
   return Array.from(new Set(values.map((item) => String(item || "").trim()).filter(Boolean))).sort();
@@ -308,39 +280,13 @@ function defaultToolPolicy(policyId = "default"): ToolPolicy {
   };
 }
 
-function agentBoundaryType(agent: AgentInstance | null | undefined) {
-  const boundary = agent as (AgentInstance & { agentBoundary?: { type?: string } }) | null | undefined;
-  return String(boundary?.agentBoundary?.type || (agent?.status === "archived" ? "archived" : "")).trim();
-}
-
-function isSessionToolPolicyAgent(agent: AgentInstance | null | undefined) {
-  if (!agent) {
-    return false;
-  }
-  const primaryMode = String(agent.primaryMode || "").trim();
-  return agentBoundaryType(agent) === "work_session" || primaryMode === "" || primaryMode === "chat";
-}
-
-function isSessionRequiredTool(toolName: string, agent: AgentInstance | null | undefined) {
-  return isSessionToolPolicyAgent(agent) && DEFAULT_SESSION_AGENT_ALLOWED_TOOLS.includes(toolName);
-}
-
 function normalizeToolPolicyDraftForAgent(
   draft: AgentToolPolicyDraft,
-  agent: AgentInstance | null | undefined,
+  _agent: AgentInstance | null | undefined,
 ): AgentToolPolicyDraft {
-  const allowed = new Set(sortedIds(draft.allowedTools));
-  const preferred = new Set(sortedIds(draft.preferredTools));
   const blocked = new Set(sortedIds(draft.blockedTools));
-  if (isSessionToolPolicyAgent(agent)) {
-    for (const tool of DEFAULT_SESSION_AGENT_ALLOWED_TOOLS) {
-      allowed.add(tool);
-      blocked.delete(tool);
-    }
-    for (const tool of DEFAULT_SESSION_AGENT_PREFERRED_TOOLS) {
-      preferred.add(tool);
-    }
-  }
+  const allowed = new Set(sortedIds(draft.allowedTools).filter((tool) => !blocked.has(tool)));
+  const preferred = new Set(sortedIds(draft.preferredTools));
   const allowedTools = sortedIds(Array.from(allowed));
   const allowedSet = new Set(allowedTools);
   return {
@@ -393,13 +339,13 @@ function policyDraftMode(draft: AgentToolPolicyDraft, toolName: string): ToolPol
 
 function policyDraftModeLabel(mode: ToolPolicyDraftMode, lang: string) {
   const zh = {
-    inherited: "跟随默认",
+    inherited: "未允许",
     allowed: "允许",
     blocked: "禁用",
     excluded: "未列入",
   };
   const en = {
-    inherited: "Default",
+    inherited: "Not allowed",
     allowed: "Allowed",
     blocked: "Blocked",
     excluded: "Excluded",
@@ -554,7 +500,7 @@ function buildAgentCapabilityPreview(draft: AgentToolPolicyDraft, tools: ToolReg
   const allowed = new Set(draft.allowedTools);
   const blocked = new Set(draft.blockedTools);
   const inherited = Math.max(0, tools.length - allowed.size - blocked.size);
-  const effectiveAllowed = allowed.size || Math.max(0, tools.length - blocked.size);
+  const effectiveAllowed = allowed.size;
   const highRiskAllowed = tools.filter((tool) => allowed.has(tool.name) && (tool.permissionTier === "high" || tool.permissionPolicy?.requiresExplicitAllow)).length;
   const explicitAllowed = tools.filter((tool) => allowed.has(tool.name) && tool.permissionPolicy?.requiresExplicitAllow).length;
   return {
@@ -602,14 +548,14 @@ function toolPolicyMode(policy: ToolPolicy, tool: ToolRegistryItem | string): To
 
 function toolPolicyModeLabel(mode: ToolPolicyMode, lang: string) {
   const zh = {
-    inherited: "跟随默认",
+    inherited: "未允许",
     explicit_required: "需显式授权",
     allowed: "允许清单",
     blocked: "禁用",
     excluded: "未在允许清单",
   };
   const en = {
-    inherited: "Default",
+    inherited: "Not allowed",
     explicit_required: "Explicit allow required",
     allowed: "Allow-list",
     blocked: "Blocked",
@@ -1340,11 +1286,14 @@ export function ToolsRoute() {
       const preferred = new Set(current.preferredTools);
       const blocked = new Set(current.blockedTools);
       for (const tool of bundleTools) {
-        allowed.add(tool);
-        blocked.delete(tool);
+        if (!blocked.has(tool)) {
+          allowed.add(tool);
+        }
       }
       for (const tool of bundlePreferred) {
-        preferred.add(tool);
+        if (!blocked.has(tool)) {
+          preferred.add(tool);
+        }
       }
       return normalizeToolPolicyDraftForAgent({
         ...current,
@@ -1711,7 +1660,7 @@ export function ToolsRoute() {
                 <span>{lang === "zh" ? "允许" : "Allowed"} <strong>{toolPolicyDraft.allowedTools.length}</strong></span>
                 <span>{lang === "zh" ? "优先" : "Preferred"} <strong>{toolPolicyDraft.preferredTools.length}</strong></span>
                 <span>{lang === "zh" ? "禁用" : "Blocked"} <strong>{toolPolicyDraft.blockedTools.length}</strong></span>
-                <span>{lang === "zh" ? "默认" : "Default"} <strong>{capabilityPreview.inherited}</strong></span>
+                <span>{lang === "zh" ? "未允许" : "Not allowed"} <strong>{capabilityPreview.inherited}</strong></span>
                 <span>{lang === "zh" ? "高风险允许" : "High-risk allowed"} <strong>{capabilityPreview.highRiskAllowed}</strong></span>
               </div>
             </div>
@@ -1772,7 +1721,7 @@ export function ToolsRoute() {
                         <div>
                           <strong>{group.label}</strong>
                           <span>
-                            {group.tools.length} tools · {lang === "zh" ? "允许" : "Allowed"} {group.allowedCount} · {lang === "zh" ? "禁用" : "Blocked"} {group.blockedCount} · {lang === "zh" ? "默认" : "Default"} {group.inheritedCount}
+                            {group.tools.length} tools · {lang === "zh" ? "允许" : "Allowed"} {group.allowedCount} · {lang === "zh" ? "禁用" : "Blocked"} {group.blockedCount} · {lang === "zh" ? "未允许" : "Not allowed"} {group.inheritedCount}
                           </span>
                         </div>
                         {group.highRiskCount ? <small>{lang === "zh" ? "高风险" : "High risk"} {group.highRiskCount}</small> : null}
@@ -1780,7 +1729,6 @@ export function ToolsRoute() {
                       <div className={styles.toolPermissionGroupList}>
                         {group.tools.map((tool) => {
                           const mode = policyDraftMode(toolPolicyDraft, tool.name);
-                          const sessionRequiredTool = isSessionRequiredTool(tool.name, activePolicyAgent);
                           const tags = [...(tool.capabilityTags ?? []), ...(tool.riskTags ?? [])].slice(0, 4);
                           return (
                             <div key={`${tool.source}:${tool.id}`} className={styles.toolPermissionRow}>
@@ -1790,7 +1738,6 @@ export function ToolsRoute() {
                                 <span className={styles.toolPermissionMeta}>
                                   <em>{toolTierLabel(tool.permissionTier, lang)}</em>
                                   <small>{toolCategoryLabel(tool.category, tool.categoryLabel, lang)}</small>
-                                  {sessionRequiredTool ? <small>{lang === "zh" ? "会话必备，不可移除" : "Required for sessions"}</small> : null}
                                   {tags.length ? <small>{tags.join(" / ")}</small> : null}
                                 </span>
                               </span>
@@ -1798,7 +1745,6 @@ export function ToolsRoute() {
                                 <button
                                   type="button"
                                   className={mode === "inherited" || mode === "excluded" ? styles.segmentActive : styles.segmentButton}
-                                  disabled={sessionRequiredTool}
                                   onClick={() => updateToolPolicyMode(tool.name, "inherited")}
                                 >
                                   {policyDraftModeLabel(mode === "excluded" ? "excluded" : "inherited", lang)}
@@ -1813,7 +1759,6 @@ export function ToolsRoute() {
                                 <button
                                   type="button"
                                   className={mode === "blocked" ? styles.segmentActiveDanger : styles.segmentButton}
-                                  disabled={sessionRequiredTool}
                                   onClick={() => updateToolPolicyMode(tool.name, "blocked")}
                                 >
                                   {policyDraftModeLabel("blocked", lang)}

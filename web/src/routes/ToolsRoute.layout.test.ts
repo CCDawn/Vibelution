@@ -108,6 +108,8 @@ describe("ToolsRoute layout contract", () => {
     expect(routeSource).toContain("preferredTools: sortedIds(payload.draft.preferredTools)");
     expect(routeSource).toContain("blockedTools: sortedIds(payload.draft.blockedTools)");
     expect(routeSource).toContain("writeScopes: sortedIds(payload.draft.writeScopes)");
+    expect(routeSource).toContain("const effectiveAllowed = allowed.size");
+    expect(routeSource).toContain("if (!blocked.has(tool))");
     expect(routeSource).toContain("groupPolicyToolsByBundle");
     expect(routeSource).toContain("editablePolicyGroups");
     expect(routeSource).toContain("applyToolBundle(bundle, \"merge\")");
@@ -116,6 +118,10 @@ describe("ToolsRoute layout contract", () => {
     expect(routeSource).toContain("updateToolPolicyMode(tool.name, \"allowed\")");
     expect(routeSource).toContain("updateToolPolicyMode(tool.name, \"blocked\")");
     expect(routeSource).toContain("保存工具配置");
+    expect(routeSource).not.toContain("DEFAULT_SESSION_AGENT_ALLOWED_TOOLS");
+    expect(routeSource).not.toContain("DEFAULT_SESSION_AGENT_PREFERRED_TOOLS");
+    expect(routeSource).not.toContain("会话必备，不可移除");
+    expect(routeSource).not.toContain("Required for sessions");
     expect(routeSource).toContain("styles.toolPermissionList");
     expect(routeSource).toContain("styles.segmentedControl");
     expect(routeSource).toContain("styles.toolAgentFitPanel");
