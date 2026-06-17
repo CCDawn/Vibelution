@@ -4028,6 +4028,11 @@ export type TeamWorkflowCandidateGraphPayload = {
     missingLinkCount: number;
     unreviewedNodeCount: number;
     archivedCandidateCount?: number;
+    curationMode?: string;
+    inputCandidateCount?: number;
+    filteredCandidateCount?: number;
+    createdByAgent?: string;
+    stageAgentRole?: string;
   };
   createdAt: string;
 };

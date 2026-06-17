@@ -77,6 +77,7 @@ const WORKFLOW_GRAPH_MARGIN_Y = 28;
 const SOURCE_COLLECTION_RUN_PREVIEW_LIMIT = 20;
 const SOURCE_COLLECTION_RESULT_PAGE_SIZE = 8;
 const SOURCE_COLLECTION_DEFAULT_ROLES = ["data_discovery", "source_acquisition", "content_extraction", "source_quality"];
+const SOURCE_COLLECTION_TEAM_AGENT_ROLES = [...SOURCE_COLLECTION_DEFAULT_ROLES, "candidate_graph", "knowledge_steward"];
 const SOURCE_COLLECTION_SEARCH_EXECUTION_ROLES = new Set(["data_discovery", "source_acquisition"]);
 const SOURCE_COLLECTION_PROMPT_CACHE_POLICY = {
   requirement: "required_for_llm_execution",
@@ -329,7 +330,7 @@ const SOURCE_COLLECTION_STAGE_AGENT_KEYS: Record<SourceCollectionStageModuleId, 
   collection: ["data_discovery", "source_acquisition", "content_extraction"],
   screening: ["source_quality"],
   candidate: ["source_quality"],
-  graph: ["source_quality"],
+  graph: ["candidate_graph"],
   memory: ["knowledge_steward"],
 };
 
@@ -508,6 +509,14 @@ const RESEARCH_STAGE_AGENT_ROLES: Record<ResearchStageType, ResearchStageAgentRo
       en: "Source quality",
       zhFocus: "筛选、复审与退回",
       enFocus: "Screen and review",
+    },
+    {
+      key: "candidate_graph",
+      roleKeys: ["candidate_graph", "candidate_graph_preview", "graph_builder"],
+      zh: "候选图谱",
+      en: "Candidate graph",
+      zhFocus: "候选关系与断链预览",
+      enFocus: "Candidate links and gaps",
     },
     {
       key: "knowledge_steward",
@@ -1133,10 +1142,14 @@ function sourceCollectionAgentRoleLabel(value: string | undefined | null, lang: 
     "Source Collection Agent": "资料搜集 Agent",
     "Source Intake Agent": "资料入候选 Agent",
     "Source Quality Assessment Agent": "资料质量评估 Agent",
+    "Candidate Graph Preview Agent": "候选图谱 Agent",
+    "Knowledge Steward Agent": "共享记忆前审 Agent",
     data_discovery: "资料发现 Agent",
     source_acquisition: "来源获取 Agent",
     content_extraction: "内容提炼 Agent",
     source_quality: "资料质量评估 Agent",
+    candidate_graph: "候选图谱 Agent",
+    knowledge_steward: "共享记忆前审 Agent",
   };
   return zh[normalized] ?? normalized;
 }
@@ -1703,10 +1716,11 @@ function canvasFromTeam(team: Team | null): TeamOrganizationCanvas | null {
 
 function sourceCollectionAgentIdsFromCanvas(canvas: TeamOrganizationCanvas | null) {
   const agentIds: Record<string, string> = {};
-  const roleSet = new Set(SOURCE_COLLECTION_DEFAULT_ROLES);
+  const roleSet = new Set(SOURCE_COLLECTION_TEAM_AGENT_ROLES);
   for (const node of canvas?.nodes ?? []) {
-    if (roleSet.has(node.role) && node.agentId && !agentIds[node.role]) {
-      agentIds[node.role] = node.agentId;
+    const role = normalizeAgentRoleKey(node.role);
+    if (roleSet.has(role) && node.agentId && !agentIds[role]) {
+      agentIds[role] = node.agentId;
     }
   }
   return agentIds;
@@ -1715,7 +1729,7 @@ function sourceCollectionAgentIdsFromCanvas(canvas: TeamOrganizationCanvas | nul
 function sourceCollectionOwnerAgentIdFromCanvas(canvas: TeamOrganizationCanvas | null) {
   const preferredRoles = ["research_coordination", "data_intake_coordinator", "ceo", "organization_coordinator"];
   for (const role of preferredRoles) {
-    const node = canvas?.nodes.find((item) => item.role === role && item.agentId);
+    const node = canvas?.nodes.find((item) => normalizeAgentRoleKey(item.role) === role && item.agentId);
     if (node?.agentId) {
       return node.agentId;
     }
@@ -2922,8 +2936,9 @@ export function TeamsRoute({
   );
   const sourceCollectionAgentIds = useMemo(() => sourceCollectionAgentIdsFromCanvas(canvas), [canvas]);
   const sourceCollectionOwnerAgentId = useMemo(() => sourceCollectionOwnerAgentIdFromCanvas(canvas), [canvas]);
-  const sourceCollectionQualityAgentId = sourceCollectionAgentIds.source_quality || sourceCollectionOwnerAgentId || "Source Quality Assessment Agent";
-  const sourceCollectionKnowledgeStewardAgentId = sourceCollectionAgentIds.knowledge_steward || sourceCollectionOwnerAgentId || "Knowledge Steward Agent";
+  const sourceCollectionQualityAgentId = sourceCollectionAgentIds.source_quality || "Source Quality Assessment Agent";
+  const sourceCollectionGraphAgentId = sourceCollectionAgentIds.candidate_graph || "Candidate Graph Preview Agent";
+  const sourceCollectionKnowledgeStewardAgentId = sourceCollectionAgentIds.knowledge_steward || "agent-knowledge-steward";
   const researchStageAgentBindingsByStage = useMemo(() => {
     const roleBindings = new Map<string, { agentId: string; label: string; source: "canvas" | "member" | "fallback" }>();
 
@@ -4497,9 +4512,9 @@ export function TeamsRoute({
         return message.id.startsWith("candidate-") || message.id.startsWith("writeback-") || message.id === "search-execution-summary";
       }
       if (stageId === "graph") {
-        return message.id.startsWith("candidate-") || message.tone === "quality";
+        return message.id.startsWith("graph-");
       }
-      return message.tone === "quality" || message.id.startsWith("candidate-");
+      return message.id.startsWith("memory-");
     });
   }
 
@@ -6366,6 +6381,12 @@ export function TeamsRoute({
   const teamWorkflowCandidateGraphRecord = latestWorkflowCandidate(teamWorkflowCandidateGraphQuery.data?.candidates ?? []);
   const teamWorkflowCandidateGraph = workflowCandidateGraphFromCandidate(teamWorkflowCandidateGraphRecord);
   const teamWorkflowCandidateGraphLayout = teamWorkflowCandidateGraph ? workflowGraphLayout(teamWorkflowCandidateGraph) : null;
+  const latestKnowledgeStewardPackCandidate = latestWorkflowCandidate(
+    teamWorkflowCandidates.filter((candidate) => {
+      const metadata = isRecord(candidate.metadata) ? candidate.metadata : {};
+      return candidate.currentWorkflowNode === "steward_ingestion" || String(metadata.taskType || "") === "steward_pack_draft";
+    }),
+  );
   const teamWorkflowCoordinationStatus = teamWorkflowCoordinationStatusQuery.data ?? null;
   const teamWorkflowKnowledgeIngestionStatus = teamWorkflowKnowledgeIngestionStatusQuery.data ?? null;
   const teamWorkflowOfficialModelEvidenceStatus = teamWorkflowOfficialModelEvidenceStatusQuery.data ?? null;
@@ -6878,9 +6899,75 @@ export function TeamsRoute({
         storageRefs: [candidate.candidateId],
       });
     });
+    if (teamWorkflowCandidateGraphRecord && teamWorkflowCandidateGraph) {
+      const graphSummary = teamWorkflowCandidateGraph.summary;
+      const graphMetadata = isRecord(teamWorkflowCandidateGraphRecord.metadata) ? teamWorkflowCandidateGraphRecord.metadata : {};
+      const graphProcess = Array.isArray(graphMetadata.agentProcess) ? graphMetadata.agentProcess : [];
+      const graphProcessRefs = graphProcess
+        .map((event) => {
+          if (!isRecord(event)) {
+            return "";
+          }
+          return (
+            String(event.outputSummary || "") ||
+            String(event.nextAction || "") ||
+            String(event.eventType || "")
+          );
+        })
+        .filter(Boolean)
+        .slice(0, 4);
+      messages.push({
+        id: `graph-${teamWorkflowCandidateGraphRecord.candidateId}`,
+        agentRole: teamWorkflowCandidateGraphRecord.createdByAgent || "Candidate Graph Preview Agent",
+        title: lang === "zh" ? "已生成候选图谱关系快照" : "Built candidate graph snapshot",
+        body: teamWorkflowCandidateGraphRecord.summary || (lang === "zh" ? "候选图谱 Agent 已把通过筛选的候选资料转成可预览关系快照。" : "The candidate graph Agent converted screened candidates into a previewable relationship snapshot."),
+        status: teamWorkflowCandidateGraphRecord.currentState || "candidate_graph_visible",
+        tone: graphSummary.missingLinkCount ? "blocked" : "storage",
+        inputLabel: lang === "zh"
+          ? `${graphSummary.inputCandidateCount ?? graphSummary.nodeCount} 条通过候选`
+          : `${graphSummary.inputCandidateCount ?? graphSummary.nodeCount} approved candidates`,
+        outputLabel: lang === "zh"
+          ? `${graphSummary.nodeCount} 个节点 / ${graphSummary.edgeCount} 条关系`
+          : `${graphSummary.nodeCount} nodes / ${graphSummary.edgeCount} edges`,
+        nextLabel: graphSummary.missingLinkCount
+          ? (lang === "zh" ? "修复断链后前审" : "Repair gaps before precheck")
+          : (lang === "zh" ? "交给共享记忆前审" : "Send to memory precheck"),
+        refs: [
+          ...(graphProcessRefs.length ? graphProcessRefs : [teamWorkflowCandidateGraphRecord.title || teamWorkflowCandidateGraphRecord.candidateId]),
+          `${lang === "zh" ? "筛除" : "filtered"} ${graphSummary.filteredCandidateCount ?? 0}`,
+          `${lang === "zh" ? "断链" : "missing"} ${graphSummary.missingLinkCount}`,
+        ],
+        storageRefs: [teamWorkflowCandidateGraphRecord.candidateId, teamWorkflow?.candidateStore.storagePath || ""].filter(Boolean),
+      });
+    }
+    if (latestKnowledgeStewardPackCandidate) {
+      const metadata = isRecord(latestKnowledgeStewardPackCandidate.metadata) ? latestKnowledgeStewardPackCandidate.metadata : {};
+      const output = isRecord(metadata.output) ? metadata.output : {};
+      const candidateIds = Array.isArray(output.candidateIds) ? output.candidateIds : [];
+      const sourceTrace = isRecord(output.sourceTrace) ? output.sourceTrace : {};
+      const stewardCandidateGraphId = String(sourceTrace.candidateGraphId || "");
+      messages.push({
+        id: `memory-${latestKnowledgeStewardPackCandidate.candidateId}`,
+        agentRole: latestKnowledgeStewardPackCandidate.createdByAgent || "Knowledge Steward Agent",
+        title: lang === "zh" ? "已生成共享记忆前审包" : "Built shared-memory precheck pack",
+        body: latestKnowledgeStewardPackCandidate.summary || (lang === "zh" ? "共享记忆前审 Agent 已把通过候选整理成 candidate-only 前审包。" : "The memory steward Agent prepared a candidate-only precheck pack from approved candidates."),
+        status: latestKnowledgeStewardPackCandidate.currentState || "steward_pack_draft",
+        tone: "quality",
+        inputLabel: lang === "zh" ? `${candidateIds.length} 条候选资料` : `${candidateIds.length} candidates`,
+        outputLabel: lang === "zh" ? "前审包草稿" : "precheck draft",
+        nextLabel: lang === "zh" ? "等待正式入库门禁" : "Wait for official gate",
+        refs: [
+          latestKnowledgeStewardPackCandidate.title || latestKnowledgeStewardPackCandidate.candidateId,
+          stewardCandidateGraphId ? `${lang === "zh" ? "图谱" : "graph"}: ${stewardCandidateGraphId}` : "",
+          `${lang === "zh" ? "正式写入关闭" : "formal writes off"}`,
+        ].filter(Boolean),
+        storageRefs: [latestKnowledgeStewardPackCandidate.candidateId, teamWorkflow?.candidateStore.storagePath || ""].filter(Boolean),
+      });
+    }
     return messages;
   }, [
     lang,
+    latestKnowledgeStewardPackCandidate,
     selectedSourceCollectionRun,
     selectedSourceCollectionActiveWorkRun,
     selectedSourceCollectionStorageArtifacts,
@@ -6904,6 +6991,8 @@ export function TeamsRoute({
     sourceCollectionRunCandidates,
     sourceCollectionRunSummary?.recordCount,
     teamWorkflow?.candidateStore.storagePath,
+    teamWorkflowCandidateGraph,
+    teamWorkflowCandidateGraphRecord,
     teamWorkflowSourceQualityStatus,
   ]);
   const canRecordSourceCollectionOutput = Boolean(
@@ -7098,7 +7187,7 @@ export function TeamsRoute({
     buildCandidateGraphMutation.mutate({
       teamId: selectedTeam.teamId,
       title: "Agent curated candidate graph",
-      createdByAgent: sourceCollectionQualityAgentId,
+      createdByAgent: sourceCollectionGraphAgentId,
       curationMode: "agent_approved_only",
     });
     openSourceCollectionStage("graph", "results");
@@ -8567,7 +8656,7 @@ export function TeamsRoute({
                             onClick={() => selectedTeam?.teamId && buildCandidateGraphMutation.mutate({
                               teamId: selectedTeam.teamId,
                               title: "Agent curated candidate graph",
-                              createdByAgent: sourceCollectionQualityAgentId,
+                              createdByAgent: sourceCollectionGraphAgentId,
                               curationMode: "agent_approved_only",
                             })}
                             disabled={!selectedTeam?.teamId || sourceCollectionRunApprovedCount <= 0 || selectedTeamBuildCandidateGraphPending}

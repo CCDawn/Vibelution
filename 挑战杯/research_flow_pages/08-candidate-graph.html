@@ -86,13 +86,13 @@
       <div class="status-grid">
         <div class="status-item"><b>状态</b><span>candidate_graph_visible</span></div>
         <div class="status-item"><b>功能岗位</b><span>Candidate Graph Preview Agent</span></div>
-        <div class="status-item"><b>Agent 状态</b><span>后端/API 已可生成候选图谱快照；Teams 工作台科研流程面板已接入首版 SVG 可视化读取</span></div>
+        <div class="status-item"><b>Agent 状态</b><span>后端/API 已可生成候选图谱快照；Teams 工作台绑定独立 candidate_graph Agent，并把 agentProcess 显示到当前步骤过程页。</span></div>
         <div class="status-item"><b>进入条件</b><span>CandidateStore 中存在 paper_note / neuro_mechanism / mechanism_mapping / algorithm_hypothesis 等候选。</span></div>
         <div class="status-item"><b>退出条件</b><span>candidate_graph 候选快照能列出 nodes、edges、missingLinks、unreviewedNodes 和 officialBoundary，并能在 Teams 科研流程面板可视化查看。</span></div>
         <div class="status-item"><b>审核门禁</b><span>确认候选图谱只作预览，不作为正式知识证据使用。</span></div>
       </div>
       <div class="plan-grid">
-        <article class="plan-card"><h2>本步操作</h2><p class="hint">从 paperNoteIds、neuroMechanismIds、mechanismMappingIds 重建候选链路；Teams 面板可请求最新 candidate_graph 并渲染 evidence -&gt; candidate 的阅读向箭头。</p></article>
+        <article class="plan-card"><h2>本步操作</h2><p class="hint">由 candidate_graph Agent 从已通过筛选的 source_manifest 与后续候选链路重建候选关系；Teams 面板可请求最新 candidate_graph，渲染 evidence -&gt; candidate 的阅读向箭头，并在过程页展示输入、输出和下一步。</p></article>
 
         <article class="plan-card"><h2>所需功能</h2><ul><li>candidate_graph 候选快照生成</li>
 <li>候选节点/边预览 payload</li>
@@ -100,7 +100,7 @@
 <li>未审节点清单</li>
 <li>候选/正式边界标识</li>
 <li>Teams SVG 候选图谱面板</li>
-<li>手动刷新 candidate_only 快照</li></ul></article>
+<li>candidate_graph Agent 过程追踪</li></ul></article>
         <article class="plan-card"><h2>工具/平台能力</h2><ul><li>/api/teams/{teamId}/workflow-orchestration/candidate-graph</li>
 <li>CandidateStore</li>
 <li>TeamsRoute 候选图谱渲染</li></ul></article>
