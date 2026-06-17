@@ -50,6 +50,70 @@ describe("agent display helpers", () => {
     });
   });
 
+  it("maps current Agent Center role keys to clear responsibility labels", () => {
+    expect(agentDisplayInfo({
+      displayName: "程听澜",
+      primaryMode: "chat",
+      roleKey: "chat_session_entry",
+      metadata: { functionalDisplayName: "新会话" },
+    }, "zh")).toMatchObject({
+      functionLabel: "会话入口",
+      tone: "chat",
+    });
+    expect(agentDisplayInfo({
+      displayName: "顾明澈",
+      primaryMode: "chat",
+      roleKey: "agent_center_review_session",
+      metadata: { functionalDisplayName: "新会话" },
+    }, "zh")).toMatchObject({
+      functionLabel: "Agent 配置审查",
+      tone: "chat",
+    });
+    expect(agentDisplayInfo({ displayName: "数据发现", primaryMode: "research", roleKey: "challenge_cup_data_discovery" }, "zh")).toMatchObject({
+      functionLabel: "数据发现",
+      tone: "research",
+    });
+    expect(agentDisplayInfo({ displayName: "来源获取", primaryMode: "research", roleKey: "challenge_cup_source_acquisition" }, "zh")).toMatchObject({
+      functionLabel: "来源获取",
+      tone: "research",
+    });
+    expect(agentDisplayInfo({ displayName: "内容抽取", primaryMode: "research", roleKey: "challenge_cup_content_extraction" }, "zh")).toMatchObject({
+      functionLabel: "内容抽取",
+      tone: "research",
+    });
+    expect(agentDisplayInfo({ displayName: "资料质量评估", primaryMode: "research", roleKey: "challenge_cup_source_quality" }, "zh")).toMatchObject({
+      functionLabel: "资料质检",
+      tone: "research",
+    });
+  });
+
+  it("uses precise labels for search-source and stewardship roles", () => {
+    expect(agentDisplayInfo({ displayName: "范围负责人", primaryMode: "research", roleKey: "ai_search_scope_lead" }, "zh")).toMatchObject({
+      functionLabel: "搜索范围",
+      tone: "research",
+    });
+    expect(agentDisplayInfo({ displayName: "全球源", primaryMode: "research", roleKey: "global_primary_sources" }, "zh")).toMatchObject({
+      functionLabel: "全球官方源",
+      tone: "research",
+    });
+    expect(agentDisplayInfo({ displayName: "中国源", primaryMode: "research", roleKey: "cn_primary_sources" }, "zh")).toMatchObject({
+      functionLabel: "中国官方源",
+      tone: "research",
+    });
+    expect(agentDisplayInfo({ displayName: "信号质检", primaryMode: "research", roleKey: "signal_quality_gate" }, "zh")).toMatchObject({
+      functionLabel: "信号质检",
+      tone: "research",
+    });
+    expect(agentDisplayInfo({ displayName: "能力管家", primaryMode: "research", roleKey: "research_capability_steward" }, "zh")).toMatchObject({
+      functionLabel: "能力管家",
+      tone: "research",
+    });
+    expect(agentDisplayInfo({ displayName: "知识管家", primaryMode: "general", roleKey: "knowledge_steward" }, "zh")).toMatchObject({
+      functionLabel: "知识管理员",
+      tone: "memory",
+    });
+  });
+
   it("shows compact job labels without internal ids or repeated Agent suffixes", () => {
     expect(agentDisplayInfo({ displayName: "程听澜", primaryMode: "chat", roleKey: "chat-default" }, "zh")).toMatchObject({
       functionLabel: "会话入口",
