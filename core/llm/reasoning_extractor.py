@@ -32,6 +32,11 @@ REASONING_FIELD_CANDIDATES = (
     "thought",
 )
 
+REASONING_DELTA_FIELD_CANDIDATES = (
+    "reasoning_content_delta",
+    "reasoning_delta",
+)
+
 
 _THINK_BLOCK_RE = re.compile(
     r"<(?:think|thinking)\b[^>]*>([\s\S]*?)</(?:think|thinking)\s*>",
@@ -185,7 +190,10 @@ def _looks_like_partial_think_tag(fragment: str) -> bool:
 def _extract_field(payload: dict[str, Any], key: str, text_extractor: TextExtractor) -> str:
     if key not in payload:
         return ""
-    return text_extractor(payload.get(key)).strip()
+    text = text_extractor(payload.get(key))
+    if key in REASONING_DELTA_FIELD_CANDIDATES:
+        return text
+    return text.strip()
 
 
 def _as_dict(value: Any) -> dict[str, Any] | None:
@@ -209,6 +217,7 @@ def _as_dict(value: Any) -> dict[str, Any] | None:
 
 
 __all__ = [
+    "REASONING_DELTA_FIELD_CANDIDATES",
     "REASONING_FIELD_CANDIDATES",
     "ReasoningExtraction",
     "ThinkTagStreamParser",
