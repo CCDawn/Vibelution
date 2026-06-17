@@ -948,6 +948,33 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("visibilityState: typeof document === \"undefined\" ? \"unknown\" : document.visibilityState");
   });
 
+  it("logs chat route shell and startup readiness for switch-latency diagnosis", () => {
+    expect(routeSource).toContain("chatRouteMountStartedAtRef");
+    expect(routeSource).toContain("chatRouteShellMountedLoggedRef");
+    expect(routeSource).toContain("chatRouteStartupReadyLoggedRef");
+    expect(routeSource).toContain("chatRouteLongTaskCountRef");
+    expect(routeSource).toContain("browser.chat_route.shell_mounted");
+    expect(routeSource).toContain("browser.chat_route.startup_data_ready");
+    expect(routeSource).toContain("browser.chat_route.long_task");
+    expect(routeSource).toContain("chatRouteLongTaskCountRef.current >= 8");
+    expect(routeSource).toContain("runtimeReady: Boolean(runtimeQuery.data)");
+    expect(routeSource).toContain("sessionDetailReady: Boolean(activeSessionId ? sessionDetailQuery.data : true)");
+  });
+
+  it("does not block chat startup readiness on secondary dashboard data", () => {
+    expect(routeSource).toContain("if (sessionsQuery.data && directReady && groupReady)");
+    expect(routeSource).not.toContain(
+      "if (runtimeQuery.data && sessionsQuery.data && conversationsQuery.data && teamsQuery.data && directReady && groupReady)",
+    );
+  });
+
+  it("defers secondary chat dashboard queries until the shell is ready", () => {
+    expect(routeSource).toContain("const secondaryChatDataEnabled = chatStartupDataReady");
+    expect(routeSource).toContain("enabled: secondaryChatDataEnabled");
+    expect(routeSource).toContain("enabled: groupComposerOpen || legacyGroupRoomActive || Boolean(activeSessionId && secondaryChatDataEnabled)");
+    expect(routeSource).not.toContain("enabled: groupComposerOpen || Boolean(activeSessionId)");
+  });
+
   it("visually distinguishes direct sessions from group chats in the conversation list", () => {
     expect(routeSource).toContain("avatarInitials");
     expect(directSessionIndexItemSource).toContain("styles.conversationAvatarDirect");

@@ -8,7 +8,16 @@ describe("router error boundary contract", () => {
     expect(routerSource).toContain("errorElement: routeErrorElement(\"workbench\")");
     expect(routerSource).toContain("errorElement: routeErrorElement(\"launcher\")");
     expect(routerSource).toContain("guardedLazyElement");
+    expect(routerSource).toContain("RouteLoadingShell");
+    expect(routerSource).toContain("fallback={<RouteLoadingShell surface={surface} />}");
+    expect(routerSource).not.toContain("fallback={null}");
     expect(routerSource).not.toContain("Hey developer");
+  });
+
+  it("times chat route chunk loading separately from route mount", () => {
+    expect(routerSource).toContain("browser.chat_route.chunk_load_started");
+    expect(routerSource).toContain("browser.chat_route.chunk_loaded");
+    expect(routerSource).toContain("durationMs: elapsedMs(startedAt)");
   });
 
   it("guards the evolution routes that are split into dynamic chunks", () => {

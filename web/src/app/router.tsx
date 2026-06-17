@@ -15,7 +15,29 @@ import { postBrowserTelemetry } from "./browserTelemetry";
 import { recoverFromDynamicImportFetchError } from "./routeChunkRecovery";
 
 const AgentsRoute = lazyRoute(() => import("../routes/AgentsRoute").then((module) => ({ default: module.AgentsRoute })));
-const ChatCodingRoute = lazyRoute(() => import("../routes/ChatCodingRoute").then((module) => ({ default: module.ChatCodingRoute })));
+const ChatCodingRoute = lazyRoute(() => {
+  const startedAt = nowMs();
+  postBrowserTelemetry({
+    phase: "navigation",
+    eventCode: "browser.chat_route.chunk_load_started",
+    message: "Chat route chunk load started.",
+    fields: {
+      pathname: currentPathname(),
+    },
+  });
+  return import("../routes/ChatCodingRoute").then((module) => {
+    postBrowserTelemetry({
+      phase: "navigation",
+      eventCode: "browser.chat_route.chunk_loaded",
+      message: "Chat route chunk loaded.",
+      fields: {
+        durationMs: elapsedMs(startedAt),
+        pathname: currentPathname(),
+      },
+    });
+    return { default: module.ChatCodingRoute };
+  });
+});
 const ConfigRoute = lazyRoute(() => import("../routes/ConfigRoute").then((module) => ({ default: module.ConfigRoute })));
 const EvolutionRoute = lazyRoute(() => import("../routes/EvolutionRoute").then((module) => ({ default: module.EvolutionRoute })));
 const GitRoute = lazyRoute(() => import("../routes/GitRoute").then((module) => ({ default: module.GitRoute })));
@@ -42,8 +64,52 @@ function lazyRoute<T extends ComponentType<any>>(loader: () => Promise<{ default
   );
 }
 
-function lazyElement(element: ReactNode) {
-  return <Suspense fallback={null}>{element}</Suspense>;
+function nowMs(): number {
+  return typeof performance === "undefined" ? Date.now() : performance.now();
+}
+
+function elapsedMs(startedAt: number): number {
+  return Math.max(0, Math.round(nowMs() - startedAt));
+}
+
+function currentPathname(): string {
+  return typeof window === "undefined" ? "" : window.location.pathname;
+}
+
+function RouteLoadingShell({ surface }: { surface: RouteErrorSurface }) {
+  const label = surface === "launcher" ? "正在打开启动器" : "正在打开工作台";
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      aria-busy="true"
+      style={{
+        display: "grid",
+        minHeight: "min(520px, calc(100dvh - 96px))",
+        placeItems: "center",
+        padding: 24,
+      }}
+    >
+      <div
+        style={{
+          width: "min(360px, 100%)",
+          border: "1px solid rgba(148, 163, 184, 0.24)",
+          borderRadius: 8,
+          background: "rgba(12, 16, 24, 0.72)",
+          boxShadow: "0 20px 80px rgba(0, 0, 0, 0.24)",
+          color: "var(--fg-primary)",
+          padding: "18px 20px",
+        }}
+      >
+        <strong style={{ display: "block", fontSize: 15, fontWeight: 700 }}>{label}</strong>
+        <span style={{ display: "block", marginTop: 6, color: "var(--fg-muted)", fontSize: 13 }}>加载界面模块</span>
+      </div>
+    </div>
+  );
+}
+
+function lazyElement(element: ReactNode, surface: RouteErrorSurface = "workbench") {
+  return <Suspense fallback={<RouteLoadingShell surface={surface} />}>{element}</Suspense>;
 }
 
 function routeErrorElement(surface: RouteErrorSurface = "workbench") {
@@ -52,7 +118,7 @@ function routeErrorElement(surface: RouteErrorSurface = "workbench") {
 
 function guardedLazyElement(element: ReactNode, surface: RouteErrorSurface = "workbench") {
   return {
-    element: lazyElement(element),
+    element: lazyElement(element, surface),
     errorElement: routeErrorElement(surface),
   };
 }
