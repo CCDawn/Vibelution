@@ -3847,6 +3847,11 @@ export type TeamWorkflowSourceCollectionPromptCachePolicy = {
   modelName: string;
   providerId: string;
   promptCacheMode: string;
+  modelResolution?: {
+    status?: string;
+    requestedModelId?: string;
+    reason?: string;
+  };
   supportedPromptCacheModes: string[];
   partitionTemplate: string;
   rolePartitions: Array<{
