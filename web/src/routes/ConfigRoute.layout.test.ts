@@ -102,4 +102,20 @@ describe("ConfigRoute layout contract", () => {
     expect(stylesSource).toContain("aspect-ratio: 16 / 9");
     expect(stylesSource).toContain(".themeBackgroundPresetButton > em");
   });
+
+  it("renders the Web user avatar as a compact image control instead of a raw path field", () => {
+    expect(routeSource).toContain("avatarImageDisplayName");
+    expect(routeSource).toContain("copy.avatarImageCurrent");
+    expect(routeSource).toContain("copy.avatarImageEmpty");
+    expect(routeSource).toContain("copy.avatarImageClickToUpload");
+    expect(routeSource).toContain("className={styles.avatarImageDropButton}");
+    expect(routeSource).toContain("className={styles.avatarImageUploadCue}");
+    expect(routeSource).toContain("className={styles.avatarImageMeta}");
+    expect(routeSource).toContain("await beginAvatarCrop(file, absolutePath)");
+    expect(stylesSource).toContain(".avatarImageMeta");
+    expect(stylesSource).toContain(".avatarImageDropButton");
+    expect(stylesSource).toContain(".avatarImageUploadCue");
+    expect(stylesSource).toContain("width: 56px");
+    expect(stylesSource).toContain("white-space: nowrap");
+  });
 });

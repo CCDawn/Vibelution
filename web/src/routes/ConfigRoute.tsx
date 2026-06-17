@@ -502,6 +502,9 @@ export const CONFIG_COPY = {
     clearAvatarImage: "清除图片",
     avatarImageUploading: "上传头像图片中",
     avatarImageUploadFailed: "头像图片上传失败：",
+    avatarImageCurrent: "当前头像",
+    avatarImageEmpty: "未设置头像图片",
+    avatarImageClickToUpload: "点击头像上传",
     uploadThemeBackgroundImage: "上传背景图片",
     clearThemeBackgroundImage: "清除背景图片",
     themeBackgroundPresetTitle: "内置背景",
@@ -737,6 +740,9 @@ export const CONFIG_COPY = {
     clearAvatarImage: "Clear image",
     avatarImageUploading: "Uploading avatar image",
     avatarImageUploadFailed: "Avatar image upload failed: ",
+    avatarImageCurrent: "Current avatar",
+    avatarImageEmpty: "No avatar image set",
+    avatarImageClickToUpload: "Click avatar to upload",
     uploadThemeBackgroundImage: "Upload background image",
     clearThemeBackgroundImage: "Clear background image",
     themeBackgroundPresetTitle: "Built-in backgrounds",
@@ -1518,6 +1524,14 @@ function avatarImagePreviewUrl(value: unknown): string {
   return `/api/config/avatar-image/${encodeURIComponent(filename)}`;
 }
 
+function avatarImageDisplayName(value: unknown, copy: ConfigCopy): string {
+  const path = getString(value).replace(/\\/g, "/").trim();
+  if (!path) {
+    return copy.avatarImageEmpty;
+  }
+  return path.split("/").filter(Boolean).at(-1) ?? path;
+}
+
 function themeBackgroundImagePreviewUrl(value: unknown): string {
   const path = getString(value).replace(/\\/g, "/").trim();
   const prefix = "theme_backgrounds/";
@@ -1797,6 +1811,7 @@ function ConfigSectionEditor({
     }
     if (kind === "image") {
       const previewUrl = avatarImagePreviewUrl(fieldValue);
+      const displayName = avatarImageDisplayName(fieldValue, copy);
       return (
         <article
           key={absolutePath}
@@ -1814,7 +1829,10 @@ function ConfigSectionEditor({
                 <ImageIcon size={16} />
               </span>
             )}
-            <span>{formatConfigDisplayValue(fieldValue, meta?.kind, copy)}</span>
+            <div className={styles.avatarImageMeta}>
+              <strong>{previewUrl ? copy.avatarImageCurrent : copy.avatarImageEmpty}</strong>
+              <span>{displayName}</span>
+            </div>
           </div>
         </article>
       );
@@ -1840,6 +1858,7 @@ function ConfigSectionEditor({
       control = renderThemeBackgroundControl(fieldValue, absolutePath);
     } else if (kind === "image") {
       const previewUrl = avatarImagePreviewUrl(fieldValue);
+      const displayName = avatarImageDisplayName(fieldValue, copy);
       const cropDraft = avatarCrop?.absolutePath === absolutePath ? avatarCrop : null;
       const cropScale = cropDraft
         ? (AVATAR_CROP_FRAME_SIZE / Math.min(cropDraft.imageWidth, cropDraft.imageHeight)) * cropDraft.zoom
@@ -1862,14 +1881,45 @@ function ConfigSectionEditor({
       control = (
         <div className={styles.avatarImageEditor}>
           <div className={styles.avatarImageValue}>
-            {previewUrl ? (
-              <img src={previewUrl} alt="" className={styles.avatarImagePreview} />
-            ) : (
-              <span className={styles.avatarImagePlaceholder}>
-                <ImageIcon size={16} />
+            <label
+              className={styles.avatarImageDropButton}
+              title={copy.avatarImageClickToUpload}
+              aria-label={copy.avatarImageClickToUpload}
+            >
+              {previewUrl ? (
+                <img src={previewUrl} alt="" className={styles.avatarImagePreview} />
+              ) : (
+                <span className={styles.avatarImagePlaceholder}>
+                  <ImageIcon size={16} />
+                </span>
+              )}
+              <span className={styles.avatarImageUploadCue}>
+                <Upload size={12} />
               </span>
-            )}
-            <span>{configLabel(metaMap, absolutePath)}</span>
+              <input
+                type="file"
+                accept="image/png,image/jpeg,image/webp"
+                disabled={disabled || imageUploading}
+                onChange={async (event) => {
+                  const file = event.currentTarget.files?.[0];
+                  event.currentTarget.value = "";
+                  if (!file) {
+                    return;
+                  }
+                  try {
+                    await beginAvatarCrop(file, absolutePath);
+                  } catch (error) {
+                    setAvatarCropError(readableErrorMessage(error));
+                  } finally {
+                    setUploadingImagePath("");
+                  }
+                }}
+              />
+            </label>
+            <div className={styles.avatarImageMeta}>
+              <strong>{configLabel(metaMap, absolutePath)}</strong>
+              <span>{displayName}</span>
+            </div>
           </div>
           {cropDraft ? (
             <div className={styles.avatarCropPanel}>
