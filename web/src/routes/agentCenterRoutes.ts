@@ -1,6 +1,7 @@
 export type AgentCenterPane = "overview" | "config" | "activity";
 
 export type AgentCenterReturnLabel =
+  | "agents"
   | "tools"
   | "teams"
   | "chat"
@@ -15,7 +16,13 @@ type AgentCenterConfigRouteOptions = {
   returnTo?: string | null;
 };
 
-function safeAgentCenterReturnToPath(value: string | null | undefined) {
+type AgentCenterToolsRouteOptions = {
+  agentId?: string | null;
+  returnLabel?: AgentCenterReturnLabel | string | null;
+  returnTo?: string | null;
+};
+
+export function safeAgentCenterReturnToPath(value: string | null | undefined) {
   const normalized = String(value || "").trim();
   if (!normalized || !normalized.startsWith("/") || normalized.startsWith("//")) {
     return "";
@@ -45,4 +52,28 @@ export function agentCenterConfigRoute({
   }
 
   return `/agents?${params.toString()}`;
+}
+
+export function agentCenterToolsRoute({
+  agentId,
+  returnLabel,
+  returnTo,
+}: AgentCenterToolsRouteOptions) {
+  const params = new URLSearchParams();
+  const normalizedAgentId = String(agentId || "").trim();
+  const normalizedReturnLabel = String(returnLabel || "").trim();
+  const normalizedReturnTo = safeAgentCenterReturnToPath(returnTo);
+
+  if (normalizedAgentId) {
+    params.set("agent", normalizedAgentId);
+  }
+  if (normalizedReturnTo) {
+    params.set("returnTo", normalizedReturnTo);
+  }
+  if (normalizedReturnLabel) {
+    params.set("returnLabel", normalizedReturnLabel);
+  }
+
+  const query = params.toString();
+  return query ? `/agents/tools?${query}` : "/agents/tools";
 }

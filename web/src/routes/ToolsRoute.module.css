@@ -56,6 +56,7 @@
 }
 
 .refreshButton,
+.returnButton,
 .filterButton,
 .filterButtonActive,
 .primaryButton,
@@ -77,7 +78,17 @@
   padding: 3px 8px;
 }
 
+.returnButton {
+  flex: 0 0 auto;
+  padding: 3px 9px;
+  text-decoration: none;
+  color: var(--accent-cool);
+  border-color: color-mix(in srgb, var(--accent-cool) 34%, transparent);
+  background: color-mix(in srgb, var(--accent-cool) 10%, var(--surface-card));
+}
+
 .refreshButton:hover,
+.returnButton:hover,
 .filterButton:hover,
 .primaryButton:hover,
 .secondaryButton:hover {
@@ -773,6 +784,247 @@
   font-size: 0.96rem;
   line-height: 1.22;
   overflow-wrap: anywhere;
+}
+
+.policyDraftPanel {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.policyDraftSummary,
+.workspaceScopePanel {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 7px;
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-control);
+  background: var(--surface-card);
+}
+
+.policyDraftSummary strong,
+.policyDraftSummary span,
+.workspaceScopePanel span,
+.workspaceScopePanel label {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg-secondary);
+  font-size: 0.75rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.policyDraftSummary strong {
+  color: var(--fg-primary);
+}
+
+.workspaceScopePanel label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.toolBundleApplyGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 8px;
+  max-height: 240px;
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.toolBundleApplyCard {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  padding: 9px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-control);
+  background: var(--surface-card);
+}
+
+.toolBundleApplyCard strong,
+.toolBundleApplyCard span,
+.toolBundleApplyCard p {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.toolBundleApplyCard strong {
+  color: var(--fg-primary);
+  font-size: 0.82rem;
+  white-space: nowrap;
+}
+
+.toolBundleApplyCard span,
+.toolBundleApplyCard p {
+  color: var(--fg-secondary);
+  font-size: 0.72rem;
+  line-height: 1.35;
+}
+
+.toolBundleApplyCard div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.toolPermissionList {
+  display: grid;
+  gap: 8px;
+  max-height: 440px;
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.toolPermissionGroup {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--surface-panel-muted) 78%, transparent);
+}
+
+.toolPermissionGroupHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+.toolPermissionGroupHeader > div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.toolPermissionGroupHeader strong,
+.toolPermissionGroupHeader span,
+.toolPermissionGroupHeader small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.toolPermissionGroupHeader strong {
+  color: var(--fg-primary);
+  font-size: 0.82rem;
+}
+
+.toolPermissionGroupHeader span,
+.toolPermissionGroupHeader small {
+  color: var(--fg-secondary);
+  font-size: 0.72rem;
+}
+
+.toolPermissionGroupList {
+  display: grid;
+  gap: 6px;
+}
+
+.toolPermissionRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 7px;
+  border: 1px solid color-mix(in srgb, var(--border-soft) 70%, transparent);
+  border-radius: var(--radius-control);
+  background: var(--surface-card);
+}
+
+.toolPermissionRow > span {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.toolPermissionRow strong,
+.toolPermissionRow small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.toolPermissionRow strong {
+  color: var(--fg-primary);
+  font-size: 0.8rem;
+}
+
+.toolPermissionRow small {
+  color: var(--fg-secondary);
+  font-size: 0.7rem;
+}
+
+.toolPermissionMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  min-width: 0;
+}
+
+.toolPermissionMeta em,
+.toolPermissionMeta small {
+  display: inline-flex;
+  align-items: center;
+  min-height: 19px;
+  padding: 0 5px;
+  border: 1px solid color-mix(in srgb, var(--accent-cool) 20%, transparent);
+  border-radius: 999px;
+  color: var(--fg-secondary);
+  font-style: normal;
+}
+
+.segmentedControl {
+  display: inline-grid;
+  grid-template-columns: repeat(3, minmax(54px, auto));
+  gap: 3px;
+  min-width: 0;
+  padding: 2px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-control);
+  background: var(--surface-panel);
+}
+
+.segmentButton,
+.segmentActive,
+.segmentActiveDanger {
+  min-height: 26px;
+  padding: 0 8px;
+  border: 1px solid transparent;
+  border-radius: calc(var(--radius-control) - 2px);
+  background: transparent;
+  color: var(--fg-secondary);
+  font: inherit;
+  font-size: 0.72rem;
+}
+
+.segmentActive {
+  border-color: color-mix(in srgb, var(--accent-cool) 36%, transparent);
+  background: color-mix(in srgb, var(--accent-cool) 12%, var(--surface-card));
+  color: var(--accent-cool);
+}
+
+.segmentActiveDanger {
+  border-color: color-mix(in srgb, var(--state-error) 34%, transparent);
+  background: color-mix(in srgb, var(--state-error) 10%, var(--surface-card));
+  color: var(--state-error);
+}
+
+.policyHint {
+  margin: 0;
+  color: var(--fg-secondary);
+  font-size: 0.74rem;
 }
 
 .schemaDisclosure pre,
