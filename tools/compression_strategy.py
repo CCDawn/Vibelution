@@ -257,7 +257,11 @@ class CompressionStrategy:
         iteration: int,
         compression_count: int = 0,
     ) -> CompressionLevel:
-        """结合 token 比和迭代数确定压缩级别（防止认知漂移）。
+        """结合 token 比和迭代数确定压缩级别。
+
+        Iteration count is only an auxiliary signal. It must not promote a
+        low-token turn into deep/emergency compression by itself, because that
+        can erase useful current-turn evidence in long ReAct loops.
 
         Args:
             current_tokens: 当前 Token 数
@@ -269,11 +273,14 @@ class CompressionStrategy:
             压缩级别
         """
         base = self.determine_level(current_tokens, max_tokens, compression_count)
-        if iteration >= 25:
-            return CompressionLevel.EMERGENCY
-        elif iteration >= 18:
+        if max_tokens <= 0:
+            return base
+        ratio = current_tokens / max_tokens
+        if ratio < self.thresholds.light_threshold:
+            return base
+        if iteration >= 18 and ratio >= self.thresholds.deep_threshold:
             return CompressionLevel.max_severity(base, CompressionLevel.DEEP)
-        elif iteration >= 12:
+        if iteration >= 12 and ratio >= self.thresholds.standard_threshold:
             return CompressionLevel.max_severity(base, CompressionLevel.STANDARD)
         return base
 

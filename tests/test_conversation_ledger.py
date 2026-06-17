@@ -2,12 +2,14 @@ from __future__ import annotations
 
 from core.chat.conversation_ledger import (
     EVENT_ASSISTANT_PARTIAL,
+    EVENT_COMPACTION_CHECKPOINT,
     EVENT_TOOL_RESULT,
     EVENT_TURN_COMPLETED,
     EVENT_TURN_INTERRUPTED,
     EVENT_TURN_STARTED,
     EVENT_USER_MESSAGE,
     TURN_INTERRUPTED_MARKER,
+    append_context_compression_checkpoint,
     append_conversation_event,
     conversation_ledger_path,
     conversation_model_messages_from_events,
@@ -92,3 +94,54 @@ def test_conversation_ledger_event_projection_categories_are_explicit():
     assert event_has_model_projection(EVENT_USER_MESSAGE) is True
     assert event_has_model_projection(EVENT_ASSISTANT_PARTIAL) is True
     assert event_has_model_projection(EVENT_TURN_COMPLETED) is False
+
+
+def test_conversation_ledger_checkpoint_replaces_covered_history_for_model(tmp_path):
+    append_conversation_event(
+        tmp_path,
+        "session-compress",
+        "turn-old",
+        EVENT_USER_MESSAGE,
+        status="recorded",
+        payload={"content": "旧请求不应再逐条进入模型"},
+    )
+    append_conversation_event(
+        tmp_path,
+        "session-compress",
+        "turn-old",
+        EVENT_TOOL_RESULT,
+        status="done",
+        payload={"toolCall": {"id": "tool-old", "name": "cli_tool", "status": "done", "result": "旧工具结果"}},
+        tool_call_id="tool-old",
+    )
+    event = append_context_compression_checkpoint(
+        tmp_path,
+        "session-compress",
+        turn_id="turn-new",
+        current_turn_id="turn-new",
+        summary="旧阶段已经完成：定位到压缩事实源分裂。",
+        level="standard",
+        reason="context_pressure",
+        before_tokens=9000,
+        after_tokens=3000,
+        iteration=5,
+        trigger_source="auto",
+    )
+    append_conversation_event(
+        tmp_path,
+        "session-compress",
+        "turn-after",
+        EVENT_USER_MESSAGE,
+        status="recorded",
+        payload={"content": "checkpoint 后的新请求应保留"},
+    )
+
+    messages = conversation_model_messages_from_events(load_conversation_events(tmp_path, "session-compress"))
+    contents = "\n".join(str(message.get("content") or "") for message in messages)
+
+    assert event is not None
+    assert event.event_type == EVENT_COMPACTION_CHECKPOINT
+    assert "旧阶段已经完成" in contents
+    assert "checkpoint 后的新请求应保留" in contents
+    assert "旧请求不应再逐条进入模型" not in contents
+    assert "旧工具结果" not in contents

@@ -434,6 +434,55 @@ def test_runtime_summary_exposes_real_context_compression_snapshot(monkeypatch):
     assert compression["strategy"]["levels"][0]["thresholdTokens"] == 7200
 
 
+def test_runtime_summary_prefers_ledger_context_compression_checkpoint(monkeypatch, tmp_path):
+    from core.chat.conversation_ledger import append_context_compression_checkpoint, load_conversation_events
+
+    append_context_compression_checkpoint(
+        tmp_path,
+        "session-ledger-compression",
+        turn_id="turn-compress",
+        summary="旧上下文已经压缩。",
+        level="deep",
+        reason="context_pressure",
+        before_tokens=30000,
+        after_tokens=9000,
+        iteration=9,
+        trigger_source="auto",
+        effectiveness_threshold=0.3,
+        effectiveness_ratio=0.7,
+        effective=True,
+    )
+    events = load_conversation_events(tmp_path, "session-ledger-compression")
+    monkeypatch.setattr(
+        runtime_service,
+        "get_active_session_summary",
+        lambda: {"id": "session-ledger-compression", "agentId": ""},
+    )
+    monkeypatch.setattr(runtime_service, "load_conversation_events", lambda _root, _session_id: events)
+    monkeypatch.setattr(
+        runtime_service,
+        "_load_runtime_state",
+        lambda: {
+            "current_context_tokens": 12000,
+            "context_token_limit": 40000,
+            "context_compression": {
+                "compressionCount": 99,
+                "lastCompression": {"level": "light", "reason": "stale runtime state"},
+            },
+        },
+    )
+
+    payload = runtime_service.get_runtime_summary()
+    compression = payload["contextCompression"]
+
+    assert compression["source"] == "conversation_ledger"
+    assert compression["compressionCount"] == 1
+    assert compression["lastCompression"]["level"] == "deep"
+    assert compression["lastCompression"]["savedTokens"] == 21000
+    assert compression["lastCompression"]["effectivenessRatio"] == pytest.approx(0.7)
+    assert compression["strategy"]["summaryStorage"] == "conversation_ledger"
+
+
 def test_runtime_summary_uses_active_agent_context_compression_policy(monkeypatch):
     monkeypatch.setattr(runtime_service, "get_active_session_summary", lambda: {"agentId": "agent-compression"})
     monkeypatch.setattr(

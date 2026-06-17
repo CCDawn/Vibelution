@@ -22,7 +22,9 @@ from .tool_result_replacement import (
 )
 from .conversation_ledger import (
     ConversationLedgerEvent,
+    apply_context_compression_checkpoints,
     conversation_model_messages_from_events,
+    latest_context_compression_checkpoint,
 )
 
 
@@ -104,7 +106,11 @@ def assemble_conversation_context(
         list(ledger_events or []),
         current_turn_id=current_turn_id,
     )
-    ledger_messages = conversation_model_messages_from_events(ledger_event_list)
+    ledger_replay_events = apply_context_compression_checkpoints(
+        ledger_event_list,
+        current_turn_id=current_turn_id,
+    )
+    ledger_messages = conversation_model_messages_from_events(ledger_replay_events)
     if ledger_messages:
         normalized_messages = ledger_messages
     events = build_history_events(normalized_messages, session_id=session_id)
@@ -113,6 +119,7 @@ def assemble_conversation_context(
     recent_raw_messages = normalized_messages[recent_start_index:]
     recent_messages = recent_raw_messages
     checkpoint = latest_checkpoint(events)
+    ledger_checkpoint = latest_context_compression_checkpoint(ledger_replay_events)
     checkpoint_message = _checkpoint_seed_message(checkpoint)
     retrieved_list = list(retrieved_events or [])
     retrieved_messages = [_event_seed_message(event) for event in retrieved_list]
@@ -155,8 +162,19 @@ def assemble_conversation_context(
                 key="conversation_ledger",
                 label="conversation ledger replay",
                 source="conversation_ledger",
-                item_count=len(ledger_messages),
+                item_count=len(ledger_replay_events),
                 chars=_message_chars(ledger_messages),
+                cache_policy="dynamic",
+            )
+        )
+    if ledger_checkpoint is not None:
+        segments.append(
+            ContextSegment(
+                key="context_compression_checkpoint",
+                label="context compression checkpoint",
+                source="conversation_ledger",
+                item_count=1,
+                chars=len(str((ledger_checkpoint.payload or {}).get("summary") or "")),
                 cache_policy="dynamic",
             )
         )
@@ -187,7 +205,13 @@ def assemble_conversation_context(
         events=events,
         included_event_ids=included_event_ids,
         omitted_event_count=omitted_event_count,
-        checkpoint_event_id=checkpoint.event_id if checkpoint else "",
+        checkpoint_event_id=(
+            ledger_checkpoint.event_id
+            if ledger_checkpoint is not None
+            else checkpoint.event_id
+            if checkpoint
+            else ""
+        ),
         segments=segments,
         cacheable_prefix_hash=_hash_text("agent_protocol:v1"),
         dynamic_context_hash=_hash_messages(history_messages),

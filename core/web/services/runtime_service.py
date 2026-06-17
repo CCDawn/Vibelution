@@ -23,6 +23,10 @@ from core.runtime_manager.evolution_store import (
 )
 from core.runtime_manager.state_store import load_state as load_runtime_manager_state
 from core.runtime_manager.work_run_leases import leases_for_snapshot
+from core.chat.conversation_ledger import (
+    context_compression_projection,
+    load_conversation_events,
+)
 
 from .i18n import get_web_language, text_for
 from .avatar_image_service import avatar_image_url
@@ -1669,6 +1673,16 @@ def _context_compression_summary(runtime_state: dict, context_usage: dict[str, i
 
     persisted = runtime_state.get("context_compression")
     persisted = persisted if isinstance(persisted, dict) else {}
+    ledger_compression = _active_session_context_compression_projection(active_session)
+    if ledger_compression.get("compressionCount"):
+        persisted = {
+            **persisted,
+            "compressionCount": ledger_compression.get("compressionCount"),
+            "lastCompression": ledger_compression.get("lastCompression") or {},
+            "updatedAt": ledger_compression.get("updatedAt") or persisted.get("updatedAt"),
+            "lastCompressionEventId": ledger_compression.get("lastCompressionEventId") or "",
+            "lastCompressionSeq": ledger_compression.get("lastCompressionSeq") or 0,
+        }
     enabled = bool(getattr(cfg, "enabled", True)) if cfg is not None else bool(persisted.get("enabled", True))
     effective_limit = _positive_int(
         persisted.get("effectiveTokenLimit"),
@@ -1701,7 +1715,7 @@ def _context_compression_summary(runtime_state: dict, context_usage: dict[str, i
 
     return {
         "enabled": enabled,
-        "source": "runtime_state",
+        "source": "conversation_ledger" if ledger_compression.get("compressionCount") else "runtime_state",
         "policyMode": str((policy_payload or {}).get("mode") or "inherit").strip() or "inherit",
         "policySource": str((policy_payload or {}).get("source") or "global").strip() or "global",
         "policyAgentId": str((policy_payload or {}).get("agentId") or "").strip(),
@@ -1719,11 +1733,23 @@ def _context_compression_summary(runtime_state: dict, context_usage: dict[str, i
             "levels": strategy_levels,
             "preserveErrors": bool(_compression_policy_get(preservation, "preserveErrors", "preserve_errors", default=True)),
             "errorProtectionKeywords": ["error", "exception", "traceback", "failed", "错误", "异常", "失败", "超时", "权限"],
-            "summaryStorage": "state_memory",
-            "algorithm": "old messages become a runtime summary while recent AI context is kept",
+            "summaryStorage": "conversation_ledger" if ledger_compression.get("compressionCount") else "state_memory",
+            "algorithm": "ledger checkpoint covers old events; recent and current-turn events remain complete",
         },
         "updatedAt": str(persisted.get("updatedAt") or runtime_state.get("updated_at") or "").strip(),
     }
+
+
+def _active_session_context_compression_projection(active_session: dict | None) -> dict[str, object]:
+    if not isinstance(active_session, dict):
+        return {}
+    session_id = str(active_session.get("id") or active_session.get("sessionId") or "").strip()
+    if not session_id:
+        return {}
+    try:
+        return context_compression_projection(load_conversation_events(PROJECT_ROOT, session_id))
+    except Exception:
+        return {}
 
 
 def _active_session_context_compression_policy(
@@ -1821,6 +1847,10 @@ def _last_compression_payload(payload: dict) -> dict[str, object] | None:
         "afterTokens": after,
         "savedTokens": max(0, int(payload.get("savedTokens") or max(0, before - after))),
         "iteration": max(0, int(payload.get("iteration") or 0)),
+        "effectivenessRatio": max(0.0, float(payload.get("effectivenessRatio") or 0.0)),
+        "effectivenessThreshold": max(0.0, float(payload.get("effectivenessThreshold") or 0.0)),
+        "effective": bool(payload.get("effective", True)),
+        "summaryHash": str(payload.get("summaryHash") or "").strip(),
         "summaryWritten": bool(payload.get("summaryWritten")),
         "timestamp": str(payload.get("timestamp") or "").strip(),
     }

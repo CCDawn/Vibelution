@@ -47,6 +47,12 @@ from .turn_journal import (
     model_visible_messages_from_events,
     turn_journal_path,
 )
+from .context_compression_ledger import (
+    append_context_compression_checkpoint,
+    apply_context_compression_checkpoints,
+    context_compression_projection,
+    latest_context_compression_checkpoint,
+)
 
 
 ConversationLedgerEvent = TurnJournalEvent
@@ -120,7 +126,7 @@ def load_conversation_events(project_root: Path, session_id: str) -> list[Conver
 def conversation_model_messages_from_events(
     events: Iterable[ConversationLedgerEvent],
 ) -> list[dict[str, Any]]:
-    return model_messages_from_events(events)
+    return model_messages_from_events(apply_context_compression_checkpoints(events))
 
 
 def conversation_visible_messages_from_events(
@@ -136,10 +142,11 @@ def project_conversation_ledger(
     include_visible_messages: bool = False,
 ) -> ConversationLedgerProjection:
     event_list = list(events or [])
+    model_event_list = apply_context_compression_checkpoints(event_list)
     latest = event_list[-1] if event_list else None
     return ConversationLedgerProjection(
         events=event_list,
-        model_messages=conversation_model_messages_from_events(event_list) if include_model_messages else [],
+        model_messages=model_messages_from_events(model_event_list) if include_model_messages else [],
         visible_messages=conversation_visible_messages_from_events(event_list) if include_visible_messages else [],
         latest_seq=int(getattr(latest, "sequence", 0) or 0) if latest is not None else 0,
         latest_event_id=str(getattr(latest, "event_id", "") or "") if latest is not None else "",
@@ -192,12 +199,16 @@ __all__ = [
     "TURN_INTERRUPTED_MARKER",
     "VOLATILE_MODEL_EVENT_TYPES",
     "append_conversation_event",
+    "append_context_compression_checkpoint",
+    "apply_context_compression_checkpoints",
     "conversation_ledger_path",
     "conversation_model_messages_from_events",
     "conversation_visible_messages_from_events",
+    "context_compression_projection",
     "event_has_model_projection",
     "event_projection_category",
     "latest_ledger_sequence",
+    "latest_context_compression_checkpoint",
     "load_conversation_events",
     "project_conversation_ledger",
     "reconcile_open_conversation_turn",
