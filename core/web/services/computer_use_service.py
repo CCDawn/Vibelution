@@ -17,9 +17,12 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
+from core.infrastructure import developer_sandbox
 
-PROJECT_ROOT = Path(__file__).resolve().parents[3]
-SESSION_ROOT = PROJECT_ROOT / "workspace" / "computer_use_sessions"
+_DEFAULT_PROJECT_ROOT = Path(__file__).resolve().parents[3]
+PROJECT_ROOT = _DEFAULT_PROJECT_ROOT
+_DEFAULT_SESSION_ROOT = _DEFAULT_PROJECT_ROOT / "workspace" / "computer_use_sessions"
+SESSION_ROOT = _DEFAULT_SESSION_ROOT
 ALLOWED_STATUSES = {"completed", "running", "need_confirmation", "blocked", "failed", "timeout", "cancelled"}
 HIGH_RISK_ACTIONS = {"submit", "send", "delete", "pay", "purchase", "download", "upload", "login", "confirm"}
 SUPPORTED_BROWSER_ACTIONS = {
@@ -1016,7 +1019,23 @@ def _default_summary(status: str) -> str:
 
 
 def _session_dir(session_id: str) -> Path:
-    return SESSION_ROOT / _normalize_session_id(session_id)
+    return _session_root() / _normalize_session_id(session_id)
+
+
+def _session_root() -> Path:
+    configured_root = Path(SESSION_ROOT)
+    current_formal_root = PROJECT_ROOT / "workspace" / "computer_use_sessions"
+    if configured_root.resolve() not in {
+        _DEFAULT_SESSION_ROOT.resolve(),
+        current_formal_root.resolve(),
+    }:
+        return configured_root
+    return developer_sandbox.route_workspace_path(
+        PROJECT_ROOT,
+        "computer_use",
+        "computer_use_sessions",
+        intent="state",
+    )
 
 
 def _session_lock_path(session_id: str) -> Path:

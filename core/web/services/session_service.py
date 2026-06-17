@@ -9066,8 +9066,9 @@ def _find_cli_agent_task_result_message(
 
 
 def _cli_agent_lifecycle_sidecar_path(session_id: str) -> Path:
-    workspace_path = (PROJECT_ROOT / _session_workspace_relative_path(session_id)).resolve()
-    sessions_root = (PROJECT_ROOT / "workspace" / "sessions").resolve()
+    token = _safe_session_workspace_token(session_id)
+    sessions_root = developer_sandbox.sandboxed_workspace_path(PROJECT_ROOT, "sessions").resolve()
+    workspace_path = developer_sandbox.seeded_sandbox_workspace_path(PROJECT_ROOT, "sessions", token).resolve()
     if not workspace_path.is_relative_to(sessions_root):
         raise SessionValidationError(f"Invalid session workspace path: {workspace_path}")
     return workspace_path / "logs" / "cli_agent_lifecycle.jsonl"
