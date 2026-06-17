@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import contextlib
 import hashlib
+import json
 import re
 from contextvars import ContextVar
 from dataclasses import dataclass, field
@@ -190,6 +191,111 @@ def _message_chain_signature(messages: List[Dict[str, Any]]) -> str:
         parts.append(str(item.get("tool_call_id") or ""))
         parts.append(repr(item.get("tool_calls") or []))
     return hashlib.sha256("\n".join(parts).encode("utf-8", errors="replace")).hexdigest()[:16]
+
+
+def _message_content_shape(content: Any) -> Dict[str, Any]:
+    if isinstance(content, str):
+        return {"kind": "text", "chars": len(content), "blocks": 0, "images": 0}
+    if isinstance(content, list):
+        block_types: list[str] = []
+        text_chars = 0
+        image_blocks = 0
+        for block in content:
+            if isinstance(block, dict):
+                block_type = str(block.get("type") or "").strip().lower() or "object"
+                block_types.append(block_type)
+                text_chars += len(str(block.get("text") or block.get("content") or ""))
+                if block_type in {"image_url", "input_image"} or block.get("image_url") or block.get("imageUrl"):
+                    image_blocks += 1
+            else:
+                block_types.append(type(block).__name__)
+                text_chars += len(str(block or ""))
+        return {
+            "kind": "blocks",
+            "chars": text_chars,
+            "blocks": len(content),
+            "blockTypes": block_types[:8],
+            "images": image_blocks,
+        }
+    if content is None:
+        return {"kind": "empty", "chars": 0, "blocks": 0, "images": 0}
+    return {"kind": type(content).__name__, "chars": len(str(content or "")), "blocks": 0, "images": 0}
+
+
+def _tool_pairing_snapshot(messages: List[Dict[str, Any]]) -> Dict[str, int]:
+    pending: list[str] = []
+    paired = 0
+    orphan = 0
+    missing = 0
+    assistant_tool_calls = 0
+    tool_results = 0
+    for message in list(messages or []):
+        role = str(message.get("role") or "").strip().lower()
+        if role == "assistant":
+            if pending:
+                missing += len(pending)
+                pending = []
+            raw_calls = message.get("tool_calls")
+            if isinstance(raw_calls, list):
+                for index, item in enumerate(raw_calls):
+                    if not isinstance(item, dict):
+                        continue
+                    tool_call_id = str(item.get("id") or "").strip() or f"tool_{index}"
+                    pending.append(tool_call_id)
+                    assistant_tool_calls += 1
+            continue
+        if role == "tool":
+            tool_results += 1
+            tool_call_id = str(message.get("tool_call_id") or "").strip()
+            if tool_call_id and tool_call_id in pending:
+                pending.remove(tool_call_id)
+                paired += 1
+            else:
+                orphan += 1
+            continue
+        if pending:
+            missing += len(pending)
+            pending = []
+    if pending:
+        missing += len(pending)
+    return {
+        "payloadMessageAssistantToolCallCount": assistant_tool_calls,
+        "payloadMessageToolResultCount": tool_results,
+        "payloadMessagePairedToolResultCount": paired,
+        "payloadMessageOrphanToolResultCount": orphan,
+        "payloadMessageMissingToolResultCount": missing,
+    }
+
+
+def _payload_message_snapshot(payload: Dict[str, Any]) -> Dict[str, Any]:
+    messages = payload.get("messages")
+    message_list = [item for item in messages if isinstance(item, dict)] if isinstance(messages, list) else []
+    roles = [str(item.get("role") or "").strip().lower() or "unknown" for item in message_list]
+    shape_items: list[dict[str, Any]] = []
+    has_image = False
+    for index, message in enumerate(message_list):
+        content_shape = _message_content_shape(message.get("content"))
+        has_image = has_image or int(content_shape.get("images") or 0) > 0
+        shape_items.append(
+            {
+                "index": index,
+                "role": roles[index],
+                "contentKind": str(content_shape.get("kind") or ""),
+                "contentChars": int(content_shape.get("chars") or 0),
+                "contentBlocks": int(content_shape.get("blocks") or 0),
+                "imageBlocks": int(content_shape.get("images") or 0),
+                "toolCallCount": len(message.get("tool_calls") or []) if isinstance(message.get("tool_calls"), list) else 0,
+                "hasToolResultId": bool(str(message.get("tool_call_id") or "").strip()),
+            }
+        )
+    signature_source = json.dumps(shape_items, ensure_ascii=False, sort_keys=True)
+    return {
+        "payloadMessageShapeHash": hashlib.sha256(signature_source.encode("utf-8", errors="replace")).hexdigest()[:16],
+        "payloadMessageRoleSequence": roles,
+        "payloadMessageShapeTail": shape_items[-8:],
+        "payloadMessageHasImage": has_image,
+        **_tool_pairing_snapshot(message_list),
+    }
 
 
 def _apply_system_message_policy(
@@ -608,6 +714,7 @@ def build_llm_payload(
 
     summary = assert_payload_valid(payload, route)
     summary.update(policy_actions.to_log_dict())
+    summary.update(_payload_message_snapshot(payload))
     return BuiltPayload(payload=payload, route=route, summary=summary, warnings=route.warnings)
 
 

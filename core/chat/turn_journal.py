@@ -39,6 +39,32 @@ TERMINAL_EVENTS = {
     EVENT_TURN_INTERRUPTED,
 }
 
+MODEL_VISIBLE_EVENT_TYPES = {
+    EVENT_USER_MESSAGE,
+    EVENT_ASSISTANT_PARTIAL,
+    EVENT_ASSISTANT_DELTA_COMMITTED,
+    EVENT_ASSISTANT_MESSAGE,
+    EVENT_TOOL_CALL_STARTED,
+    EVENT_TOOL_RESULT,
+    EVENT_CLI_TASK_SENT,
+    EVENT_CLI_TASK_RESULT,
+    EVENT_CLI_SESSION_LIFECYCLE,
+    EVENT_TURN_INTERRUPTED,
+    EVENT_COMPACTION_CHECKPOINT,
+}
+
+VOLATILE_MODEL_EVENT_TYPES = {
+    EVENT_ASSISTANT_PARTIAL,
+    EVENT_ASSISTANT_DELTA_COMMITTED,
+}
+
+AUDIT_ONLY_EVENT_TYPES = {
+    EVENT_TURN_STARTED,
+    EVENT_TURN_CONTEXT,
+    EVENT_TURN_COMPLETED,
+    EVENT_TURN_FAILED,
+}
+
 TURN_INTERRUPTED_MARKER = (
     "<turn_interrupted>\n"
     "上一轮在完成前中断。已产生的助手内容、工具结果和 CLI 结果已经保留在上文；"
@@ -212,6 +238,27 @@ def latest_open_turn_id(events: Iterable[TurnJournalEvent]) -> str:
     return ""
 
 
+def event_projection_category(event_type: str) -> str:
+    normalized = str(event_type or "").strip()
+    if normalized in VOLATILE_MODEL_EVENT_TYPES:
+        return "volatile_model"
+    if normalized in MODEL_VISIBLE_EVENT_TYPES:
+        return "model"
+    if normalized in AUDIT_ONLY_EVENT_TYPES:
+        return "audit"
+    return "unknown"
+
+
+def event_has_model_projection(event: TurnJournalEvent | str) -> bool:
+    if isinstance(event, TurnJournalEvent):
+        if not event.visible_in_model:
+            return False
+        event_type = event.event_type
+    else:
+        event_type = str(event or "").strip()
+    return event_projection_category(event_type) in {"model", "volatile_model"}
+
+
 def append_interrupted_if_open(
     project_root: Path,
     session_id: str,
@@ -256,6 +303,8 @@ def model_visible_messages_from_events(events: Iterable[TurnJournalEvent]) -> li
 
     for event in event_list:
         if not event.visible_in_model:
+            continue
+        if not event_has_model_projection(event) and event.event_type not in TERMINAL_EVENTS:
             continue
         turn_id = str(event.turn_id or "").strip()
         payload = dict(event.payload or {})
@@ -631,12 +680,15 @@ __all__ = [
     "EVENT_ASSISTANT_MESSAGE",
     "EVENT_ASSISTANT_DELTA_COMMITTED",
     "EVENT_ASSISTANT_PARTIAL",
+    "AUDIT_ONLY_EVENT_TYPES",
     "EVENT_CLI_SESSION_LIFECYCLE",
     "EVENT_CLI_TASK_SENT",
     "EVENT_CLI_TASK_RESULT",
     "EVENT_COMPACTION_CHECKPOINT",
+    "MODEL_VISIBLE_EVENT_TYPES",
     "EVENT_TOOL_CALL_STARTED",
     "EVENT_TOOL_RESULT",
+    "VOLATILE_MODEL_EVENT_TYPES",
     "EVENT_TURN_COMPLETED",
     "EVENT_TURN_CONTEXT",
     "EVENT_TURN_FAILED",
@@ -647,6 +699,8 @@ __all__ = [
     "TurnJournalEvent",
     "append_interrupted_if_open",
     "append_turn_event",
+    "event_has_model_projection",
+    "event_projection_category",
     "latest_open_turn_id",
     "load_turn_events",
     "model_visible_messages_from_events",
