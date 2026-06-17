@@ -58,6 +58,7 @@ import {
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
 import { useShellI18n } from "../i18n/useShellI18n";
 import { AgentManagementNav } from "./AgentManagementNav";
+import { agentCenterToolsRoute } from "./agentCenterRoutes";
 import { agentDisplayInfo } from "./agentDisplay";
 import { createChatWorkspaceCache } from "./chatWorkspaceCache";
 import styles from "./AgentsRoute.module.css";
@@ -3818,6 +3819,16 @@ export function AgentsRoute() {
     [lang, toolBundles, toolPolicyDraft, visiblePolicyTools],
   );
   const selectedAgent = selectedAgentFromList(visibleAgents, selectedAgentId, workspace?.agents ?? [], activeFilter);
+  const selectedAgentToolConfigRoute = useMemo(
+    () => selectedAgent?.agentId
+      ? agentCenterToolsRoute({
+          agentId: selectedAgent.agentId,
+          returnLabel: "agents",
+          returnTo: `/agents?agent=${encodeURIComponent(selectedAgent.agentId)}&pane=config`,
+        })
+      : "/agents/tools",
+    [selectedAgent?.agentId],
+  );
   const managementBrief = useMemo(() => buildAgentManagementBrief(selectedAgent, copy, lang), [copy, lang, selectedAgent]);
   const capabilityPreview = useMemo(
     () => buildAgentCapabilityPreview(toolPolicyDraft, visiblePolicyTools, copy),
@@ -6598,32 +6609,11 @@ export function AgentsRoute() {
                   </div>
                   <ShieldCheck size={16} />
                 </div>
-                <p className={styles.policyHint}>{copy.toolGovernanceHint}</p>
-                <div className={styles.policySummaryGrid}>
-                  <span>{lang === "zh" ? "新增授权" : "Grant"}: <strong>{toolGovernanceDelta.grantTools.length}</strong></span>
-                  <span>{lang === "zh" ? "撤销授权" : "Revoke"}: <strong>{toolGovernanceDelta.revokeTools.length}</strong></span>
-                  <span>{lang === "zh" ? "禁用变化" : "Block changes"}: <strong>{toolGovernanceDelta.blockTools.length + toolGovernanceDelta.unblockTools.length}</strong></span>
-                </div>
-                <div className={styles.governanceEditorGrid}>
-                  <label className={styles.field}>
-                    <span>{copy.toolGovernanceReason}</span>
-                    <input
-                      value={toolGovernanceDraft.reason}
-                      placeholder={copy.toolGovernanceReasonPlaceholder}
-                      onChange={(event) => updateToolGovernanceDraft({ reason: event.target.value })}
-                    />
-                  </label>
-                  <label className={styles.field}>
-                    <span>Apply mode</span>
-                    <select
-                      value={toolGovernanceDraft.applyMode}
-                      onChange={(event) => updateToolGovernanceDraft({ applyMode: event.target.value === "review" ? "review" : "auto" })}
-                    >
-                      <option value="auto">{copy.toolGovernanceApplyAuto}</option>
-                      <option value="review">{copy.toolGovernanceApplyReview}</option>
-                    </select>
-                  </label>
-                </div>
+                <p className={styles.policyHint}>
+                  {lang === "zh"
+                    ? "工具治理变更从工具页发起；这里保留最近记录和待审批处理。"
+                    : "Tool governance changes start from the Tools page. Recent records and approvals remain visible here."}
+                </p>
                 <div className={styles.toolGovernanceList}>
                   {(selectedAgent.toolGovernanceRequests ?? []).length ? (
                     (selectedAgent.toolGovernanceRequests ?? []).map((request) => {
@@ -6669,10 +6659,10 @@ export function AgentsRoute() {
                   <button
                     type="button"
                     className={styles.primaryButton}
-                    disabled={!canSubmitToolGovernance || selectedAgentToolGovernanceCreatePending}
-                    onClick={submitToolGovernanceRequest}
+                    onClick={() => navigate(selectedAgentToolConfigRoute)}
                   >
-                    {selectedAgentToolGovernanceCreatePending ? copy.toolGovernanceSubmitting : copy.toolGovernanceSubmit}
+                    <Wrench size={15} />
+                    {lang === "zh" ? "去工具页配置" : "Configure in tools"}
                   </button>
                 </div>
               </section>
@@ -6960,165 +6950,27 @@ export function AgentsRoute() {
                     <p className={styles.panelEyebrow}>{copy.toolPolicyTitle}</p>
                     <h3>{selectedAgent.toolPolicyId || "-"}</h3>
                   </div>
-                  <span className={toolPolicyDirty ? styles.dirtyPill : styles.cleanPill}>
-                    {toolPolicyDirty ? (lang === "zh" ? "未保存" : "Unsaved") : (lang === "zh" ? "已同步" : "Synced")}
-                  </span>
+                  <Wrench size={16} />
                 </div>
                 <div className={styles.policySummaryGrid}>
-                  <span>{copy.allowedTools}: <strong>{toolPolicyDraft.allowedTools.length}</strong></span>
-                  <span>{copy.preferredTools}: <strong>{toolPolicyDraft.preferredTools.length}</strong></span>
-                  <span>{copy.blockedTools}: <strong>{toolPolicyDraft.blockedTools.length}</strong></span>
-                  <span>{copy.inheritedTools}: <strong>{Math.max(0, visiblePolicyTools.length - toolPolicyDraft.allowedTools.length - toolPolicyDraft.blockedTools.length)}</strong></span>
-                  <span>{copy.toolCategoryCount}: <strong>{visiblePolicyToolGroups.length}</strong></span>
+                  <span>{copy.allowedTools}: <strong>{selectedAgent.toolPolicy?.allowedTools?.length ?? 0}</strong></span>
+                  <span>{copy.preferredTools}: <strong>{selectedAgent.toolPolicy?.preferredTools?.length ?? 0}</strong></span>
+                  <span>{copy.blockedTools}: <strong>{selectedAgent.toolPolicy?.blockedTools?.length ?? 0}</strong></span>
+                  <span>{copy.toolCategoryCount}: <strong>{toolBundles.length}</strong></span>
                 </div>
-                <section className={styles.capabilityPreviewPanel}>
-                  <div>
-                    <span>{copy.capabilityPreviewTitle}</span>
-                    <small>{copy.capabilityPreviewHint}</small>
-                  </div>
-                  <strong>{copy.effectiveAllowedTools}: {capabilityPreview.effectiveAllowed}</strong>
-                  <strong>{copy.preferredTools}: {capabilityPreview.preferred}</strong>
-                  <strong>{copy.blockedTools}: {capabilityPreview.blocked}</strong>
-                  <strong>{copy.inheritedTools}: {capabilityPreview.inherited}</strong>
-                  <strong>{copy.highRiskAllowedTools}: {capabilityPreview.highRiskAllowed}</strong>
-                  <strong>{copy.explicitAllowedTools}: {capabilityPreview.explicitAllowed}</strong>
-                  <strong>{copy.writeBoundaryPreview}: {capabilityPreview.writeBoundaryLabel}</strong>
-                </section>
-                <section className={styles.workspaceScopePanel}>
-                  <div>
-                    <span>{copy.workspaceWriteScopes}</span>
-                    <strong>{toolPolicyDraft.writeScopes.includes("shared") ? copy.sharedWriteScope : copy.privateWriteScope}</strong>
-                    <small>{copy.sharedWriteHint}</small>
-                  </div>
-                  <label className={styles.checkField}>
-                    <input type="checkbox" checked disabled />
-                    <span>{copy.privateWriteScope}</span>
-                  </label>
-                  <label className={styles.checkField}>
-                    <input
-                      type="checkbox"
-                      checked={toolPolicyDraft.writeScopes.includes("shared")}
-                      onChange={(event) => toggleToolPolicyScope("writeScopes", "shared", event.target.checked)}
-                    />
-                    <span>{copy.sharedWriteScope}</span>
-                  </label>
-                </section>
-                {toolBundles.length ? (
-                  <section className={styles.toolBundlePanel}>
-                    <div className={styles.toolBundlePanelHeader}>
-                      <div>
-                        <strong>{copy.toolBundlesTitle}</strong>
-                        <span>{copy.toolBundlesHint}</span>
-                      </div>
-                    </div>
-                    <div className={styles.toolBundleList}>
-                      {toolBundles.map((bundle) => (
-                        <div key={bundle.bundleId} className={styles.toolBundleItem}>
-                          <span>
-                            <strong>{bundle.label}</strong>
-                            <small>{toolBundleMeta(bundle, lang)}</small>
-                          </span>
-                          <p>{bundle.description}</p>
-                          <div className={styles.toolBundleActions}>
-                            <button type="button" className={styles.secondaryButton} onClick={() => applyToolBundle(bundle, "merge")}>
-                              {copy.applyBundle}
-                            </button>
-                            <button type="button" className={styles.secondaryButton} onClick={() => applyToolBundle(bundle, "replace")}>
-                              {copy.replaceWithBundle}
-                            </button>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </section>
-                ) : null}
-                <label className={styles.searchBox}>
-                  <Search size={15} />
-                  <input value={toolSearchText} placeholder={copy.toolSearch} onChange={(event) => setToolSearchText(event.target.value)} />
-                </label>
-                {visiblePolicyTools.length ? (
-                  <div className={styles.toolPermissionList}>
-                    {visiblePolicyToolGroups.map((group) => (
-                      <section key={group.category} className={styles.toolPermissionGroup}>
-                        <header className={styles.toolPermissionGroupHeader}>
-                          <div>
-                            <strong>{group.label}</strong>
-                            <span>
-                              {group.tools.length} tools · {copy.allowedTools} {group.allowedCount} · {copy.blockedTools} {group.blockedCount} · {copy.inheritedTools} {group.inheritedCount}
-                            </span>
-                          </div>
-                          {group.highRiskCount ? (
-                            <small>{copy.toolHighRisk} {group.highRiskCount}</small>
-                          ) : null}
-                        </header>
-                        <div className={styles.toolPermissionGroupList}>
-                          {group.tools.map((tool) => {
-                            const mode = toolPolicyMode(toolPolicyDraft, tool.name);
-                            const sessionRequiredTool = isSessionRequiredTool(tool.name, selectedAgent);
-                            const tags = [...(tool.capabilityTags ?? []), ...(tool.riskTags ?? [])].slice(0, 4);
-                            return (
-                              <div key={`${tool.source}:${tool.id}`} className={styles.toolPermissionRow}>
-                                <span>
-                                  <strong>{tool.name}</strong>
-                                  <small>{tool.description || tool.source}</small>
-                                  <span className={styles.toolPermissionMeta}>
-                                    <em>{toolTierLabel(tool.permissionTier, lang)}</em>
-                                    <small>{toolCategoryLabel(tool.category, tool.categoryLabel, lang)}</small>
-                                    {sessionRequiredTool ? <small>{lang === "zh" ? "会话必备，不可移除" : "Required for sessions"}</small> : null}
-                                    {tags.length ? <small>{copy.toolTags}: {tags.join(" / ")}</small> : null}
-                                  </span>
-                                </span>
-                                <div className={styles.segmentedControl} aria-label={tool.name}>
-                                  <button
-                                    type="button"
-                                    className={mode === "inherited" || mode === "excluded" ? styles.segmentActive : styles.segmentButton}
-                                    disabled={sessionRequiredTool}
-                                    onClick={() => updateToolPolicyMode(tool.name, "inherited")}
-                                  >
-                                    {toolPolicyModeLabel(mode === "excluded" ? "excluded" : "inherited", lang)}
-                                  </button>
-                                  <button
-                                    type="button"
-                                    className={mode === "allowed" ? styles.segmentActive : styles.segmentButton}
-                                    onClick={() => updateToolPolicyMode(tool.name, "allowed")}
-                                  >
-                                    {toolPolicyModeLabel("allowed", lang)}
-                                  </button>
-                                  <button
-                                    type="button"
-                                    className={mode === "blocked" ? styles.segmentActiveDanger : styles.segmentButton}
-                                    disabled={sessionRequiredTool}
-                                    onClick={() => updateToolPolicyMode(tool.name, "blocked")}
-                                  >
-                                    {toolPolicyModeLabel("blocked", lang)}
-                                  </button>
-                                </div>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      </section>
-                    ))}
-                  </div>
-                ) : (
-                  <p className={styles.emptyText}>{copy.noTools}</p>
-                )}
+                <p className={styles.contextLine}>
+                  {lang === "zh"
+                    ? "工具能力已迁移到 Agent 管理的工具页集中配置；这里保留当前 Agent 的工具摘要和入口。"
+                    : "Tool permissions are configured in the Agent Tools page. This panel keeps only the current Agent summary and entry point."}
+                </p>
                 <div className={styles.editorActions}>
                   <button
                     type="button"
-                    className={styles.secondaryButton}
-                    disabled={!toolPolicyDirty || selectedAgentToolPolicyPending}
-                    onClick={() => setToolPolicyDraft(toolPolicyDraftFromAgent(selectedAgent))}
-                  >
-                    {copy.resetConfig}
-                  </button>
-                  <button
-                    type="button"
                     className={styles.primaryButton}
-                    disabled={!canSaveToolPolicy || selectedAgentToolPolicyPending}
-                    onClick={saveToolPolicy}
+                    onClick={() => navigate(selectedAgentToolConfigRoute)}
                   >
-                    {selectedAgentToolPolicyPending ? copy.savingToolPolicy : copy.saveToolPolicy}
+                    <Wrench size={15} />
+                    {lang === "zh" ? "配置工具能力" : "Configure tools"}
                   </button>
                 </div>
               </section>
