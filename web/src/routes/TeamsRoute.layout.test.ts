@@ -334,6 +334,10 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("HTMLDetailsElement");
     expect(routeSource).toContain("暂无候选");
     expect(routeSource).toContain("source-collection-screening-panel");
+    expect(routeSource).toContain("sourceCollectionScreeningListShell");
+    expect(routeSource).toContain("sourceCollectionScreeningScrollHint");
+    expect(routeSource).toContain("资料筛选候选列表，可向下滚动查看更多");
+    expect(routeSource).toContain("向下滚动查看更多本页候选");
     expect(routeSource).toContain("source-collection-candidates-panel");
     expect(routeSource).toContain("source-collection-graph-panel");
     expect(routeSource).toContain("source-collection-memory-panel");
@@ -659,6 +663,9 @@ describe("TeamsRoute layout contract", () => {
     expect(routeStyles.sourceCollectionStageActionRow).toBeTypeOf("string");
     expect(routeStyles.sourceCollectionStageOperationPanel).toBeTypeOf("string");
     expect(routeStyles.sourceCollectionPanelActions).toBeTypeOf("string");
+    expect(routeStyles.sourceCollectionScreeningListShell).toBeTypeOf("string");
+    expect(routeStyles.sourceCollectionScreeningList).toBeTypeOf("string");
+    expect(routeStyles.sourceCollectionScreeningScrollHint).toBeTypeOf("string");
     expect(routeStyles.sourceCollectionStagePrimaryAction).toBeTypeOf("string");
     expect(routeStyles.sourceCollectionStageSecondaryAction).toBeTypeOf("string");
     expect(routeStyles.sourceCollectionFocusedPanel).toBeTypeOf("string");
