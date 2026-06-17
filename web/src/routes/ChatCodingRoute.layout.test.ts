@@ -862,7 +862,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("queueSessionDetail(payload.detail, event.data.length)");
   });
 
-  it("applies lightweight assistant delta stream events without full detail sync", () => {
+  it("coalesces lightweight assistant delta stream events before updating UI cache", () => {
+    expect(routeSource).toContain("const SESSION_ASSISTANT_DELTA_MIN_APPLY_INTERVAL_MS = 80");
     expect(routeSource).toContain("function mergeAssistantDeltaIntoSessionDetail(");
     expect(routeSource).toContain("function liveAssistantOverlayTurnId(turnId: string)");
     expect(routeSource).toContain("function liveAssistantMessageId(sessionId: string, turnId: string)");
@@ -886,9 +887,15 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("feedbackEventKey(event)");
     expect(routeSource).toContain("const nextFeedbackEvents = mergeLiveFeedbackEvents(previous?.feedbackEvents, payload.feedbackEvents)");
     expect(routeSource).toContain("return mergeSessionDetailWithLiveAssistantOverlay(previous, detail)");
+    expect(routeSource).toContain("let pendingAssistantDeltaDetail: SessionDetail | undefined");
+    expect(routeSource).toContain("function applyPendingAssistantDelta(reason: \"timer\" | \"close\" | \"final\")");
+    expect(routeSource).toContain("function queueAssistantDelta(");
+    expect(routeSource).toContain("browser.session_stream.assistant_delta_queued");
     expect(routeSource).toContain("stream.addEventListener(\"assistant_delta\", handleAssistantDelta as EventListener)");
     expect(routeSource).toContain("stream.removeEventListener(\"assistant_delta\", handleAssistantDelta as EventListener)");
-    expect(routeSource).toContain("queryClient.setQueryData<SessionDetail>(queryKeys.session(streamSessionId), (detail) =>");
+    expect(routeSource).toContain("queryClient.setQueryData<SessionDetail>(queryKeys.session(streamSessionId), (current) =>");
+    expect(routeSource).toContain("queueAssistantDelta(payload, event.data.length)");
+    expect(routeSource).toContain("applyPendingAssistantDelta(\"close\")");
     expect(routeSource).toContain("browser.session_stream.assistant_delta_applied");
   });
 

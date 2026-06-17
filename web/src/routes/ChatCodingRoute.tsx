@@ -1399,6 +1399,7 @@ const MAX_COMPOSER_IMAGE_BYTES = 8 * 1024 * 1024;
 const ACTIVE_INDEX_POLL_MS = 3_000;
 const ACTIVE_BACKGROUND_SYNC_POLL_MS = 5_000;
 const SESSION_STREAM_MIN_APPLY_INTERVAL_MS = 350;
+const SESSION_ASSISTANT_DELTA_MIN_APPLY_INTERVAL_MS = 80;
 const SESSION_STREAM_ROUTE_SWITCH_GRACE_MS = 4_000;
 const CHAT_CENTER_FIRST_MEDIA_QUERY = "(max-width: 980px)";
 
@@ -3498,6 +3499,17 @@ export function ChatCodingRoute() {
     let pendingDetail: SessionDetail | null = null;
     let applyTimer: ReturnType<typeof window.setTimeout> | null = null;
     let lastAppliedAt = 0;
+    let pendingAssistantDeltaDetail: SessionDetail | undefined;
+    let assistantDeltaApplyTimer: ReturnType<typeof window.setTimeout> | null = null;
+    let assistantDeltaLastAppliedAt = 0;
+    let pendingAssistantDeltaTelemetry: {
+      payloadLength: number;
+      turnId: string;
+      stage: string;
+      contentDeltaLength: number;
+      thoughtDeltaLength: number;
+      done: boolean;
+    } | null = null;
     const streamSessionId = String(activeSessionId || "");
     if (!streamSessionId) {
       setSessionStreamConnected(false);
@@ -3602,6 +3614,120 @@ export function ChatCodingRoute() {
       }
     }
 
+    function applyPendingAssistantDelta(reason: "timer" | "close" | "final") {
+      if (!pendingAssistantDeltaDetail || disposed) {
+        return;
+      }
+      const pendingDetail = pendingAssistantDeltaDetail;
+      const telemetry = pendingAssistantDeltaTelemetry;
+      pendingAssistantDeltaDetail = undefined;
+      pendingAssistantDeltaTelemetry = null;
+      if (assistantDeltaApplyTimer) {
+        window.clearTimeout(assistantDeltaApplyTimer);
+        assistantDeltaApplyTimer = null;
+      }
+      assistantDeltaLastAppliedAt = Date.now();
+      queryClient.setQueryData<SessionDetail>(queryKeys.session(streamSessionId), (current) => {
+        if (!current || current.id !== streamSessionId) {
+          return pendingDetail;
+        }
+        const merged = mergeSessionDetailWithLiveAssistantOverlay(pendingDetail, current);
+        if (merged === current) {
+          return current;
+        }
+        return {
+          ...merged,
+          ledgerSeq: maxLedgerSeq(current.ledgerSeq, pendingDetail.ledgerSeq),
+          updatedAt: pendingDetail.updatedAt || current.updatedAt,
+        };
+      });
+      const stats = sessionStreamApplyStatsRef.current[streamSessionId] ?? { received: 0, applied: 0, dropped: 0 };
+      stats.applied += 1;
+      sessionStreamApplyStatsRef.current[streamSessionId] = stats;
+      if (stats.applied === 1 || stats.applied % 50 === 0 || reason === "final") {
+        postBrowserTelemetry({
+          phase: "session_stream",
+          eventCode: "browser.session_stream.assistant_delta_applied",
+          message: "Session assistant delta stream was applied to the UI cache.",
+          level: "info",
+          fields: {
+            sessionId: streamSessionId,
+            reason,
+            turnId: telemetry?.turnId ?? "",
+            stage: telemetry?.stage ?? "",
+            receivedCount: stats.received,
+            appliedCount: stats.applied,
+            droppedCount: stats.dropped,
+            payloadLength: telemetry?.payloadLength ?? 0,
+            contentDeltaLength: telemetry?.contentDeltaLength ?? 0,
+            thoughtDeltaLength: telemetry?.thoughtDeltaLength ?? 0,
+            done: telemetry?.done ?? false,
+            minApplyIntervalMs: SESSION_ASSISTANT_DELTA_MIN_APPLY_INTERVAL_MS,
+          },
+        });
+      }
+    }
+
+    function queueAssistantDelta(
+      payload: Extract<SessionStreamEvent, { type: "assistant_delta" }>,
+      payloadLength: number,
+    ) {
+      const stats = sessionStreamApplyStatsRef.current[streamSessionId] ?? { received: 0, applied: 0, dropped: 0 };
+      stats.received += 1;
+      if (pendingAssistantDeltaDetail) {
+        stats.dropped += 1;
+      }
+      sessionStreamApplyStatsRef.current[streamSessionId] = stats;
+      const baseDetail = pendingAssistantDeltaDetail
+        ?? queryClient.getQueryData<SessionDetail>(queryKeys.session(streamSessionId));
+      pendingAssistantDeltaDetail = mergeAssistantDeltaIntoSessionDetail(baseDetail, payload);
+      const telemetry = {
+        payloadLength,
+        turnId: payload.turnId,
+        stage: payload.stage,
+        contentDeltaLength: (payload.contentDelta ?? payload.content ?? "").length,
+        thoughtDeltaLength: (payload.thoughtDelta ?? payload.thought ?? "").length,
+        done: payload.done,
+      };
+      pendingAssistantDeltaTelemetry = telemetry;
+      if (!pendingAssistantDeltaDetail) {
+        return;
+      }
+      if (payload.done) {
+        applyPendingAssistantDelta("final");
+        return;
+      }
+      const elapsed = Date.now() - assistantDeltaLastAppliedAt;
+      const delayMs = Math.max(0, SESSION_ASSISTANT_DELTA_MIN_APPLY_INTERVAL_MS - elapsed);
+      if (!assistantDeltaApplyTimer) {
+        assistantDeltaApplyTimer = window.setTimeout(() => {
+          assistantDeltaApplyTimer = null;
+          applyPendingAssistantDelta("timer");
+        }, delayMs);
+      }
+      if (stats.received === 1 || stats.received % 50 === 0) {
+        postBrowserTelemetry({
+          phase: "session_stream",
+          eventCode: "browser.session_stream.assistant_delta_queued",
+          message: "Session assistant delta stream was queued before UI cache apply.",
+          level: "info",
+          fields: {
+            sessionId: streamSessionId,
+            turnId: payload.turnId,
+            stage: payload.stage,
+            receivedCount: stats.received,
+            appliedCount: stats.applied,
+            droppedCount: stats.dropped,
+            payloadLength,
+            contentDeltaLength: telemetry.contentDeltaLength,
+            thoughtDeltaLength: telemetry.thoughtDeltaLength,
+            done: payload.done,
+            minApplyIntervalMs: SESSION_ASSISTANT_DELTA_MIN_APPLY_INTERVAL_MS,
+          },
+        });
+      }
+    }
+
     stream.onopen = () => {
       if (!disposed) {
         setSessionStreamConnected(true);
@@ -3688,31 +3814,7 @@ export function ChatCodingRoute() {
         return;
       }
       setSessionStreamConnected(true);
-      queryClient.setQueryData<SessionDetail>(queryKeys.session(streamSessionId), (detail) =>
-        mergeAssistantDeltaIntoSessionDetail(detail, payload),
-      );
-      const stats = sessionStreamApplyStatsRef.current[streamSessionId] ?? { received: 0, applied: 0, dropped: 0 };
-      stats.received += 1;
-      stats.applied += 1;
-      sessionStreamApplyStatsRef.current[streamSessionId] = stats;
-      if (stats.applied === 1 || stats.applied % 50 === 0) {
-        postBrowserTelemetry({
-          phase: "session_stream",
-          eventCode: "browser.session_stream.assistant_delta_applied",
-          message: "Session assistant delta stream was applied to the UI cache.",
-          level: "info",
-          fields: {
-            sessionId: streamSessionId,
-            turnId: payload.turnId,
-            stage: payload.stage,
-            appliedCount: stats.applied,
-            payloadLength: event.data.length,
-            contentDeltaLength: (payload.contentDelta ?? payload.content ?? "").length,
-            thoughtDeltaLength: (payload.thoughtDelta ?? payload.thought ?? "").length,
-            done: payload.done,
-          },
-        });
-      }
+      queueAssistantDelta(payload, event.data.length);
     }
 
     stream.addEventListener("session_detail", handleSessionDetail as EventListener);
@@ -3721,11 +3823,16 @@ export function ChatCodingRoute() {
     return () => {
       const readyStateBeforeClose = stream.readyState;
       applyPendingDetail("close");
+      applyPendingAssistantDelta("close");
       disposed = true;
       setSessionStreamConnected(false);
       if (applyTimer) {
         window.clearTimeout(applyTimer);
         applyTimer = null;
+      }
+      if (assistantDeltaApplyTimer) {
+        window.clearTimeout(assistantDeltaApplyTimer);
+        assistantDeltaApplyTimer = null;
       }
       stream.removeEventListener("session_detail", handleSessionDetail as EventListener);
       stream.removeEventListener("assistant_delta", handleAssistantDelta as EventListener);
