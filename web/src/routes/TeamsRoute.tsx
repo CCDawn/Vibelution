@@ -1638,6 +1638,22 @@ function sourceCollectionPromptCacheStatusLabel(status: string, lang: "zh" | "en
   return "pending";
 }
 
+function sourceCollectionPromptCacheModelDisplay(
+  policy: TeamWorkflowSourceCollectionPromptCachePolicy | null,
+  ref: TeamWorkflowSourceCollectionPromptCachePolicyRef | null,
+  lang: "zh" | "en",
+) {
+  const rawLabel = policy?.modelName || ref?.modelId || SOURCE_COLLECTION_PROMPT_CACHE_MODEL_LABEL;
+  const resolutionStatus = String(policy?.modelResolution?.status || "").toLowerCase();
+  if (resolutionStatus === "fallback") {
+    return lang === "zh" ? `${rawLabel}（自动兜底）` : `${rawLabel} (fallback)`;
+  }
+  if (resolutionStatus === "requested") {
+    return lang === "zh" ? `${rawLabel}（指定）` : `${rawLabel} (requested)`;
+  }
+  return rawLabel;
+}
+
 function sourceCollectionTraceToneLabel(tone: SourceCollectionTraceMessage["tone"], lang: "zh" | "en") {
   if (lang === "zh") {
     return {
@@ -6660,14 +6676,19 @@ export function TeamsRoute({
             promptCachePartition: String(assignment.scope.promptCachePartition || ""),
           }))
           .filter((item) => item.promptCachePartition);
+    const promptCacheModelDisplay = sourceCollectionPromptCacheModelDisplay(
+      sourceCollectionPromptCachePolicy,
+      sourceCollectionPromptCachePolicyRef,
+      lang,
+    );
     if (selectedSourceCollectionRun || sourceCollectionPromptCachePolicy || sourceCollectionPromptCachePolicyRef) {
       messages.push({
         id: "prompt-cache-gate",
         agentRole: "Research Coordination Agent",
         title: lang === "zh" ? "KV 缓存门禁已写入本轮搜集" : "KV cache gate attached to this run",
         body: lang === "zh"
-          ? `本轮使用 ${sourceCollectionPromptCachePolicy?.modelName || sourceCollectionPromptCachePolicyRef?.modelId || "当前可用 KV 模型"}，稳定前缀只放团队规则、结构契约和回写边界；每次搜索只传当前搜索词、结果引用和存储位置，避免反复重放网页全文。`
-          : `This run uses ${sourceCollectionPromptCachePolicy?.modelName || sourceCollectionPromptCachePolicyRef?.modelId || SOURCE_COLLECTION_PROMPT_CACHE_MODEL_LABEL}. The stable prefix keeps team rules, schemas, and writeback boundaries; each search sends only the current query, result refs, and storage location.`,
+          ? `KV 缓存模型：${promptCacheModelDisplay}；执行资料搜集的是右侧当前步骤 Agent。`
+          : `KV cache model: ${promptCacheModelDisplay}; source collection is executed by the step Agents on the right.`,
         status: sourceCollectionPromptCacheStatusLabel(promptCacheGateStatus, lang),
         tone: promptCacheGateStatus === "blocked" ? "blocked" : "cache",
         inputLabel: lang === "zh" ? "团队规则、结构契约" : "Team rules and schema",
@@ -6675,14 +6696,18 @@ export function TeamsRoute({
         nextLabel: lang === "zh" ? "执行单次搜索增量" : "Run query delta",
         refs: (lang === "zh"
           ? [
+              `KV 缓存模型：${promptCacheModelDisplay}`,
               `缓存要求：${sourceCollectionPromptCacheRequirement}`,
               promptCacheMode ? `缓存模式：${promptCacheMode}` : "",
+              "执行模型：见当前步骤 Agent 配置",
               "稳定前缀：团队规则 / 结构契约 / 回写边界",
               "动态增量：当前搜索词 / 结果引用",
             ]
           : [
+              `KV cache model: ${promptCacheModelDisplay}`,
               `requirement: ${sourceCollectionPromptCacheRequirement}`,
               promptCacheMode ? `mode: ${promptCacheMode}` : "",
+              "execution model: see step Agent configuration",
               "stable prefix: team rules + schema + boundary",
               "dynamic delta: query/result refs only",
             ]).filter(Boolean),
