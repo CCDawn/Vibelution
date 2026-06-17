@@ -4872,6 +4872,7 @@ export function TeamsRoute({
     const filteredScreeningCandidates = sourceCollectionFilteredRunCandidates;
     const pagedScreeningCandidates = sourceCollectionPageItems("screening", filteredScreeningCandidates);
     const screeningCandidates = pagedScreeningCandidates.items;
+    const screeningListNeedsScrollHint = screeningCandidates.length > 3;
     return (
       <details
         id="source-collection-screening-panel"
@@ -4922,135 +4923,147 @@ export function TeamsRoute({
           </button>
         </div>
         {screeningCandidates.length ? (
-          <div className={styles.workflowCandidateList}>
-            {screeningCandidates.map((candidate) => {
-              const chunkPlanSummary = candidatePaperNoteChunkPlanSummary(candidate);
-              const sourceQualitySummary = candidateSourceQualityAssessmentSummary(candidate);
-              const provenance = sourceCollectionCandidateProvenance(candidate, lang);
-              const canPlanPaperNoteChunks = sourceCandidateHasCompletedExtraction(candidate);
-              const candidateQualityPending =
-                selectedTeamAssessSourceQualityPending
-                && assessSourceQualityMutation.variables?.candidateId === candidate.candidateId;
-              const candidatePlanPending =
-                selectedTeamPlanPaperNoteChunksPending
-                && planPaperNoteChunksMutation.variables?.candidateId === candidate.candidateId;
-              const selected = selectedSourceCollectionCandidateId === candidate.candidateId;
-              return (
-                <article
-                  key={candidate.candidateId}
-                  className={`${styles.workflowCandidateItem} ${selected ? styles.workflowCandidateItemSelected : ""}`}
-                  role="button"
-                  tabIndex={0}
-                  aria-pressed={selected}
-                  title={lang === "zh" ? "点击查看来源详情" : "Open source detail"}
-                  onClick={() => selectSourceCollectionCandidate(candidate)}
-                  onKeyDown={(event) => sourceCollectionCandidateCardKeyDown(event, candidate)}
-                >
-                  <div className={styles.workflowCandidateHeader}>
-                    <strong>{candidate.title || candidate.candidateId}</strong>
-                    <span className={`${styles.workflowTag} ${workflowQualityTone(candidate.qualityStatus)}`}>
-                      {sourceQualitySummary
-                        ? workflowIngestionStatusLabel(sourceQualitySummary.decision, lang)
-                        : (lang === "zh" ? "待筛选" : "pending")}
-                    </span>
-                  </div>
-                  <p>{candidate.summary || candidate.candidateType}</p>
-                  <div className={styles.workflowCandidateMeta}>
-                    <span>{sourceCollectionSourceFilterLabel(sourceCollectionCandidateSourceCategory(candidate, lang), lang)}</span>
-                    <span>{formatTime(candidate.updatedAt, lang)}</span>
-                    {sourceQualitySummary ? (
-                      <span>{lang === "zh" ? "评分" : "score"} {sourceQualitySummary.overallScore}/100</span>
-                    ) : null}
-                    {chunkPlanSummary ? (
-                      <span>
-                        paper_note {chunkPlanSummary.completedChunkCount}/{chunkPlanSummary.chunkCount}
+          <div
+            className={styles.sourceCollectionScreeningListShell}
+            role="region"
+            tabIndex={0}
+            aria-label={lang === "zh" ? "资料筛选候选列表，可向下滚动查看更多" : "Source screening candidate list, scroll for more"}
+          >
+            <div className={`${styles.workflowCandidateList} ${styles.sourceCollectionScreeningList}`}>
+              {screeningCandidates.map((candidate) => {
+                const chunkPlanSummary = candidatePaperNoteChunkPlanSummary(candidate);
+                const sourceQualitySummary = candidateSourceQualityAssessmentSummary(candidate);
+                const provenance = sourceCollectionCandidateProvenance(candidate, lang);
+                const canPlanPaperNoteChunks = sourceCandidateHasCompletedExtraction(candidate);
+                const candidateQualityPending =
+                  selectedTeamAssessSourceQualityPending
+                  && assessSourceQualityMutation.variables?.candidateId === candidate.candidateId;
+                const candidatePlanPending =
+                  selectedTeamPlanPaperNoteChunksPending
+                  && planPaperNoteChunksMutation.variables?.candidateId === candidate.candidateId;
+                const selected = selectedSourceCollectionCandidateId === candidate.candidateId;
+                return (
+                  <article
+                    key={candidate.candidateId}
+                    className={`${styles.workflowCandidateItem} ${selected ? styles.workflowCandidateItemSelected : ""}`}
+                    role="button"
+                    tabIndex={0}
+                    aria-pressed={selected}
+                    title={lang === "zh" ? "点击查看来源详情" : "Open source detail"}
+                    onClick={() => selectSourceCollectionCandidate(candidate)}
+                    onKeyDown={(event) => sourceCollectionCandidateCardKeyDown(event, candidate)}
+                  >
+                    <div className={styles.workflowCandidateHeader}>
+                      <strong>{candidate.title || candidate.candidateId}</strong>
+                      <span className={`${styles.workflowTag} ${workflowQualityTone(candidate.qualityStatus)}`}>
+                        {sourceQualitySummary
+                          ? workflowIngestionStatusLabel(sourceQualitySummary.decision, lang)
+                          : (lang === "zh" ? "待筛选" : "pending")}
                       </span>
-                    ) : canPlanPaperNoteChunks ? (
-                      <span>{lang === "zh" ? "可分块" : "chunk ready"}</span>
-                    ) : null}
-                  </div>
-                  <div className={`${styles.sourceCollectionResultSource} ${provenance.kind === "missing" ? styles.sourceCollectionResultSourceMissing : ""}`}>
-                    <span>{provenance.label}</span>
-                    {provenance.href ? (
-                      <a
-                        href={provenance.href}
-                        target="_blank"
-                        rel="noreferrer"
-                        title={provenance.href}
-                        onClick={(event) => event.stopPropagation()}
+                    </div>
+                    <p>{candidate.summary || candidate.candidateType}</p>
+                    <div className={styles.workflowCandidateMeta}>
+                      <span>{sourceCollectionSourceFilterLabel(sourceCollectionCandidateSourceCategory(candidate, lang), lang)}</span>
+                      <span>{formatTime(candidate.updatedAt, lang)}</span>
+                      {sourceQualitySummary ? (
+                        <span>{lang === "zh" ? "评分" : "score"} {sourceQualitySummary.overallScore}/100</span>
+                      ) : null}
+                      {chunkPlanSummary ? (
+                        <span>
+                          paper_note {chunkPlanSummary.completedChunkCount}/{chunkPlanSummary.chunkCount}
+                        </span>
+                      ) : canPlanPaperNoteChunks ? (
+                        <span>{lang === "zh" ? "可分块" : "chunk ready"}</span>
+                      ) : null}
+                    </div>
+                    <div className={`${styles.sourceCollectionResultSource} ${provenance.kind === "missing" ? styles.sourceCollectionResultSourceMissing : ""}`}>
+                      <span>{provenance.label}</span>
+                      {provenance.href ? (
+                        <a
+                          href={provenance.href}
+                          target="_blank"
+                          rel="noreferrer"
+                          title={provenance.href}
+                          onClick={(event) => event.stopPropagation()}
+                        >
+                          {provenance.value}
+                        </a>
+                      ) : (
+                        <code title={provenance.value}>{provenance.value}</code>
+                      )}
+                    </div>
+                    <div className={styles.workflowCandidateActions}>
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          if (!selectedTeam?.teamId || selectedTeamSourceQualityPending) {
+                            return;
+                          }
+                          assessSourceQualityMutation.mutate({
+                            teamId: selectedTeam.teamId,
+                            candidateId: candidate.candidateId,
+                            decision: "approved",
+                          });
+                        }}
+                        disabled={!selectedTeam?.teamId || selectedTeamSourceQualityPending}
                       >
-                        {provenance.value}
-                      </a>
-                    ) : (
-                      <code title={provenance.value}>{provenance.value}</code>
-                    )}
-                  </div>
-                  <div className={styles.workflowCandidateActions}>
-                    <button
-                      type="button"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        if (!selectedTeam?.teamId || selectedTeamSourceQualityPending) {
-                          return;
-                        }
-                        assessSourceQualityMutation.mutate({
-                          teamId: selectedTeam.teamId,
-                          candidateId: candidate.candidateId,
-                          decision: "approved",
-                        });
-                      }}
-                      disabled={!selectedTeam?.teamId || selectedTeamSourceQualityPending}
-                    >
-                      <CheckCircle2 size={13} />
-                      {candidateQualityPending && assessSourceQualityMutation.variables?.decision === "approved"
-                        ? (lang === "zh" ? "筛选中" : "Assessing")
-                        : (lang === "zh" ? "通过筛选" : "Approve")}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        if (!selectedTeam?.teamId || selectedTeamSourceQualityPending) {
-                          return;
-                        }
-                        assessSourceQualityMutation.mutate({
-                          teamId: selectedTeam.teamId,
-                          candidateId: candidate.candidateId,
-                          decision: "needs_revision",
-                        });
-                      }}
-                      disabled={!selectedTeam?.teamId || selectedTeamSourceQualityPending}
-                    >
-                      <AlertTriangle size={13} />
-                      {candidateQualityPending && assessSourceQualityMutation.variables?.decision === "needs_revision"
-                        ? (lang === "zh" ? "退回中" : "Returning")
-                        : (lang === "zh" ? "退回补资料" : "Repair")}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        if (!selectedTeam?.teamId || !canPlanPaperNoteChunks || planPaperNoteChunksMutation.isPending) {
-                          return;
-                        }
-                        planPaperNoteChunksMutation.mutate({
-                          teamId: selectedTeam.teamId,
-                          candidateId: candidate.candidateId,
-                        });
-                      }}
-                      disabled={!selectedTeam?.teamId || !canPlanPaperNoteChunks || planPaperNoteChunksMutation.isPending}
-                    >
-                      {chunkPlanSummary ? <RefreshCw size={13} /> : <Plus size={13} />}
-                      {candidatePlanPending
-                        ? (lang === "zh" ? "规划中" : "Planning")
-                        : chunkPlanSummary
-                          ? (lang === "zh" ? "重建分块" : "Rebuild chunks")
-                          : (lang === "zh" ? "生成分块" : "Plan chunks")}
-                    </button>
-                  </div>
-                </article>
-              );
-            })}
+                        <CheckCircle2 size={13} />
+                        {candidateQualityPending && assessSourceQualityMutation.variables?.decision === "approved"
+                          ? (lang === "zh" ? "筛选中" : "Assessing")
+                          : (lang === "zh" ? "通过筛选" : "Approve")}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          if (!selectedTeam?.teamId || selectedTeamSourceQualityPending) {
+                            return;
+                          }
+                          assessSourceQualityMutation.mutate({
+                            teamId: selectedTeam.teamId,
+                            candidateId: candidate.candidateId,
+                            decision: "needs_revision",
+                          });
+                        }}
+                        disabled={!selectedTeam?.teamId || selectedTeamSourceQualityPending}
+                      >
+                        <AlertTriangle size={13} />
+                        {candidateQualityPending && assessSourceQualityMutation.variables?.decision === "needs_revision"
+                          ? (lang === "zh" ? "退回中" : "Returning")
+                          : (lang === "zh" ? "退回补资料" : "Repair")}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          if (!selectedTeam?.teamId || !canPlanPaperNoteChunks || planPaperNoteChunksMutation.isPending) {
+                            return;
+                          }
+                          planPaperNoteChunksMutation.mutate({
+                            teamId: selectedTeam.teamId,
+                            candidateId: candidate.candidateId,
+                          });
+                        }}
+                        disabled={!selectedTeam?.teamId || !canPlanPaperNoteChunks || planPaperNoteChunksMutation.isPending}
+                      >
+                        {chunkPlanSummary ? <RefreshCw size={13} /> : <Plus size={13} />}
+                        {candidatePlanPending
+                          ? (lang === "zh" ? "规划中" : "Planning")
+                          : chunkPlanSummary
+                            ? (lang === "zh" ? "重建分块" : "Rebuild chunks")
+                            : (lang === "zh" ? "生成分块" : "Plan chunks")}
+                      </button>
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+            {screeningListNeedsScrollHint ? (
+              <div className={styles.sourceCollectionScreeningScrollHint} aria-hidden="true">
+                <span>{lang === "zh" ? "向下滚动查看更多本页候选" : "Scroll down for more candidates on this page"}</span>
+              </div>
+            ) : null}
           </div>
         ) : (
           <div className={styles.empty}>
