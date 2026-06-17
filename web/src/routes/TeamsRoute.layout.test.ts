@@ -517,6 +517,10 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("知识搜集工作台");
     expect(routeSource).toContain("搜集对话流");
     expect(routeSource).toContain("KV 缓存门禁已写入本轮搜集");
+    expect(routeSource).toContain("KV 缓存模型：");
+    expect(routeSource).toContain("执行模型：见当前步骤 Agent 配置");
+    expect(routeSource).toContain("sourceCollectionPromptCacheModelDisplay");
+    expect(routeSource).not.toContain("本轮使用 ${sourceCollectionPromptCachePolicy?.modelName");
     expect(routeSource).toContain("promptCachePolicy: SOURCE_COLLECTION_PROMPT_CACHE_POLICY");
     expect(routeSource).toContain('SOURCE_COLLECTION_PROMPT_CACHE_MODEL_LABEL = "configured prompt-cache model"');
     expect(routeSource).not.toContain('modelId: "houmo_qwen35_9b_agent"');
