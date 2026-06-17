@@ -40,6 +40,104 @@ PREFERRED_SUPERVISED_MODEL_IDS = (
     "generated_xiaomi_mimo_v2_5_cdff497b2d9b",
     "xiaomi_mimo_v2_5_multimodal",
 )
+SUPERVISED_ROLE_CONTRACT_VERSION = 2
+SUPERVISED_ROLE_RUNTIME_TOOLS: dict[str, tuple[str, ...]] = {
+    "baseline": (
+        "open_evolution_transaction_tool",
+        "close_evolution_transaction_tool",
+        "read_file_tool",
+        "grep_search_tool",
+        "code_symbol_tool",
+        "cli_tool",
+        "python_lint_tool",
+    ),
+    "candidate": (
+        "open_evolution_transaction_tool",
+        "close_evolution_transaction_tool",
+        "read_file_tool",
+        "grep_search_tool",
+        "code_symbol_tool",
+        "cli_tool",
+        "python_lint_tool",
+    ),
+    "reviewer": (),
+    "auditor": (),
+    "judge": (),
+}
+SUPERVISED_ROLE_PERSONA_PROFILES: dict[str, dict[str, Any]] = {
+    "baseline": {
+        "personality": "稳定、克制、重视可复现证据。",
+        "communicationStyle": "先给结果，再列关键证据和限制。",
+        "background": "监督进化稳定对照角色，负责按当前策略完成同一 case。",
+        "collaborationPreference": "不争胜，不改标准，只提供公平基线。",
+        "expertise": ["baseline execution", "transaction lifecycle", "local validation"],
+    },
+    "candidate": {
+        "personality": "主动但守边界，先验证再主张改进。",
+        "communicationStyle": "说明策略假设、验证证据、收益和风险。",
+        "background": "监督进化候选角色，负责在同一输入和规则下尝试更优执行策略。",
+        "collaborationPreference": "接受基线对照，不隐藏失败或不确定性。",
+        "expertise": ["candidate strategy", "evidence comparison", "risk reporting"],
+    },
+    "reviewer": {
+        "personality": "审慎、证据优先、区分优势和证据不足。",
+        "communicationStyle": "按维度引用证据，再给评分和结论。",
+        "background": "监督进化评审角色，在被调用时比较 baseline/candidate 输出质量。",
+        "collaborationPreference": "只评审，不替候选修复，不替审计做流程判定。",
+        "expertise": ["comparative review", "quality scoring", "evidence trace"],
+    },
+    "auditor": {
+        "personality": "严格、保守、优先寻找流程污染和证据缺口。",
+        "communicationStyle": "直接说明通过、阻塞或需补证据的原因。",
+        "background": "监督进化审计角色，在被调用时核对流程、环境、事务和证据链。",
+        "collaborationPreference": "不打分，不替裁决，只判断证据链是否可信。",
+        "expertise": ["audit trail", "transaction boundary", "environment preflight"],
+    },
+    "judge": {
+        "personality": "冷静、独立、严格遵守证据边界。",
+        "communicationStyle": "简短分析后输出机器可读裁决 JSON。",
+        "background": "监督进化裁决角色，只基于已提供证据形成晋升建议。",
+        "collaborationPreference": "不派发子 Agent，不调用外部 verifier，不修改文件。",
+        "expertise": ["supervised judgment", "promotion gate", "risk decision"],
+    },
+}
+SUPERVISED_ROLE_TASK_PROFILES: dict[str, dict[str, Any]] = {
+    "baseline": {
+        "mission": "按当前稳定策略完成监督 case，形成可对照的基线轨迹。",
+        "preferredTasks": "transaction case、静态仓库探针、可复现本地验证。",
+        "avoidTasks": "候选优化、评测规则修改、自动提交或发布。",
+        "successCriteria": "事务完整开账/关账，验证结果和证据链可被候选与裁决复核。",
+        "taskTypes": ["supervised_baseline", "transaction_probe", "local_validation"],
+    },
+    "candidate": {
+        "mission": "在同一 case 和评价规则下尝试更优策略，并暴露收益与风险。",
+        "preferredTasks": "候选策略尝试、证据对比、局部验证。",
+        "avoidTasks": "绕过基线、隐藏失败、修改评测标准、自动应用主线变更。",
+        "successCriteria": "事务完整，验证通过，改进假设、收益、风险和证据清晰。",
+        "taskTypes": ["supervised_candidate", "strategy_probe", "risk_evidence"],
+    },
+    "reviewer": {
+        "mission": "按固定维度比较 baseline 和 candidate 输出质量。",
+        "preferredTasks": "证据引用、维度评分、优势/劣势/不可判定区分。",
+        "avoidTasks": "执行修复、调用 verifier、替审计判断流程完整性。",
+        "successCriteria": "评分和结论均可追溯到具体证据。",
+        "taskTypes": ["supervised_review", "comparative_scoring"],
+    },
+    "auditor": {
+        "mission": "核对监督评测流程、事务状态、环境状态和证据链可信度。",
+        "preferredTasks": "事务边界审计、环境/验证一致性检查、证据缺口定位。",
+        "avoidTasks": "替评审打分、替裁决晋升、证据不足时建议通过。",
+        "successCriteria": "明确通过、阻塞或需补证据，并说明影响范围。",
+        "taskTypes": ["supervised_audit", "trace_integrity", "environment_boundary"],
+    },
+    "judge": {
+        "mission": "基于已有证据输出候选晋升裁决建议。",
+        "preferredTasks": "PROMOTE/HOLD/REJECT/ROLLBACK/INCONCLUSIVE 裁决。",
+        "avoidTasks": "spawn_agent_tool、派发子 Agent、调用外部 verifier、修改文件。",
+        "successCriteria": "输出 SUPERVISED_AGENT_JUDGMENT JSON，分数、理由、风险和证据引用完整。",
+        "taskTypes": ["supervised_judgment", "promotion_decision"],
+    },
+}
 
 
 def ensure_supervised_agent_instances() -> list[dict[str, Any]]:
@@ -179,6 +277,36 @@ def _model_library_display(config: Any, model_id: str) -> dict[str, str]:
     }
 
 
+def _supervised_role_runtime_tools(role: str) -> list[str]:
+    return list(SUPERVISED_ROLE_RUNTIME_TOOLS.get(str(role or "").strip(), ()))
+
+
+def _supervised_role_contract(role: str) -> dict[str, Any]:
+    normalized_role = str(role or "").strip()
+    runtime_tools = _supervised_role_runtime_tools(normalized_role)
+    return {
+        "version": SUPERVISED_ROLE_CONTRACT_VERSION,
+        "role": normalized_role,
+        "runtimeToolSource": "supervised_conversation_harness",
+        "persistentToolPolicy": "system_no_tools",
+        "effectiveRuntimeTools": runtime_tools,
+        "notes": (
+            "Agent Center ToolPolicy remains no-tools for fixed system roles; "
+            "supervised runs inject this role-specific tool package through the hidden conversation harness."
+            if runtime_tools
+            else "This role is evidence-only in the current supervised pipeline and should not invoke tools."
+        ),
+    }
+
+
+def _supervised_role_persona_profile(role: str) -> dict[str, Any]:
+    return dict(SUPERVISED_ROLE_PERSONA_PROFILES.get(str(role or "").strip(), {}))
+
+
+def _supervised_role_task_profile(role: str) -> dict[str, Any]:
+    return dict(SUPERVISED_ROLE_TASK_PROFILES.get(str(role or "").strip(), {}))
+
+
 def supervised_agent_bindings() -> dict[str, dict[str, Any]]:
     """Return run-safe AgentInstance bindings keyed by supervised role."""
 
@@ -267,6 +395,8 @@ def supervised_agent_bindings() -> dict[str, dict[str, Any]]:
             "memoryPolicyId": str(agent.get("memoryPolicyId") or "").strip(),
             "role": role,
             "roleLabel": str(metadata.get("supervisedRoleLabel") or role).strip(),
+            "runtimeToolContract": _supervised_role_contract(role),
+            "effectiveRuntimeTools": _supervised_role_runtime_tools(role),
         }
     return bindings
 
@@ -379,6 +509,8 @@ def _read_current_supervised_agent_bindings_snapshot() -> dict[str, Any]:
             "memoryPolicyId": str(raw_agent.get("memoryPolicyId") or "").strip(),
             "role": role,
             "roleLabel": str(metadata.get("supervisedRoleLabel") or role_info.label or role).strip(),
+            "runtimeToolContract": _supervised_role_contract(role),
+            "effectiveRuntimeTools": _supervised_role_runtime_tools(role),
         }
     expected_role_count = len(SUPERVISED_AGENT_ROLES)
     status = "ready" if len(bindings) == expected_role_count and not issues else "partial" if bindings else "error"
@@ -730,15 +862,34 @@ def _ensure_supervised_role(role: SupervisedAgentRole) -> tuple[dict[str, Any] |
         "supervisedRole": role.role,
         "supervisedRoleLabel": role.label,
         "functionalDisplayName": role.label,
+        "supervisedRoleContract": _supervised_role_contract(role.role),
     }
+    expected_persona_profile = _supervised_role_persona_profile(role.role)
+    expected_task_profile = _supervised_role_task_profile(role.role)
+    existing_persona_profile = agent_directory_service.normalize_persona_profile(
+        existing.get("personaProfile") if isinstance(existing.get("personaProfile"), dict) else metadata.get("personaProfile")
+    )
+    existing_task_profile = agent_directory_service.normalize_task_profile(
+        existing.get("taskProfile") if isinstance(existing.get("taskProfile"), dict) else metadata.get("taskProfile")
+    )
+    persona_needs_update = (
+        bool(expected_persona_profile)
+        and existing_persona_profile != agent_directory_service.normalize_persona_profile(expected_persona_profile)
+    )
+    task_needs_update = (
+        bool(expected_task_profile)
+        and existing_task_profile != agent_directory_service.normalize_task_profile(expected_task_profile)
+    )
     needs_update = any(metadata.get(key) != value for key, value in expected_metadata.items())
-    if needs_update:
+    if needs_update or persona_needs_update or task_needs_update:
         existing = agent_directory_service.update_agent_instance(
             str(existing.get("agentId") or ""),
             primary_mode="supervised_evolution",
             role_key=role.role,
             prompt_template_id=f"prompt-supervised-{role.role}",
             metadata=expected_metadata,
+            persona_profile=expected_persona_profile,
+            task_profile=expected_task_profile,
             status="active",
         )
         changed = True

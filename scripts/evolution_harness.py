@@ -1699,6 +1699,50 @@ def _tool_result_json(event: Dict[str, Any]) -> Dict[str, Any]:
     return payload if isinstance(payload, dict) else {}
 
 
+_TOOL_SUCCESS_STATUSES = {"success", "succeeded", "ok", "done", "completed"}
+_TOOL_FAILURE_STATUSES = {"failed", "failure", "error", "blocked", "cancelled", "timeout"}
+_COMMAND_TOOL_NAMES = {
+    "cli_tool",
+    "run_powershell_tool",
+    "run_batch_tool",
+    "execute_shell_command_tool",
+    "run_test_for_tool",
+    "python_lint_tool",
+}
+
+
+def _normalize_tool_status_value(value: Any) -> str:
+    return str(value or "").strip().lower().lstrip("\ufeff")
+
+
+def _tool_call_business_succeeded(tool_name: str, event: Dict[str, Any], result_payload: Dict[str, Any]) -> bool:
+    payload_status = _normalize_tool_status_value(result_payload.get("status"))
+    if payload_status in _TOOL_SUCCESS_STATUSES:
+        return True
+    if payload_status in _TOOL_FAILURE_STATUSES:
+        return False
+    event_status = _normalize_tool_status_value(event.get("status"))
+    if event_status in {"success", "succeeded", "ok", "completed"}:
+        return True
+    if event_status in _TOOL_FAILURE_STATUSES:
+        return False
+    if event_status == "done" and tool_name not in _COMMAND_TOOL_NAMES:
+        return True
+    return False
+
+
+def _tool_status_for_summary(tool_name: str, event: Dict[str, Any], result_payload: Dict[str, Any]) -> str:
+    if _tool_call_business_succeeded(tool_name, event, result_payload):
+        return "success"
+    event_status = _normalize_tool_status_value(event.get("status"))
+    if event_status in _TOOL_FAILURE_STATUSES:
+        return event_status
+    payload_status = _normalize_tool_status_value(result_payload.get("status"))
+    if payload_status in _TOOL_FAILURE_STATUSES:
+        return payload_status
+    return event_status or "unknown"
+
+
 def _extract_supervised_marker_payload(
     lines: Iterable[str],
     marker: str,
@@ -1938,39 +1982,47 @@ def infer_evolution_summary(
             continue
 
         tool_name = str(event.get("tool_name") or "")
+        tool_args = event.get("tool_args") or {}
+        result_text = str(event.get("tool_result") or "")
+        result_payload = _tool_result_json(event)
+        tool_status = _tool_status_for_summary(tool_name, event, result_payload)
+        tool_succeeded = _tool_call_business_succeeded(tool_name, event, result_payload)
         if tool_name:
-            tool_sequence.append(f"{tool_name}:{event.get('status', 'unknown')}")
-        tool_phase = classify_tool_event_phase(event)
+            tool_sequence.append(f"{tool_name}:{tool_status}")
+        normalized_event = {**event, "status": tool_status}
+        tool_phase = classify_tool_event_phase(normalized_event)
         tool_phase_sequence.append(tool_phase)
         if tool_phase.startswith("restart_guarded_tool:"):
             restart_guarded_tool_count += 1
             guarded_tool_count += 1
         elif tool_phase.startswith("guarded_tool:"):
             guarded_tool_count += 1
-        tool_args = event.get("tool_args") or {}
-        result_text = str(event.get("tool_result") or "")
-        result_payload = _tool_result_json(event)
         command_text = str(tool_args.get("command") or tool_args.get("script") or "")
         if not environment_unavailable_evidence:
             environment_unavailable_evidence = _environment_unavailable_evidence(
                 f"{command_text}\n{result_text}"
             )
 
-        if tool_name == "task_create_tool" and event.get("status") == "success":
+        if tool_name == "task_create_tool" and tool_succeeded:
             task_created += 1
-        elif tool_name == "task_update_tool" and event.get("status") == "success":
+        elif tool_name == "task_update_tool" and tool_succeeded:
             task_updated += 1
             if bool(tool_args.get("is_completed")):
                 task_completed += 1
 
         if tool_name in {"open_evolution_transaction_tool", "close_evolution_transaction_tool"}:
-            if tool_name == "open_evolution_transaction_tool" and event.get("status") == "success":
+            if tool_name == "open_evolution_transaction_tool" and tool_succeeded:
                 transaction_opened = True
                 transaction_id = str(result_payload.get("txn_id") or tool_args.get("txn_id") or transaction_id or "")
-            elif tool_name == "close_evolution_transaction_tool" and event.get("status") == "success":
+            elif tool_name == "close_evolution_transaction_tool" and tool_succeeded:
                 transaction_closed = True
                 transaction_id = str(result_payload.get("txn_id") or tool_args.get("txn_id") or transaction_id or "")
-                transaction_status = str(result_payload.get("transaction_status") or tool_args.get("status") or "success")
+                transaction_status = str(
+                    result_payload.get("transaction_status")
+                    or result_payload.get("status")
+                    or tool_args.get("status")
+                    or "success"
+                )
             elif tool_name == "close_evolution_transaction_tool":
                 transaction_id = str(result_payload.get("txn_id") or tool_args.get("txn_id") or transaction_id or "")
 
@@ -2016,6 +2068,15 @@ def infer_evolution_summary(
             validation_failed = max(validation_failed, 1)
         elif "passed" in combined_lines.lower() or "通过" in combined_lines:
             validation_passed = max(validation_passed, 1)
+    if (
+        environment_unavailable_evidence
+        and transaction_opened
+        and transaction_closed
+        and _normalize_tool_status_value(transaction_status) == "success"
+        and validation_passed > 0
+        and validation_failed == 0
+    ):
+        environment_unavailable_evidence = ""
     supervised_markers = _extract_supervised_fixture_markers(events, debug_lines, stdout_lines)
 
     restart_triggered = any(is_restart_trigger_line(line) for line in stdout_lines)

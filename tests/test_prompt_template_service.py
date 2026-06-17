@@ -98,8 +98,14 @@ def test_build_agent_prompt_template_context_reports_block_and_missing_reasons(t
     assert supervised["reason"] == ""
     assert "PromptTemplateId: prompt-supervised-baseline" in supervised["contextBlock"]
     assert "监督进化基线 Agent" in supervised["contextBlock"]
+    assert "open_evolution_transaction_tool" in supervised["contextBlock"]
+    assert "close_evolution_transaction_tool" in supervised["contextBlock"]
     assert supervised["sourcePath"] == ""
     assert supervised["sourceExists"] is False
+    judge = prompt_template_service.get_prompt_template("prompt-supervised-judge")
+    assert judge is not None
+    assert "不调用 spawn_agent_tool" in judge["content"]
+    assert "SUPERVISED_AGENT_JUDGMENT" in judge["content"]
     assert missing["reason"] == "missing_template"
     assert missing["promptTemplateId"] == "prompt-missing-valid"
 
