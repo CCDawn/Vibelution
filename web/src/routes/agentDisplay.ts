@@ -69,13 +69,46 @@ function compactLabel(value: string): string {
   return value.replace(/^prompt-/, "").replace(/_/g, "-");
 }
 
+function roleMapKey(value: string): string {
+  return clean(value).toLowerCase().replace(/^prompt-/, "").replace(/[_\s]+/g, "-");
+}
+
+const ROLE_LABELS: Record<string, { zh: string; en: string; tone: AgentDisplayTone }> = {
+  "agent-center-review-session": { zh: "Agent 配置审查", en: "Agent config review", tone: "chat" },
+  "ai-search-scope-lead": { zh: "搜索范围", en: "Search scope", tone: "research" },
+  "chat-session-entry": { zh: "会话入口", en: "Chat entry", tone: "chat" },
+  "challenge-cup-content-extraction": { zh: "内容抽取", en: "Content extraction", tone: "research" },
+  "challenge-cup-data-discovery": { zh: "数据发现", en: "Data discovery", tone: "research" },
+  "challenge-cup-source-acquisition": { zh: "来源获取", en: "Source acquisition", tone: "research" },
+  "challenge-cup-source-quality": { zh: "资料质检", en: "Source quality", tone: "research" },
+  "cn-primary-sources": { zh: "中国官方源", en: "CN primary sources", tone: "research" },
+  "global-primary-sources": { zh: "全球官方源", en: "Global primary sources", tone: "research" },
+  "knowledge-steward": { zh: "知识管理员", en: "Knowledge steward", tone: "memory" },
+  "research-capability-steward": { zh: "能力管家", en: "Capability steward", tone: "research" },
+  "research-ceo": { zh: "科研负责人", en: "Research lead", tone: "research" },
+  "research-organization-advisor": { zh: "科研组织顾问", en: "Research advisor", tone: "research" },
+  "signal-quality-gate": { zh: "信号质检", en: "Signal quality", tone: "research" },
+};
+
+function mappedRole(value: string, lang: "zh" | "en"): { label: string; tone: AgentDisplayTone } | null {
+  const mapped = ROLE_LABELS[roleMapKey(value)];
+  return mapped ? { label: mapped[lang], tone: mapped.tone } : null;
+}
+
+function mappedRoleLabel(value: string, lang: "zh" | "en"): string {
+  return mappedRole(value, lang)?.label ?? "";
+}
+
 function compactFunctionLabel(value: string, lang: "zh" | "en"): string {
   const label = clean(value);
   if (!label) {
     return "";
   }
-  const lower = label.toLowerCase();
-  const normalized = lower.replace(/^prompt-/, "").replace(/[_\s]+/g, "-");
+  const normalized = roleMapKey(label);
+  const mappedRole = mappedRoleLabel(label, lang);
+  if (mappedRole) {
+    return mappedRole;
+  }
   const mapped: Record<string, { zh: string; en: string }> = {
     "chat-default": { zh: "会话入口", en: "Chat entry" },
     "default-chat": { zh: "会话入口", en: "Chat entry" },
@@ -179,6 +212,10 @@ export function agentRoleLabel(
   const lowerRole = role.toLowerCase();
   const lowerPrompt = prompt.toLowerCase();
   const lowerFunctional = functional.toLowerCase();
+  const roleOverride = mappedRole(role, lang) || mappedRole(prompt, lang);
+  if (roleOverride) {
+    return { label: roleOverride.label, tone: tone === "general" ? roleOverride.tone : tone };
+  }
 
   if (tone === "research") {
     if (lowerRole.includes("broad") || lowerPrompt.includes("broad")) return { label: lang === "zh" ? "广域检索" : "Broad research", tone };
