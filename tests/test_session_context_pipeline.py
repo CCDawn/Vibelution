@@ -20,6 +20,7 @@ from core.chat.conversation_ledger import (
     EVENT_TURN_STARTED,
     EVENT_USER_MESSAGE,
     TURN_INTERRUPTED_MARKER,
+    append_context_compression_checkpoint,
     append_conversation_event,
     load_conversation_events,
 )
@@ -325,6 +326,52 @@ def test_context_assembler_excludes_current_turn_ledger_from_history_seed(tmp_pa
     assert "上一轮用户输入" in contents
     assert "上一轮助手输出" in contents
     assert "当前轮用户输入" not in contents
+
+
+def test_context_assembler_replays_ledger_compression_checkpoint_without_current_turn_loss(tmp_path):
+    append_conversation_event(
+        tmp_path,
+        "session-compress",
+        "turn-old",
+        EVENT_USER_MESSAGE,
+        status="recorded",
+        payload={"content": "旧上下文明细"},
+    )
+    append_context_compression_checkpoint(
+        tmp_path,
+        "session-compress",
+        turn_id="turn-checkpoint",
+        current_turn_id="turn-current",
+        summary="旧上下文已压缩为 checkpoint。",
+        level="standard",
+        reason="context_pressure",
+        before_tokens=10000,
+        after_tokens=4000,
+        iteration=3,
+        trigger_source="auto",
+    )
+    append_conversation_event(
+        tmp_path,
+        "session-compress",
+        "turn-current",
+        EVENT_ASSISTANT_PARTIAL,
+        status="running",
+        payload={"content": "当前轮部分输出不能作为下一轮历史种子"},
+    )
+
+    assembled = assemble_conversation_context(
+        [],
+        session_id="session-compress",
+        current_turn_id="turn-current",
+        ledger_events=load_conversation_events(tmp_path, "session-compress"),
+    )
+    contents = "\n".join(str(item.get("content") or "") for item in assembled.history_messages)
+
+    assert "旧上下文已压缩为 checkpoint" in contents
+    assert "旧上下文明细" not in contents
+    assert "当前轮部分输出不能作为下一轮历史种子" not in contents
+    assert assembled.checkpoint_event_id
+    assert any(segment.key == "context_compression_checkpoint" for segment in assembled.segments)
 
 
 def test_context_assembler_uses_checkpoint_as_navigation_not_replacing_history():

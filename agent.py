@@ -1450,33 +1450,84 @@ class SelfEvolvingAgent:
         # 日志
         after_tokens = estimate_messages_tokens(compressed)
         token_saved = current_tokens - after_tokens
+        try:
+            effectiveness_threshold = float(
+                getattr(self.config.context_compression, "effectiveness_threshold", 0.0) or 0.0
+            )
+        except Exception:
+            effectiveness_threshold = 0.0
+        effectiveness_ratio = (max(0, token_saved) / current_tokens) if current_tokens > 0 else 0.0
+        compression_effective = bool(token_saved > 0 and (effectiveness_threshold <= 0 or effectiveness_ratio >= effectiveness_threshold))
         ui.add_log(
             f"[压缩] {level.value.upper()} | {token_saved:+d} tokens "
             f"({current_tokens} -> {after_tokens}) | {combined_reason[:60]}",
             "INFO",
         )
+        if not compression_effective:
+            ui.add_log(
+                f"[压缩] 收益不足 | saved={effectiveness_ratio:.1%} "
+                f"threshold={effectiveness_threshold:.1%}",
+                "WARN",
+            )
 
         # 写入 COMPRESS_SUMMARY.md
         summary_written = False
+        ledger_checkpoint_written = False
         if summary:
+            runtime_binding = getattr(self, "runtime_agent_binding", {}) or {}
+            turn_runtime = _turn_runtime_from_env()
+            session_id = str(turn_runtime.get("sessionId") or runtime_binding.get("directSessionId") or "").strip()
+            turn_id = str(turn_runtime.get("runId") or "").strip()
             try:
-                self.prompt_manager.update_state_memory(
-                    f"[上下文检查点 | iter={iteration} | {level.value}]\n{summary}"
-                )
-                summary_written = True
+                from core.web.services import agent_directory_service
+
+                current_runtime = agent_directory_service.current_agent_runtime()
+                session_id = str(session_id or current_runtime.get("sessionId") or "").strip()
+                turn_id = str(turn_id or current_runtime.get("turnId") or "").strip()
             except Exception:
                 pass
-            try:
-                runtime_binding = getattr(self, "runtime_agent_binding", {}) or {}
-                session_id = str(runtime_binding.get("directSessionId") or "").strip()
-                if session_id and self._get_mode_policy().mode == AgentMode.CHAT:
-                    from tools.conversation_history_tools import append_history_checkpoint
+            if session_id and self._get_mode_policy().mode == AgentMode.CHAT:
+                try:
+                    from core.chat.conversation_ledger import append_context_compression_checkpoint
 
-                    append_history_checkpoint(
-                        session_id=session_id,
+                    event = append_context_compression_checkpoint(
+                        Path(self.project_root),
+                        session_id,
+                        turn_id=turn_id or "context-compression",
+                        current_turn_id=turn_id,
                         summary=summary,
+                        level=level.value,
                         reason=combined_reason,
+                        before_tokens=current_tokens,
+                        after_tokens=after_tokens,
+                        iteration=iteration,
+                        trigger_source=_context_compression_trigger_source(combined_reason),
+                        effectiveness_threshold=effectiveness_threshold,
+                        effectiveness_ratio=effectiveness_ratio,
+                        effective=compression_effective,
+                        source_message_count=len(messages),
+                        tool_result_replacement_state=tool_result_replacement_state,
                     )
+                    ledger_checkpoint_written = event is not None
+                    summary_written = ledger_checkpoint_written
+                except Exception as exc:
+                    _record_agent_scene_event(
+                        "runtime",
+                        "agent.context_compression_checkpoint_failed",
+                        message="Failed to append context compression checkpoint to conversation ledger.",
+                        level="warning",
+                        fields={
+                            "sessionId": session_id,
+                            "turnId": turn_id,
+                            "errorType": type(exc).__name__,
+                        },
+                    )
+            try:
+                if not ledger_checkpoint_written:
+                    self.prompt_manager.update_state_memory(
+                        f"[上下文检查点 | iter={iteration} | {level.value}]\n{summary}"
+                    )
+                    summary_written = True
             except Exception:
                 pass
 
