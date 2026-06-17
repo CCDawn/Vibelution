@@ -68,6 +68,26 @@ DEFAULT_THEME_BACKGROUNDS = (
         "filename": "default-promptsref-tokyo-shadow-snap.png",
         "label": {"zh": "PromptsRef 东京光影", "en": "PromptsRef Tokyo Shadow Snap"},
     },
+    {
+        "filename": "default-wallpaper-football-editorial.png",
+        "label": {"zh": "壁纸 足球海报", "en": "Wallpaper Football Editorial"},
+    },
+    {
+        "filename": "default-wallpaper-storm-manga-warrior.png",
+        "label": {"zh": "壁纸 风暴漫画", "en": "Wallpaper Storm Manga"},
+    },
+    {
+        "filename": "default-wallpaper-neon-hunter-stage.png",
+        "label": {"zh": "壁纸 霓虹猎手", "en": "Wallpaper Neon Hunter"},
+    },
+    {
+        "filename": "default-wallpaper-golden-stadium.png",
+        "label": {"zh": "壁纸 金色球场", "en": "Wallpaper Golden Stadium"},
+    },
+    {
+        "filename": "default-wallpaper-neon-casino-lounge.png",
+        "label": {"zh": "壁纸 霓虹赌场", "en": "Wallpaper Neon Casino"},
+    },
 )
 DEFAULT_THEME_BACKGROUND_FILENAMES = {str(item["filename"]) for item in DEFAULT_THEME_BACKGROUNDS}
 _CONTENT_TYPE_EXTENSIONS = {

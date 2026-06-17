@@ -76,3 +76,37 @@ def test_promptsref_top5_backgrounds_are_registered_as_bundled_theme_backgrounds
     for filename, zh_label, en_label in expected:
         assert_bundled_background_registered(filename, zh_label=zh_label, en_label=en_label)
         assert_bundled_background_file_resolves(filename)
+
+
+def test_promptsref_wallpaper_top5_backgrounds_are_registered_as_bundled_theme_backgrounds():
+    expected = [
+        (
+            "default-wallpaper-football-editorial.png",
+            "壁纸 足球海报",
+            "Wallpaper Football Editorial",
+        ),
+        (
+            "default-wallpaper-storm-manga-warrior.png",
+            "壁纸 风暴漫画",
+            "Wallpaper Storm Manga",
+        ),
+        (
+            "default-wallpaper-neon-hunter-stage.png",
+            "壁纸 霓虹猎手",
+            "Wallpaper Neon Hunter",
+        ),
+        (
+            "default-wallpaper-golden-stadium.png",
+            "壁纸 金色球场",
+            "Wallpaper Golden Stadium",
+        ),
+        (
+            "default-wallpaper-neon-casino-lounge.png",
+            "壁纸 霓虹赌场",
+            "Wallpaper Neon Casino",
+        ),
+    ]
+
+    for filename, zh_label, en_label in expected:
+        assert_bundled_background_registered(filename, zh_label=zh_label, en_label=en_label)
+        assert_bundled_background_file_resolves(filename)
