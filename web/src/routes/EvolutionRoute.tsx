@@ -628,6 +628,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   const [bundleNameInput, setBundleNameInput] = useState("");
   const [keepWorktree, setKeepWorktree] = useState(false);
   const [supervisedMentalModelMode, setSupervisedMentalModelMode] = useState<SupervisedMentalModelMode>("follow");
+  const [selectedSupervisedMemberStepId, setSelectedSupervisedMemberStepId] = useState<SupervisedMemberStepId | null>(null);
   const [liveActiveRun, setLiveActiveRun] = useState<EvolutionActiveRun | null>(null);
   const [supervisedStartCommand, setSupervisedStartCommand] = useState<EvolutionRunCommandAccepted | null>(null);
   const [selfGoalInput, setSelfGoalInput] = useState("");
@@ -1212,6 +1213,10 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     ? displayDecisionLabel(monitoredRun.decision)
     : statusLabel(monitoredRun?.status || "");
   const supervisedMemberReturnTo = `${location.pathname}${location.search}` || "/supervised-evolution";
+  const supervisedMembersRunIdentity = supervisedMembersRun?.runId || supervisedMembersRun?.sessionId || "";
+  useEffect(() => {
+    setSelectedSupervisedMemberStepId(null);
+  }, [supervisedMembersRunIdentity]);
   const supervisedRunMembers = useMemo<SupervisedRunMember[]>(() => {
     const bindings = supervisedMembersBindings;
     const currentRole = String(supervisedMembersRun?.currentRole || "").trim().toLowerCase();
@@ -1240,12 +1245,16 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     () => new Map(supervisedRunMembers.map((member) => [member.role, member])),
     [supervisedRunMembers],
   );
-  const supervisedActiveMemberStepId = activeSupervisedMemberStep(supervisedMembersRun);
-  const supervisedActiveMemberStep =
-    SUPERVISED_MEMBER_STEPS.find((step) => step.id === supervisedActiveMemberStepId) ?? SUPERVISED_MEMBER_STEPS[0];
-  const supervisedActiveStepMembers = supervisedActiveMemberStep.roles
+  const supervisedRuntimeMemberStepId = activeSupervisedMemberStep(supervisedMembersRun);
+  const supervisedSelectedMemberStepId = selectedSupervisedMemberStepId ?? supervisedRuntimeMemberStepId;
+  const supervisedSelectedMemberStep =
+    SUPERVISED_MEMBER_STEPS.find((step) => step.id === supervisedSelectedMemberStepId) ?? SUPERVISED_MEMBER_STEPS[0];
+  const supervisedSelectedStepMembers = supervisedSelectedMemberStep.roles
     .map((role) => supervisedRunMemberByRole.get(role))
     .filter((member): member is SupervisedRunMember => Boolean(member));
+  const supervisedMemberStepManualSelection = Boolean(
+    selectedSupervisedMemberStepId && selectedSupervisedMemberStepId !== supervisedRuntimeMemberStepId,
+  );
   const supervisedStepMemberSummaries = SUPERVISED_MEMBER_STEPS.map((step) => ({
     step,
     members: step.roles
@@ -2915,7 +2924,17 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                       </button>
                     </div>
                     <div className={styles.closedLoopLaunchBlock} title={t("closedLoopLaunchPanelHint")}>
-                      <strong>{t("closedLoopLaunchPanelTitle")}</strong>
+                      <div>
+                        <div className={styles.closedLoopTitleRow}>
+                          <strong>{t("closedLoopLaunchPanelTitle")}</strong>
+                          <span className={styles.closedLoopModeBadge}>{lang === "zh" ? "模拟" : "Simulation"}</span>
+                        </div>
+                        <span>
+                          {lang === "zh"
+                            ? "当前只演练编排链路，不调用真实 LLM 自改。"
+                            : "Runs the orchestration rehearsal without real LLM self-editing."}
+                        </span>
+                      </div>
                       <button
                         type="button"
                         className={styles.inlineAction}
@@ -2953,30 +2972,52 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                       <p className={styles.eyebrow}>
                         {supervisedMembersSource === "run" ? lang === "zh" ? "运行绑定" : "Run binding" : lang === "zh" ? "当前配置" : "Current config"}
                       </p>
-                      <h3 className={styles.sectionTitle}>{supervisedMemberStepLabel(supervisedActiveMemberStep, lang)}</h3>
+                      <h3 className={styles.sectionTitle}>{supervisedMemberStepLabel(supervisedSelectedMemberStep, lang)}</h3>
                     </div>
-                    <span className={styles.secondaryPill}>{supervisedActiveStepMembers.length}</span>
+                    <div className={styles.supervisedMembersHeaderActions}>
+                      {supervisedMemberStepManualSelection ? (
+                        <button
+                          type="button"
+                          className={styles.supervisedStepFollowButton}
+                          onClick={() => setSelectedSupervisedMemberStepId(null)}
+                          title={lang === "zh" ? "回到当前执行阶段" : "Follow the current run stage"}
+                        >
+                          {lang === "zh" ? "跟随现场" : "Follow live"}
+                        </button>
+                      ) : null}
+                      <span className={styles.secondaryPill}>{supervisedSelectedStepMembers.length}</span>
+                    </div>
                   </div>
-                  <div className={styles.supervisedStepMemberRail} aria-label={lang === "zh" ? "监督步骤成员" : "Supervised step members"}>
+                  <div className={styles.supervisedStepMemberRail} aria-label={lang === "zh" ? "监督步骤成员导航" : "Supervised step member navigation"}>
                     {supervisedStepMemberSummaries.map(({ step, members }) => {
-                      const active = step.id === supervisedActiveMemberStep.id;
+                      const selected = step.id === supervisedSelectedMemberStep.id;
+                      const current = step.id === supervisedRuntimeMemberStepId;
                       return (
-                        <div
+                        <button
+                          type="button"
                           key={step.id}
                           className={
-                            active
+                            selected
                               ? `${styles.supervisedStepMemberCard} ${styles.supervisedStepMemberCardActive}`
-                              : styles.supervisedStepMemberCard
+                              : current
+                                ? `${styles.supervisedStepMemberCard} ${styles.supervisedStepMemberCardCurrent}`
+                                : styles.supervisedStepMemberCard
                           }
+                          aria-pressed={selected}
+                          onClick={() => setSelectedSupervisedMemberStepId(step.id)}
+                          title={lang === "zh" ? `查看${supervisedMemberStepLabel(step, lang)}成员` : `View ${supervisedMemberStepLabel(step, lang)} members`}
                         >
-                          <span>{supervisedMemberStepLabel(step, lang)}</span>
+                          <span className={styles.supervisedStepMemberLabel}>
+                            <span>{supervisedMemberStepLabel(step, lang)}</span>
+                            {current ? <em>{lang === "zh" ? "当前" : "Live"}</em> : null}
+                          </span>
                           <strong>{members.map((member) => runRoleLabel(member.role)).join(" / ") || "--"}</strong>
-                        </div>
+                        </button>
                       );
                     })}
                   </div>
                   <div className={styles.supervisedMembersList}>
-                    {supervisedActiveStepMembers.map((member) => {
+                    {supervisedSelectedStepMembers.map((member) => {
                       const rowClassName =
                           member.status === "active"
                             ? `${styles.supervisedMemberRow} ${styles.supervisedMemberRowActive}`
