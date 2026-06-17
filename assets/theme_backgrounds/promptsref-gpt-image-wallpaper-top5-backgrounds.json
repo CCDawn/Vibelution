@@ -1,0 +1,65 @@
+{
+  "source": {
+    "name": "PromptsRef AI Image Generator",
+    "query": "wallpaper",
+    "model": "gpt-image/2.0-text-to-image",
+    "sortBy": "likes-desc",
+    "pageSize": 5,
+    "fetchedAt": "2026-06-17T03:50:32Z",
+    "url": "https://promptsref.com/api/library/works?model=gpt-image%2F2.0-text-to-image&page=1&pageSize=5&q=wallpaper&sortBy=likes-desc",
+    "rawArchive": "promptsref-gpt-image-wallpaper-top5-20260617.json"
+  },
+  "generation": {
+    "generatedAt": "2026-06-17T04:35:38Z",
+    "method": "local System.Drawing background rendering",
+    "canvas": "1920x1080",
+    "reason": "Default project assets avoid direct real-person or copyrighted-character reproduction while preserving the public prompt themes."
+  },
+  "backgrounds": [
+    {
+      "rank": 1,
+      "shareId": "08226e35a518a4d69cd7d2ea18b0a8d2",
+      "likes": 12,
+      "views": 362,
+      "filename": "default-wallpaper-football-editorial.png",
+      "label": "Wallpaper Football Editorial",
+      "adaptation": "Fictional football editorial wallpaper with blue stadium lighting, rain, tunnel depth, and motion trails; no real player, club, crest, logo, or readable text."
+    },
+    {
+      "rank": 2,
+      "shareId": "8fad92cf97e01f197fe441d423ba5b45",
+      "likes": 10,
+      "views": 217,
+      "filename": "default-wallpaper-storm-manga-warrior.png",
+      "label": "Wallpaper Storm Manga",
+      "adaptation": "Original storm-battle manga wallpaper with a lone warrior silhouette, lightning, mountain ruins, grit, and speed lines; no franchise symbols."
+    },
+    {
+      "rank": 3,
+      "shareId": "30afec807a6d953d30471a2cf8794cdb",
+      "likes": 9,
+      "views": 159,
+      "filename": "default-wallpaper-neon-hunter-stage.png",
+      "label": "Wallpaper Neon Hunter",
+      "adaptation": "Original neon rooftop-stage hunter wallpaper with cyan and magenta spotlights, skyline silhouettes, stage grid, and action arcs; no named character."
+    },
+    {
+      "rank": 4,
+      "shareId": "3103ef68dc4d79984e4e09253ffaebc2",
+      "likes": 9,
+      "views": 195,
+      "filename": "default-wallpaper-golden-stadium.png",
+      "label": "Wallpaper Golden Stadium",
+      "adaptation": "Fictional golden stadium captain wallpaper with warm arena lights, pitch arcs, a central silhouette, and clean UI-friendly negative space; no real player or team."
+    },
+    {
+      "rank": 5,
+      "shareId": "aef78ef04409da34c85c6cb7151480de",
+      "likes": 8,
+      "views": 70,
+      "filename": "default-wallpaper-neon-casino-lounge.png",
+      "label": "Wallpaper Neon Casino",
+      "adaptation": "Original 90s neon casino lounge wallpaper with chips, cards, geometric signage, speed trails, and grid floor; no copyrighted characters or text."
+    }
+  ]
+}
