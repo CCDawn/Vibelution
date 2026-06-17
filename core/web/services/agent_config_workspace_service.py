@@ -74,6 +74,22 @@ AGENT_LLM_SLOT_REFS = {item["slot"]: item for item in AGENT_LLM_SLOT_DEFINITIONS
 HEALTH_LOG_CODE_LIMIT = 12
 HEALTH_LOG_AGENT_LIMIT = 12
 HEALTH_LOG_SAMPLE_LIMIT = 8
+EMPTY_TOOL_POLICY_ID = "default"
+MUTATING_AGENT_TOOLS = {
+    "apply_patch_tool",
+    "apply_diff_edit_tool",
+    "write_file_tool",
+    "cli_tool",
+    "cli_agent_run_tool",
+    "run_test_for_tool",
+    "python_lint_tool",
+}
+RESEARCH_SOURCE_ROLE_KEYS = {
+    "ai_search_scope_lead",
+    "global_primary_sources",
+    "cn_primary_sources",
+    "signal_quality_gate",
+}
 
 
 def get_agent_config_workspace() -> dict[str, Any]:
@@ -313,6 +329,30 @@ def _derive_references(
     return {agent_id: _dedupe_references(items) for agent_id, items in references.items()}
 
 
+def _prompt_template_has_runtime_content(prompt: dict[str, Any]) -> bool:
+    try:
+        return int(prompt.get("contentLength") or 0) > 0
+    except (TypeError, ValueError):
+        return bool(str(prompt.get("contentPreview") or "").strip())
+
+
+def _agent_has_system_fixed_role(agent: dict[str, Any]) -> bool:
+    metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
+    if bool(metadata.get("fixedRole")):
+        return True
+    if str(agent.get("primaryMode") or "").strip() in {"self_evolution", "supervised_evolution"}:
+        return True
+    return any(
+        str(metadata.get(key) or "").strip()
+        for key in ("selfEvolutionRole", "supervisedRole", "systemRole", "aiSearchRole")
+    )
+
+
+def _is_research_source_role(agent: dict[str, Any]) -> bool:
+    role_key = str(agent.get("roleKey") or "").strip()
+    return str(agent.get("primaryMode") or "").strip() == "research" and role_key in RESEARCH_SOURCE_ROLE_KEYS
+
+
 def _derive_health(
     *,
     agents: list[dict[str, Any]],
@@ -406,6 +446,16 @@ def _derive_health(
                         f"{prompt_template_id} 指向的 sourcePath 不存在。",
                     )
                 )
+            if not _prompt_template_has_runtime_content(prompt) and prompt_template_id != "prompt-chat-default":
+                issues.append(
+                    _agent_issue(
+                        agent,
+                        "warning",
+                        "empty_prompt_template_content",
+                        "提示词模板内容为空",
+                        f"{prompt_template_id} 没有可注入的模板内容；运行时只会使用 Agent 身份档案，Prompt Template 段为空。",
+                    )
+                )
 
         if not str(agent.get("directSessionId") or "").strip():
             issues.append(_agent_issue(agent, "warning", "missing_direct_session", "缺少直连会话", "群聊和主动唤醒需要一个可恢复的 directSessionId。"))
@@ -425,6 +475,29 @@ def _derive_health(
             )
         if not str(agent.get("toolPolicyId") or "").strip():
             issues.append(_agent_issue(agent, "warning", "missing_tool_policy", "缺少工具权限策略", "toolPolicyId 为空。"))
+        tool_policy = agent.get("toolPolicy") if isinstance(agent.get("toolPolicy"), dict) else {}
+        allowed_tools = [str(item or "").strip() for item in list(tool_policy.get("allowedTools") or []) if str(item or "").strip()]
+        if _agent_has_system_fixed_role(agent) and str(agent.get("toolPolicyId") or "").strip() == EMPTY_TOOL_POLICY_ID:
+            issues.append(
+                _agent_issue(
+                    agent,
+                    "warning",
+                    "default_empty_tool_policy_for_fixed_role",
+                    "系统角色仍使用默认空工具策略",
+                    "固定系统 Agent 应绑定显式 no-tools 策略或角色专用最小工具策略，避免把未配置误显示为已配置。",
+                )
+            )
+        risky_tools = sorted(set(allowed_tools).intersection(MUTATING_AGENT_TOOLS))
+        if _is_research_source_role(agent) and risky_tools:
+            issues.append(
+                _agent_issue(
+                    agent,
+                    "warning",
+                    "research_source_tool_policy_too_broad",
+                    "研究索引角色工具权限过宽",
+                    "这个角色只应使用检索、知识查询和 Agent 消息工具；当前包含高风险工具：" + "、".join(risky_tools[:8]) + "。",
+                )
+            )
         if not str(agent.get("memoryPolicyId") or "").strip():
             issues.append(_agent_issue(agent, "warning", "missing_memory_policy", "缺少记忆策略", "memoryPolicyId 为空。"))
         metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}

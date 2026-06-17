@@ -1669,6 +1669,68 @@ def test_repair_adds_session_default_tools_to_legacy_work_session_agent(tmp_path
     assert repaired_agent["metadata"]["onboardingStatus"] == "complete"
 
 
+def test_repair_adds_explicit_no_tools_policy_to_fixed_evolution_agent(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setattr(config_service, "get_config_workspace", _fake_config_workspace)
+    agent = agent_directory_service.create_agent_instance(
+        display_name="Legacy Supervised Baseline",
+        llm_bindings={"dialogue": {"modelId": "model-primary"}},
+        primary_mode="supervised_evolution",
+        role_key="baseline",
+        prompt_template_id="prompt-supervised-baseline",
+        metadata={"fixedRole": True, "supervisedRole": "baseline"},
+    )
+    state = agent_directory_service.load_state()
+    raw_agent = next(item for item in state["agents"] if item["agentId"] == agent["agentId"])
+    raw_agent["toolPolicyId"] = agent_directory_service.DEFAULT_TOOL_POLICY_ID
+    state["toolPolicies"][agent_directory_service.DEFAULT_TOOL_POLICY_ID] = agent_directory_service.default_tool_policy()
+    agent_directory_service.save_state(state)
+
+    repaired = agent_directory_service.repair_agent_directory()
+    repaired_agent = next(item for item in repaired["agents"] if item["agentId"] == agent["agentId"])
+    policy = repaired["toolPolicies"][repaired_agent["toolPolicyId"]]
+    workspace = agent_config_workspace_service.get_agent_config_workspace()
+    workspace_agent = next(item for item in workspace["agents"] if item["agentId"] == agent["agentId"])
+
+    assert repaired_agent["toolPolicyId"] == f"tool-{agent['agentId']}"
+    assert policy["allowedTools"] == []
+    assert policy["networkAccess"] == "none"
+    assert policy["mutationAccess"] == "none"
+    assert not any(item["code"] == "default_empty_tool_policy_for_fixed_role" for item in workspace_agent["health"])
+
+
+def test_repair_tightens_ai_search_source_role_tool_policy(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setattr(config_service, "get_config_workspace", _fake_config_workspace)
+    agent = agent_directory_service.create_agent_instance(
+        display_name="Signal Quality Gate",
+        llm_bindings={"dialogue": {"modelId": "model-primary"}},
+        primary_mode="research",
+        role_key="signal_quality_gate",
+        prompt_template_id="prompt-chat-default",
+        metadata={"fixedRole": True},
+    )
+    state = agent_directory_service.load_state()
+    raw_agent = next(item for item in state["agents"] if item["agentId"] == agent["agentId"])
+    raw_agent["toolPolicyId"] = f"tool-{agent['agentId']}"
+    state["toolPolicies"][raw_agent["toolPolicyId"]] = agent_directory_service.default_session_agent_tool_policy(raw_agent["toolPolicyId"])
+    agent_directory_service.save_state(state)
+
+    repaired = agent_directory_service.repair_agent_directory()
+    repaired_agent = next(item for item in repaired["agents"] if item["agentId"] == agent["agentId"])
+    policy = repaired["toolPolicies"][repaired_agent["toolPolicyId"]]
+    workspace = agent_config_workspace_service.get_agent_config_workspace()
+    workspace_agent = next(item for item in workspace["agents"] if item["agentId"] == agent["agentId"])
+
+    assert policy["allowedTools"] == list(agent_directory_service.RESEARCH_SOURCE_ALLOWED_TOOLS)
+    assert "apply_patch_tool" not in policy["allowedTools"]
+    assert "cli_tool" not in policy["allowedTools"]
+    assert "write_file_tool" not in policy["allowedTools"]
+    assert policy["networkAccess"] == "controlled"
+    assert policy["mutationAccess"] == "none"
+    assert not any(item["code"] == "research_source_tool_policy_too_broad" for item in workspace_agent["health"])
+
+
 def test_agent_create_api_rejects_incomplete_onboarding_payload(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     monkeypatch.setattr(config_service, "get_config_workspace", _fake_config_workspace)
