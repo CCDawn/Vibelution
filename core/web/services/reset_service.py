@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any, Callable, Iterable
 
 from config.paths import resolve_config_home, resolve_config_path
+from core.infrastructure import developer_sandbox
 from core.ui.chat_state import build_chat_state, chat_state_path, save_chat_state
 
 from .i18n import get_web_language, text_for
@@ -714,12 +715,12 @@ def _collect_chat_history() -> list[ResetCandidate]:
 
 
 def _collect_workspace_sessions() -> list[ResetCandidate]:
-    path = PROJECT_ROOT / "workspace" / "sessions"
+    path = developer_sandbox.route_workspace_path(PROJECT_ROOT, "session", "sessions", intent="state")
     return [_candidate_for_path(path, kind="directory", missing=not path.exists())]
 
 
 def _collect_chat_rooms() -> list[ResetCandidate]:
-    path = PROJECT_ROOT / "workspace" / "chat_rooms"
+    path = developer_sandbox.route_workspace_path(PROJECT_ROOT, "chat_room", "chat_rooms", intent="state")
     return [_candidate_for_path(path, kind="directory", missing=not path.exists())]
 
 
