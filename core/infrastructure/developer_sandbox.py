@@ -84,6 +84,7 @@ _SANDBOXED_SURFACE_DEFAULTS = {
     "chat",
     "chat_dataset",
     "chat_room",
+    "computer_use",
     "evaluation_dataset",
     "gym",
     "knowledge",

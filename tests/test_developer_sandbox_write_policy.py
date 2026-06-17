@@ -27,6 +27,7 @@ def _enable_sandbox(tmp_path, monkeypatch):
 def test_developer_write_policy_classifies_high_risk_surfaces():
     assert developer_sandbox.developer_write_policy("launcher", "state") == "formal_only"
     assert developer_sandbox.developer_write_policy("runtime_manager", "control_state") == "formal_only"
+    assert developer_sandbox.developer_write_policy("computer_use", "state") == "sandboxed"
     assert developer_sandbox.developer_write_policy("memory", "state") == "sandboxed"
     assert developer_sandbox.developer_write_policy("team_knowledge", "central_promotion") == "blocked_in_dev"
     assert developer_sandbox.developer_write_policy("config", "experiment") == "overlay"
