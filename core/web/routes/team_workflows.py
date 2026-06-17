@@ -39,6 +39,7 @@ from core.web.services.team_workflow_orchestration_service import (
     review_steward_pack_knowledge_ingestion,
     retry_research_stage_round_coordination,
     retry_research_stage_round_memory_record,
+    run_knowledge_ingestion_precheck,
     start_research_stage_round,
     start_source_collection_search_background,
     start_source_collection_run,
@@ -245,6 +246,14 @@ class OfficialModelEvidencePayload(BaseModel):
 class CandidateGraphBuildPayload(BaseModel):
     title: str = Field("", max_length=240)
     createdByAgent: str = Field("", max_length=160)
+    curationMode: str = Field("", max_length=80)
+
+
+class KnowledgeIngestionPrecheckPayload(BaseModel):
+    stewardAgentId: str = Field("", max_length=160)
+    maxCandidates: int = Field(32, ge=1, le=200)
+    targetDomain: str = Field("", max_length=240)
+    notes: str = Field("", max_length=4000)
 
 
 class SourceExtractionPayload(BaseModel):
@@ -555,6 +564,22 @@ def team_workflow_knowledge_ingestion_status(team_id: str) -> dict:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except (TeamServiceError, TeamWorkflowOrchestrationError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.post("/teams/{team_id}/workflow-orchestration/knowledge-ingestion/precheck", status_code=status.HTTP_201_CREATED)
+def team_workflow_knowledge_ingestion_precheck(team_id: str, payload: KnowledgeIngestionPrecheckPayload) -> dict:
+    try:
+        return run_knowledge_ingestion_precheck(team_id, payload.model_dump())
+    except TeamNotFoundError as exc:
+        _raise_team_workflow_route_error("knowledge_ingestion.precheck", team_id, exc, status_code=404)
+    except (TeamServiceError, TeamWorkflowOrchestrationError) as exc:
+        _raise_team_workflow_route_error(
+            "knowledge_ingestion.precheck",
+            team_id,
+            exc,
+            status_code=422,
+            fields={"stewardAgentId": payload.stewardAgentId},
+        )
 
 
 @router.get("/teams/{team_id}/workflow-orchestration/coordination/status")

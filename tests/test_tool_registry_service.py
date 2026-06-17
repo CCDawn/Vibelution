@@ -406,7 +406,7 @@ def test_builtin_tool_test_uses_fixed_args_for_allowlisted_tool(tmp_path, monkey
     }
 
 
-def test_tool_test_ignores_selected_agent_tool_policy_blocks(tmp_path, monkeypatch):
+def test_tool_test_respects_selected_agent_tool_policy_blocks(tmp_path, monkeypatch):
     monkeypatch.setattr(registry, "GENERATED_TOOLS_PATH", tmp_path / "generated_tools.json")
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(agent_directory_service, "record_runtime_scene_event", lambda *args, **kwargs: None)
@@ -420,19 +420,24 @@ def test_tool_test_ignores_selected_agent_tool_policy_blocks(tmp_path, monkeypat
         tool_policy={"blockedTools": ["get_current_goal_tool"]},
     )
 
+    executed = {"called": False}
+
     def fail_execute(self, tool_name, tool_args):
+        executed["called"] = True
         return ("ran despite blocked policy", None)
 
     monkeypatch.setattr("core.infrastructure.tool_executor.ToolExecutor.execute", fail_execute)
 
     result = registry.test_tool("get_current_goal_tool", agent_id=agent["agentId"])
 
-    assert result["status"] == "succeeded"
-    assert result["called"] is True
-    assert result["callable"] is True
+    assert result["status"] == "blocked"
+    assert result["called"] is False
+    assert result["callable"] is False
     assert result["agent"]["agentId"] == agent["agentId"]
-    assert result["agentCompatibility"]["status"] == "succeeded"
-    assert result["resultPreview"] == "ran despite blocked policy"
+    assert result["agentCompatibility"]["status"] == "blocked"
+    assert "ToolPolicy" in result["message"]
+    assert result["resultPreview"] == ""
+    assert executed["called"] is False
 
 
 def test_tool_test_runs_safe_builtin_inside_selected_agent_runtime(tmp_path, monkeypatch):
