@@ -12,6 +12,8 @@ import pytest
 from core.evaluation.chat_next_state_signals import append_chat_next_state_signal
 from core.chat.slash_commands import parse_skill_slash_command
 from core.chat.conversation_ledger import (
+    EVENT_ASSISTANT_MESSAGE,
+    EVENT_ASSISTANT_PARTIAL,
     EVENT_TURN_INTERRUPTED,
     EVENT_TURN_STARTED,
     append_conversation_event,
@@ -528,7 +530,7 @@ def test_persist_turn_result_records_missing_llm_usage_without_estimate(tmp_path
     assistant_metadata = conversation["messages"][-1].get("metadata")
     assert llm_usage["source"] == "missing"
     assert llm_usage["inputTokens"] == 0
-    assert assistant_metadata is None
+    assert assistant_metadata == {"turnId": "turn-missing-usage"}
     detail = session_service.get_session_detail("session-live")
     assert detail["llmUsage"]["source"] == "missing"
     assert detail["llmUsage"]["inputTokens"] == 0
@@ -2177,7 +2179,7 @@ def test_session_live_output_publishes_lightweight_assistant_delta_without_detai
     assert event["type"] == "assistant_delta"
     assert event["sessionId"] == "session-live"
     assert event["turnId"] == "turn-running"
-    assert event["ledgerSeq"] >= 2
+    assert event["ledgerSeq"] >= 0
     assert event["content"] == ""
     assert event["thought"] == ""
     assert event["contentDelta"] == "hello"
@@ -2195,6 +2197,74 @@ def test_session_live_output_publishes_lightweight_assistant_delta_without_detai
     assert any(item[1]["fields"]["thoughtChars"] == 8 for item in delta_events)
     fields = delta_events[-1][1]["fields"]
     assert fields["subscriberCount"] == 1
+
+
+def test_session_live_output_does_not_append_token_level_partials_to_ledger(tmp_path, monkeypatch):
+    _seed_chat_state(tmp_path, task_status="done")
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+
+    subscriber: queue.Queue[dict[str, object]] = queue.Queue(maxsize=8)
+    session_service._register_session_stream_subscriber("session-live", subscriber)
+    session_service._set_session_running("session-live", True, turn_id="turn-streaming")
+    try:
+        for index in range(100):
+            session_service._set_session_live_output(
+                "session-live",
+                turn_id="turn-streaming",
+                content=f"chunk {index}",
+                thought=f"thought {index}",
+                feedback_events=[{"kind": "status", "name": "model_response"}],
+            )
+        events = load_conversation_events(tmp_path, "session-live")
+    finally:
+        session_service._set_session_running("session-live", False, turn_id="turn-streaming")
+        session_service._unregister_session_stream_subscriber("session-live", subscriber)
+        session_service._clear_session_live_output("session-live", turn_id="turn-streaming")
+
+    partial_events = [
+        event
+        for event in events
+        if event.event_type == EVENT_ASSISTANT_PARTIAL and event.source == "session_live_output"
+    ]
+    assert partial_events == []
+    assert subscriber.qsize() == 1
+    event = subscriber.get_nowait()
+    assert event["type"] == "assistant_delta"
+    assert event["contentDelta"] == "chunk 99"
+    assert event["thoughtDelta"] == "thought 99"
+
+
+def test_session_detail_recovers_interrupted_live_output_from_checkpoint(tmp_path, monkeypatch):
+    _seed_chat_state(tmp_path, task_status="done")
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    append_conversation_event(tmp_path, "session-live", "turn-open", EVENT_TURN_STARTED, status="running")
+
+    session_service._set_session_running("session-live", True, turn_id="turn-open")
+    session_service._set_session_live_output(
+        "session-live",
+        turn_id="turn-open",
+        content="已生成但尚未完成的内容。",
+        thought="临时思考。",
+        feedback_events=[{"kind": "status", "name": "model_response"}],
+    )
+    with session_service._SESSION_LIVE_OUTPUTS_LOCK:
+        session_service._SESSION_LIVE_OUTPUTS.pop("session-live", None)
+    session_service._set_session_running("session-live", False, turn_id="turn-open")
+
+    response = client.get("/api/sessions/session-live")
+
+    assert response.status_code == 200
+    events = load_conversation_events(tmp_path, "session-live")
+    event_types = [event.event_type for event in events]
+    assert event_types == [EVENT_TURN_STARTED, EVENT_ASSISTANT_MESSAGE, EVENT_TURN_INTERRUPTED]
+    assistant_event = events[1]
+    assert assistant_event.payload["content"] == "已生成但尚未完成的内容。"
+    assert assistant_event.payload["thought"] == "临时思考。"
+    assert assistant_event.payload["feedbackEvents"][0]["name"] == "model_response"
+    assert any(
+        message["role"] == "assistant" and message["content"] == "已生成但尚未完成的内容。"
+        for message in response.json()["messages"]
+    )
 
 
 def test_session_detail_snapshot_publish_throttles_busy_snapshots(tmp_path, monkeypatch):
