@@ -2562,6 +2562,32 @@ def build_candidate_graph(team_id: str, payload: dict[str, Any] | None = None) -
         graph["summary"]["curationMode"] = curation_mode
         graph["summary"]["inputCandidateCount"] = len(active_candidates)
         graph["summary"]["filteredCandidateCount"] = len(filtered_candidates)
+        graph["summary"]["createdByAgent"] = created_by_agent
+        graph["summary"]["stageAgentRole"] = "candidate_graph"
+        agent_process = [
+            {
+                "eventType": "candidate_graph.input_selected",
+                "stage": "candidate_graph",
+                "agentRole": "candidate_graph",
+                "agentId": created_by_agent,
+                "status": "completed",
+                "inputSummary": f"{len(active_candidates)} active candidates, {len(candidates)} selected",
+                "outputSummary": f"{len(filtered_candidates)} candidates filtered before graph preview",
+                "nextAction": "build_candidate_graph_snapshot",
+                "candidateIds": [str(item.get("candidateId") or "") for item in candidates[:64]],
+            },
+            {
+                "eventType": "candidate_graph.snapshot_built",
+                "stage": "candidate_graph",
+                "agentRole": "candidate_graph",
+                "agentId": created_by_agent,
+                "status": "completed" if not graph["missingLinks"] else "needs_attention",
+                "inputSummary": f"{len(candidates)} selected candidates",
+                "outputSummary": f"{len(graph['nodes'])} nodes / {len(graph['edges'])} edges",
+                "nextAction": "knowledge_ingestion_precheck" if not graph["missingLinks"] else "repair_candidate_graph_links",
+                "candidateGraphBoundary": "candidate_only",
+            },
+        ]
         record = {
             "schemaVersion": SCHEMA_VERSION,
             "candidateId": _new_record_id("candidate-graph"),
@@ -2582,6 +2608,9 @@ def build_candidate_graph(team_id: str, payload: dict[str, Any] | None = None) -
                 "curationMode": curation_mode,
                 "filteredCandidateIds": [str(item.get("candidateId") or "") for item in filtered_candidates],
                 "graph": graph,
+                "agentProcess": agent_process,
+                "workflowStage": "candidate_graph",
+                "stageAgentRole": "candidate_graph",
                 "missingLinkCount": len(graph["missingLinks"]),
                 "unreviewedNodeCount": len(graph["unreviewedNodes"]),
                 "officialBoundary": graph["officialBoundary"],
@@ -2670,6 +2699,19 @@ def run_knowledge_ingestion_precheck(team_id: str, payload: dict[str, Any] | Non
         latest_graph,
         target_domain=target_domain,
     )
+    output["agentProcess"] = [
+        {
+            "eventType": "knowledge_ingestion.precheck_input_selected",
+            "stage": "memory_precheck",
+            "agentRole": "knowledge_steward",
+            "agentId": steward_agent_id,
+            "status": "completed",
+            "inputSummary": f"{len(selected_candidates)} approved candidates selected",
+            "outputSummary": "candidate-only steward precheck package",
+            "nextAction": "submit_steward_pack_to_knowledge_ingestion_after_gate",
+            "candidateGraphId": str((latest_graph or {}).get("candidateId") or ""),
+        }
+    ]
     record_response = record_local_research_model_output(
         normalized_team_id,
         {

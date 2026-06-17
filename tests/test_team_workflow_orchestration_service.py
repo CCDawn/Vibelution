@@ -1990,15 +1990,21 @@ def test_candidate_graph_agent_curation_uses_approved_sources_only(tmp_path, mon
     response = team_workflow_orchestration_service.build_candidate_graph(
         team["teamId"],
         {
-            "createdByAgent": "Source Quality Agent",
+            "createdByAgent": "Candidate Graph Agent",
             "curationMode": "agent_approved_only",
         },
     )
 
     graph_node_ids = {node["candidateId"] for node in response["graph"]["nodes"]}
     assert response["graph"]["summary"]["curationMode"] == "agent_approved_only"
+    assert response["graph"]["summary"]["createdByAgent"] == "Candidate Graph Agent"
+    assert response["graph"]["summary"]["stageAgentRole"] == "candidate_graph"
     assert response["graph"]["summary"]["nodeCount"] == 1
     assert response["graph"]["summary"]["filteredCandidateCount"] == 1
+    assert response["candidateGraph"]["createdByAgent"] == "Candidate Graph Agent"
+    assert response["candidateGraph"]["metadata"]["stageAgentRole"] == "candidate_graph"
+    assert response["candidateGraph"]["metadata"]["agentProcess"][0]["agentRole"] == "candidate_graph"
+    assert response["candidateGraph"]["metadata"]["agentProcess"][1]["nextAction"] == "knowledge_ingestion_precheck"
     assert approved_source["candidateId"] in graph_node_ids
     assert revision_source["candidateId"] not in graph_node_ids
 
@@ -2024,7 +2030,7 @@ def test_knowledge_ingestion_precheck_creates_candidate_only_steward_pack(tmp_pa
     )
     graph_response = team_workflow_orchestration_service.build_candidate_graph(
         team["teamId"],
-        {"createdByAgent": "Source Quality Agent", "curationMode": "agent_approved_only"},
+        {"createdByAgent": "Candidate Graph Agent", "curationMode": "agent_approved_only"},
     )
 
     response = team_workflow_orchestration_service.run_knowledge_ingestion_precheck(
@@ -2043,6 +2049,8 @@ def test_knowledge_ingestion_precheck_creates_candidate_only_steward_pack(tmp_pa
     assert response["precheck"]["generatedByAgent"] == "Knowledge Steward Agent"
     assert response["precheck"]["candidateIds"] == [source["candidateId"]]
     assert response["precheck"]["candidateGraphId"] == graph_response["candidateGraph"]["candidateId"]
+    assert output["agentProcess"][0]["agentRole"] == "knowledge_steward"
+    assert output["agentProcess"][0]["candidateGraphId"] == graph_response["candidateGraph"]["candidateId"]
     assert output["approvalRequired"] is True
     assert "officialSync" not in output
     assert response["precheck"]["officialBoundary"]["writesOfficialKnowledge"] is False
