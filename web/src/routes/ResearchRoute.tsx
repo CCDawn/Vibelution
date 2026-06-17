@@ -357,6 +357,7 @@ export function ResearchRoute() {
     () => nextRunnableFlowNode(flowCanvasQuery.data?.nodes ?? []),
     [flowCanvasQuery.data?.nodes],
   );
+  const manualWorkflowStep = useMemo(() => nextManualWorkflowStep(active), [active]);
 
   useEffect(() => {
     if (!flowStageItems.length) {
@@ -524,8 +525,21 @@ export function ResearchRoute() {
     if (!activeSessionId) {
       return;
     }
+    if (workflowMode === "auto") {
+      setRunningStage("draft");
+      autoDraftMutation.mutate({
+        initialPayload: active,
+        sessionId: activeSessionId,
+        startIndex: autoDraftStartIndex(active),
+      });
+      return;
+    }
     if (nextFlowNode) {
       runFlowNode(nextFlowNode);
+      return;
+    }
+    if (manualWorkflowStep) {
+      runAction(manualWorkflowStep.suffix, manualWorkflowStep.stage, manualWorkflowStep.body);
     }
   };
 
@@ -620,7 +634,10 @@ export function ResearchRoute() {
     ? displayedFlowNodeStatus(activeFlowItem.node, runningFlowNodeId)
     : displayedStageStatus(effectiveStage, active, runningStage);
   const showFallbackWorkflowModeControl = !flowStageItems.length;
-  const workflowControlsDisabled = busy || !activeSessionId || !nextFlowNode;
+  const workflowControlsDisabled =
+    busy
+    || !activeSessionId
+    || (workflowMode === "auto" ? false : !nextFlowNode && !manualWorkflowStep);
 
   return (
     <section className={styles.route}>

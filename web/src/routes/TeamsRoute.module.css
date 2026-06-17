@@ -4844,6 +4844,139 @@
   min-width: 0;
 }
 
+.workflowCandidateListPanel {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+}
+
+.workflowCandidateListHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+  padding: 7px 8px;
+  border: 1px solid color-mix(in srgb, var(--accent-cool) 24%, var(--border-soft));
+  border-radius: 8px;
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--accent-cool) 7%, transparent), transparent 66%),
+    color-mix(in srgb, var(--surface-panel-strong) 70%, transparent);
+}
+
+.workflowCandidateListHeader > div:first-child {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.workflowCandidateListHeader strong,
+.workflowCandidateListHeader span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workflowCandidateListHeader strong {
+  color: var(--fg-primary);
+  font-size: 0.76rem;
+}
+
+.workflowCandidateListHeader span {
+  color: var(--fg-muted);
+  font-size: 0.62rem;
+  font-weight: 760;
+}
+
+.workflowCandidateListHeader > div:last-child {
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 5px;
+}
+
+.workflowCandidateListHeader button {
+  min-height: 24px;
+  padding: 0 8px;
+  border: 1px solid color-mix(in srgb, var(--accent-cool) 30%, var(--border-soft));
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--surface-panel-strong) 84%, transparent);
+  color: var(--fg-primary);
+  cursor: pointer;
+  font-size: 0.64rem;
+  font-weight: 820;
+  white-space: nowrap;
+}
+
+.workflowCandidateListHeader button:disabled {
+  cursor: not-allowed;
+  opacity: 0.52;
+}
+
+.workflowCandidateListScroll {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  max-height: clamp(340px, 50vh, 620px);
+  padding: 4px 8px 22px 4px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  border: 1px solid color-mix(in srgb, var(--accent-cool) 22%, var(--border-soft));
+  border-radius: 10px;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--accent-cool) 5%, transparent), transparent 30%),
+    color-mix(in srgb, var(--surface-panel-strong) 58%, transparent);
+  overscroll-behavior: contain;
+  scrollbar-color: color-mix(in srgb, var(--accent-cool) 54%, var(--border-strong)) transparent;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+}
+
+.workflowCandidateListScroll:focus-visible {
+  border-color: color-mix(in srgb, var(--accent-cool) 54%, var(--border-strong));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-cool) 18%, transparent);
+  outline: none;
+}
+
+.workflowCandidateListScroll::-webkit-scrollbar {
+  width: 10px;
+}
+
+.workflowCandidateListScroll::-webkit-scrollbar-track {
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface-panel-strong) 42%, transparent);
+}
+
+.workflowCandidateListScroll::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent-cool) 58%, var(--border-strong));
+  background-clip: content-box;
+}
+
+.workflowCandidateListScrollHint {
+  position: sticky;
+  bottom: -22px;
+  z-index: 1;
+  display: flex;
+  justify-content: center;
+  margin-top: -8px;
+  padding: 28px 0 4px;
+  pointer-events: none;
+  background: linear-gradient(180deg, transparent, color-mix(in srgb, var(--surface-panel-strong) 88%, transparent) 62%);
+}
+
+.workflowCandidateListScrollHint span {
+  padding: 2px 9px;
+  border: 1px solid color-mix(in srgb, var(--accent-cool) 32%, var(--border-soft));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface-panel-strong) 88%, transparent);
+  color: var(--fg-muted);
+  font-size: 0.62rem;
+  font-weight: 820;
+  white-space: nowrap;
+}
+
 .researchInspector .workflowCandidateList,
 .researchInspector .teamHistoryList {
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -5199,6 +5332,20 @@
   }
 
   .sourceCollectionScreeningListShell {
+    max-height: min(62vh, 540px);
+  }
+
+  .workflowCandidateListHeader {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .workflowCandidateListHeader > div:last-child {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .workflowCandidateListScroll {
     max-height: min(62vh, 540px);
   }
 
