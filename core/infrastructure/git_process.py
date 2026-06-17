@@ -3,9 +3,14 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import time
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Sequence
+
+
+DEFAULT_GIT_TIMEOUT_SECONDS = 30.0
+DEFAULT_GIT_LOCK_RETRIES = 2
 
 
 @lru_cache(maxsize=1)
@@ -59,14 +64,59 @@ def no_console_subprocess_kwargs() -> dict[str, Any]:
     return kwargs
 
 
-def run_git(args: Sequence[str], *, cwd: str | os.PathLike[str] | None = None, **kwargs: Any) -> subprocess.CompletedProcess[Any]:
+def run_git(
+    args: Sequence[str],
+    *,
+    cwd: str | os.PathLike[str] | None = None,
+    timeout: float | None = DEFAULT_GIT_TIMEOUT_SECONDS,
+    check: bool = False,
+    retries: int = DEFAULT_GIT_LOCK_RETRIES,
+    **kwargs: Any,
+) -> subprocess.CompletedProcess[Any]:
     run_kwargs = dict(kwargs)
     run_kwargs.update(no_console_subprocess_kwargs())
-    return subprocess.run(
-        git_command(args),
-        cwd=str(cwd) if cwd is not None else None,
-        **run_kwargs,
-    )
+    command = git_command(args)
+    attempts = max(0, int(retries or 0)) + 1
+    for attempt in range(attempts):
+        result = subprocess.run(
+            command,
+            cwd=str(cwd) if cwd is not None else None,
+            timeout=timeout,
+            check=False,
+            **run_kwargs,
+        )
+        if result.returncode != 0 and _is_git_lock_contention(result) and attempt < attempts - 1:
+            time.sleep(0.2 * (attempt + 1))
+            continue
+        if check and result.returncode != 0:
+            raise subprocess.CalledProcessError(
+                result.returncode,
+                command,
+                output=result.stdout,
+                stderr=result.stderr,
+            )
+        return result
+    raise RuntimeError("run_git retry loop exhausted unexpectedly")
+
+
+def _is_git_lock_contention(result: subprocess.CompletedProcess[Any]) -> bool:
+    text = " ".join(
+        part
+        for part in (
+            _process_output_text(getattr(result, "stderr", "")),
+            _process_output_text(getattr(result, "stdout", "")),
+        )
+        if part
+    ).lower()
+    return "index.lock" in text or "another git process" in text
+
+
+def _process_output_text(value: Any) -> str:
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    if value is None:
+        return ""
+    return str(value)
 
 
 def _direct_git_candidates(discovered_path: Path) -> list[Path]:
