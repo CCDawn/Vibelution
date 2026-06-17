@@ -547,6 +547,11 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("通过筛选");
     expect(routeSource).toContain("退回补资料");
     expect(routeSource).toContain("Source Quality Assessment Agent");
+    expect(routeSource).toContain("workflowCandidateListPanel");
+    expect(routeSource).toContain("workflowCandidateListScroll");
+    expect(routeSource).toContain("候选仓库预览");
+    expect(routeSource).toContain("查看完整候选库");
+    expect(routeSource).toContain("向下滚动查看更多候选，或打开完整候选库分页处理");
     expect(routeSource).toContain("生成分块计划");
     expect(routeSource).toContain("重建分块计划");
     expect(routeSource).toContain("后续 paper_note draft 需带 chunkId");
@@ -686,6 +691,10 @@ describe("TeamsRoute layout contract", () => {
     expect(routeStyles.workflowGraphEdge).toBeTypeOf("string");
     expect(routeStyles.workflowGraphBoundary).toBeTypeOf("string");
     expect(routeStyles.workflowCandidateList).toBeTypeOf("string");
+    expect(routeStyles.workflowCandidateListPanel).toBeTypeOf("string");
+    expect(routeStyles.workflowCandidateListHeader).toBeTypeOf("string");
+    expect(routeStyles.workflowCandidateListScroll).toBeTypeOf("string");
+    expect(routeStyles.workflowCandidateListScrollHint).toBeTypeOf("string");
     expect(routeStyles.workflowCandidateActions).toBeTypeOf("string");
     expect(routeStyles.workflowValidation).toBeTypeOf("string");
     expect(routeStyles.workspaceResearch).toBeTypeOf("string");
