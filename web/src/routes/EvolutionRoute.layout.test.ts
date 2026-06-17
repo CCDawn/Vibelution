@@ -230,8 +230,11 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).toContain('{ id: "proposal", zh: "改进提案", en: "Proposal", roles: ["candidate", "judge"] }');
     expect(routeSource).toContain('{ id: "review", zh: "样本评审", en: "Review", roles: ["judge"] }');
     expect(routeSource).not.toContain('["baseline", "candidate", "reviewer", "auditor", "judge"]');
-    expect(routeSource).toContain("activeSupervisedMemberStep");
-    expect(routeSource).toContain("supervisedActiveStepMembers");
+    expect(routeSource).toContain("selectedSupervisedMemberStepId");
+    expect(routeSource).toContain("supervisedRuntimeMemberStepId");
+    expect(routeSource).toContain("supervisedSelectedMemberStep");
+    expect(routeSource).toContain("supervisedSelectedStepMembers");
+    expect(routeSource).toContain("supervisedMemberStepManualSelection");
     expect(routeSource).toContain("supervisedStepMemberSummaries");
     expect(routeSource).toContain("supervisedRunMembers");
     expect(routeSource).toContain("hasSupervisedAgentBindings");
@@ -250,13 +253,20 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).toContain("to={supervisedMemberAgentManagementRoute(member.agentId, supervisedMemberReturnTo)}");
     expect(routeSource).toContain("styles.supervisedMemberLink");
     expect(routeSource).toContain("<ArrowUpRight size={13} aria-hidden=\"true\" />");
+    expect(routeSource).toContain("onClick={() => setSelectedSupervisedMemberStepId(step.id)}");
+    expect(routeSource).toContain("aria-pressed={selected}");
+    expect(routeSource).toContain("setSelectedSupervisedMemberStepId(null)");
+    expect(routeSource).toContain("跟随现场");
     expect(routeSource).toContain("styles.supervisedMembersPanel");
     expect(routeSource).toContain("styles.supervisedStepMemberRail");
     expect(routeSource).toContain("styles.supervisedStepMemberCardActive");
-    expect(routeSource).toContain("监督步骤成员");
+    expect(routeSource).toContain("styles.supervisedStepMemberCardCurrent");
+    expect(routeSource).toContain("监督步骤成员导航");
     expect(stylesSource).toContain(".supervisedMembersPanel");
     expect(stylesSource).toContain(".supervisedStepMemberRail");
     expect(stylesSource).toContain(".supervisedStepMemberCardActive");
+    expect(stylesSource).toContain(".supervisedStepMemberCardCurrent");
+    expect(stylesSource).toContain(".supervisedStepFollowButton");
     expect(stylesSource).toContain(".supervisedMemberLink");
     expect(stylesSource).toContain(".supervisedMemberRowActive");
   });
@@ -286,8 +296,11 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).toContain("styles.closedLoopLaunchBlock");
     expect(routeSource).toContain('t("closedLoopLaunchPanelTitle")');
     expect(routeSource).toContain('t("closedLoopLaunchPanelHint")');
+    expect(routeSource).toContain("styles.closedLoopModeBadge");
+    expect(routeSource).toContain("当前只演练编排链路，不调用真实 LLM 自改。");
     expect(dictionarySource).toContain("结果会进入下方候选审核，不会自动合并。");
     expect(stylesSource).toContain(".closedLoopLaunchBlock");
+    expect(stylesSource).toContain(".closedLoopModeBadge");
   });
 
   it("keeps the supervised live console as a dense desktop split before narrow layouts", () => {
