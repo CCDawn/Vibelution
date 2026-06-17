@@ -72,4 +72,3 @@ def test_provider_turn_messages_preserve_valid_live_tool_pair():
 
     assert [message["role"] for message in messages] == ["assistant", "tool"]
     assert validate_tool_result_pairing(messages).ok
-
