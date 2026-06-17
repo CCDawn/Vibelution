@@ -625,9 +625,15 @@ describe("TeamsRoute layout contract", () => {
     expect(routeStylesSource).toContain(".sourceCollectionFilterBar");
     expect(routeStylesSource).toContain(".sourceCollectionFilterActive");
     expect(routeStylesSource).toContain("grid-template-columns: minmax(220px, 1fr) minmax(80px, 112px) minmax(150px, 240px)");
-    expect(routeStylesSource).toContain("min-height: 122px");
+    expect(routeStylesSource).toContain("grid-template-rows: auto auto auto");
+    expect(routeStylesSource).toContain("align-items: start");
+    expect(routeStylesSource).toContain("align-content: start");
+    expect(routeStylesSource).toContain("align-self: start");
+    expect(routeStylesSource).toContain("min-height: 0");
+    expect(routeStylesSource).not.toContain("grid-template-rows: auto minmax(0, 1fr) auto auto");
     expect(routeStylesSource).toContain("grid-template-columns: repeat(5, minmax(0, 1fr))");
-    expect(routeStylesSource).toContain("min-height: 96px");
+    expect(routeStylesSource).not.toContain("min-height: 122px");
+    expect(routeStylesSource).not.toContain("min-height: 96px");
     expect(routeStylesSource).toContain("white-space: nowrap");
     expect(routeStylesSource).toContain("writing-mode: horizontal-tb");
     expect(routeStyles.sourceCollectionControlPanel).toBeTypeOf("string");
