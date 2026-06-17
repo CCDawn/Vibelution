@@ -1190,6 +1190,58 @@ export function ConversationView({
     return stateLabel;
   }
 
+  function compactRequestStateLabel(tone: string) {
+    if (tone === "running") {
+      return lang === "zh" ? "正在请求" : "Requesting";
+    }
+    if (tone === "failed") {
+      return lang === "zh" ? "请求失败" : "Request failed";
+    }
+    if (tone === "done") {
+      return lang === "zh" ? "已完成" : "Done";
+    }
+    return lang === "zh" ? "等待请求" : "Pending request";
+  }
+
+  function operationMatchesAny(operation: ConversationOperation, markers: string[]) {
+    const haystack = [
+      operation.rawLabel,
+      operation.label,
+      operation.summary,
+      operation.resultPreview,
+    ].map((item) => String(item ?? "").trim().toLowerCase()).join(" ");
+    return markers.some((marker) => haystack.includes(marker));
+  }
+
+  function isInternalPipelineOperation(operation: ConversationOperation) {
+    if (operation.kind !== "status") {
+      return false;
+    }
+    return operationMatchesAny(operation, [
+      "context_prepare",
+      "agent_prepare",
+      "model_request",
+      "prepare context",
+      "bind agent",
+      "request model",
+      "准备上下文",
+      "准备对话上下文",
+      "读取当前会话",
+      "绑定 agent",
+      "唤起对话 agent",
+      "请求模型",
+      "llm 调用",
+      "首个响应片段等待中",
+    ]);
+  }
+
+  function shouldShowTimelineOperation(operation: ConversationOperation) {
+    if (!isInternalPipelineOperation(operation)) {
+      return true;
+    }
+    return Boolean(operation.error?.trim());
+  }
+
   function reActGroupDurationLabel(group: ConversationReActOperationGroup) {
     const durations = group.operations
       .map((operation) => operation.durationSeconds)
@@ -1597,6 +1649,29 @@ export function ConversationView({
     );
   }
 
+  function renderCompactRequestSummary(operations: ConversationOperation[]) {
+    const tone = operationCollectionTone(operations);
+    const title = compactRequestStateLabel(tone);
+    return (
+      <section className={`${styles.operationGroup} ${styles.executionTraceGroup}`}>
+        <div
+          className={`${styles.operationSummary} ${styles.executionRequestSummary}`}
+          role="status"
+          aria-live={tone === "running" ? "polite" : undefined}
+        >
+          {tone === "running" ? (
+            <LoaderCircle className={styles.statusSpinner} size={14} />
+          ) : tone === "done" ? (
+            <CheckCircle2 size={14} />
+          ) : (
+            <CircleDot size={14} />
+          )}
+          <span>{title}</span>
+        </div>
+      </section>
+    );
+  }
+
   function renderOperationGroup(
     messageId: string,
     section: "thought" | "mental" | "tools",
@@ -1649,11 +1724,21 @@ export function ConversationView({
     if (operations.length === 0) {
       return null;
     }
-    const reActGroups = buildConversationReActOperationGroups(operations);
+    const visibleOperations = operations.filter(shouldShowTimelineOperation);
+    if (visibleOperations.length === 0) {
+      return renderCompactRequestSummary(operations);
+    }
+    const reActGroups = buildConversationReActOperationGroups(visibleOperations);
+    if (reActGroups.length === 0) {
+      return renderCompactRequestSummary(operations);
+    }
     const defaultTimelineExpanded = defaultExpanded || reActGroups.some((group) => shouldExpandReActGroupByDefault(group));
     const expanded = getExpansionState(messageId, "feedback", defaultTimelineExpanded);
-    const title = operationTimelineTitle(operations);
-    const stateLabel = operationStateLabel(operationCollectionTone(operations));
+    const title = operationTimelineTitle(visibleOperations);
+    const collectionTone = operationCollectionTone(operations);
+    const stateLabel = operations.length > visibleOperations.length && collectionTone === "running"
+      ? compactRequestStateLabel(collectionTone)
+      : operationStateLabel(operationCollectionTone(visibleOperations));
     return (
       <section className={`${styles.operationGroup} ${styles.executionTraceGroup}`}>
         <button
