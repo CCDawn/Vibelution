@@ -2606,6 +2606,9 @@ function mergeSessionDetailWithLiveAssistantOverlay(
   previous: SessionDetail | undefined,
   detail: SessionDetail,
 ): SessionDetail {
+  if (isStaleLedgerUpdate(previous?.ledgerSeq, detail.ledgerSeq)) {
+    return previous ?? detail;
+  }
   const previousLiveMessages = (previous?.messages ?? []).filter(isLiveAssistantDeltaMessage);
   if (previousLiveMessages.length === 0) {
     return detail;
@@ -2647,6 +2650,9 @@ function mergeAssistantDeltaIntoSessionDetail(
   if (!detail || detail.id !== payload.sessionId) {
     return detail;
   }
+  if (isStaleLedgerUpdate(detail.ledgerSeq, payload.ledgerSeq)) {
+    return detail;
+  }
   const liveMessageId = liveAssistantMessageId(payload.sessionId, payload.turnId);
   const now = payload.updatedAt || new Date().toISOString();
   const messages = (detail.messages ?? []).filter((message) =>
@@ -2666,6 +2672,7 @@ function mergeAssistantDeltaIntoSessionDetail(
   if (!nextContent && !nextThought && !payload.stage && !nextFeedbackEvents.length) {
     return {
       ...detail,
+      ledgerSeq: maxLedgerSeq(detail.ledgerSeq, payload.ledgerSeq),
       updatedAt: now,
       messages: messages.filter((message) => message.id !== liveMessageId),
     };
@@ -2683,6 +2690,7 @@ function mergeAssistantDeltaIntoSessionDetail(
       ...(previous?.metadata ?? {}),
       kind: "session_live_overlay",
       turnId: payload.turnId,
+      ledgerSeq: maxLedgerSeq(previous?.metadata?.ledgerSeq, payload.ledgerSeq),
     },
   };
   if (liveIndex >= 0) {
@@ -2695,6 +2703,7 @@ function mergeAssistantDeltaIntoSessionDetail(
     };
     return {
       ...detail,
+      ledgerSeq: maxLedgerSeq(detail.ledgerSeq, payload.ledgerSeq),
       updatedAt: now,
       messages: [
         ...messages.slice(0, liveIndex),
@@ -2705,9 +2714,26 @@ function mergeAssistantDeltaIntoSessionDetail(
   }
   return {
     ...detail,
+    ledgerSeq: maxLedgerSeq(detail.ledgerSeq, payload.ledgerSeq),
     updatedAt: now,
     messages: [...messages, nextLiveMessage],
   };
+}
+
+function normalizedLedgerSeq(value: unknown): number {
+  const numeric = Number(value ?? 0);
+  return Number.isFinite(numeric) && numeric > 0 ? numeric : 0;
+}
+
+function isStaleLedgerUpdate(currentSeq: unknown, incomingSeq: unknown): boolean {
+  const current = normalizedLedgerSeq(currentSeq);
+  const incoming = normalizedLedgerSeq(incomingSeq);
+  return current > 0 && incoming > 0 && incoming < current;
+}
+
+function maxLedgerSeq(left: unknown, right: unknown): number | undefined {
+  const max = Math.max(normalizedLedgerSeq(left), normalizedLedgerSeq(right));
+  return max > 0 ? max : undefined;
 }
 
 function latestMentalSnapshot(messages: ConversationMessage[] | undefined): MentalStateSnapshot | undefined {
