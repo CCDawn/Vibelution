@@ -40,7 +40,6 @@ from core.chat.chat_result_formatter import format_chat_reply
 from core.chat.chat_task_types import trim_lines
 from core.chat.conversation_ledger import (
     EVENT_ASSISTANT_MESSAGE,
-    EVENT_ASSISTANT_PARTIAL,
     EVENT_CLI_SESSION_LIFECYCLE,
     EVENT_CLI_TASK_RESULT,
     EVENT_TOOL_CALL_STARTED,
@@ -54,8 +53,8 @@ from core.chat.conversation_ledger import (
     TURN_INTERRUPTED_MARKER,
     append_conversation_event,
     latest_ledger_sequence,
+    latest_open_turn_id,
     load_conversation_events,
-    reconcile_open_conversation_turn,
 )
 from core.chat.context_assembler import assemble_conversation_context
 from core.chat.skill_registry import build_skill_runtime_context, skill_descriptor_for_log
@@ -159,7 +158,9 @@ _SESSION_TURN_CONTROLS_LOCK = threading.Lock()
 _SESSION_TURN_CONTROLS: dict[str, "SessionTurnControl"] = {}
 _SESSION_LIVE_OUTPUTS_LOCK = threading.Lock()
 _SESSION_LIVE_OUTPUTS: dict[str, "SessionLiveOutputState"] = {}
-_SESSION_LEDGER_LIVE_SIGNATURES: dict[str, str] = {}
+_SESSION_LIVE_OUTPUT_CHECKPOINT_LOCK = threading.Lock()
+_SESSION_LIVE_OUTPUT_CHECKPOINT_LAST_AT: dict[str, float] = {}
+_SESSION_LIVE_OUTPUT_CHECKPOINT_INTERVAL_SECONDS = 0.75
 _SESSION_UI_CAPTURE_LOCK = threading.Lock()
 _SESSION_UI_CAPTURE_CONTEXT: ContextVar[dict[str, Any]] = ContextVar(
     "vibelution_session_ui_capture_context",
@@ -594,6 +595,153 @@ def _ensure_session_workspace(session_id: str) -> Path:
     return workspace_path
 
 
+def _session_live_output_checkpoint_path(session_id: str) -> Path:
+    return _ensure_session_workspace(session_id) / "live_output.json"
+
+
+def _live_output_checkpoint_payload(state: "SessionLiveOutputState") -> dict[str, Any]:
+    return {
+        "schemaVersion": 1,
+        "sessionId": str(getattr(state, "session_id", "") or "").strip(),
+        "turnId": str(getattr(state, "turn_id", "") or "").strip(),
+        "stage": str(getattr(state, "stage", "") or "").strip(),
+        "content": str(getattr(state, "content", "") or ""),
+        "thought": str(getattr(state, "thought", "") or ""),
+        "mentalSnapshot": _normalize_mental_snapshot(getattr(state, "mental_snapshot", None)),
+        "toolCalls": _normalize_message_tool_calls(getattr(state, "tool_calls", []) or []),
+        "feedbackEvents": _normalize_message_feedback_events(getattr(state, "feedback_events", []) or []),
+        "contextComposition": _normalize_session_context_composition(getattr(state, "context_composition", None)),
+        "updatedAt": str(getattr(state, "updated_at", "") or "").strip() or _now_timestamp(),
+    }
+
+
+def _live_output_checkpoint_has_visible_payload(payload: dict[str, Any]) -> bool:
+    return bool(
+        str(payload.get("content") or "").strip()
+        or str(payload.get("thought") or "").strip()
+        or list(payload.get("toolCalls") or [])
+        or list(payload.get("feedbackEvents") or [])
+        or isinstance(payload.get("mentalSnapshot"), dict)
+    )
+
+
+def _write_session_live_output_checkpoint(
+    session_id: str,
+    state: "SessionLiveOutputState",
+    *,
+    force: bool = False,
+) -> None:
+    normalized_session_id = str(session_id or "").strip()
+    if not normalized_session_id:
+        return
+    now = _perf_counter()
+    if not force:
+        with _SESSION_LIVE_OUTPUT_CHECKPOINT_LOCK:
+            last_at = _SESSION_LIVE_OUTPUT_CHECKPOINT_LAST_AT.get(normalized_session_id, 0.0)
+        if last_at > 0 and now - last_at < _SESSION_LIVE_OUTPUT_CHECKPOINT_INTERVAL_SECONDS:
+            return
+    payload = _live_output_checkpoint_payload(state)
+    if not _live_output_checkpoint_has_visible_payload(payload):
+        if force:
+            _delete_session_live_output_checkpoint(normalized_session_id)
+        return
+    checkpoint_path = _session_live_output_checkpoint_path(normalized_session_id)
+    tmp_path = checkpoint_path.with_name(f"{checkpoint_path.name}.tmp")
+    try:
+        tmp_path.write_text(json.dumps(payload, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+        tmp_path.replace(checkpoint_path)
+        with _SESSION_LIVE_OUTPUT_CHECKPOINT_LOCK:
+            _SESSION_LIVE_OUTPUT_CHECKPOINT_LAST_AT[normalized_session_id] = now
+    except OSError:
+        try:
+            tmp_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
+def _delete_session_live_output_checkpoint(session_id: str) -> None:
+    normalized_session_id = str(session_id or "").strip()
+    if not normalized_session_id:
+        return
+    with _SESSION_LIVE_OUTPUT_CHECKPOINT_LOCK:
+        _SESSION_LIVE_OUTPUT_CHECKPOINT_LAST_AT.pop(normalized_session_id, None)
+    try:
+        _session_live_output_checkpoint_path(normalized_session_id).unlink(missing_ok=True)
+    except OSError:
+        return
+
+
+def _load_session_live_output_checkpoint(session_id: str) -> "SessionLiveOutputState | None":
+    normalized_session_id = str(session_id or "").strip()
+    if not normalized_session_id:
+        return None
+    try:
+        payload = json.loads(_session_live_output_checkpoint_path(normalized_session_id).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(payload, dict) or not _live_output_checkpoint_has_visible_payload(payload):
+        return None
+    return SessionLiveOutputState(
+        session_id=normalized_session_id,
+        turn_id=str(payload.get("turnId") or "").strip(),
+        stage=str(payload.get("stage") or "").strip(),
+        thought=_sanitize_thought_text(payload.get("thought") or ""),
+        content=_sanitize_message_content("assistant", payload.get("content") or ""),
+        mental_snapshot=_normalize_mental_snapshot(payload.get("mentalSnapshot")),
+        tool_calls=_normalize_message_tool_calls(payload.get("toolCalls") or []),
+        feedback_events=_normalize_message_feedback_events(payload.get("feedbackEvents") or []),
+        context_composition=_normalize_session_context_composition(payload.get("contextComposition")),
+        updated_at=str(payload.get("updatedAt") or "").strip(),
+    )
+
+
+def _persist_recovered_live_output_to_chat_state(
+    session_id: str,
+    turn_id: str,
+    state: "SessionLiveOutputState",
+) -> None:
+    payload = _live_output_checkpoint_payload(state)
+    content = _sanitize_message_content("assistant", payload.get("content") or "")
+    thought = _sanitize_thought_text(payload.get("thought") or "")
+    tool_calls = _normalize_message_tool_calls(payload.get("toolCalls") or [])
+    feedback_events = _normalize_message_feedback_events(payload.get("feedbackEvents") or [])
+    mental_snapshot = _normalize_mental_snapshot(payload.get("mentalSnapshot"))
+    if not content and not thought and not tool_calls and not feedback_events and mental_snapshot is None:
+        return
+    normalized_turn_id = str(turn_id or "").strip()
+    with _CHAT_STATE_LOCK:
+        chat_payload = load_chat_state(PROJECT_ROOT)
+        conversation = _find_conversation_entry(chat_payload, session_id)
+        if conversation is None:
+            return
+        messages = normalize_chat_messages(conversation.get("messages") or [])
+        for message in reversed(messages):
+            metadata = message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
+            if (
+                str(message.get("role") or "").strip().lower() == "assistant"
+                and str(metadata.get("turnId") or "").strip() == normalized_turn_id
+            ):
+                return
+        assistant_entry = _make_chat_message(
+            "assistant",
+            content,
+            tool_calls,
+            thought=thought,
+            feedback_events=feedback_events,
+            mental_snapshot=mental_snapshot,
+            metadata={"turnId": normalized_turn_id},
+        )
+        if tool_calls:
+            assistant_entry["toolCalls"] = tool_calls
+        if feedback_events:
+            assistant_entry["feedbackEvents"] = feedback_events
+        conversation["messages"] = messages + [assistant_entry]
+        conversation["last_turn_status"] = "ready"
+        conversation["updated_at"] = assistant_entry["timestamp"]
+        chat_payload["updated_at"] = assistant_entry["timestamp"]
+        save_chat_state(PROJECT_ROOT, chat_payload)
+
+
 def _append_session_conversation_event(
     session_id: str,
     turn_id: str,
@@ -649,53 +797,49 @@ def _append_session_conversation_event(
             return
 
 
-def _append_session_live_ledger_event(
-    session_id: str,
-    turn_id: str,
-    state: "SessionLiveOutputState",
-) -> None:
-    normalized_turn_id = str(turn_id or getattr(state, "turn_id", "") or "").strip()
-    if not normalized_turn_id:
-        return
-    payload = {
-        "stage": str(getattr(state, "stage", "") or "").strip(),
-        "content": str(getattr(state, "content", "") or "").strip(),
-        "thought": str(getattr(state, "thought", "") or "").strip(),
-        "toolCalls": _normalize_message_tool_calls(getattr(state, "tool_calls", []) or []),
-        "feedbackEvents": _normalize_message_feedback_events(getattr(state, "feedback_events", []) or []),
-    }
-    if not payload["content"] and not payload["thought"] and not payload["toolCalls"] and not payload["feedbackEvents"]:
-        return
-    signature = _short_hash(json.dumps(payload, ensure_ascii=False, sort_keys=True))
-    signature_key = f"{session_id}:{normalized_turn_id}"
-    if _SESSION_LEDGER_LIVE_SIGNATURES.get(signature_key) == signature:
-        return
-    _SESSION_LEDGER_LIVE_SIGNATURES[signature_key] = signature
-    _append_session_conversation_event(
-        session_id,
-        normalized_turn_id,
-        EVENT_ASSISTANT_PARTIAL,
-        status="running",
-        payload=payload,
-        source="session_live_output",
-    )
-
-
 def _reconcile_stale_session_ledger(session_id: str, *, active_turn_id: str = "", reason: str = "process_restarted") -> None:
     normalized_session_id = str(session_id or "").strip()
     if not normalized_session_id:
         return
     try:
-        event = reconcile_open_conversation_turn(
+        events = load_conversation_events(PROJECT_ROOT, normalized_session_id)
+        turn_id = latest_open_turn_id(events)
+        if not turn_id:
+            _delete_session_live_output_checkpoint(normalized_session_id)
+            return
+        if active_turn_id and turn_id == str(active_turn_id or "").strip():
+            return
+        checkpoint = _load_session_live_output_checkpoint(normalized_session_id)
+        if checkpoint is not None and (not checkpoint.turn_id or checkpoint.turn_id == turn_id):
+            payload = _live_output_checkpoint_payload(checkpoint)
+            _persist_recovered_live_output_to_chat_state(normalized_session_id, turn_id, checkpoint)
+            _append_session_conversation_event(
+                normalized_session_id,
+                turn_id,
+                EVENT_ASSISTANT_MESSAGE,
+                status="interrupted",
+                payload={
+                    "content": str(payload.get("content") or ""),
+                    "thought": str(payload.get("thought") or ""),
+                    "toolCalls": list(payload.get("toolCalls") or []),
+                    "feedbackEvents": list(payload.get("feedbackEvents") or []),
+                },
+                source="recover_live_output_checkpoint",
+            )
+        event = append_conversation_event(
             PROJECT_ROOT,
             normalized_session_id,
-            active_turn_id=str(active_turn_id or "").strip(),
-            reason=reason,
+            turn_id,
+            EVENT_TURN_INTERRUPTED,
+            status="interrupted",
+            payload={
+                "reason": str(reason or "process_restarted").strip() or "process_restarted",
+                "marker": TURN_INTERRUPTED_MARKER,
+            },
             source="session_service",
         )
+        _delete_session_live_output_checkpoint(normalized_session_id)
     except Exception:
-        return
-    if event is None:
         return
     try:
         record_runtime_scene_event(
@@ -15602,7 +15746,8 @@ def _set_session_live_output(
 ) -> None:
     requested_turn_id = str(turn_id or "").strip()
     assistant_delta_state: SessionLiveOutputState | None = None
-    journal_snapshot: SessionLiveOutputState | None = None
+    checkpoint_snapshot: SessionLiveOutputState | None = None
+    delete_checkpoint = False
     publish_full_snapshot = not (
         stage is _UNSET
         and mental_snapshot is _UNSET
@@ -15671,6 +15816,7 @@ def _set_session_live_output(
                     updated_at=state.updated_at,
                 )
             _SESSION_LIVE_OUTPUTS.pop(session_id, None)
+            delete_checkpoint = True
         elif content is not _UNSET or thought is not _UNSET or feedback_events is not _UNSET:
             assistant_delta_state = SessionLiveOutputState(
                 session_id=state.session_id,
@@ -15688,8 +15834,9 @@ def _set_session_live_output(
             or thought is not _UNSET
             or tool_calls is not _UNSET
             or feedback_events is not _UNSET
+            or mental_snapshot is not _UNSET
         ):
-            journal_snapshot = SessionLiveOutputState(
+            checkpoint_snapshot = SessionLiveOutputState(
                 session_id=state.session_id,
                 turn_id=state.turn_id,
                 stage=state.stage,
@@ -15701,8 +15848,10 @@ def _set_session_live_output(
                 context_composition=dict(state.context_composition or {}) if isinstance(state.context_composition, dict) else None,
                 updated_at=state.updated_at,
             )
-    if journal_snapshot is not None:
-        _append_session_live_ledger_event(session_id, journal_snapshot.turn_id, journal_snapshot)
+    if delete_checkpoint:
+        _delete_session_live_output_checkpoint(session_id)
+    elif checkpoint_snapshot is not None:
+        _write_session_live_output_checkpoint(session_id, checkpoint_snapshot)
     if assistant_delta_state is not None:
         _publish_session_assistant_delta(session_id, assistant_delta_state)
     if publish_full_snapshot:
@@ -16032,12 +16181,16 @@ def _set_session_model_thinking_live_output(session_id: str, *, turn_id: str = "
 
 def _clear_session_live_output(session_id: str, *, turn_id: str = "") -> None:
     requested_turn_id = str(turn_id or "").strip()
+    should_delete_checkpoint = False
     with _SESSION_LIVE_OUTPUTS_LOCK:
         if requested_turn_id:
             current = _SESSION_LIVE_OUTPUTS.get(session_id)
             if current is not None and current.turn_id and current.turn_id != requested_turn_id:
                 return
         _SESSION_LIVE_OUTPUTS.pop(session_id, None)
+        should_delete_checkpoint = True
+    if should_delete_checkpoint:
+        _delete_session_live_output_checkpoint(session_id)
 
 
 def _snapshot_session_live_output(session_id: str) -> SessionLiveOutputState | None:
