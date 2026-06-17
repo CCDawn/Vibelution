@@ -199,22 +199,21 @@ class TestToolMessageFlow:
         )
 
         restored = list(agent._active_turn_messages or [])
-        ai_tool_messages = [
+        tool_messages = [message for message in restored if isinstance(message, ToolMessage)]
+        semantic_tool_messages = [
             message
             for message in restored
-            if isinstance(message, AIMessage) and list(getattr(message, "tool_calls", []) or [])
+            if isinstance(message, AIMessage) and "历史工具结果: cli_tool" in str(message.content)
         ]
-        tool_messages = [message for message in restored if isinstance(message, ToolMessage)]
 
-        assert ai_tool_messages
-        assert ai_tool_messages[0].tool_calls[0]["name"] == "cli_tool"
-        assert tool_messages
-        assert "完整工具结果" in tool_messages[0].content
-        assert "failure-line\n" * 120 in tool_messages[0].content
-        assert "Windows detected Unix shell fragment" not in tool_messages[0].content
+        assert tool_messages == []
+        assert semantic_tool_messages
+        assert "完整工具结果" in semantic_tool_messages[0].content
+        assert "failure-line\n" * 120 in semantic_tool_messages[0].content
+        assert "Windows detected Unix shell fragment" not in semantic_tool_messages[0].content
         assert any(isinstance(message, AIMessage) and message.content == "运行相关测试验证修改：" for message in restored)
 
-    def test_seed_chat_history_uses_canonical_tool_role_without_duplicate_result(self):
+    def test_seed_chat_history_demotes_canonical_tool_role_without_duplicate_result(self):
         agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
         agent.mode_policy = ModePolicy(
             mode=AgentMode.CHAT,
@@ -245,11 +244,13 @@ class TestToolMessageFlow:
         )
 
         restored = list(agent._active_turn_messages or [])
-        ai_tool_messages = [message for message in restored if isinstance(message, AIMessage) and message.tool_calls]
         tool_messages = [message for message in restored if isinstance(message, ToolMessage)]
+        semantic_messages = [message for message in restored if isinstance(message, AIMessage)]
 
-        assert ai_tool_messages[0].tool_calls[0]["args"] == {"command": "pytest"}
-        assert [message.content for message in tool_messages] == ["完整 canonical 工具结果"]
+        assert tool_messages == []
+        assert not any(getattr(message, "tool_calls", []) for message in semantic_messages)
+        assert any("历史工具结果: cli_tool" in str(message.content) for message in semantic_messages)
+        assert any("完整 canonical 工具结果" in str(message.content) for message in semantic_messages)
 
     def test_chat_state_normalization_preserves_camel_case_tool_calls(self):
         from core.ui.chat_state import normalize_chat_messages
@@ -5599,6 +5600,110 @@ class TestRuntimeStateMemoryFlow:
         assert isinstance(inserted[4], SystemMessage)
         assert inserted[4].content == "operator guidance"
         assert inserted[-1] == messages[-1]
+
+    def test_prepare_turn_messages_demotes_unresolved_tool_call_before_resume(self):
+        previous = [
+            SystemMessage(content="old system"),
+            build_chat_user_message("检查文件"),
+            AIMessage(
+                content="准备读取文件",
+                tool_calls=[
+                    {
+                        "name": "read_file_tool",
+                        "args": {"file_path": "demo.py"},
+                        "id": "call_pending",
+                    }
+                ],
+            ),
+        ]
+
+        messages, resumed = TurnOutcomeController.prepare_turn_messages(
+            system_prompt="new system",
+            user_prompt="检查文件",
+            effective_goal="检查文件",
+            active_turn_messages=previous,
+            active_turn_goal="检查文件",
+            build_system_message=agent_module.build_system_message,
+            build_external_request_message=build_chat_user_message,
+        )
+
+        assert resumed is True
+        assert not any(getattr(message, "tool_calls", []) for message in messages)
+        assert any(
+            isinstance(message, AIMessage)
+            and "历史工具调用未返回结果: read_file_tool" in str(message.content)
+            for message in messages
+        )
+
+    def test_prepare_turn_messages_demotes_orphan_tool_result_before_resume(self):
+        previous = [
+            SystemMessage(content="old system"),
+            ToolMessage(content="读取结果", tool_call_id="call_missing"),
+        ]
+
+        messages, resumed = TurnOutcomeController.prepare_turn_messages(
+            system_prompt="new system",
+            user_prompt="继续",
+            effective_goal="继续",
+            active_turn_messages=previous,
+            active_turn_goal="继续",
+            build_system_message=agent_module.build_system_message,
+            build_external_request_message=build_chat_user_message,
+        )
+
+        assert resumed is True
+        assert not any(isinstance(message, ToolMessage) for message in messages)
+        assert any(
+            isinstance(message, AIMessage) and "历史工具结果: unknown_tool" in str(message.content)
+            for message in messages
+        )
+
+    def test_volatile_context_does_not_split_unresolved_tool_chain(self):
+        messages = [
+            {"role": "system", "content": "system"},
+            build_chat_user_message("第一句"),
+            AIMessage(
+                content="准备搜索",
+                tool_calls=[
+                    {
+                        "name": "grep_search_tool",
+                        "args": {"pattern": "token"},
+                        "id": "call_search",
+                    }
+                ],
+            ),
+            build_chat_user_message("第二句"),
+        ]
+
+        inserted = TurnOutcomeController.insert_volatile_context_before_current_user(
+            messages=messages,
+            context_messages=[SystemMessage(content="runtime context")],
+        )
+
+        assert not any(getattr(message, "tool_calls", []) for message in inserted)
+        assert isinstance(inserted[2], AIMessage)
+        assert "历史工具调用未返回结果: grep_search_tool" in str(inserted[2].content)
+        assert isinstance(inserted[3], SystemMessage)
+        assert inserted[3].content == "runtime context"
+        assert inserted[-1] == messages[-1]
+
+    def test_finish_turn_message_carryover_demotes_orphan_tool_result(self):
+        carryover = TurnOutcomeController.finish_turn_message_carryover(
+            messages=[
+                SystemMessage(content="system"),
+                ToolMessage(content="孤儿工具结果", tool_call_id="call_orphan"),
+            ],
+            lifecycle_action=None,
+            active_goal="继续",
+        )
+
+        assert carryover.goal == "继续"
+        assert carryover.messages is not None
+        assert not any(isinstance(message, ToolMessage) for message in carryover.messages)
+        assert any(
+            isinstance(message, AIMessage) and "历史工具结果: unknown_tool" in str(message.content)
+            for message in carryover.messages
+        )
 
     def test_chat_runtime_context_seed_is_omitted_from_model_messages(self):
         agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)

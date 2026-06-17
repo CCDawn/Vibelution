@@ -42,17 +42,21 @@ def replace_large_tool_results_for_compression(
     replaced: list[Any] = []
     for index, message in enumerate(list(messages or [])):
         role = _message_role(message)
-        if role != "tool":
+        semantic_tool_result = _is_semantic_tool_result(message)
+        if role != "tool" and not semantic_tool_result:
             replaced.append(message)
             continue
         content = _message_content(message)
-        if len(content) <= bounded_limit:
+        replacement_basis = _semantic_tool_result_payload(content) if semantic_tool_result else content
+        if len(replacement_basis) <= bounded_limit:
             replaced.append(message)
             continue
         tool_call_id = _message_tool_call_id(message) or f"tool_message_{index}"
         metadata = _message_metadata(message)
         tool_name = str(metadata.get("toolName") or metadata.get("tool_name") or "").strip()
-        digest = hashlib.sha256(content.encode("utf-8", errors="replace")).hexdigest()
+        if not tool_name and semantic_tool_result:
+            tool_name = _semantic_tool_name(content)
+        digest = hashlib.sha256(replacement_basis.encode("utf-8", errors="replace")).hexdigest()
         reference = _replacement_reference(
             session_id=session_id,
             tool_call_id=tool_call_id,
@@ -62,17 +66,19 @@ def replace_large_tool_results_for_compression(
             reference=reference,
             tool_call_id=tool_call_id,
             tool_name=tool_name,
-            original_chars=len(content),
+            original_chars=len(replacement_basis),
             digest=digest,
-            preview=_bounded_preview(content, limit=min(800, bounded_limit)),
+            preview=_bounded_preview(replacement_basis, limit=min(800, bounded_limit)),
         )
+        if semantic_tool_result:
+            replacement_content = _semantic_replacement_content(content, replacement_content)
         state["replacements"].append(
             {
                 "reference": reference,
                 "toolCallId": tool_call_id,
                 "toolName": tool_name,
                 "messageIndex": index,
-                "originalChars": len(content),
+                "originalChars": len(replacement_basis),
                 "sha256": digest,
             }
         )
@@ -83,7 +89,10 @@ def replace_large_tool_results_for_compression(
 def _message_role(message: Any) -> str:
     if isinstance(message, dict):
         return str(message.get("role") or "").strip().lower()
-    return str(getattr(message, "type", "") or getattr(message, "role", "") or "").strip().lower()
+    role = str(getattr(message, "type", "") or getattr(message, "role", "") or "").strip().lower()
+    if role == "ai":
+        return "assistant"
+    return role
 
 
 def _message_content(message: Any) -> str:
@@ -94,7 +103,15 @@ def _message_content(message: Any) -> str:
 
 def _message_tool_call_id(message: Any) -> str:
     if isinstance(message, dict):
-        return str(message.get("tool_call_id") or message.get("toolCallId") or message.get("id") or "").strip()
+        metadata = message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
+        return str(
+            message.get("tool_call_id")
+            or message.get("toolCallId")
+            or message.get("id")
+            or metadata.get("toolCallId")
+            or metadata.get("tool_call_id")
+            or ""
+        ).strip()
     return str(getattr(message, "tool_call_id", "") or "").strip()
 
 
@@ -104,6 +121,38 @@ def _message_metadata(message: Any) -> dict[str, Any]:
         return dict(metadata) if isinstance(metadata, dict) else {}
     metadata = getattr(message, "response_metadata", None)
     return dict(metadata) if isinstance(metadata, dict) else {}
+
+
+def _is_semantic_tool_result(message: Any) -> bool:
+    if _message_role(message) != "assistant":
+        return False
+    content = _message_content(message).lstrip()
+    return content.startswith("历史工具结果:") or content.startswith("历史工具结果：")
+
+
+def _semantic_tool_name(content: str) -> str:
+    first_line = str(content or "").splitlines()[0].strip() if str(content or "").splitlines() else ""
+    for marker in ("历史工具结果:", "历史工具结果："):
+        if first_line.startswith(marker):
+            return first_line[len(marker):].strip().split()[0] if first_line[len(marker):].strip() else ""
+    return ""
+
+
+def _semantic_tool_result_payload(content: str) -> str:
+    lines = str(content or "").splitlines()
+    if not lines:
+        return ""
+    for index, line in enumerate(lines):
+        if line.strip() in {"结果:", "结果："}:
+            return "\n".join(lines[index + 1:]).strip()
+    return "\n".join(lines[1:]).strip()
+
+
+def _semantic_replacement_content(content: str, replacement_content: str) -> str:
+    lines = str(content or "").splitlines()
+    if not lines:
+        return replacement_content
+    return "\n".join([lines[0].strip(), replacement_content]).strip()
 
 
 def _with_replacement_content(message: Any, replacement_content: str, reference: str) -> Any:
