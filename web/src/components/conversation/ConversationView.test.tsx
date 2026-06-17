@@ -147,12 +147,18 @@ describe("ConversationView edit resend affordance", () => {
     const reactSummaryHoverRule = cssRule(".reActOperationSummary:hover");
     const reactResultRule = cssRule(".reActResultItem");
     const operationDetailsRule = cssRule(".operationDetails");
+    const operationItemRule = cssRule(".operationItem");
 
     expect(traceSummaryRule).toContain("border: 0");
     expect(reactSummaryRule).toContain("border: 0");
+    expect(reactSummaryRule).toContain("display: inline-grid");
+    expect(reactSummaryRule).toContain("width: fit-content");
+    expect(reactSummaryRule).not.toContain("minmax(0, 1fr)");
     expect(reactSummaryHoverRule).not.toContain("border-color");
     expect(reactResultRule).toContain("border: 0");
     expect(operationDetailsRule).toContain("border: 0");
+    expect(operationItemRule).toContain("width: fit-content");
+    expect(operationItemRule).not.toContain("minmax(0, 1fr)");
   });
 
   it("can render a read-only transcript without the composer", () => {
@@ -1523,7 +1529,7 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).not.toContain("legacy_tool");
   });
 
-  it("expands the active ReAct packet while keeping thoughts out of the default display", () => {
+  it("expands the active ReAct packet while showing model thinking content", () => {
     const html = renderConversation([
       {
         id: "message-feedback-active-react",
@@ -1572,12 +1578,41 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).not.toContain("第 1 轮");
     expect(html).not.toContain("第 2 轮");
     expect(html).toContain("行动");
+    expect(html).toContain("思考");
     expect(html).toContain("命令");
     expect(html).toContain("running rg");
     expect(html).toContain("读取");
     expect(html).not.toContain("命令 · running rg");
     expect(html).not.toContain("读取 · opened latest log");
-    expect(html).not.toContain("再查会话链路");
+    expect(html).toContain("再查会话链路");
+  });
+
+  it("renders active thought-only feedback as readable thinking content", () => {
+    const html = renderConversation([
+      {
+        id: "message-active-thought-only",
+        role: "assistant",
+        content: "",
+        timestamp: "2026-06-05T09:35:18Z",
+        streaming: true,
+        feedbackEvents: [
+          {
+            sequence: 1,
+            kind: "thought",
+            status: "running",
+            summary: "模型正在重新规划执行过程布局",
+            resultPreview: "模型正在重新规划执行过程布局。\n需要保留真实思考，但隐藏准备上下文和绑定 Agent。",
+          },
+        ],
+      },
+    ]);
+
+    expect(html).toContain("执行过程");
+    expect(html).toContain("思考");
+    expect(html).toContain("模型正在重新规划执行过程布局。");
+    expect(html).toContain("需要保留真实思考，但隐藏准备上下文和绑定 Agent。");
+    expect(html).not.toContain("准备上下文</span>");
+    expect(html).not.toContain("绑定 Agent</span>");
   });
 
   it("keeps runtime status content out of the assistant answer block", () => {
