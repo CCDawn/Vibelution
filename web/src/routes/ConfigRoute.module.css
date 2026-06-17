@@ -1960,9 +1960,11 @@
 }
 
 .themeBackgroundImageCard {
+  grid-column: 1 / -1;
   grid-template-columns: 1fr;
   align-content: start;
   min-height: 0;
+  padding: 9px;
 }
 
 .avatarImageValue {
@@ -1977,9 +1979,9 @@
 
 .themeBackgroundImageValue {
   display: grid;
-  grid-template-columns: minmax(112px, 150px) minmax(0, 1fr);
-  align-items: center;
-  gap: 8px;
+  grid-template-columns: 1fr;
+  align-items: start;
+  gap: 7px;
   min-width: 0;
   color: var(--fg-secondary);
   font-size: 0.84rem;
@@ -2009,8 +2011,8 @@
 .themeBackgroundImagePreview,
 .themeBackgroundImagePlaceholder {
   width: 100%;
-  aspect-ratio: 16 / 8;
-  min-height: 54px;
+  aspect-ratio: 16 / 9;
+  min-height: 104px;
   border: 1px solid var(--border-hairline);
   border-radius: 6px;
   background: var(--surface-card);
@@ -2054,12 +2056,15 @@
 
 .themeBackgroundImageEditor {
   display: grid;
-  gap: 7px;
+  grid-template-columns: minmax(260px, 0.34fr) minmax(420px, 1fr);
+  gap: 12px;
+  align-items: start;
 }
 
 .themeBackgroundImageMeta {
   display: grid;
-  gap: 5px;
+  align-content: space-between;
+  gap: 6px;
   min-width: 0;
 }
 
@@ -2079,18 +2084,19 @@
 }
 
 .themeBackgroundImageActions {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   align-items: center;
   gap: 6px;
-  flex-wrap: wrap;
 }
 
 .themeBackgroundPresetPanel {
   display: grid;
-  gap: 7px;
+  gap: 8px;
+  min-width: 0;
 }
 
-.themeBackgroundPresetPanel > span {
+.themeBackgroundPresetTitle {
   color: var(--fg-tertiary);
   font-size: 0.74rem;
   font-weight: 700;
@@ -2099,17 +2105,18 @@
 
 .themeBackgroundPresetGrid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
-  gap: 7px;
+  grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
+  gap: 8px;
 }
 
 .themeBackgroundPresetButton {
+  position: relative;
   display: grid;
-  grid-template-rows: minmax(44px, 0.72fr) auto;
-  gap: 5px;
+  grid-template-rows: minmax(68px, auto) auto;
+  gap: 6px;
   min-width: 0;
   min-height: 0;
-  padding: 5px;
+  padding: 6px;
   border: 1px solid var(--border-hairline);
   border-radius: 6px;
   background: color-mix(in srgb, var(--surface-card) 82%, transparent);
@@ -2130,12 +2137,14 @@
 
 .themeBackgroundPresetButton[data-active="true"] {
   border-color: color-mix(in srgb, var(--accent-warm) 62%, var(--border-strong));
+  background: color-mix(in srgb, var(--accent-warm) 12%, var(--surface-card));
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent-warm) 28%, transparent);
 }
 
 .themeBackgroundPresetButton img {
   width: 100%;
-  height: 44px;
+  aspect-ratio: 16 / 9;
+  height: auto;
   border-radius: 4px;
   object-fit: cover;
 }
@@ -2149,6 +2158,21 @@
   line-height: 1.2;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.themeBackgroundPresetButton > em {
+  position: absolute;
+  top: 9px;
+  right: 9px;
+  padding: 2px 6px;
+  border: 1px solid color-mix(in srgb, var(--accent-warm) 40%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface-panel-strong) 74%, transparent);
+  color: var(--fg-primary);
+  font-size: 0.66rem;
+  font-style: normal;
+  font-weight: 800;
+  line-height: 1.2;
 }
 
 .avatarImageActions {
@@ -2566,6 +2590,14 @@
 
   .themeBackgroundImageValue {
     grid-template-columns: 1fr;
+  }
+
+  .themeBackgroundImageEditor {
+    grid-template-columns: 1fr;
+  }
+
+  .themeBackgroundPresetGrid {
+    grid-template-columns: repeat(auto-fill, minmax(118px, 1fr));
   }
 
   .applyBar {

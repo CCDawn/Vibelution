@@ -1465,6 +1465,7 @@ type ConfigSectionEditorProps = {
   section: ConfigEditorSection;
   value: unknown;
   metaMap: Record<string, ConfigEditorMeta>;
+  lang: ConfigLanguage;
   copy: ConfigCopy;
   disabled: boolean;
   uiState: ConfigSectionUiState;
@@ -1538,6 +1539,7 @@ function ConfigSectionEditor({
   section,
   value,
   metaMap,
+  lang,
   copy,
   disabled,
   uiState,
@@ -1658,10 +1660,6 @@ function ConfigSectionEditor({
     }
   }
 
-  function isCompactConfigObjectPath(path: string): boolean {
-    return path === "ui.workbench_theme";
-  }
-
   async function uploadThemeBackgroundFile(file: File, absolutePath: string) {
     setUploadingImagePath(absolutePath);
     try {
@@ -1753,7 +1751,7 @@ function ConfigSectionEditor({
         </div>
         {presetOptions.length ? (
           <div className={styles.themeBackgroundPresetPanel} aria-label={copy.themeBackgroundPresetTitle}>
-            <span>{copy.themeBackgroundPresetTitle}</span>
+            <span className={styles.themeBackgroundPresetTitle}>{copy.themeBackgroundPresetTitle}</span>
             <div className={styles.themeBackgroundPresetGrid}>
               {presetOptions.map((option) => {
                 const optionPreviewUrl = themeBackgroundImagePreviewUrl(option.value);
@@ -1771,6 +1769,7 @@ function ConfigSectionEditor({
                   >
                     {optionPreviewUrl ? <img src={optionPreviewUrl} alt="" /> : <ImageIcon size={14} />}
                     <span>{option.label}</span>
+                    {active ? <em>{lang === "zh" ? "当前" : "Current"}</em> : null}
                   </button>
                 );
               })}
@@ -1785,9 +1784,13 @@ function ConfigSectionEditor({
     const meta = metaMap[absolutePath];
     const kind = configEditorFieldKind(meta);
     if (kind === "background_image") {
+      const hint = configHint(metaMap, absolutePath);
       return (
-        <article key={absolutePath} className={`${styles.treeFieldCard} ${styles.treeFieldCardView} ${styles.themeBackgroundImageCard}`}>
-          {configHint(metaMap, absolutePath) ? <p className={styles.treeHint}>{configHint(metaMap, absolutePath)}</p> : null}
+        <article
+          key={absolutePath}
+          className={`${styles.treeFieldCard} ${styles.treeFieldCardView} ${styles.themeBackgroundImageCard}`}
+          title={hint || undefined}
+        >
           {renderThemeBackgroundControl(fieldValue, absolutePath)}
         </article>
       );
@@ -2097,9 +2100,15 @@ function ConfigSectionEditor({
       );
     }
 
+    const hint = configHint(metaMap, absolutePath);
+    const fieldCardClassName =
+      kind === "background_image"
+        ? `${styles.treeFieldCard} ${styles.treeFieldCardEdit} ${styles.themeBackgroundImageCard}`
+        : `${styles.treeFieldCard} ${styles.treeFieldCardEdit}`;
+
     return (
-      <article key={absolutePath} className={`${styles.treeFieldCard} ${styles.treeFieldCardEdit}`}>
-        {configHint(metaMap, absolutePath) ? <p className={styles.treeHint}>{configHint(metaMap, absolutePath)}</p> : null}
+      <article key={absolutePath} className={fieldCardClassName} title={kind === "background_image" && hint ? hint : undefined}>
+        {kind !== "background_image" && hint ? <p className={styles.treeHint}>{hint}</p> : null}
         {control}
       </article>
     );
@@ -2145,9 +2154,8 @@ function ConfigSectionEditor({
           const childIsObject = isPlainObject(childValue);
           if (childIsObject || childIsObjectList) {
             const childExpanded = Boolean(expandedPaths[childPath]);
-            const childUsesWideLayout = childExpanded && !isCompactConfigObjectPath(childPath);
             return (
-              <div key={childPath} className={childUsesWideLayout ? styles.treeWide : styles.treeObjectCell}>
+              <div key={childPath} className={childExpanded ? styles.treeWide : styles.treeObjectCell}>
                 {renderNode(childValue, childPath, mode)}
               </div>
             );
@@ -4232,6 +4240,7 @@ export function ConfigRoute() {
             section={section}
             value={getConfigValueAtPath(draftConfig, section.path)}
             metaMap={editorMeta}
+            lang={currentLanguage}
             copy={copy}
             disabled={structuredActionsDisabled}
             uiState={sectionUiState[section.id] ?? defaultSectionUiState()}
