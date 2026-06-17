@@ -148,6 +148,8 @@ describe("ConversationView edit resend affordance", () => {
     const reactResultRule = cssRule(".reActResultItem");
     const operationDetailsRule = cssRule(".operationDetails");
     const operationItemRule = cssRule(".operationItem");
+    const reactGroupRule = cssRule(".reActOperationGroup");
+    const reactThoughtRule = cssRule(".reActThoughtText");
 
     expect(traceSummaryRule).toContain("border: 0");
     expect(reactSummaryRule).toContain("border: 0");
@@ -156,6 +158,10 @@ describe("ConversationView edit resend affordance", () => {
     expect(reactSummaryRule).not.toContain("minmax(0, 1fr)");
     expect(reactSummaryHoverRule).not.toContain("border-color");
     expect(reactResultRule).toContain("border: 0");
+    expect(reactResultRule).toContain("background: transparent");
+    expect(reactGroupRule).toContain("border-left: 0");
+    expect(reactThoughtRule).toContain("border-left: 0");
+    expect(reactThoughtRule).toContain("background: transparent");
     expect(operationDetailsRule).toContain("border: 0");
     expect(operationItemRule).toContain("width: fit-content");
     expect(operationItemRule).not.toContain("minmax(0, 1fr)");
@@ -476,7 +482,7 @@ describe("ConversationView edit resend affordance", () => {
 
     expect(html).toContain("执行失败");
     expect(html).toContain("命令");
-    expect(html).toContain("行动");
+    expect(html).toContain("工具调用");
     expect(html).toContain("结果");
     expect(html).not.toContain("4/5");
     expect(html).not.toContain("准备上下文");
@@ -1603,7 +1609,7 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).not.toContain("2 轮");
     expect(html).not.toContain("第 1 轮");
     expect(html).not.toContain("第 2 轮");
-    expect(html).toContain("行动");
+    expect(html).toContain("工具调用");
     expect(html).toContain("思考");
     expect(html).toContain("命令");
     expect(html).toContain("running rg");
@@ -1661,14 +1667,14 @@ describe("ConversationView edit resend affordance", () => {
       },
     ]);
 
-    expect(html).toContain("执行过程");
-    expect(html).toContain("模型思考");
-    expect(html).toContain("执行中");
-    expect(html).toContain("行动");
+    expect(html).toContain("正在请求");
+    expect(html).not.toContain("执行过程");
+    expect(html).not.toContain("模型思考");
+    expect(html).not.toContain("工具调用");
     expect(html).not.toContain("1 步");
     expect(html).not.toContain("0/1");
     expect(html).not.toContain("第 1 轮");
-    expect(html).toContain("reasoning 已开始返回");
+    expect(html).not.toContain("reasoning 已开始返回");
     expect(html).not.toContain('title="展开工具详情"');
     expect(html).not.toContain("正在思考，已收到思考片段");
     expect(html).not.toContain("回答</span>");
@@ -1760,7 +1766,7 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).toContain("正在请求");
     expect(html).toContain("命令");
     expect(html).toContain("1m 15s");
-    expect(html).toContain("行动");
+    expect(html).toContain("工具调用");
     expect(html).not.toContain("1/2");
     expect(html).not.toContain("第 1 轮");
     expect(html).not.toContain("当前位置");
@@ -1797,6 +1803,47 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).not.toContain("1/1");
     expect(html).not.toContain('title="展开工具详情"');
     expect(html).not.toContain("grep_search_tool raw result");
+  });
+
+  it("renders structured tool results as readable output instead of raw JSON", () => {
+    const html = renderConversation([
+      {
+        id: "message-feedback-structured-result",
+        role: "assistant",
+        content: "",
+        timestamp: "2026-06-05T09:35:18Z",
+        streaming: true,
+        feedbackEvents: [
+          {
+            sequence: 1,
+            kind: "thought",
+            status: "done",
+            summary: "需要看缓存统计",
+            resultPreview: "需要看缓存统计",
+          },
+          {
+            sequence: 2,
+            kind: "tool",
+            status: "running",
+            name: "grep_search_tool",
+            summary: "搜索缓存统计代码",
+            resultPreview: JSON.stringify({
+              summary: "找到 8 处缓存统计入口",
+              raw: { sequence: 2, timestamp: "2026-06-05T09:35:18Z" },
+            }),
+            relatedThoughtSequence: 1,
+          },
+        ],
+      },
+    ]);
+
+    expect(html).toContain("思考");
+    expect(html).toContain("工具调用");
+    expect(html).toContain("结果");
+    expect(html).toContain("找到 8 处缓存统计入口");
+    expect(html).not.toContain("&quot;summary&quot;");
+    expect(html).not.toContain("原始名称");
+    expect(html).not.toContain("事件索引");
   });
 
   it("renders expandable tool call details when the backend provides them", () => {

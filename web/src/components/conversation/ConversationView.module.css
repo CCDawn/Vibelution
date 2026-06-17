@@ -904,24 +904,24 @@
   gap: 4px;
   min-width: 0;
   max-width: 100%;
-  padding-left: 2px;
-  border-left: 2px solid color-mix(in srgb, var(--fg-tertiary) 14%, transparent);
+  padding-left: 0;
+  border-left: 0;
 }
 
 .reActOperationGroup_running {
-  border-left-color: color-mix(in srgb, var(--accent-cool-2) 64%, transparent);
+  color: var(--fg-primary);
 }
 
 .reActOperationGroup_failed {
-  border-left-color: color-mix(in srgb, var(--danger) 64%, transparent);
+  color: var(--danger);
 }
 
 .reActOperationGroup_done {
-  border-left-color: color-mix(in srgb, var(--state-success) 36%, transparent);
+  color: var(--fg-secondary);
 }
 
 .reActOperationGroup_pending {
-  border-left-color: color-mix(in srgb, var(--fg-tertiary) 30%, transparent);
+  color: var(--fg-tertiary);
 }
 
 .reActOperationSummary {
@@ -944,7 +944,7 @@
 }
 
 .reActOperationSummary:hover {
-  background: color-mix(in srgb, var(--surface-card) 36%, var(--accent-warm) 4%);
+  background: transparent;
   color: var(--fg-primary);
 }
 
@@ -972,10 +972,10 @@
 
 .reActOperationBody {
   display: grid;
-  gap: 8px;
+  gap: 7px;
   min-width: 0;
   max-width: 100%;
-  padding: 2px 0 4px 8px;
+  padding: 1px 0 4px 29px;
 }
 
 .reActOperationSection {
@@ -992,7 +992,8 @@
 }
 
 .reActThoughtStack,
-.reActResultList {
+.reActResultList,
+.reActToolList {
   display: grid;
   gap: 5px;
   min-width: 0;
@@ -1004,7 +1005,7 @@
   min-width: 0;
   max-width: 100%;
   margin: 0;
-  overflow: auto;
+  overflow: visible;
   color: var(--fg-secondary);
   font-family: inherit;
   font-size: 0.78rem;
@@ -1014,10 +1015,65 @@
 }
 
 .reActThoughtText {
-  max-height: 220px;
-  padding: 6px 8px;
-  border-left: 2px solid color-mix(in srgb, var(--accent-warm) 42%, transparent);
-  background: color-mix(in srgb, var(--accent-warm) 4%, transparent);
+  padding: 0;
+  border-left: 0;
+  background: transparent;
+}
+
+.reActToolItem {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.reActToolLine {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 5px 9px;
+  min-width: 0;
+  max-width: 100%;
+  color: var(--fg-secondary);
+  font-size: 0.78rem;
+  line-height: 1.55;
+}
+
+.reActToolName {
+  color: var(--fg-primary);
+  font-weight: 660;
+}
+
+.reActToolSummary {
+  min-width: min(100%, 220px);
+  max-width: min(100%, 720px);
+  color: var(--fg-secondary);
+  overflow-wrap: anywhere;
+}
+
+.reActToolStatus {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--fg-tertiary);
+  font-size: 0.72rem;
+  white-space: nowrap;
+}
+
+.reActToolDetailToggle {
+  display: inline-grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--fg-tertiary);
+  cursor: pointer;
+}
+
+.reActToolDetailToggle:hover {
+  color: var(--fg-primary);
 }
 
 .reActResultItem {
@@ -1025,14 +1081,14 @@
   gap: 4px;
   min-width: 0;
   max-width: 100%;
-  padding: 5px 8px;
+  padding: 0;
   border: 0;
   border-radius: 4px;
-  background: color-mix(in srgb, var(--surface-card) 30%, transparent);
+  background: transparent;
 }
 
 .reActResultItem_failed {
-  background: color-mix(in srgb, var(--danger) 7%, transparent);
+  color: var(--danger);
 }
 
 .reActResultLabel {
