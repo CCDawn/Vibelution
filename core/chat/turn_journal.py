@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import threading
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -73,6 +74,8 @@ TURN_INTERRUPTED_MARKER = (
 )
 
 _SAFE_SESSION_CHARS = re.compile(r"[^A-Za-z0-9_.-]+")
+_SEQUENCE_CACHE_LOCK = threading.Lock()
+_SEQUENCE_CACHE: dict[str, tuple[int, int, int]] = {}
 
 
 @dataclass(frozen=True)
@@ -177,29 +180,31 @@ def append_turn_event(
 ) -> TurnJournalEvent:
     path = turn_journal_path(project_root, session_id)
     path.parent.mkdir(parents=True, exist_ok=True)
-    sequence = _next_sequence(path)
-    event = TurnJournalEvent(
-        schema_version=SCHEMA_VERSION,
-        event_id=f"{_safe_event_token(turn_id or session_id)}-{sequence:06d}-{uuid4().hex[:8]}",
-        session_id=str(session_id or "").strip(),
-        turn_id=str(turn_id or "").strip(),
-        sequence=sequence,
-        event_type=str(event_type or "").strip(),
-        status=str(status or "").strip(),
-        timestamp=str(timestamp or "").strip() or _now_timestamp(),
-        source=str(source or "").strip(),
-        payload=dict(payload or {}),
-        parent_event_id=str(parent_event_id or "").strip(),
-        visible_in_model=bool(visible_in_model),
-        projection_kind=str(projection_kind or "").strip(),
-        provider_role=str(provider_role or "").strip(),
-        tool_call_id=str(tool_call_id or "").strip(),
-        correlation_id=str(correlation_id or "").strip(),
-        source_kind=str(source_kind or "").strip(),
-    )
-    with path.open("a", encoding="utf-8") as handle:
-        handle.write(json.dumps(event.to_dict(), ensure_ascii=False, separators=(",", ":")))
-        handle.write("\n")
+    with _SEQUENCE_CACHE_LOCK:
+        sequence = _next_sequence(path)
+        event = TurnJournalEvent(
+            schema_version=SCHEMA_VERSION,
+            event_id=f"{_safe_event_token(turn_id or session_id)}-{sequence:06d}-{uuid4().hex[:8]}",
+            session_id=str(session_id or "").strip(),
+            turn_id=str(turn_id or "").strip(),
+            sequence=sequence,
+            event_type=str(event_type or "").strip(),
+            status=str(status or "").strip(),
+            timestamp=str(timestamp or "").strip() or _now_timestamp(),
+            source=str(source or "").strip(),
+            payload=dict(payload or {}),
+            parent_event_id=str(parent_event_id or "").strip(),
+            visible_in_model=bool(visible_in_model),
+            projection_kind=str(projection_kind or "").strip(),
+            provider_role=str(provider_role or "").strip(),
+            tool_call_id=str(tool_call_id or "").strip(),
+            correlation_id=str(correlation_id or "").strip(),
+            source_kind=str(source_kind or "").strip(),
+        )
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(event.to_dict(), ensure_ascii=False, separators=(",", ":")))
+            handle.write("\n")
+        _remember_sequence(path, sequence)
     return event
 
 
@@ -209,17 +214,19 @@ def load_turn_events(project_root: Path, session_id: str) -> list[TurnJournalEve
         return []
     events: list[TurnJournalEvent] = []
     try:
-        for line in path.read_text(encoding="utf-8").splitlines():
-            raw = line.strip()
-            if not raw:
-                continue
-            try:
-                parsed = json.loads(raw)
-            except json.JSONDecodeError:
-                continue
-            event = TurnJournalEvent.from_dict(parsed)
-            if event is not None:
-                events.append(event)
+        with path.open(encoding="utf-8") as handle:
+            lines = handle
+            for line in lines:
+                raw = line.strip()
+                if not raw:
+                    continue
+                try:
+                    parsed = json.loads(raw)
+                except json.JSONDecodeError:
+                    continue
+                event = TurnJournalEvent.from_dict(parsed)
+                if event is not None:
+                    events.append(event)
     except OSError:
         return []
     events.sort(key=lambda item: (item.sequence, item.timestamp, item.event_id))
@@ -227,12 +234,13 @@ def load_turn_events(project_root: Path, session_id: str) -> list[TurnJournalEve
 
 
 def latest_open_turn_id(events: Iterable[TurnJournalEvent]) -> str:
+    event_list = list(events or [])
     terminal_turn_ids = {
         event.turn_id
-        for event in list(events or [])
+        for event in event_list
         if event.turn_id and event.event_type in TERMINAL_EVENTS
     }
-    for event in reversed(list(events or [])):
+    for event in reversed(event_list):
         if event.turn_id and event.event_type == EVENT_TURN_STARTED and event.turn_id not in terminal_turn_ids:
             return event.turn_id
     return ""
@@ -404,8 +412,6 @@ def model_visible_messages_from_events(events: Iterable[TurnJournalEvent]) -> li
                 }
             )
     return _dedupe_adjacent_messages(messages)
-
-
 def model_messages_from_events(events: Iterable[TurnJournalEvent]) -> list[dict[str, Any]]:
     """Replay journal events into canonical LLM-facing messages.
 
@@ -616,19 +622,98 @@ def _dedupe_adjacent_messages(messages: list[dict[str, Any]]) -> list[dict[str, 
 
 
 def _next_sequence(path: Path) -> int:
+    return _latest_sequence(path) + 1
+
+
+def latest_turn_sequence(project_root: Path, session_id: str) -> int:
+    path = turn_journal_path(project_root, session_id)
+    with _SEQUENCE_CACHE_LOCK:
+        return _latest_sequence(path)
+
+
+def _latest_sequence(path: Path) -> int:
     if not path.exists():
-        return 1
+        _SEQUENCE_CACHE.pop(_sequence_cache_key(path), None)
+        return 0
+    key = _sequence_cache_key(path)
+    mtime_ns, size = _sequence_file_signature(path)
+    cached = _SEQUENCE_CACHE.get(key)
+    if cached is not None and cached[1] == mtime_ns and cached[2] == size:
+        return cached[0]
+    last_sequence = _latest_sequence_from_tail(path)
+    if last_sequence <= 0:
+        last_sequence = _latest_sequence_from_scan(path)
+    _SEQUENCE_CACHE[key] = (last_sequence, mtime_ns, size)
+    return last_sequence
+
+
+def _latest_sequence_from_tail(path: Path) -> int:
+    chunk_size = 8192
+    buffer = b""
+    try:
+        with path.open("rb") as handle:
+            handle.seek(0, 2)
+            position = handle.tell()
+            while position > 0:
+                read_size = min(chunk_size, position)
+                position -= read_size
+                handle.seek(position)
+                buffer = handle.read(read_size) + buffer
+                lines = buffer.splitlines()
+                if not lines:
+                    continue
+                candidates = lines if position == 0 else lines[1:]
+                for raw_line in reversed(candidates):
+                    raw = raw_line.strip()
+                    if not raw:
+                        continue
+                    try:
+                        parsed = json.loads(raw.decode("utf-8"))
+                    except (UnicodeDecodeError, json.JSONDecodeError):
+                        continue
+                    sequence = _coerce_positive_int(parsed.get("sequence"), 0) if isinstance(parsed, dict) else 0
+                    if sequence > 0:
+                        return sequence
+    except OSError:
+        return 0
+    return 0
+
+
+def _latest_sequence_from_scan(path: Path) -> int:
     last_sequence = 0
     try:
-        for line in path.read_text(encoding="utf-8").splitlines():
-            try:
-                raw = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            last_sequence = max(last_sequence, _coerce_positive_int(raw.get("sequence"), 0))
+        with path.open(encoding="utf-8") as handle:
+            lines = handle
+            for line in lines:
+                try:
+                    raw = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(raw, dict):
+                    last_sequence = max(last_sequence, _coerce_positive_int(raw.get("sequence"), 0))
     except OSError:
-        return 1
-    return last_sequence + 1
+        return 0
+    return last_sequence
+
+
+def _remember_sequence(path: Path, sequence: int) -> None:
+    mtime_ns, size = _sequence_file_signature(path)
+    _SEQUENCE_CACHE[_sequence_cache_key(path)] = (max(0, int(sequence or 0)), mtime_ns, size)
+
+
+def _sequence_file_signature(path: Path) -> tuple[int, int]:
+    try:
+        stat = path.stat()
+    except OSError:
+        return (-1, -1)
+    return (int(stat.st_mtime_ns), int(stat.st_size))
+
+
+def _sequence_cache_key(path: Path) -> str:
+    try:
+        return str(path.resolve())
+    except OSError:
+        return str(path)
 
 
 def _safe_session_workspace_token(session_id: str) -> str:
@@ -701,6 +786,7 @@ __all__ = [
     "append_turn_event",
     "event_has_model_projection",
     "event_projection_category",
+    "latest_turn_sequence",
     "latest_open_turn_id",
     "load_turn_events",
     "model_visible_messages_from_events",
