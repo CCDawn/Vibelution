@@ -1977,6 +1977,31 @@
   overflow-wrap: anywhere;
 }
 
+.avatarImageMeta {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.avatarImageMeta strong {
+  overflow: hidden;
+  color: var(--fg-primary);
+  font-size: 0.82rem;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.avatarImageMeta span {
+  overflow: hidden;
+  color: var(--fg-tertiary);
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .themeBackgroundImageValue {
   display: grid;
   grid-template-columns: 1fr;
@@ -2006,6 +2031,45 @@
   display: grid;
   place-items: center;
   color: var(--fg-tertiary);
+}
+
+.avatarImageDropButton {
+  position: relative;
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 56px;
+  height: 56px;
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.avatarImageDropButton:hover .avatarImagePreview,
+.avatarImageDropButton:hover .avatarImagePlaceholder {
+  border-color: color-mix(in srgb, var(--accent-warm) 44%, var(--border-hairline));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-warm) 14%, transparent);
+}
+
+.avatarImageDropButton input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.avatarImageUploadCue {
+  position: absolute;
+  right: -1px;
+  bottom: -1px;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border: 1px solid var(--border-hairline);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface-panel-strong) 86%, transparent);
+  color: var(--fg-primary);
+  box-shadow: 0 6px 14px color-mix(in srgb, var(--shadow-strong) 24%, transparent);
 }
 
 .themeBackgroundImagePreview,
