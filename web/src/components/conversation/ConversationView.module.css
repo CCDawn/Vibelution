@@ -1631,7 +1631,7 @@
   max-width: min(100%, 76ch);
 }
 
-.responseSegment_answer .markdownBody:has(.markdownTableWrap) {
+.responseSegment_answer .markdownBodyWithTable {
   width: 100%;
   max-width: 100%;
 }
@@ -1885,6 +1885,11 @@
   overflow-wrap: anywhere;
 }
 
+.markdownBodyWithTable {
+  width: 100%;
+  max-width: 100%;
+}
+
 .markdownHeading {
   margin: 0;
   color: var(--fg-primary);
@@ -2038,6 +2043,8 @@
 }
 
 .markdownTableWrap {
+  width: 100%;
+  min-width: 0;
   max-width: 100%;
   overflow-x: auto;
   overscroll-behavior-x: contain;
@@ -2047,44 +2054,44 @@
 }
 
 .markdownTable {
-  width: max-content;
-  min-width: min(620px, 100%);
-  max-width: none;
+  width: 100%;
+  min-width: 100%;
+  max-width: 100%;
   border-collapse: collapse;
   color: var(--fg-primary);
   font-size: 0.86rem;
   font-variant-numeric: tabular-nums;
   line-height: 1.42;
-  table-layout: auto;
+  table-layout: fixed;
 }
 
 .markdownTable th,
 .markdownTable td {
-  max-width: min(44ch, 42vw);
   padding: 6px 8px;
   border-bottom: 1px solid color-mix(in srgb, var(--fg-tertiary) 10%, transparent);
   text-align: left;
   vertical-align: top;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .markdownTable th {
   color: var(--fg-secondary);
   font-weight: 720;
   background: color-mix(in srgb, var(--surface-panel-strong) 86%, transparent);
-  white-space: nowrap;
 }
 
 .markdownTable th:first-child,
 .markdownTable td:first-child {
-  width: 1%;
-  min-width: 10ch;
+  width: 22%;
   color: var(--fg-primary);
   font-weight: 680;
-  white-space: nowrap;
 }
 
 .markdownTable .inlineCode {
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .markdownTable tr:last-child td {

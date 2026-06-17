@@ -568,6 +568,32 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).not.toContain("[点击下载]");
   });
 
+  it("keeps wide markdown tables within the conversation content width", () => {
+    const html = renderConversation([
+      {
+        id: "assistant-wide-table",
+        role: "assistant",
+        content: [
+          "二、已启用的可选组件（本轮已激活）",
+          "",
+          "| 组件 | 来源 | 内容 |",
+          "|---|---|---|",
+          "| CODEBASE_MAP | `workspace/prompts/CODEBASE_MAP.md` + `core/prompt_manager/codebase_map_builder.py` | 项目代码骨架、测试覆盖、根据工作区自动生成 |",
+          "| RUNTIME_LOG_INDEX | `core/runtime_manager/scene_logging.py` 生成 | 最近运行和错误数据索引 |",
+        ].join("\n"),
+        timestamp: "2026-06-17T11:32:00Z",
+      },
+    ]);
+
+    expect(html).toContain("markdownBodyWithTable");
+    expect(html).toContain("markdownTableWrap");
+    expect(html).toContain("workspace/prompts/CODEBASE_MAP.md");
+    expect(conversationViewStylesSource).not.toContain(":has(.markdownTableWrap)");
+    expect(cssRule(".markdownBodyWithTable")).toContain("max-width: 100%");
+    expect(cssRule(".markdownTable")).toContain("table-layout: fixed");
+    expect(cssRule(".markdownTable .inlineCode")).toContain("white-space: normal");
+  });
+
   it("suppresses a duplicate generated-image markdown preview when an artifact already rendered it", () => {
     const html = renderConversation([
       {
