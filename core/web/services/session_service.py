@@ -106,6 +106,7 @@ from core.ui.chat_state import (
     CHAT_STATE_VERSION,
     DEFAULT_CHAT_CONVERSATION_ID,
     DEFAULT_CHAT_CONVERSATION_TITLE,
+    chat_state_transaction,
     chat_state_path,
     load_chat_state,
     normalize_chat_attachments,
@@ -137,7 +138,7 @@ from .runtime_scene_service import record_runtime_scene_conversation_event, reco
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
-_CHAT_STATE_LOCK = threading.Lock()
+_CHAT_STATE_LOCK = threading.RLock()
 _RUNNING_SESSIONS_LOCK = threading.Lock()
 _RUNNING_SESSION_IDS: set[str] = set()
 _SESSION_ACTIVE_TURN_IDS: dict[str, str] = {}
@@ -4913,29 +4914,30 @@ def _load_conversations(
     agent_by_id: dict[str, dict[str, Any]] | None = None,
     lightweight: bool = False,
 ) -> tuple[str, list[dict[str, Any]]]:
-    payload = load_chat_state(PROJECT_ROOT)
-    if repair:
-        payload = _repair_stale_running_conversations(payload)
-    active_id = str(payload.get("active_conversation_id") or DEFAULT_CHAT_CONVERSATION_ID).strip()
-    conversations: list[dict[str, Any]] = []
-    changed = False
-    agent_by_id = agent_by_id if agent_by_id is not None else _agent_lookup_for_conversations()
-    for raw in list(payload.get("conversations") or []):
-        if repair and isinstance(raw, dict):
-            changed = _ensure_conversation_workspace_metadata(raw) or changed
-            changed = _ensure_conversation_agent_metadata(raw, agent_by_id=agent_by_id) or changed
-        conversation = _normalize_conversation(
-            raw,
-            agent_by_id=agent_by_id,
-            ensure_workspace=repair,
-            lightweight=lightweight,
-        )
-        if conversation is not None:
-            conversations.append(conversation)
-    if repair and changed:
-        payload["updated_at"] = _now_timestamp()
-        save_chat_state(PROJECT_ROOT, payload)
-    return active_id or DEFAULT_CHAT_CONVERSATION_ID, conversations
+    with _CHAT_STATE_LOCK, chat_state_transaction(PROJECT_ROOT):
+        payload = load_chat_state(PROJECT_ROOT)
+        if repair:
+            payload = _repair_stale_running_conversations(payload)
+        active_id = str(payload.get("active_conversation_id") or DEFAULT_CHAT_CONVERSATION_ID).strip()
+        conversations: list[dict[str, Any]] = []
+        changed = False
+        agent_by_id = agent_by_id if agent_by_id is not None else _agent_lookup_for_conversations()
+        for raw in list(payload.get("conversations") or []):
+            if repair and isinstance(raw, dict):
+                changed = _ensure_conversation_workspace_metadata(raw) or changed
+                changed = _ensure_conversation_agent_metadata(raw, agent_by_id=agent_by_id) or changed
+            conversation = _normalize_conversation(
+                raw,
+                agent_by_id=agent_by_id,
+                ensure_workspace=repair,
+                lightweight=lightweight,
+            )
+            if conversation is not None:
+                conversations.append(conversation)
+        if repair and changed:
+            payload["updated_at"] = _now_timestamp()
+            save_chat_state(PROJECT_ROOT, payload)
+        return active_id or DEFAULT_CHAT_CONVERSATION_ID, conversations
 
 
 def _load_conversation_detail_target(

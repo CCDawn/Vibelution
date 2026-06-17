@@ -4,11 +4,18 @@
 from __future__ import annotations
 
 import json
+import os
+import shutil
+import tempfile
+import threading
+import time
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, BinaryIO
 
 from core.infrastructure import developer_sandbox
+from core.logging import debug as _debug_logger
 from core.orchestration.output_boundary import (
     sanitize_assistant_thought_text,
     sanitize_assistant_visible_text,
@@ -18,6 +25,8 @@ from core.orchestration.output_boundary import (
 CHAT_STATE_VERSION = 1
 DEFAULT_CHAT_CONVERSATION_ID = "default"
 DEFAULT_CHAT_CONVERSATION_TITLE = "默认对话"
+_CHAT_STATE_THREAD_LOCK = threading.RLock()
+_CHAT_STATE_LOCK_STATE = threading.local()
 
 
 def chat_state_path(project_root: Path) -> Path:
@@ -26,6 +35,84 @@ def chat_state_path(project_root: Path) -> Path:
 
 def formal_chat_state_path(project_root: Path) -> Path:
     return developer_sandbox.formal_workspace_path(project_root, "chat", "chat_state.json")
+
+
+def chat_state_lock_path(project_root: Path) -> Path:
+    return chat_state_path(project_root).with_name(".chat_state.lock")
+
+
+@contextmanager
+def chat_state_transaction(project_root: Path):
+    """Serialize chat-state load/mutate/save sequences across threads and processes."""
+
+    lock_path = chat_state_lock_path(project_root)
+    lock_key = _path_key(lock_path)
+    counts: dict[str, int] = getattr(_CHAT_STATE_LOCK_STATE, "counts", {})
+    if not hasattr(_CHAT_STATE_LOCK_STATE, "counts"):
+        _CHAT_STATE_LOCK_STATE.counts = counts
+    if counts.get(lock_key, 0) > 0:
+        counts[lock_key] += 1
+        try:
+            yield
+        finally:
+            counts[lock_key] -= 1
+            if counts[lock_key] <= 0:
+                counts.pop(lock_key, None)
+        return
+
+    _CHAT_STATE_THREAD_LOCK.acquire()
+    handle: BinaryIO | None = None
+    try:
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        handle = lock_path.open("a+b")
+        _ensure_lock_byte(handle)
+        _lock_file(handle)
+        counts[lock_key] = 1
+        yield
+    finally:
+        counts.pop(lock_key, None)
+        if handle is not None:
+            try:
+                _unlock_file(handle)
+            finally:
+                handle.close()
+        _CHAT_STATE_THREAD_LOCK.release()
+
+
+def _path_key(path: Path) -> str:
+    raw = str(path.resolve())
+    return raw.lower() if os.name == "nt" else raw
+
+
+def _ensure_lock_byte(handle: BinaryIO) -> None:
+    handle.seek(0, os.SEEK_END)
+    if handle.tell() == 0:
+        handle.write(b"\0")
+        handle.flush()
+    handle.seek(0)
+
+
+def _lock_file(handle: BinaryIO) -> None:
+    if os.name == "nt":
+        import msvcrt
+
+        msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
+        return
+    import fcntl
+
+    fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+
+
+def _unlock_file(handle: BinaryIO) -> None:
+    handle.seek(0)
+    if os.name == "nt":
+        import msvcrt
+
+        msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+        return
+    import fcntl
+
+    fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
 def normalize_chat_tool_calls(value: Any) -> list[str | dict[str, Any]]:
@@ -196,22 +283,76 @@ def normalize_chat_messages(items: Any) -> list[dict[str, Any]]:
 
 
 def load_chat_state(project_root: Path) -> dict[str, Any]:
-    path = chat_state_path(project_root)
-    if not path.exists() and path != formal_chat_state_path(project_root):
-        path = formal_chat_state_path(project_root)
-    if not path.exists():
-        return {}
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {}
-    return payload if isinstance(payload, dict) else {}
+    with chat_state_transaction(project_root):
+        path = chat_state_path(project_root)
+        if not path.exists() and path != formal_chat_state_path(project_root):
+            path = formal_chat_state_path(project_root)
+        if not path.exists():
+            return {}
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            _backup_corrupt_chat_state(path, exc)
+            return {}
+        return payload if isinstance(payload, dict) else {}
 
 
 def save_chat_state(project_root: Path, state: dict[str, Any]) -> None:
-    path = chat_state_path(project_root)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+    with chat_state_transaction(project_root):
+        path = chat_state_path(project_root)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        _atomic_write_text(path, json.dumps(state, ensure_ascii=False, indent=2))
+
+
+def _backup_corrupt_chat_state(path: Path, exc: Exception) -> None:
+    if not path.exists():
+        return
+    backup_path = path.with_name(f"{path.name}.corrupt.{int(time.time() * 1000)}.json")
+    try:
+        shutil.copy2(path, backup_path)
+        _debug_logger.warning(
+            f"[ChatState] chat_state load failed; corrupt file backed up to {backup_path}: {type(exc).__name__}: {exc}"
+        )
+    except OSError as backup_exc:
+        _debug_logger.warning(
+            f"[ChatState] chat_state load failed and corrupt backup failed for {path}: "
+            f"{type(exc).__name__}: {exc}; backup_error={type(backup_exc).__name__}: {backup_exc}"
+        )
+
+
+def _atomic_write_text(path: Path, payload: str) -> None:
+    tmp_path = ""
+    fd = -1
+    try:
+        fd, tmp_path = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=str(path.parent))
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            fd = -1
+            handle.write(payload)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp_path, path)
+        _fsync_parent_dir(path.parent)
+    finally:
+        if fd >= 0:
+            os.close(fd)
+        if tmp_path:
+            try:
+                Path(tmp_path).unlink(missing_ok=True)
+            except OSError:
+                pass
+
+
+def _fsync_parent_dir(path: Path) -> None:
+    if os.name == "nt":
+        return
+    try:
+        fd = os.open(str(path), os.O_RDONLY)
+    except OSError:
+        return
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
 
 
 def get_active_chat_conversation(state: dict[str, Any]) -> dict[str, Any]:
