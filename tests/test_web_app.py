@@ -1837,9 +1837,44 @@ def test_session_detail_exposes_pre_model_progress_stage(tmp_path, monkeypatch):
     assert response.status_code == 200
     payload = response.json()
     live_message = payload["messages"][-1]
+    assert live_message["id"] == "session-live-message-live-turn-progress"
     assert live_message["streaming"] is True
     assert live_message["streamStage"] == "context_prepare"
     assert live_message["content"] == CONTEXT_PREPARE_LIVE_MESSAGE
+    assert live_message["metadata"]["kind"] == "session_live_overlay"
+    assert live_message["metadata"]["turnId"] == "turn-progress"
+    assert live_message["metadata"]["ledgerSeq"] >= 0
+
+
+def test_session_detail_live_overlay_identity_matches_assistant_delta_turn_id(tmp_path, monkeypatch):
+    _seed_chat_state(tmp_path, task_status="reading")
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+
+    session_service._set_session_running("session-live", True, turn_id="turn-live-identity")
+    try:
+        session_service._set_session_live_output(
+            "session-live",
+            turn_id="turn-live-identity",
+            content="正在输出。",
+            thought="正在思考。",
+            feedback_events=[{"kind": "status", "name": "model_response"}],
+        )
+        response = client.get("/api/sessions/session-live")
+    finally:
+        session_service._clear_session_live_output("session-live", turn_id="turn-live-identity")
+        session_service._set_session_running("session-live", False, turn_id="turn-live-identity")
+
+    assert response.status_code == 200
+    live_message = response.json()["messages"][-1]
+    assert live_message["id"] == "session-live-message-live-turn-live-identity"
+    assert live_message["metadata"] == {
+        "kind": "session_live_overlay",
+        "turnId": "turn-live-identity",
+        "ledgerSeq": live_message["metadata"]["ledgerSeq"],
+    }
+    assert live_message["content"] == "正在输出。"
+    assert live_message["thought"] == "正在思考。"
+    assert live_message["feedbackEvents"][0]["name"] == "model_response"
 
 
 def test_session_detail_exposes_pre_model_progress_as_ordered_feedback_events(tmp_path, monkeypatch):

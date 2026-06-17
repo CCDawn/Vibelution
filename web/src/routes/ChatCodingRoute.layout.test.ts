@@ -863,12 +863,21 @@ describe("ChatCodingRoute layout contract", () => {
 
   it("applies lightweight assistant delta stream events without full detail sync", () => {
     expect(routeSource).toContain("function mergeAssistantDeltaIntoSessionDetail(");
+    expect(routeSource).toContain("function liveAssistantOverlayTurnId(turnId: string)");
     expect(routeSource).toContain("function liveAssistantMessageId(sessionId: string, turnId: string)");
+    expect(routeSource).toContain("function liveAssistantMessageTurnId(message: ConversationMessage)");
+    expect(routeSource).toContain("function isLiveAssistantMessageForTurn(message: ConversationMessage, turnId: string)");
+    expect(routeSource).toContain("function uniqueLiveAssistantMessagesByTurn(messages: ConversationMessage[])");
     expect(routeSource).toContain("function mergeSessionDetailWithLiveAssistantOverlay(");
     expect(routeSource).toContain("kind: \"session_live_overlay\"");
+    expect(routeSource).toContain("const settledAssistantTurnIds = new Set(");
+    expect(routeSource).toContain("const detailLiveTurnIds = new Set(");
     expect(routeSource).toContain("function isStaleLedgerUpdate(currentSeq: unknown, incomingSeq: unknown)");
     expect(routeSource).toContain("if (isStaleLedgerUpdate(detail.ledgerSeq, payload.ledgerSeq))");
     expect(routeSource).toContain("ledgerSeq: maxLedgerSeq(detail.ledgerSeq, payload.ledgerSeq)");
+    expect(routeSource).toContain("const liveTurnId = liveAssistantOverlayTurnId(payload.turnId)");
+    expect(routeSource).toContain("const firstLiveIndex = originalMessages.findIndex((message) => isLiveAssistantMessageForTurn(message, liveTurnId))");
+    expect(routeSource).toContain("isLiveAssistantMessageForTurn(message, liveTurnId)");
     expect(routeSource).toContain("const contentDelta = payload.contentDelta ?? (payload.replaceContent || !previous ? payload.content ?? \"\" : \"\")");
     expect(routeSource).toContain("const thoughtDelta = payload.thoughtDelta ?? (payload.replaceThought || !previous ? payload.thought ?? \"\" : \"\")");
     expect(routeSource).toContain("const nextContent = payload.replaceContent");
