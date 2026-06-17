@@ -823,6 +823,11 @@
   border-color: transparent;
 }
 
+.executionRequestSummary {
+  cursor: default;
+  color: color-mix(in srgb, var(--accent-cool-2) 84%, var(--fg-secondary));
+}
+
 .operationSummary:hover,
 .responseToggle:hover {
   color: var(--fg-primary);
