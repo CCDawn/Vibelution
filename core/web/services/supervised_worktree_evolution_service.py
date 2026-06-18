@@ -52,6 +52,7 @@ _RUN_STATE_LOCK = threading.Lock()
 _RUN_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="web-supervised-worktree")
 _RUN_SUBSCRIBERS_LOCK = threading.Lock()
 _RUN_SUBSCRIBERS: dict[str, set[queue.Queue[dict[str, Any]]]] = {}
+_RUN_CANCEL_EVENTS: dict[str, threading.Event] = {}
 _ACTIVE_RUN_ID: str | None = None
 _RUN_STREAM_QUEUE_SIZE = 12
 _RUN_STREAM_POLL_SECONDS = 2.0
@@ -87,6 +88,10 @@ class SupervisedWorktreeRunValidationError(ValueError):
 
 class SupervisedWorktreeRunNotFoundError(LookupError):
     """Raised when a supervised worktree run cannot be found."""
+
+
+class SupervisedWorktreeRunCancelled(RuntimeError):
+    """Raised internally when an active supervised worktree run is cancelled."""
 
 
 class SupervisedWorktreeRunActionError(RuntimeError):
@@ -221,7 +226,11 @@ def run_supervised_worktree_flow(
         "error": "",
         "errorType": "",
     }
-    return _execute_flow(snapshot, options, root=root, dependencies=dependencies or WorktreeRunDependencies())
+    run_id = str(snapshot.get("runId") or "")
+    try:
+        return _execute_flow(snapshot, options, root=root, dependencies=dependencies or WorktreeRunDependencies())
+    finally:
+        _clear_run_cancel_event(run_id)
 
 
 def get_supervised_worktree_run(run_id: str) -> dict[str, Any] | None:
@@ -279,6 +288,7 @@ def _force_cancel_supervised_worktree_run_for_shutdown(
     run_id = str(snapshot.get("runId") or "").strip()
     if not run_id:
         return None
+    _request_run_cancel(run_id)
     updated = _clone(snapshot)
     now = _now_iso()
     message = "工作台关闭前已终止监督工作树进化运行。"
@@ -309,6 +319,64 @@ def _force_cancel_supervised_worktree_run_for_shutdown(
         lifecycle=True,
     )
     return updated
+
+
+def _register_run_cancel_event(run_id: str) -> threading.Event:
+    normalized = str(run_id or "").strip()
+    with _RUN_STATE_LOCK:
+        event = _RUN_CANCEL_EVENTS.get(normalized)
+        if event is None:
+            event = threading.Event()
+            _RUN_CANCEL_EVENTS[normalized] = event
+        return event
+
+
+def _request_run_cancel(run_id: str) -> None:
+    _register_run_cancel_event(run_id).set()
+
+
+def _clear_run_cancel_event(run_id: str) -> None:
+    normalized = str(run_id or "").strip()
+    with _RUN_STATE_LOCK:
+        _RUN_CANCEL_EVENTS.pop(normalized, None)
+
+
+def _run_cancel_reason(run_id: str) -> str:
+    normalized = str(run_id or "").strip()
+    if not normalized:
+        return ""
+    with _RUN_STATE_LOCK:
+        event = _RUN_CANCEL_EVENTS.get(normalized)
+        event_set = bool(event and event.is_set())
+    if event_set:
+        return "工作台关闭前已请求终止监督工作树进化运行。"
+    snapshot = _work_run_store().load_snapshot(RUN_KIND, normalized)
+    if isinstance(snapshot, dict) and str(snapshot.get("status") or "").strip().lower() == "cancelled":
+        control = snapshot.get("runtimeManagerControl") if isinstance(snapshot.get("runtimeManagerControl"), dict) else {}
+        message = str(control.get("message") or snapshot.get("latestMessage") or "").strip()
+        return message or "监督工作树进化运行已取消。"
+    return ""
+
+
+def _cancel_checker_for_run(run_id: str) -> Callable[[], str]:
+    return lambda: _run_cancel_reason(run_id)
+
+
+def _raise_if_run_cancelled(snapshot: dict[str, Any]) -> None:
+    run_id = str(snapshot.get("runId") or "").strip()
+    reason = _run_cancel_reason(run_id)
+    if not reason:
+        return
+    persisted = _work_run_store().load_snapshot(RUN_KIND, run_id)
+    if isinstance(persisted, dict) and str(persisted.get("status") or "").strip().lower() == "cancelled":
+        snapshot.clear()
+        snapshot.update(_clone(persisted))
+    else:
+        cancelled = _force_cancel_supervised_worktree_run_for_shutdown(snapshot, reason=reason)
+        if cancelled:
+            snapshot.clear()
+            snapshot.update(_clone(cancelled))
+    raise SupervisedWorktreeRunCancelled(reason)
 
 
 def stream_supervised_worktree_run_events(run_id: str, initial_snapshot: dict[str, Any] | None = None):
@@ -429,9 +497,11 @@ def _run_supervised_worktree_thread(run_id: str, options: dict[str, Any]) -> Non
     snapshot = _work_run_store().load_snapshot(RUN_KIND, run_id)
     if not snapshot:
         return
+    _register_run_cancel_event(run_id)
     try:
         _execute_flow(snapshot, options, root=PROJECT_ROOT.resolve(), dependencies=WorktreeRunDependencies())
     finally:
+        _clear_run_cancel_event(run_id)
         with _RUN_STATE_LOCK:
             if _ACTIVE_RUN_ID == run_id:
                 _ACTIVE_RUN_ID = None
@@ -448,33 +518,54 @@ def _execute_flow(
     dependencies: WorktreeRunDependencies,
 ) -> dict[str, Any]:
     run_id = str(snapshot.get("runId") or "")
+    _register_run_cancel_event(run_id)
+    cancel_checker = _cancel_checker_for_run(run_id)
     try:
+        _raise_if_run_cancelled(snapshot)
         _transition(snapshot, "running", "baseline", "正在运行原始 agent 基线题集。")
         evaluator = dependencies.evaluation_runner or _evaluation_runner_for_mode(options["executionMode"])
         modifier = dependencies.candidate_modifier or _candidate_modifier_for_mode(options["executionMode"])
         worktree_factory = dependencies.worktree_factory or _default_worktree_factory
 
-        baseline = evaluator(root, str(options["bundleName"]), "baseline", {"runId": run_id, "options": options})
+        _raise_if_run_cancelled(snapshot)
+        baseline = evaluator(
+            root,
+            str(options["bundleName"]),
+            "baseline",
+            {"runId": run_id, "options": options, "cancelChecker": cancel_checker},
+        )
+        _raise_if_run_cancelled(snapshot)
         snapshot["baseline"] = baseline
         if _baseline_has_retryable_provider_failure(baseline):
             _finish_baseline_unavailable(snapshot, baseline)
             return _decorate_snapshot(snapshot)
+        _raise_if_run_cancelled(snapshot)
         _transition(snapshot, "running", "reflection", "基线题集完成，正在生成反思与自改目标。")
 
         reflection = _build_reflection(snapshot, baseline)
         snapshot["reflection"] = reflection
         _persist_snapshot(snapshot, active_run_id=run_id if _ACTIVE_RUN_ID == run_id else "")
 
+        _raise_if_run_cancelled(snapshot)
         _transition(snapshot, "running", "candidate_worktree", "正在创建候选隔离工作树。")
+        _raise_if_run_cancelled(snapshot)
         candidate_worktree = worktree_factory(root, run_id)
+        _raise_if_run_cancelled(snapshot)
         candidate_worktree["preserved"] = True
         snapshot["candidateWorktree"] = candidate_worktree
         _persist_snapshot(snapshot, active_run_id=run_id if _ACTIVE_RUN_ID == run_id else "")
         _ensure_bundle_available_in_candidate(root, candidate_path=Path(str(candidate_worktree.get("path") or "")), bundle_name=str(options["bundleName"]))
 
+        _raise_if_run_cancelled(snapshot)
         _transition(snapshot, "running", "candidate_modify", "候选 agent 正在反思并修改自身。")
         candidate_path = Path(str(candidate_worktree.get("path") or ""))
-        modification = modifier(candidate_path, str(reflection.get("selfModificationPrompt") or ""), {"runId": run_id})
+        _raise_if_run_cancelled(snapshot)
+        modification = modifier(
+            candidate_path,
+            str(reflection.get("selfModificationPrompt") or ""),
+            {"runId": run_id, "cancelChecker": cancel_checker},
+        )
+        _raise_if_run_cancelled(snapshot)
         snapshot["candidateModification"] = modification
         snapshot["candidateWorktree"]["changedFiles"] = _candidate_changed_files(
             candidate_path,
@@ -482,15 +573,29 @@ def _execute_flow(
         )
         _persist_snapshot(snapshot, active_run_id=run_id if _ACTIVE_RUN_ID == run_id else "")
 
+        _raise_if_run_cancelled(snapshot)
         _transition(snapshot, "running", "candidate_evaluation", "正在用同一题集复测候选 agent。")
-        candidate = evaluator(candidate_path, str(options["bundleName"]), "candidate", {"runId": run_id, "options": options})
+        _raise_if_run_cancelled(snapshot)
+        candidate = evaluator(
+            candidate_path,
+            str(options["bundleName"]),
+            "candidate",
+            {"runId": run_id, "options": options, "cancelChecker": cancel_checker},
+        )
+        _raise_if_run_cancelled(snapshot)
         snapshot["candidate"] = candidate
 
+        _raise_if_run_cancelled(snapshot)
         _transition(snapshot, "running", "decision", "正在比较基线与候选结果。")
         decision = _build_decision(snapshot, options)
         snapshot["decision"] = decision
         snapshot["mergeAnalysis"] = _build_merge_analysis(snapshot)
         _finish_by_decision(snapshot, decision, options)
+        return _decorate_snapshot(snapshot)
+    except SupervisedWorktreeRunCancelled:
+        persisted = _work_run_store().load_snapshot(RUN_KIND, run_id)
+        if isinstance(persisted, dict):
+            return _decorate_snapshot(persisted)
         return _decorate_snapshot(snapshot)
     except Exception as exc:
         snapshot["status"] = "failed"
@@ -717,8 +822,22 @@ def _real_evaluation_runner(project_root: Path, bundle_name: str, role: str, con
     bundle = load_supervised_bundle(bundle_name, project_root=project_root)
     cases = list(bundle.get("cases") or [])
     run_id = str(context.get("runId") or "")
+    cancel_checker = context.get("cancelChecker") if callable(context.get("cancelChecker")) else None
     results: list[dict[str, Any]] = []
     for case in cases:
+        cancel_reason = _call_cancel_checker(cancel_checker)
+        if cancel_reason:
+            return {
+                "role": role,
+                "status": "cancelled",
+                "score": 0.0,
+                "successes": 0,
+                "total": len(results),
+                "failures": 0,
+                "bundleName": bundle_name,
+                "summary": f"{role} evaluation cancelled: {cancel_reason}",
+                "cases": results,
+            }
         case_id = str(case.get("case_id") or "case").strip() or "case"
         prompt = str(case.get("baseline_prompt") or case.get("prompt") or "").strip()
         scenario = str(case.get("scenario") or "transaction").strip() or "transaction"
@@ -735,7 +854,21 @@ def _real_evaluation_runner(project_root: Path, bundle_name: str, role: str, con
             expect_restart=expect_restart,
             post_restart_observe_seconds=post_restart_observe_seconds,
             keep_worktree=False,
+            cancel_checker=cancel_checker,
         )
+        cancel_reason = _call_cancel_checker(cancel_checker)
+        if cancel_reason:
+            return {
+                "role": role,
+                "status": "cancelled",
+                "score": 0.0,
+                "successes": 0,
+                "total": len(results),
+                "failures": 0,
+                "bundleName": bundle_name,
+                "summary": f"{role} evaluation cancelled: {cancel_reason}",
+                "cases": results,
+            }
         results.append(_harness_result_payload(result, case_id=case_id, role=role))
         _record_worktree_scene_event(
             "evaluation",
@@ -797,18 +930,61 @@ def _real_candidate_modifier(worktree_path: Path, prompt: str, context: dict[str
     )
     started = _now_iso()
     timeout_seconds = 900
+    cancel_checker = context.get("cancelChecker") if callable(context.get("cancelChecker")) else None
+    proc: subprocess.Popen[str] | None = None
+    stdout = ""
+    stderr = ""
     try:
-        proc = subprocess.run(
+        proc = subprocess.Popen(
             command,
             cwd=str(worktree_path),
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
             encoding="utf-8",
             errors="replace",
-            timeout=timeout_seconds,
-            check=False,
             **_subprocess_no_window_kwargs(),
         )
+        deadline = time.monotonic() + max(float(timeout_seconds), 0.1)
+        while True:
+            cancel_reason = _call_cancel_checker(cancel_checker)
+            if cancel_reason:
+                _terminate_supervised_subprocess(proc)
+                stdout, stderr = _collect_supervised_process_output(proc)
+                return {
+                    "status": "cancelled",
+                    "startedAt": started,
+                    "endedAt": _now_iso(),
+                    "returnCode": proc.returncode,
+                    "command": command,
+                    "stdoutTail": stdout.splitlines()[-40:],
+                    "stderrTail": stderr.splitlines()[-40:],
+                    "summary": f"candidate self-edit cancelled: {cancel_reason}",
+                }
+
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                _terminate_supervised_subprocess(proc)
+                stdout, stderr = _collect_supervised_process_output(proc)
+                return {
+                    "status": "timeout",
+                    "startedAt": started,
+                    "endedAt": _now_iso(),
+                    "returnCode": proc.returncode,
+                    "command": command,
+                    "stdoutTail": stdout.splitlines()[-40:],
+                    "stderrTail": stderr.splitlines()[-40:],
+                    "summary": f"candidate self-edit timed out after {timeout_seconds}s",
+                }
+
+            try:
+                stdout, stderr = proc.communicate(timeout=min(0.5, remaining))
+                stdout = stdout or ""
+                stderr = stderr or ""
+                break
+            except subprocess.TimeoutExpired:
+                continue
+
         status = "success" if proc.returncode == 0 else "failed"
         return {
             "status": status,
@@ -816,21 +992,13 @@ def _real_candidate_modifier(worktree_path: Path, prompt: str, context: dict[str
             "endedAt": _now_iso(),
             "returnCode": proc.returncode,
             "command": command,
-            "stdoutTail": proc.stdout.splitlines()[-40:],
-            "stderrTail": proc.stderr.splitlines()[-40:],
+            "stdoutTail": stdout.splitlines()[-40:],
+            "stderrTail": stderr.splitlines()[-40:],
             "summary": "candidate self-edit agent finished" if status == "success" else "candidate self-edit agent failed",
         }
-    except subprocess.TimeoutExpired as exc:
-        return {
-            "status": "timeout",
-            "startedAt": started,
-            "endedAt": _now_iso(),
-            "returnCode": None,
-            "command": command,
-            "stdoutTail": str(exc.stdout or "").splitlines()[-40:],
-            "stderrTail": str(exc.stderr or "").splitlines()[-40:],
-            "summary": f"candidate self-edit timed out after {timeout_seconds}s",
-        }
+    finally:
+        if proc is not None and proc.poll() is None:
+            _terminate_supervised_subprocess(proc)
 
 
 def _default_worktree_factory(project_root: Path, run_id: str) -> dict[str, Any]:
@@ -1477,6 +1645,55 @@ def _git_status_files(repo_root: Path) -> list[dict[str, str]]:
 def _subprocess_no_window_kwargs() -> dict[str, int]:
     flags = int(getattr(subprocess, "CREATE_NO_WINDOW", 0))
     return {"creationflags": flags} if flags else {}
+
+
+def _call_cancel_checker(cancel_checker: Callable[[], Any] | None) -> str:
+    if not callable(cancel_checker):
+        return ""
+    try:
+        value = cancel_checker()
+    except Exception:
+        return ""
+    if isinstance(value, bool):
+        return "监督工作树进化运行已取消。" if value else ""
+    return str(value or "").strip()
+
+
+def _terminate_supervised_subprocess(process: subprocess.Popen[str]) -> None:
+    pid = int(getattr(process, "pid", 0) or 0)
+    if pid > 0:
+        try:
+            from core.runtime_manager.process_inventory import terminate_process_descendants
+
+            terminate_process_descendants(pid, timeout_seconds=1.0)
+        except Exception:
+            pass
+    if process.poll() is None:
+        try:
+            process.terminate()
+        except OSError:
+            pass
+    try:
+        process.wait(timeout=1.0)
+    except subprocess.TimeoutExpired:
+        if process.poll() is None:
+            try:
+                process.kill()
+            except OSError:
+                pass
+
+
+def _collect_supervised_process_output(process: subprocess.Popen[str]) -> tuple[str, str]:
+    try:
+        stdout, stderr = process.communicate(timeout=2.0)
+        return stdout or "", stderr or ""
+    except subprocess.TimeoutExpired:
+        _terminate_supervised_subprocess(process)
+        try:
+            stdout, stderr = process.communicate(timeout=1.0)
+            return stdout or "", stderr or ""
+        except Exception:
+            return "", ""
 
 
 def _change_type(status: str) -> str:
