@@ -371,9 +371,9 @@ def _tool_result_content(name: str, entry: dict[str, Any]) -> str:
         entry.get("resultSegments"),
         entry.get("stdoutPreview"),
         entry.get("stderrPreview"),
-        entry.get("summary"),
         entry.get("resultPreview"),
         entry.get("result_preview"),
+        entry.get("summary"),
     )
     if result in (None, ""):
         return ""
@@ -384,7 +384,19 @@ def _tool_result_content(name: str, entry: dict[str, Any]) -> str:
     status = str(entry.get("status") or "").strip()
     lines = [f"历史工具调用: {name}"]
     if status:
-        lines.append(f"状态: {status}")
+        lines.append(f"status: {status}")
+    for key in (
+        "transportStatus",
+        "semanticStatus",
+        "exitCode",
+        "timedOut",
+        "failureClass",
+        "resultKind",
+        "truncated",
+        "originalLength",
+    ):
+        if key in entry and entry.get(key) not in (None, ""):
+            lines.append(f"{key}: {entry.get(key)}")
     lines.extend(["结果:", result_text])
     return "\n".join(lines)
 
@@ -396,14 +408,26 @@ def _history_tool_summary(name: str, entry: dict[str, Any]) -> str:
         entry.get("resultSegments"),
         entry.get("stdoutPreview"),
         entry.get("stderrPreview"),
-        entry.get("summary"),
         entry.get("resultPreview"),
         entry.get("result_preview"),
+        entry.get("summary"),
     )
     status = str(entry.get("status") or "").strip()
     lines = [f"历史工具结果: {name}" if result not in (None, "") else f"历史工具调用未返回结果: {name}"]
     if status:
-        lines.append(f"状态: {status}")
+        lines.append(f"status: {status}")
+    for key in (
+        "transportStatus",
+        "semanticStatus",
+        "exitCode",
+        "timedOut",
+        "failureClass",
+        "resultKind",
+        "truncated",
+        "originalLength",
+    ):
+        if key in entry and entry.get(key) not in (None, ""):
+            lines.append(f"{key}: {entry.get(key)}")
     if result not in (None, ""):
         if isinstance(result, (list, dict)):
             result_text = json.dumps(result, ensure_ascii=False, sort_keys=True)

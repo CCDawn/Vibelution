@@ -1744,6 +1744,22 @@ export type ToolPermissionPolicy = {
   reason: string;
 };
 
+export type ToolResultFacts = {
+  toolName?: string;
+  transportStatus: string;
+  semanticStatus: string;
+  exitCode?: number | null;
+  timedOut: boolean;
+  failureClass?: string;
+  resultKind?: string;
+  truncated?: boolean;
+  originalLength?: number;
+  strategy?: string;
+  rangeInfo?: string;
+  continuationHint?: string;
+  action?: string;
+};
+
 export type ToolAgentCompatibility = {
   status: string;
   callable: boolean;
@@ -1756,6 +1772,7 @@ export type ToolAgentCompatibility = {
   argsParsed: Record<string, unknown>;
   messageType: string;
   resultPreview: string;
+  resultFacts?: ToolResultFacts;
 };
 
 export type ToolTestTimeout = {
@@ -1859,6 +1876,7 @@ export type ToolTestResponse = {
   callable: boolean;
   message: string;
   resultPreview: string;
+  resultFacts?: ToolResultFacts;
   argsUsed: Record<string, unknown>;
   testPolicy: ToolTestPolicy;
   agentCompatibility: ToolAgentCompatibility;
@@ -4323,6 +4341,14 @@ export type ToolCall = {
   durationMs?: number;
   durationSeconds?: number;
   timeoutSeconds?: number;
+  transportStatus?: string;
+  semanticStatus?: string;
+  exitCode?: number | null;
+  timedOut?: boolean;
+  failureClass?: string;
+  resultKind?: string;
+  truncated?: boolean;
+  originalLength?: number;
   tracePath?: string;
 };
 
@@ -4341,6 +4367,14 @@ export type ConversationFeedbackEvent = {
   durationMs?: number;
   durationSeconds?: number;
   timeoutSeconds?: number;
+  transportStatus?: string;
+  semanticStatus?: string;
+  exitCode?: number | null;
+  timedOut?: boolean;
+  failureClass?: string;
+  resultKind?: string;
+  truncated?: boolean;
+  originalLength?: number;
   tracePath?: string;
   relatedThoughtSequence?: number;
 };

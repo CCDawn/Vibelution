@@ -17,6 +17,8 @@ from core.infrastructure.tool_result import (
     extract_tool_result_semantics,
     truncate_result,
     package_tool_result,
+    package_tool_result_facts,
+    render_tool_result_for_model,
     format_tool_message,
     infer_tool_business_success,
     DEFAULT_MAX_CHARS,
@@ -163,7 +165,10 @@ class TestFormatToolMessage:
         result_str, _ = format_tool_message(
             {"id": "call_1"}, long_result
         )
-        assert len(result_str) <= DEFAULT_MAX_CHARS + 100  # 截断标记约 +50
+        assert len(result_str) <= DEFAULT_MAX_CHARS + 700
+        assert "[Tool Result Facts]" in result_str
+        assert "truncated: true" in result_str
+        assert "[...结果已截断" in result_str
 
     def test_action_param_accepted(self):
         """action 参数被接受（当前未使用）"""
@@ -172,6 +177,20 @@ class TestFormatToolMessage:
         )
         assert result_str is not None
         assert call_id is not None
+
+    def test_model_render_includes_facts_without_summarizing_failure(self):
+        facts = package_tool_result_facts(
+            {"status": "success", "exitCode": 255, "message": "process failed"},
+            tool_name="demo_tool",
+        )
+
+        rendered = render_tool_result_for_model(facts)
+
+        assert "toolName: demo_tool" in rendered
+        assert "semanticStatus: failed" in rendered
+        assert "exitCode: 255" in rendered
+        assert "failureClass: process_exit" in rendered
+        assert "summary:" not in rendered.lower()
 
 
 class TestInferToolBusinessSuccess:
