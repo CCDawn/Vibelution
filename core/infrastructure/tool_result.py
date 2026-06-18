@@ -102,6 +102,9 @@ def extract_tool_result_semantics(result: Any) -> dict[str, Any]:
                     )
                     pass
                 break
+        if semantics["exitCode"] not in (None, 0):
+            semantics["semanticStatus"] = "failed"
+            semantics["failureClass"] = semantics["failureClass"] or "process_exit"
         if bool(payload.get("timedOut") or payload.get("timed_out")) or status in {"timeout", "timed_out"}:
             semantics["timedOut"] = True
             semantics["failureClass"] = semantics["failureClass"] or "timeout"
@@ -110,15 +113,19 @@ def extract_tool_result_semantics(result: Any) -> dict[str, Any]:
                 semantics["semanticStatus"] = "failed"
             semantics["failureClass"] = semantics["failureClass"] or status or "business_failure"
 
-    exec_failure_match = re.search(r"\[EXEC FAILURE\s*\|\s*Exit Code:\s*(-?\d+)\]", text, flags=re.IGNORECASE)
-    if exec_failure_match:
+    nonzero_exit_match = re.search(
+        r"\[(?:EXEC FAILURE|WARNING)\s*\|\s*Exit Code:\s*(-?\d+)\]",
+        text,
+        flags=re.IGNORECASE,
+    )
+    if nonzero_exit_match:
         semantics["semanticStatus"] = "failed"
         semantics["failureClass"] = "process_exit"
         try:
-            semantics["exitCode"] = int(exec_failure_match.group(1))
+            semantics["exitCode"] = int(nonzero_exit_match.group(1))
         except (TypeError, ValueError) as exc:
             _debug_logger.warning(
-                f"[工具结果] EXEC FAILURE exitCode 解析失败({exec_failure_match.group(0)}): {type(exc).__name__}: {exc}",
+                f"[工具结果] exitCode 解析失败({nonzero_exit_match.group(0)}): {type(exc).__name__}: {exc}",
                 tag="TOOL_RESULT",
             )
             pass
@@ -152,6 +159,16 @@ def _looks_like_business_failure(payload: Any) -> bool:
     success_value = payload.get("success")
     if success_value is False:
         return True
+
+    for key in ("exitCode", "exit_code", "returncode", "return_code"):
+        if key not in payload:
+            continue
+        try:
+            if int(payload.get(key)) != 0:
+                return True
+        except (TypeError, ValueError):
+            return True
+        break
 
     status_value = payload.get("status")
     if isinstance(status_value, str):
@@ -191,7 +208,7 @@ def infer_tool_business_success(result: Any) -> bool:
         stripped = _normalize_text_payload(result)
         if stripped.lower() in BUSINESS_FAILURE_STATUSES:
             return False
-        if stripped.startswith(("[错误]", "[超时]", "[短路]", "[EXEC FAILURE", "[执行失败")):
+        if stripped.startswith(("[错误]", "[超时]", "[短路]", "[EXEC FAILURE", "[WARNING | Exit Code", "[执行失败")):
             return False
         if stripped.startswith("{"):
             try:
