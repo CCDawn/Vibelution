@@ -2125,6 +2125,16 @@ button.timelineCellHeader:hover,
   max-width: 100%;
 }
 
+.streamingResponseText {
+  display: block;
+}
+
+.streamingResponseParagraph {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .markdownHeading {
   margin: 0;
   color: var(--fg-primary);
