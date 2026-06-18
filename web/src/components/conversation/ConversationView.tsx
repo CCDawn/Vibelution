@@ -1236,10 +1236,10 @@ export function ConversationView({
   }
 
   function shouldShowTimelineOperation(operation: ConversationOperation) {
-    if (!isInternalPipelineOperation(operation)) {
-      return true;
+    if (operation.kind === "status") {
+      return Boolean(operation.error?.trim());
     }
-    return Boolean(operation.error?.trim());
+    return !isInternalPipelineOperation(operation) || Boolean(operation.error?.trim());
   }
 
   function reActGroupDurationLabel(group: ConversationReActOperationGroup) {
@@ -1253,7 +1253,7 @@ export function ConversationView({
   }
 
   function reActActionOperations(group: ConversationReActOperationGroup) {
-    return group.operations.filter((operation) => !["thought", "mental"].includes(operation.kind));
+    return group.operations.filter((operation) => operation.kind === "tool");
   }
 
   function reActThoughtItems(group: ConversationReActOperationGroup) {
@@ -1275,7 +1275,8 @@ export function ConversationView({
   }
 
   function reActResultItems(group: ConversationReActOperationGroup) {
-    return reActActionOperations(group)
+    return group.operations
+      .filter((operation) => operation.kind === "tool" || (operation.kind === "status" && Boolean(operation.error?.trim())))
       .map((operation) => {
         if (operation.error?.trim()) {
           return {
@@ -1285,7 +1286,7 @@ export function ConversationView({
             tone: "failed",
           };
         }
-        const result = String(operation.resultPreview ?? "").trim();
+        const result = readableOperationResult(operation);
         if (!result || result === operation.summary.trim() || operation.kind === "status") {
           return null;
         }
@@ -1297,6 +1298,65 @@ export function ConversationView({
         };
       })
       .filter((item): item is { id: string; label: string; value: string; tone: string } => item !== null);
+  }
+
+  function readableOperationResult(operation: ConversationOperation) {
+    const result = String(operation.resultPreview ?? "").trim();
+    if (!result) {
+      return "";
+    }
+    if (!/^[{[]/.test(result)) {
+      return result;
+    }
+    try {
+      const parsed = JSON.parse(result) as unknown;
+      const summary = structuredResultSummary(parsed);
+      if (summary) {
+        return summary;
+      }
+      return lang === "zh" ? "返回结构化结果，可展开详情查看。" : "Structured result returned; expand details to inspect.";
+    } catch {
+      return result;
+    }
+  }
+
+  function structuredResultSummary(value: unknown): string {
+    if (typeof value === "string") {
+      return value.trim();
+    }
+    if (typeof value === "number" || typeof value === "boolean") {
+      return String(value);
+    }
+    if (Array.isArray(value)) {
+      const primitiveItems = value
+        .map((item) => structuredResultSummary(item))
+        .filter(Boolean);
+      return primitiveItems.slice(0, 3).join("\n");
+    }
+    if (!value || typeof value !== "object") {
+      return "";
+    }
+    const record = value as Record<string, unknown>;
+    const summaryKeys = [
+      "summary",
+      "message",
+      "resultPreview",
+      "stdoutPreview",
+      "stderrPreview",
+      "output",
+      "text",
+      "content",
+      "title",
+      "error",
+      "status",
+    ];
+    for (const key of summaryKeys) {
+      const summary = structuredResultSummary(record[key]);
+      if (summary) {
+        return summary;
+      }
+    }
+    return "";
   }
 
   function shouldExpandReActGroupByDefault(group: ConversationReActOperationGroup) {
@@ -1597,8 +1657,55 @@ export function ConversationView({
     }
     return (
       <section className={styles.reActOperationSection}>
-        <span className={styles.reActOperationSectionLabel}>{lang === "zh" ? "行动" : "Actions"}</span>
-        {renderOperationTimeline(actions)}
+        <span className={styles.reActOperationSectionLabel}>{lang === "zh" ? "工具调用" : "Tool calls"}</span>
+        <div className={styles.reActToolList}>
+          {actions.map((operation) => {
+            const duration = formatDuration(operation.durationSeconds);
+            const detailsId = `operation-detail-${operation.id}`;
+            const detailsExpanded = getExpansionState(operation.id, "details", false);
+            const detailRows = operationDetailRows(operation);
+            const canExpandDetails = detailRows.length > 0;
+            const computerUseResult = renderComputerUseResult(operation);
+            return (
+              <div key={operation.id} className={styles.reActToolItem}>
+                <div className={styles.reActToolLine}>
+                  <span className={styles.reActToolName}>{operationLabel(operation)}</span>
+                  {operation.summary ? (
+                    <span className={styles.reActToolSummary}>{operation.summary}</span>
+                  ) : null}
+                  <span className={styles.reActToolStatus}>
+                    {operationStatusIcon(operation)}
+                    <span>{statusLabel(operation.status)}</span>
+                    {duration ? <span>{duration}</span> : null}
+                  </span>
+                  {canExpandDetails ? (
+                    <button
+                      type="button"
+                      className={styles.reActToolDetailToggle}
+                      aria-expanded={detailsExpanded}
+                      aria-controls={detailsId}
+                      onClick={() => toggleSection(operation.id, "details", false)}
+                      title={detailsExpanded ? t("toolCallDetailsVisible") : t("toolCallDetailsHidden")}
+                    >
+                      {detailsExpanded ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
+                    </button>
+                  ) : null}
+                </div>
+                {canExpandDetails && detailsExpanded ? (
+                  <div id={detailsId} className={styles.operationDetails}>
+                    {detailRows.map((row) => (
+                      <div key={`${operation.id}-${row.label}`} className={styles.operationDetailRow}>
+                        <span className={styles.operationDetailLabel}>{row.label}</span>
+                        <pre className={styles.operationDetailValue}>{row.value}</pre>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+                {computerUseResult}
+              </div>
+            );
+          })}
+        </div>
       </section>
     );
   }
