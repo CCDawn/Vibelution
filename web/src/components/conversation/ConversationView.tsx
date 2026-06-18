@@ -41,6 +41,10 @@ import {
   type ConversationReActOperationGroup,
 } from "./conversationOperations";
 import {
+  buildConversationTimelineItems,
+  type ConversationTimelineItem,
+} from "./conversationTimeline";
+import {
   hasResponseBlock,
   hasThoughtBlock,
   hasMentalBlock,
@@ -1305,6 +1309,9 @@ export function ConversationView({
     if (!result) {
       return "";
     }
+    if (shouldKeepResultInDetailsOnly(operation, result)) {
+      return "";
+    }
     if (!/^[{[]/.test(result)) {
       return result;
     }
@@ -1318,6 +1325,25 @@ export function ConversationView({
     } catch {
       return result;
     }
+  }
+
+  function shouldKeepResultInDetailsOnly(operation: ConversationOperation, result: string) {
+    if (operation.kind !== "tool" || operation.status !== "done") {
+      return false;
+    }
+    const rawName = String(operation.rawLabel ?? operation.label ?? "").trim().toLowerCase();
+    const commandLikeTool = [
+      "cli_tool",
+      "grep_search_tool",
+      "read_file_tool",
+      "glob_tool",
+    ].some((name) => rawName === name || rawName.includes(name));
+    if (!commandLikeTool) {
+      return false;
+    }
+    const meaningfulLines = result.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+    const codeOrTerminalLike = /(^|\n)\s*(def |class |from |import |return |if |for |while |try:|except |const |let |function |\{|\}|\[STD(?:OUT|ERR)\])/.test(result);
+    return result.length > 360 || meaningfulLines.length > 3 || codeOrTerminalLike;
   }
 
   function structuredResultSummary(value: unknown): string {
@@ -1379,47 +1405,51 @@ export function ConversationView({
   function operationDetailRows(operation: ConversationOperation) {
     const rows: Array<{ label: string; value: string }> = [];
     const args = operation.arguments ?? {};
-    if (operation.rawLabel && operation.rawLabel !== operation.label) {
-      rows.push({ label: lang === "zh" ? "原始名称" : "Raw name", value: operation.rawLabel });
-    }
     if (operation.kind === "status" && operation.resultPreview) {
       rows.push({ label: lang === "zh" ? "完整状态" : "Full status", value: operation.resultPreview });
     }
-    if (operation.rawStatus && operation.rawStatus !== operation.status) {
-      rows.push({ label: lang === "zh" ? "原始状态" : "Raw status", value: operation.rawStatus });
-    }
-    if (operation.sequence !== undefined || operation.timestamp || operation.relatedThoughtSequence !== undefined) {
-      rows.push({
-        label: lang === "zh" ? "事件索引" : "Event index",
-        value: [
-          operation.sequence !== undefined ? `sequence: ${operation.sequence}` : "",
-          operation.timestamp ? `timestamp: ${operation.timestamp}` : "",
-          operation.relatedThoughtSequence !== undefined ? `relatedThoughtSequence: ${operation.relatedThoughtSequence}` : "",
-        ].filter(Boolean).join("\n"),
-      });
-    }
     if (Object.keys(args).length > 0) {
-      rows.push({ label: t("toolCallArguments"), value: JSON.stringify(args, null, 2) });
+      rows.push({ label: t("toolCallArguments"), value: naturalRecordText(args) });
     }
     if (operation.resultPreview && operation.kind !== "status") {
+      const readableResult = readableOperationResult(operation);
       rows.push({
         label: operation.kind === "thought" ? t("thoughtProcess") : t("toolCallResult"),
-        value: operation.resultPreview,
+        value: readableResult || operation.resultPreview,
       });
     }
     if (operation.error) {
       rows.push({ label: t("toolCallError"), value: operation.error });
     }
-    const meta = [
-      operation.resultType ? `${t("toolCallResultType")}: ${operation.resultType}` : "",
-      operation.resultLength !== undefined ? `${t("toolCallResultLength")}: ${operation.resultLength}` : "",
-      operation.timeoutSeconds !== undefined ? `${t("toolCallTimeout")}: ${formatDuration(operation.timeoutSeconds)}` : "",
-      operation.tracePath ? `${t("toolCallTrace")}: ${operation.tracePath}` : "",
-    ].filter(Boolean);
-    if (meta.length > 0) {
-      rows.push({ label: t("toolCallMetadata"), value: meta.join("\n") });
-    }
     return rows;
+  }
+
+  function naturalRecordText(value: unknown): string {
+    if (typeof value === "string") {
+      return value;
+    }
+    if (typeof value === "number" || typeof value === "boolean") {
+      return String(value);
+    }
+    if (Array.isArray(value)) {
+      return value
+        .map((item, index) => {
+          const text = naturalRecordText(item);
+          return text ? `${index + 1}. ${text}` : "";
+        })
+        .filter(Boolean)
+        .join("\n");
+    }
+    if (!value || typeof value !== "object") {
+      return "";
+    }
+    return Object.entries(value as Record<string, unknown>)
+      .map(([key, item]) => {
+        const text = naturalRecordText(item);
+        return text ? `${key}: ${text}` : "";
+      })
+      .filter(Boolean)
+      .join("\n");
   }
 
   function computerUseResultForOperation(operation: ConversationOperation): ComputerUseResult | null {
@@ -1650,6 +1680,172 @@ export function ConversationView({
     );
   }
 
+  function renderConversationTimeline(message: ConversationMessage, items: ConversationTimelineItem[]) {
+    if (items.length === 0) {
+      return null;
+    }
+    return (
+      <div className={styles.conversationCellTimeline}>
+        {items.map((item) => renderConversationTimelineItem(message, item))}
+      </div>
+    );
+  }
+
+  function renderConversationTimelineItem(message: ConversationMessage, item: ConversationTimelineItem) {
+    if (item.kind === "thought") {
+      return renderThoughtTimelineItem(message, item);
+    }
+    if (item.kind === "assistant_text") {
+      return renderAssistantTextTimelineItem(message, item);
+    }
+    if (item.kind === "command_group") {
+      return renderCommandGroupTimelineItem(item);
+    }
+    return renderOperationTimelineItem(item);
+  }
+
+  function renderThoughtTimelineItem(message: ConversationMessage, item: Extract<ConversationTimelineItem, { kind: "thought" }>) {
+    const expanded = getExpansionState(message.id, item.id, item.defaultExpanded);
+    return (
+      <section key={item.id} className={styles.timelineThoughtCell}>
+        <button
+          type="button"
+          className={styles.timelineCellHeader}
+          aria-expanded={expanded}
+          onClick={() => toggleSection(message.id, item.id, item.defaultExpanded)}
+          title={expanded ? t("thoughtProcessVisible") : t("thoughtProcessHidden")}
+        >
+          {item.status === "running" ? <LoaderCircle className={styles.statusSpinner} size={14} /> : <BrainCircuit size={14} />}
+          <span>{lang === "zh" ? "思考" : "Thinking"}</span>
+          {!expanded && item.preview ? <span className={styles.timelineCellPreview}>{item.preview}</span> : null}
+          {expanded ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
+        </button>
+        {expanded ? <pre className={styles.timelineThoughtText}>{item.text}</pre> : null}
+      </section>
+    );
+  }
+
+  function renderAssistantTextTimelineItem(
+    message: ConversationMessage,
+    item: Extract<ConversationTimelineItem, { kind: "assistant_text" }>,
+  ) {
+    const segments = parseResponseSegments(item.text);
+    return (
+      <section key={item.id} className={styles.timelineAssistantTextCell}>
+        {segments.map((segment) => renderResponseSegment(segment, imageArtifactUrlsBeforeMessage.get(message.id)))}
+      </section>
+    );
+  }
+
+  function timelineStatusText(status: ConversationTimelineItem["status"]) {
+    if (status === "failed") {
+      return lang === "zh" ? "执行失败" : "Failed";
+    }
+    if (status === "running") {
+      return lang === "zh" ? "运行中" : "Running";
+    }
+    if (status === "pending") {
+      return lang === "zh" ? "等待中" : "Pending";
+    }
+    return "";
+  }
+
+  function renderCommandGroupTimelineItem(item: Extract<ConversationTimelineItem, { kind: "command_group" }>) {
+    const expanded = getExpansionState(item.id, "details", false);
+    const duration = formatDuration(
+      item.operations
+        .map((operation) => operation.durationSeconds)
+        .filter((value): value is number => typeof value === "number" && Number.isFinite(value) && value > 0)
+        .reduce((total, value) => total + value, 0),
+    );
+    const visibleStatus = timelineStatusText(item.status);
+    const className = [
+      styles.timelineOperationCell,
+      item.status === "failed" ? styles.timelineOperationCell_failed : "",
+    ].filter(Boolean).join(" ");
+    return (
+      <section key={item.id} className={className}>
+        <button
+          type="button"
+          className={styles.timelineCellHeader}
+          aria-expanded={expanded}
+          onClick={() => toggleSection(item.id, "details", false)}
+          title={expanded ? t("executionDetailsVisible") : t("executionDetailsHidden")}
+        >
+          {item.status === "running" ? <LoaderCircle className={styles.statusSpinner} size={14} /> : <TerminalSquare size={14} />}
+          <span>{item.title}</span>
+          {item.summary ? <span className={styles.timelineCellPreview}>{item.summary}</span> : null}
+          {visibleStatus ? <span className={styles.timelineCellMeta}>{visibleStatus}</span> : null}
+          {duration ? <span className={styles.timelineCellMeta}>{duration}</span> : null}
+          {expanded ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
+        </button>
+        {expanded ? (
+          <div className={styles.timelineCommandList}>
+            {item.operations.map((operation) => (
+              <div key={operation.id} className={styles.timelineCommandRow}>
+                <span>{operationLabel(operation)}</span>
+                {operation.summary ? <span>{operation.summary}</span> : null}
+                {operation.error ? <span className={styles.timelineCommandError}>{operation.error}</span> : null}
+              </div>
+            ))}
+          </div>
+        ) : null}
+      </section>
+    );
+  }
+
+  function renderOperationTimelineItem(item: Extract<ConversationTimelineItem, { kind: "operation" }>) {
+    const operation = item.operation;
+    const detailsId = `timeline-operation-detail-${operation.id}`;
+    const detailsExpanded = getExpansionState(operation.id, "details", false);
+    const detailRows = operationDetailRows(operation);
+    const canExpandDetails = detailRows.length > 0;
+    const duration = formatDuration(operation.durationSeconds);
+    const computerUseResult = renderComputerUseResult(operation);
+    const readableResult = readableOperationResult(operation);
+    const showReadableResult = Boolean(readableResult && readableResult !== item.summary.trim());
+    const visibleStatus = timelineStatusText(item.status);
+    const className = [
+      styles.timelineOperationCell,
+      item.status === "failed" ? styles.timelineOperationCell_failed : "",
+    ].filter(Boolean).join(" ");
+    return (
+      <section key={item.id} className={className}>
+        <div className={styles.timelineCellHeader}>
+          {operationStatusIcon(operation)}
+          <span>{item.title}</span>
+          {item.summary ? <span className={styles.timelineCellPreview}>{item.summary}</span> : null}
+          {visibleStatus ? <span className={styles.timelineCellMeta}>{visibleStatus}</span> : null}
+          {duration ? <span className={styles.timelineCellMeta}>{duration}</span> : null}
+          {canExpandDetails ? (
+            <button
+              type="button"
+              className={styles.timelineCellDetailButton}
+              aria-expanded={detailsExpanded}
+              aria-controls={detailsId}
+              onClick={() => toggleSection(operation.id, "details", false)}
+              title={detailsExpanded ? t("toolCallDetailsVisible") : t("toolCallDetailsHidden")}
+            >
+              {detailsExpanded ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
+            </button>
+          ) : null}
+        </div>
+        {canExpandDetails && detailsExpanded ? (
+          <div id={detailsId} className={styles.operationDetails}>
+            {detailRows.map((row) => (
+              <div key={`${operation.id}-${row.label}`} className={styles.operationDetailRow}>
+                <span className={styles.operationDetailLabel}>{row.label}</span>
+                <pre className={styles.operationDetailValue}>{row.value}</pre>
+              </div>
+            ))}
+          </div>
+        ) : null}
+        {showReadableResult ? <pre className={styles.timelineOperationResult}>{readableResult}</pre> : null}
+        {computerUseResult}
+      </section>
+    );
+  }
+
   function renderReActActionSection(group: ConversationReActOperationGroup) {
     const actions = reActActionOperations(group);
     if (actions.length === 0) {
@@ -1754,10 +1950,10 @@ export function ConversationView({
     if (group.operations.length === 0) {
       return null;
     }
-    const sectionId = `feedback-react-${group.id}`;
+    const tone = reActGroupTone(group);
+    const sectionId = `feedback-react-${tone}-${group.id}`;
     const defaultExpanded = shouldExpandReActGroupByDefault(group);
     const expanded = getExpansionState(messageId, sectionId, defaultExpanded);
-    const tone = reActGroupTone(group);
     const groupTitle = group.title || operationLabel(group.operations[0]);
     const headerItems = [
       operationStateLabel(tone),
@@ -2628,6 +2824,17 @@ export function ConversationView({
             const turnErrorMessage = isTurnErrorMessage(message);
             const agentInboxMessage = isAgentInboxMessage(message);
             const groupTranscriptMessage = isGroupRoomTranscriptMessage(message);
+            const conversationTimelineItems = buildConversationTimelineItems(message, operationGroups.timeline, {
+              lang,
+              includeAssistantText: showResponseBlock,
+            });
+            const hasConversationTimeline =
+              message.role === "assistant"
+              && hasFeedbackTimeline
+              && !turnErrorMessage
+              && !agentInboxMessage
+              && !groupTranscriptMessage
+              && conversationTimelineItems.length > 0;
             const userAuthoredMessage = message.role === "user" && !agentInboxMessage;
             const isResponseStreaming = Boolean(message.streaming) && showResponseBlock && !hasRunningTools;
             const defaultResponseExpanded = Boolean(message.streaming) || defaultExpandedResponseIds.has(message.id);
@@ -2746,7 +2953,9 @@ export function ConversationView({
                   ) : null}
                   {renderUserAttachments(message)}
 
-                  {hasFeedbackTimeline ? (
+                  {hasConversationTimeline ? (
+                    renderConversationTimeline(message, conversationTimelineItems)
+                  ) : hasFeedbackTimeline ? (
                     renderFeedbackTimelineGroup(
                       message.id,
                       operationGroups.timeline,
@@ -2785,7 +2994,7 @@ export function ConversationView({
                   ) : null}
                   {renderImageArtifact(message)}
 
-                  {showResponseBlock ? (
+                  {showResponseBlock && !hasConversationTimeline ? (
                     <section className={styles.responseSection}>
                       <button
                         type="button"

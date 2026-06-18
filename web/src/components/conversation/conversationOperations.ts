@@ -173,12 +173,12 @@ export function buildConversationReActOperationGroups(
   const groups: ConversationReActOperationGroup[] = [];
   let current: ConversationReActOperationGroup | null = null;
 
-  const startGroup = (operation: ConversationOperation) => {
+  const startGroup = (operation: ConversationOperation, thoughtSequence?: number) => {
     const group: ConversationReActOperationGroup = {
       id: `react-${groups.length + 1}-${operation.id}`,
       index: groups.length + 1,
       operations: [],
-      thoughtSequence: operation.kind === "thought" ? operation.sequence : undefined,
+      thoughtSequence: operation.kind === "thought" ? operation.sequence : thoughtSequence,
       title: "",
       primaryKind: operation.kind,
     };
@@ -186,13 +186,38 @@ export function buildConversationReActOperationGroups(
     current = group;
     return group;
   };
+  const activeGroup = (): ConversationReActOperationGroup | null => current;
 
   for (const operation of operations) {
-    let target: ConversationReActOperationGroup | null = current;
+    let target: ConversationReActOperationGroup | null = activeGroup();
+    const relatedThoughtSequence =
+      typeof operation.relatedThoughtSequence === "number" && operation.relatedThoughtSequence > 0
+        ? operation.relatedThoughtSequence
+        : undefined;
     if (!target) {
+      target = startGroup(operation, relatedThoughtSequence);
+    } else if (
+      operation.kind === "thought"
+      && (reactGroupHasThought(target) || (target.thoughtSequence !== undefined && target.thoughtSequence !== operation.sequence))
+    ) {
       target = startGroup(operation);
-    } else if (operation.kind === "thought" && reactGroupHasThought(target)) {
-      target = startGroup(operation);
+    } else if (operation.kind !== "thought" && relatedThoughtSequence !== undefined) {
+      const targetThoughtSequence = target.thoughtSequence;
+      const targetRelatedThoughtSequences = new Set(
+        target.operations
+          .map((item) => item.relatedThoughtSequence)
+          .filter((sequence): sequence is number => typeof sequence === "number" && sequence > 0),
+      );
+      const targetHasDifferentRelatedThought =
+        targetRelatedThoughtSequences.size > 0 && !targetRelatedThoughtSequences.has(relatedThoughtSequence);
+      if (
+        (targetThoughtSequence !== undefined && targetThoughtSequence !== relatedThoughtSequence)
+        || (targetThoughtSequence === undefined && targetHasDifferentRelatedThought)
+      ) {
+        target = startGroup(operation, relatedThoughtSequence);
+      } else if (target.thoughtSequence === undefined) {
+        target.thoughtSequence = relatedThoughtSequence;
+      }
     }
     if (!target) {
       continue;

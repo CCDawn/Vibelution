@@ -408,11 +408,29 @@ def test_auto_continue_pause_result_preserves_visible_reply_without_internal_pro
 
     paused = session_service._build_auto_continue_paused_result(result, None, 1)
 
-    assert paused["status"] == "completed"
-    assert paused["outcome"] == "needs_input"
+    assert paused["status"] == "needs_continue"
+    assert paused["outcome"] == "progress"
     assert paused["raw_output"] == "已经完成读取，下一步准备修改。"
+    assert paused["recommended_next_action"] == "继续当前会话目标并汇总已有工具结果。"
     assert paused["metadata"]["internal_auto_continue_blocked"] is True
     assert "继续完成同一个用户目标" not in str(paused)
+
+
+def test_auto_continue_pause_result_without_visible_reply_needs_continue():
+    result = {
+        "status": "completed",
+        "outcome": "needs_input",
+        "tool_call_count": 3,
+        "tool_trace": [{"name": "cli_tool", "status": "done", "summary": "read file"}],
+    }
+
+    paused = session_service._build_auto_continue_paused_result(result, None, 2)
+
+    assert paused["status"] == "needs_continue"
+    assert paused["outcome"] == "progress"
+    assert "没有形成最终回答" in paused["raw_output"]
+    assert session_service._is_session_turn_terminal(result) is False
+    assert session_service._chat_turn_result_status("completed", result, stop_requested=False) == "needs_continue"
 
 
 def test_history_search_tool_uses_current_runtime_session(tmp_path, monkeypatch):
