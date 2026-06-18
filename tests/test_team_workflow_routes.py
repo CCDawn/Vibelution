@@ -1388,6 +1388,48 @@ def test_team_workflow_routes_review_steward_pack_knowledge_ingestion(tmp_path, 
     assert items_response.json()["summary"]["itemCount"] == 1
 
 
+def test_team_workflow_routes_run_knowledge_collection_ingestion(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    client = _client()
+    steward = agent_directory_service.create_agent_instance(display_name="Knowledge Steward Agent")
+    team = client.post(
+        "/api/teams",
+        json={
+            "name": "ai科学研究团队",
+            "members": [{"agentId": steward["agentId"], "role": "steward"}],
+        },
+    ).json()
+    team_workflow_orchestration_service.register_candidate_source(
+        team["teamId"],
+        {
+            "title": "Predictive coding cortical hierarchy neural network paper",
+            "sourceUrl": "https://doi.org/10.0000/predictive-coding",
+            "sourceKind": "paper",
+            "summary": "Predictive coding evidence for neural-network algorithm design.",
+            "allowedForAnalysis": True,
+            "createdByAgent": "Data Discovery Agent",
+        },
+    )
+
+    response = client.post(
+        f"/api/teams/{team['teamId']}/workflow-orchestration/knowledge-collection/ingest",
+        json={
+            "sourceQualityAgentId": "资料审查 Agent",
+            "candidateGraphAgentId": "候选关系 Agent",
+            "stewardAgentId": steward["agentId"],
+            "targetDomain": "神经学启发神经网络算法",
+            "maxCandidates": 10,
+        },
+    )
+
+    assert response.status_code == 201, response.text
+    payload = response.json()
+    assert payload["status"] == "completed"
+    assert [step["stageId"] for step in payload["steps"]][-1] == "official_knowledge"
+    assert payload["summary"]["formalKnowledgeItemCount"] == 1
+    assert payload["knowledgeReview"]["candidate"]["currentState"] == "official_synced"
+
+
 def test_team_workflow_route_invokes_local_research_model(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
 
