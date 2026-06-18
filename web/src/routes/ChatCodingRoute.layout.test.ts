@@ -575,7 +575,9 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("const rawSessionDetail = sessionDetailQuery.data");
     expect(routeSource).toContain("const selectedSessionDetail =");
     expect(routeSource).toContain("rawSessionDetail && rawSessionDetail.id === activeSessionId ? rawSessionDetail : undefined");
-    expect(routeSource).toContain("const detail = selectedSessionDetail");
+    expect(routeSource).toContain("const liveAssistantMessages = activeSessionId ? liveAssistantMessagesBySession[activeSessionId] : undefined");
+    expect(routeSource).toContain("const detail = useMemo(");
+    expect(routeSource).toContain("mergeLiveAssistantMessagesIntoSessionDetail(selectedSessionDetail, liveAssistantMessages)");
     expect(routeSource).toContain("const runtimeMatchesSelectedSession = Boolean(");
     expect(routeSource).toContain("runtimeActiveChatTurnSessionIds.has(activeSessionId)");
     expect(routeSource).toContain("const runtimeMismatchLine = runtimeActiveChatTurnSessionId && !runtimeMatchesSelectedSession");
@@ -862,21 +864,26 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("queueSessionDetail(payload.detail, event.data.length)");
   });
 
-  it("coalesces lightweight assistant delta stream events before updating UI cache", () => {
+  it("coalesces lightweight assistant delta stream events into a local live overlay", () => {
     expect(routeSource).toContain("const SESSION_ASSISTANT_DELTA_MIN_APPLY_INTERVAL_MS = 80");
-    expect(routeSource).toContain("function mergeAssistantDeltaIntoSessionDetail(");
     expect(routeSource).toContain("function liveAssistantOverlayTurnId(turnId: string)");
     expect(routeSource).toContain("function liveAssistantMessageId(sessionId: string, turnId: string)");
     expect(routeSource).toContain("function liveAssistantMessageTurnId(message: ConversationMessage)");
     expect(routeSource).toContain("function isLiveAssistantMessageForTurn(message: ConversationMessage, turnId: string)");
     expect(routeSource).toContain("function uniqueLiveAssistantMessagesByTurn(messages: ConversationMessage[])");
     expect(routeSource).toContain("function mergeSessionDetailWithLiveAssistantOverlay(");
+    expect(routeSource).toContain("function mergeAssistantDeltaIntoMessages(");
+    expect(routeSource).toContain("function mergeAssistantDeltaIntoLiveMessages(");
+    expect(routeSource).toContain("function mergeLiveAssistantMessagesIntoSessionDetail(");
+    expect(routeSource).toContain("liveAssistantMessagesBySession");
+    expect(routeSource).toContain("liveAssistantMessagesBySessionRef");
+    expect(routeSource).toContain("setLiveAssistantMessagesForSession(current, streamSessionId, pendingMessages)");
     expect(routeSource).toContain("kind: \"session_live_overlay\"");
     expect(routeSource).toContain("const settledAssistantTurnIds = new Set(");
     expect(routeSource).toContain("const detailLiveTurnIds = new Set(");
     expect(routeSource).toContain("function isStaleLedgerUpdate(currentSeq: unknown, incomingSeq: unknown)");
-    expect(routeSource).toContain("if (isStaleLedgerUpdate(detail.ledgerSeq, payload.ledgerSeq))");
-    expect(routeSource).toContain("ledgerSeq: maxLedgerSeq(detail.ledgerSeq, payload.ledgerSeq)");
+    expect(routeSource).toContain("if (isStaleLedgerUpdate(latestLiveAssistantLedgerSeq(messages), payload.ledgerSeq))");
+    expect(routeSource).toContain("ledgerSeq: maxLedgerSeq(previous?.metadata?.ledgerSeq, payload.ledgerSeq)");
     expect(routeSource).toContain("const liveTurnId = liveAssistantOverlayTurnId(payload.turnId)");
     expect(routeSource).toContain("const firstLiveIndex = originalMessages.findIndex((message) => isLiveAssistantMessageForTurn(message, liveTurnId))");
     expect(routeSource).toContain("isLiveAssistantMessageForTurn(message, liveTurnId)");
@@ -887,13 +894,20 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("feedbackEventKey(event)");
     expect(routeSource).toContain("const nextFeedbackEvents = mergeLiveFeedbackEvents(previous?.feedbackEvents, payload.feedbackEvents)");
     expect(routeSource).toContain("return mergeSessionDetailWithLiveAssistantOverlay(previous, detail)");
-    expect(routeSource).toContain("let pendingAssistantDeltaDetail: SessionDetail | undefined");
+    expect(routeSource).toContain("let pendingAssistantDeltaMessages: ConversationMessage[] | undefined");
     expect(routeSource).toContain("function applyPendingAssistantDelta(reason: \"timer\" | \"close\" | \"final\")");
     expect(routeSource).toContain("function queueAssistantDelta(");
     expect(routeSource).toContain("browser.session_stream.assistant_delta_queued");
+    expect(routeSource).toContain("browser.session_stream.initial_received");
+    expect(routeSource).toContain("stream.addEventListener(\"session_initial\", handleSessionInitial as EventListener)");
     expect(routeSource).toContain("stream.addEventListener(\"assistant_delta\", handleAssistantDelta as EventListener)");
+    expect(routeSource).toContain("stream.removeEventListener(\"session_initial\", handleSessionInitial as EventListener)");
     expect(routeSource).toContain("stream.removeEventListener(\"assistant_delta\", handleAssistantDelta as EventListener)");
-    expect(routeSource).toContain("queryClient.setQueryData<SessionDetail>(queryKeys.session(streamSessionId), (current) =>");
+    expect(routeSource).toContain("queryClient.invalidateQueries({ queryKey: queryKeys.session(streamSessionId) })");
+    expect(routeSource).toContain("const stream = new EventSource(`/api/sessions/${streamSessionId}/events?initial=light`)");
+    expect(routeSource).not.toContain("let pendingAssistantDeltaDetail: SessionDetail | undefined");
+    expect(routeSource).not.toContain("pendingAssistantDeltaDetail = mergeAssistantDeltaIntoSessionDetail");
+    expect(routeSource).not.toContain("queryClient.setQueryData<SessionDetail>(queryKeys.session(streamSessionId)");
     expect(routeSource).toContain("queueAssistantDelta(payload, event.data.length)");
     expect(routeSource).toContain("applyPendingAssistantDelta(\"close\")");
     expect(routeSource).toContain("browser.session_stream.assistant_delta_applied");
@@ -910,7 +924,7 @@ describe("ChatCodingRoute layout contract", () => {
 
   it("keeps active chat streams stable during direct session route switches", () => {
     const sessionStreamEffectSource = routeSource.slice(
-      routeSource.indexOf("const stream = new EventSource(`/api/sessions/${streamSessionId}/events`);"),
+      routeSource.indexOf("const stream = new EventSource(`/api/sessions/${streamSessionId}/events?initial=light`);"),
       routeSource.indexOf("useEffect(() => {\n    if (!groupStreamShouldConnect"),
     );
 

@@ -4721,6 +4721,27 @@ export type SessionDetailStreamEvent = {
   detail: SessionDetail;
 };
 
+export type SessionInitialStreamEvent = {
+  type: "session_initial";
+  sessionId: string;
+  ledgerSeq?: number;
+  summary: SessionSummary;
+  latestMessage?: {
+    id: string;
+    role: string;
+    timestamp: string;
+    contentLength: number;
+    thoughtLength: number;
+    feedbackEventCount: number;
+    toolCallCount: number;
+    streaming: boolean;
+  };
+  activeTurnId?: string;
+  running?: boolean;
+  currentPhase?: string;
+  updatedAt?: string;
+};
+
 export type SessionAssistantDeltaStreamEvent = {
   type: "assistant_delta";
   sessionId: string;
@@ -4739,7 +4760,7 @@ export type SessionAssistantDeltaStreamEvent = {
   done: boolean;
 };
 
-export type SessionStreamEvent = SessionDetailStreamEvent | SessionAssistantDeltaStreamEvent;
+export type SessionStreamEvent = SessionDetailStreamEvent | SessionInitialStreamEvent | SessionAssistantDeltaStreamEvent;
 
 export type SessionChatReviewCandidateResponse = {
   candidateId: string;

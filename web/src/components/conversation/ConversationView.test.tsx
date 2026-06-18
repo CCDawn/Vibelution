@@ -135,6 +135,16 @@ describe("ConversationView edit resend affordance", () => {
     expect(conversationViewSource).toContain("return messageDefaults[section]");
   });
 
+  it("renders streaming assistant text through a light text path before markdown parsing", () => {
+    expect(conversationViewSource).toContain("function renderStreamingResponseText(content: string)");
+    expect(conversationViewSource).toContain("styles.streamingResponseText");
+    expect(conversationViewSource).toContain("styles.streamingResponseParagraph");
+    expect(conversationViewSource).toContain("showResponseBlock && responseExpanded && !isResponseStreaming");
+    expect(conversationViewSource).toContain("? renderStreamingResponseText(message.content)");
+    expect(conversationViewStylesSource).toContain(".streamingResponseText");
+    expect(conversationViewStylesSource).toContain(".streamingResponseParagraph");
+  });
+
   it("can render the opt-in compact workbench density", () => {
     const html = renderConversation([], { density: "compact" });
 
