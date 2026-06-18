@@ -1430,6 +1430,45 @@ def test_team_workflow_routes_run_knowledge_collection_ingestion(tmp_path, monke
     assert payload["knowledgeReview"]["candidate"]["currentState"] == "official_synced"
 
 
+def test_team_workflow_routes_extract_source_collection_candidates(monkeypatch):
+    client = _client()
+    captured = {}
+
+    def fake_extract(team_id, payload):
+        captured["team_id"] = team_id
+        captured["payload"] = payload
+        return {
+            "schemaVersion": 1,
+            "teamId": team_id,
+            "runId": payload["runId"],
+            "status": "completed",
+            "importedCount": 2,
+            "skippedCount": 0,
+            "failedCount": 0,
+        }
+
+    monkeypatch.setattr(team_workflows, "extract_source_collection_candidates", fake_extract)
+
+    response = client.post(
+        "/api/teams/research-team/workflow-orchestration/knowledge-collection/extract",
+        json={
+            "runId": "dprun-source-1",
+            "extractionAgentId": "content-extraction-agent",
+            "maxRecords": 40,
+            "force": True,
+            "notes": "rerun extraction",
+        },
+    )
+
+    assert response.status_code == 201, response.text
+    assert response.json()["status"] == "completed"
+    assert captured["team_id"] == "research-team"
+    assert captured["payload"]["runId"] == "dprun-source-1"
+    assert captured["payload"]["extractionAgentId"] == "content-extraction-agent"
+    assert captured["payload"]["maxRecords"] == 40
+    assert captured["payload"]["force"] is True
+
+
 def test_team_workflow_route_invokes_local_research_model(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
 

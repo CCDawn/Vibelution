@@ -334,6 +334,114 @@ def test_import_data_record_as_source_candidate_rejects_missing_record(tmp_path,
         raise AssertionError("Expected TeamWorkflowOrchestrationError")
 
 
+def test_extract_source_collection_candidates_imports_records_and_closes_extraction_assignment(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = team_service.create_team(name="挑战杯科研团队")
+    run = data_processing_service.create_processing_run(
+        title="Neural source collection",
+        scope={"teamId": team["teamId"], "workflowKind": "challenge_cup_research"},
+    )
+    data_processing_service.create_collection_assignment(
+        run["runId"],
+        {
+            "agentRole": "content_extraction",
+            "agentId": "content-extraction-agent",
+            "scope": {"topic": "predictive coding"},
+            "expectedRecordTypes": ["source_manifest"],
+        },
+    )
+    first_record = data_processing_service.add_record(
+        run["runId"],
+        {
+            "sourceType": "paper",
+            "sourceRef": "https://doi.org/10.0000/predictive-coding",
+            "title": "Predictive coding paper",
+            "summary": "Predictive coding evidence.",
+        },
+    )
+    second_record = data_processing_service.add_record(
+        run["runId"],
+        {
+            "sourceType": "dataset",
+            "sourceRef": "https://example.test/dataset",
+            "title": "Neural coding dataset",
+            "summary": "Dataset for neural coding.",
+        },
+    )
+
+    response = team_workflow_orchestration_service.extract_source_collection_candidates(
+        team["teamId"],
+        {
+            "runId": run["runId"],
+            "extractionAgentId": "content-extraction-agent",
+            "maxRecords": 10,
+        },
+    )
+    duplicate = team_workflow_orchestration_service.extract_source_collection_candidates(
+        team["teamId"],
+        {
+            "runId": run["runId"],
+            "extractionAgentId": "content-extraction-agent",
+            "maxRecords": 10,
+            "force": True,
+        },
+    )
+    source_list = team_workflow_orchestration_service.list_candidate_store(team["teamId"], candidate_type="source_manifest")
+    assignments = data_processing_service.list_collection_assignments(run["runId"])["assignments"]
+
+    assert response["status"] == "completed"
+    assert response["importedCount"] == 2
+    assert response["candidateCount"] == 2
+    assert response["pendingRecordCount"] == 0
+    assert response["completedExtractionAssignmentCount"] == 1
+    assert {item["dataRecordRef"]["recordId"] for item in response["imported"]} == {first_record["recordId"], second_record["recordId"]}
+    assert duplicate["status"] == "completed"
+    assert duplicate["importedCount"] == 0
+    assert duplicate["skippedCount"] == 2
+    assert source_list["candidateCount"] == 2
+    assert assignments[0]["status"] == "completed"
+    assert response["boundaries"]["writesFormalKnowledge"] is False
+    assert response["boundaries"]["writesRag"] is False
+    assert response["boundaries"]["writesOfficialGraph"] is False
+
+
+def test_extract_source_collection_candidates_keeps_assignment_open_when_batch_is_partial(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = team_service.create_team(name="挑战杯科研团队")
+    run = data_processing_service.create_processing_run(
+        title="Neural source collection",
+        scope={"teamId": team["teamId"], "workflowKind": "challenge_cup_research"},
+    )
+    data_processing_service.create_collection_assignment(
+        run["runId"],
+        {"agentRole": "content_extraction", "agentId": "content-extraction-agent"},
+    )
+    for index in range(2):
+        data_processing_service.add_record(
+            run["runId"],
+            {
+                "sourceType": "paper",
+                "sourceRef": f"https://doi.org/10.0000/source-{index}",
+                "title": f"Neural source {index}",
+            },
+        )
+
+    response = team_workflow_orchestration_service.extract_source_collection_candidates(
+        team["teamId"],
+        {
+            "runId": run["runId"],
+            "extractionAgentId": "content-extraction-agent",
+            "maxRecords": 1,
+        },
+    )
+    assignments = data_processing_service.list_collection_assignments(run["runId"])["assignments"]
+
+    assert response["status"] == "partial"
+    assert response["importedCount"] == 1
+    assert response["pendingRecordCount"] == 1
+    assert assignments[0]["status"] == "returned"
+
+
 def test_start_source_collection_run_creates_generic_run_and_assignments(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     team = team_service.create_team(name="挑战杯科研团队")

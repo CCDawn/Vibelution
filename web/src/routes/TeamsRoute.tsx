@@ -39,6 +39,7 @@ import {
   TeamWorkflowKnowledgeIngestionStatus,
   TeamWorkflowSourceCollectionPromptCachePolicy,
   TeamWorkflowSourceCollectionPromptCachePolicyRef,
+  TeamWorkflowSourceCollectionExtractionPayload,
   TeamWorkflowSourceCollectionRunStartPayload,
   TeamWorkflowDataRecordSourceCandidateImportPayload,
   TeamWorkflowCandidateListPayload,
@@ -2952,6 +2953,7 @@ export function TeamsRoute({
   );
   const sourceCollectionAgentIds = useMemo(() => sourceCollectionAgentIdsFromCanvas(canvas), [canvas]);
   const sourceCollectionOwnerAgentId = useMemo(() => sourceCollectionOwnerAgentIdFromCanvas(canvas), [canvas]);
+  const sourceCollectionExtractionAgentId = sourceCollectionAgentIds.content_extraction || "Content Extraction Agent";
   const sourceCollectionQualityAgentId = sourceCollectionAgentIds.source_quality || "Source Quality Assessment Agent";
   const sourceCollectionGraphAgentId = sourceCollectionAgentIds.candidate_graph || "Candidate Graph Preview Agent";
   const sourceCollectionKnowledgeStewardAgentId = sourceCollectionAgentIds.knowledge_steward || "agent-knowledge-steward";
@@ -3497,6 +3499,54 @@ export function TeamsRoute({
       if (payload.imported[0]?.workflow) {
         queryClient.setQueryData(queryKeys.teamWorkflow(variables.teamId), payload.imported[0].workflow);
       }
+      void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflowSourceCollectionRuns(variables.teamId, SOURCE_COLLECTION_RUN_PREVIEW_LIMIT) });
+      void queryClient.invalidateQueries({ queryKey: sourceCollectionRunRecordsQueryKey(payload.runId) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflowCandidates(variables.teamId, TEAM_WORKFLOW_CANDIDATE_PREVIEW_LIMIT) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflowKnowledgeIngestionStatus(variables.teamId) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflowCoordinationStatus(variables.teamId) });
+      void queryClient.invalidateQueries({ queryKey: sourceQualityStatusQueryKey(variables.teamId) });
+      void queryClient.invalidateQueries({ queryKey: paperNoteChunkStatusQueryKey(variables.teamId) });
+    },
+  });
+
+  const extractSourceCollectionCandidatesMutation = useMutation({
+    mutationFn: (payload: { teamId: string; runId: string; extractionAgentId: string; maxRecords?: number; force?: boolean; notes?: string }) =>
+      fetchJson<TeamWorkflowSourceCollectionExtractionPayload>(
+        `/api/teams/${encodeURIComponent(payload.teamId)}/workflow-orchestration/knowledge-collection/extract`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            runId: payload.runId,
+            extractionAgentId: payload.extractionAgentId,
+            maxRecords: payload.maxRecords ?? 100,
+            force: payload.force ?? false,
+            notes: payload.notes ?? "",
+          }),
+        },
+      ),
+    onSuccess: (payload, variables) => {
+      setSelectedSourceCollectionRunId(payload.runId);
+      queryClient.setQueryData(queryKeys.teamWorkflow(variables.teamId), payload.workflow);
+      queryClient.setQueryData(queryKeys.dataProcessingRunStatus(payload.runId), {
+        ...payload.runStatus,
+        summary: {
+          ...payload.runStatus.summary,
+          ...(payload.sourceCollectionSummary ?? {}),
+        },
+      });
+      queryClient.setQueryData(queryKeys.dataProcessingCollectionAssignments(payload.runId), {
+        schemaVersion: payload.schemaVersion,
+        runId: payload.runId,
+        assignments: payload.assignments,
+        summary: {
+          assignmentCount: payload.assignments.length,
+          assignmentStatusCounts: payload.assignments.reduce<Record<string, number>>((counts, assignment) => {
+            counts[assignment.status] = (counts[assignment.status] ?? 0) + 1;
+            return counts;
+          }, {}),
+        },
+      } satisfies DataProcessingCollectionAssignmentListPayload);
       void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflowSourceCollectionRuns(variables.teamId, SOURCE_COLLECTION_RUN_PREVIEW_LIMIT) });
       void queryClient.invalidateQueries({ queryKey: sourceCollectionRunRecordsQueryKey(payload.runId) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflowCandidates(variables.teamId, TEAM_WORKFLOW_CANDIDATE_PREVIEW_LIMIT) });
@@ -6559,6 +6609,12 @@ export function TeamsRoute({
       : null;
   const selectedTeamExecuteSourceCollectionSearchResult =
     executeSourceCollectionSearchMutation.variables?.teamId === selectedTeam?.teamId ? executeSourceCollectionSearchMutation.data : undefined;
+  const selectedTeamExtractSourceCollectionCandidatesPending =
+    extractSourceCollectionCandidatesMutation.isPending && extractSourceCollectionCandidatesMutation.variables?.teamId === selectedTeam?.teamId;
+  const selectedTeamExtractSourceCollectionCandidatesError =
+    extractSourceCollectionCandidatesMutation.variables?.teamId === selectedTeam?.teamId && extractSourceCollectionCandidatesMutation.error instanceof Error
+      ? extractSourceCollectionCandidatesMutation.error
+      : null;
   const selectedTeamInitialSourceCollectionSearchResult = selectedTeamStartResearchStageResult?.sourceCollectionSearchExecution;
   const selectedSourceCollectionSearchExecutionResult =
     selectedTeamExecuteSourceCollectionSearchResult ?? selectedTeamInitialSourceCollectionSearchResult;
@@ -7145,6 +7201,7 @@ export function TeamsRoute({
     || selectedTeamStartSourceCollectionPending
     || selectedTeamExecuteSourceCollectionSearchPending
     || sourceCollectionAcceptedBackgroundActive
+    || selectedTeamExtractSourceCollectionCandidatesPending
     || selectedTeamRecordSourceCollectionOutputPending
     || selectedTeamSourceQualityPending
     || selectedTeamBuildCandidateGraphPending
@@ -7158,6 +7215,7 @@ export function TeamsRoute({
     || selectedTeamStartResearchStageError
     || selectedTeamStartSourceCollectionError
     || selectedTeamExecuteSourceCollectionSearchError
+    || selectedTeamExtractSourceCollectionCandidatesError
     || selectedTeamRecordSourceCollectionOutputError
     || selectedTeamSourceQualityError
     || selectedTeamBuildCandidateGraphError
@@ -7186,6 +7244,18 @@ export function TeamsRoute({
       : sourceCollectionRunCandidateCount > 0
         ? (lang === "zh" ? "已筛选" : "done")
         : (lang === "zh" ? "暂无候选" : "no candidates");
+  const sourceCollectionCandidateExtractionDisabled =
+    !selectedTeam?.teamId
+    || !selectedSourceCollectionRunEffectiveId
+    || sourceCollectionRawRecordCount <= 0
+    || selectedTeamExtractSourceCollectionCandidatesPending;
+  const sourceCollectionCandidateExtractionButtonText = selectedTeamExtractSourceCollectionCandidatesPending
+    ? (lang === "zh" ? "Agent 提炼中" : "Agent extracting")
+    : sourceCollectionPendingCandidateImportCount > 0
+      ? (lang === "zh" ? "Agent 提炼资料" : "Agent extract")
+      : sourceCollectionRunCandidateCount > 0
+        ? (lang === "zh" ? "Agent 重新提炼" : "Agent re-extract")
+        : (lang === "zh" ? "Agent 提炼资料" : "Agent extract");
   const sourceCollectionPanelClassName = (panelId: string) => [
     styles.workflowSourceCollectionDetails,
     sourceCollectionFocusedPanelId === panelId ? styles.sourceCollectionFocusedPanel : "",
@@ -7278,6 +7348,30 @@ export function TeamsRoute({
     }
     openSourceCollectionStage("candidate", "results");
   };
+  const runSourceCollectionCandidateExtractionAction = () => {
+    openSourceCollectionStage("candidate", "results");
+    if (
+      !selectedTeam?.teamId
+      || !selectedSourceCollectionRunEffectiveId
+      || sourceCollectionCandidateExtractionDisabled
+    ) {
+      return;
+    }
+    const forceExtraction = sourceCollectionPendingCandidateImportCount <= 0 && sourceCollectionRunCandidateCount > 0;
+    const targetRecordCount = forceExtraction
+      ? Math.max(sourceCollectionRawRecordCount, sourceCollectionRunCandidateCount)
+      : Math.max(sourceCollectionPendingCandidateImportCount, sourceCollectionRawRecordCount);
+    extractSourceCollectionCandidatesMutation.mutate({
+      teamId: selectedTeam.teamId,
+      runId: selectedSourceCollectionRunEffectiveId,
+      extractionAgentId: sourceCollectionExtractionAgentId,
+      maxRecords: Math.max(1, Math.min(500, targetRecordCount)),
+      force: forceExtraction,
+      notes: forceExtraction
+        ? "Content Extraction Agent re-checked the DataRecord to source_manifest bridge without creating duplicate candidates."
+        : "Content Extraction Agent imported pending DataRecords into source_manifest candidates.",
+    });
+  };
   const runSourceCollectionGraphAction = () => {
     if (!selectedTeam?.teamId || sourceCollectionRunApprovedCount <= 0 || selectedTeamBuildCandidateGraphPending) {
       return;
@@ -7351,10 +7445,12 @@ export function TeamsRoute({
     ? (lang === "zh" ? "正在团队搜索" : "Team search running")
     : selectedTeamStartResearchStagePending || selectedTeamStartSourceCollectionPending
       ? (lang === "zh" ? "正在启动搜集" : "Starting collection")
-      : selectedTeamRecordSourceCollectionOutputPending
-        ? (lang === "zh" ? "正在写入候选" : "Writing candidates")
-        : selectedTeamSourceQualityPending
-          ? (lang === "zh" ? "正在筛选资料" : "Screening sources")
+    : selectedTeamRecordSourceCollectionOutputPending
+      ? (lang === "zh" ? "正在写入候选" : "Writing candidates")
+      : selectedTeamExtractSourceCollectionCandidatesPending
+        ? (lang === "zh" ? "正在提炼资料" : "Extracting sources")
+      : selectedTeamSourceQualityPending
+        ? (lang === "zh" ? "正在筛选资料" : "Screening sources")
           : selectedTeamBuildCandidateGraphPending
             ? (lang === "zh" ? "正在生成入库关系图" : "Building ingestion map")
             : selectedTeamKnowledgeCollectionIngestPending
@@ -7452,9 +7548,9 @@ export function TeamsRoute({
         : sourceCollectionRunCandidateCount > 0 && sourceCollectionSearchOpenAssignmentCount <= 0
           ? "pending"
           : "idle";
-  const sourceCollectionCandidateStepState: SourceCollectionStepState = selectedTeamRecordSourceCollectionOutputError
+  const sourceCollectionCandidateStepState: SourceCollectionStepState = selectedTeamRecordSourceCollectionOutputError || selectedTeamExtractSourceCollectionCandidatesError
     ? "failed"
-    : selectedTeamRecordSourceCollectionOutputPending
+    : selectedTeamRecordSourceCollectionOutputPending || selectedTeamExtractSourceCollectionCandidatesPending
       ? "active"
       : sourceCollectionRunCandidateCount > 0
         ? "done"
@@ -7529,11 +7625,11 @@ export function TeamsRoute({
       state: sourceCollectionCandidateStepState,
       status: sourceCollectionStepStatusText(sourceCollectionCandidateStepState),
       detailLabel: lang === "zh" ? "查看提炼结果" : "View extraction results",
-      actionLabel: lang === "zh" ? "查看提炼结果" : "View extraction",
-      actionDisabled: !selectedTeam?.teamId,
-      actionTone: "secondary",
-      actionIcon: "archive",
-      onAction: openSourceCollectionCandidatePanel,
+      actionLabel: sourceCollectionCandidateExtractionButtonText,
+      actionDisabled: sourceCollectionCandidateExtractionDisabled,
+      actionTone: "primary",
+      actionIcon: selectedTeamExtractSourceCollectionCandidatesPending ? "refresh" : "archive",
+      onAction: runSourceCollectionCandidateExtractionAction,
       onDetail: () => openSourceCollectionStage("candidate", "results"),
     },
     {

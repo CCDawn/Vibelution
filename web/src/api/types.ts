@@ -3990,6 +3990,38 @@ export type TeamWorkflowDataRecordSourceCandidateImportPayload = {
   workflow: TeamWorkflowOrchestration;
 };
 
+export type TeamWorkflowSourceCollectionExtractionPayload = {
+  schemaVersion: number;
+  teamId: string;
+  runId: string;
+  status: string;
+  run: DataProcessingRun;
+  runStatus: DataProcessingStatus;
+  sourceCollectionSummary?: Record<string, number>;
+  storageArtifacts: Record<string, string>;
+  assignments: DataProcessingCollectionAssignment[];
+  recordCount: number;
+  candidateCount: number;
+  pendingRecordCount: number;
+  importedCount: number;
+  skippedCount: number;
+  failedCount: number;
+  completedExtractionAssignmentCount: number;
+  imported: TeamWorkflowDataRecordSourceCandidateImportPayload[];
+  skipped: Array<Record<string, unknown>>;
+  failed: Array<Record<string, unknown>>;
+  executionEvents: Array<Record<string, unknown>>;
+  workflow: TeamWorkflowOrchestration;
+  boundaries: {
+    externalSearchTriggered: boolean;
+    metadataOnlyDownload: boolean;
+    writesFormalKnowledge: boolean;
+    writesRag: boolean;
+    writesOfficialGraph: boolean;
+  };
+  nextActions: string[];
+};
+
 export type TeamWorkflowCandidateValidationIssue = {
   severity: "error" | "warning" | string;
   code: string;
