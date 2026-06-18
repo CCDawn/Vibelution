@@ -27,6 +27,7 @@ from .command_queue import (
     clear_lifecycle_interrupt,
     complete_command,
     defer_processing_command_for_active_work,
+    has_recent_lifecycle_command,
     lifecycle_interrupt_requested,
     recover_processing_queue,
     reject_pending_commands_for_shutdown,
@@ -564,6 +565,10 @@ def _active_command_is_recent(state: dict[str, Any]) -> bool:
         parsed = parsed.replace(tzinfo=timezone.utc)
     age_seconds = (datetime.now(timezone.utc) - parsed.astimezone(timezone.utc)).total_seconds()
     return age_seconds < _ACTIVE_COMMAND_RESTART_GRACE_SECONDS
+
+
+def _has_recent_lifecycle_queue_command() -> bool:
+    return has_recent_lifecycle_command(grace_seconds=_ACTIVE_COMMAND_RESTART_GRACE_SECONDS)
 
 
 def _parse_command_datetime(value: Any) -> datetime | None:
@@ -1516,6 +1521,12 @@ def ensure_daemon_running(*, python_executable: str | None = None) -> bool:
         current_signature = _process_source_signature()
         if _state_source_signature(state) == current_signature or _active_command_is_recent(state):
             return False
+        if _has_recent_lifecycle_queue_command():
+            _append_event(
+                "daemon.restart_deferred_lifecycle_command",
+                {"pid": current_pid, "reason": "recent_lifecycle_command"},
+            )
+            return False
         _append_event(
             "daemon.restart_requested",
             {"pid": current_pid, "reason": "runtime_manager_source_changed"},
@@ -1580,6 +1591,27 @@ def load_runtime_snapshot() -> dict[str, Any]:
     desired_state = str(workbench.get("desiredState") or "closed").strip() or "closed"
     observed_state = str(observation.get("observedState") or "closed").strip() or "closed"
     phase = str(workbench.get("phase") or "steady").strip() or "steady"
+    command_state = state.setdefault("command", {})
+    if active_command and _command_result_is_completed(active_command):
+        _append_event(
+            "command.active_completed_cleared",
+            {
+                "commandId": active_command,
+                "activeType": str(command_state.get("activeType") or ""),
+                "requestedBy": str(command_state.get("requestedBy") or ""),
+            },
+        )
+        command_state.update(
+            {
+                "activeCommandId": "",
+                "activeType": "",
+                "requestedBy": "",
+                "startedAt": "",
+                "stopManager": False,
+                "noBrowser": False,
+            }
+        )
+        active_command = ""
     consistency_fields = _workbench_consistency_fields(observation)
     orphaned_browser = bool(consistency_fields["frontendOrphaned"])
     browser_missing = bool(consistency_fields["browserMissing"])

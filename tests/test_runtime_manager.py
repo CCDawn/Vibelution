@@ -923,6 +923,81 @@ def test_load_runtime_snapshot_persists_stale_running_state_as_closed(monkeypatc
     assert saved_states[-1]["workbench"]["observedState"] == "closed"
 
 
+def test_load_runtime_snapshot_clears_completed_active_close_command(monkeypatch):
+    saved_states: list[dict] = []
+    events: list[tuple[str, dict]] = []
+
+    monkeypatch.setattr(
+        daemon,
+        "load_state",
+        lambda: {
+            "runtimeState": "running",
+            "managerPid": 49544,
+            "daemonRunning": True,
+            "workbench": {
+                "desiredState": "closed",
+                "observedState": "open",
+                "phase": "closing",
+                "backendPid": 29804,
+                "browserWindowPid": 4736,
+            },
+            "command": {
+                "activeCommandId": "cmd_20260618T020433Z_6dbd6e51",
+                "activeType": "close_workbench",
+                "requestedBy": "launcher_api",
+                "startedAt": "2026-06-18T02:04:33+00:00",
+                "stopManager": False,
+            },
+        },
+    )
+    monkeypatch.setattr(
+        daemon,
+        "observe_workbench",
+        lambda: {
+            "observedState": "closed",
+            "backendPid": 0,
+            "browserLaunchPid": 0,
+            "browserWindowPid": 0,
+            "browserManaged": True,
+            "backendAlive": False,
+            "backendHealthy": False,
+            "backendObserved": False,
+            "backendPort": 8000,
+            "backendPortListening": False,
+            "backendPortOwnerPid": 0,
+            "backendPortOwnerTrusted": False,
+            "backendPortConflict": False,
+            "browserWindowAlive": False,
+            "sessionId": "",
+            "url": "http://127.0.0.1:8000",
+            "lifecycleConsistency": "consistent",
+        },
+    )
+    monkeypatch.setattr(daemon, "is_daemon_running", lambda: False)
+    monkeypatch.setattr(daemon, "load_pid", lambda: 0)
+    monkeypatch.setattr(daemon, "_command_result_is_completed", lambda command_id: command_id.startswith("cmd_"))
+    monkeypatch.setattr(daemon, "_append_event", lambda event_type, payload: events.append((event_type, payload)))
+    monkeypatch.setattr(daemon, "save_state", lambda state: saved_states.append(json.loads(json.dumps(state))) or state)
+
+    snapshot = daemon.load_runtime_snapshot()
+
+    assert snapshot["command"]["activeCommandId"] == ""
+    assert snapshot["command"]["activeType"] == ""
+    assert snapshot["workbench"]["desiredState"] == "closed"
+    assert snapshot["workbench"]["observedState"] == "closed"
+    assert snapshot["workbench"]["phase"] == "steady"
+    assert saved_states
+    assert saved_states[-1]["command"]["activeCommandId"] == ""
+    assert (
+        "command.active_completed_cleared",
+        {
+            "commandId": "cmd_20260618T020433Z_6dbd6e51",
+            "activeType": "close_workbench",
+            "requestedBy": "launcher_api",
+        },
+    ) in events
+
+
 def test_load_runtime_snapshot_marks_missing_managed_window_as_partial(monkeypatch):
     saved_states: list[dict] = []
 
@@ -2431,6 +2506,67 @@ def test_recover_processing_queue_completes_stale_satisfied_stop_manager_close(t
     assert "command_queue.recovered_stale_close_completed" in [event["type"] for event in events]
 
 
+def test_recover_processing_queue_completes_stale_satisfied_launcher_close_from_live_observation(tmp_path, monkeypatch):
+    inbox_dir = tmp_path / "inbox"
+    processing_dir = tmp_path / "processing"
+    results_dir = tmp_path / "results"
+    events_path = tmp_path / "events.jsonl"
+    for path in (inbox_dir, processing_dir, results_dir):
+        path.mkdir(parents=True)
+
+    stale_close = {
+        "commandId": "cmd_20260618T020433Z_6dbd6e51",
+        "type": "close_workbench",
+        "requestedBy": "launcher_api",
+        "requestedAt": "2026-06-18T02:04:33.573938+00:00",
+        "args": {"reason": "launcher_stop_button", "source": "launcher_api", "stopManager": False},
+    }
+    (processing_dir / f"{stale_close['commandId']}.json").write_text(json.dumps(stale_close), encoding="utf-8")
+
+    monkeypatch.setattr(command_queue, "INBOX_DIR", inbox_dir)
+    monkeypatch.setattr(command_queue, "PROCESSING_DIR", processing_dir)
+    monkeypatch.setattr(command_queue, "RESULTS_DIR", results_dir)
+    monkeypatch.setattr(command_queue, "EVENTS_PATH", events_path)
+    monkeypatch.setattr(command_queue, "ensure_runtime_manager_dirs", lambda: None)
+    monkeypatch.setattr(
+        command_queue,
+        "load_state",
+        lambda: {
+            "stateVersion": 146987,
+            "runtimeState": "running",
+            "managerPid": 49544,
+            "daemonRunning": True,
+            "command": {"activeCommandId": stale_close["commandId"], "activeType": "close_workbench"},
+            "workbench": {"desiredState": "closed", "observedState": "open", "phase": "closing"},
+        },
+    )
+    monkeypatch.setattr(
+        workbench_controller,
+        "observe_workbench",
+        lambda recover_browser_window_for_backend_observed=False: {
+            "observedState": "closed",
+            "backendAlive": False,
+            "backendObserved": False,
+            "backendPortListening": False,
+            "backendPortOwnerPid": 0,
+            "browserWindowAlive": False,
+            "browserWindowPid": 0,
+        },
+    )
+
+    command_queue.recover_processing_queue()
+
+    recovered_result = json.loads((results_dir / f"{stale_close['commandId']}.json").read_text(encoding="utf-8"))
+    assert recovered_result["ok"] is True
+    assert recovered_result["completed"] is True
+    assert recovered_result["staleRecoveredCommand"] is True
+    assert recovered_result["recoverySource"] == "live_observation"
+    assert not (processing_dir / f"{stale_close['commandId']}.json").exists()
+    assert list(inbox_dir.glob("*.json")) == []
+    events = [json.loads(line) for line in events_path.read_text(encoding="utf-8").splitlines()]
+    assert "command_queue.recovered_stale_close_completed" in [event["type"] for event in events]
+
+
 def test_recover_processing_queue_preserves_completed_result_without_requeue(tmp_path, monkeypatch):
     inbox_dir = tmp_path / "inbox"
     processing_dir = tmp_path / "processing"
@@ -3569,6 +3705,35 @@ def test_ensure_daemon_running_restarts_stale_source_signature(monkeypatch, tmp_
         ),
     ]
     assert popen_calls == [["python-test", "-m", "core.runtime_manager.cli", "daemon"]]
+
+
+def test_ensure_daemon_running_defers_source_restart_for_recent_lifecycle_queue(monkeypatch):
+    events: list[tuple[str, dict]] = []
+    terminated: list[int] = []
+
+    monkeypatch.setattr(daemon, "load_pid", lambda: 12345)
+    monkeypatch.setattr(daemon, "_is_process_alive", lambda pid: pid == 12345)
+    monkeypatch.setattr(
+        daemon,
+        "load_state",
+        lambda: {
+            "runtimeManager": {"sourceSignature": "old-signature"},
+            "command": {"activeCommandId": "", "startedAt": ""},
+        },
+    )
+    monkeypatch.setattr(daemon, "_process_source_signature", lambda: "new-signature")
+    monkeypatch.setattr(daemon, "_has_recent_lifecycle_queue_command", lambda: True)
+    monkeypatch.setattr(daemon, "_append_event", lambda event_type, payload: events.append((event_type, payload)))
+    monkeypatch.setattr(daemon, "_terminate_daemon_process", lambda pid: terminated.append(pid))
+
+    assert daemon.ensure_daemon_running(python_executable="python-test") is False
+    assert terminated == []
+    assert events == [
+        (
+            "daemon.restart_deferred_lifecycle_command",
+            {"pid": 12345, "reason": "recent_lifecycle_command"},
+        )
+    ]
 
 
 def test_claim_daemon_ownership_blocks_existing_live_pid(monkeypatch, tmp_path):

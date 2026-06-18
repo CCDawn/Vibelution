@@ -32,6 +32,14 @@ from .restart_coordinator import create_restart_intent
 
 DEFERRED_COMMAND_POLL_SECONDS = 10.0
 ACTIVE_LIFECYCLE_INTERRUPT_TYPES = {"open_workbench", "restart_workbench"}
+LIFECYCLE_COMMAND_TYPES = {
+    "open_workbench",
+    "close_workbench",
+    "force_close_workbench",
+    "restart_workbench",
+    "hot_restart_workbench",
+    "toggle_workbench",
+}
 LIFECYCLE_CANCEL_TYPES = {
     "restart": {"restart_workbench"},
     "stop": {"close_workbench"},
@@ -201,7 +209,7 @@ def recover_processing_queue() -> None:
         command = _load_command_file(path)
         if _discard_recovered_command_with_existing_result(path, command):
             continue
-        if _complete_recovered_satisfied_stop_manager_close(path, command):
+        if _complete_recovered_satisfied_close_workbench(path, command):
             continue
         target = INBOX_DIR / path.name
         try:
@@ -214,6 +222,28 @@ def recover_processing_queue() -> None:
             )
         except OSError:
             continue
+
+
+def has_recent_lifecycle_command(*, grace_seconds: float, now: datetime | None = None) -> bool:
+    ensure_runtime_manager_dirs()
+    current = now or datetime.now(timezone.utc)
+    age_limit = max(0.0, float(grace_seconds))
+    for directory in (PROCESSING_DIR, INBOX_DIR):
+        for path in sorted(directory.glob("*.json")):
+            command = _load_command_file(path)
+            if str(command.get("type") or "").strip() not in LIFECYCLE_COMMAND_TYPES:
+                continue
+            for key in ("claimedAt", "startedAt", "requestedAt"):
+                parsed = _parse_datetime(str(command.get(key) or ""))
+                if parsed is not None and (current - parsed).total_seconds() <= age_limit:
+                    return True
+            try:
+                mtime = datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)
+            except OSError:
+                continue
+            if (current - mtime).total_seconds() <= age_limit:
+                return True
+    return False
 
 
 def claim_next_command() -> tuple[Path, dict[str, Any]] | None:
@@ -573,12 +603,15 @@ def _safe_command_id(command_id: str) -> bool:
     return bool(command_id) and all(char.isalnum() or char in {"_", "-"} for char in command_id)
 
 
-def _complete_recovered_satisfied_stop_manager_close(path: Path, command: dict[str, Any]) -> bool:
-    if not _is_stop_manager_close(command):
+def _complete_recovered_satisfied_close_workbench(path: Path, command: dict[str, Any]) -> bool:
+    if not _is_recoverable_close_workbench(command):
         return False
     state = load_state()
+    recovery_source = "state"
     if not _workbench_is_already_closed(state):
-        return False
+        if not _live_observation_says_workbench_closed():
+            return False
+        recovery_source = "live_observation"
     command_id = str(command.get("commandId") or path.stem).strip() or path.stem
     result = {
         "commandId": command_id,
@@ -588,6 +621,7 @@ def _complete_recovered_satisfied_stop_manager_close(path: Path, command: dict[s
         "message": "Recovered stale close command was already satisfied.",
         "stateVersion": int(state.get("stateVersion") or 0) if isinstance(state, dict) else 0,
         "staleRecoveredCommand": True,
+        "recoverySource": recovery_source,
         "stopDaemon": False,
     }
     complete_command(path, result)
@@ -600,14 +634,14 @@ def _complete_recovered_satisfied_stop_manager_close(path: Path, command: dict[s
             "requestedAt": str(command.get("requestedAt") or ""),
             "queuePath": path.name,
             "reason": "workbench_already_closed",
+            "recoverySource": recovery_source,
         },
     )
     return True
 
 
-def _is_stop_manager_close(command: dict[str, Any]) -> bool:
-    args = command.get("args") if isinstance(command.get("args"), dict) else {}
-    return str(command.get("type") or "").strip() == "close_workbench" and bool(args.get("stopManager"))
+def _is_recoverable_close_workbench(command: dict[str, Any]) -> bool:
+    return str(command.get("type") or "").strip() in {"close_workbench", "force_close_workbench"}
 
 
 def _workbench_is_already_closed(state: Any) -> bool:
@@ -618,6 +652,45 @@ def _workbench_is_already_closed(state: Any) -> bool:
     observed = str(workbench.get("observedState") or "").strip()
     phase = str(workbench.get("phase") or "").strip()
     return desired == "closed" and observed == "closed" and phase in {"", "steady", "closing"}
+
+
+def _live_observation_says_workbench_closed() -> bool:
+    try:
+        from . import workbench_controller
+
+        observation = workbench_controller.observe_workbench(recover_browser_window_for_backend_observed=False)
+    except TypeError as exc:
+        if "recover_browser_window_for_backend_observed" not in str(exc):
+            _append_queue_event(
+                "command_queue.recovered_stale_close_observation_failed",
+                {"errorType": type(exc).__name__, "message": truncate_event_text(str(exc))},
+            )
+            return False
+        try:
+            from . import workbench_controller
+
+            observation = workbench_controller.observe_workbench()
+        except Exception as fallback_exc:
+            _append_queue_event(
+                "command_queue.recovered_stale_close_observation_failed",
+                {"errorType": type(fallback_exc).__name__, "message": truncate_event_text(str(fallback_exc))},
+            )
+            return False
+    except Exception as exc:
+        _append_queue_event(
+            "command_queue.recovered_stale_close_observation_failed",
+            {"errorType": type(exc).__name__, "message": truncate_event_text(str(exc))},
+        )
+        return False
+    if not isinstance(observation, dict):
+        return False
+    return bool(
+        str(observation.get("observedState") or "").strip() == "closed"
+        and not observation.get("backendAlive")
+        and not observation.get("backendObserved")
+        and not observation.get("backendPortListening")
+        and not observation.get("browserWindowAlive")
+    )
 
 
 def complete_command(path: Path, result: dict[str, Any]) -> None:
