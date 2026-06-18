@@ -248,6 +248,28 @@ describe("conversationOperations", () => {
     expect(groups[0].operations.map((operation) => operation.sequence)).toEqual([1, 2]);
   });
 
+  it("starts a new ReAct packet when a tool references a different thought sequence", () => {
+    const message: ConversationMessage = {
+      id: "message-related-thought-split",
+      role: "assistant",
+      content: "",
+      timestamp: "2026-06-05T00:00:00Z",
+      feedbackEvents: [
+        { sequence: 5, kind: "tool", status: "done", name: "cli_tool", summary: "first command", relatedThoughtSequence: 4 },
+        { sequence: 6, kind: "thought", status: "done", summary: "下一步", resultPreview: "下一步" },
+        { sequence: 7, kind: "tool", status: "done", name: "grep_search_tool", summary: "search", relatedThoughtSequence: 6 },
+      ],
+    };
+
+    const groups = buildConversationReActOperationGroups(buildConversationOperations(message, labels));
+
+    expect(groups.map((group) => group.id)).toEqual(["react-thought-4", "react-thought-6"]);
+    expect(groups.map((group) => group.operations.map((operation) => operation.sequence))).toEqual([
+      [5],
+      [6, 7],
+    ]);
+  });
+
   it("drops completed thought-only packets while keeping titled action packets", () => {
     const message: ConversationMessage = {
       id: "message-action-packet-title",

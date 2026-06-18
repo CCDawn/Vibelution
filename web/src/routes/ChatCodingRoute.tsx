@@ -2170,6 +2170,7 @@ function mergeAssistantDeltaIntoSessionDetail(
     streamStage: payload.stage || undefined,
     thought: nextThought || undefined,
     feedbackEvents: nextFeedbackEvents,
+    timelineItems: payload.timelineItems ?? previous?.timelineItems,
     metadata: {
       ...(previous?.metadata ?? {}),
       kind: "session_live_overlay",
@@ -2184,6 +2185,7 @@ function mergeAssistantDeltaIntoSessionDetail(
       ...nextLiveMessage,
       mentalSnapshot: previousLiveMessage.mentalSnapshot,
       toolCalls: previousLiveMessage.toolCalls,
+      timelineItems: nextLiveMessage.timelineItems ?? previousLiveMessage.timelineItems,
     };
     return {
       ...detail,
