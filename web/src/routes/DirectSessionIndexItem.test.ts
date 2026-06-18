@@ -8,6 +8,7 @@ import {
   isChildSession,
   sessionUnreadBadgeTitle,
   sessionUnreadCount,
+  sessionModelBadgeLabel,
   sessionModelTooltip,
   sessionAgentMetaLabel,
   sessionListTitle,
@@ -59,15 +60,17 @@ describe("DirectSessionIndexItem helpers", () => {
     expect(sessionAgentMetaLabel(makeSession({ agentCode: "", agentId: "agent-A017" }))).toBe("");
   });
 
-  it("hides generic or English function labels while keeping meaningful Chinese role labels", () => {
-    expect(showSessionFunctionLabel(display({ tone: "chat", functionLabel: "会话入口" }))).toBe(false);
-    expect(showSessionFunctionLabel(display({ tone: "chat", functionLabel: "Chat entry" }))).toBe(false);
+  it("shows readable function labels while keeping raw English role ids out of Chinese cards", () => {
+    expect(showSessionFunctionLabel(display({ tone: "chat", functionLabel: "会话入口" }))).toBe(true);
+    expect(showSessionFunctionLabel(display({ tone: "chat", functionLabel: "Chat entry" }), "en")).toBe(true);
     expect(showSessionFunctionLabel(display({ tone: "chat", functionLabel: "agent-center-review-session" }))).toBe(false);
     expect(showSessionFunctionLabel(display({ tone: "memory", functionLabel: "知识管理员" }))).toBe(true);
   });
 
-  it("uses model icons without surfacing English model identifiers in the Chinese card tooltip", () => {
-    expect(sessionModelTooltip("小米 MiMo V2.5 Pro", "zh")).toBe("模型已绑定");
+  it("surfaces compact model names in the Chinese card badge and tooltip", () => {
+    expect(sessionModelBadgeLabel("小米 MiMo V2.5 Pro")).toBe("小米 MiMo V2.5 Pro");
+    expect(sessionModelBadgeLabel("gpt-5")).toBe("gpt-5");
+    expect(sessionModelTooltip("小米 MiMo V2.5 Pro", "zh")).toBe("模型：小米 MiMo V2.5 Pro");
     expect(sessionModelTooltip("小米模型", "zh")).toBe("模型：小米模型");
     expect(sessionModelTooltip("gpt-5", "en")).toBe("Model: gpt-5");
   });
