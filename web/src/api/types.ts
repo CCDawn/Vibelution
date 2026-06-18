@@ -4188,6 +4188,43 @@ export type TeamWorkflowKnowledgeIngestionStatus = {
   updatedAt: string;
 };
 
+export type TeamWorkflowKnowledgeCollectionIngestionPayload = {
+  schemaVersion: number;
+  teamId: string;
+  status: "completed" | "pending_review" | "precheck_ready" | "blocked" | string;
+  steps: Array<{
+    stageId: string;
+    label: string;
+    status: string;
+    inputCount: number;
+    outputCount: number;
+    detail: string;
+    artifactId: string;
+  }>;
+  sourceQuality: Record<string, unknown>;
+  candidateGraph: TeamWorkflowCandidateGraphBuildPayload | null;
+  precheck: Record<string, unknown> | null;
+  sourceReview: Record<string, unknown> | null;
+  knowledgeSubmission: Record<string, unknown> | null;
+  knowledgeReview: Record<string, unknown> | null;
+  knowledgeBase: {
+    knowledgeBaseId: string;
+    [key: string]: unknown;
+  } | null;
+  statusSnapshot: TeamWorkflowKnowledgeIngestionStatus;
+  summary: {
+    sourceCandidateCount: number;
+    approvedSourceCandidateCount: number;
+    candidateGraphNodeCount?: number;
+    candidateGraphEdgeCount?: number;
+    stewardPackCandidateId?: string;
+    knowledgeBaseId?: string;
+    formalKnowledgeItemCount: number;
+    nextAction: string;
+  };
+  workflow: TeamWorkflowOrchestration;
+};
+
 export type TeamWorkflowCoordinationQueueItem = {
   queue: "pending_transfer" | "needs_rework" | "stewardship" | "blocked" | "active" | string;
   candidateId: string;

@@ -111,7 +111,7 @@ def _stub_source_collection_search_background(monkeypatch):
                 "runId": run_id,
                 "status": "queued",
                 "currentPhase": "queued",
-                "summary": "资料搜集已进入后台执行，页面可继续操作。",
+                "summary": "资料搜索已进入后台执行，页面可继续操作。",
                 "openAssignmentCount": len(assignments),
                 "recordCount": 0,
                 "queryCount": 1,
@@ -2419,6 +2419,75 @@ def test_steward_pack_approval_gate_applies_pending_ingestion_to_formal_knowledg
     assert knowledge_items["summary"]["itemCount"] == 1
 
 
+def test_knowledge_collection_ingestion_runs_agent_gate_to_formal_knowledge(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    steward = agent_directory_service.create_agent_instance(display_name="Knowledge Steward Agent")
+    team = team_service.create_team(
+        name="ai科学研究团队",
+        members=[{"agentId": steward["agentId"], "role": "steward"}],
+    )
+    team_workflow_orchestration_service.register_candidate_source(
+        team["teamId"],
+        {
+            "title": "Predictive coding cortical hierarchy neural network paper",
+            "sourceUrl": "https://doi.org/10.0000/predictive-coding",
+            "sourceKind": "paper",
+            "summary": "Neural predictive coding evidence for neural-network hierarchy and learning.",
+            "tags": ["neuroscience", "algorithm"],
+            "allowedForAnalysis": True,
+            "createdByAgent": "Data Discovery Agent",
+        },
+    )
+    team_workflow_orchestration_service.register_candidate_source(
+        team["teamId"],
+        {
+            "title": "Synaptic plasticity learning rule review",
+            "sourceUrl": "https://doi.org/10.0000/stdp-review",
+            "sourceKind": "review",
+            "summary": "Synaptic plasticity evidence can support learning-rule hypotheses.",
+            "tags": ["neuroscience", "learning"],
+            "allowedForAnalysis": True,
+            "createdByAgent": "Source Acquisition Agent",
+        },
+    )
+
+    response = team_workflow_orchestration_service.run_knowledge_collection_ingestion(
+        team["teamId"],
+        {
+            "sourceQualityAgentId": "资料审查 Agent",
+            "candidateGraphAgentId": "候选关系 Agent",
+            "stewardAgentId": steward["agentId"],
+            "targetDomain": "神经学启发神经网络算法",
+            "maxCandidates": 10,
+        },
+    )
+    knowledge_base_id = response["summary"]["knowledgeBaseId"]
+    knowledge_items = team_knowledge_service.list_knowledge_items(
+        knowledge_base_id,
+        agent_id=steward["agentId"],
+    )
+    step_ids = [step["stageId"] for step in response["steps"]]
+
+    assert response["status"] == "completed"
+    assert step_ids == [
+        "source_review",
+        "candidate_graph",
+        "steward_pack",
+        "source_gate",
+        "knowledge_proposal",
+        "official_knowledge",
+    ]
+    assert response["sourceQuality"]["officialBoundary"]["writesFormalKnowledge"] is False
+    assert response["candidateGraph"]["graph"]["officialBoundary"]["writesOfficialGraph"] is False
+    assert response["precheck"]["precheck"]["officialBoundary"]["writesOfficialKnowledge"] is False
+    assert response["sourceReview"]["centralSource"]["centralSourceId"]
+    assert response["knowledgeSubmission"]["candidate"]["currentState"] == "steward_pending_knowledge_review"
+    assert response["knowledgeReview"]["candidate"]["currentState"] == "official_synced"
+    assert response["knowledgeReview"]["knowledgeIngestion"]["officialSyncRecord"]["writesOfficialKnowledge"] is True
+    assert response["statusSnapshot"]["summary"]["formalKnowledgeItemCount"] == 1
+    assert knowledge_items["summary"]["itemCount"] == 1
+
+
 def test_knowledge_ingestion_status_tracks_pending_and_official_sync(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     steward = agent_directory_service.create_agent_instance(display_name="Knowledge Steward Agent")
@@ -2666,7 +2735,7 @@ def test_knowledge_ingestion_status_tracks_pending_and_official_sync(tmp_path, m
         {
             "code": "knowledge_ingestion_operational",
             "severity": "ready",
-            "message": "知识搜集、筛选、共享记忆和图谱同步链路已跑通。",
+            "message": "资料搜索、提炼、审查和入库链路已跑通。",
             "nextAction": "",
             "workflowNode": "official_sync",
         }
