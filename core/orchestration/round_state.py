@@ -23,6 +23,8 @@ class RoundStateController:
     consecutive_bookkeeping_tool_only_steps: int = 0
     delegation_failures: int = 0
     substantive_tool_calls: int = 0
+    last_response_tool_call_count: int = 0
+    last_response_visible_text: str = ""
 
     BOOKKEEPING_TOOL_NAMES: ClassVar[set[str]] = {
         "get_git_status_summary_tool",
@@ -71,6 +73,8 @@ class RoundStateController:
         visible_text: str = "",
         tool_names: Iterable[str] | None = None,
     ) -> None:
+        self.last_response_tool_call_count = max(0, int(tool_call_count or 0))
+        self.last_response_visible_text = str(visible_text or "")
         if tool_call_count > 0:
             substantive_count = self._substantive_tool_count(tool_call_count, tool_names)
             self.substantive_tool_calls += substantive_count
@@ -143,7 +147,12 @@ class RoundStateController:
         }
 
     def finish_success(self, last_turn_failed: bool) -> bool:
-        return self.turn_had_progress and not last_turn_failed
+        return self.turn_had_progress and not last_turn_failed and not self.exhausted_without_final_answer()
+
+    def exhausted_without_final_answer(self) -> bool:
+        if self.iteration < self.max_iterations:
+            return False
+        return self.last_response_tool_call_count > 0 or not self.last_response_visible_text.strip()
 
     def final_stats(self) -> Dict[str, int]:
         return {

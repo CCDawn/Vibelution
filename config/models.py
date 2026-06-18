@@ -583,7 +583,7 @@ class AgentConfig(BaseModel):
         description="苏醒间隔（秒）"
     )
     max_iterations: int = Field(
-        default=10,
+        default=200,
         gt=0,
         description="单次苏醒的最大工具调用次数"
     )
