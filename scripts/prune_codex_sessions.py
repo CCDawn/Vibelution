@@ -377,6 +377,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--include-logs", action="store_true", help="Also prune logs_2.sqlite by the same cutoff.")
     parser.add_argument("--logs-db", type=Path, default=None, help="Override logs DB path.")
     parser.add_argument("--no-vacuum", action="store_true", help="Skip VACUUM when applying logs DB pruning.")
+    parser.add_argument(
+        "--allow-session-prune",
+        action="store_true",
+        help="Allow rewriting session JSONL files. Dangerous: can hide or empty old Codex conversations.",
+    )
     parser.add_argument("--report", type=Path, default=None)
     args = parser.parse_args(argv)
 
@@ -402,6 +407,11 @@ def main(argv: list[str] | None = None) -> int:
     report_path = args.report or backup_root / "prune_report.json"
 
     session_files = discover_session_files(session_roots)
+    if args.apply and session_files and not args.allow_session_prune:
+        parser.error(
+            "Refusing to rewrite Codex session JSONL files without --allow-session-prune. "
+            "Use --session-root with an empty directory for logs-only cleanup."
+        )
     stats = [
         prune_session_file(
             path,
