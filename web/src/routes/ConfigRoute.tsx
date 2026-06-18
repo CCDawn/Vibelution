@@ -505,6 +505,8 @@ export const CONFIG_COPY = {
     avatarImageCurrent: "当前头像",
     avatarImageEmpty: "未设置头像图片",
     avatarImageClickToUpload: "点击头像上传",
+    userProfileAvatarGroupTitle: "头像设置",
+    userProfileAvatarGroupHint: "头像预设和本地头像图片只影响前端展示，不会把图片内容传给模型。",
     uploadThemeBackgroundImage: "上传背景图片",
     clearThemeBackgroundImage: "清除背景图片",
     themeBackgroundPresetTitle: "内置背景",
@@ -743,6 +745,8 @@ export const CONFIG_COPY = {
     avatarImageCurrent: "Current avatar",
     avatarImageEmpty: "No avatar image set",
     avatarImageClickToUpload: "Click avatar to upload",
+    userProfileAvatarGroupTitle: "Avatar settings",
+    userProfileAvatarGroupHint: "The avatar preset and local avatar image affect frontend display only. Image content is not sent to the model.",
     uploadThemeBackgroundImage: "Upload background image",
     clearThemeBackgroundImage: "Clear background image",
     themeBackgroundPresetTitle: "Built-in backgrounds",
@@ -1384,6 +1388,19 @@ function LogHelperCard({ helper, lang, copy }: { helper: LogHelper; lang: Config
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function isConfigObjectListValue(value: unknown, kind: ConfigEditorMeta["kind"] | undefined): value is Record<string, unknown>[] {
+  if (!Array.isArray(value)) {
+    return false;
+  }
+  if (kind === "object_list") {
+    return true;
+  }
+  if (kind === "string_list") {
+    return false;
+  }
+  return value.length > 0 && value.every((item) => isPlainObject(item));
 }
 
 function getConfigValueAtPath(root: unknown, path: string): unknown {
@@ -2188,19 +2205,47 @@ function ConfigSectionEditor({
     );
   }
 
+  function renderConfigField(childValue: unknown, childPath: string, mode: "view" | "edit") {
+    return mode === "edit" ? renderFieldEditor(childValue, childPath) : renderFieldView(childValue, childPath);
+  }
+
+  function renderUserProfileBody(nodeValue: Record<string, unknown>, absolutePath: string, mode: "view" | "edit") {
+    const field = (key: string) => renderConfigField(nodeValue[key], `${absolutePath}.${key}`, mode);
+    return (
+      <div className={styles.userProfileLayout}>
+        <div className={styles.userProfileIdentityFields}>
+          {field("display_name")}
+          {field("bio")}
+        </div>
+        <div className={styles.userProfilePreferencesField}>{field("preferences")}</div>
+        <div className={styles.userProfileAvatarGroup}>
+          <div className={styles.userProfileAvatarHeader}>
+            <strong>{copy.userProfileAvatarGroupTitle}</strong>
+            <span>{copy.userProfileAvatarGroupHint}</span>
+          </div>
+          <div className={styles.userProfileAvatarFields}>
+            {field("avatar_preset")}
+            {field("avatar_image_path")}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   function renderObjectBody(nodeValue: Record<string, unknown>, absolutePath: string, mode: "view" | "edit") {
     const entries = Object.entries(nodeValue);
     if (!entries.length) {
       return <p className={styles.helperText}>{copy.emptyValue}</p>;
+    }
+    if (absolutePath === "user_profile") {
+      return renderUserProfileBody(nodeValue, absolutePath, mode);
     }
     return (
       <div className={styles.treeGrid}>
         {entries.map(([key, childValue]) => {
           const childPath = `${absolutePath}.${key}`;
           const childMetaKind = metaMap[childPath]?.kind;
-          const childIsObjectList =
-            Array.isArray(childValue) &&
-            (childMetaKind === "object_list" || childValue.every((item) => isPlainObject(item)));
+          const childIsObjectList = isConfigObjectListValue(childValue, childMetaKind);
           const childIsObject = isPlainObject(childValue);
           if (childIsObject || childIsObjectList) {
             const childExpanded = Boolean(expandedPaths[childPath]);
@@ -2210,7 +2255,7 @@ function ConfigSectionEditor({
               </div>
             );
           }
-          return mode === "edit" ? renderFieldEditor(childValue, childPath) : renderFieldView(childValue, childPath);
+          return renderConfigField(childValue, childPath, mode);
         })}
       </div>
     );
@@ -2218,7 +2263,7 @@ function ConfigSectionEditor({
 
   function renderNode(nodeValue: unknown, absolutePath: string, mode: "view" | "edit", itemIndex?: number) {
     const isRoot = absolutePath === section.path;
-    if (Array.isArray(nodeValue) && nodeValue.every((item) => isPlainObject(item))) {
+    if (isConfigObjectListValue(nodeValue, metaMap[absolutePath]?.kind)) {
       if (isRoot) {
         return nodeValue.length ? (
           <div className={styles.treeStack}>

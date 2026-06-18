@@ -1959,6 +1959,71 @@
   grid-template-columns: minmax(132px, 0.38fr) minmax(0, 1fr);
 }
 
+.userProfileLayout {
+  display: grid;
+  gap: 7px;
+}
+
+.userProfileIdentityFields,
+.userProfileAvatarFields {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.userProfileIdentityFields {
+  grid-template-columns: repeat(2, minmax(220px, 1fr));
+}
+
+.userProfilePreferencesField,
+.userProfileAvatarGroup {
+  min-width: 0;
+}
+
+.userProfileAvatarGroup {
+  display: grid;
+  gap: 6px;
+}
+
+.userProfileAvatarHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+  padding: 0 2px;
+}
+
+.userProfileAvatarHeader strong {
+  flex: 0 0 auto;
+  color: var(--fg-primary);
+  font-size: 0.8rem;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.userProfileAvatarHeader span {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg-tertiary);
+  font-size: 0.72rem;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.userProfileAvatarFields {
+  grid-template-columns: minmax(210px, 0.4fr) minmax(320px, 0.6fr);
+}
+
+.userProfileLayout .treeFieldCardView .treeHint {
+  -webkit-line-clamp: 1;
+}
+
+.userProfileAvatarFields .treeFieldCardView .treeHint {
+  display: none;
+}
+
 .themeBackgroundImageCard {
   grid-column: 1 / -1;
   grid-template-columns: 1fr;
@@ -2637,6 +2702,21 @@
 
   .treeFieldCardView {
     grid-template-columns: 1fr;
+  }
+
+  .userProfileIdentityFields,
+  .userProfileAvatarFields {
+    grid-template-columns: 1fr;
+  }
+
+  .userProfileAvatarHeader {
+    align-items: start;
+    flex-direction: column;
+    gap: 3px;
+  }
+
+  .userProfileAvatarHeader span {
+    white-space: normal;
   }
 
   .modelLibrarySection > .sectionText {
