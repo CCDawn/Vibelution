@@ -118,4 +118,31 @@ describe("ConfigRoute layout contract", () => {
     expect(stylesSource).toContain("width: 56px");
     expect(stylesSource).toContain("white-space: nowrap");
   });
+
+  it("keeps empty string-list settings out of object-list layout blocks", () => {
+    expect(routeSource).toContain("function isConfigObjectListValue");
+    expect(routeSource).toContain('kind === "string_list"');
+    expect(routeSource).toContain("value.length > 0");
+    expect(routeSource).toContain("isConfigObjectListValue(childValue, childMetaKind)");
+    expect(routeSource).toContain("isConfigObjectListValue(nodeValue, metaMap[absolutePath]?.kind)");
+    expect(routeSource).not.toContain("childValue.every((item) => isPlainObject(item))");
+    expect(routeSource).not.toContain("Array.isArray(nodeValue) && nodeValue.every");
+  });
+
+  it("uses a dedicated user profile layout for identity, preferences, and avatar settings", () => {
+    expect(routeSource).toContain("function renderUserProfileBody");
+    expect(routeSource).toContain('absolutePath === "user_profile"');
+    expect(routeSource).toContain("styles.userProfileLayout");
+    expect(routeSource).toContain("styles.userProfileIdentityFields");
+    expect(routeSource).toContain("styles.userProfilePreferencesField");
+    expect(routeSource).toContain("styles.userProfileAvatarGroup");
+    expect(routeSource).toContain("styles.userProfileAvatarFields");
+    expect(routeSource).toContain("copy.userProfileAvatarGroupTitle");
+    expect(routeSource).toContain("copy.userProfileAvatarGroupHint");
+    expect(stylesSource).toContain(".userProfileLayout");
+    expect(stylesSource).toContain(".userProfileIdentityFields");
+    expect(stylesSource).toContain(".userProfileAvatarFields");
+    expect(stylesSource).toContain("grid-template-columns: repeat(2, minmax(220px, 1fr))");
+    expect(stylesSource).toContain("grid-template-columns: minmax(210px, 0.4fr) minmax(320px, 0.6fr)");
+  });
 });
