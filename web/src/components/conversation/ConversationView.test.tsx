@@ -150,6 +150,8 @@ describe("ConversationView edit resend affordance", () => {
     const operationItemRule = cssRule(".operationItem");
     const reactGroupRule = cssRule(".reActOperationGroup");
     const reactThoughtRule = cssRule(".reActThoughtText");
+    const timelineThoughtRule = cssRule(".timelineThoughtText");
+    const reactResultToggleRule = cssRule(".reActResultToggle");
 
     expect(traceSummaryRule).toContain("border: 0");
     expect(reactSummaryRule).toContain("border: 0");
@@ -165,6 +167,9 @@ describe("ConversationView edit resend affordance", () => {
     expect(operationDetailsRule).toContain("border: 0");
     expect(operationItemRule).toContain("width: fit-content");
     expect(operationItemRule).not.toContain("minmax(0, 1fr)");
+    expect(timelineThoughtRule).toContain("border: 0");
+    expect(timelineThoughtRule).toContain("background: transparent");
+    expect(reactResultToggleRule).toContain("border: 0");
   });
 
   it("can render a read-only transcript without the composer", () => {
@@ -1847,10 +1852,10 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).not.toContain("1 步");
     expect(html).not.toContain("1/1");
     expect(html).toContain('title="展开工具详情"');
-    expect(html).toContain("grep_search_tool raw result");
+    expect(html).not.toContain("grep_search_tool raw result");
   });
 
-  it("renders structured tool results as readable output instead of raw JSON", () => {
+  it("keeps structured tool results collapsed by default instead of showing raw JSON", () => {
     const html = renderConversation([
       {
         id: "message-feedback-structured-result",
@@ -1886,7 +1891,8 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).not.toContain("工具调用");
     expect(html).not.toContain("结果</");
     expect(html).toContain("搜索");
-    expect(html).toContain("找到 8 处缓存统计入口");
+    expect(html).toContain("搜索缓存统计代码");
+    expect(html).not.toContain("找到 8 处缓存统计入口");
     expect(html).not.toContain("&quot;summary&quot;");
     expect(html).not.toContain("原始名称");
     expect(html).not.toContain("事件索引");
@@ -1948,6 +1954,56 @@ describe("ConversationView edit resend affordance", () => {
     expect(html.match(/statusSpinner/g)?.length).toBe(1);
     expect(html).toContain("opening session_service.py");
     expect(html).toContain("已读取文件。");
+  });
+
+  it("only animates the latest running timeline item", () => {
+    const html = renderConversation([
+      {
+        id: "message-running-timeline",
+        role: "assistant",
+        content: "",
+        timestamp: "2026-06-18T00:01:00Z",
+        streaming: true,
+        feedbackEvents: [
+          {
+            sequence: 1,
+            kind: "thought",
+            status: "running",
+            summary: "先确认上下文",
+            resultPreview: "先确认上下文",
+          },
+          {
+            sequence: 2,
+            kind: "thought",
+            status: "running",
+            summary: "再查看当前渲染",
+            resultPreview: "再查看当前渲染",
+          },
+        ],
+        timelineItems: [
+          {
+            id: "timeline-thought-1",
+            kind: "thought",
+            status: "running",
+            text: "先确认上下文",
+            preview: "先确认上下文",
+            defaultExpanded: true,
+          },
+          {
+            id: "timeline-thought-2",
+            kind: "thought",
+            status: "running",
+            text: "再查看当前渲染",
+            preview: "再查看当前渲染",
+            defaultExpanded: true,
+          },
+        ],
+      },
+    ]);
+
+    expect(html).toContain("先确认上下文");
+    expect(html).toContain("再查看当前渲染");
+    expect(html.match(/statusSpinner/g)?.length).toBe(1);
   });
 
   it("does not keep completed auxiliary sections spinning while a later tool is active", () => {

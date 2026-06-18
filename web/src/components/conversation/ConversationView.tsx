@@ -1084,12 +1084,15 @@ export function ConversationView({
     return "tool";
   }
 
-  function operationStatusIcon(operation: ConversationOperation) {
+  function operationStatusIcon(operation: ConversationOperation, animateRunning = true) {
     const status = operation.status.trim().toLowerCase();
     if (["done", "success", "completed", "succeeded"].includes(status)) {
       return <CheckCircle2 size={14} />;
     }
     if (isRunningOperationStatus(status)) {
+      if (!animateRunning) {
+        return <CircleDot size={14} />;
+      }
       return (
         <>
           <LoaderCircle className={styles.statusSpinner} size={14} />
@@ -1680,31 +1683,49 @@ export function ConversationView({
     );
   }
 
+  function activeTimelineItemId(message: ConversationMessage, items: ConversationTimelineItem[]) {
+    if (!message.streaming) {
+      return "";
+    }
+    for (let index = items.length - 1; index >= 0; index -= 1) {
+      const item = items[index];
+      if (item?.kind !== "assistant_text" && item?.status === "running") {
+        return item.id;
+      }
+    }
+    return "";
+  }
+
   function renderConversationTimeline(message: ConversationMessage, items: ConversationTimelineItem[]) {
     if (items.length === 0) {
       return null;
     }
+    const activeItemId = activeTimelineItemId(message, items);
     return (
       <div className={styles.conversationCellTimeline}>
-        {items.map((item) => renderConversationTimelineItem(message, item))}
+        {items.map((item) => renderConversationTimelineItem(message, item, item.id === activeItemId))}
       </div>
     );
   }
 
-  function renderConversationTimelineItem(message: ConversationMessage, item: ConversationTimelineItem) {
+  function renderConversationTimelineItem(message: ConversationMessage, item: ConversationTimelineItem, isActiveTimelineItem: boolean) {
     if (item.kind === "thought") {
-      return renderThoughtTimelineItem(message, item);
+      return renderThoughtTimelineItem(message, item, isActiveTimelineItem);
     }
     if (item.kind === "assistant_text") {
       return renderAssistantTextTimelineItem(message, item);
     }
     if (item.kind === "command_group") {
-      return renderCommandGroupTimelineItem(item);
+      return renderCommandGroupTimelineItem(item, isActiveTimelineItem);
     }
-    return renderOperationTimelineItem(item);
+    return renderOperationTimelineItem(item, isActiveTimelineItem);
   }
 
-  function renderThoughtTimelineItem(message: ConversationMessage, item: Extract<ConversationTimelineItem, { kind: "thought" }>) {
+  function renderThoughtTimelineItem(
+    message: ConversationMessage,
+    item: Extract<ConversationTimelineItem, { kind: "thought" }>,
+    isActiveTimelineItem: boolean,
+  ) {
     const expanded = getExpansionState(message.id, item.id, item.defaultExpanded);
     return (
       <section key={item.id} className={styles.timelineThoughtCell}>
@@ -1715,7 +1736,7 @@ export function ConversationView({
           onClick={() => toggleSection(message.id, item.id, item.defaultExpanded)}
           title={expanded ? t("thoughtProcessVisible") : t("thoughtProcessHidden")}
         >
-          {item.status === "running" ? <LoaderCircle className={styles.statusSpinner} size={14} /> : <BrainCircuit size={14} />}
+          {isActiveTimelineItem && item.status === "running" ? <LoaderCircle className={styles.statusSpinner} size={14} /> : <BrainCircuit size={14} />}
           <span>{lang === "zh" ? "思考" : "Thinking"}</span>
           {!expanded && item.preview ? <span className={styles.timelineCellPreview}>{item.preview}</span> : null}
           {expanded ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
@@ -1750,7 +1771,10 @@ export function ConversationView({
     return "";
   }
 
-  function renderCommandGroupTimelineItem(item: Extract<ConversationTimelineItem, { kind: "command_group" }>) {
+  function renderCommandGroupTimelineItem(
+    item: Extract<ConversationTimelineItem, { kind: "command_group" }>,
+    isActiveTimelineItem: boolean,
+  ) {
     const expanded = getExpansionState(item.id, "details", false);
     const duration = formatDuration(
       item.operations
@@ -1772,7 +1796,7 @@ export function ConversationView({
           onClick={() => toggleSection(item.id, "details", false)}
           title={expanded ? t("executionDetailsVisible") : t("executionDetailsHidden")}
         >
-          {item.status === "running" ? <LoaderCircle className={styles.statusSpinner} size={14} /> : <TerminalSquare size={14} />}
+          {isActiveTimelineItem && item.status === "running" ? <LoaderCircle className={styles.statusSpinner} size={14} /> : <TerminalSquare size={14} />}
           <span>{item.title}</span>
           {item.summary ? <span className={styles.timelineCellPreview}>{item.summary}</span> : null}
           {visibleStatus ? <span className={styles.timelineCellMeta}>{visibleStatus}</span> : null}
@@ -1794,7 +1818,10 @@ export function ConversationView({
     );
   }
 
-  function renderOperationTimelineItem(item: Extract<ConversationTimelineItem, { kind: "operation" }>) {
+  function renderOperationTimelineItem(
+    item: Extract<ConversationTimelineItem, { kind: "operation" }>,
+    isActiveTimelineItem: boolean,
+  ) {
     const operation = item.operation;
     const detailsId = `timeline-operation-detail-${operation.id}`;
     const detailsExpanded = getExpansionState(operation.id, "details", false);
@@ -1803,7 +1830,7 @@ export function ConversationView({
     const duration = formatDuration(operation.durationSeconds);
     const computerUseResult = renderComputerUseResult(operation);
     const readableResult = readableOperationResult(operation);
-    const showReadableResult = Boolean(readableResult && readableResult !== item.summary.trim());
+    const showReadableResult = Boolean(operation.kind !== "tool" && readableResult && readableResult !== item.summary.trim());
     const visibleStatus = timelineStatusText(item.status);
     const className = [
       styles.timelineOperationCell,
@@ -1812,7 +1839,7 @@ export function ConversationView({
     return (
       <section key={item.id} className={className}>
         <div className={styles.timelineCellHeader}>
-          {operationStatusIcon(operation)}
+          {operationStatusIcon(operation, isActiveTimelineItem)}
           <span>{item.title}</span>
           {item.summary ? <span className={styles.timelineCellPreview}>{item.summary}</span> : null}
           {visibleStatus ? <span className={styles.timelineCellMeta}>{visibleStatus}</span> : null}
@@ -1923,25 +1950,45 @@ export function ConversationView({
     );
   }
 
-  function renderReActResultSection(group: ConversationReActOperationGroup) {
+  function renderReActResultSection(messageId: string, group: ConversationReActOperationGroup) {
     const results = reActResultItems(group);
     if (results.length === 0) {
       return null;
     }
+    const sectionId = `feedback-react-results-${group.id}`;
+    const bodyId = `${sectionId}-body`;
+    const expanded = getExpansionState(messageId, sectionId, false);
+    const label = lang === "zh"
+      ? results.length > 1 ? `结果 ${results.length}` : "结果"
+      : results.length > 1 ? `${results.length} results` : "Result";
     return (
       <section className={styles.reActOperationSection}>
-        <span className={styles.reActOperationSectionLabel}>{lang === "zh" ? "结果" : "Results"}</span>
-        <div className={styles.reActResultList}>
-          {results.map((item) => (
-            <div
-              key={item.id}
-              className={`${styles.reActResultItem} ${item.tone === "failed" ? styles.reActResultItem_failed : ""}`}
-            >
-              <span className={styles.reActResultLabel}>{item.label}</span>
-              <pre className={styles.reActResultValue}>{item.value}</pre>
-            </div>
-          ))}
-        </div>
+        <button
+          type="button"
+          className={styles.reActResultToggle}
+          aria-expanded={expanded}
+          aria-controls={bodyId}
+          onClick={() => toggleSection(messageId, sectionId, false)}
+          title={expanded
+            ? lang === "zh" ? "折叠工具结果" : "Collapse tool results"
+            : lang === "zh" ? "展开工具结果" : "Expand tool results"}
+        >
+          <span className={styles.reActOperationSectionLabel}>{label}</span>
+          {expanded ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
+        </button>
+        {expanded ? (
+          <div id={bodyId} className={styles.reActResultList}>
+            {results.map((item) => (
+              <div
+                key={item.id}
+                className={`${styles.reActResultItem} ${item.tone === "failed" ? styles.reActResultItem_failed : ""}`}
+              >
+                <span className={styles.reActResultLabel}>{item.label}</span>
+                <pre className={styles.reActResultValue}>{item.value}</pre>
+              </div>
+            ))}
+          </div>
+        ) : null}
       </section>
     );
   }
@@ -1981,7 +2028,7 @@ export function ConversationView({
           <div className={styles.reActOperationBody}>
             {renderReActThoughtSection(group)}
             {renderReActActionSection(group)}
-            {renderReActResultSection(group)}
+            {renderReActResultSection(messageId, group)}
           </div>
         ) : null}
       </section>

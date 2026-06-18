@@ -954,19 +954,35 @@ button.timelineCellHeader:hover,
 }
 
 .timelineThoughtText {
+  position: relative;
   min-width: 0;
   max-width: 100%;
   margin: 0;
-  padding: 8px 10px;
-  border-left: 2px solid color-mix(in srgb, var(--accent-cool-2) 45%, transparent);
-  border-radius: 0 4px 4px 0;
-  background: color-mix(in srgb, var(--surface-card) 42%, transparent);
+  padding: 5px 0 5px 13px;
+  border: 0;
+  background: transparent;
   color: color-mix(in srgb, var(--fg-secondary) 95%, transparent);
   font-family: inherit;
   font-size: 0.86rem;
   line-height: 1.72;
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+.timelineThoughtText::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0.42em;
+  bottom: 0.42em;
+  width: 1px;
+  border-radius: 999px;
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--accent-cool-2) 20%, transparent),
+    color-mix(in srgb, var(--accent-cool-2) 58%, transparent) 42%,
+    color-mix(in srgb, var(--accent-warm) 30%, transparent)
+  );
 }
 
 .timelineAssistantTextCell {
@@ -1216,6 +1232,26 @@ button.timelineCellHeader:hover,
 }
 
 .reActToolDetailToggle:hover {
+  color: var(--fg-primary);
+}
+
+.reActResultToggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: start;
+  gap: 5px;
+  width: fit-content;
+  max-width: 100%;
+  min-height: 20px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--fg-tertiary);
+  cursor: pointer;
+  font: inherit;
+}
+
+.reActResultToggle:hover {
   color: var(--fg-primary);
 }
 
