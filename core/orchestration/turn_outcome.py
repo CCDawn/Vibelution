@@ -25,6 +25,8 @@ class TurnFinalization:
     turn_success: bool
     ui_status: str
     turn_stats: Dict[str, int]
+    max_iteration_exhausted_without_final_answer: bool = False
+    stop_reason: str = ""
 
 
 @dataclass
@@ -481,12 +483,21 @@ class TurnOutcomeController:
 
     def finalize_round(self, *, round_state) -> TurnFinalization:
         last_turn_failed = round_state.consecutive_failures > 0
+        exhausted_without_final_answer = round_state.exhausted_without_final_answer()
         turn_success = round_state.finish_success(last_turn_failed)
+        stop_reason = ""
+        if exhausted_without_final_answer:
+            stop_reason = (
+                f"已达到本轮最大迭代次数 {round_state.max_iterations}，"
+                "模型仍在调用工具或未输出最终可见回答；本轮未完成，请发送“继续”或缩小任务后重试。"
+            )
         return TurnFinalization(
             last_turn_failed=last_turn_failed,
             turn_success=turn_success,
             ui_status="SUCCESS" if turn_success else ("ERROR" if last_turn_failed else "IDLE"),
             turn_stats=round_state.final_stats(),
+            max_iteration_exhausted_without_final_answer=exhausted_without_final_answer,
+            stop_reason=stop_reason,
         )
 
 

@@ -1961,6 +1961,26 @@ class TestToolMessageFlow:
         state.note_response_tools(0, "")
         assert state.consecutive_tool_only_steps == 0
 
+    def test_round_state_marks_iteration_exhaustion_without_final_answer(self):
+        state = RoundStateController(max_iterations=2)
+
+        state.next_iteration()
+        state.note_response_tools(1, "", tool_names=["read_file_tool"])
+        assert state.exhausted_without_final_answer() is False
+
+        state.next_iteration()
+        state.note_response_tools(1, "", tool_names=["grep_search_tool"])
+        assert state.exhausted_without_final_answer() is True
+        assert state.finish_success(False) is False
+
+        recovered = RoundStateController(max_iterations=2)
+        recovered.next_iteration()
+        recovered.next_iteration()
+        recovered.note_response_tools(0, "这是最终回答")
+        recovered.note_progress()
+        assert recovered.exhausted_without_final_answer() is False
+        assert recovered.finish_success(False) is True
+
     def test_round_state_tracks_bookkeeping_tools_as_no_new_evidence(self):
         state = RoundStateController(max_iterations=5)
 
@@ -1996,6 +2016,24 @@ class TestToolMessageFlow:
         assert finalization.turn_success is True
         assert finalization.ui_status == "SUCCESS"
         assert finalization.turn_stats["tool_calls"] == 2
+
+    def test_turn_outcome_controller_warns_when_max_iterations_end_on_tool_call(self):
+        state = RoundStateController(max_iterations=1)
+        state.next_iteration()
+        state.note_progress()
+        state.note_response_tools(1, "", tool_names=["grep_search_tool"])
+        state.add_tool_calls(1)
+        controller = TurnOutcomeController(
+            max_consecutive_failures=3,
+            get_attention_snapshot=lambda: {},
+        )
+
+        finalization = controller.finalize_round(round_state=state)
+
+        assert finalization.turn_success is False
+        assert finalization.max_iteration_exhausted_without_final_answer is True
+        assert "最大迭代次数 1" in finalization.stop_reason
+        assert finalization.ui_status == "IDLE"
 
     def test_close_transaction_turn_complete_can_be_suppressed_for_pending_post_close_action(self):
         action = ToolLifecycleBridge.derive_lifecycle_action(

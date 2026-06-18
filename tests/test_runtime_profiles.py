@@ -84,7 +84,7 @@ def test_safe_remote_profile_applies_remote_guardrails():
     assert primary.timeout == 120
     assert primary.connect_timeout == 20
     assert config.llm.discovery.enabled is True
-    assert config.agent.max_iterations == 60
+    assert config.agent.max_iterations == 200
 
 
 def test_web_chat_continuation_limit_is_configurable():
