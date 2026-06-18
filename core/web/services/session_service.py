@@ -1957,13 +1957,21 @@ class SessionTurnCapture:
         error: Any = "",
         duration_ms: Any = None,
         timeout_seconds: Any = None,
+        transport_status: Any = None,
+        semantic_status: Any = None,
+        failure_class: Any = None,
+        exit_code: Any = None,
+        timed_out: Any = None,
+        result_kind: Any = None,
+        truncated: Any = None,
+        original_length: Any = None,
     ) -> None:
         tool_name = str(name or "").strip()
         if not tool_name:
             return
         entry = {
             "name": tool_name,
-            "status": _normalize_tool_call_status(status, default="running"),
+            "status": _normalize_tool_call_status(semantic_status or status, default="running"),
         }
         cleaned_summary = trim_lines(summary or "", max_lines=2)
         if cleaned_summary:
@@ -1985,6 +1993,19 @@ class SessionTurnCapture:
         numeric_timeout = _coerce_tool_number(timeout_seconds)
         if numeric_timeout is not None:
             entry["timeoutSeconds"] = numeric_timeout
+        _copy_tool_result_fact_fields(
+            {
+                "transportStatus": transport_status,
+                "semanticStatus": semantic_status,
+                "failureClass": failure_class,
+                "exitCode": exit_code,
+                "timedOut": timed_out,
+                "resultKind": result_kind,
+                "truncated": truncated,
+                "originalLength": original_length,
+            },
+            entry,
+        )
         related_thought_sequence = self._latest_thought_sequence or 0
         for index in range(len(self.tool_calls) - 1, -1, -1):
             existing = self.tool_calls[index]
@@ -2030,6 +2051,14 @@ class SessionTurnCapture:
             "durationMs",
             "durationSeconds",
             "timeoutSeconds",
+            "transportStatus",
+            "semanticStatus",
+            "failureClass",
+            "exitCode",
+            "timedOut",
+            "resultKind",
+            "truncated",
+            "originalLength",
             "tracePath",
         ):
             if key in tool_call:
@@ -2068,6 +2097,14 @@ class SessionTurnCapture:
                     "durationMs",
                     "durationSeconds",
                     "timeoutSeconds",
+                    "transportStatus",
+                    "semanticStatus",
+                    "failureClass",
+                    "exitCode",
+                    "timedOut",
+                    "resultKind",
+                    "truncated",
+                    "originalLength",
                     "tracePath",
                 ):
                     if key in tool_call:
@@ -14208,13 +14245,56 @@ def _normalize_tool_call_status(value: Any, *, default: str = "done") -> str:
         "in_progress",
         "timeout",
         "timed_out",
-    }:
+        }:
         if status in {"success", "succeeded", "completed", "finished", "ready"}:
             return "done"
-        if status in {"error", "timeout", "timed_out"}:
+        if status == "error":
             return "failed"
+        if status in {"timeout", "timed_out"}:
+            return "timeout"
         return status
     return default
+
+
+_TOOL_RESULT_FACT_ALIASES: dict[str, tuple[str, ...]] = {
+    "transportStatus": ("transportStatus", "transport_status"),
+    "semanticStatus": ("semanticStatus", "semantic_status"),
+    "failureClass": ("failureClass", "failure_class"),
+    "exitCode": ("exitCode", "exit_code", "returncode", "return_code"),
+    "timedOut": ("timedOut", "timed_out"),
+    "resultKind": ("resultKind", "result_kind"),
+    "truncated": ("truncated",),
+    "originalLength": ("originalLength", "original_length"),
+}
+
+
+def _first_present_mapping_value(source: dict[str, Any], aliases: tuple[str, ...]) -> Any:
+    for key in aliases:
+        if key in source and source.get(key) is not None:
+            return source.get(key)
+    return None
+
+
+def _copy_tool_result_fact_fields(source: dict[str, Any], target: dict[str, Any]) -> None:
+    if not isinstance(source, dict):
+        return
+    for canonical, aliases in _TOOL_RESULT_FACT_ALIASES.items():
+        value = _first_present_mapping_value(source, aliases)
+        if value is None or value == "":
+            continue
+        if canonical in {"exitCode", "originalLength"}:
+            numeric = _coerce_tool_number(value)
+            if numeric is None:
+                continue
+            target[canonical] = numeric
+            continue
+        if canonical in {"timedOut", "truncated"}:
+            if isinstance(value, str):
+                target[canonical] = value.strip().lower() in {"1", "true", "yes", "y", "on"}
+            else:
+                target[canonical] = bool(value)
+            continue
+        target[canonical] = str(value).strip()
 
 
 def _trim_tool_detail_text(value: Any, *, max_chars: int = 1200, max_lines: int = 12) -> str:
@@ -14328,8 +14408,9 @@ def _normalize_persisted_tool_calls(value: Any) -> list[dict[str, Any]]:
             )
             if summary:
                 entry["summary"] = summary
-            if _looks_like_tool_call_failure_summary(summary or item.get("error") or ""):
-                entry["status"] = "failed"
+            failure_hint = summary or item.get("error") or ""
+            if _looks_like_tool_call_failure_summary(failure_hint):
+                entry["status"] = "timeout" if re.search(r"(?i)(超时|timed\s+out|timeout)", str(failure_hint or "")) else "failed"
             arguments = _safe_tool_argument_details(
                 item.get("arguments") if isinstance(item.get("arguments"), dict) else item.get("args")
             )
@@ -14363,6 +14444,9 @@ def _normalize_persisted_tool_calls(value: Any) -> list[dict[str, Any]]:
             trace_path = str(item.get("tracePath") or item.get("trace_path") or "").strip()
             if trace_path:
                 entry["tracePath"] = trace_path
+            _copy_tool_result_fact_fields(item, entry)
+            if entry.get("semanticStatus"):
+                entry["status"] = _normalize_tool_call_status(entry.get("semanticStatus"), default=entry["status"])
         tool_calls.append(entry)
     return tool_calls
 
@@ -14386,6 +14470,14 @@ def _normalize_message_tool_calls(value: Any) -> list[dict[str, Any]]:
             "durationMs",
             "durationSeconds",
             "timeoutSeconds",
+            "transportStatus",
+            "semanticStatus",
+            "failureClass",
+            "exitCode",
+            "timedOut",
+            "resultKind",
+            "truncated",
+            "originalLength",
             "tracePath",
         ):
             if key in item:
@@ -14468,6 +14560,9 @@ def _normalize_persisted_feedback_events(value: Any) -> list[dict[str, Any]]:
         trace_path = str(item.get("tracePath") or item.get("trace_path") or "").strip()
         if trace_path:
             entry["tracePath"] = trace_path
+        _copy_tool_result_fact_fields(item, entry)
+        if entry.get("semanticStatus"):
+            entry["status"] = _normalize_tool_call_status(entry.get("semanticStatus"), default=entry["status"])
         related_sequence = _coerce_nonnegative_int(item.get("relatedThoughtSequence") or item.get("related_thought_sequence"))
         if related_sequence > 0:
             entry["relatedThoughtSequence"] = related_sequence
@@ -14496,6 +14591,14 @@ def _normalize_message_feedback_events(value: Any) -> list[dict[str, Any]]:
             "durationMs",
             "durationSeconds",
             "timeoutSeconds",
+            "transportStatus",
+            "semanticStatus",
+            "failureClass",
+            "exitCode",
+            "timedOut",
+            "resultKind",
+            "truncated",
+            "originalLength",
             "tracePath",
             "relatedThoughtSequence",
         ):
@@ -16477,14 +16580,26 @@ def _capture_session_ui_stream(
         name = str(data.get("name") or "").strip()
         if not name:
             return
+        semantic_status = str(data.get("semanticStatus") or data.get("semantic_status") or "").strip()
         status = {
             EventNames.TOOL_START: "running",
-            EventNames.TOOL_SUCCESS: "done",
-            EventNames.TOOL_ERROR: "failed",
+            EventNames.TOOL_SUCCESS: semantic_status or "done",
+            EventNames.TOOL_ERROR: semantic_status or "failed",
         }.get(event.name, "running")
-        result = data.get("result") if event.name == EventNames.TOOL_SUCCESS else ""
-        error = data.get("error") if event.name == EventNames.TOOL_ERROR else ""
+        status = _normalize_tool_call_status(status, default="running")
+        result = data.get("result") if "result" in data else ""
+        error = data.get("error") if "error" in data else ""
         summary = str(data.get("summary") or result or error or "").strip()
+        fact_fields = {
+            "transportStatus": _first_present_mapping_value(data, ("transportStatus", "transport_status")),
+            "semanticStatus": semantic_status,
+            "failureClass": _first_present_mapping_value(data, ("failureClass", "failure_class")),
+            "exitCode": _first_present_mapping_value(data, ("exitCode", "exit_code")),
+            "timedOut": _first_present_mapping_value(data, ("timedOut", "timed_out")),
+            "resultKind": _first_present_mapping_value(data, ("resultKind", "result_kind")),
+            "truncated": data.get("truncated"),
+            "originalLength": _first_present_mapping_value(data, ("originalLength", "original_length")),
+        }
         capture.note_tool_event(
             name,
             status,
@@ -16494,23 +16609,33 @@ def _capture_session_ui_stream(
             error=error,
             duration_ms=data.get("durationMs") or data.get("duration_ms"),
             timeout_seconds=data.get("timeoutSeconds") or data.get("timeout_seconds"),
+            transport_status=fact_fields["transportStatus"],
+            semantic_status=fact_fields["semanticStatus"],
+            failure_class=fact_fields["failureClass"],
+            exit_code=fact_fields["exitCode"],
+            timed_out=fact_fields["timedOut"],
+            result_kind=fact_fields["resultKind"],
+            truncated=fact_fields["truncated"],
+            original_length=fact_fields["originalLength"],
         )
+        tool_call_payload = {
+            "name": name,
+            "status": status,
+            "arguments": data.get("args") if isinstance(data.get("args"), dict) else {},
+            "summary": summary,
+            "result": result,
+            "error": error,
+            "durationMs": data.get("durationMs") or data.get("duration_ms"),
+            "timeoutSeconds": data.get("timeoutSeconds") or data.get("timeout_seconds"),
+        }
+        _copy_tool_result_fact_fields(fact_fields, tool_call_payload)
         _append_session_conversation_event(
             session_id,
             capture.turn_id,
             EVENT_TOOL_CALL_STARTED if event.name == EventNames.TOOL_START else EVENT_TOOL_RESULT,
             status=status,
             payload={
-                "toolCall": {
-                    "name": name,
-                    "status": status,
-                    "arguments": data.get("args") if isinstance(data.get("args"), dict) else {},
-                    "summary": summary,
-                    "result": result,
-                    "error": error,
-                    "durationMs": data.get("durationMs") or data.get("duration_ms"),
-                    "timeoutSeconds": data.get("timeoutSeconds") or data.get("timeout_seconds"),
-                }
+                "toolCall": tool_call_payload
             },
             source="session_ui_capture",
         )

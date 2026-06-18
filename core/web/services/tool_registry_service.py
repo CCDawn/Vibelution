@@ -26,7 +26,11 @@ from core.infrastructure.llm_utils import parse_tool_args
 from core.orchestration.tool_lifecycle import ToolLifecycleBridge
 from core.logging import debug as _debug_logger
 from core.web.services.tool_catalog import bundle_ids_for_tool, explicit_allow_tool_names, list_tool_bundles, metadata_for_tool
-from core.infrastructure.tool_result import infer_tool_business_success
+from core.infrastructure.tool_result import (
+    infer_tool_business_success,
+    package_tool_result_facts,
+    tool_result_facts_payload,
+)
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -363,6 +367,12 @@ def test_tool(
                 "callable": False,
                 "message": scope_block,
                 "resultPreview": "",
+                "resultFacts": _tool_result_facts_for_status(
+                    normalized,
+                    scope_block,
+                    status="blocked",
+                    failure_class="agent_scope_block",
+                ),
                 "argsUsed": {},
                 "testPolicy": item["testPolicy"],
                 "agentCompatibility": compatibility,
@@ -409,6 +419,12 @@ def test_tool(
                 "callable": False,
                 "message": "This built-in tool is not in the safe browser test allow-list.",
                 "resultPreview": "",
+                "resultFacts": _tool_result_facts_for_status(
+                    normalized,
+                    "This built-in tool is not in the safe browser test allow-list.",
+                    status="blocked",
+                    failure_class="safe_test_policy",
+                ),
                 "argsUsed": {},
                 "testPolicy": test_policy,
                 "agentCompatibility": compatibility,
@@ -449,6 +465,12 @@ def test_tool(
             "callable": False,
             "message": scope_block,
             "resultPreview": "",
+            "resultFacts": _tool_result_facts_for_status(
+                normalized,
+                scope_block,
+                status="blocked",
+                failure_class="agent_scope_block",
+            ),
             "argsUsed": {},
             "testPolicy": scoped_item["testPolicy"],
             "agentCompatibility": compatibility,
@@ -519,6 +541,7 @@ def _test_safe_builtin_tool(
     else:
         result_text = str(result if result is not None else "")
     status = "failed" if _is_tool_failure_result(result) else "succeeded"
+    result_facts = _tool_result_facts_for_status(tool_name, result, status=status)
     compatibility = _build_tool_message_compatibility(
         tool_name,
         parsed_args,
@@ -534,6 +557,7 @@ def _test_safe_builtin_tool(
         "callable": True,
         "message": "Safe built-in tool test executed.",
         "resultPreview": result_text[:800],
+        "resultFacts": result_facts,
         "argsUsed": parsed_args,
         "testPolicy": test_policy,
         "agentCompatibility": compatibility,
@@ -559,6 +583,12 @@ def _test_generated_tool_manifest(
             message=args_error,
             tool_name=tool_name,
             args=parsed_args,
+            result_facts=_tool_result_facts_for_status(
+                tool_name,
+                args_error,
+                status="failed",
+                failure_class="schema_validation",
+            ),
         )
         return {
             "toolId": tool_name,
@@ -568,6 +598,12 @@ def _test_generated_tool_manifest(
             "callable": False,
             "message": args_error,
             "resultPreview": "",
+            "resultFacts": _tool_result_facts_for_status(
+                tool_name,
+                args_error,
+                status="failed",
+                failure_class="schema_validation",
+            ),
             "argsUsed": parsed_args,
             "testPolicy": item["testPolicy"],
             "agentCompatibility": compatibility,
@@ -578,6 +614,7 @@ def _test_generated_tool_manifest(
         }
 
     status = "failed" if _is_tool_failure_result(result_text) else "succeeded"
+    result_facts = _tool_result_facts_for_status(tool_name, result_text, status=status)
     compatibility = _build_tool_message_compatibility(
         tool_name,
         parsed_args,
@@ -593,6 +630,7 @@ def _test_generated_tool_manifest(
         "callable": status == "succeeded",
         "message": "Generated tool manifest test executed without runtime code execution.",
         "resultPreview": result_text[:800],
+        "resultFacts": result_facts,
         "argsUsed": parsed_args,
         "testPolicy": item["testPolicy"],
         "agentCompatibility": compatibility,
@@ -656,6 +694,50 @@ def _agent_policy_test_block(tool_name: str, args: dict[str, Any], agent: dict[s
     return str(getattr(decision, "message", "") or "[工具策略提示] 当前工具测试被该 Agent 的 ToolPolicy 拦截。")
 
 
+def _tool_result_facts_for_status(
+    tool_name: str,
+    result: Any,
+    *,
+    status: str = "",
+    timed_out: bool = False,
+    failure_class: str = "",
+) -> dict[str, Any]:
+    if isinstance(result, dict):
+        payload = dict(result)
+        if status and not payload.get("status"):
+            payload["status"] = status
+        if timed_out:
+            payload["timedOut"] = True
+        if failure_class and not payload.get("failureClass"):
+            payload["failureClass"] = failure_class
+        source: Any = payload
+    elif status and not (isinstance(result, str) and result.lstrip("\ufeff").strip().startswith("{")):
+        source = {
+            "status": status,
+            "message": str(result or ""),
+            "timedOut": bool(timed_out),
+        }
+        if failure_class:
+            source["failureClass"] = failure_class
+    else:
+        source = result
+    facts = tool_result_facts_payload(package_tool_result_facts(source, tool_name=tool_name))
+    if status and facts.get("semanticStatus") in {"", None, "succeeded"} and status not in {"succeeded", "success", "ok"}:
+        facts["semanticStatus"] = status
+    if timed_out:
+        facts["timedOut"] = True
+        facts["failureClass"] = facts.get("failureClass") or "timeout"
+    if failure_class:
+        facts["failureClass"] = failure_class
+    if timed_out:
+        facts["transportStatus"] = "timeout"
+    elif status in {"blocked"} or failure_class in {"agent_scope_block", "safe_test_policy", "agent_tool_policy", "schema_validation"}:
+        facts["transportStatus"] = "not_called"
+    elif failure_class in {"test_exception", "message_conversion"}:
+        facts["transportStatus"] = "raised"
+    return facts
+
+
 def _blocked_tool_test_response(
     tool_name: str,
     *,
@@ -698,6 +780,12 @@ def _blocked_tool_test_response(
         "callable": False,
         "message": message,
         "resultPreview": "",
+        "resultFacts": _tool_result_facts_for_status(
+            tool_name,
+            message,
+            status="blocked",
+            failure_class=event_reason or "blocked",
+        ),
         "argsUsed": parsed_args,
         "testPolicy": test_policy,
         "agentCompatibility": compatibility,
@@ -763,6 +851,13 @@ def _run_tool_test_with_timeout(
             "callable": False,
             "message": compatibility["message"],
             "resultPreview": "",
+            "resultFacts": _tool_result_facts_for_status(
+                tool_name,
+                compatibility["message"],
+                status="timeout",
+                timed_out=True,
+                failure_class="timeout",
+            ),
             "argsUsed": args_used,
             "testPolicy": test_policy,
             "agentCompatibility": compatibility,
@@ -806,6 +901,12 @@ def _run_tool_test_with_timeout(
             "callable": False,
             "message": message,
             "resultPreview": "",
+            "resultFacts": _tool_result_facts_for_status(
+                tool_name,
+                message,
+                status="failed",
+                failure_class="test_exception",
+            ),
             "argsUsed": args_used,
             "testPolicy": test_policy,
             "agentCompatibility": compatibility,
@@ -820,6 +921,12 @@ def _run_tool_test_with_timeout(
     payload["timeout"] = _timeout_metadata(False, timeout_seconds, duration_ms)
     payload["agentScope"] = agent_scope
     payload["agent"] = agent if isinstance(agent, dict) else {}
+    if not isinstance(payload.get("resultFacts"), dict):
+        payload["resultFacts"] = _tool_result_facts_for_status(
+            tool_name,
+            payload.get("resultPreview") or payload.get("message") or "",
+            status=str(payload.get("status") or ""),
+        )
     _record_completed_tool_test(
         tool_name,
         source=source,
@@ -852,6 +959,7 @@ def _record_completed_tool_test(
     compatibility = payload.get("agentCompatibility") if isinstance(payload.get("agentCompatibility"), dict) else {}
     agent_scope = payload.get("agentScope") if isinstance(payload.get("agentScope"), dict) else {}
     agent = payload.get("agent") if isinstance(payload.get("agent"), dict) else {}
+    result_facts = payload.get("resultFacts") if isinstance(payload.get("resultFacts"), dict) else {}
     _record_registry_event(
         "tool_registry.test.executed",
         message,
@@ -866,6 +974,7 @@ def _record_completed_tool_test(
             "agentScope": str(agent_scope.get("id") or MAIN_AGENT_SCOPE_ID),
             "agentId": str(agent.get("agentId") or ""),
             "durationMs": duration_ms,
+            **result_facts,
             **event_fields,
         },
     )
@@ -904,6 +1013,7 @@ def _build_tool_message_compatibility(
     message: str,
 ) -> dict[str, Any]:
     tool_call = _agent_tool_call(tool_name, args)
+    result_facts = _tool_result_facts_for_status(tool_name, result_text, status=status)
     messages: list[Any] = []
     try:
         ToolLifecycleBridge.handle_tool_result(tool_call, result_text, None, messages)
@@ -918,6 +1028,7 @@ def _build_tool_message_compatibility(
             message=f"Agent tool message conversion failed: {type(exc).__name__}: {exc}",
             tool_name=tool_name,
             args=args,
+            result_facts=_tool_result_facts_for_status(tool_name, str(exc), status="failed", failure_class="message_conversion"),
         )
     message_type = str(getattr(messages[-1], "type", "") or "") if messages else ""
     if message_type != "tool":
@@ -928,6 +1039,7 @@ def _build_tool_message_compatibility(
             tool_name=tool_name,
             args=args,
             message_type=message_type,
+            result_facts=_tool_result_facts_for_status(tool_name, result_text, status="failed", failure_class="message_conversion"),
         )
     return _agent_compatibility_result(
         status=status,
@@ -937,6 +1049,7 @@ def _build_tool_message_compatibility(
         args=args,
         message_type=message_type,
         result_preview=result_text[:320],
+        result_facts=result_facts,
     )
 
 
@@ -949,9 +1062,18 @@ def _agent_compatibility_result(
     args: dict[str, Any],
     message_type: str = "",
     result_preview: str = "",
+    result_facts: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     parsed_args = args if isinstance(args, dict) else {}
-    return {
+    if not isinstance(result_facts, dict):
+        result_facts = _tool_result_facts_for_status(
+            tool_name,
+            message,
+            status=status,
+            timed_out=status == "timeout",
+            failure_class=status if status in {"blocked", "failed", "timeout"} else "",
+        )
+    payload = {
         "status": status,
         "callable": bool(callable),
         "message": message,
@@ -960,6 +1082,8 @@ def _agent_compatibility_result(
         "messageType": message_type,
         "resultPreview": result_preview,
     }
+    payload["resultFacts"] = result_facts
+    return payload
 
 
 def _agent_tool_call(tool_name: str, args: dict[str, Any]) -> dict[str, Any]:
