@@ -249,6 +249,19 @@ class TestInferToolBusinessSuccess:
     def test_failed_dict_is_business_failure(self):
         assert infer_tool_business_success({"status": "failed", "message": "send failed"}) is False
 
+    def test_nonzero_exit_code_dict_is_business_failure_even_with_success_status(self):
+        payload = {"status": "success", "exitCode": 255, "message": "process failed"}
+
+        assert infer_tool_business_success(payload) is False
+        semantics = extract_tool_result_semantics(payload)
+        envelope = package_tool_result(payload)
+
+        assert semantics["semanticStatus"] == "failed"
+        assert semantics["exitCode"] == 255
+        assert semantics["failureClass"] == "process_exit"
+        assert envelope.semantic_status == "failed"
+        assert envelope.exit_code == 255
+
     def test_plain_text_is_success(self):
         assert infer_tool_business_success("normal output") is True
 
@@ -279,6 +292,20 @@ class TestInferToolBusinessSuccess:
         assert semantics["failureClass"] == "process_exit"
         assert envelope.semantic_status == "failed"
         assert envelope.exit_code == 1
+
+    def test_warning_exit_code_text_is_business_failure_with_exit_code(self):
+        payload = "[WARNING | Exit Code: 255]\n[STDERR]\nThe system cannot find the path specified."
+
+        assert infer_tool_business_success(payload) is False
+        semantics = extract_tool_result_semantics(payload)
+        envelope = package_tool_result(payload)
+
+        assert semantics["semanticStatus"] == "failed"
+        assert semantics["exitCode"] == 255
+        assert semantics["failureClass"] == "process_exit"
+        assert envelope.semantic_status == "failed"
+        assert envelope.exit_code == 255
+        assert envelope.failure_class == "process_exit"
 
 
 if __name__ == "__main__":
