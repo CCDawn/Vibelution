@@ -5,6 +5,8 @@ import json
 import sqlite3
 from pathlib import Path
 
+import pytest
+
 from scripts.prune_codex_sessions import main
 
 
@@ -46,6 +48,33 @@ def test_prune_codex_sessions_dry_run_does_not_modify_file(tmp_path: Path):
     assert report["sessions"][0]["archivedLines"] == 1
 
 
+def test_prune_codex_sessions_apply_requires_explicit_session_prune_allowance(tmp_path: Path):
+    codex_home = tmp_path / ".codex"
+    session_root = codex_home / "sessions"
+    session_root.mkdir(parents=True)
+    session_file = session_root / "rollout.jsonl"
+    original = _line("2026-06-01T01:00:00Z")
+    session_file.write_text(original, encoding="utf-8")
+
+    with pytest.raises(SystemExit) as exc_info:
+        main(
+            [
+                "--codex-home",
+                str(codex_home),
+                "--now",
+                "2026-06-06T00:00:00Z",
+                "--retention-hours",
+                "72",
+                "--backup-root",
+                str(tmp_path / "backup"),
+                "--apply",
+            ]
+        )
+
+    assert exc_info.value.code == 2
+    assert session_file.read_text(encoding="utf-8") == original
+
+
 def test_prune_codex_sessions_apply_archives_old_lines_and_keeps_meta(tmp_path: Path):
     codex_home = tmp_path / ".codex"
     session_root = codex_home / "sessions"
@@ -74,6 +103,7 @@ def test_prune_codex_sessions_apply_archives_old_lines_and_keeps_meta(tmp_path: 
             "--backup-root",
             str(tmp_path / "backup"),
             "--apply",
+            "--allow-session-prune",
         ]
     )
 
