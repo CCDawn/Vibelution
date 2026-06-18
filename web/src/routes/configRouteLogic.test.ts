@@ -929,8 +929,12 @@ describe("config route copy", () => {
     expect(CONFIG_COPY.zh.avatarImageCurrent).toBe("当前头像");
     expect(CONFIG_COPY.zh.avatarImageEmpty).toBe("未设置头像图片");
     expect(CONFIG_COPY.zh.avatarImageClickToUpload).toBe("点击头像上传");
+    expect(CONFIG_COPY.zh.userProfileAvatarGroupTitle).toBe("头像设置");
+    expect(CONFIG_COPY.zh.userProfileAvatarGroupHint).toContain("不会把图片内容传给模型");
     expect(CONFIG_COPY.en.avatarImageCurrent).toBe("Current avatar");
     expect(CONFIG_COPY.en.avatarImageEmpty).toBe("No avatar image set");
     expect(CONFIG_COPY.en.avatarImageClickToUpload).toBe("Click avatar to upload");
+    expect(CONFIG_COPY.en.userProfileAvatarGroupTitle).toBe("Avatar settings");
+    expect(CONFIG_COPY.en.userProfileAvatarGroupHint).toContain("Image content is not sent to the model");
   });
 });
