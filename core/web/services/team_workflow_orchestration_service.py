@@ -407,6 +407,253 @@ def import_data_record_as_source_candidate(team_id: str, run_id: str, record_id:
     }
 
 
+def extract_source_collection_candidates(team_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
+    team_service.get_team(normalized_team_id)
+    request_payload = payload if isinstance(payload, dict) else {}
+    normalized_run_id = _normalize_required_id(request_payload.get("runId"), "Data processing run id is required.")
+    extraction_agent_id = (
+        _trim_text(request_payload.get("extractionAgentId"), max_length=160)
+        or _trim_text(request_payload.get("createdByAgent"), max_length=160)
+        or "资料提炼 Agent"
+    )
+    max_records = _normalize_int(request_payload.get("maxRecords"), default=100, minimum=1, maximum=500)
+    force = bool(request_payload.get("force"))
+    notes = _trim_text(request_payload.get("notes"), max_length=4000)
+    try:
+        run = data_processing_service.get_processing_run(normalized_run_id)
+        records_payload = data_processing_service.list_records(normalized_run_id)
+        assignments_payload = data_processing_service.list_collection_assignments(normalized_run_id)
+    except data_processing_service.DataProcessingError as exc:
+        raise TeamWorkflowOrchestrationError(str(exc)) from exc
+    run_scope = run.get("scope") if isinstance(run.get("scope"), dict) else {}
+    run_team_id = _trim_text(run_scope.get("teamId"), max_length=128)
+    if run_team_id and run_team_id != normalized_team_id:
+        raise TeamWorkflowOrchestrationError("Data processing run does not belong to this team.")
+
+    records = [item for item in list(records_payload.get("records") or []) if isinstance(item, dict)]
+    assignments = [item for item in list(assignments_payload.get("assignments") or []) if isinstance(item, dict)]
+    storage_artifacts = _source_collection_storage_artifacts(normalized_team_id, normalized_run_id)
+    with _WORKFLOW_LOCK:
+        candidate_store = _load_candidate_store(normalized_team_id)
+    existing_by_record_id: dict[str, dict[str, Any]] = {}
+    for candidate in list(candidate_store.get("candidates") or []):
+        if not isinstance(candidate, dict) or candidate.get("candidateType") != "source_manifest":
+            continue
+        imported_from = (candidate.get("metadata") or {}).get("importedFromDataRecord") if isinstance(candidate.get("metadata"), dict) else {}
+        if not isinstance(imported_from, dict):
+            continue
+        if _trim_text(imported_from.get("runId"), max_length=128) != normalized_run_id:
+            continue
+        imported_record_id = _trim_text(imported_from.get("recordId"), max_length=128)
+        if imported_record_id:
+            existing_by_record_id[imported_record_id] = candidate
+
+    pending_records = [
+        record for record in records
+        if _trim_text(record.get("recordId"), max_length=128) not in existing_by_record_id
+    ]
+    target_records = (records if force else pending_records)[:max_records]
+    imported: list[dict[str, Any]] = []
+    skipped: list[dict[str, Any]] = []
+    failed: list[dict[str, Any]] = []
+    execution_events: list[dict[str, Any]] = []
+    extraction_assignment = next(
+        (
+            item for item in assignments
+            if _trim_text(item.get("agentRole"), max_length=80) == "content_extraction"
+        ),
+        {"assignmentId": "", "agentRole": "content_extraction", "agentId": extraction_agent_id},
+    )
+    for record in target_records:
+        record_id = _trim_text(record.get("recordId"), max_length=128)
+        if not record_id:
+            continue
+        try:
+            import_response = import_data_record_as_source_candidate(
+                normalized_team_id,
+                normalized_run_id,
+                record_id,
+                {
+                    "createdByAgent": extraction_agent_id,
+                    "tags": ["source_collection", "content_extraction"],
+                    "metadata": {
+                        "sourceCollectionExtraction": True,
+                        "extractionAgentId": extraction_agent_id,
+                        "extractionNotes": notes,
+                    },
+                },
+            )
+        except TeamWorkflowOrchestrationError as exc:
+            failed.append({"recordId": record_id, "error": str(exc)})
+            execution_events.append(
+                _source_collection_execution_event(
+                    "storage.source_manifest_import_failed",
+                    assignment=extraction_assignment,
+                    status="blocked",
+                    title=f"资料提炼失败：{record.get('title') or record_id}",
+                    summary=_trim_text(exc, max_length=600),
+                    refs=[record_id],
+                    storage_refs=[storage_artifacts["dataProcessingRecordsPath"], storage_artifacts["candidateStorePath"]],
+                )
+            )
+            continue
+        event_status = "completed" if import_response.get("created") else "skipped"
+        if import_response.get("created"):
+            imported.append(import_response)
+        else:
+            skipped.append(
+                {
+                    "recordId": record_id,
+                    "candidateId": import_response.get("candidate", {}).get("candidateId", ""),
+                    "reason": "already_imported",
+                }
+            )
+        execution_events.append(
+            _source_collection_execution_event(
+                "storage.source_manifest_imported",
+                assignment=extraction_assignment,
+                query=_source_collection_record_search_trace(record),
+                status=event_status,
+                title=f"资料提炼：{import_response['candidate'].get('title')}",
+                summary="资料提炼 Agent 将 DataRecord 转为可追溯 source_manifest 候选；不写正式知识库、RAG 或官方图谱。",
+                refs=[import_response["candidate"].get("candidateId", ""), record_id],
+                raw_location=_trim_text(record.get("rawLocation") or record.get("sourceRef"), max_length=1000),
+                storage_refs=[storage_artifacts["candidatesPath"], storage_artifacts["candidateStorePath"]],
+            )
+        )
+
+    completed_extraction_assignments = 0
+    remaining_pending_after_batch = max(0, len(pending_records) - len(target_records)) if not force else 0
+    if records:
+        open_extraction_assignments = [
+            item for item in assignments
+            if _trim_text(item.get("agentRole"), max_length=80) == "content_extraction"
+            and str(item.get("status") or "").strip().lower() in {"open", "in_progress", "returned"}
+        ]
+        assignment_output_status = "completed" if not failed and remaining_pending_after_batch == 0 else "returned"
+        for assignment in open_extraction_assignments:
+            assignment_id = _trim_text(assignment.get("assignmentId"), max_length=128)
+            if not assignment_id:
+                continue
+            try:
+                data_processing_service.record_collection_output(
+                    normalized_run_id,
+                    assignment_id,
+                    {
+                        "status": assignment_output_status,
+                        "records": [],
+                        "notes": (
+                            f"{extraction_agent_id} synchronized DataRecord records into source_manifest candidates. "
+                            f"Imported {len(imported)}, skipped {len(skipped)}, failed {len(failed)}."
+                        ),
+                        "qualitySignals": {
+                            "sourceCollectionExtraction": True,
+                            "recordCount": len(records),
+                            "importedCount": len(imported),
+                            "skippedCount": len(skipped),
+                            "failedCount": len(failed),
+                        },
+                        "blockingIssues": ["source_manifest_import_failed"] if failed else [],
+                    },
+                )
+            except data_processing_service.DataProcessingError as exc:
+                failed.append({"assignmentId": assignment_id, "error": str(exc)})
+                continue
+            completed_extraction_assignments += 1
+
+    _append_source_collection_execution_artifacts(
+        normalized_team_id,
+        normalized_run_id,
+        execution_events=execution_events,
+        created_records=[],
+        imported=imported,
+    )
+    final_run = data_processing_service.get_processing_run(normalized_run_id)
+    final_records_payload = data_processing_service.list_records(normalized_run_id)
+    final_assignments = data_processing_service.list_collection_assignments(normalized_run_id)["assignments"]
+    final_status = data_processing_service.get_processing_status(normalized_run_id)
+    source_collection_summary = _source_collection_assignment_stage_summary(
+        [item for item in list(final_assignments or []) if isinstance(item, dict)]
+    )
+    final_status_summary = final_status.get("summary") if isinstance(final_status.get("summary"), dict) else {}
+    final_status_summary.update(source_collection_summary)
+    final_status["summary"] = final_status_summary
+    with _WORKFLOW_LOCK:
+        workflow = _load_or_create_workflow(normalized_team_id)
+        final_candidate_store = _load_candidate_store(normalized_team_id)
+        workflow_api = _workflow_to_api(normalized_team_id, workflow, final_candidate_store)
+    final_records = [item for item in list(final_records_payload.get("records") or []) if isinstance(item, dict)]
+    final_source_candidates = [
+        item for item in list(final_candidate_store.get("candidates") or [])
+        if isinstance(item, dict)
+        and item.get("candidateType") == "source_manifest"
+        and isinstance(item.get("metadata"), dict)
+        and isinstance(item["metadata"].get("importedFromDataRecord"), dict)
+        and _trim_text(item["metadata"]["importedFromDataRecord"].get("runId"), max_length=128) == normalized_run_id
+    ]
+    final_candidate_record_ids = {
+        _trim_text(item["metadata"]["importedFromDataRecord"].get("recordId"), max_length=128)
+        for item in final_source_candidates
+    }
+    pending_record_count = len(
+        [
+            record for record in final_records
+            if _trim_text(record.get("recordId"), max_length=128) not in final_candidate_record_ids
+        ]
+    )
+    status_label = "blocked" if not final_records else ("partial" if failed or pending_record_count else "completed")
+    _record_workflow_event(
+        "source_collection.candidates_extracted",
+        normalized_team_id,
+        fields={
+            "runId": normalized_run_id,
+            "status": status_label,
+            "recordCount": len(final_records),
+            "candidateCount": len(final_source_candidates),
+            "importedCount": len(imported),
+            "skippedCount": len(skipped),
+            "failedCount": len(failed),
+            "pendingRecordCount": pending_record_count,
+            "completedExtractionAssignmentCount": completed_extraction_assignments,
+        },
+    )
+    return {
+        "schemaVersion": SCHEMA_VERSION,
+        "teamId": normalized_team_id,
+        "runId": normalized_run_id,
+        "status": status_label,
+        "run": final_run,
+        "runStatus": final_status,
+        "sourceCollectionSummary": source_collection_summary,
+        "storageArtifacts": storage_artifacts,
+        "assignments": final_assignments,
+        "recordCount": len(final_records),
+        "candidateCount": len(final_source_candidates),
+        "pendingRecordCount": pending_record_count,
+        "importedCount": len(imported),
+        "skippedCount": len(skipped),
+        "failedCount": len(failed),
+        "completedExtractionAssignmentCount": completed_extraction_assignments,
+        "imported": imported,
+        "skipped": skipped,
+        "failed": failed,
+        "executionEvents": execution_events,
+        "workflow": workflow_api,
+        "boundaries": {
+            "externalSearchTriggered": False,
+            "metadataOnlyDownload": True,
+            "writesFormalKnowledge": False,
+            "writesRag": False,
+            "writesOfficialGraph": False,
+        },
+        "nextActions": [
+            "Run source quality assessment on extracted source_manifest candidates.",
+            "Keep formal Team Knowledge/RAG/official graph writes behind the later governance gate.",
+        ],
+    }
+
+
 def start_source_collection_run(team_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
     normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
     team = team_service.get_team(normalized_team_id)

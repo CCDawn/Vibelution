@@ -18,6 +18,7 @@ from core.web.services.team_workflow_orchestration_service import (
     decide_transfer_request,
     ensure_team_workflow_orchestration,
     execute_source_collection_search,
+    extract_source_collection_candidates,
     get_knowledge_ingestion_status,
     get_official_model_evidence_status,
     get_paper_note_chunk_status,
@@ -269,6 +270,14 @@ class KnowledgeCollectionIngestionPayload(BaseModel):
     autoSubmit: bool = True
     autoReviewSource: bool = True
     autoApprove: bool = True
+
+
+class KnowledgeCollectionExtractionPayload(BaseModel):
+    runId: str = Field("", max_length=128)
+    extractionAgentId: str = Field("", max_length=160)
+    maxRecords: int = Field(100, ge=1, le=500)
+    force: bool = False
+    notes: str = Field("", max_length=4000)
 
 
 class SourceExtractionPayload(BaseModel):
@@ -594,6 +603,26 @@ def team_workflow_knowledge_ingestion_precheck(team_id: str, payload: KnowledgeI
             exc,
             status_code=422,
             fields={"stewardAgentId": payload.stewardAgentId},
+        )
+
+
+@router.post("/teams/{team_id}/workflow-orchestration/knowledge-collection/extract", status_code=status.HTTP_201_CREATED)
+def team_workflow_knowledge_collection_extract(team_id: str, payload: KnowledgeCollectionExtractionPayload) -> dict:
+    try:
+        return extract_source_collection_candidates(team_id, payload.model_dump())
+    except TeamNotFoundError as exc:
+        _raise_team_workflow_route_error("knowledge_collection.extract", team_id, exc, status_code=404)
+    except (TeamServiceError, TeamWorkflowOrchestrationError) as exc:
+        _raise_team_workflow_route_error(
+            "knowledge_collection.extract",
+            team_id,
+            exc,
+            status_code=422,
+            fields={
+                "runId": payload.runId,
+                "extractionAgentId": payload.extractionAgentId,
+                "force": payload.force,
+            },
         )
 
 

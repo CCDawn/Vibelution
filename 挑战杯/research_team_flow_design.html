@@ -1675,6 +1675,11 @@
               <span>把通用 DataRecord 幂等导入为 source_manifest 候选，保留 run/record/quality/collection trace；不写正式知识。</span>
             </div>
 <div class="blueprint-row compact">
+              <b>资料提炼批量执行</b>
+              <strong>/api/teams/{teamId}/workflow-orchestration/knowledge-collection/extract</strong>
+              <span>资料提炼 Agent 批量把本轮 DataRecord 同步为 source_manifest 候选，并记录 search_events/candidates 镜像；重复执行保持幂等。</span>
+            </div>
+<div class="blueprint-row compact">
               <b>模型调用证据链</b>
               <strong>/api/teams/{teamId}/workflow-orchestration/official-model-evidence/status</strong>
               <span>只读聚合 Qwen/百炼/本地模型调用证据覆盖；本地模型 invoke 自动登记 invocation_log，已有 local_model_output 可折算为候选输出证据；不写正式知识/RAG/图谱。</span>
@@ -1707,12 +1712,12 @@
 <div class="blueprint-row compact">
               <b>服务文件</b>
               <strong>core/web/services/team_workflow_orchestration_service.py</strong>
-              <span>Team 编排、资料搜集批次启动、候选登记、DataRecord 导入、资料质量筛选、paper_note 分块计划、模型证据登记、转移请求、协调 Agent 裁决和轻量运行事件日志。</span>
+              <span>Team 编排、资料搜集批次启动、候选登记、DataRecord 批量/单条导入、资料质量筛选、paper_note 分块计划、模型证据登记、转移请求、协调 Agent 裁决和轻量运行事件日志。</span>
             </div>
 <div class="blueprint-row compact">
               <b>路由文件</b>
               <strong>core/web/routes/team_workflows.py</strong>
-              <span>提供工作流查询/确保、资料搜集批次启动、候选资料登记、DataRecord 导入、资料质量筛选状态/写回、paper_note 分块状态/计划、模型证据状态/登记、转移提交、转移裁决 API。</span>
+              <span>提供工作流查询/确保、资料搜集批次启动、候选资料登记、DataRecord 单条导入、资料提炼批量执行、资料质量筛选状态/写回、paper_note 分块状态/计划、模型证据状态/登记、转移提交、转移裁决 API。</span>
             </div>
 <div class="blueprint-row compact">
               <b>路由注册</b>
@@ -2214,6 +2219,12 @@
               <strong>知识搜集四步闭环入库</strong>
               <span>知识搜集阶段从旧五步收敛为搜索资料、资料提炼、资料审查、资料入库四张用户步骤卡；候选关系图和入库包不再作为独立用户阶段，而是合并进资料入库的一键 Agent 动作。</span>
               <span>第一阶段可从资料搜索结果一路推进到团队知识库正式 KnowledgeItem：搜索资料写 DataRecord/source_manifest，资料提炼展示候选资料，资料审查批量写 sourceQualityAssessment，资料入库复用候选关系、入库包、Team Knowledge source/proposal/review 门禁完成正式入库；正式 RAG/official graph 仍遵守现有审核边界。</span>
+            </div>
+<div class="blueprint-row">
+              <b>M6.57</b>
+              <strong>资料提炼 Agent 一键阶段</strong>
+              <span>新增 /api/teams/{team_id}/workflow-orchestration/knowledge-collection/extract，由 content_extraction/资料提炼 Agent 批量读取本轮 DataRecord，并通过既有导入桥幂等转为 source_manifest 候选。</span>
+              <span>资料提炼步骤卡不再只是查看结果；用户可点击 Agent 提炼资料或 Agent 重新提炼，页面显示提炼进行中、失败和完成状态，并刷新本轮候选库、Assignment、候选审查状态和证据落盘位置；仍不触发外部搜索、不写正式 Team Knowledge/RAG/official graph。</span>
             </div>
       </div>
       <div class="tag-row">
