@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import json
 import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+from core.chat.turn_journal import EVENT_TOOL_RESULT, load_turn_events
 from core.evaluation.supervised_evolution import (
     normalize_supervised_mental_model_mode,
     supervised_mental_model_enabled_for_mode,
@@ -40,6 +42,7 @@ _CONVERSATION_HARNESS_MESSAGE_FIELDS = {
     "feedbackEvents",
     "streaming",
     "toolCalls",
+    "tool_calls",
     "attachments",
     "references",
     "metadata",
@@ -245,6 +248,7 @@ def run_supervised_conversation_harness(
                 latest_detail,
                 assistant_text=assistant_text,
                 restart_expected=expect_restart,
+                repo_root=repo_root,
             )
             if callable(progress_callback):
                 progress_callback(
@@ -299,6 +303,7 @@ def run_supervised_conversation_harness(
                 latest_detail,
                 assistant_text=assistant_text,
                 restart_expected=expect_restart,
+                repo_root=repo_root,
             )
             return _conversation_harness_result(
                 run_id=run_id,
@@ -326,6 +331,7 @@ def run_supervised_conversation_harness(
         latest_detail,
         assistant_text=assistant_text,
         restart_expected=expect_restart,
+        repo_root=repo_root,
     )
     last_status = str(
         latest_completion_snapshot.get("terminalStatus")
@@ -535,8 +541,88 @@ def _conversation_harness_latest_assistant(detail: dict[str, Any]) -> str:
     return ""
 
 
-def _conversation_harness_events(detail: dict[str, Any], *, assistant_text: str) -> list[dict[str, Any]]:
+def _conversation_harness_tool_event(tool: dict[str, Any]) -> dict[str, Any] | None:
+    tool_name = str(tool.get("name") or tool.get("tool_name") or tool.get("tool") or "").strip()
+    if not tool_name:
+        return None
+    raw_args = tool.get("arguments") if isinstance(tool.get("arguments"), dict) else tool.get("tool_args")
+    if not isinstance(raw_args, dict):
+        raw_args = tool.get("args") if isinstance(tool.get("args"), dict) else {}
+    result_value: Any = ""
+    for key in ("result", "resultPreview", "tool_result", "summary", "error"):
+        value = tool.get(key)
+        if value not in (None, ""):
+            result_value = value
+            break
+    if isinstance(result_value, (dict, list)):
+        result_text = json.dumps(result_value, ensure_ascii=False)
+    else:
+        result_text = str(result_value or "").strip()
+    return {
+        "type": "tool_call",
+        "tool_name": tool_name,
+        "status": str(tool.get("status") or "").strip(),
+        "tool_args": dict(raw_args),
+        "tool_result": result_text,
+    }
+
+
+def _conversation_harness_tool_event_key(event: dict[str, Any]) -> str:
+    try:
+        args_text = json.dumps(event.get("tool_args") or {}, ensure_ascii=False, sort_keys=True)
+    except TypeError:
+        args_text = str(event.get("tool_args") or {})
+    return "|".join(
+        [
+            str(event.get("tool_name") or ""),
+            str(event.get("status") or ""),
+            args_text,
+            str(event.get("tool_result") or ""),
+        ]
+    )
+
+
+def _conversation_harness_turn_journal_tool_events(
+    repo_root: Path | None,
+    session_id: str,
+) -> list[dict[str, Any]]:
+    if repo_root is None or not session_id:
+        return []
+    try:
+        journal_events = load_turn_events(Path(repo_root), session_id)
+    except Exception:
+        return []
     events: list[dict[str, Any]] = []
+    for journal_event in journal_events:
+        if journal_event.event_type != EVENT_TOOL_RESULT:
+            continue
+        payload = journal_event.payload if isinstance(journal_event.payload, dict) else {}
+        tool = payload.get("toolCall") if isinstance(payload.get("toolCall"), dict) else {}
+        tool_event = _conversation_harness_tool_event(tool)
+        if tool_event is not None:
+            events.append(tool_event)
+    return events
+
+
+def _conversation_harness_events(
+    detail: dict[str, Any],
+    *,
+    assistant_text: str,
+    repo_root: Path | None = None,
+) -> list[dict[str, Any]]:
+    events: list[dict[str, Any]] = []
+    tool_event_keys: set[str] = set()
+    session_id = str((detail or {}).get("id") or (detail or {}).get("sessionId") or "").strip()
+
+    def add_tool_event(tool_event: dict[str, Any] | None) -> None:
+        if tool_event is None:
+            return
+        event_key = _conversation_harness_tool_event_key(tool_event)
+        if event_key in tool_event_keys:
+            return
+        tool_event_keys.add(event_key)
+        events.append(tool_event)
+
     for message in list((detail or {}).get("messages") or []):
         if not isinstance(message, dict):
             continue
@@ -547,15 +633,9 @@ def _conversation_harness_events(detail: dict[str, Any], *, assistant_text: str)
         for tool in list(message.get("toolCalls") or message.get("tool_calls") or []):
             if not isinstance(tool, dict):
                 continue
-            events.append(
-                {
-                    "type": "tool_call",
-                    "tool_name": str(tool.get("name") or "").strip(),
-                    "status": str(tool.get("status") or "").strip(),
-                    "tool_args": tool.get("arguments") if isinstance(tool.get("arguments"), dict) else {},
-                    "tool_result": str(tool.get("resultPreview") or tool.get("result") or "").strip(),
-                }
-            )
+            add_tool_event(_conversation_harness_tool_event(tool))
+    for tool_event in _conversation_harness_turn_journal_tool_events(repo_root, session_id):
+        add_tool_event(tool_event)
     if assistant_text and not any(event.get("type") == "llm_response" for event in events):
         events.append({"type": "llm_response", "content": assistant_text})
     return events
@@ -566,8 +646,9 @@ def _conversation_harness_evolution_summary(
     *,
     assistant_text: str,
     restart_expected: bool,
+    repo_root: Path | None = None,
 ) -> dict[str, Any]:
-    events = _conversation_harness_events(detail, assistant_text=assistant_text)
+    events = _conversation_harness_events(detail, assistant_text=assistant_text, repo_root=repo_root)
     debug_lines: list[str] = []
     stdout_lines = assistant_text.splitlines()
     return infer_evolution_summary(

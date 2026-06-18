@@ -1,8 +1,65 @@
 from pathlib import Path
 
+from core.chat.turn_journal import EVENT_TOOL_RESULT, append_turn_event
 from core.ui.chat_state import CHAT_STATE_VERSION, save_chat_state
 from core.web.services import session_service
 from core.web.services import supervised_conversation_harness_adapter as adapter
+
+
+def test_conversation_harness_summary_uses_turn_journal_when_final_message_loses_tool_calls(tmp_path: Path):
+    session_id = "session-hidden-supervised"
+    turn_id = "turn-1"
+    append_turn_event(
+        tmp_path,
+        session_id,
+        turn_id,
+        EVENT_TOOL_RESULT,
+        status="done",
+        payload={
+            "toolCall": {
+                "name": "open_evolution_transaction_tool",
+                "status": "done",
+                "arguments": {"summary": "supervised probe"},
+                "result": '{"status":"success","txn_id":"txn-journal"}',
+            }
+        },
+        source="session_ui_capture",
+    )
+
+    detail = {
+        "id": session_id,
+        "messages": [
+            {"role": "user", "content": "run supervised probe"},
+            {
+                "role": "assistant",
+                "content": "27 passed, closing transaction",
+                "tool_calls": [
+                    {
+                        "name": "close_evolution_transaction_tool",
+                        "status": "done",
+                        "arguments": {"txn_id": "txn-journal", "status": "success"},
+                        "result": '{"status":"success","txn_id":"txn-journal","transaction_status":"success"}',
+                    }
+                ],
+            },
+        ],
+    }
+
+    summary = adapter._conversation_harness_evolution_summary(
+        detail,
+        assistant_text="27 passed, closing transaction",
+        restart_expected=False,
+        repo_root=tmp_path,
+    )
+
+    assert summary["transaction"] == {
+        "opened": True,
+        "closed": True,
+        "status": "success",
+        "txn_id": "txn-journal",
+    }
+    assert "open_evolution_transaction_tool:success" in summary["tool_sequence_tail"]
+    assert "close_evolution_transaction_tool:success" in summary["tool_sequence_tail"]
 
 
 def test_conversation_harness_recovers_completed_turn_from_completion_snapshot(monkeypatch, tmp_path: Path):
