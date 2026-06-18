@@ -1,4 +1,4 @@
-import { ConversationMessage } from "../../api/types";
+import { ConversationMessage, type ConversationTimelineItem as ApiConversationTimelineItem } from "../../api/types";
 import { ConversationOperation } from "./conversationOperations";
 
 export type ConversationTimelineItemStatus = "pending" | "running" | "completed" | "failed";
@@ -56,6 +56,9 @@ export function buildConversationTimelineItems(
 ): ConversationTimelineItem[] {
   if (message.role !== "assistant") {
     return [];
+  }
+  if ((message.timelineItems?.length ?? 0) > 0) {
+    return timelineItemsFromServer(message.timelineItems ?? [], operations, options);
   }
   const items: ConversationTimelineItem[] = [];
   const sortedOperations = [...operations].sort((left, right) => (left.sequence ?? 0) - (right.sequence ?? 0));
@@ -121,6 +124,92 @@ export function buildConversationTimelineItems(
   return mergeAdjacentThoughtItems(items);
 }
 
+function timelineItemsFromServer(
+  serverItems: ApiConversationTimelineItem[],
+  operations: ConversationOperation[],
+  options: ConversationTimelineOptions,
+): ConversationTimelineItem[] {
+  const operationsById = new Map(operations.map((operation) => [operation.id, operation]));
+  const items: ConversationTimelineItem[] = [];
+  for (const item of serverItems) {
+    const kind = String(item.kind || "").trim();
+    const status = normalizeTimelineStatus(item.status);
+    if (kind === "thought") {
+      const text = String(item.text || item.preview || item.summary || "").trim();
+      if (!text) {
+        continue;
+      }
+      items.push({
+        id: item.id || `timeline-thought-${items.length + 1}`,
+        kind: "thought",
+        status,
+        text,
+        preview: String(item.preview || firstParagraphPreview(text)).trim(),
+        defaultExpanded: Boolean(item.defaultExpanded) || status === "running",
+        sourceOperationIds: [...(item.sourceOperationIds || item.operationIds || [])],
+      });
+      continue;
+    }
+    if (kind === "assistant_text") {
+      if (options.includeAssistantText === false) {
+        continue;
+      }
+      const text = String(item.text || "").trim();
+      if (text) {
+        items.push({
+          id: item.id || `timeline-response-${items.length + 1}`,
+          kind: "assistant_text",
+          status,
+          text,
+        });
+      }
+      continue;
+    }
+    if (kind === "command_group") {
+      const commandOperations = (item.operationIds || item.sourceOperationIds || [])
+        .map((operationId) => operationsById.get(operationId))
+        .filter((operation): operation is ConversationOperation => Boolean(operation));
+      items.push({
+        id: item.id || `timeline-command-group-${items.length + 1}`,
+        kind: "command_group",
+        status,
+        title: String(item.title || commandGroupTitle(commandOperations, status, options.lang)).trim(),
+        summary: String(item.summary || commandOperations.slice(0, 2).map((operation) => operation.summary || operation.label).filter(Boolean).join("；")).trim(),
+        operations: commandOperations,
+      });
+      continue;
+    }
+    if (kind === "operation") {
+      const operation = (item.operationIds || item.sourceOperationIds || [])
+        .map((operationId) => operationsById.get(operationId))
+        .find(Boolean) ?? serverOperation(item, status);
+      items.push({
+        id: item.id || `${operation.id}-timeline-operation`,
+        kind: "operation",
+        status,
+        title: String(item.title || operation.label).trim(),
+        summary: String(item.summary || operation.summary || "").trim(),
+        operation,
+      });
+    }
+  }
+  return mergeAdjacentThoughtItems(items);
+}
+
+function serverOperation(
+  item: ApiConversationTimelineItem,
+  status: ConversationTimelineItemStatus,
+): ConversationOperation {
+  return {
+    id: item.id || `server-operation-${item.sequence ?? "unknown"}`,
+    kind: "status",
+    label: String(item.title || "运行状态"),
+    status: status === "completed" ? "done" : status,
+    summary: String(item.summary || item.preview || "").trim(),
+    durationSeconds: null,
+  };
+}
+
 function operationTimelineItem(operation: ConversationOperation): ConversationOperationTimelineItem {
   return {
     id: `${operation.id}-timeline-operation`,
@@ -143,13 +232,7 @@ function commandGroupTimelineItem(
       ? "running"
       : "completed";
   const commandCount = operations.length;
-  const title = lang === "zh"
-    ? status === "running"
-      ? `正在运行 ${commandCount} 条命令`
-      : `已运行 ${commandCount} 条命令`
-    : status === "running"
-      ? `Running ${commandCount} commands`
-      : `Ran ${commandCount} commands`;
+  const title = commandGroupTitle(operations, status, lang);
   const summary = operations
     .map((operation) => operation.summary || operation.label)
     .filter(Boolean)
@@ -165,6 +248,18 @@ function commandGroupTimelineItem(
     summary,
     operations: [...operations],
   };
+}
+
+function commandGroupTitle(
+  operations: ConversationOperation[],
+  status: ConversationTimelineItemStatus,
+  lang: string,
+) {
+  const commandCount = operations.length;
+  if (lang === "zh") {
+    return status === "running" ? `正在运行 ${commandCount} 条命令` : `已运行 ${commandCount} 条命令`;
+  }
+  return status === "running" ? `Running ${commandCount} commands` : `Ran ${commandCount} commands`;
 }
 
 function mergeAdjacentThoughtItems(items: ConversationTimelineItem[]) {

@@ -605,6 +605,11 @@ def test_persist_turn_result_preserves_ordered_feedback_events(tmp_path, monkeyp
     assert [item["kind"] for item in feedback_events] == ["thought", "tool", "thought", "tool"]
     assert feedback_events[1]["relatedThoughtSequence"] == 1
     assert feedback_events[3]["relatedThoughtSequence"] == 3
+    timeline_items = detail["messages"][-1]["timelineItems"]
+    assert [item["kind"] for item in timeline_items] == ["thought", "operation", "thought", "operation", "assistant_text"]
+    assert timeline_items[0]["text"] == "先看日志。"
+    assert timeline_items[1]["operationIds"] == [f"{detail['messages'][-1]['id']}-feedback-2"]
+    assert timeline_items[-1]["text"] == "已完成。"
 
 
 def test_persist_turn_result_normalizes_completed_feedback_statuses(tmp_path, monkeypatch):
@@ -1877,6 +1882,8 @@ def test_session_detail_live_overlay_identity_matches_assistant_delta_turn_id(tm
     assert live_message["content"] == "正在输出。"
     assert live_message["thought"] == "正在思考。"
     assert live_message["feedbackEvents"][0]["name"] == "model_response"
+    assert live_message["timelineItems"][0]["kind"] == "assistant_text"
+    assert live_message["timelineItems"][0]["text"] == "正在输出。"
 
 
 def test_session_detail_exposes_pre_model_progress_as_ordered_feedback_events(tmp_path, monkeypatch):
@@ -2165,7 +2172,14 @@ def test_session_live_output_publishes_lightweight_assistant_delta_without_detai
             "session-live",
             turn_id="turn-running",
             thought="thinking",
-            feedback_events=[{"kind": "status", "name": "model_response"}],
+            feedback_events=[
+                {
+                    "kind": "thought",
+                    "status": "running",
+                    "summary": "thinking",
+                    "resultPreview": "thinking",
+                }
+            ],
         )
     finally:
         session_service._set_session_running("session-live", False, turn_id="turn-running")
@@ -2186,8 +2200,9 @@ def test_session_live_output_publishes_lightweight_assistant_delta_without_detai
     assert event["thoughtDelta"] == "thinking"
     assert event["replaceContent"] is False
     assert event["replaceThought"] is False
-    assert event["feedbackEvents"][0]["kind"] == "status"
-    assert event["feedbackEvents"][0]["name"] == "model_response"
+    assert event["feedbackEvents"][0]["kind"] == "thought"
+    assert event["timelineItems"][0]["kind"] == "thought"
+    assert event["timelineItems"][0]["text"] == "thinking"
     assert event["done"] is False
     delta_events = [item for item in recorded_events if item[0][2] == "session.assistant_delta.published"]
     snapshot_events = [item for item in recorded_events if item[0][2] == "session.detail_snapshot.published"]
@@ -7149,6 +7164,8 @@ def test_session_detail_includes_live_thought_draft(tmp_path, monkeypatch):
     assert payload["messages"][-1]["streaming"] is True
     assert payload["messages"][-1]["thought"] == "先把这轮的思考过程挂进消息卡片。"
     assert payload["messages"][-1]["feedbackEvents"][0]["kind"] == "thought"
+    assert payload["messages"][-1]["timelineItems"][0]["kind"] == "thought"
+    assert payload["messages"][-1]["timelineItems"][0]["text"] == "先把这轮的思考过程挂进消息卡片。"
     assert payload["messages"][-1]["mentalSnapshot"]["mood"] == "专注"
 
 
