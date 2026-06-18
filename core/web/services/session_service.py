@@ -2426,6 +2426,52 @@ def get_session_detail(session_id: str) -> dict | None:
     return None
 
 
+def get_session_stream_initial_state(session_id: str) -> dict | None:
+    """Return a lightweight initial SSE payload without hydrating full messages."""
+
+    normalized_session_id = str(session_id or "").strip()
+    if not normalized_session_id:
+        return None
+
+    with _RUNNING_SESSIONS_LOCK:
+        active_turn_id = str(_SESSION_ACTIVE_TURN_IDS.get(normalized_session_id) or "").strip()
+        session_running = normalized_session_id in _RUNNING_SESSION_IDS
+    payload = load_chat_state(PROJECT_ROOT)
+    target = _load_conversation_detail_target(
+        normalized_session_id,
+        payload=payload,
+        repair=False,
+        agent_by_id={},
+        lightweight=True,
+    )
+    if target is None:
+        return None
+    summary = _build_session_summary(target, hydrate_agent=False)
+    messages = list(target.get("messages") or [])
+    latest_message = messages[-1] if messages else {}
+    latest_message_payload = {
+        "id": str(latest_message.get("id") or "").strip(),
+        "role": str(latest_message.get("role") or "").strip(),
+        "timestamp": str(latest_message.get("timestamp") or "").strip(),
+        "contentLength": len(str(latest_message.get("content") or "")),
+        "thoughtLength": len(str(latest_message.get("thought") or "")),
+        "feedbackEventCount": len(list(latest_message.get("feedbackEvents") or [])),
+        "toolCallCount": len(list(latest_message.get("toolCalls") or [])),
+        "streaming": bool(latest_message.get("streaming")),
+    }
+    return {
+        "type": "session_initial",
+        "sessionId": normalized_session_id,
+        "ledgerSeq": _session_ledger_sequence(normalized_session_id),
+        "summary": summary,
+        "latestMessage": latest_message_payload,
+        "activeTurnId": active_turn_id,
+        "running": bool(session_running),
+        "currentPhase": str(summary.get("currentPhase") or summary.get("status") or "").strip(),
+        "updatedAt": str(summary.get("updatedAt") or summary.get("lastActive") or "").strip(),
+    }
+
+
 def get_session_turn_completion_snapshot(session_id: str, turn_id: str = "") -> dict[str, Any]:
     """Return a turn-scoped completion snapshot for external harness pollers."""
 
@@ -4149,7 +4195,13 @@ def _record_missing_session_turn_control_recovery(
         return
 
 
-def stream_session_events(session_id: str, initial_detail: dict[str, Any] | None = None):
+def stream_session_events(
+    session_id: str,
+    initial_detail: dict[str, Any] | None = None,
+    *,
+    initial: str = "full",
+    initial_state: dict[str, Any] | None = None,
+):
     """Yield SSE events for one persisted chat session."""
 
     conversation_id = str(session_id or "").strip()
@@ -4157,23 +4209,44 @@ def stream_session_events(session_id: str, initial_detail: dict[str, Any] | None
         raise SessionNotFoundError(
             text_for(get_web_language(), zh="未找到当前会话。", en="Session not found.")
         )
-    detail = initial_detail or get_session_detail(conversation_id)
-    if detail is None:
-        raise SessionNotFoundError(
-            text_for(get_web_language(), zh="未找到当前会话。", en="Session not found.")
-        )
+    initial_mode = str(initial or "full").strip().lower()
+    if initial_mode not in {"full", "light", "none"}:
+        initial_mode = "full"
+    detail: dict[str, Any] | None = None
+    state: dict[str, Any] | None = None
+    if initial_mode == "full":
+        detail = initial_detail or get_session_detail(conversation_id)
+        if detail is None:
+            raise SessionNotFoundError(
+                text_for(get_web_language(), zh="未找到当前会话。", en="Session not found.")
+            )
+    elif initial_mode == "light":
+        state = initial_state or get_session_stream_initial_state(conversation_id)
+        if state is None:
+            raise SessionNotFoundError(
+                text_for(get_web_language(), zh="未找到当前会话。", en="Session not found.")
+            )
+    else:
+        state = initial_state or get_session_stream_initial_state(conversation_id)
+        if state is None:
+            raise SessionNotFoundError(
+                text_for(get_web_language(), zh="未找到当前会话。", en="Session not found.")
+            )
 
     subscriber: queue.Queue[dict[str, Any]] = queue.Queue(maxsize=_SESSION_STREAM_QUEUE_SIZE)
     _register_session_stream_subscriber(conversation_id, subscriber)
     try:
-        yield _encode_sse_event(
-            "session_detail",
-            {
-                "type": "session_detail",
-                "sessionId": conversation_id,
-                "detail": detail,
-            },
-        )
+        if initial_mode == "full" and detail is not None:
+            yield _encode_sse_event(
+                "session_detail",
+                {
+                    "type": "session_detail",
+                    "sessionId": conversation_id,
+                    "detail": detail,
+                },
+            )
+        elif initial_mode == "light" and state is not None:
+            yield _encode_sse_event("session_initial", state)
         while True:
             try:
                 event = subscriber.get(timeout=_SESSION_STREAM_HEARTBEAT_SECONDS)
@@ -5142,6 +5215,7 @@ def _load_conversation_detail_target(
     payload: dict[str, Any] | None = None,
     repair: bool = True,
     agent_by_id: dict[str, dict[str, Any]] | None = None,
+    lightweight: bool = False,
 ) -> dict[str, Any] | None:
     normalized_session_id = str(session_id or "").strip()
     if not normalized_session_id:
@@ -5162,7 +5236,12 @@ def _load_conversation_detail_target(
             changed = _repair_stale_running_conversation(raw) or changed
             changed = _ensure_conversation_workspace_metadata(raw) or changed
             changed = _ensure_conversation_agent_metadata(raw, agent_by_id=agent_by_id) or changed
-        conversation = _normalize_conversation(raw, agent_by_id=agent_by_id, ensure_workspace=repair)
+        conversation = _normalize_conversation(
+            raw,
+            agent_by_id=agent_by_id,
+            ensure_workspace=repair,
+            lightweight=lightweight,
+        )
         if changed:
             payload["updated_at"] = _now_timestamp()
             save_chat_state(PROJECT_ROOT, payload)

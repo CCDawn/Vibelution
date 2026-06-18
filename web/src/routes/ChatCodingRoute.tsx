@@ -2124,20 +2124,13 @@ function sessionDetailWithoutLiveAssistantOverlay(detail: SessionDetail): Sessio
   };
 }
 
-function mergeAssistantDeltaIntoSessionDetail(
-  detail: SessionDetail | undefined,
+function mergeAssistantDeltaIntoMessages(
+  originalMessages: ConversationMessage[],
   payload: Extract<SessionStreamEvent, { type: "assistant_delta" }>,
-): SessionDetail | undefined {
-  if (!detail || detail.id !== payload.sessionId) {
-    return detail;
-  }
-  if (isStaleLedgerUpdate(detail.ledgerSeq, payload.ledgerSeq)) {
-    return detail;
-  }
+): ConversationMessage[] {
   const liveMessageId = liveAssistantMessageId(payload.sessionId, payload.turnId);
   const liveTurnId = liveAssistantOverlayTurnId(payload.turnId);
   const now = payload.updatedAt || new Date().toISOString();
-  const originalMessages = detail.messages ?? [];
   const firstLiveIndex = originalMessages.findIndex((message) => isLiveAssistantMessageForTurn(message, liveTurnId));
   const messages = originalMessages.filter((message, index) =>
     !isLiveAssistantDeltaMessage(message) || (index === firstLiveIndex && isLiveAssistantMessageForTurn(message, liveTurnId))
@@ -2154,12 +2147,7 @@ function mergeAssistantDeltaIntoSessionDetail(
     : `${previous?.thought ?? ""}${thoughtDelta}`;
   const nextFeedbackEvents = mergeLiveFeedbackEvents(previous?.feedbackEvents, payload.feedbackEvents);
   if (!nextContent && !nextThought && !payload.stage && !nextFeedbackEvents.length) {
-    return {
-      ...detail,
-      ledgerSeq: maxLedgerSeq(detail.ledgerSeq, payload.ledgerSeq),
-      updatedAt: now,
-      messages: messages.filter((message) => message.id !== liveMessageId),
-    };
+    return messages.filter((message) => message.id !== liveMessageId);
   }
   const nextLiveMessage: ConversationMessage = {
     id: liveMessageId,
@@ -2187,22 +2175,83 @@ function mergeAssistantDeltaIntoSessionDetail(
       toolCalls: previousLiveMessage.toolCalls,
       timelineItems: nextLiveMessage.timelineItems ?? previousLiveMessage.timelineItems,
     };
-    return {
+    return [
+      ...messages.slice(0, liveIndex),
+      merged,
+      ...messages.slice(liveIndex + 1),
+    ];
+  }
+  return [...messages, nextLiveMessage];
+}
+
+function mergeLiveAssistantMessagesIntoSessionDetail(
+  detail: SessionDetail | undefined,
+  liveMessages: ConversationMessage[] | undefined,
+): SessionDetail | undefined {
+  if (!detail || !liveMessages?.length) {
+    return detail;
+  }
+  return mergeSessionDetailWithLiveAssistantOverlay(
+    {
       ...detail,
-      ledgerSeq: maxLedgerSeq(detail.ledgerSeq, payload.ledgerSeq),
-      updatedAt: now,
-      messages: [
-        ...messages.slice(0, liveIndex),
-        merged,
-        ...messages.slice(liveIndex + 1),
-      ],
-    };
+      messages: [...(detail.messages ?? []), ...liveMessages],
+    },
+    detail,
+  );
+}
+
+function latestLiveAssistantLedgerSeq(messages: ConversationMessage[] | undefined) {
+  let latest = 0;
+  for (const message of messages ?? []) {
+    latest = Math.max(latest, normalizedLedgerSeq(message.metadata?.ledgerSeq));
+  }
+  return latest > 0 ? latest : undefined;
+}
+
+function mergeAssistantDeltaIntoLiveMessages(
+  messages: ConversationMessage[] | undefined,
+  payload: Extract<SessionStreamEvent, { type: "assistant_delta" }>,
+): ConversationMessage[] {
+  if (isStaleLedgerUpdate(latestLiveAssistantLedgerSeq(messages), payload.ledgerSeq)) {
+    return messages ?? [];
+  }
+  return mergeAssistantDeltaIntoMessages(messages ?? [], payload);
+}
+
+function sameLiveAssistantMessages(left: ConversationMessage[] | undefined, right: ConversationMessage[] | undefined) {
+  const leftMessages = left ?? [];
+  const rightMessages = right ?? [];
+  if (leftMessages.length !== rightMessages.length) {
+    return false;
+  }
+  return leftMessages.every((message, index) => message === rightMessages[index]);
+}
+
+function setLiveAssistantMessagesForSession(
+  current: Record<string, ConversationMessage[]>,
+  sessionId: string,
+  messages: ConversationMessage[],
+) {
+  const normalizedSessionId = String(sessionId || "").trim();
+  if (!normalizedSessionId) {
+    return current;
+  }
+  const previous = current[normalizedSessionId];
+  const nextMessages = messages.filter(isLiveAssistantDeltaMessage);
+  if (sameLiveAssistantMessages(previous, nextMessages)) {
+    return current;
+  }
+  if (!nextMessages.length) {
+    if (!previous) {
+      return current;
+    }
+    const next = { ...current };
+    delete next[normalizedSessionId];
+    return next;
   }
   return {
-    ...detail,
-    ledgerSeq: maxLedgerSeq(detail.ledgerSeq, payload.ledgerSeq),
-    updatedAt: now,
-    messages: [...messages, nextLiveMessage],
+    ...current,
+    [normalizedSessionId]: nextMessages,
   };
 }
 
@@ -2264,6 +2313,7 @@ export function ChatCodingRoute() {
   const [editingSessionTitle, setEditingSessionTitle] = useState("");
   const [sessionContextMenu, setSessionContextMenu] = useState<SessionContextMenuState | null>(null);
   const [sessionStreamConnected, setSessionStreamConnected] = useState(false);
+  const [liveAssistantMessagesBySession, setLiveAssistantMessagesBySession] = useState<Record<string, ConversationMessage[]>>({});
   const [groupStreamConnected, setGroupStreamConnected] = useState(false);
   const [tokenSpeedTracker, setTokenSpeedTracker] = useState<TokenSpeedTrackerState | null>(null);
   const [petActionFeedback, setPetActionFeedback] = useState("");
@@ -2300,6 +2350,7 @@ export function ChatCodingRoute() {
   const sessionStreamErrorLoggedRef = useRef<Record<string, boolean>>({});
   const sessionStreamPayloadErrorLoggedRef = useRef<Record<string, boolean>>({});
   const sessionStreamApplyStatsRef = useRef<Record<string, { received: number; applied: number; dropped: number }>>({});
+  const liveAssistantMessagesBySessionRef = useRef<Record<string, ConversationMessage[]>>({});
   const sessionStreamDecisionSnapshotRef = useRef({
     sessionId: "",
     shouldConnect: false,
@@ -2324,6 +2375,9 @@ export function ChatCodingRoute() {
   const requestedRoomId = useMemo(() => {
     return new URLSearchParams(location.search).get("room") ?? "";
   }, [location.search]);
+  useEffect(() => {
+    liveAssistantMessagesBySessionRef.current = liveAssistantMessagesBySession;
+  }, [liveAssistantMessagesBySession]);
   useEffect(() => {
     if (chatRouteShellMountedLoggedRef.current) {
       return;
@@ -3498,10 +3552,16 @@ export function ChatCodingRoute() {
     }
 
     let disposed = false;
+    const streamSessionId = String(activeSessionId || "");
+    if (!streamSessionId) {
+      setSessionStreamConnected(false);
+      return;
+    }
     let pendingDetail: SessionDetail | null = null;
     let applyTimer: ReturnType<typeof window.setTimeout> | null = null;
     let lastAppliedAt = 0;
-    let pendingAssistantDeltaDetail: SessionDetail | undefined;
+    let committedAssistantDeltaMessages = liveAssistantMessagesBySessionRef.current[streamSessionId] ?? [];
+    let pendingAssistantDeltaMessages: ConversationMessage[] | undefined;
     let assistantDeltaApplyTimer: ReturnType<typeof window.setTimeout> | null = null;
     let assistantDeltaLastAppliedAt = 0;
     let pendingAssistantDeltaTelemetry: {
@@ -3512,11 +3572,6 @@ export function ChatCodingRoute() {
       thoughtDeltaLength: number;
       done: boolean;
     } | null = null;
-    const streamSessionId = String(activeSessionId || "");
-    if (!streamSessionId) {
-      setSessionStreamConnected(false);
-      return;
-    }
     const decisionSnapshot = sessionStreamDecisionSnapshotRef.current;
     postBrowserTelemetry({
       phase: "session_stream",
@@ -3539,7 +3594,7 @@ export function ChatCodingRoute() {
         ...collectBrowserPageSnapshot(),
       },
     });
-    const stream = new EventSource(`/api/sessions/${streamSessionId}/events`);
+    const stream = new EventSource(`/api/sessions/${streamSessionId}/events?initial=light`);
 
     function applyPendingDetail(reason: "timer" | "close" | "final") {
       if (!pendingDetail || disposed) {
@@ -3573,6 +3628,12 @@ export function ChatCodingRoute() {
         });
       }
       syncSessionDetail(detail);
+      const phase = String(detail.currentPhase || detail.status || "").trim().toLowerCase();
+      if (phase && !isBusyPhase(phase)) {
+        setLiveAssistantMessagesBySession((current) =>
+          setLiveAssistantMessagesForSession(current, streamSessionId, [])
+        );
+      }
     }
 
     function queueSessionDetail(detail: SessionDetail, payloadLength: number) {
@@ -3617,32 +3678,22 @@ export function ChatCodingRoute() {
     }
 
     function applyPendingAssistantDelta(reason: "timer" | "close" | "final") {
-      if (!pendingAssistantDeltaDetail || disposed) {
+      if (!pendingAssistantDeltaMessages || disposed) {
         return;
       }
-      const pendingDetail = pendingAssistantDeltaDetail;
+      const pendingMessages = pendingAssistantDeltaMessages;
       const telemetry = pendingAssistantDeltaTelemetry;
-      pendingAssistantDeltaDetail = undefined;
+      pendingAssistantDeltaMessages = undefined;
       pendingAssistantDeltaTelemetry = null;
       if (assistantDeltaApplyTimer) {
         window.clearTimeout(assistantDeltaApplyTimer);
         assistantDeltaApplyTimer = null;
       }
       assistantDeltaLastAppliedAt = Date.now();
-      queryClient.setQueryData<SessionDetail>(queryKeys.session(streamSessionId), (current) => {
-        if (!current || current.id !== streamSessionId) {
-          return pendingDetail;
-        }
-        const merged = mergeSessionDetailWithLiveAssistantOverlay(pendingDetail, current);
-        if (merged === current) {
-          return current;
-        }
-        return {
-          ...merged,
-          ledgerSeq: maxLedgerSeq(current.ledgerSeq, pendingDetail.ledgerSeq),
-          updatedAt: pendingDetail.updatedAt || current.updatedAt,
-        };
-      });
+      committedAssistantDeltaMessages = pendingMessages;
+      setLiveAssistantMessagesBySession((current) =>
+        setLiveAssistantMessagesForSession(current, streamSessionId, pendingMessages)
+      );
       const stats = sessionStreamApplyStatsRef.current[streamSessionId] ?? { received: 0, applied: 0, dropped: 0 };
       stats.applied += 1;
       sessionStreamApplyStatsRef.current[streamSessionId] = stats;
@@ -3650,7 +3701,7 @@ export function ChatCodingRoute() {
         postBrowserTelemetry({
           phase: "session_stream",
           eventCode: "browser.session_stream.assistant_delta_applied",
-          message: "Session assistant delta stream was applied to the UI cache.",
+          message: "Session assistant delta stream was applied to the live UI overlay.",
           level: "info",
           fields: {
             sessionId: streamSessionId,
@@ -3668,6 +3719,9 @@ export function ChatCodingRoute() {
           },
         });
       }
+      if (reason === "final" && telemetry?.done) {
+        void queryClient.invalidateQueries({ queryKey: queryKeys.session(streamSessionId) });
+      }
     }
 
     function queueAssistantDelta(
@@ -3676,13 +3730,12 @@ export function ChatCodingRoute() {
     ) {
       const stats = sessionStreamApplyStatsRef.current[streamSessionId] ?? { received: 0, applied: 0, dropped: 0 };
       stats.received += 1;
-      if (pendingAssistantDeltaDetail) {
+      if (pendingAssistantDeltaMessages) {
         stats.dropped += 1;
       }
       sessionStreamApplyStatsRef.current[streamSessionId] = stats;
-      const baseDetail = pendingAssistantDeltaDetail
-        ?? queryClient.getQueryData<SessionDetail>(queryKeys.session(streamSessionId));
-      pendingAssistantDeltaDetail = mergeAssistantDeltaIntoSessionDetail(baseDetail, payload);
+      const baseMessages = pendingAssistantDeltaMessages ?? committedAssistantDeltaMessages;
+      pendingAssistantDeltaMessages = mergeAssistantDeltaIntoLiveMessages(baseMessages, payload);
       const telemetry = {
         payloadLength,
         turnId: payload.turnId,
@@ -3692,7 +3745,7 @@ export function ChatCodingRoute() {
         done: payload.done,
       };
       pendingAssistantDeltaTelemetry = telemetry;
-      if (!pendingAssistantDeltaDetail) {
+      if (!pendingAssistantDeltaMessages) {
         return;
       }
       if (payload.done) {
@@ -3711,7 +3764,7 @@ export function ChatCodingRoute() {
         postBrowserTelemetry({
           phase: "session_stream",
           eventCode: "browser.session_stream.assistant_delta_queued",
-          message: "Session assistant delta stream was queued before UI cache apply.",
+          message: "Session assistant delta stream was queued before live UI overlay apply.",
           level: "info",
           fields: {
             sessionId: streamSessionId,
@@ -3792,6 +3845,48 @@ export function ChatCodingRoute() {
       queueSessionDetail(payload.detail, event.data.length);
     }
 
+    function handleSessionInitial(event: MessageEvent<string>) {
+      let payload: SessionStreamEvent;
+      try {
+        payload = JSON.parse(event.data) as SessionStreamEvent;
+      } catch {
+        if (!sessionStreamPayloadErrorLoggedRef.current[streamSessionId]) {
+          sessionStreamPayloadErrorLoggedRef.current[streamSessionId] = true;
+          postBrowserTelemetry({
+            phase: "session_stream",
+            eventCode: "browser.session_stream.bad_payload",
+            message: "Session initial stream payload could not be parsed.",
+            level: "warning",
+            fields: {
+              sessionId: streamSessionId,
+              payloadLength: event.data.length,
+            },
+          });
+        }
+        return;
+      }
+      if (!shouldAcceptSessionStreamEvent(payload, streamSessionId) || payload.type !== "session_initial") {
+        return;
+      }
+      setSessionStreamConnected(true);
+      postBrowserTelemetry({
+        phase: "session_stream",
+        eventCode: "browser.session_stream.initial_received",
+        message: "Session stream lightweight initial state was received.",
+        level: "info",
+        fields: {
+          sessionId: streamSessionId,
+          payloadLength: event.data.length,
+          ledgerSeq: payload.ledgerSeq,
+          currentPhase: payload.currentPhase || "",
+          running: payload.running,
+          latestMessageRole: payload.latestMessage?.role || "",
+          latestMessageContentLength: payload.latestMessage?.contentLength ?? 0,
+          latestMessageThoughtLength: payload.latestMessage?.thoughtLength ?? 0,
+        },
+      });
+    }
+
     function handleAssistantDelta(event: MessageEvent<string>) {
       let payload: SessionStreamEvent;
       try {
@@ -3820,6 +3915,7 @@ export function ChatCodingRoute() {
     }
 
     stream.addEventListener("session_detail", handleSessionDetail as EventListener);
+    stream.addEventListener("session_initial", handleSessionInitial as EventListener);
     stream.addEventListener("assistant_delta", handleAssistantDelta as EventListener);
 
     return () => {
@@ -3837,6 +3933,7 @@ export function ChatCodingRoute() {
         assistantDeltaApplyTimer = null;
       }
       stream.removeEventListener("session_detail", handleSessionDetail as EventListener);
+      stream.removeEventListener("session_initial", handleSessionInitial as EventListener);
       stream.removeEventListener("assistant_delta", handleAssistantDelta as EventListener);
       stream.close();
       postBrowserTelemetry({
@@ -3851,6 +3948,7 @@ export function ChatCodingRoute() {
     };
   }, [
     activeSessionId,
+    queryClient,
     sessionStreamShouldConnect,
     syncSessionDetail,
   ]);
@@ -4099,7 +4197,11 @@ export function ChatCodingRoute() {
   const rawSessionDetail = sessionDetailQuery.data;
   const selectedSessionDetail =
     rawSessionDetail && rawSessionDetail.id === activeSessionId ? rawSessionDetail : undefined;
-  const detail = selectedSessionDetail;
+  const liveAssistantMessages = activeSessionId ? liveAssistantMessagesBySession[activeSessionId] : undefined;
+  const detail = useMemo(
+    () => mergeLiveAssistantMessagesIntoSessionDetail(selectedSessionDetail, liveAssistantMessages),
+    [selectedSessionDetail, liveAssistantMessages],
+  );
   const closedCliAgentRunTokens = activeSessionId ? (closedCliAgentRunTokensBySession[activeSessionId] ?? []) : [];
   const closedCliAgentRunTokenSet = useMemo(() => new Set(closedCliAgentRunTokens), [closedCliAgentRunTokens]);
   const cliAgentRunTabs = useMemo(
