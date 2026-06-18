@@ -116,6 +116,7 @@ from core.ui.chat_state import (
 )
 
 from . import agent_directory_service
+from .conversation_timeline_service import build_conversation_timeline_items
 from .i18n import get_web_language, text_for
 from .model_capability_service import model_record_image_input_support
 from .session_turn_scheduler import SessionTurnScheduler
@@ -601,19 +602,32 @@ def _session_live_output_checkpoint_path(session_id: str) -> Path:
 
 
 def _live_output_checkpoint_payload(state: "SessionLiveOutputState") -> dict[str, Any]:
-    return {
+    session_id = str(getattr(state, "session_id", "") or "").strip()
+    turn_id = str(getattr(state, "turn_id", "") or "").strip()
+    content = str(getattr(state, "content", "") or "")
+    feedback_events = _normalize_message_feedback_events(getattr(state, "feedback_events", []) or [])
+    payload = {
         "schemaVersion": 1,
-        "sessionId": str(getattr(state, "session_id", "") or "").strip(),
-        "turnId": str(getattr(state, "turn_id", "") or "").strip(),
+        "sessionId": session_id,
+        "turnId": turn_id,
         "stage": str(getattr(state, "stage", "") or "").strip(),
-        "content": str(getattr(state, "content", "") or ""),
+        "content": content,
         "thought": str(getattr(state, "thought", "") or ""),
         "mentalSnapshot": _normalize_mental_snapshot(getattr(state, "mental_snapshot", None)),
         "toolCalls": _normalize_message_tool_calls(getattr(state, "tool_calls", []) or []),
-        "feedbackEvents": _normalize_message_feedback_events(getattr(state, "feedback_events", []) or []),
+        "feedbackEvents": feedback_events,
         "contextComposition": _normalize_session_context_composition(getattr(state, "context_composition", None)),
         "updatedAt": str(getattr(state, "updated_at", "") or "").strip() or _now_timestamp(),
     }
+    timeline_items = _build_message_timeline_items(
+        message_id=_live_assistant_message_id(session_id, turn_id) if session_id else "",
+        content=content,
+        feedback_events=feedback_events,
+        streaming=True,
+    )
+    if timeline_items:
+        payload["timelineItems"] = timeline_items
+    return payload
 
 
 def _live_output_checkpoint_has_visible_payload(payload: dict[str, Any]) -> bool:
@@ -6181,6 +6195,14 @@ def _normalize_messages(conversation_id: str, items: Any) -> list[dict[str, Any]
             entry["toolCalls"] = tool_calls
         if feedback_events:
             entry["feedbackEvents"] = feedback_events
+        timeline_items = _build_message_timeline_items(
+            message_id=entry["id"],
+            content=content,
+            feedback_events=feedback_events,
+            streaming=bool(raw.get("streaming")),
+        )
+        if timeline_items:
+            entry["timelineItems"] = timeline_items
         if attachments:
             entry["attachments"] = attachments
         if references:
@@ -14506,6 +14528,29 @@ def _normalize_message_feedback_events(value: Any) -> list[dict[str, Any]]:
     return events
 
 
+def _build_message_timeline_items(
+    *,
+    message_id: str,
+    content: Any = "",
+    feedback_events: Any = None,
+    streaming: bool = False,
+) -> list[dict[str, Any]]:
+    normalized_message_id = str(message_id or "").strip()
+    if not normalized_message_id:
+        return []
+    normalized_feedback_events = _normalize_message_feedback_events(feedback_events or [])
+    if not normalized_feedback_events:
+        return []
+    return build_conversation_timeline_items(
+        message_id=normalized_message_id,
+        content=content,
+        feedback_events=normalized_feedback_events,
+        streaming=streaming,
+        lang=get_web_language(),
+        include_assistant_text=True,
+    )
+
+
 def _normalize_session_turn_error(value: Any) -> dict[str, Any] | None:
     if not isinstance(value, dict):
         return None
@@ -15734,6 +15779,14 @@ def _build_live_output_message(session_id: str) -> dict[str, Any] | None:
         message["toolCalls"] = tool_calls
     if feedback_events:
         message["feedbackEvents"] = feedback_events
+    timeline_items = _build_message_timeline_items(
+        message_id=message["id"],
+        content=content,
+        feedback_events=feedback_events,
+        streaming=True,
+    )
+    if timeline_items:
+        message["timelineItems"] = timeline_items
     return message
 
 
@@ -17882,6 +17935,14 @@ def _publish_session_assistant_delta(
         "updatedAt": str(state.updated_at or "").strip() or _now_timestamp(),
         "done": bool(done),
     }
+    timeline_items = _build_message_timeline_items(
+        message_id=_live_assistant_message_id(session_id, state.turn_id),
+        content=str(state.content or ""),
+        feedback_events=state.feedback_events,
+        streaming=not done,
+    )
+    if timeline_items:
+        event["timelineItems"] = timeline_items
     delivered_count = 0
     dropped_count = 0
     for subscriber in subscribers:
@@ -17982,6 +18043,8 @@ def _merge_assistant_delta_stream_events(existing: dict[str, Any], replacement: 
         replacement["stage"] = str(existing.get("stage") or "")
     if "feedbackEvents" not in replacement and "feedbackEvents" in existing:
         replacement["feedbackEvents"] = list(existing.get("feedbackEvents") or [])
+    if "timelineItems" not in replacement and "timelineItems" in existing:
+        replacement["timelineItems"] = list(existing.get("timelineItems") or [])
     return True
 
 

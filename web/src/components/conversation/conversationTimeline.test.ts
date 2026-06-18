@@ -127,4 +127,58 @@ describe("conversationTimeline", () => {
 
     expect(items).toEqual([]);
   });
+
+  it("prefers backend timeline items and links them to normalized operations", () => {
+    const message: ConversationMessage = {
+      id: "message-server-timeline",
+      role: "assistant",
+      content: "最终回答",
+      timestamp: "2026-06-18T00:00:00Z",
+      feedbackEvents: [
+        {
+          sequence: 1,
+          kind: "tool",
+          status: "done",
+          name: "grep_search_tool",
+          summary: "原始搜索摘要",
+        },
+      ],
+      timelineItems: [
+        {
+          id: "server-operation",
+          kind: "operation",
+          status: "completed",
+          title: "搜索",
+          summary: "后端自然摘要",
+          operationIds: ["message-server-timeline-feedback-1"],
+        },
+        {
+          id: "server-answer",
+          kind: "assistant_text",
+          status: "completed",
+          text: "最终回答",
+        },
+      ],
+    };
+
+    const items = buildConversationTimelineItems(
+      message,
+      buildConversationOperations(message, labels),
+      { lang: "zh" },
+    );
+
+    expect(items).toHaveLength(2);
+    expect(items[0]).toMatchObject({
+      id: "server-operation",
+      kind: "operation",
+      title: "搜索",
+      summary: "后端自然摘要",
+    });
+    expect(items[0].kind === "operation" ? items[0].operation.rawLabel : "").toBe("grep_search_tool");
+    expect(items[1]).toMatchObject({
+      id: "server-answer",
+      kind: "assistant_text",
+      text: "最终回答",
+    });
+  });
 });
