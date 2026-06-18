@@ -145,4 +145,20 @@ describe("ConfigRoute layout contract", () => {
     expect(stylesSource).toContain("grid-template-columns: repeat(2, minmax(220px, 1fr))");
     expect(stylesSource).toContain("grid-template-columns: minmax(210px, 0.4fr) minmax(320px, 0.6fr)");
   });
+
+  it("uses a compact layout for large config sections with many fields", () => {
+    expect(routeSource).toContain("function isDenseConfigSection");
+    expect(routeSource).toContain('section.id === "llm-discovery"');
+    expect(routeSource).toContain("return false");
+    expect(routeSource).toContain("Number(section.fieldCount || 0) >= 12");
+    expect(routeSource).toContain("styles.configDenseSection");
+    expect(routeSource).toContain('section.id === "llm-discovery" ? styles.configDiscoverySection : ""');
+    expect(stylesSource).toContain(".configDenseSection > .treeGrid");
+    expect(stylesSource).toContain("grid-template-columns: repeat(auto-fit, minmax(186px, 1fr))");
+    expect(stylesSource).toContain(".configDenseSection .treeFieldCardView");
+    expect(stylesSource).toContain("grid-template-columns: minmax(92px, 0.42fr) minmax(0, 1fr)");
+    expect(stylesSource).toContain(".configDenseSection .treeFieldCardEdit");
+    expect(stylesSource).toContain(".configDenseSection .treeObjectCell .treeObjectBlock");
+    expect(stylesSource).toContain(".configDenseSection .treeObjectCell .treeToggle");
+  });
 });

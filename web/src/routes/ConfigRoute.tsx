@@ -1566,6 +1566,13 @@ function configEditorFieldKind(meta: ConfigEditorMeta | undefined): ConfigEditor
   return (meta?.kind ?? "text") as ConfigEditorMeta["kind"] | "background_image";
 }
 
+function isDenseConfigSection(section: ConfigEditorSection): boolean {
+  if (section.id === "llm-discovery") {
+    return false;
+  }
+  return Number(section.fieldCount || 0) >= 12;
+}
+
 function ConfigSectionEditor({
   section,
   value,
@@ -1587,6 +1594,7 @@ function ConfigSectionEditor({
     styles.sectionSurface,
     styles.configEditorSection,
     section.id === "llm-discovery" ? styles.configDiscoverySection : "",
+    isDenseConfigSection(section) ? styles.configDenseSection : "",
   ].filter(Boolean).join(" ");
   const [uploadingImagePath, setUploadingImagePath] = useState("");
   const [avatarCrop, setAvatarCrop] = useState<AvatarCropDraft | null>(null);
