@@ -4642,6 +4642,7 @@ a.teamTreeChild:focus-visible {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  flex: 0 1 auto;
   min-height: 16px;
   max-width: 100%;
   padding: 0 5px;
@@ -4690,8 +4691,10 @@ a.teamTreeChild:focus-visible {
 .agentModelTag {
   display: inline-flex;
   align-items: center;
+  gap: 3px;
+  flex: 0 1 96px;
   min-width: 0;
-  max-width: 124px;
+  max-width: 104px;
   min-height: 16px;
   padding: 0 5px;
   border: 1px solid color-mix(in srgb, var(--accent-cool) 24%, var(--border-soft));
@@ -4704,6 +4707,10 @@ a.teamTreeChild:focus-visible {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.agentModelTag svg {
+  flex: 0 0 auto;
 }
 
 .agentModelLine {
