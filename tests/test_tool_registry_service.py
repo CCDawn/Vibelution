@@ -350,21 +350,21 @@ def test_builtin_tool_test_marks_structured_failure_status_as_failed(tmp_path, m
 
 
 @pytest.mark.parametrize(
-    "result,status",
+    "result,status,semantic_status",
     [
-        ({"status": "fail"}, "failed"),
-        ({"status": "blocked"}, "failed"),
-        ({"status": "policy_blocked"}, "failed"),
-        ({"status": "error"}, "failed"),
-        ({"ok": False}, "failed"),
-        ({"status": "succeeded"}, "succeeded"),
-        ({"status": "success"}, "succeeded"),
-        (None, "failed"),
-        ("[错误] binary failure".encode("utf-8"), "failed"),
-        (b"done", "succeeded"),
+        ({"status": "fail"}, "failed", "failed"),
+        ({"status": "blocked"}, "failed", "blocked"),
+        ({"status": "policy_blocked"}, "failed", "policy_blocked"),
+        ({"status": "error"}, "failed", "failed"),
+        ({"ok": False}, "failed", "failed"),
+        ({"status": "succeeded"}, "succeeded", "succeeded"),
+        ({"status": "success"}, "succeeded", "succeeded"),
+        (None, "failed", "failed"),
+        ("[错误] binary failure".encode("utf-8"), "failed", "failed"),
+        (b"done", "succeeded", "succeeded"),
     ],
 )
-def test_builtin_tool_test_marks_structured_result_object_as_failure_when_applicable(tmp_path, monkeypatch, result, status):
+def test_builtin_tool_test_marks_structured_result_object_as_failure_when_applicable(tmp_path, monkeypatch, result, status, semantic_status):
     monkeypatch.setattr(registry, "GENERATED_TOOLS_PATH", tmp_path / "generated_tools.json")
 
     monkeypatch.setattr(
@@ -375,6 +375,8 @@ def test_builtin_tool_test_marks_structured_result_object_as_failure_when_applic
     tested = registry.test_tool("get_current_goal_tool")
 
     assert tested["status"] == status
+    assert tested["resultFacts"]["semanticStatus"] == semantic_status
+    assert tested["agentCompatibility"]["resultFacts"]["semanticStatus"] == status
     assert tested["called"] is True
     if isinstance(result, (bytes, bytearray)):
         assert tested["resultPreview"].startswith("[错误]") if status == "failed" else tested["resultPreview"] == "done"
@@ -495,3 +497,6 @@ def test_builtin_tool_test_times_out_without_waiting_for_slow_tool(tmp_path, mon
     assert result["timeout"]["timedOut"] is True
     assert result["timeout"]["durationMs"] < 250
     assert result["agentCompatibility"]["status"] == "timeout"
+    assert result["resultFacts"]["semanticStatus"] == "timeout"
+    assert result["resultFacts"]["timedOut"] is True
+    assert result["agentCompatibility"]["resultFacts"]["semanticStatus"] == "timeout"

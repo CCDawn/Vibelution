@@ -1202,7 +1202,7 @@ def test_build_followup_prompt_includes_running_turn_guidance():
     assert "先不要继续实现，先汇报链路风险。" in prompt
 
 
-def test_normalize_persisted_tool_calls_preserves_timeout_as_failed():
+def test_normalize_persisted_tool_calls_preserves_timeout_as_timeout():
     tool_calls = session_service._normalize_persisted_tool_calls(
         [
             {
@@ -1217,7 +1217,7 @@ def test_normalize_persisted_tool_calls_preserves_timeout_as_failed():
         ]
     )
 
-    assert tool_calls[0]["status"] == "failed"
+    assert tool_calls[0]["status"] == "timeout"
     assert tool_calls[1]["status"] == "done"
 
 
@@ -1247,7 +1247,7 @@ def test_normalize_persisted_tool_calls_preserves_safe_details():
     assert tool_calls == [
         {
             "name": "image2_generate_tool",
-            "status": "failed",
+            "status": "timeout",
             "summary": "Read timed out.",
             "arguments": {
                 "prompt": "生成美女图片",

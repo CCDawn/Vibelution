@@ -27,7 +27,12 @@ from core.infrastructure.agent_session import get_session_state
 from core.infrastructure.evolution_governor import get_evolution_governor
 from core.infrastructure.llm_utils import parse_tool_args
 from core.infrastructure.tool_recommender import decide_next_tools
-from core.infrastructure.tool_result import extract_tool_result_semantics, infer_tool_business_success
+from core.infrastructure.tool_result import (
+    extract_tool_result_semantics,
+    infer_tool_business_success,
+    package_tool_result_facts,
+    tool_result_facts_payload,
+)
 from core.logging import debug as _debug_logger
 
 
@@ -90,6 +95,43 @@ def _summarize_tool_result(result: Any) -> dict[str, Any]:
         "resultLength": len(text),
         **{key: value for key, value in semantics.items() if value not in {None, ""}},
     }
+
+
+def _tool_error_event_facts(
+    tool_name: str,
+    error: Any,
+    *,
+    semantic_status: str = "failed",
+    failure_class: str = "",
+    timed_out: bool = False,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "status": semantic_status,
+        "error": str(error or ""),
+        "timedOut": bool(timed_out),
+    }
+    if failure_class:
+        payload["failureClass"] = failure_class
+    facts = tool_result_facts_payload(package_tool_result_facts(payload, tool_name=tool_name))
+    facts["semanticStatus"] = semantic_status
+    facts["timedOut"] = bool(timed_out)
+    if failure_class:
+        facts["failureClass"] = failure_class
+    if timed_out:
+        facts["transportStatus"] = "timeout"
+    elif semantic_status == "cancelled":
+        facts["transportStatus"] = "cancelled"
+    elif failure_class in {
+        "policy_blocked",
+        "readonly_subagent_block",
+        "runtime_block",
+        "unknown_tool",
+        "invalid_args",
+    }:
+        facts["transportStatus"] = "not_called"
+    elif failure_class == "tool_error":
+        facts["transportStatus"] = "raised"
+    return facts
 
 
 def _coerce_tool_result_payload(result: Any) -> dict[str, Any]:
@@ -513,6 +555,14 @@ class ToolExecutor:
             self._event_bus.publish(EventNames.TOOL_ERROR, {
                 "name": tool_name,
                 "error": policy_block,
+                "result": policy_block,
+                "args": tool_args,
+                **_tool_error_event_facts(
+                    tool_name,
+                    policy_block,
+                    semantic_status="blocked",
+                    failure_class="policy_blocked",
+                ),
             })
             _record_current_agent_tool_observation(tool_name, "policy_blocked", tool_args, policy_block)
             _record_tool_scene_event(
@@ -532,6 +582,14 @@ class ToolExecutor:
             self._event_bus.publish(EventNames.TOOL_ERROR, {
                 "name": tool_name,
                 "error": readonly_block,
+                "result": readonly_block,
+                "args": tool_args,
+                **_tool_error_event_facts(
+                    tool_name,
+                    readonly_block,
+                    semantic_status="blocked",
+                    failure_class="readonly_subagent_block",
+                ),
             })
             _record_tool_scene_event(
                 "execute",
@@ -549,6 +607,14 @@ class ToolExecutor:
             self._event_bus.publish(EventNames.TOOL_ERROR, {
                 "name": tool_name,
                 "error": blocked_message,
+                "result": blocked_message,
+                "args": tool_args,
+                **_tool_error_event_facts(
+                    tool_name,
+                    blocked_message,
+                    semantic_status="blocked",
+                    failure_class="runtime_block",
+                ),
             })
             _record_tool_scene_event(
                 "execute",
@@ -565,12 +631,17 @@ class ToolExecutor:
 
         soft_result = self._check_codex_style_reading_governance(tool_name, tool_args)
         if soft_result:
+            soft_duration_ms = int((time.monotonic() - started_at) * 1000)
+            soft_facts = tool_result_facts_payload(
+                package_tool_result_facts(soft_result, tool_name=tool_name)
+            )
             self._event_bus.publish(EventNames.TOOL_SUCCESS, {
                 "name": tool_name,
                 "args": tool_args,
                 "result": soft_result,
-                "durationMs": int((time.monotonic() - started_at) * 1000),
+                "durationMs": soft_duration_ms,
                 "timeoutSeconds": 0,
+                **soft_facts,
             })
             self._record_runtime_signals(tool_name, tool_args, soft_result)
             _record_current_agent_tool_observation(tool_name, "reading_governed", tool_args, soft_result)
@@ -583,7 +654,7 @@ class ToolExecutor:
                 outcome="observed",
                 fields={
                     **_summarize_tool_args(tool_args),
-                    "durationMs": int((time.monotonic() - started_at) * 1000),
+                    "durationMs": soft_duration_ms,
                     "resultPreview": soft_result[:320],
                 },
             )
@@ -594,6 +665,14 @@ class ToolExecutor:
             self._event_bus.publish(EventNames.TOOL_ERROR, {
                 "name": "[unknown_tool]",
                 "error": error_msg,
+                "result": error_msg,
+                "args": tool_args,
+                **_tool_error_event_facts(
+                    "[unknown_tool]",
+                    error_msg,
+                    semantic_status="failed",
+                    failure_class="unknown_tool",
+                ),
             })
             _record_current_agent_tool_observation(str(tool_name or "[unknown_tool]"), "unknown_tool", tool_args, error_msg)
             _record_tool_scene_event(
@@ -629,8 +708,15 @@ class ToolExecutor:
             self._event_bus.publish(EventNames.TOOL_ERROR, {
                 "name": tool_name,
                 "error": argument_error,
+                "result": argument_error,
                 "args": tool_args,
                 "durationMs": int((time.monotonic() - started_at) * 1000),
+                **_tool_error_event_facts(
+                    tool_name,
+                    argument_error,
+                    semantic_status="failed",
+                    failure_class="invalid_args",
+                ),
             })
             self._record_runtime_signals(tool_name, tool_args, argument_error)
             _record_current_agent_tool_observation(tool_name, "invalid_args", tool_args, argument_error)
@@ -663,9 +749,16 @@ class ToolExecutor:
                 self._event_bus.publish(EventNames.TOOL_ERROR, {
                     "name": tool_name,
                     "error": error_msg,
+                    "result": error_msg,
                     "args": tool_args,
                     "durationMs": int((time.monotonic() - started_at) * 1000),
                     "timeoutSeconds": timeout,
+                    **_tool_error_event_facts(
+                        tool_name,
+                        error_msg,
+                        semantic_status="cancelled",
+                        failure_class="cancelled",
+                    ),
                 })
                 _record_tool_scene_event(
                     "execute",
@@ -694,9 +787,16 @@ class ToolExecutor:
                     self._event_bus.publish(EventNames.TOOL_ERROR, {
                         "name": tool_name,
                         "error": error_msg,
+                        "result": error_msg,
                         "args": tool_args,
                         "durationMs": int((time.monotonic() - started_at) * 1000),
                         "timeoutSeconds": timeout,
+                        **_tool_error_event_facts(
+                            tool_name,
+                            error_msg,
+                            semantic_status="cancelled",
+                            failure_class="cancelled",
+                        ),
                     })
                     self._record_runtime_signals(tool_name, tool_args, error_msg)
                     _record_tool_scene_event(
@@ -725,9 +825,16 @@ class ToolExecutor:
                         self._event_bus.publish(EventNames.TOOL_ERROR, {
                             "name": tool_name,
                             "error": error_msg,
+                            "result": error_msg,
                             "args": tool_args,
                             "durationMs": int((time.monotonic() - started_at) * 1000),
                             "timeoutSeconds": timeout,
+                            **_tool_error_event_facts(
+                                tool_name,
+                                error_msg,
+                                semantic_status="cancelled",
+                                failure_class="cancelled",
+                            ),
                         })
                         self._record_runtime_signals(tool_name, tool_args, error_msg)
                         _record_tool_scene_event(
@@ -749,20 +856,37 @@ class ToolExecutor:
                 except TimeoutError:
                     continue
 
-            # 发布工具成功事件
-            self._event_bus.publish(EventNames.TOOL_SUCCESS, {
+            duration_ms = int((time.monotonic() - started_at) * 1000)
+            semantic = _classify_tool_semantic_result(tool_name, result)
+            semantic_outcome = str(semantic.get("outcome") or "succeeded")
+            result_facts = tool_result_facts_payload(
+                package_tool_result_facts(result, tool_name=tool_name)
+            )
+            result_facts["semanticStatus"] = semantic_outcome
+            if semantic_outcome == "timeout":
+                result_facts["timedOut"] = True
+                result_facts["failureClass"] = result_facts.get("failureClass") or "timeout"
+
+            event_payload = {
                 "name": tool_name,
                 "args": tool_args,
                 "result": result,
-                "durationMs": int((time.monotonic() - started_at) * 1000),
+                "durationMs": duration_ms,
                 "timeoutSeconds": timeout,
-            })
+                **result_facts,
+            }
+            if semantic_outcome in {"succeeded", "degraded", "observed"}:
+                self._event_bus.publish(EventNames.TOOL_SUCCESS, event_payload)
+            else:
+                self._event_bus.publish(EventNames.TOOL_ERROR, {
+                    **event_payload,
+                    "error": str(result or ""),
+                })
 
             self._record_runtime_signals(tool_name, tool_args, result)
-            semantic = _classify_tool_semantic_result(tool_name, result)
             _record_current_agent_tool_observation(
                 tool_name,
-                str(semantic.get("outcome") or "succeeded"),
+                semantic_outcome,
                 tool_args,
                 str(result or "")[:320],
             )
@@ -776,8 +900,9 @@ class ToolExecutor:
                 fields={
                     **_summarize_tool_args(tool_args),
                     **_summarize_tool_result(result),
+                    **result_facts,
                     **(semantic.get("fields") if isinstance(semantic.get("fields"), dict) else {}),
-                    "durationMs": int((time.monotonic() - started_at) * 1000),
+                    "durationMs": duration_ms,
                     "timeoutSeconds": timeout,
                 },
                 lifecycle=bool(semantic.get("lifecycle")),
@@ -797,9 +922,17 @@ class ToolExecutor:
             self._event_bus.publish(EventNames.TOOL_ERROR, {
                 "name": tool_name,
                 "error": error_msg,
+                "result": error_msg,
                 "args": tool_args,
                 "durationMs": int((time.monotonic() - started_at) * 1000),
                 "timeoutSeconds": timeout,
+                **_tool_error_event_facts(
+                    tool_name,
+                    error_msg,
+                    semantic_status="timeout",
+                    failure_class="timeout",
+                    timed_out=True,
+                ),
             })
             self._record_runtime_signals(tool_name, tool_args, error_msg)
             _record_current_agent_tool_observation(tool_name, "timeout", tool_args, error_msg)
@@ -826,9 +959,16 @@ class ToolExecutor:
             self._event_bus.publish(EventNames.TOOL_ERROR, {
                 "name": tool_name,
                 "error": error_msg,
+                "result": error_msg,
                 "args": tool_args,
                 "durationMs": int((time.monotonic() - started_at) * 1000),
                 "timeoutSeconds": timeout,
+                **_tool_error_event_facts(
+                    tool_name,
+                    error_msg,
+                    semantic_status="failed",
+                    failure_class="invalid_args",
+                ),
             })
             self._record_runtime_signals(tool_name, tool_args, error_msg)
             _record_current_agent_tool_observation(tool_name, "invalid_args", tool_args, error_msg)
@@ -855,9 +995,16 @@ class ToolExecutor:
             self._event_bus.publish(EventNames.TOOL_ERROR, {
                 "name": tool_name,
                 "error": error_msg,
+                "result": error_msg,
                 "args": tool_args,
                 "durationMs": int((time.monotonic() - started_at) * 1000),
                 "timeoutSeconds": timeout,
+                **_tool_error_event_facts(
+                    tool_name,
+                    error_msg,
+                    semantic_status="failed",
+                    failure_class="tool_error",
+                ),
             })
             self._record_runtime_signals(tool_name, tool_args, error_msg)
             _record_current_agent_tool_observation(tool_name, "failed", tool_args, error_msg)

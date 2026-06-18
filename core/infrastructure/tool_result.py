@@ -64,6 +64,26 @@ class ToolResultEnvelope:
     failure_class: str = ""
 
 
+@dataclass
+class ToolResultFacts:
+    """模型可见的工具结果事实，不承载二次摘要。"""
+
+    tool_name: str
+    content: str
+    truncated: bool
+    original_length: int
+    result_kind: str = "text"
+    strategy: str = "passthrough"
+    range_info: str = ""
+    continuation_hint: str = ""
+    transport_status: str = "returned"
+    semantic_status: str = "succeeded"
+    exit_code: int | None = None
+    timed_out: bool = False
+    failure_class: str = ""
+    action: str = ""
+
+
 def extract_tool_result_semantics(result: Any) -> dict[str, Any]:
     """Extract transport/business semantics from common tool result shapes."""
     semantics: dict[str, Any] = {
@@ -87,6 +107,13 @@ def extract_tool_result_semantics(result: Any) -> dict[str, Any]:
 
     text = _normalize_text_payload(str(result or ""))
     lowered = text.lower()
+    if not payload and text.startswith("{"):
+        try:
+            parsed_payload = json.loads(text)
+            if isinstance(parsed_payload, dict):
+                payload = parsed_payload
+        except Exception:
+            pass
     if payload:
         status = _normalize_text_payload(str(payload.get("status") or "")).lower()
         if status:
@@ -145,6 +172,12 @@ def extract_tool_result_semantics(result: Any) -> dict[str, Any]:
         semantics["failureClass"] = str(semantics["semanticStatus"])
     if semantics["semanticStatus"] in {"ok", "success", "succeeded"}:
         semantics["semanticStatus"] = "succeeded"
+    elif semantics["semanticStatus"] in {"fail", "failure", "error", "errored"}:
+        semantics["semanticStatus"] = "failed"
+    elif semantics["semanticStatus"] == "timed_out":
+        semantics["semanticStatus"] = "timeout"
+        semantics["timedOut"] = True
+        semantics["failureClass"] = "timeout"
     return semantics
 
 
@@ -449,6 +482,84 @@ def truncate_result(result: Any, max_chars: int = DEFAULT_MAX_CHARS) -> tuple:
     return packaged.content, packaged.truncated
 
 
+def package_tool_result_facts(
+    result: Any,
+    *,
+    tool_name: str = "",
+    action: Optional[str] = None,
+    max_chars: int = DEFAULT_MAX_CHARS,
+) -> ToolResultFacts:
+    """将工具原始返回值封装为模型与 UI 共享的事实载荷。"""
+    packaged = package_tool_result(result, tool_name=tool_name, max_chars=max_chars)
+    return ToolResultFacts(
+        tool_name=str(tool_name or "").strip(),
+        content=packaged.content,
+        truncated=packaged.truncated,
+        original_length=packaged.original_length,
+        result_kind=packaged.result_kind,
+        strategy=packaged.strategy,
+        range_info=packaged.range_info,
+        continuation_hint=packaged.continuation_hint,
+        transport_status=packaged.transport_status,
+        semantic_status=packaged.semantic_status,
+        exit_code=packaged.exit_code,
+        timed_out=packaged.timed_out,
+        failure_class=packaged.failure_class,
+        action=str(action or "").strip(),
+    )
+
+
+def tool_result_facts_payload(facts: ToolResultFacts) -> dict[str, Any]:
+    """转为 API/事件可安全传输的事实字段。"""
+    payload: dict[str, Any] = {
+        "transportStatus": facts.transport_status,
+        "semanticStatus": facts.semantic_status,
+        "timedOut": bool(facts.timed_out),
+        "truncated": bool(facts.truncated),
+        "originalLength": int(facts.original_length),
+        "resultKind": facts.result_kind,
+        "strategy": facts.strategy,
+    }
+    if facts.tool_name:
+        payload["toolName"] = facts.tool_name
+    if facts.exit_code is not None:
+        payload["exitCode"] = facts.exit_code
+    if facts.failure_class:
+        payload["failureClass"] = facts.failure_class
+    if facts.range_info:
+        payload["rangeInfo"] = facts.range_info
+    if facts.continuation_hint:
+        payload["continuationHint"] = facts.continuation_hint
+    if facts.action:
+        payload["action"] = facts.action
+    return payload
+
+
+def render_tool_result_for_model(facts: ToolResultFacts) -> str:
+    """把工具结果渲染成 Agent 可自然读取的事实块。"""
+    lines = ["[Tool Result Facts]"]
+    if facts.tool_name:
+        lines.append(f"toolName: {facts.tool_name}")
+    lines.append(f"transportStatus: {facts.transport_status}")
+    lines.append(f"semanticStatus: {facts.semantic_status}")
+    if facts.exit_code is not None:
+        lines.append(f"exitCode: {facts.exit_code}")
+    lines.append(f"timedOut: {str(bool(facts.timed_out)).lower()}")
+    if facts.failure_class:
+        lines.append(f"failureClass: {facts.failure_class}")
+    lines.append(f"resultKind: {facts.result_kind}")
+    lines.append(f"truncated: {str(bool(facts.truncated)).lower()}")
+    lines.append(f"originalLength: {facts.original_length}")
+    if facts.action:
+        lines.append(f"action: {facts.action}")
+    if facts.range_info:
+        lines.append(f"rangeInfo: {facts.range_info}")
+    if facts.continuation_hint:
+        lines.append(f"continuationHint: {facts.continuation_hint}")
+    lines.extend(["", "Result:", facts.content])
+    return "\n".join(lines)
+
+
 def infer_result_from_tool_outputs(tool_outputs: List[str]) -> Dict[str, Any]:
     """从最近工具输出中提炼结构化诊断结果。"""
     haystack = "\n".join(str(item or "") for item in tool_outputs if str(item or "").strip())
@@ -535,9 +646,9 @@ def format_tool_message(
     Returns:
         (ToolMessage 内容字符串, tool_call_id)
     """
-    from langchain_core.messages import ToolMessage
-
-    result_str, _ = truncate_result(result)
+    tool_name = str(tool_call.get("name") or "").strip()
+    facts = package_tool_result_facts(result, tool_name=tool_name, action=action)
+    result_str = render_tool_result_for_model(facts)
 
     # 安全获取 tool_call_id
     tool_call_id = str(tool_call.get('id', '')) if tool_call.get('id') is not None else ''
@@ -548,8 +659,12 @@ def format_tool_message(
 __all__ = [
     "truncate_result",
     "package_tool_result",
+    "package_tool_result_facts",
+    "tool_result_facts_payload",
+    "render_tool_result_for_model",
     "extract_tool_result_semantics",
     "ToolResultEnvelope",
+    "ToolResultFacts",
     "format_tool_message",
     "compact_tool_output_for_diagnosis",
     "infer_result_from_tool_outputs",
