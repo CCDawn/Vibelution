@@ -1765,6 +1765,11 @@
   gap: 6px;
 }
 
+.configDenseSection > .treeGrid {
+  grid-template-columns: repeat(auto-fit, minmax(186px, 1fr));
+  gap: 5px;
+}
+
 .treeWide {
   grid-column: 1 / -1;
 }
@@ -1821,10 +1826,32 @@
   padding: 5px 6px;
 }
 
+.configDenseSection .treeFieldCardView {
+  grid-template-columns: minmax(92px, 0.42fr) minmax(0, 1fr);
+  gap: 3px 6px;
+  min-height: 30px;
+  padding: 5px;
+}
+
 .treeFieldCardEdit {
   align-content: start;
   gap: 5px;
   padding: 7px 8px;
+}
+
+.configDenseSection .treeFieldCardEdit {
+  gap: 4px;
+  padding: 6px;
+}
+
+.configDenseSection .treeObjectCell .treeObjectBlock,
+.configDenseSection .treeObjectCell .treeNestedBlock {
+  min-height: 36px;
+  padding: 6px;
+}
+
+.configDenseSection .treeObjectCell .treeToggle {
+  min-height: 28px;
 }
 
 .treeToggle,
