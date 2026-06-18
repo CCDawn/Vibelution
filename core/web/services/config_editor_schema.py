@@ -14,6 +14,7 @@ AVATAR_PRESET_OPTIONS = ["lobster", "shrimp", "crab", "cat", "chick", "bunny", "
 USER_AVATAR_PRESET_OPTIONS = ["default", "circle", "spark", "codex", "minimal", "initial"]
 WORKBENCH_WINDOW_MODE_OPTIONS = ["windowed", "fullscreen"]
 WORKBENCH_BACKGROUND_READABILITY_OPTIONS = ["soft", "standard", "strong"]
+LOG_LEVEL_OPTIONS = ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
 
 SECTION_LABELS = {
     "zh": {
@@ -426,6 +427,8 @@ def _field_options(path: str, lang: str) -> list[dict[str, str]]:
         return list_default_theme_background_options(lang)
     if path == "evolution.chat_dataset.segmentation_strategy":
         return [{"value": value, "label": value} for value in SEGMENTATION_STRATEGY_OPTIONS]
+    if path == "log.level" or path.startswith("log.third_party."):
+        return [{"value": value, "label": value} for value in LOG_LEVEL_OPTIONS]
     return []
 
 
@@ -473,10 +476,11 @@ def _field_kind(path: str, value: Any, options: list[dict[str, str]] | None = No
         return "json", "JSON"
     if _is_secret_path(path):
         return "secret", "Secret"
-    if any(token in path for token in ("url", "api_base", "base_url")):
+    normalized_path = str(path or "").replace("-", "_").lower()
+    path_tokens = set(normalized_path.replace(".", "_").split("_"))
+    if "url" in path_tokens or normalized_path.endswith((".api_base", ".base_url")):
         return "url", "URL"
-    path_tokens = set(str(path or "").replace("-", "_").replace(".", "_").split("_"))
-    if path_tokens.intersection({"path", "workspace", "directory", "directories", "file", "log"}):
+    if path_tokens.intersection({"path", "workspace", "directory", "directories", "file"}):
         return "path", "Path"
     return "text", "Text"
 
