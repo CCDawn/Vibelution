@@ -2567,6 +2567,53 @@ def test_recover_processing_queue_completes_stale_satisfied_launcher_close_from_
     assert "command_queue.recovered_stale_close_completed" in [event["type"] for event in events]
 
 
+def test_recover_processing_queue_completes_stale_satisfied_pending_close(tmp_path, monkeypatch):
+    inbox_dir = tmp_path / "inbox"
+    processing_dir = tmp_path / "processing"
+    results_dir = tmp_path / "results"
+    events_path = tmp_path / "events.jsonl"
+    for path in (inbox_dir, processing_dir, results_dir):
+        path.mkdir(parents=True)
+
+    pending_close = {
+        "commandId": "cmd_20260618T020437Z_c89d34be",
+        "type": "close_workbench",
+        "requestedBy": "launcher_api",
+        "requestedAt": "2026-06-18T02:04:37.016547+00:00",
+        "args": {"reason": "launcher_stop_button", "source": "launcher_api", "stopManager": False},
+    }
+    (inbox_dir / f"{pending_close['commandId']}.json").write_text(json.dumps(pending_close), encoding="utf-8")
+
+    monkeypatch.setattr(command_queue, "INBOX_DIR", inbox_dir)
+    monkeypatch.setattr(command_queue, "PROCESSING_DIR", processing_dir)
+    monkeypatch.setattr(command_queue, "RESULTS_DIR", results_dir)
+    monkeypatch.setattr(command_queue, "EVENTS_PATH", events_path)
+    monkeypatch.setattr(command_queue, "ensure_runtime_manager_dirs", lambda: None)
+    monkeypatch.setattr(
+        command_queue,
+        "load_state",
+        lambda: {
+            "stateVersion": 146988,
+            "runtimeState": "idle",
+            "managerPid": 0,
+            "daemonRunning": False,
+            "workbench": {"desiredState": "closed", "observedState": "closed", "phase": "steady"},
+        },
+    )
+
+    command_queue.recover_processing_queue()
+
+    recovered_result = json.loads((results_dir / f"{pending_close['commandId']}.json").read_text(encoding="utf-8"))
+    assert recovered_result["ok"] is True
+    assert recovered_result["completed"] is True
+    assert recovered_result["staleRecoveredCommand"] is True
+    assert recovered_result["recoverySource"] == "state"
+    assert list(inbox_dir.glob("*.json")) == []
+    assert list(processing_dir.glob("*.json")) == []
+    events = [json.loads(line) for line in events_path.read_text(encoding="utf-8").splitlines()]
+    assert "command_queue.recovered_stale_close_completed" in [event["type"] for event in events]
+
+
 def test_recover_processing_queue_preserves_completed_result_without_requeue(tmp_path, monkeypatch):
     inbox_dir = tmp_path / "inbox"
     processing_dir = tmp_path / "processing"

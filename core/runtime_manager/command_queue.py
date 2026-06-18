@@ -222,6 +222,15 @@ def recover_processing_queue() -> None:
             )
         except OSError:
             continue
+    _complete_satisfied_pending_close_commands()
+
+
+def _complete_satisfied_pending_close_commands() -> None:
+    for path in sorted(INBOX_DIR.glob("*.json")):
+        command = _load_command_file(path)
+        if _discard_recovered_command_with_existing_result(path, command):
+            continue
+        _complete_recovered_satisfied_close_workbench(path, command)
 
 
 def has_recent_lifecycle_command(*, grace_seconds: float, now: datetime | None = None) -> bool:
