@@ -534,6 +534,15 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("selectedSourceCollectionSearchAccepted");
     expect(routeSource).not.toContain('collection: ["research_coordination", "data_discovery", "source_acquisition", "content_extraction"]');
     expect(routeSource).toContain('collection: ["data_discovery", "source_acquisition", "content_extraction"]');
+    expect(routeSource).not.toContain('graph: ["source_quality"]');
+    expect(routeSource).toContain('graph: ["candidate_graph"]');
+    expect(routeSource).toContain('SOURCE_COLLECTION_TEAM_AGENT_ROLES');
+    expect(routeSource).toContain('key: "candidate_graph"');
+    expect(routeSource).toContain("const sourceCollectionGraphAgentId");
+    expect(routeSource).toContain("createdByAgent: sourceCollectionGraphAgentId");
+    expect(routeSource).not.toContain("createdByAgent: sourceCollectionQualityAgentId");
+    expect(routeSource).toContain('return message.id.startsWith("graph-")');
+    expect(routeSource).toContain('return message.id.startsWith("memory-")');
     expect(routeSource).toContain("researchStageStartFeedbackText");
     expect(routeSource).toContain("已复用正在运行的");
     expect(routeSource).not.toContain("像对话一样记录：搜索了什么");
