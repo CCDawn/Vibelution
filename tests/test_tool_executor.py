@@ -113,7 +113,7 @@ class TestToolExecutorInit:
         assert "conversation_log_inspect_tool" in canonical_names
         assert "conversation_log_inspect_tool" in llm_names
 
-    def test_cli_agent_run_tool_is_registered_and_allowed_by_session_default(self):
+    def test_cli_agent_run_tool_is_registered_but_restricted_by_session_default(self):
         from core.web.services.agent_directory_service import (
             compute_effective_tool_visibility,
             default_session_agent_tool_policy,
@@ -136,8 +136,8 @@ class TestToolExecutorInit:
             policy=default_session_agent_tool_policy("tool-agent-session"),
         )
 
-        assert "cli_agent_run_tool" in session_visibility.visible_tools
-        assert "cli_agent_run_tool" not in session_visibility.hidden_restricted_tools
+        assert "cli_agent_run_tool" not in session_visibility.visible_tools
+        assert "cli_agent_run_tool" in session_visibility.hidden_restricted_tools
 
     def test_memory_tools_are_llm_facing_but_policy_gated_by_default(self):
         from core.web.services.agent_directory_service import (
@@ -900,12 +900,15 @@ class TestToolExecutorTimeout:
         assert "ToolPolicy" in str(result)
         assert "fake_policy_probe_tool" in str(result)
 
-    def test_cli_agent_run_tool_runs_with_session_default_tool_policy(self, executor, monkeypatch):
+    def test_cli_agent_run_tool_runs_with_explicit_tool_policy_allow(self, executor, monkeypatch):
         from core.web.services import agent_directory_service
 
         monkeypatch.setattr(agent_directory_service, "current_agent_runtime", lambda: {
             "agentId": "agent-session",
-            "toolPolicy": agent_directory_service.default_session_agent_tool_policy("tool-agent-session"),
+            "toolPolicy": {
+                "policyId": "tool-agent-session-cli",
+                "allowedTools": ["cli_agent_run_tool"],
+            },
         })
         monkeypatch.setitem(
             executor._tool_map,
@@ -2039,6 +2042,36 @@ class TestToolExecutorIntegration:
             "max_issues": 5,
         })
         assert result is not None
+
+
+def test_semantic_failure_return_publishes_tool_error_event():
+    executor = ToolExecutor()
+    bus = get_event_bus()
+    success_events = []
+    error_events = []
+    success_callback_id = "test_semantic_failure_success_event"
+    error_callback_id = "test_semantic_failure_error_event"
+    bus.subscribe(EventNames.TOOL_SUCCESS, lambda event: success_events.append(event.data), callback_id=success_callback_id)
+    bus.subscribe(EventNames.TOOL_ERROR, lambda event: error_events.append(event.data), callback_id=error_callback_id)
+
+    def fake_tool():
+        return {"status": "failed", "error": "real failure"}
+
+    executor.register_tool("semantic_failure_probe_tool", fake_tool, timeout=5)
+
+    try:
+        result, action = executor.execute("semantic_failure_probe_tool", {})
+    finally:
+        bus.unsubscribe_by_id(success_callback_id)
+        bus.unsubscribe_by_id(error_callback_id)
+
+    assert action is None
+    assert result == {"status": "failed", "error": "real failure"}
+    assert success_events == []
+    assert error_events
+    assert error_events[-1]["semanticStatus"] == "failed"
+    assert error_events[-1]["transportStatus"] == "returned"
+    assert error_events[-1]["result"] == result
 
 
 if __name__ == "__main__":

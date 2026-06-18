@@ -14,7 +14,11 @@ from typing import Any, Callable, ClassVar, Dict, List, Optional, Tuple
 from langchain_core.messages import AIMessage, ToolMessage
 
 from core.infrastructure.llm_utils import parse_tool_args
-from core.infrastructure.tool_result import infer_tool_business_success, truncate_result
+from core.infrastructure.tool_result import (
+    infer_tool_business_success,
+    package_tool_result_facts,
+    render_tool_result_for_model,
+)
 from core.logging.logger import debug as _debug_logger
 from core.logging.unified_logger import logger
 from core.ui.cli_ui import get_ui
@@ -225,7 +229,12 @@ class ToolLifecycleBridge:
     @staticmethod
     def handle_tool_result(tool_call: Dict[str, Any], result: Any, action: Optional[str], messages: list) -> None:
         """将工具结果回写到消息历史。"""
-        result_str, truncated = truncate_result(result)
+        facts = package_tool_result_facts(
+            result,
+            tool_name=str(tool_call.get("name") or "").strip(),
+            action=action,
+        )
+        result_str = render_tool_result_for_model(facts)
         if action in ("restart", "skip", "hibernated"):
             logger.log_action(action, {"tool": tool_call["name"]})
         tool_call_id = tool_call.get("id")
@@ -233,7 +242,7 @@ class ToolLifecycleBridge:
             messages.append(ToolMessage(content=result_str, tool_call_id=tool_call_id))
         else:
             messages.append(AIMessage(content=result_str))
-        if truncated:
+        if facts.truncated:
             _debug_logger.warning(f"[工具] {tool_call['name']} 结果过长，已截断", tag="TOOL")
 
     def execute_tools(
