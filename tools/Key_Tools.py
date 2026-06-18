@@ -645,7 +645,13 @@ def create_key_tools() -> List[BaseTool]:
 
     # ── 文件操作工具 ────────────────────────────────────────────────────────
 
-    def _cli_tool_impl(command: str = "", timeout: int = 60, cwd: str = "", max_output_chars: int = 12000) -> str:
+    def _cli_tool_impl(
+        command: str = "",
+        timeout: int = 60,
+        cwd: str = "",
+        max_output_chars: int = 12000,
+        _cancel_checker=None,
+    ) -> str:
         from tools.shell_tools import execute_shell_command
         if not command:
             return '{"status": "error", "code": "MISSING_COMMAND", "message": "cli_tool 需要提供 command 参数"}'
@@ -657,7 +663,7 @@ def create_key_tools() -> List[BaseTool]:
             max_output_chars = int(max_output_chars)
         except (TypeError, ValueError):
             max_output_chars = 12000
-        result = execute_shell_command(command, timeout=timeout, cwd=cwd or None)
+        result = execute_shell_command(command, timeout=timeout, cwd=cwd or None, _cancel_checker=_cancel_checker)
         if max_output_chars > 0 and len(result) > max_output_chars:
             head_size = max(2000, max_output_chars // 2)
             tail_size = max(2000, max_output_chars - head_size)

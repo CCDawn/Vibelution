@@ -228,6 +228,14 @@ def _validate_tool_arguments(tool_name: str, func: Callable, tool_args: dict[str
     return None
 
 
+def _tool_accepts_cancel_checker(func: Callable) -> bool:
+    try:
+        signature = inspect.signature(func)
+    except (TypeError, ValueError):
+        return False
+    return "_cancel_checker" in signature.parameters
+
+
 def _classify_tool_semantic_result(tool_name: str, result: Any) -> dict[str, Any]:
     text = str(result or "").strip()
     fields: dict[str, Any] = {"semanticStatus": "succeeded"}
@@ -642,7 +650,7 @@ class ToolExecutor:
             )
             return (argument_error, None)
         cancel_checker = self._snapshot_cancel_checker()
-        if tool_name == "spawn_agent_tool" and "_cancel_checker" not in call_args:
+        if _tool_accepts_cancel_checker(func) and "_cancel_checker" not in call_args:
             call_args["_cancel_checker"] = lambda: self._current_cancel_reason(cancel_checker)
 
         executor = ThreadPoolExecutor(max_workers=1)

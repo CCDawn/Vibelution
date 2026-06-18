@@ -603,3 +603,94 @@ def test_force_cancel_active_supervised_worktree_run_for_shutdown_releases_snaps
     cancelled_event = next(item for item in scene_events if item[2] == "supervised_worktree_run.shutdown_cancelled")
     assert cancelled_event[1] == "shutdown"
     assert cancelled_event[3]["lifecycle"] is True
+
+
+def test_shutdown_cancel_stops_flow_before_candidate_work(tmp_path, monkeypatch):
+    monkeypatch.setattr(service.work_run_store, "WORK_RUNS_DIR", tmp_path / "work_runs")
+    monkeypatch.setattr(service, "record_runtime_scene_event", lambda *args, **kwargs: {"accepted": True})
+    project_root = tmp_path / "project"
+    _write_bundle(project_root, "cancel_bundle_v1")
+    options = service._normalize_start_payload(
+        {"sourceKind": "bundle", "bundleName": "cancel_bundle_v1", "executionMode": "simulation"},
+        lang="zh",
+        project_root=project_root,
+    )
+    run_id = "swte-cancel-flow"
+    snapshot = {
+        "runId": run_id,
+        "runKind": service.RUN_KIND,
+        "leases": service.RUN_LEASES,
+        "status": "queued",
+        "phase": "queued",
+        "runtimeStatus": "queued",
+        "outcome": "",
+        "mode": options["mode"],
+        "executionMode": options["executionMode"],
+        "sourceKind": options["sourceKind"],
+        "datasetName": options["datasetName"],
+        "datasetLimit": options["datasetLimit"],
+        "bundleName": options["bundleName"],
+        "keepWorktree": bool(options["keepWorktree"]),
+        "startRequest": options["startRequest"],
+        "selfEvolutionOrigin": options["selfEvolutionOrigin"],
+        "reviewGate": options["reviewGate"],
+        "startedAt": "2026-05-22T10:00:00+00:00",
+        "updatedAt": "2026-05-22T10:00:00+00:00",
+        "finishedAt": "",
+        "projectRoot": str(project_root),
+        "latestMessage": "",
+        "costEstimate": options["costEstimate"],
+        "stages": [],
+        "events": [],
+        "baseline": {},
+        "reflection": {},
+        "candidateWorktree": {},
+        "candidateModification": {},
+        "candidate": {},
+        "decision": {},
+        "mergeAnalysis": {},
+        "merge": {},
+        "rollback": {},
+        "error": "",
+        "errorType": "",
+    }
+    calls = {"baseline": 0, "worktree": 0, "modifier": 0, "candidate": 0}
+
+    def evaluator(root: Path, bundle_name: str, role: str, context: dict) -> dict:
+        assert callable(context.get("cancelChecker"))
+        calls[role] += 1
+        if role == "baseline":
+            service.force_cancel_active_supervised_worktree_runs_for_shutdown("closing")
+        return _fake_evaluator(root, bundle_name, role, context)
+
+    def worktree_factory(*_: object) -> dict:
+        calls["worktree"] += 1
+        return {"path": str(tmp_path / "candidate")}
+
+    def modifier(*_: object) -> dict:
+        calls["modifier"] += 1
+        return {"status": "success"}
+
+    service._persist_snapshot(snapshot, active_run_id=run_id)
+    try:
+        result = service._execute_flow(
+            snapshot,
+            options,
+            root=project_root,
+            dependencies=service.WorktreeRunDependencies(
+                evaluation_runner=evaluator,
+                candidate_modifier=modifier,
+                worktree_factory=worktree_factory,
+            ),
+        )
+    finally:
+        service._clear_run_cancel_event(run_id)
+
+    assert result["status"] == "cancelled"
+    assert result["phase"] == "shutdown"
+    assert result["outcome"] == "shutdown_cancelled"
+    assert calls == {"baseline": 1, "worktree": 0, "modifier": 0, "candidate": 0}
+    persisted = service.get_supervised_worktree_run(run_id)
+    assert persisted is not None
+    assert persisted["status"] == "cancelled"
+    assert persisted["phase"] == "shutdown"
