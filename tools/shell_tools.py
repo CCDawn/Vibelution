@@ -41,9 +41,10 @@ import traceback
 import json
 import glob as glob_module
 import re
+import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional, List
+from typing import Callable, Optional, List
 from contextlib import contextmanager
 from contextvars import ContextVar
 from datetime import datetime
@@ -123,6 +124,44 @@ def _subprocess_no_window_kwargs() -> dict:
     """Hide transient console windows for background tool commands on Windows."""
     flags = int(getattr(subprocess, "CREATE_NO_WINDOW", 0))
     return {"creationflags": flags} if flags else {}
+
+
+def _terminate_shell_process(process: subprocess.Popen) -> None:
+    """Terminate a shell command and its children without launching helper consoles."""
+    pid = int(getattr(process, "pid", 0) or 0)
+    if pid > 0:
+        try:
+            from core.runtime_manager.process_inventory import terminate_process_descendants
+
+            terminate_process_descendants(pid, timeout_seconds=1.0)
+        except Exception as exc:
+            logger.warning(f"terminate_shell_process: 终止子进程树失败 - {type(exc).__name__}: {exc}")
+    if process.poll() is None:
+        try:
+            process.terminate()
+        except OSError:
+            pass
+    try:
+        process.wait(timeout=1.0)
+    except subprocess.TimeoutExpired:
+        if process.poll() is None:
+            try:
+                process.kill()
+            except OSError:
+                pass
+
+
+def _collect_process_output(process: subprocess.Popen, *, timeout: float = 2.0) -> tuple[str, str]:
+    try:
+        stdout, stderr = process.communicate(timeout=max(0.1, float(timeout)))
+        return stdout or "", stderr or ""
+    except subprocess.TimeoutExpired:
+        _terminate_shell_process(process)
+        try:
+            stdout, stderr = process.communicate(timeout=1.0)
+            return stdout or "", stderr or ""
+        except Exception:
+            return "", ""
 
 
 # Linux/macOS 特有命令集合（在 Windows 上需要特殊处理）
@@ -662,7 +701,8 @@ def execute_shell_command(
     command: str,
     timeout: int = 60,
     cwd: Optional[str] = None,
-    check_safety: bool = True
+    check_safety: bool = True,
+    _cancel_checker: Optional[Callable[[], str]] = None,
 ) -> str:
     """
     执行 Shell 命令的万能工具（跨平台支持）
@@ -707,38 +747,81 @@ def execute_shell_command(
         except (TypeError, ValueError):
             timeout_int = 60
 
-        result = subprocess.run(
+        started_at = time.monotonic()
+        process = subprocess.Popen(
             final_command,
             shell=True,
             cwd=cwd,
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
             encoding=system_encoding,
             errors='replace',
-            timeout=timeout_int,
             **_subprocess_no_window_kwargs(),
         )
+        deadline = time.monotonic() + max(float(timeout_int), 0.1)
+        cancelled_reason = ""
+        stdout = ""
+        stderr = ""
+
+        while True:
+            if callable(_cancel_checker):
+                try:
+                    cancelled_reason = str(_cancel_checker() or "").strip()
+                except Exception:
+                    cancelled_reason = ""
+                if cancelled_reason:
+                    _terminate_shell_process(process)
+                    stdout, stderr = _collect_process_output(process)
+                    break
+
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                _terminate_shell_process(process)
+                stdout, stderr = _collect_process_output(process)
+                return f"[超时] 命令执行超过 {timeout} 秒被强制终止。\n请检查命令是否陷入死循环。"
+
+            try:
+                stdout, stderr = process.communicate(timeout=min(0.2, remaining))
+                stdout = stdout or ""
+                stderr = stderr or ""
+                break
+            except subprocess.TimeoutExpired:
+                continue
+
+        if cancelled_reason:
+            output_preview = "\n\n".join(
+                part
+                for part in [
+                    str(stdout or "").strip(),
+                    f"[STDERR]\n{str(stderr or '').strip()}" if str(stderr or "").strip() else "",
+                ]
+                if part
+            )
+            suffix = f"\n\n{output_preview}" if output_preview else ""
+            elapsed_ms = int((time.monotonic() - started_at) * 1000)
+            return f"[取消] 命令已因停止请求终止：{cancelled_reason} ({elapsed_ms}ms){suffix}"
 
         output_parts = []
 
-        if result.stdout:
-            output_parts.append(result.stdout.strip())
+        if stdout:
+            output_parts.append(stdout.strip())
 
-        if result.stderr:
-            output_parts.append(f"[STDERR]\n{result.stderr.strip()}")
+        if stderr:
+            output_parts.append(f"[STDERR]\n{stderr.strip()}")
 
         if not output_parts:
             output_parts.append("[命令执行完成，无输出]")
 
         output = "\n\n".join(output_parts)
 
-        if result.returncode != 0:
+        if process.returncode != 0:
             has_error_keywords = any(kw in output.lower() for kw in
                 ["error", "exception", "failed", "fail", "traceback", "syntaxerror", "indentationerror"])
             if has_error_keywords:
-                return f"[EXEC FAILURE | Exit Code: {result.returncode}]\n{output}"
+                return f"[EXEC FAILURE | Exit Code: {process.returncode}]\n{output}"
             else:
-                return f"[WARNING | Exit Code: {result.returncode}]\n{output}"
+                return f"[WARNING | Exit Code: {process.returncode}]\n{output}"
 
         return output
 
