@@ -2273,6 +2273,7 @@ class SelfEvolvingAgent:
         lifecycle_action: Optional[str] = None
         turn_tool_names: List[str] = []
         delegated_this_turn = False
+        round_return_ok = True
         try:
             self._raise_if_turn_stop_requested()
             for _ in range(round_state.max_iterations):
@@ -2699,6 +2700,19 @@ class SelfEvolvingAgent:
             # 轮次结束统计（无论正常结束还是异常，都记录）
             finalization = self._get_turn_outcome_controller().finalize_round(round_state=round_state)
             self._last_turn_failed = finalization.last_turn_failed
+            if bool(getattr(finalization, "max_iteration_exhausted_without_final_answer", False)):
+                round_return_ok = False
+                stop_reason = str(getattr(finalization, "stop_reason", "") or "").strip()
+                ui.add_log(stop_reason, "WARN")
+                self._last_turn_metadata = {
+                    **dict(getattr(self, "_last_turn_metadata", {}) or {}),
+                    "status": "stopped",
+                    "outcome": "blocked",
+                    "max_iteration_exhausted": True,
+                    "stop_reason": stop_reason,
+                    "summary": stop_reason,
+                    "raw_output": stop_reason,
+                }
             ui.note_turn_result(success=finalization.turn_success, had_progress=round_state.turn_had_progress)
             ui.update_status(
                 finalization.ui_status,
@@ -2725,7 +2739,7 @@ class SelfEvolvingAgent:
             self._refresh_retrospective_state_memory()
             _debug_logger.turn_end(current_turn, tool_count=round_state.total_tool_calls)
 
-        return True
+        return round_return_ok
 
     def _build_chat_user_message_for_turn(
         self,

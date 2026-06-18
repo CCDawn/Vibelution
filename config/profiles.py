@@ -86,7 +86,7 @@ def apply_runtime_profile(config: "AppConfig") -> "AppConfig":
         primary.timeout = max(primary.timeout, 120)
         primary.connect_timeout = min(primary.connect_timeout, 20)
         config.llm.discovery.enabled = True
-        config.agent.max_iterations = min(config.agent.max_iterations, 60)
+        config.agent.max_iterations = min(config.agent.max_iterations, 200)
         config.agent.awake_interval = min(config.agent.awake_interval, 60)
         config.context_compression.enabled = True
         config.runtime.preflight_doctor = True
