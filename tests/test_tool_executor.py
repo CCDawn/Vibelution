@@ -12,6 +12,7 @@
 import os
 import sys
 import json
+import subprocess
 import pytest
 import threading
 import time
@@ -24,6 +25,7 @@ from core.pet_system.pet_system import reset_pet_system
 from core.infrastructure import evolution_governor as governor_module
 from core.infrastructure.tool_executor import IMAGE2_TOOL_TIMEOUT_SECONDS, ToolExecutor, get_tool_executor
 from core.infrastructure.agent_session import get_session_state, reset_session_state
+from tools import shell_tools
 from tools.Key_Tools import create_key_tools, create_llm_facing_tools
 
 
@@ -966,6 +968,100 @@ class TestToolExecutorTimeout:
 
         assert action is None
         assert "[取消] slow_tool 已因停止请求中断" in str(result)
+
+    def test_execute_passes_cancel_checker_to_tools_that_accept_it(self, executor):
+        captured = {}
+
+        def cancel_aware_tool(_cancel_checker=None):
+            captured["checker"] = _cancel_checker
+            return "ok"
+
+        executor.register_tool("cancel_aware_tool", cancel_aware_tool, timeout=5)
+        executor.set_cancel_checker(lambda: "")
+
+        result, action = executor.execute("cancel_aware_tool", {})
+
+        assert action is None
+        assert result == "ok"
+        assert callable(captured["checker"])
+
+    def test_cli_tool_cancel_checker_terminates_shell_process(self, monkeypatch):
+        class FakeProcess:
+            pid = 43210
+
+            def __init__(self):
+                self.returncode = None
+                self.communicate_calls = 0
+                self.terminated = False
+                self.killed = False
+
+            def communicate(self, timeout=None):
+                self.communicate_calls += 1
+                if self.returncode is None:
+                    raise subprocess.TimeoutExpired(cmd="fake", timeout=timeout or 0)
+                return ("partial stdout", "")
+
+            def poll(self):
+                return self.returncode
+
+            def terminate(self):
+                self.terminated = True
+                self.returncode = -15
+
+            def kill(self):
+                self.killed = True
+                self.returncode = -9
+
+            def wait(self, timeout=None):
+                if self.returncode is None:
+                    raise subprocess.TimeoutExpired(cmd="fake", timeout=timeout or 0)
+                return self.returncode
+
+        process = FakeProcess()
+        cancel_calls = {"count": 0}
+
+        def fake_popen(*args, **kwargs):
+            return process
+
+        def cancel_checker():
+            cancel_calls["count"] += 1
+            return "stop now" if cancel_calls["count"] >= 2 else ""
+
+        monkeypatch.setattr(shell_tools.subprocess, "Popen", fake_popen)
+
+        result = shell_tools.execute_shell_command(
+            "echo slow",
+            timeout=5,
+            _cancel_checker=cancel_checker,
+        )
+
+        assert "[取消] 命令已因停止请求终止：stop now" in result
+        assert process.terminated
+        assert process.communicate_calls >= 2
+
+    def test_registered_cli_tool_forwards_cancel_checker_to_shell(self, executor, monkeypatch):
+        captured = {}
+
+        def fake_execute_shell_command(command, timeout=60, cwd=None, check_safety=True, _cancel_checker=None):
+            captured["command"] = command
+            captured["checker"] = _cancel_checker
+            return "ok"
+
+        monkeypatch.setattr(shell_tools, "execute_shell_command", fake_execute_shell_command)
+        executor.set_cancel_checker(lambda: "")
+
+        result, action = executor.execute("cli_tool", {"command": "echo ok"})
+
+        assert action is None
+        assert result == "ok"
+        assert captured["command"] == "echo ok"
+        assert callable(captured["checker"])
+
+    def test_cli_tool_schema_hides_internal_cancel_checker(self):
+        cli_tool = next(tool for tool in create_key_tools() if tool.name == "cli_tool")
+        schema = cli_tool.args_schema.model_json_schema()
+
+        assert "_cancel_checker" not in schema.get("properties", {})
 
     def test_cancel_checker_owner_prevents_stale_turn_clear(self, executor):
         owner_a = object()
