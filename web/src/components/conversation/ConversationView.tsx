@@ -2347,6 +2347,9 @@ export function ConversationView({
     if (!hasFeedbackTimeline) {
       return true;
     }
+    if (message.streaming) {
+      return true;
+    }
     const segments = parseResponseSegments(message.content);
     return segments.some((segment) => segment.kind !== "status");
   }
@@ -2360,6 +2363,17 @@ export function ConversationView({
     return (
       <div className={`${styles.markdownBody} ${hasTable ? styles.markdownBodyWithTable : ""}`}>
         {blocks.map((block, index) => renderMarkdownBlock(block, index, duplicateImageUrls))}
+      </div>
+    );
+  }
+
+  function renderStreamingResponseText(content: string) {
+    if (!content) {
+      return null;
+    }
+    return (
+      <div className={`${styles.markdownBody} ${styles.streamingResponseText}`}>
+        <p className={styles.streamingResponseParagraph}>{content}</p>
       </div>
     );
   }
@@ -2886,7 +2900,9 @@ export function ConversationView({
             const isResponseStreaming = Boolean(message.streaming) && showResponseBlock && !hasRunningTools;
             const defaultResponseExpanded = Boolean(message.streaming) || defaultExpandedResponseIds.has(message.id);
             const responseExpanded = getExpansionState(message.id, "response", defaultResponseExpanded);
-            const responseSegments = showResponseBlock && responseExpanded ? parseResponseSegments(message.content) : [];
+            const responseSegments = showResponseBlock && responseExpanded && !isResponseStreaming
+              ? parseResponseSegments(message.content)
+              : [];
             const isEditingMessage = userAuthoredMessage && message.id === editingMessageId;
             const agentInboxExpanded = getExpansionState(message.id, "agentInbox", false);
             const agentInboxPreview = agentInboxMessage ? compactPreview(agentInboxSummary(message), 140) : "";
@@ -3056,9 +3072,11 @@ export function ConversationView({
                       </button>
                       {responseExpanded ? (
                         <div className={styles.responseBody}>
-                          {responseSegments.map((segment) =>
-                            renderResponseSegment(segment, imageArtifactUrlsBeforeMessage.get(message.id)),
-                          )}
+                          {isResponseStreaming
+                            ? renderStreamingResponseText(message.content)
+                            : responseSegments.map((segment) =>
+                              renderResponseSegment(segment, imageArtifactUrlsBeforeMessage.get(message.id)),
+                            )}
                         </div>
                       ) : null}
                     </section>

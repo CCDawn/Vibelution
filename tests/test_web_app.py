@@ -2085,6 +2085,37 @@ def test_session_events_stream_initial_detail(tmp_path, monkeypatch):
     assert payload["detail"]["messages"][1]["content"] == "已经接到真实状态了。"
 
 
+def test_session_events_stream_initial_lightweight_payload_avoids_full_detail(tmp_path, monkeypatch):
+    _seed_chat_state(tmp_path, task_status="running")
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+
+    def unexpected_full_detail(session_id: str):
+        raise AssertionError(f"unexpected full detail load for {session_id}")
+
+    monkeypatch.setattr(session_service, "get_session_detail", unexpected_full_detail)
+
+    stream = session_service.stream_session_events("session-live", initial="light")
+    raw_event = next(stream)
+    stream.close()
+
+    class _SingleEventResponse:
+        def iter_lines(self):
+            for line in str(raw_event).splitlines():
+                yield line
+            yield ""
+
+    event = _read_first_sse_event(_SingleEventResponse())
+
+    assert event["event"] == "session_initial"
+    payload = json.loads(event["data"])
+    assert payload["type"] == "session_initial"
+    assert payload["sessionId"] == "session-live"
+    assert "detail" not in payload
+    assert payload["summary"]["id"] == "session-live"
+    assert payload["latestMessage"]["role"] == "assistant"
+    assert payload["latestMessage"]["contentLength"] >= 0
+
+
 def test_session_detail_snapshot_publish_records_perf_event(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path, task_status="done")
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
