@@ -575,7 +575,7 @@ def execute_source_collection_search(team_id: str, run_id: str, payload: dict[st
         team=team,
         assignments=assignments,
         records=records,
-        summary="正在执行资料搜集，搜索来源元数据并写入候选资料库。",
+        summary="正在执行资料搜索，搜索来源元数据并写入候选资料库。",
         active=True,
     )
     try:
@@ -590,7 +590,7 @@ def execute_source_collection_search(team_id: str, run_id: str, payload: dict[st
             team=team,
             assignments=assignments,
             records=records,
-            summary="资料搜集执行失败。",
+            summary="资料搜索执行失败。",
             active=False,
             error=str(exc),
             error_type=type(exc).__name__,
@@ -656,7 +656,7 @@ def start_source_collection_search_background(team_id: str, run_id: str, payload
         team=team,
         assignments=assignments,
         records=records,
-        summary="资料搜集已进入后台执行，页面可继续操作。",
+        summary="资料搜索已进入后台执行，页面可继续操作。",
         active=True,
         extra={
             "executionMode": "background",
@@ -2716,8 +2716,8 @@ def run_knowledge_ingestion_precheck(team_id: str, payload: dict[str, Any] | Non
         normalized_team_id,
         {
             "taskType": "steward_pack_draft",
-            "title": "共享记忆前审包",
-            "summary": f"由 {steward_agent_id} 汇总 {len(selected_candidates)} 条通过候选，生成 candidate-only 前审包。",
+            "title": "资料入库包",
+            "summary": f"由 {steward_agent_id} 汇总 {len(selected_candidates)} 条通过资料，生成团队知识库入库包。",
             "createdByAgent": steward_agent_id,
             "output": output,
         },
@@ -3604,6 +3604,298 @@ def review_steward_pack_knowledge_ingestion(team_id: str, candidate_id: str, pay
     }
 
 
+def run_knowledge_collection_ingestion(team_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Run the four-step knowledge collection gate from screened sources to Team Knowledge.
+
+    The function intentionally reuses the existing source-quality, candidate-graph,
+    steward-pack, source-review, and knowledge-review gates instead of writing
+    formal Team Knowledge directly.
+    """
+
+    normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
+    team_service.get_team(normalized_team_id)
+    payload = payload if isinstance(payload, dict) else {}
+    source_quality_agent_id = _trim_text(payload.get("sourceQualityAgentId"), max_length=160) or "Source Quality Assessment Agent"
+    candidate_graph_agent_id = _trim_text(payload.get("candidateGraphAgentId"), max_length=160) or "Candidate Graph Preview Agent"
+    steward_agent_id = _trim_text(payload.get("stewardAgentId"), max_length=160) or "Knowledge Steward Agent"
+    target_domain = _trim_text(payload.get("targetDomain"), max_length=240) or "神经机制启发神经网络算法"
+    max_candidates = _normalize_int(payload.get("maxCandidates"), default=80, minimum=1, maximum=200)
+    force_review = bool(payload.get("forceReview"))
+    auto_create_knowledge_base = bool(payload.get("autoCreateKnowledgeBase", True))
+    auto_submit = bool(payload.get("autoSubmit", True))
+    auto_review_source = bool(payload.get("autoReviewSource", True))
+    auto_approve = bool(payload.get("autoApprove", True))
+    steps: list[dict[str, Any]] = []
+
+    def append_step(
+        stage_id: str,
+        label: str,
+        status: str,
+        *,
+        input_count: int = 0,
+        output_count: int = 0,
+        detail: str = "",
+        artifact_id: str = "",
+    ) -> None:
+        steps.append(
+            {
+                "stageId": stage_id,
+                "label": label,
+                "status": status,
+                "inputCount": input_count,
+                "outputCount": output_count,
+                "detail": detail,
+                "artifactId": artifact_id,
+            }
+        )
+
+    source_quality = assess_source_quality_batch(
+        normalized_team_id,
+        {
+            "assessedByAgent": source_quality_agent_id,
+            "maxCandidates": max_candidates,
+            "force": force_review,
+            "notes": "资料审查 Agent 执行第一阶段一键入库前的批量质量审查。",
+        },
+    )
+    source_quality_summary = source_quality.get("sourceQualityStatus", {}).get("summary", {})
+    source_candidate_count = int(source_quality_summary.get("sourceCandidateCount") or 0)
+    approved_count = int(source_quality_summary.get("approvedSourceCandidateCount") or 0)
+    append_step(
+        "source_review",
+        "资料审查",
+        "completed" if approved_count else str(source_quality.get("status") or "blocked"),
+        input_count=source_candidate_count,
+        output_count=approved_count,
+        detail=f"{source_quality_agent_id} completed source quality screening.",
+        artifact_id=str(source_quality.get("batchRunId") or ""),
+    )
+    if approved_count <= 0:
+        status_payload = get_knowledge_ingestion_status(normalized_team_id)
+        _record_workflow_event(
+            "knowledge_collection.ingestion_blocked",
+            normalized_team_id,
+            fields={
+                "reason": "no_approved_sources",
+                "sourceCandidateCount": source_candidate_count,
+                "sourceQualityAgentId": source_quality_agent_id,
+            },
+        )
+        return {
+            "schemaVersion": SCHEMA_VERSION,
+            "teamId": normalized_team_id,
+            "status": "blocked",
+            "steps": steps,
+            "sourceQuality": source_quality,
+            "candidateGraph": None,
+            "precheck": None,
+            "sourceReview": None,
+            "knowledgeSubmission": None,
+            "knowledgeReview": None,
+            "knowledgeBase": None,
+            "statusSnapshot": status_payload,
+            "summary": {
+                "sourceCandidateCount": source_candidate_count,
+                "approvedSourceCandidateCount": approved_count,
+                "formalKnowledgeItemCount": status_payload["summary"]["formalKnowledgeItemCount"],
+                "nextAction": "补充或重新审查资料后再入库。",
+            },
+            "workflow": source_quality["workflow"],
+        }
+
+    candidate_graph = build_candidate_graph(
+        normalized_team_id,
+        {
+            "title": "资料入库候选关系快照",
+            "createdByAgent": candidate_graph_agent_id,
+            "curationMode": "agent_approved_only",
+        },
+    )
+    graph_summary = candidate_graph["graph"]["summary"]
+    append_step(
+        "candidate_graph",
+        "候选关系",
+        "completed",
+        input_count=int(graph_summary.get("inputCandidateCount") or approved_count),
+        output_count=int(graph_summary.get("nodeCount") or 0),
+        detail=f"{candidate_graph_agent_id} generated a candidate-only graph snapshot.",
+        artifact_id=str(candidate_graph["candidateGraph"].get("candidateId") or ""),
+    )
+
+    precheck = run_knowledge_ingestion_precheck(
+        normalized_team_id,
+        {
+            "stewardAgentId": steward_agent_id,
+            "targetDomain": target_domain,
+            "maxCandidates": max_candidates,
+        },
+    )
+    steward_candidate_id = str(precheck["candidate"].get("candidateId") or "")
+    append_step(
+        "steward_pack",
+        "资料提炼包",
+        "completed",
+        input_count=int(precheck["precheck"].get("selectedCandidateCount") or 0),
+        output_count=1,
+        detail=f"{steward_agent_id} built a governed steward pack.",
+        artifact_id=steward_candidate_id,
+    )
+
+    knowledge_base_id = _trim_text(payload.get("knowledgeBaseId"), max_length=128)
+    knowledge_base: dict[str, Any] | None = None
+    if not knowledge_base_id:
+        status_before_submit = get_knowledge_ingestion_status(normalized_team_id)
+        existing_bases = [item for item in list(status_before_submit.get("knowledgeBases") or []) if isinstance(item, dict)]
+        if existing_bases:
+            knowledge_base_id = str(existing_bases[0].get("knowledgeBaseId") or "")
+            knowledge_base = existing_bases[0]
+        elif auto_create_knowledge_base:
+            try:
+                knowledge_base = team_knowledge_service.create_knowledge_base(
+                    normalized_team_id,
+                    name="挑战杯科研知识库",
+                    description="由 ai科学研究团队第一阶段一键入库流程创建。",
+                    actor_agent_id=steward_agent_id,
+                )
+                knowledge_base_id = str(knowledge_base.get("knowledgeBaseId") or "")
+            except (team_knowledge_service.TeamKnowledgeError, team_knowledge_service.TeamKnowledgeNotFoundError) as exc:
+                raise TeamWorkflowOrchestrationError(f"Knowledge base auto-create failed: {exc}") from exc
+    if not knowledge_base_id:
+        raise TeamWorkflowOrchestrationError("Knowledge base id is required before knowledge collection ingestion.")
+
+    source_review: dict[str, Any] | None = None
+    knowledge_submission: dict[str, Any] | None = None
+    knowledge_review: dict[str, Any] | None = None
+    if auto_submit:
+        knowledge_submission = submit_steward_pack_to_knowledge_ingestion(
+            normalized_team_id,
+            steward_candidate_id,
+            {
+                "knowledgeBaseId": knowledge_base_id,
+                "proposedByAgentId": steward_agent_id,
+            },
+        )
+        inbox_source_id = str(
+            ((knowledge_submission.get("candidate") or {}).get("metadata") or {})
+            .get("knowledgeIngestion", {})
+            .get("inboxSourceId")
+            or ""
+        )
+        append_step(
+            "source_gate",
+            "来源入库门禁",
+            "pending_review" if inbox_source_id else str((knowledge_submission.get("knowledgeIngestion") or {}).get("status") or "submitted"),
+            input_count=1,
+            output_count=1 if inbox_source_id else 0,
+            detail="资料入库包已进入团队来源收件箱。",
+            artifact_id=inbox_source_id,
+        )
+        if auto_review_source and inbox_source_id:
+            try:
+                source_review = team_knowledge_service.review_owner_inbox_source(
+                    "team",
+                    normalized_team_id,
+                    inbox_source_id,
+                    decision="accepted",
+                    reviewed_by_agent_id=steward_agent_id,
+                    resolution_note="一键入库流程由知识治理 Agent 接受资料入库包来源。",
+                )
+            except (team_knowledge_service.TeamKnowledgeError, team_knowledge_service.TeamKnowledgeNotFoundError) as exc:
+                raise TeamWorkflowOrchestrationError(f"Source review failed: {exc}") from exc
+            central_source_id = str((source_review.get("centralSource") or {}).get("centralSourceId") or "")
+            knowledge_submission = submit_steward_pack_to_knowledge_ingestion(
+                normalized_team_id,
+                steward_candidate_id,
+                {
+                    "knowledgeBaseId": knowledge_base_id,
+                    "proposedByAgentId": steward_agent_id,
+                    "centralSourceId": central_source_id,
+                },
+            )
+            append_step(
+                "knowledge_proposal",
+                "知识库提案",
+                "pending_review",
+                input_count=1,
+                output_count=1,
+                detail="资料入库包已成为知识库待审提案。",
+                artifact_id=str(((knowledge_submission.get("knowledgeIngestion") or {}).get("package") or {}).get("proposal", {}).get("proposalId") or ""),
+            )
+        if auto_approve and knowledge_submission and str((knowledge_submission.get("knowledgeIngestion") or {}).get("status") or "") == "pending_review":
+            knowledge_review = review_steward_pack_knowledge_ingestion(
+                normalized_team_id,
+                steward_candidate_id,
+                {
+                    "knowledgeBaseId": knowledge_base_id,
+                    "reviewedByAgentId": steward_agent_id,
+                    "decision": "approved",
+                    "resolutionNote": "一键入库流程通过资料审查、入库关系和知识库门禁后，由知识治理 Agent 批准入库。",
+                },
+            )
+            append_step(
+                "official_knowledge",
+                "正式入库",
+                "completed",
+                input_count=1,
+                output_count=len(
+                    ((knowledge_review.get("knowledgeIngestion") or {}).get("officialSyncRecord") or {}).get("knowledgeItemIds")
+                    or []
+                ),
+                detail="正式 KnowledgeItem 已通过现有知识库门禁创建。",
+                artifact_id=str((knowledge_review.get("candidate") or {}).get("candidateId") or ""),
+            )
+
+    status_payload = get_knowledge_ingestion_status(normalized_team_id)
+    final_status = "completed" if knowledge_review else ("pending_review" if knowledge_submission else "precheck_ready")
+    _record_workflow_event(
+        "knowledge_collection.ingested",
+        normalized_team_id,
+        fields={
+            "status": final_status,
+            "sourceCandidateCount": source_candidate_count,
+            "approvedSourceCandidateCount": approved_count,
+            "candidateGraphId": str(candidate_graph["candidateGraph"].get("candidateId") or ""),
+            "stewardPackCandidateId": steward_candidate_id,
+            "knowledgeBaseId": knowledge_base_id,
+            "formalKnowledgeItemCount": status_payload["summary"]["formalKnowledgeItemCount"],
+            "autoSubmit": auto_submit,
+            "autoReviewSource": auto_review_source,
+            "autoApprove": auto_approve,
+        },
+    )
+    return {
+        "schemaVersion": SCHEMA_VERSION,
+        "teamId": normalized_team_id,
+        "status": final_status,
+        "steps": steps,
+        "sourceQuality": source_quality,
+        "candidateGraph": candidate_graph,
+        "precheck": precheck,
+        "sourceReview": source_review,
+        "knowledgeSubmission": knowledge_submission,
+        "knowledgeReview": knowledge_review,
+        "knowledgeBase": knowledge_base or {"knowledgeBaseId": knowledge_base_id},
+        "statusSnapshot": status_payload,
+        "summary": {
+            "sourceCandidateCount": source_candidate_count,
+            "approvedSourceCandidateCount": approved_count,
+            "candidateGraphNodeCount": int(graph_summary.get("nodeCount") or 0),
+            "candidateGraphEdgeCount": int(graph_summary.get("edgeCount") or 0),
+            "stewardPackCandidateId": steward_candidate_id,
+            "knowledgeBaseId": knowledge_base_id,
+            "formalKnowledgeItemCount": status_payload["summary"]["formalKnowledgeItemCount"],
+            "nextAction": "进入实验规划" if knowledge_review else "检查资料入库门禁",
+        },
+        "workflow": (
+            knowledge_review["workflow"]
+            if knowledge_review
+            else knowledge_submission["workflow"]
+            if knowledge_submission
+            else precheck["workflow"]
+        ),
+    }
+
+
 def validate_local_research_model_output(task_type: str, output: dict[str, Any]) -> dict[str, Any]:
     normalized_task_type = _normalize_local_research_task_type(task_type)
     issues: list[dict[str, str]] = []
@@ -3944,7 +4236,7 @@ def _build_knowledge_ingestion_precheck_output(
                 "sourceRef": str(item.get("candidateId") or ""),
             }
         )
-    proposal_summary = f"本前审包汇总 {len(candidate_ids)} 条已通过候选，用于进入共享记忆前的候选审查。"
+    proposal_summary = f"本资料入库包汇总 {len(candidate_ids)} 条已通过资料，用于写入团队知识库前的门禁审查。"
     return {
         "candidateType": "review_record",
         "sourceRefs": source_refs,
@@ -3960,11 +4252,11 @@ def _build_knowledge_ingestion_precheck_output(
             "candidateGraphId": str((latest_graph or {}).get("candidateId") or ""),
         },
         "riskSummary": (
-            "该包仍处于 candidate-only 前审层，只能作为共享记忆入库门禁的输入；"
-            "正式 Team Knowledge、RAG 和正式图谱仍需后续审核节点。"
+            "该包仍处于 candidate-only 入库门禁层，只能作为团队知识库入库输入；"
+            "正式 Team Knowledge、RAG 和正式图谱仍需审核节点确认。"
         ),
         "proposalPayload": {
-            "title": "神经算法候选知识前审包",
+            "title": "神经算法资料入库包",
             "summary": proposal_summary,
             "targetDomain": target_domain,
             "candidateIds": candidate_ids,
@@ -3973,7 +4265,7 @@ def _build_knowledge_ingestion_precheck_output(
         "ratingSuggestion": {
             "rating": "candidate_only_precheck",
             "score": 0.68,
-            "rationale": "来源已通过 Agent 筛选，但尚未写入正式共享记忆。",
+            "rationale": "来源已通过 Agent 审查，但尚未写入正式团队知识库。",
         },
         "approvalRequired": True,
         "uncertainty": ["正式入库前仍需知识治理门禁确认。"],
@@ -4109,13 +4401,13 @@ def _knowledge_ingestion_stages(candidate_summary: dict[str, int], knowledge_sum
         ),
         _knowledge_ingestion_stage(
             "knowledge_review",
-            "共享记忆审核",
+            "团队知识库审核",
             knowledge_summary["proposalCount"],
             ready=knowledge_summary["formalKnowledgeItemCount"] > 0,
             warning=knowledge_summary["pendingProposalCount"] > 0,
             blocked=candidate_summary["stewardPackCandidateCount"] > 0 and knowledge_summary["proposalCount"] == 0,
             next_action="submit_or_review_refinement_proposal",
-            reason="正式团队共享记忆必须经 refinement proposal 审核。",
+            reason="正式团队知识库必须经 refinement proposal 审核。",
         ),
         _knowledge_ingestion_stage(
             "official_sync",
@@ -4249,7 +4541,7 @@ def _knowledge_ingestion_action_items(
             _knowledge_ingestion_action_item(
                 "knowledge_proposal_pending_review",
                 "needs_review",
-                "入库包已经提交，但共享记忆仍在审核队列。",
+                "入库包已经提交，但团队知识库仍在审核队列。",
                 "review_refinement_proposal",
                 "steward_ingestion",
                 candidateId=str(candidate.get("candidateId") or ""),
@@ -4282,7 +4574,7 @@ def _knowledge_ingestion_action_items(
             _knowledge_ingestion_action_item(
                 "knowledge_ingestion_operational",
                 "ready",
-                "知识搜集、筛选、共享记忆和图谱同步链路已跑通。",
+                "资料搜索、提炼、审查和入库链路已跑通。",
                 "",
                 "official_sync",
             )
@@ -5105,7 +5397,7 @@ def _source_quality_action_items(
                 "code": "source_quality_no_sources",
                 "severity": "blocked",
                 "message": "还没有 source_manifest 可供资料质量评估。",
-                "nextAction": "先启动资料搜集或手工回写 DataRecord 并导入 source_manifest。",
+                "nextAction": "先启动资料搜索或手工回写 DataRecord 并导入 source_manifest。",
                 "candidateId": "",
             }
         ]
@@ -5983,9 +6275,9 @@ def _default_workflow(team_id: str, *, workflow_kind: str, owner_agent_id: str) 
             "currentStage": "knowledge_collection",
             "nodes": [
                 {"nodeId": "knowledge_collection", "label": "知识搜集"},
-                {"nodeId": "source_screening", "label": "资料筛选"},
-                {"nodeId": "candidate_ingestion", "label": "候选入库"},
-                {"nodeId": "team_memory_ready", "label": "团队共享记忆待接入"},
+            {"nodeId": "source_screening", "label": "资料审查"},
+            {"nodeId": "candidate_ingestion", "label": "资料入库"},
+            {"nodeId": "team_memory_ready", "label": "团队知识库已接入"},
             ],
             "transitions": [
                 {"from": "knowledge_collection", "to": "source_screening"},
@@ -7150,12 +7442,12 @@ def _source_collection_work_run_terminal_phase(result: dict[str, Any]) -> str:
 
 def _source_collection_work_run_terminal_summary(result: dict[str, Any]) -> str:
     if _source_collection_work_run_terminal_status(result) == "failed":
-        return "资料搜集执行失败，等待检查搜索错误。"
+        return "资料搜索执行失败，等待检查搜索错误。"
     record_count = _source_collection_count(result.get("recordCount"))
     imported_count = _source_collection_count(result.get("importedCount"))
     if _source_collection_work_run_terminal_status(result) == "needs_continue":
         return f"本轮已写入 {record_count} 条资料、导入 {imported_count} 个候选，仍有任务可继续。"
-    return f"本轮资料搜集完成，写入 {record_count} 条资料、导入 {imported_count} 个候选。"
+    return f"本轮资料搜索完成，写入 {record_count} 条资料、导入 {imported_count} 个候选。"
 
 
 def _source_collection_count(value: Any) -> int:
@@ -7926,7 +8218,7 @@ def _stage_label(stage_type: str) -> str:
 
 def _stage_coordination_purpose(stage_type: str) -> str:
     if stage_type == "knowledge_collection":
-        return "围绕资料搜集范围、query seeds、角色分工和结果回写合同进行团队协调。"
+        return "围绕资料搜索范围、query seeds、角色分工和结果回写合同进行团队协调。"
     if stage_type == "experiment":
         return "围绕实验目标、baseline、指标和风险控制进行团队规划，不自动执行实验。"
     return "围绕实验反馈、缺口、改动范围和下一轮目标进行团队规划，不自动进入下一轮。"
