@@ -7229,6 +7229,18 @@ export function TeamsRoute({
   const formalKnowledgeItemCount = teamWorkflowKnowledgeIngestionStatus?.summary.formalKnowledgeItemCount ?? 0;
   const sourceCollectionDefaultKnowledgeBaseId = teamWorkflowKnowledgeIngestionStatus?.knowledgeBases[0]?.knowledgeBaseId ?? "";
   const sourceCollectionPrecheckCandidateCount = Math.max(sourceCollectionApprovedCount, sourceCollectionRunApprovedCount);
+  const sourceCollectionIngestCandidateCount = Math.max(sourceCollectionPrecheckCandidateCount, sourceCollectionRunCandidateCount);
+  const sourceCollectionMemoryActionDisabled =
+    !selectedTeam?.teamId
+    || sourceCollectionIngestCandidateCount <= 0
+    || selectedTeamKnowledgeCollectionIngestPending;
+  const sourceCollectionMemoryActionLabel = selectedTeamKnowledgeCollectionIngestPending
+    ? (lang === "zh" ? "Agent 入库中" : "Agent ingesting")
+    : sourceCollectionPrecheckCandidateCount > 0
+      ? (lang === "zh" ? "Agent 一键入库" : "Agent ingest")
+      : sourceCollectionRunCandidateCount > 0
+        ? (lang === "zh" ? "Agent 审查并入库" : "Agent review and ingest")
+        : (lang === "zh" ? "Agent 一键入库" : "Agent ingest");
   const sourceCollectionScreeningDisabled = !selectedTeam?.teamId || sourceCollectionRunCandidateCount <= 0;
   const sourceCollectionScreeningButtonText = selectedTeamSourceQualityPending
     ? (lang === "zh" ? "Agent 审查中" : "Agent reviewing")
@@ -7385,7 +7397,7 @@ export function TeamsRoute({
     openSourceCollectionStage("graph", "results");
   };
   const runSourceCollectionMemoryPrecheckAction = () => {
-    if (!selectedTeam?.teamId || sourceCollectionPrecheckCandidateCount <= 0 || selectedTeamKnowledgeCollectionIngestPending) {
+    if (sourceCollectionMemoryActionDisabled) {
       return;
     }
     runKnowledgeCollectionIngestMutation.mutate({
@@ -7395,7 +7407,8 @@ export function TeamsRoute({
       stewardAgentId: sourceCollectionKnowledgeStewardAgentId,
       knowledgeBaseId: sourceCollectionDefaultKnowledgeBaseId,
       targetDomain: sourceCollectionDraft.topic || "神经机制启发神经网络算法",
-      maxCandidates: Math.max(1, Math.min(80, sourceCollectionPrecheckCandidateCount)),
+      maxCandidates: Math.max(1, Math.min(80, sourceCollectionIngestCandidateCount)),
+      forceReview: sourceCollectionPrecheckCandidateCount <= 0 && sourceCollectionRunCandidateCount > 0,
     });
     openSourceCollectionStage("memory", "results");
   };
@@ -7572,7 +7585,7 @@ export function TeamsRoute({
       ? "active"
       : formalKnowledgeItemCount > 0
         ? "done"
-        : knowledgePendingReviewCount > 0 || knowledgeStewardPackCount > 0 || sourceCollectionPrecheckCandidateCount > 0
+        : knowledgePendingReviewCount > 0 || knowledgeStewardPackCount > 0 || sourceCollectionIngestCandidateCount > 0
           ? "pending"
           : "idle";
   const sourceCollectionCollectionActionLabel = !selectedSourceCollectionRun
@@ -7666,10 +7679,14 @@ export function TeamsRoute({
           ? (lang === "zh" ? "已生成资料入库包" : "Ingestion pack ready")
         : knowledgePendingReviewCount > 0
           ? (lang === "zh" ? "有待审入库对象" : "Review items pending")
-          : sourceCollectionPrecheckCandidateCount > 0
-            ? (lang === "zh" ? "可由 Agent 一键入库" : "Agent can ingest")
-            : (lang === "zh" ? "等审查通过后入库" : "Ingest after approval"),
-      inputLabel: lang === "zh" ? `${sourceCollectionPrecheckCandidateCount} 条通过资料` : `${sourceCollectionPrecheckCandidateCount} approved sources`,
+        : sourceCollectionPrecheckCandidateCount > 0
+          ? (lang === "zh" ? "可由 Agent 一键入库" : "Agent can ingest")
+          : sourceCollectionRunCandidateCount > 0
+            ? (lang === "zh" ? "可由 Agent 先审查再入库" : "Agent can review then ingest")
+            : (lang === "zh" ? "等资料提炼后入库" : "Ingest after extraction"),
+      inputLabel: sourceCollectionPrecheckCandidateCount > 0
+        ? (lang === "zh" ? `${sourceCollectionPrecheckCandidateCount} 条通过资料` : `${sourceCollectionPrecheckCandidateCount} approved sources`)
+        : (lang === "zh" ? `${sourceCollectionRunCandidateCount} 条候选资料` : `${sourceCollectionRunCandidateCount} candidate sources`),
       outputLabel: lang === "zh" ? `${formalKnowledgeItemCount} 条正式知识 / ${candidateGraphNodeCount} 个关系节点` : `${formalKnowledgeItemCount} formal / ${candidateGraphNodeCount} graph nodes`,
       nextLabel: formalKnowledgeItemCount > 0
         ? (lang === "zh" ? "进入实验规划" : "Move to experiment planning")
@@ -7679,8 +7696,8 @@ export function TeamsRoute({
       state: sourceCollectionMemoryStepState,
       status: sourceCollectionStepStatusText(sourceCollectionMemoryStepState),
       detailLabel: lang === "zh" ? "查看入库详情" : "View ingestion details",
-      actionLabel: selectedTeamKnowledgeCollectionIngestPending ? (lang === "zh" ? "Agent 入库中" : "Agent ingesting") : (lang === "zh" ? "Agent 一键入库" : "Agent ingest"),
-      actionDisabled: !selectedTeam?.teamId || sourceCollectionPrecheckCandidateCount <= 0 || selectedTeamKnowledgeCollectionIngestPending,
+      actionLabel: sourceCollectionMemoryActionLabel,
+      actionDisabled: sourceCollectionMemoryActionDisabled,
       actionTone: "primary",
       actionIcon: "check",
       onAction: runSourceCollectionMemoryPrecheckAction,
