@@ -8,7 +8,7 @@
 from __future__ import annotations
 
 import json
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Callable, ClassVar, Dict, List, Optional, Tuple
 
 from langchain_core.messages import AIMessage, ToolMessage
@@ -304,15 +304,46 @@ class ToolLifecycleBridge:
     ) -> List[Tuple[Any, Optional[str]]]:
         """并发执行 read-only batch，按 batch 原序返回结果。
 
-        每个 worker 独立调 execute_tool；只读工具不应改 messages，所以传给 execute_tool
-        的 messages 只在极端的 `trigger_self_restart_tool` 场景被读，而该工具不在
-        read-only 白名单内，所以不会落到这里。
+        每个 worker 独立调 execute_tool。为了避免异常工具拖垮整个 batch，每个 future
+        单独归档结果；失败工具回写错误占位，成功工具仍按原序进入消息历史。
         """
 
         worker_count = max(1, min(workers, len(batch)))
+        results: List[Tuple[Any, Optional[str]] | None] = [None] * len(batch)
         with ThreadPoolExecutor(
             max_workers=worker_count,
             thread_name_prefix="readonly-tool",
         ) as pool:
-            futures = [pool.submit(self.execute_tool, tc, messages) for tc in batch]
-            return [f.result() for f in futures]
+            futures = {
+                pool.submit(self.execute_tool, tc, list(messages)): index
+                for index, tc in enumerate(batch)
+            }
+            for future in as_completed(futures):
+                index = futures[future]
+                try:
+                    results[index] = future.result()
+                except Exception as exc:
+                    tool_call = batch[index]
+                    results[index] = (self._readonly_batch_error_result(tool_call, exc), None)
+                    _debug_logger.warning(
+                        f"[工具生命周期] read-only batch 工具失败但不终止整批: "
+                        f"{tool_call.get('name', 'unknown')} {type(exc).__name__}: {exc}",
+                        tag="TOOL",
+                    )
+        return [
+            item
+            if item is not None
+            else (
+                self._readonly_batch_error_result(
+                    batch[index],
+                    RuntimeError("missing readonly batch result"),
+                ),
+                None,
+            )
+            for index, item in enumerate(results)
+        ]
+
+    @staticmethod
+    def _readonly_batch_error_result(tool_call: Dict[str, Any], exc: Exception) -> str:
+        tool_name = str(tool_call.get("name") or "unknown")
+        return f"[错误] read-only 工具 {tool_name} 执行失败: {type(exc).__name__}: {exc}"
