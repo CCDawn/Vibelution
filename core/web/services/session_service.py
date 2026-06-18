@@ -116,6 +116,7 @@ from core.ui.chat_state import (
 )
 
 from . import agent_directory_service
+from .conversation_timeline_service import build_conversation_timeline_items
 from .i18n import get_web_language, text_for
 from .model_capability_service import model_record_image_input_support
 from .session_turn_scheduler import SessionTurnScheduler
@@ -601,19 +602,32 @@ def _session_live_output_checkpoint_path(session_id: str) -> Path:
 
 
 def _live_output_checkpoint_payload(state: "SessionLiveOutputState") -> dict[str, Any]:
-    return {
+    session_id = str(getattr(state, "session_id", "") or "").strip()
+    turn_id = str(getattr(state, "turn_id", "") or "").strip()
+    content = str(getattr(state, "content", "") or "")
+    feedback_events = _normalize_message_feedback_events(getattr(state, "feedback_events", []) or [])
+    payload = {
         "schemaVersion": 1,
-        "sessionId": str(getattr(state, "session_id", "") or "").strip(),
-        "turnId": str(getattr(state, "turn_id", "") or "").strip(),
+        "sessionId": session_id,
+        "turnId": turn_id,
         "stage": str(getattr(state, "stage", "") or "").strip(),
-        "content": str(getattr(state, "content", "") or ""),
+        "content": content,
         "thought": str(getattr(state, "thought", "") or ""),
         "mentalSnapshot": _normalize_mental_snapshot(getattr(state, "mental_snapshot", None)),
         "toolCalls": _normalize_message_tool_calls(getattr(state, "tool_calls", []) or []),
-        "feedbackEvents": _normalize_message_feedback_events(getattr(state, "feedback_events", []) or []),
+        "feedbackEvents": feedback_events,
         "contextComposition": _normalize_session_context_composition(getattr(state, "context_composition", None)),
         "updatedAt": str(getattr(state, "updated_at", "") or "").strip() or _now_timestamp(),
     }
+    timeline_items = _build_message_timeline_items(
+        message_id=_live_assistant_message_id(session_id, turn_id) if session_id else "",
+        content=content,
+        feedback_events=feedback_events,
+        streaming=True,
+    )
+    if timeline_items:
+        payload["timelineItems"] = timeline_items
+    return payload
 
 
 def _live_output_checkpoint_has_visible_payload(payload: dict[str, Any]) -> bool:
@@ -6218,6 +6232,14 @@ def _normalize_messages(conversation_id: str, items: Any) -> list[dict[str, Any]
             entry["toolCalls"] = tool_calls
         if feedback_events:
             entry["feedbackEvents"] = feedback_events
+        timeline_items = _build_message_timeline_items(
+            message_id=entry["id"],
+            content=content,
+            feedback_events=feedback_events,
+            streaming=bool(raw.get("streaming")),
+        )
+        if timeline_items:
+            entry["timelineItems"] = timeline_items
         if attachments:
             entry["attachments"] = attachments
         if references:
@@ -11909,7 +11931,7 @@ def _persist_session_turn_result(
         conversation["last_turn_status"] = (
             "failed"
             if final_status in {"failed_provider", "failed_runtime", "failed"}
-            else ("paused_limit" if final_status == "paused_limit" else "ready")
+            else ("needs_continue" if final_status == "needs_continue" else ("paused_limit" if final_status == "paused_limit" else "ready"))
         )
         conversation["updated_at"] = assistant_entry["timestamp"]
         payload["updated_at"] = assistant_entry["timestamp"]
@@ -14609,6 +14631,29 @@ def _normalize_message_feedback_events(value: Any) -> list[dict[str, Any]]:
     return events
 
 
+def _build_message_timeline_items(
+    *,
+    message_id: str,
+    content: Any = "",
+    feedback_events: Any = None,
+    streaming: bool = False,
+) -> list[dict[str, Any]]:
+    normalized_message_id = str(message_id or "").strip()
+    if not normalized_message_id:
+        return []
+    normalized_feedback_events = _normalize_message_feedback_events(feedback_events or [])
+    if not normalized_feedback_events:
+        return []
+    return build_conversation_timeline_items(
+        message_id=normalized_message_id,
+        content=content,
+        feedback_events=normalized_feedback_events,
+        streaming=streaming,
+        lang=get_web_language(),
+        include_assistant_text=True,
+    )
+
+
 def _normalize_session_turn_error(value: Any) -> dict[str, Any] | None:
     if not isinstance(value, dict):
         return None
@@ -15837,6 +15882,14 @@ def _build_live_output_message(session_id: str) -> dict[str, Any] | None:
         message["toolCalls"] = tool_calls
     if feedback_events:
         message["feedbackEvents"] = feedback_events
+    timeline_items = _build_message_timeline_items(
+        message_id=message["id"],
+        content=content,
+        feedback_events=feedback_events,
+        streaming=True,
+    )
+    if timeline_items:
+        message["timelineItems"] = timeline_items
     return message
 
 
@@ -16539,10 +16592,31 @@ def _attach_turn_capture_to_result(
         return result
     if capture.thought and not result.get("thought") and not result.get("reasoning_content"):
         result["thought"] = capture.thought
+    live_state = _snapshot_session_live_output(capture.session_id)
+    live_turn_id = str(getattr(live_state, "turn_id", "") if live_state else "").strip()
+    capture_turn_id = str(capture.turn_id or "").strip()
+    live_content = (
+        _sanitize_message_content("assistant", getattr(live_state, "content", "") if live_state else "")
+        if (
+            live_state is not None
+            and str(getattr(live_state, "stage", "") or "").strip().lower() == "assistant_response"
+            and (not capture_turn_id or live_turn_id == capture_turn_id)
+        )
+        else ""
+    )
+    captured_content = capture.content or live_content
     visible_result = _visible_reply_candidate(result)
-    if capture.content and (not visible_result or _looks_like_structured_payload(visible_result)):
-        result["raw_output"] = capture.content
-        result["summary"] = capture.content
+    raw_visible_result = str(result.get("raw_output") or result.get("summary") or result.get("message") or "").strip()
+    raw_visible_was_control_only = bool(raw_visible_result and not _sanitize_message_content("assistant", raw_visible_result))
+    derived_tool_activity_visible = _visible_reply_matches_derived_tool_activity(result, visible_result)
+    if captured_content and (
+        not visible_result
+        or _looks_like_structured_payload(visible_result)
+        or raw_visible_was_control_only
+        or derived_tool_activity_visible
+    ):
+        result["raw_output"] = captured_content
+        result["summary"] = captured_content
     if (
         _is_mental_model_enabled_for_turn(mental_model_enabled)
         and capture.mental_state
@@ -16555,6 +16629,20 @@ def _attach_turn_capture_to_result(
     if capture.feedback_events and not result.get("feedback_events") and not result.get("feedbackEvents"):
         result["feedback_events"] = list(capture.feedback_events)
     return result
+
+
+def _visible_reply_matches_derived_tool_activity(result: dict[str, Any], visible_result: str) -> bool:
+    visible = _sanitize_message_content("assistant", visible_result)
+    if not visible:
+        return False
+    if not (result.get("tool_trace") or result.get("tool_calls") or result.get("read_files") or result.get("changed_files")):
+        return False
+    probe = dict(result)
+    probe["raw_output"] = ""
+    probe["summary"] = ""
+    probe["message"] = ""
+    derived = _sanitize_message_content("assistant", format_chat_reply(probe))
+    return bool(derived and derived == visible)
 
 
 @contextmanager
@@ -16793,7 +16881,12 @@ def _ensure_session_ui_capture_hooks(ui: Any) -> None:
                 else:
                     next_content = f"{previous}{cleaned}" if previous else cleaned
                 capture.note_content(next_content)
-                _set_session_live_output(session_id, turn_id=capture.turn_id, content=next_content)
+                _set_session_live_output(
+                    session_id,
+                    turn_id=capture.turn_id,
+                    stage="assistant_response",
+                    content=next_content,
+                )
 
         def clear_response_stream_proxy():
             original = originals.get("clear_response_stream")
@@ -17358,12 +17451,14 @@ def _is_session_turn_terminal(result: Any) -> bool:
         and (has_conclusion_signal(visible) or has_next_action_signal(visible))
     ):
         return True
-    if outcome in {"done", "blocked", "needs_input"}:
-        return True
     if explicit_outcome == "progress":
         return False
+    if not visible and _raw_visible_payload_is_control_marker_only(result) and outcome in {"done", "blocked", "needs_input"}:
+        return True
     if not visible and (tool_count > 0 or tool_trace):
         return False
+    if outcome in {"done", "blocked", "needs_input"}:
+        return True
     if not visible:
         return False
     return True
@@ -17392,7 +17487,23 @@ def _visible_reply_candidate(result: dict[str, Any]) -> str:
     )
 
 
+def _raw_visible_payload_is_control_marker_only(result: dict[str, Any]) -> bool:
+    raw = str(result.get("raw_output") or result.get("summary") or result.get("message") or "").strip()
+    if not raw:
+        return False
+    return bool(
+        re.fullmatch(r"\[(?:outcome|task_outcome|status)\s*=\s*[^\]\r\n]*\]", raw, flags=re.IGNORECASE)
+        or re.fullmatch(
+            r"(?:outcome|task_outcome|status)\s*=\s*(?:done|success|failed|ready|blocked|needs_input|progress)",
+            raw,
+            flags=re.IGNORECASE,
+        )
+    )
+
+
 def _visible_reply_summary_candidate(result: dict[str, Any]) -> str:
+    if _raw_visible_payload_is_control_marker_only(result):
+        return ""
     visible = _visible_reply_candidate(result)
     if visible and _looks_like_provider_error_text(visible):
         return _user_visible_failure_summary(visible, lang=get_web_language())
@@ -17474,7 +17585,7 @@ def _build_auto_continue_paused_result(
     merged = _merge_continuation_visible_result(dict(result), visible_result)
     visible = _visible_reply_summary_candidate(merged) if isinstance(merged, dict) else ""
     if not visible:
-        visible = "本轮已完成阶段性处理，等待你的下一条消息继续。"
+        visible = "本轮还没有形成最终回答，已保留当前执行进度；发送“继续”可衔接上一轮继续。"
     paused = dict(merged)
     metadata = dict(paused.get("metadata") or {}) if isinstance(paused.get("metadata"), dict) else {}
     metadata.update(
@@ -17485,9 +17596,10 @@ def _build_auto_continue_paused_result(
         }
     )
     paused["metadata"] = metadata
-    paused["status"] = "completed"
-    paused["outcome"] = "needs_input"
-    paused["task_outcome"] = "needs_input"
+    paused["status"] = "needs_continue"
+    paused["outcome"] = "progress"
+    paused["task_outcome"] = "progress"
+    paused["recommended_next_action"] = paused.get("recommended_next_action") or "继续当前会话目标并汇总已有工具结果。"
     paused["summary"] = visible
     paused["raw_output"] = visible
     return paused
@@ -17510,6 +17622,10 @@ def _chat_turn_result_status(result_status: str, result: Any, *, stop_requested:
             and (has_conclusion_signal(visible) or has_next_action_signal(visible))
         ):
             return "completed"
+        tool_count = _coerce_nonnegative_int(result.get("tool_call_count") or 0)
+        tool_trace = list(result.get("tool_trace") or result.get("tool_calls") or [])
+        if normalized == "completed" and not visible and (tool_count > 0 or tool_trace):
+            return "needs_continue"
         if outcome == "progress":
             return "needs_continue"
     if normalized == "completed":
@@ -17944,6 +18060,14 @@ def _publish_session_assistant_delta(
         "updatedAt": str(state.updated_at or "").strip() or _now_timestamp(),
         "done": bool(done),
     }
+    timeline_items = _build_message_timeline_items(
+        message_id=_live_assistant_message_id(session_id, state.turn_id),
+        content=str(state.content or ""),
+        feedback_events=state.feedback_events,
+        streaming=not done,
+    )
+    if timeline_items:
+        event["timelineItems"] = timeline_items
     delivered_count = 0
     dropped_count = 0
     for subscriber in subscribers:
@@ -18044,6 +18168,8 @@ def _merge_assistant_delta_stream_events(existing: dict[str, Any], replacement: 
         replacement["stage"] = str(existing.get("stage") or "")
     if "feedbackEvents" not in replacement and "feedbackEvents" in existing:
         replacement["feedbackEvents"] = list(existing.get("feedbackEvents") or [])
+    if "timelineItems" not in replacement and "timelineItems" in existing:
+        replacement["timelineItems"] = list(existing.get("timelineItems") or [])
     return True
 
 
