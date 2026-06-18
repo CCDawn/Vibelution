@@ -132,6 +132,16 @@ def test_ensure_supervised_agent_instances_creates_fixed_role_agents_without_ste
     assert all(agent["metadata"]["configSurface"] == "model_config" for agent in agents)
     assert by_role["judge"]["metadata"]["protected"] is True
     assert by_role["baseline"]["metadata"]["protected"] is False
+    assert "open_evolution_transaction_tool" in by_role["baseline"]["metadata"]["supervisedRoleContract"]["effectiveRuntimeTools"]
+    assert "close_evolution_transaction_tool" in by_role["candidate"]["metadata"]["supervisedRoleContract"]["effectiveRuntimeTools"]
+    assert by_role["judge"]["metadata"]["supervisedRoleContract"]["effectiveRuntimeTools"] == []
+    assert "可复现" in by_role["baseline"]["personaProfile"]["personality"]
+    assert "spawn_agent_tool" in by_role["judge"]["taskProfile"]["avoidTasks"]
+
+    bindings = supervised_agent_service.supervised_agent_bindings()
+    assert "python_lint_tool" in bindings["baseline"]["effectiveRuntimeTools"]
+    assert bindings["baseline"]["runtimeToolContract"]["persistentToolPolicy"] == "system_no_tools"
+    assert bindings["judge"]["effectiveRuntimeTools"] == []
 
     state = load_chat_state(tmp_path)
     assert state["active_conversation_id"] == "session-user"

@@ -1497,6 +1497,58 @@ def test_infer_evolution_summary_extracts_transaction_validation_and_restart():
     assert summary["guarded_tools"]["total"] == 0
 
 
+def test_infer_evolution_summary_treats_done_tool_result_success_as_transaction_success():
+    events = [
+        {
+            "type": "tool_call",
+            "tool_name": "open_evolution_transaction_tool",
+            "status": "done",
+            "tool_result": '{"status":"success","txn_id":"txn_done"}',
+        },
+        {
+            "type": "tool_call",
+            "tool_name": "cli_tool",
+            "status": "done",
+            "tool_args": {"command": "python -c broken"},
+            "tool_result": "'python' is not recognized as an internal or external command",
+        },
+        {
+            "type": "tool_call",
+            "tool_name": "cli_tool",
+            "status": "done",
+            "tool_args": {"command": "python -m pytest tests/test_dataset_registry.py -q"},
+            "tool_result": "27 passed in 0.92s",
+        },
+        {
+            "type": "tool_call",
+            "tool_name": "close_evolution_transaction_tool",
+            "status": "done",
+            "tool_args": {"txn_id": "txn_done", "status": "success"},
+            "tool_result": '{"status":"success","txn_id":"txn_done","transaction_status":"success"}',
+        },
+    ]
+
+    summary = infer_evolution_summary(
+        events,
+        [],
+        [],
+        restart_expected=False,
+        restart_reentered=False,
+        child_first_event_phase="conversation_chain",
+    )
+
+    assert summary["transaction"] == {
+        "opened": True,
+        "closed": True,
+        "status": "success",
+        "txn_id": "txn_done",
+    }
+    assert summary["validation"]["passed"] == 1
+    assert "environment" not in summary
+    assert "open_evolution_transaction_tool:success" in summary["tool_sequence_tail"]
+    assert "close_evolution_transaction_tool:success" in summary["tool_sequence_tail"]
+
+
 def test_infer_evolution_summary_recovers_tool_events_from_debug_lines_when_conversation_is_partial():
     events = [
         {
