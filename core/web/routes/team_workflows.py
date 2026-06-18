@@ -39,6 +39,7 @@ from core.web.services.team_workflow_orchestration_service import (
     review_steward_pack_knowledge_ingestion,
     retry_research_stage_round_coordination,
     retry_research_stage_round_memory_record,
+    run_knowledge_collection_ingestion,
     run_knowledge_ingestion_precheck,
     start_research_stage_round,
     start_source_collection_search_background,
@@ -254,6 +255,20 @@ class KnowledgeIngestionPrecheckPayload(BaseModel):
     maxCandidates: int = Field(32, ge=1, le=200)
     targetDomain: str = Field("", max_length=240)
     notes: str = Field("", max_length=4000)
+
+
+class KnowledgeCollectionIngestionPayload(BaseModel):
+    sourceQualityAgentId: str = Field("", max_length=160)
+    candidateGraphAgentId: str = Field("", max_length=160)
+    stewardAgentId: str = Field("", max_length=160)
+    knowledgeBaseId: str = Field("", max_length=128)
+    targetDomain: str = Field("", max_length=240)
+    maxCandidates: int = Field(80, ge=1, le=200)
+    forceReview: bool = False
+    autoCreateKnowledgeBase: bool = True
+    autoSubmit: bool = True
+    autoReviewSource: bool = True
+    autoApprove: bool = True
 
 
 class SourceExtractionPayload(BaseModel):
@@ -579,6 +594,26 @@ def team_workflow_knowledge_ingestion_precheck(team_id: str, payload: KnowledgeI
             exc,
             status_code=422,
             fields={"stewardAgentId": payload.stewardAgentId},
+        )
+
+
+@router.post("/teams/{team_id}/workflow-orchestration/knowledge-collection/ingest", status_code=status.HTTP_201_CREATED)
+def team_workflow_knowledge_collection_ingest(team_id: str, payload: KnowledgeCollectionIngestionPayload) -> dict:
+    try:
+        return run_knowledge_collection_ingestion(team_id, payload.model_dump())
+    except TeamNotFoundError as exc:
+        _raise_team_workflow_route_error("knowledge_collection.ingest", team_id, exc, status_code=404)
+    except (TeamServiceError, TeamWorkflowOrchestrationError) as exc:
+        _raise_team_workflow_route_error(
+            "knowledge_collection.ingest",
+            team_id,
+            exc,
+            status_code=422,
+            fields={
+                "stewardAgentId": payload.stewardAgentId,
+                "knowledgeBaseId": payload.knowledgeBaseId,
+                "autoApprove": payload.autoApprove,
+            },
         )
 
 
