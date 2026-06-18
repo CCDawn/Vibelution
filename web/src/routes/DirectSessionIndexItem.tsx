@@ -49,11 +49,10 @@ export function showSessionFunctionLabel(display: AgentDisplayInfo, lang: "zh" |
   if (!label) {
     return false;
   }
-  const normalized = label.toLowerCase();
   if (lang === "zh" && (hasAsciiLetter(label) || !hasCjkText(label))) {
     return false;
   }
-  return !(display.tone === "chat" && (label === "会话入口" || normalized === "chat entry"));
+  return true;
 }
 
 export function sessionModelTooltip(modelLabel: string | undefined, lang: "zh" | "en") {
@@ -62,9 +61,13 @@ export function sessionModelTooltip(modelLabel: string | undefined, lang: "zh" |
     return "";
   }
   if (lang === "zh") {
-    return hasAsciiLetter(label) ? "模型已绑定" : `模型：${label}`;
+    return `模型：${label}`;
   }
   return `Model: ${label}`;
+}
+
+export function sessionModelBadgeLabel(modelLabel: string | undefined) {
+  return String(modelLabel ?? "").trim();
 }
 
 export function showSessionSummaryInline(summary: string | undefined, lang: "zh" | "en", sessionIsChild: boolean) {
@@ -232,6 +235,7 @@ export function DirectSessionIndexItem({
   const sessionStatus = sessionIsChild ? (session.childStatus || session.currentPhase || session.status) : session.status;
   const sessionAgentMeta = sessionAgentMetaLabel(session);
   const sessionFunctionVisible = showSessionFunctionLabel(sessionDisplay, lang);
+  const sessionModelLabel = sessionModelBadgeLabel(sessionDisplay.modelLabel);
   const sessionModelTitle = sessionModelTooltip(sessionDisplay.modelLabel, lang);
   const sessionSummaryVisible = showSessionSummaryInline(sessionSummary, lang, sessionIsChild);
   const unreadCount = sessionUnreadCount(session);
@@ -306,6 +310,7 @@ export function DirectSessionIndexItem({
               {sessionModelTitle ? (
                 <span className={styles.agentModelTag} title={sessionModelTitle} aria-label={sessionModelTitle}>
                   <Cpu size={10} aria-hidden="true" />
+                  <span>{sessionModelLabel}</span>
                 </span>
               ) : null}
               <Clock3 size={10} aria-hidden="true" />
@@ -356,6 +361,7 @@ export function DirectSessionIndexItem({
               {sessionModelTitle ? (
                 <span className={styles.agentModelTag} title={sessionModelTitle} aria-label={sessionModelTitle}>
                   <Cpu size={10} aria-hidden="true" />
+                  <span>{sessionModelLabel}</span>
                 </span>
               ) : null}
               <Clock3 size={10} aria-hidden="true" />

@@ -175,7 +175,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeCssSource).toContain("height: 32px");
     expect(routeCssSource).toContain("font-size: 0.7rem");
     expect(routeCssSource).toContain("font-size: 0.66rem");
-    expect(routeCssSource).toContain("max-width: 124px");
+    expect(routeCssSource).toContain("max-width: 104px");
     expect(conversationCssSource).toContain(".surfaceCompact .timeline {\n  padding: 10px 14px 12px;");
     expect(conversationCssSource).toContain(".surfaceCompact .composer {\n  gap: 8px;\n  padding: 7px 11px 9px;");
   });
@@ -1444,8 +1444,9 @@ describe("ChatCodingRoute layout contract", () => {
     expect(directSessionIndexItemSource).toContain("return \"\";");
     expect(directSessionIndexItemSource).toContain("export function showSessionFunctionLabel");
     expect(directSessionIndexItemSource).toContain("sessionModelTooltip");
+    expect(directSessionIndexItemSource).toContain("sessionModelBadgeLabel");
     expect(directSessionIndexItemSource).toContain("showSessionSummaryInline");
-    expect(directSessionIndexItemSource).toContain('label === "会话入口"');
+    expect(directSessionIndexItemSource).not.toContain('label === "会话入口"');
     expect(directSessionIndexItemSource).toContain("const sessionTitle = sessionListTitle(session) || sessionDisplay.name");
     expect(routeSource).toContain("agentDisplayName: title");
     expect(routeSource).toContain("targetSession");
