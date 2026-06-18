@@ -319,6 +319,25 @@ def test_config_workspace_exposes_editor_schema_without_launcher_owned_startup_s
     assert editor_meta["network.proxy_url"]["kind"] == "url"
     assert editor_meta["network.proxy_url"]["label"] == "代理地址"
     assert "科研调研" in editor_meta["network.proxy_enabled"]["hint"]
+    assert editor_meta["log.level"]["kind"] == "select"
+    assert [option["value"] for option in editor_meta["log.level"]["options"]] == [
+        "DEBUG",
+        "INFO",
+        "WARNING",
+        "ERROR",
+        "CRITICAL",
+    ]
+    assert editor_meta["log.format"]["kind"] == "text"
+    assert editor_meta["log.date_format"]["kind"] == "text"
+    assert editor_meta["log.file_path"]["kind"] == "path"
+    assert editor_meta["log.third_party.urllib3"]["kind"] == "select"
+    assert [option["value"] for option in editor_meta["log.third_party.urllib3"]["options"]] == [
+        "DEBUG",
+        "INFO",
+        "WARNING",
+        "ERROR",
+        "CRITICAL",
+    ]
     assert "tools.file.editable_extensions" not in editor_meta
     assert "tools.image2.default_model_ref" not in editor_meta
     assert "prompt.sections" not in editor_meta
