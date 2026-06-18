@@ -7752,7 +7752,7 @@ def test_submit_session_message_continues_progress_until_done(tmp_path, monkeypa
     assert len(calls) == 1
     assert "继续完成同一个用户目标" not in str(calls)
     assert payload["messages"][-1]["content"] == "已查看：tests/prompt_debugger.py\n下一步：继续读取测试工具结构并形成规划。"
-    assert payload["currentPhase"] == "ready"
+    assert payload["currentPhase"] == "needs_continue"
 
 
 def test_submit_session_message_continues_after_bookkeeping_progress(tmp_path, monkeypatch):
@@ -7811,7 +7811,7 @@ def test_submit_session_message_continues_after_bookkeeping_progress(tmp_path, m
     assert len(calls) == 1
     assert "继续完成同一个用户目标" not in str(calls)
     assert payload["messages"][-1]["content"] == "下一步：继续读取证据或直接给出结论。"
-    assert payload["currentPhase"] == "ready"
+    assert payload["currentPhase"] == "needs_continue"
 
 
 def test_submit_session_message_keeps_tools_available_after_tool_progress(tmp_path, monkeypatch):
@@ -7873,7 +7873,7 @@ def test_submit_session_message_keeps_tools_available_after_tool_progress(tmp_pa
     assert calls[0]["disable_tools"] is False
     assert "继续完成同一个用户目标" not in str(calls)
     assert payload["messages"][-1]["content"] == "已读取 core/web/services/runtime_scene_service.py，下一步继续校准 runtime scene 摘要。"
-    assert payload["currentPhase"] == "ready"
+    assert payload["currentPhase"] == "needs_continue"
 
 
 def test_submit_session_message_keeps_previous_continuation_reply_when_done_marker_follows(tmp_path, monkeypatch):
@@ -8074,7 +8074,7 @@ def test_submit_session_message_does_not_persist_xml_protocol_as_reply_or_task(t
     assert "active_task" not in state["conversations"][0]
 
 
-def test_submit_session_message_ignores_configured_continuation_limit_until_done(tmp_path, monkeypatch):
+def test_submit_session_message_pauses_progress_without_internal_auto_continue(tmp_path, monkeypatch):
     (tmp_path / "tests").mkdir(parents=True, exist_ok=True)
     (tmp_path / "tests" / "prompt_debugger.py").write_text("pass\n", encoding="utf-8")
     _seed_chat_state(tmp_path, task_status="reading")
@@ -8132,9 +8132,9 @@ def test_submit_session_message_ignores_configured_continuation_limit_until_done
     assert len(calls) == 1
     assert "任务级持续上限" not in payload["messages"][-1]["content"]
     assert payload["messages"][-1]["content"] == "已查看：tests/prompt_debugger.py\n下一步：继续读取测试工具结构并形成规划。"
-    assert payload["currentPhase"] == "ready"
+    assert payload["currentPhase"] == "needs_continue"
     latest_run = session_service.load_chat_turn_work_run_summary()["latest"]
-    assert latest_run["status"] == "completed"
+    assert latest_run["status"] == "needs_continue"
     assert latest_run["finishedAt"]
 
 
@@ -8191,14 +8191,14 @@ def test_submit_session_message_preserves_visible_progress_without_limit_prompt(
     assert len(calls) == 1
     assert assistant["content"] == "我已经完成第一项优化，并通过基础验证。下一步继续收口剩余日志路径。"
     assert "任务级持续上限" not in assistant["content"]
-    assert payload["currentPhase"] == "ready"
+    assert payload["currentPhase"] == "needs_continue"
     latest_run = session_service.load_chat_turn_work_run_summary()["latest"]
-    assert latest_run["status"] == "completed"
+    assert latest_run["status"] == "needs_continue"
     state = load_chat_state(tmp_path)
     assert "active_task" not in state["conversations"][0]
 
 
-def test_submit_session_message_continues_repeated_visible_progress_until_done(tmp_path, monkeypatch):
+def test_submit_session_message_preserves_repeated_visible_progress_once_without_auto_continue(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path, task_status="reading")
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(
@@ -8253,9 +8253,9 @@ def test_submit_session_message_continues_repeated_visible_progress_until_done(t
     assert assistant["content"] == repeated_reply
     assert assistant["content"].count(repeated_reply) == 1
     assert "任务级持续上限" not in assistant["content"]
-    assert payload["currentPhase"] == "ready"
+    assert payload["currentPhase"] == "needs_continue"
     latest_run = session_service.load_chat_turn_work_run_summary()["latest"]
-    assert latest_run["status"] == "completed"
+    assert latest_run["status"] == "needs_continue"
 
 
 def test_submit_session_message_stops_on_inferred_progress_visible_conclusion(tmp_path, monkeypatch):

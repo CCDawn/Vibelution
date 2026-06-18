@@ -4345,6 +4345,23 @@ export type ConversationFeedbackEvent = {
   relatedThoughtSequence?: number;
 };
 
+export type ConversationTimelineItem = {
+  id: string;
+  turnId?: string;
+  messageId?: string;
+  sequence?: number;
+  kind: "thought" | "assistant_text" | "operation" | "command_group" | string;
+  status?: "pending" | "running" | "completed" | "failed" | string;
+  title?: string;
+  summary?: string;
+  text?: string;
+  preview?: string;
+  defaultExpanded?: boolean;
+  sourceOperationIds?: string[];
+  operationIds?: string[];
+  metadata?: Record<string, unknown>;
+};
+
 export type MentalStateSnapshot = {
   mood: string;
   feeling: string;
@@ -4386,6 +4403,7 @@ export type ConversationMessage = {
   streamStage?: string;
   mentalSnapshot?: MentalStateSnapshot;
   feedbackEvents?: ConversationFeedbackEvent[];
+  timelineItems?: ConversationTimelineItem[];
   streaming?: boolean;
   toolCalls?: ToolCall[];
   attachments?: ConversationAttachment[];
@@ -4645,6 +4663,7 @@ export type SessionAssistantDeltaStreamEvent = {
   replaceContent?: boolean;
   replaceThought?: boolean;
   feedbackEvents?: ConversationFeedbackEvent[];
+  timelineItems?: ConversationTimelineItem[];
   updatedAt: string;
   done: boolean;
 };

@@ -385,8 +385,7 @@ describe("ConversationView edit resend affordance", () => {
       },
     ]);
 
-    expect(html).toContain("执行过程");
-    expect(html).toContain("已完成");
+    expect(html).toContain("已运行 40 条命令");
     expect(html).not.toContain("40 步");
     expect(html).not.toContain("40/40");
     expect(html).not.toContain("+33");
@@ -422,14 +421,62 @@ describe("ConversationView edit resend affordance", () => {
       },
     ]);
 
-    expect(html).toContain("执行过程");
+    expect(html).toContain("已运行 8 条命令");
     expect(html).not.toContain("+");
-    expect(html).toContain("已完成");
     expect(html).not.toContain("9 步");
     expect(html).not.toContain("9/9");
     expect(html).not.toContain("准备上下文");
-    expect(html).not.toContain("命令");
+    expect(html).not.toContain("命令 5");
     expect(html.match(/title="命令 · 已完成"/g)?.length ?? 0).toBe(0);
+  });
+
+  it("keeps noisy completed command output out of the expanded ReAct result body", () => {
+    const html = renderConversation([
+      {
+        id: "assistant-noisy-command-output",
+        role: "assistant",
+        content: "",
+        timestamp: "2026-05-22T00:00:00Z",
+        streaming: true,
+        feedbackEvents: [
+          {
+            sequence: 1,
+            kind: "thought",
+            status: "running",
+            summary: "检查缓存命中实现",
+            resultPreview: "检查缓存命中实现",
+          },
+          {
+            sequence: 2,
+            kind: "tool",
+            status: "done",
+            name: "cli_tool",
+            summary: "读取缓存代码",
+            resultPreview: [
+              "def _context_segment(",
+              "    key: str,",
+              "    block: str,",
+              "):",
+              "    return hashlib.sha256(block.encode()).hexdigest()",
+            ].join("\n"),
+            relatedThoughtSequence: 1,
+          },
+          {
+            sequence: 3,
+            kind: "tool",
+            status: "running",
+            name: "grep_search_tool",
+            summary: "继续定位缓存统计",
+            relatedThoughtSequence: 1,
+          },
+        ],
+      },
+    ]);
+
+    expect(html).toContain("检查缓存命中实现");
+    expect(html).toContain("读取缓存代码");
+    expect(html).toContain("继续定位缓存统计");
+    expect(html).not.toContain("return hashlib.sha256");
   });
 
   it("expands failed execution traces while keeping the real failure visible in the summary", () => {
@@ -482,8 +529,8 @@ describe("ConversationView edit resend affordance", () => {
 
     expect(html).toContain("执行失败");
     expect(html).toContain("命令");
-    expect(html).toContain("工具调用");
-    expect(html).toContain("结果");
+    expect(html).not.toContain("工具调用");
+    expect(html).not.toContain("结果</");
     expect(html).not.toContain("4/5");
     expect(html).not.toContain("准备上下文");
     expect(html).not.toContain("绑定 Agent");
@@ -1545,18 +1592,17 @@ describe("ConversationView edit resend affordance", () => {
       },
     ]);
 
-    expect(html).toContain("执行过程");
-    expect(html).toContain("已完成");
+    expect(html).toContain("思考");
+    expect(html).toContain("读取");
     expect(html).not.toContain("3 步");
     expect(html).not.toContain("2 轮");
     expect(html).not.toContain("3/3");
-    expect(html).not.toContain("思考过程");
-    expect(html).not.toContain("读取");
-    expect(html).toContain('title="展开执行明细"');
+    expect(html).not.toContain("执行过程");
+    expect(html).toContain('title="展开思考过程"');
     expect(html).not.toContain('title="展开工具调用"');
-    expect(html).not.toContain("先看日志");
-    expect(html).not.toContain("opened latest log");
-    expect(html).not.toContain("再查 React 链路");
+    expect(html).toContain("先看日志");
+    expect(html).toContain("opened latest log");
+    expect(html).toContain("再查 React 链路");
     expect(html).not.toContain("legacy latest thought");
     expect(html).not.toContain("legacy_tool");
   });
@@ -1604,12 +1650,12 @@ describe("ConversationView edit resend affordance", () => {
       },
     ]);
 
-    expect(html).toContain("执行过程");
+    expect(html).not.toContain("执行过程");
     expect(html).not.toContain("4 步");
     expect(html).not.toContain("2 轮");
     expect(html).not.toContain("第 1 轮");
     expect(html).not.toContain("第 2 轮");
-    expect(html).toContain("工具调用");
+    expect(html).not.toContain("工具调用");
     expect(html).toContain("思考");
     expect(html).toContain("命令");
     expect(html).toContain("running rg");
@@ -1763,10 +1809,10 @@ describe("ConversationView edit resend affordance", () => {
       },
     ]);
 
-    expect(html).toContain("正在请求");
+    expect(html).toContain("运行中");
     expect(html).toContain("命令");
     expect(html).toContain("1m 15s");
-    expect(html).toContain("工具调用");
+    expect(html).not.toContain("工具调用");
     expect(html).not.toContain("1/2");
     expect(html).not.toContain("第 1 轮");
     expect(html).not.toContain("当前位置");
@@ -1797,12 +1843,11 @@ describe("ConversationView edit resend affordance", () => {
       },
     ]);
 
-    expect(html).not.toContain("搜索");
-    expect(html).toContain("已完成");
+    expect(html).toContain("搜索");
     expect(html).not.toContain("1 步");
     expect(html).not.toContain("1/1");
-    expect(html).not.toContain('title="展开工具详情"');
-    expect(html).not.toContain("grep_search_tool raw result");
+    expect(html).toContain('title="展开工具详情"');
+    expect(html).toContain("grep_search_tool raw result");
   });
 
   it("renders structured tool results as readable output instead of raw JSON", () => {
@@ -1838,8 +1883,9 @@ describe("ConversationView edit resend affordance", () => {
     ]);
 
     expect(html).toContain("思考");
-    expect(html).toContain("工具调用");
-    expect(html).toContain("结果");
+    expect(html).not.toContain("工具调用");
+    expect(html).not.toContain("结果</");
+    expect(html).toContain("搜索");
     expect(html).toContain("找到 8 处缓存统计入口");
     expect(html).not.toContain("&quot;summary&quot;");
     expect(html).not.toContain("原始名称");

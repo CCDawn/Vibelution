@@ -892,6 +892,149 @@
   white-space: nowrap;
 }
 
+.conversationCellTimeline {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.timelineThoughtCell,
+.timelineOperationCell,
+.timelineAssistantTextCell {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.timelineThoughtCell {
+  display: grid;
+  gap: 6px;
+}
+
+.timelineCellHeader {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  width: fit-content;
+  max-width: 100%;
+  min-height: 24px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--fg-tertiary);
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 620;
+  line-height: 1.5;
+}
+
+button.timelineCellHeader {
+  cursor: pointer;
+}
+
+button.timelineCellHeader:hover,
+.timelineCellDetailButton:hover {
+  color: var(--fg-primary);
+}
+
+.timelineCellPreview {
+  min-width: 0;
+  max-width: min(58vw, 640px);
+  overflow: hidden;
+  color: color-mix(in srgb, var(--fg-tertiary) 84%, transparent);
+  font-weight: 460;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.timelineCellMeta {
+  color: color-mix(in srgb, var(--fg-tertiary) 74%, transparent);
+  font-size: 0.72rem;
+  font-weight: 520;
+}
+
+.timelineThoughtText {
+  min-width: 0;
+  max-width: 100%;
+  margin: 0;
+  padding: 8px 10px;
+  border-left: 2px solid color-mix(in srgb, var(--accent-cool-2) 45%, transparent);
+  border-radius: 0 4px 4px 0;
+  background: color-mix(in srgb, var(--surface-card) 42%, transparent);
+  color: color-mix(in srgb, var(--fg-secondary) 95%, transparent);
+  font-family: inherit;
+  font-size: 0.86rem;
+  line-height: 1.72;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.timelineAssistantTextCell {
+  color: var(--fg-primary);
+}
+
+.timelineOperationCell {
+  display: grid;
+  gap: 6px;
+  color: var(--fg-secondary);
+}
+
+.timelineOperationResult {
+  min-width: 0;
+  max-width: 100%;
+  margin: 0 0 0 21px;
+  color: var(--fg-secondary);
+  font-family: inherit;
+  font-size: 0.82rem;
+  line-height: 1.62;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.timelineOperationCell_failed .timelineCellHeader {
+  color: var(--danger);
+}
+
+.timelineCommandList {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  padding-left: 22px;
+}
+
+.timelineCommandRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px 10px;
+  min-width: 0;
+  color: var(--fg-tertiary);
+  font-size: 0.76rem;
+  line-height: 1.55;
+}
+
+.timelineCommandRow span:first-child {
+  color: var(--fg-secondary);
+  font-weight: 620;
+}
+
+.timelineCommandError {
+  color: var(--danger);
+}
+
+.timelineCellDetailButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
 .reActOperationList {
   display: grid;
   gap: 6px;
