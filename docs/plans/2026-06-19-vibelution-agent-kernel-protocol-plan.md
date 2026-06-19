@@ -1924,11 +1924,88 @@ def handle_kernel_event(envelope: EventEnvelope, payload: SemanticPayload) -> Ke
 - policy editor；
 - SQLite migration。
 
-## 33. 复杂度收敛规则
+## 33. Unified Kernel Primitive Rule
+
+第三轮架构审查的核心价值不是再增加一层系统，而是把已有设计压回单一执行模型。
+
+后续所有 kernel 相关设计都必须先映射到以下五个 primitive：
+
+```text
+1. Input: Event
+2. State: TaskLedger
+3. Execution: WorkRun
+4. Output: Outcome
+5. Governance: EvaluationGate
+```
+
+任何不能映射到这五类的内容，都不是 kernel primitive，而是 projection、resolver、evidence、policy 或 invariant enforcement。
+
+### 33.1 Canonical Execution Model
+
+VAKP v1 的统一执行模型是：
+
+```text
+Input
+  -> Event Intake
+  -> Task Resolution / Materialization
+  -> Minimal Context Resolution
+  -> Execution
+  -> Outcome Materialization
+  -> Governance Side Workflow
+  -> Projection Repair / Update
+```
+
+这条链路的重点是：
+
+- `TaskLedger` 不能等到 governance 完成后才写入；task 创建、运行、终结必须在 runtime loop 中完成。
+- `EvaluationGate` 只能处理 outcome 之后的 proposal / review / apply，不能阻塞 runtime terminal outcome。
+- projection 可以在 outcome 后修复或刷新，但不能反写覆盖 TaskLedger。
+- Context 参与 execution 前的计算，但 context 本身不是任务事实源。
+
+### 33.2 Primitive Authority Matrix
+
+| Component | Primitive mapping | Authority boundary |
+|---|---|---|
+| `EventEnvelope` / `AgentEvent` | Input | 只负责入口、路由、审计、correlation 和 idempotency signal，不拥有 task status。 |
+| `TaskLedger` | State | 用户态任务事实源，拥有 assignment、status、lifecycle 和 outcome reference。 |
+| `WorkRun` | Execution | 只记录一次执行轨迹、runner 状态和证据，不等同于用户态任务。 |
+| `KernelOutcome` | Output | 终结或推进 task 的结果对象，是 runtime loop 的输出边界。 |
+| `EvaluationGate` | Governance | outcome 后的异步治理流水线，负责 proposal、review、apply，不属于 runtime path。 |
+| `ContextManifest` / `ContextResolver` | Resolver | 计算执行上下文；可记录 manifest / refs 作为证据，但不作为事实源。 |
+| `Session` / `Room` / `Conversation` | Projection | 是交互视图和消息投影，不拥有 task lifecycle。 |
+| `Memory` | Governed knowledge | 是受治理的持久知识层，不是 kernel primitive，也不能被简单视为 UI projection。 |
+| `RuntimeScene` | Evidence | 是诊断证据链，不是业务状态权威。 |
+| `Test Strategy` | Invariant enforcement | 保护输入、状态、执行、输出、治理的不变量，不作为独立 architecture layer。 |
+
+### 33.3 Boundary Rules
+
+必须遵守：
+
+- event 永远不能直接代表任务完成、失败或取消。
+- task 状态只能通过 TaskLedger lifecycle transition 改变。
+- WorkRun 不能在没有 Outcome 的情况下终结用户态 task。
+- outcome 可以终结 task，也可以生成 proposal stub。
+- EvaluationGate 不允许同步阻塞 runtime loop。
+- Context 是计算结果；持久化只保存 manifest、source ref、hash 或 evidence ref。
+- Session、Room、Conversation 只能显示和触发 kernel state，不能成为 state truth。
+- Memory 写入必须走 governance 或明确的知识管理路径，不能被 runtime side effect 偷写。
+- 测试只证明 invariant，不用旧测试锁死新架构。
+
+### 33.4 Anti-patterns
+
+后续实现要避免：
+
+- 新增一个 subsystem，却无法说明它属于五个 primitive 中哪一类。
+- 把 `Session`、`Room`、frontend cache 或 runtime scene 当成任务事实源。
+- 把 `EvaluationGate` 做成第二个 workflow engine，并让 runtime 等审批。
+- 把 ContextResolver 一开始做成 memory OS、RAG engine 和 policy engine 的混合体。
+- 让旧测试继续要求旧 projection 形状，从而阻碍 TaskLedger / Event / Outcome 的新 contract。
+
+## 34. 复杂度收敛规则
 
 为了避免过度系统化，后续实现必须遵守这些降维规则。
 
-### 33.1 MVP 优先级
+### 34.1 MVP 优先级
 
 ```text
 先跑通 loop，再扩展 OS。
@@ -1950,7 +2027,7 @@ def handle_kernel_event(envelope: EventEnvelope, payload: SemanticPayload) -> Ke
 - replayable event sourcing；
 - 多 Agent scheduler。
 
-### 33.2 Context 降级规则
+### 34.2 Context 降级规则
 
 第一版只做 minimal context。
 
@@ -1962,7 +2039,7 @@ def handle_kernel_event(envelope: EventEnvelope, payload: SemanticPayload) -> Ke
 
 不要第一版就实现 memory OS。
 
-### 33.3 EvaluationGate 降级规则
+### 34.3 EvaluationGate 降级规则
 
 第一版只记录 proposal stub。
 
@@ -1973,7 +2050,7 @@ def handle_kernel_event(envelope: EventEnvelope, payload: SemanticPayload) -> Ke
 - proposal 自动写 project memory；
 - proposal 自动应用 code change。
 
-### 33.4 Event 降级规则
+### 34.4 Event 降级规则
 
 第一版事件是 audit/routing log，不是完整 replay state machine。
 
@@ -1991,7 +2068,7 @@ def handle_kernel_event(envelope: EventEnvelope, payload: SemanticPayload) -> Ke
 - event schema migration UI；
 - timeline reconstruction engine。
 
-## 34. 后续文档建议
+## 35. 后续文档建议
 
 本草案确认后，建议继续补三份文档：
 
