@@ -923,6 +923,146 @@ def test_launcher_status_exposes_control_plane_evidence(tmp_path, monkeypatch):
     assert "Workbench restarted." in evidence["recovery"]["statusLine"]
 
 
+def test_launcher_status_recovers_offline_stale_close_processing(tmp_path, monkeypatch):
+    runtime_dir = tmp_path / ".runtime" / "runtime-manager"
+    inbox_dir = runtime_dir / "inbox"
+    processing_dir = runtime_dir / "processing"
+    results_dir = runtime_dir / "results"
+    for directory in (inbox_dir, processing_dir, results_dir):
+        directory.mkdir(parents=True, exist_ok=True)
+    state_path = runtime_dir / "state.json"
+    events_path = runtime_dir / "events.jsonl"
+    command_id = "cmd-stale-close"
+    state_path.write_text(
+        json.dumps(
+            {
+                "stateVersion": 11,
+                "runtimeState": "running",
+                "managerPid": 50012,
+                "daemonRunning": True,
+                "updatedAt": "2026-06-19T06:19:17+00:00",
+                "command": {
+                    "activeCommandId": command_id,
+                    "activeType": "close_workbench",
+                    "requestedBy": "launcher_api",
+                    "startedAt": "2026-06-19T06:19:16+00:00",
+                },
+                "workbench": {
+                    "desiredState": "closed",
+                    "observedState": "open",
+                    "phase": "closing",
+                    "statusLine": "Runtime manager is closing the workbench.",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    (processing_dir / f"{command_id}.json").write_text(
+        json.dumps(
+            {
+                "commandId": command_id,
+                "type": "close_workbench",
+                "requestedBy": "launcher_api",
+                "requestedAt": "2026-06-19T06:19:09+00:00",
+                "args": {"reason": "launcher_stop_button", "source": "launcher_api"},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    recover_calls: list[str] = []
+
+    def recover_processing_queue():
+        recover_calls.append("recover")
+        (processing_dir / f"{command_id}.json").unlink()
+        (results_dir / f"{command_id}.json").write_text(
+            json.dumps(
+                {
+                    "commandId": command_id,
+                    "accepted": True,
+                    "completed": True,
+                    "ok": True,
+                    "message": "Recovered stale close command was already satisfied.",
+                    "stateVersion": 12,
+                    "staleRecoveredCommand": True,
+                }
+            ),
+            encoding="utf-8",
+        )
+        events_path.write_text(
+            "\n".join(
+                [
+                    json.dumps(
+                        {
+                            "type": "command_queue.command_result_written",
+                            "at": "2026-06-19T06:20:00+00:00",
+                            "payload": {
+                                "commandId": command_id,
+                                "type": "close_workbench",
+                                "requestedBy": "launcher_api",
+                                "resultPath": f"{command_id}.json",
+                                "ok": True,
+                                "completed": True,
+                                "message": "Recovered stale close command was already satisfied.",
+                            },
+                        }
+                    ),
+                    json.dumps(
+                        {
+                            "type": "command_queue.recovered_stale_close_completed",
+                            "at": "2026-06-19T06:20:00+00:00",
+                            "payload": {"commandId": command_id, "type": "close_workbench", "requestedBy": "launcher_api"},
+                        }
+                    ),
+                ]
+            ),
+            encoding="utf-8",
+        )
+
+    monkeypatch.setattr(launcher_service, "STATE_PATH", state_path)
+    monkeypatch.setattr(launcher_service, "INBOX_DIR", inbox_dir)
+    monkeypatch.setattr(launcher_service, "PROCESSING_DIR", processing_dir)
+    monkeypatch.setattr(launcher_service, "RESULTS_DIR", results_dir)
+    monkeypatch.setattr(launcher_service, "EVENTS_PATH", events_path)
+    monkeypatch.setattr(launcher_service, "LAUNCHER_STATE_PATH", tmp_path / ".runtime" / "launcher" / "state.json")
+    monkeypatch.setattr(launcher_service, "load_state", lambda: json.loads(state_path.read_text(encoding="utf-8")))
+    monkeypatch.setattr(launcher_service, "load_pid", lambda: 50012)
+    monkeypatch.setattr(launcher_service, "_is_process_alive", lambda pid: False)
+    monkeypatch.setattr(launcher_service.command_queue, "recover_processing_queue", recover_processing_queue)
+    monkeypatch.setattr(launcher_service, "launcher_active_work_runs", lambda: [])
+    monkeypatch.setattr(
+        launcher_service,
+        "observe_workbench",
+        lambda: {
+            "sessionRole": "launcher_control_surface",
+            "observedState": "closed",
+            "backendPid": 0,
+            "backendAlive": False,
+            "backendHealthy": False,
+            "backendObserved": False,
+            "backendPort": 8000,
+            "backendPortListening": False,
+            "browserManaged": True,
+            "browserWindowPid": 0,
+            "browserWindowAlive": False,
+            "lifecycleConsistency": "consistent",
+            "url": "http://127.0.0.1:8000",
+        },
+    )
+
+    payload = launcher_service.get_launcher_status()
+
+    assert recover_calls == ["recover"]
+    evidence = payload["controlPlaneEvidence"]
+    assert evidence["queue"]["processingCount"] == 0
+    assert evidence["queue"]["pendingCount"] == 0
+    assert evidence["state"]["activeCommand"]["commandId"] == ""
+    assert evidence["results"]["recent"][0]["commandId"] == command_id
+    assert evidence["events"]["recent"][0]["type"] == "command_queue.recovered_stale_close_completed"
+    assert payload["projectBundle"]["observedState"] == "closed"
+    assert payload["runtimeManager"]["running"] is False
+
+
 def test_launcher_status_shows_control_surface_when_project_window_is_closed(tmp_path, monkeypatch):
     launcher_state_path = tmp_path / ".runtime" / "launcher" / "state.json"
     launcher_state_path.parent.mkdir(parents=True, exist_ok=True)
