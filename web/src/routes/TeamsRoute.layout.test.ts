@@ -178,8 +178,8 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("styles.workspaceEmpty");
     expect(routeSource).toContain("styles.emptyCanvasPanel");
     expect(routeSource).toContain("选择团队后进入对应工作区");
-    expect(routeSource).toContain("顶部只保留 AI 搜索范围团队和 ai科学研究团队两个入口");
-    expect(routeSource).toContain("暂无可用团队。请确认 AI 搜索范围团队和 ai科学研究团队已初始化。");
+    expect(routeSource).toContain("顶部只保留 AI 搜索范围团队和 挑战杯ai科研团队 两个入口");
+    expect(routeSource).toContain("暂无可用团队。请确认 AI 搜索范围团队和 挑战杯ai科研团队 已初始化。");
     expect(routeSource).not.toContain("teamNameInputRef");
     expect(routeSource).not.toContain("从模板创建");
     expect(routeSource).not.toContain("创建 Demo 团队");
@@ -203,6 +203,10 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("接入主干");
     expect(routeSource).toContain("保存节点");
     expect(routeSource).toContain("归档");
+    expect(routeSource).toContain("function isSystemManagedTeam");
+    expect(routeSource).toContain("systemManagedTeamArchiveReason");
+    expect(routeSource).toContain("系统团队由工作流自动维护，不能在这里归档。");
+    expect(routeSource).toContain("系统团队不可归档");
     expect(routeSource).toContain("解绑节点");
     expect(routeSource).toContain("删除节点");
     expect(routeSource).toContain("团队任务");
@@ -603,7 +607,7 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("生成分块计划");
     expect(routeSource).toContain("重建分块计划");
     expect(routeSource).toContain("后续 paper_note draft 需带 chunkId");
-    expect(routeSource).toContain("选择 research-team / ai科学研究团队后显示挑战杯科研流程。");
+    expect(routeSource).toContain("选择 research-team / 挑战杯ai科研团队 后显示挑战杯科研流程。");
     expect(routeSource).toContain("团队广播");
     expect(routeSource).toContain("发送给团队");
     expect(routeSource).toContain("最近团队广播");

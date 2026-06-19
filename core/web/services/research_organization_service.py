@@ -862,6 +862,7 @@ def _ensure_default_organization(graph: dict[str, Any]) -> dict[str, Any]:
         if str(node.get("archiveReason") or "") == "duplicate_research_core_role"
         and str(node.get("status") or "active").strip() == "archived"
     }
+    nodes = _refresh_resolvable_agent_node_snapshots(nodes)
     newly_archived_core_agent_ids = stale_core_agent_ids - previously_archived_core_agent_ids
     payload["agents"] = nodes
     payload["zones"] = _ensure_core_zone(payload.get("zones") or [])
@@ -877,6 +878,26 @@ def _ensure_default_organization(graph: dict[str, Any]) -> dict[str, Any]:
         newly_archived_core_edge_count=newly_archived_core_edge_count,
     )
     return payload
+
+
+def _refresh_resolvable_agent_node_snapshots(nodes: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    refreshed: list[dict[str, Any]] = []
+    for item in nodes:
+        if not isinstance(item, dict):
+            continue
+        node = dict(item)
+        agent_id = _clean_id(node.get("agentId"))
+        agent = get_agent(agent_id, include_archived=True) if agent_id else None
+        if agent:
+            metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
+            node["agent"] = agent
+            node["agentCode"] = str(agent.get("agentCode") or node.get("agentCode") or "")
+            node["protected"] = bool(node.get("protected") or metadata.get("protected"))
+            node["toolPolicy"] = resolve_tool_policy_for_agent(agent_id)
+            node["memoryPolicy"] = resolve_memory_policy_for_agent(agent_id)
+            node["updatedAt"] = str(agent.get("updatedAt") or node.get("updatedAt") or utc_now_iso())
+        refreshed.append(node)
+    return refreshed
 
 
 def _ensure_core_agent(

@@ -244,6 +244,54 @@ def test_research_organization_canvas_prunes_unresolvable_embedded_core_snapshot
     assert all("embedded" not in edge["edgeId"] for edge in canvas["edges"])
 
 
+def test_research_organization_refreshes_resolvable_embedded_agent_snapshots(org_workspace):
+    detail = session_service.create_chat_session(title="知识治理")
+    steward = agent_directory_service.update_agent_instance(
+        detail["agentId"],
+        primary_mode="general",
+        role_key="knowledge_steward",
+        prompt_template_id="prompt-knowledge-steward",
+        metadata={
+            "systemRole": "knowledge_steward",
+            "protected": True,
+            "responsibilities": ["维护知识治理任务"],
+        },
+    )
+    org_workspace.write_research_organization(
+        {
+            "schemaVersion": 1,
+            "agents": [
+                {
+                    "nodeId": "knowledge-steward",
+                    "agentId": steward["agentId"],
+                    "displayName": "知识治理",
+                    "role": "knowledge_steward",
+                    "employeeRank": "steward",
+                    "protected": False,
+                    "status": "active",
+                    "agent": {
+                        "agentId": steward["agentId"],
+                        "displayName": "旧知识治理",
+                        "promptTemplateId": "prompt-chat-default",
+                        "metadata": {"protected": False},
+                    },
+                }
+            ],
+            "edges": [],
+        }
+    )
+
+    repaired = research_organization_service.get_research_organization()
+    stored = org_workspace.read_research_organization()
+    api_node = next(node for node in repaired["agents"] if node["agentId"] == steward["agentId"])
+    stored_node = next(node for node in stored["agents"] if node["agentId"] == steward["agentId"])
+
+    assert api_node["protected"] is True
+    assert api_node["agent"]["promptTemplateId"] == "prompt-knowledge-steward"
+    assert stored_node["protected"] is True
+    assert stored_node["agent"]["promptTemplateId"] == "prompt-knowledge-steward"
+
+
 def test_research_organization_prefers_research_mode_binding_when_repairing_core_nodes(org_workspace):
     ceo_detail = session_service.create_chat_session(title="绑定 CEO")
     advisor_detail = session_service.create_chat_session(title="绑定组织顾问")

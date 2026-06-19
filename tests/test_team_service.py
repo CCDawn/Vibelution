@@ -112,8 +112,17 @@ def test_team_members_keep_structured_responsibilities(tmp_path, monkeypatch):
 
 def test_ensure_research_team_from_organization_uses_stable_team_id(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
-    alpha = agent_directory_service.create_agent_instance(display_name="Alpha", direct_session_id="session-alpha")
-    beta = agent_directory_service.create_agent_instance(display_name="Beta", direct_session_id="session-beta")
+    alpha = agent_directory_service.create_agent_instance(
+        display_name="Alpha",
+        direct_session_id="session-alpha",
+        metadata={"teamMembership": {"responsibilities": ["发现候选来源", "记录覆盖缺口"]}},
+    )
+    beta = agent_directory_service.create_agent_instance(
+        display_name="Beta",
+        direct_session_id="session-beta",
+        primary_mode="research",
+        metadata={"taskProfile": {"responsibilities": "审查证据；输出返工建议"}},
+    )
     organization = {
         "updatedAt": "2026-05-29T00:00:00Z",
         "agents": [
@@ -132,7 +141,7 @@ def test_ensure_research_team_from_organization_uses_stable_team_id(tmp_path, mo
 
     assert first["teamId"] == "research-team"
     assert second["teamId"] == "research-team"
-    assert second["name"] == "ai科学研究团队"
+    assert second["name"] == "挑战杯ai科研团队"
     assert second["teamKind"] == "research"
     assert second["teamCategory"] == "科研组织团队"
     assert second["teamSource"] == "research_organization"
@@ -143,8 +152,11 @@ def test_ensure_research_team_from_organization_uses_stable_team_id(tmp_path, mo
     assert len(chat_room_service.list_chat_rooms()) == 1
     assert chat_room_service.get_chat_room_detail(second["linkedChatRoomId"])["config"]["teamCategory"] == "科研组织团队"
     assert [member["agentId"] for member in second["members"]] == [alpha["agentId"], beta["agentId"]]
+    assert second["members"][0]["responsibilities"] == ["发现候选来源", "记录覆盖缺口"]
+    assert second["members"][1]["responsibilities"] == ["审查证据", "输出返工建议"]
     assert {node["agentId"] for node in canvas["nodes"]} == {alpha["agentId"], beta["agentId"]}
     assert {node["id"] for node in canvas["nodes"]} == {alpha["agentId"], beta["agentId"]}
+    assert next(node for node in canvas["nodes"] if node["agentId"] == alpha["agentId"])["responsibilities"] == ["发现候选来源", "记录覆盖缺口"]
     assert canvas["edges"] == [
         {
             "id": "edge-alpha-beta",
@@ -251,6 +263,8 @@ def test_research_team_sync_restores_missing_historical_team_chat_room_id(tmp_pa
     assert repaired["linkedChatRoomId"] == historical_room_id
     assert room is not None
     assert room["purpose"] == "research_coordination"
+    assert room["title"] == "挑战杯ai科研团队 团队群聊"
+    assert room["config"]["teamName"] == "挑战杯ai科研团队"
     assert [participant["agentId"] for participant in room["participants"]] == [alpha["agentId"], beta["agentId"]]
 
 
@@ -305,9 +319,66 @@ def test_research_team_sync_preserves_current_room_and_restores_historical_room_
     assert reloaded["linkedChatRoomId"] == current_room_id
     assert restored_room is not None
     assert restored_room["config"]["historicalTeamRoom"] is True
+    assert restored_room["title"] == "挑战杯ai科研团队 团队群聊（历史）"
+    assert restored_room["config"]["teamName"] == "挑战杯ai科研团队"
     assert restored_room["config"]["currentLinkedChatRoomId"] == current_room_id
     assert chat_room_service.get_chat_room_detail(historical_room_id) is not None
     assert {room["roomId"] for room in chat_room_service.list_chat_rooms()} == {current_room_id, historical_room_id}
+
+
+def test_research_team_sync_updates_existing_historical_room_metadata(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    alpha = agent_directory_service.create_agent_instance(display_name="Alpha", direct_session_id="session-alpha")
+    organization = {
+        "agents": [
+            {"nodeId": "alpha-node", "agentId": alpha["agentId"], "displayName": "Alpha", "role": "lead", "status": "active"},
+        ],
+        "edges": [],
+    }
+
+    current = team_service.ensure_research_team_from_organization(organization)
+    current_room_id = current["linkedChatRoomId"]
+    historical_room_id = "room-20260529-090009-757107-6a747d62"
+    chat_room_service.create_chat_room(
+        room_id=historical_room_id,
+        title="旧科研团队群聊（历史）",
+        participant_session_ids=[],
+        allow_empty_participants=True,
+        purpose="discussion",
+        config={
+            "source": "team",
+            "teamId": "research-team",
+            "teamName": "旧科研团队",
+            "historicalTeamRoom": True,
+            "customFlag": "keep",
+        },
+    )
+    rounds_path = tmp_path / "workspace" / "teams" / "research-team" / "research_stage_rounds" / "index.json"
+    rounds_path.parent.mkdir(parents=True, exist_ok=True)
+    rounds_path.write_text(
+        json.dumps(
+            {
+                "rounds": [
+                    {
+                        "roundId": "round-historical",
+                        "coordinationRoomId": historical_room_id,
+                    }
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    team_service.get_team("research-team")
+    room = chat_room_service.get_chat_room_detail(historical_room_id)
+
+    assert room["title"] == "挑战杯ai科研团队 团队群聊（历史）"
+    assert room["purpose"] == "research_coordination"
+    assert room["config"]["teamName"] == "挑战杯ai科研团队"
+    assert room["config"]["currentLinkedChatRoomId"] == current_room_id
+    assert room["config"]["customFlag"] == "keep"
+    assert [participant["agentId"] for participant in room["participants"]] == [alpha["agentId"]]
 
 
 def test_team_chat_room_sync_preserves_existing_config_extensions(tmp_path, monkeypatch):
@@ -1040,6 +1111,51 @@ def test_archive_system_team_is_rejected(tmp_path, monkeypatch):
         team_service.archive_team("self-evolution-team")
 
     assert team_service.get_team("self-evolution-team")["status"] == "active"
+
+
+def test_archived_template_team_prunes_missing_member_refs(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    index_path = tmp_path / "workspace" / "teams" / "teams.json"
+    index_path.parent.mkdir(parents=True, exist_ok=True)
+    index_path.write_text(
+        json.dumps(
+            {
+                "schemaVersion": 1,
+                "teams": [
+                    {
+                        "teamId": "demo",
+                        "name": "演示团队",
+                        "status": "archived",
+                        "teamKind": "template_demo",
+                        "teamCategory": "演示业务团队",
+                        "teamSource": "team_template",
+                        "teamTemplateId": "medical-consultation-demo",
+                        "linkedChatRoomId": "",
+                        "members": [
+                            {
+                                "memberId": "medical-demo-1",
+                                "agentId": "agent-missing-demo",
+                                "agentName": "旧成员",
+                                "role": "旧角色",
+                                "purpose": "旧用途",
+                                "agentStatus": "stale",
+                            }
+                        ],
+                        "createdAt": "2026-06-01T00:00:00Z",
+                        "updatedAt": "2026-06-01T00:00:00Z",
+                    }
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    team = team_service.get_team("demo")
+    stored = json.loads(index_path.read_text(encoding="utf-8"))
+
+    assert team["members"] == []
+    assert stored["teams"][0]["members"] == []
 
 
 def test_archived_team_list_repairs_active_member_agents(tmp_path, monkeypatch):
