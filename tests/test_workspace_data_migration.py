@@ -52,6 +52,21 @@ def test_workspace_migration_apply_copies_files_and_backs_up_target_conflicts(tm
     assert backup_files[0].read_text(encoding="utf-8") == '{"agents":["old"]}\n'
 
 
+def test_workspace_migration_cli_apply_writes_manifest(tmp_path, monkeypatch):
+    project = tmp_path / "project"
+    source_workspace = project / "workspace"
+    data_home = tmp_path / "operator-data"
+    (source_workspace / "memory").mkdir(parents=True)
+    (source_workspace / "memory" / "tasks.json").write_text('{"tasks":[1]}\n', encoding="utf-8")
+    monkeypatch.setenv("VIBELUTION_DATA_HOME", str(data_home))
+
+    exit_code = migration.main(["apply", "--project-root", str(project), "--data-home", str(data_home)])
+
+    assert exit_code == 0
+    assert (data_home / "workspace" / "memory" / "tasks.json").exists()
+    assert (data_home / "workspace" / "workspace_manifest.json").exists()
+
+
 def test_workspace_migration_verify_reports_mismatch(tmp_path):
     source_workspace = tmp_path / "project" / "workspace"
     target_workspace = tmp_path / "operator-data" / "workspace"

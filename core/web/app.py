@@ -42,6 +42,7 @@ from .routes.reset import router as reset_router
 from .routes.runtime import router as runtime_router
 from .routes.sessions import router as sessions_router
 from .routes.skills import router as skills_router
+from .routes.storage import router as storage_router
 from .routes.team_templates import router as team_templates_router
 from .routes.team_workflows import router as team_workflows_router
 from .routes.teams import router as teams_router
@@ -410,6 +411,7 @@ def create_app() -> FastAPI:
     app.include_router(evolution_router, prefix="/api")
     app.include_router(config_router, prefix="/api")
     app.include_router(reset_router, prefix="/api")
+    app.include_router(storage_router, prefix="/api")
     app.include_router(pet_router, prefix="/api")
 
     @app.get("/", include_in_schema=False)
