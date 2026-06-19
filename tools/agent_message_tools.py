@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import re
+import uuid
 from typing import Any
 
 from core.chat.chat_task_types import trim_lines
@@ -38,12 +39,10 @@ def agent_message_tool(
     """
 
     try:
-        from core.web.services import session_service
         from core.web.services.agent_directory_service import (
             current_agent_runtime,
             get_agent,
             list_agents,
-            write_agent_inbox_message,
         )
 
         runtime = current_agent_runtime()
@@ -114,44 +113,57 @@ def agent_message_tool(
         if research_org_result is not None:
             return _json_result(research_org_result)
 
-        message = write_agent_inbox_message(
-            target_agent_id,
+        kernel_result = _send_direct_agent_message_via_kernel(
+            source_agent=source_agent_payload,
+            target_agent=target_agent_payload,
             source_agent_id=source_agent_id,
             source_session_id=source_session_id,
+            target_agent_id=target_agent_id,
             content=message_body,
             summary=summary,
+            wake_target=wake_target,
             thread_id=thread_id,
-            kind="agent_direct_message",
-            created_by="agent_tool",
             metadata=metadata,
         )
-        delivery = (
-            session_service.wake_agent_for_inbox_message(message)
-            if bool(wake_target)
-            else {
-                "wakeRequested": False,
-                "wakeStatus": "not_requested",
-                "messageId": message.get("messageId") or message.get("eventId") or "",
-                "targetAgentId": message.get("targetAgentId") or "",
-                "targetSessionId": message.get("targetSessionId") or "",
-                "turnId": "",
-                "reason": "",
-            }
+        kernel_delivery = _first_kernel_delivery(kernel_result, target_agent_id=target_agent_id)
+        delivery = _flatten_kernel_delivery(
+            kernel_delivery,
+            target_agent_id=target_agent_id,
+            target_session_id=str(target_agent_payload.get("directSessionId") or "").strip(),
+            wake_target=bool(wake_target),
         )
-        _record_agent_message_tool_event(message, delivery, route="direct")
+        sent = str(kernel_delivery.get("status") or "").strip() == "delivered"
+        message_id = str(delivery.get("messageId") or delivery.get("inboxMessageId") or "").strip()
+        tool_message = {
+            "messageId": message_id,
+            "sourceAgentId": source_agent_id,
+            "sourceSessionId": source_session_id,
+            "targetAgentId": target_agent_id,
+            "targetSessionId": str(delivery.get("targetSessionId") or target_agent_payload.get("directSessionId") or "").strip(),
+        }
+        kernel_trace = _kernel_trace_fields(kernel_result)
+        _record_agent_message_tool_event(
+            tool_message,
+            delivery,
+            route="kernel",
+            outcome="sent" if sent else "blocked",
+            extra_fields=kernel_trace,
+        )
         return _json_result(
             {
-                "ok": True,
-                "status": "sent",
-                "route": "direct",
-                "messageId": message.get("messageId") or "",
+                "ok": sent,
+                "status": "sent" if sent else "blocked",
+                "route": "kernel",
+                "messageId": message_id,
                 "sourceAgentId": source_agent_id,
                 "sourceSessionId": source_session_id,
                 "targetAgentId": target_agent_id,
                 "targetAgentCode": target_agent_payload.get("agentCode") or "",
                 "targetSessionId": target_agent_payload.get("directSessionId") or "",
                 "wakeStatus": delivery.get("wakeStatus") or "",
+                "reason": delivery.get("reason") or "",
                 "delivery": delivery,
+                "kernel": kernel_trace,
             }
         )
     except Exception as exc:
@@ -253,6 +265,133 @@ def _parse_metadata(metadata_json: str) -> dict[str, Any]:
     except json.JSONDecodeError:
         return {"raw": raw[:500]}
     return payload if isinstance(payload, dict) else {"value": payload}
+
+
+def _send_direct_agent_message_via_kernel(
+    *,
+    source_agent: dict[str, Any],
+    target_agent: dict[str, Any],
+    source_agent_id: str,
+    source_session_id: str,
+    target_agent_id: str,
+    content: str,
+    summary: str,
+    wake_target: bool,
+    thread_id: str,
+    metadata: dict[str, Any],
+) -> dict[str, Any]:
+    from core.agent_kernel.adapters import submit_agent_message_event
+
+    source_message_id = f"agent-message-tool-{uuid.uuid4().hex}"
+    source_agent_code = str(source_agent.get("agentCode") or "").strip()
+    target_agent_code = str(target_agent.get("agentCode") or "").strip()
+    kernel_metadata = {
+        "sourceSurface": "agent_message_tool",
+        "sourceSessionId": source_session_id,
+        "sourceAgentId": source_agent_id,
+        "senderAgentId": source_agent_id,
+        "sourceMessageId": source_message_id,
+        "agentMessageToolSourceId": source_message_id,
+        "inboxKind": "agent_direct_message",
+        "messageSummary": trim_lines(str(summary or content or ""), max_lines=4),
+        "agentToolMetadataJson": json.dumps(metadata, ensure_ascii=False, sort_keys=True) if metadata else "{}",
+    }
+    if source_agent_code:
+        kernel_metadata["sourceAgentCode"] = source_agent_code
+    if target_agent_code:
+        kernel_metadata["targetAgentCode"] = target_agent_code
+    resolved_thread_id = str(thread_id or f"agent:{source_agent_id}->{target_agent_id}").strip()
+    return submit_agent_message_event(
+        source="agent_message_tool",
+        sender={
+            "type": "agent",
+            "id": source_agent_id,
+            "agentId": source_agent_id,
+            "agentCode": source_agent_code,
+            "sessionId": source_session_id,
+            "displayName": str(source_agent.get("displayName") or "").strip(),
+        },
+        recipient_agent_ids=[target_agent_id],
+        content=content,
+        correlation_id=resolved_thread_id,
+        wake_target=bool(wake_target),
+        metadata=kernel_metadata,
+        source_id=source_message_id,
+        idempotency_key=f"agent-message-tool:{source_message_id}",
+    )
+
+
+def _first_kernel_delivery(kernel_result: dict[str, Any], *, target_agent_id: str) -> dict[str, Any]:
+    outcome = kernel_result.get("outcome") if isinstance(kernel_result.get("outcome"), dict) else {}
+    deliveries = outcome.get("deliveries") if isinstance(outcome.get("deliveries"), list) else []
+    normalized_target = str(target_agent_id or "").strip()
+    for item in deliveries:
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("targetAgentId") or "").strip() == normalized_target:
+            return item
+    for item in deliveries:
+        if isinstance(item, dict):
+            return item
+    return {
+        "targetAgentId": normalized_target,
+        "status": "failed",
+        "inboxMessageId": "",
+        "targetSessionId": "",
+        "reason": "kernel_delivery_missing",
+        "wake": {
+            "wakeRequested": False,
+            "wakeStatus": "failed",
+            "messageId": "",
+            "targetAgentId": normalized_target,
+            "targetSessionId": "",
+            "turnId": "",
+            "reason": "kernel_delivery_missing",
+        },
+    }
+
+
+def _flatten_kernel_delivery(
+    delivery: dict[str, Any],
+    *,
+    target_agent_id: str,
+    target_session_id: str,
+    wake_target: bool,
+) -> dict[str, Any]:
+    wake = delivery.get("wake") if isinstance(delivery.get("wake"), dict) else {}
+    message_id = str(delivery.get("inboxMessageId") or wake.get("messageId") or "").strip()
+    resolved_target_session_id = str(delivery.get("targetSessionId") or wake.get("targetSessionId") or target_session_id or "").strip()
+    reason = str(delivery.get("reason") or wake.get("reason") or "").strip()
+    return {
+        "status": str(delivery.get("status") or "").strip(),
+        "inboxMessageId": message_id,
+        "messageId": message_id,
+        "targetAgentId": str(delivery.get("targetAgentId") or target_agent_id or "").strip(),
+        "targetSessionId": resolved_target_session_id,
+        "wakeRequested": bool(wake.get("wakeRequested", wake_target)),
+        "wakeStatus": str(wake.get("wakeStatus") or ("not_requested" if not wake_target else "")).strip(),
+        "turnId": str(wake.get("turnId") or "").strip(),
+        "reason": reason,
+        "kernelDelivery": delivery,
+    }
+
+
+def _kernel_trace_fields(kernel_result: dict[str, Any]) -> dict[str, Any]:
+    event = kernel_result.get("event") if isinstance(kernel_result.get("event"), dict) else {}
+    task = kernel_result.get("task") if isinstance(kernel_result.get("task"), dict) else {}
+    execution = kernel_result.get("execution") if isinstance(kernel_result.get("execution"), dict) else {}
+    outcome = kernel_result.get("outcome") if isinstance(kernel_result.get("outcome"), dict) else {}
+    adapter = kernel_result.get("adapter") if isinstance(kernel_result.get("adapter"), dict) else {}
+    return {
+        "eventId": str(event.get("eventId") or adapter.get("eventId") or "").strip(),
+        "taskId": str(task.get("taskId") or "").strip(),
+        "workRunId": str(execution.get("workRunId") or "").strip(),
+        "outcomeId": str(outcome.get("outcomeId") or "").strip(),
+        "outcomeStatus": str(outcome.get("status") or "").strip(),
+        "adapterVersion": str(adapter.get("adapterVersion") or "").strip(),
+        "idempotencyKey": str(event.get("idempotencyKey") or adapter.get("idempotencyKey") or "").strip(),
+        "reused": bool(kernel_result.get("reused")),
+    }
 
 
 def _try_send_research_org_message(
