@@ -3608,6 +3608,18 @@ export type TeamListPayload = {
     teamsPath: string;
     teamRoot: string;
   };
+  systemTeamBootstrap?: {
+    schemaVersion: number;
+    status: "idle" | "ready" | "running" | "needs_retry" | "failed" | string;
+    requiredSteps: string[];
+    reason: string;
+    startedAt: string;
+    finishedAt: string;
+    lastError: string;
+    elapsedMs: number;
+    attempt: number;
+    requestId?: string;
+  };
 };
 
 export type TeamTemplateSummary = {
