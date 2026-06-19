@@ -30,6 +30,7 @@ from .routes.evolution import router as evolution_router
 from .routes.files import router as files_router
 from .routes.git import router as git_router
 from .routes.knowledge import router as knowledge_router
+from .routes.kernel import router as kernel_router
 from .routes.launcher import router as launcher_router
 from .routes.logs import router as logs_router
 from .routes.memory import router as memory_router
@@ -390,6 +391,7 @@ def create_app() -> FastAPI:
     app.include_router(chat_rooms_router, prefix="/api")
     app.include_router(cli_agents_router, prefix="/api")
     app.include_router(project_agent_bus_router, prefix="/api")
+    app.include_router(kernel_router, prefix="/api")
     app.include_router(team_templates_router, prefix="/api")
     app.include_router(teams_router, prefix="/api")
     app.include_router(team_workflows_router, prefix="/api")
