@@ -712,9 +712,23 @@ def build_llm_payload(
         if adapter.supports_explicit_tool_choice() and route.policy.allow_explicit_tool_choice and route.compat.tool_choice_mode != "omit":
             payload["tool_choice"] = "auto"
 
-    summary = assert_payload_valid(payload, route)
+    payload_snapshot = _payload_message_snapshot(payload)
+    try:
+        summary = assert_payload_valid(payload, route)
+    except LLMError as exc:
+        details = dict(exc.details or {})
+        details.update(policy_actions.to_log_dict())
+        details.update(payload_snapshot)
+        raise LLMError(
+            exc.category,
+            str(exc),
+            retryable=exc.retryable,
+            provider=exc.provider,
+            model=exc.model,
+            details=details,
+        ) from exc
     summary.update(policy_actions.to_log_dict())
-    summary.update(_payload_message_snapshot(payload))
+    summary.update(payload_snapshot)
     return BuiltPayload(payload=payload, route=route, summary=summary, warnings=route.warnings)
 
 
