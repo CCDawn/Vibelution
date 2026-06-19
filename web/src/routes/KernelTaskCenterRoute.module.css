@@ -256,6 +256,16 @@
   white-space: nowrap;
 }
 
+.selectionNotice {
+  padding: 7px 8px;
+  border: 1px solid color-mix(in srgb, var(--state-warning) 28%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--state-warning) 8%, transparent);
+  color: var(--fg-secondary);
+  font-size: 0.76rem;
+  line-height: 1.35;
+}
+
 .section {
   display: grid;
   gap: 7px;
