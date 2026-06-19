@@ -5210,11 +5210,29 @@ a.teamTreeChild:focus-visible {
   font-size: 0.72rem;
 }
 
-.projectBusEventMeta span {
+.projectBusEventMeta span,
+.kernelTraceLink {
+  display: inline-flex;
+  align-items: center;
   padding: 3px 7px;
   border: 1px solid color-mix(in srgb, var(--border-soft) 72%, transparent);
   border-radius: 999px;
   background: color-mix(in srgb, var(--surface-panel) 72%, transparent);
+}
+
+.kernelTraceLink {
+  max-width: 100%;
+  color: var(--accent-cool-2);
+  font-weight: 760;
+  overflow: hidden;
+  text-decoration: none;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kernelTraceLink:hover {
+  border-color: color-mix(in srgb, var(--accent-cool) 50%, var(--border-soft));
+  color: var(--accent-cool);
 }
 
 .groupRoundBlock {
