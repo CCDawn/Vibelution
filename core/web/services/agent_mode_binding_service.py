@@ -9,13 +9,16 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from core.infrastructure import developer_sandbox
+
 from .agent_directory_service import get_agent, list_agents
 from .runtime_scene_service import record_runtime_scene_event
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 MODE_BINDING_VERSION = 1
-MODE_BINDING_PATH = PROJECT_ROOT / "workspace" / "agent_config" / "mode_bindings.json"
+MODE_BINDING_PATH = developer_sandbox.formal_workspace_path(PROJECT_ROOT, "agent_config", "mode_bindings.json")
+_DEFAULT_MODE_BINDING_PATH = MODE_BINDING_PATH
 MODE_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{1,63}$")
 
 
@@ -493,7 +496,21 @@ def save_mode_binding_state(state: dict[str, Any]) -> dict[str, Any]:
 
 
 def mode_binding_path() -> Path:
-    return PROJECT_ROOT / "workspace" / "agent_config" / "mode_bindings.json"
+    configured_path = Path(MODE_BINDING_PATH)
+    current_formal_path = developer_sandbox.formal_workspace_path(PROJECT_ROOT, "agent_config", "mode_bindings.json")
+    if configured_path.resolve() not in {
+        _DEFAULT_MODE_BINDING_PATH.resolve(),
+        current_formal_path.resolve(),
+    }:
+        return configured_path
+    return developer_sandbox.route_workspace_path(
+        PROJECT_ROOT,
+        "agent_configuration",
+        "agent_config",
+        "mode_bindings.json",
+        intent="state",
+        seed=True,
+    )
 
 
 def _seed_bindings_from_agents(
@@ -839,8 +856,20 @@ def _atomic_write_json(path: Path, payload: dict[str, Any]) -> None:
 
 
 def _relative_project_path(path: Path) -> str:
+    resolved = path.resolve()
+    workspace_root = developer_sandbox.formal_workspace_path(PROJECT_ROOT).resolve()
     try:
-        return path.resolve().relative_to(Path(PROJECT_ROOT).resolve()).as_posix()
+        return f"workspace/{resolved.relative_to(workspace_root).as_posix()}"
+    except ValueError:
+        pass
+    sandbox_root = developer_sandbox.sandbox_workspace_path(PROJECT_ROOT)
+    if sandbox_root is not None:
+        try:
+            return f"workspace/{resolved.relative_to(sandbox_root.resolve()).as_posix()}"
+        except ValueError:
+            pass
+    try:
+        return resolved.relative_to(Path(PROJECT_ROOT).resolve()).as_posix()
     except ValueError:
         return str(path)
 

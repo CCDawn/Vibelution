@@ -7,8 +7,10 @@ import hashlib
 import json
 import re
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
+
+from core.infrastructure import developer_sandbox
 
 from .runtime_scene_service import record_runtime_scene_event
 
@@ -16,7 +18,7 @@ from .runtime_scene_service import record_runtime_scene_event
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 PROMPT_TEMPLATE_INDEX_VERSION = 1
 PROMPT_TEMPLATE_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{1,95}$")
-PROMPT_TEMPLATE_PATH = PROJECT_ROOT / "workspace" / "agent_config" / "prompt_templates.json"
+PROMPT_TEMPLATE_PATH = developer_sandbox.formal_workspace_path(PROJECT_ROOT, "agent_config", "prompt_templates.json")
 
 
 class PromptTemplateError(ValueError):
@@ -526,7 +528,7 @@ def repair_prompt_templates() -> dict[str, Any]:
 
 
 def prompt_template_path() -> Path:
-    return PROJECT_ROOT / "workspace" / "agent_config" / "prompt_templates.json"
+    return _workspace_path("agent_config", "prompt_templates.json")
 
 
 def _get_prompt_template_for_project(template_id: str, *, project_root: Path | None = None) -> dict[str, Any] | None:
@@ -684,10 +686,25 @@ def _normalize_source_path(value: Any) -> str:
 
 def _resolve_project_path(value: str) -> Path:
     root = Path(PROJECT_ROOT).resolve()
-    candidate = (root / value).resolve()
+    raw = str(value or "").strip().replace("\\", "/")
+    parts = PurePosixPath(raw).parts if raw else ()
+    if parts and parts[0] == "workspace":
+        candidate = _workspace_path(*parts[1:])
+        return candidate.resolve()
+    candidate = (root / raw).resolve()
     if candidate != root and root not in candidate.parents:
         raise PromptTemplateError("Prompt template source path must stay inside the project.")
     return candidate
+
+
+def _workspace_path(*parts: str) -> Path:
+    return developer_sandbox.route_workspace_path(
+        PROJECT_ROOT,
+        "prompt_manager",
+        *parts,
+        intent="state",
+        seed=True,
+    )
 
 
 def _default_template_map() -> dict[str, dict[str, Any]]:
@@ -740,8 +757,20 @@ def _atomic_write_json(path: Path, payload: dict[str, Any]) -> None:
 
 
 def _relative_project_path(path: Path) -> str:
+    resolved = path.resolve()
+    workspace_root = developer_sandbox.formal_workspace_path(PROJECT_ROOT).resolve()
     try:
-        return path.resolve().relative_to(Path(PROJECT_ROOT).resolve()).as_posix()
+        return f"workspace/{resolved.relative_to(workspace_root).as_posix()}"
+    except ValueError:
+        pass
+    sandbox_root = developer_sandbox.sandbox_workspace_path(PROJECT_ROOT)
+    if sandbox_root is not None:
+        try:
+            return f"workspace/{resolved.relative_to(sandbox_root.resolve()).as_posix()}"
+        except ValueError:
+            pass
+    try:
+        return resolved.relative_to(Path(PROJECT_ROOT).resolve()).as_posix()
     except ValueError:
         return str(path)
 

@@ -21,7 +21,7 @@ from core.infrastructure import developer_sandbox
 
 _DEFAULT_PROJECT_ROOT = Path(__file__).resolve().parents[3]
 PROJECT_ROOT = _DEFAULT_PROJECT_ROOT
-_DEFAULT_SESSION_ROOT = _DEFAULT_PROJECT_ROOT / "workspace" / "computer_use_sessions"
+_DEFAULT_SESSION_ROOT = developer_sandbox.formal_workspace_path(_DEFAULT_PROJECT_ROOT, "computer_use_sessions")
 SESSION_ROOT = _DEFAULT_SESSION_ROOT
 ALLOWED_STATUSES = {"completed", "running", "need_confirmation", "blocked", "failed", "timeout", "cancelled"}
 HIGH_RISK_ACTIONS = {"submit", "send", "delete", "pay", "purchase", "download", "upload", "login", "confirm"}
@@ -1024,7 +1024,7 @@ def _session_dir(session_id: str) -> Path:
 
 def _session_root() -> Path:
     configured_root = Path(SESSION_ROOT)
-    current_formal_root = PROJECT_ROOT / "workspace" / "computer_use_sessions"
+    current_formal_root = developer_sandbox.formal_workspace_path(PROJECT_ROOT, "computer_use_sessions")
     if configured_root.resolve() not in {
         _DEFAULT_SESSION_ROOT.resolve(),
         current_formal_root.resolve(),

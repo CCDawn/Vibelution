@@ -2398,7 +2398,7 @@ def _historical_team_chat_room_ids(team_id: str) -> list[str]:
     normalized_team_id = _safe_token(team_id, default="", max_length=96)
     if not normalized_team_id:
         return []
-    rounds_path = PROJECT_ROOT / "workspace" / "teams" / normalized_team_id / "research_stage_rounds" / "index.json"
+    rounds_path = _teams_root() / normalized_team_id / "research_stage_rounds" / "index.json"
     if not rounds_path.exists():
         return []
     try:
@@ -2986,7 +2986,7 @@ def _agent_reference_maps() -> dict[str, dict[str, dict[str, Any]]]:
 def _load_lightweight_agent_references() -> list[dict[str, Any]]:
     """Read Agent identity fields without running Agent repair or API hydration."""
 
-    path = _project_root() / "workspace" / "agents" / "agents.json"
+    path = developer_sandbox.seeded_sandbox_workspace_path(_project_root(), "agents", "agents.json")
     if not path.exists():
         return []
     try:
@@ -4003,8 +4003,20 @@ def _sync_project_bus_root() -> None:
 
 
 def _relative_path(path: Path) -> str:
+    resolved = path.resolve()
+    workspace_root = developer_sandbox.formal_workspace_path(_project_root()).resolve()
     try:
-        return str(path.resolve().relative_to(_project_root())).replace("\\", "/")
+        return f"workspace/{resolved.relative_to(workspace_root).as_posix()}"
+    except ValueError:
+        pass
+    sandbox_root = developer_sandbox.sandbox_workspace_path(_project_root())
+    if sandbox_root is not None:
+        try:
+            return f"workspace/{resolved.relative_to(sandbox_root.resolve()).as_posix()}"
+        except ValueError:
+            pass
+    try:
+        return str(resolved.relative_to(_project_root())).replace("\\", "/")
     except ValueError:
         return str(path).replace("\\", "/")
 

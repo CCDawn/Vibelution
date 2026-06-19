@@ -47,7 +47,7 @@ from .session_service import list_active_session_work_runs
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 RUN_KIND = "supervised_worktree_evolution_run"
 RUN_LEASES = [EVALUATION_LEASE, WORKTREE_WRITE_LEASE]
-RUN_STORE_ROOT = PROJECT_ROOT / "workspace" / "supervised_evolution" / "worktree_runs"
+RUN_STORE_ROOT = developer_sandbox.formal_workspace_path(PROJECT_ROOT, "supervised_evolution", "worktree_runs")
 _RUN_STATE_LOCK = threading.Lock()
 _RUN_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="web-supervised-worktree")
 _RUN_SUBSCRIBERS_LOCK = threading.Lock()
@@ -1019,7 +1019,7 @@ def _default_worktree_factory(project_root: Path, run_id: str) -> dict[str, Any]
 def _ensure_bundle_available_in_candidate(project_root: Path, *, candidate_path: Path, bundle_name: str) -> None:
     if not bundle_name or not candidate_path.exists():
         return
-    source = project_root / "workspace" / "evaluation" / "bundles" / f"{bundle_name}.json"
+    source = developer_sandbox.seeded_sandbox_workspace_path(project_root, "evaluation", "bundles", f"{bundle_name}.json")
     if not source.exists():
         return
     target = candidate_path / "workspace" / "evaluation" / "bundles" / source.name

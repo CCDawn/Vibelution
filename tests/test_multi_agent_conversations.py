@@ -32,6 +32,7 @@ client = TestClient(create_app(), headers={CONTROL_TOKEN_HEADER: get_control_tok
 
 
 def _use_tmp_project_root(tmp_path, monkeypatch):
+    monkeypatch.setenv("VIBELUTION_DATA_HOME", str(tmp_path))
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
@@ -44,6 +45,16 @@ def _use_tmp_project_root(tmp_path, monkeypatch):
         tmp_path / "workspace" / "web_self_evolution",
     )
     monkeypatch.setattr(supervised_agent_service, "PROJECT_ROOT", tmp_path)
+
+
+def _allow_agent_message_tool(agent_id: str) -> None:
+    agent = agent_directory_service.get_agent(agent_id, include_archived=True) or {}
+    policy = dict(agent.get("toolPolicy") or {})
+    allowed = list(policy.get("allowedTools") or [])
+    if "agent_message_tool" not in allowed:
+        allowed.append("agent_message_tool")
+    policy["allowedTools"] = allowed
+    agent_directory_service.update_agent_instance(agent_id, tool_policy=policy)
 
 
 class _FakeResearchWorkspace:
@@ -817,6 +828,7 @@ def test_agent_directory_direct_session_can_accept_messages_after_materializatio
 def test_agent_directory_resolves_workspace_root_without_nested_workspace(tmp_path, monkeypatch):
     workspace_root = tmp_path / "workspace"
     workspace_root.mkdir()
+    monkeypatch.setenv("VIBELUTION_DATA_HOME", str(tmp_path))
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", workspace_root)
     monkeypatch.setattr(agent_directory_service, "record_runtime_scene_event", lambda *args, **kwargs: None)
 
@@ -1369,6 +1381,7 @@ def test_agent_message_tool_sends_persistent_message_by_agent_code(tmp_path, mon
     _use_tmp_project_root(tmp_path, monkeypatch)
     alpha = session_service.create_chat_session(title="Alpha Agent")
     beta = session_service.create_chat_session(title="Beta Agent")
+    _allow_agent_message_tool(alpha["agentId"])
 
     with agent_directory_service.active_agent_runtime(alpha["agentId"], session_id=alpha["id"]):
         result, action = ToolExecutor().execute(
@@ -1487,6 +1500,7 @@ def test_agent_message_tool_resolves_ui_composite_agent_label(tmp_path, monkeypa
     _use_tmp_project_root(tmp_path, monkeypatch)
     alpha = session_service.create_chat_session(title="Alpha Agent")
     beta = session_service.create_chat_session(title="Beta Agent")
+    _allow_agent_message_tool(alpha["agentId"])
     beta_agent = agent_directory_service.get_agent(beta["agentId"])
     label = f"{beta['agentCode']} · {beta_agent['displayName']}"
 
@@ -1521,6 +1535,7 @@ def test_agent_message_tool_resolves_common_agent_label_variants(tmp_path, monke
     _use_tmp_project_root(tmp_path, monkeypatch)
     alpha = session_service.create_chat_session(title="Alpha Agent")
     beta = session_service.create_chat_session(title="Beta Agent")
+    _allow_agent_message_tool(alpha["agentId"])
     beta_agent = agent_directory_service.get_agent(beta["agentId"])
     label = label_template.format(code=beta["agentCode"], name=beta_agent["displayName"])
 
@@ -1545,6 +1560,7 @@ def test_agent_message_tool_preserves_full_message_body(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     alpha = session_service.create_chat_session(title="Alpha Agent")
     beta = session_service.create_chat_session(title="Beta Agent")
+    _allow_agent_message_tool(alpha["agentId"])
     full_report = "\n".join(f"第 {index:02d} 行：工具发送报告正文" for index in range(1, 31))
 
     with agent_directory_service.active_agent_runtime(alpha["agentId"], session_id=alpha["id"]):
@@ -1569,6 +1585,7 @@ def test_agent_message_tool_can_wake_target_session_and_consume_inbox(tmp_path, 
     _use_tmp_project_root(tmp_path, monkeypatch)
     alpha = session_service.create_chat_session(title="Alpha Agent")
     beta = session_service.create_chat_session(title="Beta Agent")
+    _allow_agent_message_tool(alpha["agentId"])
     captured = {}
 
     class ReplyingAgent:
@@ -1837,6 +1854,7 @@ def test_agent_message_tool_routes_research_core_messages_through_org_policy(tmp
     org = research_organization_service.get_research_organization()
     ceo = next(node for node in org["agents"] if node["role"] == "ceo")
     steward = next(node for node in org["agents"] if node["role"] == "capability_steward")
+    _allow_agent_message_tool(ceo["agentId"])
 
     with agent_directory_service.active_agent_runtime(ceo["agentId"], session_id=ceo["agent"]["directSessionId"]):
         result, action = ToolExecutor().execute(
@@ -1894,6 +1912,7 @@ def test_agent_message_tool_blocks_research_core_message_without_intent(tmp_path
     org = research_organization_service.get_research_organization()
     ceo = next(node for node in org["agents"] if node["role"] == "ceo")
     steward = next(node for node in org["agents"] if node["role"] == "capability_steward")
+    _allow_agent_message_tool(ceo["agentId"])
 
     with agent_directory_service.active_agent_runtime(ceo["agentId"], session_id=ceo["agent"]["directSessionId"]):
         result, action = ToolExecutor().execute(
@@ -1971,6 +1990,7 @@ def test_agent_message_tool_blocks_research_core_messages_without_allowed_policy
     org = research_organization_service.get_research_organization()
     ceo = next(node for node in org["agents"] if node["role"] == "ceo")
     advisor = next(node for node in org["agents"] if node["role"] == "organization_advisor")
+    _allow_agent_message_tool(advisor["agentId"])
 
     with agent_directory_service.active_agent_runtime(advisor["agentId"], session_id=advisor["agent"]["directSessionId"]):
         result, action = ToolExecutor().execute(
@@ -2019,6 +2039,7 @@ def test_agent_message_tool_blocks_outsider_to_research_core_agent(tmp_path, mon
     org = research_organization_service.get_research_organization()
     steward = next(node for node in org["agents"] if node["role"] == "capability_steward")
     outsider = session_service.create_chat_session(title="外部 Chat Agent")
+    _allow_agent_message_tool(outsider["agentId"])
 
     with agent_directory_service.active_agent_runtime(outsider["agentId"], session_id=outsider["id"]):
         result, action = ToolExecutor().execute(

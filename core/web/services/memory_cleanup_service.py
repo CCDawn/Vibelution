@@ -11,6 +11,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
+from core.infrastructure import developer_sandbox
+
 from . import agent_directory_service, memory_service, rag_vector_index_service, team_knowledge_service
 from .runtime_scene_service import record_runtime_scene_event
 
@@ -271,23 +273,24 @@ def _execute_target(target: CleanupTarget) -> dict[str, Any]:
 
 def _paths_for_target(target: CleanupTarget) -> list[CleanupPath]:
     root = _project_root()
+    workspace_root = _workspace_root(root)
     if target.target_type == "global_runtime_memory":
         return [
-            CleanupPath(root / "workspace" / "agent_brain.db", "database", "reset", "Clear memory tables only."),
-            CleanupPath(root / "workspace" / "memory", "directory", "delete", "Delete runtime memory files."),
-            CleanupPath(root / "workspace" / "prompts" / "STATE_MEMORY.md", "file", "reset", "Reset prompt state memory to an empty file."),
+            CleanupPath(workspace_root / "agent_brain.db", "database", "reset", "Clear memory tables only."),
+            CleanupPath(workspace_root / "memory", "directory", "delete", "Delete runtime memory files."),
+            CleanupPath(workspace_root / "prompts" / "STATE_MEMORY.md", "file", "reset", "Reset prompt state memory to an empty file."),
         ]
     if target.target_type == "sqlite_database_compact":
         return [
-            CleanupPath(root / "workspace" / "agent_brain.db", "database_compact", "compact", "Reclaim SQLite free pages without deleting rows."),
+            CleanupPath(workspace_root / "agent_brain.db", "database_compact", "compact", "Reclaim SQLite free pages without deleting rows."),
         ]
     if target.target_type == "evaluation_artifacts":
         return [
-            CleanupPath(root / "workspace" / "evaluation", "directory", "delete", "Delete evaluation bundles, chat candidates, and review queues."),
+            CleanupPath(workspace_root / "evaluation", "directory", "delete", "Delete evaluation bundles, chat candidates, and review queues."),
         ]
     if target.target_type == "session_artifacts":
         return [
-            CleanupPath(root / "workspace" / "sessions", "directory", "delete", "Delete historical session transcripts and artifacts."),
+            CleanupPath(workspace_root / "sessions", "directory", "delete", "Delete historical session transcripts and artifacts."),
         ]
     if target.target_type == "legacy_log_info":
         return [
@@ -298,7 +301,7 @@ def _paths_for_target(target: CleanupTarget) -> list[CleanupPath]:
             CleanupPath(root / "logs" / "runtime_scenes", "directory", "delete", "Delete runtime scene diagnostic bundles."),
         ]
     if target.target_type == "team_archive_artifacts":
-        teams_root = root / "workspace" / "teams"
+        teams_root = workspace_root / "teams"
         if not teams_root.exists():
             return []
         return [
@@ -308,15 +311,15 @@ def _paths_for_target(target: CleanupTarget) -> list[CleanupPath]:
         ]
     if target.target_type == "agent_private_memory":
         return [
-            CleanupPath(root / "workspace" / "agents" / target.agent_id / "memory", "directory", "delete", "Delete Agent private memory files.")
+            CleanupPath(workspace_root / "agents" / target.agent_id / "memory", "directory", "delete", "Delete Agent private memory files.")
         ]
     if target.target_type == "agent_formal_knowledge":
         return [
-            CleanupPath(root / "workspace" / "agents" / target.agent_id / "knowledge", "directory", "delete", "Delete Agent-owned formal knowledge.")
+            CleanupPath(workspace_root / "agents" / target.agent_id / "knowledge", "directory", "delete", "Delete Agent-owned formal knowledge.")
         ]
     if target.target_type == "team_knowledge":
         return [
-            CleanupPath(root / "workspace" / "teams" / target.team_id / "knowledge", "directory", "delete", "Delete Team-owned formal knowledge.")
+            CleanupPath(workspace_root / "teams" / target.team_id / "knowledge", "directory", "delete", "Delete Team-owned formal knowledge.")
         ]
     if target.target_type == "knowledge_base":
         owner = _owner_for_target(target)
@@ -394,7 +397,7 @@ def _knowledge_counts_for_target(target: CleanupTarget) -> dict[str, int]:
 def _database_row_count_for_target(target: CleanupTarget) -> int:
     if target.target_type != "global_runtime_memory":
         return 0
-    return _database_memory_row_count(_project_root() / "workspace" / "agent_brain.db")
+    return _database_memory_row_count(_workspace_root(_project_root()) / "agent_brain.db")
 
 
 def _database_memory_row_count(path: Path) -> int:
@@ -884,20 +887,21 @@ def _clear_memory_caches() -> None:
 
 def _assert_allowed_cleanup_path(path: Path, *, action: str) -> Path:
     root = _project_root().resolve()
+    workspace_root = _workspace_root(root).resolve()
     candidate = path if path.is_absolute() else root / path
     try:
         resolved = candidate.resolve()
     except OSError as exc:
         raise MemoryCleanupError(f"Cleanup path could not be resolved: {path}") from exc
     allowed_roots = [
-        root / "workspace" / "memory",
-        root / "workspace" / "prompts" / "STATE_MEMORY.md",
-        root / "workspace" / "agent_brain.db",
-        root / "workspace" / "agents",
-        root / "workspace" / "teams",
-        root / "workspace" / "knowledge" / "rag",
-        root / "workspace" / "evaluation",
-        root / "workspace" / "sessions",
+        workspace_root / "memory",
+        workspace_root / "prompts" / "STATE_MEMORY.md",
+        workspace_root / "agent_brain.db",
+        workspace_root / "agents",
+        workspace_root / "teams",
+        workspace_root / "knowledge" / "rag",
+        workspace_root / "evaluation",
+        workspace_root / "sessions",
         root / "log_info",
         root / "logs" / "runtime_scenes",
     ]
@@ -905,7 +909,7 @@ def _assert_allowed_cleanup_path(path: Path, *, action: str) -> Path:
         raise MemoryCleanupError(f"Cleanup path is outside the memory cleanup allow-list: {_relative_path(resolved)}")
     if ".docs" in resolved.parts:
         raise MemoryCleanupError("Project governance memory is protected from this cleanup tool.")
-    if action == "delete" and resolved in {root / "workspace", root / "workspace" / "agents", root / "workspace" / "teams", root / "workspace" / "knowledge", root / "logs"}:
+    if action == "delete" and resolved in {workspace_root, workspace_root / "agents", workspace_root / "teams", workspace_root / "knowledge", root / "logs"}:
         raise MemoryCleanupError(f"Refusing broad cleanup path: {_relative_path(resolved)}")
     return resolved
 
@@ -918,8 +922,14 @@ def _same_or_child(base: Path, candidate: Path) -> bool:
 
 
 def _relative_path(path: Path) -> str:
+    resolved = path.resolve()
+    workspace_root = _workspace_root(_project_root()).resolve()
     try:
-        return path.resolve().relative_to(_project_root().resolve()).as_posix()
+        return f"workspace/{resolved.relative_to(workspace_root).as_posix()}"
+    except ValueError:
+        pass
+    try:
+        return resolved.relative_to(_project_root().resolve()).as_posix()
     except ValueError:
         return str(path)
 
@@ -935,6 +945,10 @@ def _safe_token(value: Any, *, default: str, max_length: int) -> str:
 def _project_root() -> Path:
     root = Path(PROJECT_ROOT).resolve()
     return root.parent if root.name.lower() == "workspace" else root
+
+
+def _workspace_root(root: Path | None = None) -> Path:
+    return developer_sandbox.formal_workspace_path(root or _project_root())
 
 
 def _sync_roots() -> None:

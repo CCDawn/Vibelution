@@ -15,6 +15,7 @@ pytestmark = pytest.mark.serial
 
 @pytest.fixture
 def reset_project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    monkeypatch.setenv("VIBELUTION_DATA_HOME", str(tmp_path))
     monkeypatch.setattr(reset_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(reset_service, "get_web_language", lambda: "zh")
     return tmp_path

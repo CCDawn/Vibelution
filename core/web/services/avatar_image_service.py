@@ -11,11 +11,14 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 from urllib.parse import quote
 
+from core.infrastructure import developer_sandbox
+
 from .runtime_scene_service import record_runtime_scene_event
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
-USER_AVATAR_DIR = PROJECT_ROOT / "workspace" / "user_avatars"
+USER_AVATAR_DIR = developer_sandbox.formal_workspace_path(PROJECT_ROOT, "user_avatars")
+_DEFAULT_USER_AVATAR_DIR = USER_AVATAR_DIR
 USER_AVATAR_RELATIVE_DIR = PurePosixPath("workspace/user_avatars")
 MAX_USER_AVATAR_IMAGE_BYTES = 5 * 1024 * 1024
 _CONTENT_TYPE_EXTENSIONS = {
@@ -113,7 +116,7 @@ def resolve_user_avatar_file(filename: str) -> Path:
     safe_filename = user_avatar_filename(str(USER_AVATAR_RELATIVE_DIR / str(filename or "")))
     if not safe_filename:
         raise FileNotFoundError("invalid avatar image path")
-    avatar_dir = USER_AVATAR_DIR.resolve()
+    avatar_dir = _user_avatar_dir().resolve()
     path = (avatar_dir / safe_filename).resolve()
     if avatar_dir != path.parent:
         raise FileNotFoundError("invalid avatar image path")
@@ -129,7 +132,7 @@ def store_user_avatar_image(*, filename: str, content_type: str, data_base64: st
     payload = _decode_image_payload(data_base64)
     _validate_image_signature(payload, normalized_type)
 
-    USER_AVATAR_DIR.mkdir(parents=True, exist_ok=True)
+    _user_avatar_dir().mkdir(parents=True, exist_ok=True)
     safe_stem = _sanitize_stem(filename)
     output_name = f"avatar-{int(time.time())}-{secrets.token_hex(4)}-{safe_stem}{extension}"
     output_path = resolve_user_avatar_file(output_name)
@@ -150,3 +153,20 @@ def store_user_avatar_image(*, filename: str, content_type: str, data_base64: st
         "contentType": normalized_type,
         "sizeBytes": len(payload),
     }
+
+
+def _user_avatar_dir() -> Path:
+    configured_dir = Path(USER_AVATAR_DIR)
+    current_formal_dir = developer_sandbox.formal_workspace_path(PROJECT_ROOT, "user_avatars")
+    if configured_dir.resolve() not in {
+        _DEFAULT_USER_AVATAR_DIR.resolve(),
+        current_formal_dir.resolve(),
+    }:
+        return configured_dir
+    return developer_sandbox.route_workspace_path(
+        PROJECT_ROOT,
+        "avatar_image",
+        "user_avatars",
+        intent="state",
+        seed=True,
+    )

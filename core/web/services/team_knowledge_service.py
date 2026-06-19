@@ -2391,7 +2391,7 @@ def _lightweight_knowledge_memory_summary() -> dict[str, Any]:
 
 
 def _iter_existing_knowledge_roots() -> list[Path]:
-    workspace_root = _project_root() / "workspace"
+    workspace_root = _route_team_knowledge_workspace_path(seed=True)
     roots: list[Path] = []
     for parent in (workspace_root / "teams", workspace_root / "agents"):
         if not parent.exists():
@@ -3670,8 +3670,14 @@ def _safe_source_filename(value: Any, *, default: str) -> str:
 
 
 def _project_relative_path(path: Path) -> str:
+    resolved = path.resolve()
+    workspace_root = _route_team_knowledge_workspace_path(seed=True).resolve()
     try:
-        return path.resolve().relative_to(_project_root().resolve()).as_posix()
+        return f"workspace/{resolved.relative_to(workspace_root).as_posix()}"
+    except (OSError, ValueError):
+        pass
+    try:
+        return resolved.relative_to(_project_root().resolve()).as_posix()
     except (OSError, ValueError):
         return str(path)
 
@@ -3681,8 +3687,16 @@ def _project_path_from_relative(value: str) -> Path:
     if not text:
         return Path()
     candidate = Path(text)
+    if candidate.parts and candidate.parts[0].lower() == "workspace":
+        return _route_team_knowledge_workspace_path(*candidate.parts[1:], seed=True)
     if not candidate.is_absolute():
         candidate = _project_root() / candidate
+    workspace_root = _route_team_knowledge_workspace_path(seed=True).resolve()
+    try:
+        candidate.resolve().relative_to(workspace_root)
+        return candidate
+    except (OSError, ValueError):
+        pass
     try:
         candidate.resolve().relative_to(_project_root().resolve())
     except (OSError, ValueError):
@@ -3923,7 +3937,7 @@ def _assert_central_source_write_allowed() -> None:
 
 
 def _central_knowledge_root() -> Path:
-    return _project_root() / "workspace" / "knowledge"
+    return _route_team_knowledge_workspace_path("knowledge", intent="state", seed=True)
 
 
 def _central_sources_root() -> Path:

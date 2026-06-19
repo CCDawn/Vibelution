@@ -49,7 +49,9 @@ def _tasks_json_path() -> str:
     workspace_override = _TASK_STORAGE_OVERRIDE.get("").strip()
     if workspace_override:
         return str(Path(workspace_override) / "memory" / "tasks.json")
-    return str(_resolve_root() / "workspace" / "memory" / "tasks.json")
+    from core.infrastructure import developer_sandbox
+
+    return str(developer_sandbox.formal_workspace_path(_resolve_root(), "memory", "tasks.json"))
 
 
 class TaskPriority(Enum):

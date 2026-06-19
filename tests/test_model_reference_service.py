@@ -20,6 +20,11 @@ from core.web.services.model_reference_service import (
 pytestmark = pytest.mark.serial
 
 
+@pytest.fixture(autouse=True)
+def _isolate_data_home(tmp_path, monkeypatch):
+    monkeypatch.setenv("VIBELUTION_DATA_HOME", str(tmp_path))
+
+
 def _write_json(path, payload):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
