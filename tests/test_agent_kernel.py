@@ -149,6 +149,23 @@ def test_kernel_event_idempotency_reuses_existing_terminal_task(tmp_path, monkey
     assert [task["taskId"] for task in tasks] == [first_payload["task"]["taskId"]]
 
 
+def test_kernel_task_list_returns_latest_tasks_first_after_limit(tmp_path, monkeypatch):
+    _isolate_kernel(tmp_path, monkeypatch)
+    agent = _create_agent()
+    client = _client()
+    created_task_ids = []
+    for index in range(5):
+        payload = client.post(
+            "/api/kernel/events",
+            json=_kernel_event(agent["agentId"], idempotency_key=f"task-order-{index}", content=f"task {index}"),
+        ).json()
+        created_task_ids.append(payload["task"]["taskId"])
+
+    tasks = client.get("/api/kernel/tasks", params={"limit": 3}).json()["tasks"]
+
+    assert [task["taskId"] for task in tasks] == list(reversed(created_task_ids[-3:]))
+
+
 def test_kernel_event_rejects_missing_recipient_but_keeps_audit_event(tmp_path, monkeypatch):
     _isolate_kernel(tmp_path, monkeypatch)
     client = _client()
