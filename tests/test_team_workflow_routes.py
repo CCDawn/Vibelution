@@ -717,6 +717,194 @@ def test_team_workflow_routes_register_experiment_smoke_result(tmp_path, monkeyp
     assert payload["boundaries"]["createsExperimentAttempt"] is False
 
 
+def test_team_workflow_routes_register_experiment_full_run_result(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    client = _client()
+    team = client.post("/api/teams", json={"name": "ai科学研究团队"}).json()
+    client.post(
+        f"/api/teams/{team['teamId']}/workflow-orchestration/local-research-model/outputs",
+        json={
+            "taskType": "algorithm_hypothesis_draft",
+            "title": "Algorithm hypothesis draft",
+            "createdByAgent": "Algorithm Hypothesis Agent",
+            "output": {
+                "candidateType": "algorithm_hypothesis",
+                "sourceRefs": [{"type": "paper", "id": "paper-1", "label": "Paper 1"}],
+                "evidenceRefs": [{"type": "mapping", "id": "mapping-1", "label": "Mapping 1"}],
+                "claims": [{"claim": "Context-gated routing may improve adaptation.", "sourceRef": "paper-1"}],
+                "mechanismMappingIds": ["mapping-1"],
+                "hypothesis": "Context-gated routing improves adaptation under shifting tasks.",
+                "baseline": "standard MoE router",
+                "expectedBenefit": "better task adaptation at equal parameter count",
+                "expectedComputeCost": "one small gating MLP and no extra experts",
+                "experimentPlan": {
+                    "dataset": "synthetic task-switch benchmark",
+                    "metric": "validation accuracy and routing entropy",
+                    "baseline": "standard MoE router",
+                    "smokePlan": "train 200 mini-batches and compare metric direction",
+                },
+                "uncertainty": [],
+                "riskFlags": [],
+                "confidence": 0.53,
+                "nextAction": "send_to_research_review",
+                "requiresReview": True,
+            },
+        },
+    )
+    stage_response = client.post(
+        f"/api/teams/{team['teamId']}/workflow-orchestration/stage-rounds/start",
+        json={"stageType": "experiment", "topic": "routing experiment plan"},
+    )
+    plan_response = client.post(
+        f"/api/teams/{team['teamId']}/workflow-orchestration/experiments/plan",
+        json={"stageRoundId": stage_response.json()["stageRound"]["stageRoundId"]},
+    )
+    client.post(
+        f"/api/teams/{team['teamId']}/workflow-orchestration/experiments/plans/{plan_response.json()['plan']['planId']}/baseline-artifact",
+        json={
+            "artifactPath": "workspace/experiments/baselines/standard-moe-router.json",
+            "reproductionCommand": "python experiments/run_baseline.py --config configs/standard_moe_router.yaml",
+            "evaluationCommand": "python experiments/evaluate.py --run standard-moe-router",
+            "registeredByAgent": "Experiment Planning Agent",
+        },
+    )
+    smoke_response = client.post(
+        f"/api/teams/{team['teamId']}/workflow-orchestration/experiments/plans/{plan_response.json()['plan']['planId']}/smoke-result",
+        json={
+            "status": "passed",
+            "metricValue": "0.75 validation accuracy",
+            "resultPath": "workspace/experiments/smoke/context-gated-routing.json",
+            "recordedByAgent": "Experiment Planning Agent",
+        },
+    )
+
+    response = client.post(
+        f"/api/teams/{team['teamId']}/workflow-orchestration/experiments/plans/{plan_response.json()['plan']['planId']}/full-run-result",
+        json={
+            "status": "passed",
+            "metricName": "validation accuracy",
+            "metricValue": "0.79 validation accuracy",
+            "baselineMetricValue": "0.71 validation accuracy",
+            "smokeMetricValue": "0.75 validation accuracy",
+            "delta": "+0.08 accuracy",
+            "resultPath": "workspace/experiments/full_run/context-gated-routing.json",
+            "logRef": "logs/experiments/context-gated-routing-full-run.log",
+            "configPath": "workspace/experiments/full_run/context-gated-routing-config.json",
+            "recordedByAgent": "Experiment Planning Agent",
+        },
+    )
+
+    assert smoke_response.status_code == 201, smoke_response.text
+    assert response.status_code == 201, response.text
+    payload = response.json()
+    assert payload["fullRunResult"]["status"] == "passed"
+    assert payload["fullRunResult"]["gateDecision"] == "ready_for_knowledge_review"
+    assert payload["plan"]["readiness"]["readyForKnowledgeIngestion"] is True
+    assert payload["status"]["status"] == "ready_for_knowledge_ingestion"
+    assert payload["status"]["summary"]["activeFullRunResultId"] == payload["fullRunResult"]["fullRunResultId"]
+    assert payload["boundaries"]["writesFormalKnowledge"] is False
+
+
+def test_team_workflow_routes_request_experiment_result_knowledge_ingestion(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    client = _client()
+    steward = agent_directory_service.create_agent_instance(display_name="Knowledge Steward Agent")
+    requester = agent_directory_service.create_agent_instance(display_name="Experiment Planning Agent")
+    deliveries = []
+
+    def fake_wake(message):
+        deliveries.append(message)
+        return {
+            "wakeRequested": True,
+            "wakeStatus": "started",
+            "messageId": message["messageId"],
+            "targetAgentId": message["targetAgentId"],
+            "targetSessionId": message["targetSessionId"],
+            "turnId": "route-turn-experiment-ingest",
+            "reason": "",
+        }
+
+    monkeypatch.setattr(session_service, "wake_agent_for_inbox_message", fake_wake)
+    team = client.post(
+        "/api/teams",
+        json={"name": "ai科学研究团队", "members": [{"agentId": steward["agentId"], "role": "steward"}]},
+    ).json()
+    client.post(
+        f"/api/teams/{team['teamId']}/workflow-orchestration/local-research-model/outputs",
+        json={
+            "taskType": "algorithm_hypothesis_draft",
+            "title": "Algorithm hypothesis draft",
+            "createdByAgent": "Algorithm Hypothesis Agent",
+            "output": {
+                "candidateType": "algorithm_hypothesis",
+                "sourceRefs": [{"type": "paper", "id": "paper-1", "label": "Paper 1"}],
+                "evidenceRefs": [{"type": "mapping", "id": "mapping-1", "label": "Mapping 1"}],
+                "claims": [{"claim": "Context-gated routing may improve adaptation.", "sourceRef": "paper-1"}],
+                "mechanismMappingIds": ["mapping-1"],
+                "hypothesis": "Context-gated routing improves adaptation under shifting tasks.",
+                "baseline": "standard MoE router",
+                "expectedBenefit": "better task adaptation at equal parameter count",
+                "expectedComputeCost": "one small gating MLP and no extra experts",
+                "experimentPlan": {
+                    "dataset": "synthetic task-switch benchmark",
+                    "metric": "validation accuracy",
+                    "baseline": "standard MoE router",
+                    "smokePlan": "train 200 mini-batches",
+                },
+                "uncertainty": [],
+                "riskFlags": [],
+                "confidence": 0.53,
+                "nextAction": "send_to_research_review",
+                "requiresReview": True,
+            },
+        },
+    )
+    client.post(
+        f"/api/teams/{team['teamId']}/workflow-orchestration/stage-rounds/start",
+        json={"stageType": "experiment", "topic": "routing experiment plan"},
+    )
+    plan_response = client.post(
+        f"/api/teams/{team['teamId']}/workflow-orchestration/experiments/plan",
+        json={},
+    )
+    plan_id = plan_response.json()["plan"]["planId"]
+    client.post(
+        f"/api/teams/{team['teamId']}/workflow-orchestration/experiments/plans/{plan_id}/baseline-artifact",
+        json={
+            "artifactPath": "workspace/experiments/baselines/standard-moe-router.json",
+            "reproductionCommand": "python experiments/run_baseline.py",
+        },
+    )
+    client.post(
+        f"/api/teams/{team['teamId']}/workflow-orchestration/experiments/plans/{plan_id}/smoke-result",
+        json={"status": "passed", "metricValue": "0.75", "resultPath": "workspace/experiments/smoke/result.json"},
+    )
+    full_run_response = client.post(
+        f"/api/teams/{team['teamId']}/workflow-orchestration/experiments/plans/{plan_id}/full-run-result",
+        json={"status": "passed", "metricValue": "0.79", "resultPath": "workspace/experiments/full_run/result.json"},
+    )
+
+    response = client.post(
+        f"/api/teams/{team['teamId']}/workflow-orchestration/experiments/plans/{plan_id}/knowledge-ingestion-request",
+        json={
+            "requestedByAgent": requester["agentId"],
+            "stewardAgentId": steward["agentId"],
+            "knowledgeBaseId": "research-team-experiment-kb",
+            "targetDomain": "挑战杯实验结果",
+        },
+    )
+
+    assert full_run_response.status_code == 201, full_run_response.text
+    assert response.status_code == 201, response.text
+    payload = response.json()
+    assert payload["status"]["status"] == "knowledge_steward_notified"
+    assert payload["experimentResultPack"]["fullRunResultId"] == full_run_response.json()["fullRunResult"]["fullRunResultId"]
+    assert payload["experimentResultPack"]["officialBoundary"]["currentWritesOfficialKnowledge"] is False
+    assert payload["knowledgeStewardActivation"]["status"] == "agent_wake_started"
+    assert payload["knowledgeStewardActivation"]["delivery"]["turnId"] == "route-turn-experiment-ingest"
+    assert deliveries and deliveries[0]["metadata"]["experimentResultPackId"] == payload["experimentResultPack"]["packId"]
+
+
 def test_team_workflow_route_resolves_stale_prompt_cache_model_for_stage_round(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _stub_source_collection_search_background(monkeypatch)
