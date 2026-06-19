@@ -1055,6 +1055,7 @@ agent_kernel.agent.resolve_failed
 12. ContextManifest 是否默认持久化，ContextPacket 是否只在短上下文和调试场景持久化？
 13. 哪些场景允许 bypass EvaluationGate，是否只允许 emergency/manual repair？
 14. Policy version 是否作为第一版必做字段，还是第二阶段补齐？
+15. MVP 是否明确只实现 Minimal Kernel Loop，把 ContextManifest、完整 EvaluationGate、Task Center UI 放到后续阶段？
 
 ## 26. 推荐第一实现切片
 
@@ -1081,7 +1082,8 @@ Agent-to-Agent inbox with TaskLedger and KernelOutcome
 5. 接收方 inbox 记录事件。
 6. wake policy 先记录但默认不自动唤醒。
 7. 记录 outcome 和 evidence refs。
-8. 对本切片跑通一次 `event -> task -> execution -> outcome -> gate` 闭环。
+8. 对本切片跑通一次 `event -> task -> execution -> outcome` runtime 闭环。
+9. 如果 outcome 产生 proposal，只触发 side workflow 记录，不阻塞 runtime loop。
 
 验收标准：
 
@@ -1093,7 +1095,7 @@ Agent-to-Agent inbox with TaskLedger and KernelOutcome
 - 不发生直接 memory write 或 tool permission change。
 - 同一个 idempotency key 重试不会创建重复 task；
 - 一个 WorkRun 最多提交一个 terminal outcome；
-- proposal 即使自动通过，也必须留下 EvaluationGate 记录；
+- proposal 不进入 runtime critical path；即使自动通过，也必须留下 EvaluationGate 记录；
 - Session/Room 只接收 projection，不直接成为任务状态事实源。
 
 ## 27. 系统不变量
@@ -1564,7 +1566,509 @@ type ProposalReviewPolicy = {
 - validation result；
 - rollback ref，如果适用。
 
-## 32. 后续文档建议
+## 32. Kernel Minimal Execution Spec
+
+第二轮架构审查指出：当前 VAKP 已经接近 Agent OS 规范，但 MVP 需要一个更小的 kernel runtime contract。否则实现者会被 TaskLedger、EventEnvelope、ContextManifest、EvaluationGate、WorkRun、Projection Layer 同时牵引，不知道第一步到底实现哪一个。
+
+因此第一版必须额外定义最小执行闭环。
+
+### 32.1 MVP 只实现一条 CPU 级路径
+
+第一版 kernel runtime 只保证这条路径跑通：
+
+```text
+input event
+  -> task created or matched
+  -> minimal context resolved
+  -> execution run
+  -> outcome produced
+  -> side workflows triggered
+```
+
+压缩成一句话：
+
+```text
+Event -> Task -> Execution -> Outcome
+```
+
+其中：
+
+- `Event` 是入口；
+- `Task` 是用户态任务事实；
+- `Execution` 是一次实际执行，可以映射为 WorkRun；
+- `Outcome` 是执行结果；
+- `EvaluationGate` 是 outcome 后的 side workflow，不阻塞 runtime loop。
+
+### 32.2 MVP 层级边界
+
+第一版把系统分成三层，但只完整实现第一层。
+
+```text
+Layer 1: Kernel Runtime
+  Event -> Task -> Execution -> Outcome
+  MVP 必做。
+
+Layer 2: Governance Layer
+  Outcome -> Proposal -> Review -> Apply
+  MVP 只记录入口和状态，不实现完整治理自动化。
+
+Layer 3: Context Layer
+  Task -> ContextManifest -> ContextPacket
+  MVP 使用 minimal runtime context，ContextManifest 可选保存。
+```
+
+这条边界的目的：
+
+- 防止第一版被 OS 级完整设计拖慢；
+- 让 Agent-to-Agent inbox 能先落地；
+- 保留后续 ContextGraph、EvaluationGate、Task Center 的扩展入口；
+- 避免把 EvaluationGate 做成第二个 WorkRun 或 workflow engine。
+
+### 32.3 Event Runtime Contract
+
+MVP runtime 的 primary input 是 `EventEnvelope`。
+
+```text
+Kernel consumes EventEnvelope.
+SemanticPayload is carried by the envelope and interpreted by handlers.
+AgentEvent is a convenience composition, not the runtime authority.
+```
+
+具体规则：
+
+- routing 使用 `EventEnvelope.sender`、`recipients`、`status`、`correlationId`、`idempotencyKey`。
+- task creation 使用 `EventEnvelope.idempotencyKey` 和 `SemanticPayload.semanticType`。
+- debug 使用 `EventEnvelope.eventId`、`causationId`、`correlationId`。
+- domain handler 读取 `SemanticPayload.payload`。
+- runtime 不直接消费裸 `SemanticPayload`。
+
+MVP 不做完整 replayable event sourcing。事件定位保持：
+
+```text
+append-only audit/routing log
+```
+
+### 32.4 Task Runtime Contract
+
+MVP 的 Task 只需要支持：
+
+```text
+queued
+running
+succeeded
+failed
+cancelled
+blocked
+```
+
+最小字段：
+
+```ts
+type MinimalTask = {
+  taskId: string;
+  creatorEventId: string;
+  idempotencyKey: string;
+  goal: string;
+  assignedAgentIds: string[];
+  status: "queued" | "running" | "succeeded" | "failed" | "cancelled" | "blocked";
+  workRunId?: string;
+  outcomeId?: string;
+  evidenceRefs: EvidenceRef[];
+  createdAt: string;
+  updatedAt: string;
+};
+```
+
+MVP 约束：
+
+- 一个 input event 最多创建一个 task。
+- 重试必须命中同一个 `idempotencyKey`。
+- terminal status 后不能回到 running。
+- 需要重开时创建 followup task。
+
+### 32.5 Minimal Context Contract
+
+MVP 不实现完整 `ContextManifest + Resolver`。
+
+MVP 只需要：
+
+```text
+minimal runtime context
+```
+
+包含：
+
+- sender message；
+- recipient Agent identity；
+- task goal；
+- 最近必要的 direct session / inbox 摘要；
+- policy refs；
+- hard constraints。
+
+MVP 可选保存 `ContextManifest`，但不要求完整 lazy graph。
+
+建议第一版字段：
+
+```ts
+type MinimalContext = {
+  agentId: string;
+  taskId: string;
+  eventId: string;
+  messageSummary: string;
+  recentContextRefs: ContextSourceRef[];
+  policyRefs: string[];
+  constraints: string[];
+};
+```
+
+明确不做：
+
+- 大规模 memory graph resolver；
+- RAG 检索；
+- 多源上下文排序算法；
+- context diff；
+- 长上下文缓存系统。
+
+### 32.6 Execution Contract
+
+MVP 的 execution 可以是一个轻量 WorkRun。
+
+最小状态：
+
+```text
+created
+running
+succeeded
+failed
+cancelled
+blocked
+```
+
+最小字段：
+
+```ts
+type MinimalExecution = {
+  workRunId: string;
+  taskId: string;
+  agentId: string;
+  status: "created" | "running" | "succeeded" | "failed" | "cancelled" | "blocked";
+  startedAt?: string;
+  endedAt?: string;
+  evidenceRefs: EvidenceRef[];
+};
+```
+
+第一版可以先让 execution 调用现有 Agent runtime、LLM invocation、或 test double。重点不是模型能力，而是 kernel state transition 正确。
+
+### 32.7 Outcome Contract
+
+MVP 的 outcome 必须可终结 task。
+
+最小字段：
+
+```ts
+type MinimalOutcome = {
+  outcomeId: string;
+  taskId: string;
+  workRunId: string;
+  agentId: string;
+  status: "succeeded" | "failed" | "partial" | "blocked";
+  visibleReply?: string;
+  resultSummary: string;
+  proposalRefs: string[];
+  evidenceRefs: EvidenceRef[];
+  createdAt: string;
+};
+```
+
+规则：
+
+- 一个 WorkRun 最多一个 terminal outcome。
+- `partial` 不终结 task。
+- `succeeded`、`failed`、`blocked` 可以终结 task。
+- outcome 可触发 proposal side workflow。
+
+### 32.8 EvaluationGate Side Workflow
+
+MVP 中 EvaluationGate 不属于 runtime loop。
+
+```text
+Runtime loop:
+  Event -> Task -> Execution -> Outcome
+
+Side workflow:
+  Outcome -> Proposal -> Review -> Apply
+```
+
+MVP 只需要：
+
+- 如果 outcome 生成 proposal，记录 proposal stub。
+- proposal stub 状态为 `queued`。
+- 不自动应用。
+- 不阻塞 task terminal outcome。
+
+最小字段：
+
+```ts
+type MinimalProposal = {
+  proposalId: string;
+  sourceOutcomeId: string;
+  proposalType: string;
+  status: "queued" | "approved" | "rejected" | "applied";
+  summary: string;
+  createdAt: string;
+};
+```
+
+### 32.9 MVP 存储建议
+
+MVP 不需要一开始就全 SQLite。
+
+建议混合策略：
+
+```text
+workspace/agent_kernel/events.jsonl
+workspace/agent_kernel/tasks.jsonl
+workspace/agent_kernel/outcomes.jsonl
+workspace/agent_kernel/proposals.jsonl
+workspace/agent_kernel/index.json
+```
+
+其中：
+
+- JSONL 保存 append-only 历史；
+- `index.json` 保存当前 task / inbox / latest outcome 快速索引；
+- 后续如果查询变慢，再迁移到 SQLite；
+- 迁移前不要让业务逻辑依赖复杂 SQL。
+
+### 32.10 MVP API Contract
+
+第一版 API 控制在最小集合：
+
+```http
+POST /api/kernel/events
+GET /api/kernel/tasks/{taskId}
+GET /api/agents/{agentId}/inbox
+POST /api/agents/{agentId}/inbox/{eventId}/ack
+```
+
+可选：
+
+```http
+GET /api/kernel/tasks
+GET /api/kernel/events/{eventId}
+```
+
+暂不做：
+
+- 完整 proposal approval API；
+- Task Center UI；
+- ContextManifest UI；
+- group chat 抢占式 scheduler；
+- policy editor。
+
+### 32.11 MVP 伪代码
+
+```python
+def handle_kernel_event(envelope: EventEnvelope, payload: SemanticPayload) -> KernelResult:
+    event = event_store.append(envelope, payload)
+
+    task = task_store.get_by_idempotency_key(envelope.idempotencyKey)
+    if task is None:
+        task = task_store.create_from_event(event)
+
+    if task.status in {"succeeded", "failed", "cancelled", "blocked"}:
+        return KernelResult(task=task, reused=True)
+
+    task_store.mark_running(task.taskId)
+
+    context = minimal_context_resolver.resolve(task=task, event=event)
+    execution = execution_store.create(task=task, context=context)
+
+    try:
+        result = agent_executor.run(execution, context)
+        outcome = outcome_store.create_success(task, execution, result)
+        task_store.mark_succeeded(task.taskId, outcome.outcomeId)
+    except KernelBlocked as error:
+        outcome = outcome_store.create_blocked(task, execution, error)
+        task_store.mark_blocked(task.taskId, outcome.outcomeId)
+    except Exception as error:
+        outcome = outcome_store.create_failed(task, execution, error)
+        task_store.mark_failed(task.taskId, outcome.outcomeId)
+
+    proposal_store.create_stubs_from_outcome(outcome)
+    return KernelResult(task=task_store.get(task.taskId), outcome=outcome)
+```
+
+### 32.12 Two-week MVP Scope
+
+两周 MVP 应只交付：
+
+1. Kernel DTO。
+2. JSONL stores + index。
+3. `POST /api/kernel/events`。
+4. Agent inbox read / ack。
+5. Minimal task lifecycle。
+6. Minimal execution runner，允许先用 fake executor 或现有 direct Agent runtime wrapper。
+7. Minimal outcome。
+8. Proposal stub side workflow。
+9. 聚焦测试覆盖 idempotency、missing recipient、terminal outcome、inbox ack、proposal non-blocking。
+
+不交付：
+
+- Task Center 完整 UI；
+- ContextGraph；
+- 完整 EvaluationGate；
+- 群聊 scheduler；
+- 自进化自动应用；
+- policy editor；
+- SQLite migration。
+
+## 33. Unified Kernel Primitive Rule
+
+第三轮架构审查的核心价值不是再增加一层系统，而是把已有设计压回单一执行模型。
+
+后续所有 kernel 相关设计都必须先映射到以下五个 primitive：
+
+```text
+1. Input: Event
+2. State: TaskLedger
+3. Execution: WorkRun
+4. Output: Outcome
+5. Governance: EvaluationGate
+```
+
+任何不能映射到这五类的内容，都不是 kernel primitive，而是 projection、resolver、evidence、policy 或 invariant enforcement。
+
+### 33.1 Canonical Execution Model
+
+VAKP v1 的统一执行模型是：
+
+```text
+Input
+  -> Event Intake
+  -> Task Resolution / Materialization
+  -> Minimal Context Resolution
+  -> Execution
+  -> Outcome Materialization
+  -> Governance Side Workflow
+  -> Projection Repair / Update
+```
+
+这条链路的重点是：
+
+- `TaskLedger` 不能等到 governance 完成后才写入；task 创建、运行、终结必须在 runtime loop 中完成。
+- `EvaluationGate` 只能处理 outcome 之后的 proposal / review / apply，不能阻塞 runtime terminal outcome。
+- projection 可以在 outcome 后修复或刷新，但不能反写覆盖 TaskLedger。
+- Context 参与 execution 前的计算，但 context 本身不是任务事实源。
+
+### 33.2 Primitive Authority Matrix
+
+| Component | Primitive mapping | Authority boundary |
+|---|---|---|
+| `EventEnvelope` / `AgentEvent` | Input | 只负责入口、路由、审计、correlation 和 idempotency signal，不拥有 task status。 |
+| `TaskLedger` | State | 用户态任务事实源，拥有 assignment、status、lifecycle 和 outcome reference。 |
+| `WorkRun` | Execution | 只记录一次执行轨迹、runner 状态和证据，不等同于用户态任务。 |
+| `KernelOutcome` | Output | 终结或推进 task 的结果对象，是 runtime loop 的输出边界。 |
+| `EvaluationGate` | Governance | outcome 后的异步治理流水线，负责 proposal、review、apply，不属于 runtime path。 |
+| `ContextManifest` / `ContextResolver` | Resolver | 计算执行上下文；可记录 manifest / refs 作为证据，但不作为事实源。 |
+| `Session` / `Room` / `Conversation` | Projection | 是交互视图和消息投影，不拥有 task lifecycle。 |
+| `Memory` | Governed knowledge | 是受治理的持久知识层，不是 kernel primitive，也不能被简单视为 UI projection。 |
+| `RuntimeScene` | Evidence | 是诊断证据链，不是业务状态权威。 |
+| `Test Strategy` | Invariant enforcement | 保护输入、状态、执行、输出、治理的不变量，不作为独立 architecture layer。 |
+
+### 33.3 Boundary Rules
+
+必须遵守：
+
+- event 永远不能直接代表任务完成、失败或取消。
+- task 状态只能通过 TaskLedger lifecycle transition 改变。
+- WorkRun 不能在没有 Outcome 的情况下终结用户态 task。
+- outcome 可以终结 task，也可以生成 proposal stub。
+- EvaluationGate 不允许同步阻塞 runtime loop。
+- Context 是计算结果；持久化只保存 manifest、source ref、hash 或 evidence ref。
+- Session、Room、Conversation 只能显示和触发 kernel state，不能成为 state truth。
+- Memory 写入必须走 governance 或明确的知识管理路径，不能被 runtime side effect 偷写。
+- 测试只证明 invariant，不用旧测试锁死新架构。
+
+### 33.4 Anti-patterns
+
+后续实现要避免：
+
+- 新增一个 subsystem，却无法说明它属于五个 primitive 中哪一类。
+- 把 `Session`、`Room`、frontend cache 或 runtime scene 当成任务事实源。
+- 把 `EvaluationGate` 做成第二个 workflow engine，并让 runtime 等审批。
+- 把 ContextResolver 一开始做成 memory OS、RAG engine 和 policy engine 的混合体。
+- 让旧测试继续要求旧 projection 形状，从而阻碍 TaskLedger / Event / Outcome 的新 contract。
+
+## 34. 复杂度收敛规则
+
+为了避免过度系统化，后续实现必须遵守这些降维规则。
+
+### 34.1 MVP 优先级
+
+```text
+先跑通 loop，再扩展 OS。
+```
+
+优先级：
+
+1. EventEnvelope 可写入。
+2. Task 可创建和去重。
+3. Execution 可运行并终结。
+4. Outcome 可产生并关联 task。
+5. Proposal 可作为 side workflow 记录。
+
+低优先级：
+
+- 完整 ContextManifest resolver；
+- 完整 EvaluationGate；
+- UI 重组；
+- replayable event sourcing；
+- 多 Agent scheduler。
+
+### 34.2 Context 降级规则
+
+第一版只做 minimal context。
+
+如果实现中遇到上下文不足：
+
+- 先增加明确的 `ContextSourceRef`；
+- 再增加摘要；
+- 最后才考虑完整 resolver。
+
+不要第一版就实现 memory OS。
+
+### 34.3 EvaluationGate 降级规则
+
+第一版只记录 proposal stub。
+
+不允许：
+
+- runtime 等待 proposal 审批；
+- proposal 自动修改 policy；
+- proposal 自动写 project memory；
+- proposal 自动应用 code change。
+
+### 34.4 Event 降级规则
+
+第一版事件是 audit/routing log，不是完整 replay state machine。
+
+必须做：
+
+- append-only；
+- idempotency；
+- correlation；
+- failure event。
+
+暂不做：
+
+- full replay；
+- event compaction；
+- event schema migration UI；
+- timeline reconstruction engine。
+
+## 35. 后续文档建议
 
 本草案确认后，建议继续补三份文档：
 
