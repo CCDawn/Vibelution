@@ -69,6 +69,9 @@ const LINKED_ROOM_IDLE_REFETCH_MS = 30_000;
 const TEAM_WORKFLOW_CANDIDATE_PREVIEW_LIMIT = 500;
 const TEAM_WORKFLOW_CANDIDATE_GRAPH_LIMIT = 20;
 const AI_SEARCH_RUN_PREVIEW_LIMIT = 6;
+const TEAM_BOOTSTRAP_ACTIVE_REFETCH_MS = 2_000;
+const TEAM_BOOTSTRAP_BACKGROUND_REFETCH_MS = 12_000;
+const TEAM_BOOTSTRAP_REFETCH_STATUSES = new Set(["running", "needs_retry"]);
 const WORKFLOW_GRAPH_WIDTH = 1120;
 const WORKFLOW_GRAPH_MIN_HEIGHT = 320;
 const WORKFLOW_GRAPH_NODE_WIDTH = 168;
@@ -2969,6 +2972,10 @@ export function TeamsRoute({
   const teamsQuery = useQuery({
     queryKey: queryKeys.teams(),
     queryFn: () => fetchJson<TeamListPayload>("/api/teams"),
+    refetchInterval: (query) =>
+      TEAM_BOOTSTRAP_REFETCH_STATUSES.has(query.state.data?.systemTeamBootstrap?.status ?? "")
+        ? resolvePollingInterval(pageVisible, TEAM_BOOTSTRAP_ACTIVE_REFETCH_MS, { backgroundMs: TEAM_BOOTSTRAP_BACKGROUND_REFETCH_MS })
+        : false,
   });
   const workspaceQuery = useQuery({
     queryKey: queryKeys.agentConfigWorkspace(),

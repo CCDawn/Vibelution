@@ -34,6 +34,9 @@ describe("TeamsRoute layout contract", () => {
 
   it("uses Team APIs and Agent Center as the binding source", () => {
     expect(routeSource).toContain('fetchJson<TeamListPayload>("/api/teams")');
+    expect(routeSource).toContain("TEAM_BOOTSTRAP_REFETCH_STATUSES");
+    expect(routeSource).toContain("query.state.data?.systemTeamBootstrap?.status");
+    expect(routeSource).toContain("TEAM_BOOTSTRAP_ACTIVE_REFETCH_MS");
     expect(routeSource).not.toContain('fetchJson<TeamTemplateListPayload>("/api/team-templates")');
     expect(routeSource).not.toContain("/api/team-templates/${encodeURIComponent(templateId)}/instantiate");
     expect(routeSource).not.toContain("instantiateTeamTemplateMutation");

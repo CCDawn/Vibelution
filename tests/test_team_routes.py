@@ -10,12 +10,17 @@ def _client() -> TestClient:
     return TestClient(create_app(), headers={CONTROL_TOKEN_HEADER: get_control_token()})
 
 
-def test_team_routes_create_detail_and_canvas(tmp_path, monkeypatch):
+def _isolate_team_route_state(tmp_path, monkeypatch):
+    monkeypatch.setenv("VIBELUTION_DATA_HOME", str(tmp_path))
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(project_agent_bus_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(team_service, "PROJECT_ROOT", tmp_path)
+
+
+def test_team_routes_create_detail_and_canvas(tmp_path, monkeypatch):
+    _isolate_team_route_state(tmp_path, monkeypatch)
     agent = agent_directory_service.create_agent_instance(display_name="Alpha", direct_session_id="session-alpha")
     client = _client()
 
@@ -36,11 +41,7 @@ def test_team_routes_create_detail_and_canvas(tmp_path, monkeypatch):
 
 
 def test_team_routes_reject_agent_that_already_belongs_to_active_team(tmp_path, monkeypatch):
-    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
-    monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
-    monkeypatch.setattr(project_agent_bus_service, "PROJECT_ROOT", tmp_path)
-    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
-    monkeypatch.setattr(team_service, "PROJECT_ROOT", tmp_path)
+    _isolate_team_route_state(tmp_path, monkeypatch)
     agent = agent_directory_service.create_agent_instance(display_name="Alpha", direct_session_id="session-alpha")
     client = _client()
     first_response = client.post(
@@ -58,33 +59,41 @@ def test_team_routes_reject_agent_that_already_belongs_to_active_team(tmp_path, 
     assert "already belongs to Team" in response.json()["detail"]
 
 
-def test_team_list_route_materializes_system_teams(tmp_path, monkeypatch):
-    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
-    monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
-    monkeypatch.setattr(project_agent_bus_service, "PROJECT_ROOT", tmp_path)
-    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
-    monkeypatch.setattr(team_service, "PROJECT_ROOT", tmp_path)
+def test_team_list_route_schedules_system_bootstrap_without_inline_materialization(tmp_path, monkeypatch):
+    _isolate_team_route_state(tmp_path, monkeypatch)
+    requested_reasons = []
+
+    def fake_request_system_team_bootstrap(*, reason):
+        requested_reasons.append(reason)
+        return {
+            "schemaVersion": 1,
+            "status": "running",
+            "requiredSteps": ["evolution_system_teams", "ai_search_system_team"],
+            "reason": reason,
+            "startedAt": "2026-06-19T00:00:00Z",
+            "finishedAt": "",
+            "lastError": "",
+            "elapsedMs": 0,
+            "attempt": 1,
+            "requestId": "test-bootstrap",
+        }
+
+    monkeypatch.setattr(teams_route, "request_system_team_bootstrap", fake_request_system_team_bootstrap)
     client = _client()
 
     response = client.get("/api/teams")
 
     assert response.status_code == 200, response.text
-    teams = {team["teamId"]: team for team in response.json()["teams"]}
-    assert {"self-evolution-team", "supervised-evolution-team", "ai-search-team"}.issubset(teams)
-    assert teams["self-evolution-team"]["linkedChatRoomId"]
-    assert teams["supervised-evolution-team"]["linkedChatRoomId"]
-    assert teams["ai-search-team"]["linkedChatRoomId"]
-    assert teams["ai-search-team"]["memberCount"] == 4
-    assert teams["ai-search-team"]["teamKind"] == "ai_search"
-    assert response.json()["summary"]["activeTeamCount"] == 3
+    payload = response.json()
+    assert payload["teams"] == []
+    assert payload["summary"]["activeTeamCount"] == 0
+    assert payload["systemTeamBootstrap"]["status"] == "running"
+    assert payload["systemTeamBootstrap"]["requiredSteps"] == ["evolution_system_teams", "ai_search_system_team"]
+    assert requested_reasons == ["team_list"]
 
 
 def test_ai_search_run_routes_start_and_list_runs(tmp_path, monkeypatch):
-    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
-    monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
-    monkeypatch.setattr(project_agent_bus_service, "PROJECT_ROOT", tmp_path)
-    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
-    monkeypatch.setattr(team_service, "PROJECT_ROOT", tmp_path)
+    _isolate_team_route_state(tmp_path, monkeypatch)
 
     def fake_web_search(query, *, max_results):
         return (
@@ -96,7 +105,7 @@ def test_ai_search_run_routes_start_and_list_runs(tmp_path, monkeypatch):
 
     monkeypatch.setattr(team_service, "_run_ai_web_search", fake_web_search)
     client = _client()
-    client.get("/api/teams")
+    team_service.ensure_ai_search_system_team()
 
     response = client.post(
         "/api/teams/ai-search-team/ai-search-runs",
@@ -116,11 +125,7 @@ def test_ai_search_run_routes_start_and_list_runs(tmp_path, monkeypatch):
 
 
 def test_ai_search_run_route_rejects_non_ai_search_team(tmp_path, monkeypatch):
-    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
-    monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
-    monkeypatch.setattr(project_agent_bus_service, "PROJECT_ROOT", tmp_path)
-    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
-    monkeypatch.setattr(team_service, "PROJECT_ROOT", tmp_path)
+    _isolate_team_route_state(tmp_path, monkeypatch)
     client = _client()
     team = client.post("/api/teams", json={"name": "普通团队"}).json()
 
@@ -130,33 +135,24 @@ def test_ai_search_run_route_rejects_non_ai_search_team(tmp_path, monkeypatch):
     assert "AI search" in response.json()["detail"]
 
 
-def test_team_list_route_skips_system_bootstrap_when_teams_exist(tmp_path, monkeypatch):
-    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
-    monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
-    monkeypatch.setattr(project_agent_bus_service, "PROJECT_ROOT", tmp_path)
-    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
-    monkeypatch.setattr(team_service, "PROJECT_ROOT", tmp_path)
+def test_team_list_route_reports_ready_when_system_teams_exist(tmp_path, monkeypatch):
+    _isolate_team_route_state(tmp_path, monkeypatch)
     team_service.ensure_evolution_system_teams()
-    monkeypatch.setattr(
-        teams_route,
-        "ensure_evolution_system_teams",
-        lambda: (_ for _ in ()).throw(AssertionError("system team bootstrap should be skipped")),
-    )
+    team_service.ensure_ai_search_system_team()
     client = _client()
 
     response = client.get("/api/teams")
 
     assert response.status_code == 200, response.text
-    teams = {team["teamId"]: team for team in response.json()["teams"]}
-    assert {"self-evolution-team", "supervised-evolution-team"}.issubset(teams)
+    payload = response.json()
+    teams = {team["teamId"]: team for team in payload["teams"]}
+    assert {"self-evolution-team", "supervised-evolution-team", "ai-search-team"}.issubset(teams)
+    assert payload["systemTeamBootstrap"]["status"] == "ready"
+    assert payload["systemTeamBootstrap"]["requiredSteps"] == []
 
 
 def test_team_routes_save_canvas(tmp_path, monkeypatch):
-    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
-    monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
-    monkeypatch.setattr(project_agent_bus_service, "PROJECT_ROOT", tmp_path)
-    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
-    monkeypatch.setattr(team_service, "PROJECT_ROOT", tmp_path)
+    _isolate_team_route_state(tmp_path, monkeypatch)
     client = _client()
     team = client.post("/api/teams", json={"name": "画布团队"}).json()
     assert team["linkedChatRoomId"]
@@ -184,11 +180,7 @@ def test_team_routes_save_canvas(tmp_path, monkeypatch):
 
 
 def test_team_routes_sync_linked_chat_room(tmp_path, monkeypatch):
-    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
-    monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
-    monkeypatch.setattr(project_agent_bus_service, "PROJECT_ROOT", tmp_path)
-    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
-    monkeypatch.setattr(team_service, "PROJECT_ROOT", tmp_path)
+    _isolate_team_route_state(tmp_path, monkeypatch)
     agent = agent_directory_service.create_agent_instance(display_name="Alpha", direct_session_id="session-alpha")
     client = _client()
     team = client.post("/api/teams", json={"name": "同步团队", "members": [{"agentId": agent["agentId"]}]}).json()
@@ -204,11 +196,7 @@ def test_team_routes_sync_linked_chat_room(tmp_path, monkeypatch):
 
 
 def test_archived_team_room_is_hidden_from_conversation_index_and_deleted(tmp_path, monkeypatch):
-    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
-    monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
-    monkeypatch.setattr(project_agent_bus_service, "PROJECT_ROOT", tmp_path)
-    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
-    monkeypatch.setattr(team_service, "PROJECT_ROOT", tmp_path)
+    _isolate_team_route_state(tmp_path, monkeypatch)
     client = _client()
     team = client.post("/api/teams", json={"name": "医疗问诊"}).json()
     room_id = team["linkedChatRoomId"]
@@ -224,11 +212,7 @@ def test_archived_team_room_is_hidden_from_conversation_index_and_deleted(tmp_pa
 
 
 def test_team_delete_route_cascades_member_agent_archive(tmp_path, monkeypatch):
-    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
-    monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
-    monkeypatch.setattr(project_agent_bus_service, "PROJECT_ROOT", tmp_path)
-    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
-    monkeypatch.setattr(team_service, "PROJECT_ROOT", tmp_path)
+    _isolate_team_route_state(tmp_path, monkeypatch)
     agent = agent_directory_service.create_agent_instance(display_name="Alpha", direct_session_id="session-alpha")
     client = _client()
     team = client.post("/api/teams", json={"name": "删除团队", "members": [{"agentId": agent["agentId"]}]}).json()
@@ -241,11 +225,7 @@ def test_team_delete_route_cascades_member_agent_archive(tmp_path, monkeypatch):
 
 
 def test_team_delete_route_removes_archived_agent_from_extra_chat_rooms(tmp_path, monkeypatch):
-    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
-    monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
-    monkeypatch.setattr(project_agent_bus_service, "PROJECT_ROOT", tmp_path)
-    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
-    monkeypatch.setattr(team_service, "PROJECT_ROOT", tmp_path)
+    _isolate_team_route_state(tmp_path, monkeypatch)
     alpha = session_service.create_chat_session(title="Alpha")
     beta = session_service.create_chat_session(title="Beta")
     client = _client()
@@ -264,11 +244,7 @@ def test_team_delete_route_removes_archived_agent_from_extra_chat_rooms(tmp_path
 
 
 def test_team_delete_route_repairs_already_archived_team_members(tmp_path, monkeypatch):
-    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
-    monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
-    monkeypatch.setattr(project_agent_bus_service, "PROJECT_ROOT", tmp_path)
-    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
-    monkeypatch.setattr(team_service, "PROJECT_ROOT", tmp_path)
+    _isolate_team_route_state(tmp_path, monkeypatch)
     agent = agent_directory_service.create_agent_instance(display_name="Legacy", direct_session_id="session-legacy")
     client = _client()
     team = client.post("/api/teams", json={"name": "旧删除团队", "members": [{"agentId": agent["agentId"]}]}).json()
@@ -285,11 +261,7 @@ def test_team_delete_route_repairs_already_archived_team_members(tmp_path, monke
 
 
 def test_team_delete_route_rejects_system_team(tmp_path, monkeypatch):
-    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
-    monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
-    monkeypatch.setattr(project_agent_bus_service, "PROJECT_ROOT", tmp_path)
-    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
-    monkeypatch.setattr(team_service, "PROJECT_ROOT", tmp_path)
+    _isolate_team_route_state(tmp_path, monkeypatch)
     team_service.ensure_evolution_system_teams()
     client = _client()
 
@@ -300,11 +272,7 @@ def test_team_delete_route_rejects_system_team(tmp_path, monkeypatch):
 
 
 def test_team_routes_send_message_to_team_members(tmp_path, monkeypatch):
-    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
-    monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
-    monkeypatch.setattr(project_agent_bus_service, "PROJECT_ROOT", tmp_path)
-    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
-    monkeypatch.setattr(team_service, "PROJECT_ROOT", tmp_path)
+    _isolate_team_route_state(tmp_path, monkeypatch)
     monkeypatch.setattr(
         project_agent_bus_service.session_service,
         "wake_agent_for_inbox_message",
