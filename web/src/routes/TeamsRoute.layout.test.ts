@@ -267,7 +267,7 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("开始知识搜集");
     expect(routeSource).toContain("搜索下一批");
     expect(routeSource).toContain("新一轮搜集");
-    expect(routeSource).toContain("资料待筛选");
+    expect(routeSource).toContain("资料待审查");
     expect(routeSource).toContain("可进入实验");
     expect(routeSource).toContain("正在团队搜索");
     expect(routeSource).toContain("知识搜集操作台");
@@ -460,8 +460,11 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("当前过滤条件下没有入库关系节点");
     expect(routeSource).toContain("当前过滤条件下没有入库资料");
     expect(routeSource).toContain("candidate.qualityStatus || candidate.currentState");
-    expect(routeSource).toContain("source_needs_quality_revision: \"待质检\"");
-    expect(routeSource).toContain("source_screened: \"已筛选\"");
+    expect(routeSource).toContain("source_needs_quality_revision: \"需补资料\"");
+    expect(routeSource).toContain("source_screened: \"已审查\"");
+    expect(routeSource).toContain("sourceCollectionCandidateListShell");
+    expect(routeSource).toContain("待 Agent 审查");
+    expect(routeSource).not.toContain("待质检");
     expect(routeSource).not.toContain("workflowSourceCollectionPrimaryButton");
     expect(routeSource).toContain("启动实验规划");
     expect(routeSource).toContain("启动迭代");
@@ -651,6 +654,7 @@ describe("TeamsRoute layout contract", () => {
     expect(routeStyles.sourceCollectionFilterActive).toBeTypeOf("string");
     expect(routeStyles.sourceCollectionResultStats).toBeTypeOf("string");
     expect(routeStyles.sourceCollectionResultList).toBeTypeOf("string");
+    expect(routeStyles.sourceCollectionCandidateListShell).toBeTypeOf("string");
     expect(routeStyles.sourceCollectionResultItem).toBeTypeOf("string");
     expect(routeStyles.sourceCollectionResultContent).toBeTypeOf("string");
     expect(routeStyles.sourceCollectionResultWarning).toBeTypeOf("string");
@@ -673,6 +677,9 @@ describe("TeamsRoute layout contract", () => {
     expect(routeStylesSource).toContain(".sourceCollectionFilterActive");
     expect(routeStylesSource).toContain("grid-template-columns: minmax(220px, 1fr) minmax(80px, 112px) minmax(150px, 240px)");
     expect(routeStylesSource).toContain("grid-template-rows: auto auto auto");
+    expect(routeStylesSource).toContain(".sourceCollectionCandidateListShell");
+    expect(routeStylesSource).toContain("overflow-y: auto");
+    expect(routeStylesSource).toContain("scrollbar-gutter: stable");
     expect(routeStylesSource).toContain("align-items: start");
     expect(routeStylesSource).toContain("align-content: start");
     expect(routeStylesSource).toContain("align-self: start");
