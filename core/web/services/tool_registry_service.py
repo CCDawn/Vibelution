@@ -288,6 +288,54 @@ def set_generated_tool_enabled(tool_id: str, enabled: bool) -> dict[str, Any]:
     return _generated_tool_item(record, builtin_names=_builtin_tool_names())
 
 
+def set_generated_tools_enabled_bulk(tool_ids: list[str], enabled: bool) -> dict[str, Any]:
+    """Enable or disable multiple generated tool manifests with one load/save pass."""
+
+    records = _load_generated_tools()
+    builtin_names = _builtin_tool_names()
+    normalized_ids = _unique_normalized_tool_ids(tool_ids)
+    results: list[dict[str, Any]] = []
+    changed = False
+    for tool_id in normalized_ids:
+        if tool_id in builtin_names:
+            results.append({"toolId": tool_id, "status": "skipped", "reason": "built_in_protected"})
+            continue
+        try:
+            _, record = _find_generated_record(records, tool_id)
+        except FileNotFoundError:
+            results.append({"toolId": tool_id, "status": "failed", "reason": "not_found"})
+            continue
+        if not bool(record.get("validated")) or str(record.get("status") or "") != "validated":
+            results.append({"toolId": tool_id, "status": "skipped", "reason": "not_validated"})
+            continue
+        record["enabled"] = bool(enabled)
+        record["updatedAt"] = _now()
+        changed = True
+        results.append(
+            {
+                "toolId": _normalize_tool_id(record.get("id") or record.get("name") or tool_id),
+                "status": "updated",
+                "enabled": bool(enabled),
+            }
+        )
+    if changed:
+        _save_generated_tools(records)
+        _record_registry_event(
+            "tool_registry.generated.bulk_enabled_changed",
+            "Generated tool enabled state changed in bulk.",
+            tool_id="bulk",
+            status="bulk",
+            outcome="succeeded",
+            fields={"enabled": bool(enabled), **_bulk_result_counts(results)},
+        )
+    return {
+        "action": "bulk_enabled",
+        "enabled": bool(enabled),
+        **_bulk_result_counts(results),
+        "results": results,
+    }
+
+
 def delete_generated_tool(tool_id: str) -> dict[str, Any]:
     """Delete one generated tool manifest."""
 
@@ -316,6 +364,48 @@ def delete_tool(tool_id: str) -> dict[str, Any]:
     if normalized in _builtin_tool_names():
         raise ToolRegistryPermissionError("Built-in tools are protected and cannot be deleted")
     return delete_generated_tool(normalized)
+
+
+def delete_tools_bulk(tool_ids: list[str]) -> dict[str, Any]:
+    """Delete multiple tools, skipping protected built-ins and saving once."""
+
+    records = _load_generated_tools()
+    builtin_names = _builtin_tool_names()
+    normalized_ids = _unique_normalized_tool_ids(tool_ids)
+    results: list[dict[str, Any]] = []
+    deleted_any = False
+    for tool_id in normalized_ids:
+        if tool_id in builtin_names:
+            results.append({"toolId": tool_id, "status": "skipped", "reason": "built_in_protected"})
+            continue
+        try:
+            index, record = _find_generated_record(records, tool_id)
+        except FileNotFoundError:
+            results.append({"toolId": tool_id, "status": "failed", "reason": "not_found"})
+            continue
+        deleted = records.pop(index)
+        deleted_any = True
+        results.append(
+            {
+                "toolId": _normalize_tool_id(deleted.get("id") or deleted.get("name") or tool_id),
+                "status": "deleted",
+            }
+        )
+    if deleted_any:
+        _save_generated_tools(records)
+        _record_registry_event(
+            "tool_registry.generated.bulk_deleted",
+            "Generated tool manifests deleted in bulk.",
+            tool_id="bulk",
+            status="bulk",
+            outcome="succeeded",
+            fields=_bulk_result_counts(results),
+        )
+    return {
+        "action": "bulk_delete",
+        **_bulk_result_counts(results),
+        "results": results,
+    }
 
 
 def test_tool(
@@ -1471,6 +1561,27 @@ def _save_generated_tools(records: list[dict[str, Any]]) -> None:
 
 def _normalize_tool_id(value: object) -> str:
     return str(value or "").strip().replace("-", "_").lower()
+
+
+def _unique_normalized_tool_ids(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    normalized: list[str] = []
+    for value in values or []:
+        tool_id = _normalize_tool_id(value)
+        if not tool_id or tool_id in seen:
+            continue
+        seen.add(tool_id)
+        normalized.append(tool_id)
+    return normalized
+
+
+def _bulk_result_counts(results: list[dict[str, Any]]) -> dict[str, int]:
+    success_statuses = {"updated", "deleted"}
+    return {
+        "successCount": sum(1 for item in results if item.get("status") in success_statuses),
+        "skippedCount": sum(1 for item in results if item.get("status") == "skipped"),
+        "failedCount": sum(1 for item in results if item.get("status") == "failed"),
+    }
 
 
 def _image2_model_config_payload(public_config: dict[str, Any]) -> dict[str, Any]:

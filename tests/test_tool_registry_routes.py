@@ -264,6 +264,55 @@ def test_tools_api_generated_tool_lifecycle(tmp_path, monkeypatch):
     assert delete_response.json()["deleted"] is True
 
 
+def test_tools_api_bulk_generated_enable_and_delete(tmp_path, monkeypatch):
+    monkeypatch.setattr(registry, "GENERATED_TOOLS_PATH", tmp_path / "generated_tools.json")
+    client = _client()
+    for name in ("alpha_digest_tool", "beta_digest_tool"):
+        response = client.post(
+            "/api/tools/generated",
+            json={
+                "name": name,
+                "description": f"Controlled generated tool {name}.",
+                "argsSchema": {"type": "object", "properties": {"text": {"type": "string"}}},
+            },
+        )
+        assert response.status_code == 200, response.text
+
+    enabled = client.put(
+        "/api/tools/generated/bulk-enabled",
+        json={"toolIds": ["alpha_digest_tool", "beta_digest_tool", "grep_search_tool", "missing_tool"], "enabled": True},
+    )
+
+    assert enabled.status_code == 200, enabled.text
+    enabled_payload = enabled.json()
+    assert enabled_payload["successCount"] == 2
+    assert enabled_payload["skippedCount"] == 1
+    assert enabled_payload["failedCount"] == 1
+    assert {item["reason"] for item in enabled_payload["results"] if item["status"] == "skipped"} == {
+        "built_in_protected"
+    }
+    registry_payload = client.get("/api/tools").json()
+    generated = {item["name"]: item for item in registry_payload["tools"] if item["source"] == "generated"}
+    assert generated["alpha_digest_tool"]["enabled"] is True
+    assert generated["beta_digest_tool"]["enabled"] is True
+
+    deleted = client.post(
+        "/api/tools/bulk-delete",
+        json={"toolIds": ["alpha_digest_tool", "beta_digest_tool", "grep_search_tool", "missing_tool"]},
+    )
+
+    assert deleted.status_code == 200, deleted.text
+    deleted_payload = deleted.json()
+    assert deleted_payload["successCount"] == 2
+    assert deleted_payload["skippedCount"] == 1
+    assert deleted_payload["failedCount"] == 1
+    assert {item["status"] for item in deleted_payload["results"]} == {"deleted", "skipped", "failed"}
+    remaining = client.get("/api/tools").json()
+    remaining_generated_names = {item["name"] for item in remaining["tools"] if item["source"] == "generated"}
+    assert "alpha_digest_tool" not in remaining_generated_names
+    assert "beta_digest_tool" not in remaining_generated_names
+
+
 def test_tools_api_blocks_unsafe_builtin_test(tmp_path, monkeypatch):
     monkeypatch.setattr(registry, "GENERATED_TOOLS_PATH", tmp_path / "generated_tools.json")
 
@@ -332,7 +381,7 @@ def test_tools_api_runs_safe_builtin_test_with_binary_failure_output(tmp_path, m
     assert payload["agentCompatibility"]["status"] == "failed"
 
 
-def test_tools_api_tests_safe_builtin_ignores_selected_agent_tool_policy(tmp_path, monkeypatch):
+def test_tools_api_tests_safe_builtin_respects_selected_agent_tool_policy(tmp_path, monkeypatch):
     monkeypatch.setattr(registry, "GENERATED_TOOLS_PATH", tmp_path / "generated_tools.json")
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(agent_directory_service, "record_runtime_scene_event", lambda *args, **kwargs: None)
@@ -358,11 +407,12 @@ def test_tools_api_tests_safe_builtin_ignores_selected_agent_tool_policy(tmp_pat
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["status"] == "succeeded"
-    assert payload["called"] is True
+    assert payload["status"] == "blocked"
+    assert payload["called"] is False
     assert payload["agent"]["agentId"] == agent["agentId"]
-    assert payload["agentCompatibility"]["status"] == "succeeded"
-    assert payload["resultPreview"] == "ran despite blocked policy"
+    assert payload["agentCompatibility"]["status"] == "blocked"
+    assert payload["resultFacts"]["failureClass"] == "agent_tool_policy"
+    assert payload["resultPreview"] == ""
 
 
 def test_tools_api_generated_tool_test(tmp_path, monkeypatch):

@@ -2999,7 +2999,7 @@ function agentsRouteCopy(lang: "zh" | "en") {
         contextCompressionKeepAi: "保留 AI 消息",
         contextCompressionPreserveErrors: "保留错误",
         contextCompressionExtractDecisions: "提取决策",
-        contextCompressionEffective: "有效阈值",
+        contextCompressionEffective: "压缩触发阈值",
         contextCompressionWindow: "模型窗口",
         contextCompressionSourceGlobal: "继承全局策略",
         contextCompressionSourceCustom: "当前 Agent 自定义策略",
@@ -3396,7 +3396,7 @@ function agentsRouteCopy(lang: "zh" | "en") {
         contextCompressionKeepAi: "Keep AI messages",
         contextCompressionPreserveErrors: "Preserve errors",
         contextCompressionExtractDecisions: "Extract decisions",
-        contextCompressionEffective: "Effective limit",
+        contextCompressionEffective: "Compression trigger",
         contextCompressionWindow: "Model window",
         contextCompressionSourceGlobal: "Inherited global policy",
         contextCompressionSourceCustom: "This Agent uses a custom policy",
@@ -3987,16 +3987,23 @@ export function AgentsRoute() {
   const canPurgeAgent = Boolean(selectedAgent?.agentId && selectedAgent.status === "archived" && !selectedAgentProtected);
   const contextCompressionCustom = configDraft.contextCompressionPolicy.mode === "custom";
   const contextCompressionEffectivePolicy = selectedAgent?.contextCompressionEffectivePolicy;
-  const contextCompressionEffectiveLimit = contextCompressionEffectivePolicy?.effectiveTokenLimit
+  const contextCompressionEffectiveLimit = contextCompressionEffectivePolicy?.compressionTriggerTokenLimit
+    ?? contextCompressionEffectivePolicy?.effectiveTokenLimit
     ?? contextCompressionEffectivePolicy?.maxTokenLimit
     ?? Number(configDraft.contextCompressionPolicy.maxTokenLimit || DEFAULT_AGENT_CONTEXT_COMPRESSION_DRAFT.maxTokenLimit);
-  const contextCompressionWindowLimit = contextCompressionEffectivePolicy?.contextWindowLimit ?? 0;
+  const contextCompressionWindowLimit = contextCompressionEffectivePolicy?.modelContextWindowLimit
+    ?? contextCompressionEffectivePolicy?.contextWindowLimit
+    ?? 0;
   const contextCompressionPolicySource = contextCompressionCustom
     ? copy.contextCompressionSourceCustom
     : copy.contextCompressionSourceGlobal;
   const contextCompressionPolicyLine = `${contextCompressionPolicySource} · ${copy.contextCompressionEffective}: ${numberFormatter.format(
     Math.max(0, Number(contextCompressionEffectiveLimit) || 0),
   )} · ${copy.contextCompressionWindow}: ${numberFormatter.format(Math.max(0, Number(contextCompressionWindowLimit) || 0))}`;
+  const toolPolicySource = selectedAgent?.toolPolicySource;
+  const toolPolicySourceLine = toolPolicySource
+    ? `${toolPolicySource.label} · ${toolPolicySource.allowedToolCount} ${copy.tools}${toolPolicySource.mutatingToolCount ? ` · ${toolPolicySource.mutatingToolCount} ${lang === "zh" ? "个可写/命令工具" : "mutating tools"}` : ""}`
+    : copy.toolPolicyPickerHint;
 
   const createAgentMutation = useMutation({
     mutationFn: (draft: AgentCreateDraft) => {
@@ -6298,7 +6305,7 @@ export function AgentsRoute() {
                         </option>
                       ))}
                     </select>
-                    <small>{copy.toolPolicyPickerHint}</small>
+                    <small title={toolPolicySource?.description || copy.toolPolicyPickerHint}>{toolPolicySourceLine}</small>
                   </label>
                   <label className={styles.field}>
                     <span>{copy.memory}</span>

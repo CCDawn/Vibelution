@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, CheckCircle2, CheckSquare, CircleSlash, FlaskConical, Power, RefreshCw, Search, Square, Trash2, Wrench } from "lucide-react";
-import { type CSSProperties, type KeyboardEvent, type PointerEvent, useEffect, useMemo, useState } from "react";
+import { type CSSProperties, type KeyboardEvent, type MouseEvent, type PointerEvent, useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 
 import { fetchJson } from "../api/client";
@@ -29,6 +29,18 @@ import styles from "./ToolsRoute.module.css";
 
 type ToolFilter = "all" | "built_in" | "generated" | "llm" | "enabled";
 type ToolPolicyMode = "inherited" | "explicit_required" | "allowed" | "blocked" | "excluded";
+type ToolBulkMutationResponse = {
+  action: string;
+  enabled?: boolean;
+  successCount: number;
+  skippedCount: number;
+  failedCount: number;
+  results: Array<{
+    toolId: string;
+    status: string;
+    reason?: string;
+  }>;
+};
 type ToolBundleGroup = {
   bundleId: string;
   label: string;
@@ -808,6 +820,7 @@ export function ToolsRoute() {
   );
   const [leftPanelCollapsed, setLeftPanelCollapsed] = useState(false);
   const [selectedToolIds, setSelectedToolIds] = useState<Set<string>>(() => new Set());
+  const [bulkSelectionAnchorToolId, setBulkSelectionAnchorToolId] = useState<string | null>(null);
   const [bulkToolPending, setBulkToolPending] = useState(false);
   const [notice, setNotice] = useState<{ tone: "neutral" | "success" | "error"; text: string }>({
     tone: "neutral",
@@ -1425,9 +1438,21 @@ export function ToolsRoute() {
     });
   }
 
-  function toggleBulkTool(toolId: string, selected: boolean) {
+  function toggleBulkTool(toolId: string, selected: boolean, extendRange = false) {
     setSelectedToolIds((current) => {
       const next = new Set(current);
+      if (extendRange && bulkSelectionAnchorToolId) {
+        const ids = visibleTools.map((tool) => tool.id);
+        const anchorIndex = ids.indexOf(bulkSelectionAnchorToolId);
+        const targetIndex = ids.indexOf(toolId);
+        if (anchorIndex >= 0 && targetIndex >= 0) {
+          const [start, end] = anchorIndex < targetIndex ? [anchorIndex, targetIndex] : [targetIndex, anchorIndex];
+          for (const id of ids.slice(start, end + 1)) {
+            next.add(id);
+          }
+          return next;
+        }
+      }
       if (selected) {
         next.add(toolId);
       } else {
@@ -1435,6 +1460,16 @@ export function ToolsRoute() {
       }
       return next;
     });
+    setBulkSelectionAnchorToolId(toolId);
+  }
+
+  function handleToolRowClick(tool: ToolRegistryItem, event: MouseEvent<HTMLButtonElement>) {
+    if (event.ctrlKey || event.metaKey || event.shiftKey) {
+      event.preventDefault();
+      toggleBulkTool(tool.id, event.shiftKey ? true : !selectedToolIds.has(tool.id), event.shiftKey);
+      return;
+    }
+    setActiveToolId(tool.id);
   }
 
   function selectVisibleBulkTools() {
@@ -1454,35 +1489,40 @@ export function ToolsRoute() {
       return;
     }
     setBulkToolPending(true);
-    let success = 0;
-    let skipped = 0;
-    let failed = 0;
-    const notes: string[] = [];
-    for (const tool of selectedTools) {
-      if (!canBulkToggleTool(tool)) {
-        skipped += 1;
-        notes.push(`${tool.name}: ${bulkCopy.skippedToggle}`);
-        continue;
-      }
-      try {
-        await fetchJson<ToolRegistryItem>(`/api/tools/generated/${encodeURIComponent(tool.id)}/enabled`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ enabled }),
-        });
-        success += 1;
-      } catch (error) {
-        failed += 1;
-        notes.push(`${tool.name}: ${error instanceof Error ? error.message : String(error)}`);
-      }
+    const skippedLocal = selectedTools.filter((tool) => !canBulkToggleTool(tool));
+    try {
+      const payload = await fetchJson<ToolBulkMutationResponse>("/api/tools/generated/bulk-enabled", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          toolIds: selectedTools.filter(canBulkToggleTool).map((tool) => tool.id),
+          enabled,
+        }),
+      });
+      const notes = [
+        ...skippedLocal.map((tool) => `${tool.name}: ${bulkCopy.skippedToggle}`),
+        ...payload.results
+          .filter((item) => item.status === "failed" || item.status === "skipped")
+          .map((item) => `${item.toolId}: ${item.reason || item.status}`),
+      ];
+      setNotice({
+        tone: payload.failedCount > 0 ? "error" : "success",
+        text: toolsBulkActionSummary(
+          enabled ? bulkCopy.enableResult : bulkCopy.disableResult,
+          payload.successCount,
+          payload.skippedCount + skippedLocal.length,
+          payload.failedCount,
+          notes,
+          lang,
+        ),
+      });
+      clearBulkTools();
+      refresh();
+    } catch (error) {
+      setNotice({ tone: "error", text: error instanceof Error ? error.message : String(error) });
+    } finally {
+      setBulkToolPending(false);
     }
-    setBulkToolPending(false);
-    setNotice({
-      tone: failed > 0 ? "error" : "success",
-      text: toolsBulkActionSummary(enabled ? bulkCopy.enableResult : bulkCopy.disableResult, success, skipped, failed, notes, lang),
-    });
-    clearBulkTools();
-    refresh();
   }
 
   async function bulkDeleteTools() {
@@ -1498,40 +1538,42 @@ export function ToolsRoute() {
       return;
     }
     setBulkToolPending(true);
-    let success = 0;
-    let skipped = 0;
-    let failed = 0;
-    const notes: string[] = [];
     let deletedActiveTool = false;
-    for (const tool of selectedTools) {
-      if (!tool.deleteAllowed) {
-        skipped += 1;
-        notes.push(`${tool.name}: ${bulkCopy.skippedDelete}`);
-        continue;
+    const skippedLocal = selectedTools.filter((tool) => !tool.deleteAllowed);
+    try {
+      const payload = await fetchJson<ToolBulkMutationResponse>("/api/tools/bulk-delete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ toolIds: selectedTools.filter((tool) => tool.deleteAllowed).map((tool) => tool.id) }),
+      });
+      deletedActiveTool = payload.results.some((item) => item.status === "deleted" && item.toolId === activeToolId);
+      if (deletedActiveTool) {
+        setActiveToolId(null);
       }
-      try {
-        await fetchJson<GeneratedToolDeleteResponse>(`/api/tools/${encodeURIComponent(tool.id)}`, {
-          method: "DELETE",
-        });
-        if (tool.id === activeToolId) {
-          deletedActiveTool = true;
-        }
-        success += 1;
-      } catch (error) {
-        failed += 1;
-        notes.push(`${tool.name}: ${error instanceof Error ? error.message : String(error)}`);
-      }
+      const notes = [
+        ...skippedLocal.map((tool) => `${tool.name}: ${bulkCopy.skippedDelete}`),
+        ...payload.results
+          .filter((item) => item.status === "failed" || item.status === "skipped")
+          .map((item) => `${item.toolId}: ${item.reason || item.status}`),
+      ];
+      setNotice({
+        tone: payload.failedCount > 0 ? "error" : "success",
+        text: toolsBulkActionSummary(
+          bulkCopy.deleteResult,
+          payload.successCount,
+          payload.skippedCount + skippedLocal.length,
+          payload.failedCount,
+          notes,
+          lang,
+        ),
+      });
+      clearBulkTools();
+      refresh();
+    } catch (error) {
+      setNotice({ tone: "error", text: error instanceof Error ? error.message : String(error) });
+    } finally {
+      setBulkToolPending(false);
     }
-    if (deletedActiveTool) {
-      setActiveToolId(null);
-    }
-    setBulkToolPending(false);
-    setNotice({
-      tone: failed > 0 ? "error" : "success",
-      text: toolsBulkActionSummary(bulkCopy.deleteResult, success, skipped, failed, notes, lang),
-    });
-    clearBulkTools();
-    refresh();
   }
 
   return (
@@ -1710,19 +1752,23 @@ export function ToolsRoute() {
                             type="checkbox"
                             checked={bulkSelected}
                             aria-label={`${bulkCopy.selected}: ${tool.name}`}
-                            onChange={(event) => toggleBulkTool(tool.id, event.target.checked)}
+                            onChange={(event) => toggleBulkTool(
+                              tool.id,
+                              event.target.checked,
+                              Boolean((event.nativeEvent as globalThis.MouseEvent).shiftKey),
+                            )}
                           />
                           {bulkSelected ? <CheckSquare size={15} /> : <Square size={15} />}
                         </label>
                         <button
-                        type="button"
-                        className={isActive ? styles.toolButtonActive : styles.toolButton}
-                        onClick={() => setActiveToolId(tool.id)}
-                      >
-                        <span className={`${styles.statusDot} ${styles[`status_${statusTone(tool)}`]}`} />
-                        <span className={styles.toolCopy}>
-                          <strong>{tool.name}</strong>
-                          <span title={tool.description || t("toolsNoDescription")}>
+                          type="button"
+                          className={isActive ? styles.toolButtonActive : styles.toolButton}
+                          onClick={(event) => handleToolRowClick(tool, event)}
+                        >
+                          <span className={`${styles.statusDot} ${styles[`status_${statusTone(tool)}`]}`} />
+                          <span className={styles.toolCopy}>
+                            <strong>{tool.name}</strong>
+                            <span title={tool.description || t("toolsNoDescription")}>
                             {toolCategoryLabel(tool.category, tool.categoryLabel, lang)} · {toolTierLabel(tool.permissionTier, lang)}
                           </span>
                         </span>
