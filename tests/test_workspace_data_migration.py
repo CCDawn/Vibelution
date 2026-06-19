@@ -67,6 +67,24 @@ def test_workspace_migration_cli_apply_writes_manifest(tmp_path, monkeypatch):
     assert (data_home / "workspace" / "workspace_manifest.json").exists()
 
 
+def test_workspace_migration_cli_finalize_target_writes_manifest_without_source_copy(tmp_path, monkeypatch):
+    project = tmp_path / "project"
+    source_workspace = project / "workspace"
+    data_home = tmp_path / "operator-data"
+    target_workspace = data_home / "workspace"
+    (source_workspace / "agents").mkdir(parents=True)
+    (source_workspace / "agents" / "agents.json").write_text('{"legacy":true}\n', encoding="utf-8")
+    (target_workspace / "memory").mkdir(parents=True)
+    (target_workspace / "memory" / "memory.json").write_text("{}\n", encoding="utf-8")
+    monkeypatch.setenv("VIBELUTION_DATA_HOME", str(data_home))
+
+    exit_code = migration.main(["finalize-target", "--project-root", str(project), "--data-home", str(data_home)])
+
+    assert exit_code == 0
+    assert (target_workspace / "workspace_manifest.json").exists()
+    assert not (target_workspace / "agents" / "agents.json").exists()
+
+
 def test_workspace_migration_verify_reports_mismatch(tmp_path):
     source_workspace = tmp_path / "project" / "workspace"
     target_workspace = tmp_path / "operator-data" / "workspace"

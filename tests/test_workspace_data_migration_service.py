@@ -47,6 +47,32 @@ def test_workspace_migration_verify_detects_same_size_content_change(tmp_path, m
     assert source_workspace.exists()
 
 
+def test_workspace_migration_status_is_manifest_based_and_shallow(tmp_path, monkeypatch):
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    data_home = tmp_path / "operator-data"
+    target_workspace = data_home / "workspace"
+    _seed_workspace(project_root)
+    (target_workspace / "memory").mkdir(parents=True)
+    (target_workspace / "memory" / "memory.json").write_text("{}\n", encoding="utf-8")
+    monkeypatch.setenv("VIBELUTION_DATA_HOME", str(data_home))
+    migration.finalize_external_workspace(data_home=data_home)
+
+    def fail_full_verify(**_kwargs):
+        raise AssertionError("status must not run source-target full verification")
+
+    monkeypatch.setattr(migration, "verify_workspace_migration", fail_full_verify)
+
+    status = migration.get_workspace_migration_status(project_root=project_root)
+
+    assert status["verification"]["ok"] is True
+    assert status["verification"]["verificationMode"] == "target_manifest_presence"
+    assert status["source"]["summaryMode"] == "shallow"
+    assert status["target"]["summaryMode"] == "shallow"
+    assert status["legacyCleanup"]["canExecute"] is False
+    assert status["legacyCleanup"]["requiresPreview"] is True
+
+
 def test_legacy_workspace_cleanup_requires_verified_target(tmp_path, monkeypatch):
     project_root = tmp_path / "project"
     project_root.mkdir()
@@ -87,6 +113,52 @@ def test_legacy_workspace_cleanup_deletes_only_after_verified_target_and_exact_p
     assert result["deleted"]["status"] == "deleted"
     assert not source_workspace.exists()
     assert (data_home / "workspace" / "agents" / "agents.json").exists()
+
+
+def test_legacy_workspace_cleanup_allows_manifest_verified_target_without_source_equality(tmp_path, monkeypatch):
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    data_home = tmp_path / "operator-data"
+    source_workspace = _seed_workspace(project_root)
+    (source_workspace / "debug-noise.log").write_text("old noisy data", encoding="utf-8")
+    target_workspace = data_home / "workspace"
+    (target_workspace / "memory").mkdir(parents=True)
+    (target_workspace / "memory" / "memory.json").write_text("{}\n", encoding="utf-8")
+    monkeypatch.setenv("VIBELUTION_DATA_HOME", str(data_home))
+    finalized = migration.finalize_external_workspace(data_home=data_home)
+
+    assert finalized["verification"]["ok"] is True
+    preview = migration.preview_legacy_workspace_cleanup(project_root=project_root)
+    result = migration.execute_legacy_workspace_cleanup(
+        project_root=project_root,
+        confirmation_phrase=migration.LEGACY_WORKSPACE_CLEANUP_CONFIRMATION,
+    )
+
+    assert preview["canExecute"] is True
+    assert preview["verification"]["verificationMode"] == "target_manifest_self_check"
+    assert result["deleted"]["status"] == "deleted"
+    assert not source_workspace.exists()
+    assert (target_workspace / "memory" / "memory.json").exists()
+    assert not (target_workspace / "agents" / "agents.json").exists()
+
+
+def test_legacy_workspace_cleanup_blocks_stale_target_manifest(tmp_path, monkeypatch):
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    data_home = tmp_path / "operator-data"
+    _seed_workspace(project_root)
+    target_workspace = data_home / "workspace"
+    (target_workspace / "memory").mkdir(parents=True)
+    (target_workspace / "memory" / "memory.json").write_text("{}\n", encoding="utf-8")
+    monkeypatch.setenv("VIBELUTION_DATA_HOME", str(data_home))
+    migration.finalize_external_workspace(data_home=data_home)
+    (target_workspace / "memory" / "memory.json").write_text('{"changed":true}\n', encoding="utf-8")
+
+    preview = migration.preview_legacy_workspace_cleanup(project_root=project_root)
+
+    assert preview["canExecute"] is False
+    assert "target_manifest_mismatch" in preview["blockedReasons"]
+    assert "migration_not_verified" in preview["blockedReasons"]
 
 
 def test_legacy_workspace_cleanup_blocks_symlink_entries(tmp_path, monkeypatch):
