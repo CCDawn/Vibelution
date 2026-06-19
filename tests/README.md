@@ -95,7 +95,7 @@ pytest tests/ -v -x
 ### 3.2 使用 test_runner.py
 
 ```bash
-# 运行所有测试（简洁模式）
+# 批量串行运行完整测试（简洁模式）
 python tests/test_runner.py
 
 # 详细输出
@@ -104,11 +104,17 @@ python tests/test_runner.py --verbose
 # 跳过慢速测试
 python tests/test_runner.py --fast
 
-# 使用进程级并行执行可并行测试文件
+# 只使用进程级并行执行可并行测试文件（排除 serial）
 python tests/test_runner.py --parallel --workers 4
+
+# 完整混合验证：not serial 并行 + serial 串行兜底
+python tests/test_runner.py --hybrid --workers 4
 
 # 快速并行：跳过 slow 和 serial 标记
 python tests/test_runner.py --fast --parallel --workers 4
+
+# 逐文件诊断：只在需要定位失败文件时使用
+python tests/test_runner.py --per-file
 ```
 
 ### 3.3 进程级并行策略
@@ -123,12 +129,16 @@ pytest tests/ -n 4 --dist loadfile -m "not serial"
 
 # 使用项目 test runner
 python tests/test_runner.py --parallel --workers 4
+
+# 使用项目 test runner 做完整混合验证
+python tests/test_runner.py --hybrid --workers 4
 ```
 
 并行策略：
 
 - 优先使用 `--dist loadfile`，按测试文件分发，降低同一文件内共享 fixture/全局状态的交叉风险。
 - 在并行模式下排除 `serial` 标记；涉及真实进程、端口、共享全局状态、真实 workspace、外部 config 或 Launcher/runtime 生命周期的测试应标记为 `serial`。
+- 需要完整验证时优先使用 `--hybrid`：先并行运行 `not serial`，再串行运行 `serial`，避免把并行子集误判为全量通过。
 - 不把 `-n auto` 作为默认；本地开发建议先用 `--workers 2` 或 `--workers 4`，再根据耗时和稳定性调整。
 - 广义全量回归仍应保留串行兜底；并行适合日常快速反馈和已标注边界的稳定子集。
 
