@@ -421,8 +421,16 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("agent_approved_only");
     expect(routeSource).toContain("Agent 生成关系图");
     expect(routeSource).toContain("Agent 一键入库");
+    expect(routeSource).toContain("Agent 审查并入库");
     expect(routeSource).toContain("资料已写入团队知识库");
     expect(routeSource).toContain("sourceCollectionPrecheckCandidateCount");
+    expect(routeSource).toContain("sourceCollectionIngestCandidateCount");
+    expect(routeSource).toContain("sourceCollectionMemoryActionDisabled");
+    expect(routeSource).toContain("sourceCollectionMemoryActionLabel");
+    expect(routeSource).toContain("maxCandidates: Math.max(1, Math.min(80, sourceCollectionIngestCandidateCount))");
+    expect(routeSource).toContain("forceReview: sourceCollectionPrecheckCandidateCount <= 0 && sourceCollectionRunCandidateCount > 0");
+    expect(routeSource).toContain("可由 Agent 先审查再入库");
+    expect(routeSource).toContain("条候选资料");
     expect(routeSource).not.toContain("onAction: refreshSourceCollectionGraph");
     expect(routeSource).not.toContain("onAction: refreshSourceCollectionMemoryPrecheck");
     expect(routeSource).toContain("forceRescreen");
