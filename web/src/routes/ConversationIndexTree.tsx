@@ -9,7 +9,8 @@ import type {
 } from "../api/types";
 import type { TranslationKey } from "../i18n/dictionary";
 import type { ModelLabelResolver } from "./agentDisplay";
-import type { ConversationIndexGroup, ConversationIndexGroupKey } from "./conversationIndexModel";
+import type { ConversationIndexGroup, ConversationIndexGroupKey, ConversationIndexTeam } from "./conversationIndexModel";
+import { isConfiguredConversationIndexTeam } from "./conversationIndexModel";
 import { ConversationIndexSection } from "./ConversationIndexSection";
 import { DirectSessionIndexList } from "./DirectSessionIndexList";
 import {
@@ -37,7 +38,7 @@ type ConversationIndexTreeProps = {
   editingSessionTitle: string;
   filteredConversationsCount: number;
   filteredStandaloneGroupConversations: ConversationSummary[];
-  filteredTeams: Team[];
+  filteredTeams: ConversationIndexTeam[];
   formatTime: (value: string) => string;
   groupPanelActive: boolean;
   groupedConversations: ConversationIndexGroup[];
@@ -107,6 +108,9 @@ export function ConversationIndexTree({
   onSubmitRename,
   onToggleConversationGroup,
 }: ConversationIndexTreeProps) {
+  const configuredTeams = filteredTeams.filter(isConfiguredConversationIndexTeam);
+  const setupTeams = filteredTeams.filter((team) => !isConfiguredConversationIndexTeam(team));
+
   return (
     <>
       {filteredConversationsCount ? groupedConversations.map((group) => {
@@ -170,15 +174,40 @@ export function ConversationIndexTree({
           </ConversationIndexSection>
         );
       }) : null}
-      {filteredTeams.length ? (
+      {configuredTeams.length ? (
         <ConversationIndexSection
           className={styles.teamTreeGroup}
-          count={filteredTeams.length}
+          count={configuredTeams.length}
           expanded={searchHasTerm || !collapsedConversationGroups.teams}
           label={conversationGroupLabel("teams", lang === "zh" ? "zh" : "en")}
           onToggle={() => onToggleConversationGroup("teams")}
         >
-          {filteredTeams.map((team) => {
+          {configuredTeams.map((team) => {
+            const roomId = String(team.linkedChatRoomId ?? "").trim();
+            return (
+              <TeamConversationIndexItem
+                key={team.teamId}
+                active={Boolean(roomId && activeGroupRoomId === roomId)}
+                lang={lang}
+                roomId={roomId}
+                team={team}
+                teamRoute={teamRouteFor(team)}
+                statusLabel={statusLabel}
+                onOpen={onOpenGroupRoom}
+              />
+            );
+          })}
+        </ConversationIndexSection>
+      ) : null}
+      {setupTeams.length ? (
+        <ConversationIndexSection
+          className={styles.teamTreeGroup}
+          count={setupTeams.length}
+          expanded={searchHasTerm || !collapsedConversationGroups.setupTeams}
+          label={conversationGroupLabel("setupTeams", lang === "zh" ? "zh" : "en")}
+          onToggle={() => onToggleConversationGroup("setupTeams")}
+        >
+          {setupTeams.map((team) => {
             const roomId = String(team.linkedChatRoomId ?? "").trim();
             return (
               <TeamConversationIndexItem

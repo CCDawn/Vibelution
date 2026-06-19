@@ -1,6 +1,8 @@
 import { CircleDot, Clock3, MessageCircleHeart, UsersRound } from "lucide-react";
 
 import type { ConversationSummary, Team } from "../api/types";
+import type { ConversationIndexTeam } from "./conversationIndexModel";
+import { conversationIndexTeamMemberCount } from "./conversationIndexModel";
 import styles from "./ChatCodingRoute.module.css";
 
 export function teamStatusLabel(status: string | undefined, lang: "zh" | "en", fallback: (status: string) => string) {
@@ -15,11 +17,19 @@ export function teamStatusLabel(status: string | undefined, lang: "zh" | "en", f
 }
 
 export function teamMemberPreview(team: Pick<Team, "members" | "memberCount">, lang: "zh" | "en") {
-  const memberCount = team.memberCount || team.members?.length || 0;
+  const memberCount = conversationIndexTeamMemberCount(team);
   if (!memberCount) {
-    return lang === "zh" ? "待绑定" : "empty";
+    return lang === "zh" ? "0人" : "0";
   }
   return lang === "zh" ? `${memberCount}人` : String(memberCount);
+}
+
+export function teamMemberStatusTitle(team: Pick<Team, "members" | "memberCount">, lang: "zh" | "en") {
+  const memberCount = conversationIndexTeamMemberCount(team);
+  if (!memberCount) {
+    return lang === "zh" ? "成员：0人 / 未配置成员" : "Members: 0 / not configured";
+  }
+  return lang === "zh" ? `成员：${teamMemberPreview(team, lang)}` : `Members: ${teamMemberPreview(team, lang)}`;
 }
 
 export function teamCategoryLabel(team: Pick<Team, "teamCategory" | "teamKind">, lang: "zh" | "en") {
@@ -97,7 +107,7 @@ type TeamConversationIndexItemProps = {
   active: boolean;
   lang: "zh" | "en";
   roomId: string;
-  team: Team;
+  team: ConversationIndexTeam;
   teamRoute: string;
   statusLabel: (status: string) => string;
   onOpen: (roomId: string) => void;
@@ -118,7 +128,11 @@ export function TeamConversationIndexItem({
     : `${styles.sessionItem} ${styles.teamTreeItem}`;
   const teamStatus = teamStatusLabel(team.status, lang, statusLabel);
   const roomTitle = roomId ? (lang === "zh" ? "团队群聊已同步" : "Team room linked") : (lang === "zh" ? "团队群聊待同步" : "Team room pending");
-  const memberTitle = lang === "zh" ? `成员：${teamMemberPreview(team, lang)}` : `Members: ${teamMemberPreview(team, lang)}`;
+  const memberTitle = teamMemberStatusTitle(team, lang);
+  const duplicateCount = Number(team.conversationIndexDuplicateCount) || 0;
+  const duplicateTitle = lang === "zh"
+    ? `已合并 ${duplicateCount} 个同名团队记录`
+    : `${duplicateCount} same-name Team records merged`;
 
   return (
     <div
@@ -152,6 +166,11 @@ export function TeamConversationIndexItem({
             <span title={roomTitle} aria-label={roomTitle}>
               <MessageCircleHeart size={10} aria-hidden="true" />
             </span>
+            {duplicateCount > 1 ? (
+              <span title={duplicateTitle} aria-label={duplicateTitle}>
+                {lang === "zh" ? `合并${duplicateCount}` : `merged ${duplicateCount}`}
+              </span>
+            ) : null}
           </span>
         </span>
       </button>
