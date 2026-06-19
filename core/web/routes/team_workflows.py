@@ -332,7 +332,11 @@ class OfficialModelEvidencePayload(BaseModel):
 class CandidateGraphBuildPayload(BaseModel):
     title: str = Field("", max_length=240)
     createdByAgent: str = Field("", max_length=160)
+    sourceQualityAgentId: str = Field("", max_length=160)
     curationMode: str = Field("", max_length=80)
+    maxCandidates: int = Field(80, ge=1, le=200)
+    forceReview: bool = False
+    forceRebuild: bool = False
 
 
 class KnowledgeIngestionPrecheckPayload(BaseModel):
@@ -350,6 +354,7 @@ class KnowledgeCollectionIngestionPayload(BaseModel):
     targetDomain: str = Field("", max_length=240)
     maxCandidates: int = Field(80, ge=1, le=200)
     forceReview: bool = False
+    forceRebuild: bool = False
     autoCreateKnowledgeBase: bool = True
     autoSubmit: bool = False
     autoReviewSource: bool = False

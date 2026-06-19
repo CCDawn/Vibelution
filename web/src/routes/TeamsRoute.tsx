@@ -350,9 +350,6 @@ function parseSourceCollectionStageModuleId(value: string | null): SourceCollect
   if (value === "ingest") {
     return "memory";
   }
-  if (value === "graph") {
-    return "memory";
-  }
   return value === "collection" || value === "screening" || value === "candidate" || value === "graph" || value === "memory"
     ? value
     : null;
@@ -423,8 +420,14 @@ type TeamWorkflowSourceCollectionSearchExecutionPayload = {
   failedQueryCount: number;
   resultCount: number;
   recordCount: number;
+  createdUniqueRecordCount?: number;
   outputCount: number;
   importedCount: number;
+  skippedDuplicateCount?: number;
+  duplicateSourceKeys?: string[];
+  remainingQueryCount?: number;
+  nextRunnableQueryIds?: string[];
+  hasMore?: boolean;
   run: TeamWorkflowSourceCollectionRunStartPayload["run"];
   runStatus: DataProcessingStatus;
   sourceCollectionSummary?: {
@@ -3990,14 +3993,27 @@ export function TeamsRoute({
   });
 
   const buildCandidateGraphMutation = useMutation({
-    mutationFn: (variables: { teamId: string; title?: string; createdByAgent?: string; curationMode?: string }) =>
+    mutationFn: (variables: {
+      teamId: string;
+      title?: string;
+      createdByAgent?: string;
+      sourceQualityAgentId?: string;
+      curationMode?: string;
+      maxCandidates?: number;
+      forceReview?: boolean;
+      forceRebuild?: boolean;
+    }) =>
       fetchJson<TeamWorkflowCandidateGraphBuildPayload>(`/api/teams/${encodeURIComponent(variables.teamId)}/workflow-orchestration/candidate-graph`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           title: variables.title || "Agent curated candidate graph",
           createdByAgent: variables.createdByAgent || "Candidate Graph Preview Agent",
+          sourceQualityAgentId: variables.sourceQualityAgentId || sourceCollectionQualityAgentId,
           curationMode: variables.curationMode || "",
+          maxCandidates: variables.maxCandidates || 80,
+          forceReview: variables.forceReview ?? false,
+          forceRebuild: variables.forceRebuild ?? false,
         }),
       }),
     onSuccess: (payload, variables) => {
@@ -4041,6 +4057,7 @@ export function TeamsRoute({
       targetDomain?: string;
       maxCandidates?: number;
       forceReview?: boolean;
+      forceRebuild?: boolean;
     }) =>
       fetchJson<TeamWorkflowKnowledgeCollectionIngestionPayload>(
         `/api/teams/${encodeURIComponent(variables.teamId)}/workflow-orchestration/knowledge-collection/ingest`,
@@ -4055,6 +4072,7 @@ export function TeamsRoute({
             targetDomain: variables.targetDomain || sourceCollectionDraft.topic || "神经机制启发神经网络算法",
             maxCandidates: variables.maxCandidates || 80,
             forceReview: variables.forceReview ?? false,
+            forceRebuild: variables.forceRebuild ?? false,
             autoCreateKnowledgeBase: true,
             autoSubmit: false,
             autoReviewSource: false,
@@ -6490,7 +6508,7 @@ export function TeamsRoute({
                   <span>{lang === "zh" ? "页面可继续操作，结果会自动刷新。" : "You can keep working; results will refresh automatically."}</span>
                 ) : (
                   <span>
-                    {selectedTeamExecuteSourceCollectionSearchResult.executedQueryCount} {lang === "zh" ? "条搜索" : "queries"} / {selectedTeamExecuteSourceCollectionSearchResult.recordCount} {lang === "zh" ? "条资料记录" : "DataRecord"} / {selectedTeamExecuteSourceCollectionSearchResult.importedCount} {lang === "zh" ? "个候选" : "candidate"}
+                    {selectedTeamExecuteSourceCollectionSearchResult.executedQueryCount} {lang === "zh" ? "条搜索" : "queries"} / {selectedTeamExecuteSourceCollectionSearchResult.recordCount} {lang === "zh" ? "条资料记录" : "DataRecord"} / {selectedTeamExecuteSourceCollectionSearchResult.importedCount} {lang === "zh" ? "个候选" : "candidate"}{selectedTeamExecuteSourceCollectionSearchResult.skippedDuplicateCount ? ` / ${selectedTeamExecuteSourceCollectionSearchResult.skippedDuplicateCount} ${lang === "zh" ? "条重复跳过" : "duplicates skipped"}` : ""}{selectedTeamExecuteSourceCollectionSearchResult.hasMore ? ` / ${selectedTeamExecuteSourceCollectionSearchResult.remainingQueryCount ?? 0} ${lang === "zh" ? "条待继续" : "remaining"}` : ""}
                   </span>
                 )}
               </div>
@@ -7692,8 +7710,8 @@ export function TeamsRoute({
         agentRole: "Source Collection Agent",
         title: lang === "zh" ? "已执行一批搜索并写入候选" : "Ran one search batch and wrote candidates",
         body: lang === "zh"
-          ? `本批执行 ${selectedTeamExecuteSourceCollectionSearchResult.executedQueryCount} 条搜索，写入 ${selectedTeamExecuteSourceCollectionSearchResult.recordCount} 条资料记录，导入 ${selectedTeamExecuteSourceCollectionSearchResult.importedCount} 个候选资料${failedCount ? `，${failedCount} 条需要补救` : ""}。`
-          : `This batch executed ${selectedTeamExecuteSourceCollectionSearchResult.executedQueryCount} queries, wrote ${selectedTeamExecuteSourceCollectionSearchResult.recordCount} DataRecords, and imported ${selectedTeamExecuteSourceCollectionSearchResult.importedCount} source_manifest candidates${failedCount ? `; ${failedCount} need follow-up` : ""}.`,
+          ? `本批执行 ${selectedTeamExecuteSourceCollectionSearchResult.executedQueryCount} 条搜索，写入 ${selectedTeamExecuteSourceCollectionSearchResult.recordCount} 条资料记录，导入 ${selectedTeamExecuteSourceCollectionSearchResult.importedCount} 个候选资料${selectedTeamExecuteSourceCollectionSearchResult.skippedDuplicateCount ? `，跳过 ${selectedTeamExecuteSourceCollectionSearchResult.skippedDuplicateCount} 条重复资料` : ""}${selectedTeamExecuteSourceCollectionSearchResult.hasMore ? `，还有 ${selectedTeamExecuteSourceCollectionSearchResult.remainingQueryCount ?? 0} 条可继续` : ""}${failedCount ? `，${failedCount} 条需要补救` : ""}。`
+          : `This batch executed ${selectedTeamExecuteSourceCollectionSearchResult.executedQueryCount} queries, wrote ${selectedTeamExecuteSourceCollectionSearchResult.recordCount} DataRecords, imported ${selectedTeamExecuteSourceCollectionSearchResult.importedCount} source_manifest candidates${selectedTeamExecuteSourceCollectionSearchResult.skippedDuplicateCount ? `, and skipped ${selectedTeamExecuteSourceCollectionSearchResult.skippedDuplicateCount} duplicate sources` : ""}${selectedTeamExecuteSourceCollectionSearchResult.hasMore ? `; ${selectedTeamExecuteSourceCollectionSearchResult.remainingQueryCount ?? 0} remaining` : ""}${failedCount ? `; ${failedCount} need follow-up` : ""}.`,
         status: failedCount ? "needs_attention" : "completed",
         tone: failedCount ? "blocked" : "storage",
         inputLabel: lang === "zh" ? "本批搜索问题" : "Batch queries",
@@ -7991,6 +8009,18 @@ export function TeamsRoute({
       : sourceCollectionRunCandidateCount > 0
         ? (lang === "zh" ? "提炼并通知 Agent" : "Prepare and notify Agent")
         : (lang === "zh" ? "通知知识库 Agent" : "Notify steward Agent");
+  const sourceCollectionCanBuildGraph = sourceCollectionRunApprovedCount > 0 || sourceCollectionRunCandidateCount > 0;
+  const sourceCollectionGraphActionDisabled =
+    !selectedTeam?.teamId
+    || !sourceCollectionCanBuildGraph
+    || selectedTeamBuildCandidateGraphPending;
+  const sourceCollectionGraphActionLabel = selectedTeamBuildCandidateGraphPending
+    ? (lang === "zh" ? "Agent 生成中" : "Agent building")
+    : sourceCollectionRunApprovedCount > 0
+      ? (lang === "zh" ? "Agent 生成关系图" : "Agent build map")
+      : sourceCollectionRunCandidateCount > 0
+        ? (lang === "zh" ? "审查并生成关系图" : "Review and build map")
+        : (lang === "zh" ? "Agent 生成关系图" : "Agent build map");
   const sourceCollectionScreeningDisabled = !selectedTeam?.teamId || sourceCollectionRunCandidateCount <= 0;
   const sourceCollectionScreeningButtonText = selectedTeamSourceQualityPending
     ? (lang === "zh" ? "Agent 审查中" : "Agent reviewing")
@@ -8030,7 +8060,7 @@ export function TeamsRoute({
       return "candidate";
     }
     if (panelId === "source-collection-graph-panel") {
-      return "memory";
+      return "graph";
     }
     if (panelId === "source-collection-memory-panel") {
       return "memory";
@@ -8135,14 +8165,17 @@ export function TeamsRoute({
     });
   };
   const runSourceCollectionGraphAction = () => {
-    if (!selectedTeam?.teamId || sourceCollectionRunApprovedCount <= 0 || selectedTeamBuildCandidateGraphPending) {
+    if (!selectedTeam?.teamId || sourceCollectionGraphActionDisabled) {
       return;
     }
     buildCandidateGraphMutation.mutate({
       teamId: selectedTeam.teamId,
       title: "Agent curated candidate graph",
       createdByAgent: sourceCollectionGraphAgentId,
+      sourceQualityAgentId: sourceCollectionQualityAgentId,
       curationMode: "agent_approved_only",
+      maxCandidates: Math.max(1, Math.min(80, sourceCollectionIngestCandidateCount)),
+      forceReview: sourceCollectionRunApprovedCount <= 0 && sourceCollectionRunCandidateCount > 0,
     });
     openSourceCollectionStage("graph", "results");
   };
@@ -9602,14 +9635,15 @@ export function TeamsRoute({
                               teamId: selectedTeam.teamId,
                               title: "Agent curated candidate graph",
                               createdByAgent: sourceCollectionGraphAgentId,
+                              sourceQualityAgentId: sourceCollectionQualityAgentId,
                               curationMode: "agent_approved_only",
+                              maxCandidates: Math.max(1, Math.min(80, sourceCollectionIngestCandidateCount)),
+                              forceReview: sourceCollectionRunApprovedCount <= 0 && sourceCollectionRunCandidateCount > 0,
                             })}
-                            disabled={!selectedTeam?.teamId || sourceCollectionRunApprovedCount <= 0 || selectedTeamBuildCandidateGraphPending}
+                            disabled={sourceCollectionGraphActionDisabled}
                           >
                             <RefreshCw size={13} />
-                            {selectedTeamBuildCandidateGraphPending
-                              ? (lang === "zh" ? "Agent 生成中" : "Agent building")
-                              : (lang === "zh" ? "Agent 生成关系图" : "Agent build map")}
+                            {sourceCollectionGraphActionLabel}
                           </button>
                         </div>
                         {teamWorkflowCandidateGraph && teamWorkflowCandidateGraphLayout ? (

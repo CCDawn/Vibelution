@@ -681,7 +681,9 @@ def test_execute_source_collection_search_writes_records_and_imports_candidates(
     assert execution["provider"] == "crossref_rest_api"
     assert execution["executedQueryCount"] == 1
     assert execution["recordCount"] == 2
+    assert execution["createdUniqueRecordCount"] == 2
     assert execution["importedCount"] == 2
+    assert execution["skippedDuplicateCount"] == 0
     assert execution["boundaries"]["externalSearchTriggered"] is True
     assert execution["boundaries"]["metadataOnlyDownload"] is True
     assert execution["boundaries"]["writesFormalKnowledge"] is False
@@ -693,6 +695,7 @@ def test_execute_source_collection_search_writes_records_and_imports_candidates(
     assert records[0]["metadata"]["sourceCollectionTrace"]["externalSearchTriggered"] is True
     assert records[0]["metadata"]["sourceCollectionTrace"]["storageTarget"] == "data_processing.records"
     assert records[0]["metadata"]["metadataOnlyDownload"] is True
+    assert records[0]["metadata"]["sourceIdentityKey"] == "doi:10.0000/predictive-coding"
     assert records[0]["collectionTrace"]["assignmentId"] == run_response["assignments"][0]["assignmentId"]
     assert candidates["candidateCount"] == 2
     assert all(candidate["metadata"]["sourceCollectionSearchExecution"] is True for candidate in candidates["candidates"])
@@ -848,9 +851,49 @@ def test_execute_source_collection_search_skips_existing_query_without_force(tmp
     assert first["executedQueryCount"] == 1
     assert second["executedQueryCount"] == 0
     assert second["skippedQueryCount"] == 0
+    assert second["skippedDuplicateCount"] == 0
     assert second["status"] == "no_open_assignment"
     assert calls == [run_response["searchPlan"]["queries"][0]["queryId"]]
     assert data_processing_service.list_records(run_response["run"]["runId"])["summary"]["recordCount"] == 2
+
+
+def test_execute_source_collection_search_skips_duplicate_sources_on_force_rerun(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setattr(team_workflow_orchestration_service, "_execute_source_collection_query", _fake_source_search_response)
+    team = team_service.create_team(name="ai科学研究团队")
+    run_response = team_workflow_orchestration_service.start_source_collection_run(
+        team["teamId"],
+        {
+            "topic": "predictive coding cortical hierarchy",
+            "querySeeds": ["predictive coding cortical hierarchy"],
+            "searchLanguages": ["en"],
+            "sourceTypes": ["paper"],
+            "agentRoles": ["data_discovery"],
+        },
+    )
+
+    first = team_workflow_orchestration_service.execute_source_collection_search(
+        team["teamId"],
+        run_response["run"]["runId"],
+        {"maxQueries": 1, "maxResultsPerQuery": 2},
+    )
+    second = team_workflow_orchestration_service.execute_source_collection_search(
+        team["teamId"],
+        run_response["run"]["runId"],
+        {"maxQueries": 1, "maxResultsPerQuery": 2, "force": True},
+    )
+
+    assert first["recordCount"] == 2
+    assert second["status"] == "duplicates_skipped"
+    assert second["recordCount"] == 0
+    assert second["createdUniqueRecordCount"] == 0
+    assert second["importedCount"] == 0
+    assert second["skippedDuplicateCount"] == 2
+    assert second["duplicateSourceKeys"] == ["doi:10.0000/predictive-coding", "doi:10.0000/cortical-dataset"]
+    assert {event["eventType"] for event in second["executionEvents"]} >= {"search.duplicate_skipped"}
+    assert data_processing_service.list_records(run_response["run"]["runId"])["summary"]["recordCount"] == 2
+    candidates = team_workflow_orchestration_service.list_candidate_store(team["teamId"], candidate_type="source_manifest")
+    assert candidates["candidateCount"] == 2
 
 
 def test_start_research_stage_round_creates_knowledge_collection_round(tmp_path, monkeypatch):
@@ -2533,6 +2576,8 @@ def test_candidate_graph_agent_curation_uses_approved_sources_only(tmp_path, mon
     assert response["graph"]["summary"]["curationMode"] == "agent_approved_only"
     assert response["graph"]["summary"]["createdByAgent"] == "Candidate Graph Agent"
     assert response["graph"]["summary"]["stageAgentRole"] == "candidate_graph"
+    assert response["reusedCandidateGraph"] is False
+    assert response["ingestionFingerprint"]
     assert response["graph"]["summary"]["nodeCount"] == 1
     assert response["graph"]["summary"]["filteredCandidateCount"] == 1
     assert response["candidateGraph"]["createdByAgent"] == "Candidate Graph Agent"
@@ -2541,6 +2586,17 @@ def test_candidate_graph_agent_curation_uses_approved_sources_only(tmp_path, mon
     assert response["candidateGraph"]["metadata"]["agentProcess"][1]["nextAction"] == "knowledge_ingestion_precheck"
     assert approved_source["candidateId"] in graph_node_ids
     assert revision_source["candidateId"] not in graph_node_ids
+
+    reused = team_workflow_orchestration_service.build_candidate_graph(
+        team["teamId"],
+        {
+            "createdByAgent": "Candidate Graph Agent",
+            "curationMode": "agent_approved_only",
+        },
+    )
+
+    assert reused["reusedCandidateGraph"] is True
+    assert reused["candidateGraph"]["candidateId"] == response["candidateGraph"]["candidateId"]
 
 
 def test_knowledge_ingestion_precheck_creates_candidate_only_steward_pack(tmp_path, monkeypatch):
@@ -3019,6 +3075,9 @@ def test_knowledge_collection_ingestion_notifies_steward_agent_for_final_ingesti
     inbox_messages = agent_directory_service.list_agent_inbox_messages_for_agent(steward["agentId"], status="pending")
 
     assert response["status"] == "agent_notified"
+    assert response["reusedCandidateGraph"] is False
+    assert response["reusedStewardPack"] is False
+    assert response["ingestionFingerprint"]
     assert step_ids == [
         "source_review",
         "candidate_graph",
@@ -3038,6 +3097,23 @@ def test_knowledge_collection_ingestion_notifies_steward_agent_for_final_ingesti
     assert inbox_messages[0]["messageId"] == response["summary"]["knowledgeStewardInboxMessageId"]
     assert inbox_messages[0]["kind"] == "challenge_cup_knowledge_ingestion_request"
     assert inbox_messages[0]["metadata"]["knowledgeBaseId"] == knowledge_base_id
+
+    second = team_workflow_orchestration_service.run_knowledge_collection_ingestion(
+        team["teamId"],
+        {
+            "sourceQualityAgentId": "资料审查 Agent",
+            "candidateGraphAgentId": "候选关系 Agent",
+            "stewardAgentId": steward["agentId"],
+            "targetDomain": "神经学启发神经网络算法",
+            "maxCandidates": 10,
+            "notifyStewardAgent": False,
+            "wakeStewardAgent": False,
+        },
+    )
+
+    assert second["reusedCandidateGraph"] is True
+    assert second["reusedStewardPack"] is True
+    assert second["summary"]["stewardPackCandidateId"] == response["summary"]["stewardPackCandidateId"]
     assert response["statusSnapshot"]["summary"]["formalKnowledgeItemCount"] == 0
     assert knowledge_items["summary"]["itemCount"] == 0
 

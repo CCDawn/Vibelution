@@ -69,8 +69,11 @@ def _stub_source_collection_search_background(monkeypatch):
             "failedQueryCount": 0,
             "resultCount": 0,
             "recordCount": 0,
+            "createdUniqueRecordCount": 0,
             "outputCount": 0,
             "importedCount": 0,
+            "skippedDuplicateCount": 0,
+            "duplicateSourceKeys": [],
             "run": run,
             "runStatus": data_processing_service.get_processing_status(run_id),
             "storageArtifacts": {"runDirectory": f"workspace/teams/{team_id}/source_collection_runs/{run_id}"},
@@ -287,7 +290,9 @@ def test_team_workflow_route_executes_source_collection_search(tmp_path, monkeyp
     assert response.status_code == 201, response.text
     assert response.json()["executedQueryCount"] == 1
     assert response.json()["recordCount"] == 1
+    assert response.json()["createdUniqueRecordCount"] == 1
     assert response.json()["importedCount"] == 1
+    assert response.json()["skippedDuplicateCount"] == 0
     assert response.json()["boundaries"]["externalSearchTriggered"] is True
     assert response.json()["boundaries"]["writesFormalKnowledge"] is False
     assert response.json()["boundaries"]["writesRag"] is False
@@ -1546,6 +1551,8 @@ def test_team_workflow_routes_build_candidate_graph(tmp_path, monkeypatch):
     assert response.json()["candidateGraph"]["currentState"] == "candidate_graph_visible"
     assert response.json()["candidateGraph"]["qualityStatus"] == "broken_links"
     assert response.json()["graph"]["officialBoundary"]["writesOfficialKnowledge"] is False
+    assert response.json()["reusedCandidateGraph"] is False
+    assert response.json()["ingestionFingerprint"]
     assert response.json()["graph"]["summary"]["missingLinkCount"] == 1
     assert response.json()["workflow"]["candidateStore"]["candidateCount"] == 2
 
@@ -1833,6 +1840,9 @@ def test_team_workflow_routes_run_knowledge_collection_ingestion(tmp_path, monke
     assert response.status_code == 201, response.text
     payload = response.json()
     assert payload["status"] == "agent_notified"
+    assert payload["reusedCandidateGraph"] is False
+    assert payload["reusedStewardPack"] is False
+    assert payload["ingestionFingerprint"]
     assert [step["stageId"] for step in payload["steps"]][-1] == "knowledge_steward_request"
     assert payload["summary"]["formalKnowledgeItemCount"] == 0
     assert payload["summary"]["knowledgeStewardInboxMessageId"]
