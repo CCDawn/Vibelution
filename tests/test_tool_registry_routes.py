@@ -1,3 +1,4 @@
+import pytest
 from fastapi.testclient import TestClient
 
 from core.web.app import create_app
@@ -5,6 +6,11 @@ from core.web.control import CONTROL_TOKEN_HEADER, get_control_token
 from core.web.services import agent_directory_service
 from core.web.services import tool_registry_service as registry
 from core.web.services import tool_catalog
+
+
+@pytest.fixture(autouse=True)
+def _isolate_data_home(tmp_path, monkeypatch):
+    monkeypatch.setenv("VIBELUTION_DATA_HOME", str(tmp_path))
 
 
 def _client() -> TestClient:
@@ -395,7 +401,10 @@ def test_tools_api_tests_safe_builtin_respects_selected_agent_tool_policy(tmp_pa
         tool_policy={"blockedTools": ["get_current_goal_tool"]},
     )
 
+    executed = {"called": False}
+
     def fake_execute(self, tool_name, tool_args):
+        executed["called"] = True
         return ("ran despite blocked policy", None)
 
     monkeypatch.setattr("core.infrastructure.tool_executor.ToolExecutor.execute", fake_execute)
@@ -409,10 +418,12 @@ def test_tools_api_tests_safe_builtin_respects_selected_agent_tool_policy(tmp_pa
     payload = response.json()
     assert payload["status"] == "blocked"
     assert payload["called"] is False
+    assert payload["callable"] is False
     assert payload["agent"]["agentId"] == agent["agentId"]
     assert payload["agentCompatibility"]["status"] == "blocked"
-    assert payload["resultFacts"]["failureClass"] == "agent_tool_policy"
+    assert "ToolPolicy" in payload["message"]
     assert payload["resultPreview"] == ""
+    assert executed["called"] is False
 
 
 def test_tools_api_generated_tool_test(tmp_path, monkeypatch):

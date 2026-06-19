@@ -25,6 +25,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 
+@pytest.fixture(autouse=True)
+def _isolate_data_home(tmp_path, monkeypatch):
+    monkeypatch.setenv("VIBELUTION_DATA_HOME", str(tmp_path))
+
+
 # ============================================================================
 # Fixture: 用 tmp_path 替换项目根目录
 # ============================================================================
@@ -159,7 +164,7 @@ class TestPathProperties:
         WorkspaceManager._instance = None
         try:
             wm = WorkspaceManager()
-            assert wm.root == project_root / "workspace"
+            assert wm.root == tmp_path / "workspace"
         finally:
             WorkspaceManager._instance = old_instance
 

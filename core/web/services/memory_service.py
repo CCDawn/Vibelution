@@ -101,29 +101,29 @@ def _memory_overview_section_signature(root: Path, section_id: str) -> str | Non
             ]
         )
     if normalized == "runtime-memory":
-        return _path_signature(root / "workspace" / "runtime_state.json")
+        return _path_signature(_sandboxed_workspace_path(root, "runtime_state.json"))
     if normalized == "prompt-memory":
-        return _dir_signature(root / "workspace" / "prompts")
+        return _dir_signature(_sandboxed_workspace_path(root, "prompts"))
     if normalized in {"workspace-database", "git-memory"}:
-        return _path_signature(root / "workspace" / "agent_brain.db")
+        return _path_signature(_sandboxed_workspace_path(root, "agent_brain.db"))
     if normalized == "self-evolution-memory":
         return "|".join(
             [
                 _developer_sandbox_cache_token(root),
-                _path_signature(root / "workspace" / "agent_brain.db"),
+                _path_signature(_sandboxed_workspace_path(root, "agent_brain.db")),
                 _path_signature(_sandboxed_workspace_path(root, "gym", "active_promotions.json")),
                 _path_signature(_sandboxed_workspace_path(root, "evolution", "audit.jsonl")),
             ]
         )
     if normalized == "research-memory":
-        return _dir_signature(root / "workspace" / "research")
+        return _dir_signature(_sandboxed_workspace_path(root, "research"))
     if normalized == "team-knowledge":
-        return _dir_signature(root / "workspace" / "teams")
+        return _dir_signature(_sandboxed_workspace_path(root, "teams"))
     if normalized == "chat-session-memory":
         return "|".join(
             [
-                _path_signature(root / "workspace" / "chat" / "chat_state.json"),
-                _dir_signature(root / "workspace" / "sessions"),
+                _path_signature(_sandboxed_workspace_path(root, "chat", "chat_state.json")),
+                _dir_signature(_sandboxed_workspace_path(root, "sessions")),
             ]
         )
     if normalized == "supervised-evolution-memory":
@@ -956,7 +956,7 @@ def _project_memory_section(root: Path, warnings: list[str]) -> dict[str, Any]:
 
 
 def _runtime_memory_section(root: Path) -> dict[str, Any]:
-    memory_dir = root / "workspace" / "memory"
+    memory_dir = _sandboxed_workspace_path(root, "memory")
     items = [
         _file_item(
             root,
@@ -1028,7 +1028,7 @@ def _runtime_memory_section(root: Path) -> dict[str, Any]:
 
 
 def _prompt_memory_section(root: Path) -> dict[str, Any]:
-    prompt_dir = root / "workspace" / "prompts"
+    prompt_dir = _sandboxed_workspace_path(root, "prompts")
     specs = [
         (
             "STATE_MEMORY.md",
@@ -1110,7 +1110,7 @@ def _prompt_memory_section(root: Path) -> dict[str, Any]:
 
 
 def _workspace_database_section(root: Path, sub_timings: list[dict[str, Any]] | None = None) -> dict[str, Any]:
-    db_path = root / "workspace" / "agent_brain.db"
+    db_path = _sandboxed_workspace_path(root, "agent_brain.db")
     table_specs = [
         ("LongTermMemory", "long_term_memory", "长期记忆", ["record_learning_tool", "search_memory_tool"]),
         ("ErrorArchive", "error_archive", "错误归档", ["record_error", "search_error_archive_tool"]),
@@ -1157,7 +1157,7 @@ def _workspace_database_section(root: Path, sub_timings: list[dict[str, Any]] | 
 
 
 def _research_memory_section(root: Path) -> dict[str, Any]:
-    knowledge_path = root / "workspace" / "research" / "knowledge_base.json"
+    knowledge_path = _sandboxed_workspace_path(root, "research", "knowledge_base.json")
     knowledge_exists = knowledge_path.exists()
     payload = _load_json(knowledge_path, fallback={})
     summary = _research_knowledge_summary(payload)
@@ -1280,7 +1280,7 @@ def _team_knowledge_memory_section(root: Path, sub_timings: list[dict[str, Any]]
 
 
 def _git_memory_section(root: Path, sub_timings: list[dict[str, Any]] | None = None) -> dict[str, Any]:
-    db_path = root / "workspace" / "agent_brain.db"
+    db_path = _sandboxed_workspace_path(root, "agent_brain.db")
     git_snapshot = _time_memory_overview_step(sub_timings, "git.snapshot", lambda: _git_snapshot(root))
     git_db = {
         "attentionCache": _time_memory_overview_step(
@@ -1352,8 +1352,8 @@ def _git_memory_section(root: Path, sub_timings: list[dict[str, Any]] | None = N
 
 
 def _chat_session_memory_section(root: Path, sub_timings: list[dict[str, Any]] | None = None) -> dict[str, Any]:
-    chat_state = root / "workspace" / "chat" / "chat_state.json"
-    session_root = root / "workspace" / "sessions"
+    chat_state = _sandboxed_workspace_path(root, "chat", "chat_state.json")
+    session_root = _sandboxed_workspace_path(root, "sessions")
     sessions_payload = _time_memory_overview_step(
         sub_timings,
         "session_workspace.summary",
@@ -1407,7 +1407,7 @@ def _chat_session_memory_section(root: Path, sub_timings: list[dict[str, Any]] |
 
 
 def _self_evolution_memory_section(root: Path, sub_timings: list[dict[str, Any]] | None = None) -> dict[str, Any]:
-    db_path = root / "workspace" / "agent_brain.db"
+    db_path = _sandboxed_workspace_path(root, "agent_brain.db")
     active_promotions = _sandboxed_workspace_path(root, "gym", "active_promotions.json")
     audit_path = _sandboxed_workspace_path(root, "evolution", "audit.jsonl")
     transaction_payload = _time_memory_overview_step(
@@ -1487,7 +1487,7 @@ def _supervised_evolution_memory_section(root: Path, sub_timings: list[dict[str,
     bundles = _time_memory_overview_step(
         sub_timings,
         "latest_files.evaluation_bundles",
-        lambda: _latest_files(root / "workspace" / "evaluation" / "bundles", "*.json", limit=10),
+        lambda: _latest_files(_sandboxed_workspace_path(root, "evaluation", "bundles"), "*.json", limit=10),
     )
     decision_payload = _time_memory_overview_step(
         sub_timings,
@@ -2957,8 +2957,14 @@ def _item_id(prefix: str, path: Path) -> str:
 
 
 def _rel(root: Path, path: Path) -> str:
+    resolved = path.resolve()
+    workspace_root = _sandboxed_workspace_path(root).resolve()
     try:
-        return path.resolve().relative_to(root.resolve()).as_posix()
+        return f"workspace/{resolved.relative_to(workspace_root).as_posix()}"
+    except (OSError, ValueError):
+        pass
+    try:
+        return resolved.relative_to(root.resolve()).as_posix()
     except (OSError, ValueError):
         return str(path)
 

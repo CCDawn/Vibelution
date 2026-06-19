@@ -19,6 +19,7 @@ pytestmark = pytest.mark.serial
 
 @pytest.fixture()
 def cleanup_project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    monkeypatch.setenv("VIBELUTION_DATA_HOME", str(tmp_path))
     for service in (
         agent_directory_service,
         chat_room_service,

@@ -1045,7 +1045,7 @@ def ensure_agent_purge_workspace_deletable(agent: dict[str, Any]) -> dict[str, A
         return {"deletable": True, "workspacePath": workspace_path, "reason": "no_workspace_path"}
     try:
         resolved = _resolve_project_path(workspace_path)
-        agents_root = (_project_root() / "workspace" / "agents").resolve()
+        agents_root = _workspace_path("agents").resolve()
         expected_private = _resolve_project_path(_agent_workspace_relative_path(agent_id))
     except Exception as exc:
         raise AgentDirectoryError(f"Agent workspace path could not be resolved: {type(exc).__name__}") from exc
@@ -1728,7 +1728,7 @@ def resolve_agent_workspace_territory(agent_id: str) -> dict[str, Any]:
 
 def ensure_agent_shared_workspace() -> Path:
     path = _resolve_project_path(AGENT_SHARED_WORKSPACE_PATH)
-    shared_root = (_project_root() / "workspace" / "shared").resolve()
+    shared_root = _workspace_path("shared").resolve()
     if path != shared_root:
         raise AgentDirectoryError(f"Invalid shared workspace path: {path}")
     for subdir in ("memory", "artifacts", "notes", "logs", "research", "tmp"):
@@ -3578,7 +3578,7 @@ def save_state(state: dict[str, Any]) -> dict[str, Any]:
 
 
 def registry_path() -> Path:
-    return _project_root() / "workspace" / "agents" / "agents.json"
+    return _workspace_path("agents", "agents.json")
 
 
 def agent_avatar_image_url(avatar_image_path: object) -> str:
@@ -3662,7 +3662,7 @@ def store_agent_avatar_image(
     payload = _decode_agent_avatar_payload(data_base64)
     _validate_agent_avatar_signature(payload, normalized_type)
 
-    avatar_dir = (_project_root() / AGENT_AVATAR_RELATIVE_DIR).resolve()
+    avatar_dir = _workspace_path("avatars").resolve()
     avatar_dir.mkdir(parents=True, exist_ok=True)
     safe_stem = _sanitize_avatar_stem(filename or agent_id)
     output_name = f"agent-avatar-{int(time.time())}-{secrets.token_hex(4)}-{safe_stem}{extension}"
@@ -3925,7 +3925,7 @@ def resolve_agent_avatar_file(filename: str) -> Path:
     safe_filename = agent_avatar_filename(str(AGENT_AVATAR_RELATIVE_DIR / str(filename or "")))
     if not safe_filename:
         raise FileNotFoundError("invalid Agent avatar image path")
-    avatar_dir = (_project_root() / AGENT_AVATAR_RELATIVE_DIR).resolve()
+    avatar_dir = _workspace_path("avatars").resolve()
     path = (avatar_dir / safe_filename).resolve()
     if avatar_dir != path.parent:
         raise FileNotFoundError("invalid Agent avatar image path")
@@ -4917,7 +4917,7 @@ def _is_agent_private_workspace_path(path_value: str, agent_id: str) -> bool:
 
 def _ensure_agent_workspace(path_value: str) -> Path:
     path = _resolve_project_path(path_value)
-    agents_root = (_project_root() / "workspace" / "agents").resolve()
+    agents_root = _workspace_path("agents").resolve()
     if not path.is_relative_to(agents_root):
         raise AgentDirectoryError(f"Invalid agent workspace path: {path}")
     path.mkdir(parents=True, exist_ok=True)
@@ -4934,7 +4934,7 @@ def _delete_purged_agent_workspace(agent: dict[str, Any]) -> dict[str, Any]:
         return {"deleted": False, "deletedPaths": [], "skippedPaths": []}
     try:
         resolved = _resolve_project_path(workspace_path)
-        agents_root = (_project_root() / "workspace" / "agents").resolve()
+        agents_root = _workspace_path("agents").resolve()
     except Exception:
         return {"deleted": False, "deletedPaths": [], "skippedPaths": [workspace_path]}
     expected_private = _resolve_project_path(_agent_workspace_relative_path(agent_id))
@@ -4964,7 +4964,7 @@ def _clear_agent_runtime_state(agent: dict[str, Any]) -> dict[str, Any]:
     try:
         resolved = _resolve_project_path(workspace_path)
         expected_private = _resolve_project_path(_agent_workspace_relative_path(agent_id))
-        agents_root = (_project_root() / "workspace" / "agents").resolve()
+        agents_root = _workspace_path("agents").resolve()
     except Exception:
         return {"deletedPaths": [], "skippedPaths": [workspace_path]}
     if resolved != expected_private:
@@ -5023,6 +5023,8 @@ def _reset_agent_direct_session(agent: dict[str, Any]) -> dict[str, Any]:
 def _resolve_project_path(path_value: str) -> Path:
     raw = str(path_value or "").strip()
     path = Path(raw)
+    if path.parts and path.parts[0].lower() == "workspace":
+        return _workspace_path(*path.parts[1:]).resolve()
     if not path.is_absolute():
         path = _project_root() / path
     return path.resolve()
@@ -5030,6 +5032,11 @@ def _resolve_project_path(path_value: str) -> Path:
 
 def _relative_project_path(path: Path) -> str:
     resolved = Path(path).resolve()
+    workspace_root = _workspace_path().resolve()
+    try:
+        return f"workspace/{resolved.relative_to(workspace_root).as_posix()}"
+    except ValueError:
+        pass
     root = _project_root().resolve()
     try:
         return resolved.relative_to(root).as_posix()
@@ -5046,6 +5053,22 @@ def _path_is_within(path: Path, root: Path) -> bool:
 def _project_root() -> Path:
     root = Path(PROJECT_ROOT).resolve()
     return root.parent if root.name.lower() == "workspace" else root
+
+
+def _developer_sandbox_module():
+    from core.infrastructure import developer_sandbox
+
+    return developer_sandbox
+
+
+def _workspace_path(*parts: str, intent: str = "state", seed: bool = True) -> Path:
+    return _developer_sandbox_module().route_workspace_path(
+        _project_root(),
+        "agent_directory",
+        *parts,
+        intent=intent,
+        seed=seed,
+    )
 
 
 def _append_jsonl(path: Path, payload: dict[str, Any]) -> None:

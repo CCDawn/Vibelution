@@ -3,6 +3,7 @@ from pathlib import Path
 
 from config.paths import (
     CONFIG_META_SCHEMA_VERSION,
+    DATA_HOME_ENV,
     CONFIG_HOME_ENV,
     CONFIG_PATH_ENV,
     ensure_global_config_initialized,
@@ -10,6 +11,9 @@ from config.paths import (
     resolve_config_home,
     resolve_config_meta_path,
     resolve_config_path,
+    resolve_data_backup_dir,
+    resolve_data_home,
+    resolve_workspace_home,
 )
 from config.runtime_capabilities import MODEL_CAPABILITY_CACHE_ENV, get_model_capability_cache_path
 
@@ -22,6 +26,18 @@ def test_resolve_config_path_defaults_to_user_documents(monkeypatch, tmp_path):
 
     assert resolve_config_home() == user_root / "Documents" / "Vibelution" / "config"
     assert resolve_config_path() == user_root / "Documents" / "Vibelution" / "config" / "config.toml"
+
+
+def test_resolve_data_home_defaults_to_user_documents(monkeypatch, tmp_path):
+    user_root = tmp_path / "user"
+    monkeypatch.setenv("USERPROFILE", str(user_root))
+    monkeypatch.delenv(DATA_HOME_ENV, raising=False)
+    monkeypatch.delenv(CONFIG_PATH_ENV, raising=False)
+    monkeypatch.delenv(CONFIG_HOME_ENV, raising=False)
+
+    assert resolve_data_home() == user_root / "Documents" / "Vibelution" / "data"
+    assert resolve_workspace_home() == user_root / "Documents" / "Vibelution" / "data" / "workspace"
+    assert resolve_data_backup_dir() == user_root / "Documents" / "Vibelution" / "data" / "backups"
 
 
 def test_resolve_config_path_prefers_explicit_config_path(monkeypatch, tmp_path):
@@ -40,6 +56,25 @@ def test_resolve_config_path_uses_config_home_when_no_path_override(monkeypatch,
     monkeypatch.setenv("VIBELUTION_CONFIG_HOME", str(config_home))
 
     assert resolve_config_path() == config_home / "config.toml"
+
+
+def test_resolve_data_home_prefers_env_override(monkeypatch, tmp_path):
+    data_home = tmp_path / "operator-data"
+    monkeypatch.setenv(DATA_HOME_ENV, str(data_home))
+
+    assert resolve_data_home() == data_home
+    assert resolve_workspace_home() == data_home / "workspace"
+
+
+def test_resolve_data_home_uses_storage_config_when_no_env(monkeypatch, tmp_path):
+    config_path = tmp_path / "config" / "config.toml"
+    config_path.parent.mkdir()
+    config_path.write_text("[storage]\ndata_home = \"../operator-data\"\n", encoding="utf-8")
+    monkeypatch.delenv(DATA_HOME_ENV, raising=False)
+    monkeypatch.setenv(CONFIG_PATH_ENV, str(config_path))
+
+    assert resolve_data_home() == tmp_path / "operator-data"
+    assert resolve_workspace_home() == tmp_path / "operator-data" / "workspace"
 
 
 def test_model_capability_cache_defaults_next_to_external_config(monkeypatch, tmp_path):

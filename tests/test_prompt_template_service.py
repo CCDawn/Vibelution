@@ -4,6 +4,7 @@ from core.web.services import prompt_template_service
 
 
 def _use_tmp_project_root(tmp_path, monkeypatch):
+    monkeypatch.setenv("VIBELUTION_DATA_HOME", str(tmp_path))
     monkeypatch.setattr(prompt_template_service, "PROJECT_ROOT", tmp_path)
 
 

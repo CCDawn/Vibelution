@@ -725,22 +725,23 @@ def _collect_chat_rooms() -> list[ResetCandidate]:
 
 
 def _collect_memory() -> list[ResetCandidate]:
+    workspace_root = developer_sandbox.formal_workspace_path(PROJECT_ROOT)
     candidates = [
         _candidate_for_path(
-            PROJECT_ROOT / "workspace" / "agent_brain.db",
+            workspace_root / "agent_brain.db",
             kind="database",
             action="reset",
             note_zh="清空 agent_brain.db 中的记忆表，保留数据库结构和 Git/进化状态表。",
             note_en="Clear memory tables in agent_brain.db while preserving schema and Git/evolution state tables.",
         ),
-        _candidate_for_path(PROJECT_ROOT / "workspace" / "memory", kind="directory"),
-        _candidate_for_path(PROJECT_ROOT / "workspace" / "prompts" / "STATE_MEMORY.md", kind="file", action="reset"),
+        _candidate_for_path(workspace_root / "memory", kind="directory"),
+        _candidate_for_path(workspace_root / "prompts" / "STATE_MEMORY.md", kind="file", action="reset"),
     ]
     return _dedupe_candidates(candidates)
 
 
 def _collect_agents() -> list[ResetCandidate]:
-    path = PROJECT_ROOT / "workspace" / "agents"
+    path = developer_sandbox.formal_workspace_path(PROJECT_ROOT, "agents")
     return [_candidate_for_path(path, kind="directory", missing=not path.exists())]
 
 
@@ -748,7 +749,7 @@ def _execute_agents(candidate: ResetCandidate) -> ResetActionResult:
     result = _execute_delete_candidate(candidate)
     if result.status != "deleted":
         return result
-    registry_path = PROJECT_ROOT / "workspace" / "agents" / "agents.json"
+    registry_path = developer_sandbox.formal_workspace_path(PROJECT_ROOT, "agents", "agents.json")
     try:
         registry_path.parent.mkdir(parents=True, exist_ok=True)
         registry_path.write_text(
@@ -769,9 +770,10 @@ def _execute_agents(candidate: ResetCandidate) -> ResetActionResult:
 
 
 def _collect_agent_config_state() -> list[ResetCandidate]:
+    workspace_root = developer_sandbox.formal_workspace_path(PROJECT_ROOT)
     paths = [
-        PROJECT_ROOT / "workspace" / "agent_config" / "mode_bindings.json",
-        PROJECT_ROOT / "workspace" / "agent_config" / "prompt_templates.json",
+        workspace_root / "agent_config" / "mode_bindings.json",
+        workspace_root / "agent_config" / "prompt_templates.json",
     ]
     return _dedupe_candidates(
         [_candidate_for_path(path, kind="file", missing=not path.exists()) for path in paths]
@@ -779,17 +781,17 @@ def _collect_agent_config_state() -> list[ResetCandidate]:
 
 
 def _collect_teams() -> list[ResetCandidate]:
-    path = PROJECT_ROOT / "workspace" / "teams"
+    path = developer_sandbox.formal_workspace_path(PROJECT_ROOT, "teams")
     return [_candidate_for_path(path, kind="directory", missing=not path.exists())]
 
 
 def _collect_project_agent_bus() -> list[ResetCandidate]:
-    path = PROJECT_ROOT / "workspace" / "project_agent_bus"
+    path = developer_sandbox.formal_workspace_path(PROJECT_ROOT, "project_agent_bus")
     return [_candidate_for_path(path, kind="directory", missing=not path.exists())]
 
 
 def _collect_generated_tools() -> list[ResetCandidate]:
-    path = PROJECT_ROOT / "workspace" / "tool_registry" / "generated_tools.json"
+    path = developer_sandbox.formal_workspace_path(PROJECT_ROOT, "tool_registry", "generated_tools.json")
     return [
         _candidate_for_path(
             path,
@@ -997,7 +999,7 @@ def _collect_browser_profiles() -> list[ResetCandidate]:
 
 
 def _collect_workspace_browser_profiles() -> list[ResetCandidate]:
-    workspace = PROJECT_ROOT / "workspace"
+    workspace = developer_sandbox.formal_workspace_path(PROJECT_ROOT)
     if not workspace.exists():
         return [_candidate_for_path(workspace, kind="directory", missing=True)]
     candidates: list[ResetCandidate] = []
@@ -1011,7 +1013,7 @@ def _collect_workspace_browser_profiles() -> list[ResetCandidate]:
 
 
 def _collect_workspace_service_logs() -> list[ResetCandidate]:
-    workspace = PROJECT_ROOT / "workspace"
+    workspace = developer_sandbox.formal_workspace_path(PROJECT_ROOT)
     if not workspace.exists():
         return [_candidate_for_path(workspace, kind="directory", missing=True)]
     candidates: list[ResetCandidate] = []
@@ -1042,7 +1044,7 @@ def _collect_python_test_caches() -> list[ResetCandidate]:
 
 def _collect_temp_artifacts() -> list[ResetCandidate]:
     candidates: list[ResetCandidate] = []
-    workspace = PROJECT_ROOT / "workspace"
+    workspace = developer_sandbox.formal_workspace_path(PROJECT_ROOT)
     if workspace.exists():
         for path in workspace.glob("tmp-*"):
             if path.exists():
@@ -1202,11 +1204,17 @@ def _candidate_for_path(
 def _resolve_project_path(path: Path) -> Path:
     candidate = path.resolve()
     root = PROJECT_ROOT.resolve()
+    workspace_root = developer_sandbox.formal_workspace_path(root).resolve()
     try:
         candidate.relative_to(root)
+        return candidate
+    except ValueError:
+        pass
+    try:
+        candidate.relative_to(workspace_root)
+        return candidate
     except ValueError as exc:
-        raise ValueError("Reset paths must stay inside the project root") from exc
-    return candidate
+        raise ValueError("Reset paths must stay inside the project root or the Vibelution data workspace") from exc
 
 
 def _candidate_is_deletable(candidate: ResetCandidate) -> bool:
@@ -1261,8 +1269,14 @@ def _localized_rebuild_hint(definition: ResetItemDefinition, lang: str) -> str:
 
 
 def _relative_path(path: Path) -> str:
+    resolved = path.resolve()
+    workspace_root = developer_sandbox.formal_workspace_path(PROJECT_ROOT).resolve()
     try:
-        return path.resolve().relative_to(PROJECT_ROOT.resolve()).as_posix()
+        return f"workspace/{resolved.relative_to(workspace_root).as_posix()}"
+    except ValueError:
+        pass
+    try:
+        return resolved.relative_to(PROJECT_ROOT.resolve()).as_posix()
     except ValueError:
         return str(path)
 

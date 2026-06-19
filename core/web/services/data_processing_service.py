@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from core.infrastructure import developer_sandbox
 from core.web.services.runtime_scene_service import record_runtime_scene_event
 
 
@@ -101,7 +102,7 @@ def list_processing_runs(
     normalized_metadata_filters = _normalize_filter_map(metadata_filters)
     normalized_scope_filters = _normalize_filter_map(scope_filters)
     runs: list[dict[str, Any]] = []
-    runs_root = _project_root() / "workspace" / "data_processing" / "runs"
+    runs_root = _runs_root()
     if runs_root.exists():
         for run_path in runs_root.glob("*/run.json"):
             run = _read_json(run_path)
@@ -556,7 +557,18 @@ def _events_path(run_id: str) -> Path:
 
 
 def _run_root(run_id: str) -> Path:
-    return _project_root() / "workspace" / "data_processing" / "runs" / _safe_token(run_id, default="run", max_length=96)
+    return _runs_root() / _safe_token(run_id, default="run", max_length=96)
+
+
+def _runs_root() -> Path:
+    return developer_sandbox.route_workspace_path(
+        _project_root(),
+        "data_processing",
+        "data_processing",
+        "runs",
+        intent="state",
+        seed=True,
+    )
 
 
 def _project_root() -> Path:
@@ -565,8 +577,20 @@ def _project_root() -> Path:
 
 
 def _relative_path(path: Path) -> str:
+    resolved = path.resolve()
+    workspace_root = developer_sandbox.formal_workspace_path(_project_root()).resolve()
     try:
-        return str(path.resolve().relative_to(_project_root())).replace("\\", "/")
+        return f"workspace/{resolved.relative_to(workspace_root).as_posix()}"
+    except ValueError:
+        pass
+    sandbox_root = developer_sandbox.sandbox_workspace_path(_project_root())
+    if sandbox_root is not None:
+        try:
+            return f"workspace/{resolved.relative_to(sandbox_root.resolve()).as_posix()}"
+        except ValueError:
+            pass
+    try:
+        return str(resolved.relative_to(_project_root())).replace("\\", "/")
     except ValueError:
         return str(path).replace("\\", "/")
 

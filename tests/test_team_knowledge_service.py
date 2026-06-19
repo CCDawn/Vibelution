@@ -24,12 +24,14 @@ def isolate_developer_sandbox_config(tmp_path, monkeypatch):
     config_path.write_text("[launcher]\ncontrol_port = 8765\n", encoding="utf-8")
     project_root = tmp_path / "developer-mode-project"
     project_root.mkdir()
+    monkeypatch.setenv("VIBELUTION_DATA_HOME", str(tmp_path))
     monkeypatch.setattr(developer_sandbox, "CONFIG_PATH", config_path)
     monkeypatch.setattr(developer_sandbox, "PROJECT_ROOT", project_root)
 
 
 @pytest.fixture()
 def knowledge_env(tmp_path, monkeypatch):
+    monkeypatch.setenv("VIBELUTION_DATA_HOME", str(tmp_path))
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(team_service, "PROJECT_ROOT", tmp_path)

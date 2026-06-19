@@ -75,6 +75,7 @@ def _safe_runtime_target(project_root: Path, target: Path) -> Path:
     resolved_root = project_root.resolve()
     resolved = target.resolve()
     allowed_roots = [
+        developer_sandbox.formal_workspace_path(resolved_root),
         resolved_root / "workspace",
         resolved_root / ".runtime" / "cli_agents",
         resolved_root / ".runtime" / "developer-mode" / "sandboxes",

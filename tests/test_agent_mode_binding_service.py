@@ -9,6 +9,7 @@ pytestmark = pytest.mark.serial
 
 
 def _use_tmp_project_root(tmp_path, monkeypatch):
+    monkeypatch.setenv("VIBELUTION_DATA_HOME", str(tmp_path))
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(agent_mode_binding_service, "PROJECT_ROOT", tmp_path)
 
@@ -223,7 +224,6 @@ def test_remove_agent_from_mode_bindings_preserves_fixed_role_tombstone_after_re
         primary_mode="self_evolution",
         role_key="executor",
         prompt_template_id="prompt-self-executor",
-        metadata={"selfEvolutionRole": "executor"},
     )
     seeded = agent_mode_binding_service.get_mode_bindings_payload()
     assert seeded["modes"]["self_evolution"]["slots"]["executor"] == agent["agentId"]

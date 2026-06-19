@@ -10,9 +10,10 @@ import time
 import copy
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
+from core.infrastructure import developer_sandbox
 from core.runtime_manager import agent_run_store
 from core.web.services.runtime_scene_service import record_runtime_scene_event
 
@@ -446,7 +447,7 @@ def _research_organization_context_signature(
     research_organization_service: Any,
 ) -> tuple[tuple[str, int, str], ...]:
     watched_paths = [
-        Path(project_root) / "workspace" / "agents" / "agents.json",
+        _workspace_path(project_root, "agents", "agents.json"),
     ]
     try:
         workspace = research_organization_service.get_workspace()
@@ -454,7 +455,7 @@ def _research_organization_context_signature(
         if callable(getter):
             watched_paths.append(Path(getter()))
     except Exception:
-        watched_paths.append(Path(project_root) / "workspace" / "research" / "organization_graph.json")
+        watched_paths.append(_workspace_path(project_root, "research", "organization_graph.json"))
     return tuple(_file_signature(path) for path in watched_paths)
 
 
@@ -632,7 +633,7 @@ def record_subagent_result(parent_run_id: str, sub_run_id: str, result: dict[str
         "summary": summary,
         "createdAt": created_at,
     }
-    path = Path(agent_directory_service.PROJECT_ROOT) / "workspace" / "agent_runs" / "subagent_results.jsonl"
+    path = _workspace_path(Path(agent_directory_service.PROJECT_ROOT), "agent_runs", "subagent_results.jsonl")
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8", newline="\n") as handle:
         handle.write(json.dumps(payload, ensure_ascii=False) + "\n")
@@ -675,12 +676,24 @@ def _append_agent_event(project_root: Path, workspace_path: str, filename: str, 
     if not safe_workspace:
         return
     root = Path(project_root).resolve()
-    event_path = (root / safe_workspace / "events" / filename).resolve()
-    if root != event_path and root not in event_path.parents:
-        return
+    normalized = safe_workspace.replace("\\", "/").strip("/")
+    parts = PurePosixPath(normalized).parts
+    if parts and parts[0] == "workspace":
+        workspace_root = developer_sandbox.sandboxed_workspace_path(root).resolve()
+        event_path = (workspace_root.joinpath(*parts[1:]) / "events" / filename).resolve()
+        if workspace_root != event_path and workspace_root not in event_path.parents:
+            return
+    else:
+        event_path = (root / normalized / "events" / filename).resolve()
+        if root != event_path and root not in event_path.parents:
+            return
     event_path.parent.mkdir(parents=True, exist_ok=True)
     with event_path.open("a", encoding="utf-8", newline="\n") as handle:
         handle.write(json.dumps(payload, ensure_ascii=False) + "\n")
+
+
+def _workspace_path(project_root: Path, *parts: str) -> Path:
+    return developer_sandbox.seeded_sandbox_workspace_path(Path(project_root), *parts)
 
 
 def _build_prompt_template_context_block(

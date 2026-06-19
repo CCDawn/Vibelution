@@ -21,6 +21,7 @@ from config.public_config import (
     save_public_config,
 )
 from config.settings import reload_config
+from core.infrastructure import developer_sandbox
 from core.infrastructure.image_model_discovery import resolve_image_model, should_discover_image_model
 from core.infrastructure.llm_utils import parse_tool_args
 from core.orchestration.tool_lifecycle import ToolLifecycleBridge
@@ -34,7 +35,8 @@ from core.infrastructure.tool_result import (
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
-GENERATED_TOOLS_PATH = PROJECT_ROOT / "workspace" / "tool_registry" / "generated_tools.json"
+GENERATED_TOOLS_PATH = developer_sandbox.formal_workspace_path(PROJECT_ROOT, "tool_registry", "generated_tools.json")
+_DEFAULT_GENERATED_TOOLS_PATH = GENERATED_TOOLS_PATH
 TOOL_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9_]{2,63}$")
 SCHEMA_BLOCKED_KEYS = {"$ref", "oneOf", "anyOf", "allOf", "not", "patternProperties"}
 MAX_DESCRIPTION_CHARS = 600
@@ -136,7 +138,7 @@ def get_tool_registry() -> dict[str, Any]:
     return {
         "schemaVersion": 1,
         "mode": "safe_manifest_registry",
-        "storagePath": _relative_project_path(GENERATED_TOOLS_PATH),
+        "storagePath": _relative_project_path(_generated_tools_path()),
         "counts": counts,
         "agentScopes": _agent_scope_summaries(tools),
         "toolBundles": list_tool_bundles(available_tool_names={str(item.get("name") or "") for item in tools}),
@@ -1533,13 +1535,14 @@ def _find_generated_record(records: list[dict[str, Any]], tool_id: str) -> tuple
 
 
 def _load_generated_tools() -> list[dict[str, Any]]:
+    path = _generated_tools_path()
     try:
-        payload = json.loads(GENERATED_TOOLS_PATH.read_text(encoding="utf-8-sig"))
+        payload = json.loads(path.read_text(encoding="utf-8-sig"))
     except FileNotFoundError:
         return []
     except json.JSONDecodeError as exc:
         _debug_logger.warning(
-            f"[工具注册] 生成工具配置 JSON 解析失败: path={GENERATED_TOOLS_PATH}, {type(exc).__name__}: {exc}",
+            f"[工具注册] 生成工具配置 JSON 解析失败: path={path}, {type(exc).__name__}: {exc}",
             tag="TOOL_REGISTRY",
         )
         return []
@@ -1550,13 +1553,32 @@ def _load_generated_tools() -> list[dict[str, Any]]:
 
 
 def _save_generated_tools(records: list[dict[str, Any]]) -> None:
-    GENERATED_TOOLS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    path = _generated_tools_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "schemaVersion": 1,
         "updatedAt": _now(),
         "tools": records,
     }
-    GENERATED_TOOLS_PATH.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def _generated_tools_path() -> Path:
+    configured_path = Path(GENERATED_TOOLS_PATH)
+    current_formal_path = developer_sandbox.formal_workspace_path(PROJECT_ROOT, "tool_registry", "generated_tools.json")
+    if configured_path.resolve() not in {
+        _DEFAULT_GENERATED_TOOLS_PATH.resolve(),
+        current_formal_path.resolve(),
+    }:
+        return configured_path
+    return developer_sandbox.route_workspace_path(
+        PROJECT_ROOT,
+        "tool_registry",
+        "tool_registry",
+        "generated_tools.json",
+        intent="state",
+        seed=True,
+    )
 
 
 def _normalize_tool_id(value: object) -> str:
@@ -1769,8 +1791,20 @@ def _record_registry_event(
 
 
 def _relative_project_path(path: Path) -> str:
+    resolved = path.resolve()
+    workspace_root = developer_sandbox.formal_workspace_path(PROJECT_ROOT).resolve()
     try:
-        return path.resolve().relative_to(PROJECT_ROOT.resolve()).as_posix()
+        return f"workspace/{resolved.relative_to(workspace_root).as_posix()}"
+    except ValueError:
+        pass
+    sandbox_root = developer_sandbox.sandbox_workspace_path(PROJECT_ROOT)
+    if sandbox_root is not None:
+        try:
+            return f"workspace/{resolved.relative_to(sandbox_root.resolve()).as_posix()}"
+        except ValueError:
+            pass
+    try:
+        return resolved.relative_to(PROJECT_ROOT.resolve()).as_posix()
     except ValueError:
         return str(path)
 

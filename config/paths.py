@@ -12,6 +12,7 @@ from typing import Any
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 CONFIG_PATH_ENV = "VIBELUTION_CONFIG_PATH"
 CONFIG_HOME_ENV = "VIBELUTION_CONFIG_HOME"
+DATA_HOME_ENV = "VIBELUTION_DATA_HOME"
 CONFIG_FILENAME = "config.toml"
 EXAMPLE_CONFIG_FILENAME = "config.example.toml"
 CONFIG_META_FILENAME = "config.meta.json"
@@ -30,6 +31,11 @@ def default_config_home() -> Path:
     return user_root / "Documents" / "Vibelution" / "config"
 
 
+def default_data_home() -> Path:
+    user_root = Path(os.environ.get("USERPROFILE") or Path.home()).expanduser()
+    return user_root / "Documents" / "Vibelution" / "data"
+
+
 def resolve_config_home() -> Path:
     raw = str(os.environ.get(CONFIG_HOME_ENV) or "").strip()
     if raw:
@@ -44,6 +50,30 @@ def resolve_config_path(config_path: str | os.PathLike[str] | None = None) -> Pa
     if raw:
         return Path(raw).expanduser().resolve()
     return (resolve_config_home() / CONFIG_FILENAME).resolve()
+
+
+def resolve_data_home(
+    data_home: str | os.PathLike[str] | None = None,
+    *,
+    config_path: str | os.PathLike[str] | None = None,
+) -> Path:
+    if data_home is not None:
+        return _resolve_operator_path(data_home)
+    raw = str(os.environ.get(DATA_HOME_ENV) or "").strip()
+    if raw:
+        return _resolve_operator_path(raw)
+    configured = _configured_data_home(config_path=config_path)
+    if configured:
+        return configured
+    return default_data_home().resolve()
+
+
+def resolve_workspace_home(
+    data_home: str | os.PathLike[str] | None = None,
+    *,
+    config_path: str | os.PathLike[str] | None = None,
+) -> Path:
+    return (resolve_data_home(data_home, config_path=config_path) / "workspace").resolve()
 
 
 def resolve_example_config_path(config_path: str | os.PathLike[str] | None = None) -> Path:
@@ -64,6 +94,14 @@ def resolve_config_backup_dir(config_path: str | os.PathLike[str] | None = None)
 def resolve_config_lock_path(config_path: str | os.PathLike[str] | None = None) -> Path:
     config = resolve_config_path(config_path)
     return config.parent / "config-edit.lock"
+
+
+def resolve_data_backup_dir(
+    data_home: str | os.PathLike[str] | None = None,
+    *,
+    config_path: str | os.PathLike[str] | None = None,
+) -> Path:
+    return resolve_data_home(data_home, config_path=config_path) / "backups"
 
 
 def ensure_global_config_initialized(
@@ -151,12 +189,40 @@ def _should_write_meta(meta_path: Path, existing_meta: dict[str, Any], next_meta
     return any(existing_meta.get(key) != value for key, value in next_meta.items())
 
 
+def _configured_data_home(*, config_path: str | os.PathLike[str] | None = None) -> Path | None:
+    path = resolve_config_path(config_path)
+    if not path.exists():
+        return None
+    try:
+        import tomllib
+
+        payload = tomllib.loads(path.read_text(encoding="utf-8"))
+    except (OSError, tomllib.TOMLDecodeError):
+        return None
+    storage = payload.get("storage") if isinstance(payload, dict) else None
+    if not isinstance(storage, dict):
+        return None
+    raw = str(storage.get("data_home") or "").strip()
+    if not raw:
+        return None
+    return _resolve_operator_path(raw, base_dir=path.parent)
+
+
+def _resolve_operator_path(value: str | os.PathLike[str], *, base_dir: Path | None = None) -> Path:
+    raw = os.path.expandvars(str(value)).strip()
+    path = Path(raw).expanduser()
+    if not path.is_absolute() and base_dir is not None:
+        path = base_dir / path
+    return path.resolve()
+
+
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
 __all__ = [
     "CONFIG_FILENAME",
+    "DATA_HOME_ENV",
     "CONFIG_HOME_ENV",
     "CONFIG_META_FILENAME",
     "CONFIG_META_SCHEMA_VERSION",
@@ -164,11 +230,15 @@ __all__ = [
     "EXAMPLE_CONFIG_FILENAME",
     "PROJECT_ROOT",
     "default_config_home",
+    "default_data_home",
     "ensure_global_config_initialized",
     "resolve_config_backup_dir",
     "resolve_config_home",
     "resolve_config_lock_path",
     "resolve_config_meta_path",
     "resolve_config_path",
+    "resolve_data_backup_dir",
+    "resolve_data_home",
     "resolve_example_config_path",
+    "resolve_workspace_home",
 ]
