@@ -10,6 +10,7 @@ export type ConversationIndexGroupKey =
   | "selfEvolution"
   | "supervisedEvolution"
   | "teams"
+  | "setupTeams"
   | "standaloneGroups"
   | "other";
 
@@ -19,6 +20,12 @@ export type ConversationIndexGroup = {
   items: ConversationSummary[];
 };
 
+export type ConversationIndexTeam = Team & {
+  conversationIndexDuplicateCount?: number;
+  conversationIndexHiddenTeamIds?: string[];
+  conversationIndexSetupReason?: "empty_members";
+};
+
 export const DEFAULT_COLLAPSED_CONVERSATION_GROUPS: Record<ConversationIndexGroupKey, boolean> = {
   user: false,
   group: false,
@@ -26,6 +33,7 @@ export const DEFAULT_COLLAPSED_CONVERSATION_GROUPS: Record<ConversationIndexGrou
   selfEvolution: true,
   supervisedEvolution: true,
   teams: false,
+  setupTeams: true,
   standaloneGroups: true,
   other: true,
 };
@@ -50,11 +58,94 @@ export function isDiscussionTeam(team: Team | undefined | null) {
   const teamId = String(team.teamId ?? "").trim();
   const teamKind = String(team.teamKind ?? "").trim();
   const teamSource = String(team.teamSource ?? "").trim();
+  const status = String(team.status ?? "").trim().toLowerCase();
+  if (status === "archived") {
+    return false;
+  }
   return !(
     NON_DISCUSSION_TEAM_IDS.has(teamId)
     || NON_DISCUSSION_TEAM_KINDS.has(teamKind)
     || NON_DISCUSSION_TEAM_SOURCES.has(teamSource)
   );
+}
+
+export function conversationIndexTeamMemberCount(team: Pick<Team, "members" | "memberCount"> | undefined | null) {
+  if (!team) {
+    return 0;
+  }
+  return Math.max(Number(team.memberCount) || 0, team.members?.length || 0);
+}
+
+export function isConfiguredConversationIndexTeam(team: Pick<Team, "members" | "memberCount"> | undefined | null) {
+  return conversationIndexTeamMemberCount(team) > 0;
+}
+
+function normalizedTeamName(team: Team) {
+  return String(team.name ?? "").trim().toLowerCase();
+}
+
+function conversationTeamDedupeKey(team: Team) {
+  const name = normalizedTeamName(team) || String(team.teamId ?? "").trim().toLowerCase();
+  const kind = String(team.teamKind ?? "").trim().toLowerCase();
+  const source = String(team.teamSource ?? "manual").trim().toLowerCase() || "manual";
+  const templateId = String(team.teamTemplateId ?? "").trim().toLowerCase();
+  return [source, kind, templateId, name].join("|");
+}
+
+function conversationTeamScore(team: Team, index: number) {
+  const memberScore = isConfiguredConversationIndexTeam(team) ? 1000 : 0;
+  const roomScore = String(team.linkedChatRoomId ?? "").trim() ? 100 : 0;
+  const sourceScore = String(team.teamSource ?? "").trim() && team.teamSource !== "manual" ? 10 : 0;
+  return memberScore + roomScore + sourceScore - index / 1000;
+}
+
+export function normalizeConversationIndexTeams(teams: Team[]): ConversationIndexTeam[] {
+  const buckets = new Map<string, {
+    representative: ConversationIndexTeam;
+    representativeIndex: number;
+    score: number;
+    teamIds: string[];
+  }>();
+
+  teams.forEach((team, index) => {
+    if (!isDiscussionTeam(team)) {
+      return;
+    }
+    const key = conversationTeamDedupeKey(team);
+    const teamId = String(team.teamId ?? "").trim();
+    const score = conversationTeamScore(team, index);
+    const existing = buckets.get(key);
+    if (!existing) {
+      buckets.set(key, {
+        representative: { ...team },
+        representativeIndex: index,
+        score,
+        teamIds: teamId ? [teamId] : [],
+      });
+      return;
+    }
+    if (teamId) {
+      existing.teamIds.push(teamId);
+    }
+    if (score > existing.score) {
+      existing.representative = { ...team };
+      existing.representativeIndex = index;
+      existing.score = score;
+    }
+  });
+
+  return [...buckets.values()]
+    .sort((left, right) => left.representativeIndex - right.representativeIndex)
+    .map((bucket) => {
+      const representativeId = String(bucket.representative.teamId ?? "").trim();
+      const hiddenTeamIds = bucket.teamIds.filter((teamId) => teamId && teamId !== representativeId);
+      return {
+        ...bucket.representative,
+        conversationIndexDuplicateCount: bucket.teamIds.length,
+        conversationIndexHiddenTeamIds: hiddenTeamIds,
+        conversationIndexSetupReason: isConfiguredConversationIndexTeam(bucket.representative) ? undefined : "empty_members",
+      };
+    });
 }
 
 export function sessionToConversationSummary(session: SessionSummary): ConversationSummary {
@@ -198,6 +289,7 @@ export function conversationGroupLabel(groupKey: ConversationIndexGroupKey, lang
     selfEvolution: { zh: "自进化助手", en: "Self-evolution agents" },
     supervisedEvolution: { zh: "监督进化助手", en: "Supervised agents" },
     teams: { zh: "团队", en: "Teams" },
+    setupTeams: { zh: "待配置团队", en: "Teams to configure" },
     standaloneGroups: { zh: "未归属群聊", en: "Standalone groups" },
     other: { zh: "其他助手", en: "Other agents" },
   };
@@ -289,7 +381,7 @@ export function buildConversationIndexModel({
         String(value ?? "").toLowerCase().includes(term),
       ),
     );
-  const discussionTeams = teams.filter(isDiscussionTeam);
+  const discussionTeams = normalizeConversationIndexTeams(teams);
   const filteredTeams = term
     ? discussionTeams.filter((team) =>
         [

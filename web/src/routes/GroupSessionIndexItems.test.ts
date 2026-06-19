@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { Team } from "../api/types";
-import { teamCategoryLabel, teamMemberPreview, teamStatusLabel } from "./GroupSessionIndexItems";
+import { teamCategoryLabel, teamMemberPreview, teamMemberStatusTitle, teamStatusLabel } from "./GroupSessionIndexItems";
 
 function team(overrides: Partial<Team>): Team {
   return {
@@ -47,7 +47,8 @@ describe("GroupSessionIndexItems helpers", () => {
       ],
     }), "zh")).toBe("4人");
     expect(teamMemberPreview(team({ memberCount: 2 }), "en")).toBe("2");
-    expect(teamMemberPreview(team({ memberCount: 0 }), "zh")).toBe("待绑定");
+    expect(teamMemberPreview(team({ memberCount: 0 }), "zh")).toBe("0人");
+    expect(teamMemberStatusTitle(team({ memberCount: 0 }), "zh")).toBe("成员：0人 / 未配置成员");
   });
 
   it("uses Team category before kind and falls back to a localized custom label", () => {
