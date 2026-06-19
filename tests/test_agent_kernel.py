@@ -24,6 +24,7 @@ def _isolate_kernel(tmp_path, monkeypatch):
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", project_root)
     monkeypatch.setattr(session_service, "PROJECT_ROOT", project_root)
     monkeypatch.setattr(developer_sandbox, "PROJECT_ROOT", project_root)
+    monkeypatch.setattr(developer_sandbox, "resolve_workspace_home", lambda *args, **kwargs: data_home / "workspace")
     return project_root, data_home
 
 

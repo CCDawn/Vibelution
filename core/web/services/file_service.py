@@ -117,7 +117,7 @@ def read_text_file(relative_path: str) -> dict:
 
 
 def _build_node(path: Path, depth: int, *, stats: dict[str, Any]) -> dict | None:
-    if path.name in EXCLUDED_DIR_NAMES:
+    if _is_excluded_dir(path):
         if path.is_dir():
             stats["skippedDirectoryCount"] += 1
         return None
@@ -138,7 +138,12 @@ def _build_node(path: Path, depth: int, *, stats: dict[str, Any]) -> dict | None
                 "children": [],
             }
         children = []
-        for child in sorted(path.iterdir(), key=_sort_key):
+        try:
+            child_paths = sorted(path.iterdir(), key=_sort_key)
+        except OSError:
+            stats["skippedDirectoryCount"] += 1
+            child_paths = []
+        for child in child_paths:
             if _node_budget_exhausted(stats):
                 stats["truncated"] = True
                 break
@@ -179,6 +184,10 @@ def _resolve_project_path(relative_path: str) -> Path:
     except ValueError as exc:
         raise ValueError("Path must stay inside the project root") from exc
     return candidate
+
+
+def _is_excluded_dir(path: Path) -> bool:
+    return path.name in EXCLUDED_DIR_NAMES or path.name.startswith(".pytest-run-")
 
 
 def _sort_key(path: Path) -> tuple[int, str]:
