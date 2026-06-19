@@ -8,7 +8,7 @@ from core.agent_kernel import service as agent_kernel_service
 from core.infrastructure import developer_sandbox
 from core.web.app import create_app
 from core.web.control import CONTROL_TOKEN_HEADER, get_control_token
-from core.web.services import agent_directory_service
+from core.web.services import agent_directory_service, session_service
 
 
 def _client() -> TestClient:
@@ -22,6 +22,7 @@ def _isolate_kernel(tmp_path, monkeypatch):
     monkeypatch.setenv("VIBELUTION_DATA_HOME", str(data_home))
     monkeypatch.setattr(agent_kernel_service, "PROJECT_ROOT", project_root)
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", project_root)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", project_root)
     monkeypatch.setattr(developer_sandbox, "PROJECT_ROOT", project_root)
     return project_root, data_home
 
@@ -38,6 +39,7 @@ def _kernel_event(agent_id: str, *, idempotency_key: str = "kernel-idempotency-1
         "semanticType": "agent.message",
         "payload": {"content": content, "goal": content},
         "idempotencyKey": idempotency_key,
+        "wakeTarget": False,
     }
 
 
@@ -56,6 +58,8 @@ def test_kernel_event_creates_task_execution_outcome_and_inbox_message(tmp_path,
     assert payload["execution"]["status"] == "succeeded"
     assert payload["outcome"]["status"] == "succeeded"
     assert payload["outcome"]["deliveries"][0]["status"] == "delivered"
+    assert payload["outcome"]["deliveries"][0]["wake"]["wakeStatus"] == "not_requested"
+    assert payload["execution"]["deliveryRefs"][0]["wakeStatus"] == "not_requested"
 
     inbox_response = _client().get(f"/api/agents/{agent['agentId']}/inbox")
     assert inbox_response.status_code == 200
@@ -69,6 +73,60 @@ def test_kernel_event_creates_task_execution_outcome_and_inbox_message(tmp_path,
     assert (kernel_root / "executions.jsonl").exists()
     assert (kernel_root / "outcomes.jsonl").exists()
     assert (kernel_root / "index.json").exists()
+
+
+def test_kernel_event_default_wakes_target_agent(tmp_path, monkeypatch):
+    _isolate_kernel(tmp_path, monkeypatch)
+    agent = _create_agent()
+
+    def fake_wake(message):
+        return {
+            "wakeRequested": True,
+            "wakeStatus": "started",
+            "messageId": message["messageId"],
+            "targetAgentId": message["targetAgentId"],
+            "targetSessionId": message["targetSessionId"],
+            "turnId": "turn-wake",
+            "reason": "",
+        }
+
+    monkeypatch.setattr(agent_kernel_service.session_service, "wake_agent_for_inbox_message", fake_wake)
+    event = _kernel_event(agent["agentId"], idempotency_key="default-wake")
+    event.pop("wakeTarget")
+
+    response = _client().post("/api/kernel/events", json=event)
+
+    assert response.status_code == 202
+    payload = response.json()
+    assert payload["event"]["deliveryPolicy"]["wakeTarget"] is True
+    assert payload["task"]["status"] == "succeeded"
+    assert payload["outcome"]["deliveries"][0]["wake"]["wakeStatus"] == "started"
+    assert payload["execution"]["deliveryRefs"][0]["wakeStatus"] == "started"
+
+
+def test_kernel_event_wake_failure_is_delivery_evidence_not_task_failure(tmp_path, monkeypatch):
+    _isolate_kernel(tmp_path, monkeypatch)
+    agent = _create_agent()
+
+    def raise_wake(_message):
+        raise RuntimeError("wake boom")
+
+    monkeypatch.setattr(agent_kernel_service.session_service, "wake_agent_for_inbox_message", raise_wake)
+
+    response = _client().post(
+        "/api/kernel/events",
+        json={**_kernel_event(agent["agentId"], idempotency_key="wake-failure"), "wakeTarget": True},
+    )
+
+    assert response.status_code == 202
+    payload = response.json()
+    delivery = payload["outcome"]["deliveries"][0]
+    assert payload["task"]["status"] == "succeeded"
+    assert payload["outcome"]["status"] == "succeeded"
+    assert delivery["status"] == "delivered"
+    assert delivery["wake"]["wakeStatus"] == "failed"
+    assert "RuntimeError: wake boom" in delivery["wake"]["reason"]
+    assert payload["execution"]["deliveryRefs"][0]["wakeStatus"] == "failed"
 
 
 def test_kernel_event_idempotency_reuses_existing_terminal_task(tmp_path, monkeypatch):
