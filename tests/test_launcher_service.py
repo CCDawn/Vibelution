@@ -1056,11 +1056,15 @@ def test_launcher_status_recovers_offline_stale_close_processing(tmp_path, monke
     evidence = payload["controlPlaneEvidence"]
     assert evidence["queue"]["processingCount"] == 0
     assert evidence["queue"]["pendingCount"] == 0
+    assert evidence["state"]["runtimeState"] == "idle"
+    assert evidence["state"]["managerPid"] == 0
     assert evidence["state"]["activeCommand"]["commandId"] == ""
     assert evidence["results"]["recent"][0]["commandId"] == command_id
     assert evidence["events"]["recent"][0]["type"] == "command_queue.recovered_stale_close_completed"
     assert payload["projectBundle"]["observedState"] == "closed"
     assert payload["runtimeManager"]["running"] is False
+    assert payload["runtimeManager"]["runtimeState"] == "idle"
+    assert payload["runtimeManager"]["managerPid"] == 0
 
 
 def test_launcher_status_shows_control_surface_when_project_window_is_closed(tmp_path, monkeypatch):

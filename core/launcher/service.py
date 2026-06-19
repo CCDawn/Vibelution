@@ -1033,6 +1033,7 @@ def _runtime_manager_state() -> dict[str, Any]:
         manager_running = False
     if not manager_running:
         manager_pid = 0
+        payload["runtimeState"] = "idle"
     payload["daemonRunning"] = manager_running
     payload["managerPid"] = int(manager_pid or 0)
     payload.setdefault("projectRoot", str(PROJECT_ROOT))
@@ -1580,6 +1581,17 @@ def _load_launcher_state() -> dict[str, Any]:
 
 def _control_plane_evidence() -> dict[str, Any]:
     state = _load_json_file(STATE_PATH)
+    try:
+        manager_pid = load_pid()
+        manager_running = _is_process_alive(manager_pid)
+    except Exception:
+        manager_pid = 0
+        manager_running = False
+    if not manager_running:
+        manager_pid = 0
+        state = dict(state)
+        state["runtimeState"] = "idle"
+        state["managerPid"] = 0
     pending_commands = _recent_command_files(INBOX_DIR, limit=5)
     processing_commands = _recent_command_files(PROCESSING_DIR, limit=5)
     recent_results = _recent_result_files(RESULTS_DIR, limit=5)
@@ -1593,7 +1605,7 @@ def _control_plane_evidence() -> dict[str, Any]:
         "state": {
             "stateVersion": int(state.get("stateVersion") or 0),
             "runtimeState": str(state.get("runtimeState") or ""),
-            "managerPid": int(state.get("managerPid") or 0),
+            "managerPid": int(manager_pid or state.get("managerPid") or 0),
             "updatedAt": str(state.get("updatedAt") or ""),
             "activeCommand": _command_summary(active_command),
         },
