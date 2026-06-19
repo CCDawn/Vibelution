@@ -1,10 +1,18 @@
+from core.agent_kernel import service as agent_kernel_service
+from core.infrastructure import developer_sandbox
 from core.web.services import agent_directory_service, project_agent_bus_service, session_service
 
 
 def _use_tmp_project_root(tmp_path, monkeypatch):
-    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
-    monkeypatch.setattr(project_agent_bus_service, "PROJECT_ROOT", tmp_path)
-    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    project_root = tmp_path / "project"
+    data_home = tmp_path / "operator-data"
+    project_root.mkdir()
+    monkeypatch.setenv("VIBELUTION_DATA_HOME", str(data_home))
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", project_root)
+    monkeypatch.setattr(project_agent_bus_service, "PROJECT_ROOT", project_root)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", project_root)
+    monkeypatch.setattr(agent_kernel_service, "PROJECT_ROOT", project_root)
+    monkeypatch.setattr(developer_sandbox, "PROJECT_ROOT", project_root)
 
 
 def test_project_agent_bus_observe_message_only_writes_timeline(tmp_path, monkeypatch):
@@ -50,6 +58,66 @@ def test_project_agent_bus_plain_message_defaults_to_all_active_agents(tmp_path,
     assert set(event["targetAgentIds"]) == {alpha["agentId"], beta["agentId"], steward["agentId"]}
     assert len(event["deliveries"]) == len(event["targetAgentIds"])
     assert all(item["status"] == "delivered" for item in event["deliveries"])
+    assert event["kernel"]["enabled"] is True
+    assert event["kernel"]["adapterVersion"] == "kernel-adapter-v1"
+    assert event["kernel"]["taskId"]
+    assert all(item["kernelTaskId"] == event["kernel"]["taskId"] for item in event["deliveries"])
+
+
+def test_project_agent_bus_targeted_message_delegates_delivery_to_kernel_adapter(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    alpha = agent_directory_service.create_agent_instance(display_name="Alpha", direct_session_id="session-alpha")
+    captured: dict[str, object] = {}
+
+    def fail_direct_inbox_write(*_args, **_kwargs):
+        raise AssertionError("ProjectAgentBus must not write targeted inbox messages directly")
+
+    def fake_kernel_submit(**kwargs):
+        captured.update(kwargs)
+        return {
+            "reused": False,
+            "event": {"eventId": "kernel-event-1"},
+            "task": {"taskId": "kernel-task-1"},
+            "execution": {"workRunId": "kernel-workrun-1"},
+            "outcome": {
+                "outcomeId": "kernel-outcome-1",
+                "status": "succeeded",
+                "deliveries": [
+                    {
+                        "targetAgentId": alpha["agentId"],
+                        "targetSessionId": "session-alpha",
+                        "inboxMessageId": "inbox-from-kernel",
+                        "status": "delivered",
+                        "wake": {
+                            "wakeRequested": False,
+                            "wakeStatus": "not_requested",
+                            "messageId": "inbox-from-kernel",
+                            "targetAgentId": alpha["agentId"],
+                            "targetSessionId": "session-alpha",
+                            "turnId": "",
+                            "reason": "",
+                        },
+                    }
+                ],
+            },
+            "proposals": [],
+        }
+
+    monkeypatch.setattr(agent_directory_service, "write_agent_inbox_message", fail_direct_inbox_write)
+    monkeypatch.setattr(project_agent_bus_service, "submit_agent_message_event", fake_kernel_submit)
+
+    event = project_agent_bus_service.send_project_agent_bus_message(
+        content=f"@{alpha['agentCode']} 走 Kernel Adapter",
+        wake_target=False,
+    )
+
+    assert captured["source"] == "project_agent_bus"
+    assert captured["recipient_agent_ids"] == [alpha["agentId"]]
+    assert captured["wake_target"] is False
+    assert event["kernel"]["taskId"] == "kernel-task-1"
+    assert event["kernel"]["outcomeId"] == "kernel-outcome-1"
+    assert event["deliveries"][0]["inboxMessageId"] == "inbox-from-kernel"
+    assert event["deliveries"][0]["kernelTaskId"] == "kernel-task-1"
 
 
 def test_project_agent_bus_all_mention_delivers_to_active_agents_only(tmp_path, monkeypatch):

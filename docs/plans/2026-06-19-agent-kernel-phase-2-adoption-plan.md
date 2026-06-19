@@ -1,9 +1,9 @@
 # Agent Kernel Phase 2 Adoption Plan
 
 日期：2026-06-19
-状态：实施前规划草案
-归属分线：agent-runtime-core / quality-and-operations / chat-coding-surface
-范围：Phase 2A 采用计划，不包含运行时代码改动
+状态：Phase 2A 已落地；Phase 2B ProjectAgentBus 试点与 Phase 2C 只读 Task Center 已在 `codex/agent-kernel-phase2-complete` 实施并验证，等待合并
+归属分线：agent-runtime-core / quality-and-operations / web-workbench-surface
+范围：Agent Kernel Phase 2 采用计划、实施记录与后续边界
 
 ## 1. 目的
 
@@ -17,7 +17,7 @@ Agent Kernel MVP 已经完成第一阶段：
 
 Phase 2 的目标不是继续扩展一个完整 Agent OS，而是把 Kernel 从“旁路 API”推进到“现有会话、群聊、Agent 管理能使用的协作底座”。
 
-本计划只定义下一阶段如何落地，不直接修改运行时代码。
+本文件最初用于定义下一阶段如何落地；本轮实施后，它同时作为 Phase 2 采用记录，保留原始契约、实际完成项和后续边界。
 
 ## 2. Phase 2 总目标
 
@@ -42,6 +42,17 @@ Session / Room / Agent Action
 - `ContextResolver` 只做 minimal refs，不提前实现 memory OS。
 - 任何旧测试失败必须分类为 contract / compatibility / implementation-lock / characterization / smoke，不允许无解释跳过。
 
+### 2.1 本轮实施状态
+
+| 阶段 | 状态 | 当前结果 |
+|---|---|---|
+| Phase 2A：Kernel Adapter + Task Timeline API | 已完成 | `core/agent_kernel/adapters.py`、`GET /api/kernel/tasks/{task_id}/timeline`、`GET /api/kernel/tasks` 已存在并有 contract tests |
+| Phase 2B：ProjectAgentBus 试点 | 已完成 | ProjectAgentBus targeted message 通过 Kernel adapter 生成 task/outcome/delivery，bus event 记录 `kernelEventId` / `kernelTaskId` / `kernelOutcomeId` |
+| Phase 2C：只读 Kernel Task Center | 已完成 | 新增 `/kernel` 路由、只读任务列表、timeline detail、delivery/wake/projection/runtime refs 展示 |
+| Full session / room migration | 未开始 | 保持为后续 Phase 3 候选，不在本轮直接替换会话或群聊主入口 |
+| EvaluationGate approval API | 未开始 | 仍保持 outcome 后 side workflow 边界，不进入 runtime critical path |
+| SQLite / full ContextResolver | 未开始 | 继续使用 JSONL + index；Context 仍只做 minimal refs |
+
 ## 3. 现状差距
 
 ### 3.1 已有能力
@@ -55,21 +66,24 @@ Session / Room / Agent Action
 | Runtime scene evidence | 部分完成 | `kernel.event.rejected` / `kernel.event.completed` |
 | Proposal stub | 已完成 | outcome 后 `proposalRefs` |
 
-### 3.2 缺口
+### 3.2 Phase 2 后剩余缺口
 
 | 缺口 | 影响 |
 |---|---|
-| 现有 session / room / agent message 入口尚未统一走 Kernel adapter | Kernel 仍像旁路能力，不能承接平台主流程 |
-| 缺少 task timeline read model | 用户和后续 Agent 不容易追踪事件、投递、wake、outcome 的完整链路 |
-| 缺少 projection repair 记录约定 | Session/Room 投影失败时，难以证明 TaskLedger 仍是事实源 |
-| 缺少可见 Task Center 或只读面板 | 用户无法直接看到平台正在处理哪些 Kernel task |
-| 旧入口仍可能直接写 inbox 或 room state | 后续协作路径会继续分叉 |
+| session submit / chat room round 尚未默认走 Kernel adapter | 会话和群聊仍是下一阶段迁移重点，不能把本轮试点误读为全平台切换 |
+| projection repair 仍只有边界约定，没有独立修复队列 | Session/Room 投影失败时，TaskLedger 仍是事实源，但还缺少可操作的 repair workflow |
+| Task Center 只读 | 用户能观察 task，但不能取消、重试、审批或 apply |
+| EvaluationGate approval API 尚未实现 | 治理层仍是 proposal stub / side workflow，不能承接人工审批流 |
+| SQLite / full ContextResolver 未迁移 | 当前 JSONL + index 足够审计 MVP，但高频查询和复杂上下文解析仍需 Phase 3 评估 |
+| 旧入口仍可能直接写 room/session state | 后续协作路径仍需按入口逐步收束，不能一次性全量替换 |
 
 ## 4. 推荐实施顺序
 
 ### Phase 2A：Kernel Adapter + Task Timeline API
 
-这是下一轮代码实现的推荐范围。
+状态：已完成。
+
+这是 Phase 2 的第一步代码实现范围。
 
 交付目标：
 
@@ -79,7 +93,7 @@ Session / Room / Agent Action
 4. 保持旧入口默认行为不破坏，只在明确试点入口启用 adapter。
 5. 增加 contract tests 保护 adapter 与 timeline。
 
-不交付：
+Phase 2A 当时不交付：
 
 - 不把所有 session 消息默认切到 Kernel。
 - 不改完整群聊 scheduler。
@@ -90,7 +104,9 @@ Session / Room / Agent Action
 
 ### Phase 2B：试点接入现有 Agent-to-Agent / ProjectAgentBus
 
-在 Phase 2A 可观察后，再接入一个真实业务入口。
+状态：已完成。
+
+在 Phase 2A 可观察后，接入一个真实业务入口。
 
 推荐先接入：
 
@@ -108,7 +124,16 @@ ProjectAgentBus targeted message
 - 接入 Kernel 后能立刻减少“私信路径”和“Kernel 路径”分裂；
 - 风险低于直接改 session submit 或 chat room round。
 
+本轮实际落地：
+
+- `send_project_agent_bus_message` 对 targeted message 调用 `submit_agent_message_event`；
+- delivery 从 Kernel outcome 映射回 ProjectAgentBus event；
+- ProjectAgentBus event metadata 保存 Kernel event/task/outcome id；
+- 新增测试证明试点路径不再直接调用旧 inbox writer。
+
 ### Phase 2C：只读 Kernel Task Center
+
+状态：已完成。
 
 当 timeline API 稳定后，再做 UI。
 
@@ -124,6 +149,13 @@ ProjectAgentBus targeted message
 - runtime evidence refs。
 
 不提供取消、重试、审批、apply 等控制动作。
+
+本轮实际落地：
+
+- 新增 `GET /api/kernel/tasks` 前端 client；
+- 新增 `/kernel` 路由和 AppShell 导航入口；
+- 左侧展示最近 task，右侧展示 timeline、delivery、wake、projection refs、runtime evidence refs；
+- 页面保持只读，不引入 mutation。
 
 ## 5. Phase 2A 行为契约
 
@@ -484,111 +516,92 @@ And task remains succeeded/blocked according to Kernel outcome
 | 旧测试阻碍迁移 | 重构被旧实现锁死 | 使用 test strategy 分类旧测试 |
 | wake 失败被误判为 task 失败 | TaskLedger 不稳定 | 保持 delivery wake evidence 与 task outcome 分离 |
 
-## 13. Phase 2A Done Criteria
+## 13. Phase 2 当前 Done Criteria
 
-Phase 2A 可以合并的最低标准：
+Phase 2A / 2B / 2C 当前可以进入合并评审的最低标准：
 
 ```text
 adapter contract tests pass
 + timeline API tests pass
 + existing kernel tests pass
-+ developer sandbox path test pass
-+ no unexplained legacy test failure
-+ docs mention Phase 2B pilot target
++ ProjectAgentBus pilot tests pass
++ Task Center route/API static tests pass
++ web production build passes
++ no unexplained legacy test failure in touched suites
++ docs state completed scope and remaining Phase 3 boundary
 ```
 
-建议验证命令：
+本轮验证命令：
 
 ```powershell
-py -m pytest tests\test_agent_kernel.py tests\test_agent_kernel_adapters.py -q
-py -m py_compile core\agent_kernel\__init__.py core\agent_kernel\service.py core\agent_kernel\adapters.py core\web\routes\kernel.py
+& "C:\Users\17533\Desktop\Vibelution\.venv\Scripts\python.exe" -m pytest tests\test_project_agent_bus_service.py tests\test_project_agent_bus_routes.py tests\test_agent_kernel.py tests\test_agent_kernel_adapters.py -q
+npm --prefix web run test -- src/api/kernel.test.ts src/routes/KernelTaskCenterRoute.layout.test.ts
+npm --prefix web run build
 git diff --check
 ```
 
-如果 Phase 2A 修改前端 DTO 或 UI，再追加：
-
-```powershell
-npm --prefix web run build
-```
-
-## 14. 后续实施任务拆分
+## 14. 本轮实施任务拆分
 
 ### Task 1：Adapter Service
 
-范围：
-
-- `core/agent_kernel/adapters.py`
-- adapter unit tests
+状态：已完成。
 
 输出：
 
-- build event；
-- submit event；
-- idempotency helper；
-- metadata normalizer。
+- `build_agent_message_event`；
+- `submit_agent_message_event`；
+- stable idempotency key；
+- metadata normalizer；
+- adapter runtime scene evidence。
 
 ### Task 2：Timeline Read Model
 
-范围：
-
-- `core/agent_kernel/service.py`
-- `core/web/routes/kernel.py`
-- timeline tests
+状态：已完成。
 
 输出：
 
 - `get_kernel_task_timeline(task_id)`；
 - `GET /api/kernel/tasks/{task_id}/timeline`；
-- runtime scene evidence。
+- `GET /api/kernel/tasks`；
+- event/task/execution/outcome/delivery/proposal/runtime refs 只读组装。
 
-### Task 3：ProjectAgentBus Pilot Plan
+### Task 3：ProjectAgentBus Pilot
 
-范围：
-
-- 先写小型迁移计划或 behind-flag adapter call；
-- 不直接删除旧 bus delivery。
+状态：已完成。
 
 输出：
 
-- ProjectAgentBus 可选择调用 adapter；
-- old path 和 kernel path 结果可对比；
-- pilot tests。
+- ProjectAgentBus targeted message 通过 adapter 进入 Kernel；
+- old direct inbox write 路径不再承担试点 delivery；
+- ProjectAgentBus event 保留 Kernel ids，便于从 bus 追溯到 TaskLedger；
+- service / route tests 覆盖响应结构。
 
-### Task 4：Task Center UI Spec
+### Task 4：Task Center UI
 
-范围：
-
-- 只写 UI spec 或后续单独实施；
-- 不与 Phase 2A 混合。
+状态：已完成。
 
 输出：
 
-- 只读 task list；
-- task timeline detail；
-- delivery/wake evidence 展示。
+- `/kernel` 只读页面；
+- task list；
+- selected task timeline detail；
+- delivery/wake/projection/runtime evidence 展示；
+- 不提供 mutation 控制动作。
 
 ## 15. 下一步推荐
 
-下一步直接开实现分支：
+Phase 3 不应继续堆抽象，建议按入口收束：
 
-```text
-codex/agent-kernel-adapter-timeline
-```
+1. 先做 session submit / chat room round 的迁移预案和 characterization tests。
+2. 为 projection repair 增加独立记录和只读可见性，不让 repair 改写 TaskLedger。
+3. 在 Task Center 增加受控操作前，先定义 cancel / retry / approval 的 task lifecycle contract。
+4. EvaluationGate approval API 继续保持 side workflow，只有 proposal apply 阶段允许影响外部投影。
+5. SQLite / full ContextResolver 只在 JSONL + index 出现明确查询或并发瓶颈后进入 Phase 3 存储评估。
 
-实施范围限定为：
+本轮不继续追加：
 
-- `core/agent_kernel/adapters.py`
-- `core/agent_kernel/service.py`
-- `core/web/routes/kernel.py`
-- `tests/test_agent_kernel.py`
-- `tests/test_agent_kernel_adapters.py`
-
-不碰：
-
-- `session_service.py`
-- `chat_room_service.py`
-- `project_agent_bus_service.py`
-- frontend
-- project memory
-
-这样可以先把 Kernel 接入面和可观察面打稳，再进入真实业务入口迁移。
+- 不默认替换所有 session / room 消息入口；
+- 不实现群聊 scheduler；
+- 不实现审批 apply；
+- 不迁移 SQLite；
+- 不扩大 ContextResolver 为 memory OS。
