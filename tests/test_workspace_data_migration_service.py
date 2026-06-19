@@ -1,3 +1,5 @@
+import os
+
 import pytest
 
 from core.web.services import workspace_data_migration_service as migration
@@ -159,6 +161,39 @@ def test_legacy_workspace_cleanup_blocks_stale_target_manifest(tmp_path, monkeyp
     assert preview["canExecute"] is False
     assert "target_manifest_mismatch" in preview["blockedReasons"]
     assert "migration_not_verified" in preview["blockedReasons"]
+
+
+def test_legacy_workspace_cleanup_retries_readonly_delete_errors(tmp_path, monkeypatch):
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    data_home = tmp_path / "operator-data"
+    source_workspace = _seed_workspace(project_root)
+    readonly_file = source_workspace / "readonly.bin"
+    readonly_file.write_text("locked once", encoding="utf-8")
+    target_workspace = data_home / "workspace"
+    (target_workspace / "memory").mkdir(parents=True)
+    (target_workspace / "memory" / "memory.json").write_text("{}\n", encoding="utf-8")
+    monkeypatch.setenv("VIBELUTION_DATA_HOME", str(data_home))
+    migration.finalize_external_workspace(data_home=data_home)
+    original_rmtree = migration.shutil.rmtree
+    calls = {"count": 0}
+
+    def fake_rmtree(path, *, onexc=None):
+        calls["count"] += 1
+        if onexc and readonly_file.exists():
+            onexc(os.unlink, str(readonly_file), PermissionError("readonly"))
+        return original_rmtree(path)
+
+    monkeypatch.setattr(migration.shutil, "rmtree", fake_rmtree)
+
+    result = migration.execute_legacy_workspace_cleanup(
+        project_root=project_root,
+        confirmation_phrase=migration.LEGACY_WORKSPACE_CLEANUP_CONFIRMATION,
+    )
+
+    assert calls["count"] == 1
+    assert result["deleted"]["status"] == "deleted"
+    assert not source_workspace.exists()
 
 
 def test_legacy_workspace_cleanup_blocks_symlink_entries(tmp_path, monkeypatch):
