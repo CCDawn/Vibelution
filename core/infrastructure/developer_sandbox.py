@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from config.paths import resolve_workspace_home
 from config.public_config import CONFIG_PATH, load_public_config, public_config_hash, save_public_config
 
 
@@ -308,8 +309,8 @@ def sandbox_workspace_path(project_root: Path, *parts: str) -> Path | None:
 
 
 def formal_workspace_path(project_root: Path, *parts: str) -> Path:
-    root = _project_root(project_root)
-    return root.joinpath("workspace", *parts)
+    _ = _project_root(project_root)
+    return resolve_workspace_home().joinpath(*parts)
 
 
 def sandboxed_workspace_path(project_root: Path, *parts: str) -> Path:

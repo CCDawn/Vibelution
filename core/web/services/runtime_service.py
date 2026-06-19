@@ -13,6 +13,7 @@ import time
 
 from config.public_config import load_public_config
 from config import get_config
+from core.infrastructure import developer_sandbox
 from core.infrastructure.mental_model import get_mental_model
 from core.mental_model_flags import is_mental_model_enabled
 from core.runtime_manager import ensure_daemon_running, submit_command
@@ -42,7 +43,7 @@ from .workbench_contract_service import get_workbench_contract
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
-RUNTIME_STATE_PATH = PROJECT_ROOT / "workspace" / "ui_runtime_state.json"
+RUNTIME_STATE_PATH = developer_sandbox.formal_workspace_path(PROJECT_ROOT, "ui_runtime_state.json")
 LAUNCHER_SCRIPT_PATH = PROJECT_ROOT / "scripts" / "vibelution_launcher.ps1"
 LAUNCHER_STATE_PATH = PROJECT_ROOT / ".runtime" / "launcher" / "state.json"
 LAUNCHER_SHUTDOWN_LOG_PATH = PROJECT_ROOT / ".runtime" / "launcher" / "shutdown-request.log"
@@ -599,10 +600,20 @@ def _schedule_local_backend_exit(delay_seconds: float = 0.35) -> None:
 
 def _load_runtime_state() -> dict:
     try:
-        payload = json.loads(RUNTIME_STATE_PATH.read_text(encoding="utf-8"))
+        payload = json.loads(_runtime_state_path().read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return {}
     return payload if isinstance(payload, dict) else {}
+
+
+def _runtime_state_path() -> Path:
+    return developer_sandbox.route_workspace_path(
+        PROJECT_ROOT,
+        "runtime",
+        "ui_runtime_state.json",
+        intent="state",
+        seed=True,
+    )
 
 
 def _load_runtime_manager_snapshot() -> dict:
@@ -1542,7 +1553,7 @@ def _mental_state_summary(lang: str, public_config: dict | None = None) -> dict[
         return _disabled_mental_state(lang)
 
     try:
-        mental_model = get_mental_model(workspace_root=str(PROJECT_ROOT / "workspace"))
+        mental_model = get_mental_model(workspace_root=str(developer_sandbox.seeded_sandbox_workspace_path(PROJECT_ROOT)))
     except TypeError:
         mental_model = get_mental_model()
     except Exception:

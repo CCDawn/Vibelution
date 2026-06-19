@@ -7,6 +7,7 @@
 
 import json
 import os
+from pathlib import Path
 from typing import Dict, Any, Optional
 
 
@@ -14,8 +15,17 @@ class Storage:
     """数据存储工具类"""
 
     def __init__(self, save_path: str = "workspace/memory/pet_info.json"):
-        self.save_path = save_path
+        self.save_path = self._resolve_save_path(save_path)
         self._ensure_directory()
+
+    @staticmethod
+    def _resolve_save_path(save_path: str) -> str:
+        path = Path(str(save_path or "workspace/memory/pet_info.json"))
+        if path.parts and path.parts[0].lower() == "workspace":
+            from core.infrastructure import developer_sandbox
+
+            return str(developer_sandbox.formal_workspace_path(Path(__file__).resolve().parents[3], *path.parts[1:]))
+        return str(path)
 
     def _ensure_directory(self):
         """确保目录存在"""

@@ -686,7 +686,7 @@ def _recent_changes_payload(items: list[dict[str, Any]]) -> list[dict[str, Any]]
 
 
 def _delete_transaction_groups(project_root: Path, txn_ids: list[str]) -> int:
-    db_path = project_root / "workspace" / "agent_brain.db"
+    db_path = developer_sandbox.seeded_sandbox_workspace_path(project_root, "agent_brain.db")
     if not db_path.exists():
         return 0
 

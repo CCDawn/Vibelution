@@ -24,7 +24,7 @@ from core.evaluation.self_evolution_experience_repository import (
 from core.evaluation.self_evolution_reflection import (
     record_bounded_self_evolution_reflection,
 )
-from core.infrastructure import git_process
+from core.infrastructure import developer_sandbox, git_process
 from core.infrastructure.agent_session import get_session_state
 from core.orchestration.context_engine import build_agent_context, record_agent_turn_result
 from core.orchestration.turn_runner import AgentSingleTurnRequest, run_agent_single_turn
@@ -67,8 +67,8 @@ from .workbench_contract_service import get_workbench_contract
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
-RUNTIME_STATE_PATH = PROJECT_ROOT / "workspace" / "ui_runtime_state.json"
-ROLLBACK_ROOT = PROJECT_ROOT / "workspace" / "web_self_evolution"
+RUNTIME_STATE_PATH = developer_sandbox.formal_workspace_path(PROJECT_ROOT, "ui_runtime_state.json")
+ROLLBACK_ROOT = developer_sandbox.formal_workspace_path(PROJECT_ROOT, "web_self_evolution")
 _RUN_STATE_LOCK = threading.Lock()
 _RUN_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="web-self-evolution")
 _RUN_STATES: dict[str, dict[str, Any]] = {}
@@ -2991,7 +2991,7 @@ def _derive_self_current_task(
 
 
 def _capture_preflight_state(run_id: str) -> dict[str, Any]:
-    run_dir = ROLLBACK_ROOT / run_id
+    run_dir = _rollback_root() / run_id
     backup_dir = run_dir / "backups"
     manifest_path = run_dir / "rollback_manifest.json"
     backup_dir.mkdir(parents=True, exist_ok=True)
@@ -3444,10 +3444,30 @@ def _clone_payload(payload: dict[str, Any]) -> dict[str, Any]:
 
 def _load_runtime_state() -> dict[str, Any]:
     try:
-        payload = json.loads(RUNTIME_STATE_PATH.read_text(encoding="utf-8"))
+        payload = json.loads(_runtime_state_path().read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return {}
     return payload if isinstance(payload, dict) else {}
+
+
+def _runtime_state_path() -> Path:
+    return developer_sandbox.route_workspace_path(
+        PROJECT_ROOT,
+        "runtime",
+        "ui_runtime_state.json",
+        intent="state",
+        seed=True,
+    )
+
+
+def _rollback_root() -> Path:
+    return developer_sandbox.route_workspace_path(
+        PROJECT_ROOT,
+        "self_evolution",
+        "web_self_evolution",
+        intent="state",
+        seed=True,
+    )
 
 
 def _encode_sse_event(event_name: str, payload: dict[str, Any]) -> str:

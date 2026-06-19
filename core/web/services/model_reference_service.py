@@ -12,6 +12,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+from core.infrastructure import developer_sandbox
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 _HISTORICAL_REFERENCE_LIMIT = 50
@@ -35,8 +37,20 @@ def _normalized_model_id(value: Any) -> str:
 
 
 def _display_path(path: Path, project_root: Path) -> str:
+    resolved = Path(path).resolve()
+    workspace_root = developer_sandbox.formal_workspace_path(project_root).resolve()
     try:
-        return str(path.relative_to(project_root)).replace("\\", "/")
+        return f"workspace/{resolved.relative_to(workspace_root).as_posix()}"
+    except ValueError:
+        pass
+    sandbox_root = developer_sandbox.sandbox_workspace_path(project_root)
+    if sandbox_root is not None:
+        try:
+            return f"workspace/{resolved.relative_to(sandbox_root.resolve()).as_posix()}"
+        except ValueError:
+            pass
+    try:
+        return str(resolved.relative_to(project_root.resolve())).replace("\\", "/")
     except ValueError:
         return str(path)
 
@@ -234,7 +248,7 @@ def _scan_public_config_refs(refs: list[dict[str, Any]], model_id: str, public_c
 
 
 def _scan_agent_registry_refs(refs: list[dict[str, Any]], model_id: str, project_root: Path) -> None:
-    path = project_root / "workspace" / "agents" / "agents.json"
+    path = _workspace_path(project_root, "agent_directory", "agents", "agents.json")
     source_path = _display_path(path, project_root)
     payload = _load_json(path)
     agents = payload.get("agents") if isinstance(payload, dict) else None
@@ -272,7 +286,7 @@ def _scan_agent_registry_refs(refs: list[dict[str, Any]], model_id: str, project
 
 
 def _scan_chat_room_refs(refs: list[dict[str, Any]], model_id: str, project_root: Path) -> None:
-    path = project_root / "workspace" / "chat_rooms" / "chat_rooms.json"
+    path = _workspace_path(project_root, "chat_room", "chat_rooms", "chat_rooms.json")
     source_path = _display_path(path, project_root)
     payload = _load_json(path)
     rooms = payload.get("rooms") if isinstance(payload, dict) else None
@@ -373,7 +387,7 @@ def _scan_active_supervised_run_refs(refs: list[dict[str, Any]], model_id: str, 
 def _scan_historical_supervised_refs(
     refs: list[dict[str, Any]], model_id: str, project_root: Path, *, limit: int = _HISTORICAL_REFERENCE_LIMIT
 ) -> None:
-    base = project_root / "workspace" / "supervised_evolution"
+    base = _workspace_path(project_root, "supervised_evolution", "supervised_evolution")
     if not base.exists():
         return
     candidates: list[tuple[str, Path]] = []
@@ -669,12 +683,12 @@ def rebind_model_references(
         updated_refs.extend(_replace_public_config_refs(updated_public_config, normalized_from, normalized_to))
 
     if update_workspace:
-        agent_path = root / "workspace" / "agents" / "agents.json"
+        agent_path = _workspace_path(root, "agent_directory", "agents", "agents.json")
         refs, changed = _replace_workspace_agent_refs(agent_path, root, normalized_from, normalized_to)
         updated_refs.extend(refs)
         if changed:
             workspace_files_changed.append(_display_path(agent_path, root))
-        room_path = root / "workspace" / "chat_rooms" / "chat_rooms.json"
+        room_path = _workspace_path(root, "chat_room", "chat_rooms", "chat_rooms.json")
         refs, changed = _replace_workspace_chat_room_refs(room_path, root, normalized_from, normalized_to)
         updated_refs.extend(refs)
         if changed:
@@ -691,6 +705,16 @@ def rebind_model_references(
         "updatedReferenceCount": len(updated_refs),
         "workspaceFilesChanged": workspace_files_changed,
     }
+
+
+def _workspace_path(project_root: Path, surface: str, *parts: str) -> Path:
+    return developer_sandbox.route_workspace_path(
+        project_root,
+        surface,
+        *parts,
+        intent="state",
+        seed=True,
+    )
 
 
 __all__ = [
