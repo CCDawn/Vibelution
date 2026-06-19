@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import shutil
+import stat
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
@@ -313,7 +315,7 @@ def execute_legacy_workspace_cleanup(
     source_workspace = Path(preview["sourceWorkspace"]).resolve()
     stats = _path_summary(source_workspace, hash_files=False)
     try:
-        shutil.rmtree(source_workspace)
+        _remove_legacy_workspace_tree(source_workspace)
     except Exception as exc:
         _record_workspace_event(
             "legacy_cleanup",
@@ -347,6 +349,18 @@ def execute_legacy_workspace_cleanup(
         },
     )
     return result
+
+
+def _remove_legacy_workspace_tree(source_workspace: Path) -> None:
+    shutil.rmtree(source_workspace, onexc=_clear_readonly_and_retry)
+
+
+def _clear_readonly_and_retry(function: Any, path_value: str, exc: BaseException) -> None:
+    try:
+        os.chmod(path_value, stat.S_IREAD | stat.S_IWRITE)
+        function(path_value)
+    except Exception as retry_exc:
+        raise retry_exc from exc
 
 
 def build_report(*, action: str, source_workspace: Path, target_workspace: Path, excludes: set[str]) -> dict[str, Any]:
