@@ -5815,6 +5815,27 @@
   font-size: 0.68rem;
 }
 
+.kernelTraceLink {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  min-height: 20px;
+  padding: 1px 6px;
+  border: 1px solid color-mix(in srgb, var(--accent-cool) 30%, transparent);
+  border-radius: 999px;
+  color: var(--accent-cool-2);
+  font-weight: 760;
+  overflow: hidden;
+  text-decoration: none;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kernelTraceLink:hover {
+  border-color: var(--accent-cool);
+  color: var(--accent-cool);
+}
+
 .deliveryList span {
   max-width: 100%;
   padding: 1px 6px;

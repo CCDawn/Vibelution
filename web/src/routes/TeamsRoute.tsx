@@ -5,6 +5,7 @@ import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, MouseEvent as 
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 
 import { fetchJson } from "../api/client";
+import { kernelTaskCenterHref } from "../api/kernel";
 import {
   PROJECT_AGENT_BUS_TEAM_TIMELINE_LIMIT,
   isProjectAgentBusEventRevoked,
@@ -10185,6 +10186,11 @@ export function TeamsRoute({
                   <div className={styles.messageResult}>
                     <strong>{selectedTeamMessageResult.deliveries.length}</strong>
                     <span>{lang === "zh" ? "条投递已进入项目总群" : "deliveries recorded in project bus"}</span>
+                    {selectedTeamMessageResult.kernel?.taskId ? (
+                      <Link className={styles.kernelTraceLink} to={kernelTaskCenterHref(selectedTeamMessageResult.kernel.taskId)}>
+                        {lang === "zh" ? "Kernel 任务" : "Kernel Task"}
+                      </Link>
+                    ) : null}
                   </div>
                 ) : null}
                 {selectedTeamMessageError ? (
@@ -10216,6 +10222,11 @@ export function TeamsRoute({
                             <span>{formatTime(event.createdAt, lang)}</span>
                             <span>{event.deliveries.length} deliveries</span>
                             <span>{event.interruptions.length} interrupts</span>
+                            {event.kernel?.taskId ? (
+                              <Link className={styles.kernelTraceLink} to={kernelTaskCenterHref(event.kernel.taskId)}>
+                                {lang === "zh" ? "Kernel 任务" : "Kernel Task"}
+                              </Link>
+                            ) : null}
                           </div>
                           <div className={styles.deliveryList}>
                             {event.deliveries.map((delivery) => (

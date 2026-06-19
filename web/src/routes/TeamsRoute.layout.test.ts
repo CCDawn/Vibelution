@@ -47,6 +47,7 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("fetchJson<Team>(`/api/teams/${encodeURIComponent(teamId)}`");
     expect(routeSource).toContain('method: "DELETE"');
     expect(routeSource).toContain("sendTeamProjectBusMessage(payload)");
+    expect(routeSource).toContain("kernelTaskCenterHref");
     expect(routeSource).toContain("listProjectAgentBusTimeline(PROJECT_AGENT_BUS_TEAM_TIMELINE_LIMIT)");
     expect(routeSource).toContain("revokeProjectAgentBusMessage({");
     expect(routeSource).toContain("/api/teams/${encodeURIComponent(teamId)}/chat-room/sync");
@@ -642,7 +643,10 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("isProjectAgentBusEventRevoked");
     expect(routeSource).toContain("projectAgentBusEventsForTeam");
     expect(routeSource).toContain("revokeTeamMessageMutation");
+    expect(routeSource).toContain("selectedTeamMessageResult.kernel?.taskId");
+    expect(routeSource).toContain("event.kernel?.taskId");
     expect(routeSource).toContain("styles.teamHistoryPanel");
+    expect(routeStyles.kernelTraceLink).toBeTypeOf("string");
     expect(routeSource).toContain("interrupt_targets");
     expect(routeSource).toContain("edges: canvas.edges.filter((edge) => edge.source !== deletedNodeId && edge.target !== deletedNodeId)");
     expect(routeStyles.teamPickerPanel).toBeTypeOf("string");
