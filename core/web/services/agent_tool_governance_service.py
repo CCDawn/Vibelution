@@ -657,11 +657,9 @@ def _read_requests(agent: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def _request_path(agent: dict[str, Any]) -> Path:
-    root = Path(agent_directory_service.PROJECT_ROOT).resolve()
-    if root.name.lower() == "workspace":
-        root = root.parent
     workspace_path = str(agent.get("workspacePath") or "").strip()
-    return (root / workspace_path / "events" / TOOL_GOVERNANCE_EVENT_FILE).resolve()
+    workspace = agent_directory_service._ensure_agent_workspace(workspace_path).resolve()
+    return (workspace / "events" / TOOL_GOVERNANCE_EVENT_FILE).resolve()
 
 
 def _actor_label(agent: dict[str, Any] | None) -> str:

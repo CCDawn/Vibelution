@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from core.chat.chat_task_types import trim_lines
+from core.infrastructure import developer_sandbox
 from core.infrastructure.workspace_manager import get_workspace
 from core.logging import debug as _debug_logger
 
@@ -663,7 +664,7 @@ def _organization_path(workspace: Any) -> Path:
     root = Path(getattr(workspace, "root", "") or "workspace")
     if root.name == "workspace":
         return root / "research" / "organization_graph.json"
-    return root / "workspace" / "research" / "organization_graph.json"
+    return developer_sandbox.seeded_sandbox_workspace_path(root, "research", "organization_graph.json")
 
 
 def _normalize_organization(raw: dict[str, Any] | None) -> dict[str, Any]:

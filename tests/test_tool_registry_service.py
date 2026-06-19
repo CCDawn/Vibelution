@@ -7,6 +7,11 @@ from core.web.services import tool_catalog
 from core.web.services import tool_registry_service as registry
 
 
+@pytest.fixture(autouse=True)
+def _isolate_data_home(tmp_path, monkeypatch):
+    monkeypatch.setenv("VIBELUTION_DATA_HOME", str(tmp_path))
+
+
 def _is_explicitly_allowed_tool(name: str) -> bool:
     return str(name or "").strip() in tool_catalog.explicit_allow_tool_names()
 

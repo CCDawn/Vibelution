@@ -57,9 +57,16 @@ def _resolve_project_root() -> Path:
 
 
 def _resolve_workspace_root(project_root: Optional[Path] = None) -> Path:
-    """稳定解析 workspace 根目录。"""
+    """稳定解析产品 workspace 根目录。"""
     root = (project_root or _resolve_project_root()).resolve()
-    return root / "workspace"
+    try:
+        from core.infrastructure import developer_sandbox
+
+        return developer_sandbox.sandboxed_workspace_path(root)
+    except Exception:
+        from config.paths import resolve_workspace_home
+
+        return resolve_workspace_home()
 
 
 def sys_path_iter():
