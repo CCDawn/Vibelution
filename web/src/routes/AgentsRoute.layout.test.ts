@@ -165,6 +165,8 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("copy.contextCompressionInherit");
     expect(routeSource).toContain("copy.contextCompressionCustom");
     expect(routeSource).toContain("contextCompressionPolicyLine");
+    expect(routeSource).toContain("compressionTriggerTokenLimit");
+    expect(routeSource).toContain("modelContextWindowLimit");
     expect(routeSource).toContain("styles.compressionPolicyGrid");
     expect(routeSource).toContain("styles.compressionPolicySubgrid");
     expect(routeSource).toContain("styles.compressionPolicyFooter");
@@ -475,6 +477,8 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain('returnLabel: "agents"');
     expect(routeSource).toContain("returnTo: `/agents?agent=${encodeURIComponent(selectedAgent.agentId)}&pane=config`");
     expect(routeSource).toContain("copy.toolPolicyTitle");
+    expect(routeSource).toContain("toolPolicySourceLine");
+    expect(routeSource).toContain("toolPolicySource?.description");
     expect(routeSource).toContain("工具能力已迁移到 Agent 管理的工具页集中配置");
     expect(routeSource).toContain("配置工具能力");
     expect(routeSource).toContain("去工具页配置");

@@ -56,6 +56,15 @@ DEFAULT_SESSION_AGENT_PREFERRED_TOOLS = (
     "conversation_log_inspect_tool",
     "get_core_context_tool",
 )
+MUTATING_AGENT_TOOL_NAMES = {
+    "apply_patch_tool",
+    "apply_diff_edit_tool",
+    "write_file_tool",
+    "cli_tool",
+    "cli_agent_run_tool",
+    "run_test_for_tool",
+    "python_lint_tool",
+}
 SYSTEM_NO_TOOL_MODES = {"self_evolution", "supervised_evolution"}
 SYSTEM_NO_TOOL_ROLES = {
     "self_evolution": {"executor", "reviewer", "summarizer"},
@@ -3344,7 +3353,9 @@ def effective_agent_context_compression_policy(
     else:
         merged["maxTokenLimit"] = int(base.get("maxTokenLimit") or base.get("effectiveTokenLimit") or 0)
         merged["effectiveTokenLimit"] = int(base.get("effectiveTokenLimit") or merged["maxTokenLimit"])
+    merged["compressionTriggerTokenLimit"] = int(merged.get("effectiveTokenLimit") or 0)
     merged["contextWindowLimit"] = context_window or int(merged.get("effectiveTokenLimit") or 0)
+    merged["modelContextWindowLimit"] = int(merged.get("contextWindowLimit") or 0)
     return merged
 
 
@@ -3412,7 +3423,9 @@ def _context_compression_policy_from_config(base_policy: Any, *, context_window_
         "enabled": bool(_get_config_value(base_policy, "enabled", default=True)),
         "maxTokenLimit": effective_limit,
         "effectiveTokenLimit": effective_token_limit,
+        "compressionTriggerTokenLimit": effective_token_limit,
         "contextWindowLimit": context_window,
+        "modelContextWindowLimit": context_window,
         "maxCompressionsPerSession": _positive_context_compression_int(
             _get_config_value(base_policy, "max_compressions_per_session", "maxCompressionsPerSession"),
             default=20,
@@ -4039,6 +4052,7 @@ def _agent_to_api(agent: dict[str, Any], *, hydration: AgentApiHydrationContext 
     persona_profile = {} if profileless_session_agent else _persona_profile_for_agent({**agent, "metadata": metadata})
     task_profile = {} if profileless_session_agent else _task_profile_for_agent({**agent, "metadata": metadata})
     agent_id = str(agent.get("agentId") or "").strip()
+    tool_policy = _tool_policy_for_agent(agent, hydration=hydration)
     return {
         "agentId": agent_id,
         "agentCode": _normalize_agent_code(agent.get("agentCode"))
@@ -4073,7 +4087,8 @@ def _agent_to_api(agent: dict[str, Any], *, hydration: AgentApiHydrationContext 
         "createdAt": str(agent.get("createdAt") or "").strip(),
         "updatedAt": str(agent.get("updatedAt") or "").strip(),
         "memoryPolicy": _memory_policy_for_agent(agent, hydration=hydration),
-        "toolPolicy": _tool_policy_for_agent(agent, hydration=hydration),
+        "toolPolicy": tool_policy,
+        "toolPolicySource": _tool_policy_source_for_agent(agent, tool_policy),
         "toolGovernanceRequests": _tool_governance_requests_for_agent(agent_id, hydration=hydration, limit=6),
         "groupContextEvents": _group_context_events_for_agent(agent, hydration=hydration, limit=8),
         "agentInboxMessages": _agent_inbox_messages_for_agent(agent, hydration=hydration, limit=8, status="pending"),
@@ -4316,6 +4331,60 @@ def _tool_policy_for_agent(agent: dict[str, Any], *, hydration: AgentApiHydratio
     policy_id = str(agent.get("toolPolicyId") or DEFAULT_TOOL_POLICY_ID).strip() or DEFAULT_TOOL_POLICY_ID
     policy = hydration.tool_policies.get(policy_id) or default_tool_policy(policy_id)
     return normalize_tool_policy(policy, policy_id)
+
+
+def _tool_policy_source_for_agent(agent: dict[str, Any], policy: dict[str, Any] | None) -> dict[str, Any]:
+    agent_id = str(agent.get("agentId") or "").strip()
+    policy_id = str(agent.get("toolPolicyId") or DEFAULT_TOOL_POLICY_ID).strip() or DEFAULT_TOOL_POLICY_ID
+    normalized_policy = normalize_tool_policy(policy if isinstance(policy, dict) else {}, policy_id)
+    allowed_tools = _tool_name_list(normalized_policy.get("allowedTools") or [])
+    preferred_tools = _tool_name_list(normalized_policy.get("preferredTools") or [])
+    mutating_tools = sorted({tool for tool in allowed_tools if tool in MUTATING_AGENT_TOOL_NAMES})
+    is_session_agent = _is_session_agent_primary_mode(str(agent.get("primaryMode") or _infer_agent_primary_mode(agent)))
+    is_private_policy = bool(agent_id and policy_id == f"tool-{agent_id}")
+    fixed_kind = _fixed_role_tool_policy_kind(agent)
+    default_allowed = list(DEFAULT_SESSION_AGENT_ALLOWED_TOOLS)
+    default_preferred = list(DEFAULT_SESSION_AGENT_PREFERRED_TOOLS)
+    if fixed_kind == "no_tools":
+        kind = "system_no_tools"
+        label = "系统固定无工具"
+        description = "该系统角色由运行时固定为无工具策略，避免误删或误授权影响核心流程。"
+    elif fixed_kind == "research_source":
+        kind = "fixed_role_policy"
+        label = "角色固定工具"
+        description = "该科研来源角色使用固定工具包，系统会按职责保持只读/受控权限。"
+    elif policy_id == DEFAULT_TOOL_POLICY_ID:
+        kind = "empty_default_policy"
+        label = "空默认包"
+        description = "当前引用全局空默认包；没有显式允许工具。"
+    elif is_session_agent and is_private_policy and allowed_tools == default_allowed and preferred_tools == default_preferred:
+        kind = "session_default_private"
+        label = "会话默认包"
+        description = "当前会话 Agent 使用自己的默认工具包；保存后不会被其他共享包覆盖。"
+    elif is_session_agent and len(allowed_tools) > len(default_allowed) and mutating_tools:
+        kind = "legacy_wide_private_override"
+        label = "历史宽权限覆盖"
+        description = "该会话 Agent 保留了旧的私有宽权限配置；系统不会静默收窄，请在工具页手动替换为目标工具包。"
+    elif is_private_policy:
+        kind = "agent_private_override"
+        label = "Agent 私有覆盖"
+        description = "该 Agent 使用自己的私有 ToolPolicy；重置/替换只影响当前 Agent。"
+    else:
+        kind = "shared_policy"
+        label = "共享工具包"
+        description = "该 Agent 引用共享 ToolPolicy；修改共享包可能影响其他 Agent。"
+    return {
+        "kind": kind,
+        "label": label,
+        "description": description,
+        "policyId": policy_id,
+        "isPrivate": is_private_policy,
+        "isLegacyWide": kind == "legacy_wide_private_override",
+        "allowedToolCount": len(allowed_tools),
+        "preferredToolCount": len(preferred_tools),
+        "mutatingToolCount": len(mutating_tools),
+        "mutatingTools": mutating_tools,
+    }
 
 
 def _tool_governance_requests_for_agent(

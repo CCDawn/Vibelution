@@ -12,11 +12,13 @@ from core.web.services.tool_registry_service import (
     ToolRegistryError,
     ToolRegistryPermissionError,
     create_generated_tool,
+    delete_tools_bulk,
     delete_tool,
     get_image2_model_config,
     get_tool_registry,
     set_image2_default_model,
     set_generated_tool_enabled,
+    set_generated_tools_enabled_bulk,
     test_tool,
     validate_generated_tool,
 )
@@ -34,6 +36,15 @@ class GeneratedToolPayload(BaseModel):
 
 class GeneratedToolEnabledPayload(BaseModel):
     enabled: bool
+
+
+class GeneratedToolBulkEnabledPayload(BaseModel):
+    toolIds: list[str] = Field(default_factory=list)
+    enabled: bool
+
+
+class ToolBulkDeletePayload(BaseModel):
+    toolIds: list[str] = Field(default_factory=list)
 
 
 class ToolTestPayload(BaseModel):
@@ -109,6 +120,22 @@ def tools_generated_validate(tool_id: str) -> dict:
 def tools_generated_enabled(tool_id: str, payload: GeneratedToolEnabledPayload) -> dict:
     try:
         return set_generated_tool_enabled(tool_id, payload.enabled)
+    except Exception as exc:  # pragma: no cover - routed by helper
+        _raise_tool_registry_error(exc)
+
+
+@router.put("/tools/generated/bulk-enabled")
+def tools_generated_bulk_enabled(payload: GeneratedToolBulkEnabledPayload) -> dict:
+    try:
+        return set_generated_tools_enabled_bulk(payload.toolIds, payload.enabled)
+    except Exception as exc:  # pragma: no cover - routed by helper
+        _raise_tool_registry_error(exc)
+
+
+@router.post("/tools/bulk-delete")
+def tools_bulk_delete(payload: ToolBulkDeletePayload) -> dict:
+    try:
+        return delete_tools_bulk(payload.toolIds)
     except Exception as exc:  # pragma: no cover - routed by helper
         _raise_tool_registry_error(exc)
 
