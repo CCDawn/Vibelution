@@ -1,8 +1,15 @@
 import json
 
+import pytest
+
 from core.web.services import agent_directory_service, chat_room_service, team_knowledge_service, team_service
 from tools import team_knowledge_tools
 from tools.Key_Tools import create_llm_facing_tools
+
+
+@pytest.fixture(autouse=True)
+def _isolate_data_home(tmp_path, monkeypatch):
+    monkeypatch.setenv("VIBELUTION_DATA_HOME", str(tmp_path))
 
 
 def _seed_team_knowledge(tmp_path, monkeypatch):
@@ -20,12 +27,12 @@ def _seed_team_knowledge(tmp_path, monkeypatch):
         ],
     )
     base = team_knowledge_service.create_knowledge_base(team["teamId"], name="Tool KB", actor_agent_id=lead["agentId"])
+    base_ref = base.get("scopedKnowledgeBaseId") or base["knowledgeBaseId"]
     agent_directory_service.update_agent_instance(
         member["agentId"],
         tool_policy={
             "allowedTools": [
-                "knowledge_query_tool",
-                "unified_knowledge_search_tool",
+                "unified_memory_search_tool",
                 "knowledge_proposal_tool",
                 "knowledge_ingestion_tool",
                 "knowledge_governance_tasks_tool",
@@ -36,9 +43,9 @@ def _seed_team_knowledge(tmp_path, monkeypatch):
             ]
         },
         memory_policy={
-            "readKnowledgeBaseIds": [base["knowledgeBaseId"]],
-            "proposeKnowledgeBaseIds": [base["knowledgeBaseId"]],
-            "rateKnowledgeBaseIds": [base["knowledgeBaseId"]],
+            "readKnowledgeBaseIds": [base_ref],
+            "proposeKnowledgeBaseIds": [base_ref],
+            "rateKnowledgeBaseIds": [base_ref],
         },
     )
     return {"lead": lead, "member": member, "team": team, "base": base}
@@ -68,7 +75,7 @@ def _promote_central_source(env: dict, *, source_type: str = "manual_user_entry"
 def _source_artifact(env: dict, *, title: str = "Tool source", knowledge_base_id: str = "") -> dict:
     central_source = _promote_central_source(env, title=title)
     return team_knowledge_service.create_source_artifact_from_central_source(
-        knowledge_base_id or env["base"]["knowledgeBaseId"],
+        knowledge_base_id or _kb_ref(env),
         central_source["centralSourceId"],
         actor_agent_id=env["member"]["agentId"],
         title=title,
@@ -80,7 +87,11 @@ def _source_ids(env: dict, *, title: str = "Tool source", knowledge_base_id: str
     return [source["sourceArtifactId"]]
 
 
-def test_team_knowledge_tools_are_llm_facing_without_explicit_allow(tmp_path, monkeypatch):
+def _kb_ref(env: dict) -> str:
+    return str(env["base"].get("scopedKnowledgeBaseId") or env["base"]["knowledgeBaseId"])
+
+
+def test_team_knowledge_tools_are_llm_facing_after_explicit_allow(tmp_path, monkeypatch):
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
     agent = agent_directory_service.create_agent_instance(display_name="Default Agent")
     tools = [
@@ -88,9 +99,7 @@ def test_team_knowledge_tools_are_llm_facing_without_explicit_allow(tmp_path, mo
         for tool in create_llm_facing_tools()
         if tool.name
         in {
-            "knowledge_query_tool",
-            "unified_knowledge_search_tool",
-            "knowledge_rag_retrieve_tool",
+            "unified_memory_search_tool",
             "knowledge_proposal_tool",
             "knowledge_rating_suggestion_tool",
             "knowledge_operations_health_tool",
@@ -105,9 +114,7 @@ def test_team_knowledge_tools_are_llm_facing_without_explicit_allow(tmp_path, mo
         visible = agent_directory_service.filter_llm_tools_for_current_agent(tools)
 
     assert {tool.name for tool in tools} == {
-        "knowledge_query_tool",
-        "unified_knowledge_search_tool",
-        "knowledge_rag_retrieve_tool",
+        "unified_memory_search_tool",
         "knowledge_proposal_tool",
         "knowledge_rating_suggestion_tool",
         "knowledge_operations_health_tool",
@@ -116,7 +123,16 @@ def test_team_knowledge_tools_are_llm_facing_without_explicit_allow(tmp_path, mo
         "knowledge_steward_workbench_tool",
         "agent_message_tool",
     }
-    assert [tool.name for tool in visible] == [tool.name for tool in tools]
+    assert [tool.name for tool in visible] == []
+
+    agent_directory_service.update_agent_instance(
+        agent["agentId"],
+        tool_policy={"allowedTools": [tool.name for tool in tools]},
+    )
+    with agent_directory_service.active_agent_runtime(agent["agentId"], session_id="session-tools"):
+        visible_after_allow = agent_directory_service.filter_llm_tools_for_current_agent(tools)
+
+    assert [tool.name for tool in visible_after_allow] == [tool.name for tool in tools]
 
 
 def test_knowledge_proposal_tool_submits_source_and_pending_candidate(tmp_path, monkeypatch):
@@ -126,7 +142,7 @@ def test_knowledge_proposal_tool_submits_source_and_pending_candidate(tmp_path, 
     with agent_directory_service.active_agent_runtime(env["member"]["agentId"], session_id="session-knowledge"):
         result = json.loads(
             team_knowledge_tools.knowledge_proposal_tool(
-                knowledge_base_id=env["base"]["knowledgeBaseId"],
+                knowledge_base_id=_kb_ref(env),
                 central_source_id=central_source["centralSourceId"],
                 source_type="manual_user_entry",
                 source_ref_json='{"note":"tool source"}',
@@ -138,7 +154,7 @@ def test_knowledge_proposal_tool_submits_source_and_pending_candidate(tmp_path, 
 
     assert result["ok"] is True
     assert result["proposal"]["status"] == "pending"
-    items = team_knowledge_service.list_knowledge_items(env["base"]["knowledgeBaseId"], agent_id=env["member"]["agentId"])
+    items = team_knowledge_service.list_knowledge_items(_kb_ref(env), agent_id=env["member"]["agentId"])
     assert items["summary"]["itemCount"] == 0
 
 
@@ -154,7 +170,7 @@ def test_knowledge_ingestion_tool_submits_standard_package(tmp_path, monkeypatch
     with agent_directory_service.active_agent_runtime(env["member"]["agentId"], session_id="session-knowledge"):
         result = json.loads(
             team_knowledge_tools.knowledge_ingestion_tool(
-                knowledge_base_id=env["base"]["knowledgeBaseId"],
+                knowledge_base_id=_kb_ref(env),
                 central_source_id=central_source["centralSourceId"],
                 source_type="external_search_refinement",
                 source_ref_json='{"url":"https://example.test","query":"memory"}',
@@ -172,7 +188,7 @@ def test_knowledge_ingestion_tool_submits_standard_package(tmp_path, monkeypatch
 def test_knowledge_governance_tasks_tool_reads_open_queue(tmp_path, monkeypatch):
     env = _seed_team_knowledge(tmp_path, monkeypatch)
     team_knowledge_service.create_refinement_proposal(
-        env["base"]["knowledgeBaseId"],
+        _kb_ref(env),
         source_artifact_ids=_source_ids(env, title="Open governance task source"),
         proposed_by_agent_id=env["member"]["agentId"],
         title="Open governance task",
@@ -190,7 +206,7 @@ def test_knowledge_governance_tasks_tool_reads_open_queue(tmp_path, monkeypatch)
 def test_knowledge_steward_recommendations_tool_reads_read_only_actions(tmp_path, monkeypatch):
     env = _seed_team_knowledge(tmp_path, monkeypatch)
     proposal = team_knowledge_service.create_refinement_proposal(
-        env["base"]["knowledgeBaseId"],
+        _kb_ref(env),
         source_artifact_ids=_source_ids(env, title="Steward tool source"),
         proposed_by_agent_id=env["member"]["agentId"],
         title="Steward tool proposal",
@@ -236,13 +252,13 @@ def test_knowledge_operations_health_and_plan_tools_are_read_only(tmp_path, monk
     assert plan["mode"] == "recommendations_only"
     assert plan["operatingBoundary"]["planOnly"] is True
     assert all(action["mutatesFormalKnowledge"] is False for action in plan["actions"])
-    assert team_knowledge_service.list_knowledge_items(env["base"]["knowledgeBaseId"], agent_id=env["member"]["agentId"])["summary"]["itemCount"] == 0
+    assert team_knowledge_service.list_knowledge_items(_kb_ref(env), agent_id=env["member"]["agentId"])["summary"]["itemCount"] == 0
 
 
-def test_knowledge_query_tool_reads_applied_items_only(tmp_path, monkeypatch):
+def test_unified_memory_search_tool_reads_applied_items_only(tmp_path, monkeypatch):
     env = _seed_team_knowledge(tmp_path, monkeypatch)
     proposal = team_knowledge_service.create_refinement_proposal(
-        env["base"]["knowledgeBaseId"],
+        _kb_ref(env),
         source_artifact_ids=_source_ids(env, title="Applied tool source"),
         proposed_by_agent_id=env["member"]["agentId"],
         title="Applied tool knowledge",
@@ -250,7 +266,7 @@ def test_knowledge_query_tool_reads_applied_items_only(tmp_path, monkeypatch):
         tags=["query-tool"],
     )
     team_knowledge_service.review_refinement_proposal(
-        env["base"]["knowledgeBaseId"],
+        _kb_ref(env),
         proposal["proposalId"],
         status="approved",
         reviewed_by_agent_id=env["lead"]["agentId"],
@@ -258,9 +274,10 @@ def test_knowledge_query_tool_reads_applied_items_only(tmp_path, monkeypatch):
 
     with agent_directory_service.active_agent_runtime(env["member"]["agentId"], session_id="session-knowledge"):
         result = json.loads(
-            team_knowledge_tools.knowledge_query_tool(
+            team_knowledge_tools.unified_memory_search_tool(
                 query="formal team",
-                knowledge_base_id=env["base"]["knowledgeBaseId"],
+                query_mode="hybrid",
+                knowledge_base_id=_kb_ref(env),
                 limit=5,
             )
         )
@@ -271,10 +288,10 @@ def test_knowledge_query_tool_reads_applied_items_only(tmp_path, monkeypatch):
     assert result["results"][0]["knowledgeBaseId"] == env["base"]["knowledgeBaseId"]
 
 
-def test_unified_knowledge_search_tool_returns_standard_results(tmp_path, monkeypatch):
+def test_unified_memory_search_tool_returns_standard_results(tmp_path, monkeypatch):
     env = _seed_team_knowledge(tmp_path, monkeypatch)
     proposal = team_knowledge_service.create_refinement_proposal(
-        env["base"]["knowledgeBaseId"],
+        _kb_ref(env),
         source_artifact_ids=_source_ids(env, title="Unified search source"),
         proposed_by_agent_id=env["member"]["agentId"],
         title="Unified search knowledge",
@@ -282,7 +299,7 @@ def test_unified_knowledge_search_tool_returns_standard_results(tmp_path, monkey
         tags=["unified-search"],
     )
     reviewed = team_knowledge_service.review_refinement_proposal(
-        env["base"]["knowledgeBaseId"],
+        _kb_ref(env),
         proposal["proposalId"],
         status="approved",
         reviewed_by_agent_id=env["lead"]["agentId"],
@@ -290,10 +307,10 @@ def test_unified_knowledge_search_tool_returns_standard_results(tmp_path, monkey
 
     with agent_directory_service.active_agent_runtime(env["member"]["agentId"], session_id="session-knowledge"):
         result = json.loads(
-            team_knowledge_tools.unified_knowledge_search_tool(
+            team_knowledge_tools.unified_memory_search_tool(
                 query="stable tool",
                 query_mode="hybrid",
-                knowledge_base_id=env["base"]["knowledgeBaseId"],
+                knowledge_base_id=_kb_ref(env),
                 tags="unified-search",
                 limit=5,
             )
@@ -309,10 +326,10 @@ def test_unified_knowledge_search_tool_returns_standard_results(tmp_path, monkey
     assert result["retrievalPolicy"]["mutatesFormalKnowledge"] is False
 
 
-def test_unified_knowledge_search_tool_supports_regex_and_rag_modes(tmp_path, monkeypatch):
+def test_unified_memory_search_tool_supports_regex_and_rag_modes(tmp_path, monkeypatch):
     env = _seed_team_knowledge(tmp_path, monkeypatch)
     proposal = team_knowledge_service.create_refinement_proposal(
-        env["base"]["knowledgeBaseId"],
+        _kb_ref(env),
         source_artifact_ids=_source_ids(env, title="Unified regex source"),
         proposed_by_agent_id=env["member"]["agentId"],
         title="Unified regex knowledge",
@@ -320,7 +337,7 @@ def test_unified_knowledge_search_tool_supports_regex_and_rag_modes(tmp_path, mo
         tags=["unified-regex"],
     )
     reviewed = team_knowledge_service.review_refinement_proposal(
-        env["base"]["knowledgeBaseId"],
+        _kb_ref(env),
         proposal["proposalId"],
         status="approved",
         reviewed_by_agent_id=env["lead"]["agentId"],
@@ -328,17 +345,17 @@ def test_unified_knowledge_search_tool_supports_regex_and_rag_modes(tmp_path, mo
 
     with agent_directory_service.active_agent_runtime(env["member"]["agentId"], session_id="session-knowledge"):
         regex_result = json.loads(
-            team_knowledge_tools.unified_knowledge_search_tool(
+            team_knowledge_tools.unified_memory_search_tool(
                 query="Regex mode",
                 query_mode="regex",
-                knowledge_base_id=env["base"]["knowledgeBaseId"],
+                knowledge_base_id=_kb_ref(env),
             )
         )
         rag_result = json.loads(
-            team_knowledge_tools.unified_knowledge_search_tool(
+            team_knowledge_tools.unified_memory_search_tool(
                 query="rag mode unified protocol",
                 query_mode="rag",
-                knowledge_base_id=env["base"]["knowledgeBaseId"],
+                knowledge_base_id=_kb_ref(env),
                 limit=3,
             )
         )
@@ -353,16 +370,16 @@ def test_unified_knowledge_search_tool_supports_regex_and_rag_modes(tmp_path, mo
     assert rag_result["results"][0]["knowledgeItemId"] == reviewed["item"]["knowledgeItemId"]
 
 
-def test_unified_knowledge_search_tool_honors_memory_policy_base_ids(tmp_path, monkeypatch):
+def test_unified_memory_search_tool_honors_memory_policy_base_ids(tmp_path, monkeypatch):
     env = _seed_team_knowledge(tmp_path, monkeypatch)
     other_base = team_knowledge_service.create_knowledge_base(env["team"]["teamId"], name="Other Unified KB", actor_agent_id=env["lead"]["agentId"])
 
     with agent_directory_service.active_agent_runtime(env["member"]["agentId"], session_id="session-knowledge"):
         result = json.loads(
-            team_knowledge_tools.unified_knowledge_search_tool(
+            team_knowledge_tools.unified_memory_search_tool(
                 query="",
                 query_mode="metadata",
-                knowledge_base_id=other_base["knowledgeBaseId"],
+                knowledge_base_id=other_base["scopedKnowledgeBaseId"],
             )
         )
 
@@ -371,7 +388,7 @@ def test_unified_knowledge_search_tool_honors_memory_policy_base_ids(tmp_path, m
     assert result["error"] == "knowledge_base_not_in_memory_policy"
 
 
-def test_unified_knowledge_search_tool_limits_unscoped_search_to_memory_policy(tmp_path, monkeypatch):
+def test_unified_memory_search_tool_limits_unscoped_search_to_memory_policy(tmp_path, monkeypatch):
     env = _seed_team_knowledge(tmp_path, monkeypatch)
     other_base = team_knowledge_service.create_knowledge_base(
         env["team"]["teamId"],
@@ -379,7 +396,7 @@ def test_unified_knowledge_search_tool_limits_unscoped_search_to_memory_policy(t
         actor_agent_id=env["lead"]["agentId"],
     )
     allowed_proposal = team_knowledge_service.create_refinement_proposal(
-        env["base"]["knowledgeBaseId"],
+        _kb_ref(env),
         source_artifact_ids=_source_ids(env, title="Allowed unified source"),
         proposed_by_agent_id=env["member"]["agentId"],
         title="Allowed unified knowledge",
@@ -387,11 +404,11 @@ def test_unified_knowledge_search_tool_limits_unscoped_search_to_memory_policy(t
         tags=["unified-policy"],
     )
     blocked_proposal = team_knowledge_service.create_refinement_proposal(
-        other_base["knowledgeBaseId"],
+        other_base["scopedKnowledgeBaseId"],
         source_artifact_ids=_source_ids(
             env,
             title="Blocked unified source",
-            knowledge_base_id=other_base["knowledgeBaseId"],
+            knowledge_base_id=other_base["scopedKnowledgeBaseId"],
         ),
         proposed_by_agent_id=env["lead"]["agentId"],
         title="Blocked unified knowledge",
@@ -399,13 +416,13 @@ def test_unified_knowledge_search_tool_limits_unscoped_search_to_memory_policy(t
         tags=["unified-policy"],
     )
     allowed_item = team_knowledge_service.review_refinement_proposal(
-        env["base"]["knowledgeBaseId"],
+        _kb_ref(env),
         allowed_proposal["proposalId"],
         status="approved",
         reviewed_by_agent_id=env["lead"]["agentId"],
     )["item"]
     blocked_item = team_knowledge_service.review_refinement_proposal(
-        other_base["knowledgeBaseId"],
+        other_base["scopedKnowledgeBaseId"],
         blocked_proposal["proposalId"],
         status="approved",
         reviewed_by_agent_id=env["lead"]["agentId"],
@@ -413,7 +430,7 @@ def test_unified_knowledge_search_tool_limits_unscoped_search_to_memory_policy(t
 
     with agent_directory_service.active_agent_runtime(env["member"]["agentId"], session_id="session-knowledge"):
         result = json.loads(
-            team_knowledge_tools.unified_knowledge_search_tool(
+            team_knowledge_tools.unified_memory_search_tool(
                 query="Unified global search",
                 query_mode="hybrid",
                 limit=10,
@@ -427,15 +444,16 @@ def test_unified_knowledge_search_tool_limits_unscoped_search_to_memory_policy(t
     assert {item["knowledgeBaseId"] for item in result["results"]} == {env["base"]["knowledgeBaseId"]}
 
 
-def test_knowledge_query_tool_honors_memory_policy_base_ids(tmp_path, monkeypatch):
+def test_unified_memory_search_tool_honors_requested_base_memory_policy_ids(tmp_path, monkeypatch):
     env = _seed_team_knowledge(tmp_path, monkeypatch)
     other_base = team_knowledge_service.create_knowledge_base(env["team"]["teamId"], name="Other KB", actor_agent_id=env["lead"]["agentId"])
 
     with agent_directory_service.active_agent_runtime(env["member"]["agentId"], session_id="session-knowledge"):
         result = json.loads(
-            team_knowledge_tools.knowledge_query_tool(
+            team_knowledge_tools.unified_memory_search_tool(
                 query="",
-                knowledge_base_id=other_base["knowledgeBaseId"],
+                query_mode="metadata",
+                knowledge_base_id=other_base["scopedKnowledgeBaseId"],
             )
         )
 
@@ -444,7 +462,7 @@ def test_knowledge_query_tool_honors_memory_policy_base_ids(tmp_path, monkeypatc
     assert result["error"] == "knowledge_base_not_in_memory_policy"
 
 
-def test_knowledge_query_tool_honors_owner_scoped_memory_policy_ids(tmp_path, monkeypatch):
+def test_unified_memory_search_tool_honors_owner_scoped_memory_policy_ids(tmp_path, monkeypatch):
     env = _seed_team_knowledge(tmp_path, monkeypatch)
     second_lead = agent_directory_service.create_agent_instance(display_name="Second Knowledge Lead")
     second_team = team_service.create_team(
@@ -459,26 +477,29 @@ def test_knowledge_query_tool_honors_owner_scoped_memory_policy_ids(tmp_path, mo
     )
     agent_directory_service.update_agent_instance(
         env["member"]["agentId"],
-        tool_policy={"allowedTools": ["knowledge_query_tool"]},
+        tool_policy={"allowedTools": ["unified_memory_search_tool"]},
         memory_policy={"readKnowledgeBaseIds": [env["base"]["scopedKnowledgeBaseId"]]},
     )
 
     with agent_directory_service.active_agent_runtime(env["member"]["agentId"], session_id="session-knowledge"):
         allowed = json.loads(
-            team_knowledge_tools.knowledge_query_tool(
+            team_knowledge_tools.unified_memory_search_tool(
                 query="",
+                query_mode="metadata",
                 knowledge_base_id=env["base"]["scopedKnowledgeBaseId"],
             )
         )
         blocked_scoped = json.loads(
-            team_knowledge_tools.knowledge_query_tool(
+            team_knowledge_tools.unified_memory_search_tool(
                 query="",
+                query_mode="metadata",
                 knowledge_base_id=second_base["scopedKnowledgeBaseId"],
             )
         )
         blocked_raw = json.loads(
-            team_knowledge_tools.knowledge_query_tool(
+            team_knowledge_tools.unified_memory_search_tool(
                 query="",
+                query_mode="metadata",
                 knowledge_base_id=env["base"]["knowledgeBaseId"],
             )
         )
@@ -491,15 +512,15 @@ def test_knowledge_query_tool_honors_owner_scoped_memory_policy_ids(tmp_path, mo
     assert blocked_raw["error"] == "knowledge_base_not_in_memory_policy"
 
 
-def test_knowledge_rag_retrieve_tool_returns_contexts_with_citations(tmp_path, monkeypatch):
+def test_unified_memory_search_tool_returns_rag_results_with_citations(tmp_path, monkeypatch):
     env = _seed_team_knowledge(tmp_path, monkeypatch)
     agent_directory_service.update_agent_instance(
         env["member"]["agentId"],
-        tool_policy={"allowedTools": ["knowledge_rag_retrieve_tool"]},
-        memory_policy={"readKnowledgeBaseIds": [env["base"]["knowledgeBaseId"]]},
+        tool_policy={"allowedTools": ["unified_memory_search_tool"]},
+        memory_policy={"readKnowledgeBaseIds": [_kb_ref(env)]},
     )
     proposal = team_knowledge_service.create_refinement_proposal(
-        env["base"]["knowledgeBaseId"],
+        _kb_ref(env),
         source_artifact_ids=_source_ids(env, title="RAG tool source"),
         proposed_by_agent_id=env["member"]["agentId"],
         title="RAG tool knowledge",
@@ -507,7 +528,7 @@ def test_knowledge_rag_retrieve_tool_returns_contexts_with_citations(tmp_path, m
         tags=["rag-tool"],
     )
     reviewed = team_knowledge_service.review_refinement_proposal(
-        env["base"]["knowledgeBaseId"],
+        _kb_ref(env),
         proposal["proposalId"],
         status="approved",
         reviewed_by_agent_id=env["lead"]["agentId"],
@@ -515,38 +536,40 @@ def test_knowledge_rag_retrieve_tool_returns_contexts_with_citations(tmp_path, m
 
     with agent_directory_service.active_agent_runtime(env["member"]["agentId"], session_id="session-knowledge"):
         result = json.loads(
-            team_knowledge_tools.knowledge_rag_retrieve_tool(
+            team_knowledge_tools.unified_memory_search_tool(
                 query="rag tool context",
-                knowledge_base_id=env["base"]["knowledgeBaseId"],
-                retrieval_mode="hybrid",
-                provider="local",
-                top_k=3,
+                query_mode="rag",
+                knowledge_base_id=_kb_ref(env),
+                limit=3,
                 max_context_chars=240,
             )
         )
 
     assert result["ok"] is True
+    assert result["request"]["backend"] == "local_rag"
     assert result["summary"]["contextCount"] == 1
     assert result["summary"]["citationCount"] == 1
-    assert result["contexts"][0]["source"]["knowledgeItemId"] == reviewed["item"]["knowledgeItemId"]
-    assert result["citations"][0]["contextId"] == result["contexts"][0]["contextId"]
+    assert result["results"][0]["resultType"] == "rag_context"
+    assert result["results"][0]["knowledgeItemId"] == reviewed["item"]["knowledgeItemId"]
+    assert result["citations"][0]["contextId"] == result["results"][0]["resultId"]
     assert result["retrievalPolicy"]["injectsPromptByDefault"] is False
 
 
-def test_knowledge_rag_retrieve_tool_honors_memory_policy_base_ids(tmp_path, monkeypatch):
+def test_unified_memory_search_tool_rag_mode_honors_memory_policy_base_ids(tmp_path, monkeypatch):
     env = _seed_team_knowledge(tmp_path, monkeypatch)
     agent_directory_service.update_agent_instance(
         env["member"]["agentId"],
-        tool_policy={"allowedTools": ["knowledge_rag_retrieve_tool"]},
-        memory_policy={"readKnowledgeBaseIds": [env["base"]["knowledgeBaseId"]]},
+        tool_policy={"allowedTools": ["unified_memory_search_tool"]},
+        memory_policy={"readKnowledgeBaseIds": [_kb_ref(env)]},
     )
     other_base = team_knowledge_service.create_knowledge_base(env["team"]["teamId"], name="Other RAG KB", actor_agent_id=env["lead"]["agentId"])
 
     with agent_directory_service.active_agent_runtime(env["member"]["agentId"], session_id="session-knowledge"):
         result = json.loads(
-            team_knowledge_tools.knowledge_rag_retrieve_tool(
+            team_knowledge_tools.unified_memory_search_tool(
                 query="",
-                knowledge_base_id=other_base["knowledgeBaseId"],
+                query_mode="rag",
+                knowledge_base_id=other_base["scopedKnowledgeBaseId"],
             )
         )
 
@@ -559,18 +582,18 @@ def test_knowledge_rating_suggestion_tool_submits_pending_suggestion_only(tmp_pa
     env = _seed_team_knowledge(tmp_path, monkeypatch)
     agent_directory_service.update_agent_instance(
         env["lead"]["agentId"],
-        tool_policy={"allowedTools": ["knowledge_query_tool", "knowledge_proposal_tool", "knowledge_rating_suggestion_tool"]},
-        memory_policy={"rateKnowledgeBaseIds": [env["base"]["knowledgeBaseId"]]},
+        tool_policy={"allowedTools": ["unified_memory_search_tool", "knowledge_proposal_tool", "knowledge_rating_suggestion_tool"]},
+        memory_policy={"rateKnowledgeBaseIds": [_kb_ref(env)]},
     )
     proposal = team_knowledge_service.create_refinement_proposal(
-        env["base"]["knowledgeBaseId"],
+        _kb_ref(env),
         source_artifact_ids=_source_ids(env, title="Tool rating source"),
         proposed_by_agent_id=env["member"]["agentId"],
         title="Tool rating target",
         content="Rating suggestion tools must not directly update formal knowledge.",
     )
     reviewed = team_knowledge_service.review_refinement_proposal(
-        env["base"]["knowledgeBaseId"],
+        _kb_ref(env),
         proposal["proposalId"],
         status="approved",
         reviewed_by_agent_id=env["lead"]["agentId"],
@@ -579,7 +602,7 @@ def test_knowledge_rating_suggestion_tool_submits_pending_suggestion_only(tmp_pa
     with agent_directory_service.active_agent_runtime(env["lead"]["agentId"], session_id="session-knowledge"):
         result = json.loads(
             team_knowledge_tools.knowledge_rating_suggestion_tool(
-                knowledge_base_id=env["base"]["knowledgeBaseId"],
+                knowledge_base_id=_kb_ref(env),
                 target_type="knowledge_item",
                 knowledge_item_id=reviewed["item"]["knowledgeItemId"],
                 importance_level="high",
@@ -590,7 +613,7 @@ def test_knowledge_rating_suggestion_tool_submits_pending_suggestion_only(tmp_pa
             )
         )
 
-    item = team_knowledge_service.list_knowledge_items(env["base"]["knowledgeBaseId"], agent_id=env["member"]["agentId"])["items"][0]
+    item = team_knowledge_service.list_knowledge_items(_kb_ref(env), agent_id=env["member"]["agentId"])["items"][0]
     assert result["ok"] is True
     assert result["suggestion"]["status"] == "pending"
     assert item["importanceLevel"] == "medium"
