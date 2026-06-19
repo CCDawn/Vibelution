@@ -8,15 +8,18 @@ from fastapi import APIRouter, HTTPException, Query, status
 from pydantic import BaseModel, Field
 
 from core.agent_kernel import (
+    KernelAdapterError,
     KernelError,
     KernelNotFoundError,
     KernelValidationError,
     ack_agent_inbox_message,
     get_kernel_event,
     get_kernel_task,
+    get_kernel_task_timeline,
     handle_kernel_event,
     list_agent_inbox,
     list_kernel_tasks,
+    submit_agent_message_event,
 )
 
 
@@ -47,6 +50,47 @@ class KernelInboxAckPayload(BaseModel):
     consumedByTurnId: str = ""
 
 
+class KernelAgentMessageAdapterPayload(BaseModel):
+    source: str = "manual_api"
+    sender: dict[str, Any] = Field(default_factory=dict)
+    recipientAgentIds: list[str] = Field(default_factory=list)
+    content: str = ""
+    correlationId: str = ""
+    causationId: str = ""
+    wakeTarget: bool = True
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    sourceId: str = ""
+    idempotencyKey: str = ""
+    eventId: str = ""
+
+
+@router.post("/kernel/adapter/agent-message", status_code=status.HTTP_202_ACCEPTED)
+def kernel_agent_message_adapter_create(payload: KernelAgentMessageAdapterPayload) -> dict:
+    try:
+        return submit_agent_message_event(
+            source=payload.source,
+            sender=payload.sender,
+            recipient_agent_ids=payload.recipientAgentIds,
+            content=payload.content,
+            correlation_id=payload.correlationId,
+            causation_id=payload.causationId,
+            wake_target=payload.wakeTarget,
+            metadata=payload.metadata,
+            source_id=payload.sourceId,
+            idempotency_key=payload.idempotencyKey,
+            event_id=payload.eventId,
+        )
+    except KernelAdapterError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except KernelValidationError as exc:
+        detail: dict[str, Any] = {"message": str(exc)}
+        if exc.event:
+            detail["event"] = exc.event
+        raise HTTPException(status_code=422, detail=detail) from exc
+    except KernelError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
 @router.post("/kernel/events", status_code=status.HTTP_202_ACCEPTED)
 def kernel_event_create(payload: KernelEventPayload) -> dict:
     try:
@@ -72,6 +116,16 @@ def kernel_event_detail(event_id: str) -> dict:
 @router.get("/kernel/tasks")
 def kernel_task_list(status: str = "", limit: int = Query(default=50, ge=1, le=300)) -> dict:
     return list_kernel_tasks(status=status, limit=limit)
+
+
+@router.get("/kernel/tasks/{task_id}/timeline")
+def kernel_task_timeline(task_id: str) -> dict:
+    try:
+        return get_kernel_task_timeline(task_id)
+    except KernelValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except KernelNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @router.get("/kernel/tasks/{task_id}")
