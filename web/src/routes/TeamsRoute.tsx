@@ -87,6 +87,7 @@ const SOURCE_COLLECTION_PROMPT_CACHE_POLICY = {
 const SOURCE_COLLECTION_PROMPT_CACHE_MODEL_LABEL = "configured prompt-cache model";
 
 const researchStageRoundStatusQueryKey = (id: string) => ["teams", id, "workflow-orchestration", "stage-rounds", "status"] as const;
+const experimentPlanningStatusQueryKey = (id: string) => ["teams", id, "workflow-orchestration", "experiments", "status"] as const;
 const officialModelEvidenceStatusQueryKey = (id: string) => ["teams", id, "workflow-orchestration", "official-model-evidence", "status"] as const;
 const paperNoteChunkStatusQueryKey = (id: string) => ["teams", id, "workflow-orchestration", "paper-note-chunks", "status"] as const;
 const sourceQualityStatusQueryKey = (id: string) => ["teams", id, "workflow-orchestration", "source-quality", "status"] as const;
@@ -637,11 +638,18 @@ type ResearchStageRound = {
   stageType: ResearchStageType;
   roundNumber: number;
   status: string;
+  title?: string;
   topic: string;
   goal: string;
   sourceRunIds?: string[];
   querySeeds?: string[];
   promptCachePolicy?: TeamWorkflowSourceCollectionRunStartPayload["promptCachePolicy"];
+  experimentPlanRef?: {
+    planId: string;
+    status: string;
+    storagePath: string;
+    updatedAt: string;
+  };
   teamMemoryRecordId?: string;
   coordinationContract?: {
     linkedChatRoomId?: string;
@@ -719,6 +727,114 @@ type ResearchStageRoundStartPayload = {
   };
   boundaries: ResearchStageRoundStatusPayload["boundaries"];
   nextActions?: string[];
+};
+
+type ExperimentPlanChecklistItem = {
+  item: string;
+  label: string;
+  status: "pass" | "needs_attention" | string;
+  note: string;
+};
+
+type ExperimentHypothesisCandidateSummary = {
+  candidateId: string;
+  title: string;
+  summary: string;
+  currentState: string;
+  qualityStatus: string;
+  valid: boolean;
+  validationIssueCount: number;
+  hypothesis: string;
+  baseline: string;
+  expectedBenefit: string;
+  expectedComputeCost: string;
+  experimentPlan: {
+    dataset: string;
+    metric: string;
+    baseline: string;
+    smokePlan: string;
+  };
+  missingExperimentPlanFields: string[];
+  updatedAt: string;
+};
+
+type ExperimentPlanRecord = {
+  planId: string;
+  stageRoundId: string;
+  status: string;
+  title: string;
+  topic: string;
+  goal: string;
+  selectedHypotheses: ExperimentHypothesisCandidateSummary[];
+  hypothesisCandidateIds: string[];
+  experimentPlan: {
+    dataset: string;
+    metric: string;
+    baseline: string;
+    smokePlan: string;
+  };
+  baselineSelection: {
+    baseline: string;
+    status: string;
+    activeBaselineReady: boolean;
+    reason: string;
+  };
+  readinessChecklist: ExperimentPlanChecklistItem[];
+  readiness: {
+    readyForPlanReview: boolean;
+    readyForSmoke: boolean;
+    readyForFullRun: boolean;
+    blockers: string[];
+  };
+  updatedAt: string;
+};
+
+type ExperimentPlanningStatusPayload = {
+  schemaVersion: number;
+  teamId: string;
+  status: string;
+  latestExperimentRound?: ResearchStageRound | null;
+  latestKnowledgeCollectionRound?: ResearchStageRound | null;
+  activePlan?: ExperimentPlanRecord | null;
+  plans: ExperimentPlanRecord[];
+  hypothesisCandidates: ExperimentHypothesisCandidateSummary[];
+  readyHypothesisCandidates: ExperimentHypothesisCandidateSummary[];
+  gaps: Array<{ code: string; severity: string; message: string }>;
+  summary: {
+    experimentRoundCount: number;
+    planCount: number;
+    hypothesisCandidateCount: number;
+    readyHypothesisCandidateCount: number;
+    gapCount: number;
+    activePlanId: string;
+  };
+  readiness: {
+    readyToPlan: boolean;
+    readyForSmoke: boolean;
+    readyForFullRun: boolean;
+    reason: string;
+  };
+  boundaries: {
+    autoExecution: boolean;
+    writesFormalKnowledge: boolean;
+    writesRag: boolean;
+    writesOfficialGraph: boolean;
+    createsExperimentAttempt: boolean;
+    requiresUserDecision: boolean;
+    boundary: string;
+  };
+  storagePath: string;
+  nextActions: string[];
+  updatedAt: string;
+};
+
+type ExperimentPlanCreatePayload = {
+  plan: ExperimentPlanRecord;
+  status: ExperimentPlanningStatusPayload;
+  stageRound: ResearchStageRound;
+  stageRoundStatus: ResearchStageRoundStatusPayload;
+  workflow: TeamWorkflowOrchestration;
+  boundaries: ExperimentPlanningStatusPayload["boundaries"];
 };
 
 type TeamWorkflowOfficialModelEvidenceCoverage = {
@@ -2889,6 +3005,14 @@ export function TeamsRoute({
       ),
     enabled: Boolean(effectiveTeamId && researchWorkflowTeamSelected && teamWorkflowQuery.data),
   });
+  const experimentPlanningStatusQuery = useQuery({
+    queryKey: experimentPlanningStatusQueryKey(effectiveTeamId || "none"),
+    queryFn: () =>
+      fetchJson<ExperimentPlanningStatusPayload>(
+        `/api/teams/${encodeURIComponent(effectiveTeamId)}/workflow-orchestration/experiments/status`,
+      ),
+    enabled: Boolean(effectiveTeamId && researchWorkflowTeamSelected && teamWorkflowQuery.data),
+  });
   const sourceCollectionRunsQuery = useQuery({
     queryKey: queryKeys.teamWorkflowSourceCollectionRuns(effectiveTeamId || "none", SOURCE_COLLECTION_RUN_PREVIEW_LIMIT),
     queryFn: () =>
@@ -3304,6 +3428,7 @@ export function TeamsRoute({
     onSuccess: (payload, variables) => {
       queryClient.setQueryData(researchStageRoundStatusQueryKey(variables.teamId), payload.status);
       queryClient.setQueryData(queryKeys.teamWorkflow(variables.teamId), payload.workflow);
+      void queryClient.invalidateQueries({ queryKey: experimentPlanningStatusQueryKey(variables.teamId) });
       const sourceRunId = payload.run?.runId || payload.stageRound.sourceRunIds?.[0] || "";
       const searchExecution = payload.sourceCollectionSearchExecution;
       if (sourceRunId) {
@@ -3381,6 +3506,30 @@ export function TeamsRoute({
       } else if (variables.stageType === "iteration") {
         setResearchWorkspaceView("iteration");
       }
+    },
+  });
+
+  const createExperimentPlanMutation = useMutation({
+    mutationFn: (payload: { teamId: string; stageRoundId?: string; title?: string }) =>
+      fetchJson<ExperimentPlanCreatePayload>(
+        `/api/teams/${encodeURIComponent(payload.teamId)}/workflow-orchestration/experiments/plan`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            stageRoundId: payload.stageRoundId || "",
+            title: payload.title || "",
+            createdByAgent: sourceCollectionOwnerAgentId,
+            notes: "Created from the experiment planning workspace. No training execution was triggered.",
+          }),
+        },
+      ),
+    onSuccess: (payload, variables) => {
+      queryClient.setQueryData(experimentPlanningStatusQueryKey(variables.teamId), payload.status);
+      queryClient.setQueryData(researchStageRoundStatusQueryKey(variables.teamId), payload.stageRoundStatus);
+      queryClient.setQueryData(queryKeys.teamWorkflow(variables.teamId), payload.workflow);
+      void queryClient.invalidateQueries({ queryKey: experimentPlanningStatusQueryKey(variables.teamId) });
+      void queryClient.invalidateQueries({ queryKey: researchStageRoundStatusQueryKey(variables.teamId) });
     },
   });
 
@@ -3774,6 +3923,19 @@ export function TeamsRoute({
       stageType,
       mode,
       draft: sourceCollectionDraft,
+    });
+  }
+
+  function createExperimentPlanFromWorkspace() {
+    if (!selectedTeam?.teamId || selectedTeamCreateExperimentPlanPending) {
+      return;
+    }
+    const experimentPhase = researchStagePhases.find((phase) => phase.stageType === "experiment");
+    const stageRoundId = experimentPhase?.activeRoundId || experimentPhase?.latestRound?.stageRoundId || experimentPlanningStatus?.latestExperimentRound?.stageRoundId || "";
+    createExperimentPlanMutation.mutate({
+      teamId: selectedTeam.teamId,
+      stageRoundId,
+      title: sourceCollectionDraft.title.trim() || experimentPhase?.latestRound?.title || "",
     });
   }
 
@@ -6170,6 +6332,126 @@ export function TeamsRoute({
     );
   }
 
+  function renderExperimentPlanningLedgerPanel() {
+    const latestMutationPayload = selectedTeamCreateExperimentPlanResult;
+    const statusPayload = latestMutationPayload?.status ?? experimentPlanningStatus;
+    const activePlan = latestMutationPayload?.plan ?? statusPayload?.activePlan ?? null;
+    const hypotheses = statusPayload?.readyHypothesisCandidates?.length
+      ? statusPayload.readyHypothesisCandidates
+      : statusPayload?.hypothesisCandidates ?? [];
+    const canDraftPlan = Boolean(selectedTeam?.teamId && statusPayload?.latestExperimentRound && !selectedTeamCreateExperimentPlanPending);
+    const summary = statusPayload?.summary;
+    return (
+      <section className={styles.experimentLedgerPanel} aria-label={lang === "zh" ? "实验计划账本" : "Experiment planning ledger"}>
+        <div className={styles.experimentLedgerHeader}>
+          <div>
+            <strong>{lang === "zh" ? "实验计划账本" : "Experiment ledger"}</strong>
+            <span>
+              {statusPayload?.readiness.reason
+                || (experimentPlanningStatusQuery.isFetching
+                  ? (lang === "zh" ? "读取实验账本中" : "Loading experiment ledger")
+                  : (lang === "zh" ? "等待实验阶段状态" : "Waiting for experiment status"))}
+            </span>
+          </div>
+          <button type="button" onClick={createExperimentPlanFromWorkspace} disabled={!canDraftPlan}>
+            <Save size={13} />
+            {selectedTeamCreateExperimentPlanPending
+              ? (lang === "zh" ? "生成中" : "Drafting")
+              : (lang === "zh" ? "生成计划草稿" : "Draft plan")}
+          </button>
+        </div>
+        <div className={styles.experimentLedgerStats}>
+          <span>
+            {lang === "zh" ? "计划" : "Plans"}
+            <strong>{summary?.planCount ?? 0}</strong>
+          </span>
+          <span>
+            {lang === "zh" ? "候选假设" : "Hypotheses"}
+            <strong>{summary?.hypothesisCandidateCount ?? 0}</strong>
+          </span>
+          <span>
+            {lang === "zh" ? "可规划" : "Ready"}
+            <strong>{summary?.readyHypothesisCandidateCount ?? 0}</strong>
+          </span>
+          <span>
+            {lang === "zh" ? "缺口" : "Gaps"}
+            <strong>{summary?.gapCount ?? 0}</strong>
+          </span>
+        </div>
+        {activePlan ? (
+          <div className={styles.experimentPlanGrid}>
+            <article className={styles.experimentPlanSummary}>
+              <div>
+                <span>{lang === "zh" ? "当前草稿" : "Active draft"}</span>
+                <strong>{activePlan.title}</strong>
+              </div>
+              <p>{activePlan.goal || activePlan.topic || (lang === "zh" ? "实验目标待补齐" : "Experiment goal pending")}</p>
+              <div className={styles.experimentPlanFields}>
+                <span title={activePlan.experimentPlan.dataset}>{lang === "zh" ? "数据" : "Data"} · {activePlan.experimentPlan.dataset || "-"}</span>
+                <span title={activePlan.experimentPlan.metric}>{lang === "zh" ? "指标" : "Metric"} · {activePlan.experimentPlan.metric || "-"}</span>
+                <span title={activePlan.experimentPlan.baseline}>Baseline · {activePlan.experimentPlan.baseline || "-"}</span>
+                <span title={activePlan.experimentPlan.smokePlan}>Smoke · {activePlan.experimentPlan.smokePlan || "-"}</span>
+              </div>
+            </article>
+            <div className={styles.experimentChecklist}>
+              {activePlan.readinessChecklist.map((item) => (
+                <span key={item.item} className={item.status === "pass" ? styles.experimentChecklistPass : styles.experimentChecklistWarn} title={item.note}>
+                  {item.status === "pass" ? <CheckCircle2 size={12} /> : <AlertTriangle size={12} />}
+                  {item.label}
+                </span>
+              ))}
+            </div>
+          </div>
+        ) : (
+          <div className={styles.experimentLedgerEmpty}>
+            <AlertTriangle size={14} />
+            <span>{lang === "zh" ? "还没有实验计划草稿，先启动实验阶段并生成计划。" : "No experiment plan draft yet. Start the stage and draft a plan."}</span>
+          </div>
+        )}
+        <div className={styles.experimentEvidenceGrid}>
+          <section>
+            <strong>{lang === "zh" ? "候选算法假设" : "Algorithm hypotheses"}</strong>
+            <div className={styles.experimentHypothesisList}>
+              {hypotheses.slice(0, 4).map((candidate) => (
+                <article key={candidate.candidateId}>
+                  <div>
+                    <span>{candidate.valid ? (lang === "zh" ? "可用" : "ready") : (lang === "zh" ? "需修订" : "rework")}</span>
+                    <strong>{candidate.title || candidate.candidateId}</strong>
+                  </div>
+                  <p>{candidate.hypothesis || candidate.summary || "-"}</p>
+                  <small>
+                    {candidate.missingExperimentPlanFields.length
+                      ? `${lang === "zh" ? "缺" : "missing"} ${candidate.missingExperimentPlanFields.join(", ")}`
+                      : `${candidate.experimentPlan.dataset || "-"} / ${candidate.experimentPlan.metric || "-"}`}
+                  </small>
+                </article>
+              ))}
+              {hypotheses.length === 0 ? <span>{lang === "zh" ? "暂无可用假设候选" : "No hypothesis candidates yet"}</span> : null}
+            </div>
+          </section>
+          <section>
+            <strong>{lang === "zh" ? "阻塞项" : "Blockers"}</strong>
+            <div className={styles.experimentGapList}>
+              {(statusPayload?.gaps ?? []).map((gap) => (
+                <span key={gap.code} title={gap.message}>
+                  <AlertTriangle size={12} />
+                  {gap.message}
+                </span>
+              ))}
+              {statusPayload && statusPayload.gaps.length === 0 ? (
+                <span>
+                  <CheckCircle2 size={12} />
+                  {lang === "zh" ? "计划审查入口已就绪" : "Plan review is ready"}
+                </span>
+              ) : null}
+            </div>
+          </section>
+        </div>
+        {selectedTeamCreateExperimentPlanError ? <div className={styles.workflowError}>{selectedTeamCreateExperimentPlanError.message}</div> : null}
+      </section>
+    );
+  }
+
   function renderResearchStageStandalonePage(stageView: Exclude<ResearchStageWorkspaceView, "knowledge_collection">) {
     const stageType: ResearchStageType = stageView;
     const stagePhase = researchStagePhases.find((phase) => phase.stageType === stageType);
@@ -6272,6 +6554,7 @@ export function TeamsRoute({
               </div>
             ) : null}
           </section>
+          {stageView === "experiment" ? renderExperimentPlanningLedgerPanel() : null}
           <section className={styles.researchStageModuleGrid} aria-label={lang === "zh" ? "阶段模块" : "Stage modules"}>
             {config.modules.map(([title, body]) => (
               <article key={title} className={styles.researchStageModuleCard}>
@@ -6541,6 +6824,7 @@ export function TeamsRoute({
   const teamWorkflowPaperNoteChunkStatus = teamWorkflowPaperNoteChunkStatusQuery.data ?? null;
   const researchStageRoundStatus = researchStageRoundStatusQuery.data ?? null;
   const researchStagePhases = researchStageRoundStatus?.phases ?? [];
+  const experimentPlanningStatus = experimentPlanningStatusQuery.data ?? null;
   const sourceCollectionRecords = sourceCollectionRecordsQuery.data?.records ?? [];
   const sourceCollectionAssignments = sourceCollectionAssignmentsQuery.data?.assignments ?? [];
   const sourceCollectionRunStatus = sourceCollectionRunStatusQuery.data ?? null;
@@ -6571,6 +6855,14 @@ export function TeamsRoute({
       : null;
   const selectedTeamStartResearchStageResult =
     startResearchStageRoundMutation.variables?.teamId === selectedTeam?.teamId ? startResearchStageRoundMutation.data : undefined;
+  const selectedTeamCreateExperimentPlanPending =
+    createExperimentPlanMutation.isPending && createExperimentPlanMutation.variables?.teamId === selectedTeam?.teamId;
+  const selectedTeamCreateExperimentPlanError =
+    createExperimentPlanMutation.variables?.teamId === selectedTeam?.teamId && createExperimentPlanMutation.error instanceof Error
+      ? createExperimentPlanMutation.error
+      : null;
+  const selectedTeamCreateExperimentPlanResult =
+    createExperimentPlanMutation.variables?.teamId === selectedTeam?.teamId ? createExperimentPlanMutation.data : undefined;
   const selectedTeamStartSourceCollectionPending =
     startSourceCollectionRunMutation.isPending && startSourceCollectionRunMutation.variables?.teamId === selectedTeam?.teamId;
   const selectedTeamStartSourceCollectionError =

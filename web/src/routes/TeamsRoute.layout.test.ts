@@ -565,6 +565,13 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).not.toContain("搜索计划、步骤记录、资料记录和候选镜像都已落盘");
     expect(routeSource).toContain("返回团队页面");
     expect(routeSource).toContain("实验规划工作台");
+    expect(routeSource).toContain("experimentPlanningStatusQueryKey");
+    expect(routeSource).toContain("renderExperimentPlanningLedgerPanel");
+    expect(routeSource).toContain("实验计划账本");
+    expect(routeSource).toContain("生成计划草稿");
+    expect(routeSource).toContain("baselineSelection");
+    expect(routeSource).toContain("readyForFullRun");
+    expect(routeSource).toContain("No training execution was triggered.");
     expect(routeSource).toContain("迭代优化工作台");
     expect(routeSource).toContain("renderResearchStageStandalonePage");
     expect(routeSource).toContain("不自动进入下一阶段。");

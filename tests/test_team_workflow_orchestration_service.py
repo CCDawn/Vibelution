@@ -1005,6 +1005,74 @@ def test_start_research_stage_round_keeps_experiment_plan_when_coordination_busy
     assert "coordination_round_not_started" not in {item["code"] for item in experiment["stageRound"]["warnings"]}
 
 
+def test_experiment_plan_draft_uses_ready_algorithm_hypotheses_and_blocks_full_run(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = team_service.create_team(name="ai科学研究团队")
+    team_workflow_orchestration_service.record_local_research_model_output(
+        team["teamId"],
+        {
+            "taskType": "algorithm_hypothesis_draft",
+            "title": "Context gated routing",
+            "createdByAgent": "Algorithm Hypothesis Agent",
+            "output": {
+                "candidateType": "algorithm_hypothesis",
+                "sourceRefs": [{"type": "paper", "id": "paper-1", "label": "Paper 1"}],
+                "evidenceRefs": [{"type": "mapping", "id": "mapping-1", "label": "Mapping 1"}],
+                "claims": [{"claim": "Context-gated routing may improve adaptation.", "sourceRef": "paper-1"}],
+                "mechanismMappingIds": ["mapping-1"],
+                "hypothesis": "Context-gated routing improves adaptation under shifting tasks.",
+                "baseline": "standard MoE router",
+                "expectedBenefit": "better task adaptation at equal parameter count",
+                "expectedComputeCost": "one small gating MLP and no extra experts",
+                "experimentPlan": {
+                    "dataset": "synthetic task-switch benchmark",
+                    "metric": "validation accuracy and routing entropy",
+                    "baseline": "standard MoE router",
+                    "smokePlan": "train 200 mini-batches and compare metric direction",
+                },
+                "uncertainty": [],
+                "riskFlags": [],
+                "confidence": 0.52,
+                "nextAction": "send_to_research_review",
+                "requiresReview": True,
+            },
+        },
+    )
+    stage = team_workflow_orchestration_service.start_research_stage_round(
+        team["teamId"],
+        {"stageType": "experiment", "topic": "routing experiment plan"},
+    )
+
+    draft = team_workflow_orchestration_service.create_experiment_plan(
+        team["teamId"],
+        {"stageRoundId": stage["stageRound"]["stageRoundId"], "createdByAgent": "Research Coordination Agent"},
+    )
+    status = team_workflow_orchestration_service.get_experiment_planning_status(team["teamId"])
+
+    assert draft["plan"]["status"] == "draft"
+    assert draft["plan"]["experimentPlan"]["dataset"] == "synthetic task-switch benchmark"
+    assert draft["plan"]["experimentPlan"]["metric"] == "validation accuracy and routing entropy"
+    assert draft["plan"]["baselineSelection"]["activeBaselineReady"] is False
+    assert draft["plan"]["readiness"]["readyForPlanReview"] is True
+    assert draft["plan"]["readiness"]["readyForSmoke"] is False
+    assert "active_baseline_record" in draft["plan"]["readiness"]["blockers"]
+    assert draft["stageRound"]["experimentPlanRef"]["planId"] == draft["plan"]["planId"]
+    assert draft["stageRound"]["planningContract"]["autoExecution"] is False
+    assert status["summary"]["planCount"] == 1
+    assert status["summary"]["readyHypothesisCandidateCount"] == 1
+    assert any(gap["code"] == "active_baseline_not_registered" for gap in status["gaps"])
+    assert status["boundaries"]["autoExecution"] is False
+    assert status["boundaries"]["createsExperimentAttempt"] is False
+
+
+def test_experiment_plan_requires_experiment_stage_round(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = team_service.create_team(name="ai科学研究团队")
+
+    with pytest.raises(team_workflow_orchestration_service.TeamWorkflowOrchestrationError, match="Start an experiment planning stage round"):
+        team_workflow_orchestration_service.create_experiment_plan(team["teamId"], {})
+
+
 def test_transfer_decision_rejects_non_owner_agent(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     team = team_service.create_team(name="挑战杯科研团队")
