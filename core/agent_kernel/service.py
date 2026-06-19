@@ -135,6 +135,77 @@ def get_kernel_task(task_id: str) -> dict[str, Any]:
     return dict(task)
 
 
+def get_kernel_task_timeline(task_id: str) -> dict[str, Any]:
+    """Return a read-only task timeline projection.
+
+    The timeline is derived from the TaskLedger/index and JSONL streams. It is
+    intentionally not persisted as a second source of truth.
+    """
+
+    normalized = _required_id(task_id, label="task id")
+    with _KERNEL_LOCK:
+        store = _store()
+        index = store.load_index()
+        task = index.get("tasksById", {}).get(normalized)
+        if not isinstance(task, dict):
+            _record_kernel_timeline_scene_event(
+                "kernel.timeline.missing_task",
+                task_id=normalized,
+                outcome_status="missing",
+                level="warning",
+            )
+            raise KernelNotFoundError(f"Kernel task not found: {task_id}")
+        task_payload = dict(task)
+        event_id = str(task_payload.get("creatorEventId") or "").strip()
+        event = index.get("eventsById", {}).get(event_id)
+        event_payload = dict(event) if isinstance(event, dict) else {}
+        execution = _task_execution(index, task_payload)
+        outcome = _task_outcome(index, task_payload)
+        proposals = _outcome_proposals(index, outcome)
+        deliveries = list(outcome.get("deliveries") or []) if isinstance(outcome.get("deliveries"), list) else []
+        timeline = _build_kernel_task_timeline(
+            store,
+            task=task_payload,
+            event=event_payload,
+            execution=execution,
+            outcome=outcome,
+            deliveries=deliveries,
+            proposals=proposals,
+        )
+        response = {
+            "taskId": normalized,
+            "task": task_payload,
+            "event": event_payload,
+            "execution": execution,
+            "outcome": outcome,
+            "deliveries": deliveries,
+            "proposals": proposals,
+            "runtimeEvidenceRefs": _kernel_runtime_evidence_refs(
+                event=event_payload,
+                task=task_payload,
+                execution=execution,
+                outcome=outcome,
+            ),
+            "projectionRefs": _kernel_projection_refs(event_payload),
+            "timeline": timeline,
+            "readModel": {
+                "projection": True,
+                "factAuthority": False,
+                "truthSource": "TaskLedger",
+                "generatedAt": utc_now_iso(),
+            },
+        }
+        _record_kernel_timeline_scene_event(
+            "kernel.timeline.loaded",
+            task_id=normalized,
+            event_id=event_id,
+            outcome_id=str(outcome.get("outcomeId") or "").strip(),
+            timeline_item_count=len(timeline),
+            outcome_status=str(outcome.get("status") or task_payload.get("status") or "observed"),
+        )
+        return response
+
+
 def list_kernel_tasks(*, status: str = "", limit: int = 50) -> dict[str, Any]:
     index = _store().load_index()
     normalized_status = str(status or "").strip().lower()
@@ -560,6 +631,246 @@ def _outcome_proposals(index: dict[str, Any], outcome: dict[str, Any]) -> list[d
     return proposals
 
 
+def _build_kernel_task_timeline(
+    store: KernelJsonlStore,
+    *,
+    task: dict[str, Any],
+    event: dict[str, Any],
+    execution: dict[str, Any],
+    outcome: dict[str, Any],
+    deliveries: list[dict[str, Any]],
+    proposals: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    entries: list[dict[str, Any]] = []
+    sequence = 0
+
+    def add_entry(
+        *,
+        kind: str,
+        status: str,
+        at: str,
+        summary: str,
+        refs: list[dict[str, str]] | None = None,
+        fields: dict[str, Any] | None = None,
+    ) -> None:
+        nonlocal sequence
+        sequence += 1
+        item = {
+            "kind": kind,
+            "status": status,
+            "at": at,
+            "summary": _trim(summary, 300),
+            "refs": refs or [],
+            "_sequence": sequence,
+        }
+        if fields:
+            item.update(fields)
+        entries.append(item)
+
+    event_id = str(event.get("eventId") or task.get("creatorEventId") or "").strip()
+    for row in _matching_stream_rows(store, "events", "eventId", event_id, fallback=event):
+        status = str(row.get("status") or "observed").strip()
+        semantic = row.get("semanticPayload") if isinstance(row.get("semanticPayload"), dict) else {}
+        add_entry(
+            kind=f"event.{status}",
+            status=status,
+            at=str(row.get("updatedAt") or row.get("createdAt") or ""),
+            summary=f"Kernel event {status}: {str(semantic.get('semanticType') or 'agent.message').strip()}",
+            refs=[_timeline_ref("event", "eventId", event_id)],
+        )
+
+    task_id = str(task.get("taskId") or "").strip()
+    for row in _matching_stream_rows(store, "tasks", "taskId", task_id, fallback=task):
+        status = str(row.get("status") or "observed").strip()
+        add_entry(
+            kind=f"task.{status}",
+            status=status,
+            at=str(row.get("updatedAt") or row.get("createdAt") or ""),
+            summary=f"Task {status}: {str(row.get('goal') or '').strip()}",
+            refs=[_timeline_ref("task", "taskId", task_id)],
+        )
+
+    work_run_id = str(execution.get("workRunId") or "").strip()
+    for row in _matching_stream_rows(store, "executions", "workRunId", work_run_id, fallback=execution):
+        status = str(row.get("status") or "observed").strip()
+        add_entry(
+            kind=f"execution.{status}",
+            status=status,
+            at=str(row.get("updatedAt") or row.get("createdAt") or row.get("startedAt") or ""),
+            summary=f"WorkRun {status}",
+            refs=[_timeline_ref("execution", "workRunId", work_run_id), _timeline_ref("task", "taskId", task_id)],
+        )
+
+    outcome_id = str(outcome.get("outcomeId") or "").strip()
+    for row in _matching_stream_rows(store, "outcomes", "outcomeId", outcome_id, fallback=outcome):
+        status = str(row.get("status") or "observed").strip()
+        add_entry(
+            kind=f"outcome.{status}",
+            status=status,
+            at=str(row.get("createdAt") or ""),
+            summary=str(row.get("resultSummary") or f"Outcome {status}"),
+            refs=[
+                _timeline_ref("outcome", "outcomeId", outcome_id),
+                _timeline_ref("execution", "workRunId", str(row.get("workRunId") or work_run_id).strip()),
+                _timeline_ref("task", "taskId", task_id),
+            ],
+        )
+
+    delivery_at = str(outcome.get("createdAt") or execution.get("endedAt") or execution.get("updatedAt") or "")
+    for delivery in deliveries:
+        if not isinstance(delivery, dict):
+            continue
+        status = str(delivery.get("status") or "observed").strip()
+        wake = delivery.get("wake") if isinstance(delivery.get("wake"), dict) else {}
+        target_agent_id = str(delivery.get("targetAgentId") or "").strip()
+        inbox_message_id = str(delivery.get("inboxMessageId") or "").strip()
+        wake_status = str(wake.get("wakeStatus") or "").strip()
+        add_entry(
+            kind=f"delivery.{status}",
+            status=status,
+            at=delivery_at,
+            summary=f"Delivery {status} to {target_agent_id}",
+            refs=[
+                _timeline_ref("agent", "agentId", target_agent_id),
+                _timeline_ref("inbox_message", "messageId", inbox_message_id),
+                _timeline_ref("task", "taskId", task_id),
+            ],
+            fields={
+                "targetAgentId": target_agent_id,
+                "inboxMessageId": inbox_message_id,
+                "wakeStatus": wake_status,
+            },
+        )
+
+    proposal_rows = []
+    proposal_ids = {str(item.get("proposalId") or "").strip() for item in proposals if isinstance(item, dict)}
+    for row in store.read_stream("proposals"):
+        if str(row.get("proposalId") or "").strip() in proposal_ids:
+            proposal_rows.append(row)
+    if not proposal_rows:
+        proposal_rows = proposals
+    for proposal in proposal_rows:
+        if not isinstance(proposal, dict):
+            continue
+        status = str(proposal.get("status") or "observed").strip()
+        proposal_id = str(proposal.get("proposalId") or "").strip()
+        add_entry(
+            kind=f"proposal.{status}",
+            status=status,
+            at=str(proposal.get("createdAt") or ""),
+            summary=str(proposal.get("summary") or proposal.get("proposalType") or f"Proposal {status}"),
+            refs=[
+                _timeline_ref("proposal", "proposalId", proposal_id),
+                _timeline_ref("outcome", "outcomeId", str(proposal.get("sourceOutcomeId") or outcome_id).strip()),
+            ],
+        )
+
+    entries.sort(key=lambda item: (str(item.get("at") or ""), int(item.get("_sequence") or 0)))
+    for item in entries:
+        item.pop("_sequence", None)
+        item["refs"] = [ref for ref in item.get("refs", []) if ref.get("id")]
+    return entries
+
+
+def _matching_stream_rows(
+    store: KernelJsonlStore,
+    stream: str,
+    id_key: str,
+    expected_id: str,
+    *,
+    fallback: dict[str, Any],
+) -> list[dict[str, Any]]:
+    expected = str(expected_id or "").strip()
+    if not expected:
+        return [dict(fallback)] if fallback else []
+    rows = [dict(row) for row in store.read_stream(stream) if str(row.get(id_key) or "").strip() == expected]
+    if rows:
+        return rows
+    return [dict(fallback)] if fallback else []
+
+
+def _timeline_ref(kind: str, id_key: str, value: str) -> dict[str, str]:
+    return {"kind": kind, id_key: str(value or "").strip(), "id": str(value or "").strip()}
+
+
+def _kernel_projection_refs(event: dict[str, Any]) -> list[dict[str, str]]:
+    metadata = event.get("metadata") if isinstance(event.get("metadata"), dict) else {}
+    source_surface = str(metadata.get("sourceSurface") or "").strip()
+    refs: list[dict[str, str]] = []
+    seen: set[tuple[str, str, str]] = set()
+
+    def add_ref(kind: str, value: Any, metadata_key: str) -> None:
+        for item in _projection_ref_values(value, default_kind=kind):
+            ref_kind = str(item.get("kind") or kind).strip()
+            ref_id = str(item.get("id") or "").strip()
+            if not ref_kind or not ref_id:
+                continue
+            dedupe_key = (ref_kind, ref_id, metadata_key)
+            if dedupe_key in seen:
+                continue
+            seen.add(dedupe_key)
+            refs.append(
+                {
+                    "kind": ref_kind,
+                    "id": ref_id,
+                    "sourceSurface": source_surface,
+                    "metadataKey": metadata_key,
+                }
+            )
+
+    add_ref("session", metadata.get("sourceSessionId"), "sourceSessionId")
+    add_ref("room", metadata.get("sourceRoomId"), "sourceRoomId")
+    add_ref("message", metadata.get("sourceMessageId"), "sourceMessageId")
+    add_ref("projection", metadata.get("projectionRef"), "projectionRef")
+    return refs
+
+
+def _projection_ref_values(value: Any, *, default_kind: str) -> list[dict[str, str]]:
+    if isinstance(value, dict):
+        ref_id = str(value.get("id") or value.get("ref") or value.get("value") or "").strip()
+        if not ref_id:
+            return []
+        return [{"kind": str(value.get("kind") or default_kind).strip(), "id": ref_id}]
+    if isinstance(value, (list, tuple)):
+        refs: list[dict[str, str]] = []
+        for item in value:
+            refs.extend(_projection_ref_values(item, default_kind=default_kind))
+        return refs
+    ref_id = str(value or "").strip()
+    if not ref_id:
+        return []
+    return [{"kind": default_kind, "id": ref_id}]
+
+
+def _kernel_runtime_evidence_refs(
+    *,
+    event: dict[str, Any],
+    task: dict[str, Any],
+    execution: dict[str, Any],
+    outcome: dict[str, Any],
+) -> list[dict[str, str]]:
+    event_status = str(event.get("status") or "").strip()
+    outcome_status = str(outcome.get("status") or "").strip()
+    if event_status == "rejected":
+        event_code = "kernel.event.rejected"
+    elif outcome_status:
+        event_code = "kernel.event.completed"
+    else:
+        event_code = "kernel.event.observed"
+    return [
+        {
+            "kind": "runtime_scene_event",
+            "component": "agent_kernel",
+            "layer": "runtime",
+            "eventCode": event_code,
+            "eventId": str(event.get("eventId") or task.get("creatorEventId") or "").strip(),
+            "taskId": str(task.get("taskId") or "").strip(),
+            "workRunId": str(execution.get("workRunId") or "").strip(),
+            "outcomeId": str(outcome.get("outcomeId") or "").strip(),
+        }
+    ]
+
+
 def _safe_external_id(value: Any, *, prefix: str) -> str:
     raw = str(value or "").strip()
     if not raw:
@@ -677,6 +988,36 @@ def _record_kernel_scene_event(
                 else "",
                 "recipientCount": len(event.get("recipients") or []),
                 "status": str(event.get("status") or "").strip(),
+            },
+            lifecycle=True,
+        )
+    except Exception:
+        return
+
+
+def _record_kernel_timeline_scene_event(
+    event_code: str,
+    *,
+    task_id: str,
+    event_id: str = "",
+    outcome_id: str = "",
+    timeline_item_count: int = 0,
+    outcome_status: str = "observed",
+    level: str = "info",
+) -> None:
+    try:
+        record_runtime_scene_event(
+            "agent_kernel",
+            "runtime",
+            event_code,
+            message=event_code,
+            level=level,
+            outcome=outcome_status,
+            fields={
+                "taskId": str(task_id or "").strip(),
+                "eventId": str(event_id or "").strip(),
+                "outcomeId": str(outcome_id or "").strip(),
+                "timelineItemCount": int(timeline_item_count or 0),
             },
             lifecycle=True,
         )
