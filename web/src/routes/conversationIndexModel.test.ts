@@ -7,6 +7,7 @@ import {
   conversationGroupLabel,
   hasInvalidChildSessionLink,
   isDiscussionTeam,
+  normalizeConversationIndexTeams,
   mergeVisibleSessionsIntoConversations,
   rootSessionIdFor,
   sessionToConversationSummary,
@@ -109,6 +110,7 @@ describe("conversationIndexModel", () => {
     expect(conversationGroupLabel("selfEvolution", "zh")).toBe("自进化助手");
     expect(conversationGroupLabel("supervisedEvolution", "zh")).toBe("监督进化助手");
     expect(conversationGroupLabel("other", "zh")).toBe("其他助手");
+    expect(conversationGroupLabel("setupTeams", "zh")).toBe("待配置团队");
     expect(conversationGroupLabel("standaloneGroups", "zh")).toBe("未归属群聊");
   });
 
@@ -153,6 +155,20 @@ describe("conversationIndexModel", () => {
     expect(model.groupedConversations.map((group) => group.groupKey)).toEqual(["user"]);
     expect(model.filteredStandaloneGroupConversations).toEqual([]);
     expect(model.filteredTeams.map((item) => item.teamId)).toEqual(["team-1"]);
+  });
+
+  it("deduplicates same-name empty Teams before they reach the chat index", () => {
+    const teams = normalizeConversationIndexTeams([
+      team({ teamId: "team", name: "挑战杯科研团队", memberCount: 0, members: [], linkedChatRoomId: "room-team" }),
+      team({ teamId: "team-2", name: "挑战杯科研团队", memberCount: 0, members: [], linkedChatRoomId: "room-team-2" }),
+      team({ teamId: "research-team", name: "挑战杯ai科研团队", teamSource: "research_organization", memberCount: 4 }),
+    ]);
+
+    expect(teams.map((item) => item.teamId)).toEqual(["team", "research-team"]);
+    expect(teams[0].conversationIndexDuplicateCount).toBe(2);
+    expect(teams[0].conversationIndexHiddenTeamIds).toEqual(["team-2"]);
+    expect(teams[0].conversationIndexSetupReason).toBe("empty_members");
+    expect(teams[1].conversationIndexSetupReason).toBeUndefined();
   });
 
   it("keeps non-discussion evolution system Teams out of the chat index", () => {

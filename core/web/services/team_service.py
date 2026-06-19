@@ -359,13 +359,29 @@ def create_team(
     now = utc_now_iso()
     with _TEAM_LOCK:
         state = _load_index()
+        normalized_members = _normalize_members(members or [], require_active=True)
+        reusable_team = _find_reusable_empty_team(
+            state,
+            normalized_name=normalized_name,
+            team_kind=team_kind,
+            team_source=team_source,
+            team_template_id=team_template_id,
+            requested_member_count=len(normalized_members),
+        )
+        if reusable_team is not None:
+            reused_team_id = str(reusable_team.get("teamId") or "").strip()
+            _record_team_event(
+                "team.create.reused_empty_team",
+                reusable_team,
+                fields={"name": normalized_name, "memberCount": 0},
+            )
+            return get_team(reused_team_id)
         existing_ids = {
             str(item.get("teamId") or "").strip()
             for item in list(state.get("teams") or [])
             if isinstance(item, dict)
         }
         team_id = _new_team_id(normalized_name, existing_ids)
-        normalized_members = _normalize_members(members or [], require_active=True)
         _ensure_members_can_join_team(normalized_members, state, team_id)
         team = {
             "teamId": team_id,
@@ -4208,6 +4224,72 @@ def _find_team(state: dict[str, Any], team_id: str) -> dict[str, Any] | None:
         if isinstance(item, dict) and str(item.get("teamId") or "").strip() == team_id:
             return item
     return None
+
+
+def _normalized_team_dedupe_key(
+    *,
+    name: str,
+    team_kind: str,
+    team_source: str,
+    team_template_id: str,
+) -> tuple[str, str, str, str]:
+    probe = {
+        "name": name,
+        "teamKind": team_kind,
+        "teamSource": team_source,
+        "teamTemplateId": team_template_id,
+    }
+    _apply_team_contract(
+        probe,
+        team_kind=team_kind,
+        team_source=team_source,
+        team_template_id=team_template_id,
+    )
+    return (
+        str(probe.get("teamSource") or TEAM_KIND_DEFAULTS["custom"]["teamSource"]).strip().lower(),
+        str(probe.get("teamKind") or "custom").strip().lower(),
+        str(probe.get("teamTemplateId") or "").strip().lower(),
+        str(name or "").strip().lower(),
+    )
+
+
+def _find_reusable_empty_team(
+    state: dict[str, Any],
+    *,
+    normalized_name: str,
+    team_kind: str,
+    team_source: str,
+    team_template_id: str,
+    requested_member_count: int,
+) -> dict[str, Any] | None:
+    if requested_member_count:
+        return None
+    requested_key = _normalized_team_dedupe_key(
+        name=normalized_name,
+        team_kind=team_kind,
+        team_source=team_source,
+        team_template_id=team_template_id,
+    )
+    candidates: list[dict[str, Any]] = []
+    for item in list(state.get("teams") or []):
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("status") or DEFAULT_TEAM_STATUS).strip() == "archived":
+            continue
+        if len(list(item.get("members") or [])):
+            continue
+        item_key = _normalized_team_dedupe_key(
+            name=str(item.get("name") or "").strip(),
+            team_kind=str(item.get("teamKind") or ""),
+            team_source=str(item.get("teamSource") or ""),
+            team_template_id=str(item.get("teamTemplateId") or ""),
+        )
+        if item_key == requested_key:
+            candidates.append(item)
+    if not candidates:
+        return None
+    candidates.sort(key=lambda item: str(item.get("updatedAt") or item.get("createdAt") or ""))
+    return candidates[0]
 
 
 def _new_team_id(name: str, existing_ids: set[str]) -> str:

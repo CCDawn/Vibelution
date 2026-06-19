@@ -4,7 +4,8 @@ import { describe, expect, it } from "vitest";
 
 import type { ConversationSummary, SessionReferenceAttachment, SessionSummary, Team } from "../api/types";
 import { ConversationIndexTree } from "./ConversationIndexTree";
-import type { ConversationIndexGroup } from "./conversationIndexModel";
+import { DEFAULT_COLLAPSED_CONVERSATION_GROUPS } from "./conversationIndexModel";
+import type { ConversationIndexGroup, ConversationIndexGroupKey } from "./conversationIndexModel";
 
 function directConversation(overrides: Partial<ConversationSummary> = {}): ConversationSummary {
   return {
@@ -66,11 +67,13 @@ function renderTree(overrides: Partial<{
   filteredStandaloneGroupConversations: ConversationSummary[];
   filteredTeams: Team[];
   groupedConversations: ConversationIndexGroup[];
+  searchHasTerm: boolean;
+  collapsedConversationGroups: Record<ConversationIndexGroupKey, boolean>;
 }> = {}) {
   const direct = directConversation();
   const group = groupConversation();
   const groupedConversations = [{
-    groupKey: "chat",
+    groupKey: "user",
     label: "用户会话",
     items: [direct, group],
   }];
@@ -92,14 +95,22 @@ function renderTree(overrides: Partial<{
         summary,
         createdAt: "2026-06-09T00:00:00.000Z",
       })}
-      collapsedConversationGroups={{}}
-      conversationGroupLabel={(groupKey) => (groupKey === "teams" ? "团队" : "未归属群聊")}
+      collapsedConversationGroups={DEFAULT_COLLAPSED_CONVERSATION_GROUPS}
+      conversationGroupLabel={(groupKey) => {
+        if (groupKey === "teams") {
+          return "团队";
+        }
+        if (groupKey === "setupTeams") {
+          return "待配置团队";
+        }
+        return "未归属群聊";
+      }}
       deleteBusyLabel="会话忙碌"
       editingSessionId={null}
       editingSessionTitle=""
       filteredConversationsCount={2}
       filteredStandaloneGroupConversations={[groupConversation({ conversationId: "standalone-room", roomId: "standalone-room", title: "未归属群聊" })]}
-      filteredTeams={[team()]}
+      filteredTeams={[team(), team({ teamId: "team-empty", name: "空团队", members: [], memberCount: 0 })]}
       formatTime={() => "06/09"}
       groupPanelActive={false}
       groupedConversations={groupedConversations}
@@ -134,19 +145,36 @@ describe("ConversationIndexTree", () => {
     expect(markup).toContain("用户改名");
     expect(markup).toContain("项目群聊");
     expect(markup).toContain("研究团队");
+    expect(markup).toContain("待配置团队");
+    expect(markup).not.toContain("空团队");
     expect(markup).toContain("未归属群聊");
     expect(markup).toContain("团队群聊");
   });
 
   it("collapses conversation groups without removing team and standalone sections", () => {
     const markup = renderTree({
-      groupedConversations: [{ groupKey: "chat", label: "用户会话", items: [directConversation()] }],
-      collapsedConversationGroups: { chat: true },
+      groupedConversations: [{ groupKey: "user", label: "用户会话", items: [directConversation()] }],
+      collapsedConversationGroups: { ...DEFAULT_COLLAPSED_CONVERSATION_GROUPS, user: true },
     });
 
     expect(markup).toContain("用户会话");
     expect(markup).not.toContain("用户改名");
     expect(markup).toContain("研究团队");
+    expect(markup).toContain("待配置团队");
     expect(markup).toContain("未归属群聊");
+  });
+
+  it("expands setup Teams when search is active", () => {
+    const markup = renderTree({
+      searchHasTerm: true,
+      filteredConversationsCount: 0,
+      groupedConversations: [],
+      filteredStandaloneGroupConversations: [],
+      filteredTeams: [team({ teamId: "team-empty", name: "空团队", members: [], memberCount: 0 })],
+    });
+
+    expect(markup).toContain("待配置团队");
+    expect(markup).toContain("空团队");
+    expect(markup).toContain("0人");
   });
 });
