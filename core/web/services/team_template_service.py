@@ -15,6 +15,7 @@ from .runtime_scene_service import record_runtime_scene_event
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 MEDICAL_CONSULTATION_TEMPLATE_ID = "medical-consultation-demo"
 HELETECH_MATERNAL_DIGITAL_HEALTH_TEMPLATE_ID = "heletech-maternal-digital-health-demo"
+TEAM_TEMPLATE_REQUIRED_ALLOWED_TOOLS = ("agent_message_tool",)
 
 
 class TeamTemplateError(ValueError):
@@ -295,11 +296,24 @@ def _template_to_summary(template: dict[str, Any]) -> dict[str, Any]:
 
 def _role_tool_policy(role: dict[str, Any]) -> dict[str, Any]:
     policy = dict(role.get("toolPolicy") or {})
+    allowed_tools = _dedupe_tool_names([*TEAM_TEMPLATE_REQUIRED_ALLOWED_TOOLS, *list(policy.get("allowedTools") or [])])
     return {
-        "allowedTools": list(policy.get("allowedTools") or []),
-        "preferredTools": list(policy.get("preferredTools") or []),
+        "allowedTools": allowed_tools,
+        "preferredTools": _dedupe_tool_names(policy.get("preferredTools") or []),
         "writeScopes": list(policy.get("writeScopes") or []),
     }
+
+
+def _dedupe_tool_names(values: Any) -> list[str]:
+    result: list[str] = []
+    seen: set[str] = set()
+    for value in list(values or []):
+        name = str(value or "").strip()
+        if not name or name in seen:
+            continue
+        seen.add(name)
+        result.append(name)
+    return result
 
 
 def _medical_consultation_template() -> dict[str, Any]:

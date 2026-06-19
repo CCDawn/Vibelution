@@ -32,6 +32,7 @@ def isolate_developer_sandbox_config(tmp_path: Path, monkeypatch):
     config_path.write_text("[launcher]\ncontrol_port = 8765\n", encoding="utf-8")
     monkeypatch.setattr(developer_sandbox, "CONFIG_PATH", config_path)
     monkeypatch.setattr(developer_sandbox, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(developer_sandbox, "resolve_workspace_home", lambda *args, **kwargs: tmp_path / "workspace")
     status = developer_sandbox.get_developer_mode_status(config_path=config_path, project_root=tmp_path)
     developer_sandbox.update_developer_mode_status(
         False,

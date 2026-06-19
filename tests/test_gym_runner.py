@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from core.infrastructure import developer_sandbox
 from core.gym import (
     AgentHarnessAdapter,
     Attempt,
@@ -22,6 +23,11 @@ from core.gym import (
     run_promotion_gate_episode,
 )
 from core.gym.runner import main
+
+
+@pytest.fixture(autouse=True)
+def isolate_workspace_home(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(developer_sandbox, "resolve_workspace_home", lambda *args, **kwargs: tmp_path / "workspace")
 
 
 class RunnerFakeAdapter(AgentHarnessAdapter):

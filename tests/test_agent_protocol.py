@@ -158,7 +158,8 @@ class TestToolMessageFlow:
         )
 
         assert len(messages) == 1
-        assert messages[0].content == "[错误] binary result"
+        assert "semanticStatus: failed" in messages[0].content
+        assert messages[0].content.endswith("[错误] binary result")
         assert messages[0].tool_call_id == "call_binary"
 
     def test_seed_chat_history_restores_persisted_tool_results(self):
@@ -1261,7 +1262,7 @@ class TestToolMessageFlow:
         assert any(
             isinstance(message, ToolMessage)
             and message.tool_call_id == "xml_0"
-            and message.content == "xml tool result"
+            and "xml tool result" in message.content
             for message in agent._active_turn_messages
         )
         assert any(
@@ -1494,7 +1495,7 @@ class TestToolMessageFlow:
         assert any(
             isinstance(message, ToolMessage)
             and message.tool_call_id == "xml_hidden"
-            and message.content == "blocked:hidden_tool"
+            and "blocked:hidden_tool" in message.content
             for message in agent._active_turn_messages
         )
 

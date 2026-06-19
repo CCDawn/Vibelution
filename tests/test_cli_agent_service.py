@@ -6,6 +6,7 @@ import sqlite3
 
 import pytest
 
+from core.infrastructure import developer_sandbox
 from core.ui.chat_state import build_chat_state, load_chat_state, save_chat_state
 from core.chat.turn_journal import EVENT_CLI_SESSION_LIFECYCLE, load_turn_events, model_visible_messages_from_events
 from core.web.services import cli_agent_service as service
@@ -81,6 +82,22 @@ CALL :find_dp0
         encoding="utf-8",
     )
     return cmd_path, cli_exe
+
+
+def _isolate_developer_sandbox(monkeypatch, tmp_path):
+    config_path = tmp_path / "config.toml"
+    config_path.write_text("[launcher]\ncontrol_port = 8765\n", encoding="utf-8")
+    monkeypatch.setattr(developer_sandbox, "CONFIG_PATH", config_path)
+    monkeypatch.setattr(developer_sandbox, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(developer_sandbox, "resolve_workspace_home", lambda *args, **kwargs: tmp_path / "workspace")
+    status = developer_sandbox.get_developer_mode_status(config_path=config_path, project_root=tmp_path)
+    developer_sandbox.update_developer_mode_status(
+        True,
+        base_hash=status["configHash"],
+        config_path=config_path,
+        project_root=tmp_path,
+        updated_by="pytest",
+    )
 
 
 def _write_mimocode_session_db(path, *, cwd, session_id="ses_test", created=10_000, updated=10_000):
@@ -1776,6 +1793,7 @@ def test_cli_agent_terminal_resume_intent_spawns_stale_session(monkeypatch, tmp_
 
 
 def test_cli_agent_lifecycle_close_event_persists_once(monkeypatch, tmp_path):
+    _isolate_developer_sandbox(monkeypatch, tmp_path)
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(session_service, "_publish_session_detail_snapshot", lambda *args, **kwargs: None)
     monkeypatch.setattr(session_service, "_record_session_cycle_message", lambda *args, **kwargs: None)
@@ -1828,7 +1846,7 @@ def test_cli_agent_lifecycle_close_event_persists_once(monkeypatch, tmp_path):
     assert lifecycle_messages[0]["metadata"]["lockKey"] == "cli-lock-1"
     assert lifecycle_messages[0]["metadata"]["mode"] == "readonly"
     assert lifecycle_messages[0]["metadata"]["linkedSourceRunIds"] == ["run-1", "run-2"]
-    sidecar_path = tmp_path / "workspace" / "sessions" / "session-1" / "logs" / "cli_agent_lifecycle.jsonl"
+    sidecar_path = session_service._cli_agent_lifecycle_sidecar_path("session-1")
     assert sidecar_path.exists()
     assert len(sidecar_path.read_text(encoding="utf-8").splitlines()) == 1
     journal_events = load_turn_events(tmp_path, "session-1")
@@ -1838,6 +1856,7 @@ def test_cli_agent_lifecycle_close_event_persists_once(monkeypatch, tmp_path):
 
 
 def test_cli_agent_lifecycle_sidecar_restores_detail_after_message_truncation(monkeypatch, tmp_path):
+    _isolate_developer_sandbox(monkeypatch, tmp_path)
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(session_service, "_publish_session_detail_snapshot", lambda *args, **kwargs: None)
     monkeypatch.setattr(session_service, "_record_session_cycle_message", lambda *args, **kwargs: None)
@@ -1881,6 +1900,7 @@ def test_cli_agent_lifecycle_sidecar_restores_detail_after_message_truncation(mo
 
 
 def test_cli_agent_lifecycle_link_event_persists_cli_session_id(monkeypatch, tmp_path):
+    _isolate_developer_sandbox(monkeypatch, tmp_path)
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(session_service, "_publish_session_detail_snapshot", lambda *args, **kwargs: None)
     monkeypatch.setattr(session_service, "_record_session_cycle_message", lambda *args, **kwargs: None)

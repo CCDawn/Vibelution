@@ -104,6 +104,50 @@ rules:
     notes:
       - "Verify effective config behavior, not only source defaults."
 
+  - id: agent-directory-config
+    description: "Agent directory, mode binding, prompt templates, and model reference repair."
+    paths:
+      - "core/web/services/agent_directory_service.py"
+      - "core/web/services/agent_mode_binding_service.py"
+      - "core/web/services/model_reference_service.py"
+      - "core/web/services/prompt_template_service.py"
+      - "tests/test_agent_config_workspace_service.py"
+      - "tests/test_agent_mode_binding_service.py"
+      - "tests/test_model_reference_service.py"
+      - "tests/test_prompt_template_service.py"
+    commands:
+      - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_agent_config_workspace_service.py tests/test_agent_mode_binding_service.py tests/test_model_reference_service.py tests/test_prompt_template_service.py -q"
+    notes:
+      - "Agent configuration changes should validate directory repair, mode bindings, model references, and prompt template contracts together."
+
+  - id: memory-cleanup
+    description: "Memory overview, cleanup, reset, and memory route behavior."
+    paths:
+      - "core/web/services/memory_cleanup_service.py"
+      - "core/web/services/memory_service.py"
+      - "core/web/routes/memory.py"
+      - "tests/test_memory_cleanup_service.py"
+      - "tests/test_web_memory_routes.py"
+      - "tests/test_reset_service.py"
+    commands:
+      - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_memory_cleanup_service.py tests/test_web_memory_routes.py tests/test_reset_service.py -q"
+    notes:
+      - "Memory cleanup changes must keep preview, protection, and route contracts aligned."
+
+  - id: tool-registry
+    description: "Tool registry service, generated tool metadata, and tool route contracts."
+    paths:
+      - "core/web/services/tool_registry_service.py"
+      - "core/web/routes/tools.py"
+      - "tests/test_tool_registry.py"
+      - "tests/test_tool_registry_service.py"
+      - "tests/test_tool_registry_routes.py"
+    commands:
+      - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_tool_registry.py tests/test_tool_registry_service.py tests/test_tool_registry_routes.py -q"
+      - ".\\.venv\\Scripts\\python.exe tests/prompt_debugger.py --suite"
+    notes:
+      - "Tool registry changes need route/service validation and prompt debugger coverage because they affect tool visibility."
+
   - id: git-worktree
     description: "Git service, Git memory, worktree hygiene, and no-console Git process paths."
     paths:

@@ -1,10 +1,12 @@
+from core.infrastructure import developer_sandbox
 from core.ui.chat_state import build_chat_state, load_chat_state, save_chat_state
 from scripts.clear_chat_journal_state import clear_chat_journal_state
 
 
-def test_clear_chat_journal_state_requires_confirmation_and_clears_runtime(tmp_path):
+def test_clear_chat_journal_state_requires_confirmation_and_clears_runtime(tmp_path, monkeypatch):
     project_root = tmp_path / "Vibelution"
     project_root.mkdir()
+    monkeypatch.setattr(developer_sandbox, "resolve_workspace_home", lambda *args, **kwargs: project_root / "workspace")
     save_chat_state(
         project_root,
         build_chat_state(

@@ -12,11 +12,79 @@ import pytest
 import os
 import sys
 from concurrent.futures import ThreadPoolExecutor
+from functools import lru_cache
 from pathlib import Path
 
 # 项目根目录
 PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
+
+
+_RUNTIME_ISOLATION_HINTS = (
+    "core.web.",
+    "core.web import",
+    "core.ui.chat_state",
+    "core.runtime_manager",
+    "runtime_scene_service",
+    "session_service",
+    "chat_room_service",
+    "agent_directory_service",
+    "agent_mode_binding_service",
+    "prompt_template_service",
+    "team_service",
+    "team_workflow_orchestration_service",
+    "team_knowledge_service",
+    "research_service",
+    "data_processing_service",
+    "project_agent_bus_service",
+    "supervised_agent_service",
+    "self_evolution_control_service",
+    "work_run_store",
+    "evolution_store",
+)
+
+
+_SINGLETON_RESET_HINTS = _RUNTIME_ISOLATION_HINTS + (
+    "config.settings",
+    "config import settings",
+    "core.infrastructure.state",
+    "core.infrastructure import state",
+    "core.infrastructure.agent_session",
+    "core.infrastructure import agent_session",
+    "core.infrastructure.event_bus",
+    "core.infrastructure import event_bus",
+    "core.orchestration.task_planner",
+    "core.orchestration import task_planner",
+    "core.infrastructure.tool_executor",
+    "core.infrastructure import tool_executor",
+    "core.prompt_manager",
+    "core.infrastructure.git_memory",
+    "core.infrastructure import git_memory",
+)
+
+
+@lru_cache(maxsize=512)
+def _test_file_needs_runtime_manager_isolation(path_value: str) -> bool:
+    """Return whether a test module needs the expensive web/runtime isolation stack."""
+    if not path_value:
+        return True
+    try:
+        text = Path(path_value).read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        return True
+    return any(hint in text for hint in _RUNTIME_ISOLATION_HINTS)
+
+
+@lru_cache(maxsize=512)
+def _test_file_needs_singleton_reset(path_value: str) -> bool:
+    """Return whether a test module touches singleton-heavy runtime modules."""
+    if not path_value:
+        return True
+    try:
+        text = Path(path_value).read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        return True
+    return any(hint in text for hint in _SINGLETON_RESET_HINTS)
 
 
 def _reset_agent_directory_caches(agent_directory_service):
@@ -41,7 +109,7 @@ def _reset_agent_directory_caches(agent_directory_service):
 # ============================================================================
 
 @pytest.fixture(autouse=True)
-def reset_singletons():
+def reset_singletons(request):
     """
     每个测试前后重置所有模块级单例变量，防止测试间状态泄漏。
 
@@ -52,6 +120,11 @@ def reset_singletons():
     - ToolExecutor (tool_executor.py)
     - PromptManager (prompt_manager.py)
     """
+    path_value = str(getattr(request.node, "path", "") or getattr(request.node, "fspath", "") or "")
+    if not _test_file_needs_singleton_reset(path_value):
+        yield
+        return
+
     # 保存并重置 state.py 单例
     import core.infrastructure.state as _state_mod
     _orig_state = _state_mod._state_manager
@@ -136,10 +209,16 @@ def reset_singletons():
 
 
 @pytest.fixture(autouse=True)
-def isolate_runtime_manager_evolution_store(tmp_path, monkeypatch):
+def isolate_runtime_manager_evolution_store(tmp_path, monkeypatch, request):
     """Keep manager-owned evolution snapshots out of the real .runtime tree."""
+    path_value = str(getattr(request.node, "path", "") or getattr(request.node, "fspath", "") or "")
+    if not _test_file_needs_runtime_manager_isolation(path_value):
+        yield
+        return
+
     from core.runtime_manager import evolution_store
     from core.runtime_manager import work_run_store
+    from core.infrastructure import developer_sandbox
     from core.web.services import runtime_scene_service
     from core.web.services import agent_directory_service
     from core.web.services import agent_mode_binding_service
@@ -159,6 +238,8 @@ def isolate_runtime_manager_evolution_store(tmp_path, monkeypatch):
     work_runs_dir = runtime_manager_dir / "work_runs"
     launcher_state_path = tmp_path / ".runtime" / "launcher" / "state.json"
 
+    monkeypatch.setattr(developer_sandbox, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(developer_sandbox, "resolve_workspace_home", lambda *args, **kwargs: tmp_path / "workspace")
     monkeypatch.setattr(evolution_store, "EVOLUTION_DIR", evolution_dir)
     monkeypatch.setattr(evolution_store, "SELF_RUNS_DIR", self_runs_dir)
     monkeypatch.setattr(evolution_store, "SUPERVISED_RUNS_DIR", supervised_runs_dir)
@@ -295,6 +376,8 @@ def pytest_collection_modifyitems(items):
     """
     from pathlib import Path
 
+    source_cache: dict[Path, str] = {}
+
     for item in items:
         fspath = Path(str(item.fspath))
         rel = fspath.relative_to(PROJECT_ROOT).as_posix()
@@ -304,7 +387,10 @@ def pytest_collection_modifyitems(items):
         stem = fspath.stem  # e.g., "test_shell_tools" → "shell_tools"
 
         # Heuristic: check what the test file imports to determine layer
-        source = fspath.read_text(encoding="utf-8")[:2000]
+        source = source_cache.get(fspath)
+        if source is None:
+            source = fspath.read_text(encoding="utf-8")[:2000]
+            source_cache[fspath] = source
         if "core.infrastructure" in source or "core/infrastructure" in source:
             item.add_marker(pytest.mark.infrastructure)
         elif "core.orchestration" in source or "core/orchestration" in source:

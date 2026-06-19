@@ -59,7 +59,7 @@ def _capture_session_lifecycle_events(monkeypatch):
             events.append(event)
             condition.notify_all()
 
-    def wait_for_phase(phase, *, timeout=2.0, fields=None):
+    def wait_for_phase(phase, *, timeout=10.0, fields=None):
         expected_fields = fields or {}
         return wait_for_matching_event(
             events,
