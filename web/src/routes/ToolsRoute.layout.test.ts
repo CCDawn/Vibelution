@@ -236,12 +236,14 @@ describe("ToolsRoute layout contract", () => {
     expect(routeSource).toContain("window.confirm(bulkCopy.deleteConfirm)");
     const bulkDeleteSection = routeSource.slice(routeSource.indexOf("async function bulkDeleteTools"));
     expect(bulkDeleteSection.indexOf("window.confirm(bulkCopy.deleteConfirm)")).toBeLessThan(
-      bulkDeleteSection.indexOf("fetchJson<GeneratedToolDeleteResponse>"),
+      bulkDeleteSection.indexOf('fetchJson<ToolBulkMutationResponse>("/api/tools/bulk-delete"'),
     );
+    expect(routeSource).toContain("bulkSelectionAnchorToolId");
+    expect(routeSource).toContain("event.ctrlKey || event.metaKey || event.shiftKey");
     expect(routeSource).toContain("canBulkToggleTool(tool)");
     expect(routeSource).toContain("tool.deleteAllowed");
-    expect(routeSource).toContain("fetchJson<ToolRegistryItem>(`/api/tools/generated/");
-    expect(routeSource).toContain("fetchJson<GeneratedToolDeleteResponse>(`/api/tools/");
+    expect(routeSource).toContain('fetchJson<ToolBulkMutationResponse>("/api/tools/generated/bulk-enabled"');
+    expect(routeSource).toContain('fetchJson<ToolBulkMutationResponse>("/api/tools/bulk-delete"');
     expect(routeSource).toContain("styles.bulkActionBar");
     expect(routeSource).toContain("styles.selectableToolRow");
   });
