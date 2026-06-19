@@ -1,4 +1,5 @@
 import pytest
+from langchain_core.messages import AIMessage, ToolMessage
 
 from config import Settings
 from core.llm.client import LLMClient
@@ -147,6 +148,81 @@ def test_llm_client_payload_repairs_unresolved_tool_call_before_provider():
     assert client._last_payload_protocol_summary["payloadValidationResult"] == "passed"
     assert client._last_payload_protocol_summary["payloadMessageAssistantToolCallCount"] == 0
     assert client._last_payload_protocol_summary["payloadMessageToolResultCount"] == 0
+    assert client._last_payload_protocol_summary["payloadMessageMissingToolResultCount"] == 0
+
+
+def test_llm_client_payload_demotes_partial_live_tool_chain_before_provider():
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "openai_compatible",
+            "llm.providers.default.api_key": "test-key",
+            "llm.providers.default.base_url": "https://example.test/v1",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "gpt-4o",
+        }
+    )
+
+    client = LLMClient(config=config, backend=lambda payload: payload)
+    payload = client._build_payload(
+        [
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {"id": "call_ok", "name": "cli_tool", "args": {"command": "echo ok"}},
+                    {"id": "call_timeout", "name": "cli_tool", "args": {"command": "bash -c find ."}},
+                ],
+            ),
+            ToolMessage(content="ok", tool_call_id="call_ok"),
+            {"role": "user", "content": "继续"},
+        ]
+    )
+
+    assert [message["role"] for message in payload["messages"]] == ["assistant", "assistant", "user"]
+    assert "tool_calls" not in payload["messages"][0]
+    assert "历史工具调用未返回结果: cli_tool" in payload["messages"][0]["content"]
+    assert "历史工具结果: cli_tool" in payload["messages"][1]["content"]
+    assert client._last_payload_protocol_summary["payloadValidationResult"] == "passed"
+    assert client._last_payload_protocol_summary["payloadMessageAssistantToolCallCount"] == 0
+    assert client._last_payload_protocol_summary["payloadMessageToolResultCount"] == 0
+    assert client._last_payload_protocol_summary["payloadMessageMissingToolResultCount"] == 0
+    assert client._last_payload_protocol_summary["payloadPolicyProviderToolChainRepaired"] >= 1
+
+
+def test_llm_client_payload_preserves_complete_live_timeout_tool_pair():
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "openai_compatible",
+            "llm.providers.default.api_key": "test-key",
+            "llm.providers.default.base_url": "https://example.test/v1",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "gpt-4o",
+        }
+    )
+
+    client = LLMClient(config=config, backend=lambda payload: payload)
+    payload = client._build_payload(
+        [
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {"id": "call_timeout", "name": "cli_tool", "args": {"command": "bash -c find ."}},
+                ],
+            ),
+            ToolMessage(
+                content="[超时] 命令执行超过 30 秒被强制终止。",
+                tool_call_id="call_timeout",
+            ),
+            {"role": "user", "content": "继续"},
+        ]
+    )
+
+    assert [message["role"] for message in payload["messages"]] == ["assistant", "tool", "user"]
+    assert payload["messages"][0]["tool_calls"][0]["id"] == "call_timeout"
+    assert payload["messages"][1]["tool_call_id"] == "call_timeout"
+    assert client._last_payload_protocol_summary["payloadValidationResult"] == "passed"
+    assert client._last_payload_protocol_summary["payloadMessageAssistantToolCallCount"] == 1
+    assert client._last_payload_protocol_summary["payloadMessageToolResultCount"] == 1
+    assert client._last_payload_protocol_summary["payloadMessagePairedToolResultCount"] == 1
     assert client._last_payload_protocol_summary["payloadMessageMissingToolResultCount"] == 0
 
 

@@ -52,6 +52,37 @@ def test_history_orphan_tool_result_is_demoted_to_semantic_context():
     assert validate_tool_result_pairing(messages).ok
 
 
+def test_provider_turn_messages_demote_partial_live_tool_chain_without_orphan_result():
+    messages = normalize_provider_turn_messages(
+        [
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "call_ok",
+                        "type": "function",
+                        "function": {"name": "cli_tool", "arguments": "{\"command\":\"echo ok\"}"},
+                    },
+                    {
+                        "id": "call_timeout",
+                        "type": "function",
+                        "function": {"name": "cli_tool", "arguments": "{\"command\":\"bash -c find .\"}"},
+                    },
+                ],
+            },
+            {"role": "tool", "tool_call_id": "call_ok", "content": "ok"},
+            {"role": "user", "content": "继续"},
+        ]
+    )
+
+    assert [message["role"] for message in messages] == ["assistant", "assistant", "user"]
+    assert "tool_calls" not in messages[0]
+    assert "历史工具调用未返回结果: cli_tool" in messages[0]["content"]
+    assert "历史工具结果" in messages[1]["content"]
+    assert validate_tool_result_pairing(messages).ok
+
+
 def test_provider_turn_messages_preserve_valid_live_tool_pair():
     messages = normalize_provider_turn_messages(
         [
