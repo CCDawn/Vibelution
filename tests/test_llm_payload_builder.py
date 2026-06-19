@@ -1,4 +1,4 @@
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, ToolMessage
 import pytest
 
 from config import Settings
@@ -128,6 +128,42 @@ def test_deepseek_reasoning_protocol_preserves_assistant_reasoning_roundtrip():
     )
 
     assert payload["messages"][0]["reasoning_content"] == "先读文件再决定"
+
+
+def test_payload_protocol_error_includes_safe_message_snapshot():
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "openai_compatible",
+            "llm.providers.default.api_key": "test-key",
+            "llm.providers.default.base_url": "https://example.test/v1",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "gpt-4o",
+            "llm.profiles.primary.contract": "tool_chat",
+        }
+    )
+    client = LLMClient(config=config, backend=lambda payload: payload)
+
+    with pytest.raises(LLMError) as exc_info:
+        client._build_payload(
+            [
+                AIMessage(
+                    content="",
+                    tool_calls=[
+                        {"id": "dup", "name": "read_file", "args": {"path": "a.py"}},
+                        {"id": "dup", "name": "grep_search", "args": {"query": "needle"}},
+                    ],
+                ),
+                ToolMessage(content="result", tool_call_id="dup"),
+            ]
+        )
+
+    details = exc_info.value.details
+    assert exc_info.value.category == "payload_protocol_error"
+    assert details["payloadValidationErrorType"] == "duplicate_tool_call_id"
+    assert details["payloadMessageAssistantToolCallCount"] == 2
+    assert details["payloadMessageToolResultCount"] == 1
+    assert details["payloadMessageShapeHash"]
+    assert details["payloadMessageShapeTail"][-1]["role"] == "tool"
 
 
 def test_basic_chat_no_tools_blocks_tool_payload_before_provider():
