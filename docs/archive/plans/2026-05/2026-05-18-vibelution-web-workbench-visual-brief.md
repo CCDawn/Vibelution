@@ -4,8 +4,8 @@
 
 **Upstream references:**
 
-- [2026-05-18-vibelution-web-workbench-design.md](/C:/Users/17533/Desktop/Vibelution/docs/plans/2026-05-18-vibelution-web-workbench-design.md)
-- [2026-05-18-vibelution-web-workbench-wireframes.md](/C:/Users/17533/Desktop/Vibelution/docs/plans/2026-05-18-vibelution-web-workbench-wireframes.md)
+- [2026-05-18-vibelution-web-workbench-design.md](2026-05-18-vibelution-web-workbench-design.md)
+- [2026-05-18-vibelution-web-workbench-wireframes.md](2026-05-18-vibelution-web-workbench-wireframes.md)
 
 **Design skill anchor:** `frontend-design`
 
