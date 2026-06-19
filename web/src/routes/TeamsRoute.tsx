@@ -2307,6 +2307,17 @@ function isAiSearchScopeTeam(team: Team | null | undefined) {
   return team.teamId === AI_SEARCH_TEAM_ID || team.teamKind === "ai_search" || team.teamSource === "ai_search";
 }
 
+function isSystemManagedTeam(team: Team | null | undefined) {
+  return isResearchWorkflowTeam(team) || isEvolutionSystemTeam(team) || isAiSearchScopeTeam(team);
+}
+
+function systemManagedTeamArchiveReason(team: Team | null | undefined, lang: "zh" | "en") {
+  if (!team || !isSystemManagedTeam(team)) {
+    return "";
+  }
+  return lang === "zh" ? "系统团队由工作流自动维护，不能在这里归档。" : "System teams are maintained by workflows and cannot be archived here.";
+}
+
 function aiSearchSourceRoleLabel(value: string, lang: "zh" | "en") {
   const normalized = String(value || "").trim();
   const zh: Record<string, string> = {
@@ -6458,7 +6469,7 @@ export function TeamsRoute({
     const latestRound = stagePhase?.latestRound;
     const config = {
       experiment: {
-        eyebrow: lang === "zh" ? "ai科学研究团队 / 实验阶段" : "AI research team / experiment stage",
+        eyebrow: lang === "zh" ? "挑战杯ai科研团队 / 实验阶段" : "Challenge Cup AI research team / experiment stage",
         title: lang === "zh" ? "实验规划工作台" : "Experiment planning workspace",
         description: lang === "zh"
           ? "把已审查知识转成可验证实验，先规划 baseline、指标、数据与执行记录；是否真正进入实验由用户触发。"
@@ -6473,7 +6484,7 @@ export function TeamsRoute({
         ],
       },
       iteration: {
-        eyebrow: lang === "zh" ? "ai科学研究团队 / 迭代阶段" : "AI research team / iteration stage",
+        eyebrow: lang === "zh" ? "挑战杯ai科研团队 / 迭代阶段" : "Challenge Cup AI research team / iteration stage",
         title: lang === "zh" ? "迭代优化工作台" : "Iteration workspace",
         description: lang === "zh"
           ? "把实验结论转成下一轮改进计划，记录复盘、版本、风险和交付门禁；每轮迭代由用户重新触发。"
@@ -6774,6 +6785,7 @@ export function TeamsRoute({
   const selectedTeamSaveCanvasSuccess = saveCanvasMutation.isSuccess && saveCanvasMutation.variables?.teamId === selectedTeam?.teamId;
   const selectedTeamSyncPending = syncTeamChatRoomMutation.isPending && syncTeamChatRoomMutation.variables === selectedTeam?.teamId;
   const selectedTeamArchivePending = archiveTeamMutation.isPending && archiveTeamMutation.variables === selectedTeam?.teamId;
+  const selectedTeamArchiveDisabledReason = systemManagedTeamArchiveReason(selectedTeam, lang);
   const selectedTeamStartRoundPending = startTeamRoundMutation.isPending && startTeamRoundMutation.variables?.teamId === selectedTeam?.teamId;
   const selectedTeamStartRoundResult =
     startTeamRoundMutation.variables?.teamId === selectedTeam?.teamId ? startTeamRoundMutation.data : undefined;
@@ -8070,7 +8082,7 @@ export function TeamsRoute({
       <section className={`${styles.route} ${styles.sourceCollectionPage}`}>
         <header className={`${styles.header} ${styles.sourceCollectionPageHeader}`}>
           <div className={styles.sourceCollectionPageTitleBlock}>
-            <p>{lang === "zh" ? "ai科学研究团队 / 知识搜集阶段" : "AI research team / knowledge collection stage"}</p>
+            <p>{lang === "zh" ? "挑战杯ai科研团队 / 知识搜集阶段" : "Challenge Cup AI research team / knowledge collection stage"}</p>
             <div className={styles.sourceCollectionPageTitleLine}>
               <h1>{lang === "zh" ? "知识搜集工作台" : "Knowledge collection workspace"}</h1>
               <span className={`${styles.sourceCollectionRunBadge} ${sourceCollectionStepClassName(sourceCollectionConsoleState)}`}>
@@ -8158,7 +8170,7 @@ export function TeamsRoute({
         ) : (
           <main className={styles.sourceCollectionPageBody}>
             <section className={styles.sourceCollectionUnavailable}>
-              <strong>{lang === "zh" ? "正在读取 ai科学研究团队" : "Loading AI research team"}</strong>
+              <strong>{lang === "zh" ? "正在读取 挑战杯ai科研团队" : "Loading Challenge Cup AI research team"}</strong>
               <span>
                 {teamDetailQuery.error instanceof Error
                   ? teamDetailQuery.error.message
@@ -8335,10 +8347,11 @@ export function TeamsRoute({
                     type="button"
                     className={styles.dangerButton}
                     onClick={() => selectedTeam?.teamId && archiveTeamMutation.mutate(selectedTeam.teamId)}
-                    disabled={!selectedTeam || selectedTeamArchivePending}
+                    disabled={!selectedTeam || selectedTeamArchivePending || Boolean(selectedTeamArchiveDisabledReason)}
+                    title={selectedTeamArchiveDisabledReason || undefined}
                   >
                     <Archive size={14} />
-                    {lang === "zh" ? "归档" : "Archive"}
+                    {selectedTeamArchiveDisabledReason ? (lang === "zh" ? "系统团队不可归档" : "System team") : (lang === "zh" ? "归档" : "Archive")}
                   </button>
                 </>
               )}
@@ -8410,8 +8423,8 @@ export function TeamsRoute({
                 <strong>{lang === "zh" ? "选择团队后进入对应工作区" : "Select a team to open its workspace"}</strong>
                 <p>
                   {lang === "zh"
-                    ? "顶部只保留 AI 搜索范围团队和 ai科学研究团队两个入口；选择后这里会显示对应团队内容。"
-                    : "The top selector only exposes the AI search scope team and the AI research team; selecting one opens its workspace."}
+                    ? "顶部只保留 AI 搜索范围团队和 挑战杯ai科研团队 两个入口；选择后这里会显示对应团队内容。"
+                    : "The top selector only exposes the AI search scope team and the Challenge Cup AI research team; selecting one opens its workspace."}
                 </p>
                 <div className={styles.emptyCanvasSteps}>
                   <span>{lang === "zh" ? "1 选择团队" : "1 Select team"}</span>
@@ -8427,7 +8440,7 @@ export function TeamsRoute({
           <div className={styles.inspectorHeader}>
             <strong>
               {researchWorkflowTeamSelected && !researchCanvasVisible
-                ? `${lang === "zh" ? "ai科学研究团队" : "AI research team"} · ${researchWorkspaceViewLabel(researchWorkspaceView, lang)}`
+                ? `${lang === "zh" ? "挑战杯ai科研团队" : "Challenge Cup AI research team"} · ${researchWorkspaceViewLabel(researchWorkspaceView, lang)}`
                 : researchCanvasReadOnly
                 ? (lang === "zh" ? "组织画布" : "Organization canvas")
                 : (lang === "zh" ? "节点绑定" : "Node binding")}
@@ -8445,8 +8458,8 @@ export function TeamsRoute({
               <section className={`${styles.nodeBindingSection} ${styles.nodeBindingPlaceholder}`}>
                 <div className={styles.empty}>
                   {lang === "zh"
-                    ? "暂无可用团队。请确认 AI 搜索范围团队和 ai科学研究团队已初始化。"
-                    : "No available team. Confirm the AI search scope team and AI research team are initialized."}
+                    ? "暂无可用团队。请确认 AI 搜索范围团队和 挑战杯ai科研团队 已初始化。"
+                    : "No available team. Confirm the AI search scope team and Challenge Cup AI research team are initialized."}
                 </div>
               </section>
             ) : showNodeBindingPanel && selectedNode ? (
@@ -9553,7 +9566,7 @@ export function TeamsRoute({
                   )
                 ) : (
                   <div className={styles.empty}>
-                    {lang === "zh" ? "选择 research-team / ai科学研究团队后显示挑战杯科研流程。" : "Select research-team to view the Challenge Cup workflow."}
+                    {lang === "zh" ? "选择 research-team / 挑战杯ai科研团队 后显示挑战杯科研流程。" : "Select research-team to view the Challenge Cup workflow."}
                   </div>
                 )}
                 {teamWorkflowQuery.error instanceof Error ? (

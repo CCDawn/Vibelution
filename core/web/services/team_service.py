@@ -27,7 +27,7 @@ from core.logging.logger import debug as _debug_logger
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 SCHEMA_VERSION = 1
 CANVAS_KIND = "team_organization_canvas"
-RESEARCH_TEAM_DISPLAY_NAME = "ai科学研究团队"
+RESEARCH_TEAM_DISPLAY_NAME = "挑战杯ai科研团队"
 AI_SEARCH_TEAM_ID = "ai-search-team"
 AI_SEARCH_TEAM_DISPLAY_NAME = "AI 搜索范围团队"
 DEFAULT_TEAM_STATUS = "active"
@@ -1780,24 +1780,59 @@ def _repair_archived_team_member_agents_for_team(
         return False
     if not _team_kind_allows_member_agent_cascade(team):
         return False
+    changed = _prune_missing_archived_team_members(team, agent_refs=agent_refs)
     agent_ids = _unique_active_member_agent_ids(team, agent_refs=agent_refs)
     if not agent_ids:
-        return False
+        if changed:
+            team["updatedAt"] = utc_now_iso()
+            state["updatedAt"] = team["updatedAt"]
+        return changed
     try:
         _ensure_team_member_agents_can_archive(team, agent_ids)
     except TeamServiceError:
         if strict:
             raise
-        return False
+        return changed
     try:
         _remove_team_member_agents_from_chat_rooms(team, agent_ids)
     except TeamServiceError:
         if strict:
             raise
-        return False
+        return changed
     _archive_team_member_agents(team, agent_ids, reason=reason)
     team["updatedAt"] = utc_now_iso()
     state["updatedAt"] = team["updatedAt"]
+    return True
+
+
+def _prune_missing_archived_team_members(
+    team: dict[str, Any],
+    *,
+    agent_refs: dict[str, dict[str, dict[str, Any]]] | None = None,
+) -> bool:
+    kept_members: list[dict[str, Any]] = []
+    removed_agent_ids: list[str] = []
+    for member in list(team.get("members") or []):
+        if not isinstance(member, dict):
+            continue
+        agent_id = str(member.get("agentId") or "").strip()
+        if not agent_id:
+            continue
+        if _agent_reference(agent_id, include_archived=True, agent_refs=agent_refs):
+            kept_members.append(member)
+            continue
+        removed_agent_ids.append(agent_id)
+    if not removed_agent_ids:
+        return False
+    team["members"] = kept_members
+    _record_team_event(
+        "team.archived_missing_members_pruned",
+        team,
+        fields={
+            "removedAgentIds": removed_agent_ids,
+            "removedAgentCount": len(removed_agent_ids),
+        },
+    )
     return True
 
 
@@ -1848,6 +1883,7 @@ def _members_from_research_organization(organization: dict[str, Any]) -> list[di
             continue
         seen.add(agent_id)
         function_label = _research_member_function_label(item, agent)
+        responsibilities = _research_member_responsibilities(item, agent)
         members.append(
             {
                 "memberId": _safe_token(item.get("nodeId") or agent_id, default=f"member-{index + 1}", max_length=96),
@@ -1856,6 +1892,7 @@ def _members_from_research_organization(organization: dict[str, Any]) -> list[di
                 "agentName": str(agent.get("displayName") or item.get("displayName") or "").strip(),
                 "role": str(item.get("role") or ((agent.get("metadata") or {}) if isinstance(agent.get("metadata"), dict) else {}).get("researchOrgRole") or "").strip(),
                 "purpose": function_label,
+                "responsibilities": responsibilities,
                 "agentStatus": "active",
             }
         )
@@ -1889,6 +1926,7 @@ def _canvas_from_research_organization(organization: dict[str, Any], team: dict[
                 "agentName": str(member.get("agentName") or item.get("displayName") or "").strip(),
                 "role": str(member.get("role") or "").strip(),
                 "purpose": str(member.get("purpose") or "").strip(),
+                "responsibilities": list(member.get("responsibilities") or [])[:8],
             }
         )
     node_ids = {str(node.get("id") or "") for node in nodes}
@@ -2047,6 +2085,43 @@ def _research_member_function_label(item: dict[str, Any], agent: dict[str, Any])
         if joined:
             return trim_lines(joined, max_lines=1).strip()
     return trim_lines(item.get("role") or "科研协作", max_lines=1).strip()
+
+
+def _research_member_responsibilities(item: dict[str, Any], agent: dict[str, Any]) -> list[str]:
+    metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
+    embedded_agent = item.get("agent") if isinstance(item.get("agent"), dict) else {}
+    embedded_metadata = embedded_agent.get("metadata") if isinstance(embedded_agent.get("metadata"), dict) else {}
+    sources = [
+        item.get("responsibilities"),
+        (item.get("teamMembership") if isinstance(item.get("teamMembership"), dict) else {}).get("responsibilities"),
+        embedded_metadata.get("responsibilities"),
+        (embedded_metadata.get("teamMembership") if isinstance(embedded_metadata.get("teamMembership"), dict) else {}).get("responsibilities"),
+        (embedded_metadata.get("taskProfile") if isinstance(embedded_metadata.get("taskProfile"), dict) else {}).get("responsibilities"),
+        metadata.get("responsibilities"),
+        (metadata.get("teamMembership") if isinstance(metadata.get("teamMembership"), dict) else {}).get("responsibilities"),
+        (metadata.get("taskProfile") if isinstance(metadata.get("taskProfile"), dict) else {}).get("responsibilities"),
+        (agent.get("taskProfile") if isinstance(agent.get("taskProfile"), dict) else {}).get("responsibilities"),
+    ]
+    responsibilities: list[str] = []
+    seen: set[str] = set()
+    for source in sources:
+        for value in _responsibility_values(source):
+            normalized = trim_lines(value, max_lines=2).strip()
+            if not normalized or normalized in seen:
+                continue
+            seen.add(normalized)
+            responsibilities.append(normalized)
+            if len(responsibilities) >= 8:
+                return responsibilities
+    return responsibilities
+
+
+def _responsibility_values(value: Any) -> list[str]:
+    if isinstance(value, list):
+        return [str(item or "").strip() for item in value if str(item or "").strip()]
+    if isinstance(value, str):
+        return [item.strip() for item in re.split(r"[；;\n]+", value) if item.strip()]
+    return []
 
 
 def _active_member_agent_ids(
@@ -2361,10 +2436,9 @@ def _ensure_historical_team_chat_room_links(
     if not team_id or not current_room_id:
         return []
     created_room_ids: list[str] = []
+    updated_room_ids: list[str] = []
     for room_id in _historical_team_chat_room_ids(team_id):
         if not room_id or room_id == current_room_id:
-            continue
-        if chat_room_service.get_chat_room_compact(room_id):
             continue
         room_config = {
             **config,
@@ -2372,6 +2446,26 @@ def _ensure_historical_team_chat_room_links(
             "teamRoomRole": "historical",
             "currentLinkedChatRoomId": current_room_id,
         }
+        existing_room = chat_room_service.get_chat_room_detail(room_id)
+        if existing_room:
+            try:
+                chat_room_service.update_chat_room(
+                    room_id,
+                    title=f"{title}（历史）",
+                    participant_session_ids=session_ids,
+                    participant_contexts_by_agent_id=participant_contexts,
+                    allow_empty_participants=True,
+                    mode=str(existing_room.get("mode") or "round_robin"),
+                    purpose=_team_chat_room_purpose_for_update(team, existing_room.get("purpose")),
+                    config={
+                        **dict(existing_room.get("config") or {}),
+                        **room_config,
+                    },
+                )
+            except Exception:
+                continue
+            updated_room_ids.append(room_id)
+            continue
         try:
             chat_room_service.create_chat_room(
                 room_id=room_id,
@@ -2386,14 +2480,16 @@ def _ensure_historical_team_chat_room_links(
         except Exception:
             continue
         created_room_ids.append(room_id)
-    if created_room_ids:
+    if created_room_ids or updated_room_ids:
         _record_team_event(
-            "team.chat_room.history_restored",
+            "team.chat_room.history_synced",
             team,
             fields={
                 "linkedChatRoomId": current_room_id,
                 "historicalRoomIds": created_room_ids,
                 "historicalRoomCount": len(created_room_ids),
+                "historicalUpdatedRoomIds": updated_room_ids,
+                "historicalUpdatedRoomCount": len(updated_room_ids),
             },
         )
     return created_room_ids
@@ -2553,7 +2649,15 @@ def _team_chat_room_needs_sync(
         for room_id in _historical_team_chat_room_ids(str(team.get("teamId") or "").strip())
         if room_id and room_id != linked_room_id
     ]
-    if any(not chat_room_service.get_chat_room_compact(room_id) for room_id in historical_room_ids):
+    if any(
+        _historical_team_chat_room_needs_sync(
+            team,
+            room_id=room_id,
+            current_room_id=linked_room_id,
+            active_member_agent_ids=active_member_agent_ids,
+        )
+        for room_id in historical_room_ids
+    ):
         return True
     team_kind = _infer_team_kind(team)
     if team_kind == "custom":
@@ -2570,6 +2674,44 @@ def _team_chat_room_needs_sync(
     if any(str(config.get(key) or "").strip() != value for key, value in expected_pairs.items() if value):
         return True
     return str(linked_room.get("purpose") or "").strip() != _team_chat_room_purpose_for_update(team, linked_room.get("purpose"))
+
+
+def _historical_team_chat_room_needs_sync(
+    team: dict[str, Any],
+    *,
+    room_id: str,
+    current_room_id: str,
+    active_member_agent_ids: list[str],
+) -> bool:
+    room = chat_room_service.get_chat_room_compact(room_id)
+    if not room:
+        return True
+    participant_agent_ids = [
+        str(participant.get("agentId") or "").strip()
+        for participant in list(room.get("participants") or [])
+        if isinstance(participant, dict) and str(participant.get("agentId") or "").strip()
+    ]
+    if participant_agent_ids != active_member_agent_ids:
+        return True
+    if str(room.get("title") or "").strip() != f"{_team_chat_room_title(team)}（历史）":
+        return True
+    if str(room.get("purpose") or "").strip() != _team_chat_room_purpose_for_update(team, room.get("purpose")):
+        return True
+    config = room.get("config") if isinstance(room.get("config"), dict) else {}
+    expected_pairs = {
+        "source": "team",
+        "teamId": str(team.get("teamId") or "").strip(),
+        "teamName": str(team.get("name") or "").strip(),
+        "teamKind": str(team.get("teamKind") or _infer_team_kind(team)).strip(),
+        "teamCategory": str(team.get("teamCategory") or "").strip(),
+        "teamSource": str(team.get("teamSource") or "").strip(),
+        "teamTemplateId": str(team.get("teamTemplateId") or "").strip(),
+        "teamRoomRole": "historical",
+        "currentLinkedChatRoomId": current_room_id,
+    }
+    if any(str(config.get(key) or "").strip() != value for key, value in expected_pairs.items() if value):
+        return True
+    return config.get("historicalTeamRoom") is not True
 
 
 def _sync_compact_team_chat_room_metadata(
