@@ -794,6 +794,11 @@
         <b class="status-pill">已接入前端/API</b>
       </div>
 <div class="feature-row">
+        <strong>Active baseline artifact</strong>
+        <span>experiments/plans/{planId}/baseline-artifact 登记 baseline 工件路径、复现命令、评估命令和指标快照；登记后 readyForSmoke=true，但 full-run 仍等待 smoke 结果</span>
+        <b class="status-pill">已接入前端/API</b>
+      </div>
+<div class="feature-row">
         <strong>评级建议</strong>
         <span>knowledge_rating_suggestion_tool 只提交 reviewable rating suggestion</span>
         <b class="status-pill ready">已有能力</b>
@@ -1334,15 +1339,15 @@
                 </div>
 <div class="service-row">
                   <b>team_workflow_orchestration_service</b>
-                  <span>已落地：Team 级 workflowOrchestration、ResearchStageRound、CandidateStore、transfer request/decision、source-collection run 启动、DataSearchPlan/query seed 契约、prompt cache/KV 启动门禁、DataRecord -&gt; source_manifest 幂等导入桥、source_quality assessment、paper_note chunk planning、official_model_evidence 证据登记/status，以及 experiment_plans 实验计划账本。</span>
+                  <span>已落地：Team 级 workflowOrchestration、ResearchStageRound、CandidateStore、transfer request/decision、source-collection run 启动、DataSearchPlan/query seed 契约、prompt cache/KV 启动门禁、DataRecord -&gt; source_manifest 幂等导入桥、source_quality assessment、paper_note chunk planning、official_model_evidence 证据登记/status，以及 experiment_plans 实验计划账本和 active baseline artifact 登记。</span>
                 </div>
 <div class="service-row">
                   <b>team_workflows API</b>
-                  <span>已落地：/api/teams/{team_id}/workflow-orchestration、stage-rounds/status、stage-rounds/start、stage-rounds/{stageRoundId}/coordination/retry、stage-rounds/{stageRoundId}/memory-record/retry、source-collection-runs（含 searchPlan/querySeeds/assignedQueries/resultWritebackContract）、candidates/source、data-processing/runs/{runId}/records/{recordId}/source-candidate、candidates/{candidate_id}/source-extraction、source-quality/status、candidates/{candidate_id}/source-quality/assess、paper-note-chunks/status、candidates/{candidate_id}/paper-note-chunks/plan、candidates/{candidate_id}/paper-note-draft（支持 chunkId）、candidates、candidates/validation、candidate-graph、transfers、decide、knowledge-ingestion/status、coordination/status、official-model-evidence/status、official-model-evidence、experiments/status、experiments/plan；coordination/status 返回 communicationBrief。</span>
+                  <span>已落地：/api/teams/{team_id}/workflow-orchestration、stage-rounds/status、stage-rounds/start、stage-rounds/{stageRoundId}/coordination/retry、stage-rounds/{stageRoundId}/memory-record/retry、source-collection-runs（含 searchPlan/querySeeds/assignedQueries/resultWritebackContract）、candidates/source、data-processing/runs/{runId}/records/{recordId}/source-candidate、candidates/{candidate_id}/source-extraction、source-quality/status、candidates/{candidate_id}/source-quality/assess、paper-note-chunks/status、candidates/{candidate_id}/paper-note-chunks/plan、candidates/{candidate_id}/paper-note-draft（支持 chunkId）、candidates、candidates/validation、candidate-graph、transfers、decide、knowledge-ingestion/status、coordination/status、official-model-evidence/status、official-model-evidence、experiments/status、experiments/plan、experiments/plans/{planId}/baseline-artifact；coordination/status 返回 communicationBrief。</span>
                 </div>
 <div class="service-row">
                   <b>TeamsRoute workflow workspace</b>
-                  <span>已落地入口：Teams 页顶部固定横向切换条只暴露 AI 搜索范围团队和 ai科学研究团队，左侧栏已删除；监督进化/自进化模式页各自读取系统 Team 并展示只读团队画布；选择 ai科学研究团队后直接进入 research-team 专属科研控制台；总览只显示知识搜集、实验、迭代三张阶段卡，每张卡一个主操作和一个阶段详情入口。知识搜集卡会显示当前批次、待处理、候选和查询数，主按钮按状态执行开始、下一批搜索、筛选入口或打开工作台，另有新一轮搜集入口。知识搜集页位于 /teams?team=research-team&amp;researchView=knowledge_collection，默认展示高价值状态摘要、状态驱动主操作和对话式 source collection 过程流；点击知识搜集主按钮会通过 stage-rounds/start 创建轮次并立即排队第一批后台 source collection 搜索；执行 source collection 搜索时会写入 source_collection_run 运行快照，让 AppShell 顶部“正在进行”优先显示知识搜集；资料搜集 run 列表通过 data-processing 服务端 teamId/startedFrom 过滤，避免被其它团队批次挤掉；后台 accepted 后 activeWorkRun 会进入控制台和对话流，直到 runStatus 收口；资料搜集、资料筛选、候选入库、候选图谱、共享记忆前审五张步骤卡各自带主按钮并作为页内子页索引，顶部卡片只保留状态、关键数量和主操作，不再显示输入/输出小框；底部只显示当前阶段内容，并拆成结果与 Agent过程；右侧只显示当前步骤操作、当前资料详情、关键数量和当前步骤 Agent 配置；资料筛选会调用资料质量评估 Agent 批量执行，完成后展开、滚动并高亮页内筛选详情；KV/prompt cache 由后端从当前模型库解析，不再依赖旧固定模型 ID，过程流把 KV 缓存模型与执行 Agent 模型分层展示；稳定前缀、动态增量、assignment、query、存储路径和手工回写保留在可展开详情中；默认层移除解释性小字且使用实体工作台背景，避免主题壁纸压住正文；实验页新增实验计划账本，可生成计划草稿并显示 baseline/metric/dataset/smoke 缺口与 full-run 阻塞；迭代页先提供规划启动、轮次状态和边界说明；旧 source_collection 参数兼容映射到知识搜集。</span>
+                  <span>已落地入口：Teams 页顶部固定横向切换条只暴露 AI 搜索范围团队和 ai科学研究团队，左侧栏已删除；监督进化/自进化模式页各自读取系统 Team 并展示只读团队画布；选择 ai科学研究团队后直接进入 research-team 专属科研控制台；总览只显示知识搜集、实验、迭代三张阶段卡，每张卡一个主操作和一个阶段详情入口。知识搜集卡会显示当前批次、待处理、候选和查询数，主按钮按状态执行开始、下一批搜索、筛选入口或打开工作台，另有新一轮搜集入口。知识搜集页位于 /teams?team=research-team&amp;researchView=knowledge_collection，默认展示高价值状态摘要、状态驱动主操作和对话式 source collection 过程流；点击知识搜集主按钮会通过 stage-rounds/start 创建轮次并立即排队第一批后台 source collection 搜索；执行 source collection 搜索时会写入 source_collection_run 运行快照，让 AppShell 顶部“正在进行”优先显示知识搜集；资料搜集 run 列表通过 data-processing 服务端 teamId/startedFrom 过滤，避免被其它团队批次挤掉；后台 accepted 后 activeWorkRun 会进入控制台和对话流，直到 runStatus 收口；资料搜集、资料筛选、候选入库、候选图谱、共享记忆前审五张步骤卡各自带主按钮并作为页内子页索引，顶部卡片只保留状态、关键数量和主操作，不再显示输入/输出小框；底部只显示当前阶段内容，并拆成结果与 Agent过程；右侧只显示当前步骤操作、当前资料详情、关键数量和当前步骤 Agent 配置；资料筛选会调用资料质量评估 Agent 批量执行，完成后展开、滚动并高亮页内筛选详情；KV/prompt cache 由后端从当前模型库解析，不再依赖旧固定模型 ID，过程流把 KV 缓存模型与执行 Agent 模型分层展示；稳定前缀、动态增量、assignment、query、存储路径和手工回写保留在可展开详情中；默认层移除解释性小字且使用实体工作台背景，避免主题壁纸压住正文；实验页新增实验计划账本，可生成计划草稿并登记 active baseline artifact，显示 baseline/metric/dataset/smoke 缺口、readyForSmoke 和 full-run 阻塞；迭代页先提供规划启动、轮次状态和边界说明；旧 source_collection 参数兼容映射到知识搜集。</span>
                 </div>
 <div class="service-row">
                   <b>local_research_worker_model</b>
@@ -1675,6 +1680,11 @@
               <span>基于可用 algorithm_hypothesis 与实验阶段轮次生成 experiment_plan 草稿，挂回 ResearchStageRound；不触发训练 runner。</span>
             </div>
 <div class="blueprint-row compact">
+              <b>Active baseline artifact 登记</b>
+              <strong>/api/teams/{teamId}/workflow-orchestration/experiments/plans/{planId}/baseline-artifact</strong>
+              <span>登记 baseline 工件路径、复现命令、评估命令和指标快照；只解除 smoke 前置 blocker，不创建 ExperimentResult。</span>
+            </div>
+<div class="blueprint-row compact">
               <b>阶段协调显式启动</b>
               <strong>/api/teams/{teamId}/workflow-orchestration/stage-rounds/{stageRoundId}/coordination/retry</strong>
               <span>用户明确需要团队讨论时启动团队协调 round；如果群聊缺失、忙碌或没有可发言成员，会把失败原因写回 coordinationContract；成功后写回 coordinationRoomId/coordinationRoundId。</span>
@@ -1752,7 +1762,7 @@
 <div class="blueprint-row compact">
               <b>实验计划索引</b>
               <strong>workspace/teams/&lt;teamId&gt;/experiment_plans/index.json</strong>
-              <span>保存实验计划草稿、selectedHypotheses、baselineSelection、readinessChecklist 和 full-run blocker。</span>
+              <span>保存实验计划草稿、selectedHypotheses、baselineSelection、activeBaselineArtifact、readinessChecklist 和 full-run blocker。</span>
             </div>
 <div class="blueprint-row compact">
               <b>候选索引</b>
@@ -2264,6 +2274,12 @@
               <span>新增 experiments/status 与 experiments/plan：聚合实验阶段轮次、algorithm_hypothesis 候选、计划草稿和 baseline/metric/dataset/smoke 缺口，并把草稿写入 experiment_plans/index.json。</span>
               <span>Teams 实验阶段页展示实验计划账本，可生成计划草稿；readyForSmoke 与 readyForFullRun 保持 false，直到 active baseline artifact 和 smoke 结果由后续切片登记。</span>
             </div>
+<div class="blueprint-row">
+              <b>M7.1</b>
+              <strong>Active baseline artifact 登记</strong>
+              <span>新增 experiments/plans/{planId}/baseline-artifact：登记 baseline 工件路径、复现命令、评估命令和指标快照，并更新 baselineSelection.activeBaselineReady。</span>
+              <span>登记 active baseline artifact 后 readyForSmoke=true，active_baseline_not_registered 缺口消失；full-run 仍由 smoke_result 阻塞，不触发训练 runner。</span>
+            </div>
       </div>
       <div class="tag-row">
         <span class="tag">DataProcessingRun</span>
@@ -2278,6 +2294,7 @@
 <span class="tag">mechanism_mapping</span>
 <span class="tag">algorithm_hypothesis</span>
 <span class="tag">experiment_plan</span>
+<span class="tag">active_baseline_artifact</span>
 <span class="tag">review_record</span>
 <span class="tag">candidate_graph</span>
 <span class="tag">steward_ingestion_pack</span>

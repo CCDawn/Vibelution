@@ -1630,6 +1630,95 @@ def create_experiment_plan(team_id: str, payload: dict[str, Any] | None = None) 
     }
 
 
+def register_experiment_baseline_artifact(team_id: str, plan_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
+    normalized_plan_id = _normalize_required_id(plan_id, "Experiment plan id is required.")
+    team = team_service.get_team(normalized_team_id)
+    request_payload = payload if isinstance(payload, dict) else {}
+    registered_by_agent = _trim_text(request_payload.get("registeredByAgent"), max_length=160) or DEFAULT_OWNER_AGENT_ID
+    with _WORKFLOW_LOCK:
+        workflow = _load_or_create_workflow(normalized_team_id)
+        stage_store = _load_stage_round_store(normalized_team_id)
+        rounds = _stage_rounds(stage_store)
+        candidate_store = _load_candidate_store(normalized_team_id)
+        plan_store = _load_experiment_plan_store(normalized_team_id)
+        plan = _find_experiment_plan(plan_store, normalized_plan_id)
+        if plan is None:
+            raise TeamWorkflowOrchestrationError("Experiment plan not found.")
+        artifact = _experiment_baseline_artifact_record(plan, request_payload, registered_by_agent=registered_by_agent)
+        baseline_selection = plan.get("baselineSelection") if isinstance(plan.get("baselineSelection"), dict) else {}
+        artifacts = [item for item in list(baseline_selection.get("artifacts") or []) if isinstance(item, dict)]
+        artifacts.append(artifact)
+        baseline_selection["baseline"] = artifact["baseline"]
+        baseline_selection["status"] = "active_artifact_registered"
+        baseline_selection["activeBaselineReady"] = True
+        baseline_selection["activeBaselineArtifactId"] = artifact["artifactId"]
+        baseline_selection["activeBaselineArtifact"] = artifact
+        baseline_selection["artifacts"] = artifacts[-12:]
+        baseline_selection["reason"] = "Active baseline artifact is registered; smoke execution still requires an explicit user trigger."
+        plan["baselineSelection"] = baseline_selection
+        plan["status"] = "baseline_ready"
+        plan["updatedAt"] = artifact["registeredAt"]
+        _refresh_experiment_plan_readiness(plan)
+        plan_store["activePlanId"] = plan["planId"]
+        plan_store["updatedAt"] = artifact["registeredAt"]
+        _write_json(_experiment_plan_store_path(normalized_team_id), plan_store)
+        stage_round = _find_stage_round(rounds, str(plan.get("stageRoundId") or ""))
+        if stage_round is not None:
+            stage_round["experimentPlanRef"] = {
+                "planId": plan["planId"],
+                "status": plan["status"],
+                "storagePath": _relative_path(_experiment_plan_store_path(normalized_team_id)),
+                "baselineArtifactRef": {"artifactId": artifact["artifactId"], "artifactPath": artifact["artifactPath"]},
+                "updatedAt": artifact["registeredAt"],
+            }
+            planning_contract = stage_round.get("planningContract") if isinstance(stage_round.get("planningContract"), dict) else {}
+            planning_contract["currentPlanId"] = plan["planId"]
+            planning_contract["activeBaselineArtifactId"] = artifact["artifactId"]
+            planning_contract["readyForSmoke"] = bool((plan.get("readiness") or {}).get("readyForSmoke"))
+            planning_contract["autoExecution"] = False
+            planning_contract["requiresUserDecision"] = True
+            stage_round["planningContract"] = planning_contract
+            stage_round["status"] = "planning"
+            stage_round["updatedAt"] = artifact["registeredAt"]
+            stage_store["rounds"] = rounds
+            stage_store["updatedAt"] = artifact["registeredAt"]
+            _write_json(_stage_round_store_path(normalized_team_id), stage_store)
+        workflow["updatedAt"] = artifact["registeredAt"]
+        workflow["activeWorkflowItems"] = _upsert_active_item(
+            workflow.get("activeWorkflowItems"),
+            candidate_id=str(plan.get("stageRoundId") or plan["planId"]),
+            current_node=RESEARCH_STAGE_DEFAULTS["experiment"]["currentNode"],
+            status="baseline_artifact_registered",
+            transfer_id="",
+        )
+        _write_json(_workflow_path(normalized_team_id), workflow)
+        status_payload = _experiment_planning_status(normalized_team_id, rounds, candidate_store, plan_store)
+        stage_round_status = get_research_stage_round_status(normalized_team_id)
+    _record_workflow_event(
+        "experiment_plan.baseline_artifact_registered",
+        normalized_team_id,
+        fields={
+            "workflowId": workflow["workflowId"],
+            "stageRoundId": str(plan.get("stageRoundId") or ""),
+            "planId": plan["planId"],
+            "baselineArtifactId": artifact["artifactId"],
+            "readyForSmoke": bool((plan.get("readiness") or {}).get("readyForSmoke")),
+            "readyForFullRun": False,
+            "registeredByAgent": registered_by_agent,
+        },
+    )
+    return {
+        "baselineArtifact": artifact,
+        "plan": plan,
+        "status": status_payload,
+        "stageRoundStatus": stage_round_status,
+        "workflow": _workflow_to_api(normalized_team_id, workflow, candidate_store),
+        "team": {"teamId": team.get("teamId", normalized_team_id), "name": team.get("name", "")},
+        "boundaries": _experiment_planning_boundaries(),
+    }
+
+
 def retry_research_stage_round_coordination(team_id: str, stage_round_id: str) -> dict[str, Any]:
     normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
     normalized_round_id = _normalize_required_id(stage_round_id, "Stage round id is required.")
@@ -8490,7 +8579,9 @@ def _experiment_planning_status(
         active_plan=active_plan,
     )
     status = "blocked"
-    if latest_experiment and active_plan:
+    if latest_experiment and active_plan and bool((active_plan.get("readiness") or {}).get("readyForSmoke")):
+        status = "ready_for_smoke"
+    elif latest_experiment and active_plan:
         status = "planned"
     elif latest_experiment and ready_hypotheses:
         status = "ready_to_plan"
@@ -8586,6 +8677,7 @@ def _build_experiment_plan_record(
         metric=metric,
         baseline=baseline,
         smoke_plan=smoke_plan,
+        active_baseline_artifact=None,
     )
     ready_for_plan_review = all(item["status"] == "pass" for item in checklist if item["item"] != "active_baseline_record")
     blockers = [item["item"] for item in checklist if item["status"] != "pass"]
@@ -8692,6 +8784,78 @@ def _experiment_hypothesis_missing_fields(candidate: dict[str, Any]) -> list[str
     return [field for field in EXPERIMENT_PLAN_REQUIRED_FIELDS if not _has_value(experiment_plan.get(field))]
 
 
+def _find_experiment_plan(plan_store: dict[str, Any], plan_id: str) -> dict[str, Any] | None:
+    for plan in list(plan_store.get("plans") or []):
+        if isinstance(plan, dict) and str(plan.get("planId") or "") == plan_id:
+            return plan
+    return None
+
+
+def _experiment_baseline_artifact_record(
+    plan: dict[str, Any],
+    payload: dict[str, Any],
+    *,
+    registered_by_agent: str,
+) -> dict[str, Any]:
+    experiment_plan = plan.get("experimentPlan") if isinstance(plan.get("experimentPlan"), dict) else {}
+    baseline_selection = plan.get("baselineSelection") if isinstance(plan.get("baselineSelection"), dict) else {}
+    artifact_path = _trim_text(payload.get("artifactPath"), max_length=500)
+    reproduction_command = _trim_text(payload.get("reproductionCommand"), max_length=1200)
+    if not artifact_path:
+        raise TeamWorkflowOrchestrationError("Baseline artifact path is required.")
+    if not reproduction_command:
+        raise TeamWorkflowOrchestrationError("Baseline reproduction command is required.")
+    now = utc_now_iso()
+    return {
+        "artifactId": _new_record_id("baseline-artifact"),
+        "status": "registered",
+        "baseline": _first_non_empty_text(payload.get("baselineName"), baseline_selection.get("baseline"), experiment_plan.get("baseline")),
+        "dataset": _first_non_empty_text(payload.get("datasetRef"), experiment_plan.get("dataset")),
+        "metric": _first_non_empty_text(payload.get("metricName"), experiment_plan.get("metric")),
+        "metricValue": _trim_text(payload.get("metricValue"), max_length=240),
+        "artifactPath": artifact_path,
+        "evidenceRef": _trim_text(payload.get("evidenceRef"), max_length=500),
+        "reproductionCommand": reproduction_command,
+        "evaluationCommand": _trim_text(payload.get("evaluationCommand"), max_length=1200),
+        "sourceRefs": _normalize_ref_list(payload.get("sourceRefs"), max_items=12),
+        "evidenceRefs": _normalize_ref_list(payload.get("evidenceRefs"), max_items=12),
+        "notes": _trim_text(payload.get("notes"), max_length=4000),
+        "metadata": payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {},
+        "registeredByAgent": registered_by_agent,
+        "registeredAt": now,
+    }
+
+
+def _refresh_experiment_plan_readiness(plan: dict[str, Any]) -> None:
+    experiment_plan = plan.get("experimentPlan") if isinstance(plan.get("experimentPlan"), dict) else {}
+    baseline_selection = plan.get("baselineSelection") if isinstance(plan.get("baselineSelection"), dict) else {}
+    active_baseline_artifact = baseline_selection.get("activeBaselineArtifact") if isinstance(baseline_selection.get("activeBaselineArtifact"), dict) else None
+    checklist = _experiment_plan_checklist(
+        stage_round={"stageRoundId": plan.get("stageRoundId", "")} if plan.get("stageRoundId") else {},
+        hypothesis_summaries=[item for item in list(plan.get("selectedHypotheses") or []) if isinstance(item, dict)],
+        dataset=_trim_text(experiment_plan.get("dataset"), max_length=500),
+        metric=_trim_text(experiment_plan.get("metric"), max_length=500),
+        baseline=_trim_text(experiment_plan.get("baseline") or baseline_selection.get("baseline"), max_length=500),
+        smoke_plan=_trim_text(experiment_plan.get("smokePlan"), max_length=1200),
+        active_baseline_artifact=active_baseline_artifact,
+    )
+    smoke_blockers = [item["item"] for item in checklist if item["status"] != "pass"]
+    full_run_blockers = smoke_blockers if smoke_blockers else ["smoke_result"]
+    plan["readinessChecklist"] = checklist
+    plan["readiness"] = {
+        "readyForPlanReview": all(item["status"] == "pass" for item in checklist if item["item"] != "active_baseline_record"),
+        "readyForSmoke": not smoke_blockers,
+        "readyForFullRun": False,
+        "blockers": full_run_blockers,
+    }
+    risk_controls = plan.get("riskControls") if isinstance(plan.get("riskControls"), dict) else {}
+    risk_controls["autoExecution"] = False
+    risk_controls["requiresUserDecision"] = True
+    risk_controls["smokeGateRequired"] = True
+    risk_controls["fullRunBlockedUntil"] = full_run_blockers
+    plan["riskControls"] = risk_controls
+
+
 def _experiment_plan_checklist(
     *,
     stage_round: dict[str, Any],
@@ -8700,7 +8864,14 @@ def _experiment_plan_checklist(
     metric: str,
     baseline: str,
     smoke_plan: str,
+    active_baseline_artifact: dict[str, Any] | None,
 ) -> list[dict[str, str]]:
+    artifact_note = ""
+    if active_baseline_artifact:
+        artifact_note = _trim_text(
+            active_baseline_artifact.get("artifactPath") or active_baseline_artifact.get("evidenceRef"),
+            max_length=1200,
+        )
     return [
         _experiment_checklist_item("experiment_stage_round", "实验轮次", bool(stage_round), "Experiment planning stage round is available."),
         _experiment_checklist_item("algorithm_hypothesis", "算法假设", bool(hypothesis_summaries), f"{len(hypothesis_summaries)} hypothesis candidate(s) selected."),
@@ -8708,7 +8879,12 @@ def _experiment_plan_checklist(
         _experiment_checklist_item("metric", "指标", bool(metric), metric or "Metric is missing."),
         _experiment_checklist_item("baseline", "Baseline", bool(baseline), baseline or "Baseline is missing."),
         _experiment_checklist_item("smoke_plan", "Smoke gate", bool(smoke_plan), smoke_plan or "Smoke plan is missing."),
-        _experiment_checklist_item("active_baseline_record", "Active baseline", False, "Active baseline artifact is not registered in this slice."),
+        _experiment_checklist_item(
+            "active_baseline_record",
+            "Active baseline",
+            bool(active_baseline_artifact),
+            artifact_note or "Active baseline artifact is not registered.",
+        ),
     ]
 
 
@@ -8739,6 +8915,8 @@ def _experiment_planning_gaps(
         gaps.append({"code": "missing_experiment_plan_draft", "severity": "pending", "message": "实验轮次已启动，但还没有 draft plan 账本记录。"})
     if active_plan and not bool((active_plan.get("baselineSelection") or {}).get("activeBaselineReady")):
         gaps.append({"code": "active_baseline_not_registered", "severity": "needs_attention", "message": "已有计划草稿，但 active baseline artifact 仍未登记，不能进入 full run。"})
+    elif active_plan and bool((active_plan.get("readiness") or {}).get("readyForSmoke")) and not bool((active_plan.get("readiness") or {}).get("readyForFullRun")):
+        gaps.append({"code": "smoke_result_not_recorded", "severity": "pending", "message": "active baseline artifact 已登记；等待显式 smoke run 或 smoke 结果登记。"})
     return gaps
 
 
@@ -8749,6 +8927,8 @@ def _experiment_planning_readiness_reason(
 ) -> str:
     if not latest_experiment:
         return "需要先启动实验规划轮次。"
+    if active_plan and bool((active_plan.get("readiness") or {}).get("readyForSmoke")):
+        return "active baseline artifact 已登记；可进入 smoke gate，但 full run 仍等待 smoke 结果。"
     if active_plan:
         return "已有实验计划草稿；下一步补 active baseline artifact 与 smoke 结果。"
     if ready_hypotheses:
@@ -8762,8 +8942,12 @@ def _experiment_planning_next_actions(*, active_plan: dict[str, Any] | None, gap
         return ["Start the experiment planning stage round.", "Keep training execution disabled until a plan is reviewed."]
     if "missing_algorithm_hypotheses" in gap_codes or "incomplete_experiment_plan" in gap_codes:
         return ["Review upstream paper notes, mechanism mappings, and algorithm_hypothesis candidates.", "Repair candidate experimentPlan fields before drafting a plan."]
-    if active_plan:
+    if "active_baseline_not_registered" in gap_codes:
         return ["Review the draft plan checklist.", "Register an active baseline artifact before smoke or full-run execution."]
+    if "smoke_result_not_recorded" in gap_codes:
+        return ["Run or record a smoke result using the registered active baseline artifact.", "Keep full-run execution blocked until smoke evidence is reviewed."]
+    if active_plan:
+        return ["Review the draft plan checklist.", "Keep training execution disabled until the next explicit gate."]
     return ["Draft an experiment plan from ready algorithm hypotheses.", "Do not auto-run training."]
 
 
