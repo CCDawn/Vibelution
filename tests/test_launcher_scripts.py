@@ -763,6 +763,47 @@ def test_desktop_entry_python_bridge_reuses_current_launcher(monkeypatch):
     assert saved_states[-1]["launcherBrowserWindowPid"] == 222
 
 
+def test_desktop_entry_python_bridge_replaces_orphaned_launcher_window(monkeypatch):
+    bridge = _load_desktop_entry_py()
+    state = {
+        "sessionRole": "launcher_control_surface",
+        "launcherBackendPid": 111,
+        "launcherBackendLaunchPid": 111,
+        "launcherBrowserWindowPid": 222,
+        "launcherControlSourceSignature": "source-sig",
+    }
+    calls: list[tuple[str, object]] = []
+    terminated: list[int] = []
+    saved_states: list[dict[str, object]] = []
+
+    @contextlib.contextmanager
+    def fake_lock():
+        yield True
+
+    monkeypatch.setattr(bridge, "_append_log", lambda *args, **kwargs: None)
+    monkeypatch.setattr(bridge, "_single_launcher_open_lock", fake_lock)
+    monkeypatch.setattr(bridge, "_read_state", lambda: dict(state))
+    monkeypatch.setattr(bridge, "_write_state", lambda next_state: saved_states.append(dict(next_state)))
+    monkeypatch.setattr(bridge, "_source_signature", lambda: "source-sig")
+    monkeypatch.setattr(bridge, "_launcher_control_port", lambda: 8765)
+    monkeypatch.setattr(bridge, "_launcher_control_healthy", lambda port: False)
+    monkeypatch.setattr(bridge, "_terminate_pid", lambda pid: terminated.append(pid))
+    monkeypatch.setattr(bridge, "_start_launcher_backend", lambda python_exe, port: calls.append(("backend", port)) or 333)
+    monkeypatch.setattr(bridge, "_open_launcher_window", lambda url: calls.append(("browser", url)) or 444)
+    monkeypatch.setattr(bridge, "_pid_alive", lambda pid: pid == 222)
+
+    result = bridge.main(["--action", "launcher"])
+
+    assert result == 0
+    assert terminated == [222]
+    assert calls == [
+        ("backend", 8765),
+        ("browser", "http://127.0.0.1:8765/launcher"),
+    ]
+    assert saved_states[-1]["launcherBackendPid"] == 333
+    assert saved_states[-1]["launcherBrowserWindowPid"] == 444
+
+
 def test_desktop_entry_python_bridge_does_not_start_when_port_is_already_healthy_without_state(monkeypatch):
     bridge = _load_desktop_entry_py()
     calls: list[str] = []

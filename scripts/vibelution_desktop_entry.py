@@ -460,6 +460,23 @@ def _replace_stale_launcher_control(state: dict[str, object], port: int, current
     return True
 
 
+def _discard_orphaned_launcher_control_window(state: dict[str, object], port: int) -> bool:
+    if _launcher_control_healthy(port):
+        return False
+    pids = [pid for pid in _launcher_pids_from_state(state) if _pid_alive(pid)]
+    if not pids:
+        return False
+    _append_log(
+        "desktop_entry_python.orphaned_launcher_control.replacing",
+        level="warning",
+        port=port,
+        pids=pids,
+    )
+    for pid in pids:
+        _terminate_pid(pid)
+    return True
+
+
 def _save_launcher_state(
     previous_state: dict[str, object],
     *,
@@ -565,6 +582,8 @@ def _open_launcher(args: argparse.Namespace) -> None:
         backend_pid = int(state.get("launcherBackendPid") or 0)
         browser_pid = int(state.get("launcherBrowserWindowPid") or state.get("launcherBrowserLaunchPid") or 0)
         healthy = _launcher_control_healthy(port)
+        if not healthy and _discard_orphaned_launcher_control_window(state, port):
+            browser_pid = 0
         current = healthy and _launcher_backend_source_current(state, backend_pid, current_signature)
         if healthy:
             if current and backend_pid > 0:

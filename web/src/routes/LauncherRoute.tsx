@@ -1904,10 +1904,12 @@ export function LauncherRoute() {
   const controlPlaneIdle = isControlPlaneIdle(evidence);
   const controlBusy = controlMutation.isPending && !(controlPlaneIdle && lifecycleSettled);
   const busy = controlBusy || supervisorMutation.isPending;
-  const startDisabled = busy || !controlPlaneIdle || projectIsOpen || projectIsChanging;
-  const startDisabledReason = busy || !controlPlaneIdle
-    ? copy.startDisabledBusy
-    : projectIsOpen
+  const startDisabled = launcherStatusDisconnected || busy || !controlPlaneIdle || projectIsOpen || projectIsChanging;
+  const startDisabledReason = launcherStatusDisconnected
+    ? copy.loadFailed
+    : busy || !controlPlaneIdle
+      ? copy.startDisabledBusy
+      : projectIsOpen
       ? copy.startDisabledRunning
       : projectIsChanging
         ? copy.startDisabledChanging

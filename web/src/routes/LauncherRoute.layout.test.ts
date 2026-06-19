@@ -24,7 +24,7 @@ describe("LauncherRoute layout contract", () => {
     expect(routerSource).toContain("const LauncherRoute = lazyRoute");
     expect(routerSource).toContain('path: "/launcher"');
     expect(routerSource).toContain("element: <LauncherShell />");
-    expect(routerSource).toContain("lazyElement(<LauncherRoute />)");
+    expect(routerSource).toContain('guardedLazyElement(<LauncherRoute />, "launcher")');
     expect(routerSource).not.toContain('{ path: "launcher", element: lazyElement(<LauncherRoute />) }');
     expect(shellSource).toContain("LazyAppShellUtilityMenu");
     expect(utilityMenuSource).toContain('href="/launcher"');
@@ -63,6 +63,8 @@ describe("LauncherRoute layout contract", () => {
     expect(routeSource).toContain("const controlPlaneIdle = isControlPlaneIdle(evidence)");
     expect(routeSource).toContain("const controlBusy = controlMutation.isPending && !(controlPlaneIdle && lifecycleSettled)");
     expect(routeSource).toContain("const busy = controlBusy || supervisorMutation.isPending");
+    expect(routeSource).toContain("const startDisabled = launcherStatusDisconnected || busy || !controlPlaneIdle || projectIsOpen || projectIsChanging");
+    expect(routeSource).toContain("const startDisabledReason = launcherStatusDisconnected");
     expect(routeSource).toContain("startDisabledReason");
     expect(routeSource).toContain("startDisabledBusy");
     expect(routeSource).toContain("title={startDisabled ? startDisabledReason : copy.start}");
