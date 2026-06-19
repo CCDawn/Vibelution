@@ -334,9 +334,19 @@ type AgentEvent = {
 - 离线 Agent 接收 inbox 事件。
 - 是否唤醒 Agent 是调度策略，不是消息写入本身决定。
 
-## 11. ContextPacket
+## 11. ContextPacket 与 ContextManifest
 
 `ContextPacket` 定义 Agent 在一次运行前看到什么。
+
+实现上不建议把每次完整上下文都作为大对象持久化。第一版协议应把上下文拆成：
+
+```text
+ContextManifest = 可追踪、可保存、可复现的上下文清单
+ContextPacket = 运行时实际交给 Agent 的上下文视图
+ContextResolver = 按权限和引用延迟解析上下文内容
+```
+
+也就是说，协议层保留 `ContextPacket` 作为概念，但实现层优先使用 `ContextManifest + lazy resolver`，避免每次执行都复制大段会话、记忆、工具输出和 workspace 状态。
 
 建议字段：
 
@@ -370,6 +380,36 @@ type ContextPacket = {
 - 群聊内容必须保留发言者身份。
 - 工具结果过大时只进入摘要和引用。
 - 未授权项目记忆不能默认进入 Agent 上下文。
+- 长上下文应保存引用、摘要、hash、range，而不是无界复制全文。
+- 持久化优先保存 `ContextManifest`，运行时再解析成 `ContextPacket`。
+
+建议补充的 `ContextManifest` 字段：
+
+```ts
+type ContextManifest = {
+  manifestId: string;
+  agentId: string;
+  taskId?: string;
+  workRunId?: string;
+  sessionId?: string;
+  roomId?: string;
+  sourceRefs: ContextSourceRef[];
+  omittedRefs: ContextSourceRef[];
+  resolverPolicyId: string;
+  tokenBudget?: number;
+  summary: string;
+  createdAt: string;
+};
+```
+
+这样未来可以支持：
+
+- 运行时按需取上下文；
+- 失败后重建“当时看到了什么”；
+- 大上下文缓存；
+- 权限审计；
+- context diff；
+- 后续多 Agent 共享部分上下文但不共享全部私有记忆。
 
 ## 12. KernelOutcome
 
@@ -439,6 +479,34 @@ rolled_back
 - 工具权限和策略变化需要审查。
 - 代码和配置变化必须走 worktree、claim、validation、merge。
 - 自进化输出默认是参考，不能直接变成长期原则。
+
+第一版不应把 `EvaluationGate` 做成同步阻塞函数。它应是异步 proposal state machine。
+
+建议状态机：
+
+```text
+draft
+queued
+reviewing
+needs_user_decision
+approved
+rejected
+applied
+expired
+conflict
+superseded
+rolled_back
+```
+
+关键规则：
+
+- runtime 可以继续执行，不必等待所有 proposal 立刻评审。
+- proposal 进入 `queued` 后由用户、监督 Agent、或指定 reviewer 处理。
+- 需要用户确认的 proposal 不能被普通 Agent 自动批准。
+- 自动批准只允许用于低风险、明确授权、可回滚的 proposal。
+- `applied` 必须记录 applied evidence。
+- `conflict` 必须说明冲突对象，例如 memory version、policy version、workspace file 或 task status。
+- proposal 超时不能静默应用，应进入 `expired` 或升级为 `needs_user_decision`。
 
 ## 14. 高层架构
 
