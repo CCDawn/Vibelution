@@ -10,16 +10,13 @@ from pydantic import BaseModel, Field
 from core.web.services.team_service import (
     TeamNotFoundError,
     TeamServiceError,
-    ai_search_system_team_missing,
     archive_team,
     create_team,
-    ensure_ai_search_system_team,
-    ensure_evolution_system_teams,
-    evolution_system_teams_missing,
     get_team,
     get_team_canvas,
     list_ai_search_source_scope_runs,
     list_teams_compact,
+    request_system_team_bootstrap,
     save_team_canvas,
     send_team_message,
     start_ai_search_source_scope_run,
@@ -78,11 +75,9 @@ class AiSearchRunStartPayload(BaseModel):
 
 @router.get("/teams")
 def team_list(includeArchived: bool = False) -> dict:
-    if evolution_system_teams_missing():
-        ensure_evolution_system_teams()
-    if ai_search_system_team_missing():
-        ensure_ai_search_system_team()
-    return list_teams_compact(include_archived=includeArchived)
+    payload = list_teams_compact(include_archived=includeArchived)
+    payload["systemTeamBootstrap"] = request_system_team_bootstrap(reason="team_list")
+    return payload
 
 
 @router.post("/teams", status_code=status.HTTP_201_CREATED)
