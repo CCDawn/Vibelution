@@ -286,7 +286,7 @@
                 <span class="num">10</span>
                 <h3>实验迭代闭环</h3>
                 <p>把实验与迭代合成一个模板化 Research Loop：按算法模型、仿真模拟、数据集基准、环境探针、资料审查等问题类型切换模板，先登记人工证据和决策，不接沙盒 runner。</p>
-                <div class="tag-row"><span class="tag active">Research Loop 模板化流程 API 已接入</span><span class="tag">Research Loop Agent / Experiment Ledger Service</span></div>
+                <div class="tag-row"><span class="tag active">Research Loop 模板化流程与 Teams 实验面板已接入</span><span class="tag">Research Loop Agent / Experiment Ledger Service</span></div>
               </a>
 <a class="node-card" href="research_flow_pages/11-iteration-versioning.html">
                 <span class="num">11</span>
@@ -800,7 +800,7 @@
       </div>
 <div class="feature-row">
         <strong>实验计划账本</strong>
-        <span>experiments/status 与 experiments/plan 聚合实验轮次、算法假设、计划草稿和 baseline/metric/dataset/smoke 缺口；Teams 实验页可生成计划草稿并明确 full-run 阻塞</span>
+        <span>experiments/status 与 experiments/plan 聚合实验轮次、算法假设、计划草稿和 baseline/metric/dataset/smoke 缺口；Teams 实验页可生成计划草稿并明确 full-run 与知识入库阻塞</span>
         <b class="status-pill">已接入前端/API</b>
       </div>
 <div class="feature-row">
@@ -811,6 +811,21 @@
 <div class="feature-row">
         <strong>Smoke 结果登记</strong>
         <span>experiments/plans/{planId}/smoke-result 登记 smoke 指标、结果路径、日志引用和 gateDecision；Teams 实验账本可登记和回显 active smoke，passed 后 readyForFullRun=true，但仍不自动训练</span>
+        <b class="status-pill">已接入前端/API</b>
+      </div>
+<div class="feature-row">
+        <strong>Full-run 结果登记</strong>
+        <span>experiments/plans/{planId}/full-run-result 登记外部 full-run 指标、结果路径、日志和配置引用；Teams 实验账本只记录手工证据，不触发训练 runner</span>
+        <b class="status-pill">已接入前端/API</b>
+      </div>
+<div class="feature-row">
+        <strong>实验结果入库请求</strong>
+        <span>experiments/plans/{planId}/knowledge-ingestion-request 生成 experiment_result_pack 并通知 Knowledge Steward Agent；正式 Team Knowledge/RAG/official graph 仍由 Steward 复核后写入</span>
+        <b class="status-pill">已接入前端/API</b>
+      </div>
+<div class="feature-row">
+        <strong>Research Loop 模板</strong>
+        <span>research-loop/templates/status/loops/evidence/decision 支持算法模型、仿真模拟、数据集基准、环境探针等模板；Teams 实验页和迭代页共享同一模板切换、证据登记和决策面板</span>
         <b class="status-pill">已接入前端/API</b>
       </div>
 <div class="feature-row">
@@ -1365,15 +1380,15 @@
                 </div>
 <div class="service-row">
                   <b>team_workflow_orchestration_service</b>
-                  <span>已落地：Team 级 workflowOrchestration、ResearchStageRound、CandidateStore、transfer request/decision、source-collection run 启动、DataSearchPlan/query seed 契约、prompt cache/KV 启动门禁、DataRecord -&gt; source_manifest 幂等导入桥、source_quality assessment、paper_note chunk planning、official_model_evidence 证据登记/status，以及 experiment_plans 实验计划账本、active baseline artifact 和 smoke result 登记。</span>
+                  <span>已落地：Team 级 workflowOrchestration、ResearchStageRound、CandidateStore、transfer request/decision、source-collection run 启动、DataSearchPlan/query seed 契约、prompt cache/KV 启动门禁、DataRecord -&gt; source_manifest 幂等导入桥、source_quality assessment、paper_note chunk planning、official_model_evidence 证据登记/status，以及 experiment_plans 实验计划账本、active baseline artifact、smoke result、full-run result、experiment result pack 和 Research Loop 手工证据/决策账本。</span>
                 </div>
 <div class="service-row">
                   <b>team_workflows API</b>
-                  <span>已落地：/api/teams/{team_id}/workflow-orchestration、stage-rounds/status、stage-rounds/start、stage-rounds/{stageRoundId}/coordination/retry、stage-rounds/{stageRoundId}/memory-record/retry、source-collection-runs（含 searchPlan/querySeeds/assignedQueries/resultWritebackContract）、candidates/source、data-processing/runs/{runId}/records/{recordId}/source-candidate、candidates/{candidate_id}/source-extraction、source-quality/status、candidates/{candidate_id}/source-quality/assess、paper-note-chunks/status、candidates/{candidate_id}/paper-note-chunks/plan、candidates/{candidate_id}/paper-note-draft（支持 chunkId）、candidates、candidates/validation、candidate-graph、transfers、decide、knowledge-ingestion/status、coordination/status、official-model-evidence/status、official-model-evidence、experiments/status、experiments/plan、experiments/plans/{planId}/baseline-artifact、experiments/plans/{planId}/smoke-result；coordination/status 返回 communicationBrief。</span>
+                  <span>已落地：/api/teams/{team_id}/workflow-orchestration、stage-rounds/status、stage-rounds/start、stage-rounds/{stageRoundId}/coordination/retry、stage-rounds/{stageRoundId}/memory-record/retry、source-collection-runs（含 searchPlan/querySeeds/assignedQueries/resultWritebackContract）、candidates/source、data-processing/runs/{runId}/records/{recordId}/source-candidate、candidates/{candidate_id}/source-extraction、source-quality/status、candidates/{candidate_id}/source-quality/assess、paper-note-chunks/status、candidates/{candidate_id}/paper-note-chunks/plan、candidates/{candidate_id}/paper-note-draft（支持 chunkId）、candidates、candidates/validation、candidate-graph、transfers、decide、knowledge-ingestion/status、coordination/status、official-model-evidence/status、official-model-evidence、experiments/status、experiments/plan、experiments/plans/{planId}/baseline-artifact、experiments/plans/{planId}/smoke-result、experiments/plans/{planId}/full-run-result、experiments/plans/{planId}/knowledge-ingestion-request、research-loop/templates、research-loop/status、research-loop/loops、research-loop/loops/{loopId}/evidence、research-loop/loops/{loopId}/decision；coordination/status 返回 communicationBrief。</span>
                 </div>
 <div class="service-row">
                   <b>TeamsRoute workflow workspace</b>
-                  <span>已落地入口：Teams 页顶部固定横向切换条只暴露 AI 搜索范围团队和 ai科学研究团队，左侧栏已删除；监督进化/自进化模式页各自读取系统 Team 并展示只读团队画布；选择 ai科学研究团队后直接进入 research-team 专属科研控制台；总览只显示知识搜集、实验、迭代三张阶段卡，每张卡一个主操作和一个阶段详情入口。知识搜集卡会显示当前批次、待处理、候选和查询数，主按钮按状态执行开始、下一批搜索、筛选入口或打开工作台，另有新一轮搜集入口。知识搜集页位于 /teams?team=research-team&amp;researchView=knowledge_collection，默认展示高价值状态摘要、状态驱动主操作和对话式 source collection 过程流；点击知识搜集主按钮会通过 stage-rounds/start 创建轮次并立即排队第一批后台 source collection 搜索；执行 source collection 搜索时会写入 source_collection_run 运行快照，让 AppShell 顶部“正在进行”优先显示知识搜集；资料搜集 run 列表通过 data-processing 服务端 teamId/startedFrom 过滤，避免被其它团队批次挤掉；后台 accepted 后 activeWorkRun 会进入控制台和对话流，直到 runStatus 收口；资料搜集、资料筛选、候选入库、候选图谱、共享记忆前审五张步骤卡各自带主按钮并作为页内子页索引，顶部卡片只保留状态、关键数量和主操作，不再显示输入/输出小框；底部只显示当前阶段内容，并拆成结果与 Agent过程；右侧只显示当前步骤操作、当前资料详情、关键数量和当前步骤 Agent 配置；资料筛选会调用资料质量评估 Agent 批量执行，完成后展开、滚动并高亮页内筛选详情；KV/prompt cache 由后端从当前模型库解析，不再依赖旧固定模型 ID，过程流把 KV 缓存模型与执行 Agent 模型分层展示；稳定前缀、动态增量、assignment、query、存储路径和手工回写保留在可展开详情中；默认层移除解释性小字且使用实体工作台背景，避免主题壁纸压住正文；实验页新增实验计划账本，可生成计划草稿并登记 active baseline artifact 与 smoke result，显示 baseline/metric/dataset/smoke 缺口、active smoke 摘要、readyForSmoke 和 full-run 阻塞/解锁；迭代页先提供规划启动、轮次状态和边界说明；旧 source_collection 参数兼容映射到知识搜集。</span>
+                  <span>已落地入口：Teams 页顶部固定横向切换条只暴露 AI 搜索范围团队和 ai科学研究团队，左侧栏已删除；监督进化/自进化模式页各自读取系统 Team 并展示只读团队画布；选择 ai科学研究团队后直接进入 research-team 专属科研控制台；总览只显示知识搜集、实验、迭代三张阶段卡，每张卡一个主操作和一个阶段详情入口。知识搜集卡会显示当前批次、待处理、候选和查询数，主按钮按状态执行开始、下一批搜索、筛选入口或打开工作台，另有新一轮搜集入口。知识搜集页位于 /teams?team=research-team&amp;researchView=knowledge_collection，默认展示高价值状态摘要、状态驱动主操作和对话式 source collection 过程流；点击知识搜集主按钮会通过 stage-rounds/start 创建轮次并立即排队第一批后台 source collection 搜索；执行 source collection 搜索时会写入 source_collection_run 运行快照，让 AppShell 顶部“正在进行”优先显示知识搜集；资料搜集 run 列表通过 data-processing 服务端 teamId/startedFrom 过滤，避免被其它团队批次挤掉；后台 accepted 后 activeWorkRun 会进入控制台和对话流，直到 runStatus 收口；资料搜集、资料筛选、候选入库、候选图谱、共享记忆前审五张步骤卡各自带主按钮并作为页内子页索引，顶部卡片只保留状态、关键数量和主操作，不再显示输入/输出小框；底部只显示当前阶段内容，并拆成结果与 Agent过程；右侧只显示当前步骤操作、当前资料详情、关键数量和当前步骤 Agent 配置；资料筛选会调用资料质量评估 Agent 批量执行，完成后展开、滚动并高亮页内筛选详情；KV/prompt cache 由后端从当前模型库解析，不再依赖旧固定模型 ID，过程流把 KV 缓存模型与执行 Agent 模型分层展示；稳定前缀、动态增量、assignment、query、存储路径和手工回写保留在可展开详情中；默认层移除解释性小字且使用实体工作台背景，避免主题壁纸压住正文；实验页新增实验计划账本，可生成计划草稿并登记 active baseline artifact、smoke result、full-run result，full-run passed 后可通知 Knowledge Steward Agent 处理 experiment_result_pack；实验页和迭代页共享 Research Loop 模板面板，可按算法模型、仿真模拟、数据集基准、环境探针等模板登记证据和决策；旧 source_collection 参数兼容映射到知识搜集。</span>
                 </div>
 <div class="service-row">
                   <b>local_research_worker_model</b>
@@ -1711,6 +1726,36 @@
               <span>登记 baseline 工件路径、复现命令、评估命令和指标快照；只解除 smoke 前置 blocker，不创建 ExperimentResult。</span>
             </div>
 <div class="blueprint-row compact">
+              <b>Smoke 结果登记</b>
+              <strong>/api/teams/{teamId}/workflow-orchestration/experiments/plans/{planId}/smoke-result</strong>
+              <span>登记 smoke 指标、结果路径、日志引用和 gateDecision；passed 后只开放 full-run 证据登记，不触发训练 runner。</span>
+            </div>
+<div class="blueprint-row compact">
+              <b>Full-run 结果登记</b>
+              <strong>/api/teams/{teamId}/workflow-orchestration/experiments/plans/{planId}/full-run-result</strong>
+              <span>登记外部 full-run 指标、结果路径、日志和配置引用；passed 后开放 Knowledge Steward 入库请求。</span>
+            </div>
+<div class="blueprint-row compact">
+              <b>实验结果入库请求</b>
+              <strong>/api/teams/{teamId}/workflow-orchestration/experiments/plans/{planId}/knowledge-ingestion-request</strong>
+              <span>生成 experiment_result_pack 并通知 Knowledge Steward Agent；正式知识、RAG 和 official graph 仍由 Steward 审批。</span>
+            </div>
+<div class="blueprint-row compact">
+              <b>Research Loop 模板</b>
+              <strong>/api/teams/{teamId}/workflow-orchestration/research-loop/templates</strong>
+              <span>列出算法模型、仿真模拟、数据集基准、环境探针、资料审查等动态模板及必需证据类型。</span>
+            </div>
+<div class="blueprint-row compact">
+              <b>Research Loop 状态</b>
+              <strong>/api/teams/{teamId}/workflow-orchestration/research-loop/status</strong>
+              <span>只读聚合 active loop、证据缺口、决策状态和执行边界。</span>
+            </div>
+<div class="blueprint-row compact">
+              <b>Research Loop 证据/决策</b>
+              <strong>/api/teams/{teamId}/workflow-orchestration/research-loop/loops + /evidence + /decision</strong>
+              <span>创建 loop、登记人工证据和提交迭代决策；commandPreview 仅作计划引用，不自动执行。</span>
+            </div>
+<div class="blueprint-row compact">
               <b>阶段协调显式启动</b>
               <strong>/api/teams/{teamId}/workflow-orchestration/stage-rounds/{stageRoundId}/coordination/retry</strong>
               <span>用户明确需要团队讨论时启动团队协调 round；如果群聊缺失、忙碌或没有可发言成员，会把失败原因写回 coordinationContract；成功后写回 coordinationRoomId/coordinationRoundId。</span>
@@ -1788,7 +1833,7 @@
 <div class="blueprint-row compact">
               <b>实验计划索引</b>
               <strong>workspace/teams/&lt;teamId&gt;/experiment_plans/index.json</strong>
-              <span>保存实验计划草稿、selectedHypotheses、baselineSelection、activeBaselineArtifact、readinessChecklist 和 full-run blocker。</span>
+              <span>保存实验计划草稿、selectedHypotheses、baselineSelection、activeBaselineArtifact、smoke/full-run 结果、experimentResultPack、readinessChecklist 和 knowledge-ingestion blocker。</span>
             </div>
 <div class="blueprint-row compact">
               <b>候选索引</b>
@@ -2312,6 +2357,18 @@
               <span>新增 experiments/plans/{planId}/smoke-result：登记 smoke 指标、结果路径、日志引用和 gateDecision，并更新 activeSmokeResult。</span>
               <span>Teams 实验账本已接 smoke 结果登记和 active smoke 回显；status=passed 才让 readyForFullRun=true；failed/needs_review 继续阻塞 full-run；仍不创建 ExperimentResult、不触发训练 runner。</span>
             </div>
+<div class="blueprint-row">
+              <b>M7.3</b>
+              <strong>Full-run 与知识入库请求</strong>
+              <span>新增 Teams 实验账本 full-run 结果登记和 knowledge-ingestion-request 前端入口，复用已有 full-run-result 与 Knowledge Steward 通知 API。</span>
+              <span>smoke passed 后可登记外部 full-run 证据；full-run passed 后可生成 experiment_result_pack 并通知 Knowledge Steward Agent；正式知识/RAG/official graph 仍等待 Steward 审批。</span>
+            </div>
+<div class="blueprint-row">
+              <b>M8</b>
+              <strong>Research Loop 模板化实验迭代</strong>
+              <span>新增 Teams Research Loop 面板：读取 research-loop/templates/status，创建 loop，登记 evidence，提交 decision，并在迭代页复用同一模板切换面板。</span>
+              <span>实验与迭代合并为模板化模块，可按算法模型、仿真模拟、数据集基准、环境探针等研究内容动态切换；不接沙盒 runner、不自动训练。</span>
+            </div>
       </div>
       <div class="tag-row">
         <span class="tag">DataProcessingRun</span>
@@ -2328,6 +2385,9 @@
 <span class="tag">experiment_plan</span>
 <span class="tag">active_baseline_artifact</span>
 <span class="tag">smoke_result</span>
+<span class="tag">full_run_result</span>
+<span class="tag">experiment_result_pack</span>
+<span class="tag">research_loop</span>
 <span class="tag">review_record</span>
 <span class="tag">candidate_graph</span>
 <span class="tag">steward_ingestion_pack</span>

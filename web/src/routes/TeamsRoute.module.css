@@ -3550,6 +3550,350 @@
   grid-column: span 3;
 }
 
+.experimentKnowledgePanel {
+  display: grid;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid color-mix(in srgb, var(--accent-cool) 24%, var(--border-soft));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface-panel-strong) 76%, transparent);
+}
+
+.experimentKnowledgePanel > div:first-child {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.experimentKnowledgePanel strong {
+  color: var(--fg-primary);
+  font-size: 0.84rem;
+}
+
+.experimentKnowledgePanel span {
+  overflow: hidden;
+  color: var(--fg-muted);
+  font-size: 0.68rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.experimentKnowledgeForm {
+  display: grid;
+  grid-template-columns: minmax(150px, 1fr) minmax(150px, 1fr) minmax(170px, 1.1fr) minmax(190px, 1.25fr) auto auto;
+  gap: 8px;
+  align-items: end;
+}
+
+.experimentKnowledgeForm label {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.experimentKnowledgeForm label span {
+  color: var(--fg-muted);
+  font-size: 0.64rem;
+  font-weight: 760;
+}
+
+.experimentKnowledgeForm input {
+  width: 100%;
+  min-width: 0;
+  min-height: 30px;
+  padding: 0 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--surface-panel-strong) 82%, transparent);
+  color: var(--fg-primary);
+  font-size: 0.72rem;
+  outline: none;
+}
+
+.experimentKnowledgeForm input:focus {
+  border-color: color-mix(in srgb, var(--accent-cool) 44%, var(--border-soft));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-cool) 10%, transparent);
+}
+
+.experimentKnowledgeForm button {
+  display: inline-flex;
+  min-height: 30px;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 10px;
+  border: 1px solid color-mix(in srgb, var(--accent-cool) 34%, var(--border-soft));
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--accent-cool) 10%, var(--surface-card));
+  color: var(--fg-primary);
+  font-size: 0.72rem;
+  font-weight: 760;
+  white-space: nowrap;
+}
+
+.experimentKnowledgeForm button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.experimentKnowledgeWide {
+  grid-column: span 2;
+}
+
+.experimentKnowledgeToggle {
+  display: inline-flex !important;
+  min-height: 30px;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.experimentKnowledgeToggle input {
+  width: 14px;
+  min-height: 14px;
+  padding: 0;
+}
+
+.researchLoopPanel {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, var(--accent-cool) 24%, var(--border-soft));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface-panel-strong) 74%, transparent);
+}
+
+.researchLoopHeader {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+}
+
+.researchLoopHeader > div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.researchLoopHeader strong,
+.researchLoopTemplateSummary strong,
+.researchLoopOutcomeGrid strong {
+  color: var(--fg-primary);
+  font-size: 0.84rem;
+}
+
+.researchLoopHeader span,
+.researchLoopTemplateSummary span,
+.researchLoopOutcomeGrid span,
+.researchLoopOutcomeGrid small {
+  color: var(--fg-muted);
+  font-size: 0.7rem;
+  line-height: 1.42;
+}
+
+.researchLoopHeader button,
+.researchLoopTemplateBar button,
+.researchLoopEvidenceForm button,
+.researchLoopDecisionForm button {
+  display: inline-flex;
+  min-height: 30px;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 10px;
+  border: 1px solid color-mix(in srgb, var(--accent-cool) 34%, var(--border-soft));
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--accent-cool) 12%, var(--surface-card));
+  color: var(--fg-primary);
+  font-size: 0.72rem;
+  font-weight: 760;
+  white-space: nowrap;
+}
+
+.researchLoopHeader button:disabled,
+.researchLoopTemplateBar button:disabled,
+.researchLoopEvidenceForm button:disabled,
+.researchLoopDecisionForm button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.researchLoopStats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.researchLoopStats span {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface-card) 64%, transparent);
+  color: var(--fg-muted);
+  font-size: 0.66rem;
+  font-weight: 740;
+}
+
+.researchLoopStats strong {
+  color: var(--fg-primary);
+  font-size: 0.86rem;
+}
+
+.researchLoopTemplateBar,
+.researchLoopEvidenceForm,
+.researchLoopDecisionForm {
+  display: grid;
+  gap: 8px;
+  align-items: end;
+  padding: 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface-card) 62%, transparent);
+}
+
+.researchLoopTemplateBar {
+  grid-template-columns: minmax(180px, 0.8fr) minmax(240px, 1.2fr) minmax(220px, 1fr) auto;
+}
+
+.researchLoopEvidenceForm {
+  grid-template-columns: minmax(150px, 0.75fr) minmax(130px, 0.6fr) minmax(130px, 0.7fr) minmax(220px, 1fr) auto;
+}
+
+.researchLoopDecisionForm {
+  grid-template-columns: minmax(150px, 0.75fr) minmax(180px, 0.85fr) minmax(320px, 1.3fr) auto;
+}
+
+.researchLoopTemplateBar label,
+.researchLoopEvidenceForm label,
+.researchLoopDecisionForm label {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.researchLoopTemplateBar label span,
+.researchLoopEvidenceForm label span,
+.researchLoopDecisionForm label span {
+  color: var(--fg-muted);
+  font-size: 0.64rem;
+  font-weight: 760;
+}
+
+.researchLoopTemplateBar input,
+.researchLoopTemplateBar select,
+.researchLoopEvidenceForm input,
+.researchLoopEvidenceForm select,
+.researchLoopDecisionForm input,
+.researchLoopDecisionForm select {
+  width: 100%;
+  min-width: 0;
+  min-height: 30px;
+  padding: 0 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--surface-panel-strong) 82%, transparent);
+  color: var(--fg-primary);
+  font-size: 0.72rem;
+  outline: none;
+}
+
+.researchLoopTemplateBar input:focus,
+.researchLoopTemplateBar select:focus,
+.researchLoopEvidenceForm input:focus,
+.researchLoopEvidenceForm select:focus,
+.researchLoopDecisionForm input:focus,
+.researchLoopDecisionForm select:focus {
+  border-color: color-mix(in srgb, var(--accent-cool) 46%, var(--border-soft));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-cool) 10%, transparent);
+}
+
+.researchLoopTemplateSummary,
+.researchLoopActive,
+.researchLoopOutcomeGrid section {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface-card) 64%, transparent);
+}
+
+.researchLoopTemplateSummary div,
+.researchLoopStatusPills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+
+.researchLoopTemplateSummary small,
+.researchLoopStatusPills span {
+  display: inline-flex;
+  max-width: 100%;
+  min-height: 23px;
+  align-items: center;
+  padding: 0 8px;
+  border: 1px solid color-mix(in srgb, var(--accent-cool) 28%, var(--border-soft));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface-panel-strong) 78%, transparent);
+  overflow: hidden;
+  color: var(--fg-muted);
+  font-size: 0.64rem;
+  font-weight: 740;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.researchLoopActive {
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 0.72fr);
+  align-items: center;
+}
+
+.researchLoopActive > div:first-child {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.researchLoopActive > div:first-child > span {
+  color: var(--accent-cool-2);
+  font-size: 0.64rem;
+  font-weight: 780;
+}
+
+.researchLoopActive strong,
+.researchLoopActive small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.researchLoopActive strong {
+  color: var(--fg-primary);
+  font-size: 0.78rem;
+}
+
+.researchLoopActive small {
+  color: var(--fg-muted);
+  font-size: 0.68rem;
+}
+
+.researchLoopWide {
+  grid-column: span 2;
+}
+
+.researchLoopOutcomeGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 0.72fr);
+  gap: 10px;
+}
+
 .experimentEvidenceGrid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(280px, 0.68fr);
@@ -5881,7 +6225,15 @@
   .experimentEvidenceGrid,
   .experimentBaselineForm,
   .experimentSmokeResult,
-  .experimentSmokeForm {
+  .experimentSmokeForm,
+  .experimentKnowledgeForm,
+  .researchLoopHeader,
+  .researchLoopStats,
+  .researchLoopTemplateBar,
+  .researchLoopActive,
+  .researchLoopEvidenceForm,
+  .researchLoopDecisionForm,
+  .researchLoopOutcomeGrid {
     grid-template-columns: 1fr;
   }
 
@@ -5889,7 +6241,9 @@
     justify-content: flex-start;
   }
 
-  .experimentSmokeWide {
+  .experimentSmokeWide,
+  .experimentKnowledgeWide,
+  .researchLoopWide {
     grid-column: auto;
   }
 
