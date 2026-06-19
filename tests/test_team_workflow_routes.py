@@ -639,6 +639,84 @@ def test_team_workflow_routes_register_experiment_baseline_artifact(tmp_path, mo
     assert payload["boundaries"]["autoExecution"] is False
 
 
+def test_team_workflow_routes_register_experiment_smoke_result(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    client = _client()
+    team = client.post("/api/teams", json={"name": "ai科学研究团队"}).json()
+    client.post(
+        f"/api/teams/{team['teamId']}/workflow-orchestration/local-research-model/outputs",
+        json={
+            "taskType": "algorithm_hypothesis_draft",
+            "title": "Algorithm hypothesis draft",
+            "createdByAgent": "Algorithm Hypothesis Agent",
+            "output": {
+                "candidateType": "algorithm_hypothesis",
+                "sourceRefs": [{"type": "paper", "id": "paper-1", "label": "Paper 1"}],
+                "evidenceRefs": [{"type": "mapping", "id": "mapping-1", "label": "Mapping 1"}],
+                "claims": [{"claim": "Context-gated routing may improve adaptation.", "sourceRef": "paper-1"}],
+                "mechanismMappingIds": ["mapping-1"],
+                "hypothesis": "Context-gated routing improves adaptation under shifting tasks.",
+                "baseline": "standard MoE router",
+                "expectedBenefit": "better task adaptation at equal parameter count",
+                "expectedComputeCost": "one small gating MLP and no extra experts",
+                "experimentPlan": {
+                    "dataset": "synthetic task-switch benchmark",
+                    "metric": "validation accuracy and routing entropy",
+                    "baseline": "standard MoE router",
+                    "smokePlan": "train 200 mini-batches and compare metric direction",
+                },
+                "uncertainty": [],
+                "riskFlags": [],
+                "confidence": 0.53,
+                "nextAction": "send_to_research_review",
+                "requiresReview": True,
+            },
+        },
+    )
+    stage_response = client.post(
+        f"/api/teams/{team['teamId']}/workflow-orchestration/stage-rounds/start",
+        json={"stageType": "experiment", "topic": "routing experiment plan"},
+    )
+    plan_response = client.post(
+        f"/api/teams/{team['teamId']}/workflow-orchestration/experiments/plan",
+        json={"stageRoundId": stage_response.json()["stageRound"]["stageRoundId"]},
+    )
+    baseline_response = client.post(
+        f"/api/teams/{team['teamId']}/workflow-orchestration/experiments/plans/{plan_response.json()['plan']['planId']}/baseline-artifact",
+        json={
+            "artifactPath": "workspace/experiments/baselines/standard-moe-router.json",
+            "reproductionCommand": "python experiments/run_baseline.py --config configs/standard_moe_router.yaml",
+            "evaluationCommand": "python experiments/evaluate.py --run standard-moe-router",
+            "registeredByAgent": "Experiment Planning Agent",
+        },
+    )
+
+    response = client.post(
+        f"/api/teams/{team['teamId']}/workflow-orchestration/experiments/plans/{plan_response.json()['plan']['planId']}/smoke-result",
+        json={
+            "status": "passed",
+            "metricValue": "0.75 validation accuracy",
+            "baselineMetricValue": "0.71 validation accuracy",
+            "delta": "+0.04 accuracy",
+            "resultPath": "workspace/experiments/smoke/context-gated-routing.json",
+            "logRef": "logs/experiments/context-gated-routing-smoke.log",
+            "evaluationCommand": "python experiments/evaluate.py --run context-gated-routing-smoke",
+            "recordedByAgent": "Experiment Planning Agent",
+        },
+    )
+
+    assert baseline_response.status_code == 201, baseline_response.text
+    assert response.status_code == 201, response.text
+    payload = response.json()
+    assert payload["smokeResult"]["status"] == "passed"
+    assert payload["smokeResult"]["gateDecision"] == "promote_to_full_run"
+    assert payload["plan"]["readiness"]["readyForSmoke"] is True
+    assert payload["plan"]["readiness"]["readyForFullRun"] is True
+    assert payload["status"]["status"] == "ready_for_full_run"
+    assert payload["stageRoundStatus"]["phases"][1]["latestRound"]["planningContract"]["readyForFullRun"] is True
+    assert payload["boundaries"]["createsExperimentAttempt"] is False
+
+
 def test_team_workflow_route_resolves_stale_prompt_cache_model_for_stage_round(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _stub_source_collection_search_background(monkeypatch)

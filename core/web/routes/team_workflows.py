@@ -38,6 +38,7 @@ from core.web.services.team_workflow_orchestration_service import (
     plan_paper_note_chunks_from_source_candidate,
     record_local_research_model_output,
     register_experiment_baseline_artifact,
+    register_experiment_smoke_result,
     register_official_model_evidence,
     register_candidate_source,
     review_steward_pack_knowledge_ingestion,
@@ -204,6 +205,22 @@ class ExperimentBaselineArtifactPayload(BaseModel):
     artifactPath: str = Field("", max_length=500)
     evidenceRef: str = Field("", max_length=500)
     reproductionCommand: str = Field("", max_length=1200)
+    evaluationCommand: str = Field("", max_length=1200)
+    sourceRefs: list[dict[str, Any]] = Field(default_factory=list, max_length=12)
+    evidenceRefs: list[dict[str, Any]] = Field(default_factory=list, max_length=12)
+    notes: str = Field("", max_length=4000)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class ExperimentSmokeResultPayload(BaseModel):
+    recordedByAgent: str = Field("", max_length=160)
+    status: str = Field("needs_review", max_length=80)
+    metricName: str = Field("", max_length=500)
+    metricValue: str = Field("", max_length=240)
+    baselineMetricValue: str = Field("", max_length=240)
+    delta: str = Field("", max_length=240)
+    resultPath: str = Field("", max_length=500)
+    logRef: str = Field("", max_length=500)
     evaluationCommand: str = Field("", max_length=1200)
     sourceRefs: list[dict[str, Any]] = Field(default_factory=list, max_length=12)
     evidenceRefs: list[dict[str, Any]] = Field(default_factory=list, max_length=12)
@@ -590,6 +607,28 @@ def team_workflow_experiment_baseline_artifact_register(team_id: str, plan_id: s
             exc,
             status_code=422,
             fields={"planId": plan_id, "registeredByAgent": payload.registeredByAgent, "artifactPath": payload.artifactPath},
+        )
+
+
+@router.post("/teams/{team_id}/workflow-orchestration/experiments/plans/{plan_id}/smoke-result", status_code=status.HTTP_201_CREATED)
+def team_workflow_experiment_smoke_result_register(team_id: str, plan_id: str, payload: ExperimentSmokeResultPayload) -> dict:
+    try:
+        return register_experiment_smoke_result(team_id, plan_id, payload.model_dump())
+    except TeamNotFoundError as exc:
+        _raise_team_workflow_route_error(
+            "experiment_smoke_result.register",
+            team_id,
+            exc,
+            status_code=404,
+            fields={"planId": plan_id, "recordedByAgent": payload.recordedByAgent},
+        )
+    except (TeamServiceError, TeamWorkflowOrchestrationError) as exc:
+        _raise_team_workflow_route_error(
+            "experiment_smoke_result.register",
+            team_id,
+            exc,
+            status_code=422,
+            fields={"planId": plan_id, "recordedByAgent": payload.recordedByAgent, "status": payload.status},
         )
 
 
