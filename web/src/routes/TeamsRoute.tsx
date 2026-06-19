@@ -92,6 +92,8 @@ const SOURCE_COLLECTION_PROMPT_CACHE_MODEL_LABEL = "configured prompt-cache mode
 
 const researchStageRoundStatusQueryKey = (id: string) => ["teams", id, "workflow-orchestration", "stage-rounds", "status"] as const;
 const experimentPlanningStatusQueryKey = (id: string) => ["teams", id, "workflow-orchestration", "experiments", "status"] as const;
+const researchLoopTemplatesQueryKey = (id: string) => ["teams", id, "workflow-orchestration", "research-loop", "templates"] as const;
+const researchLoopStatusQueryKey = (id: string) => ["teams", id, "workflow-orchestration", "research-loop", "status"] as const;
 const officialModelEvidenceStatusQueryKey = (id: string) => ["teams", id, "workflow-orchestration", "official-model-evidence", "status"] as const;
 const paperNoteChunkStatusQueryKey = (id: string) => ["teams", id, "workflow-orchestration", "paper-note-chunks", "status"] as const;
 const sourceQualityStatusQueryKey = (id: string) => ["teams", id, "workflow-orchestration", "source-quality", "status"] as const;
@@ -802,6 +804,59 @@ type ExperimentSmokeResultRecord = {
   recordedAt: string;
 };
 
+type ExperimentFullRunResultStatus = "passed" | "failed" | "needs_review";
+
+const EXPERIMENT_FULL_RUN_RESULT_STATUSES: ExperimentFullRunResultStatus[] = ["needs_review", "passed", "failed"];
+
+type ExperimentFullRunResultRecord = {
+  fullRunResultId: string;
+  status: ExperimentFullRunResultStatus | string;
+  gateDecision: string;
+  planId: string;
+  smokeResultId: string;
+  baselineArtifactId: string;
+  baselineMetricValue: string;
+  smokeMetricValue: string;
+  metricName: string;
+  metricValue: string;
+  delta: string;
+  resultPath: string;
+  logRef: string;
+  configPath: string;
+  reproductionCommand: string;
+  evaluationCommand: string;
+  notes: string;
+  recordedByAgent: string;
+  recordedAt: string;
+};
+
+type ExperimentResultPackRecord = {
+  packId: string;
+  kind: string;
+  status: string;
+  planId: string;
+  fullRunResultId: string;
+  knowledgeBaseId: string;
+  targetDomain: string;
+  title: string;
+  summary: string;
+  metrics?: Record<string, string>;
+  artifactRefs?: Array<Record<string, unknown>>;
+  officialBoundary?: Record<string, unknown>;
+  requestedByAgent: string;
+  createdAt: string;
+};
+
+type ExperimentKnowledgeIngestionRecord = {
+  status: string;
+  experimentResultPack?: ExperimentResultPackRecord;
+  knowledgeStewardActivation?: Record<string, unknown>;
+  knowledgeBaseId: string;
+  targetDomain: string;
+  updatedAt: string;
+  officialBoundary?: Record<string, unknown>;
+};
+
 type ExperimentPlanRecord = {
   planId: string;
   stageRoundId: string;
@@ -829,12 +884,18 @@ type ExperimentPlanRecord = {
   activeSmokeResultId?: string;
   activeSmokeResult?: ExperimentSmokeResultRecord;
   smokeResults?: ExperimentSmokeResultRecord[];
+  activeFullRunResultId?: string;
+  activeFullRunResult?: ExperimentFullRunResultRecord;
+  fullRunResults?: ExperimentFullRunResultRecord[];
+  knowledgeIngestion?: ExperimentKnowledgeIngestionRecord;
   readinessChecklist: ExperimentPlanChecklistItem[];
   readiness: {
     readyForPlanReview: boolean;
     readyForSmoke: boolean;
     readyForFullRun: boolean;
+    readyForKnowledgeIngestion?: boolean;
     blockers: string[];
+    knowledgeBlockers?: string[];
   };
   updatedAt: string;
 };
@@ -857,11 +918,14 @@ type ExperimentPlanningStatusPayload = {
     readyHypothesisCandidateCount: number;
     gapCount: number;
     activePlanId: string;
+    activeFullRunResultId?: string;
+    knowledgeIngestionStatus?: string;
   };
   readiness: {
     readyToPlan: boolean;
     readyForSmoke: boolean;
     readyForFullRun: boolean;
+    readyForKnowledgeIngestion?: boolean;
     reason: string;
   };
   boundaries: {
@@ -905,6 +969,210 @@ type ExperimentSmokeResultRegisterPayload = {
   boundaries: ExperimentPlanningStatusPayload["boundaries"];
 };
 
+type ExperimentFullRunResultRegisterPayload = {
+  fullRunResult: ExperimentFullRunResultRecord;
+  plan: ExperimentPlanRecord;
+  status: ExperimentPlanningStatusPayload;
+  stageRoundStatus: ResearchStageRoundStatusPayload;
+  workflow: TeamWorkflowOrchestration;
+  boundaries: ExperimentPlanningStatusPayload["boundaries"];
+};
+
+type ExperimentResultKnowledgeIngestionPayload = {
+  experimentResultPack: ExperimentResultPackRecord;
+  knowledgeStewardActivation: Record<string, unknown>;
+  plan: ExperimentPlanRecord;
+  status: ExperimentPlanningStatusPayload;
+  stageRoundStatus: ResearchStageRoundStatusPayload;
+  workflow: TeamWorkflowOrchestration;
+  boundaries: ExperimentPlanningStatusPayload["boundaries"];
+};
+
+type ResearchLoopBoundary = {
+  executionMode: string;
+  autoExecution: boolean;
+  externalExecution: boolean;
+  sandboxRunner: boolean;
+  trainingRunner: boolean;
+  writesExperimentResult: boolean;
+  writesFormalTeamKnowledge: boolean;
+  writesFormalRag: boolean;
+  writesOfficialGraph: boolean;
+  requiresUserDecision: boolean;
+};
+
+type ResearchLoopTemplate = {
+  templateId: string;
+  templateKind: string;
+  label: string;
+  labelZh: string;
+  description: string;
+  problemFits: string[];
+  requiredInputs: string[];
+  requiredEvidenceTypes: string[];
+  decisionGates: string[];
+  defaultIterationActions: string[];
+};
+
+type ResearchLoopEvidenceStatus = "needs_review" | "passed" | "failed" | "not_applicable";
+
+const RESEARCH_LOOP_EVIDENCE_STATUSES: ResearchLoopEvidenceStatus[] = ["needs_review", "passed", "failed", "not_applicable"];
+
+type ResearchLoopDecisionValue = "needs_more_evidence" | "repair_and_repeat" | "promote_to_iteration" | "accept_for_writeup" | "reject_or_archive";
+
+const RESEARCH_LOOP_DECISION_VALUES: ResearchLoopDecisionValue[] = [
+  "needs_more_evidence",
+  "repair_and_repeat",
+  "promote_to_iteration",
+  "accept_for_writeup",
+  "reject_or_archive",
+];
+
+type ResearchLoopEvidenceRecord = {
+  evidenceId: string;
+  evidenceType: string;
+  status: string;
+  summary: string;
+  metricName: string;
+  metricValue: string;
+  baselineMetricValue: string;
+  delta: string;
+  artifactRefs: Array<Record<string, unknown>>;
+  sourceRefs: Array<Record<string, unknown>>;
+  datasetRefs: string[];
+  environmentRefs: string[];
+  logRefs: string[];
+  commandPreview: string;
+  recordedAt: string;
+  recordedByAgent: string;
+};
+
+type ResearchLoopDecisionRecord = {
+  decisionId: string;
+  decision: string;
+  statusAfterDecision: string;
+  rationale: string;
+  createdAt: string;
+  decidedByAgent: string;
+  iterationProposalId?: string;
+};
+
+type ResearchLoopIterationProposal = {
+  proposalId: string;
+  loopId: string;
+  sourceDecisionId: string;
+  status: string;
+  nextTemplateId: string;
+  nextTemplateKind: string;
+  nextActions: string[];
+  createdAt: string;
+  createdByAgent: string;
+};
+
+type ResearchLoopRecord = {
+  loopId: string;
+  teamId: string;
+  templateId: string;
+  templateKind: string;
+  templateSnapshot?: ResearchLoopTemplate;
+  title: string;
+  researchQuestion: string;
+  status: string;
+  createdAt: string;
+  updatedAt: string;
+  createdByAgent: string;
+  linkedExperiment: {
+    stageRoundId: string;
+    planId: string;
+    targetRef: string;
+    candidateIds: string[];
+  };
+  inputs: {
+    inputRefs: string[];
+    sourceRefs: Array<Record<string, unknown>>;
+    datasetRefs: string[];
+    environmentRefs: string[];
+    constraints: string;
+    metadata: Record<string, unknown>;
+  };
+  evidenceRecords: ResearchLoopEvidenceRecord[];
+  decisions: ResearchLoopDecisionRecord[];
+  iterationProposals: ResearchLoopIterationProposal[];
+  readiness: {
+    requiredEvidenceTypes: string[];
+    presentEvidenceTypes: string[];
+    missingEvidenceTypes: string[];
+    evidenceRecordCount: number;
+    readyForDecision: boolean;
+    readyForIteration: boolean;
+    blockers: string[];
+  };
+  boundaries: ResearchLoopBoundary;
+};
+
+type ResearchLoopSummary = {
+  loopId: string;
+  templateId: string;
+  templateKind: string;
+  title: string;
+  researchQuestion: string;
+  status: string;
+  updatedAt: string;
+  createdByAgent: string;
+  evidenceRecordCount: number;
+  decisionCount: number;
+  readyForDecision: boolean;
+  readyForIteration: boolean;
+  missingEvidenceTypes: string[];
+};
+
+type ResearchLoopStatusPayload = {
+  schemaVersion: number;
+  storeKind: string;
+  teamId: string;
+  activeLoopId: string;
+  activeLoop: ResearchLoopRecord | null;
+  loops: ResearchLoopSummary[];
+  summary: {
+    totalLoopCount: number;
+    readyForDecisionCount: number;
+    readyForIterationCount: number;
+    blockedLoopCount: number;
+  };
+  templates: ResearchLoopTemplate[];
+  storagePath: string;
+  nextActions: Array<{ action: string; label: string; requiresUserDecision: boolean; missingEvidenceTypes?: string[] }>;
+  boundaries: ResearchLoopBoundary;
+};
+
+type ResearchLoopTemplatesPayload = {
+  schemaVersion: number;
+  templates: ResearchLoopTemplate[];
+  defaultTemplateId: string;
+  boundaries: ResearchLoopBoundary;
+};
+
+type ResearchLoopCreatePayload = {
+  loop: ResearchLoopRecord;
+  status: ResearchLoopStatusPayload;
+  boundaries: ResearchLoopBoundary;
+};
+
+type ResearchLoopEvidencePayload = {
+  evidence: ResearchLoopEvidenceRecord;
+  loop: ResearchLoopRecord;
+  status: ResearchLoopStatusPayload;
+  boundaries: ResearchLoopBoundary;
+};
+
+type ResearchLoopDecisionPayload = {
+  decision: ResearchLoopDecisionRecord;
+  iterationProposal: ResearchLoopIterationProposal | null;
+  loop: ResearchLoopRecord;
+  status: ResearchLoopStatusPayload;
+  boundaries: ResearchLoopBoundary;
+};
+
 type ExperimentBaselineArtifactDraft = {
   artifactPath: string;
   reproductionCommand: string;
@@ -921,6 +1189,58 @@ type ExperimentSmokeResultDraft = {
   logRef: string;
   evaluationCommand: string;
   notes: string;
+};
+
+type ExperimentFullRunResultDraft = {
+  status: ExperimentFullRunResultStatus;
+  metricValue: string;
+  baselineMetricValue: string;
+  smokeMetricValue: string;
+  delta: string;
+  resultPath: string;
+  logRef: string;
+  configPath: string;
+  reproductionCommand: string;
+  evaluationCommand: string;
+  notes: string;
+};
+
+type ExperimentKnowledgeIngestionDraft = {
+  knowledgeBaseId: string;
+  targetDomain: string;
+  title: string;
+  summary: string;
+  notes: string;
+  wakeStewardAgent: boolean;
+};
+
+type ResearchLoopCreateDraft = {
+  researchQuestion: string;
+  constraints: string;
+  datasetRefs: string;
+  environmentRefs: string;
+};
+
+type ResearchLoopEvidenceDraft = {
+  evidenceType: string;
+  status: ResearchLoopEvidenceStatus;
+  summary: string;
+  metricName: string;
+  metricValue: string;
+  baselineMetricValue: string;
+  delta: string;
+  artifactRef: string;
+  datasetRefs: string;
+  environmentRefs: string;
+  logRefs: string;
+  commandPreview: string;
+};
+
+type ResearchLoopDecisionDraft = {
+  decision: ResearchLoopDecisionValue;
+  rationale: string;
+  nextTemplateId: string;
+  nextActions: string;
 };
 
 type TeamWorkflowOfficialModelEvidenceCoverage = {
@@ -2947,6 +3267,54 @@ export function TeamsRoute({
     evaluationCommand: "",
     notes: "",
   });
+  const [experimentFullRunResultDraft, setExperimentFullRunResultDraft] = useState<ExperimentFullRunResultDraft>({
+    status: "needs_review",
+    metricValue: "",
+    baselineMetricValue: "",
+    smokeMetricValue: "",
+    delta: "",
+    resultPath: "",
+    logRef: "",
+    configPath: "",
+    reproductionCommand: "",
+    evaluationCommand: "",
+    notes: "",
+  });
+  const [experimentKnowledgeIngestionDraft, setExperimentKnowledgeIngestionDraft] = useState<ExperimentKnowledgeIngestionDraft>({
+    knowledgeBaseId: "research-team-experiment-kb",
+    targetDomain: "挑战杯实验结果",
+    title: "",
+    summary: "",
+    notes: "",
+    wakeStewardAgent: true,
+  });
+  const [selectedResearchLoopTemplateId, setSelectedResearchLoopTemplateId] = useState("algorithm_model_experiment");
+  const [researchLoopCreateDraft, setResearchLoopCreateDraft] = useState<ResearchLoopCreateDraft>({
+    researchQuestion: "",
+    constraints: "",
+    datasetRefs: "",
+    environmentRefs: "",
+  });
+  const [researchLoopEvidenceDraft, setResearchLoopEvidenceDraft] = useState<ResearchLoopEvidenceDraft>({
+    evidenceType: "",
+    status: "needs_review",
+    summary: "",
+    metricName: "",
+    metricValue: "",
+    baselineMetricValue: "",
+    delta: "",
+    artifactRef: "",
+    datasetRefs: "",
+    environmentRefs: "",
+    logRefs: "",
+    commandPreview: "",
+  });
+  const [researchLoopDecisionDraft, setResearchLoopDecisionDraft] = useState<ResearchLoopDecisionDraft>({
+    decision: "needs_more_evidence",
+    rationale: "",
+    nextTemplateId: "",
+    nextActions: "",
+  });
   const [selectedSourceCollectionStageId, setSelectedSourceCollectionStageId] = useState<SourceCollectionStageModuleId>(
     requestedSourceCollectionStage ?? "collection",
   );
@@ -3135,6 +3503,22 @@ export function TeamsRoute({
     queryFn: () =>
       fetchJson<ExperimentPlanningStatusPayload>(
         `/api/teams/${encodeURIComponent(effectiveTeamId)}/workflow-orchestration/experiments/status`,
+      ),
+    enabled: Boolean(effectiveTeamId && researchWorkflowTeamSelected && teamWorkflowQuery.data),
+  });
+  const researchLoopTemplatesQuery = useQuery({
+    queryKey: researchLoopTemplatesQueryKey(effectiveTeamId || "none"),
+    queryFn: () =>
+      fetchJson<ResearchLoopTemplatesPayload>(
+        `/api/teams/${encodeURIComponent(effectiveTeamId)}/workflow-orchestration/research-loop/templates`,
+      ),
+    enabled: Boolean(effectiveTeamId && researchWorkflowTeamSelected && teamWorkflowQuery.data),
+  });
+  const researchLoopStatusQuery = useQuery({
+    queryKey: researchLoopStatusQueryKey(effectiveTeamId || "none"),
+    queryFn: () =>
+      fetchJson<ResearchLoopStatusPayload>(
+        `/api/teams/${encodeURIComponent(effectiveTeamId)}/workflow-orchestration/research-loop/status`,
       ),
     enabled: Boolean(effectiveTeamId && researchWorkflowTeamSelected && teamWorkflowQuery.data),
   });
@@ -3737,6 +4121,231 @@ export function TeamsRoute({
     },
   });
 
+  const registerExperimentFullRunResultMutation = useMutation({
+    mutationFn: (payload: {
+      teamId: string;
+      plan: ExperimentPlanRecord;
+      draft: ExperimentFullRunResultDraft;
+    }) =>
+      fetchJson<ExperimentFullRunResultRegisterPayload>(
+        `/api/teams/${encodeURIComponent(payload.teamId)}/workflow-orchestration/experiments/plans/${encodeURIComponent(payload.plan.planId)}/full-run-result`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            recordedByAgent: sourceCollectionOwnerAgentId,
+            status: payload.draft.status,
+            metricName: payload.plan.experimentPlan.metric || "",
+            metricValue: payload.draft.metricValue.trim(),
+            baselineMetricValue: payload.draft.baselineMetricValue.trim(),
+            smokeMetricValue: payload.draft.smokeMetricValue.trim(),
+            delta: payload.draft.delta.trim(),
+            resultPath: payload.draft.resultPath.trim(),
+            logRef: payload.draft.logRef.trim(),
+            configPath: payload.draft.configPath.trim(),
+            reproductionCommand: payload.draft.reproductionCommand.trim(),
+            evaluationCommand: payload.draft.evaluationCommand.trim(),
+            notes: payload.draft.notes.trim() || "Registered from the experiment planning workspace. No full-run execution was triggered.",
+            metadata: {
+              enteredFrom: "teams_experiment_ledger",
+              manualFullRunResult: true,
+              noTrainingExecution: true,
+            },
+          }),
+        },
+      ),
+    onSuccess: (payload, variables) => {
+      queryClient.setQueryData(experimentPlanningStatusQueryKey(variables.teamId), payload.status);
+      queryClient.setQueryData(researchStageRoundStatusQueryKey(variables.teamId), payload.stageRoundStatus);
+      queryClient.setQueryData(queryKeys.teamWorkflow(variables.teamId), payload.workflow);
+      setExperimentFullRunResultDraft((draft) => ({
+        ...draft,
+        metricValue: "",
+        delta: "",
+        resultPath: "",
+        logRef: "",
+        configPath: "",
+        notes: "",
+      }));
+      setExperimentKnowledgeIngestionDraft((draft) => ({
+        ...draft,
+        title: payload.plan.title || draft.title,
+        summary:
+          payload.fullRunResult.status === "passed"
+            ? `${payload.fullRunResult.metricName || payload.plan.experimentPlan.metric || "metric"} = ${payload.fullRunResult.metricValue}`
+            : draft.summary,
+      }));
+      void queryClient.invalidateQueries({ queryKey: experimentPlanningStatusQueryKey(variables.teamId) });
+      void queryClient.invalidateQueries({ queryKey: researchStageRoundStatusQueryKey(variables.teamId) });
+    },
+  });
+
+  const requestExperimentKnowledgeIngestionMutation = useMutation({
+    mutationFn: (payload: {
+      teamId: string;
+      plan: ExperimentPlanRecord;
+      draft: ExperimentKnowledgeIngestionDraft;
+    }) =>
+      fetchJson<ExperimentResultKnowledgeIngestionPayload>(
+        `/api/teams/${encodeURIComponent(payload.teamId)}/workflow-orchestration/experiments/plans/${encodeURIComponent(payload.plan.planId)}/knowledge-ingestion-request`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            requestedByAgent: sourceCollectionOwnerAgentId,
+            stewardAgentId: sourceCollectionKnowledgeStewardAgentId,
+            knowledgeBaseId: payload.draft.knowledgeBaseId.trim() || `${payload.teamId}-challenge-cup-experiments`,
+            targetDomain: payload.draft.targetDomain.trim() || "挑战杯实验结果",
+            wakeStewardAgent: payload.draft.wakeStewardAgent,
+            title: payload.draft.title.trim() || payload.plan.title || "",
+            summary: payload.draft.summary.trim(),
+            notes: payload.draft.notes.trim(),
+            metadata: {
+              enteredFrom: "teams_experiment_ledger",
+              explicitUserBoundary: true,
+              stewardReviewRequired: true,
+              rawLogsStayReferenced: true,
+            },
+          }),
+        },
+      ),
+    onSuccess: (payload, variables) => {
+      queryClient.setQueryData(experimentPlanningStatusQueryKey(variables.teamId), payload.status);
+      queryClient.setQueryData(researchStageRoundStatusQueryKey(variables.teamId), payload.stageRoundStatus);
+      queryClient.setQueryData(queryKeys.teamWorkflow(variables.teamId), payload.workflow);
+      void queryClient.invalidateQueries({ queryKey: experimentPlanningStatusQueryKey(variables.teamId) });
+      void queryClient.invalidateQueries({ queryKey: researchStageRoundStatusQueryKey(variables.teamId) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflowKnowledgeIngestionStatus(variables.teamId) });
+    },
+  });
+
+  const createResearchLoopMutation = useMutation({
+    mutationFn: (payload: {
+      teamId: string;
+      plan: ExperimentPlanRecord | null;
+      templateId: string;
+      draft: ResearchLoopCreateDraft;
+    }) => {
+      const selectedHypothesisIds = payload.plan?.hypothesisCandidateIds?.length
+        ? payload.plan.hypothesisCandidateIds
+        : payload.plan?.selectedHypotheses.map((candidate) => candidate.candidateId) ?? [];
+      return fetchJson<ResearchLoopCreatePayload>(
+        `/api/teams/${encodeURIComponent(payload.teamId)}/workflow-orchestration/research-loop/loops`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            templateId: payload.templateId,
+            title: payload.plan?.title || "",
+            researchQuestion:
+              payload.draft.researchQuestion.trim()
+              || payload.plan?.goal
+              || payload.plan?.topic
+              || sourceCollectionDraft.goal,
+            stageRoundId: payload.plan?.stageRoundId || experimentPlanningStatus?.latestExperimentRound?.stageRoundId || "",
+            planId: payload.plan?.planId || "",
+            targetRef: payload.plan?.planId || payload.plan?.stageRoundId || "",
+            candidateIds: selectedHypothesisIds,
+            datasetRefs: splitDraftList(payload.draft.datasetRefs, 24),
+            environmentRefs: splitDraftList(payload.draft.environmentRefs, 24),
+            constraints: payload.draft.constraints.trim(),
+            createdByAgent: sourceCollectionOwnerAgentId,
+            metadata: {
+              enteredFrom: "teams_research_loop_panel",
+              noSandboxRunner: true,
+              noTrainingExecution: true,
+            },
+          }),
+        },
+      );
+    },
+    onSuccess: (payload, variables) => {
+      queryClient.setQueryData(researchLoopStatusQueryKey(variables.teamId), payload.status);
+      setResearchLoopEvidenceDraft((draft) => ({
+        ...draft,
+        evidenceType: payload.loop.readiness.missingEvidenceTypes[0] || payload.loop.readiness.requiredEvidenceTypes[0] || draft.evidenceType,
+        metricName: variables.plan?.experimentPlan.metric || draft.metricName,
+      }));
+      void queryClient.invalidateQueries({ queryKey: researchLoopStatusQueryKey(variables.teamId) });
+    },
+  });
+
+  const recordResearchLoopEvidenceMutation = useMutation({
+    mutationFn: (payload: { teamId: string; loop: ResearchLoopRecord; draft: ResearchLoopEvidenceDraft; evidenceType: string }) =>
+      fetchJson<ResearchLoopEvidencePayload>(
+        `/api/teams/${encodeURIComponent(payload.teamId)}/workflow-orchestration/research-loop/loops/${encodeURIComponent(payload.loop.loopId)}/evidence`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            evidenceType: payload.evidenceType,
+            status: payload.draft.status,
+            summary: payload.draft.summary.trim(),
+            metricName: payload.draft.metricName.trim(),
+            metricValue: payload.draft.metricValue.trim(),
+            baselineMetricValue: payload.draft.baselineMetricValue.trim(),
+            delta: payload.draft.delta.trim(),
+            artifactRefs: payload.draft.artifactRef.trim() ? [{ path: payload.draft.artifactRef.trim() }] : [],
+            datasetRefs: splitDraftList(payload.draft.datasetRefs, 24),
+            environmentRefs: splitDraftList(payload.draft.environmentRefs, 24),
+            logRefs: splitDraftList(payload.draft.logRefs, 24),
+            commandPreview: payload.draft.commandPreview.trim(),
+            recordedByAgent: sourceCollectionOwnerAgentId,
+            metadata: {
+              enteredFrom: "teams_research_loop_panel",
+              commandPreviewOnly: true,
+            },
+          }),
+        },
+      ),
+    onSuccess: (payload, variables) => {
+      queryClient.setQueryData(researchLoopStatusQueryKey(variables.teamId), payload.status);
+      const nextMissing = payload.loop.readiness.missingEvidenceTypes.find((item) => item !== variables.evidenceType) || "";
+      setResearchLoopEvidenceDraft((draft) => ({
+        ...draft,
+        evidenceType: nextMissing || draft.evidenceType,
+        summary: "",
+        metricValue: "",
+        delta: "",
+        artifactRef: "",
+        logRefs: "",
+        commandPreview: "",
+      }));
+      void queryClient.invalidateQueries({ queryKey: researchLoopStatusQueryKey(variables.teamId) });
+    },
+  });
+
+  const recordResearchLoopDecisionMutation = useMutation({
+    mutationFn: (payload: { teamId: string; loop: ResearchLoopRecord; draft: ResearchLoopDecisionDraft; nextTemplateId: string }) =>
+      fetchJson<ResearchLoopDecisionPayload>(
+        `/api/teams/${encodeURIComponent(payload.teamId)}/workflow-orchestration/research-loop/loops/${encodeURIComponent(payload.loop.loopId)}/decision`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            decision: payload.draft.decision,
+            rationale: payload.draft.rationale.trim(),
+            nextTemplateId: payload.nextTemplateId,
+            nextActions: splitDraftList(payload.draft.nextActions, 24),
+            decidedByAgent: sourceCollectionOwnerAgentId,
+            metadata: {
+              enteredFrom: "teams_research_loop_panel",
+              noAutomaticIterationExecution: true,
+            },
+          }),
+        },
+      ),
+    onSuccess: (payload, variables) => {
+      queryClient.setQueryData(researchLoopStatusQueryKey(variables.teamId), payload.status);
+      setResearchLoopDecisionDraft((draft) => ({
+        ...draft,
+        rationale: "",
+        nextActions: "",
+      }));
+      void queryClient.invalidateQueries({ queryKey: researchLoopStatusQueryKey(variables.teamId) });
+    },
+  });
+
   const recordSourceCollectionOutputMutation = useMutation({
     mutationFn: async (payload: { teamId: string; runId: string; draft: SourceCollectionOutputDraft }) => {
       const output = await fetchJson<DataProcessingCollectionOutputPayload>(
@@ -4180,6 +4789,94 @@ export function TeamsRoute({
       teamId: selectedTeam.teamId,
       plan,
       draft: experimentSmokeResultDraft,
+    });
+  }
+
+  function registerExperimentFullRunResultFromWorkspace(plan: ExperimentPlanRecord) {
+    if (!selectedTeam?.teamId || selectedTeamRegisterExperimentFullRunResultPending) {
+      return;
+    }
+    registerExperimentFullRunResultMutation.mutate({
+      teamId: selectedTeam.teamId,
+      plan,
+      draft: experimentFullRunResultDraft,
+    });
+  }
+
+  function requestExperimentKnowledgeIngestionFromWorkspace(plan: ExperimentPlanRecord) {
+    if (!selectedTeam?.teamId || selectedTeamRequestExperimentKnowledgeIngestionPending) {
+      return;
+    }
+    requestExperimentKnowledgeIngestionMutation.mutate({
+      teamId: selectedTeam.teamId,
+      plan,
+      draft: experimentKnowledgeIngestionDraft,
+    });
+  }
+
+  function createResearchLoopFromWorkspace(plan: ExperimentPlanRecord | null) {
+    if (!selectedTeam?.teamId || selectedTeamCreateResearchLoopPending) {
+      return;
+    }
+    const templates = researchLoopTemplatesPayload?.templates ?? researchLoopStatus?.templates ?? [];
+    const templateId = selectedResearchLoopTemplateId || researchLoopTemplatesPayload?.defaultTemplateId || templates[0]?.templateId || "algorithm_model_experiment";
+    const researchQuestion = researchLoopCreateDraft.researchQuestion.trim() || plan?.goal || plan?.topic || sourceCollectionDraft.goal;
+    if (!researchQuestion.trim()) {
+      return;
+    }
+    createResearchLoopMutation.mutate({
+      teamId: selectedTeam.teamId,
+      plan,
+      templateId,
+      draft: researchLoopCreateDraft,
+    });
+  }
+
+  function recordResearchLoopEvidenceFromWorkspace(loop: ResearchLoopRecord) {
+    if (!selectedTeam?.teamId || selectedTeamRecordResearchLoopEvidencePending) {
+      return;
+    }
+    const evidenceType =
+      researchLoopEvidenceDraft.evidenceType
+      || loop.readiness.missingEvidenceTypes[0]
+      || loop.readiness.requiredEvidenceTypes[0]
+      || "";
+    const hasEvidencePayload = Boolean(
+      researchLoopEvidenceDraft.summary.trim()
+      || researchLoopEvidenceDraft.metricValue.trim()
+      || researchLoopEvidenceDraft.artifactRef.trim()
+      || researchLoopEvidenceDraft.datasetRefs.trim()
+      || researchLoopEvidenceDraft.environmentRefs.trim()
+      || researchLoopEvidenceDraft.logRefs.trim()
+      || researchLoopEvidenceDraft.commandPreview.trim(),
+    );
+    if (!evidenceType || !hasEvidencePayload) {
+      return;
+    }
+    recordResearchLoopEvidenceMutation.mutate({
+      teamId: selectedTeam.teamId,
+      loop,
+      draft: researchLoopEvidenceDraft,
+      evidenceType,
+    });
+  }
+
+  function recordResearchLoopDecisionFromWorkspace(loop: ResearchLoopRecord) {
+    if (!selectedTeam?.teamId || selectedTeamRecordResearchLoopDecisionPending || !researchLoopDecisionDraft.rationale.trim()) {
+      return;
+    }
+    const templates = researchLoopTemplatesPayload?.templates ?? researchLoopStatus?.templates ?? [];
+    const nextTemplateId =
+      researchLoopDecisionDraft.nextTemplateId
+      || selectedResearchLoopTemplateId
+      || loop.templateId
+      || templates[0]?.templateId
+      || "algorithm_model_experiment";
+    recordResearchLoopDecisionMutation.mutate({
+      teamId: selectedTeam.teamId,
+      loop,
+      draft: researchLoopDecisionDraft,
+      nextTemplateId,
     });
   }
 
@@ -6591,14 +7288,344 @@ export function TeamsRoute({
     );
   }
 
+  function renderResearchLoopPanel(activePlan: ExperimentPlanRecord | null, variant: "experiment" | "iteration" = "experiment") {
+    const loopStatusPayload =
+      selectedTeamRecordResearchLoopDecisionResult?.status
+      ?? selectedTeamRecordResearchLoopEvidenceResult?.status
+      ?? selectedTeamCreateResearchLoopResult?.status
+      ?? researchLoopStatus;
+    const templates = researchLoopTemplatesPayload?.templates?.length
+      ? researchLoopTemplatesPayload.templates
+      : loopStatusPayload?.templates ?? [];
+    const selectedTemplate =
+      templates.find((template) => template.templateId === selectedResearchLoopTemplateId)
+      ?? templates.find((template) => template.templateId === loopStatusPayload?.activeLoop?.templateId)
+      ?? templates[0]
+      ?? null;
+    const activeLoop = loopStatusPayload?.activeLoop ?? null;
+    const activeTemplate =
+      activeLoop?.templateSnapshot
+      ?? templates.find((template) => template.templateId === activeLoop?.templateId)
+      ?? selectedTemplate;
+    const evidenceOptions = activeLoop?.readiness.requiredEvidenceTypes?.length
+      ? activeLoop.readiness.requiredEvidenceTypes
+      : selectedTemplate?.requiredEvidenceTypes ?? [];
+    const currentEvidenceType =
+      researchLoopEvidenceDraft.evidenceType
+      || activeLoop?.readiness.missingEvidenceTypes?.[0]
+      || evidenceOptions[0]
+      || "";
+    const decisionNeedsReady = researchLoopDecisionDraft.decision === "promote_to_iteration" || researchLoopDecisionDraft.decision === "accept_for_writeup";
+    const canCreateLoop = Boolean(
+      selectedTeam?.teamId
+      && selectedTemplate
+      && !selectedTeamCreateResearchLoopPending
+      && (researchLoopCreateDraft.researchQuestion.trim() || activePlan?.goal || activePlan?.topic || sourceCollectionDraft.goal),
+    );
+    const canRecordEvidence = Boolean(
+      selectedTeam?.teamId
+      && activeLoop
+      && currentEvidenceType
+      && !selectedTeamRecordResearchLoopEvidencePending
+      && (
+        researchLoopEvidenceDraft.summary.trim()
+        || researchLoopEvidenceDraft.metricValue.trim()
+        || researchLoopEvidenceDraft.artifactRef.trim()
+        || researchLoopEvidenceDraft.datasetRefs.trim()
+        || researchLoopEvidenceDraft.environmentRefs.trim()
+        || researchLoopEvidenceDraft.logRefs.trim()
+        || researchLoopEvidenceDraft.commandPreview.trim()
+      ),
+    );
+    const canRecordDecision = Boolean(
+      selectedTeam?.teamId
+      && activeLoop
+      && researchLoopDecisionDraft.rationale.trim()
+      && !selectedTeamRecordResearchLoopDecisionPending
+      && (!decisionNeedsReady || activeLoop.readiness.readyForDecision),
+    );
+    const latestProposal = activeLoop?.iterationProposals?.[activeLoop.iterationProposals.length - 1] ?? null;
+    const latestDecision = activeLoop?.decisions?.[activeLoop.decisions.length - 1] ?? null;
+    const panelTitle = variant === "iteration"
+      ? (lang === "zh" ? "实验迭代决策" : "Experiment iteration decision")
+      : (lang === "zh" ? "Research Loop 模板" : "Research Loop template");
+
+    return (
+      <section className={styles.researchLoopPanel} aria-label={panelTitle}>
+        <div className={styles.researchLoopHeader}>
+          <div>
+            <strong>{panelTitle}</strong>
+            <span>
+              {loopStatusPayload?.nextActions?.[0]?.label
+                || (researchLoopStatusQuery.isFetching
+                  ? (lang === "zh" ? "读取实验迭代状态" : "Loading research loop")
+                  : (lang === "zh" ? "选择模板后登记证据和迭代决策" : "Select a template, then record evidence and decisions"))}
+            </span>
+          </div>
+          <button type="button" onClick={() => void researchLoopStatusQuery.refetch()} disabled={researchLoopStatusQuery.isFetching}>
+            <RefreshCw size={13} />
+            {lang === "zh" ? "刷新" : "Refresh"}
+          </button>
+        </div>
+        <div className={styles.researchLoopStats}>
+          <span>
+            {lang === "zh" ? "循环" : "Loops"}
+            <strong>{loopStatusPayload?.summary.totalLoopCount ?? 0}</strong>
+          </span>
+          <span>
+            {lang === "zh" ? "可决策" : "Decision"}
+            <strong>{loopStatusPayload?.summary.readyForDecisionCount ?? 0}</strong>
+          </span>
+          <span>
+            {lang === "zh" ? "可迭代" : "Iteration"}
+            <strong>{loopStatusPayload?.summary.readyForIterationCount ?? 0}</strong>
+          </span>
+          <span>
+            {lang === "zh" ? "执行边界" : "Execution"}
+            <strong>{loopStatusPayload?.boundaries?.autoExecution ? "auto" : "manual"}</strong>
+          </span>
+        </div>
+        <div className={styles.researchLoopTemplateBar}>
+          <label>
+            <span>{lang === "zh" ? "验证模板" : "Template"}</span>
+            <select value={selectedTemplate?.templateId || selectedResearchLoopTemplateId} onChange={(event) => setSelectedResearchLoopTemplateId(event.target.value)}>
+              {templates.map((template) => (
+                <option key={template.templateId} value={template.templateId}>
+                  {lang === "zh" ? template.labelZh : template.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            <span>{lang === "zh" ? "研究问题" : "Research question"}</span>
+            <input
+              value={researchLoopCreateDraft.researchQuestion}
+              onChange={(event) => setResearchLoopCreateDraft((draft) => ({ ...draft, researchQuestion: event.target.value }))}
+              placeholder={activePlan?.goal || activePlan?.topic || sourceCollectionDraft.goal}
+            />
+          </label>
+          <label>
+            <span>{lang === "zh" ? "约束" : "Constraints"}</span>
+            <input
+              value={researchLoopCreateDraft.constraints}
+              onChange={(event) => setResearchLoopCreateDraft((draft) => ({ ...draft, constraints: event.target.value }))}
+              placeholder={lang === "zh" ? "算力、数据、环境或复现边界" : "Compute, data, environment, or reproducibility boundary"}
+            />
+          </label>
+          <button type="button" onClick={() => createResearchLoopFromWorkspace(activePlan)} disabled={!canCreateLoop}>
+            <Plus size={13} />
+            {selectedTeamCreateResearchLoopPending ? (lang === "zh" ? "创建中" : "Creating") : (lang === "zh" ? "创建 loop" : "Create loop")}
+          </button>
+        </div>
+        {selectedTemplate ? (
+          <div className={styles.researchLoopTemplateSummary}>
+            <strong>{lang === "zh" ? selectedTemplate.labelZh : selectedTemplate.label}</strong>
+            <span>{selectedTemplate.description}</span>
+            <div>
+              {selectedTemplate.requiredEvidenceTypes.map((item) => (
+                <small key={item}>{item}</small>
+              ))}
+            </div>
+          </div>
+        ) : null}
+        {activeLoop ? (
+          <>
+            <div className={styles.researchLoopActive}>
+              <div>
+                <span>{lang === "zh" ? "Active loop" : "Active loop"}</span>
+                <strong>{activeLoop.title || activeTemplate?.labelZh || activeLoop.loopId}</strong>
+                <small>{activeLoop.researchQuestion}</small>
+              </div>
+              <div className={styles.researchLoopStatusPills}>
+                <span>{activeLoop.status}</span>
+                <span>{activeTemplate?.templateKind || activeLoop.templateKind}</span>
+                <span>{activeLoop.readiness.readyForDecision ? (lang === "zh" ? "证据齐备" : "evidence ready") : (lang === "zh" ? "证据缺口" : "evidence gap")}</span>
+              </div>
+            </div>
+            <div className={styles.researchLoopEvidenceForm}>
+              <label>
+                <span>{lang === "zh" ? "证据类型" : "Evidence type"}</span>
+                <select
+                  value={currentEvidenceType}
+                  onChange={(event) => setResearchLoopEvidenceDraft((draft) => ({ ...draft, evidenceType: event.target.value }))}
+                >
+                  {evidenceOptions.map((item) => (
+                    <option key={item} value={item}>{item}</option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                <span>{lang === "zh" ? "状态" : "Status"}</span>
+                <select
+                  value={researchLoopEvidenceDraft.status}
+                  onChange={(event) => setResearchLoopEvidenceDraft((draft) => ({ ...draft, status: event.target.value as ResearchLoopEvidenceStatus }))}
+                >
+                  {RESEARCH_LOOP_EVIDENCE_STATUSES.map((status) => (
+                    <option key={status} value={status}>{status}</option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                <span>{lang === "zh" ? "指标" : "Metric"}</span>
+                <input
+                  value={researchLoopEvidenceDraft.metricValue}
+                  onChange={(event) => setResearchLoopEvidenceDraft((draft) => ({ ...draft, metricValue: event.target.value }))}
+                  placeholder={activePlan?.experimentPlan.metric || "0.00"}
+                />
+              </label>
+              <label>
+                <span>{lang === "zh" ? "工件" : "Artifact"}</span>
+                <input
+                  value={researchLoopEvidenceDraft.artifactRef}
+                  onChange={(event) => setResearchLoopEvidenceDraft((draft) => ({ ...draft, artifactRef: event.target.value }))}
+                  placeholder="workspace/experiments/result.json"
+                />
+              </label>
+              <button type="button" onClick={() => recordResearchLoopEvidenceFromWorkspace(activeLoop)} disabled={!canRecordEvidence}>
+                <Save size={13} />
+                {selectedTeamRecordResearchLoopEvidencePending ? (lang === "zh" ? "登记中" : "Recording") : (lang === "zh" ? "登记证据" : "Record evidence")}
+              </button>
+              <label className={styles.researchLoopWide}>
+                <span>{lang === "zh" ? "摘要" : "Summary"}</span>
+                <input
+                  value={researchLoopEvidenceDraft.summary}
+                  onChange={(event) => setResearchLoopEvidenceDraft((draft) => ({ ...draft, summary: event.target.value }))}
+                  placeholder={lang === "zh" ? "证据结论、失败原因或待复核点" : "Evidence outcome, failure reason, or review note"}
+                />
+              </label>
+              <label className={styles.researchLoopWide}>
+                <span>{lang === "zh" ? "命令预览" : "Command preview"}</span>
+                <input
+                  value={researchLoopEvidenceDraft.commandPreview}
+                  onChange={(event) => setResearchLoopEvidenceDraft((draft) => ({ ...draft, commandPreview: event.target.value }))}
+                  placeholder="python experiments/evaluate.py --config config.yaml"
+                />
+              </label>
+              <label>
+                <span>{lang === "zh" ? "数据" : "Dataset"}</span>
+                <input
+                  value={researchLoopEvidenceDraft.datasetRefs}
+                  onChange={(event) => setResearchLoopEvidenceDraft((draft) => ({ ...draft, datasetRefs: event.target.value }))}
+                  placeholder={activePlan?.experimentPlan.dataset || "dataset id"}
+                />
+              </label>
+              <label>
+                <span>{lang === "zh" ? "环境" : "Environment"}</span>
+                <input
+                  value={researchLoopEvidenceDraft.environmentRefs}
+                  onChange={(event) => setResearchLoopEvidenceDraft((draft) => ({ ...draft, environmentRefs: event.target.value }))}
+                  placeholder="conda env / docker image / hardware"
+                />
+              </label>
+              <label>
+                <span>{lang === "zh" ? "日志" : "Logs"}</span>
+                <input
+                  value={researchLoopEvidenceDraft.logRefs}
+                  onChange={(event) => setResearchLoopEvidenceDraft((draft) => ({ ...draft, logRefs: event.target.value }))}
+                  placeholder="logs/experiments/run.log"
+                />
+              </label>
+            </div>
+            <div className={styles.researchLoopDecisionForm}>
+              <label>
+                <span>{lang === "zh" ? "决策" : "Decision"}</span>
+                <select
+                  value={researchLoopDecisionDraft.decision}
+                  onChange={(event) => setResearchLoopDecisionDraft((draft) => ({ ...draft, decision: event.target.value as ResearchLoopDecisionValue }))}
+                >
+                  {RESEARCH_LOOP_DECISION_VALUES.map((decision) => (
+                    <option key={decision} value={decision}>{decision}</option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                <span>{lang === "zh" ? "下一模板" : "Next template"}</span>
+                <select
+                  value={researchLoopDecisionDraft.nextTemplateId || selectedTemplate?.templateId || activeLoop.templateId}
+                  onChange={(event) => setResearchLoopDecisionDraft((draft) => ({ ...draft, nextTemplateId: event.target.value }))}
+                >
+                  {templates.map((template) => (
+                    <option key={template.templateId} value={template.templateId}>
+                      {lang === "zh" ? template.labelZh : template.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className={styles.researchLoopWide}>
+                <span>{lang === "zh" ? "理由" : "Rationale"}</span>
+                <input
+                  value={researchLoopDecisionDraft.rationale}
+                  onChange={(event) => setResearchLoopDecisionDraft((draft) => ({ ...draft, rationale: event.target.value }))}
+                  placeholder={lang === "zh" ? "基于证据给出推进、修复或补证据原因" : "Reason to promote, repair, or request more evidence"}
+                />
+              </label>
+              <button type="button" onClick={() => recordResearchLoopDecisionFromWorkspace(activeLoop)} disabled={!canRecordDecision}>
+                <Send size={13} />
+                {selectedTeamRecordResearchLoopDecisionPending ? (lang === "zh" ? "提交中" : "Submitting") : (lang === "zh" ? "登记决策" : "Record decision")}
+              </button>
+              <label className={styles.researchLoopWide}>
+                <span>{lang === "zh" ? "下一步动作" : "Next actions"}</span>
+                <input
+                  value={researchLoopDecisionDraft.nextActions}
+                  onChange={(event) => setResearchLoopDecisionDraft((draft) => ({ ...draft, nextActions: event.target.value }))}
+                  placeholder={activeTemplate?.defaultIterationActions?.join(" / ") || "revise hypothesis / add evidence"}
+                />
+              </label>
+            </div>
+            <div className={styles.researchLoopOutcomeGrid}>
+              <section>
+                <strong>{lang === "zh" ? "缺失证据" : "Missing evidence"}</strong>
+                <div className={styles.experimentGapList}>
+                  {(activeLoop.readiness.missingEvidenceTypes.length ? activeLoop.readiness.missingEvidenceTypes : [lang === "zh" ? "无缺口" : "no gaps"]).map((item) => (
+                    <span key={item}>{item}</span>
+                  ))}
+                </div>
+              </section>
+              <section>
+                <strong>{lang === "zh" ? "最新决策" : "Latest decision"}</strong>
+                <span>{latestDecision ? `${latestDecision.decision} -> ${latestDecision.statusAfterDecision}` : (lang === "zh" ? "尚未决策" : "no decision yet")}</span>
+                {latestProposal ? <small>{latestProposal.nextTemplateId}: {latestProposal.nextActions.join(" / ")}</small> : null}
+              </section>
+            </div>
+          </>
+        ) : (
+          <div className={styles.experimentLedgerEmpty}>
+            <AlertTriangle size={14} />
+            <span>{lang === "zh" ? "还没有 Research Loop，先从当前实验计划创建模板化循环。" : "No Research Loop yet. Create one from the active experiment plan."}</span>
+          </div>
+        )}
+        {selectedTeamCreateResearchLoopError ? <div className={styles.workflowError}>{selectedTeamCreateResearchLoopError.message}</div> : null}
+        {selectedTeamRecordResearchLoopEvidenceError ? <div className={styles.workflowError}>{selectedTeamRecordResearchLoopEvidenceError.message}</div> : null}
+        {selectedTeamRecordResearchLoopDecisionError ? <div className={styles.workflowError}>{selectedTeamRecordResearchLoopDecisionError.message}</div> : null}
+      </section>
+    );
+  }
+
   function renderExperimentPlanningLedgerPanel() {
+    const latestKnowledgeIngestionMutationPayload = selectedTeamRequestExperimentKnowledgeIngestionResult;
+    const latestFullRunMutationPayload = selectedTeamRegisterExperimentFullRunResultResult;
     const latestSmokeMutationPayload = selectedTeamRegisterExperimentSmokeResultResult;
     const latestBaselineMutationPayload = selectedTeamRegisterExperimentBaselineArtifactResult;
     const latestMutationPayload = selectedTeamCreateExperimentPlanResult;
-    const statusPayload = latestSmokeMutationPayload?.status ?? latestBaselineMutationPayload?.status ?? latestMutationPayload?.status ?? experimentPlanningStatus;
-    const activePlan = latestSmokeMutationPayload?.plan ?? latestBaselineMutationPayload?.plan ?? latestMutationPayload?.plan ?? statusPayload?.activePlan ?? null;
+    const statusPayload =
+      latestKnowledgeIngestionMutationPayload?.status
+      ?? latestFullRunMutationPayload?.status
+      ?? latestSmokeMutationPayload?.status
+      ?? latestBaselineMutationPayload?.status
+      ?? latestMutationPayload?.status
+      ?? experimentPlanningStatus;
+    const activePlan =
+      latestKnowledgeIngestionMutationPayload?.plan
+      ?? latestFullRunMutationPayload?.plan
+      ?? latestSmokeMutationPayload?.plan
+      ?? latestBaselineMutationPayload?.plan
+      ?? latestMutationPayload?.plan
+      ?? statusPayload?.activePlan
+      ?? null;
     const activeBaselineArtifact = activePlan?.baselineSelection.activeBaselineArtifact ?? null;
     const activeSmokeResult = activePlan?.activeSmokeResult ?? null;
+    const activeFullRunResult = activePlan?.activeFullRunResult ?? null;
+    const knowledgeIngestion = activePlan?.knowledgeIngestion ?? null;
     const hypotheses = statusPayload?.readyHypothesisCandidates?.length
       ? statusPayload.readyHypothesisCandidates
       : statusPayload?.hypothesisCandidates ?? [];
@@ -6618,6 +7645,23 @@ export function TeamsRoute({
       && experimentSmokeResultDraft.metricValue.trim()
       && (experimentSmokeResultDraft.resultPath.trim() || experimentSmokeResultDraft.logRef.trim())
       && !selectedTeamRegisterExperimentSmokeResultPending,
+    );
+    const canRegisterFullRunResult = Boolean(
+      selectedTeam?.teamId
+      && activePlan
+      && activePlan.readiness.readyForFullRun
+      && experimentFullRunResultDraft.metricValue.trim()
+      && (experimentFullRunResultDraft.resultPath.trim() || experimentFullRunResultDraft.logRef.trim())
+      && !selectedTeamRegisterExperimentFullRunResultPending,
+    );
+    const canRequestKnowledgeIngestion = Boolean(
+      selectedTeam?.teamId
+      && activePlan
+      && activeFullRunResult
+      && String(activeFullRunResult.status || "").toLowerCase() === "passed"
+      && activePlan.readiness.readyForKnowledgeIngestion
+      && !knowledgeIngestion
+      && !selectedTeamRequestExperimentKnowledgeIngestionPending,
     );
     const summary = statusPayload?.summary;
     return (
@@ -6847,6 +7891,221 @@ export function TeamsRoute({
                     />
                   </label>
                 </div>
+                {activePlan.readiness.readyForFullRun ? (
+                  <>
+                    {activeFullRunResult ? (
+                      <div
+                        className={[
+                          styles.experimentSmokeResult,
+                          String(activeFullRunResult.status || "").toLowerCase() === "passed"
+                            ? styles.experimentSmokeResultPass
+                            : styles.experimentSmokeResultWarn,
+                        ].join(" ")}
+                      >
+                        <div>
+                          <span>{lang === "zh" ? "Active full-run" : "Active full-run"}</span>
+                          <strong title={activeFullRunResult.resultPath || activeFullRunResult.logRef || activeFullRunResult.fullRunResultId}>
+                            {activeFullRunResult.resultPath || activeFullRunResult.logRef || activeFullRunResult.fullRunResultId}
+                          </strong>
+                          <small title={activeFullRunResult.configPath || activeFullRunResult.recordedAt}>
+                            {activeFullRunResult.configPath || activeFullRunResult.recordedAt || "-"}
+                          </small>
+                        </div>
+                        <div className={styles.experimentSmokeMeta}>
+                          <span>{activeFullRunResult.status}</span>
+                          <span>{activeFullRunResult.gateDecision}</span>
+                          <span>{activeFullRunResult.metricName || activePlan.experimentPlan.metric || "metric"} · {activeFullRunResult.metricValue || "-"}</span>
+                          <span>
+                            {activePlan.readiness.readyForKnowledgeIngestion
+                              ? (lang === "zh" ? "可通知知识库 Agent" : "knowledge review ready")
+                              : (lang === "zh" ? "知识入库阻塞" : "knowledge blocked")}
+                          </span>
+                        </div>
+                      </div>
+                    ) : null}
+                    <div className={styles.experimentSmokeForm}>
+                      <label>
+                        <span>{lang === "zh" ? "Full-run 状态" : "Full-run status"}</span>
+                        <select
+                          value={experimentFullRunResultDraft.status}
+                          onChange={(event) =>
+                            setExperimentFullRunResultDraft((draft) => ({
+                              ...draft,
+                              status: event.target.value as ExperimentFullRunResultStatus,
+                            }))}
+                        >
+                          {EXPERIMENT_FULL_RUN_RESULT_STATUSES.map((status) => (
+                            <option key={status} value={status}>
+                              {status === "needs_review"
+                                ? (lang === "zh" ? "需复核" : "needs review")
+                                : status === "passed"
+                                  ? (lang === "zh" ? "通过" : "passed")
+                                  : (lang === "zh" ? "失败" : "failed")}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label>
+                        <span>{lang === "zh" ? "Full-run 指标" : "Full-run metric"}</span>
+                        <input
+                          value={experimentFullRunResultDraft.metricValue}
+                          onChange={(event) => setExperimentFullRunResultDraft((draft) => ({ ...draft, metricValue: event.target.value }))}
+                          placeholder={activePlan.experimentPlan.metric || "0.00"}
+                        />
+                      </label>
+                      <label>
+                        <span>{lang === "zh" ? "Baseline 指标" : "Baseline metric"}</span>
+                        <input
+                          value={experimentFullRunResultDraft.baselineMetricValue}
+                          onChange={(event) => setExperimentFullRunResultDraft((draft) => ({ ...draft, baselineMetricValue: event.target.value }))}
+                          placeholder={activeBaselineArtifact.metricValue || activeSmokeResult?.baselineMetricValue || "-"}
+                        />
+                      </label>
+                      <label>
+                        <span>{lang === "zh" ? "Smoke 指标" : "Smoke metric"}</span>
+                        <input
+                          value={experimentFullRunResultDraft.smokeMetricValue}
+                          onChange={(event) => setExperimentFullRunResultDraft((draft) => ({ ...draft, smokeMetricValue: event.target.value }))}
+                          placeholder={activeSmokeResult?.metricValue || "-"}
+                        />
+                      </label>
+                      <label>
+                        <span>Delta</span>
+                        <input
+                          value={experimentFullRunResultDraft.delta}
+                          onChange={(event) => setExperimentFullRunResultDraft((draft) => ({ ...draft, delta: event.target.value }))}
+                          placeholder="+0.00"
+                        />
+                      </label>
+                      <label>
+                        <span>{lang === "zh" ? "结果路径" : "Result path"}</span>
+                        <input
+                          value={experimentFullRunResultDraft.resultPath}
+                          onChange={(event) => setExperimentFullRunResultDraft((draft) => ({ ...draft, resultPath: event.target.value }))}
+                          placeholder="workspace/experiments/full_run/result.json"
+                        />
+                      </label>
+                      <label>
+                        <span>{lang === "zh" ? "日志引用" : "Log ref"}</span>
+                        <input
+                          value={experimentFullRunResultDraft.logRef}
+                          onChange={(event) => setExperimentFullRunResultDraft((draft) => ({ ...draft, logRef: event.target.value }))}
+                          placeholder="logs/experiments/full_run.log"
+                        />
+                      </label>
+                      <button type="button" onClick={() => registerExperimentFullRunResultFromWorkspace(activePlan)} disabled={!canRegisterFullRunResult}>
+                        <Save size={13} />
+                        {selectedTeamRegisterExperimentFullRunResultPending
+                          ? (lang === "zh" ? "登记中" : "Registering")
+                          : activeFullRunResult
+                            ? (lang === "zh" ? "更新 full-run" : "Update full-run")
+                            : (lang === "zh" ? "登记 full-run" : "Register full-run")}
+                      </button>
+                      <label className={styles.experimentSmokeWide}>
+                        <span>{lang === "zh" ? "配置路径" : "Config path"}</span>
+                        <input
+                          value={experimentFullRunResultDraft.configPath}
+                          onChange={(event) => setExperimentFullRunResultDraft((draft) => ({ ...draft, configPath: event.target.value }))}
+                          placeholder="workspace/experiments/full_run/config.json"
+                        />
+                      </label>
+                      <label className={styles.experimentSmokeWide}>
+                        <span>{lang === "zh" ? "复现命令" : "Reproduce"}</span>
+                        <input
+                          value={experimentFullRunResultDraft.reproductionCommand}
+                          onChange={(event) => setExperimentFullRunResultDraft((draft) => ({ ...draft, reproductionCommand: event.target.value }))}
+                          placeholder={activeBaselineArtifact.reproductionCommand || "python experiments/run_full.py"}
+                        />
+                      </label>
+                      <label className={styles.experimentSmokeWide}>
+                        <span>{lang === "zh" ? "评估命令" : "Evaluate"}</span>
+                        <input
+                          value={experimentFullRunResultDraft.evaluationCommand}
+                          onChange={(event) => setExperimentFullRunResultDraft((draft) => ({ ...draft, evaluationCommand: event.target.value }))}
+                          placeholder={activeSmokeResult?.evaluationCommand || activeBaselineArtifact.evaluationCommand || "python experiments/evaluate_full.py"}
+                        />
+                      </label>
+                      <label className={styles.experimentSmokeWide}>
+                        <span>{lang === "zh" ? "备注" : "Notes"}</span>
+                        <input
+                          value={experimentFullRunResultDraft.notes}
+                          onChange={(event) => setExperimentFullRunResultDraft((draft) => ({ ...draft, notes: event.target.value }))}
+                          placeholder={lang === "zh" ? "只登记外部 full-run 证据" : "External full-run evidence only"}
+                        />
+                      </label>
+                    </div>
+                  </>
+                ) : null}
+                {activeFullRunResult && String(activeFullRunResult.status || "").toLowerCase() === "passed" ? (
+                  <div className={styles.experimentKnowledgePanel}>
+                    <div>
+                      <strong>{lang === "zh" ? "实验结果入库请求" : "Experiment result ingestion"}</strong>
+                      <span>
+                        {knowledgeIngestion
+                          ? `${knowledgeIngestion.status} · ${knowledgeIngestion.experimentResultPack?.packId || knowledgeIngestion.knowledgeBaseId}`
+                          : (lang === "zh" ? "生成结果包并通知 Knowledge Steward；正式知识仍需复核。" : "Create a result pack and notify the Knowledge Steward.")}
+                      </span>
+                    </div>
+                    {!knowledgeIngestion ? (
+                      <div className={styles.experimentKnowledgeForm}>
+                        <label>
+                          <span>{lang === "zh" ? "知识库" : "Knowledge base"}</span>
+                          <input
+                            value={experimentKnowledgeIngestionDraft.knowledgeBaseId}
+                            onChange={(event) => setExperimentKnowledgeIngestionDraft((draft) => ({ ...draft, knowledgeBaseId: event.target.value }))}
+                            placeholder={`${selectedTeam?.teamId || "research-team"}-challenge-cup-experiments`}
+                          />
+                        </label>
+                        <label>
+                          <span>{lang === "zh" ? "知识域" : "Domain"}</span>
+                          <input
+                            value={experimentKnowledgeIngestionDraft.targetDomain}
+                            onChange={(event) => setExperimentKnowledgeIngestionDraft((draft) => ({ ...draft, targetDomain: event.target.value }))}
+                            placeholder={lang === "zh" ? "挑战杯实验结果" : "Challenge Cup experiment results"}
+                          />
+                        </label>
+                        <label>
+                          <span>{lang === "zh" ? "结果标题" : "Title"}</span>
+                          <input
+                            value={experimentKnowledgeIngestionDraft.title}
+                            onChange={(event) => setExperimentKnowledgeIngestionDraft((draft) => ({ ...draft, title: event.target.value }))}
+                            placeholder={activePlan.title}
+                          />
+                        </label>
+                        <label>
+                          <span>{lang === "zh" ? "摘要" : "Summary"}</span>
+                          <input
+                            value={experimentKnowledgeIngestionDraft.summary}
+                            onChange={(event) => setExperimentKnowledgeIngestionDraft((draft) => ({ ...draft, summary: event.target.value }))}
+                            placeholder={`${activeFullRunResult.metricName || activePlan.experimentPlan.metric || "metric"} = ${activeFullRunResult.metricValue || "-"}`}
+                          />
+                        </label>
+                        <label className={styles.experimentKnowledgeWide}>
+                          <span>{lang === "zh" ? "备注" : "Notes"}</span>
+                          <input
+                            value={experimentKnowledgeIngestionDraft.notes}
+                            onChange={(event) => setExperimentKnowledgeIngestionDraft((draft) => ({ ...draft, notes: event.target.value }))}
+                            placeholder={lang === "zh" ? "原始日志只保留引用，正式知识由 Steward 复核" : "Raw logs stay referenced; Steward reviews curated knowledge"}
+                          />
+                        </label>
+                        <label className={styles.experimentKnowledgeToggle}>
+                          <input
+                            type="checkbox"
+                            checked={experimentKnowledgeIngestionDraft.wakeStewardAgent}
+                            onChange={(event) => setExperimentKnowledgeIngestionDraft((draft) => ({ ...draft, wakeStewardAgent: event.target.checked }))}
+                          />
+                          <span>{lang === "zh" ? "立即唤醒 Knowledge Steward" : "Wake Knowledge Steward"}</span>
+                        </label>
+                        <button type="button" onClick={() => requestExperimentKnowledgeIngestionFromWorkspace(activePlan)} disabled={!canRequestKnowledgeIngestion}>
+                          <Send size={13} />
+                          {selectedTeamRequestExperimentKnowledgeIngestionPending
+                            ? (lang === "zh" ? "通知中" : "Notifying")
+                            : (lang === "zh" ? "通知知识库 Agent" : "Notify steward")}
+                        </button>
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
               </>
             ) : null}
           </>
@@ -6856,6 +8115,7 @@ export function TeamsRoute({
             <span>{lang === "zh" ? "还没有实验计划草稿，先启动实验阶段并生成计划。" : "No experiment plan draft yet. Start the stage and draft a plan."}</span>
           </div>
         )}
+        {renderResearchLoopPanel(activePlan, "experiment")}
         <div className={styles.experimentEvidenceGrid}>
           <section>
             <strong>{lang === "zh" ? "候选算法假设" : "Algorithm hypotheses"}</strong>
@@ -6898,6 +8158,8 @@ export function TeamsRoute({
         {selectedTeamCreateExperimentPlanError ? <div className={styles.workflowError}>{selectedTeamCreateExperimentPlanError.message}</div> : null}
         {selectedTeamRegisterExperimentBaselineArtifactError ? <div className={styles.workflowError}>{selectedTeamRegisterExperimentBaselineArtifactError.message}</div> : null}
         {selectedTeamRegisterExperimentSmokeResultError ? <div className={styles.workflowError}>{selectedTeamRegisterExperimentSmokeResultError.message}</div> : null}
+        {selectedTeamRegisterExperimentFullRunResultError ? <div className={styles.workflowError}>{selectedTeamRegisterExperimentFullRunResultError.message}</div> : null}
+        {selectedTeamRequestExperimentKnowledgeIngestionError ? <div className={styles.workflowError}>{selectedTeamRequestExperimentKnowledgeIngestionError.message}</div> : null}
       </section>
     );
   }
@@ -7005,6 +8267,7 @@ export function TeamsRoute({
             ) : null}
           </section>
           {stageView === "experiment" ? renderExperimentPlanningLedgerPanel() : null}
+          {stageView === "iteration" ? renderResearchLoopPanel(experimentPlanningStatus?.activePlan ?? null, "iteration") : null}
           <section className={styles.researchStageModuleGrid} aria-label={lang === "zh" ? "阶段模块" : "Stage modules"}>
             {config.modules.map(([title, body]) => (
               <article key={title} className={styles.researchStageModuleCard}>
@@ -7334,6 +8597,53 @@ export function TeamsRoute({
     registerExperimentSmokeResultMutation.variables?.teamId === selectedTeam?.teamId
       ? registerExperimentSmokeResultMutation.data
       : undefined;
+  const selectedTeamRegisterExperimentFullRunResultPending =
+    registerExperimentFullRunResultMutation.isPending && registerExperimentFullRunResultMutation.variables?.teamId === selectedTeam?.teamId;
+  const selectedTeamRegisterExperimentFullRunResultError =
+    registerExperimentFullRunResultMutation.variables?.teamId === selectedTeam?.teamId && registerExperimentFullRunResultMutation.error instanceof Error
+      ? registerExperimentFullRunResultMutation.error
+      : null;
+  const selectedTeamRegisterExperimentFullRunResultResult =
+    registerExperimentFullRunResultMutation.variables?.teamId === selectedTeam?.teamId
+      ? registerExperimentFullRunResultMutation.data
+      : undefined;
+  const selectedTeamRequestExperimentKnowledgeIngestionPending =
+    requestExperimentKnowledgeIngestionMutation.isPending && requestExperimentKnowledgeIngestionMutation.variables?.teamId === selectedTeam?.teamId;
+  const selectedTeamRequestExperimentKnowledgeIngestionError =
+    requestExperimentKnowledgeIngestionMutation.variables?.teamId === selectedTeam?.teamId
+    && requestExperimentKnowledgeIngestionMutation.error instanceof Error
+      ? requestExperimentKnowledgeIngestionMutation.error
+      : null;
+  const selectedTeamRequestExperimentKnowledgeIngestionResult =
+    requestExperimentKnowledgeIngestionMutation.variables?.teamId === selectedTeam?.teamId
+      ? requestExperimentKnowledgeIngestionMutation.data
+      : undefined;
+  const researchLoopTemplatesPayload = researchLoopTemplatesQuery.data ?? null;
+  const researchLoopStatus = researchLoopStatusQuery.data ?? null;
+  const selectedTeamCreateResearchLoopPending =
+    createResearchLoopMutation.isPending && createResearchLoopMutation.variables?.teamId === selectedTeam?.teamId;
+  const selectedTeamCreateResearchLoopError =
+    createResearchLoopMutation.variables?.teamId === selectedTeam?.teamId && createResearchLoopMutation.error instanceof Error
+      ? createResearchLoopMutation.error
+      : null;
+  const selectedTeamCreateResearchLoopResult =
+    createResearchLoopMutation.variables?.teamId === selectedTeam?.teamId ? createResearchLoopMutation.data : undefined;
+  const selectedTeamRecordResearchLoopEvidencePending =
+    recordResearchLoopEvidenceMutation.isPending && recordResearchLoopEvidenceMutation.variables?.teamId === selectedTeam?.teamId;
+  const selectedTeamRecordResearchLoopEvidenceError =
+    recordResearchLoopEvidenceMutation.variables?.teamId === selectedTeam?.teamId && recordResearchLoopEvidenceMutation.error instanceof Error
+      ? recordResearchLoopEvidenceMutation.error
+      : null;
+  const selectedTeamRecordResearchLoopEvidenceResult =
+    recordResearchLoopEvidenceMutation.variables?.teamId === selectedTeam?.teamId ? recordResearchLoopEvidenceMutation.data : undefined;
+  const selectedTeamRecordResearchLoopDecisionPending =
+    recordResearchLoopDecisionMutation.isPending && recordResearchLoopDecisionMutation.variables?.teamId === selectedTeam?.teamId;
+  const selectedTeamRecordResearchLoopDecisionError =
+    recordResearchLoopDecisionMutation.variables?.teamId === selectedTeam?.teamId && recordResearchLoopDecisionMutation.error instanceof Error
+      ? recordResearchLoopDecisionMutation.error
+      : null;
+  const selectedTeamRecordResearchLoopDecisionResult =
+    recordResearchLoopDecisionMutation.variables?.teamId === selectedTeam?.teamId ? recordResearchLoopDecisionMutation.data : undefined;
   const selectedTeamStartSourceCollectionPending =
     startSourceCollectionRunMutation.isPending && startSourceCollectionRunMutation.variables?.teamId === selectedTeam?.teamId;
   const selectedTeamStartSourceCollectionError =

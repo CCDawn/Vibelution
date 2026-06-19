@@ -31,7 +31,7 @@
           <div class="kicker">Research Flow Node 10</div>
           <h1>实验迭代闭环</h1>
           <p class="subtitle">把实验与迭代合成一个模板化 Research Loop：按算法模型、仿真模拟、数据集基准、环境探针、资料审查等问题类型切换模板，先登记人工证据和决策，不接沙盒 runner。</p>
-          <div class="tag-row"><span class="tag active">Research Loop 模板化流程 API 已接入</span><span class="tag">Research Loop Agent / Experiment Ledger Service</span><span class="tag">独立计划页</span></div>
+          <div class="tag-row"><span class="tag active">Research Loop 模板化流程与 Teams 实验面板已接入</span><span class="tag">Research Loop Agent / Experiment Ledger Service</span><span class="tag">独立计划页</span></div>
           <div class="diagram">
             <div class="flow-cell"><strong>输入</strong><span>experiment ResearchStageRound / algorithm_hypothesis</span></div>
             <div class="flow-cell"><strong>动作</strong><span>GET experiments/status 聚合实验轮次、算法假设候选、计划草稿、baseline/metric/dataset/smoke 缺口。</span></div>
@@ -58,6 +58,7 @@
 <li>POST experiments/plans/{planId}/baseline-artifact 登记 active baseline artifact，解除 baseline blocker 并开放 smoke gate。</li>
 <li>POST experiments/plans/{planId}/smoke-result 登记 smoke 指标、日志和结果路径；passed 才解除 full-run blocker。</li>
 <li>POST experiments/plans/{planId}/full-run-result 只登记人工 full-run 结果证据；Knowledge Steward 入库请求仍走显式审批边界。</li>
+<li>POST experiments/plans/{planId}/knowledge-ingestion-request 生成 experiment_result_pack 并通知 Knowledge Steward Agent，正式知识/RAG 仍等待复核。</li>
 <li>GET research-loop/templates 暴露算法模型、仿真模拟、数据集基准、环境探针、深度资料审查、论文结论复核模板。</li>
 <li>POST research-loop/loops 按 templateId 创建实验迭代 loop，可关联 stageRoundId、planId、candidateIds 和研究问题。</li>
 <li>POST research-loop/loops/{loopId}/evidence 登记人工证据、指标、artifact/log/source/dataset/environment refs 和 commandPreview。</li>
@@ -67,6 +68,7 @@
 <li>active_baseline_artifact</li>
 <li>smoke_result</li>
 <li>full_run_result 手工账本</li>
+<li>experiment_result_pack</li>
 <li>research_loop</li>
 <li>evidenceRecords</li>
 <li>decision</li>
@@ -76,7 +78,7 @@
 <li>commandPreview 被误当已执行</li>
 <li>模板证据缺口没有补齐就推进迭代</li>
 <li>baseline 不公平</li></ul></article>
-            <article class="plan-card "><h2>未决事项</h2><ul><li>TeamsRoute 前端总控面板等待当前 source collection dedupe claim 释放后接入；沙盒 runner 明确后置，不属于当前阶段。</li></ul></article>
+            <article class="plan-card "><h2>未决事项</h2><ul><li>沙盒 runner、训练 runner 和自动仿真执行器明确后置；当前阶段只做模板、证据、决策和 Steward 入库请求链路。</li></ul></article>
           </div>
         </section>
 
@@ -86,7 +88,7 @@
             <p class="hint">区分候选工作区、知识治理 Agent、正式 Team Knowledge 和正式知识图谱。</p>
           </div>
           <div class="status-grid">
-            <div class="status-item"><b>候选状态</b><span>Research Loop 模板化流程 API 已接入</span></div>
+            <div class="status-item"><b>候选状态</b><span>Research Loop 模板化流程与 Teams 实验面板已接入</span></div>
             <div class="status-item"><b>记忆平台</b><span>实验计划和 Research Loop 只进入 Team workflow runtime memory；实验结果是否入库仍取决于 full-run 证据、证据复核 Agent 和知识治理 Agent。</span></div>
             <div class="status-item"><b>图谱同步</b><span>Research Loop 是候选流程状态，不创建正式图谱边；正式边仍等待 Knowledge Steward 审批后从 ExperimentResult/KnowledgeItem trace 生成。</span></div>
           </div>
