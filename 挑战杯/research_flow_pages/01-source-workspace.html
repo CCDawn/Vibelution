@@ -89,7 +89,7 @@
       <div class="status-grid">
         <div class="status-item"><b>状态</b><span>source_registered</span></div>
         <div class="status-item"><b>功能岗位</b><span>Source Intake Agent</span></div>
-        <div class="status-item"><b>Agent 状态</b><span>可复用通用 data-processing assignment / source-extraction / source-quality 后端已接入；Teams 搜索资料执行台、资料提炼页、资料审查台、科研总览控制台、KV 缓存对话轨迹、启动复用反馈、metadata-only 搜索执行闭环、高价值信息层、中文控制台、默认层去说明化、步骤卡主操作入口、右侧当前步骤 Agent 配置、资料审查页内反馈、资料审查 Agent 批量执行、候选库可视化二级索引、知识搜集阶段四步控制台、资料审查 Agent 复审入口、一键排队首批后台搜索、搜索资料当前动作和已收集资料分层、搜集结果状态徽标完整显示、搜集结果 DOI/网页/本地文件来源可溯源、四步完整列表、来源类型过滤、阶段结果/Agent过程双页、阶段输入输出交接、Agent 执行过程流水、结果分页、实体可读工作台、阶段卡降噪、资料入库 Agent 一键生成关系并写入团队知识库、资料入库可从候选资料触发审查并入库、KV 缓存模型与执行 Agent 模型分层、阶段协调显式启动已接入</span></div>
+        <div class="status-item"><b>Agent 状态</b><span>可复用通用 data-processing assignment / source-extraction / source-quality 后端已接入；Teams 搜索资料执行台、资料提炼页、资料审查台、科研总览控制台、KV 缓存对话轨迹、启动复用反馈、metadata-only 搜索执行闭环、高价值信息层、中文控制台、默认层去说明化、步骤卡主操作入口、右侧当前步骤 Agent 配置、资料审查页内反馈、资料审查 Agent 批量执行、候选库可视化二级索引、知识搜集阶段四步控制台、资料审查 Agent 复审入口、一键排队首批后台搜索、搜索资料当前动作和已收集资料分层、搜集结果状态徽标完整显示、搜集结果 DOI/网页/本地文件来源可溯源、资料提炼结果滚动与待审查交接、四步完整列表、来源类型过滤、阶段结果/Agent过程双页、阶段输入输出交接、Agent 执行过程流水、结果分页、实体可读工作台、阶段卡降噪、资料入库 Agent 一键生成关系并写入团队知识库、资料入库可从候选资料触发审查并入库、KV 缓存模型与执行 Agent 模型分层、阶段协调显式启动已接入</span></div>
         <div class="status-item"><b>进入条件</b><span>用户提供 PDF、论文、赛题或补充资料；文件可在挑战杯工作区定位。</span></div>
         <div class="status-item"><b>退出条件</b><span>每个知识搜集轮次有 stageRoundId、roundNumber、teamMemoryRecord、coordinationContract.startResult(manual_only 或显式启动结果)、显式协调后的可选 coordinationRoomId/coordinationRoundId、sourceRunIds、dataSearchPlanRef、planned queries、assignedQueries 和 resultWritebackContract；每个资料项先有 DataRecord/sourceRef/rawLocation/title/qualitySignals/collectionTrace，再有 source_manifest 的 id、path、type、allowedForAnalysis、sha256、pageScope、sourceExtraction.pageAnchors 和 sourceQualityAssessment。</span></div>
         <div class="status-item"><b>审核门禁</b><span>确认资料允许分析、来源可信度和是否纳入本轮。</span></div>
@@ -117,10 +117,12 @@
 <li>KV 缓存模型分层展示</li>
 <li>执行 Agent 模型右侧展示</li>
 <li>四步结果分页</li>
+<li>结果区独立滚动</li>
 <li>搜索资料当前动作</li>
 <li>已收集资料结果区</li>
 <li>搜集结果来源溯源</li>
 <li>搜集结果状态徽标</li>
+<li>资料提炼待审查交接</li>
 <li>资料审查 Agent 复审</li>
 <li>候选库可视化面板</li>
 <li>资料入库 Agent 一键入库</li>
