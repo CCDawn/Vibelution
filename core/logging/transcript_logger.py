@@ -19,6 +19,8 @@ from datetime import datetime
 from typing import Optional, List, Dict, Any
 from pathlib import Path
 
+from config.paths import resolve_workspace_home
+
 
 class TranscriptLogger:
     """
@@ -47,9 +49,7 @@ class TranscriptLogger:
             return
         self._initialized = True
 
-        # 获取项目根目录 (core/logging/transcript_logger.py -> core/ -> project_root)
-        self._project_root = Path(__file__).parent.parent.parent.resolve()
-        self._logs_dir = self._project_root / "workspace" / "logs" / "transcripts"
+        self._logs_dir = resolve_workspace_home() / "logs" / "transcripts"
         self._ensure_logs_dir()
 
         # 当前会话和对话轮次
