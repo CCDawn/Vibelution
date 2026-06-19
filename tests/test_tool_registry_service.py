@@ -65,7 +65,8 @@ def test_tool_registry_lists_builtins_as_protected(tmp_path, monkeypatch):
     assert {"core", "research", "coding", "collaboration"}.issubset(bundles)
     assert "grep_search_tool" in bundles["core"]["toolNames"]
     assert "research_knowledge_query_tool" in bundles["research"]["toolNames"]
-    assert "unified_knowledge_search_tool" in bundles["research"]["toolNames"]
+    assert "unified_memory_search_tool" in bundles["research"]["toolNames"]
+    assert "unified_memory_search_tool" in bundles["memory_context"]["toolNames"]
     assert "research_agent_creation_proposal_tool" in bundles["collaboration"]["toolNames"]
     assert "research_communication_edge_proposal_tool" in bundles["collaboration"]["toolNames"]
     assert "research_proposal_apply_tool" in bundles["collaboration"]["toolNames"]
@@ -109,7 +110,7 @@ def test_tool_registry_exposes_tool_bundle_membership_without_duplicating_genera
     assert generated["bundleIds"] == []
 
 
-def test_tool_registry_does_not_mark_research_knowledge_tools_as_explicit_allow(tmp_path, monkeypatch):
+def test_tool_registry_lists_unified_memory_search_tool_as_agent_facing(tmp_path, monkeypatch):
     monkeypatch.setattr(registry, "GENERATED_TOOLS_PATH", tmp_path / "generated_tools.json")
 
     payload = registry.get_tool_registry()
@@ -119,17 +120,17 @@ def test_tool_registry_does_not_mark_research_knowledge_tools_as_explicit_allow(
     assert tool["llmVisible"] is True
     assert tool["permissionPolicy"]["requiresExplicitAllow"] is _is_explicitly_allowed_tool("research_knowledge_query_tool")
 
-    rag_tool = next(item for item in payload["tools"] if item["name"] == "knowledge_rag_retrieve_tool")
-    assert rag_tool["source"] == "built_in"
-    assert rag_tool["llmVisible"] is True
-    assert rag_tool["category"] == "memory_context"
-    assert rag_tool["permissionPolicy"]["requiresExplicitAllow"] is _is_explicitly_allowed_tool("knowledge_rag_retrieve_tool")
-    unified_tool = next(item for item in payload["tools"] if item["name"] == "unified_knowledge_search_tool")
+    names = {item["name"] for item in payload["tools"]}
+    assert "knowledge_query_tool" not in names
+    assert "knowledge_rag_retrieve_tool" not in names
+    assert "unified_knowledge_search_tool" not in names
+    unified_tool = next(item for item in payload["tools"] if item["name"] == "unified_memory_search_tool")
     assert unified_tool["source"] == "built_in"
     assert unified_tool["llmVisible"] is True
     assert unified_tool["category"] == "memory_context"
     assert "unified_search" in unified_tool["capabilityTags"]
-    assert unified_tool["permissionPolicy"]["requiresExplicitAllow"] is _is_explicitly_allowed_tool("unified_knowledge_search_tool")
+    assert "rag_retrieval" in unified_tool["capabilityTags"]
+    assert unified_tool["permissionPolicy"]["requiresExplicitAllow"] is _is_explicitly_allowed_tool("unified_memory_search_tool")
 
 
 def test_tool_registry_exposes_agent_scoped_tool_views(tmp_path, monkeypatch):

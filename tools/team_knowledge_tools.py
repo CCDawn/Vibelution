@@ -9,7 +9,7 @@ from typing import Any
 from core.chat.chat_task_types import trim_lines
 
 
-KNOWLEDGE_QUERY_TOOL_NAME = "knowledge_query_tool"
+UNIFIED_MEMORY_SEARCH_TOOL_NAME = "unified_memory_search_tool"
 KNOWLEDGE_PROPOSAL_TOOL_NAME = "knowledge_proposal_tool"
 KNOWLEDGE_INGESTION_TOOL_NAME = "knowledge_ingestion_tool"
 KNOWLEDGE_GOVERNANCE_TASKS_TOOL_NAME = "knowledge_governance_tasks_tool"
@@ -18,11 +18,9 @@ KNOWLEDGE_GOVERNANCE_PLAN_TOOL_NAME = "knowledge_governance_plan_tool"
 KNOWLEDGE_STEWARD_RECOMMENDATIONS_TOOL_NAME = "knowledge_steward_recommendations_tool"
 KNOWLEDGE_STEWARD_WORKBENCH_TOOL_NAME = "knowledge_steward_workbench_tool"
 KNOWLEDGE_RATING_SUGGESTION_TOOL_NAME = "knowledge_rating_suggestion_tool"
-KNOWLEDGE_RAG_RETRIEVE_TOOL_NAME = "knowledge_rag_retrieve_tool"
-UNIFIED_KNOWLEDGE_SEARCH_TOOL_NAME = "unified_knowledge_search_tool"
 
 
-def unified_knowledge_search_tool(
+def unified_memory_search_tool(
     query: str = "",
     query_mode: str = "auto",
     knowledge_base_id: str = "",
@@ -33,7 +31,7 @@ def unified_knowledge_search_tool(
     max_context_chars: int = 1200,
 ) -> str:
     """
-    Search governed formal knowledge through one read-only Agent-facing tool.
+    Search governed Agent/Team memory and formal knowledge through one read-only Agent-facing tool.
 
     The Agent chooses query_mode and query text; the platform routes the search
     to the current local knowledge, metadata, regex, or RAG backend and returns
@@ -51,7 +49,7 @@ def unified_knowledge_search_tool(
     try:
         from core.web.services import unified_knowledge_search_service
 
-        payload = unified_knowledge_search_service.search_unified_knowledge(
+        payload = unified_knowledge_search_service.search_unified_memory(
             agent_id=agent_id,
             query=trim_lines(str(query or ""), max_lines=4).strip(),
             query_mode=query_mode,
@@ -64,7 +62,7 @@ def unified_knowledge_search_tool(
             max_context_chars=max_context_chars,
         )
         _record_event(
-            "knowledge.tool.unified_search.succeeded",
+            "memory.tool.unified_search.succeeded",
             runtime=runtime,
             outcome="succeeded",
             fields={
@@ -78,164 +76,7 @@ def unified_knowledge_search_tool(
         return _json_result({"ok": True, "status": "succeeded", **payload})
     except Exception as exc:
         _record_event(
-            "knowledge.tool.unified_search.failed",
-            runtime=runtime,
-            level="error",
-            outcome="failed",
-            fields={"knowledgeBaseId": requested_base_id, "errorType": type(exc).__name__},
-        )
-        return _json_result(
-            {
-                "ok": False,
-                "status": "failed",
-                "error": type(exc).__name__,
-                "message": trim_lines(str(exc), max_lines=2),
-                "agentId": agent_id,
-                "knowledgeBaseId": requested_base_id,
-            }
-        )
-
-
-def knowledge_query_tool(query: str = "", knowledge_base_id: str = "", limit: int = 8) -> str:
-    """
-    Read formal team knowledge items the current Agent is allowed to access.
-
-    The tool is read-only. It returns reviewed knowledge items only; source
-    artifacts and pending refinement proposals stay behind the review workflow.
-    """
-
-    runtime = _current_runtime()
-    agent_id = str(runtime.get("agentId") or "").strip()
-    normalized_limit = _clamp_limit(limit)
-    normalized_query = trim_lines(str(query or ""), max_lines=4).strip().lower()
-    requested_base_id = str(knowledge_base_id or "").strip()
-    memory_policy = runtime.get("memoryPolicy") if isinstance(runtime.get("memoryPolicy"), dict) else {}
-    allowed_base_ids = _policy_ids(memory_policy, "readKnowledgeBaseIds")
-    if requested_base_id and not _policy_allows_knowledge_base(requested_base_id, allowed_base_ids):
-        return _json_result(_blocked_result(agent_id, "knowledge_base_not_in_memory_policy"))
-
-    try:
-        from core.web.services import team_knowledge_service
-
-        payload = team_knowledge_service.search_knowledge_items(
-            agent_id=agent_id,
-            query=normalized_query,
-            knowledge_base_id=requested_base_id,
-            limit=normalized_limit,
-        )
-        results = list(payload.get("results") or [])
-        _record_event(
-            "knowledge.tool.query.succeeded",
-            runtime=runtime,
-            outcome="succeeded",
-            fields={
-                "knowledgeBaseId": requested_base_id,
-                "queryLength": len(normalized_query),
-                "resultCount": len(results),
-                "limit": normalized_limit,
-            },
-        )
-        return _json_result(
-            {
-                "ok": True,
-                "status": "succeeded",
-                "agentId": agent_id,
-                "knowledgeBaseId": requested_base_id,
-                "query": normalized_query,
-                "limit": normalized_limit,
-                "summary": payload.get("summary") or {"resultCount": len(results)},
-                "results": results,
-            }
-        )
-    except Exception as exc:
-        _record_event(
-            "knowledge.tool.query.failed",
-            runtime=runtime,
-            level="error",
-            outcome="failed",
-            fields={"errorType": type(exc).__name__},
-        )
-        return _json_result(
-            {
-                "ok": False,
-                "status": "failed",
-                "error": type(exc).__name__,
-                "message": trim_lines(str(exc), max_lines=2),
-                "agentId": agent_id,
-            }
-        )
-
-
-def knowledge_rag_retrieve_tool(
-    query: str = "",
-    knowledge_base_id: str = "",
-    owner_type: str = "",
-    owner_id: str = "",
-    retrieval_mode: str = "hybrid",
-    provider: str = "local",
-    top_k: int = 5,
-    max_context_chars: int = 1200,
-) -> str:
-    """
-    Retrieve compact, cited RAG context candidates from formal Team Knowledge.
-
-    The tool is read-only. It does not mutate formal knowledge and does not
-    inject retrieved content into prompts by default.
-    """
-
-    runtime = _current_runtime()
-    agent_id = str(runtime.get("agentId") or "").strip()
-    requested_base_id = str(knowledge_base_id or "").strip()
-    memory_policy = runtime.get("memoryPolicy") if isinstance(runtime.get("memoryPolicy"), dict) else {}
-    allowed_base_ids = _policy_ids(memory_policy, "readKnowledgeBaseIds")
-    if requested_base_id and not _policy_allows_knowledge_base(requested_base_id, allowed_base_ids):
-        return _json_result(_blocked_result(agent_id, "knowledge_base_not_in_memory_policy"))
-
-    try:
-        from core.web.services import rag_retrieval_service
-
-        payload = rag_retrieval_service.retrieve_rag_contexts(
-            agent_id=agent_id,
-            query=trim_lines(str(query or ""), max_lines=4).strip(),
-            owner_type=str(owner_type or "").strip(),
-            owner_id=str(owner_id or "").strip(),
-            knowledge_base_id=requested_base_id,
-            retrieval_mode=retrieval_mode,
-            provider=provider,
-            top_k=top_k,
-            max_context_chars=max_context_chars,
-        )
-        contexts = list(payload.get("contexts") or [])
-        citations = list(payload.get("citations") or [])
-        _record_event(
-            "knowledge.tool.rag_retrieve.succeeded",
-            runtime=runtime,
-            outcome="succeeded",
-            fields={
-                "knowledgeBaseId": requested_base_id,
-                "queryLength": len(trim_lines(str(query or ""), max_lines=4).strip()),
-                "contextCount": len(contexts),
-                "citationCount": len(citations),
-                "retrievalMode": str((payload.get("request") or {}).get("retrievalMode") or retrieval_mode),
-                "provider": str((payload.get("request") or {}).get("provider") or provider),
-            },
-        )
-        return _json_result(
-            {
-                "ok": True,
-                "status": "succeeded",
-                "agentId": agent_id,
-                "knowledgeBaseId": requested_base_id,
-                "summary": payload.get("summary") or {"contextCount": len(contexts), "citationCount": len(citations)},
-                "contexts": contexts,
-                "citations": citations,
-                "retrievalPolicy": payload.get("retrievalPolicy") or {},
-                "request": payload.get("request") or {},
-            }
-        )
-    except Exception as exc:
-        _record_event(
-            "knowledge.tool.rag_retrieve.failed",
+            "memory.tool.unified_search.failed",
             runtime=runtime,
             level="error",
             outcome="failed",

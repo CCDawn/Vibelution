@@ -2306,7 +2306,7 @@ def knowledge_permission_audit(*, agent_id: str = "") -> dict[str, Any]:
             "blockedByToolPolicy": False,
             "reason": "available",
         }
-        for name in ("knowledge_query_tool", "knowledge_proposal_tool", "knowledge_rating_suggestion_tool")
+        for name in ("unified_memory_search_tool", "knowledge_proposal_tool", "knowledge_rating_suggestion_tool")
     }
     _record_event(
         "knowledge.permission.audit.viewed",
@@ -3082,7 +3082,7 @@ def _recommended_tool_for_action(action: str) -> str:
         "review_rating_suggestion": "knowledge_governance_tasks_tool",
         "draft_refinement_proposal": "knowledge_proposal_tool",
         "suggest_rating_metadata": "knowledge_rating_suggestion_tool",
-    }.get(str(action or "").strip(), "knowledge_query_tool")
+    }.get(str(action or "").strip(), "unified_memory_search_tool")
 
 
 def _priority_rank(priority: str) -> int:
