@@ -2400,8 +2400,11 @@
 
 .sourceCollectionResultsPanel {
   display: grid;
+  grid-template-rows: auto auto auto minmax(0, 1fr) auto;
   gap: 6px;
   min-width: 0;
+  min-height: 0;
+  overflow: hidden;
   padding-top: 2px;
 }
 
@@ -2518,8 +2521,75 @@
 
 .sourceCollectionResultList {
   display: grid;
+  align-content: start;
   gap: 4px;
   min-width: 0;
+  min-height: 0;
+  max-height: clamp(320px, 52vh, 660px);
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding-right: 4px;
+  overscroll-behavior: contain;
+  scrollbar-color: color-mix(in srgb, var(--accent-cool) 54%, var(--border-strong)) transparent;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+}
+
+.sourceCollectionResultList::-webkit-scrollbar {
+  width: 10px;
+}
+
+.sourceCollectionResultList::-webkit-scrollbar-track {
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface-panel-strong) 42%, transparent);
+}
+
+.sourceCollectionResultList::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent-cool) 58%, var(--border-strong));
+  background-clip: content-box;
+}
+
+.sourceCollectionCandidateListShell {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  max-height: clamp(320px, 52vh, 660px);
+  padding: 4px 8px 22px 4px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  border: 1px solid color-mix(in srgb, var(--accent-cool) 22%, var(--border-soft));
+  border-radius: 10px;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--accent-cool) 5%, transparent), transparent 30%),
+    color-mix(in srgb, var(--source-workbench-panel) 78%, transparent);
+  overscroll-behavior: contain;
+  scrollbar-color: color-mix(in srgb, var(--accent-cool) 54%, var(--border-strong)) transparent;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+}
+
+.sourceCollectionCandidateListShell:focus-visible {
+  border-color: color-mix(in srgb, var(--accent-cool) 54%, var(--border-strong));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-cool) 18%, transparent);
+  outline: none;
+}
+
+.sourceCollectionCandidateListShell::-webkit-scrollbar {
+  width: 10px;
+}
+
+.sourceCollectionCandidateListShell::-webkit-scrollbar-track {
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface-panel-strong) 42%, transparent);
+}
+
+.sourceCollectionCandidateListShell::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent-cool) 58%, var(--border-strong));
+  background-clip: content-box;
 }
 
 .sourceCollectionPagination {
