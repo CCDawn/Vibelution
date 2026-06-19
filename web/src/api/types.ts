@@ -2740,6 +2740,9 @@ export type ProjectAgentBusDelivery = {
   inboxMessageId: string;
   status: string;
   reason: string;
+  kernelEventId?: string;
+  kernelTaskId?: string;
+  kernelOutcomeId?: string;
   revoked?: boolean;
   revokedAt?: string;
   wake: {
@@ -2782,6 +2785,16 @@ export type ProjectAgentBusEvent = {
   createdAt: string;
   updatedAt: string;
   metadata: Record<string, unknown>;
+  kernel?: {
+    enabled: boolean;
+    adapterVersion: string;
+    reused: boolean;
+    eventId: string;
+    taskId: string;
+    workRunId: string;
+    outcomeId: string;
+    outcomeStatus: string;
+  };
   deliveries: ProjectAgentBusDelivery[];
   interruptions: ProjectAgentBusInterruption[];
   revocations?: Array<{
@@ -2798,6 +2811,142 @@ export type ProjectAgentBusTimeline = {
   events: ProjectAgentBusEvent[];
   activeAgentCount: number;
   updatedAt: string;
+};
+
+export type KernelTask = {
+  taskId: string;
+  creatorEventId: string;
+  idempotencyKey: string;
+  goal: string;
+  assignedAgentIds: string[];
+  status: string;
+  workRunId: string;
+  outcomeId: string;
+  evidenceRefs: Array<Record<string, unknown>>;
+  createdAt: string;
+  updatedAt: string;
+  [key: string]: unknown;
+};
+
+export type KernelEvent = {
+  eventId: string;
+  sender: Record<string, unknown>;
+  senderAgentId: string;
+  recipients: string[];
+  status: string;
+  correlationId: string;
+  causationId: string;
+  idempotencyKey: string;
+  semanticPayload: {
+    semanticType: string;
+    payload: Record<string, unknown>;
+  };
+  deliveryPolicy: {
+    wakeTarget: boolean;
+  };
+  metadata: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+  [key: string]: unknown;
+};
+
+export type KernelExecution = {
+  workRunId: string;
+  taskId: string;
+  agentId: string;
+  status: string;
+  startedAt: string;
+  endedAt: string;
+  evidenceRefs: Array<Record<string, unknown>>;
+  deliveryRefs: Array<Record<string, unknown>>;
+  createdAt: string;
+  updatedAt: string;
+  [key: string]: unknown;
+};
+
+export type KernelDelivery = {
+  targetAgentId: string;
+  status: string;
+  inboxMessageId: string;
+  targetSessionId: string;
+  reason: string;
+  wake: {
+    wakeRequested: boolean;
+    wakeStatus: string;
+    messageId: string;
+    targetAgentId: string;
+    targetSessionId: string;
+    turnId: string;
+    reason: string;
+  };
+};
+
+export type KernelOutcome = {
+  outcomeId: string;
+  taskId: string;
+  workRunId: string;
+  agentId: string;
+  status: string;
+  visibleReply: string;
+  resultSummary: string;
+  proposalRefs: string[];
+  evidenceRefs: Array<Record<string, unknown>>;
+  deliveries: KernelDelivery[];
+  createdAt: string;
+  [key: string]: unknown;
+};
+
+export type KernelProposal = {
+  proposalId: string;
+  sourceOutcomeId: string;
+  proposalType: string;
+  status: string;
+  summary: string;
+  createdAt: string;
+  metadata: Record<string, unknown>;
+};
+
+export type KernelTimelineRef = {
+  kind: string;
+  id: string;
+  [key: string]: string;
+};
+
+export type KernelTimelineItem = {
+  kind: string;
+  status: string;
+  at: string;
+  summary: string;
+  refs: KernelTimelineRef[];
+  targetAgentId?: string;
+  inboxMessageId?: string;
+  wakeStatus?: string;
+};
+
+export type KernelTaskListPayload = {
+  tasks: KernelTask[];
+  limit: number;
+  status: string;
+  updatedAt: string;
+};
+
+export type KernelTaskTimelinePayload = {
+  taskId: string;
+  task: KernelTask;
+  event: KernelEvent;
+  execution: KernelExecution;
+  outcome: KernelOutcome;
+  deliveries: KernelDelivery[];
+  proposals: KernelProposal[];
+  runtimeEvidenceRefs: Array<Record<string, string>>;
+  projectionRefs: Array<Record<string, string>>;
+  timeline: KernelTimelineItem[];
+  readModel: {
+    projection: boolean;
+    factAuthority: boolean;
+    truthSource: string;
+    generatedAt: string;
+  };
 };
 
 export type AgentDelegationPolicy = {
