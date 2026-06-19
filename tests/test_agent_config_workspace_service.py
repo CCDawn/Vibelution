@@ -533,7 +533,9 @@ def test_agent_api_effective_compression_uses_dialogue_model_context_window(tmp_
     policy = payload["contextCompressionEffectivePolicy"]
     assert policy["maxTokenLimit"] == 32768
     assert policy["effectiveTokenLimit"] == 32768
+    assert policy["compressionTriggerTokenLimit"] == 32768
     assert policy["contextWindowLimit"] == 900000
+    assert policy["modelContextWindowLimit"] == 900000
 
 
 def test_agent_instance_generates_public_person_name_and_keeps_functional_name(tmp_path, monkeypatch):
@@ -2746,6 +2748,51 @@ def test_session_agent_policy_id_patch_honors_selected_shared_policy_without_for
     assert "cli_agent_run_tool" not in payload["toolPolicy"]["allowedTools"]
     persisted = agent_directory_service.load_state()
     assert persisted["toolPolicies"]["tool-shared-minimal"]["allowedTools"] == ["agent_message_tool"]
+
+
+def test_agent_api_explains_session_tool_policy_sources(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    default_agent = agent_directory_service.create_agent_instance(
+        display_name="默认会话 Agent",
+        primary_mode="chat",
+        prompt_template_id="prompt-chat-default",
+    )
+    empty_agent = agent_directory_service.create_agent_instance(
+        display_name="空工具 Agent",
+        primary_mode="chat",
+        prompt_template_id="prompt-chat-default",
+    )
+    empty_agent = agent_directory_service.update_agent_instance(
+        empty_agent["agentId"],
+        tool_policy={"allowedTools": [], "preferredTools": []},
+    )
+    wide_agent = agent_directory_service.create_agent_instance(
+        display_name="宽权限 Agent",
+        primary_mode="chat",
+        prompt_template_id="prompt-chat-default",
+    )
+    wide_agent = agent_directory_service.update_agent_instance(
+        wide_agent["agentId"],
+        tool_policy={
+            "allowedTools": [
+                *agent_directory_service.DEFAULT_SESSION_AGENT_ALLOWED_TOOLS,
+                "cli_tool",
+                "write_file_tool",
+            ],
+            "preferredTools": ["cli_tool"],
+        },
+    )
+
+    default_payload = agent_directory_service.get_agent(default_agent["agentId"])
+    empty_payload = agent_directory_service.get_agent(empty_agent["agentId"])
+    wide_payload = agent_directory_service.get_agent(wide_agent["agentId"])
+
+    assert default_payload["toolPolicySource"]["kind"] == "session_default_private"
+    assert empty_payload["toolPolicySource"]["kind"] == "agent_private_override"
+    assert empty_payload["toolPolicySource"]["allowedToolCount"] == 0
+    assert wide_payload["toolPolicySource"]["kind"] == "legacy_wide_private_override"
+    assert wide_payload["toolPolicySource"]["isLegacyWide"] is True
+    assert set(wide_payload["toolPolicySource"]["mutatingTools"]) == {"cli_tool", "write_file_tool"}
 
 
 def test_agent_api_rejects_legacy_profile_and_template_fields(tmp_path, monkeypatch):

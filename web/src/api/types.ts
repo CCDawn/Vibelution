@@ -2569,6 +2569,19 @@ export type ToolPolicy = {
   perToolRules: Record<string, unknown>;
 };
 
+export type AgentToolPolicySource = {
+  kind: string;
+  label: string;
+  description: string;
+  policyId: string;
+  isPrivate: boolean;
+  isLegacyWide: boolean;
+  allowedToolCount: number;
+  preferredToolCount: number;
+  mutatingToolCount: number;
+  mutatingTools: string[];
+};
+
 export type AgentToolGovernanceRequest = {
   eventId: string;
   requestId: string;
@@ -2877,7 +2890,9 @@ export type AgentContextCompressionPolicy = {
 export type AgentContextCompressionEffectivePolicy = AgentContextCompressionPolicy & {
   source: "global" | "agent_custom" | string;
   effectiveTokenLimit: number;
+  compressionTriggerTokenLimit?: number;
   contextWindowLimit: number;
+  modelContextWindowLimit?: number;
   agentPolicy?: AgentContextCompressionPolicy;
 };
 
@@ -2896,6 +2911,7 @@ export type AgentInstance = {
   workspacePath: string;
   workspaceTerritory?: AgentWorkspaceTerritory;
   toolPolicyId: string;
+  toolPolicySource?: AgentToolPolicySource;
   memoryPolicyId: string;
   avatarImagePath?: string;
   avatarImageUrl?: string;
