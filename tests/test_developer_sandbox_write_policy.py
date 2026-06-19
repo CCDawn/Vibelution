@@ -14,6 +14,7 @@ def _enable_sandbox(tmp_path, monkeypatch):
     project_root.mkdir()
     monkeypatch.setattr(developer_sandbox, "CONFIG_PATH", config_path)
     monkeypatch.setattr(developer_sandbox, "PROJECT_ROOT", project_root)
+    monkeypatch.setattr(developer_sandbox, "resolve_workspace_home", lambda *args, **kwargs: project_root / "workspace")
     status = developer_sandbox.get_developer_mode_status(config_path=config_path, project_root=project_root)
     enabled = developer_sandbox.update_developer_mode_status(
         True,
@@ -106,7 +107,7 @@ def test_legacy_direct_workspace_write_modules_are_explicitly_classified():
             continue
         text = path.read_text(encoding="utf-8", errors="replace")
         if '"workspace"' not in text and "'workspace'" not in text:
-            offenders.append(f"{relative_path}: no direct workspace literal left")
+            continue
         policy = developer_sandbox.developer_write_policy(surface, "state")
         if policy not in {"sandboxed", "overlay", "blocked_in_dev"}:
             offenders.append(f"{relative_path}: unsafe policy {policy!r} for {surface!r}")

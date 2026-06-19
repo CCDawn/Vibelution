@@ -91,48 +91,53 @@ def _kb_ref(env: dict) -> str:
     return str(env["base"].get("scopedKnowledgeBaseId") or env["base"]["knowledgeBaseId"])
 
 
-def test_team_knowledge_tools_are_llm_facing_after_explicit_allow(tmp_path, monkeypatch):
-    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
-    agent = agent_directory_service.create_agent_instance(display_name="Default Agent")
-    tools = [
+_LLM_FACING_KNOWLEDGE_TOOL_NAMES = {
+    "unified_memory_search_tool",
+    "knowledge_proposal_tool",
+    "knowledge_rating_suggestion_tool",
+    "knowledge_operations_health_tool",
+    "knowledge_governance_plan_tool",
+    "knowledge_steward_recommendations_tool",
+    "knowledge_steward_workbench_tool",
+    "agent_message_tool",
+}
+
+
+def _llm_facing_knowledge_tools():
+    return [
         tool
         for tool in create_llm_facing_tools()
-        if tool.name
-        in {
-            "unified_memory_search_tool",
-            "knowledge_proposal_tool",
-            "knowledge_rating_suggestion_tool",
-            "knowledge_operations_health_tool",
-            "knowledge_governance_plan_tool",
-            "knowledge_steward_recommendations_tool",
-            "knowledge_steward_workbench_tool",
-            "agent_message_tool",
-        }
+        if tool.name in _LLM_FACING_KNOWLEDGE_TOOL_NAMES
     ]
+
+
+def test_team_knowledge_tools_are_hidden_without_explicit_allow(tmp_path, monkeypatch):
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    agent = agent_directory_service.create_agent_instance(display_name="Default Agent")
+    tools = _llm_facing_knowledge_tools()
 
     with agent_directory_service.active_agent_runtime(agent["agentId"], session_id="session-tools"):
         visible = agent_directory_service.filter_llm_tools_for_current_agent(tools)
 
-    assert {tool.name for tool in tools} == {
-        "unified_memory_search_tool",
-        "knowledge_proposal_tool",
-        "knowledge_rating_suggestion_tool",
-        "knowledge_operations_health_tool",
-        "knowledge_governance_plan_tool",
-        "knowledge_steward_recommendations_tool",
-        "knowledge_steward_workbench_tool",
-        "agent_message_tool",
-    }
-    assert [tool.name for tool in visible] == []
+    assert {tool.name for tool in tools} == _LLM_FACING_KNOWLEDGE_TOOL_NAMES
+    assert visible == []
 
+
+def test_team_knowledge_tools_are_llm_facing_with_explicit_allow(tmp_path, monkeypatch):
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    agent = agent_directory_service.create_agent_instance(display_name="Knowledge Tools Agent")
+    tools = _llm_facing_knowledge_tools()
+    allowed_names = [tool.name for tool in tools]
     agent_directory_service.update_agent_instance(
         agent["agentId"],
-        tool_policy={"allowedTools": [tool.name for tool in tools]},
+        tool_policy={"allowedTools": allowed_names},
     )
-    with agent_directory_service.active_agent_runtime(agent["agentId"], session_id="session-tools"):
-        visible_after_allow = agent_directory_service.filter_llm_tools_for_current_agent(tools)
 
-    assert [tool.name for tool in visible_after_allow] == [tool.name for tool in tools]
+    with agent_directory_service.active_agent_runtime(agent["agentId"], session_id="session-tools"):
+        visible = agent_directory_service.filter_llm_tools_for_current_agent(tools)
+
+    assert {tool.name for tool in tools} == _LLM_FACING_KNOWLEDGE_TOOL_NAMES
+    assert [tool.name for tool in visible] == [tool.name for tool in tools]
 
 
 def test_knowledge_proposal_tool_submits_source_and_pending_candidate(tmp_path, monkeypatch):

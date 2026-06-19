@@ -11,6 +11,8 @@ def _enable_sandbox(tmp_path, monkeypatch):
     project_root = tmp_path / "project"
     project_root.mkdir()
     monkeypatch.setattr(developer_sandbox, "CONFIG_PATH", config_path)
+    monkeypatch.setattr(developer_sandbox, "PROJECT_ROOT", project_root)
+    monkeypatch.setattr(developer_sandbox, "resolve_workspace_home", lambda *args, **kwargs: project_root / "workspace")
     status = developer_sandbox.get_developer_mode_status(config_path=config_path, project_root=project_root)
     enabled = developer_sandbox.update_developer_mode_status(
         True,

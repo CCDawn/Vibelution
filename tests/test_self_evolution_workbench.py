@@ -5,6 +5,7 @@ import json
 import sqlite3
 from pathlib import Path
 
+from core.infrastructure import developer_sandbox
 from core.evaluation.self_evolution_workbench import (
     SelfEvolutionTransactionRecord,
     build_self_evolution_preview,
@@ -443,6 +444,7 @@ def test_transaction_history_helpers_read_workspace_db(monkeypatch, tmp_path: Pa
 
 def test_format_self_evolution_audit_excerpt_reads_tail(monkeypatch, tmp_path: Path):
     project_root = tmp_path / "project"
+    monkeypatch.setattr(developer_sandbox, "resolve_workspace_home", lambda *args, **kwargs: project_root / "workspace")
     audit_path = project_root / "workspace" / "evolution" / "audit.jsonl"
     audit_path.parent.mkdir(parents=True)
     audit_path.write_text(

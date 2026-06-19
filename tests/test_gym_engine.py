@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from core.infrastructure import developer_sandbox
 from core.gym import (
     Attempt,
     AttemptEvidence,
@@ -65,7 +66,8 @@ class FakeAgentHarness:
         )
 
 
-def test_evolution_engine_runs_with_fake_agent_adapter_and_writes_proposal(tmp_path: Path):
+def test_evolution_engine_runs_with_fake_agent_adapter_and_writes_proposal(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(developer_sandbox, "resolve_workspace_home", lambda *args, **kwargs: tmp_path / "workspace")
     exercise = build_local_transaction_exercise()
     cases = materialize_local_transaction_cases()
     engine = EvolutionEngine(FakeAgentHarness())
