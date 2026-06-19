@@ -132,6 +132,8 @@ RESEARCH_STAGE_DEFAULTS = {
         "newRoundActionZh": "开启新一轮迭代",
     },
 }
+EXPERIMENT_PLAN_STORE_KIND = "team_workflow_experiment_plan_store"
+EXPERIMENT_PLAN_REQUIRED_FIELDS = ("dataset", "metric", "baseline", "smokePlan")
 LOCAL_RESEARCH_OUTPUT_FIELDS = (
     "candidateType",
     "sourceRefs",
@@ -1536,6 +1538,95 @@ def start_research_stage_round(team_id: str, payload: dict[str, Any] | None = No
         "nextActions": _stage_next_actions(stage_type, reused=False),
         "boundaries": _research_stage_boundaries(),
         **result_payload,
+    }
+
+
+def get_experiment_planning_status(team_id: str) -> dict[str, Any]:
+    normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
+    team_service.get_team(normalized_team_id)
+    with _WORKFLOW_LOCK:
+        store = _load_stage_round_store(normalized_team_id)
+        rounds = _stage_rounds(store)
+        candidate_store = _load_candidate_store(normalized_team_id)
+        plan_store = _load_experiment_plan_store(normalized_team_id)
+    return _experiment_planning_status(normalized_team_id, rounds, candidate_store, plan_store)
+
+
+def create_experiment_plan(team_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
+    team = team_service.get_team(normalized_team_id)
+    request_payload = payload if isinstance(payload, dict) else {}
+    created_by_agent = _trim_text(request_payload.get("createdByAgent"), max_length=160) or DEFAULT_OWNER_AGENT_ID
+    with _WORKFLOW_LOCK:
+        workflow = _load_or_create_workflow(normalized_team_id)
+        store = _load_stage_round_store(normalized_team_id)
+        rounds = _stage_rounds(store)
+        stage_round = _select_experiment_stage_round(request_payload, rounds)
+        candidate_store = _load_candidate_store(normalized_team_id)
+        selected_hypotheses = _select_experiment_hypothesis_candidates(candidate_store, request_payload)
+        plan_store = _load_experiment_plan_store(normalized_team_id)
+        plan = _build_experiment_plan_record(
+            normalized_team_id,
+            workflow,
+            stage_round,
+            selected_hypotheses,
+            request_payload,
+            created_by_agent=created_by_agent,
+        )
+        now = plan["updatedAt"]
+        plan_store.setdefault("plans", []).append(plan)
+        plan_store["activePlanId"] = plan["planId"]
+        plan_store["updatedAt"] = now
+        _write_json(_experiment_plan_store_path(normalized_team_id), plan_store)
+        stage_round["experimentPlanRef"] = {
+            "planId": plan["planId"],
+            "status": plan["status"],
+            "storagePath": _relative_path(_experiment_plan_store_path(normalized_team_id)),
+            "updatedAt": now,
+        }
+        planning_contract = stage_round.get("planningContract") if isinstance(stage_round.get("planningContract"), dict) else {}
+        planning_contract["currentPlanId"] = plan["planId"]
+        planning_contract["planStoragePath"] = _relative_path(_experiment_plan_store_path(normalized_team_id))
+        planning_contract["autoExecution"] = False
+        planning_contract["requiresUserDecision"] = True
+        stage_round["planningContract"] = planning_contract
+        stage_round["status"] = "planning"
+        stage_round["updatedAt"] = now
+        store["rounds"] = rounds
+        store["updatedAt"] = now
+        _write_json(_stage_round_store_path(normalized_team_id), store)
+        workflow["updatedAt"] = now
+        workflow["activeWorkflowItems"] = _upsert_active_item(
+            workflow.get("activeWorkflowItems"),
+            candidate_id=stage_round["stageRoundId"],
+            current_node=RESEARCH_STAGE_DEFAULTS["experiment"]["currentNode"],
+            status="experiment_plan_drafted",
+            transfer_id="",
+        )
+        _write_json(_workflow_path(normalized_team_id), workflow)
+        status_payload = _experiment_planning_status(normalized_team_id, rounds, candidate_store, plan_store)
+        stage_round_status = get_research_stage_round_status(normalized_team_id)
+    _record_workflow_event(
+        "experiment_plan.drafted",
+        normalized_team_id,
+        fields={
+            "workflowId": workflow["workflowId"],
+            "stageRoundId": stage_round["stageRoundId"],
+            "planId": plan["planId"],
+            "selectedHypothesisCount": len(plan.get("selectedHypotheses") or []),
+            "readyForPlanReview": bool((plan.get("readiness") or {}).get("readyForPlanReview")),
+            "readyForFullRun": False,
+            "createdByAgent": created_by_agent,
+        },
+    )
+    return {
+        "plan": plan,
+        "status": status_payload,
+        "stageRound": stage_round,
+        "stageRoundStatus": stage_round_status,
+        "workflow": _workflow_to_api(normalized_team_id, workflow, candidate_store),
+        "team": {"teamId": team.get("teamId", normalized_team_id), "name": team.get("name", "")},
+        "boundaries": _experiment_planning_boundaries(),
     }
 
 
@@ -6640,6 +6731,26 @@ def _load_candidate_store(team_id: str) -> dict[str, Any]:
     return payload
 
 
+def _load_experiment_plan_store(team_id: str) -> dict[str, Any]:
+    path = _experiment_plan_store_path(team_id)
+    if path.exists():
+        payload = _read_json(path)
+        if payload.get("storeKind") == EXPERIMENT_PLAN_STORE_KIND and isinstance(payload.get("plans"), list):
+            return payload
+    now = utc_now_iso()
+    payload = {
+        "schemaVersion": SCHEMA_VERSION,
+        "teamId": team_id,
+        "storeKind": EXPERIMENT_PLAN_STORE_KIND,
+        "activePlanId": "",
+        "plans": [],
+        "createdAt": now,
+        "updatedAt": now,
+    }
+    _write_json(path, payload)
+    return payload
+
+
 def _load_transfer_records(team_id: str) -> list[dict[str, Any]]:
     path = _transfer_records_path(team_id)
     if not path.exists():
@@ -8359,6 +8470,347 @@ def _stage_planning_contract(stage_type: str, stage_round: dict[str, Any]) -> di
     }
 
 
+def _experiment_planning_status(
+    team_id: str,
+    rounds: list[dict[str, Any]],
+    candidate_store: dict[str, Any],
+    plan_store: dict[str, Any],
+) -> dict[str, Any]:
+    experiment_rounds = [item for item in rounds if str(item.get("stageType") or "") == "experiment"]
+    latest_experiment = _latest_stage_round(experiment_rounds)
+    latest_collection = _latest_stage_round([item for item in rounds if str(item.get("stageType") or "") == "knowledge_collection"])
+    hypothesis_candidates = _experiment_hypothesis_summaries(candidate_store)
+    ready_hypotheses = [item for item in hypothesis_candidates if item.get("valid") and not item.get("missingExperimentPlanFields")]
+    plans = _experiment_plans(plan_store)
+    active_plan = _active_experiment_plan(plan_store)
+    gaps = _experiment_planning_gaps(
+        latest_experiment=latest_experiment,
+        hypothesis_candidates=hypothesis_candidates,
+        ready_hypotheses=ready_hypotheses,
+        active_plan=active_plan,
+    )
+    status = "blocked"
+    if latest_experiment and active_plan:
+        status = "planned"
+    elif latest_experiment and ready_hypotheses:
+        status = "ready_to_plan"
+    elif latest_experiment:
+        status = "needs_hypothesis"
+    return {
+        "schemaVersion": SCHEMA_VERSION,
+        "teamId": team_id,
+        "status": status,
+        "latestExperimentRound": latest_experiment,
+        "latestKnowledgeCollectionRound": latest_collection,
+        "activePlan": active_plan,
+        "plans": plans[-12:],
+        "hypothesisCandidates": hypothesis_candidates[:24],
+        "readyHypothesisCandidates": ready_hypotheses[:24],
+        "gaps": gaps,
+        "summary": {
+            "experimentRoundCount": len(experiment_rounds),
+            "planCount": len(plans),
+            "hypothesisCandidateCount": len(hypothesis_candidates),
+            "readyHypothesisCandidateCount": len(ready_hypotheses),
+            "gapCount": len(gaps),
+            "activePlanId": str(active_plan.get("planId") or "") if active_plan else "",
+        },
+        "readiness": {
+            "readyToPlan": bool(latest_experiment and ready_hypotheses),
+            "readyForSmoke": bool((active_plan or {}).get("readiness", {}).get("readyForSmoke")),
+            "readyForFullRun": False,
+            "reason": _experiment_planning_readiness_reason(latest_experiment, ready_hypotheses, active_plan),
+        },
+        "boundaries": _experiment_planning_boundaries(),
+        "storagePath": _relative_path(_experiment_plan_store_path(team_id)),
+        "nextActions": _experiment_planning_next_actions(active_plan=active_plan, gaps=gaps),
+        "updatedAt": str(plan_store.get("updatedAt") or ""),
+    }
+
+
+def _select_experiment_stage_round(payload: dict[str, Any], rounds: list[dict[str, Any]]) -> dict[str, Any]:
+    explicit_round_id = _trim_text(payload.get("stageRoundId"), max_length=160)
+    if explicit_round_id:
+        stage_round = _find_stage_round(rounds, explicit_round_id)
+        if stage_round is None or str(stage_round.get("stageType") or "") != "experiment":
+            raise TeamWorkflowOrchestrationError("Experiment stage round not found.")
+        return stage_round
+    active_round = _active_stage_round(rounds, "experiment")
+    if active_round:
+        return active_round
+    latest_round = _latest_stage_round([item for item in rounds if str(item.get("stageType") or "") == "experiment"])
+    if latest_round:
+        return latest_round
+    raise TeamWorkflowOrchestrationError("Start an experiment planning stage round before drafting an experiment plan.")
+
+
+def _select_experiment_hypothesis_candidates(candidate_store: dict[str, Any], payload: dict[str, Any]) -> list[dict[str, Any]]:
+    candidates = _experiment_hypothesis_candidates(candidate_store)
+    explicit_ids = _normalize_text_list(payload.get("hypothesisCandidateIds"), max_items=16, max_length=160)
+    if explicit_ids:
+        by_id = {str(item.get("candidateId") or ""): item for item in candidates}
+        selected = [by_id[item_id] for item_id in explicit_ids if item_id in by_id]
+        if len(selected) != len(explicit_ids):
+            raise TeamWorkflowOrchestrationError("One or more hypothesis candidates were not found.")
+        return selected
+    ready = [
+        item
+        for item in candidates
+        if validate_candidate_record(item).get("valid") is True
+        and not _experiment_hypothesis_missing_fields(item)
+        and not _candidate_is_archived(item)
+    ]
+    return ready[:8]
+
+
+def _build_experiment_plan_record(
+    team_id: str,
+    workflow: dict[str, Any],
+    stage_round: dict[str, Any],
+    selected_hypotheses: list[dict[str, Any]],
+    payload: dict[str, Any],
+    *,
+    created_by_agent: str,
+) -> dict[str, Any]:
+    now = utc_now_iso()
+    hypothesis_summaries = [_experiment_hypothesis_summary(item) for item in selected_hypotheses]
+    payload_plan = payload.get("experimentPlan") if isinstance(payload.get("experimentPlan"), dict) else {}
+    dataset = _first_non_empty_text(payload.get("dataset"), payload_plan.get("dataset"), *[item.get("experimentPlan", {}).get("dataset") for item in hypothesis_summaries])
+    metric = _first_non_empty_text(payload.get("metric"), payload_plan.get("metric"), *[item.get("experimentPlan", {}).get("metric") for item in hypothesis_summaries])
+    baseline = _first_non_empty_text(payload.get("baseline"), payload_plan.get("baseline"), *[item.get("experimentPlan", {}).get("baseline") for item in hypothesis_summaries], *[item.get("baseline") for item in hypothesis_summaries])
+    smoke_plan = _first_non_empty_text(payload.get("smokePlan"), payload_plan.get("smokePlan"), *[item.get("experimentPlan", {}).get("smokePlan") for item in hypothesis_summaries])
+    checklist = _experiment_plan_checklist(
+        stage_round=stage_round,
+        hypothesis_summaries=hypothesis_summaries,
+        dataset=dataset,
+        metric=metric,
+        baseline=baseline,
+        smoke_plan=smoke_plan,
+    )
+    ready_for_plan_review = all(item["status"] == "pass" for item in checklist if item["item"] != "active_baseline_record")
+    blockers = [item["item"] for item in checklist if item["status"] != "pass"]
+    return {
+        "schemaVersion": SCHEMA_VERSION,
+        "planId": _new_record_id("exp-plan"),
+        "teamId": team_id,
+        "workflowId": workflow.get("workflowId", DEFAULT_WORKFLOW_ID),
+        "stageRoundId": stage_round.get("stageRoundId", ""),
+        "stageRoundNumber": stage_round.get("roundNumber", 0),
+        "status": "draft",
+        "title": _trim_text(payload.get("title"), max_length=240) or f"Experiment plan for {stage_round.get('topic') or 'Challenge Cup'}",
+        "topic": stage_round.get("topic", ""),
+        "goal": stage_round.get("goal", ""),
+        "selectedHypotheses": hypothesis_summaries,
+        "hypothesisCandidateIds": [str(item.get("candidateId") or "") for item in selected_hypotheses if item.get("candidateId")],
+        "upstreamRoundIds": list(stage_round.get("upstreamRoundIds") or []),
+        "experimentPlan": {
+            "dataset": dataset,
+            "metric": metric,
+            "baseline": baseline,
+            "smokePlan": smoke_plan,
+        },
+        "baselineSelection": {
+            "baseline": baseline,
+            "status": "planned_not_validated" if baseline else "missing",
+            "activeBaselineReady": False,
+            "reason": "Baseline is selected from candidate evidence, but no reproducible active baseline artifact has been registered yet."
+            if baseline
+            else "No baseline selected yet.",
+        },
+        "successMetrics": _dedupe_text_values([metric]),
+        "riskControls": {
+            "autoExecution": False,
+            "requiresUserDecision": True,
+            "smokeGateRequired": True,
+            "fullRunBlockedUntil": blockers,
+        },
+        "readinessChecklist": checklist,
+        "readiness": {
+            "readyForPlanReview": ready_for_plan_review,
+            "readyForSmoke": False,
+            "readyForFullRun": False,
+            "blockers": blockers,
+        },
+        "notes": _trim_text(payload.get("notes"), max_length=4000),
+        "createdByAgent": created_by_agent,
+        "createdAt": now,
+        "updatedAt": now,
+    }
+
+
+def _experiment_hypothesis_candidates(candidate_store: dict[str, Any]) -> list[dict[str, Any]]:
+    candidates = [
+        item
+        for item in list(candidate_store.get("candidates") or [])
+        if isinstance(item, dict)
+        and str(item.get("candidateType") or "") == "algorithm_hypothesis"
+        and not _candidate_is_archived(item)
+    ]
+    return sorted(candidates, key=lambda item: (str(item.get("updatedAt") or ""), str(item.get("candidateId") or "")), reverse=True)
+
+
+def _experiment_hypothesis_summaries(candidate_store: dict[str, Any]) -> list[dict[str, Any]]:
+    return [_experiment_hypothesis_summary(item) for item in _experiment_hypothesis_candidates(candidate_store)]
+
+
+def _experiment_hypothesis_summary(candidate: dict[str, Any]) -> dict[str, Any]:
+    metadata = candidate.get("metadata") if isinstance(candidate.get("metadata"), dict) else {}
+    output = metadata.get("output") if isinstance(metadata.get("output"), dict) else {}
+    experiment_plan = output.get("experimentPlan") if isinstance(output.get("experimentPlan"), dict) else {}
+    validation = validate_candidate_record(candidate)
+    missing_fields = [field for field in EXPERIMENT_PLAN_REQUIRED_FIELDS if not _has_value(experiment_plan.get(field))]
+    return {
+        "candidateId": str(candidate.get("candidateId") or ""),
+        "title": str(candidate.get("title") or ""),
+        "summary": str(candidate.get("summary") or ""),
+        "currentWorkflowNode": str(candidate.get("currentWorkflowNode") or ""),
+        "currentState": str(candidate.get("currentState") or ""),
+        "qualityStatus": str(candidate.get("qualityStatus") or ""),
+        "valid": validation.get("valid") is True,
+        "validationIssueCount": len(validation.get("issues") or []),
+        "hypothesis": _trim_text(output.get("hypothesis"), max_length=1000),
+        "baseline": _trim_text(output.get("baseline"), max_length=500),
+        "expectedBenefit": _trim_text(output.get("expectedBenefit"), max_length=1000),
+        "expectedComputeCost": _trim_text(output.get("expectedComputeCost"), max_length=1000),
+        "experimentPlan": {
+            "dataset": _trim_text(experiment_plan.get("dataset"), max_length=500),
+            "metric": _trim_text(experiment_plan.get("metric"), max_length=500),
+            "baseline": _trim_text(experiment_plan.get("baseline"), max_length=500),
+            "smokePlan": _trim_text(experiment_plan.get("smokePlan"), max_length=1200),
+        },
+        "missingExperimentPlanFields": missing_fields,
+        "sourceRefs": _normalize_ref_list(candidate.get("sourceRefs") or output.get("sourceRefs"), max_items=12),
+        "evidenceRefs": _normalize_ref_list(candidate.get("evidenceRefs") or output.get("evidenceRefs"), max_items=12),
+        "updatedAt": str(candidate.get("updatedAt") or ""),
+    }
+
+
+def _experiment_hypothesis_missing_fields(candidate: dict[str, Any]) -> list[str]:
+    metadata = candidate.get("metadata") if isinstance(candidate.get("metadata"), dict) else {}
+    output = metadata.get("output") if isinstance(metadata.get("output"), dict) else {}
+    experiment_plan = output.get("experimentPlan") if isinstance(output.get("experimentPlan"), dict) else {}
+    return [field for field in EXPERIMENT_PLAN_REQUIRED_FIELDS if not _has_value(experiment_plan.get(field))]
+
+
+def _experiment_plan_checklist(
+    *,
+    stage_round: dict[str, Any],
+    hypothesis_summaries: list[dict[str, Any]],
+    dataset: str,
+    metric: str,
+    baseline: str,
+    smoke_plan: str,
+) -> list[dict[str, str]]:
+    return [
+        _experiment_checklist_item("experiment_stage_round", "实验轮次", bool(stage_round), "Experiment planning stage round is available."),
+        _experiment_checklist_item("algorithm_hypothesis", "算法假设", bool(hypothesis_summaries), f"{len(hypothesis_summaries)} hypothesis candidate(s) selected."),
+        _experiment_checklist_item("dataset", "数据集", bool(dataset), dataset or "Dataset is missing."),
+        _experiment_checklist_item("metric", "指标", bool(metric), metric or "Metric is missing."),
+        _experiment_checklist_item("baseline", "Baseline", bool(baseline), baseline or "Baseline is missing."),
+        _experiment_checklist_item("smoke_plan", "Smoke gate", bool(smoke_plan), smoke_plan or "Smoke plan is missing."),
+        _experiment_checklist_item("active_baseline_record", "Active baseline", False, "Active baseline artifact is not registered in this slice."),
+    ]
+
+
+def _experiment_checklist_item(item: str, label: str, passed: bool, note: str) -> dict[str, str]:
+    return {
+        "item": item,
+        "label": label,
+        "status": "pass" if passed else "needs_attention",
+        "note": _trim_text(note, max_length=1200),
+    }
+
+
+def _experiment_planning_gaps(
+    *,
+    latest_experiment: dict[str, Any] | None,
+    hypothesis_candidates: list[dict[str, Any]],
+    ready_hypotheses: list[dict[str, Any]],
+    active_plan: dict[str, Any] | None,
+) -> list[dict[str, str]]:
+    gaps: list[dict[str, str]] = []
+    if not latest_experiment:
+        gaps.append({"code": "missing_experiment_stage_round", "severity": "blocked", "message": "需要先启动实验规划轮次。"})
+    if not hypothesis_candidates:
+        gaps.append({"code": "missing_algorithm_hypotheses", "severity": "needs_evidence", "message": "还没有 algorithm_hypothesis 候选可转成实验。"})
+    elif not ready_hypotheses:
+        gaps.append({"code": "incomplete_experiment_plan", "severity": "needs_attention", "message": "已有算法假设，但 dataset、metric、baseline 或 smokePlan 不完整。"})
+    if latest_experiment and not active_plan:
+        gaps.append({"code": "missing_experiment_plan_draft", "severity": "pending", "message": "实验轮次已启动，但还没有 draft plan 账本记录。"})
+    if active_plan and not bool((active_plan.get("baselineSelection") or {}).get("activeBaselineReady")):
+        gaps.append({"code": "active_baseline_not_registered", "severity": "needs_attention", "message": "已有计划草稿，但 active baseline artifact 仍未登记，不能进入 full run。"})
+    return gaps
+
+
+def _experiment_planning_readiness_reason(
+    latest_experiment: dict[str, Any] | None,
+    ready_hypotheses: list[dict[str, Any]],
+    active_plan: dict[str, Any] | None,
+) -> str:
+    if not latest_experiment:
+        return "需要先启动实验规划轮次。"
+    if active_plan:
+        return "已有实验计划草稿；下一步补 active baseline artifact 与 smoke 结果。"
+    if ready_hypotheses:
+        return "已有完整 algorithm_hypothesis，可生成实验计划草稿。"
+    return "实验轮次已存在，但缺少完整 algorithm_hypothesis 候选。"
+
+
+def _experiment_planning_next_actions(*, active_plan: dict[str, Any] | None, gaps: list[dict[str, str]]) -> list[str]:
+    gap_codes = {item.get("code") for item in gaps}
+    if "missing_experiment_stage_round" in gap_codes:
+        return ["Start the experiment planning stage round.", "Keep training execution disabled until a plan is reviewed."]
+    if "missing_algorithm_hypotheses" in gap_codes or "incomplete_experiment_plan" in gap_codes:
+        return ["Review upstream paper notes, mechanism mappings, and algorithm_hypothesis candidates.", "Repair candidate experimentPlan fields before drafting a plan."]
+    if active_plan:
+        return ["Review the draft plan checklist.", "Register an active baseline artifact before smoke or full-run execution."]
+    return ["Draft an experiment plan from ready algorithm hypotheses.", "Do not auto-run training."]
+
+
+def _experiment_planning_boundaries() -> dict[str, bool | str]:
+    return {
+        "autoExecution": False,
+        "writesFormalKnowledge": False,
+        "writesRag": False,
+        "writesOfficialGraph": False,
+        "createsExperimentAttempt": False,
+        "requiresUserDecision": True,
+        "boundary": "experiment_planning_ledger_only_not_training_execution",
+    }
+
+
+def _experiment_plans(plan_store: dict[str, Any]) -> list[dict[str, Any]]:
+    plans = [item for item in list(plan_store.get("plans") or []) if isinstance(item, dict)]
+    return sorted(plans, key=lambda item: (str(item.get("updatedAt") or ""), str(item.get("planId") or "")))
+
+
+def _active_experiment_plan(plan_store: dict[str, Any]) -> dict[str, Any] | None:
+    plans = _experiment_plans(plan_store)
+    active_plan_id = str(plan_store.get("activePlanId") or "")
+    if active_plan_id:
+        for plan in plans:
+            if str(plan.get("planId") or "") == active_plan_id:
+                return plan
+    return plans[-1] if plans else None
+
+
+def _first_non_empty_text(*values: Any) -> str:
+    for value in values:
+        text = _trim_text(value, max_length=1200)
+        if text:
+            return text
+    return ""
+
+
+def _dedupe_text_values(values: list[Any]) -> list[str]:
+    result: list[str] = []
+    for value in values:
+        text = _trim_text(value, max_length=500)
+        if text and text not in result:
+            result.append(text)
+    return result
+
+
 def _stage_agent_binding_warnings(assignments: list[dict[str, Any]]) -> list[dict[str, str]]:
     warnings: list[dict[str, str]] = []
     for item in assignments:
@@ -9018,6 +9470,10 @@ def _transfer_records_path(team_id: str) -> Path:
 
 def _stage_round_store_path(team_id: str) -> Path:
     return _team_workflow_root(team_id) / "research_stage_rounds" / "index.json"
+
+
+def _experiment_plan_store_path(team_id: str) -> Path:
+    return _team_workflow_root(team_id) / "experiment_plans" / "index.json"
 
 
 def _official_model_evidence_store_path(team_id: str) -> Path:

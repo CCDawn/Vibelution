@@ -3127,6 +3127,248 @@
   background: color-mix(in srgb, var(--surface-panel-strong) 72%, transparent);
 }
 
+.experimentLedgerPanel {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, var(--accent-warm) 22%, var(--border-soft));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface-panel-strong) 76%, transparent);
+}
+
+.experimentLedgerHeader {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+}
+
+.experimentLedgerHeader > div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.experimentLedgerHeader strong,
+.experimentEvidenceGrid strong {
+  color: var(--fg-primary);
+  font-size: 0.84rem;
+}
+
+.experimentLedgerHeader span {
+  color: var(--fg-muted);
+  font-size: 0.72rem;
+  line-height: 1.4;
+}
+
+.experimentLedgerHeader button {
+  display: inline-flex;
+  min-height: 30px;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 10px;
+  border: 1px solid color-mix(in srgb, var(--accent-warm) 34%, var(--border-soft));
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--accent-warm) 12%, var(--surface-card));
+  color: var(--fg-primary);
+  font-size: 0.74rem;
+  font-weight: 760;
+}
+
+.experimentLedgerHeader button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.experimentLedgerStats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.experimentLedgerStats span {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface-card) 66%, transparent);
+  color: var(--fg-muted);
+  font-size: 0.66rem;
+  font-weight: 740;
+}
+
+.experimentLedgerStats strong {
+  color: var(--fg-primary);
+  font-size: 0.86rem;
+}
+
+.experimentPlanGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 0.7fr);
+  gap: 10px;
+}
+
+.experimentPlanSummary {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface-card) 70%, transparent);
+}
+
+.experimentPlanSummary div:first-child,
+.experimentPlanSummary p {
+  min-width: 0;
+}
+
+.experimentPlanSummary span {
+  color: var(--fg-muted);
+  font-size: 0.66rem;
+  font-weight: 760;
+}
+
+.experimentPlanSummary strong {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg-primary);
+  font-size: 0.86rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.experimentPlanSummary p {
+  margin: 0;
+  color: var(--fg-secondary);
+  font-size: 0.74rem;
+  line-height: 1.45;
+}
+
+.experimentPlanFields,
+.experimentChecklist,
+.experimentGapList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.experimentPlanFields span,
+.experimentChecklist span,
+.experimentGapList span {
+  display: inline-flex;
+  max-width: 100%;
+  min-height: 24px;
+  align-items: center;
+  gap: 5px;
+  padding: 0 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface-panel-strong) 78%, transparent);
+  overflow: hidden;
+  color: var(--fg-muted);
+  font-size: 0.66rem;
+  font-weight: 740;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.experimentChecklist {
+  align-content: start;
+  padding: 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface-card) 58%, transparent);
+}
+
+.experimentChecklist .experimentChecklistPass {
+  border-color: color-mix(in srgb, var(--accent-success) 38%, var(--border-soft));
+  color: var(--accent-success);
+}
+
+.experimentChecklist .experimentChecklistWarn,
+.experimentGapList span {
+  border-color: color-mix(in srgb, var(--accent-warning) 38%, var(--border-soft));
+  color: var(--accent-warning);
+}
+
+.experimentLedgerEmpty {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  min-height: 42px;
+  padding: 9px;
+  border: 1px dashed color-mix(in srgb, var(--accent-warning) 34%, var(--border-soft));
+  border-radius: 8px;
+  color: var(--fg-muted);
+  font-size: 0.74rem;
+  font-weight: 740;
+}
+
+.experimentEvidenceGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 0.68fr);
+  gap: 10px;
+}
+
+.experimentEvidenceGrid section {
+  display: grid;
+  gap: 8px;
+  align-content: start;
+  min-width: 0;
+}
+
+.experimentHypothesisList {
+  display: grid;
+  gap: 7px;
+}
+
+.experimentHypothesisList article {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  padding: 9px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface-card) 64%, transparent);
+}
+
+.experimentHypothesisList article > div {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 7px;
+  align-items: center;
+}
+
+.experimentHypothesisList article span {
+  padding: 2px 6px;
+  border: 1px solid color-mix(in srgb, var(--accent-cool) 30%, var(--border-soft));
+  border-radius: 999px;
+  color: var(--accent-cool-2);
+  font-size: 0.62rem;
+  font-weight: 780;
+}
+
+.experimentHypothesisList article strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.experimentHypothesisList article p,
+.experimentHypothesisList article small,
+.experimentHypothesisList > span {
+  margin: 0;
+  color: var(--fg-muted);
+  font-size: 0.69rem;
+  line-height: 1.4;
+}
+
 .researchStageBoundaryPanel {
   grid-template-columns: auto repeat(3, minmax(0, 1fr));
   align-items: center;
@@ -5365,7 +5607,11 @@
   .researchStageHeroPanel,
   .researchStageActionPanel,
   .researchStageModuleGrid,
-  .researchStageBoundaryPanel {
+  .researchStageBoundaryPanel,
+  .experimentLedgerHeader,
+  .experimentLedgerStats,
+  .experimentPlanGrid,
+  .experimentEvidenceGrid {
     grid-template-columns: 1fr;
   }
 

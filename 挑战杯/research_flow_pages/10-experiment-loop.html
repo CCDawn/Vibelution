@@ -30,13 +30,13 @@
         <section class="plan-hero">
           <div class="kicker">Research Flow Node 10</div>
           <h1>实验验证闭环</h1>
-          <p class="subtitle">未来把算法假设从方案推进到小规模验证。</p>
-          <div class="tag-row"><span class="tag pending">待规划</span><span class="tag">Experiment Planning Agent / ML Run Service</span><span class="tag">独立计划页</span></div>
+          <p class="subtitle">已把可用算法假设推进到实验计划草稿和可审查缺口面板；真实训练 runner 仍由后续切片承接。</p>
+          <div class="tag-row"><span class="tag active">实验计划账本已接入</span><span class="tag">Experiment Planning Agent / Experiment Ledger Service</span><span class="tag">独立计划页</span></div>
           <div class="diagram">
-            <div class="flow-cell"><strong>输入</strong><span>algorithm_hypothesis / experimentPlan</span></div>
-            <div class="flow-cell"><strong>动作</strong><span>待规划：训练 runner。</span></div>
-            <div class="flow-cell"><strong>输出</strong><span>experiment_result / 实验报告</span></div>
-            <div class="flow-cell"><strong>记忆/图谱</strong><span>未来边：AlgorithmHypothesis evaluated_by ExperimentResult。</span></div>
+            <div class="flow-cell"><strong>输入</strong><span>experiment ResearchStageRound / algorithm_hypothesis</span></div>
+            <div class="flow-cell"><strong>动作</strong><span>GET experiments/status 聚合实验轮次、算法假设候选、计划草稿、baseline/metric/dataset/smoke 缺口。</span></div>
+            <div class="flow-cell"><strong>输出</strong><span>experiment_plan 草稿 / readinessChecklist</span></div>
+            <div class="flow-cell"><strong>记忆/图谱</strong><span>本切片不创建 ExperimentResult 边；未来边仍是 AlgorithmHypothesis evaluated_by ExperimentResult。</span></div>
           </div>
         </section>
 
@@ -46,20 +46,24 @@
             <p class="hint">本页只展示 10 节点。通过左侧导航可进入其它节点页。</p>
           </div>
           <div class="plan-grid">
-            <article class="plan-card"><h2>目标</h2><p class="hint">规划 baseline/candidate 算法实验、指标、消融和结果回写。</p></article>
-            <article class="plan-card"><h2>输入</h2><ul><li>algorithm_hypothesis</li>
+            <article class="plan-card"><h2>目标</h2><p class="hint">规划 baseline/candidate 算法实验、指标、smoke 门禁和结果回写边界，先形成可审查计划，不自动训练。</p></article>
+            <article class="plan-card"><h2>输入</h2><ul><li>experiment ResearchStageRound</li>
+<li>algorithm_hypothesis</li>
 <li>experimentPlan</li>
-<li>候选实现提示</li></ul></article>
-            <article class="plan-card"><h2>处理动作</h2><ul><li>待规划：训练 runner。</li>
-<li>待规划：指标与数据集。</li>
-<li>待规划：实验结果回写。</li></ul></article>
-            <article class="plan-card"><h2>输出物</h2><ul><li>experiment_result</li>
-<li>实验报告</li>
-<li>promotion/reject 决策</li></ul></article>
-            <article class="plan-card"><h2>风险</h2><ul><li>实验成本过高</li>
-<li>指标不能验证假设</li>
+<li>baseline/metric/dataset/smokePlan</li></ul></article>
+            <article class="plan-card"><h2>处理动作</h2><ul><li>GET experiments/status 聚合实验轮次、算法假设候选、计划草稿、baseline/metric/dataset/smoke 缺口。</li>
+<li>POST experiments/plan 生成 experiment_plan 草稿，写入 experiment_plans/index.json 并挂回 ResearchStageRound。</li>
+<li>Teams 实验阶段页展示实验计划账本、候选算法假设、readyForSmoke/readyForFullRun 门禁和阻塞项。</li>
+<li>强制边界：不创建 ExperimentResult，不触发训练 runner，不写正式 Team Knowledge/RAG/official graph。</li></ul></article>
+            <article class="plan-card"><h2>输出物</h2><ul><li>experiment_plan 草稿</li>
+<li>readinessChecklist</li>
+<li>baselineSelection blocker</li>
+<li>promotion/reject 前置门禁</li></ul></article>
+            <article class="plan-card"><h2>风险</h2><ul><li>计划草稿被误认为已训练</li>
+<li>active baseline artifact 缺失</li>
+<li>smoke 指标不能验证假设</li>
 <li>baseline 不公平</li></ul></article>
-            <article class="plan-card placeholder"><h2>未决事项</h2><ul><li>是否先做轻量 toy benchmark。</li></ul></article>
+            <article class="plan-card "><h2>未决事项</h2><ul><li>下一刀是否先接 active baseline artifact 登记，再接轻量 smoke runner。</li></ul></article>
           </div>
         </section>
 
@@ -69,9 +73,9 @@
             <p class="hint">区分候选工作区、知识治理 Agent、正式 Team Knowledge 和正式知识图谱。</p>
           </div>
           <div class="status-grid">
-            <div class="status-item"><b>候选状态</b><span>待规划</span></div>
-            <div class="status-item"><b>记忆平台</b><span>实验结果是否入库取决于证据复核 Agent 和知识治理 Agent。</span></div>
-            <div class="status-item"><b>图谱同步</b><span>未来边：AlgorithmHypothesis evaluated_by ExperimentResult。</span></div>
+            <div class="status-item"><b>候选状态</b><span>实验计划账本已接入</span></div>
+            <div class="status-item"><b>记忆平台</b><span>实验计划只进入 Team workflow runtime memory；实验结果是否入库仍取决于后续 smoke/full run、证据复核 Agent 和知识治理 Agent。</span></div>
+            <div class="status-item"><b>图谱同步</b><span>本切片不创建 ExperimentResult 边；未来边仍是 AlgorithmHypothesis evaluated_by ExperimentResult。</span></div>
           </div>
         </section>
 

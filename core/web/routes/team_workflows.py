@@ -15,10 +15,12 @@ from core.web.services.team_workflow_orchestration_service import (
     assess_source_candidate_quality,
     assess_source_quality_batch,
     build_candidate_graph,
+    create_experiment_plan,
     decide_transfer_request,
     ensure_team_workflow_orchestration,
     execute_source_collection_search,
     extract_source_collection_candidates,
+    get_experiment_planning_status,
     get_knowledge_ingestion_status,
     get_official_model_evidence_status,
     get_paper_note_chunk_status,
@@ -177,6 +179,19 @@ class ResearchStageRoundStartPayload(BaseModel):
     maxResultsPerQuery: int = Field(10, ge=1, le=100)
     promptCachePolicy: dict[str, Any] = Field(default_factory=dict)
     scope: dict[str, Any] = Field(default_factory=dict)
+
+
+class ExperimentPlanCreatePayload(BaseModel):
+    stageRoundId: str = Field("", max_length=128)
+    title: str = Field("", max_length=240)
+    createdByAgent: str = Field("", max_length=160)
+    hypothesisCandidateIds: list[str] = Field(default_factory=list, max_length=16)
+    dataset: str = Field("", max_length=500)
+    metric: str = Field("", max_length=500)
+    baseline: str = Field("", max_length=500)
+    smokePlan: str = Field("", max_length=1200)
+    experimentPlan: dict[str, Any] = Field(default_factory=dict)
+    notes: str = Field("", max_length=4000)
 
 
 class TransferRequestPayload(BaseModel):
@@ -501,6 +516,38 @@ def team_workflow_research_stage_round_start(team_id: str, payload: ResearchStag
             exc,
             status_code=422,
             fields={"stageType": payload.stageType, "mode": payload.mode, "requestedByAgent": payload.requestedByAgent},
+        )
+
+
+@router.get("/teams/{team_id}/workflow-orchestration/experiments/status")
+def team_workflow_experiment_planning_status(team_id: str) -> dict:
+    try:
+        return get_experiment_planning_status(team_id)
+    except TeamNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except (TeamServiceError, TeamWorkflowOrchestrationError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.post("/teams/{team_id}/workflow-orchestration/experiments/plan", status_code=status.HTTP_201_CREATED)
+def team_workflow_experiment_plan_create(team_id: str, payload: ExperimentPlanCreatePayload) -> dict:
+    try:
+        return create_experiment_plan(team_id, payload.model_dump())
+    except TeamNotFoundError as exc:
+        _raise_team_workflow_route_error(
+            "experiment_plan.create",
+            team_id,
+            exc,
+            status_code=404,
+            fields={"stageRoundId": payload.stageRoundId, "createdByAgent": payload.createdByAgent},
+        )
+    except (TeamServiceError, TeamWorkflowOrchestrationError) as exc:
+        _raise_team_workflow_route_error(
+            "experiment_plan.create",
+            team_id,
+            exc,
+            status_code=422,
+            fields={"stageRoundId": payload.stageRoundId, "createdByAgent": payload.createdByAgent},
         )
 
 
