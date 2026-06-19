@@ -172,6 +172,25 @@ _SESSION_LIST_CACHE_LOCK = threading.Lock()
 _SESSION_LIST_CACHE_CONDITION = threading.Condition(_SESSION_LIST_CACHE_LOCK)
 _SESSION_LIST_CACHE_TTL_SECONDS = 4.0
 _SESSION_LIST_CACHE: dict[str, Any] = {}
+_AGENT_DIRECTORY_STUB_HIDDEN_CREATED_BY = {
+    "ai_search_team",
+    "research_agent_pool",
+    "self_evolution",
+    "supervised_evolution",
+    "system_repair",
+}
+_AGENT_DIRECTORY_STUB_HIDDEN_TEAM_SOURCES = {
+    "ai_search",
+    "research_organization",
+    "self_evolution",
+    "supervised_evolution",
+}
+_AGENT_DIRECTORY_STUB_HIDDEN_TEAM_KINDS = {
+    "ai_search",
+    "research",
+    "self_evolution",
+    "supervised_evolution",
+}
 _SESSION_LIST_PREWARM_LOCK = threading.Lock()
 _SESSION_LIST_PREWARM_INFLIGHT = False
 _UNSET = object()
@@ -5432,6 +5451,7 @@ def _append_agent_directory_conversations(
         agents = list((agent_by_id if agent_by_id is not None else _agent_lookup_for_conversations()).values())
     except Exception:
         return result
+    hidden_team_member_agent_ids = _agent_directory_stub_hidden_team_member_ids()
     for agent in agents:
         if not isinstance(agent, dict):
             continue
@@ -5441,11 +5461,57 @@ def _append_agent_directory_conversations(
         agent_id = str(agent.get("agentId") or "").strip()
         if not session_id or not agent_id or session_id in by_session_id:
             continue
+        if _agent_directory_stub_hidden_from_user_index(agent, hidden_team_member_agent_ids):
+            continue
         conversation = _agent_directory_conversation_stub(agent, session_id=session_id)
         result.append(conversation)
         by_session_id[session_id] = conversation
         _record_agent_directory_conversation_index_event(agent, session_id=session_id)
     return result
+
+
+def _agent_directory_stub_hidden_from_user_index(
+    agent: dict[str, Any],
+    hidden_team_member_agent_ids: set[str],
+) -> bool:
+    """Hide internal recovery channels from the ordinary user-session list."""
+
+    agent_id = str(agent.get("agentId") or "").strip()
+    if not agent_id:
+        return True
+    if agent_id in hidden_team_member_agent_ids:
+        return True
+    metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
+    creation_spec = metadata.get("creationSpec") if isinstance(metadata.get("creationSpec"), dict) else {}
+    created_by = str(agent.get("createdBy") or creation_spec.get("source") or "").strip()
+    return created_by in _AGENT_DIRECTORY_STUB_HIDDEN_CREATED_BY
+
+
+def _agent_directory_stub_hidden_team_member_ids() -> set[str]:
+    try:
+        from . import team_service
+
+        payload = team_service.list_teams_compact(include_archived=False)
+    except Exception:
+        return set()
+    hidden_agent_ids: set[str] = set()
+    for team in list((payload or {}).get("teams") or []):
+        if not isinstance(team, dict):
+            continue
+        source = str(team.get("teamSource") or "").strip()
+        kind = str(team.get("teamKind") or "").strip()
+        if (
+            source not in _AGENT_DIRECTORY_STUB_HIDDEN_TEAM_SOURCES
+            and kind not in _AGENT_DIRECTORY_STUB_HIDDEN_TEAM_KINDS
+        ):
+            continue
+        for member in list(team.get("members") or []):
+            if not isinstance(member, dict):
+                continue
+            agent_id = str(member.get("agentId") or "").strip()
+            if agent_id:
+                hidden_agent_ids.add(agent_id)
+    return hidden_agent_ids
 
 
 def _agent_directory_session_stub_for_id(
@@ -5488,6 +5554,9 @@ def _materialize_agent_directory_conversation_locked(payload: dict[str, Any], se
     if not agent:
         return False
     conversation = _agent_directory_conversation_record(agent, session_id=normalized_session_id)
+    if _agent_directory_stub_hidden_from_user_index(agent, _agent_directory_stub_hidden_team_member_ids()):
+        conversation["hidden_from_index"] = True
+        conversation["hiddenFromIndex"] = True
     conversations = payload.get("conversations")
     if not isinstance(conversations, list):
         conversations = []
@@ -7012,6 +7081,11 @@ def _agent_inbox_pending_count_for_summary(agent: dict[str, Any] | None) -> int:
     )
 
 
+def _is_default_empty_session_title(title: str) -> bool:
+    normalized = str(title or "").strip()
+    return normalized in {DEFAULT_CHAT_CONVERSATION_TITLE, "新会话", "New session"}
+
+
 def _build_session_summary(conversation: dict[str, Any], *, hydrate_agent: bool = True) -> dict[str, Any]:
     status = _conversation_phase(conversation["id"], conversation)
     summary = _latest_message_summary(conversation.get("messages") or [])
@@ -7062,7 +7136,13 @@ def _build_session_summary(conversation: dict[str, Any], *, hydrate_agent: bool 
     session_kind = str(conversation.get("sessionKind") or "main").strip() or "main"
     task_title = str(conversation.get("taskTitle") or raw_title).strip() or raw_title
     display_agent_name = agent_display_name or raw_title
-    display_title = task_title if session_kind == "child" else display_agent_name
+    messages = list(conversation.get("messages") or [])
+    if session_kind == "child":
+        display_title = task_title
+    elif messages or not _is_default_empty_session_title(task_title):
+        display_title = task_title
+    else:
+        display_title = display_agent_name
     return {
         "id": conversation["id"],
         "title": display_title,
