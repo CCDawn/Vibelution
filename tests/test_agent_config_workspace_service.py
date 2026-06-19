@@ -3352,6 +3352,7 @@ def test_repair_agent_directory_creates_protected_knowledge_steward_agent(tmp_pa
     assert steward["roleKey"] == "knowledge_steward"
     assert steward["primaryMode"] == "general"
     assert steward["directSessionId"] == "agent-knowledge-steward-direct"
+    assert steward["promptTemplateId"] == "prompt-knowledge-steward"
     assert steward["toolPolicyId"] == "tool-knowledge-steward"
     assert steward["memoryPolicyId"] == "memory-knowledge-steward"
     assert steward["metadata"]["systemRole"] == "knowledge_steward"
@@ -3407,6 +3408,54 @@ def test_repair_agent_directory_creates_protected_knowledge_steward_agent(tmp_pa
     assert "ToolPolicy: tool-knowledge-steward" not in context_block
     assert "knowledge_governance_tasks_tool" not in context_block
     assert "research_proposal_apply_tool" not in context_block
+
+
+def test_repair_agent_directory_applies_challenge_cup_research_tool_profiles(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    cases = {
+        "challenge_cup_data_discovery": [
+            "agent_message_tool",
+            "research_knowledge_query_tool",
+            "web_search_tool",
+        ],
+        "challenge_cup_source_acquisition": [
+            "agent_message_tool",
+            "research_knowledge_query_tool",
+            "web_search_tool",
+            "web_fetch_tool",
+        ],
+        "challenge_cup_content_extraction": [
+            "agent_message_tool",
+            "research_knowledge_query_tool",
+            "web_fetch_tool",
+        ],
+        "challenge_cup_source_quality": [
+            "agent_message_tool",
+            "research_knowledge_query_tool",
+            "web_search_tool",
+            "web_fetch_tool",
+        ],
+    }
+    created_ids = {
+        role_key: agent_directory_service.create_agent_instance(
+            display_name=role_key,
+            primary_mode="research",
+            role_key=role_key,
+            prompt_template_id=f"prompt-{role_key.replace('_', '-')}",
+        )["agentId"]
+        for role_key in cases
+    }
+
+    agent_directory_service.repair_agent_directory()
+
+    for role_key, expected_tools in cases.items():
+        agent = agent_directory_service.get_agent(created_ids[role_key])
+        assert agent["toolPolicy"]["allowedTools"] == expected_tools
+        assert agent["toolPolicy"]["writeScopes"] == []
+        assert agent["toolPolicy"]["networkAccess"] == "controlled"
+        assert agent["toolPolicy"]["mutationAccess"] == "none"
+        assert "cli_tool" not in agent["toolPolicy"]["allowedTools"]
+        assert "apply_patch_tool" not in agent["toolPolicy"]["allowedTools"]
 
 
 def test_knowledge_steward_agent_is_archive_protected(tmp_path, monkeypatch):
