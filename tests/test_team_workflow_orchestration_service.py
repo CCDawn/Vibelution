@@ -2692,9 +2692,24 @@ def test_steward_pack_approval_gate_applies_pending_ingestion_to_formal_knowledg
     assert knowledge_items["summary"]["itemCount"] == 1
 
 
-def test_knowledge_collection_ingestion_runs_agent_gate_to_formal_knowledge(tmp_path, monkeypatch):
+def test_knowledge_collection_ingestion_notifies_steward_agent_for_final_ingestion(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     steward = agent_directory_service.create_agent_instance(display_name="Knowledge Steward Agent")
+    deliveries = []
+
+    def fake_wake(message):
+        deliveries.append(message)
+        return {
+            "wakeRequested": True,
+            "wakeStatus": "started",
+            "messageId": message["messageId"],
+            "targetAgentId": message["targetAgentId"],
+            "targetSessionId": message["targetSessionId"],
+            "turnId": "turn-steward-ingest",
+            "reason": "",
+        }
+
+    monkeypatch.setattr(session_service, "wake_agent_for_inbox_message", fake_wake)
     team = team_service.create_team(
         name="ai科学研究团队",
         members=[{"agentId": steward["agentId"], "role": "steward"}],
@@ -2740,25 +2755,30 @@ def test_knowledge_collection_ingestion_runs_agent_gate_to_formal_knowledge(tmp_
         agent_id=steward["agentId"],
     )
     step_ids = [step["stageId"] for step in response["steps"]]
+    inbox_messages = agent_directory_service.list_agent_inbox_messages_for_agent(steward["agentId"], status="pending")
 
-    assert response["status"] == "completed"
+    assert response["status"] == "agent_notified"
     assert step_ids == [
         "source_review",
         "candidate_graph",
         "steward_pack",
-        "source_gate",
-        "knowledge_proposal",
-        "official_knowledge",
+        "knowledge_steward_request",
     ]
     assert response["sourceQuality"]["officialBoundary"]["writesFormalKnowledge"] is False
     assert response["candidateGraph"]["graph"]["officialBoundary"]["writesOfficialGraph"] is False
     assert response["precheck"]["precheck"]["officialBoundary"]["writesOfficialKnowledge"] is False
-    assert response["sourceReview"]["centralSource"]["centralSourceId"]
-    assert response["knowledgeSubmission"]["candidate"]["currentState"] == "steward_pending_knowledge_review"
-    assert response["knowledgeReview"]["candidate"]["currentState"] == "official_synced"
-    assert response["knowledgeReview"]["knowledgeIngestion"]["officialSyncRecord"]["writesOfficialKnowledge"] is True
-    assert response["statusSnapshot"]["summary"]["formalKnowledgeItemCount"] == 1
-    assert knowledge_items["summary"]["itemCount"] == 1
+    assert response["sourceReview"] is None
+    assert response["knowledgeSubmission"] is None
+    assert response["knowledgeReview"] is None
+    assert response["knowledgeStewardActivation"]["status"] == "agent_wake_started"
+    assert response["knowledgeStewardActivation"]["messageId"]
+    assert response["knowledgeStewardActivation"]["delivery"]["turnId"] == "turn-steward-ingest"
+    assert deliveries and deliveries[0]["metadata"]["stewardPackCandidateId"] == response["summary"]["stewardPackCandidateId"]
+    assert inbox_messages[0]["messageId"] == response["summary"]["knowledgeStewardInboxMessageId"]
+    assert inbox_messages[0]["kind"] == "challenge_cup_knowledge_ingestion_request"
+    assert inbox_messages[0]["metadata"]["knowledgeBaseId"] == knowledge_base_id
+    assert response["statusSnapshot"]["summary"]["formalKnowledgeItemCount"] == 0
+    assert knowledge_items["summary"]["itemCount"] == 0
 
 
 def test_knowledge_ingestion_status_tracks_pending_and_official_sync(tmp_path, monkeypatch):

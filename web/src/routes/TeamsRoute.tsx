@@ -1257,6 +1257,9 @@ function sourceCollectionStatusLabel(value: string | undefined | null, lang: "zh
   const normalized = String(value || "").trim().toLowerCase();
   const zh: Record<string, string> = {
     active: "进行中",
+    agent_notification_failed: "通知 Agent 失败",
+    agent_notified: "等待知识库 Agent",
+    agent_wake_pending: "Agent 待唤醒",
     blocked: "阻塞",
     collecting: "待继续搜集",
     completed: "已完成",
@@ -1277,6 +1280,9 @@ function sourceCollectionStatusLabel(value: string | undefined | null, lang: "zh
   };
   const en: Record<string, string> = {
     active: "active",
+    agent_notification_failed: "Agent notification failed",
+    agent_notified: "waiting for steward Agent",
+    agent_wake_pending: "Agent wake pending",
     blocked: "blocked",
     collecting: "ready to continue",
     completed: "completed",
@@ -3936,9 +3942,12 @@ export function TeamsRoute({
             maxCandidates: variables.maxCandidates || 80,
             forceReview: variables.forceReview ?? false,
             autoCreateKnowledgeBase: true,
-            autoSubmit: true,
-            autoReviewSource: true,
-            autoApprove: true,
+            autoSubmit: false,
+            autoReviewSource: false,
+            autoApprove: false,
+            notifyStewardAgent: true,
+            wakeStewardAgent: true,
+            requesterAgentId: sourceCollectionOwnerAgentId,
           }),
         },
       ),
@@ -6305,12 +6314,20 @@ export function TeamsRoute({
                 <strong>
                   {selectedTeamKnowledgeCollectionIngestResult.status === "completed"
                     ? (lang === "zh" ? "资料已写入团队知识库" : "Sources ingested into Team Knowledge")
+                    : selectedTeamKnowledgeCollectionIngestResult.status === "agent_notified"
+                      ? (lang === "zh" ? "已通知知识库 Agent" : "Steward Agent notified")
+                    : selectedTeamKnowledgeCollectionIngestResult.status === "agent_wake_pending"
+                      ? (lang === "zh" ? "已发送，等待唤醒 Agent" : "Sent; waiting to wake Agent")
                     : sourceCollectionStatusLabel(selectedTeamKnowledgeCollectionIngestResult.status, lang)}
                 </strong>
                 <span>
-                  {lang === "zh"
-                    ? `${selectedTeamKnowledgeCollectionIngestResult.summary.approvedSourceCandidateCount} 条资料通过审查，${selectedTeamKnowledgeCollectionIngestResult.summary.formalKnowledgeItemCount} 条正式知识可用于后续实验。`
-                    : `${selectedTeamKnowledgeCollectionIngestResult.summary.approvedSourceCandidateCount} sources approved; ${selectedTeamKnowledgeCollectionIngestResult.summary.formalKnowledgeItemCount} formal items are ready for experiments.`}
+                  {selectedTeamKnowledgeCollectionIngestResult.status === "completed"
+                    ? (lang === "zh"
+                        ? `${selectedTeamKnowledgeCollectionIngestResult.summary.approvedSourceCandidateCount} 条资料通过审查，${selectedTeamKnowledgeCollectionIngestResult.summary.formalKnowledgeItemCount} 条正式知识可用于后续实验。`
+                        : `${selectedTeamKnowledgeCollectionIngestResult.summary.approvedSourceCandidateCount} sources approved; ${selectedTeamKnowledgeCollectionIngestResult.summary.formalKnowledgeItemCount} formal items are ready for experiments.`)
+                    : (lang === "zh"
+                        ? `${selectedTeamKnowledgeCollectionIngestResult.summary.approvedSourceCandidateCount} 条资料通过审查，待入库知识包已发送给知识库 Agent；当前正式知识 ${selectedTeamKnowledgeCollectionIngestResult.summary.formalKnowledgeItemCount} 条。`
+                        : `${selectedTeamKnowledgeCollectionIngestResult.summary.approvedSourceCandidateCount} sources approved; the ingestion pack was sent to the steward Agent. Current formal items: ${selectedTeamKnowledgeCollectionIngestResult.summary.formalKnowledgeItemCount}.`)}
                 </span>
               </div>
             ) : null}
@@ -7695,12 +7712,12 @@ export function TeamsRoute({
     || sourceCollectionIngestCandidateCount <= 0
     || selectedTeamKnowledgeCollectionIngestPending;
   const sourceCollectionMemoryActionLabel = selectedTeamKnowledgeCollectionIngestPending
-    ? (lang === "zh" ? "Agent 入库中" : "Agent ingesting")
+    ? (lang === "zh" ? "通知 Agent 中" : "Notifying Agent")
     : sourceCollectionPrecheckCandidateCount > 0
-      ? (lang === "zh" ? "Agent 一键入库" : "Agent ingest")
+      ? (lang === "zh" ? "通知知识库 Agent" : "Notify steward Agent")
       : sourceCollectionRunCandidateCount > 0
-        ? (lang === "zh" ? "Agent 审查并入库" : "Agent review and ingest")
-        : (lang === "zh" ? "Agent 一键入库" : "Agent ingest");
+        ? (lang === "zh" ? "提炼并通知 Agent" : "Prepare and notify Agent")
+        : (lang === "zh" ? "通知知识库 Agent" : "Notify steward Agent");
   const sourceCollectionScreeningDisabled = !selectedTeam?.teamId || sourceCollectionRunCandidateCount <= 0;
   const sourceCollectionScreeningButtonText = selectedTeamSourceQualityPending
     ? (lang === "zh" ? "Agent 审查中" : "Agent reviewing")
@@ -8140,9 +8157,9 @@ export function TeamsRoute({
         : knowledgePendingReviewCount > 0
           ? (lang === "zh" ? "有待审入库对象" : "Review items pending")
         : sourceCollectionPrecheckCandidateCount > 0
-          ? (lang === "zh" ? "可由 Agent 一键入库" : "Agent can ingest")
+          ? (lang === "zh" ? "可通知知识库 Agent" : "Can notify steward Agent")
           : sourceCollectionRunCandidateCount > 0
-            ? (lang === "zh" ? "可由 Agent 先审查再入库" : "Agent can review then ingest")
+            ? (lang === "zh" ? "可先审查再通知 Agent" : "Can review then notify Agent")
             : (lang === "zh" ? "等资料提炼后入库" : "Ingest after extraction"),
       inputLabel: sourceCollectionPrecheckCandidateCount > 0
         ? (lang === "zh" ? `${sourceCollectionPrecheckCandidateCount} 条通过资料` : `${sourceCollectionPrecheckCandidateCount} approved sources`)
@@ -8151,8 +8168,8 @@ export function TeamsRoute({
       nextLabel: formalKnowledgeItemCount > 0
         ? (lang === "zh" ? "进入实验规划" : "Move to experiment planning")
         : knowledgeStewardPackCount > 0
-          ? (lang === "zh" ? "完成正式入库" : "Complete official ingestion")
-          : (lang === "zh" ? "生成关系并入库" : "Build graph and ingest"),
+          ? (lang === "zh" ? "等待知识库 Agent" : "Wait for steward Agent")
+          : (lang === "zh" ? "生成关系并通知" : "Build graph and notify"),
       state: sourceCollectionMemoryStepState,
       status: sourceCollectionStepStatusText(sourceCollectionMemoryStepState),
       detailLabel: lang === "zh" ? "查看入库详情" : "View ingestion details",

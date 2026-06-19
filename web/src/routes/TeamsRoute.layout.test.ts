@@ -420,8 +420,8 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("runSourceCollectionMemoryPrecheckAction");
     expect(routeSource).toContain("agent_approved_only");
     expect(routeSource).toContain("Agent 生成关系图");
-    expect(routeSource).toContain("Agent 一键入库");
-    expect(routeSource).toContain("Agent 审查并入库");
+    expect(routeSource).toContain("通知知识库 Agent");
+    expect(routeSource).toContain("提炼并通知 Agent");
     expect(routeSource).toContain("资料已写入团队知识库");
     expect(routeSource).toContain("sourceCollectionPrecheckCandidateCount");
     expect(routeSource).toContain("sourceCollectionIngestCandidateCount");
@@ -429,7 +429,7 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("sourceCollectionMemoryActionLabel");
     expect(routeSource).toContain("maxCandidates: Math.max(1, Math.min(80, sourceCollectionIngestCandidateCount))");
     expect(routeSource).toContain("forceReview: sourceCollectionPrecheckCandidateCount <= 0 && sourceCollectionRunCandidateCount > 0");
-    expect(routeSource).toContain("可由 Agent 先审查再入库");
+    expect(routeSource).toContain("可先审查再通知 Agent");
     expect(routeSource).toContain("条候选资料");
     expect(routeSource).not.toContain("onAction: refreshSourceCollectionGraph");
     expect(routeSource).not.toContain("onAction: refreshSourceCollectionMemoryPrecheck");
@@ -437,7 +437,7 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("force: forceRescreen");
     expect(routeSource).toContain("sourceCollectionPanelActions");
     expect(routeSource).toContain("Source Quality Assessment Agent re-screened already assessed source_manifest candidates");
-    expect(routeSource).toContain("Agent 一键入库");
+    expect(routeSource).toContain("通知知识库 Agent");
     expect(routeSource).not.toContain("待继续搜索");
     expect(routeSource).toContain("/storage/open");
     expect(routeSource).toContain("本轮产物");
