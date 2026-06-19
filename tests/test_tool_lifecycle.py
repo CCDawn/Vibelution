@@ -36,9 +36,12 @@ def test_readonly_batch_isolates_worker_exception_and_preserves_success_results(
     assert len(original_messages) == 3
     assert all(isinstance(message, ToolMessage) for message in original_messages)
     assert [message.tool_call_id for message in original_messages] == ["call-read", "call-grep", "call-list"]
-    assert original_messages[0].content == "result:read_file_tool"
-    assert original_messages[1].content == "[错误] read-only 工具 grep_search_tool 执行失败: RuntimeError: boom"
-    assert original_messages[2].content == "result:list_files_tool"
+    assert "toolName: read_file_tool" in original_messages[0].content
+    assert "Result:\nresult:read_file_tool" in original_messages[0].content
+    assert "toolName: grep_search_tool" in original_messages[1].content
+    assert "[错误] read-only 工具 grep_search_tool 执行失败: RuntimeError: boom" in original_messages[1].content
+    assert "toolName: list_files_tool" in original_messages[2].content
+    assert "Result:\nresult:list_files_tool" in original_messages[2].content
     assert "worker-local mutation" not in original_messages
     assert worker_message_ids
     assert all(message_id != id(original_messages) for message_id in worker_message_ids)

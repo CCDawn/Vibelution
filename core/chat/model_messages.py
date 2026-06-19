@@ -516,71 +516,86 @@ def _repair_provider_tool_chain(messages: list[Any]) -> list[Any]:
     repaired: list[Any] = []
     pending_ids: list[str] = []
     pending_assistant_index = -1
+    pending_result_indices: list[int] = []
+    pending_tool_names: dict[str, str] = {}
 
-    def demote_pending_assistant() -> None:
-        nonlocal pending_ids, pending_assistant_index
-        if pending_assistant_index < 0 or pending_assistant_index >= len(repaired):
-            pending_ids = []
-            pending_assistant_index = -1
-            return
-        assistant = repaired[pending_assistant_index]
-        if not isinstance(assistant, dict) or assistant.get("role") != "assistant":
-            pending_ids = []
-            pending_assistant_index = -1
-            return
-        tool_calls = list(assistant.get("tool_calls") or [])
-        if not tool_calls:
-            pending_ids = []
-            pending_assistant_index = -1
-            return
-        content_parts = [_visible_text(assistant.get("content"))]
-        for call in tool_calls:
-            function = call.get("function") if isinstance(call, dict) and isinstance(call.get("function"), dict) else {}
-            name = str(function.get("name") or call.get("name") or "").strip() or "unknown_tool"
-            content_parts.append(f"历史工具调用未返回结果: {name}")
-        assistant = dict(assistant)
-        assistant.pop("tool_calls", None)
-        assistant["content"] = _join_text_blocks(content_parts)
-        metadata = dict(assistant.get("metadata") or {})
-        metadata["kind"] = "historical_unresolved_tool_call"
-        metadata["repairedProviderToolChain"] = True
-        assistant["metadata"] = metadata
-        repaired[pending_assistant_index] = assistant
+    def clear_pending_chain() -> None:
+        nonlocal pending_ids, pending_assistant_index, pending_result_indices, pending_tool_names
         pending_ids = []
         pending_assistant_index = -1
+        pending_result_indices = []
+        pending_tool_names = {}
+
+    def demote_pending_chain() -> None:
+        nonlocal pending_ids, pending_assistant_index, pending_result_indices, pending_tool_names
+        if 0 <= pending_assistant_index < len(repaired):
+            assistant = repaired[pending_assistant_index]
+            if isinstance(assistant, dict) and assistant.get("role") == "assistant":
+                tool_calls = list(assistant.get("tool_calls") or [])
+                if tool_calls:
+                    content_parts = [_visible_text(assistant.get("content"))]
+                    for call in tool_calls:
+                        name = _provider_tool_call_name(call)
+                        content_parts.append(f"历史工具调用未返回结果: {name}")
+                    demoted = dict(assistant)
+                    demoted.pop("tool_calls", None)
+                    demoted["content"] = _join_text_blocks(content_parts)
+                    metadata = dict(demoted.get("metadata") or {})
+                    metadata["kind"] = "historical_unresolved_tool_call"
+                    metadata["repairedProviderToolChain"] = True
+                    demoted["metadata"] = metadata
+                    repaired[pending_assistant_index] = demoted
+        for result_index in pending_result_indices:
+            if 0 <= result_index < len(repaired):
+                result_message = repaired[result_index]
+                if isinstance(result_message, dict) and result_message.get("role") == "tool":
+                    result_message = dict(result_message)
+                    tool_call_id = str(result_message.get("tool_call_id") or "").strip()
+                    tool_name = pending_tool_names.get(tool_call_id, "")
+                    if tool_name:
+                        metadata = dict(result_message.get("metadata") or {})
+                        metadata.setdefault("toolName", tool_name)
+                        result_message["metadata"] = metadata
+                    repaired[result_index] = _tool_role_history_message(result_message, source_index=result_index)
+        clear_pending_chain()
 
     for raw in list(messages or []):
         if not isinstance(raw, dict):
             if pending_ids:
-                demote_pending_assistant()
+                demote_pending_chain()
             repaired.append(raw)
             continue
         message = dict(raw)
         role = str(message.get("role") or "").strip().lower()
         if role == "assistant":
             if pending_ids:
-                demote_pending_assistant()
+                demote_pending_chain()
             repaired.append(message)
             tool_call_ids = _message_tool_call_ids(message)
             if tool_call_ids:
                 pending_ids = list(tool_call_ids)
                 pending_assistant_index = len(repaired) - 1
+                pending_result_indices = []
+                pending_tool_names = _message_tool_call_names(message)
             continue
         if role == "tool":
             tool_call_id = str(message.get("tool_call_id") or "").strip()
             if tool_call_id and tool_call_id in pending_ids:
                 repaired.append(message)
+                pending_result_indices.append(len(repaired) - 1)
                 pending_ids = [item for item in pending_ids if item != tool_call_id]
                 if not pending_ids:
-                    pending_assistant_index = -1
+                    clear_pending_chain()
                 continue
+            if pending_ids:
+                demote_pending_chain()
             repaired.append(_tool_role_history_message(message, source_index=len(repaired)))
             continue
         if pending_ids:
-            demote_pending_assistant()
+            demote_pending_chain()
         repaired.append(message)
     if pending_ids:
-        demote_pending_assistant()
+        demote_pending_chain()
     return _dedupe_adjacent_semantic_messages(repaired)
 
 
@@ -592,6 +607,23 @@ def _message_tool_call_ids(message: dict[str, Any]) -> list[str]:
         tool_call_id = str(call.get("id") or "").strip() or f"tool_{index}"
         ids.append(tool_call_id)
     return ids
+
+
+def _message_tool_call_names(message: dict[str, Any]) -> dict[str, str]:
+    names: dict[str, str] = {}
+    for index, call in enumerate(list(message.get("tool_calls") or [])):
+        if not isinstance(call, dict):
+            continue
+        tool_call_id = str(call.get("id") or "").strip() or f"tool_{index}"
+        names[tool_call_id] = _provider_tool_call_name(call)
+    return names
+
+
+def _provider_tool_call_name(call: Any) -> str:
+    if not isinstance(call, dict):
+        return "unknown_tool"
+    function = call.get("function") if isinstance(call.get("function"), dict) else {}
+    return str(function.get("name") or call.get("name") or "").strip() or "unknown_tool"
 
 
 __all__ = [
