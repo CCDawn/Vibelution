@@ -310,17 +310,7 @@ Choose the lowest test layer that proves behavior:
 
 Use existing test guidance in `tests/README.md`.
 
-Common commands should prefer process-level parallelism when the target suite is isolated or can exclude known serial tests:
-
-```powershell
-python tests/test_runner.py --parallel --workers 4
-python tests/test_runner.py --fast --parallel --workers 4
-pytest tests/ -n 4 --dist loadfile -m "not serial"
-pytest tests/test_<module>.py -n 4 --dist loadfile -m "not serial" -v
-pytest tests/test_<module>.py -n 4 --dist loadfile -m "not serial" -v -k "<keyword>"
-```
-
-Use serial commands as a deliberate fallback when a suite is marked or known to be unsafe for process-level parallelism, when diagnosing order-dependent failures, or when the runner lacks `pytest-xdist`:
+Common commands:
 
 ```powershell
 pytest tests/ -v
@@ -330,19 +320,6 @@ python tests/test_runner.py
 python tests/test_runner.py --fast
 python tests/simulate_lifecycle.py
 ```
-
-Prefer process-level pytest parallelism during normal development validation. Do not add `-n` to global pytest defaults unless a separate governance round approves it; make the parallel choice explicit in the command so unsafe suites can still opt out.
-
-When using parallel pytest:
-
-- use `pytest-xdist` process workers, not thread-level parallelism;
-- prefer `--dist loadfile` so tests from the same file stay on the same worker;
-- start with `--workers 2` or `--workers 4`; avoid `-n auto` until the suite has proved stable;
-- exclude tests marked `serial`;
-- mark a test `serial` when it touches real processes, fixed ports, shared global state, the real workspace, the external operator config, Launcher/runtime lifecycle, Git side effects, or non-isolated background services;
-- if a broad parallel suite exposes unrelated baseline drift, keep the current task evidence focused and report the unrelated failure boundary explicitly.
-
-For frontend tests, keep Vitest's default worker parallelism unless a failure is being minimized, a test depends on process-global state, or the suite documents an explicit serial requirement.
 
 After adding or modifying tools, run prompt debugger coverage:
 
