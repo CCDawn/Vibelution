@@ -211,6 +211,7 @@ def test_project_agent_registry_context_is_dynamic_not_cache_prefix(tmp_path, mo
         llm_bindings={"dialogue": {"modelId": "model-primary"}},
         primary_mode="chat",
         direct_session_id="session-cache-boundary",
+        metadata={"includeProjectAgentRegistryContext": True},
     )
 
     packet = context_engine.build_agent_context(

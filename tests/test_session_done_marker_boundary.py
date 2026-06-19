@@ -70,7 +70,7 @@ def test_bare_done_marker_keeps_previous_visible_continuation_reply(tmp_path, mo
     monkeypatch.setattr(
         session_service,
         "_schedule_session_turn",
-        lambda context: session_service._run_session_turn(context),
+        lambda context: session_service._run_session_turn({**context, "allow_internal_auto_continue": True}),
     )
 
     payload = session_service.submit_session_message("session-live", "审查项目并汇报")

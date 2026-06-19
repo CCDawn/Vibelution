@@ -3,6 +3,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
+from core.infrastructure import developer_sandbox
 from core.chat.conversation_ledger import (
     EVENT_ASSISTANT_PARTIAL,
     EVENT_COMPACTION_CHECKPOINT,
@@ -22,6 +25,22 @@ from core.chat.conversation_ledger import (
     load_conversation_events,
     project_conversation_ledger,
 )
+
+
+@pytest.fixture(autouse=True)
+def isolate_developer_sandbox(tmp_path, monkeypatch):
+    config_path = tmp_path / "config.toml"
+    config_path.write_text("[launcher]\ncontrol_port = 8765\n", encoding="utf-8")
+    monkeypatch.setattr(developer_sandbox, "CONFIG_PATH", config_path)
+    monkeypatch.setattr(developer_sandbox, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(developer_sandbox, "resolve_workspace_home", lambda *args, **kwargs: tmp_path / "workspace")
+    status = developer_sandbox.get_developer_mode_status(config_path=config_path, project_root=tmp_path)
+    developer_sandbox.update_developer_mode_status(
+        False,
+        base_hash=status["configHash"],
+        config_path=config_path,
+        project_root=tmp_path,
+    )
 
 
 def test_conversation_ledger_appends_and_projects_model_messages(tmp_path):

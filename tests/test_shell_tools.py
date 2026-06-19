@@ -475,18 +475,26 @@ class TestExecuteShellCommand:
         """Windows 后台 cli_tool 命令应隐藏瞬时 cmd 窗口。"""
         calls = []
 
-        class Result:
-            stdout = "ok\n"
-            stderr = ""
+        class FakeProcess:
             returncode = 0
+            pid = 12345
 
-        def fake_run(command, **kwargs):
+            def communicate(self, timeout=None):
+                return "ok\n", ""
+
+            def poll(self):
+                return self.returncode
+
+            def wait(self, timeout=None):
+                return self.returncode
+
+        def fake_popen(command, **kwargs):
             calls.append((command, kwargs))
-            return Result()
+            return FakeProcess()
 
         monkeypatch.setattr(shell_tools_module, "IS_WINDOWS", True)
         monkeypatch.setattr(shell_tools_module.subprocess, "CREATE_NO_WINDOW", 0x08000000, raising=False)
-        monkeypatch.setattr(shell_tools_module.subprocess, "run", fake_run)
+        monkeypatch.setattr(shell_tools_module.subprocess, "Popen", fake_popen)
 
         result = execute_shell_command(command="git status", cwd=str(Path.cwd()))
 

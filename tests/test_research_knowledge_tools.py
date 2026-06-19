@@ -113,37 +113,57 @@ def test_research_knowledge_tool_queries_allowed_agent(tmp_path, monkeypatch):
     assert result["limit"] == 5
 
 
-def test_research_knowledge_tool_is_llm_facing_without_explicit_allow(tmp_path, monkeypatch):
+_LLM_FACING_RESEARCH_TOOL_NAMES = {"research_knowledge_query_tool", "agent_message_tool"}
+
+
+def _llm_facing_research_tools():
+    return [
+        tool
+        for tool in create_llm_facing_tools()
+        if tool.name in _LLM_FACING_RESEARCH_TOOL_NAMES
+    ]
+
+
+def test_research_knowledge_tools_are_hidden_without_explicit_allow(tmp_path, monkeypatch):
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
     agent = agent_directory_service.create_agent_instance(display_name="默认工具 Agent")
-    tools = [tool for tool in create_llm_facing_tools() if tool.name in {"research_knowledge_query_tool", "agent_message_tool"}]
+    tools = _llm_facing_research_tools()
 
     with agent_directory_service.active_agent_runtime(agent["agentId"], session_id="session-tools"):
         visible = agent_directory_service.filter_llm_tools_for_current_agent(tools)
 
-    assert {tool.name for tool in tools} == {"research_knowledge_query_tool", "agent_message_tool"}
-    assert [tool.name for tool in visible] == ["agent_message_tool", "research_knowledge_query_tool"]
+    assert {tool.name for tool in tools} == _LLM_FACING_RESEARCH_TOOL_NAMES
+    assert visible == []
+
+
+def test_research_knowledge_tools_are_llm_facing_with_explicit_allow(tmp_path, monkeypatch):
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    agent = agent_directory_service.create_agent_instance(display_name="显式授权工具 Agent")
+    tools = _llm_facing_research_tools()
+    allowed_names = [tool.name for tool in tools]
 
     agent_directory_service.update_agent_instance(
         agent["agentId"],
-        tool_policy={"allowedTools": ["research_knowledge_query_tool"]},
+        tool_policy={"allowedTools": allowed_names},
     )
     with agent_directory_service.active_agent_runtime(agent["agentId"], session_id="session-tools"):
         visible = agent_directory_service.filter_llm_tools_for_current_agent(tools)
 
-    assert [tool.name for tool in visible] == ["agent_message_tool", "research_knowledge_query_tool"]
+    assert {tool.name for tool in tools} == _LLM_FACING_RESEARCH_TOOL_NAMES
+    assert [tool.name for tool in visible] == [tool.name for tool in tools]
 
 
-def test_tool_policy_filtering_no_longer_hides_registered_tools(tmp_path, monkeypatch):
+def test_tool_policy_filtering_respects_explicit_registered_tool_allow(tmp_path, monkeypatch):
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
     agent = agent_directory_service.create_agent_instance(display_name="受限工具 Agent", primary_mode="general")
+    tools = [tool for tool in create_llm_facing_tools() if tool.name in {"agent_message_tool", "web_search_tool"}]
+    allowed_names = [tool.name for tool in tools]
     agent_directory_service.update_agent_instance(
         agent["agentId"],
-        tool_policy={"allowedTools": ["agent_message_tool"]},
+        tool_policy={"allowedTools": allowed_names},
     )
-    tools = [tool for tool in create_llm_facing_tools() if tool.name in {"agent_message_tool", "web_search_tool"}]
 
     with agent_directory_service.active_agent_runtime(agent["agentId"], session_id="session-tools"):
         visible = agent_directory_service.filter_llm_tools_for_current_agent(tools)
 
-    assert [tool.name for tool in visible] == ["web_search_tool", "agent_message_tool"]
+    assert [tool.name for tool in visible] == [tool.name for tool in tools]

@@ -39,6 +39,7 @@ def _enable_developer_sandbox(tmp_path, monkeypatch):
     project_root.mkdir()
     monkeypatch.setattr(developer_sandbox, "CONFIG_PATH", config_path)
     monkeypatch.setattr(developer_sandbox, "PROJECT_ROOT", project_root)
+    monkeypatch.setattr(developer_sandbox, "resolve_workspace_home", lambda *args, **kwargs: project_root / "workspace")
     status = developer_sandbox.get_developer_mode_status(config_path=config_path, project_root=project_root)
     enabled = developer_sandbox.update_developer_mode_status(
         True,
@@ -354,16 +355,16 @@ def test_memory_overview_uses_developer_sandbox_evolution_sources(tmp_path, monk
     self_items = {item["id"]: item for item in sections["self-evolution-memory"]["items"]}
     supervised_items = {item["id"]: item for item in sections["supervised-evolution-memory"]["items"]}
 
-    assert self_items["self-active-advisory"]["path"].startswith(".runtime/developer-mode/")
+    assert self_items["self-active-advisory"]["path"].replace("\\", "/").endswith("gym/active_promotions.json")
     assert "sandbox-active" in self_items["self-active-advisory"]["content"]
     assert "formal-active" not in self_items["self-active-advisory"]["content"]
-    assert self_items["self-evolution-audit"]["path"].startswith(".runtime/developer-mode/")
+    assert self_items["self-evolution-audit"]["path"].replace("\\", "/").endswith("evolution/audit.jsonl")
     assert "sandbox-audit" in self_items["self-evolution-audit"]["content"]
     assert "formal-audit" not in self_items["self-evolution-audit"]["content"]
-    assert supervised_items["supervised-workbench-state"]["path"].startswith(".runtime/developer-mode/")
+    assert supervised_items["supervised-workbench-state"]["path"].replace("\\", "/").endswith("supervised_evolution/workbench_state.json")
     assert "sandbox" in supervised_items["supervised-workbench-state"]["content"]
     assert "formal" not in supervised_items["supervised-workbench-state"]["content"]
-    assert supervised_items["supervised-decisions"]["path"].startswith(".runtime/developer-mode/")
+    assert supervised_items["supervised-decisions"]["path"].replace("\\", "/").endswith("supervised_evolution/decisions")
     assert "sandbox.json" in supervised_items["supervised-decisions"]["content"]
     assert "formal.json" not in supervised_items["supervised-decisions"]["content"]
 
