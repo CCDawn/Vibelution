@@ -2279,6 +2279,13 @@ def _ensure_team_chat_room_link(
             )
     team["linkedChatRoomId"] = str(room.get("roomId") or "").strip()
     _archive_duplicate_team_chat_rooms(team["linkedChatRoomId"], str(team.get("teamId") or "").strip())
+    _ensure_historical_team_chat_room_links(
+        team,
+        title=title,
+        session_ids=session_ids,
+        participant_contexts=participant_contexts,
+        config=config,
+    )
     team["updatedAt"] = utc_now_iso()
     _record_team_event(
         "team.chat_room.synced",
@@ -2305,16 +2312,24 @@ def _find_existing_team_chat_room_id(team_id: str) -> str:
 
 
 def _find_historical_team_chat_room_id(team_id: str, *, preferred_room_id: str = "") -> str:
+    candidates = _historical_team_chat_room_ids(team_id)
+    preferred = str(preferred_room_id or "").strip()
+    if preferred and preferred in candidates:
+        return preferred
+    return candidates[-1] if candidates else ""
+
+
+def _historical_team_chat_room_ids(team_id: str) -> list[str]:
     normalized_team_id = _safe_token(team_id, default="", max_length=96)
     if not normalized_team_id:
-        return ""
+        return []
     rounds_path = PROJECT_ROOT / "workspace" / "teams" / normalized_team_id / "research_stage_rounds" / "index.json"
     if not rounds_path.exists():
-        return ""
+        return []
     try:
         payload = json.loads(rounds_path.read_text(encoding="utf-8"))
     except Exception:
-        return ""
+        return []
     candidates: list[str] = []
 
     def collect(value: Any) -> None:
@@ -2330,10 +2345,58 @@ def _find_historical_team_chat_room_id(team_id: str, *, preferred_room_id: str =
                 collect(child)
 
     collect(payload)
-    preferred = str(preferred_room_id or "").strip()
-    if preferred and preferred in candidates:
-        return preferred
-    return candidates[-1] if candidates else ""
+    return candidates
+
+
+def _ensure_historical_team_chat_room_links(
+    team: dict[str, Any],
+    *,
+    title: str,
+    session_ids: list[str],
+    participant_contexts: dict[str, dict[str, Any]],
+    config: dict[str, Any],
+) -> list[str]:
+    team_id = str(team.get("teamId") or "").strip()
+    current_room_id = str(team.get("linkedChatRoomId") or "").strip()
+    if not team_id or not current_room_id:
+        return []
+    created_room_ids: list[str] = []
+    for room_id in _historical_team_chat_room_ids(team_id):
+        if not room_id or room_id == current_room_id:
+            continue
+        if chat_room_service.get_chat_room_compact(room_id):
+            continue
+        room_config = {
+            **config,
+            "historicalTeamRoom": True,
+            "teamRoomRole": "historical",
+            "currentLinkedChatRoomId": current_room_id,
+        }
+        try:
+            chat_room_service.create_chat_room(
+                room_id=room_id,
+                title=f"{title}（历史）",
+                participant_session_ids=session_ids,
+                participant_contexts_by_agent_id=participant_contexts,
+                allow_empty_participants=True,
+                mode="round_robin",
+                purpose=_team_default_chat_room_purpose(team),
+                config=room_config,
+            )
+        except Exception:
+            continue
+        created_room_ids.append(room_id)
+    if created_room_ids:
+        _record_team_event(
+            "team.chat_room.history_restored",
+            team,
+            fields={
+                "linkedChatRoomId": current_room_id,
+                "historicalRoomIds": created_room_ids,
+                "historicalRoomCount": len(created_room_ids),
+            },
+        )
+    return created_room_ids
 
 
 def _archive_duplicate_team_chat_rooms(keep_room_id: str, team_id: str) -> None:
@@ -2341,9 +2404,12 @@ def _archive_duplicate_team_chat_rooms(keep_room_id: str, team_id: str) -> None:
     normalized_team_id = str(team_id or "").strip()
     if not normalized_keep_room_id or not normalized_team_id:
         return
+    historical_room_ids = set(_historical_team_chat_room_ids(normalized_team_id))
+    historical_room_ids.discard(normalized_keep_room_id)
     duplicates = [
         room for room in chat_room_service.list_chat_rooms()
         if str(room.get("roomId") or "").strip() != normalized_keep_room_id
+        and str(room.get("roomId") or "").strip() not in historical_room_ids
         and str((room.get("config") or {}).get("source") or "").strip() == "team"
         and str((room.get("config") or {}).get("teamId") or "").strip() == normalized_team_id
         and str(room.get("status") or "").strip() not in {"running", "stopping"}
@@ -2481,6 +2547,13 @@ def _team_chat_room_needs_sync(
         if isinstance(participant, dict) and str(participant.get("agentId") or "").strip()
     ]
     if participant_agent_ids != active_member_agent_ids:
+        return True
+    historical_room_ids = [
+        room_id
+        for room_id in _historical_team_chat_room_ids(str(team.get("teamId") or "").strip())
+        if room_id and room_id != linked_room_id
+    ]
+    if any(not chat_room_service.get_chat_room_compact(room_id) for room_id in historical_room_ids):
         return True
     team_kind = _infer_team_kind(team)
     if team_kind == "custom":
