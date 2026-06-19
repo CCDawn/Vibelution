@@ -299,9 +299,12 @@ class KnowledgeCollectionIngestionPayload(BaseModel):
     maxCandidates: int = Field(80, ge=1, le=200)
     forceReview: bool = False
     autoCreateKnowledgeBase: bool = True
-    autoSubmit: bool = True
-    autoReviewSource: bool = True
-    autoApprove: bool = True
+    autoSubmit: bool = False
+    autoReviewSource: bool = False
+    autoApprove: bool = False
+    notifyStewardAgent: bool = True
+    wakeStewardAgent: bool = True
+    requesterAgentId: str = Field("", max_length=160)
 
 
 class KnowledgeCollectionExtractionPayload(BaseModel):
@@ -728,6 +731,8 @@ def team_workflow_knowledge_collection_ingest(team_id: str, payload: KnowledgeCo
                 "stewardAgentId": payload.stewardAgentId,
                 "knowledgeBaseId": payload.knowledgeBaseId,
                 "autoApprove": payload.autoApprove,
+                "notifyStewardAgent": payload.notifyStewardAgent,
+                "wakeStewardAgent": payload.wakeStewardAgent,
             },
         )
 
