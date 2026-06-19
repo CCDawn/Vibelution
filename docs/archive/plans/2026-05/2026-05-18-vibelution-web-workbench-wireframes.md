@@ -1,6 +1,6 @@
 # Vibelution Web Workbench Wireframes
 
-**Purpose:** 基于 [2026-05-18-vibelution-web-workbench-design.md](/C:/Users/17533/Desktop/Vibelution/docs/plans/2026-05-18-vibelution-web-workbench-design.md) 的已锁定行为，给出低保真页面结构图与区域职责，作为后续前端实现前的最后一层结构收口。
+**Purpose:** 基于 [2026-05-18-vibelution-web-workbench-design.md](2026-05-18-vibelution-web-workbench-design.md) 的已锁定行为，给出低保真页面结构图与区域职责，作为后续前端实现前的最后一层结构收口。
 
 **Design Direction:** 使用 `frontend-design` 的思路，但当前产物仍然是低保真结构，不进入视觉细节和组件实现。气质保持：
 
