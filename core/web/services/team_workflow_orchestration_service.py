@@ -18,6 +18,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from config.paths import resolve_workspace_home
 from config.public_config import build_effective_config, load_public_config
 from core.infrastructure import developer_sandbox
 from core.llm import LLMClient, LLMInvocationContext, invoke_llm
@@ -8892,11 +8893,14 @@ def _append_jsonl(path: Path, records: list[dict[str, Any]]) -> None:
 def _ensure_project_child(path: Path) -> Path:
     resolved = path.resolve()
     project_root = _project_root().resolve()
-    try:
-        resolved.relative_to(project_root)
-    except ValueError as exc:
-        raise TeamWorkflowOrchestrationError("Source collection storage path must stay inside the Vibelution project.") from exc
-    return resolved
+    workspace_root = resolve_workspace_home().resolve()
+    for allowed_root in (project_root, workspace_root):
+        try:
+            resolved.relative_to(allowed_root)
+            return resolved
+        except ValueError:
+            continue
+    raise TeamWorkflowOrchestrationError("Source collection storage path must stay inside the Vibelution project or workspace data root.")
 
 
 def _open_local_path(path: Path) -> None:
