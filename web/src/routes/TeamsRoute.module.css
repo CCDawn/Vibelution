@@ -5089,13 +5089,19 @@
 }
 
 .workflowGraphPanel {
+  position: relative;
+  z-index: 2;
+  isolation: isolate;
   display: grid;
   gap: 7px;
   min-width: 0;
   padding: 8px;
-  border: 1px solid var(--border-soft);
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--surface-panel-strong) 66%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent-cool) 24%, var(--border-soft));
+  border-radius: 10px;
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--accent-cool) 9%, transparent), transparent 42%),
+    color-mix(in srgb, var(--surface-panel-strong) 96%, #fff 4%);
+  box-shadow: 0 14px 34px color-mix(in srgb, #000 9%, transparent);
 }
 
 .workflowGraphHeader {
@@ -5155,32 +5161,46 @@
 .workflowGraphBoundary {
   padding: 1px 6px;
   border-radius: 999px;
-  background: color-mix(in srgb, var(--surface-card) 72%, transparent);
+  background: color-mix(in srgb, var(--surface-card) 92%, var(--surface-panel-strong));
 }
 
 .workflowGraphFrame {
   position: relative;
-  min-height: var(--workflow-graph-height);
-  border: 1px solid color-mix(in srgb, var(--border-soft) 82%, transparent);
-  border-radius: 8px;
+  height: clamp(320px, var(--workflow-graph-height), 620px);
+  min-height: 320px;
+  border: 1px solid color-mix(in srgb, var(--accent-cool) 28%, var(--border-soft));
+  border-radius: 10px;
   background:
-    linear-gradient(color-mix(in srgb, var(--border-soft) 30%, transparent) 1px, transparent 1px),
-    linear-gradient(90deg, color-mix(in srgb, var(--border-soft) 30%, transparent) 1px, transparent 1px),
-    color-mix(in srgb, var(--surface-card) 52%, transparent);
+    linear-gradient(color-mix(in srgb, var(--border-soft) 34%, transparent) 1px, transparent 1px),
+    linear-gradient(90deg, color-mix(in srgb, var(--border-soft) 34%, transparent) 1px, transparent 1px),
+    radial-gradient(circle at 18% 12%, color-mix(in srgb, var(--accent-cool) 10%, transparent), transparent 34%),
+    color-mix(in srgb, var(--surface-card) 96%, #fff 4%);
   background-size: 28px 28px;
   overflow: auto;
+  overscroll-behavior: contain;
+  box-shadow: inset 0 1px 0 color-mix(in srgb, #fff 72%, transparent);
 }
 
 .researchInspector .workflowGraphFrame {
-  min-height: max(250px, var(--workflow-graph-height));
+  height: clamp(250px, var(--workflow-graph-height), 520px);
+  min-height: 250px;
+}
+
+.workflowGraphCanvas {
+  position: relative;
+  width: var(--workflow-graph-width);
+  min-width: var(--workflow-graph-width);
+  height: var(--workflow-graph-height);
+  min-height: var(--workflow-graph-height);
 }
 
 .workflowGraphSvg {
   position: absolute;
   inset: 0;
-  width: 620px;
-  min-width: 620px;
-  height: var(--workflow-graph-height);
+  z-index: 1;
+  width: 100%;
+  min-width: 100%;
+  height: 100%;
   fill: color-mix(in srgb, var(--accent-cool) 74%, var(--fg-primary));
   pointer-events: none;
 }
@@ -5196,15 +5216,17 @@
   position: absolute;
   left: var(--workflow-graph-node-x);
   top: var(--workflow-graph-node-y);
+  z-index: 2;
   display: grid;
   gap: 2px;
-  width: 124px;
-  height: 42px;
-  padding: 5px 7px;
+  width: 168px;
+  min-height: 58px;
+  padding: 7px 9px 7px 11px;
   border: 1px solid var(--workflow-graph-node-border, var(--border-soft));
-  border-radius: 7px;
-  background: var(--workflow-graph-node-bg, color-mix(in srgb, var(--surface-panel-strong) 82%, transparent));
-  box-shadow: 0 7px 18px color-mix(in srgb, #000 14%, transparent);
+  border-left-width: 4px;
+  border-radius: 9px;
+  background: var(--workflow-graph-node-bg, color-mix(in srgb, var(--surface-panel-strong) 96%, #fff 4%));
+  box-shadow: 0 10px 22px color-mix(in srgb, #000 13%, transparent);
   color: var(--fg-primary);
 }
 
@@ -5213,16 +5235,20 @@
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .workflowGraphNode strong {
-  font-size: 0.66rem;
+  display: -webkit-box;
+  font-size: 0.68rem;
+  line-height: 1.25;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .workflowGraphNode span {
   color: var(--workflow-graph-node-fg, var(--fg-muted));
-  font-size: 0.6rem;
+  font-size: 0.61rem;
+  white-space: nowrap;
 }
 
 .workflowGraphNodeReady {
@@ -5244,7 +5270,7 @@
 }
 
 .workflowGraphNodeNeutral {
-  --workflow-graph-node-bg: color-mix(in srgb, var(--surface-panel-strong) 82%, transparent);
+  --workflow-graph-node-bg: color-mix(in srgb, var(--surface-panel-strong) 96%, #fff 4%);
   --workflow-graph-node-border: var(--border-soft);
   --workflow-graph-node-fg: var(--fg-muted);
 }
