@@ -591,334 +591,152 @@
 }
 
 .tokenCompressionCard {
-  padding: 6px;
+  gap: 7px;
+  padding: 7px;
 }
 
-.tokenCompressionBadges {
-  display: inline-flex;
-  flex: 0 0 auto;
-  align-items: center;
-  gap: 4px;
-  min-width: 0;
-  font-size: 0.62rem;
-  line-height: 1;
-}
-
-.tokenCompressionBadges span {
+.tokenStatusVisualGrid {
   display: grid;
-  grid-template-columns: auto auto;
+  gap: 6px;
+  min-width: 0;
+}
+
+.tokenStatusMetric {
+  --token-status-value: 0;
+  --token-status-accent: var(--accent-cool);
+  --token-status-track: color-mix(in srgb, var(--fg-tertiary) 16%, transparent);
+  display: grid;
+  grid-template-columns: 54px minmax(0, 1fr);
   align-items: center;
-  gap: 4px;
+  gap: 8px;
   min-width: 0;
-  max-width: 92px;
-  min-height: 22px;
-  padding: 3px 6px;
-  border: 1px solid color-mix(in srgb, var(--accent-cool) 18%, var(--border-soft));
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--surface-card) 76%, transparent);
-  color: var(--fg-secondary);
-  white-space: nowrap;
-}
-
-.tokenCompressionBadges small {
-  min-width: 0;
-  overflow: hidden;
-  color: var(--fg-tertiary);
-  font-size: 0.58rem;
-  font-weight: 720;
-  line-height: 1;
-  text-overflow: ellipsis;
-}
-
-.tokenCompressionBadges strong {
-  min-width: 0;
-  overflow: hidden;
+  min-height: 66px;
+  padding: 7px;
+  border: 1px solid color-mix(in srgb, var(--token-status-accent) 24%, var(--border-soft));
+  border-radius: 8px;
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--token-status-accent) 10%, transparent), transparent 64%),
+    color-mix(in srgb, var(--surface-card) 84%, transparent);
   color: var(--fg-primary);
-  font-size: 0.62rem;
-  font-weight: 820;
-  line-height: 1;
-  text-overflow: ellipsis;
 }
 
-.tokenCompressionBadgeEmphasis {
-  border-color: color-mix(in srgb, var(--accent-warm-2) 28%, var(--border-soft));
-  background: color-mix(in srgb, var(--accent-warm-2) 10%, var(--surface-card));
-}
-
-.tokenCompressionTable {
-  display: grid;
-  gap: 3px;
-  min-width: 0;
-}
-
-.tokenCompressionRow {
-  display: grid;
-  grid-template-columns: 40px minmax(0, 1fr);
-  grid-template-areas:
-    "label value"
-    "label meta";
-  align-items: baseline;
-  gap: 1px 6px;
-  min-width: 0;
-  min-height: 27px;
-  padding: 3px 5px;
-  border: 1px solid color-mix(in srgb, var(--accent-cool) 14%, var(--border-soft));
-  border-radius: 7px;
-  background: color-mix(in srgb, var(--surface-card) 70%, transparent);
-  font-size: 0.65rem;
-  line-height: 1.15;
-}
-
-.tokenCompressionRowWide {
-  grid-template-columns: 46px minmax(0, 1fr);
-}
-
-.tokenCompressionRow span,
-.tokenCompressionRow strong,
-.tokenCompressionRow small {
-  min-width: 0;
-  overflow: visible;
-  text-overflow: clip;
-  white-space: normal;
-  overflow-wrap: anywhere;
-}
-
-.tokenCompressionRow span {
-  grid-area: label;
-  align-self: center;
-  color: var(--fg-tertiary);
-  font-weight: 620;
-  white-space: nowrap;
-}
-
-.tokenCompressionRow strong {
-  grid-area: value;
-  color: var(--fg-primary);
-  font-weight: 760;
-}
-
-.tokenCompressionRow small {
-  grid-area: meta;
-  color: var(--fg-secondary);
-  font-size: 0.61rem;
-}
-
-.tokenCompressionDetails {
-  display: grid;
-  gap: 5px;
-  min-width: 0;
-}
-
-.tokenCompressionDetails summary {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 5px;
-  min-width: 0;
-  min-height: 24px;
-  padding: 3px 4px;
-  border: 1px solid transparent;
-  border-radius: 7px;
-  color: var(--fg-tertiary);
+.tokenStatusMetricButton {
+  width: 100%;
+  appearance: none;
+  font: inherit;
+  text-align: left;
   cursor: pointer;
-  font-size: 0.64rem;
-  font-weight: 700;
-  line-height: 1.05;
-  list-style: none;
 }
 
-.tokenCompressionDetails summary::-webkit-details-marker {
-  display: none;
+.tokenStatusMetricButton:hover,
+.tokenStatusMetricButton:focus-visible {
+  border-color: color-mix(in srgb, var(--token-status-accent) 44%, var(--border-soft));
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--token-status-accent) 15%, transparent), transparent 64%),
+    color-mix(in srgb, var(--surface-card) 90%, transparent);
 }
 
-.tokenCompressionDetails summary svg {
-  transition: transform 140ms ease;
+.tokenStatusMetricButton:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--token-status-accent) 42%, transparent);
+  outline-offset: 2px;
 }
 
-.tokenCompressionDetails[open] summary svg {
-  transform: rotate(90deg);
+.tokenStatusMetricButton[aria-disabled="true"] {
+  cursor: default;
 }
 
-.tokenCompressionDetails summary:hover {
-  border-color: color-mix(in srgb, var(--accent-cool) 16%, var(--border-soft));
-  background: color-mix(in srgb, var(--surface-card) 62%, transparent);
-  color: var(--fg-secondary);
+.tokenStatusMetric_cache {
+  --token-status-accent: var(--accent-cool);
 }
 
-.tokenCompressionDetails summary span,
-.tokenCompressionDetails summary strong {
+.tokenStatusMetric_context {
+  --token-status-accent: #5b7cfa;
+}
+
+.tokenStatusMetric_compression {
+  --token-status-accent: var(--accent-warm-2);
+}
+
+.tokenStatusRing {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 54px;
+  height: 54px;
+  border-radius: 50%;
+  background: conic-gradient(
+    var(--token-status-accent) calc(var(--token-status-value) * 1%),
+    var(--token-status-track) 0
+  );
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--token-status-accent) 24%, transparent);
+}
+
+.tokenStatusRing::before {
+  position: absolute;
+  inset: 7px;
+  border: 1px solid color-mix(in srgb, var(--border-soft) 76%, transparent);
+  border-radius: inherit;
+  background: color-mix(in srgb, var(--surface-card) 92%, transparent);
+  content: "";
+}
+
+.tokenStatusRingCore {
+  position: relative;
+  z-index: 1;
+  max-width: 40px;
+  overflow: hidden;
+  color: var(--fg-primary);
+  font-size: 0.78rem;
+  font-weight: 860;
+  line-height: 1;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tokenStatusCopy {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.tokenStatusLabel,
+.tokenStatusMeta {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.tokenCompressionDetails summary strong {
-  justify-self: end;
+.tokenStatusLabel {
   color: var(--fg-secondary);
-  font-weight: 760;
-}
-
-.tokenCompressionVisuals {
-  display: grid;
-  gap: 5px;
-  min-width: 0;
-}
-
-.tokenCompressionMiniPanel {
-  display: grid;
-  gap: 4px;
-  min-width: 0;
-  padding: 5px;
-  border: 1px solid var(--border-soft);
-  border-radius: 7px;
-  background: color-mix(in srgb, var(--surface-card) 58%, transparent);
-}
-
-.tokenCompressionMiniHeader {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: baseline;
-  gap: 6px;
-  min-width: 0;
-  font-size: 0.62rem;
+  font-size: 0.7rem;
+  font-weight: 780;
   line-height: 1.05;
 }
 
-.tokenCompressionMiniHeader span,
-.tokenCompressionMiniHeader strong {
-  min-width: 0;
-  overflow: visible;
-  text-overflow: clip;
-  white-space: normal;
-}
-
-.tokenCompressionMiniHeader span {
-  color: var(--fg-tertiary);
-  font-weight: 650;
-}
-
-.tokenCompressionMiniHeader strong {
+.tokenStatusMeta {
   color: var(--fg-primary);
-  font-weight: 800;
+  font-size: 0.75rem;
+  font-weight: 820;
+  line-height: 1.1;
 }
 
-.tokenCompressionCard .contextCompositionPanel {
-  gap: 4px;
-  padding-top: 0;
-}
-
-.tokenCompressionCard .contextCompositionItem {
-  gap: 3px;
-}
-
-.tokenCompressionCard .contextCompositionBar {
-  height: 6px;
-}
-
-.tokenCompressionCard .contextCompositionLegend {
-  gap: 4px 6px;
-  font-size: 0.58rem;
-}
-
-.tokenCompressionCard .contextCompositionLegend span {
-  max-width: none;
-  overflow: visible;
-  text-overflow: clip;
-  white-space: normal;
-  overflow-wrap: anywhere;
-}
-
-.tokenCompressionCard .cacheDonutPanel {
-  grid-template-columns: 58px minmax(0, 1fr);
-  gap: 6px;
-}
-
-.tokenCompressionCard .cacheDonutTrigger,
-.tokenCompressionCard .cacheDonutShell,
-.tokenCompressionCard .cacheDonutSvg {
-  width: 58px;
-  height: 58px;
-}
-
-.tokenCompressionCard .cacheDonutShell {
-  min-width: 58px;
-}
-
-.tokenCompressionCard .cacheDonutCenter {
-  inset: 16px;
-}
-
-.tokenCompressionCard .cacheDonutCenter strong {
-  font-size: 0.7rem;
-}
-
-.tokenCompressionCard .cacheDonutCenter span,
-.tokenCompressionCard .cacheDonutCenter small {
-  max-width: 30px;
-  font-size: 0.46rem;
-}
-
-.tokenCompressionCard .cacheDonutStats {
-  gap: 2px;
-  font-size: 0.58rem;
-}
-
-.tokenCompressionCard .cacheDonutStats span {
-  grid-template-columns: 24px minmax(0, 1fr);
-  gap: 4px;
-  white-space: normal;
-  overflow-wrap: anywhere;
-}
-
-.tokenCompressionStrategyStrip {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 3px;
-  min-width: 0;
-}
-
-.tokenCompressionCard .compressionStrategyRow {
-  min-height: 27px;
-  padding: 3px 4px;
-  border-color: color-mix(in srgb, var(--accent-warm-2) 18%, var(--border-soft));
-  font-size: 0.6rem;
-}
-
-.tokenCompressionCard .compressionStrategyRowActive {
-  border-color: color-mix(in srgb, var(--accent-cool) 42%, var(--border-soft));
-  background: color-mix(in srgb, var(--accent-cool) 12%, var(--surface-card));
-}
-
-.tokenCompressionCard .compressionStrategyRow strong,
-.tokenCompressionCard .compressionStrategyRow span {
-  overflow: visible;
-  text-overflow: clip;
-  white-space: normal;
-  overflow-wrap: anywhere;
-}
-
-.tokenCompressionCard .detailNote {
-  grid-template-columns: auto minmax(0, 1fr);
-  gap: 6px;
-  margin-top: 0;
+.tokenStatusBar {
+  display: block;
+  width: 100%;
+  height: 5px;
   overflow: hidden;
-  font-size: 0.62rem;
-  line-height: 1.15;
+  border-radius: 999px;
+  background: var(--token-status-track);
 }
 
-.tokenCompressionCard .detailNote span,
-.tokenCompressionCard .detailNote strong {
-  min-width: 0;
-}
-
-.tokenCompressionCard .detailNote strong {
-  overflow: visible;
-  color: var(--fg-secondary);
-  font-weight: 650;
-  text-overflow: clip;
-  white-space: normal;
-  overflow-wrap: anywhere;
+.tokenStatusBar span {
+  display: block;
+  width: calc(var(--token-status-value) * 1%);
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, color-mix(in srgb, var(--token-status-accent) 70%, #fff), var(--token-status-accent));
 }
 
 .contextStatusCard .contextCompositionPanel {
