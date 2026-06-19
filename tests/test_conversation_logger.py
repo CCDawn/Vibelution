@@ -161,6 +161,19 @@ def test_transcript_writer_marks_queue_items_done(tmp_path):
     assert "flush me" in logger._get_transcript_file().read_text(encoding="utf-8")
 
 
+def test_transcript_logger_uses_external_workspace_home(tmp_path, monkeypatch):
+    data_home = tmp_path / "operator-data"
+    monkeypatch.setenv("VIBELUTION_DATA_HOME", str(data_home))
+    TranscriptLogger._instance = None
+
+    logger = TranscriptLogger()
+
+    assert logger._logs_dir == data_home / "workspace" / "logs" / "transcripts"
+    assert logger._logs_dir.exists()
+    logger._write_queue.put((None, ""))
+    logger._writer_thread.join(timeout=1)
+
+
 def test_transcript_writer_marks_failed_items_done(tmp_path):
     TranscriptLogger._instance = None
     logger = TranscriptLogger()
