@@ -40,20 +40,16 @@ def get_workspace_migration_status(
     source_workspace = _source_workspace(root)
     target_workspace = resolve_workspace_home(data_home, config_path=config_path)
     exclusion_set = _normalize_excludes(excludes)
-    verification = verify_workspace_migration(
-        project_root=root,
-        data_home=data_home,
-        config_path=config_path,
-        excludes=exclusion_set,
-        include_report=False,
-    )
+    manifest_path = target_workspace / WORKSPACE_MANIFEST_NAME
+    manifest = _read_manifest(manifest_path)
+    verification = _target_manifest_status(target_workspace=target_workspace, manifest=manifest)
     cleanup_blockers = _legacy_cleanup_blockers(
         project_root=root,
         source_workspace=source_workspace,
         target_workspace=target_workspace,
         verification=verification,
+        check_source_symlinks=False,
     )
-    manifest_path = target_workspace / WORKSPACE_MANIFEST_NAME
     return {
         "schemaVersion": 1,
         "mode": "external_workspace_migration_status",
@@ -62,8 +58,8 @@ def get_workspace_migration_status(
         "sourceWorkspace": str(source_workspace),
         "targetWorkspace": str(target_workspace),
         "manifestPath": str(manifest_path),
-        "source": _path_summary(source_workspace),
-        "target": _path_summary(target_workspace),
+        "source": _path_summary(source_workspace, deep=False),
+        "target": _path_summary(target_workspace, deep=False),
         "samePath": _same_path(source_workspace, target_workspace),
         "sourceExists": source_workspace.exists(),
         "targetExists": target_workspace.exists(),
@@ -72,10 +68,12 @@ def get_workspace_migration_status(
         "legacyCleanup": {
             "confirmationPhrase": LEGACY_WORKSPACE_CLEANUP_CONFIRMATION,
             "canPreview": source_workspace.exists() and not _same_path(source_workspace, target_workspace),
-            "canExecute": not cleanup_blockers,
+            "canExecute": False,
+            "requiresPreview": True,
+            "statusOnly": True,
             "blockedReasons": cleanup_blockers,
         },
-        "manifest": _read_manifest(manifest_path),
+        "manifest": manifest,
     }
 
 
@@ -163,6 +161,94 @@ def verify_workspace_migration(
     return verified
 
 
+def finalize_external_workspace(
+    *,
+    data_home: str | Path | None = None,
+    config_path: str | Path | None = None,
+    excludes: set[str] | None = None,
+    report_path: str | Path | None = None,
+) -> dict[str, Any]:
+    """Write and verify the target workspace manifest without copying legacy data."""
+
+    target_workspace = resolve_workspace_home(data_home, config_path=config_path)
+    if not target_workspace.exists():
+        raise WorkspaceDataMigrationError("Target workspace is missing; cannot finalize external workspace.")
+    exclusion_set = _normalize_excludes(excludes)
+    manifest = write_workspace_manifest(target_workspace, excludes=exclusion_set)
+    verification = verify_target_workspace_manifest(target_workspace, excludes=exclusion_set)
+    report = {
+        "schemaVersion": 1,
+        "mode": "external_workspace_finalize",
+        "action": "finalize-target",
+        "generatedAt": _now_iso(),
+        "targetWorkspace": str(target_workspace),
+        "manifestPath": str(target_workspace / WORKSPACE_MANIFEST_NAME),
+        "manifest": manifest,
+        "verification": verification,
+    }
+    _write_report(report_path, report)
+    _record_workspace_event(
+        "migration",
+        "workspace_data_migration.target_finalized",
+        outcome="succeeded" if verification.get("ok") else "failed",
+        fields={
+            "targetWorkspace": str(target_workspace),
+            "manifestPath": str(target_workspace / WORKSPACE_MANIFEST_NAME),
+            "verified": bool(verification.get("ok")),
+        },
+    )
+    return report
+
+
+def verify_target_workspace_manifest(
+    target_workspace: Path,
+    *,
+    excludes: set[str] | None = None,
+) -> dict[str, Any]:
+    """Verify that the target workspace matches its own manifest."""
+
+    target = Path(target_workspace).expanduser().resolve()
+    manifest_path = target / WORKSPACE_MANIFEST_NAME
+    manifest = _read_manifest(manifest_path)
+    reasons = _target_manifest_blockers(target_workspace=target, manifest=manifest)
+    current_manifest: dict[str, Any] = {}
+    mismatches: list[dict[str, Any]] = []
+    if not reasons:
+        current_manifest = _workspace_manifest(target, excludes=_normalize_excludes(excludes))
+        for field in ("treeHash",):
+            if str(manifest.get(field) or "") != str(current_manifest.get(field) or ""):
+                mismatches.append(
+                    {
+                        "field": field,
+                        "manifest": manifest.get(field),
+                        "current": current_manifest.get(field),
+                    }
+                )
+        manifest_totals = manifest.get("totals") if isinstance(manifest.get("totals"), dict) else {}
+        current_totals = current_manifest.get("totals") if isinstance(current_manifest.get("totals"), dict) else {}
+        for field in ("itemCount", "fileCount", "sizeBytes"):
+            if int(manifest_totals.get(field) or 0) != int(current_totals.get(field) or 0):
+                mismatches.append(
+                    {
+                        "field": f"totals.{field}",
+                        "manifest": int(manifest_totals.get(field) or 0),
+                        "current": int(current_totals.get(field) or 0),
+                    }
+                )
+    if mismatches:
+        reasons.append("target_manifest_mismatch")
+    return {
+        "ok": not reasons,
+        "blockedReasons": reasons,
+        "mismatchCount": len(mismatches),
+        "mismatches": mismatches[:50],
+        "checkedAt": _now_iso(),
+        "verificationMode": "target_manifest_self_check",
+        "manifestPath": str(manifest_path),
+        "targetWorkspace": str(target),
+    }
+
+
 def preview_legacy_workspace_cleanup(
     *,
     project_root: Path | None = None,
@@ -173,12 +259,9 @@ def preview_legacy_workspace_cleanup(
     root = _project_root(project_root)
     source_workspace = _source_workspace(root)
     target_workspace = resolve_workspace_home(data_home, config_path=config_path)
-    verification = verify_workspace_migration(
-        project_root=root,
-        data_home=data_home,
-        config_path=config_path,
+    verification = verify_target_workspace_manifest(
+        target_workspace,
         excludes=_normalize_excludes(excludes),
-        include_report=False,
     )
     blockers = _legacy_cleanup_blockers(
         project_root=root,
@@ -203,7 +286,7 @@ def preview_legacy_workspace_cleanup(
             "kind": "directory",
             "action": "delete",
             "exists": source_workspace.exists(),
-            **_path_summary(source_workspace),
+            **_path_summary(source_workspace, hash_files=False),
         },
     }
 
@@ -228,7 +311,7 @@ def execute_legacy_workspace_cleanup(
         raise WorkspaceDataMigrationError(f"Legacy workspace cleanup is blocked: {', '.join(preview['blockedReasons'])}")
 
     source_workspace = Path(preview["sourceWorkspace"]).resolve()
-    stats = _path_summary(source_workspace)
+    stats = _path_summary(source_workspace, hash_files=False)
     try:
         shutil.rmtree(source_workspace)
     except Exception as exc:
@@ -404,17 +487,37 @@ def _workspace_manifest(workspace: Path, *, excludes: set[str]) -> dict[str, Any
     }
 
 
-def _path_summary(path: Path) -> dict[str, Any]:
+def _path_summary(path: Path, *, deep: bool = True, hash_files: bool = True) -> dict[str, Any]:
     path = Path(path)
     if not path.exists():
-        return {"exists": False, "kind": "", "fileCount": 0, "sizeBytes": 0, "treeHash": ""}
+        return {"exists": False, "kind": "", "fileCount": 0, "sizeBytes": 0, "treeHash": "", "summaryMode": "missing"}
     if path.is_file():
         try:
             size = path.stat().st_size
         except OSError:
             size = 0
-        digest = _file_digest(path)
-        return {"exists": True, "kind": "file", "fileCount": 1, "sizeBytes": int(size), "treeHash": digest}
+        digest = _file_digest(path) if hash_files else ""
+        return {"exists": True, "kind": "file", "fileCount": 1, "sizeBytes": int(size), "treeHash": digest, "summaryMode": "deep" if hash_files else "no_hash"}
+    if not deep:
+        entries = _safe_iterdir(path)
+        top_level_files = [entry for entry in entries if entry.is_file()]
+        size_bytes = 0
+        for entry in top_level_files:
+            try:
+                size_bytes += entry.stat().st_size
+            except OSError:
+                pass
+        return {
+            "exists": True,
+            "kind": "directory",
+            "fileCount": len(top_level_files),
+            "sizeBytes": int(size_bytes),
+            "treeHash": "",
+            "summaryMode": "shallow",
+            "topLevelEntryCount": len(entries),
+            "topLevelFileCount": len(top_level_files),
+            "topLevelDirectoryCount": sum(1 for entry in entries if entry.is_dir()),
+        }
     files = []
     size_bytes = 0
     for child in _iter_files(path):
@@ -423,14 +526,28 @@ def _path_summary(path: Path) -> dict[str, Any]:
         except OSError:
             size = 0
         size_bytes += size
-        files.append({"relativePath": child.relative_to(path).as_posix(), "sizeBytes": int(size), "sha256": _file_digest(child)})
+        files.append(
+            {
+                "relativePath": child.relative_to(path).as_posix(),
+                "sizeBytes": int(size),
+                "sha256": _file_digest(child) if hash_files else "",
+            }
+        )
     return {
         "exists": True,
         "kind": "directory",
         "fileCount": len(files),
         "sizeBytes": int(size_bytes),
-        "treeHash": _combined_tree_hash(files),
+        "treeHash": _combined_tree_hash(files) if hash_files else "",
+        "summaryMode": "deep" if hash_files else "no_hash",
     }
+
+
+def _safe_iterdir(path: Path) -> list[Path]:
+    try:
+        return list(path.iterdir())
+    except OSError:
+        return []
 
 
 def _top_level_entries(source_workspace: Path, *, excludes: set[str]) -> list[Path]:
@@ -480,12 +597,49 @@ def _verification_projection(summary: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _target_manifest_status(*, target_workspace: Path, manifest: dict[str, Any]) -> dict[str, Any]:
+    reasons = _target_manifest_blockers(target_workspace=target_workspace, manifest=manifest)
+    return {
+        "ok": not reasons,
+        "blockedReasons": reasons,
+        "mismatchCount": 0,
+        "mismatches": [],
+        "checkedAt": _now_iso(),
+        "verificationMode": "target_manifest_presence",
+        "manifestPath": str(Path(target_workspace).expanduser().resolve() / WORKSPACE_MANIFEST_NAME),
+        "targetWorkspace": str(Path(target_workspace).expanduser().resolve()),
+    }
+
+
+def _target_manifest_blockers(*, target_workspace: Path, manifest: dict[str, Any]) -> list[str]:
+    target = Path(target_workspace).expanduser().resolve()
+    blockers: list[str] = []
+    if not target.exists():
+        blockers.append("target_workspace_missing")
+    if not manifest:
+        blockers.append("target_manifest_missing")
+        return blockers
+    if int(manifest.get("schemaVersion") or 0) < 1:
+        blockers.append("target_manifest_invalid")
+    if not str(manifest.get("treeHash") or "").startswith("sha256:"):
+        blockers.append("target_manifest_invalid")
+    raw_manifest_root = str(manifest.get("workspaceRoot") or "").strip()
+    if raw_manifest_root:
+        try:
+            if Path(raw_manifest_root).expanduser().resolve() != target:
+                blockers.append("target_manifest_workspace_mismatch")
+        except OSError:
+            blockers.append("target_manifest_workspace_mismatch")
+    return blockers
+
+
 def _legacy_cleanup_blockers(
     *,
     project_root: Path,
     source_workspace: Path,
     target_workspace: Path,
     verification: dict[str, Any],
+    check_source_symlinks: bool = True,
 ) -> list[str]:
     blockers: list[str] = []
     if not source_workspace.exists():
@@ -498,9 +652,24 @@ def _legacy_cleanup_blockers(
         blockers.append("target_workspace_missing")
     if not bool(verification.get("ok")):
         blockers.append("migration_not_verified")
-    if _contains_symlink(source_workspace):
+    for reason in list(verification.get("blockedReasons") or []):
+        if str(reason or "").strip():
+            blockers.append(str(reason).strip())
+    if check_source_symlinks and _contains_symlink(source_workspace):
         blockers.append("legacy_workspace_contains_symlink")
-    return blockers
+    return _dedupe_preserve_order(blockers)
+
+
+def _dedupe_preserve_order(values: Iterable[str]) -> list[str]:
+    result: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        normalized = str(value or "").strip()
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        result.append(normalized)
+    return result
 
 
 def _contains_symlink(path: Path) -> bool:

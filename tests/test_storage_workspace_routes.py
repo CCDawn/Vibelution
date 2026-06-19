@@ -41,6 +41,28 @@ def test_storage_workspace_migration_route_flow(tmp_path, monkeypatch):
     assert (data_home / "workspace" / migration.WORKSPACE_MANIFEST_NAME).exists()
 
 
+def test_storage_workspace_migration_finalize_target_route_writes_manifest(tmp_path, monkeypatch):
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    data_home = tmp_path / "operator-data"
+    target_workspace = data_home / "workspace"
+    (target_workspace / "memory").mkdir(parents=True)
+    (target_workspace / "memory" / "memory.json").write_text("{}\n", encoding="utf-8")
+    monkeypatch.setenv("VIBELUTION_DATA_HOME", str(data_home))
+    monkeypatch.setattr(migration, "PROJECT_ROOT", project_root)
+    client = _client()
+
+    finalized = client.post("/api/storage/workspace-migration/finalize-target", json={})
+    status = client.get("/api/storage/workspace-migration/status")
+
+    assert finalized.status_code == 200, finalized.text
+    assert finalized.json()["verification"]["ok"] is True
+    assert (target_workspace / migration.WORKSPACE_MANIFEST_NAME).exists()
+    assert status.status_code == 200, status.text
+    assert status.json()["verification"]["ok"] is True
+    assert status.json()["legacyCleanup"]["requiresPreview"] is True
+
+
 def test_storage_legacy_workspace_cleanup_route_requires_verified_migration(tmp_path, monkeypatch):
     project_root = tmp_path / "project"
     project_root.mkdir()

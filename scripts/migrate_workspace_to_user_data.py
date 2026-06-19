@@ -24,6 +24,7 @@ from core.web.services.workspace_data_migration_service import (  # noqa: E402
     apply_migration,
     apply_workspace_migration,
     build_report,
+    finalize_external_workspace,
     preview_workspace_migration,
     verify_migration,
     verify_workspace_migration,
@@ -32,7 +33,7 @@ from core.web.services.workspace_data_migration_service import (  # noqa: E402
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("dry-run", "apply", "verify"))
+    parser.add_argument("action", choices=("dry-run", "apply", "verify", "finalize-target"))
     parser.add_argument("--project-root", default=str(PROJECT_ROOT))
     parser.add_argument("--data-home", default="")
     parser.add_argument("--config-path", default="")
@@ -63,6 +64,17 @@ def main(argv: list[str] | None = None) -> int:
             config_path=args.config_path or None,
             excludes=excludes,
         )
+    elif args.action == "finalize-target":
+        report = finalize_external_workspace(
+            data_home=args.data_home or None,
+            config_path=args.config_path or None,
+            excludes=excludes,
+            report_path=args.report_path or None,
+        )
+        if not report["verification"]["ok"]:
+            _write_report(args.report_path, report)
+            print(json.dumps(report, ensure_ascii=False, indent=2))
+            return 2
     else:
         report = verify_workspace_migration(
             project_root=project_root,

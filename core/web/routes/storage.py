@@ -9,6 +9,7 @@ from core.web.services.workspace_data_migration_service import (
     WorkspaceDataMigrationError,
     apply_workspace_migration,
     execute_legacy_workspace_cleanup,
+    finalize_external_workspace,
     get_workspace_migration_status,
     preview_legacy_workspace_cleanup,
     preview_workspace_migration,
@@ -48,6 +49,14 @@ def workspace_migration_apply(payload: WorkspaceMigrationPayload | None = None) 
 @router.post("/storage/workspace-migration/verify")
 def workspace_migration_verify(payload: WorkspaceMigrationPayload | None = None) -> dict:
     return verify_workspace_migration(report_path=(payload.reportPath if payload else ""))
+
+
+@router.post("/storage/workspace-migration/finalize-target")
+def workspace_migration_finalize_target(payload: WorkspaceMigrationPayload | None = None) -> dict:
+    try:
+        return finalize_external_workspace(report_path=(payload.reportPath if payload else ""))
+    except WorkspaceDataMigrationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.post("/storage/legacy-workspace/cleanup-preview")
