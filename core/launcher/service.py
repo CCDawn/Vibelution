@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any, Literal, TypedDict
 
 from config.public_config import CONFIG_PATH, load_public_config, public_config_hash, save_public_config
-from core.runtime_manager import ensure_daemon_running, submit_command
+from core.runtime_manager import command_queue, ensure_daemon_running, submit_command
 from core.runtime_manager.constants import (
     EVENTS_PATH,
     INBOX_DIR,
@@ -110,6 +110,8 @@ def get_launcher_status() -> dict[str, Any]:
     """Return standalone Launcher status without importing the Web service layer."""
 
     runtime_state = _runtime_manager_state()
+    if _recover_stale_close_commands_when_manager_offline(runtime_state):
+        runtime_state = _runtime_manager_state()
     launcher_state = _load_launcher_state()
     observed_workbench = _status_observed_workbench(runtime_state)
     workbench = _workbench_payload(runtime_state=runtime_state, observed_workbench=observed_workbench)
@@ -1037,9 +1039,44 @@ def _runtime_manager_state() -> dict[str, Any]:
     return payload
 
 
+def _recover_stale_close_commands_when_manager_offline(runtime_state: dict[str, Any]) -> bool:
+    if bool(runtime_state.get("daemonRunning")):
+        return False
+    try:
+        processing = _recent_command_files(PROCESSING_DIR, limit=20)
+    except Exception:
+        processing = []
+    if not processing:
+        return False
+    if any(str(command.get("type") or "").strip() not in {"close_workbench", "force_close_workbench"} for command in processing):
+        return False
+    try:
+        command_queue.recover_processing_queue()
+    except Exception as exc:
+        append_runtime_manager_file_event(
+            "launcher.status.stale_close_recovery_failed",
+            {"errorType": type(exc).__name__, "message": _truncate(str(exc), 180)},
+            suppress_io_errors=True,
+        )
+        return False
+    append_runtime_manager_file_event(
+        "launcher.status.stale_close_recovery_requested",
+        {"processingCount": len(processing), "commandIds": [str(command.get("commandId") or "") for command in processing[:8]]},
+        suppress_io_errors=True,
+    )
+    return True
+
+
 def _observed_workbench() -> dict[str, Any]:
     try:
-        observed = observe_workbench()
+        observed = observe_workbench(recover_browser_window=False)
+    except TypeError as exc:
+        if "recover_browser_window" not in str(exc):
+            return {}
+        try:
+            observed = observe_workbench()
+        except Exception:
+            return {}
     except Exception:
         return {}
     return observed if isinstance(observed, dict) else {}
@@ -1548,6 +1585,8 @@ def _control_plane_evidence() -> dict[str, Any]:
     recent_results = _recent_result_files(RESULTS_DIR, limit=5)
     recent_events = _recent_runtime_manager_events(EVENTS_PATH, limit=8)
     active_command = state.get("command") if isinstance(state.get("command"), dict) else {}
+    if _active_command_has_completed_result(active_command, recent_results):
+        active_command = {}
     restart_queue = _restart_queue_summary(pending_commands=pending_commands, active_command=active_command)
     return {
         "schemaVersion": 1,
@@ -1569,6 +1608,18 @@ def _control_plane_evidence() -> dict[str, Any]:
         "recovery": _runtime_manager_recovery_summary(recent_events=recent_events, recent_results=recent_results),
         "restartQueue": restart_queue,
     }
+
+
+def _active_command_has_completed_result(active_command: dict[str, Any], recent_results: list[dict[str, Any]]) -> bool:
+    command_id = str(active_command.get("activeCommandId") or active_command.get("commandId") or "").strip()
+    if not command_id:
+        return False
+    for result in recent_results:
+        if str(result.get("commandId") or "").strip() == command_id and bool(result.get("completed")):
+            return True
+    result_path = RESULTS_DIR / f"{command_id}.json"
+    payload = _load_json_file(result_path)
+    return str(payload.get("commandId") or command_id).strip() == command_id and bool(payload.get("completed"))
 
 
 def _append_active_work_run(

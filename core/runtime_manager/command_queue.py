@@ -667,9 +667,12 @@ def _live_observation_says_workbench_closed() -> bool:
     try:
         from . import workbench_controller
 
-        observation = workbench_controller.observe_workbench(recover_browser_window_for_backend_observed=False)
+        observation = workbench_controller.observe_workbench(
+            recover_browser_window=False,
+            recover_browser_window_for_backend_observed=False,
+        )
     except TypeError as exc:
-        if "recover_browser_window_for_backend_observed" not in str(exc):
+        if "recover_browser_window" not in str(exc) and "recover_browser_window_for_backend_observed" not in str(exc):
             _append_queue_event(
                 "command_queue.recovered_stale_close_observation_failed",
                 {"errorType": type(exc).__name__, "message": truncate_event_text(str(exc))},
@@ -678,7 +681,24 @@ def _live_observation_says_workbench_closed() -> bool:
         try:
             from . import workbench_controller
 
-            observation = workbench_controller.observe_workbench()
+            observation = workbench_controller.observe_workbench(recover_browser_window_for_backend_observed=False)
+        except TypeError as fallback_type_error:
+            if "recover_browser_window_for_backend_observed" not in str(fallback_type_error):
+                _append_queue_event(
+                    "command_queue.recovered_stale_close_observation_failed",
+                    {"errorType": type(fallback_type_error).__name__, "message": truncate_event_text(str(fallback_type_error))},
+                )
+                return False
+            try:
+                from . import workbench_controller
+
+                observation = workbench_controller.observe_workbench()
+            except Exception as fallback_exc:
+                _append_queue_event(
+                    "command_queue.recovered_stale_close_observation_failed",
+                    {"errorType": type(fallback_exc).__name__, "message": truncate_event_text(str(fallback_exc))},
+                )
+                return False
         except Exception as fallback_exc:
             _append_queue_event(
                 "command_queue.recovered_stale_close_observation_failed",

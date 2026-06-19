@@ -2567,6 +2567,60 @@ def test_recover_processing_queue_completes_stale_satisfied_launcher_close_from_
     assert "command_queue.recovered_stale_close_completed" in [event["type"] for event in events]
 
 
+def test_recover_processing_queue_live_close_check_skips_browser_recovery(tmp_path, monkeypatch):
+    inbox_dir = tmp_path / "inbox"
+    processing_dir = tmp_path / "processing"
+    results_dir = tmp_path / "results"
+    events_path = tmp_path / "events.jsonl"
+    for path in (inbox_dir, processing_dir, results_dir):
+        path.mkdir(parents=True)
+
+    stale_close = {
+        "commandId": "cmd-stale-close-no-browser-recovery",
+        "type": "close_workbench",
+        "requestedBy": "launcher_api",
+        "requestedAt": "2026-06-19T06:19:09+00:00",
+        "args": {"reason": "launcher_stop_button", "source": "launcher_api"},
+    }
+    (processing_dir / f"{stale_close['commandId']}.json").write_text(json.dumps(stale_close), encoding="utf-8")
+    observed_kwargs: list[dict] = []
+
+    def observe_workbench(**kwargs):
+        observed_kwargs.append(kwargs)
+        return {
+            "observedState": "closed",
+            "backendAlive": False,
+            "backendObserved": False,
+            "backendPortListening": False,
+            "browserWindowAlive": False,
+        }
+
+    monkeypatch.setattr(command_queue, "INBOX_DIR", inbox_dir)
+    monkeypatch.setattr(command_queue, "PROCESSING_DIR", processing_dir)
+    monkeypatch.setattr(command_queue, "RESULTS_DIR", results_dir)
+    monkeypatch.setattr(command_queue, "EVENTS_PATH", events_path)
+    monkeypatch.setattr(command_queue, "ensure_runtime_manager_dirs", lambda: None)
+    monkeypatch.setattr(
+        command_queue,
+        "load_state",
+        lambda: {
+            "stateVersion": 146987,
+            "runtimeState": "running",
+            "managerPid": 50012,
+            "daemonRunning": True,
+            "command": {"activeCommandId": stale_close["commandId"], "activeType": "close_workbench"},
+            "workbench": {"desiredState": "closed", "observedState": "open", "phase": "closing"},
+        },
+    )
+    monkeypatch.setattr(workbench_controller, "observe_workbench", observe_workbench)
+
+    command_queue.recover_processing_queue()
+
+    assert observed_kwargs == [{"recover_browser_window": False, "recover_browser_window_for_backend_observed": False}]
+    assert not (processing_dir / f"{stale_close['commandId']}.json").exists()
+    assert (results_dir / f"{stale_close['commandId']}.json").exists()
+
+
 def test_recover_processing_queue_completes_stale_satisfied_pending_close(tmp_path, monkeypatch):
     inbox_dir = tmp_path / "inbox"
     processing_dir = tmp_path / "processing"
@@ -4065,6 +4119,55 @@ def test_observe_workbench_drops_stale_backend_pid(monkeypatch):
     assert observation["backendPid"] == 0
     assert observation["backendAlive"] is False
     assert observation["backendObserved"] is False
+
+
+def test_observe_workbench_fast_closes_stale_workbench_state_without_slow_probes(monkeypatch):
+    monkeypatch.setattr(
+        workbench_controller,
+        "_load_launcher_state",
+        lambda: {
+            "sessionRole": "workbench",
+            "url": "http://127.0.0.1:8000",
+            "backendPid": 24932,
+            "backendLaunchPid": 24932,
+            "browserLaunchPid": 49816,
+            "browserWindowPid": 49816,
+            "workbenchBrowserLaunchPid": 49816,
+            "workbenchBrowserWindowPid": 49816,
+            "browserManaged": True,
+            "launcherBrowserLaunchPid": 28296,
+            "launcherBrowserWindowPid": 28296,
+            "sessionId": "stale-workbench",
+        },
+    )
+    monkeypatch.setattr(workbench_controller, "_is_process_alive", lambda pid: int(pid) == 28296)
+    monkeypatch.setattr(workbench_controller, "_port_is_listening_socket", lambda port: False)
+    monkeypatch.setattr(
+        workbench_controller,
+        "_is_backend_healthy",
+        lambda url: (_ for _ in ()).throw(AssertionError("stale closed state must not probe backend health")),
+    )
+    monkeypatch.setattr(
+        workbench_controller,
+        "_listening_pid_for_port",
+        lambda port: (_ for _ in ()).throw(AssertionError("stale closed state must not scan port owner")),
+    )
+    monkeypatch.setattr(
+        workbench_controller,
+        "_recover_managed_browser_window_pid",
+        lambda profile_dir: (_ for _ in ()).throw(AssertionError("stale closed state must not scan browser profile")),
+    )
+
+    observation = workbench_controller.observe_workbench(recover_browser_window=False)
+
+    assert observation["observedState"] == "closed"
+    assert observation["sessionRole"] == "launcher_control_surface"
+    assert observation["sourceSessionRole"] == "workbench"
+    assert observation["backendPid"] == 0
+    assert observation["browserWindowPid"] == 0
+    assert observation["backendPortListening"] is False
+    assert observation["launcherBrowserWindowAlive"] is True
+    assert observation["observationFastPath"] == "stale_workbench_pids_closed"
 
 
 def test_observe_workbench_reports_orphaned_browser(monkeypatch):
