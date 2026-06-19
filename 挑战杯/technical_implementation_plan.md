@@ -252,7 +252,7 @@ source_registered
 
 经需求对齐，流程状态机编排应作为 Team 的通用能力，而不是挑战杯专用孤岛。Team 在这里不是单纯成员列表，而是科研信息流控制抽象。
 
-当前挑战杯流程直接绑定 Vibelution 已有团队 `research-team`（团队名：科研团队），不另建新的挑战杯团队。该团队来自 Research Organization 自动同步，`teamCategory=科研组织团队`、`teamSource=research_organization`，并已关联团队群聊 `room-20260529-090009-757107-6a747d62`（purpose：`research_coordination`）。流程编排落盘在 `workspace/teams/research-team/workflow_orchestration.json`，候选知识仓库落盘在 `workspace/teams/research-team/candidate_store/index.json`。
+当前挑战杯流程直接绑定 Vibelution 已有团队 `research-team`（团队名：科研团队），不另建新的挑战杯团队。该团队来自 Research Organization 自动同步，`teamCategory=科研组织团队`、`teamSource=research_organization`，当前团队群聊入口以 `workspace/teams/teams.json` 中 `research-team.linkedChatRoomId` 为准，且 purpose 应为 `research_coordination`。流程编排落盘在 `workspace/teams/research-team/workflow_orchestration.json`，候选知识仓库落盘在 `workspace/teams/research-team/candidate_store/index.json`。
 
 ### 5.1.1 已落地的前半段后端切片
 
@@ -955,7 +955,7 @@ Team linkedChatRoom round
 
 1. 使用现有 `research-team / 科研团队` 作为挑战杯科研流程团队，不新增平行团队。
 2. 保持 Research Organization 对该团队的成员、功能岗位和通信边同步。
-3. 使用 Team 已关联的 linkedChatRoom `room-20260529-090009-757107-6a747d62` 承载团队群聊。
+3. 使用 Team registry 当前记录的 `research-team.linkedChatRoomId` 承载团队群聊；历史轮次若引用旧 roomId，应由团队修复逻辑恢复或桥接，不能新建空房间切断上下文。
 4. 群聊 round 使用 `research_coordination` purpose。
 5. Research Coordination Agent 负责发起轮次、收敛结论和生成任务摘要。
 6. 需要新增功能 Agent 或通信边时，走 proposal -> 用户确认 -> apply。
