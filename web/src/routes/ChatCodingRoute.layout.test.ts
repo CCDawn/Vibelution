@@ -1332,7 +1332,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(groupSessionIndexItemsSource).not.toContain("群成员");
     expect(groupSessionIndexItemsSource).not.toContain("团队分类");
     expect(groupSessionIndexItemsSource).toContain("团队群聊");
-    expect(groupSessionIndexItemsSource).toContain("待绑定");
+    expect(groupSessionIndexItemsSource).toContain("团队群聊待同步");
     expect(groupSessionIndexItemsSource).not.toContain("styles.teamTreeLabelRow");
     expect(conversationIndexTreeSource).toContain("`/teams?team=${encodeURIComponent(team.teamId)}`");
     expect(conversationIndexTreeSource).toContain("未绑定团队的群聊");
