@@ -33,9 +33,10 @@ import {
   type MouseEvent as ReactMouseEvent,
   type PointerEvent,
 } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 
 import { fetchJson } from "../api/client";
+import { kernelTaskCenterHref } from "../api/kernel";
 import { createChatWorkspaceCache } from "./chatWorkspaceCache";
 import {
   isProjectAgentBusEventRevoked,
@@ -7034,6 +7035,11 @@ export function ChatCodingRoute() {
                           <span>{revoked ? (lang === "zh" ? "已撤回" : "revoked") : event.messageType}</span>
                           <span>{deliveryLabel}</span>
                           {interruptionLabel ? <span>{interruptionLabel}</span> : null}
+                          {event.kernel?.taskId ? (
+                            <Link className={styles.kernelTraceLink} to={kernelTaskCenterHref(event.kernel.taskId)}>
+                              {lang === "zh" ? "Kernel 任务" : "Kernel Task"}
+                            </Link>
+                          ) : null}
                           {event.unresolvedMentions.length ? (
                             <span>{lang === "zh" ? "未识别" : "unresolved"} @{event.unresolvedMentions.join(", @")}</span>
                           ) : null}
