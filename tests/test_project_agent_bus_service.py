@@ -171,6 +171,20 @@ def test_project_agent_bus_named_mention_targets_one_agent_without_wake(tmp_path
     assert event["deliveries"][0]["wake"]["wakeStatus"] == "not_requested"
     assert agent_directory_service.count_agent_inbox_messages_for_agent(alpha["agentId"]) == 1
     assert agent_directory_service.count_agent_inbox_messages_for_agent(beta["agentId"]) == 0
+    inbox_message = agent_directory_service.list_agent_inbox_messages_for_agent(alpha["agentId"])[0]
+    assert inbox_message["sourceRoomId"] == "project_agent_bus"
+    assert inbox_message["sourceRoundId"] == event["eventId"]
+    assert inbox_message["threadId"] == event["eventId"]
+    assert inbox_message["metadata"]["sourceSurface"] == "project_agent_bus"
+    assert inbox_message["metadata"]["sourceMessageId"] == event["eventId"]
+    assert inbox_message["metadata"]["sourceRoomId"] == "project_agent_bus"
+    assert inbox_message["metadata"]["projectBusEventId"] == event["eventId"]
+    assert inbox_message["metadata"]["projectBusMessageType"] == event["messageType"]
+    assert inbox_message["metadata"]["projectBusTargetScope"] == event["targetScope"]
+    assert inbox_message["metadata"]["projectionRefKind"] == "project_agent_bus_event"
+    assert inbox_message["metadata"]["projectionRefId"] == event["eventId"]
+    assert inbox_message["metadata"]["kernelTaskId"] == event["kernel"]["taskId"]
+    assert inbox_message["metadata"]["kernelEventId"] == event["kernel"]["eventId"]
 
 
 def test_project_agent_bus_named_mention_does_not_match_legacy_profile_id(tmp_path, monkeypatch):

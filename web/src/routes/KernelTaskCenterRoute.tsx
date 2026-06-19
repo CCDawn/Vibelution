@@ -1,9 +1,10 @@
 import { useQuery } from "@tanstack/react-query";
 import { Activity, Boxes, RefreshCw, Router, ShieldCheck } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import type { ReactNode } from "react";
+import { useSearchParams } from "react-router-dom";
 
-import { getKernelTaskTimeline, listKernelTasks } from "../api/kernel";
+import { getKernelTaskTimeline, listKernelTasks, selectKernelTaskId } from "../api/kernel";
 import { queryKeys } from "../api/queryKeys";
 import type { KernelDelivery, KernelTask, KernelTimelineItem } from "../api/types";
 import { useShellI18n } from "../i18n/useShellI18n";
@@ -33,7 +34,11 @@ const COPY = {
     wake: "Wake",
     inbox: "Inbox",
     readModel: "Read model",
-    truthSource: "事实源",
+    factAuthority: "事实权威",
+    viewType: "当前视图",
+    projectionView: "Read model / Projection",
+    directView: "Direct",
+    taskHidden: "当前任务不在左侧列表中，可能被状态筛选或数量限制隐藏。",
     noTasks: "暂无 Kernel 任务",
     loading: "读取中",
     loadFailed: "读取失败",
@@ -60,7 +65,11 @@ const COPY = {
     wake: "Wake",
     inbox: "Inbox",
     readModel: "Read model",
-    truthSource: "Truth source",
+    factAuthority: "Fact authority",
+    viewType: "View",
+    projectionView: "Read model / Projection",
+    directView: "Direct",
+    taskHidden: "This task is not in the left list; it may be hidden by status filtering or list limits.",
     noTasks: "No Kernel tasks",
     loading: "Loading",
     loadFailed: "Load failed",
@@ -108,27 +117,40 @@ function describeError(error: unknown, fallback: string) {
 export function KernelTaskCenterRoute() {
   const { lang } = useShellI18n();
   const copy = COPY[lang];
+  const [searchParams, setSearchParams] = useSearchParams();
+  const requestedTaskId = searchParams.get("taskId") ?? "";
   const [status, setStatus] = useState("");
-  const [selectedTaskId, setSelectedTaskId] = useState("");
+  const updateSelectedTaskId = useCallback(
+    (taskId: string) => {
+      const nextTaskId = String(taskId || "").trim();
+      setSearchParams(
+        (current) => {
+          const next = new URLSearchParams(current);
+          if (nextTaskId) {
+            next.set("taskId", nextTaskId);
+          } else {
+            next.delete("taskId");
+          }
+          return next;
+        },
+        { replace: true },
+      );
+    },
+    [setSearchParams],
+  );
   const taskQuery = useQuery({
     queryKey: queryKeys.kernelTasks(status, 120),
     queryFn: () => listKernelTasks(status, 120),
   });
   const tasks = taskQuery.data?.tasks ?? [];
+  const selectedTaskId = useMemo(() => selectKernelTaskId(tasks, requestedTaskId), [requestedTaskId, tasks]);
   const selectedTask = useMemo(
-    () => tasks.find((task) => task.taskId === selectedTaskId) ?? tasks[0] ?? null,
+    () => tasks.find((task) => task.taskId === selectedTaskId) ?? null,
     [selectedTaskId, tasks],
   );
-
-  useEffect(() => {
-    if (!selectedTask) {
-      setSelectedTaskId("");
-      return;
-    }
-    if (selectedTask.taskId !== selectedTaskId) {
-      setSelectedTaskId(selectedTask.taskId);
-    }
-  }, [selectedTask, selectedTaskId]);
+  const selectedTaskHiddenFromList = Boolean(
+    selectedTaskId && !selectedTask && !taskQuery.isLoading && !taskQuery.isError,
+  );
 
   const timelineQuery = useQuery({
     queryKey: queryKeys.kernelTaskTimeline(selectedTaskId),
@@ -194,7 +216,7 @@ export function KernelTaskCenterRoute() {
                   key={task.taskId}
                   task={task}
                   selected={task.taskId === selectedTaskId}
-                  onSelect={() => setSelectedTaskId(task.taskId)}
+                  onSelect={() => updateSelectedTaskId(task.taskId)}
                   copy={copy}
                 />
               ))
@@ -220,11 +242,18 @@ export function KernelTaskCenterRoute() {
               </div>
 
               <div className={styles.summaryGrid}>
-                <Metric label={copy.truthSource} value={timeline.readModel.truthSource} icon={<ShieldCheck size={15} />} />
+                <Metric label={copy.factAuthority} value={timeline.readModel.truthSource} icon={<ShieldCheck size={15} />} />
+                <Metric
+                  label={copy.viewType}
+                  value={timeline.readModel.projection ? copy.projectionView : copy.directView}
+                  icon={<ShieldCheck size={15} />}
+                />
                 <Metric label={copy.event} value={shortId(timeline.event.eventId)} icon={<Router size={15} />} />
                 <Metric label={copy.workRun} value={shortId(timeline.execution.workRunId)} icon={<Activity size={15} />} />
                 <Metric label={copy.outcome} value={timeline.outcome.status || "-"} icon={<Boxes size={15} />} />
               </div>
+
+              {selectedTaskHiddenFromList ? <div className={styles.selectionNotice}>{copy.taskHidden}</div> : null}
 
               <section className={styles.section}>
                 <div className={styles.sectionHeader}>

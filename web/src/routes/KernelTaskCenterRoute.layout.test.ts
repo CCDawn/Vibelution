@@ -9,12 +9,16 @@ describe("KernelTaskCenterRoute layout contract", () => {
     expect(routerSource).toContain("<KernelTaskCenterRoute />");
     expect(routeSource).toContain("listKernelTasks(status, 120)");
     expect(routeSource).toContain("getKernelTaskTimeline(selectedTaskId)");
+    expect(routeSource).toContain("useSearchParams");
+    expect(routeSource).toContain("selectKernelTaskId(tasks, requestedTaskId)");
     expect(routeSource).not.toContain("useMutation");
     expect(routeSource).not.toContain('method: "POST"');
   });
 
   it("shows TaskLedger authority and delivery/wake evidence", () => {
     expect(routeSource).toContain("timeline.readModel.truthSource");
+    expect(routeSource).toContain("timeline.readModel.projection");
+    expect(routeSource).toContain("copy.factAuthority");
     expect(routeSource).toContain("timeline.deliveries.map");
     expect(routeSource).toContain("delivery.wake?.wakeStatus");
     expect(routeSource).toContain("timeline.projectionRefs");

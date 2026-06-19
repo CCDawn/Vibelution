@@ -222,7 +222,7 @@ def list_kernel_tasks(*, status: str = "", limit: int = 50) -> dict[str, Any]:
     if normalized_status:
         tasks = [task for task in tasks if str(task.get("status") or "").strip().lower() == normalized_status]
     return {
-        "tasks": tasks[-bounded_limit:],
+        "tasks": tasks[:bounded_limit],
         "limit": bounded_limit,
         "status": normalized_status,
         "updatedAt": str(index.get("updatedAt") or ""),
@@ -467,6 +467,10 @@ def _deliver_event_to_recipients(event: dict[str, Any], task: dict[str, Any]) ->
         content = str(semantic.get("semanticType") or "Kernel message").strip()
     delivery_policy = event.get("deliveryPolicy") if isinstance(event.get("deliveryPolicy"), dict) else {}
     wake_target = bool(delivery_policy.get("wakeTarget", True))
+    inbox_metadata = _kernel_inbox_metadata(event, task)
+    source_room_id = _metadata_text(inbox_metadata, "sourceRoomId")
+    source_round_id = _metadata_text(inbox_metadata, "sourceMessageId") or _metadata_text(inbox_metadata, "projectBusEventId") or event["eventId"]
+    thread_id = str(event.get("correlationId") or source_round_id or event["eventId"]).strip()
     deliveries: list[dict[str, Any]] = []
     for agent_id in list(event.get("recipients") or []):
         target_agent_id = str(agent_id or "").strip()
@@ -491,17 +495,14 @@ def _deliver_event_to_recipients(event: dict[str, Any], task: dict[str, Any]) ->
                 agent_id,
                 content=content,
                 source_agent_id=str(event.get("senderAgentId") or "").strip(),
-                source_round_id=event["eventId"],
-                thread_id=str(event.get("correlationId") or event["eventId"]),
+                source_room_id=source_room_id,
+                source_round_id=source_round_id,
+                thread_id=thread_id,
                 kind="kernel_event",
                 summary=content,
                 prompt_eligible=True,
                 created_by="kernel",
-                metadata={
-                    "kernelEventId": event["eventId"],
-                    "kernelTaskId": task["taskId"],
-                    "semanticType": str(semantic.get("semanticType") or ""),
-                },
+                metadata=inbox_metadata,
             )
             delivery.update(
                 {
@@ -530,6 +531,49 @@ def _deliver_event_to_recipients(event: dict[str, Any], task: dict[str, Any]) ->
             delivery["reason"] = f"{type(exc).__name__}: {_trim(str(exc), 240)}"
         deliveries.append(delivery)
     return deliveries
+
+
+def _kernel_inbox_metadata(event: dict[str, Any], task: dict[str, Any]) -> dict[str, Any]:
+    event_metadata = event.get("metadata") if isinstance(event.get("metadata"), dict) else {}
+    allowed_keys = (
+        "sourceSurface",
+        "sourceId",
+        "sourceSessionId",
+        "sourceRoomId",
+        "sourceMessageId",
+        "projectionRef",
+        "adapterVersion",
+        "projectBusEventId",
+        "projectBusMessageType",
+        "projectBusTargetScope",
+        "teamId",
+        "teamName",
+        "source",
+        "senderAgentId",
+        "sourceAgentId",
+    )
+    metadata = {
+        key: deepcopy(event_metadata[key])
+        for key in allowed_keys
+        if key in event_metadata and event_metadata[key] not in ("", None)
+    }
+    projection_refs = _projection_ref_values(metadata.get("projectionRef"), default_kind="projection")
+    if projection_refs:
+        metadata["projectionRefKind"] = str(projection_refs[0].get("kind") or "").strip()
+        metadata["projectionRefId"] = str(projection_refs[0].get("id") or "").strip()
+    semantic = event.get("semanticPayload") if isinstance(event.get("semanticPayload"), dict) else {}
+    metadata.update(
+        {
+            "kernelEventId": event["eventId"],
+            "kernelTaskId": task["taskId"],
+            "semanticType": str(semantic.get("semanticType") or ""),
+        }
+    )
+    return _safe_metadata(metadata, max_items=32)
+
+
+def _metadata_text(metadata: dict[str, Any], key: str) -> str:
+    return str(metadata.get(key) or "").strip()
 
 
 def _create_outcome(
