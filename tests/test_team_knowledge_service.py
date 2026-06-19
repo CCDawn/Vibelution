@@ -933,13 +933,13 @@ def test_search_filters_only_visible_formal_items(knowledge_env):
 def test_permission_audit_explains_tool_memory_and_team_boundaries(knowledge_env):
     agent_directory_service.update_agent_instance(
         knowledge_env["member"]["agentId"],
-        tool_policy={"allowedTools": ["knowledge_query_tool"]},
+        tool_policy={"allowedTools": ["unified_memory_search_tool"]},
         memory_policy={"readKnowledgeBaseIds": [knowledge_env["base"]["knowledgeBaseId"]]},
     )
 
     audit = team_knowledge_service.knowledge_permission_audit(agent_id=knowledge_env["member"]["agentId"])
 
-    assert audit["tools"]["knowledge_query_tool"]["visible"] is True
+    assert audit["tools"]["unified_memory_search_tool"]["visible"] is True
     assert audit["tools"]["knowledge_proposal_tool"]["reason"] == "available"
     row = audit["knowledgeBases"][0]
     assert row["permissions"]["read"]["allowed"] is True

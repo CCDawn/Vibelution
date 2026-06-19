@@ -1,4 +1,4 @@
-"""Unified read-only search boundary for governed formal knowledge."""
+"""Unified read-only search boundary for governed memory and formal knowledge."""
 
 from __future__ import annotations
 
@@ -18,11 +18,11 @@ MAX_LIMIT = 25
 REGEX_SCAN_LIMIT = 100
 
 
-class UnifiedKnowledgeSearchError(ValueError):
+class UnifiedMemorySearchError(ValueError):
     """Raised when a unified search request is invalid."""
 
 
-def search_unified_knowledge(
+def search_unified_memory(
     *,
     agent_id: str = "",
     query: str = "",
@@ -35,20 +35,20 @@ def search_unified_knowledge(
     limit: int = 8,
     max_context_chars: int = 1200,
 ) -> dict[str, Any]:
-    """Search formal knowledge through one stable Agent-facing result contract."""
+    """Search formal Agent/Team memory through one stable Agent-facing result contract."""
 
     normalized_agent_id = str(agent_id or "").strip()
     normalized_query = trim_lines(str(query or ""), max_lines=4).strip()
     requested_mode = str(query_mode or "auto").strip().lower() or "auto"
     if requested_mode not in SUPPORTED_QUERY_MODES:
-        raise UnifiedKnowledgeSearchError(f"Unsupported unified knowledge query mode: {query_mode}")
+        raise UnifiedMemorySearchError(f"Unsupported unified memory query mode: {query_mode}")
     effective_mode = _effective_query_mode(requested_mode, normalized_query)
     bounded_limit = _clamp_limit(limit)
     normalized_tags = [str(tag or "").strip() for tag in list(tags or []) if str(tag or "").strip()]
     normalized_allowed_base_ids = _unique_strings(allowed_knowledge_base_ids or [])
     normalized_base_id = str(knowledge_base_id or "").strip()
     if normalized_base_id and normalized_allowed_base_ids and not _policy_allows_knowledge_base(normalized_base_id, normalized_allowed_base_ids):
-        raise UnifiedKnowledgeSearchError("Knowledge base is not allowed by the active memory policy.")
+        raise UnifiedMemorySearchError("Knowledge base is not allowed by the active memory policy.")
 
     if effective_mode == "rag":
         return _rag_search(
@@ -205,11 +205,11 @@ def _regex_search(
     limit: int,
 ) -> dict[str, Any]:
     if not query:
-        raise UnifiedKnowledgeSearchError("Regex unified knowledge search requires query.")
+        raise UnifiedMemorySearchError("Regex unified memory search requires query.")
     try:
         pattern = re.compile(query, re.IGNORECASE)
     except re.error as exc:
-        raise UnifiedKnowledgeSearchError(f"Invalid regex query: {exc}") from exc
+        raise UnifiedMemorySearchError(f"Invalid regex query: {exc}") from exc
     payloads = _knowledge_search_payloads(
         agent_id=agent_id,
         query="",
