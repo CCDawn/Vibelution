@@ -1,7 +1,7 @@
 # Vibelution 项目索引
 
-**版本：** v7.2
-**日期：** 2026-06-05
+**版本：** v7.3
+**日期：** 2026-06-19
 **用途：** AI Agent 执行任务的执行参数（结构说明已与仓库同步）
 
 ---
@@ -38,6 +38,10 @@ Vibelution/
 ├── tools/                      # Agent 可见工具（约 27 个 *_tools.py 模块）
 ├── tests/                      # Python 测试套件（以 pytest 收集为准）
 ├── web/                        # React + Vite 前端工程
+├── docs/                       # 文档索引、当前计划、操作记录、归档
+│   ├── README.md               # 文档入口与归档边界
+│   ├── plans/                  # 当前或近当前计划
+│   └── archive/                # 历史计划与归档说明
 ├── workspace/                  # 本地运行态产物、evaluation 数据和日志（gitignored）
 ├── scripts/                    # launcher、web_workbench、doctor、prune_logs 等
 └── .docs/project-memory/       # 项目记忆与多页 HTML 状态面
@@ -49,7 +53,7 @@ Vibelution/
 
 | 文件 | 版本 | 更新日期 |
 |------|------|----------|
-| INDEX.md | v7.2 | 2026-06-05 |
+| INDEX.md | v7.3 | 2026-06-19 |
 | SOUL.md | v4.1 | 2026-04-30 |
 | SPEC.md | v4.5 | 2026-04-30 |
 
@@ -130,9 +134,10 @@ Vibelution/
 | `core/core_prompt/SPEC.md` | 开发流程规范 |
 | `core/core_prompt/COMMON.md` | 通用准则 |
 | `core/core_prompt/MENTAL_SOUL.md` | 心智模型说明 |
-| `workspace/prompts/DYNAMIC.md` | 动态任务描述 |
-| `workspace/prompts/IDENTITY.md` | 身份定义 |
-| `workspace/prompts/USER.md` | 用户环境 |
+| `DEVELOPMENT_STANDARD.md` | 当前开发与协作标准 |
+| `docs/README.md` | 当前文档入口与归档边界 |
+| `tests/README.md` | 测试入口与验证说明 |
+| `挑战杯/research_team_flow_design.html` | 挑战杯科研流程 HTML 入口 |
 
 ---
 
@@ -150,6 +155,7 @@ Vibelution/
 
 | 版本 | 日期 | 变更 |
 |------|------|------|
+| v7.3 | 2026-06-19 | 增加 docs 入口；将 2026-05 历史计划归档到 docs/archive/plans/2026-05；刷新 README/INDEX 文档边界 |
 | v7.2 | 2026-06-05 | 补齐缺失子目录（chatroom/code_context_graph/llm/research/workspace）；修正 agent.py 行数；重排 P0/P1 待办，新增单文件红线约束与日志 retention 项 |
 | v7.1 | 2026-05-21 | 删除重复的根目录 reset.py，Reset 入口统一到 Web 工作台白名单清理动作面 |
 | v7.0 | 2026-05-11 | 同步项目结构（orchestration、infrastructure、ui）；修正 agent.py 体量与测试说明；移除过时的 ≤500 行与手工用例计数表 |
