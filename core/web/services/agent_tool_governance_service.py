@@ -52,7 +52,7 @@ HIGH_RISK_GRANT_TOOLS = {
     "compress_context_tool",
     "image2_generate_tool",
     "knowledge_proposal_tool",
-    "knowledge_query_tool",
+    "unified_memory_search_tool",
     "open_evolution_transaction_tool",
     "plan_update_tool",
     "record_evolution_tool",

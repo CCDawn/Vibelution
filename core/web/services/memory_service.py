@@ -416,7 +416,7 @@ def get_memory_usage_contract() -> dict[str, Any]:
                 "label": "Agent formal knowledge base",
                 "owner": "Agent",
                 "storage": "workspace/agents/{agentId}/knowledge",
-                "readsThrough": ["knowledge_rag_retrieve_tool", "/api/knowledge/search", "/api/knowledge/rag/retrieve"],
+                "readsThrough": ["unified_memory_search_tool", "/api/knowledge/search", "/api/knowledge/rag/retrieve"],
                 "writesThrough": [
                     "OwnerSourceInbox",
                     "CentralSourceRegistry",
@@ -435,7 +435,7 @@ def get_memory_usage_contract() -> dict[str, Any]:
                 "label": "Team knowledge base",
                 "owner": "Team",
                 "storage": "workspace/teams/{teamId}/knowledge",
-                "readsThrough": ["knowledge_query_tool", "/api/knowledge/search", "/api/knowledge/overview"],
+                "readsThrough": ["unified_memory_search_tool", "/api/knowledge/search", "/api/knowledge/overview"],
                 "writesThrough": [
                     "OwnerSourceInbox",
                     "CentralSourceRegistry",
@@ -520,7 +520,7 @@ def get_memory_usage_contract() -> dict[str, Any]:
             "knowledgeBodiesInPromptByDefault": False,
             "explicitReadChannels": ["research", "explicit_read"],
             "agentToolBoundary": {
-                "query": "knowledge_query_tool",
+                "query": "unified_memory_search_tool",
                 "proposal": "knowledge_proposal_tool or knowledge_ingestion_tool",
                 "health": "knowledge_operations_health_tool",
                 "plan": "knowledge_governance_plan_tool",
@@ -1247,7 +1247,7 @@ def _team_knowledge_memory_section(root: Path, sub_timings: list[dict[str, Any]]
         updated_at=str(summary_payload.get("updatedAt") or ""),
         agent_visible=True,
         in_prompt=False,
-        used_by=["/api/knowledge/overview", "/agents/memory/knowledge", "knowledge_query_tool"],
+        used_by=["/api/knowledge/overview", "/agents/memory/knowledge", "unified_memory_search_tool"],
         channels=["research", "explicit_read"],
         visibility_class="agent_visible",
         summary=(

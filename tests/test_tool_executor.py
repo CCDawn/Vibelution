@@ -101,10 +101,11 @@ class TestToolExecutorInit:
 
         assert "research_knowledge_query_tool" in canonical_names
         assert "research_knowledge_query_tool" in llm_names
-        assert "knowledge_rag_retrieve_tool" in canonical_names
-        assert "knowledge_rag_retrieve_tool" in llm_names
-        assert "unified_knowledge_search_tool" in canonical_names
-        assert "unified_knowledge_search_tool" in llm_names
+        assert "unified_memory_search_tool" in canonical_names
+        assert "unified_memory_search_tool" in llm_names
+        assert "knowledge_query_tool" not in canonical_names
+        assert "knowledge_rag_retrieve_tool" not in canonical_names
+        assert "unified_knowledge_search_tool" not in canonical_names
 
     def test_conversation_log_inspect_tool_is_registered_and_llm_facing(self):
         canonical_names = {tool.name for tool in create_key_tools()}
