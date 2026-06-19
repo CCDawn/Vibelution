@@ -66,6 +66,10 @@ RESEARCH_SOURCE_ROLE_KEYS = {
     "global_primary_sources",
     "cn_primary_sources",
     "signal_quality_gate",
+    "challenge_cup_data_discovery",
+    "challenge_cup_source_acquisition",
+    "challenge_cup_content_extraction",
+    "challenge_cup_source_quality",
 }
 RESEARCH_SOURCE_ALLOWED_TOOLS = (
     "agent_message_tool",
@@ -79,6 +83,24 @@ RESEARCH_SOURCE_PREFERRED_TOOLS = (
     "web_search_tool",
     "agent_message_tool",
 )
+RESEARCH_SOURCE_ROLE_TOOL_PROFILES = {
+    "challenge_cup_data_discovery": {
+        "allowedTools": ("agent_message_tool", "research_knowledge_query_tool", "web_search_tool"),
+        "preferredTools": ("web_search_tool", "research_knowledge_query_tool", "agent_message_tool"),
+    },
+    "challenge_cup_source_acquisition": {
+        "allowedTools": ("agent_message_tool", "research_knowledge_query_tool", "web_search_tool", "web_fetch_tool"),
+        "preferredTools": ("web_search_tool", "web_fetch_tool", "research_knowledge_query_tool", "agent_message_tool"),
+    },
+    "challenge_cup_content_extraction": {
+        "allowedTools": ("agent_message_tool", "research_knowledge_query_tool", "web_fetch_tool"),
+        "preferredTools": ("web_fetch_tool", "research_knowledge_query_tool", "agent_message_tool"),
+    },
+    "challenge_cup_source_quality": {
+        "allowedTools": ("agent_message_tool", "research_knowledge_query_tool", "web_search_tool", "web_fetch_tool"),
+        "preferredTools": ("research_knowledge_query_tool", "web_fetch_tool", "web_search_tool", "agent_message_tool"),
+    },
+}
 AGENT_LLM_BINDING_SLOTS = AGENT_LLM_SLOTS
 LEGACY_AGENT_MODEL_ID_ALIASES = {
     "gpt_5_5_gpt_5_5": "relay_openai_gpt_5_5",
@@ -88,6 +110,7 @@ KNOWLEDGE_STEWARD_AGENT_ID = "agent-knowledge-steward"
 KNOWLEDGE_STEWARD_TOOL_POLICY_ID = "tool-knowledge-steward"
 KNOWLEDGE_STEWARD_MEMORY_POLICY_ID = "memory-knowledge-steward"
 KNOWLEDGE_STEWARD_ROLE_KEY = "knowledge_steward"
+KNOWLEDGE_STEWARD_PROMPT_TEMPLATE_ID = "prompt-knowledge-steward"
 KNOWLEDGE_STEWARD_FUNCTIONAL_NAME = "知识库管理员"
 KNOWLEDGE_STEWARD_DIRECT_SESSION_ID = "agent-knowledge-steward-direct"
 AGENT_CODE_PREFIX = "A"
@@ -2591,10 +2614,11 @@ def default_system_no_tool_policy(policy_id: str) -> dict[str, Any]:
     return payload
 
 
-def default_research_source_tool_policy(policy_id: str) -> dict[str, Any]:
+def default_research_source_tool_policy(policy_id: str, *, role_key: str = "") -> dict[str, Any]:
     payload = default_tool_policy(policy_id)
-    payload["allowedTools"] = list(RESEARCH_SOURCE_ALLOWED_TOOLS)
-    payload["preferredTools"] = list(RESEARCH_SOURCE_PREFERRED_TOOLS)
+    profile = RESEARCH_SOURCE_ROLE_TOOL_PROFILES.get(_normalize_role_key(role_key), {})
+    payload["allowedTools"] = list(profile.get("allowedTools") or RESEARCH_SOURCE_ALLOWED_TOOLS)
+    payload["preferredTools"] = list(profile.get("preferredTools") or RESEARCH_SOURCE_PREFERRED_TOOLS)
     payload["readScopes"] = ["private", "shared"]
     payload["writeScopes"] = []
     payload["networkAccess"] = "controlled"
@@ -2654,7 +2678,7 @@ def _ensure_fixed_role_tool_policy(state: dict[str, Any], agent: dict[str, Any])
     policy_id = f"tool-{agent_id}"
     policies = _tool_policies(state)
     if desired_kind == "research_source":
-        desired_policy = default_research_source_tool_policy(policy_id)
+        desired_policy = default_research_source_tool_policy(policy_id, role_key=str(agent.get("roleKey") or ""))
     else:
         desired_policy = default_system_no_tool_policy(policy_id)
     current_policy_id = str(agent.get("toolPolicyId") or DEFAULT_TOOL_POLICY_ID).strip() or DEFAULT_TOOL_POLICY_ID
@@ -3689,7 +3713,7 @@ def _ensure_knowledge_steward_agent(state: dict[str, Any]) -> dict[str, Any]:
             "primaryMode": "general",
             "roleKey": KNOWLEDGE_STEWARD_ROLE_KEY,
             "llmBindings": llm_bindings,
-            "promptTemplateId": "prompt-chat-default",
+            "promptTemplateId": KNOWLEDGE_STEWARD_PROMPT_TEMPLATE_ID,
             "directSessionId": KNOWLEDGE_STEWARD_DIRECT_SESSION_ID,
             "workspacePath": workspace_path,
             "toolPolicyId": KNOWLEDGE_STEWARD_TOOL_POLICY_ID,
@@ -3714,7 +3738,7 @@ def _ensure_knowledge_steward_agent(state: dict[str, Any]) -> dict[str, Any]:
         "kind": DEFAULT_AGENT_KIND,
         "primaryMode": "general",
         "roleKey": KNOWLEDGE_STEWARD_ROLE_KEY,
-        "promptTemplateId": "prompt-chat-default",
+        "promptTemplateId": KNOWLEDGE_STEWARD_PROMPT_TEMPLATE_ID,
         "directSessionId": KNOWLEDGE_STEWARD_DIRECT_SESSION_ID,
         "workspacePath": workspace_path,
         "toolPolicyId": KNOWLEDGE_STEWARD_TOOL_POLICY_ID,

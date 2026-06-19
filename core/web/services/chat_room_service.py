@@ -688,6 +688,7 @@ def reset_chat_room(room_id: str) -> dict[str, Any]:
 
 def create_chat_room(
     *,
+    room_id: str = "",
     title: str = "",
     participant_session_ids: list[str] | None = None,
     participant_agent_ids: list[str] | None = None,
@@ -700,6 +701,9 @@ def create_chat_room(
     lang = get_web_language()
     normalized_mode = _normalize_mode(mode or DEFAULT_MODE)
     normalized_purpose = _normalize_purpose(purpose or DEFAULT_PURPOSE)
+    requested_room_id = str(room_id or "").strip()
+    if requested_room_id and (_safe_fragment(requested_room_id) != requested_room_id or not requested_room_id.startswith("room-")):
+        raise ChatRoomValidationError("Invalid chat room id.")
     _require_ready_mode(normalized_mode)
     with _CHAT_ROOM_LOCK:
         state = _store().load()
@@ -708,7 +712,12 @@ def create_chat_room(
             for item in state.get("rooms") or []
             if isinstance(item, dict)
         }
-        room_id = _new_id("room", existing_room_ids)
+        if requested_room_id:
+            if requested_room_id in existing_room_ids:
+                raise ChatRoomValidationError("Chat room id already exists.")
+            room_id = requested_room_id
+        else:
+            room_id = _new_id("room", existing_room_ids)
         participants = (
             _resolve_agent_participants(participant_agent_ids)
             if participant_agent_ids
