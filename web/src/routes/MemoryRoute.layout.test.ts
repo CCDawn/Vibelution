@@ -119,6 +119,21 @@ describe("MemoryRoute layout contract", () => {
     expect(routeSource).toContain('forcedView === "cleanup"');
   });
 
+  it("wires external workspace migration and hard-delete cleanup into the cleanup view", () => {
+    expect(routeSource).toContain('["storage", "workspace-migration", "status"]');
+    expect(routeSource).toContain('fetchJson<WorkspaceMigrationStatus>("/api/storage/workspace-migration/status")');
+    expect(routeSource).toContain('fetchJson<WorkspaceMigrationReport>("/api/storage/workspace-migration/preview"');
+    expect(routeSource).toContain('fetchJson<WorkspaceMigrationReport>("/api/storage/workspace-migration/apply"');
+    expect(routeSource).toContain('fetchJson<WorkspaceMigrationReport>("/api/storage/workspace-migration/verify"');
+    expect(routeSource).toContain('fetchJson<LegacyWorkspaceCleanupPreview>("/api/storage/legacy-workspace/cleanup-preview"');
+    expect(routeSource).toContain('fetchJson<LegacyWorkspaceCleanupPreview>("/api/storage/legacy-workspace/cleanup-execute"');
+    expect(routeSource).toContain("硬删除旧 workspace");
+    expect(routeSource).toContain("storageMigrationFeedback");
+    expect(routeSource).toContain("legacyWorkspaceCleanupConfirmationText");
+    expect(routeSource).toContain("copy.storageLegacyCleanupExecute");
+    expect(memoryCssSource).toContain(".buttonRow");
+  });
+
   it("keeps dense Memory workspaces bounded with internal scrolling", () => {
     expect(memoryCssSource).toContain("grid-template-rows: minmax(0, 1fr)");
     expect(memoryCssSource).toContain("grid-template-columns: minmax(210px, 260px) minmax(320px, 0.95fr) minmax(390px, 1.08fr)");

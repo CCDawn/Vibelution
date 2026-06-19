@@ -3918,6 +3918,14 @@
   font-size: 0.74rem;
 }
 
+.buttonRow {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+  min-width: 0;
+}
+
 .inlineActionButton,
 .cleanupExecuteButton {
   display: inline-flex;
