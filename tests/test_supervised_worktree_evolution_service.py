@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from core.infrastructure import developer_sandbox
 from core.web.services import supervised_worktree_evolution_service as service
 
 pytestmark = pytest.mark.slow
@@ -32,23 +33,25 @@ def _init_repo(repo: Path) -> None:
 
 
 def _write_bundle(project_root: Path, name: str = "closed_loop_v1") -> None:
-    bundle_path = project_root / "workspace" / "evaluation" / "bundles" / f"{name}.json"
-    bundle_path.parent.mkdir(parents=True, exist_ok=True)
-    bundle_path.write_text(
-        json.dumps(
-            {
-                "bundle_name": name,
-                "benchmark": "unit",
-                "cases": [
-                    {"case_id": "one", "prompt": "case one"},
-                    {"case_id": "two", "prompt": "case two"},
-                ],
-            },
-            ensure_ascii=False,
-            indent=2,
-        ),
-        encoding="utf-8",
+    payload = json.dumps(
+        {
+            "bundle_name": name,
+            "benchmark": "unit",
+            "cases": [
+                {"case_id": "one", "prompt": "case one"},
+                {"case_id": "two", "prompt": "case two"},
+            ],
+        },
+        ensure_ascii=False,
+        indent=2,
     )
+    bundle_paths = {
+        project_root / "workspace" / "evaluation" / "bundles" / f"{name}.json",
+        developer_sandbox.seeded_sandbox_workspace_path(project_root, "evaluation", "bundles", f"{name}.json"),
+    }
+    for bundle_path in bundle_paths:
+        bundle_path.parent.mkdir(parents=True, exist_ok=True)
+        bundle_path.write_text(payload, encoding="utf-8")
 
 
 def _fake_evaluator(_: Path, bundle_name: str, role: str, __: dict) -> dict:

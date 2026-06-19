@@ -24,6 +24,7 @@ def _enable_sandbox(tmp_path, monkeypatch):
     monkeypatch.setenv("VIBELUTION_DATA_HOME", str(data_home))
     monkeypatch.setattr(developer_sandbox, "CONFIG_PATH", config_path)
     monkeypatch.setattr(developer_sandbox, "PROJECT_ROOT", project_root)
+    monkeypatch.setattr(developer_sandbox, "resolve_workspace_home", lambda *args, **kwargs: data_home / "workspace")
     status = developer_sandbox.get_developer_mode_status(config_path=config_path, project_root=project_root)
     enabled = developer_sandbox.update_developer_mode_status(
         True,
@@ -75,6 +76,7 @@ def test_high_roi_state_paths_stay_formal_when_developer_mode_is_off(tmp_path, m
     monkeypatch.setenv("VIBELUTION_DATA_HOME", str(data_home))
     monkeypatch.setattr(developer_sandbox, "CONFIG_PATH", config_path)
     monkeypatch.setattr(developer_sandbox, "PROJECT_ROOT", project_root)
+    monkeypatch.setattr(developer_sandbox, "resolve_workspace_home", lambda *args, **kwargs: data_home / "workspace")
     monkeypatch.setattr(prompt_manager, "_resolve_project_root", lambda: project_root)
     monkeypatch.setattr(computer_use_service, "PROJECT_ROOT", project_root)
     monkeypatch.setattr(project_agent_bus_service, "PROJECT_ROOT", project_root)

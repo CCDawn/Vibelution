@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pytest
 
+from tests import conftest as test_conftest
 from tests import select_tests
 
 
@@ -12,6 +13,36 @@ def test_matrix_loads_with_builtin_subset_parser():
     assert matrix["version"] == 1
     assert matrix["always"]["commands"] == ["git diff --check"]
     assert any(rule["id"] == "web-session-chat" for rule in matrix["rules"])
+
+
+def test_runtime_manager_isolation_hint_skips_pure_test_files(tmp_path: Path):
+    pure_test = tmp_path / "test_pure.py"
+    pure_test.write_text("def test_value():\n    assert 1 == 1\n", encoding="utf-8")
+    web_test = tmp_path / "test_web.py"
+    web_test.write_text("from core.web.app import create_app\n", encoding="utf-8")
+    team_test = tmp_path / "test_team.py"
+    team_test.write_text("from core.web.services import team_workflow_orchestration_service\n", encoding="utf-8")
+    chat_state_test = tmp_path / "test_chat_state.py"
+    chat_state_test.write_text("from core.ui.chat_state import load_chat_state\n", encoding="utf-8")
+
+    test_conftest._test_file_needs_runtime_manager_isolation.cache_clear()
+
+    assert test_conftest._test_file_needs_runtime_manager_isolation(str(pure_test)) is False
+    assert test_conftest._test_file_needs_runtime_manager_isolation(str(web_test)) is True
+    assert test_conftest._test_file_needs_runtime_manager_isolation(str(team_test)) is True
+    assert test_conftest._test_file_needs_runtime_manager_isolation(str(chat_state_test)) is True
+
+
+def test_singleton_reset_hint_skips_pure_test_files(tmp_path: Path):
+    pure_test = tmp_path / "test_pure.py"
+    pure_test.write_text("def test_value():\n    assert 1 == 1\n", encoding="utf-8")
+    singleton_test = tmp_path / "test_singleton.py"
+    singleton_test.write_text("from core.infrastructure.state import get_state\n", encoding="utf-8")
+
+    test_conftest._test_file_needs_singleton_reset.cache_clear()
+
+    assert test_conftest._test_file_needs_singleton_reset(str(pure_test)) is False
+    assert test_conftest._test_file_needs_singleton_reset(str(singleton_test)) is True
 
 
 def test_selector_matches_session_service_to_chat_validation_commands():
@@ -55,6 +86,37 @@ def test_selector_matches_web_config_routes_to_config_validation_commands():
     assert "tests/test_web_config_routes.py" in result["matchedRules"][0]["matchedFiles"]
     assert any("tests/test_web_config_routes.py" in command for command in result["commands"])
     assert not any("tests/test_web_app.py" in command for command in result["commands"])
+
+
+def test_selector_matches_agent_directory_services_to_focused_commands():
+    result = select_tests.select_tests(
+        [
+            "core/web/services/agent_directory_service.py",
+            "core/web/services/model_reference_service.py",
+        ],
+        select_tests.load_matrix(),
+    )
+
+    assert {rule["id"] for rule in result["matchedRules"]} == {"agent-directory-config"}
+    assert any("tests/test_agent_config_workspace_service.py" in command for command in result["commands"])
+    assert any("tests/test_model_reference_service.py" in command for command in result["commands"])
+    assert not any("tests/ --collect-only" in command for command in result["commands"])
+
+
+def test_selector_matches_memory_cleanup_and_tool_registry_services():
+    result = select_tests.select_tests(
+        [
+            "core/web/services/memory_cleanup_service.py",
+            "core/web/services/tool_registry_service.py",
+        ],
+        select_tests.load_matrix(),
+    )
+
+    rule_ids = {rule["id"] for rule in result["matchedRules"]}
+    assert rule_ids == {"memory-cleanup", "tool-registry"}
+    assert any("tests/test_memory_cleanup_service.py" in command for command in result["commands"])
+    assert any("tests/test_tool_registry_service.py" in command for command in result["commands"])
+    assert len(result["commands"]) == len(set(result["commands"]))
 
 
 def test_selector_matches_web_runtime_routes_to_runtime_validation_commands():
