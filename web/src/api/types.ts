@@ -4138,6 +4138,8 @@ export type TeamWorkflowCandidateGraphBuildPayload = {
   candidateGraph: TeamWorkflowCandidate;
   graph: TeamWorkflowCandidateGraphPayload;
   workflow: TeamWorkflowOrchestration;
+  reusedCandidateGraph?: boolean;
+  ingestionFingerprint?: string;
 };
 
 export type TeamWorkflowKnowledgeIngestionStage = {
@@ -4240,6 +4242,9 @@ export type TeamWorkflowKnowledgeCollectionIngestionPayload = {
   knowledgeSubmission: Record<string, unknown> | null;
   knowledgeReview: Record<string, unknown> | null;
   knowledgeStewardActivation: Record<string, unknown> | null;
+  reusedCandidateGraph?: boolean;
+  reusedStewardPack?: boolean;
+  ingestionFingerprint?: string;
   knowledgeBase: {
     knowledgeBaseId: string;
     [key: string]: unknown;
@@ -4254,6 +4259,9 @@ export type TeamWorkflowKnowledgeCollectionIngestionPayload = {
     knowledgeBaseId?: string;
     knowledgeStewardInboxMessageId?: string;
     knowledgeStewardActivationStatus?: string;
+    reusedCandidateGraph?: boolean;
+    reusedStewardPack?: boolean;
+    ingestionFingerprint?: string;
     formalKnowledgeItemCount: number;
     nextAction: string;
   };

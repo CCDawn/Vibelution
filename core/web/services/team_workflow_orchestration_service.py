@@ -387,6 +387,19 @@ def import_data_record_as_source_candidate(team_id: str, run_id: str, record_id:
                 "validation": existing.get("validation") if isinstance(existing.get("validation"), dict) else validate_candidate_record(existing),
                 "workflow": _workflow_to_api(normalized_team_id, workflow, candidate_store),
             }
+        source_identity_key = _source_collection_record_identity_key(record)
+        existing_by_identity = _find_source_candidate_by_identity_key(candidate_store, source_identity_key)
+        if existing_by_identity is not None:
+            return {
+                "created": False,
+                "duplicate": True,
+                "duplicateReason": "source_identity_key",
+                "duplicateOfCandidateId": str(existing_by_identity.get("candidateId") or ""),
+                "candidate": existing_by_identity,
+                "dataRecordRef": _data_record_ref(run, record),
+                "validation": existing_by_identity.get("validation") if isinstance(existing_by_identity.get("validation"), dict) else validate_candidate_record(existing_by_identity),
+                "workflow": _workflow_to_api(normalized_team_id, workflow, candidate_store),
+            }
     candidate_payload = _source_candidate_payload_from_data_record(run, record, import_payload)
     response = register_candidate_source(normalized_team_id, candidate_payload)
     candidate = response["candidate"]
@@ -1032,7 +1045,9 @@ def _execute_source_collection_search_impl(team_id: str, run_id: str, payload: d
     if run_team_id and run_team_id != normalized_team_id:
         raise TeamWorkflowOrchestrationError("Data processing run does not belong to this team.")
     assignments = [item for item in list(assignments_payload.get("assignments") or []) if isinstance(item, dict)]
-    existing_query_ids = _source_collection_existing_query_ids(list(records_payload.get("records") or []))
+    existing_records = [item for item in list(records_payload.get("records") or []) if isinstance(item, dict)]
+    existing_query_ids = _source_collection_existing_query_ids(existing_records)
+    existing_identity_records = _source_collection_existing_identity_records(existing_records)
     execution_events: list[dict[str, Any]] = []
     outputs: list[dict[str, Any]] = []
     created_records: list[dict[str, Any]] = []
@@ -1042,6 +1057,8 @@ def _execute_source_collection_search_impl(team_id: str, run_id: str, payload: d
     skipped_query_count = 0
     failed_query_count = 0
     result_count = 0
+    skipped_duplicate_count = 0
+    duplicate_source_keys: list[str] = []
 
     for assignment in assignments:
         if executed_query_count >= max_queries:
@@ -1114,17 +1131,37 @@ def _execute_source_collection_search_impl(team_id: str, run_id: str, payload: d
                 )
             )
             for result in search_results:
-                assignment_records.append(
-                    _source_collection_record_from_search_result(
-                        normalized_team_id,
-                        run,
-                        assignment,
-                        query,
-                        result,
-                        provider=provider,
-                        search_url=_trim_text(search_response.get("searchUrl"), max_length=1000),
-                    )
+                candidate_record = _source_collection_record_from_search_result(
+                    normalized_team_id,
+                    run,
+                    assignment,
+                    query,
+                    result,
+                    provider=provider,
+                    search_url=_trim_text(search_response.get("searchUrl"), max_length=1000),
                 )
+                source_identity_key = _source_collection_record_identity_key(candidate_record)
+                duplicate_record = existing_identity_records.get(source_identity_key) if source_identity_key else None
+                if duplicate_record is not None:
+                    skipped_duplicate_count += 1
+                    if source_identity_key:
+                        duplicate_source_keys.append(source_identity_key)
+                    execution_events.append(
+                        _source_collection_execution_event(
+                            "search.duplicate_skipped",
+                            assignment=assignment,
+                            query=query,
+                            status="completed",
+                            title=f"Skipped duplicate source: {candidate_record.get('title') or candidate_record.get('sourceRef')}",
+                            summary="The search result matched an existing DataRecord source identity and was not written again.",
+                            refs=[source_identity_key, duplicate_record.get("recordId", "")],
+                            raw_location=_trim_text(candidate_record.get("rawLocation") or candidate_record.get("sourceRef"), max_length=1000),
+                        )
+                    )
+                    continue
+                if source_identity_key:
+                    existing_identity_records[source_identity_key] = candidate_record
+                assignment_records.append(candidate_record)
         if assignment_records:
             assignment_query_ids = {
                 _trim_text(item.get("queryId"), max_length=160)
@@ -1186,20 +1223,45 @@ def _execute_source_collection_search_impl(team_id: str, run_id: str, payload: d
                         },
                     },
                 )
-                imported.append(import_response)
-                execution_events.append(
-                    _source_collection_execution_event(
-                        "storage.source_manifest_imported",
-                        assignment=assignment,
-                        query=trace,
-                        status="completed",
-                        title=f"Imported source_manifest: {import_response['candidate'].get('title')}",
-                        summary="The DataRecord was imported as a source_manifest candidate, still outside formal Team Knowledge/RAG/official graph.",
-                        refs=[import_response["candidate"].get("candidateId", ""), str(record.get("recordId") or "")],
-                        storage_refs=[storage_artifacts["candidatesPath"], storage_artifacts["candidateStorePath"]],
+                if import_response.get("duplicate"):
+                    skipped_duplicate_count += 1
+                    candidate = import_response.get("candidate") if isinstance(import_response.get("candidate"), dict) else {}
+                    candidate_metadata = candidate.get("metadata") if isinstance(candidate.get("metadata"), dict) else {}
+                    duplicate_key = _trim_text(candidate_metadata.get("sourceIdentityKey"), max_length=200)
+                    if duplicate_key:
+                        duplicate_source_keys.append(duplicate_key)
+                    execution_events.append(
+                        _source_collection_execution_event(
+                            "storage.source_manifest_duplicate_skipped",
+                            assignment=assignment,
+                            query=trace,
+                            status="completed",
+                            title=f"Skipped duplicate source_manifest: {candidate.get('title') or candidate.get('candidateId')}",
+                            summary="The DataRecord matched an existing source_manifest identity and was not imported again.",
+                            refs=[candidate.get("candidateId", ""), str(record.get("recordId") or "")],
+                            storage_refs=[storage_artifacts["candidatesPath"], storage_artifacts["candidateStorePath"]],
+                        )
                     )
-                )
+                else:
+                    imported.append(import_response)
+                    execution_events.append(
+                        _source_collection_execution_event(
+                            "storage.source_manifest_imported",
+                            assignment=assignment,
+                            query=trace,
+                            status="completed",
+                            title=f"Imported source_manifest: {import_response['candidate'].get('title')}",
+                            summary="The DataRecord was imported as a source_manifest candidate, still outside formal Team Knowledge/RAG/official graph.",
+                            refs=[import_response["candidate"].get("candidateId", ""), str(record.get("recordId") or "")],
+                            storage_refs=[storage_artifacts["candidatesPath"], storage_artifacts["candidateStorePath"]],
+                        )
+                    )
         elif attempted_query_ids:
+            no_record_notes = (
+                "Automated metadata search only found duplicate sources already present in this run."
+                if skipped_duplicate_count
+                else "Automated metadata search returned no importable records for this assignment."
+            )
             try:
                 output_response = data_processing_service.record_collection_output(
                     normalized_run_id,
@@ -1207,9 +1269,13 @@ def _execute_source_collection_search_impl(team_id: str, run_id: str, payload: d
                     {
                         "status": "returned",
                         "records": [],
-                        "notes": "Automated metadata search returned no importable records for this assignment.",
+                        "notes": no_record_notes,
                         "blockingIssues": ["no_importable_search_result"],
-                        "qualitySignals": {"searchProvider": provider, "metadataOnlyDownload": True},
+                        "qualitySignals": {
+                            "searchProvider": provider,
+                            "metadataOnlyDownload": True,
+                            "skippedDuplicateCount": skipped_duplicate_count,
+                        },
                     },
                 )
             except data_processing_service.DataProcessingError as exc:
@@ -1218,7 +1284,17 @@ def _execute_source_collection_search_impl(team_id: str, run_id: str, payload: d
 
     final_run = data_processing_service.get_processing_run(normalized_run_id)
     final_assignments = data_processing_service.list_collection_assignments(normalized_run_id)["assignments"]
+    final_records_payload = data_processing_service.list_records(normalized_run_id)
     final_status = data_processing_service.get_processing_status(normalized_run_id)
+    final_existing_query_ids = _source_collection_existing_query_ids(list(final_records_payload.get("records") or []))
+    next_runnable_query_ids = _source_collection_next_runnable_query_ids(
+        [item for item in list(final_assignments or []) if isinstance(item, dict)],
+        final_existing_query_ids,
+        force=force,
+        target_assignment_ids=target_assignment_ids,
+        target_agent_role=target_agent_role,
+    )
+    remaining_query_count = len(next_runnable_query_ids)
     source_collection_summary = _source_collection_assignment_stage_summary(
         [item for item in list(final_assignments or []) if isinstance(item, dict)]
     )
@@ -1242,11 +1318,16 @@ def _execute_source_collection_search_impl(team_id: str, run_id: str, payload: d
             "skippedQueryCount": skipped_query_count,
             "failedQueryCount": failed_query_count,
             "recordCount": len(created_records),
+            "createdUniqueRecordCount": len(created_records),
             "importedCount": len(imported),
+            "skippedDuplicateCount": skipped_duplicate_count,
+            "duplicateSourceKeys": duplicate_source_keys[:20],
+            "remainingQueryCount": remaining_query_count,
+            "hasMore": remaining_query_count > 0,
             "sourceCollectionRunDirectory": storage_artifacts["runDirectory"],
         },
     )
-    status_label = "executed" if created_records else ("partial" if executed_query_count or failed_query_count else "no_open_assignment")
+    status_label = "executed" if created_records else ("duplicates_skipped" if skipped_duplicate_count else ("partial" if executed_query_count or failed_query_count else "no_open_assignment"))
     return {
         "schemaVersion": SCHEMA_VERSION,
         "teamId": normalized_team_id,
@@ -1258,8 +1339,14 @@ def _execute_source_collection_search_impl(team_id: str, run_id: str, payload: d
         "failedQueryCount": failed_query_count,
         "resultCount": result_count,
         "recordCount": len(created_records),
+        "createdUniqueRecordCount": len(created_records),
         "outputCount": len(outputs),
         "importedCount": len(imported),
+        "skippedDuplicateCount": skipped_duplicate_count,
+        "duplicateSourceKeys": duplicate_source_keys[:20],
+        "remainingQueryCount": remaining_query_count,
+        "nextRunnableQueryIds": next_runnable_query_ids[:12],
+        "hasMore": remaining_query_count > 0,
         "run": final_run,
         "runStatus": final_status,
         "sourceCollectionSummary": source_collection_summary,
@@ -2795,7 +2882,14 @@ def get_knowledge_ingestion_status(team_id: str) -> dict[str, Any]:
             for item in candidates
             if str(item.get("candidateType") or "") != "candidate_graph" and _candidate_is_archived(item)
         ]
-        candidate_graph = _build_candidate_graph_payload(normalized_team_id, workflow["workflowId"], active_graph_candidates)
+        graph_candidates = [
+            item
+            for item in candidates
+            if str(item.get("candidateType") or "") == "candidate_graph" and not _candidate_is_archived(item)
+        ]
+        latest_graph = _latest_candidate_record(graph_candidates)
+        latest_graph_metadata = latest_graph.get("metadata") if isinstance((latest_graph or {}).get("metadata"), dict) else {}
+        candidate_graph = latest_graph_metadata.get("graph") if isinstance(latest_graph_metadata.get("graph"), dict) else _build_candidate_graph_payload(normalized_team_id, workflow["workflowId"], active_graph_candidates)
         candidate_graph["summary"]["archivedCandidateCount"] = len(archived_candidates)
 
     try:
@@ -3070,6 +3164,18 @@ def build_candidate_graph(team_id: str, payload: dict[str, Any] | None = None) -
     payload = payload if isinstance(payload, dict) else {}
     curation_mode = _trim_text(payload.get("curationMode"), max_length=80) or "all_active"
     created_by_agent = _trim_text(payload.get("createdByAgent"), max_length=160) or "Candidate Graph Preview Agent"
+    source_quality_agent_id = _trim_text(payload.get("sourceQualityAgentId"), max_length=160) or "Source Quality Assessment Agent"
+    force_rebuild = bool(payload.get("forceRebuild"))
+    if bool(payload.get("forceReview")):
+        assess_source_quality_batch(
+            normalized_team_id,
+            {
+                "assessedByAgent": source_quality_agent_id,
+                "maxCandidates": _normalize_int(payload.get("maxCandidates"), default=80, minimum=1, maximum=200),
+                "force": True,
+                "notes": "Candidate Graph Agent requested source review before graph generation.",
+            },
+        )
     now = utc_now_iso()
     with _WORKFLOW_LOCK:
         workflow = _load_or_create_workflow(normalized_team_id)
@@ -3077,7 +3183,7 @@ def build_candidate_graph(team_id: str, payload: dict[str, Any] | None = None) -
         all_candidates = [
             item
             for item in list(candidate_store.get("candidates") or [])
-            if isinstance(item, dict) and str(item.get("candidateType") or "") != "candidate_graph"
+            if isinstance(item, dict) and _candidate_allowed_for_agent_graph_input(item)
         ]
         archived_candidates = [item for item in all_candidates if _candidate_is_archived(item)]
         active_candidates = [item for item in all_candidates if not _candidate_is_archived(item)]
@@ -3087,6 +3193,31 @@ def build_candidate_graph(team_id: str, payload: dict[str, Any] | None = None) -
             filtered_candidates = [item for item in active_candidates if item not in candidates]
         else:
             candidates = active_candidates
+        graph_fingerprint = _knowledge_collection_fingerprint(
+            normalized_team_id,
+            candidates,
+            purpose="candidate_graph",
+            curation_mode=curation_mode,
+        )
+        if not force_rebuild:
+            reusable_graph = _find_reusable_candidate_graph(candidate_store, graph_fingerprint)
+            if reusable_graph is not None:
+                metadata = reusable_graph.get("metadata") if isinstance(reusable_graph.get("metadata"), dict) else {}
+                graph = metadata.get("graph") if isinstance(metadata.get("graph"), dict) else _build_candidate_graph_payload(normalized_team_id, workflow["workflowId"], candidates)
+                graph.setdefault("summary", {})
+                graph["summary"]["archivedCandidateCount"] = len(archived_candidates)
+                graph["summary"]["curationMode"] = curation_mode
+                graph["summary"]["inputCandidateCount"] = len(active_candidates)
+                graph["summary"]["filteredCandidateCount"] = len(filtered_candidates)
+                graph["summary"]["createdByAgent"] = created_by_agent
+                graph["summary"]["stageAgentRole"] = "candidate_graph"
+                return {
+                    "candidateGraph": reusable_graph,
+                    "graph": graph,
+                    "workflow": _workflow_to_api(normalized_team_id, workflow, candidate_store),
+                    "reusedCandidateGraph": True,
+                    "ingestionFingerprint": graph_fingerprint,
+                }
         graph = _build_candidate_graph_payload(normalized_team_id, workflow["workflowId"], candidates)
         graph["summary"]["archivedCandidateCount"] = len(archived_candidates)
         graph["summary"]["curationMode"] = curation_mode
@@ -3094,6 +3225,7 @@ def build_candidate_graph(team_id: str, payload: dict[str, Any] | None = None) -
         graph["summary"]["filteredCandidateCount"] = len(filtered_candidates)
         graph["summary"]["createdByAgent"] = created_by_agent
         graph["summary"]["stageAgentRole"] = "candidate_graph"
+        graph["summary"]["ingestionFingerprint"] = graph_fingerprint
         agent_process = [
             {
                 "eventType": "candidate_graph.input_selected",
@@ -3144,6 +3276,11 @@ def build_candidate_graph(team_id: str, payload: dict[str, Any] | None = None) -
                 "missingLinkCount": len(graph["missingLinks"]),
                 "unreviewedNodeCount": len(graph["unreviewedNodes"]),
                 "officialBoundary": graph["officialBoundary"],
+                "knowledgeCollectionIngestion": {
+                    "fingerprint": graph_fingerprint,
+                    "purpose": "candidate_graph",
+                    "inputCandidateIds": [str(item.get("candidateId") or "") for item in candidates],
+                },
             },
             "createdByAgent": created_by_agent,
             "currentWorkflowNode": "candidate_graph",
@@ -3178,12 +3315,15 @@ def build_candidate_graph(team_id: str, payload: dict[str, Any] | None = None) -
             "filteredCandidateCount": len(filtered_candidates),
             "curationMode": curation_mode,
             "createdByAgent": created_by_agent,
+            "ingestionFingerprint": graph_fingerprint,
         },
     )
     return {
         "candidateGraph": record,
         "graph": graph,
         "workflow": _workflow_to_api(normalized_team_id, workflow, candidate_store),
+        "reusedCandidateGraph": False,
+        "ingestionFingerprint": graph_fingerprint,
     }
 
 
@@ -3196,6 +3336,7 @@ def run_knowledge_ingestion_precheck(team_id: str, payload: dict[str, Any] | Non
     steward_agent_id = _trim_text(payload.get("stewardAgentId"), max_length=160) or "Knowledge Steward Agent"
     target_domain = _trim_text(payload.get("targetDomain"), max_length=240) or "神经机制启发神经网络算法"
     max_candidates = _normalize_int(payload.get("maxCandidates"), default=32, minimum=1, maximum=200)
+    force_rebuild = bool(payload.get("forceRebuild"))
     with _WORKFLOW_LOCK:
         workflow = _load_or_create_workflow(normalized_team_id)
         candidate_store = _load_candidate_store(normalized_team_id)
@@ -3219,6 +3360,40 @@ def run_knowledge_ingestion_precheck(team_id: str, payload: dict[str, Any] | Non
         )[:max_candidates]
         workflow_id = str(workflow.get("workflowId") or "")
         filtered_candidate_count = max(0, len(active_candidates) - len(selected_candidates))
+        precheck_fingerprint = _knowledge_collection_fingerprint(
+            normalized_team_id,
+            selected_candidates,
+            purpose="steward_pack",
+            target_domain=target_domain,
+            steward_agent_id=steward_agent_id,
+            candidate_graph_id=str((latest_graph or {}).get("candidateId") or ""),
+        )
+        if not force_rebuild:
+            reusable_pack = _find_reusable_steward_pack(candidate_store, precheck_fingerprint)
+            if reusable_pack is not None:
+                status_payload = get_knowledge_ingestion_status(normalized_team_id)
+                return {
+                    "candidate": reusable_pack,
+                    "validation": validate_candidate_record(reusable_pack),
+                    "precheck": {
+                        "status": str(reusable_pack.get("currentState") or "steward_pack_draft"),
+                        "generatedByAgent": steward_agent_id,
+                        "selectedCandidateCount": len(selected_candidates),
+                        "filteredCandidateCount": filtered_candidate_count,
+                        "candidateIds": [str(item.get("candidateId") or "") for item in selected_candidates],
+                        "candidateGraphId": str((latest_graph or {}).get("candidateId") or ""),
+                        "officialBoundary": {
+                            "writesOfficialKnowledge": False,
+                            "writesOfficialRag": False,
+                            "writesOfficialGraph": False,
+                            "requiresReviewBeforeOfficialSync": True,
+                        },
+                    },
+                    "status": status_payload,
+                    "workflow": _workflow_to_api(normalized_team_id, workflow, candidate_store),
+                    "reusedStewardPack": True,
+                    "ingestionFingerprint": precheck_fingerprint,
+                }
     if not selected_candidates:
         raise TeamWorkflowOrchestrationError("No agent-approved candidates are ready for knowledge ingestion precheck.")
 
@@ -3229,6 +3404,11 @@ def run_knowledge_ingestion_precheck(team_id: str, payload: dict[str, Any] | Non
         latest_graph,
         target_domain=target_domain,
     )
+    output["knowledgeCollectionIngestion"] = {
+        "fingerprint": precheck_fingerprint,
+        "purpose": "steward_pack",
+        "candidateGraphId": str((latest_graph or {}).get("candidateId") or ""),
+    }
     output["agentProcess"] = [
         {
             "eventType": "knowledge_ingestion.precheck_input_selected",
@@ -3287,6 +3467,8 @@ def run_knowledge_ingestion_precheck(team_id: str, payload: dict[str, Any] | Non
         },
         "status": status_payload,
         "workflow": record_response["workflow"],
+        "reusedStewardPack": False,
+        "ingestionFingerprint": precheck_fingerprint,
     }
 
 
@@ -4260,6 +4442,7 @@ def run_knowledge_collection_ingestion(team_id: str, payload: dict[str, Any] | N
     target_domain = _trim_text(payload.get("targetDomain"), max_length=240) or "神经机制启发神经网络算法"
     max_candidates = _normalize_int(payload.get("maxCandidates"), default=80, minimum=1, maximum=200)
     force_review = bool(payload.get("forceReview"))
+    force_rebuild = bool(payload.get("forceRebuild"))
     auto_create_knowledge_base = bool(payload.get("autoCreateKnowledgeBase", True))
     auto_submit = bool(payload.get("autoSubmit", False))
     auto_review_source = bool(payload.get("autoReviewSource", False))
@@ -4350,7 +4533,9 @@ def run_knowledge_collection_ingestion(team_id: str, payload: dict[str, Any] | N
         {
             "title": "资料入库候选关系快照",
             "createdByAgent": candidate_graph_agent_id,
+            "sourceQualityAgentId": source_quality_agent_id,
             "curationMode": "agent_approved_only",
+            "forceRebuild": force_rebuild,
         },
     )
     graph_summary = candidate_graph["graph"]["summary"]
@@ -4370,6 +4555,7 @@ def run_knowledge_collection_ingestion(team_id: str, payload: dict[str, Any] | N
             "stewardAgentId": steward_agent_id,
             "targetDomain": target_domain,
             "maxCandidates": max_candidates,
+            "forceRebuild": force_rebuild,
         },
     )
     steward_candidate_id = str(precheck["candidate"].get("candidateId") or "")
@@ -4543,6 +4729,9 @@ def run_knowledge_collection_ingestion(team_id: str, payload: dict[str, Any] | N
             "wakeStewardAgent": wake_steward_agent,
             "knowledgeStewardActivationStatus": activation_status,
             "knowledgeStewardInboxMessageId": str((knowledge_steward_activation or {}).get("messageId") or ""),
+            "reusedCandidateGraph": bool(candidate_graph.get("reusedCandidateGraph")),
+            "reusedStewardPack": bool(precheck.get("reusedStewardPack")),
+            "ingestionFingerprint": str(precheck.get("ingestionFingerprint") or candidate_graph.get("ingestionFingerprint") or ""),
         },
     )
     return {
@@ -4557,6 +4746,9 @@ def run_knowledge_collection_ingestion(team_id: str, payload: dict[str, Any] | N
         "knowledgeSubmission": knowledge_submission,
         "knowledgeReview": knowledge_review,
         "knowledgeStewardActivation": knowledge_steward_activation,
+        "reusedCandidateGraph": bool(candidate_graph.get("reusedCandidateGraph")),
+        "reusedStewardPack": bool(precheck.get("reusedStewardPack")),
+        "ingestionFingerprint": str(precheck.get("ingestionFingerprint") or candidate_graph.get("ingestionFingerprint") or ""),
         "knowledgeBase": knowledge_base or {"knowledgeBaseId": knowledge_base_id},
         "statusSnapshot": status_payload,
         "summary": {
@@ -4569,6 +4761,9 @@ def run_knowledge_collection_ingestion(team_id: str, payload: dict[str, Any] | N
             "formalKnowledgeItemCount": status_payload["summary"]["formalKnowledgeItemCount"],
             "knowledgeStewardInboxMessageId": str((knowledge_steward_activation or {}).get("messageId") or ""),
             "knowledgeStewardActivationStatus": activation_status,
+            "reusedCandidateGraph": bool(candidate_graph.get("reusedCandidateGraph")),
+            "reusedStewardPack": bool(precheck.get("reusedStewardPack")),
+            "ingestionFingerprint": str(precheck.get("ingestionFingerprint") or candidate_graph.get("ingestionFingerprint") or ""),
             "nextAction": "进入实验规划" if knowledge_review else ("等待知识库 Agent 最终入库" if knowledge_steward_activation else "检查资料入库门禁"),
         },
         "workflow": (
@@ -4834,6 +5029,8 @@ def _candidate_graph_edge(source_id: str, target_id: str, relation: str) -> dict
 
 
 def _candidate_ready_for_agent_graph(candidate: dict[str, Any]) -> bool:
+    if not _candidate_allowed_for_agent_graph_input(candidate):
+        return False
     candidate_type = str(candidate.get("candidateType") or "")
     current_state = str(candidate.get("currentState") or "")
     quality_status = str(candidate.get("qualityStatus") or "")
@@ -4847,6 +5044,79 @@ def _candidate_ready_for_agent_graph(candidate: dict[str, Any]) -> bool:
         return False
     validation = validate_candidate_record(candidate)
     return bool(validation.get("valid"))
+
+
+def _candidate_allowed_for_agent_graph_input(candidate: dict[str, Any]) -> bool:
+    candidate_type = str(candidate.get("candidateType") or "")
+    if candidate_type == "candidate_graph":
+        return False
+    metadata = candidate.get("metadata") if isinstance(candidate.get("metadata"), dict) else {}
+    if str(candidate.get("currentWorkflowNode") or "") == "steward_ingestion":
+        return False
+    if str(metadata.get("taskType") or "") == "steward_pack_draft":
+        return False
+    return candidate_type in {"source_manifest", "paper_note", "neuro_mechanism", "mechanism_mapping", "algorithm_hypothesis", "review_record"}
+
+
+def _knowledge_collection_fingerprint(
+    team_id: str,
+    candidates: list[dict[str, Any]],
+    *,
+    purpose: str,
+    curation_mode: str = "",
+    target_domain: str = "",
+    steward_agent_id: str = "",
+    candidate_graph_id: str = "",
+) -> str:
+    candidate_ids = sorted(str(item.get("candidateId") or "") for item in candidates if item.get("candidateId"))
+    payload = {
+        "teamId": team_id,
+        "purpose": purpose,
+        "candidateIds": candidate_ids,
+        "curationMode": curation_mode,
+        "targetDomain": target_domain,
+        "stewardAgentId": steward_agent_id,
+        "candidateGraphId": candidate_graph_id,
+    }
+    return hashlib.sha256(json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()[:32]
+
+
+def _candidate_knowledge_collection_fingerprint(candidate: dict[str, Any]) -> str:
+    metadata = candidate.get("metadata") if isinstance(candidate.get("metadata"), dict) else {}
+    ingestion = metadata.get("knowledgeCollectionIngestion") if isinstance(metadata.get("knowledgeCollectionIngestion"), dict) else {}
+    output = metadata.get("output") if isinstance(metadata.get("output"), dict) else {}
+    output_ingestion = output.get("knowledgeCollectionIngestion") if isinstance(output.get("knowledgeCollectionIngestion"), dict) else {}
+    return _trim_text(ingestion.get("fingerprint") or output_ingestion.get("fingerprint") or candidate.get("ingestionFingerprint"), max_length=80)
+
+
+def _find_reusable_candidate_graph(candidate_store: dict[str, Any], fingerprint: str) -> dict[str, Any] | None:
+    candidates = [
+        item
+        for item in list(candidate_store.get("candidates") or [])
+        if isinstance(item, dict)
+        and str(item.get("candidateType") or "") == "candidate_graph"
+        and not _candidate_is_archived(item)
+        and _candidate_knowledge_collection_fingerprint(item) == fingerprint
+    ]
+    return _latest_candidate_record(candidates)
+
+
+def _find_reusable_steward_pack(candidate_store: dict[str, Any], fingerprint: str) -> dict[str, Any] | None:
+    reusable_states = {"steward_pack_draft", "pending_source_review", "pending_review"}
+    candidates = [
+        item
+        for item in list(candidate_store.get("candidates") or [])
+        if isinstance(item, dict)
+        and str(item.get("candidateType") or "") != "candidate_graph"
+        and not _candidate_is_archived(item)
+        and (
+            str(item.get("currentWorkflowNode") or "") == "steward_ingestion"
+            or str((item.get("metadata") if isinstance(item.get("metadata"), dict) else {}).get("taskType") or "") == "steward_pack_draft"
+        )
+        and str(item.get("currentState") or "") in reusable_states
+        and _candidate_knowledge_collection_fingerprint(item) == fingerprint
+    ]
+    return _latest_candidate_record(candidates)
 
 
 def _latest_candidate_record(candidates: list[dict[str, Any]]) -> dict[str, Any] | None:
@@ -7214,6 +7484,24 @@ def _find_candidate_imported_from_data_record(candidate_store: dict[str, Any], r
     return None
 
 
+def _find_source_candidate_by_identity_key(candidate_store: dict[str, Any], source_identity_key: str) -> dict[str, Any] | None:
+    if not source_identity_key:
+        return None
+    for candidate in list(candidate_store.get("candidates") or []):
+        if not isinstance(candidate, dict):
+            continue
+        if str(candidate.get("candidateType") or "") != "source_manifest" or _candidate_is_archived(candidate):
+            continue
+        metadata = candidate.get("metadata") if isinstance(candidate.get("metadata"), dict) else {}
+        imported_from = metadata.get("importedFromDataRecord") if isinstance(metadata.get("importedFromDataRecord"), dict) else {}
+        if source_identity_key in {
+            _trim_text(metadata.get("sourceIdentityKey"), max_length=160),
+            _trim_text(imported_from.get("sourceIdentityKey"), max_length=160),
+        }:
+            return candidate
+    return None
+
+
 def _source_candidate_payload_from_data_record(run: dict[str, Any], record: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
     source_type = _trim_text(record.get("sourceType"), max_length=80) or "unknown"
     source_ref = _trim_text(record.get("sourceRef"), max_length=2000)
@@ -7240,6 +7528,10 @@ def _source_candidate_payload_from_data_record(run: dict[str, Any], record: dict
             "dataProcessingRecordMetadata": _normalize_metadata(record_metadata),
         }
     )
+    source_identity_key = _source_collection_record_identity_key(record)
+    if source_identity_key:
+        metadata["sourceIdentityKey"] = source_identity_key
+        metadata["importedFromDataRecord"]["sourceIdentityKey"] = source_identity_key
     return {
         "candidateType": "source_manifest",
         "title": title,
@@ -7834,6 +8126,103 @@ def _source_collection_existing_query_ids(records: list[dict[str, Any]]) -> set[
     return query_ids
 
 
+def _source_collection_existing_identity_records(records: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    by_key: dict[str, dict[str, Any]] = {}
+    for record in records:
+        if not isinstance(record, dict):
+            continue
+        source_identity_key = _source_collection_record_identity_key(record)
+        if source_identity_key and source_identity_key not in by_key:
+            by_key[source_identity_key] = record
+    return by_key
+
+
+def _source_collection_record_identity_key(record: dict[str, Any]) -> str:
+    metadata = record.get("metadata") if isinstance(record.get("metadata"), dict) else {}
+    quality_signals = record.get("qualitySignals") if isinstance(record.get("qualitySignals"), dict) else {}
+    existing = _trim_text(metadata.get("sourceIdentityKey") or quality_signals.get("sourceIdentityKey"), max_length=160)
+    if existing:
+        return existing
+    return _source_collection_identity_key(
+        source_ref=record.get("sourceRef"),
+        raw_location=record.get("rawLocation"),
+        title=record.get("title"),
+        container=metadata.get("container") or quality_signals.get("container"),
+        published=metadata.get("published") or quality_signals.get("published"),
+    )
+
+
+def _source_collection_result_identity_key(result: dict[str, Any]) -> str:
+    metadata = result.get("metadata") if isinstance(result.get("metadata"), dict) else {}
+    quality_signals = result.get("qualitySignals") if isinstance(result.get("qualitySignals"), dict) else {}
+    return _source_collection_identity_key(
+        source_ref=result.get("sourceRef"),
+        raw_location=result.get("rawLocation"),
+        title=result.get("title"),
+        container=result.get("container") or metadata.get("container") or quality_signals.get("container"),
+        published=result.get("published") or metadata.get("published") or quality_signals.get("published"),
+    )
+
+
+def _source_collection_identity_key(
+    *,
+    source_ref: Any,
+    raw_location: Any,
+    title: Any,
+    container: Any = "",
+    published: Any = "",
+) -> str:
+    for value in (source_ref, raw_location):
+        doi = _source_collection_normalized_doi(value)
+        if doi:
+            return f"doi:{doi}"
+    for value in (source_ref, raw_location):
+        url_key = _source_collection_normalized_url(value)
+        if url_key:
+            return f"url:{url_key}"
+    normalized_title = re.sub(r"\s+", " ", _trim_text(title, max_length=260).lower()).strip()
+    if len(normalized_title) < 16:
+        return ""
+    normalized_container = re.sub(r"\s+", " ", _trim_text(container, max_length=160).lower()).strip()
+    year_match = re.search(r"(19|20)\d{2}", _trim_text(published, max_length=80))
+    if not normalized_container and not year_match:
+        return ""
+    fingerprint_source = "|".join([normalized_title, normalized_container, year_match.group(0) if year_match else ""])
+    return f"title:{hashlib.sha256(fingerprint_source.encode('utf-8')).hexdigest()[:24]}"
+
+
+def _source_collection_normalized_doi(value: Any) -> str:
+    text = _trim_text(value, max_length=1000).strip()
+    if not text:
+        return ""
+    match = re.search(r"10\.\d{4,9}/[^\s\"'<>]+", text, flags=re.IGNORECASE)
+    if not match:
+        return ""
+    return match.group(0).rstrip(".,;)").lower()
+
+
+def _source_collection_normalized_url(value: Any) -> str:
+    text = _trim_text(value, max_length=1000).strip()
+    if not _looks_like_url(text):
+        return ""
+    try:
+        parsed = urllib.parse.urlsplit(text)
+    except ValueError:
+        return ""
+    scheme = parsed.scheme.lower() or "https"
+    netloc = parsed.netloc.lower()
+    if not netloc:
+        return ""
+    query_pairs = [
+        (key, val)
+        for key, val in urllib.parse.parse_qsl(parsed.query, keep_blank_values=True)
+        if not key.lower().startswith("utm_") and key.lower() not in {"fbclid", "gclid", "yclid", "mc_cid", "mc_eid"}
+    ]
+    query = urllib.parse.urlencode(query_pairs, doseq=True)
+    path = parsed.path.rstrip("/") or "/"
+    return urllib.parse.urlunsplit((scheme, netloc, path, query, ""))
+
+
 def _execute_source_collection_query(query: dict[str, Any], *, max_results: int, provider: str) -> dict[str, Any]:
     if provider != SOURCE_COLLECTION_SEARCH_PROVIDER_CROSSREF:
         return {"provider": provider, "results": [], "error": f"Unsupported provider: {provider}"}
@@ -7949,6 +8338,13 @@ def _source_collection_record_from_search_result(
             "metadataOnlyDownload": True,
         }
     )
+    source_identity_key = _source_collection_result_identity_key(result)
+    if source_identity_key:
+        metadata["sourceIdentityKey"] = source_identity_key
+    quality_signals = _normalize_metadata(result.get("qualitySignals"))
+    if source_identity_key:
+        quality_signals["sourceIdentityKey"] = source_identity_key
+        quality_signals["duplicateState"] = "unique_candidate"
     return {
         "sourceType": _source_collection_data_processing_source_type(result.get("sourceType")),
         "sourceRef": source_ref,
@@ -7957,7 +8353,7 @@ def _source_collection_record_from_search_result(
         "summary": _trim_text(result.get("summary"), max_length=4000),
         "status": "collected",
         "metadata": metadata,
-        "qualitySignals": _normalize_metadata(result.get("qualitySignals")),
+        "qualitySignals": quality_signals,
         "collectionTrace": trace,
     }
 
@@ -8130,6 +8526,8 @@ def _persist_source_collection_work_run(
 def _source_collection_work_run_terminal_status(result: dict[str, Any]) -> str:
     if _source_collection_count(result.get("failedQueryCount")) and not _source_collection_count(result.get("executedQueryCount")):
         return "failed"
+    if bool(result.get("hasMore")) or _source_collection_count(result.get("remainingQueryCount")):
+        return "needs_continue"
     source_collection_summary = result.get("sourceCollectionSummary") if isinstance(result.get("sourceCollectionSummary"), dict) else {}
     if _source_collection_count(source_collection_summary.get("searchOpenAssignmentCount")):
         return "needs_continue"
@@ -8157,6 +8555,38 @@ def _source_collection_work_run_terminal_summary(result: dict[str, Any]) -> str:
 
 def _source_collection_count(value: Any) -> int:
     return _normalize_int(value, default=0, minimum=0, maximum=100_000)
+
+
+def _source_collection_next_runnable_query_ids(
+    assignments: list[dict[str, Any]],
+    existing_query_ids: set[str],
+    *,
+    force: bool,
+    target_assignment_ids: set[str],
+    target_agent_role: str,
+) -> list[str]:
+    query_ids: list[str] = []
+    seen: set[str] = set()
+    for assignment in assignments:
+        assignment_id = _trim_text(assignment.get("assignmentId"), max_length=128)
+        agent_role = _trim_text(assignment.get("agentRole"), max_length=80)
+        if agent_role not in SOURCE_COLLECTION_SEARCH_EXECUTION_AGENT_ROLES:
+            continue
+        if target_assignment_ids and assignment_id not in target_assignment_ids:
+            continue
+        if target_agent_role and agent_role != target_agent_role:
+            continue
+        if not force and str(assignment.get("status") or "") not in {"open", "in_progress", "returned"}:
+            continue
+        for query in _source_collection_assigned_queries(assignment):
+            query_id = _trim_text(query.get("queryId"), max_length=160)
+            if not query_id or query_id in seen:
+                continue
+            if query_id in existing_query_ids and not force:
+                continue
+            seen.add(query_id)
+            query_ids.append(query_id)
+    return query_ids
 
 
 def _source_collection_storage_target_path(team_id: str, run_id: str, target: str) -> Path:
