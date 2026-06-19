@@ -267,7 +267,7 @@
 <a class="node-card" href="research_flow_pages/07-steward-ingestion.html">
                 <span class="num">07</span>
                 <h3>知识治理入库</h3>
-                <p>steward_pack_draft 可提交到 Team Knowledge 待审队列，且团队可读取知识入库状态漏斗。</p>
+                <p>steward_pack_draft 先作为团队待入库知识包暂存，搜集流程向 Knowledge Steward Agent 发送入库请求并唤醒它处理最终入库。</p>
                 <div class="tag-row"><span class="tag active">待知识治理审查</span><span class="tag">Knowledge Steward Agent · agent-knowledge-steward</span></div>
               </a>
 <a class="node-card" href="research_flow_pages/08-candidate-graph.html">
@@ -465,7 +465,7 @@
           <div class="plan-summary">
             <div class="service-row"><strong>知识搜集主线</strong><span>只跑通知识搜集第一阶段：搜索资料、资料提炼、资料审查、资料入库；不进入训练实验、算法实现或比赛交付。</span></div>
             <div class="service-row"><strong>实施目标</strong><span>复用 Vibelution 现有 Research、Team Knowledge、RAG、Knowledge Steward 和 Memory Graph 能力，把 01-09 做成可运行 MVP，并把 10 实验阶段先推进到可审查计划账本。</span></div>
-            <div class="service-row"><strong>团队入口</strong><span>/teams?team=research-team · 选中 ai科学研究团队后，团队内容区显示科研控制台：研究主题、当前阶段、知识搜集/实验/迭代三张阶段卡、每卡一个主按钮和一个阶段详情入口；知识搜集卡会按未开始、待继续搜索、搜索中、待审查、可入库、可进入实验、等待回写显示状态，并提供“新一轮搜集”；点击知识搜集主按钮会创建/续用阶段轮次，并立即排队第一批后台资料搜索；知识搜集独立页只展示搜索资料、资料提炼、资料审查、资料入库四张步骤卡，每张卡只承载状态、关键数量和主操作，当前步骤的功能 Agent 名称、模型、状态和配置入口集中显示在右侧详情底部；资料审查主按钮会让资料质量评估 Agent 批量执行待审候选，已审完时显示 Agent 重新审查并 force 复审已审候选；资料入库主按钮会让入库 Agent 一键完成入库关系、资料入库包和团队知识库写入，不再要求用户逐条选择资料；若尚无通过资料但已有候选资料，资料入库按钮显示 Agent 审查并入库，复用一键入库后端先批量审查再生成关系、入库包和正式知识；批次列表按 teamId/startedFrom 在服务端过滤，后台 activeWorkRun 会持续显示正在团队搜索，AppShell 顶部优先显示知识搜集而不是团队群聊；知识搜集页不再把本阶段 Agent 统一堆在顶部，点击每张步骤卡才查看该步骤内容和操作；搜索资料子页把当前动作和原始资料记录分开：过程区只显示当前正在执行的一条动作，结果区只展示本轮 DataRecord 原始记录，并明确标出已入候选多少、还有多少待导入候选；资料提炼子页单独展示本轮 source_manifest 候选资料，避免把原始记录数和候选数混在一起；搜索资料结果列表和资料提炼候选列表都有独立纵向滚动区，分页控件保留在列表下方，长批次不会被外层布局裁掉；Agent 重新提炼只重新同步 DataRecord 到候选资料，不会自动完成资料审查，候选仍会显示为待 Agent 审查并引导进入资料审查步骤；资料结果统计使用原始记录、已入候选、可点击来源和本地文件，列表内 DOI 单独显示为 DOI 链接，网页显示可点击来源，本地文件显示路径，缺少来源直接标出；每条资料卡片可点击选中，右侧详情把资料来源和搜集证据分开：主操作只打开论文 DOI、网页来源或本地文件，Crossref/OpenAlex 等机器 API 放入“查看搜索证据”折叠区，并保留打开批次目录、搜索步骤、搜集记录和候选镜像入口；知识搜集启动不再依赖旧的 houmo_qwen35_9b_agent 固定 ID，而是由后端从当前模型库解析可用 KV 模型；过程流把 KV 缓存模型和执行 Agent 模型分开展示，避免把缓存兜底模型误认为搜索资料 Agent；模型证据、候选、路径、校验和内部状态默认移到阶段详情页或高级信息中。</span></div>
+            <div class="service-row"><strong>团队入口</strong><span>/teams?team=research-team · 选中 ai科学研究团队后，团队内容区显示科研控制台：研究主题、当前阶段、知识搜集/实验/迭代三张阶段卡、每卡一个主按钮和一个阶段详情入口；知识搜集卡会按未开始、待继续搜索、搜索中、待审查、可入库、可进入实验、等待回写显示状态，并提供“新一轮搜集”；点击知识搜集主按钮会创建/续用阶段轮次，并立即排队第一批后台资料搜索；知识搜集独立页只展示搜索资料、资料提炼、资料审查、资料入库四张步骤卡，每张卡只承载状态、关键数量和主操作，当前步骤的功能 Agent 名称、模型、状态和配置入口集中显示在右侧详情底部；资料审查主按钮会让资料质量评估 Agent 批量执行待审候选，已审完时显示 Agent 重新审查并 force 复审已审候选；资料入库主按钮会让入库 Agent 生成入库关系和待入库知识包，并向知识库 Agent 发送入库请求，不再要求用户逐条选择资料；若尚无通过资料但已有候选资料，资料入库按钮显示提炼并通知 Agent，后端先批量审查再生成关系、入库包和 Agent inbox 请求，正式知识由知识库 Agent 后续处理；批次列表按 teamId/startedFrom 在服务端过滤，后台 activeWorkRun 会持续显示正在团队搜索，AppShell 顶部优先显示知识搜集而不是团队群聊；知识搜集页不再把本阶段 Agent 统一堆在顶部，点击每张步骤卡才查看该步骤内容和操作；搜索资料子页把当前动作和原始资料记录分开：过程区只显示当前正在执行的一条动作，结果区只展示本轮 DataRecord 原始记录，并明确标出已入候选多少、还有多少待导入候选；资料提炼子页单独展示本轮 source_manifest 候选资料，避免把原始记录数和候选数混在一起；搜索资料结果列表和资料提炼候选列表都有独立纵向滚动区，分页控件保留在列表下方，长批次不会被外层布局裁掉；Agent 重新提炼只重新同步 DataRecord 到候选资料，不会自动完成资料审查，候选仍会显示为待 Agent 审查并引导进入资料审查步骤；资料结果统计使用原始记录、已入候选、可点击来源和本地文件，列表内 DOI 单独显示为 DOI 链接，网页显示可点击来源，本地文件显示路径，缺少来源直接标出；每条资料卡片可点击选中，右侧详情把资料来源和搜集证据分开：主操作只打开论文 DOI、网页来源或本地文件，Crossref/OpenAlex 等机器 API 放入“查看搜索证据”折叠区，并保留打开批次目录、搜索步骤、搜集记录和候选镜像入口；知识搜集启动不再依赖旧的 houmo_qwen35_9b_agent 固定 ID，而是由后端从当前模型库解析可用 KV 模型；过程流把 KV 缓存模型和执行 Agent 模型分开展示，避免把缓存兜底模型误认为搜索资料 Agent；模型证据、候选、路径、校验和内部状态默认移到阶段详情页或高级信息中。</span></div>
           </div>
           <div class="dashboard-panel">
             <h2>边界提醒</h2>
@@ -576,9 +576,14 @@
                   <span>CandidateStore 中已有 proposalPayload、ratingSuggestion、sourceTrace，且 approvalRequired=true。</span>
                 </div>
 <div class="state-row">
+                  <b>knowledge_steward_agent_notified</b>
+                  <strong>已通知知识库 Agent</strong>
+                  <span>steward_pack_draft 已写入 CandidateStore，并向 Knowledge Steward Agent inbox 发送入库请求。</span>
+                </div>
+<div class="state-row">
                   <b>steward_pending_knowledge_review</b>
                   <strong>待审入库对象</strong>
-                  <span>已创建 SourceArtifact、pending RefinementProposal，可选 pending ratingSuggestion；等待审批门禁。</span>
+                  <span>Knowledge Steward Agent 已创建 SourceArtifact、pending RefinementProposal，可选 pending ratingSuggestion；等待审批门禁。</span>
                 </div>
 <div class="state-row">
                   <b>knowledge_ingestion_needs_review</b>
@@ -628,7 +633,12 @@
 <div class="artifact-row">
                   <code>steward_ingestion_pack_YYYYMMDD_NNN.json</code>
                   <b>知识治理摄取包</b>
-                  <span>治理建议、评级建议、目标知识域和正式入库申请；审批通过后评分建议承接到正式 KnowledgeItem。</span>
+                  <span>治理建议、评级建议、目标知识域和正式入库申请；默认先作为待入库包通知 Knowledge Steward Agent。</span>
+                </div>
+<div class="artifact-row">
+                  <code>agent_inbox_messages.jsonl</code>
+                  <b>知识库 Agent 入库请求</b>
+                  <span>challenge_cup_knowledge_ingestion_request 消息记录 teamId、stewardPackCandidateId、knowledgeBaseId 和最终入库边界。</span>
                 </div>
 <div class="artifact-row">
                   <code>candidate_graph.json</code>
@@ -659,8 +669,8 @@
         <div class="agent-row">
         <b>01</b>
         <strong>Source Intake Agent</strong>
-        <span>可复用通用 data-processing assignment / source-extraction / source-quality 后端已接入；Teams 搜索资料执行台、资料提炼页、资料审查台、科研总览控制台、KV 缓存对话轨迹、启动复用反馈、metadata-only 搜索执行闭环、高价值信息层、中文控制台、默认层去说明化、步骤卡主操作入口、右侧当前步骤 Agent 配置、资料审查页内反馈、资料审查 Agent 批量执行、候选库可视化二级索引、知识搜集阶段四步控制台、资料审查 Agent 复审入口、一键排队首批后台搜索、搜索资料当前动作和已收集资料分层、搜集结果状态徽标完整显示、搜集结果 DOI/网页/本地文件来源可溯源、资料提炼结果滚动与待审查交接、四步完整列表、来源类型过滤、阶段结果/Agent过程双页、阶段输入输出交接、Agent 执行过程流水、结果分页、实体可读工作台、阶段卡降噪、资料入库 Agent 一键生成关系并写入团队知识库、资料入库可从候选资料触发审查并入库、KV 缓存模型与执行 Agent 模型分层、阶段协调显式启动已接入</span>
-        <span>ResearchStageRound 建立 / 科研控制台一键进入知识搜集 / 总览页只显示三阶段主操作 / 知识搜集状态驱动按钮 / 知识搜集中文展示映射 / 默认层去说明化 / 右侧主操作唯一化 / 资料审查入口常驻 / 步骤卡主操作入口 / 右侧当前步骤 Agent 配置 / 步骤卡二级索引 / 四步阶段控制台 / 阶段结果/Agent过程双页 / 实体可读工作台 / 阶段卡降噪 / 阶段输入输出交接 / Agent 执行过程流水 / KV 缓存模型分层展示 / 执行 Agent 模型右侧展示 / 四步结果分页 / 结果区独立滚动 / 搜索资料当前动作 / 已收集资料结果区 / 搜集结果来源溯源 / 搜集结果状态徽标 / 资料提炼待审查交接 / 资料审查 Agent 复审 / 候选库可视化面板 / 资料入库 Agent 一键入库 / 资料入库候选触发 / 资料审查页内详情 / 资料审查展开高亮反馈 / 资料审查 Agent 批量执行 / source-quality/assess-batch / source-quality force 重审 / 新一轮搜集入口 / active 知识搜集轮次复用反馈 / 一键排队首批搜索 / 全局运行态知识搜集优先 / 步骤功能 Agent 聚焦 / 四步完整列表 / 来源类型过滤 / 阶段协调显式启动 / DataProcessingRun 建立 / DataProcessingRun reviewing 收口 / DataSearchPlan/querySeeds 搜索计划 / KV/prompt cache 启动门禁 / 稳定前缀/动态增量契约 / CollectionAssignment 搜索资料任务 / assignedQueries 角色分配 / promptCachePartition 角色分区 / Teams 启动搜集批次 / Teams 查看 run/assignment/query/KV 状态 / Teams 高价值摘要层 / Teams 搜索下一批 / Crossref 元数据搜索执行器 / 搜索执行事件进入搜集对话流 / DataRecord 通用记录 / DataRecord 自动导入 source_manifest / metadata-only 下载边界 / 手工 CollectionOutput 回写 / 本地资料登记 / source_manifest 写入 / 文件路径/页码/来源可信度记录 / 本地 PDF sha256/pageAnchors/excerpt 抽取 / sourceQualityAssessment 审查 / 可选 research_knowledge_query_tool 查重</span>
+        <span>可复用通用 data-processing assignment / source-extraction / source-quality 后端已接入；Teams 搜索资料执行台、资料提炼页、资料审查台、科研总览控制台、KV 缓存对话轨迹、启动复用反馈、metadata-only 搜索执行闭环、高价值信息层、中文控制台、默认层去说明化、步骤卡主操作入口、右侧当前步骤 Agent 配置、资料审查页内反馈、资料审查 Agent 批量执行、候选库可视化二级索引、知识搜集阶段四步控制台、资料审查 Agent 复审入口、一键排队首批后台搜索、搜索资料当前动作和已收集资料分层、搜集结果状态徽标完整显示、搜集结果 DOI/网页/本地文件来源可溯源、资料提炼结果滚动与待审查交接、四步完整列表、来源类型过滤、阶段结果/Agent过程双页、阶段输入输出交接、Agent 执行过程流水、结果分页、实体可读工作台、阶段卡降噪、资料入库 Agent 生成关系并通知知识库 Agent、资料入库可从候选资料触发审查并发送入库请求、KV 缓存模型与执行 Agent 模型分层、阶段协调显式启动已接入</span>
+        <span>ResearchStageRound 建立 / 科研控制台一键进入知识搜集 / 总览页只显示三阶段主操作 / 知识搜集状态驱动按钮 / 知识搜集中文展示映射 / 默认层去说明化 / 右侧主操作唯一化 / 资料审查入口常驻 / 步骤卡主操作入口 / 右侧当前步骤 Agent 配置 / 步骤卡二级索引 / 四步阶段控制台 / 阶段结果/Agent过程双页 / 实体可读工作台 / 阶段卡降噪 / 阶段输入输出交接 / Agent 执行过程流水 / KV 缓存模型分层展示 / 执行 Agent 模型右侧展示 / 四步结果分页 / 结果区独立滚动 / 搜索资料当前动作 / 已收集资料结果区 / 搜集结果来源溯源 / 搜集结果状态徽标 / 资料提炼待审查交接 / 资料审查 Agent 复审 / 候选库可视化面板 / 资料入库 Agent 通知入库 / 资料入库候选触发 / 资料审查页内详情 / 资料审查展开高亮反馈 / 资料审查 Agent 批量执行 / source-quality/assess-batch / source-quality force 重审 / 新一轮搜集入口 / active 知识搜集轮次复用反馈 / 一键排队首批搜索 / 全局运行态知识搜集优先 / 步骤功能 Agent 聚焦 / 四步完整列表 / 来源类型过滤 / 阶段协调显式启动 / DataProcessingRun 建立 / DataProcessingRun reviewing 收口 / DataSearchPlan/querySeeds 搜索计划 / KV/prompt cache 启动门禁 / 稳定前缀/动态增量契约 / CollectionAssignment 搜索资料任务 / assignedQueries 角色分配 / promptCachePartition 角色分区 / Teams 启动搜集批次 / Teams 查看 run/assignment/query/KV 状态 / Teams 高价值摘要层 / Teams 搜索下一批 / Crossref 元数据搜索执行器 / 搜索执行事件进入搜集对话流 / DataRecord 通用记录 / DataRecord 自动导入 source_manifest / metadata-only 下载边界 / 手工 CollectionOutput 回写 / 本地资料登记 / source_manifest 写入 / 文件路径/页码/来源可信度记录 / 本地 PDF sha256/pageAnchors/excerpt 抽取 / sourceQualityAssessment 审查 / 可选 research_knowledge_query_tool 查重</span>
         <span>确认资料允许分析、来源可信度和是否纳入本轮。</span>
       </div>
 <div class="agent-row">
@@ -934,8 +944,14 @@
               <p><b>失败：</b>退回 steward_needs_revision</p>
             </article>
 <article class="gate-card">
+              <h3>Agent 通知门</h3>
+              <p><b>通过：</b>资料搜集流程只发送入库请求并激活 Knowledge Steward Agent，不直接创建 SourceArtifact/Proposal/KnowledgeItem</p>
+              <p><b>进入：</b>knowledge_steward_agent_notified</p>
+              <p><b>失败：</b>停在 steward_pack_draft</p>
+            </article>
+<article class="gate-card">
               <h3>治理门</h3>
-              <p><b>通过：</b>知识治理 Agent 只创建 SourceArtifact + pending RefinementProposal + 可选 pending ratingSuggestion，不直接创建 KnowledgeItem</p>
+              <p><b>通过：</b>Knowledge Steward Agent 收到请求后只创建 SourceArtifact + pending RefinementProposal + 可选 pending ratingSuggestion，不直接创建 KnowledgeItem</p>
               <p><b>进入：</b>steward_pending_knowledge_review</p>
               <p><b>失败：</b>退回 steward_needs_revision</p>
             </article>
@@ -1199,8 +1215,13 @@
             </div>
 <div class="blueprint-row compact">
               <b>POST</b>
+              <strong>/api/teams/{team_id}/workflow-orchestration/knowledge-collection/ingest</strong>
+              <span>批量审查候选、生成候选图谱和 steward_pack_draft；默认只发送知识库 Agent 入库请求并唤醒 Agent，不直接正式入库。</span>
+            </div>
+<div class="blueprint-row compact">
+              <b>POST</b>
               <strong>/api/teams/{team_id}/workflow-orchestration/steward-packs/{candidate_id}/knowledge-ingestion</strong>
-              <span>把有效 steward_pack_draft 提交为 SourceArtifact + pending RefinementProposal，可选 pending ratingSuggestion；不创建 KnowledgeItem/RAG/正式图谱。</span>
+              <span>由 Knowledge Steward Agent 把有效 steward_pack_draft 提交为 SourceArtifact + pending RefinementProposal，可选 pending ratingSuggestion；不创建 KnowledgeItem/RAG/正式图谱。</span>
             </div>
 <div class="blueprint-row compact">
               <b>POST</b>
@@ -1387,7 +1408,7 @@
                 </div>
 <div class="service-row">
                   <b>memory_ingestion_bridge</b>
-                  <span>已复用 Team Knowledge create_ingestion_package、review_refinement_proposal、rating suggestion review/create 和 KnowledgeItem metadata patch；steward_pack_draft 可进入 pending proposal，审批通过后创建正式 KnowledgeItem、迁移待审评分建议，并写入 officialResearchGraph 正式科研边。</span>
+                  <span>已复用 Agent Inbox、Team Knowledge create_ingestion_package、review_refinement_proposal、rating suggestion review/create 和 KnowledgeItem metadata patch；steward_pack_draft 默认先通知 Knowledge Steward Agent，Agent 后续可提交 pending proposal，审批通过后创建正式 KnowledgeItem、迁移待审评分建议，并写入 officialResearchGraph 正式科研边。</span>
                 </div>
 <div class="service-row">
                   <b>knowledge_ingestion_status</b>
@@ -2247,8 +2268,8 @@
 <div class="blueprint-row">
               <b>M6.55</b>
               <strong>知识搜集四步闭环入库</strong>
-              <span>知识搜集阶段从旧五步收敛为搜索资料、资料提炼、资料审查、资料入库四张用户步骤卡；候选关系图和入库包不再作为独立用户阶段，而是合并进资料入库的一键 Agent 动作。</span>
-              <span>第一阶段可从资料搜索结果一路推进到团队知识库正式 KnowledgeItem：搜索资料写 DataRecord/source_manifest，资料提炼展示候选资料，资料审查批量写 sourceQualityAssessment，资料入库复用候选关系、入库包、Team Knowledge source/proposal/review 门禁完成正式入库；正式 RAG/official graph 仍遵守现有审核边界。</span>
+              <span>知识搜集阶段从旧五步收敛为搜索资料、资料提炼、资料审查、资料入库四张用户步骤卡；候选关系图和入库包不再作为独立用户阶段，而是合并进资料入库的 Agent 动作。</span>
+              <span>第一阶段可从资料搜索结果推进到待入库知识包：搜索资料写 DataRecord/source_manifest，资料提炼展示候选资料，资料审查批量写 sourceQualityAssessment，资料入库复用候选关系和 steward_pack_draft，并向 Knowledge Steward Agent 发送入库请求；正式 Team Knowledge/RAG/official graph 仍由 Knowledge Steward Agent 后续走审核门禁。</span>
             </div>
 <div class="blueprint-row">
               <b>M6.57</b>
@@ -2259,8 +2280,8 @@
 <div class="blueprint-row">
               <b>M6.58</b>
               <strong>资料入库入口贯通候选资料</strong>
-              <span>资料入库步骤不再只看已通过资料数量；只要本轮已有候选资料，就允许点击 Agent 审查并入库。</span>
-              <span>前端把候选资料数作为一键入库输入上限；后端 knowledge-collection/ingest 会先调用资料审查，再生成候选关系、资料入库包和团队知识库正式 KnowledgeItem，避免用户被卡在必须先手动跑完每个中间门禁。</span>
+              <span>资料入库步骤不再只看已通过资料数量；只要本轮已有候选资料，就允许点击 Agent 提炼并通知知识库 Agent。</span>
+              <span>前端把候选资料数作为待入库包输入上限；后端 knowledge-collection/ingest 会先调用资料审查，再生成候选关系和 steward_pack_draft，并通过 Agent Inbox 向 Knowledge Steward Agent 发送入库请求，避免用户被卡在必须先手动跑完每个中间门禁，同时不绕过最终入库 Agent。</span>
             </div>
 <div class="blueprint-row">
               <b>M6.59</b>

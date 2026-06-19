@@ -1519,6 +1519,21 @@ def test_team_workflow_routes_run_knowledge_collection_ingestion(tmp_path, monke
     _use_tmp_project_root(tmp_path, monkeypatch)
     client = _client()
     steward = agent_directory_service.create_agent_instance(display_name="Knowledge Steward Agent")
+    deliveries = []
+
+    def fake_wake(message):
+        deliveries.append(message)
+        return {
+            "wakeRequested": True,
+            "wakeStatus": "started",
+            "messageId": message["messageId"],
+            "targetAgentId": message["targetAgentId"],
+            "targetSessionId": message["targetSessionId"],
+            "turnId": "route-turn-steward-ingest",
+            "reason": "",
+        }
+
+    monkeypatch.setattr(session_service, "wake_agent_for_inbox_message", fake_wake)
     team = client.post(
         "/api/teams",
         json={
@@ -1551,10 +1566,15 @@ def test_team_workflow_routes_run_knowledge_collection_ingestion(tmp_path, monke
 
     assert response.status_code == 201, response.text
     payload = response.json()
-    assert payload["status"] == "completed"
-    assert [step["stageId"] for step in payload["steps"]][-1] == "official_knowledge"
-    assert payload["summary"]["formalKnowledgeItemCount"] == 1
-    assert payload["knowledgeReview"]["candidate"]["currentState"] == "official_synced"
+    assert payload["status"] == "agent_notified"
+    assert [step["stageId"] for step in payload["steps"]][-1] == "knowledge_steward_request"
+    assert payload["summary"]["formalKnowledgeItemCount"] == 0
+    assert payload["summary"]["knowledgeStewardInboxMessageId"]
+    assert payload["knowledgeSubmission"] is None
+    assert payload["knowledgeReview"] is None
+    assert payload["knowledgeStewardActivation"]["status"] == "agent_wake_started"
+    assert payload["knowledgeStewardActivation"]["delivery"]["turnId"] == "route-turn-steward-ingest"
+    assert deliveries and deliveries[0]["kind"] == "challenge_cup_knowledge_ingestion_request"
 
 
 def test_team_workflow_routes_extract_source_collection_candidates(monkeypatch):
