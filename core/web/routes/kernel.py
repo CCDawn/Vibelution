@@ -39,6 +39,7 @@ class KernelEventPayload(BaseModel):
     correlationId: str = ""
     causationId: str = ""
     metadata: dict[str, Any] = Field(default_factory=dict)
+    wakeTarget: bool | None = None
 
 
 class KernelInboxAckPayload(BaseModel):

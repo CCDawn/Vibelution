@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from core.infrastructure import developer_sandbox
-from core.web.services import agent_directory_service
+from core.web.services import agent_directory_service, session_service
 from core.web.services.runtime_scene_service import record_runtime_scene_event
 
 from .store import KernelJsonlStore, utc_now_iso
@@ -242,6 +242,9 @@ def _normalize_event(payload: dict[str, Any]) -> dict[str, Any]:
         "causationId": str(payload.get("causationId") or "").strip(),
         "idempotencyKey": idempotency_key,
         "semanticPayload": semantic_payload,
+        "deliveryPolicy": {
+            "wakeTarget": _event_wake_target(payload, semantic_payload),
+        },
         "createdAt": now,
         "updatedAt": now,
         "metadata": _safe_metadata(payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {}),
@@ -260,6 +263,17 @@ def _semantic_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "semanticType": semantic_type,
         "payload": _safe_metadata(raw_payload, max_items=64),
     }
+
+
+def _event_wake_target(payload: dict[str, Any], semantic_payload: dict[str, Any]) -> bool:
+    raw_value = payload.get("wakeTarget")
+    if raw_value is not None:
+        return bool(raw_value)
+    semantic_body = semantic_payload.get("payload") if isinstance(semantic_payload.get("payload"), dict) else {}
+    raw_semantic_value = semantic_body.get("wakeTarget")
+    if raw_semantic_value is not None:
+        return bool(raw_semantic_value)
+    return True
 
 
 def _recipient_agent_ids(payload: dict[str, Any]) -> list[str]:
@@ -363,6 +377,7 @@ def _persist_execution_transition(
                 "targetAgentId": str(item.get("targetAgentId") or "").strip(),
                 "inboxMessageId": str(item.get("inboxMessageId") or "").strip(),
                 "status": str(item.get("status") or "").strip(),
+                "wakeStatus": str((item.get("wake") if isinstance(item.get("wake"), dict) else {}).get("wakeStatus") or "").strip(),
             }
             for item in deliveries
         ]
@@ -373,18 +388,32 @@ def _persist_execution_transition(
 
 def _deliver_event_to_recipients(event: dict[str, Any], task: dict[str, Any]) -> list[dict[str, Any]]:
     _ensure_agent_directory_root()
+    _ensure_session_root()
     semantic = event.get("semanticPayload") if isinstance(event.get("semanticPayload"), dict) else {}
     payload = semantic.get("payload") if isinstance(semantic.get("payload"), dict) else {}
     content = str(payload.get("content") or payload.get("message") or task.get("goal") or "").strip()
     if not content:
         content = str(semantic.get("semanticType") or "Kernel message").strip()
+    delivery_policy = event.get("deliveryPolicy") if isinstance(event.get("deliveryPolicy"), dict) else {}
+    wake_target = bool(delivery_policy.get("wakeTarget", True))
     deliveries: list[dict[str, Any]] = []
     for agent_id in list(event.get("recipients") or []):
+        target_agent_id = str(agent_id or "").strip()
         delivery = {
-            "targetAgentId": str(agent_id or "").strip(),
+            "targetAgentId": target_agent_id,
             "status": "pending",
             "inboxMessageId": "",
+            "targetSessionId": "",
             "reason": "",
+            "wake": {
+                "wakeRequested": wake_target,
+                "wakeStatus": "not_requested" if not wake_target else "skipped",
+                "messageId": "",
+                "targetAgentId": target_agent_id,
+                "targetSessionId": "",
+                "turnId": "",
+                "reason": "",
+            },
         }
         try:
             message = agent_directory_service.write_agent_inbox_message(
@@ -410,6 +439,21 @@ def _deliver_event_to_recipients(event: dict[str, Any], task: dict[str, Any]) ->
                     "targetSessionId": str(message.get("targetSessionId") or "").strip(),
                 }
             )
+            delivery["wake"]["messageId"] = delivery["inboxMessageId"]
+            delivery["wake"]["targetSessionId"] = delivery["targetSessionId"]
+            if wake_target:
+                try:
+                    delivery["wake"] = session_service.wake_agent_for_inbox_message(message)
+                except Exception as wake_exc:
+                    delivery["wake"] = {
+                        "wakeRequested": True,
+                        "wakeStatus": "failed",
+                        "messageId": delivery["inboxMessageId"],
+                        "targetAgentId": target_agent_id,
+                        "targetSessionId": delivery["targetSessionId"],
+                        "turnId": "",
+                        "reason": f"{type(wake_exc).__name__}: {_trim(str(wake_exc), 240)}",
+                    }
         except Exception as exc:
             delivery["status"] = "failed"
             delivery["reason"] = f"{type(exc).__name__}: {_trim(str(exc), 240)}"
@@ -532,6 +576,11 @@ def _safe_external_id(value: Any, *, prefix: str) -> str:
 def _ensure_agent_directory_root() -> None:
     if getattr(agent_directory_service, "PROJECT_ROOT", PROJECT_ROOT) != PROJECT_ROOT:
         agent_directory_service.PROJECT_ROOT = PROJECT_ROOT
+
+
+def _ensure_session_root() -> None:
+    if getattr(session_service, "PROJECT_ROOT", PROJECT_ROOT) != PROJECT_ROOT:
+        session_service.PROJECT_ROOT = PROJECT_ROOT
 
 
 def _new_id(prefix: str) -> str:
