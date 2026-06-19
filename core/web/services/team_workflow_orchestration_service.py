@@ -135,6 +135,7 @@ RESEARCH_STAGE_DEFAULTS = {
 EXPERIMENT_PLAN_STORE_KIND = "team_workflow_experiment_plan_store"
 EXPERIMENT_PLAN_REQUIRED_FIELDS = ("dataset", "metric", "baseline", "smokePlan")
 EXPERIMENT_SMOKE_RESULT_STATUSES = {"passed", "failed", "needs_review"}
+EXPERIMENT_FULL_RUN_RESULT_STATUSES = {"passed", "failed", "needs_review"}
 LOCAL_RESEARCH_OUTPUT_FIELDS = (
     "candidateType",
     "sourceRefs",
@@ -1813,6 +1814,246 @@ def register_experiment_smoke_result(team_id: str, plan_id: str, payload: dict[s
     )
     return {
         "smokeResult": smoke_result,
+        "plan": plan,
+        "status": status_payload,
+        "stageRoundStatus": stage_round_status,
+        "workflow": _workflow_to_api(normalized_team_id, workflow, candidate_store),
+        "team": {"teamId": team.get("teamId", normalized_team_id), "name": team.get("name", "")},
+        "boundaries": _experiment_planning_boundaries(),
+    }
+
+
+def register_experiment_full_run_result(team_id: str, plan_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
+    normalized_plan_id = _normalize_required_id(plan_id, "Experiment plan id is required.")
+    team = team_service.get_team(normalized_team_id)
+    request_payload = payload if isinstance(payload, dict) else {}
+    recorded_by_agent = _trim_text(request_payload.get("recordedByAgent"), max_length=160) or DEFAULT_OWNER_AGENT_ID
+    with _WORKFLOW_LOCK:
+        workflow = _load_or_create_workflow(normalized_team_id)
+        stage_store = _load_stage_round_store(normalized_team_id)
+        rounds = _stage_rounds(stage_store)
+        candidate_store = _load_candidate_store(normalized_team_id)
+        plan_store = _load_experiment_plan_store(normalized_team_id)
+        plan = _find_experiment_plan(plan_store, normalized_plan_id)
+        if plan is None:
+            raise TeamWorkflowOrchestrationError("Experiment plan not found.")
+        full_run_result = _experiment_full_run_result_record(plan, request_payload, recorded_by_agent=recorded_by_agent)
+        full_run_results = [item for item in list(plan.get("fullRunResults") or []) if isinstance(item, dict)]
+        full_run_results.append(full_run_result)
+        plan["fullRunResults"] = full_run_results[-12:]
+        plan["activeFullRunResultId"] = full_run_result["fullRunResultId"]
+        plan["activeFullRunResult"] = full_run_result
+        plan["status"] = "full_run_passed" if full_run_result["status"] == "passed" else f"full_run_{full_run_result['status']}"
+        plan["updatedAt"] = full_run_result["recordedAt"]
+        _refresh_experiment_plan_readiness(plan)
+        plan_store["activePlanId"] = plan["planId"]
+        plan_store["updatedAt"] = full_run_result["recordedAt"]
+        _write_json(_experiment_plan_store_path(normalized_team_id), plan_store)
+        stage_round = _find_stage_round(rounds, str(plan.get("stageRoundId") or ""))
+        if stage_round is not None:
+            stage_round["experimentPlanRef"] = {
+                "planId": plan["planId"],
+                "status": plan["status"],
+                "storagePath": _relative_path(_experiment_plan_store_path(normalized_team_id)),
+                "fullRunResultRef": {
+                    "fullRunResultId": full_run_result["fullRunResultId"],
+                    "status": full_run_result["status"],
+                    "resultPath": full_run_result["resultPath"],
+                    "logRef": full_run_result["logRef"],
+                },
+                "updatedAt": full_run_result["recordedAt"],
+            }
+            active_smoke_result = plan.get("activeSmokeResult") if isinstance(plan.get("activeSmokeResult"), dict) else None
+            if active_smoke_result:
+                stage_round["experimentPlanRef"]["smokeResultRef"] = {
+                    "smokeResultId": active_smoke_result.get("smokeResultId", ""),
+                    "status": active_smoke_result.get("status", ""),
+                    "resultPath": active_smoke_result.get("resultPath", ""),
+                    "logRef": active_smoke_result.get("logRef", ""),
+                }
+            baseline_selection = plan.get("baselineSelection") if isinstance(plan.get("baselineSelection"), dict) else {}
+            active_artifact = (
+                baseline_selection.get("activeBaselineArtifact")
+                if isinstance(baseline_selection.get("activeBaselineArtifact"), dict)
+                else None
+            )
+            if active_artifact:
+                stage_round["experimentPlanRef"]["baselineArtifactRef"] = {
+                    "artifactId": active_artifact.get("artifactId", ""),
+                    "artifactPath": active_artifact.get("artifactPath", ""),
+                }
+            planning_contract = stage_round.get("planningContract") if isinstance(stage_round.get("planningContract"), dict) else {}
+            planning_contract["currentPlanId"] = plan["planId"]
+            planning_contract["activeFullRunResultId"] = full_run_result["fullRunResultId"]
+            planning_contract["readyForSmoke"] = bool((plan.get("readiness") or {}).get("readyForSmoke"))
+            planning_contract["readyForFullRun"] = bool((plan.get("readiness") or {}).get("readyForFullRun"))
+            planning_contract["readyForKnowledgeIngestion"] = bool((plan.get("readiness") or {}).get("readyForKnowledgeIngestion"))
+            planning_contract["autoExecution"] = False
+            planning_contract["requiresUserDecision"] = True
+            stage_round["planningContract"] = planning_contract
+            stage_round["status"] = "planning"
+            stage_round["updatedAt"] = full_run_result["recordedAt"]
+            stage_store["rounds"] = rounds
+            stage_store["updatedAt"] = full_run_result["recordedAt"]
+            _write_json(_stage_round_store_path(normalized_team_id), stage_store)
+        workflow["updatedAt"] = full_run_result["recordedAt"]
+        workflow["activeWorkflowItems"] = _upsert_active_item(
+            workflow.get("activeWorkflowItems"),
+            candidate_id=str(plan.get("stageRoundId") or plan["planId"]),
+            current_node=RESEARCH_STAGE_DEFAULTS["experiment"]["currentNode"],
+            status="full_run_result_registered",
+            transfer_id="",
+        )
+        _write_json(_workflow_path(normalized_team_id), workflow)
+        status_payload = _experiment_planning_status(normalized_team_id, rounds, candidate_store, plan_store)
+        stage_round_status = get_research_stage_round_status(normalized_team_id)
+    _record_workflow_event(
+        "experiment_plan.full_run_result_registered",
+        normalized_team_id,
+        fields={
+            "workflowId": workflow["workflowId"],
+            "stageRoundId": str(plan.get("stageRoundId") or ""),
+            "planId": plan["planId"],
+            "fullRunResultId": full_run_result["fullRunResultId"],
+            "status": full_run_result["status"],
+            "gateDecision": full_run_result["gateDecision"],
+            "readyForKnowledgeIngestion": bool((plan.get("readiness") or {}).get("readyForKnowledgeIngestion")),
+            "recordedByAgent": recorded_by_agent,
+        },
+    )
+    return {
+        "fullRunResult": full_run_result,
+        "plan": plan,
+        "status": status_payload,
+        "stageRoundStatus": stage_round_status,
+        "workflow": _workflow_to_api(normalized_team_id, workflow, candidate_store),
+        "team": {"teamId": team.get("teamId", normalized_team_id), "name": team.get("name", "")},
+        "boundaries": _experiment_planning_boundaries(),
+    }
+
+
+def request_experiment_result_knowledge_ingestion(team_id: str, plan_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
+    normalized_plan_id = _normalize_required_id(plan_id, "Experiment plan id is required.")
+    team = team_service.get_team(normalized_team_id)
+    request_payload = payload if isinstance(payload, dict) else {}
+    requested_by_agent = _trim_text(request_payload.get("requestedByAgent"), max_length=160) or DEFAULT_OWNER_AGENT_ID
+    steward_agent_id = _trim_text(request_payload.get("stewardAgentId"), max_length=160) or agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID
+    knowledge_base_id = _trim_text(request_payload.get("knowledgeBaseId"), max_length=160) or f"{normalized_team_id}-challenge-cup-experiments"
+    target_domain = _trim_text(request_payload.get("targetDomain"), max_length=240) or "挑战杯实验结果"
+    wake_steward_agent = bool(request_payload.get("wakeStewardAgent", True))
+    with _WORKFLOW_LOCK:
+        workflow = _load_or_create_workflow(normalized_team_id)
+        stage_store = _load_stage_round_store(normalized_team_id)
+        rounds = _stage_rounds(stage_store)
+        candidate_store = _load_candidate_store(normalized_team_id)
+        plan_store = _load_experiment_plan_store(normalized_team_id)
+        plan = _find_experiment_plan(plan_store, normalized_plan_id)
+        if plan is None:
+            raise TeamWorkflowOrchestrationError("Experiment plan not found.")
+        experiment_result_pack = _experiment_result_ingestion_pack_record(
+            plan,
+            request_payload,
+            knowledge_base_id=knowledge_base_id,
+            target_domain=target_domain,
+            requested_by_agent=requested_by_agent,
+        )
+        activation = _notify_knowledge_steward_for_experiment_result(
+            normalized_team_id,
+            steward_agent_id=steward_agent_id,
+            requester_agent_id=requested_by_agent,
+            experiment_result_pack=experiment_result_pack,
+            knowledge_base_id=knowledge_base_id,
+            target_domain=target_domain,
+            wake_target=wake_steward_agent,
+        )
+        activation_status = str(activation.get("status") or "")
+        if activation_status in {"message_written", "agent_wake_started"}:
+            plan_status = "knowledge_steward_notified"
+        elif activation_status.startswith("agent_wake_"):
+            plan_status = "knowledge_steward_wake_pending"
+        else:
+            plan_status = "knowledge_steward_notification_failed"
+        plan["knowledgeIngestion"] = {
+            "status": plan_status,
+            "experimentResultPack": experiment_result_pack,
+            "knowledgeStewardActivation": activation,
+            "knowledgeBaseId": knowledge_base_id,
+            "targetDomain": target_domain,
+            "updatedAt": experiment_result_pack["createdAt"],
+            "officialBoundary": experiment_result_pack["officialBoundary"],
+        }
+        plan["status"] = plan_status
+        plan["updatedAt"] = experiment_result_pack["createdAt"]
+        _refresh_experiment_plan_readiness(plan)
+        plan_store["activePlanId"] = plan["planId"]
+        plan_store["updatedAt"] = experiment_result_pack["createdAt"]
+        _write_json(_experiment_plan_store_path(normalized_team_id), plan_store)
+        stage_round = _find_stage_round(rounds, str(plan.get("stageRoundId") or ""))
+        if stage_round is not None:
+            stage_round["experimentPlanRef"] = {
+                "planId": plan["planId"],
+                "status": plan["status"],
+                "storagePath": _relative_path(_experiment_plan_store_path(normalized_team_id)),
+                "experimentResultPackRef": {
+                    "packId": experiment_result_pack["packId"],
+                    "fullRunResultId": experiment_result_pack["fullRunResultId"],
+                    "knowledgeBaseId": knowledge_base_id,
+                    "messageId": str(activation.get("messageId") or ""),
+                },
+                "updatedAt": experiment_result_pack["createdAt"],
+            }
+            active_full_run = plan.get("activeFullRunResult") if isinstance(plan.get("activeFullRunResult"), dict) else None
+            if active_full_run:
+                stage_round["experimentPlanRef"]["fullRunResultRef"] = {
+                    "fullRunResultId": active_full_run.get("fullRunResultId", ""),
+                    "status": active_full_run.get("status", ""),
+                    "resultPath": active_full_run.get("resultPath", ""),
+                    "logRef": active_full_run.get("logRef", ""),
+                }
+            planning_contract = stage_round.get("planningContract") if isinstance(stage_round.get("planningContract"), dict) else {}
+            planning_contract["currentPlanId"] = plan["planId"]
+            planning_contract["experimentResultPackId"] = experiment_result_pack["packId"]
+            planning_contract["knowledgeStewardInboxMessageId"] = str(activation.get("messageId") or "")
+            planning_contract["readyForKnowledgeIngestion"] = bool((plan.get("readiness") or {}).get("readyForKnowledgeIngestion"))
+            planning_contract["autoExecution"] = False
+            planning_contract["requiresUserDecision"] = True
+            stage_round["planningContract"] = planning_contract
+            stage_round["status"] = "planning"
+            stage_round["updatedAt"] = experiment_result_pack["createdAt"]
+            stage_store["rounds"] = rounds
+            stage_store["updatedAt"] = experiment_result_pack["createdAt"]
+            _write_json(_stage_round_store_path(normalized_team_id), stage_store)
+        workflow["updatedAt"] = experiment_result_pack["createdAt"]
+        workflow["activeWorkflowItems"] = _upsert_active_item(
+            workflow.get("activeWorkflowItems"),
+            candidate_id=str(plan.get("stageRoundId") or plan["planId"]),
+            current_node=RESEARCH_STAGE_DEFAULTS["experiment"]["currentNode"],
+            status=plan_status,
+            transfer_id="",
+        )
+        _write_json(_workflow_path(normalized_team_id), workflow)
+        status_payload = _experiment_planning_status(normalized_team_id, rounds, candidate_store, plan_store)
+        stage_round_status = get_research_stage_round_status(normalized_team_id)
+    _record_workflow_event(
+        "experiment_plan.knowledge_ingestion_requested",
+        normalized_team_id,
+        fields={
+            "workflowId": workflow["workflowId"],
+            "stageRoundId": str(plan.get("stageRoundId") or ""),
+            "planId": plan["planId"],
+            "experimentResultPackId": experiment_result_pack["packId"],
+            "fullRunResultId": experiment_result_pack["fullRunResultId"],
+            "knowledgeBaseId": knowledge_base_id,
+            "knowledgeStewardActivationStatus": activation_status,
+            "knowledgeStewardInboxMessageId": str(activation.get("messageId") or ""),
+            "requestedByAgent": requested_by_agent,
+        },
+    )
+    return {
+        "experimentResultPack": experiment_result_pack,
+        "knowledgeStewardActivation": activation,
         "plan": plan,
         "status": status_payload,
         "stageRoundStatus": stage_round_status,
@@ -8837,7 +9078,21 @@ def _experiment_planning_status(
         active_plan=active_plan,
     )
     status = "blocked"
-    if latest_experiment and active_plan and bool((active_plan.get("readiness") or {}).get("readyForFullRun")):
+    active_full_run = active_plan.get("activeFullRunResult") if isinstance((active_plan or {}).get("activeFullRunResult"), dict) else None
+    active_full_run_status = str((active_full_run or {}).get("status") or "").strip().lower()
+    knowledge_ingestion = active_plan.get("knowledgeIngestion") if isinstance((active_plan or {}).get("knowledgeIngestion"), dict) else None
+    knowledge_ingestion_status = str((knowledge_ingestion or {}).get("status") or "").strip().lower()
+    if latest_experiment and active_plan and knowledge_ingestion_status in {
+        "knowledge_steward_notified",
+        "knowledge_steward_wake_pending",
+        "knowledge_steward_notification_failed",
+    }:
+        status = knowledge_ingestion_status
+    elif latest_experiment and active_plan and active_full_run_status == "passed":
+        status = "ready_for_knowledge_ingestion"
+    elif latest_experiment and active_plan and active_full_run_status in {"failed", "needs_review"}:
+        status = "full_run_needs_review"
+    elif latest_experiment and active_plan and bool((active_plan.get("readiness") or {}).get("readyForFullRun")):
         status = "ready_for_full_run"
     elif latest_experiment and active_plan and bool((active_plan.get("readiness") or {}).get("readyForSmoke")):
         status = "ready_for_smoke"
@@ -8865,11 +9120,14 @@ def _experiment_planning_status(
             "readyHypothesisCandidateCount": len(ready_hypotheses),
             "gapCount": len(gaps),
             "activePlanId": str(active_plan.get("planId") or "") if active_plan else "",
+            "activeFullRunResultId": str((active_plan or {}).get("activeFullRunResultId") or "") if active_plan else "",
+            "knowledgeIngestionStatus": str(((active_plan or {}).get("knowledgeIngestion") or {}).get("status") or "") if active_plan and isinstance(active_plan.get("knowledgeIngestion"), dict) else "",
         },
         "readiness": {
             "readyToPlan": bool(latest_experiment and ready_hypotheses),
             "readyForSmoke": bool((active_plan or {}).get("readiness", {}).get("readyForSmoke")),
             "readyForFullRun": bool((active_plan or {}).get("readiness", {}).get("readyForFullRun")),
+            "readyForKnowledgeIngestion": bool((active_plan or {}).get("readiness", {}).get("readyForKnowledgeIngestion")),
             "reason": _experiment_planning_readiness_reason(latest_experiment, ready_hypotheses, active_plan),
         },
         "boundaries": _experiment_planning_boundaries(),
@@ -9139,6 +9397,265 @@ def _experiment_smoke_result_record(
     }
 
 
+def _experiment_full_run_result_record(
+    plan: dict[str, Any],
+    payload: dict[str, Any],
+    *,
+    recorded_by_agent: str,
+) -> dict[str, Any]:
+    active_smoke_result = plan.get("activeSmokeResult") if isinstance(plan.get("activeSmokeResult"), dict) else None
+    if not active_smoke_result or str(active_smoke_result.get("status") or "").strip().lower() != "passed":
+        raise TeamWorkflowOrchestrationError("Record a passing smoke result before recording full-run results.")
+    if not bool((plan.get("readiness") or {}).get("readyForFullRun")):
+        raise TeamWorkflowOrchestrationError("Experiment plan is not ready for full-run result recording.")
+    status = _trim_text(payload.get("status"), max_length=80).lower() or "needs_review"
+    if status not in EXPERIMENT_FULL_RUN_RESULT_STATUSES:
+        raise TeamWorkflowOrchestrationError(f"Unsupported full-run result status: {status}")
+    metric_value = _trim_text(payload.get("metricValue"), max_length=240)
+    result_path = _trim_text(payload.get("resultPath") or payload.get("artifactPath"), max_length=500)
+    log_ref = _trim_text(payload.get("logRef") or payload.get("evidenceRef"), max_length=500)
+    if not metric_value:
+        raise TeamWorkflowOrchestrationError("Full-run result metric value is required.")
+    if not result_path and not log_ref:
+        raise TeamWorkflowOrchestrationError("Full-run result path or log reference is required.")
+    baseline_selection = plan.get("baselineSelection") if isinstance(plan.get("baselineSelection"), dict) else {}
+    active_baseline_artifact = (
+        baseline_selection.get("activeBaselineArtifact")
+        if isinstance(baseline_selection.get("activeBaselineArtifact"), dict)
+        else {}
+    )
+    experiment_plan = plan.get("experimentPlan") if isinstance(plan.get("experimentPlan"), dict) else {}
+    now = utc_now_iso()
+    gate_decision = {
+        "passed": "ready_for_knowledge_review",
+        "failed": "reject_or_repair",
+        "needs_review": "needs_more_evidence",
+    }[status]
+    return {
+        "fullRunResultId": _new_record_id("full-run-result"),
+        "status": status,
+        "gateDecision": gate_decision,
+        "planId": str(plan.get("planId") or ""),
+        "smokeResultId": str(active_smoke_result.get("smokeResultId") or ""),
+        "baselineArtifactId": str(active_baseline_artifact.get("artifactId") or ""),
+        "baselineMetricValue": _first_non_empty_text(payload.get("baselineMetricValue"), active_baseline_artifact.get("metricValue")),
+        "smokeMetricValue": _first_non_empty_text(payload.get("smokeMetricValue"), active_smoke_result.get("metricValue")),
+        "metricName": _first_non_empty_text(payload.get("metricName"), active_smoke_result.get("metricName"), active_baseline_artifact.get("metric"), experiment_plan.get("metric")),
+        "metricValue": metric_value,
+        "delta": _trim_text(payload.get("delta"), max_length=240),
+        "resultPath": result_path,
+        "logRef": log_ref,
+        "configPath": _trim_text(payload.get("configPath"), max_length=500),
+        "reproductionCommand": _trim_text(payload.get("reproductionCommand"), max_length=1200),
+        "evaluationCommand": _trim_text(payload.get("evaluationCommand") or payload.get("command"), max_length=1200),
+        "sourceRefs": _normalize_ref_list(payload.get("sourceRefs"), max_items=12),
+        "evidenceRefs": _normalize_ref_list(payload.get("evidenceRefs"), max_items=12),
+        "notes": _trim_text(payload.get("notes"), max_length=4000),
+        "metadata": payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {},
+        "recordedByAgent": recorded_by_agent,
+        "recordedAt": now,
+    }
+
+
+def _experiment_result_ingestion_pack_record(
+    plan: dict[str, Any],
+    payload: dict[str, Any],
+    *,
+    knowledge_base_id: str,
+    target_domain: str,
+    requested_by_agent: str,
+) -> dict[str, Any]:
+    active_full_run = plan.get("activeFullRunResult") if isinstance(plan.get("activeFullRunResult"), dict) else None
+    if not active_full_run or str(active_full_run.get("status") or "").strip().lower() != "passed":
+        raise TeamWorkflowOrchestrationError("Record a passing full-run result before requesting knowledge ingestion.")
+    experiment_plan = plan.get("experimentPlan") if isinstance(plan.get("experimentPlan"), dict) else {}
+    baseline_selection = plan.get("baselineSelection") if isinstance(plan.get("baselineSelection"), dict) else {}
+    active_baseline_artifact = (
+        baseline_selection.get("activeBaselineArtifact")
+        if isinstance(baseline_selection.get("activeBaselineArtifact"), dict)
+        else {}
+    )
+    active_smoke_result = plan.get("activeSmokeResult") if isinstance(plan.get("activeSmokeResult"), dict) else {}
+    now = utc_now_iso()
+    artifact_refs = [
+        {
+            "type": "baseline_artifact",
+            "id": str(active_baseline_artifact.get("artifactId") or ""),
+            "path": str(active_baseline_artifact.get("artifactPath") or ""),
+        },
+        {
+            "type": "smoke_result",
+            "id": str(active_smoke_result.get("smokeResultId") or ""),
+            "path": str(active_smoke_result.get("resultPath") or ""),
+            "logRef": str(active_smoke_result.get("logRef") or ""),
+        },
+        {
+            "type": "full_run_result",
+            "id": str(active_full_run.get("fullRunResultId") or ""),
+            "path": str(active_full_run.get("resultPath") or ""),
+            "logRef": str(active_full_run.get("logRef") or ""),
+            "configPath": str(active_full_run.get("configPath") or ""),
+        },
+    ]
+    selected_hypotheses = [item for item in list(plan.get("selectedHypotheses") or []) if isinstance(item, dict)]
+    return {
+        "packId": _new_record_id("experiment-result-pack"),
+        "kind": "challenge_cup_experiment_result_pack",
+        "status": "ready_for_knowledge_steward",
+        "planId": str(plan.get("planId") or ""),
+        "teamId": str(plan.get("teamId") or ""),
+        "stageRoundId": str(plan.get("stageRoundId") or ""),
+        "fullRunResultId": str(active_full_run.get("fullRunResultId") or ""),
+        "knowledgeBaseId": knowledge_base_id,
+        "targetDomain": target_domain,
+        "title": _trim_text(payload.get("title"), max_length=240) or f"Experiment result for {plan.get('title') or plan.get('topic') or 'Challenge Cup'}",
+        "summary": _trim_text(payload.get("summary"), max_length=4000)
+        or f"Full-run {active_full_run.get('status')} result: {active_full_run.get('metricName') or experiment_plan.get('metric')} = {active_full_run.get('metricValue')}.",
+        "hypothesisCandidateIds": [str(item.get("candidateId") or "") for item in selected_hypotheses if item.get("candidateId")],
+        "selectedHypotheses": selected_hypotheses,
+        "experimentPlan": {
+            "dataset": _trim_text(experiment_plan.get("dataset"), max_length=500),
+            "metric": _trim_text(experiment_plan.get("metric"), max_length=500),
+            "baseline": _trim_text(experiment_plan.get("baseline"), max_length=500),
+            "smokePlan": _trim_text(experiment_plan.get("smokePlan"), max_length=1200),
+        },
+        "metrics": {
+            "baselineMetricValue": str(active_full_run.get("baselineMetricValue") or ""),
+            "smokeMetricValue": str(active_full_run.get("smokeMetricValue") or ""),
+            "fullRunMetricName": str(active_full_run.get("metricName") or ""),
+            "fullRunMetricValue": str(active_full_run.get("metricValue") or ""),
+            "delta": str(active_full_run.get("delta") or ""),
+            "verdict": "supports" if str(active_full_run.get("status") or "") == "passed" else "inconclusive",
+        },
+        "artifactRefs": [item for item in artifact_refs if item.get("id") or item.get("path") or item.get("logRef")],
+        "sourceRefs": _normalize_ref_list(payload.get("sourceRefs") or active_full_run.get("sourceRefs"), max_items=12),
+        "evidenceRefs": _normalize_ref_list(payload.get("evidenceRefs") or active_full_run.get("evidenceRefs"), max_items=12),
+        "notes": _trim_text(payload.get("notes"), max_length=4000),
+        "metadata": payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {},
+        "officialBoundary": {
+            "currentWritesOfficialKnowledge": False,
+            "currentWritesOfficialRag": False,
+            "currentWritesOfficialGraph": False,
+            "rawLogsStoredOutsideRag": True,
+            "ragUsesCuratedSummaryOnly": True,
+            "finalIngestionOwnedByKnowledgeSteward": True,
+        },
+        "requestedByAgent": requested_by_agent,
+        "createdAt": now,
+    }
+
+
+def _notify_knowledge_steward_for_experiment_result(
+    team_id: str,
+    *,
+    steward_agent_id: str,
+    requester_agent_id: str,
+    experiment_result_pack: dict[str, Any],
+    knowledge_base_id: str,
+    target_domain: str,
+    wake_target: bool,
+) -> dict[str, Any]:
+    pack_id = str(experiment_result_pack.get("packId") or "")
+    full_run_result_id = str(experiment_result_pack.get("fullRunResultId") or "")
+    plan_id = str(experiment_result_pack.get("planId") or "")
+    activation = {
+        "status": "disabled",
+        "targetAgentId": steward_agent_id,
+        "messageId": "",
+        "threadId": "",
+        "wakeRequested": bool(wake_target),
+        "wakeStatus": "not_requested",
+        "delivery": None,
+        "metadata": {
+            "kind": "challenge_cup_experiment_result_ingestion_request",
+            "teamId": team_id,
+            "planId": plan_id,
+            "experimentResultPackId": pack_id,
+            "fullRunResultId": full_run_result_id,
+            "knowledgeBaseId": knowledge_base_id,
+            "targetDomain": target_domain,
+        },
+    }
+    if not steward_agent_id:
+        activation["status"] = "skipped_missing_steward_agent"
+        return activation
+
+    target_agent = agent_directory_service.get_agent(steward_agent_id, include_archived=True)
+    if not target_agent:
+        activation["status"] = "skipped_missing_steward_agent"
+        return activation
+    if str(target_agent.get("status") or "active").strip().lower() == "archived":
+        activation["status"] = "skipped_archived_steward_agent"
+        return activation
+
+    source_agent_id = requester_agent_id if requester_agent_id and agent_directory_service.get_agent(requester_agent_id, include_archived=True) else ""
+    content = "\n".join(
+        [
+            "[挑战杯实验结果入库请求]",
+            f"团队: {team_id}",
+            f"实验计划: {plan_id}",
+            f"实验结果包: {pack_id}",
+            f"Full-run 结果: {full_run_result_id}",
+            f"目标知识库: {knowledge_base_id}",
+            f"知识域: {target_domain}",
+            "",
+            "请作为知识库管理员 Agent 处理这个已复核实验结果包：",
+            "1. 读取 Team workflow experiment_plans/index.json 中的 knowledgeIngestion.experimentResultPack。",
+            "2. 复核 hypothesis、experimentPlan、metrics、artifactRefs、sourceRefs 和 evidenceRefs。",
+            "3. 只把整理后的实验结论写入正式 Team Knowledge/RAG；原始日志和大文件保持路径引用。",
+            "4. 无法确认时标记 needs_revision，不要把 raw logs 直接写入正式知识库。",
+        ]
+    )
+    try:
+        message = agent_directory_service.write_agent_inbox_message(
+            steward_agent_id,
+            content=content,
+            source_agent_id=source_agent_id,
+            thread_id=f"challenge-cup-experiment-ingestion:{team_id}:{pack_id}",
+            kind="challenge_cup_experiment_result_ingestion_request",
+            summary=f"挑战杯实验结果包 {pack_id} 请求最终入库。",
+            prompt_eligible=True,
+            created_by=requester_agent_id or "team_workflow",
+            metadata={
+                **activation["metadata"],
+                "requesterAgentId": requester_agent_id,
+                "expectedAction": "review_experiment_result_pack_to_team_knowledge",
+                "officialBoundary": dict(experiment_result_pack.get("officialBoundary") or {}),
+            },
+        )
+    except (agent_directory_service.AgentDirectoryError, agent_directory_service.AgentNotFoundError) as exc:
+        activation["status"] = "message_failed"
+        activation["error"] = str(exc)
+        return activation
+
+    activation.update(
+        {
+            "status": "message_written",
+            "messageId": str(message.get("messageId") or message.get("eventId") or ""),
+            "threadId": str(message.get("threadId") or ""),
+            "message": message,
+        }
+    )
+    if wake_target:
+        try:
+            from core.web.services import session_service
+
+            delivery = session_service.wake_agent_for_inbox_message(message)
+        except Exception as exc:
+            delivery = {
+                "wakeRequested": True,
+                "wakeStatus": "failed",
+                "reason": type(exc).__name__,
+            }
+        activation["delivery"] = delivery
+        activation["wakeStatus"] = str((delivery or {}).get("wakeStatus") or "unknown")
+        if activation["wakeStatus"] == "started":
+            activation["status"] = "agent_wake_started"
+        else:
+            activation["status"] = f"agent_wake_{activation['wakeStatus']}"
+    return activation
+
+
 def _refresh_experiment_plan_readiness(plan: dict[str, Any]) -> None:
     experiment_plan = plan.get("experimentPlan") if isinstance(plan.get("experimentPlan"), dict) else {}
     baseline_selection = plan.get("baselineSelection") if isinstance(plan.get("baselineSelection"), dict) else {}
@@ -9155,18 +9672,23 @@ def _refresh_experiment_plan_readiness(plan: dict[str, Any]) -> None:
     smoke_blockers = [item["item"] for item in checklist if item["status"] != "pass"]
     active_smoke_result = plan.get("activeSmokeResult") if isinstance(plan.get("activeSmokeResult"), dict) else None
     active_smoke_status = _trim_text((active_smoke_result or {}).get("status"), max_length=80).lower()
+    active_full_run_result = plan.get("activeFullRunResult") if isinstance(plan.get("activeFullRunResult"), dict) else None
+    active_full_run_status = _trim_text((active_full_run_result or {}).get("status"), max_length=80).lower()
     if smoke_blockers:
         full_run_blockers = smoke_blockers
     elif active_smoke_status == "passed":
         full_run_blockers = []
     else:
         full_run_blockers = ["smoke_result"]
+    knowledge_blockers = [] if active_full_run_status == "passed" else ["full_run_result"]
     plan["readinessChecklist"] = checklist
     plan["readiness"] = {
         "readyForPlanReview": all(item["status"] == "pass" for item in checklist if item["item"] != "active_baseline_record"),
         "readyForSmoke": not smoke_blockers,
         "readyForFullRun": not full_run_blockers,
+        "readyForKnowledgeIngestion": not knowledge_blockers,
         "blockers": full_run_blockers,
+        "knowledgeBlockers": knowledge_blockers,
     }
     risk_controls = plan.get("riskControls") if isinstance(plan.get("riskControls"), dict) else {}
     risk_controls["autoExecution"] = False
@@ -9174,6 +9696,8 @@ def _refresh_experiment_plan_readiness(plan: dict[str, Any]) -> None:
     risk_controls["smokeGateRequired"] = True
     risk_controls["fullRunBlockedUntil"] = full_run_blockers
     risk_controls["activeSmokeResultStatus"] = active_smoke_status
+    risk_controls["knowledgeIngestionBlockedUntil"] = knowledge_blockers
+    risk_controls["activeFullRunResultStatus"] = active_full_run_status
     plan["riskControls"] = risk_controls
 
 
@@ -9242,6 +9766,14 @@ def _experiment_planning_gaps(
             gaps.append({"code": "smoke_result_not_passed", "severity": "needs_attention", "message": "smoke 结果已登记但尚未通过，full run 继续阻塞。"})
         else:
             gaps.append({"code": "smoke_result_not_recorded", "severity": "pending", "message": "active baseline artifact 已登记；等待显式 smoke run 或 smoke 结果登记。"})
+    if active_plan and bool((active_plan.get("readiness") or {}).get("readyForFullRun")):
+        active_full_run_result = active_plan.get("activeFullRunResult") if isinstance(active_plan.get("activeFullRunResult"), dict) else None
+        if active_full_run_result and str(active_full_run_result.get("status") or "").strip().lower() != "passed":
+            gaps.append({"code": "full_run_result_not_passed", "severity": "needs_attention", "message": "full-run 结果已登记但尚未通过，不能进入正式知识入库。"})
+        elif not active_full_run_result:
+            gaps.append({"code": "full_run_result_not_recorded", "severity": "pending", "message": "smoke 已通过；等待显式 full-run 结果登记。"})
+        elif not isinstance(active_plan.get("knowledgeIngestion"), dict):
+            gaps.append({"code": "experiment_result_not_submitted_to_knowledge", "severity": "pending", "message": "full-run 结果已通过；等待生成实验结果包并通知知识库 Agent。"})
     return gaps
 
 
@@ -9252,6 +9784,15 @@ def _experiment_planning_readiness_reason(
 ) -> str:
     if not latest_experiment:
         return "需要先启动实验规划轮次。"
+    knowledge_ingestion = active_plan.get("knowledgeIngestion") if isinstance((active_plan or {}).get("knowledgeIngestion"), dict) else None
+    if active_plan and knowledge_ingestion:
+        return "实验结果包已进入知识库 Agent 入库请求链路；正式知识仍等待知识治理门禁。"
+    active_full_run = active_plan.get("activeFullRunResult") if isinstance((active_plan or {}).get("activeFullRunResult"), dict) else None
+    active_full_run_status = _trim_text((active_full_run or {}).get("status"), max_length=80).lower()
+    if active_plan and active_full_run_status == "passed":
+        return "full-run evidence 已通过；可以生成实验结果包并通知知识库 Agent。"
+    if active_plan and active_full_run_status:
+        return "full-run evidence 已登记但尚未通过；需要复核或修复后再进入知识入库。"
     if active_plan and bool((active_plan.get("readiness") or {}).get("readyForFullRun")):
         return "smoke evidence 已通过；可以进入显式 full-run 决策，但本接口不自动训练。"
     if active_plan and bool((active_plan.get("readiness") or {}).get("readyForSmoke")):
@@ -9265,6 +9806,8 @@ def _experiment_planning_readiness_reason(
 
 def _experiment_planning_next_actions(*, active_plan: dict[str, Any] | None, gaps: list[dict[str, str]]) -> list[str]:
     gap_codes = {item.get("code") for item in gaps}
+    if active_plan and isinstance(active_plan.get("knowledgeIngestion"), dict):
+        return ["Wait for the Knowledge Steward Agent to review the experiment result pack.", "Keep raw logs outside RAG until the steward approves a curated knowledge item."]
     if "missing_experiment_stage_round" in gap_codes:
         return ["Start the experiment planning stage round.", "Keep training execution disabled until a plan is reviewed."]
     if "missing_algorithm_hypotheses" in gap_codes or "incomplete_experiment_plan" in gap_codes:
@@ -9275,6 +9818,12 @@ def _experiment_planning_next_actions(*, active_plan: dict[str, Any] | None, gap
         return ["Run or record a smoke result using the registered active baseline artifact.", "Keep full-run execution blocked until smoke evidence is reviewed."]
     if "smoke_result_not_passed" in gap_codes:
         return ["Review the recorded smoke evidence.", "Repair the candidate or record a passing smoke result before full-run execution."]
+    if "full_run_result_not_recorded" in gap_codes:
+        return ["Run or record a full-run result using the passed smoke evidence.", "Keep knowledge ingestion blocked until full-run evidence is recorded."]
+    if "full_run_result_not_passed" in gap_codes:
+        return ["Review the full-run evidence.", "Repair the experiment or record a passing full-run result before requesting knowledge ingestion."]
+    if "experiment_result_not_submitted_to_knowledge" in gap_codes:
+        return ["Generate an experiment result ingestion pack.", "Notify the Knowledge Steward Agent for final Team Knowledge ingestion."]
     if active_plan:
         return ["Review the passed smoke evidence.", "Make a separate explicit decision before any full-run execution."]
     return ["Draft an experiment plan from ready algorithm hypotheses.", "Do not auto-run training."]

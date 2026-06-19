@@ -1301,6 +1301,128 @@ def test_experiment_smoke_result_requires_active_baseline_artifact(tmp_path, mon
         )
 
 
+def test_experiment_full_run_result_registration_tracks_ledger_without_official_ingestion(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = team_service.create_team(name="ai科学研究团队")
+    prepared = _create_experiment_plan_with_active_baseline(team["teamId"])
+    smoke = team_workflow_orchestration_service.register_experiment_smoke_result(
+        team["teamId"],
+        prepared["baseline"]["plan"]["planId"],
+        {
+            "status": "passed",
+            "metricValue": "0.75 validation accuracy",
+            "resultPath": "workspace/experiments/smoke/context-gated-routing.json",
+            "recordedByAgent": "Experiment Planning Agent",
+        },
+    )
+
+    registered = team_workflow_orchestration_service.register_experiment_full_run_result(
+        team["teamId"],
+        smoke["plan"]["planId"],
+        {
+            "status": "passed",
+            "metricName": "validation accuracy",
+            "metricValue": "0.79 validation accuracy",
+            "baselineMetricValue": "0.71 validation accuracy",
+            "smokeMetricValue": "0.75 validation accuracy",
+            "delta": "+0.08 accuracy",
+            "resultPath": "workspace/experiments/full_run/context-gated-routing.json",
+            "logRef": "logs/experiments/context-gated-routing-full-run.log",
+            "configPath": "workspace/experiments/full_run/context-gated-routing-config.json",
+            "recordedByAgent": "Experiment Planning Agent",
+        },
+    )
+    status = team_workflow_orchestration_service.get_experiment_planning_status(team["teamId"])
+
+    assert registered["fullRunResult"]["status"] == "passed"
+    assert registered["fullRunResult"]["gateDecision"] == "ready_for_knowledge_review"
+    assert registered["fullRunResult"]["smokeResultId"] == smoke["smokeResult"]["smokeResultId"]
+    assert registered["plan"]["status"] == "full_run_passed"
+    assert registered["plan"]["activeFullRunResultId"] == registered["fullRunResult"]["fullRunResultId"]
+    assert registered["plan"]["readiness"]["readyForFullRun"] is True
+    assert registered["plan"]["readiness"]["readyForKnowledgeIngestion"] is True
+    assert registered["plan"]["readiness"]["knowledgeBlockers"] == []
+    assert registered["stageRoundStatus"]["phases"][1]["latestRound"]["planningContract"]["readyForKnowledgeIngestion"] is True
+    assert status["status"] == "ready_for_knowledge_ingestion"
+    assert status["summary"]["activeFullRunResultId"] == registered["fullRunResult"]["fullRunResultId"]
+    assert status["boundaries"]["writesFormalKnowledge"] is False
+    assert status["boundaries"]["writesRag"] is False
+    assert status["boundaries"]["writesOfficialGraph"] is False
+
+
+def test_experiment_full_run_result_requires_passing_smoke_result(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = team_service.create_team(name="ai科学研究团队")
+    prepared = _create_experiment_plan_with_active_baseline(team["teamId"])
+
+    with pytest.raises(team_workflow_orchestration_service.TeamWorkflowOrchestrationError, match="passing smoke result"):
+        team_workflow_orchestration_service.register_experiment_full_run_result(
+            team["teamId"],
+            prepared["baseline"]["plan"]["planId"],
+            {
+                "status": "passed",
+                "metricValue": "0.79 validation accuracy",
+                "resultPath": "workspace/experiments/full_run/context-gated-routing.json",
+            },
+        )
+
+
+def test_experiment_result_knowledge_ingestion_request_notifies_steward_agent(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    requester = agent_directory_service.create_agent_instance(display_name="Experiment Planning Agent")
+    deliveries = []
+
+    def fake_wake(message):
+        deliveries.append(message)
+        return {
+            "wakeRequested": True,
+            "wakeStatus": "started",
+            "messageId": message["messageId"],
+            "targetAgentId": message["targetAgentId"],
+            "targetSessionId": message["targetSessionId"],
+            "turnId": "turn-experiment-ingest",
+            "reason": "",
+        }
+
+    monkeypatch.setattr(session_service, "wake_agent_for_inbox_message", fake_wake)
+    team = team_service.create_team(name="ai科学研究团队")
+    prepared = _create_experiment_plan_with_active_baseline(team["teamId"])
+    smoke = team_workflow_orchestration_service.register_experiment_smoke_result(
+        team["teamId"],
+        prepared["baseline"]["plan"]["planId"],
+        {"status": "passed", "metricValue": "0.75", "resultPath": "workspace/experiments/smoke/result.json"},
+    )
+    full_run = team_workflow_orchestration_service.register_experiment_full_run_result(
+        team["teamId"],
+        smoke["plan"]["planId"],
+        {"status": "passed", "metricValue": "0.79", "resultPath": "workspace/experiments/full_run/result.json"},
+    )
+
+    requested = team_workflow_orchestration_service.request_experiment_result_knowledge_ingestion(
+        team["teamId"],
+        full_run["plan"]["planId"],
+        {
+            "requestedByAgent": requester["agentId"],
+            "knowledgeBaseId": "research-team-experiment-kb",
+            "targetDomain": "挑战杯实验结果",
+        },
+    )
+    inbox_messages = agent_directory_service.list_agent_inbox_messages_for_agent(agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID, status="pending")
+
+    assert requested["status"]["status"] == "knowledge_steward_notified"
+    assert requested["plan"]["status"] == "knowledge_steward_notified"
+    assert requested["experimentResultPack"]["fullRunResultId"] == full_run["fullRunResult"]["fullRunResultId"]
+    assert requested["experimentResultPack"]["officialBoundary"]["currentWritesOfficialKnowledge"] is False
+    assert requested["experimentResultPack"]["officialBoundary"]["ragUsesCuratedSummaryOnly"] is True
+    assert requested["knowledgeStewardActivation"]["status"] == "agent_wake_started"
+    assert requested["knowledgeStewardActivation"]["targetAgentId"] == agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID
+    assert requested["knowledgeStewardActivation"]["delivery"]["turnId"] == "turn-experiment-ingest"
+    assert deliveries and deliveries[0]["kind"] == "challenge_cup_experiment_result_ingestion_request"
+    assert inbox_messages[0]["messageId"] == requested["knowledgeStewardActivation"]["messageId"]
+    assert inbox_messages[0]["metadata"]["experimentResultPackId"] == requested["experimentResultPack"]["packId"]
+    assert inbox_messages[0]["metadata"]["fullRunResultId"] == full_run["fullRunResult"]["fullRunResultId"]
+
+
 def test_experiment_plan_requires_experiment_stage_round(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     team = team_service.create_team(name="ai科学研究团队")

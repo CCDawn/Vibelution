@@ -38,9 +38,11 @@ from core.web.services.team_workflow_orchestration_service import (
     plan_paper_note_chunks_from_source_candidate,
     record_local_research_model_output,
     register_experiment_baseline_artifact,
+    register_experiment_full_run_result,
     register_experiment_smoke_result,
     register_official_model_evidence,
     register_candidate_source,
+    request_experiment_result_knowledge_ingestion,
     review_steward_pack_knowledge_ingestion,
     retry_research_stage_round_coordination,
     retry_research_stage_round_memory_record,
@@ -222,6 +224,39 @@ class ExperimentSmokeResultPayload(BaseModel):
     resultPath: str = Field("", max_length=500)
     logRef: str = Field("", max_length=500)
     evaluationCommand: str = Field("", max_length=1200)
+    sourceRefs: list[dict[str, Any]] = Field(default_factory=list, max_length=12)
+    evidenceRefs: list[dict[str, Any]] = Field(default_factory=list, max_length=12)
+    notes: str = Field("", max_length=4000)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class ExperimentFullRunResultPayload(BaseModel):
+    recordedByAgent: str = Field("", max_length=160)
+    status: str = Field("needs_review", max_length=80)
+    metricName: str = Field("", max_length=500)
+    metricValue: str = Field("", max_length=240)
+    baselineMetricValue: str = Field("", max_length=240)
+    smokeMetricValue: str = Field("", max_length=240)
+    delta: str = Field("", max_length=240)
+    resultPath: str = Field("", max_length=500)
+    logRef: str = Field("", max_length=500)
+    configPath: str = Field("", max_length=500)
+    reproductionCommand: str = Field("", max_length=1200)
+    evaluationCommand: str = Field("", max_length=1200)
+    sourceRefs: list[dict[str, Any]] = Field(default_factory=list, max_length=12)
+    evidenceRefs: list[dict[str, Any]] = Field(default_factory=list, max_length=12)
+    notes: str = Field("", max_length=4000)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class ExperimentResultKnowledgeIngestionPayload(BaseModel):
+    requestedByAgent: str = Field("", max_length=160)
+    stewardAgentId: str = Field("", max_length=160)
+    knowledgeBaseId: str = Field("", max_length=160)
+    targetDomain: str = Field("", max_length=240)
+    wakeStewardAgent: bool = True
+    title: str = Field("", max_length=240)
+    summary: str = Field("", max_length=4000)
     sourceRefs: list[dict[str, Any]] = Field(default_factory=list, max_length=12)
     evidenceRefs: list[dict[str, Any]] = Field(default_factory=list, max_length=12)
     notes: str = Field("", max_length=4000)
@@ -629,6 +664,55 @@ def team_workflow_experiment_smoke_result_register(team_id: str, plan_id: str, p
             exc,
             status_code=422,
             fields={"planId": plan_id, "recordedByAgent": payload.recordedByAgent, "status": payload.status},
+        )
+
+
+@router.post("/teams/{team_id}/workflow-orchestration/experiments/plans/{plan_id}/full-run-result", status_code=status.HTTP_201_CREATED)
+def team_workflow_experiment_full_run_result_register(team_id: str, plan_id: str, payload: ExperimentFullRunResultPayload) -> dict:
+    try:
+        return register_experiment_full_run_result(team_id, plan_id, payload.model_dump())
+    except TeamNotFoundError as exc:
+        _raise_team_workflow_route_error(
+            "experiment_full_run_result.register",
+            team_id,
+            exc,
+            status_code=404,
+            fields={"planId": plan_id, "recordedByAgent": payload.recordedByAgent},
+        )
+    except (TeamServiceError, TeamWorkflowOrchestrationError) as exc:
+        _raise_team_workflow_route_error(
+            "experiment_full_run_result.register",
+            team_id,
+            exc,
+            status_code=422,
+            fields={"planId": plan_id, "recordedByAgent": payload.recordedByAgent, "status": payload.status},
+        )
+
+
+@router.post("/teams/{team_id}/workflow-orchestration/experiments/plans/{plan_id}/knowledge-ingestion-request", status_code=status.HTTP_201_CREATED)
+def team_workflow_experiment_result_knowledge_ingestion_request(team_id: str, plan_id: str, payload: ExperimentResultKnowledgeIngestionPayload) -> dict:
+    try:
+        return request_experiment_result_knowledge_ingestion(team_id, plan_id, payload.model_dump())
+    except TeamNotFoundError as exc:
+        _raise_team_workflow_route_error(
+            "experiment_result_knowledge_ingestion.request",
+            team_id,
+            exc,
+            status_code=404,
+            fields={"planId": plan_id, "requestedByAgent": payload.requestedByAgent},
+        )
+    except (TeamServiceError, TeamWorkflowOrchestrationError) as exc:
+        _raise_team_workflow_route_error(
+            "experiment_result_knowledge_ingestion.request",
+            team_id,
+            exc,
+            status_code=422,
+            fields={
+                "planId": plan_id,
+                "requestedByAgent": payload.requestedByAgent,
+                "stewardAgentId": payload.stewardAgentId,
+                "knowledgeBaseId": payload.knowledgeBaseId,
+            },
         )
 
 
