@@ -832,6 +832,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("sendProjectAgentBusMessage({ content, interruptTargets })");
     expect(routeSource).toContain("revokeProjectAgentBusMessage({");
     expect(routeSource).toContain("isProjectAgentBusEventRevoked(event)");
+    expect(routeSource).toContain("kernelTaskCenterHref");
+    expect(routeSource).toContain("event.kernel?.taskId");
     expect(routeSource).toContain("handleRevokeProjectBusMessage(event.eventId)");
     expect(routeSource).toContain("projectBusInterruptTargets");
     expect(routeSource).toContain("助手通知流");
@@ -855,6 +857,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.projectBusEventBody).toBeTypeOf("string");
     expect(routeStyles.agentMention).toBeTypeOf("string");
     expect(routeStyles.projectBusEventMeta).toBeTypeOf("string");
+    expect(routeStyles.kernelTraceLink).toBeTypeOf("string");
     expect(routeStyles.projectBusInterruptToggle).toBeTypeOf("string");
   });
 
