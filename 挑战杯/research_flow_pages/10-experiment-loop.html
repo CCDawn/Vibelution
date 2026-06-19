@@ -35,7 +35,7 @@
           <div class="diagram">
             <div class="flow-cell"><strong>输入</strong><span>experiment ResearchStageRound / algorithm_hypothesis</span></div>
             <div class="flow-cell"><strong>动作</strong><span>GET experiments/status 聚合实验轮次、算法假设候选、计划草稿、baseline/metric/dataset/smoke 缺口。</span></div>
-            <div class="flow-cell"><strong>输出</strong><span>experiment_plan 草稿 / readinessChecklist</span></div>
+            <div class="flow-cell"><strong>输出</strong><span>experiment_plan 草稿 / active_baseline_artifact</span></div>
             <div class="flow-cell"><strong>记忆/图谱</strong><span>本切片不创建 ExperimentResult 边；未来边仍是 AlgorithmHypothesis evaluated_by ExperimentResult。</span></div>
           </div>
         </section>
@@ -53,11 +53,13 @@
 <li>baseline/metric/dataset/smokePlan</li></ul></article>
             <article class="plan-card"><h2>处理动作</h2><ul><li>GET experiments/status 聚合实验轮次、算法假设候选、计划草稿、baseline/metric/dataset/smoke 缺口。</li>
 <li>POST experiments/plan 生成 experiment_plan 草稿，写入 experiment_plans/index.json 并挂回 ResearchStageRound。</li>
+<li>POST experiments/plans/{planId}/baseline-artifact 登记 active baseline artifact，解除 baseline blocker 并开放 smoke gate。</li>
 <li>Teams 实验阶段页展示实验计划账本、候选算法假设、readyForSmoke/readyForFullRun 门禁和阻塞项。</li>
 <li>强制边界：不创建 ExperimentResult，不触发训练 runner，不写正式 Team Knowledge/RAG/official graph。</li></ul></article>
             <article class="plan-card"><h2>输出物</h2><ul><li>experiment_plan 草稿</li>
+<li>active_baseline_artifact</li>
 <li>readinessChecklist</li>
-<li>baselineSelection blocker</li>
+<li>baselineSelection</li>
 <li>promotion/reject 前置门禁</li></ul></article>
             <article class="plan-card"><h2>风险</h2><ul><li>计划草稿被误认为已训练</li>
 <li>active baseline artifact 缺失</li>
