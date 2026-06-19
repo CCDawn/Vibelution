@@ -30,6 +30,8 @@ export const queryKeys = {
   chatRoom: (id: string) => ["chat-rooms", id] as const,
   chatRoomModes: () => ["chat-rooms", "modes"] as const,
   chatRoomPurposes: () => ["chat-rooms", "purposes"] as const,
+  kernelTasks: (status = "", limit = 80) => ["kernel", "tasks", status, limit] as const,
+  kernelTaskTimeline: (taskId: string) => ["kernel", "tasks", taskId, "timeline"] as const,
   projectAgentBus: () => ["project-agent-bus"] as const,
   teams: () => ["teams"] as const,
   teamTemplates: () => ["team-templates"] as const,
