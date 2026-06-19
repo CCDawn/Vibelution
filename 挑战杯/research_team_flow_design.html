@@ -286,7 +286,7 @@
                 <span class="num">10</span>
                 <h3>实验验证闭环</h3>
                 <p>已把可用算法假设推进到实验计划草稿、active baseline artifact 和 smoke 结果账本；真实训练 runner 仍由后续切片承接。</p>
-                <div class="tag-row"><span class="tag active">smoke 结果登记 API 已接入</span><span class="tag">Experiment Planning Agent / Experiment Ledger Service</span></div>
+                <div class="tag-row"><span class="tag active">smoke 结果登记 UI/API 已接入</span><span class="tag">Experiment Planning Agent / Experiment Ledger Service</span></div>
               </a>
 <a class="node-card" href="research_flow_pages/11-iteration-versioning.html">
                 <span class="num">11</span>
@@ -810,8 +810,8 @@
       </div>
 <div class="feature-row">
         <strong>Smoke 结果登记</strong>
-        <span>experiments/plans/{planId}/smoke-result 登记 smoke 指标、结果路径、日志引用和 gateDecision；passed 后 readyForFullRun=true，但仍不自动训练</span>
-        <b class="status-pill">已接入后端/API</b>
+        <span>experiments/plans/{planId}/smoke-result 登记 smoke 指标、结果路径、日志引用和 gateDecision；Teams 实验账本可登记和回显 active smoke，passed 后 readyForFullRun=true，但仍不自动训练</span>
+        <b class="status-pill">已接入前端/API</b>
       </div>
 <div class="feature-row">
         <strong>评级建议</strong>
@@ -1373,7 +1373,7 @@
                 </div>
 <div class="service-row">
                   <b>TeamsRoute workflow workspace</b>
-                  <span>已落地入口：Teams 页顶部固定横向切换条只暴露 AI 搜索范围团队和 ai科学研究团队，左侧栏已删除；监督进化/自进化模式页各自读取系统 Team 并展示只读团队画布；选择 ai科学研究团队后直接进入 research-team 专属科研控制台；总览只显示知识搜集、实验、迭代三张阶段卡，每张卡一个主操作和一个阶段详情入口。知识搜集卡会显示当前批次、待处理、候选和查询数，主按钮按状态执行开始、下一批搜索、筛选入口或打开工作台，另有新一轮搜集入口。知识搜集页位于 /teams?team=research-team&amp;researchView=knowledge_collection，默认展示高价值状态摘要、状态驱动主操作和对话式 source collection 过程流；点击知识搜集主按钮会通过 stage-rounds/start 创建轮次并立即排队第一批后台 source collection 搜索；执行 source collection 搜索时会写入 source_collection_run 运行快照，让 AppShell 顶部“正在进行”优先显示知识搜集；资料搜集 run 列表通过 data-processing 服务端 teamId/startedFrom 过滤，避免被其它团队批次挤掉；后台 accepted 后 activeWorkRun 会进入控制台和对话流，直到 runStatus 收口；资料搜集、资料筛选、候选入库、候选图谱、共享记忆前审五张步骤卡各自带主按钮并作为页内子页索引，顶部卡片只保留状态、关键数量和主操作，不再显示输入/输出小框；底部只显示当前阶段内容，并拆成结果与 Agent过程；右侧只显示当前步骤操作、当前资料详情、关键数量和当前步骤 Agent 配置；资料筛选会调用资料质量评估 Agent 批量执行，完成后展开、滚动并高亮页内筛选详情；KV/prompt cache 由后端从当前模型库解析，不再依赖旧固定模型 ID，过程流把 KV 缓存模型与执行 Agent 模型分层展示；稳定前缀、动态增量、assignment、query、存储路径和手工回写保留在可展开详情中；默认层移除解释性小字且使用实体工作台背景，避免主题壁纸压住正文；实验页新增实验计划账本，可生成计划草稿并登记 active baseline artifact，显示 baseline/metric/dataset/smoke 缺口、readyForSmoke 和 full-run 阻塞；迭代页先提供规划启动、轮次状态和边界说明；旧 source_collection 参数兼容映射到知识搜集。</span>
+                  <span>已落地入口：Teams 页顶部固定横向切换条只暴露 AI 搜索范围团队和 ai科学研究团队，左侧栏已删除；监督进化/自进化模式页各自读取系统 Team 并展示只读团队画布；选择 ai科学研究团队后直接进入 research-team 专属科研控制台；总览只显示知识搜集、实验、迭代三张阶段卡，每张卡一个主操作和一个阶段详情入口。知识搜集卡会显示当前批次、待处理、候选和查询数，主按钮按状态执行开始、下一批搜索、筛选入口或打开工作台，另有新一轮搜集入口。知识搜集页位于 /teams?team=research-team&amp;researchView=knowledge_collection，默认展示高价值状态摘要、状态驱动主操作和对话式 source collection 过程流；点击知识搜集主按钮会通过 stage-rounds/start 创建轮次并立即排队第一批后台 source collection 搜索；执行 source collection 搜索时会写入 source_collection_run 运行快照，让 AppShell 顶部“正在进行”优先显示知识搜集；资料搜集 run 列表通过 data-processing 服务端 teamId/startedFrom 过滤，避免被其它团队批次挤掉；后台 accepted 后 activeWorkRun 会进入控制台和对话流，直到 runStatus 收口；资料搜集、资料筛选、候选入库、候选图谱、共享记忆前审五张步骤卡各自带主按钮并作为页内子页索引，顶部卡片只保留状态、关键数量和主操作，不再显示输入/输出小框；底部只显示当前阶段内容，并拆成结果与 Agent过程；右侧只显示当前步骤操作、当前资料详情、关键数量和当前步骤 Agent 配置；资料筛选会调用资料质量评估 Agent 批量执行，完成后展开、滚动并高亮页内筛选详情；KV/prompt cache 由后端从当前模型库解析，不再依赖旧固定模型 ID，过程流把 KV 缓存模型与执行 Agent 模型分层展示；稳定前缀、动态增量、assignment、query、存储路径和手工回写保留在可展开详情中；默认层移除解释性小字且使用实体工作台背景，避免主题壁纸压住正文；实验页新增实验计划账本，可生成计划草稿并登记 active baseline artifact 与 smoke result，显示 baseline/metric/dataset/smoke 缺口、active smoke 摘要、readyForSmoke 和 full-run 阻塞/解锁；迭代页先提供规划启动、轮次状态和边界说明；旧 source_collection 参数兼容映射到知识搜集。</span>
                 </div>
 <div class="service-row">
                   <b>local_research_worker_model</b>
@@ -2310,7 +2310,7 @@
               <b>M7.2</b>
               <strong>Smoke 结果登记</strong>
               <span>新增 experiments/plans/{planId}/smoke-result：登记 smoke 指标、结果路径、日志引用和 gateDecision，并更新 activeSmokeResult。</span>
-              <span>status=passed 才让 readyForFullRun=true；failed/needs_review 继续阻塞 full-run；接口仍不创建 ExperimentResult、不触发训练 runner。</span>
+              <span>Teams 实验账本已接 smoke 结果登记和 active smoke 回显；status=passed 才让 readyForFullRun=true；failed/needs_review 继续阻塞 full-run；仍不创建 ExperimentResult、不触发训练 runner。</span>
             </div>
       </div>
       <div class="tag-row">

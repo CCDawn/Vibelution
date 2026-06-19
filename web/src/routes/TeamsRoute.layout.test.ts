@@ -576,6 +576,13 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("baseline-artifact");
     expect(routeSource).toContain("登记基线工件");
     expect(routeSource).toContain("reproductionCommand");
+    expect(routeSource).toContain("smoke-result");
+    expect(routeSource).toContain("ExperimentSmokeResultRecord");
+    expect(routeSource).toContain("activeSmokeResult");
+    expect(routeSource).toContain("gateDecision");
+    expect(routeSource).toContain("登记 smoke 结果");
+    expect(routeSource).toContain("needs_review");
+    expect(routeSource).toContain("full-run 已解锁");
     expect(routeSource).toContain("readyForSmoke");
     expect(routeSource).toContain("baselineSelection");
     expect(routeSource).toContain("readyForFullRun");
