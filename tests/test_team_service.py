@@ -254,6 +254,62 @@ def test_research_team_sync_restores_missing_historical_team_chat_room_id(tmp_pa
     assert [participant["agentId"] for participant in room["participants"]] == [alpha["agentId"], beta["agentId"]]
 
 
+def test_research_team_sync_preserves_current_room_and_restores_historical_room_refs(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    alpha = agent_directory_service.create_agent_instance(display_name="Alpha", direct_session_id="session-alpha")
+    beta = agent_directory_service.create_agent_instance(display_name="Beta", direct_session_id="session-beta")
+    organization = {
+        "agents": [
+            {"nodeId": "alpha-node", "agentId": alpha["agentId"], "displayName": "Alpha", "role": "lead", "status": "active"},
+            {"nodeId": "beta-node", "agentId": beta["agentId"], "displayName": "Beta", "role": "reviewer", "status": "active"},
+        ],
+        "edges": [],
+    }
+
+    current = team_service.ensure_research_team_from_organization(organization)
+    current_room_id = current["linkedChatRoomId"]
+    historical_room_id = "room-20260529-090009-757107-6a747d62"
+    rounds_path = tmp_path / "workspace" / "teams" / "research-team" / "research_stage_rounds" / "index.json"
+    rounds_path.parent.mkdir(parents=True, exist_ok=True)
+    rounds_path.write_text(
+        json.dumps(
+            {
+                "rounds": [
+                    {
+                        "roundId": "round-historical",
+                        "coordinationRoomId": historical_room_id,
+                        "coordinationContract": {
+                            "linkedChatRoomId": historical_room_id,
+                            "startResult": {"roomId": historical_room_id},
+                        },
+                    },
+                    {
+                        "roundId": "round-current",
+                        "coordinationContract": {
+                            "linkedChatRoomId": current_room_id,
+                            "startResult": {"roomId": current_room_id},
+                        },
+                    },
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    repaired = team_service.get_team("research-team")
+    restored_room = chat_room_service.get_chat_room_detail(historical_room_id)
+    reloaded = team_service.get_team("research-team")
+
+    assert repaired["linkedChatRoomId"] == current_room_id
+    assert reloaded["linkedChatRoomId"] == current_room_id
+    assert restored_room is not None
+    assert restored_room["config"]["historicalTeamRoom"] is True
+    assert restored_room["config"]["currentLinkedChatRoomId"] == current_room_id
+    assert chat_room_service.get_chat_room_detail(historical_room_id) is not None
+    assert {room["roomId"] for room in chat_room_service.list_chat_rooms()} == {current_room_id, historical_room_id}
+
+
 def test_team_chat_room_sync_preserves_existing_config_extensions(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     agent = agent_directory_service.create_agent_instance(display_name="Alpha", direct_session_id="session-alpha")
