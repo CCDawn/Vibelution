@@ -573,6 +573,10 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("renderExperimentPlanningLedgerPanel");
     expect(routeSource).toContain("实验计划账本");
     expect(routeSource).toContain("生成计划草稿");
+    expect(routeSource).toContain("baseline-artifact");
+    expect(routeSource).toContain("登记基线工件");
+    expect(routeSource).toContain("reproductionCommand");
+    expect(routeSource).toContain("readyForSmoke");
     expect(routeSource).toContain("baselineSelection");
     expect(routeSource).toContain("readyForFullRun");
     expect(routeSource).toContain("No training execution was triggered.");

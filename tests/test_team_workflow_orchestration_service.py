@@ -1065,6 +1065,103 @@ def test_experiment_plan_draft_uses_ready_algorithm_hypotheses_and_blocks_full_r
     assert status["boundaries"]["createsExperimentAttempt"] is False
 
 
+def test_experiment_baseline_artifact_registration_unlocks_smoke_gate(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = team_service.create_team(name="ai科学研究团队")
+    team_workflow_orchestration_service.record_local_research_model_output(
+        team["teamId"],
+        {
+            "taskType": "algorithm_hypothesis_draft",
+            "title": "Context gated routing",
+            "createdByAgent": "Algorithm Hypothesis Agent",
+            "output": {
+                "candidateType": "algorithm_hypothesis",
+                "sourceRefs": [{"type": "paper", "id": "paper-1", "label": "Paper 1"}],
+                "evidenceRefs": [{"type": "mapping", "id": "mapping-1", "label": "Mapping 1"}],
+                "claims": [{"claim": "Context-gated routing may improve adaptation.", "sourceRef": "paper-1"}],
+                "mechanismMappingIds": ["mapping-1"],
+                "hypothesis": "Context-gated routing improves adaptation under shifting tasks.",
+                "baseline": "standard MoE router",
+                "expectedBenefit": "better task adaptation at equal parameter count",
+                "expectedComputeCost": "one small gating MLP and no extra experts",
+                "experimentPlan": {
+                    "dataset": "synthetic task-switch benchmark",
+                    "metric": "validation accuracy and routing entropy",
+                    "baseline": "standard MoE router",
+                    "smokePlan": "train 200 mini-batches and compare metric direction",
+                },
+                "uncertainty": [],
+                "riskFlags": [],
+                "confidence": 0.52,
+                "nextAction": "send_to_research_review",
+                "requiresReview": True,
+            },
+        },
+    )
+    stage = team_workflow_orchestration_service.start_research_stage_round(
+        team["teamId"],
+        {"stageType": "experiment", "topic": "routing experiment plan"},
+    )
+    draft = team_workflow_orchestration_service.create_experiment_plan(
+        team["teamId"],
+        {"stageRoundId": stage["stageRound"]["stageRoundId"], "createdByAgent": "Research Coordination Agent"},
+    )
+
+    registered = team_workflow_orchestration_service.register_experiment_baseline_artifact(
+        team["teamId"],
+        draft["plan"]["planId"],
+        {
+            "artifactPath": "workspace/experiments/baselines/standard-moe-router.json",
+            "reproductionCommand": "python experiments/run_baseline.py --config configs/standard_moe_router.yaml",
+            "evaluationCommand": "python experiments/evaluate.py --run standard-moe-router",
+            "metricValue": "0.71 validation accuracy",
+            "registeredByAgent": "Experiment Planning Agent",
+        },
+    )
+    status = team_workflow_orchestration_service.get_experiment_planning_status(team["teamId"])
+
+    assert registered["baselineArtifact"]["artifactPath"].endswith("standard-moe-router.json")
+    assert registered["plan"]["status"] == "baseline_ready"
+    assert registered["plan"]["baselineSelection"]["activeBaselineReady"] is True
+    assert registered["plan"]["baselineSelection"]["activeBaselineArtifactId"] == registered["baselineArtifact"]["artifactId"]
+    assert registered["plan"]["readiness"]["readyForSmoke"] is True
+    assert registered["plan"]["readiness"]["readyForFullRun"] is False
+    assert "active_baseline_record" not in registered["plan"]["readiness"]["blockers"]
+    assert "smoke_result" in registered["plan"]["readiness"]["blockers"]
+    assert registered["stageRoundStatus"]["phases"][1]["latestRound"]["planningContract"]["readyForSmoke"] is True
+    assert status["status"] == "ready_for_smoke"
+    assert status["readiness"]["readyForSmoke"] is True
+    assert not any(gap["code"] == "active_baseline_not_registered" for gap in status["gaps"])
+    assert any(gap["code"] == "smoke_result_not_recorded" for gap in status["gaps"])
+    assert status["boundaries"]["createsExperimentAttempt"] is False
+
+
+def test_experiment_baseline_artifact_requires_artifact_path(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = team_service.create_team(name="ai科学研究团队")
+    stage = team_workflow_orchestration_service.start_research_stage_round(
+        team["teamId"],
+        {"stageType": "experiment", "topic": "routing experiment plan"},
+    )
+    draft = team_workflow_orchestration_service.create_experiment_plan(
+        team["teamId"],
+        {
+            "stageRoundId": stage["stageRound"]["stageRoundId"],
+            "dataset": "synthetic task-switch benchmark",
+            "metric": "validation accuracy",
+            "baseline": "standard MoE router",
+            "smokePlan": "train 200 mini-batches",
+        },
+    )
+
+    with pytest.raises(team_workflow_orchestration_service.TeamWorkflowOrchestrationError, match="Baseline artifact path is required"):
+        team_workflow_orchestration_service.register_experiment_baseline_artifact(
+            team["teamId"],
+            draft["plan"]["planId"],
+            {"reproductionCommand": "python experiments/run_baseline.py"},
+        )
+
+
 def test_experiment_plan_requires_experiment_stage_round(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     team = team_service.create_team(name="ai科学研究团队")

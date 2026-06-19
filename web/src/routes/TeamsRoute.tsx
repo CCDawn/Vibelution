@@ -758,6 +758,21 @@ type ExperimentHypothesisCandidateSummary = {
   updatedAt: string;
 };
 
+type ExperimentBaselineArtifactRecord = {
+  artifactId: string;
+  status: string;
+  baseline: string;
+  dataset: string;
+  metric: string;
+  metricValue: string;
+  artifactPath: string;
+  evidenceRef: string;
+  reproductionCommand: string;
+  evaluationCommand: string;
+  registeredByAgent: string;
+  registeredAt: string;
+};
+
 type ExperimentPlanRecord = {
   planId: string;
   stageRoundId: string;
@@ -777,6 +792,9 @@ type ExperimentPlanRecord = {
     baseline: string;
     status: string;
     activeBaselineReady: boolean;
+    activeBaselineArtifactId?: string;
+    activeBaselineArtifact?: ExperimentBaselineArtifactRecord;
+    artifacts?: ExperimentBaselineArtifactRecord[];
     reason: string;
   };
   readinessChecklist: ExperimentPlanChecklistItem[];
@@ -835,6 +853,22 @@ type ExperimentPlanCreatePayload = {
   stageRoundStatus: ResearchStageRoundStatusPayload;
   workflow: TeamWorkflowOrchestration;
   boundaries: ExperimentPlanningStatusPayload["boundaries"];
+};
+
+type ExperimentBaselineArtifactRegisterPayload = {
+  baselineArtifact: ExperimentBaselineArtifactRecord;
+  plan: ExperimentPlanRecord;
+  status: ExperimentPlanningStatusPayload;
+  stageRoundStatus: ResearchStageRoundStatusPayload;
+  workflow: TeamWorkflowOrchestration;
+  boundaries: ExperimentPlanningStatusPayload["boundaries"];
+};
+
+type ExperimentBaselineArtifactDraft = {
+  artifactPath: string;
+  reproductionCommand: string;
+  evaluationCommand: string;
+  metricValue: string;
 };
 
 type TeamWorkflowOfficialModelEvidenceCoverage = {
@@ -2837,6 +2871,12 @@ export function TeamsRoute({
     summary: "",
     notes: "",
   });
+  const [experimentBaselineArtifactDraft, setExperimentBaselineArtifactDraft] = useState<ExperimentBaselineArtifactDraft>({
+    artifactPath: "",
+    reproductionCommand: "",
+    evaluationCommand: "",
+    metricValue: "",
+  });
   const [selectedSourceCollectionStageId, setSelectedSourceCollectionStageId] = useState<SourceCollectionStageModuleId>(
     requestedSourceCollectionStage ?? "collection",
   );
@@ -3544,6 +3584,39 @@ export function TeamsRoute({
     },
   });
 
+  const registerExperimentBaselineArtifactMutation = useMutation({
+    mutationFn: (payload: {
+      teamId: string;
+      plan: ExperimentPlanRecord;
+      draft: ExperimentBaselineArtifactDraft;
+    }) =>
+      fetchJson<ExperimentBaselineArtifactRegisterPayload>(
+        `/api/teams/${encodeURIComponent(payload.teamId)}/workflow-orchestration/experiments/plans/${encodeURIComponent(payload.plan.planId)}/baseline-artifact`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            registeredByAgent: sourceCollectionOwnerAgentId,
+            baselineName: payload.plan.experimentPlan.baseline || payload.plan.baselineSelection.baseline || "",
+            datasetRef: payload.plan.experimentPlan.dataset || "",
+            metricName: payload.plan.experimentPlan.metric || "",
+            metricValue: payload.draft.metricValue.trim(),
+            artifactPath: payload.draft.artifactPath.trim(),
+            reproductionCommand: payload.draft.reproductionCommand.trim(),
+            evaluationCommand: payload.draft.evaluationCommand.trim(),
+            notes: "Registered from the experiment planning workspace. No training execution was triggered.",
+          }),
+        },
+      ),
+    onSuccess: (payload, variables) => {
+      queryClient.setQueryData(experimentPlanningStatusQueryKey(variables.teamId), payload.status);
+      queryClient.setQueryData(researchStageRoundStatusQueryKey(variables.teamId), payload.stageRoundStatus);
+      queryClient.setQueryData(queryKeys.teamWorkflow(variables.teamId), payload.workflow);
+      void queryClient.invalidateQueries({ queryKey: experimentPlanningStatusQueryKey(variables.teamId) });
+      void queryClient.invalidateQueries({ queryKey: researchStageRoundStatusQueryKey(variables.teamId) });
+    },
+  });
+
   const recordSourceCollectionOutputMutation = useMutation({
     mutationFn: async (payload: { teamId: string; runId: string; draft: SourceCollectionOutputDraft }) => {
       const output = await fetchJson<DataProcessingCollectionOutputPayload>(
@@ -3947,6 +4020,17 @@ export function TeamsRoute({
       teamId: selectedTeam.teamId,
       stageRoundId,
       title: sourceCollectionDraft.title.trim() || experimentPhase?.latestRound?.title || "",
+    });
+  }
+
+  function registerExperimentBaselineArtifactFromWorkspace(plan: ExperimentPlanRecord) {
+    if (!selectedTeam?.teamId || selectedTeamRegisterExperimentBaselineArtifactPending) {
+      return;
+    }
+    registerExperimentBaselineArtifactMutation.mutate({
+      teamId: selectedTeam.teamId,
+      plan,
+      draft: experimentBaselineArtifactDraft,
     });
   }
 
@@ -6344,13 +6428,23 @@ export function TeamsRoute({
   }
 
   function renderExperimentPlanningLedgerPanel() {
+    const latestBaselineMutationPayload = selectedTeamRegisterExperimentBaselineArtifactResult;
     const latestMutationPayload = selectedTeamCreateExperimentPlanResult;
-    const statusPayload = latestMutationPayload?.status ?? experimentPlanningStatus;
-    const activePlan = latestMutationPayload?.plan ?? statusPayload?.activePlan ?? null;
+    const statusPayload = latestBaselineMutationPayload?.status ?? latestMutationPayload?.status ?? experimentPlanningStatus;
+    const activePlan = latestBaselineMutationPayload?.plan ?? latestMutationPayload?.plan ?? statusPayload?.activePlan ?? null;
+    const activeBaselineArtifact = activePlan?.baselineSelection.activeBaselineArtifact ?? null;
     const hypotheses = statusPayload?.readyHypothesisCandidates?.length
       ? statusPayload.readyHypothesisCandidates
       : statusPayload?.hypothesisCandidates ?? [];
     const canDraftPlan = Boolean(selectedTeam?.teamId && statusPayload?.latestExperimentRound && !selectedTeamCreateExperimentPlanPending);
+    const canRegisterBaselineArtifact = Boolean(
+      selectedTeam?.teamId
+      && activePlan
+      && !activePlan.baselineSelection.activeBaselineReady
+      && experimentBaselineArtifactDraft.artifactPath.trim()
+      && experimentBaselineArtifactDraft.reproductionCommand.trim()
+      && !selectedTeamRegisterExperimentBaselineArtifactPending,
+    );
     const summary = statusPayload?.summary;
     return (
       <section className={styles.experimentLedgerPanel} aria-label={lang === "zh" ? "实验计划账本" : "Experiment planning ledger"}>
@@ -6390,29 +6484,79 @@ export function TeamsRoute({
           </span>
         </div>
         {activePlan ? (
-          <div className={styles.experimentPlanGrid}>
-            <article className={styles.experimentPlanSummary}>
-              <div>
-                <span>{lang === "zh" ? "当前草稿" : "Active draft"}</span>
-                <strong>{activePlan.title}</strong>
+          <>
+            <div className={styles.experimentPlanGrid}>
+              <article className={styles.experimentPlanSummary}>
+                <div>
+                  <span>{lang === "zh" ? "当前草稿" : "Active draft"}</span>
+                  <strong>{activePlan.title}</strong>
+                </div>
+                <p>{activePlan.goal || activePlan.topic || (lang === "zh" ? "实验目标待补齐" : "Experiment goal pending")}</p>
+                <div className={styles.experimentPlanFields}>
+                  <span title={activePlan.experimentPlan.dataset}>{lang === "zh" ? "数据" : "Data"} · {activePlan.experimentPlan.dataset || "-"}</span>
+                  <span title={activePlan.experimentPlan.metric}>{lang === "zh" ? "指标" : "Metric"} · {activePlan.experimentPlan.metric || "-"}</span>
+                  <span title={activePlan.experimentPlan.baseline}>Baseline · {activePlan.experimentPlan.baseline || "-"}</span>
+                  <span title={activePlan.experimentPlan.smokePlan}>Smoke · {activePlan.experimentPlan.smokePlan || "-"}</span>
+                </div>
+              </article>
+              <div className={styles.experimentChecklist}>
+                {activePlan.readinessChecklist.map((item) => (
+                  <span key={item.item} className={item.status === "pass" ? styles.experimentChecklistPass : styles.experimentChecklistWarn} title={item.note}>
+                    {item.status === "pass" ? <CheckCircle2 size={12} /> : <AlertTriangle size={12} />}
+                    {item.label}
+                  </span>
+                ))}
               </div>
-              <p>{activePlan.goal || activePlan.topic || (lang === "zh" ? "实验目标待补齐" : "Experiment goal pending")}</p>
-              <div className={styles.experimentPlanFields}>
-                <span title={activePlan.experimentPlan.dataset}>{lang === "zh" ? "数据" : "Data"} · {activePlan.experimentPlan.dataset || "-"}</span>
-                <span title={activePlan.experimentPlan.metric}>{lang === "zh" ? "指标" : "Metric"} · {activePlan.experimentPlan.metric || "-"}</span>
-                <span title={activePlan.experimentPlan.baseline}>Baseline · {activePlan.experimentPlan.baseline || "-"}</span>
-                <span title={activePlan.experimentPlan.smokePlan}>Smoke · {activePlan.experimentPlan.smokePlan || "-"}</span>
-              </div>
-            </article>
-            <div className={styles.experimentChecklist}>
-              {activePlan.readinessChecklist.map((item) => (
-                <span key={item.item} className={item.status === "pass" ? styles.experimentChecklistPass : styles.experimentChecklistWarn} title={item.note}>
-                  {item.status === "pass" ? <CheckCircle2 size={12} /> : <AlertTriangle size={12} />}
-                  {item.label}
-                </span>
-              ))}
             </div>
-          </div>
+            {activeBaselineArtifact ? (
+              <div className={styles.experimentBaselineArtifact}>
+                <span>{lang === "zh" ? "Active baseline" : "Active baseline"}</span>
+                <strong title={activeBaselineArtifact.artifactPath}>{activeBaselineArtifact.artifactPath}</strong>
+                <small title={activeBaselineArtifact.reproductionCommand}>{activeBaselineArtifact.reproductionCommand}</small>
+              </div>
+            ) : (
+              <div className={styles.experimentBaselineForm}>
+                <label>
+                  <span>{lang === "zh" ? "工件路径" : "Artifact path"}</span>
+                  <input
+                    value={experimentBaselineArtifactDraft.artifactPath}
+                    onChange={(event) => setExperimentBaselineArtifactDraft((draft) => ({ ...draft, artifactPath: event.target.value }))}
+                    placeholder="workspace/experiments/baselines/baseline.json"
+                  />
+                </label>
+                <label>
+                  <span>{lang === "zh" ? "复现命令" : "Reproduce"}</span>
+                  <input
+                    value={experimentBaselineArtifactDraft.reproductionCommand}
+                    onChange={(event) => setExperimentBaselineArtifactDraft((draft) => ({ ...draft, reproductionCommand: event.target.value }))}
+                    placeholder="python experiments/run_baseline.py"
+                  />
+                </label>
+                <label>
+                  <span>{lang === "zh" ? "评估命令" : "Evaluate"}</span>
+                  <input
+                    value={experimentBaselineArtifactDraft.evaluationCommand}
+                    onChange={(event) => setExperimentBaselineArtifactDraft((draft) => ({ ...draft, evaluationCommand: event.target.value }))}
+                    placeholder="python experiments/evaluate.py"
+                  />
+                </label>
+                <label>
+                  <span>{lang === "zh" ? "指标快照" : "Metric"}</span>
+                  <input
+                    value={experimentBaselineArtifactDraft.metricValue}
+                    onChange={(event) => setExperimentBaselineArtifactDraft((draft) => ({ ...draft, metricValue: event.target.value }))}
+                    placeholder={activePlan.experimentPlan.metric || "validation accuracy"}
+                  />
+                </label>
+                <button type="button" onClick={() => registerExperimentBaselineArtifactFromWorkspace(activePlan)} disabled={!canRegisterBaselineArtifact}>
+                  <Save size={13} />
+                  {selectedTeamRegisterExperimentBaselineArtifactPending
+                    ? (lang === "zh" ? "登记中" : "Registering")
+                    : (lang === "zh" ? "登记基线工件" : "Register baseline")}
+                </button>
+              </div>
+            )}
+          </>
         ) : (
           <div className={styles.experimentLedgerEmpty}>
             <AlertTriangle size={14} />
@@ -6459,6 +6603,7 @@ export function TeamsRoute({
           </section>
         </div>
         {selectedTeamCreateExperimentPlanError ? <div className={styles.workflowError}>{selectedTeamCreateExperimentPlanError.message}</div> : null}
+        {selectedTeamRegisterExperimentBaselineArtifactError ? <div className={styles.workflowError}>{selectedTeamRegisterExperimentBaselineArtifactError.message}</div> : null}
       </section>
     );
   }
@@ -6875,6 +7020,16 @@ export function TeamsRoute({
       : null;
   const selectedTeamCreateExperimentPlanResult =
     createExperimentPlanMutation.variables?.teamId === selectedTeam?.teamId ? createExperimentPlanMutation.data : undefined;
+  const selectedTeamRegisterExperimentBaselineArtifactPending =
+    registerExperimentBaselineArtifactMutation.isPending && registerExperimentBaselineArtifactMutation.variables?.teamId === selectedTeam?.teamId;
+  const selectedTeamRegisterExperimentBaselineArtifactError =
+    registerExperimentBaselineArtifactMutation.variables?.teamId === selectedTeam?.teamId && registerExperimentBaselineArtifactMutation.error instanceof Error
+      ? registerExperimentBaselineArtifactMutation.error
+      : null;
+  const selectedTeamRegisterExperimentBaselineArtifactResult =
+    registerExperimentBaselineArtifactMutation.variables?.teamId === selectedTeam?.teamId
+      ? registerExperimentBaselineArtifactMutation.data
+      : undefined;
   const selectedTeamStartSourceCollectionPending =
     startSourceCollectionRunMutation.isPending && startSourceCollectionRunMutation.variables?.teamId === selectedTeam?.teamId;
   const selectedTeamStartSourceCollectionError =
