@@ -2266,7 +2266,9 @@ def _ensure_team_chat_room_link(
                 config=room_config,
             )
         else:
+            historical_room_id = _find_historical_team_chat_room_id(str(team.get("teamId") or "").strip(), preferred_room_id=linked_room_id)
             room = chat_room_service.create_chat_room(
+                room_id=historical_room_id,
                 title=title,
                 participant_session_ids=session_ids,
                 participant_contexts_by_agent_id=participant_contexts,
@@ -2300,6 +2302,38 @@ def _find_existing_team_chat_room_id(team_id: str) -> str:
     ]
     rooms.sort(key=lambda item: str(item.get("updatedAt") or item.get("createdAt") or ""), reverse=True)
     return str((rooms[0] if rooms else {}).get("roomId") or "").strip()
+
+
+def _find_historical_team_chat_room_id(team_id: str, *, preferred_room_id: str = "") -> str:
+    normalized_team_id = _safe_token(team_id, default="", max_length=96)
+    if not normalized_team_id:
+        return ""
+    rounds_path = PROJECT_ROOT / "workspace" / "teams" / normalized_team_id / "research_stage_rounds" / "index.json"
+    if not rounds_path.exists():
+        return ""
+    try:
+        payload = json.loads(rounds_path.read_text(encoding="utf-8"))
+    except Exception:
+        return ""
+    candidates: list[str] = []
+
+    def collect(value: Any) -> None:
+        if isinstance(value, dict):
+            for key in ("linkedChatRoomId", "coordinationRoomId", "roomId"):
+                room_id = str(value.get(key) or "").strip()
+                if room_id.startswith("room-") and room_id not in candidates:
+                    candidates.append(room_id)
+            for child in value.values():
+                collect(child)
+        elif isinstance(value, list):
+            for child in value:
+                collect(child)
+
+    collect(payload)
+    preferred = str(preferred_room_id or "").strip()
+    if preferred and preferred in candidates:
+        return preferred
+    return candidates[-1] if candidates else ""
 
 
 def _archive_duplicate_team_chat_rooms(keep_room_id: str, team_id: str) -> None:

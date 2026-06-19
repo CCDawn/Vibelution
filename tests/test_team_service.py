@@ -212,6 +212,48 @@ def test_research_team_sync_reuses_existing_team_chat_room(tmp_path, monkeypatch
     assert {participant["agentId"] for participant in rooms[0]["participants"]} == {alpha["agentId"], beta["agentId"]}
 
 
+def test_research_team_sync_restores_missing_historical_team_chat_room_id(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    alpha = agent_directory_service.create_agent_instance(display_name="Alpha", direct_session_id="session-alpha")
+    beta = agent_directory_service.create_agent_instance(display_name="Beta", direct_session_id="session-beta")
+    organization = {
+        "agents": [
+            {"nodeId": "alpha-node", "agentId": alpha["agentId"], "displayName": "Alpha", "role": "lead", "status": "active"},
+            {"nodeId": "beta-node", "agentId": beta["agentId"], "displayName": "Beta", "role": "reviewer", "status": "active"},
+        ],
+        "edges": [],
+    }
+
+    first = team_service.ensure_research_team_from_organization(organization)
+    historical_room_id = first["linkedChatRoomId"]
+    chat_room_service.delete_chat_room(historical_room_id)
+    rounds_path = tmp_path / "workspace" / "teams" / "research-team" / "research_stage_rounds" / "index.json"
+    rounds_path.parent.mkdir(parents=True, exist_ok=True)
+    rounds_path.write_text(
+        json.dumps(
+            {
+                "rounds": [
+                    {
+                        "roundId": "round-historical",
+                        "coordinationRoomId": historical_room_id,
+                        "contract": {"linkedChatRoomId": historical_room_id},
+                    }
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    repaired = team_service.get_team("research-team")
+    room = chat_room_service.get_chat_room_detail(historical_room_id)
+
+    assert repaired["linkedChatRoomId"] == historical_room_id
+    assert room is not None
+    assert room["purpose"] == "research_coordination"
+    assert [participant["agentId"] for participant in room["participants"]] == [alpha["agentId"], beta["agentId"]]
+
+
 def test_team_chat_room_sync_preserves_existing_config_extensions(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     agent = agent_directory_service.create_agent_instance(display_name="Alpha", direct_session_id="session-alpha")
