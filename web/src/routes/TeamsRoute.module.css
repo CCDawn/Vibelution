@@ -3405,6 +3405,151 @@
   font-size: 0.68rem;
 }
 
+.experimentSmokeResult {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 0.8fr);
+  gap: 10px;
+  align-items: center;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid color-mix(in srgb, var(--accent-warning) 28%, var(--border-soft));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface-card) 70%, transparent);
+}
+
+.experimentSmokeResult > div:first-child {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.experimentSmokeResult > div:first-child > span {
+  color: var(--fg-muted);
+  font-size: 0.64rem;
+  font-weight: 780;
+}
+
+.experimentSmokeResult strong,
+.experimentSmokeResult small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.experimentSmokeResult strong {
+  color: var(--fg-primary);
+  font-size: 0.76rem;
+}
+
+.experimentSmokeResult small {
+  color: var(--fg-muted);
+  font-size: 0.68rem;
+}
+
+.experimentSmokeResultPass {
+  border-color: color-mix(in srgb, var(--accent-success) 34%, var(--border-soft));
+  background: color-mix(in srgb, var(--accent-success) 7%, var(--surface-card));
+}
+
+.experimentSmokeResultWarn {
+  border-color: color-mix(in srgb, var(--accent-warning) 34%, var(--border-soft));
+  background: color-mix(in srgb, var(--accent-warning) 7%, var(--surface-card));
+}
+
+.experimentSmokeMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+  min-width: 0;
+}
+
+.experimentSmokeMeta span {
+  display: inline-flex;
+  max-width: 100%;
+  min-height: 24px;
+  align-items: center;
+  padding: 0 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface-panel-strong) 78%, transparent);
+  overflow: hidden;
+  color: var(--fg-muted);
+  font-size: 0.66rem;
+  font-weight: 740;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.experimentSmokeForm {
+  display: grid;
+  grid-template-columns: minmax(118px, 0.7fr) minmax(150px, 0.9fr) minmax(150px, 0.9fr) minmax(110px, 0.6fr) minmax(190px, 1.15fr) minmax(170px, 1fr) auto;
+  gap: 8px;
+  align-items: end;
+  padding: 10px;
+  border: 1px solid color-mix(in srgb, var(--accent-success) 24%, var(--border-soft));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface-card) 62%, transparent);
+}
+
+.experimentSmokeForm label {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.experimentSmokeForm label span {
+  color: var(--fg-muted);
+  font-size: 0.64rem;
+  font-weight: 760;
+}
+
+.experimentSmokeForm input,
+.experimentSmokeForm select {
+  width: 100%;
+  min-width: 0;
+  min-height: 30px;
+  padding: 0 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--surface-panel-strong) 82%, transparent);
+  color: var(--fg-primary);
+  font-size: 0.72rem;
+  outline: none;
+}
+
+.experimentSmokeForm input:focus,
+.experimentSmokeForm select:focus {
+  border-color: color-mix(in srgb, var(--accent-success) 44%, var(--border-soft));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-success) 10%, transparent);
+}
+
+.experimentSmokeForm button {
+  display: inline-flex;
+  min-height: 30px;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 10px;
+  border: 1px solid color-mix(in srgb, var(--accent-success) 34%, var(--border-soft));
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--accent-success) 10%, var(--surface-card));
+  color: var(--fg-primary);
+  font-size: 0.72rem;
+  font-weight: 760;
+  white-space: nowrap;
+}
+
+.experimentSmokeForm button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.experimentSmokeWide {
+  grid-column: span 3;
+}
+
 .experimentEvidenceGrid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(280px, 0.68fr);
@@ -5708,8 +5853,18 @@
   .experimentLedgerStats,
   .experimentPlanGrid,
   .experimentEvidenceGrid,
-  .experimentBaselineForm {
+  .experimentBaselineForm,
+  .experimentSmokeResult,
+  .experimentSmokeForm {
     grid-template-columns: 1fr;
+  }
+
+  .experimentSmokeMeta {
+    justify-content: flex-start;
+  }
+
+  .experimentSmokeWide {
+    grid-column: auto;
   }
 
   .sourceCollectionStageModules {

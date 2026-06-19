@@ -773,6 +773,28 @@ type ExperimentBaselineArtifactRecord = {
   registeredAt: string;
 };
 
+type ExperimentSmokeResultStatus = "passed" | "failed" | "needs_review";
+
+const EXPERIMENT_SMOKE_RESULT_STATUSES: ExperimentSmokeResultStatus[] = ["needs_review", "passed", "failed"];
+
+type ExperimentSmokeResultRecord = {
+  smokeResultId: string;
+  status: ExperimentSmokeResultStatus | string;
+  gateDecision: string;
+  planId: string;
+  baselineArtifactId: string;
+  baselineMetricValue: string;
+  metricName: string;
+  metricValue: string;
+  delta: string;
+  resultPath: string;
+  logRef: string;
+  evaluationCommand: string;
+  notes: string;
+  recordedByAgent: string;
+  recordedAt: string;
+};
+
 type ExperimentPlanRecord = {
   planId: string;
   stageRoundId: string;
@@ -797,6 +819,9 @@ type ExperimentPlanRecord = {
     artifacts?: ExperimentBaselineArtifactRecord[];
     reason: string;
   };
+  activeSmokeResultId?: string;
+  activeSmokeResult?: ExperimentSmokeResultRecord;
+  smokeResults?: ExperimentSmokeResultRecord[];
   readinessChecklist: ExperimentPlanChecklistItem[];
   readiness: {
     readyForPlanReview: boolean;
@@ -864,11 +889,31 @@ type ExperimentBaselineArtifactRegisterPayload = {
   boundaries: ExperimentPlanningStatusPayload["boundaries"];
 };
 
+type ExperimentSmokeResultRegisterPayload = {
+  smokeResult: ExperimentSmokeResultRecord;
+  plan: ExperimentPlanRecord;
+  status: ExperimentPlanningStatusPayload;
+  stageRoundStatus: ResearchStageRoundStatusPayload;
+  workflow: TeamWorkflowOrchestration;
+  boundaries: ExperimentPlanningStatusPayload["boundaries"];
+};
+
 type ExperimentBaselineArtifactDraft = {
   artifactPath: string;
   reproductionCommand: string;
   evaluationCommand: string;
   metricValue: string;
+};
+
+type ExperimentSmokeResultDraft = {
+  status: ExperimentSmokeResultStatus;
+  metricValue: string;
+  baselineMetricValue: string;
+  delta: string;
+  resultPath: string;
+  logRef: string;
+  evaluationCommand: string;
+  notes: string;
 };
 
 type TeamWorkflowOfficialModelEvidenceCoverage = {
@@ -2883,6 +2928,16 @@ export function TeamsRoute({
     evaluationCommand: "",
     metricValue: "",
   });
+  const [experimentSmokeResultDraft, setExperimentSmokeResultDraft] = useState<ExperimentSmokeResultDraft>({
+    status: "needs_review",
+    metricValue: "",
+    baselineMetricValue: "",
+    delta: "",
+    resultPath: "",
+    logRef: "",
+    evaluationCommand: "",
+    notes: "",
+  });
   const [selectedSourceCollectionStageId, setSelectedSourceCollectionStageId] = useState<SourceCollectionStageModuleId>(
     requestedSourceCollectionStage ?? "collection",
   );
@@ -3623,6 +3678,52 @@ export function TeamsRoute({
     },
   });
 
+  const registerExperimentSmokeResultMutation = useMutation({
+    mutationFn: (payload: {
+      teamId: string;
+      plan: ExperimentPlanRecord;
+      draft: ExperimentSmokeResultDraft;
+    }) =>
+      fetchJson<ExperimentSmokeResultRegisterPayload>(
+        `/api/teams/${encodeURIComponent(payload.teamId)}/workflow-orchestration/experiments/plans/${encodeURIComponent(payload.plan.planId)}/smoke-result`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            recordedByAgent: sourceCollectionOwnerAgentId,
+            status: payload.draft.status,
+            metricName: payload.plan.experimentPlan.metric || "",
+            metricValue: payload.draft.metricValue.trim(),
+            baselineMetricValue: payload.draft.baselineMetricValue.trim(),
+            delta: payload.draft.delta.trim(),
+            resultPath: payload.draft.resultPath.trim(),
+            logRef: payload.draft.logRef.trim(),
+            evaluationCommand: payload.draft.evaluationCommand.trim(),
+            notes: payload.draft.notes.trim() || "Registered from the experiment planning workspace. No training execution was triggered.",
+            metadata: {
+              enteredFrom: "teams_experiment_ledger",
+              noTrainingExecution: true,
+            },
+          }),
+        },
+      ),
+    onSuccess: (payload, variables) => {
+      queryClient.setQueryData(experimentPlanningStatusQueryKey(variables.teamId), payload.status);
+      queryClient.setQueryData(researchStageRoundStatusQueryKey(variables.teamId), payload.stageRoundStatus);
+      queryClient.setQueryData(queryKeys.teamWorkflow(variables.teamId), payload.workflow);
+      setExperimentSmokeResultDraft((draft) => ({
+        ...draft,
+        metricValue: "",
+        delta: "",
+        resultPath: "",
+        logRef: "",
+        notes: "",
+      }));
+      void queryClient.invalidateQueries({ queryKey: experimentPlanningStatusQueryKey(variables.teamId) });
+      void queryClient.invalidateQueries({ queryKey: researchStageRoundStatusQueryKey(variables.teamId) });
+    },
+  });
+
   const recordSourceCollectionOutputMutation = useMutation({
     mutationFn: async (payload: { teamId: string; runId: string; draft: SourceCollectionOutputDraft }) => {
       const output = await fetchJson<DataProcessingCollectionOutputPayload>(
@@ -4040,6 +4141,17 @@ export function TeamsRoute({
       teamId: selectedTeam.teamId,
       plan,
       draft: experimentBaselineArtifactDraft,
+    });
+  }
+
+  function registerExperimentSmokeResultFromWorkspace(plan: ExperimentPlanRecord) {
+    if (!selectedTeam?.teamId || selectedTeamRegisterExperimentSmokeResultPending) {
+      return;
+    }
+    registerExperimentSmokeResultMutation.mutate({
+      teamId: selectedTeam.teamId,
+      plan,
+      draft: experimentSmokeResultDraft,
     });
   }
 
@@ -6445,11 +6557,13 @@ export function TeamsRoute({
   }
 
   function renderExperimentPlanningLedgerPanel() {
+    const latestSmokeMutationPayload = selectedTeamRegisterExperimentSmokeResultResult;
     const latestBaselineMutationPayload = selectedTeamRegisterExperimentBaselineArtifactResult;
     const latestMutationPayload = selectedTeamCreateExperimentPlanResult;
-    const statusPayload = latestBaselineMutationPayload?.status ?? latestMutationPayload?.status ?? experimentPlanningStatus;
-    const activePlan = latestBaselineMutationPayload?.plan ?? latestMutationPayload?.plan ?? statusPayload?.activePlan ?? null;
+    const statusPayload = latestSmokeMutationPayload?.status ?? latestBaselineMutationPayload?.status ?? latestMutationPayload?.status ?? experimentPlanningStatus;
+    const activePlan = latestSmokeMutationPayload?.plan ?? latestBaselineMutationPayload?.plan ?? latestMutationPayload?.plan ?? statusPayload?.activePlan ?? null;
     const activeBaselineArtifact = activePlan?.baselineSelection.activeBaselineArtifact ?? null;
+    const activeSmokeResult = activePlan?.activeSmokeResult ?? null;
     const hypotheses = statusPayload?.readyHypothesisCandidates?.length
       ? statusPayload.readyHypothesisCandidates
       : statusPayload?.hypothesisCandidates ?? [];
@@ -6461,6 +6575,14 @@ export function TeamsRoute({
       && experimentBaselineArtifactDraft.artifactPath.trim()
       && experimentBaselineArtifactDraft.reproductionCommand.trim()
       && !selectedTeamRegisterExperimentBaselineArtifactPending,
+    );
+    const canRegisterSmokeResult = Boolean(
+      selectedTeam?.teamId
+      && activePlan
+      && activePlan.baselineSelection.activeBaselineReady
+      && experimentSmokeResultDraft.metricValue.trim()
+      && (experimentSmokeResultDraft.resultPath.trim() || experimentSmokeResultDraft.logRef.trim())
+      && !selectedTeamRegisterExperimentSmokeResultPending,
     );
     const summary = statusPayload?.summary;
     return (
@@ -6573,6 +6695,125 @@ export function TeamsRoute({
                 </button>
               </div>
             )}
+            {activeBaselineArtifact ? (
+              <>
+                {activeSmokeResult ? (
+                  <div
+                    className={[
+                      styles.experimentSmokeResult,
+                      activeSmokeResult.status === "passed" ? styles.experimentSmokeResultPass : styles.experimentSmokeResultWarn,
+                    ].join(" ")}
+                  >
+                    <div>
+                      <span>{lang === "zh" ? "Active smoke" : "Active smoke"}</span>
+                      <strong title={activeSmokeResult.resultPath || activeSmokeResult.logRef || activeSmokeResult.smokeResultId}>
+                        {activeSmokeResult.resultPath || activeSmokeResult.logRef || activeSmokeResult.smokeResultId}
+                      </strong>
+                      <small title={activeSmokeResult.evaluationCommand || activeSmokeResult.recordedAt}>
+                        {activeSmokeResult.evaluationCommand || activeSmokeResult.recordedAt || "-"}
+                      </small>
+                    </div>
+                    <div className={styles.experimentSmokeMeta}>
+                      <span>{activeSmokeResult.status}</span>
+                      <span>{activeSmokeResult.gateDecision}</span>
+                      <span>{activeSmokeResult.metricName || activePlan.experimentPlan.metric || "metric"} · {activeSmokeResult.metricValue || "-"}</span>
+                      <span>
+                        {activePlan.readiness.readyForFullRun
+                          ? (lang === "zh" ? "full-run 已解锁" : "full-run ready")
+                          : (lang === "zh" ? "full-run 阻塞" : "full-run blocked")}
+                      </span>
+                    </div>
+                  </div>
+                ) : null}
+                <div className={styles.experimentSmokeForm}>
+                  <label>
+                    <span>{lang === "zh" ? "Smoke 状态" : "Smoke status"}</span>
+                    <select
+                      value={experimentSmokeResultDraft.status}
+                      onChange={(event) =>
+                        setExperimentSmokeResultDraft((draft) => ({
+                          ...draft,
+                          status: event.target.value as ExperimentSmokeResultStatus,
+                        }))}
+                    >
+                      {EXPERIMENT_SMOKE_RESULT_STATUSES.map((status) => (
+                        <option key={status} value={status}>
+                          {status === "needs_review"
+                            ? (lang === "zh" ? "需复核" : "needs review")
+                            : status === "passed"
+                              ? (lang === "zh" ? "通过" : "passed")
+                              : (lang === "zh" ? "失败" : "failed")}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    <span>{lang === "zh" ? "Smoke 指标" : "Smoke metric"}</span>
+                    <input
+                      value={experimentSmokeResultDraft.metricValue}
+                      onChange={(event) => setExperimentSmokeResultDraft((draft) => ({ ...draft, metricValue: event.target.value }))}
+                      placeholder={activePlan.experimentPlan.metric || "0.00"}
+                    />
+                  </label>
+                  <label>
+                    <span>{lang === "zh" ? "Baseline 指标" : "Baseline metric"}</span>
+                    <input
+                      value={experimentSmokeResultDraft.baselineMetricValue}
+                      onChange={(event) => setExperimentSmokeResultDraft((draft) => ({ ...draft, baselineMetricValue: event.target.value }))}
+                      placeholder={activeBaselineArtifact.metricValue || "-"}
+                    />
+                  </label>
+                  <label>
+                    <span>Delta</span>
+                    <input
+                      value={experimentSmokeResultDraft.delta}
+                      onChange={(event) => setExperimentSmokeResultDraft((draft) => ({ ...draft, delta: event.target.value }))}
+                      placeholder="+0.00"
+                    />
+                  </label>
+                  <label>
+                    <span>{lang === "zh" ? "结果路径" : "Result path"}</span>
+                    <input
+                      value={experimentSmokeResultDraft.resultPath}
+                      onChange={(event) => setExperimentSmokeResultDraft((draft) => ({ ...draft, resultPath: event.target.value }))}
+                      placeholder="workspace/experiments/smoke/result.json"
+                    />
+                  </label>
+                  <label>
+                    <span>{lang === "zh" ? "日志引用" : "Log ref"}</span>
+                    <input
+                      value={experimentSmokeResultDraft.logRef}
+                      onChange={(event) => setExperimentSmokeResultDraft((draft) => ({ ...draft, logRef: event.target.value }))}
+                      placeholder="logs/experiments/smoke.log"
+                    />
+                  </label>
+                  <button type="button" onClick={() => registerExperimentSmokeResultFromWorkspace(activePlan)} disabled={!canRegisterSmokeResult}>
+                    <Save size={13} />
+                    {selectedTeamRegisterExperimentSmokeResultPending
+                      ? (lang === "zh" ? "登记中" : "Registering")
+                      : activeSmokeResult
+                        ? (lang === "zh" ? "更新 smoke 结果" : "Update smoke result")
+                        : (lang === "zh" ? "登记 smoke 结果" : "Register smoke")}
+                  </button>
+                  <label className={styles.experimentSmokeWide}>
+                    <span>{lang === "zh" ? "评估命令" : "Evaluate"}</span>
+                    <input
+                      value={experimentSmokeResultDraft.evaluationCommand}
+                      onChange={(event) => setExperimentSmokeResultDraft((draft) => ({ ...draft, evaluationCommand: event.target.value }))}
+                      placeholder={activeBaselineArtifact.evaluationCommand || "python experiments/evaluate_smoke.py"}
+                    />
+                  </label>
+                  <label className={styles.experimentSmokeWide}>
+                    <span>{lang === "zh" ? "备注" : "Notes"}</span>
+                    <input
+                      value={experimentSmokeResultDraft.notes}
+                      onChange={(event) => setExperimentSmokeResultDraft((draft) => ({ ...draft, notes: event.target.value }))}
+                      placeholder={lang === "zh" ? "只登记证据，不触发训练" : "Evidence only; no training execution"}
+                    />
+                  </label>
+                </div>
+              </>
+            ) : null}
           </>
         ) : (
           <div className={styles.experimentLedgerEmpty}>
@@ -6621,6 +6862,7 @@ export function TeamsRoute({
         </div>
         {selectedTeamCreateExperimentPlanError ? <div className={styles.workflowError}>{selectedTeamCreateExperimentPlanError.message}</div> : null}
         {selectedTeamRegisterExperimentBaselineArtifactError ? <div className={styles.workflowError}>{selectedTeamRegisterExperimentBaselineArtifactError.message}</div> : null}
+        {selectedTeamRegisterExperimentSmokeResultError ? <div className={styles.workflowError}>{selectedTeamRegisterExperimentSmokeResultError.message}</div> : null}
       </section>
     );
   }
@@ -7046,6 +7288,16 @@ export function TeamsRoute({
   const selectedTeamRegisterExperimentBaselineArtifactResult =
     registerExperimentBaselineArtifactMutation.variables?.teamId === selectedTeam?.teamId
       ? registerExperimentBaselineArtifactMutation.data
+      : undefined;
+  const selectedTeamRegisterExperimentSmokeResultPending =
+    registerExperimentSmokeResultMutation.isPending && registerExperimentSmokeResultMutation.variables?.teamId === selectedTeam?.teamId;
+  const selectedTeamRegisterExperimentSmokeResultError =
+    registerExperimentSmokeResultMutation.variables?.teamId === selectedTeam?.teamId && registerExperimentSmokeResultMutation.error instanceof Error
+      ? registerExperimentSmokeResultMutation.error
+      : null;
+  const selectedTeamRegisterExperimentSmokeResultResult =
+    registerExperimentSmokeResultMutation.variables?.teamId === selectedTeam?.teamId
+      ? registerExperimentSmokeResultMutation.data
       : undefined;
   const selectedTeamStartSourceCollectionPending =
     startSourceCollectionRunMutation.isPending && startSourceCollectionRunMutation.variables?.teamId === selectedTeam?.teamId;
