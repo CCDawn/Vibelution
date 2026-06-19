@@ -4223,7 +4223,7 @@ export type TeamWorkflowKnowledgeIngestionStatus = {
 export type TeamWorkflowKnowledgeCollectionIngestionPayload = {
   schemaVersion: number;
   teamId: string;
-  status: "completed" | "pending_review" | "precheck_ready" | "blocked" | string;
+  status: "completed" | "pending_review" | "agent_notified" | "agent_wake_pending" | "agent_notification_failed" | "precheck_ready" | "blocked" | string;
   steps: Array<{
     stageId: string;
     label: string;
@@ -4239,6 +4239,7 @@ export type TeamWorkflowKnowledgeCollectionIngestionPayload = {
   sourceReview: Record<string, unknown> | null;
   knowledgeSubmission: Record<string, unknown> | null;
   knowledgeReview: Record<string, unknown> | null;
+  knowledgeStewardActivation: Record<string, unknown> | null;
   knowledgeBase: {
     knowledgeBaseId: string;
     [key: string]: unknown;
@@ -4251,6 +4252,8 @@ export type TeamWorkflowKnowledgeCollectionIngestionPayload = {
     candidateGraphEdgeCount?: number;
     stewardPackCandidateId?: string;
     knowledgeBaseId?: string;
+    knowledgeStewardInboxMessageId?: string;
+    knowledgeStewardActivationStatus?: string;
     formalKnowledgeItemCount: number;
     nextAction: string;
   };

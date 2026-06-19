@@ -22,7 +22,7 @@ from config.public_config import build_effective_config, load_public_config
 from core.infrastructure import developer_sandbox
 from core.llm import LLMClient, LLMInvocationContext, invoke_llm
 from core.runtime_manager import work_run_store
-from core.web.services import chat_room_service, data_processing_service, team_knowledge_service, team_service
+from core.web.services import agent_directory_service, chat_room_service, data_processing_service, team_knowledge_service, team_service
 from core.web.services.runtime_scene_service import record_runtime_scene_event
 
 
@@ -4031,6 +4031,115 @@ def review_steward_pack_knowledge_ingestion(team_id: str, candidate_id: str, pay
     }
 
 
+def _notify_knowledge_steward_for_ingestion(
+    team_id: str,
+    *,
+    steward_agent_id: str,
+    requester_agent_id: str,
+    steward_candidate_id: str,
+    knowledge_base_id: str,
+    target_domain: str,
+    wake_target: bool,
+) -> dict[str, Any]:
+    activation = {
+        "status": "disabled",
+        "targetAgentId": steward_agent_id,
+        "messageId": "",
+        "threadId": "",
+        "wakeRequested": bool(wake_target),
+        "wakeStatus": "not_requested",
+        "delivery": None,
+        "metadata": {
+            "kind": "challenge_cup_knowledge_ingestion_request",
+            "teamId": team_id,
+            "stewardPackCandidateId": steward_candidate_id,
+            "knowledgeBaseId": knowledge_base_id,
+            "targetDomain": target_domain,
+        },
+    }
+    if not steward_agent_id:
+        activation["status"] = "skipped_missing_steward_agent"
+        return activation
+
+    target_agent = agent_directory_service.get_agent(steward_agent_id, include_archived=True)
+    if not target_agent:
+        activation["status"] = "skipped_missing_steward_agent"
+        return activation
+    if str(target_agent.get("status") or "active").strip().lower() == "archived":
+        activation["status"] = "skipped_archived_steward_agent"
+        return activation
+
+    source_agent_id = requester_agent_id if requester_agent_id and agent_directory_service.get_agent(requester_agent_id, include_archived=True) else ""
+    content = "\n".join(
+        [
+            "[挑战杯团队知识入库请求]",
+            f"团队: {team_id}",
+            f"待入库知识包: {steward_candidate_id}",
+            f"目标知识库: {knowledge_base_id}",
+            f"知识域: {target_domain}",
+            "",
+            "请作为知识库管理员 Agent 处理这个团队已提炼知识包：",
+            "1. 读取 CandidateStore 中的 steward_pack_draft。",
+            "2. 复核 sourceRefs、evidenceRefs、sourceTrace、proposalPayload 和 ratingSuggestion。",
+            "3. 通过后再调用知识入库门禁，提交来源、创建知识提案并最终 review/apply 到正式 Team Knowledge。",
+            "4. 不要把原始搜集噪音直接写入正式知识库；无法确认时标记 needs_revision。",
+        ]
+    )
+    try:
+        message = agent_directory_service.write_agent_inbox_message(
+            steward_agent_id,
+            content=content,
+            source_agent_id=source_agent_id,
+            thread_id=f"challenge-cup-knowledge-ingestion:{team_id}:{steward_candidate_id}",
+            kind="challenge_cup_knowledge_ingestion_request",
+            summary=f"挑战杯团队待入库知识包 {steward_candidate_id} 请求最终入库。",
+            prompt_eligible=True,
+            created_by=requester_agent_id or "team_workflow",
+            metadata={
+                **activation["metadata"],
+                "requesterAgentId": requester_agent_id,
+                "expectedAction": "submit_and_review_steward_pack_to_team_knowledge",
+                "officialBoundary": {
+                    "currentWritesOfficialKnowledge": False,
+                    "currentWritesOfficialRag": False,
+                    "currentWritesOfficialGraph": False,
+                    "finalIngestionOwnedByKnowledgeSteward": True,
+                },
+            },
+        )
+    except (agent_directory_service.AgentDirectoryError, agent_directory_service.AgentNotFoundError) as exc:
+        activation["status"] = "message_failed"
+        activation["error"] = str(exc)
+        return activation
+
+    activation.update(
+        {
+            "status": "message_written",
+            "messageId": str(message.get("messageId") or message.get("eventId") or ""),
+            "threadId": str(message.get("threadId") or ""),
+            "message": message,
+        }
+    )
+    if wake_target:
+        try:
+            from core.web.services import session_service
+
+            delivery = session_service.wake_agent_for_inbox_message(message)
+        except Exception as exc:
+            delivery = {
+                "wakeRequested": True,
+                "wakeStatus": "failed",
+                "reason": type(exc).__name__,
+            }
+        activation["delivery"] = delivery
+        activation["wakeStatus"] = str((delivery or {}).get("wakeStatus") or "unknown")
+        if activation["wakeStatus"] == "started":
+            activation["status"] = "agent_wake_started"
+        else:
+            activation["status"] = f"agent_wake_{activation['wakeStatus']}"
+    return activation
+
+
 def run_knowledge_collection_ingestion(team_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
     """Run the four-step knowledge collection gate from screened sources to Team Knowledge.
 
@@ -4049,9 +4158,12 @@ def run_knowledge_collection_ingestion(team_id: str, payload: dict[str, Any] | N
     max_candidates = _normalize_int(payload.get("maxCandidates"), default=80, minimum=1, maximum=200)
     force_review = bool(payload.get("forceReview"))
     auto_create_knowledge_base = bool(payload.get("autoCreateKnowledgeBase", True))
-    auto_submit = bool(payload.get("autoSubmit", True))
-    auto_review_source = bool(payload.get("autoReviewSource", True))
-    auto_approve = bool(payload.get("autoApprove", True))
+    auto_submit = bool(payload.get("autoSubmit", False))
+    auto_review_source = bool(payload.get("autoReviewSource", False))
+    auto_approve = bool(payload.get("autoApprove", False))
+    notify_steward_agent = bool(payload.get("notifyStewardAgent", True))
+    wake_steward_agent = bool(payload.get("wakeStewardAgent", True))
+    requester_agent_id = _trim_text(payload.get("requesterAgentId"), max_length=160) or source_quality_agent_id
     steps: list[dict[str, Any]] = []
 
     def append_step(
@@ -4193,6 +4305,7 @@ def run_knowledge_collection_ingestion(team_id: str, payload: dict[str, Any] | N
     source_review: dict[str, Any] | None = None
     knowledge_submission: dict[str, Any] | None = None
     knowledge_review: dict[str, Any] | None = None
+    knowledge_steward_activation: dict[str, Any] | None = None
     if auto_submit:
         knowledge_submission = submit_steward_pack_to_knowledge_ingestion(
             normalized_team_id,
@@ -4272,8 +4385,43 @@ def run_knowledge_collection_ingestion(team_id: str, payload: dict[str, Any] | N
                 artifact_id=str((knowledge_review.get("candidate") or {}).get("candidateId") or ""),
             )
 
+    if notify_steward_agent and not knowledge_review:
+        knowledge_steward_activation = _notify_knowledge_steward_for_ingestion(
+            normalized_team_id,
+            steward_agent_id=steward_agent_id,
+            requester_agent_id=requester_agent_id,
+            steward_candidate_id=steward_candidate_id,
+            knowledge_base_id=knowledge_base_id,
+            target_domain=target_domain,
+            wake_target=wake_steward_agent,
+        )
+        append_step(
+            "knowledge_steward_request",
+            "通知知识库 Agent",
+            str(knowledge_steward_activation.get("status") or "message_written"),
+            input_count=1,
+            output_count=1 if knowledge_steward_activation.get("messageId") else 0,
+            detail="待入库知识包已发送给知识库管理员 Agent，等待它执行最终入库。"
+            if knowledge_steward_activation.get("messageId")
+            else "待入库知识包已生成，但知识库管理员 Agent 尚未收到消息。",
+            artifact_id=str(knowledge_steward_activation.get("messageId") or ""),
+        )
+
     status_payload = get_knowledge_ingestion_status(normalized_team_id)
-    final_status = "completed" if knowledge_review else ("pending_review" if knowledge_submission else "precheck_ready")
+    activation_status = str((knowledge_steward_activation or {}).get("status") or "")
+    final_status = (
+        "completed"
+        if knowledge_review
+        else "pending_review"
+        if knowledge_submission
+        else "agent_notified"
+        if activation_status in {"message_written", "agent_wake_started"}
+        else "agent_wake_pending"
+        if activation_status.startswith("agent_wake_skipped_")
+        else "agent_notification_failed"
+        if knowledge_steward_activation
+        else "precheck_ready"
+    )
     _record_workflow_event(
         "knowledge_collection.ingested",
         normalized_team_id,
@@ -4288,6 +4436,10 @@ def run_knowledge_collection_ingestion(team_id: str, payload: dict[str, Any] | N
             "autoSubmit": auto_submit,
             "autoReviewSource": auto_review_source,
             "autoApprove": auto_approve,
+            "notifyStewardAgent": notify_steward_agent,
+            "wakeStewardAgent": wake_steward_agent,
+            "knowledgeStewardActivationStatus": activation_status,
+            "knowledgeStewardInboxMessageId": str((knowledge_steward_activation or {}).get("messageId") or ""),
         },
     )
     return {
@@ -4301,6 +4453,7 @@ def run_knowledge_collection_ingestion(team_id: str, payload: dict[str, Any] | N
         "sourceReview": source_review,
         "knowledgeSubmission": knowledge_submission,
         "knowledgeReview": knowledge_review,
+        "knowledgeStewardActivation": knowledge_steward_activation,
         "knowledgeBase": knowledge_base or {"knowledgeBaseId": knowledge_base_id},
         "statusSnapshot": status_payload,
         "summary": {
@@ -4311,7 +4464,9 @@ def run_knowledge_collection_ingestion(team_id: str, payload: dict[str, Any] | N
             "stewardPackCandidateId": steward_candidate_id,
             "knowledgeBaseId": knowledge_base_id,
             "formalKnowledgeItemCount": status_payload["summary"]["formalKnowledgeItemCount"],
-            "nextAction": "进入实验规划" if knowledge_review else "检查资料入库门禁",
+            "knowledgeStewardInboxMessageId": str((knowledge_steward_activation or {}).get("messageId") or ""),
+            "knowledgeStewardActivationStatus": activation_status,
+            "nextAction": "进入实验规划" if knowledge_review else ("等待知识库 Agent 最终入库" if knowledge_steward_activation else "检查资料入库门禁"),
         },
         "workflow": (
             knowledge_review["workflow"]
