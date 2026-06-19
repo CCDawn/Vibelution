@@ -778,9 +778,10 @@ tests/test_agent_kernel_store.py
 
 行为：
 
-- 定义 `TaskLedgerEntry`、`AgentEvent`、`KernelOutcome`、`EvidenceRef`；
+- 定义 `TaskLedgerEntry`、`EventEnvelope`、`SemanticPayload`、`AgentEvent`、`KernelOutcome`、`EvidenceRef`、`ContextManifest`；
 - 支持 JSONL append/read；
 - 做字段校验；
+- 支持 `correlationId`、`causationId`、`idempotencyKey`；
 - 不改 session、room、research 运行逻辑。
 
 验证：
@@ -826,6 +827,8 @@ tests/test_agent_kernel_store.py
 - 更新任务状态；
 - 记录 evidence refs；
 - 记录 outcome。
+- 用 `idempotencyKey` 防止同一输入重复创建 task。
+- 明确 TaskLedger 是用户态任务事实源，Session/Room 只是 projection。
 
 验证：
 
@@ -881,8 +884,10 @@ tests/test_agent_kernel_store.py
 行为：
 
 - Agent outcome 可以包含 proposals；
-- proposal 进入 `needs_review`；
+- proposal 进入 `queued` 或 `reviewing`；
 - 用户或监督 Agent 可以 approve/reject；
+- `needs_user_decision` 的 proposal 只能由用户确认；
+- `applied` 必须记录 applied evidence；
 - 项目记忆和代码变更继续走现有治理路径。
 
 验证：
@@ -1045,6 +1050,11 @@ agent_kernel.agent.resolve_failed
 7. 群聊抢占式讨论由 scheduler 控制，还是由 moderator Agent 控制？
 8. ContextPacket 和 inbox event 保留多久？
 9. 哪些 proposal 可由监督 Agent 批准，哪些必须用户确认？
+10. TaskLedger 是否作为用户态任务事实源，WorkRun 是否作为执行事实源？
+11. AgentEvent v0 是 append-only audit/routing log，还是从第一版就做 replayable event sourcing？
+12. ContextManifest 是否默认持久化，ContextPacket 是否只在短上下文和调试场景持久化？
+13. 哪些场景允许 bypass EvaluationGate，是否只允许 emergency/manual repair？
+14. Policy version 是否作为第一版必做字段，还是第二阶段补齐？
 
 ## 26. 推荐第一实现切片
 
@@ -1071,6 +1081,7 @@ Agent-to-Agent inbox with TaskLedger and KernelOutcome
 5. 接收方 inbox 记录事件。
 6. wake policy 先记录但默认不自动唤醒。
 7. 记录 outcome 和 evidence refs。
+8. 对本切片跑通一次 `event -> task -> execution -> outcome -> gate` 闭环。
 
 验收标准：
 
@@ -1080,8 +1091,480 @@ Agent-to-Agent inbox with TaskLedger and KernelOutcome
 - inbox event 能 ack；
 - recipient missing 时有明确失败状态和 runtime evidence；
 - 不发生直接 memory write 或 tool permission change。
+- 同一个 idempotency key 重试不会创建重复 task；
+- 一个 WorkRun 最多提交一个 terminal outcome；
+- proposal 即使自动通过，也必须留下 EvaluationGate 记录；
+- Session/Room 只接收 projection，不直接成为任务状态事实源。
 
-## 27. 后续文档建议
+## 27. 系统不变量
+
+为了让 VAKP 从对象草案变成可实现协议，必须明确系统不变量。否则 Task、Event、Outcome、Session、Room、WorkRun 会在运行中互相覆盖状态。
+
+第一版建议锁定以下不变量。
+
+### 27.1 Task 创建不变量
+
+```text
+一个 Task 必须有且只有一个 creator source。
+```
+
+`creator source` 可以是：
+
+- user message；
+- AgentEvent；
+- room round；
+- team workflow stage；
+- supervised run；
+- self-evolution proposal；
+- system recovery task。
+
+如果同一个外部输入被重复处理，必须通过 `idempotencyKey` 或 `correlationId` 合并，而不是创建多个等价 Task。
+
+### 27.2 Task / Event / Outcome 生命周期关系
+
+建议关系：
+
+```text
+AgentEvent may create Task
+Task may emit many AgentEvents
+Task may create one or more WorkRuns
+WorkRun may produce partial KernelOutcomes
+Task has at most one terminal KernelOutcome
+KernelOutcome may create Proposals
+Proposal enters EvaluationGate
+```
+
+说明：
+
+- 一个 Task 可以有多个 partial outcome。
+- 一个 WorkRun 可以有自己的 outcome。
+- 一个 Task 最多只有一个 terminal outcome。
+- terminal outcome 之后不能再把 Task 改回 running，除非创建 recovery task 或 reopen event。
+
+### 27.3 Event append-only 不变量
+
+```text
+AgentEvent 一旦写入，不允许原地修改业务含义。
+```
+
+允许追加：
+
+- delivery status event；
+- ack event；
+- failure event；
+- compensation event；
+- supersede event。
+
+不允许：
+
+- 修改原始 sender；
+- 修改原始 recipient；
+- 修改原始 payload 语义；
+- 删除失败事件来制造成功历史。
+
+### 27.4 Outcome 提交不变量
+
+```text
+同一个 WorkRun 可以提交多个 partial outcome，但只能提交一个 terminal outcome。
+```
+
+`terminal outcome` 包括：
+
+- succeeded；
+- failed；
+- cancelled；
+- blocked。
+
+如果 Agent 之后发现需要补充，应创建 followup task 或补充 proposal，而不是覆盖 terminal outcome。
+
+### 27.5 Memory write 不变量
+
+```text
+长期记忆写入必须符合 MemoryPolicy，并经过 EvaluationGate 或明确 direct-write 授权。
+```
+
+默认：
+
+- session transcript 是交互记录，不等于长期记忆；
+- private memory direct-write 必须由 Agent 的 MemoryPolicy 显式允许；
+- project memory 默认 proposal-first；
+- self-evolution 原则默认不直接写入长期记忆。
+
+### 27.6 Policy version 不变量
+
+```text
+Policy change must be versioned.
+```
+
+所有模型、工具、记忆、workspace、communication、supervision policy 的变更都应记录：
+
+- previous version；
+- next version；
+- changed by；
+- reason；
+- approval ref；
+- applied at。
+
+运行中的 Task 应记录自己解析到的 policy version，避免事后无法判断“当时到底按哪个权限执行”。
+
+### 27.7 Projection 不变量
+
+```text
+Session、Room、UI view 是 projection，不应成为内核状态事实源。
+```
+
+这些投影视图可以缓存、展示、索引，但当它们和 TaskLedger / WorkRun / AgentEvent 冲突时，应通过 repair 或 projection rebuild 收敛。
+
+## 28. 状态权威模型
+
+VAKP 不应让所有对象都声称自己是事实源。建议采用三层状态模型。
+
+```text
+System of Record Layer
+  TaskLedger
+  AgentEvent append log
+  Policy version records
+  Proposal records
+
+Execution Layer
+  WorkRun
+  RuntimeScene
+  ToolCall records
+  LLM invocation metadata
+
+Projection Layer
+  Session
+  Room
+  Team UI state
+  Agent Center summaries
+  Task Center summaries
+  derived indexes
+```
+
+### 28.1 TaskLedger 的权威范围
+
+`TaskLedger` 是用户和系统理解“任务是否存在、谁负责、当前状态是什么、最终结果是什么”的事实源。
+
+它负责：
+
+- task identity；
+- owner / assignee；
+- task status；
+- priority；
+- linked session / room / workrun；
+- final result summary；
+- failure reason；
+- evidence refs。
+
+它不负责保存：
+
+- 完整模型上下文；
+- 完整 transcript；
+- 完整工具输出；
+- 每个底层执行步骤。
+
+### 28.2 WorkRun 的权威范围
+
+`WorkRun` 是执行事实源。
+
+它负责：
+
+- execution status；
+- runtime phase；
+- leases；
+- process / background run；
+- start / stop / cancel；
+- partial execution snapshot。
+
+当 TaskLedger 与 WorkRun 冲突时：
+
+- WorkRun 用于诊断执行实际发生了什么；
+- TaskLedger 用于用户态任务结论；
+- repair 逻辑必须产生 reconciliation event，而不是静默覆盖。
+
+### 28.3 RuntimeScene 的权威范围
+
+`RuntimeScene` 是诊断证据源。
+
+它负责让未来 Agent 重建：
+
+- 什么时候启动；
+- 哪个动作失败；
+- 哪个路径被执行；
+- 哪些日志和 artifact 支持结论。
+
+RuntimeScene 不应替代 TaskLedger，也不应成为业务状态写入入口。
+
+### 28.4 Session / Room 的权威范围
+
+`Session` 和 `Room` 是交互投影。
+
+它们负责：
+
+- 用户和 Agent 看见的消息；
+- speaker identity；
+- room participant projection；
+- conversation UI display；
+- room round projection。
+
+它们不应独立决定：
+
+- task 是否成功；
+- Agent 是否有工具权限；
+- 记忆是否正式写入；
+- policy 是否生效。
+
+### 28.5 冲突处理规则
+
+建议冲突状态统一进入 repair event：
+
+```text
+agent_kernel.state_conflict.detected
+agent_kernel.state_conflict.repaired
+agent_kernel.state_conflict.needs_review
+```
+
+冲突例子：
+
+- TaskLedger 显示 running，但 WorkRun 已 failed。
+- Session 显示回复完成，但 Task 没有 terminal outcome。
+- Room 里存在 archived Agent 发言投影。
+- Proposal 显示 approved，但没有 applied evidence。
+
+## 29. 事件模型分层
+
+审查意见指出 `AgentEvent` 目前偏业务语义，未来可能出现事件类型膨胀。第一版应把事件拆成 envelope 和 semantic payload。
+
+### 29.1 EventEnvelope
+
+`EventEnvelope` 是底层事件外壳，负责传输、追踪、投递、幂等和诊断。
+
+```ts
+type EventEnvelope = {
+  eventId: string;
+  schemaVersion: number;
+  kernelEventType:
+    | "emit"
+    | "deliver"
+    | "ack"
+    | "fail"
+    | "schedule"
+    | "cancel"
+    | "supersede";
+  semanticType: string;
+  causationId?: string;
+  correlationId?: string;
+  idempotencyKey?: string;
+  sender: EventActor;
+  recipients: EventRecipient[];
+  status: "queued" | "delivered" | "handled" | "failed" | "cancelled";
+  createdAt: string;
+};
+```
+
+### 29.2 SemanticPayload
+
+`SemanticPayload` 表达业务语义。
+
+```ts
+type SemanticPayload = {
+  semanticType:
+    | "agent.message.sent"
+    | "agent.task.assigned"
+    | "agent.tool.requested"
+    | "agent.memory.proposed"
+    | "agent.result.submitted"
+    | "agent.failure.reported";
+  payload: Record<string, unknown>;
+};
+```
+
+### 29.3 AgentEvent 兼容形态
+
+文档中的 `AgentEvent` 可以视为：
+
+```text
+AgentEvent = EventEnvelope + SemanticPayload
+```
+
+这样第一版实现可以保持简单，但后续能自然支持：
+
+- replay；
+- idempotency；
+- delivery ack；
+- event correlation；
+- task duplication prevention；
+- runtime scene diagnosis。
+
+### 29.4 v0 的事件定位
+
+第一版不承诺完整 event sourcing。
+
+建议定位：
+
+```text
+AgentEvent v0 = append-only audit/event log + routing input
+TaskLedger v0 = current task state snapshot + status history
+```
+
+也就是说：
+
+- Event 可以用于追踪和投递；
+- TaskLedger 仍保存当前任务状态；
+- 暂不要求完全通过 replay 重建所有状态；
+- 如果未来需要，再升级为 replayable state machine。
+
+## 30. ContextManifest 与延迟解析
+
+`ContextPacket` 如果直接持久化完整内容，会带来性能、隐私、缓存和权限问题。第一版建议实现为 lazy graph。
+
+### 30.1 上下文三层结构
+
+```text
+ContextManifest
+  保存来源、范围、摘要、hash、权限、resolver policy。
+
+ContextResolver
+  按权限、预算、模式和运行目标解析 manifest。
+
+ContextPacket
+  运行时实际传入 Agent / LLM 的上下文视图。
+```
+
+### 30.2 SourceRef
+
+建议统一上下文引用：
+
+```ts
+type ContextSourceRef = {
+  refId: string;
+  sourceType:
+    | "session"
+    | "room"
+    | "agent_inbox"
+    | "private_memory"
+    | "project_memory"
+    | "tool_result"
+    | "workspace_file"
+    | "runtime_scene"
+    | "task_ledger";
+  sourceId: string;
+  range?: {
+    start?: string | number;
+    end?: string | number;
+  };
+  summary: string;
+  hash?: string;
+  permissionReason: string;
+};
+```
+
+### 30.3 保存策略
+
+建议：
+
+- 默认保存 `ContextManifest`。
+- 对短上下文可保存 packet snapshot。
+- 对长上下文保存 refs + summary。
+- 对敏感上下文只保存 ref 和 redacted summary。
+- 对工具大输出保存 tool result ref，不复制全文。
+
+### 30.4 调试策略
+
+为了可诊断，manifest 至少要能回答：
+
+- 本轮引用了哪些 session / room / memory；
+- 哪些内容被省略；
+- 为什么省略；
+- 哪个 policy 允许读取；
+- 哪个 token budget 限制了上下文；
+- 是否使用了压缩摘要。
+
+## 31. EvaluationGate 异步状态机
+
+`EvaluationGate` 应作为异步治理状态机，而不是同步布尔判断。
+
+### 31.1 Proposal 类型
+
+建议第一版支持：
+
+```text
+memory_proposal
+policy_proposal
+tool_permission_proposal
+prompt_proposal
+self_evolution_reference
+supervised_case_proposal
+code_change_proposal
+followup_task_proposal
+```
+
+### 31.2 Proposal 状态
+
+建议状态：
+
+```text
+draft
+queued
+reviewing
+needs_user_decision
+approved
+rejected
+applied
+expired
+conflict
+superseded
+rolled_back
+```
+
+### 31.3 审批主体
+
+建议将审批主体写入 policy：
+
+```text
+user_required
+supervisor_agent_allowed
+auto_allowed
+deny
+```
+
+默认建议：
+
+- project memory：`user_required` 或 `supervisor_agent_allowed + user audit`
+- private memory：按 Agent MemoryPolicy 决定
+- tool permission：`user_required`
+- prompt / policy：`user_required`
+- self-evolution reference：`supervisor_agent_allowed`
+- code change：必须 worktree + claim + validation
+
+### 31.4 超时和升级
+
+Proposal 不应无限挂起。
+
+建议字段：
+
+```ts
+type ProposalReviewPolicy = {
+  reviewerPolicy: "user_required" | "supervisor_agent_allowed" | "auto_allowed" | "deny";
+  timeoutSeconds?: number;
+  onTimeout: "expire" | "escalate_to_user" | "keep_waiting";
+  conflictPolicy: "block" | "supersede" | "manual_review";
+};
+```
+
+### 31.5 应用证据
+
+进入 `applied` 必须记录：
+
+- applied by；
+- applied at；
+- target object；
+- previous version；
+- next version；
+- validation result；
+- rollback ref，如果适用。
+
+## 32. 后续文档建议
 
 本草案确认后，建议继续补三份文档：
 
