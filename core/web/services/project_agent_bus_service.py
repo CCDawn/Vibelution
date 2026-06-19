@@ -13,6 +13,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from core.agent_kernel import ADAPTER_VERSION, KernelError, submit_agent_message_event
+from core.agent_kernel import service as agent_kernel_service
+
 from . import agent_directory_service, session_service
 from .runtime_scene_service import record_runtime_scene_event
 
@@ -95,6 +98,7 @@ def send_project_agent_bus_message(
         "createdAt": now,
         "updatedAt": now,
         "metadata": _safe_metadata(metadata),
+        "kernel": {},
         "deliveries": [],
         "interruptions": [],
     }
@@ -105,21 +109,183 @@ def send_project_agent_bus_message(
             for agent in resolution["targets"]
         ]
 
-    event["deliveries"] = [
-        _deliver_to_agent(
-            agent,
+    if resolution["targets"]:
+        kernel_result = _submit_bus_message_to_kernel(
+            event,
+            targets=resolution["targets"],
             content=normalized_content,
-            event_id=event_id,
-            message_type=event["messageType"],
             wake_target=bool(wake_target),
+            created_by=created_by,
         )
-        for agent in resolution["targets"]
-    ]
+        event["kernel"] = _kernel_bus_delivery_summary(kernel_result)
+        event["deliveries"] = _bus_deliveries_from_kernel_result(
+            kernel_result,
+            targets=resolution["targets"],
+        )
+        event["metadata"]["kernelTaskId"] = event["kernel"].get("taskId", "")
+        event["metadata"]["kernelEventId"] = event["kernel"].get("eventId", "")
+        event["metadata"]["kernelOutcomeId"] = event["kernel"].get("outcomeId", "")
 
     with _BUS_LOCK:
         _append_jsonl(_bus_events_path(), event)
     _record_bus_event("message.sent", event)
     return event
+
+
+def _submit_bus_message_to_kernel(
+    event: dict[str, Any],
+    *,
+    targets: list[dict[str, Any]],
+    content: str,
+    wake_target: bool,
+    created_by: str,
+) -> dict[str, Any]:
+    agent_kernel_service.PROJECT_ROOT = _project_root()
+    target_agent_ids = [
+        str(agent.get("agentId") or "").strip()
+        for agent in targets
+        if str(agent.get("agentId") or "").strip()
+    ]
+    metadata = _safe_metadata(event.get("metadata") if isinstance(event.get("metadata"), dict) else {})
+    metadata.update(
+        {
+            "sourceSurface": "project_agent_bus",
+            "sourceMessageId": str(event.get("eventId") or "").strip(),
+            "sourceRoomId": "project_agent_bus",
+            "projectionRef": {
+                "kind": "project_agent_bus_event",
+                "id": str(event.get("eventId") or "").strip(),
+            },
+            "projectBusEventId": str(event.get("eventId") or "").strip(),
+            "projectBusMessageType": str(event.get("messageType") or "").strip(),
+            "projectBusTargetScope": str(event.get("targetScope") or "").strip(),
+        }
+    )
+    try:
+        return submit_agent_message_event(
+            source="project_agent_bus",
+            sender=_kernel_sender(created_by=created_by, metadata=metadata),
+            recipient_agent_ids=target_agent_ids,
+            content=content,
+            correlation_id=str(event.get("eventId") or "").strip(),
+            wake_target=wake_target,
+            metadata=metadata,
+            source_id=str(event.get("eventId") or "").strip(),
+        )
+    except KernelError as exc:
+        raise ProjectAgentBusError(f"Project Agent bus kernel delivery failed: {exc}") from exc
+
+
+def _kernel_sender(*, created_by: str, metadata: dict[str, Any]) -> dict[str, str]:
+    sender_agent_id = str(metadata.get("senderAgentId") or metadata.get("sourceAgentId") or "").strip()
+    if sender_agent_id:
+        return {"type": "agent", "id": sender_agent_id, "agentId": sender_agent_id}
+    return {"type": "user", "id": str(created_by or "user").strip() or "user"}
+
+
+def _kernel_bus_delivery_summary(kernel_result: dict[str, Any]) -> dict[str, Any]:
+    event = kernel_result.get("event") if isinstance(kernel_result.get("event"), dict) else {}
+    task = kernel_result.get("task") if isinstance(kernel_result.get("task"), dict) else {}
+    execution = kernel_result.get("execution") if isinstance(kernel_result.get("execution"), dict) else {}
+    outcome = kernel_result.get("outcome") if isinstance(kernel_result.get("outcome"), dict) else {}
+    return {
+        "enabled": True,
+        "adapterVersion": ADAPTER_VERSION,
+        "reused": bool(kernel_result.get("reused")),
+        "eventId": str(event.get("eventId") or "").strip(),
+        "taskId": str(task.get("taskId") or "").strip(),
+        "workRunId": str(execution.get("workRunId") or "").strip(),
+        "outcomeId": str(outcome.get("outcomeId") or "").strip(),
+        "outcomeStatus": str(outcome.get("status") or "").strip(),
+    }
+
+
+def _bus_deliveries_from_kernel_result(
+    kernel_result: dict[str, Any],
+    *,
+    targets: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    target_map = {
+        str(agent.get("agentId") or "").strip(): agent
+        for agent in targets
+        if str(agent.get("agentId") or "").strip()
+    }
+    outcome = kernel_result.get("outcome") if isinstance(kernel_result.get("outcome"), dict) else {}
+    raw_deliveries = list(outcome.get("deliveries") or []) if isinstance(outcome.get("deliveries"), list) else []
+    kernel_summary = _kernel_bus_delivery_summary(kernel_result)
+    deliveries = [
+        _bus_delivery_from_kernel_delivery(
+            delivery,
+            target_map=target_map,
+            kernel_summary=kernel_summary,
+        )
+        for delivery in raw_deliveries
+        if isinstance(delivery, dict)
+    ]
+    delivered_ids = {
+        str(delivery.get("targetAgentId") or "").strip()
+        for delivery in deliveries
+        if str(delivery.get("targetAgentId") or "").strip()
+    }
+    for agent_id, agent in target_map.items():
+        if agent_id in delivered_ids:
+            continue
+        deliveries.append(
+            {
+                "targetAgentId": agent_id,
+                "targetAgentCode": str(agent.get("agentCode") or "").strip(),
+                "targetAgentName": str(agent.get("displayName") or "").strip(),
+                "targetSessionId": str(agent.get("directSessionId") or "").strip(),
+                "inboxMessageId": "",
+                "status": "failed",
+                "wake": {
+                    "wakeRequested": False,
+                    "wakeStatus": "missing_kernel_delivery",
+                    "messageId": "",
+                    "targetAgentId": agent_id,
+                    "targetSessionId": str(agent.get("directSessionId") or "").strip(),
+                    "turnId": "",
+                    "reason": "kernel_outcome_missing_delivery",
+                },
+                "reason": "kernel_outcome_missing_delivery",
+                "kernelEventId": kernel_summary["eventId"],
+                "kernelTaskId": kernel_summary["taskId"],
+                "kernelOutcomeId": kernel_summary["outcomeId"],
+            }
+        )
+    return deliveries
+
+
+def _bus_delivery_from_kernel_delivery(
+    delivery: dict[str, Any],
+    *,
+    target_map: dict[str, dict[str, Any]],
+    kernel_summary: dict[str, Any],
+) -> dict[str, Any]:
+    agent_id = str(delivery.get("targetAgentId") or "").strip()
+    agent = target_map.get(agent_id) or {}
+    wake = delivery.get("wake") if isinstance(delivery.get("wake"), dict) else {}
+    return {
+        "targetAgentId": agent_id,
+        "targetAgentCode": str(agent.get("agentCode") or "").strip(),
+        "targetAgentName": str(agent.get("displayName") or "").strip(),
+        "targetSessionId": str(delivery.get("targetSessionId") or agent.get("directSessionId") or "").strip(),
+        "inboxMessageId": str(delivery.get("inboxMessageId") or "").strip(),
+        "status": str(delivery.get("status") or "skipped").strip(),
+        "wake": {
+            "wakeRequested": bool(wake.get("wakeRequested")),
+            "wakeStatus": str(wake.get("wakeStatus") or "").strip(),
+            "messageId": str(wake.get("messageId") or delivery.get("inboxMessageId") or "").strip(),
+            "targetAgentId": str(wake.get("targetAgentId") or agent_id).strip(),
+            "targetSessionId": str(wake.get("targetSessionId") or delivery.get("targetSessionId") or agent.get("directSessionId") or "").strip(),
+            "turnId": str(wake.get("turnId") or "").strip(),
+            "reason": str(wake.get("reason") or "").strip(),
+        },
+        "reason": str(delivery.get("reason") or "").strip(),
+        "kernelEventId": str(kernel_summary.get("eventId") or "").strip(),
+        "kernelTaskId": str(kernel_summary.get("taskId") or "").strip(),
+        "kernelOutcomeId": str(kernel_summary.get("outcomeId") or "").strip(),
+    }
 
 
 def revoke_project_agent_bus_message(
@@ -263,59 +429,6 @@ def _revoke_deliveries(
                 revoked["reason"] = type(exc).__name__
         revocations.append(revoked)
     return revocations
-
-
-def _deliver_to_agent(
-    agent: dict[str, Any],
-    *,
-    content: str,
-    event_id: str,
-    message_type: str,
-    wake_target: bool,
-) -> dict[str, Any]:
-    agent_id = str(agent.get("agentId") or "").strip()
-    delivery = {
-        "targetAgentId": agent_id,
-        "targetAgentCode": str(agent.get("agentCode") or "").strip(),
-        "targetAgentName": str(agent.get("displayName") or "").strip(),
-        "targetSessionId": str(agent.get("directSessionId") or "").strip(),
-        "inboxMessageId": "",
-        "status": "skipped",
-        "wake": {
-            "wakeRequested": bool(wake_target),
-            "wakeStatus": "not_requested" if not wake_target else "skipped",
-            "messageId": "",
-            "targetAgentId": agent_id,
-            "targetSessionId": str(agent.get("directSessionId") or "").strip(),
-            "turnId": "",
-            "reason": "",
-        },
-        "reason": "",
-    }
-    try:
-        message = agent_directory_service.write_agent_inbox_message(
-            agent_id,
-            content=content,
-            source_room_id="project_agent_bus",
-            source_round_id=event_id,
-            thread_id="project:agent-bus",
-            kind="user_guidance" if message_type == "user_guidance" else "agent_broadcast",
-            summary=content,
-            prompt_eligible=True,
-            created_by="user",
-            metadata={"projectBusEventId": event_id, "messageType": message_type},
-        )
-    except Exception as exc:
-        delivery["status"] = "failed"
-        delivery["reason"] = type(exc).__name__
-        return delivery
-
-    delivery["status"] = "delivered"
-    delivery["inboxMessageId"] = str(message.get("messageId") or message.get("eventId") or "").strip()
-    delivery["wake"]["messageId"] = delivery["inboxMessageId"]
-    if wake_target:
-        delivery["wake"] = session_service.wake_agent_for_inbox_message(message)
-    return delivery
 
 
 def _interrupt_target_agent(agent: dict[str, Any], *, source_event_id: str) -> dict[str, Any]:
@@ -520,6 +633,7 @@ def _record_bus_event(event_name: str, event: dict[str, Any]) -> None:
             for item in deliveries
             if str(item.get("status") or "").strip()
         ]
+        kernel = event.get("kernel") if isinstance(event.get("kernel"), dict) else {}
         record_runtime_scene_event(
             "project_agent_bus",
             "message",
@@ -541,6 +655,10 @@ def _record_bus_event(event_name: str, event: dict[str, Any]) -> None:
                 "interruptedCount": sum(1 for status in interrupt_statuses if status == "interrupted"),
                 "interruptStatuses": interrupt_statuses[:24],
                 "wakeStatuses": wake_statuses[:24],
+                "kernelEventId": str(kernel.get("eventId") or "").strip(),
+                "kernelTaskId": str(kernel.get("taskId") or "").strip(),
+                "kernelOutcomeId": str(kernel.get("outcomeId") or "").strip(),
+                "kernelOutcomeStatus": str(kernel.get("outcomeStatus") or "").strip(),
                 "unresolvedMentionCount": len(event.get("unresolvedMentions") or []),
                 "unresolvedMentions": list(event.get("unresolvedMentions") or [])[:24],
             },
@@ -553,6 +671,14 @@ def _record_bus_event(event_name: str, event: dict[str, Any]) -> None:
                 "mentioned_tokens": list(event.get("mentionedTokens") or [])[:50],
                 "unresolved_mentions": list(event.get("unresolvedMentions") or [])[:50],
                 "content_summary": _trim_lines(str(event.get("summary") or ""), max_lines=3),
+                "kernel": {
+                    "event_id": str(kernel.get("eventId") or "").strip(),
+                    "task_id": str(kernel.get("taskId") or "").strip(),
+                    "work_run_id": str(kernel.get("workRunId") or "").strip(),
+                    "outcome_id": str(kernel.get("outcomeId") or "").strip(),
+                    "outcome_status": str(kernel.get("outcomeStatus") or "").strip(),
+                    "reused": bool(kernel.get("reused")),
+                },
                 "deliveries": [
                     {
                         "target_agent_id": str(item.get("targetAgentId") or "").strip(),
