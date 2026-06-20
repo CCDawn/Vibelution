@@ -108,6 +108,7 @@ def test_chat_room_api_create_and_run_round(tmp_path, monkeypatch):
     assert [message["content"] for message in latest_round["messages"]] == ["Agent A 发言", "Agent B 发言"]
 
 
+@pytest.mark.slow
 def test_chat_room_round_prefer_async_returns_lightweight_acceptance(tmp_path, monkeypatch):
     _seed_chat_sessions(tmp_path)
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)

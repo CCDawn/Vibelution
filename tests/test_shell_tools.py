@@ -300,6 +300,7 @@ class TestCreateFile:
         outside_cwd.mkdir()
 
         monkeypatch.setattr(shell_tools_module, "PROJECT_ROOT", fake_root.resolve())
+        monkeypatch.setattr(shell_tools_module, "_get_workspace_root", lambda: fake_workspace.resolve())
         monkeypatch.chdir(outside_cwd)
 
         result = create_file(file_path="nested/created.txt", content="ok")

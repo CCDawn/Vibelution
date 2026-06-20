@@ -97,7 +97,7 @@ def test_append_candidate_record_routes_by_type_and_dedupes(tmp_path: Path):
     first = append_candidate_record(candidate, project_root=tmp_path)
     second = append_candidate_record(candidate, project_root=tmp_path)
 
-    path = tmp_path / CANDIDATE_JSONL_BY_TYPE["prompt_candidate"]
+    path = first.path
     rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
     records = list_candidate_records("prompt_candidate", project_root=tmp_path)
     paths = candidate_pool_paths(project_root=tmp_path)
