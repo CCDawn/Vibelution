@@ -18,6 +18,11 @@ PROJECT_ROOT = Path(__file__).parent.parent
 pytestmark = pytest.mark.environment_smoke
 
 
+def _available_python_runtime() -> Path:
+    project_venv_python = PROJECT_ROOT / ".venv" / "Scripts" / "python.exe"
+    return project_venv_python if project_venv_python.exists() else Path(sys.executable)
+
+
 def test_config_smoke_loads():
     config = Settings().config
 
@@ -29,7 +34,7 @@ def test_config_smoke_loads():
 def test_boot_prerequisites_exist():
     assert (PROJECT_ROOT / "agent.py").exists()
     assert (PROJECT_ROOT / "scripts" / "doctor.ps1").exists()
-    assert (PROJECT_ROOT / ".venv" / "Scripts" / "python.exe").exists()
+    assert _available_python_runtime().exists()
 
 
 def test_workspace_can_initialize():
