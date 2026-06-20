@@ -1271,6 +1271,7 @@ def ensure_agent_archive_allowed(agent_id: str) -> dict[str, Any]:
 def repair_agent_directory() -> dict[str, Any]:
     with _STATE_LOCK:
         state = load_state()
+        state_signature = _agent_directory_storage_signature(state)
         changed = False
         knowledge_steward_result = _ensure_knowledge_steward_agent(state)
         if knowledge_steward_result.get("changed"):
@@ -1423,7 +1424,7 @@ def repair_agent_directory() -> dict[str, Any]:
                 changed = True
             _refresh_agent_onboarding_metadata(state, agent)
         state["memoryPolicies"] = policies
-        if changed:
+        if changed and _agent_directory_storage_signature(state) != state_signature:
             save_state(state)
             for repaired_agent in display_name_repaired_agents:
                 _record_agent_event("agent.display_name_repaired", repaired_agent)
@@ -3680,22 +3681,33 @@ def load_state() -> dict[str, Any]:
 
 def save_state(state: dict[str, Any]) -> dict[str, Any]:
     with _STATE_LOCK:
-        payload = default_state()
-        payload.update(state if isinstance(state, dict) else {})
-        payload["version"] = AGENT_REGISTRY_VERSION
-        payload["updatedAt"] = utc_now_iso()
-        raw_agents = list(payload.get("agents") or []) if isinstance(payload.get("agents"), list) else []
-        payload["agents"] = [
-            normalized
-            for item in raw_agents
-            if isinstance(item, dict)
-            for normalized in [_normalize_agent_record_for_storage(item)]
-        ]
-        payload["toolPolicies"] = _tool_policies(payload)
-        payload["memoryPolicies"] = _memory_policies(payload)
+        payload = _build_agent_registry_payload_for_storage(state)
         _atomic_write_json(registry_path(), payload)
         _invalidate_repaired_state_cache()
         return payload
+
+
+def _build_agent_registry_payload_for_storage(state: dict[str, Any]) -> dict[str, Any]:
+    payload = default_state()
+    payload.update(state if isinstance(state, dict) else {})
+    payload["version"] = AGENT_REGISTRY_VERSION
+    payload["updatedAt"] = utc_now_iso()
+    raw_agents = list(payload.get("agents") or []) if isinstance(payload.get("agents"), list) else []
+    payload["agents"] = [
+        normalized
+        for item in raw_agents
+        if isinstance(item, dict)
+        for normalized in [_normalize_agent_record_for_storage(item)]
+    ]
+    payload["toolPolicies"] = _tool_policies(payload)
+    payload["memoryPolicies"] = _memory_policies(payload)
+    return payload
+
+
+def _agent_directory_storage_signature(state: dict[str, Any]) -> str:
+    payload = _build_agent_registry_payload_for_storage(state)
+    payload.pop("updatedAt", None)
+    return json.dumps(payload, ensure_ascii=False, sort_keys=True)
 
 
 def registry_path() -> Path:

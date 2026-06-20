@@ -396,6 +396,72 @@ def test_agent_directory_repaired_snapshot_cache_invalidates_after_save(tmp_path
     assert agent_directory_service.get_agent(agent["agentId"])["metadata"]["cacheProbe"] == "after"
 
 
+def test_repair_agent_directory_legacy_fields_is_idempotent(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setattr(config_service, "get_config_workspace", _fake_config_workspace)
+    fake_llm = SimpleNamespace(
+        get_profile=lambda profile_id=None, role="primary": SimpleNamespace(profile_id=profile_id or "primary"),
+        get_model_library_entry_for_profile=lambda profile: ("model-primary", {}),
+        model_library={"model-primary": {"model": "gpt-test"}},
+    )
+    monkeypatch.setattr("config.settings.get_config", lambda: SimpleNamespace(llm=fake_llm))
+
+    registry_path = tmp_path / "workspace" / "agents" / "agents.json"
+    registry_path.parent.mkdir(parents=True, exist_ok=True)
+    registry_path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "agents": [
+                    {
+                        "agentId": "agent-legacy",
+                        "agentCode": "A014",
+                        "displayName": "旧 Agent",
+                        "kind": "persistent",
+                        "primaryMode": "chat",
+                        "roleKey": "chat",
+                        "profileId": "primary",
+                        "templateId": "primary",
+                        "promptTemplateId": "prompt-chat-default",
+                        "directSessionId": "session-legacy",
+                        "workspacePath": "workspace/agents/agent-legacy",
+                        "toolPolicyId": "default",
+                        "memoryPolicyId": "memory-agent-legacy",
+                        "createdBy": "legacy",
+                        "status": "active",
+                        "metadata": {},
+                        "createdAt": "2026-06-04T00:00:00+00:00",
+                        "updatedAt": "2026-06-04T00:00:00+00:00",
+                    }
+                ],
+                "toolPolicies": {"default": agent_directory_service.default_tool_policy("default")},
+                "memoryPolicies": {},
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    save_calls = 0
+    real_save_state = agent_directory_service.save_state
+
+    def tracked_save_state(state: dict) -> dict:
+        nonlocal save_calls
+        save_calls += 1
+        return real_save_state(state)
+
+    monkeypatch.setattr(agent_directory_service, "save_state", tracked_save_state)
+
+    first = agent_directory_service.repair_agent_directory()
+    second = agent_directory_service.repair_agent_directory()
+
+    assert save_calls == 1
+    assert all("profileId" not in item for item in first["agents"] if isinstance(item, dict))
+    assert all("profileId" not in item for item in second["agents"] if isinstance(item, dict))
+
+
 def test_work_session_boundary_skips_persona_task_and_team_onboarding_requirements(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     monkeypatch.setattr(config_service, "get_config_workspace", _fake_config_workspace)
