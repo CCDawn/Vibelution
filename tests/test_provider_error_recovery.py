@@ -631,16 +631,16 @@ def test_session_history_seed_keeps_provider_error_but_filters_recovery_notices(
         {
             "role": "user",
             "content": "现在审查一下整个项目,然后向我汇报结果",
-            "timestamp": "2026-05-23T00:00:00",
+            "metadata": {"schemaVersion": 1, "sourceIndex": 0},
         },
         {
             "role": "assistant",
             "content": "模型服务上游暂时失败，本轮没有完成。完整 provider 错误已写入运行日志；可以稍后直接重试或发送“继续”。",
-            "timestamp": "2026-05-23T00:01:00",
+            "metadata": {"schemaVersion": 1, "sourceIndex": 1},
         },
         {
             "role": "assistant",
             "content": "结果已经审查完了，结论是：项目结构健康。",
-            "timestamp": "2026-05-23T00:03:00",
+            "metadata": {"schemaVersion": 1, "sourceIndex": 2},
         },
     ]
