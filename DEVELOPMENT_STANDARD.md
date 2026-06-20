@@ -216,6 +216,8 @@ The implementation plan, review notes, or final report must state one of:
 
 If developer mode is affected, validation should include the smallest useful evidence for both modes: focused tests, route/service assertions, cache-key checks, path-resolution checks, or a manual verification note naming the mode-specific behavior. Do not assume formal-mode correctness implies developer-mode correctness when paths, caches, state files, write scopes, tool routing, or UI data sources changed.
 
+Structural migrations must converge on one normal path. Compatibility layers, duplicate routing paths, adapter shims, dual writers, legacy aliases, and old data/layout surfaces may exist only as temporary development scaffolding. Before stable merge or release, remove the old structure and its tests, docs, config entries, and call sites so only the new structure remains; otherwise record a bounded migration exception with owner, expiry or removal trigger, validation evidence, and rollback reason.
+
 ### 8.2 Rust Accelerator Boundary
 
 Python remains the primary runtime for Vibelution business logic, Agent orchestration, web APIs, tests, and evolution workflows. Rust is allowed only as a bounded accelerator layer, not as a replacement for product semantics or the main Agent runtime.
