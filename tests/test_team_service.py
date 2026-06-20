@@ -19,6 +19,27 @@ def _use_tmp_project_root(tmp_path, monkeypatch):
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(team_service, "PROJECT_ROOT", tmp_path)
 
+    def list_direct_agent_sessions():
+        sessions = []
+        for agent in agent_directory_service.list_agents(include_archived=False):
+            session_id = str(agent.get("directSessionId") or "").strip()
+            if not session_id:
+                continue
+            sessions.append(
+                {
+                    "id": session_id,
+                    "title": str(agent.get("displayName") or session_id),
+                    "agentId": str(agent.get("agentId") or ""),
+                    "agentCode": str(agent.get("agentCode") or ""),
+                    "workspacePath": str(agent.get("workspacePath") or ""),
+                    "status": "active",
+                    "updatedAt": "2026-05-29T00:00:00Z",
+                }
+            )
+        return sessions
+
+    monkeypatch.setattr(session_service, "list_sessions", list_direct_agent_sessions)
+
 
 def test_create_team_with_active_agent_writes_default_canvas(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
