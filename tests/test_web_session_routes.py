@@ -8,6 +8,7 @@ from core.web.app import create_app
 from core.web.control import CONTROL_TOKEN_HEADER, get_control_token
 from core.web.services import (
     agent_directory_service,
+    team_service,
     runtime_service,
     self_evolution_control_service,
     self_evolution_service,
@@ -195,6 +196,130 @@ def test_session_query_default_page_skips_per_item_filtering(tmp_path, monkeypat
     assert [item["id"] for item in payload["items"]] == ["session-alpha"]
     assert payload["nextCursor"] == "1"
     assert payload["totalEstimate"] == 2
+
+
+def test_agent_directory_internal_direct_session_stub_hidden_from_user_index(tmp_path, monkeypatch):
+    _seed_chat_state(tmp_path, conversations=[])
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(team_service, "PROJECT_ROOT", tmp_path)
+
+    internal_agent = agent_directory_service.create_agent_instance(
+        display_name="AI 搜索内部 Agent",
+        primary_mode="research",
+        role_key="signal_quality_gate",
+        prompt_template_id="prompt-chat-default",
+        direct_session_id="session-ai-internal",
+        created_by="ai_search_team",
+    )
+    visible_agent = agent_directory_service.create_agent_instance(
+        display_name="能力管家 Agent",
+        primary_mode="research",
+        role_key="research_capability_steward",
+        prompt_template_id="prompt-chat-default",
+        direct_session_id="session-visible-recovery",
+        created_by="session_repair",
+    )
+
+    listed_ids = {item["id"] for item in session_service.list_sessions()}
+
+    assert "session-ai-internal" not in listed_ids
+    assert "session-visible-recovery" in listed_ids
+    assert visible_agent["agentId"]
+
+    detail = session_service.get_session_detail("session-ai-internal")
+
+    assert detail["agentId"] == internal_agent["agentId"]
+    assert detail["hiddenFromIndex"] is True
+    assert "session-ai-internal" not in {item["id"] for item in session_service.list_sessions()}
+
+
+def test_agent_directory_system_team_member_stub_hidden_from_user_index(tmp_path, monkeypatch):
+    _seed_chat_state(tmp_path, conversations=[])
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(team_service, "PROJECT_ROOT", tmp_path)
+
+    team_agent = agent_directory_service.create_agent_instance(
+        display_name="挑战杯数据发现",
+        primary_mode="research",
+        role_key="challenge_cup_data_discovery",
+        prompt_template_id="prompt-chat-default",
+        direct_session_id="session-team-member",
+        created_by="user",
+    )
+    team_service._save_index(
+        {
+            "schemaVersion": team_service.SCHEMA_VERSION,
+            "updatedAt": "2026-05-18T12:00:00Z",
+            "teams": [
+                {
+                    "teamId": "challenge-cup-ai-research",
+                    "name": "挑战杯ai科研团队",
+                    "purpose": "挑战杯科研协作",
+                    "status": "active",
+                    "teamKind": "research",
+                    "teamSource": "research_organization",
+                    "members": [{"agentId": team_agent["agentId"], "role": "数据发现"}],
+                    "linkedChatRoomId": "",
+                }
+            ],
+        }
+    )
+
+    assert "session-team-member" not in {item["id"] for item in session_service.list_sessions()}
+
+    detail = session_service.get_session_detail("session-team-member")
+
+    assert detail["agentId"] == team_agent["agentId"]
+    assert detail["hiddenFromIndex"] is True
+    assert "session-team-member" not in {item["id"] for item in session_service.list_sessions()}
+
+
+def test_session_summary_prefers_real_conversation_title_over_generated_agent_name(tmp_path, monkeypatch):
+    _seed_chat_state(
+        tmp_path,
+        conversations=[
+            {
+                "conversation_id": "session-paper",
+                "title": "论文阅读 Agent",
+                "agent_id": "agent-paper",
+                "agentId": "agent-paper",
+                "updated_at": "2026-05-18T12:00:00",
+                "messages": [{"role": "user", "content": "继续读论文", "timestamp": "2026-05-18T11:55:00"}],
+            }
+        ],
+    )
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    agent_directory_service.save_state(
+        {
+            "agents": [
+                {
+                    "agentId": "agent-paper",
+                    "agentCode": "A030",
+                    "displayName": "周云舒",
+                    "directSessionId": "session-paper",
+                    "primaryMode": "chat",
+                    "roleKey": "chat-default",
+                    "promptTemplateId": "prompt-chat-default",
+                    "workspacePath": "workspace/agents/agent-paper",
+                    "status": "active",
+                }
+            ]
+        }
+    )
+
+    response = client.get("/api/sessions")
+
+    assert response.status_code == 200
+    session = response.json()[0]
+    assert session["id"] == "session-paper"
+    assert session["title"] == "论文阅读 Agent"
+    assert session["taskTitle"] == "论文阅读 Agent"
+    assert session["agentDisplayName"] == "周云舒"
+
+
 def test_supervised_agent_session_is_hidden_and_preserves_prompt_with_mental_override(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path, conversations=[])
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
