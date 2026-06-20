@@ -1,5 +1,5 @@
 param(
-    [ValidateSet("launcher", "toggle", "start", "stop", "restart", "status", "repair-deps", "monitor", "supervise", "internal-start", "internal-focus", "internal-stop", "internal-restart", "internal-status")]
+    [ValidateSet("launcher", "toggle", "start", "stop", "restart", "status", "repair-deps", "repair-shortcut", "monitor", "supervise", "internal-start", "internal-focus", "internal-stop", "internal-restart", "internal-status")]
     [string]$Action = "launcher",
     [switch]$NoBrowser,
     [string]$SessionId
@@ -40,6 +40,9 @@ $exampleConfigPath = Join-Path (Split-Path -Parent $configPath) "config.example.
 $managedBackendMarkerArg = "--managed-by-launcher"
 $managedLauncherMarkerArg = "--managed-launcher-control"
 $runtimeManagerInternalLauncherEnv = "VIBELUTION_RUNTIME_MANAGER_INTERNAL_LAUNCHER"
+$launcherShortcutName = "Vibelution.lnk"
+$launcherIconPath = Join-Path $projectDir "assets\icons\vibelution.ico"
+$launcherDesktopEntryVbsPath = Join-Path $projectDir "scripts\vibelution_desktop_entry.vbs"
 
 function Initialize-GlobalConfigFile {
     $configDir = Split-Path -Parent $configPath
@@ -2072,6 +2075,118 @@ function Test-ProcessAlive {
     param([int]$ProcessId)
 
     return $null -ne (Get-Process -Id $ProcessId -ErrorAction SilentlyContinue)
+}
+
+function Repair-LauncherShortcut {
+    $startMenuRoot = [Environment]::GetFolderPath("StartMenu")
+    if (-not $startMenuRoot -and $env:APPDATA) {
+        $startMenuRoot = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu"
+    }
+    if (-not $startMenuRoot) {
+        throw "Windows Start Menu path could not be resolved."
+    }
+
+    $programsDir = Join-Path $startMenuRoot "Programs"
+    if (-not (Test-Path -LiteralPath $programsDir)) {
+        New-Item -ItemType Directory -Path $programsDir -Force | Out-Null
+    }
+
+    if (-not (Test-Path -LiteralPath $launcherDesktopEntryVbsPath)) {
+        throw "Vibelution desktop entry script is missing: $launcherDesktopEntryVbsPath"
+    }
+
+    $wscriptPath = Join-Path $env:SystemRoot "System32\wscript.exe"
+    if (-not (Test-Path -LiteralPath $wscriptPath)) {
+        throw "wscript.exe was not found: $wscriptPath"
+    }
+
+    $iconPath = $launcherIconPath
+    if (-not (Test-Path -LiteralPath $iconPath)) {
+        $iconPath = Join-Path $projectDir "web\public\favicon.ico"
+    }
+    if (-not (Test-Path -LiteralPath $iconPath)) {
+        throw "Vibelution icon file is missing: $launcherIconPath"
+    }
+
+    $shortcutPath = Join-Path $programsDir $launcherShortcutName
+    $shell = New-Object -ComObject WScript.Shell
+    $shortcut = $shell.CreateShortcut($shortcutPath)
+    $shortcut.TargetPath = $wscriptPath
+    $shortcut.Arguments = ('"{0}" launcher' -f $launcherDesktopEntryVbsPath)
+    $shortcut.WorkingDirectory = $projectDir
+    $shortcut.IconLocation = ('{0},0' -f $iconPath)
+    $shortcut.Description = "Vibelution Launcher"
+    $shortcut.WindowStyle = 7
+    $shortcut.Save()
+
+    Write-LauncherControlLog `
+        -Event "launcher.shortcut.repaired" `
+        -Message "Launcher Start Menu shortcut was created or refreshed." `
+        -Fields @{
+            shortcut_path = $shortcutPath
+            target_path = $wscriptPath
+            desktop_entry = $launcherDesktopEntryVbsPath
+            icon_path = $iconPath
+        }
+    return $shortcutPath
+}
+
+function Repair-StaleLauncherControlState {
+    $state = Get-State
+    if (-not $state) {
+        return $false
+    }
+
+    $sessionRole = [string](Get-ObjectPropertyValue -Object $state -Name "sessionRole" -Default "")
+    $launcherBackendPid = [int](Get-ObjectPropertyValue -Object $state -Name "launcherBackendPid" -Default 0)
+    $launcherBackendLaunchPid = [int](Get-ObjectPropertyValue -Object $state -Name "launcherBackendLaunchPid" -Default 0)
+    $launcherBrowserLaunchPid = [int](Get-ObjectPropertyValue -Object $state -Name "launcherBrowserLaunchPid" -Default 0)
+    $launcherBrowserWindowPid = [int](Get-ObjectPropertyValue -Object $state -Name "launcherBrowserWindowPid" -Default 0)
+    $hasLauncherState = $sessionRole -eq "launcher_control_surface" -or $launcherBackendPid -gt 0 -or $launcherBackendLaunchPid -gt 0 -or $launcherBrowserLaunchPid -gt 0 -or $launcherBrowserWindowPid -gt 0
+    if (-not $hasLauncherState) {
+        return $false
+    }
+
+    $backendAlive = $launcherBackendPid -gt 0 -and (Test-ProcessAlive $launcherBackendPid)
+    $browserAlive = $launcherBrowserWindowPid -gt 0 -and (Test-ProcessAlive $launcherBrowserWindowPid)
+    $controlHealthy = $backendAlive -and (Test-LauncherControlHealthy)
+    if ($controlHealthy -or $browserAlive) {
+        return $false
+    }
+
+    Write-LauncherControlLog `
+        -Event "launcher.control_state.stale_reconciled" `
+        -Message "Stale Launcher control surface state was reconciled after tracked processes disappeared." `
+        -Level "warning" `
+        -Fields @{
+            session_role = $sessionRole
+            launcher_backend_pid = $launcherBackendPid
+            launcher_backend_launch_pid = $launcherBackendLaunchPid
+            launcher_browser_launch_pid = $launcherBrowserLaunchPid
+            launcher_browser_window_pid = $launcherBrowserWindowPid
+        }
+
+    if ($sessionRole -eq "launcher_control_surface") {
+        Remove-State
+        return $true
+    }
+
+    $payload = @{}
+    foreach ($property in $state.PSObject.Properties) {
+        $payload[$property.Name] = $property.Value
+    }
+
+    $payload["launcherBackendPid"] = 0
+    $payload["launcherBackendLaunchPid"] = 0
+    $payload["launcherBrowserLaunchPid"] = 0
+    $payload["launcherBrowserWindowPid"] = 0
+    $payload["launcherControlStartedAt"] = $null
+    $payload["staleLauncherControlReconciledAt"] = (Get-Date).ToString("o")
+    $payload["lastReason"] = "stale_launcher_control_reconciled"
+    $payload["lastSource"] = "launcher_script"
+
+    Save-State $payload
+    return $true
 }
 
 function Get-ProcessChildPidMap {
@@ -8078,6 +8193,7 @@ function Ensure-LauncherControlSurfaceForRuntimeCommand {
     Acquire-LauncherMutex
     try {
         Sync-LauncherEndpointFromState
+        [void](Repair-StaleLauncherControlState)
         Write-LauncherControlLog `
             -Event "launcher.lifecycle.runtime_command.control_surface.ensure" `
             -Message "Ensuring Launcher control surface before forwarding a lifecycle command to Runtime Manager." `
@@ -8141,8 +8257,10 @@ if ($runtimeManagerClientActions -contains $Action) {
 Acquire-LauncherMutex
 try {
     Sync-LauncherEndpointFromState
+    [void](Repair-StaleLauncherControlState)
     switch ($Action) {
         "launcher" {
+            [void](Repair-LauncherShortcut)
             Write-LauncherControlLog `
                 -Event "launcher.control_surface.open_requested" `
                 -Message "Launcher action is opening only the standalone control surface." `
@@ -8210,6 +8328,10 @@ try {
         }
         "repair-deps" {
             Repair-ProjectPythonDependencies
+        }
+        "repair-shortcut" {
+            $shortcutPath = Repair-LauncherShortcut
+            Write-Note "Shortcut  : $shortcutPath"
         }
         "supervise" {
             Run-SupervisorLoop -ManagedSessionId $SessionId

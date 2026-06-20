@@ -22,6 +22,35 @@ DESKTOP_ENTRY_PY = PROJECT_ROOT / "scripts" / "vibelution_desktop_entry.py"
 pytestmark = [pytest.mark.slow, pytest.mark.serial]
 
 
+def test_launcher_script_repairs_start_menu_shortcut_entry():
+    source = LAUNCHER_SCRIPT.read_text(encoding="utf-8")
+
+    assert '"repair-shortcut"' in source
+    assert "function Repair-LauncherShortcut" in source
+    assert "Vibelution.lnk" in source
+    assert "vibelution_desktop_entry.vbs" in source
+    assert "assets\\icons\\vibelution.ico" in source
+    assert "CreateShortcut" in source
+    assert "$shortcut.TargetPath = $wscriptPath" in source
+    assert '$shortcut.Arguments = (\'"{0}" launcher\' -f $launcherDesktopEntryVbsPath)' in source
+    assert "$shortcut.IconLocation" in source
+    assert "[void](Repair-LauncherShortcut)" in source
+
+
+def test_launcher_script_reconciles_stale_control_state_before_lifecycle_actions():
+    source = LAUNCHER_SCRIPT.read_text(encoding="utf-8")
+
+    assert "function Repair-StaleLauncherControlState" in source
+    assert source.count("[void](Repair-StaleLauncherControlState)") >= 2
+    assert "launcher.control_state.stale_reconciled" in source
+    assert '$payload["launcherBackendPid"] = 0' in source
+    assert '$payload["launcherBackendLaunchPid"] = 0' in source
+    assert '$payload["launcherBrowserWindowPid"] = 0' in source
+    assert '$payload["lastReason"] = "stale_launcher_control_reconciled"' in source
+    assert "Remove-State" in source
+    assert "Test-LauncherControlHealthy" in source
+
+
 def _load_desktop_entry_py():
     module_name = f"vibelution_desktop_entry_under_test_{time.time_ns()}"
     spec = importlib.util.spec_from_file_location(module_name, DESKTOP_ENTRY_PY)
@@ -3490,7 +3519,7 @@ $scriptText = $ast.EndBlock.Extent.Text
 if ($scriptText -notmatch '\\$runtimeManagerClientActions\\s*=\\s*@\\("toggle", "start", "stop", "restart"\\)') {
     throw "Runtime-manager client actions changed unexpectedly."
 }
-foreach ($forbiddenClientAction in @("launcher", "status", "repair-deps")) {
+foreach ($forbiddenClientAction in @("launcher", "status", "repair-deps", "repair-shortcut")) {
     if ($scriptText -match ('\\$runtimeManagerClientActions\\s*=\\s*@\\([^\\)]*"' + [regex]::Escape($forbiddenClientAction) + '"')) {
         throw "$forbiddenClientAction action must stay out of runtime-manager client actions."
     }
@@ -3503,6 +3532,9 @@ if ($scriptText -notmatch '"status"\\s*\\{\\s*Show-Status\\s*\\}') {
 }
 if ($scriptText -notmatch '"repair-deps"\\s*\\{\\s*Repair-ProjectPythonDependencies\\s*\\}') {
     throw "repair-deps action must invoke explicit Python dependency repair."
+}
+if ($scriptText -notmatch '"repair-shortcut"\\s*\\{[\\s\\S]*?Repair-LauncherShortcut[\\s\\S]*?\\}') {
+    throw "repair-shortcut action must invoke explicit Launcher shortcut repair."
 }
 if ($scriptText -notmatch '"launcher"\\s*\\{[\\s\\S]*?Open-LauncherControlSurface[\\s\\S]*?\\}\\s*"toggle"') {
     throw "launcher action does not open only the Launcher control surface."
