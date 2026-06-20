@@ -109,7 +109,7 @@ class ToolTracker:
         self.project_root = Path(project_root)
 
         # 追踪数据存储路径
-        self._data_dir = self.project_root / "workspace" / "analytics"
+        self._data_dir = _workspace_root(self.project_root) / "analytics"
         self._data_dir.mkdir(parents=True, exist_ok=True)
         self._stats_file = self._data_dir / "tool_stats.json"
         self._history_file = self._data_dir / "tool_history.json"
@@ -730,6 +730,16 @@ class ToolTracker:
 # ============================================================================
 
 _tool_tracker: Optional[ToolTracker] = None
+
+
+def _workspace_root(project_root: Path) -> Path:
+    from core.infrastructure.workspace_manager import get_workspace
+
+    root = Path(project_root).resolve()
+    workspace = get_workspace()
+    if root == workspace.project_root.resolve():
+        return workspace.root.resolve()
+    return root if root.name.lower() == "workspace" else root / "workspace"
 
 
 def get_tool_tracker(project_root: Optional[str] = None) -> ToolTracker:

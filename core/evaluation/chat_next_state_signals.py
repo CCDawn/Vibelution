@@ -16,9 +16,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
+from core.infrastructure.workspace_manager import get_workspace
+
 
 SIGNAL_SCHEMA_VERSION = 1
-DEFAULT_SIGNAL_PATH = Path("workspace/evaluation/chat_next_state_signals.jsonl")
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+DEFAULT_SIGNAL_PATH = Path("evaluation/chat_next_state_signals.jsonl")
 ALLOWED_SOURCES = {"user", "tool", "runtime", "verification", "review"}
 ALLOWED_KINDS = {
     "user_guidance",
@@ -48,7 +51,17 @@ def resolve_chat_next_state_signal_path(project_root: Path, path: str | Path | N
     raw = Path(path) if path else DEFAULT_SIGNAL_PATH
     if raw.is_absolute():
         return raw.resolve()
-    return (project_root / raw).resolve()
+    parts = raw.parts
+    if parts and parts[0] == "workspace":
+        raw = Path(*parts[1:])
+    return (_workspace_root(project_root) / raw).resolve()
+
+
+def _workspace_root(project_root: Path) -> Path:
+    root = Path(project_root).resolve()
+    if root == PROJECT_ROOT.resolve():
+        return get_workspace().root.resolve()
+    return root if root.name.lower() == "workspace" else root / "workspace"
 
 
 def _trim_text(value: Any, *, max_chars: int = MAX_SUMMARY_CHARS) -> str:

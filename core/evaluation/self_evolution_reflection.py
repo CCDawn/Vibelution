@@ -13,7 +13,7 @@ from core.gym.models import utcnow_iso
 from core.infrastructure.workspace_manager import get_workspace
 
 
-REFLECTION_ROOT = Path("workspace/self_evolution/reflection")
+REFLECTION_ROOT = Path("self_evolution/reflection")
 REFLECTION_JSONL = REFLECTION_ROOT / "reflection.jsonl"
 REFLECTION_INDEX = REFLECTION_ROOT / "index.json"
 
@@ -33,13 +33,20 @@ class RecordReflectionResult:
 
 
 def reflection_paths(*, project_root: Optional[Path] = None) -> ReflectionPaths:
-    root = (project_root or get_workspace().project_root).resolve()
+    root = _workspace_root(project_root)
     reflection_root = root / REFLECTION_ROOT
     return ReflectionPaths(
         root=reflection_root,
         jsonl=root / REFLECTION_JSONL,
         index=root / REFLECTION_INDEX,
     )
+
+
+def _workspace_root(project_root: Optional[Path] = None) -> Path:
+    if project_root is None:
+        return get_workspace().root.resolve()
+    root = Path(project_root).resolve()
+    return root if root.name.lower() == "workspace" else root / "workspace"
 
 
 def build_bounded_self_evolution_reflection(experience: dict[str, Any]) -> dict[str, Any]:

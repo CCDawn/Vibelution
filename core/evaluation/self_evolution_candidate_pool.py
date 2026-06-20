@@ -19,7 +19,7 @@ from .supervised_intake import (
 )
 
 
-CANDIDATE_ROOT = Path("workspace/self_evolution/candidates")
+CANDIDATE_ROOT = Path("self_evolution/candidates")
 CANDIDATE_INDEX = CANDIDATE_ROOT / "index.json"
 CANDIDATE_JSONL_BY_TYPE = {
     "skill_candidate": CANDIDATE_ROOT / "skill_candidates.jsonl",
@@ -44,12 +44,19 @@ class AppendCandidateResult:
 
 
 def candidate_pool_paths(*, project_root: Optional[Path] = None) -> CandidatePoolPaths:
-    root = (project_root or get_workspace().project_root).resolve()
+    root = _workspace_root(project_root)
     return CandidatePoolPaths(
         root=root / CANDIDATE_ROOT,
         index=root / CANDIDATE_INDEX,
         by_type={candidate_type: root / path for candidate_type, path in CANDIDATE_JSONL_BY_TYPE.items()},
     )
+
+
+def _workspace_root(project_root: Optional[Path] = None) -> Path:
+    if project_root is None:
+        return get_workspace().root.resolve()
+    root = Path(project_root).resolve()
+    return root if root.name.lower() == "workspace" else root / "workspace"
 
 
 def build_candidate_from_reflection(reflection: dict[str, Any], *, candidate_type: str) -> dict[str, Any]:

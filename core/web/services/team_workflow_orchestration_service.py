@@ -9018,7 +9018,12 @@ def _source_collection_storage_artifact_paths(team_id: str, run_id: str) -> dict
     normalized_team_id = _safe_token(team_id, default="team", max_length=96)
     normalized_run_id = _safe_token(run_id, default="run", max_length=96)
     run_directory = _team_workflow_root(normalized_team_id) / "source_collection_runs" / normalized_run_id
-    data_processing_directory = _project_root() / "workspace" / "data_processing" / "runs" / normalized_run_id
+    data_processing_directory = developer_sandbox.seeded_sandbox_workspace_path(
+        _project_root(),
+        "data_processing",
+        "runs",
+        normalized_run_id,
+    )
     return {
         "runDirectory": run_directory,
         "artifactsDirectory": run_directory / "artifacts",
