@@ -25,6 +25,7 @@ DEFAULT_TOP_LEVEL_EXCLUDES = {
     ".ruff_cache",
     WORKSPACE_MANIFEST_NAME,
 }
+WORKSPACE_MIGRATION_CRITICAL_TOP_LEVEL_ENTRIES = ("agents", "modes", "configs", "data")
 
 
 class WorkspaceDataMigrationError(ValueError):
@@ -42,9 +43,14 @@ def get_workspace_migration_status(
     source_workspace = _source_workspace(root)
     target_workspace = resolve_workspace_home(data_home, config_path=config_path)
     exclusion_set = _normalize_excludes(excludes)
+    required_top_level_entries = _required_workspace_top_level_entries(source_workspace=source_workspace)
     manifest_path = target_workspace / WORKSPACE_MANIFEST_NAME
     manifest = _read_manifest(manifest_path)
-    verification = _target_manifest_status(target_workspace=target_workspace, manifest=manifest)
+    verification = _target_manifest_status(
+        target_workspace=target_workspace,
+        manifest=manifest,
+        required_top_level_entries=required_top_level_entries,
+    )
     cleanup_blockers = _legacy_cleanup_blockers(
         project_root=root,
         source_workspace=source_workspace,
@@ -106,22 +112,29 @@ def apply_workspace_migration(
 ) -> dict[str, Any]:
     root = _project_root(project_root)
     target_workspace = resolve_workspace_home(data_home, config_path=config_path)
+    source_workspace = _source_workspace(root)
+    exclusion_set = _normalize_excludes(excludes)
+    required_top_level_entries = _required_workspace_top_level_entries(source_workspace=source_workspace)
     report = build_report(
         action="apply",
-        source_workspace=_source_workspace(root),
+        source_workspace=source_workspace,
         target_workspace=target_workspace,
-        excludes=_normalize_excludes(excludes),
+        excludes=exclusion_set,
     )
     apply_migration(report, data_home=data_home, config_path=config_path)
     report = build_report(
         action="apply",
-        source_workspace=_source_workspace(root),
+        source_workspace=source_workspace,
         target_workspace=target_workspace,
-        excludes=_normalize_excludes(excludes),
+        excludes=exclusion_set,
     )
     report["applied"] = True
     report["verified"] = verify_migration(report)
-    report["manifest"] = write_workspace_manifest(target_workspace, excludes=_normalize_excludes(excludes))
+    report["manifest"] = write_workspace_manifest(
+        target_workspace,
+        excludes=exclusion_set,
+        required_top_level_entries=required_top_level_entries,
+    )
     _write_report(report_path, report)
     _record_workspace_event(
         "migration",
@@ -147,15 +160,22 @@ def verify_workspace_migration(
     report_path: str | Path | None = None,
 ) -> dict[str, Any]:
     root = _project_root(project_root)
+    source_workspace = _source_workspace(root)
+    exclusion_set = _normalize_excludes(excludes)
+    required_top_level_entries = _required_workspace_top_level_entries(source_workspace=source_workspace)
     report = build_report(
         action="verify",
-        source_workspace=_source_workspace(root),
+        source_workspace=source_workspace,
         target_workspace=resolve_workspace_home(data_home, config_path=config_path),
-        excludes=_normalize_excludes(excludes),
+        excludes=exclusion_set,
     )
     verified = verify_migration(report)
     if verified["ok"] and report["targetExists"]:
-        verified["manifest"] = write_workspace_manifest(Path(report["targetWorkspace"]), excludes=_normalize_excludes(excludes))
+        verified["manifest"] = write_workspace_manifest(
+            Path(report["targetWorkspace"]),
+            excludes=exclusion_set,
+            required_top_level_entries=required_top_level_entries,
+        )
     if include_report:
         report["verified"] = verified
         _write_report(report_path, report)
@@ -167,6 +187,8 @@ def finalize_external_workspace(
     *,
     data_home: str | Path | None = None,
     config_path: str | Path | None = None,
+    project_root: Path | None = None,
+    enforce_required_top_level_entries: bool = False,
     excludes: set[str] | None = None,
     report_path: str | Path | None = None,
 ) -> dict[str, Any]:
@@ -176,8 +198,21 @@ def finalize_external_workspace(
     if not target_workspace.exists():
         raise WorkspaceDataMigrationError("Target workspace is missing; cannot finalize external workspace.")
     exclusion_set = _normalize_excludes(excludes)
-    manifest = write_workspace_manifest(target_workspace, excludes=exclusion_set)
-    verification = verify_target_workspace_manifest(target_workspace, excludes=exclusion_set)
+    required_top_level_entries: list[str] = []
+    if enforce_required_top_level_entries:
+        required_top_level_entries = _required_workspace_top_level_entries(
+            source_workspace=_source_workspace(_project_root(project_root))
+        )
+    manifest = write_workspace_manifest(
+        target_workspace,
+        excludes=exclusion_set,
+        required_top_level_entries=required_top_level_entries,
+    )
+    verification = verify_target_workspace_manifest(
+        target_workspace,
+        excludes=exclusion_set,
+        required_top_level_entries=required_top_level_entries,
+    )
     report = {
         "schemaVersion": 1,
         "mode": "external_workspace_finalize",
@@ -206,13 +241,22 @@ def verify_target_workspace_manifest(
     target_workspace: Path,
     *,
     excludes: set[str] | None = None,
+    required_top_level_entries: list[str] | None = None,
 ) -> dict[str, Any]:
     """Verify that the target workspace matches its own manifest."""
 
     target = Path(target_workspace).expanduser().resolve()
     manifest_path = target / WORKSPACE_MANIFEST_NAME
     manifest = _read_manifest(manifest_path)
-    reasons = _target_manifest_blockers(target_workspace=target, manifest=manifest)
+    if required_top_level_entries is None:
+        required_top_level_entries = _normalize_required_workspace_top_level_entries(
+            manifest.get("requiredTopLevelEntries")
+        )
+    reasons = _target_manifest_blockers(
+        target_workspace=target,
+        manifest=manifest,
+        required_top_level_entries=required_top_level_entries,
+    )
     current_manifest: dict[str, Any] = {}
     mismatches: list[dict[str, Any]] = []
     if not reasons:
@@ -248,6 +292,7 @@ def verify_target_workspace_manifest(
         "verificationMode": "target_manifest_self_check",
         "manifestPath": str(manifest_path),
         "targetWorkspace": str(target),
+        "requiredTopLevelEntries": _normalize_required_workspace_top_level_entries(required_top_level_entries),
     }
 
 
@@ -261,9 +306,11 @@ def preview_legacy_workspace_cleanup(
     root = _project_root(project_root)
     source_workspace = _source_workspace(root)
     target_workspace = resolve_workspace_home(data_home, config_path=config_path)
+    required_top_level_entries = _required_workspace_top_level_entries(source_workspace=source_workspace)
     verification = verify_target_workspace_manifest(
         target_workspace,
         excludes=_normalize_excludes(excludes),
+        required_top_level_entries=required_top_level_entries,
     )
     blockers = _legacy_cleanup_blockers(
         project_root=root,
@@ -313,6 +360,15 @@ def execute_legacy_workspace_cleanup(
         raise WorkspaceDataMigrationError(f"Legacy workspace cleanup is blocked: {', '.join(preview['blockedReasons'])}")
 
     source_workspace = Path(preview["sourceWorkspace"]).resolve()
+    target_workspace = Path(preview["targetWorkspace"]).resolve()
+    cleanup_verification = verify_migration(
+        build_report(
+            action="verify",
+            source_workspace=source_workspace,
+            target_workspace=target_workspace,
+            excludes=_normalize_excludes(excludes),
+        )
+    )
     stats = _path_summary(source_workspace, hash_files=False)
     try:
         _remove_legacy_workspace_tree(source_workspace)
@@ -338,6 +394,11 @@ def execute_legacy_workspace_cleanup(
             "status": "deleted",
         },
     }
+    _prune_stale_target_agents_after_cleanup(
+        source_workspace=Path(preview["sourceWorkspace"]),
+        target_workspace=Path(preview["targetWorkspace"]),
+        migration_verification=cleanup_verification,
+    )
     _record_workspace_event(
         "legacy_cleanup",
         "workspace_data_migration.legacy_workspace_deleted",
@@ -349,6 +410,42 @@ def execute_legacy_workspace_cleanup(
         },
     )
     return result
+
+
+def _prune_stale_target_agents_after_cleanup(
+    *,
+    source_workspace: Path,
+    target_workspace: Path,
+    migration_verification: dict[str, Any] | None = None,
+) -> None:
+    try:
+        source_workspace = Path(source_workspace).expanduser().resolve()
+        target_workspace = Path(target_workspace).expanduser().resolve()
+    except OSError:
+        return
+
+    if not target_workspace.exists():
+        return
+    verified = migration_verification or verify_migration(
+        build_report(
+            action="verify",
+            source_workspace=source_workspace,
+            target_workspace=target_workspace,
+            excludes=_normalize_excludes(set()),
+        )
+    )
+    if verified.get("ok"):
+        return
+    mismatch_paths = {str(item.get("relativePath") or "").strip().lower() for item in verified.get("mismatches") or []}
+    if "agents" not in mismatch_paths:
+        return
+    legacy_agents_json = target_workspace / "agents" / "agents.json"
+    if not legacy_agents_json.exists():
+        return
+    try:
+        legacy_agents_json.unlink()
+    except OSError:
+        return
 
 
 def _remove_legacy_workspace_tree(source_workspace: Path) -> None:
@@ -467,16 +564,30 @@ def verify_migration(report: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def write_workspace_manifest(target_workspace: Path, *, excludes: set[str] | None = None) -> dict[str, Any]:
+def write_workspace_manifest(
+    target_workspace: Path,
+    *,
+    excludes: set[str] | None = None,
+    required_top_level_entries: list[str] | None = None,
+) -> dict[str, Any]:
     target = Path(target_workspace).expanduser().resolve()
-    manifest = _workspace_manifest(target, excludes=_normalize_excludes(excludes))
+    manifest = _workspace_manifest(
+        target,
+        excludes=_normalize_excludes(excludes),
+        required_top_level_entries=required_top_level_entries,
+    )
     manifest_path = target / WORKSPACE_MANIFEST_NAME
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
     manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return manifest
 
 
-def _workspace_manifest(workspace: Path, *, excludes: set[str]) -> dict[str, Any]:
+def _workspace_manifest(
+    workspace: Path,
+    *,
+    excludes: set[str],
+    required_top_level_entries: list[str] | None = None,
+) -> dict[str, Any]:
     entries = _top_level_entries(workspace, excludes=excludes)
     items = []
     for entry in entries:
@@ -491,6 +602,7 @@ def _workspace_manifest(workspace: Path, *, excludes: set[str]) -> dict[str, Any
         "schemaVersion": 1,
         "generatedAt": _now_iso(),
         "workspaceRoot": str(workspace),
+        "requiredTopLevelEntries": _normalize_required_workspace_top_level_entries(required_top_level_entries),
         "items": items,
         "totals": {
             "itemCount": len(items),
@@ -564,6 +676,34 @@ def _safe_iterdir(path: Path) -> list[Path]:
         return []
 
 
+def _required_workspace_top_level_entries(source_workspace: Path) -> list[str]:
+    if not source_workspace.exists():
+        return []
+    return [
+        entry
+        for entry in WORKSPACE_MIGRATION_CRITICAL_TOP_LEVEL_ENTRIES
+        if (source_workspace / entry).is_dir()
+    ]
+
+
+def _normalize_required_workspace_top_level_entries(entries: Iterable[str] | None) -> list[str]:
+    if not entries:
+        return []
+    result = []
+    seen = set()
+    for entry in entries:
+        if not isinstance(entry, str):
+            continue
+        normalized = entry.strip()
+        if not normalized:
+            continue
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        result.append(normalized)
+    return result
+
+
 def _top_level_entries(source_workspace: Path, *, excludes: set[str]) -> list[Path]:
     if not source_workspace.exists():
         return []
@@ -611,21 +751,37 @@ def _verification_projection(summary: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _target_manifest_status(*, target_workspace: Path, manifest: dict[str, Any]) -> dict[str, Any]:
-    reasons = _target_manifest_blockers(target_workspace=target_workspace, manifest=manifest)
+def _target_manifest_status(
+    *,
+    target_workspace: Path,
+    manifest: dict[str, Any],
+    required_top_level_entries: list[str] | None = None,
+) -> dict[str, Any]:
+    reasons = _target_manifest_blockers(
+        target_workspace=target_workspace,
+        manifest=manifest,
+        required_top_level_entries=required_top_level_entries,
+    )
+    required = _normalize_required_workspace_top_level_entries(required_top_level_entries)
     return {
         "ok": not reasons,
         "blockedReasons": reasons,
         "mismatchCount": 0,
         "mismatches": [],
         "checkedAt": _now_iso(),
-        "verificationMode": "target_manifest_presence",
+        "verificationMode": "target_manifest_presence_and_required_entries" if required else "target_manifest_presence",
         "manifestPath": str(Path(target_workspace).expanduser().resolve() / WORKSPACE_MANIFEST_NAME),
         "targetWorkspace": str(Path(target_workspace).expanduser().resolve()),
+        "requiredTopLevelEntries": required,
     }
 
 
-def _target_manifest_blockers(*, target_workspace: Path, manifest: dict[str, Any]) -> list[str]:
+def _target_manifest_blockers(
+    *,
+    target_workspace: Path,
+    manifest: dict[str, Any],
+    required_top_level_entries: list[str] | None = None,
+) -> list[str]:
     target = Path(target_workspace).expanduser().resolve()
     blockers: list[str] = []
     if not target.exists():
@@ -637,6 +793,10 @@ def _target_manifest_blockers(*, target_workspace: Path, manifest: dict[str, Any
         blockers.append("target_manifest_invalid")
     if not str(manifest.get("treeHash") or "").startswith("sha256:"):
         blockers.append("target_manifest_invalid")
+    for required_entry in _normalize_required_workspace_top_level_entries(required_top_level_entries):
+        required_path = target / required_entry
+        if not required_path.exists() or not required_path.is_dir():
+            blockers.append(f"target_missing_required_entry:{required_entry}")
     raw_manifest_root = str(manifest.get("workspaceRoot") or "").strip()
     if raw_manifest_root:
         try:

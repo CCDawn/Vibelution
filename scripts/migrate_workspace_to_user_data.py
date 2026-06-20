@@ -68,6 +68,7 @@ def main(argv: list[str] | None = None) -> int:
         report = finalize_external_workspace(
             data_home=args.data_home or None,
             config_path=args.config_path or None,
+            project_root=project_root,
             excludes=excludes,
             report_path=args.report_path or None,
         )

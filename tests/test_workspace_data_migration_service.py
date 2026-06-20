@@ -55,10 +55,16 @@ def test_workspace_migration_status_is_manifest_based_and_shallow(tmp_path, monk
     data_home = tmp_path / "operator-data"
     target_workspace = data_home / "workspace"
     _seed_workspace(project_root)
+    (target_workspace / "agents").mkdir(parents=True)
+    (target_workspace / "agents" / "agents.json").write_text('{"agents":["old"]}\n', encoding="utf-8")
     (target_workspace / "memory").mkdir(parents=True)
     (target_workspace / "memory" / "memory.json").write_text("{}\n", encoding="utf-8")
     monkeypatch.setenv("VIBELUTION_DATA_HOME", str(data_home))
-    migration.finalize_external_workspace(data_home=data_home)
+    monkeypatch.setattr(migration, "PROJECT_ROOT", project_root)
+    migration.finalize_external_workspace(
+        data_home=data_home,
+        enforce_required_top_level_entries=True,
+    )
 
     def fail_full_verify(**_kwargs):
         raise AssertionError("status must not run source-target full verification")
@@ -68,11 +74,68 @@ def test_workspace_migration_status_is_manifest_based_and_shallow(tmp_path, monk
     status = migration.get_workspace_migration_status(project_root=project_root)
 
     assert status["verification"]["ok"] is True
-    assert status["verification"]["verificationMode"] == "target_manifest_presence"
+    assert status["verification"]["verificationMode"] == "target_manifest_presence_and_required_entries"
     assert status["source"]["summaryMode"] == "shallow"
     assert status["target"]["summaryMode"] == "shallow"
     assert status["legacyCleanup"]["canExecute"] is False
     assert status["legacyCleanup"]["requiresPreview"] is True
+
+
+def test_workspace_migration_status_detects_missing_required_source_entries(tmp_path, monkeypatch):
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    data_home = tmp_path / "operator-data"
+    target_workspace = data_home / "workspace"
+    _seed_workspace(project_root)
+    (project_root / "workspace" / "modes").mkdir()
+    (project_root / "workspace" / "modes" / "chat.json").write_text('{"mode":"chat"}\n', encoding="utf-8")
+    (target_workspace / "agents").mkdir(parents=True)
+    (target_workspace / "agents" / "agents.json").write_text('{"agents":["new"]}\n', encoding="utf-8")
+    monkeypatch.setenv("VIBELUTION_DATA_HOME", str(data_home))
+    monkeypatch.setattr(migration, "PROJECT_ROOT", project_root)
+    migration.finalize_external_workspace(
+        data_home=data_home,
+        enforce_required_top_level_entries=True,
+    )
+
+    status = migration.get_workspace_migration_status(project_root=project_root)
+
+    assert status["verification"]["ok"] is False
+    assert "target_missing_required_entry:modes" in status["verification"]["blockedReasons"]
+    assert status["verification"]["requiredTopLevelEntries"] == ["agents", "modes"]
+
+
+def test_finalize_external_workspace_uses_project_root_context(tmp_path, monkeypatch):
+    other_root = tmp_path / "other-project"
+    other_root.mkdir()
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+
+    data_home = tmp_path / "operator-data"
+    data_home.mkdir()
+    target_workspace = data_home / "workspace"
+    (target_workspace / "memory").mkdir(parents=True)
+    (target_workspace / "memory" / "memory.json").write_text("{}\n", encoding="utf-8")
+
+    # Source workspace under other_root is empty so default required list is empty.
+    monkeypatch.setattr(migration, "PROJECT_ROOT", other_root)
+    monkeypatch.setenv("VIBELUTION_DATA_HOME", str(data_home))
+
+    default_finalized = migration.finalize_external_workspace(data_home=data_home)
+    assert default_finalized["verification"]["ok"] is True
+
+    # Source workspace under project_root contains required directories.
+    (project_root / "workspace" / "agents").mkdir(parents=True)
+    (project_root / "workspace" / "modes").mkdir(parents=True)
+    override_finalized = migration.finalize_external_workspace(
+        data_home=data_home,
+        project_root=project_root,
+        enforce_required_top_level_entries=True,
+    )
+
+    assert override_finalized["verification"]["ok"] is False
+    assert "target_missing_required_entry:modes" in override_finalized["verification"]["blockedReasons"]
+    assert override_finalized["verification"]["requiredTopLevelEntries"] == ["agents", "modes"]
 
 
 def test_legacy_workspace_cleanup_requires_verified_target(tmp_path, monkeypatch):
@@ -126,7 +189,10 @@ def test_legacy_workspace_cleanup_allows_manifest_verified_target_without_source
     target_workspace = data_home / "workspace"
     (target_workspace / "memory").mkdir(parents=True)
     (target_workspace / "memory" / "memory.json").write_text("{}\n", encoding="utf-8")
+    (target_workspace / "agents").mkdir(parents=True)
+    (target_workspace / "agents" / "agents.json").write_text('{"agents":["legacy-only"]}\n', encoding="utf-8")
     monkeypatch.setenv("VIBELUTION_DATA_HOME", str(data_home))
+    monkeypatch.setattr(migration, "PROJECT_ROOT", project_root)
     finalized = migration.finalize_external_workspace(data_home=data_home)
 
     assert finalized["verification"]["ok"] is True
@@ -144,6 +210,47 @@ def test_legacy_workspace_cleanup_allows_manifest_verified_target_without_source
     assert not (target_workspace / "agents" / "agents.json").exists()
 
 
+def test_legacy_workspace_cleanup_checks_source_required_entries_not_manifest(tmp_path, monkeypatch):
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    data_home = tmp_path / "operator-data"
+    _seed_workspace(project_root)
+    (project_root / "workspace" / "modes").mkdir()
+    (project_root / "workspace" / "modes" / "chat.json").write_text('{"mode":"chat"}\n', encoding="utf-8")
+    target_workspace = data_home / "workspace"
+    (target_workspace / "agents").mkdir(parents=True)
+    (target_workspace / "agents" / "agents.json").write_text('{"agents":["legacy-only"]}\n', encoding="utf-8")
+    migration.write_workspace_manifest(target_workspace, required_top_level_entries=["agents"])
+    monkeypatch.setenv("VIBELUTION_DATA_HOME", str(data_home))
+    monkeypatch.setattr(migration, "PROJECT_ROOT", project_root)
+
+    preview = migration.preview_legacy_workspace_cleanup(project_root=project_root)
+
+    assert preview["canExecute"] is False
+    assert "target_missing_required_entry:modes" in preview["blockedReasons"]
+
+
+def test_legacy_workspace_cleanup_blocks_required_entry_file_instead_of_directory(tmp_path, monkeypatch):
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    data_home = tmp_path / "operator-data"
+    _seed_workspace(project_root)
+    (project_root / "workspace" / "modes").mkdir()
+    (project_root / "workspace" / "modes" / "chat.json").write_text('{"mode":"chat"}\n', encoding="utf-8")
+    target_workspace = data_home / "workspace"
+    (target_workspace / "agents").mkdir(parents=True)
+    (target_workspace / "agents" / "agents.json").write_text('{"agents":["legacy-only"]}\n', encoding="utf-8")
+    (target_workspace / "modes").write_text("legacy file instead of dir", encoding="utf-8")
+    migration.write_workspace_manifest(target_workspace, required_top_level_entries=["agents", "modes"])
+    monkeypatch.setenv("VIBELUTION_DATA_HOME", str(data_home))
+    monkeypatch.setattr(migration, "PROJECT_ROOT", project_root)
+
+    preview = migration.preview_legacy_workspace_cleanup(project_root=project_root)
+
+    assert preview["canExecute"] is False
+    assert "target_missing_required_entry:modes" in preview["blockedReasons"]
+
+
 def test_legacy_workspace_cleanup_blocks_stale_target_manifest(tmp_path, monkeypatch):
     project_root = tmp_path / "project"
     project_root.mkdir()
@@ -152,7 +259,10 @@ def test_legacy_workspace_cleanup_blocks_stale_target_manifest(tmp_path, monkeyp
     target_workspace = data_home / "workspace"
     (target_workspace / "memory").mkdir(parents=True)
     (target_workspace / "memory" / "memory.json").write_text("{}\n", encoding="utf-8")
+    (target_workspace / "agents").mkdir(parents=True)
+    (target_workspace / "agents" / "agents.json").write_text('{"agents":["legacy-only"]}\n', encoding="utf-8")
     monkeypatch.setenv("VIBELUTION_DATA_HOME", str(data_home))
+    monkeypatch.setattr(migration, "PROJECT_ROOT", project_root)
     migration.finalize_external_workspace(data_home=data_home)
     (target_workspace / "memory" / "memory.json").write_text('{"changed":true}\n', encoding="utf-8")
 
@@ -173,7 +283,10 @@ def test_legacy_workspace_cleanup_retries_readonly_delete_errors(tmp_path, monke
     target_workspace = data_home / "workspace"
     (target_workspace / "memory").mkdir(parents=True)
     (target_workspace / "memory" / "memory.json").write_text("{}\n", encoding="utf-8")
+    (target_workspace / "agents").mkdir(parents=True)
+    (target_workspace / "agents" / "agents.json").write_text('{"agents":["legacy-only"]}\n', encoding="utf-8")
     monkeypatch.setenv("VIBELUTION_DATA_HOME", str(data_home))
+    monkeypatch.setattr(migration, "PROJECT_ROOT", project_root)
     migration.finalize_external_workspace(data_home=data_home)
     original_rmtree = migration.shutil.rmtree
     calls = {"count": 0}
