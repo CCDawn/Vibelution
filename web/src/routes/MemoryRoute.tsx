@@ -2517,7 +2517,9 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
     || "";
   const agentMemoryDetailQuery = useQuery({
     queryKey: ["memory", "agents", selectedAgentMemoryAgentId, "detail"],
-    queryFn: () => fetchJson<AgentMemoryInventoryPayload>(`/api/memory/agents/${encodeURIComponent(selectedAgentMemoryAgentId)}`),
+    queryFn: () => fetchJson<AgentMemoryInventoryPayload>(
+      `/api/memory/agents/${encodeURIComponent(selectedAgentMemoryAgentId)}?actorAgentId=${encodeURIComponent(selectedAgentMemoryAgentId)}`,
+    ),
     enabled: forcedView === "agents" && Boolean(selectedAgentMemoryAgentId),
     refetchInterval: false,
   });

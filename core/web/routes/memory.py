@@ -71,7 +71,14 @@ def memory_agents(agentId: str = "", includeContent: bool = False) -> dict:
 
 
 @router.get("/memory/agents/{agent_id}")
-def memory_agent_detail(agent_id: str, includeContent: bool = True) -> dict:
+def memory_agent_detail(agent_id: str, includeContent: bool = True, actorAgentId: str = "") -> dict:
+    if includeContent:
+        index_payload = get_agent_memory_inventory(agent_id=agent_id, include_content=False)
+        if index_payload.get("selectedAgent") is None:
+            raise HTTPException(status_code=404, detail="Agent memory not found.")
+    normalized_actor_agent_id = str(actorAgentId or "").strip()
+    if includeContent and normalized_actor_agent_id != str(agent_id or "").strip():
+        raise HTTPException(status_code=422, detail="actorAgentId must match agent_id when includeContent is true.")
     payload = get_agent_memory_inventory(agent_id=agent_id, include_content=includeContent)
     if payload.get("selectedAgent") is None:
         raise HTTPException(status_code=404, detail="Agent memory not found.")
