@@ -26,7 +26,6 @@ from .agent_directory_service import (
     resolve_tool_policy_for_agent,
     resolve_supervision_policy_for_agent,
     update_agent_instance,
-    write_agent_inbox_message,
 )
 from .runtime_scene_service import record_research_scene_event
 
@@ -367,6 +366,7 @@ def send_research_org_message(payload: dict[str, Any]) -> dict[str, Any]:
                 "reason": str(delivery.get("reason") or ""),
                 "edgeId": str(delivery.get("edgeId") or ""),
                 "wakeStatus": str(delivery.get("wakeStatus") or ""),
+                "kernelTaskId": str(delivery.get("kernelTaskId") or ""),
             },
         )
 
@@ -1637,42 +1637,137 @@ def _deliver_message_to_agent(
         mailbox_only=bool(payload.get("mailboxOnly")),
     )
     try:
-        inbox_message = write_agent_inbox_message(
-            target_agent_id,
-            content=str(message.get("content") or ""),
+        kernel_result = _submit_research_org_message_to_kernel(
+            message=message,
+            target_agent_id=target_agent_id,
+            message_type=message_type,
             source_agent_id=source_agent_id,
             source_session_id=str(payload.get("sourceSessionId") or ""),
             source_room_id=str(payload.get("sourceRoomId") or ""),
             source_round_id=str(payload.get("sourceRoundId") or ""),
-            thread_id=str(message.get("threadId") or ""),
-            kind=f"research_org_{message_type}",
-            summary=str(message.get("summary") or ""),
-            prompt_eligible=True,
-            created_by="human_override" if message.get("humanOverride") else "research_org",
-            metadata={
-                "researchOrgMessageId": message.get("messageId") or "",
-                "researchOrgDeliveryMode": message.get("deliveryMode") or "",
-                "researchOrgMessageType": message_type,
-                "researchOrgIntent": message.get("intent") or "",
-                "humanOverride": bool(message.get("humanOverride")),
-                "communicationEdgeId": delivery["edgeId"],
-            },
+            edge_id=delivery["edgeId"],
+            wake_requested=wake_requested,
         )
     except (AgentDirectoryError, AgentNotFoundError) as exc:
         delivery["allowed"] = False
         delivery["reason"] = type(exc).__name__
         delivery["wakeStatus"] = "blocked"
         return delivery
+    except Exception as exc:
+        delivery["allowed"] = False
+        delivery["reason"] = f"{type(exc).__name__}: {trim_lines(str(exc), max_lines=2)}"
+        delivery["wakeStatus"] = "blocked"
+        return delivery
 
-    delivery["inboxMessageId"] = str(inbox_message.get("messageId") or inbox_message.get("eventId") or "")
+    kernel_delivery = _first_kernel_delivery(kernel_result, target_agent_id=target_agent_id)
+    if str(kernel_delivery.get("status") or "").strip() != "delivered":
+        delivery["allowed"] = False
+        delivery["reason"] = str(kernel_delivery.get("reason") or "kernel_delivery_failed")
+        delivery["wakeStatus"] = "blocked"
+        delivery.update(_kernel_trace_fields(kernel_result))
+        return delivery
+
+    wake = kernel_delivery.get("wake") if isinstance(kernel_delivery.get("wake"), dict) else {}
+    delivery["inboxMessageId"] = str(kernel_delivery.get("inboxMessageId") or wake.get("messageId") or "")
     delivery["deliveredAt"] = utc_now_iso()
     delivery["wakeRequested"] = wake_requested
-    if wake_requested:
-        wake = session_service.wake_agent_for_inbox_message(inbox_message)
-        delivery["wakeStatus"] = str(wake.get("wakeStatus") or "")
-        delivery["wakeReason"] = str(wake.get("reason") or "")
-        delivery["turnId"] = str(wake.get("turnId") or "")
+    delivery["wakeStatus"] = str(wake.get("wakeStatus") or ("not_requested" if not wake_requested else "")).strip()
+    delivery["wakeReason"] = str(wake.get("reason") or "").strip()
+    delivery["turnId"] = str(wake.get("turnId") or "").strip()
+    delivery.update(_kernel_trace_fields(kernel_result))
     return delivery
+
+
+def _submit_research_org_message_to_kernel(
+    *,
+    message: dict[str, Any],
+    target_agent_id: str,
+    message_type: str,
+    source_agent_id: str,
+    source_session_id: str,
+    source_room_id: str,
+    source_round_id: str,
+    edge_id: str,
+    wake_requested: bool,
+) -> dict[str, Any]:
+    from core.agent_kernel.adapters import submit_agent_message_event
+
+    message_id = str(message.get("messageId") or "").strip()
+    created_by = "human_override" if message.get("humanOverride") else "research_org"
+    source_type = str(message.get("sourceType") or "").strip().lower()
+    sender: dict[str, Any] = {"type": source_type or "agent"}
+    if source_type == "agent" and source_agent_id:
+        sender.update(
+            {
+                "id": source_agent_id,
+                "agentId": source_agent_id,
+                "agentCode": str(message.get("sourceAgentCode") or "").strip(),
+                "sessionId": source_session_id,
+                "displayName": str(message.get("sourceAgentName") or "").strip(),
+            }
+        )
+    else:
+        sender.update({"type": "user", "id": "research_organization"})
+    metadata = {
+        "sourceSurface": "research_org",
+        "sourceSessionId": source_session_id,
+        "sourceRoomId": source_room_id,
+        "sourceRoundId": source_round_id,
+        "sourceMessageId": message_id,
+        "projectionRef": {"kind": "research_org_message", "id": message_id},
+        "sourceAgentId": source_agent_id,
+        "senderAgentId": source_agent_id,
+        "inboxKind": f"research_org_{message_type}",
+        "messageSummary": str(message.get("summary") or ""),
+        "inboxCreatedBy": created_by,
+        "researchOrgMessageId": message_id,
+        "researchOrgDeliveryMode": message.get("deliveryMode") or "",
+        "researchOrgMessageType": message_type,
+        "researchOrgIntent": message.get("intent") or "",
+        "humanOverride": bool(message.get("humanOverride")),
+        "communicationEdgeId": edge_id,
+    }
+    return submit_agent_message_event(
+        source="research_org",
+        sender=sender,
+        recipient_agent_ids=[target_agent_id],
+        content=str(message.get("content") or ""),
+        correlation_id=str(message.get("threadId") or message_id).strip(),
+        wake_target=bool(wake_requested),
+        metadata=metadata,
+        source_id=message_id,
+        idempotency_key=f"research-org:{message_id}:{target_agent_id}",
+    )
+
+
+def _first_kernel_delivery(kernel_result: dict[str, Any], *, target_agent_id: str) -> dict[str, Any]:
+    outcome = kernel_result.get("outcome") if isinstance(kernel_result.get("outcome"), dict) else {}
+    deliveries = outcome.get("deliveries") if isinstance(outcome.get("deliveries"), list) else []
+    normalized_target = str(target_agent_id or "").strip()
+    for item in deliveries:
+        if isinstance(item, dict) and str(item.get("targetAgentId") or "").strip() == normalized_target:
+            return item
+    for item in deliveries:
+        if isinstance(item, dict):
+            return item
+    return {"targetAgentId": normalized_target, "status": "failed", "reason": "kernel_delivery_missing"}
+
+
+def _kernel_trace_fields(kernel_result: dict[str, Any]) -> dict[str, Any]:
+    event = kernel_result.get("event") if isinstance(kernel_result.get("event"), dict) else {}
+    task = kernel_result.get("task") if isinstance(kernel_result.get("task"), dict) else {}
+    execution = kernel_result.get("execution") if isinstance(kernel_result.get("execution"), dict) else {}
+    outcome = kernel_result.get("outcome") if isinstance(kernel_result.get("outcome"), dict) else {}
+    adapter = kernel_result.get("adapter") if isinstance(kernel_result.get("adapter"), dict) else {}
+    return {
+        "kernelEventId": str(event.get("eventId") or adapter.get("eventId") or "").strip(),
+        "kernelTaskId": str(task.get("taskId") or "").strip(),
+        "kernelWorkRunId": str(execution.get("workRunId") or "").strip(),
+        "kernelOutcomeId": str(outcome.get("outcomeId") or "").strip(),
+        "kernelOutcomeStatus": str(outcome.get("status") or "").strip(),
+        "kernelAdapterVersion": str(adapter.get("adapterVersion") or "").strip(),
+        "kernelReused": bool(kernel_result.get("reused")),
+    }
 
 
 def _evaluate_message_supervision_policy(message: dict[str, Any]):
@@ -2218,6 +2313,13 @@ def _audit_from_delivery(message: dict[str, Any], delivery: dict[str, Any]) -> d
         "inboxMessageId": delivery.get("inboxMessageId") or "",
         "wakeRequested": bool(delivery.get("wakeRequested")),
         "wakeStatus": delivery.get("wakeStatus") or "",
+        "kernelEventId": delivery.get("kernelEventId") or "",
+        "kernelTaskId": delivery.get("kernelTaskId") or "",
+        "kernelWorkRunId": delivery.get("kernelWorkRunId") or "",
+        "kernelOutcomeId": delivery.get("kernelOutcomeId") or "",
+        "kernelOutcomeStatus": delivery.get("kernelOutcomeStatus") or "",
+        "kernelAdapterVersion": delivery.get("kernelAdapterVersion") or "",
+        "kernelReused": bool(delivery.get("kernelReused")),
         "summary": message.get("summary") or "",
     }
 

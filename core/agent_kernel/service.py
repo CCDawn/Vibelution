@@ -473,6 +473,7 @@ def _deliver_event_to_recipients(event: dict[str, Any], task: dict[str, Any]) ->
     thread_id = str(event.get("correlationId") or source_round_id or event["eventId"]).strip()
     inbox_kind = _metadata_text(inbox_metadata, "inboxKind") or "kernel_event"
     message_summary = _metadata_text(inbox_metadata, "messageSummary") or content
+    inbox_created_by = _metadata_text(inbox_metadata, "inboxCreatedBy") or "kernel"
     deliveries: list[dict[str, Any]] = []
     for agent_id in list(event.get("recipients") or []):
         target_agent_id = str(agent_id or "").strip()
@@ -504,7 +505,7 @@ def _deliver_event_to_recipients(event: dict[str, Any], task: dict[str, Any]) ->
                 kind=inbox_kind,
                 summary=message_summary,
                 prompt_eligible=True,
-                created_by="kernel",
+                created_by=inbox_created_by,
                 metadata=inbox_metadata,
             )
             delivery.update(
@@ -559,7 +560,14 @@ def _kernel_inbox_metadata(event: dict[str, Any], task: dict[str, Any]) -> dict[
         "agentMessageToolSourceId",
         "inboxKind",
         "messageSummary",
+        "inboxCreatedBy",
         "agentToolMetadataJson",
+        "researchOrgMessageId",
+        "researchOrgDeliveryMode",
+        "researchOrgMessageType",
+        "researchOrgIntent",
+        "humanOverride",
+        "communicationEdgeId",
     )
     metadata = {
         key: deepcopy(event_metadata[key])
