@@ -860,6 +860,12 @@ def test_execute_source_collection_search_skips_existing_query_without_force(tmp
 
 def test_execute_source_collection_search_skips_duplicate_sources_on_force_rerun(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
+    source_work_runs = WorkRunStore(root=tmp_path / ".runtime" / "work_runs")
+    monkeypatch.setattr(
+        team_workflow_orchestration_service,
+        "_source_collection_work_run_store",
+        lambda: source_work_runs,
+    )
     monkeypatch.setattr(team_workflow_orchestration_service, "_execute_source_collection_query", _fake_source_search_response)
     team = team_service.create_team(name="ai科学研究团队")
     run_response = team_workflow_orchestration_service.start_source_collection_run(
@@ -890,11 +896,104 @@ def test_execute_source_collection_search_skips_duplicate_sources_on_force_rerun
     assert second["createdUniqueRecordCount"] == 0
     assert second["importedCount"] == 0
     assert second["skippedDuplicateCount"] == 2
+    assert second["remainingQueryCount"] == 0
+    assert second["hasMore"] is False
     assert second["duplicateSourceKeys"] == ["doi:10.0000/predictive-coding", "doi:10.0000/cortical-dataset"]
     assert {event["eventType"] for event in second["executionEvents"]} >= {"search.duplicate_skipped"}
+    assignments = data_processing_service.list_collection_assignments(run_response["run"]["runId"])["assignments"]
+    assert assignments[0]["status"] == "completed"
+    summary = team_workflow_orchestration_service.load_source_collection_work_run_summary()
+    assert summary["latest"]["status"] == "completed"
+    assert summary["latest"]["currentPhase"] == "completed"
+    assert summary["latest"]["searchOpenAssignmentCount"] == 0
+    assert "跳过 2 条重复资料" in summary["latest"]["summary"]
     assert data_processing_service.list_records(run_response["run"]["runId"])["summary"]["recordCount"] == 2
     candidates = team_workflow_orchestration_service.list_candidate_store(team["teamId"], candidate_type="source_manifest")
     assert candidates["candidateCount"] == 2
+
+
+def test_execute_source_collection_search_dedupes_metadata_doi_and_sorted_url_query(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    responses = [
+        {
+            "provider": "crossref_rest_api",
+            "searchUrl": "https://api.example.test/search?q=first",
+            "results": [
+                {
+                    "title": "Metadata DOI source identity",
+                    "sourceRef": "metadata-doi-source",
+                    "rawLocation": "metadata-doi-location",
+                    "summary": "DOI only appears in metadata.",
+                    "sourceType": "paper",
+                    "metadata": {"doi": "10.0000/metadata-only", "containerTitle": "Journal", "issued": "2025"},
+                },
+                {
+                    "title": "URL query order source identity",
+                    "sourceRef": "https://example.test/source?b=2&a=1&utm_source=tracker",
+                    "rawLocation": "https://example.test/source?a=1&b=2",
+                    "summary": "Equivalent URLs should dedupe.",
+                    "sourceType": "paper",
+                    "metadata": {"containerTitle": "Journal", "issued": "2025"},
+                },
+            ],
+        },
+        {
+            "provider": "crossref_rest_api",
+            "searchUrl": "https://api.example.test/search?q=second",
+            "results": [
+                {
+                    "title": "Metadata DOI source identity duplicate",
+                    "sourceRef": "different-source-ref",
+                    "rawLocation": "different-location",
+                    "summary": "Same DOI only appears in metadata.",
+                    "sourceType": "paper",
+                    "metadata": {"doi": "10.0000/metadata-only", "containerTitle": "Journal", "issued": "2025"},
+                },
+                {
+                    "title": "URL query order source identity duplicate",
+                    "sourceRef": "https://example.test/source?a=1&b=2",
+                    "rawLocation": "https://example.test/source?b=2&a=1",
+                    "summary": "Equivalent URL with different query order.",
+                    "sourceType": "paper",
+                    "metadata": {"containerTitle": "Journal", "issued": "2025"},
+                },
+            ],
+        },
+    ]
+
+    def fake_search(query, *, max_results, provider):
+        return responses.pop(0)
+
+    monkeypatch.setattr(team_workflow_orchestration_service, "_execute_source_collection_query", fake_search)
+    team = team_service.create_team(name="ai科学研究团队")
+    run_response = team_workflow_orchestration_service.start_source_collection_run(
+        team["teamId"],
+        {
+            "topic": "source identity",
+            "querySeeds": ["first", "second"],
+            "searchLanguages": ["en"],
+            "sourceTypes": ["paper"],
+            "agentRoles": ["data_discovery"],
+        },
+    )
+
+    first = team_workflow_orchestration_service.execute_source_collection_search(
+        team["teamId"],
+        run_response["run"]["runId"],
+        {"maxQueries": 1, "maxResultsPerQuery": 2},
+    )
+    second = team_workflow_orchestration_service.execute_source_collection_search(
+        team["teamId"],
+        run_response["run"]["runId"],
+        {"maxQueries": 1, "maxResultsPerQuery": 2},
+    )
+
+    assert first["recordCount"] == 2
+    assert second["status"] == "duplicates_skipped"
+    assert second["recordCount"] == 0
+    assert second["skippedDuplicateCount"] == 2
+    assert second["duplicateSourceKeys"] == ["doi:10.0000/metadata-only", "url:https://example.test/source?a=1&b=2"]
+    assert data_processing_service.list_records(run_response["run"]["runId"])["summary"]["recordCount"] == 2
 
 
 def test_start_research_stage_round_creates_knowledge_collection_round(tmp_path, monkeypatch):
