@@ -69,9 +69,20 @@ def _seed_knowledge_base(root):
     return path
 
 
+def _fake_workspace(root):
+    class Workspace:
+        project_root = root
+
+        @staticmethod
+        def research_dir():
+            return root / "workspace" / "research"
+
+    return Workspace()
+
+
 def test_research_knowledge_tool_queries_without_explicit_agent_allow(tmp_path, monkeypatch):
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
-    monkeypatch.setattr(knowledge_base, "get_workspace", lambda: type("Workspace", (), {"project_root": tmp_path})())
+    monkeypatch.setattr(knowledge_base, "get_workspace", lambda: _fake_workspace(tmp_path))
     _seed_knowledge_base(tmp_path)
     agent = agent_directory_service.create_agent_instance(display_name="普通科研 Agent")
 
@@ -85,7 +96,7 @@ def test_research_knowledge_tool_queries_without_explicit_agent_allow(tmp_path, 
 
 def test_research_knowledge_tool_queries_allowed_agent(tmp_path, monkeypatch):
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
-    monkeypatch.setattr(knowledge_base, "get_workspace", lambda: type("Workspace", (), {"project_root": tmp_path})())
+    monkeypatch.setattr(knowledge_base, "get_workspace", lambda: _fake_workspace(tmp_path))
     path = _seed_knowledge_base(tmp_path)
     agent = agent_directory_service.create_agent_instance(display_name="知识库 Agent")
     agent_directory_service.update_agent_instance(

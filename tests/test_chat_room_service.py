@@ -348,10 +348,10 @@ def test_list_chat_rooms_for_conversation_index_does_not_repair_participants_by_
     session_list_calls = 0
     real_list_sessions = session_service.list_sessions
 
-    def counting_list_sessions():
+    def counting_list_sessions(*args, **kwargs):
         nonlocal session_list_calls
         session_list_calls += 1
-        return real_list_sessions()
+        return real_list_sessions(*args, **kwargs)
 
     monkeypatch.setattr(chat_room_service, "_repair_room_participants_in_state", fake_repair_room_participants_in_state)
     monkeypatch.setattr(session_service, "list_sessions", counting_list_sessions)
@@ -379,10 +379,10 @@ def test_list_chat_rooms_for_conversation_index_repair_participants_when_enabled
     session_list_calls = 0
     real_list_sessions = session_service.list_sessions
 
-    def counting_list_sessions():
+    def counting_list_sessions(*args, **kwargs):
         nonlocal session_list_calls
         session_list_calls += 1
-        return real_list_sessions()
+        return real_list_sessions(*args, **kwargs)
 
     monkeypatch.setattr(chat_room_service, "_repair_room_participants_in_state", fake_repair_room_participants_in_state)
     monkeypatch.setattr(session_service, "list_sessions", counting_list_sessions)
@@ -716,10 +716,10 @@ def test_chat_room_list_and_detail_use_lightweight_participant_refresh(tmp_path,
     real_list_sessions = session_service.list_sessions
     list_session_calls = 0
 
-    def counting_list_sessions():
+    def counting_list_sessions(*args, **kwargs):
         nonlocal list_session_calls
         list_session_calls += 1
-        return real_list_sessions()
+        return real_list_sessions(*args, **kwargs)
 
     monkeypatch.setattr(session_service, "list_sessions", counting_list_sessions)
     real_list_agents = agent_directory_service.list_agents
