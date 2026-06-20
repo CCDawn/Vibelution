@@ -1481,6 +1481,175 @@ def load_source_collection_work_run_summary() -> dict[str, Any]:
     }
 
 
+def _sync_source_collection_stage_round_after_search(
+    team_id: str,
+    run_id: str,
+    result: dict[str, Any],
+    *,
+    terminal_status: str,
+    terminal_summary: str,
+) -> dict[str, Any] | None:
+    normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
+    normalized_run_id = _normalize_required_id(run_id, "Data processing run id is required.")
+    try:
+        run_status = data_processing_service.get_processing_status(normalized_run_id)
+    except data_processing_service.DataProcessingError:
+        run_status = {}
+    run_status_summary = run_status.get("summary") if isinstance(run_status.get("summary"), dict) else {}
+    candidate_store = _load_candidate_store(normalized_team_id)
+    run_candidate_count = _source_collection_candidate_count_for_run(candidate_store, normalized_run_id)
+    source_collection_summary = result.get("sourceCollectionSummary") if isinstance(result.get("sourceCollectionSummary"), dict) else {}
+    stage_status = _source_collection_stage_round_status_after_search(
+        terminal_status,
+        result=result,
+        run_status_summary=run_status_summary,
+        source_collection_summary=source_collection_summary,
+        run_candidate_count=run_candidate_count,
+    )
+    now = utc_now_iso()
+    synced_round: dict[str, Any] | None = None
+    workflow_id = ""
+    with _WORKFLOW_LOCK:
+        store = _load_stage_round_store(normalized_team_id)
+        rounds = _stage_rounds(store)
+        stage_round = _latest_stage_round(
+            [
+                item
+                for item in rounds
+                if str(item.get("stageType") or "") == "knowledge_collection"
+                and normalized_run_id in {str(source_run_id) for source_run_id in list(item.get("sourceRunIds") or [])}
+            ]
+        )
+        if stage_round is None:
+            return None
+        workflow = _load_or_create_workflow(normalized_team_id)
+        workflow_id = str(workflow.get("workflowId") or "")
+        previous_execution = stage_round.get("sourceCollectionSearchExecution") if isinstance(stage_round.get("sourceCollectionSearchExecution"), dict) else {}
+        stage_round["sourceCollectionSearchExecution"] = {
+            **previous_execution,
+            "runId": normalized_run_id,
+            "status": terminal_status,
+            "resultStatus": _trim_text(result.get("status"), max_length=80),
+            "executionMode": previous_execution.get("executionMode") or "background",
+            "accepted": bool(previous_execution.get("accepted")),
+            "provider": _trim_text(result.get("provider"), max_length=80) or previous_execution.get("provider") or SOURCE_COLLECTION_SEARCH_PROVIDER_CROSSREF,
+            "executedQueryCount": _source_collection_count(result.get("executedQueryCount")),
+            "failedQueryCount": _source_collection_count(result.get("failedQueryCount")),
+            "recordCount": _source_collection_count(run_status_summary.get("recordCount") or result.get("recordCount")),
+            "importedCount": _source_collection_count(result.get("importedCount")),
+            "skippedDuplicateCount": _source_collection_count(result.get("skippedDuplicateCount")),
+            "remainingQueryCount": _source_collection_count(result.get("remainingQueryCount")),
+            "hasMore": bool(result.get("hasMore")),
+            "activeWorkRunId": "",
+            "summary": _trim_text(terminal_summary, max_length=500),
+            "updatedAt": now,
+        }
+        stage_round["sourceCollectionSummary"] = {
+            **source_collection_summary,
+            "recordCount": _source_collection_count(run_status_summary.get("recordCount")),
+            "candidateCount": run_candidate_count,
+        }
+        stage_round["status"] = stage_status
+        stage_round["updatedAt"] = now
+        stage_round["teamMemoryRecord"] = _stage_memory_record(stage_round, workflow)
+        stage_round["teamMemoryRecordId"] = stage_round["teamMemoryRecord"]["recordId"]
+        workflow["activeWorkflowItems"] = _upsert_active_item(
+            workflow.get("activeWorkflowItems"),
+            candidate_id=normalized_run_id,
+            current_node="knowledge_collection",
+            status=f"source_collection_{stage_status}",
+            transfer_id="",
+        )
+        workflow["updatedAt"] = now
+        store["updatedAt"] = now
+        _write_json(_stage_round_store_path(normalized_team_id), store)
+        _write_json(_workflow_path(normalized_team_id), workflow)
+        synced_round = dict(stage_round)
+    _record_workflow_event(
+        "research_stage_round.source_collection_search_synced",
+        normalized_team_id,
+        fields={
+            "workflowId": workflow_id,
+            "runId": normalized_run_id,
+            "stageRoundId": synced_round.get("stageRoundId", "") if synced_round else "",
+            "status": stage_status,
+            "searchStatus": terminal_status,
+            "recordCount": _source_collection_count(run_status_summary.get("recordCount")),
+            "candidateCount": run_candidate_count,
+        },
+    )
+    return synced_round
+
+
+def _sync_source_collection_stage_round_from_latest_work_run(team_id: str, run_id: str) -> dict[str, Any] | None:
+    latest = load_source_collection_work_run_summary().get("latest")
+    if not isinstance(latest, dict) or str(latest.get("runId") or "") != run_id:
+        return None
+    latest_status = str(latest.get("status") or "").lower()
+    if latest_status in {"queued", "running"}:
+        return None
+    result = {
+        "status": latest_status,
+        "provider": SOURCE_COLLECTION_SEARCH_PROVIDER_CROSSREF,
+        "executedQueryCount": _source_collection_count(latest.get("executedQueryCount")),
+        "failedQueryCount": _source_collection_count(latest.get("failedQueryCount")),
+        "recordCount": _source_collection_count(latest.get("recordCount")),
+        "importedCount": _source_collection_count(latest.get("importedCount")),
+        "skippedDuplicateCount": _source_collection_count(latest.get("skippedDuplicateCount")),
+        "remainingQueryCount": _source_collection_count(latest.get("searchOpenAssignmentCount")),
+        "hasMore": latest_status == "needs_continue",
+        "sourceCollectionSummary": latest.get("sourceCollection") if isinstance(latest.get("sourceCollection"), dict) else {},
+    }
+    return _sync_source_collection_stage_round_after_search(
+        team_id,
+        run_id,
+        result,
+        terminal_status=latest_status or "completed",
+        terminal_summary=_trim_text(latest.get("summary"), max_length=500) or "资料搜索已结束。",
+    )
+
+
+def _source_collection_stage_round_status_after_search(
+    terminal_status: str,
+    *,
+    result: dict[str, Any],
+    run_status_summary: dict[str, Any],
+    source_collection_summary: dict[str, Any],
+    run_candidate_count: int,
+) -> str:
+    normalized = str(terminal_status or "").lower()
+    if normalized == "failed":
+        return "needs_attention"
+    if normalized == "needs_continue":
+        return "needs_continue"
+    if _source_collection_count(result.get("remainingQueryCount")) or bool(result.get("hasMore")):
+        return "needs_continue"
+    if _source_collection_count(source_collection_summary.get("searchOpenAssignmentCount")):
+        return "needs_continue"
+    if (
+        _source_collection_count(source_collection_summary.get("downstreamOpenAssignmentCount"))
+        or run_candidate_count
+        or _source_collection_count(run_status_summary.get("recordCount"))
+        or _source_collection_count(result.get("importedCount"))
+    ):
+        return "needs_screening"
+    return "completed"
+
+
+def _source_collection_candidate_count_for_run(candidate_store: dict[str, Any], run_id: str) -> int:
+    count = 0
+    for candidate in list(candidate_store.get("candidates") or []):
+        if not isinstance(candidate, dict) or _candidate_is_archived(candidate):
+            continue
+        if str(candidate.get("candidateType") or "") != "source_manifest":
+            continue
+        metadata = candidate.get("metadata") if isinstance(candidate.get("metadata"), dict) else {}
+        imported_from = metadata.get("importedFromDataRecord") if isinstance(metadata.get("importedFromDataRecord"), dict) else {}
+        if str(imported_from.get("runId") or "") == run_id:
+            count += 1
+    return count
+
+
 def get_research_stage_round_status(team_id: str) -> dict[str, Any]:
     normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
     team = team_service.get_team(normalized_team_id)
@@ -1666,12 +1835,22 @@ def start_research_stage_round(team_id: str, payload: dict[str, Any] | None = No
             "requestedByAgent": requested_by_agent,
         },
     )
+    if stage_type == "knowledge_collection":
+        source_run = result_payload.get("run") if isinstance(result_payload.get("run"), dict) else {}
+        synced_round = _sync_source_collection_stage_round_from_latest_work_run(normalized_team_id, str(source_run.get("runId") or ""))
+        if synced_round is not None:
+            round_payload = synced_round
+    stage_status_payload = get_research_stage_round_status(normalized_team_id)
+    phase_payload = next(
+        (item for item in list(stage_status_payload.get("phases") or []) if isinstance(item, dict) and item.get("stageType") == stage_type),
+        _stage_phase_status(normalized_team_id, stage_type, [round_payload], workflow=workflow, team=team),
+    )
     return {
         "created": True,
         "stageRound": round_payload,
-        "phase": _stage_phase_status(normalized_team_id, stage_type, store["rounds"], workflow=workflow, team=team),
+        "phase": phase_payload,
         "workflow": _workflow_to_api(normalized_team_id, workflow, candidate_store),
-        "status": get_research_stage_round_status(normalized_team_id),
+        "status": stage_status_payload,
         "nextActions": _stage_next_actions(stage_type, reused=False),
         "boundaries": _research_stage_boundaries(),
         **result_payload,
