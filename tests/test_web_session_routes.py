@@ -276,6 +276,94 @@ def test_agent_directory_system_team_member_stub_hidden_from_user_index(tmp_path
     assert "session-team-member" not in {item["id"] for item in session_service.list_sessions()}
 
 
+def test_persisted_empty_system_team_member_session_hidden_from_user_index(tmp_path, monkeypatch):
+    _seed_chat_state(
+        tmp_path,
+        conversations=[
+            {
+                "conversation_id": "session-team-persisted",
+                "title": "挑战杯数据发现",
+                "agent_id": "agent-team",
+                "agentId": "agent-team",
+                "session_kind": "main",
+                "updated_at": "2026-05-18T12:00:00",
+                "messages": [],
+            },
+            {
+                "conversation_id": "session-user-empty",
+                "title": "用户新会话",
+                "agent_id": "agent-user",
+                "agentId": "agent-user",
+                "session_kind": "main",
+                "updated_at": "2026-05-18T12:01:00",
+                "messages": [],
+            },
+            {
+                "conversation_id": "session-research-history",
+                "title": "论文阅读 Agent",
+                "agent_id": "agent-research",
+                "agentId": "agent-research",
+                "session_kind": "main",
+                "updated_at": "2026-05-18T12:02:00",
+                "messages": [{"role": "user", "content": "继续读论文", "timestamp": "2026-05-18T12:02:00"}],
+            },
+        ],
+    )
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(team_service, "PROJECT_ROOT", tmp_path)
+    agent_directory_service.save_state(
+        {
+            "agents": [
+                {
+                    "agentId": "agent-team",
+                    "displayName": "挑战杯数据发现",
+                    "status": "active",
+                    "directSessionId": "session-team-persisted",
+                    "createdBy": "user",
+                },
+                {
+                    "agentId": "agent-user",
+                    "displayName": "用户新会话",
+                    "status": "active",
+                    "directSessionId": "session-user-empty",
+                    "createdBy": "user",
+                },
+                {
+                    "agentId": "agent-research",
+                    "displayName": "论文阅读 Agent",
+                    "status": "active",
+                    "directSessionId": "session-research-history",
+                    "createdBy": "research_agent_pool",
+                },
+            ]
+        }
+    )
+    team_service._save_index(
+        {
+            "schemaVersion": team_service.SCHEMA_VERSION,
+            "updatedAt": "2026-05-18T12:00:00Z",
+            "teams": [
+                {
+                    "teamId": "challenge-cup-ai-research",
+                    "name": "挑战杯ai科研团队",
+                    "status": "active",
+                    "teamKind": "research",
+                    "teamSource": "research_organization",
+                    "members": [{"agentId": "agent-team", "role": "数据发现"}],
+                    "linkedChatRoomId": "",
+                }
+            ],
+        }
+    )
+
+    listed_ids = {item["id"] for item in session_service.list_sessions()}
+
+    assert "session-team-persisted" not in listed_ids
+    assert "session-user-empty" in listed_ids
+    assert "session-research-history" in listed_ids
+
+
 def test_session_summary_prefers_real_conversation_title_over_generated_agent_name(tmp_path, monkeypatch):
     _seed_chat_state(
         tmp_path,

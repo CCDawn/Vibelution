@@ -2523,7 +2523,7 @@ def _build_group_round_session_message(
 
 
 def _resolve_participants(session_ids: list[str] | None) -> list[dict[str, Any]]:
-    summaries = session_service.list_sessions()
+    summaries = session_service.list_sessions(include_hidden_internal=True)
     by_id = {str(item.get("id") or "").strip(): item for item in summaries}
     requested = [str(item or "").strip() for item in list(session_ids or []) if str(item or "").strip()]
     if session_ids is not None:
@@ -3266,7 +3266,7 @@ def _session_summary_index(*, session_ids: set[str] | None = None) -> dict[str, 
         return _targeted_session_summary_index(session_ids)
     return {
         str(item.get("id") or "").strip(): item
-        for item in session_service.list_sessions()
+        for item in session_service.list_sessions(include_hidden_internal=True)
         if isinstance(item, dict) and str(item.get("id") or "").strip()
     }
 
@@ -3326,7 +3326,7 @@ def _session_summary(
         return None
     if session_summaries is not None:
         return session_summaries.get(normalized_session_id)
-    for item in session_service.list_sessions():
+    for item in session_service.list_sessions(include_hidden_internal=True):
         if str(item.get("id") or "").strip() == normalized_session_id:
             return item
     return None

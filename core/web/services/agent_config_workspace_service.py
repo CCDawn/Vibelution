@@ -98,7 +98,7 @@ def get_agent_config_workspace() -> dict[str, Any]:
     timings: dict[str, float] = {}
     load_modes: dict[str, str] = {}
     total_started = perf_counter()
-    agents = _timed_stage(timings, "list_agents", lambda: list_agents(include_archived=True))
+    agents = _timed_stage(timings, "list_agents", lambda: list_agents(include_archived=True, detail="config"))
     active_agent_options = [_agent_option(agent) for agent in agents if str(agent.get("status") or "active").strip() != "archived"]
     mode_bindings = _timed_stage(
         timings,
@@ -108,7 +108,7 @@ def get_agent_config_workspace() -> dict[str, Any]:
     prompt_workspace = _timed_stage(timings, "prompt_templates", _safe_prompt_workspace)
     config_workspace = _timed_stage(timings, "model_config", _safe_config_workspace)
     chat_rooms = _timed_stage(timings, "chat_rooms", lambda: _safe_chat_rooms_for_agents(agents))
-    teams = _timed_stage(timings, "teams", _safe_teams)
+    teams = _timed_stage(timings, "teams", lambda: _visible_agent_config_teams(_safe_teams()))
     policy_options = _timed_stage(timings, "policy_options", lambda: _safe_policy_options(agents=agents))
 
     agent_refs = {str(agent.get("agentId") or ""): agent for agent in agents if str(agent.get("agentId") or "")}
@@ -555,7 +555,7 @@ def _derive_health(
             )
 
     for team in teams:
-        if str(team.get("status") or "active").strip() == "archived":
+        if str(team.get("status") or "active").strip().lower() == "archived":
             continue
         for member in list(team.get("members") or []):
             if not isinstance(member, dict):
@@ -661,6 +661,8 @@ def _derive_team_indexes(teams: list[dict[str, Any]], *, agents: list[dict[str, 
             continue
         members = [member for member in list(team.get("members") or []) if isinstance(member, dict)]
         agent_ids = visible_member_ids(members)
+        if not agent_ids:
+            continue
         team_name = str(team.get("name") or team_id).strip()
         team_category = str(team.get("teamCategory") or "").strip()
         purpose = str(team.get("purpose") or team.get("description") or "").strip()
@@ -688,6 +690,22 @@ def _derive_team_indexes(teams: list[dict[str, Any]], *, agents: list[dict[str, 
             )
         )
     return indexes
+
+
+def _visible_agent_config_teams(teams: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Agent Center indexes are Agent-centric, so empty teams are not useful filters."""
+
+    visible: list[dict[str, Any]] = []
+    for team in list(teams or []):
+        if not isinstance(team, dict):
+            continue
+        if str(team.get("status") or "active").strip().lower() == "archived":
+            continue
+        members = [member for member in list(team.get("members") or []) if isinstance(member, dict)]
+        if not any(str(member.get("agentId") or "").strip() for member in members):
+            continue
+        visible.append(team)
+    return visible
 
 
 def _derive_source_scope_indexes(
