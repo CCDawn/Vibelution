@@ -3,6 +3,7 @@ from fastapi.testclient import TestClient
 from core.web.app import create_app
 from core.web.control import CONTROL_TOKEN_HEADER, get_control_token
 from core.web.services import agent_directory_service, chat_room_service, session_service, team_service, team_template_service
+from tests.helpers.system_agent_state import _mark_config_agent_instances_present
 
 
 def _client() -> TestClient:
@@ -40,6 +41,7 @@ def test_team_template_routes_list_medical_demo_template(tmp_path, monkeypatch):
 
 def test_team_template_instantiate_creates_medical_team_agents_and_room(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
+    _mark_config_agent_instances_present()
     client = _client()
 
     response = client.post(
@@ -91,6 +93,7 @@ def test_team_template_instantiate_creates_medical_team_agents_and_room(tmp_path
 
 def test_team_template_instantiate_creates_heletech_demo_team(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
+    _mark_config_agent_instances_present()
     client = _client()
 
     response = client.post(
