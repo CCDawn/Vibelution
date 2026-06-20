@@ -43,6 +43,8 @@ class KernelEventPayload(BaseModel):
     causationId: str = ""
     metadata: dict[str, Any] = Field(default_factory=dict)
     wakeTarget: bool | None = None
+    traceOnly: bool | None = None
+    deliveryPolicy: dict[str, Any] = Field(default_factory=dict)
 
 
 class KernelInboxAckPayload(BaseModel):

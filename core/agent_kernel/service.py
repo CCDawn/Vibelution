@@ -52,7 +52,9 @@ def handle_kernel_event(payload: dict[str, Any]) -> dict[str, Any]:
         store = _store()
         index = store.load_index()
         event = _normalize_event(payload)
-        if not event["recipients"]:
+        delivery_policy = event.get("deliveryPolicy") if isinstance(event.get("deliveryPolicy"), dict) else {}
+        trace_only = bool(delivery_policy.get("traceOnly"))
+        if not event["recipients"] and not trace_only:
             event["status"] = "rejected"
             event["failureReason"] = "missing_recipient"
             _persist_event(store, index, event)
@@ -82,9 +84,14 @@ def handle_kernel_event(payload: dict[str, Any]) -> dict[str, Any]:
         _persist_execution_transition(store, index, execution, "created")
         _persist_execution_transition(store, index, execution, "running")
 
-        deliveries = _deliver_event_to_recipients(event, task)
+        deliveries = [] if trace_only else _deliver_event_to_recipients(event, task)
         failed_deliveries = [item for item in deliveries if str(item.get("status") or "") != "delivered"]
-        if failed_deliveries:
+        if trace_only:
+            outcome_status = "succeeded"
+            result_summary = "Kernel trace event recorded without recipient delivery."
+            final_task_status = "succeeded"
+            final_execution_status = "succeeded"
+        elif failed_deliveries:
             outcome_status = "blocked"
             result_summary = f"Kernel event delivered partially; {len(failed_deliveries)} recipient(s) blocked."
             final_task_status = "blocked"
@@ -315,6 +322,7 @@ def _normalize_event(payload: dict[str, Any]) -> dict[str, Any]:
         "semanticPayload": semantic_payload,
         "deliveryPolicy": {
             "wakeTarget": _event_wake_target(payload, semantic_payload),
+            "traceOnly": _event_trace_only(payload, semantic_payload),
         },
         "createdAt": now,
         "updatedAt": now,
@@ -345,6 +353,21 @@ def _event_wake_target(payload: dict[str, Any], semantic_payload: dict[str, Any]
     if raw_semantic_value is not None:
         return bool(raw_semantic_value)
     return True
+
+
+def _event_trace_only(payload: dict[str, Any], semantic_payload: dict[str, Any]) -> bool:
+    raw_value = payload.get("traceOnly")
+    if raw_value is not None:
+        return bool(raw_value)
+    delivery_policy = payload.get("deliveryPolicy") if isinstance(payload.get("deliveryPolicy"), dict) else {}
+    raw_policy_value = delivery_policy.get("traceOnly")
+    if raw_policy_value is not None:
+        return bool(raw_policy_value)
+    semantic_body = semantic_payload.get("payload") if isinstance(semantic_payload.get("payload"), dict) else {}
+    raw_semantic_value = semantic_body.get("traceOnly")
+    if raw_semantic_value is not None:
+        return bool(raw_semantic_value)
+    return False
 
 
 def _recipient_agent_ids(payload: dict[str, Any]) -> list[str]:

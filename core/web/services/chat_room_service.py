@@ -866,6 +866,18 @@ def start_chat_room_round(
         submit_timings["chatRoomLockedMs"] = _elapsed_ms_between(lock_acquired_at)
 
     stage_started_at = _perf_counter()
+    kernel_trace = _create_chat_room_round_kernel_trace(room, round_payload, speakers)
+    if kernel_trace:
+        room, round_payload = _attach_chat_room_round_kernel_trace(
+            normalized_room_id,
+            round_id,
+            kernel_trace,
+            fallback_room=room,
+            fallback_round=round_payload,
+        )
+    submit_timings["kernelTraceMs"] = _elapsed_ms(stage_started_at)
+
+    stage_started_at = _perf_counter()
     _persist_chat_room_work_run(room, round_payload, status="running", summary="")
     submit_timings["workRunPersistMs"] = _elapsed_ms(stage_started_at)
     stage_started_at = _perf_counter()
@@ -948,6 +960,166 @@ def start_chat_room_round(
         runner,
         lang,
     )
+
+
+def _create_chat_room_round_kernel_trace(
+    room: dict[str, Any],
+    round_payload: dict[str, Any],
+    speakers: list[dict[str, Any]],
+) -> dict[str, Any]:
+    room_id = str(room.get("roomId") or round_payload.get("roomId") or "").strip()
+    round_id = str(round_payload.get("roundId") or "").strip()
+    if not room_id or not round_id:
+        return {}
+    speaker_agent_ids = _speaker_agent_ids(speakers)
+    topic = str(round_payload.get("topic") or "").strip()
+    event_payload = {
+        "eventId": f"chat-room-round-{room_id}-{round_id}",
+        "sender": {"type": "system", "id": "chat_room_service"},
+        "recipientAgentIds": speaker_agent_ids,
+        "semanticType": "chat_room.round",
+        "payload": {
+            "goal": f"Chat room round: {topic or round_id}",
+            "content": topic,
+            "roomId": room_id,
+            "roundId": round_id,
+            "mode": str(round_payload.get("mode") or DEFAULT_MODE).strip() or DEFAULT_MODE,
+            "purpose": _normalize_purpose(round_payload.get("purpose") or room.get("purpose") or DEFAULT_PURPOSE),
+            "speakerCount": len(speakers),
+        },
+        "correlationId": f"chat-room:{room_id}",
+        "idempotencyKey": f"chat-room-round:{room_id}:{round_id}",
+        "wakeTarget": False,
+        "traceOnly": True,
+        "metadata": {
+            "sourceSurface": "chat_room_round",
+            "sourceRoomId": room_id,
+            "sourceMessageId": round_id,
+            "projectionRef": {"kind": "chat_room_round", "id": round_id},
+            "adapterVersion": "chat-room-kernel-shadow-v1",
+            "roomId": room_id,
+            "roundId": round_id,
+            "mode": str(round_payload.get("mode") or DEFAULT_MODE).strip() or DEFAULT_MODE,
+            "purpose": _normalize_purpose(round_payload.get("purpose") or room.get("purpose") or DEFAULT_PURPOSE),
+            "participantCount": len(speakers),
+            "speakerAgentIds": speaker_agent_ids,
+            "messageSummary": topic,
+            "inboxCreatedBy": "chat_room_kernel_trace",
+        },
+    }
+    try:
+        from core.agent_kernel import service as agent_kernel_service
+
+        if getattr(agent_kernel_service, "PROJECT_ROOT", PROJECT_ROOT) != PROJECT_ROOT:
+            agent_kernel_service.PROJECT_ROOT = PROJECT_ROOT
+        result = agent_kernel_service.handle_kernel_event(event_payload)
+    except Exception as exc:
+        trace = {
+            "source": "agent_kernel",
+            "traceOnly": True,
+            "status": "failed",
+            "errorType": type(exc).__name__,
+            "reason": trim_lines(str(exc), max_lines=2),
+        }
+        _record_room_event(
+            "kernel",
+            "chat_room.round.kernel_trace_failed",
+            room,
+            round_payload,
+            fields={
+                "errorType": trace["errorType"],
+                "reason": trace["reason"],
+                "traceOnly": True,
+            },
+            outcome="failed",
+            level="warning",
+        )
+        return trace
+
+    event = result.get("event") if isinstance(result.get("event"), dict) else {}
+    task = result.get("task") if isinstance(result.get("task"), dict) else {}
+    execution = result.get("execution") if isinstance(result.get("execution"), dict) else {}
+    outcome_payload = result.get("outcome") if isinstance(result.get("outcome"), dict) else {}
+    trace = {
+        "source": "agent_kernel",
+        "traceOnly": True,
+        "status": "recorded",
+        "eventId": str(event.get("eventId") or "").strip(),
+        "taskId": str(task.get("taskId") or "").strip(),
+        "workRunId": str(execution.get("workRunId") or "").strip(),
+        "outcomeId": str(outcome_payload.get("outcomeId") or "").strip(),
+        "outcomeStatus": str(outcome_payload.get("status") or task.get("status") or "").strip(),
+        "reused": bool(result.get("reused")),
+    }
+    _record_room_event(
+        "kernel",
+        "chat_room.round.kernel_trace_recorded",
+        room,
+        round_payload,
+        fields={
+            "traceOnly": True,
+            "kernelEventId": trace["eventId"],
+            "kernelTaskId": trace["taskId"],
+            "kernelWorkRunId": trace["workRunId"],
+            "kernelOutcomeId": trace["outcomeId"],
+            "kernelOutcomeStatus": trace["outcomeStatus"],
+            "reused": trace["reused"],
+        },
+        outcome=trace["outcomeStatus"] or "succeeded",
+        lifecycle=True,
+    )
+    return trace
+
+
+def _attach_chat_room_round_kernel_trace(
+    room_id: str,
+    round_id: str,
+    kernel_trace: dict[str, Any],
+    *,
+    fallback_room: dict[str, Any],
+    fallback_round: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    safe_trace = _chat_room_kernel_trace_summary({"kernel": kernel_trace})
+    if not safe_trace:
+        return fallback_room, fallback_round
+    next_room = dict(fallback_room)
+    next_round = {**dict(fallback_round), "kernel": safe_trace}
+    next_rounds = []
+    for item in list(next_room.get("rounds") or []):
+        if isinstance(item, dict) and str(item.get("roundId") or "").strip() == round_id:
+            next_rounds.append(dict(next_round))
+        else:
+            next_rounds.append(item)
+    next_room["rounds"] = next_rounds
+
+    try:
+        with _CHAT_ROOM_LOCK:
+            state = _store().load()
+            live_room = _find_room(state, room_id)
+            if live_room is None:
+                return next_room, next_round
+            target_round = _find_round(live_room, round_id)
+            if target_round is None:
+                return dict(live_room), next_round
+            target_round["kernel"] = dict(safe_trace)
+            live_room["updatedAt"] = utc_now_iso()
+            _store().save(state)
+            return dict(live_room), dict(target_round)
+    except Exception:
+        return next_room, next_round
+
+
+def _speaker_agent_ids(speakers: list[dict[str, Any]]) -> list[str]:
+    result: list[str] = []
+    seen: set[str] = set()
+    for speaker in list(speakers or []):
+        if not isinstance(speaker, dict):
+            continue
+        agent_id = str(speaker.get("agentId") or "").strip()
+        if agent_id and agent_id not in seen:
+            seen.add(agent_id)
+            result.append(agent_id)
+    return result
 
 
 def _accepted_chat_room_round_payload(room: dict[str, Any], round_payload: dict[str, Any]) -> dict[str, Any]:
@@ -3203,6 +3375,25 @@ def _safe_config(config: Any) -> dict[str, Any]:
     return dict(config) if isinstance(config, dict) else {}
 
 
+def _chat_room_kernel_trace_summary(round_payload: dict[str, Any]) -> dict[str, Any]:
+    trace = round_payload.get("kernel") if isinstance(round_payload.get("kernel"), dict) else {}
+    if not trace:
+        return {}
+    return {
+        "source": str(trace.get("source") or "agent_kernel").strip() or "agent_kernel",
+        "traceOnly": bool(trace.get("traceOnly", True)),
+        "status": str(trace.get("status") or "").strip(),
+        "eventId": str(trace.get("eventId") or "").strip(),
+        "taskId": str(trace.get("taskId") or "").strip(),
+        "workRunId": str(trace.get("workRunId") or "").strip(),
+        "outcomeId": str(trace.get("outcomeId") or "").strip(),
+        "outcomeStatus": str(trace.get("outcomeStatus") or "").strip(),
+        "reused": bool(trace.get("reused")),
+        "errorType": str(trace.get("errorType") or "").strip(),
+        "reason": str(trace.get("reason") or "").strip(),
+    }
+
+
 def _room_to_api(
     room: dict[str, Any],
     *,
@@ -3396,7 +3587,7 @@ def _chat_room_work_run_snapshot(
     status: str = "",
 ) -> dict[str, Any]:
     normalized_status = str(status or round_payload.get("status") or "running").strip().lower()
-    return {
+    payload = {
         "runId": str(round_payload.get("roundId") or "").strip(),
         "runKind": RUN_KIND,
         "track": "dialogue",
@@ -3413,6 +3604,10 @@ def _chat_room_work_run_snapshot(
         "updatedAt": str(round_payload.get("updatedAt") or "").strip(),
         "finishedAt": str(round_payload.get("finishedAt") or "").strip(),
     }
+    kernel_trace = _chat_room_kernel_trace_summary(round_payload)
+    if kernel_trace:
+        payload["kernel"] = kernel_trace
+    return payload
 
 
 def _stopped_round_summary(reason: str, *, message_count: int, speaker_count: int) -> str:
@@ -3507,6 +3702,9 @@ def _persist_chat_room_work_run(
         if normalized_status not in RUNNING_ROUND_STATUSES
         else "",
     }
+    kernel_trace = _chat_room_kernel_trace_summary(round_payload)
+    if kernel_trace:
+        payload["kernel"] = kernel_trace
     active_run_id = round_id if normalized_status in RUNNING_ROUND_STATUSES else ""
     _work_run_store().persist_snapshot(RUN_KIND, payload, active_run_id=active_run_id)
 
@@ -3545,6 +3743,19 @@ def _record_room_event(
                 "purpose": _normalize_purpose(round_payload.get("purpose") or room.get("purpose") or DEFAULT_PURPOSE),
             }
         )
+        kernel_trace = _chat_room_kernel_trace_summary(round_payload)
+        if kernel_trace:
+            event_fields.update(
+                {
+                    "kernelTraceOnly": kernel_trace["traceOnly"],
+                    "kernelTraceStatus": kernel_trace["status"],
+                    "kernelEventId": kernel_trace["eventId"],
+                    "kernelTaskId": kernel_trace["taskId"],
+                    "kernelWorkRunId": kernel_trace["workRunId"],
+                    "kernelOutcomeId": kernel_trace["outcomeId"],
+                    "kernelOutcomeStatus": kernel_trace["outcomeStatus"],
+                }
+            )
     if fields:
         event_fields.update(fields)
     try:
