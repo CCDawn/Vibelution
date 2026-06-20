@@ -586,7 +586,11 @@ def _research_loop_store_path(team_id: str) -> Path:
 
 
 def _team_workspace_root(team_id: str) -> Path:
-    return _project_root() / "workspace" / "teams" / _safe_token(team_id, default="team", max_length=96)
+    return developer_sandbox.seeded_sandbox_workspace_path(
+        _project_root(),
+        "teams",
+        _safe_token(team_id, default="team", max_length=96),
+    )
 
 
 def _project_root() -> Path:

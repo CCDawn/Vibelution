@@ -3334,7 +3334,8 @@ def _room_to_compact_reference(room: dict[str, Any]) -> dict[str, Any]:
 
 
 def _store() -> ChatRoomStore:
-    return ChatRoomStore(root=PROJECT_ROOT)
+    workspace_root = developer_sandbox.formal_workspace_path(PROJECT_ROOT)
+    return ChatRoomStore(root=workspace_root.parent)
 
 
 def _work_run_store() -> work_run_store.WorkRunStore:

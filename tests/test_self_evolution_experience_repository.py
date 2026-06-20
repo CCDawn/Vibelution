@@ -26,7 +26,7 @@ def test_append_experience_record_materializes_bounded_candidate_source(tmp_path
         project_root=tmp_path,
     )
 
-    path = tmp_path / EXPERIENCE_JSONL
+    path = tmp_path / "workspace" / EXPERIENCE_JSONL
     rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
 
     assert result.created is True

@@ -17,9 +17,10 @@ from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any
 
+from config.paths import resolve_workspace_home
 
 SCHEMA_VERSION = 1
-INDEX_REL_PATH = Path("workspace") / "code_context_graph" / "index.json"
+INDEX_REL_PATH = Path("code_context_graph") / "index.json"
 
 INCLUDED_ROOTS = {
     "core",
@@ -95,8 +96,13 @@ def project_root() -> Path:
 
 
 def index_path(root: Path | None = None) -> Path:
-    base = root or project_root()
-    return base / INDEX_REL_PATH
+    if root is None:
+        return resolve_workspace_home() / INDEX_REL_PATH
+    base = Path(root).resolve()
+    if base == project_root():
+        return resolve_workspace_home() / INDEX_REL_PATH
+    workspace_root = base if base.name.lower() == "workspace" else base / "workspace"
+    return workspace_root / INDEX_REL_PATH
 
 
 def code_context_graph_tool(

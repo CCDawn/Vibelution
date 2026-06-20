@@ -131,7 +131,7 @@ class TaskAnalyzer:
         self.project_root = Path(project_root)
 
         # 分析结果存储路径
-        self._analysis_dir = self.project_root / "workspace" / "analytics"
+        self._analysis_dir = _workspace_root(self.project_root) / "analytics"
         self._analysis_dir.mkdir(parents=True, exist_ok=True)
 
         # 任务历史记录
@@ -1154,6 +1154,16 @@ class TaskAnalyzer:
 # ============================================================================
 
 _task_analyzer: Optional[TaskAnalyzer] = None
+
+
+def _workspace_root(project_root: Path) -> Path:
+    from core.infrastructure.workspace_manager import get_workspace
+
+    root = Path(project_root).resolve()
+    workspace = get_workspace()
+    if root == workspace.project_root.resolve():
+        return workspace.root.resolve()
+    return root if root.name.lower() == "workspace" else root / "workspace"
 
 
 def get_task_analyzer(project_root: Optional[str] = None) -> TaskAnalyzer:

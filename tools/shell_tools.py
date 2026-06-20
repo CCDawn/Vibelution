@@ -489,11 +489,13 @@ def _get_workspace_root() -> Path:
     if override:
         return Path(override).resolve()
     try:
-        from config import get_config
-        workspace_name = get_config().agent.workspace
+        from core.infrastructure.workspace_manager import get_workspace
+
+        return get_workspace().root.resolve()
     except Exception:
-        workspace_name = "workspace"
-    return (PROJECT_ROOT / workspace_name).resolve()
+        from config.paths import resolve_workspace_home
+
+        return resolve_workspace_home()
 
 
 def _get_allowed_root_dirs() -> list[Path]:

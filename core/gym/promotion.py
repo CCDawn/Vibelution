@@ -390,7 +390,7 @@ def _application_from_applied_proposal(
         str(proposal.get("decision_path") or decision_path_for_episode_id(episode_id, project_root=project_root))
     ).resolve()
     trace_index_path = Path(str(proposal.get("trace_index_path") or trace_index_path_for_decision(decision_path))).resolve()
-    ledger_path = Path(str(proposal.get("ledger_path") or project_root / "workspace" / "gym" / "applied_promotions.jsonl")).resolve()
+    ledger_path = Path(str(proposal.get("ledger_path") or _gym_workspace_path(project_root, "applied_promotions.jsonl"))).resolve()
     return GymPromotionApplication(
         proposal_id=_required_text(proposal, "proposal_id"),
         episode_id=episode_id,
@@ -416,8 +416,8 @@ def _activation_from_active_proposal(
         str(proposal.get("decision_path") or decision_path_for_episode_id(episode_id, project_root=project_root))
     ).resolve()
     trace_index_path = Path(str(proposal.get("trace_index_path") or trace_index_path_for_decision(decision_path))).resolve()
-    registry_path = Path(str(proposal.get("activation_registry_path") or project_root / "workspace" / "gym" / "active_promotions.json")).resolve()
-    history_path = Path(str(proposal.get("activation_history_path") or project_root / "workspace" / "gym" / "activation_history.jsonl")).resolve()
+    registry_path = Path(str(proposal.get("activation_registry_path") or _gym_workspace_path(project_root, "active_promotions.json"))).resolve()
+    history_path = Path(str(proposal.get("activation_history_path") or _gym_workspace_path(project_root, "activation_history.jsonl"))).resolve()
     return GymPromotionActivation(
         proposal_id=_required_text(proposal, "proposal_id"),
         episode_id=episode_id,
@@ -447,7 +447,7 @@ def _rollback_from_rolled_back_proposal(
         str(proposal.get("decision_path") or decision_path_for_episode_id(episode_id, project_root=project_root))
     ).resolve()
     trace_index_path = Path(str(proposal.get("trace_index_path") or trace_index_path_for_decision(decision_path))).resolve()
-    ledger_path = Path(str(proposal.get("rollback_ledger_path") or project_root / "workspace" / "gym" / "rolled_back_promotions.jsonl")).resolve()
+    ledger_path = Path(str(proposal.get("rollback_ledger_path") or _gym_workspace_path(project_root, "rolled_back_promotions.jsonl"))).resolve()
     return GymPromotionRollback(
         proposal_id=_required_text(proposal, "proposal_id"),
         episode_id=episode_id,

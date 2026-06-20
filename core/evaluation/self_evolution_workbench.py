@@ -637,8 +637,10 @@ def _format_preview_transactions(records: list[SelfEvolutionTransactionRecord] |
 
 
 def _workspace_root(project_root: Path) -> Path:
-    workspace_name = getattr(get_config().agent, "workspace", "workspace")
-    return (Path(project_root).resolve() / workspace_name).resolve()
+    root = Path(project_root).resolve()
+    if root == PROJECT_ROOT.resolve():
+        return developer_sandbox.seeded_sandbox_workspace_path(root).resolve()
+    return root if root.name.lower() == "workspace" else root / "workspace"
 
 
 def _audit_log_path(project_root: Path) -> Path:

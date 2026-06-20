@@ -27,8 +27,8 @@ T = TypeVar("T")
 
 class ResearchRepository:
     def __init__(self, root: Path | None = None):
-        project_root = get_workspace().project_root.resolve()
-        self.root = (root or project_root / "workspace" / "research" / "theme_discovery").resolve()
+        workspace = get_workspace()
+        self.root = (root or workspace.research_dir() / "theme_discovery").resolve()
 
     @property
     def sessions_root(self) -> Path:

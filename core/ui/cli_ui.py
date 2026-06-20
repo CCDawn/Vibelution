@@ -22,6 +22,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from config.paths import resolve_workspace_home
 from rich.box import ASCII2, ROUNDED
 from rich.cells import cell_len
 from rich.align import Align
@@ -148,7 +149,7 @@ class UIManager:
         self._context_compression_state: Dict[str, Any] = {}
         self._completed_evolutions = 0
         self._seen_closed_evolution_txns: set[str] = set()
-        self._runtime_state_path = Path("workspace") / "ui_runtime_state.json"
+        self._runtime_state_path = resolve_workspace_home() / "ui_runtime_state.json"
         self._load_runtime_totals()
         self._shell_mode = "chat"
 
