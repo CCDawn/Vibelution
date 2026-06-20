@@ -23,6 +23,7 @@ client = TestClient(create_app(), headers={CONTROL_TOKEN_HEADER: get_control_tok
 
 @pytest.fixture(autouse=True)
 def isolate_developer_sandbox_config(tmp_path, monkeypatch):
+    monkeypatch.setenv("VIBELUTION_DATA_HOME", str(tmp_path / "operator-data"))
     config_path = tmp_path / "developer-mode-off.toml"
     config_path.write_text("[launcher]\ncontrol_port = 8765\n", encoding="utf-8")
     project_root = tmp_path / "developer-mode-project"
@@ -836,7 +837,7 @@ def test_agent_memory_inventory_lists_private_workspace_without_content(tmp_path
     monkeypatch.setattr(team_knowledge_service, "PROJECT_ROOT", tmp_path)
     agent = agent_directory_service.create_agent_instance(display_name="Private Memory Agent")
     empty_agent = agent_directory_service.create_agent_instance(display_name="No Memory Agent")
-    memory_root = tmp_path / agent["workspacePath"] / "memory"
+    memory_root = developer_sandbox.formal_workspace_path(tmp_path, "agents", agent["agentId"], "memory")
     memory_root.mkdir(parents=True, exist_ok=True)
     (memory_root / "lesson.md").write_text("PRIVATE MEMORY BODY SHOULD ONLY LOAD IN DETAIL", encoding="utf-8")
     (memory_root / "nested").mkdir()
@@ -867,7 +868,14 @@ def test_agent_memory_inventory_lists_private_workspace_without_content(tmp_path
     assert empty_entry["fileCount"] == 0
     assert "PRIVATE MEMORY BODY SHOULD ONLY LOAD IN DETAIL" not in payload_text
 
-    detail_response = client.get(f"/api/memory/agents/{agent['agentId']}")
+    unauthenticated_detail_response = client.get(f"/api/memory/agents/{agent['agentId']}")
+
+    assert unauthenticated_detail_response.status_code == 422
+
+    detail_response = client.get(
+        f"/api/memory/agents/{agent['agentId']}",
+        params={"actorAgentId": agent["agentId"]},
+    )
 
     assert detail_response.status_code == 200, detail_response.json()
     detail_payload = detail_response.json()

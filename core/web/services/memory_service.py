@@ -2190,15 +2190,37 @@ def _resolve_agent_memory_root(root: Path, workspace_path: str) -> Path | None:
     workspace = str(workspace_path or "").strip()
     if not workspace:
         return None
-    candidate = Path(workspace)
-    if not candidate.is_absolute():
-        candidate = root / candidate
+    candidate = _resolve_agent_workspace_path(root, workspace)
     try:
         resolved = candidate.resolve()
-        resolved.relative_to(root.resolve())
-    except (OSError, ValueError):
+    except OSError:
+        return None
+    allowed_roots = [
+        root.resolve(),
+        developer_sandbox.formal_workspace_path(root).resolve(),
+        developer_sandbox.sandboxed_workspace_path(root).resolve(),
+    ]
+    if not any(_path_is_within(resolved, allowed_root) for allowed_root in allowed_roots):
         return None
     return resolved / "memory"
+
+
+def _resolve_agent_workspace_path(root: Path, workspace_path: str) -> Path:
+    raw = str(workspace_path or "").strip()
+    candidate = Path(raw)
+    if candidate.parts and str(candidate.parts[0]).lower() == "workspace":
+        return _sandboxed_workspace_path(root, *[str(part) for part in candidate.parts[1:]])
+    if not candidate.is_absolute():
+        return root / candidate
+    return candidate
+
+
+def _path_is_within(path: Path, root: Path) -> bool:
+    try:
+        path.relative_to(root)
+        return True
+    except ValueError:
+        return path == root
 
 
 def _fallback_agent_workspace_path(agent_id: str) -> str:

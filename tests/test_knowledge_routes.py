@@ -1,9 +1,15 @@
+import pytest
 from fastapi.testclient import TestClient
 
 from core.web.app import create_app
 from core.web.control import CONTROL_TOKEN_HEADER, get_control_token
 from core.web.routes import knowledge as knowledge_routes
 from core.web.services import agent_directory_service, chat_room_service, team_knowledge_service, team_service
+
+
+@pytest.fixture(autouse=True)
+def _isolate_data_home(tmp_path, monkeypatch):
+    monkeypatch.setenv("VIBELUTION_DATA_HOME", str(tmp_path / "operator-data"))
 
 
 def _setup(tmp_path, monkeypatch):
