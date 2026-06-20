@@ -30,7 +30,7 @@ from .supervised_evolution import (
 )
 
 
-DATASET_REGISTRY_PATH = Path("workspace/evaluation/datasets/registry.json")
+DATASET_REGISTRY_PATH = Path("evaluation/datasets/registry.json")
 TERMINAL_BENCH_SMOKE_ROWS: List[Dict[str, Any]] = [
     {
         "case_id": "tb_smoke_inspect_validate",
@@ -294,7 +294,7 @@ def list_pending_self_evolution_dataset_candidates(
     they are not registered datasets and cannot be materialized automatically.
     """
 
-    root = (project_root or get_workspace().project_root).resolve()
+    root = _workspace_root(project_root)
     rows: List[Dict[str, Any]] = []
     for candidate_type in sorted(ALLOWED_CANDIDATE_TYPES):
         for record in list_candidate_records(candidate_type, project_root=root):
@@ -327,8 +327,15 @@ def list_pending_self_evolution_dataset_candidates(
 
 
 def _registry_path(project_root: Optional[Path] = None) -> Path:
-    root = (project_root or get_workspace().project_root).resolve()
+    root = _workspace_root(project_root)
     return root / DATASET_REGISTRY_PATH
+
+
+def _workspace_root(project_root: Optional[Path] = None) -> Path:
+    if project_root is None:
+        return get_workspace().root.resolve()
+    root = Path(project_root).resolve()
+    return root if root.name.lower() == "workspace" else root / "workspace"
 
 
 def _text_list(value: Any) -> List[str]:
@@ -610,7 +617,7 @@ def _bootstrap_or_refresh_builtin_jsonl(source: Path, rows: List[Dict[str, Any]]
 
 
 def ensure_dataset_registry(project_root: Optional[Path] = None) -> Path:
-    root = (project_root or get_workspace().project_root).resolve()
+    root = _workspace_root(project_root)
     path = _registry_path(root)
     path.parent.mkdir(parents=True, exist_ok=True)
     if path.exists():
@@ -677,7 +684,11 @@ def resolve_source_path(spec: DatasetSpec, project_root: Path) -> Optional[Path]
         return None
     path = Path(spec.source_path)
     if not path.is_absolute():
-        path = project_root / path
+        parts = path.parts
+        if parts and parts[0] == "workspace":
+            path = project_root.joinpath(*parts[1:])
+        else:
+            path = project_root / path
     return path.resolve()
 
 
@@ -686,11 +697,11 @@ def list_dataset_status(
     *,
     include_environment_preflight: bool = True,
 ) -> List[Dict[str, Any]]:
-    root = (project_root or get_workspace().project_root).resolve()
+    root = _workspace_root(project_root)
     rows = []
     for spec in load_dataset_specs(root):
         source = resolve_source_path(spec, root)
-        bundle_path = root / "workspace" / "evaluation" / "bundles" / f"{spec.bundle_name}.json"
+        bundle_path = root / "evaluation" / "bundles" / f"{spec.bundle_name}.json"
         available = spec.kind == "supervised_bundle" or bool(source and source.exists())
         case_count: Optional[int] = None
         validation_error = ""
@@ -853,16 +864,16 @@ def materialize_dataset_bundle(
     project_root: Optional[Path] = None,
     limit: Optional[int] = None,
 ) -> DatasetMaterialization:
-    root = (project_root or get_workspace().project_root).resolve()
+    root = _workspace_root(project_root)
     spec = get_dataset_spec(dataset_name, project_root=root)
     materialized_bundle_name = spec.bundle_name
     materialization_limit = limit
-    bundle_path = root / "workspace" / "evaluation" / "bundles" / f"{materialized_bundle_name}.json"
+    bundle_path = root / "evaluation" / "bundles" / f"{materialized_bundle_name}.json"
     if limit is not None:
         limit_count = max(1, int(limit))
         materialization_limit = limit_count
         materialized_bundle_name = f"{spec.bundle_name}_limit_{limit_count}"
-        bundle_path = root / "workspace" / "evaluation" / "bundles" / f"{materialized_bundle_name}.json"
+        bundle_path = root / "evaluation" / "bundles" / f"{materialized_bundle_name}.json"
 
     if spec.kind == "supervised_bundle":
         source_bundle = resolve_supervised_bundle_path(spec.bundle_name, project_root=root)

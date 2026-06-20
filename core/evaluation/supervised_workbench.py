@@ -160,7 +160,7 @@ def run_workbench_session(
     )
 
 
-def list_dataset_choices(project_root: Path) -> list[dict]:
+def list_dataset_choices(project_root: Path | None) -> list[dict]:
     from .dataset_registry import list_dataset_status
 
     return list_dataset_status(project_root, include_environment_preflight=True)
@@ -227,14 +227,15 @@ def bundle_environment_preflight_block_message(bundle_path: Path, *, project_roo
     return ""
 
 
-def prepare_dataset_run(project_root: Path, dataset_name: str, dataset_limit: int | None) -> DatasetRunPreparation:
+def prepare_dataset_run(project_root: Path | None, dataset_name: str, dataset_limit: int | None) -> DatasetRunPreparation:
     from .dataset_registry import materialize_dataset_bundle
 
     materialized = materialize_dataset_bundle(dataset_name, project_root=project_root, limit=dataset_limit)
     adapter_status = getattr(materialized, "adapter_status", "-")
     runnable = bool(getattr(materialized, "runnable", False))
+    environment_root = _resolve_project_root(project_root)
     environment_block = (
-        bundle_environment_preflight_block_message(Path(getattr(materialized, "bundle_path", "")), project_root=project_root)
+        bundle_environment_preflight_block_message(Path(getattr(materialized, "bundle_path", "")), project_root=environment_root)
         if runnable
         else ""
     )
@@ -618,11 +619,11 @@ def format_bundle_preview(bundle_path: str) -> str:
 
 
 def resolve_workbench_bundle_path(project_root: Path, bundle_name: str) -> Path:
-    return project_root / "workspace" / "evaluation" / "bundles" / f"{bundle_name}.json"
+    return _workspace_root(project_root) / "evaluation" / "bundles" / f"{bundle_name}.json"
 
 
 def list_available_workbench_bundles(project_root: Path) -> list[dict[str, Any]]:
-    bundles_dir = project_root / "workspace" / "evaluation" / "bundles"
+    bundles_dir = _workspace_root(project_root) / "evaluation" / "bundles"
     if not bundles_dir.exists():
         return []
     rows: list[dict[str, Any]] = []
@@ -653,6 +654,15 @@ def list_available_workbench_bundles(project_root: Path) -> list[dict[str, Any]]
             }
         )
     return rows
+
+
+def _workspace_root(project_root: Path | None = None) -> Path:
+    if project_root is None:
+        from core.infrastructure.workspace_manager import get_workspace
+
+        return get_workspace().root.resolve()
+    root = Path(project_root).resolve()
+    return root if root.name.lower() == "workspace" else root / "workspace"
 
 
 def format_materialization_summary(materialized: object, fallback_dataset_name: str) -> str:

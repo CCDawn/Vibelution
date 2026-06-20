@@ -13,7 +13,7 @@ from .models import GeneratedCaseProvenance, GymCase
 
 
 GENERATED_CASES_DATASET_NAME = "generated_cases"
-GENERATED_CASES_JSONL = Path("workspace/evaluation/datasets/generated_cases.jsonl")
+GENERATED_CASES_JSONL = Path("evaluation/datasets/generated_cases.jsonl")
 
 
 def append_generated_case(case: GymCase, *, project_root: Optional[Path] = None) -> Path:
@@ -22,7 +22,7 @@ def append_generated_case(case: GymCase, *, project_root: Optional[Path] = None)
     if "holdout" in case.dataset_splits:
         raise ValueError("Generated cases cannot automatically enter holdout")
 
-    root = (project_root or get_workspace().project_root).resolve()
+    root = _workspace_root(project_root)
     path = root / GENERATED_CASES_JSONL
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = case.to_bundle_case()
@@ -61,3 +61,10 @@ def build_generated_case(
         dataset_splits=dataset_splits or ["train", "observe"],
         provenance=provenance,
     )
+
+
+def _workspace_root(project_root: Optional[Path] = None) -> Path:
+    if project_root is None:
+        return get_workspace().root.resolve()
+    root = Path(project_root).resolve()
+    return root if root.name.lower() == "workspace" else root / "workspace"

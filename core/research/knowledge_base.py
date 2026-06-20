@@ -57,7 +57,7 @@ class ResearchKnowledgeBase:
     def __init__(self, path: Path | None = None):
         if path is None:
             workspace = get_workspace()
-            path = workspace.project_root / "workspace" / "research" / "knowledge_base.json"
+            path = workspace.research_dir() / "knowledge_base.json"
         self.path = path.resolve()
 
     def payload(self, *, query: str = "", kind: str = "", category: str = "", limit: int = 100) -> dict[str, Any]:

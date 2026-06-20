@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from config import get_config
+from core.infrastructure import developer_sandbox
 from core.infrastructure.workspace_manager import get_workspace
 
 
@@ -65,7 +66,11 @@ def resolve_lineage_index_path(*, project_root: Optional[Path] = None) -> Path:
     root = (project_root or get_workspace().project_root).resolve()
     proposals_dir = Path(get_config().evolution.proposals_dir)
     if not proposals_dir.is_absolute():
-        proposals_dir = (root / proposals_dir).resolve()
+        parts = proposals_dir.parts
+        if parts and parts[0] == "workspace":
+            proposals_dir = developer_sandbox.seeded_sandbox_workspace_path(root, *parts[1:]).resolve()
+        else:
+            proposals_dir = (root / proposals_dir).resolve()
     return proposals_dir / "lineage_index.json"
 
 

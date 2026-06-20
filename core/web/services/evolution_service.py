@@ -28,6 +28,7 @@ from .workbench_contract_service import get_workbench_contract
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
+SOURCE_PROJECT_ROOT = PROJECT_ROOT
 LIST_RECORD_LIMIT = 24
 DETAIL_RECORD_LIMIT = 400
 EVOLUTION_WORKSPACE_SNAPSHOT_SLOW_MS = 1000.0
@@ -403,24 +404,26 @@ def list_self_evolution_candidate_pending_items(
     if not _self_evolution_enabled_for_candidate_review():
         return []
     root = (project_root or PROJECT_ROOT).resolve()
+    storage_root = _storage_root_arg(project_root)
     active_lang = lang or get_web_language()
     items: list[dict[str, Any]] = []
     for candidate_type in sorted(ALLOWED_CANDIDATE_TYPES):
-        for record in list_candidate_records(candidate_type, project_root=root):
+        for record in list_candidate_records(candidate_type, project_root=storage_root):
             if str(record.get("review_state") or "").strip().lower() != "pending":
                 continue
             items.append(_self_evolution_candidate_pending_item(record, lang=active_lang))
     return sorted(items, key=lambda item: str(item.get("updatedAt") or ""), reverse=True)
 
 
-def _find_self_evolution_candidate(candidate_id: str, *, root: Path) -> dict[str, Any] | None:
+def _find_self_evolution_candidate(candidate_id: str, *, root: Path, project_root: Path | None = None) -> dict[str, Any] | None:
     if not _self_evolution_enabled_for_candidate_review():
         return None
     target = str(candidate_id or "").strip()
     if not target:
         return None
+    storage_root = _storage_root_arg(project_root)
     for candidate_type in sorted(ALLOWED_CANDIDATE_TYPES):
-        for record in list_candidate_records(candidate_type, project_root=root):
+        for record in list_candidate_records(candidate_type, project_root=storage_root):
             if str(record.get("candidate_id") or "").strip() == target:
                 return record
     return None
@@ -433,7 +436,7 @@ def get_proposal_detail(session_id: str, *, project_root: Path | None = None) ->
     root = (project_root or PROJECT_ROOT).resolve()
     record = _find_record(session_id, root=root, limit=DETAIL_RECORD_LIMIT)
     if record is None:
-        candidate = _find_self_evolution_candidate(session_id, root=root)
+        candidate = _find_self_evolution_candidate(session_id, root=root, project_root=project_root)
         if candidate is not None:
             return _self_evolution_candidate_detail(candidate, lang=lang)
         raise EvolutionProposalNotFoundError("Supervised proposal not found.")
@@ -837,13 +840,13 @@ def _build_current_status(latest_run: dict[str, Any] | None, lang: str) -> dict[
 
 
 def _build_workbench_state() -> dict[str, Any]:
-    return get_workbench_state_payload(project_root=PROJECT_ROOT)
+    return get_workbench_state_payload()
 
 
 def get_workbench_state_payload(*, project_root: Path | None = None) -> dict[str, Any]:
     root = (project_root or PROJECT_ROOT).resolve()
     state = load_workbench_state(root)
-    datasets = list_dataset_status(root, include_environment_preflight=False)
+    datasets = list_dataset_status(_storage_root_arg(project_root), include_environment_preflight=False)
     source = str(state.get("source") or "").strip().lower()
     if source not in {"bundle", "dataset"}:
         source = "unknown"
@@ -1653,6 +1656,11 @@ def _score(value: float) -> int:
 def _load_records(root: Path, *, limit: int) -> list[Any]:
     records, _ = load_dashboard_records(project_root=root, limit=limit)
     return records
+
+
+def _storage_root_arg(project_root: Path | None) -> Path | None:
+    root = Path(project_root).resolve() if project_root is not None else PROJECT_ROOT.resolve()
+    return None if root == SOURCE_PROJECT_ROOT.resolve() else root
 
 
 def record_evolution_workspace_snapshot_perf(

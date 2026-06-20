@@ -81,7 +81,7 @@ def test_record_bounded_reflection_materializes_and_dedupes(tmp_path: Path):
 
     rows = [
         json.loads(line)
-        for line in (tmp_path / REFLECTION_JSONL).read_text(encoding="utf-8").splitlines()
+        for line in (tmp_path / "workspace" / REFLECTION_JSONL).read_text(encoding="utf-8").splitlines()
         if line.strip()
     ]
     records = list_reflection_records(project_root=tmp_path)

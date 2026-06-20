@@ -25,7 +25,7 @@ def print_dataset_menu(rows: List[Dict[str, Any]]) -> None:
 
 
 def choose_dataset_interactively(*, project_root: Path) -> Tuple[str, Optional[int]]:
-    rows = list_dataset_status(project_root)
+    rows = list_dataset_status(_storage_root_arg(project_root))
     if not rows:
         raise RuntimeError("数据集注册表为空")
 
@@ -66,7 +66,7 @@ def should_handle_supervised_cli(args: Any) -> bool:
 
 def run_supervised_cli_from_args(*, args: Any, project_root: Path) -> int:
     if getattr(args, "list_datasets", False):
-        print(json.dumps(list_dataset_status(project_root), ensure_ascii=False, indent=2))
+        print(json.dumps(list_dataset_status(_storage_root_arg(project_root)), ensure_ascii=False, indent=2))
         return 0
 
     if getattr(args, "supervised_dashboard", False):
@@ -86,7 +86,7 @@ def run_supervised_cli_from_args(*, args: Any, project_root: Path) -> int:
     if dataset_name:
         materialized = materialize_dataset_bundle(
             dataset_name,
-            project_root=project_root,
+            project_root=_storage_root_arg(project_root),
             limit=dataset_limit,
         )
         print(json.dumps(asdict(materialized), ensure_ascii=False, indent=2))
@@ -126,6 +126,15 @@ def _to_jsonable(value: Any) -> Any:
     if hasattr(value, "__dict__"):
         return dict(value.__dict__)
     return value
+
+
+def _storage_root_arg(project_root: Path | None) -> Path | None:
+    if project_root is None:
+        return None
+    from core.infrastructure.workspace_manager import get_workspace
+
+    root = Path(project_root).resolve()
+    return None if root == get_workspace().project_root.resolve() else root
 
 
 __all__ = [
