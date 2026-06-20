@@ -16,9 +16,6 @@ from core.infrastructure.model_discovery import (
     get_dynamic_model_config,
 )
 
-pytestmark = pytest.mark.serial
-
-
 class TestModelDiscovery:
     """ModelDiscovery 测试"""
 
