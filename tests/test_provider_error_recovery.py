@@ -2,16 +2,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 from config import Settings
 from core.llm.client import LLMClient
 from core.llm.errors import classify_exception
 from core.llm.recovery import plan_recovery
 from core.ui.chat_state import CHAT_STATE_VERSION, save_chat_state
 from core.web.services import session_service
-
-pytestmark = pytest.mark.serial
 
 
 def _make_config(**kwargs):
