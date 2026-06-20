@@ -1,5 +1,6 @@
 import json
 from concurrent.futures import Future
+from pathlib import Path
 
 import pytest
 
@@ -17,6 +18,13 @@ from core.web.services import (
 )
 
 pytestmark = pytest.mark.serial
+
+
+def test_source_collection_stage_round_sync_has_single_implementation():
+    service_path = Path(team_workflow_orchestration_service.__file__)
+    source = service_path.read_text(encoding="utf-8")
+
+    assert source.count("def _sync_source_collection_stage_round_after_search(") == 1
 
 
 class _FakeLocalResearchMessage:
@@ -1160,6 +1168,63 @@ def test_source_collection_search_syncs_stage_round_terminal_state(tmp_path, mon
     assert second_status["phases"][0]["activeRoundId"] == ""
     assert second_latest["sourceCollectionSearchExecution"]["status"] == "completed"
     assert second_latest["sourceCollectionSummary"]["candidateCount"] == 2
+
+
+def test_research_stage_status_recovers_stale_running_source_collection_round(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _stub_source_collection_search_background(monkeypatch)
+
+    def fake_search(query, *, max_results, provider):
+        query_id = str(query.get("queryId") or "query")
+        return {
+            "provider": provider,
+            "searchUrl": f"https://api.example.test/search?q={query_id}",
+            "results": [
+                {
+                    "title": f"Recover stale source {query_id}",
+                    "sourceRef": f"https://doi.org/10.0000/{query_id}",
+                    "rawLocation": f"https://api.example.test/works/10.0000/{query_id}",
+                    "summary": "Metadata-only result for stale status recovery.",
+                    "sourceType": "paper",
+                    "metadata": {"doi": f"10.0000/{query_id}", "containerTitle": "Status Recovery Journal"},
+                    "qualitySignals": {"providerScore": 90},
+                }
+            ][:max_results],
+        }
+
+    monkeypatch.setattr(team_workflow_orchestration_service, "_execute_source_collection_query", fake_search)
+    team = team_service.create_team(name="ai科学研究团队")
+    response = team_workflow_orchestration_service.start_research_stage_round(
+        team["teamId"],
+        {
+            "stageType": "knowledge_collection",
+            "topic": "stale status recovery",
+            "querySeeds": ["first query", "second query"],
+            "searchLanguages": ["en"],
+            "sourceTypes": ["paper"],
+            "agentRoles": ["data_discovery"],
+        },
+    )
+    run_id = response["run"]["runId"]
+    first = team_workflow_orchestration_service.execute_source_collection_search(team["teamId"], run_id, {"maxQueries": 1, "maxResultsPerQuery": 1})
+
+    assert first["hasMore"] is True
+
+    store_path = team_workflow_orchestration_service._stage_round_store_path(team["teamId"])
+    store = json.loads(store_path.read_text(encoding="utf-8"))
+    stage_round = store["rounds"][0]
+    stage_round["status"] = "running"
+    stage_round["sourceCollectionSearchExecution"]["status"] = "accepted"
+    stage_round["sourceCollectionSearchExecution"]["activeWorkRunId"] = run_id
+    store_path.write_text(json.dumps(store, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    status_payload = team_workflow_orchestration_service.get_research_stage_round_status(team["teamId"])
+    latest_round = status_payload["latestRound"]
+
+    assert latest_round["status"] == "needs_continue"
+    assert status_payload["phases"][0]["activeRoundId"] == ""
+    assert latest_round["sourceCollectionSearchExecution"]["status"] == "needs_continue"
+    assert latest_round["sourceCollectionSearchExecution"]["activeWorkRunId"] == ""
 
 
 def test_start_research_stage_round_reuses_active_knowledge_collection_round(tmp_path, monkeypatch):
