@@ -1,12 +1,7 @@
 import json
 from pathlib import Path
 
-import pytest
-
 from core.web.services import runtime_scene_service
-
-pytestmark = pytest.mark.serial
-
 
 def _write_jsonl(path: Path, rows: list[dict]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
