@@ -1,15 +1,10 @@
 import json
 from pathlib import Path
 
-import pytest
-
 import core
 from core.launcher.app import create_launcher_app
 from core.version import get_product_version
 from core.web.app import create_app
-
-pytestmark = pytest.mark.serial
-
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 

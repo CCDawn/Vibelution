@@ -17,9 +17,6 @@ from core.web.services.model_reference_service import (
     scan_model_references,
 )
 
-pytestmark = pytest.mark.serial
-
-
 @pytest.fixture(autouse=True)
 def _isolate_data_home(tmp_path, monkeypatch):
     monkeypatch.setenv("VIBELUTION_DATA_HOME", str(tmp_path))
