@@ -4558,6 +4558,144 @@ def review_steward_pack_knowledge_ingestion(team_id: str, candidate_id: str, pay
     }
 
 
+def _team_workflow_kernel_delivery(kernel_result: dict[str, Any], target_agent_id: str) -> dict[str, Any]:
+    outcome = kernel_result.get("outcome") if isinstance(kernel_result.get("outcome"), dict) else {}
+    deliveries = outcome.get("deliveries") if isinstance(outcome.get("deliveries"), list) else []
+    normalized_target_agent_id = str(target_agent_id or "").strip()
+    for delivery in deliveries:
+        if not isinstance(delivery, dict):
+            continue
+        if str(delivery.get("targetAgentId") or "").strip() == normalized_target_agent_id:
+            return dict(delivery)
+    return dict(deliveries[0]) if deliveries and isinstance(deliveries[0], dict) else {}
+
+
+def _team_workflow_inbox_message_from_kernel_delivery(
+    target_agent_id: str,
+    delivery: dict[str, Any],
+    *,
+    fallback: dict[str, Any],
+) -> dict[str, Any]:
+    message_id = str(
+        delivery.get("inboxMessageId")
+        or (delivery.get("wake", {}) if isinstance(delivery.get("wake"), dict) else {}).get("messageId")
+        or ""
+    ).strip()
+    if message_id:
+        for message in agent_directory_service.list_agent_inbox_messages_for_agent(
+            target_agent_id,
+            limit=100,
+            status="",
+        ):
+            if str(message.get("messageId") or message.get("eventId") or "").strip() == message_id:
+                return message
+    message = dict(fallback)
+    if message_id:
+        message["messageId"] = message_id
+        message.setdefault("eventId", message_id)
+    message["targetAgentId"] = str(target_agent_id or "").strip()
+    message["targetSessionId"] = str(
+        delivery.get("targetSessionId")
+        or (delivery.get("wake", {}) if isinstance(delivery.get("wake"), dict) else {}).get("targetSessionId")
+        or ""
+    ).strip()
+    return message
+
+
+def _team_workflow_kernel_summary(kernel_result: dict[str, Any]) -> dict[str, Any]:
+    event = kernel_result.get("event") if isinstance(kernel_result.get("event"), dict) else {}
+    task = kernel_result.get("task") if isinstance(kernel_result.get("task"), dict) else {}
+    execution = kernel_result.get("execution") if isinstance(kernel_result.get("execution"), dict) else {}
+    outcome = kernel_result.get("outcome") if isinstance(kernel_result.get("outcome"), dict) else {}
+    adapter = kernel_result.get("adapter") if isinstance(kernel_result.get("adapter"), dict) else {}
+    return {
+        "eventId": str(adapter.get("eventId") or event.get("eventId") or "").strip(),
+        "taskId": str(task.get("taskId") or "").strip(),
+        "workRunId": str(execution.get("workRunId") or "").strip(),
+        "outcomeId": str(outcome.get("outcomeId") or "").strip(),
+        "outcomeStatus": str(outcome.get("status") or "").strip(),
+        "adapterVersion": str(adapter.get("adapterVersion") or "").strip(),
+        "reused": bool(kernel_result.get("reused", False)),
+    }
+
+
+def _submit_team_workflow_inbox_via_kernel(
+    *,
+    target_agent_id: str,
+    content: str,
+    source_agent_id: str,
+    thread_id: str,
+    kind: str,
+    summary: str,
+    created_by: str,
+    metadata: dict[str, Any],
+    wake_target: bool,
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+    from core.agent_kernel.adapters import submit_agent_message_event
+
+    normalized_metadata = dict(metadata or {})
+    source_id = str(thread_id or normalized_metadata.get("sourceMessageId") or "").strip()
+    created_by_value = str(created_by or source_agent_id or "team_workflow").strip()
+    kernel_metadata = {
+        **normalized_metadata,
+        "source": "team_workflow_orchestration",
+        "sourceSurface": "team_workflow",
+        "sourceMessageId": source_id,
+        "projectionRef": {"kind": kind, "id": source_id},
+        "senderAgentId": source_agent_id,
+        "sourceAgentId": source_agent_id,
+        "inboxKind": kind,
+        "messageSummary": summary,
+        "inboxCreatedBy": created_by_value,
+    }
+    if normalized_metadata:
+        kernel_metadata["agentToolMetadataJson"] = json.dumps(normalized_metadata, ensure_ascii=False, sort_keys=True)
+    sender = (
+        {"type": "agent", "id": source_agent_id, "agentId": source_agent_id}
+        if source_agent_id
+        else {"type": "system", "id": created_by_value}
+    )
+    kernel_result = submit_agent_message_event(
+        source="team_workflow",
+        sender=sender,
+        recipient_agent_ids=[target_agent_id],
+        content=content,
+        correlation_id=thread_id,
+        wake_target=wake_target,
+        metadata=kernel_metadata,
+        source_id=source_id,
+    )
+    kernel_delivery = _team_workflow_kernel_delivery(kernel_result, target_agent_id)
+    if str(kernel_delivery.get("status") or "").strip() != "delivered":
+        raise agent_directory_service.AgentDirectoryError(str(kernel_delivery.get("reason") or "Kernel delivery failed."))
+    message = _team_workflow_inbox_message_from_kernel_delivery(
+        target_agent_id,
+        kernel_delivery,
+        fallback={
+            "sourceAgentId": source_agent_id,
+            "targetAgentId": target_agent_id,
+            "threadId": thread_id,
+            "kind": kind,
+            "summary": summary,
+            "metadata": kernel_metadata,
+        },
+    )
+    delivery = (
+        kernel_delivery.get("wake")
+        if isinstance(kernel_delivery.get("wake"), dict)
+        else {
+            "wakeRequested": bool(wake_target),
+            "wakeStatus": "not_requested" if not wake_target else "skipped",
+            "messageId": str(message.get("messageId") or message.get("eventId") or "").strip(),
+            "targetAgentId": target_agent_id,
+            "targetSessionId": str(message.get("targetSessionId") or "").strip(),
+            "turnId": "",
+            "reason": "",
+        }
+    )
+    return message, delivery, kernel_result
+
+
 def _notify_knowledge_steward_for_ingestion(
     team_id: str,
     *,
@@ -4612,16 +4750,18 @@ def _notify_knowledge_steward_for_ingestion(
             "4. 不要把原始搜集噪音直接写入正式知识库；无法确认时标记 needs_revision。",
         ]
     )
+    thread_id = f"challenge-cup-knowledge-ingestion:{team_id}:{steward_candidate_id}"
+    message_summary = f"挑战杯团队待入库知识包 {steward_candidate_id} 请求最终入库。"
     try:
-        message = agent_directory_service.write_agent_inbox_message(
-            steward_agent_id,
+        message, delivery, kernel_result = _submit_team_workflow_inbox_via_kernel(
+            target_agent_id=steward_agent_id,
             content=content,
             source_agent_id=source_agent_id,
-            thread_id=f"challenge-cup-knowledge-ingestion:{team_id}:{steward_candidate_id}",
+            thread_id=thread_id,
             kind="challenge_cup_knowledge_ingestion_request",
-            summary=f"挑战杯团队待入库知识包 {steward_candidate_id} 请求最终入库。",
-            prompt_eligible=True,
+            summary=message_summary,
             created_by=requester_agent_id or "team_workflow",
+            wake_target=wake_target,
             metadata={
                 **activation["metadata"],
                 "requesterAgentId": requester_agent_id,
@@ -4634,7 +4774,7 @@ def _notify_knowledge_steward_for_ingestion(
                 },
             },
         )
-    except (agent_directory_service.AgentDirectoryError, agent_directory_service.AgentNotFoundError) as exc:
+    except Exception as exc:
         activation["status"] = "message_failed"
         activation["error"] = str(exc)
         return activation
@@ -4645,19 +4785,10 @@ def _notify_knowledge_steward_for_ingestion(
             "messageId": str(message.get("messageId") or message.get("eventId") or ""),
             "threadId": str(message.get("threadId") or ""),
             "message": message,
+            "kernel": _team_workflow_kernel_summary(kernel_result),
         }
     )
     if wake_target:
-        try:
-            from core.web.services import session_service
-
-            delivery = session_service.wake_agent_for_inbox_message(message)
-        except Exception as exc:
-            delivery = {
-                "wakeRequested": True,
-                "wakeStatus": "failed",
-                "reason": type(exc).__name__,
-            }
         activation["delivery"] = delivery
         activation["wakeStatus"] = str((delivery or {}).get("wakeStatus") or "unknown")
         if activation["wakeStatus"] == "started":
@@ -10040,16 +10171,18 @@ def _notify_knowledge_steward_for_experiment_result(
             "4. 无法确认时标记 needs_revision，不要把 raw logs 直接写入正式知识库。",
         ]
     )
+    thread_id = f"challenge-cup-experiment-ingestion:{team_id}:{pack_id}"
+    message_summary = f"挑战杯实验结果包 {pack_id} 请求最终入库。"
     try:
-        message = agent_directory_service.write_agent_inbox_message(
-            steward_agent_id,
+        message, delivery, kernel_result = _submit_team_workflow_inbox_via_kernel(
+            target_agent_id=steward_agent_id,
             content=content,
             source_agent_id=source_agent_id,
-            thread_id=f"challenge-cup-experiment-ingestion:{team_id}:{pack_id}",
+            thread_id=thread_id,
             kind="challenge_cup_experiment_result_ingestion_request",
-            summary=f"挑战杯实验结果包 {pack_id} 请求最终入库。",
-            prompt_eligible=True,
+            summary=message_summary,
             created_by=requester_agent_id or "team_workflow",
+            wake_target=wake_target,
             metadata={
                 **activation["metadata"],
                 "requesterAgentId": requester_agent_id,
@@ -10057,7 +10190,7 @@ def _notify_knowledge_steward_for_experiment_result(
                 "officialBoundary": dict(experiment_result_pack.get("officialBoundary") or {}),
             },
         )
-    except (agent_directory_service.AgentDirectoryError, agent_directory_service.AgentNotFoundError) as exc:
+    except Exception as exc:
         activation["status"] = "message_failed"
         activation["error"] = str(exc)
         return activation
@@ -10068,19 +10201,10 @@ def _notify_knowledge_steward_for_experiment_result(
             "messageId": str(message.get("messageId") or message.get("eventId") or ""),
             "threadId": str(message.get("threadId") or ""),
             "message": message,
+            "kernel": _team_workflow_kernel_summary(kernel_result),
         }
     )
     if wake_target:
-        try:
-            from core.web.services import session_service
-
-            delivery = session_service.wake_agent_for_inbox_message(message)
-        except Exception as exc:
-            delivery = {
-                "wakeRequested": True,
-                "wakeStatus": "failed",
-                "reason": type(exc).__name__,
-            }
         activation["delivery"] = delivery
         activation["wakeStatus"] = str((delivery or {}).get("wakeStatus") or "unknown")
         if activation["wakeStatus"] == "started":
