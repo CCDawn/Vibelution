@@ -30,11 +30,9 @@ from typing import Dict, List, Optional, Tuple
 
 import pytest
 
-pytestmark = pytest.mark.serial
-
 # 项目根目录
 PROJECT_ROOT = Path(__file__).parent.parent
-DEFAULT_MAX_PARALLEL_WORKERS = 4
+DEFAULT_MAX_PARALLEL_WORKERS = 8
 
 
 def _default_parallel_workers() -> int:
@@ -512,6 +510,12 @@ def test_runner_builds_parallel_pytest_command():
     assert cmd[marker_index + 1] == "not slow and not serial"
 
 
+def test_runner_default_parallel_worker_cap_prefers_eight_on_large_machines(monkeypatch):
+    monkeypatch.setattr(os, "cpu_count", lambda: 16)
+
+    assert _default_parallel_workers() == 8
+
+
 def test_runner_builds_hybrid_serial_stage_command():
     runner = TestRunner(verbose=False, fast=True, environment_smoke=True, hybrid=True, workers=2)
     cmd = runner.build_pytest_command(
@@ -613,7 +617,7 @@ if __name__ == "__main__":
     mode_group.add_argument("--parallel", action="store_true", help="只使用 pytest-xdist 执行 not serial 子集")
     mode_group.add_argument("--hybrid", action="store_true", help="并行执行 not serial 子集，再串行执行 serial 子集")
     mode_group.add_argument("--per-file", action="store_true", help="逐文件启动 pytest，用于定位具体失败文件")
-    parser.add_argument("--workers", type=int, default=None, help="进程级并行 worker 数，默认最多 4 个")
+    parser.add_argument("--workers", type=int, default=None, help="进程级并行 worker 数，默认最多 8 个")
     args = parser.parse_args()
 
     runner = TestRunner(
