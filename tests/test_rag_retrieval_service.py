@@ -3,6 +3,11 @@ import pytest
 from core.web.services import agent_directory_service, chat_room_service, team_knowledge_service, team_service
 
 
+@pytest.fixture(autouse=True)
+def _isolate_data_home(tmp_path, monkeypatch):
+    monkeypatch.setenv("VIBELUTION_DATA_HOME", str(tmp_path / "operator-data"))
+
+
 def _source_artifact(
     knowledge_base_id: str,
     *,
