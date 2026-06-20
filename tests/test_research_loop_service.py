@@ -3,9 +3,6 @@ import pytest
 from core.web.services import research_loop_service, team_service
 
 
-pytestmark = pytest.mark.serial
-
-
 def _use_tmp_project_root(tmp_path, monkeypatch):
     monkeypatch.setattr(team_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(research_loop_service, "PROJECT_ROOT", tmp_path)
