@@ -4743,6 +4743,10 @@ def submit_session_message(
         "active_task": active_task,
         "agent_id": agent_id,
         "leases": requested_leases,
+        "message_metadata": dict(persisted_message_metadata),
+        "supervised_context": dict(conversation.get("supervised_context") or {})
+        if isinstance(conversation.get("supervised_context"), dict)
+        else {},
         "skill_invocation": skill_invocation,
         "active_skill_contract": active_skill_contract,
         "llm_slot": SESSION_LLM_SLOT_VISION if attachments else SESSION_LLM_SLOT_DIALOGUE,
@@ -10523,6 +10527,24 @@ def _record_session_scheduler_event(
     )
 
 
+def _supervised_role_for_runtime_context(context: dict[str, Any], agent_instance: dict[str, Any] | None) -> str:
+    if str(context.get("user_message_source") or "").strip() != "supervised_evolution":
+        return ""
+    candidates: list[Any] = [
+        context.get("message_metadata"),
+        context.get("supervised_context"),
+        (agent_instance or {}).get("metadata") if isinstance(agent_instance, dict) else {},
+    ]
+    for payload in candidates:
+        if not isinstance(payload, dict):
+            continue
+        for key in ("supervisedRole", "role", "supervised_role"):
+            role = str(payload.get(key) or "").strip()
+            if role:
+                return role
+    return ""
+
+
 def _run_session_turn(context: dict[str, Any]) -> None:
     prepare_started_at = _perf_counter()
     session_id = str(context.get("session_id") or "").strip()
@@ -10555,6 +10577,7 @@ def _run_session_turn(context: dict[str, Any]) -> None:
     stage_started_at = _perf_counter()
     agent_instance = get_agent(agent_id, include_archived=False) if agent_id else None
     historical_agent = None if agent_instance else (get_agent(agent_id, include_archived=True) if agent_id else None)
+    supervised_runtime_role = _supervised_role_for_runtime_context(context, agent_instance)
     prepare_timings["agentLookupMs"] = _elapsed_ms(stage_started_at)
     stage_started_at = _perf_counter()
     turn_attachments = _normalize_message_attachments(context.get("attachments") or [])
@@ -10705,6 +10728,8 @@ def _run_session_turn(context: dict[str, Any]) -> None:
             "agentMemoryRoot": memory_root,
             "toolWorkspacePath": str(tool_workspace),
             "toolWorkspaceScope": str(getattr(workspace_decision, "scope", "") or ""),
+            "supervisedRuntimeRole": supervised_runtime_role,
+            "supervisedRuntimeToolSource": "supervised_conversation_harness" if supervised_runtime_role else "",
             **_session_prompt_cache_log_fields(scope=prompt_cache_scope, partition=prompt_cache_partition),
             "executorWaitMs": _elapsed_ms_between(context.get("_executor_submitted_at_monotonic"), prepare_started_at),
             "schedulerToWorkerStartedMs": _elapsed_ms_between(
@@ -10802,7 +10827,12 @@ def _run_session_turn(context: dict[str, Any]) -> None:
             )
             return
         with (
-            active_agent_runtime(agent_id, session_id=session_id, turn_id=turn_id),
+            active_agent_runtime(
+                agent_id,
+                session_id=session_id,
+                turn_id=turn_id,
+                supervised_role=supervised_runtime_role,
+            ),
             mental_model_enabled_override(mental_model_enabled),
             _session_tool_workspace_override(tool_workspace, memory_workspace=agent_workspace_path if agent_instance else tool_workspace),
         ):

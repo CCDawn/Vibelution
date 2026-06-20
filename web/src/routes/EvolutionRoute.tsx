@@ -1163,6 +1163,12 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     activeWorktreeRun
     && ["queued", "running", "paused", "stopping"].includes(String(activeWorktreeRun.status || "").toLowerCase()),
   );
+  const supervisedStartSubmitting = startRunMutation.isPending || isLocalSupervisedStartPlaceholder(liveActiveRun);
+  const supervisedStartButtonLabel = supervisedStartSubmitting
+    ? (lang === "zh" ? "提交中" : "Submitting")
+    : runLocked
+      ? (lang === "zh" ? "监督运行中" : "Supervised running")
+      : t("startSupervisedRun");
   const monitoredRunStatus = String(monitoredRun?.status || "").toLowerCase();
   const monitoredCaseTranscript = monitoredRun?.currentCaseIo?.transcript ?? [];
   const monitoredCaseConversationMessages = monitoredRun?.currentCaseIo?.conversationMessages ?? [];
@@ -2930,8 +2936,8 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                         onClick={() => startRunMutation.mutate()}
                         title={t("launchSupervisedRunHint")}
                       >
-                        {startRunMutation.isPending ? <LoaderCircle size={15} /> : <Play size={15} />}
-                        {t("startSupervisedRun")}
+                        {supervisedStartSubmitting || runLocked ? <LoaderCircle size={15} /> : <Play size={15} />}
+                        {supervisedStartButtonLabel}
                       </button>
                     </div>
                     <div className={styles.closedLoopLaunchBlock} title={t("closedLoopLaunchPanelHint")}>

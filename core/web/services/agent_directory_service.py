@@ -31,6 +31,7 @@ from core.llm.agent_runtime import (
 from core.logging import debug as _debug_logger
 
 from .runtime_scene_service import record_runtime_scene_event
+from .supervised_runtime_contract import supervised_role_runtime_tools
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -1486,16 +1487,23 @@ def _agent_runtime_from_env() -> dict[str, Any]:
     if not agent_id:
         return {}
     session_id = str(os.environ.get("VIBELUTION_AGENT_DIRECT_SESSION_ID") or "").strip()
+    supervised_role = str(os.environ.get("VIBELUTION_SUPERVISED_ROLE") or "").strip()
     agent = _agent_from_runtime_env(agent_id)
+    tool_policy = resolve_tool_policy_for_agent(agent_id, session_id=session_id)
+    tool_policy = _with_runtime_tool_grants(
+        tool_policy,
+        supervised_role_runtime_tools(supervised_role),
+        source="supervised_conversation_harness" if supervised_role else "",
+    )
     return {
         "agentId": agent_id,
         "sessionId": session_id,
         "turnId": "",
         "roomId": "",
         "roundId": "",
-        "supervisedRole": str(os.environ.get("VIBELUTION_SUPERVISED_ROLE") or "").strip(),
+        "supervisedRole": supervised_role,
         "agent": agent,
-        "toolPolicy": resolve_tool_policy_for_agent(agent_id, session_id=session_id),
+        "toolPolicy": tool_policy,
         "memoryPolicy": resolve_memory_policy_for_agent(agent_id),
         "delegationPolicy": resolve_delegation_policy_for_agent(agent_id),
         "supervisionPolicy": resolve_supervision_policy_for_agent(agent_id),
@@ -1548,16 +1556,33 @@ def active_agent_runtime(
     turn_id: str = "",
     room_id: str = "",
     round_id: str = "",
+    supervised_role: str = "",
+    runtime_tool_grants: Iterable[Any] | None = None,
+    runtime_tool_source: str = "",
 ):
     agent = get_agent(agent_id) if agent_id else None
+    normalized_supervised_role = str(supervised_role or "").strip()
+    grants = (
+        _tool_name_list(runtime_tool_grants or [])
+        if runtime_tool_grants is not None
+        else supervised_role_runtime_tools(normalized_supervised_role)
+    )
+    tool_policy = resolve_tool_policy_for_agent(agent_id, session_id=session_id, turn_id=turn_id)
+    tool_policy = _with_runtime_tool_grants(
+        tool_policy,
+        grants,
+        source=str(runtime_tool_source or "").strip()
+        or ("supervised_conversation_harness" if normalized_supervised_role else ""),
+    )
     context = {
         "agentId": str(agent_id or "").strip(),
         "sessionId": str(session_id or "").strip(),
         "turnId": str(turn_id or "").strip(),
         "roomId": str(room_id or "").strip(),
         "roundId": str(round_id or "").strip(),
+        "supervisedRole": normalized_supervised_role,
         "agent": agent or {},
-        "toolPolicy": resolve_tool_policy_for_agent(agent_id, session_id=session_id, turn_id=turn_id),
+        "toolPolicy": tool_policy,
         "memoryPolicy": resolve_memory_policy_for_agent(agent_id),
         "delegationPolicy": resolve_delegation_policy_for_agent(agent_id),
         "supervisionPolicy": resolve_supervision_policy_for_agent(agent_id),
@@ -1579,6 +1604,33 @@ def _tool_name_list(tools: Iterable[Any]) -> list[str]:
         seen.add(name)
         names.append(name)
     return names
+
+
+def _with_runtime_tool_grants(
+    policy: dict[str, Any],
+    grants: Iterable[Any],
+    *,
+    source: str = "",
+) -> dict[str, Any]:
+    runtime_grants = _tool_name_list(grants or [])
+    if not runtime_grants:
+        return policy
+    allowed = _tool_name_list(policy.get("allowedTools") or [])
+    blocked = set(_tool_name_list(policy.get("blockedTools") or []))
+    added: list[str] = []
+    for tool in runtime_grants:
+        if not tool or tool in blocked or tool in allowed:
+            continue
+        allowed.append(tool)
+        added.append(tool)
+    if not added:
+        return policy
+    return {
+        **policy,
+        "allowedTools": allowed,
+        "temporaryAllowedTools": _tool_name_list(list(policy.get("temporaryAllowedTools") or []) + added),
+        "runtimeToolSource": str(source or "").strip(),
+    }
 
 
 def compute_effective_tool_visibility(

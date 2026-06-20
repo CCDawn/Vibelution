@@ -428,9 +428,29 @@ def test_supervised_agent_session_is_hidden_and_preserves_prompt_with_mental_ove
                     "displayName": "Supervised Agent",
                     "status": "active",
                     "directSessionId": "",
+                    "primaryMode": "supervised_evolution",
+                    "roleKey": "baseline",
+                    "toolPolicyId": "tool-agent-supervised",
+                    "metadata": {"supervisedRole": "baseline"},
                     "llmBindings": {"dialogue": {"modelId": "model-a"}},
                 }
-            ]
+            ],
+            "toolPolicies": {
+                "tool-agent-supervised": {
+                    "policyId": "tool-agent-supervised",
+                    "allowedTools": [],
+                    "preferredTools": [],
+                    "blockedTools": [],
+                    "readScopes": [],
+                    "writeScopes": [],
+                    "allowedCommandKinds": [],
+                    "blockedCommandPatterns": [],
+                    "networkAccess": "none",
+                    "mutationAccess": "none",
+                    "maxCallsPerTurn": 0,
+                    "perToolRules": {},
+                }
+            },
         }
     )
     scheduled_contexts: list[dict] = []
@@ -439,6 +459,7 @@ def test_supervised_agent_session_is_hidden_and_preserves_prompt_with_mental_ove
         def __init__(self):
             self.override = None
             self.seeded_history = []
+            self.visible_tools = []
 
         def set_mental_model_enabled_override(self, enabled):
             self.override = enabled
@@ -447,10 +468,18 @@ def test_supervised_agent_session_is_hidden_and_preserves_prompt_with_mental_ove
             self.seeded_history = list(messages)
 
         def run_single_turn(self, initial_prompt=None):
+            self.visible_tools = agent_directory_service.effective_visible_tool_names_for_current_agent(
+                [
+                    "open_evolution_transaction_tool",
+                    "close_evolution_transaction_tool",
+                    "python_lint_tool",
+                    "trigger_self_restart_tool",
+                ]
+            )
             return {
                 "status": "completed",
-                "summary": f"seen: {initial_prompt}",
-                "raw_output": f"seen: {initial_prompt}",
+                "summary": f"seen: {initial_prompt}\nvisible: {', '.join(self.visible_tools)}",
+                "raw_output": f"seen: {initial_prompt}\nvisible: {', '.join(self.visible_tools)}",
                 "tool_call_count": 0,
                 "tool_trace": [],
             }
@@ -489,7 +518,11 @@ def test_supervised_agent_session_is_hidden_and_preserves_prompt_with_mental_ove
         message_source="supervised_evolution",
     )
 
-    assert response["messages"][-1]["content"] == f"seen: {prompt}"
+    assert response["messages"][-1]["content"].startswith(f"seen: {prompt}")
+    assert "open_evolution_transaction_tool" in response["messages"][-1]["content"]
+    assert "close_evolution_transaction_tool" in response["messages"][-1]["content"]
+    assert "python_lint_tool" in response["messages"][-1]["content"]
+    assert "trigger_self_restart_tool" not in response["messages"][-1]["content"]
     assert scheduled_contexts[-1]["user_message"] == prompt
     assert scheduled_contexts[-1]["user_message_source"] == "supervised_evolution"
     assert scheduled_contexts[-1]["mental_model_enabled"] is False
