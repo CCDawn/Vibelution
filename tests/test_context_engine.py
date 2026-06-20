@@ -6,8 +6,6 @@ from core.orchestration import context_engine
 from core.runtime_manager import work_run_store
 from core.web.services import agent_directory_service, prompt_template_service, research_organization_service
 
-pytestmark = pytest.mark.serial
-
 
 def _use_tmp_project_root(tmp_path, monkeypatch):
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
