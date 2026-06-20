@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from core.evaluation import (
+    list_available_workbench_bundles,
     list_dataset_status,
     load_dashboard_records,
     load_gym_promotion_lifecycle,
@@ -844,15 +845,47 @@ def get_workbench_state_payload(*, project_root: Path | None = None) -> dict[str
     root = (project_root or PROJECT_ROOT).resolve()
     state = load_workbench_state(root)
     datasets = list_dataset_status(root, include_environment_preflight=False)
+    bundles = list_available_workbench_bundles(root)
     source = str(state.get("source") or "").strip().lower()
     if source not in {"bundle", "dataset"}:
         source = "unknown"
+    bundle_name = str(state.get("bundle_name") or "").strip()
+    dataset_name = str(state.get("dataset_name") or "").strip()
+    bundle_names = {str(item.get("name") or "").strip() for item in bundles}
+    dataset_names = {str(item.get("name") or "").strip() for item in datasets}
+    fallback_bundle = str(bundles[0].get("name") or "").strip() if bundles else ""
+    fallback_dataset = next(
+        (str(item.get("name") or "").strip() for item in datasets if item.get("effective")),
+        "",
+    )
+    if source == "bundle" and (not bundle_name or bundle_name not in bundle_names):
+        if fallback_bundle:
+            bundle_name = fallback_bundle
+        elif fallback_dataset:
+            source = "dataset"
+            dataset_name = fallback_dataset
+            bundle_name = ""
+        else:
+            source = "unknown"
+            bundle_name = ""
+    if source == "dataset" and (not dataset_name or dataset_name not in dataset_names):
+        if fallback_dataset:
+            dataset_name = fallback_dataset
+        elif fallback_bundle:
+            source = "bundle"
+            bundle_name = fallback_bundle
+            dataset_name = ""
+        else:
+            source = "unknown"
+            dataset_name = ""
+    if source == "bundle" and dataset_name not in dataset_names:
+        dataset_name = ""
     runnable_datasets = sum(1 for item in datasets if item.get("effective"))
     blocked_datasets = len(datasets) - runnable_datasets
     return {
         "source": source,
-        "bundleName": str(state.get("bundle_name") or "").strip(),
-        "datasetName": str(state.get("dataset_name") or "").strip(),
+        "bundleName": bundle_name,
+        "datasetName": dataset_name,
         "datasetLimit": state.get("dataset_limit"),
         "keepWorktree": state.get("keep_worktree"),
         "availableDatasets": len(datasets),
