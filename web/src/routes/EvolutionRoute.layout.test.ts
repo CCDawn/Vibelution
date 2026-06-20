@@ -289,6 +289,9 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).toContain("visibleLiveRunSnapshot");
     expect(routeSource).toContain("const streamLiveRun = isLocalSupervisedStartPlaceholder(liveActiveRun) ? null : liveActiveRun");
     expect(routeSource).toContain("setLiveActiveRun((current) => (isLocalSupervisedStartPlaceholder(current) ? null : current))");
+    expect(routeSource).toContain("const supervisedStartSubmitting = startRunMutation.isPending || isLocalSupervisedStartPlaceholder(liveActiveRun)");
+    expect(routeSource).toContain("监督运行中");
+    expect(routeSource).toContain("supervisedStartButtonLabel");
   });
 
   it("explains closed-loop launch and dataset case limits without changing review actions", () => {

@@ -147,6 +147,43 @@ def test_ensure_supervised_agent_instances_creates_fixed_role_agents_without_ste
     assert state["active_conversation_id"] == "session-user"
 
 
+def test_supervised_runtime_tools_are_granted_only_during_role_runtime(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setattr(supervised_agent_service, "_current_config", lambda: _model_config())
+    agents = supervised_agent_service.ensure_supervised_agent_instances()
+    baseline = next(agent for agent in agents if agent["metadata"]["supervisedRole"] == "baseline")
+    judge = next(agent for agent in agents if agent["metadata"]["supervisedRole"] == "judge")
+
+    baseline_policy = agent_directory_service.resolve_tool_policy_for_agent(baseline["agentId"])
+    assert baseline_policy["allowedTools"] == []
+
+    probe_tools = [
+        "open_evolution_transaction_tool",
+        "close_evolution_transaction_tool",
+        "python_lint_tool",
+        "trigger_self_restart_tool",
+    ]
+    with agent_directory_service.active_agent_runtime(
+        baseline["agentId"],
+        session_id="session-supervised-baseline",
+        supervised_role="baseline",
+    ):
+        visible = agent_directory_service.effective_visible_tool_names_for_current_agent(probe_tools)
+
+    assert "open_evolution_transaction_tool" in visible
+    assert "close_evolution_transaction_tool" in visible
+    assert "python_lint_tool" in visible
+    assert "trigger_self_restart_tool" not in visible
+    assert agent_directory_service.resolve_tool_policy_for_agent(baseline["agentId"])["allowedTools"] == []
+
+    with agent_directory_service.active_agent_runtime(
+        judge["agentId"],
+        session_id="session-supervised-judge",
+        supervised_role="judge",
+    ):
+        assert agent_directory_service.effective_visible_tool_names_for_current_agent(probe_tools) == []
+
+
 def test_ensure_supervised_agent_instances_preserves_agent_center_llm_binding(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     monkeypatch.setattr(supervised_agent_service, "_current_config", lambda: _model_config())
@@ -481,7 +518,7 @@ def test_supervised_agent_bindings_block_missing_dialogue_model_api_key(tmp_path
         supervised_agent_service.supervised_agent_bindings()
 
 
-def test_child_process_agent_runtime_falls_back_to_supervised_env(tmp_path, monkeypatch):
+def test_child_process_agent_runtime_injects_supervised_env_tool_grants(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     baseline = next(
         agent
@@ -505,8 +542,10 @@ def test_child_process_agent_runtime_falls_back_to_supervised_env(tmp_path, monk
     runtime = agent_directory_service.current_agent_runtime()
     visible_tools = agent_directory_service.filter_llm_tools_for_current_agent(
         [
+            type("Tool", (), {"name": "open_evolution_transaction_tool"})(),
             type("Tool", (), {"name": "read_file_tool"})(),
             type("Tool", (), {"name": "cli_tool"})(),
+            type("Tool", (), {"name": "trigger_self_restart_tool"})(),
         ]
     )
 
@@ -515,7 +554,11 @@ def test_child_process_agent_runtime_falls_back_to_supervised_env(tmp_path, monk
     assert runtime["supervisedRole"] == "baseline"
     assert runtime["supervisionPolicy"]["reviewMode"] == "required"
     assert runtime["supervisionPolicy"]["evidenceLevel"] == "strict"
-    assert [tool.name for tool in visible_tools] == []
+    assert [tool.name for tool in visible_tools] == [
+        "open_evolution_transaction_tool",
+        "read_file_tool",
+        "cli_tool",
+    ]
 
 
 def test_child_process_agent_runtime_uses_env_llm_snapshot_when_registry_missing(tmp_path, monkeypatch):
