@@ -561,6 +561,16 @@ def test_agent_instance_generates_public_person_name_and_keeps_functional_name(t
     assert (tmp_path / "workspace" / "shared").is_dir()
 
 
+def test_agent_private_workspace_path_accepts_standard_relative_path_without_resolve(monkeypatch):
+    def fail_resolve(*args, **kwargs):
+        raise AssertionError("standard Agent workspace paths should not hit filesystem resolve")
+
+    monkeypatch.setattr(agent_directory_service, "_resolve_project_path", fail_resolve)
+
+    assert agent_directory_service._is_agent_private_workspace_path("workspace/agents/agent-alpha", "agent-alpha")
+    assert agent_directory_service._is_agent_private_workspace_path("workspace\\agents\\agent-alpha", "agent-alpha")
+
+
 def test_repair_agent_directory_moves_legacy_workspace_into_private_territory(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     monkeypatch.setattr(config_service, "get_config_workspace", _fake_config_workspace)
@@ -759,14 +769,38 @@ def test_agent_directory_config_list_skips_chat_and_inbox_activity_hydration(tmp
         hydration_calls += 1
         raise AssertionError("config agent list should not hydrate group context or inbox activity")
 
+    window_batch_calls = 0
+
+    def fake_model_context_windows(agents):
+        nonlocal window_batch_calls
+        window_batch_calls += 1
+        return {
+            agent_directory_service.agent_dialogue_model_id(agent): 123456
+            for agent in agents
+            if agent_directory_service.agent_dialogue_model_id(agent)
+        }
+
+    with agent_directory_service._AGENT_API_HYDRATION_CACHE_LOCK:
+        agent_directory_service._AGENT_API_HYDRATION_CACHE_SIGNATURE = None
+        agent_directory_service._AGENT_API_HYDRATION_CACHE_FAST_SIGNATURE = None
+        agent_directory_service._AGENT_API_HYDRATION_CACHE = None
+
     monkeypatch.setattr(agent_directory_service, "_build_agent_api_hydration_context", fail_full_hydration)
+    monkeypatch.setattr(agent_directory_service, "_model_context_window_limits_for_agents", fake_model_context_windows)
+    monkeypatch.setattr(
+        agent_directory_service,
+        "_agent_api_config_hydration_signature",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("cold config hydration should not scan exact signatures")),
+    )
 
     agents = agent_directory_service.list_agents(detail="config")
 
     assert hydration_calls == 0
+    assert window_batch_calls == 1
     agent = next(item for item in agents if item["agentId"] == created["agentId"])
     assert agent["toolPolicy"]["policyId"] == created["toolPolicyId"]
     assert agent["memoryPolicy"]["policyId"] == created["memoryPolicyId"]
+    assert agent["contextCompressionEffectivePolicy"]["contextWindowLimit"] == 123456
     assert agent["toolGovernanceRequests"][0]["requestId"] == request["requestId"]
     assert agent["groupContextEvents"] == []
     assert agent["agentInboxMessages"] == []
@@ -787,6 +821,7 @@ def test_agent_directory_config_list_skips_chat_and_inbox_activity_hydration(tmp
     cached_agents = agent_directory_service.list_agents(detail="config")
     cached_agent = next(item for item in cached_agents if item["agentId"] == created["agentId"])
     assert cached_agent["toolGovernanceRequests"][0]["requestId"] == request["requestId"]
+    assert window_batch_calls == 1
 
 
 def test_agents_api_summary_detail_returns_light_payload(tmp_path, monkeypatch):
