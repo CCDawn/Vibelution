@@ -39,7 +39,7 @@
         <aside class="dashboard-panel">
           <h2>审核摘要</h2>
           <div class="kpi-grid">
-            <div class="kpi"><b>当前阶段</b><strong>M6.53</strong><span>KV 缓存模型与执行 Agent 模型已分层展示，避免把缓存兜底模型误认为搜集 Agent。</span></div>
+            <div class="kpi"><b>当前阶段</b><strong>M6.61</strong><span>搜集运行态、增量返回和阶段终态已拆分，避免 stale activeWorkRun 让 UI 误以为 Agent 仍在启动或运行。</span></div>
             <div class="kpi"><b>流程节点</b><strong>13</strong><span>1-9 为知识入库主线，10-13 保留占位与维护节点。</span></div>
             <div class="kpi"><b>候选资料</b><strong>10</strong><span>第一轮 source_manifest 已进入 candidate-only 工作区。</span></div>
             <div class="kpi"><b>正式写入</b><strong>0</strong><span>未写正式 Team Knowledge、RAG 或 official graph。</span></div>
@@ -2349,6 +2349,12 @@
               <strong>重复资料搜索真实收口</strong>
               <span>资料搜索重复-only 批次返回 duplicates_skipped、skippedDuplicateCount、remainingQueryCount=0 和 hasMore=false；assignment/work-run 按 completed 收口。</span>
               <span>重复资料被跳过是成功收口，不再写 no_importable_search_result，不再误导 Agent 或 UI 继续搜索；去重身份统一读取 DOI、URL、metadata.doi、containerTitle/issued 和标题指纹，URL query 排序后比较。</span>
+            </div>
+<div class="blueprint-row">
+              <b>M6.61</b>
+              <strong>搜集运行态与增量返回收口</strong>
+              <span>资料搜索后台运行态改为以 runtime summary 中的真实 active source_collection_run 为准；Teams 控制台把启动中、后台搜索中、已返回一批但可继续、待审查资料拆成独立显示态。</span>
+              <span>搜索执行器按 query 级别写入 CollectionOutput/DataRecord/source_manifest，前端轮询可逐批看到结果；后台结束后同步 ResearchStageRound 为 needs_continue/needs_screening/completed，不再让 stage-rounds/status 长时间停留 running，也不再把 stale accepted activeWorkRun 当成 Agent 仍在运行。</span>
             </div>
 <div class="blueprint-row">
               <b>M7</b>

@@ -21,10 +21,10 @@ const nodes = [
       "登记文件路径、资料类型、页码范围和来源可信度。",
       "对本地 PDF source_manifest 运行 source-extraction，计算 sha256 并生成 pageAnchors 与 excerpt。",
       "区分允许分析、暂不分析、需要用户确认的资料。",
-      "执行 source collection 搜索时写入 source_collection_run work-run 快照，让顶部全局运行状态栏显示知识搜集正在运行。",
+      "执行 source collection 搜索时写入真实 active source_collection_run work-run 快照；每条 query 完成后立即写入 CollectionOutput，并在后台结束时同步 ResearchStageRound 终态。",
       "保留原始文件，不在资料入口阶段改写内容。",
     ],
-    outputs: ["资料清单", "sourceFiles 引用", "sourceExtraction.pageAnchors", "source_collection_run 运行快照", "Paper 原始来源节点"],
+    outputs: ["资料清单", "sourceFiles 引用", "sourceExtraction.pageAnchors", "source_collection_run 运行快照", "query 级 CollectionOutput", "Paper 原始来源节点"],
     memory: "不进入正式记忆库；只作为后续 paper_note 的 sourceFiles。",
     graph: "可作为候选图谱的 Paper source 节点，不进入正式知识图谱。",
     risks: ["资料来源不明", "PDF 抽取失败", "联网搜索结果混入第一版"],
@@ -578,6 +578,7 @@ const implementationBlueprint = {
     ["M6.58", "资料入库入口贯通候选资料", "资料入库步骤不再只看已通过资料数量；只要本轮已有候选资料，就允许点击 Agent 提炼并通知知识库 Agent。", "前端把候选资料数作为待入库包输入上限；后端 knowledge-collection/ingest 会先调用资料审查，再生成候选关系和 steward_pack_draft，并通过 Agent Inbox 向 Knowledge Steward Agent 发送入库请求，避免用户被卡在必须先手动跑完每个中间门禁，同时不绕过最终入库 Agent。"],
     ["M6.59", "资料提炼结果滚动与审查交接", "搜索资料结果区和资料提炼候选区都接入独立纵向滚动容器；资料提炼统计和候选状态统一显示为已审查、需补资料或待 Agent 审查。", "Agent 重新提炼只负责把本轮原始资料同步为候选资料，不自动完成资料质量审查；用户看到仍有待 Agent 审查时，应进入资料审查步骤，由资料质量评估 Agent 批量处理。"],
     ["M6.60", "重复资料搜索真实收口", "资料搜索重复-only 批次返回 duplicates_skipped、skippedDuplicateCount、remainingQueryCount=0 和 hasMore=false；assignment/work-run 按 completed 收口。", "重复资料被跳过是成功收口，不再写 no_importable_search_result，不再误导 Agent 或 UI 继续搜索；去重身份统一读取 DOI、URL、metadata.doi、containerTitle/issued 和标题指纹，URL query 排序后比较。"],
+    ["M6.61", "搜集运行态与增量返回收口", "资料搜索后台运行态改为以 runtime summary 中的真实 active source_collection_run 为准；Teams 控制台把启动中、后台搜索中、已返回一批但可继续、待审查资料拆成独立显示态。", "搜索执行器按 query 级别写入 CollectionOutput/DataRecord/source_manifest，前端轮询可逐批看到结果；后台结束后同步 ResearchStageRound 为 needs_continue/needs_screening/completed，不再让 stage-rounds/status 长时间停留 running，也不再把 stale accepted activeWorkRun 当成 Agent 仍在运行。"],
     ["M7", "实验计划账本首切", "新增 experiments/status 与 experiments/plan：聚合实验阶段轮次、algorithm_hypothesis 候选、计划草稿和 baseline/metric/dataset/smoke 缺口，并把草稿写入 experiment_plans/index.json。", "Teams 实验阶段页展示实验计划账本，可生成计划草稿；readyForSmoke 与 readyForFullRun 保持 false，直到 active baseline artifact 和 smoke 结果由后续切片登记。"],
     ["M7.1", "Active baseline artifact 登记", "新增 experiments/plans/{planId}/baseline-artifact：登记 baseline 工件路径、复现命令、评估命令和指标快照，并更新 baselineSelection.activeBaselineReady。", "登记 active baseline artifact 后 readyForSmoke=true，active_baseline_not_registered 缺口消失；full-run 仍由 smoke_result 阻塞，不触发训练 runner。"],
     ["M7.2", "Smoke 结果登记", "新增 experiments/plans/{planId}/smoke-result：登记 smoke 指标、结果路径、日志引用和 gateDecision，并更新 activeSmokeResult。", "Teams 实验账本已接 smoke 结果登记和 active smoke 回显；status=passed 才让 readyForFullRun=true；failed/needs_review 继续阻塞 full-run；仍不创建 ExperimentResult、不触发训练 runner。"],
@@ -2864,7 +2865,7 @@ function indexHtml() {
         <aside class="dashboard-panel">
           <h2>审核摘要</h2>
           <div class="kpi-grid">
-            <div class="kpi"><b>当前阶段</b><strong>M6.53</strong><span>KV 缓存模型与执行 Agent 模型已分层展示，避免把缓存兜底模型误认为搜集 Agent。</span></div>
+            <div class="kpi"><b>当前阶段</b><strong>M6.61</strong><span>搜集运行态、增量返回和阶段终态已拆分，避免 stale activeWorkRun 让 UI 误以为 Agent 仍在启动或运行。</span></div>
             <div class="kpi"><b>流程节点</b><strong>${nodes.length}</strong><span>1-9 为知识入库主线，10-13 保留占位与维护节点。</span></div>
             <div class="kpi"><b>候选资料</b><strong>${currentResearchRun.sources.length}</strong><span>第一轮 source_manifest 已进入 candidate-only 工作区。</span></div>
             <div class="kpi"><b>正式写入</b><strong>0</strong><span>未写正式 Team Knowledge、RAG 或 official graph。</span></div>

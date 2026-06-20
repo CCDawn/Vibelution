@@ -27,6 +27,7 @@ import {
   DataProcessingRecord,
   DataProcessingRunListPayload,
   DataProcessingStatus,
+  RuntimeSummary,
   Team,
   TeamCanvasNode,
   TeamListPayload,
@@ -45,6 +46,7 @@ import {
   TeamWorkflowDataRecordSourceCandidateImportPayload,
   TeamWorkflowCandidateListPayload,
   TeamWorkflowOrchestration,
+  WorkRunSnapshot,
 } from "../api/types";
 import { useShellI18n } from "../i18n/useShellI18n";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
@@ -2650,6 +2652,221 @@ function sourceCollectionRunRefetchInterval(pageVisible: boolean, status: string
   );
 }
 
+type SourceCollectionDisplayPhase =
+  | "done"
+  | "failed"
+  | "idle"
+  | "ingesting"
+  | "needs_continue"
+  | "needs_downstream"
+  | "needs_screening"
+  | "ready_for_experiment"
+  | "running"
+  | "screening"
+  | "starting"
+  | "waiting_for_writeback"
+  | "writing";
+
+type SourceCollectionDisplayInput = {
+  lang: "zh" | "en";
+  hasRun: boolean;
+  startPending: boolean;
+  searchPending: boolean;
+  backgroundActive: boolean;
+  recordOutputPending: boolean;
+  extractionPending: boolean;
+  sourceQualityPending: boolean;
+  graphPending: boolean;
+  knowledgeIngestionPending: boolean;
+  failed: boolean;
+  searchOpenAssignmentCount: number;
+  downstreamOpenAssignmentCount: number;
+  pendingScreeningCount: number;
+  rawRecordCount: number;
+  candidateCount: number;
+  activeWorkSummary?: string;
+};
+
+type SourceCollectionDisplayState = {
+  phase: SourceCollectionDisplayPhase;
+  active: boolean;
+  consoleState: SourceCollectionStepState;
+  searchStepState: SourceCollectionStepState;
+  statusText: string;
+  decisionText: string;
+};
+
+export function deriveSourceCollectionDisplayState(input: SourceCollectionDisplayInput): SourceCollectionDisplayState {
+  const lang = input.lang;
+  const materialCount = Math.max(0, input.rawRecordCount || 0, input.candidateCount || 0);
+  const zh = lang === "zh";
+  const runningSummary = input.activeWorkSummary?.trim();
+  const state = (
+    phase: SourceCollectionDisplayPhase,
+    consoleState: SourceCollectionStepState,
+    searchStepState: SourceCollectionStepState,
+    statusText: string,
+    decisionText: string,
+    active = false,
+  ): SourceCollectionDisplayState => ({ phase, active, consoleState, searchStepState, statusText, decisionText });
+
+  if (input.failed) {
+    return state(
+      "failed",
+      "failed",
+      "failed",
+      zh ? "处理失败" : "Failed",
+      zh ? "处理失败，先查看下方失败步骤，再重试当前按钮。" : "A step failed. Review the failed step below, then retry its action.",
+    );
+  }
+  if (input.searchPending || input.backgroundActive) {
+    return state(
+      "running",
+      "active",
+      "active",
+      zh ? "正在团队搜索" : "Team search running",
+      runningSummary || (zh ? "后台资料搜索正在运行，记录和候选会按批刷新。" : "Background source collection is running; records and candidates refresh in batches."),
+      true,
+    );
+  }
+  if (input.startPending) {
+    return state(
+      "starting",
+      "active",
+      "active",
+      zh ? "正在启动搜集" : "Starting collection",
+      zh ? "正在创建本轮查询计划、团队 Agent 分工和后台搜索任务。" : "Creating the query plan, team-agent assignments, and background search work.",
+      true,
+    );
+  }
+  if (input.recordOutputPending || input.extractionPending) {
+    return state(
+      "writing",
+      "active",
+      materialCount > 0 ? "done" : "active",
+      input.recordOutputPending ? (zh ? "正在写入候选" : "Writing candidates") : (zh ? "正在提炼资料" : "Extracting sources"),
+      zh ? "正在把资料记录提炼为候选资料。" : "Data records are being converted into candidate sources.",
+      true,
+    );
+  }
+  if (input.sourceQualityPending) {
+    return state(
+      "screening",
+      "active",
+      "done",
+      zh ? "正在筛选资料" : "Screening sources",
+      zh ? "资料审查 Agent 正在评估候选资料。" : "The source review Agent is assessing candidate sources.",
+      true,
+    );
+  }
+  if (input.graphPending || input.knowledgeIngestionPending) {
+    return state(
+      "ingesting",
+      "active",
+      "done",
+      input.graphPending ? (zh ? "正在生成入库关系图" : "Building ingestion map") : (zh ? "正在资料入库" : "Ingesting sources"),
+      zh ? "资料已通过搜集阶段，正在准备入库链路。" : "Source collection is ready; the ingestion path is being prepared.",
+      true,
+    );
+  }
+  if (!input.hasRun) {
+    return state(
+      "idle",
+      "idle",
+      "idle",
+      zh ? "未开始" : "Not started",
+      zh ? "点击开始搜集，生成本轮搜索任务和存储目录。" : "Start collection to create the search work and storage folder.",
+    );
+  }
+  if (input.searchOpenAssignmentCount > 0) {
+    return state(
+      "needs_continue",
+      "pending",
+      "pending",
+      materialCount > 0 ? (zh ? "已返回一批" : "Batch returned") : (zh ? "需补充资料" : "More sources needed"),
+      materialCount > 0
+        ? (zh
+          ? `已返回 ${materialCount} 条资料，还有 ${input.searchOpenAssignmentCount} 个搜索任务可继续。`
+          : `${materialCount} sources have returned; ${input.searchOpenAssignmentCount} search assignments can continue.`)
+        : (zh
+          ? `还有 ${input.searchOpenAssignmentCount} 个搜索任务未完成，点击搜索下一批推进。`
+          : `${input.searchOpenAssignmentCount} search assignments remain. Run the next search to proceed.`),
+    );
+  }
+  if (input.downstreamOpenAssignmentCount > 0) {
+    return state(
+      "needs_downstream",
+      "pending",
+      materialCount > 0 ? "done" : "pending",
+      zh ? "待提炼/审查" : "Extraction or review pending",
+      zh
+        ? `搜索已停止，还有 ${input.downstreamOpenAssignmentCount} 个后续任务等待提炼或筛选。`
+        : `Search is idle; ${input.downstreamOpenAssignmentCount} downstream tasks wait for extraction or screening.`,
+    );
+  }
+  if (input.pendingScreeningCount > 0) {
+    return state(
+      "needs_screening",
+      "pending",
+      materialCount > 0 ? "done" : "pending",
+      zh ? "待审查资料" : "Needs review",
+      zh ? "候选资料已到位，下一步执行资料审查。" : "Candidate sources are ready. Run screening next.",
+    );
+  }
+  if (input.candidateCount > 0) {
+    return state(
+      "ready_for_experiment",
+      "done",
+      "done",
+      zh ? "可进入实验" : "Ready for experiment",
+      zh ? "资料链路已具备，可进入实验规划或继续补充资料。" : "The source chain is ready. Move to experiment planning or collect more.",
+    );
+  }
+  return state(
+    "waiting_for_writeback",
+    "pending",
+    materialCount > 0 ? "done" : "pending",
+    zh ? "待回写" : "Waiting for writeback",
+    zh ? "等待 Agent 回写搜集结果。" : "Waiting for agent writeback.",
+  );
+}
+
+export function sourceCollectionActiveWorkRunFromRuntime(
+  runtime: RuntimeSummary | null | undefined,
+  runId: string,
+): WorkRunSnapshot | null {
+  const activeItems = runtime?.workRuns?.activeItems?.source_collection_run ?? [];
+  const active = runtime?.workRuns?.active as unknown as Record<string, WorkRunSnapshot | null | undefined> | undefined;
+  const candidates = [
+    ...activeItems,
+    active?.source_collection_run,
+  ].filter((item): item is WorkRunSnapshot => Boolean(item));
+  const normalizedRunId = String(runId || "").trim();
+  return candidates.find((item) => {
+    const status = String(item.status || "").toLowerCase();
+    if (status !== "queued" && status !== "running") {
+      return false;
+    }
+    return !normalizedRunId || String(item.runId || "") === normalizedRunId;
+  }) ?? null;
+}
+
+function workRunString(snapshot: unknown, key: string) {
+  if (!snapshot || typeof snapshot !== "object") {
+    return "";
+  }
+  const value = (snapshot as Record<string, unknown>)[key];
+  return typeof value === "string" ? value : "";
+}
+
+function workRunNumber(snapshot: unknown, key: string, fallback = 0) {
+  if (!snapshot || typeof snapshot !== "object") {
+    return fallback;
+  }
+  const value = (snapshot as Record<string, unknown>)[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
 function nextNodeId(nodes: TeamCanvasNode[]) {
   const ids = new Set(nodes.map((node) => node.id));
   let index = nodes.length + 1;
@@ -3637,6 +3854,16 @@ export function TeamsRoute({
   const selectedSourceCollectionRun =
     sourceCollectionRuns.find((run) => run.runId === selectedSourceCollectionRunId) ?? sourceCollectionRuns[0] ?? null;
   const selectedSourceCollectionRunEffectiveId = selectedSourceCollectionRun?.runId ?? "";
+  const runtimeSummaryQuery = useQuery({
+    queryKey: queryKeys.runtimeSummary(),
+    queryFn: () => fetchJson<RuntimeSummary>("/api/runtime/summary"),
+    enabled: Boolean(researchWorkflowTeamSelected),
+    refetchInterval: (query) => {
+      const runtime = query.state.data as RuntimeSummary | undefined;
+      const active = sourceCollectionActiveWorkRunFromRuntime(runtime, selectedSourceCollectionRunEffectiveId);
+      return resolvePollingInterval(pageVisible, active ? 1500 : false);
+    },
+  });
   const sourceCollectionRunStatusQuery = useQuery({
     queryKey: queryKeys.dataProcessingRunStatus(selectedSourceCollectionRunEffectiveId || "none"),
     queryFn: () => fetchJson<DataProcessingStatus>(`/api/data-processing/runs/${encodeURIComponent(selectedSourceCollectionRunEffectiveId)}/status`),
@@ -5167,23 +5394,11 @@ export function TeamsRoute({
         primaryAction: lang === "zh" ? "启动迭代" : "Start iteration",
       },
     };
-    const knowledgeCollectionStatusLabel = !selectedSourceCollectionRun
-      ? (lang === "zh" ? "未开始" : "not started")
-      : selectedTeamExecuteSourceCollectionSearchPending
-        ? (lang === "zh" ? "搜索中" : "searching")
-        : sourceCollectionSearchOpenAssignmentCount > 0
-          ? (lang === "zh" ? "需补充资料" : "more sources needed")
-          : sourceCollectionDownstreamOpenAssignmentCount > 0
-            ? (lang === "zh" ? "待提炼/审查" : "downstream pending")
-            : sourceCollectionRunPendingScreeningCount > 0
-              ? (lang === "zh" ? "资料待审查" : "needs review")
-              : sourceCollectionRunCandidateCount > 0
-                ? (lang === "zh" ? "可进入实验" : "ready for experiment")
-                : (lang === "zh" ? "等待回写" : "waiting for writeback");
+    const knowledgeCollectionStatusLabel = sourceCollectionDisplayState.statusText;
     const knowledgeCollectionPrimaryActionLabel = !selectedSourceCollectionRun
       ? (lang === "zh" ? "开始知识搜集" : "Start knowledge")
       : sourceCollectionSearchOpenAssignmentCount > 0
-        ? (selectedTeamExecuteSourceCollectionSearchPending
+        ? (selectedTeamExecuteSourceCollectionSearchPending || sourceCollectionAcceptedBackgroundActive
           ? (lang === "zh" ? "搜索中" : "Searching")
           : (lang === "zh" ? "搜索下一批" : "Search next batch"))
         : sourceCollectionDownstreamOpenAssignmentCount > 0
@@ -8705,7 +8920,14 @@ export function TeamsRoute({
   const selectedSourceCollectionSearchExecutionResult =
     selectedTeamExecuteSourceCollectionSearchResult ?? selectedTeamInitialSourceCollectionSearchResult;
   const selectedSourceCollectionSearchAccepted = Boolean(selectedSourceCollectionSearchExecutionResult?.accepted);
-  const selectedSourceCollectionActiveWorkRun = selectedSourceCollectionSearchExecutionResult?.activeWorkRun;
+  const runtimeSourceCollectionActiveWorkRun = sourceCollectionActiveWorkRunFromRuntime(
+    runtimeSummaryQuery.data,
+    selectedSourceCollectionRunEffectiveId,
+  );
+  const selectedSourceCollectionActiveWorkRun =
+    runtimeSummaryQuery.data
+      ? runtimeSourceCollectionActiveWorkRun ?? undefined
+      : selectedSourceCollectionSearchExecutionResult?.activeWorkRun;
   const selectedSourceCollectionStorageArtifacts =
     selectedSourceCollectionSearchExecutionResult?.storageArtifacts
     ?? sourceCollectionStorageArtifactsForRun(selectedTeam?.teamId ?? effectiveTeamId, selectedSourceCollectionRunEffectiveId);
@@ -8881,9 +9103,7 @@ export function TeamsRoute({
   const sourceCollectionAcceptedBackgroundActive = Boolean(
     selectedSourceCollectionSearchAccepted
     && selectedSourceCollectionActiveWorkRun
-    && ["running", "queued"].includes(String(selectedSourceCollectionActiveWorkRun.status || "").toLowerCase())
-    && (!sourceCollectionRunStatus || sourceCollectionSearchOpenAssignmentCount > 0)
-    && (!sourceCollectionRunStatus || ["collecting", "processing"].includes(sourceCollectionRunStatusValue)),
+    && ["running", "queued"].includes(String(selectedSourceCollectionActiveWorkRun.status || "").toLowerCase()),
   );
   const sourceCollectionTraceMessages = useMemo<SourceCollectionTraceMessage[]>(() => {
     const messages: SourceCollectionTraceMessage[] = [];
@@ -8991,23 +9211,25 @@ export function TeamsRoute({
       });
     }
     if (sourceCollectionAcceptedBackgroundActive && selectedSourceCollectionActiveWorkRun) {
+      const activeWorkTask = workRunString(selectedSourceCollectionActiveWorkRun, "currentTask")
+        || workRunString(selectedSourceCollectionActiveWorkRun, "summary");
       messages.push({
         id: `active-work-${selectedSourceCollectionActiveWorkRun.runId}`,
         agentRole: "Source Collection Agent",
         title: lang === "zh" ? "正在执行本批资料搜索" : "Running this source search batch",
-        body: selectedSourceCollectionActiveWorkRun.currentTask || selectedSourceCollectionActiveWorkRun.summary || (lang === "zh" ? "后台正在把搜索结果写成资料记录和候选资料。" : "The background worker is writing search results into records and candidates."),
+        body: activeWorkTask || (lang === "zh" ? "后台正在把搜索结果写成资料记录和候选资料。" : "The background worker is writing search results into records and candidates."),
         status: selectedSourceCollectionActiveWorkRun.status,
         tone: "search",
         inputLabel: lang === "zh" ? "待执行搜索任务" : "Open search tasks",
         outputLabel: lang === "zh" ? "资料记录与候选导入" : "Records and candidate imports",
         nextLabel: lang === "zh" ? "等待后台回写" : "Wait for writeback",
         refs: [
-          `${selectedSourceCollectionActiveWorkRun.searchOpenAssignmentCount ?? sourceCollectionSearchOpenAssignmentCount} ${lang === "zh" ? "个可搜索任务" : "searchable assignments"}`,
-          `${selectedSourceCollectionActiveWorkRun.downstreamOpenAssignmentCount ?? sourceCollectionDownstreamOpenAssignmentCount} ${lang === "zh" ? "个后续任务" : "downstream assignments"}`,
-          `${selectedSourceCollectionActiveWorkRun.recordCount ?? sourceCollectionRunSummary?.recordCount ?? 0} ${lang === "zh" ? "条资料记录" : "records"}`,
-          `${selectedSourceCollectionActiveWorkRun.queryCount ?? sourceCollectionQueryCount} ${lang === "zh" ? "条搜索问题" : "queries"}`,
+          `${workRunNumber(selectedSourceCollectionActiveWorkRun, "searchOpenAssignmentCount", sourceCollectionSearchOpenAssignmentCount)} ${lang === "zh" ? "个可搜索任务" : "searchable assignments"}`,
+          `${workRunNumber(selectedSourceCollectionActiveWorkRun, "downstreamOpenAssignmentCount", sourceCollectionDownstreamOpenAssignmentCount)} ${lang === "zh" ? "个后续任务" : "downstream assignments"}`,
+          `${workRunNumber(selectedSourceCollectionActiveWorkRun, "recordCount", sourceCollectionRunSummary?.recordCount ?? 0)} ${lang === "zh" ? "条资料记录" : "records"}`,
+          `${workRunNumber(selectedSourceCollectionActiveWorkRun, "queryCount", sourceCollectionQueryCount)} ${lang === "zh" ? "条搜索问题" : "queries"}`,
         ],
-        storageRefs: [selectedSourceCollectionActiveWorkRun.storagePath || selectedSourceCollectionStorageArtifacts?.runDirectory || ""].filter(Boolean),
+        storageRefs: [workRunString(selectedSourceCollectionActiveWorkRun, "storagePath") || selectedSourceCollectionStorageArtifacts?.runDirectory || ""].filter(Boolean),
       });
     }
     if (selectedTeamExecuteSourceCollectionSearchResult?.executionEvents?.length) {
@@ -9232,7 +9454,8 @@ export function TeamsRoute({
     selectedTeam?.teamId
     && selectedSourceCollectionRunEffectiveId
     && sourceCollectionSearchOpenAssignmentCount > 0
-    && !selectedTeamExecuteSourceCollectionSearchPending,
+    && !selectedTeamExecuteSourceCollectionSearchPending
+    && !sourceCollectionAcceptedBackgroundActive,
   );
   const selectedTeamBuildCandidateGraphPending =
     buildCandidateGraphMutation.isPending && buildCandidateGraphMutation.variables?.teamId === selectedTeam?.teamId;
@@ -9282,18 +9505,6 @@ export function TeamsRoute({
     selectedSourceCollectionActiveWorkRun
     && ["failed", "blocked"].includes(String(selectedSourceCollectionActiveWorkRun.status || "").toLowerCase()),
   );
-  const sourceCollectionOperationActive = Boolean(
-    selectedTeamStartResearchStagePending
-    || selectedTeamStartSourceCollectionPending
-    || selectedTeamExecuteSourceCollectionSearchPending
-    || sourceCollectionAcceptedBackgroundActive
-    || selectedTeamExtractSourceCollectionCandidatesPending
-    || selectedTeamRecordSourceCollectionOutputPending
-    || selectedTeamSourceQualityPending
-    || selectedTeamBuildCandidateGraphPending
-    || selectedTeamKnowledgePrecheckPending
-    || selectedTeamKnowledgeCollectionIngestPending
-  );
   const sourceCollectionOperationFailed = Boolean(
     sourceCollectionRunStatusValue === "failed"
     || sourceCollectionRunStatusValue === "blocked"
@@ -9308,6 +9519,26 @@ export function TeamsRoute({
     || selectedTeamKnowledgePrecheckError
     || selectedTeamKnowledgeCollectionIngestError
   );
+  const sourceCollectionDisplayState = deriveSourceCollectionDisplayState({
+    lang,
+    hasRun: Boolean(selectedSourceCollectionRun),
+    startPending: selectedTeamStartResearchStagePending || selectedTeamStartSourceCollectionPending,
+    searchPending: selectedTeamExecuteSourceCollectionSearchPending,
+    backgroundActive: sourceCollectionAcceptedBackgroundActive,
+    recordOutputPending: selectedTeamRecordSourceCollectionOutputPending,
+    extractionPending: selectedTeamExtractSourceCollectionCandidatesPending,
+    sourceQualityPending: selectedTeamSourceQualityPending,
+    graphPending: selectedTeamBuildCandidateGraphPending,
+    knowledgeIngestionPending: selectedTeamKnowledgePrecheckPending || selectedTeamKnowledgeCollectionIngestPending,
+    failed: sourceCollectionOperationFailed,
+    searchOpenAssignmentCount: sourceCollectionSearchOpenAssignmentCount,
+    downstreamOpenAssignmentCount: sourceCollectionDownstreamOpenAssignmentCount,
+    pendingScreeningCount: sourceCollectionRunPendingScreeningCount,
+    rawRecordCount: sourceCollectionRawRecordCount,
+    candidateCount: sourceCollectionRunCandidateCount,
+    activeWorkSummary: workRunString(selectedSourceCollectionActiveWorkRun, "currentTask")
+      || workRunString(selectedSourceCollectionActiveWorkRun, "summary"),
+  });
   const candidateGraphNodeCount = teamWorkflowCandidateGraph?.summary.nodeCount ?? 0;
   const candidateGraphEdgeCount = teamWorkflowCandidateGraph?.summary.edgeCount ?? 0;
   const knowledgeStewardPackCount = teamWorkflowKnowledgeIngestionStatus?.summary.stewardPackCandidateCount ?? 0;
@@ -9544,79 +9775,9 @@ export function TeamsRoute({
     }
     launchResearchStage("knowledge_collection", "new_round");
   };
-  const sourceCollectionConsoleState: SourceCollectionStepState = sourceCollectionOperationFailed
-    ? "failed"
-    : sourceCollectionOperationActive
-      ? "active"
-      : !selectedSourceCollectionRun
-        ? "idle"
-        : sourceCollectionSearchOpenAssignmentCount > 0 || sourceCollectionDownstreamOpenAssignmentCount > 0 || sourceCollectionRunPendingScreeningCount > 0
-          ? "pending"
-          : sourceCollectionRunCandidateCount > 0
-            ? "done"
-            : "pending";
-  const sourceCollectionConsoleStatusText = selectedTeamExecuteSourceCollectionSearchPending || sourceCollectionAcceptedBackgroundActive
-    ? (lang === "zh" ? "正在团队搜索" : "Team search running")
-    : selectedTeamStartResearchStagePending || selectedTeamStartSourceCollectionPending
-      ? (lang === "zh" ? "正在启动搜集" : "Starting collection")
-    : selectedTeamRecordSourceCollectionOutputPending
-      ? (lang === "zh" ? "正在写入候选" : "Writing candidates")
-      : selectedTeamExtractSourceCollectionCandidatesPending
-        ? (lang === "zh" ? "正在提炼资料" : "Extracting sources")
-      : selectedTeamSourceQualityPending
-        ? (lang === "zh" ? "正在筛选资料" : "Screening sources")
-          : selectedTeamBuildCandidateGraphPending
-            ? (lang === "zh" ? "正在生成入库关系图" : "Building ingestion map")
-            : selectedTeamKnowledgeCollectionIngestPending
-              ? (lang === "zh" ? "正在资料入库" : "Ingesting sources")
-            : sourceCollectionOperationFailed
-              ? (lang === "zh" ? "处理失败" : "Failed")
-              : !selectedSourceCollectionRun
-                ? (lang === "zh" ? "未开始" : "Not started")
-                : sourceCollectionSearchOpenAssignmentCount > 0
-                  ? (lang === "zh" ? "需补充资料" : "More sources needed")
-                  : sourceCollectionDownstreamOpenAssignmentCount > 0
-                    ? (lang === "zh" ? "待提炼/审查" : "Extraction or review pending")
-                  : sourceCollectionRunPendingScreeningCount > 0
-                    ? (lang === "zh" ? "待审查资料" : "Needs review")
-                    : sourceCollectionRunCandidateCount > 0
-                      ? (lang === "zh" ? "可进入实验" : "Ready for experiment")
-                      : (lang === "zh" ? "待回写" : "Waiting for writeback");
-  const sourceCollectionDecisionText = (() => {
-    if (sourceCollectionOperationFailed) {
-      return lang === "zh" ? "处理失败，先查看下方失败步骤，再重试当前按钮。" : "A step failed. Review the failed step below, then retry its action.";
-    }
-    if (sourceCollectionOperationActive) {
-      if (sourceCollectionAcceptedBackgroundActive) {
-        return selectedSourceCollectionActiveWorkRun?.currentTask || selectedSourceCollectionActiveWorkRun?.summary || (lang === "zh" ? "后台资料搜索正在运行，完成后会刷新记录、候选和下一步状态。" : "Background source collection is running; records, candidates, and next state will refresh when it completes.");
-      }
-      return lang === "zh" ? "正在处理当前动作，完成后会刷新阶段颜色和结果数量。" : "Current action is running. Stage colors and counts update when it completes.";
-    }
-    if (!selectedSourceCollectionRun) {
-      return lang === "zh" ? "点击开始搜集，生成本轮搜索任务和存储目录。" : "Start collection to create the search work and storage folder.";
-    }
-    if (sourceCollectionSearchOpenAssignmentCount > 0) {
-      return lang === "zh"
-        ? `还有 ${sourceCollectionSearchOpenAssignmentCount} 个搜索任务未完成，点击搜索下一批推进。`
-        : `${sourceCollectionSearchOpenAssignmentCount} search assignments remain. Run the next search to proceed.`;
-    }
-    if (sourceCollectionDownstreamOpenAssignmentCount > 0) {
-      return lang === "zh"
-        ? `搜索已停止，还有 ${sourceCollectionDownstreamOpenAssignmentCount} 个后续任务等待提炼或筛选。`
-        : `Search is idle; ${sourceCollectionDownstreamOpenAssignmentCount} downstream tasks wait for extraction or screening.`;
-    }
-    if (sourceCollectionRunPendingScreeningCount > 0) {
-      return lang === "zh"
-        ? "候选资料已到位，下一步执行资料审查。"
-        : "Candidate sources are ready. Run screening next.";
-    }
-    if (sourceCollectionRunCandidateCount > 0) {
-      return lang === "zh"
-        ? "资料链路已具备，可进入实验规划或继续补充资料。"
-        : "The source chain is ready. Move to experiment planning or collect more.";
-    }
-    return lang === "zh" ? "等待 Agent 回写搜集结果。" : "Waiting for agent writeback.";
-  })();
+  const sourceCollectionConsoleState: SourceCollectionStepState = sourceCollectionDisplayState.consoleState;
+  const sourceCollectionConsoleStatusText = sourceCollectionDisplayState.statusText;
+  const sourceCollectionDecisionText = sourceCollectionDisplayState.decisionText;
   const sourceCollectionStepStatusText = (state: SourceCollectionStepState) => {
     const labels: Record<SourceCollectionStepState, string> = lang === "zh"
       ? {
@@ -9642,17 +9803,7 @@ export function TeamsRoute({
     idle: styles.sourceCollectionStepIdle,
     pending: styles.sourceCollectionStepPending,
   }[state]);
-  const sourceCollectionSearchStepState: SourceCollectionStepState = sourceCollectionOperationFailed
-    ? "failed"
-    : selectedTeamExecuteSourceCollectionSearchPending || sourceCollectionAcceptedBackgroundActive || selectedTeamStartResearchStagePending || selectedTeamStartSourceCollectionPending
-      ? "active"
-      : !selectedSourceCollectionRun
-        ? "idle"
-        : sourceCollectionSearchOpenAssignmentCount > 0
-          ? "pending"
-          : sourceCollectionRawRecordCount || sourceCollectionRunCandidateCount
-            ? "done"
-            : "pending";
+  const sourceCollectionSearchStepState: SourceCollectionStepState = sourceCollectionDisplayState.searchStepState;
   const sourceCollectionScreeningStepState: SourceCollectionStepState = selectedTeamSourceQualityError
     ? "failed"
       : selectedTeamSourceQualityPending
@@ -9691,7 +9842,7 @@ export function TeamsRoute({
           : "idle";
   const sourceCollectionCollectionActionLabel = !selectedSourceCollectionRun
     ? (lang === "zh" ? "开始搜集" : "Start")
-    : selectedTeamExecuteSourceCollectionSearchPending
+    : selectedTeamExecuteSourceCollectionSearchPending || sourceCollectionAcceptedBackgroundActive
       ? (lang === "zh" ? "搜索中" : "Searching")
       : sourceCollectionSearchOpenAssignmentCount > 0
         ? (lang === "zh" ? "搜索下一批" : "Search next")
