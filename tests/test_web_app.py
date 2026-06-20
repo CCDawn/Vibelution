@@ -5656,10 +5656,16 @@ def test_runtime_summary_exposes_parallel_chat_turn_active_items(tmp_path, monke
     try:
         session_service.submit_session_message(alpha["id"], "alpha 并行任务")
         session_service.submit_session_message(beta["id"], "beta 并行任务")
-        assert both_started.wait(1.0), "expected different agents to overlap"
-
+        expected_session_ids = {alpha["id"], beta["id"]}
+        deadline = time.perf_counter() + 5.0
         payload = runtime_service.get_runtime_summary()
         chat_items = payload["workRuns"]["activeItems"]["chat_turn"]
+        while time.perf_counter() < deadline:
+            payload = runtime_service.get_runtime_summary()
+            chat_items = payload["workRuns"]["activeItems"]["chat_turn"]
+            if {item["sessionId"] for item in chat_items} == expected_session_ids and {item["status"] for item in chat_items} == {"running"}:
+                break
+            time.sleep(0.05)
         assert {item["sessionId"] for item in chat_items} == {alpha["id"], beta["id"]}
         assert {item["status"] for item in chat_items} == {"running"}
         assert payload["lifecycleProof"]["activeWorkRuns"]["count"] == 2
