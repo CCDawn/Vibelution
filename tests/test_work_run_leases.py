@@ -1,13 +1,8 @@
-import pytest
-
 from core.runtime_manager.work_run_leases import (
     WorkRunLeaseRequest,
     check_lease_conflicts,
     infer_chat_turn_leases,
 )
-
-pytestmark = pytest.mark.serial
-
 
 def test_readonly_chat_can_overlap_with_supervised_run():
     active = [
