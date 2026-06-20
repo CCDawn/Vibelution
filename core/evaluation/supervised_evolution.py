@@ -27,7 +27,7 @@ from scripts.evolution_harness import HarnessResult, run_harness
 
 
 DEFAULT_BUNDLE_NAME = "supervised_evolution_dry_run_v1"
-DEFAULT_BUNDLE_PATH = Path("workspace/evaluation/bundles") / f"{DEFAULT_BUNDLE_NAME}.json"
+DEFAULT_BUNDLE_PATH = Path("evaluation/bundles") / f"{DEFAULT_BUNDLE_NAME}.json"
 DEFAULT_BUNDLE_TEMPLATE_DIR = Path(__file__).resolve().parent / "bundles"
 TRANSACTION_REQUIRED_SCENARIOS = {"transaction", "modify_rollback", "full_evolution"}
 AGENT_JUDGMENT_MARKER = "SUPERVISED_AGENT_JUDGMENT:"
@@ -97,7 +97,8 @@ def _safe_report_file_stem(value: str) -> str:
 
 
 def _workspace_bundle_path(root: Path, bundle_name: str) -> Path:
-    return root / "workspace" / "evaluation" / "bundles" / f"{bundle_name}.json"
+    workspace_root = root if root.name.lower() == "workspace" else root / "workspace"
+    return workspace_root / "evaluation" / "bundles" / f"{bundle_name}.json"
 
 
 def _template_bundle_path(bundle_name: str) -> Path:
@@ -323,7 +324,7 @@ class SupervisedEvolutionDecision:
 
 
 def load_supervised_bundle(bundle_name: str = DEFAULT_BUNDLE_NAME, *, project_root: Optional[Path] = None) -> Dict[str, Any]:
-    root = (project_root or get_workspace().project_root).resolve()
+    root = Path(project_root).resolve() if project_root is not None else get_workspace().root.resolve()
     bundle_path = _ensure_default_bundle_available(root, bundle_name)
     if not bundle_path.exists():
         raise FileNotFoundError(f"监督进化 bundle 不存在: {bundle_path}")
@@ -337,7 +338,7 @@ def load_supervised_bundle(bundle_name: str = DEFAULT_BUNDLE_NAME, *, project_ro
 
 
 def resolve_supervised_bundle_path(bundle_name: str = DEFAULT_BUNDLE_NAME, *, project_root: Optional[Path] = None) -> Path:
-    root = (project_root or get_workspace().project_root).resolve()
+    root = Path(project_root).resolve() if project_root is not None else get_workspace().root.resolve()
     return _ensure_default_bundle_available(root, bundle_name)
 
 
@@ -2173,8 +2174,8 @@ def run_supervised_evolution_session(
     resume_from_decision_path: Optional[Path] = None,
 ) -> SupervisedEvolutionDecision:
     root = (project_root or get_workspace().project_root).resolve()
-    bundle_path = resolve_supervised_bundle_path(bundle_name, project_root=root)
-    bundle = load_supervised_bundle(bundle_name, project_root=root)
+    bundle_path = resolve_supervised_bundle_path(bundle_name, project_root=project_root)
+    bundle = load_supervised_bundle(bundle_name, project_root=project_root)
     dirs = _ensure_supervised_dirs(root)
     session_id = f"supervised_{_now_stamp()}"
     started_at = _now_iso()

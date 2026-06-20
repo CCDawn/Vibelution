@@ -45,6 +45,7 @@ from .session_service import list_active_session_work_runs
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
+SOURCE_PROJECT_ROOT = PROJECT_ROOT
 RUN_KIND = "supervised_worktree_evolution_run"
 RUN_LEASES = [EVALUATION_LEASE, WORKTREE_WRITE_LEASE]
 RUN_STORE_ROOT = developer_sandbox.formal_workspace_path(PROJECT_ROOT, "supervised_evolution", "worktree_runs")
@@ -185,7 +186,7 @@ def run_supervised_worktree_flow(
 
     lang = get_web_language()
     root = (project_root or PROJECT_ROOT).resolve()
-    options = _normalize_start_payload(payload, lang=lang, project_root=root)
+    options = _normalize_start_payload(payload, lang=lang, project_root=project_root)
     run_id = f"swte-{uuid4().hex[:12]}"
     now = _now_iso()
     snapshot = {
@@ -627,6 +628,7 @@ def _normalize_start_payload(
     project_root: Path | None = None,
 ) -> dict[str, Any]:
     root = (project_root or PROJECT_ROOT).resolve()
+    storage_project_root = _storage_project_root_arg(project_root)
     source_kind = str(payload.get("sourceKind") or "bundle").strip().lower()
     mode = str(payload.get("mode") or "auto").strip().lower()
     execution_mode = str(payload.get("executionMode") or "simulation").strip().lower()
@@ -650,7 +652,7 @@ def _normalize_start_payload(
             raise SupervisedWorktreeRunValidationError(
                 text_for(lang, zh="请选择一个数据集。", en="Choose a dataset.")
             )
-        prepared = prepare_dataset_run(root, dataset_name, dataset_limit)
+        prepared = prepare_dataset_run(storage_project_root, dataset_name, dataset_limit)
         if not prepared.runnable:
             raise SupervisedWorktreeRunValidationError(prepared.blocked_message or "Dataset is not runnable.")
         bundle_name = prepared.bundle_name
@@ -659,7 +661,7 @@ def _normalize_start_payload(
             text_for(lang, zh="请输入监督 bundle 名称。", en="Enter a supervised bundle name.")
         )
 
-    bundle = load_supervised_bundle(bundle_name, project_root=root)
+    bundle = load_supervised_bundle(bundle_name, project_root=storage_project_root)
     case_count = len(list(bundle.get("cases") or []))
     estimate = _estimate_llm_cost(case_count)
     if execution_mode == "real" and not bool(payload.get("confirmRealLlmCost")):
@@ -793,7 +795,7 @@ def _candidate_modifier_for_mode(execution_mode: str) -> Callable[[Path, str, di
 
 
 def _simulation_evaluation_runner(project_root: Path, bundle_name: str, role: str, context: dict[str, Any]) -> dict[str, Any]:
-    bundle = load_supervised_bundle(bundle_name, project_root=project_root)
+    bundle = load_supervised_bundle(bundle_name, project_root=_storage_project_root_arg(project_root))
     cases = list(bundle.get("cases") or [])
     successes = len(cases) if role == "candidate" else max(0, len(cases) - 1)
     total = len(cases)
@@ -819,7 +821,7 @@ def _simulation_evaluation_runner(project_root: Path, bundle_name: str, role: st
 
 
 def _real_evaluation_runner(project_root: Path, bundle_name: str, role: str, context: dict[str, Any]) -> dict[str, Any]:
-    bundle = load_supervised_bundle(bundle_name, project_root=project_root)
+    bundle = load_supervised_bundle(bundle_name, project_root=_storage_project_root_arg(project_root))
     cases = list(bundle.get("cases") or [])
     run_id = str(context.get("runId") or "")
     cancel_checker = context.get("cancelChecker") if callable(context.get("cancelChecker")) else None
@@ -1740,6 +1742,11 @@ def _run_store_root(project_root: Path) -> Path:
         intent="state",
         seed=True,
     )
+
+
+def _storage_project_root_arg(project_root: Path | None) -> Path | None:
+    root = Path(project_root).resolve() if project_root is not None else PROJECT_ROOT.resolve()
+    return None if root == SOURCE_PROJECT_ROOT.resolve() else root
 
 
 def _transition(snapshot: dict[str, Any], status: str, phase: str, message: str) -> None:

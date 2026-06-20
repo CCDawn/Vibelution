@@ -77,8 +77,9 @@ def _resolve_project_root() -> Path:
 
 
 def _get_prompts_dir() -> Path:
-    project_root = _resolve_project_root()
-    prompts_dir = project_root / "workspace" / "prompts"
+    from config.paths import resolve_workspace_home
+
+    prompts_dir = resolve_workspace_home() / "prompts"
     prompts_dir.mkdir(parents=True, exist_ok=True)
     return prompts_dir
 

@@ -13,7 +13,7 @@ from core.gym.models import utcnow_iso
 from core.infrastructure.workspace_manager import get_workspace
 
 
-EXPERIENCE_ROOT = Path("workspace/self_evolution/experience")
+EXPERIENCE_ROOT = Path("self_evolution/experience")
 EXPERIENCE_JSONL = EXPERIENCE_ROOT / "experience.jsonl"
 EXPERIENCE_INDEX = EXPERIENCE_ROOT / "index.json"
 
@@ -33,13 +33,20 @@ class AppendExperienceResult:
 
 
 def experience_paths(*, project_root: Optional[Path] = None) -> ExperiencePaths:
-    root = (project_root or get_workspace().project_root).resolve()
+    root = _workspace_root(project_root)
     experience_root = root / EXPERIENCE_ROOT
     return ExperiencePaths(
         root=experience_root,
         jsonl=root / EXPERIENCE_JSONL,
         index=root / EXPERIENCE_INDEX,
     )
+
+
+def _workspace_root(project_root: Optional[Path] = None) -> Path:
+    if project_root is None:
+        return get_workspace().root.resolve()
+    root = Path(project_root).resolve()
+    return root if root.name.lower() == "workspace" else root / "workspace"
 
 
 def append_experience_record(
