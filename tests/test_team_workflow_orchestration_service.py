@@ -586,10 +586,10 @@ def test_start_source_collection_run_ignores_invalid_collection_roles(tmp_path, 
 
 def test_start_source_collection_run_maps_roles_to_team_canvas_agents(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
-    coordinator = agent_directory_service.create_agent_instance(display_name="Coordinator", direct_session_id="session-coordinator")
-    discovery = agent_directory_service.create_agent_instance(display_name="Discovery", direct_session_id="session-discovery")
-    acquisition = agent_directory_service.create_agent_instance(display_name="Acquisition", direct_session_id="session-acquisition")
-    extraction = agent_directory_service.create_agent_instance(display_name="Extraction", direct_session_id="session-extraction")
+    coordinator = session_service.create_chat_session(title="Coordinator")
+    discovery = session_service.create_chat_session(title="Discovery")
+    acquisition = session_service.create_chat_session(title="Acquisition")
+    extraction = session_service.create_chat_session(title="Extraction")
     organization = {
         "agents": [
             {"nodeId": "coordinator", "agentId": coordinator["agentId"], "displayName": "Coordinator", "role": "ceo", "status": "active"},
@@ -860,6 +860,54 @@ def test_execute_source_collection_search_skips_existing_query_without_force(tmp
     assert data_processing_service.list_records(run_response["run"]["runId"])["summary"]["recordCount"] == 2
 
 
+def test_execute_source_collection_search_records_output_per_query(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+
+    def fake_search(query, *, max_results, provider):
+        query_id = str(query.get("queryId") or "query")
+        query_text = str(query.get("query") or query_id)
+        return {
+            "provider": provider,
+            "searchUrl": f"https://api.example.test/search?q={query_text}",
+            "results": [
+                {
+                    "title": f"Incremental source {query_text}",
+                    "sourceRef": f"https://doi.org/10.0000/{query_id}",
+                    "rawLocation": f"https://api.example.test/works/10.0000/{query_id}",
+                    "summary": "Metadata-only result for incremental output.",
+                    "sourceType": "paper",
+                    "metadata": {"doi": f"10.0000/{query_id}", "containerTitle": "Incremental Journal"},
+                    "qualitySignals": {"providerScore": 90},
+                }
+            ][:max_results],
+        }
+
+    monkeypatch.setattr(team_workflow_orchestration_service, "_execute_source_collection_query", fake_search)
+    team = team_service.create_team(name="ai科学研究团队")
+    run_response = team_workflow_orchestration_service.start_source_collection_run(
+        team["teamId"],
+        {
+            "topic": "first query",
+            "querySeeds": ["first query", "second query"],
+            "searchLanguages": ["en"],
+            "sourceTypes": ["paper"],
+            "agentRoles": ["data_discovery"],
+        },
+    )
+
+    execution = team_workflow_orchestration_service.execute_source_collection_search(
+        team["teamId"],
+        run_response["run"]["runId"],
+        {"maxQueries": 2, "maxResultsPerQuery": 1},
+    )
+
+    assert execution["executedQueryCount"] == 2
+    assert execution["recordCount"] == 2
+    assert execution["outputCount"] == 2
+    assert [output["status"] for output in execution["outputs"]] == ["returned", "completed"]
+    assert execution["runStatus"]["summary"]["outputCount"] == 2
+
+
 def test_execute_source_collection_search_skips_duplicate_sources_on_force_rerun(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     source_work_runs = WorkRunStore(root=tmp_path / ".runtime" / "work_runs")
@@ -1052,6 +1100,66 @@ def test_start_research_stage_round_creates_knowledge_collection_round(tmp_path,
     assert response["searchPlan"]["promptCachePolicy"]["requirement"] == "required_for_llm_execution"
     assert status_payload["phases"][0]["activeRoundId"] == stage_round["stageRoundId"]
     assert status_payload["phases"][0]["roundCount"] == 1
+
+
+def test_source_collection_search_syncs_stage_round_terminal_state(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _stub_source_collection_search_background(monkeypatch)
+
+    def fake_search(query, *, max_results, provider):
+        query_id = str(query.get("queryId") or "query")
+        query_text = str(query.get("query") or query_id)
+        return {
+            "provider": provider,
+            "searchUrl": f"https://api.example.test/search?q={query_text}",
+            "results": [
+                {
+                    "title": f"Stage sync source {query_text}",
+                    "sourceRef": f"https://doi.org/10.0000/{query_id}",
+                    "rawLocation": f"https://api.example.test/works/10.0000/{query_id}",
+                    "summary": "Metadata-only result for stage status sync.",
+                    "sourceType": "paper",
+                    "metadata": {"doi": f"10.0000/{query_id}", "containerTitle": "Stage Sync Journal"},
+                    "qualitySignals": {"providerScore": 90},
+                }
+            ][:max_results],
+        }
+
+    monkeypatch.setattr(team_workflow_orchestration_service, "_execute_source_collection_query", fake_search)
+    team = team_service.create_team(name="ai科学研究团队")
+    response = team_workflow_orchestration_service.start_research_stage_round(
+        team["teamId"],
+        {
+            "stageType": "knowledge_collection",
+            "topic": "first stage query",
+            "goal": "Collect traceable sources incrementally.",
+            "querySeeds": ["first stage query", "second stage query"],
+            "searchLanguages": ["en"],
+            "sourceTypes": ["paper"],
+            "agentRoles": ["data_discovery"],
+        },
+    )
+    run_id = response["run"]["runId"]
+
+    first = team_workflow_orchestration_service.execute_source_collection_search(team["teamId"], run_id, {"maxQueries": 1, "maxResultsPerQuery": 1})
+    first_status = team_workflow_orchestration_service.get_research_stage_round_status(team["teamId"])
+    first_latest = first_status["latestRound"]
+
+    assert first["hasMore"] is True
+    assert first_latest["status"] == "needs_continue"
+    assert first_status["phases"][0]["activeRoundId"] == ""
+    assert first_latest["sourceCollectionSearchExecution"]["status"] == "needs_continue"
+    assert first_latest["sourceCollectionSearchExecution"]["activeWorkRunId"] == ""
+
+    second = team_workflow_orchestration_service.execute_source_collection_search(team["teamId"], run_id, {"maxQueries": 1, "maxResultsPerQuery": 1})
+    second_status = team_workflow_orchestration_service.get_research_stage_round_status(team["teamId"])
+    second_latest = second_status["latestRound"]
+
+    assert second["hasMore"] is False
+    assert second_latest["status"] == "needs_screening"
+    assert second_status["phases"][0]["activeRoundId"] == ""
+    assert second_latest["sourceCollectionSearchExecution"]["status"] == "completed"
+    assert second_latest["sourceCollectionSummary"]["candidateCount"] == 2
 
 
 def test_start_research_stage_round_reuses_active_knowledge_collection_round(tmp_path, monkeypatch):
