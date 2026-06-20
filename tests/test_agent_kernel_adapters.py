@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 from fastapi.testclient import TestClient
 
 import core.agent_kernel.adapters as agent_kernel_adapters
@@ -26,8 +28,8 @@ def _isolate_kernel(tmp_path, monkeypatch):
     return project_root, data_home
 
 
-def _create_agent(display_name: str = "Kernel Adapter Alpha") -> dict:
-    return agent_directory_service.create_agent_instance(display_name=display_name, direct_session_id="session-alpha")
+def _create_agent(display_name: str = "Kernel Adapter Alpha", *, direct_session_id: str = "session-alpha") -> dict:
+    return agent_directory_service.create_agent_instance(display_name=display_name, direct_session_id=direct_session_id)
 
 
 def _adapter_payload(agent_id: str, *, source_id: str = "message-1", wake_target: bool = False) -> dict:
@@ -146,6 +148,41 @@ def test_agent_message_adapter_propagates_wake_target_false(tmp_path, monkeypatc
     assert payload["event"]["deliveryPolicy"]["wakeTarget"] is False
     assert payload["outcome"]["deliveries"][0]["wake"]["wakeStatus"] == "not_requested"
     assert payload["execution"]["deliveryRefs"][0]["wakeStatus"] == "not_requested"
+
+
+def test_agent_message_adapter_preserves_inbox_projection_metadata(tmp_path, monkeypatch) -> None:
+    _isolate_kernel(tmp_path, monkeypatch)
+    source = _create_agent("Kernel Adapter Source")
+    agent = _create_agent("Kernel Adapter Target", direct_session_id="session-target")
+
+    response = _client().post(
+        "/api/kernel/adapter/agent-message",
+        json={
+            "source": "agent_message_tool",
+            "sender": {"type": "agent", "id": source["agentId"], "agentId": source["agentId"]},
+            "recipientAgentIds": [agent["agentId"]],
+            "content": "please inspect this direct message",
+            "sourceId": "tool-message-1",
+            "wakeTarget": False,
+            "metadata": {
+                "sourceSessionId": "session-alpha",
+                "sourceMessageId": "tool-message-1",
+                "inboxKind": "agent_direct_message",
+                "messageSummary": "direct review request",
+                "agentToolMetadataJson": "{\"priority\":\"normal\"}",
+            },
+        },
+    )
+
+    assert response.status_code == 202
+    payload = response.json()
+    inbox = agent_directory_service.list_agent_inbox_messages_for_agent(agent["agentId"])[0]
+    assert inbox["kind"] == "agent_direct_message"
+    assert inbox["sourceSessionId"] == "session-alpha"
+    assert inbox["summary"] == "direct review request"
+    assert json.loads(inbox["metadata"]["agentToolMetadataJson"]) == {"priority": "normal"}
+    assert inbox["metadata"]["kernelTaskId"] == payload["task"]["taskId"]
+    assert inbox["metadata"]["kernelEventId"] == payload["event"]["eventId"]
 
 
 def test_kernel_task_timeline_returns_read_model_with_delivery_and_projection_refs(tmp_path, monkeypatch) -> None:

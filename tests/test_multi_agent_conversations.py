@@ -6,6 +6,8 @@ from types import SimpleNamespace
 import pytest
 from fastapi.testclient import TestClient
 
+from core.agent_kernel import service as agent_kernel_service
+from core.infrastructure import developer_sandbox
 from core.infrastructure.tool_executor import ToolExecutor
 from core.ui.chat_state import load_chat_state, save_chat_state
 from core.web.app import create_app
@@ -36,6 +38,8 @@ def _use_tmp_project_root(tmp_path, monkeypatch):
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_kernel_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(developer_sandbox, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(prompt_template_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(agent_mode_binding_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(self_evolution_control_service, "PROJECT_ROOT", tmp_path)
@@ -1399,18 +1403,30 @@ def test_agent_message_tool_sends_persistent_message_by_agent_code(tmp_path, mon
     assert action is None
     assert payload["ok"] is True
     assert payload["status"] == "sent"
+    assert payload["route"] == "kernel"
     assert payload["sourceAgentId"] == alpha["agentId"]
     assert payload["sourceSessionId"] == alpha["id"]
     assert payload["targetAgentId"] == beta["agentId"]
     assert payload["targetAgentCode"] == beta["agentCode"]
     assert payload["wakeStatus"] == "not_requested"
+    assert payload["kernel"]["taskId"]
+    assert payload["kernel"]["eventId"]
+    assert payload["kernel"]["outcomeId"]
 
     pending = agent_directory_service.list_agent_inbox_messages_for_agent(beta["agentId"], status="pending")
     assert [item["messageId"] for item in pending] == [payload["messageId"]]
     assert pending[0]["sourceAgentId"] == alpha["agentId"]
     assert pending[0]["sourceAgentCode"] == alpha["agentCode"]
+    assert pending[0]["sourceSessionId"] == alpha["id"]
+    assert pending[0]["threadId"] == f"agent:{alpha['agentId']}->{beta['agentId']}"
+    assert pending[0]["kind"] == "agent_direct_message"
+    assert pending[0]["createdBy"] == "kernel"
+    assert pending[0]["summary"] == "请求架构审查"
     assert pending[0]["content"] == "Beta，请从架构风险角度审查这轮改造。"
-    assert pending[0]["metadata"] == {"priority": "normal"}
+    assert json.loads(pending[0]["metadata"]["agentToolMetadataJson"]) == {"priority": "normal"}
+    assert pending[0]["metadata"]["sourceSurface"] == "agent_message_tool"
+    assert pending[0]["metadata"]["kernelTaskId"] == payload["kernel"]["taskId"]
+    assert pending[0]["metadata"]["kernelEventId"] == payload["kernel"]["eventId"]
 
 
 def test_session_reference_message_persists_reference_and_schedules_query_context(tmp_path, monkeypatch):
@@ -1577,6 +1593,7 @@ def test_agent_message_tool_preserves_full_message_body(tmp_path, monkeypatch):
     payload = json.loads(result)
     assert action is None
     assert payload["ok"] is True
+    assert payload["kernel"]["taskId"]
     pending = agent_directory_service.list_agent_inbox_messages_for_agent(beta["agentId"], status="pending")
     assert pending[0]["content"] == full_report
 
@@ -1624,6 +1641,8 @@ def test_agent_message_tool_can_wake_target_session_and_consume_inbox(tmp_path, 
     payload = json.loads(result)
     assert action is None
     assert payload["ok"] is True
+    assert payload["route"] == "kernel"
+    assert payload["kernel"]["taskId"]
     assert payload["wakeStatus"] == "started"
     assert payload["delivery"]["targetSessionId"] == beta["id"]
     assert payload["delivery"]["turnId"]

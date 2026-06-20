@@ -471,6 +471,8 @@ def _deliver_event_to_recipients(event: dict[str, Any], task: dict[str, Any]) ->
     source_room_id = _metadata_text(inbox_metadata, "sourceRoomId")
     source_round_id = _metadata_text(inbox_metadata, "sourceMessageId") or _metadata_text(inbox_metadata, "projectBusEventId") or event["eventId"]
     thread_id = str(event.get("correlationId") or source_round_id or event["eventId"]).strip()
+    inbox_kind = _metadata_text(inbox_metadata, "inboxKind") or "kernel_event"
+    message_summary = _metadata_text(inbox_metadata, "messageSummary") or content
     deliveries: list[dict[str, Any]] = []
     for agent_id in list(event.get("recipients") or []):
         target_agent_id = str(agent_id or "").strip()
@@ -495,11 +497,12 @@ def _deliver_event_to_recipients(event: dict[str, Any], task: dict[str, Any]) ->
                 agent_id,
                 content=content,
                 source_agent_id=str(event.get("senderAgentId") or "").strip(),
+                source_session_id=_metadata_text(inbox_metadata, "sourceSessionId"),
                 source_room_id=source_room_id,
                 source_round_id=source_round_id,
                 thread_id=thread_id,
-                kind="kernel_event",
-                summary=content,
+                kind=inbox_kind,
+                summary=message_summary,
                 prompt_eligible=True,
                 created_by="kernel",
                 metadata=inbox_metadata,
@@ -551,6 +554,12 @@ def _kernel_inbox_metadata(event: dict[str, Any], task: dict[str, Any]) -> dict[
         "source",
         "senderAgentId",
         "sourceAgentId",
+        "sourceAgentCode",
+        "targetAgentCode",
+        "agentMessageToolSourceId",
+        "inboxKind",
+        "messageSummary",
+        "agentToolMetadataJson",
     )
     metadata = {
         key: deepcopy(event_metadata[key])
