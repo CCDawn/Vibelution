@@ -5,8 +5,11 @@ from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
 import pytest
 
+from core.agent_kernel import service as agent_kernel_service
 from core.chatroom import store as chat_room_store
 from core.chatroom.scheduler import get_scheduler_registry
+from core.infrastructure import developer_sandbox
+from core.runtime_manager import work_run_store
 from core.ui.chat_state import load_chat_state, save_chat_state
 from core.web.services import agent_directory_service, chat_room_service, session_service
 
@@ -41,6 +44,19 @@ def _seed_chat_sessions(root):
             ],
         },
     )
+
+
+def _isolate_chat_room_kernel(tmp_path, monkeypatch):
+    data_home = tmp_path / "operator-data"
+    work_runs_root = tmp_path / "work_runs"
+    monkeypatch.setenv("VIBELUTION_DATA_HOME", str(data_home))
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_kernel_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(developer_sandbox, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(developer_sandbox, "resolve_workspace_home", lambda *args, **kwargs: data_home / "workspace")
+    monkeypatch.setattr(work_run_store, "WORK_RUNS_DIR", work_runs_root)
 
 
 def _capture_session_lifecycle_events(monkeypatch):
@@ -1045,6 +1061,91 @@ def test_start_chat_room_round_runs_participants_in_round_robin_and_persists_wor
     assert speaker_fields["speakerRunMs"] >= 0
     assert speaker_fields["runnerMs"] >= 0
     assert speaker_fields["totalSpeakerMs"] >= 0
+
+
+def test_start_chat_room_round_records_kernel_trace_without_agent_inbox_delivery(tmp_path, monkeypatch):
+    _isolate_chat_room_kernel(tmp_path, monkeypatch)
+    recorded_events = []
+    monkeypatch.setattr(
+        chat_room_service,
+        "record_runtime_scene_event",
+        lambda *args, **kwargs: recorded_events.append((args, kwargs)) or {"accepted": True},
+    )
+    alpha = session_service.create_chat_session(title="Alpha Agent")
+    beta = session_service.create_chat_session(title="Beta Agent")
+    room = chat_room_service.create_chat_room(
+        title="Kernel 追踪群聊",
+        participant_agent_ids=[alpha["agentId"], beta["agentId"]],
+    )
+
+    detail = chat_room_service.start_chat_room_round(
+        room["roomId"],
+        "讨论群聊轮次如何进入任务中心",
+        agent_runner=lambda participant, prompt, context: {
+            "status": "completed",
+            "raw_output": f"{participant['title']} 已完成",
+            "summary": "ok",
+        },
+    )
+
+    latest_round = detail["rounds"][-1]
+    kernel_trace = latest_round["kernel"]
+    assert latest_round["status"] == "completed"
+    assert kernel_trace["traceOnly"] is True
+    assert kernel_trace["status"] == "recorded"
+    assert kernel_trace["taskId"]
+    assert kernel_trace["workRunId"]
+    assert kernel_trace["outcomeStatus"] == "succeeded"
+
+    task = agent_kernel_service.get_kernel_task(kernel_trace["taskId"])
+    assert task["status"] == "succeeded"
+    assert task["goal"] == "Chat room round: 讨论群聊轮次如何进入任务中心"
+    assert task["assignedAgentIds"] == [alpha["agentId"], beta["agentId"]]
+    timeline = agent_kernel_service.get_kernel_task_timeline(kernel_trace["taskId"])
+    assert timeline["event"]["deliveryPolicy"]["traceOnly"] is True
+    assert timeline["outcome"]["deliveries"] == []
+    assert agent_directory_service.list_agent_inbox_messages_for_agent(alpha["agentId"]) == []
+    assert agent_directory_service.list_agent_inbox_messages_for_agent(beta["agentId"]) == []
+
+    work_run_summary = chat_room_service.load_chat_room_work_run_summary()
+    assert work_run_summary["latest"]["kernel"]["taskId"] == kernel_trace["taskId"]
+    assert any(
+        event[0][:3] == ("chat_room", "kernel", "chat_room.round.kernel_trace_recorded")
+        and event[1]["fields"]["kernelTaskId"] == kernel_trace["taskId"]
+        for event in recorded_events
+    )
+
+
+def test_start_chat_room_round_continues_when_kernel_trace_fails(tmp_path, monkeypatch):
+    _isolate_chat_room_kernel(tmp_path, monkeypatch)
+    alpha = session_service.create_chat_session(title="Alpha Agent")
+    beta = session_service.create_chat_session(title="Beta Agent")
+    room = chat_room_service.create_chat_room(
+        title="Kernel 失败不阻塞群聊",
+        participant_agent_ids=[alpha["agentId"], beta["agentId"]],
+    )
+
+    def raise_kernel_trace(_event):
+        raise RuntimeError("kernel unavailable")
+
+    monkeypatch.setattr(agent_kernel_service, "handle_kernel_event", raise_kernel_trace)
+
+    detail = chat_room_service.start_chat_room_round(
+        room["roomId"],
+        "即使追踪失败也要继续讨论",
+        agent_runner=lambda participant, prompt, context: {
+            "status": "completed",
+            "raw_output": f"{participant['title']} 已发言",
+            "summary": "ok",
+        },
+    )
+
+    latest_round = detail["rounds"][-1]
+    assert latest_round["status"] == "completed"
+    assert [message["status"] for message in latest_round["messages"]] == ["completed", "completed"]
+    assert latest_round["kernel"]["status"] == "failed"
+    assert latest_round["kernel"]["errorType"] == "RuntimeError"
+    assert "kernel unavailable" in latest_round["kernel"]["reason"]
 
 
 def test_start_chat_room_round_dedupes_duplicate_participants_before_prompt_chain(tmp_path, monkeypatch):

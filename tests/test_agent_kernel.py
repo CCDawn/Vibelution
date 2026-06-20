@@ -191,6 +191,40 @@ def test_kernel_event_rejects_missing_recipient_but_keeps_audit_event(tmp_path, 
     assert audit_response.json()["status"] == "rejected"
 
 
+def test_kernel_trace_only_event_creates_task_without_recipient_delivery(tmp_path, monkeypatch):
+    _isolate_kernel(tmp_path, monkeypatch)
+    client = _client()
+    event = {
+        "eventId": "event-trace-only-room-round",
+        "sender": {"type": "system", "id": "chat_room_service"},
+        "semanticType": "chat_room.round",
+        "payload": {"content": "trace room", "goal": "Trace room round"},
+        "idempotencyKey": "trace-only-room-round",
+        "traceOnly": True,
+        "wakeTarget": False,
+        "metadata": {"sourceSurface": "chat_room_round"},
+    }
+
+    first = client.post("/api/kernel/events", json=event)
+    second = client.post("/api/kernel/events", json=event)
+
+    assert first.status_code == 202
+    first_payload = first.json()
+    assert first_payload["event"]["recipients"] == []
+    assert first_payload["event"]["deliveryPolicy"]["traceOnly"] is True
+    assert first_payload["task"]["status"] == "succeeded"
+    assert first_payload["task"]["assignedAgentIds"] == []
+    assert first_payload["execution"]["status"] == "succeeded"
+    assert first_payload["execution"]["deliveryRefs"] == []
+    assert first_payload["outcome"]["status"] == "succeeded"
+    assert first_payload["outcome"]["deliveries"] == []
+    assert first_payload["outcome"]["resultSummary"] == "Kernel trace event recorded without recipient delivery."
+    assert second.status_code == 202
+    second_payload = second.json()
+    assert second_payload["reused"] is True
+    assert second_payload["task"]["taskId"] == first_payload["task"]["taskId"]
+
+
 def test_kernel_inbox_ack_consumes_message_without_deleting_projection(tmp_path, monkeypatch):
     _isolate_kernel(tmp_path, monkeypatch)
     agent = _create_agent()
