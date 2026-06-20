@@ -314,7 +314,7 @@ _AGENT_API_HYDRATION_CACHE_FAST_SIGNATURE: tuple[Any, ...] | None = None
 _AGENT_API_HYDRATION_CACHE_VALIDATED_AT = 0.0
 _AGENT_API_HYDRATION_EVENT_VERSION = 0
 _AGENT_API_HYDRATION_CACHE: AgentApiHydrationContext | None = None
-_AGENT_API_HYDRATION_FAST_TTL_SECONDS = 5.0
+_AGENT_API_HYDRATION_FAST_TTL_SECONDS = 15.0
 _AGENT_API_HYDRATION_EVENT_FILENAMES = frozenset(
     {
         "tool_governance_requests.jsonl",
@@ -433,7 +433,7 @@ def list_agents(*, include_archived: bool = False, detail: str = "full") -> list
     started = time.perf_counter()
     timings: dict[str, float] = {}
     normalized_detail = str(detail or "full").strip().lower()
-    if normalized_detail not in {"full", "summary"}:
+    if normalized_detail not in {"full", "summary", "config"}:
         normalized_detail = "full"
     repair_cache_hit = False
     lock_wait_started = time.perf_counter()
@@ -454,6 +454,23 @@ def list_agents(*, include_archived: bool = False, detail: str = "full") -> list
         timings["hydrate"] = 0.0
         stage_started = time.perf_counter()
         agents = [_agent_to_api_summary(item) for item in raw_agents]
+        timings["to_api"] = round((time.perf_counter() - stage_started) * 1000, 1)
+    elif normalized_detail == "config":
+        stage_started = time.perf_counter()
+        hydration = _build_agent_api_config_hydration_context(state, raw_agents, timings=hydration_timings)
+        timings["hydrate"] = round((time.perf_counter() - stage_started) * 1000, 1)
+        hydration_timings["activity_hydration"] = 0.0
+        stage_started = time.perf_counter()
+        agents = [
+            _agent_to_api(
+                item,
+                hydration=hydration,
+                include_activity=False,
+                include_tool_governance=True,
+                include_inbox_pending_count=True,
+            )
+            for item in raw_agents
+        ]
         timings["to_api"] = round((time.perf_counter() - stage_started) * 1000, 1)
     else:
         stage_started = time.perf_counter()
@@ -4039,7 +4056,14 @@ def _agent_avatar_match_key(agent: dict[str, Any]) -> str:
     return " ".join(str(item or "").strip().lower() for item in parts if str(item or "").strip())
 
 
-def _agent_to_api(agent: dict[str, Any], *, hydration: AgentApiHydrationContext | None = None) -> dict[str, Any]:
+def _agent_to_api(
+    agent: dict[str, Any],
+    *,
+    hydration: AgentApiHydrationContext | None = None,
+    include_activity: bool = True,
+    include_tool_governance: bool = False,
+    include_inbox_pending_count: bool = False,
+) -> dict[str, Any]:
     workspace = str(agent.get("workspacePath") or "").strip()
     metadata = dict(agent.get("metadata") or {})
     avatar_path = _agent_avatar_path_from_metadata(metadata)
@@ -4087,10 +4111,25 @@ def _agent_to_api(agent: dict[str, Any], *, hydration: AgentApiHydrationContext 
         "memoryPolicy": _memory_policy_for_agent(agent, hydration=hydration),
         "toolPolicy": tool_policy,
         "toolPolicySource": _tool_policy_source_for_agent(agent, tool_policy),
-        "toolGovernanceRequests": _tool_governance_requests_for_agent(agent_id, hydration=hydration, limit=6),
-        "groupContextEvents": _group_context_events_for_agent(agent, hydration=hydration, limit=8),
-        "agentInboxMessages": _agent_inbox_messages_for_agent(agent, hydration=hydration, limit=8, status="pending"),
-        "agentInboxPendingCount": _agent_inbox_pending_count_for_agent(agent, hydration=hydration, status="pending"),
+        "toolGovernanceRequests": (
+            _tool_governance_requests_for_agent(agent_id, hydration=hydration, limit=6)
+            if include_activity or include_tool_governance
+            else []
+        ),
+        "groupContextEvents": _group_context_events_for_agent(agent, hydration=hydration, limit=8) if include_activity else [],
+        "agentInboxMessages": (
+            _agent_inbox_messages_for_agent(agent, hydration=hydration, limit=8, status="pending") if include_activity else []
+        ),
+        "agentInboxPendingCount": (
+            _agent_inbox_pending_count_for_agent(agent, hydration=hydration, status="pending")
+            if include_activity or include_inbox_pending_count
+            else 0
+        ),
+        "activityHydration": (
+            "full"
+            if include_activity
+            else ("config" if include_tool_governance or include_inbox_pending_count else "deferred")
+        ),
     }
 
 
@@ -4147,14 +4186,14 @@ def _build_agent_api_hydration_context(
 ) -> AgentApiHydrationContext:
     timings_ref = timings if timings is not None else {}
     started = time.perf_counter()
-    fast_signature = _agent_api_hydration_fast_signature(agents)
+    fast_signature = ("full", _agent_api_hydration_fast_signature(agents))
     cached = _get_agent_api_hydration_fast_cache(fast_signature, now=started)
     if cached is not None:
         timings_ref["cache_lookup"] = round((time.perf_counter() - started) * 1000, 1)
         timings_ref["cache_hit"] = 1.0
         timings_ref["cache_fast_hit"] = 1.0
         return cached
-    signature = _agent_api_hydration_signature(agents)
+    signature = ("full", _agent_api_hydration_signature(agents))
     cached = _get_agent_api_hydration_cache(signature)
     timings_ref["cache_lookup"] = round((time.perf_counter() - started) * 1000, 1)
     if cached is not None:
@@ -4212,6 +4251,58 @@ def _build_agent_api_hydration_context(
     return context
 
 
+def _build_agent_api_config_hydration_context(
+    state: dict[str, Any],
+    agents: list[dict[str, Any]],
+    *,
+    timings: dict[str, float] | None = None,
+) -> AgentApiHydrationContext:
+    timings_ref = timings if timings is not None else {}
+    started = time.perf_counter()
+    fast_signature = ("config", _agent_api_hydration_fast_signature(agents))
+    cached = _get_agent_api_hydration_fast_cache(fast_signature, now=started)
+    if cached is not None:
+        timings_ref["cache_lookup"] = round((time.perf_counter() - started) * 1000, 1)
+        timings_ref["cache_hit"] = 1.0
+        timings_ref["cache_fast_hit"] = 1.0
+        return cached
+    signature = ("config", _agent_api_config_hydration_signature(agents))
+    cached = _get_agent_api_hydration_cache(signature)
+    timings_ref["cache_lookup"] = round((time.perf_counter() - started) * 1000, 1)
+    if cached is not None:
+        timings_ref["cache_hit"] = 1.0
+        timings_ref["cache_fast_hit"] = 0.0
+        _refresh_agent_api_hydration_fast_cache(fast_signature)
+        return cached
+    timings_ref["cache_hit"] = 0.0
+    timings_ref["cache_fast_hit"] = 0.0
+    started = time.perf_counter()
+    tool_policies = _tool_policies(state)
+    timings_ref["tool_policies"] = round((time.perf_counter() - started) * 1000, 1)
+    started = time.perf_counter()
+    memory_policies = _memory_policies(state)
+    timings_ref["memory_policies"] = round((time.perf_counter() - started) * 1000, 1)
+    started = time.perf_counter()
+    tool_governance_requests_by_agent = _load_recent_tool_governance_requests_for_agents(agents, limit=6)
+    timings_ref["tool_governance_requests"] = round((time.perf_counter() - started) * 1000, 1)
+    started = time.perf_counter()
+    agent_inbox_pending_count_by_agent = _count_pending_agent_inbox_messages_for_agents(agents)
+    timings_ref["agent_inbox_pending_counts"] = round((time.perf_counter() - started) * 1000, 1)
+    timings_ref["group_context_events"] = 0.0
+    timings_ref["agent_inbox_messages"] = 0.0
+    context = AgentApiHydrationContext(
+        state=state,
+        tool_policies=tool_policies,
+        memory_policies=memory_policies,
+        tool_governance_requests_by_agent=tool_governance_requests_by_agent,
+        group_context_events_by_agent={},
+        agent_inbox_messages_by_agent={},
+        agent_inbox_pending_count_by_agent=agent_inbox_pending_count_by_agent,
+    )
+    _remember_agent_api_hydration_cache(signature, fast_signature, context)
+    return context
+
+
 def _agent_api_hydration_fast_signature(agents: list[dict[str, Any]]) -> tuple[Any, ...]:
     agent_keys: list[tuple[str, str]] = []
     for agent in agents:
@@ -4239,6 +4330,24 @@ def _agent_api_hydration_signature(agents: list[dict[str, Any]]) -> tuple[Any, .
                 workspace,
                 _jsonl_signature(_agent_workspace_event_path(agent, "tool_governance_requests.jsonl")),
                 _jsonl_signature(_agent_workspace_event_path(agent, "group_context_events.jsonl")),
+                _jsonl_signature(_agent_workspace_event_path(agent, "agent_inbox_messages.jsonl")),
+            )
+        )
+    return (_registry_state_signature(), _agent_api_hydration_event_version(), tuple(agent_signatures))
+
+
+def _agent_api_config_hydration_signature(agents: list[dict[str, Any]]) -> tuple[Any, ...]:
+    agent_signatures: list[tuple[Any, ...]] = []
+    for agent in agents:
+        if not isinstance(agent, dict):
+            continue
+        agent_id = str(agent.get("agentId") or "").strip()
+        workspace = str(agent.get("workspacePath") or "").strip()
+        agent_signatures.append(
+            (
+                agent_id,
+                workspace,
+                _jsonl_signature(_agent_workspace_event_path(agent, "tool_governance_requests.jsonl")),
                 _jsonl_signature(_agent_workspace_event_path(agent, "agent_inbox_messages.jsonl")),
             )
         )
@@ -4480,6 +4589,26 @@ def _load_recent_tool_governance_requests_for_agents(
             reverse=True,
         )
         result[agent_id] = requests[: max(1, int(limit or 1))]
+    return result
+
+
+def _count_pending_agent_inbox_messages_for_agents(agents: list[dict[str, Any]]) -> dict[str, int]:
+    result: dict[str, int] = {}
+    for agent in agents:
+        agent_id = str(agent.get("agentId") or "").strip()
+        if not agent_id:
+            continue
+        try:
+            result[agent_id] = _count_jsonl_matching_status(
+                _agent_workspace_event_path(agent, "agent_inbox_messages.jsonl"),
+                status="pending",
+            )
+        except Exception as exc:
+            _debug_logger.warning(
+                f"Failed to count pending inbox messages for agent={agent_id}. error={type(exc).__name__}: {exc}",
+                tag="AGENT_TOOL_DIRECTORY",
+            )
+            result[agent_id] = 0
     return result
 
 
