@@ -1353,6 +1353,8 @@ def test_agent_inbox_message_api_can_wake_target_agent_and_consume_message(tmp_p
     alpha_consumed = agent_directory_service.list_agent_inbox_messages_for_agent(alpha["agentId"], status="consumed")
     assert alpha_consumed[0]["kind"] == "agent_inbox_reply"
     assert alpha_consumed[0]["metadata"]["replyToMessageId"] == payload["messageId"]
+    assert alpha_consumed[0]["metadata"]["sourceSurface"] == "agent_inbox_reply"
+    assert alpha_consumed[0]["metadata"]["kernelTaskId"]
 
 
 def test_agent_inbox_message_wake_skips_busy_target_without_consuming(tmp_path, monkeypatch):
@@ -1664,6 +1666,9 @@ def test_agent_message_tool_can_wake_target_session_and_consume_inbox(tmp_path, 
     alpha_detail = session_service.get_session_detail(alpha["id"])
     assert alpha_detail["messages"][-2]["metadata"]["inboxKind"] == "agent_inbox_reply"
     assert alpha_detail["messages"][-2]["metadata"]["sourceAgentId"] == beta["agentId"]
+    alpha_consumed = agent_directory_service.list_agent_inbox_messages_for_agent(alpha["agentId"], status="consumed")
+    assert alpha_consumed[0]["metadata"]["sourceSurface"] == "agent_inbox_reply"
+    assert alpha_consumed[0]["metadata"]["kernelTaskId"]
 
 
 def test_research_org_inbox_wake_carries_communication_metadata_to_conversation(tmp_path, monkeypatch):

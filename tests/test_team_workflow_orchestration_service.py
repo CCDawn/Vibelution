@@ -3,6 +3,7 @@ from concurrent.futures import Future
 
 import pytest
 
+from core.agent_kernel import service as agent_kernel_service
 from core.runtime_manager.work_run_store import WorkRunStore
 from core.web.services import (
     agent_directory_service,
@@ -68,6 +69,7 @@ def _use_tmp_project_root(tmp_path, monkeypatch):
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(data_processing_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_kernel_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(project_agent_bus_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(team_knowledge_service, "PROJECT_ROOT", tmp_path)
@@ -1560,8 +1562,14 @@ def test_experiment_result_knowledge_ingestion_request_notifies_steward_agent(tm
     assert requested["knowledgeStewardActivation"]["status"] == "agent_wake_started"
     assert requested["knowledgeStewardActivation"]["targetAgentId"] == agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID
     assert requested["knowledgeStewardActivation"]["delivery"]["turnId"] == "turn-experiment-ingest"
+    assert requested["knowledgeStewardActivation"]["kernel"]["taskId"]
+    assert requested["knowledgeStewardActivation"]["kernel"]["outcomeStatus"] == "succeeded"
     assert deliveries and deliveries[0]["kind"] == "challenge_cup_experiment_result_ingestion_request"
+    assert deliveries[0]["metadata"]["sourceSurface"] == "team_workflow"
+    assert deliveries[0]["metadata"]["kernelTaskId"] == requested["knowledgeStewardActivation"]["kernel"]["taskId"]
     assert inbox_messages[0]["messageId"] == requested["knowledgeStewardActivation"]["messageId"]
+    assert inbox_messages[0]["metadata"]["sourceSurface"] == "team_workflow"
+    assert inbox_messages[0]["metadata"]["kernelTaskId"] == requested["knowledgeStewardActivation"]["kernel"]["taskId"]
     assert inbox_messages[0]["metadata"]["experimentResultPackId"] == requested["experimentResultPack"]["packId"]
     assert inbox_messages[0]["metadata"]["fullRunResultId"] == full_run["fullRunResult"]["fullRunResultId"]
 
@@ -3193,9 +3201,15 @@ def test_knowledge_collection_ingestion_notifies_steward_agent_for_final_ingesti
     assert response["knowledgeStewardActivation"]["status"] == "agent_wake_started"
     assert response["knowledgeStewardActivation"]["messageId"]
     assert response["knowledgeStewardActivation"]["delivery"]["turnId"] == "turn-steward-ingest"
+    assert response["knowledgeStewardActivation"]["kernel"]["taskId"]
+    assert response["knowledgeStewardActivation"]["kernel"]["outcomeStatus"] == "succeeded"
     assert deliveries and deliveries[0]["metadata"]["stewardPackCandidateId"] == response["summary"]["stewardPackCandidateId"]
+    assert deliveries[0]["metadata"]["sourceSurface"] == "team_workflow"
+    assert deliveries[0]["metadata"]["kernelTaskId"] == response["knowledgeStewardActivation"]["kernel"]["taskId"]
     assert inbox_messages[0]["messageId"] == response["summary"]["knowledgeStewardInboxMessageId"]
     assert inbox_messages[0]["kind"] == "challenge_cup_knowledge_ingestion_request"
+    assert inbox_messages[0]["metadata"]["sourceSurface"] == "team_workflow"
+    assert inbox_messages[0]["metadata"]["kernelTaskId"] == response["knowledgeStewardActivation"]["kernel"]["taskId"]
     assert inbox_messages[0]["metadata"]["knowledgeBaseId"] == knowledge_base_id
 
     second = team_workflow_orchestration_service.run_knowledge_collection_ingestion(

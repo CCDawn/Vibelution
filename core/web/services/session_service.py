@@ -12420,23 +12420,137 @@ def _record_agent_inbox_reply_skipped(
         return
 
 
+def _agent_inbox_kernel_delivery(kernel_result: dict[str, Any], target_agent_id: str) -> dict[str, Any]:
+    outcome = kernel_result.get("outcome") if isinstance(kernel_result.get("outcome"), dict) else {}
+    deliveries = outcome.get("deliveries") if isinstance(outcome.get("deliveries"), list) else []
+    normalized_target_agent_id = str(target_agent_id or "").strip()
+    for delivery in deliveries:
+        if not isinstance(delivery, dict):
+            continue
+        if str(delivery.get("targetAgentId") or "").strip() == normalized_target_agent_id:
+            return dict(delivery)
+    return dict(deliveries[0]) if deliveries and isinstance(deliveries[0], dict) else {}
+
+
+def _agent_inbox_message_from_kernel_delivery(
+    target_agent_id: str,
+    delivery: dict[str, Any],
+    *,
+    fallback: dict[str, Any],
+) -> dict[str, Any]:
+    message_id = str(
+        delivery.get("inboxMessageId")
+        or (delivery.get("wake", {}) if isinstance(delivery.get("wake"), dict) else {}).get("messageId")
+        or ""
+    ).strip()
+    if message_id:
+        for message in agent_directory_service.list_agent_inbox_messages_for_agent(
+            target_agent_id,
+            limit=100,
+            status="",
+        ):
+            if str(message.get("messageId") or message.get("eventId") or "").strip() == message_id:
+                return message
+    message = dict(fallback)
+    if message_id:
+        message["messageId"] = message_id
+        message.setdefault("eventId", message_id)
+    message["targetAgentId"] = str(target_agent_id or "").strip()
+    message["targetSessionId"] = str(
+        delivery.get("targetSessionId")
+        or (delivery.get("wake", {}) if isinstance(delivery.get("wake"), dict) else {}).get("targetSessionId")
+        or ""
+    ).strip()
+    return message
+
+
+def _agent_inbox_reply_kernel_metadata(
+    reply: dict[str, Any],
+    *,
+    source_agent_id: str,
+    target_agent_id: str,
+) -> dict[str, Any]:
+    reply_metadata = reply.get("metadata") if isinstance(reply.get("metadata"), dict) else {}
+    reply_to_message_id = str(reply_metadata.get("replyToMessageId") or "").strip()
+    source_turn_id = str(reply_metadata.get("sourceTurnId") or "").strip()
+    thread_id = str(reply.get("threadId") or "").strip()
+    projection_id = thread_id or reply_to_message_id or source_turn_id
+    metadata = {
+        "sourceSurface": "agent_inbox_reply",
+        "sourceSessionId": str(reply.get("sourceSessionId") or "").strip(),
+        "sourceMessageId": source_turn_id or reply_to_message_id,
+        "projectionRef": {"kind": "agent_inbox_reply", "id": projection_id},
+        "senderAgentId": source_agent_id,
+        "sourceAgentId": source_agent_id,
+        "targetAgentId": target_agent_id,
+        "inboxKind": "agent_inbox_reply",
+        "messageSummary": str(reply.get("summary") or "").strip(),
+        "inboxCreatedBy": "agent_inbox_reply",
+        "replyToMessageId": reply_to_message_id,
+        "replyToTurnId": str(reply_metadata.get("replyToTurnId") or "").strip(),
+        "sourceTurnId": source_turn_id,
+    }
+    if reply_metadata:
+        metadata["agentToolMetadataJson"] = json.dumps(reply_metadata, ensure_ascii=False, sort_keys=True)
+    return {key: value for key, value in metadata.items() if value not in ("", None)}
+
+
 def _deliver_agent_inbox_turn_reply(reply: dict[str, Any]) -> None:
     target_agent_id = str(reply.get("targetAgentId") or "").strip()
     source_agent_id = str(reply.get("sourceAgentId") or "").strip()
     if not target_agent_id or not source_agent_id:
         return
     try:
-        message = agent_directory_service.write_agent_inbox_message(
-            target_agent_id,
-            content=str(reply.get("content") or ""),
+        from core.agent_kernel.adapters import submit_agent_message_event
+
+        metadata = _agent_inbox_reply_kernel_metadata(
+            reply,
             source_agent_id=source_agent_id,
-            source_session_id=str(reply.get("sourceSessionId") or "").strip(),
-            thread_id=str(reply.get("threadId") or "").strip(),
-            kind="agent_inbox_reply",
-            summary=str(reply.get("summary") or "").strip(),
-            metadata=reply.get("metadata") if isinstance(reply.get("metadata"), dict) else {},
+            target_agent_id=target_agent_id,
         )
-        delivery = wake_agent_for_inbox_message(message)
+        source_id = ":".join(
+            item
+            for item in (
+                "agent-inbox-reply",
+                str(reply.get("sourceSessionId") or "").strip(),
+                str(metadata.get("sourceMessageId") or "").strip(),
+                source_agent_id,
+                target_agent_id,
+            )
+            if item
+        )
+        kernel_result = submit_agent_message_event(
+            source="agent_inbox_reply",
+            sender={"type": "agent", "id": source_agent_id, "agentId": source_agent_id},
+            recipient_agent_ids=[target_agent_id],
+            content=str(reply.get("content") or ""),
+            correlation_id=str(reply.get("threadId") or "").strip(),
+            wake_target=True,
+            metadata=metadata,
+            source_id=source_id,
+        )
+        kernel_delivery = _agent_inbox_kernel_delivery(kernel_result, target_agent_id)
+        message = _agent_inbox_message_from_kernel_delivery(
+            target_agent_id,
+            kernel_delivery,
+            fallback={
+                "sourceAgentId": source_agent_id,
+                "targetAgentId": target_agent_id,
+                "metadata": metadata,
+            },
+        )
+        delivery = kernel_delivery.get("wake") if isinstance(kernel_delivery.get("wake"), dict) else {}
+        if str(kernel_delivery.get("status") or "").strip() != "delivered":
+            delivery = {
+                "wakeRequested": True,
+                "wakeStatus": "failed",
+                "targetAgentId": target_agent_id,
+                "targetSessionId": str(kernel_delivery.get("targetSessionId") or "").strip(),
+                "turnId": "",
+                "reason": str(kernel_delivery.get("reason") or "").strip(),
+            }
+            _record_agent_inbox_reply_event("agent_inbox.reply_failed", message, delivery, level="warning", outcome="failed")
+            return
         _record_agent_inbox_reply_event("agent_inbox.reply_delivered", message, delivery, outcome="delivered")
     except Exception as exc:
         _record_agent_inbox_reply_event(
@@ -12653,6 +12767,8 @@ def _record_agent_inbox_reply_event(
                 "turnId": str(delivery.get("turnId") or "").strip(),
                 "wakeStatus": str(delivery.get("wakeStatus") or "").strip(),
                 "reason": str(delivery.get("reason") or "").strip(),
+                "kernelEventId": str(metadata.get("kernelEventId") or "").strip(),
+                "kernelTaskId": str(metadata.get("kernelTaskId") or "").strip(),
             },
             lifecycle=True,
         )
