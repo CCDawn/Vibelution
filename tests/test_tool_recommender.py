@@ -1,14 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-import pytest
-
 from core.infrastructure.tool_recommender import decide_next_tools
 from core.infrastructure.tool_intents import TOOL_INTENTS, get_tool_intent, humanize_tool_name
 from tools.Key_Tools import create_llm_facing_tools
-
-pytestmark = pytest.mark.serial
-
 
 LEGACY_AGENT_TOOL_NAMES = {
     "read_file",
