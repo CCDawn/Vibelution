@@ -5,9 +5,6 @@ import pytest
 
 from core.web.services import agent_directory_service, agent_mode_binding_service
 
-pytestmark = pytest.mark.serial
-
-
 def _use_tmp_project_root(tmp_path, monkeypatch):
     monkeypatch.setenv("VIBELUTION_DATA_HOME", str(tmp_path))
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
