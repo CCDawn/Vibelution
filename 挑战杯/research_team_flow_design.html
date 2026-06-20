@@ -47,7 +47,7 @@
           <div class="focus-list">
             <div class="focus-item"><b>优先看</b><span>知识搜集页是否能一眼判断是否进行中、下一步按钮是什么、结果存在哪里，以及详情里能否追溯原始证据。</span></div>
             <div class="focus-item"><b>不能做</b><span>当前执行器只取元数据引用，不抓全文、不审批入库、不把候选图谱当作正式事实。</span></div>
-            <div class="focus-item"><b>下一步</b><span>扩展全文下载/网页抽取、批量去重、质量评分和 cache hit/miss 运行证据。</span></div>
+            <div class="focus-item"><b>下一步</b><span>扩展全文下载/网页抽取、质量评分和 cache hit/miss 运行证据；重复-only 搜索已按成功收口，不再提示继续或补救。</span></div>
           </div>
         </aside>
       </section>
@@ -1771,6 +1771,11 @@
               <span>把通用 DataRecord 幂等导入为 source_manifest 候选，保留 run/record/quality/collection trace；不写正式知识。</span>
             </div>
 <div class="blueprint-row compact">
+              <b>资料搜索重复收口</b>
+              <strong>/api/teams/{teamId}/workflow-orchestration/source-collection-runs/{runId}/search/execute</strong>
+              <span>重复-only 搜索以 duplicates_skipped 完成，返回 skippedDuplicateCount 且 remainingQueryCount=0/hasMore=false；不把已跳过重复误标为 returned 或 blocking issue。</span>
+            </div>
+<div class="blueprint-row compact">
               <b>资料提炼批量执行</b>
               <strong>/api/teams/{teamId}/workflow-orchestration/knowledge-collection/extract</strong>
               <span>资料提炼 Agent 批量把本轮 DataRecord 同步为 source_manifest 候选，并记录 search_events/candidates 镜像；重复执行保持幂等。</span>
@@ -2338,6 +2343,12 @@
               <strong>资料提炼结果滚动与审查交接</strong>
               <span>搜索资料结果区和资料提炼候选区都接入独立纵向滚动容器；资料提炼统计和候选状态统一显示为已审查、需补资料或待 Agent 审查。</span>
               <span>Agent 重新提炼只负责把本轮原始资料同步为候选资料，不自动完成资料质量审查；用户看到仍有待 Agent 审查时，应进入资料审查步骤，由资料质量评估 Agent 批量处理。</span>
+            </div>
+<div class="blueprint-row">
+              <b>M6.60</b>
+              <strong>重复资料搜索真实收口</strong>
+              <span>资料搜索重复-only 批次返回 duplicates_skipped、skippedDuplicateCount、remainingQueryCount=0 和 hasMore=false；assignment/work-run 按 completed 收口。</span>
+              <span>重复资料被跳过是成功收口，不再写 no_importable_search_result，不再误导 Agent 或 UI 继续搜索；去重身份统一读取 DOI、URL、metadata.doi、containerTitle/issued 和标题指纹，URL query 排序后比较。</span>
             </div>
 <div class="blueprint-row">
               <b>M7</b>
