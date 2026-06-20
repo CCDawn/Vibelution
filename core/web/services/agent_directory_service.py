@@ -408,6 +408,8 @@ class AgentApiHydrationContext:
     state: dict[str, Any]
     tool_policies: dict[str, dict[str, Any]]
     memory_policies: dict[str, dict[str, Any]]
+    context_compression_base_policy: Any
+    model_context_window_limits_by_model_id: dict[str, int]
     tool_governance_requests_by_agent: dict[str, list[dict[str, Any]]]
     group_context_events_by_agent: dict[str, list[dict[str, Any]]]
     agent_inbox_messages_by_agent: dict[str, list[dict[str, Any]]]
@@ -3428,10 +3430,16 @@ def effective_agent_context_compression_policy(
     return merged
 
 
-def _agent_context_window_limit(agent: dict[str, Any] | None) -> int:
+def _agent_context_window_limit(
+    agent: dict[str, Any] | None,
+    *,
+    hydration: AgentApiHydrationContext | None = None,
+) -> int:
     model_id = agent_dialogue_model_id(agent) if isinstance(agent, dict) else ""
     if not model_id:
         return 0
+    if hydration is not None:
+        return int(hydration.model_context_window_limits_by_model_id.get(model_id) or 0)
     try:
         from config import get_config
         from config.public_config import resolve_llm_model_context_window
@@ -3448,6 +3456,50 @@ def _agent_context_window_limit(agent: dict[str, Any] | None) -> int:
         return resolve_llm_model_context_window(entry, provider)
     except Exception:
         return 0
+
+
+def _model_context_window_limits_for_agents(agents: list[dict[str, Any]]) -> dict[str, int]:
+    model_ids = sorted(
+        {
+            model_id
+            for model_id in (agent_dialogue_model_id(agent) for agent in list(agents or []) if isinstance(agent, dict))
+            if model_id
+        }
+    )
+    if not model_ids:
+        return {}
+    try:
+        from config import get_config
+        from config.public_config import resolve_llm_model_context_window
+
+        config = get_config()
+        model_library = getattr(config.llm, "model_library", {}) or {}
+        result: dict[str, int] = {}
+        for model_id in model_ids:
+            entry = model_library.get(model_id) if isinstance(model_library, dict) else None
+            if not isinstance(entry, dict):
+                result[model_id] = 0
+                continue
+            provider = None
+            provider_id = str(entry.get("provider_id") or "").strip()
+            if provider_id:
+                provider = config.llm.get_provider(provider_id)
+            try:
+                result[model_id] = int(resolve_llm_model_context_window(entry, provider) or 0)
+            except Exception:
+                result[model_id] = 0
+        return result
+    except Exception:
+        return {model_id: 0 for model_id in model_ids}
+
+
+def _context_compression_base_policy_for_agents() -> Any:
+    try:
+        from config import get_config
+
+        return get_config().context_compression
+    except Exception:
+        return {}
 
 
 def _has_context_compression_override(source: dict[str, Any]) -> bool:
@@ -4141,7 +4193,8 @@ def _agent_to_api(
         ),
         "contextCompressionEffectivePolicy": effective_agent_context_compression_policy(
             agent,
-            context_window_limit=_agent_context_window_limit(agent),
+            hydration.context_compression_base_policy if hydration is not None else None,
+            context_window_limit=_agent_context_window_limit(agent, hydration=hydration),
         ),
         "promptTemplateId": _normalize_prompt_template_id(
             agent.get("promptTemplateId") or _infer_agent_prompt_template_id(agent)
@@ -4245,14 +4298,18 @@ def _build_agent_api_hydration_context(
         timings_ref["cache_hit"] = 1.0
         timings_ref["cache_fast_hit"] = 1.0
         return cached
-    signature = ("full", _agent_api_hydration_signature(agents))
-    cached = _get_agent_api_hydration_cache(signature)
-    timings_ref["cache_lookup"] = round((time.perf_counter() - started) * 1000, 1)
-    if cached is not None:
-        timings_ref["cache_hit"] = 1.0
-        timings_ref["cache_fast_hit"] = 0.0
-        _refresh_agent_api_hydration_fast_cache(fast_signature)
-        return cached
+    signature: tuple[Any, ...] | None = None
+    if _agent_api_hydration_cache_matches_mode("full"):
+        signature = ("full", _agent_api_hydration_signature(agents))
+        cached = _get_agent_api_hydration_cache(signature)
+        timings_ref["cache_lookup"] = round((time.perf_counter() - started) * 1000, 1)
+        if cached is not None:
+            timings_ref["cache_hit"] = 1.0
+            timings_ref["cache_fast_hit"] = 0.0
+            _refresh_agent_api_hydration_fast_cache(fast_signature)
+            return cached
+    else:
+        timings_ref["cache_lookup"] = round((time.perf_counter() - started) * 1000, 1)
     timings_ref["cache_hit"] = 0.0
     timings_ref["cache_fast_hit"] = 0.0
     started = time.perf_counter()
@@ -4261,6 +4318,12 @@ def _build_agent_api_hydration_context(
     started = time.perf_counter()
     memory_policies = _memory_policies(state)
     timings_ref["memory_policies"] = round((time.perf_counter() - started) * 1000, 1)
+    started = time.perf_counter()
+    context_compression_base_policy = _context_compression_base_policy_for_agents()
+    timings_ref["context_compression_policy"] = round((time.perf_counter() - started) * 1000, 1)
+    started = time.perf_counter()
+    model_context_window_limits = _model_context_window_limits_for_agents(agents)
+    timings_ref["model_context_windows"] = round((time.perf_counter() - started) * 1000, 1)
     started = time.perf_counter()
     tool_governance_requests_by_agent = _load_recent_tool_governance_requests_for_agents(agents, limit=6)
     timings_ref["tool_governance_requests"] = round((time.perf_counter() - started) * 1000, 1)
@@ -4294,6 +4357,8 @@ def _build_agent_api_hydration_context(
         state=state,
         tool_policies=tool_policies,
         memory_policies=memory_policies,
+        context_compression_base_policy=context_compression_base_policy,
+        model_context_window_limits_by_model_id=model_context_window_limits,
         tool_governance_requests_by_agent=tool_governance_requests_by_agent,
         group_context_events_by_agent=group_context_events_by_agent,
         agent_inbox_messages_by_agent=agent_inbox_messages_by_agent,
@@ -4318,14 +4383,18 @@ def _build_agent_api_config_hydration_context(
         timings_ref["cache_hit"] = 1.0
         timings_ref["cache_fast_hit"] = 1.0
         return cached
-    signature = ("config", _agent_api_config_hydration_signature(agents))
-    cached = _get_agent_api_hydration_cache(signature)
-    timings_ref["cache_lookup"] = round((time.perf_counter() - started) * 1000, 1)
-    if cached is not None:
-        timings_ref["cache_hit"] = 1.0
-        timings_ref["cache_fast_hit"] = 0.0
-        _refresh_agent_api_hydration_fast_cache(fast_signature)
-        return cached
+    signature: tuple[Any, ...] | None = None
+    if _agent_api_hydration_cache_matches_mode("config"):
+        signature = ("config", _agent_api_config_hydration_signature(agents))
+        cached = _get_agent_api_hydration_cache(signature)
+        timings_ref["cache_lookup"] = round((time.perf_counter() - started) * 1000, 1)
+        if cached is not None:
+            timings_ref["cache_hit"] = 1.0
+            timings_ref["cache_fast_hit"] = 0.0
+            _refresh_agent_api_hydration_fast_cache(fast_signature)
+            return cached
+    else:
+        timings_ref["cache_lookup"] = round((time.perf_counter() - started) * 1000, 1)
     timings_ref["cache_hit"] = 0.0
     timings_ref["cache_fast_hit"] = 0.0
     started = time.perf_counter()
@@ -4334,6 +4403,12 @@ def _build_agent_api_config_hydration_context(
     started = time.perf_counter()
     memory_policies = _memory_policies(state)
     timings_ref["memory_policies"] = round((time.perf_counter() - started) * 1000, 1)
+    started = time.perf_counter()
+    context_compression_base_policy = _context_compression_base_policy_for_agents()
+    timings_ref["context_compression_policy"] = round((time.perf_counter() - started) * 1000, 1)
+    started = time.perf_counter()
+    model_context_window_limits = _model_context_window_limits_for_agents(agents)
+    timings_ref["model_context_windows"] = round((time.perf_counter() - started) * 1000, 1)
     started = time.perf_counter()
     tool_governance_requests_by_agent = _load_recent_tool_governance_requests_for_agents(agents, limit=6)
     timings_ref["tool_governance_requests"] = round((time.perf_counter() - started) * 1000, 1)
@@ -4346,6 +4421,8 @@ def _build_agent_api_config_hydration_context(
         state=state,
         tool_policies=tool_policies,
         memory_policies=memory_policies,
+        context_compression_base_policy=context_compression_base_policy,
+        model_context_window_limits_by_model_id=model_context_window_limits,
         tool_governance_requests_by_agent=tool_governance_requests_by_agent,
         group_context_events_by_agent={},
         agent_inbox_messages_by_agent={},
@@ -4447,6 +4524,17 @@ def _get_agent_api_hydration_cache(signature: tuple[Any, ...]) -> AgentApiHydrat
     return None
 
 
+def _agent_api_hydration_cache_matches_mode(mode: str) -> bool:
+    normalized_mode = str(mode or "").strip()
+    if not normalized_mode:
+        return False
+    with _AGENT_API_HYDRATION_CACHE_LOCK:
+        for signature in (_AGENT_API_HYDRATION_CACHE_FAST_SIGNATURE, _AGENT_API_HYDRATION_CACHE_SIGNATURE):
+            if isinstance(signature, tuple) and signature and signature[0] == normalized_mode:
+                return True
+    return False
+
+
 def _refresh_agent_api_hydration_fast_cache(fast_signature: tuple[Any, ...]) -> None:
     global _AGENT_API_HYDRATION_CACHE_FAST_SIGNATURE
     global _AGENT_API_HYDRATION_CACHE_VALIDATED_AT
@@ -4456,7 +4544,7 @@ def _refresh_agent_api_hydration_fast_cache(fast_signature: tuple[Any, ...]) -> 
 
 
 def _remember_agent_api_hydration_cache(
-    signature: tuple[Any, ...],
+    signature: tuple[Any, ...] | None,
     fast_signature: tuple[Any, ...],
     context: AgentApiHydrationContext,
 ) -> None:
@@ -5084,11 +5172,16 @@ def _agent_workspace_relative_path(agent_id: str) -> str:
 
 
 def _is_agent_private_workspace_path(path_value: str, agent_id: str) -> bool:
-    if not str(agent_id or "").strip():
+    normalized_agent_id = str(agent_id or "").strip()
+    if not normalized_agent_id:
         return False
+    normalized_path = str(path_value or "").strip().replace("\\", "/").strip("/")
+    expected_path = _agent_workspace_relative_path(normalized_agent_id).strip("/")
+    if normalized_path == expected_path:
+        return True
     try:
         actual = _resolve_project_path(path_value)
-        expected = _resolve_project_path(_agent_workspace_relative_path(agent_id))
+        expected = _resolve_project_path(expected_path)
     except Exception:
         return False
     return actual == expected
