@@ -68,7 +68,10 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).toContain("workbenchCatalogQuery");
     expect(routeSource).toContain("queryKeys.evolutionWorkbench()");
     expect(routeSource).toContain('"/api/evolution/workbench"');
-    expect(routeSource).toContain("const workbenchControl = workbenchCatalogQuery.data ?? workspaceSnapshot?.workbench");
+    expect(routeSource).toContain("const workbenchControl = workbenchCatalogQuery.data");
+    expect(routeSource).not.toContain("workbenchCatalogQuery.data ?? workspaceSnapshot?.workbench");
+    expect(routeSource).toContain("workbenchCatalogLoading");
+    expect(routeSource).toContain("sourceCatalogCountLabel");
     expect(routeSource).toContain("primaryDatasets");
     expect(routeSource).toContain("item.selectable !== false && item.effective");
     expect(routeSource).toContain("hiddenDatasetCount");

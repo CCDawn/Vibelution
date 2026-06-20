@@ -798,6 +798,17 @@ def test_evolution_workbench_route_exposes_dataset_choices_and_saved_state(tmp_p
         ),
         encoding="utf-8",
     )
+    (bundle_dir / "saved_bundle_v1.json").write_text(
+        json.dumps(
+            {
+                "bundle_name": "saved_bundle_v1",
+                "benchmark": "saved",
+                "cases": [{"case_id": "saved", "prompt": "run saved"}],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
     _write_workbench_state(
         tmp_path,
         {
@@ -866,6 +877,43 @@ def test_evolution_workbench_route_exposes_dataset_choices_and_saved_state(tmp_p
     assert agent_judged["officialScoreAvailable"] is False
     assert "纯 agent" in agent_judged["usabilityReason"]
     assert payload["activeRun"] is None
+
+def test_evolution_workbench_route_falls_back_from_stale_saved_bundle(tmp_path, monkeypatch):
+    bundle_dir = tmp_path / "workspace" / "evaluation" / "bundles"
+    bundle_dir.mkdir(parents=True, exist_ok=True)
+    (bundle_dir / "real_bundle_v1.json").write_text(
+        json.dumps(
+            {
+                "bundle_name": "real_bundle_v1",
+                "benchmark": "dry",
+                "cases": [{"case_id": "probe", "prompt": "run"}],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    _write_workbench_state(
+        tmp_path,
+        {
+            "source": "bundle",
+            "bundle_name": "demo_bundle",
+            "dataset_name": "missing_dataset",
+            "keep_worktree": False,
+        },
+    )
+    _reset_supervised_live_state()
+    monkeypatch.setattr(evolution_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(supervised_control_service, "PROJECT_ROOT", tmp_path)
+
+    response = client.get("/api/evolution/workbench")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["savedState"]["source"] == "bundle"
+    assert payload["savedState"]["bundleName"] == "real_bundle_v1"
+    assert payload["savedState"]["datasetName"] in {"", "supervised_dry_run"}
+    assert any(item["name"] == "real_bundle_v1" for item in payload["bundles"])
+    assert not any(item["name"] == "demo_bundle" for item in payload["bundles"])
 
 @pytest.mark.slow
 def test_supervised_worktree_run_routes_start_and_list_simulation(tmp_path, monkeypatch):

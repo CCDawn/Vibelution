@@ -1104,8 +1104,8 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   const libraryItems = workspaceSnapshot?.library?.items ?? EMPTY_LIBRARY_ENTRIES;
   const pendingItems = workspaceSnapshot?.library?.pending ?? EMPTY_LIBRARY_ENTRIES;
   const overview = workspaceSnapshot?.overview;
-  const workbenchControl = workbenchCatalogQuery.data ?? workspaceSnapshot?.workbench;
-  const workbenchState = overview?.workbench ?? workbenchControl?.savedState;
+  const workbenchControl = workbenchCatalogQuery.data;
+  const workbenchState = overview?.workbench ?? workbenchControl?.savedState ?? workspaceSnapshot?.workbench?.savedState;
   const activeRunSnapshot = selectRunSnapshotWithRunId(workspaceSnapshot?.activeRun);
   const latestSupervisedRunSnapshot = selectRunSnapshotWithRunId(workspaceSnapshot?.latestRun);
   const currentSupervisedAgentBindings = workspaceSnapshot?.currentAgentBindings ?? EMPTY_AGENT_BINDINGS;
@@ -1336,6 +1336,11 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   const hiddenDatasetCount = Math.max(0, (workbenchControl?.datasets ?? []).length - primaryDatasets.length);
   const availableBundles = workbenchControl?.bundles ?? [];
   const selectedBundleExists = availableBundles.some((item) => item.name === bundleNameInput);
+  const workbenchCatalogLoading = supervisedTrackQueriesEnabled && !workbenchControl && workbenchCatalogQuery.isFetching;
+  const workbenchCatalogUnavailable = supervisedTrackQueriesEnabled && !workbenchControl && workbenchCatalogQuery.isError;
+  const sourceCatalogCountLabel = workbenchCatalogLoading
+    ? (lang === "zh" ? "加载中" : "Loading")
+    : String(primaryDatasets.length + availableBundles.length);
   const supervisedSourceOptions = useMemo<SupervisedSourceOption[]>(() => {
     const datasetOptions: SupervisedSourceOption[] = primaryDatasets.map((item) => ({
       value: `dataset:${item.name}`,
@@ -2780,7 +2785,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                 </div>
                 <div className={styles.supervisedRunConsoleStatus}>
                   <span className={styles.secondaryPill}>
-                    {lang === "zh" ? "来源" : "Source"} {primaryDatasets.length + availableBundles.length}
+                    {lang === "zh" ? "来源" : "Source"} {sourceCatalogCountLabel}
                   </span>
                   <span className={styles.secondaryPill}>
                     {supervisedMembersRun ? supervisedMembersRunStatusLabel : supervisedMembersIdleStatusLabel}
@@ -2789,12 +2794,17 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
               </div>
 
               <div className={styles.sourceInventoryBar}>
-                <span>{lang === "zh" ? "数据集" : "Datasets"} <strong>{primaryDatasets.length}</strong></span>
-                <span>{lang === "zh" ? "评测包" : "Bundles"} <strong>{availableBundles.length}</strong></span>
+                <span>{lang === "zh" ? "数据集" : "Datasets"} <strong>{workbenchCatalogLoading ? "--" : primaryDatasets.length}</strong></span>
+                <span>{lang === "zh" ? "评测包" : "Bundles"} <strong>{workbenchCatalogLoading ? "--" : availableBundles.length}</strong></span>
                 {hiddenDatasetCount > 0 ? (
                   <span>{lang === "zh" ? "隐藏" : "Hidden"} <strong>{hiddenDatasetCount}</strong></span>
                 ) : null}
               </div>
+              {workbenchCatalogUnavailable ? (
+                <p className={styles.errorTextCompact}>
+                  {lang === "zh" ? "评测来源暂时不可用，正在等待目录刷新。" : "Evaluation sources are temporarily unavailable while the catalog refreshes."}
+                </p>
+              ) : null}
 
               <div className={styles.supervisedRunConsoleGrid}>
                 <div className={styles.supervisedRunSetup}>
@@ -2873,7 +2883,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                     {selectedSourceOfficialWarning ? (
                       <p className={styles.sourceWarningStrip}>{selectedSourceOfficialWarning}</p>
                     ) : null}
-                    {sourceKind === "bundle" && !selectedBundleExists ? (
+                    {workbenchControl && sourceKind === "bundle" && !selectedBundleExists ? (
                       <p className={styles.errorTextCompact}>
                         {lang === "zh" ? "请选择一个存在的监督评测包。" : "Choose an existing supervised bundle."}
                       </p>
@@ -2912,6 +2922,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                         disabled={
                           runLocked
                           || worktreeRunLocked
+                          || !workbenchControl
                           || startRunMutation.isPending
                           || (sourceKind === "dataset" && !datasetName)
                           || (sourceKind === "bundle" && !selectedBundleExists)
@@ -2941,6 +2952,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                         disabled={
                           runLocked
                           || worktreeRunLocked
+                          || !workbenchControl
                           || startWorktreeRunMutation.isPending
                           || (sourceKind === "dataset" && !datasetName)
                           || (sourceKind === "bundle" && !selectedBundleExists)
