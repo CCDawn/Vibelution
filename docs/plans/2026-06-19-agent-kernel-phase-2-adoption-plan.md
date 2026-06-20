@@ -588,11 +588,31 @@ git diff --check
 - delivery/wake/projection/runtime evidence 展示；
 - 不提供 mutation 控制动作。
 
-## 15. 下一步推荐
+## 15. Phase 3A：Chat Room Shadow Trace
 
-Phase 3 不应继续堆抽象，建议按入口收束：
+状态：已完成首个入口收束切片。
 
-1. 先做 session submit / chat room round 的迁移预案和 characterization tests。
+边界：
+
+- chat room round 创建时登记一条 `traceOnly` Kernel event；
+- Kernel 生成 Event / Task / WorkRun / Outcome 审计轨迹；
+- 不执行 recipient delivery；
+- 不写 agent inbox；
+- 不唤醒目标 agent；
+- 不替换现有 chat room scheduler / speaker runner / group context sync。
+
+实现含义：
+
+- 群聊轮次可以在 TaskLedger / Task Center 中被观察和追溯；
+- chat room round payload 与 work run snapshot 保留 `kernel.taskId/workRunId/outcomeId`；
+- Kernel trace 失败只记录证据，不阻塞群聊轮次执行；
+- `traceOnly` 是显式 delivery policy，普通 Kernel event 缺少 recipient 仍必须拒绝。
+
+## 16. 下一步推荐
+
+Phase 3B 不应继续堆抽象，建议继续按入口收束：
+
+1. 先做 session submit 的迁移预案和 characterization tests。
 2. 为 projection repair 增加独立记录和只读可见性，不让 repair 改写 TaskLedger。
 3. 在 Task Center 增加受控操作前，先定义 cancel / retry / approval 的 task lifecycle contract。
 4. EvaluationGate approval API 继续保持 side workflow，只有 proposal apply 阶段允许影响外部投影。
