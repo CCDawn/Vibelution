@@ -24,7 +24,7 @@ def _use_tmp_project_root(tmp_path, monkeypatch):
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(team_service, "PROJECT_ROOT", tmp_path)
 
-    def list_direct_agent_sessions():
+    def list_direct_agent_sessions(*args, **kwargs):
         sessions = []
         for agent in agent_directory_service.list_agents(include_archived=False):
             session_id = str(agent.get("directSessionId") or "").strip()
