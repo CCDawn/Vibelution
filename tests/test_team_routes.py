@@ -4,6 +4,7 @@ from core.web.app import create_app
 from core.web.control import CONTROL_TOKEN_HEADER, get_control_token
 from core.web.routes import teams as teams_route
 from core.web.services import agent_directory_service, chat_room_service, project_agent_bus_service, session_service, team_service
+from tests.helpers.system_agent_state import _seed_ai_search_system_team_ready, _seed_system_team_bootstrap_ready
 
 
 def _client() -> TestClient:
@@ -104,6 +105,7 @@ def test_ai_search_run_routes_start_and_list_runs(tmp_path, monkeypatch):
         )
 
     monkeypatch.setattr(team_service, "_run_ai_web_search", fake_web_search)
+    monkeypatch.setattr(team_service, "ensure_ai_search_system_team", _seed_ai_search_system_team_ready)
     client = _client()
     team_service.ensure_ai_search_system_team()
 
@@ -137,8 +139,7 @@ def test_ai_search_run_route_rejects_non_ai_search_team(tmp_path, monkeypatch):
 
 def test_team_list_route_reports_ready_when_system_teams_exist(tmp_path, monkeypatch):
     _isolate_team_route_state(tmp_path, monkeypatch)
-    team_service.ensure_evolution_system_teams()
-    team_service.ensure_ai_search_system_team()
+    _seed_system_team_bootstrap_ready()
     client = _client()
 
     response = client.get("/api/teams")
@@ -262,7 +263,7 @@ def test_team_delete_route_repairs_already_archived_team_members(tmp_path, monke
 
 def test_team_delete_route_rejects_system_team(tmp_path, monkeypatch):
     _isolate_team_route_state(tmp_path, monkeypatch)
-    team_service.ensure_evolution_system_teams()
+    _seed_system_team_bootstrap_ready()
     client = _client()
 
     response = client.delete("/api/teams/self-evolution-team")
