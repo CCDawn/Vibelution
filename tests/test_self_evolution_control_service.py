@@ -639,7 +639,13 @@ def test_self_evolution_agent_repair_does_not_reactivate_archived_fixed_role(tmp
     first = service.ensure_self_evolution_agent_instances()
     executor = next(agent for agent in first if agent["roleKey"] == "executor")
     agent_mode_binding_service.remove_agent_from_mode_bindings(executor["agentId"])
-    agent_directory_service.archive_agent_instance(executor["agentId"])
+    state = agent_directory_service.load_state()
+    for agent in state["agents"]:
+        if agent["agentId"] == executor["agentId"]:
+            agent["status"] = "archived"
+            agent["archivedAt"] = "2026-06-20T00:00:00+00:00"
+            break
+    agent_directory_service.save_state(state)
 
     second = service.ensure_self_evolution_agent_instances()
 
