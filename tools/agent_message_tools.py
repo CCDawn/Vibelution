@@ -475,6 +475,7 @@ def _try_send_research_org_message(
     inbox_message_id = str(delivery.get("inboxMessageId") or "").strip()
     research_org_message_id = str(message.get("messageId") or "").strip()
     tool_message_id = inbox_message_id or research_org_message_id
+    kernel_trace = _research_org_kernel_trace_fields(delivery)
     tool_message = {
         "messageId": tool_message_id,
         "sourceAgentId": source_agent_id,
@@ -493,6 +494,7 @@ def _try_send_research_org_message(
             "messageType": str(message.get("messageType") or message_type).strip(),
             "intent": str(message.get("intent") or intent).strip(),
             "deliveryMode": str(message.get("deliveryMode") or delivery_mode).strip(),
+            **kernel_trace,
         },
     )
     return {
@@ -509,12 +511,25 @@ def _try_send_research_org_message(
         "wakeStatus": delivery.get("wakeStatus") or ("blocked" if not allowed else ""),
         "reason": delivery.get("reason") or "",
         "delivery": delivery,
+        "kernel": kernel_trace,
     }
 
 
 def _agent_has_research_org_scope(agent: dict[str, Any]) -> bool:
     metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
     return any(str(metadata.get(key) or "").strip() for key in ("researchOrgRole", "systemRole"))
+
+
+def _research_org_kernel_trace_fields(delivery: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "eventId": str(delivery.get("kernelEventId") or "").strip(),
+        "taskId": str(delivery.get("kernelTaskId") or "").strip(),
+        "workRunId": str(delivery.get("kernelWorkRunId") or "").strip(),
+        "outcomeId": str(delivery.get("kernelOutcomeId") or "").strip(),
+        "outcomeStatus": str(delivery.get("kernelOutcomeStatus") or "").strip(),
+        "adapterVersion": str(delivery.get("kernelAdapterVersion") or "").strip(),
+        "reused": bool(delivery.get("kernelReused")),
+    }
 
 
 def _metadata_text(metadata: dict[str, Any], *keys: str) -> str:

@@ -1700,6 +1700,8 @@ def test_research_org_inbox_wake_carries_communication_metadata_to_conversation(
 
     delivery = result["message"]["deliveries"][0]
     assert delivery["wakeStatus"] == "started"
+    assert delivery["kernelTaskId"]
+    assert delivery["kernelEventId"]
 
     assert captured["sessionId"] == ceo["agent"]["directSessionId"]
     metadata = captured["kwargs"]["message_metadata"]
@@ -1710,6 +1712,17 @@ def test_research_org_inbox_wake_carries_communication_metadata_to_conversation(
     assert metadata["researchOrgIntent"] == "decision_request"
     assert metadata["researchOrgDeliveryMode"] == "private"
     assert metadata["communicationEdgeId"] == delivery["edgeId"]
+    consumed = agent_directory_service.list_agent_inbox_messages_for_agent(ceo["agentId"], status="consumed")
+    assert consumed[0]["createdBy"] == "research_org"
+    assert consumed[0]["metadata"]["sourceSurface"] == "research_org"
+    assert consumed[0]["metadata"]["researchOrgMessageId"] == result["message"]["messageId"]
+    assert consumed[0]["metadata"]["kernelTaskId"] == delivery["kernelTaskId"]
+    assert consumed[0]["metadata"]["kernelEventId"] == delivery["kernelEventId"]
+    audit = result["organization"]["auditEvents"][-1]
+    assert audit["messageId"] == result["message"]["messageId"]
+    assert audit["kernelTaskId"] == delivery["kernelTaskId"]
+    assert audit["kernelEventId"] == delivery["kernelEventId"]
+    assert audit["kernelOutcomeStatus"] == "succeeded"
 
 
 def test_agent_inbox_auto_reply_skips_when_agent_message_tool_already_sent_to_source(tmp_path, monkeypatch):
@@ -1901,6 +1914,8 @@ def test_agent_message_tool_routes_research_core_messages_through_org_policy(tmp
     assert payload["sourceAgentId"] == ceo["agentId"]
     assert payload["targetAgentId"] == steward["agentId"]
     assert payload["researchOrgMessageId"]
+    assert payload["kernel"]["taskId"]
+    assert payload["kernel"]["eventId"]
     assert payload["delivery"]["edgeId"] == f"edge-{ceo['agentId']}-{steward['agentId']}"
     tool_events = [
         event for event in recorded_events
@@ -1915,14 +1930,18 @@ def test_agent_message_tool_routes_research_core_messages_through_org_policy(tmp
     assert tool_fields["messageType"] == "task"
     assert tool_fields["intent"] == "tool_policy"
     assert tool_fields["deliveryMode"] == "private"
+    assert tool_fields["taskId"] == payload["kernel"]["taskId"]
 
     pending = agent_directory_service.list_agent_inbox_messages_for_agent(steward["agentId"], status="pending")
     assert [item["messageId"] for item in pending] == [payload["messageId"]]
     assert pending[0]["kind"] == "research_org_task"
     assert pending[0]["createdBy"] == "research_org"
+    assert pending[0]["metadata"]["sourceSurface"] == "research_org"
     assert pending[0]["metadata"]["researchOrgMessageId"] == payload["researchOrgMessageId"]
     assert pending[0]["metadata"]["researchOrgMessageType"] == "task"
     assert pending[0]["metadata"]["researchOrgIntent"] == "tool_policy"
+    assert pending[0]["metadata"]["kernelTaskId"] == payload["kernel"]["taskId"]
+    assert pending[0]["metadata"]["kernelEventId"] == payload["kernel"]["eventId"]
 
 
 def test_agent_message_tool_blocks_research_core_message_without_intent(tmp_path, monkeypatch):
@@ -1990,9 +2009,11 @@ def test_research_org_report_intent_forces_mailbox_only_even_when_wake_requested
     assert delivery["allowed"] is True
     assert delivery["wakeRequested"] is False
     assert delivery["wakeStatus"] == "not_requested"
+    assert delivery["kernelTaskId"]
     pending = agent_directory_service.list_agent_inbox_messages_for_agent(ceo["agentId"], status="pending")
     assert [item["messageId"] for item in pending] == [delivery["inboxMessageId"]]
     assert pending[0]["metadata"]["researchOrgIntent"] == "status_report"
+    assert pending[0]["metadata"]["kernelTaskId"] == delivery["kernelTaskId"]
 
 
 def test_agent_message_tool_blocks_research_core_messages_without_allowed_policy(tmp_path, monkeypatch):
