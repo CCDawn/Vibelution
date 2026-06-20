@@ -3,13 +3,8 @@
 稳定运行档案测试
 """
 
-import pytest
-
 from config import Settings
 from config.profiles import apply_runtime_profile
-
-pytestmark = pytest.mark.serial
-
 
 def make_config(**kwargs):
     return Settings(None, **kwargs).config
