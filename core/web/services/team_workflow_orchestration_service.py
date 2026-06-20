@@ -8986,6 +8986,90 @@ def _source_collection_work_run_terminal_summary(result: dict[str, Any]) -> str:
     return f"本轮资料搜索完成，写入 {record_count} 条资料、导入 {imported_count} 个候选、跳过 {skipped_duplicate_count} 条重复资料。"
 
 
+def _sync_source_collection_stage_round_after_search(
+    team_id: str,
+    run_id: str,
+    result: dict[str, Any],
+    *,
+    terminal_status: str,
+    terminal_summary: str,
+) -> None:
+    now = utc_now_iso()
+    try:
+        with _WORKFLOW_LOCK:
+            store = _load_stage_round_store(team_id)
+            rounds = _stage_rounds(store)
+            matched_round_ids: list[str] = []
+            for stage_round in rounds:
+                source_run_ids = [str(item) for item in list(stage_round.get("sourceRunIds") or []) if str(item or "").strip()]
+                if run_id not in source_run_ids:
+                    continue
+                matched_round_ids.append(str(stage_round.get("stageRoundId") or ""))
+                execution = (
+                    stage_round.get("sourceCollectionSearchExecution")
+                    if isinstance(stage_round.get("sourceCollectionSearchExecution"), dict)
+                    else {}
+                )
+                execution.update(
+                    {
+                        "runId": run_id,
+                        "status": str(result.get("status") or terminal_status),
+                        "terminalStatus": terminal_status,
+                        "currentPhase": _source_collection_work_run_terminal_phase(result),
+                        "summary": _trim_text(terminal_summary, max_length=500),
+                        "executedQueryCount": _source_collection_count(result.get("executedQueryCount")),
+                        "skippedQueryCount": _source_collection_count(result.get("skippedQueryCount")),
+                        "failedQueryCount": _source_collection_count(result.get("failedQueryCount")),
+                        "resultCount": _source_collection_count(result.get("resultCount")),
+                        "recordCount": _source_collection_count(result.get("recordCount")),
+                        "importedCount": _source_collection_count(result.get("importedCount")),
+                        "skippedDuplicateCount": _source_collection_count(result.get("skippedDuplicateCount")),
+                        "remainingQueryCount": _source_collection_count(result.get("remainingQueryCount")),
+                        "hasMore": bool(result.get("hasMore")),
+                        "updatedAt": now,
+                    }
+                )
+                stage_round["sourceCollectionSearchExecution"] = execution
+                source_collection_summary = (
+                    result.get("sourceCollectionSummary") if isinstance(result.get("sourceCollectionSummary"), dict) else {}
+                )
+                if source_collection_summary:
+                    stage_round["sourceCollectionSummary"] = source_collection_summary
+                if terminal_status == "completed":
+                    stage_round["status"] = "completed"
+                elif terminal_status == "failed":
+                    stage_round["status"] = "needs_attention"
+                else:
+                    stage_round["status"] = "running"
+                stage_round["updatedAt"] = now
+            if not matched_round_ids:
+                return
+            store["rounds"] = rounds
+            store["updatedAt"] = now
+            _write_json(_stage_round_store_path(team_id), store)
+    except Exception as exc:
+        _record_workflow_event(
+            "source_collection.stage_round_sync_failed",
+            team_id,
+            fields={
+                "runId": run_id,
+                "terminalStatus": terminal_status,
+                "errorType": type(exc).__name__,
+                "error": _trim_text(exc, max_length=500),
+            },
+        )
+        return
+    _record_workflow_event(
+        "source_collection.stage_round_synced",
+        team_id,
+        fields={
+            "runId": run_id,
+            "terminalStatus": terminal_status,
+            "stageRoundIds": [item for item in matched_round_ids if item],
+        },
+    )
+
+
 def _source_collection_count(value: Any) -> int:
     return _normalize_int(value, default=0, minimum=0, maximum=100_000)
 
