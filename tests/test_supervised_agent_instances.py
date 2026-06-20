@@ -13,6 +13,7 @@ from core.web.services import (
     session_service,
     supervised_agent_service,
 )
+from tests.helpers.system_agent_state import _seed_supervised_fixed_role_agents
 
 
 client = TestClient(create_app(), headers={CONTROL_TOKEN_HEADER: get_control_token()})
@@ -157,7 +158,7 @@ def test_ensure_supervised_agent_instances_preserves_agent_center_llm_binding(tm
         lambda *args, **kwargs: events.append((args, kwargs)) or {"accepted": True},
     )
 
-    first = supervised_agent_service.ensure_supervised_agent_instances()
+    first = _seed_supervised_fixed_role_agents()
     baseline = next(agent for agent in first if agent["metadata"]["supervisedRole"] == "baseline")
     agent_directory_service.update_agent_instance(
         baseline["agentId"],
@@ -198,7 +199,7 @@ def test_ensure_supervised_agent_instances_prefers_xiaomi_when_role_profile_miss
 def test_ensure_supervised_agent_instances_cleans_stale_exclusions_before_slot_sync(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
 
-    agents = supervised_agent_service.ensure_supervised_agent_instances()
+    agents = _seed_supervised_fixed_role_agents()
     mode = agent_mode_binding_service.get_mode_bindings_payload()["modes"]["supervised_evolution"]
     mode["slots"] = {role.role: "" for role in supervised_agent_service.SUPERVISED_AGENT_ROLES}
     mode["excludedAgentIds"] = [
@@ -236,7 +237,7 @@ def test_ensure_supervised_agent_instances_does_not_reactivate_archived_fixed_ro
         lambda *args, **kwargs: events.append((args, kwargs)) or {"accepted": True},
     )
 
-    first = supervised_agent_service.ensure_supervised_agent_instances()
+    first = _seed_supervised_fixed_role_agents()
     baseline = next(agent for agent in first if agent["metadata"]["supervisedRole"] == "baseline")
     agent_mode_binding_service.remove_agent_from_mode_bindings(baseline["agentId"])
     state = agent_directory_service.load_state()
@@ -263,7 +264,7 @@ def test_ensure_supervised_agent_instances_does_not_reactivate_archived_fixed_ro
 def test_ensure_supervised_agent_instances_restores_core_judge_without_duplicates(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
 
-    first = supervised_agent_service.ensure_supervised_agent_instances()
+    first = _seed_supervised_fixed_role_agents()
     judge = next(agent for agent in first if agent["metadata"]["supervisedRole"] == "judge")
     agent_mode_binding_service.remove_agent_from_mode_bindings(judge["agentId"])
     state = agent_directory_service.load_state()
@@ -309,6 +310,7 @@ def test_agents_api_auto_syncs_supervised_agent_instances(tmp_path, monkeypatch)
 
 def test_supervised_agent_bindings_are_run_safe_payloads(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
+    _seed_supervised_fixed_role_agents()
 
     bindings = supervised_agent_service.supervised_agent_bindings()
 
@@ -334,7 +336,7 @@ def test_supervised_agent_bindings_are_run_safe_payloads(tmp_path, monkeypatch):
 
 def test_current_supervised_agent_bindings_snapshot_reads_current_config_without_sync(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
-    agents = supervised_agent_service.ensure_supervised_agent_instances()
+    agents = _seed_supervised_fixed_role_agents()
     baseline = next(agent for agent in agents if agent["metadata"]["supervisedRole"] == "baseline")
     agent_directory_service.update_agent_instance(
         baseline["agentId"],
@@ -358,7 +360,7 @@ def test_current_supervised_agent_bindings_snapshot_reads_current_config_without
 
 def test_supervised_agent_bindings_follow_mode_binding_slot_replacement(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
-    supervised_agent_service.ensure_supervised_agent_instances()
+    _seed_supervised_fixed_role_agents()
     replacement = agent_directory_service.create_agent_instance(
         display_name="替换基线 Agent",
         llm_bindings={"dialogue": {"modelId": "model-primary"}},
@@ -382,7 +384,7 @@ def test_supervised_agent_bindings_follow_mode_binding_slot_replacement(tmp_path
 
 def test_supervised_agent_bindings_block_archived_slot_replacement(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
-    supervised_agent_service.ensure_supervised_agent_instances()
+    _seed_supervised_fixed_role_agents()
     replacement = agent_directory_service.create_agent_instance(
         display_name="将被归档的基线 Agent",
         llm_bindings={"dialogue": {"modelId": "model-primary"}},
@@ -402,7 +404,7 @@ def test_supervised_agent_bindings_block_archived_slot_replacement(tmp_path, mon
 
 def test_supervised_agent_bindings_block_missing_dialogue_model(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
-    agents = supervised_agent_service.ensure_supervised_agent_instances()
+    agents = _seed_supervised_fixed_role_agents()
     baseline = next(agent for agent in agents if agent["metadata"]["supervisedRole"] == "baseline")
     state = agent_directory_service.load_state()
     for item in state["agents"]:
@@ -417,7 +419,7 @@ def test_supervised_agent_bindings_block_missing_dialogue_model(tmp_path, monkey
 def test_supervised_agent_bindings_block_unregistered_dialogue_model(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     monkeypatch.setattr(supervised_agent_service, "_configured_model_library_ids", lambda: {"model-primary"})
-    agents = supervised_agent_service.ensure_supervised_agent_instances()
+    agents = _seed_supervised_fixed_role_agents()
     judge = next(agent for agent in agents if agent["metadata"]["supervisedRole"] == "judge")
     state = agent_directory_service.load_state()
     for item in state["agents"]:
@@ -470,7 +472,7 @@ def test_supervised_agent_bindings_block_missing_dialogue_model_api_key(tmp_path
         }
     )
     monkeypatch.setattr(supervised_agent_service, "_current_config", lambda: config)
-    agents = supervised_agent_service.ensure_supervised_agent_instances()
+    agents = _seed_supervised_fixed_role_agents()
     state = agent_directory_service.load_state()
     for item in state["agents"]:
         if item.get("agentId") in {agent["agentId"] for agent in agents}:

@@ -23,6 +23,10 @@ from core.web.services import (
     supervised_agent_service,
     team_service,
 )
+from tests.helpers.system_agent_state import (
+    _mark_config_agent_instances_present,
+    _seed_supervised_fixed_role_agent,
+)
 
 
 client = TestClient(create_app(), headers={CONTROL_TOKEN_HEADER: get_control_token()})
@@ -1936,8 +1940,7 @@ def test_agent_config_workspace_does_not_report_historical_mode_repair_warnings(
 def test_agent_delete_api_blocks_supervised_fixed_role_agent(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     monkeypatch.setattr(config_service, "get_config_workspace", _fake_config_workspace)
-    supervised = supervised_agent_service.ensure_supervised_agent_instances()
-    baseline = next(agent for agent in supervised if agent["metadata"].get("supervisedRole") == "baseline")
+    baseline = _seed_supervised_fixed_role_agent("baseline")
 
     response = client.delete(f"/api/agents/{baseline['agentId']}")
     assert response.status_code == 422, response.text
@@ -1959,8 +1962,7 @@ def test_agent_delete_api_blocks_supervised_fixed_role_agent(tmp_path, monkeypat
 def test_agent_delete_api_blocks_core_supervised_judge(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     monkeypatch.setattr(config_service, "get_config_workspace", _fake_config_workspace)
-    supervised = supervised_agent_service.ensure_supervised_agent_instances()
-    judge = next(agent for agent in supervised if agent["metadata"].get("supervisedRole") == "judge")
+    judge = _seed_supervised_fixed_role_agent("judge")
 
     response = client.delete(f"/api/agents/{judge['agentId']}")
 
@@ -2011,8 +2013,7 @@ def test_agent_patch_status_archived_uses_safe_archive_cleanup(tmp_path, monkeyp
 def test_agent_purge_api_blocks_supervised_fixed_role_agent(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     monkeypatch.setattr(config_service, "get_config_workspace", _fake_config_workspace)
-    supervised = supervised_agent_service.ensure_supervised_agent_instances()
-    auditor = next(agent for agent in supervised if agent["metadata"].get("supervisedRole") == "auditor")
+    auditor = _seed_supervised_fixed_role_agent("auditor")
 
     archive_response = client.delete(f"/api/agents/{auditor['agentId']}")
     assert archive_response.status_code == 422, archive_response.text
@@ -2047,6 +2048,7 @@ def test_agent_purge_api_preserves_fixed_role_tombstone_after_legacy_archive(tmp
         reviewer["agentId"],
         metadata={"fixedRole": True, "supervisedRole": "reviewer"},
     )
+    _mark_config_agent_instances_present()
     repaired = agent_mode_binding_service.get_mode_bindings_payload()["modes"]["supervised_evolution"]
     assert repaired["slots"]["reviewer"] == ""
 

@@ -10,6 +10,11 @@ from core.web.services import (
     session_service,
     team_service,
 )
+from tests.helpers.system_agent_state import (
+    _evolution_system_agent_payloads,
+    _seed_ai_search_system_team_ready,
+    _seed_system_team_bootstrap_ready,
+)
 
 
 def _use_tmp_project_root(tmp_path, monkeypatch):
@@ -427,6 +432,7 @@ def test_team_chat_room_sync_preserves_existing_config_extensions(tmp_path, monk
 
 def test_ensure_evolution_system_teams_materializes_mode_roles(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setattr(team_service, "_ensure_evolution_system_agents", _evolution_system_agent_payloads)
 
     result = team_service.ensure_evolution_system_teams()
     teams = {team["teamId"]: team for team in result["teams"]}
@@ -570,6 +576,7 @@ def test_start_ai_search_source_scope_run_writes_cards_and_index(tmp_path, monke
         )
 
     monkeypatch.setattr(team_service, "_run_ai_web_search", fake_web_search)
+    monkeypatch.setattr(team_service, "ensure_ai_search_system_team", _seed_ai_search_system_team_ready)
     team_service.ensure_ai_search_system_team()
 
     run = team_service.start_ai_search_source_scope_run(
@@ -620,6 +627,7 @@ def test_start_ai_search_source_scope_run_records_partial_failures(tmp_path, mon
         "_run_ai_source_page_fallback",
         lambda query, *, max_results, primary_error: "[错误] source page fallback failed",
     )
+    monkeypatch.setattr(team_service, "ensure_ai_search_system_team", _seed_ai_search_system_team_ready)
 
     run = team_service.start_ai_search_source_scope_run(team_service.AI_SEARCH_TEAM_ID, source_limit=2)
 
@@ -651,6 +659,7 @@ def test_start_ai_search_source_scope_run_falls_back_to_source_page(tmp_path, mo
 
     monkeypatch.setattr(team_service, "_run_ai_web_search", fake_web_search)
     monkeypatch.setattr(team_service, "_fetch_ai_search_source_page", fake_fetch_source_page)
+    monkeypatch.setattr(team_service, "ensure_ai_search_system_team", _seed_ai_search_system_team_ready)
 
     run = team_service.start_ai_search_source_scope_run(
         team_service.AI_SEARCH_TEAM_ID,
@@ -683,6 +692,7 @@ def test_start_ai_search_source_scope_run_falls_back_to_source_page(tmp_path, mo
 
 def test_ensure_evolution_system_teams_preserves_existing_team_member_status(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setattr(team_service, "_ensure_evolution_system_agents", _evolution_system_agent_payloads)
     agent = agent_directory_service.create_agent_instance(display_name="Research Lead", direct_session_id="session-research-lead")
     team = team_service.create_team(name="Research Team", members=[{"agentId": agent["agentId"], "role": "lead"}])
 
@@ -1126,7 +1136,7 @@ def test_archive_team_rejects_protected_member_without_partial_changes(tmp_path,
 
 def test_archive_system_team_is_rejected(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
-    team_service.ensure_evolution_system_teams()
+    _seed_system_team_bootstrap_ready()
 
     with pytest.raises(team_service.TeamServiceError, match="System Team cannot be archived"):
         team_service.archive_team("self-evolution-team")
