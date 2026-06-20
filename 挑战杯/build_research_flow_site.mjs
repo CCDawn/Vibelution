@@ -577,6 +577,7 @@ const implementationBlueprint = {
     ["M6.57", "资料提炼 Agent 一键阶段", "新增 /api/teams/{team_id}/workflow-orchestration/knowledge-collection/extract，由 content_extraction/资料提炼 Agent 批量读取本轮 DataRecord，并通过既有导入桥幂等转为 source_manifest 候选。", "资料提炼步骤卡不再只是查看结果；用户可点击 Agent 提炼资料或 Agent 重新提炼，页面显示提炼进行中、失败和完成状态，并刷新本轮候选库、Assignment、候选审查状态和证据落盘位置；仍不触发外部搜索、不写正式 Team Knowledge/RAG/official graph。"],
     ["M6.58", "资料入库入口贯通候选资料", "资料入库步骤不再只看已通过资料数量；只要本轮已有候选资料，就允许点击 Agent 提炼并通知知识库 Agent。", "前端把候选资料数作为待入库包输入上限；后端 knowledge-collection/ingest 会先调用资料审查，再生成候选关系和 steward_pack_draft，并通过 Agent Inbox 向 Knowledge Steward Agent 发送入库请求，避免用户被卡在必须先手动跑完每个中间门禁，同时不绕过最终入库 Agent。"],
     ["M6.59", "资料提炼结果滚动与审查交接", "搜索资料结果区和资料提炼候选区都接入独立纵向滚动容器；资料提炼统计和候选状态统一显示为已审查、需补资料或待 Agent 审查。", "Agent 重新提炼只负责把本轮原始资料同步为候选资料，不自动完成资料质量审查；用户看到仍有待 Agent 审查时，应进入资料审查步骤，由资料质量评估 Agent 批量处理。"],
+    ["M6.60", "重复资料搜索真实收口", "资料搜索重复-only 批次返回 duplicates_skipped、skippedDuplicateCount、remainingQueryCount=0 和 hasMore=false；assignment/work-run 按 completed 收口。", "重复资料被跳过是成功收口，不再写 no_importable_search_result，不再误导 Agent 或 UI 继续搜索；去重身份统一读取 DOI、URL、metadata.doi、containerTitle/issued 和标题指纹，URL query 排序后比较。"],
     ["M7", "实验计划账本首切", "新增 experiments/status 与 experiments/plan：聚合实验阶段轮次、algorithm_hypothesis 候选、计划草稿和 baseline/metric/dataset/smoke 缺口，并把草稿写入 experiment_plans/index.json。", "Teams 实验阶段页展示实验计划账本，可生成计划草稿；readyForSmoke 与 readyForFullRun 保持 false，直到 active baseline artifact 和 smoke 结果由后续切片登记。"],
     ["M7.1", "Active baseline artifact 登记", "新增 experiments/plans/{planId}/baseline-artifact：登记 baseline 工件路径、复现命令、评估命令和指标快照，并更新 baselineSelection.activeBaselineReady。", "登记 active baseline artifact 后 readyForSmoke=true，active_baseline_not_registered 缺口消失；full-run 仍由 smoke_result 阻塞，不触发训练 runner。"],
     ["M7.2", "Smoke 结果登记", "新增 experiments/plans/{planId}/smoke-result：登记 smoke 指标、结果路径、日志引用和 gateDecision，并更新 activeSmokeResult。", "Teams 实验账本已接 smoke 结果登记和 active smoke 回显；status=passed 才让 readyForFullRun=true；failed/needs_review 继续阻塞 full-run；仍不创建 ExperimentResult、不触发训练 runner。"],
@@ -762,6 +763,7 @@ const implementationBlueprint = {
     ["阶段协调显式启动", "/api/teams/{teamId}/workflow-orchestration/stage-rounds/{stageRoundId}/coordination/retry", "用户明确需要团队讨论时启动团队协调 round；如果群聊缺失、忙碌或没有可发言成员，会把失败原因写回 coordinationContract；成功后写回 coordinationRoomId/coordinationRoundId。"],
     ["数据搜索计划契约", "DataSearchPlan / assignedQueries", "基于 topic/goal/scope/querySeeds 生成 planned 查询、角色分配输入和 resultWritebackContract；只做 contract_only 搜索计划，不触发真实外部搜索。"],
     ["DataRecord 导入桥", "/api/teams/{teamId}/workflow-orchestration/data-processing/runs/{runId}/records/{recordId}/source-candidate", "把通用 DataRecord 幂等导入为 source_manifest 候选，保留 run/record/quality/collection trace；不写正式知识。"],
+    ["资料搜索重复收口", "/api/teams/{teamId}/workflow-orchestration/source-collection-runs/{runId}/search/execute", "重复-only 搜索以 duplicates_skipped 完成，返回 skippedDuplicateCount 且 remainingQueryCount=0/hasMore=false；不把已跳过重复误标为 returned 或 blocking issue。"],
     ["资料提炼批量执行", "/api/teams/{teamId}/workflow-orchestration/knowledge-collection/extract", "资料提炼 Agent 批量把本轮 DataRecord 同步为 source_manifest 候选，并记录 search_events/candidates 镜像；重复执行保持幂等。"],
     ["模型调用证据链", "/api/teams/{teamId}/workflow-orchestration/official-model-evidence/status", "只读聚合 Qwen/百炼/本地模型调用证据覆盖；本地模型 invoke 自动登记 invocation_log，已有 local_model_output 可折算为候选输出证据；不写正式知识/RAG/图谱。"],
     ["模型证据登记", "/api/teams/{teamId}/workflow-orchestration/official-model-evidence", "允许登记 invocation_log、sample_output、screenshot、config 或 manual_attestation，要求绑定 taskType/workflowNode/candidateId 之一，用于审计而非自动入库。"],
@@ -2870,7 +2872,7 @@ function indexHtml() {
           <div class="focus-list">
             <div class="focus-item"><b>优先看</b><span>知识搜集页是否能一眼判断是否进行中、下一步按钮是什么、结果存在哪里，以及详情里能否追溯原始证据。</span></div>
             <div class="focus-item"><b>不能做</b><span>当前执行器只取元数据引用，不抓全文、不审批入库、不把候选图谱当作正式事实。</span></div>
-            <div class="focus-item"><b>下一步</b><span>扩展全文下载/网页抽取、批量去重、质量评分和 cache hit/miss 运行证据。</span></div>
+            <div class="focus-item"><b>下一步</b><span>扩展全文下载/网页抽取、质量评分和 cache hit/miss 运行证据；重复-only 搜索已按成功收口，不再提示继续或补救。</span></div>
           </div>
         </aside>
       </section>

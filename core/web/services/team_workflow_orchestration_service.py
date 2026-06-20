@@ -846,6 +846,14 @@ def execute_source_collection_search(team_id: str, run_id: str, payload: dict[st
     try:
         result = _execute_source_collection_search_impl(normalized_team_id, normalized_run_id, payload)
     except Exception as exc:
+        failure_result = {
+            "status": "failed",
+            "failedQueryCount": 1,
+            "executedQueryCount": 0,
+            "recordCount": len(records),
+            "importedCount": 0,
+            "sourceCollectionSummary": _source_collection_assignment_stage_summary(assignments),
+        }
         _persist_source_collection_work_run(
             normalized_team_id,
             normalized_run_id,
@@ -860,6 +868,13 @@ def execute_source_collection_search(team_id: str, run_id: str, payload: dict[st
             error=str(exc),
             error_type=type(exc).__name__,
         )
+        _sync_source_collection_stage_round_after_search(
+            normalized_team_id,
+            normalized_run_id,
+            failure_result,
+            terminal_status="failed",
+            terminal_summary="资料搜索执行失败，等待检查搜索错误。",
+        )
         raise
 
     final_run = result.get("run") if isinstance(result.get("run"), dict) else run
@@ -868,16 +883,19 @@ def execute_source_collection_search(team_id: str, run_id: str, payload: dict[st
         final_records = data_processing_service.list_records(normalized_run_id).get("records") if normalized_run_id else []
     except data_processing_service.DataProcessingError:
         final_records = []
+    terminal_status = _source_collection_work_run_terminal_status(result)
+    terminal_phase = _source_collection_work_run_terminal_phase(result)
+    terminal_summary = _source_collection_work_run_terminal_summary(result)
     _persist_source_collection_work_run(
         normalized_team_id,
         normalized_run_id,
-        status=_source_collection_work_run_terminal_status(result),
-        current_phase=_source_collection_work_run_terminal_phase(result),
+        status=terminal_status,
+        current_phase=terminal_phase,
         run=final_run,
         team=team,
         assignments=final_assignments,
         records=[item for item in list(final_records or []) if isinstance(item, dict)],
-        summary=_source_collection_work_run_terminal_summary(result),
+        summary=terminal_summary,
         active=False,
         extra={
             "executedQueryCount": _source_collection_count(result.get("executedQueryCount")),
@@ -886,6 +904,13 @@ def execute_source_collection_search(team_id: str, run_id: str, payload: dict[st
             "importedCount": _source_collection_count(result.get("importedCount")),
             "resultCount": _source_collection_count(result.get("resultCount")),
         },
+    )
+    _sync_source_collection_stage_round_after_search(
+        normalized_team_id,
+        normalized_run_id,
+        result,
+        terminal_status=terminal_status,
+        terminal_summary=terminal_summary,
     )
     return result
 
@@ -1088,8 +1113,13 @@ def _execute_source_collection_search_impl(team_id: str, run_id: str, payload: d
                 )
             )
             continue
-        assignment_records: list[dict[str, Any]] = []
         attempted_query_ids: list[str] = []
+        assignment_skipped_duplicate_count = 0
+        assignment_query_ids = {
+            _trim_text(item.get("queryId"), max_length=160)
+            for item in assigned_queries
+            if _trim_text(item.get("queryId"), max_length=160)
+        }
         for query in assigned_queries:
             if executed_query_count >= max_queries:
                 break
@@ -1102,6 +1132,8 @@ def _execute_source_collection_search_impl(team_id: str, run_id: str, payload: d
                 continue
             search_response = _execute_source_collection_query(query, max_results=max_results_per_query, provider=provider)
             attempted_query_ids.append(query_id)
+            query_records: list[dict[str, Any]] = []
+            query_skipped_duplicate_count = 0
             if search_response.get("error"):
                 failed_query_count += 1
                 execution_events.append(
@@ -1146,6 +1178,8 @@ def _execute_source_collection_search_impl(team_id: str, run_id: str, payload: d
                 duplicate_record = existing_identity_records.get(source_identity_key) if source_identity_key else None
                 if duplicate_record is not None:
                     skipped_duplicate_count += 1
+                    assignment_skipped_duplicate_count += 1
+                    query_skipped_duplicate_count += 1
                     if source_identity_key:
                         duplicate_source_keys.append(source_identity_key)
                     execution_events.append(
@@ -1163,126 +1197,139 @@ def _execute_source_collection_search_impl(team_id: str, run_id: str, payload: d
                     continue
                 if source_identity_key:
                     existing_identity_records[source_identity_key] = candidate_record
-                assignment_records.append(candidate_record)
-        if assignment_records:
-            assignment_query_ids = {
-                _trim_text(item.get("queryId"), max_length=160)
-                for item in assigned_queries
-                if _trim_text(item.get("queryId"), max_length=160)
-            }
+                query_records.append(candidate_record)
             remaining_query_ids = assignment_query_ids - existing_query_ids
-            output_status = "completed" if not remaining_query_ids else "returned"
-            try:
-                output_response = data_processing_service.record_collection_output(
-                    normalized_run_id,
-                    assignment_id,
-                    {
-                        "status": output_status,
-                        "records": assignment_records,
-                        "notes": "Automated source collection search executed metadata-only queries and wrote DataRecords for review.",
-                        "qualitySignals": {
-                            "searchProvider": provider,
-                            "executedQueryCount": len(attempted_query_ids),
-                            "metadataOnlyDownload": True,
-                            "remainingQueryCount": len(remaining_query_ids),
+            if query_records:
+                output_status = "completed" if not remaining_query_ids else "returned"
+                try:
+                    output_response = data_processing_service.record_collection_output(
+                        normalized_run_id,
+                        assignment_id,
+                        {
+                            "status": output_status,
+                            "records": query_records,
+                            "notes": "Automated source collection search executed one metadata-only query and wrote DataRecords for review.",
+                            "qualitySignals": {
+                                "searchProvider": provider,
+                                "executedQueryCount": 1,
+                                "queryId": query_id,
+                                "metadataOnlyDownload": True,
+                                "remainingQueryCount": len(remaining_query_ids),
+                            },
                         },
-                    },
-                )
-            except data_processing_service.DataProcessingError as exc:
-                raise TeamWorkflowOrchestrationError(str(exc)) from exc
-            outputs.append(output_response["output"])
-            created_records.extend(output_response["createdRecords"])
-            for index, record in enumerate(output_response["createdRecords"]):
-                original_record = assignment_records[index] if index < len(assignment_records) else {}
-                trace = _source_collection_record_search_trace(original_record)
-                execution_events.append(
-                    _source_collection_execution_event(
-                        "storage.data_record_written",
-                        assignment=assignment,
-                        query=trace,
-                        status="completed",
-                        title=f"Stored DataRecord: {record.get('title') or record.get('recordId')}",
-                        summary="The search result was stored in the generic data processing run before candidate import.",
-                        refs=[record.get("recordId", ""), record.get("sourceRef", "") or record.get("rawLocation", "")],
-                        storage_refs=[*_source_collection_storage_refs(run), storage_artifacts["recordsPath"]],
                     )
-                )
-                import_response = import_data_record_as_source_candidate(
-                    normalized_team_id,
-                    normalized_run_id,
-                    str(record.get("recordId") or ""),
-                    {
-                        "createdByAgent": _trim_text(assignment.get("agentId"), max_length=160) or agent_role or "source_collection_search_executor",
-                        "tags": ["source_collection", "search_execution", agent_role],
-                        "metadata": {
-                            "sourceCollectionSearchExecution": True,
-                            "searchProvider": provider,
-                            "metadataOnlyDownload": True,
-                            "assignmentId": assignment_id,
-                            "agentRole": agent_role,
-                            "queryId": _trim_text(trace.get("queryId"), max_length=160),
-                            "query": _trim_text(trace.get("query"), max_length=1000),
-                        },
-                    },
-                )
-                if import_response.get("duplicate"):
-                    skipped_duplicate_count += 1
-                    candidate = import_response.get("candidate") if isinstance(import_response.get("candidate"), dict) else {}
-                    candidate_metadata = candidate.get("metadata") if isinstance(candidate.get("metadata"), dict) else {}
-                    duplicate_key = _trim_text(candidate_metadata.get("sourceIdentityKey"), max_length=200)
-                    if duplicate_key:
-                        duplicate_source_keys.append(duplicate_key)
+                except data_processing_service.DataProcessingError as exc:
+                    raise TeamWorkflowOrchestrationError(str(exc)) from exc
+                outputs.append(output_response["output"])
+                created_records.extend(output_response["createdRecords"])
+                for index, record in enumerate(output_response["createdRecords"]):
+                    original_record = query_records[index] if index < len(query_records) else {}
+                    trace = _source_collection_record_search_trace(original_record)
                     execution_events.append(
                         _source_collection_execution_event(
-                            "storage.source_manifest_duplicate_skipped",
+                            "storage.data_record_written",
                             assignment=assignment,
                             query=trace,
                             status="completed",
-                            title=f"Skipped duplicate source_manifest: {candidate.get('title') or candidate.get('candidateId')}",
-                            summary="The DataRecord matched an existing source_manifest identity and was not imported again.",
-                            refs=[candidate.get("candidateId", ""), str(record.get("recordId") or "")],
-                            storage_refs=[storage_artifacts["candidatesPath"], storage_artifacts["candidateStorePath"]],
+                            title=f"Stored DataRecord: {record.get('title') or record.get('recordId')}",
+                            summary="The search result was stored in the generic data processing run before candidate import.",
+                            refs=[record.get("recordId", ""), record.get("sourceRef", "") or record.get("rawLocation", "")],
+                            storage_refs=[*_source_collection_storage_refs(run), storage_artifacts["recordsPath"]],
                         )
                     )
-                else:
-                    imported.append(import_response)
+                    import_response = import_data_record_as_source_candidate(
+                        normalized_team_id,
+                        normalized_run_id,
+                        str(record.get("recordId") or ""),
+                        {
+                            "createdByAgent": _trim_text(assignment.get("agentId"), max_length=160) or agent_role or "source_collection_search_executor",
+                            "tags": ["source_collection", "search_execution", agent_role],
+                            "metadata": {
+                                "sourceCollectionSearchExecution": True,
+                                "searchProvider": provider,
+                                "metadataOnlyDownload": True,
+                                "assignmentId": assignment_id,
+                                "agentRole": agent_role,
+                                "queryId": _trim_text(trace.get("queryId"), max_length=160),
+                                "query": _trim_text(trace.get("query"), max_length=1000),
+                            },
+                        },
+                    )
+                    if import_response.get("duplicate"):
+                        skipped_duplicate_count += 1
+                        candidate = import_response.get("candidate") if isinstance(import_response.get("candidate"), dict) else {}
+                        candidate_metadata = candidate.get("metadata") if isinstance(candidate.get("metadata"), dict) else {}
+                        duplicate_key = _trim_text(candidate_metadata.get("sourceIdentityKey"), max_length=200)
+                        if duplicate_key:
+                            duplicate_source_keys.append(duplicate_key)
+                        execution_events.append(
+                            _source_collection_execution_event(
+                                "storage.source_manifest_duplicate_skipped",
+                                assignment=assignment,
+                                query=trace,
+                                status="completed",
+                                title=f"Skipped duplicate source_manifest: {candidate.get('title') or candidate.get('candidateId')}",
+                                summary="The DataRecord matched an existing source_manifest identity and was not imported again.",
+                                refs=[candidate.get("candidateId", ""), str(record.get("recordId") or "")],
+                                storage_refs=[storage_artifacts["candidatesPath"], storage_artifacts["candidateStorePath"]],
+                            )
+                        )
+                    else:
+                        imported.append(import_response)
+                        execution_events.append(
+                            _source_collection_execution_event(
+                                "storage.source_manifest_imported",
+                                assignment=assignment,
+                                query=trace,
+                                status="completed",
+                                title=f"Imported source_manifest: {import_response['candidate'].get('title')}",
+                                summary="The DataRecord was imported as a source_manifest candidate, still outside formal Team Knowledge/RAG/official graph.",
+                                refs=[import_response["candidate"].get("candidateId", ""), str(record.get("recordId") or "")],
+                                storage_refs=[storage_artifacts["candidatesPath"], storage_artifacts["candidateStorePath"]],
+                            )
+                        )
+            elif query_id in attempted_query_ids:
+                duplicate_only = query_skipped_duplicate_count > 0
+                no_record_notes = (
+                    f"Automated metadata search only found {query_skipped_duplicate_count} duplicate source(s) already present in this run; no repair is required."
+                    if duplicate_only
+                    else "Automated metadata search returned no importable records for this query."
+                )
+                try:
+                    output_response = data_processing_service.record_collection_output(
+                        normalized_run_id,
+                        assignment_id,
+                        {
+                            "status": "completed" if duplicate_only and not remaining_query_ids else "returned",
+                            "records": [],
+                            "notes": no_record_notes,
+                            "blockingIssues": [] if duplicate_only else ["no_importable_search_result"],
+                            "qualitySignals": {
+                                "searchProvider": provider,
+                                "metadataOnlyDownload": True,
+                                "queryId": query_id,
+                                "remainingQueryCount": len(remaining_query_ids),
+                                "skippedDuplicateCount": query_skipped_duplicate_count,
+                                "duplicateOnly": duplicate_only,
+                            },
+                        },
+                    )
+                except data_processing_service.DataProcessingError as exc:
+                    raise TeamWorkflowOrchestrationError(str(exc)) from exc
+                outputs.append(output_response["output"])
+                if duplicate_only:
                     execution_events.append(
                         _source_collection_execution_event(
-                            "storage.source_manifest_imported",
+                            "search.duplicates_only_output_recorded",
                             assignment=assignment,
-                            query=trace,
+                            query=query,
                             status="completed",
-                            title=f"Imported source_manifest: {import_response['candidate'].get('title')}",
-                            summary="The DataRecord was imported as a source_manifest candidate, still outside formal Team Knowledge/RAG/official graph.",
-                            refs=[import_response["candidate"].get("candidateId", ""), str(record.get("recordId") or "")],
-                            storage_refs=[storage_artifacts["candidatesPath"], storage_artifacts["candidateStorePath"]],
+                            title=f"Recorded duplicate-only query result: {query_text}",
+                            summary=no_record_notes,
+                            refs=[query_id],
+                            storage_refs=[storage_artifacts["recordsPath"]],
                         )
                     )
-        elif attempted_query_ids:
-            no_record_notes = (
-                "Automated metadata search only found duplicate sources already present in this run."
-                if skipped_duplicate_count
-                else "Automated metadata search returned no importable records for this assignment."
-            )
-            try:
-                output_response = data_processing_service.record_collection_output(
-                    normalized_run_id,
-                    assignment_id,
-                    {
-                        "status": "returned",
-                        "records": [],
-                        "notes": no_record_notes,
-                        "blockingIssues": ["no_importable_search_result"],
-                        "qualitySignals": {
-                            "searchProvider": provider,
-                            "metadataOnlyDownload": True,
-                            "skippedDuplicateCount": skipped_duplicate_count,
-                        },
-                    },
-                )
-            except data_processing_service.DataProcessingError as exc:
-                raise TeamWorkflowOrchestrationError(str(exc)) from exc
-            outputs.append(output_response["output"])
 
     final_run = data_processing_service.get_processing_run(normalized_run_id)
     final_assignments = data_processing_service.list_collection_assignments(normalized_run_id)["assignments"]
@@ -1292,7 +1339,7 @@ def _execute_source_collection_search_impl(team_id: str, run_id: str, payload: d
     next_runnable_query_ids = _source_collection_next_runnable_query_ids(
         [item for item in list(final_assignments or []) if isinstance(item, dict)],
         final_existing_query_ids,
-        force=force,
+        force=False,
         target_assignment_ids=target_assignment_ids,
         target_agent_role=target_agent_role,
     )
@@ -8388,9 +8435,11 @@ def _source_collection_record_identity_key(record: dict[str, Any]) -> str:
     return _source_collection_identity_key(
         source_ref=record.get("sourceRef"),
         raw_location=record.get("rawLocation"),
+        doi=metadata.get("doi") or quality_signals.get("doi"),
+        url=metadata.get("url") or quality_signals.get("url"),
         title=record.get("title"),
-        container=metadata.get("container") or quality_signals.get("container"),
-        published=metadata.get("published") or quality_signals.get("published"),
+        container=metadata.get("containerTitle") or metadata.get("container") or quality_signals.get("containerTitle") or quality_signals.get("container"),
+        published=metadata.get("issued") or metadata.get("published") or quality_signals.get("issued") or quality_signals.get("published"),
     )
 
 
@@ -8400,9 +8449,11 @@ def _source_collection_result_identity_key(result: dict[str, Any]) -> str:
     return _source_collection_identity_key(
         source_ref=result.get("sourceRef"),
         raw_location=result.get("rawLocation"),
+        doi=metadata.get("doi") or result.get("doi") or quality_signals.get("doi"),
+        url=metadata.get("url") or result.get("url") or quality_signals.get("url"),
         title=result.get("title"),
-        container=result.get("container") or metadata.get("container") or quality_signals.get("container"),
-        published=result.get("published") or metadata.get("published") or quality_signals.get("published"),
+        container=result.get("container") or metadata.get("containerTitle") or metadata.get("container") or quality_signals.get("containerTitle") or quality_signals.get("container"),
+        published=result.get("published") or metadata.get("issued") or metadata.get("published") or quality_signals.get("issued") or quality_signals.get("published"),
     )
 
 
@@ -8410,15 +8461,17 @@ def _source_collection_identity_key(
     *,
     source_ref: Any,
     raw_location: Any,
+    doi: Any = "",
+    url: Any = "",
     title: Any,
     container: Any = "",
     published: Any = "",
 ) -> str:
-    for value in (source_ref, raw_location):
+    for value in (doi, source_ref, raw_location):
         doi = _source_collection_normalized_doi(value)
         if doi:
             return f"doi:{doi}"
-    for value in (source_ref, raw_location):
+    for value in (url, source_ref, raw_location):
         url_key = _source_collection_normalized_url(value)
         if url_key:
             return f"url:{url_key}"
@@ -8455,11 +8508,13 @@ def _source_collection_normalized_url(value: Any) -> str:
     netloc = parsed.netloc.lower()
     if not netloc:
         return ""
-    query_pairs = [
+    query_pairs = sorted(
+        [
         (key, val)
         for key, val in urllib.parse.parse_qsl(parsed.query, keep_blank_values=True)
         if not key.lower().startswith("utm_") and key.lower() not in {"fbclid", "gclid", "yclid", "mc_cid", "mc_eid"}
-    ]
+        ]
+    )
     query = urllib.parse.urlencode(query_pairs, doseq=True)
     path = parsed.path.rstrip("/") or "/"
     return urllib.parse.urlunsplit((scheme, netloc, path, query, ""))
@@ -8766,6 +8821,8 @@ def _persist_source_collection_work_run(
 
 
 def _source_collection_work_run_terminal_status(result: dict[str, Any]) -> str:
+    if str(result.get("status") or "") == "duplicates_skipped":
+        return "completed"
     if _source_collection_count(result.get("failedQueryCount")) and not _source_collection_count(result.get("executedQueryCount")):
         return "failed"
     if bool(result.get("hasMore")) or _source_collection_count(result.get("remainingQueryCount")):
@@ -8790,9 +8847,12 @@ def _source_collection_work_run_terminal_summary(result: dict[str, Any]) -> str:
         return "资料搜索执行失败，等待检查搜索错误。"
     record_count = _source_collection_count(result.get("recordCount"))
     imported_count = _source_collection_count(result.get("importedCount"))
+    skipped_duplicate_count = _source_collection_count(result.get("skippedDuplicateCount"))
+    if str(result.get("status") or "") == "duplicates_skipped":
+        return f"本轮资料搜索完成，跳过 {skipped_duplicate_count} 条重复资料，未新增资料。"
     if _source_collection_work_run_terminal_status(result) == "needs_continue":
-        return f"本轮已写入 {record_count} 条资料、导入 {imported_count} 个候选，仍有任务可继续。"
-    return f"本轮资料搜索完成，写入 {record_count} 条资料、导入 {imported_count} 个候选。"
+        return f"本轮已写入 {record_count} 条资料、导入 {imported_count} 个候选、跳过 {skipped_duplicate_count} 条重复资料，仍有任务可继续。"
+    return f"本轮资料搜索完成，写入 {record_count} 条资料、导入 {imported_count} 个候选、跳过 {skipped_duplicate_count} 条重复资料。"
 
 
 def _source_collection_count(value: Any) -> int:
