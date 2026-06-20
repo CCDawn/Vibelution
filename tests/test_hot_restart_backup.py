@@ -1,12 +1,7 @@
 import json
 from pathlib import Path
 
-import pytest
-
 from core.runtime_manager import hot_restart_backup as backup
-
-pytestmark = pytest.mark.serial
-
 
 def test_stable_backup_prunes_to_three(monkeypatch, tmp_path: Path):
     project_root = tmp_path
