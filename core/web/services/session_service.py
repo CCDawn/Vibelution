@@ -1766,6 +1766,27 @@ def _session_agent_visible_in_indexes(summary: dict[str, Any]) -> bool:
     return not bool(summary.get("agentMissing"))
 
 
+def _empty_direct_agent_session_hidden_from_index(
+    conversation: dict[str, Any],
+    hidden_team_member_agent_ids: set[str],
+) -> bool:
+    """Hide stale empty Agent recovery channels while preserving real conversations."""
+
+    if list(conversation.get("messages") or []):
+        return False
+    if isinstance(conversation.get("activeTask"), dict) and conversation.get("activeTask"):
+        return False
+    if str(conversation.get("sessionKind") or "main").strip().lower() != "main":
+        return False
+    agent = conversation.get("_agent")
+    if not isinstance(agent, dict):
+        return False
+    session_id = str(conversation.get("id") or conversation.get("conversation_id") or "").strip()
+    if not session_id or str(agent.get("directSessionId") or "").strip() != session_id:
+        return False
+    return _agent_directory_stub_hidden_from_user_index(agent, hidden_team_member_agent_ids)
+
+
 @contextmanager
 def _session_tool_workspace_override(session_workspace: str | Path, memory_workspace: str | Path | None = None):
     try:
@@ -2150,14 +2171,14 @@ class SessionTurnCapture:
         self._append_tool_feedback_event(tool_call, related_thought_sequence=related_thought_sequence)
 
 
-def list_sessions() -> list[dict]:
+def list_sessions(*, include_hidden_internal: bool = False) -> list[dict]:
     """Return summarized sessions sourced from persisted chat state."""
 
     started_at = _perf_counter()
     _sync_agent_directory_project_root()
-    signature = _session_list_source_signature()
+    signature = (_session_list_source_signature(), bool(include_hidden_internal))
     if _repair_agent_direct_session_collisions(source_signature=signature):
-        signature = _session_list_source_signature()
+        signature = (_session_list_source_signature(), bool(include_hidden_internal))
     cached, should_build, waited_for_inflight = _begin_session_list_cache_build(
         now=started_at,
         signature=signature,
@@ -2183,11 +2204,16 @@ def list_sessions() -> list[dict]:
         agent_by_id = _agent_lookup_for_conversations()
         active_id, conversations = _load_conversations(repair=False, agent_by_id=agent_by_id, lightweight=True)
         conversations = _append_agent_directory_conversations(conversations, agent_by_id=agent_by_id)
+        hidden_team_member_agent_ids = _agent_directory_stub_hidden_team_member_ids()
         sessions = []
         hidden_summaries = []
         for item in conversations:
             summary = _build_session_summary(item, hydrate_agent=False)
-            if _session_agent_visible_in_indexes(summary):
+            hidden_internal = not include_hidden_internal and _empty_direct_agent_session_hidden_from_index(
+                item,
+                hidden_team_member_agent_ids,
+            )
+            if _session_agent_visible_in_indexes(summary) and not hidden_internal:
                 sessions.append(summary)
             else:
                 hidden_summaries.append(summary)

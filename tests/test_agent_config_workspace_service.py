@@ -738,6 +738,53 @@ def test_agent_directory_summary_list_skips_heavy_hydration(tmp_path, monkeypatc
     assert "agentInboxPendingCount" not in agent
 
 
+def test_agent_directory_config_list_skips_chat_and_inbox_activity_hydration(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    created = agent_directory_service.create_agent_instance(display_name="Config Agent", primary_mode="chat")
+    reviewer = agent_directory_service.create_agent_instance(display_name="Reviewer Agent", primary_mode="chat")
+    request = agent_tool_governance_service.submit_tool_governance_request(
+        created["agentId"],
+        proposed_by_agent_id=reviewer["agentId"],
+        grant_tools=["read_file_tool"],
+        reason="配置页需要显示最近的工具申请。",
+    )
+    hydration_calls = 0
+
+    def fail_full_hydration(*args, **kwargs):
+        nonlocal hydration_calls
+        hydration_calls += 1
+        raise AssertionError("config agent list should not hydrate group context or inbox activity")
+
+    monkeypatch.setattr(agent_directory_service, "_build_agent_api_hydration_context", fail_full_hydration)
+
+    agents = agent_directory_service.list_agents(detail="config")
+
+    assert hydration_calls == 0
+    agent = next(item for item in agents if item["agentId"] == created["agentId"])
+    assert agent["toolPolicy"]["policyId"] == created["toolPolicyId"]
+    assert agent["memoryPolicy"]["policyId"] == created["memoryPolicyId"]
+    assert agent["toolGovernanceRequests"][0]["requestId"] == request["requestId"]
+    assert agent["groupContextEvents"] == []
+    assert agent["agentInboxMessages"] == []
+    assert agent["agentInboxPendingCount"] == 0
+    assert agent["activityHydration"] == "config"
+
+    monkeypatch.setattr(
+        agent_directory_service,
+        "_load_recent_tool_governance_requests_for_agents",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("config hydration should reuse cache")),
+    )
+    monkeypatch.setattr(
+        agent_directory_service,
+        "_count_pending_agent_inbox_messages_for_agents",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("config inbox counts should reuse cache")),
+    )
+
+    cached_agents = agent_directory_service.list_agents(detail="config")
+    cached_agent = next(item for item in cached_agents if item["agentId"] == created["agentId"])
+    assert cached_agent["toolGovernanceRequests"][0]["requestId"] == request["requestId"]
+
+
 def test_agents_api_summary_detail_returns_light_payload(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     created = agent_directory_service.create_agent_instance(display_name="Summary Route Agent", primary_mode="chat")
@@ -795,9 +842,9 @@ def test_agent_config_workspace_batches_agent_api_hydration(tmp_path, monkeypatc
 
     agents = {item["agentId"]: item for item in payload["agents"]}
     assert agents[alpha["agentId"]]["agentInboxPendingCount"] == 1
-    assert len(agents[alpha["agentId"]]["agentInboxMessages"]) == 1
+    assert agents[alpha["agentId"]]["agentInboxMessages"] == []
     assert len(agents[alpha["agentId"]]["toolGovernanceRequests"]) == 1
-    assert len(agents[beta["agentId"]]["groupContextEvents"]) == 1
+    assert agents[beta["agentId"]]["groupContextEvents"] == []
     assert agents[alpha["agentId"]]["toolPolicy"]["policyId"]
     assert agents[alpha["agentId"]]["memoryPolicy"]["privateMemoryRoot"].endswith(f"{alpha['agentId']}/memory")
     assert not any("agent_inbox_messages.jsonl" in path for path in full_read_paths)
@@ -906,7 +953,7 @@ def test_agent_directory_full_list_fast_cache_invalidates_after_tool_governance_
     assert len(updated_agent["toolGovernanceRequests"]) == 1
 
 
-def test_agent_config_workspace_recent_jsonl_preserves_older_pending_messages(tmp_path, monkeypatch):
+def test_agent_config_workspace_defers_inbox_messages_while_full_detail_preserves_older_pending(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     monkeypatch.setattr(config_service, "get_config_workspace", _fake_config_workspace)
     agent = agent_directory_service.create_agent_instance(display_name="Pending Tail Agent", primary_mode="chat")
@@ -937,7 +984,9 @@ def test_agent_config_workspace_recent_jsonl_preserves_older_pending_messages(tm
 
     workspace_agent = next(item for item in payload["agents"] if item["agentId"] == agent["agentId"])
     assert workspace_agent["agentInboxPendingCount"] == 1
-    assert [item["messageId"] for item in workspace_agent["agentInboxMessages"]] == ["older-pending"]
+    assert workspace_agent["agentInboxMessages"] == []
+    full_agent = next(item for item in agent_directory_service.list_agents(include_archived=True) if item["agentId"] == agent["agentId"])
+    assert [item["messageId"] for item in full_agent["agentInboxMessages"]] == ["older-pending"]
     assert agent_directory_service.list_agent_inbox_messages_for_agent(agent["agentId"], status="pending", limit=8)[0]["messageId"] == "older-pending"
 
 
@@ -992,6 +1041,72 @@ def test_agent_config_workspace_uses_compact_room_and_team_indexes(tmp_path, mon
         and item["count"] == 1
         for item in team_indexes
     )
+
+
+def test_agent_config_workspace_uses_config_agent_detail(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setattr(config_service, "get_config_workspace", _fake_config_workspace)
+    created = agent_directory_service.create_agent_instance(display_name="轻量配置 Agent")
+    captured_details: list[str] = []
+    real_list_agents = agent_config_workspace_service.list_agents
+
+    def capture_list_agents(*, include_archived=False, detail="full"):
+        captured_details.append(str(detail))
+        return real_list_agents(include_archived=include_archived, detail=detail)
+
+    def fail_full_hydration(*args, **kwargs):
+        raise AssertionError("Agent Center should use detail=config instead of full Agent hydration")
+
+    monkeypatch.setattr(agent_config_workspace_service, "list_agents", capture_list_agents)
+    monkeypatch.setattr(agent_directory_service, "_build_agent_api_hydration_context", fail_full_hydration)
+
+    payload = agent_config_workspace_service.get_agent_config_workspace()
+
+    assert captured_details == ["config"]
+    workspace_agent = next(item for item in payload["agents"] if item["agentId"] == created["agentId"])
+    assert workspace_agent["toolPolicy"]["policyId"] == created["toolPolicyId"]
+    assert workspace_agent["activityHydration"] == "config"
+    assert workspace_agent["groupContextEvents"] == []
+    assert workspace_agent["agentInboxMessages"] == []
+
+
+def test_agent_config_workspace_hides_empty_teams_from_team_indexes(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setattr(config_service, "get_config_workspace", _fake_config_workspace)
+    alpha = agent_directory_service.create_agent_instance(display_name="数据发现")
+    team_service._save_index(
+        {
+            "schemaVersion": team_service.SCHEMA_VERSION,
+            "updatedAt": "2026-05-18T12:00:00Z",
+            "teams": [
+                {
+                    "teamId": "empty-challenge-cup-team",
+                    "name": "挑战杯科研团队",
+                    "status": "active",
+                    "teamKind": "research",
+                    "teamSource": "research_organization",
+                    "members": [],
+                },
+                {
+                    "teamId": "challenge-cup-ai-research-team",
+                    "name": "挑战杯ai科研团队",
+                    "status": "active",
+                    "teamKind": "research",
+                    "teamSource": "research_organization",
+                    "members": [{"agentId": alpha["agentId"], "role": "数据发现"}],
+                },
+            ],
+        }
+    )
+
+    payload = agent_config_workspace_service.get_agent_config_workspace()
+    team_ids = {item["teamId"] for item in payload["teams"]}
+    team_indexes = {item["id"]: item for item in payload["teamIndexes"]}
+
+    assert payload["summary"]["teamCount"] == 1
+    assert "empty-challenge-cup-team" not in team_ids
+    assert "team:empty-challenge-cup-team" not in team_indexes
+    assert team_indexes["team:challenge-cup-ai-research-team"]["agentIds"] == [alpha["agentId"]]
 
 
 def test_agent_config_workspace_exposes_ai_search_source_scope_indexes(tmp_path, monkeypatch):
