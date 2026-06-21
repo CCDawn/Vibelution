@@ -194,6 +194,80 @@ def test_ensure_research_team_from_organization_uses_stable_team_id(tmp_path, mo
     ]
 
 
+def test_research_team_sync_applies_challenge_cup_agent_tool_profiles(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    discovery = agent_directory_service.create_agent_instance(display_name="Discovery", direct_session_id="session-discovery")
+    acquisition = agent_directory_service.create_agent_instance(display_name="Acquisition", direct_session_id="session-acquisition")
+    extraction = agent_directory_service.create_agent_instance(display_name="Extraction", direct_session_id="session-extraction")
+    organization = {
+        "updatedAt": "2026-05-29T00:00:00Z",
+        "agents": [
+            {"nodeId": "discovery", "agentId": discovery["agentId"], "displayName": "Discovery", "role": "data_discovery", "status": "active"},
+            {"nodeId": "acquisition", "agentId": acquisition["agentId"], "displayName": "Acquisition", "role": "source_acquisition", "status": "active"},
+            {"nodeId": "extraction", "agentId": extraction["agentId"], "displayName": "Extraction", "role": "content_extraction", "status": "active"},
+        ],
+        "edges": [],
+    }
+
+    team = team_service.ensure_research_team_from_organization(organization)
+
+    assert [member["role"] for member in team["members"]] == ["data_discovery", "source_acquisition", "content_extraction"]
+    cases = {
+        discovery["agentId"]: (
+            "challenge_cup_data_discovery",
+            ["agent_message_tool", "research_knowledge_query_tool", "web_search_tool"],
+        ),
+        acquisition["agentId"]: (
+            "challenge_cup_source_acquisition",
+            ["agent_message_tool", "research_knowledge_query_tool", "web_search_tool", "web_fetch_tool"],
+        ),
+        extraction["agentId"]: (
+            "challenge_cup_content_extraction",
+            ["agent_message_tool", "research_knowledge_query_tool", "web_fetch_tool"],
+        ),
+    }
+    for agent_id, (role_key, expected_tools) in cases.items():
+        agent = agent_directory_service.get_agent(agent_id)
+        assert agent["primaryMode"] == "research"
+        assert agent["roleKey"] == role_key
+        assert agent["metadata"]["researchTeamRoleKey"] == role_key
+        assert agent["toolPolicy"]["allowedTools"] == expected_tools
+        assert agent["toolPolicy"]["writeScopes"] == []
+        assert agent["toolPolicy"]["mutationAccess"] == "none"
+
+
+def test_research_team_repair_applies_challenge_cup_agent_tool_profiles(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    discovery = agent_directory_service.create_agent_instance(display_name="Discovery", direct_session_id="session-discovery")
+    team_service.create_team(
+        name="挑战杯ai科研团队",
+        purpose="科研协作",
+        members=[
+            {
+                "agentId": discovery["agentId"],
+                "memberId": "discovery",
+                "role": "data_discovery",
+                "purpose": "Discovery",
+            }
+        ],
+        team_kind="research",
+        team_source="research_organization",
+    )
+
+    team_service.list_teams()
+
+    agent = agent_directory_service.get_agent(discovery["agentId"])
+    assert agent["primaryMode"] == "research"
+    assert agent["roleKey"] == "challenge_cup_data_discovery"
+    assert agent["toolPolicy"]["allowedTools"] == [
+        "agent_message_tool",
+        "research_knowledge_query_tool",
+        "web_search_tool",
+    ]
+    assert agent["toolPolicy"]["mutationAccess"] == "none"
+    assert agent["toolPolicy"]["writeScopes"] == []
+
+
 def test_research_team_canvas_separates_reporting_and_communication_edges(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     ceo = agent_directory_service.create_agent_instance(display_name="CEO", direct_session_id="session-ceo")

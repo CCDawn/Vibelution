@@ -104,6 +104,12 @@ TEAM_ID_TO_KIND = {
     "self-evolution-team": "self_evolution",
     "supervised-evolution-team": "supervised_evolution",
 }
+RESEARCH_TEAM_MEMBER_ROLE_KEYS = {
+    "data_discovery": "challenge_cup_data_discovery",
+    "source_acquisition": "challenge_cup_source_acquisition",
+    "content_extraction": "challenge_cup_content_extraction",
+    "source_quality": "challenge_cup_source_quality",
+}
 TEMPLATE_MEMBER_PREFIX_TO_TEMPLATE_ID = {
     "medical-demo": "medical-consultation-demo",
     "heletech-demo": "heletech-maternal-digital-health-demo",
@@ -420,6 +426,8 @@ def ensure_research_team_from_organization(organization: dict[str, Any]) -> dict
     team_id = "research-team"
     now = utc_now_iso()
     members = _members_from_research_organization(organization)
+    if _sync_research_team_member_agent_roles(members):
+        agent_directory_service.repair_agent_directory()
     with _TEAM_LOCK:
         state = _load_index()
         if _repair_index_state(state):
@@ -2097,6 +2105,53 @@ def _members_from_research_organization(organization: dict[str, Any]) -> list[di
     return members
 
 
+def _sync_research_team_member_agent_roles(members: list[dict[str, Any]]) -> bool:
+    changed = False
+    for member in members:
+        if not isinstance(member, dict):
+            continue
+        agent_id = str(member.get("agentId") or "").strip()
+        role = _safe_token(member.get("role"), default="", max_length=96)
+        role_key = RESEARCH_TEAM_MEMBER_ROLE_KEYS.get(role)
+        if not agent_id or not role_key:
+            continue
+        agent = agent_directory_service.get_agent(agent_id, include_archived=False)
+        if not agent:
+            continue
+        metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
+        expected_metadata = {
+            "agentMode": "research",
+            "configSurface": "team",
+            "researchTeamRole": role,
+            "researchTeamRoleKey": role_key,
+        }
+        current_policy = agent_directory_service.resolve_tool_policy_for_agent(agent_id)
+        expected_policy = agent_directory_service.default_research_source_tool_policy(
+            str(agent.get("toolPolicyId") or f"tool-{agent_id}"),
+            role_key=role_key,
+        )
+        needs_update = (
+            str(agent.get("primaryMode") or "").strip() != "research"
+            or str(agent.get("roleKey") or "").strip() != role_key
+            or any(metadata.get(key) != value for key, value in expected_metadata.items())
+            or list(current_policy.get("allowedTools") or []) != list(expected_policy.get("allowedTools") or [])
+            or current_policy.get("mutationAccess") != expected_policy.get("mutationAccess")
+            or list(current_policy.get("writeScopes") or []) != list(expected_policy.get("writeScopes") or [])
+        )
+        if not needs_update:
+            continue
+        agent_directory_service.update_agent_instance(
+            agent_id,
+            primary_mode="research",
+            role_key=role_key,
+            tool_policy=expected_policy,
+            metadata=expected_metadata,
+            status="active",
+        )
+        changed = True
+    return changed
+
+
 def _canvas_from_research_organization(organization: dict[str, Any], team: dict[str, Any]) -> dict[str, Any]:
     members_by_agent_id = {
         str(member.get("agentId") or "").strip(): member
@@ -3371,6 +3426,8 @@ def _repair_team(
     if repaired_members != members:
         team["members"] = repaired_members
         changed = True
+    if _infer_team_kind(team) == "research":
+        _sync_research_team_member_agent_roles(repaired_members)
     if _team_chat_room_needs_sync(team, agent_refs=agent_refs):
         _ensure_team_chat_room_link(team, agent_refs=agent_refs)
         changed = True

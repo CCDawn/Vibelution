@@ -28,6 +28,11 @@ def test_mode_binding_repairs_chat_and_research_agent_refs(tmp_path, monkeypatch
         direct_session_id="session-research",
         metadata={"researchAgentKey": "broad"},
     )
+    agent_mode_binding_service.update_mode_binding(
+        "chat",
+        default_agent_id=chat_agent["agentId"],
+        available_agent_ids=[chat_agent["agentId"]],
+    )
 
     payload = agent_mode_binding_service.get_mode_bindings_payload()
 
@@ -52,6 +57,11 @@ def test_mode_binding_payload_reuses_loaded_agent_options_without_per_reference_
         llm_bindings={"dialogue": {"modelId": "model-research-broad"}},
         primary_mode="research",
         role_key="research_broad",
+    )
+    agent_mode_binding_service.update_mode_binding(
+        "chat",
+        default_agent_id=chat_agent["agentId"],
+        available_agent_ids=[chat_agent["agentId"]],
     )
     agent_options = [
         {
@@ -94,6 +104,43 @@ def test_mode_binding_payload_reuses_loaded_agent_options_without_per_reference_
     assert research_agent["agentId"] in payload["modes"]["research"]["pool"]
     assert payload["agentRefs"][research_agent["agentId"]]["primaryMode"] == "research"
     assert "profileId" not in payload["agentRefs"][research_agent["agentId"]]
+
+
+def test_mode_binding_repair_removes_ineligible_chat_references(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    chat_agent = agent_directory_service.create_agent_instance(
+        display_name="普通会话 Agent",
+        primary_mode="chat",
+        direct_session_id="session-chat",
+    )
+    research_reader = agent_directory_service.create_agent_instance(
+        display_name="论文阅读 Agent",
+        primary_mode="chat",
+        role_key="research_paper_reader",
+        direct_session_id="session-reader",
+    )
+    judge = agent_directory_service.create_agent_instance(
+        display_name="监督进化裁决 Agent",
+        primary_mode="supervised_evolution",
+        role_key="judge",
+        metadata={"supervisedRole": "judge"},
+    )
+    state = agent_mode_binding_service.default_mode_binding_state()
+    state["modes"]["chat"]["defaultAgentId"] = judge["agentId"]
+    state["modes"]["chat"]["availableAgentIds"] = [chat_agent["agentId"], research_reader["agentId"], judge["agentId"]]
+    state["modes"]["research"]["availableAgentIds"] = [research_reader["agentId"]]
+    state["modes"]["research"]["pool"] = [research_reader["agentId"]]
+    agent_mode_binding_service.save_mode_binding_state(state)
+
+    payload = agent_mode_binding_service.get_mode_bindings_payload()
+
+    assert payload["modes"]["chat"]["defaultAgentId"] == chat_agent["agentId"]
+    assert payload["modes"]["chat"]["availableAgentIds"] == [chat_agent["agentId"]]
+    assert research_reader["agentId"] in payload["modes"]["research"]["availableAgentIds"]
+    assert research_reader["agentId"] in payload["modes"]["research"]["pool"]
+    assert judge["agentId"] not in payload["modes"]["chat"]["availableAgentIds"]
+    assert any(item["agentId"] == judge["agentId"] for item in payload["repairWarnings"])
+    assert any(item["agentId"] == research_reader["agentId"] for item in payload["repairWarnings"])
 
 
 def test_mode_binding_repairs_supervised_slots_from_agent_instances(tmp_path, monkeypatch):
@@ -291,7 +338,8 @@ def test_agent_mode_membership_updates_chat_and_research_without_reseeding_remov
     )
     repaired = agent_mode_binding_service.get_mode_bindings_payload()
 
-    assert added["modes"]["chat"]["defaultAgentId"] == agent["agentId"]
+    assert added["modes"]["chat"]["defaultAgentId"] != agent["agentId"]
+    assert agent["agentId"] not in added["modes"]["chat"]["availableAgentIds"]
     assert agent["agentId"] in added["modes"]["research"]["pool"]
     assert removed["modes"]["chat"]["defaultAgentId"] != agent["agentId"]
     assert agent["agentId"] not in removed["modes"]["chat"]["availableAgentIds"]
