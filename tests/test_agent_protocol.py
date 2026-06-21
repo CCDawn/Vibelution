@@ -212,7 +212,7 @@ class TestToolMessageFlow:
         assert "完整工具结果" in semantic_tool_messages[0].content
         assert "failure-line\n" * 120 in semantic_tool_messages[0].content
         assert "Windows detected Unix shell fragment" not in semantic_tool_messages[0].content
-        assert any(isinstance(message, AIMessage) and message.content == "运行相关测试验证修改：" for message in restored)
+        assert "运行相关测试验证修改：" in semantic_tool_messages[0].content
 
     def test_seed_chat_history_demotes_canonical_tool_role_without_duplicate_result(self):
         agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)

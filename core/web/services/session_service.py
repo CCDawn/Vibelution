@@ -52,6 +52,7 @@ from core.chat.conversation_ledger import (
     EVENT_USER_MESSAGE,
     TURN_INTERRUPTED_MARKER,
     append_conversation_event,
+    conversation_visible_messages_from_events,
     latest_ledger_sequence,
     latest_open_turn_id,
     load_conversation_events,
@@ -828,7 +829,8 @@ def _append_session_conversation_event(
                 lifecycle=True,
             )
         except Exception:
-            return
+            pass
+        raise
 
 
 def _reconcile_stale_session_ledger(session_id: str, *, active_turn_id: str = "", reason: str = "process_restarted") -> None:
@@ -16156,15 +16158,49 @@ def _mental_diagnosis_summary(lang: str, cognitive_state: str) -> str:
     return labels.get(str(cognitive_state or "").strip().lower(), str(cognitive_state or "").strip())
 
 
+def _ledger_visible_messages_for_session(session_id: str) -> list[dict[str, Any]] | None:
+    normalized_session_id = str(session_id or "").strip()
+    if not normalized_session_id:
+        return None
+    events = load_conversation_events(PROJECT_ROOT, normalized_session_id)
+    if not events:
+        return None
+    return conversation_visible_messages_from_events(events)
+
+
 def _messages_with_live_output(session_id: str, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    ledger_messages = _ledger_visible_messages_for_session(session_id)
+    source_messages = ledger_messages if ledger_messages is not None else messages
     detail_messages = _merge_cli_agent_lifecycle_sidecar_messages(
         session_id,
-        _normalize_messages(session_id, messages),
+        _normalize_messages(session_id, source_messages),
     )
     live_message = _build_live_output_message(session_id)
     if live_message is None:
         return detail_messages
+    detail_messages = _without_live_turn_ledger_partials(detail_messages, live_message)
     return detail_messages + [live_message]
+
+
+def _without_live_turn_ledger_partials(
+    messages: list[dict[str, Any]],
+    live_message: dict[str, Any],
+) -> list[dict[str, Any]]:
+    live_metadata = live_message.get("metadata") if isinstance(live_message.get("metadata"), dict) else {}
+    live_turn_id = str(live_metadata.get("turnId") or "").strip()
+    if not live_turn_id:
+        return list(messages or [])
+    filtered: list[dict[str, Any]] = []
+    for message in list(messages or []):
+        metadata = message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
+        if (
+            str(message.get("role") or "").strip().lower() == "assistant"
+            and str(metadata.get("turnId") or "").strip() == live_turn_id
+            and str(metadata.get("kind") or "").strip() == "journal_assistant_partial"
+        ):
+            continue
+        filtered.append(message)
+    return filtered
 
 
 def _live_assistant_overlay_turn_id(session_id: str, turn_id: str = "") -> str:

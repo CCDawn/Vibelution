@@ -382,7 +382,7 @@ def model_visible_messages_from_events(events: Iterable[TurnJournalEvent]) -> li
                     messages.append(partial)
                 messages.append(
                     {
-                        "role": "user",
+                        "role": "system",
                         "content": str(payload.get("marker") or TURN_INTERRUPTED_MARKER),
                         "metadata": {
                             "kind": "turn_interrupted",
@@ -402,7 +402,7 @@ def model_visible_messages_from_events(events: Iterable[TurnJournalEvent]) -> li
             messages.append(partial)
             messages.append(
                 {
-                    "role": "user",
+                    "role": "system",
                     "content": TURN_INTERRUPTED_MARKER,
                     "metadata": {
                         "kind": "turn_interrupted",

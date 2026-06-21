@@ -58,6 +58,13 @@ class LLMCancelledError(Exception):
         self.reason = str(reason or "").strip()
 
 
+def _find_ui_tool_calls_message_index(messages: List[Any]) -> int:
+    for index, message in enumerate(list(messages or [])):
+        if isinstance(message, dict) and "toolCalls" in message:
+            return index
+    return -1
+
+
 def _current_llm_cancel_reason() -> str:
     checker = _LLM_CANCEL_CHECKER_CONTEXT.get(None)
     if not callable(checker):
@@ -1033,6 +1040,20 @@ class LLMClient:
         selected_tools = list(self.bound_tools)
         if tools is not None:
             selected_tools = list(tools or [])
+        ui_tool_calls_index = _find_ui_tool_calls_message_index(list(messages or []))
+        if ui_tool_calls_index >= 0:
+            raise LLMError(
+                "payload_protocol_error",
+                "UI field `toolCalls` is not allowed in model input. Build model context from ConversationLedger ModelProjection first.",
+                retryable=False,
+                provider=self.provider.kind,
+                model=self.profile.model,
+                details={
+                    "messageIndex": ui_tool_calls_index,
+                    "requiredSource": "conversation_ledger_model_projection",
+                    "forbiddenField": "toolCalls",
+                },
+            )
         provider_messages = normalize_messages_for_provider(list(messages or []))
         built = build_llm_payload(
             PayloadBuildInput(
