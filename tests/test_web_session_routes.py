@@ -68,28 +68,6 @@ def isolate_evolution_live_state():
 
 def test_session_detail_exists(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path)
-    append_conversation_event(
-        tmp_path,
-        "session-live",
-        "turn-seeded",
-        EVENT_USER_MESSAGE,
-        status="recorded",
-        payload={"content": "继续前端开发"},
-    )
-    append_conversation_event(
-        tmp_path,
-        "session-live",
-        "turn-seeded",
-        EVENT_ASSISTANT_MESSAGE,
-        status="completed",
-        payload={
-            "content": "<think>internal</think>\n\n已经接到真实状态了。",
-            "toolCalls": [
-                {"name": "read_file_tool", "status": "done"},
-                {"name": "search_code_tool", "status": "done"},
-            ],
-        },
-    )
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
 
     sessions_response = client.get("/api/sessions")

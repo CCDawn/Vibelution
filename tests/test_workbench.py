@@ -20,7 +20,7 @@ from core.chat.conversation_ledger import (
 from core.evaluation.chat_dataset_capture import ChatDatasetCaptureService, resolve_chat_dataset_paths
 from core.evaluation.chat_review_queue import get_review_item
 from core.evaluation.chat_segmenter import ChatTurnRecord
-from core.ui.chat_state import build_chat_state, load_chat_state, save_chat_state
+from core.ui.chat_state import build_chat_state, chat_state_path, load_chat_state, save_chat_state
 from core.ui.workbench import AgentWorkbenchShell
 
 
@@ -724,6 +724,34 @@ def test_build_chat_state_keeps_only_conversation_metadata():
     assert conversation["conversation_id"] == "default"
     assert conversation["title"]
     assert "messages" not in conversation
+
+
+def test_load_chat_state_deletes_legacy_conversation_messages(tmp_path: Path):
+    path = chat_state_path(tmp_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "active_conversation_id": "default",
+                "conversations": [
+                    {
+                        "conversation_id": "default",
+                        "title": "旧会话",
+                        "messages": [{"role": "user", "content": "旧内容"}],
+                    }
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    state = load_chat_state(tmp_path)
+    persisted = json.loads(path.read_text(encoding="utf-8"))
+
+    assert "messages" not in state["conversations"][0]
+    assert "messages" not in persisted["conversations"][0]
 
 
 def test_workbench_chat_falls_back_to_structured_reply_when_visible_text_is_missing(monkeypatch, tmp_path: Path):
