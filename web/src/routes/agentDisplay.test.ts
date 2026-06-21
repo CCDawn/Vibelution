@@ -24,6 +24,20 @@ describe("agent display helpers", () => {
     expect(info.tone).toBe("chat");
   });
 
+  it("does not leak session implementation labels into Agent list role badges", () => {
+    for (const noisyLabel of ["CLI 会话", "真实会话", "x"]) {
+      expect(agentDisplayInfo({
+        displayName: "林清和",
+        primaryMode: "chat",
+        promptTemplateId: "prompt-chat-default",
+        metadata: { functionalDisplayName: noisyLabel },
+      }, "zh")).toMatchObject({
+        functionLabel: "会话入口",
+        tone: "chat",
+      });
+    }
+  });
+
   it("compacts provider-prefixed model ids for dense chat surfaces", () => {
     expect(compactModelLabel("openai/gpt-5.1")).toBe("gpt-5.1");
     expect(compactModelLabel("HiModel_xh2_qwen3-2507_30b.gguf")).toBe("HiModel-xh2-qwen3-2507-30b");
@@ -85,6 +99,10 @@ describe("agent display helpers", () => {
       functionLabel: "资料质检",
       tone: "research",
     });
+    expect(agentDisplayInfo({ displayName: "叶念青", primaryMode: "chat", roleKey: "challenge_cup_coordinator" }, "zh")).toMatchObject({
+      functionLabel: "科研统筹",
+      tone: "research",
+    });
   });
 
   it("uses precise labels for search-source and stewardship roles", () => {
@@ -93,11 +111,11 @@ describe("agent display helpers", () => {
       tone: "research",
     });
     expect(agentDisplayInfo({ displayName: "全球源", primaryMode: "research", roleKey: "global_primary_sources" }, "zh")).toMatchObject({
-      functionLabel: "全球官方源",
+      functionLabel: "全球源检索",
       tone: "research",
     });
     expect(agentDisplayInfo({ displayName: "中国源", primaryMode: "research", roleKey: "cn_primary_sources" }, "zh")).toMatchObject({
-      functionLabel: "中国官方源",
+      functionLabel: "中国源检索",
       tone: "research",
     });
     expect(agentDisplayInfo({ displayName: "信号质检", primaryMode: "research", roleKey: "signal_quality_gate" }, "zh")).toMatchObject({
@@ -111,6 +129,10 @@ describe("agent display helpers", () => {
     expect(agentDisplayInfo({ displayName: "知识管家", primaryMode: "general", roleKey: "knowledge_steward" }, "zh")).toMatchObject({
       functionLabel: "知识管理员",
       tone: "memory",
+    });
+    expect(agentDisplayInfo({ displayName: "论文阅读", primaryMode: "chat", roleKey: "research_paper_reader" }, "zh")).toMatchObject({
+      functionLabel: "论文阅读",
+      tone: "research",
     });
   });
 
