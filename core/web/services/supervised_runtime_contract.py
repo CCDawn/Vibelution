@@ -11,7 +11,6 @@ SUPERVISED_ROLE_RUNTIME_TOOLS: dict[str, tuple[str, ...]] = {
     "baseline": (
         "open_evolution_transaction_tool",
         "close_evolution_transaction_tool",
-        "read_file_tool",
         "grep_search_tool",
         "code_symbol_tool",
         "cli_tool",
@@ -20,7 +19,6 @@ SUPERVISED_ROLE_RUNTIME_TOOLS: dict[str, tuple[str, ...]] = {
     "candidate": (
         "open_evolution_transaction_tool",
         "close_evolution_transaction_tool",
-        "read_file_tool",
         "grep_search_tool",
         "code_symbol_tool",
         "cli_tool",
