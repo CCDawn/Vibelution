@@ -28,6 +28,7 @@ from core.chat.conversation_ledger import (
     context_compression_projection,
     load_conversation_events,
 )
+from core.orchestration.cache_diagnostics import normalize_runtime_llm_usage
 
 from .i18n import get_web_language, text_for
 from .avatar_image_service import avatar_image_url
@@ -109,6 +110,10 @@ def get_runtime_summary() -> dict:
     session_state = _derive_session_state(lang, active_session, runtime_state)
     active_tools = _active_tools(active_session, runtime_state)
     context_usage = _context_usage(runtime_state)
+    cache_usage = _runtime_cache_usage(runtime_state)
+    last_llm_usage = _runtime_last_llm_usage(runtime_state)
+    last_context_composition = _runtime_last_context_composition(runtime_state)
+    last_cache_composition = _runtime_last_cache_composition(runtime_state)
     context_compression = _context_compression_summary(runtime_state, context_usage, active_session)
     runtime_manager = _load_runtime_manager_snapshot()
     work_runs = _work_run_summary()
@@ -158,6 +163,10 @@ def get_runtime_summary() -> dict:
         "sessionUpdatedAt": session_updated_at,
         "mentalState": _mental_state_summary(lang, public_config=public_config),
         "contextUsage": context_usage,
+        "cacheUsage": cache_usage,
+        "lastLlmUsage": last_llm_usage,
+        "lastContextComposition": last_context_composition,
+        "lastCacheComposition": last_cache_composition,
         "contextCompression": context_compression,
         "activeTools": active_tools,
         "changedFilesCount": len(active_session.get("changedFiles") or []),
@@ -1674,6 +1683,62 @@ def _context_usage(runtime_state: dict) -> dict[str, int]:
     used = max(0, int(runtime_state.get("current_context_tokens") or 0))
     limit = max(0, int(runtime_state.get("context_token_limit") or 0)) or 128000
     return {"used": min(used, limit), "limit": limit}
+
+
+def _runtime_last_llm_usage(runtime_state: dict) -> dict[str, object] | None:
+    usage = normalize_runtime_llm_usage(runtime_state.get("last_llm_usage") or runtime_state.get("lastLlmUsage"))
+    return usage if usage is not None else None
+
+
+def _runtime_last_context_composition(runtime_state: dict) -> dict[str, object] | None:
+    value = runtime_state.get("last_context_composition") or runtime_state.get("lastContextComposition")
+    return dict(value) if isinstance(value, dict) and value else None
+
+
+def _runtime_last_cache_composition(runtime_state: dict) -> dict[str, object] | None:
+    value = runtime_state.get("last_cache_composition") or runtime_state.get("lastCacheComposition")
+    return dict(value) if isinstance(value, dict) and value else None
+
+
+def _runtime_cache_usage(runtime_state: dict) -> dict[str, object]:
+    total_input_tokens = max(0, int(runtime_state.get("total_input_tokens") or 0))
+    total_cached_input_tokens = min(
+        max(0, int(runtime_state.get("total_cached_input_tokens") or 0)),
+        total_input_tokens,
+    ) if total_input_tokens else 0
+    last_usage = _runtime_last_llm_usage(runtime_state) or {}
+    last_input_tokens = max(
+        0,
+        int(last_usage.get("inputTokens") or runtime_state.get("last_input_tokens") or 0),
+    )
+    last_cached_input_tokens = min(
+        max(0, int(last_usage.get("cachedInputTokens") or runtime_state.get("last_cached_input_tokens") or 0)),
+        last_input_tokens,
+    ) if last_input_tokens else 0
+    turn_input_tokens = max(0, int(runtime_state.get("turn_input_tokens") or last_input_tokens or 0))
+    turn_cached_input_tokens = min(
+        max(0, int(runtime_state.get("turn_cached_input_tokens") or last_cached_input_tokens or 0)),
+        turn_input_tokens,
+    ) if turn_input_tokens else 0
+    return {
+        "lastInputTokens": last_input_tokens,
+        "lastCachedInputTokens": last_cached_input_tokens,
+        "lastCacheReadInputTokens": last_cached_input_tokens,
+        "lastUncachedInputTokens": max(0, last_input_tokens - last_cached_input_tokens),
+        "lastCacheHitRate": (last_cached_input_tokens / last_input_tokens) if last_input_tokens > 0 else 0.0,
+        "turnInputTokens": turn_input_tokens,
+        "turnCachedInputTokens": turn_cached_input_tokens,
+        "turnCacheReadInputTokens": turn_cached_input_tokens,
+        "turnUncachedInputTokens": max(0, turn_input_tokens - turn_cached_input_tokens),
+        "turnCacheHitRate": (turn_cached_input_tokens / turn_input_tokens) if turn_input_tokens > 0 else 0.0,
+        "totalInputTokens": total_input_tokens,
+        "totalCachedInputTokens": total_cached_input_tokens,
+        "totalCacheReadInputTokens": total_cached_input_tokens,
+        "totalUncachedInputTokens": max(0, total_input_tokens - total_cached_input_tokens),
+        "totalCacheHitRate": (total_cached_input_tokens / total_input_tokens) if total_input_tokens > 0 else 0.0,
+        "totalObservedTurnCount": 0,
+        "source": "ui_runtime_state",
+    }
 
 
 def _context_compression_summary(runtime_state: dict, context_usage: dict[str, int], active_session: dict | None = None) -> dict[str, object]:

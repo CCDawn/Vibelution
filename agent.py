@@ -74,6 +74,11 @@ from core.evaluation.chat_segmenter import ChatTurnRecord
 from core.chat.chat_result_contract import build_chat_coding_result_contract
 from core.chat.model_messages import normalize_model_messages
 from core.orchestration.output_boundary import sanitize_assistant_visible_text
+from core.orchestration.cache_diagnostics import (
+    build_llm_usage_from_observation,
+    build_runtime_cache_composition,
+    build_runtime_context_composition,
+)
 
 from core.llm import (
     LLMError,
@@ -2403,13 +2408,19 @@ class SelfEvolvingAgent:
                         visible_text=raw_content,
                         tool_names=xml_tool_names,
                     )
-                    self._get_response_surface_controller().record_token_usage(
+                    token_usage = self._get_response_surface_controller().record_token_usage(
                         response=response,
                         round_state=round_state,
                         current_turn=current_turn,
                         messages=messages,
                         raw_content=raw_content,
                         estimate_output_tokens=estimate_tokens_precise,
+                    )
+                    self._record_turn_cache_diagnostics(
+                        token_usage=token_usage,
+                        response=response,
+                        messages=messages,
+                        current_turn=current_turn,
                     )
                     xml_stop_reason = self._get_turn_outcome_controller().should_stop_for_convergence(
                         iteration=iteration,
@@ -2461,19 +2472,12 @@ class SelfEvolvingAgent:
                     estimate_output_tokens=estimate_tokens_precise,
                 )
                 input_tokens, output_tokens = token_usage
-                token_usage_observed = bool(getattr(token_usage, "observed", False))
-                self._last_turn_metadata = {
-                    **dict(getattr(self, "_last_turn_metadata", {}) or {}),
-                    "llm_usage": {
-                        "source": "provider_usage" if token_usage_observed else "missing",
-                        "input_tokens": int(getattr(token_usage, "input_tokens", input_tokens) or 0) if token_usage_observed else 0,
-                        "output_tokens": int(getattr(token_usage, "output_tokens", output_tokens) or 0) if token_usage_observed else 0,
-                        "total_tokens": int(getattr(token_usage, "total_tokens", (input_tokens + output_tokens)) or 0) if token_usage_observed else 0,
-                        "cached_input_tokens": int(getattr(token_usage, "cached_input_tokens", 0) or 0) if token_usage_observed else 0,
-                        "cache_creation_input_tokens": int(getattr(token_usage, "cache_creation_input_tokens", 0) or 0) if token_usage_observed else 0,
-                        "uncached_input_tokens": int(getattr(token_usage, "uncached_input_tokens", 0) or 0) if token_usage_observed else 0,
-                    },
-                }
+                self._record_turn_cache_diagnostics(
+                    token_usage=token_usage,
+                    response=response,
+                    messages=messages,
+                    current_turn=current_turn,
+                )
 
                 logger.log_llm_response(
                     raw_content,
@@ -2695,6 +2699,79 @@ class SelfEvolvingAgent:
             )
         except Exception:
             return
+
+    def _record_turn_cache_diagnostics(
+        self,
+        *,
+        token_usage: Any,
+        response: Any,
+        messages: List[Any],
+        current_turn: int,
+    ) -> Dict[str, Any]:
+        response_metadata = getattr(response, "response_metadata", None)
+        if not isinstance(response_metadata, dict):
+            response_metadata = {}
+        runtime = _turn_runtime_from_env()
+        runtime_metadata = {
+            **_safe_turn_runtime_metadata(runtime),
+            **({
+                "promptCachePartition": str(runtime.get("promptCachePartition") or "").strip(),
+            } if str(runtime.get("promptCachePartition") or "").strip() else {}),
+        }
+        llm_usage = build_llm_usage_from_observation(
+            token_usage,
+            response_metadata=response_metadata,
+            runtime_metadata=runtime_metadata,
+        )
+        prompt_cache_partition = str(llm_usage.get("promptCachePartition") or "").strip()
+        context_limit = int(
+            getattr(
+                self,
+                "_context_window_limit",
+                getattr(self, "_effective_max_token_limit", 0),
+            )
+            or 0
+        )
+        context_composition = build_runtime_context_composition(
+            list(messages or []),
+            turn_id=str(current_turn or ""),
+            prompt_cache_partition=prompt_cache_partition,
+            context_limit=context_limit,
+        )
+        ui = get_ui()
+        average_cache = {}
+        snapshot = getattr(ui, "cache_average_snapshot", None)
+        if callable(snapshot):
+            try:
+                average_cache = snapshot()
+            except Exception:
+                average_cache = {}
+        cache_composition = build_runtime_cache_composition(
+            turn_id=str(current_turn or ""),
+            llm_usage=llm_usage,
+            context_composition=context_composition,
+            average_cache=average_cache,
+        )
+        self._last_turn_metadata = {
+            **dict(getattr(self, "_last_turn_metadata", {}) or {}),
+            "llm_usage": llm_usage,
+            "context_composition": context_composition,
+            "cache_composition": cache_composition,
+        }
+        note_cache_diagnostics = getattr(ui, "note_cache_diagnostics", None)
+        if callable(note_cache_diagnostics):
+            try:
+                note_cache_diagnostics(
+                    llm_usage=llm_usage,
+                    context_composition=context_composition,
+                    cache_composition=cache_composition,
+                )
+            except Exception as exc:
+                _debug_logger.warning(
+                    f"[TOKEN] runtime cache diagnostics persist failed: {type(exc).__name__}: {exc}",
+                    tag="TOKEN",
+                )
+        return llm_usage
 
     def _build_llm_invocation_context(self, *, prompt_purpose: str = "main_reply") -> LLMInvocationContext:
         runtime = _turn_runtime_from_env()
