@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, Iterator, List
 
 from config import AppConfig, LLMProfile, ProviderConfig
-from core.chat.model_messages import normalize_provider_turn_messages
+from core.chat.model_messages import ProviderMessageChain
 
 from .adapters import ProviderAdapter
 from .protocol_resolver import ResolvedProtocolRoute
@@ -178,19 +178,6 @@ def _default_prompt_cache_retention(strategy: str, *, model: str = "") -> str:
     }:
         return "in_memory"
     return ""
-
-
-def _message_chain_signature(messages: List[Dict[str, Any]]) -> str:
-    parts: list[str] = []
-    for item in list(messages or []):
-        if not isinstance(item, dict):
-            parts.append(repr(item))
-            continue
-        parts.append(str(item.get("role") or ""))
-        parts.append(str(item.get("content") or ""))
-        parts.append(str(item.get("tool_call_id") or ""))
-        parts.append(repr(item.get("tool_calls") or []))
-    return hashlib.sha256("\n".join(parts).encode("utf-8", errors="replace")).hexdigest()[:16]
 
 
 def _message_content_shape(content: Any) -> Dict[str, Any]:
@@ -646,9 +633,9 @@ def build_llm_payload(
         )
         for item in messages
     ]
-    normalized_signature = _message_chain_signature(normalized_messages)
-    normalized_messages = normalize_provider_turn_messages(normalized_messages)
-    if _message_chain_signature(normalized_messages) != normalized_signature:
+    provider_chain = ProviderMessageChain.from_messages(normalized_messages)
+    normalized_messages = provider_chain.to_provider_payload()
+    if provider_chain.repaired:
         policy_actions.provider_tool_chain_repaired += 1
     if has_prompt_cache_control and not preserve_cache_control:
         normalized_messages = strip_cache_control_from_messages(normalized_messages)
