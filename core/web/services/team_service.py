@@ -4142,8 +4142,9 @@ def _load_index() -> dict[str, Any]:
     if not path.exists():
         return {"schemaVersion": SCHEMA_VERSION, "updatedAt": utc_now_iso(), "teams": []}
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+        data = _read_json(path)
+    except (OSError, json.JSONDecodeError) as exc:
+        _debug_logger.warning(f"Failed to read Team index. path={path} error={type(exc).__name__}: {exc}")
         return {"schemaVersion": SCHEMA_VERSION, "updatedAt": utc_now_iso(), "teams": []}
     return data if isinstance(data, dict) else {"schemaVersion": SCHEMA_VERSION, "updatedAt": utc_now_iso(), "teams": []}
 
@@ -4153,7 +4154,7 @@ def _save_index(state: dict[str, Any]) -> None:
 
 
 def _read_json(path: Path) -> dict[str, Any]:
-    data = json.loads(path.read_text(encoding="utf-8"))
+    data = json.loads(path.read_text(encoding="utf-8-sig"))
     return data if isinstance(data, dict) else {}
 
 
