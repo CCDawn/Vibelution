@@ -5337,12 +5337,17 @@ class TestRuntimeStateMemoryFlow:
             active_evolution_txn_id="txn_1",
         ) is False
 
-    def test_single_turn_direct_response_does_not_finish_action_promise(self):
+    def test_single_turn_direct_response_does_not_parse_action_words(self):
         assert TurnOutcomeController.should_finish_single_turn_after_direct_response(
             single_turn_mode_active=True,
             tool_calls=[],
             visible_text="第一步：读取当前代码确认状态。",
-        ) is False
+        ) is True
+        assert TurnOutcomeController.should_finish_single_turn_after_direct_response(
+            single_turn_mode_active=True,
+            tool_calls=[],
+            visible_text="请问你希望我继续做什么？比如：继续提示词系统缓存机制的探索？检查最近提交的运行状态？",
+        ) is True
 
     def test_web_session_active_task_requires_task_tool_call(self):
         from core.web.services import session_service
