@@ -319,16 +319,20 @@ def model_visible_messages_from_events(events: Iterable[TurnJournalEvent]) -> li
         if event.event_type == EVENT_USER_MESSAGE:
             content = str(payload.get("content") or "").strip()
             if content or payload.get("attachments"):
+                payload_metadata = payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {}
+                message_metadata = {
+                    "kind": "journal_user_message",
+                    "turnId": turn_id,
+                    "eventId": event.event_id,
+                }
+                if payload_metadata:
+                    message_metadata.update(payload_metadata)
                 messages.append(
                     {
                         "role": "user",
                         "content": content,
                         "attachments": list(payload.get("attachments") or []),
-                        "metadata": {
-                            "kind": "journal_user_message",
-                            "turnId": turn_id,
-                            "eventId": event.event_id,
-                        },
+                        "metadata": message_metadata,
                     }
                 )
         elif event.event_type in {EVENT_ASSISTANT_PARTIAL, EVENT_ASSISTANT_DELTA_COMMITTED}:
@@ -382,7 +386,7 @@ def model_visible_messages_from_events(events: Iterable[TurnJournalEvent]) -> li
                     messages.append(partial)
                 messages.append(
                     {
-                        "role": "user",
+                        "role": "system",
                         "content": str(payload.get("marker") or TURN_INTERRUPTED_MARKER),
                         "metadata": {
                             "kind": "turn_interrupted",
@@ -402,7 +406,7 @@ def model_visible_messages_from_events(events: Iterable[TurnJournalEvent]) -> li
             messages.append(partial)
             messages.append(
                 {
-                    "role": "user",
+                    "role": "system",
                     "content": TURN_INTERRUPTED_MARKER,
                     "metadata": {
                         "kind": "turn_interrupted",
@@ -441,6 +445,18 @@ def _assistant_message_from_payload(
             "interrupted": interrupted,
         },
     }
+    metadata = payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {}
+    usage = payload.get("llmUsage") or payload.get("llm_usage") or metadata.get("llmUsage") or metadata.get("llm_usage")
+    if isinstance(usage, dict):
+        message["metadata"]["llmUsage"] = dict(usage)
+    mental_snapshot = (
+        payload.get("mentalSnapshot")
+        or payload.get("mental_snapshot")
+        or metadata.get("mentalSnapshot")
+        or metadata.get("mental_snapshot")
+    )
+    if isinstance(mental_snapshot, dict):
+        message["mentalSnapshot"] = dict(mental_snapshot)
     thought = str(payload.get("thought") or "").strip()
     if thought:
         message["thought"] = thought

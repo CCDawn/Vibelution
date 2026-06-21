@@ -52,6 +52,7 @@ from core.chat.conversation_ledger import (
     EVENT_USER_MESSAGE,
     TURN_INTERRUPTED_MARKER,
     append_conversation_event,
+    conversation_visible_messages_from_events,
     latest_ledger_sequence,
     latest_open_turn_id,
     load_conversation_events,
@@ -828,7 +829,8 @@ def _append_session_conversation_event(
                 lifecycle=True,
             )
         except Exception:
-            return
+            pass
+        raise
 
 
 def _reconcile_stale_session_ledger(session_id: str, *, active_turn_id: str = "", reason: str = "process_restarted") -> None:
@@ -4524,6 +4526,7 @@ def submit_session_message(
             "content": message,
             "attachments": _normalize_message_attachments(attachments),
             "references": _normalize_session_references(session_references),
+            "metadata": persisted_message_metadata,
             "source": normalized_message_source,
         },
         source="submit_session_message",
@@ -7118,7 +7121,12 @@ def _is_default_empty_session_title(title: str) -> bool:
 
 def _build_session_summary(conversation: dict[str, Any], *, hydrate_agent: bool = True) -> dict[str, Any]:
     status = _conversation_phase(conversation["id"], conversation)
-    summary = _latest_message_summary(conversation.get("messages") or [])
+    summary = _latest_message_summary(
+        _normalize_messages(
+            conversation["id"],
+            _ledger_visible_messages_for_session(conversation["id"]),
+        )
+    )
     updated_at = str(conversation.get("updatedAt") or "").strip()
     agent_id = str(conversation.get("agentId") or "").strip()
     cached_agent = conversation.get("_agent")
@@ -8550,7 +8558,7 @@ def _build_session_context_usage(conversation: dict[str, Any], messages: list[di
         "userMessageCount": user_count,
         "assistantMessageCount": assistant_count,
         "toolCallCount": tool_call_count,
-        "source": "session_messages",
+        "source": "conversation_ledger",
     }
     return payload
 
@@ -12274,8 +12282,10 @@ def _persist_session_turn_result(
             payload={
                 "content": assistant_text,
                 "thought": str(assistant_entry.get("thought") or ""),
-                "toolCalls": _normalize_message_tool_calls(assistant_entry.get("tool_calls") or assistant_entry.get("toolCalls") or []),
-                "feedbackEvents": _normalize_message_feedback_events(assistant_entry.get("feedback_events") or assistant_entry.get("feedbackEvents") or []),
+            "toolCalls": _normalize_message_tool_calls(assistant_entry.get("tool_calls") or assistant_entry.get("toolCalls") or []),
+            "feedbackEvents": _normalize_message_feedback_events(assistant_entry.get("feedback_events") or assistant_entry.get("feedbackEvents") or []),
+            "llmUsage": llm_usage,
+            "mentalSnapshot": _normalize_mental_snapshot(assistant_entry.get("mental_snapshot")),
             },
             source="persist_session_turn_result",
         )
@@ -16156,15 +16166,45 @@ def _mental_diagnosis_summary(lang: str, cognitive_state: str) -> str:
     return labels.get(str(cognitive_state or "").strip().lower(), str(cognitive_state or "").strip())
 
 
+def _ledger_visible_messages_for_session(session_id: str) -> list[dict[str, Any]]:
+    normalized_session_id = str(session_id or "").strip()
+    if not normalized_session_id:
+        return []
+    events = load_conversation_events(PROJECT_ROOT, normalized_session_id)
+    return conversation_visible_messages_from_events(events)
+
+
 def _messages_with_live_output(session_id: str, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
     detail_messages = _merge_cli_agent_lifecycle_sidecar_messages(
         session_id,
-        _normalize_messages(session_id, messages),
+        _normalize_messages(session_id, _ledger_visible_messages_for_session(session_id)),
     )
     live_message = _build_live_output_message(session_id)
     if live_message is None:
         return detail_messages
+    detail_messages = _without_live_turn_ledger_partials(detail_messages, live_message)
     return detail_messages + [live_message]
+
+
+def _without_live_turn_ledger_partials(
+    messages: list[dict[str, Any]],
+    live_message: dict[str, Any],
+) -> list[dict[str, Any]]:
+    live_metadata = live_message.get("metadata") if isinstance(live_message.get("metadata"), dict) else {}
+    live_turn_id = str(live_metadata.get("turnId") or "").strip()
+    if not live_turn_id:
+        return list(messages or [])
+    filtered: list[dict[str, Any]] = []
+    for message in list(messages or []):
+        metadata = message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
+        if (
+            str(message.get("role") or "").strip().lower() == "assistant"
+            and str(metadata.get("turnId") or "").strip() == live_turn_id
+            and str(metadata.get("kind") or "").strip() == "journal_assistant_partial"
+        ):
+            continue
+        filtered.append(message)
+    return filtered
 
 
 def _live_assistant_overlay_turn_id(session_id: str, turn_id: str = "") -> str:

@@ -48,6 +48,7 @@ def normalize_model_history_messages(messages: Iterable[Any]) -> list[Any]:
 
     normalized: list[Any] = []
     raw_messages = list(messages or [])
+    pending_tool_names: dict[str, str] = {}
     for index, raw in enumerate(raw_messages):
         if not isinstance(raw, dict):
             if hasattr(raw, "content") and hasattr(raw, "type"):
@@ -59,6 +60,7 @@ def normalize_model_history_messages(messages: Iterable[Any]) -> list[Any]:
             continue
         role = _normalize_role(raw.get("role"))
         if role == "assistant":
+            pending_tool_names.update(_assistant_tool_call_names(raw, source_index=index))
             normalized.extend(
                 _assistant_history_messages(
                     raw,
@@ -72,7 +74,9 @@ def normalize_model_history_messages(messages: Iterable[Any]) -> list[Any]:
             )
             continue
         if role == "tool":
-            tool_message = _tool_role_history_message(raw, source_index=index)
+            tool_call_id = _tool_call_id_from_message(raw)
+            tool_name = pending_tool_names.pop(tool_call_id, "") if tool_call_id else ""
+            tool_message = _tool_role_history_message(raw, source_index=index, tool_name=tool_name)
             if tool_message:
                 normalized.append(tool_message)
             continue
@@ -200,17 +204,27 @@ def _assistant_provider_messages(message: dict[str, Any], *, source_index: int) 
     return [assistant, *tool_messages]
 
 
-def _tool_role_history_message(message: dict[str, Any], *, source_index: int) -> dict[str, Any]:
+def _tool_role_history_message(
+    message: dict[str, Any],
+    *,
+    source_index: int,
+    tool_name: str = "",
+) -> dict[str, Any]:
     content = _content_value(message.get("content"))
     if not _visible_text(content):
         return {}
-    name = _tool_name_from_text(content) or _tool_name_from_metadata(message) or "unknown_tool"
+    name = (
+        str(tool_name or "").strip()
+        or _tool_name_from_text(content)
+        or _tool_name_from_metadata(message)
+        or "unknown_tool"
+    )
     normalized = _base_message("assistant", _history_tool_result_text(name, content), source_index=source_index)
     _copy_optional(message, normalized, ("metadata",))
     metadata = dict(normalized.get("metadata") or {})
     metadata["kind"] = "historical_orphan_tool_result"
     metadata["toolName"] = name
-    tool_call_id = str(message.get("tool_call_id") or message.get("toolCallId") or message.get("id") or "").strip()
+    tool_call_id = _tool_call_id_from_message(message)
     if tool_call_id:
         metadata["toolCallId"] = tool_call_id
     normalized["metadata"] = metadata
@@ -218,7 +232,7 @@ def _tool_role_history_message(message: dict[str, Any], *, source_index: int) ->
 
 
 def _tool_role_message(message: dict[str, Any], *, source_index: int) -> dict[str, Any]:
-    tool_call_id = str(message.get("tool_call_id") or message.get("toolCallId") or message.get("id") or "").strip()
+    tool_call_id = _tool_call_id_from_message(message)
     content = _content_value(message.get("content"))
     if not tool_call_id or not _visible_text(content):
         return {}
@@ -289,6 +303,17 @@ def _tool_entries(message: dict[str, Any]) -> list[dict[str, Any]]:
     return [dict(item) for item in list(raw or []) if isinstance(item, dict)]
 
 
+def _assistant_tool_call_names(message: dict[str, Any], *, source_index: int) -> dict[str, str]:
+    names: dict[str, str] = {}
+    for tool_index, entry in enumerate(_tool_entries(message), start=1):
+        normalized = _normalize_tool_call(entry, source_index=source_index, tool_index=tool_index)
+        tool_call_id = str(normalized.get("id") or "").strip() if normalized else ""
+        tool_name = str(normalized.get("name") or "").strip() if normalized else ""
+        if tool_call_id and tool_name:
+            names[tool_call_id] = tool_name
+    return names
+
+
 def _assistant_tool_calls_have_following_results(
     messages: list[Any],
     assistant_index: int,
@@ -357,6 +382,10 @@ def _normalize_tool_call(entry: dict[str, Any], *, source_index: int, tool_index
         "name": name,
         "args": arguments,
     }
+
+
+def _tool_call_id_from_message(message: dict[str, Any]) -> str:
+    return str(message.get("tool_call_id") or message.get("toolCallId") or message.get("id") or "").strip()
 
 
 def _tool_arguments(entry: dict[str, Any]) -> dict[str, Any]:
