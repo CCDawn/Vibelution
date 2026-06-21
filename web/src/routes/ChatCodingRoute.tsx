@@ -2588,7 +2588,7 @@ export function ChatCodingRoute() {
   const agentsQuery = useQuery({
     queryKey: queryKeys.agents(),
     queryFn: () => fetchJson<AgentInstance[]>("/api/agents?detail=summary"),
-    enabled: groupComposerOpen || legacyGroupRoomActive || Boolean(activeSessionId && secondaryChatDataEnabled),
+    enabled: secondaryChatDataEnabled || groupComposerOpen || legacyGroupRoomActive || Boolean(activeSessionId),
   });
   const chatRoomModesQuery = useQuery({
     queryKey: queryKeys.chatRoomModes(),
@@ -5401,6 +5401,7 @@ export function ChatCodingRoute() {
     groupedConversations,
     searchHasTerm,
   } = useConversationIndexModel({
+    agents: agentsQuery.data,
     conversations: conversationsQuery.data,
     lang,
     linkedTeamRoomIds,
