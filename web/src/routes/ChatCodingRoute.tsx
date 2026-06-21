@@ -2551,10 +2551,13 @@ export function ChatCodingRoute() {
     () => rawSessionsQuery.data?.filter(isVisibleDirectSession),
     [rawSessionsQuery.data],
   );
-  const sessionsQuery = {
-    ...rawSessionsQuery,
-    data: visibleSessionsData,
-  };
+  const sessionsQuery = useMemo(
+    () => ({
+      ...rawSessionsQuery,
+      data: visibleSessionsData,
+    }),
+    [rawSessionsQuery, visibleSessionsData],
+  );
   const conversationsQuery = useQuery({
     queryKey: queryKeys.conversations(),
     queryFn: () => fetchJson<ConversationSummary[]>("/api/conversations"),

@@ -9,6 +9,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 import threading
 import urllib.error
 import urllib.parse
@@ -937,23 +938,50 @@ def start_source_collection_search_background(team_id: str, run_id: str, payload
     assignments = [item for item in list(assignments_payload.get("assignments") or []) if isinstance(item, dict)]
     records = [item for item in list(records_payload.get("records") or []) if isinstance(item, dict)]
     storage_artifacts = _source_collection_storage_artifacts(normalized_team_id, normalized_run_id)
-    active_snapshot = _persist_source_collection_work_run(
-        normalized_team_id,
-        normalized_run_id,
-        status="running",
-        current_phase="queued",
-        run=run,
-        team=team,
-        assignments=assignments,
-        records=records,
-        summary="资料搜索已进入后台执行，页面可继续操作。",
-        active=True,
-        extra={
-            "executionMode": "background",
-            "provider": provider,
-            "queuedSearchExecution": True,
-        },
-    )
+    with _WORKFLOW_LOCK:
+        existing_active_snapshot = _source_collection_work_run_store().load_active_snapshot(SOURCE_COLLECTION_WORK_RUN_KIND)
+        if _source_collection_background_snapshot_is_active(existing_active_snapshot, normalized_team_id, normalized_run_id):
+            _record_workflow_event(
+                "source_collection.search_background_already_running",
+                normalized_team_id,
+                fields={
+                    "runId": normalized_run_id,
+                    "provider": provider,
+                    "assignmentCount": len(assignments),
+                    "recordCount": len(records),
+                    "activeStatus": str(existing_active_snapshot.get("status") or ""),
+                    "activePhase": str(existing_active_snapshot.get("currentPhase") or ""),
+                },
+            )
+            return _source_collection_search_background_response(
+                team_id=normalized_team_id,
+                run_id=normalized_run_id,
+                provider=provider,
+                run=run,
+                run_status=run_status,
+                storage_artifacts=storage_artifacts,
+                assignments=assignments,
+                records=records,
+                active_snapshot=existing_active_snapshot,
+                already_running=True,
+            )
+        active_snapshot = _persist_source_collection_work_run(
+            normalized_team_id,
+            normalized_run_id,
+            status="running",
+            current_phase="queued",
+            run=run,
+            team=team,
+            assignments=assignments,
+            records=records,
+            summary="资料搜索已进入后台执行，页面可继续操作。",
+            active=True,
+            extra={
+                "executionMode": "background",
+                "provider": provider,
+                "queuedSearchExecution": True,
+            },
+        )
     worker = threading.Thread(
         target=_run_source_collection_search_background,
         args=(normalized_team_id, normalized_run_id, request_payload),
@@ -972,13 +1000,53 @@ def start_source_collection_search_background(team_id: str, run_id: str, payload
             "threadName": worker.name,
         },
     )
+    return _source_collection_search_background_response(
+        team_id=normalized_team_id,
+        run_id=normalized_run_id,
+        provider=provider,
+        run=run,
+        run_status=run_status,
+        storage_artifacts=storage_artifacts,
+        assignments=assignments,
+        records=records,
+        active_snapshot=active_snapshot,
+        already_running=False,
+    )
+
+
+def _source_collection_background_snapshot_is_active(snapshot: dict[str, Any] | None, team_id: str, run_id: str) -> bool:
+    if not isinstance(snapshot, dict):
+        return False
+    if _trim_text(snapshot.get("runId"), max_length=160) != run_id:
+        return False
+    if _trim_text(snapshot.get("teamId"), max_length=160) != team_id:
+        return False
+    status = _trim_text(snapshot.get("status"), max_length=80).lower()
+    current_phase = _trim_text(snapshot.get("currentPhase"), max_length=80).lower()
+    return status in {"queued", "running"} or current_phase in {"queued", "running"}
+
+
+def _source_collection_search_background_response(
+    *,
+    team_id: str,
+    run_id: str,
+    provider: str,
+    run: dict[str, Any],
+    run_status: dict[str, Any],
+    storage_artifacts: dict[str, str],
+    assignments: list[dict[str, Any]],
+    records: list[dict[str, Any]],
+    active_snapshot: dict[str, Any],
+    already_running: bool,
+) -> dict[str, Any]:
     return {
         "schemaVersion": SCHEMA_VERSION,
-        "teamId": normalized_team_id,
-        "runId": normalized_run_id,
+        "teamId": team_id,
+        "runId": run_id,
         "status": "accepted",
         "executionMode": "background",
         "accepted": True,
+        "alreadyRunning": already_running,
         "provider": provider,
         "executedQueryCount": 0,
         "skippedQueryCount": 0,
@@ -1005,7 +1073,7 @@ def start_source_collection_search_background(team_id: str, run_id: str, payload
             "writesOfficialGraph": False,
         },
         "nextActions": [
-            "The background source collection worker will write DataRecords and source_manifest candidates.",
+            "The background source collection worker is running and will write DataRecords and source_manifest candidates.",
             "Keep this page open or return later; run status and assignments can refresh without blocking the request.",
         ],
     }
@@ -11330,7 +11398,20 @@ def _read_json(path: Path) -> dict[str, Any]:
 
 def _write_json(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    encoded = json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+    fd, temp_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=str(path.parent))
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(encoded)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temp_name, path)
+    except Exception:
+        try:
+            os.unlink(temp_name)
+        except OSError:
+            pass
+        raise
 
 
 def _workflow_path(team_id: str) -> Path:
