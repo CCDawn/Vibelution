@@ -2363,6 +2363,12 @@
               <span>get_research_stage_round_status 会在读取时用最新 source_collection_run work-run 终态自恢复旧 running 轮次；已有页面刷新即可退出假运行中，测试锁定同步函数只能有一个实现。</span>
             </div>
 <div class="blueprint-row">
+              <b>M6.63</b>
+              <strong>挑战杯 Agent 提示词按能力收敛</strong>
+              <span>Agent Directory 为 challenge_cup_coordinator、data_discovery、source_acquisition、content_extraction 和 source_quality 绑定专属 prompt template 与 persona/task profile。</span>
+              <span>提示词明确各角色现有工具边界：协调人只读协调，资料发现只做搜索线索，资料获取负责来源元数据，资料提炼输出 source_manifest 候选，资料审查只做入库前审；均不声称拥有 Shell、Git、文件写入或正式知识入库权限。</span>
+            </div>
+<div class="blueprint-row">
               <b>M7</b>
               <strong>实验计划账本首切</strong>
               <span>新增 experiments/status 与 experiments/plan：聚合实验阶段轮次、algorithm_hypothesis 候选、计划草稿和 baseline/metric/dataset/smoke 缺口，并把草稿写入 experiment_plans/index.json。</span>

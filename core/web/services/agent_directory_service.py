@@ -138,6 +138,13 @@ RESEARCH_SOURCE_ROLE_TOOL_PROFILES = {
         "preferredTools": ("research_knowledge_query_tool", "web_fetch_tool", "web_search_tool", "agent_message_tool"),
     },
 }
+CHALLENGE_CUP_ROLE_PROMPT_TEMPLATE_IDS = {
+    "challenge_cup_coordinator": "prompt-challenge-cup-coordinator",
+    "challenge_cup_data_discovery": "prompt-challenge-cup-data-discovery",
+    "challenge_cup_source_acquisition": "prompt-challenge-cup-source-acquisition",
+    "challenge_cup_content_extraction": "prompt-challenge-cup-content-extraction",
+    "challenge_cup_source_quality": "prompt-challenge-cup-source-quality",
+}
 RESEARCH_ROLE_TOOL_PROFILES = {
     "research_paper_reader": {
         "allowedTools": (
@@ -591,6 +598,8 @@ def create_agent_instance(
         normalized_primary_mode = _normalize_primary_mode(primary_mode)
         normalized_role_key = _normalize_role_key(role_key)
         normalized_prompt_template_id = _normalize_prompt_template_id(prompt_template_id)
+        if not normalized_prompt_template_id:
+            normalized_prompt_template_id = _prompt_template_id_for_role(normalized_role_key)
         normalized_context_compression_policy = normalize_agent_context_compression_policy(context_compression_policy)
         normalized_direct_session_id = str(direct_session_id or "").strip()
         _ensure_active_direct_session_available(
@@ -1525,13 +1534,13 @@ def repair_agent_directory() -> dict[str, Any]:
                 if agent.get("roleKey") != normalized_role_key:
                     agent["roleKey"] = normalized_role_key
                     changed = True
-            if not str(agent.get("promptTemplateId") or "").strip():
-                prompt_template_id = _infer_agent_prompt_template_id(agent)
-                if prompt_template_id:
-                    agent["promptTemplateId"] = prompt_template_id
-                    changed = True
-            else:
-                normalized_prompt_template_id = _normalize_prompt_template_id(agent.get("promptTemplateId"))
+            prompt_template_id = _infer_agent_prompt_template_id(agent)
+            current_prompt_template_id = str(agent.get("promptTemplateId") or "").strip()
+            if prompt_template_id and _should_repair_agent_prompt_template_id(current_prompt_template_id, prompt_template_id):
+                agent["promptTemplateId"] = prompt_template_id
+                changed = True
+            elif current_prompt_template_id:
+                normalized_prompt_template_id = _normalize_prompt_template_id(current_prompt_template_id)
                 if agent.get("promptTemplateId") != normalized_prompt_template_id:
                     agent["promptTemplateId"] = normalized_prompt_template_id
                     changed = True
@@ -4260,7 +4269,8 @@ def _ensure_fixed_role_profiles(agent: dict[str, Any]) -> bool:
     changed = False
     persona = normalize_persona_profile(metadata.get("personaProfile") if isinstance(metadata.get("personaProfile"), dict) else {})
     persona_defaults_disabled = bool(metadata.get("personaProfileDefaultsDisabled"))
-    if not persona_defaults_disabled and not _persona_profile_has_content(persona):
+    replace_generic_persona = _should_replace_generic_challenge_cup_persona(agent, metadata, persona)
+    if not persona_defaults_disabled and (not _persona_profile_has_content(persona) or replace_generic_persona):
         default_persona = normalize_persona_profile(defaults.get("personaProfile"))
         if _persona_profile_has_content(default_persona):
             metadata["personaProfile"] = default_persona
@@ -4268,7 +4278,11 @@ def _ensure_fixed_role_profiles(agent: dict[str, Any]) -> bool:
 
     task = normalize_task_profile(metadata.get("taskProfile") if isinstance(metadata.get("taskProfile"), dict) else {})
     task_defaults_disabled = bool(metadata.get("taskProfileDefaultsDisabled"))
-    if not task_defaults_disabled and not _task_profile_has_content(task):
+    replace_challenge_cup_task = (
+        _should_replace_generic_challenge_cup_task(agent, metadata, task)
+        or _should_replace_incomplete_challenge_cup_task(agent, metadata, task)
+    )
+    if not task_defaults_disabled and (not _task_profile_has_content(task) or replace_challenge_cup_task):
         default_task = normalize_task_profile(defaults.get("taskProfile"))
         if _task_profile_has_content(default_task):
             metadata["taskProfile"] = default_task
@@ -4277,6 +4291,48 @@ def _ensure_fixed_role_profiles(agent: dict[str, Any]) -> bool:
     if changed:
         agent["metadata"] = metadata
     return changed
+
+
+def _should_replace_generic_challenge_cup_persona(
+    agent: dict[str, Any],
+    metadata: dict[str, Any],
+    profile: dict[str, Any],
+) -> bool:
+    role_key = _normalize_role_key(agent.get("roleKey") or metadata.get("researchAgentKey") or "")
+    if role_key not in CHALLENGE_CUP_ROLE_PROMPT_TEMPLATE_IDS:
+        return False
+    return (
+        str(profile.get("personality") or "").strip() == "细致、证据优先，避免把未验证来源当成结论。"
+        and str(profile.get("communicationStyle") or "").strip() == "先列可用证据和不确定性，再给研究建议。"
+        and str(profile.get("collaborationPreference") or "").strip() == "围绕来源、证据、引用和结论边界与研究团队协作。"
+    )
+
+
+def _should_replace_generic_challenge_cup_task(
+    agent: dict[str, Any],
+    metadata: dict[str, Any],
+    profile: dict[str, Any],
+) -> bool:
+    role_key = _normalize_role_key(agent.get("roleKey") or metadata.get("researchAgentKey") or "")
+    if role_key not in CHALLENGE_CUP_ROLE_PROMPT_TEMPLATE_IDS:
+        return False
+    return (
+        str(profile.get("responsibilities") or "").strip()
+        == "阅读资料；提取关键证据；标注来源质量；把发现交给研究组织或团队成员复核。"
+        and str(profile.get("preferredTasks") or "").strip() == "文献阅读、来源比对、证据摘录和研究问题拆解。"
+        and str(profile.get("constraints") or "").strip() == "保留来源边界，遵守研究工具和知识库权限。"
+    )
+
+
+def _should_replace_incomplete_challenge_cup_task(
+    agent: dict[str, Any],
+    metadata: dict[str, Any],
+    profile: dict[str, Any],
+) -> bool:
+    role_key = _normalize_role_key(agent.get("roleKey") or metadata.get("researchAgentKey") or "")
+    if role_key not in CHALLENGE_CUP_ROLE_PROMPT_TEMPLATE_IDS:
+        return False
+    return not any(str(profile.get(field) or "").strip() for field in AGENT_TASK_PROFILE_TEXT_FIELDS)
 
 
 def _fixed_role_profile_defaults(agent: dict[str, Any], metadata: dict[str, Any]) -> dict[str, Any]:
@@ -4299,6 +4355,8 @@ def _fixed_role_profile_defaults(agent: dict[str, Any], metadata: dict[str, Any]
         return _supervised_evolution_profile_defaults(role.split(":", 1)[1], functional_name)
     if role.startswith("research_org:"):
         return _research_org_profile_defaults(role.split(":", 1)[1], functional_name, responsibilities)
+    if role.startswith("challenge_cup:"):
+        return _challenge_cup_agent_profile_defaults(role.split(":", 1)[1], functional_name)
     if role.startswith("research_agent:"):
         return _research_agent_profile_defaults(role.split(":", 1)[1], functional_name)
     return {}
@@ -4320,6 +4378,8 @@ def _fixed_role_profile_key(agent: dict[str, Any], metadata: dict[str, Any]) -> 
 
     research_agent_key = _normalize_role_key(metadata.get("researchAgentKey") or "")
     role_key = _normalize_role_key(agent.get("roleKey") or "")
+    if role_key in CHALLENGE_CUP_ROLE_PROMPT_TEMPLATE_IDS:
+        return f"challenge_cup:{role_key}"
     if research_agent_key or role_key.startswith("research_") or primary_mode == "research":
         return f"research_agent:{research_agent_key or role_key}"
 
@@ -4412,6 +4472,118 @@ def _research_org_profile_defaults(role: str, functional_name: str, responsibili
 
 
 def _research_agent_profile_defaults(role: str, functional_name: str) -> dict[str, Any]:
+    if role in CHALLENGE_CUP_ROLE_PROMPT_TEMPLATE_IDS:
+        return _challenge_cup_agent_profile_defaults(role, functional_name)
+    return _generic_research_agent_profile_defaults(role, functional_name)
+
+
+def _challenge_cup_agent_profile_defaults(role: str, functional_name: str) -> dict[str, Any]:
+    profiles = {
+        "challenge_cup_coordinator": {
+            "personaProfile": {
+                "personality": "清醒、克制，擅长把挑战杯科研流程压缩成下一步行动。",
+                "communicationStyle": "先给阶段判断，再列证据位置、角色分工和用户下一步。",
+                "background": f"{functional_name} 是挑战杯 ai 科研团队的协调 Agent，负责读状态和组织交接，不直接执行资料搜集。",
+                "collaborationPreference": "把执行任务交给资料发现、资料获取、资料提炼、资料审查和 Knowledge Steward，不越权声称已执行。",
+                "expertise": ["挑战杯科研流程", "阶段协调", "任务交接"],
+            },
+            "taskProfile": {
+                "mission": "协调挑战杯知识搜集阶段，整理当前状态、角色交接和用户下一步。",
+                "responsibilities": "读取项目/会话上下文、任务状态和最近变更；判断阶段位置；把输入输出交接给对应执行 Agent。",
+                "preferredTasks": "阶段判断、交接清单、阻塞归因、用户确认项整理。",
+                "avoidTasks": "不要声称已启动资料搜集、联网搜索、提炼、审查或入库；不要执行 Shell/Git/正式知识写入。",
+                "successCriteria": "用户能清楚看到当前阶段、证据位置、哪个 Agent 该做什么、下一步点击或确认什么。",
+                "deliverables": "Stage Status、Agent Handoff、User Next Step、Boundaries。",
+                "constraints": "只基于可读上下文和已有状态协调；执行动作交给具备对应工具和权限的 Agent 或 UI/API。",
+                "handoffNotes": "需要真实资料处理时交给 challenge_cup_data_discovery/source_acquisition/content_extraction/source_quality。",
+                "taskTypes": ["challenge_cup", "coordination", "stage_status"],
+            },
+        },
+        "challenge_cup_data_discovery": {
+            "personaProfile": {
+                "personality": "敏锐、证据优先，擅长把赛题和 query seeds 展开成可追踪资料线索。",
+                "communicationStyle": "先给检索框架，再列候选线索、价值、缺口和交接优先级。",
+                "background": f"{functional_name} 是挑战杯资料发现 Agent，负责发现公开资料线索，不负责打开全文或入库。",
+                "collaborationPreference": "把 DOI/URL/检索式交给资料获取 Agent，遇到弱来源或重复线索时标注风险。",
+                "expertise": ["挑战杯资料发现", "公开资料检索", "检索式设计"],
+            },
+            "taskProfile": {
+                "mission": "围绕挑战杯赛题和知识搜集目标发现高价值资料线索。",
+                "responsibilities": "生成检索方向；使用公开搜索发现论文、综述、数据集、政策/标准和赛题线索；记录 locator 缺口。",
+                "preferredTasks": "query seeds 扩展、候选来源发现、检索优先级排序。",
+                "avoidTasks": "不要抓取全文、不要提炼正文、不要写正式知识、不要把搜索摘要当成事实结论。",
+                "successCriteria": "每条线索都有标题、来源类型、关键词、URL/DOI 线索、价值说明和不确定性。",
+                "deliverables": "Search Frame、Candidate Leads、Acquisition Handoff、Blockers。",
+                "constraints": "工具边界以 web_search_tool、research_knowledge_query_tool 和 agent_message_tool 为主。",
+                "handoffNotes": "把可打开来源交给 challenge_cup_source_acquisition。",
+                "taskTypes": ["challenge_cup", "data_discovery", "source_leads"],
+            },
+        },
+        "challenge_cup_source_acquisition": {
+            "personaProfile": {
+                "personality": "耐心、严谨，重视 locator、访问状态和来源元数据一致性。",
+                "communicationStyle": "先汇总获取结果，再逐条列来源元数据、访问状态和失败原因。",
+                "background": f"{functional_name} 是挑战杯资料获取 Agent，负责把 DOI/URL/检索式转成可验证来源记录。",
+                "collaborationPreference": "向资料提炼 Agent 提交可读来源和注意事项；无法访问时退回明确原因。",
+                "expertise": ["来源获取", "DOI/URL 校验", "元数据登记"],
+            },
+            "taskProfile": {
+                "mission": "把资料发现线索转成可复核的挑战杯来源记录。",
+                "responsibilities": "搜索和打开公开网页；记录题名、作者/机构、年份、DOI/URL、来源类型、访问状态和证据片段。",
+                "preferredTasks": "DOI/URL 校验、网页访问、来源元数据整理、重复来源识别。",
+                "avoidTasks": "不要下载或改写本地文件、不要写正式知识、不要把无法访问来源标为已获取。",
+                "successCriteria": "每条来源都有可追踪 locator、访问状态、最小元数据和提炼注意事项。",
+                "deliverables": "Acquisition Summary、Source Records、Extraction Handoff、Gaps。",
+                "constraints": "工具边界允许 web_search_tool/web_fetch_tool/research_knowledge_query_tool/agent_message_tool，无写文件权限。",
+                "handoffNotes": "把已获取可读来源交给 challenge_cup_content_extraction。",
+                "taskTypes": ["challenge_cup", "source_acquisition", "source_metadata"],
+            },
+        },
+        "challenge_cup_content_extraction": {
+            "personaProfile": {
+                "personality": "细致、克制，擅长把资料内容提炼为可审查证据而不夸大结论。",
+                "communicationStyle": "先说明提炼范围，再列证据片段、来源锚点、可信度和退回原因。",
+                "background": f"{functional_name} 是挑战杯资料提炼 Agent，负责从已获取来源中提炼 source_manifest 候选摘要。",
+                "collaborationPreference": "把提炼结果交给资料审查 Agent；需要新来源时退回资料发现/获取链路。",
+                "expertise": ["证据摘录", "来源锚点", "source_manifest 提炼"],
+            },
+            "taskProfile": {
+                "mission": "从已获取来源中提炼与挑战杯赛题、机制、实验、数据和交付相关的证据。",
+                "responsibilities": "阅读公开网页或候选资料；提取证据片段、锚点、主题标签、可信度和不确定性。",
+                "preferredTasks": "证据摘录、主题标签、source_manifest 摘要、退回原因整理。",
+                "avoidTasks": "不要发现新检索方向、不要写最终结论、不要写正式知识或 official graph。",
+                "successCriteria": "每条提炼结果都有来源锚点、证据类型、适用主题、可信度和待审查边界。",
+                "deliverables": "Extraction Scope、Evidence Items、Candidate Manifest、Return Reasons。",
+                "constraints": "工具边界以 web_fetch_tool、research_knowledge_query_tool 和 agent_message_tool 为主。",
+                "handoffNotes": "把候选摘要交给 challenge_cup_source_quality 审查。",
+                "taskTypes": ["challenge_cup", "content_extraction", "evidence_manifest"],
+            },
+        },
+        "challenge_cup_source_quality": {
+            "personaProfile": {
+                "personality": "审慎、挑剔，优先发现来源缺口、重复和证据风险。",
+                "communicationStyle": "先给审查分布，再逐条列通过/退回/拒绝/人工确认的依据。",
+                "background": f"{functional_name} 是挑战杯资料审查 Agent，负责 source_manifest 入库前审查。",
+                "collaborationPreference": "把通过项交给资料入库/Knowledge Steward，把缺口退回资料发现、获取或提炼 Agent。",
+                "expertise": ["来源质量评估", "证据审查", "入库前审"],
+            },
+            "taskProfile": {
+                "mission": "审查挑战杯候选资料是否可进入入库前审。",
+                "responsibilities": "核对来源可追溯性、证据质量、赛题相关性、重复/冲突和可入库风险。",
+                "preferredTasks": "候选资料审查、退回补资料、人工确认项整理、Steward 交接。",
+                "avoidTasks": "不要直接写正式 Team Knowledge/RAG/official graph，不替 Knowledge Steward 做正式治理或 ACL 变更。",
+                "successCriteria": "每条候选都有清晰决定、证据、风险、补齐要求或 Steward 交接理由。",
+                "deliverables": "Review Summary、Candidate Decisions、Steward Handoff、Human Gate。",
+                "constraints": "工具边界允许 research_knowledge_query_tool、web_search_tool、web_fetch_tool 和 agent_message_tool。",
+                "handoffNotes": "通过项交给 Knowledge Steward 或资料入库步骤，退回项交给对应执行 Agent。",
+                "taskTypes": ["challenge_cup", "source_quality", "pre_ingestion_review"],
+            },
+        },
+    }
+    return profiles.get(role, _generic_research_agent_profile_defaults(role, functional_name))
+
+
+def _generic_research_agent_profile_defaults(role: str, functional_name: str) -> dict[str, Any]:
     role_label = role.replace("_", " ").strip() or "research agent"
     return {
         "personaProfile": {
@@ -5521,6 +5693,18 @@ def _normalize_prompt_template_id(value: Any) -> str:
     return _safe_fragment(normalized)
 
 
+def _prompt_template_id_for_role(role_key: Any) -> str:
+    return CHALLENGE_CUP_ROLE_PROMPT_TEMPLATE_IDS.get(_normalize_role_key(role_key), "")
+
+
+def _should_repair_agent_prompt_template_id(current: str, expected: str) -> bool:
+    normalized_current = _normalize_prompt_template_id(current)
+    normalized_expected = _normalize_prompt_template_id(expected)
+    if not normalized_expected:
+        return False
+    return not normalized_current or normalized_current == "prompt-chat-default"
+
+
 def _infer_agent_primary_mode(agent: dict[str, Any]) -> str:
     metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
     mode = str(metadata.get("agentMode") or metadata.get("primaryMode") or "").strip()
@@ -5556,6 +5740,9 @@ def _infer_agent_prompt_template_id(agent: dict[str, Any]) -> str:
     explicit = str(metadata.get("promptTemplateId") or "").strip()
     if explicit:
         return _normalize_prompt_template_id(explicit)
+    role_prompt_template_id = _prompt_template_id_for_role(agent.get("roleKey"))
+    if role_prompt_template_id:
+        return role_prompt_template_id
     research_key = str(metadata.get("researchAgentKey") or "").strip()
     if research_key:
         return _normalize_prompt_template_id(f"prompt-research-{research_key}")

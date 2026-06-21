@@ -125,26 +125,62 @@ def test_repair_agent_directory_applies_challenge_cup_research_tool_profiles(tmp
             "web_fetch_tool",
         ],
     }
+    expected_prompt_templates = {
+        "challenge_cup_data_discovery": "prompt-challenge-cup-data-discovery",
+        "challenge_cup_source_acquisition": "prompt-challenge-cup-source-acquisition",
+        "challenge_cup_content_extraction": "prompt-challenge-cup-content-extraction",
+        "challenge_cup_source_quality": "prompt-challenge-cup-source-quality",
+    }
     created_ids = {
         role_key: agent_directory_service.create_agent_instance(
             display_name=role_key,
             primary_mode="research",
             role_key=role_key,
-            prompt_template_id=f"prompt-{role_key.replace('_', '-')}",
+            prompt_template_id="prompt-chat-default",
+            metadata={
+                "personaProfile": {
+                    "personality": "细致、证据优先，避免把未验证来源当成结论。",
+                    "communicationStyle": "先列可用证据和不确定性，再给研究建议。",
+                    "collaborationPreference": "围绕来源、证据、引用和结论边界与研究团队协作。",
+                },
+                "taskProfile": {
+                    "responsibilities": "阅读资料；提取关键证据；标注来源质量；把发现交给研究组织或团队成员复核。",
+                    "preferredTasks": "文献阅读、来源比对、证据摘录和研究问题拆解。",
+                    "constraints": "保留来源边界，遵守研究工具和知识库权限。",
+                },
+            },
         )["agentId"]
         for role_key in cases
     }
+    coordinator_id = agent_directory_service.create_agent_instance(
+        display_name="challenge_cup_coordinator",
+        primary_mode="chat",
+        role_key="challenge_cup_coordinator",
+        prompt_template_id="prompt-chat-default",
+        metadata={
+            "taskProfile": {
+                "taskTypes": ["team_coordination", "research_workflow_handoff"],
+            },
+        },
+    )["agentId"]
 
     agent_directory_service.repair_agent_directory()
 
     for role_key, expected_tools in cases.items():
         agent = agent_directory_service.get_agent(created_ids[role_key])
+        assert agent["promptTemplateId"] == expected_prompt_templates[role_key]
+        assert "挑战杯" in agent["personaProfile"]["background"]
+        assert "challenge_cup" in agent["taskProfile"]["taskTypes"]
         assert agent["toolPolicy"]["allowedTools"] == expected_tools
         assert agent["toolPolicy"]["writeScopes"] == []
         assert agent["toolPolicy"]["networkAccess"] == "controlled"
         assert agent["toolPolicy"]["mutationAccess"] == "none"
         assert "cli_tool" not in agent["toolPolicy"]["allowedTools"]
         assert "apply_patch_tool" not in agent["toolPolicy"]["allowedTools"]
+    coordinator = agent_directory_service.get_agent(coordinator_id)
+    assert coordinator["promptTemplateId"] == "prompt-challenge-cup-coordinator"
+    assert coordinator["personaProfile"]["communicationStyle"] == "先给阶段判断，再列证据位置、角色分工和用户下一步。"
+    assert "不要声称已启动资料搜集" in coordinator["taskProfile"]["avoidTasks"]
 
 
 def test_knowledge_steward_agent_is_archive_protected(tmp_path, monkeypatch):
