@@ -4645,6 +4645,7 @@ export function TeamsRoute({
       void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflowCoordinationStatus(variables.teamId) });
       void queryClient.invalidateQueries({ queryKey: sourceQualityStatusQueryKey(variables.teamId) });
       void queryClient.invalidateQueries({ queryKey: paperNoteChunkStatusQueryKey(variables.teamId) });
+      void queryClient.invalidateQueries({ queryKey: researchStageRoundStatusQueryKey(variables.teamId) });
     },
   });
 
@@ -8952,6 +8953,7 @@ export function TeamsRoute({
     void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflowCoordinationStatus(selectedTeam.teamId) });
     void queryClient.invalidateQueries({ queryKey: sourceQualityStatusQueryKey(selectedTeam.teamId) });
     void queryClient.invalidateQueries({ queryKey: paperNoteChunkStatusQueryKey(selectedTeam.teamId) });
+    void queryClient.invalidateQueries({ queryKey: researchStageRoundStatusQueryKey(selectedTeam.teamId) });
   }, [
     queryClient,
     selectedSourceCollectionRunEffectiveId,
