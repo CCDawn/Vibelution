@@ -12,7 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from core.orchestration.context_engine import list_agent_runs_for_agent
 from core.web.services import agent_directory_service, agent_tool_governance_service, session_service
 from core.web.services.runtime_scene_service import list_runtime_scene_evidence_for_agent, record_runtime_scene_event
-from core.web.services.agent_config_workspace_service import get_agent_config_workspace
+from core.web.services.agent_config_workspace_service import get_agent_config_workspace, invalidate_agent_config_workspace_cache
 from core.web.services.agent_directory_service import (
     AgentDirectoryError,
     AgentMemoryProposalNotFoundError,
@@ -317,7 +317,12 @@ def agent_avatar_options() -> dict:
 @router.get("/agents/config-workspace")
 def agent_config_workspace() -> dict:
     _ensure_config_agent_instances()
-    return get_agent_config_workspace()
+    return get_agent_config_workspace(use_cache=True)
+
+
+def _with_agent_workspace_cache_invalidated(payload: dict[str, Any]) -> dict[str, Any]:
+    invalidate_agent_config_workspace_cache()
+    return payload
 
 
 @router.get("/agents/project-memory-updates")
@@ -404,7 +409,7 @@ def agent_create(payload: AgentCreatePayload) -> dict:
             agent = update_agent_instance(agent_id, task_profile=task_profile)
         if tool_policy:
             agent = update_agent_instance(agent_id, tool_policy=tool_policy)
-        return agent
+        return _with_agent_workspace_cache_invalidated(agent)
     except session_service.SessionValidationError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except AgentDirectoryError as exc:
@@ -635,7 +640,7 @@ def agent_update(agent_id: str, payload: AgentUpdatePayload) -> dict:
                     "dataRetention": "archived_only",
                     "source": "patch_status",
                 }
-        return update_agent_instance(
+        return _with_agent_workspace_cache_invalidated(update_agent_instance(
             agent_id,
             display_name=payload.displayName,
             llm_bindings=payload.llmBindings,
@@ -653,7 +658,7 @@ def agent_update(agent_id: str, payload: AgentUpdatePayload) -> dict:
             task_profile=payload.taskProfile,
             metadata=payload.metadata,
             status=payload.status,
-        ) | ({"archiveSummary": archive_summary} if archive_summary else {})
+        ) | ({"archiveSummary": archive_summary} if archive_summary else {}))
     except AgentNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ChatRoomBusyError as exc:
@@ -666,14 +671,14 @@ def agent_update(agent_id: str, payload: AgentUpdatePayload) -> dict:
 def agent_mode_membership_update(agent_id: str, payload: AgentModeMembershipUpdatePayload) -> dict:
     try:
         _ensure_config_agent_instances()
-        return update_agent_mode_membership(
+        return _with_agent_workspace_cache_invalidated(update_agent_mode_membership(
             agent_id,
             chat_default=payload.chatDefault,
             chat_available=payload.chatAvailable,
             research_pool=payload.researchPool,
             supervised_slot=payload.supervisedSlot,
             self_evolution_slot=payload.selfEvolutionSlot,
-        )
+        ))
     except AgentModeBindingError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
@@ -682,7 +687,7 @@ def agent_mode_membership_update(agent_id: str, payload: AgentModeMembershipUpda
 def agent_chat_room_membership_update(agent_id: str, payload: AgentChatRoomMembershipUpdatePayload) -> dict:
     try:
         _ensure_config_agent_instances()
-        return update_agent_chat_room_membership(agent_id, payload.roomIds)
+        return _with_agent_workspace_cache_invalidated(update_agent_chat_room_membership(agent_id, payload.roomIds))
     except ChatRoomBusyError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ChatRoomValidationError as exc:
@@ -777,7 +782,7 @@ def _record_agent_delete_route_event(
 def agent_reset(agent_id: str, payload: AgentResetPayload) -> dict:
     _record_agent_reset_route_event("agent.reset.requested", agent_id, payload, outcome="requested")
     try:
-        return reset_agent_instance(
+        return _with_agent_workspace_cache_invalidated(reset_agent_instance(
             agent_id,
             clear_runtime_state=payload.clearRuntimeState,
             reset_direct_session=payload.resetDirectSession,
@@ -786,7 +791,7 @@ def agent_reset(agent_id: str, payload: AgentResetPayload) -> dict:
             reset_tool_policy=payload.resetToolPolicy,
             reset_memory_policy=payload.resetMemoryPolicy,
             reset_runtime_policy=payload.resetRuntimePolicy,
-        )
+        ))
     except AgentNotFoundError as exc:
         _record_agent_reset_route_event("agent.reset.failed", agent_id, payload, outcome="failed", level="warning", error=exc)
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -801,7 +806,7 @@ def agent_reset(agent_id: str, payload: AgentResetPayload) -> dict:
 @router.post("/agents/bulk-archive")
 def agent_bulk_archive(payload: AgentBulkActionPayload) -> dict:
     try:
-        return bulk_archive_agents(payload.agentIds)
+        return _with_agent_workspace_cache_invalidated(bulk_archive_agents(payload.agentIds))
     except ChatRoomBusyError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except (AgentDirectoryError, AgentModeBindingError, ChatRoomValidationError, TeamServiceError) as exc:
@@ -811,7 +816,7 @@ def agent_bulk_archive(payload: AgentBulkActionPayload) -> dict:
 @router.post("/agents/bulk-purge")
 def agent_bulk_purge(payload: AgentBulkActionPayload) -> dict:
     try:
-        return bulk_purge_agents(payload.agentIds)
+        return _with_agent_workspace_cache_invalidated(bulk_purge_agents(payload.agentIds))
     except ChatRoomBusyError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except (AgentDirectoryError, AgentModeBindingError, ChatRoomValidationError, TeamServiceError) as exc:
@@ -821,7 +826,7 @@ def agent_bulk_purge(payload: AgentBulkActionPayload) -> dict:
 @router.post("/agents/bulk-prompt-template")
 def agent_bulk_prompt_template(payload: AgentBulkPromptTemplatePayload) -> dict:
     try:
-        return bulk_update_agent_prompt_template(payload.agentIds, payload.promptTemplateId)
+        return _with_agent_workspace_cache_invalidated(bulk_update_agent_prompt_template(payload.agentIds, payload.promptTemplateId))
     except AgentDirectoryError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
@@ -829,7 +834,7 @@ def agent_bulk_prompt_template(payload: AgentBulkPromptTemplatePayload) -> dict:
 @router.post("/agents/bulk-config")
 def agent_bulk_config(payload: AgentBulkConfigPayload) -> dict:
     try:
-        return bulk_update_agent_config(payload.agentIds, payload.patch, payload.applyFields)
+        return _with_agent_workspace_cache_invalidated(bulk_update_agent_config(payload.agentIds, payload.patch, payload.applyFields))
     except AgentDirectoryError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
@@ -869,7 +874,7 @@ def agent_archive(agent_id: str) -> dict:
                 "modeBindingRepairWarningCount": len(mode_cleanup.get("repairWarnings") or []),
             },
         )
-        return payload
+        return _with_agent_workspace_cache_invalidated(payload)
     except AgentNotFoundError as exc:
         _record_agent_delete_route_event("agent.archive.failed", agent_id, timings=timings, started_at=started_at, outcome="failed", level="warning", error=exc)
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -959,7 +964,7 @@ def agent_purge(agent_id: str) -> dict:
                 "directSessionTombstoned": bool(public_direct_session_cleanup.get("changed")),
             },
         )
-        return payload
+        return _with_agent_workspace_cache_invalidated(payload)
     except AgentNotFoundError as exc:
         _record_agent_delete_route_event("agent.purge.failed", agent_id, timings=timings, started_at=started_at, outcome="failed", level="warning", error=exc)
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -1021,14 +1026,14 @@ def mode_binding_detail() -> dict:
 def mode_binding_update(mode: str, payload: ModeBindingUpdatePayload) -> dict:
     try:
         _ensure_config_agent_instances()
-        return update_mode_binding(
+        return _with_agent_workspace_cache_invalidated(update_mode_binding(
             mode,
             default_agent_id=payload.defaultAgentId,
             available_agent_ids=payload.availableAgentIds,
             pool=payload.pool,
             flow_bindings=payload.flowBindings,
             slots=payload.slots,
-        )
+        ))
     except AgentModeBindingError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
@@ -1040,7 +1045,7 @@ def mode_binding_slot_update(mode: str, slot: str, payload: ModeBindingSlotUpdat
         current = (get_mode_bindings_payload().get("modes") or {}).get(mode, {})
         slots = dict(current.get("slots") or {}) if isinstance(current, dict) else {}
         slots[slot] = payload.agentId
-        return update_mode_binding(mode, slots=slots)
+        return _with_agent_workspace_cache_invalidated(update_mode_binding(mode, slots=slots))
     except AgentModeBindingError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
@@ -1049,6 +1054,6 @@ def mode_binding_slot_update(mode: str, slot: str, payload: ModeBindingSlotUpdat
 def mode_binding_pool_update(mode: str, payload: ModeBindingPoolUpdatePayload) -> dict:
     try:
         _ensure_config_agent_instances()
-        return update_mode_binding(mode, pool=payload.agentIds)
+        return _with_agent_workspace_cache_invalidated(update_mode_binding(mode, pool=payload.agentIds))
     except AgentModeBindingError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc

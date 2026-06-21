@@ -1469,7 +1469,7 @@ def test_agent_config_workspace_api_route(tmp_path, monkeypatch):
     monkeypatch.setattr(
         agents_route,
         "get_agent_config_workspace",
-        lambda: calls.append("get_agent_config_workspace") or route_payload,
+        lambda **kwargs: calls.append(kwargs) or route_payload,
     )
 
     registered_routes = [
@@ -1481,11 +1481,35 @@ def test_agent_config_workspace_api_route(tmp_path, monkeypatch):
     payload = agents_route.agent_config_workspace()
 
     assert registered_routes
-    assert calls == ["get_agent_config_workspace"]
+    assert calls == [{"use_cache": True}]
     assert payload["schemaVersion"] == 1
     assert payload["summary"]["agentCount"] >= 1
     assert any(item["policyId"] == "default" for item in payload["toolPolicies"])
     assert payload["memoryPolicies"]
+
+
+def test_agent_config_workspace_route_uses_short_lived_cache(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setattr(config_service, "get_config_workspace", _fake_config_workspace)
+    agent_config_workspace_service.invalidate_agent_config_workspace_cache()
+    calls = []
+    original_list_agents = agent_config_workspace_service.list_agents
+
+    def counted_list_agents(*args, **kwargs):
+        calls.append(kwargs)
+        return original_list_agents(*args, **kwargs)
+
+    monkeypatch.setattr(agent_config_workspace_service, "list_agents", counted_list_agents)
+    agent_directory_service.create_agent_instance(display_name="缓存 Agent")
+
+    first = agent_config_workspace_service.get_agent_config_workspace(use_cache=True)
+    second = agent_config_workspace_service.get_agent_config_workspace(use_cache=True)
+
+    assert len(calls) == 1
+    assert first["diagnostics"]["cache"]["enabled"] is True
+    assert first["diagnostics"]["cache"]["hit"] is False
+    assert second["diagnostics"]["cache"]["hit"] is True
+    assert second["summary"]["agentCount"] == first["summary"]["agentCount"]
 
 
 def test_agent_config_workspace_surfaces_runtime_status_from_run_snapshots(tmp_path, monkeypatch):
@@ -3946,3 +3970,32 @@ def test_agent_config_workspace_surfaces_stale_room_participant(tmp_path, monkey
     payload = agent_config_workspace_service.get_agent_config_workspace()
 
     assert any(item["code"] == "stale_chat_room_participant" for item in payload["health"]["issues"])
+
+
+def test_agent_config_workspace_collapses_duplicate_team_name_indexes(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setattr(config_service, "get_config_workspace", _fake_config_workspace)
+    first_agent = agent_directory_service.create_agent_instance(display_name="重复团队成员 A")
+    second_agent = agent_directory_service.create_agent_instance(display_name="重复团队成员 B")
+    first_team = team_service.create_team(
+        name="Duplicate Team",
+        members=[{"agentId": first_agent["agentId"], "role": "lead"}],
+    )
+    second_team = team_service.create_team(
+        name="Duplicate Team",
+        members=[{"agentId": second_agent["agentId"], "role": "member"}],
+    )
+
+    payload = agent_config_workspace_service.get_agent_config_workspace()
+    duplicate_indexes = [
+        item for item in payload["teamIndexes"]
+        if item.get("label") == "Duplicate Team"
+    ]
+
+    assert len(duplicate_indexes) == 1
+    index = duplicate_indexes[0]
+    assert index["source"] == "duplicate_team_name"
+    assert index["duplicateTeamCount"] == 2
+    assert index["duplicateTeamIds"] == [first_team["teamId"], second_team["teamId"]]
+    assert set(index["agentIds"]) == {first_agent["agentId"], second_agent["agentId"]}
+    assert any(item["code"] == "duplicate_team_name" for item in payload["health"]["issues"])

@@ -13,7 +13,11 @@ const stylesSource = readFileSync(new URL("./AgentsRoute.module.css", import.met
 describe("AgentsRoute layout contract", () => {
   it("loads the read-only Agent config workspace endpoint", () => {
     expect(routeSource).toContain("fetchJson<AgentConfigWorkspaceWithTeamIndexes>(\"/api/agents/config-workspace\")");
+    expect(routeSource).toContain("fetchJson<AgentConfigWorkspaceAgent[]>(\"/api/agents?includeArchived=true&detail=summary\")");
+    expect(routeSource).toContain("queryKeys.agentSummary(true)");
     expect(routeSource).toContain("queryKeys.agentConfigWorkspace()");
+    expect(routeSource).toContain("const workspace = workspaceQuery.data ?? lightweightWorkspace");
+    expect(routeSource).toContain("staleTime: 10_000");
   });
 
   it("uses the lightweight shell language source instead of the full app dictionary", () => {

@@ -3461,6 +3461,18 @@ export type AgentConfigWorkspace = {
     modeBindings: AgentModeBindingWarning[];
     promptTemplates: Array<Record<string, unknown>>;
   };
+  diagnostics?: {
+    timingsMs?: Record<string, number>;
+    loadModes?: Record<string, string>;
+    cache?: {
+      enabled?: boolean;
+      hit?: boolean;
+      waitMs?: number;
+      ageMs?: number;
+      ttlSeconds?: number;
+    };
+    source?: string;
+  };
 };
 
 export type TeamMember = {
