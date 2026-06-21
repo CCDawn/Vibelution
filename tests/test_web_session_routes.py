@@ -13,6 +13,7 @@ from core.web.app import create_app
 from core.web.control import CONTROL_TOKEN_HEADER, get_control_token
 from core.web.services import (
     agent_directory_service,
+    agent_mode_binding_service,
     team_service,
     runtime_service,
     self_evolution_control_service,
@@ -119,6 +120,53 @@ def test_session_detail_exists(tmp_path, monkeypatch):
     assert payload["contextUsage"]["toolCallCount"] == 2
     assert payload["contextUsage"]["used"] > 0
     assert payload["contextUsage"]["limit"] > 0
+
+
+def test_empty_seed_session_detail_does_not_materialize_agent(tmp_path, monkeypatch):
+    _seed_chat_state(
+        tmp_path,
+        conversations=[
+            {
+                "conversation_id": "session-seed-0",
+                "title": "Agent 0",
+                "updated_at": "2026-06-21T00:00:00",
+                "messages": [],
+            }
+        ],
+    )
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+
+    response = client.get("/api/sessions/session-seed-0")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["id"] == "session-seed-0"
+    assert payload["agentId"] == ""
+    state = agent_directory_service.load_state()
+    materialized_names = {
+        str(item.get("displayName") or "")
+        for item in state.get("agents") or []
+        if str(item.get("status") or "active") == "active"
+    }
+    assert "Agent 0" not in materialized_names
+
+
+def test_chat_mode_binding_repair_does_not_seed_all_active_chat_agents(tmp_path, monkeypatch):
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_mode_binding_service, "PROJECT_ROOT", tmp_path)
+    first = agent_directory_service.create_agent_instance(display_name="Chat Alpha", primary_mode="chat")
+    second = agent_directory_service.create_agent_instance(display_name="Chat Beta", primary_mode="chat")
+
+    payload = agent_mode_binding_service.repair_mode_bindings()
+    chat = {item["mode"]: item for item in payload["bindings"]}["chat"]
+
+    assert first["agentId"] not in chat["availableAgentIds"]
+    assert second["agentId"] not in chat["availableAgentIds"]
+    assert chat["availableAgentIds"] == []
+    assert chat["defaultAgentId"] == ""
+
+
 def test_session_query_paginates_searches_and_filters(tmp_path, monkeypatch):
     conversations = [
         {

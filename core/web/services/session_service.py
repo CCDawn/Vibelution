@@ -1549,6 +1549,8 @@ def _ensure_conversation_agent_metadata(
         ) or changed
         return changed
     direct_agent = _agent_for_direct_session(conversation_id) if not existing_agent_id else None
+    if not direct_agent and not _conversation_requires_agent_materialization(conversation):
+        return False
     llm_bindings_for_ensure = (
         agent_directory_service.normalize_agent_llm_bindings(existing_agent.get("llmBindings"))
         if existing_agent
@@ -1583,6 +1585,20 @@ def _ensure_conversation_agent_metadata(
         agent=agent,
     ) or changed
     return changed
+
+
+def _conversation_requires_agent_materialization(conversation: dict[str, Any]) -> bool:
+    if str(conversation.get("agent_id") or conversation.get("agentId") or "").strip():
+        return True
+    if list(conversation.get("messages") or []):
+        return True
+    active_task = conversation.get("active_task") or conversation.get("activeTask")
+    if isinstance(active_task, dict) and active_task:
+        return True
+    if str(conversation.get("session_kind") or conversation.get("sessionKind") or "").strip().lower() in {"child", "supervised"}:
+        return True
+    last_status = str(conversation.get("last_turn_status") or conversation.get("status") or "").strip().lower()
+    return last_status not in {"", "ready", "idle"}
 
 
 def _sync_agent_directory_project_root() -> None:

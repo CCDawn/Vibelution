@@ -535,8 +535,7 @@ def _seed_bindings_from_agents(
             if role_key:
                 self_slots[role_key] = agent_id
 
-    chat_ids = list(by_mode.get("chat", []))
-    _seed_binding(bindings_by_mode, "chat", chat_ids)
+    _seed_binding(bindings_by_mode, "chat", [])
     _seed_binding(bindings_by_mode, "research", by_mode.get("research", []))
     _seed_binding(bindings_by_mode, "supervised_evolution", by_mode.get("supervised_evolution", []), slots=supervised_slots)
     _seed_binding(bindings_by_mode, "self_evolution", by_mode.get("self_evolution", []), slots=self_slots)
