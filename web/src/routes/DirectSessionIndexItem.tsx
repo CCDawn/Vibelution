@@ -297,24 +297,28 @@ export function DirectSessionIndexItem({
               </span>
             ) : null}
             <span className={styles.conversationMetaRow}>
-              <span className={`${styles.conversationKindBadge} ${sessionIsChild ? styles.conversationKindBadgeChild : styles.conversationKindBadgeDirect}`} title={kindLabel} aria-label={kindLabel}>
-                <MessageCircle size={10} aria-hidden="true" />
+              <span className={styles.conversationMetaMain}>
+                <span className={`${styles.conversationKindBadge} ${sessionIsChild ? styles.conversationKindBadgeChild : styles.conversationKindBadgeDirect}`} title={kindLabel} aria-label={kindLabel}>
+                  <MessageCircle size={10} aria-hidden="true" />
+                </span>
+                {sessionAgentMeta ? <span>{sessionAgentMeta}</span> : null}
+                {sessionFunctionVisible ? (
+                  <span className={`${styles.agentRoleTag} ${styles[agentRoleClass(sessionDisplay.tone)]}`} title={sessionDisplay.functionLabel}>
+                    <Bot size={10} aria-hidden="true" />
+                    {sessionDisplay.functionLabel}
+                  </span>
+                ) : null}
+                {sessionModelTitle ? (
+                  <span className={styles.agentModelTag} title={sessionModelTitle} aria-label={sessionModelTitle}>
+                    <Cpu size={10} aria-hidden="true" />
+                    <span>{sessionModelLabel}</span>
+                  </span>
+                ) : null}
               </span>
-              {sessionAgentMeta ? <span>{sessionAgentMeta}</span> : null}
-              {sessionFunctionVisible ? (
-                <span className={`${styles.agentRoleTag} ${styles[agentRoleClass(sessionDisplay.tone)]}`} title={sessionDisplay.functionLabel}>
-                  <Bot size={10} aria-hidden="true" />
-                  {sessionDisplay.functionLabel}
-                </span>
-              ) : null}
-              {sessionModelTitle ? (
-                <span className={styles.agentModelTag} title={sessionModelTitle} aria-label={sessionModelTitle}>
-                  <Cpu size={10} aria-hidden="true" />
-                  <span>{sessionModelLabel}</span>
-                </span>
-              ) : null}
-              <Clock3 size={10} aria-hidden="true" />
-              <time>{formatTime(session.updatedAt || session.lastActive)}</time>
+              <span className={styles.conversationMetaTime}>
+                <Clock3 size={10} aria-hidden="true" />
+                <time>{formatTime(session.updatedAt || session.lastActive)}</time>
+              </span>
             </span>
             {missingAgentMessage ? <span className={styles.agentMissingLine}>{missingAgentMessage}</span> : null}
           </span>
@@ -348,24 +352,28 @@ export function DirectSessionIndexItem({
               </span>
             ) : null}
             <span className={styles.conversationMetaRow}>
-              <span className={`${styles.conversationKindBadge} ${sessionIsChild ? styles.conversationKindBadgeChild : styles.conversationKindBadgeDirect}`} title={kindLabel} aria-label={kindLabel}>
-                <MessageCircle size={10} aria-hidden="true" />
+              <span className={styles.conversationMetaMain}>
+                <span className={`${styles.conversationKindBadge} ${sessionIsChild ? styles.conversationKindBadgeChild : styles.conversationKindBadgeDirect}`} title={kindLabel} aria-label={kindLabel}>
+                  <MessageCircle size={10} aria-hidden="true" />
+                </span>
+                {sessionAgentMeta ? <span>{sessionAgentMeta}</span> : null}
+                {sessionFunctionVisible ? (
+                  <span className={`${styles.agentRoleTag} ${styles[agentRoleClass(sessionDisplay.tone)]}`} title={sessionDisplay.functionLabel}>
+                    <Bot size={10} aria-hidden="true" />
+                    {sessionDisplay.functionLabel}
+                  </span>
+                ) : null}
+                {sessionModelTitle ? (
+                  <span className={styles.agentModelTag} title={sessionModelTitle} aria-label={sessionModelTitle}>
+                    <Cpu size={10} aria-hidden="true" />
+                    <span>{sessionModelLabel}</span>
+                  </span>
+                ) : null}
               </span>
-              {sessionAgentMeta ? <span>{sessionAgentMeta}</span> : null}
-              {sessionFunctionVisible ? (
-                <span className={`${styles.agentRoleTag} ${styles[agentRoleClass(sessionDisplay.tone)]}`} title={sessionDisplay.functionLabel}>
-                  <Bot size={10} aria-hidden="true" />
-                  {sessionDisplay.functionLabel}
-                </span>
-              ) : null}
-              {sessionModelTitle ? (
-                <span className={styles.agentModelTag} title={sessionModelTitle} aria-label={sessionModelTitle}>
-                  <Cpu size={10} aria-hidden="true" />
-                  <span>{sessionModelLabel}</span>
-                </span>
-              ) : null}
-              <Clock3 size={10} aria-hidden="true" />
-              <time>{formatTime(session.updatedAt || session.lastActive)}</time>
+              <span className={styles.conversationMetaTime}>
+                <Clock3 size={10} aria-hidden="true" />
+                <time>{formatTime(session.updatedAt || session.lastActive)}</time>
+              </span>
             </span>
             {missingAgentMessage ? <span className={styles.agentMissingLine}>{missingAgentMessage}</span> : null}
           </span>
