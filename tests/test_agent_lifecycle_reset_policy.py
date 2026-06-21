@@ -181,8 +181,8 @@ def test_agent_reset_api_can_reset_session_agent_advanced_policies_without_profi
     assert "cli_tool" in payload["agent"]["toolPolicy"]["allowedTools"]
     assert "apply_patch_tool" in payload["agent"]["toolPolicy"]["allowedTools"]
     assert "run_test_for_tool" in payload["agent"]["toolPolicy"]["allowedTools"]
-    assert "create_child_session_tool" in payload["agent"]["toolPolicy"]["allowedTools"]
-    assert "list_child_sessions_tool" in payload["agent"]["toolPolicy"]["allowedTools"]
+    assert "create_child_session_tool" not in payload["agent"]["toolPolicy"]["allowedTools"]
+    assert "list_child_sessions_tool" not in payload["agent"]["toolPolicy"]["allowedTools"]
     assert "agent_message_tool" in payload["agent"]["toolPolicy"]["allowedTools"]
     assert "agent_tool_permission_request_tool" in payload["agent"]["toolPolicy"]["allowedTools"]
     assert payload["agent"]["memoryPolicy"]["readSharedGroups"] == []
@@ -408,7 +408,9 @@ def test_agent_api_explains_session_tool_policy_sources(tmp_path, monkeypatch):
     assert empty_payload["toolPolicySource"]["allowedToolCount"] == 0
     assert wide_payload["toolPolicySource"]["kind"] == "legacy_wide_private_override"
     assert wide_payload["toolPolicySource"]["isLegacyWide"] is True
-    assert set(wide_payload["toolPolicySource"]["mutatingTools"]) == set(agent_directory_service.MUTATING_AGENT_TOOL_NAMES)
+    assert set(wide_payload["toolPolicySource"]["mutatingTools"]) == (
+        set(agent_directory_service.MUTATING_AGENT_TOOL_NAMES) - agent_directory_service.SUBAGENT_DELEGATION_TOOL_NAMES
+    )
 
 
 def test_agent_api_rejects_legacy_profile_and_template_fields(tmp_path, monkeypatch):
