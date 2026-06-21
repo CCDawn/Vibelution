@@ -294,14 +294,47 @@ def load_chat_state(project_root: Path) -> dict[str, Any]:
         except (OSError, json.JSONDecodeError) as exc:
             _backup_corrupt_chat_state(path, exc)
             return {}
-        return payload if isinstance(payload, dict) else {}
+        if not isinstance(payload, dict):
+            return {}
+        cleaned, changed = _drop_legacy_chat_state_messages(payload)
+        if changed:
+            try:
+                _atomic_write_text(path, json.dumps(cleaned, ensure_ascii=False, indent=2))
+            except OSError as exc:
+                _debug_logger.warning(
+                    f"[ChatState] failed to clean legacy chat messages from {path}: {type(exc).__name__}: {exc}"
+                )
+        return cleaned
 
 
 def save_chat_state(project_root: Path, state: dict[str, Any]) -> None:
     with chat_state_transaction(project_root):
         path = chat_state_path(project_root)
         path.parent.mkdir(parents=True, exist_ok=True)
-        _atomic_write_text(path, json.dumps(state, ensure_ascii=False, indent=2))
+        cleaned, _changed = _drop_legacy_chat_state_messages(state)
+        _atomic_write_text(path, json.dumps(cleaned, ensure_ascii=False, indent=2))
+
+
+def _drop_legacy_chat_state_messages(state: dict[str, Any]) -> tuple[dict[str, Any], bool]:
+    if not isinstance(state, dict):
+        return {}, True
+    changed = False
+    cleaned = dict(state)
+    conversations = cleaned.get("conversations")
+    if isinstance(conversations, list):
+        cleaned_conversations: list[Any] = []
+        for item in conversations:
+            if not isinstance(item, dict):
+                cleaned_conversations.append(item)
+                continue
+            conversation = dict(item)
+            if "messages" in conversation:
+                conversation.pop("messages", None)
+                changed = True
+            cleaned_conversations.append(conversation)
+        if changed:
+            cleaned["conversations"] = cleaned_conversations
+    return cleaned, changed
 
 
 def _backup_corrupt_chat_state(path: Path, exc: Exception) -> None:
