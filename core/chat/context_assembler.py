@@ -101,7 +101,8 @@ def assemble_conversation_context(
 ) -> ContextAssemblyResult:
     """Return the bounded history view used to seed an agent turn."""
 
-    normalized_messages = normalize_model_messages(list(messages or []))
+    ledger_source_provided = ledger_events is not None
+    legacy_normalized_messages = [] if ledger_source_provided else normalize_model_messages(list(messages or []))
     ledger_event_list = _historical_ledger_events(
         list(ledger_events or []),
         current_turn_id=current_turn_id,
@@ -111,8 +112,7 @@ def assemble_conversation_context(
         current_turn_id=current_turn_id,
     )
     ledger_messages = conversation_model_messages_from_events(ledger_replay_events)
-    if ledger_messages:
-        normalized_messages = ledger_messages
+    normalized_messages = ledger_messages if ledger_source_provided else legacy_normalized_messages
     events = build_history_events(normalized_messages, session_id=session_id)
     bounded_recent_limit = max(1, min(int(recent_message_limit or DEFAULT_RECENT_MESSAGE_LIMIT), 40))
     recent_start_index = max(0, len(normalized_messages) - bounded_recent_limit)
@@ -150,13 +150,13 @@ def assemble_conversation_context(
         ContextSegment(
             key="history_tail",
             label="history tail",
-            source="conversation_ledger" if ledger_messages else "conversation_history_assembler",
+            source="conversation_ledger" if ledger_source_provided else "conversation_history_assembler",
             item_count=len(recent_raw_messages),
             chars=_message_chars(recent_messages),
             cache_policy="dynamic",
         ),
     ]
-    if ledger_messages:
+    if ledger_source_provided:
         segments.append(
             ContextSegment(
                 key="conversation_ledger",

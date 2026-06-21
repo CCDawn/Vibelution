@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 
+import pytest
 from langchain_core.messages import ToolMessage
 
 from core.chat.context_assembler import assemble_conversation_context
@@ -286,6 +287,23 @@ def test_context_assembler_replays_conversation_ledger_over_message_tail(tmp_pat
     assert full_result.strip() in tool_summary["content"]
 
 
+def test_context_assembler_with_ledger_source_ignores_legacy_messages_even_when_ledger_empty():
+    assembled = assemble_conversation_context(
+        [
+            {"role": "user", "content": "旧 messages 不允许兜底进入模型"},
+            {"role": "assistant", "content": "旧回答也不允许兜底进入模型"},
+        ],
+        session_id="session-empty-ledger",
+        ledger_events=[],
+        recent_message_limit=8,
+    )
+
+    assert assembled.history_messages == []
+    assert assembled.events == []
+    assert any(segment.key == "conversation_ledger" for segment in assembled.segments)
+    assert all(segment.source != "conversation_history_assembler" for segment in assembled.segments)
+
+
 def test_context_assembler_excludes_current_turn_ledger_from_history_seed(tmp_path):
     append_conversation_event(
         tmp_path,
@@ -372,6 +390,122 @@ def test_context_assembler_replays_ledger_compression_checkpoint_without_current
     assert "当前轮部分输出不能作为下一轮历史种子" not in contents
     assert assembled.checkpoint_event_id
     assert any(segment.key == "context_compression_checkpoint" for segment in assembled.segments)
+
+
+def test_session_conversation_event_append_failure_is_not_silent(monkeypatch):
+    def fail_append(*args, **kwargs):
+        raise OSError("ledger unavailable")
+
+    recorded: list[tuple[tuple, dict]] = []
+    monkeypatch.setattr(session_service, "append_conversation_event", fail_append)
+    monkeypatch.setattr(session_service, "record_runtime_scene_event", lambda *args, **kwargs: recorded.append((args, kwargs)))
+
+    with pytest.raises(OSError, match="ledger unavailable"):
+        session_service._append_session_conversation_event(
+            "session-a",
+            "turn-a",
+            EVENT_USER_MESSAGE,
+            payload={"content": "必须写入 ledger"},
+        )
+
+    assert recorded
+    assert recorded[0][0][2] == "conversation.ledger.append_failed"
+
+
+def test_session_detail_messages_replay_ledger_before_legacy_messages(tmp_path, monkeypatch):
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    append_conversation_event(
+        tmp_path,
+        "session-visible",
+        "turn-ledger",
+        EVENT_USER_MESSAGE,
+        status="recorded",
+        payload={"content": "ledger 用户事实"},
+    )
+    append_conversation_event(
+        tmp_path,
+        "session-visible",
+        "turn-ledger",
+        EVENT_ASSISTANT_PARTIAL,
+        status="running",
+        payload={"content": "ledger 助手事实"},
+    )
+
+    messages = session_service._messages_with_live_output(
+        "session-visible",
+        [
+            {"role": "user", "content": "旧 messages 用户内容"},
+            {"role": "assistant", "content": "旧 messages 助手内容"},
+        ],
+    )
+    contents = [str(item.get("content") or "") for item in messages]
+
+    assert "ledger 用户事实" in contents
+    assert "ledger 助手事实" in contents
+    assert "旧 messages 用户内容" not in contents
+    assert "旧 messages 助手内容" not in contents
+
+
+def test_session_detail_without_ledger_does_not_fallback_to_legacy_messages(tmp_path, monkeypatch):
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+
+    messages = session_service._messages_with_live_output(
+        "session-no-ledger",
+        [
+            {"role": "user", "content": "旧 messages 用户内容"},
+            {"role": "assistant", "content": "旧 messages 助手内容"},
+        ],
+    )
+
+    assert messages == []
+
+
+def test_session_detail_live_overlay_replaces_open_ledger_partial(tmp_path, monkeypatch):
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    append_conversation_event(
+        tmp_path,
+        "session-visible",
+        "turn-live",
+        EVENT_USER_MESSAGE,
+        status="recorded",
+        payload={"content": "开始执行"},
+    )
+    append_conversation_event(
+        tmp_path,
+        "session-visible",
+        "turn-live",
+        EVENT_ASSISTANT_PARTIAL,
+        status="running",
+        payload={"content": "ledger 执行中内容"},
+    )
+    with session_service._SESSION_LIVE_OUTPUTS_LOCK:
+        previous_live_outputs = dict(session_service._SESSION_LIVE_OUTPUTS)
+        session_service._SESSION_LIVE_OUTPUTS.clear()
+        session_service._SESSION_LIVE_OUTPUTS["session-visible"] = session_service.SessionLiveOutputState(
+            session_id="session-visible",
+            turn_id="turn-live",
+            stage="running",
+            content="live 执行中内容",
+            updated_at="2026-06-21T00:00:00",
+        )
+    try:
+        messages = session_service._messages_with_live_output("session-visible", [])
+    finally:
+        with session_service._SESSION_LIVE_OUTPUTS_LOCK:
+            session_service._SESSION_LIVE_OUTPUTS.clear()
+            session_service._SESSION_LIVE_OUTPUTS.update(previous_live_outputs)
+
+    contents = [str(item.get("content") or "") for item in messages]
+    assert "开始执行" in contents
+    assert "live 执行中内容" in contents
+    assert "ledger 执行中内容" not in contents
+    assert len(
+        [
+            item
+            for item in messages
+            if item.get("role") == "assistant" and (item.get("metadata") or {}).get("turnId") == "turn-live"
+        ]
+    ) == 1
 
 
 def test_context_assembler_uses_checkpoint_as_navigation_not_replacing_history():
@@ -515,6 +649,22 @@ def test_run_session_turn_seeds_bounded_assembled_history(tmp_path, monkeypatch)
     for index in range(10):
         messages.append({"role": "user", "content": f"历史用户 {index}"})
         messages.append({"role": "assistant", "content": f"历史回答 {index}"})
+        append_conversation_event(
+            tmp_path,
+            "session-run",
+            f"turn-{index}",
+            EVENT_USER_MESSAGE,
+            status="recorded",
+            payload={"content": f"历史用户 {index}"},
+        )
+        append_conversation_event(
+            tmp_path,
+            "session-run",
+            f"turn-{index}",
+            EVENT_ASSISTANT_PARTIAL,
+            status="completed",
+            payload={"content": f"历史回答 {index}"},
+        )
     messages.append({"role": "user", "content": "当前请求"})
     save_chat_state(
         tmp_path,
@@ -550,5 +700,5 @@ def test_run_session_turn_seeds_bounded_assembled_history(tmp_path, monkeypatch)
     seeded_contents = [str(item.get("content") or "") for item in captured["history"]]
     assert "历史用户 0" not in seeded_contents
     assert "历史回答 9" in seeded_contents
-    assert "当前请求" in seeded_contents
+    assert "当前请求" not in seeded_contents
     assert len(captured["history"]) <= 8
