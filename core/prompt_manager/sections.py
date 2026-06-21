@@ -311,6 +311,27 @@ def make_git_rules_section(project_root: Path) -> SystemPromptSection:
     )
 
 
+def make_reading_rules_section() -> SystemPromptSection:
+    """代码与日志阅读规则 — 默认用 CLI/ripgrep 做有界读取。"""
+
+    def compute() -> str:
+        return (
+            "## 阅读规则\n"
+            "- 默认阅读/搜索走 `cli_tool`，先用 `rg --line-number --context 2 \"关键词\" 路径` 定位，再按命中行号读取小范围片段。\n"
+            "- Windows 小范围读取优先用 PowerShell：`Get-Content -LiteralPath \"路径\" | Select-Object -Skip N -First M`；保持输出有界。\n"
+            "- 不要调用 `read_file_tool`，也不要整文件读取大文件；已经读取过的范围不重复读取，先复用已有证据再补缺口。\n"
+            "- 需要符号级理解时可先用代码符号/搜索工具定位，再用 `cli_tool` 读取相邻上下文。\n"
+        )
+
+    return SystemPromptSection(
+        name="READING_RULES",
+        compute=compute,
+        cache_break=False,
+        priority=36,
+        description="CLI/ripgrep 优先的有界阅读规则",
+    )
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # 动态章节工厂（cache_break=True）
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -325,7 +346,7 @@ def make_env_info_section(project_root: Path) -> SystemPromptSection:
                 "- 命令平台纪律: 当前是 Windows，生成命令前先确认 PowerShell/cmd 兼容性。",
                 "- 不要直接执行 Unix shell 片段：`/dev/null`、`tail/head`、`grep -n/-e`、`xargs`、`$(pwd)`。",
                 "- 需要等价能力时改用 PowerShell：`2>$null`、`Select-Object -First/-Last`、`Select-String`、`Get-Location`。",
-                "- 读文件/搜索可用 `cli_tool`，但要用 Windows 兼容命令并限制输出。",
+                "- 读文件/搜索默认用 `cli_tool` 执行 Windows 兼容的 `rg`/PowerShell 小范围命令。",
             ]
         if os_name in {"Linux", "macOS"}:
             return [
@@ -675,6 +696,7 @@ def create_default_sections(
     sections.append(make_config_awareness_section())
     sections.append(make_language_awareness_section())
     sections.append(make_session_child_routing_section())
+    sections.append(make_reading_rules_section())
     sections.append(make_git_rules_section(project_root))
 
     # ── 动态章节 ──
