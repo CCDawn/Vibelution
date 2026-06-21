@@ -13,6 +13,7 @@ def test_prompt_template_registry_repairs_research_defaults(tmp_path, monkeypatc
 
     payload = prompt_template_service.list_prompt_templates()
     research_template_ids = {item["promptTemplateId"] for item in payload["templates"] if item["category"] == "research"}
+    template_ids = {item["promptTemplateId"] for item in payload["templates"]}
 
     broad = next(item for item in payload["templates"] if item["promptTemplateId"] == "prompt-research-broad")
     assert {
@@ -24,7 +25,12 @@ def test_prompt_template_registry_repairs_research_defaults(tmp_path, monkeypatc
         "prompt-research-review",
         "prompt-research-themes",
         "prompt-research-card",
+        "prompt-challenge-cup-data-discovery",
+        "prompt-challenge-cup-source-acquisition",
+        "prompt-challenge-cup-content-extraction",
+        "prompt-challenge-cup-source-quality",
     } <= research_template_ids
+    assert "prompt-challenge-cup-coordinator" in template_ids
     assert broad["category"] == "research"
     assert broad["sourcePath"] == "workspace/prompts/research/broad.md"
     assert broad["sourceExists"] is True
@@ -53,10 +59,26 @@ def test_prompt_template_registry_repairs_research_defaults(tmp_path, monkeypatc
     assert "research_proposal_apply_tool" in steward_detail["content"]
     assert "Tool Plan" in steward_detail["content"]
     assert "ToolPolicy.allowedTools" not in steward_detail["content"]
+    discovery_detail = prompt_template_service.get_prompt_template("prompt-challenge-cup-data-discovery")
+    assert discovery_detail is not None
+    assert discovery_detail["metadata"]["roleKey"] == "challenge_cup_data_discovery"
+    assert "web_search_tool" in discovery_detail["content"]
+    assert "不调用 web_fetch_tool" in discovery_detail["content"]
+    acquisition_detail = prompt_template_service.get_prompt_template("prompt-challenge-cup-source-acquisition")
+    assert acquisition_detail is not None
+    assert "web_fetch_tool" in acquisition_detail["content"]
+    extraction_detail = prompt_template_service.get_prompt_template("prompt-challenge-cup-content-extraction")
+    assert extraction_detail is not None
+    assert "不直接写正式 Team Knowledge" in extraction_detail["content"]
+    coordinator_detail = prompt_template_service.get_prompt_template("prompt-challenge-cup-coordinator")
+    assert coordinator_detail is not None
+    assert coordinator_detail["category"] == "chat"
+    assert "不具备直接联网搜索" in coordinator_detail["content"]
     assert (tmp_path / "workspace" / "agent_config" / "prompt_templates.json").exists()
     assert (tmp_path / "workspace" / "prompts" / "research" / "ceo.md").exists()
     assert (tmp_path / "workspace" / "prompts" / "research" / "organization_advisor.md").exists()
     assert (tmp_path / "workspace" / "prompts" / "research" / "capability_steward.md").exists()
+    assert (tmp_path / "workspace" / "prompts" / "research" / "challenge_cup_data_discovery.md").exists()
 
 
 def test_prompt_template_update_writes_source_and_refreshes_hash(tmp_path, monkeypatch):
