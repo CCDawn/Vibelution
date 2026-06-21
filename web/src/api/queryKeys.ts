@@ -12,6 +12,7 @@ export const queryKeys = {
   gitCommits: () => ["git", "commits"] as const,
   gitDiff: (path: string) => ["git", "diff", path] as const,
   agents: () => ["agents"] as const,
+  agentSummary: (includeArchived = false) => ["agents", "summary", includeArchived] as const,
   agentConfigWorkspace: () => ["agents", "config-workspace"] as const,
   agent: (id: string) => ["agents", id] as const,
   agentRuns: (id: string) => ["agents", id, "runs"] as const,

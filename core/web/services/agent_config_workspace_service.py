@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import copy
+import threading
 from collections import defaultdict
 from datetime import datetime, timezone
 from time import perf_counter
@@ -19,6 +21,7 @@ from .agent_directory_service import build_agent_policy_options
 from .agent_directory_service import list_agents
 from .agent_directory_service import list_agent_policy_options
 from .agent_directory_service import normalize_agent_llm_bindings
+from .agent_directory_service import registry_path
 from .agent_mode_binding_service import get_mode_bindings_payload, mode_binding_path
 from .prompt_template_service import list_prompt_templates, prompt_template_path
 from .runtime_scene_service import record_runtime_scene_event
@@ -90,11 +93,72 @@ RESEARCH_SOURCE_ROLE_KEYS = {
     "cn_primary_sources",
     "signal_quality_gate",
 }
+WORKSPACE_CACHE_TTL_SECONDS = 3.0
+_WORKSPACE_CACHE_LOCK = threading.Lock()
+_WORKSPACE_CACHE_PAYLOAD: dict[str, Any] | None = None
+_WORKSPACE_CACHE_KEY: tuple[Any, ...] | None = None
+_WORKSPACE_CACHE_CREATED_AT = 0.0
 
 
-def get_agent_config_workspace() -> dict[str, Any]:
+def get_agent_config_workspace(*, use_cache: bool = False) -> dict[str, Any]:
     """Return a read-only workspace that explains every persistent Agent once."""
 
+    if use_cache:
+        return _get_agent_config_workspace_cached()
+    return _build_agent_config_workspace(cache_diagnostics={"enabled": False, "hit": False})
+
+
+def invalidate_agent_config_workspace_cache() -> None:
+    """Clear the short-lived Agent config workspace cache after known mutations."""
+
+    global _WORKSPACE_CACHE_PAYLOAD, _WORKSPACE_CACHE_KEY, _WORKSPACE_CACHE_CREATED_AT
+    with _WORKSPACE_CACHE_LOCK:
+        _WORKSPACE_CACHE_PAYLOAD = None
+        _WORKSPACE_CACHE_KEY = None
+        _WORKSPACE_CACHE_CREATED_AT = 0.0
+
+
+def _get_agent_config_workspace_cached() -> dict[str, Any]:
+    global _WORKSPACE_CACHE_PAYLOAD, _WORKSPACE_CACHE_KEY, _WORKSPACE_CACHE_CREATED_AT
+
+    wait_started = perf_counter()
+    with _WORKSPACE_CACHE_LOCK:
+        wait_ms = round((perf_counter() - wait_started) * 1000, 1)
+        now = perf_counter()
+        cache_key = _workspace_cache_key()
+        if (
+            _WORKSPACE_CACHE_PAYLOAD is not None
+            and _WORKSPACE_CACHE_KEY == cache_key
+            and now - _WORKSPACE_CACHE_CREATED_AT <= WORKSPACE_CACHE_TTL_SECONDS
+        ):
+            return _with_cache_diagnostics(
+                _WORKSPACE_CACHE_PAYLOAD,
+                enabled=True,
+                hit=True,
+                wait_ms=wait_ms,
+                age_ms=round((now - _WORKSPACE_CACHE_CREATED_AT) * 1000, 1),
+            )
+        payload = _build_agent_config_workspace(
+            cache_diagnostics={
+                "enabled": True,
+                "hit": False,
+                "waitMs": wait_ms,
+                "ttlSeconds": WORKSPACE_CACHE_TTL_SECONDS,
+            }
+        )
+        _WORKSPACE_CACHE_PAYLOAD = copy.deepcopy(payload)
+        _WORKSPACE_CACHE_KEY = cache_key
+        _WORKSPACE_CACHE_CREATED_AT = perf_counter()
+        return _with_cache_diagnostics(
+            payload,
+            enabled=True,
+            hit=False,
+            wait_ms=wait_ms,
+            age_ms=0.0,
+        )
+
+
+def _build_agent_config_workspace(*, cache_diagnostics: dict[str, Any] | None = None) -> dict[str, Any]:
     timings: dict[str, float] = {}
     load_modes: dict[str, str] = {}
     total_started = perf_counter()
@@ -185,11 +249,14 @@ def get_agent_config_workspace() -> dict[str, Any]:
     )
     summary = _timed_stage(timings, "summary", lambda: _summary(enriched_agents, groups, health["issues"], chat_rooms, teams, mode_bindings))
     timings["total"] = round((perf_counter() - total_started) * 1000, 1)
+    load_modes["chatRooms"] = "compact"
+    load_modes["teams"] = "graph_references"
+    load_modes["runtimeStatuses"] = "batched"
     payload = {
         "schemaVersion": SCHEMA_VERSION,
         "generatedAt": _now(),
         "storage": {
-            "agentRegistryPath": "workspace/agents/agents.json",
+            "agentRegistryPath": _relative_path(registry_path),
             "modeBindingPath": _relative_path(mode_binding_path()),
             "promptTemplatePath": _relative_path(prompt_template_path()),
         },
@@ -212,10 +279,12 @@ def get_agent_config_workspace() -> dict[str, Any]:
             "modeBindings": list(mode_bindings.get("repairWarnings") or []),
             "promptTemplates": list(prompt_workspace.get("repairWarnings") or []),
         },
+        "diagnostics": {
+            "timingsMs": dict(timings),
+            "loadModes": dict(load_modes),
+            "cache": dict(cache_diagnostics or {}),
+        },
     }
-    load_modes["chatRooms"] = "compact"
-    load_modes["teams"] = "graph_references"
-    load_modes["runtimeStatuses"] = "batched"
     _record_workspace_loaded(summary, timings=timings, load_modes=load_modes, issues=health["issues"])
     _record_model_reference_resolution(health["issues"])
     return payload
@@ -573,6 +642,7 @@ def _derive_health(
                         "action": "在团队画布中替换或解绑该成员。",
                     }
                 )
+    issues.extend(_duplicate_team_name_issues(teams))
 
     blocking = [item for item in issues if item.get("severity") == "blocking"]
     warnings = [item for item in issues if item.get("severity") == "warning"]
@@ -651,7 +721,8 @@ def _derive_team_indexes(teams: list[dict[str, Any]], *, agents: list[dict[str, 
             )
         )
 
-    indexes: list[dict[str, Any]] = []
+    team_indexes: list[dict[str, Any]] = []
+    source_scope_indexes: list[dict[str, Any]] = []
     for team in teams:
         if not isinstance(team, dict):
             continue
@@ -666,7 +737,7 @@ def _derive_team_indexes(teams: list[dict[str, Any]], *, agents: list[dict[str, 
         team_name = str(team.get("name") or team_id).strip()
         team_category = str(team.get("teamCategory") or "").strip()
         purpose = str(team.get("purpose") or team.get("description") or "").strip()
-        indexes.append(
+        team_indexes.append(
             {
                 "id": f"team:{team_id}",
                 "label": team_name,
@@ -681,7 +752,7 @@ def _derive_team_indexes(teams: list[dict[str, Any]], *, agents: list[dict[str, 
                 "source": "team",
             }
         )
-        indexes.extend(
+        source_scope_indexes.extend(
             _derive_source_scope_indexes(
                 team,
                 members=members,
@@ -689,7 +760,95 @@ def _derive_team_indexes(teams: list[dict[str, Any]], *, agents: list[dict[str, 
                 health_count=health_count,
             )
         )
-    return indexes
+    return _collapse_duplicate_team_indexes(team_indexes, health_count=health_count) + source_scope_indexes
+
+
+def _collapse_duplicate_team_indexes(
+    indexes: list[dict[str, Any]],
+    *,
+    health_count: Callable[[list[str]], int],
+) -> list[dict[str, Any]]:
+    by_label: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    order: list[str] = []
+    for index in indexes:
+        label_key = _normalized_team_index_label(index)
+        if not label_key:
+            label_key = str(index.get("id") or "").strip()
+        if label_key not in by_label:
+            order.append(label_key)
+        by_label[label_key].append(index)
+
+    collapsed: list[dict[str, Any]] = []
+    for label_key in order:
+        items = by_label[label_key]
+        if len(items) <= 1:
+            collapsed.append(items[0])
+            continue
+        first = items[0]
+        agent_ids = _unique_string_list(
+            agent_id
+            for item in items
+            for agent_id in list(item.get("agentIds") or [])
+        )
+        team_ids = _unique_string_list(item.get("teamId") for item in items)
+        team_kinds = _unique_string_list(item.get("teamKind") for item in items)
+        team_categories = _unique_string_list(item.get("teamCategory") for item in items)
+        collapsed.append(
+            {
+                **first,
+                "id": f"{first.get('id')}:duplicate-name-group",
+                "description": f"检测到 {len(items)} 个同名团队，已合并显示，避免 Agent Center 左侧索引重复。",
+                "agentIds": agent_ids,
+                "count": len(agent_ids),
+                "healthCount": health_count(agent_ids),
+                "teamId": str(first.get("teamId") or "").strip(),
+                "teamKind": team_kinds[0] if len(team_kinds) == 1 else "mixed",
+                "teamCategory": team_categories[0] if len(team_categories) == 1 else "mixed",
+                "source": "duplicate_team_name",
+                "duplicateTeamCount": len(items),
+                "duplicateTeamIds": team_ids,
+            }
+        )
+    return collapsed
+
+
+def _normalized_team_index_label(index: dict[str, Any]) -> str:
+    return " ".join(str(index.get("label") or "").strip().casefold().split())
+
+
+def _duplicate_team_name_issues(teams: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    by_name: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    display_names: dict[str, str] = {}
+    for team in teams:
+        if not isinstance(team, dict):
+            continue
+        if str(team.get("status") or "active").strip().lower() == "archived":
+            continue
+        team_id = str(team.get("teamId") or "").strip()
+        name = str(team.get("name") or "").strip()
+        key = " ".join(name.casefold().split())
+        if not team_id or not key:
+            continue
+        display_names.setdefault(key, name)
+        by_name[key].append(team)
+    issues: list[dict[str, Any]] = []
+    for key, items in by_name.items():
+        if len(items) <= 1:
+            continue
+        team_ids = _unique_string_list(team.get("teamId") for team in items)
+        display_name = display_names.get(key) or key
+        issues.append(
+            {
+                "severity": "warning",
+                "code": "duplicate_team_name",
+                "agentId": "",
+                "title": "存在同名团队",
+                "detail": f"{display_name} 有 {len(items)} 个 active 团队：{', '.join(team_ids[:8])}{'...' if len(team_ids) > 8 else ''}。",
+                "source": "team",
+                "action": "在 Teams 页面确认是否需要合并、重命名或归档重复团队。",
+            }
+        )
+    return issues
 
 
 def _visible_agent_config_teams(teams: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -1675,9 +1834,54 @@ def _safe_int(value: Any) -> int:
         return 0
 
 
+def _workspace_cache_key() -> tuple[Any, ...]:
+    return (
+        SCHEMA_VERSION,
+        _path_signature(registry_path),
+        _path_signature(mode_binding_path),
+        _path_signature(prompt_template_path),
+    )
+
+
+def _path_signature(path_func: Any) -> tuple[str, int, int]:
+    try:
+        raw_path = path_func() if callable(path_func) else path_func
+        stat = raw_path.stat()
+        return (raw_path.as_posix(), int(stat.st_mtime_ns), int(stat.st_size))
+    except Exception:
+        try:
+            raw_path = path_func() if callable(path_func) else path_func
+            return (raw_path.as_posix(), 0, -1)
+        except Exception:
+            return ("", 0, -1)
+
+
+def _with_cache_diagnostics(
+    payload: dict[str, Any],
+    *,
+    enabled: bool,
+    hit: bool,
+    wait_ms: float,
+    age_ms: float,
+) -> dict[str, Any]:
+    result = copy.deepcopy(payload)
+    diagnostics = result.get("diagnostics") if isinstance(result.get("diagnostics"), dict) else {}
+    cache = diagnostics.get("cache") if isinstance(diagnostics.get("cache"), dict) else {}
+    diagnostics["cache"] = {
+        **cache,
+        "enabled": enabled,
+        "hit": hit,
+        "waitMs": wait_ms,
+        "ageMs": age_ms,
+        "ttlSeconds": WORKSPACE_CACHE_TTL_SECONDS,
+    }
+    result["diagnostics"] = diagnostics
+    return result
+
+
 def _relative_path(path_func: Any) -> str:
     try:
-        path = path_func()
+        path = path_func() if callable(path_func) else path_func
     except Exception:
         return ""
     try:
