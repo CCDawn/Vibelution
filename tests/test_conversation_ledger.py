@@ -153,6 +153,8 @@ def test_conversation_ledger_preserves_interrupted_partial(tmp_path):
     contents = [str(message.get("content") or "") for message in messages]
 
     assert "已经完成前半部分。" in contents
+    assert any(message.get("role") == "system" and TURN_INTERRUPTED_MARKER in str(message.get("content") or "") for message in messages)
+    assert not any(message.get("role") == "user" and TURN_INTERRUPTED_MARKER in str(message.get("content") or "") for message in messages)
     assert any(TURN_INTERRUPTED_MARKER in content for content in contents)
 
 
