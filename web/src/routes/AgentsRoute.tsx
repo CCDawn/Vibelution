@@ -42,6 +42,7 @@ import {
   AgentToolGovernanceRequest,
   AgentConfigReference,
   AgentSupervisionPolicy,
+  AgentBoundary,
   AgentConfigWorkspace,
   AgentConfigWorkspaceAgent,
   AgentConfigWorkspaceGroup,
@@ -351,6 +352,11 @@ const FALLBACK_AGENT_LLM_SLOTS: AgentLlmSlotDefinition[] = [
 const EMPTY_TOOL_BUNDLES: ToolBundle[] = [];
 const EMPTY_TOOL_REGISTRY_ITEMS: ToolRegistryItem[] = [];
 const EMPTY_AGENT_CONFIG_GROUPS: AgentConfigWorkspaceGroup[] = [];
+const LIGHTWEIGHT_AGENT_CONFIG_STORAGE = {
+  agentRegistryPath: "workspace/agents/agents.json",
+  modeBindingPath: "workspace/agent_config/mode_bindings.json",
+  promptTemplatePath: "workspace/agent_config/prompt_templates.json",
+};
 const DEFAULT_AGENT_RESET_OPTIONS: AgentResetOptions = {
   clearRuntimeState: true,
   resetDirectSession: true,
@@ -1151,6 +1157,131 @@ function workspaceTeamIndexes(workspace: AgentConfigWorkspace | undefined): Agen
           Array.isArray(item.agentIds),
       ),
   );
+}
+
+function lightweightAgentBoundary(agent: AgentConfigWorkspaceAgent): AgentBoundary {
+  if (agent.agentBoundary) {
+    return agent.agentBoundary;
+  }
+  const archived = agent.status === "archived";
+  const teamManaged = String(agent.primaryMode || "").trim() === "research";
+  return {
+    type: archived ? "archived" : teamManaged ? "team_role" : "work_session",
+    label: archived ? "已归档 Agent" : teamManaged ? "团队/科研角色 Agent" : "会话入口 Agent",
+    ownership: archived ? "archive" : teamManaged ? "team" : "user",
+    directSessionRole: agent.directSessionId ? "primary_entry" : "none",
+    reason: archived ? "archived" : teamManaged ? "summary_research_mode" : "summary_agent",
+    configurationSurface: archived ? "archive" : teamManaged ? "team_role" : "work_session",
+    requiresPersonaProfile: teamManaged ? "true" : "false",
+    requiresTaskProfile: teamManaged ? "true" : "false",
+    requiresTeamMembership: teamManaged ? "true" : "false",
+  };
+}
+
+function normalizeLightweightAgent(agent: AgentConfigWorkspaceAgent): AgentConfigWorkspaceAgent {
+  const normalized = {
+    ...agent,
+    references: Array.isArray(agent.references) ? agent.references : [],
+    health: Array.isArray(agent.health) ? agent.health : [],
+  };
+  return {
+    ...normalized,
+    agentBoundary: lightweightAgentBoundary(normalized),
+  };
+}
+
+function lightweightAgentGroup(
+  id: string,
+  label: string,
+  section: string,
+  description: string,
+  agents: AgentConfigWorkspaceAgent[],
+  predicate: (agent: AgentConfigWorkspaceAgent) => boolean,
+): AgentConfigWorkspaceGroup {
+  const agentIds = agents.filter(predicate).map((agent) => agent.agentId);
+  return {
+    id,
+    label,
+    section,
+    description,
+    agentIds,
+    count: agentIds.length,
+    healthCount: agents.filter((agent) => agentIds.includes(agent.agentId) && hasActionableHealthIssue(agent)).length,
+  };
+}
+
+function buildLightweightAgentWorkspace(
+  rawAgents: AgentConfigWorkspaceAgent[],
+  updatedAt: number,
+): AgentConfigWorkspaceWithTeamIndexes {
+  const agents = rawAgents.map(normalizeLightweightAgent);
+  const activeAgents = agents.filter((agent) => agent.status !== "archived");
+  const issues = agents.flatMap((agent) => agent.health ?? []);
+  const groups = [
+    lightweightAgentGroup("active", "可用 Agent", "status", "当前可被业务页面引用或调度的 Agent。", agents, (agent) => agent.status !== "archived"),
+    lightweightAgentGroup("archived", "已归档", "status", "只保留历史数据、不再进入可用池的 Agent。", agents, (agent) => agent.status === "archived"),
+    lightweightAgentGroup("chat", "会话模式", "mode", "属于 Chat 运行模式或会话可用池的 Agent。", agents, (agent) => agent.primaryMode === "chat"),
+    lightweightAgentGroup("research", "科研模式", "mode", "属于 Research 运行模式或科研池的 Agent。", agents, (agent) => agent.primaryMode === "research"),
+    lightweightAgentGroup(
+      "supervised_evolution",
+      "监督进化模式",
+      "mode",
+      "占用监督进化模式引用的 Agent。",
+      agents,
+      (agent) => agent.primaryMode === "supervised_evolution",
+    ),
+    lightweightAgentGroup("self_evolution", "自进化模式", "mode", "占用自进化模式引用的 Agent。", agents, (agent) => agent.primaryMode === "self_evolution"),
+  ].filter((group) => group.count > 0 || group.id === "active" || group.id === "archived");
+  return {
+    schemaVersion: 1,
+    generatedAt: new Date(updatedAt || Date.now()).toISOString(),
+    storage: LIGHTWEIGHT_AGENT_CONFIG_STORAGE,
+    summary: {
+      agentCount: agents.length,
+      activeAgentCount: activeAgents.length,
+      archivedAgentCount: agents.length - activeAgents.length,
+      runningAgentCount: 0,
+      blockedAgentCount: 0,
+      modeCount: new Set(activeAgents.map((agent) => agent.primaryMode).filter(Boolean)).size,
+      chatRoomCount: 0,
+      groupCount: groups.length,
+      healthIssueCount: issues.length,
+      blockingIssueCount: issues.filter((issue) => issue.severity === "blocking").length,
+      warningIssueCount: issues.filter((issue) => issue.severity === "warning").length,
+      inboxPendingCount: 0,
+      teamCount: 0,
+    },
+    groups,
+    teamIndexes: [],
+    agents,
+    modeBindings: {},
+    promptTemplates: [],
+    agentLlmSlots: FALLBACK_AGENT_LLM_SLOTS,
+    agentModelChoices: [],
+    modelOptions: [],
+    toolPolicies: [],
+    memoryPolicies: [],
+    chatRooms: [],
+    teams: [],
+    references: Object.fromEntries(agents.map((agent) => [agent.agentId, agent.references ?? []])),
+    health: {
+      status: issues.some((issue) => issue.severity === "blocking") ? "blocked" : issues.some((issue) => issue.severity === "warning") ? "warning" : "ok",
+      issues,
+      counts: {
+        blocking: issues.filter((issue) => issue.severity === "blocking").length,
+        warning: issues.filter((issue) => issue.severity === "warning").length,
+        info: issues.filter((issue) => issue.severity === "info").length,
+      },
+      byAgent: Object.fromEntries(agents.map((agent) => [agent.agentId, agent.health ?? []])),
+    },
+    repairWarnings: {
+      modeBindings: [],
+      promptTemplates: [],
+    },
+    diagnostics: {
+      source: "agent_summary_fallback",
+    },
+  };
 }
 
 function filterAgents(
@@ -3683,8 +3814,12 @@ export function AgentsRoute() {
   const workspaceQuery = useQuery({
     queryKey: queryKeys.agentConfigWorkspace(),
     queryFn: () => fetchJson<AgentConfigWorkspaceWithTeamIndexes>("/api/agents/config-workspace"),
-    refetchInterval: resolvePollingInterval(pageVisible, 12_000),
-    refetchIntervalInBackground: false,
+    staleTime: 10_000,
+  });
+  const agentSummaryQuery = useQuery({
+    queryKey: queryKeys.agentSummary(true),
+    queryFn: () => fetchJson<AgentConfigWorkspaceAgent[]>("/api/agents?includeArchived=true&detail=summary"),
+    staleTime: 10_000,
   });
 
   const toolsWorkspaceNeeded = createOpen || activePane === "config";
@@ -3704,7 +3839,11 @@ export function AgentsRoute() {
     staleTime: 30_000,
   });
 
-  const workspace = workspaceQuery.data;
+  const lightweightWorkspace = useMemo(
+    () => agentSummaryQuery.data ? buildLightweightAgentWorkspace(agentSummaryQuery.data, agentSummaryQuery.dataUpdatedAt) : undefined,
+    [agentSummaryQuery.data, agentSummaryQuery.dataUpdatedAt],
+  );
+  const workspace = workspaceQuery.data ?? lightweightWorkspace;
   const tools = toolsQuery.data?.tools ?? EMPTY_TOOL_REGISTRY_ITEMS;
   const agentModelChoices = useMemo(
     () => buildAgentModelChoices(workspace?.agentModelChoices ?? []),
@@ -3842,6 +3981,7 @@ export function AgentsRoute() {
   const healthStatusLabel = workspaceHealthStatusLabel(healthStatus, lang);
   const healthStatusDescription = workspaceHealthStatusDescription(healthStatus, summary, lang);
   const refresh = () => {
+    void queryClient.invalidateQueries({ queryKey: queryKeys.agentSummary(true) });
     void chatWorkspaceCache.afterAgentWorkspaceChanged();
   };
 
