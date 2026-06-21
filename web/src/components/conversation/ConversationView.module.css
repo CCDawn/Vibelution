@@ -857,6 +857,79 @@
   white-space: nowrap;
 }
 
+.answerOnlyProcessGroup {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.answerOnlyProcessToggle {
+  display: inline-grid;
+  grid-template-columns: 18px auto auto minmax(0, 1fr) 16px;
+  align-items: center;
+  gap: 7px;
+  width: fit-content;
+  max-width: 100%;
+  min-height: 26px;
+  padding: 2px 7px;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--surface-card) 34%, transparent);
+  color: var(--fg-tertiary);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.72rem;
+}
+
+.answerOnlyProcessToggle:hover {
+  background: color-mix(in srgb, var(--surface-card) 64%, var(--accent-cool) 5%);
+  color: var(--fg-secondary);
+}
+
+.answerOnlyProcessIcon {
+  display: inline-grid;
+  place-items: center;
+  color: color-mix(in srgb, var(--accent-cool-2) 72%, var(--fg-tertiary));
+}
+
+.answerOnlyProcessGroup_failed .answerOnlyProcessIcon,
+.answerOnlyProcessGroup_failed .answerOnlyProcessTitle {
+  color: var(--danger);
+}
+
+.answerOnlyProcessTitle {
+  color: var(--fg-secondary);
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.answerOnlyProcessMeta,
+.answerOnlyProcessPreview {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.answerOnlyProcessMeta {
+  color: color-mix(in srgb, var(--fg-tertiary) 84%, transparent);
+  font-weight: 560;
+}
+
+.answerOnlyProcessPreview {
+  max-width: min(42vw, 460px);
+  color: color-mix(in srgb, var(--fg-tertiary) 74%, transparent);
+}
+
+.answerOnlyProcessDetails {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  max-width: 100%;
+  padding-left: 4px;
+}
+
 .operationStatusLine {
   display: flex;
   align-items: center;
