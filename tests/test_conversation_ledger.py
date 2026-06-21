@@ -7,6 +7,7 @@ import pytest
 
 from core.infrastructure import developer_sandbox
 from core.chat.conversation_ledger import (
+    EVENT_ASSISTANT_MESSAGE,
     EVENT_ASSISTANT_PARTIAL,
     EVENT_COMPACTION_CHECKPOINT,
     EVENT_TOOL_RESULT,
@@ -156,6 +157,33 @@ def test_conversation_ledger_preserves_interrupted_partial(tmp_path):
     assert any(message.get("role") == "system" and TURN_INTERRUPTED_MARKER in str(message.get("content") or "") for message in messages)
     assert not any(message.get("role") == "user" and TURN_INTERRUPTED_MARKER in str(message.get("content") or "") for message in messages)
     assert any(TURN_INTERRUPTED_MARKER in content for content in contents)
+
+
+def test_conversation_ledger_preserves_assistant_payload_metadata(tmp_path):
+    append_conversation_event(
+        tmp_path,
+        "session-card",
+        "turn-card",
+        EVENT_ASSISTANT_MESSAGE,
+        status="completed",
+        payload={
+            "content": "子对话：修复展示",
+            "metadata": {
+                "kind": "child_session_card",
+                "childSessionId": "session-child",
+                "taskTitle": "修复展示",
+            },
+        },
+    )
+
+    projection = project_conversation_ledger(
+        load_conversation_events(tmp_path, "session-card"),
+        include_visible_messages=True,
+    )
+
+    assert projection.visible_messages[0]["metadata"]["kind"] == "child_session_card"
+    assert projection.visible_messages[0]["metadata"]["childSessionId"] == "session-child"
+    assert projection.visible_messages[0]["metadata"]["taskTitle"] == "修复展示"
 
 
 def test_conversation_ledger_event_projection_categories_are_explicit():

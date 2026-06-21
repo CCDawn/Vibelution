@@ -3,6 +3,11 @@ import json
 import pytest
 from fastapi.testclient import TestClient
 
+from core.chat.conversation_ledger import (
+    EVENT_ASSISTANT_MESSAGE,
+    EVENT_USER_MESSAGE,
+    append_conversation_event,
+)
 from core.ui.chat_state import save_chat_state
 from core.web.app import create_app
 from core.web.control import CONTROL_TOKEN_HEADER, get_control_token
@@ -62,6 +67,28 @@ def isolate_evolution_live_state():
 
 def test_session_detail_exists(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path)
+    append_conversation_event(
+        tmp_path,
+        "session-live",
+        "turn-seeded",
+        EVENT_USER_MESSAGE,
+        status="recorded",
+        payload={"content": "继续前端开发"},
+    )
+    append_conversation_event(
+        tmp_path,
+        "session-live",
+        "turn-seeded",
+        EVENT_ASSISTANT_MESSAGE,
+        status="completed",
+        payload={
+            "content": "<think>internal</think>\n\n已经接到真实状态了。",
+            "toolCalls": [
+                {"name": "read_file_tool", "status": "done"},
+                {"name": "search_code_tool", "status": "done"},
+            ],
+        },
+    )
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
 
     sessions_response = client.get("/api/sessions")
@@ -85,7 +112,7 @@ def test_session_detail_exists(tmp_path, monkeypatch):
     assert payload["taskSummary"] == "已经接到真实状态了。"
     assert payload["previewTabs"] == []
     assert payload["currentPhase"] == "ready"
-    assert payload["contextUsage"]["source"] == "session_messages"
+    assert payload["contextUsage"]["source"] == "conversation_ledger"
     assert payload["contextUsage"]["messageCount"] == 2
     assert payload["contextUsage"]["userMessageCount"] == 1
     assert payload["contextUsage"]["assistantMessageCount"] == 1
@@ -677,6 +704,14 @@ def test_session_detail_uses_targeted_conversation_read(tmp_path, monkeypatch):
             },
         ],
     )
+    append_conversation_event(
+        tmp_path,
+        "session-live",
+        "turn-targeted-read",
+        EVENT_USER_MESSAGE,
+        status="recorded",
+        payload={"content": "目标消息"},
+    )
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
 
     def fail_append_agent_directory_conversations(*args, **kwargs):
@@ -711,6 +746,14 @@ def test_session_detail_does_not_scan_full_conversation_list_for_known_id(tmp_pa
                 "messages": [{"role": "user", "content": "目标消息", "timestamp": "2026-05-18T12:00:00"}],
             },
         ],
+    )
+    append_conversation_event(
+        tmp_path,
+        "session-live",
+        "turn-known-id-read",
+        EVENT_USER_MESSAGE,
+        status="recorded",
+        payload={"content": "目标消息"},
     )
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
 

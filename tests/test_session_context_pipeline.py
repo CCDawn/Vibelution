@@ -431,13 +431,7 @@ def test_session_detail_messages_replay_ledger_before_legacy_messages(tmp_path, 
         payload={"content": "ledger 助手事实"},
     )
 
-    messages = session_service._messages_with_live_output(
-        "session-visible",
-        [
-            {"role": "user", "content": "旧 messages 用户内容"},
-            {"role": "assistant", "content": "旧 messages 助手内容"},
-        ],
-    )
+    messages = session_service._messages_with_live_output("session-visible")
     contents = [str(item.get("content") or "") for item in messages]
 
     assert "ledger 用户事实" in contents
@@ -449,13 +443,7 @@ def test_session_detail_messages_replay_ledger_before_legacy_messages(tmp_path, 
 def test_session_detail_without_ledger_does_not_fallback_to_legacy_messages(tmp_path, monkeypatch):
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
 
-    messages = session_service._messages_with_live_output(
-        "session-no-ledger",
-        [
-            {"role": "user", "content": "旧 messages 用户内容"},
-            {"role": "assistant", "content": "旧 messages 助手内容"},
-        ],
-    )
+    messages = session_service._messages_with_live_output("session-no-ledger")
 
     assert messages == []
 
@@ -489,7 +477,7 @@ def test_session_detail_live_overlay_replaces_open_ledger_partial(tmp_path, monk
             updated_at="2026-06-21T00:00:00",
         )
     try:
-        messages = session_service._messages_with_live_output("session-visible", [])
+        messages = session_service._messages_with_live_output("session-visible")
     finally:
         with session_service._SESSION_LIVE_OUTPUTS_LOCK:
             session_service._SESSION_LIVE_OUTPUTS.clear()
