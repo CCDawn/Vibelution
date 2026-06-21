@@ -1281,6 +1281,7 @@ def repair_agent_directory() -> dict[str, Any]:
         avatar_defaulted_agents: list[dict[str, Any]] = []
         territory_repaired_agents: list[dict[str, Any]] = []
         llm_binding_migrated_agents: list[dict[str, Any]] = []
+        profile_repaired_agents: list[dict[str, Any]] = []
         tool_policy_repaired_agents: list[tuple[dict[str, Any], dict[str, Any]]] = []
         model_library_ids = _configured_model_library_ids()
         used_agent_codes: set[str] = set()
@@ -1318,6 +1319,9 @@ def repair_agent_directory() -> dict[str, Any]:
                     )
                 changed = True
             if _normalize_agent_legacy_metadata_fields(agent):
+                changed = True
+            if _ensure_fixed_role_profiles(agent):
+                profile_repaired_agents.append(dict(agent))
                 changed = True
             territory_changed = False
             if not str(agent.get("primaryMode") or "").strip():
@@ -1439,6 +1443,8 @@ def repair_agent_directory() -> dict[str, Any]:
                 )
             if llm_binding_migrated_agents:
                 _record_agent_llm_binding_migration_event(llm_binding_migrated_agents)
+            for repaired_agent in profile_repaired_agents:
+                _record_agent_event("agent.profile_repaired", repaired_agent)
             for repaired_agent, repaired_policy in tool_policy_repaired_agents:
                 _record_agent_tool_policy_event(repaired_agent, repaired_policy)
             for repaired_agent in territory_repaired_agents:
@@ -4041,6 +4047,188 @@ def _knowledge_steward_metadata() -> dict[str, Any]:
             "constraints": "正式 KnowledgeItem 落盘仍必须由具备审核权限的角色或用户确认。",
             "handoffNotes": "需要最终审核时交给 Team owner/lead/steward/coordinator 或用户。",
             "taskTypes": ["knowledge_governance", "source_ingestion", "rating_suggestion", "review_preparation"],
+        },
+    }
+
+
+def _ensure_fixed_role_profiles(agent: dict[str, Any]) -> bool:
+    metadata = dict(agent.get("metadata") or {})
+    defaults = _fixed_role_profile_defaults(agent, metadata)
+    if not defaults:
+        return False
+
+    changed = False
+    persona = normalize_persona_profile(metadata.get("personaProfile") if isinstance(metadata.get("personaProfile"), dict) else {})
+    if not _persona_profile_has_content(persona):
+        default_persona = normalize_persona_profile(defaults.get("personaProfile"))
+        if _persona_profile_has_content(default_persona):
+            metadata["personaProfile"] = default_persona
+            changed = True
+
+    task = normalize_task_profile(metadata.get("taskProfile") if isinstance(metadata.get("taskProfile"), dict) else {})
+    if not _task_profile_has_content(task):
+        default_task = normalize_task_profile(defaults.get("taskProfile"))
+        if _task_profile_has_content(default_task):
+            metadata["taskProfile"] = default_task
+            changed = True
+
+    if changed:
+        agent["metadata"] = metadata
+    return changed
+
+
+def _fixed_role_profile_defaults(agent: dict[str, Any], metadata: dict[str, Any]) -> dict[str, Any]:
+    role = _fixed_role_profile_key(agent, metadata)
+    if not role:
+        return {}
+
+    functional_name = str(
+        metadata.get("functionalDisplayName")
+        or metadata.get("selfEvolutionRoleLabel")
+        or metadata.get("supervisedRoleLabel")
+        or agent.get("displayName")
+        or role
+    ).strip()
+    responsibilities = _unique_string_list(metadata.get("responsibilities"))
+
+    if role.startswith("self_evolution:"):
+        return _self_evolution_profile_defaults(role.split(":", 1)[1], functional_name)
+    if role.startswith("supervised_evolution:"):
+        return _supervised_evolution_profile_defaults(role.split(":", 1)[1], functional_name)
+    if role.startswith("research_org:"):
+        return _research_org_profile_defaults(role.split(":", 1)[1], functional_name, responsibilities)
+    if role.startswith("research_agent:"):
+        return _research_agent_profile_defaults(role.split(":", 1)[1], functional_name)
+    return {}
+
+
+def _fixed_role_profile_key(agent: dict[str, Any], metadata: dict[str, Any]) -> str:
+    primary_mode = _normalize_primary_mode(agent.get("primaryMode") or _infer_agent_primary_mode(agent))
+    self_role = _normalize_role_key(metadata.get("selfEvolutionRole") or "")
+    if primary_mode == "self_evolution" or self_role:
+        return f"self_evolution:{self_role or _normalize_role_key(agent.get('roleKey')) or 'member'}"
+
+    supervised_role = _normalize_role_key(metadata.get("supervisedRole") or "")
+    if primary_mode == "supervised_evolution" or supervised_role:
+        return f"supervised_evolution:{supervised_role or _normalize_role_key(agent.get('roleKey')) or 'member'}"
+
+    research_org_role = _normalize_role_key(metadata.get("researchOrgRole") or metadata.get("systemRole") or "")
+    if research_org_role in {"ceo", "organization_advisor", "capability_steward"}:
+        return f"research_org:{research_org_role}"
+
+    research_agent_key = _normalize_role_key(metadata.get("researchAgentKey") or "")
+    role_key = _normalize_role_key(agent.get("roleKey") or "")
+    if research_agent_key or role_key.startswith("research_") or primary_mode == "research":
+        return f"research_agent:{research_agent_key or role_key}"
+
+    return ""
+
+
+def _self_evolution_profile_defaults(role: str, functional_name: str) -> dict[str, Any]:
+    labels = {
+        "executor": ("执行候选改进", "实现、验证和记录自进化候选变更。", "实现、测试、回滚准备"),
+        "reviewer": ("评审候选变更", "从证据、风险和可回滚性角度审查自进化候选。", "代码评审、风险评估、证据复核"),
+        "summarizer": ("总结进化证据", "压缩自进化运行证据，输出可追踪摘要和后续建议。", "运行摘要、证据整理、结论归档"),
+    }
+    mission, responsibilities, expertise = labels.get(
+        role,
+        ("维护自进化流程", "按固定角色职责处理自进化运行中的分工。", "自进化协作"),
+    )
+    return {
+        "personaProfile": {
+            "personality": "审慎、可复核，优先保护主线稳定。",
+            "communicationStyle": "先给结论，再列证据、风险和下一步。",
+            "background": f"{functional_name} 是 Vibelution 自进化流程中的固定系统角色。",
+            "collaborationPreference": "围绕候选变更、验证证据和回滚边界与其他系统 Agent 协作。",
+            "expertise": ["自进化", expertise, "运行证据"],
+        },
+        "taskProfile": {
+            "mission": mission,
+            "responsibilities": responsibilities,
+            "preferredTasks": "边界清晰、可验证、可回滚的自进化子任务。",
+            "avoidTasks": "不要绕过监督门禁、不要直接发布远端变更、不要处理缺少证据的破坏性操作。",
+            "successCriteria": "输出包含行为变化、证据、风险和回滚条件的可审查结果。",
+            "deliverables": "候选实现、评审意见、运行摘要或证据索引。",
+            "constraints": "遵守自进化事务边界和主线稳定要求。",
+            "handoffNotes": "高风险或需发布的动作交给监督/用户确认。",
+            "taskTypes": ["self_evolution", role],
+        },
+    }
+
+
+def _supervised_evolution_profile_defaults(role: str, functional_name: str) -> dict[str, Any]:
+    return {
+        "personaProfile": {
+            "personality": "严谨、保守，重视对照实验和可复现证据。",
+            "communicationStyle": "用明确判定说明通过、失败、风险和证据缺口。",
+            "background": f"{functional_name} 是监督进化评测和晋升流程中的固定系统角色。",
+            "collaborationPreference": "围绕基线、候选、评审、审计和判定证据协作。",
+            "expertise": ["监督进化", "评测证据", role],
+        },
+        "taskProfile": {
+            "mission": "支撑监督进化的候选比较、风险评审和晋升判定。",
+            "responsibilities": "收集评测证据；比较候选与基线；标注风险、退化和晋升条件。",
+            "preferredTasks": "候选评测、审计、对照比较和晋升门禁判断。",
+            "avoidTasks": "不要绕过用户门禁或把未验证候选提升为稳定行为。",
+            "successCriteria": "每个判定都能追溯到测试、日志或人工评审证据。",
+            "deliverables": "评测结论、风险说明、晋升或回滚建议。",
+            "constraints": "SemVer、回滚和证据链要求必须保留。",
+            "handoffNotes": "需要合入或发布时交给主线集成流程。",
+            "taskTypes": ["supervised_evolution", role],
+        },
+    }
+
+
+def _research_org_profile_defaults(role: str, functional_name: str, responsibilities: list[str]) -> dict[str, Any]:
+    role_labels = {
+        "ceo": ("把研究目标转成组织任务", "研究组织决策、任务分派、用户沟通"),
+        "organization_advisor": ("设计和维护临时研究组织", "组织结构设计、权限建议、成员治理"),
+        "capability_steward": ("维护 Agent 能力和权限边界", "能力审计、工具策略、记忆策略"),
+    }
+    mission, expertise = role_labels.get(role, ("维护研究组织运行", "研究组织治理"))
+    responsibility_text = "；".join(responsibilities) if responsibilities else f"{functional_name} 负责{mission}。"
+    return {
+        "personaProfile": {
+            "personality": "冷静、结构化，优先保持研究组织边界清晰。",
+            "communicationStyle": "先给组织判断，再列依据、风险和需要用户确认的动作。",
+            "background": f"{functional_name} 是研究组织中的受保护治理角色。",
+            "collaborationPreference": "通过提案、审核和显式用户门禁推进高风险组织变更。",
+            "expertise": ["研究组织", expertise, "Agent 治理"],
+        },
+        "taskProfile": {
+            "mission": mission,
+            "responsibilities": responsibility_text,
+            "preferredTasks": "研究任务拆解、组织调度、能力边界审查和治理建议。",
+            "avoidTasks": "不要擅自删除核心 Agent、绕过权限审批或直接执行高风险工具变更。",
+            "successCriteria": "组织建议可审查、可回滚，且每个高风险动作都有明确用户门禁。",
+            "deliverables": "组织方案、能力审计、权限建议、协作边界说明。",
+            "constraints": "保持研究组织图、Agent Directory 和 mode binding 一致。",
+            "handoffNotes": "需要执行破坏性或权限升级动作时交给用户或主线治理流程确认。",
+            "taskTypes": ["research_organization", role],
+        },
+    }
+
+
+def _research_agent_profile_defaults(role: str, functional_name: str) -> dict[str, Any]:
+    role_label = role.replace("_", " ").strip() or "research agent"
+    return {
+        "personaProfile": {
+            "personality": "细致、证据优先，避免把未验证来源当成结论。",
+            "communicationStyle": "先列可用证据和不确定性，再给研究建议。",
+            "background": f"{functional_name} 是研究流程中的功能型 Agent。",
+            "collaborationPreference": "围绕来源、证据、引用和结论边界与研究团队协作。",
+            "expertise": ["研究检索", "证据整理", role_label],
+        },
+        "taskProfile": {
+            "mission": f"承担 {functional_name} 的研究分工，输出可追溯证据。",
+            "responsibilities": "阅读资料；提取关键证据；标注来源质量；把发现交给研究组织或团队成员复核。",
+            "preferredTasks": "文献阅读、来源比对、证据摘录和研究问题拆解。",
+            "avoidTasks": "不要编造来源、不要把未经复核的发现写成确定结论。",
+            "successCriteria": "输出包含来源、证据片段、可信度和待复核问题。",
+            "deliverables": "资料摘要、证据清单、引用线索和复核建议。",
+            "constraints": "保留来源边界，遵守研究工具和知识库权限。",
+            "handoffNotes": "结论性判断交给研究负责人或评审 Agent 复核。",
+            "taskTypes": ["research", role],
         },
     }
 

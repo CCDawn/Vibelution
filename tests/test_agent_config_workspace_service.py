@@ -1500,6 +1500,103 @@ def test_repair_agent_directory_migrates_legacy_functional_user_display_name(tmp
     assert repaired["metadata"]["displayNameSource"] == "generated_person_name"
 
 
+def test_repair_agent_directory_fills_fixed_role_profiles(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setattr(config_service, "get_config_workspace", _fake_config_workspace)
+    agent = agent_directory_service.create_agent_instance(
+        display_name="自进化执行 Agent",
+        primary_mode="self_evolution",
+        role_key="executor",
+        llm_bindings={"dialogue": {"modelId": "model-research"}},
+        prompt_template_id="prompt-self-executor",
+        metadata={
+            "agentMode": "self_evolution",
+            "fixedRole": True,
+            "selfEvolutionRole": "executor",
+            "selfEvolutionRoleLabel": "自进化执行 Agent",
+        },
+    )
+
+    agent_directory_service.repair_agent_directory()
+    repaired = agent_directory_service.get_agent(agent["agentId"])
+    workspace = agent_config_workspace_service.get_agent_config_workspace(use_cache=False, include_runtime=False)
+    workspace_agent = next(item for item in workspace["agents"] if item["agentId"] == agent["agentId"])
+
+    assert "自进化流程" in repaired["personaProfile"]["background"]
+    assert "executor" in repaired["taskProfile"]["taskTypes"]
+    assert not any(item["code"] == "agent_onboarding_incomplete" for item in workspace_agent["health"])
+
+
+def test_repair_agent_directory_fills_research_org_profiles(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setattr(config_service, "get_config_workspace", _fake_config_workspace)
+    agent = agent_directory_service.create_agent_instance(
+        display_name="CEO Agent",
+        primary_mode="research",
+        role_key="research_ceo",
+        llm_bindings={"dialogue": {"modelId": "model-research"}},
+        prompt_template_id="prompt-research-ceo",
+        metadata={
+            "systemRole": "ceo",
+            "researchOrgRole": "ceo",
+            "protected": True,
+            "functionalDisplayName": "CEO Agent",
+            "responsibilities": [
+                "Directly communicates with the user.",
+                "Turns research goals into organizational tasks.",
+            ],
+        },
+    )
+    agent_directory_service.update_agent_instance(
+        agent["agentId"],
+        tool_policy={"allowedTools": [], "preferredTools": [], "mutationAccess": "none"},
+    )
+
+    agent_directory_service.repair_agent_directory()
+    repaired = agent_directory_service.get_agent(agent["agentId"])
+    workspace = agent_config_workspace_service.get_agent_config_workspace(use_cache=False, include_runtime=False)
+    workspace_agent = next(item for item in workspace["agents"] if item["agentId"] == agent["agentId"])
+
+    assert "研究组织" in repaired["personaProfile"]["background"]
+    assert repaired["taskProfile"]["mission"] == "把研究目标转成组织任务"
+    assert "Directly communicates with the user." in repaired["taskProfile"]["responsibilities"]
+    assert not any(item["code"] == "agent_onboarding_incomplete" for item in workspace_agent["health"])
+
+
+def test_repair_agent_directory_fills_research_agent_profiles(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setattr(config_service, "get_config_workspace", _fake_config_workspace)
+    agent = agent_directory_service.create_agent_instance(
+        display_name="论文阅读 Agent",
+        primary_mode="chat",
+        role_key="research_paper_reader",
+        llm_bindings={"dialogue": {"modelId": "model-research"}},
+        prompt_template_id="prompt-research-paper_reader",
+        metadata={
+            "functionalDisplayName": "论文阅读 Agent",
+            "researchAgentKey": "paper_reader",
+            "researchTemplateId": "research_broad_explorer",
+        },
+    )
+    agent_directory_service.update_agent_instance(
+        agent["agentId"],
+        tool_policy={
+            "allowedTools": ["research_knowledge_query_tool"],
+            "preferredTools": ["research_knowledge_query_tool"],
+            "mutationAccess": "none",
+        },
+    )
+
+    agent_directory_service.repair_agent_directory()
+    repaired = agent_directory_service.get_agent(agent["agentId"])
+    workspace = agent_config_workspace_service.get_agent_config_workspace(use_cache=False, include_runtime=False)
+    workspace_agent = next(item for item in workspace["agents"] if item["agentId"] == agent["agentId"])
+
+    assert "研究流程" in repaired["personaProfile"]["background"]
+    assert "paper_reader" in repaired["taskProfile"]["taskTypes"]
+    assert not any(item["code"] == "agent_onboarding_incomplete" for item in workspace_agent["health"])
+
+
 def test_repair_agent_directory_keeps_real_user_display_name(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     agent = agent_directory_service.create_agent_instance(display_name="科研 Agent", primary_mode="research")
