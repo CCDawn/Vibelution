@@ -65,6 +65,11 @@ const DEFAULT_EXPANDED_RESPONSE_TAIL_COUNT = 1;
 const INITIAL_VISIBLE_MESSAGE_COUNT = 14;
 const INITIAL_VISIBLE_FEEDBACK_OPERATION_COUNT = 36;
 const COMPUTER_USE_TOOL_NAME = "computer_use_task_tool";
+const STREAMING_REVEAL_INTERVAL_MS = 18;
+const STREAMING_REVEAL_MIN_CHARS_PER_TICK = 2;
+const STREAMING_REVEAL_MAX_CHARS_PER_TICK = 28;
+
+export type ConversationProcessDisplayMode = "answer" | "trace";
 
 type ComposerDragData = {
   files?: ArrayLike<File> | Iterable<File> | null;
@@ -144,6 +149,78 @@ type ComputerUseResult = {
   needsConfirmation: boolean;
   error: string;
 };
+
+export function advanceStreamingRevealText(current: string, target: string) {
+  const currentText = String(current ?? "");
+  const targetText = String(target ?? "");
+  if (!targetText || currentText === targetText) {
+    return targetText;
+  }
+  if (!targetText.startsWith(currentText) || currentText.length > targetText.length) {
+    return targetText;
+  }
+  const remaining = targetText.length - currentText.length;
+  const step = Math.max(
+    STREAMING_REVEAL_MIN_CHARS_PER_TICK,
+    Math.min(STREAMING_REVEAL_MAX_CHARS_PER_TICK, Math.ceil(remaining / 4)),
+  );
+  return targetText.slice(0, currentText.length + step);
+}
+
+function useStreamingRevealText(target: string) {
+  const [visibleText, setVisibleText] = useState(target);
+  const visibleTextRef = useRef(target);
+
+  useEffect(() => {
+    visibleTextRef.current = visibleText;
+  }, [visibleText]);
+
+  useEffect(() => {
+    if (visibleTextRef.current === target) {
+      return undefined;
+    }
+    if (!target || !target.startsWith(visibleTextRef.current) || visibleTextRef.current.length > target.length) {
+      visibleTextRef.current = target;
+      setVisibleText(target);
+      return undefined;
+    }
+
+    let cancelled = false;
+    let timeoutId: number | undefined;
+    const pump = () => {
+      if (cancelled) {
+        return;
+      }
+      const nextText = advanceStreamingRevealText(visibleTextRef.current, target);
+      visibleTextRef.current = nextText;
+      setVisibleText(nextText);
+      if (nextText !== target) {
+        timeoutId = window.setTimeout(pump, STREAMING_REVEAL_INTERVAL_MS);
+      }
+    };
+    timeoutId = window.setTimeout(pump, STREAMING_REVEAL_INTERVAL_MS);
+    return () => {
+      cancelled = true;
+      if (timeoutId !== undefined) {
+        window.clearTimeout(timeoutId);
+      }
+    };
+  }, [target]);
+
+  return visibleText;
+}
+
+function StreamingResponseContent({ content }: { content: string }) {
+  const visibleContent = useStreamingRevealText(content);
+  if (!visibleContent) {
+    return null;
+  }
+  return (
+    <div className={`${styles.markdownBody} ${styles.streamingResponseText}`}>
+      <p className={styles.streamingResponseParagraph}>{visibleContent}</p>
+    </div>
+  );
+}
 
 export function buildTimelineScrollSignal(messages: ConversationMessage[]) {
   return messages
@@ -525,6 +602,7 @@ export type ConversationViewProps = {
   showSessionOverview?: boolean;
   showMentalSnapshots?: boolean;
   showComposer?: boolean;
+  processDisplayMode?: ConversationProcessDisplayMode;
   autoScrollToLatest?: boolean;
   composerValue: string;
   composerPlaceholder: string;
@@ -592,6 +670,7 @@ export function ConversationView({
   showSessionOverview = true,
   showMentalSnapshots = true,
   showComposer = true,
+  processDisplayMode = "answer",
   autoScrollToLatest = true,
   composerValue,
   composerPlaceholder,
@@ -675,6 +754,7 @@ export function ConversationView({
   const showSafeGuidanceAction = runningGuidanceActionsEnabled && guidanceDraftReady;
   const composerCanAcceptImageDrop = Boolean(onAddComposerAttachments) && !attachmentInputDisabled;
   const composerCanAcceptReferenceDrop = Boolean(onAddComposerReference) && !composerDisabled;
+  const answerOnlyProcessMode = processDisplayMode === "answer";
   const timestampFormatter = useMemo(
     () =>
       new Intl.DateTimeFormat(lang === "zh" ? "zh-CN" : "en-US", {
@@ -1150,10 +1230,6 @@ export function ConversationView({
     return RUNNING_OPERATION_STATUSES.has(status.trim().toLowerCase());
   }
 
-  function hasRunningOperation(operations: ConversationOperation[]) {
-    return operations.some((operation) => isRunningOperationStatus(operation.status));
-  }
-
   function operationLabel(operation: ConversationOperation) {
     if (operation.kind !== "tool") {
       return operation.label;
@@ -1237,6 +1313,63 @@ export function ConversationView({
       return lang === "zh" ? "已完成" : "Done";
     }
     return lang === "zh" ? "等待请求" : "Pending request";
+  }
+
+  function processSummaryTitle(tone: string) {
+    if (tone === "running") {
+      return lang === "zh" ? "过程执行中" : "Process running";
+    }
+    if (tone === "failed") {
+      return lang === "zh" ? "过程失败" : "Process failed";
+    }
+    if (tone === "done") {
+      return lang === "zh" ? "过程已收起" : "Process collapsed";
+    }
+    return lang === "zh" ? "过程待处理" : "Process pending";
+  }
+
+  function processSummaryMeta(operations: ConversationOperation[]) {
+    const thoughtCount = operations.filter((operation) => operation.kind === "thought").length;
+    const toolCount = operations.filter((operation) => operation.kind === "tool").length;
+    const mentalCount = operations.filter((operation) => operation.kind === "mental").length;
+    const visibleStatusCount = operations.filter(
+      (operation) => operation.kind === "status" && shouldShowTimelineOperation(operation),
+    ).length;
+    const parts = [
+      thoughtCount > 0 ? `${t("thoughtProcess")} ${thoughtCount}` : "",
+      toolCount > 0 ? `${t("toolProcess")} ${toolCount}` : "",
+      mentalCount > 0 ? `${t("mentalProcess")} ${mentalCount}` : "",
+      visibleStatusCount > 0 ? `${lang === "zh" ? "状态" : "Status"} ${visibleStatusCount}` : "",
+    ].filter(Boolean);
+    return parts.length > 0 ? parts.join(" · ") : compactRequestStateLabel(operationCollectionTone(operations));
+  }
+
+  function processSummaryPreview(operations: ConversationOperation[]) {
+    const failed = operations.find((operation) => operationStatusTone(operation) === "failed");
+    const readable = operations.find((operation) => shouldShowTimelineOperation(operation) && operation.summary.trim());
+    const fallback = operations.find((operation) => operation.summary.trim() || operation.error?.trim());
+    return compactPreview(
+      failed?.error?.trim()
+        || failed?.summary.trim()
+        || readable?.summary.trim()
+        || fallback?.error?.trim()
+        || fallback?.summary.trim()
+        || "",
+      120,
+    );
+  }
+
+  function processSummaryIcon(tone: string) {
+    if (tone === "running") {
+      return <LoaderCircle className={styles.statusSpinner} size={14} />;
+    }
+    if (tone === "failed") {
+      return <TerminalSquare size={14} />;
+    }
+    if (tone === "done") {
+      return <CheckCircle2 size={14} />;
+    }
+    return <CircleDot size={14} />;
   }
 
   function operationMatchesAny(operation: ConversationOperation, markers: string[]) {
@@ -2181,6 +2314,41 @@ export function ConversationView({
     );
   }
 
+  function renderAnswerOnlyProcessGroup(
+    messageId: string,
+    operations: ConversationOperation[],
+    defaultExpanded: boolean,
+    renderDetails: () => ReactNode,
+  ) {
+    if (operations.length === 0) {
+      return null;
+    }
+    const tone = operationCollectionTone(operations);
+    const expanded = getExpansionState(messageId, "process", defaultExpanded);
+    const preview = tone === "failed" ? processSummaryPreview(operations) : "";
+    const title = processSummaryTitle(tone);
+    return (
+      <section className={`${styles.answerOnlyProcessGroup} ${styles[`answerOnlyProcessGroup_${tone}`]}`}>
+        <button
+          type="button"
+          className={styles.answerOnlyProcessToggle}
+          aria-expanded={expanded}
+          onClick={() => toggleSection(messageId, "process", defaultExpanded)}
+          title={expanded ? t("executionDetailsVisible") : t("executionDetailsHidden")}
+        >
+          <span className={styles.answerOnlyProcessIcon} aria-hidden="true">
+            {processSummaryIcon(tone)}
+          </span>
+          <span className={styles.answerOnlyProcessTitle}>{title}</span>
+          <span className={styles.answerOnlyProcessMeta}>{processSummaryMeta(operations)}</span>
+          {!expanded && preview ? <span className={styles.answerOnlyProcessPreview}>{preview}</span> : null}
+          {expanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+        </button>
+        {expanded ? <div className={styles.answerOnlyProcessDetails}>{renderDetails()}</div> : null}
+      </section>
+    );
+  }
+
   function shouldExpandToolGroupByDefault(message: ConversationMessage, operations: ConversationOperation[]) {
     return Boolean(message.streaming)
       || operations.some((operation) => operation.kind === "tool" && (operation.rawLabel ?? operation.label) === COMPUTER_USE_TOOL_NAME);
@@ -2251,7 +2419,7 @@ export function ConversationView({
     );
   }
 
-  function renderThoughtPanel(message: ConversationMessage) {
+  function renderThoughtPanel(message: ConversationMessage, defaultExpandedOverride?: boolean) {
     if (!hasThoughtBlock(message)) {
       return null;
     }
@@ -2262,7 +2430,7 @@ export function ConversationView({
       "thought",
       t("thoughtProcess"),
       compactPreview(thought),
-      Boolean(message.streaming),
+      defaultExpandedOverride ?? Boolean(message.streaming),
       Boolean(message.streaming) && !hasLaterActiveSection,
       <div className={`${styles.auxiliaryPanel} ${styles.auxiliaryPanel_thought}`}>
         <p className={styles.thoughtText}>{thought}</p>
@@ -2270,7 +2438,7 @@ export function ConversationView({
     );
   }
 
-  function renderMentalPanel(message: ConversationMessage) {
+  function renderMentalPanel(message: ConversationMessage, defaultExpandedOverride?: boolean) {
     if (!showMentalSnapshots || !hasMentalBlock(message)) {
       return null;
     }
@@ -2295,7 +2463,7 @@ export function ConversationView({
       "mental",
       t("mentalProcess"),
       mentalSnapshotPreview(snapshot),
-      true,
+      defaultExpandedOverride ?? true,
       Boolean(message.streaming) && !hasToolBlock(message) && !hasResponseBlock(message),
       <div className={`${styles.auxiliaryPanel} ${styles.auxiliaryPanel_mental}`}>
         {metaRows.length ? (
@@ -2400,11 +2568,7 @@ export function ConversationView({
     if (!content) {
       return null;
     }
-    return (
-      <div className={`${styles.markdownBody} ${styles.streamingResponseText}`}>
-        <p className={styles.streamingResponseParagraph}>{content}</p>
-      </div>
-    );
+    return <StreamingResponseContent content={content} />;
   }
 
   function renderMarkdownBlock(block: MarkdownBlock, index: number, duplicateImageUrls?: Set<string>) {
@@ -2908,7 +3072,7 @@ export function ConversationView({
               );
             }
             const operationGroups = buildConversationOperationGroups(message, operationLabels);
-            const hasRunningTools = hasRunningOperation(operationGroups.tools);
+            const hasActiveProcess = operationGroups.timeline.some((operation) => isRunningOperationStatus(operation.status));
             const hasFeedbackTimeline = (message.feedbackEvents?.length ?? 0) > 0;
             const showResponseBlock = shouldShowResponseBlock(message, hasFeedbackTimeline);
             const turnErrorMessage = isTurnErrorMessage(message);
@@ -2916,7 +3080,7 @@ export function ConversationView({
             const groupTranscriptMessage = isGroupRoomTranscriptMessage(message);
             const conversationTimelineItems = buildConversationTimelineItems(message, operationGroups.timeline, {
               lang,
-              includeAssistantText: showResponseBlock,
+              includeAssistantText: showResponseBlock && !answerOnlyProcessMode,
             });
             const hasConversationTimeline =
               message.role === "assistant"
@@ -2926,7 +3090,8 @@ export function ConversationView({
               && !groupTranscriptMessage
               && conversationTimelineItems.length > 0;
             const userAuthoredMessage = message.role === "user" && !agentInboxMessage;
-            const isResponseStreaming = Boolean(message.streaming) && showResponseBlock && !hasRunningTools;
+            const isResponseStreaming = Boolean(message.streaming) && showResponseBlock;
+            const showResponseSpinner = isResponseStreaming && !hasActiveProcess;
             const defaultResponseExpanded = Boolean(message.streaming) || defaultExpandedResponseIds.has(message.id);
             const responseExpanded = getExpansionState(message.id, "response", defaultResponseExpanded);
             const responseSegments = showResponseBlock && responseExpanded && !isResponseStreaming
@@ -2955,6 +3120,32 @@ export function ConversationView({
                   ? agentInboxSourceLabel(message)
                   : userLabel;
             const editDisabled = Boolean(editUserMessageDisabled);
+            const processDefaultExpanded = operationCollectionTone(operationGroups.timeline) === "failed";
+            const renderLegacyProcessDetails = (defaultExpandedOverride?: boolean) => (
+              <>
+                {renderThoughtPanel(message, defaultExpandedOverride)}
+                {renderMentalPanel(message, defaultExpandedOverride)}
+                {renderOperationGroup(
+                  message.id,
+                  "tools",
+                  operationGroups.tools,
+                  defaultExpandedOverride ?? shouldExpandToolGroupByDefault(message, operationGroups.tools),
+                )}
+              </>
+            );
+            const renderProcessDetails = () => {
+              if (hasConversationTimeline) {
+                return renderConversationTimeline(message, conversationTimelineItems);
+              }
+              if (hasFeedbackTimeline) {
+                return renderFeedbackTimelineGroup(
+                  message.id,
+                  operationGroups.timeline,
+                  true,
+                );
+              }
+              return renderLegacyProcessDetails(true);
+            };
             return (
               <article
                 key={message.id}
@@ -3045,7 +3236,9 @@ export function ConversationView({
                   ) : null}
                   {renderUserAttachments(message)}
 
-                  {hasConversationTimeline ? (
+                  {answerOnlyProcessMode ? (
+                    renderAnswerOnlyProcessGroup(message.id, operationGroups.timeline, processDefaultExpanded, renderProcessDetails)
+                  ) : hasConversationTimeline ? (
                     renderConversationTimeline(message, conversationTimelineItems)
                   ) : hasFeedbackTimeline ? (
                     renderFeedbackTimelineGroup(
@@ -3053,13 +3246,7 @@ export function ConversationView({
                       operationGroups.timeline,
                       false,
                     )
-                  ) : (
-                    <>
-                      {renderThoughtPanel(message)}
-                      {renderMentalPanel(message)}
-                      {renderOperationGroup(message.id, "tools", operationGroups.tools, shouldExpandToolGroupByDefault(message, operationGroups.tools))}
-                    </>
-                  )}
+                  ) : renderLegacyProcessDetails()}
                   {turnErrorMessage ? (
                     <div className={styles.turnErrorNotice} role="status" aria-live="polite">
                       <div className={styles.turnErrorNoticeIcon} aria-hidden="true">
@@ -3086,7 +3273,7 @@ export function ConversationView({
                   ) : null}
                   {renderImageArtifact(message)}
 
-                  {showResponseBlock && !hasConversationTimeline ? (
+                  {showResponseBlock && (!hasConversationTimeline || answerOnlyProcessMode) ? (
                     <section className={styles.responseSection}>
                       <button
                         type="button"
@@ -3097,7 +3284,7 @@ export function ConversationView({
                       >
                         {responseExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
                         <span>{t("responseLabel")}</span>
-                        {isResponseStreaming ? <LoaderCircle className={styles.statusSpinner} size={14} /> : null}
+                        {showResponseSpinner ? <LoaderCircle className={styles.statusSpinner} size={14} /> : null}
                       </button>
                       {responseExpanded ? (
                         <div className={styles.responseBody}>
