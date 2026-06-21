@@ -12,10 +12,29 @@ reserved for the live tool-call protocol inside the current ReAct turn.
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from typing import Any, Iterable
 
 
 MODEL_MESSAGE_SCHEMA_VERSION = 1
+
+
+@dataclass(frozen=True)
+class ProviderMessageChain:
+    """Canonical provider-facing message chain for one live turn."""
+
+    messages: tuple[Any, ...]
+    repaired: bool = False
+
+    @classmethod
+    def from_messages(cls, messages: Iterable[Any]) -> "ProviderMessageChain":
+        before = _provider_chain_fingerprint(messages)
+        normalized = _normalize_provider_turn_messages_impl(messages)
+        after = _provider_chain_fingerprint(normalized)
+        return cls(messages=tuple(normalized), repaired=before != after)
+
+    def to_provider_payload(self) -> list[Any]:
+        return [dict(item) if isinstance(item, dict) else item for item in self.messages]
 
 
 def normalize_model_messages(messages: Iterable[Any]) -> list[Any]:
@@ -69,6 +88,12 @@ def normalize_model_history_messages(messages: Iterable[Any]) -> list[Any]:
 
 def normalize_provider_turn_messages(messages: Iterable[Any]) -> list[Any]:
     """Return provider-facing messages with illegal historical tool chains repaired."""
+
+    return ProviderMessageChain.from_messages(messages).to_provider_payload()
+
+
+def _normalize_provider_turn_messages_impl(messages: Iterable[Any]) -> list[Any]:
+    """Internal implementation owned by ProviderMessageChain."""
 
     normalized: list[Any] = []
     for index, raw in enumerate(list(messages or [])):
@@ -626,8 +651,33 @@ def _provider_tool_call_name(call: Any) -> str:
     return str(function.get("name") or call.get("name") or "").strip() or "unknown_tool"
 
 
+def _provider_chain_fingerprint(messages: Iterable[Any]) -> tuple[Any, ...]:
+    parts: list[Any] = []
+    for raw in list(messages or []):
+        if isinstance(raw, dict):
+            parts.append(
+                (
+                    str(raw.get("role") or ""),
+                    _visible_text(raw.get("content")),
+                    str(raw.get("tool_call_id") or raw.get("toolCallId") or ""),
+                    tuple(
+                        (
+                            str(call.get("id") or call.get("tool_call_id") or call.get("toolCallId") or ""),
+                            _provider_tool_call_name(call),
+                        )
+                        for call in list(raw.get("tool_calls") or raw.get("toolCalls") or [])
+                        if isinstance(call, dict)
+                    ),
+                )
+            )
+            continue
+        parts.append((type(raw).__name__, str(raw)))
+    return tuple(parts)
+
+
 __all__ = [
     "MODEL_MESSAGE_SCHEMA_VERSION",
+    "ProviderMessageChain",
     "normalize_model_history_messages",
     "normalize_model_messages",
     "normalize_provider_turn_messages",

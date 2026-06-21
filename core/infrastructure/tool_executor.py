@@ -460,6 +460,23 @@ class ToolExecutor:
         "record_evolution_tool",
         "compress_context_tool",
     }
+    _RUNTIME_GOAL_WRITE_BLOCKED_TOOLS = set(_READ_ONLY_BLOCKED_TOOLS)
+    _RUNTIME_GOAL_GIT_BLOCKED_TOOLS = {
+        "cli_tool",
+        "commit_compressed_memory_tool",
+        "trigger_self_restart_tool",
+    }
+    _RUNTIME_GOAL_SUBAGENT_BLOCKED_TOOLS = {
+        "spawn_agent_tool",
+        "cli_agent_run_tool",
+        "agent_message_tool",
+    }
+    _RUNTIME_GOAL_EVOLUTION_BLOCKED_TOOLS = {
+        "open_evolution_transaction_tool",
+        "close_evolution_transaction_tool",
+        "record_evolution_tool",
+        "update_self_model_tool",
+    }
 
     def _register_default_tools(self):
         """注册默认工具映射：只注册 canonical agent 工具名和内部委派入口。"""
@@ -1064,9 +1081,58 @@ class ToolExecutor:
         delegation_block = self._check_delegation_policy_block(tool_name, tool_args)
         if delegation_block:
             return delegation_block
+        capability_block = self._check_runtime_goal_capability_block(session, tool_name, tool_args)
+        if capability_block:
+            return capability_block
         evolution_block = self._check_evolution_mutation_guard(session, tool_name, tool_args)
         if evolution_block:
             return evolution_block
+        return None
+
+    @classmethod
+    def _check_runtime_goal_capability_block(cls, session, tool_name: str, tool_args: dict) -> Optional[str]:
+        """Enforce the current RuntimeGoalPacket as the tool side-effect authority."""
+
+        try:
+            packet = session.get_runtime_goal_packet()
+        except Exception:
+            packet = None
+        if packet is None:
+            return None
+        normalized_tool = str(tool_name or "").strip()
+        profile = str(getattr(packet, "capability_profile", "") or getattr(packet, "objective_type", "") or "").strip()
+        if (
+            not bool(getattr(packet, "allow_subagents", True))
+            and normalized_tool in cls._RUNTIME_GOAL_SUBAGENT_BLOCKED_TOOLS
+        ):
+            return (
+                "[运行目标包] 当前能力边界禁止子 agent 或跨会话派发。"
+                f"能力 Profile: {profile or 'unknown'}；工具 `{normalized_tool}` 已被拦截。"
+            )
+        if (
+            not bool(getattr(packet, "allow_file_writes", True))
+            and normalized_tool in cls._RUNTIME_GOAL_WRITE_BLOCKED_TOOLS
+        ):
+            return (
+                "[运行目标包] 当前能力边界为只读，禁止文件、命令、记忆或状态写入。"
+                f"能力 Profile: {profile or 'unknown'}；工具 `{normalized_tool}` 已被拦截。"
+            )
+        if (
+            not bool(getattr(packet, "allow_git_commit", True))
+            and normalized_tool in cls._RUNTIME_GOAL_GIT_BLOCKED_TOOLS
+        ):
+            return (
+                "[运行目标包] 当前能力边界禁止 Git 提交、重启或可能触发 Git 写入的命令。"
+                f"能力 Profile: {profile or 'unknown'}；工具 `{normalized_tool}` 已被拦截。"
+            )
+        if (
+            not bool(getattr(packet, "allow_evolution_transaction", True))
+            and normalized_tool in cls._RUNTIME_GOAL_EVOLUTION_BLOCKED_TOOLS
+        ):
+            return (
+                "[运行目标包] 当前能力边界禁止进化事务写入。"
+                f"能力 Profile: {profile or 'unknown'}；工具 `{normalized_tool}` 已被拦截。"
+            )
         return None
 
     @staticmethod
