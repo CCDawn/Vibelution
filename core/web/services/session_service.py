@@ -3327,6 +3327,22 @@ def create_child_session(
         payload["updated_at"] = now
         payload["conversations"] = conversations
         save_chat_state(PROJECT_ROOT, payload)
+    _append_session_conversation_event(
+        root_id,
+        f"child-session-{child_id}",
+        EVENT_ASSISTANT_MESSAGE,
+        status="completed",
+        payload={
+            "content": _child_session_created_card(child_id=child_id, title=title, auto_start=auto_start),
+            "metadata": {
+                "kind": "child_session_card",
+                "childSessionId": child_id,
+                "childStatus": "queued" if auto_start else "idle",
+                "taskTitle": title,
+            },
+        },
+        source="create_child_session",
+    )
     _invalidate_session_list_cache()
     _record_child_session_event(
         "created",
@@ -4485,6 +4501,10 @@ def submit_session_message(
                     if str(item.get("artifactId") or "").strip()
                 ],
             }
+        persisted_message_metadata = {
+            **persisted_message_metadata,
+            **(user_entry.get("metadata") if isinstance(user_entry.get("metadata"), dict) else {}),
+        }
         conversation["messages"] = previous_messages + [user_entry]
         conversation.pop("last_turn_error", None)
         conversation.pop("lastTurnError", None)
@@ -5073,6 +5093,18 @@ def edit_and_resubmit_session_message(
             started_at=user_entry["timestamp"],
             updated_at=user_entry["timestamp"],
         )
+    _append_session_conversation_event(
+        conversation_id,
+        turn_control.turn_id,
+        EVENT_USER_MESSAGE,
+        status="recorded",
+        payload={
+            "content": message,
+            "source": "edited_user_message",
+            "metadata": user_entry.get("metadata") if isinstance(user_entry.get("metadata"), dict) else user_metadata,
+        },
+        source="edit_and_resubmit_session_message",
+    )
 
     _set_session_waiting_live_output(conversation_id, turn_id=turn_control.turn_id)
     _record_session_message_edit_resubmit_event(
@@ -6010,6 +6042,23 @@ def _append_session_runtime_notice(items: Any, notice: dict[str, Any]) -> list[d
 def _not_called_llm_usage(*, recorded_at: str = "") -> dict[str, Any]:
     return {
         "source": "not_called",
+        "inputTokens": 0,
+        "outputTokens": 0,
+        "totalTokens": 0,
+        "cachedInputTokens": 0,
+        "cacheReadInputTokens": 0,
+        "cacheCreationInputTokens": 0,
+        "uncachedInputTokens": 0,
+        "cacheHitRate": 0.0,
+        "provider": "",
+        "model": "",
+        "recordedAt": str(recorded_at or "").strip() or _now_timestamp(),
+    }
+
+
+def _missing_llm_usage(*, recorded_at: str = "") -> dict[str, Any]:
+    return {
+        "source": "missing",
         "inputTokens": 0,
         "outputTokens": 0,
         "totalTokens": 0,
@@ -7003,7 +7052,16 @@ def _resolve_session_references(
                 )
             )
         title = trim_lines(reference.get("title") or target.get("title") or target_id, max_lines=1)
-        summary = trim_lines(reference.get("summary") or _latest_message_summary(target.get("messages") or []), max_lines=2)
+        summary = trim_lines(
+            reference.get("summary")
+            or _latest_message_summary(
+                _normalize_messages(
+                    target_id,
+                    _ledger_visible_messages_for_session(target_id),
+                )
+            ),
+            max_lines=2,
+        )
         resolved.append(
             {
                 **reference,
@@ -7309,7 +7367,7 @@ def _build_session_detail_from_summary(
     active_preview_path = (
         str(active_task.get("active_preview_path") or "").strip() if active_task else ""
     ) or "agent"
-    detail_messages = _messages_with_live_output(conversation["id"], conversation.get("messages") or [])
+    detail_messages = _messages_with_live_output(conversation["id"])
     context_usage = _build_session_context_usage(conversation, detail_messages)
     llm_usage = _session_last_llm_usage(conversation, detail_messages)
     cache_usage = _build_session_cache_usage(llm_usage, detail_messages)
@@ -7445,12 +7503,6 @@ def _build_session_cache_usage(
 
 
 def _session_last_llm_usage(conversation: dict[str, Any], messages: list[dict[str, Any]]) -> dict[str, Any] | None:
-    normalized = _normalize_turn_llm_usage(
-        conversation.get("last_llm_usage")
-        or conversation.get("lastLlmUsage")
-    )
-    if normalized is not None:
-        return normalized
     for message in reversed(list(messages or [])):
         if str((message or {}).get("role") or "").strip().lower() != "assistant":
             continue
@@ -7458,6 +7510,12 @@ def _session_last_llm_usage(conversation: dict[str, Any], messages: list[dict[st
         normalized = _normalize_turn_llm_usage(metadata.get("llmUsage") or metadata.get("llm_usage"))
         if normalized is not None:
             return normalized
+    normalized = _normalize_turn_llm_usage(
+        conversation.get("last_llm_usage")
+        or conversation.get("lastLlmUsage")
+    )
+    if normalized is not None and str(normalized.get("source") or "").strip() in {"missing", "not_called"}:
+        return normalized
     return None
 
 
@@ -12098,6 +12156,9 @@ def _persist_session_turn_result(
             )
         assistant_metadata = assistant_entry.get("metadata") if isinstance(assistant_entry.get("metadata"), dict) else {}
         assistant_entry["metadata"] = {**assistant_metadata, "turnId": turn_id}
+        turn_llm_usage = llm_usage if llm_usage is not None else _missing_llm_usage(
+            recorded_at=str(assistant_entry.get("timestamp") or "").strip(),
+        )
         if isinstance(result, dict):
             assistant_entry["toolCalls"] = _normalize_message_tool_calls(_extract_chat_tool_calls(result))
             feedback_events = _normalize_message_feedback_events(feedback_events_for_result)
@@ -12132,17 +12193,7 @@ def _persist_session_turn_result(
         if llm_usage is not None:
             conversation["last_llm_usage"] = llm_usage
         else:
-            conversation["last_llm_usage"] = {
-                "source": "missing",
-                "inputTokens": 0,
-                "outputTokens": 0,
-                "totalTokens": 0,
-                "cachedInputTokens": 0,
-                "cacheHitRate": 0.0,
-                "provider": "",
-                "model": "",
-                "recordedAt": _now_timestamp(),
-            }
+            conversation["last_llm_usage"] = dict(turn_llm_usage)
         if context_composition is not None:
             conversation["last_context_composition"] = context_composition
         conversation["last_cache_composition"] = cache_composition
@@ -12282,10 +12333,10 @@ def _persist_session_turn_result(
             payload={
                 "content": assistant_text,
                 "thought": str(assistant_entry.get("thought") or ""),
-            "toolCalls": _normalize_message_tool_calls(assistant_entry.get("tool_calls") or assistant_entry.get("toolCalls") or []),
-            "feedbackEvents": _normalize_message_feedback_events(assistant_entry.get("feedback_events") or assistant_entry.get("feedbackEvents") or []),
-            "llmUsage": llm_usage,
-            "mentalSnapshot": _normalize_mental_snapshot(assistant_entry.get("mental_snapshot")),
+                "toolCalls": _normalize_message_tool_calls(assistant_entry.get("tool_calls") or assistant_entry.get("toolCalls") or []),
+                "feedbackEvents": _normalize_message_feedback_events(assistant_entry.get("feedback_events") or assistant_entry.get("feedbackEvents") or []),
+                "llmUsage": turn_llm_usage,
+                "mentalSnapshot": _normalize_mental_snapshot(assistant_entry.get("mental_snapshot")),
             },
             source="persist_session_turn_result",
         )
@@ -16174,7 +16225,7 @@ def _ledger_visible_messages_for_session(session_id: str) -> list[dict[str, Any]
     return conversation_visible_messages_from_events(events)
 
 
-def _messages_with_live_output(session_id: str, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _messages_with_live_output(session_id: str) -> list[dict[str, Any]]:
     detail_messages = _merge_cli_agent_lifecycle_sidecar_messages(
         session_id,
         _normalize_messages(session_id, _ledger_visible_messages_for_session(session_id)),
