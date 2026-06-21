@@ -18,6 +18,9 @@
   display: grid;
   grid-template-rows: auto;
   align-content: start;
+  box-sizing: border-box;
+  inline-size: 100%;
+  max-inline-size: 100vw;
   height: 100%;
   min-height: 100%;
   padding-bottom: max(12px, env(safe-area-inset-bottom));
@@ -86,6 +89,8 @@
   justify-content: flex-end;
   flex-wrap: wrap;
   gap: 6px;
+  flex: 0 0 auto;
+  min-width: 0;
 }
 
 .primaryButton,
@@ -94,14 +99,19 @@
   align-items: center;
   justify-content: center;
   gap: 6px;
+  flex: 0 0 auto;
+  width: fit-content;
+  max-width: 100%;
   min-height: 28px;
-  padding: 4px 8px;
+  padding: 0 8px;
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-control);
   color: var(--fg-secondary);
   font-size: 0.8rem;
   line-height: 1;
   text-decoration: none;
+  white-space: nowrap;
+  box-sizing: border-box;
 }
 
 .primaryButton {
