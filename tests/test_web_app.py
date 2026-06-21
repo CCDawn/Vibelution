@@ -6753,6 +6753,48 @@ def test_capture_session_ui_stream_splits_cumulative_thought_after_tool_boundary
     assert live_state.thought == "先读日志。再检查前端状态。"
 
 
+def test_capture_session_ui_stream_dedupes_repeated_thought_after_tool_boundary(tmp_path, monkeypatch):
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(session_service, "_publish_session_detail_snapshot", lambda _session_id: None)
+    stub_ui = SimpleNamespace(
+        stream_thought=lambda *args, **kwargs: None,
+        clear_thought_stream=lambda *args, **kwargs: None,
+        stream_response=lambda *args, **kwargs: None,
+        clear_response_stream=lambda *args, **kwargs: None,
+        set_pet_mental_state=lambda *args, **kwargs: None,
+    )
+    monkeypatch.setattr("core.ui.get_ui", lambda: stub_ui)
+
+    capture = session_service.SessionTurnCapture(session_id="session-repeated-thought", turn_id="turn-thinking")
+    with session_service._capture_session_ui_stream("session-repeated-thought", capture):
+        stub_ui.stream_thought("我已经有了 sections.py 的完整内容。现在分析三个问题。", done=False)
+        session_service.get_event_bus().publish(
+            session_service.EventNames.TOOL_START,
+            {"name": "read_file", "args": {"path": "core/prompt_manager/sections.py"}},
+        )
+        session_service.get_event_bus().publish(
+            session_service.EventNames.TOOL_SUCCESS,
+            {"name": "read_file", "result": "section content", "durationMs": 12},
+        )
+        stub_ui.stream_thought("我已经有了 sections.py 的完整内容。现在分析三个问题。", done=False)
+        session_service.get_event_bus().publish(
+            session_service.EventNames.TOOL_START,
+            {"name": "grep", "args": {"pattern": "cache_prefix=True"}},
+        )
+
+    live_state = session_service._snapshot_session_live_output("session-repeated-thought")
+    assert live_state is not None
+    thought_events = [item for item in live_state.feedback_events if item["kind"] == "thought"]
+    tool_events = [item for item in live_state.feedback_events if item["kind"] == "tool"]
+    assert [item["resultPreview"] for item in thought_events] == [
+        "我已经有了 sections.py 的完整内容。现在分析三个问题。"
+    ]
+    assert [item["name"] for item in tool_events] == ["read_file", "grep"]
+    assert tool_events[0]["relatedThoughtSequence"] == thought_events[0]["sequence"]
+    assert tool_events[1]["relatedThoughtSequence"] == thought_events[0]["sequence"]
+    assert live_state.thought == "我已经有了 sections.py 的完整内容。现在分析三个问题。"
+
+
 def test_capture_session_ui_stream_preserves_ordered_feedback_events(tmp_path, monkeypatch):
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(session_service, "_publish_session_detail_snapshot", lambda _session_id: None)
