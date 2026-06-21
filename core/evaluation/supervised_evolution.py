@@ -23,7 +23,7 @@ from core.evaluation.supervised_intake import (
     STATIC_CASE_TYPE,
 )
 from core.gym import build_active_advisory_snapshot, summarize_active_advisory_baselines
-from scripts.evolution_harness import HarnessResult, run_harness
+from scripts.evolution_harness import HarnessResult
 
 
 DEFAULT_BUNDLE_NAME = "supervised_evolution_dry_run_v1"
@@ -54,6 +54,26 @@ class SupervisedEvolutionCancelled(RuntimeError):
         super().__init__(reason)
         self.reason = reason
         self.session_id = session_id
+
+
+class SupervisedEvolutionHarnessUnavailable(RuntimeError):
+    """Raised when the default supervised dialogue harness cannot be loaded."""
+
+
+def _default_supervised_harness_runner() -> Callable[..., HarnessResult]:
+    """Resolve the default runner through the same hidden conversation chain used by Web."""
+
+    try:
+        from core.web.services.supervised_conversation_harness_adapter import (
+            run_supervised_conversation_harness,
+        )
+    except Exception as exc:  # pragma: no cover - defensive path depends on optional web imports.
+        raise SupervisedEvolutionHarnessUnavailable(
+            "默认监督进化执行器需要隐藏对话链路，但当前无法加载 "
+            "core.web.services.supervised_conversation_harness_adapter；"
+            "请修复对话链路初始化，或在调用 run_supervised_evolution_session 时显式传入 harness_runner。"
+        ) from exc
+    return run_supervised_conversation_harness
 
 
 def normalize_supervised_mental_model_mode(value: Any) -> str:
@@ -2179,7 +2199,7 @@ def run_supervised_evolution_session(
     dirs = _ensure_supervised_dirs(root)
     session_id = f"supervised_{_now_stamp()}"
     started_at = _now_iso()
-    runner = harness_runner or run_harness
+    runner = harness_runner or _default_supervised_harness_runner()
     advisory_context = build_active_advisory_snapshot(project_root=root)
     advisory_lines = summarize_active_advisory_baselines(project_root=root, limit=3)
     normalized_agent_bindings = _normalize_supervised_agent_bindings(agent_bindings)
@@ -2808,6 +2828,7 @@ __all__ = [
     "CaseDecisionSummary",
     "SupervisedEvolutionCancelled",
     "SupervisedEvolutionDecision",
+    "SupervisedEvolutionHarnessUnavailable",
     "SupervisedEvolutionRun",
     "format_decision_record_summary",
     "load_supervised_bundle",
