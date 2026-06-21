@@ -50,7 +50,7 @@ def test_agent_tool_governance_low_risk_change_auto_applies_for_governance_agent
     request = agent_tool_governance_service.submit_tool_governance_request(
         target["agentId"],
         proposed_by_agent_id=advisor["agentId"],
-        grant_tools=["read_file_tool", "grep_search_tool"],
+        grant_tools=["grep_search_tool", "glob_tool"],
         reason="资料 Agent 需要只读检索项目材料。",
         apply_mode="auto",
     )
@@ -59,8 +59,8 @@ def test_agent_tool_governance_low_risk_change_auto_applies_for_governance_agent
     assert request["status"] == "applied"
     assert request["requiresApproval"] is False
     assert request["riskLevel"] == "low"
-    assert updated["toolPolicy"]["allowedTools"] == ["read_file_tool", "grep_search_tool"]
-    assert request["after"]["allowedTools"] == ["read_file_tool", "grep_search_tool"]
+    assert updated["toolPolicy"]["allowedTools"] == ["grep_search_tool", "glob_tool"]
+    assert request["after"]["allowedTools"] == ["grep_search_tool", "glob_tool"]
     assert any(
         event[0][:3] == ("agent_tool_governance", "tool_policy", "agent_tool_governance.request_applied")
         and event[1]["fields"]["targetAgentId"] == target["agentId"]
@@ -174,8 +174,8 @@ def test_session_detail_surfaces_pending_tool_governance_request(tmp_path, monke
     request = agent_tool_governance_service.submit_tool_governance_request(
         agent_id,
         proposed_by_agent_id=agent_id,
-        grant_tools=["read_file_tool"],
-        reason="需要当前会话临时读取文件。",
+        grant_tools=["cli_tool"],
+        reason="需要当前会话临时运行命令读取证据。",
         apply_mode="auto",
         grant_scope="session",
         source_session_id=session["id"],
@@ -186,7 +186,7 @@ def test_session_detail_surfaces_pending_tool_governance_request(tmp_path, monke
 
     assert detail["pendingToolGovernanceRequests"][0]["requestId"] == request["requestId"]
     assert detail["pendingToolGovernanceRequests"][0]["grantScope"] == "session"
-    assert detail["pendingToolGovernanceRequests"][0]["policyDelta"]["grantTools"] == ["read_file_tool"]
+    assert detail["pendingToolGovernanceRequests"][0]["policyDelta"]["grantTools"] == ["cli_tool"]
 
 
 def test_agent_tool_governance_uses_shared_tool_catalog_risk_metadata(tmp_path, monkeypatch):

@@ -17,6 +17,7 @@ from .agent_directory_service import agent_persona_profile_has_content
 from .agent_directory_service import agent_task_profile_has_content
 from .agent_directory_service import AGENT_LLM_BINDING_SLOTS
 from .agent_directory_service import SESSION_AGENT_VISIBILITY_PENDING
+from .agent_directory_service import _session_workspace_has_activity
 from .agent_directory_service import agent_dialogue_model_id
 from .agent_directory_service import build_agent_policy_options
 from .agent_directory_service import list_agents
@@ -991,6 +992,12 @@ def _derive_agent_boundary(agent: dict[str, Any], *, references: list[dict[str, 
     primary_mode = str(agent.get("primaryMode") or "general").strip() or "general"
     role_key = str(agent.get("roleKey") or "").strip()
     created_by = str(agent.get("createdBy") or metadata.get("createdBy") or "").strip()
+    direct_session_id = str(agent.get("directSessionId") or "").strip()
+    direct_session_visibility = str(metadata.get("directSessionVisibility") or "").strip()
+    direct_session_has_activity = _session_workspace_has_activity(
+        direct_session_id,
+        session_workspace_path=str(metadata.get("legacySessionWorkspacePath") or "").strip(),
+    )
 
     if status == "archived":
         return {
@@ -1072,7 +1079,8 @@ def _derive_agent_boundary(agent: dict[str, Any], *, references: list[dict[str, 
         chat_available
         and not has_team_ref
         and activity_gated_session_source
-        and session_agent_visibility(agent) == SESSION_AGENT_VISIBILITY_PENDING
+        and direct_session_visibility == SESSION_AGENT_VISIBILITY_PENDING
+        and not direct_session_has_activity
     ):
         return {
             "type": "service_role",
