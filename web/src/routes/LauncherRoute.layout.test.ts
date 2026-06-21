@@ -12,6 +12,7 @@ import launcherShellSource from "../app/LauncherShell.tsx?raw";
 import launcherShellStyles from "../app/LauncherShell.module.css";
 
 const routeStylesSource = readFileSync(new URL("./LauncherRoute.module.css", import.meta.url), "utf8");
+const launcherShellStylesSource = readFileSync(new URL("../app/LauncherShell.module.css", import.meta.url), "utf8");
 
 describe("LauncherRoute layout contract", () => {
   it("uses shell language state without loading the full app dictionary", () => {
@@ -223,7 +224,10 @@ describe("LauncherRoute layout contract", () => {
     expect(routeStylesSource).toContain("background: color-mix(in srgb, var(--accent-primary) 10%, #ffffff)");
     expect(routeStylesSource).toContain("background: color-mix(in srgb, var(--danger) 7%, #ffffff)");
     expect(routeStylesSource).toContain("min-height: 28px");
-    expect(routeStylesSource).toContain("padding: 4px 8px");
+    expect(routeStylesSource).toContain("padding: 0 8px");
+    expect(routeStylesSource).toContain("width: fit-content");
+    expect(routeStylesSource).toContain("white-space: nowrap");
+    expect(launcherShellStylesSource).toContain("#f6f8fb");
   });
 
   it("keeps the complete launcher surface reachable when the window is short", () => {
