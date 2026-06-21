@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, Archive, ArrowLeft, Bot, CheckCircle2, Eye, Link2, Play, Plus, RefreshCw, Save, Search, Send, Trash2, Unlink, Users } from "lucide-react";
+import { AlertTriangle, Archive, ArrowLeft, Bot, CheckCircle2, Eye, Link2, MessageSquare, Play, Plus, RefreshCw, Save, Search, Send, Trash2, Unlink, Users } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
@@ -91,6 +91,8 @@ const SOURCE_COLLECTION_PROMPT_CACHE_POLICY = {
   requirement: "required_for_llm_execution",
 };
 const SOURCE_COLLECTION_PROMPT_CACHE_MODEL_LABEL = "configured prompt-cache model";
+const SOURCE_COLLECTION_STAGE_CHAT_MODE = "round_robin";
+const SOURCE_COLLECTION_STAGE_CHAT_PURPOSE = "research_coordination";
 
 const researchStageRoundStatusQueryKey = (id: string) => ["teams", id, "workflow-orchestration", "stage-rounds", "status"] as const;
 const experimentPlanningStatusQueryKey = (id: string) => ["teams", id, "workflow-orchestration", "experiments", "status"] as const;
@@ -271,23 +273,8 @@ type DataProcessingRecordListPayload = {
   };
 };
 
-type SourceCollectionTraceMessage = {
-  id: string;
-  agentRole: string;
-  title: string;
-  body: string;
-  status: string;
-  tone: "plan" | "cache" | "search" | "acquire" | "extract" | "quality" | "storage" | "blocked";
-  inputLabel: string;
-  outputLabel: string;
-  nextLabel: string;
-  refs: string[];
-  storageRefs: string[];
-};
-
 type SourceCollectionStepState = "active" | "done" | "failed" | "idle" | "pending";
 type SourceCollectionStageModuleId = "collection" | "screening" | "candidate" | "graph" | "memory";
-type SourceCollectionStageViewMode = "process" | "results";
 
 type SourceCollectionCandidateWithSource = TeamWorkflowCandidate & {
   sourcePath?: string;
@@ -344,6 +331,27 @@ const SOURCE_COLLECTION_STAGE_AGENT_KEYS: Record<SourceCollectionStageModuleId, 
   graph: ["candidate_graph"],
   memory: ["candidate_graph", "knowledge_steward"],
 };
+
+const SOURCE_COLLECTION_STAGE_CHAT_LABELS: Record<SourceCollectionStageModuleId, { zh: string; en: string }> = {
+  collection: { zh: "搜索资料 Agent 会话", en: "Source search Agent room" },
+  candidate: { zh: "资料提炼 Agent 会话", en: "Source extraction Agent room" },
+  screening: { zh: "资料审查 Agent 会话", en: "Source review Agent room" },
+  graph: { zh: "资料关系 Agent 会话", en: "Source graph Agent room" },
+  memory: { zh: "资料入库 Agent 会话", en: "Knowledge ingestion Agent room" },
+};
+
+function sourceCollectionStageRoomKey(teamId: string, stageId: SourceCollectionStageModuleId) {
+  return `challenge-cup-source-collection:${teamId}:${stageId}`;
+}
+
+function sourceCollectionStageChatTitle(teamName: string, stageId: SourceCollectionStageModuleId, lang: "zh" | "en") {
+  const label = SOURCE_COLLECTION_STAGE_CHAT_LABELS[stageId][lang];
+  return `${teamName || (lang === "zh" ? "挑战杯AI科研团队" : "Challenge Cup AI research team")} · ${label}`;
+}
+
+function sourceCollectionStageChatRoute(roomId: string) {
+  return `/chat?room=${encodeURIComponent(roomId)}`;
+}
 
 function parseSourceCollectionStageModuleId(value: string | null): SourceCollectionStageModuleId | null {
   if (value === "search") {
@@ -2216,31 +2224,6 @@ function sourceCollectionPromptCacheModelDisplay(
   return rawLabel;
 }
 
-function sourceCollectionTraceToneLabel(tone: SourceCollectionTraceMessage["tone"], lang: "zh" | "en") {
-  if (lang === "zh") {
-    return {
-      plan: "计划",
-      cache: "缓存",
-      search: "搜索",
-      acquire: "获取",
-      extract: "提炼",
-      quality: "质检",
-      storage: "入候选",
-      blocked: "需处理",
-    }[tone];
-  }
-  return {
-    plan: "Plan",
-    cache: "Cache",
-    search: "Search",
-    acquire: "Acquire",
-    extract: "Extract",
-    quality: "Quality",
-    storage: "Candidate",
-    blocked: "Needs attention",
-  }[tone];
-}
-
 function researchStageStartFeedbackText(payload: ResearchStageRoundStartPayload, lang: "zh" | "en", stageLabel?: string) {
   const label = stageLabel || payload.stageRound.stageType;
   const sourceRef = payload.continuedSourceRunRef;
@@ -3535,7 +3518,6 @@ export function TeamsRoute({
   const [selectedSourceCollectionStageId, setSelectedSourceCollectionStageId] = useState<SourceCollectionStageModuleId>(
     requestedSourceCollectionStage ?? "collection",
   );
-  const [sourceCollectionStageViewMode, setSourceCollectionStageViewMode] = useState<SourceCollectionStageViewMode>("results");
   const [sourceCollectionResultPageByStage, setSourceCollectionResultPageByStage] = useState<Record<SourceCollectionStageModuleId, number>>({
     collection: 1,
     screening: 1,
@@ -3851,6 +3833,25 @@ export function TeamsRoute({
       bindingSource: string;
     }>>;
   }, [activeAgentsById, canvas, selectedTeam?.members]);
+  const sourceCollectionStageChatRoomsQuery = useQuery({
+    queryKey: queryKeys.chatRooms(),
+    queryFn: () => fetchJson<ChatRoomDetail[]>("/api/chat-rooms"),
+    enabled: Boolean(researchWorkflowTeamSelected && effectiveTeamId),
+    staleTime: 30_000,
+  });
+  const sourceCollectionStageRoomById = useMemo(() => {
+    const rooms = new Map<SourceCollectionStageModuleId, ChatRoomDetail>();
+    for (const room of sourceCollectionStageChatRoomsQuery.data ?? []) {
+      const config = isRecord(room.config) ? room.config : {};
+      const roomKey = String(config.sourceCollectionStageRoomKey || "");
+      for (const stageId of Object.keys(SOURCE_COLLECTION_STAGE_AGENT_KEYS) as SourceCollectionStageModuleId[]) {
+        if (roomKey === sourceCollectionStageRoomKey(effectiveTeamId, stageId)) {
+          rooms.set(stageId, room);
+        }
+      }
+    }
+    return rooms;
+  }, [effectiveTeamId, sourceCollectionStageChatRoomsQuery.data]);
   const selectedSourceCollectionRun =
     sourceCollectionRuns.find((run) => run.runId === selectedSourceCollectionRunId) ?? sourceCollectionRuns[0] ?? null;
   const selectedSourceCollectionRunEffectiveId = selectedSourceCollectionRun?.runId ?? "";
@@ -4059,6 +4060,42 @@ export function TeamsRoute({
       setTeamTaskTopic("");
       queryClient.setQueryData(queryKeys.chatRoom(room.roomId), room);
       void chatWorkspaceCache.afterTeamRoomMembershipChanged(variables.teamId, room.roomId);
+    },
+  });
+
+  const createSourceCollectionStageChatRoomMutation = useMutation({
+    mutationFn: (payload: {
+      teamId: string;
+      teamName: string;
+      stageId: SourceCollectionStageModuleId;
+      agentIds: string[];
+    }) =>
+      fetchJson<ChatRoomDetail>("/api/chat-rooms", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: sourceCollectionStageChatTitle(payload.teamName, payload.stageId, lang),
+          agentIds: payload.agentIds,
+          mode: SOURCE_COLLECTION_STAGE_CHAT_MODE,
+          purpose: SOURCE_COLLECTION_STAGE_CHAT_PURPOSE,
+          config: {
+            source: "challenge_cup_source_collection_stage",
+            teamId: payload.teamId,
+            stageId: payload.stageId,
+            sourceCollectionStageRoomKey: sourceCollectionStageRoomKey(payload.teamId, payload.stageId),
+          },
+        }),
+      }),
+    onSuccess: (room, variables) => {
+      queryClient.setQueryData(queryKeys.chatRoom(room.roomId), room);
+      queryClient.setQueryData<ChatRoomDetail[] | undefined>(queryKeys.chatRooms(), (current) => {
+        if (!current) {
+          return [room];
+        }
+        return [room, ...current.filter((item) => item.roomId !== room.roomId)];
+      });
+      void chatWorkspaceCache.afterTeamRoomMembershipChanged(variables.teamId, room.roomId);
+      navigate(sourceCollectionStageChatRoute(room.roomId));
     },
   });
 
@@ -4689,6 +4726,7 @@ export function TeamsRoute({
       if (payload.imported[0]?.workflow) {
         queryClient.setQueryData(queryKeys.teamWorkflow(variables.teamId), payload.imported[0].workflow);
       }
+      void queryClient.invalidateQueries({ queryKey: researchStageRoundStatusQueryKey(variables.teamId) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflowSourceCollectionRuns(variables.teamId, SOURCE_COLLECTION_RUN_PREVIEW_LIMIT) });
       void queryClient.invalidateQueries({ queryKey: sourceCollectionRunRecordsQueryKey(payload.runId) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflowCandidates(variables.teamId, TEAM_WORKFLOW_CANDIDATE_PREVIEW_LIMIT) });
@@ -5205,6 +5243,31 @@ export function TeamsRoute({
     return (researchStageAgentBindingsByStage.knowledge_collection ?? []).filter((binding) => targetKeys.has(binding.key));
   }
 
+  function sourceCollectionStageAgentIds(stageId: SourceCollectionStageModuleId) {
+    return Array.from(new Set(
+      sourceCollectionStageAgentBindings(stageId)
+        .map((binding) => String(binding.agent?.agentId || binding.agentId || "").trim())
+        .filter(Boolean),
+    ));
+  }
+
+  function openSourceCollectionStageChat(stageId: SourceCollectionStageModuleId) {
+    const room = sourceCollectionStageRoomById.get(stageId);
+    if (room?.roomId) {
+      navigate(sourceCollectionStageChatRoute(room.roomId));
+      return;
+    }
+    if (!selectedTeam?.teamId || createSourceCollectionStageChatRoomMutation.isPending) {
+      return;
+    }
+    createSourceCollectionStageChatRoomMutation.mutate({
+      teamId: selectedTeam.teamId,
+      teamName: selectedTeam.name,
+      stageId,
+      agentIds: sourceCollectionStageAgentIds(stageId),
+    });
+  }
+
   function renderSourceCollectionStageAgents(stageId: SourceCollectionStageModuleId) {
     const bindings = sourceCollectionStageAgentBindings(stageId);
     if (!bindings.length) {
@@ -5370,9 +5433,8 @@ export function TeamsRoute({
     );
   }
 
-  function openSourceCollectionStage(stageId: SourceCollectionStageModuleId, mode: SourceCollectionStageViewMode = "results") {
+  function openSourceCollectionStage(stageId: SourceCollectionStageModuleId) {
     selectSourceCollectionStage(stageId);
-    setSourceCollectionStageViewMode(mode);
     setSourceCollectionFocusedPanelId("");
   }
 
@@ -5919,196 +5981,17 @@ export function TeamsRoute({
     );
   }
 
-  function sourceCollectionTraceMessagesForStage(stageId: SourceCollectionStageModuleId) {
-    return sourceCollectionTraceMessages.filter((message) => {
-      if (stageId === "collection") {
-        return (
-          message.id === "coordination-plan"
-          || message.id === "prompt-cache-gate"
-          || message.id === "query-plan"
-          || message.id === "assignment-summary"
-          || message.id === "search-execution-summary"
-          || message.id.startsWith("active-work-")
-          || message.id.startsWith("writeback-")
-        );
-      }
-      if (stageId === "screening") {
-        return message.tone === "quality" || message.id === "assignment-summary";
-      }
-      if (stageId === "candidate") {
-        return message.id.startsWith("candidate-") || message.id.startsWith("writeback-") || message.id === "search-execution-summary";
-      }
-      if (stageId === "graph") {
-        return message.id.startsWith("graph-");
-      }
-      return message.id.startsWith("graph-") || message.id.startsWith("memory-");
-    });
-  }
-
-  function renderSourceCollectionStageProcessPanel(stageId: SourceCollectionStageModuleId) {
-    const toneClass: Record<SourceCollectionTraceMessage["tone"], string> = {
-      plan: styles.sourceCollectionTrace_plan,
-      cache: styles.sourceCollectionTrace_cache,
-      search: styles.sourceCollectionTrace_search,
-      acquire: styles.sourceCollectionTrace_acquire,
-      extract: styles.sourceCollectionTrace_extract,
-      quality: styles.sourceCollectionTrace_quality,
-      storage: styles.sourceCollectionTrace_storage,
-      blocked: styles.sourceCollectionTrace_blocked,
-    };
-    const messages = sourceCollectionTraceMessagesForStage(stageId);
-    return (
-      <section className={styles.sourceCollectionConversationPanel} aria-label={lang === "zh" ? "阶段过程" : "Stage process"}>
-        <div className={styles.sourceCollectionConversationHeader}>
-          <div>
-            <strong>{lang === "zh" ? "Agent 执行过程" : "Agent execution process"}</strong>
-          </div>
-          <small>{messages.length} {lang === "zh" ? "步" : "steps"}</small>
-        </div>
-        <div className={styles.sourceCollectionTraceList}>
-          {messages.length ? messages.map((message, index) => (
-            <article key={message.id} className={`${styles.sourceCollectionTraceMessage} ${toneClass[message.tone]}`}>
-              <div className={styles.sourceCollectionTraceAvatar}>
-                <small>{String(index + 1).padStart(2, "0")}</small>
-                <span>{sourceCollectionTraceToneLabel(message.tone, lang)}</span>
-              </div>
-              <div className={styles.sourceCollectionTraceBody}>
-                <div className={styles.sourceCollectionTraceMeta}>
-                  <strong>{sourceCollectionAgentRoleLabel(message.agentRole, lang)}</strong>
-                  <span>{sourceCollectionStatusLabel(message.status, lang)}</span>
-                </div>
-                <h3>{message.title}</h3>
-                <div className={styles.sourceCollectionTraceHandoff}>
-                  <span><b>{lang === "zh" ? "输入" : "Input"}</b>{message.inputLabel}</span>
-                  <span><b>{lang === "zh" ? "输出" : "Output"}</b>{message.outputLabel}</span>
-                  <span><b>{lang === "zh" ? "下一步" : "Next"}</b>{message.nextLabel}</span>
-                </div>
-                <p>{message.body}</p>
-                {message.refs.length || message.storageRefs.length ? (
-                  <details className={styles.sourceCollectionTraceDetails}>
-                    <summary>{lang === "zh" ? "证据与存放位置" : "Evidence and storage"}</summary>
-                    {message.refs.length ? (
-                      <div className={styles.sourceCollectionTraceRefs}>
-                        {message.refs.map((ref) => (
-                          <span key={ref}>{ref}</span>
-                        ))}
-                      </div>
-                    ) : null}
-                    {message.storageRefs.length ? (
-                      <div className={styles.sourceCollectionTraceStorage}>
-                        {message.storageRefs.map((ref) => {
-                          const target = sourceCollectionStorageTargetForRef(ref, selectedSourceCollectionStorageArtifacts);
-                          return target ? (
-                            <button
-                              key={ref}
-                              type="button"
-                              disabled={selectedSourceCollectionStorageOpenPending}
-                              onClick={() => openSourceCollectionStorageTarget(target)}
-                              title={ref}
-                            >
-                              <Link2 size={12} />
-                              {sourceCollectionStorageTargetLabel(target, lang)}
-                            </button>
-                          ) : (
-                            <span key={ref}>{ref}</span>
-                          );
-                        })}
-                      </div>
-                    ) : null}
-                  </details>
-                ) : null}
-              </div>
-            </article>
-          )) : (
-            <div className={styles.empty}>{lang === "zh" ? "当前阶段还没有可展示的 Agent 过程。" : "No Agent process records for this stage yet."}</div>
-          )}
-        </div>
-      </section>
-    );
-  }
-
   function renderSourceCollectionConversation() {
-    const toneClass: Record<SourceCollectionTraceMessage["tone"], string> = {
-      plan: styles.sourceCollectionTrace_plan,
-      cache: styles.sourceCollectionTrace_cache,
-      search: styles.sourceCollectionTrace_search,
-      acquire: styles.sourceCollectionTrace_acquire,
-      extract: styles.sourceCollectionTrace_extract,
-      quality: styles.sourceCollectionTrace_quality,
-      storage: styles.sourceCollectionTrace_storage,
-      blocked: styles.sourceCollectionTrace_blocked,
-    };
-    const visibleTraceMessages = sourceCollectionTraceMessagesForStage("collection");
     const pagedResults = sourceCollectionPageItems("collection", sourceCollectionFilteredRecords);
     const visibleResults = pagedResults.items;
     return (
       <section id="source-collection-process" className={styles.sourceCollectionConversationPanel} aria-label={lang === "zh" ? "搜集对话流" : "Collection conversation"}>
         <div className={styles.sourceCollectionConversationHeader}>
           <div>
-            <strong>{sourceCollectionStageViewMode === "process" ? (lang === "zh" ? "搜集过程" : "Collection process") : (lang === "zh" ? "已收集资料" : "Collected sources")}</strong>
+            <strong>{lang === "zh" ? "本轮原始资料记录" : "Raw records in this run"}</strong>
           </div>
-          <small>{sourceCollectionStageViewMode === "process" ? `${visibleTraceMessages.length} ${lang === "zh" ? "步" : "steps"}` : `${pagedResults.start}-${pagedResults.end} / ${sourceCollectionFilteredRecords.length}`}</small>
+          <small>{pagedResults.start}-{pagedResults.end} / {sourceCollectionFilteredRecords.length}</small>
         </div>
-        {sourceCollectionStageViewMode === "process" ? (
-          <div className={styles.sourceCollectionTraceList}>
-            {visibleTraceMessages.length ? visibleTraceMessages.map((message, index) => (
-              <article key={message.id} className={`${styles.sourceCollectionTraceMessage} ${toneClass[message.tone]}`}>
-                <div className={styles.sourceCollectionTraceAvatar}>
-                  <small>{String(index + 1).padStart(2, "0")}</small>
-                  <span>{sourceCollectionTraceToneLabel(message.tone, lang)}</span>
-                </div>
-                <div className={styles.sourceCollectionTraceBody}>
-                  <div className={styles.sourceCollectionTraceMeta}>
-                    <strong>{sourceCollectionAgentRoleLabel(message.agentRole, lang)}</strong>
-                    <span>{sourceCollectionStatusLabel(message.status, lang)}</span>
-                  </div>
-                  <h3>{message.title}</h3>
-                  <div className={styles.sourceCollectionTraceHandoff}>
-                    <span><b>{lang === "zh" ? "输入" : "Input"}</b>{message.inputLabel}</span>
-                    <span><b>{lang === "zh" ? "输出" : "Output"}</b>{message.outputLabel}</span>
-                    <span><b>{lang === "zh" ? "下一步" : "Next"}</b>{message.nextLabel}</span>
-                  </div>
-                  <p>{message.body}</p>
-                  {message.refs.length || message.storageRefs.length ? (
-                    <details className={styles.sourceCollectionTraceDetails}>
-                      <summary>{lang === "zh" ? "证据与存放位置" : "Evidence and storage"}</summary>
-                      {message.refs.length ? (
-                        <div className={styles.sourceCollectionTraceRefs}>
-                          {message.refs.map((ref) => (
-                            <span key={ref}>{ref}</span>
-                          ))}
-                        </div>
-                      ) : null}
-                      {message.storageRefs.length ? (
-                        <div className={styles.sourceCollectionTraceStorage}>
-                          {message.storageRefs.map((ref) => {
-                            const target = sourceCollectionStorageTargetForRef(ref, selectedSourceCollectionStorageArtifacts);
-                            return target ? (
-                              <button
-                                key={ref}
-                                type="button"
-                                disabled={selectedSourceCollectionStorageOpenPending}
-                                onClick={() => openSourceCollectionStorageTarget(target)}
-                                title={ref}
-                              >
-                                <Link2 size={12} />
-                                {sourceCollectionStorageTargetLabel(target, lang)}
-                              </button>
-                            ) : (
-                              <span key={ref}>{ref}</span>
-                            );
-                          })}
-                        </div>
-                      ) : null}
-                    </details>
-                  ) : null}
-                </div>
-              </article>
-            )) : (
-              <div className={styles.empty}>{lang === "zh" ? "还没有搜集过程记录。" : "No collection process records yet."}</div>
-            )}
-          </div>
-        ) : (
         <section id="source-collection-results" className={styles.sourceCollectionResultsPanel} aria-label={lang === "zh" ? "本轮原始资料记录" : "Raw collected records"}>
           <div className={styles.sourceCollectionResultsHeader}>
             <strong>{lang === "zh" ? "本轮原始资料记录" : "Raw records in this run"}</strong>
@@ -6210,7 +6093,6 @@ export function TeamsRoute({
           )}
           {renderSourceCollectionPagination("collection", sourceCollectionFilteredRecords.length)}
         </section>
-        )}
       </section>
     );
   }
@@ -7453,6 +7335,11 @@ export function TeamsRoute({
     const activeModule =
       sourceCollectionStageModules.find((module) => module.id === selectedSourceCollectionStageId)
       ?? sourceCollectionStageModules[0];
+    const stageAgentIds = sourceCollectionStageAgentIds(activeModule.id);
+    const stageChatRoom = sourceCollectionStageRoomById.get(activeModule.id) ?? null;
+    const stageChatPending =
+      createSourceCollectionStageChatRoomMutation.isPending
+      && createSourceCollectionStageChatRoomMutation.variables?.stageId === activeModule.id;
     const resultPanel = selectedSourceCollectionStageId === "screening"
       ? renderSourceCollectionScreeningPanel()
       : selectedSourceCollectionStageId === "candidate"
@@ -7479,27 +7366,33 @@ export function TeamsRoute({
             <span><b>{lang === "zh" ? "输出" : "Output"}</b>{activeModule.outputLabel}</span>
             <span className={styles.sourceCollectionStageHandoffNext}><b>{lang === "zh" ? "下一步" : "Next"}</b>{activeModule.nextLabel}</span>
           </div>
-        </div>
-        <div className={styles.sourceCollectionStageTabs} role="tablist" aria-label={lang === "zh" ? "阶段子页" : "Stage tabs"}>
-          {([
-            ["results", lang === "zh" ? "结果" : "Results"],
-            ["process", lang === "zh" ? "Agent过程" : "Agent process"],
-          ] as const).map(([mode, label]) => (
+          <div className={styles.sourceCollectionStageChatActions}>
+            {stageAgentIds.length ? (
             <button
-              key={mode}
               type="button"
-              role="tab"
-              aria-selected={sourceCollectionStageViewMode === mode}
-              className={sourceCollectionStageViewMode === mode ? styles.sourceCollectionStageTabActive : ""}
-              onClick={() => setSourceCollectionStageViewMode(mode)}
+              onClick={() => openSourceCollectionStageChat(activeModule.id)}
+              disabled={stageChatPending}
+              title={stageChatRoom?.roomId || SOURCE_COLLECTION_STAGE_CHAT_LABELS[activeModule.id][lang]}
             >
-              {label}
+              <MessageSquare size={13} />
+              {stageChatPending
+                ? (lang === "zh" ? "创建会话中" : "Creating room")
+                : stageChatRoom
+                  ? (lang === "zh" ? "进入 Agent 会话" : "Open Agent room")
+                  : (lang === "zh" ? "创建 Agent 会话" : "Create Agent room")}
             </button>
-          ))}
+            ) : (
+              <Link to="/agents" title={lang === "zh" ? "当前阶段缺少可用 Agent" : "No usable Agent is bound to this stage"}>
+                <Link2 size={13} />
+                {lang === "zh" ? "先配置 Agent" : "Configure Agents"}
+              </Link>
+            )}
+          </div>
         </div>
-        {sourceCollectionStageViewMode === "process"
-          ? renderSourceCollectionStageProcessPanel(selectedSourceCollectionStageId)
-          : resultPanel}
+        {createSourceCollectionStageChatRoomMutation.error instanceof Error ? (
+          <div className={styles.messageError}>{createSourceCollectionStageChatRoomMutation.error.message}</div>
+        ) : null}
+        {resultPanel}
       </section>
     );
   }
@@ -9107,344 +9000,6 @@ export function TeamsRoute({
     && selectedSourceCollectionActiveWorkRun
     && ["running", "queued"].includes(String(selectedSourceCollectionActiveWorkRun.status || "").toLowerCase()),
   );
-  const sourceCollectionTraceMessages = useMemo<SourceCollectionTraceMessage[]>(() => {
-    const messages: SourceCollectionTraceMessage[] = [];
-    messages.push({
-      id: "coordination-plan",
-      agentRole: "Research Coordination Agent",
-      title: selectedSourceCollectionRun
-        ? (lang === "zh" ? "已建立本轮资料搜索批次" : "Created the source collection run")
-        : (lang === "zh" ? "等待启动资料搜索批次" : "Waiting for a source collection run"),
-      body: selectedSourceCollectionRun
-        ? `${lang === "zh" ? "目标" : "Goal"}：${translateResearchPhrase(String(selectedSourceCollectionRun.scope?.goal || sourceCollectionDraft.goal || "-"), lang)}`
-        : (lang === "zh" ? "点击启动后会生成查询计划、团队 Agent 分工和回写契约。" : "Starting creates a query plan, team-agent assignments, and a writeback contract."),
-      status: selectedSourceCollectionRun?.status || "pending",
-      tone: selectedSourceCollectionRun ? "plan" : "blocked",
-      inputLabel: lang === "zh" ? "研究主题与目标" : "Topic and goal",
-      outputLabel: selectedSourceCollectionRun ? (lang === "zh" ? "搜集批次与回写边界" : "Run and writeback boundary") : (lang === "zh" ? "等待创建批次" : "Waiting for run"),
-      nextLabel: lang === "zh" ? "拆分搜索问题" : "Split search queries",
-      refs: selectedSourceCollectionRun
-        ? [
-            `${lang === "zh" ? "批次" : "run"}: ${sourceCollectionRunLabel(selectedSourceCollectionRun.runId)}`,
-            `${lang === "zh" ? "主题" : "topic"}: ${translateResearchPhrase(String(selectedSourceCollectionRun.scope?.topic || sourceCollectionDraft.topic), lang)}`,
-          ]
-        : [],
-      storageRefs: selectedSourceCollectionStorageArtifacts
-        ? [selectedSourceCollectionStorageArtifacts.runDirectory, selectedSourceCollectionStorageArtifacts.searchPlanPath]
-        : [],
-    });
-    const plannedQueries = sourceCollectionAssignments.flatMap((assignment) => assignment.scope.assignedQueries ?? []);
-    const promptCacheGateStatus = sourceCollectionPromptCachePolicy?.gate?.status || sourceCollectionPromptCachePolicyRef?.gateStatus || "";
-    const promptCacheMode = sourceCollectionPromptCachePolicy?.promptCacheMode || sourceCollectionPromptCachePolicyRef?.promptCacheMode || "";
-    const promptCacheRolePartitions = sourceCollectionPromptCachePolicy?.rolePartitions?.length
-      ? sourceCollectionPromptCachePolicy.rolePartitions
-      : sourceCollectionAssignments
-          .map((assignment) => ({
-            agentRole: assignment.agentRole,
-            agentId: assignment.agentId,
-            promptCachePartition: String(assignment.scope.promptCachePartition || ""),
-          }))
-          .filter((item) => item.promptCachePartition);
-    const promptCacheModelDisplay = sourceCollectionPromptCacheModelDisplay(
-      sourceCollectionPromptCachePolicy,
-      sourceCollectionPromptCachePolicyRef,
-      lang,
-    );
-    if (selectedSourceCollectionRun || sourceCollectionPromptCachePolicy || sourceCollectionPromptCachePolicyRef) {
-      messages.push({
-        id: "prompt-cache-gate",
-        agentRole: "Research Coordination Agent",
-        title: lang === "zh" ? "KV 缓存门禁已写入本轮搜集" : "KV cache gate attached to this run",
-        body: lang === "zh"
-          ? `KV 缓存模型：${promptCacheModelDisplay}；执行资料搜索的是右侧当前步骤 Agent。`
-          : `KV cache model: ${promptCacheModelDisplay}; source collection is executed by the step Agents on the right.`,
-        status: sourceCollectionPromptCacheStatusLabel(promptCacheGateStatus, lang),
-        tone: promptCacheGateStatus === "blocked" ? "blocked" : "cache",
-        inputLabel: lang === "zh" ? "团队规则、结构契约" : "Team rules and schema",
-        outputLabel: lang === "zh" ? "可复用 KV 前缀" : "Reusable KV prefix",
-        nextLabel: lang === "zh" ? "执行单次搜索增量" : "Run query delta",
-        refs: (lang === "zh"
-          ? [
-              `KV 缓存模型：${promptCacheModelDisplay}`,
-              `缓存要求：${sourceCollectionPromptCacheRequirement}`,
-              promptCacheMode ? `缓存模式：${promptCacheMode}` : "",
-              "执行模型：见当前步骤 Agent 配置",
-              "稳定前缀：团队规则 / 结构契约 / 回写边界",
-              "动态增量：当前搜索词 / 结果引用",
-            ]
-          : [
-              `KV cache model: ${promptCacheModelDisplay}`,
-              `requirement: ${sourceCollectionPromptCacheRequirement}`,
-              promptCacheMode ? `mode: ${promptCacheMode}` : "",
-              "execution model: see step Agent configuration",
-              "stable prefix: team rules + schema + boundary",
-              "dynamic delta: query/result refs only",
-            ]).filter(Boolean),
-        storageRefs: promptCacheRolePartitions.slice(0, 4).map((item) => `${sourceCollectionAgentRoleLabel(item.agentRole, lang)}：${lang === "zh" ? "缓存分区" : "cache"} ${item.promptCachePartition}`),
-      });
-    }
-    if (plannedQueries.length || sourceCollectionSearchPlanRef || selectedTeamStartSourceCollectionResult?.searchPlan) {
-      const plannedQueryCacheRefs = Array.from(
-        new Set(
-          plannedQueries
-            .map((query) => query.execution?.promptCachePartition)
-            .filter((value): value is string => Boolean(value)),
-        ),
-      );
-      messages.push({
-        id: "query-plan",
-        agentRole: "Data Discovery Agent",
-        title: lang === "zh" ? "已拆成可执行搜索问题" : "Split into executable search queries",
-        body: lang === "zh"
-          ? `当前可见 ${plannedQueries.length || sourceCollectionSearchPlanRef?.queryCount || selectedTeamStartSourceCollectionResult?.searchPlan.queryCount || 0} 条搜索问题，按资料类型和语言分配给功能 Agent；搜索词是动态增量，不会挤进稳定缓存前缀。`
-          : `${plannedQueries.length || sourceCollectionSearchPlanRef?.queryCount || selectedTeamStartSourceCollectionResult?.searchPlan.queryCount || 0} visible queries are assigned by source type and language; queries are dynamic deltas outside the stable cached prefix.`,
-        status: "planned",
-        tone: "search",
-        inputLabel: lang === "zh" ? "主题、目标、搜索种子" : "Topic, goal, query seeds",
-        outputLabel: lang === "zh" ? "可执行搜索问题" : "Executable queries",
-        nextLabel: lang === "zh" ? "分配给功能 Agent" : "Assign to functional Agents",
-        refs: plannedQueries.slice(0, 5).map((query) =>
-          `${translateResearchPhrase(query.query, lang)} · ${sourceCollectionSourceTypeLabel(query.sourceType, lang)} · ${sourceCollectionLanguageLabel(query.language, lang)}`
-        ),
-        storageRefs: [
-          selectedSourceCollectionStorageArtifacts?.searchPlanPath || "",
-          ...plannedQueryCacheRefs.slice(0, 3).map((partition) => `KV ${partition}`),
-        ].filter(Boolean),
-      });
-    }
-    if (sourceCollectionAcceptedBackgroundActive && selectedSourceCollectionActiveWorkRun) {
-      const activeWorkTask = workRunString(selectedSourceCollectionActiveWorkRun, "currentTask")
-        || workRunString(selectedSourceCollectionActiveWorkRun, "summary");
-      messages.push({
-        id: `active-work-${selectedSourceCollectionActiveWorkRun.runId}`,
-        agentRole: "Source Collection Agent",
-        title: lang === "zh" ? "正在执行本批资料搜索" : "Running this source search batch",
-        body: activeWorkTask || (lang === "zh" ? "后台正在把搜索结果写成资料记录和候选资料。" : "The background worker is writing search results into records and candidates."),
-        status: selectedSourceCollectionActiveWorkRun.status,
-        tone: "search",
-        inputLabel: lang === "zh" ? "待执行搜索任务" : "Open search tasks",
-        outputLabel: lang === "zh" ? "资料记录与候选导入" : "Records and candidate imports",
-        nextLabel: lang === "zh" ? "等待后台回写" : "Wait for writeback",
-        refs: [
-          `${workRunNumber(selectedSourceCollectionActiveWorkRun, "searchOpenAssignmentCount", sourceCollectionSearchOpenAssignmentCount)} ${lang === "zh" ? "个可搜索任务" : "searchable assignments"}`,
-          `${workRunNumber(selectedSourceCollectionActiveWorkRun, "downstreamOpenAssignmentCount", sourceCollectionDownstreamOpenAssignmentCount)} ${lang === "zh" ? "个后续任务" : "downstream assignments"}`,
-          `${workRunNumber(selectedSourceCollectionActiveWorkRun, "recordCount", sourceCollectionRunSummary?.recordCount ?? 0)} ${lang === "zh" ? "条资料记录" : "records"}`,
-          `${workRunNumber(selectedSourceCollectionActiveWorkRun, "queryCount", sourceCollectionQueryCount)} ${lang === "zh" ? "条搜索问题" : "queries"}`,
-        ],
-        storageRefs: [workRunString(selectedSourceCollectionActiveWorkRun, "storagePath") || selectedSourceCollectionStorageArtifacts?.runDirectory || ""].filter(Boolean),
-      });
-    }
-    if (selectedTeamExecuteSourceCollectionSearchResult?.executionEvents?.length) {
-      const events = selectedTeamExecuteSourceCollectionSearchResult.executionEvents;
-      const searchedCount = events.filter((event) => event.eventType === "search.executed").length;
-      const failedCount = events.filter((event) => event.status === "failed" || event.eventType === "search.failed").length;
-      const storageRefs = Array.from(new Set(events.flatMap((event) => event.storageRefs ?? []).filter(Boolean))).slice(0, 6);
-      const evidenceRefs = events
-        .filter((event) => event.query || event.rawLocation || event.refs?.length)
-        .slice(0, 8)
-        .map((event) => {
-          const query = event.query || event.queryId || event.eventType;
-          const ref = event.rawLocation || event.refs?.[0] || "";
-          return [query, ref].filter(Boolean).join(" · ");
-        });
-      messages.push({
-        id: "search-execution-summary",
-        agentRole: "Source Collection Agent",
-        title: lang === "zh" ? "已执行一批搜索并写入候选" : "Ran one search batch and wrote candidates",
-        body: lang === "zh"
-          ? `本批执行 ${selectedTeamExecuteSourceCollectionSearchResult.executedQueryCount} 条搜索，写入 ${selectedTeamExecuteSourceCollectionSearchResult.recordCount} 条资料记录，导入 ${selectedTeamExecuteSourceCollectionSearchResult.importedCount} 个候选资料${selectedTeamExecuteSourceCollectionSearchResult.skippedDuplicateCount ? `，跳过 ${selectedTeamExecuteSourceCollectionSearchResult.skippedDuplicateCount} 条重复资料` : ""}${selectedTeamExecuteSourceCollectionSearchResult.hasMore ? `，还有 ${selectedTeamExecuteSourceCollectionSearchResult.remainingQueryCount ?? 0} 条可继续` : ""}${failedCount ? `，${failedCount} 条需要补救` : ""}。`
-          : `This batch executed ${selectedTeamExecuteSourceCollectionSearchResult.executedQueryCount} queries, wrote ${selectedTeamExecuteSourceCollectionSearchResult.recordCount} DataRecords, imported ${selectedTeamExecuteSourceCollectionSearchResult.importedCount} source_manifest candidates${selectedTeamExecuteSourceCollectionSearchResult.skippedDuplicateCount ? `, and skipped ${selectedTeamExecuteSourceCollectionSearchResult.skippedDuplicateCount} duplicate sources` : ""}${selectedTeamExecuteSourceCollectionSearchResult.hasMore ? `; ${selectedTeamExecuteSourceCollectionSearchResult.remainingQueryCount ?? 0} remaining` : ""}${failedCount ? `; ${failedCount} need follow-up` : ""}.`,
-        status: failedCount ? "needs_attention" : "completed",
-        tone: failedCount ? "blocked" : "storage",
-        inputLabel: lang === "zh" ? "本批搜索问题" : "Batch queries",
-        outputLabel: lang === "zh" ? "资料记录与候选资料" : "Records and candidate sources",
-        nextLabel: failedCount ? (lang === "zh" ? "修复失败搜索" : "Repair failed searches") : (lang === "zh" ? "进入资料审查" : "Move to review"),
-        refs: [
-          `${searchedCount} ${lang === "zh" ? "条元数据搜索" : "metadata searches"}`,
-          ...evidenceRefs,
-        ],
-        storageRefs,
-      });
-    }
-    if (sourceCollectionAssignments.length) {
-      const visibleAssignments = sourceCollectionAssignments.slice(0, 5);
-      const assignedQueries = visibleAssignments.flatMap((assignment) => assignment.scope.assignedQueries ?? []);
-      messages.push({
-        id: "assignment-summary",
-        agentRole: "Research Coordination Agent",
-        title: lang === "zh" ? "已把搜集任务分配给功能 Agent" : "Assigned collection work to functional Agents",
-        body: lang === "zh"
-          ? `${sourceCollectionAssignments.length} 个任务已分配：${sourceCollectionSearchOpenAssignmentCount} 个还能继续搜索，${sourceCollectionDownstreamOpenAssignmentCount} 个等待提炼或筛选。`
-          : `${sourceCollectionAssignments.length} assignments are allocated: ${sourceCollectionSearchOpenAssignmentCount} can still search and ${sourceCollectionDownstreamOpenAssignmentCount} wait for extraction or screening.`,
-        status: sourceCollectionSearchOpenAssignmentCount ? "open" : "ready_for_screening",
-        tone: sourceCollectionSearchOpenAssignmentCount ? "acquire" : "quality",
-        inputLabel: lang === "zh" ? "搜索计划" : "Search plan",
-        outputLabel: lang === "zh" ? "Agent 分工任务" : "Agent assignments",
-        nextLabel: sourceCollectionSearchOpenAssignmentCount ? (lang === "zh" ? "继续搜索" : "Continue searching") : (lang === "zh" ? "启动筛选" : "Start screening"),
-        refs: [
-          ...visibleAssignments.map((assignment) => `${sourceCollectionAgentRoleLabel(assignment.agentRole, lang)}：${sourceCollectionStatusLabel(assignment.status, lang)}`),
-          ...assignedQueries.slice(0, 4).map((query) => translateResearchPhrase(query.query, lang)),
-        ],
-        storageRefs: visibleAssignments
-          .map((assignment) => assignment.scope.promptCachePartition ? `${sourceCollectionAgentRoleLabel(assignment.agentRole, lang)}：KV ${assignment.scope.promptCachePartition}` : assignment.assignmentId)
-          .filter(Boolean),
-      });
-    }
-    if (selectedTeamRecordSourceCollectionOutputResult) {
-      const records = selectedTeamRecordSourceCollectionOutputResult.output.createdRecords;
-      const outputRecord = selectedTeamRecordSourceCollectionOutputResult.output.output;
-      messages.push({
-        id: `writeback-${outputRecord.outputId}`,
-        agentRole: outputRecord.agentRole || "Source Intake Agent",
-        title: lang === "zh" ? "已把搜集结果写成资料记录" : "Wrote collected result as DataRecord",
-        body: lang === "zh"
-          ? `本次回写 ${records.length} 条资料记录，并导入 ${selectedTeamRecordSourceCollectionOutputResult.imported.length} 个候选资料。`
-          : `This writeback created ${records.length} DataRecords and imported ${selectedTeamRecordSourceCollectionOutputResult.imported.length} source_manifest candidates.`,
-        status: outputRecord.status,
-        tone: "storage",
-        inputLabel: lang === "zh" ? "手工/Agent 回写内容" : "Manual or Agent output",
-        outputLabel: lang === "zh" ? "DataRecord 与候选资料" : "DataRecord and candidate source",
-        nextLabel: lang === "zh" ? "资料审查" : "Source review",
-        refs: records.slice(0, 4).map((record) => `${record.title || record.recordId} · ${record.sourceRef || record.rawLocation || sourceCollectionSourceTypeLabel(record.sourceType, lang)}`),
-        storageRefs: [
-          outputRecord.outputId,
-          ...(selectedSourceCollectionRun?.storage ? [selectedSourceCollectionRun.storage.recordsPath, selectedSourceCollectionRun.storage.collectionOutputsPath] : []),
-        ],
-      });
-    }
-    sourceCollectionRunCandidates.slice(0, 4).forEach((candidate) => {
-      messages.push({
-        id: `candidate-${candidate.candidateId}`,
-        agentRole: candidate.createdByAgent || "Source Intake Agent",
-        title: lang === "zh" ? "已进入候选资料仓库" : "Imported into candidate source store",
-        body: candidate.summary || (lang === "zh" ? "该资料已作为候选保留，等待质量筛选或内容抽取。" : "This source is retained as a candidate for quality screening or extraction."),
-        status: candidate.qualityStatus || candidate.currentState,
-        tone: "storage",
-        inputLabel: lang === "zh" ? "资料记录" : "DataRecord",
-        outputLabel: lang === "zh" ? "候选资料" : "Candidate source",
-        nextLabel: lang === "zh" ? "质量筛选" : "Quality screening",
-        refs: [candidate.title || candidate.candidateId, candidate.currentState].filter(Boolean),
-        storageRefs: [candidate.candidateId, teamWorkflow?.candidateStore.storagePath || ""].filter(Boolean),
-      });
-    });
-    (teamWorkflowSourceQualityStatus?.candidates ?? []).slice(0, 3).forEach((candidate) => {
-      if (!candidate.decision && candidate.bucket === "pending") {
-        return;
-      }
-      messages.push({
-        id: `quality-${candidate.candidateId}`,
-        agentRole: "Source Quality Assessment Agent",
-        title: lang === "zh" ? "已完成资料质量判断" : "Completed source quality decision",
-        body: lang === "zh"
-          ? `${candidate.title}：${workflowIngestionStatusLabel(candidate.decision || candidate.bucket, lang)}，综合分 ${candidate.overallScore || 0}/100。`
-          : `${candidate.title}: ${workflowIngestionStatusLabel(candidate.decision || candidate.bucket, lang)}, overall ${candidate.overallScore || 0}/100.`,
-        status: candidate.decision || candidate.bucket,
-        tone: candidate.bucket === "rejected" ? "blocked" : "quality",
-        inputLabel: lang === "zh" ? "候选资料" : "Candidate source",
-        outputLabel: lang === "zh" ? "质量判断" : "Quality decision",
-        nextLabel: candidate.bucket === "approved" || candidate.decision === "approved"
-          ? (lang === "zh" ? "进入资料入库" : "Move to ingestion")
-          : (lang === "zh" ? "退回补资料" : "Repair source"),
-        refs: candidate.requiredFixes.length ? candidate.requiredFixes.slice(0, 3) : [candidate.sourceKind || "source_manifest"],
-        storageRefs: [candidate.candidateId],
-      });
-    });
-    if (teamWorkflowCandidateGraphRecord && teamWorkflowCandidateGraph) {
-      const graphSummary = teamWorkflowCandidateGraph.summary;
-      const graphMetadata = isRecord(teamWorkflowCandidateGraphRecord.metadata) ? teamWorkflowCandidateGraphRecord.metadata : {};
-      const graphProcess = Array.isArray(graphMetadata.agentProcess) ? graphMetadata.agentProcess : [];
-      const graphProcessRefs = graphProcess
-        .map((event) => {
-          if (!isRecord(event)) {
-            return "";
-          }
-          return (
-            String(event.outputSummary || "") ||
-            String(event.nextAction || "") ||
-            String(event.eventType || "")
-          );
-        })
-        .filter(Boolean)
-        .slice(0, 4);
-      messages.push({
-        id: `graph-${teamWorkflowCandidateGraphRecord.candidateId}`,
-        agentRole: teamWorkflowCandidateGraphRecord.createdByAgent || "Candidate Graph Preview Agent",
-        title: lang === "zh" ? "已生成入库关系图" : "Built ingestion relationship map",
-        body: teamWorkflowCandidateGraphRecord.summary || (lang === "zh" ? "资料关系生成 Agent 已把通过审查的资料转成可预览关系图。" : "The relationship Agent converted reviewed sources into a previewable map."),
-        status: teamWorkflowCandidateGraphRecord.currentState || "candidate_graph_visible",
-        tone: graphSummary.missingLinkCount ? "blocked" : "storage",
-        inputLabel: lang === "zh"
-          ? `${graphSummary.inputCandidateCount ?? graphSummary.nodeCount} 条通过候选`
-          : `${graphSummary.inputCandidateCount ?? graphSummary.nodeCount} approved candidates`,
-        outputLabel: lang === "zh"
-          ? `${graphSummary.nodeCount} 个节点 / ${graphSummary.edgeCount} 条关系`
-          : `${graphSummary.nodeCount} nodes / ${graphSummary.edgeCount} edges`,
-        nextLabel: graphSummary.missingLinkCount
-          ? (lang === "zh" ? "修复断链后入库" : "Repair gaps before ingestion")
-          : (lang === "zh" ? "交给资料入库" : "Send to ingestion"),
-        refs: [
-          ...(graphProcessRefs.length ? graphProcessRefs : [teamWorkflowCandidateGraphRecord.title || teamWorkflowCandidateGraphRecord.candidateId]),
-          `${lang === "zh" ? "筛除" : "filtered"} ${graphSummary.filteredCandidateCount ?? 0}`,
-          `${lang === "zh" ? "断链" : "missing"} ${graphSummary.missingLinkCount}`,
-        ],
-        storageRefs: [teamWorkflowCandidateGraphRecord.candidateId, teamWorkflow?.candidateStore.storagePath || ""].filter(Boolean),
-      });
-    }
-    if (latestKnowledgeStewardPackCandidate) {
-      const metadata = isRecord(latestKnowledgeStewardPackCandidate.metadata) ? latestKnowledgeStewardPackCandidate.metadata : {};
-      const output = isRecord(metadata.output) ? metadata.output : {};
-      const candidateIds = Array.isArray(output.candidateIds) ? output.candidateIds : [];
-      const sourceTrace = isRecord(output.sourceTrace) ? output.sourceTrace : {};
-      const stewardCandidateGraphId = String(sourceTrace.candidateGraphId || "");
-      messages.push({
-        id: `memory-${latestKnowledgeStewardPackCandidate.candidateId}`,
-        agentRole: latestKnowledgeStewardPackCandidate.createdByAgent || "Knowledge Steward Agent",
-        title: lang === "zh" ? "已生成资料入库包" : "Built knowledge ingestion pack",
-        body: latestKnowledgeStewardPackCandidate.summary || (lang === "zh" ? "资料入库 Agent 已把通过审查的资料整理成可写入团队知识库的入库包。" : "The ingestion Agent prepared reviewed sources for Team Knowledge."),
-        status: latestKnowledgeStewardPackCandidate.currentState || "steward_pack_draft",
-        tone: "quality",
-        inputLabel: lang === "zh" ? `${candidateIds.length} 条候选资料` : `${candidateIds.length} candidates`,
-        outputLabel: lang === "zh" ? "入库包草稿" : "ingestion draft",
-        nextLabel: lang === "zh" ? "写入团队知识库" : "Write to Team Knowledge",
-        refs: [
-          latestKnowledgeStewardPackCandidate.title || latestKnowledgeStewardPackCandidate.candidateId,
-          stewardCandidateGraphId ? `${lang === "zh" ? "关系图" : "map"}: ${stewardCandidateGraphId}` : "",
-          `${lang === "zh" ? "等待入库门禁" : "waiting for ingestion gate"}`,
-        ].filter(Boolean),
-        storageRefs: [latestKnowledgeStewardPackCandidate.candidateId, teamWorkflow?.candidateStore.storagePath || ""].filter(Boolean),
-      });
-    }
-    return messages;
-  }, [
-    lang,
-    latestKnowledgeStewardPackCandidate,
-    selectedSourceCollectionRun,
-    selectedSourceCollectionActiveWorkRun,
-    selectedSourceCollectionStorageArtifacts,
-    selectedTeamRecordSourceCollectionOutputResult,
-    selectedTeamExecuteSourceCollectionSearchResult,
-    selectedTeamStartResearchStageResult,
-    selectedTeamStartSourceCollectionResult,
-    sourceCollectionAssignments,
-    sourceCollectionAcceptedBackgroundActive,
-    sourceCollectionDownstreamOpenAssignmentCount,
-    sourceCollectionDraft.goal,
-    sourceCollectionDraft.topic,
-    sourceCollectionOpenAssignmentCount,
-    sourceCollectionPromptCachePolicy,
-    sourceCollectionPromptCachePolicyRef,
-    sourceCollectionPromptCacheRequirement,
-    sourceCollectionPromptCacheStatus,
-    sourceCollectionSearchPlanRef,
-    sourceCollectionSearchOpenAssignmentCount,
-    sourceCollectionQueryCount,
-    sourceCollectionRunCandidates,
-    sourceCollectionRunSummary?.recordCount,
-    teamWorkflow?.candidateStore.storagePath,
-    teamWorkflowCandidateGraph,
-    teamWorkflowCandidateGraphRecord,
-    teamWorkflowSourceQualityStatus,
-  ]);
   const canRecordSourceCollectionOutput = Boolean(
     selectedTeam?.teamId
     && selectedSourceCollectionRunEffectiveId
@@ -9666,10 +9221,10 @@ export function TeamsRoute({
     if (!selectedTeam?.teamId || sourceCollectionScreeningDisabled) {
       return;
     }
-    openSourceCollectionStage("screening", "results");
+    openSourceCollectionStage("screening");
   };
   const runSourceCollectionScreeningAction = () => {
-    openSourceCollectionStage("screening", "results");
+    openSourceCollectionStage("screening");
     if (!selectedTeam?.teamId || sourceCollectionScreeningDisabled || selectedTeamSourceQualityPending) {
       return;
     }
@@ -9689,10 +9244,10 @@ export function TeamsRoute({
     if (!selectedTeam?.teamId) {
       return;
     }
-    openSourceCollectionStage("candidate", "results");
+    openSourceCollectionStage("candidate");
   };
   const runSourceCollectionCandidateExtractionAction = () => {
-    openSourceCollectionStage("candidate", "results");
+    openSourceCollectionStage("candidate");
     if (
       !selectedTeam?.teamId
       || !selectedSourceCollectionRunEffectiveId
@@ -9728,7 +9283,7 @@ export function TeamsRoute({
       maxCandidates: Math.max(1, Math.min(80, sourceCollectionIngestCandidateCount)),
       forceReview: sourceCollectionRunApprovedCount <= 0 && sourceCollectionRunCandidateCount > 0,
     });
-    openSourceCollectionStage("graph", "results");
+    openSourceCollectionStage("graph");
   };
   const runSourceCollectionMemoryPrecheckAction = () => {
     if (sourceCollectionMemoryActionDisabled) {
@@ -9744,7 +9299,7 @@ export function TeamsRoute({
       maxCandidates: Math.max(1, Math.min(80, sourceCollectionIngestCandidateCount)),
       forceReview: sourceCollectionPrecheckCandidateCount <= 0 && sourceCollectionRunCandidateCount > 0,
     });
-    openSourceCollectionStage("memory", "results");
+    openSourceCollectionStage("memory");
   };
   const runSourceCollectionSearchFromHeader = () => {
     if (!selectedTeam?.teamId || !selectedSourceCollectionRunEffectiveId || !canExecuteSourceCollectionSearch) {
@@ -9766,7 +9321,7 @@ export function TeamsRoute({
     if (!selectedTeam?.teamId) {
       return;
     }
-    openSourceCollectionStage("collection", sourceCollectionSearchOpenAssignmentCount > 0 ? "process" : "results");
+    openSourceCollectionStage("collection");
     if (!selectedSourceCollectionRun) {
       launchResearchStage("knowledge_collection");
       return;
@@ -9877,7 +9432,7 @@ export function TeamsRoute({
       actionTone: "primary",
       actionIcon: selectedSourceCollectionRun && sourceCollectionSearchOpenAssignmentCount > 0 ? "search" : "play",
       onAction: runSourceCollectionCollectionAction,
-      onDetail: () => openSourceCollectionStage("collection", "results"),
+      onDetail: () => openSourceCollectionStage("collection"),
     },
     {
       id: "candidate",
@@ -9897,7 +9452,7 @@ export function TeamsRoute({
       actionTone: "primary",
       actionIcon: selectedTeamExtractSourceCollectionCandidatesPending ? "refresh" : "archive",
       onAction: runSourceCollectionCandidateExtractionAction,
-      onDetail: () => openSourceCollectionStage("candidate", "results"),
+      onDetail: () => openSourceCollectionStage("candidate"),
     },
     {
       id: "screening",
@@ -9921,7 +9476,7 @@ export function TeamsRoute({
       actionTone: "primary",
       actionIcon: "check",
       onAction: runSourceCollectionScreeningAction,
-      onDetail: () => openSourceCollectionStage("screening", "results"),
+      onDetail: () => openSourceCollectionStage("screening"),
     },
     {
       id: "memory",
@@ -9955,7 +9510,7 @@ export function TeamsRoute({
       actionTone: "primary",
       actionIcon: "check",
       onAction: runSourceCollectionMemoryPrecheckAction,
-      onDetail: () => openSourceCollectionStage("memory", "results"),
+      onDetail: () => openSourceCollectionStage("memory"),
     },
   ];
   const sourceCollectionStageCardKeyDown = (

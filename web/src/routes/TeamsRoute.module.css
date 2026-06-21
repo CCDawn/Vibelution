@@ -2073,38 +2073,49 @@
   font-weight: 780;
 }
 
-.sourceCollectionStageTabs {
+.sourceCollectionStageChatActions {
   display: inline-flex;
-  width: max-content;
-  max-width: 100%;
-  min-height: 30px;
-  gap: 4px;
-  padding: 3px;
-  border: 1px solid var(--border-soft);
-  border-radius: 8px;
-  background: var(--source-workbench-card);
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  min-width: 0;
 }
 
-.sourceCollectionStageTabs button {
-  min-width: 76px;
-  min-height: 24px;
-  padding: 0 10px;
-  border: 1px solid transparent;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--fg-muted);
+.sourceCollectionStageChatActions button,
+.sourceCollectionStageChatActions a {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 30px;
+  width: max-content;
+  max-width: 100%;
+  padding: 0 12px;
+  border: 1px solid color-mix(in srgb, var(--accent-cool) 42%, var(--border-soft));
+  border-radius: 7px;
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--accent-cool) 10%, transparent), transparent 86%),
+    var(--source-workbench-card);
+  color: var(--fg-primary);
   cursor: pointer;
   font-size: 0.66rem;
   font-weight: 840;
+  line-height: 1;
+  text-decoration: none;
+  white-space: nowrap;
 }
 
-.sourceCollectionStageTabs button:hover,
-.sourceCollectionStageTabs button:focus-visible,
-.sourceCollectionStageTabActive {
-  border-color: color-mix(in srgb, var(--accent-cool) 42%, var(--border-soft));
-  background: color-mix(in srgb, var(--accent-cool) 10%, var(--surface-panel-strong));
-  color: var(--fg-primary);
+.sourceCollectionStageChatActions button:hover,
+.sourceCollectionStageChatActions button:focus-visible,
+.sourceCollectionStageChatActions a:hover,
+.sourceCollectionStageChatActions a:focus-visible {
+  border-color: color-mix(in srgb, var(--accent-success) 44%, var(--accent-cool));
   outline: none;
+}
+
+.sourceCollectionStageChatActions button:disabled {
+  cursor: wait;
+  opacity: 0.68;
 }
 
 .sourceCollectionConversationPanel,
@@ -6279,7 +6290,7 @@
     grid-template-columns: 1fr;
   }
 
-  .sourceCollectionStageTabs,
+  .sourceCollectionStageChatActions,
   .sourceCollectionPagination {
     width: 100%;
   }
