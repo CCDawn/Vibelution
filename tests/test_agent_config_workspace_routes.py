@@ -2,6 +2,7 @@ import json
 from types import SimpleNamespace
 
 import pytest
+from fastapi.routing import APIRoute
 
 from tests.test_agent_config_workspace_service import (
     ProviderConfig,
@@ -27,6 +28,30 @@ from tests.test_agent_config_workspace_service import (
     supervised_agent_service,
     team_service,
 )
+
+
+def _iter_api_routes(app):
+    for route in app.routes:
+        if isinstance(route, APIRoute):
+            yield route.path, route.methods
+            continue
+        nested_routes = []
+        route_prefix = str(getattr(route, "prefix", "") or "").rstrip("/")
+        if isinstance(getattr(route, "routes", None), (list, tuple)):
+            nested_routes = list(route.routes)
+        elif getattr(route, "original_router", None) is not None:
+            nested_router = getattr(route, "original_router")
+            include_context = getattr(route, "include_context", None)
+            route_prefix = str(getattr(include_context, "prefix", "") or "").rstrip("/")
+            nested_routes = list(getattr(nested_router, "routes", []))
+        if not nested_routes:
+            continue
+        for sub_route in nested_routes:
+            if isinstance(sub_route, APIRoute):
+                full_path = str(getattr(sub_route, "path", "")).strip()
+                if not full_path.startswith("/"):
+                    full_path = f"/{full_path}"
+                yield f"{route_prefix}{full_path}" if route_prefix else full_path, sub_route.methods
 
 def test_agents_api_summary_detail_returns_light_payload(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
@@ -67,9 +92,8 @@ def test_agent_config_workspace_api_route(tmp_path, monkeypatch):
 
     registered_routes = [
         route
-        for route in client.app.routes
-        if getattr(route, "path", "") == "/api/agents/config-workspace"
-        and "GET" in set(getattr(route, "methods", set()) or set())
+        for route in _iter_api_routes(client.app)
+        if route[0] == "/api/agents/config-workspace" and "GET" in set(route[1] or set())
     ]
     payload = agents_route.agent_config_workspace()
 
