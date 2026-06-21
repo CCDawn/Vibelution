@@ -91,8 +91,6 @@ const SOURCE_COLLECTION_PROMPT_CACHE_POLICY = {
   requirement: "required_for_llm_execution",
 };
 const SOURCE_COLLECTION_PROMPT_CACHE_MODEL_LABEL = "configured prompt-cache model";
-const SOURCE_COLLECTION_STAGE_CHAT_MODE = "round_robin";
-const SOURCE_COLLECTION_STAGE_CHAT_PURPOSE = "research_coordination";
 
 const researchStageRoundStatusQueryKey = (id: string) => ["teams", id, "workflow-orchestration", "stage-rounds", "status"] as const;
 const experimentPlanningStatusQueryKey = (id: string) => ["teams", id, "workflow-orchestration", "experiments", "status"] as const;
@@ -334,25 +332,12 @@ const SOURCE_COLLECTION_STAGE_AGENT_KEYS: Record<SourceCollectionStageModuleId, 
 };
 
 const SOURCE_COLLECTION_STAGE_CHAT_LABELS: Record<SourceCollectionStageModuleId, { zh: string; en: string }> = {
-  collection: { zh: "搜索资料 Agent 会话", en: "Source search Agent room" },
-  candidate: { zh: "资料提炼 Agent 会话", en: "Source extraction Agent room" },
-  screening: { zh: "资料审查 Agent 会话", en: "Source review Agent room" },
-  graph: { zh: "资料关系 Agent 会话", en: "Source graph Agent room" },
-  memory: { zh: "资料入库 Agent 会话", en: "Knowledge ingestion Agent room" },
+  collection: { zh: "搜索资料 Agent 私聊", en: "Source search Agent chat" },
+  candidate: { zh: "资料提炼 Agent 私聊", en: "Source extraction Agent chat" },
+  screening: { zh: "资料审查 Agent 私聊", en: "Source review Agent chat" },
+  graph: { zh: "资料关系 Agent 私聊", en: "Source graph Agent chat" },
+  memory: { zh: "资料入库 Agent 私聊", en: "Knowledge ingestion Agent chat" },
 };
-
-function sourceCollectionStageRoomKey(teamId: string, stageId: SourceCollectionStageModuleId) {
-  return `challenge-cup-source-collection:${teamId}:${stageId}`;
-}
-
-function sourceCollectionStageChatTitle(teamName: string, stageId: SourceCollectionStageModuleId, lang: "zh" | "en") {
-  const label = SOURCE_COLLECTION_STAGE_CHAT_LABELS[stageId][lang];
-  return `${teamName || (lang === "zh" ? "挑战杯AI科研团队" : "Challenge Cup AI research team")} · ${label}`;
-}
-
-function sourceCollectionStageChatRoute(roomId: string) {
-  return `/chat?room=${encodeURIComponent(roomId)}`;
-}
 
 function parseSourceCollectionStageModuleId(value: string | null): SourceCollectionStageModuleId | null {
   if (value === "search") {
@@ -2421,6 +2406,11 @@ function researchStageAgentManagementRoute(agentId: string) {
   return `/agents?${params.toString()}`;
 }
 
+function researchStageAgentDirectChatRoute(agent: AgentConfigWorkspaceAgent | null | undefined) {
+  const sessionId = String(agent?.directSessionId || "").trim();
+  return sessionId ? `/chat?session=${encodeURIComponent(sessionId)}` : "";
+}
+
 function researchStageAgentModelLabel(agent: AgentConfigWorkspaceAgent | null | undefined, lang: "zh" | "en") {
   if (!agent) {
     return lang === "zh" ? "未绑定" : "not bound";
@@ -3838,25 +3828,6 @@ export function TeamsRoute({
       bindingSource: string;
     }>>;
   }, [activeAgentsById, canvas, selectedTeam?.members]);
-  const sourceCollectionStageChatRoomsQuery = useQuery({
-    queryKey: queryKeys.chatRooms(),
-    queryFn: () => fetchJson<ChatRoomDetail[]>("/api/chat-rooms"),
-    enabled: Boolean(researchWorkflowTeamSelected && effectiveTeamId),
-    staleTime: 30_000,
-  });
-  const sourceCollectionStageRoomById = useMemo(() => {
-    const rooms = new Map<SourceCollectionStageModuleId, ChatRoomDetail>();
-    for (const room of sourceCollectionStageChatRoomsQuery.data ?? []) {
-      const config = isRecord(room.config) ? room.config : {};
-      const roomKey = String(config.sourceCollectionStageRoomKey || "");
-      for (const stageId of Object.keys(SOURCE_COLLECTION_STAGE_AGENT_KEYS) as SourceCollectionStageModuleId[]) {
-        if (roomKey === sourceCollectionStageRoomKey(effectiveTeamId, stageId)) {
-          rooms.set(stageId, room);
-        }
-      }
-    }
-    return rooms;
-  }, [effectiveTeamId, sourceCollectionStageChatRoomsQuery.data]);
   const selectedSourceCollectionRun =
     sourceCollectionRuns.find((run) => run.runId === selectedSourceCollectionRunId) ?? sourceCollectionRuns[0] ?? null;
   const selectedSourceCollectionRunEffectiveId = selectedSourceCollectionRun?.runId ?? "";
@@ -4065,42 +4036,6 @@ export function TeamsRoute({
       setTeamTaskTopic("");
       queryClient.setQueryData(queryKeys.chatRoom(room.roomId), room);
       void chatWorkspaceCache.afterTeamRoomMembershipChanged(variables.teamId, room.roomId);
-    },
-  });
-
-  const createSourceCollectionStageChatRoomMutation = useMutation({
-    mutationFn: (payload: {
-      teamId: string;
-      teamName: string;
-      stageId: SourceCollectionStageModuleId;
-      agentIds: string[];
-    }) =>
-      fetchJson<ChatRoomDetail>("/api/chat-rooms", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          title: sourceCollectionStageChatTitle(payload.teamName, payload.stageId, lang),
-          agentIds: payload.agentIds,
-          mode: SOURCE_COLLECTION_STAGE_CHAT_MODE,
-          purpose: SOURCE_COLLECTION_STAGE_CHAT_PURPOSE,
-          config: {
-            source: "challenge_cup_source_collection_stage",
-            teamId: payload.teamId,
-            stageId: payload.stageId,
-            sourceCollectionStageRoomKey: sourceCollectionStageRoomKey(payload.teamId, payload.stageId),
-          },
-        }),
-      }),
-    onSuccess: (room, variables) => {
-      queryClient.setQueryData(queryKeys.chatRoom(room.roomId), room);
-      queryClient.setQueryData<ChatRoomDetail[] | undefined>(queryKeys.chatRooms(), (current) => {
-        if (!current) {
-          return [room];
-        }
-        return [room, ...current.filter((item) => item.roomId !== room.roomId)];
-      });
-      void chatWorkspaceCache.afterTeamRoomMembershipChanged(variables.teamId, room.roomId);
-      navigate(sourceCollectionStageChatRoute(room.roomId));
     },
   });
 
@@ -5248,29 +5183,23 @@ export function TeamsRoute({
     return (researchStageAgentBindingsByStage.knowledge_collection ?? []).filter((binding) => targetKeys.has(binding.key));
   }
 
-  function sourceCollectionStageAgentIds(stageId: SourceCollectionStageModuleId) {
-    return Array.from(new Set(
-      sourceCollectionStageAgentBindings(stageId)
-        .map((binding) => String(binding.agent?.agentId || binding.agentId || "").trim())
-        .filter(Boolean),
-    ));
+  function sourceCollectionStagePrimaryAgentBinding(stageId: SourceCollectionStageModuleId) {
+    const bindings = sourceCollectionStageAgentBindings(stageId);
+    return bindings.find((binding) => researchStageAgentDirectChatRoute(binding.agent)) ?? bindings[0] ?? null;
   }
 
-  function openSourceCollectionStageChat(stageId: SourceCollectionStageModuleId) {
-    const room = sourceCollectionStageRoomById.get(stageId);
-    if (room?.roomId) {
-      navigate(sourceCollectionStageChatRoute(room.roomId));
+  function openSourceCollectionStageAgentChat(stageId: SourceCollectionStageModuleId) {
+    const binding = sourceCollectionStagePrimaryAgentBinding(stageId);
+    const chatRoute = researchStageAgentDirectChatRoute(binding?.agent);
+    if (chatRoute) {
+      navigate(chatRoute);
       return;
     }
-    if (!selectedTeam?.teamId || createSourceCollectionStageChatRoomMutation.isPending) {
+    if (binding?.agentId) {
+      navigate(researchStageAgentManagementRoute(binding.agentId));
       return;
     }
-    createSourceCollectionStageChatRoomMutation.mutate({
-      teamId: selectedTeam.teamId,
-      teamName: selectedTeam.name,
-      stageId,
-      agentIds: sourceCollectionStageAgentIds(stageId),
-    });
+    navigate("/agents");
   }
 
   function renderSourceCollectionStageAgents(stageId: SourceCollectionStageModuleId) {
@@ -5311,6 +5240,7 @@ export function TeamsRoute({
                 ? (lang === "zh" ? "引用失效" : "missing reference")
                 : (lang === "zh" ? "待绑定" : "missing");
             const modelLabel = researchStageAgentModelLabel(binding.agent, lang);
+            const chatRoute = researchStageAgentDirectChatRoute(binding.agent);
             return (
               <article
                 key={`source-step-${stageId}-${binding.key}`}
@@ -5335,6 +5265,12 @@ export function TeamsRoute({
                 </div>
                 <div className={styles.sourceCollectionStageAgentCardActions}>
                   <span>{statusLabel}</span>
+                  {chatRoute ? (
+                    <Link to={chatRoute}>
+                      <MessageSquare size={12} />
+                      {lang === "zh" ? "私聊" : "Chat"}
+                    </Link>
+                  ) : null}
                   <Link to={binding.agentId ? researchStageAgentManagementRoute(binding.agentId) : "/agents"}>
                     <Link2 size={12} />
                     {binding.agent ? (lang === "zh" ? "配置" : "Configure") : (lang === "zh" ? "绑定" : "Bind")}
@@ -7340,11 +7276,12 @@ export function TeamsRoute({
     const activeModule =
       sourceCollectionStageModules.find((module) => module.id === selectedSourceCollectionStageId)
       ?? sourceCollectionStageModules[0];
-    const stageAgentIds = sourceCollectionStageAgentIds(activeModule.id);
-    const stageChatRoom = sourceCollectionStageRoomById.get(activeModule.id) ?? null;
-    const stageChatPending =
-      createSourceCollectionStageChatRoomMutation.isPending
-      && createSourceCollectionStageChatRoomMutation.variables?.stageId === activeModule.id;
+    const primaryStageAgentBinding = sourceCollectionStagePrimaryAgentBinding(activeModule.id);
+    const primaryStageAgentChatRoute = researchStageAgentDirectChatRoute(primaryStageAgentBinding?.agent);
+    const primaryStageAgentFallbackRoute = primaryStageAgentBinding?.agentId
+      ? researchStageAgentManagementRoute(primaryStageAgentBinding.agentId)
+      : "/agents";
+    const primaryStageAgentRoute = primaryStageAgentChatRoute || primaryStageAgentFallbackRoute;
     const resultPanel = selectedSourceCollectionStageId === "screening"
       ? renderSourceCollectionScreeningPanel()
       : selectedSourceCollectionStageId === "candidate"
@@ -7372,31 +7309,19 @@ export function TeamsRoute({
             <span className={styles.sourceCollectionStageHandoffNext}><b>{lang === "zh" ? "下一步" : "Next"}</b>{activeModule.nextLabel}</span>
           </div>
           <div className={styles.sourceCollectionStageChatActions}>
-            {stageAgentIds.length ? (
-            <button
-              type="button"
-              onClick={() => openSourceCollectionStageChat(activeModule.id)}
-              disabled={stageChatPending}
-              title={stageChatRoom?.roomId || SOURCE_COLLECTION_STAGE_CHAT_LABELS[activeModule.id][lang]}
+            <Link
+              to={primaryStageAgentRoute}
+              title={primaryStageAgentChatRoute
+                ? SOURCE_COLLECTION_STAGE_CHAT_LABELS[activeModule.id][lang]
+                : (lang === "zh" ? "当前步骤缺少可用私聊，进入 Agent 配置" : "No usable direct chat for this step; open Agent config")}
             >
               <MessageSquare size={13} />
-              {stageChatPending
-                ? (lang === "zh" ? "创建会话中" : "Creating room")
-                : stageChatRoom
-                  ? (lang === "zh" ? "进入 Agent 会话" : "Open Agent room")
-                  : (lang === "zh" ? "创建 Agent 会话" : "Create Agent room")}
-            </button>
-            ) : (
-              <Link to="/agents" title={lang === "zh" ? "当前阶段缺少可用 Agent" : "No usable Agent is bound to this stage"}>
-                <Link2 size={13} />
-                {lang === "zh" ? "先配置 Agent" : "Configure Agents"}
-              </Link>
-            )}
+              {primaryStageAgentChatRoute
+                ? (lang === "zh" ? "进入 Agent 私聊" : "Open Agent chat")
+                : (lang === "zh" ? "配置主责 Agent" : "Configure lead Agent")}
+            </Link>
           </div>
         </div>
-        {createSourceCollectionStageChatRoomMutation.error instanceof Error ? (
-          <div className={styles.messageError}>{createSourceCollectionStageChatRoomMutation.error.message}</div>
-        ) : null}
         {resultPanel}
       </section>
     );
@@ -8324,6 +8249,23 @@ export function TeamsRoute({
             <h1>{config.title}</h1>
           </div>
           <div className={styles.sourceCollectionPageActions}>
+            {linkedChatRoomId ? (
+              <Link to={`/chat?room=${encodeURIComponent(linkedChatRoomId)}`}>
+                <Users size={14} />
+                {lang === "zh" ? "团队讨论" : "Team discussion"}
+              </Link>
+            ) : (
+              <button
+                type="button"
+                onClick={() => selectedTeam?.teamId && syncTeamChatRoomMutation.mutate(selectedTeam.teamId)}
+                disabled={!selectedTeam || activeTeamMemberCount === 0 || selectedTeamSyncPending}
+              >
+                <Users size={14} />
+                {selectedTeamSyncPending
+                  ? (lang === "zh" ? "同步中" : "Syncing")
+                  : (lang === "zh" ? "同步团队讨论" : "Sync team discussion")}
+              </button>
+            )}
             <Link to={teamWorkspaceRoute(selectedTeam?.teamId || RESEARCH_TEAM_ID)}>
               <ArrowLeft size={14} />
               {lang === "zh" ? "返回团队页面" : "Back to team"}
@@ -9438,7 +9380,7 @@ export function TeamsRoute({
       actionIcon: selectedSourceCollectionRun && sourceCollectionSearchOpenAssignmentCount > 0 ? "search" : "play",
       onAction: runSourceCollectionCollectionAction,
       onDetail: () => openSourceCollectionStage("collection"),
-      onAgentChat: () => openSourceCollectionStageChat("collection"),
+      onAgentChat: () => openSourceCollectionStageAgentChat("collection"),
     },
     {
       id: "candidate",
@@ -9459,7 +9401,7 @@ export function TeamsRoute({
       actionIcon: selectedTeamExtractSourceCollectionCandidatesPending ? "refresh" : "archive",
       onAction: runSourceCollectionCandidateExtractionAction,
       onDetail: () => openSourceCollectionStage("candidate"),
-      onAgentChat: () => openSourceCollectionStageChat("candidate"),
+      onAgentChat: () => openSourceCollectionStageAgentChat("candidate"),
     },
     {
       id: "screening",
@@ -9484,7 +9426,7 @@ export function TeamsRoute({
       actionIcon: "check",
       onAction: runSourceCollectionScreeningAction,
       onDetail: () => openSourceCollectionStage("screening"),
-      onAgentChat: () => openSourceCollectionStageChat("screening"),
+      onAgentChat: () => openSourceCollectionStageAgentChat("screening"),
     },
     {
       id: "graph",
@@ -9509,7 +9451,7 @@ export function TeamsRoute({
       actionIcon: "refresh",
       onAction: runSourceCollectionGraphAction,
       onDetail: () => openSourceCollectionStage("graph"),
-      onAgentChat: () => openSourceCollectionStageChat("graph"),
+      onAgentChat: () => openSourceCollectionStageAgentChat("graph"),
     },
     {
       id: "memory",
@@ -9544,7 +9486,7 @@ export function TeamsRoute({
       actionIcon: "check",
       onAction: runSourceCollectionMemoryPrecheckAction,
       onDetail: () => openSourceCollectionStage("memory"),
-      onAgentChat: () => openSourceCollectionStageChat("memory"),
+      onAgentChat: () => openSourceCollectionStageAgentChat("memory"),
     },
   ];
   const sourceCollectionStageCardKeyDown = (
@@ -9617,6 +9559,23 @@ export function TeamsRoute({
             </div>
           </div>
           <div className={styles.sourceCollectionPageActions}>
+            {linkedChatRoomId ? (
+              <Link to={`/chat?room=${encodeURIComponent(linkedChatRoomId)}`}>
+                <Users size={14} />
+                {lang === "zh" ? "团队讨论" : "Team discussion"}
+              </Link>
+            ) : (
+              <button
+                type="button"
+                onClick={() => selectedTeam?.teamId && syncTeamChatRoomMutation.mutate(selectedTeam.teamId)}
+                disabled={!selectedTeam || activeTeamMemberCount === 0 || selectedTeamSyncPending}
+              >
+                <Users size={14} />
+                {selectedTeamSyncPending
+                  ? (lang === "zh" ? "同步中" : "Syncing")
+                  : (lang === "zh" ? "同步团队讨论" : "Sync team discussion")}
+              </button>
+            )}
             <Link to={teamWorkspaceRoute(selectedTeam?.teamId || RESEARCH_TEAM_ID)}>
               <ArrowLeft size={14} />
               {lang === "zh" ? "返回团队页面" : "Back to team"}
@@ -9688,11 +9647,10 @@ export function TeamsRoute({
                       type="button"
                       className={styles.sourceCollectionStageSecondaryAction}
                       onClick={module.onAgentChat}
-                      disabled={createSourceCollectionStageChatRoomMutation.isPending}
                       title={SOURCE_COLLECTION_STAGE_CHAT_LABELS[module.id][lang]}
                     >
                       <MessageSquare size={13} />
-                      {lang === "zh" ? "Agent 会话" : "Agent room"}
+                      {lang === "zh" ? "Agent 私聊" : "Agent chat"}
                     </button>
                   </div>
                 </article>
