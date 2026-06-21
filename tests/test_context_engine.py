@@ -10,6 +10,11 @@ from core.web.services import agent_directory_service, prompt_template_service, 
 def _use_tmp_project_root(tmp_path, monkeypatch):
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(prompt_template_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        agent_directory_service,
+        "_configured_model_library_ids",
+        lambda: {"model-primary", "model-research-broad"},
+    )
     with context_engine._RESEARCH_ORG_CONTEXT_CACHE_LOCK:
         context_engine._RESEARCH_ORG_CONTEXT_CACHE.clear()
     with context_engine._PROJECT_RULES_CONTEXT_CACHE_LOCK:

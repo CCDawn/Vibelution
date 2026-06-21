@@ -78,3 +78,35 @@ def test_debug_log_fields_are_added_only_when_sandbox_enabled(tmp_path, monkeypa
     assert fields["developerSandboxId"] == enabled["sandbox"]["sandboxId"]
     assert fields["recordKind"] == "debug"
     assert fields["retention"] == "diagnostic_only"
+
+
+def test_developer_mode_status_reuses_config_parse_until_file_changes(tmp_path, monkeypatch):
+    config_path = tmp_path / "config.toml"
+    config_path.write_text("[launcher]\ncontrol_port = 8765\n", encoding="utf-8")
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    calls = 0
+    original_load_public_config = developer_sandbox.load_public_config
+
+    def counted_load_public_config(path=None):
+        nonlocal calls
+        calls += 1
+        return original_load_public_config(path)
+
+    monkeypatch.setattr(developer_sandbox, "load_public_config", counted_load_public_config)
+    developer_sandbox._clear_developer_mode_config_cache()
+
+    first = developer_sandbox.get_developer_mode_status(config_path=config_path, project_root=project_root)
+    second = developer_sandbox.get_developer_mode_status(config_path=config_path, project_root=project_root)
+
+    assert first["configHash"] == second["configHash"]
+    assert calls == 1
+
+    config_path.write_text(
+        "[launcher]\ncontrol_port = 8765\n[launcher.developer_mode]\nenabled = true\n",
+        encoding="utf-8",
+    )
+    refreshed = developer_sandbox.get_developer_mode_status(config_path=config_path, project_root=project_root)
+
+    assert refreshed["enabled"] is True
+    assert calls == 2

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import shutil
+from threading import RLock
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -98,6 +99,8 @@ _SANDBOXED_SURFACE_DEFAULTS = {
     "team",
     "team_knowledge",
 }
+_CONFIG_CACHE_LOCK = RLock()
+_CONFIG_CACHE: dict[tuple[str, int | None, int | None], tuple[dict[str, Any], str]] = {}
 
 
 class DeveloperSandboxConfigConflict(ValueError):
@@ -129,7 +132,7 @@ def get_developer_mode_status(
     """Return the global developer sandbox mode status."""
 
     root = _project_root(project_root)
-    public_config = _load_public_config(config_path)
+    public_config, config_hash, resolved_config_path = _load_public_config_with_hash(config_path)
     setting = _raw_setting(public_config)
     enabled = bool(setting.get("enabled", False))
     state = _ensure_active_state(root) if enabled and ensure_sandbox else _read_active_state(root)
@@ -144,8 +147,8 @@ def get_developer_mode_status(
         "controller": "launcher",
         "scope": "global",
         "mode": "ephemeral_sandbox",
-        "configPath": str(config_path or CONFIG_PATH),
-        "configHash": public_config_hash(public_config),
+        "configPath": str(resolved_config_path),
+        "configHash": config_hash,
         "sandbox": {
             "sandboxId": sandbox_id,
             "root": str(sandbox_root) if sandbox_root is not None else "",
@@ -270,6 +273,7 @@ def update_developer_mode_status(
     else:
         state = _read_active_state(root)
         clear_active_sandbox(project_root=root)
+    _clear_developer_mode_config_cache()
     status = get_developer_mode_status(
         config_path=config_path,
         project_root=root,
@@ -456,6 +460,40 @@ def _load_public_config(config_path: Path | None) -> dict[str, Any]:
     except Exception:
         return {}
     return payload if isinstance(payload, dict) else {}
+
+
+def _load_public_config_with_hash(config_path: Path | None) -> tuple[dict[str, Any], str, Path]:
+    resolved_path = _resolved_config_path(config_path)
+    signature = _file_signature(resolved_path)
+    with _CONFIG_CACHE_LOCK:
+        cached = _CONFIG_CACHE.get(signature)
+    if cached is not None:
+        public_config, config_hash = cached
+        return public_config, config_hash, resolved_path
+
+    public_config = _load_public_config(resolved_path)
+    config_hash = public_config_hash(public_config)
+    refreshed_signature = _file_signature(resolved_path)
+    with _CONFIG_CACHE_LOCK:
+        _CONFIG_CACHE[refreshed_signature] = (public_config, config_hash)
+    return public_config, config_hash, resolved_path
+
+
+def _clear_developer_mode_config_cache() -> None:
+    with _CONFIG_CACHE_LOCK:
+        _CONFIG_CACHE.clear()
+
+
+def _resolved_config_path(config_path: Path | None) -> Path:
+    return Path(config_path or CONFIG_PATH).expanduser().resolve()
+
+
+def _file_signature(path: Path) -> tuple[str, int | None, int | None]:
+    try:
+        stat = path.stat()
+    except OSError:
+        return (str(path), None, None)
+    return (str(path), int(stat.st_mtime_ns), int(stat.st_size))
 
 
 def _raw_setting(public_config: dict[str, Any]) -> dict[str, Any]:
