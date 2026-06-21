@@ -4875,7 +4875,7 @@ export function ChatCodingRoute() {
   const sessionStopping = isStoppingPhase(detail?.currentPhase) || Boolean(detail?.stopRequested);
   const sessionBusy = isBusyPhase(detail?.currentPhase);
   const composerStopMode = sessionBusy;
-  const composerGuidance = sessionBusy && !sessionStopping ? t("sessionBusyComposerGuidance") : "";
+  const composerGuidance = "";
   const composerPending =
     composerStopMode ? (stopTurnMutation.isPending && stopMutationMatchesActiveSession) || sessionStopping : submitPending;
   const composerSafeGuidancePending =
@@ -4895,10 +4895,8 @@ export function ChatCodingRoute() {
   const composerPlaceholder =
     !activeSessionId
       ? t("loadingSession")
-      : sessionStopping
-        ? t("sessionStoppingPlaceholder")
-        : sessionBusy
-          ? t("sessionBusyPlaceholder")
+      : sessionStopping || sessionBusy
+        ? ""
           : resolvedEditTarget
             ? t("editMessagePlaceholder")
           : t("messageInputPlaceholder");
