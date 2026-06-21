@@ -24,6 +24,12 @@ def classify_exception(exc: Exception) -> LLMError:
         return LLMError("context_length_error", "上下文长度超过模型限制", retryable=False)
     if "quota" in lower or "insufficient_quota" in lower or "billing" in lower:
         return LLMError("quota_error", "provider 额度不足或计费受限", retryable=False)
+    if "duplicate tool_call id" in lower or ("tool" in lower and "schema" in lower):
+        return LLMError("tool_protocol_error", exc_msg or "tool calling 协议错误", retryable=False)
+    if "chat content is empty" in lower or "content is empty" in lower:
+        return LLMError("empty_content_error", "provider 拒绝空消息内容", retryable=False)
+    if "bad_request" in lower or "bad request" in lower or "invalid params" in lower or "400" in lower:
+        return LLMError("provider_protocol_error", exc_msg or "provider 请求参数错误", retryable=False)
     if (
         "unexpected_eof_while_reading" in lower
         or "eof occurred in violation of protocol" in lower
@@ -35,6 +41,19 @@ def classify_exception(exc: Exception) -> LLMError:
         or "remoteprotocolerror" in lower
         or "connection reset" in lower
         or "connection aborted" in lower
+        or "apiconnectionerror" in lower_type
+        or "apiconnectionerror" in lower
+        or "api connection error" in lower
+        or "connecterror" in lower_type
+        or "connecterror" in lower
+        or "connection error" in lower
+        or "connection refused" in lower
+        or "failed to connect" in lower
+        or "connect tcp" in lower
+        or "winerror 10061" in lower
+        or "actively refused" in lower
+        or "目标计算机积极拒绝" in lower
+        or "无法连接" in lower
     ):
         return LLMError("network_error", exc_msg or "provider 传输连接异常", retryable=True)
     if (
