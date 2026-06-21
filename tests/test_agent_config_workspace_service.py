@@ -316,6 +316,36 @@ def test_agent_config_workspace_promotes_direct_session_after_activity(tmp_path,
     assert agent_id in groups["work_session"]["agentIds"]
 
 
+def test_agent_boundary_prefers_team_reference_over_protected_service_marker():
+    boundary = agent_config_workspace_service._derive_agent_boundary(
+        {
+            "status": "active",
+            "primaryMode": "research",
+            "roleKey": "cn_primary_sources",
+            "metadata": {
+                "protected": True,
+                "fixedRole": True,
+                "configSurface": "team",
+            },
+            "directSessionId": "session-source",
+        },
+        references=[
+            {
+                "kind": "team",
+                "sourceId": "ai-search-team",
+                "sourceLabel": "AI 搜索范围团队",
+                "mode": "",
+                "field": "cn_primary_sources",
+                "status": "active",
+            }
+        ],
+    )
+
+    assert boundary["type"] == "team_role"
+    assert boundary["reason"] == "team_reference"
+    assert boundary["requiresTeamMembership"] == "true"
+
+
 def test_agent_config_workspace_summary_counts_only_actionable_health_issues():
     summary = agent_config_workspace_service._summary(
         [

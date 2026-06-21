@@ -42,6 +42,12 @@ const NOISY_LABELS = new Set([
   "default chat",
   "general chat agent",
   "general chat",
+  "cli 会话",
+  "cli会话",
+  "真实会话",
+  "real session",
+  "real chat",
+  "x",
   "会话默认",
   "默认会话",
   "通用会话 agent",
@@ -77,16 +83,18 @@ const ROLE_LABELS: Record<string, { zh: string; en: string; tone: AgentDisplayTo
   "agent-center-review-session": { zh: "Agent 配置审查", en: "Agent config review", tone: "chat" },
   "ai-search-scope-lead": { zh: "搜索范围", en: "Search scope", tone: "research" },
   "chat-session-entry": { zh: "会话入口", en: "Chat entry", tone: "chat" },
+  "challenge-cup-coordinator": { zh: "科研统筹", en: "Research coordinator", tone: "research" },
   "challenge-cup-content-extraction": { zh: "内容抽取", en: "Content extraction", tone: "research" },
   "challenge-cup-data-discovery": { zh: "数据发现", en: "Data discovery", tone: "research" },
   "challenge-cup-source-acquisition": { zh: "来源获取", en: "Source acquisition", tone: "research" },
   "challenge-cup-source-quality": { zh: "资料质检", en: "Source quality", tone: "research" },
-  "cn-primary-sources": { zh: "中国官方源", en: "CN primary sources", tone: "research" },
-  "global-primary-sources": { zh: "全球官方源", en: "Global primary sources", tone: "research" },
+  "cn-primary-sources": { zh: "中国源检索", en: "CN source search", tone: "research" },
+  "global-primary-sources": { zh: "全球源检索", en: "Global source search", tone: "research" },
   "knowledge-steward": { zh: "知识管理员", en: "Knowledge steward", tone: "memory" },
   "research-capability-steward": { zh: "能力管家", en: "Capability steward", tone: "research" },
   "research-ceo": { zh: "科研负责人", en: "Research lead", tone: "research" },
   "research-organization-advisor": { zh: "科研组织顾问", en: "Research advisor", tone: "research" },
+  "research-paper-reader": { zh: "论文阅读", en: "Paper reader", tone: "research" },
   "signal-quality-gate": { zh: "信号质检", en: "Signal quality", tone: "research" },
 };
 
@@ -214,7 +222,7 @@ export function agentRoleLabel(
   const lowerFunctional = functional.toLowerCase();
   const roleOverride = mappedRole(role, lang) || mappedRole(prompt, lang);
   if (roleOverride) {
-    return { label: roleOverride.label, tone: tone === "general" ? roleOverride.tone : tone };
+    return { label: roleOverride.label, tone: roleOverride.tone };
   }
 
   if (tone === "research") {

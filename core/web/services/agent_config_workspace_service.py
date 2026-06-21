@@ -1025,6 +1025,21 @@ def _derive_agent_boundary(agent: dict[str, Any], *, references: list[dict[str, 
             "requiresTeamMembership": "true",
         }
 
+    has_team_ref = "team" in ref_kinds
+    research_markers = primary_mode == "research" or "research" in ref_modes or role_key.startswith("research_")
+    if has_team_ref or research_markers:
+        return {
+            "type": "team_role",
+            "label": "团队/科研角色 Agent",
+            "ownership": "team",
+            "directSessionRole": "recovery_channel",
+            "reason": "team_reference" if has_team_ref else "research_mode",
+            "configurationSurface": "team_role",
+            "requiresPersonaProfile": "true",
+            "requiresTaskProfile": "true",
+            "requiresTeamMembership": "true",
+        }
+
     service_markers = (
         role_key in {"knowledge_steward"}
         or "steward" in role_key
@@ -1042,21 +1057,6 @@ def _derive_agent_boundary(agent: dict[str, Any], *, references: list[dict[str, 
             "requiresPersonaProfile": "false",
             "requiresTaskProfile": "true",
             "requiresTeamMembership": "false",
-        }
-
-    has_team_ref = "team" in ref_kinds
-    research_markers = primary_mode == "research" or "research" in ref_modes or role_key.startswith("research_")
-    if has_team_ref or research_markers:
-        return {
-            "type": "team_role",
-            "label": "团队/科研角色 Agent",
-            "ownership": "team",
-            "directSessionRole": "recovery_channel",
-            "reason": "team_reference" if has_team_ref else "research_mode",
-            "configurationSurface": "team_role",
-            "requiresPersonaProfile": "true",
-            "requiresTaskProfile": "true",
-            "requiresTeamMembership": "true",
         }
 
     chat_default = any(
