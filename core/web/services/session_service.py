@@ -7179,12 +7179,15 @@ def _is_default_empty_session_title(title: str) -> bool:
 
 def _build_session_summary(conversation: dict[str, Any], *, hydrate_agent: bool = True) -> dict[str, Any]:
     status = _conversation_phase(conversation["id"], conversation)
-    summary = _latest_message_summary(
-        _normalize_messages(
+    summary_messages = list(conversation.get("messages") or [])
+    if summary_messages:
+        normalized_summary_messages = _normalize_messages(conversation["id"], summary_messages)
+    else:
+        normalized_summary_messages = _normalize_messages(
             conversation["id"],
             _ledger_visible_messages_for_session(conversation["id"]),
         )
-    )
+    summary = _latest_message_summary(normalized_summary_messages)
     updated_at = str(conversation.get("updatedAt") or "").strip()
     agent_id = str(conversation.get("agentId") or "").strip()
     cached_agent = conversation.get("_agent")
@@ -7368,6 +7371,8 @@ def _build_session_detail_from_summary(
         str(active_task.get("active_preview_path") or "").strip() if active_task else ""
     ) or "agent"
     detail_messages = _messages_with_live_output(conversation["id"])
+    if not detail_messages:
+        detail_messages = list(conversation.get("messages") or [])
     context_usage = _build_session_context_usage(conversation, detail_messages)
     llm_usage = _session_last_llm_usage(conversation, detail_messages)
     cache_usage = _build_session_cache_usage(llm_usage, detail_messages)
