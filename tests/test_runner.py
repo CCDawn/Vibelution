@@ -24,6 +24,7 @@ import subprocess
 import argparse
 import importlib.util
 import re
+import threading
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple
@@ -63,6 +64,47 @@ def _parse_pytest_counts(output: str, returncode: int) -> Tuple[int, int, int]:
         return counts["passed"], counts["failed"], counts["skipped"]
 
     return (1, 0, 0) if returncode == 0 else (0, 1, 0)
+
+
+def _run_command_with_live_output(
+    cmd: List[str],
+    *,
+    timeout: int,
+    cwd: Path,
+) -> Tuple[int, str]:
+    """Run a command while streaming its combined output and retaining it."""
+    output_parts: list[str] = []
+    process = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        cwd=str(cwd),
+        bufsize=1,
+    )
+
+    def _forward_output() -> None:
+        if process.stdout is None:
+            return
+        for line in process.stdout:
+            output_parts.append(line)
+            print(line, end="", flush=True)
+
+    reader = threading.Thread(target=_forward_output, daemon=True)
+    reader.start()
+    try:
+        returncode = process.wait(timeout=timeout)
+    except subprocess.TimeoutExpired as exc:
+        process.kill()
+        reader.join(timeout=1.0)
+        raise subprocess.TimeoutExpired(
+            cmd=exc.cmd,
+            timeout=exc.timeout,
+            output="".join(output_parts),
+        ) from exc
+
+    reader.join(timeout=1.0)
+    return returncode, "".join(output_parts)
 
 
 class TestRunner:
@@ -166,22 +208,17 @@ class TestRunner:
         allow_no_tests: bool = False,
     ) -> Tuple[bool, Dict]:
         try:
-            result = subprocess.run(
+            returncode, output = _run_command_with_live_output(
                 cmd,
-                capture_output=True,
-                text=True,
                 cwd=str(PROJECT_ROOT),
                 timeout=timeout,
             )
-            output = result.stdout + result.stderr
-            no_tests_selected = result.returncode == pytest.ExitCode.NO_TESTS_COLLECTED
-            passed, failed, skipped = _parse_pytest_counts(output, result.returncode)
+            no_tests_selected = returncode == pytest.ExitCode.NO_TESTS_COLLECTED
+            passed, failed, skipped = _parse_pytest_counts(output, returncode)
             if allow_no_tests and no_tests_selected:
                 passed, failed, skipped = 0, 0, 0
             total = passed + failed + skipped
-            success = result.returncode == 0 or (allow_no_tests and no_tests_selected)
-
-            print(output)
+            success = returncode == 0 or (allow_no_tests and no_tests_selected)
 
             return success, {
                 "module": module,
@@ -597,6 +634,24 @@ def test_runner_hybrid_runs_parallel_and_serial_stages(monkeypatch):
 def test_runner_parses_pytest_summary_without_failed_count():
     assert _parse_pytest_counts("13 passed in 1.66s", 0) == (13, 0, 0)
     assert _parse_pytest_counts("1 failed, 97 passed, 2 skipped in 4.33s", 1) == (97, 1, 2)
+
+
+def test_runner_streams_pytest_output_and_keeps_summary(capsys):
+    runner = TestRunner(verbose=False, fast=False, environment_smoke=True)
+
+    success, result = runner._run_pytest_command(
+        [sys.executable, "-c", "print('13 passed in 0.01s')"],
+        module="synthetic",
+        description="Synthetic stream",
+        timeout=10,
+        timeout_message="timeout",
+    )
+
+    captured = capsys.readouterr()
+    assert success is True
+    assert result["passed"] == 13
+    assert result["failed"] == 0
+    assert "13 passed in 0.01s" in captured.out
 
 
 def test_runner_environment_smoke_targets_are_stable():
