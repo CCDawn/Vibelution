@@ -3003,6 +3003,7 @@ function agentsRouteCopy(lang: "zh" | "en") {
           reference: "引用关系",
           management: "工作队列",
         },
+        moreFilters: "更多筛选",
         groupLabels: {
           active: "可用 Agent",
           needs_review: "需要处理",
@@ -3400,6 +3401,7 @@ function agentsRouteCopy(lang: "zh" | "en") {
           reference: "References",
           management: "Work queue",
         },
+        moreFilters: "More filters",
         groupLabels: {
           active: "Available Agents",
           needs_review: "Needs Review",
@@ -3859,7 +3861,7 @@ export function AgentsRoute() {
     [copy, workspace?.agents],
   );
   const groupedFilters = useMemo(() => {
-    const sectionOrder = ["status", "boundary", "team_index", "source_scope", "mode", "reference"] as const;
+    const sectionOrder = ["status", "boundary", "team_index"] as const;
     const indexedGroups = [...groups, ...teamIndexGroups];
     const defaultSections = sectionOrder
       .map((section) => ({
@@ -3878,6 +3880,18 @@ export function AgentsRoute() {
       ...defaultSections,
     ].filter((section) => section.groups.length > 0);
   }, [copy, groups, managementFilterGroups, teamIndexGroups]);
+  const advancedGroupedFilters = useMemo(() => {
+    const sectionOrder = ["source_scope", "mode", "reference"] as const;
+    const indexedGroups = [...groups, ...teamIndexGroups];
+    return sectionOrder
+      .map((section) => ({
+        id: section,
+        label: copy.filterSections[section],
+        groups: indexedGroups.filter((group) => groupSectionId(group) === section),
+      }))
+      .filter((section) => section.groups.length > 0);
+  }, [copy, groups, teamIndexGroups]);
+  const advancedFilterCount = advancedGroupedFilters.reduce((total, section) => total + section.groups.length, 0);
   const activeGroup = groups.find((group) => group.id === activeFilter);
   const activeTeamIndexGroup = teamIndexGroups.find((group) => group.id === activeFilter);
   const activeManagementGroup = managementFilterGroups.find((group) => group.id === activeFilter);
@@ -5518,7 +5532,7 @@ export function AgentsRoute() {
                         title={description}
                       >
                         <span>
-                          {section.id === "management" ? <CheckCircle2 size={15} /> : section.id === "boundary" ? <UserRound size={15} /> : section.id === "team_index" ? <Users size={15} /> : section.id === "source_scope" ? <Database size={15} /> : section.id === "reference" ? <Users size={15} /> : section.id === "mode" ? <Layers3 size={15} /> : group.id === "needs_review" ? <AlertTriangle size={15} /> : <Bot size={15} />}
+                          {section.id === "management" ? <CheckCircle2 size={15} /> : section.id === "boundary" ? <UserRound size={15} /> : section.id === "team_index" ? <Users size={15} /> : group.id === "needs_review" ? <AlertTriangle size={15} /> : <Bot size={15} />}
                           {displayLabel}
                         </span>
                         <strong>{group.count}</strong>
@@ -5531,6 +5545,50 @@ export function AgentsRoute() {
                 </div>
               </section>
             ))}
+            {advancedGroupedFilters.length ? (
+              <details className={styles.advancedFilterSection}>
+                <summary className={styles.advancedFilterSummary}>
+                  <span>{copy.moreFilters}</span>
+                  <strong>{advancedFilterCount}</strong>
+                </summary>
+                <div className={styles.advancedFilterBody}>
+                  {advancedGroupedFilters.map((section) => (
+                    <section key={section.id} className={styles.groupSection}>
+                      <p className={styles.groupSectionTitle}>{section.label}</p>
+                      <div className={styles.groupSectionItems}>
+                        {section.groups.map((group) => {
+                          const active = activeFilter === group.id;
+                          const description = groupDescription(group, copy);
+                          const displayLabel = groupDisplayLabel(group, copy);
+                          return (
+                            <button
+                              key={group.id}
+                              type="button"
+                              className={active ? `${styles.groupButton} ${styles.groupButtonActive}` : styles.groupButton}
+                              onClick={() => {
+                                setActiveFilter(group.id);
+                                setSelectedAgentId("");
+                              }}
+                              aria-label={groupAriaLabel(displayLabel, group, copy, lang)}
+                              title={description}
+                            >
+                              <span>
+                                {section.id === "source_scope" ? <Database size={15} /> : section.id === "reference" ? <Users size={15} /> : <Layers3 size={15} />}
+                                {displayLabel}
+                              </span>
+                              <strong>{group.count}</strong>
+                              {group.healthCount ? (
+                                <em>{group.id === "setup:inbox" ? copy.statusReminderShort : copy.healthIssueShort} {group.healthCount}</em>
+                              ) : null}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </section>
+                  ))}
+                </div>
+              </details>
+            ) : null}
           </nav>
           <section className={styles.storagePanel}>
             <p className={styles.panelEyebrow}>{copy.readOnly}</p>

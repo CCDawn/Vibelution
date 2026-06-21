@@ -94,13 +94,15 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).not.toContain("agentCardGrid");
   });
 
-  it("separates Agent filters into work queue, status, identity, team, source, mode, and reference sections", () => {
+  it("keeps common Agent filters prominent and folds low-frequency filters away", () => {
     expect(routeSource).toContain('useState<FilterId>("active")');
     expect(routeSource).toContain("groupedFilters");
+    expect(routeSource).toContain("advancedGroupedFilters");
     expect(routeSource).toContain("teamIndexes");
     expect(routeSource).toContain("copy.filterSections");
     expect(routeSource).toContain("copy.groupLabels");
-    expect(routeSource).toContain('const sectionOrder = ["status", "boundary", "team_index", "source_scope", "mode", "reference"] as const;');
+    expect(routeSource).toContain('const sectionOrder = ["status", "boundary", "team_index"] as const;');
+    expect(routeSource).toContain('const sectionOrder = ["source_scope", "mode", "reference"] as const;');
     expect(routeSource).toContain("workspaceTeamIndexes(workspace)");
     expect(routeSource).toContain('section === "team_index"');
     expect(routeSource).toContain('section === "source_scope"');
@@ -108,13 +110,21 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain('source_scope: "来源范围"');
     expect(routeSource).toContain('team_index: "Team indexes"');
     expect(routeSource).toContain('source_scope: "Source scope"');
+    expect(routeSource).toContain('moreFilters: "更多筛选"');
+    expect(routeSource).toContain('moreFilters: "More filters"');
     expect(routeSource).toContain("sourceScopeGroupId");
     expect(routeSource).toContain("teamIndexesWithoutAgentIds");
     expect(routeSource).toContain('section === "boundary"');
     expect(routeSource).toContain("managementSection,");
+    expect(routeSource).toContain("styles.advancedFilterSection");
+    expect(routeSource).toContain("styles.advancedFilterSummary");
+    expect(routeSource).toContain("styles.advancedFilterBody");
     expect(routeSource).toContain("styles.groupSection");
     expect(routeSource).toContain("styles.groupSectionTitle");
     expect(routeSource).toContain("groupDisplayLabel(group, copy)");
+    expect(styles.advancedFilterSection).toBeTruthy();
+    expect(styles.advancedFilterSummary).toBeTruthy();
+    expect(styles.advancedFilterBody).toBeTruthy();
     expect(styles.groupSection).toBeTruthy();
     expect(styles.groupSectionTitle).toBeTruthy();
   });
@@ -565,7 +575,8 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("function isWorkSessionCreateDraft");
     expect(routeSource).toContain("const createDraftIsWorkSession = isWorkSessionCreateDraft(createDraft)");
     expect(routeSource).toContain("const workSession = isWorkSessionCreateDraft(draft)");
-    expect(routeSource).toContain("const sectionOrder = [\"status\", \"boundary\", \"team_index\", \"source_scope\", \"mode\", \"reference\"] as const");
+    expect(routeSource).toContain("const sectionOrder = [\"status\", \"boundary\", \"team_index\"] as const");
+    expect(routeSource).toContain("const sectionOrder = [\"source_scope\", \"mode\", \"reference\"] as const");
     expect(routeSource).toContain("copy.managementModelPrompt");
     expect(routeSource).toContain("copy.managementWorkspace");
     expect(routeSource).toContain("copy.nextSetupModelPrompt");
