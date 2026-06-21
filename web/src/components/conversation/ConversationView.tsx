@@ -148,6 +148,9 @@ type ComputerUseResult = {
 export function buildTimelineScrollSignal(messages: ConversationMessage[]) {
   return messages
     .map((message) => {
+      const contentSignal = message.streaming
+        ? ""
+        : [message.content.length, message.thought?.length ?? 0].join(":");
       const mentalSnapshot = message.mentalSnapshot;
       const mentalSignal = mentalSnapshot
         ? [
@@ -205,8 +208,7 @@ export function buildTimelineScrollSignal(messages: ConversationMessage[]) {
         : "";
       return [
         message.id,
-        message.content.length,
-        message.thought?.length ?? 0,
+        contentSignal,
         feedbackSignal,
         toolSignal,
         mentalSignal,
@@ -214,6 +216,13 @@ export function buildTimelineScrollSignal(messages: ConversationMessage[]) {
         message.streaming ? 1 : 0,
       ].join(":");
     })
+    .join("|");
+}
+
+export function buildStreamingTimelineScrollSignal(messages: ConversationMessage[]) {
+  return messages
+    .filter((message) => message.streaming)
+    .map((message) => [message.id, message.content.length, message.thought?.length ?? 0].join(":"))
     .join("|");
 }
 
@@ -840,6 +849,10 @@ export function ConversationView({
     [showMentalSnapshots, timelineMessages],
   );
   const timelineScrollSignal = useMemo(() => buildTimelineScrollSignal(timelineSignalMessages), [timelineSignalMessages]);
+  const streamingTimelineScrollSignal = useMemo(
+    () => buildStreamingTimelineScrollSignal(timelineSignalMessages),
+    [timelineSignalMessages],
+  );
   const hasSessionMeta = resolvedStats.length > 0 || latestToolCalls.length > 0;
   const hasMetaSection = showSessionOverview && (hasSessionMeta || Boolean(supplementalContent));
   const operationLabels = useMemo(
@@ -909,6 +922,21 @@ export function ConversationView({
       setIsAtBottom(true);
     }
   }, [autoScrollToLatest, sessionId, timelineScrollSignal]);
+
+  useEffect(() => {
+    if (!streamingTimelineScrollSignal || !autoScrollToLatest || !atBottomRef.current) {
+      return undefined;
+    }
+    const frameId = window.requestAnimationFrame(() => {
+      const timeline = timelineRef.current;
+      if (!timeline || !atBottomRef.current) {
+        return;
+      }
+      timeline.scrollTop = timeline.scrollHeight;
+      setIsAtBottom(true);
+    });
+    return () => window.cancelAnimationFrame(frameId);
+  }, [autoScrollToLatest, sessionId, streamingTimelineScrollSignal]);
 
   useEffect(() => {
     const timeline = timelineRef.current;

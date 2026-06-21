@@ -49,6 +49,16 @@ export type ConversationTimelineOptions = {
   includeAssistantText?: boolean;
 };
 
+const timelineItemsCache = new WeakMap<
+  ConversationMessage,
+  {
+    operations: ConversationOperation[];
+    lang: string;
+    includeAssistantText: boolean | undefined;
+    items: ConversationTimelineItem[];
+  }
+>();
+
 export function buildConversationTimelineItems(
   message: ConversationMessage,
   operations: ConversationOperation[],
@@ -57,6 +67,30 @@ export function buildConversationTimelineItems(
   if (message.role !== "assistant") {
     return [];
   }
+  const cached = timelineItemsCache.get(message);
+  if (
+    cached
+    && cached.operations === operations
+    && cached.lang === options.lang
+    && cached.includeAssistantText === options.includeAssistantText
+  ) {
+    return cached.items;
+  }
+  const items = buildConversationTimelineItemsUncached(message, operations, options);
+  timelineItemsCache.set(message, {
+    operations,
+    lang: options.lang,
+    includeAssistantText: options.includeAssistantText,
+    items,
+  });
+  return items;
+}
+
+function buildConversationTimelineItemsUncached(
+  message: ConversationMessage,
+  operations: ConversationOperation[],
+  options: ConversationTimelineOptions,
+): ConversationTimelineItem[] {
   if ((message.timelineItems?.length ?? 0) > 0) {
     return timelineItemsFromServer(message.timelineItems ?? [], operations, options);
   }

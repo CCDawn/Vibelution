@@ -49,6 +49,10 @@ export type ConversationReActOperationGroup = {
 
 const FEEDBACK_OPERATION_CACHE_LIMIT = 200;
 const feedbackOperationCache = new Map<string, ConversationOperation[]>();
+const operationGroupsCache = new WeakMap<
+  ConversationMessage,
+  { labels: ConversationOperationLabels; groups: ConversationOperationGroups }
+>();
 
 export function buildConversationOperations(
   message: ConversationMessage,
@@ -157,14 +161,20 @@ export function buildConversationOperationGroups(
   message: ConversationMessage,
   labels: ConversationOperationLabels,
 ): ConversationOperationGroups {
+  const cached = operationGroupsCache.get(message);
+  if (cached && cached.labels === labels) {
+    return cached.groups;
+  }
   const operations = buildConversationOperations(message, labels);
-  return {
+  const groups = {
     timeline: operations,
     thoughts: operations.filter((operation) => operation.kind === "thought"),
     mental: operations.filter((operation) => operation.kind === "mental"),
     status: operations.filter((operation) => operation.kind === "status"),
     tools: operations.filter((operation) => operation.kind === "tool"),
   };
+  operationGroupsCache.set(message, { labels, groups });
+  return groups;
 }
 
 export function buildConversationReActOperationGroups(
