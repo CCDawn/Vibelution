@@ -38,6 +38,8 @@ _CACHE_TTL_HOURS = 24
 # ── 变更日志（内存中，最多保留 10 条）──────────────────────────────
 _change_log: List[Dict[str, str]] = []
 _change_log_lock = threading.Lock()
+_task_focused_view_cache: Dict[str, object] = {"signature": None, "value": ""}
+_task_focused_view_cache_lock = threading.Lock()
 
 
 def _record_change(filepath: str, action: str = "modified"):
@@ -922,6 +924,28 @@ def _build_task_focused_view(project_root: Path, full_content: str) -> str:
         if getattr(change, "path", None):
             hot_paths.add(change.path)
 
+    signature = (
+        str(project_root.resolve()),
+        hashlib.sha1(full_content.encode("utf-8", errors="ignore")).hexdigest(),
+        goal,
+        state_memory,
+        tuple(str(path) for path in (attention.get("modified_paths") or [])),
+        tuple(str(name) for name in (attention.get("modified_entities") or [])),
+        str(attention.get("last_validation_summary") or ""),
+        bool(attention.get("active_delegation")),
+        tuple(
+            (
+                str(getattr(change, "path", "") or ""),
+                str(getattr(change, "change_type", "") or ""),
+                str(getattr(change, "subject", "") or ""),
+            )
+            for change in recent_changes
+        ),
+    )
+    with _task_focused_view_cache_lock:
+        if _task_focused_view_cache.get("signature") == signature:
+            return str(_task_focused_view_cache.get("value") or "")
+
     files = _collect_python_files(project_root)
     context_text = "\n".join(part for part in [goal, state_memory] if part).strip()
     scored = []
@@ -978,7 +1002,11 @@ def _build_task_focused_view(project_root: Path, full_content: str) -> str:
     if impact_chain:
         sections.append(impact_chain.strip())
     sections.append("\n".join(compact_sections).strip())
-    return "\n\n".join(section for section in sections if section).strip()
+    value = "\n\n".join(section for section in sections if section).strip()
+    with _task_focused_view_cache_lock:
+        _task_focused_view_cache["signature"] = signature
+        _task_focused_view_cache["value"] = value
+    return value
 
 
 def get_codebase_map(force_refresh: bool = False) -> str:
