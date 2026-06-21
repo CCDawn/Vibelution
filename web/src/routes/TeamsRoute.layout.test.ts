@@ -120,6 +120,11 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("startSourceCollectionRunMutation");
     expect(routeSource).toContain("recordSourceCollectionOutputMutation");
     expect(routeSource).toContain("executeSourceCollectionSearchMutation");
+    const executeSearchMutationSource = routeSource.slice(
+      routeSource.indexOf("const executeSourceCollectionSearchMutation"),
+      routeSource.indexOf("const extractSourceCollectionCandidatesMutation"),
+    );
+    expect(executeSearchMutationSource).toContain("researchStageRoundStatusQueryKey(variables.teamId)");
     expect(routeSource).toContain("/workflow-orchestration/source-collection-runs");
     expect(routeSource).toContain("/search/execute");
     expect(routeSource).toContain("/api/data-processing/runs?limit=${SOURCE_COLLECTION_RUN_PREVIEW_LIMIT}");
@@ -584,6 +589,11 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("sourceCollectionSearchExecution");
     expect(routeSource).toContain("selectedTeamInitialSourceCollectionSearchResult");
     expect(routeSource).toContain("selectedSourceCollectionSearchExecutionResult");
+    const sourceCollectionBackgroundRefreshSource = routeSource.slice(
+      routeSource.indexOf("const selectedSourceCollectionActiveWorkRun"),
+      routeSource.indexOf("const sourceCollectionAcceptedBackgroundActive"),
+    );
+    expect(sourceCollectionBackgroundRefreshSource).toContain("researchStageRoundStatusQueryKey(selectedTeam.teamId)");
     expect(routeSource).toContain("skippedDuplicateCount");
     expect(routeSource).toContain("条重复跳过");
     expect(routeSource).toContain("跳过 ${selectedTeamExecuteSourceCollectionSearchResult.skippedDuplicateCount} 条重复资料");
