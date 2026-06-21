@@ -28,7 +28,9 @@ describe("MemoryRoute layout contract", () => {
   it("reads Agent-private memory through the dedicated inventory API", () => {
     expect(routeSource).toContain("AgentMemoryInventoryPayload");
     expect(routeSource).toContain('fetchJson<AgentMemoryInventoryPayload>("/api/memory/agents")');
-    expect(routeSource).toContain("`/api/memory/agents/${encodeURIComponent(selectedAgentMemoryAgentId)}`");
+    expect(routeSource).toContain(
+      "`/api/memory/agents/${encodeURIComponent(selectedAgentMemoryAgentId)}?actorAgentId=${encodeURIComponent(selectedAgentMemoryAgentId)}`",
+    );
     expect(routeSource).toContain("renderAgentMemoryView()");
     expect(routeSource).toContain("copy.agentMemoryView");
     expect(routeSource).toContain("copy.agentMemoryPrivateFiles");
@@ -119,19 +121,12 @@ describe("MemoryRoute layout contract", () => {
     expect(routeSource).toContain('forcedView === "cleanup"');
   });
 
-  it("wires external workspace migration and hard-delete cleanup into the cleanup view", () => {
-    expect(routeSource).toContain('["storage", "workspace-migration", "status"]');
-    expect(routeSource).toContain('fetchJson<WorkspaceMigrationStatus>("/api/storage/workspace-migration/status")');
-    expect(routeSource).toContain('fetchJson<WorkspaceMigrationReport>("/api/storage/workspace-migration/preview"');
-    expect(routeSource).toContain('fetchJson<WorkspaceMigrationReport>("/api/storage/workspace-migration/apply"');
-    expect(routeSource).toContain('fetchJson<WorkspaceMigrationReport>("/api/storage/workspace-migration/verify"');
-    expect(routeSource).toContain('fetchJson<LegacyWorkspaceCleanupPreview>("/api/storage/legacy-workspace/cleanup-preview"');
-    expect(routeSource).toContain('fetchJson<LegacyWorkspaceCleanupPreview>("/api/storage/legacy-workspace/cleanup-execute"');
-    expect(routeSource).toContain("硬删除旧 workspace");
-    expect(routeSource).toContain("storageMigrationFeedback");
-    expect(routeSource).toContain("legacyWorkspaceCleanupConfirmationText");
-    expect(routeSource).toContain("copy.storageLegacyCleanupExecute");
-    expect(memoryCssSource).toContain(".buttonRow");
+  it("does not expose the removed workspace migration compatibility controls", () => {
+    expect(routeSource).not.toContain("/api/storage/workspace-migration");
+    expect(routeSource).not.toContain("/api/storage/legacy-workspace");
+    expect(routeSource).not.toContain("WorkspaceMigrationStatus");
+    expect(routeSource).not.toContain("LegacyWorkspaceCleanupPreview");
+    expect(routeSource).not.toContain("硬删除旧 workspace");
   });
 
   it("keeps dense Memory workspaces bounded with internal scrolling", () => {
