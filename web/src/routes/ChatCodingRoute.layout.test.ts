@@ -1453,9 +1453,13 @@ describe("ChatCodingRoute layout contract", () => {
     expect(deleteMutationSource).toContain("Prefer\": \"respond-async\"");
   });
 
-  it("switches away when the active direct session disappears after reset or delete", () => {
-    expect(routeSource).toContain("!sessionsQuery.data.some((session) => session.id === activeSessionId)");
-    expect(routeSource).toContain("setActiveSession(sessionsQuery.data[0].id)");
+  it("keeps the active direct session selected when the list is temporarily stale", () => {
+    const selectionEffectSource = routeSource.slice(
+      routeSource.indexOf("if (requestedRoomId && activeGroupRoomId !== requestedRoomId)"),
+      routeSource.indexOf("const pendingHandoff = loadPendingSelfEvolutionHandoff()"),
+    );
+    expect(selectionEffectSource).toContain("if (!activeSessionId && sessionsQuery.data && sessionsQuery.data.length > 0)");
+    expect(selectionEffectSource).not.toContain("!sessionsQuery.data.some((session) => session.id === activeSessionId)");
   });
 
   it("keeps renamed direct session titles visible before conversation refetch finishes", () => {
