@@ -45,7 +45,7 @@ def test_projector_demotes_legacy_tool_calls_with_results_to_semantic_history():
     assert "short preview must not win" not in projected[1]["content"]
 
 
-def test_llm_client_payload_demotes_history_tool_results_after_projection():
+def test_llm_client_payload_rejects_ui_tool_calls_before_provider_projection():
     config = make_config(
         **{
             "llm.providers.default.kind": "openai_compatible",
@@ -57,8 +57,8 @@ def test_llm_client_payload_demotes_history_tool_results_after_projection():
     )
 
     client = LLMClient(config=config, backend=lambda payload: payload)
-    payload = client._build_payload(
-        [
+    with pytest.raises(LLMError) as exc_info:
+        client._build_payload([
             {
                 "role": "assistant",
                 "content": "",
@@ -72,12 +72,10 @@ def test_llm_client_payload_demotes_history_tool_results_after_projection():
                 ],
             },
             {"role": "user", "content": "继续"},
-        ]
-    )
+        ])
 
-    assert [message["role"] for message in payload["messages"]] == ["assistant", "user"]
-    assert "tool_calls" not in payload["messages"][0]
-    assert "完整历史证据" in payload["messages"][0]["content"]
+    assert exc_info.value.error_type == "payload_protocol_error"
+    assert exc_info.value.details["forbiddenField"] == "toolCalls"
 
 
 def test_llm_client_payload_repairs_orphan_tool_result_before_provider():
