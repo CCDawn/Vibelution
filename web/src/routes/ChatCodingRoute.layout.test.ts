@@ -175,7 +175,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeCssSource).toContain("height: 32px");
     expect(routeCssSource).toContain("font-size: 0.7rem");
     expect(routeCssSource).toContain("font-size: 0.66rem");
-    expect(routeCssSource).toContain("max-width: 104px");
+    expect(routeCssSource).toContain("grid-template-columns: minmax(0, 1fr) max-content");
+    expect(routeCssSource).toContain("max-width: 100%");
     expect(conversationCssSource).toContain(".surfaceCompact .timeline {\n  padding: 10px 14px 12px;");
     expect(conversationCssSource).toContain(".surfaceCompact .composer {\n  gap: 8px;\n  padding: 7px 11px 9px;");
   });
@@ -1037,12 +1038,26 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.conversationAvatarGroup).toBeTypeOf("string");
     expect(routeStyles.conversationTitleRow).toBeTypeOf("string");
     expect(routeStyles.conversationMetaRow).toBeTypeOf("string");
+    expect(routeStyles.conversationMetaMain).toBeTypeOf("string");
+    expect(routeStyles.conversationMetaTime).toBeTypeOf("string");
     expect(routeStyles.directSessionItem).toBeTypeOf("string");
     expect(routeStyles.groupSessionItem).toBeTypeOf("string");
     expect(routeStyles.conversationKindBadge).toBeTypeOf("string");
     expect(routeStyles.conversationKindBadgeDirect).toBeTypeOf("string");
     expect(routeStyles.conversationKindBadgeChild).toBeTypeOf("string");
     expect(routeStyles.conversationKindBadgeGroup).toBeTypeOf("string");
+  });
+
+  it("keeps direct session model metadata and timestamps from clipping each other", () => {
+    expect(directSessionIndexItemSource).toContain("styles.conversationMetaMain");
+    expect(directSessionIndexItemSource).toContain("styles.conversationMetaTime");
+    expect(routeCssSource).toContain("grid-template-columns: minmax(0, 1fr) max-content");
+    expect(routeCssSource).toContain(".conversationMetaTime time");
+    expect(routeCssSource).toContain("overflow: visible");
+    expect(routeCssSource).toContain("text-overflow: clip");
+    expect(routeCssSource).toContain("flex: 1 1 112px");
+    expect(routeCssSource).toContain("min-width: 92px");
+    expect(routeCssSource).not.toContain("max-width: 104px");
   });
 
   it("moves direct session actions into a right-click context menu", () => {
