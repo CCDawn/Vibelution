@@ -52,6 +52,30 @@ def test_history_orphan_tool_result_is_demoted_to_semantic_context():
     assert validate_tool_result_pairing(messages).ok
 
 
+def test_history_tool_result_resolves_name_from_previous_tool_call_id():
+    messages = normalize_model_history_messages(
+        [
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "call_cli",
+                        "type": "function",
+                        "function": {"name": "cli_tool", "arguments": "{\"command\":\"pytest\"}"},
+                    }
+                ],
+            },
+            {"role": "tool", "tool_call_id": "call_cli", "content": "All checks passed."},
+        ]
+    )
+
+    assert [message["role"] for message in messages] == ["assistant"]
+    assert "历史工具结果: cli_tool" in messages[0]["content"]
+    assert "All checks passed." in messages[0]["content"]
+    assert validate_tool_result_pairing(messages).ok
+
+
 def test_provider_turn_messages_demote_partial_live_tool_chain_without_orphan_result():
     messages = normalize_provider_turn_messages(
         [
