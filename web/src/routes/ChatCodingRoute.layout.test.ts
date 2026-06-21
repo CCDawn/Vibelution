@@ -1052,8 +1052,13 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("onContextMenu={openSessionContextMenu}");
     expect(agentSessionTabStripSource).toContain("onContextMenu={(event) => onContextMenu(event, session)}");
     expect(routeSource).toContain("contextMenuSession");
+    expect(routeSource).toContain("agentCenterConfigRoute");
+    expect(routeSource).toContain("function openSessionAgentConfig");
+    expect(routeSource).toContain("returnLabel: \"chat\"");
+    expect(routeSource).toContain("returnTo: `/chat?session=${encodeURIComponent(session.id)}`");
     expect(routeSource).toContain("<SessionContextMenu");
     expect(routeSource).toContain("onAddToReview={handleAddSessionToReview}");
+    expect(routeSource).toContain("onOpenAgentConfig={openSessionAgentConfig}");
     expect(routeSource).toContain("onRename={beginRenameSession}");
     expect(routeSource).toContain("onDelete={handleDeleteSession}");
     expect(routeSource).toContain("event.key === \"Escape\"");

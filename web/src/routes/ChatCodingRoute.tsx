@@ -162,6 +162,7 @@ import {
   isAgentRootSession,
 } from "./DirectSessionIndexItem";
 import { SessionContextMenu } from "./SessionContextMenu";
+import { agentCenterConfigRoute } from "./agentCenterRoutes";
 import {
   buildChatMentionTargets,
   tokenizeChatMentions,
@@ -6195,6 +6196,21 @@ export function ChatCodingRoute() {
     }));
   }
 
+  function openSessionAgentConfig(session: SessionSummary) {
+    const agentId = String(session.agentId || "").trim();
+    if (!agentId) {
+      setSessionContextMenu(null);
+      return;
+    }
+    setSessionContextMenu(null);
+    navigate(agentCenterConfigRoute({
+      agentId,
+      pane: "config",
+      returnLabel: "chat",
+      returnTo: `/chat?session=${encodeURIComponent(session.id)}`,
+    }));
+  }
+
   function cancelRenameSession() {
     setSessionContextMenu(null);
     setEditingSessionId(null);
@@ -7995,6 +8011,7 @@ export function ChatCodingRoute() {
                   t={t}
                   onAddToReview={handleAddSessionToReview}
                   onDelete={handleDeleteSession}
+                  onOpenAgentConfig={openSessionAgentConfig}
                   onRename={beginRenameSession}
                 />
               ) : null}
