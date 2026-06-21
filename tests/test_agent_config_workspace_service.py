@@ -63,6 +63,12 @@ def _use_tmp_project_root(tmp_path, monkeypatch):
     monkeypatch.setattr(supervised_agent_service, "_configured_model_library_ids", lambda *args, **kwargs: set(model_library_ids))
 
 
+def _mark_session_active(tmp_path, session_id: str):
+    journal = tmp_path / "workspace" / "sessions" / session_id / "turn_journal.jsonl"
+    journal.parent.mkdir(parents=True, exist_ok=True)
+    journal.write_text("{}\n", encoding="utf-8")
+
+
 def _fake_config_workspace():
     return {
         "modelOptions": [
@@ -212,6 +218,7 @@ def test_agent_config_workspace_lists_agents_once_and_derives_references(tmp_pat
     _use_tmp_project_root(tmp_path, monkeypatch)
     monkeypatch.setattr(config_service, "get_config_workspace", _fake_config_workspace)
     chat_agent = session_service.create_chat_session(title="会话 Agent")
+    _mark_session_active(tmp_path, chat_agent["id"])
     research_session = session_service.create_chat_session(title="科研 Agent")
     research_agent = agent_directory_service.update_agent_instance(
         research_session["agentId"],
@@ -276,6 +283,37 @@ def test_agent_config_workspace_lists_agents_once_and_derives_references(tmp_pat
     assert groups["team"]["section"] == "reference"
     assert research_agent["agentId"] in groups["research"]["agentIds"]
     assert research_agent["agentId"] in groups["group_chat"]["agentIds"]
+
+
+def test_agent_config_workspace_keeps_empty_direct_session_out_of_work_session_group(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setattr(config_service, "get_config_workspace", _fake_config_workspace)
+    session = session_service.create_chat_session(title="Agent 0")
+    agent_id = session["agentId"]
+
+    payload = agent_config_workspace_service.get_agent_config_workspace()
+
+    agents = {item["agentId"]: item for item in payload["agents"]}
+    groups = {item["id"]: item for item in payload["groups"]}
+    assert agents[agent_id]["agentBoundary"]["type"] == "service_role"
+    assert agents[agent_id]["agentBoundary"]["directSessionRole"] == "pending_activity"
+    assert agents[agent_id]["agentBoundary"]["reason"] == "empty_direct_session"
+    assert agent_id not in groups["work_session"]["agentIds"]
+
+
+def test_agent_config_workspace_promotes_direct_session_after_activity(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setattr(config_service, "get_config_workspace", _fake_config_workspace)
+    session = session_service.create_chat_session(title="真实会话")
+    agent_id = session["agentId"]
+    _mark_session_active(tmp_path, session["id"])
+
+    payload = agent_config_workspace_service.get_agent_config_workspace()
+
+    agents = {item["agentId"]: item for item in payload["agents"]}
+    groups = {item["id"]: item for item in payload["groups"]}
+    assert agents[agent_id]["agentBoundary"]["type"] == "work_session"
+    assert agent_id in groups["work_session"]["agentIds"]
 
 
 def test_agent_config_workspace_summary_counts_only_actionable_health_issues():
@@ -474,6 +512,7 @@ def test_work_session_boundary_skips_persona_task_and_team_onboarding_requiremen
     _use_tmp_project_root(tmp_path, monkeypatch)
     monkeypatch.setattr(config_service, "get_config_workspace", _fake_config_workspace)
     session = session_service.create_chat_session(title="开发会话")
+    _mark_session_active(tmp_path, session["id"])
     agent_id = session["agentId"]
     agent = agent_directory_service.get_agent(agent_id)
     metadata = dict(agent["metadata"])

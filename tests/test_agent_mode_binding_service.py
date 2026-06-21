@@ -143,6 +143,95 @@ def test_mode_binding_repair_removes_ineligible_chat_references(tmp_path, monkey
     assert any(item["agentId"] == research_reader["agentId"] for item in payload["repairWarnings"])
 
 
+def test_mode_binding_repair_removes_pending_empty_direct_session_agents(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    agent = agent_directory_service.create_agent_instance(
+        display_name="空会话 Agent",
+        primary_mode="chat",
+        direct_session_id="session-empty",
+        metadata={
+            "legacySessionWorkspacePath": "workspace/sessions/session-empty",
+            "directSessionVisibility": agent_directory_service.SESSION_AGENT_VISIBILITY_PENDING,
+        },
+    )
+    state = agent_mode_binding_service.default_mode_binding_state()
+    state["modes"]["chat"]["defaultAgentId"] = agent["agentId"]
+    state["modes"]["chat"]["availableAgentIds"] = [agent["agentId"]]
+    state["modes"]["chat"]["pool"] = [agent["agentId"]]
+    agent_mode_binding_service.save_mode_binding_state(state)
+
+    payload = agent_mode_binding_service.get_mode_bindings_payload()
+
+    assert payload["modes"]["chat"]["defaultAgentId"] == ""
+    assert payload["modes"]["chat"]["availableAgentIds"] == []
+    assert payload["modes"]["chat"]["pool"] == []
+    assert any(item["agentId"] == agent["agentId"] for item in payload["repairWarnings"])
+
+
+def test_mode_binding_repair_keeps_direct_session_agent_after_activity(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    journal = tmp_path / "workspace" / "sessions" / "session-live" / "turn_journal.jsonl"
+    journal.parent.mkdir(parents=True, exist_ok=True)
+    journal.write_text("{}\n", encoding="utf-8")
+    agent = agent_directory_service.create_agent_instance(
+        display_name="真实会话 Agent",
+        primary_mode="chat",
+        direct_session_id="session-live",
+        metadata={
+            "legacySessionWorkspacePath": "workspace/sessions/session-live",
+            "directSessionVisibility": agent_directory_service.SESSION_AGENT_VISIBILITY_PENDING,
+        },
+    )
+    state = agent_mode_binding_service.default_mode_binding_state()
+    state["modes"]["chat"]["defaultAgentId"] = agent["agentId"]
+    state["modes"]["chat"]["availableAgentIds"] = [agent["agentId"]]
+    agent_mode_binding_service.save_mode_binding_state(state)
+
+    payload = agent_mode_binding_service.get_mode_bindings_payload()
+
+    assert payload["modes"]["chat"]["defaultAgentId"] == agent["agentId"]
+    assert payload["modes"]["chat"]["availableAgentIds"] == [agent["agentId"]]
+
+
+def test_mode_binding_repair_removes_legacy_empty_direct_session_without_visibility_metadata(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    (tmp_path / "workspace" / "sessions" / "session-empty").mkdir(parents=True, exist_ok=True)
+    agent = agent_directory_service.create_agent_instance(
+        display_name="旧空会话 Agent",
+        primary_mode="chat",
+        direct_session_id="session-empty",
+    )
+    state = agent_mode_binding_service.default_mode_binding_state()
+    state["modes"]["chat"]["defaultAgentId"] = agent["agentId"]
+    state["modes"]["chat"]["availableAgentIds"] = [agent["agentId"]]
+    agent_mode_binding_service.save_mode_binding_state(state)
+
+    payload = agent_mode_binding_service.get_mode_bindings_payload()
+
+    assert payload["modes"]["chat"]["defaultAgentId"] == ""
+    assert payload["modes"]["chat"]["availableAgentIds"] == []
+
+
+def test_mode_binding_repair_removes_coordinator_session_from_chat_pool(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    agent = agent_directory_service.create_agent_instance(
+        display_name="Coordinator",
+        primary_mode="chat",
+        direct_session_id="session-coordinator",
+    )
+    state = agent_mode_binding_service.default_mode_binding_state()
+    state["modes"]["chat"]["defaultAgentId"] = agent["agentId"]
+    state["modes"]["chat"]["availableAgentIds"] = [agent["agentId"]]
+    state["modes"]["chat"]["pool"] = [agent["agentId"]]
+    agent_mode_binding_service.save_mode_binding_state(state)
+
+    payload = agent_mode_binding_service.get_mode_bindings_payload()
+
+    assert payload["modes"]["chat"]["defaultAgentId"] == ""
+    assert payload["modes"]["chat"]["availableAgentIds"] == []
+    assert payload["modes"]["chat"]["pool"] == []
+
+
 def test_mode_binding_repairs_supervised_slots_from_agent_instances(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     baseline = agent_directory_service.create_agent_instance(

@@ -11,7 +11,7 @@ from typing import Any
 
 from core.infrastructure import developer_sandbox
 
-from .agent_directory_service import get_agent, list_agents
+from .agent_directory_service import SESSION_AGENT_VISIBILITY_PENDING, get_agent, list_agents, session_agent_visibility
 from .runtime_scene_service import record_runtime_scene_event
 
 
@@ -662,8 +662,18 @@ def _agent_allowed_in_mode(mode: str, agent: dict[str, Any] | None) -> bool:
     normalized_mode = _normalize_mode(mode)
     primary_mode = str(agent.get("primaryMode") or "general").strip() or "general"
     role_key = str(agent.get("roleKey") or "").strip()
+    metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
+    creation_spec = metadata.get("creationSpec") if isinstance(metadata.get("creationSpec"), dict) else {}
+    created_by = str(agent.get("createdBy") or creation_spec.get("source") or "").strip()
     if normalized_mode == "chat":
-        return primary_mode == "chat" and not role_key.startswith("research_")
+        return (
+            primary_mode == "chat"
+            and not role_key.startswith("research_")
+            and (
+                created_by == "api_agents"
+                or session_agent_visibility(agent) != SESSION_AGENT_VISIBILITY_PENDING
+            )
+        )
     if normalized_mode == "research":
         return primary_mode == "research" or role_key.startswith("research_")
     if normalized_mode == "supervised_evolution":
