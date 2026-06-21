@@ -16,12 +16,14 @@ from . import chat_room_service, config_service
 from .agent_directory_service import agent_persona_profile_has_content
 from .agent_directory_service import agent_task_profile_has_content
 from .agent_directory_service import AGENT_LLM_BINDING_SLOTS
+from .agent_directory_service import SESSION_AGENT_VISIBILITY_PENDING
 from .agent_directory_service import agent_dialogue_model_id
 from .agent_directory_service import build_agent_policy_options
 from .agent_directory_service import list_agents
 from .agent_directory_service import list_agent_policy_options
 from .agent_directory_service import normalize_agent_llm_bindings
 from .agent_directory_service import registry_path
+from .agent_directory_service import session_agent_visibility
 from .agent_mode_binding_service import get_mode_bindings_payload, mode_binding_path
 from .prompt_template_service import list_prompt_templates, prompt_template_path
 from .runtime_scene_service import record_runtime_scene_event
@@ -1065,6 +1067,24 @@ def _derive_agent_boundary(agent: dict[str, Any], *, references: list[dict[str, 
     )
     chat_available = primary_mode == "chat" or "chat" in ref_modes
     created_by_session = created_by in {"user", "api_agents", "session_repair", "session_agent_binding", "session_delete_rebind"}
+    activity_gated_session_source = created_by != "api_agents"
+    if (
+        chat_available
+        and not has_team_ref
+        and activity_gated_session_source
+        and session_agent_visibility(agent) == SESSION_AGENT_VISIBILITY_PENDING
+    ):
+        return {
+            "type": "service_role",
+            "label": "待激活会话 Agent",
+            "ownership": "service",
+            "directSessionRole": "pending_activity",
+            "reason": "empty_direct_session",
+            "configurationSurface": "service",
+            "requiresPersonaProfile": "false",
+            "requiresTaskProfile": "false",
+            "requiresTeamMembership": "false",
+        }
     if chat_available and not has_team_ref:
         return {
             "type": "work_session",

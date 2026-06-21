@@ -57,6 +57,14 @@ DEFAULT_SESSION_AGENT_PREFERRED_TOOLS = (
     "conversation_log_inspect_tool",
     "get_core_context_tool",
 )
+SESSION_AGENT_VISIBILITY_ACTIVE = "active_session"
+SESSION_AGENT_VISIBILITY_PENDING = "pending_activity"
+SESSION_AGENT_VISIBILITY_NONE = "none"
+SESSION_AGENT_ACTIVITY_FILES = (
+    "turn_journal.jsonl",
+    "logs/conversation.jsonl",
+    "events/visible_messages.jsonl",
+)
 MUTATING_AGENT_TOOL_NAMES = {
     "apply_patch_tool",
     "apply_diff_edit_tool",
@@ -647,6 +655,10 @@ def ensure_agent_for_session(
         if agent is None:
             agent = _find_agent_by_direct_session(state, normalized_session_id)
         if agent is None:
+            session_visibility = _direct_session_visibility(
+                normalized_session_id,
+                session_workspace_path=session_workspace_path,
+            )
             created = create_agent_instance(
                 display_name=display_name or normalized_session_id,
                 llm_bindings=normalized_llm_bindings,
@@ -655,7 +667,10 @@ def ensure_agent_for_session(
                 prompt_template_id=prompt_template_id,
                 direct_session_id=normalized_session_id,
                 created_by=created_by,
-                metadata={"legacySessionWorkspacePath": str(session_workspace_path or "").strip()},
+                metadata={
+                    "legacySessionWorkspacePath": str(session_workspace_path or "").strip(),
+                    "directSessionVisibility": session_visibility,
+                },
             )
             return created
 
@@ -726,6 +741,14 @@ def ensure_agent_for_session(
             metadata["legacySessionWorkspacePath"] = legacy_path
             agent["metadata"] = metadata
             changed = True
+        session_visibility = _direct_session_visibility(
+            normalized_session_id,
+            session_workspace_path=str(metadata.get("legacySessionWorkspacePath") or legacy_path),
+        )
+        if session_visibility != str(metadata.get("directSessionVisibility") or "").strip():
+            metadata["directSessionVisibility"] = session_visibility
+            agent["metadata"] = metadata
+            changed = True
         workspace_path = str(agent.get("workspacePath") or "").strip() or _agent_workspace_relative_path(str(agent["agentId"]))
         if not agent.get("workspacePath"):
             agent["workspacePath"] = workspace_path
@@ -746,6 +769,98 @@ def ensure_agent_for_session(
             _record_agent_event("agent.repaired", agent)
             _record_agent_territory_event("agent_territory.resolved", agent, outcome="repaired")
     return _agent_to_api(agent)
+
+
+def session_agent_visibility(agent: dict[str, Any] | None) -> str:
+    """Return whether a direct chat Agent is backed by real session activity."""
+
+    if not isinstance(agent, dict):
+        return SESSION_AGENT_VISIBILITY_NONE
+    primary_mode = _normalize_primary_mode(agent.get("primaryMode") or _infer_agent_primary_mode(agent))
+    direct_session_id = str(agent.get("directSessionId") or "").strip()
+    if primary_mode != "chat" or not direct_session_id:
+        return SESSION_AGENT_VISIBILITY_NONE
+    metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
+    legacy_workspace_path = str(metadata.get("legacySessionWorkspacePath") or "").strip()
+    visibility = str(metadata.get("directSessionVisibility") or "").strip()
+    if visibility == SESSION_AGENT_VISIBILITY_ACTIVE:
+        return SESSION_AGENT_VISIBILITY_ACTIVE
+    if visibility == SESSION_AGENT_VISIBILITY_PENDING:
+        if _session_workspace_has_activity(
+            direct_session_id,
+            session_workspace_path=legacy_workspace_path,
+        ):
+            return SESSION_AGENT_VISIBILITY_ACTIVE
+        return SESSION_AGENT_VISIBILITY_PENDING
+    session_root_exists = _session_workspace_root_exists(direct_session_id)
+    if (
+        not legacy_workspace_path
+        and not direct_session_id.startswith("session-seed-")
+        and direct_session_id != "session-coordinator"
+        and not session_root_exists
+    ):
+        return SESSION_AGENT_VISIBILITY_ACTIVE
+    return _direct_session_visibility(
+        direct_session_id,
+        session_workspace_path=legacy_workspace_path,
+    )
+
+
+def _direct_session_visibility(
+    session_id: str,
+    *,
+    session_workspace_path: str = "",
+) -> str:
+    normalized_session_id = str(session_id or "").strip()
+    if not normalized_session_id:
+        return SESSION_AGENT_VISIBILITY_NONE
+    if _session_workspace_has_activity(normalized_session_id, session_workspace_path=session_workspace_path):
+        return SESSION_AGENT_VISIBILITY_ACTIVE
+    return SESSION_AGENT_VISIBILITY_PENDING
+
+
+def _session_workspace_has_activity(session_id: str, *, session_workspace_path: str = "") -> bool:
+    session_id = str(session_id or "").strip()
+    candidates: list[Path] = []
+    raw_workspace_path = str(session_workspace_path or "").strip()
+    if raw_workspace_path:
+        candidates.append(_resolve_project_path(raw_workspace_path))
+    if session_id:
+        candidates.append(_workspace_path("sessions", session_id, seed=False))
+
+    seen: set[Path] = set()
+    for session_root in candidates:
+        resolved = Path(session_root).resolve()
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        for relative in SESSION_AGENT_ACTIVITY_FILES:
+            if _jsonl_file_has_records(resolved / relative):
+                return True
+    return False
+
+
+def _session_workspace_root_exists(session_id: str) -> bool:
+    normalized_session_id = str(session_id or "").strip()
+    if not normalized_session_id:
+        return False
+    try:
+        return _workspace_path("sessions", normalized_session_id, seed=False).exists()
+    except OSError:
+        return False
+
+
+def _jsonl_file_has_records(path: Path) -> bool:
+    try:
+        if not path.is_file() or path.stat().st_size <= 0:
+            return False
+        with path.open("r", encoding="utf-8") as handle:
+            for line in handle:
+                if line.strip():
+                    return True
+    except OSError:
+        return False
+    return False
 
 
 def update_agent_instance(
