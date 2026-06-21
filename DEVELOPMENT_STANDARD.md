@@ -161,6 +161,8 @@ If a scope hits an active claim or hotspot, stop unless you have explicit author
 
 One Agent should bind to one active task worktree at a time. Do not reuse an old task worktree for a new goal.
 
+The Agent that implements a task owns the full local development loop by default: self-review the diff, run the scoped validation, commit the task branch, decide whether the merge gate is satisfied, and either merge the task into local `main` or explicitly leave it `ready_for_merge` / `blocked` with the reason. Do not treat implementation as complete merely because a worktree commit exists.
+
 ## 7. Shared Hot Files
 
 Treat these as shared hot files and edit them only with a narrow scope and explicit claim:
@@ -403,13 +405,26 @@ Commit messages should be concise, scoped, and behavior-oriented. Prefer prefixe
 - `docs: ...`;
 - `chore: ...`.
 
-After implementation and validation in a task worktree, mark the claim ready:
+After implementation and validation in a task worktree, the owning Agent should self-review and close the local loop. A task branch may merge itself into local `main` only when all merge gates pass:
+
+- the claim belongs to the current Agent/session and covers the changed files;
+- the task branch is committed and contains only current-task changes;
+- scoped validation ran, or a precise validation blocker is recorded;
+- the task branch merges cleanly into current local `main`;
+- local `main` has no unrelated dirty changes in files affected by the merge;
+- no active claim or hotspot conflict blocks the scope;
+- the user did not ask to stop before merge, keep work isolated, or hand off only;
+- the merge remains local and does not push to GitHub.
+
+When the gates pass, merge one task at a time into local `main`, run the smallest useful post-merge validation or state why docs-only/rule-only validation is sufficient, close the claim, and remove the task worktree when it is clean.
+
+When any gate fails, do not force the merge. Mark the claim ready or blocked with the exact reason:
 
 ```powershell
 python "C:\Users\17533\.codex\skills\ccdawn-dawn-agent-html-memory\scripts\agent_work_guard.py" "C:\Users\17533\Desktop\Vibelution" ready --claim-id "<claim-id>" --commit "<sha>" --changed-file "<file>" --validation "<result>"
 ```
 
-The main integration session then merges or cherry-picks into local `main`, validates, closes the claim, and cleans the worktree.
+Self-merge does not change remote publication rules. Pushing, PR creation, remote branch deletion, or treating `origin/main` as authority still requires explicit user authorization.
 
 ## 14. Remote GitHub Sync
 
@@ -476,11 +491,11 @@ Task handoff must include version bump recommendation, capability domain, user-v
 
 ## 16. Mainline Integration
 
-The main integration session is responsible for:
+Task-owning Agents should self-merge when the merge gates in section 13 pass. A mainline integration session is still responsible for queued, cross-lane, conflicted, release-sensitive, or user-designated integration work:
 
 - keeping local `main` clean before each merge;
 - reviewing claim status and write scopes;
-- merging only `ready_for_merge` claims;
+- merging only `ready_for_merge` claims when the owning Agent cannot safely self-merge;
 - merging one task at a time;
 - running targeted validation after each merge;
 - handling conflicts or returning them to the owning worktree;
@@ -512,17 +527,17 @@ Require a concrete anchor for delegation: a file, test, log, blocker, or local e
 
 Do not repeat same-round delegation for the same broad failed diagnosis pattern.
 
-When multiple Codex Agents collaborate, the coordinator must plan:
+When multiple Codex Agents collaborate, treat session-level Agents as peers. Do not assume a central dispatcher or coordinator exists. Each Agent should declare and keep current:
 
-- main goal;
-- parallel slices;
+- its session identity and lane;
+- current task;
 - write scopes and forbidden scopes;
 - hotspot risks;
 - validation commands;
-- handoff fields;
-- merge and cleanup path.
+- handoff suggestion if the task is outside its territory;
+- merge, cleanup, or memory-sync proposal when relevant.
 
-Other Agents' final messages are not fact sources. The main integration session must verify with `agent-registry.json`, Git status, commits, diffs, tests, and logs.
+The shared registry records peer session identity, territory, work claims, conflicts, and merge readiness. It is a state record, not a command channel. Do not auto-dispatch work to another session, claim on another session's behalf, or treat another Agent's final message as a fact source. Verify with `agent-registry.json`, Git status, commits, diffs, tests, and logs.
 
 ## 18. Session Agent Territory
 
@@ -635,7 +650,9 @@ A development round is not done until:
 - relevant tests/checks ran or blockers are reported;
 - Launcher refresh decision is explicit;
 - Git status was reviewed;
+- current-task diff was self-reviewed;
 - changes are committed or explicitly marked not ready;
+- merge gates were evaluated;
 - claim is `ready_for_merge`, `merged_to_main`, `local_applied`, `blocked`, or `cancelled`;
 - project memory was updated or an exact update proposal was handed off;
 - version impact was judged;
