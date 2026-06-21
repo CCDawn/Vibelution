@@ -8,10 +8,12 @@ import { describe, expect, it } from "vitest";
 import { ChatNextStateSignalSummary, ConversationMessage, SessionTurnError } from "../../api/types";
 import conversationViewSource from "./ConversationView.tsx?raw";
 import {
+  advanceStreamingRevealText,
   buildStreamingTimelineScrollSignal,
   buildTimelineScrollSignal,
   COMPOSER_SESSION_REFERENCE_MIME,
   ConversationView,
+  type ConversationProcessDisplayMode,
   extractComposerImageDropFiles,
   extractComposerSessionReferenceDrop,
   hasComposerImageDragPayload,
@@ -70,6 +72,8 @@ function renderConversation(
     onInterruptGuidance?: () => void;
     showMentalSnapshots?: boolean;
     showComposer?: boolean;
+    processDisplayMode?: ConversationProcessDisplayMode;
+    useDefaultProcessDisplayMode?: boolean;
   } = {},
 ) {
   const queryClient = new QueryClient({
@@ -79,6 +83,9 @@ function renderConversation(
       },
     },
   });
+  const processDisplayProps = options.useDefaultProcessDisplayMode
+    ? {}
+    : { processDisplayMode: options.processDisplayMode ?? ("trace" as ConversationProcessDisplayMode) };
   return renderToStaticMarkup(
     <QueryClientProvider client={queryClient}>
       <ConversationView
@@ -91,6 +98,7 @@ function renderConversation(
         showSessionOverview={false}
         showMentalSnapshots={options.showMentalSnapshots}
         showComposer={options.showComposer}
+        {...processDisplayProps}
         composerValue={options.composerValue ?? ""}
         composerPlaceholder="Type"
         composerDisabled={options.composerDisabled ?? false}
@@ -138,12 +146,66 @@ describe("ConversationView edit resend affordance", () => {
 
   it("renders streaming assistant text through a light text path before markdown parsing", () => {
     expect(conversationViewSource).toContain("function renderStreamingResponseText(content: string)");
+    expect(conversationViewSource).toContain("<StreamingResponseContent content={content} />");
+    expect(conversationViewSource).toContain("advanceStreamingRevealText(visibleTextRef.current, target)");
     expect(conversationViewSource).toContain("styles.streamingResponseText");
     expect(conversationViewSource).toContain("styles.streamingResponseParagraph");
+    expect(conversationViewSource).toContain("const isResponseStreaming = Boolean(message.streaming) && showResponseBlock");
     expect(conversationViewSource).toContain("showResponseBlock && responseExpanded && !isResponseStreaming");
     expect(conversationViewSource).toContain("? renderStreamingResponseText(message.content)");
     expect(conversationViewStylesSource).toContain(".streamingResponseText");
     expect(conversationViewStylesSource).toContain(".streamingResponseParagraph");
+  });
+
+  it("advances large streaming chunks in small reveal steps", () => {
+    const target = "这是一段一次性到达的长回复，需要在前端逐步显示。";
+    const first = advanceStreamingRevealText("", target);
+    const second = advanceStreamingRevealText(first, target);
+
+    expect(first.length).toBeGreaterThan(0);
+    expect(first.length).toBeLessThan(target.length);
+    expect(second.length).toBeGreaterThan(first.length);
+    expect(second.length).toBeLessThanOrEqual(target.length);
+    expect(advanceStreamingRevealText("旧文本", target)).toBe(target);
+  });
+
+  it("defaults to answer-only process display while keeping details expandable", () => {
+    const html = renderConversation(
+      [
+        {
+          id: "message-answer-only",
+          role: "assistant",
+          content: "最终回答已经完成。",
+          timestamp: "2026-06-21T10:00:00Z",
+          feedbackEvents: [
+            {
+              sequence: 1,
+              kind: "thought",
+              status: "done",
+              summary: "先分析缓存链路",
+              resultPreview: "先分析缓存链路",
+            },
+            {
+              sequence: 2,
+              kind: "tool",
+              status: "done",
+              name: "read_file",
+              summary: "opened session_service.py",
+              relatedThoughtSequence: 1,
+            },
+          ],
+        },
+      ],
+      { useDefaultProcessDisplayMode: true },
+    );
+
+    expect(html).toContain("过程已收起");
+    expect(html).toContain("思考过程 1");
+    expect(html).toContain("工具调用 1");
+    expect(html).toContain("最终回答已经完成。");
+    expect(html).toContain('title="展开执行明细"');
+    expect(html).not.toContain("先分析缓存链路");
+    expect(html).not.toContain("opened session_service.py");
   });
 
   it("can render the opt-in compact workbench density", () => {
