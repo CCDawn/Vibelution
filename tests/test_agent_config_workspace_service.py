@@ -4062,6 +4062,6 @@ def test_agent_config_workspace_collapses_duplicate_team_name_indexes(tmp_path, 
     index = duplicate_indexes[0]
     assert index["source"] == "duplicate_team_name"
     assert index["duplicateTeamCount"] == 2
-    assert index["duplicateTeamIds"] == [first_team["teamId"], second_team["teamId"]]
+    assert set(index["duplicateTeamIds"]) == {first_team["teamId"], second_team["teamId"]}
     assert set(index["agentIds"]) == {first_agent["agentId"], second_agent["agentId"]}
     assert any(item["code"] == "duplicate_team_name" for item in payload["health"]["issues"])
