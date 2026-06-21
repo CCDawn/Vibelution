@@ -134,7 +134,7 @@ class TestToolExecutorInit:
         assert "read_file_tool" in visibility.visible_tools
         assert "read_file_tool" not in visibility.configured_unavailable_tools
 
-    def test_cli_agent_run_tool_is_registered_and_visible_for_operational_session_default(self):
+    def test_cli_agent_run_tool_is_registered_but_hidden_for_operational_session_default(self):
         from core.web.services.agent_directory_service import (
             compute_effective_tool_visibility,
             default_session_agent_tool_policy,
@@ -157,8 +157,8 @@ class TestToolExecutorInit:
             policy=default_session_agent_tool_policy("tool-agent-session"),
         )
 
-        assert "cli_agent_run_tool" in session_visibility.visible_tools
-        assert "cli_agent_run_tool" not in session_visibility.hidden_restricted_tools
+        assert "cli_agent_run_tool" not in session_visibility.visible_tools
+        assert "cli_agent_run_tool" in session_visibility.hidden_restricted_tools
 
     def test_memory_tools_are_llm_facing_but_policy_gated_by_default(self):
         from core.web.services.agent_directory_service import (
@@ -930,6 +930,13 @@ class TestToolExecutorTimeout:
                 "policyId": "tool-agent-session-cli",
                 "allowedTools": ["cli_agent_run_tool"],
             },
+            "delegationPolicy": {
+                "allowSubagents": True,
+                "allowedContextModes": ["isolated"],
+                "maxDepth": 1,
+                "maxConcurrent": 1,
+                "allowWakeMessages": True,
+            },
         })
         monkeypatch.setitem(
             executor._tool_map,
@@ -941,6 +948,35 @@ class TestToolExecutorTimeout:
 
         assert action is None
         assert result == "ran codex_code: inspect only"
+
+    def test_cli_agent_run_tool_requires_delegation_policy_allow(self, executor, monkeypatch):
+        from core.web.services import agent_directory_service
+
+        monkeypatch.setattr(agent_directory_service, "current_agent_runtime", lambda: {
+            "agentId": "agent-session",
+            "toolPolicy": {
+                "policyId": "tool-agent-session-cli",
+                "allowedTools": ["cli_agent_run_tool"],
+            },
+            "delegationPolicy": {
+                "allowSubagents": False,
+                "allowedContextModes": ["isolated"],
+                "maxDepth": 0,
+                "maxConcurrent": 0,
+                "allowWakeMessages": True,
+            },
+        })
+        monkeypatch.setitem(
+            executor._tool_map,
+            "cli_agent_run_tool",
+            lambda agent_type="", task="", **_kwargs: f"ran {agent_type}: {task}",
+        )
+
+        result, action = executor.execute("cli_agent_run_tool", {"agent_type": "codex_code", "task": "inspect only"})
+
+        assert action is None
+        assert "委托策略" in str(result)
+        assert "默认关闭子 agent 派发权限" in str(result)
 
     def test_cli_agent_run_tool_blocked_in_readonly_subagent_scope(self, monkeypatch):
         monkeypatch.setenv("VIBELUTION_SUBAGENT_MODE", "readonly")

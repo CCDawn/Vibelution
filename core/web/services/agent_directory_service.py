@@ -52,10 +52,7 @@ DEFAULT_SESSION_AGENT_ALLOWED_TOOLS = (
     "python_lint_tool",
     "run_test_for_tool",
     "cli_tool",
-    "cli_agent_run_tool",
     "agent_message_tool",
-    "create_child_session_tool",
-    "list_child_sessions_tool",
     "agent_tool_permission_request_tool",
     "get_core_context_tool",
     "get_current_goal_tool",
@@ -72,10 +69,15 @@ DEFAULT_SESSION_AGENT_PREFERRED_TOOLS = (
     "apply_patch_tool",
     "run_test_for_tool",
     "cli_tool",
-    "cli_agent_run_tool",
     "get_core_context_tool",
     "conversation_log_inspect_tool",
 )
+SUBAGENT_DELEGATION_TOOL_NAMES = {
+    "cli_agent_run_tool",
+    "create_child_session_tool",
+    "list_child_sessions_tool",
+    "spawn_agent_tool",
+}
 SESSION_AGENT_VISIBILITY_ACTIVE = "active_session"
 SESSION_AGENT_VISIBILITY_PENDING = "pending_activity"
 SESSION_AGENT_VISIBILITY_NONE = "none"
@@ -1691,12 +1693,14 @@ def _agent_runtime_from_env() -> dict[str, Any]:
     session_id = str(os.environ.get("VIBELUTION_AGENT_DIRECT_SESSION_ID") or "").strip()
     supervised_role = str(os.environ.get("VIBELUTION_SUPERVISED_ROLE") or "").strip()
     agent = _agent_from_runtime_env(agent_id)
+    delegation_policy = resolve_delegation_policy_for_agent(agent_id)
     tool_policy = resolve_tool_policy_for_agent(agent_id, session_id=session_id)
     tool_policy = _with_runtime_tool_grants(
         tool_policy,
         supervised_role_runtime_tools(supervised_role),
         source="supervised_conversation_harness" if supervised_role else "",
     )
+    tool_policy = _without_subagent_delegation_tools(tool_policy, delegation_policy)
     return {
         "agentId": agent_id,
         "sessionId": session_id,
@@ -1707,7 +1711,7 @@ def _agent_runtime_from_env() -> dict[str, Any]:
         "agent": agent,
         "toolPolicy": tool_policy,
         "memoryPolicy": resolve_memory_policy_for_agent(agent_id),
-        "delegationPolicy": resolve_delegation_policy_for_agent(agent_id),
+        "delegationPolicy": delegation_policy,
         "supervisionPolicy": resolve_supervision_policy_for_agent(agent_id),
     }
 
@@ -1769,6 +1773,7 @@ def active_agent_runtime(
         if runtime_tool_grants is not None
         else supervised_role_runtime_tools(normalized_supervised_role)
     )
+    delegation_policy = resolve_delegation_policy_for_agent(agent_id)
     tool_policy = resolve_tool_policy_for_agent(agent_id, session_id=session_id, turn_id=turn_id)
     tool_policy = _with_runtime_tool_grants(
         tool_policy,
@@ -1776,6 +1781,7 @@ def active_agent_runtime(
         source=str(runtime_tool_source or "").strip()
         or ("supervised_conversation_harness" if normalized_supervised_role else ""),
     )
+    tool_policy = _without_subagent_delegation_tools(tool_policy, delegation_policy)
     context = {
         "agentId": str(agent_id or "").strip(),
         "sessionId": str(session_id or "").strip(),
@@ -1786,7 +1792,7 @@ def active_agent_runtime(
         "agent": agent or {},
         "toolPolicy": tool_policy,
         "memoryPolicy": resolve_memory_policy_for_agent(agent_id),
-        "delegationPolicy": resolve_delegation_policy_for_agent(agent_id),
+        "delegationPolicy": delegation_policy,
         "supervisionPolicy": resolve_supervision_policy_for_agent(agent_id),
     }
     token = _CURRENT_AGENT_RUNTIME.set(context)
@@ -1806,6 +1812,24 @@ def _tool_name_list(tools: Iterable[Any]) -> list[str]:
         seen.add(name)
         names.append(name)
     return names
+
+
+def _without_subagent_delegation_tools(policy: dict[str, Any], delegation_policy: dict[str, Any] | None) -> dict[str, Any]:
+    normalized_policy = normalize_delegation_policy(delegation_policy)
+    if bool(normalized_policy.get("allowSubagents", False)):
+        return policy
+    blocked_tools = SUBAGENT_DELEGATION_TOOL_NAMES
+    allowed = [name for name in _tool_name_list(policy.get("allowedTools") or []) if name not in blocked_tools]
+    preferred = [name for name in _tool_name_list(policy.get("preferredTools") or []) if name not in blocked_tools]
+    if allowed == _tool_name_list(policy.get("allowedTools") or []) and preferred == _tool_name_list(
+        policy.get("preferredTools") or []
+    ):
+        return policy
+    return {
+        **policy,
+        "allowedTools": allowed,
+        "preferredTools": preferred,
+    }
 
 
 def _with_runtime_tool_grants(
@@ -1924,11 +1948,16 @@ def resolve_tool_policy_for_agent(agent_id: str, *, session_id: str = "", turn_i
     policy_id = str(agent.get("toolPolicyId") or DEFAULT_TOOL_POLICY_ID).strip() or DEFAULT_TOOL_POLICY_ID
     policy = _tool_policies(state).get(policy_id) or default_tool_policy(policy_id)
     normalized = normalize_tool_policy(policy, policy_id)
-    return _with_temporary_tool_grants(
+    with_grants = _with_temporary_tool_grants(
         normalized,
         agent_id=agent_id,
         session_id=session_id,
         turn_id=turn_id,
+    )
+    metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
+    return _without_subagent_delegation_tools(
+        with_grants,
+        metadata.get("delegationPolicy") if isinstance(metadata, dict) else {},
     )
 
 
@@ -2270,9 +2299,25 @@ def evaluate_current_tool_policy(tool_name: str, tool_args: dict[str, Any]) -> T
     agent_id = str(runtime.get("agentId") or "").strip()
     if not agent_id:
         return ToolPolicyDecision(True)
+    normalized_tool = str(tool_name or "").strip()
+    delegation_policy = normalize_delegation_policy(runtime.get("delegationPolicy"))
+    if normalized_tool in SUBAGENT_DELEGATION_TOOL_NAMES and not bool(
+        delegation_policy.get("allowSubagents", False)
+    ):
+        policy = runtime.get("toolPolicy") or {}
+        policy_id = str(policy.get("policyId") or policy.get("id") or "").strip() or DEFAULT_TOOL_POLICY_ID
+        decision = _blocked_decision(
+            normalized_tool,
+            "subagent_delegation_disabled",
+            policy_id,
+            agent_id,
+            f"[委托策略提示] 当前 Agent 默认关闭子 agent 派发权限，`{normalized_tool}` 已被拦截。",
+        )
+        _record_policy_block(agent_id, policy, normalized_tool, tool_args, decision)
+        return decision
     policy = runtime.get("toolPolicy") or {}
     decision = evaluate_tool_policy(
-        tool_name,
+        normalized_tool,
         tool_args,
         policy=policy,
         agent_id=agent_id,
@@ -5159,7 +5204,11 @@ def _tool_policy_for_agent(agent: dict[str, Any], *, hydration: AgentApiHydratio
         return resolve_tool_policy_for_agent(agent_id)
     policy_id = str(agent.get("toolPolicyId") or DEFAULT_TOOL_POLICY_ID).strip() or DEFAULT_TOOL_POLICY_ID
     policy = hydration.tool_policies.get(policy_id) or default_tool_policy(policy_id)
-    return normalize_tool_policy(policy, policy_id)
+    metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
+    return _without_subagent_delegation_tools(
+        normalize_tool_policy(policy, policy_id),
+        metadata.get("delegationPolicy") if isinstance(metadata, dict) else {},
+    )
 
 
 def _tool_policy_source_for_agent(agent: dict[str, Any], policy: dict[str, Any] | None) -> dict[str, Any]:
