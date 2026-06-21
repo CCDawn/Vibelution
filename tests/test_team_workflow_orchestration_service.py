@@ -711,6 +711,12 @@ def test_execute_source_collection_search_writes_records_and_imports_candidates(
     assert candidates["candidateCount"] == 2
     assert all(candidate["metadata"]["sourceCollectionSearchExecution"] is True for candidate in candidates["candidates"])
     assert all(candidate["metadata"]["importedFromDataRecord"]["runId"] == run_response["run"]["runId"] for candidate in candidates["candidates"])
+    assert all(candidate["metadata"]["sourceRunId"] == run_response["run"]["runId"] for candidate in candidates["candidates"])
+    assert all(candidate["metadata"]["sourceRecordId"] for candidate in candidates["candidates"])
+    assert all(candidate["metadata"]["queryId"] == run_response["searchPlan"]["queries"][0]["queryId"] for candidate in candidates["candidates"])
+    assert all(candidate["metadata"]["assignmentId"] == run_response["assignments"][0]["assignmentId"] for candidate in candidates["candidates"])
+    assert {candidate["metadata"]["sourceCategory"] for candidate in candidates["candidates"]} == {"paper_web", "dataset"}
+    assert candidates["candidates"][0]["metadata"]["doi"] == "10.0000/predictive-coding"
     assert {event["eventType"] for event in execution["executionEvents"]} >= {
         "search.executed",
         "storage.data_record_written",

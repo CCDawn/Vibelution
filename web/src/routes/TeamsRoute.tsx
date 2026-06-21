@@ -322,6 +322,7 @@ type SourceCollectionStageModule = {
   actionIcon: "play" | "search" | "check" | "archive" | "refresh";
   onAction: () => void;
   onDetail: () => void;
+  onAgentChat: () => void;
 };
 
 const SOURCE_COLLECTION_STAGE_AGENT_KEYS: Record<SourceCollectionStageModuleId, string[]> = {
@@ -2026,6 +2027,10 @@ function sourceCollectionRecordSourceCategory(record: DataProcessingRecord, lang
 function sourceCollectionCandidateSourceCategory(candidate: TeamWorkflowCandidate, lang: "zh" | "en") {
   const metadata = isRecord(candidate.metadata) ? candidate.metadata : {};
   const sourceCandidate = candidate as SourceCollectionCandidateWithSource;
+  const normalizedCategory = metadataString(metadata, "sourceCategory") as SourceCollectionSourceFilter;
+  if (SOURCE_COLLECTION_SOURCE_FILTERS.includes(normalizedCategory)) {
+    return normalizedCategory;
+  }
   const provenance = sourceCollectionCandidateProvenance(candidate, lang);
   return sourceCollectionSourceCategoryFromProvenance(
     sourceCandidate.sourceKind || candidate.sourceKind || metadataString(metadata, "sourceType") || candidate.candidateType,
@@ -2077,15 +2082,15 @@ function sourceCollectionCandidateTrace(candidate: TeamWorkflowCandidate): Sourc
   const dataRecordRef = evidenceRefs.find((ref) => String(ref.type || "") === "data_record");
   const runRef = evidenceRefs.find((ref) => String(ref.type || "") === "data_processing_run");
   return {
-    assignmentId: String(sourceTrace.assignmentId || collectionTrace.assignmentId || ""),
-    query: String(sourceTrace.query || metadata.query || ""),
-    queryId: String(sourceTrace.queryId || metadata.queryId || ""),
+    assignmentId: String(metadata.assignmentId || sourceTrace.assignmentId || collectionTrace.assignmentId || ""),
+    query: String(metadata.query || sourceTrace.query || ""),
+    queryId: String(metadata.queryId || sourceTrace.queryId || ""),
     rawLocation: String(importedRecord.rawLocation || sourceTrace.rawLocation || sourceCandidate.sourcePath || ""),
-    recordId: String(importedRecord.recordId || dataRecordRef?.id || ""),
-    runId: String(sourceTrace.runId || importedRecord.runId || runRef?.id || ""),
-    searchProvider: String(sourceTrace.searchProvider || recordMetadata.searchProvider || metadata.searchProvider || ""),
-    searchUrl: String(sourceTrace.searchUrl || recordMetadata.searchUrl || metadata.searchUrl || ""),
-    sourceRef: String(importedRecord.sourceRef || sourceCandidate.sourceRef || sourceCandidate.sourceUrl || metadataString(metadata, "sourceRef")),
+    recordId: String(metadata.sourceRecordId || importedRecord.recordId || dataRecordRef?.id || ""),
+    runId: String(metadata.sourceRunId || sourceTrace.runId || importedRecord.runId || runRef?.id || ""),
+    searchProvider: String(metadata.searchProvider || sourceTrace.searchProvider || recordMetadata.searchProvider || ""),
+    searchUrl: String(metadata.searchUrl || sourceTrace.searchUrl || recordMetadata.searchUrl || ""),
+    sourceRef: String(metadata.sourceRef || importedRecord.sourceRef || sourceCandidate.sourceRef || sourceCandidate.sourceUrl || metadataString(metadata, "sourceRef")),
   };
 }
 
@@ -9433,6 +9438,7 @@ export function TeamsRoute({
       actionIcon: selectedSourceCollectionRun && sourceCollectionSearchOpenAssignmentCount > 0 ? "search" : "play",
       onAction: runSourceCollectionCollectionAction,
       onDetail: () => openSourceCollectionStage("collection"),
+      onAgentChat: () => openSourceCollectionStageChat("collection"),
     },
     {
       id: "candidate",
@@ -9453,6 +9459,7 @@ export function TeamsRoute({
       actionIcon: selectedTeamExtractSourceCollectionCandidatesPending ? "refresh" : "archive",
       onAction: runSourceCollectionCandidateExtractionAction,
       onDetail: () => openSourceCollectionStage("candidate"),
+      onAgentChat: () => openSourceCollectionStageChat("candidate"),
     },
     {
       id: "screening",
@@ -9477,10 +9484,36 @@ export function TeamsRoute({
       actionIcon: "check",
       onAction: runSourceCollectionScreeningAction,
       onDetail: () => openSourceCollectionStage("screening"),
+      onAgentChat: () => openSourceCollectionStageChat("screening"),
+    },
+    {
+      id: "graph",
+      label: lang === "zh" ? "候选图谱" : "Candidate map",
+      metric: lang === "zh" ? `节点 ${candidateGraphNodeCount} / 关系 ${candidateGraphEdgeCount}` : `${candidateGraphNodeCount} nodes / ${candidateGraphEdgeCount} edges`,
+      summary: candidateGraphNodeCount > 0
+        ? (lang === "zh" ? "候选资料关系已生成" : "Candidate relationships are ready")
+        : sourceCollectionRunCandidateCount > 0
+          ? (lang === "zh" ? "可由 Agent 生成候选关系" : "Agent can build candidate relationships")
+          : (lang === "zh" ? "等候选资料生成后建图" : "Build after candidates exist"),
+      inputLabel: lang === "zh" ? `${sourceCollectionRunCandidateCount} 条候选资料` : `${sourceCollectionRunCandidateCount} candidate sources`,
+      outputLabel: lang === "zh" ? `${candidateGraphNodeCount} 个节点 / ${candidateGraphEdgeCount} 条关系` : `${candidateGraphNodeCount} nodes / ${candidateGraphEdgeCount} edges`,
+      nextLabel: candidateGraphNodeCount > 0
+        ? (lang === "zh" ? "进入共享记忆前审" : "Move to memory precheck")
+        : (lang === "zh" ? "生成候选图谱" : "Build candidate map"),
+      state: sourceCollectionGraphStepState,
+      status: sourceCollectionStepStatusText(sourceCollectionGraphStepState),
+      detailLabel: lang === "zh" ? "查看候选图谱" : "View candidate map",
+      actionLabel: sourceCollectionGraphActionLabel,
+      actionDisabled: sourceCollectionGraphActionDisabled,
+      actionTone: "primary",
+      actionIcon: "refresh",
+      onAction: runSourceCollectionGraphAction,
+      onDetail: () => openSourceCollectionStage("graph"),
+      onAgentChat: () => openSourceCollectionStageChat("graph"),
     },
     {
       id: "memory",
-      label: lang === "zh" ? "资料入库" : "Ingest knowledge",
+      label: lang === "zh" ? "共享记忆前审" : "Memory precheck",
       metric: lang === "zh" ? `正式知识 ${formalKnowledgeItemCount}` : `${formalKnowledgeItemCount} formal items`,
       summary: formalKnowledgeItemCount > 0
         ? (lang === "zh" ? "已进入团队知识库" : "Synced into Team Knowledge")
@@ -9511,13 +9544,14 @@ export function TeamsRoute({
       actionIcon: "check",
       onAction: runSourceCollectionMemoryPrecheckAction,
       onDetail: () => openSourceCollectionStage("memory"),
+      onAgentChat: () => openSourceCollectionStageChat("memory"),
     },
   ];
   const sourceCollectionStageCardKeyDown = (
     event: ReactKeyboardEvent<HTMLElement>,
     onDetail: () => void,
   ) => {
-    if (event.target instanceof Element && event.target.closest("button")) {
+    if (event.target instanceof Element && event.target.closest("button, a")) {
       return;
     }
     if (event.key !== "Enter" && event.key !== " ") {
@@ -9649,6 +9683,16 @@ export function TeamsRoute({
                     >
                       {renderSourceCollectionStageActionIcon(module.actionIcon)}
                       {module.actionLabel}
+                    </button>
+                    <button
+                      type="button"
+                      className={styles.sourceCollectionStageSecondaryAction}
+                      onClick={module.onAgentChat}
+                      disabled={createSourceCollectionStageChatRoomMutation.isPending}
+                      title={SOURCE_COLLECTION_STAGE_CHAT_LABELS[module.id][lang]}
+                    >
+                      <MessageSquare size={13} />
+                      {lang === "zh" ? "Agent 会话" : "Agent room"}
                     </button>
                   </div>
                 </article>
