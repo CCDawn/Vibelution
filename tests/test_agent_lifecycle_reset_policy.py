@@ -80,6 +80,7 @@ def test_agent_reset_api_clears_runtime_state_without_removing_bindings_or_memor
     assert payload["resetSummary"]["resetDirectSession"] is True
     assert payload["resetSummary"]["previousDirectSessionId"] == direct_session["id"]
     assert payload["resetSummary"]["replacementDirectSessionId"] == payload["agent"]["directSessionId"]
+    assert payload["agent"]["metadata"]["directSessionVisibility"] == agent_directory_service.SESSION_AGENT_VISIBILITY_ACTIVE
     assert "team_membership" in payload["resetSummary"]["preserved"]
     for subdir in ("inbox", "events", "logs", "runs", "scratch", "artifacts"):
         assert (workspace_path / subdir).is_dir()
@@ -177,11 +178,13 @@ def test_agent_reset_api_can_reset_session_agent_advanced_policies_without_profi
     assert payload["agent"]["toolPolicy"]["allowedTools"] == list(agent_directory_service.DEFAULT_SESSION_AGENT_ALLOWED_TOOLS)
     assert payload["agent"]["toolPolicy"]["preferredTools"] == list(agent_directory_service.DEFAULT_SESSION_AGENT_PREFERRED_TOOLS)
     assert "read_file_tool" in payload["agent"]["toolPolicy"]["allowedTools"]
-    assert "cli_tool" not in payload["agent"]["toolPolicy"]["allowedTools"]
-    assert "create_child_session_tool" not in payload["agent"]["toolPolicy"]["allowedTools"]
-    assert "list_child_sessions_tool" not in payload["agent"]["toolPolicy"]["allowedTools"]
-    assert "agent_message_tool" not in payload["agent"]["toolPolicy"]["allowedTools"]
-    assert "agent_tool_permission_request_tool" not in payload["agent"]["toolPolicy"]["allowedTools"]
+    assert "cli_tool" in payload["agent"]["toolPolicy"]["allowedTools"]
+    assert "apply_patch_tool" in payload["agent"]["toolPolicy"]["allowedTools"]
+    assert "run_test_for_tool" in payload["agent"]["toolPolicy"]["allowedTools"]
+    assert "create_child_session_tool" in payload["agent"]["toolPolicy"]["allowedTools"]
+    assert "list_child_sessions_tool" in payload["agent"]["toolPolicy"]["allowedTools"]
+    assert "agent_message_tool" in payload["agent"]["toolPolicy"]["allowedTools"]
+    assert "agent_tool_permission_request_tool" in payload["agent"]["toolPolicy"]["allowedTools"]
     assert payload["agent"]["memoryPolicy"]["readSharedGroups"] == []
     assert payload["agent"]["memoryPolicy"]["writeSharedGroups"] == []
     assert payload["agent"]["metadata"]["delegationPolicy"]["allowSubagents"] is False
@@ -390,10 +393,9 @@ def test_agent_api_explains_session_tool_policy_sources(tmp_path, monkeypatch):
         tool_policy={
             "allowedTools": [
                 *agent_directory_service.DEFAULT_SESSION_AGENT_ALLOWED_TOOLS,
-                "cli_tool",
-                "write_file_tool",
+                "web_search_tool",
             ],
-            "preferredTools": ["cli_tool"],
+            "preferredTools": ["cli_tool", "web_search_tool"],
         },
     )
 
@@ -406,7 +408,7 @@ def test_agent_api_explains_session_tool_policy_sources(tmp_path, monkeypatch):
     assert empty_payload["toolPolicySource"]["allowedToolCount"] == 0
     assert wide_payload["toolPolicySource"]["kind"] == "legacy_wide_private_override"
     assert wide_payload["toolPolicySource"]["isLegacyWide"] is True
-    assert set(wide_payload["toolPolicySource"]["mutatingTools"]) == {"cli_tool", "write_file_tool"}
+    assert set(wide_payload["toolPolicySource"]["mutatingTools"]) == set(agent_directory_service.MUTATING_AGENT_TOOL_NAMES)
 
 
 def test_agent_api_rejects_legacy_profile_and_template_fields(tmp_path, monkeypatch):

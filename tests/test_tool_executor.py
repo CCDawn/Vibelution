@@ -134,7 +134,7 @@ class TestToolExecutorInit:
         assert "read_file_tool" in visibility.visible_tools
         assert "read_file_tool" not in visibility.configured_unavailable_tools
 
-    def test_cli_agent_run_tool_is_registered_but_restricted_by_session_default(self):
+    def test_cli_agent_run_tool_is_registered_and_visible_for_operational_session_default(self):
         from core.web.services.agent_directory_service import (
             compute_effective_tool_visibility,
             default_session_agent_tool_policy,
@@ -157,8 +157,8 @@ class TestToolExecutorInit:
             policy=default_session_agent_tool_policy("tool-agent-session"),
         )
 
-        assert "cli_agent_run_tool" not in session_visibility.visible_tools
-        assert "cli_agent_run_tool" in session_visibility.hidden_restricted_tools
+        assert "cli_agent_run_tool" in session_visibility.visible_tools
+        assert "cli_agent_run_tool" not in session_visibility.hidden_restricted_tools
 
     def test_memory_tools_are_llm_facing_but_policy_gated_by_default(self):
         from core.web.services.agent_directory_service import (

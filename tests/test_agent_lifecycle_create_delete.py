@@ -97,22 +97,25 @@ def test_agent_create_api_allows_work_session_without_persona_task_or_role(tmp_p
     assert "read_file_tool" in created["toolPolicy"]["allowedTools"]
     assert "grep_search_tool" in created["toolPolicy"]["allowedTools"]
     assert "glob_tool" in created["toolPolicy"]["allowedTools"]
-    assert "cli_tool" not in created["toolPolicy"]["allowedTools"]
-    assert "run_test_for_tool" not in created["toolPolicy"]["allowedTools"]
+    assert "cli_tool" in created["toolPolicy"]["allowedTools"]
+    assert "run_test_for_tool" in created["toolPolicy"]["allowedTools"]
+    assert "python_lint_tool" in created["toolPolicy"]["allowedTools"]
+    assert "apply_patch_tool" in created["toolPolicy"]["allowedTools"]
+    assert "write_file_tool" in created["toolPolicy"]["allowedTools"]
     assert "web_search_tool" not in created["toolPolicy"]["allowedTools"]
     assert "image2_generate_tool" not in created["toolPolicy"]["allowedTools"]
-    assert "cli_agent_run_tool" not in created["toolPolicy"]["allowedTools"]
+    assert "cli_agent_run_tool" in created["toolPolicy"]["allowedTools"]
     assert "search_memory_tool" not in created["toolPolicy"]["allowedTools"]
     assert "search_error_archive_tool" not in created["toolPolicy"]["allowedTools"]
     assert "record_learning_tool" not in created["toolPolicy"]["allowedTools"]
-    assert "code_symbol_tool" not in created["toolPolicy"]["allowedTools"]
+    assert "code_symbol_tool" in created["toolPolicy"]["allowedTools"]
     assert "research_knowledge_query_tool" not in created["toolPolicy"]["allowedTools"]
     assert "knowledge_proposal_tool" not in created["toolPolicy"]["allowedTools"]
     assert "research_agent_creation_proposal_tool" not in created["toolPolicy"]["allowedTools"]
-    assert "create_child_session_tool" not in created["toolPolicy"]["allowedTools"]
-    assert "list_child_sessions_tool" not in created["toolPolicy"]["allowedTools"]
-    assert "agent_message_tool" not in created["toolPolicy"]["allowedTools"]
-    assert "agent_tool_permission_request_tool" not in created["toolPolicy"]["allowedTools"]
+    assert "create_child_session_tool" in created["toolPolicy"]["allowedTools"]
+    assert "list_child_sessions_tool" in created["toolPolicy"]["allowedTools"]
+    assert "agent_message_tool" in created["toolPolicy"]["allowedTools"]
+    assert "agent_tool_permission_request_tool" in created["toolPolicy"]["allowedTools"]
     assert not any(item["code"] == "agent_onboarding_incomplete" for item in created["health"])
 
 
@@ -170,16 +173,16 @@ def test_repair_adds_session_default_tools_to_legacy_work_session_agent(tmp_path
     assert "read_file_tool" in policy["allowedTools"]
     assert "grep_search_tool" in policy["allowedTools"]
     assert "glob_tool" in policy["allowedTools"]
-    assert "cli_tool" not in policy["allowedTools"]
-    assert "cli_agent_run_tool" not in policy["allowedTools"]
+    assert "cli_tool" in policy["allowedTools"]
+    assert "cli_agent_run_tool" in policy["allowedTools"]
     assert "search_memory_tool" not in policy["allowedTools"]
     assert "search_error_archive_tool" not in policy["allowedTools"]
     assert "record_learning_tool" not in policy["allowedTools"]
-    assert "code_symbol_tool" not in policy["allowedTools"]
-    assert "create_child_session_tool" not in policy["allowedTools"]
-    assert "list_child_sessions_tool" not in policy["allowedTools"]
-    assert "agent_message_tool" not in policy["allowedTools"]
-    assert "agent_tool_permission_request_tool" not in policy["allowedTools"]
+    assert "code_symbol_tool" in policy["allowedTools"]
+    assert "create_child_session_tool" in policy["allowedTools"]
+    assert "list_child_sessions_tool" in policy["allowedTools"]
+    assert "agent_message_tool" in policy["allowedTools"]
+    assert "agent_tool_permission_request_tool" in policy["allowedTools"]
     assert repaired_agent["metadata"]["onboardingStatus"] == "complete"
 
 
@@ -338,4 +341,3 @@ def test_agent_onboarding_health_clears_after_required_profiles_and_tools(tmp_pa
     assert created["metadata"]["onboardingStatus"] == "complete"
     assert created["metadata"]["onboardingMissing"] == []
     assert not any(item["code"] == "agent_onboarding_incomplete" for item in created["health"])
-

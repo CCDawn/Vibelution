@@ -29,6 +29,7 @@ from core.llm.agent_runtime import (
     normalize_agent_llm_bindings,
 )
 from core.logging import debug as _debug_logger
+from core.ui.chat_state import load_chat_state
 
 from .runtime_scene_service import record_runtime_scene_event
 from .supervised_runtime_contract import supervised_role_runtime_tools
@@ -44,18 +45,36 @@ DEFAULT_SESSION_AGENT_ALLOWED_TOOLS = (
     "grep_search_tool",
     "glob_tool",
     "read_file_tool",
+    "code_symbol_tool",
+    "apply_diff_edit_tool",
+    "apply_patch_tool",
+    "write_file_tool",
+    "python_lint_tool",
+    "run_test_for_tool",
+    "cli_tool",
+    "cli_agent_run_tool",
+    "agent_message_tool",
+    "create_child_session_tool",
+    "list_child_sessions_tool",
+    "agent_tool_permission_request_tool",
     "get_core_context_tool",
     "get_current_goal_tool",
     "task_list_tool",
     "get_git_status_summary_tool",
     "get_recent_changes_tool",
+    "explain_current_worktree_tool",
     "conversation_log_inspect_tool",
 )
 DEFAULT_SESSION_AGENT_PREFERRED_TOOLS = (
     "grep_search_tool",
     "read_file_tool",
-    "conversation_log_inspect_tool",
+    "code_symbol_tool",
+    "apply_patch_tool",
+    "run_test_for_tool",
+    "cli_tool",
+    "cli_agent_run_tool",
     "get_core_context_tool",
+    "conversation_log_inspect_tool",
 )
 SESSION_AGENT_VISIBILITY_ACTIVE = "active_session"
 SESSION_AGENT_VISIBILITY_PENDING = "pending_activity"
@@ -783,6 +802,8 @@ def session_agent_visibility(agent: dict[str, Any] | None) -> str:
     metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
     legacy_workspace_path = str(metadata.get("legacySessionWorkspacePath") or "").strip()
     visibility = str(metadata.get("directSessionVisibility") or "").strip()
+    if direct_session_id == _active_chat_session_id():
+        return SESSION_AGENT_VISIBILITY_ACTIVE
     if visibility == SESSION_AGENT_VISIBILITY_ACTIVE:
         return SESSION_AGENT_VISIBILITY_ACTIVE
     if visibility == SESSION_AGENT_VISIBILITY_PENDING:
@@ -804,6 +825,16 @@ def session_agent_visibility(agent: dict[str, Any] | None) -> str:
         direct_session_id,
         session_workspace_path=legacy_workspace_path,
     )
+
+
+def _active_chat_session_id() -> str:
+    try:
+        payload = load_chat_state(PROJECT_ROOT)
+    except Exception:
+        return ""
+    if not isinstance(payload, dict):
+        return ""
+    return str(payload.get("active_conversation_id") or "").strip()
 
 
 def _direct_session_visibility(
@@ -1008,6 +1039,10 @@ def update_agent_instance(
             else:
                 updated_persona_profile = normalize_persona_profile(persona_profile)
                 metadata_payload["personaProfile"] = updated_persona_profile
+                if _persona_profile_has_content(updated_persona_profile):
+                    metadata_payload.pop("personaProfileDefaultsDisabled", None)
+                else:
+                    metadata_payload["personaProfileDefaultsDisabled"] = True
             agent["metadata"] = metadata_payload
         if task_profile is not None:
             metadata_payload = dict(agent.get("metadata") or {})
@@ -1016,6 +1051,10 @@ def update_agent_instance(
             else:
                 updated_task_profile = normalize_task_profile(task_profile)
                 metadata_payload["taskProfile"] = updated_task_profile
+                if _task_profile_has_content(updated_task_profile):
+                    metadata_payload.pop("taskProfileDefaultsDisabled", None)
+                else:
+                    metadata_payload["taskProfileDefaultsDisabled"] = True
             agent["metadata"] = metadata_payload
         if (tool_policy_id is not None or primary_mode is not None) and _ensure_session_agent_tool_policy(state, agent):
             policy_id = str(agent.get("toolPolicyId") or DEFAULT_TOOL_POLICY_ID).strip() or DEFAULT_TOOL_POLICY_ID
@@ -1272,6 +1311,7 @@ def reset_agent_instance(
             else:
                 updated_persona_profile = normalize_persona_profile({})
                 metadata["personaProfile"] = updated_persona_profile
+                metadata["personaProfileDefaultsDisabled"] = True
                 reset_summary["resetPersonaProfile"] = True
             agent["metadata"] = metadata
         if reset_task_profile:
@@ -1281,6 +1321,7 @@ def reset_agent_instance(
             else:
                 updated_task_profile = normalize_task_profile({})
                 metadata["taskProfile"] = updated_task_profile
+                metadata["taskProfileDefaultsDisabled"] = True
                 reset_summary["resetTaskProfile"] = True
             agent["metadata"] = metadata
         if reset_tool_policy:
@@ -1326,6 +1367,16 @@ def reset_agent_instance(
         reset_summary["resetDirectSession"] = bool(direct_session_cleanup.get("resetDirectSession"))
         reset_summary["replacementDirectSessionId"] = str(direct_session_cleanup.get("replacementDirectSessionId") or "").strip()
         reset_summary["skippedPaths"].extend(list(direct_session_cleanup.get("skippedPaths") or []))
+        if reset_summary["resetDirectSession"] and reset_summary["replacementDirectSessionId"]:
+            with _STATE_LOCK:
+                state = load_state()
+                agent = _find_agent(state, normalized_agent_id)
+                if agent is not None:
+                    metadata = dict(agent.get("metadata") or {})
+                    metadata["directSessionVisibility"] = SESSION_AGENT_VISIBILITY_ACTIVE
+                    agent["metadata"] = metadata
+                    agent["updatedAt"] = utc_now_iso()
+                    save_state(state)
 
     updated_agent = get_agent(normalized_agent_id)
     _record_agent_reset_event(updated_agent or agent_snapshot, reset_summary)
@@ -4208,14 +4259,16 @@ def _ensure_fixed_role_profiles(agent: dict[str, Any]) -> bool:
 
     changed = False
     persona = normalize_persona_profile(metadata.get("personaProfile") if isinstance(metadata.get("personaProfile"), dict) else {})
-    if not _persona_profile_has_content(persona):
+    persona_defaults_disabled = bool(metadata.get("personaProfileDefaultsDisabled"))
+    if not persona_defaults_disabled and not _persona_profile_has_content(persona):
         default_persona = normalize_persona_profile(defaults.get("personaProfile"))
         if _persona_profile_has_content(default_persona):
             metadata["personaProfile"] = default_persona
             changed = True
 
     task = normalize_task_profile(metadata.get("taskProfile") if isinstance(metadata.get("taskProfile"), dict) else {})
-    if not _task_profile_has_content(task):
+    task_defaults_disabled = bool(metadata.get("taskProfileDefaultsDisabled"))
+    if not task_defaults_disabled and not _task_profile_has_content(task):
         default_task = normalize_task_profile(defaults.get("taskProfile"))
         if _task_profile_has_content(default_task):
             metadata["taskProfile"] = default_task
