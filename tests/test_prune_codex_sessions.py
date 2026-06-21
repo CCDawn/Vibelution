@@ -193,6 +193,8 @@ def test_prune_codex_logs_dry_run_reports_without_deleting(tmp_path: Path):
     report = json.loads((tmp_path / "backup" / "prune_report.json").read_text(encoding="utf-8"))
     assert report["logs"]["oldRows"] == 1
     assert report["logs"]["keptRows"] == 1
+    assert not Path(str(logs_db) + "-wal").exists()
+    assert not Path(str(logs_db) + "-shm").exists()
 
 
 def test_prune_codex_logs_apply_deletes_old_rows_and_backs_up_db(tmp_path: Path):
