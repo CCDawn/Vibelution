@@ -93,6 +93,40 @@ def test_team_list_route_schedules_system_bootstrap_without_inline_materializati
     assert requested_reasons == ["team_list"]
 
 
+def test_team_list_route_reads_utf8_bom_team_index(tmp_path, monkeypatch):
+    _isolate_team_route_state(tmp_path, monkeypatch)
+    client = _client()
+    create_response = client.post("/api/teams", json={"name": "BOM 团队"})
+    assert create_response.status_code == 201, create_response.text
+
+    index_path = team_service._teams_index_path()
+    index_path.write_text(index_path.read_text(encoding="utf-8"), encoding="utf-8-sig")
+    monkeypatch.setattr(
+        teams_route,
+        "request_system_team_bootstrap",
+        lambda *, reason: {
+            "schemaVersion": 1,
+            "status": "ready",
+            "requiredSteps": [],
+            "reason": reason,
+            "startedAt": "",
+            "finishedAt": "2026-06-21T00:00:00Z",
+            "lastError": "",
+            "elapsedMs": 0,
+            "attempt": 0,
+            "requestId": "",
+        },
+    )
+
+    response = client.get("/api/teams")
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert [team["name"] for team in payload["teams"]] == ["BOM 团队"]
+    assert payload["summary"]["activeTeamCount"] == 1
+    assert payload["systemTeamBootstrap"]["status"] == "ready"
+
+
 def test_ai_search_run_routes_start_and_list_runs(tmp_path, monkeypatch):
     _isolate_team_route_state(tmp_path, monkeypatch)
 
