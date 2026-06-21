@@ -37,6 +37,8 @@ from .supervised_runtime_contract import supervised_role_runtime_tools
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 AGENT_REGISTRY_VERSION = 1
+SUSPICIOUS_REGISTRY_SHRINK_MIN_AGENTS = 8
+SUSPICIOUS_REGISTRY_SHRINK_MIN_DIRECT_AGENTS = 3
 DEFAULT_AGENT_KIND = "persistent"
 DEFAULT_TOOL_POLICY_ID = "default"
 DEFAULT_MEMORY_POLICY_ID = "private"
@@ -3947,9 +3949,67 @@ def load_state() -> dict[str, Any]:
 def save_state(state: dict[str, Any]) -> dict[str, Any]:
     with _STATE_LOCK:
         payload = _build_agent_registry_payload_for_storage(state)
+        _guard_against_suspicious_registry_shrink(payload)
         _atomic_write_json(registry_path(), payload)
         _invalidate_repaired_state_cache()
         return payload
+
+
+def _guard_against_suspicious_registry_shrink(next_payload: dict[str, Any]) -> None:
+    path = registry_path()
+    if not path.exists():
+        return
+    try:
+        previous_payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return
+    if not isinstance(previous_payload, dict):
+        return
+    previous_agents = [item for item in previous_payload.get("agents") or [] if isinstance(item, dict)]
+    next_agents = [item for item in next_payload.get("agents") or [] if isinstance(item, dict)]
+    previous_count = len(previous_agents)
+    next_count = len(next_agents)
+    if previous_count < SUSPICIOUS_REGISTRY_SHRINK_MIN_AGENTS:
+        return
+    if next_count > max(2, previous_count // 4):
+        return
+    next_agent_ids = {str(item.get("agentId") or "").strip() for item in next_agents}
+    previous_direct_agents = [
+        item
+        for item in previous_agents
+        if str(item.get("agentId") or "").strip()
+        and str(item.get("directSessionId") or "").strip()
+        and str(item.get("status") or "active").strip().lower() != "archived"
+    ]
+    removed_direct_agents = [
+        item for item in previous_direct_agents if str(item.get("agentId") or "").strip() not in next_agent_ids
+    ]
+    if len(removed_direct_agents) < SUSPICIOUS_REGISTRY_SHRINK_MIN_DIRECT_AGENTS:
+        return
+    if len(removed_direct_agents) < max(SUSPICIOUS_REGISTRY_SHRINK_MIN_DIRECT_AGENTS, len(previous_direct_agents) // 2):
+        return
+    fields = {
+        "previousAgentCount": previous_count,
+        "nextAgentCount": next_count,
+        "previousDirectSessionAgentCount": len(previous_direct_agents),
+        "removedDirectSessionAgentCount": len(removed_direct_agents),
+        "sampleRemovedAgentIds": [
+            str(item.get("agentId") or "").strip()
+            for item in removed_direct_agents[:8]
+        ],
+        "pathName": path.name,
+    }
+    _record_state_write_event(
+        "agent_directory.state_write_rejected_suspicious_shrink",
+        level="error",
+        outcome="blocked",
+        fields=fields,
+    )
+    raise AgentDirectoryError(
+        "Refused suspicious Agent registry shrink: "
+        f"{previous_count} agents would become {next_count}, "
+        f"removing {len(removed_direct_agents)} active direct-session Agents."
+    )
 
 
 def _build_agent_registry_payload_for_storage(state: dict[str, Any]) -> dict[str, Any]:
