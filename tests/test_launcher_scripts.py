@@ -18,6 +18,8 @@ LAUNCHER_SCRIPT = PROJECT_ROOT / "scripts" / "vibelution_launcher.ps1"
 DESKTOP_ENTRY_SCRIPT = PROJECT_ROOT / "scripts" / "vibelution_desktop_entry.ps1"
 DESKTOP_ENTRY_VBS = PROJECT_ROOT / "scripts" / "vibelution_desktop_entry.vbs"
 DESKTOP_ENTRY_PY = PROJECT_ROOT / "scripts" / "vibelution_desktop_entry.py"
+NATIVE_ENTRY_SOURCE = PROJECT_ROOT / "scripts" / "windows_launcher_entry" / "VibelutionLauncher.cs"
+NATIVE_ENTRY_BUILD_SCRIPT = PROJECT_ROOT / "scripts" / "windows_launcher_entry" / "build_vibelution_launcher_entry.ps1"
 
 pytestmark = [pytest.mark.slow, pytest.mark.serial]
 
@@ -27,14 +29,41 @@ def test_launcher_script_repairs_start_menu_shortcut_entry():
 
     assert '"repair-shortcut"' in source
     assert "function Repair-LauncherShortcut" in source
+    assert "function Ensure-NativeLauncherEntryExecutable" in source
+    assert "function Set-LauncherShellShortcut" in source
     assert "Vibelution.lnk" in source
+    assert "Vibelution Launcher.lnk" in source
+    assert "VibelutionLauncher.exe" in source
+    assert "windows_launcher_entry\\build_vibelution_launcher_entry.ps1" in source
     assert "vibelution_desktop_entry.vbs" in source
     assert "assets\\icons\\vibelution.ico" in source
     assert "CreateShortcut" in source
-    assert "$shortcut.TargetPath = $wscriptPath" in source
-    assert '$shortcut.Arguments = (\'"{0}" launcher\' -f $launcherDesktopEntryVbsPath)' in source
+    assert "$shortcut.TargetPath = $TargetPath" in source
+    assert '$shortcutArguments = (\'--project "{0}" launcher\' -f $projectDir)' in source
+    assert '$shortcutMode = "native_exe"' in source
+    assert '$shortcutMode = "script_host_fallback"' in source
     assert "$shortcut.IconLocation" in source
     assert "[void](Repair-LauncherShortcut)" in source
+
+
+def test_launcher_native_entry_source_and_build_contract():
+    source = NATIVE_ENTRY_SOURCE.read_text(encoding="utf-8")
+    build_script = NATIVE_ENTRY_BUILD_SCRIPT.read_text(encoding="utf-8")
+
+    assert "ProcessStartInfo" in source
+    assert "UseShellExecute = false" in source
+    assert "CreateNoWindow = true" in source
+    assert "WindowStyle = ProcessWindowStyle.Hidden" in source
+    assert "wscript.exe" in source
+    assert "vibelution_desktop_entry.vbs" in source
+    assert "--project" in source
+    assert "native-launcher-entry.log" in source
+
+    assert "/target:winexe" in build_script
+    assert "/win32icon:" in build_script
+    assert "VibelutionLauncher.exe" in build_script
+    assert "assets\\icons\\vibelution.ico" in build_script
+    assert "Microsoft.NET\\Framework64\\v4.0.30319\\csc.exe" in build_script
 
 
 def test_launcher_script_reconciles_stale_control_state_before_lifecycle_actions():
