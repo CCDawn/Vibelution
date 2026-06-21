@@ -53,6 +53,7 @@ def _iter_api_routes(app):
                     full_path = f"/{full_path}"
                 yield f"{route_prefix}{full_path}" if route_prefix else full_path, sub_route.methods
 
+
 def test_agents_api_summary_detail_returns_light_payload(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _mark_config_agent_instances_present()
@@ -98,7 +99,7 @@ def test_agent_config_workspace_api_route(tmp_path, monkeypatch):
     payload = agents_route.agent_config_workspace()
 
     assert registered_routes
-    assert calls == [{"use_cache": True}]
+    assert calls == [{"use_cache": True, "include_runtime": True}]
     assert payload["schemaVersion"] == 1
     assert payload["summary"]["agentCount"] >= 1
     assert any(item["policyId"] == "default" for item in payload["toolPolicies"])
