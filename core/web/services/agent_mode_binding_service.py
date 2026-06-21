@@ -424,8 +424,17 @@ def repair_mode_bindings(*, agent_options: list[dict[str, Any]] | None = None) -
     seeded = _seed_bindings_from_agents(bindings_by_mode, agents=agents)
     repaired: list[dict[str, Any]] = []
     repair_warnings: list[dict[str, str]] = []
+    agents_by_id = {
+        str(agent.get("agentId") or "").strip(): agent
+        for agent in agents
+        if str(agent.get("agentId") or "").strip()
+    }
     for binding in seeded.values():
-        next_binding, warnings = _repair_agent_references(binding, active_agent_ids=active_agent_ids)
+        next_binding, warnings = _repair_agent_references(
+            binding,
+            active_agent_ids=active_agent_ids,
+            agents_by_id=agents_by_id,
+        )
         repaired.append(next_binding)
         repair_warnings.extend(warnings)
     if repair_warnings:
@@ -580,6 +589,7 @@ def _repair_agent_references(
     binding: dict[str, Any],
     *,
     active_agent_ids: set[str],
+    agents_by_id: dict[str, dict[str, Any]] | None = None,
 ) -> tuple[dict[str, Any], list[dict[str, str]]]:
     mode = str(binding.get("mode") or "").strip()
     warnings: list[dict[str, str]] = []
@@ -588,7 +598,7 @@ def _repair_agent_references(
         normalized = str(agent_id or "").strip()
         if not normalized:
             return ""
-        if normalized in active_agent_ids:
+        if normalized in active_agent_ids and _agent_allowed_in_mode(mode, (agents_by_id or {}).get(normalized)):
             return normalized
         warnings.append({"mode": mode, "field": field, "agentId": normalized})
         return ""
@@ -644,6 +654,23 @@ def _repair_agent_references(
             },
         )
     return next_binding, warnings
+
+
+def _agent_allowed_in_mode(mode: str, agent: dict[str, Any] | None) -> bool:
+    if not isinstance(agent, dict):
+        return False
+    normalized_mode = _normalize_mode(mode)
+    primary_mode = str(agent.get("primaryMode") or "general").strip() or "general"
+    role_key = str(agent.get("roleKey") or "").strip()
+    if normalized_mode == "chat":
+        return primary_mode == "chat" and not role_key.startswith("research_")
+    if normalized_mode == "research":
+        return primary_mode == "research" or role_key.startswith("research_")
+    if normalized_mode == "supervised_evolution":
+        return primary_mode == "supervised_evolution"
+    if normalized_mode == "self_evolution":
+        return primary_mode == "self_evolution"
+    return primary_mode == normalized_mode
 
 
 def _binding_to_api(binding: dict[str, Any]) -> dict[str, Any]:

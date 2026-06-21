@@ -111,6 +111,23 @@ RESEARCH_SOURCE_ROLE_TOOL_PROFILES = {
         "preferredTools": ("research_knowledge_query_tool", "web_fetch_tool", "web_search_tool", "agent_message_tool"),
     },
 }
+RESEARCH_ROLE_TOOL_PROFILES = {
+    "research_paper_reader": {
+        "allowedTools": (
+            "agent_message_tool",
+            "research_knowledge_query_tool",
+            "web_search_tool",
+            "web_fetch_tool",
+            "read_file_tool",
+        ),
+        "preferredTools": (
+            "research_knowledge_query_tool",
+            "web_fetch_tool",
+            "read_file_tool",
+            "agent_message_tool",
+        ),
+    },
+}
 AGENT_LLM_BINDING_SLOTS = AGENT_LLM_SLOTS
 LEGACY_AGENT_MODEL_ID_ALIASES = {
     "gpt_5_5_gpt_5_5": "relay_openai_gpt_5_5",
@@ -2715,6 +2732,19 @@ def default_research_source_tool_policy(policy_id: str, *, role_key: str = "") -
     return payload
 
 
+def default_research_role_tool_policy(policy_id: str, *, role_key: str = "") -> dict[str, Any]:
+    payload = default_tool_policy(policy_id)
+    profile = RESEARCH_ROLE_TOOL_PROFILES.get(_normalize_role_key(role_key), {})
+    payload["allowedTools"] = list(profile.get("allowedTools") or ("agent_message_tool", "research_knowledge_query_tool"))
+    payload["preferredTools"] = list(profile.get("preferredTools") or payload["allowedTools"])
+    payload["readScopes"] = ["private", "shared"]
+    payload["writeScopes"] = []
+    payload["networkAccess"] = "controlled"
+    payload["mutationAccess"] = "none"
+    payload["maxCallsPerTurn"] = 8
+    return payload
+
+
 def _default_tool_policy_id_for_agent(agent_id: str, primary_mode: str) -> str:
     if _is_session_agent_primary_mode(primary_mode):
         return f"tool-{agent_id}"
@@ -2767,6 +2797,8 @@ def _ensure_fixed_role_tool_policy(state: dict[str, Any], agent: dict[str, Any])
     policies = _tool_policies(state)
     if desired_kind == "research_source":
         desired_policy = default_research_source_tool_policy(policy_id, role_key=str(agent.get("roleKey") or ""))
+    elif desired_kind == "research_role":
+        desired_policy = default_research_role_tool_policy(policy_id, role_key=str(agent.get("roleKey") or ""))
     else:
         desired_policy = default_system_no_tool_policy(policy_id)
     current_policy_id = str(agent.get("toolPolicyId") or DEFAULT_TOOL_POLICY_ID).strip() or DEFAULT_TOOL_POLICY_ID
@@ -2804,6 +2836,8 @@ def _fixed_role_tool_policy_kind(agent: dict[str, Any]) -> str:
             return "no_tools"
     if primary_mode == "research" and role_key in RESEARCH_SOURCE_ROLE_KEYS:
         return "research_source"
+    if role_key in RESEARCH_ROLE_TOOL_PROFILES:
+        return "research_role"
     return ""
 
 
@@ -4801,10 +4835,10 @@ def _tool_policy_source_for_agent(agent: dict[str, Any], policy: dict[str, Any] 
         kind = "system_no_tools"
         label = "系统固定无工具"
         description = "该系统角色由运行时固定为无工具策略，避免误删或误授权影响核心流程。"
-    elif fixed_kind == "research_source":
+    elif fixed_kind in {"research_source", "research_role"}:
         kind = "fixed_role_policy"
         label = "角色固定工具"
-        description = "该科研来源角色使用固定工具包，系统会按职责保持只读/受控权限。"
+        description = "该科研角色使用固定工具包，系统会按职责保持只读/受控权限。"
     elif policy_id == DEFAULT_TOOL_POLICY_ID:
         kind = "empty_default_policy"
         label = "空默认包"

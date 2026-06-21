@@ -116,6 +116,24 @@ class TestToolExecutorInit:
         assert "conversation_log_inspect_tool" in canonical_names
         assert "conversation_log_inspect_tool" in llm_names
 
+    def test_read_file_tool_is_llm_facing_for_session_policy(self):
+        from core.web.services.agent_directory_service import compute_effective_tool_visibility, default_session_agent_tool_policy
+
+        canonical_names = {tool.name for tool in create_key_tools()}
+        llm_tools = create_llm_facing_tools()
+        llm_names = {tool.name for tool in llm_tools}
+
+        assert "read_file_tool" in canonical_names
+        assert "read_file_tool" in llm_names
+
+        visibility = compute_effective_tool_visibility(
+            llm_tools,
+            policy=default_session_agent_tool_policy("tool-agent-session"),
+        )
+
+        assert "read_file_tool" in visibility.visible_tools
+        assert "read_file_tool" not in visibility.configured_unavailable_tools
+
     def test_cli_agent_run_tool_is_registered_but_restricted_by_session_default(self):
         from core.web.services.agent_directory_service import (
             compute_effective_tool_visibility,

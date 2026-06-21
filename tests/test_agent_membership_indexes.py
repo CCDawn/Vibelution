@@ -358,10 +358,10 @@ def test_agent_mode_membership_api_updates_selected_agent_bindings(tmp_path, mon
 
     assert response.status_code == 200, response.text
     modes = response.json()["modes"]
-    assert modes["chat"]["defaultAgentId"] == agent["agentId"]
-    assert agent["agentId"] in modes["chat"]["availableAgentIds"]
+    assert modes["chat"]["defaultAgentId"] != agent["agentId"]
+    assert agent["agentId"] not in modes["chat"]["availableAgentIds"]
     assert agent["agentId"] in modes["research"]["pool"]
-    assert modes["supervised_evolution"]["slots"]["reviewer"] == agent["agentId"]
+    assert modes["supervised_evolution"]["slots"]["reviewer"] != agent["agentId"]
 
 
 def test_agent_chat_room_membership_api_updates_selected_agent_rooms(tmp_path, monkeypatch):

@@ -1594,6 +1594,15 @@ def test_repair_agent_directory_fills_research_agent_profiles(tmp_path, monkeypa
 
     assert "研究流程" in repaired["personaProfile"]["background"]
     assert "paper_reader" in repaired["taskProfile"]["taskTypes"]
+    assert repaired["toolPolicy"]["allowedTools"] == [
+        "agent_message_tool",
+        "research_knowledge_query_tool",
+        "web_search_tool",
+        "web_fetch_tool",
+        "read_file_tool",
+    ]
+    assert repaired["toolPolicy"]["mutationAccess"] == "none"
+    assert repaired["toolPolicy"]["writeScopes"] == []
     assert not any(item["code"] == "agent_onboarding_incomplete" for item in workspace_agent["health"])
 
 
