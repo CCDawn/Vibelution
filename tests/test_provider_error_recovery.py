@@ -3,16 +3,18 @@ from __future__ import annotations
 from pathlib import Path
 
 from config import Settings
+from core.chat.conversation_ledger import EVENT_ASSISTANT_MESSAGE, EVENT_USER_MESSAGE, append_conversation_event
 from core.infrastructure import developer_sandbox
 from core.llm.client import LLMClient
 from core.llm.errors import classify_exception
 from core.llm.recovery import plan_recovery
 from core.ui.chat_state import CHAT_STATE_VERSION, save_chat_state
-from core.web.services import session_service
+from core.web.services import agent_directory_service, session_service
 
 
 def _use_tmp_session_root(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(developer_sandbox, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(developer_sandbox, "resolve_workspace_home", lambda *args, **kwargs: tmp_path / "workspace")
 
@@ -22,6 +24,11 @@ def _make_config(**kwargs):
 
 
 def _seed_session(root: Path) -> None:
+    agent = agent_directory_service.ensure_agent_for_session(
+        "session-live",
+        display_name="Agent 会话",
+        prompt_template_id="prompt-chat-default",
+    )
     save_chat_state(
         root,
         {
@@ -35,6 +42,8 @@ def _seed_session(root: Path) -> None:
                     "updated_at": "2026-05-21T12:00:00",
                     "last_turn_status": "ready",
                     "messages": [],
+                    "agent_id": agent["agentId"],
+                    "agentId": agent["agentId"],
                     "active_task": None,
                 }
             ],
@@ -156,7 +165,8 @@ def test_stream_upstream_failure_records_retryable_server_error(monkeypatch):
     assert raised.retryable is True
     messages = [item[1]["message"] for item in recorded]
     assert "LLM stream failed before iterator: server_error" in messages
-    assert recorded[-1][1]["message"] == "LLM stream fallback invoke failed: server_error"
+    assert recorded[-1][0][1] == "llm.stream.failed"
+    assert recorded[-1][1]["message"] == "LLM stream failed before iterator: server_error"
     assert recorded[-1][1]["fields"]["errorType"] == "server_error"
     assert recorded[-1][1]["fields"]["retryable"] is True
 
@@ -236,6 +246,11 @@ def test_session_llm_runtime_diagnostics_fill_provider_failure_metadata():
 
 def test_session_detail_dedupes_same_turn_error_messages(tmp_path, monkeypatch):
     _use_tmp_session_root(tmp_path, monkeypatch)
+    agent = agent_directory_service.ensure_agent_for_session(
+        "session-live",
+        display_name="Agent 会话",
+        prompt_template_id="prompt-chat-default",
+    )
     save_chat_state(
         tmp_path,
         {
@@ -248,6 +263,8 @@ def test_session_detail_dedupes_same_turn_error_messages(tmp_path, monkeypatch):
                     "title": "Agent 会话",
                     "updated_at": "2026-06-08T14:19:02",
                     "last_turn_status": "failed",
+                    "agent_id": agent["agentId"],
+                    "agentId": agent["agentId"],
                     "messages": [
                         {
                             "role": "user",
@@ -280,6 +297,33 @@ def test_session_detail_dedupes_same_turn_error_messages(tmp_path, monkeypatch):
             ],
         },
     )
+    append_conversation_event(
+        tmp_path,
+        "session-live",
+        "turn-1",
+        EVENT_USER_MESSAGE,
+        status="recorded",
+        payload={"content": "审查主对话和子对话"},
+        timestamp="2026-06-08T14:14:10",
+    )
+    turn_error_metadata = {
+        "kind": "turn_error",
+        "turnId": "turn-1",
+        "providerFailure": True,
+    }
+    for event_turn_id in ("turn-1", "turn-1-duplicate"):
+        append_conversation_event(
+            tmp_path,
+            "session-live",
+            event_turn_id,
+            EVENT_ASSISTANT_MESSAGE,
+            status="failed",
+            payload={
+                "content": "模型服务上游暂时失败，本轮没有完成。",
+                "metadata": turn_error_metadata,
+            },
+            timestamp="2026-06-08T14:19:02",
+        )
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
 
     payload = session_service.get_session_detail("session-live")

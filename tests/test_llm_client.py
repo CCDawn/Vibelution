@@ -9,7 +9,7 @@ from concurrent.futures import ThreadPoolExecutor
 from config import Settings
 from core.llm.agent_runtime import config_for_agent_llm_model
 from core.orchestration.response_processor import ResponseProcessor
-from core.llm.client import LLMClient, _ensure_no_proxy_for_local_base_url, llm_cancel_context
+from core.llm.client import LLMClient, _llm_provider_proxy_env, _ensure_no_proxy_for_local_base_url, llm_cancel_context
 from core.llm.errors import classify_exception
 from core.llm.types import LLMError
 from core.llm.recovery import plan_recovery
@@ -1068,7 +1068,7 @@ def test_stream_retries_retryable_failure_before_first_event(monkeypatch):
     assert [item[1]["attempt"] for item in retry_statuses] == [1, 2]
 
 
-def test_stream_falls_back_to_non_streaming_after_retryable_pre_chunk_failures(monkeypatch):
+def test_stream_fails_stream_only_after_retryable_pre_chunk_failures(monkeypatch):
     config = make_config(
         **{
             "llm.providers.default.kind": "local",
@@ -1107,19 +1107,19 @@ def test_stream_falls_back_to_non_streaming_after_retryable_pre_chunk_failures(m
     monkeypatch.setattr("core.llm.client._publish_llm_status_event", lambda status, **fields: statuses.append((status, fields)))
 
     client = LLMClient(config=config, backend=backend)
-    events = list(client.stream_events([{"role": "user", "content": "ping"}]))
+    with pytest.raises(LLMError) as exc_info:
+        list(client.stream_events([{"role": "user", "content": "ping"}]))
 
-    assert [payload["stream"] for payload in payloads] == [True, True, False]
-    assert [event.type for event in events] == ["text_delta", "done"]
-    assert events[0].text == "fallback ok"
+    assert exc_info.value.category == "network_error"
+    assert [payload["stream"] for payload in payloads] == [True, True]
     event_codes = [item[0][1] for item in recorded]
-    assert "llm.stream.fallback.invoke_started" in event_codes
-    assert "llm.stream.fallback.invoke_succeeded" in event_codes
+    assert "llm.stream.fallback.invoke_started" not in event_codes
+    assert "llm.stream.fallback.invoke_succeeded" not in event_codes
     business_statuses = [
         item for item in statuses
-        if item[0] in {"retrying", "failed", "fallback_invoke_started", "fallback_invoke_succeeded"}
+        if item[0] in {"retrying", "failed"}
     ]
-    assert [item[0] for item in business_statuses] == ["retrying", "failed", "fallback_invoke_started", "fallback_invoke_succeeded"]
+    assert [item[0] for item in business_statuses] == ["retrying", "failed"]
 
 
 def test_stream_records_success_event_with_safe_summary(monkeypatch):
@@ -2863,6 +2863,69 @@ def test_bad_request_wrapped_as_connection_error_is_protocol_error():
 
     assert normalized.category == "empty_content_error"
     assert normalized.retryable is False
+
+
+def test_connection_refused_wrapped_as_internal_server_error_is_network_error():
+    error = Exception(
+        "litellm.InternalServerError: InternalServerError: OpenAIException - Connection error. "
+        "httpx.ConnectError: [WinError 10061] 由于目标计算机积极拒绝，无法连接。"
+    )
+
+    normalized = classify_exception(error)
+
+    assert normalized.category == "network_error"
+    assert normalized.retryable is True
+
+
+def test_llm_provider_proxy_env_disables_environment_proxy_when_project_proxy_off(monkeypatch):
+    config = make_config(
+        **{
+            "network.proxy_enabled": False,
+            "llm.providers.default.kind": "xiaomi",
+            "llm.providers.default.api_key": "test-key",
+            "llm.providers.default.base_url": "https://token-plan-cn.xiaomimimo.com/v1",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "mimo-v2.5-pro",
+        }
+    )
+    monkeypatch.setenv("HTTP_PROXY", "http://127.0.0.1:7890")
+    monkeypatch.setenv("HTTPS_PROXY", "http://127.0.0.1:7890")
+    monkeypatch.setenv("ALL_PROXY", "socks5://127.0.0.1:7890")
+
+    with _llm_provider_proxy_env(config, "https://token-plan-cn.xiaomimimo.com/v1"):
+        assert os.environ.get("HTTP_PROXY") is None
+        assert os.environ.get("HTTPS_PROXY") is None
+        assert os.environ.get("ALL_PROXY") is None
+
+    assert os.environ.get("HTTP_PROXY") == "http://127.0.0.1:7890"
+    assert os.environ.get("HTTPS_PROXY") == "http://127.0.0.1:7890"
+    assert os.environ.get("ALL_PROXY") == "socks5://127.0.0.1:7890"
+
+
+def test_llm_provider_proxy_env_uses_configured_project_proxy(monkeypatch):
+    config = make_config(
+        **{
+            "network.proxy_enabled": True,
+            "network.proxy_url": "http://127.0.0.1:7897",
+            "llm.providers.default.kind": "xiaomi",
+            "llm.providers.default.api_key": "test-key",
+            "llm.providers.default.base_url": "https://token-plan-cn.xiaomimimo.com/v1",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "mimo-v2.5-pro",
+        }
+    )
+    monkeypatch.setenv("HTTP_PROXY", "http://127.0.0.1:7890")
+    monkeypatch.delenv("HTTPS_PROXY", raising=False)
+    monkeypatch.delenv("ALL_PROXY", raising=False)
+
+    with _llm_provider_proxy_env(config, "https://token-plan-cn.xiaomimimo.com/v1"):
+        assert os.environ.get("HTTP_PROXY") == "http://127.0.0.1:7897"
+        assert os.environ.get("HTTPS_PROXY") == "http://127.0.0.1:7897"
+        assert os.environ.get("ALL_PROXY") == "http://127.0.0.1:7897"
+
+    assert os.environ.get("HTTP_PROXY") == "http://127.0.0.1:7890"
+    assert os.environ.get("HTTPS_PROXY") is None
+    assert os.environ.get("ALL_PROXY") is None
 
 
 def test_duplicate_tool_call_error_classified_as_tool_protocol_error():
