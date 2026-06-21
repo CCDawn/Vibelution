@@ -47,6 +47,9 @@ _LLM_ROUTE_CONCURRENCY_LOCK = threading.Lock()
 _LLM_ROUTE_CONCURRENCY_GATES: Dict[str, threading.BoundedSemaphore] = {}
 _NO_PROXY_LOCK = threading.Lock()
 _NO_PROXY_ENV_NAMES = ("NO_PROXY", "no_proxy")
+_PROXY_ENV_NAMES = ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy")
+_PROXY_ENV_CONDITION = threading.Condition(threading.RLock())
+_PROXY_ENV_STATE = {"readers": 0, "writer": False}
 PROMPT_CACHE_OPPORTUNITY_PREFIX_CHARS = 4096
 
 
@@ -863,6 +866,55 @@ def _ensure_no_proxy_for_local_base_url(base_url: Any) -> None:
             os.environ[env_name] = ",".join([*parts, host]) if parts else host
 
 
+@contextmanager
+def _llm_provider_proxy_env(config: Any, base_url: Any) -> Iterator[None]:
+    """Bound provider proxy env to project config for the duration of one LLM call."""
+
+    network_config = getattr(config, "network", None)
+    proxy_enabled = bool(getattr(network_config, "proxy_enabled", False))
+    proxy_url = str(getattr(network_config, "proxy_url", "") or "").strip()
+    raw_base_url = str(base_url or "").strip()
+    if is_llm_local_network_base_url(raw_base_url):
+        _ensure_no_proxy_for_local_base_url(raw_base_url)
+        yield
+        return
+    desired_proxy = proxy_url if proxy_enabled and proxy_url else None
+    mode = "read"
+    previous: Dict[str, str | None] = {}
+    with _PROXY_ENV_CONDITION:
+        while _PROXY_ENV_STATE["writer"]:
+            _PROXY_ENV_CONDITION.wait()
+        env_matches = all(os.environ.get(env_name) == desired_proxy for env_name in _PROXY_ENV_NAMES)
+        if env_matches:
+            _PROXY_ENV_STATE["readers"] += 1
+        else:
+            mode = "write"
+            while _PROXY_ENV_STATE["writer"] or int(_PROXY_ENV_STATE["readers"]) > 0:
+                _PROXY_ENV_CONDITION.wait()
+            _PROXY_ENV_STATE["writer"] = True
+            previous = {env_name: os.environ.get(env_name) for env_name in _PROXY_ENV_NAMES}
+            if desired_proxy:
+                for env_name in _PROXY_ENV_NAMES:
+                    os.environ[env_name] = desired_proxy
+            else:
+                for env_name in _PROXY_ENV_NAMES:
+                    os.environ.pop(env_name, None)
+    try:
+        yield
+    finally:
+        with _PROXY_ENV_CONDITION:
+            if mode == "write":
+                for env_name, value in previous.items():
+                    if value is None:
+                        os.environ.pop(env_name, None)
+                    else:
+                        os.environ[env_name] = value
+                _PROXY_ENV_STATE["writer"] = False
+            else:
+                _PROXY_ENV_STATE["readers"] = max(0, int(_PROXY_ENV_STATE["readers"]) - 1)
+            _PROXY_ENV_CONDITION.notify_all()
+
+
 def _default_completion_backend(payload: Dict[str, Any]) -> Any:
     _raise_if_llm_cancelled()
     try:
@@ -1221,7 +1273,8 @@ class LLMClient:
 
     def _invoke_payload_once(self, payload: Dict[str, Any]) -> Any:
         _raise_if_llm_cancelled()
-        return self._backend(payload)
+        with _llm_provider_proxy_env(self.config, payload.get("base_url")):
+            return self._backend(payload)
 
     def _invoke_backend_with_retry(
         self,
@@ -1250,7 +1303,8 @@ class LLMClient:
                     tool_count=tool_count,
                 ):
                     _raise_if_llm_cancelled()
-                    return self._backend(payload)
+                    with _llm_provider_proxy_env(self.config, payload.get("base_url")):
+                        return self._backend(payload)
             except LLMCancelledError as exc:
                 raise _llm_cancelled_error(exc.reason) from exc
             except Exception as exc:
@@ -1298,122 +1352,6 @@ class LLMClient:
         if last_error is not None:
             raise last_error
         raise LLMError("provider_protocol_error", "LLM backend failed before returning a response.", retryable=False)
-
-    def _stream_fallback_to_invoke(
-        self,
-        stream_payload: Dict[str, Any],
-        *,
-        message_count: int,
-        tool_count: int,
-        metadata: Optional[Dict[str, Any]],
-        last_error: LLMError,
-    ) -> Iterator[StreamChunk]:
-        payload = dict(stream_payload)
-        payload["stream"] = False
-        route_summary = _safe_payload_route_summary(payload, self.profile, self.provider)
-        start = time.time()
-        _record_llm_scene_event(
-            "stream",
-            "llm.stream.fallback.invoke_started",
-            message="LLM stream fallback to non-streaming invoke started.",
-            level="warning",
-            outcome="running",
-            fields={
-                "role": self.role,
-                "profileId": self.profile_id,
-                "provider": self.provider.kind,
-                "model": self.profile.model,
-                "messageCount": message_count,
-                "toolCount": tool_count,
-                **route_summary,
-                **(metadata or {}),
-                "fallbackReason": last_error.category,
-                "fallbackError": str(last_error),
-            },
-            lifecycle=True,
-        )
-        _publish_llm_status_event(
-            "fallback_invoke_started",
-            reason=last_error.category,
-            message_count=message_count,
-            tool_count=tool_count,
-        )
-        try:
-            response = self._invoke_payload_once(payload)
-        except Exception as exc:
-            llm_error = classify_exception(exc)
-            _record_llm_scene_event(
-                "stream",
-                "llm.stream.fallback.invoke_failed",
-                message=f"LLM stream fallback invoke failed: {llm_error.category}",
-                level="error",
-                outcome="failed",
-                fields=_llm_retry_event_fields(
-                    role=self.role,
-                    profile_id=self.profile_id,
-                    provider=self.provider.kind,
-                    model=self.profile.model,
-                    message_count=message_count,
-                    tool_count=tool_count,
-                    metadata={**(metadata or {}), **route_summary, "fallbackReason": last_error.category},
-                    attempt=1,
-                    max_attempts=1,
-                    llm_error=llm_error,
-                ),
-                lifecycle=True,
-            )
-            _publish_llm_status_event(
-                "failed",
-                category=llm_error.category,
-                retryable=llm_error.retryable,
-            )
-            raise llm_error from exc
-
-        latency_ms = int((time.time() - start) * 1000)
-        message = self._choice_message(response)
-        text = strip_think_tag_reasoning(message.get("content") or "", extract_text_content)
-        reasoning = extract_reasoning_text(message, extract_text_content)
-        tool_calls = extract_message_tool_calls(message)
-        usage = self._usage_from_response(response, latency_ms)
-        cache_observation_fields = _usage_cache_observation_fields(usage)
-        _record_llm_scene_event(
-            "stream",
-            "llm.stream.fallback.invoke_succeeded",
-            message="LLM stream fallback invoke succeeded.",
-            outcome="succeeded",
-            fields={
-                "role": self.role,
-                "profileId": self.profile_id,
-                "provider": self.provider.kind,
-                "model": self.profile.model,
-                "messageCount": message_count,
-                "toolCount": tool_count,
-                **route_summary,
-                **(metadata or {}),
-                "toolCallCount": len(tool_calls),
-                "reasoningSource": reasoning.source,
-                "reasoningChars": len(reasoning.text),
-                "inputTokens": usage.input_tokens,
-                "outputTokens": usage.output_tokens,
-                "totalTokens": usage.total_tokens,
-                **cache_observation_fields,
-                "latencyMs": latency_ms,
-            },
-            lifecycle=True,
-        )
-        _publish_llm_status_event(
-            "fallback_invoke_succeeded",
-            reason=last_error.category,
-            content_chars=len(text or ""),
-            tool_call_count=len(tool_calls or []),
-        )
-        if reasoning.text.strip():
-            yield StreamChunk(type="reasoning_delta", text=reasoning.text, provider_payload={**message, "reasoning_source": reasoning.source})
-        if text.strip():
-            yield StreamChunk(type="text_delta", text=text, provider_payload=message)
-        if tool_calls:
-            yield StreamChunk(type="tool_call_final", tool_calls=tool_calls, provider_payload=message)
-        yield StreamChunk(type="done", usage=usage, provider_payload=message)
 
     def _record_llm_retry_or_failure(
         self,
@@ -1490,26 +1428,29 @@ class LLMClient:
         tool_count: int,
     ) -> Tuple[Iterator[StreamChunk], Callable[[], bool]]:
         _raise_if_llm_cancelled()
-        iterator = self._backend(payload)
         emitted = False
 
         def events() -> Iterator[StreamChunk]:
             nonlocal emitted
-            normalized_iterator = self.adapter.stream_normalizer().events(iterator)
-            try:
-                for event in normalized_iterator:
-                    _raise_if_llm_cancelled()
-                    emitted = True
-                    yield event
-                    _raise_if_llm_cancelled()
-            except LLMCancelledError:
-                close = getattr(normalized_iterator, "close", None)
-                if callable(close):
-                    close()
-                close = getattr(iterator, "close", None)
-                if callable(close):
-                    close()
-                raise
+            iterator: Any = None
+            normalized_iterator: Any = None
+            with _llm_provider_proxy_env(self.config, payload.get("base_url")):
+                iterator = self._backend(payload)
+                normalized_iterator = self.adapter.stream_normalizer().events(iterator)
+                try:
+                    for event in normalized_iterator:
+                        _raise_if_llm_cancelled()
+                        emitted = True
+                        yield event
+                        _raise_if_llm_cancelled()
+                except LLMCancelledError:
+                    close = getattr(normalized_iterator, "close", None)
+                    if callable(close):
+                        close()
+                    close = getattr(iterator, "close", None)
+                    if callable(close):
+                        close()
+                    raise
 
         return events(), lambda: emitted
 
@@ -1803,15 +1744,6 @@ class LLMClient:
                     llm_error=llm_error,
                 )
                 if not should_retry:
-                    if llm_error.retryable:
-                        yield from self._stream_fallback_to_invoke(
-                            payload,
-                            message_count=message_count,
-                            tool_count=tool_count,
-                            metadata=event_metadata,
-                            last_error=llm_error,
-                        )
-                        return
                     raise llm_error from exc
 
     def stream(self, messages: List[Any], *, tools: Optional[List[Any]] = None, metadata: Optional[Dict[str, Any]] = None) -> Iterator[AIMessageChunk]:

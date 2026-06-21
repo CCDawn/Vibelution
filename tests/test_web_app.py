@@ -6589,6 +6589,51 @@ def test_capture_session_ui_stream_surfaces_llm_retry_status(tmp_path, monkeypat
     assert any(item["phase"] == "llm_status_retrying" for item in lifecycle_events)
 
 
+def test_capture_session_ui_stream_surfaces_network_failure_without_fallback_text(tmp_path, monkeypatch):
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    lifecycle_events: list[dict] = []
+    monkeypatch.setattr(
+        session_service,
+        "_record_session_turn_lifecycle_event",
+        lambda session_id, phase, **kwargs: lifecycle_events.append(
+            {"session_id": session_id, "phase": phase, **kwargs}
+        ),
+    )
+    published: list[str] = []
+    monkeypatch.setattr(session_service, "_publish_session_detail_snapshot", lambda session_id: published.append(session_id))
+    stub_ui = SimpleNamespace(
+        stream_thought=lambda *args, **kwargs: None,
+        clear_thought_stream=lambda *args, **kwargs: None,
+        stream_response=lambda *args, **kwargs: None,
+        clear_response_stream=lambda *args, **kwargs: None,
+        set_pet_mental_state=lambda *args, **kwargs: None,
+    )
+    monkeypatch.setattr("core.ui.get_ui", lambda: stub_ui)
+
+    capture = session_service.SessionTurnCapture(session_id="session-live", turn_id="turn-llm")
+    with session_service._capture_session_ui_stream("session-live", capture):
+        session_service.get_event_bus().publish(
+            session_service.EventNames.LLM_STATUS,
+            {
+                "status": "failed",
+                "attempt": 2,
+                "max_attempts": 2,
+                "category": "network_error",
+            },
+        )
+
+    live_state = session_service._snapshot_session_live_output("session-live")
+    assert live_state is not None
+    assert live_state.stage == "model_failed"
+    assert "模型请求失败" in live_state.content
+    assert "network_error" in live_state.content
+    assert "代理端口" in live_state.content
+    assert "非流式" not in live_state.content
+    assert "切换" not in live_state.content
+    assert published == ["session-live"]
+    assert any(item["phase"] == "llm_status_failed" for item in lifecycle_events)
+
+
 def test_capture_session_ui_stream_surfaces_live_thought_as_model_thinking(tmp_path, monkeypatch):
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     lifecycle_events: list[dict] = []
