@@ -2699,15 +2699,6 @@ export function ChatCodingRoute() {
       setActiveSession(sessionsQuery.data[0].id);
       return;
     }
-    if (
-      activeSessionId
-      && !requestedRoomId
-      && sessionsQuery.data
-      && sessionsQuery.data.length > 0
-      && !sessionsQuery.data.some((session) => session.id === activeSessionId)
-    ) {
-      setActiveSession(sessionsQuery.data[0].id);
-    }
   }, [activeGroupRoomId, activeSessionId, requestedRoomId, requestedSessionId, sessionsQuery.data, setActiveSession]);
 
   useEffect(() => {

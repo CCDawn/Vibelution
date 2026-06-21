@@ -2,6 +2,7 @@ import json
 from types import SimpleNamespace
 
 import config as config_package
+import pytest
 from fastapi.testclient import TestClient
 from config import ProviderConfig
 
@@ -1169,6 +1170,35 @@ def test_agent_config_workspace_reuses_loaded_agents_for_policy_options(tmp_path
 
     assert any(item["policyId"] == agent["toolPolicyId"] for item in payload["toolPolicies"])
     assert any(item["policyId"] == agent["memoryPolicyId"] for item in payload["memoryPolicies"])
+
+
+def test_agent_registry_rejects_suspicious_direct_session_agent_shrink(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setattr(config_service, "get_config_workspace", _fake_config_workspace)
+    for index in range(9):
+        agent_directory_service.create_agent_instance(
+            display_name=f"Session Agent {index}",
+            direct_session_id=f"session-{index}",
+        )
+    before = agent_directory_service.load_state()
+    before_count = len(before["agents"])
+
+    with pytest.raises(agent_directory_service.AgentDirectoryError, match="suspicious Agent registry shrink"):
+        agent_directory_service.save_state(
+            {
+                "agents": [
+                    {
+                        "agentId": "agent-only",
+                        "displayName": "Only Agent",
+                        "status": "active",
+                    }
+                ]
+            }
+        )
+
+    after = agent_directory_service.load_state()
+    assert len(after["agents"]) == before_count
+    assert {item["agentId"] for item in after["agents"]} == {item["agentId"] for item in before["agents"]}
 
 
 def test_agent_config_workspace_uses_compact_room_and_team_indexes(tmp_path, monkeypatch):
