@@ -142,6 +142,44 @@ def test_system_prompt_includes_configured_user_profile(monkeypatch):
     assert "用户头像" not in result
 
 
+def test_codebase_map_task_view_reuses_signature_cache(tmp_path, monkeypatch):
+    from core.prompt_manager import codebase_map_builder as builder
+
+    source = tmp_path / "core" / "demo.py"
+    source.parent.mkdir(parents=True)
+    source.write_text('"""demo module"""\n', encoding="utf-8")
+    goal = {"value": "demo"}
+    collect_calls = 0
+
+    def collect_python_files(project_root):
+        nonlocal collect_calls
+        collect_calls += 1
+        return [source]
+
+    with builder._task_focused_view_cache_lock:
+        builder._task_focused_view_cache["signature"] = None
+        builder._task_focused_view_cache["value"] = ""
+
+    monkeypatch.setattr(builder, "_get_prompt_runtime_context", lambda: (goal["value"], ""))
+    monkeypatch.setattr(builder, "_collect_python_files", collect_python_files)
+    monkeypatch.setattr(
+        builder,
+        "_scan_file",
+        lambda path: {"docstring": "demo module", "imports": [], "line_count": 1},
+    )
+    monkeypatch.setattr(builder, "_build_impact_chain_view", lambda *args, **kwargs: "")
+
+    first = builder._build_task_focused_view(tmp_path, "## 子系统概览\n- demo\n")
+    second = builder._build_task_focused_view(tmp_path, "## 子系统概览\n- demo\n")
+    goal["value"] = "changed demo"
+    third = builder._build_task_focused_view(tmp_path, "## 子系统概览\n- demo\n")
+
+    assert "core/demo.py" in first
+    assert second == first
+    assert third
+    assert collect_calls == 2
+
+
 def _seed_prompt_runtime_scene(project_root, scene_id="scene-prompt"):
     scene_dir = project_root / "logs" / "runtime_scenes" / f"20260518T120000Z__{scene_id}"
     (scene_dir / "raw").mkdir(parents=True, exist_ok=True)
