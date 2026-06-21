@@ -16,6 +16,7 @@ from core.chat.conversation_ledger import (
     EVENT_ASSISTANT_PARTIAL,
     EVENT_TURN_INTERRUPTED,
     EVENT_TURN_STARTED,
+    EVENT_USER_MESSAGE,
     append_conversation_event,
     load_conversation_events,
 )
@@ -267,7 +268,7 @@ def test_session_detail_surfaces_missing_agent_placeholder(tmp_path, monkeypatch
     assert detail["memoryPolicy"] is None
 
 
-def test_session_detail_context_usage_comes_from_persisted_messages_after_restart(tmp_path, monkeypatch):
+def test_session_detail_context_usage_comes_from_ledger_after_restart(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path)
     state = load_chat_state(tmp_path)
     state["conversations"][0]["messages"].extend(
@@ -285,6 +286,44 @@ def test_session_detail_context_usage_comes_from_persisted_messages_after_restar
         ]
     )
     save_chat_state(tmp_path, state)
+    append_conversation_event(
+        tmp_path,
+        "session-live",
+        "turn-ledger-1",
+        EVENT_USER_MESSAGE,
+        status="recorded",
+        payload={"content": "继续前端开发"},
+    )
+    append_conversation_event(
+        tmp_path,
+        "session-live",
+        "turn-ledger-1",
+        EVENT_ASSISTANT_MESSAGE,
+        status="completed",
+        payload={
+            "content": "已经接到真实状态了。",
+            "toolCalls": [
+                {"name": "read_file_tool", "status": "done", "summary": "读取文件"},
+                {"name": "search_code_tool", "status": "done", "summary": "搜索代码"},
+            ],
+        },
+    )
+    append_conversation_event(
+        tmp_path,
+        "session-live",
+        "turn-ledger-2",
+        EVENT_USER_MESSAGE,
+        status="recorded",
+        payload={"content": "重启后仍然应该统计这一条历史用户消息。"},
+    )
+    append_conversation_event(
+        tmp_path,
+        "session-live",
+        "turn-ledger-2",
+        EVENT_ASSISTANT_MESSAGE,
+        status="completed",
+        payload={"content": "收到，当前对话上下文应来自持久 ledger，而不是运行时临时计数。"},
+    )
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
 
     response = client.get("/api/sessions/session-live")
@@ -295,7 +334,7 @@ def test_session_detail_context_usage_comes_from_persisted_messages_after_restar
     assert payload["contextUsage"]["messageCount"] == 4
     assert payload["contextUsage"]["userMessageCount"] == 2
     assert payload["contextUsage"]["assistantMessageCount"] == 2
-    assert payload["contextUsage"]["source"] == "session_messages"
+    assert payload["contextUsage"]["source"] == "conversation_ledger"
     assert payload["contextUsage"]["used"] == payload["contextUsage"]["estimatedTokens"]
     assert payload["contextUsage"]["used"] > 0
 
@@ -477,20 +516,26 @@ def test_session_detail_exposes_last_provider_llm_usage(tmp_path, monkeypatch):
     assert llm_usage["recordedAt"] == "2026-05-18T12:04:00"
 
 
-def test_session_detail_recovers_llm_usage_from_assistant_metadata(tmp_path, monkeypatch):
+def test_session_detail_recovers_llm_usage_from_assistant_ledger_payload(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path)
-    state = load_chat_state(tmp_path)
-    state["conversations"][0]["messages"][1]["metadata"] = {
-        "llmUsage": {
-            "source": "provider_usage",
-            "inputTokens": 111,
-            "outputTokens": 22,
-            "totalTokens": 133,
-            "cachedInputTokens": 0,
-            "recordedAt": "2026-05-18T12:05:00",
-        }
-    }
-    save_chat_state(tmp_path, state)
+    append_conversation_event(
+        tmp_path,
+        "session-live",
+        "turn-usage",
+        EVENT_ASSISTANT_MESSAGE,
+        status="completed",
+        payload={
+            "content": "收到，当前对话上下文来自 ledger。",
+            "llmUsage": {
+                "source": "provider_usage",
+                "inputTokens": 111,
+                "outputTokens": 22,
+                "totalTokens": 133,
+                "cachedInputTokens": 0,
+                "recordedAt": "2026-05-18T12:05:00",
+            },
+        },
+    )
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
 
     response = client.get("/api/sessions/session-live")
@@ -730,25 +775,24 @@ def test_persist_turn_result_records_provider_llm_usage(tmp_path, monkeypatch):
 def test_persist_turn_result_exposes_previous_context_and_cache_composition(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path, task_status="done")
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
-    state = load_chat_state(tmp_path)
-    state["conversations"][0]["messages"].append(
-        {
-            "role": "assistant",
+    append_conversation_event(
+        tmp_path,
+        "session-live",
+        "turn-cache-history",
+        EVENT_ASSISTANT_MESSAGE,
+        status="completed",
+        payload={
             "content": "上一轮回答",
-            "timestamp": "2026-05-18T12:05:00",
-            "metadata": {
-                "llmUsage": {
-                    "source": "provider_usage",
-                    "inputTokens": 500,
-                    "outputTokens": 40,
-                    "cachedInputTokens": 100,
-                    "cacheCreationInputTokens": 0,
-                    "recordedAt": "2026-05-18T12:05:00",
-                }
+            "llmUsage": {
+                "source": "provider_usage",
+                "inputTokens": 500,
+                "outputTokens": 40,
+                "cachedInputTokens": 100,
+                "cacheCreationInputTokens": 0,
+                "recordedAt": "2026-05-18T12:05:00",
             },
-        }
+        },
     )
-    save_chat_state(tmp_path, state)
     session_service._set_session_running("session-live", True, turn_id="turn-context-composition")
 
     session_service._persist_session_turn_result(
@@ -1070,18 +1114,19 @@ def test_provider_failure_persists_previous_context_composition_with_missing_cac
 
 def test_session_detail_keeps_persisted_tool_only_assistant_message(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path)
-    state = load_chat_state(tmp_path)
-    state["conversations"][0]["messages"].append(
-        {
-            "role": "assistant",
+    append_conversation_event(
+        tmp_path,
+        "session-live",
+        "turn-tool-only",
+        EVENT_ASSISTANT_MESSAGE,
+        status="completed",
+        payload={
             "content": "<state",
-            "timestamp": "2026-05-18T11:57:00",
-            "tool_calls": [
+            "toolCalls": [
                 {"name": "read_file_tool", "status": "done", "summary": "session_service.py"},
             ],
-        }
+        },
     )
-    save_chat_state(tmp_path, state)
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
 
     response = client.get("/api/sessions/session-live")
@@ -1309,6 +1354,22 @@ def test_chat_turn_records_keep_tool_names_when_persisted_calls_have_details():
 
 def test_session_detail_exposes_recent_next_state_signal_summaries(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path)
+    append_conversation_event(
+        tmp_path,
+        "session-live",
+        "turn-seeded",
+        EVENT_USER_MESSAGE,
+        status="recorded",
+        payload={"content": "继续前端开发"},
+    )
+    append_conversation_event(
+        tmp_path,
+        "session-live",
+        "turn-seeded",
+        EVENT_ASSISTANT_MESSAGE,
+        status="completed",
+        payload={"content": "已经接到真实状态了。"},
+    )
     append_chat_next_state_signal(
         project_root=tmp_path,
         session_id="session-live",
@@ -2060,6 +2121,28 @@ def test_session_detail_hydrates_file_context_from_saved_active_task(tmp_path, m
 
 def test_session_events_stream_initial_detail(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path, task_status="done")
+    append_conversation_event(
+        tmp_path,
+        "session-live",
+        "turn-stream-seeded-user",
+        EVENT_USER_MESSAGE,
+        status="recorded",
+        payload={"content": "继续前端开发"},
+    )
+    append_conversation_event(
+        tmp_path,
+        "session-live",
+        "turn-stream-seeded-assistant",
+        EVENT_ASSISTANT_MESSAGE,
+        status="completed",
+        payload={
+            "content": "<think>internal</think>\n\n已经接到真实状态了。",
+            "toolCalls": [
+                {"name": "read_file_tool", "status": "done", "summary": "读取文件"},
+                {"name": "search_code_tool", "status": "done", "summary": "搜索代码"},
+            ],
+        },
+    )
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
 
     detail = session_service.get_session_detail("session-live")
@@ -7145,6 +7228,14 @@ def test_stale_turn_live_output_does_not_overwrite_new_turn(tmp_path, monkeypatc
 
 def test_stale_turn_live_output_clear_does_not_remove_new_turn(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path, task_status="done")
+    append_conversation_event(
+        tmp_path,
+        "session-live",
+        "turn-done",
+        EVENT_ASSISTANT_MESSAGE,
+        status="completed",
+        payload={"content": "已完成上一轮。"},
+    )
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
 
     session_service._set_session_live_output(
@@ -7305,9 +7396,14 @@ def test_session_detail_sanitizes_persisted_protocol_messages_and_active_task(tm
         },
     )
     state = load_chat_state(tmp_path)
-    state["conversations"][0]["messages"].append(
-        {
-            "role": "assistant",
+    save_chat_state(tmp_path, state)
+    append_conversation_event(
+        tmp_path,
+        "session-live",
+        "turn-protocol",
+        EVENT_ASSISTANT_MESSAGE,
+        status="running",
+        payload={
             "content": (
                 "继续检查。\n"
                 '<invoke name="read_file_tool">'
@@ -7316,11 +7412,9 @@ def test_session_detail_sanitizes_persisted_protocol_messages_and_active_task(tm
                 "<state"
             ),
             "thought": "</parameter>\n<parameter",
-            "timestamp": "2026-05-20T17:55:00",
-            "tool_calls": [{"name": "read_file_tool"}],
-        }
+            "toolCalls": [{"name": "read_file_tool"}],
+        },
     )
-    save_chat_state(tmp_path, state)
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
 
     response = client.get("/api/sessions/session-live")
@@ -7365,6 +7459,14 @@ def test_session_detail_promotes_legacy_runtime_notice_outside_messages(tmp_path
         ]
     )
     save_chat_state(tmp_path, state)
+    append_conversation_event(
+        tmp_path,
+        "session-live",
+        "turn-real-message",
+        EVENT_ASSISTANT_MESSAGE,
+        status="completed",
+        payload={"content": "继续分析日志。"},
+    )
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
 
     response = client.get("/api/sessions/session-live")
@@ -7379,21 +7481,24 @@ def test_session_detail_promotes_legacy_runtime_notice_outside_messages(tmp_path
 def test_session_detail_filters_legacy_queued_stop_notice_from_messages(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path, task_status="idle")
     state = load_chat_state(tmp_path)
-    state["conversations"][0]["messages"].extend(
-        [
-            {
-                "role": "user",
-                "content": "按照这个提示词来生成图片",
-                "timestamp": "2026-05-29T21:36:11",
-            },
-            {
-                "role": "assistant",
-                "content": "当前 Agent 正在处理上一项任务，本轮已进入队列...\n会在前一轮释放会话锁后继续执行。\n\n本轮已按请求停止。可发送“继续”恢复这次未完成的任务。",
-                "timestamp": "2026-05-29T21:36:20",
-            },
-        ]
-    )
+    state["conversations"][0]["runtime_notices"] = [
+        {
+            "kind": "runtime_notice",
+            "level": "info",
+            "message": "当前 Agent 正在处理上一项任务，本轮已进入队列...",
+            "timestamp": "2026-05-29T21:36:20",
+            "source": "conversation.queued",
+        }
+    ]
     save_chat_state(tmp_path, state)
+    append_conversation_event(
+        tmp_path,
+        "session-live",
+        "turn-user",
+        EVENT_USER_MESSAGE,
+        status="recorded",
+        payload={"content": "按照这个提示词来生成图片"},
+    )
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(agent_directory_service, "_ensure_agent_default_avatar", lambda agent: None, raising=False)
 
