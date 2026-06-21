@@ -8,6 +8,7 @@ import { describe, expect, it } from "vitest";
 import { ChatNextStateSignalSummary, ConversationMessage, SessionTurnError } from "../../api/types";
 import conversationViewSource from "./ConversationView.tsx?raw";
 import {
+  buildStreamingTimelineScrollSignal,
   buildTimelineScrollSignal,
   COMPOSER_SESSION_REFERENCE_MIME,
   ConversationView,
@@ -2210,6 +2211,43 @@ describe("ConversationView timeline scroll signal", () => {
           updatedAt: "2026-05-22T00:01:05Z",
           source: "runtime",
         },
+      },
+    ]);
+
+    expect(after).not.toBe(before);
+  });
+
+  it("does not change the synchronous scroll signal when streaming text grows", () => {
+    const before = buildTimelineScrollSignal([baseAssistantMessage]);
+    const after = buildTimelineScrollSignal([
+      {
+        ...baseAssistantMessage,
+        content: "streaming response text is still growing",
+      },
+    ]);
+
+    expect(after).toBe(before);
+  });
+
+  it("tracks streaming text growth in the deferred scroll signal", () => {
+    const before = buildStreamingTimelineScrollSignal([baseAssistantMessage]);
+    const after = buildStreamingTimelineScrollSignal([
+      {
+        ...baseAssistantMessage,
+        content: "streaming response text is still growing",
+      },
+    ]);
+
+    expect(after).not.toBe(before);
+  });
+
+  it("changes the synchronous scroll signal when settled text changes", () => {
+    const before = buildTimelineScrollSignal([{ ...baseAssistantMessage, streaming: false }]);
+    const after = buildTimelineScrollSignal([
+      {
+        ...baseAssistantMessage,
+        streaming: false,
+        content: "settled response text changed",
       },
     ]);
 
