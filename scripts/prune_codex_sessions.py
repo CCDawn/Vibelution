@@ -247,7 +247,7 @@ def inspect_logs_db(path: Path, cutoff_epoch: int) -> LogPruneStats | None:
     shm_path = Path(str(path) + "-shm")
     wal_bytes = wal_path.stat().st_size if wal_path.exists() else 0
     shm_bytes = shm_path.stat().st_size if shm_path.exists() else 0
-    con = sqlite3.connect(path)
+    con = sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True)
     try:
         table_exists = con.execute(
             "select 1 from sqlite_master where type='table' and name='logs'"
