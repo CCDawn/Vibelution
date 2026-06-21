@@ -18130,28 +18130,13 @@ def _build_followup_prompt(
     turn_index: int,
     guidance_summaries: list[str] | None = None,
 ) -> str:
-    next_action = ""
-    if isinstance(latest_result, dict):
-        contract = build_chat_coding_result_contract(latest_result)
-        next_action = trim_lines(
-            contract.get("next_action") or latest_result.get("recommended_next_action") or "",
-            max_lines=2,
-        )
     goal = _unwrap_continuation_goal(effective_prompt or original_prompt)
     if _is_continue_request(goal):
         goal = _unwrap_continuation_goal(_latest_effective_user_message(history_messages) or original_prompt)
-    lines = [
-        f"继续完成同一个用户目标：{goal}",
-        f"上一内部回合仍未完成用户目标（第 {turn_index} 轮）。",
-        "不要只输出 <state>；如果目标已完成，请给出可见汇报并标记 outcome=done。",
-    ]
-    if next_action:
-        lines.append(f"优先执行上一轮下一步：{next_action}")
+    lines = [goal or str(original_prompt or "").strip() or "继续"]
     guidance_lines = [item for item in list(guidance_summaries or []) if str(item or "").strip()]
     if guidance_lines:
-        lines.append("用户在当前运行轮补充了以下引导，请在不违背安全边界的前提下优先对齐：")
-        for item in guidance_lines[:3]:
-            lines.append(f"- {item}")
+        lines.extend(str(item).strip() for item in guidance_lines[:3])
     return "\n".join(lines)
 
 
