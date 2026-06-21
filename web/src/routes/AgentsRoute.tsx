@@ -1220,17 +1220,17 @@ function buildLightweightAgentWorkspace(
   const groups = [
     lightweightAgentGroup("active", "可用 Agent", "status", "当前可被业务页面引用或调度的 Agent。", agents, (agent) => agent.status !== "archived"),
     lightweightAgentGroup("archived", "已归档", "status", "只保留历史数据、不再进入可用池的 Agent。", agents, (agent) => agent.status === "archived"),
-    lightweightAgentGroup("chat", "会话模式", "mode", "属于 Chat 运行模式或会话可用池的 Agent。", agents, (agent) => agent.primaryMode === "chat"),
-    lightweightAgentGroup("research", "科研模式", "mode", "属于 Research 运行模式或科研池的 Agent。", agents, (agent) => agent.primaryMode === "research"),
+    lightweightAgentGroup("chat", "会话模式", "mode", "属于 Chat 运行模式或会话可用池的 Agent。", activeAgents, (agent) => agent.primaryMode === "chat"),
+    lightweightAgentGroup("research", "科研模式", "mode", "属于 Research 运行模式或科研池的 Agent。", activeAgents, (agent) => agent.primaryMode === "research"),
     lightweightAgentGroup(
       "supervised_evolution",
       "监督进化模式",
       "mode",
       "占用监督进化模式引用的 Agent。",
-      agents,
+      activeAgents,
       (agent) => agent.primaryMode === "supervised_evolution",
     ),
-    lightweightAgentGroup("self_evolution", "自进化模式", "mode", "占用自进化模式引用的 Agent。", agents, (agent) => agent.primaryMode === "self_evolution"),
+    lightweightAgentGroup("self_evolution", "自进化模式", "mode", "占用自进化模式引用的 Agent。", activeAgents, (agent) => agent.primaryMode === "self_evolution"),
   ].filter((group) => group.count > 0 || group.id === "active" || group.id === "archived");
   return {
     schemaVersion: 1,

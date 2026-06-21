@@ -129,6 +129,14 @@ describe("AgentsRoute layout contract", () => {
     expect(styles.groupSectionTitle).toBeTruthy();
   });
 
+  it("keeps archived Agents out of lightweight mode filter counts", () => {
+    expect(routeSource).toContain('lightweightAgentGroup("active", "可用 Agent", "status"');
+    expect(routeSource).toContain('lightweightAgentGroup("archived", "已归档", "status"');
+    expect(routeSource).toContain('lightweightAgentGroup("chat", "会话模式", "mode", "属于 Chat 运行模式或会话可用池的 Agent。", activeAgents');
+    expect(routeSource).toContain('lightweightAgentGroup("research", "科研模式", "mode", "属于 Research 运行模式或科研池的 Agent。", activeAgents');
+    expect(routeSource).toContain('lightweightAgentGroup("self_evolution", "自进化模式", "mode", "占用自进化模式引用的 Agent。", activeAgents');
+  });
+
   it("labels Agent filter health counts instead of concatenating bare numbers", () => {
     expect(routeSource).toContain("function groupAriaLabel");
     expect(routeSource).toContain("aria-label={groupAriaLabel(displayLabel, group, copy, lang)}");
