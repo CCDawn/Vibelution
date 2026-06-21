@@ -85,116 +85,6 @@ const GRAPH_NODE_TYPE_LABELS: Record<string, string> = {
   tag: "Tag",
 };
 
-type WorkspacePathSummary = {
-  exists: boolean;
-  kind: string;
-  fileCount: number;
-  sizeBytes: number;
-  treeHash: string;
-};
-
-type WorkspaceManifest = {
-  schemaVersion?: number;
-  generatedAt?: string;
-  workspaceRoot?: string;
-  treeHash?: string;
-  totals?: {
-    itemCount?: number;
-    fileCount?: number;
-    sizeBytes?: number;
-  };
-};
-
-type WorkspaceMigrationVerification = {
-  ok?: boolean;
-  mismatchCount?: number;
-  mismatches?: Array<{ relativePath?: string }>;
-  checkedAt?: string;
-  verificationMode?: string;
-  manifest?: WorkspaceManifest;
-};
-
-type WorkspaceMigrationItem = {
-  relativePath: string;
-  kind: string;
-  sourcePath: string;
-  targetPath: string;
-  sourceExists: boolean;
-  targetExists: boolean;
-  source: WorkspacePathSummary;
-  target: WorkspacePathSummary;
-};
-
-type WorkspaceMigrationReport = {
-  schemaVersion: number;
-  mode: string;
-  action?: string;
-  generatedAt?: string;
-  sourceWorkspace: string;
-  targetWorkspace: string;
-  sourceExists: boolean;
-  targetExists: boolean;
-  samePath: boolean;
-  excludes?: string[];
-  items?: WorkspaceMigrationItem[];
-  totals?: {
-    itemCount: number;
-    sourceSizeBytes: number;
-    targetSizeBytes: number;
-    sourceFileCount: number;
-    targetFileCount: number;
-    targetExistingCount: number;
-  };
-  applied?: boolean;
-  verified?: WorkspaceMigrationVerification;
-  deletesProjectWorkspace?: boolean;
-  manifestPath?: string;
-  manifest?: WorkspaceManifest;
-};
-
-type WorkspaceMigrationStatus = WorkspaceMigrationReport & {
-  projectRoot: string;
-  manifestPath: string;
-  source: WorkspacePathSummary;
-  target: WorkspacePathSummary;
-  migrationNeeded: boolean;
-  verification: WorkspaceMigrationVerification;
-  legacyCleanup: {
-    confirmationPhrase: string;
-    canPreview: boolean;
-    canExecute: boolean;
-    blockedReasons: string[];
-  };
-};
-
-type LegacyWorkspaceCleanupPreview = {
-  schemaVersion: number;
-  mode: string;
-  generatedAt?: string;
-  hardDelete: boolean;
-  confirmationPhrase: string;
-  canExecute: boolean;
-  blockedReasons: string[];
-  sourceWorkspace: string;
-  targetWorkspace: string;
-  verification: WorkspaceMigrationVerification;
-  path: WorkspacePathSummary & {
-    path: string;
-    absolutePath: string;
-    action: string;
-  };
-  executed?: boolean;
-  deleted?: {
-    path: string;
-    absolutePath: string;
-    fileCount: number;
-    byteCount: number;
-    status: string;
-  };
-};
-
-const STORAGE_WORKSPACE_MIGRATION_STATUS_QUERY_KEY = ["storage", "workspace-migration", "status"] as const;
-
 type Copy = {
   eyebrow: string;
   title: string;
@@ -550,28 +440,6 @@ type Copy = {
   cleanupBytes: string;
   cleanupVectorRecords: string;
   cleanupCentralSourceBoundary: string;
-  storageMigration: string;
-  storageMigrationSubtitle: string;
-  storageStatus: string;
-  storageSourceWorkspace: string;
-  storageTargetWorkspace: string;
-  storageManifest: string;
-  storageMigrationNeeded: string;
-  storageVerified: string;
-  storageBlocked: string;
-  storagePreview: string;
-  storageApply: string;
-  storageVerify: string;
-  storageLegacyCleanupPreview: string;
-  storageLegacyCleanupExecute: string;
-  storageCleanupReady: string;
-  storageCleanupDeleted: string;
-  storageConfirmPlaceholder: string;
-  storageItems: string;
-  storageExistingTargets: string;
-  storageNoMismatches: string;
-  storageOperationDone: string;
-  storageOperationFailed: string;
   knowledgeGraph: string;
   graphNodes: string;
   graphEdges: string;
@@ -1108,28 +976,6 @@ const COPY: Record<"zh" | "en", Copy> = {
     cleanupBytes: "字节",
     cleanupVectorRecords: "RAG 索引",
     cleanupCentralSourceBoundary: "单个知识库清理不会删除中央来源文件；中央来源需要单独治理。",
-    storageMigration: "存储迁移",
-    storageMigrationSubtitle: "把项目内 workspace 迁移到用户数据目录，校验通过后再硬删除旧目录。",
-    storageStatus: "迁移状态",
-    storageSourceWorkspace: "旧项目 workspace",
-    storageTargetWorkspace: "用户数据 workspace",
-    storageManifest: "清单",
-    storageMigrationNeeded: "需要迁移",
-    storageVerified: "校验通过",
-    storageBlocked: "阻塞",
-    storagePreview: "预览迁移",
-    storageApply: "执行迁移",
-    storageVerify: "校验迁移",
-    storageLegacyCleanupPreview: "预览旧目录清理",
-    storageLegacyCleanupExecute: "硬删除旧 workspace",
-    storageCleanupReady: "可清理",
-    storageCleanupDeleted: "旧 workspace 已删除",
-    storageConfirmPlaceholder: "输入：硬删除旧 workspace",
-    storageItems: "条目",
-    storageExistingTargets: "目标已存在",
-    storageNoMismatches: "无不一致",
-    storageOperationDone: "存储操作完成",
-    storageOperationFailed: "存储迁移失败",
     knowledgeGraph: "项目知识图谱",
     graphNodes: "节点",
     graphEdges: "连线",
@@ -1513,28 +1359,6 @@ const COPY: Record<"zh" | "en", Copy> = {
     cleanupBytes: "Bytes",
     cleanupVectorRecords: "RAG index",
     cleanupCentralSourceBoundary: "Single knowledge-base cleanup does not delete central source files; central sources need separate governance.",
-    storageMigration: "Storage migration",
-    storageMigrationSubtitle: "Move project-local workspace data into the user data directory, verify it, then hard-delete the old directory.",
-    storageStatus: "Migration status",
-    storageSourceWorkspace: "Legacy project workspace",
-    storageTargetWorkspace: "User data workspace",
-    storageManifest: "Manifest",
-    storageMigrationNeeded: "Migration needed",
-    storageVerified: "Verified",
-    storageBlocked: "Blocked",
-    storagePreview: "Preview migration",
-    storageApply: "Apply migration",
-    storageVerify: "Verify migration",
-    storageLegacyCleanupPreview: "Preview old workspace cleanup",
-    storageLegacyCleanupExecute: "Hard-delete old workspace",
-    storageCleanupReady: "Cleanup ready",
-    storageCleanupDeleted: "Old workspace deleted",
-    storageConfirmPlaceholder: "Type: 硬删除旧 workspace",
-    storageItems: "Items",
-    storageExistingTargets: "Existing targets",
-    storageNoMismatches: "No mismatches",
-    storageOperationDone: "Storage operation complete",
-    storageOperationFailed: "Storage migration failed",
     knowledgeGraph: "Project knowledge graph",
     graphNodes: "Nodes",
     graphEdges: "Edges",
@@ -2450,13 +2274,6 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
     tone: "idle",
     text: "",
   });
-  const [storageMigrationReport, setStorageMigrationReport] = useState<WorkspaceMigrationReport | null>(null);
-  const [legacyWorkspaceCleanupPreview, setLegacyWorkspaceCleanupPreview] = useState<LegacyWorkspaceCleanupPreview | null>(null);
-  const [legacyWorkspaceCleanupConfirmationText, setLegacyWorkspaceCleanupConfirmationText] = useState("");
-  const [storageMigrationFeedback, setStorageMigrationFeedback] = useState<{ tone: "idle" | "success" | "error"; text: string }>({
-    tone: "idle",
-    text: "",
-  });
   const [knowledgeFeedback, setKnowledgeFeedback] = useState<{ tone: "idle" | "success" | "error"; text: string }>({
     tone: "idle",
     text: "",
@@ -2558,13 +2375,6 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
     refetchInterval: false,
     enabled: forcedView === "graph" && Boolean(selectedGraphNodeId) && Boolean(fallbackKnowledgeActorAgentId),
   });
-  const workspaceMigrationStatusQuery = useQuery({
-    queryKey: STORAGE_WORKSPACE_MIGRATION_STATUS_QUERY_KEY,
-    queryFn: () => fetchJson<WorkspaceMigrationStatus>("/api/storage/workspace-migration/status"),
-    refetchInterval: false,
-    enabled: forcedView === "cleanup",
-  });
-
   const memoryMutation = useMutation({
     mutationFn: async (draft: EditDraft) => {
       const body = JSON.stringify({
@@ -2718,105 +2528,6 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
       setCleanupFeedback({
         tone: "error",
         text: `${copy.cleanupFailed}: ${error instanceof Error ? error.message : String(error)}`,
-      });
-    },
-  });
-  const workspaceMigrationPreviewMutation = useMutation({
-    mutationFn: async () =>
-      fetchJson<WorkspaceMigrationReport>("/api/storage/workspace-migration/preview", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({}),
-      }),
-    onSuccess: (payload) => {
-      setStorageMigrationReport(payload);
-      setStorageMigrationFeedback({ tone: "success", text: copy.cleanupPreviewReady });
-    },
-    onError: (error) => {
-      setStorageMigrationFeedback({
-        tone: "error",
-        text: `${copy.storageOperationFailed}: ${error instanceof Error ? error.message : String(error)}`,
-      });
-    },
-  });
-  const workspaceMigrationApplyMutation = useMutation({
-    mutationFn: async () =>
-      fetchJson<WorkspaceMigrationReport>("/api/storage/workspace-migration/apply", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({}),
-      }),
-    onSuccess: (payload) => {
-      setStorageMigrationReport(payload);
-      setLegacyWorkspaceCleanupPreview(null);
-      setLegacyWorkspaceCleanupConfirmationText("");
-      setStorageMigrationFeedback({ tone: "success", text: copy.storageOperationDone });
-      void queryClient.invalidateQueries({ queryKey: STORAGE_WORKSPACE_MIGRATION_STATUS_QUERY_KEY });
-    },
-    onError: (error) => {
-      setStorageMigrationFeedback({
-        tone: "error",
-        text: `${copy.storageOperationFailed}: ${error instanceof Error ? error.message : String(error)}`,
-      });
-    },
-  });
-  const workspaceMigrationVerifyMutation = useMutation({
-    mutationFn: async () =>
-      fetchJson<WorkspaceMigrationReport>("/api/storage/workspace-migration/verify", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({}),
-      }),
-    onSuccess: (payload) => {
-      setStorageMigrationReport(payload);
-      setStorageMigrationFeedback({ tone: "success", text: copy.storageOperationDone });
-      void queryClient.invalidateQueries({ queryKey: STORAGE_WORKSPACE_MIGRATION_STATUS_QUERY_KEY });
-    },
-    onError: (error) => {
-      setStorageMigrationFeedback({
-        tone: "error",
-        text: `${copy.storageOperationFailed}: ${error instanceof Error ? error.message : String(error)}`,
-      });
-    },
-  });
-  const legacyWorkspaceCleanupPreviewMutation = useMutation({
-    mutationFn: async () =>
-      fetchJson<LegacyWorkspaceCleanupPreview>("/api/storage/legacy-workspace/cleanup-preview", {
-        method: "POST",
-      }),
-    onSuccess: (payload) => {
-      setLegacyWorkspaceCleanupPreview(payload);
-      setStorageMigrationFeedback({
-        tone: payload.canExecute ? "success" : "error",
-        text: payload.canExecute ? copy.cleanupPreviewReady : `${copy.storageBlocked}: ${payload.blockedReasons.join(", ")}`,
-      });
-    },
-    onError: (error) => {
-      setStorageMigrationFeedback({
-        tone: "error",
-        text: `${copy.storageOperationFailed}: ${error instanceof Error ? error.message : String(error)}`,
-      });
-    },
-  });
-  const legacyWorkspaceCleanupExecuteMutation = useMutation({
-    mutationFn: async (confirmationPhrase: string) =>
-      fetchJson<LegacyWorkspaceCleanupPreview>("/api/storage/legacy-workspace/cleanup-execute", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ confirmationPhrase }),
-      }),
-    onSuccess: (payload) => {
-      setLegacyWorkspaceCleanupPreview(payload);
-      setLegacyWorkspaceCleanupConfirmationText("");
-      setStorageMigrationReport(null);
-      setStorageMigrationFeedback({ tone: "success", text: copy.storageCleanupDeleted });
-      void queryClient.invalidateQueries({ queryKey: STORAGE_WORKSPACE_MIGRATION_STATUS_QUERY_KEY });
-      invalidateMemoryQueries(queryClient);
-    },
-    onError: (error) => {
-      setStorageMigrationFeedback({
-        tone: "error",
-        text: `${copy.storageOperationFailed}: ${error instanceof Error ? error.message : String(error)}`,
       });
     },
   });
@@ -4122,21 +3833,6 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
       targets: selectedCleanupTargets,
       confirmationPhrase: cleanupConfirmationText,
     });
-  };
-  const previewWorkspaceMigration = () => {
-    workspaceMigrationPreviewMutation.mutate();
-  };
-  const applyWorkspaceMigration = () => {
-    workspaceMigrationApplyMutation.mutate();
-  };
-  const verifyWorkspaceMigration = () => {
-    workspaceMigrationVerifyMutation.mutate();
-  };
-  const previewLegacyWorkspaceCleanup = () => {
-    legacyWorkspaceCleanupPreviewMutation.mutate();
-  };
-  const executeLegacyWorkspaceCleanup = () => {
-    legacyWorkspaceCleanupExecuteMutation.mutate(legacyWorkspaceCleanupConfirmationText);
   };
 
   const renderSubnav = () => (
@@ -6590,26 +6286,6 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
     const report = cleanupExecution ?? cleanupPreview;
     const totals = report?.totals;
     const canExecute = selectedCleanupTargets.length > 0 && cleanupConfirmationText.trim() === (report?.confirmationPhrase || "硬删除记忆");
-    const storageStatus = workspaceMigrationStatusQuery.data ?? null;
-    const migrationReport = storageMigrationReport;
-    const reportVerification = migrationReport?.verified;
-    const migrationVerification = reportVerification && Object.keys(reportVerification).length ? reportVerification : storageStatus?.verification;
-    const migrationTotals = migrationReport?.totals;
-    const migrationItems = migrationReport?.items ?? [];
-    const storageSourceSummary = storageStatus?.source;
-    const storageTargetSummary = storageStatus?.target;
-    const legacyPreview = legacyWorkspaceCleanupPreview;
-    const legacyBlockers = legacyPreview?.blockedReasons ?? storageStatus?.legacyCleanup.blockedReasons ?? [];
-    const legacyConfirmationPhrase = legacyPreview?.confirmationPhrase ?? storageStatus?.legacyCleanup.confirmationPhrase ?? "硬删除旧 workspace";
-    const legacyCanExecute =
-      Boolean(legacyPreview?.canExecute)
-      && legacyWorkspaceCleanupConfirmationText.trim() === legacyConfirmationPhrase;
-    const storageBusy =
-      workspaceMigrationPreviewMutation.isPending
-      || workspaceMigrationApplyMutation.isPending
-      || workspaceMigrationVerifyMutation.isPending
-      || legacyWorkspaceCleanupPreviewMutation.isPending
-      || legacyWorkspaceCleanupExecuteMutation.isPending;
     return (
       <>
         <div className={styles.summaryGrid}>
@@ -6639,181 +6315,6 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
           <TriangleAlert size={16} />
           <strong>{copy.cleanupHardDelete}</strong>
         </section>
-
-        <div className={styles.cleanupWorkspace}>
-          <section className={styles.cleanupTargetPanel}>
-            <div className={styles.panelHeader}>
-              <div>
-                <h2 title={copy.storageMigrationSubtitle}>{copy.storageMigration}</h2>
-              </div>
-              <span className={styles.countPill}>{migrationVerification?.ok ? copy.yes : copy.no}</span>
-            </div>
-            {workspaceMigrationStatusQuery.isPending ? <div className={styles.emptyState}>{copy.loading}</div> : null}
-            {workspaceMigrationStatusQuery.isError ? <div className={styles.emptyState}>{copy.loadFailed}</div> : null}
-            <div className={styles.cleanupStats}>
-              <span>{copy.storageMigrationNeeded}: {storageStatus?.migrationNeeded ? copy.yes : copy.no}</span>
-              <span>{copy.storageVerified}: {migrationVerification?.ok ? copy.yes : copy.no}</span>
-              <span>{copy.storageBlocked}: {legacyBlockers.length}</span>
-            </div>
-            <div className={styles.cleanupPathList}>
-              <span>
-                <small>{copy.storageSourceWorkspace}</small>
-                <strong title={storageStatus?.sourceWorkspace || ""}>{storageStatus?.sourceWorkspace || "-"}</strong>
-                <em>{storageSourceSummary?.fileCount ?? 0} {copy.cleanupFiles}</em>
-              </span>
-              <span>
-                <small>{copy.storageTargetWorkspace}</small>
-                <strong title={storageStatus?.targetWorkspace || ""}>{storageStatus?.targetWorkspace || "-"}</strong>
-                <em>{storageTargetSummary?.fileCount ?? 0} {copy.cleanupFiles}</em>
-              </span>
-              <span>
-                <small>{copy.storageManifest}</small>
-                <strong title={storageStatus?.manifestPath || ""}>{storageStatus?.manifestPath || "-"}</strong>
-                <em>{storageStatus?.manifest?.treeHash ? copy.yes : copy.no}</em>
-              </span>
-            </div>
-          </section>
-
-          <section className={styles.cleanupPreviewPanel}>
-            <div className={styles.panelHeader}>
-              <div>
-                <h2>{copy.storageStatus}</h2>
-              </div>
-              <div className={styles.buttonRow}>
-                <button
-                  type="button"
-                  className={styles.inlineActionButton}
-                  onClick={previewWorkspaceMigration}
-                  disabled={storageBusy}
-                >
-                  <Eye size={15} />
-                  {copy.storagePreview}
-                </button>
-                <button
-                  type="button"
-                  className={styles.inlineActionButton}
-                  onClick={applyWorkspaceMigration}
-                  disabled={storageBusy || !storageStatus?.migrationNeeded}
-                >
-                  <CheckCircle2 size={15} />
-                  {copy.storageApply}
-                </button>
-                <button
-                  type="button"
-                  className={styles.inlineActionButton}
-                  onClick={verifyWorkspaceMigration}
-                  disabled={storageBusy}
-                >
-                  <RefreshCw size={15} />
-                  {copy.storageVerify}
-                </button>
-              </div>
-            </div>
-            {migrationReport ? (
-              <>
-                <div className={styles.cleanupStats}>
-                  <span>{copy.storageItems}: {migrationTotals?.itemCount ?? 0}</span>
-                  <span>{copy.cleanupFiles}: {migrationTotals?.sourceFileCount ?? 0}</span>
-                  <span>{copy.cleanupBytes}: {formatByteCount(migrationTotals?.sourceSizeBytes ?? 0)}</span>
-                  <span>{copy.storageExistingTargets}: {migrationTotals?.targetExistingCount ?? 0}</span>
-                  <span>{copy.storageVerified}: {migrationVerification?.ok ? copy.yes : copy.no}</span>
-                </div>
-                {migrationVerification?.mismatchCount ? (
-                  <p className={styles.cleanupInlineWarning}>
-                    {copy.storageBlocked}: {migrationVerification.mismatchCount}
-                  </p>
-                ) : (
-                  <p className={styles.cleanupFeedback} data-tone="success">{copy.storageNoMismatches}</p>
-                )}
-                <div className={styles.cleanupPreviewList}>
-                  {migrationItems.slice(0, 24).map((item) => (
-                    <article key={item.relativePath} className={styles.cleanupPreviewItem}>
-                      <header>
-                        <strong>{item.relativePath}</strong>
-                        <span>{item.kind}</span>
-                      </header>
-                      <div className={styles.cleanupPathList}>
-                        <span>
-                          <small>{copy.storageSourceWorkspace}</small>
-                          <strong title={item.sourcePath}>{item.sourcePath}</strong>
-                          <em>{item.source.fileCount} {copy.cleanupFiles}</em>
-                        </span>
-                        <span>
-                          <small>{copy.storageTargetWorkspace}</small>
-                          <strong title={item.targetPath}>{item.targetPath}</strong>
-                          <em>{item.targetExists ? `${item.target.fileCount} ${copy.cleanupFiles}` : copy.missing}</em>
-                        </span>
-                      </div>
-                    </article>
-                  ))}
-                </div>
-              </>
-            ) : (
-              <div className={styles.emptyState}>{copy.storageMigrationSubtitle}</div>
-            )}
-          </section>
-
-          <section className={styles.cleanupExecutePanel}>
-            <div className={styles.panelHeader}>
-              <div>
-                <h2>{copy.storageLegacyCleanupExecute}</h2>
-                <p>{copy.cleanupConfirmPhrase}: {legacyConfirmationPhrase}</p>
-              </div>
-              <Trash2 size={18} />
-            </div>
-            <button
-              type="button"
-              className={styles.inlineActionButton}
-              onClick={previewLegacyWorkspaceCleanup}
-              disabled={storageBusy || !storageStatus?.legacyCleanup.canPreview}
-            >
-              <Eye size={15} />
-              {copy.storageLegacyCleanupPreview}
-            </button>
-            <div className={styles.cleanupStats}>
-              <span>{copy.storageCleanupReady}: {(legacyPreview?.canExecute ?? storageStatus?.legacyCleanup.canExecute) ? copy.yes : copy.no}</span>
-              <span>{copy.storageBlocked}: {legacyBlockers.length}</span>
-            </div>
-            {legacyBlockers.length ? (
-              <div className={styles.cleanupPathList}>
-                {legacyBlockers.map((reason) => (
-                  <span key={reason}>
-                    <small>{copy.storageBlocked}</small>
-                    <strong>{reason}</strong>
-                    <em>{copy.no}</em>
-                  </span>
-                ))}
-              </div>
-            ) : null}
-            <label className={styles.cleanupConfirmField}>
-              <span>{copy.cleanupConfirmPhrase}</span>
-              <input
-                value={legacyWorkspaceCleanupConfirmationText}
-                placeholder={copy.storageConfirmPlaceholder}
-                onChange={(event) => setLegacyWorkspaceCleanupConfirmationText(event.target.value)}
-              />
-            </label>
-            <button
-              type="button"
-              className={styles.cleanupExecuteButton}
-              onClick={executeLegacyWorkspaceCleanup}
-              disabled={!legacyCanExecute || storageBusy}
-            >
-              <Trash2 size={15} />
-              {copy.storageLegacyCleanupExecute}
-            </button>
-            {legacyPreview?.deleted ? (
-              <div className={styles.cleanupExecutionSummary}>
-                <CheckCircle2 size={18} />
-                <span>{copy.storageCleanupDeleted}</span>
-                <strong>{legacyPreview.deleted.fileCount}</strong>
-              </div>
-            ) : null}
-            {storageMigrationFeedback.tone !== "idle" ? (
-              <p className={styles.cleanupFeedback} data-tone={storageMigrationFeedback.tone}>{storageMigrationFeedback.text}</p>
-            ) : null}
-          </section>
-        </div>
 
         <div className={styles.cleanupWorkspace}>
           <section className={styles.cleanupTargetPanel}>
