@@ -94,7 +94,7 @@ def test_agent_create_api_allows_work_session_without_persona_task_or_role(tmp_p
     assert created["toolPolicyId"].startswith("tool-")
     assert created["toolPolicy"]["allowedTools"] == list(agent_directory_service.DEFAULT_SESSION_AGENT_ALLOWED_TOOLS)
     assert created["toolPolicy"]["preferredTools"] == list(agent_directory_service.DEFAULT_SESSION_AGENT_PREFERRED_TOOLS)
-    assert "read_file_tool" in created["toolPolicy"]["allowedTools"]
+    assert "read_file_tool" not in created["toolPolicy"]["allowedTools"]
     assert "grep_search_tool" in created["toolPolicy"]["allowedTools"]
     assert "glob_tool" in created["toolPolicy"]["allowedTools"]
     assert "cli_tool" in created["toolPolicy"]["allowedTools"]
@@ -170,7 +170,7 @@ def test_repair_adds_session_default_tools_to_legacy_work_session_agent(tmp_path
     assert repaired_agent["toolPolicyId"].startswith("tool-")
     assert policy["allowedTools"] == list(agent_directory_service.DEFAULT_SESSION_AGENT_ALLOWED_TOOLS)
     assert policy["preferredTools"] == list(agent_directory_service.DEFAULT_SESSION_AGENT_PREFERRED_TOOLS)
-    assert "read_file_tool" in policy["allowedTools"]
+    assert "read_file_tool" not in policy["allowedTools"]
     assert "grep_search_tool" in policy["allowedTools"]
     assert "glob_tool" in policy["allowedTools"]
     assert "cli_tool" in policy["allowedTools"]
@@ -210,8 +210,8 @@ def test_repair_preserves_session_agent_explicit_tool_overrides(tmp_path, monkey
     policy = repaired["toolPolicies"][repaired_agent["toolPolicyId"]]
 
     assert repaired_agent["toolPolicyId"] == f"tool-{agent['agentId']}"
-    assert policy["allowedTools"] == ["read_file_tool"]
-    assert policy["preferredTools"] == ["read_file_tool"]
+    assert policy["allowedTools"] == []
+    assert policy["preferredTools"] == []
     assert policy["blockedTools"] == ["get_core_context_tool"]
     assert "conversation_log_inspect_tool" not in policy["allowedTools"]
     assert "get_core_context_tool" not in policy["allowedTools"]
