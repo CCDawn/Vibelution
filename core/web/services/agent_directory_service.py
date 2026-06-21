@@ -4539,6 +4539,9 @@ def _default_agent_avatar_filename(agent: dict[str, Any]) -> str:
 
 def _available_agent_avatar_filenames() -> list[str]:
     avatar_dir = _workspace_path("avatars").resolve()
+    legacy_avatar_dir = (_project_root() / AGENT_AVATAR_RELATIVE_DIR).resolve()
+    if not avatar_dir.exists() and legacy_avatar_dir.exists():
+        avatar_dir = legacy_avatar_dir
     if not avatar_dir.exists() or not avatar_dir.is_dir():
         return []
     existing = {
