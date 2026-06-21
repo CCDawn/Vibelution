@@ -4526,6 +4526,7 @@ def submit_session_message(
             "content": message,
             "attachments": _normalize_message_attachments(attachments),
             "references": _normalize_session_references(session_references),
+            "metadata": persisted_message_metadata,
             "source": normalized_message_source,
         },
         source="submit_session_message",
@@ -7120,7 +7121,12 @@ def _is_default_empty_session_title(title: str) -> bool:
 
 def _build_session_summary(conversation: dict[str, Any], *, hydrate_agent: bool = True) -> dict[str, Any]:
     status = _conversation_phase(conversation["id"], conversation)
-    summary = _latest_message_summary(conversation.get("messages") or [])
+    summary = _latest_message_summary(
+        _normalize_messages(
+            conversation["id"],
+            _ledger_visible_messages_for_session(conversation["id"]),
+        )
+    )
     updated_at = str(conversation.get("updatedAt") or "").strip()
     agent_id = str(conversation.get("agentId") or "").strip()
     cached_agent = conversation.get("_agent")
@@ -8552,7 +8558,7 @@ def _build_session_context_usage(conversation: dict[str, Any], messages: list[di
         "userMessageCount": user_count,
         "assistantMessageCount": assistant_count,
         "toolCallCount": tool_call_count,
-        "source": "session_messages",
+        "source": "conversation_ledger",
     }
     return payload
 
@@ -10927,12 +10933,19 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                     stop_configurer(lambda: _get_turn_control_stop_reason(turn_control))
                 raw_history_messages = list(context.get("history_messages") or [])
                 seedable_history_messages = _history_messages_for_agent_seed(raw_history_messages)
-                conversation_ledger_events = load_conversation_events(PROJECT_ROOT, session_id)
+                conversation_ledger_events = list(load_conversation_events(PROJECT_ROOT, session_id) or [])
+                conversation_context_events = [
+                    event
+                    for event in conversation_ledger_events
+                    if str(getattr(event, "turn_id", "") or "").strip() != str(turn_id or "").strip()
+                ]
+                if not conversation_context_events:
+                    conversation_context_events = None
                 context_assembly = assemble_conversation_context(
                     seedable_history_messages,
                     session_id=session_id,
                     current_turn_id=turn_id,
-                    ledger_events=conversation_ledger_events,
+                    ledger_events=conversation_context_events,
                 )
                 history_messages = context_assembly.history_messages
                 full_history_message_count = len(seedable_history_messages)
@@ -12276,8 +12289,10 @@ def _persist_session_turn_result(
             payload={
                 "content": assistant_text,
                 "thought": str(assistant_entry.get("thought") or ""),
-                "toolCalls": _normalize_message_tool_calls(assistant_entry.get("tool_calls") or assistant_entry.get("toolCalls") or []),
-                "feedbackEvents": _normalize_message_feedback_events(assistant_entry.get("feedback_events") or assistant_entry.get("feedbackEvents") or []),
+            "toolCalls": _normalize_message_tool_calls(assistant_entry.get("tool_calls") or assistant_entry.get("toolCalls") or []),
+            "feedbackEvents": _normalize_message_feedback_events(assistant_entry.get("feedback_events") or assistant_entry.get("feedbackEvents") or []),
+            "llmUsage": llm_usage,
+            "mentalSnapshot": _normalize_mental_snapshot(assistant_entry.get("mental_snapshot")),
             },
             source="persist_session_turn_result",
         )
@@ -16158,22 +16173,20 @@ def _mental_diagnosis_summary(lang: str, cognitive_state: str) -> str:
     return labels.get(str(cognitive_state or "").strip().lower(), str(cognitive_state or "").strip())
 
 
-def _ledger_visible_messages_for_session(session_id: str) -> list[dict[str, Any]] | None:
+def _ledger_visible_messages_for_session(session_id: str) -> list[dict[str, Any]]:
     normalized_session_id = str(session_id or "").strip()
     if not normalized_session_id:
-        return None
+        return []
     events = load_conversation_events(PROJECT_ROOT, normalized_session_id)
     if not events:
-        return None
+        return []
     return conversation_visible_messages_from_events(events)
 
 
 def _messages_with_live_output(session_id: str, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    ledger_messages = _ledger_visible_messages_for_session(session_id)
-    source_messages = ledger_messages if ledger_messages is not None else messages
     detail_messages = _merge_cli_agent_lifecycle_sidecar_messages(
         session_id,
-        _normalize_messages(session_id, source_messages),
+        _normalize_messages(session_id, _ledger_visible_messages_for_session(session_id)),
     )
     live_message = _build_live_output_message(session_id)
     if live_message is None:

@@ -446,6 +446,19 @@ def test_session_detail_messages_replay_ledger_before_legacy_messages(tmp_path, 
     assert "旧 messages 助手内容" not in contents
 
 
+def test_session_detail_without_ledger_does_not_fallback_to_legacy_messages(tmp_path, monkeypatch):
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+
+    messages = session_service._messages_with_live_output(
+        "session-no-ledger",
+        [
+            {"role": "user", "content": "旧 messages 用户内容"},
+            {"role": "assistant", "content": "旧 messages 助手内容"},
+        ],
+    )
+
+    assert messages == []
+
 def test_session_detail_live_overlay_replaces_open_ledger_partial(tmp_path, monkeypatch):
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     append_conversation_event(
