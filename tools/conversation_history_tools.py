@@ -4,12 +4,15 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from core.chat.conversation_ledger import (
+    append_context_compression_checkpoint,
+    conversation_visible_messages_from_events,
+    load_conversation_events,
+)
 from core.chat.history_ledger import (
-    build_checkpoint_message,
     build_history_events,
     fetch_history_event,
     latest_checkpoint,
@@ -17,8 +20,7 @@ from core.chat.history_ledger import (
     search_history_events,
     timeline_events,
 )
-from core.ui.chat_state import load_chat_state, normalize_chat_messages
-from core.ui.chat_state import save_chat_state
+from core.ui.chat_state import load_chat_state, save_chat_state
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -101,50 +103,38 @@ def append_history_checkpoint(
     reason: str = "",
     covered_event_ids: list[str] | None = None,
 ) -> bool:
-    """Append a hidden checkpoint message to persisted chat state."""
+    """Append a ledger-backed history checkpoint."""
 
     normalized_session_id = str(session_id or "").strip()
     checkpoint_summary = str(summary or "").strip()
     if not normalized_session_id or not checkpoint_summary:
         return False
-    payload = load_chat_state(PROJECT_ROOT)
-    conversations = payload.get("conversations")
-    if not isinstance(conversations, list):
+    if not _session_exists(normalized_session_id):
         return False
-    checkpoint = build_checkpoint_message(
-        session_id=normalized_session_id,
-        covered_event_ids=covered_event_ids or [],
+    events = load_conversation_events(PROJECT_ROOT, normalized_session_id)
+    existing_checkpoint_summaries = {
+        str(event.payload.get("summary") or "").strip()
+        for event in events
+        if getattr(event, "event_type", "") == "compaction_checkpoint"
+    }
+    if checkpoint_summary in existing_checkpoint_summaries:
+        return False
+    written = append_context_compression_checkpoint(
+        PROJECT_ROOT,
+        normalized_session_id,
+        turn_id="history-checkpoint",
         summary=checkpoint_summary,
+        level="history",
         reason=reason,
+        before_tokens=0,
+        after_tokens=0,
+        source_message_count=len(conversation_visible_messages_from_events(events)),
+        source="conversation_history_tool",
     )
-    timestamp = datetime.now().isoformat(timespec="seconds")
-    checkpoint["timestamp"] = timestamp
-    for conversation in conversations:
-        if not isinstance(conversation, dict):
-            continue
-        candidate_id = str(
-            conversation.get("conversation_id")
-            or conversation.get("conversationId")
-            or conversation.get("id")
-            or ""
-        ).strip()
-        if candidate_id != normalized_session_id:
-            continue
-        messages = list(conversation.get("messages") or [])
-        existing_checkpoint_ids = {
-            str(((item.get("metadata") or {}) if isinstance(item, dict) else {}).get("checkpointId") or "")
-            for item in messages
-        }
-        checkpoint_id = str((checkpoint.get("metadata") or {}).get("checkpointId") or "")
-        if checkpoint_id and checkpoint_id in existing_checkpoint_ids:
-            return False
-        messages.append(checkpoint)
-        conversation["messages"] = messages
-        conversation["updated_at"] = timestamp
-        payload["updated_at"] = timestamp
-        save_chat_state(PROJECT_ROOT, payload)
-        return True
-    return False
+    if written is None:
+        return False
+    _drop_session_messages_field(normalized_session_id)
+    return True
 
 
 def _resolve_session_id(session_id: str = "") -> str:
@@ -165,6 +155,13 @@ def _resolve_session_id(session_id: str = "") -> str:
 
 
 def _messages_for_session(session_id: str) -> list[dict[str, Any]]:
+    if not _session_exists(session_id):
+        return []
+    events = load_conversation_events(PROJECT_ROOT, session_id)
+    return conversation_visible_messages_from_events(events)
+
+
+def _session_exists(session_id: str) -> bool:
     payload = load_chat_state(PROJECT_ROOT)
     for conversation in list(payload.get("conversations") or []):
         if not isinstance(conversation, dict):
@@ -176,8 +173,27 @@ def _messages_for_session(session_id: str) -> list[dict[str, Any]]:
             or ""
         ).strip()
         if candidate_id == session_id:
-            return normalize_chat_messages(conversation.get("messages") or [])
-    return []
+            return True
+    return False
+
+
+def _drop_session_messages_field(session_id: str) -> None:
+    payload = load_chat_state(PROJECT_ROOT)
+    changed = False
+    for conversation in list(payload.get("conversations") or []):
+        if not isinstance(conversation, dict):
+            continue
+        candidate_id = str(
+            conversation.get("conversation_id")
+            or conversation.get("conversationId")
+            or conversation.get("id")
+            or ""
+        ).strip()
+        if candidate_id == session_id and "messages" in conversation:
+            conversation.pop("messages", None)
+            changed = True
+    if changed:
+        save_chat_state(PROJECT_ROOT, payload)
 
 
 def _json_error(code: str, message: str) -> str:

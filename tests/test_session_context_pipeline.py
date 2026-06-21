@@ -9,12 +9,11 @@ from langchain_core.messages import ToolMessage
 
 from core.chat.context_assembler import assemble_conversation_context
 from core.chat.history_ledger import (
-    EVENT_CHECKPOINT,
-    build_checkpoint_message,
     build_history_events,
     search_history_events,
 )
 from core.chat.conversation_ledger import (
+    EVENT_ASSISTANT_MESSAGE,
     EVENT_ASSISTANT_PARTIAL,
     EVENT_TOOL_RESULT,
     EVENT_TURN_INTERRUPTED,
@@ -30,6 +29,85 @@ from core.ui.chat_state import build_chat_state, save_chat_state
 from core.web.services import session_service
 from tools import conversation_history_tools
 from tools.Key_Tools import create_key_tools
+
+
+def _ledger_events_from_messages(tmp_path, session_id: str, messages: list[dict]) -> list:
+    for index, message in enumerate(messages, start=1):
+        turn_id = f"turn-{index:03d}"
+        role = str(message.get("role") or "").strip().lower()
+        if role == "user":
+            append_conversation_event(
+                tmp_path,
+                session_id,
+                turn_id,
+                EVENT_USER_MESSAGE,
+                status="recorded",
+                payload={"content": message.get("content") or ""},
+            )
+            continue
+        if role == "assistant":
+            content = str(message.get("content") or "").strip()
+            if content:
+                append_conversation_event(
+                    tmp_path,
+                    session_id,
+                    turn_id,
+                    EVENT_ASSISTANT_MESSAGE,
+                    status="completed",
+                    payload={"content": content},
+                )
+            for call_index, raw_call in enumerate(list(message.get("toolCalls") or message.get("tool_calls") or []), start=1):
+                call = dict(raw_call or {})
+                function = call.get("function") if isinstance(call.get("function"), dict) else {}
+                tool_call_id = str(
+                    call.get("id")
+                    or call.get("toolCallId")
+                    or call.get("tool_call_id")
+                    or f"{turn_id}-tool-{call_index}"
+                ).strip()
+                tool_name = str(
+                    call.get("name")
+                    or call.get("toolName")
+                    or call.get("tool_name")
+                    or function.get("name")
+                    or "tool"
+                ).strip()
+                append_conversation_event(
+                    tmp_path,
+                    session_id,
+                    turn_id,
+                    EVENT_TOOL_RESULT,
+                    status=str(call.get("status") or "done").strip() or "done",
+                    payload={
+                        "toolCall": {
+                            **call,
+                            "id": tool_call_id,
+                            "name": tool_name,
+                        }
+                    },
+                    tool_call_id=tool_call_id,
+                )
+            continue
+        if role == "tool":
+            metadata = message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
+            tool_call_id = str(message.get("tool_call_id") or message.get("toolCallId") or f"{turn_id}-tool").strip()
+            tool_name = str(metadata.get("toolName") or metadata.get("tool_name") or "tool").strip()
+            append_conversation_event(
+                tmp_path,
+                session_id,
+                turn_id,
+                EVENT_TOOL_RESULT,
+                status=str(metadata.get("toolStatus") or metadata.get("status") or "done").strip() or "done",
+                payload={
+                    "toolCall": {
+                        "id": tool_call_id,
+                        "name": tool_name,
+                        "result": message.get("content") or "",
+                    }
+                },
+                tool_call_id=tool_call_id,
+            )
+    return load_conversation_events(tmp_path, session_id)
 
 
 def test_history_ledger_indexes_assistant_tool_results():
@@ -90,13 +168,18 @@ def test_history_ledger_indexes_canonical_role_tool_results():
     assert "agent.py 已读取" in matches[0].content
 
 
-def test_context_assembler_keeps_recent_tail_and_omits_old_events():
+def test_context_assembler_keeps_recent_tail_and_omits_old_events(tmp_path):
     messages = []
     for index in range(12):
         messages.append({"role": "user", "content": f"用户消息 {index}"})
         messages.append({"role": "assistant", "content": f"回答 {index}"})
 
-    assembled = assemble_conversation_context(messages, session_id="session-a", recent_message_limit=4)
+    assembled = assemble_conversation_context(
+        [],
+        session_id="session-a",
+        recent_message_limit=4,
+        ledger_events=_ledger_events_from_messages(tmp_path, "session-a", messages),
+    )
 
     assert [item["content"] for item in assembled.history_messages] == ["用户消息 10", "回答 10", "用户消息 11", "回答 11"]
     assert assembled.omitted_event_count > 0
@@ -104,7 +187,7 @@ def test_context_assembler_keeps_recent_tail_and_omits_old_events():
     assert assembled.dynamic_context_hash
 
 
-def test_context_assembler_keeps_recent_tool_results_complete_for_model_input():
+def test_context_assembler_keeps_recent_tool_results_complete_for_model_input(tmp_path):
     huge_output = "terminal-line\n" * 1000
     full_result = f"[EXEC FAILURE | Exit Code: 1]\n{huge_output}"
     messages = [
@@ -124,7 +207,12 @@ def test_context_assembler_keeps_recent_tool_results_complete_for_model_input():
         },
     ]
 
-    assembled = assemble_conversation_context(messages, session_id="session-a", recent_message_limit=3)
+    assembled = assemble_conversation_context(
+        [],
+        session_id="session-a",
+        recent_message_limit=3,
+        ledger_events=_ledger_events_from_messages(tmp_path, "session-a", messages),
+    )
     assert not any(item.get("tool_calls") for item in assembled.history_messages)
     assert not any(item.get("role") == "tool" for item in assembled.history_messages)
     tool_summary = next(item for item in assembled.history_messages if "历史工具结果: cli_tool" in str(item.get("content") or ""))
@@ -134,7 +222,7 @@ def test_context_assembler_keeps_recent_tool_results_complete_for_model_input():
     assert "Windows detected" not in tool_summary["content"]
 
 
-def test_context_hash_tracks_canonical_tool_call_identity():
+def test_context_hash_tracks_canonical_tool_call_identity(tmp_path):
     base_messages = [
         {
             "role": "assistant",
@@ -164,13 +252,23 @@ def test_context_hash_tracks_canonical_tool_call_identity():
         {"role": "tool", "tool_call_id": "call_b", "content": "same result"},
     ]
 
-    base = assemble_conversation_context(base_messages, session_id="session-a", recent_message_limit=4)
-    changed = assemble_conversation_context(changed_messages, session_id="session-a", recent_message_limit=4)
+    base = assemble_conversation_context(
+        [],
+        session_id="session-base",
+        recent_message_limit=4,
+        ledger_events=_ledger_events_from_messages(tmp_path, "session-base", base_messages),
+    )
+    changed = assemble_conversation_context(
+        [],
+        session_id="session-changed",
+        recent_message_limit=4,
+        ledger_events=_ledger_events_from_messages(tmp_path, "session-changed", changed_messages),
+    )
 
     assert base.dynamic_context_hash != changed.dynamic_context_hash
 
 
-def test_context_assembler_replaces_large_tool_results_only_for_compression():
+def test_context_assembler_replaces_large_tool_results_only_for_compression(tmp_path):
     large_result = "terminal-line\n" * 700
     messages = [
         {
@@ -192,7 +290,8 @@ def test_context_assembler_replaces_large_tool_results_only_for_compression():
         },
     ]
 
-    normal = assemble_conversation_context(messages, session_id="session-a", recent_message_limit=4)
+    ledger_events = _ledger_events_from_messages(tmp_path, "session-a", messages)
+    normal = assemble_conversation_context([], session_id="session-a", recent_message_limit=4, ledger_events=ledger_events)
     normal_tool = next(
         item for item in normal.history_messages if "历史工具结果: cli_tool" in str(item.get("content") or "")
     )
@@ -201,9 +300,10 @@ def test_context_assembler_replaces_large_tool_results_only_for_compression():
     assert normal.tool_result_replacement_state["replacements"] == []
 
     compressed = assemble_conversation_context(
-        messages,
+        [],
         session_id="session-a",
         recent_message_limit=4,
+        ledger_events=ledger_events,
         replace_large_tool_results_for_compression=True,
         tool_result_replacement_char_limit=200,
     )
@@ -495,28 +595,68 @@ def test_session_detail_live_overlay_replaces_open_ledger_partial(tmp_path, monk
     ) == 1
 
 
-def test_context_assembler_uses_checkpoint_as_navigation_not_replacing_history():
-    messages = [
-        {"role": "user", "content": "旧请求"},
-        {"role": "assistant", "content": "旧回答"},
-        build_checkpoint_message(
-            session_id="session-a",
-            covered_event_ids=["session-a:0:user_message:old"],
-            summary="旧阶段已经完成定位，证据在早期事件里。",
-            reason="context_limit",
-        ),
-        {"role": "user", "content": "最新请求"},
-    ]
+def test_context_assembler_uses_ledger_checkpoint_as_compressed_history(tmp_path):
+    append_conversation_event(
+        tmp_path,
+        "session-a",
+        "turn-old",
+        EVENT_USER_MESSAGE,
+        status="recorded",
+        payload={"content": "旧请求"},
+    )
+    append_conversation_event(
+        tmp_path,
+        "session-a",
+        "turn-old",
+        EVENT_ASSISTANT_MESSAGE,
+        status="completed",
+        payload={"content": "旧回答"},
+    )
+    append_context_compression_checkpoint(
+        tmp_path,
+        "session-a",
+        turn_id="turn-checkpoint",
+        current_turn_id="turn-new",
+        summary="旧阶段已经完成定位，证据在早期事件里。",
+        level="standard",
+        reason="context_limit",
+        before_tokens=1000,
+        after_tokens=300,
+        iteration=1,
+        trigger_source="test",
+    )
+    append_conversation_event(
+        tmp_path,
+        "session-a",
+        "turn-new",
+        EVENT_USER_MESSAGE,
+        status="recorded",
+        payload={"content": "最新请求"},
+    )
+    append_conversation_event(
+        tmp_path,
+        "session-a",
+        "turn-future",
+        EVENT_USER_MESSAGE,
+        status="recorded",
+        payload={"content": "当前轮不进入历史"},
+    )
 
-    events = build_history_events(messages, session_id="session-a")
-    checkpoints = [event for event in events if event.event_type == EVENT_CHECKPOINT]
-    assembled = assemble_conversation_context(messages, session_id="session-a", recent_message_limit=1)
+    assembled = assemble_conversation_context(
+        [],
+        session_id="session-a",
+        current_turn_id="turn-future",
+        recent_message_limit=4,
+        ledger_events=load_conversation_events(tmp_path, "session-a"),
+    )
+    contents = "\n".join(str(item.get("content") or "") for item in assembled.history_messages)
 
-    assert len(checkpoints) == 1
-    assert checkpoints[0].metadata["coveredEventIds"] == ["session-a:0:user_message:old"]
-    assert assembled.history_messages[0]["metadata"]["kind"] == "history_checkpoint_seed"
-    assert assembled.history_messages[-1]["content"] == "最新请求"
-    assert len(events) >= len(messages)
+    assert "旧阶段已经完成定位" in contents
+    assert "旧请求" not in contents
+    assert "旧回答" not in contents
+    assert "最新请求" in contents
+    assert "当前轮不进入历史" not in contents
+    assert assembled.checkpoint_event_id
 
 
 def test_auto_continue_pause_result_preserves_visible_reply_without_internal_prompt():
@@ -558,23 +698,28 @@ def test_history_search_tool_uses_current_runtime_session(tmp_path, monkeypatch)
     save_chat_state(
         tmp_path,
         build_chat_state(
-            [
-                {"role": "user", "content": "开始修复上下文"},
-                {
-                    "role": "assistant",
-                    "content": "",
-                    "tool_calls": [
-                        {
-                            "name": "cli_tool",
-                            "status": "done",
-                            "resultPreview": "pytest passed for context pipeline",
-                        }
-                    ],
-                },
-            ],
+            [],
             conversation_id="session-tool",
             title="测试会话",
         ),
+    )
+    _ledger_events_from_messages(
+        tmp_path,
+        "session-tool",
+        [
+            {"role": "user", "content": "开始修复上下文"},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "name": "cli_tool",
+                        "status": "done",
+                        "resultPreview": "pytest passed for context pipeline",
+                    }
+                ],
+            },
+        ],
     )
     monkeypatch.setattr(conversation_history_tools, "PROJECT_ROOT", tmp_path)
 
@@ -603,11 +748,12 @@ def test_append_history_checkpoint_persists_hidden_checkpoint(tmp_path, monkeypa
     save_chat_state(
         tmp_path,
         build_chat_state(
-            [{"role": "user", "content": "旧请求"}],
+            [],
             conversation_id="session-checkpoint",
             title="测试会话",
         ),
     )
+    _ledger_events_from_messages(tmp_path, "session-checkpoint", [{"role": "user", "content": "旧请求"}])
     monkeypatch.setattr(conversation_history_tools, "PROJECT_ROOT", tmp_path)
 
     written = conversation_history_tools.append_history_checkpoint(
@@ -616,19 +762,30 @@ def test_append_history_checkpoint_persists_hidden_checkpoint(tmp_path, monkeypa
         reason="context_limit",
     )
     payload = conversation_history_tools.load_chat_state(tmp_path)
-    messages = payload["conversations"][0]["messages"]
+    events = load_conversation_events(tmp_path, "session-checkpoint")
+    checkpoint = events[-1]
+    detail_messages = session_service._normalize_messages(
+        "session-checkpoint",
+        conversation_history_tools._messages_for_session("session-checkpoint"),
+    )
 
     assert written is True
-    assert messages[-1]["metadata"]["kind"] == EVENT_CHECKPOINT
-    assert messages[-1]["content"] == "旧阶段已经归纳为检查点。"
-    assert session_service._normalize_messages("session-checkpoint", messages) == [
-        {
-            "id": "session-checkpoint-message-1",
-            "role": "user",
-            "content": "旧请求",
-            "timestamp": messages[0]["timestamp"],
-        }
-    ]
+    assert "messages" not in payload["conversations"][0]
+    assert checkpoint.event_type == "compaction_checkpoint"
+    assert checkpoint.payload["summary"] == "旧阶段已经归纳为检查点。"
+    assert detail_messages[0]["role"] == "user"
+    assert detail_messages[0]["content"] == "旧请求"
+    assert detail_messages[-1] == {
+        "id": "session-checkpoint-message-2",
+        "role": "assistant",
+        "content": "历史检查点：\n旧阶段已经归纳为检查点。",
+        "timestamp": checkpoint.timestamp,
+        "metadata": {
+            "kind": "compaction_checkpoint",
+            "turnId": "history-checkpoint",
+            "eventId": checkpoint.event_id,
+        },
+    }
 
 
 def test_run_session_turn_seeds_bounded_assembled_history(tmp_path, monkeypatch):

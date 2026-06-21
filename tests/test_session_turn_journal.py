@@ -211,11 +211,13 @@ def test_turn_journal_replays_cli_lifecycle_closed_message(tmp_path):
         {
             "role": "assistant",
             "content": "MiMo Code 已关闭。",
+            "timestamp": messages[0]["timestamp"],
             "metadata": {
                 "kind": EVENT_CLI_SESSION_LIFECYCLE,
                 "turnId": "",
                 "eventId": messages[0]["metadata"]["eventId"],
                 "event": "closed",
+                "lifecycleKey": "",
                 "terminalSessionId": "cli-term-1",
                 "cliRunId": "",
                 "adapterId": "mimo_code",

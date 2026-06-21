@@ -6,6 +6,13 @@ from types import SimpleNamespace
 import pytest
 
 from core.agent_kernel import service as agent_kernel_service
+from core.chat.conversation_ledger import (
+    EVENT_ASSISTANT_MESSAGE,
+    EVENT_USER_MESSAGE,
+    append_conversation_event,
+    conversation_visible_messages_from_events,
+    load_conversation_events,
+)
 from core.chatroom import store as chat_room_store
 from core.chatroom.scheduler import get_scheduler_registry
 from core.infrastructure import developer_sandbox
@@ -16,7 +23,45 @@ from core.web.services import agent_directory_service, chat_room_service, sessio
 from tests.helpers.chat_turn_harness import wait_for_matching_event
 
 
+def _append_session_ledger_message(root, session_id: str, message: dict, *, turn_id: str) -> None:
+    role = str(message.get("role") or "").strip().lower()
+    append_conversation_event(
+        root,
+        session_id,
+        turn_id,
+        EVENT_USER_MESSAGE if role == "user" else EVENT_ASSISTANT_MESSAGE,
+        status="recorded" if role == "user" else "completed",
+        payload={
+            "content": str(message.get("content") or ""),
+            "metadata": dict(message.get("metadata") or {}) if isinstance(message.get("metadata"), dict) else {},
+        },
+        timestamp=str(message.get("timestamp") or ""),
+    )
+
+
+def _session_ledger_messages(root, session_id: str) -> list[dict]:
+    return conversation_visible_messages_from_events(load_conversation_events(root, session_id))
+
+
+def _has_room_transcript(root, session_id: str, room_id: str) -> bool:
+    return any(
+        (message.get("metadata") or {}).get("sourceRoomId") == room_id
+        for message in _session_ledger_messages(root, session_id)
+        if isinstance(message, dict)
+    )
+
+
 def _seed_chat_sessions(root):
+    seed_messages = {
+        "session-alpha": [
+            {"role": "user", "content": "先看 API", "timestamp": "2026-05-26T10:00:00"},
+            {"role": "assistant", "content": "API 线索已记录。", "timestamp": "2026-05-26T10:01:00"},
+        ],
+        "session-beta": [
+            {"role": "user", "content": "先看 UI", "timestamp": "2026-05-26T10:02:00"},
+            {"role": "assistant", "content": "UI 线索已记录。", "timestamp": "2026-05-26T10:03:00"},
+        ],
+    }
     save_chat_state(
         root,
         {
@@ -27,23 +72,18 @@ def _seed_chat_sessions(root):
                     "conversation_id": "session-alpha",
                     "title": "Alpha Agent",
                     "updated_at": "2026-05-26T10:00:00",
-                    "messages": [
-                        {"role": "user", "content": "先看 API", "timestamp": "2026-05-26T10:00:00"},
-                        {"role": "assistant", "content": "API 线索已记录。", "timestamp": "2026-05-26T10:01:00"},
-                    ],
                 },
                 {
                     "conversation_id": "session-beta",
                     "title": "Beta Agent",
                     "updated_at": "2026-05-26T10:02:00",
-                    "messages": [
-                        {"role": "user", "content": "先看 UI", "timestamp": "2026-05-26T10:02:00"},
-                        {"role": "assistant", "content": "UI 线索已记录。", "timestamp": "2026-05-26T10:03:00"},
-                    ],
                 },
             ],
         },
     )
+    for session_id, messages in seed_messages.items():
+        for index, message in enumerate(messages, start=1):
+            _append_session_ledger_message(root, session_id, message, turn_id=f"{session_id}-seed-{index}")
 
 
 def _isolate_chat_room_kernel(tmp_path, monkeypatch):
@@ -772,15 +812,18 @@ def test_chat_room_participant_index_stays_warm_for_message_only_session_changes
     state = load_chat_state(tmp_path)
     for conversation in state["conversations"]:
         if conversation["conversation_id"] == "session-alpha":
-            conversation["messages"].append(
-                {
-                    "role": "user",
-                    "content": "追加一条普通消息",
-                    "timestamp": "2026-05-26T10:04:00",
-                }
-            )
             conversation["updated_at"] = "2026-05-26T10:04:00"
             break
+    _append_session_ledger_message(
+        tmp_path,
+        "session-alpha",
+        {
+            "role": "user",
+            "content": "追加一条普通消息",
+            "timestamp": "2026-05-26T10:04:00",
+        },
+        turn_id="session-alpha-extra-message",
+    )
     state["updated_at"] = "2026-05-26T10:04:00"
     state["conversations"][0]["last_turn_status"] = "completed"
     save_chat_state(tmp_path, state)
@@ -885,7 +928,7 @@ def test_group_round_sync_materializes_agent_directory_only_sessions(tmp_path, m
     conversation = session_service._find_conversation_entry(synced_state, detail["id"])
     assert conversation is not None
     assert conversation.get("agent_id") == detail["agentId"]
-    messages = conversation.get("messages") or []
+    messages = _session_ledger_messages(tmp_path, detail["id"])
     assert messages[-1]["metadata"]["kind"] == "group_room_transcript"
     assert messages[-1]["metadata"]["sourceRoundId"] == "round-alpha"
 
@@ -1240,13 +1283,8 @@ def test_reset_chat_room_clears_history_and_group_context_pollution(tmp_path, mo
         alpha["agentId"],
         prompt_eligible_only=True,
     )
-    synced_state = load_chat_state(tmp_path)
-    assert any(
-        (message.get("metadata") or {}).get("sourceRoomId") == room["roomId"]
-        for conversation in synced_state["conversations"]
-        for message in conversation.get("messages") or []
-        if isinstance(message, dict)
-    )
+    assert _has_room_transcript(tmp_path, "session-alpha", room["roomId"])
+    assert _has_room_transcript(tmp_path, "session-beta", room["roomId"])
 
     reset = chat_room_service.reset_chat_room(room["roomId"])
 
@@ -1258,13 +1296,8 @@ def test_reset_chat_room_clears_history_and_group_context_pollution(tmp_path, mo
     assert reset["rounds"] == []
     assert reset["status"] == "ready"
     assert reset["activeRoundId"] == ""
-    cleaned_state = load_chat_state(tmp_path)
-    assert not any(
-        (message.get("metadata") or {}).get("sourceRoomId") == room["roomId"]
-        for conversation in cleaned_state["conversations"]
-        for message in conversation.get("messages") or []
-        if isinstance(message, dict)
-    )
+    assert not _has_room_transcript(tmp_path, "session-alpha", room["roomId"])
+    assert not _has_room_transcript(tmp_path, "session-beta", room["roomId"])
     assert not agent_directory_service.list_group_context_events_for_agent(
         alpha["agentId"],
         prompt_eligible_only=True,
@@ -1411,8 +1444,9 @@ def test_chat_room_participant_runner_reuses_session_workspace_and_agent_llm_bin
         "tool_calling_mode": "disabled",
     }
     monkeypatch.setattr(session_service, "get_config", lambda: base_config)
+    beta_agent = agent_directory_service.ensure_agent_for_session("session-beta", display_name="Beta Agent")
     detail = session_service.get_session_detail("session-beta")
-    agent_id = detail["agentId"]
+    agent_id = detail["agentId"] or beta_agent["agentId"]
     agent_directory_service.update_agent_instance(
         agent_id,
         llm_bindings={"dialogue": {"modelId": "agent-explorer-model"}},

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from core.chat.conversation_ledger import conversation_ledger_path
 from core.infrastructure import developer_sandbox
 from core.gym import episodes as gym_episodes
 from core.prompt_manager import prompt_manager
@@ -54,8 +55,8 @@ def test_high_roi_state_paths_route_to_developer_sandbox(tmp_path, monkeypatch):
     assert gym_episodes._gym_workspace(project_root) == sandbox_workspace / "gym"
     assert computer_use_service._session_dir("debug-session") == sandbox_workspace / "computer_use_sessions" / "debug-session"
     assert supervised_worktree_evolution_service._run_store_root(project_root) == sandbox_workspace / "supervised_evolution" / "worktree_runs"
-    assert session_service._cli_agent_lifecycle_sidecar_path("debug-session") == (
-        sandbox_workspace / "sessions" / "debug-session" / "logs" / "cli_agent_lifecycle.jsonl"
+    assert conversation_ledger_path(project_root, "debug-session") == (
+        sandbox_workspace / "sessions" / "debug-session" / "turn_journal.jsonl"
     )
     assert reset_service._collect_workspace_sessions()[0].path == sandbox_workspace / "sessions"
     assert reset_service._collect_chat_rooms()[0].path == sandbox_workspace / "chat_rooms"
@@ -93,8 +94,8 @@ def test_high_roi_state_paths_stay_formal_when_developer_mode_is_off(tmp_path, m
     assert gym_episodes._gym_workspace(project_root) == workspace / "gym"
     assert computer_use_service._session_dir("debug-session") == workspace / "computer_use_sessions" / "debug-session"
     assert supervised_worktree_evolution_service._run_store_root(project_root) == workspace / "supervised_evolution" / "worktree_runs"
-    assert session_service._cli_agent_lifecycle_sidecar_path("debug-session") == (
-        workspace / "sessions" / "debug-session" / "logs" / "cli_agent_lifecycle.jsonl"
+    assert conversation_ledger_path(project_root, "debug-session") == (
+        workspace / "sessions" / "debug-session" / "turn_journal.jsonl"
     )
     assert reset_service._collect_workspace_sessions()[0].path == workspace / "sessions"
     assert reset_service._collect_chat_rooms()[0].path == workspace / "chat_rooms"

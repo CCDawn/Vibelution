@@ -1832,30 +1832,22 @@ def test_cli_agent_lifecycle_close_event_persists_once(monkeypatch, tmp_path):
     )
 
     state = load_chat_state(tmp_path)
-    messages = state["conversations"][0]["messages"]
-    lifecycle_messages = [
-        item for item in messages
-        if (item.get("metadata") or {}).get("kind") == "cli_agent_lifecycle"
-    ]
     assert first is not None
     assert second is not None
     assert first["metadata"]["lifecycleKey"] == second["metadata"]["lifecycleKey"]
-    assert len(lifecycle_messages) == 1
-    assert lifecycle_messages[0]["content"] == "MiMo Code 已关闭。"
-    assert lifecycle_messages[0]["metadata"]["cliRunId"] == "cli-run-1"
-    assert lifecycle_messages[0]["metadata"]["lockKey"] == "cli-lock-1"
-    assert lifecycle_messages[0]["metadata"]["mode"] == "readonly"
-    assert lifecycle_messages[0]["metadata"]["linkedSourceRunIds"] == ["run-1", "run-2"]
-    sidecar_path = session_service._cli_agent_lifecycle_sidecar_path("session-1")
-    assert sidecar_path.exists()
-    assert len(sidecar_path.read_text(encoding="utf-8").splitlines()) == 1
+    assert "messages" not in state["conversations"][0]
+    assert first["content"] == "MiMo Code 已关闭。"
+    assert first["metadata"]["cliRunId"] == "cli-run-1"
+    assert first["metadata"]["lockKey"] == "cli-lock-1"
+    assert first["metadata"]["mode"] == "readonly"
+    assert first["metadata"]["linkedSourceRunIds"] == ["run-1", "run-2"]
     journal_events = load_turn_events(tmp_path, "session-1")
     assert [event.event_type for event in journal_events] == [EVENT_CLI_SESSION_LIFECYCLE]
     visible = model_visible_messages_from_events(journal_events)
     assert visible[0]["content"] == "MiMo Code 已关闭。"
 
 
-def test_cli_agent_lifecycle_sidecar_restores_detail_after_message_truncation(monkeypatch, tmp_path):
+def test_cli_agent_lifecycle_ledger_restores_detail_without_chat_state_messages(monkeypatch, tmp_path):
     _isolate_developer_sandbox(monkeypatch, tmp_path)
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(session_service, "_publish_session_detail_snapshot", lambda *args, **kwargs: None)
@@ -1882,18 +1874,12 @@ def test_cli_agent_lifecycle_sidecar_restores_detail_after_message_truncation(mo
         event="closed",
         terminal_session=terminal_session,
     )
-    state = load_chat_state(tmp_path)
-    state["conversations"][0]["messages"] = [
-        item for item in state["conversations"][0]["messages"]
-        if (item.get("metadata") or {}).get("kind") != "cli_agent_lifecycle"
-    ]
-    save_chat_state(tmp_path, state)
 
     detail = session_service.get_session_detail("session-1")
 
     lifecycle_messages = [
         item for item in detail["messages"]
-        if (item.get("metadata") or {}).get("kind") == "cli_agent_lifecycle"
+        if (item.get("metadata") or {}).get("kind") == "cli_session_lifecycle"
     ]
     assert len(lifecycle_messages) == 1
     assert lifecycle_messages[0]["metadata"]["lifecycleKey"] == "cli_agent_lifecycle:closed:cli-run-1"
@@ -1929,17 +1915,20 @@ def test_cli_agent_lifecycle_link_event_persists_cli_session_id(monkeypatch, tmp
         },
     )
 
-    state = load_chat_state(tmp_path)
-    lifecycle_message = [
-        item for item in state["conversations"][0]["messages"]
-        if (item.get("metadata") or {}).get("kind") == "cli_agent_lifecycle"
-    ][0]
     assert event is not None
-    assert lifecycle_message["content"] == "MiMo Code 已连接 CLI 会话。"
-    assert lifecycle_message["metadata"]["event"] == "linked"
-    assert lifecycle_message["metadata"]["cliSessionId"] == "ses_linked"
-    assert lifecycle_message["metadata"]["cliSessionIdSource"] == "session_discovery"
-    assert lifecycle_message["metadata"]["folded"] is True
+    assert event["content"] == "MiMo Code 已连接 CLI 会话。"
+    assert event["metadata"]["event"] == "linked"
+    assert event["metadata"]["cliSessionId"] == "ses_linked"
+    assert event["metadata"]["cliSessionIdSource"] == "session_discovery"
+    assert event["metadata"]["folded"] is True
+    state = load_chat_state(tmp_path)
+    assert "messages" not in state["conversations"][0]
+    journal_events = load_turn_events(tmp_path, "session-1")
+    assert [item.event_type for item in journal_events] == [EVENT_CLI_SESSION_LIFECYCLE]
+    assert journal_events[0].visible_in_model is False
+    lifecycle = journal_events[0].payload["lifecycle"]
+    assert lifecycle["event"] == "linked"
+    assert lifecycle["cliSessionId"] == "ses_linked"
 
 
 def test_cli_agent_terminal_reads_only_bounded_transcript_tail(tmp_path):

@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
 """Append-only conversation history event view.
 
-This module adapts existing persisted chat messages instead of owning a second
-storage format. Compression/checkpoint records are additional events; original
-user, assistant, and tool entries remain queryable.
+This module adapts the conversation ledger's visible message projection into a
+searchable tool-facing event list. The ledger remains the only durable history
+source.
 """
 
 from __future__ import annotations
@@ -266,31 +266,6 @@ def latest_checkpoint(events: Iterable[HistoryEvent]) -> HistoryEvent | None:
     return checkpoints[-1] if checkpoints else None
 
 
-def build_checkpoint_message(
-    *,
-    session_id: str,
-    covered_event_ids: Iterable[str],
-    summary: str,
-    reason: str = "",
-) -> dict[str, Any]:
-    """Return a persisted assistant checkpoint message without mutating history."""
-
-    event_ids = [str(item).strip() for item in covered_event_ids if str(item).strip()]
-    checkpoint_id = hashlib.sha256(
-        "\n".join([session_id, *event_ids, str(summary or ""), str(reason or "")]).encode("utf-8", errors="replace")
-    ).hexdigest()[:16]
-    return {
-        "role": "assistant",
-        "content": str(summary or "").strip(),
-        "metadata": {
-            "kind": EVENT_CHECKPOINT,
-            "checkpointId": checkpoint_id,
-            "coveredEventIds": event_ids[:200],
-            "reason": str(reason or "").strip(),
-        },
-    }
-
-
 def render_events_for_tool(events: Iterable[HistoryEvent], *, max_content_chars: int = 600) -> str:
     payload = []
     for event in events:
@@ -304,7 +279,7 @@ def render_events_for_tool(events: Iterable[HistoryEvent], *, max_content_chars:
 
 def _message_event_type(role: str, metadata: dict[str, Any]) -> str:
     kind = str(metadata.get("kind") or "").strip()
-    if kind == EVENT_CHECKPOINT:
+    if kind in {EVENT_CHECKPOINT, "compaction_checkpoint"}:
         return EVENT_CHECKPOINT
     if kind == EVENT_RUNTIME_NOTICE:
         return EVENT_RUNTIME_NOTICE
@@ -470,7 +445,6 @@ __all__ = [
     "EVENT_TOOL_RESULT",
     "EVENT_USER_MESSAGE",
     "HistoryEvent",
-    "build_checkpoint_message",
     "build_history_events",
     "fetch_history_event",
     "latest_checkpoint",

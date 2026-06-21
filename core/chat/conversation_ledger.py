@@ -5,9 +5,8 @@ The ledger is the authoritative append-only event stream for a chat session.
 UI snapshots, model context, recovery state, and stream ordering must be
 derived from this stream instead of maintaining independent facts.
 
-This module intentionally wraps the existing turn journal storage path during
-the migration. Callers should depend on this ledger API; the physical file can
-move later without changing conversation-flow code.
+The current physical storage is the turn journal JSONL file, exposed through
+this ledger API so conversation-flow code has one stable source of truth.
 """
 
 from __future__ import annotations
@@ -46,6 +45,7 @@ from .turn_journal import (
     load_turn_events,
     model_messages_from_events,
     model_visible_messages_from_events,
+    rewrite_turn_events,
     turn_journal_path,
 )
 from .context_compression_ledger import (
@@ -122,6 +122,14 @@ def append_conversation_event(
 
 def load_conversation_events(project_root: Path, session_id: str) -> list[ConversationLedgerEvent]:
     return load_turn_events(project_root, session_id)
+
+
+def rewrite_conversation_events(
+    project_root: Path,
+    session_id: str,
+    events: Iterable[ConversationLedgerEvent],
+) -> None:
+    rewrite_turn_events(project_root, session_id, events)
 
 
 def conversation_model_messages_from_events(
@@ -210,6 +218,7 @@ __all__ = [
     "latest_ledger_sequence",
     "latest_context_compression_checkpoint",
     "load_conversation_events",
+    "rewrite_conversation_events",
     "project_conversation_ledger",
     "reconcile_open_conversation_turn",
 ]

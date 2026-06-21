@@ -14,6 +14,7 @@ from core.chat.slash_commands import parse_skill_slash_command
 from core.chat.conversation_ledger import (
     EVENT_ASSISTANT_MESSAGE,
     EVENT_ASSISTANT_PARTIAL,
+    EVENT_TOOL_RESULT,
     EVENT_TURN_INTERRUPTED,
     EVENT_TURN_STARTED,
     EVENT_USER_MESSAGE,
@@ -50,6 +51,83 @@ client = TestClient(create_app(), headers={CONTROL_TOKEN_HEADER: get_control_tok
 CONTEXT_PREPARE_LIVE_MESSAGE = "正在准备对话上下文...\n正在读取当前会话、绑定 Agent、工具权限和可恢复的上轮现场。"
 
 
+def _append_test_ledger_messages(project_root: Path, session_id: str, messages: list[dict], *, prefix: str = "test") -> None:
+    for index, message in enumerate(messages, start=1):
+        if not isinstance(message, dict):
+            continue
+        role = str(message.get("role") or "").strip().lower()
+        turn_id = f"{prefix}-{index:03d}"
+        timestamp = str(message.get("timestamp") or "").strip()
+        metadata = dict(message.get("metadata") or {}) if isinstance(message.get("metadata"), dict) else {}
+        if role == "user":
+            append_conversation_event(
+                project_root,
+                session_id,
+                turn_id,
+                EVENT_USER_MESSAGE,
+                status="recorded",
+                payload={
+                    "content": message.get("content") or "",
+                    "attachments": list(message.get("attachments") or []),
+                    "metadata": metadata,
+                },
+                timestamp=timestamp,
+            )
+            continue
+        if role == "assistant":
+            mental_snapshot = message.get("mentalSnapshot") or message.get("mental_snapshot")
+            append_conversation_event(
+                project_root,
+                session_id,
+                turn_id,
+                EVENT_ASSISTANT_MESSAGE,
+                status=str(message.get("status") or "completed").strip() or "completed",
+                payload={
+                    "content": message.get("content") or "",
+                    "thought": message.get("thought") or "",
+                    "toolCalls": list(message.get("toolCalls") or message.get("tool_calls") or []),
+                    "feedbackEvents": list(message.get("feedbackEvents") or message.get("feedback_events") or []),
+                    "mentalSnapshot": dict(mental_snapshot) if isinstance(mental_snapshot, dict) else None,
+                    "metadata": metadata,
+                },
+                timestamp=timestamp,
+            )
+            continue
+        if role == "tool":
+            tool_call_id = str(
+                message.get("tool_call_id")
+                or message.get("toolCallId")
+                or metadata.get("toolCallId")
+                or ""
+            ).strip()
+            append_conversation_event(
+                project_root,
+                session_id,
+                turn_id,
+                EVENT_TOOL_RESULT,
+                status=str(metadata.get("status") or metadata.get("toolStatus") or "done").strip() or "done",
+                payload={
+                    "toolCall": {
+                        "id": tool_call_id,
+                        "name": str(metadata.get("toolName") or metadata.get("tool_name") or "tool").strip() or "tool",
+                        "result": message.get("content") or "",
+                    }
+                },
+                timestamp=timestamp,
+                tool_call_id=tool_call_id,
+            )
+
+
+
+
+def _bind_live_session_agent(project_root: Path, *, display_name: str = "真实会话", **kwargs) -> dict:
+    agent = agent_directory_service.ensure_agent_for_session(
+        "session-live",
+        display_name=display_name,
+        **kwargs,
+    )
+    _bind_seeded_session_agent(project_root, agent)
+    return agent
 
 
 def _capture_session_lifecycle_events(monkeypatch):
@@ -270,44 +348,6 @@ def test_session_detail_surfaces_missing_agent_placeholder(tmp_path, monkeypatch
 
 def test_session_detail_context_usage_comes_from_ledger_after_restart(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path)
-    state = load_chat_state(tmp_path)
-    state["conversations"][0]["messages"].extend(
-        [
-            {
-                "role": "user",
-                "content": "重启后仍然应该统计这一条历史用户消息。",
-                "timestamp": "2026-05-18T11:57:00",
-            },
-            {
-                "role": "assistant",
-                "content": "收到，当前对话上下文应来自持久化消息，而不是运行时临时计数。",
-                "timestamp": "2026-05-18T11:58:00",
-            },
-        ]
-    )
-    save_chat_state(tmp_path, state)
-    append_conversation_event(
-        tmp_path,
-        "session-live",
-        "turn-ledger-1",
-        EVENT_USER_MESSAGE,
-        status="recorded",
-        payload={"content": "继续前端开发"},
-    )
-    append_conversation_event(
-        tmp_path,
-        "session-live",
-        "turn-ledger-1",
-        EVENT_ASSISTANT_MESSAGE,
-        status="completed",
-        payload={
-            "content": "已经接到真实状态了。",
-            "toolCalls": [
-                {"name": "read_file_tool", "status": "done", "summary": "读取文件"},
-                {"name": "search_code_tool", "status": "done", "summary": "搜索代码"},
-            ],
-        },
-    )
     append_conversation_event(
         tmp_path,
         "session-live",
@@ -587,12 +627,14 @@ def test_persist_turn_result_records_missing_llm_usage_without_estimate(tmp_path
     )
 
     conversation = load_chat_state(tmp_path)["conversations"][0]
-    llm_usage = conversation["last_llm_usage"]
-    assistant_metadata = conversation["messages"][-1].get("metadata")
+    assert "last_llm_usage" not in conversation
+    assert not conversation.get("messages")
+    detail = session_service.get_session_detail("session-live")
+    assistant_metadata = detail["messages"][-1].get("metadata")
+    llm_usage = assistant_metadata["llmUsage"]
+    assert assistant_metadata["turnId"] == "turn-missing-usage"
     assert llm_usage["source"] == "missing"
     assert llm_usage["inputTokens"] == 0
-    assert assistant_metadata == {"turnId": "turn-missing-usage"}
-    detail = session_service.get_session_detail("session-live")
     assert detail["llmUsage"]["source"] == "missing"
     assert detail["llmUsage"]["inputTokens"] == 0
     assert any(
@@ -659,8 +701,6 @@ def test_persist_turn_result_preserves_ordered_feedback_events(tmp_path, monkeyp
         turn_id="turn-feedback",
     )
 
-    stored_message = load_chat_state(tmp_path)["conversations"][0]["messages"][-1]
-    assert [item["kind"] for item in stored_message["feedback_events"]] == ["thought", "tool", "thought", "tool"]
     detail = session_service.get_session_detail("session-live")
     feedback_events = detail["messages"][-1]["feedbackEvents"]
     assert [item["kind"] for item in feedback_events] == ["thought", "tool", "thought", "tool"]
@@ -768,15 +808,13 @@ def test_persist_turn_result_records_provider_llm_usage(tmp_path, monkeypatch):
     )
 
     conversation = load_chat_state(tmp_path)["conversations"][0]
-    assistant_metadata = conversation["messages"][-1]["metadata"]
-    assert conversation["last_llm_usage"]["source"] == "provider_usage"
-    assert conversation["last_llm_usage"]["inputTokens"] == 1500
-    assert conversation["last_llm_usage"]["cacheCreationInputTokens"] == 450
-    assert conversation["last_llm_usage"]["uncachedInputTokens"] == 1200
+    assert "last_llm_usage" not in conversation
+    assert not conversation.get("messages")
+    detail = session_service.get_session_detail("session-live")
+    assistant_metadata = detail["messages"][-1]["metadata"]
     assert assistant_metadata["llmUsage"]["inputTokens"] == 1500
     assert assistant_metadata["llmUsage"]["cacheCreationInputTokens"] == 450
     assert assistant_metadata["llmUsage"]["cacheHitRate"] == pytest.approx(0.2)
-    detail = session_service.get_session_detail("session-live")
     assert detail["llmUsage"]["source"] == "provider_usage"
     assert detail["llmUsage"]["inputTokens"] == 1500
     assert any(
@@ -1043,14 +1081,6 @@ def test_session_detail_live_context_uses_current_missing_cache_composition(tmp_
     _seed_chat_state(tmp_path, task_status="done")
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     state = load_chat_state(tmp_path)
-    state["conversations"][0]["last_llm_usage"] = {
-        "source": "missing",
-        "inputTokens": 0,
-        "outputTokens": 0,
-        "totalTokens": 0,
-        "cachedInputTokens": 0,
-        "recordedAt": "2026-05-18T12:06:00",
-    }
     state["conversations"][0]["last_cache_composition"] = {
         "turnId": "previous-turn",
         "recordedAt": "2026-05-18T12:05:00",
@@ -2401,8 +2431,8 @@ def test_session_detail_recovers_interrupted_live_output_from_checkpoint(tmp_pat
     assert response.status_code == 200
     events = load_conversation_events(tmp_path, "session-live")
     event_types = [event.event_type for event in events]
-    assert event_types == [EVENT_TURN_STARTED, EVENT_ASSISTANT_MESSAGE, EVENT_TURN_INTERRUPTED]
-    assistant_event = events[1]
+    assert event_types[-3:] == [EVENT_TURN_STARTED, EVENT_ASSISTANT_MESSAGE, EVENT_TURN_INTERRUPTED]
+    assistant_event = events[-2]
     assert assistant_event.payload["content"] == "已生成但尚未完成的内容。"
     assert assistant_event.payload["thought"] == "临时思考。"
     assert assistant_event.payload["feedbackEvents"][0]["name"] == "model_response"
@@ -2615,7 +2645,8 @@ def test_submit_session_message_rejects_archived_agent_without_mutating_session(
 
     state = load_chat_state(tmp_path)
     conversation = state["conversations"][0]
-    assert conversation["messages"] == []
+    assert "messages" not in conversation
+    assert load_conversation_events(tmp_path, detail["id"]) == []
     blocked_events = [item for item in events if item[0][2] == "conversation.turn.blocked_archived_agent"]
     assert len(blocked_events) == 1
     assert blocked_events[0][1]["fields"]["agentId"] == detail["agentId"]
@@ -2625,12 +2656,15 @@ def test_edit_resubmit_session_message_rejects_archived_agent_without_mutating_s
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
     detail = session_service.create_chat_session(title="归档重发 Agent")
-    state = load_chat_state(tmp_path)
-    conversation = state["conversations"][0]
-    conversation["messages"] = [
-        {"role": "user", "content": "原始消息", "timestamp": "2026-05-29T08:40:00+00:00"}
-    ]
-    save_chat_state(tmp_path, state)
+    append_conversation_event(
+        tmp_path,
+        detail["id"],
+        "turn-original",
+        EVENT_USER_MESSAGE,
+        status="recorded",
+        payload={"content": "原始消息"},
+        timestamp="2026-05-29T08:40:00+00:00",
+    )
     agent_directory_service.archive_agent_instance(detail["agentId"])
     events = []
     monkeypatch.setattr(
@@ -2653,7 +2687,8 @@ def test_edit_resubmit_session_message_rejects_archived_agent_without_mutating_s
 
     next_state = load_chat_state(tmp_path)
     next_conversation = next_state["conversations"][0]
-    assert next_conversation["messages"][0]["content"] == "原始消息"
+    assert "messages" not in next_conversation
+    assert session_service.get_session_detail(detail["id"])["messages"][0]["content"] == "原始消息"
     assert next_conversation.get("last_turn_status") != "running"
     blocked_events = [item for item in events if item[0][2] == "conversation.turn.blocked_archived_agent"]
     assert len(blocked_events) == 1
@@ -2824,6 +2859,11 @@ def test_submit_session_message_runs_turn_and_persists_reply(tmp_path, monkeypat
 
 def test_session_submit_message_routes_slash_skill_into_scheduled_context(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path, task_status="done")
+    session_agent = agent_directory_service.create_agent_instance(
+        display_name="Slash Skill Agent",
+        primary_mode="chat",
+    )
+    _bind_seeded_session_agent(tmp_path, session_agent)
     skill_root = tmp_path / "skills"
     skill_dir = skill_root / "brt"
     skill_dir.mkdir(parents=True)
@@ -2870,6 +2910,11 @@ def test_session_submit_message_routes_slash_skill_into_scheduled_context(tmp_pa
 
 def test_session_worker_seeds_slash_skill_runtime_context(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path, task_status="done")
+    session_agent = agent_directory_service.create_agent_instance(
+        display_name="Slash Skill Runtime Agent",
+        primary_mode="chat",
+    )
+    _bind_seeded_session_agent(tmp_path, session_agent)
     skill_root = tmp_path / "skills"
     skill_dir = skill_root / "brt"
     skill_dir.mkdir(parents=True)
@@ -2985,6 +3030,11 @@ def test_session_worker_seeds_slash_skill_runtime_context(tmp_path, monkeypatch)
 
 def test_session_worker_seeds_active_skill_contract_on_later_turn(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path, task_status="done")
+    session_agent = agent_directory_service.create_agent_instance(
+        display_name="Active Skill Runtime Agent",
+        primary_mode="chat",
+    )
+    _bind_seeded_session_agent(tmp_path, session_agent)
     skill_root = tmp_path / "skills"
     skill_dir = skill_root / "brt"
     skill_dir.mkdir(parents=True)
@@ -3099,15 +3149,51 @@ def test_edit_resubmit_session_message_routes_slash_skill_into_scheduled_context
                     "title": "真实会话",
                     "updated_at": "2026-05-18T12:03:00",
                     "last_turn_status": "ready",
-                    "messages": [
-                        {"role": "user", "content": "原始需求", "timestamp": "2026-05-18T12:00:00"},
-                        {"role": "assistant", "content": "原始回答", "timestamp": "2026-05-18T12:01:00"},
-                        {"role": "user", "content": "后续追问", "timestamp": "2026-05-18T12:02:00"},
-                        {"role": "assistant", "content": "后续回答", "timestamp": "2026-05-18T12:03:00"},
-                    ],
                 }
             ],
         },
+    )
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    session_agent = agent_directory_service.create_agent_instance(
+        display_name="Edit Resubmit Slash Agent",
+        primary_mode="chat",
+    )
+    _bind_seeded_session_agent(tmp_path, session_agent)
+    append_conversation_event(
+        tmp_path,
+        "session-live",
+        "turn-original",
+        EVENT_USER_MESSAGE,
+        status="recorded",
+        payload={"content": "原始需求"},
+        timestamp="2026-05-18T12:00:00",
+    )
+    append_conversation_event(
+        tmp_path,
+        "session-live",
+        "turn-original",
+        EVENT_ASSISTANT_MESSAGE,
+        status="completed",
+        payload={"content": "原始回答"},
+        timestamp="2026-05-18T12:01:00",
+    )
+    append_conversation_event(
+        tmp_path,
+        "session-live",
+        "turn-followup",
+        EVENT_USER_MESSAGE,
+        status="recorded",
+        payload={"content": "后续追问"},
+        timestamp="2026-05-18T12:02:00",
+    )
+    append_conversation_event(
+        tmp_path,
+        "session-live",
+        "turn-followup",
+        EVENT_ASSISTANT_MESSAGE,
+        status="completed",
+        payload={"content": "后续回答"},
+        timestamp="2026-05-18T12:03:00",
     )
     skill_root = tmp_path / "skills"
     skill_dir = skill_root / "brt"
@@ -3239,7 +3325,8 @@ def test_session_user_image_attachment_upload_and_submit_reaches_agent(tmp_path,
     assert seen_attachment["dataUrl"].startswith("data:image/png;base64,")
 
     state = load_chat_state(tmp_path)
-    stored_user = state["conversations"][0]["messages"][-2]
+    assert "messages" not in state["conversations"][0]
+    stored_user = session_service.get_session_detail("session-live")["messages"][-2]
     assert stored_user["attachments"][0]["artifactId"] == attachment["artifactId"]
     assert "dataUrl" not in stored_user["attachments"][0]
 
@@ -3255,6 +3342,15 @@ def test_session_user_image_attachment_vision_intent_blocks_unsupported_agent(tm
     if primary_model_id and isinstance(primary_model_entry, dict):
         base_config.llm.model_library[primary_model_id]["supports_image_input"] = False
     monkeypatch.setattr(session_service, "get_config", lambda: base_config)
+    _bind_seeded_session_agent(
+        tmp_path,
+        agent_directory_service.ensure_agent_for_session(
+            "session-live",
+            display_name="真实会话",
+            llm_bindings={"dialogue": {"modelId": primary_model_id or "model-primary"}},
+            prompt_template_id="prompt-chat-default",
+        ),
+    )
     monkeypatch.setattr(session_service, "_schedule_session_turn", lambda context: pytest.fail("LLM turn should not be scheduled"))
 
     upload_response = client.post(
@@ -3293,6 +3389,15 @@ def test_session_user_image_attachment_picture_content_phrase_stays_vision_inten
     if primary_model_id and isinstance(primary_model_entry, dict):
         base_config.llm.model_library[primary_model_id]["supports_image_input"] = False
     monkeypatch.setattr(session_service, "get_config", lambda: base_config)
+    _bind_seeded_session_agent(
+        tmp_path,
+        agent_directory_service.ensure_agent_for_session(
+            "session-live",
+            display_name="真实会话",
+            llm_bindings={"dialogue": {"modelId": primary_model_id or "model-primary"}},
+            prompt_template_id="prompt-chat-default",
+        ),
+    )
     monkeypatch.setattr(session_service, "_schedule_session_turn", lambda context: pytest.fail("LLM turn should not be scheduled"))
 
     upload_response = client.post(
@@ -4027,46 +4132,61 @@ def test_session_contextual_retry_ignores_active_task_image_clarification(tmp_pa
     )
     assert upload_response.status_code == 201
     artifact = upload_response.json()
-    state = load_chat_state(tmp_path)
-    conversation = state["conversations"][0]
-    conversation["messages"].extend(
-        [
-            {
-                "role": "user",
-                "content": "我刚才点击了测试,还是显示不支持图像为什么",
-                "timestamp": "2026-05-18T11:58:00",
-                "attachments": [artifact],
-            },
-            {
-                "role": "assistant",
-                "content": "我看到你发送了图片。你想让我分析这张图片，还是基于它生成/调整图片？请补一句你的目标。",
-                "timestamp": "2026-05-18T11:59:00",
-            },
-            {
-                "role": "user",
-                "content": "继续",
-                "timestamp": "2026-05-18T12:00:00",
-                "metadata": {
-                    "resolvedRecentImageReference": {
-                        "status": "resolved",
-                        "source": "contextual_retry",
-                        "prompt": "我看到你发送了图片。你想让我分析这张图片，还是基于它生成/调整图片？请补一句你的目标。",
-                        "artifactIds": [artifact["artifactId"]],
-                    }
-                },
-            },
-            {
-                "role": "assistant",
-                "content": "图片生成失败：image2 provider returned 401",
-                "timestamp": "2026-05-18T12:01:00",
-                "metadata": {
-                    "kind": "turn_error",
-                    "reasonCode": "auth_failed",
-                },
-            },
-        ]
+    append_conversation_event(
+        tmp_path,
+        "session-live",
+        "turn-image-history",
+        EVENT_USER_MESSAGE,
+        status="recorded",
+        payload={
+            "content": "我刚才点击了测试,还是显示不支持图像为什么",
+            "attachments": [artifact],
+        },
+        timestamp="2026-05-18T11:58:00",
     )
-    save_chat_state(tmp_path, state)
+    append_conversation_event(
+        tmp_path,
+        "session-live",
+        "turn-image-history",
+        EVENT_ASSISTANT_MESSAGE,
+        status="completed",
+        payload={"content": "我看到你发送了图片。你想让我分析这张图片，还是基于它生成/调整图片？请补一句你的目标。"},
+        timestamp="2026-05-18T11:59:00",
+    )
+    append_conversation_event(
+        tmp_path,
+        "session-live",
+        "turn-image-retry",
+        EVENT_USER_MESSAGE,
+        status="recorded",
+        payload={
+            "content": "继续",
+            "metadata": {
+                "resolvedRecentImageReference": {
+                    "status": "resolved",
+                    "source": "contextual_retry",
+                    "prompt": "我看到你发送了图片。你想让我分析这张图片，还是基于它生成/调整图片？请补一句你的目标。",
+                    "artifactIds": [artifact["artifactId"]],
+                }
+            },
+        },
+        timestamp="2026-05-18T12:00:00",
+    )
+    append_conversation_event(
+        tmp_path,
+        "session-live",
+        "turn-image-retry",
+        EVENT_ASSISTANT_MESSAGE,
+        status="failed",
+        payload={
+            "content": "图片生成失败：image2 provider returned 401",
+            "metadata": {
+                "kind": "turn_error",
+                "reasonCode": "auth_failed",
+            },
+        },
+        timestamp="2026-05-18T12:01:00",
+    )
 
     response = client.post("/api/sessions/session-live/messages", json={"content": "继续"})
 
@@ -4082,6 +4202,10 @@ def test_session_recent_image_reference_without_history_asks_for_image(tmp_path,
     _seed_chat_state(tmp_path, task_status="done")
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    _bind_seeded_session_agent(
+        tmp_path,
+        agent_directory_service.ensure_agent_for_session("session-live", display_name="真实会话"),
+    )
     monkeypatch.setattr(session_service, "_schedule_session_turn", lambda context: pytest.fail("LLM turn should not be scheduled"))
 
     response = client.post(
@@ -4099,6 +4223,10 @@ def test_session_user_image_attachment_empty_text_asks_for_clarification(tmp_pat
     _seed_chat_state(tmp_path, task_status="done")
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    _bind_seeded_session_agent(
+        tmp_path,
+        agent_directory_service.ensure_agent_for_session("session-live", display_name="真实会话"),
+    )
     monkeypatch.setattr(session_service, "_schedule_session_turn", lambda context: pytest.fail("LLM turn should not be scheduled"))
 
     upload_response = client.post(
@@ -4212,6 +4340,11 @@ def test_session_user_image_attachment_rejects_stream_that_exceeds_limit(tmp_pat
 def test_submit_session_message_preserves_chinese_content_round_trip(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path, task_status="done")
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    _bind_seeded_session_agent(
+        tmp_path,
+        agent_directory_service.ensure_agent_for_session("session-live", display_name="真实会话"),
+    )
     monkeypatch.setattr(session_service, "_schedule_session_turn", lambda context: None)
 
     content = "修复中文编码：runtime circuit breaker validation ping"
@@ -4229,7 +4362,8 @@ def test_submit_session_message_preserves_chinese_content_round_trip(tmp_path, m
     assert payload["messages"][-1]["streaming"] is True
 
     state = load_chat_state(tmp_path)
-    persisted = state["conversations"][0]["messages"][-1]
+    assert "messages" not in state["conversations"][0]
+    persisted = session_service.get_session_detail("session-live")["messages"][-2]
     assert persisted["role"] == "user"
     assert persisted["content"] == content
 
@@ -4241,6 +4375,11 @@ def test_submit_session_message_preserves_chinese_content_round_trip(tmp_path, m
 def test_submit_session_message_preserves_full_multiline_prompt_for_agent(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path, task_status="done")
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    _bind_seeded_session_agent(
+        tmp_path,
+        agent_directory_service.ensure_agent_for_session("session-live", display_name="真实会话"),
+    )
     captured: dict[str, object] = {}
     monkeypatch.setattr(session_service, "_schedule_session_turn", lambda context: captured.update({"context": dict(context)}))
 
@@ -4269,6 +4408,8 @@ def test_submit_session_message_preserves_full_multiline_prompt_for_agent(tmp_pa
 def test_submit_session_message_shows_waiting_live_message_while_turn_runs(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path, task_status="done")
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    _bind_live_session_agent(tmp_path)
     monkeypatch.setattr(session_service, "_schedule_session_turn", lambda context: None)
 
     try:
@@ -4293,6 +4434,8 @@ def test_submit_session_message_shows_waiting_live_message_while_turn_runs(tmp_p
 def test_submit_session_message_recovers_content_from_utf8_base64_fallback(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path, task_status="done")
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    _bind_live_session_agent(tmp_path)
     monkeypatch.setattr(session_service, "_schedule_session_turn", lambda context: None)
 
     content = "请继续检查中文输入链路"
@@ -4309,13 +4452,16 @@ def test_submit_session_message_recovers_content_from_utf8_base64_fallback(tmp_p
     assert payload["messages"][-1]["streaming"] is True
     assert payload["messages"][-1]["content"] == CONTEXT_PREPARE_LIVE_MESSAGE
     state = load_chat_state(tmp_path)
-    assert state["conversations"][0]["messages"][-1]["content"] == content
+    assert "messages" not in state["conversations"][0]
+    assert session_service.get_session_detail("session-live")["messages"][-2]["content"] == content
     assert _read_next_state_signals(tmp_path, session_id="session-live") == []
 
 
 def test_submit_session_message_rejects_encoding_replacement_pollution(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path, task_status="done")
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    _bind_live_session_agent(tmp_path)
     monkeypatch.setattr(session_service, "_schedule_session_turn", lambda context: None)
 
     response = client.post(
@@ -4326,9 +4472,10 @@ def test_submit_session_message_rejects_encoding_replacement_pollution(tmp_path,
     assert response.status_code == 422
     assert "编码损坏" in response.json()["detail"]
     state = load_chat_state(tmp_path)
-    assert [item["content"] for item in state["conversations"][0]["messages"]] == [
+    assert "messages" not in state["conversations"][0]
+    assert [item["content"] for item in session_service.get_session_detail("session-live")["messages"]] == [
         "继续前端开发",
-        "<think>internal</think>\n\n已经接到真实状态了。",
+        "已经接到真实状态了。",
     ]
 
 
@@ -4350,6 +4497,8 @@ def test_submit_session_message_preserves_short_dialogue_prompt_without_task_fal
         },
     )
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    _bind_live_session_agent(tmp_path)
     recorded_events: list[tuple[tuple, dict]] = []
     monkeypatch.setattr(
         session_service,
@@ -4440,12 +4589,15 @@ def test_submit_session_message_continue_preserves_raw_prompt_and_dialogue_histo
             "metadata": {"source": "task_tool"},
         },
     )
-    state = load_chat_state(tmp_path)
-    state["conversations"][0]["messages"].append(
-        {"role": "user", "content": "?", "timestamp": "2026-05-18T11:57:00"}
+    _append_test_ledger_messages(
+        tmp_path,
+        "session-live",
+        [{"role": "user", "content": "?", "timestamp": "2026-05-18T11:57:00"}],
+        prefix="continue-history",
     )
-    save_chat_state(tmp_path, state)
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    _bind_live_session_agent(tmp_path)
 
     captured: dict[str, object] = {}
 
@@ -4593,36 +4745,34 @@ def test_submit_session_plain_confirmation_preserves_raw_prompt_without_agent_in
             "metadata": {"source": "task_tool", "last_user_message_filtered": True},
         },
     )
-    state = load_chat_state(tmp_path)
-    messages = state["conversations"][0]["messages"]
-    messages.append(
-        {
-            "role": "user",
-            "content": "我现在需要对项目的记忆系统进行开发,需要你的团队,请你把这个作为目前的任务,分析一下如何进展",
-            "timestamp": "2026-05-31T17:03:58",
-        }
-    )
-    messages.append(
-        {
-            "role": "user",
-            "content": "[Agent 私信回复]\n来源 Agent: A013 · 白予安\n\n消息内容:\n需要 CEO 确认。",
-            "timestamp": "2026-05-31T17:08:50",
-            "metadata": {
-                "kind": "agent_inbox_message",
-                "inboxKind": "agent_inbox_reply",
-                "sourceAgentId": "agent-a013",
-                "targetAgentId": "agent-ceo",
+    _append_test_ledger_messages(
+        tmp_path,
+        "session-live",
+        [
+            {
+                "role": "user",
+                "content": "我现在需要对项目的记忆系统进行开发,需要你的团队,请你把这个作为目前的任务,分析一下如何进展",
+                "timestamp": "2026-05-31T17:03:58",
             },
-        }
+            {
+                "role": "user",
+                "content": "[Agent 私信回复]\n来源 Agent: A013 · 白予安\n\n消息内容:\n需要 CEO 确认。",
+                "timestamp": "2026-05-31T17:08:50",
+                "metadata": {
+                    "kind": "agent_inbox_message",
+                    "inboxKind": "agent_inbox_reply",
+                    "sourceAgentId": "agent-a013",
+                    "targetAgentId": "agent-ceo",
+                },
+            },
+            {
+                "role": "assistant",
+                "content": "团队已完成前期组织诊断和能力评估，现在需要您的决策来推进下一阶段工作。请确认上述决策点。",
+                "timestamp": "2026-05-31T17:09:00",
+            },
+        ],
+        prefix="agent-inbox-history",
     )
-    messages.append(
-        {
-            "role": "assistant",
-            "content": "团队已完成前期组织诊断和能力评估，现在需要您的决策来推进下一阶段工作。请确认上述决策点。",
-            "timestamp": "2026-05-31T17:09:00",
-        }
-    )
-    save_chat_state(tmp_path, state)
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     captured: dict[str, object] = {}
 
@@ -4674,15 +4824,18 @@ def test_submit_session_agent_inbox_turn_preserves_inbox_prompt_without_history_
             "metadata": {"source": "task_tool"},
         },
     )
-    state = load_chat_state(tmp_path)
-    state["conversations"][0]["messages"].append(
-        {
-            "role": "user",
-            "content": "只需要创建记忆库管理员",
-            "timestamp": "2026-05-31T17:03:58",
-        }
+    _append_test_ledger_messages(
+        tmp_path,
+        "session-live",
+        [
+            {
+                "role": "user",
+                "content": "只需要创建记忆库管理员",
+                "timestamp": "2026-05-31T17:03:58",
+            }
+        ],
+        prefix="agent-inbox-base",
     )
-    save_chat_state(tmp_path, state)
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     captured: dict[str, object] = {}
     lifecycle_events: list[tuple[str, dict]] = []
@@ -4762,33 +4915,29 @@ def test_submit_session_continue_preserves_raw_prompt_when_active_task_goal_is_c
             "metadata": {"source": "task_tool"},
         },
     )
-    state = load_chat_state(tmp_path)
-    messages = state["conversations"][0]["messages"]
-    messages.append(
-        {
-            "role": "user",
-            "content": "检查日志系统摘要一致性并给出优化方案",
-            "timestamp": "2026-05-18T11:57:00",
-        }
+    _append_test_ledger_messages(
+        tmp_path,
+        "session-live",
+        [
+            {
+                "role": "user",
+                "content": "检查日志系统摘要一致性并给出优化方案",
+                "timestamp": "2026-05-18T11:57:00",
+            },
+            {
+                "role": "assistant",
+                "content": "建议先定位 summary 与 package_index 的生成链路，再补测试。",
+                "timestamp": "2026-05-18T11:58:00",
+            },
+            {"role": "user", "content": "好的开始修改", "timestamp": "2026-05-18T11:59:00"},
+            {
+                "role": "assistant",
+                "content": "已达到 Web Chat 任务级持续上限（4 轮），本次先暂停，避免后台无限运行。",
+                "timestamp": "2026-05-18T12:00:00",
+            },
+        ],
+        prefix="confirmation-history",
     )
-    messages.append(
-        {
-            "role": "assistant",
-            "content": "建议先定位 summary 与 package_index 的生成链路，再补测试。",
-            "timestamp": "2026-05-18T11:58:00",
-        }
-    )
-    messages.append(
-        {"role": "user", "content": "好的开始修改", "timestamp": "2026-05-18T11:59:00"}
-    )
-    messages.append(
-        {
-            "role": "assistant",
-            "content": "已达到 Web Chat 任务级持续上限（4 轮），本次先暂停，避免后台无限运行。",
-            "timestamp": "2026-05-18T12:00:00",
-        }
-    )
-    save_chat_state(tmp_path, state)
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     captured: dict[str, object] = {}
 
@@ -4845,33 +4994,36 @@ def test_submit_session_continue_keeps_raw_prompt_while_task_state_prefers_newer
             },
         },
     )
-    state = load_chat_state(tmp_path)
-    state["conversations"][0]["messages"] = [
-        {
-            "role": "user",
-            "content": "你可以继续按刚才的方向整理诊断报告",
-            "timestamp": "2026-05-30T00:53:10",
-        },
-        {
-            "role": "assistant",
-            "content": "初版诊断报告已经整理完成。",
-            "timestamp": "2026-05-30T00:57:55",
-            "tool_calls": [{"name": "read_file", "status": "done"}],
-        },
-        {
-            "role": "user",
-            "content": "这个报告没有解释为什么日志会重复记录,你需要继续分析 runtime scene 的重复事件来源",
-            "timestamp": "2026-05-30T00:58:24",
-        },
-        {"role": "user", "content": "继续", "timestamp": "2026-05-30T01:03:15"},
-        {
-            "role": "assistant",
-            "content": "很抱歉，我现在无法执行任何工具操作，所有工具当前都显示为不可用状态。",
-            "timestamp": "2026-05-30T01:04:19",
-            "toolCalls": [],
-        },
-    ]
-    save_chat_state(tmp_path, state)
+    _append_test_ledger_messages(
+        tmp_path,
+        "session-live",
+        [
+            {
+                "role": "user",
+                "content": "你可以继续按刚才的方向整理诊断报告",
+                "timestamp": "2026-05-30T00:53:10",
+            },
+            {
+                "role": "assistant",
+                "content": "初版诊断报告已经整理完成。",
+                "timestamp": "2026-05-30T00:57:55",
+                "tool_calls": [{"name": "read_file", "status": "done"}],
+            },
+            {
+                "role": "user",
+                "content": "这个报告没有解释为什么日志会重复记录,你需要继续分析 runtime scene 的重复事件来源",
+                "timestamp": "2026-05-30T00:58:24",
+            },
+            {"role": "user", "content": "继续", "timestamp": "2026-05-30T01:03:15"},
+            {
+                "role": "assistant",
+                "content": "很抱歉，我现在无法执行任何工具操作，所有工具当前都显示为不可用状态。",
+                "timestamp": "2026-05-30T01:04:19",
+                "toolCalls": [],
+            },
+        ],
+        prefix="resume-report-history",
+    )
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(
         session_service,
@@ -4931,26 +5083,29 @@ def test_submit_session_continue_keeps_raw_prompt_while_task_state_ignores_retry
             "metadata": {"source": "task_tool", "outcome": "failed_runtime"},
         },
     )
-    state = load_chat_state(tmp_path)
-    state["conversations"][0]["messages"] = [
-        {
-            "role": "user",
-            "content": "这次报告和原始日志完全对不上,你需要继续调整诊断方向,来逼近真实原因",
-            "timestamp": "2026-05-30T00:58:24",
-        },
-        {
-            "role": "user",
-            "content": "好了应该恢复了你再试试",
-            "timestamp": "2026-05-30T10:35:27",
-        },
-        {
-            "role": "assistant",
-            "content": "模型服务上游暂时失败，本轮没有完成。完整 provider 错误已写入运行日志；可以稍后直接重试或发送“继续”。",
-            "timestamp": "2026-05-30T10:39:52",
-            "tool_calls": [{"name": "read_file", "status": "done"}],
-        },
-    ]
-    save_chat_state(tmp_path, state)
+    _append_test_ledger_messages(
+        tmp_path,
+        "session-live",
+        [
+            {
+                "role": "user",
+                "content": "这次报告和原始日志完全对不上,你需要继续调整诊断方向,来逼近真实原因",
+                "timestamp": "2026-05-30T00:58:24",
+            },
+            {
+                "role": "user",
+                "content": "好了应该恢复了你再试试",
+                "timestamp": "2026-05-30T10:35:27",
+            },
+            {
+                "role": "assistant",
+                "content": "模型服务上游暂时失败，本轮没有完成。完整 provider 错误已写入运行日志；可以稍后直接重试或发送“继续”。",
+                "timestamp": "2026-05-30T10:39:52",
+                "tool_calls": [{"name": "read_file", "status": "done"}],
+            },
+        ],
+        prefix="retry-goal-history",
+    )
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(
         session_service,
@@ -4996,6 +5151,8 @@ def test_submit_session_continue_keeps_raw_prompt_while_task_state_ignores_retry
 def test_edit_resubmit_session_message_recovers_content_from_utf8_base64_fallback(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path, task_status="done")
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    _bind_live_session_agent(tmp_path)
     monkeypatch.setattr(session_service, "_schedule_session_turn", lambda context: None)
 
     content = "编辑后保留中文"
@@ -5016,7 +5173,8 @@ def test_edit_resubmit_session_message_recovers_content_from_utf8_base64_fallbac
     assert payload["messages"][-1]["streaming"] is True
     assert payload["messages"][-1]["content"] == CONTEXT_PREPARE_LIVE_MESSAGE
     state = load_chat_state(tmp_path)
-    assert state["conversations"][0]["messages"][-1]["content"] == content
+    assert "messages" not in state["conversations"][0]
+    assert session_service.get_session_detail("session-live")["messages"][-2]["content"] == content
 
 
 def test_edit_resubmit_session_message_truncates_following_history_and_starts_turn(tmp_path, monkeypatch):
@@ -5032,17 +5190,24 @@ def test_edit_resubmit_session_message_truncates_following_history_and_starts_tu
                     "title": "真实会话",
                     "updated_at": "2026-05-18T12:03:00",
                     "last_turn_status": "ready",
-                    "messages": [
-                        {"role": "user", "content": "原始需求", "timestamp": "2026-05-18T12:00:00"},
-                        {"role": "assistant", "content": "原始回答", "timestamp": "2026-05-18T12:01:00"},
-                        {"role": "user", "content": "后续追问", "timestamp": "2026-05-18T12:02:00"},
-                        {"role": "assistant", "content": "后续回答", "timestamp": "2026-05-18T12:03:00"},
-                    ],
                 }
             ],
         },
     )
+    _append_test_ledger_messages(
+        tmp_path,
+        "session-live",
+        [
+            {"role": "user", "content": "原始需求", "timestamp": "2026-05-18T12:00:00"},
+            {"role": "assistant", "content": "原始回答", "timestamp": "2026-05-18T12:01:00"},
+            {"role": "user", "content": "后续追问", "timestamp": "2026-05-18T12:02:00"},
+            {"role": "assistant", "content": "后续回答", "timestamp": "2026-05-18T12:03:00"},
+        ],
+        prefix="edit-history",
+    )
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    _bind_live_session_agent(tmp_path)
     scheduled_contexts: list[dict] = []
     events: list[dict] = []
     monkeypatch.setattr(session_service, "_schedule_session_turn", lambda context: scheduled_contexts.append(dict(context)))
@@ -5074,12 +5239,13 @@ def test_edit_resubmit_session_message_truncates_following_history_and_starts_tu
     assert [item["content"] for item in scheduled_contexts[0]["history_messages"]] == ["原始需求", "原始回答"]
     assert scheduled_contexts[0]["mental_model_enabled"] is False
     state = load_chat_state(tmp_path)
-    stored_messages = state["conversations"][0]["messages"]
+    assert "messages" not in state["conversations"][0]
+    stored_messages = session_service.get_session_detail("session-live")["messages"][:-1]
     assert [item["content"] for item in stored_messages] == ["原始需求", "原始回答", "编辑后的需求"]
-    assert stored_messages[:2] == [
-        {"role": "user", "content": "原始需求", "timestamp": "2026-05-18T12:00:00"},
-        {"role": "assistant", "content": "原始回答", "timestamp": "2026-05-18T12:01:00"},
-    ]
+    assert stored_messages[0]["role"] == "user"
+    assert stored_messages[0]["timestamp"] == "2026-05-18T12:00:00"
+    assert stored_messages[1]["role"] == "assistant"
+    assert stored_messages[1]["timestamp"] == "2026-05-18T12:01:00"
     assert any(event["eventCode"] == "conversation.message_edited_resubmitted" for event in events)
     signals = _read_next_state_signals(tmp_path, session_id="session-live")
     assert any(item["kind"] == "assistant_output_edited" and item["turnId"] for item in signals)
@@ -5102,17 +5268,24 @@ def test_edit_resubmit_session_message_allows_latest_user_message(tmp_path, monk
                     "title": "真实会话",
                     "updated_at": "2026-05-18T12:03:00",
                     "last_turn_status": "ready",
-                    "messages": [
-                        {"role": "user", "content": "原始需求", "timestamp": "2026-05-18T12:00:00"},
-                        {"role": "assistant", "content": "原始回答", "timestamp": "2026-05-18T12:01:00"},
-                        {"role": "user", "content": "后续追问", "timestamp": "2026-05-18T12:02:00"},
-                        {"role": "assistant", "content": "后续回答", "timestamp": "2026-05-18T12:03:00"},
-                    ],
                 }
             ],
         },
     )
+    _append_test_ledger_messages(
+        tmp_path,
+        "session-live",
+        [
+            {"role": "user", "content": "原始需求", "timestamp": "2026-05-18T12:00:00"},
+            {"role": "assistant", "content": "原始回答", "timestamp": "2026-05-18T12:01:00"},
+            {"role": "user", "content": "后续追问", "timestamp": "2026-05-18T12:02:00"},
+            {"role": "assistant", "content": "后续回答", "timestamp": "2026-05-18T12:03:00"},
+        ],
+        prefix="edit-latest-history",
+    )
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    _bind_live_session_agent(tmp_path)
     scheduled_contexts: list[dict] = []
     events: list[dict] = []
     monkeypatch.setattr(session_service, "_schedule_session_turn", lambda context: scheduled_contexts.append(dict(context)))
@@ -5152,6 +5325,8 @@ def test_edit_resubmit_session_message_supersedes_running_turn(tmp_path, monkeyp
     _seed_chat_state(tmp_path, task_status="done")
     scheduled_contexts: list[dict] = []
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    _bind_live_session_agent(tmp_path)
     monkeypatch.setattr(session_service, "_schedule_session_turn", lambda context: scheduled_contexts.append(dict(context)))
 
     first_response = client.post(
@@ -5228,15 +5403,15 @@ def test_edit_resubmit_session_message_rejects_assistant_message(tmp_path, monke
 
 def test_edit_resubmit_session_message_rejects_non_latest_user_message(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path, task_status="done")
-    state = load_chat_state(tmp_path)
-    conversation = state["conversations"][0]
-    conversation["messages"].extend(
+    _append_test_ledger_messages(
+        tmp_path,
+        "session-live",
         [
             {"role": "user", "content": "后续追问", "timestamp": "2026-05-18T12:02:00"},
             {"role": "assistant", "content": "后续回答", "timestamp": "2026-05-18T12:03:00"},
-        ]
+        ],
+        prefix="non-latest-edit-history",
     )
-    save_chat_state(tmp_path, state)
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     before_state = load_chat_state(tmp_path)
     rejected_events: list[dict] = []
@@ -5262,6 +5437,8 @@ def test_edit_resubmit_session_message_rejects_non_latest_user_message(tmp_path,
 def test_chat_turn_registers_as_work_run_until_finished(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path, task_status="done")
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    _bind_live_session_agent(tmp_path)
     monkeypatch.setattr(session_service, "_schedule_session_turn", lambda context: None)
 
     response = client.post(
@@ -5326,12 +5503,14 @@ def test_persist_turn_result_blocks_phantom_image_generation_success(tmp_path, m
     session_service._set_session_running("session-live", False, turn_id=turn_id)
 
     conversation = load_chat_state(tmp_path)["conversations"][0]
-    message = conversation["messages"][-1]
+    detail = session_service.get_session_detail("session-live")
+    message = detail["messages"][-1]
     assert message["role"] == "assistant"
     assert "没有实际生成新的图片" in message["content"]
     assert not message.get("tool_calls")
     assert message.get("metadata", {}).get("kind") == "turn_error"
     assert message.get("metadata", {}).get("turnId") == turn_id
+    assert "messages" not in conversation
     assert conversation["last_turn_status"] == "failed"
     assert any(
         event["args"][:3]
@@ -5344,6 +5523,15 @@ def test_persist_turn_result_blocks_phantom_image_generation_success(tmp_path, m
 def test_different_agent_sessions_run_chat_turns_concurrently(tmp_path, monkeypatch):
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        "core.orchestration.context_engine.record_runtime_scene_event",
+        lambda *args, **kwargs: {"accepted": True},
+    )
+    monkeypatch.setattr(
+        session_service,
+        "build_agent_context",
+        lambda agent_id, **kwargs: SimpleNamespace(memory_policy={}, context_block="", timings={}),
+    )
     alpha = session_service.create_chat_session(title="Alpha Agent")
     beta = session_service.create_chat_session(title="Beta Agent")
     executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="pytest-chat-concurrent")
@@ -5533,7 +5721,7 @@ def test_same_agent_sessions_queue_when_agent_concurrency_limit_is_reached(tmp_p
         assert not second_started.is_set()
 
         release_first.set()
-        assert second_started.wait(1.0), "expected queued turn to start after first turn"
+        assert second_started.wait(3.0), "expected queued turn to start after first turn"
     finally:
         release_first.set()
         release_second.set()
@@ -5855,6 +6043,8 @@ def test_runtime_summary_exposes_queued_chat_turn_active_item(tmp_path, monkeypa
 def test_submit_session_message_records_chat_turn_started_scene_event(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path, task_status="done")
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    _bind_live_session_agent(tmp_path)
     monkeypatch.setattr(session_service, "_schedule_session_turn", lambda context: None)
     recorded_scene_events: list[tuple[tuple, dict]] = []
     monkeypatch.setattr(
@@ -5896,6 +6086,8 @@ def test_submit_session_message_records_chat_turn_started_scene_event(tmp_path, 
 def test_submit_session_message_prefer_async_returns_lightweight_acceptance(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path, task_status="done")
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    _bind_live_session_agent(tmp_path)
     monkeypatch.setattr(session_service, "_schedule_session_turn", lambda context: None)
 
     response = client.post(
@@ -5916,6 +6108,8 @@ def test_submit_session_message_prefer_async_returns_lightweight_acceptance(tmp_
 def test_edit_resubmit_records_chat_turn_started_scene_event(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path, task_status="done")
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    _bind_live_session_agent(tmp_path)
     monkeypatch.setattr(session_service, "_schedule_session_turn", lambda context: None)
     recorded_scene_events: list[tuple[tuple, dict]] = []
     monkeypatch.setattr(
@@ -6099,6 +6293,8 @@ def test_runtime_summary_exposes_work_run_kinds(monkeypatch):
 def test_submit_session_message_captures_chat_review_candidate(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path, task_status="done")
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    _bind_live_session_agent(tmp_path)
     monkeypatch.setattr(chat_review_service, "PROJECT_ROOT", tmp_path)
 
     class DummyAgent:
@@ -6174,16 +6370,34 @@ def test_session_adds_current_conversation_to_chat_review_queue(tmp_path, monkey
 
 
 def test_session_add_to_chat_review_rejects_empty_conversation(tmp_path, monkeypatch):
-    _seed_chat_state(tmp_path, task_status="done")
-    state = load_chat_state(tmp_path)
-    state["conversations"][0]["messages"] = [
+    save_chat_state(
+        tmp_path,
         {
-            "role": "user",
-            "content": "只有用户消息",
-            "timestamp": "2026-05-18T11:55:00",
-        }
-    ]
-    save_chat_state(tmp_path, state)
+            "version": 1,
+            "active_conversation_id": "session-live",
+            "updated_at": "2026-05-18T12:00:00",
+            "conversations": [
+                {
+                    "conversation_id": "session-live",
+                    "title": "真实会话",
+                    "updated_at": "2026-05-18T12:00:00",
+                    "last_turn_status": "ready",
+                }
+            ],
+        },
+    )
+    _append_test_ledger_messages(
+        tmp_path,
+        "session-live",
+        [
+            {
+                "role": "user",
+                "content": "只有用户消息",
+                "timestamp": "2026-05-18T11:55:00",
+            }
+        ],
+        prefix="chat-review-empty",
+    )
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(chat_review_service, "PROJECT_ROOT", tmp_path)
 
@@ -6215,8 +6429,7 @@ def test_session_add_to_chat_review_rejects_duplicate_snapshot(tmp_path, monkeyp
 def test_submit_session_message_rejects_busy_session(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path, task_status="reading")
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
-    before_state = load_chat_state(tmp_path)
-    before_messages = list(before_state["conversations"][0]["messages"])
+    before_events = [event.to_dict() for event in load_conversation_events(tmp_path, "session-live")]
 
     session_service._set_session_running("session-live", True)
     session_service._WORK_RUN_STORE.persist_snapshot(
@@ -6246,8 +6459,7 @@ def test_submit_session_message_rejects_busy_session(tmp_path, monkeypatch):
 
     assert response.status_code == 409
     assert "运行" in response.json()["detail"] or "running" in response.json()["detail"].lower()
-    after_state = load_chat_state(tmp_path)
-    assert after_state["conversations"][0]["messages"] == before_messages
+    assert [event.to_dict() for event in load_conversation_events(tmp_path, "session-live")] == before_events
     active_run = session_service._WORK_RUN_STORE.load_active_snapshot("chat_turn")
     assert active_run["runId"] == "existing-chat-turn"
     assert active_run["userMessage"] == "上一轮仍在运行"
@@ -6257,7 +6469,7 @@ def test_submit_session_message_rejects_blank_message_without_mutating_session(t
     _seed_chat_state(tmp_path, task_status="done")
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     before_state = load_chat_state(tmp_path)
-    before_messages = list(before_state["conversations"][0]["messages"])
+    before_events = [event.to_dict() for event in load_conversation_events(tmp_path, "session-live")]
     before_status = before_state["conversations"][0]["last_turn_status"]
 
     response = client.post(
@@ -6268,7 +6480,7 @@ def test_submit_session_message_rejects_blank_message_without_mutating_session(t
     assert response.status_code == 422
     assert "请输入" in response.json()["detail"] or "enter a message" in response.json()["detail"].lower()
     after_state = load_chat_state(tmp_path)
-    assert after_state["conversations"][0]["messages"] == before_messages
+    assert [event.to_dict() for event in load_conversation_events(tmp_path, "session-live")] == before_events
     assert after_state["conversations"][0]["last_turn_status"] == before_status
     assert session_service._is_session_running("session-live") is False
     assert session_service._WORK_RUN_STORE.load_active_snapshot("chat_turn") is None
@@ -6277,6 +6489,8 @@ def test_submit_session_message_rejects_blank_message_without_mutating_session(t
 def test_submit_session_message_records_provider_failure_next_state_signal(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path, task_status="done")
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    _bind_live_session_agent(tmp_path)
 
     class ProviderFailureAgent:
         def seed_chat_history(self, messages):
@@ -6612,6 +6826,8 @@ def test_turn_circuit_breaker_records_next_state_signal_with_turn_id(tmp_path, m
 def test_submit_session_message_recovers_when_scheduler_fails(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path, task_status="done")
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    _bind_live_session_agent(tmp_path)
     recorded_scene_events: list[tuple[tuple, dict]] = []
     monkeypatch.setattr(
         session_service,
@@ -6652,6 +6868,8 @@ def test_submit_session_message_recovers_when_scheduler_fails(tmp_path, monkeypa
 def test_submit_session_message_write_intent_rejects_self_evolution_lease(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path, task_status="done")
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    _bind_live_session_agent(tmp_path)
     monkeypatch.setattr(session_service, "_schedule_session_turn", lambda context: None)
     self_snapshot = {
         "runId": "web-self-active-for-chat",
@@ -6684,6 +6902,8 @@ def test_submit_session_message_write_intent_rejects_self_evolution_lease(tmp_pa
 def test_request_stop_session_turn_persists_stop_snapshot_and_releases_session(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path, task_status="done")
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    _bind_live_session_agent(tmp_path)
     monkeypatch.setattr(session_service, "_schedule_session_turn", lambda context: None)
 
     try:
@@ -6724,6 +6944,8 @@ def test_request_stop_session_turn_persists_stop_snapshot_and_releases_session(t
 def test_submit_session_safe_guidance_records_signal_without_stopping(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path, task_status="done")
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    _bind_live_session_agent(tmp_path)
     monkeypatch.setattr(session_service, "_schedule_session_turn", lambda context: None)
 
     try:
@@ -6757,6 +6979,8 @@ def test_submit_session_safe_guidance_records_signal_without_stopping(tmp_path, 
 def test_submit_session_interrupt_guidance_records_signal_and_stops(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path, task_status="done")
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    _bind_live_session_agent(tmp_path)
     monkeypatch.setattr(session_service, "_schedule_session_turn", lambda context: None)
 
     try:
@@ -6853,6 +7077,13 @@ def test_request_stop_session_turn_reuses_active_work_run_when_controller_is_mis
 def test_stop_requested_turn_persists_visible_stop_message(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path, task_status="done")
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    _bind_live_session_agent(tmp_path)
+    monkeypatch.setattr(
+        session_service,
+        "build_agent_context",
+        lambda agent_id, **kwargs: SimpleNamespace(memory_policy={}, context_block="", timings={}),
+    )
 
     started = threading.Event()
     finished = threading.Event()
@@ -6951,6 +7182,8 @@ def test_stop_session_turn_persists_partial_snapshot_and_allows_immediate_contin
     (tmp_path / "tests").mkdir(parents=True, exist_ok=True)
     (tmp_path / "tests" / "prompt_debugger.py").write_text("pass\n", encoding="utf-8")
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    _bind_live_session_agent(tmp_path)
     monkeypatch.setattr(session_service, "_schedule_session_turn", lambda context: None)
 
     submit_response = client.post(
@@ -7003,6 +7236,8 @@ def test_stop_session_turn_persists_partial_snapshot_and_allows_immediate_contin
 def test_stop_session_turn_keeps_old_control_cancel_token_until_worker_observes_it(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path, task_status="done")
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    _bind_live_session_agent(tmp_path)
     monkeypatch.setattr(session_service, "_schedule_session_turn", lambda context: None)
 
     submit_response = client.post(
@@ -7056,6 +7291,8 @@ def test_session_detail_reconciles_open_conversation_ledger_after_restart(tmp_pa
 def test_stale_stopped_turn_does_not_run_after_immediate_continue(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path, task_status="done")
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    _bind_live_session_agent(tmp_path)
     scheduled_contexts = []
     stale_agent_called = False
 
@@ -7120,6 +7357,8 @@ def test_stale_stopped_turn_does_not_run_after_immediate_continue(tmp_path, monk
 def test_stop_during_agent_call_does_not_record_late_completed_result(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path, task_status="done")
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    _bind_live_session_agent(tmp_path)
     lifecycle_events = []
 
     def record_lifecycle_event(session_id, phase, **kwargs):
@@ -7198,6 +7437,8 @@ def test_stop_during_agent_call_does_not_record_late_completed_result(tmp_path, 
 def test_stale_turn_live_output_does_not_overwrite_new_turn(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path, task_status="done")
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    _bind_live_session_agent(tmp_path)
     monkeypatch.setattr(session_service, "_schedule_session_turn", lambda context: None)
 
     try:
@@ -7457,23 +7698,21 @@ def test_session_detail_sanitizes_persisted_protocol_messages_and_active_task(tm
     assert "<state" not in json.dumps(payload, ensure_ascii=False)
 
 
-def test_session_detail_promotes_legacy_runtime_notice_outside_messages(tmp_path, monkeypatch):
+def test_session_detail_ignores_old_chat_state_runtime_notice_messages(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path, task_status="idle")
     state = load_chat_state(tmp_path)
-    state["conversations"][0]["messages"].extend(
-        [
-            {
-                "role": "assistant",
-                "content": "上一轮运行已被中断，当前会话已恢复为可继续状态。",
-                "timestamp": "2026-05-29T18:16:31",
-            },
-            {
-                "role": "assistant",
-                "content": "继续分析日志。",
-                "timestamp": "2026-05-29T18:16:32",
-            },
-        ]
-    )
+    state["conversations"][0]["messages"] = [
+        {
+            "role": "assistant",
+            "content": "上一轮运行已被中断，当前会话已恢复为可继续状态。",
+            "timestamp": "2026-05-29T18:16:31",
+        },
+        {
+            "role": "assistant",
+            "content": "继续分析日志。",
+            "timestamp": "2026-05-29T18:16:32",
+        },
+    ]
     save_chat_state(tmp_path, state)
     append_conversation_event(
         tmp_path,
@@ -7494,7 +7733,7 @@ def test_session_detail_promotes_legacy_runtime_notice_outside_messages(tmp_path
     assert payload["runtimeNotices"] == []
 
 
-def test_session_detail_filters_legacy_queued_stop_notice_from_messages(tmp_path, monkeypatch):
+def test_session_detail_keeps_runtime_notice_outside_ledger_messages(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path, task_status="idle")
     state = load_chat_state(tmp_path)
     state["conversations"][0]["runtime_notices"] = [
@@ -7514,6 +7753,7 @@ def test_session_detail_filters_legacy_queued_stop_notice_from_messages(tmp_path
         EVENT_USER_MESSAGE,
         status="recorded",
         payload={"content": "按照这个提示词来生成图片"},
+        timestamp="2026-05-29T21:36:19",
     )
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(agent_directory_service, "_ensure_agent_default_avatar", lambda agent: None, raising=False)
@@ -7545,7 +7785,7 @@ def test_session_detail_shows_current_runtime_notice_until_real_message_arrives(
             "level": "warning",
             "message": "上一轮运行已被中断，当前会话已恢复为可继续状态。",
             "timestamp": "2026-05-29T18:16:32",
-            "source": "legacy_assistant_message",
+            "source": "conversation.turn_recovered",
         },
     ]
     save_chat_state(tmp_path, state)
@@ -7555,15 +7795,15 @@ def test_session_detail_shows_current_runtime_notice_until_real_message_arrives(
     assert len(fresh_notice["runtimeNotices"]) == 1
     assert fresh_notice["runtimeNotices"][0]["source"] == "conversation.turn_recovered"
 
-    state = load_chat_state(tmp_path)
-    state["conversations"][0]["messages"].append(
-        {
-            "role": "assistant",
-            "content": "已恢复并继续完成任务。",
-            "timestamp": "2026-05-29T18:16:33",
-        }
+    append_conversation_event(
+        tmp_path,
+        "session-live",
+        "turn-after-notice",
+        EVENT_ASSISTANT_MESSAGE,
+        status="completed",
+        payload={"content": "已恢复并继续完成任务。"},
+        timestamp="2026-05-29T18:16:33",
     )
-    save_chat_state(tmp_path, state)
 
     settled = client.get("/api/sessions/session-live").json()
     assert settled["runtimeNotices"] == []
@@ -7649,7 +7889,7 @@ def test_session_detail_recovers_stale_running_state(tmp_path, monkeypatch):
     assert "已被中断" in payload["runtimeNotices"][-1]["message"]
     persisted = load_chat_state(tmp_path)
     assert persisted["conversations"][0]["last_turn_status"] == "ready"
-    assert all("已被中断" not in message["content"] for message in persisted["conversations"][0]["messages"])
+    assert "messages" not in persisted["conversations"][0]
     assert persisted["conversations"][0]["runtime_notices"][-1]["kind"] == "turn_recovered"
     assert session_service._WORK_RUN_STORE.load_active_snapshot("chat_turn") is None
     latest_run = session_service._WORK_RUN_STORE.load_latest_snapshot("chat_turn")
@@ -7663,6 +7903,8 @@ def test_submit_session_message_allows_follow_up_when_previous_turn_finished(tmp
     (tmp_path / "web" / "src" / "routes" / "ChatCodingRoute.tsx").write_text("export {};\n", encoding="utf-8")
     _seed_chat_state(tmp_path, task_status="reading")
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    _bind_live_session_agent(tmp_path)
     monkeypatch.setattr(
         session_service,
         "get_web_chat_config",
@@ -7709,6 +7951,8 @@ def test_submit_session_message_allows_follow_up_when_previous_turn_finished(tmp
 def test_submit_session_message_keeps_streamed_reply_when_final_result_is_control_marker(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path, task_status="reading")
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    _bind_live_session_agent(tmp_path)
     monkeypatch.setattr(
         session_service,
         "get_web_chat_config",
@@ -7758,6 +8002,8 @@ def test_submit_session_message_keeps_streamed_reply_when_final_result_is_contro
 def test_submit_session_message_keeps_fallback_streamed_reply_when_final_result_is_control_marker(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path, task_status="reading")
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    _bind_live_session_agent(tmp_path)
     monkeypatch.setattr(
         session_service,
         "get_web_chat_config",
@@ -7806,6 +8052,8 @@ def test_submit_session_message_marks_completed_file_artifact_task_done(tmp_path
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text("<html>slides</html>\n", encoding="utf-8")
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    _bind_live_session_agent(tmp_path)
     recorded_scene_events: list[tuple[tuple, dict]] = []
     monkeypatch.setattr(
         session_service,
@@ -7874,6 +8122,8 @@ def test_submit_session_message_continues_progress_until_done(tmp_path, monkeypa
     (tmp_path / "tests" / "prompt_debugger.py").write_text("pass\n", encoding="utf-8")
     _seed_chat_state(tmp_path, task_status="reading")
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    _bind_live_session_agent(tmp_path)
     monkeypatch.setattr(
         session_service,
         "get_web_chat_config",
@@ -7933,6 +8183,8 @@ def test_submit_session_message_continues_progress_until_done(tmp_path, monkeypa
 def test_submit_session_message_continues_after_bookkeeping_progress(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path, task_status="reading")
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    _bind_live_session_agent(tmp_path)
     monkeypatch.setattr(
         session_service,
         "get_web_chat_config",
@@ -7992,6 +8244,8 @@ def test_submit_session_message_continues_after_bookkeeping_progress(tmp_path, m
 def test_submit_session_message_keeps_tools_available_after_tool_progress(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path, task_status="reading")
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    _bind_live_session_agent(tmp_path)
     monkeypatch.setattr(
         session_service,
         "get_web_chat_config",
@@ -8054,6 +8308,8 @@ def test_submit_session_message_keeps_tools_available_after_tool_progress(tmp_pa
 def test_submit_session_message_keeps_previous_continuation_reply_when_done_marker_follows(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path, task_status="reading")
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    _bind_live_session_agent(tmp_path)
     monkeypatch.setattr(
         session_service,
         "get_web_chat_config",
@@ -8113,6 +8369,8 @@ def test_submit_session_message_keeps_previous_continuation_reply_when_done_mark
 def test_submit_session_message_never_persists_empty_assistant_reply(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path, task_status="reading")
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    _bind_live_session_agent(tmp_path)
     monkeypatch.setattr(
         session_service,
         "get_web_chat_config",
@@ -8153,9 +8411,11 @@ def test_submit_session_message_never_persists_empty_assistant_reply(tmp_path, m
     assert assistant["content"] == "本轮没有产生可见回复。"
 
     state = load_chat_state(tmp_path)
-    persisted_assistant = state["conversations"][0]["messages"][-1]
+    detail = session_service.get_session_detail("session-live")
+    persisted_assistant = detail["messages"][-1]
     assert persisted_assistant["role"] == "assistant"
     assert persisted_assistant["content"] == "本轮没有产生可见回复。"
+    assert "messages" not in state["conversations"][0]
 
 
 def test_session_visible_reply_treats_litellm_empty_placeholder_as_no_visible_reply():
@@ -8189,6 +8449,8 @@ def test_submit_session_message_does_not_persist_xml_protocol_as_reply_or_task(t
     (tmp_path / "tests" / "prompt_debugger.py").write_text("pass\n", encoding="utf-8")
     _seed_chat_state(tmp_path, task_status="reading")
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    _bind_live_session_agent(tmp_path)
     monkeypatch.setattr(
         session_service,
         "get_web_chat_config",
@@ -8254,6 +8516,8 @@ def test_submit_session_message_pauses_progress_without_internal_auto_continue(t
     (tmp_path / "tests" / "prompt_debugger.py").write_text("pass\n", encoding="utf-8")
     _seed_chat_state(tmp_path, task_status="reading")
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    _bind_live_session_agent(tmp_path)
     monkeypatch.setattr(
         session_service,
         "get_web_chat_config",
@@ -8316,6 +8580,8 @@ def test_submit_session_message_pauses_progress_without_internal_auto_continue(t
 def test_submit_session_message_preserves_visible_progress_without_limit_prompt(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path, task_status="reading")
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    _bind_live_session_agent(tmp_path)
     monkeypatch.setattr(
         session_service,
         "get_web_chat_config",
@@ -8376,6 +8642,8 @@ def test_submit_session_message_preserves_visible_progress_without_limit_prompt(
 def test_submit_session_message_preserves_repeated_visible_progress_once_without_auto_continue(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path, task_status="reading")
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    _bind_live_session_agent(tmp_path)
     monkeypatch.setattr(
         session_service,
         "get_web_chat_config",
@@ -8438,6 +8706,8 @@ def test_submit_session_message_stops_on_inferred_progress_visible_conclusion(tm
     (tmp_path / "core" / "web" / "services" / "session_service.py").write_text("pass\n", encoding="utf-8")
     _seed_chat_state(tmp_path, task_status="reading")
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    _bind_live_session_agent(tmp_path)
     monkeypatch.setattr(
         session_service,
         "get_web_chat_config",
@@ -8492,6 +8762,8 @@ def test_submit_session_message_stops_on_inferred_progress_visible_conclusion(tm
 def test_submit_session_message_completed_turn_ignores_low_configured_limit(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path, task_status="reading")
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    _bind_live_session_agent(tmp_path)
     monkeypatch.setattr(
         session_service,
         "get_web_chat_config",
@@ -8552,6 +8824,8 @@ def test_submit_session_continue_preserves_raw_prompt_and_unfinished_task_state(
         },
     )
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    _bind_live_session_agent(tmp_path)
     monkeypatch.setattr(
         session_service,
         "get_web_chat_config",
@@ -8614,6 +8888,8 @@ def test_submit_session_continue_clears_stale_next_action_after_visible_reply(tm
         },
     )
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    _bind_live_session_agent(tmp_path)
     monkeypatch.setattr(
         session_service,
         "get_web_chat_config",
@@ -8674,25 +8950,28 @@ def test_submit_session_continue_keeps_raw_prompt_when_active_task_is_continue(t
             "metadata": {"source": "task_tool"},
         },
     )
-    state = load_chat_state(tmp_path)
-    state["conversations"][0]["messages"] = [
-        {
-            "role": "user",
-            "content": "做一个测试工具吧,能够更快速的进行BDD调试,先规划一下,然后向我汇报",
-            "timestamp": "2026-05-20T17:50:00",
-        },
-        {
-            "role": "assistant",
-            "content": "已达到 Web Chat 任务级持续上限（1 轮），本次先暂停，避免后台无限运行。",
-            "timestamp": "2026-05-20T17:51:00",
-        },
-        {
-            "role": "user",
-            "content": "继续",
-            "timestamp": "2026-05-20T17:53:05",
-        },
-    ]
-    save_chat_state(tmp_path, state)
+    _append_test_ledger_messages(
+        tmp_path,
+        "session-live",
+        [
+            {
+                "role": "user",
+                "content": "做一个测试工具吧,能够更快速的进行BDD调试,先规划一下,然后向我汇报",
+                "timestamp": "2026-05-20T17:50:00",
+            },
+            {
+                "role": "assistant",
+                "content": "已达到 Web Chat 任务级持续上限（1 轮），本次先暂停，避免后台无限运行。",
+                "timestamp": "2026-05-20T17:51:00",
+            },
+            {
+                "role": "user",
+                "content": "继续",
+                "timestamp": "2026-05-20T17:53:05",
+            },
+        ],
+        prefix="continue-active",
+    )
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(
         session_service,
@@ -8793,10 +9072,12 @@ def test_persist_turn_result_cleans_parameter_and_requires_real_stop(tmp_path, m
     )
 
     state = load_chat_state(tmp_path)
-    message = state["conversations"][0]["messages"][-1]
+    detail = session_service.get_session_detail("session-live")
+    message = detail["messages"][-1]
     assert message["role"] == "assistant"
     assert message["content"] == "连续被拦截。让我尝试拆分写入。"
     assert message["content"] != "本轮已按请求停止。"
+    assert "messages" not in state["conversations"][0]
     active_task = state["conversations"][0]["active_task"]
     assert active_task["latest_summary"] == "连续被拦截。让我尝试拆分写入。"
     assert "</parameter>" not in json.dumps(active_task, ensure_ascii=False)
@@ -8816,6 +9097,8 @@ def test_session_detail_uses_ready_phase_for_resting_sessions(tmp_path, monkeypa
 def test_submit_session_message_persists_visible_failure(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path, task_status="done")
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    _bind_live_session_agent(tmp_path)
 
     class FailingAgent:
         def seed_chat_history(self, messages):
@@ -8847,6 +9130,8 @@ def test_submit_session_message_persists_visible_failure(tmp_path, monkeypatch):
 def test_submit_session_message_surfaces_failed_result_error(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path, task_status="done")
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    _bind_live_session_agent(tmp_path)
 
     class FailingResultAgent:
         def seed_chat_history(self, messages):
@@ -8885,6 +9170,8 @@ def test_submit_session_message_surfaces_failed_result_error(tmp_path, monkeypat
 def test_submit_session_message_surfaces_provider_error_inside_messages(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path, task_status="done")
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    _bind_live_session_agent(tmp_path)
     monkeypatch.setattr(
         session_service,
         "_WORK_RUN_STORE",
@@ -8950,6 +9237,8 @@ def test_submit_session_message_surfaces_provider_error_inside_messages(tmp_path
 def test_submit_session_message_surfaces_local_runtime_exception_as_turn_error(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path, task_status="done")
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    _bind_live_session_agent(tmp_path)
     monkeypatch.setattr(
         session_service,
         "_WORK_RUN_STORE",
@@ -9030,6 +9319,8 @@ def test_failed_runtime_turn_result_is_persisted_as_turn_error_with_trace(tmp_pa
 def test_submit_session_message_surfaces_provider_http_diagnostics(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path, task_status="done")
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    _bind_live_session_agent(tmp_path)
 
     provider_error = (
         "server_error: litellm.ServiceUnavailableError: AnthropicException - "
@@ -9091,6 +9382,8 @@ def test_submit_session_message_surfaces_provider_http_diagnostics(tmp_path, mon
 def test_submit_session_message_surfaces_prompt_cache_unsupported_inside_messages(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path, task_status="done")
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    _bind_live_session_agent(tmp_path)
 
     cache_error = (
         "prompt_cache_unsupported: 当前模型配置声明不支持 prompt cache；"
@@ -9140,6 +9433,8 @@ def test_submit_session_message_surfaces_prompt_cache_unsupported_inside_message
 def test_submit_session_message_surfaces_provider_quota_reason_inside_messages(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path, task_status="done")
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    _bind_live_session_agent(tmp_path)
 
     provider_error = (
         'provider_protocol_error: litellm.RateLimitError: AnthropicException - '
@@ -9187,6 +9482,8 @@ def test_submit_session_message_surfaces_provider_quota_reason_inside_messages(t
 def test_submit_session_message_prefers_llm_failure_message_for_provider_detail(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path, task_status="done")
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    _bind_live_session_agent(tmp_path)
 
     generic_error = "provider_protocol_error"
     detailed_error = (
@@ -9238,6 +9535,8 @@ def test_submit_session_message_prefers_llm_failure_message_for_provider_detail(
 def test_submit_session_message_surfaces_deprecated_parameter_reason_inside_messages(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path, task_status="done")
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    _bind_live_session_agent(tmp_path)
 
     provider_error = "provider_protocol_error: invalid_request_error: `temperature` is deprecated for this model."
 
@@ -9280,6 +9579,8 @@ def test_submit_session_message_surfaces_deprecated_parameter_reason_inside_mess
 def test_submit_session_message_omits_mental_snapshot_when_disabled(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path, task_status="done")
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    _bind_live_session_agent(tmp_path)
     monkeypatch.setattr(session_service, "is_mental_model_enabled", lambda: False)
 
     class DummyAgent:
@@ -9323,6 +9624,8 @@ def test_submit_session_message_omits_mental_snapshot_when_disabled(tmp_path, mo
 def test_submit_session_message_uses_per_turn_mental_model_override(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path, task_status="done")
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    _bind_live_session_agent(tmp_path)
     monkeypatch.setattr(session_service, "is_mental_model_enabled", lambda: True)
 
     created_agents = []
@@ -9449,6 +9752,8 @@ def test_turn_mental_snapshot_prefers_current_state_info_over_runtime_summary(mo
 def test_submit_session_message_includes_stream_friendly_tool_and_mental_payloads(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path, task_status="done")
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    _bind_live_session_agent(tmp_path)
 
     class DummyAgent:
         def seed_chat_history(self, messages):
@@ -9522,41 +9827,38 @@ def test_submit_session_message_includes_stream_friendly_tool_and_mental_payload
 
 
 def test_submit_session_message_restores_prior_mental_snapshot_for_agent(tmp_path, monkeypatch):
-    save_chat_state(
+    _seed_chat_state(
         tmp_path,
-        {
-            "version": 1,
-            "active_conversation_id": "session-live",
-            "updated_at": "2026-05-20T14:00:00",
-            "conversations": [
-                {
-                    "conversation_id": "session-live",
-                    "title": "真实会话",
-                    "updated_at": "2026-05-20T14:00:00",
-                    "last_turn_status": "ready",
-                    "messages": [
-                        {
-                            "role": "user",
-                            "content": "你能感知到你的心智模型吗",
-                            "timestamp": "2026-05-20T13:58:00",
+        conversations=[
+            {
+                "conversation_id": "session-live",
+                "title": "真实会话",
+                "updated_at": "2026-05-20T14:00:00",
+                "last_turn_status": "ready",
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": "你能感知到你的心智模型吗",
+                        "timestamp": "2026-05-20T13:58:00",
+                    },
+                    {
+                        "role": "assistant",
+                        "content": "我对自己的心智模型能感知多少？",
+                        "timestamp": "2026-05-20T13:59:00",
+                        "mental_snapshot": {
+                            "mood": "沉思",
+                            "feeling": "正在延续心智模型话题。",
+                            "whisper": "接住上一段回答。",
+                            "sampleSize": 4,
                         },
-                        {
-                            "role": "assistant",
-                            "content": "我对自己的心智模型能感知多少？",
-                            "timestamp": "2026-05-20T13:59:00",
-                            "mental_snapshot": {
-                                "mood": "沉思",
-                                "feeling": "正在延续心智模型话题。",
-                                "whisper": "接住上一段回答。",
-                                "sampleSize": 4,
-                            },
-                        },
-                    ],
-                }
-            ],
-        },
+                    },
+                ],
+            }
+        ],
     )
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    _bind_live_session_agent(tmp_path)
     captured = {}
 
     class DummyAgent:

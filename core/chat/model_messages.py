@@ -137,6 +137,8 @@ def _assistant_history_messages(
     content = _content_value(message.get("content"))
     tool_entries = _tool_entries(message)
     tool_summaries: list[str] = []
+    tool_call_ids: list[str] = []
+    tool_names: list[str] = []
     for tool_index, entry in enumerate(tool_entries, start=1):
         normalized = _normalize_tool_call(entry, source_index=source_index, tool_index=tool_index)
         if not normalized:
@@ -146,6 +148,8 @@ def _assistant_history_messages(
         summary = _history_tool_summary(normalized["name"], entry)
         if summary:
             tool_summaries.append(summary)
+            tool_call_ids.append(str(normalized.get("id") or "").strip())
+            tool_names.append(str(normalized.get("name") or "").strip())
     if not tool_summaries:
         if not _visible_text(content) and not _visible_text(message.get("reasoning_content")):
             return []
@@ -159,6 +163,10 @@ def _assistant_history_messages(
     metadata = dict(assistant.get("metadata") or {})
     metadata["kind"] = "historical_tool_context"
     metadata["toolSummaryCount"] = len(tool_summaries)
+    if len(tool_call_ids) == 1 and tool_call_ids[0]:
+        metadata["toolCallId"] = tool_call_ids[0]
+    if len(tool_names) == 1 and tool_names[0]:
+        metadata["toolName"] = tool_names[0]
     assistant["metadata"] = metadata
     return [assistant]
 

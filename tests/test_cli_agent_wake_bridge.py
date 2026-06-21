@@ -38,17 +38,22 @@ def test_cli_agent_task_result_event_persists_once_and_enters_history(monkeypatc
     second = session_service.append_cli_agent_task_result_event("session-1", task_result=result)
 
     state = load_chat_state(tmp_path)
-    messages = state["conversations"][0]["messages"]
-    result_messages = [item for item in messages if (item.get("metadata") or {}).get("kind") == "cli_agent_task_result"]
+    journal_events = load_turn_events(tmp_path, "session-1")
+    visible = model_visible_messages_from_events(journal_events)
+    result_messages = [
+        item
+        for item in visible
+        if (item.get("metadata") or {}).get("kind") == EVENT_CLI_TASK_RESULT
+    ]
     assert first is not None
     assert second is not None
+    assert "messages" not in state["conversations"][0]
     assert len(result_messages) == 1
-    assert "CLI Agent 任务结果回流：MiMo Code" in result_messages[0]["content"]
-    assert "状态：超时" in result_messages[0]["content"]
-    assert "最后停在读取配置" in result_messages[0]["content"]
-    journal_events = load_turn_events(tmp_path, "session-1")
+    tool_call = result_messages[0]["toolCalls"][0]
+    assert "CLI Agent 任务结果回流：MiMo Code" in tool_call["result"]
+    assert "状态：超时" in tool_call["result"]
+    assert "最后停在读取配置" in tool_call["result"]
     assert [event.event_type for event in journal_events] == [EVENT_CLI_TASK_RESULT]
-    visible = model_visible_messages_from_events(journal_events)
     assert visible[0]["toolCalls"][0]["name"] == "cli_agent_run_tool"
     assert visible[0]["toolCalls"][0]["status"] == "timeout"
 
