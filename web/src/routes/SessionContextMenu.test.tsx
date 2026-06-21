@@ -28,6 +28,14 @@ function session(): SessionSummary {
   };
 }
 
+function agentSession(): SessionSummary {
+  return {
+    ...session(),
+    agentId: "agent-1",
+    agentDisplayName: "顾明澈",
+  };
+}
+
 describe("SessionContextMenu", () => {
   it("keeps the action menu compact and accessible", () => {
     const markup = renderToStaticMarkup(
@@ -51,6 +59,28 @@ describe("SessionContextMenu", () => {
     expect(markup).toContain("加入评审");
     expect(markup).toContain("重命名");
     expect(markup).toContain("移除会话记录");
+    expect(markup).not.toContain("打开 Agent 配置");
+  });
+
+  it("shows the Agent configuration action for Agent-backed sessions", () => {
+    const markup = renderToStaticMarkup(
+      <SessionContextMenu
+        addToReviewDisabled={false}
+        addToReviewPending={false}
+        deleteDisabled={false}
+        lang="zh"
+        position={{ x: 24, y: 32 }}
+        session={agentSession()}
+        t={t}
+        onAddToReview={() => undefined}
+        onDelete={() => undefined}
+        onOpenAgentConfig={() => undefined}
+        onRename={() => undefined}
+      />,
+    );
+
+    expect(markup).toContain("打开 Agent 配置");
+    expect(markup).toContain("title=\"打开当前 Agent 配置\"");
   });
 
   it("shows pending and busy states without changing the menu structure", () => {
@@ -78,7 +108,7 @@ describe("SessionContextMenu", () => {
   it("clamps the menu inside the visible viewport", () => {
     expect(sessionContextMenuStyle({ x: 900, y: 700 }, { width: 960, height: 720 })).toEqual({
       left: 772,
-      top: 588,
+      top: 556,
     });
     expect(sessionContextMenuStyle({ x: 24, y: 32 }, undefined)).toEqual({
       left: 24,

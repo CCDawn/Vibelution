@@ -1,4 +1,4 @@
-import { BookPlus, Pencil, Trash2 } from "lucide-react";
+import { BookPlus, Pencil, Settings2, Trash2 } from "lucide-react";
 import type { CSSProperties, PointerEvent } from "react";
 
 import type { SessionSummary } from "../api/types";
@@ -6,7 +6,7 @@ import type { TranslationKey } from "../i18n/dictionary";
 import styles from "./ChatCodingRoute.module.css";
 
 const MENU_WIDTH = 188;
-const MENU_HEIGHT = 132;
+const MENU_HEIGHT = 164;
 const MENU_MARGIN = 12;
 
 export type SessionContextMenuPosition = {
@@ -40,6 +40,7 @@ type SessionContextMenuProps = {
   t: (key: TranslationKey) => string;
   onAddToReview: (session: SessionSummary) => void;
   onDelete: (session: SessionSummary) => void;
+  onOpenAgentConfig?: (session: SessionSummary) => void;
   onRename: (session: SessionSummary) => void;
 };
 
@@ -53,6 +54,7 @@ export function SessionContextMenu({
   t,
   onAddToReview,
   onDelete,
+  onOpenAgentConfig,
   onRename,
 }: SessionContextMenuProps) {
   const viewport = typeof window === "undefined"
@@ -98,6 +100,18 @@ export function SessionContextMenu({
         <Pencil size={14} />
         <span>{t("renameSession")}</span>
       </button>
+      {session.agentId && onOpenAgentConfig ? (
+        <button
+          type="button"
+          role="menuitem"
+          className={styles.sessionContextMenuItem}
+          onClick={() => onOpenAgentConfig(session)}
+          title={lang === "zh" ? "打开当前 Agent 配置" : "Open current Agent configuration"}
+        >
+          <Settings2 size={14} />
+          <span>{lang === "zh" ? "打开 Agent 配置" : "Open Agent config"}</span>
+        </button>
+      ) : null}
       <button
         type="button"
         role="menuitem"
