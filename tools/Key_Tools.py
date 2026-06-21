@@ -74,6 +74,7 @@ from tools.team_knowledge_tools import (
     knowledge_steward_workbench_tool as _knowledge_steward_workbench_impl,
     unified_memory_search_tool as _unified_memory_search_impl,
 )
+from tools.skill_library_tools import skill_library_search_tool as _skill_library_search_impl
 from tools.token_manager import compress_context_tool as _compress_context_impl
 from tools.python_intelligence_tools import (
     code_symbol_tool as _code_symbol_impl,
@@ -1531,6 +1532,44 @@ def create_key_tools() -> List[BaseTool]:
         )
 
     @tool
+    def skill_library_search_tool(
+        query: str = "",
+        query_mode: str = "auto",
+        source: str = "all_visible",
+        scope: str = "all_visible",
+        team_id: str = "",
+        tags: str = "",
+        limit: int = 8,
+    ) -> str:
+        """
+        【技能库搜索】只读检索外部记忆库中的 skills 索引。
+
+        Agent 只需要指定 query_mode 和 query；平台只读取外部 workspace/skills 索引，不回退 .codex/skills 或插件缓存。
+        搜索结果会明确标注 managed / system_index：managed 是 Vibelution 托管技能，system_index 只是系统技能只读索引。
+
+        Args:
+            query: 查询内容；metadata 模式可为空
+            query_mode: auto / keyword / metadata / hybrid / regex / rg / grep / semantic / rag
+            source: all_visible / managed / system_index
+            scope: all_visible / shared / team / agent / system
+            team_id: 查询团队私有技能时的 teamId
+            tags: 逗号分隔标签过滤
+            limit: 最多返回结果数，范围 1-25
+
+        Returns:
+            JSON 格式的外部技能库搜索结果
+        """
+        return _skill_library_search_impl(
+            query=query,
+            query_mode=query_mode,
+            source=source,
+            scope=scope,
+            team_id=team_id,
+            tags=tags,
+            limit=limit,
+        )
+
+    @tool
     def knowledge_proposal_tool(
         knowledge_base_id: str,
         source_type: str,
@@ -1897,6 +1936,7 @@ def create_key_tools() -> List[BaseTool]:
         computer_use_session_tool,
         research_knowledge_query_tool,
         unified_memory_search_tool,
+        skill_library_search_tool,
         knowledge_proposal_tool,
         knowledge_ingestion_tool,
         knowledge_governance_tasks_tool,
