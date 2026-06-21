@@ -1651,9 +1651,11 @@
 }
 
 .sourceCollectionStageActionRow {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   min-width: 0;
   align-items: center;
+  gap: 6px;
   justify-content: stretch;
 }
 

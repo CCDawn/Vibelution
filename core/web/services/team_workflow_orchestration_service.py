@@ -8200,14 +8200,40 @@ def _source_candidate_payload_from_data_record(run: dict[str, Any], record: dict
     record_metadata = record.get("metadata") if isinstance(record.get("metadata"), dict) else {}
     quality_signals = record.get("qualitySignals") if isinstance(record.get("qualitySignals"), dict) else {}
     collection_trace = record.get("collectionTrace") if isinstance(record.get("collectionTrace"), dict) else {}
+    source_trace = record_metadata.get("sourceCollectionTrace") if isinstance(record_metadata.get("sourceCollectionTrace"), dict) else collection_trace
+    source_category = _source_collection_source_category(
+        source_kind=source_kind,
+        source_ref=source_ref,
+        raw_location=raw_location,
+        source_url=source_url,
+        source_path=source_path,
+    )
+    doi = _source_collection_extract_doi(source_ref, source_url, raw_location, record_metadata.get("doi"))
+    imported_from = _data_record_ref(run, record)
     metadata.update(
         {
-            "importedFromDataRecord": _data_record_ref(run, record),
+            "importedFromDataRecord": imported_from,
             "dataProcessingQualitySignals": _normalize_metadata(quality_signals),
             "dataProcessingCollectionTrace": _normalize_metadata(collection_trace),
             "dataProcessingRecordMetadata": _normalize_metadata(record_metadata),
+            "sourceCollectionTrace": _normalize_metadata(source_trace),
+            "sourceRunId": imported_from["runId"],
+            "sourceRecordId": imported_from["recordId"],
+            "sourceCategory": source_category,
+            "sourceRef": source_ref or raw_location,
+            "sourceUrl": source_url,
+            "sourcePath": source_path,
+            "assignmentId": _trim_text(source_trace.get("assignmentId"), max_length=128),
+            "agentRole": _trim_text(source_trace.get("agentRole"), max_length=80),
+            "queryId": _trim_text(source_trace.get("queryId"), max_length=160),
+            "query": _trim_text(source_trace.get("query"), max_length=1000),
+            "searchProvider": _trim_text(source_trace.get("searchProvider") or record_metadata.get("searchProvider"), max_length=80),
+            "searchUrl": _trim_text(source_trace.get("searchUrl") or record_metadata.get("searchUrl"), max_length=1000),
         }
     )
+    if doi:
+        metadata["doi"] = doi
+        metadata["importedFromDataRecord"]["doi"] = doi
     source_identity_key = _source_collection_record_identity_key(record)
     if source_identity_key:
         metadata["sourceIdentityKey"] = source_identity_key
@@ -8263,6 +8289,42 @@ def _source_kind_from_data_record(source_type: str, source_ref: str, raw_locatio
     if raw_location or source_ref:
         return "file"
     return "unknown"
+
+
+def _source_collection_extract_doi(*values: Any) -> str:
+    for value in values:
+        text = str(value or "").strip()
+        if not text:
+            continue
+        text = re.sub(r"^https?://(?:dx\.)?doi\.org/", "", text, flags=re.IGNORECASE)
+        text = re.sub(r"^doi:\s*", "", text, flags=re.IGNORECASE)
+        match = re.search(r"10\.\d{4,9}/[^\s\"'<>]+", text, flags=re.IGNORECASE)
+        if match:
+            return match.group(0).rstrip(").,;")
+    return ""
+
+
+def _source_collection_source_category(
+    *,
+    source_kind: str,
+    source_ref: str,
+    raw_location: str,
+    source_url: str,
+    source_path: str,
+) -> str:
+    normalized = str(source_kind or "").strip().lower()
+    refs = " ".join([source_ref, raw_location, source_url, source_path]).lower()
+    if "dataset" in normalized:
+        return "dataset"
+    if ".pdf" in refs or "application/pdf" in refs:
+        return "pdf"
+    if source_path and not _looks_like_url(source_path):
+        return "local_file"
+    if normalized in {"file", "manual", "note"}:
+        return "local_file"
+    if _source_collection_extract_doi(source_ref, source_url, raw_location) or _looks_like_url(source_ref) or _looks_like_url(source_url):
+        return "paper_web"
+    return "missing"
 
 
 def _looks_like_url(value: str) -> bool:
