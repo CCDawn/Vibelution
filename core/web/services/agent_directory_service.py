@@ -116,6 +116,7 @@ LEGACY_AGENT_MODEL_ID_ALIASES = {
     "gpt_5_5_gpt_5_5": "relay_openai_gpt_5_5",
     "mimo_v2_5_pro": "xiaomi_mimo_v2_5_pro_token_plan",
 }
+LEGACY_AGENT_PRIMARY_MODEL_IDS = {"model-primary"}
 KNOWLEDGE_STEWARD_AGENT_ID = "agent-knowledge-steward"
 KNOWLEDGE_STEWARD_TOOL_POLICY_ID = "tool-knowledge-steward"
 KNOWLEDGE_STEWARD_MEMORY_POLICY_ID = "memory-knowledge-steward"
@@ -3125,6 +3126,10 @@ def _resolve_legacy_agent_model_id(model_id: str, *, model_library_ids: set[str]
     normalized = str(model_id or "").strip()
     if not normalized or normalized in model_library_ids:
         return normalized
+    if normalized in LEGACY_AGENT_PRIMARY_MODEL_IDS:
+        primary_model_id = _profile_id_to_model_id("primary")
+        if primary_model_id and primary_model_id in model_library_ids:
+            return primary_model_id
     alias_target = LEGACY_AGENT_MODEL_ID_ALIASES.get(normalized, "")
     if alias_target and alias_target in model_library_ids:
         return alias_target
@@ -4143,7 +4148,7 @@ def _default_agent_avatar_filename(agent: dict[str, Any]) -> str:
 
 
 def _available_agent_avatar_filenames() -> list[str]:
-    avatar_dir = (_project_root() / AGENT_AVATAR_RELATIVE_DIR).resolve()
+    avatar_dir = _workspace_path("avatars").resolve()
     if not avatar_dir.exists() or not avatar_dir.is_dir():
         return []
     existing = {
