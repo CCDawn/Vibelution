@@ -16599,8 +16599,6 @@ def _set_session_llm_status_live_output(
     attempt = _coerce_nonnegative_int(data.get("attempt"))
     max_attempts = _coerce_nonnegative_int(data.get("max_attempts") or data.get("maxAttempts"))
     category = str(data.get("category") or data.get("reason") or "").strip()
-    fallback_profile_id = str(data.get("fallback_profile_id") or data.get("fallbackProfileId") or "").strip()
-    content_chars = _coerce_nonnegative_int(data.get("content_chars") or data.get("contentChars"))
 
     if status_key == "retrying":
         attempt_line = (
@@ -16615,28 +16613,17 @@ def _set_session_llm_status_live_output(
             en=f"Retrying the model connection...\n{attempt_line}; reason: {reason_line}. This turn is still running.",
         )
         stage = "model_retry"
-    elif status_key == "fallback_invoke_started":
-        reason_line = category or text_for(language, zh="连续流式失败", en="repeated stream failure")
-        profile_line = f"\nFallback: {fallback_profile_id}" if fallback_profile_id else ""
-        content = text_for(
-            language,
-            zh=f"流式输出不稳定，正在切换到非流式回答...\n原因：{reason_line}。{profile_line}",
-            en=f"Streaming is unstable; switching to a non-streaming response...\nReason: {reason_line}.{profile_line}",
-        )
-        stage = "model_fallback"
-    elif status_key == "fallback_invoke_succeeded":
-        content = text_for(
-            language,
-            zh=f"非流式回答已返回，正在写入会话...\n正文约 {content_chars} 个字符。",
-            en=f"The non-streaming response returned and is being written to the session...\nAbout {content_chars} characters.",
-        )
-        stage = "model_fallback"
     elif status_key == "failed":
         reason_line = category or text_for(language, zh="模型调用失败", en="model call failed")
+        hint_line = (
+            text_for(language, zh="\n请检查网络连接或代理端口是否可用。", en="\nCheck the network connection or proxy port.")
+            if category == "network_error"
+            else ""
+        )
         content = text_for(
             language,
-            zh=f"模型请求失败。\n原因：{reason_line}。",
-            en=f"The model request failed.\nReason: {reason_line}.",
+            zh=f"模型请求失败。\n原因：{reason_line}。{hint_line}",
+            en=f"The model request failed.\nReason: {reason_line}.{hint_line}",
         )
         stage = "model_failed"
     else:
@@ -16675,8 +16662,6 @@ def _set_session_llm_status_live_output(
             "attempt": attempt,
             "maxAttempts": max_attempts,
             "category": trim_lines(category, max_lines=1),
-            "fallbackProfileId": fallback_profile_id,
-            "contentChars": content_chars,
             "messageLength": len(content),
         },
     )
