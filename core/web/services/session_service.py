@@ -1971,6 +1971,9 @@ class SessionTurnCapture:
     _next_feedback_sequence: int = 1
     _latest_thought_sequence: int = 0
     _latest_thought_text: str = ""
+    _last_recorded_thought_sequence: int = 0
+    _last_recorded_thought_text: str = ""
+    _pending_related_thought_sequence: int = 0
 
     def note_thought(self, text: str) -> None:
         cleaned = _sanitize_thought_delta_text(text)
@@ -1978,17 +1981,23 @@ class SessionTurnCapture:
             previous_total = self.thought
             previous_segment = self._latest_thought_text if self._latest_thought_sequence else ""
             if previous_total and not previous_segment and cleaned == previous_total:
+                self._mark_repeated_thought_after_boundary()
                 return
             next_total, next_text = self._resolve_thought_text_update(cleaned, previous_total, previous_segment)
             if not next_text:
+                return
+            if not previous_segment and self._is_repeated_recorded_thought(next_text):
+                self._mark_repeated_thought_after_boundary()
                 return
             if previous_segment and next_text == previous_segment:
                 self.thought = next_total
                 return
             self.thought = next_total
             self._latest_thought_text = next_text
+            self._pending_related_thought_sequence = 0
             if self._latest_thought_sequence:
                 self._update_latest_thought_event(next_text)
+                self._remember_recorded_thought(self._latest_thought_sequence, next_text)
             else:
                 self._latest_thought_sequence = self._append_feedback_event(
                     {
@@ -1998,6 +2007,35 @@ class SessionTurnCapture:
                         "resultPreview": next_text,
                     }
                 )
+                self._remember_recorded_thought(self._latest_thought_sequence, next_text)
+
+    def _mark_repeated_thought_after_boundary(self) -> None:
+        if self._last_recorded_thought_sequence:
+            self._pending_related_thought_sequence = self._last_recorded_thought_sequence
+
+    def _remember_recorded_thought(self, sequence: int, text: str) -> None:
+        if sequence > 0 and text:
+            self._last_recorded_thought_sequence = sequence
+            self._last_recorded_thought_text = text
+
+    def _is_repeated_recorded_thought(self, text: str) -> bool:
+        previous = self._normalize_thought_for_dedupe(self._last_recorded_thought_text)
+        current = self._normalize_thought_for_dedupe(text)
+        if not previous or not current:
+            return False
+        if current == previous:
+            return True
+        if len(current) < 48 or len(previous) < 48:
+            return False
+        if current in previous or previous in current:
+            shorter = min(len(current), len(previous))
+            longer = max(len(current), len(previous))
+            return shorter >= int(longer * 0.85)
+        return False
+
+    @staticmethod
+    def _normalize_thought_for_dedupe(text: str) -> str:
+        return re.sub(r"\s+", " ", str(text or "")).strip()
 
     def _resolve_thought_text_update(self, cleaned: str, previous_total: str, previous_segment: str) -> tuple[str, str]:
         if not previous_total:
@@ -2145,7 +2183,7 @@ class SessionTurnCapture:
             },
             entry,
         )
-        related_thought_sequence = self._latest_thought_sequence or 0
+        related_thought_sequence = self._latest_thought_sequence or self._pending_related_thought_sequence or 0
         for index in range(len(self.tool_calls) - 1, -1, -1):
             existing = self.tool_calls[index]
             if existing.get("name") == tool_name and existing.get("status") == "running":
@@ -2153,6 +2191,7 @@ class SessionTurnCapture:
                 self._update_running_tool_feedback_event(entry, related_thought_sequence=related_thought_sequence)
                 self._latest_thought_sequence = 0
                 self._latest_thought_text = ""
+                self._pending_related_thought_sequence = 0
                 return
         self.tool_calls.append(entry)
         if len(self.tool_calls) > 30:
@@ -2160,6 +2199,7 @@ class SessionTurnCapture:
         self._append_tool_feedback_event(entry, related_thought_sequence=related_thought_sequence)
         self._latest_thought_sequence = 0
         self._latest_thought_text = ""
+        self._pending_related_thought_sequence = 0
 
     def _append_feedback_event(self, event: dict[str, Any]) -> int:
         sequence = self._next_feedback_sequence
