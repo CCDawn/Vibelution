@@ -8,7 +8,7 @@ from core.chat.conversation_ledger import (
     EVENT_USER_MESSAGE,
     append_conversation_event,
 )
-from core.ui.chat_state import save_chat_state
+from core.ui.chat_state import load_chat_state, save_chat_state
 from core.web.app import create_app
 from core.web.control import CONTROL_TOKEN_HEADER, get_control_token
 from core.web.services import (
@@ -98,6 +98,112 @@ def test_session_detail_exists(tmp_path, monkeypatch):
     assert payload["contextUsage"]["toolCallCount"] == 2
     assert payload["contextUsage"]["used"] > 0
     assert payload["contextUsage"]["limit"] > 0
+
+
+def test_stale_missing_agent_session_recovers_when_direct_agent_returns(tmp_path, monkeypatch):
+    _seed_chat_state(
+        tmp_path,
+        conversations=[
+            {
+                "conversation_id": "session-live",
+                "title": "周书遥",
+                "agent_id": "",
+                "agentId": "",
+                "agent_missing_id": "agent-live",
+                "agentMissingId": "agent-live",
+                "agentMissing": True,
+                "agentStatusCode": "missing_agent",
+                "updated_at": "2026-06-21T14:08:02",
+                "messages": [{"role": "user", "content": "会话还在吗", "timestamp": "2026-06-21T14:08:00"}],
+            }
+        ],
+    )
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    agent_directory_service.save_state(
+        {
+            "agents": [
+                {
+                    "agentId": "agent-live",
+                    "agentCode": "A014",
+                    "displayName": "周书遥",
+                    "status": "active",
+                    "directSessionId": "session-live",
+                    "primaryMode": "chat",
+                    "roleKey": "chat-default",
+                    "promptTemplateId": "prompt-chat-default",
+                    "workspacePath": "workspace/agents/agent-live",
+                }
+            ]
+        }
+    )
+
+    listed_ids = {item["id"] for item in session_service.list_sessions()}
+    initial_state = session_service.get_session_stream_initial_state("session-live")
+    response = client.get("/api/sessions/session-live")
+
+    assert "session-live" in listed_ids
+    assert initial_state is not None
+    assert initial_state["summary"]["agentId"] == "agent-live"
+    assert initial_state["summary"]["agentMissing"] is False
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["agentId"] == "agent-live"
+    assert payload["agentDisplayName"] == "周书遥"
+    assert payload["agentMissing"] is False
+    assert payload["agentMissingId"] == ""
+    assert payload["agentStatusCode"] == ""
+
+    state = load_chat_state(tmp_path)
+    raw = next(item for item in state["conversations"] if item["conversation_id"] == "session-live")
+    assert raw["agent_id"] == "agent-live"
+    assert raw["agentId"] == "agent-live"
+    assert raw["agentMissing"] is False
+    assert raw["agentMissingId"] == ""
+    assert raw["agentStatusCode"] == ""
+
+
+def test_deleted_agent_session_tombstone_is_not_recovered_by_restored_direct_agent(tmp_path, monkeypatch):
+    _seed_chat_state(
+        tmp_path,
+        conversations=[
+            {
+                "conversation_id": "session-live",
+                "title": "已删除历史",
+                "agent_id": "",
+                "agentId": "",
+                "agent_missing_id": "agent-live",
+                "agentMissingId": "agent-live",
+                "agentMissing": True,
+                "agentStatusCode": "deleted_agent",
+                "updated_at": "2026-06-21T14:08:02",
+                "messages": [{"role": "user", "content": "历史保留", "timestamp": "2026-06-21T14:08:00"}],
+            }
+        ],
+    )
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    agent_directory_service.save_state(
+        {
+            "agents": [
+                {
+                    "agentId": "agent-live",
+                    "displayName": "周书遥",
+                    "status": "active",
+                    "directSessionId": "session-live",
+                }
+            ]
+        }
+    )
+
+    response = client.get("/api/sessions/session-live")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["agentId"] == ""
+    assert payload["agentMissing"] is True
+    assert payload["agentMissingId"] == "agent-live"
+    assert payload["agentStatusCode"] == "deleted_agent"
 
 
 def test_empty_seed_session_detail_does_not_materialize_agent(tmp_path, monkeypatch):

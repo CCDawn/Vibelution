@@ -1432,6 +1432,18 @@ def _ensure_conversation_agent_metadata(
             changed = True
         return changed
     existing_agent = _agent_from_lookup(agent_by_id, existing_agent_id) if existing_agent_id else None
+    if existing_agent is None:
+        recovered_agent = _recover_active_direct_session_agent(
+            conversation_id,
+            agent_by_id=agent_by_id,
+            preferred_agent_id=(
+                existing_agent_id
+                or str(conversation.get("agent_missing_id") or conversation.get("agentMissingId") or "").strip()
+            ),
+        )
+        if recovered_agent is not None:
+            existing_agent = recovered_agent
+            existing_agent_id = str(recovered_agent.get("agentId") or "").strip()
     default_primary_mode = agent_directory_service.DEFAULT_AGENT_PRIMARY_MODE
     primary_mode = str((existing_agent or {}).get("primaryMode") or default_primary_mode).strip() or default_primary_mode
     role_key = str((existing_agent or {}).get("roleKey") or "").strip()
@@ -1477,11 +1489,27 @@ def _ensure_conversation_agent_metadata(
         return changed
     if existing_agent and str(existing_agent.get("directSessionId") or "").strip() == conversation_id:
         changed = False
+        recovered_missing_agent = bool(
+            conversation.get("agentMissing")
+            or conversation.get("agentStatusCode")
+            or conversation.get("agent_missing_id")
+            or conversation.get("agentMissingId")
+        )
         if conversation.get("agent_id") != existing_agent_id:
             conversation["agent_id"] = existing_agent_id
             changed = True
         if conversation.get("agentId") != existing_agent_id:
             conversation["agentId"] = existing_agent_id
+            changed = True
+        for key in ("agent_missing_id", "agentMissingId"):
+            if conversation.get(key):
+                conversation[key] = ""
+                changed = True
+        if conversation.get("agentMissing"):
+            conversation["agentMissing"] = False
+            changed = True
+        if conversation.get("agentStatusCode"):
+            conversation["agentStatusCode"] = ""
             changed = True
         changed = _repair_conversation_agent_legacy_model_fields(
             conversation,
@@ -1495,6 +1523,8 @@ def _ensure_conversation_agent_metadata(
         if conversation.get("agentPrimaryDirectSessionId"):
             conversation["agentPrimaryDirectSessionId"] = ""
             changed = True
+        if recovered_missing_agent and changed:
+            _record_session_agent_binding_recovered_event(conversation_id, agent_id=existing_agent_id)
         return changed
     if existing_agent:
         changed = False
@@ -1676,6 +1706,33 @@ def _agent_from_lookup(
         agent = agent_by_id.get(normalized)
         return agent if isinstance(agent, dict) else None
     return get_agent(normalized)
+
+
+def _recover_active_direct_session_agent(
+    session_id: str,
+    *,
+    agent_by_id: dict[str, dict[str, Any]] | None,
+    preferred_agent_id: str = "",
+) -> dict[str, Any] | None:
+    normalized_session_id = str(session_id or "").strip()
+    if not normalized_session_id or not isinstance(agent_by_id, dict):
+        return None
+    normalized_preferred_agent_id = str(preferred_agent_id or "").strip()
+    preferred_agent = _agent_from_lookup(agent_by_id, normalized_preferred_agent_id) if normalized_preferred_agent_id else None
+    if (
+        isinstance(preferred_agent, dict)
+        and str(preferred_agent.get("status") or "active").strip().lower() != "archived"
+        and str(preferred_agent.get("directSessionId") or "").strip() == normalized_session_id
+    ):
+        return preferred_agent
+    for agent in agent_by_id.values():
+        if not isinstance(agent, dict):
+            continue
+        if str(agent.get("status") or "active").strip().lower() == "archived":
+            continue
+        if str(agent.get("directSessionId") or "").strip() == normalized_session_id:
+            return agent
+    return None
 
 
 def _archived_agent_for_direct_session(session_id: str) -> dict[str, Any] | None:
@@ -2510,11 +2567,12 @@ def get_session_stream_initial_state(session_id: str) -> dict | None:
         active_turn_id = str(_SESSION_ACTIVE_TURN_IDS.get(normalized_session_id) or "").strip()
         session_running = normalized_session_id in _RUNNING_SESSION_IDS
     payload = load_chat_state(PROJECT_ROOT)
+    agent_by_id = _agent_lookup_for_conversations()
     target = _load_conversation_detail_target(
         normalized_session_id,
         payload=payload,
         repair=False,
-        agent_by_id={},
+        agent_by_id=agent_by_id,
         lightweight=True,
     )
     if target is None:
@@ -6273,6 +6331,20 @@ def _normalize_conversation(
     agent_status_code = str(raw.get("agentStatusCode") or "").strip()
     agent_direct_session_mismatch = bool(raw.get("agentDirectSessionMismatch"))
     agent_primary_direct_session_id = str(raw.get("agentPrimaryDirectSessionId") or "").strip()
+    if agent_status_code != "deleted_agent" and agent is None:
+        recovered_agent = _recover_active_direct_session_agent(
+            conversation_id,
+            agent_by_id=agent_by_id,
+            preferred_agent_id=agent_id or missing_agent_id,
+        )
+        if recovered_agent is not None:
+            agent = recovered_agent
+            agent_id = str(recovered_agent.get("agentId") or "").strip()
+            missing_agent_id = ""
+            agent_missing = False
+            agent_status_code = ""
+            agent_direct_session_mismatch = False
+            agent_primary_direct_session_id = ""
     if agent and str(agent.get("directSessionId") or "").strip() != conversation_id:
         agent_direct_session_mismatch = True
         agent_primary_direct_session_id = str(agent.get("directSessionId") or "").strip()
@@ -7156,7 +7228,7 @@ def _build_session_summary(conversation: dict[str, Any], *, hydrate_agent: bool 
         agent_lookup_checked=agent_lookup_checked,
         persisted_status_code=str(conversation.get("agentStatusCode") or "").strip(),
     )
-    if not agent_status["agentMissing"] and bool(conversation.get("agentMissing")):
+    if not agent_status["agentMissing"] and bool(conversation.get("agentMissing")) and not isinstance(agent, dict):
         agent_status = {
             "agentMissing": True,
             "agentStatusCode": str(conversation.get("agentStatusCode") or "missing_agent").strip() or "missing_agent",
@@ -13551,6 +13623,26 @@ def _record_direct_session_agent_deleted_event(
                 "createdTombstoneConversation": bool(created_tombstone),
                 "reason": str(result.get("reason") or "").strip(),
                 "errorType": str(result.get("errorType") or "").strip(),
+            },
+            lifecycle=True,
+        )
+    except Exception:
+        return
+
+
+def _record_session_agent_binding_recovered_event(session_id: str, *, agent_id: str) -> None:
+    try:
+        record_runtime_scene_event(
+            "conversation",
+            "agent_binding",
+            "conversation.agent_binding.recovered",
+            message="Recovered a direct-session Agent binding from stale missing-agent metadata.",
+            level="info",
+            outcome="recovered",
+            fields={
+                "sessionId": str(session_id or "").strip(),
+                "agentId": str(agent_id or "").strip(),
+                "source": "session_agent_metadata_repair",
             },
             lifecycle=True,
         )

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from core.chat.conversation_ledger import EVENT_USER_MESSAGE, append_conversation_event
 from core.ui.chat_state import load_chat_state, save_chat_state
 from core.web.services import agent_directory_service, session_service
 
@@ -80,6 +81,15 @@ def test_session_list_repairs_duplicate_direct_session_without_losing_history(tm
             ],
         },
     )
+    append_conversation_event(
+        tmp_path,
+        shared_session_id,
+        "turn-preserved-history",
+        EVENT_USER_MESSAGE,
+        status="recorded",
+        payload={"content": "保留历史"},
+        timestamp="2026-06-09T10:53:30",
+    )
     recorded_events: list[tuple[tuple, dict]] = []
     monkeypatch.setattr(
         session_service,
@@ -101,7 +111,10 @@ def test_session_list_repairs_duplicate_direct_session_without_losing_history(tm
     persisted = load_chat_state(tmp_path)
     original = next(item for item in persisted["conversations"] if item["conversation_id"] == shared_session_id)
     assert original["agent_id"] == visible_agent_id
-    assert original["messages"] == [{"role": "user", "content": "保留历史", "timestamp": "2026-06-09T10:53:30"}]
+    original_messages = session_service._session_ledger_visible_messages(shared_session_id)
+    assert [(item["role"], item["content"], item["timestamp"]) for item in original_messages] == [
+        ("user", "保留历史", "2026-06-09T10:53:30")
+    ]
     assert any(item["conversation_id"] == hidden["id"] for item in persisted["conversations"])
     repair_events = [
         event
