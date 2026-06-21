@@ -41,8 +41,10 @@ $managedBackendMarkerArg = "--managed-by-launcher"
 $managedLauncherMarkerArg = "--managed-launcher-control"
 $runtimeManagerInternalLauncherEnv = "VIBELUTION_RUNTIME_MANAGER_INTERNAL_LAUNCHER"
 $launcherShortcutName = "Vibelution.lnk"
+$launcherDesktopShortcutName = "Vibelution Launcher.lnk"
 $launcherIconPath = Join-Path $projectDir "assets\icons\vibelution.ico"
 $launcherDesktopEntryVbsPath = Join-Path $projectDir "scripts\vibelution_desktop_entry.vbs"
+$nativeLauncherEntryBuildScriptPath = Join-Path $projectDir "scripts\windows_launcher_entry\build_vibelution_launcher_entry.ps1"
 
 function Initialize-GlobalConfigFile {
     $configDir = Split-Path -Parent $configPath
@@ -2077,6 +2079,84 @@ function Test-ProcessAlive {
     return $null -ne (Get-Process -Id $ProcessId -ErrorAction SilentlyContinue)
 }
 
+function Get-NativeLauncherEntryExePath {
+    $localAppData = [Environment]::GetFolderPath("LocalApplicationData")
+    if (-not $localAppData) {
+        $localAppData = Join-Path $launcherDir "bin"
+    }
+    return (Join-Path $localAppData "Vibelution\Launcher\VibelutionLauncher.exe")
+}
+
+function Ensure-NativeLauncherEntryExecutable {
+    $outputPath = Get-NativeLauncherEntryExePath
+    if (-not (Test-Path -LiteralPath $nativeLauncherEntryBuildScriptPath)) {
+        return $null
+    }
+
+    $sourcePath = Join-Path $projectDir "scripts\windows_launcher_entry\VibelutionLauncher.cs"
+    $inputs = @($nativeLauncherEntryBuildScriptPath, $sourcePath, $launcherIconPath) | Where-Object { Test-Path -LiteralPath $_ }
+    $needsBuild = -not (Test-Path -LiteralPath $outputPath)
+    if (-not $needsBuild) {
+        $outputItem = Get-Item -LiteralPath $outputPath
+        foreach ($inputPath in $inputs) {
+            if ((Get-Item -LiteralPath $inputPath).LastWriteTimeUtc -gt $outputItem.LastWriteTimeUtc) {
+                $needsBuild = $true
+                break
+            }
+        }
+    }
+
+    if (-not $needsBuild) {
+        return $outputPath
+    }
+
+    try {
+        $buildOutput = & $nativeLauncherEntryBuildScriptPath -ProjectDir $projectDir -OutputPath $outputPath
+        Write-LauncherControlLog `
+            -Event "launcher.native_entry.built" `
+            -Message "Native Launcher entry executable was built for Windows shell pinning." `
+            -Fields @{
+                output_path = $outputPath
+                build_output = ($buildOutput -join "`n")
+            }
+        return $outputPath
+    } catch {
+        Write-LauncherControlLog `
+            -Event "launcher.native_entry.build_failed" `
+            -Message "Native Launcher entry build failed; falling back to script-host shortcut." `
+            -Level "warning" `
+            -Fields @{
+                output_path = $outputPath
+                error = $_.Exception.Message
+            }
+        return $null
+    }
+}
+
+function Set-LauncherShellShortcut {
+    param(
+        [Parameter(Mandatory = $true)]
+        [object]$Shell,
+        [Parameter(Mandatory = $true)]
+        [string]$ShortcutPath,
+        [Parameter(Mandatory = $true)]
+        [string]$TargetPath,
+        [Parameter(Mandatory = $true)]
+        [string]$Arguments,
+        [Parameter(Mandatory = $true)]
+        [string]$IconPath
+    )
+
+    $shortcut = $Shell.CreateShortcut($ShortcutPath)
+    $shortcut.TargetPath = $TargetPath
+    $shortcut.Arguments = $Arguments
+    $shortcut.WorkingDirectory = $projectDir
+    $shortcut.IconLocation = ('{0},0' -f $IconPath)
+    $shortcut.Description = "Vibelution Launcher"
+    $shortcut.WindowStyle = 7
+    $shortcut.Save()
+}
+
 function Repair-LauncherShortcut {
     $startMenuRoot = [Environment]::GetFolderPath("StartMenu")
     if (-not $startMenuRoot -and $env:APPDATA) {
@@ -2108,23 +2188,38 @@ function Repair-LauncherShortcut {
         throw "Vibelution icon file is missing: $launcherIconPath"
     }
 
+    $nativeLauncherEntryPath = Ensure-NativeLauncherEntryExecutable
+    $shortcutTargetPath = $nativeLauncherEntryPath
+    $shortcutArguments = ('--project "{0}" launcher' -f $projectDir)
+    $shortcutMode = "native_exe"
+    if (-not $shortcutTargetPath) {
+        $shortcutTargetPath = Join-Path $env:SystemRoot "System32\wscript.exe"
+        if (-not (Test-Path -LiteralPath $shortcutTargetPath)) {
+            throw "wscript.exe was not found: $shortcutTargetPath"
+        }
+        $shortcutArguments = ('"{0}" launcher' -f $launcherDesktopEntryVbsPath)
+        $shortcutMode = "script_host_fallback"
+    }
+
     $shortcutPath = Join-Path $programsDir $launcherShortcutName
     $shell = New-Object -ComObject WScript.Shell
-    $shortcut = $shell.CreateShortcut($shortcutPath)
-    $shortcut.TargetPath = $wscriptPath
-    $shortcut.Arguments = ('"{0}" launcher' -f $launcherDesktopEntryVbsPath)
-    $shortcut.WorkingDirectory = $projectDir
-    $shortcut.IconLocation = ('{0},0' -f $iconPath)
-    $shortcut.Description = "Vibelution Launcher"
-    $shortcut.WindowStyle = 7
-    $shortcut.Save()
+    Set-LauncherShellShortcut -Shell $shell -ShortcutPath $shortcutPath -TargetPath $shortcutTargetPath -Arguments $shortcutArguments -IconPath $iconPath
+
+    $desktopDir = [Environment]::GetFolderPath("Desktop")
+    $desktopShortcutPath = ""
+    if ($desktopDir) {
+        $desktopShortcutPath = Join-Path $desktopDir $launcherDesktopShortcutName
+        Set-LauncherShellShortcut -Shell $shell -ShortcutPath $desktopShortcutPath -TargetPath $shortcutTargetPath -Arguments $shortcutArguments -IconPath $iconPath
+    }
 
     Write-LauncherControlLog `
         -Event "launcher.shortcut.repaired" `
-        -Message "Launcher Start Menu shortcut was created or refreshed." `
+        -Message "Launcher shell shortcuts were created or refreshed." `
         -Fields @{
             shortcut_path = $shortcutPath
-            target_path = $wscriptPath
+            desktop_shortcut_path = $desktopShortcutPath
+            target_path = $shortcutTargetPath
+            shortcut_mode = $shortcutMode
             desktop_entry = $launcherDesktopEntryVbsPath
             icon_path = $iconPath
         }
