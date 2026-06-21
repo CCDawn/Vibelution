@@ -741,7 +741,7 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).toContain("Answer");
   });
 
-  it("keeps the composer writable while a running turn offers round guidance and stop actions", () => {
+  it("keeps the composer writable while a running turn hides explanatory guidance and keeps stop actions", () => {
     const html = renderConversation([], {
       composerValue: "下一句先写在这里",
       composerDisabled: true,
@@ -753,8 +753,8 @@ describe("ConversationView edit resend affordance", () => {
     });
 
     expect(html).toContain("下一句先写在这里");
-    expect(html).toContain("当前轮仍在运行");
-    expect(html).toContain("打断引导");
+    expect(html).not.toContain("当前轮仍在运行");
+    expect(html).not.toContain("打断引导");
     expect(html).toContain('aria-label="安全引导"');
     expect(html).not.toContain('aria-label="打断引导"');
     expect(html).toContain('aria-label="终止"');
@@ -775,6 +775,8 @@ describe("ConversationView edit resend affordance", () => {
       onInterruptGuidance: () => undefined,
     });
 
+    expect(html).not.toContain("当前轮仍在运行");
+    expect(html).not.toContain("打断引导");
     expect(html).not.toContain('aria-label="安全引导"');
     expect(html).toContain('aria-label="终止"');
     expect(html.match(/composerRoundButton/g)?.length).toBe(1);
