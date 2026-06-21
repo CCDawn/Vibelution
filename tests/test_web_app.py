@@ -429,16 +429,24 @@ def test_session_detail_uses_provider_usage_for_prompt_cache_observation(tmp_pat
     runtime_state_path = tmp_path / "workspace" / "ui_runtime_state.json"
     runtime_state_path.parent.mkdir(parents=True, exist_ok=True)
     runtime_state_path.write_text(json.dumps(runtime_state), encoding="utf-8")
-    state = load_chat_state(tmp_path)
-    state["conversations"][0]["last_llm_usage"] = {
-        "source": "provider_usage",
-        "input_tokens": 800,
-        "output_tokens": 120,
-        "cached_input_tokens": 200,
-        "cache_creation_input_tokens": 160,
-        "recorded_at": "2026-05-18T12:04:00",
-    }
-    save_chat_state(tmp_path, state)
+    append_conversation_event(
+        tmp_path,
+        "session-live",
+        "turn-cache-usage",
+        EVENT_ASSISTANT_MESSAGE,
+        status="completed",
+        payload={
+            "content": "缓存观测来自 ledger。",
+            "llmUsage": {
+                "source": "provider_usage",
+                "input_tokens": 800,
+                "output_tokens": 120,
+                "cached_input_tokens": 200,
+                "cache_creation_input_tokens": 160,
+                "recorded_at": "2026-05-18T12:04:00",
+            },
+        },
+    )
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
 
     response = client.get("/api/sessions/session-live")
@@ -484,18 +492,26 @@ def test_session_detail_marks_prompt_cache_missing_without_provider_usage(tmp_pa
 
 def test_session_detail_exposes_last_provider_llm_usage(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path)
-    state = load_chat_state(tmp_path)
-    state["conversations"][0]["last_llm_usage"] = {
-        "source": "provider_usage",
-        "input_tokens": 2048,
-        "output_tokens": 256,
-        "cached_input_tokens": 512,
-        "cache_creation_input_tokens": 384,
-        "provider": "openai",
-        "model": "gpt-5",
-        "recorded_at": "2026-05-18T12:04:00",
-    }
-    save_chat_state(tmp_path, state)
+    append_conversation_event(
+        tmp_path,
+        "session-live",
+        "turn-provider-usage",
+        EVENT_ASSISTANT_MESSAGE,
+        status="completed",
+        payload={
+            "content": "模型用量来自 ledger。",
+            "llmUsage": {
+                "source": "provider_usage",
+                "input_tokens": 2048,
+                "output_tokens": 256,
+                "cached_input_tokens": 512,
+                "cache_creation_input_tokens": 384,
+                "provider": "openai",
+                "model": "gpt-5",
+                "recorded_at": "2026-05-18T12:04:00",
+            },
+        },
+    )
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
 
     response = client.get("/api/sessions/session-live")

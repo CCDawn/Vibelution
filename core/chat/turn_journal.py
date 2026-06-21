@@ -446,6 +446,8 @@ def _assistant_message_from_payload(
         },
     }
     metadata = payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {}
+    if metadata:
+        message["metadata"].update(metadata)
     usage = payload.get("llmUsage") or payload.get("llm_usage") or metadata.get("llmUsage") or metadata.get("llm_usage")
     if isinstance(usage, dict):
         message["metadata"]["llmUsage"] = dict(usage)
