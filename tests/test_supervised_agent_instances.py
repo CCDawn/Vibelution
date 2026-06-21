@@ -25,15 +25,17 @@ def _use_tmp_project_root(tmp_path, monkeypatch):
     monkeypatch.setattr(agent_mode_binding_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(supervised_agent_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(supervised_agent_service, "_current_config", lambda: _model_config())
+    model_library_ids = {
+        "deepseek_v4_pro",
+        "model-primary",
+        "xiaomi_mimo_v2_5_pro_token_plan",
+        "generated_xiaomi_mimo_v2_5_cdff497b2d9b",
+    }
+    monkeypatch.setattr(agent_directory_service, "_configured_model_library_ids", lambda *args, **kwargs: set(model_library_ids))
     monkeypatch.setattr(
         supervised_agent_service,
         "_configured_model_library_ids",
-        lambda: {
-            "deepseek_v4_pro",
-            "model-primary",
-            "xiaomi_mimo_v2_5_pro_token_plan",
-            "generated_xiaomi_mimo_v2_5_cdff497b2d9b",
-        },
+        lambda *args, **kwargs: set(model_library_ids),
     )
 
 

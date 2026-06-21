@@ -51,6 +51,7 @@ import config.public_config as public_config_module
 
 
 PROJECT_ROOT = Path(__file__).parent.parent
+pytestmark = pytest.mark.serial
 
 
 def _start_test_config_panel(monkeypatch: pytest.MonkeyPatch, config_path: Path):
