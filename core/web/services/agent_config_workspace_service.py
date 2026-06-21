@@ -146,6 +146,7 @@ def _get_agent_config_workspace_cached() -> dict[str, Any]:
                 "ttlSeconds": WORKSPACE_CACHE_TTL_SECONDS,
             }
         )
+        cache_key = _workspace_cache_key()
         _WORKSPACE_CACHE_PAYLOAD = copy.deepcopy(payload)
         _WORKSPACE_CACHE_KEY = cache_key
         _WORKSPACE_CACHE_CREATED_AT = perf_counter()
