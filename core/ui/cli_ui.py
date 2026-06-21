@@ -146,6 +146,9 @@ class UIManager:
         self._last_request_input_tokens = 0
         self._last_input_tokens = 0
         self._last_cached_input_tokens = 0
+        self._last_llm_usage: Dict[str, Any] = {}
+        self._last_context_composition: Dict[str, Any] = {}
+        self._last_cache_composition: Dict[str, Any] = {}
         self._context_compression_state: Dict[str, Any] = {}
         self._completed_evolutions = 0
         self._seen_closed_evolution_txns: set[str] = set()
@@ -209,6 +212,9 @@ class UIManager:
         self._last_request_input_tokens = 0
         self._last_input_tokens = 0
         self._last_cached_input_tokens = 0
+        self._last_llm_usage = {}
+        self._last_context_composition = {}
+        self._last_cache_composition = {}
         self._context_compression_state = {}
         self._current_goal = ""
         self._status = "IDLE"
@@ -231,6 +237,12 @@ class UIManager:
             self._total_cached_input_tokens = max(0, int(data.get("total_cached_input_tokens") or 0))
             compression = data.get("context_compression")
             self._context_compression_state = compression if isinstance(compression, dict) else {}
+            llm_usage = data.get("last_llm_usage")
+            self._last_llm_usage = llm_usage if isinstance(llm_usage, dict) else {}
+            context_composition = data.get("last_context_composition")
+            self._last_context_composition = context_composition if isinstance(context_composition, dict) else {}
+            cache_composition = data.get("last_cache_composition")
+            self._last_cache_composition = cache_composition if isinstance(cache_composition, dict) else {}
             if "completed_evolutions" in data:
                 self._completed_evolutions = max(0, int(data.get("completed_evolutions") or 0))
             else:
@@ -244,6 +256,9 @@ class UIManager:
             self._total_cached_input_tokens = 0
             self._completed_evolutions = 0
             self._seen_closed_evolution_txns = set()
+            self._last_llm_usage = {}
+            self._last_context_composition = {}
+            self._last_cache_composition = {}
 
     def _load_completed_evolutions_from_db(self):
         try:
@@ -281,6 +296,9 @@ class UIManager:
                 "turn_cached_input_tokens": max(0, int(self._turn_cached_input_tokens or 0)),
                 "last_input_tokens": max(0, int(self._last_input_tokens or 0)),
                 "last_cached_input_tokens": max(0, int(self._last_cached_input_tokens or 0)),
+                "last_llm_usage": dict(self._last_llm_usage or {}),
+                "last_context_composition": dict(self._last_context_composition or {}),
+                "last_cache_composition": dict(self._last_cache_composition or {}),
                 "status": str(self._status or "").upper(),
                 "runtime_status": str(self._runtime.last_status or "").upper(),
                 "current_goal": str(self._current_goal or "").strip(),
@@ -776,6 +794,31 @@ class UIManager:
                 self._runtime.missing_usage_rounds += 1
         self._update_status_line()
 
+    def note_cache_diagnostics(
+        self,
+        *,
+        llm_usage: Dict[str, Any] | None = None,
+        context_composition: Dict[str, Any] | None = None,
+        cache_composition: Dict[str, Any] | None = None,
+    ):
+        if isinstance(llm_usage, dict):
+            self._last_llm_usage = dict(llm_usage)
+        if isinstance(context_composition, dict):
+            self._last_context_composition = dict(context_composition)
+        if isinstance(cache_composition, dict):
+            self._last_cache_composition = dict(cache_composition)
+        self._save_runtime_state()
+        self._update_status_line()
+
+    def cache_average_snapshot(self) -> Dict[str, int]:
+        with self._runtime_lock:
+            observed_turns = max(0, int(self._runtime.completed_rounds or 0))
+        return {
+            "inputTokens": max(0, int(self._total_input_tokens or 0)),
+            "cachedInputTokens": max(0, int(self._total_cached_input_tokens or 0)),
+            "observedTurnCount": observed_turns,
+        }
+
     def note_turn_result(self, success: bool, had_progress: bool = True):
         with self._runtime_lock:
             self._runtime.completed_rounds += 1
@@ -797,6 +840,9 @@ class UIManager:
         self._last_request_input_tokens = 0
         self._last_input_tokens = 0
         self._last_cached_input_tokens = 0
+        self._last_llm_usage = {}
+        self._last_context_composition = {}
+        self._last_cache_composition = {}
         self._save_runtime_state()
         self._update_status_line()
 
