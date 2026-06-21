@@ -100,12 +100,15 @@ _WORKSPACE_CACHE_KEY: tuple[Any, ...] | None = None
 _WORKSPACE_CACHE_CREATED_AT = 0.0
 
 
-def get_agent_config_workspace(*, use_cache: bool = False) -> dict[str, Any]:
+def get_agent_config_workspace(*, use_cache: bool = False, include_runtime: bool = True) -> dict[str, Any]:
     """Return a read-only workspace that explains every persistent Agent once."""
 
     if use_cache:
-        return _get_agent_config_workspace_cached()
-    return _build_agent_config_workspace(cache_diagnostics={"enabled": False, "hit": False})
+        return _get_agent_config_workspace_cached(include_runtime=include_runtime)
+    return _build_agent_config_workspace(
+        include_runtime=include_runtime,
+        cache_diagnostics={"enabled": False, "hit": False},
+    )
 
 
 def invalidate_agent_config_workspace_cache() -> None:
@@ -118,14 +121,14 @@ def invalidate_agent_config_workspace_cache() -> None:
         _WORKSPACE_CACHE_CREATED_AT = 0.0
 
 
-def _get_agent_config_workspace_cached() -> dict[str, Any]:
+def _get_agent_config_workspace_cached(*, include_runtime: bool) -> dict[str, Any]:
     global _WORKSPACE_CACHE_PAYLOAD, _WORKSPACE_CACHE_KEY, _WORKSPACE_CACHE_CREATED_AT
 
     wait_started = perf_counter()
     with _WORKSPACE_CACHE_LOCK:
         wait_ms = round((perf_counter() - wait_started) * 1000, 1)
         now = perf_counter()
-        cache_key = _workspace_cache_key()
+        cache_key = _workspace_cache_key(include_runtime=include_runtime)
         if (
             _WORKSPACE_CACHE_PAYLOAD is not None
             and _WORKSPACE_CACHE_KEY == cache_key
@@ -139,6 +142,7 @@ def _get_agent_config_workspace_cached() -> dict[str, Any]:
                 age_ms=round((now - _WORKSPACE_CACHE_CREATED_AT) * 1000, 1),
             )
         payload = _build_agent_config_workspace(
+            include_runtime=include_runtime,
             cache_diagnostics={
                 "enabled": True,
                 "hit": False,
@@ -146,7 +150,7 @@ def _get_agent_config_workspace_cached() -> dict[str, Any]:
                 "ttlSeconds": WORKSPACE_CACHE_TTL_SECONDS,
             }
         )
-        cache_key = _workspace_cache_key()
+        cache_key = _workspace_cache_key(include_runtime=include_runtime)
         _WORKSPACE_CACHE_PAYLOAD = copy.deepcopy(payload)
         _WORKSPACE_CACHE_KEY = cache_key
         _WORKSPACE_CACHE_CREATED_AT = perf_counter()
@@ -159,7 +163,11 @@ def _get_agent_config_workspace_cached() -> dict[str, Any]:
         )
 
 
-def _build_agent_config_workspace(*, cache_diagnostics: dict[str, Any] | None = None) -> dict[str, Any]:
+def _build_agent_config_workspace(
+    *,
+    include_runtime: bool,
+    cache_diagnostics: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     timings: dict[str, float] = {}
     load_modes: dict[str, str] = {}
     total_started = perf_counter()
@@ -220,12 +228,19 @@ def _build_agent_config_workspace(*, cache_diagnostics: dict[str, Any] | None = 
         ),
     )
     issues_by_agent = _issues_by_agent(health["issues"])
-    runtime_histories = _timed_stage(timings, "runtime_histories", lambda: _load_runtime_histories(agents))
-    runtime_status_by_agent = _timed_stage(
-        timings,
-        "runtime_statuses",
-        lambda: _derive_runtime_statuses(agents, histories_by_agent=runtime_histories),
-    )
+    if include_runtime:
+        runtime_histories = _timed_stage(timings, "runtime_histories", lambda: _load_runtime_histories(agents))
+        runtime_status_by_agent = _timed_stage(
+            timings,
+            "runtime_statuses",
+            lambda: _derive_runtime_statuses(agents, histories_by_agent=runtime_histories),
+        )
+        load_modes["runtimeStatuses"] = "batched"
+    else:
+        timings["runtime_histories"] = 0.0
+        timings["runtime_statuses"] = 0.0
+        runtime_status_by_agent = {}
+        load_modes["runtimeStatuses"] = "skipped"
     enriched_agents = [
         {
             **agent,
@@ -252,7 +267,6 @@ def _build_agent_config_workspace(*, cache_diagnostics: dict[str, Any] | None = 
     timings["total"] = round((perf_counter() - total_started) * 1000, 1)
     load_modes["chatRooms"] = "compact"
     load_modes["teams"] = "graph_references"
-    load_modes["runtimeStatuses"] = "batched"
     payload = {
         "schemaVersion": SCHEMA_VERSION,
         "generatedAt": _now(),
@@ -785,6 +799,7 @@ def _collapse_duplicate_team_indexes(
         if len(items) <= 1:
             collapsed.append(items[0])
             continue
+        items = sorted(items, key=lambda item: str(item.get("teamId") or item.get("id") or "").strip())
         first = items[0]
         agent_ids = _unique_string_list(
             agent_id
@@ -1835,9 +1850,10 @@ def _safe_int(value: Any) -> int:
         return 0
 
 
-def _workspace_cache_key() -> tuple[Any, ...]:
+def _workspace_cache_key(*, include_runtime: bool) -> tuple[Any, ...]:
     return (
         SCHEMA_VERSION,
+        bool(include_runtime),
         _path_signature(registry_path),
         _path_signature(mode_binding_path),
         _path_signature(prompt_template_path),

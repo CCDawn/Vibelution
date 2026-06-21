@@ -315,9 +315,9 @@ def agent_avatar_options() -> dict:
 
 
 @router.get("/agents/config-workspace")
-def agent_config_workspace() -> dict:
+def agent_config_workspace(includeRuntime: bool = True) -> dict:
     _ensure_config_agent_instances()
-    return get_agent_config_workspace(use_cache=True)
+    return get_agent_config_workspace(use_cache=True, include_runtime=includeRuntime)
 
 
 def _with_agent_workspace_cache_invalidated(payload: dict[str, Any]) -> dict[str, Any]:
