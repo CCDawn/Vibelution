@@ -2533,13 +2533,6 @@ class SelfEvolvingAgent:
                     )
                 messages.append(processed.build_ai_message(response))
                 self._raise_if_turn_stop_requested()
-                if not tool_calls and TurnOutcomeController.is_readonly_platform_judgment_complete(
-                    getattr(self, "_active_goal", "") or "",
-                    self._last_visible_response_text,
-                ):
-                    get_session_state().note_scope_completion("只读平台判断已给出明确结论。")
-                    ui.add_log("只读平台判断已完成，本轮直接收束。", "INFO")
-                    break
                 if TurnOutcomeController.should_finish_single_turn_after_direct_response(
                     single_turn_mode_active=self._single_turn_mode_active,
                     tool_calls=tool_calls,
@@ -2548,6 +2541,12 @@ class SelfEvolvingAgent:
                     active_evolution_txn_id=get_session_state().get_active_evolution_txn(),
                 ):
                     ui.add_log("单轮请求已给出直接回答，本轮收束。", "INFO")
+                    break
+                if not tool_calls:
+                    if (self._last_visible_response_text or "").strip():
+                        ui.add_log("模型本轮未请求工具调用，本轮收束。", "INFO")
+                    else:
+                        ui.add_log("模型本轮未返回正文或工具调用，本轮收束。", "INFO")
                     break
                 round_state.add_tool_calls(len(tool_calls))
                 self._raise_if_turn_stop_requested()

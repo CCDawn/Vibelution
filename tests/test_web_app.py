@@ -1275,9 +1275,9 @@ def test_build_followup_prompt_unwraps_nested_continue_goal():
         turn_index=2,
     )
 
-    assert prompt.count("继续完成同一个用户目标：") == 1
-    assert "继续完成同一个用户目标：审查对话日志并汇报" in prompt
-    assert "继续完成同一个用户目标：继续完成" not in prompt
+    assert prompt == "审查对话日志并汇报"
+    assert "继续完成同一个用户目标：" not in prompt
+    assert "上一内部回合" not in prompt
 
 
 def test_build_followup_prompt_includes_running_turn_guidance():
@@ -1294,7 +1294,8 @@ def test_build_followup_prompt_includes_running_turn_guidance():
         guidance_summaries=["先不要继续实现，先汇报链路风险。"],
     )
 
-    assert "用户在当前运行轮补充了以下引导" in prompt
+    assert "用户在当前运行轮补充了以下引导" not in prompt
+    assert prompt.startswith("审查对话日志并汇报")
     assert "先不要继续实现，先汇报链路风险。" in prompt
 
 
