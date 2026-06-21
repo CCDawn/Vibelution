@@ -14,7 +14,6 @@ from typing import Any
 
 
 _EXPORTS = {
-    "ChatSessionState": (".chat_session_manager", "ChatSessionState"),
     "assemble_conversation_context": (".context_assembler", "assemble_conversation_context"),
     "append_context_compression_checkpoint": (".conversation_ledger", "append_context_compression_checkpoint"),
     "append_conversation_event": (".conversation_ledger", "append_conversation_event"),
@@ -22,11 +21,9 @@ _EXPORTS = {
     "build_chat_coding_result_contract": (".chat_result_contract", "build_chat_coding_result_contract"),
     "build_history_events": (".history_ledger", "build_history_events"),
     "format_chat_reply": (".chat_result_formatter", "format_chat_reply"),
-    "load_chat_session": (".chat_session_manager", "load_chat_session"),
     "load_conversation_events": (".conversation_ledger", "load_conversation_events"),
     "context_compression_projection": (".conversation_ledger", "context_compression_projection"),
     "project_conversation_ledger": (".conversation_ledger", "project_conversation_ledger"),
-    "save_chat_session": (".chat_session_manager", "save_chat_session"),
     "search_history_events": (".history_ledger", "search_history_events"),
 }
 

@@ -16,6 +16,7 @@ import time
 import urllib.error
 import urllib.request
 import webbrowser
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
@@ -26,8 +27,20 @@ from config import get_config
 from config.workbench import configured_backend_port
 from core.chat import (
     format_chat_reply,
-    load_chat_session,
-    save_chat_session,
+)
+from core.chat.conversation_ledger import (
+    EVENT_ASSISTANT_MESSAGE,
+    EVENT_USER_MESSAGE,
+    append_conversation_event,
+    conversation_visible_messages_from_events,
+    load_conversation_events,
+)
+from core.ui.chat_state import (
+    DEFAULT_CHAT_CONVERSATION_ID,
+    DEFAULT_CHAT_CONVERSATION_TITLE,
+    get_active_chat_conversation,
+    load_chat_state,
+    save_chat_state,
 )
 from core.evaluation.self_evolution_workbench import (
     DEFAULT_SELF_EVOLUTION_GOAL,
@@ -79,8 +92,20 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 LOGGER = logging.getLogger(__name__)
 
 
+@dataclass
+class WorkbenchChatSession:
+    conversation_id: str = DEFAULT_CHAT_CONVERSATION_ID
+    title: str = DEFAULT_CHAT_CONVERSATION_TITLE
+    messages: list[dict[str, Any]] = field(default_factory=list)
+    updated_at: str = ""
+
+
 def _default_workbench_port() -> int:
     return configured_backend_port()
+
+
+def _now_timestamp() -> str:
+    return time.strftime("%Y-%m-%dT%H:%M:%S")
 
 
 CONFIG_PANEL_PORT = _default_workbench_port()
@@ -254,7 +279,7 @@ class AgentWorkbenchShell:
         self.ui.reset_workspace()
         self.ui.set_shell_mode("chat")
         agent = self._create_agent(agent_factory, "chat")
-        session = self._load_chat_session()
+        session = self._load_workbench_chat_session()
         messages = list(session.messages)
         if hasattr(self.ui, "load_chat_messages"):
             self.ui.load_chat_messages(messages)
@@ -282,10 +307,13 @@ class AgentWorkbenchShell:
             if task.lower() in {"/back", "/q", "/quit", "q"}:
                 self._recent_status = "对话会话已结束"
                 return
+            turn_id = f"workbench-{int(time.time() * 1000)}"
             self.ui.add_chat_message("user", task)
-            messages.append(self._make_chat_message("user", task))
+            user_message = self._make_chat_message("user", task)
+            messages.append(user_message)
             session.messages = list(messages)
-            self._save_chat_session(session)
+            self._append_chat_ledger_message(session, turn_id, user_message)
+            self._save_workbench_chat_session(session)
             self.ui.start_live(transient=True)
             try:
                 result = run_existing_agent_single_turn(agent, initial_prompt=task)
@@ -294,9 +322,11 @@ class AgentWorkbenchShell:
             reply = self._chat_reply_text(result)
             tool_calls = self._extract_chat_tool_calls(result)
             self.ui.add_chat_message("assistant", reply, tool_calls=tool_calls)
-            messages.append(self._make_chat_message("assistant", reply, tool_calls=tool_calls))
+            assistant_message = self._make_chat_message("assistant", reply, tool_calls=tool_calls)
+            messages.append(assistant_message)
             session.messages = list(messages)
-            self._save_chat_session(session)
+            self._append_chat_ledger_message(session, turn_id, assistant_message)
+            self._save_workbench_chat_session(session)
             self._recent_status = "对话已完成一轮"
 
     def _chat_reply_text(self, result: Any) -> str:
@@ -365,11 +395,49 @@ class AgentWorkbenchShell:
             return False
         return isinstance(parsed, (dict, list))
 
-    def _load_chat_session(self):
-        return load_chat_session(PROJECT_ROOT)
+    def _load_workbench_chat_session(self):
+        payload = load_chat_state(PROJECT_ROOT)
+        conversation = get_active_chat_conversation(payload)
+        conversation_id = str(conversation.get("conversation_id") or DEFAULT_CHAT_CONVERSATION_ID).strip()
+        events = load_conversation_events(PROJECT_ROOT, conversation_id)
+        return WorkbenchChatSession(
+            conversation_id=conversation_id,
+            title=str(conversation.get("title") or DEFAULT_CHAT_CONVERSATION_TITLE).strip(),
+            messages=conversation_visible_messages_from_events(events),
+            updated_at=str(conversation.get("updated_at") or "").strip(),
+        )
 
-    def _save_chat_session(self, session) -> None:
-        save_chat_session(PROJECT_ROOT, session)
+    def _save_workbench_chat_session(self, session: WorkbenchChatSession) -> None:
+        payload = load_chat_state(PROJECT_ROOT)
+        conversations = list(payload.get("conversations") or [])
+        conversation_id = str(session.conversation_id or DEFAULT_CHAT_CONVERSATION_ID).strip()
+        timestamp = str(session.updated_at or _now_timestamp()).strip()
+        matched = False
+        for conversation in conversations:
+            if not isinstance(conversation, dict):
+                continue
+            if str(conversation.get("conversation_id") or "").strip() != conversation_id:
+                continue
+            conversation["title"] = session.title or DEFAULT_CHAT_CONVERSATION_TITLE
+            conversation["updated_at"] = timestamp
+            conversation["active_task"] = None
+            conversation.pop("messages", None)
+            matched = True
+            break
+        if not matched:
+            conversations.append(
+                {
+                    "conversation_id": conversation_id,
+                    "title": session.title or DEFAULT_CHAT_CONVERSATION_TITLE,
+                    "updated_at": timestamp,
+                    "last_turn_status": "ready",
+                    "active_task": None,
+                }
+            )
+        payload["active_conversation_id"] = conversation_id
+        payload["conversations"] = conversations
+        payload["updated_at"] = timestamp
+        save_chat_state(PROJECT_ROOT, payload)
 
     def _set_chat_task_snapshot(self, snapshot: dict[str, Any] | None) -> None:
         setter = getattr(self.ui, "set_chat_task_snapshot", None)
@@ -389,13 +457,41 @@ class AgentWorkbenchShell:
         return message
 
     def _load_chat_messages(self) -> list[dict[str, Any]]:
-        session = self._load_chat_session()
+        session = self._load_workbench_chat_session()
         return list(session.messages)
 
     def _save_chat_messages(self, messages: list[dict[str, Any]]) -> None:
-        session = self._load_chat_session()
+        session = self._load_workbench_chat_session()
         session.messages = list(messages)
-        self._save_chat_session(session)
+        session.updated_at = _now_timestamp()
+        self._save_workbench_chat_session(session)
+
+    @staticmethod
+    def _append_chat_ledger_message(session: WorkbenchChatSession, turn_id: str, message: dict[str, Any]) -> None:
+        role = str(message.get("role") or "").strip().lower()
+        event_type = EVENT_USER_MESSAGE if role == "user" else EVENT_ASSISTANT_MESSAGE
+        timestamp = str(message.get("timestamp") or _now_timestamp()).strip()
+        session.updated_at = timestamp
+        payload: dict[str, Any] = {
+            "content": str(message.get("content") or ""),
+            "metadata": dict(message.get("metadata") or {}) if isinstance(message.get("metadata"), dict) else {},
+        }
+        if role == "assistant":
+            payload["toolCalls"] = [
+                {"name": name}
+                for name in AgentWorkbenchShell._normalize_chat_tool_calls(
+                    message.get("tool_calls") or message.get("toolCalls") or []
+                )
+            ]
+        append_conversation_event(
+            PROJECT_ROOT,
+            session.conversation_id or DEFAULT_CHAT_CONVERSATION_ID,
+            turn_id,
+            event_type,
+            status="recorded" if role == "user" else "completed",
+            payload=payload,
+            timestamp=timestamp,
+        )
 
     def _restore_chat_context(self, agent: Any, messages: list[dict[str, str]]) -> None:
         restore = getattr(agent, "seed_chat_history", None)

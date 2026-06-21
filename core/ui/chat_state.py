@@ -362,7 +362,6 @@ def get_active_chat_conversation(state: dict[str, Any]) -> dict[str, Any]:
         return {
             "conversation_id": conversation_id or DEFAULT_CHAT_CONVERSATION_ID,
             "title": DEFAULT_CHAT_CONVERSATION_TITLE,
-            "messages": [],
             "active_task": None,
             "updated_at": "",
         }
@@ -373,27 +372,24 @@ def get_active_chat_conversation(state: dict[str, Any]) -> dict[str, Any]:
             return {
                 "conversation_id": conversation_id,
                 "title": str(item.get("title") or DEFAULT_CHAT_CONVERSATION_TITLE),
-                "messages": normalize_chat_messages(item.get("messages") or []),
                 "active_task": item.get("active_task") if isinstance(item.get("active_task"), dict) else None,
                 "updated_at": str(item.get("updated_at") or ""),
             }
     return {
         "conversation_id": conversation_id or DEFAULT_CHAT_CONVERSATION_ID,
         "title": DEFAULT_CHAT_CONVERSATION_TITLE,
-        "messages": [],
         "active_task": None,
         "updated_at": "",
     }
 
 
 def build_chat_state(
-    messages: list[dict[str, Any]],
+    messages: list[dict[str, Any]] | None = None,
     *,
     conversation_id: str = DEFAULT_CHAT_CONVERSATION_ID,
     title: str = DEFAULT_CHAT_CONVERSATION_TITLE,
     active_task: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    normalized_messages = normalize_chat_messages(messages)
     updated_at = datetime.now().isoformat(timespec="seconds")
     return {
         "version": CHAT_STATE_VERSION,
@@ -404,7 +400,6 @@ def build_chat_state(
                 "conversation_id": conversation_id,
                 "title": title,
                 "updated_at": updated_at,
-                "messages": normalized_messages,
                 "active_task": dict(active_task or {}) if isinstance(active_task, dict) and active_task else None,
             }
         ],

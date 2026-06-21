@@ -56,6 +56,7 @@ from core.chat.conversation_ledger import (
     latest_ledger_sequence,
     latest_open_turn_id,
     load_conversation_events,
+    rewrite_conversation_events,
 )
 from core.chat.context_assembler import assemble_conversation_context
 from core.chat.skill_registry import build_skill_runtime_context, skill_descriptor_for_log
@@ -749,14 +750,8 @@ def _persist_recovered_live_output_to_chat_state(
         conversation = _find_conversation_entry(chat_payload, session_id)
         if conversation is None:
             return
-        messages = normalize_chat_messages(conversation.get("messages") or [])
-        for message in reversed(messages):
-            metadata = message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
-            if (
-                str(message.get("role") or "").strip().lower() == "assistant"
-                and str(metadata.get("turnId") or "").strip() == normalized_turn_id
-            ):
-                return
+        if _find_turn_scoped_assistant_message(_session_ledger_visible_messages(session_id), normalized_turn_id) is not None:
+            return
         assistant_entry = _make_chat_message(
             "assistant",
             content,
@@ -770,7 +765,7 @@ def _persist_recovered_live_output_to_chat_state(
             assistant_entry["toolCalls"] = tool_calls
         if feedback_events:
             assistant_entry["feedbackEvents"] = feedback_events
-        conversation["messages"] = messages + [assistant_entry]
+        conversation.pop("messages", None)
         conversation["last_turn_status"] = "ready"
         conversation["updated_at"] = assistant_entry["timestamp"]
         chat_payload["updated_at"] = assistant_entry["timestamp"]
@@ -1164,7 +1159,8 @@ def _find_session_attachment_metadata(conversation: dict[str, Any] | None, artif
     normalized_artifact_id = str(artifact_id or "").strip()
     if not normalized_artifact_id:
         return {}
-    for message in reversed(list(conversation.get("messages") or [])):
+    conversation_id = str(conversation.get("conversation_id") or conversation.get("id") or "").strip()
+    for message in reversed(_session_ledger_visible_messages(conversation_id)):
         if not isinstance(message, dict):
             continue
         for attachment in _normalize_message_attachments(message.get("attachments") or []):
@@ -1199,7 +1195,8 @@ def _image_context_request_for_retry(
         return {}
     if not isinstance(conversation, dict):
         return {}
-    for item in reversed(list(conversation.get("messages") or [])[-8:]):
+    conversation_id = str(conversation.get("conversation_id") or conversation.get("id") or "").strip()
+    for item in reversed(_session_ledger_visible_messages(conversation_id)[-8:]):
         if not isinstance(item, dict) or str(item.get("role") or "").strip().lower() != "user":
             continue
         request = _image_context_request_from_user_message(item)
@@ -1267,7 +1264,8 @@ def _looks_like_image_retry_context(text: Any) -> bool:
 def _find_recent_user_image_attachment(conversation: dict[str, Any] | None) -> dict[str, Any]:
     if not isinstance(conversation, dict):
         return {}
-    for message in reversed(list(conversation.get("messages") or [])):
+    conversation_id = str(conversation.get("conversation_id") or conversation.get("id") or "").strip()
+    for message in reversed(_session_ledger_visible_messages(conversation_id)):
         if not isinstance(message, dict):
             continue
         if str(message.get("role") or "").strip().lower() != "user":
@@ -1313,17 +1311,29 @@ def append_session_assistant_artifact_message(
         conversation = _find_conversation_entry(payload, normalized_session_id)
         if conversation is None:
             raise SessionNotFoundError(f"Session not found: {normalized_session_id}")
-        messages = normalize_chat_messages(conversation.get("messages") or [])
         assistant_entry = _make_chat_message(
             "assistant",
             content,
             tool_calls or [],
             metadata=metadata,
         )
-        conversation["messages"] = messages + [assistant_entry]
+        conversation.pop("messages", None)
         conversation["updated_at"] = assistant_entry["timestamp"]
         payload["updated_at"] = assistant_entry["timestamp"]
         save_chat_state(PROJECT_ROOT, payload)
+    turn_id = str((metadata or {}).get("turnId") or (metadata or {}).get("turn_id") or f"artifact:{assistant_entry['timestamp']}").strip()
+    _append_session_conversation_event(
+        normalized_session_id,
+        turn_id,
+        EVENT_ASSISTANT_MESSAGE,
+        status=status,
+        payload={
+            "content": content,
+            "toolCalls": _normalize_message_tool_calls(tool_calls or []),
+            "metadata": metadata or {},
+        },
+        source="append_session_assistant_artifact_message",
+    )
 
     _record_session_cycle_message(
         normalized_session_id,
@@ -1790,7 +1800,8 @@ def _empty_direct_agent_session_hidden_from_index(
 ) -> bool:
     """Hide stale empty Agent recovery channels while preserving real conversations."""
 
-    if list(conversation.get("messages") or []):
+    session_id = str(conversation.get("id") or conversation.get("conversation_id") or "").strip()
+    if _session_ledger_visible_messages(session_id):
         return False
     if isinstance(conversation.get("activeTask"), dict) and conversation.get("activeTask"):
         return False
@@ -1799,7 +1810,6 @@ def _empty_direct_agent_session_hidden_from_index(
     agent = conversation.get("_agent")
     if not isinstance(agent, dict):
         return False
-    session_id = str(conversation.get("id") or conversation.get("conversation_id") or "").strip()
     if not session_id or str(agent.get("directSessionId") or "").strip() != session_id:
         return False
     return _agent_directory_stub_hidden_from_user_index(agent, hidden_team_member_agent_ids)
@@ -2510,7 +2520,10 @@ def get_session_stream_initial_state(session_id: str) -> dict | None:
     if target is None:
         return None
     summary = _build_session_summary(target, hydrate_agent=False)
-    messages = list(target.get("messages") or [])
+    messages = _normalize_latest_preview_messages(
+        normalized_session_id,
+        _session_ledger_visible_messages(normalized_session_id),
+    )
     latest_message = messages[-1] if messages else {}
     latest_message_payload = {
         "id": str(latest_message.get("id") or "").strip(),
@@ -2581,7 +2594,7 @@ def get_session_turn_completion_snapshot(session_id: str, turn_id: str = "") -> 
                 "turnCurrent": turn_current,
             }
         last_turn_status = str(conversation.get("last_turn_status") or conversation.get("lastTurnStatus") or "").strip().lower()
-        messages = normalize_chat_messages(conversation.get("messages") or [])
+        messages = _session_ledger_visible_messages(session_id)
 
     assistant_message = _find_turn_scoped_assistant_message(messages, normalized_turn_id)
     assistant_text = str((assistant_message or {}).get("content") or "").strip()
@@ -2702,33 +2715,18 @@ def append_cli_agent_lifecycle_event(
         conversation = _find_conversation_entry(payload, normalized_session_id)
         if conversation is None:
             return None
-        messages = normalize_chat_messages(conversation.get("messages") or [])
         existing = _find_cli_agent_lifecycle_message(
             normalized_session_id,
-            messages,
+            _session_ledger_visible_messages(normalized_session_id),
             lifecycle_key=lifecycle_key,
         )
         if existing is not None:
-            _append_cli_agent_lifecycle_sidecar(normalized_session_id, existing)
             return existing
-        existing_sidecar = _find_cli_agent_lifecycle_sidecar_message(
-            normalized_session_id,
-            lifecycle_key=lifecycle_key,
-        )
         event_entry = _make_chat_message("assistant", content, metadata=metadata)
-        if existing_sidecar is not None:
-            event_entry["timestamp"] = str(existing_sidecar.get("timestamp") or event_entry["timestamp"])
-        conversation["messages"] = messages + [event_entry]
+        conversation.pop("messages", None)
         conversation["updated_at"] = event_entry["timestamp"]
         payload["updated_at"] = event_entry["timestamp"]
         save_chat_state(PROJECT_ROOT, payload)
-        _append_cli_agent_lifecycle_sidecar(normalized_session_id, event_entry)
-        normalized_messages = _normalize_messages(normalized_session_id, conversation["messages"])
-        normalized_event_entry = _find_cli_agent_lifecycle_message(
-            normalized_session_id,
-            normalized_messages,
-            lifecycle_key=lifecycle_key,
-        )
     _append_session_conversation_event(
         normalized_session_id,
         str(terminal.get("sourceTurnId") or terminal.get("turnId") or f"cli-lifecycle:{lifecycle_subject}"),
@@ -2753,7 +2751,8 @@ def append_cli_agent_lifecycle_event(
         metadata=metadata,
     )
     _publish_session_detail_snapshot(normalized_session_id)
-    return normalized_event_entry
+    normalized = _normalize_messages(normalized_session_id, [event_entry])
+    return normalized[0] if normalized else event_entry
 
 
 def append_cli_agent_task_result_event(
@@ -2802,13 +2801,15 @@ def append_cli_agent_task_result_event(
         conversation = _find_conversation_entry(payload, normalized_session_id)
         if conversation is None:
             return None
-        messages = normalize_chat_messages(conversation.get("messages") or [])
-        existing = _find_cli_agent_task_result_message(messages, result_key=result_key)
+        existing = _find_cli_agent_task_result_message(
+            _session_ledger_visible_messages(normalized_session_id),
+            result_key=result_key,
+        )
         if existing is not None:
             return existing
         else:
             result_entry = _make_chat_message("assistant", content, metadata=metadata)
-            conversation["messages"] = messages + [result_entry]
+            conversation.pop("messages", None)
             conversation["updated_at"] = result_entry["timestamp"]
             payload["updated_at"] = result_entry["timestamp"]
             save_chat_state(PROJECT_ROOT, payload)
@@ -2970,7 +2971,7 @@ def _wake_agent_for_cli_agent_task_result(
         _ensure_conversation_agent_metadata(conversation)
         agent_id = str(conversation.get("agent_id") or conversation.get("agentId") or "").strip()
         _resolve_active_agent_for_turn(session_id, agent_id, lang=lang)
-        history_messages = normalize_chat_messages(conversation.get("messages") or [])
+        history_messages = _session_ledger_visible_messages(session_id)
         active_task = _normalize_session_active_task(conversation.get("active_task") or conversation.get("activeTask"))
         if not _is_task_tool_backed_active_task(active_task):
             active_task = None
@@ -3293,7 +3294,7 @@ def create_child_session(
             "source": str(source or "agent_auto_split").strip() or "agent_auto_split",
             "parentSessionId": root_id,
             "sourceSessionId": parent_id,
-            "parentMessageId": _latest_user_message_id(parent_id, source_parent.get("messages") or []),
+            "parentMessageId": _latest_user_message_id(parent_id, _session_ledger_visible_messages(parent_id)),
             "triggeringUserMessage": request_text,
             "splitReason": split_reason or "Agent judged this request as a separate task.",
             "inheritedFacts": list(inherited_facts or []),
@@ -3321,20 +3322,7 @@ def create_child_session(
             child_ids.append(child_id)
         parent["child_session_ids"] = child_ids
         parent["active_child_session_id"] = child_id
-        parent_messages = normalize_chat_messages(parent.get("messages") or [])
-        parent_messages.append(
-            _make_chat_message(
-                "assistant",
-                _child_session_created_card(child_id=child_id, title=title, auto_start=auto_start),
-                metadata={
-                    "kind": "child_session_card",
-                    "childSessionId": child_id,
-                    "childStatus": "queued" if auto_start else "idle",
-                    "taskTitle": title,
-                },
-            )
-        )
-        parent["messages"] = parent_messages
+        parent.pop("messages", None)
         parent["updated_at"] = now
         conversations.append(child)
         payload["version"] = int(payload.get("version") or CHAT_STATE_VERSION)
@@ -3630,7 +3618,7 @@ def _delete_chat_session_state(session_id: str, *, activate_replacement: bool = 
             fields={
                 "phase": target_phase,
                 "agentId": target_agent_id,
-                "messageCount": len(normalize_chat_messages(target_conversation.get("messages") or [])),
+                "messageCount": len(_session_ledger_visible_messages(conversation_id)),
             },
         )
         if target_phase in {"running", "stopping"}:
@@ -3957,7 +3945,7 @@ def create_chat_review_candidate_from_session(session_id: str) -> dict:
             )
         )
 
-    messages = normalize_chat_messages(conversation.get("messages") or [])
+    messages = _session_ledger_visible_messages(conversation_id)
     turns = _build_chat_turn_records_from_messages(messages)
     if len(turns) < 1:
         _record_session_chat_review_candidate_event(
@@ -4476,10 +4464,10 @@ def submit_session_message(
         _ensure_conversation_agent_metadata(conversation)
         agent_id = str(conversation.get("agent_id") or conversation.get("agentId") or "").strip()
         agent = _resolve_active_agent_for_turn(conversation_id, agent_id, lang=lang)
-        previous_messages = normalize_chat_messages(conversation.get("messages") or [])
         skill_command = parse_skill_slash_command(message)
         skill_invocation = _skill_invocation_payload(skill_command) if skill_command is not None else None
         _reconcile_stale_session_ledger(conversation_id, reason="new_turn_submitted")
+        previous_messages = _session_ledger_visible_messages(conversation_id)
         turn_control = _create_session_turn_control(conversation_id)
         active_skill_contract = (
             _active_skill_contract_from_invocation(skill_invocation, turn_id=turn_control.turn_id)
@@ -4521,7 +4509,7 @@ def submit_session_message(
             **persisted_message_metadata,
             **(user_entry.get("metadata") if isinstance(user_entry.get("metadata"), dict) else {}),
         }
-        conversation["messages"] = previous_messages + [user_entry]
+        conversation.pop("messages", None)
         conversation.pop("last_turn_error", None)
         conversation.pop("lastTurnError", None)
         conversation["last_turn_status"] = "running"
@@ -5007,7 +4995,7 @@ def edit_and_resubmit_session_message(
             raise SessionNotFoundError(text_for(lang, zh="未找到当前会话。", en="Session not found."))
         _ensure_conversation_workspace_metadata(conversation)
 
-        previous_messages = normalize_chat_messages(conversation.get("messages") or [])
+        previous_messages = _session_ledger_visible_messages(conversation_id)
         skill_command = parse_skill_slash_command(message)
         skill_invocation = _skill_invocation_payload(skill_command) if skill_command is not None else None
         target_index = _find_user_message_index_by_api_id(conversation_id, previous_messages, target_message_id)
@@ -5064,6 +5052,8 @@ def edit_and_resubmit_session_message(
         agent_id = str(conversation.get("agent_id") or conversation.get("agentId") or "").strip()
         agent = _resolve_active_agent_for_turn(conversation_id, agent_id, lang=lang)
         original_entry = dict(previous_messages[target_index])
+        history_before_target = previous_messages[:target_index]
+        _truncate_session_ledger_before_message(conversation_id, original_entry)
         original_metadata = original_entry.get("metadata") if isinstance(original_entry.get("metadata"), dict) else {}
         original_was_slash_skill = isinstance(original_metadata.get("slashSkillCommand"), dict)
         superseded_turn_id = ""
@@ -5088,9 +5078,9 @@ def edit_and_resubmit_session_message(
             active_skill_contract = None
             conversation.pop("active_skill_contract", None)
             conversation.pop("activeSkillContract", None)
+        user_metadata.setdefault("turnId", turn_control.turn_id)
         user_entry = _make_chat_message("user", message, metadata=user_metadata)
-        edited_messages = previous_messages[:target_index] + [user_entry]
-        conversation["messages"] = edited_messages
+        conversation.pop("messages", None)
         conversation.pop("last_turn_error", None)
         conversation.pop("lastTurnError", None)
         conversation["last_turn_status"] = "running"
@@ -5171,7 +5161,7 @@ def edit_and_resubmit_session_message(
     effective_user_message, user_message_source = _resolve_session_user_prompt(
         conversation_id,
         message,
-        edited_messages[:target_index],
+        history_before_target,
         existing_task=active_task,
     )
     if effective_user_message != message:
@@ -5190,7 +5180,7 @@ def edit_and_resubmit_session_message(
         "user_message": effective_user_message,
         "raw_user_message": message,
         "user_message_source": user_message_source,
-        "history_messages": edited_messages[:target_index],
+        "history_messages": history_before_target,
         "mental_model_enabled": mental_model_enabled,
         "active_task": active_task,
         "agent_id": agent_id,
@@ -5968,7 +5958,7 @@ def _repair_stale_running_conversation(conversation: dict[str, Any]) -> bool:
         zh="上一轮运行已被中断，当前会话已恢复为可继续状态。",
         en="The previous turn was interrupted. This session is ready to continue.",
     )
-    conversation["messages"] = normalize_chat_messages(conversation.get("messages") or [])
+    conversation.pop("messages", None)
     conversation["runtime_notices"] = _append_session_runtime_notice(
         conversation.get("runtime_notices") or conversation.get("runtimeNotices") or [],
         {
@@ -6053,23 +6043,6 @@ def _normalize_session_runtime_notices(items: Any) -> list[dict[str, Any]]:
 
 def _append_session_runtime_notice(items: Any, notice: dict[str, Any]) -> list[dict[str, Any]]:
     return _normalize_session_runtime_notices([*list(items or []), notice])
-
-
-def _not_called_llm_usage(*, recorded_at: str = "") -> dict[str, Any]:
-    return {
-        "source": "not_called",
-        "inputTokens": 0,
-        "outputTokens": 0,
-        "totalTokens": 0,
-        "cachedInputTokens": 0,
-        "cacheReadInputTokens": 0,
-        "cacheCreationInputTokens": 0,
-        "uncachedInputTokens": 0,
-        "cacheHitRate": 0.0,
-        "provider": "",
-        "model": "",
-        "recordedAt": str(recorded_at or "").strip() or _now_timestamp(),
-    }
 
 
 def _missing_llm_usage(*, recorded_at: str = "") -> dict[str, Any]:
@@ -6171,7 +6144,6 @@ def _persist_session_preflight_rejection(
             "previousStatus": "preflight_rejected",
         },
     )
-    conversation["last_llm_usage"] = _not_called_llm_usage(recorded_at=timestamp)
     conversation["last_cache_composition"] = _not_called_cache_composition(
         recorded_at=timestamp,
         reason="preflight_rejected",
@@ -6218,28 +6190,6 @@ def _persist_session_preflight_rejection(
     return turn_error
 
 
-def _runtime_notices_from_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    notices: list[dict[str, Any]] = []
-    for index, message in enumerate(list(messages or []), start=1):
-        role = str(message.get("role") or "").strip().lower()
-        content = str(message.get("content") or "").strip()
-        if role != "assistant" or not _looks_like_runtime_failure_notice(content):
-            continue
-        if _has_visible_message_after_index(messages, index - 1):
-            continue
-        notices.append(
-            {
-                "id": f"legacy-runtime-notice-{index}",
-                "kind": "turn_recovered" if "中断" in content or "interrupted" in content.lower() else "runtime_notice",
-                "level": "warning",
-                "message": content,
-                "timestamp": str(message.get("timestamp") or "").strip(),
-                "source": "legacy_assistant_message",
-            }
-        )
-    return _normalize_session_runtime_notices(notices)
-
-
 def _visible_session_runtime_notices(
     notices: list[dict[str, Any]],
     messages: list[dict[str, Any]],
@@ -6255,29 +6205,6 @@ def _visible_session_runtime_notices(
             continue
         visible.append(notice)
     return visible[-1:]
-
-
-def _has_visible_message_after_index(messages: list[dict[str, Any]], index: int) -> bool:
-    for later in list(messages or [])[index + 1:]:
-        role = str(later.get("role") or "").strip().lower()
-        if role not in {"user", "assistant"}:
-            continue
-        content = str(later.get("content") or "").strip()
-        if not content or _looks_like_runtime_failure_notice(content):
-            continue
-        return True
-    return False
-
-
-def _filter_runtime_notice_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    return [
-        message
-        for message in list(messages or [])
-        if not (
-            str(message.get("role") or "").strip().lower() == "assistant"
-            and _looks_like_runtime_failure_notice(message.get("content") or "")
-        )
-    ]
 
 
 def _release_stale_chat_turn_work_run(*, session_id: str, finished_at: str, summary: str) -> None:
@@ -6356,22 +6283,21 @@ def _normalize_conversation(
         missing_agent_id = agent_id
         agent_missing = True
         agent_status_code = "missing_agent"
+    ledger_messages = _session_ledger_visible_messages(conversation_id)
     if lightweight:
-        messages = _normalize_latest_preview_messages(conversation_id, raw.get("messages") or [])
+        messages = _normalize_latest_preview_messages(conversation_id, ledger_messages)
         visible_runtime_notices: list[dict[str, Any]] = []
     else:
-        raw_messages = _normalize_messages(conversation_id, raw.get("messages") or [])
-        messages = _filter_runtime_notice_messages(raw_messages)
+        messages = ledger_messages
         runtime_notices = _normalize_session_runtime_notices(
             raw.get("runtime_notices") or raw.get("runtimeNotices") or []
         )
         visible_runtime_notices = _visible_session_runtime_notices(
-            [*runtime_notices, *_runtime_notices_from_messages(raw_messages)],
+            runtime_notices,
             messages,
         )
     last_turn_status = str(raw.get("last_turn_status") or "").strip().lower()
     last_turn_error = _normalize_session_turn_error(raw.get("last_turn_error") or raw.get("lastTurnError"))
-    last_llm_usage = _normalize_turn_llm_usage(raw.get("last_llm_usage") or raw.get("lastLlmUsage"))
     last_context_composition = _normalize_session_context_composition(
         raw.get("last_context_composition") or raw.get("lastContextComposition")
     )
@@ -6419,7 +6345,6 @@ def _normalize_conversation(
         "runtimeNotices": visible_runtime_notices,
         "lastTurnStatus": last_turn_status,
         "lastTurnError": last_turn_error,
-        "lastLlmUsage": last_llm_usage,
         "lastContextComposition": last_context_composition,
         "activeSkillContract": active_skill_contract,
         "lastCacheComposition": last_cache_composition,
@@ -7251,10 +7176,10 @@ def _build_session_summary(conversation: dict[str, Any], *, hydrate_agent: bool 
     session_kind = str(conversation.get("sessionKind") or "main").strip() or "main"
     task_title = str(conversation.get("taskTitle") or raw_title).strip() or raw_title
     display_agent_name = agent_display_name or raw_title
-    messages = list(conversation.get("messages") or [])
+    has_ledger_messages = bool(_session_ledger_visible_messages(str(conversation.get("id") or "")))
     if session_kind == "child":
         display_title = task_title
-    elif messages or not _is_default_empty_session_title(task_title):
+    elif has_ledger_messages or not _is_default_empty_session_title(task_title):
         display_title = task_title
     else:
         display_title = display_agent_name
@@ -7390,7 +7315,21 @@ def _build_session_detail_from_summary(
     if not detail_messages:
         detail_messages = list(conversation.get("messages") or [])
     context_usage = _build_session_context_usage(conversation, detail_messages)
-    llm_usage = _session_last_llm_usage(conversation, detail_messages)
+    llm_usage = _session_last_llm_usage(detail_messages)
+    stored_last_cache_composition = _normalize_session_cache_composition(
+        conversation.get("lastCacheComposition") or conversation.get("last_cache_composition")
+    )
+    if (
+        llm_usage is None
+        and stored_last_cache_composition is not None
+        and str(stored_last_cache_composition.get("source") or "").strip() == "not_called"
+    ):
+        llm_usage = _normalize_turn_llm_usage(
+            {
+                "source": "not_called",
+                "recordedAt": str(stored_last_cache_composition.get("updatedAt") or "").strip(),
+            }
+        )
     cache_usage = _build_session_cache_usage(llm_usage, detail_messages)
     live_context_composition = _current_session_live_context_composition(conversation["id"])
     last_context_composition = live_context_composition or _normalize_session_context_composition(
@@ -7409,6 +7348,7 @@ def _build_session_detail_from_summary(
             llm_usage=llm_usage,
             context_composition=last_context_composition,
             average_cache=cache_usage,
+            normalized_last_cache_composition=stored_last_cache_composition,
         )
     )
     agent_available = _session_agent_is_available(summary)
@@ -7424,7 +7364,12 @@ def _build_session_detail_from_summary(
         "changedFiles": changed_files,
         "readFiles": read_files,
         "messages": detail_messages,
-        "runtimeNotices": _visible_session_runtime_notices(conversation.get("runtimeNotices") or [], detail_messages),
+        "runtimeNotices": _visible_session_runtime_notices(
+            _normalize_session_runtime_notices(
+                conversation.get("runtime_notices") or conversation.get("runtimeNotices") or []
+            ),
+            detail_messages,
+        ),
         "contextUsage": context_usage,
         "cacheUsage": cache_usage,
         "llmUsage": llm_usage,
@@ -7523,7 +7468,7 @@ def _build_session_cache_usage(
     }
 
 
-def _session_last_llm_usage(conversation: dict[str, Any], messages: list[dict[str, Any]]) -> dict[str, Any] | None:
+def _session_last_llm_usage(messages: list[dict[str, Any]]) -> dict[str, Any] | None:
     for message in reversed(list(messages or [])):
         if str((message or {}).get("role") or "").strip().lower() != "assistant":
             continue
@@ -7531,12 +7476,6 @@ def _session_last_llm_usage(conversation: dict[str, Any], messages: list[dict[st
         normalized = _normalize_turn_llm_usage(metadata.get("llmUsage") or metadata.get("llm_usage"))
         if normalized is not None:
             return normalized
-    normalized = _normalize_turn_llm_usage(
-        conversation.get("last_llm_usage")
-        or conversation.get("lastLlmUsage")
-    )
-    if normalized is not None and str(normalized.get("source") or "").strip() in {"missing", "not_called"}:
-        return normalized
     return None
 
 
@@ -8530,8 +8469,9 @@ def _session_last_cache_composition(
     llm_usage: dict[str, Any] | None,
     context_composition: dict[str, Any] | None = None,
     average_cache: dict[str, Any] | None = None,
+    normalized_last_cache_composition: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
-    existing = _normalize_session_cache_composition(
+    existing = normalized_last_cache_composition or _normalize_session_cache_composition(
         conversation.get("lastCacheComposition") or conversation.get("last_cache_composition")
     )
     if existing is not None:
@@ -9521,7 +9461,7 @@ def _find_cli_agent_lifecycle_message(
     normalized_messages = _normalize_messages(conversation_id, messages)
     for message in normalized_messages:
         metadata = message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
-        if str(metadata.get("kind") or "").strip() != "cli_agent_lifecycle":
+        if str(metadata.get("kind") or "").strip() not in {"cli_agent_lifecycle", EVENT_CLI_SESSION_LIFECYCLE}:
             continue
         if str(metadata.get("lifecycleKey") or "").strip() == normalized_key:
             return message
@@ -9538,119 +9478,11 @@ def _find_cli_agent_task_result_message(
         return None
     for message in messages:
         metadata = message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
-        if str(metadata.get("kind") or "").strip() != "cli_agent_task_result":
+        if str(metadata.get("kind") or "").strip() not in {"cli_agent_task_result", EVENT_CLI_TASK_RESULT}:
             continue
         if str(metadata.get("resultKey") or "").strip() == normalized_key:
             return message
     return None
-
-
-def _cli_agent_lifecycle_sidecar_path(session_id: str) -> Path:
-    token = _safe_session_workspace_token(session_id)
-    sessions_root = developer_sandbox.sandboxed_workspace_path(PROJECT_ROOT, "sessions").resolve()
-    workspace_path = developer_sandbox.seeded_sandbox_workspace_path(PROJECT_ROOT, "sessions", token).resolve()
-    if not workspace_path.is_relative_to(sessions_root):
-        raise SessionValidationError(f"Invalid session workspace path: {workspace_path}")
-    return workspace_path / "logs" / "cli_agent_lifecycle.jsonl"
-
-
-def _append_cli_agent_lifecycle_sidecar(session_id: str, message: dict[str, Any]) -> None:
-    metadata = message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
-    lifecycle_key = str(metadata.get("lifecycleKey") or "").strip()
-    if not lifecycle_key:
-        return
-    if _find_cli_agent_lifecycle_sidecar_message(session_id, lifecycle_key=lifecycle_key) is not None:
-        return
-    try:
-        path = _cli_agent_lifecycle_sidecar_path(session_id)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        record = {
-            "schemaVersion": 1,
-            "timestamp": str(message.get("timestamp") or _now_timestamp()).strip(),
-            "sessionId": str(session_id or "").strip(),
-            "lifecycleKey": lifecycle_key,
-            "event": str(metadata.get("event") or metadata.get("status") or "").strip(),
-            "message": message,
-        }
-        with path.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(record, ensure_ascii=False, separators=(",", ":")) + "\n")
-    except Exception as exc:
-        _debug_logger.warning(
-            f"cli agent lifecycle sidecar append skipped: {type(exc).__name__}: {exc}",
-            tag="LOGS",
-        )
-
-
-def _find_cli_agent_lifecycle_sidecar_message(
-    session_id: str,
-    *,
-    lifecycle_key: str,
-) -> dict[str, Any] | None:
-    normalized_key = str(lifecycle_key or "").strip()
-    if not normalized_key:
-        return None
-    for message in _load_cli_agent_lifecycle_sidecar_messages(session_id):
-        metadata = message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
-        if str(metadata.get("kind") or "").strip() != "cli_agent_lifecycle":
-            continue
-        if str(metadata.get("lifecycleKey") or "").strip() == normalized_key:
-            return message
-    return None
-
-
-def _load_cli_agent_lifecycle_sidecar_messages(session_id: str) -> list[dict[str, Any]]:
-    try:
-        path = _cli_agent_lifecycle_sidecar_path(session_id)
-    except Exception:
-        return []
-    if not path.exists():
-        return []
-    result: list[dict[str, Any]] = []
-    try:
-        lines = path.read_text(encoding="utf-8").splitlines()
-    except Exception:
-        return []
-    for line in lines:
-        text = str(line or "").strip()
-        if not text:
-            continue
-        try:
-            payload = json.loads(text)
-        except Exception:
-            continue
-        message = payload.get("message") if isinstance(payload, dict) else None
-        if not isinstance(message, dict):
-            continue
-        metadata = message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
-        if str(metadata.get("kind") or "").strip() != "cli_agent_lifecycle":
-            continue
-        result.append(dict(message))
-    return result
-
-
-def _merge_cli_agent_lifecycle_sidecar_messages(
-    session_id: str,
-    messages: list[dict[str, Any]],
-) -> list[dict[str, Any]]:
-    merged = list(messages or [])
-    seen_keys: set[str] = set()
-    for message in merged:
-        metadata = message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
-        lifecycle_key = str(metadata.get("lifecycleKey") or "").strip()
-        if str(metadata.get("kind") or "").strip() == "cli_agent_lifecycle" and lifecycle_key:
-            seen_keys.add(lifecycle_key)
-    additions: list[dict[str, Any]] = []
-    for message in _load_cli_agent_lifecycle_sidecar_messages(session_id):
-        metadata = message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
-        lifecycle_key = str(metadata.get("lifecycleKey") or "").strip()
-        if not lifecycle_key or lifecycle_key in seen_keys:
-            continue
-        seen_keys.add(lifecycle_key)
-        additions.append(message)
-    if not additions:
-        return merged
-    normalized = _normalize_messages(session_id, merged + additions)
-    return sorted(normalized, key=lambda item: _timestamp_sort_key(str(item.get("timestamp") or "")))
 
 
 def _new_conversation_id(existing_ids: set[str] | None = None) -> str:
@@ -9737,7 +9569,6 @@ def _make_empty_conversation(session_id: str, *, title: str, timestamp: str) -> 
         "last_turn_status": "ready",
         "last_turn_error": None,
         "active_task": None,
-        "messages": [],
     }
 
 
@@ -9900,7 +9731,7 @@ def _conversation_phase(conversation_id: str, conversation: dict[str, Any]) -> s
         "superseded",
     }:
         return normalized
-    if conversation.get("messages"):
+    if _session_ledger_visible_messages(conversation_id):
         return "ready"
     return "idle"
 
@@ -11881,7 +11712,7 @@ def _persist_session_turn_result(
             return
         if turn_id and not _is_session_turn_current(session_id, turn_id):
             return
-        messages = normalize_chat_messages(conversation.get("messages") or [])
+        messages = _session_ledger_visible_messages(session_id)
         if _latest_assistant_message_is_stop(messages):
             _persist_chat_turn_work_run(
                 session_id=session_id,
@@ -11909,7 +11740,6 @@ def _persist_session_turn_result(
                 result.get("context_composition") if isinstance(result, dict) else None
             )
             cache_composition = _build_session_cache_composition(turn_id, None)
-            new_messages = list(messages)
             partial_reply = _provider_failure_partial_visible_reply(result, failure_message)
             partial_entry: dict[str, Any] | None = None
             if partial_reply:
@@ -11930,13 +11760,11 @@ def _persist_session_turn_result(
                 )
                 if isinstance(result, dict):
                     partial_entry["toolCalls"] = _normalize_message_tool_calls(_extract_chat_tool_calls(result))
-                new_messages.append(partial_entry)
             error_entry = _make_provider_failure_chat_message(
                 turn_error,
                 error_type=error_type,
                 turn_id=turn_id,
             )
-            new_messages.append(error_entry)
             timestamp = str(error_entry.get("timestamp") or _now_timestamp()).strip()
             stored_active_task = _normalize_session_active_task(
                 conversation.get("active_task") or conversation.get("activeTask")
@@ -11955,7 +11783,7 @@ def _persist_session_turn_result(
                 user_message_source=user_message_source,
             )
             _set_or_clear_session_active_task(conversation, next_active_task)
-            conversation["messages"] = new_messages
+            conversation.pop("messages", None)
             if context_composition is not None:
                 conversation["last_context_composition"] = context_composition
             conversation["last_cache_composition"] = cache_composition
@@ -12023,7 +11851,7 @@ def _persist_session_turn_result(
                     "providerFailure": error_type != "prompt_cache_unsupported",
                     "visibleErrorMessagePersisted": True,
                     "partialReplyPersisted": bool(partial_entry),
-                    "messageCount": len(conversation.get("messages") or []),
+                    "messageCount": len(messages) + (1 if partial_entry else 0) + 1,
                 },
             )
             _record_session_turn_error(
@@ -12054,6 +11882,20 @@ def _persist_session_turn_result(
                     },
                     source="persist_session_turn_result",
                 )
+            _append_session_conversation_event(
+                session_id,
+                turn_id,
+                EVENT_ASSISTANT_MESSAGE,
+                status="failed_provider",
+                payload={
+                    "content": str(error_entry.get("content") or ""),
+                    "thought": str(error_entry.get("thought") or ""),
+                    "toolCalls": _normalize_message_tool_calls(error_entry.get("tool_calls") or error_entry.get("toolCalls") or []),
+                    "feedbackEvents": _normalize_message_feedback_events(error_entry.get("feedback_events") or error_entry.get("feedbackEvents") or []),
+                    "metadata": error_entry.get("metadata") if isinstance(error_entry.get("metadata"), dict) else {},
+                },
+                source="persist_session_turn_result",
+            )
             _append_session_conversation_event(
                 session_id,
                 turn_id,
@@ -12184,6 +12026,7 @@ def _persist_session_turn_result(
             )
         assistant_metadata = assistant_entry.get("metadata") if isinstance(assistant_entry.get("metadata"), dict) else {}
         assistant_entry["metadata"] = {**assistant_metadata, "turnId": turn_id}
+        visible_assistant_text = str(assistant_entry.get("content") or assistant_text or "").strip()
         turn_llm_usage = llm_usage if llm_usage is not None else _missing_llm_usage(
             recorded_at=str(assistant_entry.get("timestamp") or "").strip(),
         )
@@ -12192,7 +12035,7 @@ def _persist_session_turn_result(
             feedback_events = _normalize_message_feedback_events(feedback_events_for_result)
             if feedback_events:
                 assistant_entry["feedbackEvents"] = feedback_events
-        conversation["messages"] = messages + [assistant_entry]
+        conversation.pop("messages", None)
         stored_active_task = _normalize_session_active_task(
             conversation.get("active_task") or conversation.get("activeTask")
         )
@@ -12213,15 +12056,11 @@ def _persist_session_turn_result(
         next_active_task = _build_session_active_task(
             session_id,
             task_result,
-            conversation["messages"],
+            messages,
             existing_task=existing_active_task,
             user_message_source=user_message_source,
         )
         _set_or_clear_session_active_task(conversation, next_active_task)
-        if llm_usage is not None:
-            conversation["last_llm_usage"] = llm_usage
-        else:
-            conversation["last_llm_usage"] = dict(turn_llm_usage)
         if context_composition is not None:
             conversation["last_context_composition"] = context_composition
         conversation["last_cache_composition"] = cache_composition
@@ -12242,7 +12081,7 @@ def _persist_session_turn_result(
         tool_calls = _normalize_message_tool_calls(_extract_chat_tool_calls(result))
         feedback_event_count = len(_normalize_message_feedback_events(feedback_events_for_result))
         if final_status == "completed":
-            capture_messages = list(conversation["messages"])
+            capture_messages = [*messages, assistant_entry]
             agent_inbox_reply = _build_agent_inbox_turn_reply(
                 messages,
                 assistant_text=assistant_text,
@@ -12255,9 +12094,9 @@ def _persist_session_turn_result(
             session_id=session_id,
             turn_id=turn_id,
             status=final_status,
-            summary=assistant_text,
+            summary=visible_assistant_text,
             error_type=error_type if runtime_failed else "",
-            error=assistant_text if runtime_failed else "",
+            error=visible_assistant_text if runtime_failed else "",
             finished_at=assistant_entry["timestamp"],
             updated_at=assistant_entry["timestamp"],
         )
@@ -12300,7 +12139,7 @@ def _persist_session_turn_result(
             session_id,
             turn_id,
             status=final_status,
-            summary=assistant_text,
+            summary=visible_assistant_text,
             recovery_pointer={
                 "resumeAllowed": final_status in {"stopped_by_user", "paused_limit", "needs_continue"},
                 "toolCallCount": len(tool_calls),
@@ -12323,8 +12162,8 @@ def _persist_session_turn_result(
                 "activeTaskStatus": str((cycle_active_task or {}).get("status") or "").strip(),
                 "activeTaskOutcome": str(((cycle_active_task or {}).get("metadata") or {}).get("outcome") or "").strip(),
                 "activeTaskChangedFileCount": len(list((cycle_active_task or {}).get("changed_files") or [])),
-                "messageCount": len(conversation.get("messages") or []),
-                "assistantTextLength": len(assistant_text),
+                "messageCount": len(messages) + 1,
+                "assistantTextLength": len(visible_assistant_text),
                 "toolCallCount": len(_extract_chat_tool_calls(result)),
                 "feedbackEventCount": feedback_event_count,
                 "hasThought": bool(assistant_entry.get("thought")),
@@ -12359,12 +12198,13 @@ def _persist_session_turn_result(
             EVENT_ASSISTANT_MESSAGE,
             status=final_status,
             payload={
-                "content": assistant_text,
+                "content": visible_assistant_text,
                 "thought": str(assistant_entry.get("thought") or ""),
                 "toolCalls": _normalize_message_tool_calls(assistant_entry.get("tool_calls") or assistant_entry.get("toolCalls") or []),
                 "feedbackEvents": _normalize_message_feedback_events(assistant_entry.get("feedback_events") or assistant_entry.get("feedbackEvents") or []),
                 "llmUsage": turn_llm_usage,
                 "mentalSnapshot": _normalize_mental_snapshot(assistant_entry.get("mental_snapshot")),
+                "metadata": assistant_entry.get("metadata") if isinstance(assistant_entry.get("metadata"), dict) else {},
             },
             source="persist_session_turn_result",
         )
@@ -12381,7 +12221,7 @@ def _persist_session_turn_result(
                 "finalStatus": final_status,
                 "marker": TURN_INTERRUPTED_MARKER if terminal_event == EVENT_TURN_INTERRUPTED else "",
                 "errorType": error_type if runtime_failed else "",
-                "summary": assistant_text,
+                "summary": visible_assistant_text,
             },
             source="persist_session_turn_result",
         )
@@ -12784,8 +12624,7 @@ def _persist_session_turn_runtime_error(
             return
         if turn_id and not _is_session_turn_current(session_id, turn_id):
             return
-        messages = normalize_chat_messages(conversation.get("messages") or [])
-        conversation["messages"] = messages + [error_entry]
+        conversation.pop("messages", None)
         conversation["last_turn_status"] = normalized_status
         conversation["last_turn_error"] = turn_error
         conversation["updated_at"] = timestamp
@@ -12841,6 +12680,20 @@ def _persist_session_turn_runtime_error(
         turn_error,
         raw_error=raw_error,
         status=normalized_status,
+    )
+    _append_session_conversation_event(
+        session_id,
+        turn_id,
+        EVENT_ASSISTANT_MESSAGE,
+        status=normalized_status,
+        payload={
+            "content": str(error_entry.get("content") or ""),
+            "thought": str(error_entry.get("thought") or ""),
+            "toolCalls": _normalize_message_tool_calls(error_entry.get("tool_calls") or error_entry.get("toolCalls") or []),
+            "feedbackEvents": _normalize_message_feedback_events(error_entry.get("feedback_events") or error_entry.get("feedbackEvents") or []),
+            "metadata": error_entry.get("metadata") if isinstance(error_entry.get("metadata"), dict) else {},
+        },
+        source="persist_session_turn_runtime_error",
     )
     _append_session_conversation_event(
         session_id,
@@ -12938,7 +12791,7 @@ def _persist_session_turn_failure(session_id: str, context: dict[str, Any], exc:
         conversation = _find_conversation_entry(payload, session_id)
         if conversation is None:
             return
-        messages = normalize_chat_messages(conversation.get("messages") or [])
+        messages = _session_ledger_visible_messages(session_id)
         if _looks_like_provider_error_text(raw_error):
             turn_error = _make_session_turn_error(raw_error, lang=lang, error_type=error_type, turn_id=turn_id)
             error_entry = _make_provider_failure_chat_message(
@@ -12947,7 +12800,7 @@ def _persist_session_turn_failure(session_id: str, context: dict[str, Any], exc:
                 turn_id=turn_id,
             )
             timestamp = str(error_entry.get("timestamp") or _now_timestamp()).strip()
-            conversation["messages"] = messages + [error_entry]
+            conversation.pop("messages", None)
             conversation["last_turn_status"] = "failed"
             conversation["last_turn_error"] = turn_error
             conversation["updated_at"] = timestamp
@@ -12994,7 +12847,7 @@ def _persist_session_turn_failure(session_id: str, context: dict[str, Any], exc:
                     "errorType": error_type,
                     "providerFailure": True,
                     "visibleErrorMessagePersisted": True,
-                    "messageCount": len(conversation.get("messages") or []),
+                    "messageCount": len(messages) + 1,
                 },
             )
             _record_session_turn_error(
@@ -13009,6 +12862,20 @@ def _persist_session_turn_failure(session_id: str, context: dict[str, Any], exc:
                 error_type=error_type,
                 raw_error=raw_error,
                 related_event_code="conversation.turn_error",
+            )
+            _append_session_conversation_event(
+                session_id,
+                turn_id,
+                EVENT_ASSISTANT_MESSAGE,
+                status="failed_provider",
+                payload={
+                    "content": str(error_entry.get("content") or ""),
+                    "thought": str(error_entry.get("thought") or ""),
+                    "toolCalls": _normalize_message_tool_calls(error_entry.get("tool_calls") or error_entry.get("toolCalls") or []),
+                    "feedbackEvents": _normalize_message_feedback_events(error_entry.get("feedback_events") or error_entry.get("feedbackEvents") or []),
+                    "metadata": error_entry.get("metadata") if isinstance(error_entry.get("metadata"), dict) else {},
+                },
+                source="persist_session_turn_failure",
             )
             _append_session_conversation_event(
                 session_id,
@@ -13031,7 +12898,7 @@ def _persist_session_turn_failure(session_id: str, context: dict[str, Any], exc:
             provider_failure=False,
         )
         timestamp = str(error_entry.get("timestamp") or _now_timestamp()).strip()
-        conversation["messages"] = messages + [error_entry]
+        conversation.pop("messages", None)
         conversation["last_turn_error"] = turn_error
         conversation["last_turn_status"] = "failed"
         conversation["updated_at"] = timestamp
@@ -13072,7 +12939,7 @@ def _persist_session_turn_failure(session_id: str, context: dict[str, Any], exc:
                 "errorType": error_type,
                 "providerFailure": False,
                 "visibleErrorMessagePersisted": True,
-                "messageCount": len(conversation.get("messages") or []),
+                "messageCount": len(messages) + 1,
             },
         )
         _record_session_turn_error(
@@ -13086,6 +12953,20 @@ def _persist_session_turn_failure(session_id: str, context: dict[str, Any], exc:
         error_entry,
         event="assistant_turn_error",
         status="failed",
+    )
+    _append_session_conversation_event(
+        session_id,
+        turn_id,
+        EVENT_ASSISTANT_MESSAGE,
+        status="failed_runtime",
+        payload={
+            "content": str(error_entry.get("content") or ""),
+            "thought": str(error_entry.get("thought") or ""),
+            "toolCalls": _normalize_message_tool_calls(error_entry.get("tool_calls") or error_entry.get("toolCalls") or []),
+            "feedbackEvents": _normalize_message_feedback_events(error_entry.get("feedback_events") or error_entry.get("feedbackEvents") or []),
+            "metadata": error_entry.get("metadata") if isinstance(error_entry.get("metadata"), dict) else {},
+        },
+        source="persist_session_turn_failure",
     )
     _append_session_conversation_event(
         session_id,
@@ -16255,11 +16136,37 @@ def _ledger_visible_messages_for_session(session_id: str) -> list[dict[str, Any]
     return conversation_visible_messages_from_events(events)
 
 
+def _session_ledger_visible_messages(session_id: str) -> list[dict[str, Any]]:
+    return _normalize_messages(session_id, _ledger_visible_messages_for_session(session_id))
+
+
+def _truncate_session_ledger_before_message(session_id: str, message: dict[str, Any]) -> None:
+    metadata = message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
+    event_id = str(metadata.get("eventId") or "").strip()
+    if not event_id:
+        return
+    events = load_conversation_events(PROJECT_ROOT, session_id)
+    target_index = -1
+    target_turn_id = ""
+    for index, event in enumerate(events):
+        if str(getattr(event, "event_id", "") or "").strip() != event_id:
+            continue
+        target_index = index
+        target_turn_id = str(getattr(event, "turn_id", "") or "").strip()
+        break
+    if target_index < 0:
+        return
+    truncate_index = target_index
+    if target_turn_id:
+        for index, event in enumerate(events):
+            if str(getattr(event, "turn_id", "") or "").strip() == target_turn_id:
+                truncate_index = index
+                break
+    rewrite_conversation_events(PROJECT_ROOT, session_id, events[:truncate_index])
+
+
 def _messages_with_live_output(session_id: str) -> list[dict[str, Any]]:
-    detail_messages = _merge_cli_agent_lifecycle_sidecar_messages(
-        session_id,
-        _normalize_messages(session_id, _ledger_visible_messages_for_session(session_id)),
-    )
+    detail_messages = _session_ledger_visible_messages(session_id)
     live_message = _build_live_output_message(session_id)
     if live_message is None:
         return detail_messages
@@ -16858,7 +16765,7 @@ def _persist_session_interrupted_snapshot(
         conversation = _find_conversation_entry(payload, session_id)
         if conversation is None:
             return
-        messages = normalize_chat_messages(conversation.get("messages") or [])
+        messages = _session_ledger_visible_messages(session_id)
         if _latest_assistant_message_is_stop(messages):
             conversation["last_turn_status"] = "ready"
             payload["updated_at"] = conversation.get("updated_at") or _now_timestamp()
@@ -16953,14 +16860,14 @@ def _persist_session_interrupted_snapshot(
             assistant_entry["toolCalls"] = live_tools
         if live_feedback_events:
             assistant_entry["feedbackEvents"] = live_feedback_events
-        conversation["messages"] = messages + [assistant_entry]
         next_active_task = _build_session_active_task(
             session_id,
             stopped_result,
-            conversation["messages"],
+            [*messages, assistant_entry],
             existing_task=existing_active_task,
         )
         _set_or_clear_session_active_task(conversation, next_active_task)
+        conversation.pop("messages", None)
         conversation["last_turn_status"] = "ready"
         conversation["updated_at"] = assistant_entry["timestamp"]
         payload["updated_at"] = assistant_entry["timestamp"]
@@ -17717,7 +17624,7 @@ def _latest_unfinished_task_goal_with_source(session_id: str) -> tuple[str, str]
         active_task = _normalize_session_active_task(
             conversation.get("active_task") or conversation.get("activeTask")
         )
-        messages = normalize_chat_messages(conversation.get("messages") or [])
+    messages = _session_ledger_visible_messages(session_id)
     if not _is_task_tool_backed_active_task(active_task):
         return "", ""
     status = str(active_task.get("status") or "").strip().lower()

@@ -10,11 +10,53 @@ from types import SimpleNamespace
 import pytest
 
 from config import AppConfig
+from core.chat.conversation_ledger import (
+    EVENT_ASSISTANT_MESSAGE,
+    EVENT_USER_MESSAGE,
+    append_conversation_event,
+    conversation_visible_messages_from_events,
+    load_conversation_events,
+)
 from core.evaluation.chat_dataset_capture import ChatDatasetCaptureService, resolve_chat_dataset_paths
 from core.evaluation.chat_review_queue import get_review_item
 from core.evaluation.chat_segmenter import ChatTurnRecord
 from core.ui.chat_state import build_chat_state, load_chat_state, save_chat_state
 from core.ui.workbench import AgentWorkbenchShell
+
+
+def _seed_ledger_messages(
+    project_root: Path,
+    messages: list[dict],
+    *,
+    session_id: str = "default",
+    prefix: str = "test",
+) -> None:
+    for index, message in enumerate(messages, start=1):
+        role = str(message.get("role") or "").strip().lower()
+        event_type = EVENT_USER_MESSAGE if role == "user" else EVENT_ASSISTANT_MESSAGE
+        payload = {
+            "content": str(message.get("content") or ""),
+            "metadata": dict(message.get("metadata") or {}) if isinstance(message.get("metadata"), dict) else {},
+        }
+        if role == "assistant":
+            payload["toolCalls"] = list(message.get("toolCalls") or message.get("tool_calls") or [])
+        append_conversation_event(
+            project_root,
+            session_id,
+            f"{prefix}-{index:03d}",
+            event_type,
+            status="recorded" if role == "user" else "completed",
+            payload=payload,
+            timestamp=str(message.get("timestamp") or ""),
+        )
+
+
+def _ledger_messages(project_root: Path, *, session_id: str = "default") -> list[dict]:
+    return conversation_visible_messages_from_events(load_conversation_events(project_root, session_id))
+
+
+def _role_content(messages: list[dict]) -> list[tuple[str, str]]:
+    return [(str(item.get("role") or ""), str(item.get("content") or "")) for item in messages]
 
 
 def test_workbench_module_py_compiles():
@@ -365,8 +407,7 @@ def test_workbench_chat_evolution_mention_stays_in_chat(monkeypatch, tmp_path: P
     assert chat_calls == ["开始自主进化"]
     assert evolution_calls == []
     assert shell._recent_status == "已退出工作台"
-    state = load_chat_state(tmp_path)
-    active = state["conversations"][0]["messages"]
+    active = _ledger_messages(tmp_path)
     assert active[-2]["content"] == "开始自主进化"
     assert active[-1]["content"] == "收到"
 
@@ -513,6 +554,7 @@ def test_workbench_chat_persists_and_restores_single_conversation(monkeypatch, t
     ]
     monkeypatch.setattr("core.ui.workbench.PROJECT_ROOT", tmp_path)
     save_chat_state(tmp_path, build_chat_state(saved_messages))
+    _seed_ledger_messages(tmp_path, saved_messages, prefix="saved")
 
     shell = AgentWorkbenchShell(config=SimpleNamespace(avatar=SimpleNamespace(preset="default")))
     fake_ui = _FakeUI()
@@ -531,12 +573,13 @@ def test_workbench_chat_persists_and_restores_single_conversation(monkeypatch, t
 
     shell._run_chat(lambda: DummyAgent())
 
-    assert fake_ui.loaded_chat_messages == [saved_messages]
-    assert restored["messages"] == saved_messages
+    assert _role_content(fake_ui.loaded_chat_messages[0]) == _role_content(saved_messages)
+    assert _role_content(restored["messages"]) == _role_content(saved_messages)
     state = load_chat_state(tmp_path)
-    active = state["conversations"][0]["messages"]
+    active = _ledger_messages(tmp_path)
     assert active[-2]["content"] == "继续聊"
     assert active[-1]["content"] == "收到：继续聊"
+    assert "messages" not in state["conversations"][0]
 
 
 def test_workbench_chat_coding_task_formats_reply_and_persists_task_state(monkeypatch, tmp_path: Path):
@@ -613,8 +656,9 @@ def test_workbench_chat_persists_assistant_tool_calls(monkeypatch, tmp_path: Pat
     assert fake_ui.chat_messages[1]["tool_calls"] == ["read_file_tool", "run_test_for_tool"]
 
     state = load_chat_state(tmp_path)
-    active = state["conversations"][0]["messages"]
-    assert active[-1]["tool_calls"] == ["read_file_tool", "run_test_for_tool"]
+    active = _ledger_messages(tmp_path)
+    assert [item["name"] for item in active[-1]["toolCalls"]] == ["read_file_tool", "run_test_for_tool"]
+    assert "messages" not in state["conversations"][0]
 
 
 def test_workbench_chat_coding_task_consumes_explicit_result_contract(monkeypatch, tmp_path: Path):
@@ -649,7 +693,7 @@ def test_workbench_chat_coding_task_consumes_explicit_result_contract(monkeypatc
     assert state["conversations"][0].get("active_task") is None
 
 
-def test_build_chat_state_preserves_structured_tool_calls():
+def test_build_chat_state_omits_legacy_message_storage():
     state = build_chat_state(
         [
             {
@@ -661,11 +705,10 @@ def test_build_chat_state_preserves_structured_tool_calls():
         ]
     )
 
-    message = state["conversations"][0]["messages"][0]
-    assert message["tool_calls"] == [{"name": "read_file_tool"}, "run_test_for_tool"]
+    assert "messages" not in state["conversations"][0]
 
 
-def test_build_chat_state_keeps_tool_only_assistant_messages():
+def test_build_chat_state_keeps_only_conversation_metadata():
     state = build_chat_state(
         [
             {
@@ -677,10 +720,10 @@ def test_build_chat_state_keeps_tool_only_assistant_messages():
         ]
     )
 
-    message = state["conversations"][0]["messages"][0]
-    assert message["role"] == "assistant"
-    assert message["content"] == ""
-    assert message["tool_calls"] == [{"name": "read_file_tool"}, "run_test_for_tool"]
+    conversation = state["conversations"][0]
+    assert conversation["conversation_id"] == "default"
+    assert conversation["title"]
+    assert "messages" not in conversation
 
 
 def test_workbench_chat_falls_back_to_structured_reply_when_visible_text_is_missing(monkeypatch, tmp_path: Path):

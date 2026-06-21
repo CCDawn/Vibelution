@@ -233,6 +233,35 @@ def load_turn_events(project_root: Path, session_id: str) -> list[TurnJournalEve
     return events
 
 
+def rewrite_turn_events(project_root: Path, session_id: str, events: Iterable[TurnJournalEvent]) -> None:
+    path = turn_journal_path(project_root, session_id)
+    event_list = [event for event in list(events or []) if isinstance(event, TurnJournalEvent)]
+    with _SEQUENCE_CACHE_LOCK:
+        if not event_list:
+            try:
+                path.unlink()
+            except FileNotFoundError:
+                pass
+            except OSError:
+                return
+            _SEQUENCE_CACHE.pop(_sequence_cache_key(path), None)
+            return
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp_path = path.with_name(f"{path.name}.tmp")
+        try:
+            with tmp_path.open("w", encoding="utf-8") as handle:
+                for event in event_list:
+                    handle.write(json.dumps(event.to_dict(), ensure_ascii=False, separators=(",", ":")))
+                    handle.write("\n")
+            tmp_path.replace(path)
+            _SEQUENCE_CACHE.pop(_sequence_cache_key(path), None)
+        except OSError:
+            try:
+                tmp_path.unlink()
+            except OSError:
+                pass
+
+
 def latest_open_turn_id(events: Iterable[TurnJournalEvent]) -> str:
     event_list = list(events or [])
     terminal_turn_ids = {
@@ -331,6 +360,7 @@ def model_visible_messages_from_events(events: Iterable[TurnJournalEvent]) -> li
                     {
                         "role": "user",
                         "content": content,
+                        "timestamp": event.timestamp,
                         "attachments": list(payload.get("attachments") or []),
                         "metadata": message_metadata,
                     }
@@ -341,6 +371,7 @@ def model_visible_messages_from_events(events: Iterable[TurnJournalEvent]) -> li
                 kind="journal_assistant_partial",
                 turn_id=turn_id,
                 event_id=event.event_id,
+                timestamp=event.timestamp,
                 interrupted=False,
             )
             if _message_has_visible_payload(partial):
@@ -351,6 +382,7 @@ def model_visible_messages_from_events(events: Iterable[TurnJournalEvent]) -> li
                 kind="journal_assistant_message",
                 turn_id=turn_id,
                 event_id=event.event_id,
+                timestamp=event.timestamp,
                 interrupted=False,
             )
             if _message_has_visible_payload(message):
@@ -388,6 +420,7 @@ def model_visible_messages_from_events(events: Iterable[TurnJournalEvent]) -> li
                     {
                         "role": "system",
                         "content": str(payload.get("marker") or TURN_INTERRUPTED_MARKER),
+                        "timestamp": event.timestamp,
                         "metadata": {
                             "kind": "turn_interrupted",
                             "turnId": turn_id,
@@ -408,6 +441,7 @@ def model_visible_messages_from_events(events: Iterable[TurnJournalEvent]) -> li
                 {
                     "role": "system",
                     "content": TURN_INTERRUPTED_MARKER,
+                    "timestamp": str(partial.get("timestamp") or ""),
                     "metadata": {
                         "kind": "turn_interrupted",
                         "turnId": turn_id,
@@ -434,6 +468,7 @@ def _assistant_message_from_payload(
     turn_id: str,
     event_id: str,
     interrupted: bool,
+    timestamp: str = "",
 ) -> dict[str, Any]:
     message: dict[str, Any] = {
         "role": "assistant",
@@ -445,6 +480,8 @@ def _assistant_message_from_payload(
             "interrupted": interrupted,
         },
     }
+    if timestamp:
+        message["timestamp"] = timestamp
     metadata = payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {}
     if metadata:
         message["metadata"].update(metadata)
@@ -519,11 +556,14 @@ def _tool_message_from_event(event: TurnJournalEvent) -> dict[str, Any]:
     return {
         "role": "assistant",
         "content": "",
+        "timestamp": event.timestamp,
         "toolCalls": [normalized],
         "metadata": {
             "kind": event.event_type,
             "turnId": event.turn_id,
             "eventId": event.event_id,
+            "correlationId": str(event.correlation_id or "").strip(),
+            "resultKey": str(event.correlation_id or "").strip() if event.event_type == EVENT_CLI_TASK_RESULT else "",
         },
     }
 
@@ -536,6 +576,7 @@ def _checkpoint_message_from_event(event: TurnJournalEvent) -> dict[str, Any]:
     return {
         "role": "assistant",
         "content": f"历史检查点：\n{summary}",
+        "timestamp": event.timestamp,
         "metadata": {
             "kind": EVENT_COMPACTION_CHECKPOINT,
             "turnId": event.turn_id,
@@ -564,11 +605,13 @@ def _lifecycle_message_from_event(event: TurnJournalEvent) -> dict[str, Any]:
     return {
         "role": "assistant",
         "content": content,
+        "timestamp": event.timestamp,
         "metadata": {
             "kind": EVENT_CLI_SESSION_LIFECYCLE,
             "turnId": event.turn_id,
             "eventId": event.event_id,
             "event": event_name,
+            "lifecycleKey": str(lifecycle.get("lifecycleKey") or "").strip(),
             "terminalSessionId": str(lifecycle.get("terminalSessionId") or "").strip(),
             "cliRunId": str(lifecycle.get("cliRunId") or "").strip(),
             "adapterId": str(lifecycle.get("adapterId") or "").strip(),
@@ -807,6 +850,7 @@ __all__ = [
     "latest_turn_sequence",
     "latest_open_turn_id",
     "load_turn_events",
+    "rewrite_turn_events",
     "model_visible_messages_from_events",
     "model_messages_from_events",
     "turn_journal_path",

@@ -13,6 +13,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
+from core.chat.conversation_ledger import (
+    EVENT_ASSISTANT_MESSAGE,
+    append_conversation_event,
+    conversation_visible_messages_from_events,
+    latest_ledger_sequence,
+    load_conversation_events,
+    rewrite_conversation_events,
+)
 from core.chat.chat_task_types import trim_lines
 from core.chatroom.scheduler import get_scheduler_registry
 from core.chatroom.store import ChatRoomStore, utc_now_iso
@@ -22,7 +30,7 @@ from core.orchestration.output_boundary import sanitize_assistant_visible_text
 from core.orchestration.turn_runner import prepare_agent_turn, run_existing_agent_single_turn
 from core.runtime_manager import work_run_store
 from core.runtime_manager.work_run_leases import READONLY_CHAT_LEASE
-from core.ui.chat_state import chat_state_path, load_chat_state, normalize_chat_messages, save_chat_state
+from core.ui.chat_state import chat_state_path, load_chat_state, save_chat_state
 
 from . import agent_directory_service, session_service
 from .agent_directory_service import active_agent_runtime, evaluate_agent_workspace_write, write_group_context_event
@@ -2338,20 +2346,33 @@ def _sync_group_round_to_participant_sessions(room: dict[str, Any], round_payloa
                 if conversation is None:
                     missing_count += 1
                     continue
-            raw_messages = list(conversation.get("messages") or [])
-            if _has_group_round_session_sync(raw_messages, room_id=room_id, round_id=round_id):
+            session_messages = conversation_visible_messages_from_events(
+                load_conversation_events(PROJECT_ROOT, session_id)
+            )
+            if _has_group_round_session_sync(session_messages, room_id=room_id, round_id=round_id):
                 skipped_count += 1
                 continue
-            raw_messages.append(
-                _build_group_round_session_message(
-                    room,
-                    round_payload,
-                    participant,
-                    messages,
-                    timestamp=timestamp,
-                )
+            transcript_message = _build_group_round_session_message(
+                room,
+                round_payload,
+                participant,
+                messages,
+                timestamp=timestamp,
             )
-            conversation["messages"] = normalize_chat_messages(raw_messages)
+            append_conversation_event(
+                PROJECT_ROOT,
+                session_id,
+                f"chat-room-{round_id or uuid.uuid4().hex}",
+                EVENT_ASSISTANT_MESSAGE,
+                status="completed",
+                payload={
+                    "content": str(transcript_message.get("content") or ""),
+                    "metadata": transcript_message.get("metadata") if isinstance(transcript_message.get("metadata"), dict) else {},
+                },
+                source="chat_room_round_sync",
+                timestamp=timestamp,
+            )
+            conversation.pop("messages", None)
             conversation["updated_at"] = timestamp
             synced_count += 1
         if synced_count:
@@ -2392,16 +2413,20 @@ def _remove_group_room_transcripts_from_participant_sessions(
         for conversation in conversations:
             if not isinstance(conversation, dict):
                 continue
-            messages = [item for item in list(conversation.get("messages") or []) if isinstance(item, dict)]
-            kept_messages = [
-                item
-                for item in messages
-                if not _is_group_room_transcript_message(item, normalized_room_id)
+            session_id = str(conversation.get("conversation_id") or conversation.get("id") or "").strip()
+            if not session_id:
+                continue
+            events = load_conversation_events(PROJECT_ROOT, session_id)
+            kept_events = [
+                event
+                for event in events
+                if not _is_group_room_transcript_event(event, normalized_room_id)
             ]
-            removed_count = len(messages) - len(kept_messages)
+            removed_count = len(events) - len(kept_events)
             if removed_count <= 0:
                 continue
-            conversation["messages"] = normalize_chat_messages(kept_messages)
+            rewrite_conversation_events(PROJECT_ROOT, session_id, kept_events)
+            conversation.pop("messages", None)
             conversation["updated_at"] = utc_now_iso()
             changed_session_count += 1
             removed_message_count += removed_count
@@ -2422,6 +2447,22 @@ def _is_group_room_transcript_message(message: dict[str, Any], room_id: str) -> 
             and str(metadata.get("sourceRoomId") or "").strip() == room_id
         )
     content = str(message.get("content") or "")
+    return "[群聊同步]" in content and room_id in content
+
+
+def _is_group_room_transcript_event(event: Any, room_id: str) -> bool:
+    if event is None:
+        return False
+    payload = getattr(event, "payload", None)
+    if not isinstance(payload, dict):
+        return False
+    metadata = payload.get("metadata")
+    if isinstance(metadata, dict):
+        return (
+            str(metadata.get("kind") or "").strip() == "group_room_transcript"
+            and str(metadata.get("sourceRoomId") or "").strip() == room_id
+        )
+    content = str(payload.get("content") or "")
     return "[群聊同步]" in content and room_id in content
 
 
@@ -3131,7 +3172,7 @@ def _chat_state_participant_index_signature(*, session_ids: set[str] | None = No
             continue
         if target_session_ids is not None and session_id not in target_session_ids:
             continue
-        messages = raw.get("messages")
+        has_ledger_messages = bool(latest_ledger_sequence(PROJECT_ROOT, session_id))
         rows.append(
             (
                 session_id,
@@ -3143,7 +3184,7 @@ def _chat_state_participant_index_signature(*, session_ids: set[str] | None = No
                 bool(raw.get("agentDirectSessionMismatch")),
                 _signature_text(raw, "agentPrimaryDirectSessionId"),
                 _signature_text(raw, "workspace_path", "workspacePath"),
-                bool(messages),
+                has_ledger_messages,
             )
         )
     return ("chat_state_participants_v1", str(path), tuple(rows))
