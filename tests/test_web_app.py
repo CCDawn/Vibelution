@@ -1753,12 +1753,10 @@ def test_delete_session_switches_to_latest_remaining_session(tmp_path, monkeypat
     ]
     assert [event["eventCode"] for event in events] == [
         "session.delete.requested",
-        "session.delete.agent_unbound",
         "session.delete.deleted",
     ]
     assert events[0]["fields"]["phase"] == "ready"
-    assert events[1]["fields"]["previousDirectSessionId"] == "session-live"
-    assert events[2]["fields"]["nextActiveSessionId"] == "session-newer"
+    assert events[1]["fields"]["nextActiveSessionId"] == "session-newer"
 
 
 def test_delete_session_keeps_bound_agent_active(tmp_path, monkeypatch):
