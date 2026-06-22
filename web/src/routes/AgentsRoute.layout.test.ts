@@ -291,7 +291,7 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("DEFAULT_SESSION_AGENT_ALLOWED_TOOLS");
     expect(routeSource).toContain("DEFAULT_SESSION_AGENT_PREFERRED_TOOLS");
     expect(routeSource).toContain("\"conversation_log_inspect_tool\"");
-    expect(routeSource).toContain("\"read_file_tool\"");
+    expect(routeSource).not.toContain("\"read_file_tool\",");
     expect(routeSource).toContain("\"grep_search_tool\"");
     expect(routeSource).toContain("\"glob_tool\"");
     expect(routeSource).not.toContain("\"cli_agent_run_tool\"");
