@@ -1,13 +1,17 @@
 import { describe, expect, it } from "vitest";
 
-import type { ConversationSummary, SessionSummary, Team } from "../api/types";
+import type { AgentInstance, ConversationSummary, SessionSummary, Team } from "../api/types";
 import {
+  agentToConversationSummary,
   buildConversationIndexModel,
   classifyConversation,
   conversationGroupLabel,
+  DEFAULT_COLLAPSED_CONVERSATION_GROUPS,
   hasInvalidChildSessionLink,
   isDiscussionTeam,
+  isVisibleConversationAgent,
   normalizeConversationIndexTeams,
+  mergeVisibleAgentsIntoConversations,
   mergeVisibleSessionsIntoConversations,
   rootSessionIdFor,
   sessionToConversationSummary,
@@ -71,6 +75,29 @@ function team(overrides: Partial<Team> = {}): Team {
   };
 }
 
+function agent(overrides: Partial<AgentInstance> = {}): AgentInstance {
+  return {
+    agentId: "agent-1",
+    agentCode: "A001",
+    displayName: "科研助手",
+    kind: "persistent",
+    primaryMode: "research",
+    roleKey: "research_quality",
+    llmBindings: { dialogue: { modelId: "mimo-v2.5" } },
+    promptTemplateId: "prompt-research-quality",
+    directSessionId: "session-agent-1",
+    workspacePath: "C:/workspace/agent-1",
+    toolPolicyId: "default",
+    memoryPolicyId: "default",
+    createdBy: "user",
+    status: "idle",
+    metadata: {},
+    createdAt: "2026-06-09T00:00:00.000Z",
+    updatedAt: "2026-06-09T00:00:00.000Z",
+    ...overrides,
+  };
+}
+
 describe("conversationIndexModel", () => {
   it("converts sessions to direct conversations without losing model and Agent metadata", () => {
     const summary = sessionToConversationSummary(session({
@@ -103,6 +130,46 @@ describe("conversationIndexModel", () => {
     expect(merged.map((item) => item.conversationId)).toEqual(["new", "old"]);
   });
 
+  it("converts visible persistent Agents into direct conversations for the categorized chat index", () => {
+    const summary = agentToConversationSummary(agent({
+      agentId: "agent-research",
+      agentCode: "R001",
+      displayName: "证据审查",
+      directSessionId: "session-research",
+      agentInboxPendingCount: 2,
+    }));
+
+    expect(summary).toMatchObject({
+      conversationId: "session-research",
+      directSessionId: "session-research",
+      type: "direct_agent",
+      title: "证据审查",
+      agentId: "agent-research",
+      agentPrimaryMode: "research",
+      agentRoleKey: "research_quality",
+      agentPromptTemplateId: "prompt-research-quality",
+      dialogueModelId: "mimo-v2.5",
+      agentInboxPendingCount: 2,
+    });
+  });
+
+  it("only adds clickable, non-archived persistent Agents that are not already represented by sessions", () => {
+    const existing = conversation({ conversationId: "session-existing", directSessionId: "session-existing", agentId: "agent-existing" });
+    const merged = mergeVisibleAgentsIntoConversations(
+      [existing],
+      [
+        agent({ agentId: "agent-existing", directSessionId: "session-existing", displayName: "已有会话" }),
+        agent({ agentId: "agent-missing", directSessionId: "session-missing", displayName: "缺席分页 Agent" }),
+        agent({ agentId: "agent-archived", directSessionId: "session-archived", status: "archived" }),
+        agent({ agentId: "agent-no-session", directSessionId: "" }),
+      ],
+    );
+
+    expect(isVisibleConversationAgent(agent({ status: "archived" }))).toBe(false);
+    expect(isVisibleConversationAgent(agent({ directSessionId: "" }))).toBe(false);
+    expect(merged.map((item) => item.conversationId).sort()).toEqual(["session-existing", "session-missing"]);
+  });
+
   it("classifies and labels conversation groups", () => {
     expect(classifyConversation(conversation({ agentPrimaryMode: "research" }))).toBe("research");
     expect(classifyConversation(conversation({ title: "自进化 Agent" }))).toBe("selfEvolution");
@@ -112,6 +179,10 @@ describe("conversationIndexModel", () => {
     expect(conversationGroupLabel("other", "zh")).toBe("其他助手");
     expect(conversationGroupLabel("setupTeams", "zh")).toBe("待配置团队");
     expect(conversationGroupLabel("standaloneGroups", "zh")).toBe("未归属群聊");
+    expect(DEFAULT_COLLAPSED_CONVERSATION_GROUPS.research).toBe(false);
+    expect(DEFAULT_COLLAPSED_CONVERSATION_GROUPS.selfEvolution).toBe(false);
+    expect(DEFAULT_COLLAPSED_CONVERSATION_GROUPS.supervisedEvolution).toBe(false);
+    expect(DEFAULT_COLLAPSED_CONVERSATION_GROUPS.other).toBe(false);
   });
 
   it("derives the visible conversation index model with direct, team, and standalone filters", () => {
@@ -131,6 +202,7 @@ describe("conversationIndexModel", () => {
       rightIndexSessions: [visibleSession],
       sessionFilter: "知识",
       sessionsById: new Map([[visibleSession.id, visibleSession], [childSession.id, childSession]]),
+      agents: [],
       teams: [
         team({ purpose: "知识治理" }),
         team({ teamId: "team-2", name: "普通团队", purpose: "闲聊" }),
@@ -155,6 +227,40 @@ describe("conversationIndexModel", () => {
     expect(model.groupedConversations.map((group) => group.groupKey)).toEqual(["user"]);
     expect(model.filteredStandaloneGroupConversations).toEqual([]);
     expect(model.filteredTeams.map((item) => item.teamId)).toEqual(["team-1"]);
+  });
+
+  it("groups visible Agents by category even when their sessions are not in the current session page", () => {
+    const model = buildConversationIndexModel({
+      agents: [
+        agent({ agentId: "agent-research-1", directSessionId: "session-research-1", displayName: "许景行", primaryMode: "research" }),
+        agent({ agentId: "agent-research-2", directSessionId: "session-research-2", displayName: "白书遥", primaryMode: "research" }),
+        agent({
+          agentId: "agent-user",
+          directSessionId: "session-user",
+          displayName: "周书遥",
+          primaryMode: "chat",
+          roleKey: "chat",
+          promptTemplateId: "prompt-chat",
+        }),
+      ],
+      conversations: [],
+      lang: "zh",
+      linkedTeamRoomIds: new Set(),
+      rawSessions: [],
+      rightIndexSessions: [],
+      sessionFilter: "",
+      sessionsById: new Map(),
+      teams: [],
+    });
+
+    const groups = new Map(model.groupedConversations.map((group) => [group.groupKey, group.items]));
+    expect(groups.get("research")?.map((item) => item.title).sort()).toEqual(["白书遥", "许景行"]);
+    expect(groups.get("user")?.map((item) => item.title)).toEqual(["周书遥"]);
+    expect(model.filteredConversations.map((item) => item.directSessionId).sort()).toEqual([
+      "session-research-1",
+      "session-research-2",
+      "session-user",
+    ]);
   });
 
   it("deduplicates same-name empty Teams before they reach the chat index", () => {
