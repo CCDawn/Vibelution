@@ -80,7 +80,8 @@ def test_intelligence_collection_materializes_strategy_case():
     assert len(cases) == 1
     assert cases[0].case_id == "strategy_selection_policy_probe"
     assert cases[0].validation["scenario"] == "strategy"
-    assert cases[0].validation["required_tools"] == ["read_file_tool"]
+    assert cases[0].validation["required_tools"] == ["cli_tool"]
+    assert cases[0].allowed_tools == ["cli_tool"]
     assert "open_evolution_transaction_tool" in cases[0].validation["forbidden_tools"]
 
 
