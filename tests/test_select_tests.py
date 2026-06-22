@@ -1,4 +1,5 @@
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -7,12 +8,40 @@ from tests import conftest as test_conftest
 from tests import select_tests
 
 
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+
 def test_matrix_loads_with_builtin_subset_parser():
     matrix = select_tests._parse_yaml_subset(select_tests.DEFAULT_MATRIX.read_text(encoding="utf-8"))
 
     assert matrix["version"] == 1
     assert matrix["always"]["commands"] == ["git diff --check"]
     assert any(rule["id"] == "web-session-chat" for rule in matrix["rules"])
+
+
+def test_matrix_references_existing_test_files_and_directories():
+    matrix = select_tests.load_matrix()
+    missing_paths: list[str] = []
+    missing_command_tests: list[str] = []
+
+    for rule in matrix["rules"]:
+        for pattern in rule.get("paths", []):
+            normalized = select_tests.normalize_path(str(pattern))
+            if "*" in normalized:
+                matches = list(PROJECT_ROOT.glob(normalized))
+                if not matches and not normalized.startswith(".docs/"):
+                    missing_paths.append(f"{rule['id']}:{normalized}")
+            elif normalized.startswith("tests/") and not (PROJECT_ROOT / normalized).exists():
+                missing_paths.append(f"{rule['id']}:{normalized}")
+
+        for command in rule.get("commands", []):
+            for match in re.finditer(r"tests/[A-Za-z0-9_./-]+\.py", str(command).replace("\\", "/")):
+                test_path = match.group(0)
+                if not (PROJECT_ROOT / test_path).exists():
+                    missing_command_tests.append(f"{rule['id']}:{test_path}")
+
+    assert missing_paths == []
+    assert missing_command_tests == []
 
 
 def test_runtime_manager_isolation_hint_skips_pure_test_files(tmp_path: Path):
@@ -129,6 +158,21 @@ def test_selector_matches_web_runtime_routes_to_runtime_validation_commands():
     assert "tests/test_web_runtime_routes.py" in result["matchedRules"][0]["matchedFiles"]
     assert any("tests/test_web_runtime_routes.py" in command for command in result["commands"])
     assert not any("tests/test_web_app.py" in command for command in result["commands"])
+
+
+def test_selector_matches_current_evolution_service_layout():
+    result = select_tests.select_tests(
+        [
+            "core/evaluation/supervised_evolution.py",
+            "core/web/services/self_evolution_control_service.py",
+            "core/web/services/supervised_worktree_evolution_service.py",
+        ],
+        select_tests.load_matrix(),
+    )
+
+    assert {rule["id"] for rule in result["matchedRules"]} == {"web-evolution"}
+    assert any("tests/test_web_evolution_routes.py" in command for command in result["commands"])
+    assert any("tests/test_evolution_harness.py" in command for command in result["commands"])
 
 
 def test_selector_matches_real_runtime_route_to_runtime_validation_commands():
