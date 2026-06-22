@@ -121,6 +121,23 @@ def test_build_parallel_pytest_shell_command_reads_targets_from_manifest():
     assert "-m 'not serial'" in command
 
 
+def test_distributed_correctness_summary_names_excluded_gates():
+    summary = remote_test_runner.build_distributed_correctness_summary(
+        local_targets=[Path("tests/test_a.py")],
+        remote_targets=[Path("tests/test_b.py"), Path("tests/test_c.py")],
+        local_workers=8,
+        remote_workers=16,
+    )
+
+    assert summary.startswith("correctness_scope=python_pytest:not_serial")
+    assert "targets:3" in summary
+    assert "local_targets:1" in summary
+    assert "remote_targets:2" in summary
+    assert "workers:8+16" in summary
+    assert "excluded:serial_pytest,frontend_vitest,frontend_build" in summary
+    assert "gate_hint:run_serial_and_frontend_for_release_or_matching_changes" in summary
+
+
 def test_create_source_archive_can_embed_extra_files(tmp_path):
     project = tmp_path / "project"
     project.mkdir()
@@ -281,6 +298,8 @@ def test_distributed_dry_run_splits_local_and_remote_commands(tmp_path, monkeypa
     output = capsys.readouterr().out
     assert calls == []
     assert "distributed_split=local:" in output
+    assert "correctness_scope=python_pytest:not_serial" in output
+    assert "excluded:serial_pytest,frontend_vitest,frontend_build" in output
     assert "remote:" in output
     assert "local " in output
     assert "-n 8" in output
