@@ -22,7 +22,8 @@ def materialize_intelligence_strategy_cases() -> list[GymCase]:
     exercise = build_intelligence_strategy_exercise()
     prompt = (
         "Run this intelligence strategy Gym probe as a read-only analysis. "
-        "Read core/gym/selection.py and core/gym/vibelution_adapter.py, then answer with exactly three bullets: "
+        "Use cli_tool with rg and bounded PowerShell reads to inspect core/gym/selection.py "
+        "and core/gym/vibelution_adapter.py, then answer with exactly three bullets: "
         "1) the promotion risk in one sentence, "
         "2) the smallest policy improvement in one sentence, "
         "3) the regression test that would protect it in one sentence. "
@@ -38,7 +39,7 @@ def materialize_intelligence_strategy_cases() -> list[GymCase]:
                 "mode": "single_turn",
                 "expect_restart": False,
                 "timeout_seconds": 600,
-                "required_tools": ["read_file_tool"],
+                "required_tools": ["cli_tool"],
                 "forbidden_tools": [
                     "spawn_agent_tool",
                     "write_file_tool",
@@ -57,13 +58,13 @@ def materialize_intelligence_strategy_cases() -> list[GymCase]:
             training_tier=exercise.training_tier,
             capability_tags=exercise.capability_tags,
             constraints=[
-                "read the named files before answering",
+                "use cli_tool with rg and bounded PowerShell reads before answering",
                 "return exactly three bullets",
                 "do not modify files",
                 "do not open an evolution transaction",
                 "do not delegate",
             ],
-            allowed_tools=["read_file_tool"],
+            allowed_tools=["cli_tool"],
             dataset_ref={"dataset": "builtin_intelligence_gym", "exercise_id": exercise.exercise_id},
         )
     ]
