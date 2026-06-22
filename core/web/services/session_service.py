@@ -5648,9 +5648,11 @@ def _agent_directory_stub_hidden_from_user_index(
     agent_id = str(agent.get("agentId") or "").strip()
     if not agent_id:
         return True
+    metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
+    if bool(metadata.get("showInSessionIndex")) or str(metadata.get("directSessionVisibility") or "").strip() == "active_session":
+        return False
     if agent_id in hidden_team_member_agent_ids:
         return True
-    metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
     creation_spec = metadata.get("creationSpec") if isinstance(metadata.get("creationSpec"), dict) else {}
     created_by = str(agent.get("createdBy") or creation_spec.get("source") or "").strip()
     return created_by in _AGENT_DIRECTORY_STUB_HIDDEN_CREATED_BY

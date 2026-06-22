@@ -5195,11 +5195,9 @@ export function TeamsRoute({
       navigate(chatRoute);
       return;
     }
-    if (binding?.agentId) {
-      navigate(researchStageAgentManagementRoute(binding.agentId));
-      return;
-    }
-    navigate("/agents");
+    window.alert(lang === "zh"
+      ? "当前步骤 Agent 缺少可用私聊会话，请先修复团队 Agent 绑定。"
+      : "This step Agent has no direct chat session. Repair the Team Agent binding first.");
   }
 
   function renderSourceCollectionStageAgents(stageId: SourceCollectionStageModuleId) {
@@ -7278,10 +7276,6 @@ export function TeamsRoute({
       ?? sourceCollectionStageModules[0];
     const primaryStageAgentBinding = sourceCollectionStagePrimaryAgentBinding(activeModule.id);
     const primaryStageAgentChatRoute = researchStageAgentDirectChatRoute(primaryStageAgentBinding?.agent);
-    const primaryStageAgentFallbackRoute = primaryStageAgentBinding?.agentId
-      ? researchStageAgentManagementRoute(primaryStageAgentBinding.agentId)
-      : "/agents";
-    const primaryStageAgentRoute = primaryStageAgentChatRoute || primaryStageAgentFallbackRoute;
     const resultPanel = selectedSourceCollectionStageId === "screening"
       ? renderSourceCollectionScreeningPanel()
       : selectedSourceCollectionStageId === "candidate"
@@ -7309,17 +7303,24 @@ export function TeamsRoute({
             <span className={styles.sourceCollectionStageHandoffNext}><b>{lang === "zh" ? "下一步" : "Next"}</b>{activeModule.nextLabel}</span>
           </div>
           <div className={styles.sourceCollectionStageChatActions}>
-            <Link
-              to={primaryStageAgentRoute}
-              title={primaryStageAgentChatRoute
-                ? SOURCE_COLLECTION_STAGE_CHAT_LABELS[activeModule.id][lang]
-                : (lang === "zh" ? "当前步骤缺少可用私聊，进入 Agent 配置" : "No usable direct chat for this step; open Agent config")}
-            >
-              <MessageSquare size={13} />
-              {primaryStageAgentChatRoute
-                ? (lang === "zh" ? "进入 Agent 私聊" : "Open Agent chat")
-                : (lang === "zh" ? "配置主责 Agent" : "Configure lead Agent")}
-            </Link>
+            {primaryStageAgentChatRoute ? (
+              <Link
+                to={primaryStageAgentChatRoute}
+                title={SOURCE_COLLECTION_STAGE_CHAT_LABELS[activeModule.id][lang]}
+              >
+                <MessageSquare size={13} />
+                {lang === "zh" ? "进入 Agent 私聊" : "Open Agent chat"}
+              </Link>
+            ) : (
+              <button
+                type="button"
+                title={lang === "zh" ? "当前步骤缺少可用私聊，请先修复团队 Agent 绑定" : "No usable direct chat for this step"}
+                onClick={() => openSourceCollectionStageAgentChat(activeModule.id)}
+              >
+                <MessageSquare size={13} />
+                {lang === "zh" ? "私聊未绑定" : "Chat missing"}
+              </button>
+            )}
           </div>
         </div>
         {resultPanel}
