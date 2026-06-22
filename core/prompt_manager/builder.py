@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import time
 from typing import Optional, List, Dict, Any
 
 from core.prompt_manager.types import (
@@ -41,6 +42,8 @@ def get_system_prompt(
     results: List[SectionRenderResult] = []
 
     for section in sections:
+        started = time.perf_counter()
+        source = "computed"
         if section.cache_break:
             # 动态章节：每轮重算，不读缓存
             content = section.compute()
@@ -48,9 +51,11 @@ def get_system_prompt(
             # 静态章节：优先从缓存读取
             if cache.has(section.name):
                 content = cache.get(section.name)
+                source = "cache"
             else:
                 content = section.compute()
                 cache.set(section.name, content)
+        duration_ms = (time.perf_counter() - started) * 1000
 
         rendered = SectionRenderResult(
             name=section.name,
@@ -61,6 +66,8 @@ def get_system_prompt(
             description=section.description,
             content=content,
             is_empty=not bool(content),
+            source=source,
+            duration_ms=duration_ms,
         )
         results.append(rendered)
 
@@ -81,10 +88,15 @@ def get_system_prompt(
         parts.append(SYSTEM_PROMPT_DYNAMIC_BOUNDARY)
         parts.extend(dynamic_parts)
 
+    join_started = time.perf_counter()
+    prompt = as_system_prompt(parts)
+    join_duration_ms = (time.perf_counter() - join_started) * 1000
+
     return PromptBuildResult(
-        prompt=as_system_prompt(parts),
+        prompt=prompt,
         section_results=tuple(results),
         available_sections_text=available,
+        join_duration_ms=join_duration_ms,
     )
 
 
