@@ -1962,6 +1962,7 @@ def create_llm_facing_tools() -> List[BaseTool]:
         "task_start_tool",
         "task_output_tool",
         "task_stop_tool",
+        "read_file_tool",
         "list_workspace_debris_tool",
         "clean_workspace_debris_tool",
         "get_session_files_tool",

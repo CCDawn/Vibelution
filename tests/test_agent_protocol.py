@@ -4769,6 +4769,14 @@ class TestDelegationExposure:
         assert "外部代码 Agent" in descriptions["cli_agent_run_tool"]
         assert "内部子 Agent 自动派遣" in descriptions["cli_agent_run_tool"]
 
+        from core.web.services import tool_catalog
+
+        assert "read_file_tool" in tool_catalog.explicit_allow_tool_names()
+        assert tool_catalog.permission_tier_for_tool("read_file_tool") == tool_catalog.MEDIUM_PERMISSION_TIER
+        for bundle in tool_catalog.list_tool_bundles():
+            assert "read_file_tool" not in bundle["toolNames"]
+            assert "read_file_tool" not in bundle["preferredToolNames"]
+
     def test_child_session_tool_description_guides_autostart_handoff(self):
         tools_by_name = {tool.name: tool for tool in create_llm_facing_tools()}
         description = str(getattr(tools_by_name["create_child_session_tool"], "description", "") or "")
