@@ -3191,13 +3191,6 @@ function agentsRouteCopy(lang: "zh" | "en") {
         maintenanceHint: "调试重置、归档和彻底删除集中在这里；普通身份、任务、工具配置不和删除动作混在一起。",
         healthReason: "原因",
         healthNextStep: "下一步",
-        configGuideTitle: "这页先回答三个问题",
-        configGuideIdentity: "它是谁",
-        configGuideIdentityHint: "名称、状态、人物档案决定用户和其他 Agent 如何称呼它。",
-        configGuideRuntime: "它用什么脑子",
-        configGuideRuntimeHint: "模型模板和提示词模板决定每次会话的基础能力与说话方式。",
-        configGuideBoundary: "它能用哪些资源",
-        configGuideBoundaryHint: "工具和记忆先在这里选择模板；细粒度配置到“策略”页调整。",
         toolPolicyPickerHint: "选择工具能力模板；具体允许、优先、禁用哪些工具，请到“策略”页调整。",
         memoryPolicyPickerHint: "选择记忆范围模板；具体可查看/可保存的共享组，请到“策略”页调整。",
         editAvatar: "编辑头像",
@@ -3589,13 +3582,6 @@ function agentsRouteCopy(lang: "zh" | "en") {
         maintenanceHint: "Debug reset, archive, and purge live here so normal identity/task/tool editing stays separate from destructive actions.",
         healthReason: "Reason",
         healthNextStep: "Next step",
-        configGuideTitle: "This page answers three questions first",
-        configGuideIdentity: "Who it is",
-        configGuideIdentityHint: "Name, status, and persona decide how users and other Agents address it.",
-        configGuideRuntime: "Which brain it uses",
-        configGuideRuntimeHint: "Model and prompt templates define baseline capability and voice for every turn.",
-        configGuideBoundary: "What it can touch",
-        configGuideBoundaryHint: "Pick tool and memory templates here; tune exact permissions in Policies.",
         toolPolicyPickerHint: "Choose the tool-permission template. Use Policies for allowed, preferred, or blocked tools.",
         memoryPolicyPickerHint: "Choose the memory-boundary template. Use Policies for readable and writable shared groups.",
         editAvatar: "Edit avatar",
@@ -5616,7 +5602,7 @@ export function AgentsRoute() {
             </div>
           </div>
           {createOpen ? (
-            <section className={styles.createAgentPanel}>
+            <section className={styles.createAgentPanel} title={copy.createAgentHint}>
               <div className={styles.panelHeader}>
                 <div>
                   <p className={styles.panelEyebrow}>{copy.createAgentTitle}</p>
@@ -5624,7 +5610,6 @@ export function AgentsRoute() {
                 </div>
                 <Bot size={16} />
               </div>
-              <p>{copy.createAgentHint}</p>
               <div className={styles.createAgentGrid}>
                 <label className={styles.field}>
                   <span>{copy.createAgentName}</span>
@@ -5709,15 +5694,18 @@ export function AgentsRoute() {
                     </label>
                   </>
                 ) : null}
-                <section className={styles.fieldWide}>
+                <section className={styles.fieldWide} title={copy.createAgentToolBundlesHint}>
                   <span>{copy.createAgentToolBundles}</span>
-                  <small>{copy.createAgentToolBundlesHint}</small>
                   {toolBundles.length ? (
                     <div className={styles.createToolBundleGrid}>
                       {toolBundles.map((bundle) => {
                         const selected = createDraft.selectedToolBundleIds.includes(bundle.bundleId);
                         return (
-                          <label key={bundle.bundleId} className={selected ? styles.createToolBundleSelected : styles.createToolBundleOption}>
+                          <label
+                            key={bundle.bundleId}
+                            className={selected ? styles.createToolBundleSelected : styles.createToolBundleOption}
+                            title={[bundle.label, toolBundleMeta(bundle, lang), bundle.description].filter(Boolean).join("\n")}
+                          >
                             <input
                               type="checkbox"
                               checked={selected}
@@ -5734,7 +5722,6 @@ export function AgentsRoute() {
                             <span>
                               <strong>{bundle.label}</strong>
                               <small>{toolBundleMeta(bundle, lang)}</small>
-                              <small>{bundle.description}</small>
                             </span>
                           </label>
                         );
@@ -5931,10 +5918,9 @@ export function AgentsRoute() {
 
         <aside className={styles.detailPanel}>
           {returnToPath ? (
-            <section className={styles.returnBanner} aria-label={copy.returnBannerTitle}>
+            <section className={styles.returnBanner} aria-label={copy.returnBannerTitle} title={copy.returnBannerHint}>
               <div className={styles.returnBannerCopy}>
                 <strong>{copy.returnBannerTitle}</strong>
-                <span>{copy.returnBannerHint}</span>
               </div>
               <button
                 type="button"
@@ -6079,7 +6065,7 @@ export function AgentsRoute() {
             </section>
           ) : selectedAgent ? (
             <>
-              <section className={styles.detailHeader}>
+              <section className={styles.detailHeader} title={copy.routeHint}>
                 <div className={styles.avatarEditorAnchor}>
                   <button
                     type="button"
@@ -6096,7 +6082,7 @@ export function AgentsRoute() {
                     )}
                   </button>
                   {avatarEditorOpen ? (
-                    <section className={styles.avatarEditorPanel}>
+                    <section className={styles.avatarEditorPanel} title={copy.avatarEditorHint}>
                       <div className={styles.avatarEditorHeader}>
                         <div>
                           <p className={styles.panelEyebrow}>{copy.avatarEditorTitle}</p>
@@ -6106,7 +6092,6 @@ export function AgentsRoute() {
                           ×
                         </button>
                       </div>
-                      <p>{copy.avatarEditorHint}</p>
                       <div className={styles.avatarEditorActions}>
                         <label className={styles.secondaryButton}>
                           <input
@@ -6160,7 +6145,6 @@ export function AgentsRoute() {
                   <span className={`${styles.agentRoleTag} ${styles[`agentRoleTag_${agentFunctionTone(selectedAgent, lang)}`]}`}>
                     {agentFunctionalLabel(selectedAgent, lang)}
                   </span>
-                  <p>{copy.routeHint}</p>
                 </div>
                 <div className={styles.detailHeaderActions}>
                   <span className={styles.detailHealthStatus}>
@@ -6186,12 +6170,12 @@ export function AgentsRoute() {
                 ))}
               </nav>
 
-              <section className={styles.managementBriefPanel}>
+              <section className={styles.managementBriefPanel} title={copy.managementBriefHint}>
                 <div className={styles.managementBriefHeader}>
                   <div>
                     <p className={styles.panelEyebrow}>{copy.managementBriefTitle}</p>
                     <h3>{managementBrief.statusLabel}</h3>
-                    <span>{managementBrief.statusDetail} · {copy.managementBriefHint}</span>
+                    <span>{managementBrief.statusDetail}</span>
                   </div>
                   <strong>{managementBrief.score}</strong>
                 </div>
@@ -6215,6 +6199,7 @@ export function AgentsRoute() {
                       <button
                         key={action.id}
                         type="button"
+                        title={action.detail}
                         onClick={() => {
                           if (action.route) {
                             void navigate(action.route);
@@ -6224,7 +6209,6 @@ export function AgentsRoute() {
                         }}
                       >
                         <strong>{action.label}</strong>
-                        <small>{action.detail}</small>
                       </button>
                     ))
                   ) : (
@@ -6369,7 +6353,7 @@ export function AgentsRoute() {
 
               {activePane === "config" ? (
                 <>
-              <section className={styles.configEditor}>
+              <section className={styles.configEditor} title={copy.personaHint}>
                 <div className={styles.panelHeader}>
                   <div>
                     <p className={styles.panelEyebrow}>{copy.configTitle}</p>
@@ -6386,26 +6370,6 @@ export function AgentsRoute() {
                   </div>
                   <p><strong>{copy.healthNextStep}</strong>{issueNextStep(selectedAgent.health, lang)}</p>
                 </section>
-                <section className={styles.configGuidePanel}>
-                  <div className={styles.configGuideHeader}>
-                    <Brain size={15} />
-                    <strong>{copy.configGuideTitle}</strong>
-                  </div>
-                  <div className={styles.configGuideGrid}>
-                    <span>
-                      <strong>{copy.configGuideIdentity}</strong>
-                      <small>{copy.configGuideIdentityHint}</small>
-                    </span>
-                    <span>
-                      <strong>{copy.configGuideRuntime}</strong>
-                      <small>{copy.configGuideRuntimeHint}</small>
-                    </span>
-                    <span>
-                      <strong>{copy.configGuideBoundary}</strong>
-                      <small>{copy.configGuideBoundaryHint}</small>
-                    </span>
-                  </div>
-                </section>
                 <div className={styles.editorGrid}>
                   <label className={styles.field}>
                     <span>Agent</span>
@@ -6420,9 +6384,8 @@ export function AgentsRoute() {
                       <option value="active">{lang === "zh" ? "活跃" : "Active"}</option>
                     </select>
                   </label>
-                  <section className={styles.fieldWide}>
+                  <section className={styles.fieldWide} title={copy.llmSlotsHint}>
                     <span>{copy.llmSlots}</span>
-                    <small>{copy.llmSlotsHint}</small>
                     <div className={styles.llmSlotGrid}>
                       {llmSlots.map((slot) => {
                         const selectedSlotModelId = agentLlmSlotModelId(configDraft.llmBindings, slot);
@@ -6435,7 +6398,7 @@ export function AgentsRoute() {
                           lang,
                         );
                         return (
-                          <label key={slot.slot} className={styles.llmSlotField}>
+                          <label key={slot.slot} className={styles.llmSlotField} title={slot.description}>
                             <span>
                               <strong>{slot.label}</strong>
                               <small>{slot.required ? copy.requiredSlot : copy.optionalSlot}</small>
@@ -6479,7 +6442,6 @@ export function AgentsRoute() {
                                 <option value="high">{copy.reasoningEffort}: {copy.reasoningEffortHigh}</option>
                               </select>
                             ) : null}
-                            <small>{slot.description}</small>
                           </label>
                         );
                       })}
@@ -6496,7 +6458,7 @@ export function AgentsRoute() {
                       ))}
                     </select>
                   </label>
-                  <label className={styles.field}>
+                  <label className={styles.field} title={toolPolicySource?.description || copy.toolPolicyPickerHint}>
                     <span>{copy.tools}</span>
                     <select value={configDraft.toolPolicyId} onChange={(event) => updateDraft({ toolPolicyId: event.target.value })}>
                       {workspace?.toolPolicies.map((policy) => (
@@ -6505,9 +6467,9 @@ export function AgentsRoute() {
                         </option>
                       ))}
                     </select>
-                    <small title={toolPolicySource?.description || copy.toolPolicyPickerHint}>{toolPolicySourceLine}</small>
+                    <small>{toolPolicySourceLine}</small>
                   </label>
-                  <label className={styles.field}>
+                  <label className={styles.field} title={copy.memoryPolicyPickerHint}>
                     <span>{copy.memory}</span>
                     <select value={configDraft.memoryPolicyId} onChange={(event) => updateDraft({ memoryPolicyId: event.target.value })}>
                       {workspace?.memoryPolicies.map((policy) => (
@@ -6516,11 +6478,9 @@ export function AgentsRoute() {
                         </option>
                       ))}
                     </select>
-                    <small>{copy.memoryPolicyPickerHint}</small>
                   </label>
-                  <section className={styles.fieldWide}>
+                  <section className={styles.fieldWide} title={contextCompressionPolicyLine}>
                     <span>{copy.contextCompressionPolicy}</span>
-                    <small>{contextCompressionPolicyLine}</small>
                     <div className={styles.compressionPolicyGrid}>
                       <label className={styles.field}>
                         <span>{copy.contextCompressionPolicy}</span>
@@ -6706,7 +6666,6 @@ export function AgentsRoute() {
                     {personaDirty ? (lang === "zh" ? "未保存" : "Unsaved") : (lang === "zh" ? "已同步" : "Synced")}
                   </span>
                 </div>
-                <p className={styles.contextLine}>{copy.personaHint}</p>
                 <div className={styles.editorGrid}>
                   <label className={styles.field}>
                     <span>{copy.gender}</span>
@@ -6776,7 +6735,11 @@ export function AgentsRoute() {
               </section>
               ) : null}
 
-              <section className={styles.configEditor}>
+              <section className={styles.configEditor} title={
+                lang === "zh"
+                  ? "工具治理变更从工具页发起；这里保留最近记录和待审批处理。"
+                  : "Tool governance changes start from the Tools page. Recent records and approvals remain visible here."
+              }>
                 <div className={styles.panelHeader}>
                   <div>
                     <p className={styles.panelEyebrow}>{copy.toolGovernanceTitle}</p>
@@ -6784,11 +6747,6 @@ export function AgentsRoute() {
                   </div>
                   <ShieldCheck size={16} />
                 </div>
-                <p className={styles.policyHint}>
-                  {lang === "zh"
-                    ? "工具治理变更从工具页发起；这里保留最近记录和待审批处理。"
-                    : "Tool governance changes start from the Tools page. Recent records and approvals remain visible here."}
-                </p>
                 <div className={styles.toolGovernanceList}>
                   {(selectedAgent.toolGovernanceRequests ?? []).length ? (
                     (selectedAgent.toolGovernanceRequests ?? []).map((request) => {
@@ -6843,7 +6801,7 @@ export function AgentsRoute() {
               </section>
 
               {selectedAgentRequiresTask ? (
-              <section className={styles.configEditor}>
+              <section className={styles.configEditor} title={copy.taskHint}>
                 <div className={styles.panelHeader}>
                   <div>
                     <p className={styles.panelEyebrow}>{copy.taskTitle}</p>
@@ -6853,7 +6811,6 @@ export function AgentsRoute() {
                     {taskDirty ? (lang === "zh" ? "未保存" : "Unsaved") : (lang === "zh" ? "已同步" : "Synced")}
                   </span>
                 </div>
-                <p className={styles.contextLine}>{copy.taskHint}</p>
                 <div className={styles.editorGrid}>
                   <label className={styles.fieldWide}>
                     <span>{copy.mission}</span>
@@ -6917,7 +6874,7 @@ export function AgentsRoute() {
               </section>
               ) : null}
 
-              <section className={styles.detailSection}>
+              <section className={styles.detailSection} title={issueNextStep(selectedAgent.health, lang)}>
                 <div className={styles.panelHeader}>
                   <div>
                     <p className={styles.panelEyebrow}>{issuePanelLabel(selectedAgent.health, copy)}</p>
@@ -6925,7 +6882,6 @@ export function AgentsRoute() {
                   </div>
                   {selectedAgent.health.length ? <AlertTriangle size={16} /> : <CheckCircle2 size={16} />}
                 </div>
-                <p className={styles.contextLine}>{issueNextStep(selectedAgent.health, lang)}</p>
                 {selectedAgent.health.length ? (
                   <div className={styles.issueList}>
                     {selectedAgent.health.map((issue) => (
@@ -6950,15 +6906,23 @@ export function AgentsRoute() {
                 )}
               </section>
 
-              <section className={styles.maintenanceIntro}>
+              <section className={styles.maintenanceIntro} title={copy.maintenanceHint}>
                 <div>
                   <p className={styles.panelEyebrow}>{copy.maintenanceTitle}</p>
                   <h3>{copy.maintenanceTitle}</h3>
                 </div>
-                <p>{copy.maintenanceHint}</p>
               </section>
 
-              <section className={selectedAgentProtected ? styles.protectedZone : styles.dangerZone}>
+              <section
+                className={selectedAgentProtected ? styles.protectedZone : styles.dangerZone}
+                title={
+                  selectedAgentProtected
+                    ? copy.archiveProtectionHint
+                    : selectedAgent.status === "archived"
+                      ? copy.purgeAgentHint
+                      : copy.archiveAgentHint
+                }
+              >
                 <div className={styles.panelHeader}>
                   <div>
                     <p className={styles.panelEyebrow}>
@@ -6978,13 +6942,6 @@ export function AgentsRoute() {
                   </div>
                   {selectedAgentProtected ? <ShieldCheck size={16} /> : <Trash2 size={16} />}
                 </div>
-                <p>
-                  {selectedAgentProtected
-                    ? copy.archiveProtectionHint
-                    : selectedAgent.status === "archived"
-                      ? copy.purgeAgentHint
-                      : copy.archiveAgentHint}
-                </p>
                 {selectedAgentProtected ? (
                   <span className={styles.cleanPill}>{copy.protectedAgent}</span>
                 ) : (
@@ -7013,7 +6970,7 @@ export function AgentsRoute() {
                 )}
               </section>
               {selectedAgent.status !== "archived" ? (
-                <section className={styles.resetZone}>
+                <section className={styles.resetZone} title={copy.resetAgentHint}>
                   <div className={styles.panelHeader}>
                     <div>
                       <p className={styles.panelEyebrow}>{copy.resetAgentTitle}</p>
@@ -7021,9 +6978,8 @@ export function AgentsRoute() {
                     </div>
                     <RefreshCw size={16} />
                   </div>
-                  <p>{copy.resetAgentHint}</p>
                   <div className={styles.resetOptionGrid}>
-                    <label className={styles.resetOptionField}>
+                    <label className={styles.resetOptionField} title={copy.resetClearRuntimeStateHint}>
                       <input
                         type="checkbox"
                         checked={resetOptions.clearRuntimeState}
@@ -7031,10 +6987,9 @@ export function AgentsRoute() {
                       />
                       <span>
                         <strong>{copy.resetClearRuntimeState}</strong>
-                        <small>{copy.resetClearRuntimeStateHint}</small>
                       </span>
                     </label>
-                    <label className={styles.resetOptionField}>
+                    <label className={styles.resetOptionField} title={copy.resetDirectSessionHint}>
                       <input
                         type="checkbox"
                         checked={resetOptions.resetDirectSession}
@@ -7042,10 +6997,9 @@ export function AgentsRoute() {
                       />
                       <span>
                         <strong>{copy.resetDirectSession}</strong>
-                        <small>{copy.resetDirectSessionHint}</small>
                       </span>
                     </label>
-                    <label className={styles.resetOptionField}>
+                    <label className={styles.resetOptionField} title={copy.resetPersonaProfileHint}>
                       <input
                         type="checkbox"
                         checked={resetOptions.resetPersonaProfile}
@@ -7053,10 +7007,9 @@ export function AgentsRoute() {
                       />
                       <span>
                         <strong>{copy.resetPersonaProfile}</strong>
-                        <small>{copy.resetPersonaProfileHint}</small>
                       </span>
                     </label>
-                    <label className={styles.resetOptionField}>
+                    <label className={styles.resetOptionField} title={copy.resetTaskProfileHint}>
                       <input
                         type="checkbox"
                         checked={resetOptions.resetTaskProfile}
@@ -7064,10 +7017,9 @@ export function AgentsRoute() {
                       />
                       <span>
                         <strong>{copy.resetTaskProfile}</strong>
-                        <small>{copy.resetTaskProfileHint}</small>
                       </span>
                     </label>
-                    <label className={styles.resetOptionField}>
+                    <label className={styles.resetOptionField} title={copy.resetToolPolicyHint}>
                       <input
                         type="checkbox"
                         checked={resetOptions.resetToolPolicy}
@@ -7075,10 +7027,9 @@ export function AgentsRoute() {
                       />
                       <span>
                         <strong>{copy.resetToolPolicy}</strong>
-                        <small>{copy.resetToolPolicyHint}</small>
                       </span>
                     </label>
-                    <label className={styles.resetOptionField}>
+                    <label className={styles.resetOptionField} title={copy.resetMemoryPolicyHint}>
                       <input
                         type="checkbox"
                         checked={resetOptions.resetMemoryPolicy}
@@ -7086,10 +7037,9 @@ export function AgentsRoute() {
                       />
                       <span>
                         <strong>{copy.resetMemoryPolicy}</strong>
-                        <small>{copy.resetMemoryPolicyHint}</small>
                       </span>
                     </label>
-                    <label className={styles.resetOptionField}>
+                    <label className={styles.resetOptionField} title={copy.resetRuntimePolicyHint}>
                       <input
                         type="checkbox"
                         checked={resetOptions.resetRuntimePolicy}
@@ -7097,7 +7047,6 @@ export function AgentsRoute() {
                       />
                       <span>
                         <strong>{copy.resetRuntimePolicy}</strong>
-                        <small>{copy.resetRuntimePolicyHint}</small>
                       </span>
                     </label>
                   </div>
@@ -7119,7 +7068,14 @@ export function AgentsRoute() {
 
               {activePane === "config" ? (
                 <>
-              <section className={styles.configEditor}>
+              <section
+                className={styles.configEditor}
+                title={
+                  lang === "zh"
+                    ? "工具能力已迁移到 Agent 管理的工具页集中配置；这里保留当前 Agent 的工具摘要和入口。"
+                    : "Tool permissions are configured in the Agent Tools page. This panel keeps only the current Agent summary and entry point."
+                }
+              >
                 <div className={styles.panelHeader}>
                   <div>
                     <p className={styles.panelEyebrow}>{copy.toolPolicyTitle}</p>
@@ -7133,11 +7089,6 @@ export function AgentsRoute() {
                   <span>{copy.blockedTools}: <strong>{selectedAgent.toolPolicy?.blockedTools?.length ?? 0}</strong></span>
                   <span>{copy.toolCategoryCount}: <strong>{toolBundles.length}</strong></span>
                 </div>
-                <p className={styles.contextLine}>
-                  {lang === "zh"
-                    ? "工具能力已迁移到 Agent 管理的工具页集中配置；这里保留当前 Agent 的工具摘要和入口。"
-                    : "Tool permissions are configured in the Agent Tools page. This panel keeps only the current Agent summary and entry point."}
-                </p>
                 <div className={styles.editorActions}>
                   <button
                     type="button"

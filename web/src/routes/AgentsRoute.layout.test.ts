@@ -372,11 +372,14 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("AgentConfigDraft");
     expect(routeSource).toContain("useMutation");
     expect(routeSource).toContain("copy.configTitle");
-    expect(routeSource).toContain("copy.configGuideTitle");
-    expect(routeSource).toContain("copy.configGuideBoundaryHint");
     expect(routeSource).toContain("copy.toolPolicyPickerHint");
     expect(routeSource).toContain("copy.memoryPolicyPickerHint");
-    expect(routeSource).toContain("styles.configGuidePanel");
+    expect(routeSource).not.toContain("copy.configGuideTitle");
+    expect(routeSource).not.toContain("copy.configGuideBoundaryHint");
+    expect(routeSource).not.toContain("styles.configGuidePanel");
+    expect(routeSource).not.toContain("这页先回答三个问题");
+    expect(routeSource).toContain("title={copy.llmSlotsHint}");
+    expect(routeSource).toContain("title={copy.memoryPolicyPickerHint}");
     expect(routeSource).toContain("displayName: payload.draft.displayName");
     expect(routeSource).toContain("llmBindings: normalizeAgentLlmBindings(payload.draft.llmBindings)");
     expect(routeSource).toContain("promptTemplateId: payload.draft.promptTemplateId");
@@ -385,8 +388,28 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("status: payload.draft.status");
     expect(routeSource).toContain("method: \"PATCH\"");
     expect(routeSource).toContain("queryKeys.agentConfigWorkspace()");
-    expect(styles.configGuidePanel).toBeTruthy();
     expect(styles.healthGuidePanel).toBeTruthy();
+  });
+
+  it("keeps Agent Center helper copy in hover text instead of permanent explanatory blocks", () => {
+    expect(routeSource).toContain("title={copy.createAgentHint}");
+    expect(routeSource).toContain("title={copy.createAgentToolBundlesHint}");
+    expect(routeSource).toContain("title={copy.returnBannerHint}");
+    expect(routeSource).toContain("title={copy.avatarEditorHint}");
+    expect(routeSource).toContain("title={copy.routeHint}");
+    expect(routeSource).toContain("title={copy.managementBriefHint}");
+    expect(routeSource).toContain("title={copy.personaHint}");
+    expect(routeSource).toContain("title={copy.taskHint}");
+    expect(routeSource).toContain("title={copy.maintenanceHint}");
+    expect(routeSource).toContain("title={copy.resetAgentHint}");
+    expect(routeSource).not.toContain("<p>{copy.createAgentHint}</p>");
+    expect(routeSource).not.toContain("<span>{copy.returnBannerHint}</span>");
+    expect(routeSource).not.toContain("<p>{copy.avatarEditorHint}</p>");
+    expect(routeSource).not.toContain("<p>{copy.routeHint}</p>");
+    expect(routeSource).not.toContain("<p className={styles.contextLine}>{copy.personaHint}</p>");
+    expect(routeSource).not.toContain("<p className={styles.contextLine}>{copy.taskHint}</p>");
+    expect(routeSource).not.toContain("<p>{copy.maintenanceHint}</p>");
+    expect(routeSource).not.toContain("<p>{copy.resetAgentHint}</p>");
   });
 
   it("explains Agent health states with reason and next action instead of a bare hint pill", () => {
