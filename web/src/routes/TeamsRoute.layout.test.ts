@@ -404,6 +404,10 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("selectSourceCollectionStage");
     expect(routeSource).toContain("renderSourceCollectionActiveStagePanel");
     expect(routeSource).toContain("researchStageAgentDirectChatRoute");
+    expect(routeSource).toContain("sourceCollectionStageReturnRoute");
+    expect(routeSource).toContain("sourceCollectionStageChatReturnLabel");
+    expect(routeSource).toContain("params.set(\"returnTo\", normalizedReturnTo)");
+    expect(routeSource).toContain("params.set(\"returnLabel\", normalizedReturnLabel)");
     expect(routeSource).toContain("openSourceCollectionStageAgentChat");
     expect(routeSource).toContain("repairChallengeCupTeamAgentsMutation");
     expect(routeSource).toContain("/challenge-cup-agents/repair");
@@ -579,6 +583,10 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("researchSourceCollectionRoute");
     expect(routeSource).toContain("teamWorkspaceRoute");
     expect(routeSource).toContain("researchCanvasRoute");
+    expect(routeSource).toContain("teamChatRoomRoute");
+    expect(routeSource).toContain("返回团队页面");
+    expect(routeSource).toContain("返回知识搜集");
+    expect(routeSource).toContain("返回阶段页");
     expect(routeSource).toContain("renderSourceCollectionConversation");
     expect(routeSource).toContain("renderSourceCollectionControlsPanel");
     expect(routeSource).toContain("知识搜集工作台");
@@ -686,8 +694,9 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("发送给团队");
     expect(routeSource).toContain("最近团队广播");
     expect(routeSource).toContain("已衔接群聊");
-    expect(routeSource).toContain("to={`/chat?room=${encodeURIComponent(selectedTeamStartRoundResult.roomId)}`}");
-    expect(routeSource).toContain("to={`/chat?room=${encodeURIComponent(latestTeamRound.roomId)}`}");
+    expect(routeSource).toContain("teamChatRoomRoute(selectedTeamStartRoundResult.roomId");
+    expect(routeSource).toContain("teamChatRoomRoute(latestTeamRound.roomId");
+    expect(routeSource).toContain("teamWorkspaceRoute(selectedTeam?.teamId || RESEARCH_TEAM_ID)");
     expect(routeSource).toContain("styles.linkedRoomLine");
     expect(routeSource).toContain("styles.toolbarLink");
     expect(routeSource).toContain("teamBusEvents");
