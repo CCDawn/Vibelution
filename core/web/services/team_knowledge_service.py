@@ -1567,7 +1567,7 @@ def create_rating_suggestion(
 ) -> dict[str, Any]:
     owner, base = _require_base_with_owner(knowledge_base_id)
     suggester_id = str(suggested_by_agent_id or "").strip()
-    _require_permission(owner, base, suggester_id, "rate")
+    _require_rating_suggestion_permission(owner, base, suggester_id)
     normalized_target_type = str(target_type or "").strip().lower()
     if normalized_target_type not in {"proposal", "knowledge_item"}:
         raise TeamKnowledgeError("Rating suggestion targetType must be proposal or knowledge_item.")
@@ -2561,6 +2561,12 @@ def _require_permission(owner_value: Any, base: dict[str, Any], agent_id: str, a
         raise TeamKnowledgePermissionError(f"Agent is not allowed to {action} this knowledge base.")
 
 
+def _require_rating_suggestion_permission(owner_value: Any, base: dict[str, Any], agent_id: str) -> None:
+    if _can_access(owner_value, base, agent_id, "rate") or _is_global_knowledge_steward(agent_id):
+        return
+    raise TeamKnowledgePermissionError("Agent is not allowed to suggest ratings for this knowledge base.")
+
+
 def _can_access(owner_value: Any, base: dict[str, Any], agent_id: str, action: str, *, internal: bool = False) -> bool:
     owner = _coerce_owner_context(owner_value)
     normalized_agent_id = str(agent_id or "").strip()
@@ -2568,6 +2574,8 @@ def _can_access(owner_value: Any, base: dict[str, Any], agent_id: str, action: s
         return True
     if not normalized_agent_id:
         return False
+    if _is_global_knowledge_steward(normalized_agent_id) and action in {"read", "propose"}:
+        return True
     acl = _normalize_acl(base.get("acl") if isinstance(base.get("acl"), dict) else {})
     grants = acl.get("grants") if isinstance(acl.get("grants"), dict) else {}
     agent_grants = _unique_strings((grants.get(action) or []) + (grants.get("*") or [])) if isinstance(grants, dict) else []
