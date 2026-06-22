@@ -1,6 +1,7 @@
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Apple,
+  ArrowLeft,
   ArrowUpRight,
   BellRing,
   Check,
@@ -162,7 +163,7 @@ import {
   isAgentRootSession,
 } from "./DirectSessionIndexItem";
 import { SessionContextMenu } from "./SessionContextMenu";
-import { agentCenterConfigRoute } from "./agentCenterRoutes";
+import { agentCenterConfigRoute, safeAgentCenterReturnToPath } from "./agentCenterRoutes";
 import {
   buildChatMentionTargets,
   tokenizeChatMentions,
@@ -2370,6 +2371,16 @@ export function ChatCodingRoute() {
   const requestedRoomId = useMemo(() => {
     return new URLSearchParams(location.search).get("room") ?? "";
   }, [location.search]);
+  const chatReturnTarget = useMemo(() => {
+    return safeAgentCenterReturnToPath(new URLSearchParams(location.search).get("returnTo"));
+  }, [location.search]);
+  const chatReturnLabel = useMemo(() => {
+    const raw = String(new URLSearchParams(location.search).get("returnLabel") || "").trim();
+    if (!raw || raw.length > 80) {
+      return lang === "zh" ? "返回来源" : "Back";
+    }
+    return raw;
+  }, [lang, location.search]);
   useEffect(() => {
     liveAssistantMessagesBySessionRef.current = liveAssistantMessagesBySession;
   }, [liveAssistantMessagesBySession]);
@@ -6845,6 +6856,12 @@ export function ChatCodingRoute() {
 
       <section className={styles.centerPane}>
         <div className={styles.tabStrip}>
+          {chatReturnTarget ? (
+            <Link className={styles.chatReturnLink} to={chatReturnTarget} title={chatReturnLabel}>
+              <ArrowLeft size={14} aria-hidden="true" />
+              <span>{chatReturnLabel}</span>
+            </Link>
+          ) : null}
           {groupPanelActive ? (
             <button
               type="button"

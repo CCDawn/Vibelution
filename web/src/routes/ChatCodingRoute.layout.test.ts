@@ -168,6 +168,20 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.agentSessionTabActive).toBeTypeOf("string");
   });
 
+  it("shows a safe return link when Chat is opened from another workspace surface", () => {
+    expect(routeSource).toContain("safeAgentCenterReturnToPath(new URLSearchParams(location.search).get(\"returnTo\"))");
+    expect(routeSource).toContain("new URLSearchParams(location.search).get(\"returnLabel\")");
+    expect(routeSource).toContain("const chatReturnTarget = useMemo");
+    expect(routeSource).toContain("const chatReturnLabel = useMemo");
+    expect(routeSource).toContain("返回来源");
+    expect(routeSource).toContain("styles.chatReturnLink");
+    expect(routeSource).toContain("to={chatReturnTarget}");
+    expect(routeSource).toContain("<ArrowLeft size={14} aria-hidden=\"true\" />");
+    expect(routeStyles.chatReturnLink).toBeTypeOf("string");
+    expect(routeCssSource).toContain(".chatReturnLink span");
+    expect(routeCssSource).toContain("text-overflow: ellipsis");
+  });
+
   it("keeps the conversation index compact enough for 1024px workbench use", () => {
     expect(routeCssSource).toContain("grid-template-columns: 32px minmax(0, 1fr)");
     expect(routeCssSource).toContain("min-height: 46px");
