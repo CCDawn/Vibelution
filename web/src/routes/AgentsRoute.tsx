@@ -1334,9 +1334,32 @@ function selectedAgentFromList(
 function buildVisibleAgentColumns(
   agents: AgentConfigWorkspaceAgent[],
   copy: ReturnType<typeof agentsRouteCopy>,
+  teamIndexGroups: AgentTeamIndexGroup[],
 ) {
   const sessionAgents = agents.filter(isWorkSessionAgent);
   const nonSessionAgents = agents.filter((agent) => !isWorkSessionAgent(agent));
+  const visibleNonSessionIds = new Set(nonSessionAgents.map((agent) => agent.agentId));
+  const assignedTeamAgentIds = new Set<string>();
+  const teamColumns = teamIndexGroups
+    .filter((group) => group.section === "team_index")
+    .map((group) => {
+      const groupIds = new Set(group.agentIds);
+      const teamAgents = nonSessionAgents.filter((agent) => {
+        if (!groupIds.has(agent.agentId) || assignedTeamAgentIds.has(agent.agentId)) {
+          return false;
+        }
+        return visibleNonSessionIds.has(agent.agentId);
+      });
+      teamAgents.forEach((agent) => assignedTeamAgentIds.add(agent.agentId));
+      return {
+        id: `team_agents:${group.id}`,
+        label: group.label,
+        description: group.description || copy.teamAgentColumnHint,
+        agents: teamAgents,
+      };
+    })
+    .filter((column) => column.agents.length > 0);
+  const unassignedNonSessionAgents = nonSessionAgents.filter((agent) => !assignedTeamAgentIds.has(agent.agentId));
   return [
     {
       id: "session_agents",
@@ -1344,11 +1367,12 @@ function buildVisibleAgentColumns(
       description: copy.sessionAgentColumnHint,
       agents: sessionAgents,
     },
+    ...teamColumns,
     {
       id: "non_session_agents",
       label: copy.nonSessionAgentColumn,
       description: copy.nonSessionAgentColumnHint,
-      agents: nonSessionAgents,
+      agents: unassignedNonSessionAgents,
     },
   ].filter((column) => column.agents.length > 0);
 }
@@ -3000,8 +3024,9 @@ function agentsRouteCopy(lang: "zh" | "en") {
         bulkNoConfigFields: "请选择要批量应用的配置字段。",
         sessionAgentColumn: "会话入口 Agent",
         sessionAgentColumnHint: "直接承载项目开发、调试和审计对话的 Agent。",
+        teamAgentColumnHint: "该团队当前引用的非会话 Agent。",
         nonSessionAgentColumn: "非会话 Agent",
-        nonSessionAgentColumnHint: "知识库、系统、团队或平台服务等不作为直接对话入口的 Agent。",
+        nonSessionAgentColumnHint: "未归入当前团队索引的知识库、系统或平台服务 Agent。",
         bulkEditTitle: "批量编辑",
         bulkEditSelected: "已选 Agent",
         bulkEditMixed: "混合值",
@@ -3395,8 +3420,9 @@ function agentsRouteCopy(lang: "zh" | "en") {
         bulkNoConfigFields: "Select at least one config field to apply.",
         sessionAgentColumn: "Session entry Agents",
         sessionAgentColumnHint: "Agents that directly carry project development, debugging, and audit conversations.",
+        teamAgentColumnHint: "Non-session Agents referenced by this team.",
         nonSessionAgentColumn: "Non-session Agents",
-        nonSessionAgentColumnHint: "Knowledge, system, team, or platform-service Agents that are not direct chat entries.",
+        nonSessionAgentColumnHint: "Knowledge, system, or platform-service Agents not grouped by the current team indexes.",
         bulkEditTitle: "Bulk edit",
         bulkEditSelected: "Selected Agents",
         bulkEditMixed: "Mixed value",
@@ -3917,8 +3943,8 @@ export function AgentsRoute() {
     [activeFilter, searchText, workspace],
   );
   const visibleAgentColumns = useMemo(
-    () => buildVisibleAgentColumns(visibleAgents, copy),
-    [copy, visibleAgents],
+    () => buildVisibleAgentColumns(visibleAgents, copy, teamIndexGroups),
+    [copy, teamIndexGroups, visibleAgents],
   );
   const selectedBulkAgents = useMemo(
     () => visibleAgents.filter((agent) => selectedBulkAgentIds.has(agent.agentId)),
