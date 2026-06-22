@@ -649,7 +649,7 @@
   --token-status-accent: var(--accent-cool);
 }
 
-.tokenStatusMetric_context {
+.tokenStatusMetric_modelInput {
   --token-status-accent: #5b7cfa;
 }
 
