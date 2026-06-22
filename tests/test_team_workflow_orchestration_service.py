@@ -776,6 +776,9 @@ def test_start_source_collection_stage_session_task_submits_direct_session_task(
     assert task["task"]["writebackContract"]["endpoint"].endswith(f"/stage-session-tasks/{task['taskId']}/writeback")
     assert submitted[0]["sessionId"] == direct_session["id"]
     assert "资料搜集阶段任务" in submitted[0]["content"]
+    assert "会立即要求当前 Agent 在本会话执行" in submitted[0]["content"]
+    assert "先用一句简短状态回应已接收任务" in submitted[0]["content"]
+    assert "不会自动启动 Agent 回答" not in submitted[0]["content"]
     assert submitted[0]["kwargs"]["message_source"] == "team_workflow_stage_task"
     assert submitted[0]["kwargs"]["lightweight_response"] is True
     assert submitted[0]["kwargs"]["include_started_turn_id"] is True
