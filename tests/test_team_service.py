@@ -384,6 +384,46 @@ def test_challenge_cup_research_team_agent_repair_purges_stale_and_rebuilds_comp
     assert team_service.challenge_cup_research_team_agents_need_repair() is False
 
 
+def test_challenge_cup_research_team_agent_repair_detects_missing_team(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+
+    assert team_service.challenge_cup_research_team_agents_need_repair() is True
+
+
+def test_challenge_cup_research_team_agent_repair_detects_missing_roles_and_direct_sessions(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    result = team_service.ensure_challenge_cup_research_team_agents(purge_stale=True)
+    team = result["team"]
+    discovery = next(member for member in team["members"] if member["role"] == "data_discovery")
+    agent = agent_directory_service.get_agent(discovery["agentId"])
+    state = agent_directory_service.load_state()
+    for item in state["agents"]:
+        if item["agentId"] == agent["agentId"]:
+            item["directSessionId"] = ""
+            break
+    agent_directory_service.save_state(state)
+
+    assert team_service.challenge_cup_research_team_agents_need_repair() is True
+
+    repaired = team_service.ensure_challenge_cup_research_team_agents(purge_stale=True)
+
+    assert team_service.challenge_cup_research_team_agents_need_repair() is False
+    repaired_discovery = next(member for member in repaired["team"]["members"] if member["role"] == "data_discovery")
+    repaired_agent = agent_directory_service.get_agent(repaired_discovery["agentId"])
+    assert session_service.get_session_detail(repaired_agent["directSessionId"])
+
+    teams_root = developer_sandbox.seeded_sandbox_workspace_path(tmp_path, "teams")
+    teams_index = teams_root / "teams.json"
+    teams_payload = json.loads(teams_index.read_text(encoding="utf-8"))
+    teams_payload["teams"][0]["members"] = [
+        member for member in teams_payload["teams"][0]["members"]
+        if member.get("role") != "candidate_graph"
+    ]
+    teams_index.write_text(json.dumps(teams_payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    assert team_service.challenge_cup_research_team_agents_need_repair() is True
+
+
 def test_challenge_cup_research_team_agents_remain_visible_in_session_index(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     result = team_service.ensure_challenge_cup_research_team_agents(purge_stale=True)

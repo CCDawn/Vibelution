@@ -2406,9 +2406,42 @@ function researchStageAgentManagementRoute(agentId: string) {
   return `/agents?${params.toString()}`;
 }
 
-function researchStageAgentDirectChatRoute(agent: AgentConfigWorkspaceAgent | null | undefined) {
+function researchStageAgentDirectChatRoute(
+  agent: AgentConfigWorkspaceAgent | null | undefined,
+  returnTo?: string,
+  returnLabel?: string,
+) {
   const sessionId = String(agent?.directSessionId || "").trim();
-  return sessionId ? `/chat?session=${encodeURIComponent(sessionId)}` : "";
+  if (!sessionId) {
+    return "";
+  }
+  const params = new URLSearchParams({ session: sessionId });
+  const normalizedReturnTo = String(returnTo || "").trim();
+  const normalizedReturnLabel = String(returnLabel || "").trim();
+  if (normalizedReturnTo) {
+    params.set("returnTo", normalizedReturnTo);
+  }
+  if (normalizedReturnLabel) {
+    params.set("returnLabel", normalizedReturnLabel);
+  }
+  return `/chat?${params.toString()}`;
+}
+
+function teamChatRoomRoute(roomId: string, returnTo?: string, returnLabel?: string) {
+  const normalizedRoomId = String(roomId || "").trim();
+  if (!normalizedRoomId) {
+    return "";
+  }
+  const params = new URLSearchParams({ room: normalizedRoomId });
+  const normalizedReturnTo = String(returnTo || "").trim();
+  const normalizedReturnLabel = String(returnLabel || "").trim();
+  if (normalizedReturnTo) {
+    params.set("returnTo", normalizedReturnTo);
+  }
+  if (normalizedReturnLabel) {
+    params.set("returnLabel", normalizedReturnLabel);
+  }
+  return `/chat?${params.toString()}`;
 }
 
 function researchStageAgentModelLabel(agent: AgentConfigWorkspaceAgent | null | undefined, lang: "zh" | "en") {
@@ -4017,6 +4050,20 @@ export function TeamsRoute({
     },
   });
 
+  const repairChallengeCupTeamAgentsMutation = useMutation({
+    mutationFn: (teamId: string) =>
+      fetchJson<{ team: Team }>(`/api/teams/${encodeURIComponent(teamId)}/challenge-cup-agents/repair`, {
+        method: "POST",
+      }),
+    onSuccess: (payload, teamId) => {
+      if (payload.team) {
+        queryClient.setQueryData(queryKeys.team(payload.team.teamId), payload.team);
+      }
+      void chatWorkspaceCache.afterTeamChanged(payload.team?.teamId || teamId);
+      void chatWorkspaceCache.afterAgentWorkspaceChanged();
+    },
+  });
+
   const startTeamRoundMutation = useMutation({
     mutationFn: (payload: { roomId: string; teamId: string; topic: string; mode: string; purpose: string }) =>
       fetchJson<ChatRoomDetail>(`/api/chat-rooms/${payload.roomId}/rounds`, {
@@ -5188,16 +5235,28 @@ export function TeamsRoute({
     return bindings.find((binding) => researchStageAgentDirectChatRoute(binding.agent)) ?? bindings[0] ?? null;
   }
 
+  function sourceCollectionStageReturnRoute(stageId: SourceCollectionStageModuleId) {
+    return `${researchSourceCollectionRoute(selectedTeam?.teamId || RESEARCH_TEAM_ID)}&collectionStage=${stageId}`;
+  }
+
+  function sourceCollectionStageChatReturnLabel(stageId: SourceCollectionStageModuleId) {
+    return `${lang === "zh" ? "返回" : "Back to"} ${SOURCE_COLLECTION_STAGE_CHAT_LABELS[stageId][lang]}`;
+  }
+
   function openSourceCollectionStageAgentChat(stageId: SourceCollectionStageModuleId) {
     const binding = sourceCollectionStagePrimaryAgentBinding(stageId);
-    const chatRoute = researchStageAgentDirectChatRoute(binding?.agent);
+    const chatRoute = researchStageAgentDirectChatRoute(
+      binding?.agent,
+      sourceCollectionStageReturnRoute(stageId),
+      sourceCollectionStageChatReturnLabel(stageId),
+    );
     if (chatRoute) {
       navigate(chatRoute);
       return;
     }
-    window.alert(lang === "zh"
-      ? "当前步骤 Agent 缺少可用私聊会话，请先修复团队 Agent 绑定。"
-      : "This step Agent has no direct chat session. Repair the Team Agent binding first.");
+    if (selectedTeam?.teamId === RESEARCH_TEAM_ID && !repairChallengeCupTeamAgentsMutation.isPending) {
+      repairChallengeCupTeamAgentsMutation.mutate(selectedTeam.teamId);
+    }
   }
 
   function renderSourceCollectionStageAgents(stageId: SourceCollectionStageModuleId) {
@@ -5238,7 +5297,11 @@ export function TeamsRoute({
                 ? (lang === "zh" ? "引用失效" : "missing reference")
                 : (lang === "zh" ? "待绑定" : "missing");
             const modelLabel = researchStageAgentModelLabel(binding.agent, lang);
-            const chatRoute = researchStageAgentDirectChatRoute(binding.agent);
+            const chatRoute = researchStageAgentDirectChatRoute(
+              binding.agent,
+              sourceCollectionStageReturnRoute(stageId),
+              sourceCollectionStageChatReturnLabel(stageId),
+            );
             return (
               <article
                 key={`source-step-${stageId}-${binding.key}`}
@@ -7275,7 +7338,11 @@ export function TeamsRoute({
       sourceCollectionStageModules.find((module) => module.id === selectedSourceCollectionStageId)
       ?? sourceCollectionStageModules[0];
     const primaryStageAgentBinding = sourceCollectionStagePrimaryAgentBinding(activeModule.id);
-    const primaryStageAgentChatRoute = researchStageAgentDirectChatRoute(primaryStageAgentBinding?.agent);
+    const primaryStageAgentChatRoute = researchStageAgentDirectChatRoute(
+      primaryStageAgentBinding?.agent,
+      sourceCollectionStageReturnRoute(activeModule.id),
+      sourceCollectionStageChatReturnLabel(activeModule.id),
+    );
     const resultPanel = selectedSourceCollectionStageId === "screening"
       ? renderSourceCollectionScreeningPanel()
       : selectedSourceCollectionStageId === "candidate"
@@ -7316,13 +7383,19 @@ export function TeamsRoute({
                 type="button"
                 title={lang === "zh" ? "当前步骤缺少可用私聊，请先修复团队 Agent 绑定" : "No usable direct chat for this step"}
                 onClick={() => openSourceCollectionStageAgentChat(activeModule.id)}
+                disabled={repairChallengeCupTeamAgentsMutation.isPending}
               >
                 <MessageSquare size={13} />
-                {lang === "zh" ? "私聊未绑定" : "Chat missing"}
+                {repairChallengeCupTeamAgentsMutation.isPending
+                  ? (lang === "zh" ? "修复中" : "Repairing")
+                  : (lang === "zh" ? "修复团队 Agent" : "Repair Team Agents")}
               </button>
             )}
           </div>
         </div>
+        {repairChallengeCupTeamAgentsMutation.error instanceof Error ? (
+          <div className={styles.messageError}>{repairChallengeCupTeamAgentsMutation.error.message}</div>
+        ) : null}
         {resultPanel}
       </section>
     );
@@ -8251,7 +8324,7 @@ export function TeamsRoute({
           </div>
           <div className={styles.sourceCollectionPageActions}>
             {linkedChatRoomId ? (
-              <Link to={`/chat?room=${encodeURIComponent(linkedChatRoomId)}`}>
+              <Link to={teamChatRoomRoute(linkedChatRoomId, researchWorkspaceStageRoute(selectedTeam?.teamId || RESEARCH_TEAM_ID, stageView), lang === "zh" ? "返回阶段页" : "Back to stage")}>
                 <Users size={14} />
                 {lang === "zh" ? "团队讨论" : "Team discussion"}
               </Link>
@@ -9561,7 +9634,7 @@ export function TeamsRoute({
           </div>
           <div className={styles.sourceCollectionPageActions}>
             {linkedChatRoomId ? (
-              <Link to={`/chat?room=${encodeURIComponent(linkedChatRoomId)}`}>
+              <Link to={teamChatRoomRoute(linkedChatRoomId, researchSourceCollectionRoute(selectedTeam?.teamId || RESEARCH_TEAM_ID), lang === "zh" ? "返回知识搜集" : "Back to knowledge collection")}>
                 <Users size={14} />
                 {lang === "zh" ? "团队讨论" : "Team discussion"}
               </Link>
@@ -9819,7 +9892,7 @@ export function TeamsRoute({
               ) : (
                 <>
                   {linkedChatRoomId ? (
-                    <Link className={styles.toolbarLink} to={`/chat?room=${encodeURIComponent(linkedChatRoomId)}`}>
+                    <Link className={styles.toolbarLink} to={teamChatRoomRoute(linkedChatRoomId, teamWorkspaceRoute(selectedTeam?.teamId || RESEARCH_TEAM_ID), lang === "zh" ? "返回团队页面" : "Back to team")}>
                       {lang === "zh" ? "打开群聊" : "Open room"}
                     </Link>
                   ) : (
@@ -11126,7 +11199,7 @@ export function TeamsRoute({
                   <div className={styles.messageResult}>
                     <strong>{selectedTeamStartRoundResult.rounds.length}</strong>
                     <span>{lang === "zh" ? "轮讨论已写入关联群聊" : "rounds now recorded in the linked room"}</span>
-                    <Link to={`/chat?room=${encodeURIComponent(selectedTeamStartRoundResult.roomId)}`}>
+                    <Link to={teamChatRoomRoute(selectedTeamStartRoundResult.roomId, teamWorkspaceRoute(selectedTeam?.teamId || RESEARCH_TEAM_ID), lang === "zh" ? "返回团队页面" : "Back to team")}>
                       {lang === "zh" ? "打开群聊" : "Open room"}
                     </Link>
                   </div>
@@ -11153,7 +11226,7 @@ export function TeamsRoute({
                         <span>{latestTeamRound.mode}</span>
                         <span>{formatTime(latestTeamRound.updatedAt || latestTeamRound.startedAt, lang)}</span>
                       </div>
-                      <Link to={`/chat?room=${encodeURIComponent(latestTeamRound.roomId)}`}>
+                      <Link to={teamChatRoomRoute(latestTeamRound.roomId, teamWorkspaceRoute(selectedTeam?.teamId || RESEARCH_TEAM_ID), lang === "zh" ? "返回团队页面" : "Back to team")}>
                         {lang === "zh" ? "查看完整群聊" : "View full room"}
                       </Link>
                     </article>
