@@ -17,7 +17,12 @@ import os
 import json
 import time
 import hashlib
-from typing import Optional, List, Dict, Any
+import base64
+import html as html_lib
+import ipaddress
+import re
+from urllib.parse import parse_qs, quote_plus, unquote, urljoin, urlparse
+from typing import List, Dict, Any
 
 import httpx
 
@@ -33,6 +38,14 @@ _DEFAULT_TOKEN_URL = "http://127.0.0.1:53699/get_token"
 _TOKEN_URL = os.environ.get("AUTOGLM_TOKEN_URL", _DEFAULT_TOKEN_URL).strip() or _DEFAULT_TOKEN_URL
 _REQUEST_TIMEOUT = 30.0  # 秒
 _TOKEN_TIMEOUT = 10.0  # 秒
+_PUBLIC_SEARCH_URL = "https://www.bing.com/search"
+_PUBLIC_SEARCH_TIMEOUT = 12.0
+_PUBLIC_SEARCH_MAX_RESULTS = 20
+_WEB_FETCH_TIMEOUT = 30.0
+_WEB_FETCH_MAX_BYTES = 2 * 1024 * 1024
+_WEB_FETCH_MAX_REDIRECTS = 5
+_USER_AGENT = "Mozilla/5.0 (compatible; Vibelution/1.0; research search tools)"
+_BLOCKED_HOST_SUFFIXES = (".localhost", ".local", ".internal")
 
 
 class AutoGLMTokenServiceError(RuntimeError):
@@ -218,6 +231,212 @@ def _parse_response(data: Dict[str, Any]) -> List[Dict[str, str]]:
     return results
 
 
+def _clamp_int(value: int, *, default: int, minimum: int, maximum: int) -> int:
+    try:
+        parsed = int(value)
+    except Exception:
+        parsed = default
+    return max(minimum, min(parsed, maximum))
+
+
+def _split_domain_list(value: str | None) -> list[str]:
+    if not value:
+        return []
+    domains: list[str] = []
+    for item in re.split(r"[\n,;]+", str(value)):
+        normalized = item.strip().lower()
+        normalized = normalized.removeprefix("http://").removeprefix("https://")
+        normalized = normalized.split("/", 1)[0].strip(".")
+        if normalized:
+            domains.append(normalized)
+    return list(dict.fromkeys(domains))
+
+
+def _host_matches_domain(host: str, domain: str) -> bool:
+    normalized_host = host.lower().strip(".")
+    normalized_domain = domain.lower().strip(".")
+    return normalized_host == normalized_domain or normalized_host.endswith(f".{normalized_domain}")
+
+
+def _domain_filter_allows(url: str, *, allowed_domains: str = "", blocked_domains: str = "") -> bool:
+    parsed = urlparse(url)
+    host = (parsed.hostname or "").lower()
+    if not host:
+        return False
+    blocked = _split_domain_list(blocked_domains)
+    if any(_host_matches_domain(host, domain) for domain in blocked):
+        return False
+    allowed = _split_domain_list(allowed_domains)
+    return not allowed or any(_host_matches_domain(host, domain) for domain in allowed)
+
+
+def _validate_public_http_url(url: str) -> str:
+    parsed = urlparse(url)
+    if parsed.scheme not in {"http", "https"}:
+        return "URL 必须使用 http:// 或 https://"
+    if not parsed.hostname:
+        return "URL 缺少主机名"
+    if parsed.username or parsed.password:
+        return "URL 不能包含用户名或密码"
+    host = parsed.hostname.strip().lower()
+    if host in {"localhost", "127.0.0.1", "::1"} or host.endswith(_BLOCKED_HOST_SUFFIXES):
+        return "出于安全原因，不允许访问本机或内部网络地址"
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        return ""
+    if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_multicast or ip.is_reserved or ip.is_unspecified:
+        return "出于安全原因，不允许访问私有、环回或保留 IP 地址"
+    return ""
+
+
+def _clean_html_fragment(fragment: str) -> str:
+    text = re.sub(r"<script[^>]*>.*?</script>", " ", fragment, flags=re.DOTALL | re.IGNORECASE)
+    text = re.sub(r"<style[^>]*>.*?</style>", " ", text, flags=re.DOTALL | re.IGNORECASE)
+    text = re.sub(r"<[^>]+>", " ", text)
+    text = html_lib.unescape(text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _decode_search_result_url(url: str) -> str:
+    candidate = html_lib.unescape(str(url or "").strip())
+    if not candidate:
+        return ""
+    parsed = urlparse(candidate)
+    if (not parsed.hostname or parsed.hostname.lower().endswith("bing.com")) and parsed.path.startswith("/ck/"):
+        encoded = parse_qs(parsed.query).get("u", [""])[0]
+        encoded = unquote(encoded)
+        if encoded.startswith("a1"):
+            encoded = encoded[2:]
+        if encoded:
+            try:
+                padded = encoded + "=" * (-len(encoded) % 4)
+                decoded = base64.urlsafe_b64decode(padded.encode("ascii")).decode("utf-8", errors="replace")
+                if decoded.startswith(("http://", "https://")):
+                    return decoded
+            except Exception:
+                pass
+    return candidate
+
+
+def _parse_public_search_html(document: str, *, max_results: int) -> list[dict[str, str]]:
+    results: list[dict[str, str]] = []
+    seen_urls: set[str] = set()
+    blocks = re.findall(
+        r"<li\b[^>]*class=[\"'][^\"']*\bb_algo\b[^\"']*[\"'][^>]*>(.*?)</li>",
+        document,
+        flags=re.DOTALL | re.IGNORECASE,
+    )
+    if not blocks:
+        blocks = re.findall(r"<h2\b[^>]*>.*?</h2>.*?(?=<h2\b|$)", document, flags=re.DOTALL | re.IGNORECASE)
+    for block in blocks:
+        anchor = re.search(r"<a\b[^>]*href=[\"']([^\"']+)[\"'][^>]*>(.*?)</a>", block, flags=re.DOTALL | re.IGNORECASE)
+        if not anchor:
+            continue
+        url = _decode_search_result_url(anchor.group(1))
+        if _validate_public_http_url(url):
+            continue
+        normalized_url = url.split("#", 1)[0]
+        if normalized_url in seen_urls:
+            continue
+        title = _clean_html_fragment(anchor.group(2)) or "无标题"
+        snippet_match = re.search(r"<p\b[^>]*>(.*?)</p>", block, flags=re.DOTALL | re.IGNORECASE)
+        snippet = _clean_html_fragment(snippet_match.group(1)) if snippet_match else ""
+        results.append({"name": title, "url": url, "snippet": snippet})
+        seen_urls.add(normalized_url)
+        if len(results) >= max_results:
+            break
+    return results
+
+
+def _format_search_results(
+    query: str,
+    results: list[dict[str, str]],
+    *,
+    provider: str,
+    note: str = "",
+) -> str:
+    if not results:
+        return f"[搜索] 未找到与「{query}」相关的结果\n来源: {provider}"
+
+    snippets = [item.get("snippet", "") for item in results if item.get("snippet")]
+    summary = f"关于「{query}」，通过 {provider} 搜索到 {len(results)} 条相关结果：\n\n"
+    if snippets:
+        summary += " | ".join(f"• {snippet[:150]}{'...' if len(snippet) > 150 else ''}" for snippet in snippets[:3])
+        if len(snippets) > 3:
+            summary += f"\n（另有 {len(snippets) - 3} 条相关结果）"
+    else:
+        summary += "搜索结果包含标题和链接，但无摘要信息。"
+    if note:
+        summary += f"\n\n{note}"
+
+    sources = "\n\n**参考来源：**\n"
+    for index, item in enumerate(results, 1):
+        title = item.get("name") or "无标题"
+        url = item.get("url") or ""
+        snippet = item.get("snippet") or ""
+        if url:
+            sources += f"{index}. [{title}]({url})"
+        else:
+            sources += f"{index}. {title}"
+        if snippet:
+            sources += f"\n   - {snippet[:220]}{'...' if len(snippet) > 220 else ''}"
+        sources += "\n"
+    return summary + sources
+
+
+def public_web_search(
+    query: str,
+    max_results: int = 10,
+    allowed_domains: str = "",
+    blocked_domains: str = "",
+) -> str:
+    """Use a keyless public search result page as a bounded no-quota fallback."""
+    if not query or not query.strip():
+        return "[错误] 搜索关键词不能为空"
+    limit = _clamp_int(max_results, default=10, minimum=1, maximum=_PUBLIC_SEARCH_MAX_RESULTS)
+    search_url = f"{_PUBLIC_SEARCH_URL}?q={quote_plus(query.strip())}&count={limit}"
+    try:
+        with httpx.Client(timeout=_PUBLIC_SEARCH_TIMEOUT, follow_redirects=True) as client:
+            try:
+                response = client.get(search_url, headers={"User-Agent": _USER_AGENT})
+            except TypeError:
+                response = client.get(search_url)
+            response.raise_for_status()
+            document = response.text
+    except httpx.HTTPStatusError as exc:
+        return f"[错误] 公开搜索页请求失败: HTTP {exc.response.status_code}"
+    except httpx.TimeoutException:
+        return f"[错误] 公开搜索页请求超时 ({_PUBLIC_SEARCH_TIMEOUT:g}s)"
+    except httpx.RequestError as exc:
+        return f"[错误] 公开搜索页请求失败: {exc}"
+    except Exception as exc:
+        return f"[错误] 公开搜索页解析失败: {type(exc).__name__}: {exc}"
+
+    results = [
+        item
+        for item in _parse_public_search_html(document, max_results=limit * 2)
+        if _domain_filter_allows(item.get("url", ""), allowed_domains=allowed_domains, blocked_domains=blocked_domains)
+    ][:limit]
+    domain_note = ""
+    if allowed_domains or blocked_domains:
+        domain_note = f"域名过滤: allowed={allowed_domains or '*'}, blocked={blocked_domains or '-'}"
+    return _format_search_results(query.strip(), results, provider="public_web_search", note=domain_note)
+
+
+def _maybe_public_search_fallback(error: AutoGLMTokenServiceError, query: str, max_results: int) -> str | None:
+    if error.status == "empty_token":
+        return None
+    fallback = public_web_search(query=query, max_results=max_results)
+    if fallback.startswith("[错误]"):
+        return f"\n\n[公开搜索降级失败]\n{fallback}"
+    return (
+        "\n\n[公开搜索降级]\n"
+        "AutoGLM token 服务当前不可用，已改用无需 API key 的公开搜索页解析结果。\n"
+        f"{fallback}"
+    )
+
+
 # ============================================================================
 # 核心搜索函数
 # ============================================================================
@@ -241,7 +460,11 @@ def web_search(query: str, max_results: int = 10) -> str:
         token = _get_bearer_token()
     except AutoGLMTokenServiceError as e:
         _record_dependency_event(e)
-        return _format_token_service_error(e)
+        diagnostic = _format_token_service_error(e)
+        fallback = _maybe_public_search_fallback(e, query.strip(), max_results)
+        if fallback and fallback.startswith("\n\n[公开搜索降级]\n"):
+            return fallback.strip() + "\n\n[AutoGLM token 诊断]\n" + diagnostic
+        return diagnostic + (fallback or "")
 
     # 2. 构建请求
     headers, payload = _build_headers(token, query.strip())
@@ -274,92 +497,127 @@ def web_search(query: str, max_results: int = 10) -> str:
     if not results:
         return f"[搜索] 未找到与「{query}」相关的结果"
 
-    # 6. 限制结果数量
-    results = results[:max_results]
-
-    # 7. 生成摘要
-    snippets = [r["snippet"] for r in results if r["snippet"]]
-    if snippets:
-        summary = f"关于「{query}」，搜索到 {len(results)} 条相关结果：\n\n"
-        summary += " | ".join(f"• {s[:150]}{'...' if len(s) > 150 else ''}" for s in snippets[:3])
-        if len(snippets) > 3:
-            summary += f"\n（另有 {len(snippets) - 3} 条相关结果）"
-    else:
-        summary = f"[搜索] 找到 {len(results)} 条结果，但无摘要信息"
-
-    # 8. 生成参考来源
-    sources = "\n\n**参考来源：**\n"
-    for i, r in enumerate(results, 1):
-        if r["url"]:
-            sources += f"{i}. [{r['name']}]({r['url']})\n"
-        else:
-            sources += f"{i}. {r['name']}\n"
-
-    return summary + sources
+    # 6. 限制结果数量并格式化
+    limit = _clamp_int(max_results, default=10, minimum=1, maximum=50)
+    return _format_search_results(query.strip(), results[:limit], provider="AutoGLM Web Search")
 
 
 # ============================================================================
 # 网页内容抓取
 # ============================================================================
 
-def web_fetch(url: str, max_chars: int = 8000) -> str:
+def _read_response_text(response: httpx.Response) -> str:
+    content_type = str(response.headers.get("content-type") or "").lower()
+    if content_type and not any(
+        marker in content_type
+        for marker in ("text/", "html", "xml", "json", "javascript", "xhtml")
+    ):
+        return f"[错误] 不支持的内容类型: {content_type[:120]}"
+    content = response.content
+    if len(content) > _WEB_FETCH_MAX_BYTES:
+        return f"[错误] 网页内容超过安全上限 {_WEB_FETCH_MAX_BYTES} bytes，已停止处理。"
+    encoding = response.encoding or "utf-8"
+    return content.decode(encoding, errors="replace")
+
+
+def _extract_plain_text(document: str) -> str:
+    text = re.sub(r"<!--.*?-->", " ", document, flags=re.DOTALL)
+    text = re.sub(r"<script[^>]*>.*?</script>", " ", text, flags=re.DOTALL | re.IGNORECASE)
+    text = re.sub(r"<style[^>]*>.*?</style>", " ", text, flags=re.DOTALL | re.IGNORECASE)
+    text = re.sub(r"<noscript[^>]*>.*?</noscript>", " ", text, flags=re.DOTALL | re.IGNORECASE)
+    text = re.sub(r"<br\s*/?>", "\n", text, flags=re.IGNORECASE)
+    text = re.sub(r"</(p|div|section|article|li|h[1-6]|tr)>", "\n", text, flags=re.IGNORECASE)
+    text = re.sub(r"<[^>]+>", " ", text)
+    text = html_lib.unescape(text)
+    text = re.sub(r"[ \t\r\f\v]+", " ", text)
+    text = re.sub(r"\n\s*\n\s*", "\n\n", text)
+    return text.strip()
+
+
+def _fetch_with_same_host_redirects(url: str) -> tuple[str, httpx.Response | None]:
+    current_url = url
+    original_host = (urlparse(url).hostname or "").lower()
+    try:
+        with httpx.Client(timeout=_WEB_FETCH_TIMEOUT, follow_redirects=False) as client:
+            for _ in range(_WEB_FETCH_MAX_REDIRECTS + 1):
+                validation_error = _validate_public_http_url(current_url)
+                if validation_error:
+                    return f"[错误] {validation_error}: {current_url}", None
+                try:
+                    response = client.get(current_url, headers={"User-Agent": _USER_AGENT})
+                except TypeError:
+                    response = client.get(current_url)
+                if response.status_code in {301, 302, 303, 307, 308}:
+                    location = response.headers.get("location", "")
+                    if not location:
+                        return f"[错误] 重定向响应缺少 Location: {current_url}", None
+                    next_url = urljoin(current_url, location)
+                    validation_error = _validate_public_http_url(next_url)
+                    if validation_error:
+                        return f"[错误] 重定向目标被拒绝: {validation_error}: {next_url}", None
+                    next_host = (urlparse(next_url).hostname or "").lower()
+                    if next_host != original_host:
+                        return (
+                            "[网页抓取] 目标发生跨主机重定向，已按安全策略停止自动跟随。\n"
+                            f"原 URL: {url}\n"
+                            f"重定向目标: {next_url}\n"
+                            "如确认该目标可信，请直接用 web_fetch_tool 抓取重定向后的 URL。",
+                            None,
+                        )
+                    current_url = next_url
+                    continue
+                response.raise_for_status()
+                return current_url, response
+            return f"[错误] 重定向次数超过上限 {_WEB_FETCH_MAX_REDIRECTS}: {url}", None
+    except httpx.ConnectError:
+        return f"[错误] 无法连接到服务器: {current_url}", None
+    except httpx.TimeoutException:
+        return f"[错误] 请求超时 ({_WEB_FETCH_TIMEOUT:g}s): {current_url}", None
+    except httpx.HTTPStatusError as exc:
+        return f"[错误] HTTP {exc.response.status_code}: {current_url}", None
+    except Exception as exc:
+        return f"[错误] 请求失败: {type(exc).__name__}: {exc}", None
+
+
+def web_fetch(url: str, max_chars: int = 8000, prompt: str = "") -> str:
     """
     获取网页内容并返回纯文本
 
     Args:
         url: 要抓取的网页 URL
         max_chars: 最大返回字符数，默认 8000
+        prompt: 可选聚焦提示词；不调用模型，只用于标注本次抓取关注点
 
     Returns:
         网页文本内容（已去除 HTML 标签）
     """
-    import re
-
     if not url or not url.strip():
         return "[错误] URL 不能为空"
 
     url = url.strip()
-    if not url.startswith(("http://", "https://")):
-        return f"[错误] URL 必须以 http:// 或 https:// 开头: {url}"
+    validation_error = _validate_public_http_url(url)
+    if validation_error:
+        return f"[错误] {validation_error}: {url}"
 
-    try:
-        with httpx.Client(timeout=30.0, follow_redirects=True) as client:
-            response = client.get(
-                url,
-                headers={
-                    "User-Agent": "Mozilla/5.0 (compatible; Vibelution/1.0; +https://github.com/Vibelution)"
-                },
-            )
-            response.raise_for_status()
-            html = response.text
-    except httpx.ConnectError:
-        return f"[错误] 无法连接到服务器: {url}"
-    except httpx.TimeoutException:
-        return f"[错误] 请求超时 (30s): {url}"
-    except httpx.HTTPStatusError as e:
-        return f"[错误] HTTP {e.response.status_code}: {url}"
-    except Exception as e:
-        return f"[错误] 请求失败: {type(e).__name__}: {e}"
+    final_url_or_error, response = _fetch_with_same_host_redirects(url)
+    if response is None:
+        return final_url_or_error
 
-    # 去除 HTML 标签
-    text = re.sub(r'<script[^>]*>.*?</script>', '', html, flags=re.DOTALL | re.IGNORECASE)
-    text = re.sub(r'<style[^>]*>.*?</style>', '', text, flags=re.DOTALL | re.IGNORECASE)
-    text = re.sub(r'<[^>]+>', '', text)
-    text = re.sub(r'&nbsp;', ' ', text)
-    text = re.sub(r'&amp;', '&', text)
-    text = re.sub(r'&lt;', '<', text)
-    text = re.sub(r'&gt;', '>', text)
-    text = re.sub(r'&quot;', '"', text)
-    text = re.sub(r'\n\s*\n', '\n\n', text)
-    text = text.strip()
+    document_or_error = _read_response_text(response)
+    if document_or_error.startswith("[错误]"):
+        return document_or_error
 
-    if len(text) > max_chars:
-        text = text[:max_chars] + f"\n\n... [截断，原内容 {len(text)} 字符]"
+    text = _extract_plain_text(document_or_error)
+
+    limit = _clamp_int(max_chars, default=8000, minimum=500, maximum=50000)
+    if len(text) > limit:
+        text = text[:limit] + f"\n\n... [截断，原内容 {len(text)} 字符]"
 
     if not text:
-        return f"[网页抓取] URL 内容为空: {url}"
+        return f"[网页抓取] URL 内容为空: {final_url_or_error}"
 
-    return f"[网页内容] {url}\n\n{text}"
+    focus = f"\n关注点: {prompt.strip()[:240]}" if prompt and prompt.strip() else ""
+    return f"[网页内容] {final_url_or_error}{focus}\n\n{text}"
 
 
 # ============================================================================
