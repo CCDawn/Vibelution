@@ -26,6 +26,9 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_HOST = "bossai-server-b"
 DEFAULT_REMOTE_ROOT = "/home/enrigin/Vibelution-test"
 DEFAULT_WORKERS = 8
+DEFAULT_BACKEND = "venv"
+DEFAULT_DOCKER_IMAGE = "vibelution-test"
+REMOTE_TEST_CONFIG = ".remote-test/config.toml"
 
 EXCLUDED_NAMES = {
     ".git",
@@ -53,6 +56,9 @@ class RemoteTestConfig:
     remote_root: str
     workers: int
     suite: str
+    backend: str
+    docker_image: str
+    rebuild_image: bool
     remote_command: str | None
     no_install: bool
     dry_run: bool
@@ -128,11 +134,34 @@ def build_remote_script(config: RemoteTestConfig, run_id: str) -> str:
         f"REMOTE_ARCHIVE={remote_archive}",
         'CACHE_ROOT="$REMOTE_ROOT/cache"',
         'PY_VERSION="$(python3 -c \'import sys; print(f"{sys.version_info.major}{sys.version_info.minor}")\')"',
-        'VENV="$CACHE_ROOT/venv-py${PY_VERSION}"',
         'mkdir -p "$REMOTE_SOURCE" "$REMOTE_ARTIFACTS" "$CACHE_ROOT"',
         'exec > >(tee "$REMOTE_ARTIFACTS/remote-test.log") 2>&1',
         'tar -xzf "$REMOTE_ARCHIVE" -C "$REMOTE_SOURCE"',
         'cd "$REMOTE_SOURCE"',
+        'mkdir -p "$REMOTE_SOURCE/.remote-test"',
+        'cat > "$REMOTE_SOURCE/' + REMOTE_TEST_CONFIG + '" <<\'EOF_REMOTE_TEST_CONFIG\'',
+        "[runtime]",
+        'profile = "safe_remote"',
+        "preflight_doctor = true",
+        "require_venv = true",
+        "EOF_REMOTE_TEST_CONFIG",
+        'export VIBELUTION_CONFIG_PATH="$REMOTE_SOURCE/' + REMOTE_TEST_CONFIG + '"',
+        f"echo remote_root={remote_root}",
+        f"echo run_id={shlex.quote(run_id)}",
+        f"echo backend={shlex.quote(config.backend)}",
+        'echo config_path="$VIBELUTION_CONFIG_PATH"',
+        f"echo command={shlex.quote(test_command)}",
+    ]
+    if config.backend == "docker":
+        setup_lines.extend(build_remote_docker_lines(config, test_command))
+    else:
+        setup_lines.extend(build_remote_venv_lines(config, test_command))
+    return "\n".join(setup_lines)
+
+
+def build_remote_venv_lines(config: RemoteTestConfig, test_command: str) -> list[str]:
+    setup_lines = [
+        'VENV="$CACHE_ROOT/venv-py${PY_VERSION}"',
         'if [ ! -x "$VENV/bin/python" ]; then python3 -m venv "$VENV"; fi',
         '. "$VENV/bin/activate"',
     ]
@@ -152,13 +181,62 @@ def build_remote_script(config: RemoteTestConfig, run_id: str) -> str:
         )
     setup_lines.extend(
         [
-            f"echo remote_root={remote_root}",
-            f"echo run_id={shlex.quote(run_id)}",
-            f"echo command={shlex.quote(test_command)}",
             f"({test_command})",
         ]
     )
-    return "\n".join(setup_lines)
+    return setup_lines
+
+
+def build_remote_docker_lines(config: RemoteTestConfig, test_command: str) -> list[str]:
+    image_base = shlex.quote(config.docker_image)
+    rebuild_flag = "1" if config.rebuild_image else "0"
+    quoted_command = shlex.quote(test_command)
+    return [
+        f"DOCKER_IMAGE_BASE={image_base}",
+        f"REBUILD_IMAGE={rebuild_flag}",
+        "if ! command -v docker >/dev/null 2>&1; then echo 'docker executable not found on remote host' >&2; exit 127; fi",
+        "if [ -f requirements.txt ]; then",
+        "  REQ_HASH=\"$(python3 -c 'import hashlib, pathlib; print(hashlib.sha256(pathlib.Path(\"requirements.txt\").read_bytes()).hexdigest()[:12])')\"",
+        "else",
+        "  REQ_HASH=no-requirements",
+        "fi",
+        'DOCKER_IMAGE="${DOCKER_IMAGE_BASE}:py${PY_VERSION}-${REQ_HASH}"',
+        'DOCKER_BUILD_CONTEXT="$CACHE_ROOT/docker-build/py${PY_VERSION}-${REQ_HASH}"',
+        'DOCKERFILE="$DOCKER_BUILD_CONTEXT/Dockerfile"',
+        'mkdir -p "$DOCKER_BUILD_CONTEXT"',
+        'if [ -f requirements.txt ]; then cp requirements.txt "$DOCKER_BUILD_CONTEXT/requirements.txt"; else : > "$DOCKER_BUILD_CONTEXT/requirements.txt"; fi',
+        'cat > "$DOCKERFILE" <<\'EOF_DOCKERFILE\'',
+        "FROM python:3.11-slim",
+        "ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \\",
+        "    PYTHONDONTWRITEBYTECODE=1 \\",
+        "    PYTHONUNBUFFERED=1 \\",
+        "    NO_PROXY=localhost,127.0.0.1 \\",
+        "    no_proxy=localhost,127.0.0.1 \\",
+        "    TERM=xterm-256color \\",
+        "    COLUMNS=120 \\",
+        "    HOME=/tmp/vibelution-home \\",
+        "    XDG_CACHE_HOME=/tmp/vibelution-cache",
+        "WORKDIR /workspace",
+        "COPY requirements.txt /tmp/vibelution-requirements.txt",
+        "RUN python -m pip install --upgrade pip && python -m pip install -r /tmp/vibelution-requirements.txt",
+        "EOF_DOCKERFILE",
+        'if [ "$REBUILD_IMAGE" = "1" ] || ! docker image inspect "$DOCKER_IMAGE" >/dev/null 2>&1; then',
+        '  docker build -t "$DOCKER_IMAGE" -f "$DOCKERFILE" "$DOCKER_BUILD_CONTEXT"',
+        "fi",
+        'echo docker_image="$DOCKER_IMAGE"',
+        "docker run --rm \\",
+        '  -v "$REMOTE_SOURCE:/workspace" \\',
+        "  -w /workspace \\",
+        "  -e NO_PROXY=localhost,127.0.0.1 \\",
+        "  -e no_proxy=localhost,127.0.0.1 \\",
+        "  -e TERM=xterm-256color \\",
+        "  -e COLUMNS=120 \\",
+        "  -e HOME=/tmp/vibelution-home \\",
+        "  -e XDG_CACHE_HOME=/tmp/vibelution-cache \\",
+        "  -e PYTHONUNBUFFERED=1 \\",
+        "  -e VIBELUTION_CONFIG_PATH=/workspace/" + REMOTE_TEST_CONFIG + " \\",
+        '  "$DOCKER_IMAGE" bash -lc ' + quoted_command,
+    ]
 
 
 def command_to_display(command: Sequence[str]) -> str:
@@ -233,6 +311,18 @@ def parse_args(argv: Sequence[str]) -> RemoteTestConfig:
     parser.add_argument("--remote-root", default=DEFAULT_REMOTE_ROOT, help=f"Remote workspace root, default: {DEFAULT_REMOTE_ROOT}")
     parser.add_argument("--workers", type=int, default=DEFAULT_WORKERS, help=f"pytest worker count, default: {DEFAULT_WORKERS}")
     parser.add_argument(
+        "--backend",
+        choices=("venv", "docker"),
+        default=DEFAULT_BACKEND,
+        help=f"Remote execution backend, default: {DEFAULT_BACKEND}",
+    )
+    parser.add_argument(
+        "--docker-image",
+        default=DEFAULT_DOCKER_IMAGE,
+        help=f"Docker image repository/base name for --backend docker, default: {DEFAULT_DOCKER_IMAGE}",
+    )
+    parser.add_argument("--rebuild-image", action="store_true", help="Force rebuild of the remote Docker test image.")
+    parser.add_argument(
         "--suite",
         choices=("environment-smoke", "parallel", "hybrid"),
         default="parallel",
@@ -261,6 +351,9 @@ def parse_args(argv: Sequence[str]) -> RemoteTestConfig:
         remote_root=args.remote_root.rstrip("/"),
         workers=args.workers,
         suite=args.suite,
+        backend=args.backend,
+        docker_image=args.docker_image,
+        rebuild_image=args.rebuild_image,
         remote_command=args.remote_command,
         no_install=args.no_install,
         dry_run=args.dry_run,
