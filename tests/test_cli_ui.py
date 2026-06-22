@@ -1299,7 +1299,7 @@ def test_chat_dialog_block_message_card_reaches_right_edge():
     console.print(block)
     rendered = console.export_text()
 
-    border_line = next(line for line in rendered.splitlines() if "┐" in line)
+    border_line = next(line for line in rendered.splitlines() if "┐" in line or "╮" in line)
     assert len(border_line.rstrip()) >= 70
 
 

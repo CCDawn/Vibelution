@@ -25,7 +25,16 @@ from core.infrastructure.security import (
 )
 
 # 动态获取项目根目录（避免硬编码路径）
-_PROJECT_ROOT = str(Path(__file__).parent.parent)
+_PROJECT_ROOT_PATH = Path(__file__).parent.parent
+_PROJECT_ROOT = str(_PROJECT_ROOT_PATH)
+
+
+def _project_path(*parts: str) -> str:
+    return str(_PROJECT_ROOT_PATH.joinpath(*parts))
+
+
+def _outside_project_path(*parts: str) -> str:
+    return str(_PROJECT_ROOT_PATH.parent.joinpath("outside_project", *parts))
 
 
 # ============================================================================
@@ -49,10 +58,10 @@ class TestPathSandbox:
     def test_is_within_project_valid(self, sandbox):
         """测试合法路径"""
         valid_paths = [
-            _PROJECT_ROOT + "\\agent.py",
-            _PROJECT_ROOT + "\\core\\security.py",
-            _PROJECT_ROOT + "\\tools\\shell_tools.py",
-            _PROJECT_ROOT + "\\workspace\\memory\\test.json",
+            _project_path("agent.py"),
+            _project_path("core", "security.py"),
+            _project_path("tools", "shell_tools.py"),
+            _project_path("workspace", "memory", "test.json"),
         ]
         for path in valid_paths:
             assert sandbox.is_within_project(path) is True, f"路径应该在项目内：{path}"
@@ -60,10 +69,10 @@ class TestPathSandbox:
     def test_is_within_project_invalid(self, sandbox):
         """测试非法路径"""
         invalid_paths = [
-            "C:\\Windows\\System32\\cmd.exe",
-            "C:\\Program Files\\Python\\python.exe",
-            "C:\\Users\\Public\\Documents\\other_project\\file.txt",
-            "D:\\Some\\Other\\Drive\\file.txt",
+            _outside_project_path("cmd.exe"),
+            _outside_project_path("Python", "python.exe"),
+            _outside_project_path("Documents", "other_project", "file.txt"),
+            _outside_project_path("Some", "Other", "Drive", "file.txt"),
         ]
         for path in invalid_paths:
             assert sandbox.is_within_project(path) is False, f"路径应该在项目外：{path}"
@@ -71,9 +80,9 @@ class TestPathSandbox:
     def test_path_traversal_attack(self, sandbox):
         """测试路径遍历攻击防护"""
         attack_paths = [
-            _PROJECT_ROOT + "\\..\\..\\Windows\\system32",
-            _PROJECT_ROOT + "\\..\\..\\..\\..\\Windows",
-            "..\\..\\Windows\\system32",
+            str(_PROJECT_ROOT_PATH / ".." / ".." / "Windows" / "system32"),
+            str(_PROJECT_ROOT_PATH / ".." / ".." / ".." / ".." / "Windows"),
+            str(Path("..") / ".." / "Windows" / "system32"),
         ]
         for path in attack_paths:
             is_valid, error = sandbox.validate_path(path)
@@ -189,10 +198,10 @@ class TestSecurityValidator:
     def test_validate_command_whitelist_allowed(self, validator):
         """测试白名单允许的命令"""
         allowed_commands = [
-            f"Get-Content {_PROJECT_ROOT}\\agent.py",
-            f"Set-Content {_PROJECT_ROOT}\\test.txt -Value 'hello'",
+            f"Get-Content {_project_path('agent.py')}",
+            f"Set-Content {_project_path('test.txt')} -Value 'hello'",
             f"Get-ChildItem {_PROJECT_ROOT}",
-            f"python {_PROJECT_ROOT}\\agent.py",
+            f"python {_project_path('agent.py')}",
             "git status",
             "pytest tests/",
             "Select-String -Pattern 'test' -Path file.txt",
@@ -229,16 +238,16 @@ class TestFileOperationSecurity:
         """测试文件读取"""
         is_safe, error = validator.validate_file_operation(
             "read",
-            _PROJECT_ROOT + "\\agent.py"
+            _project_path("agent.py")
         )
         assert is_safe is True
 
     def test_validate_file_write_forbidden_ext(self, validator):
         """测试禁止的文件扩展名"""
         forbidden_extensions = [
-            _PROJECT_ROOT + "\\malware.exe",
-            _PROJECT_ROOT + "\\script.bat",
-            _PROJECT_ROOT + "\\payload.dll",
+            _project_path("malware.exe"),
+            _project_path("script.bat"),
+            _project_path("payload.dll"),
         ]
         for path in forbidden_extensions:
             is_safe, error = validator.validate_file_operation("write", path)
@@ -257,7 +266,7 @@ class TestFileOperationSecurity:
         for content in dangerous_contents:
             is_safe, error = validator.validate_file_operation(
                 "write",
-                _PROJECT_ROOT + "\\test.py",
+                _project_path("test.py"),
                 content
             )
             assert is_safe is False, f"应该阻止危险内容：{content}"
@@ -287,12 +296,12 @@ class TestConvenienceFunctions:
         """测试 validate_file_path 函数"""
         # 合法路径
         is_valid, error = validate_file_path(
-            _PROJECT_ROOT + "\\agent.py"
+            _project_path("agent.py")
         )
         assert is_valid is True
 
         # 非法路径
-        is_valid, error = validate_file_path("C:\\Windows\\system32")
+        is_valid, error = validate_file_path(_outside_project_path("system32"))
         assert is_valid is False
 
 
@@ -312,20 +321,20 @@ class TestIntegration:
 
         # 2. 验证命令
         is_safe, error = validator.validate_command(
-            f"Get-Content {_PROJECT_ROOT}\\agent.py"
+            f"Get-Content {_project_path('agent.py')}"
         )
         assert is_safe is True
 
         # 3. 验证路径
         is_valid, error = validator.path_sandbox.validate_path(
-            _PROJECT_ROOT + "\\core\\security.py"
+            _project_path("core", "security.py")
         )
         assert is_valid is True
 
         # 4. 验证文件操作
         is_safe, error = validator.validate_file_operation(
             "read",
-            _PROJECT_ROOT + "\\README.md"
+            _project_path("README.md")
         )
         assert is_safe is True
 

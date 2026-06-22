@@ -57,7 +57,7 @@ def test_run_git_hides_console_windows_on_windows(monkeypatch, tmp_path):
     service = GitMemoryService.__new__(GitMemoryService)
     service._project_root = tmp_path
 
-    monkeypatch.setattr(git_process.os, "name", "nt", raising=False)
+    monkeypatch.setattr(git_process, "_is_windows_platform", lambda: True)
     monkeypatch.setattr(git_process.shutil, "which", lambda name: str(cmd_git) if name == "git" else None)
     monkeypatch.setattr(git_process.subprocess, "CREATE_NO_WINDOW", 0x08000000, raising=False)
     git_process.resolve_git_executable.cache_clear()
