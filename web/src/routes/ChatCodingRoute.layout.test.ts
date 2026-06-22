@@ -899,6 +899,7 @@ describe("ChatCodingRoute layout contract", () => {
 
   it("coalesces lightweight assistant delta stream events into a local live overlay", () => {
     expect(routeSource).toContain("const SESSION_ASSISTANT_DELTA_MIN_APPLY_INTERVAL_MS = 80");
+    expect(routeSource).toContain("const SESSION_ASSISTANT_DELTA_IMMEDIATE_FLUSH_CHARS = 160");
     expect(routeSource).toContain("function liveAssistantOverlayTurnId(turnId: string)");
     expect(routeSource).toContain("function liveAssistantMessageId(sessionId: string, turnId: string)");
     expect(routeSource).toContain("function liveAssistantMessageTurnId(message: ConversationMessage)");
@@ -928,8 +929,11 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("const nextFeedbackEvents = mergeLiveFeedbackEvents(previous?.feedbackEvents, payload.feedbackEvents)");
     expect(routeSource).toContain("return mergeSessionDetailWithLiveAssistantOverlay(previous, detail)");
     expect(routeSource).toContain("let pendingAssistantDeltaMessages: ConversationMessage[] | undefined");
-    expect(routeSource).toContain("function applyPendingAssistantDelta(reason: \"timer\" | \"close\" | \"final\")");
+    expect(routeSource).toContain("function applyPendingAssistantDelta(reason: \"timer\" | \"close\" | \"final\" | \"immediate\")");
     expect(routeSource).toContain("function queueAssistantDelta(");
+    expect(routeSource).toContain("const shouldFlushAssistantDeltaImmediately =");
+    expect(routeSource).toContain("contentDeltaLength + thoughtDeltaLength >= SESSION_ASSISTANT_DELTA_IMMEDIATE_FLUSH_CHARS");
+    expect(routeSource).toContain("applyPendingAssistantDelta(payload.done ? \"final\" : \"immediate\")");
     expect(routeSource).toContain("browser.session_stream.assistant_delta_queued");
     expect(routeSource).toContain("browser.session_stream.initial_received");
     expect(routeSource).toContain("stream.addEventListener(\"session_initial\", handleSessionInitial as EventListener)");
@@ -944,6 +948,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("queueAssistantDelta(payload, event.data.length)");
     expect(routeSource).toContain("applyPendingAssistantDelta(\"close\")");
     expect(routeSource).toContain("browser.session_stream.assistant_delta_applied");
+    expect(routeSource).toContain("pendingTextLength");
+    expect(routeSource).toContain("immediateFlushChars: SESSION_ASSISTANT_DELTA_IMMEDIATE_FLUSH_CHARS");
   });
 
   it("backs off index polling when detail streams are connected", () => {

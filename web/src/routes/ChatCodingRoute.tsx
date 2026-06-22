@@ -1395,6 +1395,7 @@ const ACTIVE_INDEX_POLL_MS = 3_000;
 const ACTIVE_BACKGROUND_SYNC_POLL_MS = 5_000;
 const SESSION_STREAM_MIN_APPLY_INTERVAL_MS = 350;
 const SESSION_ASSISTANT_DELTA_MIN_APPLY_INTERVAL_MS = 80;
+const SESSION_ASSISTANT_DELTA_IMMEDIATE_FLUSH_CHARS = 160;
 const SESSION_STREAM_ROUTE_SWITCH_GRACE_MS = 4_000;
 const CHAT_CENTER_FIRST_MEDIA_QUERY = "(max-width: 980px)";
 
@@ -3569,6 +3570,7 @@ export function ChatCodingRoute() {
       stage: string;
       contentDeltaLength: number;
       thoughtDeltaLength: number;
+      pendingTextLength: number;
       done: boolean;
     } | null = null;
     const decisionSnapshot = sessionStreamDecisionSnapshotRef.current;
@@ -3676,7 +3678,7 @@ export function ChatCodingRoute() {
       }
     }
 
-    function applyPendingAssistantDelta(reason: "timer" | "close" | "final") {
+    function applyPendingAssistantDelta(reason: "timer" | "close" | "final" | "immediate") {
       if (!pendingAssistantDeltaMessages || disposed) {
         return;
       }
@@ -3713,8 +3715,10 @@ export function ChatCodingRoute() {
             payloadLength: telemetry?.payloadLength ?? 0,
             contentDeltaLength: telemetry?.contentDeltaLength ?? 0,
             thoughtDeltaLength: telemetry?.thoughtDeltaLength ?? 0,
+            pendingTextLength: telemetry?.pendingTextLength ?? 0,
             done: telemetry?.done ?? false,
             minApplyIntervalMs: SESSION_ASSISTANT_DELTA_MIN_APPLY_INTERVAL_MS,
+            immediateFlushChars: SESSION_ASSISTANT_DELTA_IMMEDIATE_FLUSH_CHARS,
           },
         });
       }
@@ -3735,20 +3739,28 @@ export function ChatCodingRoute() {
       sessionStreamApplyStatsRef.current[streamSessionId] = stats;
       const baseMessages = pendingAssistantDeltaMessages ?? committedAssistantDeltaMessages;
       pendingAssistantDeltaMessages = mergeAssistantDeltaIntoLiveMessages(baseMessages, payload);
+      if (!pendingAssistantDeltaMessages) {
+        return;
+      }
+      const contentDeltaLength = (payload.contentDelta ?? payload.content ?? "").length;
+      const thoughtDeltaLength = (payload.thoughtDelta ?? payload.thought ?? "").length;
       const telemetry = {
         payloadLength,
         turnId: payload.turnId,
         stage: payload.stage,
-        contentDeltaLength: (payload.contentDelta ?? payload.content ?? "").length,
-        thoughtDeltaLength: (payload.thoughtDelta ?? payload.thought ?? "").length,
+        contentDeltaLength,
+        thoughtDeltaLength,
+        pendingTextLength: pendingAssistantDeltaMessages.reduce(
+          (total, message) => total + String(message.content ?? "").length + String(message.thought ?? "").length,
+          0,
+        ),
         done: payload.done,
       };
       pendingAssistantDeltaTelemetry = telemetry;
-      if (!pendingAssistantDeltaMessages) {
-        return;
-      }
-      if (payload.done) {
-        applyPendingAssistantDelta("final");
+      const shouldFlushAssistantDeltaImmediately =
+        payload.done || contentDeltaLength + thoughtDeltaLength >= SESSION_ASSISTANT_DELTA_IMMEDIATE_FLUSH_CHARS;
+      if (shouldFlushAssistantDeltaImmediately) {
+        applyPendingAssistantDelta(payload.done ? "final" : "immediate");
         return;
       }
       const elapsed = Date.now() - assistantDeltaLastAppliedAt;
@@ -3775,8 +3787,10 @@ export function ChatCodingRoute() {
             payloadLength,
             contentDeltaLength: telemetry.contentDeltaLength,
             thoughtDeltaLength: telemetry.thoughtDeltaLength,
+            pendingTextLength: telemetry.pendingTextLength,
             done: payload.done,
             minApplyIntervalMs: SESSION_ASSISTANT_DELTA_MIN_APPLY_INTERVAL_MS,
+            immediateFlushChars: SESSION_ASSISTANT_DELTA_IMMEDIATE_FLUSH_CHARS,
           },
         });
       }
