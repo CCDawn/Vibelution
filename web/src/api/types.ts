@@ -4171,6 +4171,20 @@ export type TeamWorkflowSourceCollectionRunStartPayload = {
   nextActions: string[];
 };
 
+export type TeamWorkflowSourceCollectionAgentSessionContextPayload = {
+  schemaVersion: number;
+  teamId: string;
+  runId: string;
+  stageId: string;
+  agentId: string;
+  agentRole: string;
+  sessionId: string;
+  contextKey: string;
+  created: boolean;
+  alreadyPresent: boolean;
+  message: Record<string, unknown>;
+};
+
 export type TeamWorkflowDataRecordSourceCandidateImportPayload = {
   created: boolean;
   candidate: TeamWorkflowCandidate;
