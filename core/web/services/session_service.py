@@ -1358,6 +1358,21 @@ def _ensure_conversation_workspace_metadata(conversation: dict[str, Any]) -> boo
     return changed
 
 
+def _agent_requests_visible_direct_session(agent: dict[str, Any] | None) -> bool:
+    if not isinstance(agent, dict):
+        return False
+    metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
+    return bool(metadata.get("showInSessionIndex")) or (
+        str(metadata.get("directSessionVisibility") or "").strip() == "active_session"
+    )
+
+
+def _conversation_hidden_from_index(raw: dict[str, Any], agent: dict[str, Any] | None) -> bool:
+    if _agent_requests_visible_direct_session(agent):
+        return False
+    return bool(raw.get("hidden_from_index") or raw.get("hiddenFromIndex"))
+
+
 def _repair_conversation_agent_legacy_model_fields(
     conversation: dict[str, Any],
     *,
@@ -1495,6 +1510,11 @@ def _ensure_conversation_agent_metadata(
             or conversation.get("agent_missing_id")
             or conversation.get("agentMissingId")
         )
+        if _agent_requests_visible_direct_session(existing_agent):
+            for key in ("hidden_from_index", "hiddenFromIndex"):
+                if conversation.get(key):
+                    conversation.pop(key, None)
+                    changed = True
         if conversation.get("agent_id") != existing_agent_id:
             conversation["agent_id"] = existing_agent_id
             changed = True
@@ -6519,7 +6539,7 @@ def _normalize_conversation(
         "activeSkillContract": active_skill_contract,
         "lastCacheComposition": last_cache_composition,
         "sessionKind": session_kind,
-        "hiddenFromIndex": bool(raw.get("hidden_from_index") or raw.get("hiddenFromIndex")),
+        "hiddenFromIndex": _conversation_hidden_from_index(raw, agent),
         "parentSessionId": parent_session_id,
         "rootSessionId": root_session_id,
         "childSessionIds": child_session_ids,
