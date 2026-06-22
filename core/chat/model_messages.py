@@ -560,13 +560,17 @@ def _dedupe_adjacent_tool_results(messages: list[Any]) -> list[Any]:
 
 def _dedupe_adjacent_semantic_messages(messages: list[Any]) -> list[Any]:
     deduped: list[Any] = []
-    previous_key: tuple[str, str] | None = None
+    previous_key: tuple[str, str, str] | None = None
     for message in messages:
         if not isinstance(message, dict):
             deduped.append(message)
             previous_key = None
             continue
-        key = (str(message.get("role") or ""), str(message.get("content") or ""))
+        role = str(message.get("role") or "")
+        identity = ""
+        if role == "tool":
+            identity = str(message.get("tool_call_id") or message.get("toolCallId") or "")
+        key = (role, str(message.get("content") or ""), identity)
         if key == previous_key:
             continue
         deduped.append(message)

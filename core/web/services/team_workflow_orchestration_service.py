@@ -9856,6 +9856,7 @@ def _source_collection_agent_context_message(
     records: list[dict[str, Any]],
     source_candidates: list[dict[str, Any]],
     storage_artifacts: dict[str, str],
+    boundary_text: str | None = None,
 ) -> str:
     run_scope = run.get("scope") if isinstance(run.get("scope"), dict) else {}
     run_metadata = run.get("metadata") if isinstance(run.get("metadata"), dict) else {}
@@ -9918,7 +9919,8 @@ def _source_collection_agent_context_message(
     lines.extend(
         [
             "",
-            "边界：这条消息只投递当前资料搜集上下文，不会自动启动 Agent 回答；正式知识库、RAG 和官方图谱写入仍由后续治理入口控制。",
+            boundary_text
+            or "边界：这条消息只投递当前资料搜集上下文，不会自动启动 Agent 回答；正式知识库、RAG 和官方图谱写入仍由后续治理入口控制。",
         ]
     )
     return "\n".join(lines)
@@ -9953,6 +9955,10 @@ def _source_collection_stage_session_task_message(
         records=records,
         source_candidates=source_candidates,
         storage_artifacts=storage_artifacts,
+        boundary_text=(
+            "边界：这是阶段任务启动消息，会立即要求当前 Agent 在本会话执行；"
+            "正式知识库、RAG 和官方图谱写入仍由后续治理入口控制。"
+        ),
     )
     task_title = _source_collection_stage_task_title(stage_id)
     contract_json = json.dumps(writeback_contract, ensure_ascii=False, sort_keys=True)
@@ -9963,6 +9969,7 @@ def _source_collection_stage_session_task_message(
             context,
             "",
             "## 执行要求",
+            "- 先用一句简短状态回应已接收任务，再按需要调用工具；不要让用户看到像未启动一样的空白等待。",
             "- 在本会话里完成当前阶段任务，并把可审查的结论、证据引用和下一步写清楚。",
             "- 不要直接写正式 Team Knowledge、RAG 或官方图谱；只能按候选层和结构化回写合同提交结果。",
             "- 完成后必须通过结构化 writeback contract 回写，不要让自然语言回复成为唯一结果来源。",
