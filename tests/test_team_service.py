@@ -374,6 +374,7 @@ def test_challenge_cup_research_team_agent_repair_purges_stale_and_rebuilds_comp
     for member in team["members"]:
         agent = active_agents_by_id[member["agentId"]]
         assert agent["directSessionId"]
+        assert session_service.get_session_detail(agent["directSessionId"])
         assert agent["metadata"]["challengeCupTeamId"] == "research-team"
         assert agent["metadata"]["challengeCupTeamRole"] == member["role"]
         assert agent["metadata"]["showInSessionIndex"] is True

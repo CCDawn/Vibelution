@@ -1832,9 +1832,15 @@ def _ensure_challenge_cup_research_team_role_agent(role: dict[str, Any], *, sess
     else:
         existing = _find_challenge_cup_research_team_agent(role_name)
 
+    if existing and not _agent_direct_session_available(existing, session_service=session_service):
+        session_service.ensure_agent_direct_session(
+            agent_id=str(existing.get("agentId") or ""),
+            title=label,
+            created_by=CHALLENGE_CUP_RESEARCH_TEAM_AGENT_CREATED_BY,
+        )
+        existing = agent_directory_service.get_agent(str(existing.get("agentId") or ""), include_archived=False)
+
     if not existing or not str(existing.get("directSessionId") or "").strip():
-        if role_key == agent_directory_service.KNOWLEDGE_STEWARD_ROLE_KEY:
-            raise TeamServiceError("Knowledge Steward Agent direct session is missing.")
         session_detail = session_service.create_chat_session(
             title=label,
             llm_bindings=session_service.default_session_llm_bindings(),
@@ -1889,6 +1895,16 @@ def _ensure_challenge_cup_research_team_role_agent(role: dict[str, Any], *, sess
         update_kwargs["tool_policy"] = tool_policy
     existing = agent_directory_service.update_agent_instance(agent_id, **update_kwargs)
     return existing
+
+
+def _agent_direct_session_available(agent: dict[str, Any], *, session_service: Any) -> bool:
+    session_id = str(agent.get("directSessionId") or "").strip()
+    if not session_id:
+        return False
+    try:
+        return bool(session_service.get_session_detail(session_id))
+    except Exception:
+        return False
 
 
 def _find_challenge_cup_research_team_agent(role_name: str) -> dict[str, Any] | None:
