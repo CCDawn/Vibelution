@@ -29,6 +29,13 @@ from tools.search_tools import grep_search_tool as _grep_search_impl
 from tools.web_search_tool import (
     web_search as _web_search_impl,
 )
+from tools.research_search_tools import (
+    batch_web_search as _batch_web_search_impl,
+    news_search as _news_search_impl,
+    paper_search as _paper_search_impl,
+    project_search as _project_search_impl,
+    search_summarize_sources as _search_summarize_sources_impl,
+)
 from tools.git_tools import (
     get_git_status_summary_tool as _get_git_status_summary_impl,
     get_recent_changes_tool as _get_recent_changes_impl,
@@ -407,7 +414,7 @@ def create_key_tools() -> List[BaseTool]:
         return _web_search_impl(query=query, max_results=max_results)
 
     @tool
-    def web_fetch_tool(url: str, max_chars: int = 8000) -> str:
+    def web_fetch_tool(url: str, max_chars: int = 8000, prompt: str = "") -> str:
         """
         【网页抓取】获取指定 URL 的网页内容并提取纯文本。
 
@@ -417,12 +424,125 @@ def create_key_tools() -> List[BaseTool]:
         Args:
             url: 要抓取的完整 URL（需要以 http:// 或 https:// 开头）
             max_chars: 最大返回字符数，默认 8000
+            prompt: 可选关注点，不调用模型，仅随抓取结果标注
 
         Returns:
             去除 HTML 标签后的纯文本内容
         """
         from tools.web_search_tool import web_fetch as _web_fetch
-        return _web_fetch(url=url, max_chars=max_chars)
+        return _web_fetch(url=url, max_chars=max_chars, prompt=prompt)
+
+    @tool
+    def batch_web_search_tool(
+        queries: str,
+        max_results_per_query: int = 5,
+        allowed_domains: str = "",
+        blocked_domains: str = "",
+        max_workers: int = 4,
+    ) -> str:
+        """
+        【批量公开搜索】并发执行多个网络搜索，单个查询失败不影响其他查询。
+
+        不依赖 Tavily/Brave/SerpAPI/NewsAPI 等付费或额度型 API；适合搜索 Agent
+        同时探索多个检索式、关键词变体或来源域。
+
+        Args:
+            queries: 多个搜索词，支持换行、分号、逗号或 JSON 数组
+            max_results_per_query: 每个搜索词最多返回结果数，默认 5
+            allowed_domains: 可选域名白名单，逗号或换行分隔
+            blocked_domains: 可选域名黑名单，逗号或换行分隔
+            max_workers: 并发 worker 数，上限 4
+
+        Returns:
+            按查询分组的搜索结果和来源链接
+        """
+        return _batch_web_search_impl(
+            queries=queries,
+            max_results_per_query=max_results_per_query,
+            allowed_domains=allowed_domains,
+            blocked_domains=blocked_domains,
+            max_workers=max_workers,
+        )
+
+    @tool
+    def paper_search_tool(topic: str, max_results: int = 8, year_hint: str = "", include_domains: str = "") -> str:
+        """
+        【论文公开搜索】搜索论文、预印本、会议页、综述和 benchmark 线索。
+
+        仅使用公开搜索页解析，不调用 Semantic Scholar、Crossref 或其他需要额度的 API。
+
+        Args:
+            topic: 论文主题、方法名、数据集名或研究问题
+            max_results: 最多返回结果数，默认 8
+            year_hint: 可选年份或时间范围提示
+            include_domains: 可选补充论文域名，逗号或换行分隔
+
+        Returns:
+            论文候选来源链接、摘要片段和域名过滤信息
+        """
+        return _paper_search_impl(
+            topic=topic,
+            max_results=max_results,
+            year_hint=year_hint,
+            include_domains=include_domains,
+        )
+
+    @tool
+    def project_search_tool(topic: str, max_results: int = 8, language: str = "", include_domains: str = "") -> str:
+        """
+        【项目公开搜索】搜索开源项目、代码仓库、包页面和项目文档。
+
+        不调用 GitHub/GitLab/PyPI/npm API，不需要 token 或额度。
+
+        Args:
+            topic: 项目主题、库名、技术栈或任务描述
+            max_results: 最多返回结果数，默认 8
+            language: 可选编程语言提示
+            include_domains: 可选补充项目域名，逗号或换行分隔
+
+        Returns:
+            项目候选来源链接、摘要片段和域名过滤信息
+        """
+        return _project_search_impl(
+            topic=topic,
+            max_results=max_results,
+            language=language,
+            include_domains=include_domains,
+        )
+
+    @tool
+    def news_search_tool(topic: str, max_results: int = 8, date_hint: str = "") -> str:
+        """
+        【新闻公开搜索】搜索公开新闻和近期报道线索。
+
+        不调用 NewsAPI 或其他需要 key/额度的新闻 API；适合资料搜集阶段获取当前事件线索。
+
+        Args:
+            topic: 新闻主题、公司、政策、论文或项目名
+            max_results: 最多返回结果数，默认 8
+            date_hint: 可选日期、年份或时间范围提示
+
+        Returns:
+            新闻候选来源链接和摘要片段
+        """
+        return _news_search_impl(topic=topic, max_results=max_results, date_hint=date_hint)
+
+    @tool
+    def search_summarize_sources_tool(search_outputs: str, max_sources: int = 20) -> str:
+        """
+        【搜索来源整理】从搜索输出中抽取、去重 URL，整理为结构化来源清单。
+
+        该工具不联网、不写入知识库；适合搜索 Agent 在交接给资料获取/审查 Agent 前
+        生成候选来源列表。
+
+        Args:
+            search_outputs: 一个或多个搜索工具返回的文本
+            max_sources: 最多抽取来源数，默认 20
+
+        Returns:
+            JSON 字符串，包含去重后的 title/url/domain
+        """
+        return _search_summarize_sources_impl(search_outputs=search_outputs, max_sources=max_sources)
 
     @tool
     def get_git_status_summary_tool(limit: int = 5) -> str:
@@ -1882,6 +2002,11 @@ def create_key_tools() -> List[BaseTool]:
         python_lint_tool,
         web_search_tool,
         web_fetch_tool,
+        batch_web_search_tool,
+        paper_search_tool,
+        project_search_tool,
+        news_search_tool,
+        search_summarize_sources_tool,
         get_git_status_summary_tool,
         get_recent_changes_tool,
         get_entity_history_tool,
