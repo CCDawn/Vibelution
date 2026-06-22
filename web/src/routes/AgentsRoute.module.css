@@ -726,13 +726,85 @@
   line-height: 1.42;
 }
 
+.agentColumnGrid {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  min-height: 0;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.agentColumn {
+  display: grid;
+  align-content: start;
+  gap: 6px;
+  min-width: 0;
+  padding: 7px 0 0;
+  border-top: 1px solid color-mix(in srgb, var(--border-soft) 76%, transparent);
+}
+
+.agentColumn:first-child {
+  padding-top: 0;
+  border-top: 0;
+}
+
+.agentColumnHeader {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 0 4px 2px;
+}
+
+.agentColumnHeader > div {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+
+.agentColumnHeader strong,
+.agentColumnHeader span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agentColumnHeader strong {
+  color: var(--fg-primary);
+  font-size: 0.82rem;
+  font-weight: 820;
+}
+
+.agentColumnHeader span {
+  color: var(--fg-tertiary);
+  font-size: 0.68rem;
+  line-height: 1.25;
+}
+
+.agentColumnHeader em {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  min-height: 22px;
+  padding: 0 7px;
+  border: 1px solid color-mix(in srgb, var(--accent-cool) 22%, var(--border-soft));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent-cool) 9%, transparent);
+  color: var(--accent-cool);
+  font-size: 0.72rem;
+  font-style: normal;
+  font-weight: 800;
+}
+
 .agentTable {
   display: grid;
   align-content: start;
   gap: 4px;
   min-height: 0;
-  overflow: auto;
-  padding-right: 4px;
 }
 
 .agentTableHead,
