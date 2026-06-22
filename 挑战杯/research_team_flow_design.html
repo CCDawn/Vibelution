@@ -2375,6 +2375,12 @@
               <span>用户可从每个阶段直接进入对应 Agent 私有对话页审查执行过程；五个子页可按 PDF、论文网页/DOI、数据集、本地文件和缺少来源过滤，并能从资料卡追溯 DOI、网页、本地路径或搜索证据。</span>
             </div>
 <div class="blueprint-row">
+              <b>M6.65</b>
+              <strong>科研团队 Agent 结构性重绑</strong>
+              <span>research-team 增加标准 7 角色修复入口：科研协调、资料发现、来源获取、内容提炼、资料质量评估、候选图谱、资料入库；旧成员、旧画布节点和重复 challengeCupTeamId Agent 可被物理清理。</span>
+              <span>阶段 Agent 必须拥有 directSessionId 且在会话页可见；阶段私聊入口只跳转到对应 Agent 私有对话页，缺少私聊会话时提示修复团队 Agent，不再退回 Agent 管理页。</span>
+            </div>
+<div class="blueprint-row">
               <b>M7</b>
               <strong>实验计划账本首切</strong>
               <span>新增 experiments/status 与 experiments/plan：聚合实验阶段轮次、algorithm_hypothesis 候选、计划草稿和 baseline/metric/dataset/smoke 缺口，并把草稿写入 experiment_plans/index.json。</span>

@@ -12,6 +12,7 @@ from core.web.services.team_service import (
     TeamServiceError,
     archive_team,
     create_team,
+    ensure_challenge_cup_research_team_agents,
     get_team,
     get_team_canvas,
     list_ai_search_source_scope_runs,
@@ -200,5 +201,15 @@ def team_chat_room_sync(team_id: str) -> dict:
         return sync_team_chat_room(team_id)
     except TeamNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except TeamServiceError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.post("/teams/{team_id}/challenge-cup-agents/repair")
+def team_challenge_cup_agents_repair(team_id: str) -> dict:
+    if team_id != "research-team":
+        raise HTTPException(status_code=404, detail="Challenge Cup research Team not found.")
+    try:
+        return ensure_challenge_cup_research_team_agents(purge_stale=True)
     except TeamServiceError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc

@@ -2,6 +2,7 @@ import json
 
 import pytest
 
+from core.infrastructure import developer_sandbox
 from core.web.services import (
     agent_config_workspace_service,
     agent_directory_service,
@@ -266,6 +267,129 @@ def test_research_team_repair_applies_challenge_cup_agent_tool_profiles(tmp_path
     ]
     assert agent["toolPolicy"]["mutationAccess"] == "none"
     assert agent["toolPolicy"]["writeScopes"] == []
+
+
+def test_challenge_cup_research_team_agent_repair_purges_stale_and_rebuilds_complete_team(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    stale_agent = agent_directory_service.create_agent_instance(
+        display_name="旧资料发现",
+        direct_session_id="session-old-discovery",
+        metadata={"challengeCupTeamId": "research-team", "challengeCupTeamRole": "data_discovery"},
+    )
+    missing_agent_id = "agent-missing-challenge-cup"
+    orphan_workspace = developer_sandbox.seeded_sandbox_workspace_path(tmp_path, "agents", missing_agent_id)
+    orphan_workspace.mkdir(parents=True)
+    (orphan_workspace / "note.txt").write_text("stale", encoding="utf-8")
+    teams_root = developer_sandbox.seeded_sandbox_workspace_path(tmp_path, "teams")
+    teams_root.mkdir(parents=True)
+    now = "2026-06-22T00:00:00+00:00"
+    (teams_root / "teams.json").write_text(
+        json.dumps(
+            {
+                "schemaVersion": 1,
+                "updatedAt": now,
+                "teams": [
+                    {
+                        "teamId": "research-team",
+                        "name": "挑战杯ai科研团队",
+                        "description": "旧团队",
+                        "purpose": "旧目的",
+                        "status": "active",
+                        "members": [
+                            {
+                                "memberId": "old-discovery",
+                                "agentId": stale_agent["agentId"],
+                                "agentName": "旧资料发现",
+                                "role": "data_discovery",
+                            },
+                            {
+                                "memberId": "missing",
+                                "agentId": missing_agent_id,
+                                "agentName": "缺失 Agent",
+                                "role": "source_acquisition",
+                            },
+                        ],
+                        "linkedChatRoomId": "",
+                        "canvasPath": "workspace/teams/research-team/canvas.json",
+                        "createdAt": now,
+                        "updatedAt": now,
+                        "teamKind": "research",
+                        "teamCategory": "科研组织团队",
+                        "teamSource": "research_organization",
+                        "teamTemplateId": "",
+                    }
+                ],
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    canvas_path = teams_root / "research-team" / "canvas.json"
+    canvas_path.parent.mkdir(parents=True)
+    canvas_path.write_text(
+        json.dumps(
+            {
+                "schemaVersion": 1,
+                "canvasKind": team_service.CANVAS_KIND,
+                "teamId": "research-team",
+                "updatedAt": now,
+                "path": "workspace/teams/research-team/canvas.json",
+                "viewport": {"x": 0, "y": 0, "zoom": 1},
+                "nodes": [
+                    {"id": stale_agent["agentId"], "agentId": stale_agent["agentId"], "label": "旧资料发现", "role": "data_discovery"},
+                    {"id": missing_agent_id, "agentId": missing_agent_id, "label": "缺失 Agent", "role": "source_acquisition"},
+                ],
+                "edges": [],
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    assert team_service.challenge_cup_research_team_agents_need_repair() is True
+
+    result = team_service.ensure_challenge_cup_research_team_agents(purge_stale=True)
+    team = result["team"]
+
+    assert result["memberCount"] == len(team_service.CHALLENGE_CUP_RESEARCH_TEAM_ROLES)
+    assert result["directSessionCount"] == len(team_service.CHALLENGE_CUP_RESEARCH_TEAM_ROLES)
+    assert stale_agent["agentId"] in result["purgedAgentIds"]
+    assert not orphan_workspace.exists()
+    assert agent_directory_service.get_agent(stale_agent["agentId"], include_archived=True) is None
+    assert [member["role"] for member in team["members"]] == [
+        "research_coordination",
+        "data_discovery",
+        "source_acquisition",
+        "content_extraction",
+        "source_quality",
+        "candidate_graph",
+        "knowledge_steward",
+    ]
+    active_agents_by_id = {
+        agent["agentId"]: agent
+        for agent in agent_directory_service.list_agents(include_archived=False)
+    }
+    for member in team["members"]:
+        agent = active_agents_by_id[member["agentId"]]
+        assert agent["directSessionId"]
+        assert agent["metadata"]["challengeCupTeamId"] == "research-team"
+        assert agent["metadata"]["challengeCupTeamRole"] == member["role"]
+        assert agent["metadata"]["showInSessionIndex"] is True
+    canvas = team_service.get_team_canvas("research-team")
+    assert {node["agentId"] for node in canvas["nodes"]} == {member["agentId"] for member in team["members"]}
+    assert stale_agent["agentId"] not in {node["agentId"] for node in canvas["nodes"]}
+    assert team_service.challenge_cup_research_team_agents_need_repair() is False
+
+
+def test_challenge_cup_research_team_agents_remain_visible_in_session_index(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    result = team_service.ensure_challenge_cup_research_team_agents(purge_stale=True)
+    data_discovery = next(member for member in result["team"]["members"] if member["role"] == "data_discovery")
+    agent = agent_directory_service.get_agent(data_discovery["agentId"])
+
+    assert session_service._agent_directory_stub_hidden_from_user_index(agent, {agent["agentId"]}) is False
 
 
 def test_research_team_canvas_separates_reporting_and_communication_edges(tmp_path, monkeypatch):

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 import threading
 from html.parser import HTMLParser
 from datetime import datetime, timezone
@@ -105,11 +106,67 @@ TEAM_ID_TO_KIND = {
     "supervised-evolution-team": "supervised_evolution",
 }
 RESEARCH_TEAM_MEMBER_ROLE_KEYS = {
+    "research_coordination": "challenge_cup_coordinator",
     "data_discovery": "challenge_cup_data_discovery",
     "source_acquisition": "challenge_cup_source_acquisition",
     "content_extraction": "challenge_cup_content_extraction",
     "source_quality": "challenge_cup_source_quality",
+    "candidate_graph": "candidate_graph",
+    "knowledge_steward": "knowledge_steward",
 }
+CHALLENGE_CUP_RESEARCH_TEAM_ID = "research-team"
+CHALLENGE_CUP_RESEARCH_TEAM_AGENT_CREATED_BY = "challenge_cup_team"
+CHALLENGE_CUP_RESEARCH_TEAM_ROLES: tuple[dict[str, Any], ...] = (
+    {
+        "role": "research_coordination",
+        "roleKey": "challenge_cup_coordinator",
+        "label": "科研协调",
+        "purpose": "阶段调度与分工",
+        "responsibilities": ["判断当前阶段", "组织返工转移", "把任务交接给功能 Agent"],
+    },
+    {
+        "role": "data_discovery",
+        "roleKey": "challenge_cup_data_discovery",
+        "label": "资料发现",
+        "purpose": "搜索问题与来源范围",
+        "responsibilities": ["生成检索问题", "发现公开资料线索", "标注来源缺口"],
+    },
+    {
+        "role": "source_acquisition",
+        "roleKey": "challenge_cup_source_acquisition",
+        "label": "来源获取",
+        "purpose": "网页、论文和数据集元信息",
+        "responsibilities": ["打开可验证来源", "记录 DOI/URL/来源元数据", "把可读来源交给提炼"],
+    },
+    {
+        "role": "content_extraction",
+        "roleKey": "challenge_cup_content_extraction",
+        "label": "内容提炼",
+        "purpose": "摘要、页码与证据片段",
+        "responsibilities": ["提炼证据片段", "生成候选摘要", "标注页码和引用锚点"],
+    },
+    {
+        "role": "source_quality",
+        "roleKey": "challenge_cup_source_quality",
+        "label": "资料质量评估",
+        "purpose": "筛选、复审与退回",
+        "responsibilities": ["审查候选资料", "判断通过或退回", "整理补资料要求"],
+    },
+    {
+        "role": "candidate_graph",
+        "roleKey": "candidate_graph",
+        "label": "资料关系生成",
+        "purpose": "入库关系与断链预览",
+        "responsibilities": ["生成候选关系", "标注断链缺口", "预览图谱边界"],
+    },
+    {
+        "role": "knowledge_steward",
+        "roleKey": "knowledge_steward",
+        "label": "资料入库",
+        "purpose": "团队知识库入库门禁",
+        "responsibilities": ["审查入库门槛", "接收入库请求", "防止未审资料进入正式知识"],
+    },
+)
 TEMPLATE_MEMBER_PREFIX_TO_TEMPLATE_ID = {
     "medical-demo": "medical-consultation-demo",
     "heletech-demo": "heletech-maternal-digital-health-demo",
@@ -480,6 +537,131 @@ def ensure_research_team_from_organization(organization: dict[str, Any]) -> dict
     return get_team(team_id)
 
 
+def challenge_cup_research_team_agents_need_repair() -> bool:
+    """Return whether the Challenge Cup research Team has stale Agent bindings."""
+
+    with _TEAM_LOCK:
+        state = _load_index()
+        team = _find_team(state, CHALLENGE_CUP_RESEARCH_TEAM_ID)
+        if not team:
+            return False
+        agent_refs = _agent_reference_maps()
+        active_agents = agent_refs.get("active_by_id") or {}
+        for member in list(team.get("members") or []):
+            if not isinstance(member, dict):
+                continue
+            agent_id = str(member.get("agentId") or "").strip()
+            if agent_id and agent_id not in active_agents:
+                return True
+        canvas_path = _team_canvas_path(CHALLENGE_CUP_RESEARCH_TEAM_ID)
+        canvas = _read_json(canvas_path) if canvas_path.exists() else {}
+        for node in list(canvas.get("nodes") or []):
+            if not isinstance(node, dict):
+                continue
+            agent_id = str(node.get("agentId") or "").strip()
+            if agent_id and agent_id not in active_agents:
+                return True
+    return False
+
+
+def ensure_challenge_cup_research_team_agents(*, purge_stale: bool = True) -> dict[str, Any]:
+    """Rebuild the Challenge Cup research Team around complete stage Agents."""
+
+    project_root = Path(PROJECT_ROOT).resolve()
+    ensured_agents = _ensure_challenge_cup_research_team_role_agents()
+    members = _challenge_cup_research_team_members_from_agents(ensured_agents)
+    expected_agent_ids = {
+        str(agent.get("agentId") or "").strip()
+        for agent in ensured_agents
+        if isinstance(agent, dict) and str(agent.get("agentId") or "").strip()
+    }
+    old_agent_ids = _challenge_cup_research_team_bound_agent_ids()
+    extra_agent_ids = _challenge_cup_research_team_duplicate_agent_ids(expected_agent_ids)
+    purge_candidates = sorted((old_agent_ids | extra_agent_ids) - expected_agent_ids)
+    purge_results = _purge_challenge_cup_research_team_agents(purge_candidates, project_root=project_root) if purge_stale else []
+
+    now = utc_now_iso()
+    agent_refs = _merged_agent_reference_maps(_load_lightweight_agent_references(), ensured_agents)
+    with _TEAM_LOCK:
+        state = _load_index()
+        changed = _repair_index_state(state, agent_refs=agent_refs)
+        team = _find_team(state, CHALLENGE_CUP_RESEARCH_TEAM_ID)
+        created = team is None
+        if team is None:
+            team = {
+                "teamId": CHALLENGE_CUP_RESEARCH_TEAM_ID,
+                "name": RESEARCH_TEAM_DISPLAY_NAME,
+                "description": "挑战杯神经算法科研团队的系统团队。",
+                "purpose": "组织知识搜集、实验和迭代阶段的功能 Agent。",
+                "status": DEFAULT_TEAM_STATUS,
+                "members": members,
+                "linkedChatRoomId": "",
+                "canvasPath": _relative_path(_team_canvas_path(CHALLENGE_CUP_RESEARCH_TEAM_ID)),
+                "createdAt": now,
+                "updatedAt": now,
+            }
+            _apply_team_contract(team, team_kind="research", team_source="research_organization")
+            state.setdefault("teams", []).append(team)
+            changed = True
+        else:
+            if team.get("name") != RESEARCH_TEAM_DISPLAY_NAME:
+                team["name"] = RESEARCH_TEAM_DISPLAY_NAME
+                changed = True
+            if str(team.get("description") or "").strip() != "挑战杯神经算法科研团队的系统团队。":
+                team["description"] = "挑战杯神经算法科研团队的系统团队。"
+                changed = True
+            if str(team.get("purpose") or "").strip() != "组织知识搜集、实验和迭代阶段的功能 Agent。":
+                team["purpose"] = "组织知识搜集、实验和迭代阶段的功能 Agent。"
+                changed = True
+            if team.get("members") != members:
+                team["members"] = members
+                changed = True
+            team["status"] = DEFAULT_TEAM_STATUS
+            team["canvasPath"] = _relative_path(_team_canvas_path(CHALLENGE_CUP_RESEARCH_TEAM_ID))
+            _apply_team_contract(team, team_kind="research", team_source="research_organization")
+        if changed:
+            team["updatedAt"] = now
+            state["updatedAt"] = now
+            _save_index(state)
+        canvas = _default_canvas_for_team(team)
+        _write_json(_team_canvas_path(CHALLENGE_CUP_RESEARCH_TEAM_ID), canvas)
+        _ensure_team_chat_room_link(team, agent_refs=agent_refs)
+        team["updatedAt"] = now
+        state["updatedAt"] = now
+        _save_index(state)
+    result = {
+        "schemaVersion": SCHEMA_VERSION,
+        "teamId": CHALLENGE_CUP_RESEARCH_TEAM_ID,
+        "created": created,
+        "memberCount": len(members),
+        "agentCount": len(ensured_agents),
+        "directSessionCount": sum(1 for agent in ensured_agents if str(agent.get("directSessionId") or "").strip()),
+        "purgedAgentIds": [str(item.get("agentId") or "") for item in purge_results if item.get("deleted")],
+        "purgeResults": purge_results,
+        "roles": [
+            {
+                "role": str(role.get("role") or ""),
+                "roleKey": str(role.get("roleKey") or ""),
+                "label": str(role.get("label") or ""),
+            }
+            for role in CHALLENGE_CUP_RESEARCH_TEAM_ROLES
+        ],
+        "team": get_team(CHALLENGE_CUP_RESEARCH_TEAM_ID),
+    }
+    _record_team_event(
+        "team.challenge_cup_agents_repaired",
+        result["team"],
+        fields={
+            "created": created,
+            "memberCount": result["memberCount"],
+            "agentCount": result["agentCount"],
+            "directSessionCount": result["directSessionCount"],
+            "purgedAgentCount": len(result["purgedAgentIds"]),
+        },
+    )
+    return result
+
+
 def ensure_evolution_system_teams() -> dict[str, Any]:
     """Ensure self-evolution and supervised-evolution roles are visible as Teams."""
 
@@ -622,6 +804,8 @@ def _system_team_bootstrap_required_steps() -> list[str]:
         required_steps.append("evolution_system_teams")
     if ai_search_system_team_missing():
         required_steps.append("ai_search_system_team")
+    if challenge_cup_research_team_agents_need_repair():
+        required_steps.append("challenge_cup_research_team_agents")
     return required_steps
 
 
@@ -652,6 +836,8 @@ def _run_system_team_bootstrap(request_id: str, required_steps: list[str], reaso
             ensure_evolution_system_teams()
         if "ai_search_system_team" in required_steps:
             ensure_ai_search_system_team()
+        if "challenge_cup_research_team_agents" in required_steps:
+            ensure_challenge_cup_research_team_agents(purge_stale=True)
         remaining_steps = _system_team_bootstrap_required_steps()
         elapsed_ms = _elapsed_ms(started_at)
         status = "ready" if not remaining_steps else "needs_retry"
@@ -1612,6 +1798,287 @@ def _ensure_ai_search_system_agents() -> list[dict[str, Any]]:
     return ensured
 
 
+def _ensure_challenge_cup_research_team_role_agents() -> list[dict[str, Any]]:
+    project_root = Path(PROJECT_ROOT).resolve()
+    ensured: list[dict[str, Any]] = []
+    try:
+        from . import session_service
+
+        previous_root = session_service.PROJECT_ROOT
+        session_service.PROJECT_ROOT = project_root
+        try:
+            for role in CHALLENGE_CUP_RESEARCH_TEAM_ROLES:
+                agent = _ensure_challenge_cup_research_team_role_agent(role, session_service=session_service)
+                if agent:
+                    ensured.append(agent)
+        finally:
+            session_service.PROJECT_ROOT = previous_root
+    except Exception as exc:
+        _record_system_team_sync_failed("challenge_cup_research_team", exc)
+        raise
+    return ensured
+
+
+def _ensure_challenge_cup_research_team_role_agent(role: dict[str, Any], *, session_service: Any) -> dict[str, Any] | None:
+    role_name = str(role.get("role") or "").strip()
+    role_key = str(role.get("roleKey") or role_name).strip()
+    label = str(role.get("label") or role_name).strip() or role_name
+    if not role_name or not role_key:
+        return None
+
+    if role_key == agent_directory_service.KNOWLEDGE_STEWARD_ROLE_KEY:
+        agent_directory_service.repair_agent_directory()
+        existing = agent_directory_service.get_agent(agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID, include_archived=False)
+    else:
+        existing = _find_challenge_cup_research_team_agent(role_name)
+
+    if not existing or not str(existing.get("directSessionId") or "").strip():
+        if role_key == agent_directory_service.KNOWLEDGE_STEWARD_ROLE_KEY:
+            raise TeamServiceError("Knowledge Steward Agent direct session is missing.")
+        session_detail = session_service.create_chat_session(
+            title=label,
+            llm_bindings=session_service.default_session_llm_bindings(),
+            created_by=CHALLENGE_CUP_RESEARCH_TEAM_AGENT_CREATED_BY,
+        )
+        agent_id = str(session_detail.get("agentId") or "").strip()
+        existing = agent_directory_service.get_agent(agent_id) if agent_id else None
+        if not existing:
+            raise TeamServiceError(f"Challenge Cup role Agent was not created for role: {role_name}")
+
+    if str(existing.get("status") or "active").strip() == "archived":
+        existing = agent_directory_service.reactivate_agent_instance(
+            str(existing.get("agentId") or ""),
+            reason="challenge_cup_research_team_required",
+            metadata=_challenge_cup_research_team_role_metadata(role),
+        )
+
+    agent_id = str(existing.get("agentId") or "").strip()
+    if not agent_id:
+        return None
+    expected_metadata = _challenge_cup_research_team_role_metadata(role)
+    if role_key == agent_directory_service.KNOWLEDGE_STEWARD_ROLE_KEY:
+        prompt_template_id = agent_directory_service.KNOWLEDGE_STEWARD_PROMPT_TEMPLATE_ID
+    else:
+        prompt_template_id = (
+            agent_directory_service.CHALLENGE_CUP_ROLE_PROMPT_TEMPLATE_IDS.get(role_key, "")
+            or "prompt-chat-default"
+        )
+    tool_policy = None
+    if role_key == agent_directory_service.KNOWLEDGE_STEWARD_ROLE_KEY:
+        tool_policy = None
+    elif role_key in agent_directory_service.RESEARCH_SOURCE_ROLE_TOOL_PROFILES:
+        tool_policy = agent_directory_service.default_research_source_tool_policy(
+            str(existing.get("toolPolicyId") or f"tool-{agent_id}"),
+            role_key=role_key,
+        )
+    else:
+        tool_policy = agent_directory_service.default_research_role_tool_policy(
+            str(existing.get("toolPolicyId") or f"tool-{agent_id}"),
+            role_key=role_key,
+        )
+    update_kwargs: dict[str, Any] = {
+        "display_name": label,
+        "primary_mode": "research",
+        "role_key": role_key,
+        "metadata": expected_metadata,
+        "status": "active",
+    }
+    if prompt_template_id:
+        update_kwargs["prompt_template_id"] = prompt_template_id
+    if tool_policy is not None:
+        update_kwargs["tool_policy"] = tool_policy
+    existing = agent_directory_service.update_agent_instance(agent_id, **update_kwargs)
+    return existing
+
+
+def _find_challenge_cup_research_team_agent(role_name: str) -> dict[str, Any] | None:
+    normalized_role = str(role_name or "").strip()
+    if not normalized_role:
+        return None
+    for agent in agent_directory_service.list_agents(include_archived=True, detail="summary"):
+        metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
+        if (
+            str(metadata.get("challengeCupTeamId") or "").strip() == CHALLENGE_CUP_RESEARCH_TEAM_ID
+            and str(metadata.get("challengeCupTeamRole") or "").strip() == normalized_role
+            and int(metadata.get("challengeCupTeamManagedVersion") or 0) >= 1
+        ):
+            return agent
+    return None
+
+
+def _challenge_cup_research_team_role_metadata(role: dict[str, Any]) -> dict[str, Any]:
+    role_name = str(role.get("role") or "").strip()
+    role_key = str(role.get("roleKey") or role_name).strip()
+    label = str(role.get("label") or role_name).strip() or role_name
+    responsibilities = [
+        str(item or "").strip()
+        for item in list(role.get("responsibilities") or [])
+        if str(item or "").strip()
+    ]
+    return {
+        "agentMode": "research",
+        "configSurface": "team",
+        "fixedRole": True,
+        "showInSessionIndex": True,
+        "directSessionVisibility": "active_session",
+        "challengeCupTeamId": CHALLENGE_CUP_RESEARCH_TEAM_ID,
+        "challengeCupTeamManagedVersion": 1,
+        "challengeCupTeamRole": role_name,
+        "challengeCupTeamRoleKey": role_key,
+        "researchTeamRole": role_name,
+        "researchTeamRoleKey": role_key,
+        "researchAgentKey": role_key,
+        "functionalDisplayName": label,
+        "managedDomain": "challenge_cup_neuro_algorithm",
+        "responsibilities": responsibilities,
+    }
+
+
+def _challenge_cup_research_team_members_from_agents(agents: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    agents_by_role: dict[str, dict[str, Any]] = {}
+    for agent in agents:
+        metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
+        role = str(metadata.get("challengeCupTeamRole") or "").strip()
+        if role:
+            agents_by_role[role] = agent
+    members: list[dict[str, Any]] = []
+    for index, role in enumerate(CHALLENGE_CUP_RESEARCH_TEAM_ROLES, start=1):
+        role_name = str(role.get("role") or "").strip()
+        agent = agents_by_role.get(role_name)
+        agent_id = str((agent or {}).get("agentId") or "").strip()
+        if not agent_id:
+            continue
+        members.append(
+            {
+                "memberId": f"challenge-cup-{index:02d}-{role_name}",
+                "agentId": agent_id,
+                "agentCode": str((agent or {}).get("agentCode") or "").strip(),
+                "agentName": str((agent or {}).get("displayName") or role.get("label") or "").strip(),
+                "role": role_name,
+                "purpose": str(role.get("purpose") or role.get("label") or "").strip(),
+                "responsibilities": [
+                    str(item or "").strip()
+                    for item in list(role.get("responsibilities") or [])
+                    if str(item or "").strip()
+                ],
+                "agentStatus": "active",
+            }
+        )
+    return members
+
+
+def _challenge_cup_research_team_bound_agent_ids() -> set[str]:
+    agent_ids: set[str] = set()
+    with _TEAM_LOCK:
+        state = _load_index()
+        team = _find_team(state, CHALLENGE_CUP_RESEARCH_TEAM_ID)
+        if team:
+            for member in list(team.get("members") or []):
+                if isinstance(member, dict):
+                    agent_id = str(member.get("agentId") or "").strip()
+                    if agent_id:
+                        agent_ids.add(agent_id)
+        canvas_path = _team_canvas_path(CHALLENGE_CUP_RESEARCH_TEAM_ID)
+        canvas = _read_json(canvas_path) if canvas_path.exists() else {}
+        for node in list(canvas.get("nodes") or []):
+            if isinstance(node, dict):
+                agent_id = str(node.get("agentId") or "").strip()
+                if agent_id:
+                    agent_ids.add(agent_id)
+    return agent_ids
+
+
+def _challenge_cup_research_team_duplicate_agent_ids(expected_agent_ids: set[str]) -> set[str]:
+    duplicates: set[str] = set()
+    for agent in agent_directory_service.list_agents(include_archived=True, detail="summary"):
+        agent_id = str(agent.get("agentId") or "").strip()
+        if not agent_id or agent_id in expected_agent_ids:
+            continue
+        metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
+        if str(metadata.get("challengeCupTeamId") or "").strip() == CHALLENGE_CUP_RESEARCH_TEAM_ID:
+            duplicates.add(agent_id)
+    return duplicates
+
+
+def _purge_challenge_cup_research_team_agents(agent_ids: list[str], *, project_root: Path) -> list[dict[str, Any]]:
+    results: list[dict[str, Any]] = []
+    try:
+        from . import session_service
+    except Exception:
+        session_service = None
+    previous_root = getattr(session_service, "PROJECT_ROOT", None) if session_service else None
+    if session_service:
+        session_service.PROJECT_ROOT = project_root
+    try:
+        for agent_id in agent_ids:
+            result = _purge_challenge_cup_research_team_agent(agent_id, session_service=session_service)
+            if result:
+                results.append(result)
+    finally:
+        if session_service and previous_root is not None:
+            session_service.PROJECT_ROOT = previous_root
+    return results
+
+
+def _purge_challenge_cup_research_team_agent(agent_id: str, *, session_service: Any | None) -> dict[str, Any] | None:
+    normalized_agent_id = str(agent_id or "").strip()
+    if not _safe_agent_workspace_name(normalized_agent_id):
+        return None
+    agent = agent_directory_service.get_agent(normalized_agent_id, include_archived=True)
+    if not agent:
+        orphan_result = _delete_orphan_agent_workspace(normalized_agent_id)
+        return {
+            "agentId": normalized_agent_id,
+            "deleted": bool(orphan_result.get("deleted")),
+            "orphan": True,
+            **orphan_result,
+        }
+    metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
+    if bool(metadata.get("protected")) or str(agent.get("agentId") or "") == agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID:
+        return {"agentId": normalized_agent_id, "deleted": False, "skipped": "protected"}
+    direct_session_id = str(agent.get("directSessionId") or "").strip()
+    if direct_session_id and session_service:
+        try:
+            session_service.mark_direct_session_agent_deleted(
+                direct_session_id,
+                agent_id=normalized_agent_id,
+                agent_display_name=str(agent.get("displayName") or ""),
+                previous_status=str(agent.get("status") or ""),
+            )
+        except Exception:
+            pass
+    try:
+        if str(agent.get("status") or "active").strip() != "archived":
+            agent_directory_service.archive_agent_instance(normalized_agent_id, repair_mode_bindings=True)
+        result = agent_directory_service.purge_archived_agent_instance(normalized_agent_id)
+        result["orphan"] = False
+        return result
+    except Exception as exc:
+        return {"agentId": normalized_agent_id, "deleted": False, "orphan": False, "error": str(exc)}
+
+
+def _delete_orphan_agent_workspace(agent_id: str) -> dict[str, Any]:
+    normalized_agent_id = str(agent_id or "").strip()
+    if not _safe_agent_workspace_name(normalized_agent_id):
+        return {"deleted": False, "deletedPaths": [], "skippedPaths": [normalized_agent_id]}
+    agents_root = developer_sandbox.seeded_sandbox_workspace_path(_project_root(), "agents").resolve()
+    target = (agents_root / normalized_agent_id).resolve()
+    if agents_root not in target.parents:
+        return {"deleted": False, "deletedPaths": [], "skippedPaths": [str(target)]}
+    if not target.exists():
+        return {"deleted": False, "deletedPaths": [], "skippedPaths": []}
+    if target.is_dir():
+        shutil.rmtree(target)
+    else:
+        target.unlink()
+    return {"deleted": True, "deletedPaths": [str(target)], "skippedPaths": []}
+
+
+def _safe_agent_workspace_name(value: str) -> bool:
+    normalized = str(value or "").strip()
+    return bool(normalized) and _SAFE_ID_FRAGMENT.sub("", normalized) == normalized and normalized not in {".", ".."}
+
+
 def _ensure_ai_search_role_agent(role: dict[str, Any], *, session_service: Any) -> dict[str, Any] | None:
     role_key = str(role.get("role") or "").strip()
     label = str(role.get("label") or role_key).strip() or role_key
@@ -2126,10 +2593,18 @@ def _sync_research_team_member_agent_roles(members: list[dict[str, Any]]) -> boo
             "researchTeamRoleKey": role_key,
         }
         current_policy = agent_directory_service.resolve_tool_policy_for_agent(agent_id)
-        expected_policy = agent_directory_service.default_research_source_tool_policy(
-            str(agent.get("toolPolicyId") or f"tool-{agent_id}"),
-            role_key=role_key,
-        )
+        if role_key == agent_directory_service.KNOWLEDGE_STEWARD_ROLE_KEY:
+            expected_policy = current_policy
+        elif role_key in agent_directory_service.RESEARCH_SOURCE_ROLE_TOOL_PROFILES:
+            expected_policy = agent_directory_service.default_research_source_tool_policy(
+                str(agent.get("toolPolicyId") or f"tool-{agent_id}"),
+                role_key=role_key,
+            )
+        else:
+            expected_policy = agent_directory_service.default_research_role_tool_policy(
+                str(agent.get("toolPolicyId") or f"tool-{agent_id}"),
+                role_key=role_key,
+            )
         needs_update = (
             str(agent.get("primaryMode") or "").strip() != "research"
             or str(agent.get("roleKey") or "").strip() != role_key
@@ -2144,7 +2619,7 @@ def _sync_research_team_member_agent_roles(members: list[dict[str, Any]]) -> boo
             agent_id,
             primary_mode="research",
             role_key=role_key,
-            tool_policy=expected_policy,
+            tool_policy=None if role_key == agent_directory_service.KNOWLEDGE_STEWARD_ROLE_KEY else expected_policy,
             metadata=expected_metadata,
             status="active",
         )
