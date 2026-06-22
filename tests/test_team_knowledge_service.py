@@ -355,6 +355,68 @@ def test_agent_inbox_is_private_and_global_steward_can_promote(knowledge_env):
     assert team_knowledge_service.list_central_sources(agent_id=knowledge_env["outsider"]["agentId"])["summary"]["centralSourceCount"] == 0
 
 
+def test_knowledge_steward_policy_includes_skill_library_search_tool():
+    policy = agent_directory_service._knowledge_steward_tool_policy()
+
+    assert "skill_library_search_tool" in policy["allowedTools"]
+    assert "skill_library_search_tool" in policy["preferredTools"]
+
+
+def test_global_knowledge_steward_can_prepare_formal_kb_governance_without_applying(knowledge_env):
+    steward_id = agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID
+    source = _create_central_source_artifact(
+        knowledge_env["base"]["knowledgeBaseId"],
+        owner_type="team",
+        owner_id=knowledge_env["team"]["teamId"],
+        actor_agent_id=knowledge_env["member"]["agentId"],
+        reviewer_agent_id=knowledge_env["lead"]["agentId"],
+        title="Steward governance source",
+    )
+
+    proposal = team_knowledge_service.create_refinement_proposal(
+        knowledge_env["base"]["knowledgeBaseId"],
+        source_artifact_ids=[source["sourceArtifactId"]],
+        proposed_by_agent_id=steward_id,
+        title="Steward prepares proposal",
+        content="Knowledge Steward can prepare formal knowledge proposals without applying them.",
+        tags=["steward"],
+    )
+    suggestion = team_knowledge_service.create_rating_suggestion(
+        knowledge_env["base"]["knowledgeBaseId"],
+        suggested_by_agent_id=steward_id,
+        target_type="proposal",
+        proposal_id=proposal["proposalId"],
+        importance_level="medium",
+        confidence=0.7,
+        stability="evolving",
+        review_priority="normal",
+        marking_reason="Steward proposes metadata; reviewers still apply it.",
+    )
+
+    tasks = team_knowledge_service.list_knowledge_governance_tasks(agent_id=steward_id)
+    recommendations = team_knowledge_service.list_knowledge_steward_recommendations(agent_id=steward_id)
+
+    assert proposal["status"] == "pending"
+    assert suggestion["status"] == "pending"
+    assert tasks["summary"]["openTaskCount"] >= 2
+    assert recommendations["summary"]["recommendationCount"] >= 2
+
+    with pytest.raises(team_knowledge_service.TeamKnowledgePermissionError):
+        team_knowledge_service.review_refinement_proposal(
+            knowledge_env["base"]["knowledgeBaseId"],
+            proposal["proposalId"],
+            status="applied",
+            reviewed_by_agent_id=steward_id,
+        )
+    with pytest.raises(team_knowledge_service.TeamKnowledgePermissionError):
+        team_knowledge_service.review_rating_suggestion(
+            knowledge_env["base"]["knowledgeBaseId"],
+            suggestion["suggestionId"],
+            status="applied",
+            reviewed_by_agent_id=steward_id,
+        )
+
+
 def test_central_source_registry_dedupes_by_source_hash(knowledge_env):
     first = team_knowledge_service.collect_source_to_inbox(
         "team",
