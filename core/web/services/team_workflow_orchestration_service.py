@@ -98,8 +98,10 @@ SOURCE_COLLECTION_AGENT_CONTEXT_STAGE_ROLES = {
     "candidate": ("content_extraction",),
     "screening": ("source_quality",),
     "graph": ("candidate_graph",),
-    "memory": ("candidate_graph", "knowledge_steward"),
+    "memory": ("knowledge_steward", "candidate_graph"),
 }
+SOURCE_COLLECTION_STAGE_SESSION_TASK_KIND = "source_collection_stage_session_task"
+SOURCE_COLLECTION_STAGE_SESSION_TASK_STATUSES = {"queued", "running", "completed", "needs_review", "blocked", "failed", "cancelled"}
 SOURCE_COLLECTION_STORAGE_OPEN_TARGETS = {
     "run_directory",
     "artifacts_directory",
@@ -817,6 +819,265 @@ def seed_source_collection_agent_session_context(
         "created": True,
         "alreadyPresent": False,
         "message": message,
+    }
+
+
+def start_source_collection_stage_session_task(
+    team_id: str,
+    run_id: str,
+    payload: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
+    normalized_run_id = _normalize_required_id(run_id, "Data processing run id is required.")
+    team = team_service.get_team(normalized_team_id)
+    request_payload = dict(payload) if isinstance(payload, dict) else {}
+    stage_id = _trim_text(request_payload.get("stageId"), max_length=80) or "collection"
+    agent_id = _trim_text(request_payload.get("agentId"), max_length=160)
+    agent_role = _trim_text(request_payload.get("agentRole"), max_length=80)
+    return_to = _trim_text(request_payload.get("returnTo"), max_length=1000)
+    return_label = _trim_text(request_payload.get("returnLabel"), max_length=240)
+    requested_by = _trim_text(request_payload.get("requestedByAgent"), max_length=160)
+    idempotency_key = _trim_text(request_payload.get("idempotencyKey"), max_length=240)
+    if stage_id not in SOURCE_COLLECTION_AGENT_CONTEXT_STAGE_ROLES:
+        raise TeamWorkflowOrchestrationError(f"Unsupported source collection stage: {stage_id}")
+    if not agent_id:
+        raise TeamWorkflowOrchestrationError("Agent id is required for source collection stage session task.")
+
+    agent = agent_directory_service.get_agent(agent_id)
+    if not isinstance(agent, dict):
+        raise TeamWorkflowOrchestrationError(f"Agent not found: {agent_id}")
+    session_id = _trim_text(agent.get("directSessionId"), max_length=160)
+    if not session_id:
+        raise TeamWorkflowOrchestrationError(f"Agent has no direct session: {agent_id}")
+
+    run_bundle = _source_collection_run_context_bundle(normalized_team_id, normalized_run_id)
+    run = run_bundle["run"]
+    assignments = run_bundle["assignments"]
+    records = run_bundle["records"]
+    source_candidates = run_bundle["sourceCandidates"]
+    run_status = run_bundle["runStatus"]
+    active_work_run = run_bundle["activeWorkRun"]
+    if not agent_role:
+        agent_role = _source_collection_agent_role_for_id(assignments, agent_id, stage_id)
+    allowed_roles = SOURCE_COLLECTION_AGENT_CONTEXT_STAGE_ROLES[stage_id]
+    if agent_role and agent_role not in allowed_roles:
+        raise TeamWorkflowOrchestrationError(f"Agent role {agent_role} is not assigned to source collection stage {stage_id}.")
+
+    matching_assignments = _source_collection_matching_assignments(assignments, agent_id=agent_id, agent_role=agent_role)
+    if not requested_by:
+        requested_by = _source_collection_owner_agent_id(team, {})
+    task_idempotency_key = idempotency_key or f"stage_task:{normalized_team_id}:{normalized_run_id}:{stage_id}:{agent_id}:{agent_role or 'agent'}"
+    existing_task = _find_source_collection_stage_session_task(
+        normalized_team_id,
+        normalized_run_id,
+        idempotency_key=task_idempotency_key,
+    )
+    if existing_task is not None:
+        return {
+            "schemaVersion": SCHEMA_VERSION,
+            "teamId": normalized_team_id,
+            "runId": normalized_run_id,
+            "stageId": stage_id,
+            "agentId": agent_id,
+            "agentRole": agent_role,
+            "sessionId": _trim_text(existing_task.get("sessionId"), max_length=160) or session_id,
+            "taskId": _trim_text(existing_task.get("taskId"), max_length=160),
+            "idempotencyKey": task_idempotency_key,
+            "created": False,
+            "alreadyPresent": True,
+            "task": existing_task,
+            "turn": existing_task.get("turn") if isinstance(existing_task.get("turn"), dict) else {},
+            "chatRoute": _source_collection_stage_task_chat_route(
+                _trim_text(existing_task.get("sessionId"), max_length=160) or session_id,
+                return_to=return_to or _trim_text(existing_task.get("returnTo"), max_length=1000),
+                return_label=return_label or _trim_text(existing_task.get("returnLabel"), max_length=240),
+            ),
+            "writebackContract": existing_task.get("writebackContract") if isinstance(existing_task.get("writebackContract"), dict) else {},
+            "boundaries": _source_collection_stage_session_task_boundaries(),
+        }
+
+    storage_artifacts = _source_collection_storage_artifacts(normalized_team_id, normalized_run_id)
+    task_id = _new_record_id("stagetask")
+    writeback_contract = _source_collection_stage_task_writeback_contract(
+        normalized_team_id,
+        normalized_run_id,
+        task_id,
+        stage_id=stage_id,
+        agent_id=agent_id,
+        agent_role=agent_role,
+    )
+    task_message = _source_collection_stage_session_task_message(
+        team=team,
+        agent=agent,
+        stage_id=stage_id,
+        agent_role=agent_role,
+        run=run,
+        run_status=run_status,
+        active_work_run=active_work_run,
+        assignments=assignments,
+        matching_assignments=matching_assignments,
+        records=records,
+        source_candidates=source_candidates,
+        storage_artifacts=storage_artifacts,
+        writeback_contract=writeback_contract,
+    )
+    now = utc_now_iso()
+    task_record = {
+        "schemaVersion": SCHEMA_VERSION,
+        "taskKind": SOURCE_COLLECTION_STAGE_SESSION_TASK_KIND,
+        "taskId": task_id,
+        "idempotencyKey": task_idempotency_key,
+        "teamId": normalized_team_id,
+        "runId": normalized_run_id,
+        "stageId": stage_id,
+        "agentId": agent_id,
+        "agentRole": agent_role,
+        "sessionId": session_id,
+        "status": "queued",
+        "title": _source_collection_stage_task_title(stage_id),
+        "summary": "",
+        "returnTo": return_to,
+        "returnLabel": return_label,
+        "requestedByAgent": requested_by,
+        "recordCount": len(records),
+        "candidateCount": len(source_candidates),
+        "assignmentCount": len(assignments),
+        "matchingAssignmentCount": len(matching_assignments),
+        "storageArtifacts": storage_artifacts,
+        "writebackContract": writeback_contract,
+        "writesFormalKnowledge": False,
+        "writesRag": False,
+        "writesOfficialGraph": False,
+        "turn": {},
+        "result": {},
+        "writeback": {},
+        "createdAt": now,
+        "updatedAt": now,
+    }
+    _upsert_source_collection_stage_session_task(normalized_team_id, normalized_run_id, task_record)
+    turn = session_service.submit_session_message(
+        session_id,
+        task_message,
+        mental_model_enabled=False,
+        turn_mode="task",
+        write_intent=False,
+        message_source="team_workflow_stage_task",
+        message_metadata={
+            "kind": SOURCE_COLLECTION_STAGE_SESSION_TASK_KIND,
+            "teamId": normalized_team_id,
+            "runId": normalized_run_id,
+            "stageId": stage_id,
+            "agentId": agent_id,
+            "agentRole": agent_role,
+            "sourceCollectionStageTaskId": task_id,
+            "sourceCollectionStageTaskKey": task_idempotency_key,
+            "writebackContract": writeback_contract,
+        },
+        include_started_turn_id=True,
+        lightweight_response=True,
+    )
+    turn_payload = turn if isinstance(turn, dict) else {}
+    task_record["status"] = "running" if turn_payload.get("accepted") else "queued"
+    task_record["turn"] = {
+        "accepted": bool(turn_payload.get("accepted")),
+        "turnId": _trim_text(turn_payload.get("turnId") or turn_payload.get("startedTurnId"), max_length=160),
+        "status": _trim_text(turn_payload.get("status"), max_length=80),
+        "acceptedAt": _trim_text(turn_payload.get("acceptedAt"), max_length=120),
+    }
+    task_record["updatedAt"] = utc_now_iso()
+    _upsert_source_collection_stage_session_task(normalized_team_id, normalized_run_id, task_record)
+    _sync_stage_round_with_source_collection_stage_task(normalized_team_id, normalized_run_id, task_record)
+    _record_workflow_event(
+        "source_collection.stage_session_task_started",
+        normalized_team_id,
+        fields={
+            "runId": normalized_run_id,
+            "stageId": stage_id,
+            "agentId": agent_id,
+            "agentRole": agent_role,
+            "sessionId": session_id,
+            "taskId": task_id,
+            "turnId": task_record["turn"].get("turnId", ""),
+        },
+    )
+    return {
+        "schemaVersion": SCHEMA_VERSION,
+        "teamId": normalized_team_id,
+        "runId": normalized_run_id,
+        "stageId": stage_id,
+        "agentId": agent_id,
+        "agentRole": agent_role,
+        "sessionId": session_id,
+        "taskId": task_id,
+        "idempotencyKey": task_idempotency_key,
+        "created": True,
+        "alreadyPresent": False,
+        "task": task_record,
+        "turn": task_record["turn"],
+        "chatRoute": _source_collection_stage_task_chat_route(session_id, return_to=return_to, return_label=return_label),
+        "writebackContract": writeback_contract,
+        "boundaries": _source_collection_stage_session_task_boundaries(),
+    }
+
+
+def writeback_source_collection_stage_session_task(
+    team_id: str,
+    task_id: str,
+    payload: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
+    normalized_task_id = _normalize_required_id(task_id, "Stage session task id is required.")
+    team_service.get_team(normalized_team_id)
+    request_payload = dict(payload) if isinstance(payload, dict) else {}
+    task, run_id = _find_source_collection_stage_session_task_by_id(normalized_team_id, normalized_task_id)
+    if task is None or not run_id:
+        raise TeamWorkflowOrchestrationError(f"Stage session task not found: {normalized_task_id}")
+    status = _normalize_source_collection_stage_session_task_status(request_payload.get("status") or request_payload.get("resultStatus"))
+    result_payload = request_payload.get("result") if isinstance(request_payload.get("result"), dict) else {}
+    writeback = {
+        "status": status,
+        "summary": _trim_text(request_payload.get("summary"), max_length=4000),
+        "result": _normalize_metadata(result_payload),
+        "evidenceRefs": _normalize_ref_list(request_payload.get("evidenceRefs"), max_items=24),
+        "nextActions": _normalize_text_list(request_payload.get("nextActions"), max_items=12, max_length=500),
+        "recordedByAgent": _trim_text(request_payload.get("recordedByAgent"), max_length=160),
+        "metadata": _normalize_metadata(request_payload.get("metadata")),
+        "recordedAt": utc_now_iso(),
+    }
+    task["status"] = status
+    task["summary"] = writeback["summary"] or _trim_text(task.get("summary"), max_length=4000)
+    task["result"] = writeback["result"]
+    task["evidenceRefs"] = writeback["evidenceRefs"]
+    task["nextActions"] = writeback["nextActions"]
+    task["writeback"] = writeback
+    task["writesFormalKnowledge"] = False
+    task["writesRag"] = False
+    task["writesOfficialGraph"] = False
+    task["updatedAt"] = writeback["recordedAt"]
+    _upsert_source_collection_stage_session_task(normalized_team_id, run_id, task)
+    _sync_stage_round_with_source_collection_stage_task(normalized_team_id, run_id, task)
+    _record_workflow_event(
+        "source_collection.stage_session_task_writeback",
+        normalized_team_id,
+        fields={
+            "runId": run_id,
+            "taskId": normalized_task_id,
+            "stageId": task.get("stageId", ""),
+            "agentId": task.get("agentId", ""),
+            "status": status,
+        },
+    )
+    return {
+        "schemaVersion": SCHEMA_VERSION,
+        "teamId": normalized_team_id,
+        "runId": run_id,
+        "taskId": normalized_task_id,
+        "stageId": task.get("stageId", ""),
+        "agentId": task.get("agentId", ""),
+        "agentRole": task.get("agentRole", ""),
+        "task": task,
+        "writeback": writeback,
+        "boundaries": _source_collection_stage_session_task_boundaries(),
     }
 
 
@@ -9343,6 +9604,10 @@ def _source_collection_storage_artifact_paths(team_id: str, run_id: str) -> dict
     }
 
 
+def _source_collection_stage_session_task_store_path(team_id: str, run_id: str) -> Path:
+    return _source_collection_storage_artifact_paths(team_id, run_id)["runDirectory"] / "stage_session_tasks.json"
+
+
 def _source_collection_storage_artifacts(team_id: str, run_id: str) -> dict[str, str]:
     return {
         key: _relative_path(path)
@@ -9383,6 +9648,198 @@ def _find_source_collection_context_message(session_id: str, context_key: str) -
         ):
             return message
     return None
+
+
+def _source_collection_run_context_bundle(team_id: str, run_id: str) -> dict[str, Any]:
+    try:
+        run = data_processing_service.get_processing_run(run_id)
+        assignments_payload = data_processing_service.list_collection_assignments(run_id)
+        records_payload = data_processing_service.list_records(run_id)
+        run_status = data_processing_service.get_processing_status(run_id)
+    except data_processing_service.DataProcessingError as exc:
+        raise TeamWorkflowOrchestrationError(str(exc)) from exc
+    run_scope = run.get("scope") if isinstance(run.get("scope"), dict) else {}
+    run_team_id = _trim_text(run_scope.get("teamId"), max_length=128)
+    if run_team_id and run_team_id != team_id:
+        raise TeamWorkflowOrchestrationError("Data processing run does not belong to this team.")
+    assignments = [item for item in list(assignments_payload.get("assignments") or []) if isinstance(item, dict)]
+    records = [item for item in list(records_payload.get("records") or []) if isinstance(item, dict)]
+    source_candidates = _source_collection_candidates_for_run(team_id, run_id)
+    active_snapshot = _source_collection_work_run_store().load_active_snapshot(SOURCE_COLLECTION_WORK_RUN_KIND)
+    active_work_run = (
+        active_snapshot
+        if _source_collection_background_snapshot_is_active(active_snapshot, team_id, run_id)
+        else {}
+    )
+    return {
+        "run": run,
+        "assignments": assignments,
+        "records": records,
+        "runStatus": run_status,
+        "sourceCandidates": source_candidates,
+        "activeWorkRun": active_work_run,
+    }
+
+
+def _source_collection_matching_assignments(
+    assignments: list[dict[str, Any]],
+    *,
+    agent_id: str,
+    agent_role: str,
+) -> list[dict[str, Any]]:
+    return [
+        item
+        for item in assignments
+        if (
+            (agent_role and _trim_text(item.get("agentRole"), max_length=80) == agent_role)
+            or _trim_text(item.get("agentId"), max_length=160) == agent_id
+        )
+    ]
+
+
+def _source_collection_stage_session_task_boundaries() -> dict[str, bool]:
+    return {
+        "writesFormalKnowledge": False,
+        "writesRag": False,
+        "writesOfficialGraph": False,
+        "updatesStageTaskResult": True,
+        "requiresStructuredWriteback": True,
+    }
+
+
+def _normalize_source_collection_stage_session_task_status(value: Any) -> str:
+    normalized = _trim_text(value, max_length=80).lower()
+    return normalized if normalized in SOURCE_COLLECTION_STAGE_SESSION_TASK_STATUSES else "needs_review"
+
+
+def _load_source_collection_stage_session_task_store(team_id: str, run_id: str) -> dict[str, Any]:
+    path = _source_collection_stage_session_task_store_path(team_id, run_id)
+    if path.exists():
+        payload = _read_json(path)
+        if isinstance(payload.get("tasks"), list):
+            return payload
+    now = utc_now_iso()
+    return {
+        "schemaVersion": SCHEMA_VERSION,
+        "teamId": team_id,
+        "runId": run_id,
+        "storeKind": "source_collection_stage_session_tasks",
+        "tasks": [],
+        "createdAt": now,
+        "updatedAt": now,
+    }
+
+
+def _write_source_collection_stage_session_task_store(team_id: str, run_id: str, store: dict[str, Any]) -> None:
+    store["teamId"] = team_id
+    store["runId"] = run_id
+    store["updatedAt"] = utc_now_iso()
+    _write_json(_source_collection_stage_session_task_store_path(team_id, run_id), store)
+
+
+def _source_collection_stage_session_tasks(team_id: str, run_id: str) -> list[dict[str, Any]]:
+    store = _load_source_collection_stage_session_task_store(team_id, run_id)
+    return [item for item in list(store.get("tasks") or []) if isinstance(item, dict)]
+
+
+def _find_source_collection_stage_session_task(team_id: str, run_id: str, *, idempotency_key: str) -> dict[str, Any] | None:
+    key = _trim_text(idempotency_key, max_length=240)
+    if not key:
+        return None
+    for item in _source_collection_stage_session_tasks(team_id, run_id):
+        if _trim_text(item.get("idempotencyKey"), max_length=240) == key:
+            return item
+    return None
+
+
+def _find_source_collection_stage_session_task_by_id(team_id: str, task_id: str) -> tuple[dict[str, Any] | None, str]:
+    normalized_task_id = _trim_text(task_id, max_length=160)
+    runs_root = _team_workflow_root(team_id) / "source_collection_runs"
+    if not normalized_task_id or not runs_root.exists():
+        return None, ""
+    for path in runs_root.glob("*/stage_session_tasks.json"):
+        run_id = path.parent.name
+        store = _read_json(path)
+        for item in list(store.get("tasks") or []):
+            if isinstance(item, dict) and _trim_text(item.get("taskId"), max_length=160) == normalized_task_id:
+                return item, run_id
+    return None, ""
+
+
+def _upsert_source_collection_stage_session_task(team_id: str, run_id: str, task: dict[str, Any]) -> dict[str, Any]:
+    task_id = _trim_text(task.get("taskId"), max_length=160)
+    if not task_id:
+        raise TeamWorkflowOrchestrationError("Stage session task id is required.")
+    with _WORKFLOW_LOCK:
+        store = _load_source_collection_stage_session_task_store(team_id, run_id)
+        tasks = [item for item in list(store.get("tasks") or []) if isinstance(item, dict)]
+        next_tasks: list[dict[str, Any]] = []
+        replaced = False
+        for item in tasks:
+            if _trim_text(item.get("taskId"), max_length=160) == task_id:
+                next_tasks.append(dict(task))
+                replaced = True
+            else:
+                next_tasks.append(item)
+        if not replaced:
+            next_tasks.append(dict(task))
+        store["tasks"] = next_tasks
+        _write_source_collection_stage_session_task_store(team_id, run_id, store)
+    return task
+
+
+def _source_collection_stage_task_writeback_contract(
+    team_id: str,
+    run_id: str,
+    task_id: str,
+    *,
+    stage_id: str,
+    agent_id: str,
+    agent_role: str,
+) -> dict[str, Any]:
+    endpoint = f"/api/teams/{urllib.parse.quote(team_id, safe='')}/workflow-orchestration/stage-session-tasks/{urllib.parse.quote(task_id, safe='')}/writeback"
+    return {
+        "schemaVersion": SCHEMA_VERSION,
+        "contractKind": "source_collection_stage_session_task_writeback",
+        "taskId": task_id,
+        "teamId": team_id,
+        "runId": run_id,
+        "stageId": stage_id,
+        "agentId": agent_id,
+        "agentRole": agent_role,
+        "endpoint": endpoint,
+        "acceptedStatuses": sorted(SOURCE_COLLECTION_STAGE_SESSION_TASK_STATUSES),
+        "requiredFields": ["status", "summary", "result"],
+        "writesFormalKnowledge": False,
+        "writesRag": False,
+        "writesOfficialGraph": False,
+        "resultAuthority": "structured_writeback_endpoint",
+    }
+
+
+def _source_collection_stage_task_title(stage_id: str) -> str:
+    return {
+        "collection": "资料搜索任务",
+        "candidate": "资料提炼任务",
+        "screening": "资料审查任务",
+        "graph": "候选图谱任务",
+        "memory": "共享记忆前审任务",
+    }.get(stage_id, "知识搜集阶段任务")
+
+
+def _source_collection_stage_task_chat_route(session_id: str, *, return_to: str, return_label: str) -> str:
+    params = urllib.parse.urlencode(
+        {
+            key: value
+            for key, value in {
+                "session": _trim_text(session_id, max_length=160),
+                "returnTo": _trim_text(return_to, max_length=1000),
+                "returnLabel": _trim_text(return_label, max_length=240),
+            }.items()
+            if value
+        }
+    )
+    return f"/chat?{params}" if params else "/chat"
 
 
 def _source_collection_agent_context_message(
@@ -9465,6 +9922,112 @@ def _source_collection_agent_context_message(
         ]
     )
     return "\n".join(lines)
+
+
+def _source_collection_stage_session_task_message(
+    *,
+    team: dict[str, Any],
+    agent: dict[str, Any],
+    stage_id: str,
+    agent_role: str,
+    run: dict[str, Any],
+    run_status: dict[str, Any],
+    active_work_run: dict[str, Any],
+    assignments: list[dict[str, Any]],
+    matching_assignments: list[dict[str, Any]],
+    records: list[dict[str, Any]],
+    source_candidates: list[dict[str, Any]],
+    storage_artifacts: dict[str, str],
+    writeback_contract: dict[str, Any],
+) -> str:
+    context = _source_collection_agent_context_message(
+        team=team,
+        agent=agent,
+        stage_id=stage_id,
+        agent_role=agent_role,
+        run=run,
+        run_status=run_status,
+        active_work_run=active_work_run,
+        assignments=assignments,
+        matching_assignments=matching_assignments,
+        records=records,
+        source_candidates=source_candidates,
+        storage_artifacts=storage_artifacts,
+    )
+    task_title = _source_collection_stage_task_title(stage_id)
+    contract_json = json.dumps(writeback_contract, ensure_ascii=False, sort_keys=True)
+    return "\n".join(
+        [
+            f"## 资料搜集阶段任务：{task_title}",
+            "",
+            context,
+            "",
+            "## 执行要求",
+            "- 在本会话里完成当前阶段任务，并把可审查的结论、证据引用和下一步写清楚。",
+            "- 不要直接写正式 Team Knowledge、RAG 或官方图谱；只能按候选层和结构化回写合同提交结果。",
+            "- 完成后必须通过结构化 writeback contract 回写，不要让自然语言回复成为唯一结果来源。",
+            "",
+            "## 结构化回写合同",
+            f"```json\n{contract_json}\n```",
+        ]
+    )
+
+
+def _sync_stage_round_with_source_collection_stage_task(team_id: str, run_id: str, task: dict[str, Any]) -> None:
+    now = utc_now_iso()
+    with _WORKFLOW_LOCK:
+        store = _load_stage_round_store(team_id)
+        rounds = _stage_rounds(store)
+        stage_round = _latest_stage_round(
+            [
+                item
+                for item in rounds
+                if str(item.get("stageType") or "") == "knowledge_collection"
+                and run_id in {str(source_run_id) for source_run_id in list(item.get("sourceRunIds") or [])}
+            ]
+        )
+        if stage_round is None:
+            return
+        task_refs = [
+            item
+            for item in list(stage_round.get("sourceCollectionStageSessionTasks") or [])
+            if isinstance(item, dict)
+            and _trim_text(item.get("taskId"), max_length=160) != _trim_text(task.get("taskId"), max_length=160)
+        ]
+        task_ref = {
+            "taskId": _trim_text(task.get("taskId"), max_length=160),
+            "runId": run_id,
+            "stageId": _trim_text(task.get("stageId"), max_length=80),
+            "agentId": _trim_text(task.get("agentId"), max_length=160),
+            "agentRole": _trim_text(task.get("agentRole"), max_length=80),
+            "sessionId": _trim_text(task.get("sessionId"), max_length=160),
+            "status": _trim_text(task.get("status"), max_length=80),
+            "summary": _trim_text(task.get("summary"), max_length=500),
+            "updatedAt": _trim_text(task.get("updatedAt"), max_length=120) or now,
+        }
+        task_refs.append(task_ref)
+        stage_round["sourceCollectionStageSessionTasks"] = sorted(task_refs, key=lambda item: str(item.get("updatedAt") or ""))
+        stage_round["updatedAt"] = now
+        if task_ref["status"] in {"running", "queued"}:
+            stage_round["status"] = "running"
+        elif task_ref["status"] in {"failed", "blocked"}:
+            stage_round["status"] = "needs_attention"
+        elif task_ref["status"] in {"completed", "needs_review"} and str(stage_round.get("status") or "") in {"running", "planning", "initializing"}:
+            stage_round["status"] = "needs_attention" if task_ref["status"] == "needs_review" else "running"
+        workflow = _load_or_create_workflow(team_id)
+        stage_round["teamMemoryRecord"] = _stage_memory_record(stage_round, workflow)
+        stage_round["teamMemoryRecordId"] = stage_round["teamMemoryRecord"]["recordId"]
+        store["updatedAt"] = now
+        workflow["activeWorkflowItems"] = _upsert_active_item(
+            workflow.get("activeWorkflowItems"),
+            candidate_id=run_id,
+            current_node="knowledge_collection",
+            status=f"source_collection_stage_task_{task_ref['status']}",
+            transfer_id="",
+        )
+        workflow["updatedAt"] = now
+        _write_json(_stage_round_store_path(team_id), store)
+        _write_json(_workflow_path(team_id), workflow)
 
 
 def _source_collection_agent_context_next_actions(stage_id: str, record_count: int, candidate_count: int, open_assignment_count: int) -> list[str]:
