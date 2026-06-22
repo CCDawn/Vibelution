@@ -90,6 +90,13 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("seedSourceCollectionAgentSessionContextMutation");
     expect(routeSource).toContain("/source-collection-runs/${encodeURIComponent(payload.runId)}/agent-session-context");
     expect(routeSource).toContain("await seedSourceCollectionAgentSessionContextMutation.mutateAsync");
+    expect(routeSource).toContain("TeamWorkflowSourceCollectionStageSessionTaskPayload");
+    expect(routeSource).toContain("startSourceCollectionStageSessionTaskMutation");
+    expect(routeSource).toContain("/source-collection-runs/${encodeURIComponent(payload.runId)}/stage-session-tasks");
+    expect(routeSource).toContain("startSourceCollectionStageSessionTask(stageId");
+    expect(routeSource).toContain("await startSourceCollectionStageSessionTaskMutation.mutateAsync");
+    expect(routeSource).toContain('memory: ["knowledge_steward", "candidate_graph"]');
+    expect(routeSource).toContain("priorityByKey");
     expect(routeSource).toContain("ExperimentFullRunResultRegisterPayload");
     expect(routeSource).toContain("ExperimentResultKnowledgeIngestionPayload");
     expect(routeSource).toContain("/workflow-orchestration/experiments/plans/${encodeURIComponent(payload.plan.planId)}/full-run-result");
@@ -412,6 +419,11 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("params.set(\"returnTo\", normalizedReturnTo)");
     expect(routeSource).toContain("params.set(\"returnLabel\", normalizedReturnLabel)");
     expect(routeSource).toContain("openSourceCollectionStageAgentChat");
+    expect(routeSource).toContain("onAction: () => void startSourceCollectionStageSessionTask(\"collection\")");
+    expect(routeSource).toContain("onAction: () => void startSourceCollectionStageSessionTask(\"candidate\")");
+    expect(routeSource).toContain("onAction: () => void startSourceCollectionStageSessionTask(\"screening\")");
+    expect(routeSource).toContain("onAction: () => void startSourceCollectionStageSessionTask(\"graph\")");
+    expect(routeSource).toContain("onAction: () => void startSourceCollectionStageSessionTask(\"memory\")");
     expect(routeSource).toContain("repairChallengeCupTeamAgentsMutation");
     expect(routeSource).toContain("/challenge-cup-agents/repair");
     expect(routeSource).toContain("修复团队 Agent");

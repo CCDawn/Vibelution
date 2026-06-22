@@ -39,7 +39,7 @@
         <aside class="dashboard-panel">
           <h2>审核摘要</h2>
           <div class="kpi-grid">
-            <div class="kpi"><b>当前阶段</b><strong>M6.65</strong><span>科研团队标准 7 角色可自动重建；缺少 Agent 私聊绑定时可一键修复团队 Agent。</span></div>
+            <div class="kpi"><b>当前阶段</b><strong>M6.66</strong><span>知识搜集阶段卡主按钮已启动对应 Agent 会话任务，并通过结构化 writeback 回团队阶段。</span></div>
             <div class="kpi"><b>流程节点</b><strong>13</strong><span>1-9 为知识入库主线，10-13 保留占位与维护节点。</span></div>
             <div class="kpi"><b>候选资料</b><strong>10</strong><span>第一轮 source_manifest 已进入 candidate-only 工作区。</span></div>
             <div class="kpi"><b>正式写入</b><strong>0</strong><span>未写正式 Team Knowledge、RAG 或 official graph。</span></div>
@@ -465,7 +465,7 @@
           <div class="plan-summary">
             <div class="service-row"><strong>知识搜集主线</strong><span>只跑通知识搜集第一阶段：搜索资料、资料提炼、资料审查、资料入库；不进入训练实验、算法实现或比赛交付。</span></div>
             <div class="service-row"><strong>实施目标</strong><span>复用 Vibelution 现有 Research、Team Knowledge、RAG、Knowledge Steward 和 Memory Graph 能力，把 01-09 做成可运行 MVP，并把 10 实验阶段先推进到可审查计划账本。</span></div>
-            <div class="service-row"><strong>团队入口</strong><span>/teams?team=research-team · 选中 ai科学研究团队后，团队内容区显示科研控制台：研究主题、当前阶段、知识搜集/实验/迭代三张阶段卡、每卡一个主按钮和一个阶段详情入口；知识搜集卡会按未开始、待继续搜索、搜索中、待审查、可入库、可进入实验、等待回写显示状态，并提供“新一轮搜集”；点击知识搜集主按钮会创建/续用阶段轮次，并立即排队第一批后台资料搜索；知识搜集状态读取会根据最新 source_collection_run 终态自动修复旧 running，避免页面假显示 Agent 仍在运行；知识搜集独立页展示搜索资料、资料筛选、候选入库、候选图谱、共享记忆前审五张步骤卡，每张卡只承载状态、关键数量、主操作和 Agent 私聊入口，当前步骤的功能 Agent 名称、模型、状态和配置入口集中显示在右侧详情底部；资料审查主按钮会让资料质量评估 Agent 批量执行待审候选，已审完时显示 Agent 重新审查并 force 复审已审候选；资料入库主按钮会让入库 Agent 生成入库关系和待入库知识包，并向知识库 Agent 发送入库请求，不再要求用户逐条选择资料；候选图谱由候选图谱 Agent 生成候选关系快照，共享记忆前审由知识库 Agent 检查待入库门槛；若尚无通过资料但已有候选资料，资料入库按钮显示提炼并通知 Agent，后端先批量审查再生成关系、入库包和 Agent inbox 请求，正式知识由知识库 Agent 后续处理；批次列表按 teamId/startedFrom 在服务端过滤，后台 activeWorkRun 会持续显示正在团队搜索，AppShell 顶部优先显示知识搜集而不是团队群聊；知识搜集页不再把本阶段 Agent 统一堆在顶部，点击每张步骤卡才查看该步骤内容和操作；搜索资料子页把当前动作和原始资料记录分开：过程区只显示当前正在执行的一条动作，结果区只展示本轮 DataRecord 原始记录，并明确标出已入候选多少、还有多少待导入候选；资料筛选和候选入库子页单独展示本轮 source_manifest 候选资料，避免把原始记录数和候选数混在一起；搜索资料结果列表和资料筛选/候选入库列表都有独立纵向滚动区，分页控件保留在列表下方，长批次不会被外层布局裁掉；Agent 重新提炼只重新同步 DataRecord 到候选资料，不会自动完成资料审查，候选仍会显示为待 Agent 审查并引导进入资料审查步骤；资料结果统计使用原始记录、已入候选、可点击来源和本地文件，列表内 DOI 单独显示为 DOI 链接，网页显示可点击来源，本地文件显示路径，缺少来源直接标出；每条资料卡片可点击选中，右侧详情把资料来源和搜集证据分开：主操作只打开论文 DOI、网页来源或本地文件，Crossref/OpenAlex 等机器 API 放入“查看搜索证据”折叠区，并保留打开批次目录、搜索步骤、搜集记录和候选镜像入口；候选 metadata 统一保留 sourceRunId、sourceRecordId、sourceCategory、doi、sourceUrl、sourcePath、query、assignmentId 和 searchProvider，供五个子页过滤与溯源；知识搜集启动不再依赖旧的 houmo_qwen35_9b_agent 固定 ID，而是由后端从当前模型库解析可用 KV 模型；过程流把 KV 缓存模型和执行 Agent 模型分开展示，避免把缓存兜底模型误认为搜索资料 Agent；模型证据、候选、路径、校验和内部状态默认移到阶段详情页或高级信息中。</span></div>
+            <div class="service-row"><strong>团队入口</strong><span>/teams?team=research-team · 选中 ai科学研究团队后，团队内容区显示科研控制台：研究主题、当前阶段、知识搜集/实验/迭代三张阶段卡、每卡一个主按钮和一个阶段详情入口；知识搜集卡会按未开始、待继续搜索、搜索中、待审查、可入库、可进入实验、等待回写显示状态，并提供“新一轮搜集”；点击知识搜集主按钮会创建/续用阶段轮次，并在需要新 run 时排队第一批后台资料搜索；知识搜集状态读取会根据最新 source_collection_run 终态自动修复旧 running，避免页面假显示 Agent 仍在运行；知识搜集独立页展示搜索资料、资料筛选、候选入库、候选图谱、共享记忆前审五张步骤卡，每张卡只承载状态、关键数量、主操作和 Agent 私聊入口，当前步骤的功能 Agent 名称、模型、状态和配置入口集中显示在右侧详情底部；五张步骤卡的主按钮会启动对应功能 Agent 的 direct session task，带 returnTo/returnLabel 跳转到会话页执行，并要求 Agent 完成后通过 source_collection_stage_session_task_writeback 结构化回写到团队阶段；旧本地执行按钮和手工回写只作为详情页/调试兜底入口保留，不再是阶段卡主路径。资料审查任务由资料质量评估 Agent 在会话内处理待审候选或复审结论；资料入库任务由入库 Agent 在会话内生成入库关系、待入库知识包和知识库 Agent 通知建议；候选图谱任务由候选图谱 Agent 在会话内生成候选关系快照；共享记忆前审任务由知识库 Agent 在会话内检查待入库门槛；正式知识由知识库 Agent 后续处理；批次列表按 teamId/startedFrom 在服务端过滤，后台 activeWorkRun 会持续显示正在团队搜索，AppShell 顶部优先显示知识搜集而不是团队群聊；知识搜集页不再把本阶段 Agent 统一堆在顶部，点击每张步骤卡才查看该步骤内容和操作；搜索资料子页把当前动作和原始资料记录分开：过程区只显示当前正在执行的一条动作，结果区只展示本轮 DataRecord 原始记录，并明确标出已入候选多少、还有多少待导入候选；资料筛选和候选入库子页单独展示本轮 source_manifest 候选资料，避免把原始记录数和候选数混在一起；搜索资料结果列表和资料筛选/候选入库列表都有独立纵向滚动区，分页控件保留在列表下方，长批次不会被外层布局裁掉；Agent 重新提炼只重新同步 DataRecord 到候选资料，不会自动完成资料审查，候选仍会显示为待 Agent 审查并引导进入资料审查步骤；资料结果统计使用原始记录、已入候选、可点击来源和本地文件，列表内 DOI 单独显示为 DOI 链接，网页显示可点击来源，本地文件显示路径，缺少来源直接标出；每条资料卡片可点击选中，右侧详情把资料来源和搜集证据分开：主操作只打开论文 DOI、网页来源或本地文件，Crossref/OpenAlex 等机器 API 放入“查看搜索证据”折叠区，并保留打开批次目录、搜索步骤、搜集记录和候选镜像入口；候选 metadata 统一保留 sourceRunId、sourceRecordId、sourceCategory、doi、sourceUrl、sourcePath、query、assignmentId 和 searchProvider，供五个子页过滤与溯源；知识搜集启动不再依赖旧的 houmo_qwen35_9b_agent 固定 ID，而是由后端从当前模型库解析可用 KV 模型；过程流把 KV 缓存模型和执行 Agent 模型分开展示，避免把缓存兜底模型误认为搜索资料 Agent；模型证据、候选、路径、校验和内部状态默认移到阶段详情页或高级信息中。</span></div>
           </div>
           <div class="dashboard-panel">
             <h2>边界提醒</h2>
@@ -669,8 +669,8 @@
         <div class="agent-row">
         <b>01</b>
         <strong>Source Intake Agent</strong>
-        <span>可复用通用 data-processing assignment / source-extraction / source-quality 后端已接入；Teams 搜索资料执行台、资料提炼页、资料审查台、科研总览控制台、KV 缓存门禁、启动复用反馈、metadata-only 搜索执行闭环、高价值信息层、中文控制台、默认层去说明化、步骤卡主操作入口、右侧当前步骤 Agent 配置、资料审查页内反馈、资料审查 Agent 批量执行、候选库可视化二级索引、知识搜集阶段四步控制台、资料审查 Agent 复审入口、一键排队首批后台搜索、搜索资料当前动作和已收集资料分层、搜集结果状态徽标完整显示、搜集结果 DOI/网页/本地文件来源可溯源、资料提炼结果滚动与待审查交接、四步完整列表、来源类型过滤、阶段结果工作台、Agent 私聊深链、阶段输入输出交接、结果分页、实体可读工作台、阶段卡降噪、资料入库 Agent 生成关系并通知知识库 Agent、资料入库可从候选资料触发审查并发送入库请求、KV 缓存模型与执行 Agent 模型分层、阶段协调显式启动已接入</span>
-        <span>ResearchStageRound 建立 / 科研控制台一键进入知识搜集 / 总览页只显示三阶段主操作 / 知识搜集状态驱动按钮 / 知识搜集中文展示映射 / 默认层去说明化 / 右侧主操作唯一化 / 资料审查入口常驻 / 步骤卡主操作入口 / 右侧当前步骤 Agent 配置 / 步骤卡二级索引 / 四步阶段控制台 / 阶段结果工作台 / Agent 私聊深链 / 实体可读工作台 / 阶段卡降噪 / 阶段输入输出交接 / KV 缓存模型分层展示 / 执行 Agent 模型右侧展示 / 四步结果分页 / 结果区独立滚动 / 搜索资料当前动作 / 已收集资料结果区 / 搜集结果来源溯源 / 搜集结果状态徽标 / 资料提炼待审查交接 / 资料审查 Agent 复审 / 候选库可视化面板 / 资料入库 Agent 通知入库 / 资料入库候选触发 / 资料审查页内详情 / 资料审查展开高亮反馈 / 资料审查 Agent 批量执行 / source-quality/assess-batch / source-quality force 重审 / 新一轮搜集入口 / active 知识搜集轮次复用反馈 / 一键排队首批搜索 / 全局运行态知识搜集优先 / 步骤功能 Agent 聚焦 / 四步完整列表 / 来源类型过滤 / 阶段协调显式启动 / DataProcessingRun 建立 / DataProcessingRun reviewing 收口 / DataSearchPlan/querySeeds 搜索计划 / KV/prompt cache 启动门禁 / 稳定前缀/动态增量契约 / CollectionAssignment 搜索资料任务 / assignedQueries 角色分配 / promptCachePartition 角色分区 / Teams 启动搜集批次 / Teams 查看 run/assignment/query/KV 状态 / Teams 高价值摘要层 / Teams 搜索下一批 / Crossref 元数据搜索执行器 / DataRecord 通用记录 / DataRecord 自动导入 source_manifest / metadata-only 下载边界 / 手工 CollectionOutput 回写 / 本地资料登记 / source_manifest 写入 / 文件路径/页码/来源可信度记录 / 本地 PDF sha256/pageAnchors/excerpt 抽取 / sourceQualityAssessment 审查 / 可选 research_knowledge_query_tool 查重</span>
+        <span>可复用通用 data-processing assignment / source-extraction / source-quality 后端已接入；Teams 搜索资料执行台、资料提炼页、资料审查台、科研总览控制台、KV 缓存门禁、启动复用反馈、metadata-only 搜索执行闭环、高价值信息层、中文控制台、默认层去说明化、步骤卡主操作入口、阶段 Agent direct session task、结构化 writeback 回团队阶段、右侧当前步骤 Agent 配置、资料审查页内反馈、资料审查 Agent 批量执行、候选库可视化二级索引、知识搜集阶段四步控制台、资料审查 Agent 复审入口、一键排队首批后台搜索、搜索资料当前动作和已收集资料分层、搜集结果状态徽标完整显示、搜集结果 DOI/网页/本地文件来源可溯源、资料提炼结果滚动与待审查交接、四步完整列表、来源类型过滤、阶段结果工作台、Agent 私聊深链、阶段输入输出交接、结果分页、实体可读工作台、阶段卡降噪、资料入库 Agent 生成关系并通知知识库 Agent、资料入库可从候选资料触发审查并发送入库请求、KV 缓存模型与执行 Agent 模型分层、阶段协调显式启动已接入</span>
+        <span>ResearchStageRound 建立 / 科研控制台一键进入知识搜集 / 总览页只显示三阶段主操作 / 知识搜集状态驱动按钮 / 知识搜集中文展示映射 / 默认层去说明化 / 右侧主操作唯一化 / 资料审查入口常驻 / 步骤卡主操作入口 / 阶段 Agent 会话任务启动 / 结构化 writeback 回团队阶段 / Chat 返回链接 / 右侧当前步骤 Agent 配置 / 步骤卡二级索引 / 四步阶段控制台 / 阶段结果工作台 / Agent 私聊深链 / 实体可读工作台 / 阶段卡降噪 / 阶段输入输出交接 / KV 缓存模型分层展示 / 执行 Agent 模型右侧展示 / 四步结果分页 / 结果区独立滚动 / 搜索资料当前动作 / 已收集资料结果区 / 搜集结果来源溯源 / 搜集结果状态徽标 / 资料提炼待审查交接 / 资料审查 Agent 复审 / 候选库可视化面板 / 资料入库 Agent 通知入库 / 资料入库候选触发 / 资料审查页内详情 / 资料审查展开高亮反馈 / 资料审查 Agent 批量执行 / source-quality/assess-batch / source-quality force 重审 / 新一轮搜集入口 / active 知识搜集轮次复用反馈 / 一键排队首批搜索 / 全局运行态知识搜集优先 / 步骤功能 Agent 聚焦 / 四步完整列表 / 来源类型过滤 / 阶段协调显式启动 / DataProcessingRun 建立 / DataProcessingRun reviewing 收口 / DataSearchPlan/querySeeds 搜索计划 / KV/prompt cache 启动门禁 / 稳定前缀/动态增量契约 / CollectionAssignment 搜索资料任务 / assignedQueries 角色分配 / promptCachePartition 角色分区 / Teams 启动搜集批次 / Teams 查看 run/assignment/query/KV 状态 / Teams 高价值摘要层 / Teams 搜索下一批 / Crossref 元数据搜索执行器 / DataRecord 通用记录 / DataRecord 自动导入 source_manifest / metadata-only 下载边界 / 手工 CollectionOutput 回写 / 本地资料登记 / source_manifest 写入 / 文件路径/页码/来源可信度记录 / 本地 PDF sha256/pageAnchors/excerpt 抽取 / sourceQualityAssessment 审查 / 可选 research_knowledge_query_tool 查重</span>
         <span>确认资料允许分析、来源可信度和是否纳入本轮。</span>
       </div>
 <div class="agent-row">
@@ -1380,15 +1380,15 @@
                 </div>
 <div class="service-row">
                   <b>team_workflow_orchestration_service</b>
-                  <span>已落地：Team 级 workflowOrchestration、ResearchStageRound、CandidateStore、transfer request/decision、source-collection run 启动、DataSearchPlan/query seed 契约、prompt cache/KV 启动门禁、DataRecord -&gt; source_manifest 幂等导入桥、source_quality assessment、paper_note chunk planning、official_model_evidence 证据登记/status，以及 experiment_plans 实验计划账本、active baseline artifact、smoke result、full-run result、experiment result pack 和 Research Loop 手工证据/决策账本。</span>
+                  <span>已落地：Team 级 workflowOrchestration、ResearchStageRound、CandidateStore、transfer request/decision、source-collection run 启动、阶段 Agent direct session task 启动、结构化 writeback 回团队阶段、DataSearchPlan/query seed 契约、prompt cache/KV 启动门禁、DataRecord -&gt; source_manifest 幂等导入桥、source_quality assessment、paper_note chunk planning、official_model_evidence 证据登记/status，以及 experiment_plans 实验计划账本、active baseline artifact、smoke result、full-run result、experiment result pack 和 Research Loop 手工证据/决策账本。</span>
                 </div>
 <div class="service-row">
                   <b>team_workflows API</b>
-                  <span>已落地：/api/teams/{team_id}/workflow-orchestration、stage-rounds/status、stage-rounds/start、stage-rounds/{stageRoundId}/coordination/retry、stage-rounds/{stageRoundId}/memory-record/retry、source-collection-runs（含 searchPlan/querySeeds/assignedQueries/resultWritebackContract）、candidates/source、data-processing/runs/{runId}/records/{recordId}/source-candidate、candidates/{candidate_id}/source-extraction、source-quality/status、candidates/{candidate_id}/source-quality/assess、paper-note-chunks/status、candidates/{candidate_id}/paper-note-chunks/plan、candidates/{candidate_id}/paper-note-draft（支持 chunkId）、candidates、candidates/validation、candidate-graph、transfers、decide、knowledge-ingestion/status、coordination/status、official-model-evidence/status、official-model-evidence、experiments/status、experiments/plan、experiments/plans/{planId}/baseline-artifact、experiments/plans/{planId}/smoke-result、experiments/plans/{planId}/full-run-result、experiments/plans/{planId}/knowledge-ingestion-request、research-loop/templates、research-loop/status、research-loop/loops、research-loop/loops/{loopId}/evidence、research-loop/loops/{loopId}/decision；coordination/status 返回 communicationBrief。</span>
+                  <span>已落地：/api/teams/{team_id}/workflow-orchestration、stage-rounds/status、stage-rounds/start、stage-rounds/{stageRoundId}/coordination/retry、stage-rounds/{stageRoundId}/memory-record/retry、source-collection-runs（含 searchPlan/querySeeds/assignedQueries/resultWritebackContract）、source-collection-runs/{runId}/stage-session-tasks、stage-session-tasks/{taskId}/writeback、candidates/source、data-processing/runs/{runId}/records/{recordId}/source-candidate、candidates/{candidate_id}/source-extraction、source-quality/status、candidates/{candidate_id}/source-quality/assess、paper-note-chunks/status、candidates/{candidate_id}/paper-note-chunks/plan、candidates/{candidate_id}/paper-note-draft（支持 chunkId）、candidates、candidates/validation、candidate-graph、transfers、decide、knowledge-ingestion/status、coordination/status、official-model-evidence/status、official-model-evidence、experiments/status、experiments/plan、experiments/plans/{planId}/baseline-artifact、experiments/plans/{planId}/smoke-result、experiments/plans/{planId}/full-run-result、experiments/plans/{planId}/knowledge-ingestion-request、research-loop/templates、research-loop/status、research-loop/loops、research-loop/loops/{loopId}/evidence、research-loop/loops/{loopId}/decision；coordination/status 返回 communicationBrief。</span>
                 </div>
 <div class="service-row">
                   <b>TeamsRoute workflow workspace</b>
-                  <span>已落地入口：Teams 页顶部固定横向切换条只暴露 AI 搜索范围团队和 ai科学研究团队，左侧栏已删除；监督进化/自进化模式页各自读取系统 Team 并展示只读团队画布；选择 ai科学研究团队后直接进入 research-team 专属科研控制台；总览只显示知识搜集、实验、迭代三张阶段卡，每张卡一个主操作和一个阶段详情入口。知识搜集卡会显示当前批次、待处理、候选和查询数，主按钮按状态执行开始、下一批搜索、筛选入口或打开工作台，另有新一轮搜集入口。知识搜集页位于 /teams?team=research-team&amp;researchView=knowledge_collection，默认展示高价值状态摘要和状态驱动主操作；点击知识搜集主按钮会通过 stage-rounds/start 创建轮次并立即排队第一批后台 source collection 搜索；执行 source collection 搜索时会写入 source_collection_run 运行快照，让 AppShell 顶部“正在进行”优先显示知识搜集；资料搜集 run 列表通过 data-processing 服务端 teamId/startedFrom 过滤，避免被其它团队批次挤掉；后台 accepted 后 activeWorkRun 会进入控制台，直到 runStatus 收口；资料搜集、资料筛选、候选入库、候选图谱、共享记忆前审五张步骤卡各自带主按钮并作为页内子页索引，顶部卡片只保留状态、关键数量和主操作，不再显示输入/输出小框；底部只显示当前阶段结果内容，不再内嵌 Agent 过程；每个阶段详情头部提供进入对应 Agent 私有对话页的深链，Agent 审查和执行过程统一到各自私有对话页追踪；右侧只显示当前步骤操作、当前资料详情、关键数量和当前步骤 Agent 配置；资料筛选会调用资料质量评估 Agent 批量执行，完成后展开、滚动并高亮页内筛选详情；KV/prompt cache 由后端从当前模型库解析，不再依赖旧固定模型 ID；稳定前缀、动态增量、assignment、query、存储路径和手工回写保留在可展开详情中；默认层移除解释性小字且使用实体工作台背景，避免主题壁纸压住正文；实验页新增实验计划账本，可生成计划草稿并登记 active baseline artifact、smoke result、full-run result，full-run passed 后可通知 Knowledge Steward Agent 处理 experiment_result_pack；实验页和迭代页共享 Research Loop 模板面板，可按算法模型、仿真模拟、数据集基准、环境探针等模板登记证据和决策；旧 source_collection 参数兼容映射到知识搜集。</span>
+                  <span>已落地入口：Teams 页顶部固定横向切换条只暴露 AI 搜索范围团队和 ai科学研究团队，左侧栏已删除；监督进化/自进化模式页各自读取系统 Team 并展示只读团队画布；选择 ai科学研究团队后直接进入 research-team 专属科研控制台；总览只显示知识搜集、实验、迭代三张阶段卡，每张卡一个主操作和一个阶段详情入口。知识搜集卡会显示当前批次、待处理、候选和查询数，主按钮按状态进入知识搜集工作台或启动对应阶段 Agent 任务。知识搜集页位于 /teams?team=research-team&amp;researchView=knowledge_collection，默认展示高价值状态摘要和状态驱动主操作；首次资料搜索任务可通过 stage-rounds/start 创建轮次并排队第一批后台 source collection 搜索；执行 source collection 搜索时会写入 source_collection_run 运行快照，让 AppShell 顶部“正在进行”优先显示知识搜集；资料搜集 run 列表通过 data-processing 服务端 teamId/startedFrom 过滤，避免被其它团队批次挤掉；后台 accepted 后 activeWorkRun 会进入控制台，直到 runStatus 收口；资料搜集、资料筛选、候选入库、候选图谱、共享记忆前审五张步骤卡各自带主按钮并作为页内子页索引，顶部卡片只保留状态、关键数量和主操作，不再显示输入/输出小框；五张步骤卡主按钮会调用 stage-session-tasks，创建对应功能 Agent 的 direct session task，再带 returnTo/returnLabel 跳转到 Chat；底部只显示当前阶段结果内容，不再内嵌 Agent 过程；每个阶段详情头部保留进入对应 Agent 私有对话页的深链，作为查看/调试入口；Agent 执行结果以 writeback 合同回写 sourceCollectionStageSessionTasks 后挂回 ResearchStageRound；右侧只显示当前步骤操作、当前资料详情、关键数量和当前步骤 Agent 配置；KV/prompt cache 由后端从当前模型库解析，不再依赖旧固定模型 ID；稳定前缀、动态增量、assignment、query、存储路径和手工回写保留在可展开详情中；默认层移除解释性小字且使用实体工作台背景，避免主题壁纸压住正文；实验页新增实验计划账本，可生成计划草稿并登记 active baseline artifact、smoke result、full-run result，full-run passed 后可通知 Knowledge Steward Agent 处理 experiment_result_pack；实验页和迭代页共享 Research Loop 模板面板，可按算法模型、仿真模拟、数据集基准、环境探针等模板登记证据和决策；旧 source_collection 参数兼容映射到知识搜集。</span>
                 </div>
 <div class="service-row">
                   <b>local_research_worker_model</b>
@@ -1836,6 +1836,11 @@
               <span>保存 ResearchStageRound、sourceRunIds、upstreamRoundIds、teamMemoryRecord、coordinationContract，以及显式协调启动后的 coordinationRoomId/coordinationRoundId。</span>
             </div>
 <div class="blueprint-row compact">
+              <b>阶段 Agent 会话任务索引</b>
+              <strong>workspace/teams/&lt;teamId&gt;/source_collection_runs/&lt;runId&gt;/stage_session_tasks.json</strong>
+              <span>保存五张知识搜集步骤卡启动的 direct session task、writebackContract、Chat turn 摘要和结构化回写结果；任务引用同步挂回 ResearchStageRound.sourceCollectionStageSessionTasks。</span>
+            </div>
+<div class="blueprint-row compact">
               <b>实验计划索引</b>
               <strong>workspace/teams/&lt;teamId&gt;/experiment_plans/index.json</strong>
               <span>保存实验计划草稿、selectedHypotheses、baselineSelection、activeBaselineArtifact、smoke/full-run 结果、experimentResultPack、readinessChecklist 和 knowledge-ingestion blocker。</span>
@@ -1866,9 +1871,19 @@
               <span>读取 /workflow-orchestration、/stage-rounds/status、/official-model-evidence/status、/candidates?limit=8、/knowledge-ingestion/status 和通用 data-processing run/status/assignment；顶部横向切换条只允许选择 AI 搜索范围团队或 ai科学研究团队，点击 research-team 后直接进入团队专属科研控制台，内容区只展示知识搜集、实验、迭代三张阶段卡和状态驱动主操作；非这两个团队不在当前入口暴露。</span>
             </div>
 <div class="blueprint-row compact">
+              <b>阶段 Agent 会话任务启动</b>
+              <strong>/api/teams/{teamId}/workflow-orchestration/source-collection-runs/{runId}/stage-session-tasks</strong>
+              <span>根据 stageId/agentId/agentRole 创建 source_collection_stage_session_task，把任务消息投递到 Agent directSessionId，并返回带 returnTo/returnLabel 的 chatRoute；不写正式 Team Knowledge/RAG/official graph。</span>
+            </div>
+<div class="blueprint-row compact">
+              <b>阶段 Agent 会话任务回写</b>
+              <strong>/api/teams/{teamId}/workflow-orchestration/stage-session-tasks/{taskId}/writeback</strong>
+              <span>只接受结构化 status/summary/result/evidenceRefs/nextActions，把结果写入 stage_session_tasks.json 并同步 ResearchStageRound.sourceCollectionStageSessionTasks；自然语言会话不是团队阶段结果来源。</span>
+            </div>
+<div class="blueprint-row compact">
               <b>知识搜集阶段页</b>
               <strong>TeamsRoute knowledge collection stage</strong>
-              <span>可在 /teams?team=research-team&amp;researchView=knowledge_collection 独立打开知识搜集页，启动 source collection run、查看 DataSearchPlan/querySeeds/assignment/assignedQueries，并手工提交一条含 rawLocation 的 CollectionOutput；启动时优先使用 Team canvas 中各功能角色绑定的团队 agentId，提交后自动导入 source_manifest 候选；页面会把 KV 门禁状态、promptCacheMode、稳定前缀、promptCachePartition 和 source_collection_runs/&lt;runId&gt; 证据落盘位置放入搜集对话流，并可通过 storage/open 白名单接口打开对应位置。</span>
+              <span>可在 /teams?team=research-team&amp;researchView=knowledge_collection 独立打开知识搜集页，查看 source collection run、DataSearchPlan/querySeeds/assignment/assignedQueries 和阶段 Agent 会话任务；五张步骤卡主按钮启动对应 Agent direct session task 并跳转 Chat，旧 Agent 私聊/手工 CollectionOutput 作为详情与兜底入口保留；页面会把 KV 门禁状态、promptCacheMode、稳定前缀、promptCachePartition 和 source_collection_runs/&lt;runId&gt; 证据落盘位置放入搜集对话流，并可通过 storage/open 白名单接口打开对应位置。</span>
             </div>
 <div class="blueprint-row compact">
               <b>转移记录</b>
@@ -2381,6 +2396,12 @@
               <span>阶段 Agent 必须拥有 directSessionId 且在会话页可见；阶段私聊入口只跳转到对应 Agent 私有对话页，缺少私聊会话时提示修复团队 Agent，不再退回 Agent 管理页。</span>
             </div>
 <div class="blueprint-row">
+              <b>M6.66</b>
+              <strong>阶段卡 Agent 会话任务桥</strong>
+              <span>知识搜集五张步骤卡的主按钮不再直接执行本地阶段动作，而是创建对应功能 Agent 的 direct session task 并跳转到会话页执行。</span>
+              <span>任务落盘到 source_collection_runs/&lt;runId&gt;/stage_session_tasks.json；Chat URL 保留 returnTo/returnLabel；Agent 完成后必须通过结构化 writeback API 回写 sourceCollectionStageSessionTasks，团队阶段再展示结果。</span>
+            </div>
+<div class="blueprint-row">
               <b>M7</b>
               <strong>实验计划账本首切</strong>
               <span>新增 experiments/status 与 experiments/plan：聚合实验阶段轮次、algorithm_hypothesis 候选、计划草稿和 baseline/metric/dataset/smoke 缺口，并把草稿写入 experiment_plans/index.json。</span>
@@ -2436,6 +2457,7 @@
 <span class="tag">official_model_evidence</span>
 <span class="tag">source_quality_assessment</span>
 <span class="tag">source_collection_prompt_cache_policy</span>
+<span class="tag">source_collection_stage_session_task</span>
       </div>
     </section>
   </div>

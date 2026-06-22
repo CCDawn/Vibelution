@@ -288,6 +288,95 @@ def test_team_workflow_route_seeds_source_collection_agent_session_context(tmp_p
     assert len([message for message in detail["messages"] if message.get("metadata", {}).get("kind") == "source_collection_agent_context"]) == 1
 
 
+def test_team_workflow_route_starts_source_collection_stage_session_task(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    client = _client()
+    discovery = agent_directory_service.create_agent_instance(display_name="资料发现")
+    direct_session = session_service.ensure_agent_direct_session(agent_id=discovery["agentId"], title="资料发现")
+    team = client.post(
+        "/api/teams",
+        json={"name": "挑战杯科研团队", "members": [{"agentId": discovery["agentId"], "role": "data_discovery", "agentName": "资料发现"}]},
+    ).json()
+    start_response = client.post(
+        f"/api/teams/{team['teamId']}/workflow-orchestration/source-collection-runs",
+        json={
+            "topic": "脑启发路由",
+            "agentRoles": ["data_discovery"],
+            "agentIds": {"data_discovery": discovery["agentId"]},
+            "querySeeds": ["brain-inspired routing"],
+            "promptCachePolicy": {"requirement": "disabled"},
+        },
+    )
+    submitted = []
+
+    def fake_submit_session_message(session_id, content, **kwargs):
+        submitted.append({"sessionId": session_id, "content": content, "kwargs": kwargs})
+        return {"accepted": True, "sessionId": session_id, "turnId": "turn-stage-task", "status": "running"}
+
+    monkeypatch.setattr(session_service, "submit_session_message", fake_submit_session_message)
+
+    response = client.post(
+        f"/api/teams/{team['teamId']}/workflow-orchestration/source-collection-runs/{start_response.json()['run']['runId']}/stage-session-tasks",
+        json={"stageId": "collection", "agentId": discovery["agentId"], "agentRole": "data_discovery", "returnLabel": "返回搜索资料"},
+    )
+
+    assert start_response.status_code == 201, start_response.text
+    assert response.status_code == 201, response.text
+    payload = response.json()
+    assert payload["created"] is True
+    assert payload["sessionId"] == direct_session["id"]
+    assert payload["chatRoute"].startswith(f"/chat?session={direct_session['id']}")
+    assert payload["task"]["writebackContract"]["taskId"] == payload["taskId"]
+    assert submitted[0]["kwargs"]["message_metadata"]["kind"] == "source_collection_stage_session_task"
+
+
+def test_team_workflow_route_writebacks_source_collection_stage_session_task(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _stub_source_collection_search_background(monkeypatch)
+    client = _client()
+    discovery = agent_directory_service.create_agent_instance(display_name="资料发现")
+    session_service.ensure_agent_direct_session(agent_id=discovery["agentId"], title="资料发现")
+    team = client.post(
+        "/api/teams",
+        json={"name": "挑战杯科研团队", "members": [{"agentId": discovery["agentId"], "role": "data_discovery", "agentName": "资料发现"}]},
+    ).json()
+    stage_response = client.post(
+        f"/api/teams/{team['teamId']}/workflow-orchestration/stage-rounds/start",
+        json={
+            "stageType": "knowledge_collection",
+            "topic": "脑启发路由",
+            "agentRoles": ["data_discovery"],
+            "agentIds": {"data_discovery": discovery["agentId"]},
+            "querySeeds": ["brain-inspired routing"],
+            "promptCachePolicy": {"requirement": "disabled"},
+        },
+    )
+    monkeypatch.setattr(
+        session_service,
+        "submit_session_message",
+        lambda session_id, content, **kwargs: {"accepted": True, "sessionId": session_id, "turnId": "turn-stage-task", "status": "running"},
+    )
+    task_response = client.post(
+        f"/api/teams/{team['teamId']}/workflow-orchestration/source-collection-runs/{stage_response.json()['run']['runId']}/stage-session-tasks",
+        json={"stageId": "collection", "agentId": discovery["agentId"], "agentRole": "data_discovery"},
+    )
+
+    response = client.post(
+        f"/api/teams/{team['teamId']}/workflow-orchestration/stage-session-tasks/{task_response.json()['taskId']}/writeback",
+        json={"status": "completed", "summary": "已完成资料搜索。", "result": {"recordCount": 1}},
+    )
+
+    assert task_response.status_code == 201, task_response.text
+    assert response.status_code == 201, response.text
+    assert response.json()["task"]["status"] == "completed"
+    assert response.json()["task"]["result"]["recordCount"] == 1
+    assert response.json()["boundaries"]["writesFormalKnowledge"] is False
+    status_response = client.get(f"/api/teams/{team['teamId']}/workflow-orchestration/stage-rounds/status")
+    assert status_response.status_code == 200, status_response.text
+    stage_tasks = status_response.json()["latestRound"].get("sourceCollectionStageSessionTasks", [])
+    assert any(item["taskId"] == task_response.json()["taskId"] and item["status"] == "completed" for item in stage_tasks)
+
+
 def test_team_workflow_route_executes_source_collection_search(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
 

@@ -49,12 +49,14 @@ from core.web.services.team_workflow_orchestration_service import (
     run_knowledge_collection_ingestion,
     run_knowledge_ingestion_precheck,
     seed_source_collection_agent_session_context,
+    start_source_collection_stage_session_task,
     start_research_stage_round,
     start_source_collection_search_background,
     start_source_collection_run,
     submit_transfer_request,
     submit_steward_pack_to_knowledge_ingestion,
     validate_candidate_store,
+    writeback_source_collection_stage_session_task,
 )
 from core.web.services.runtime_scene_service import record_runtime_scene_event
 
@@ -170,6 +172,23 @@ class SourceCollectionAgentSessionContextPayload(BaseModel):
     stageId: str = Field("collection", max_length=80)
     agentId: str = Field("", max_length=160)
     agentRole: str = Field("", max_length=80)
+
+
+class SourceCollectionStageSessionTaskPayload(SourceCollectionAgentSessionContextPayload):
+    requestedByAgent: str = Field("", max_length=160)
+    returnTo: str = Field("", max_length=1000)
+    returnLabel: str = Field("", max_length=240)
+    idempotencyKey: str = Field("", max_length=240)
+
+
+class SourceCollectionStageSessionTaskWritebackPayload(BaseModel):
+    status: str = Field("needs_review", max_length=80)
+    summary: str = Field("", max_length=4000)
+    result: dict[str, Any] = Field(default_factory=dict)
+    evidenceRefs: list[dict[str, Any]] = Field(default_factory=list, max_length=24)
+    nextActions: list[str] = Field(default_factory=list, max_length=12)
+    recordedByAgent: str = Field("", max_length=160)
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class ResearchStageRoundStartPayload(BaseModel):
@@ -568,6 +587,50 @@ def team_workflow_source_collection_agent_session_context(team_id: str, run_id: 
             exc,
             status_code=422,
             fields={"runId": run_id, "agentId": payload.agentId, "stageId": payload.stageId, "agentRole": payload.agentRole},
+        )
+
+
+@router.post("/teams/{team_id}/workflow-orchestration/source-collection-runs/{run_id}/stage-session-tasks", status_code=status.HTTP_201_CREATED)
+def team_workflow_source_collection_stage_session_task_start(team_id: str, run_id: str, payload: SourceCollectionStageSessionTaskPayload) -> dict:
+    try:
+        return start_source_collection_stage_session_task(team_id, run_id, payload.model_dump())
+    except TeamNotFoundError as exc:
+        _raise_team_workflow_route_error(
+            "source_collection_stage_session_task.start",
+            team_id,
+            exc,
+            status_code=404,
+            fields={"runId": run_id, "agentId": payload.agentId, "stageId": payload.stageId},
+        )
+    except (TeamServiceError, TeamWorkflowOrchestrationError) as exc:
+        _raise_team_workflow_route_error(
+            "source_collection_stage_session_task.start",
+            team_id,
+            exc,
+            status_code=422,
+            fields={"runId": run_id, "agentId": payload.agentId, "stageId": payload.stageId, "agentRole": payload.agentRole},
+        )
+
+
+@router.post("/teams/{team_id}/workflow-orchestration/stage-session-tasks/{task_id}/writeback", status_code=status.HTTP_201_CREATED)
+def team_workflow_source_collection_stage_session_task_writeback(team_id: str, task_id: str, payload: SourceCollectionStageSessionTaskWritebackPayload) -> dict:
+    try:
+        return writeback_source_collection_stage_session_task(team_id, task_id, payload.model_dump())
+    except TeamNotFoundError as exc:
+        _raise_team_workflow_route_error(
+            "source_collection_stage_session_task.writeback",
+            team_id,
+            exc,
+            status_code=404,
+            fields={"taskId": task_id},
+        )
+    except (TeamServiceError, TeamWorkflowOrchestrationError) as exc:
+        _raise_team_workflow_route_error(
+            "source_collection_stage_session_task.writeback",
+            team_id,
+            exc,
+            status_code=422,
+            fields={"taskId": task_id, "status": payload.status},
         )
 
 
