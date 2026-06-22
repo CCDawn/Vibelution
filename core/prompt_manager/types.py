@@ -56,6 +56,7 @@ class SectionRenderResult:
     content: Optional[str]
     is_empty: bool
     source: Optional[str] = None
+    duration_ms: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -65,6 +66,7 @@ class PromptBuildResult:
     prompt: SystemPrompt
     section_results: tuple[SectionRenderResult, ...]
     available_sections_text: str = ""
+    join_duration_ms: float = 0.0
 
 
 @dataclass
