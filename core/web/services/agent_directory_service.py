@@ -4319,6 +4319,7 @@ def _knowledge_steward_tool_policy() -> dict[str, Any]:
             **default_tool_policy(KNOWLEDGE_STEWARD_TOOL_POLICY_ID),
             "allowedTools": [
                 "agent_message_tool",
+                "skill_library_search_tool",
                 "unified_memory_search_tool",
                 "knowledge_proposal_tool",
                 "knowledge_ingestion_tool",
@@ -4335,6 +4336,7 @@ def _knowledge_steward_tool_policy() -> dict[str, Any]:
                 "knowledge_governance_plan_tool",
                 "knowledge_steward_workbench_tool",
                 "knowledge_steward_recommendations_tool",
+                "skill_library_search_tool",
                 "unified_memory_search_tool",
                 "knowledge_rating_suggestion_tool",
             ],
