@@ -3426,7 +3426,7 @@ class TestToolMessageFlow:
             return SimpleNamespace(returncode=0)
 
         monkeypatch.setattr("tools.agent_tools.subprocess.Popen", CancellablePopen)
-        monkeypatch.setattr("tools.agent_tools.os.name", "nt")
+        monkeypatch.setattr("tools.agent_tools._is_windows_platform", lambda: True)
         monkeypatch.setattr("tools.agent_tools.subprocess.run", fake_run)
         monkeypatch.setattr("tools.agent_tools.subprocess.CREATE_NEW_PROCESS_GROUP", 0x00000200, raising=False)
         monkeypatch.setattr("tools.agent_tools.subprocess.CREATE_NO_WINDOW", 0x08000000, raising=False)

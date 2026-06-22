@@ -46,10 +46,14 @@ def _emit_stream_event(stream: str, text: str) -> None:
         return
 
 
+def _is_windows_platform() -> bool:
+    return os.name == "nt"
+
+
 def _subagent_process_group_kwargs() -> Dict[str, Any]:
     """Start subagents in a killable process group where the platform supports it."""
 
-    if os.name == "nt":
+    if _is_windows_platform():
         flags = int(getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)) | int(
             getattr(subprocess, "CREATE_NO_WINDOW", 0)
         )
@@ -66,7 +70,7 @@ def _terminate_process_tree(process: subprocess.Popen) -> None:
     """Best-effort termination for the subagent and anything it spawned."""
 
     pid = getattr(process, "pid", None)
-    if os.name == "nt" and pid:
+    if _is_windows_platform() and pid:
         try:
             result = subprocess.run(
                 ["taskkill", "/PID", str(pid), "/T", "/F"],
