@@ -63,7 +63,6 @@ import {
   RuntimeSummary,
   SessionChatReviewCandidateResponse,
   SessionCacheCompositionSegment,
-  SessionContextCompositionSegment,
   ChatNextStateSignalSummary,
   SessionDeleteResponse,
   SessionGuidanceMode,
@@ -4536,33 +4535,6 @@ export function ChatCodingRoute() {
   const sessionsErrorMessage = sessionsQuery.isError
     ? describeError(sessionsQuery.error, t("loadFailed"))
     : "";
-  const contextCompositionSegments = useMemo(() => {
-    const segments = lastContextComposition?.segments ?? [];
-    return segments.filter((segment: SessionContextCompositionSegment) => (segment.tokens ?? 0) > 0 || (segment.chars ?? 0) > 0 || (segment.itemCount ?? 0) > 0);
-  }, [lastContextComposition]);
-  const contextCompositionTotalTokens = Math.max(
-    lastContextComposition?.totalTokens ?? 0,
-    contextCompositionSegments.reduce((total, segment) => total + Math.max(0, segment.tokens ?? 0), 0),
-  );
-  const contextCompositionLimitTokens = Math.max(
-    lastContextComposition?.limitTokens ?? 0,
-    contextCompositionTotalTokens,
-  );
-  const contextCompositionUsedPercent = contextCompositionLimitTokens > 0
-    ? Math.round(Math.min(1, contextCompositionTotalTokens / contextCompositionLimitTokens) * 100)
-    : 0;
-  const contextCompositionSummary = lastContextComposition
-    ? `${numberFormatter.format(contextCompositionTotalTokens)} / ${numberFormatter.format(contextCompositionLimitTokens)} · ${contextCompositionUsedPercent}%`
-    : t("noPreviousContextComposition");
-  const contextCompositionTitle = lastContextComposition
-    ? [
-      `${t("previousContextComposition")} ${numberFormatter.format(contextCompositionTotalTokens)} / ${numberFormatter.format(contextCompositionLimitTokens)} tokens`,
-      `${contextCompositionUsedPercent}%`,
-      `${numberFormatter.format(lastContextComposition.totalChars ?? 0)} chars`,
-      lastContextComposition.recordedAt ? formatTime(lastContextComposition.recordedAt) : "",
-      lastContextComposition.source || "",
-    ].filter(Boolean).join(" · ")
-    : t("noPreviousContextComposition");
   const activeSkillTitle = activeSkillContract && (activeSkillName || activeSkillCommand)
     ? [
       lang === "zh" ? "当前 Skill Contract" : "Active Skill Contract",
@@ -4577,7 +4549,7 @@ export function ChatCodingRoute() {
       activeSkillContract.skillPath || "",
     ].filter(Boolean).join(" · ")
     : "";
-  const providerCacheInputTokens = Math.max(0, lastCacheComposition?.inputTokens ?? lastCacheComposition?.calibratedInputTokens ?? 0);
+  const providerCacheInputTokens = Math.max(0, lastCacheComposition?.calibratedInputTokens ?? lastCacheComposition?.inputTokens ?? 0);
   const providerCachedInputTokens = Math.max(
     0,
     Math.min(
@@ -4914,14 +4886,6 @@ export function ChatCodingRoute() {
   const panelContextUsed = lastContextComposition?.totalTokens ?? sessionContextUsage?.used ?? 0;
   const panelContextLimit = lastContextComposition?.limitTokens ?? sessionContextUsage?.limit ?? 0;
   const contextPercent = contextUsagePercent(panelContextUsed, panelContextLimit);
-  const contextUsageLabel = formatContextUsage(panelContextUsed, panelContextLimit, locale);
-  const contextSourceLine = lastContextComposition
-    ? t("previousContextComposition")
-    : sessionContextUsage
-      ? t("sessionContextEstimate")
-      : sessionDetailLoadingForActiveSession
-        ? t("loadingContext")
-        : t("sessionContextEstimate");
   const petVitals = useMemo(
     () => [
       { key: "hunger", label: t("hunger"), value: clampPercent(pet?.hunger ?? 0) },
@@ -4958,16 +4922,6 @@ export function ChatCodingRoute() {
     talkTitle: lang === "zh" ? "和宠物沟通并刷新状态" : "Talk and refresh pet state",
     careTitle: lang === "zh" ? "照看宠物并刷新状态" : "Care and refresh pet state",
   };
-  const contextStatusLine = sessionDetailErrorState.blockingError
-    ? sessionDetailErrorMessage
-    : detail
-      ? contextUsageLabel
-      : t("loadingContext");
-  const contextUsageMetaLine = sessionContextUsage
-    ? `${numberFormatter.format(sessionContextUsage.messageCount)} ${lang === "zh" ? "条消息" : "messages"} · ${numberFormatter.format(sessionContextUsage.userMessageCount)} ${lang === "zh" ? "用户" : "user"} / ${numberFormatter.format(sessionContextUsage.assistantMessageCount)} Agent`
-    : lastContextComposition
-      ? `${numberFormatter.format(lastContextComposition.totalChars ?? 0)} chars · ${lastContextComposition.source || "session_detail"}`
-      : t("loadingContext");
   const sessionCacheUsage = detail?.cacheUsage;
   const sessionLlmUsage = detail?.llmUsage ?? null;
   const hasProviderLlmUsage = sessionLlmUsage?.source === "provider_usage";
@@ -5025,6 +4979,66 @@ export function ChatCodingRoute() {
   const compressionTitleLine = compression
     ? `${compressionMainLine} · ${compressionScopeLine} · ${t("compressionLimitBasisEffective")} · window ${numberFormatter.format(compression.contextWindowLimit)} · source ${compression.source || "runtime_state"}`
     : t("loadingContext");
+  const modelInputAvailable =
+    lastCacheComposition?.calibratedInputTokens != null
+    || (hasProviderLlmUsage && sessionLlmUsage.inputTokens != null)
+    || lastCacheComposition?.inputTokens != null
+    || (hasProviderCacheUsage && sessionCacheUsage?.turnInputTokens != null);
+  const modelInputTokens = Math.max(
+    0,
+    lastCacheComposition?.calibratedInputTokens
+      ?? (hasProviderLlmUsage ? sessionLlmUsage.inputTokens : undefined)
+      ?? lastCacheComposition?.inputTokens
+      ?? (hasProviderCacheUsage ? sessionCacheUsage?.turnInputTokens : undefined)
+      ?? 0,
+  );
+  const modelCachedInputTokens = Math.max(
+    0,
+    Math.min(
+      lastCacheComposition?.calibratedCachedInputTokens
+        ?? (hasProviderLlmUsage ? sessionLlmUsage.cachedInputTokens : undefined)
+        ?? lastCacheComposition?.cachedInputTokens
+        ?? (hasProviderCacheUsage ? sessionCacheUsage?.turnCachedInputTokens : undefined)
+        ?? 0,
+      modelInputTokens,
+    ),
+  );
+  const modelInputLimitTokens = Math.max(
+    0,
+    compression?.effectiveTokenLimit
+      ?? compression?.contextWindowLimit
+      ?? sessionContextUsage?.limit
+      ?? lastContextComposition?.limitTokens
+      ?? 0,
+  );
+  const modelInputPercent = modelInputLimitTokens > 0
+    ? Math.round(Math.min(1, modelInputTokens / modelInputLimitTokens) * 100)
+    : 0;
+  const modelInputSourceLine = modelInputAvailable
+    ? lastCacheComposition?.calibratedInputTokens != null
+      ? (lang === "zh" ? "厂商校准输入" : "provider-calibrated input")
+      : hasProviderLlmUsage
+        ? (lang === "zh" ? "厂商 usage 输入" : "provider usage input")
+        : lastCacheComposition?.inputTokens != null
+          ? (lang === "zh" ? "缓存观测输入" : "cache-observed input")
+          : (lang === "zh" ? "厂商 cache usage 输入" : "provider cache usage input")
+    : llmUsageNotCalled
+      ? t("llmUsageNotCalled")
+      : t("llmUsageMissing");
+  const modelInputMetaLine = modelInputAvailable
+    ? modelInputLimitTokens > 0
+      ? `${numberFormatter.format(modelInputTokens)} / ${numberFormatter.format(modelInputLimitTokens)} · ${modelInputPercent}%`
+      : `${numberFormatter.format(modelInputTokens)} tokens`
+    : modelInputSourceLine;
+  const modelInputTitle = [
+    lang === "zh"
+      ? `模型输入 ${numberFormatter.format(modelInputTokens)}`
+      : `Model input ${numberFormatter.format(modelInputTokens)}`,
+    modelInputLimitTokens > 0 ? `${lang === "zh" ? "窗口" : "window"} ${numberFormatter.format(modelInputLimitTokens)} · ${modelInputPercent}%` : "",
+    `${lang === "zh" ? "缓存输入" : "cached input"} ${numberFormatter.format(modelCachedInputTokens)}`,
+    modelInputSourceLine,
+    llmUsageTitle,
+  ].filter(Boolean).join("\n");
   const lastCompression = compression?.lastCompression ?? null;
   const lastCompressionSourceText = (() => {
     if (!lastCompression) {
@@ -5151,12 +5165,6 @@ export function ChatCodingRoute() {
     llmUsageLine,
     llmUsageTitle,
   ].filter(Boolean).join("\n");
-  const tokenStatusContextTitle = [
-    contextCompositionTitle,
-    contextCompositionSummary,
-    contextStatusLine,
-    contextSourceLine,
-  ].filter(Boolean).join("\n");
   const tokenStatusCompressionTitle = [
     compressionTitleLine,
     compressionThresholdValue,
@@ -5167,13 +5175,13 @@ export function ChatCodingRoute() {
     compressionUpdatedLine ? `${lang === "zh" ? "更新" : "updated"} ${compressionUpdatedLine}` : "",
   ].filter(Boolean).join("\n");
   const tokenStatusMetrics: Array<{
-    key: "cache" | "context" | "compression";
+    key: "cache" | "modelInput" | "compression";
     label: string;
     value: string;
     meta: string;
     title: string;
     percent: number;
-    tone: "cache" | "context" | "compression";
+    tone: "cache" | "modelInput" | "compression";
   }> = [
     {
       key: "cache",
@@ -5187,15 +5195,13 @@ export function ChatCodingRoute() {
       tone: "cache",
     },
     {
-      key: "context",
-      label: lang === "zh" ? "本轮上下文" : "Current context",
-      value: lastContextComposition ? `${contextCompositionUsedPercent}%` : "--",
-      meta: lastContextComposition
-        ? `${numberFormatter.format(contextCompositionTotalTokens)} / ${numberFormatter.format(contextCompositionLimitTokens)}`
-        : t("loadingContext"),
-      title: tokenStatusContextTitle,
-      percent: clampPercent(contextCompositionUsedPercent),
-      tone: "context",
+      key: "modelInput",
+      label: lang === "zh" ? "模型输入" : "Model input",
+      value: modelInputAvailable ? numberFormatter.format(modelInputTokens) : "--",
+      meta: modelInputMetaLine,
+      title: modelInputTitle,
+      percent: clampPercent(modelInputPercent),
+      tone: "modelInput",
     },
     {
       key: "compression",

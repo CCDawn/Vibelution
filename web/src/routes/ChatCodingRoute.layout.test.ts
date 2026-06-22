@@ -234,7 +234,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.tokenStatusMetric).toBeTypeOf("string");
     expect(routeStyles.tokenStatusMetricButton).toBeTypeOf("string");
     expect(routeStyles.tokenStatusMetric_cache).toBeTypeOf("string");
-    expect(routeStyles.tokenStatusMetric_context).toBeTypeOf("string");
+    expect(routeStyles.tokenStatusMetric_modelInput).toBeTypeOf("string");
     expect(routeStyles.tokenStatusMetric_compression).toBeTypeOf("string");
     expect(routeStyles.tokenStatusRing).toBeTypeOf("string");
     expect(routeStyles.tokenStatusRingCore).toBeTypeOf("string");
@@ -353,23 +353,26 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).not.toContain("key: \"llm\"");
     expect(routeSource).not.toContain("key: \"output\"");
     expect(routeSource).toContain("key: \"cache\"");
-    expect(routeSource).toContain("key: \"context\"");
+    expect(routeSource).toContain("key: \"modelInput\"");
     expect(routeSource).toContain("key: \"compression\"");
     expect(routeSource).not.toContain("key: \"strategy\"");
     expect(routeSource).toContain("t(\"previousCacheHit\")");
-    expect(routeSource).toContain("label: lang === \"zh\" ? \"本轮上下文\" : \"Current context\"");
+    expect(routeSource).toContain("label: lang === \"zh\" ? \"模型输入\" : \"Model input\"");
+    expect(routeSource).not.toContain("label: lang === \"zh\" ? \"本轮上下文\" : \"Current context\"");
     expect(routeSource).toContain("label: lang === \"zh\" ? \"压缩状态\" : \"Compression\"");
     expect(routeSource).toContain("const tokenStatusCacheTitle = [");
-    expect(routeSource).toContain("const tokenStatusContextTitle = [");
+    expect(routeSource).not.toContain("const tokenStatusContextTitle = [");
     expect(routeSource).toContain("const tokenStatusCompressionTitle = [");
     expect(routeSource).toContain("title={metric.title}");
     expect(routeSource).toContain("\"--token-status-value\": metric.percent");
     expect(routeSource).toContain("cacheDetailOpenLabel");
     expect(routeSource).toContain("onClick={openCacheDetail}");
     expect(routeSource).toContain("aria-disabled={!cacheDetailAvailable}");
-    expect(routeSource).toContain("const contextCompositionLimitTokens = Math.max(");
-    expect(routeSource).toContain("contextCompositionUsedPercent");
-    expect(routeSource).toContain("contextCompositionSummary");
+    expect(routeSource).toContain("const modelInputTokens = Math.max(");
+    expect(routeSource).toContain("lastCacheComposition?.calibratedInputTokens");
+    expect(routeSource).toContain("hasProviderLlmUsage ? sessionLlmUsage.inputTokens : undefined");
+    expect(routeSource).toContain("modelInputMetaLine");
+    expect(routeSource).toContain("modelInputTitle");
     expect(routeSource).toContain("compressionThresholdValue");
     expect(routeSource).toContain("compressionThresholdMeta");
     expect(routeSource).toContain("tokenCompressionStrategyTitle");
@@ -448,7 +451,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.tokenStatusMetric).toBeTypeOf("string");
     expect(routeStyles.tokenStatusMetricButton).toBeTypeOf("string");
     expect(routeStyles.tokenStatusMetric_cache).toBeTypeOf("string");
-    expect(routeStyles.tokenStatusMetric_context).toBeTypeOf("string");
+    expect(routeStyles.tokenStatusMetric_modelInput).toBeTypeOf("string");
     expect(routeStyles.tokenStatusMetric_compression).toBeTypeOf("string");
     expect(routeStyles.tokenStatusRing).toBeTypeOf("string");
     expect(routeStyles.tokenStatusRingCore).toBeTypeOf("string");
@@ -578,11 +581,11 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("numberFormatter.format(sessionLlmUsage.outputTokens)");
     expect(routeSource).toContain("t(\"llmUsageNotCalled\")");
     expect(routeSource).toContain("t(\"llmUsageMissing\")");
-    expect(routeSource).toContain("contextStatusLine");
+    expect(routeSource).toContain("modelInputTitle");
   });
 
   it("labels runtime compression as a separate estimate from session message history", () => {
-    expect(routeSource).toContain("const contextSourceLine = lastContextComposition");
+    expect(routeSource).not.toContain("const contextSourceLine = lastContextComposition");
     expect(routeSource).toContain("t(\"compressionScopeRuntime\")");
     expect(routeSource).toContain("t(\"compressionLimitBasisEffective\")");
     expect(routeSource).toContain("const compressionModelWindowLine = compression");
