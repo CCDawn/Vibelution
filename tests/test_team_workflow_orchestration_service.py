@@ -661,6 +661,54 @@ def test_start_source_collection_run_accepts_traceable_query_seed_contract(tmp_p
     assert response["assignments"][1]["acceptance"]["resultWritebackContract"]["officialGraphWrites"] is False
 
 
+def test_seed_source_collection_agent_session_context_writes_and_dedupes_direct_session(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
+    discovery = agent_directory_service.create_agent_instance(display_name="资料发现")
+    direct_session = session_service.ensure_agent_direct_session(agent_id=discovery["agentId"], title="资料发现")
+    team = team_service.create_team(
+        name="挑战杯科研团队",
+        members=[{"agentId": discovery["agentId"], "role": "data_discovery", "agentName": "资料发现"}],
+    )
+
+    run_response = team_workflow_orchestration_service.start_source_collection_run(
+        team["teamId"],
+        {
+            "topic": "脑启发路由",
+            "goal": "搜集神经机制启发算法资料",
+            "agentRoles": ["data_discovery"],
+            "agentIds": {"data_discovery": discovery["agentId"]},
+            "querySeeds": ["brain-inspired routing"],
+            "promptCachePolicy": {"requirement": "disabled"},
+        },
+    )
+
+    first = team_workflow_orchestration_service.seed_source_collection_agent_session_context(
+        team["teamId"],
+        run_response["run"]["runId"],
+        {"stageId": "collection", "agentId": discovery["agentId"], "agentRole": "data_discovery"},
+    )
+    second = team_workflow_orchestration_service.seed_source_collection_agent_session_context(
+        team["teamId"],
+        run_response["run"]["runId"],
+        {"stageId": "collection", "agentId": discovery["agentId"], "agentRole": "data_discovery"},
+    )
+
+    assert first["created"] is True
+    assert first["sessionId"] == direct_session["id"]
+    assert first["message"]["metadata"]["kind"] == "source_collection_agent_context"
+    assert first["message"]["metadata"]["sourceCollectionContextKey"] == first["contextKey"]
+    assert "脑启发路由" in first["message"]["content"]
+    assert second["created"] is False
+    assert second["alreadyPresent"] is True
+    detail = session_service.get_session_detail(direct_session["id"])
+    context_messages = [
+        message for message in detail["messages"]
+        if message.get("metadata", {}).get("kind") == "source_collection_agent_context"
+    ]
+    assert len(context_messages) == 1
+
+
 def test_execute_source_collection_search_writes_records_and_imports_candidates(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     monkeypatch.setattr(team_workflow_orchestration_service, "_execute_source_collection_query", _fake_source_search_response)
