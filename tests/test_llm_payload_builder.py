@@ -166,6 +166,49 @@ def test_payload_protocol_error_includes_safe_message_snapshot():
     assert details["payloadMessageShapeTail"][-1]["role"] == "tool"
 
 
+def test_failed_parallel_tool_results_remain_paired_context():
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "openai_compatible",
+            "llm.providers.default.api_key": "test-key",
+            "llm.providers.default.base_url": "https://example.test/v1",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "gpt-4o",
+            "llm.profiles.primary.contract": "tool_chat",
+        }
+    )
+    client = LLMClient(config=config, backend=lambda payload: payload)
+    same_failure = (
+        "[错误] 本地 AutoGLM token 服务不可用\n"
+        "依赖: autoglm_token_service\n"
+        "阶段: token_fetch\n"
+        "状态: unavailable"
+    )
+
+    payload = client._build_payload(
+        [
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {"id": "call_search_a", "name": "web_search_tool", "args": {"query": "predictive coding"}},
+                    {"id": "call_search_b", "name": "web_search_tool", "args": {"query": "free energy principle"}},
+                ],
+            ),
+            ToolMessage(content=same_failure, tool_call_id="call_search_a"),
+            ToolMessage(content=same_failure, tool_call_id="call_search_b"),
+        ]
+    )
+
+    messages = payload["messages"]
+    assert [item["role"] for item in messages] == ["assistant", "tool", "tool"]
+    assert [item["tool_call_id"] for item in messages[1:]] == ["call_search_a", "call_search_b"]
+    summary = client._last_payload_protocol_summary
+    assert summary["payloadMessageAssistantToolCallCount"] == 2
+    assert summary["payloadMessageToolResultCount"] == 2
+    assert summary["payloadMessagePairedToolResultCount"] == 2
+    assert summary["payloadMessageMissingToolResultCount"] == 0
+
+
 def test_basic_chat_no_tools_blocks_tool_payload_before_provider():
     config = make_config(
         **{
