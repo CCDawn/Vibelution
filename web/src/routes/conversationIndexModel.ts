@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 
-import type { ConversationSummary, SessionSummary, Team } from "../api/types";
+import type { AgentInstance, ConversationSummary, SessionSummary, Team } from "../api/types";
 import { isChildSession, sessionListTitle } from "./DirectSessionIndexItem";
 
 export type ConversationIndexGroupKey =
@@ -29,13 +29,13 @@ export type ConversationIndexTeam = Team & {
 export const DEFAULT_COLLAPSED_CONVERSATION_GROUPS: Record<ConversationIndexGroupKey, boolean> = {
   user: false,
   group: false,
-  research: true,
-  selfEvolution: true,
-  supervisedEvolution: true,
+  research: false,
+  selfEvolution: false,
+  supervisedEvolution: false,
   teams: false,
   setupTeams: true,
   standaloneGroups: true,
-  other: true,
+  other: false,
 };
 
 export const CONVERSATION_GROUP_ORDER: ConversationIndexGroupKey[] = [
@@ -172,6 +172,42 @@ export function sessionToConversationSummary(session: SessionSummary): Conversat
   };
 }
 
+export function isVisibleConversationAgent(agent: AgentInstance | undefined | null) {
+  if (!agent) {
+    return false;
+  }
+  return (
+    String(agent.kind ?? "").trim() === "persistent"
+    && String(agent.status ?? "").trim().toLowerCase() !== "archived"
+    && Boolean(String(agent.directSessionId ?? "").trim())
+  );
+}
+
+export function agentToConversationSummary(agent: AgentInstance): ConversationSummary {
+  const directSessionId = String(agent.directSessionId ?? "").trim();
+  return {
+    conversationId: directSessionId || agent.agentId,
+    type: "direct_agent",
+    title: agent.displayName || agent.agentCode || agent.agentId,
+    agentId: agent.agentId,
+    agentCode: agent.agentCode,
+    agentDisplayName: agent.displayName,
+    agentAvatarImagePath: agent.avatarImagePath,
+    agentAvatarImageUrl: agent.avatarImageUrl,
+    directSessionId,
+    roomId: "",
+    status: agent.status || "idle",
+    summary: "",
+    updatedAt: agent.updatedAt || agent.createdAt || "",
+    workspacePath: agent.workspacePath || "",
+    agentPrimaryMode: agent.primaryMode,
+    agentRoleKey: agent.roleKey,
+    agentPromptTemplateId: agent.promptTemplateId,
+    dialogueModelId: agent.llmBindings?.dialogue?.modelId,
+    agentInboxPendingCount: agent.agentInboxPendingCount,
+  };
+}
+
 export function isVisibleDirectSession(session: SessionSummary | undefined | null) {
   if (!session) {
     return false;
@@ -247,6 +283,43 @@ export function mergeVisibleSessionsIntoConversations(
   );
 }
 
+export function mergeVisibleAgentsIntoConversations(
+  conversations: ConversationSummary[],
+  agents: AgentInstance[] | undefined,
+): ConversationSummary[] {
+  const merged = [...conversations];
+  const knownSessionIds = new Set(
+    merged
+      .filter((conversation) => conversation.type === "direct_agent")
+      .flatMap((conversation) => [conversation.directSessionId, conversation.conversationId])
+      .filter((value): value is string => Boolean(value)),
+  );
+  const knownAgentIds = new Set(
+    merged
+      .filter((conversation) => conversation.type === "direct_agent")
+      .map((conversation) => String(conversation.agentId ?? "").trim())
+      .filter(Boolean),
+  );
+  (agents ?? []).forEach((agent) => {
+    if (!isVisibleConversationAgent(agent)) {
+      return;
+    }
+    const directSessionId = String(agent.directSessionId ?? "").trim();
+    const agentId = String(agent.agentId ?? "").trim();
+    if (knownSessionIds.has(directSessionId) || (agentId && knownAgentIds.has(agentId))) {
+      return;
+    }
+    merged.push(agentToConversationSummary(agent));
+    knownSessionIds.add(directSessionId);
+    if (agentId) {
+      knownAgentIds.add(agentId);
+    }
+  });
+  return merged.sort((left, right) =>
+    String(right.updatedAt || "").localeCompare(String(left.updatedAt || "")),
+  );
+}
+
 export function classifyConversation(conversation: ConversationSummary): ConversationIndexGroupKey {
   if (conversation.type === "group_room") {
     return "group";
@@ -297,6 +370,7 @@ export function conversationGroupLabel(groupKey: ConversationIndexGroupKey, lang
 }
 
 type BuildConversationIndexModelOptions = {
+  agents?: AgentInstance[];
   conversations: ConversationSummary[] | undefined;
   lang: "zh" | "en";
   linkedTeamRoomIds: Set<string>;
@@ -308,6 +382,7 @@ type BuildConversationIndexModelOptions = {
 };
 
 export function buildConversationIndexModel({
+  agents = [],
   conversations,
   lang,
   linkedTeamRoomIds,
@@ -319,7 +394,10 @@ export function buildConversationIndexModel({
 }: BuildConversationIndexModelOptions) {
   const term = sessionFilter.trim().toLowerCase();
   const rawSessionsById = new Map((rawSessions ?? []).map((session) => [session.id, session]));
-  const mergedConversations = mergeVisibleSessionsIntoConversations(conversations, rightIndexSessions);
+  const mergedConversations = mergeVisibleAgentsIntoConversations(
+    mergeVisibleSessionsIntoConversations(conversations, rightIndexSessions),
+    agents,
+  );
   const visibleConversations = mergedConversations
     .filter((conversation) => conversation.type !== "group_room")
     .filter((conversation) => {
@@ -426,6 +504,7 @@ export function useConversationIndexModel(options: BuildConversationIndexModelOp
     () => buildConversationIndexModel(options),
     [
       options.conversations,
+      options.agents,
       options.lang,
       options.linkedTeamRoomIds,
       options.rawSessions,

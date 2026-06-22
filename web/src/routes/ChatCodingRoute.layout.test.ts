@@ -1018,7 +1018,7 @@ describe("ChatCodingRoute layout contract", () => {
   it("defers secondary chat dashboard queries until the shell is ready", () => {
     expect(routeSource).toContain("const secondaryChatDataEnabled = chatStartupDataReady");
     expect(routeSource).toContain("enabled: secondaryChatDataEnabled");
-    expect(routeSource).toContain("enabled: groupComposerOpen || legacyGroupRoomActive || Boolean(activeSessionId && secondaryChatDataEnabled)");
+    expect(routeSource).toContain("enabled: secondaryChatDataEnabled || groupComposerOpen || legacyGroupRoomActive || Boolean(activeSessionId)");
     expect(routeSource).not.toContain("enabled: groupComposerOpen || Boolean(activeSessionId)");
   });
 
@@ -1382,7 +1382,10 @@ describe("ChatCodingRoute layout contract", () => {
     expect(conversationIndexModelSource).toContain("CONVERSATION_GROUP_ORDER");
     expect(conversationIndexModelSource).toContain("classifyConversation");
     expect(conversationIndexModelSource).toContain("conversationGroupLabel");
+    expect(conversationIndexModelSource).toContain("agentToConversationSummary");
+    expect(conversationIndexModelSource).toContain("mergeVisibleAgentsIntoConversations");
     expect(routeSource).toContain("useConversationIndexModel");
+    expect(routeSource).toContain("agents: agentsQuery.data");
     expect(conversationIndexTreeSource).toContain("groupedConversations.map");
     expect(routeSource).toContain("toggleConversationGroup");
     expect(routeSource).toContain("ConversationIndexTree");
