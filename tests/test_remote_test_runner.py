@@ -11,6 +11,9 @@ def make_config(**overrides):
         "remote_root": "/home/enrigin/Vibelution-test",
         "workers": 8,
         "suite": "parallel",
+        "backend": "venv",
+        "docker_image": "vibelution-test",
+        "rebuild_image": False,
         "remote_command": None,
         "no_install": False,
         "dry_run": True,
@@ -58,6 +61,10 @@ def test_custom_remote_command_overrides_suite():
 def test_remote_script_prepares_venv_and_captures_log():
     script = remote_test_runner.build_remote_script(make_config(), "20260621T000000Z")
 
+    assert "backend=venv" in script
+    assert 'cat > "$REMOTE_SOURCE/.remote-test/config.toml"' in script
+    assert 'profile = "safe_remote"' in script
+    assert 'export VIBELUTION_CONFIG_PATH="$REMOTE_SOURCE/.remote-test/config.toml"' in script
     assert 'VENV="$CACHE_ROOT/venv-py${PY_VERSION}"' in script
     assert 'python3 -m venv "$VENV"' in script
     assert 'exec > >(tee "$REMOTE_ARTIFACTS/remote-test.log") 2>&1' in script
@@ -70,6 +77,30 @@ def test_no_install_skips_pip_steps():
     script = remote_test_runner.build_remote_script(make_config(no_install=True), "run-1")
 
     assert "pip install" not in script
+
+
+def test_remote_script_can_run_inside_docker_backend():
+    script = remote_test_runner.build_remote_script(make_config(backend="docker"), "20260621T000000Z")
+
+    assert "backend=docker" in script
+    assert "command -v docker" in script
+    assert 'DOCKER_IMAGE="${DOCKER_IMAGE_BASE}:py${PY_VERSION}-${REQ_HASH}"' in script
+    assert 'DOCKER_BUILD_CONTEXT="$CACHE_ROOT/docker-build/py${PY_VERSION}-${REQ_HASH}"' in script
+    assert 'cp requirements.txt "$DOCKER_BUILD_CONTEXT/requirements.txt"' in script
+    assert 'docker build -t "$DOCKER_IMAGE" -f "$DOCKERFILE" "$DOCKER_BUILD_CONTEXT"' in script
+    assert 'docker build -t "$DOCKER_IMAGE" -f "$DOCKERFILE" "$REMOTE_SOURCE"' not in script
+    assert "docker run --rm" in script
+    assert "-e NO_PROXY=localhost,127.0.0.1" in script
+    assert "-e COLUMNS=120" in script
+    assert "-e VIBELUTION_CONFIG_PATH=/workspace/.remote-test/config.toml" in script
+    assert "-v \"$REMOTE_SOURCE:/workspace\"" in script
+    assert "python tests/test_runner.py --parallel --workers 8" in script
+
+
+def test_remote_script_can_force_docker_image_rebuild():
+    script = remote_test_runner.build_remote_script(make_config(backend="docker", rebuild_image=True), "run-1")
+
+    assert "REBUILD_IMAGE=1" in script
 
 
 def test_dry_run_prints_commands_without_executing(tmp_path, monkeypatch):
