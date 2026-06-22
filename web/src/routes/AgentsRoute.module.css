@@ -1104,8 +1104,7 @@
   background: var(--surface-card);
 }
 
-.healthGuidePanel,
-.configGuidePanel {
+.healthGuidePanel {
   display: grid;
   gap: 7px;
   min-width: 0;
@@ -1163,58 +1162,6 @@
 .healthGuide_blocking {
   border-color: color-mix(in srgb, var(--state-error) 28%, transparent);
   background: color-mix(in srgb, var(--state-error) 7%, var(--surface-panel));
-}
-
-.configGuidePanel {
-  background: color-mix(in srgb, var(--surface-panel) 72%, transparent);
-}
-
-.configGuideHeader {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-  color: var(--fg-primary);
-  font-size: 0.78rem;
-}
-
-.configGuideGrid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 6px;
-  min-width: 0;
-}
-
-.configGuideGrid span {
-  display: grid;
-  gap: 2px;
-  min-width: 0;
-  padding: 6px 7px;
-  border: 1px solid var(--border-soft);
-  border-radius: var(--radius-control);
-  background: var(--surface-card);
-}
-
-.configGuideGrid strong,
-.configGuideGrid small {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.configGuideGrid strong {
-  color: var(--fg-primary);
-  font-size: 0.74rem;
-  white-space: nowrap;
-}
-
-.configGuideGrid small {
-  display: -webkit-box;
-  color: var(--fg-tertiary);
-  font-size: 0.68rem;
-  line-height: 1.3;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
 }
 
 .createAgentPanel {
@@ -3263,7 +3210,6 @@
   .toggleGrid,
   .resetOptionGrid,
   .workspaceScopePanel,
-  .configGuideGrid,
   .toolBundleList,
   .toolBundleItem,
   .memoryPolicyGrid,
