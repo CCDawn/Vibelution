@@ -4185,6 +4185,87 @@ export type TeamWorkflowSourceCollectionAgentSessionContextPayload = {
   message: Record<string, unknown>;
 };
 
+export type TeamWorkflowSourceCollectionStageSessionTask = {
+  schemaVersion: number;
+  taskKind: "source_collection_stage_session_task" | string;
+  taskId: string;
+  idempotencyKey: string;
+  teamId: string;
+  runId: string;
+  stageId: string;
+  agentId: string;
+  agentRole: string;
+  sessionId: string;
+  status: string;
+  title: string;
+  summary: string;
+  returnTo: string;
+  returnLabel: string;
+  requestedByAgent: string;
+  recordCount: number;
+  candidateCount: number;
+  assignmentCount: number;
+  matchingAssignmentCount: number;
+  storageArtifacts: Record<string, string>;
+  writebackContract: {
+    schemaVersion: number;
+    contractKind: "source_collection_stage_session_task_writeback" | string;
+    taskId: string;
+    teamId: string;
+    runId: string;
+    stageId: string;
+    agentId: string;
+    agentRole: string;
+    endpoint: string;
+    acceptedStatuses: string[];
+    requiredFields: string[];
+    writesFormalKnowledge: boolean;
+    writesRag: boolean;
+    writesOfficialGraph: boolean;
+    resultAuthority: string;
+  };
+  writesFormalKnowledge: boolean;
+  writesRag: boolean;
+  writesOfficialGraph: boolean;
+  turn: {
+    accepted?: boolean;
+    turnId?: string;
+    status?: string;
+    acceptedAt?: string;
+  };
+  result: Record<string, unknown>;
+  writeback: Record<string, unknown>;
+  evidenceRefs?: Array<Record<string, unknown>>;
+  nextActions?: string[];
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type TeamWorkflowSourceCollectionStageSessionTaskPayload = {
+  schemaVersion: number;
+  teamId: string;
+  runId: string;
+  stageId: string;
+  agentId: string;
+  agentRole: string;
+  sessionId: string;
+  taskId: string;
+  idempotencyKey: string;
+  created: boolean;
+  alreadyPresent: boolean;
+  task: TeamWorkflowSourceCollectionStageSessionTask;
+  turn: TeamWorkflowSourceCollectionStageSessionTask["turn"];
+  chatRoute: string;
+  writebackContract: TeamWorkflowSourceCollectionStageSessionTask["writebackContract"];
+  boundaries: {
+    writesFormalKnowledge: boolean;
+    writesRag: boolean;
+    writesOfficialGraph: boolean;
+    updatesStageTaskResult: boolean;
+    requiresStructuredWriteback: boolean;
+  };
+};
+
 export type TeamWorkflowDataRecordSourceCandidateImportPayload = {
   created: boolean;
   candidate: TeamWorkflowCandidate;

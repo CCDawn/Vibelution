@@ -44,6 +44,7 @@ import {
   TeamWorkflowSourceCollectionAgentSessionContextPayload,
   TeamWorkflowSourceCollectionExtractionPayload,
   TeamWorkflowSourceCollectionRunStartPayload,
+  TeamWorkflowSourceCollectionStageSessionTaskPayload,
   TeamWorkflowDataRecordSourceCandidateImportPayload,
   TeamWorkflowCandidateListPayload,
   TeamWorkflowOrchestration,
@@ -329,7 +330,7 @@ const SOURCE_COLLECTION_STAGE_AGENT_KEYS: Record<SourceCollectionStageModuleId, 
   candidate: ["content_extraction"],
   screening: ["source_quality"],
   graph: ["candidate_graph"],
-  memory: ["candidate_graph", "knowledge_steward"],
+  memory: ["knowledge_steward", "candidate_graph"],
 };
 
 const SOURCE_COLLECTION_STAGE_CHAT_LABELS: Record<SourceCollectionStageModuleId, { zh: string; en: string }> = {
@@ -4081,6 +4082,43 @@ export function TeamsRoute({
       ),
   });
 
+  const startSourceCollectionStageSessionTaskMutation = useMutation({
+    mutationFn: (payload: {
+      teamId: string;
+      runId: string;
+      stageId: SourceCollectionStageModuleId;
+      agentId: string;
+      agentRole: string;
+      returnTo: string;
+      returnLabel: string;
+      requestedByAgent: string;
+    }) =>
+      fetchJson<TeamWorkflowSourceCollectionStageSessionTaskPayload>(
+        `/api/teams/${encodeURIComponent(payload.teamId)}/workflow-orchestration/source-collection-runs/${encodeURIComponent(payload.runId)}/stage-session-tasks`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            stageId: payload.stageId,
+            agentId: payload.agentId,
+            agentRole: payload.agentRole,
+            returnTo: payload.returnTo,
+            returnLabel: payload.returnLabel,
+            requestedByAgent: payload.requestedByAgent,
+          }),
+        },
+      ),
+    onSuccess: (payload, variables) => {
+      setSelectedSourceCollectionRunId(payload.runId);
+      void chatWorkspaceCache.afterDirectTurnAccepted(payload.sessionId);
+      void queryClient.invalidateQueries({ queryKey: researchStageRoundStatusQueryKey(variables.teamId) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflowSourceCollectionRuns(variables.teamId, SOURCE_COLLECTION_RUN_PREVIEW_LIMIT) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.dataProcessingRunStatus(payload.runId) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.dataProcessingCollectionAssignments(payload.runId) });
+      void queryClient.invalidateQueries({ queryKey: sourceCollectionRunRecordsQueryKey(payload.runId) });
+    },
+  });
+
   const startTeamRoundMutation = useMutation({
     mutationFn: (payload: { roomId: string; teamId: string; topic: string; mode: string; purpose: string }) =>
       fetchJson<ChatRoomDetail>(`/api/chat-rooms/${payload.roomId}/rounds`, {
@@ -5243,8 +5281,11 @@ export function TeamsRoute({
   }
 
   function sourceCollectionStageAgentBindings(stageId: SourceCollectionStageModuleId) {
-    const targetKeys = new Set(SOURCE_COLLECTION_STAGE_AGENT_KEYS[stageId]);
-    return (researchStageAgentBindingsByStage.knowledge_collection ?? []).filter((binding) => targetKeys.has(binding.key));
+    const targetKeys = SOURCE_COLLECTION_STAGE_AGENT_KEYS[stageId];
+    const priorityByKey = new Map(targetKeys.map((key, index) => [key, index]));
+    return (researchStageAgentBindingsByStage.knowledge_collection ?? [])
+      .filter((binding) => priorityByKey.has(binding.key))
+      .sort((left, right) => (priorityByKey.get(left.key) ?? 99) - (priorityByKey.get(right.key) ?? 99));
   }
 
   function sourceCollectionStagePrimaryAgentBinding(stageId: SourceCollectionStageModuleId) {
@@ -5289,6 +5330,57 @@ export function TeamsRoute({
     }
     if (selectedTeam?.teamId === RESEARCH_TEAM_ID && !repairChallengeCupTeamAgentsMutation.isPending) {
       repairChallengeCupTeamAgentsMutation.mutate(selectedTeam.teamId);
+    }
+  }
+
+  async function startSourceCollectionStageSessionTask(stageId: SourceCollectionStageModuleId) {
+    if (!selectedTeam?.teamId || startSourceCollectionStageSessionTaskMutation.isPending) {
+      return;
+    }
+    openSourceCollectionStage(stageId);
+    const binding = sourceCollectionStagePrimaryAgentBinding(stageId);
+    const agentId = String(binding?.agent?.agentId || binding?.agentId || "").trim();
+    const agentRole = String(binding?.key || "").trim();
+    if (!agentId || !binding?.agent?.directSessionId) {
+      if (selectedTeam.teamId === RESEARCH_TEAM_ID && !repairChallengeCupTeamAgentsMutation.isPending) {
+        repairChallengeCupTeamAgentsMutation.mutate(selectedTeam.teamId);
+      }
+      return;
+    }
+    let runId = selectedSourceCollectionRunEffectiveId;
+    if (!runId && stageId === "collection") {
+      if (!researchStageCanLaunch || selectedTeamStartResearchStagePending) {
+        return;
+      }
+      let stagePayload: ResearchStageRoundStartPayload;
+      try {
+        stagePayload = await startResearchStageRoundMutation.mutateAsync({
+          teamId: selectedTeam.teamId,
+          stageType: "knowledge_collection",
+          draft: sourceCollectionDraft,
+        });
+      } catch {
+        return;
+      }
+      runId = stagePayload.run?.runId || stagePayload.stageRound.sourceRunIds?.[0] || "";
+    }
+    if (!runId) {
+      return;
+    }
+    try {
+      const payload = await startSourceCollectionStageSessionTaskMutation.mutateAsync({
+        teamId: selectedTeam.teamId,
+        runId,
+        stageId,
+        agentId,
+        agentRole,
+        returnTo: sourceCollectionStageReturnRoute(stageId),
+        returnLabel: sourceCollectionStageChatReturnLabel(stageId),
+        requestedByAgent: sourceCollectionOwnerAgentId,
+      });
+      navigate(payload.chatRoute || researchStageAgentDirectChatRoute(binding.agent, sourceCollectionStageReturnRoute(stageId), sourceCollectionStageChatReturnLabel(stageId)));
+    } catch {
+      return;
     }
   }
 
@@ -7335,6 +7427,9 @@ export function TeamsRoute({
             {selectedTeamExecuteSourceCollectionSearchError ? (
               <div className={styles.messageError}>{selectedTeamExecuteSourceCollectionSearchError.message}</div>
             ) : null}
+            {selectedTeamStartSourceCollectionStageTaskError ? (
+              <div className={styles.messageError}>{selectedTeamStartSourceCollectionStageTaskError.message}</div>
+            ) : null}
             {selectedTeamExecuteSourceCollectionSearchResult ? (
               <div className={styles.messageResult}>
                 <strong>
@@ -7428,6 +7523,9 @@ export function TeamsRoute({
         </div>
         {repairChallengeCupTeamAgentsMutation.error instanceof Error ? (
           <div className={styles.messageError}>{repairChallengeCupTeamAgentsMutation.error.message}</div>
+        ) : null}
+        {selectedTeamStartSourceCollectionStageTaskError ? (
+          <div className={styles.messageError}>{selectedTeamStartSourceCollectionStageTaskError.message}</div>
         ) : null}
         {resultPanel}
       </section>
@@ -8815,6 +8913,14 @@ export function TeamsRoute({
       : null;
   const selectedTeamStartSourceCollectionResult =
     startSourceCollectionRunMutation.variables?.teamId === selectedTeam?.teamId ? startSourceCollectionRunMutation.data : undefined;
+  const selectedTeamStartSourceCollectionStageTaskPending =
+    startSourceCollectionStageSessionTaskMutation.isPending && startSourceCollectionStageSessionTaskMutation.variables?.teamId === selectedTeam?.teamId;
+  const selectedTeamStartSourceCollectionStageTaskError =
+    startSourceCollectionStageSessionTaskMutation.variables?.teamId === selectedTeam?.teamId && startSourceCollectionStageSessionTaskMutation.error instanceof Error
+      ? startSourceCollectionStageSessionTaskMutation.error
+      : null;
+  const sourceCollectionStageSessionTaskPendingStageId =
+    selectedTeamStartSourceCollectionStageTaskPending ? startSourceCollectionStageSessionTaskMutation.variables?.stageId : "";
   const sourceCollectionPromptCachePolicy =
     [
       selectedTeamStartSourceCollectionResult?.promptCachePolicy,
@@ -9129,11 +9235,12 @@ export function TeamsRoute({
     || selectedTeamBuildCandidateGraphError
     || selectedTeamKnowledgePrecheckError
     || selectedTeamKnowledgeCollectionIngestError
+    || selectedTeamStartSourceCollectionStageTaskError
   );
   const sourceCollectionDisplayState = deriveSourceCollectionDisplayState({
     lang,
     hasRun: Boolean(selectedSourceCollectionRun),
-    startPending: selectedTeamStartResearchStagePending || selectedTeamStartSourceCollectionPending,
+    startPending: selectedTeamStartResearchStagePending || selectedTeamStartSourceCollectionPending || selectedTeamStartSourceCollectionStageTaskPending,
     searchPending: selectedTeamExecuteSourceCollectionSearchPending,
     backgroundActive: sourceCollectionAcceptedBackgroundActive,
     recordOutputPending: selectedTeamRecordSourceCollectionOutputPending,
@@ -9452,17 +9559,25 @@ export function TeamsRoute({
           ? "pending"
           : "idle";
   const sourceCollectionCollectionActionLabel = !selectedSourceCollectionRun
-    ? (lang === "zh" ? "开始搜集" : "Start")
+    ? sourceCollectionStageSessionTaskPendingStageId === "collection"
+      ? (lang === "zh" ? "启动 Agent 中" : "Starting Agent")
+      : (lang === "zh" ? "开始搜集" : "Start")
     : selectedTeamExecuteSourceCollectionSearchPending || sourceCollectionAcceptedBackgroundActive
       ? (lang === "zh" ? "搜索中" : "Searching")
       : sourceCollectionSearchOpenAssignmentCount > 0
         ? (lang === "zh" ? "搜索下一批" : "Search next")
       : (lang === "zh" ? "新一轮搜集" : "New round");
   const sourceCollectionCollectionActionDisabled = !selectedSourceCollectionRun
-    ? selectedTeamStartResearchStagePending || !researchStageCanLaunch
+    ? selectedTeamStartResearchStagePending || selectedTeamStartSourceCollectionStageTaskPending || !researchStageCanLaunch
     : sourceCollectionSearchOpenAssignmentCount > 0
-      ? !canExecuteSourceCollectionSearch
-      : selectedTeamStartResearchStagePending || !researchStageCanLaunch;
+      ? !canExecuteSourceCollectionSearch || selectedTeamStartSourceCollectionStageTaskPending
+      : selectedTeamStartResearchStagePending || selectedTeamStartSourceCollectionStageTaskPending || !researchStageCanLaunch;
+  const sourceCollectionStageTaskActionLabel = (stageId: SourceCollectionStageModuleId, label: string) =>
+    sourceCollectionStageSessionTaskPendingStageId === stageId
+      ? (lang === "zh" ? "启动 Agent 中" : "Starting Agent")
+      : label;
+  const sourceCollectionStageTaskActionDisabled = (disabled: boolean) =>
+    disabled || selectedTeamStartSourceCollectionStageTaskPending;
   const sourceCollectionStageModules: SourceCollectionStageModule[] = [
     {
       id: "collection",
@@ -9481,11 +9596,11 @@ export function TeamsRoute({
       state: sourceCollectionSearchStepState,
       status: sourceCollectionStepStatusText(sourceCollectionSearchStepState),
       detailLabel: lang === "zh" ? "查看搜索结果" : "View search results",
-      actionLabel: sourceCollectionCollectionActionLabel,
+      actionLabel: sourceCollectionStageTaskActionLabel("collection", sourceCollectionCollectionActionLabel),
       actionDisabled: sourceCollectionCollectionActionDisabled,
       actionTone: "primary",
       actionIcon: selectedSourceCollectionRun && sourceCollectionSearchOpenAssignmentCount > 0 ? "search" : "play",
-      onAction: runSourceCollectionCollectionAction,
+      onAction: () => void startSourceCollectionStageSessionTask("collection"),
       onDetail: () => openSourceCollectionStage("collection"),
       onAgentChat: () => openSourceCollectionStageAgentChat("collection"),
     },
@@ -9502,11 +9617,11 @@ export function TeamsRoute({
       state: sourceCollectionCandidateStepState,
       status: sourceCollectionStepStatusText(sourceCollectionCandidateStepState),
       detailLabel: lang === "zh" ? "查看提炼结果" : "View extraction results",
-      actionLabel: sourceCollectionCandidateExtractionButtonText,
-      actionDisabled: sourceCollectionCandidateExtractionDisabled,
+      actionLabel: sourceCollectionStageTaskActionLabel("candidate", sourceCollectionCandidateExtractionButtonText),
+      actionDisabled: sourceCollectionStageTaskActionDisabled(sourceCollectionCandidateExtractionDisabled),
       actionTone: "primary",
       actionIcon: selectedTeamExtractSourceCollectionCandidatesPending ? "refresh" : "archive",
-      onAction: runSourceCollectionCandidateExtractionAction,
+      onAction: () => void startSourceCollectionStageSessionTask("candidate"),
       onDetail: () => openSourceCollectionStage("candidate"),
       onAgentChat: () => openSourceCollectionStageAgentChat("candidate"),
     },
@@ -9527,11 +9642,11 @@ export function TeamsRoute({
       state: sourceCollectionScreeningStepState,
       status: sourceCollectionStepStatusText(sourceCollectionScreeningStepState),
       detailLabel: lang === "zh" ? "查看审查结果" : "View review details",
-      actionLabel: sourceCollectionScreeningButtonText,
-      actionDisabled: sourceCollectionScreeningDisabled || selectedTeamSourceQualityPending,
+      actionLabel: sourceCollectionStageTaskActionLabel("screening", sourceCollectionScreeningButtonText),
+      actionDisabled: sourceCollectionStageTaskActionDisabled(sourceCollectionScreeningDisabled || selectedTeamSourceQualityPending),
       actionTone: "primary",
       actionIcon: "check",
-      onAction: runSourceCollectionScreeningAction,
+      onAction: () => void startSourceCollectionStageSessionTask("screening"),
       onDetail: () => openSourceCollectionStage("screening"),
       onAgentChat: () => openSourceCollectionStageAgentChat("screening"),
     },
@@ -9552,11 +9667,11 @@ export function TeamsRoute({
       state: sourceCollectionGraphStepState,
       status: sourceCollectionStepStatusText(sourceCollectionGraphStepState),
       detailLabel: lang === "zh" ? "查看候选图谱" : "View candidate map",
-      actionLabel: sourceCollectionGraphActionLabel,
-      actionDisabled: sourceCollectionGraphActionDisabled,
+      actionLabel: sourceCollectionStageTaskActionLabel("graph", sourceCollectionGraphActionLabel),
+      actionDisabled: sourceCollectionStageTaskActionDisabled(sourceCollectionGraphActionDisabled),
       actionTone: "primary",
       actionIcon: "refresh",
-      onAction: runSourceCollectionGraphAction,
+      onAction: () => void startSourceCollectionStageSessionTask("graph"),
       onDetail: () => openSourceCollectionStage("graph"),
       onAgentChat: () => openSourceCollectionStageAgentChat("graph"),
     },
@@ -9587,11 +9702,11 @@ export function TeamsRoute({
       state: sourceCollectionMemoryStepState,
       status: sourceCollectionStepStatusText(sourceCollectionMemoryStepState),
       detailLabel: lang === "zh" ? "查看入库详情" : "View ingestion details",
-      actionLabel: sourceCollectionMemoryActionLabel,
-      actionDisabled: sourceCollectionMemoryActionDisabled,
+      actionLabel: sourceCollectionStageTaskActionLabel("memory", sourceCollectionMemoryActionLabel),
+      actionDisabled: sourceCollectionStageTaskActionDisabled(sourceCollectionMemoryActionDisabled),
       actionTone: "primary",
       actionIcon: "check",
-      onAction: runSourceCollectionMemoryPrecheckAction,
+      onAction: () => void startSourceCollectionStageSessionTask("memory"),
       onDetail: () => openSourceCollectionStage("memory"),
       onAgentChat: () => openSourceCollectionStageAgentChat("memory"),
     },
