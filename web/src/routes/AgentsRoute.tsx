@@ -1331,6 +1331,28 @@ function selectedAgentFromList(
   );
 }
 
+function buildVisibleAgentColumns(
+  agents: AgentConfigWorkspaceAgent[],
+  copy: ReturnType<typeof agentsRouteCopy>,
+) {
+  const sessionAgents = agents.filter(isWorkSessionAgent);
+  const nonSessionAgents = agents.filter((agent) => !isWorkSessionAgent(agent));
+  return [
+    {
+      id: "session_agents",
+      label: copy.sessionAgentColumn,
+      description: copy.sessionAgentColumnHint,
+      agents: sessionAgents,
+    },
+    {
+      id: "non_session_agents",
+      label: copy.nonSessionAgentColumn,
+      description: copy.nonSessionAgentColumnHint,
+      agents: nonSessionAgents,
+    },
+  ].filter((column) => column.agents.length > 0);
+}
+
 function normalizeAgentConfigPane(value: string | null | undefined): AgentConfigPaneId {
   const normalized = String(value || "").trim();
   return normalized === "config" || normalized === "activity" || normalized === "overview"
@@ -2976,6 +2998,10 @@ function agentsRouteCopy(lang: "zh" | "en") {
         bulkNoSelection: "请先选择 Agent。",
         bulkNoPrompt: "请先选择要应用的提示词模板。",
         bulkNoConfigFields: "请选择要批量应用的配置字段。",
+        sessionAgentColumn: "会话入口 Agent",
+        sessionAgentColumnHint: "直接承载项目开发、调试和审计对话的 Agent。",
+        nonSessionAgentColumn: "非会话 Agent",
+        nonSessionAgentColumnHint: "知识库、系统、团队或平台服务等不作为直接对话入口的 Agent。",
         bulkEditTitle: "批量编辑",
         bulkEditSelected: "已选 Agent",
         bulkEditMixed: "混合值",
@@ -3367,6 +3393,10 @@ function agentsRouteCopy(lang: "zh" | "en") {
         bulkNoSelection: "Select Agents first.",
         bulkNoPrompt: "Choose a prompt template first.",
         bulkNoConfigFields: "Select at least one config field to apply.",
+        sessionAgentColumn: "Session entry Agents",
+        sessionAgentColumnHint: "Agents that directly carry project development, debugging, and audit conversations.",
+        nonSessionAgentColumn: "Non-session Agents",
+        nonSessionAgentColumnHint: "Knowledge, system, team, or platform-service Agents that are not direct chat entries.",
         bulkEditTitle: "Bulk edit",
         bulkEditSelected: "Selected Agents",
         bulkEditMixed: "Mixed value",
@@ -3885,6 +3915,10 @@ export function AgentsRoute() {
   const visibleAgents = useMemo(
     () => filterAgents(workspace, activeFilter, searchText),
     [activeFilter, searchText, workspace],
+  );
+  const visibleAgentColumns = useMemo(
+    () => buildVisibleAgentColumns(visibleAgents, copy),
+    [copy, visibleAgents],
   );
   const selectedBulkAgents = useMemo(
     () => visibleAgents.filter((agent) => selectedBulkAgentIds.has(agent.agentId)),
@@ -5426,6 +5460,71 @@ export function AgentsRoute() {
     }
   };
 
+  const renderAgentRow = (agent: AgentConfigWorkspaceAgent) => {
+    const active = selectedAgent?.agentId === agent.agentId;
+    const tone = issueTone(agent.health);
+    const display = agentDisplayInfo(agent, lang);
+    const modelDisplay = agentDialogueModelDisplay(agent, lang);
+    const bulkSelected = selectedBulkAgentIds.has(agent.agentId);
+    const rowClassName = [
+      styles.agentRow,
+      active ? styles.agentRowActive : "",
+      bulkSelected ? styles.agentRowBulkSelected : "",
+    ].filter(Boolean).join(" ");
+    return (
+      <div key={agent.agentId} className={styles.agentRowShell}>
+        <label className={styles.rowSelect} title={`${copy.bulkSelected}: ${display.name}`}>
+          <input
+            type="checkbox"
+            checked={bulkSelected}
+            aria-label={`${copy.bulkSelected}: ${display.name}`}
+            onChange={(event) => toggleBulkAgent(
+              agent.agentId,
+              event.target.checked,
+              Boolean((event.nativeEvent as globalThis.MouseEvent).shiftKey),
+            )}
+          />
+          {bulkSelected ? <CheckSquare size={15} /> : <Square size={15} />}
+        </label>
+        <button
+          type="button"
+          className={rowClassName}
+          onClick={(event) => handleAgentRowSelect(agent, event)}
+        >
+          <span className={styles.agentIdentity}>
+            {renderAgentAvatar(
+              styles.agentAvatar,
+              agent.avatarImageUrl,
+              avatarInitials(agent.agentCode, display.name),
+            )}
+            <span className={styles.agentIdentityCopy}>
+              <strong>{display.name}</strong>
+              <em className={`${styles.agentRoleTag} ${styles[`agentRoleTag_${display.tone}`]}`}>
+                {display.functionLabel}
+              </em>
+            </span>
+          </span>
+          <span title={modelDisplay.detail}>{modelDisplay.label}</span>
+          <span>{promptTemplateDisplayName(agent.promptTemplate, agent.promptTemplateId, lang)}</span>
+          <span className={`${styles.runtimePill} ${styles[`runtime_${runtimeStatusTone(agent)}`]}`}>
+            {runtimeStatusLabel(agent, lang)}
+          </span>
+          <span className={styles.modeList}>
+            {uniqueModes(agent).slice(0, 3).map((mode) => (
+              <em key={`${agent.agentId}:${mode}`}>{modeLabel(mode, lang)}</em>
+            ))}
+          </span>
+          <span className={styles.healthCell}>
+            <span className={`${styles.issuePill} ${styles[`issue_${tone}`]}`}>
+              {issueLabel(agent.health, lang)}
+            </span>
+            <small>{issueSummary(agent.health, lang)}</small>
+          </span>
+        </button>
+      </div>
+    );
+  };
+
   return (
     <section className={styles.route}>
       <header className={styles.header}>
@@ -5839,79 +5938,29 @@ export function AgentsRoute() {
               <strong>{copy.noAgents}</strong>
             </section>
           ) : (
-            <div className={styles.agentTable}>
-              <div className={styles.agentTableHead}>
-                <span>Agent</span>
-                <span>{copy.model}</span>
-                <span>{copy.prompt}</span>
-                <span>{copy.runtimeStatus}</span>
-                <span>{copy.modeMembership}</span>
-                <span>{copy.statusReminders}</span>
-              </div>
-              {visibleAgents.map((agent) => {
-                const active = selectedAgent?.agentId === agent.agentId;
-                const tone = issueTone(agent.health);
-                const display = agentDisplayInfo(agent, lang);
-                const modelDisplay = agentDialogueModelDisplay(agent, lang);
-                const bulkSelected = selectedBulkAgentIds.has(agent.agentId);
-                const rowClassName = [
-                  styles.agentRow,
-                  active ? styles.agentRowActive : "",
-                  bulkSelected ? styles.agentRowBulkSelected : "",
-                ].filter(Boolean).join(" ");
-                return (
-                  <div key={agent.agentId} className={styles.agentRowShell}>
-                    <label className={styles.rowSelect} title={`${copy.bulkSelected}: ${display.name}`}>
-                      <input
-                        type="checkbox"
-                        checked={bulkSelected}
-                        aria-label={`${copy.bulkSelected}: ${display.name}`}
-                        onChange={(event) => toggleBulkAgent(
-                          agent.agentId,
-                          event.target.checked,
-                          Boolean((event.nativeEvent as globalThis.MouseEvent).shiftKey),
-                        )}
-                      />
-                      {bulkSelected ? <CheckSquare size={15} /> : <Square size={15} />}
-                    </label>
-                    <button
-                      type="button"
-                      className={rowClassName}
-                      onClick={(event) => handleAgentRowSelect(agent, event)}
-                    >
-                      <span className={styles.agentIdentity}>
-                        {renderAgentAvatar(
-                          styles.agentAvatar,
-                          agent.avatarImageUrl,
-                          avatarInitials(agent.agentCode, display.name),
-                        )}
-                        <span className={styles.agentIdentityCopy}>
-                          <strong>{display.name}</strong>
-                          <em className={`${styles.agentRoleTag} ${styles[`agentRoleTag_${display.tone}`]}`}>
-                            {display.functionLabel}
-                          </em>
-                        </span>
-                      </span>
-                      <span title={modelDisplay.detail}>{modelDisplay.label}</span>
-                      <span>{promptTemplateDisplayName(agent.promptTemplate, agent.promptTemplateId, lang)}</span>
-                      <span className={`${styles.runtimePill} ${styles[`runtime_${runtimeStatusTone(agent)}`]}`}>
-                        {runtimeStatusLabel(agent, lang)}
-                      </span>
-                      <span className={styles.modeList}>
-                        {uniqueModes(agent).slice(0, 3).map((mode) => (
-                          <em key={`${agent.agentId}:${mode}`}>{modeLabel(mode, lang)}</em>
-                        ))}
-                      </span>
-                      <span className={styles.healthCell}>
-                        <span className={`${styles.issuePill} ${styles[`issue_${tone}`]}`}>
-                          {issueLabel(agent.health, lang)}
-                        </span>
-                        <small>{issueSummary(agent.health, lang)}</small>
-                      </span>
-                    </button>
+            <div className={styles.agentColumnGrid}>
+              {visibleAgentColumns.map((column) => (
+                <section key={column.id} className={styles.agentColumn} aria-label={column.label}>
+                  <div className={styles.agentColumnHeader}>
+                    <div>
+                      <strong>{column.label}</strong>
+                      <span>{column.description}</span>
+                    </div>
+                    <em>{column.agents.length}</em>
                   </div>
-                );
-              })}
+                  <div className={styles.agentTable}>
+                    <div className={styles.agentTableHead}>
+                      <span>Agent</span>
+                      <span>{copy.model}</span>
+                      <span>{copy.prompt}</span>
+                      <span>{copy.runtimeStatus}</span>
+                      <span>{copy.modeMembership}</span>
+                      <span>{copy.statusReminders}</span>
+                    </div>
+                    {column.agents.map(renderAgentRow)}
+                  </div>
+                </section>
+              ))}
             </div>
           )}
         </main>

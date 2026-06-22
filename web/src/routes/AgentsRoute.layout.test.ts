@@ -620,6 +620,13 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("Team / research role Agents");
     expect(routeSource).toContain("会话入口 Agent");
     expect(routeSource).toContain("团队/科研角色 Agent");
+    expect(routeSource).toContain("function buildVisibleAgentColumns");
+    expect(routeSource).toContain("copy.nonSessionAgentColumn");
+    expect(routeSource).toContain("nonSessionAgents = agents.filter((agent) => !isWorkSessionAgent(agent))");
+    expect(routeSource).toContain("styles.agentColumnGrid");
+    expect(routeSource).toContain("styles.agentColumnHeader");
+    expect(routeSource).toContain("非会话 Agent");
+    expect(routeSource).toContain("Non-session Agents");
   });
 
   it("keeps persona, task, and membership configuration out of work-session Agents", () => {
