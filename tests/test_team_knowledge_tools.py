@@ -99,15 +99,18 @@ _LLM_FACING_KNOWLEDGE_TOOL_NAMES = {
     "knowledge_governance_plan_tool",
     "knowledge_steward_recommendations_tool",
     "knowledge_steward_workbench_tool",
+}
+_LLM_FACING_COMMUNICATION_TOOL_NAMES = {
     "agent_message_tool",
 }
+_LLM_FACING_TOOL_NAMES = _LLM_FACING_KNOWLEDGE_TOOL_NAMES | _LLM_FACING_COMMUNICATION_TOOL_NAMES
 
 
 def _llm_facing_knowledge_tools():
     return [
         tool
         for tool in create_llm_facing_tools()
-        if tool.name in _LLM_FACING_KNOWLEDGE_TOOL_NAMES
+        if tool.name in _LLM_FACING_TOOL_NAMES
     ]
 
 
@@ -119,8 +122,9 @@ def test_team_knowledge_tools_are_hidden_without_explicit_allow(tmp_path, monkey
     with agent_directory_service.active_agent_runtime(agent["agentId"], session_id="session-tools"):
         visible = agent_directory_service.filter_llm_tools_for_current_agent(tools)
 
-    assert {tool.name for tool in tools} == _LLM_FACING_KNOWLEDGE_TOOL_NAMES
-    assert visible == []
+    assert {tool.name for tool in tools} == _LLM_FACING_TOOL_NAMES
+    assert {tool.name for tool in visible} == _LLM_FACING_COMMUNICATION_TOOL_NAMES
+    assert not ({tool.name for tool in visible} & _LLM_FACING_KNOWLEDGE_TOOL_NAMES)
 
 
 def test_team_knowledge_tools_are_llm_facing_with_explicit_allow(tmp_path, monkeypatch):
@@ -136,7 +140,7 @@ def test_team_knowledge_tools_are_llm_facing_with_explicit_allow(tmp_path, monke
     with agent_directory_service.active_agent_runtime(agent["agentId"], session_id="session-tools"):
         visible = agent_directory_service.filter_llm_tools_for_current_agent(tools)
 
-    assert {tool.name for tool in tools} == _LLM_FACING_KNOWLEDGE_TOOL_NAMES
+    assert {tool.name for tool in tools} == _LLM_FACING_TOOL_NAMES
     assert [tool.name for tool in visible] == [tool.name for tool in tools]
 
 

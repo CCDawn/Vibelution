@@ -184,7 +184,7 @@ def test_workbench_config_panel_uses_default_panel_port(monkeypatch):
     assert opened["url"] == "http://127.0.0.1:8000/config"
     assert "--port" in opened["cmd"]
     assert opened["cmd"][opened["cmd"].index("--port") + 1] == "8000"
-    assert opened["cmd"][1].endswith("scripts\\web_workbench.py")
+    assert Path(opened["cmd"][1]).as_posix().endswith("scripts/web_workbench.py")
     assert shell._recent_status == "已打开配置页面：http://127.0.0.1:8000/config"
 
 
@@ -213,7 +213,7 @@ def test_workbench_config_panel_prefers_python(monkeypatch, tmp_path):
     monkeypatch.setattr("core.ui.workbench._open_config_panel_page", lambda url: opened.setdefault("url", url))
     monkeypatch.setattr("core.ui.workbench.time.sleep", lambda *_args, **_kwargs: None)
     monkeypatch.setattr("core.ui.workbench.Prompt.ask", lambda *args, **kwargs: "")
-    monkeypatch.setattr("core.ui.workbench.os.name", "nt", raising=False)
+    monkeypatch.setattr("core.ui.workbench._is_windows_platform", lambda: True)
     monkeypatch.setattr("core.ui.workbench.sys.executable", r"C:\Python312\python.exe", raising=False)
     monkeypatch.setattr(workbench_module, "PROJECT_ROOT", project_root, raising=False)
 
@@ -258,7 +258,7 @@ def test_preferred_python_executable_keeps_python_executable_when_project_venv_m
     project_root = tmp_path / "project"
     project_root.mkdir(parents=True, exist_ok=True)
 
-    monkeypatch.setattr(workbench_module.os, "name", "nt", raising=False)
+    monkeypatch.setattr(workbench_module, "_is_windows_platform", lambda: True)
     monkeypatch.setattr(workbench_module.sys, "executable", r"C:\Python312\python.exe", raising=False)
     monkeypatch.setattr(workbench_module, "PROJECT_ROOT", project_root, raising=False)
 
@@ -274,7 +274,7 @@ def test_preferred_python_executable_prefers_project_venv_python(monkeypatch, tm
     project_python.write_text("", encoding="utf-8")
 
     monkeypatch.setattr(workbench_module, "PROJECT_ROOT", project_root, raising=False)
-    monkeypatch.setattr(workbench_module.os, "name", "nt", raising=False)
+    monkeypatch.setattr(workbench_module, "_is_windows_platform", lambda: True)
     monkeypatch.setattr(workbench_module.sys, "executable", r"C:\Python312\python.exe", raising=False)
 
     assert workbench_module._preferred_python_executable() == str(project_python)

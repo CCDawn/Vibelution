@@ -7,11 +7,13 @@ from core.web.services import session_service
 
 def test_save_chat_state_uses_valid_replace_target(tmp_path):
     payload = {"version": 1, "conversations": [{"conversation_id": "default", "messages": []}]}
+    expected = {"version": 1, "conversations": [{"conversation_id": "default"}]}
 
     save_chat_state(tmp_path, payload)
 
     path = chat_state_path(tmp_path)
-    assert json.loads(path.read_text(encoding="utf-8")) == payload
+    assert json.loads(path.read_text(encoding="utf-8")) == expected
+    assert payload["conversations"][0]["messages"] == []
     assert not list(path.parent.glob(f".{path.name}.*.tmp"))
 
 

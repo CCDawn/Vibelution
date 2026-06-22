@@ -69,6 +69,16 @@ def test_existing_session_detail_backfills_workspace_metadata(tmp_path, monkeypa
 def test_run_session_turn_injects_session_workspace(tmp_path, monkeypatch):
     _seed_session(tmp_path, "session-live")
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    agent = agent_directory_service.create_agent_instance(
+        display_name="Workspace Agent",
+        llm_bindings={"dialogue": {"modelId": "model-primary"}},
+        direct_session_id="session-live",
+    )
+    state = load_chat_state(tmp_path)
+    state["conversations"][0]["agent_id"] = agent["agentId"]
+    state["conversations"][0]["agentId"] = agent["agentId"]
+    save_chat_state(tmp_path, state)
     captured = {}
 
     class WorkspaceAwareAgent:

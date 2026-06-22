@@ -3,8 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 
-from core.ui.chat_state import CHAT_STATE_VERSION, save_chat_state
-from core.web.services import session_service
+from core.ui.chat_state import CHAT_STATE_VERSION, load_chat_state, save_chat_state
+from core.web.services import agent_directory_service, session_service
 
 
 def _seed_session(root: Path) -> None:
@@ -31,6 +31,16 @@ def _seed_session(root: Path) -> None:
 def test_bare_done_marker_keeps_previous_visible_continuation_reply(tmp_path, monkeypatch):
     _seed_session(tmp_path)
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    agent = agent_directory_service.create_agent_instance(
+        display_name="Done Marker Agent",
+        llm_bindings={"dialogue": {"modelId": "model-primary"}},
+        direct_session_id="session-live",
+    )
+    state = load_chat_state(tmp_path)
+    state["conversations"][0]["agent_id"] = agent["agentId"]
+    state["conversations"][0]["agentId"] = agent["agentId"]
+    save_chat_state(tmp_path, state)
     monkeypatch.setattr(
         session_service,
         "get_web_chat_config",
@@ -66,7 +76,7 @@ def test_bare_done_marker_keeps_previous_visible_continuation_reply(tmp_path, mo
             }
 
     (tmp_path / "README.md").write_text("# demo\n", encoding="utf-8")
-    monkeypatch.setattr(session_service, "create_chat_agent", lambda: DoneMarkerAgent())
+    monkeypatch.setattr(session_service, "create_chat_agent", lambda **_kwargs: DoneMarkerAgent())
     monkeypatch.setattr(
         session_service,
         "_schedule_session_turn",

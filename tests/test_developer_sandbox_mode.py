@@ -1,11 +1,17 @@
 import json
 
+from core.chat.conversation_ledger import (
+    EVENT_USER_MESSAGE,
+    append_conversation_event,
+    conversation_visible_messages_from_events,
+    load_conversation_events,
+)
 from core.infrastructure import developer_sandbox
 from core.ui.chat_state import formal_chat_state_path, load_chat_state, save_chat_state
 from core.web.services import team_service
 
 
-def _enable_sandbox(tmp_path, monkeypatch):
+def _prepare_project(tmp_path, monkeypatch):
     config_path = tmp_path / "config.toml"
     config_path.write_text("[launcher]\ncontrol_port = 8765\n", encoding="utf-8")
     project_root = tmp_path / "project"
@@ -13,6 +19,11 @@ def _enable_sandbox(tmp_path, monkeypatch):
     monkeypatch.setattr(developer_sandbox, "CONFIG_PATH", config_path)
     monkeypatch.setattr(developer_sandbox, "PROJECT_ROOT", project_root)
     monkeypatch.setattr(developer_sandbox, "resolve_workspace_home", lambda *args, **kwargs: project_root / "workspace")
+    return config_path, project_root
+
+
+def _enable_sandbox(tmp_path, monkeypatch):
+    config_path, project_root = _prepare_project(tmp_path, monkeypatch)
     status = developer_sandbox.get_developer_mode_status(config_path=config_path, project_root=project_root)
     enabled = developer_sandbox.update_developer_mode_status(
         True,
@@ -23,22 +34,48 @@ def _enable_sandbox(tmp_path, monkeypatch):
     return config_path, project_root, enabled
 
 
+def _append_user_message(project_root, content: str, *, turn_id: str) -> None:
+    append_conversation_event(
+        project_root,
+        "default",
+        turn_id,
+        EVENT_USER_MESSAGE,
+        status="recorded",
+        payload={"content": content},
+    )
+
+
+def _visible_message_content(project_root) -> str:
+    messages = conversation_visible_messages_from_events(load_conversation_events(project_root, "default"))
+    return messages[-1]["content"]
+
+
 def test_chat_state_writes_to_sandbox_without_mutating_formal_state(tmp_path, monkeypatch):
-    config_path, project_root, enabled = _enable_sandbox(tmp_path, monkeypatch)
+    config_path, project_root = _prepare_project(tmp_path, monkeypatch)
     formal_path = formal_chat_state_path(project_root)
     formal_path.parent.mkdir(parents=True)
-    formal_payload = {"version": 1, "conversations": [{"conversation_id": "default", "messages": [{"role": "user", "content": "formal"}]}]}
+    formal_payload = {"version": 1, "conversations": [{"conversation_id": "default"}]}
     formal_path.write_text(json.dumps(formal_payload, ensure_ascii=False), encoding="utf-8")
+    _append_user_message(project_root, "formal", turn_id="formal-001")
 
-    assert load_chat_state(project_root)["conversations"][0]["messages"][0]["content"] == "formal"
+    assert _visible_message_content(project_root) == "formal"
+
+    status = developer_sandbox.get_developer_mode_status(config_path=config_path, project_root=project_root)
+    enabled = developer_sandbox.update_developer_mode_status(
+        True,
+        base_hash=status["configHash"],
+        config_path=config_path,
+        project_root=project_root,
+    )
 
     debug_payload = {"version": 1, "conversations": [{"conversation_id": "default", "messages": [{"role": "user", "content": "debug"}]}]}
     save_chat_state(project_root, debug_payload)
+    _append_user_message(project_root, "debug", turn_id="debug-001")
 
     sandbox_path = project_root / ".runtime" / "developer-mode" / "sandboxes" / enabled["sandbox"]["sandboxId"] / "workspace" / "chat" / "chat_state.json"
     assert sandbox_path.exists()
     assert json.loads(formal_path.read_text(encoding="utf-8")) == formal_payload
-    assert load_chat_state(project_root)["conversations"][0]["messages"][0]["content"] == "debug"
+    assert _visible_message_content(project_root) == "debug"
 
     developer_sandbox.update_developer_mode_status(
         False,
@@ -48,7 +85,7 @@ def test_chat_state_writes_to_sandbox_without_mutating_formal_state(tmp_path, mo
     )
 
     assert not sandbox_path.exists()
-    assert load_chat_state(project_root)["conversations"][0]["messages"][0]["content"] == "formal"
+    assert _visible_message_content(project_root) == "formal"
 
 
 def test_team_root_is_seeded_into_sandbox_before_writes(tmp_path, monkeypatch):

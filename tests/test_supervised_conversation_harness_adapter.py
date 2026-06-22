@@ -1,5 +1,10 @@
 from pathlib import Path
 
+from core.chat.conversation_ledger import (
+    EVENT_ASSISTANT_MESSAGE,
+    EVENT_USER_MESSAGE,
+    append_conversation_event,
+)
 from core.chat.turn_journal import EVENT_TOOL_RESULT, append_turn_event
 from core.ui.chat_state import CHAT_STATE_VERSION, save_chat_state
 from core.web.services import session_service
@@ -163,33 +168,41 @@ def test_session_turn_completion_snapshot_recovers_finished_hidden_turn(tmp_path
                     "conversation_id": "session-hidden",
                     "title": "supervised hidden",
                     "last_turn_status": "running",
-                    "messages": [
-                        {
-                            "role": "user",
-                            "content": "执行监督进化 fixture",
-                            "metadata": {"turnId": "turn-1"},
-                        },
-                        {
-                            "role": "assistant",
-                            "content": assistant_text,
-                            "metadata": {"turnId": "turn-1"},
-                        },
-                    ],
                 }
             ],
         },
     )
+    append_conversation_event(
+        tmp_path,
+        "session-hidden",
+        "turn-1",
+        EVENT_USER_MESSAGE,
+        status="recorded",
+        payload={"content": "执行监督进化 fixture", "metadata": {"turnId": "turn-1"}},
+    )
+    append_conversation_event(
+        tmp_path,
+        "session-hidden",
+        "turn-1",
+        EVENT_ASSISTANT_MESSAGE,
+        status="completed",
+        payload={"content": assistant_text, "metadata": {"turnId": "turn-1"}},
+    )
     with session_service._RUNNING_SESSIONS_LOCK:
         session_service._RUNNING_SESSION_IDS.add("session-hidden")
         session_service._SESSION_ACTIVE_TURN_IDS["session-hidden"] = "turn-next"
+    try:
+        snapshot = session_service.get_session_turn_completion_snapshot("session-hidden", "turn-1")
 
-    snapshot = session_service.get_session_turn_completion_snapshot("session-hidden", "turn-1")
-
-    assert snapshot["terminal"] is True
-    assert snapshot["terminalStatus"] == "ready"
-    assert snapshot["completionSource"] == "assistant_marker"
-    assert snapshot["completionRecovered"] is True
-    assert snapshot["assistantText"] == assistant_text
-    assert snapshot["assistantTurnId"] == "turn-1"
-    assert snapshot["lastTurnStatus"] == "running"
-    assert snapshot["activeTurnId"] == "turn-next"
+        assert snapshot["terminal"] is True
+        assert snapshot["terminalStatus"] == "ready"
+        assert snapshot["completionSource"] == "assistant_marker"
+        assert snapshot["completionRecovered"] is True
+        assert snapshot["assistantText"] == assistant_text
+        assert snapshot["assistantTurnId"] == "turn-1"
+        assert snapshot["lastTurnStatus"] == "running"
+        assert snapshot["activeTurnId"] == "turn-next"
+    finally:
+        with session_service._RUNNING_SESSIONS_LOCK:
+            session_service._RUNNING_SESSION_IDS.discard("session-hidden")
+            session_service._SESSION_ACTIVE_TURN_IDS.pop("session-hidden", None)

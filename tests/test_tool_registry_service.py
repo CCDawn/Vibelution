@@ -106,7 +106,8 @@ def test_tool_registry_exposes_tool_bundle_membership_without_duplicating_genera
     read_file = next(item for item in payload["tools"] if item["name"] == "read_file_tool")
     generated = next(item for item in payload["tools"] if item["name"] == created["name"])
 
-    assert set(read_file["bundleIds"]).issuperset({"core", "research", "coding"})
+    assert read_file["source"] == "built_in"
+    assert read_file["bundleIds"] == []
     assert generated["bundleIds"] == []
 
 

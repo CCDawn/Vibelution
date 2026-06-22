@@ -13,6 +13,10 @@ DEFAULT_GIT_TIMEOUT_SECONDS = 30.0
 DEFAULT_GIT_LOCK_RETRIES = 2
 
 
+def _is_windows_platform() -> bool:
+    return os.name == "nt"
+
+
 @lru_cache(maxsize=1)
 def resolve_git_executable() -> str:
     """Resolve a Git executable that can run without the Git for Windows cmd wrapper."""
@@ -24,7 +28,7 @@ def resolve_git_executable() -> str:
         candidates.extend(_direct_git_candidates(discovered_path))
         candidates.append(discovered_path)
 
-    if os.name == "nt":
+    if _is_windows_platform():
         for root_env in ("ProgramFiles", "ProgramFiles(x86)", "LocalAppData"):
             root = os.environ.get(root_env)
             if not root:
@@ -50,7 +54,7 @@ def git_command(args: Sequence[str]) -> list[str]:
 
 
 def no_console_subprocess_kwargs() -> dict[str, Any]:
-    if os.name != "nt":
+    if not _is_windows_platform():
         return {}
 
     kwargs: dict[str, Any] = {}
@@ -120,7 +124,7 @@ def _process_output_text(value: Any) -> str:
 
 
 def _direct_git_candidates(discovered_path: Path) -> list[Path]:
-    if os.name != "nt":
+    if not _is_windows_platform():
         return []
 
     path = discovered_path
@@ -140,7 +144,7 @@ def _direct_git_candidates(discovered_path: Path) -> list[Path]:
 
 
 def _hidden_startup_info() -> subprocess.STARTUPINFO | None:
-    if os.name != "nt" or not hasattr(subprocess, "STARTUPINFO"):
+    if not _is_windows_platform() or not hasattr(subprocess, "STARTUPINFO"):
         return None
     startupinfo = subprocess.STARTUPINFO()
     startupinfo.dwFlags |= int(getattr(subprocess, "STARTF_USESHOWWINDOW", 0))
@@ -152,7 +156,7 @@ def _dedupe_paths(paths: Sequence[Path]) -> list[Path]:
     seen: set[str] = set()
     deduped: list[Path] = []
     for path in paths:
-        key = str(path).lower() if os.name == "nt" else str(path)
+        key = str(path).lower() if _is_windows_platform() else str(path)
         if key in seen:
             continue
         seen.add(key)

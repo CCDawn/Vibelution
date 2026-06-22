@@ -576,7 +576,7 @@ def test_windows_subprocess_kwargs_hide_console(monkeypatch):
             self.dwFlags = 0
             self.wShowWindow = 0
 
-    monkeypatch.setattr(service.os, "name", "nt", raising=False)
+    monkeypatch.setattr(service, "_is_windows_platform", lambda: True)
     monkeypatch.setattr(service.subprocess, "CREATE_NO_WINDOW", 0x08000000, raising=False)
     monkeypatch.setattr(service.subprocess, "STARTUPINFO", StartupInfo, raising=False)
     monkeypatch.setattr(service.subprocess, "STARTF_USESHOWWINDOW", 1, raising=False)
@@ -623,7 +623,7 @@ def test_mimo_cli_terminal_launch_uses_tui_project_protocol(monkeypatch, tmp_pat
             return node_exe
         return ""
 
-    monkeypatch.setattr(terminal_service.os, "name", "nt", raising=False)
+    monkeypatch.setattr(terminal_service, "_is_windows_platform", lambda: True)
     monkeypatch.setattr(service.shutil, "which", fake_which)
 
     command = terminal_service._build_terminal_command(
@@ -656,7 +656,7 @@ def test_mimo_cli_terminal_resume_uses_session_option(monkeypatch, tmp_path):
             return node_exe
         return ""
 
-    monkeypatch.setattr(terminal_service.os, "name", "nt", raising=False)
+    monkeypatch.setattr(terminal_service, "_is_windows_platform", lambda: True)
     monkeypatch.setattr(service.shutil, "which", fake_which)
 
     command = terminal_service._build_terminal_command(
@@ -734,7 +734,7 @@ def test_claude_cli_terminal_real_cmd_shim_uses_native_exe_without_node(monkeypa
             return node_exe
         return ""
 
-    monkeypatch.setattr(terminal_service.os, "name", "nt", raising=False)
+    monkeypatch.setattr(terminal_service, "_is_windows_platform", lambda: True)
     monkeypatch.setattr(service.shutil, "which", fake_which)
 
     command = terminal_service._build_terminal_command(

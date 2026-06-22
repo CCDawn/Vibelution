@@ -491,6 +491,7 @@ class TestExecuteShellCommand:
             return FakeProcess()
 
         monkeypatch.setattr(shell_tools_module, "IS_WINDOWS", True)
+        monkeypatch.setattr(shell_tools_module, "_find_git_bash", lambda: "C:\\Program Files\\Git\\bin\\bash.exe")
         monkeypatch.setattr(shell_tools_module.subprocess, "CREATE_NO_WINDOW", 0x08000000, raising=False)
         monkeypatch.setattr(shell_tools_module.subprocess, "Popen", fake_popen)
 
@@ -626,6 +627,8 @@ class TestRunPowerShell:
 
     def test_ps_invalid_cmdlet_is_allowed_in_relaxed_mode(self):
         """放宽模式下，不再因不在白名单而拦截。"""
+        if not shutil.which("powershell"):
+            pytest.skip("PowerShell executable is not available on this platform")
         result = run_powershell(command="Invoke-Expression 'echo test'")
         assert "test" in result.lower()
 

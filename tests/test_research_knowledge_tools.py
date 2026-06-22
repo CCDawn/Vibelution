@@ -144,7 +144,9 @@ def test_research_knowledge_tools_are_hidden_without_explicit_allow(tmp_path, mo
         visible = agent_directory_service.filter_llm_tools_for_current_agent(tools)
 
     assert {tool.name for tool in tools} == _LLM_FACING_RESEARCH_TOOL_NAMES
-    assert visible == []
+    visible_names = {tool.name for tool in visible}
+    assert visible_names == {"agent_message_tool"}
+    assert "research_knowledge_query_tool" not in visible_names
 
 
 def test_research_knowledge_tools_are_llm_facing_with_explicit_allow(tmp_path, monkeypatch):

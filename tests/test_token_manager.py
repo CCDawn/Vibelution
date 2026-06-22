@@ -886,6 +886,7 @@ class TestErrorHandling:
 class TestPerformance:
     """性能基准测试"""
 
+    @pytest.mark.serial
     def test_estimate_tokens_performance(self):
         """测试 Token 估算性能"""
         import timeit

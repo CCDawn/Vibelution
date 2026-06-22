@@ -116,7 +116,7 @@ class TestToolExecutorInit:
         assert "conversation_log_inspect_tool" in canonical_names
         assert "conversation_log_inspect_tool" in llm_names
 
-    def test_read_file_tool_is_registered_but_hidden_for_session_policy(self):
+    def test_read_file_tool_is_registered_but_not_default_llm_facing(self):
         from core.web.services.agent_directory_service import compute_effective_tool_visibility, default_session_agent_tool_policy
 
         canonical_names = {tool.name for tool in create_key_tools()}
@@ -124,7 +124,7 @@ class TestToolExecutorInit:
         llm_names = {tool.name for tool in llm_tools}
 
         assert "read_file_tool" in canonical_names
-        assert "read_file_tool" in llm_names
+        assert "read_file_tool" not in llm_names
 
         visibility = compute_effective_tool_visibility(
             llm_tools,
@@ -1090,7 +1090,7 @@ class TestToolExecutorTimeout:
         monkeypatch.setattr(shell_tools.subprocess, "Popen", fake_popen)
 
         result = shell_tools.execute_shell_command(
-            "echo slow",
+            "sleep 1",
             timeout=5,
             _cancel_checker=cancel_checker,
         )
