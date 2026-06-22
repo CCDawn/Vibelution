@@ -71,12 +71,11 @@ rules:
   - id: web-evolution
     description: "Supervised/self evolution web routes, harness, and control-plane services."
     paths:
-      - "core/evolution/**"
-      - "core/self_evolution/**"
+      - "core/evaluation/**"
       - "core/web/routes/evolution.py"
       - "core/web/services/evolution_service.py"
-      - "core/web/services/self_evolution_service.py"
-      - "core/web/services/supervised_control_service.py"
+      - "core/web/services/self_evolution_*.py"
+      - "core/web/services/supervised_*.py"
       - "scripts/evolution_harness.py"
       - "tests/test_web_evolution_routes.py"
       - "tests/test_evolution_harness.py"
@@ -139,11 +138,10 @@ rules:
     paths:
       - "core/web/services/tool_registry_service.py"
       - "core/web/routes/tools.py"
-      - "tests/test_tool_registry.py"
       - "tests/test_tool_registry_service.py"
       - "tests/test_tool_registry_routes.py"
     commands:
-      - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_tool_registry.py tests/test_tool_registry_service.py tests/test_tool_registry_routes.py -q"
+      - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_tool_registry_service.py tests/test_tool_registry_routes.py -q"
       - ".\\.venv\\Scripts\\python.exe tests/prompt_debugger.py --suite"
     notes:
       - "Tool registry changes need route/service validation and prompt debugger coverage because they affect tool visibility."

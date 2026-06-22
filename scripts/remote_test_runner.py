@@ -196,6 +196,27 @@ def format_targets_for_command(targets: Sequence[Path]) -> list[str]:
     return [target.as_posix() for target in targets]
 
 
+def build_distributed_correctness_summary(
+    *,
+    local_targets: Sequence[Path],
+    remote_targets: Sequence[Path],
+    local_workers: int,
+    remote_workers: int,
+) -> str:
+    """Describe the correctness scope of the distributed pytest lane."""
+    total_targets = len(local_targets) + len(remote_targets)
+    return (
+        "correctness_scope="
+        "python_pytest:not_serial "
+        f"targets:{total_targets} "
+        f"local_targets:{len(local_targets)} "
+        f"remote_targets:{len(remote_targets)} "
+        f"workers:{local_workers}+{remote_workers} "
+        "excluded:serial_pytest,frontend_vitest,frontend_build "
+        "gate_hint:run_serial_and_frontend_for_release_or_matching_changes"
+    )
+
+
 def build_parallel_pytest_command(
     targets: Sequence[Path | str],
     *,
@@ -550,6 +571,14 @@ class RemoteTestRunner:
             "distributed_split="
             f"local:{len(local_targets)} files/{local_weight} bytes/{self.config.local_workers} workers "
             f"remote:{len(remote_targets)} files/{remote_weight} bytes/{self.config.workers} workers"
+        )
+        print(
+            build_distributed_correctness_summary(
+                local_targets=local_targets,
+                remote_targets=remote_targets,
+                local_workers=self.config.local_workers,
+                remote_workers=self.config.workers,
+            )
         )
 
         run_id = utc_run_id()
