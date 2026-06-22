@@ -584,7 +584,13 @@ def ensure_challenge_cup_research_team_agents(*, purge_stale: bool = True) -> di
     agent_refs = _merged_agent_reference_maps(_load_lightweight_agent_references(), ensured_agents)
     with _TEAM_LOCK:
         state = _load_index()
-        changed = _repair_index_state(state, agent_refs=agent_refs)
+        changed = _repair_index_shape(state)
+        for existing_team in list(state.get("teams") or []):
+            if not isinstance(existing_team, dict):
+                continue
+            if str(existing_team.get("teamId") or "").strip() == CHALLENGE_CUP_RESEARCH_TEAM_ID:
+                continue
+            changed = _repair_team(existing_team, agent_refs=agent_refs) or changed
         team = _find_team(state, CHALLENGE_CUP_RESEARCH_TEAM_ID)
         created = team is None
         if team is None:
