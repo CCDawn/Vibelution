@@ -224,6 +224,41 @@ def test_llm_client_payload_preserves_complete_live_timeout_tool_pair():
     assert client._last_payload_protocol_summary["payloadMessageMissingToolResultCount"] == 0
 
 
+def test_llm_client_payload_preserves_repeated_failed_tool_results_by_call_id():
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "openai_compatible",
+            "llm.providers.default.api_key": "test-key",
+            "llm.providers.default.base_url": "https://example.test/v1",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "gpt-4o",
+        }
+    )
+
+    client = LLMClient(config=config, backend=lambda payload: payload)
+    payload = client._build_payload(
+        [
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {"id": "call_search_a", "name": "web_search_tool", "args": {"query": "predictive coding"}},
+                    {"id": "call_search_b", "name": "web_search_tool", "args": {"query": "free energy principle"}},
+                ],
+            ),
+            ToolMessage(content="[错误] 本地 AutoGLM token 服务不可用", tool_call_id="call_search_a"),
+            ToolMessage(content="[错误] 本地 AutoGLM token 服务不可用", tool_call_id="call_search_b"),
+        ]
+    )
+
+    assert [message["role"] for message in payload["messages"]] == ["assistant", "tool", "tool"]
+    assert [message["tool_call_id"] for message in payload["messages"][1:]] == ["call_search_a", "call_search_b"]
+    assert client._last_payload_protocol_summary["payloadValidationResult"] == "passed"
+    assert client._last_payload_protocol_summary["payloadMessageAssistantToolCallCount"] == 2
+    assert client._last_payload_protocol_summary["payloadMessageToolResultCount"] == 2
+    assert client._last_payload_protocol_summary["payloadMessagePairedToolResultCount"] == 2
+    assert client._last_payload_protocol_summary["payloadMessageMissingToolResultCount"] == 0
+
+
 def test_responses_payload_converts_images_after_canonical_projection():
     config = make_config(
         **{
