@@ -48,6 +48,7 @@ from core.web.services.team_workflow_orchestration_service import (
     retry_research_stage_round_memory_record,
     run_knowledge_collection_ingestion,
     run_knowledge_ingestion_precheck,
+    seed_source_collection_agent_session_context,
     start_research_stage_round,
     start_source_collection_search_background,
     start_source_collection_run,
@@ -163,6 +164,12 @@ class SourceCollectionSearchExecutePayload(BaseModel):
 
 class SourceCollectionStorageOpenPayload(BaseModel):
     target: str = Field("run_directory", max_length=80)
+
+
+class SourceCollectionAgentSessionContextPayload(BaseModel):
+    stageId: str = Field("collection", max_length=80)
+    agentId: str = Field("", max_length=160)
+    agentRole: str = Field("", max_length=80)
 
 
 class ResearchStageRoundStartPayload(BaseModel):
@@ -539,6 +546,28 @@ def team_workflow_source_collection_search_execute(team_id: str, run_id: str, pa
             exc,
             status_code=422,
             fields={"runId": run_id, "agentRole": payload.agentRole, "provider": payload.provider},
+        )
+
+
+@router.post("/teams/{team_id}/workflow-orchestration/source-collection-runs/{run_id}/agent-session-context", status_code=status.HTTP_201_CREATED)
+def team_workflow_source_collection_agent_session_context(team_id: str, run_id: str, payload: SourceCollectionAgentSessionContextPayload) -> dict:
+    try:
+        return seed_source_collection_agent_session_context(team_id, run_id, payload.model_dump())
+    except TeamNotFoundError as exc:
+        _raise_team_workflow_route_error(
+            "source_collection_agent_session_context.seed",
+            team_id,
+            exc,
+            status_code=404,
+            fields={"runId": run_id, "agentId": payload.agentId, "stageId": payload.stageId},
+        )
+    except (TeamServiceError, TeamWorkflowOrchestrationError) as exc:
+        _raise_team_workflow_route_error(
+            "source_collection_agent_session_context.seed",
+            team_id,
+            exc,
+            status_code=422,
+            fields={"runId": run_id, "agentId": payload.agentId, "stageId": payload.stageId, "agentRole": payload.agentRole},
         )
 
 

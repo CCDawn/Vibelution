@@ -87,6 +87,9 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("/workflow-orchestration/stage-rounds/status");
     expect(routeSource).toContain("/workflow-orchestration/stage-rounds/start");
     expect(routeSource).toContain("startResearchStageRoundMutation");
+    expect(routeSource).toContain("seedSourceCollectionAgentSessionContextMutation");
+    expect(routeSource).toContain("/source-collection-runs/${encodeURIComponent(payload.runId)}/agent-session-context");
+    expect(routeSource).toContain("await seedSourceCollectionAgentSessionContextMutation.mutateAsync");
     expect(routeSource).toContain("ExperimentFullRunResultRegisterPayload");
     expect(routeSource).toContain("ExperimentResultKnowledgeIngestionPayload");
     expect(routeSource).toContain("/workflow-orchestration/experiments/plans/${encodeURIComponent(payload.plan.planId)}/full-run-result");

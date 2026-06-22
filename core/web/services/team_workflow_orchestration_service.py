@@ -24,7 +24,7 @@ from config.public_config import build_effective_config, load_public_config
 from core.infrastructure import developer_sandbox
 from core.llm import LLMClient, LLMInvocationContext, invoke_llm
 from core.runtime_manager import work_run_store
-from core.web.services import agent_directory_service, chat_room_service, data_processing_service, team_knowledge_service, team_service
+from core.web.services import agent_directory_service, chat_room_service, data_processing_service, session_service, team_knowledge_service, team_service
 from core.web.services.runtime_scene_service import record_runtime_scene_event
 
 
@@ -93,6 +93,13 @@ SOURCE_COLLECTION_SEARCH_EXECUTION_DEFAULT_MAX_QUERIES = 4
 SOURCE_COLLECTION_SEARCH_EXECUTION_MAX_QUERIES = 12
 SOURCE_COLLECTION_SEARCH_EXECUTION_DEFAULT_RESULTS_PER_QUERY = 2
 SOURCE_COLLECTION_SEARCH_EXECUTION_MAX_RESULTS_PER_QUERY = 5
+SOURCE_COLLECTION_AGENT_CONTEXT_STAGE_ROLES = {
+    "collection": ("data_discovery", "source_acquisition"),
+    "candidate": ("content_extraction",),
+    "screening": ("source_quality",),
+    "graph": ("candidate_graph",),
+    "memory": ("candidate_graph", "knowledge_steward"),
+}
 SOURCE_COLLECTION_STORAGE_OPEN_TARGETS = {
     "run_directory",
     "artifacts_directory",
@@ -670,6 +677,146 @@ def extract_source_collection_candidates(team_id: str, payload: dict[str, Any] |
             "Run source quality assessment on extracted source_manifest candidates.",
             "Keep formal Team Knowledge/RAG/official graph writes behind the later governance gate.",
         ],
+    }
+
+
+def seed_source_collection_agent_session_context(
+    team_id: str,
+    run_id: str,
+    payload: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
+    normalized_run_id = _normalize_required_id(run_id, "Data processing run id is required.")
+    team = team_service.get_team(normalized_team_id)
+    request_payload = dict(payload) if isinstance(payload, dict) else {}
+    stage_id = _trim_text(request_payload.get("stageId"), max_length=80) or "collection"
+    agent_id = _trim_text(request_payload.get("agentId"), max_length=160)
+    agent_role = _trim_text(request_payload.get("agentRole"), max_length=80)
+    if stage_id not in SOURCE_COLLECTION_AGENT_CONTEXT_STAGE_ROLES:
+        raise TeamWorkflowOrchestrationError(f"Unsupported source collection stage: {stage_id}")
+    if not agent_id:
+        raise TeamWorkflowOrchestrationError("Agent id is required for source collection session context.")
+
+    agent = agent_directory_service.get_agent(agent_id)
+    if not isinstance(agent, dict):
+        raise TeamWorkflowOrchestrationError(f"Agent not found: {agent_id}")
+    session_id = _trim_text(agent.get("directSessionId"), max_length=160)
+    if not session_id:
+        raise TeamWorkflowOrchestrationError(f"Agent has no direct session: {agent_id}")
+
+    try:
+        run = data_processing_service.get_processing_run(normalized_run_id)
+        assignments_payload = data_processing_service.list_collection_assignments(normalized_run_id)
+        records_payload = data_processing_service.list_records(normalized_run_id)
+        run_status = data_processing_service.get_processing_status(normalized_run_id)
+    except data_processing_service.DataProcessingError as exc:
+        raise TeamWorkflowOrchestrationError(str(exc)) from exc
+    run_scope = run.get("scope") if isinstance(run.get("scope"), dict) else {}
+    run_team_id = _trim_text(run_scope.get("teamId"), max_length=128)
+    if run_team_id and run_team_id != normalized_team_id:
+        raise TeamWorkflowOrchestrationError("Data processing run does not belong to this team.")
+
+    assignments = [item for item in list(assignments_payload.get("assignments") or []) if isinstance(item, dict)]
+    records = [item for item in list(records_payload.get("records") or []) if isinstance(item, dict)]
+    if not agent_role:
+        agent_role = _source_collection_agent_role_for_id(assignments, agent_id, stage_id)
+    allowed_roles = SOURCE_COLLECTION_AGENT_CONTEXT_STAGE_ROLES[stage_id]
+    if agent_role and agent_role not in allowed_roles:
+        raise TeamWorkflowOrchestrationError(f"Agent role {agent_role} is not assigned to source collection stage {stage_id}.")
+
+    matching_assignments = [
+        item for item in assignments
+        if (
+            (agent_role and _trim_text(item.get("agentRole"), max_length=80) == agent_role)
+            or _trim_text(item.get("agentId"), max_length=160) == agent_id
+        )
+    ]
+    storage_artifacts = _source_collection_storage_artifacts(normalized_team_id, normalized_run_id)
+    source_candidates = _source_collection_candidates_for_run(normalized_team_id, normalized_run_id)
+    active_snapshot = _source_collection_work_run_store().load_active_snapshot(SOURCE_COLLECTION_WORK_RUN_KIND)
+    active_work_run = (
+        active_snapshot
+        if _source_collection_background_snapshot_is_active(active_snapshot, normalized_team_id, normalized_run_id)
+        else {}
+    )
+    context_key = f"source_collection_context:{normalized_team_id}:{normalized_run_id}:{stage_id}:{agent_id}:{agent_role or 'agent'}"
+    existing_message = _find_source_collection_context_message(session_id, context_key)
+    if existing_message is not None:
+        return {
+            "schemaVersion": SCHEMA_VERSION,
+            "teamId": normalized_team_id,
+            "runId": normalized_run_id,
+            "stageId": stage_id,
+            "agentId": agent_id,
+            "agentRole": agent_role,
+            "sessionId": session_id,
+            "contextKey": context_key,
+            "created": False,
+            "alreadyPresent": True,
+            "message": existing_message,
+        }
+
+    message_content = _source_collection_agent_context_message(
+        team=team,
+        agent=agent,
+        stage_id=stage_id,
+        agent_role=agent_role,
+        run=run,
+        run_status=run_status,
+        active_work_run=active_work_run,
+        assignments=assignments,
+        matching_assignments=matching_assignments,
+        records=records,
+        source_candidates=source_candidates,
+        storage_artifacts=storage_artifacts,
+    )
+    message = session_service.append_session_assistant_artifact_message(
+        session_id,
+        message_content,
+        metadata={
+            "kind": "source_collection_agent_context",
+            "status": "observed",
+            "teamId": normalized_team_id,
+            "runId": normalized_run_id,
+            "stageId": stage_id,
+            "agentId": agent_id,
+            "agentRole": agent_role,
+            "sourceCollectionContextKey": context_key,
+            "recordCount": len(records),
+            "candidateCount": len(source_candidates),
+            "assignmentCount": len(assignments),
+            "matchingAssignmentCount": len(matching_assignments),
+            "activeWorkRunId": _trim_text(active_work_run.get("runId"), max_length=160) if active_work_run else "",
+            "storageArtifacts": storage_artifacts,
+            "turnId": context_key,
+        },
+    )
+    _record_workflow_event(
+        "source_collection.agent_session_context_seeded",
+        normalized_team_id,
+        fields={
+            "runId": normalized_run_id,
+            "stageId": stage_id,
+            "agentId": agent_id,
+            "agentRole": agent_role,
+            "sessionId": session_id,
+            "recordCount": len(records),
+            "candidateCount": len(source_candidates),
+            "assignmentCount": len(assignments),
+        },
+    )
+    return {
+        "schemaVersion": SCHEMA_VERSION,
+        "teamId": normalized_team_id,
+        "runId": normalized_run_id,
+        "stageId": stage_id,
+        "agentId": agent_id,
+        "agentRole": agent_role,
+        "sessionId": session_id,
+        "contextKey": context_key,
+        "created": True,
+        "alreadyPresent": False,
+        "message": message,
     }
 
 
@@ -8385,6 +8532,22 @@ def _source_collection_agent_id(role: str, payload: dict[str, Any]) -> str:
     return explicit or role
 
 
+def _source_collection_agent_role_for_id(assignments: list[dict[str, Any]], agent_id: str, stage_id: str) -> str:
+    normalized_agent_id = _trim_text(agent_id, max_length=160)
+    allowed_roles = SOURCE_COLLECTION_AGENT_CONTEXT_STAGE_ROLES.get(stage_id, ())
+    for assignment in assignments:
+        if _trim_text(assignment.get("agentId"), max_length=160) != normalized_agent_id:
+            continue
+        role = _trim_text(assignment.get("agentRole"), max_length=80)
+        if role in allowed_roles:
+            return role
+    for assignment in assignments:
+        role = _trim_text(assignment.get("agentRole"), max_length=80)
+        if role in allowed_roles:
+            return role
+    return allowed_roles[0] if allowed_roles else ""
+
+
 def _source_collection_prompt_cache_policy(team_id: str, payload: dict[str, Any], roles: list[str]) -> dict[str, Any]:
     raw_policy = payload.get("promptCachePolicy") if isinstance(payload.get("promptCachePolicy"), dict) else {}
     requirement = _normalize_source_collection_prompt_cache_requirement(raw_policy, payload)
@@ -9185,6 +9348,143 @@ def _source_collection_storage_artifacts(team_id: str, run_id: str) -> dict[str,
         key: _relative_path(path)
         for key, path in _source_collection_storage_artifact_paths(team_id, run_id).items()
     }
+
+
+def _source_collection_candidates_for_run(team_id: str, run_id: str) -> list[dict[str, Any]]:
+    normalized_run_id = _trim_text(run_id, max_length=128)
+    with _WORKFLOW_LOCK:
+        candidate_store = _load_candidate_store(team_id)
+    candidates: list[dict[str, Any]] = []
+    for item in list(candidate_store.get("candidates") or []):
+        if not isinstance(item, dict) or item.get("candidateType") != "source_manifest":
+            continue
+        metadata = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+        imported_from = metadata.get("importedFromDataRecord") if isinstance(metadata.get("importedFromDataRecord"), dict) else {}
+        candidate_run_id = (
+            _trim_text(imported_from.get("runId"), max_length=128)
+            or _trim_text(metadata.get("sourceCollectionRunId"), max_length=128)
+        )
+        if candidate_run_id == normalized_run_id:
+            candidates.append(item)
+    return candidates
+
+
+def _find_source_collection_context_message(session_id: str, context_key: str) -> dict[str, Any] | None:
+    detail = session_service.get_session_detail(session_id)
+    if not isinstance(detail, dict):
+        raise TeamWorkflowOrchestrationError(f"Session not found: {session_id}")
+    for message in reversed(list(detail.get("messages") or [])):
+        if not isinstance(message, dict):
+            continue
+        metadata = message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
+        if (
+            str(metadata.get("kind") or "").strip() == "source_collection_agent_context"
+            and str(metadata.get("sourceCollectionContextKey") or "").strip() == context_key
+        ):
+            return message
+    return None
+
+
+def _source_collection_agent_context_message(
+    *,
+    team: dict[str, Any],
+    agent: dict[str, Any],
+    stage_id: str,
+    agent_role: str,
+    run: dict[str, Any],
+    run_status: dict[str, Any],
+    active_work_run: dict[str, Any],
+    assignments: list[dict[str, Any]],
+    matching_assignments: list[dict[str, Any]],
+    records: list[dict[str, Any]],
+    source_candidates: list[dict[str, Any]],
+    storage_artifacts: dict[str, str],
+) -> str:
+    run_scope = run.get("scope") if isinstance(run.get("scope"), dict) else {}
+    run_metadata = run.get("metadata") if isinstance(run.get("metadata"), dict) else {}
+    status_summary = run_status.get("summary") if isinstance(run_status.get("summary"), dict) else {}
+    assignment_summary = _source_collection_assignment_stage_summary(assignments)
+    open_matching_assignments = _source_collection_open_assignments(matching_assignments)
+    stage_label = {
+        "collection": "资料发现/获取/提炼",
+        "candidate": "资料关系生成",
+        "screening": "资料质量评估",
+        "graph": "候选图谱构建",
+        "memory": "知识入库治理",
+    }.get(stage_id, stage_id)
+    active_summary = _trim_text(active_work_run.get("summary"), max_length=240) if active_work_run else ""
+    run_title = _trim_text(run.get("title") or run_scope.get("topic") or run_metadata.get("title"), max_length=180)
+    topic = _trim_text(run_scope.get("topic"), max_length=240)
+    goal = _trim_text(run_scope.get("goal"), max_length=320)
+    agent_name = _trim_text(agent.get("displayName") or agent.get("name") or agent.get("id"), max_length=160)
+    lines = [
+        "## 知识搜集上下文",
+        f"- 团队：{_trim_text(team.get('name') or team.get('teamId'), max_length=160)}",
+        f"- 当前 Agent：{agent_name}",
+        f"- 当前阶段：{stage_label}",
+        f"- 角色：{agent_role or '未标注'}",
+        f"- 运行：{_trim_text(run.get('runId'), max_length=160)}",
+    ]
+    if run_title:
+        lines.append(f"- 标题：{run_title}")
+    if topic:
+        lines.append(f"- 主题：{topic}")
+    if goal:
+        lines.append(f"- 目标：{goal}")
+    status_text = _trim_text(run.get("status") or run_status.get("status") or active_work_run.get("status"), max_length=80)
+    phase_text = _trim_text(active_work_run.get("currentPhase") or status_summary.get("currentPhase"), max_length=80)
+    if status_text or phase_text:
+        lines.append(f"- 状态：{status_text or 'unknown'}{f' / {phase_text}' if phase_text else ''}")
+    if active_summary:
+        lines.append(f"- 后台进展：{active_summary}")
+    lines.extend(
+        [
+            "",
+            "## 当前可用材料",
+            f"- 搜集记录：{len(records)} 条",
+            f"- source_manifest 候选：{len(source_candidates)} 条",
+            f"- 分派任务：{assignment_summary.get('assignmentCount', 0)} 个，未完成 {assignment_summary.get('openAssignmentCount', 0)} 个",
+            f"- 本角色相关任务：{len(matching_assignments)} 个，未完成 {len(open_matching_assignments)} 个",
+        ]
+    )
+    storage_refs = [
+        storage_artifacts.get("runDirectory", ""),
+        storage_artifacts.get("recordsPath", ""),
+        storage_artifacts.get("candidateStorePath", ""),
+    ]
+    compact_refs = [item for item in storage_refs if item]
+    if compact_refs:
+        lines.extend(["", "## 存储引用", *[f"- {item}" for item in compact_refs]])
+    next_actions = _source_collection_agent_context_next_actions(stage_id, len(records), len(source_candidates), len(open_matching_assignments))
+    if next_actions:
+        lines.extend(["", "## 建议下一步", *[f"- {item}" for item in next_actions]])
+    lines.extend(
+        [
+            "",
+            "边界：这条消息只投递当前资料搜集上下文，不会自动启动 Agent 回答；正式知识库、RAG 和官方图谱写入仍由后续治理入口控制。",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def _source_collection_agent_context_next_actions(stage_id: str, record_count: int, candidate_count: int, open_assignment_count: int) -> list[str]:
+    if stage_id == "collection":
+        if record_count <= 0:
+            return ["继续等待或执行资料搜索，先形成 DataRecord。"]
+        return ["检查 DataRecord 覆盖面，必要时补充查询词或来源类型。"]
+    if stage_id == "candidate":
+        if candidate_count <= 0:
+            return ["从 DataRecord 提炼 source_manifest 候选。"]
+        return ["审查候选来源、去重线索和后续质量评估输入。"]
+    if stage_id == "screening":
+        return ["对 source_manifest 候选做相关性、可靠性、可访问性和提炼就绪度评估。"]
+    if stage_id == "graph":
+        return ["基于已通过质量评估的候选构建候选关系图。"]
+    if stage_id == "memory":
+        return ["只处理已通过质量和图谱治理的候选入库包。"]
+    if open_assignment_count:
+        return ["继续处理未完成的本角色分派任务。"]
+    return []
 
 
 def _source_collection_work_run_store() -> work_run_store.WorkRunStore:

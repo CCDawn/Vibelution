@@ -41,6 +41,7 @@ import {
   TeamWorkflowKnowledgeIngestionStatus,
   TeamWorkflowSourceCollectionPromptCachePolicy,
   TeamWorkflowSourceCollectionPromptCachePolicyRef,
+  TeamWorkflowSourceCollectionAgentSessionContextPayload,
   TeamWorkflowSourceCollectionExtractionPayload,
   TeamWorkflowSourceCollectionRunStartPayload,
   TeamWorkflowDataRecordSourceCandidateImportPayload,
@@ -4064,6 +4065,22 @@ export function TeamsRoute({
     },
   });
 
+  const seedSourceCollectionAgentSessionContextMutation = useMutation({
+    mutationFn: (payload: { teamId: string; runId: string; stageId: SourceCollectionStageModuleId; agentId: string; agentRole: string }) =>
+      fetchJson<TeamWorkflowSourceCollectionAgentSessionContextPayload>(
+        `/api/teams/${encodeURIComponent(payload.teamId)}/workflow-orchestration/source-collection-runs/${encodeURIComponent(payload.runId)}/agent-session-context`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            stageId: payload.stageId,
+            agentId: payload.agentId,
+            agentRole: payload.agentRole,
+          }),
+        },
+      ),
+  });
+
   const startTeamRoundMutation = useMutation({
     mutationFn: (payload: { roomId: string; teamId: string; topic: string; mode: string; purpose: string }) =>
       fetchJson<ChatRoomDetail>(`/api/chat-rooms/${payload.roomId}/rounds`, {
@@ -5243,7 +5260,7 @@ export function TeamsRoute({
     return `${lang === "zh" ? "返回" : "Back to"} ${SOURCE_COLLECTION_STAGE_CHAT_LABELS[stageId][lang]}`;
   }
 
-  function openSourceCollectionStageAgentChat(stageId: SourceCollectionStageModuleId) {
+  async function openSourceCollectionStageAgentChat(stageId: SourceCollectionStageModuleId) {
     const binding = sourceCollectionStagePrimaryAgentBinding(stageId);
     const chatRoute = researchStageAgentDirectChatRoute(
       binding?.agent,
@@ -5251,6 +5268,22 @@ export function TeamsRoute({
       sourceCollectionStageChatReturnLabel(stageId),
     );
     if (chatRoute) {
+      const teamId = selectedTeam?.teamId || RESEARCH_TEAM_ID;
+      const runId = selectedSourceCollectionRunEffectiveId;
+      const agentId = String(binding?.agent?.agentId || binding?.agentId || "").trim();
+      if (teamId && runId && agentId) {
+        try {
+          await seedSourceCollectionAgentSessionContextMutation.mutateAsync({
+            teamId,
+            runId,
+            stageId,
+            agentId,
+            agentRole: binding?.key || "",
+          });
+        } catch (error) {
+          console.warn("Failed to seed source collection Agent session context before navigation.", error);
+        }
+      }
       navigate(chatRoute);
       return;
     }
