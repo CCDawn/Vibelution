@@ -25,7 +25,6 @@ TOOL_GOVERNANCE_EVENT_FILE = "tool_governance_requests.jsonl"
 LOW_RISK_GRANT_TOOLS = {
     "grep_search_tool",
     "glob_tool",
-    "read_file_tool",
     "get_current_goal_tool",
     "get_core_context_tool",
     "get_git_status_summary_tool",

@@ -13,6 +13,7 @@ EXPLICIT_ALLOW_TOOLS = {
     "cli_agent_run_tool",
     "computer_use_session_tool",
     "computer_use_task_tool",
+    "read_file_tool",
     "research_knowledge_query_tool",
     "research_agent_creation_proposal_tool",
     "research_communication_edge_proposal_tool",
@@ -65,8 +66,8 @@ TOOL_CATALOG: dict[str, dict[str, Any]] = {
     "read_file_tool": {
         "category": "workspace_read",
         "capabilityTags": ["file_read", "read_only"],
-        "riskTags": [],
-        "permissionTier": LOW_PERMISSION_TIER,
+        "riskTags": ["workspace_file_read"],
+        "permissionTier": MEDIUM_PERMISSION_TIER,
     },
     "get_session_files_tool": {
         "category": "workspace_read",
@@ -483,7 +484,6 @@ TOOL_BUNDLE_DEFINITIONS: tuple[dict[str, Any], ...] = (
         "toolNames": [
             "grep_search_tool",
             "glob_tool",
-            "read_file_tool",
             "get_core_context_tool",
             "get_current_goal_tool",
             "task_list_tool",
@@ -493,7 +493,6 @@ TOOL_BUNDLE_DEFINITIONS: tuple[dict[str, Any], ...] = (
         ],
         "preferredToolNames": [
             "grep_search_tool",
-            "read_file_tool",
             "conversation_log_inspect_tool",
             "get_core_context_tool",
         ],
@@ -506,7 +505,6 @@ TOOL_BUNDLE_DEFINITIONS: tuple[dict[str, Any], ...] = (
         "toolNames": [
             "grep_search_tool",
             "glob_tool",
-            "read_file_tool",
             "web_search_tool",
             "web_fetch_tool",
             "research_knowledge_query_tool",
@@ -542,7 +540,6 @@ TOOL_BUNDLE_DEFINITIONS: tuple[dict[str, Any], ...] = (
         "toolNames": [
             "grep_search_tool",
             "glob_tool",
-            "read_file_tool",
             "code_symbol_tool",
             "apply_diff_edit_tool",
             "apply_patch_tool",
@@ -554,7 +551,6 @@ TOOL_BUNDLE_DEFINITIONS: tuple[dict[str, Any], ...] = (
         ],
         "preferredToolNames": [
             "grep_search_tool",
-            "read_file_tool",
             "apply_patch_tool",
             "run_test_for_tool",
         ],
