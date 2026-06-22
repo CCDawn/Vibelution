@@ -3322,6 +3322,62 @@ def create_supervised_agent_session(
     return get_session_detail(session_id) or {}
 
 
+def ensure_agent_direct_session(
+    *,
+    agent_id: str,
+    title: str = "",
+    created_by: str = "agent_direct_session_repair",
+) -> dict[str, Any]:
+    """Ensure an existing Agent has an ordinary direct chat session."""
+
+    normalized_agent_id = str(agent_id or "").strip()
+    if not normalized_agent_id:
+        raise SessionValidationError(text_for(get_web_language(), zh="缺少 Agent 绑定。", en="Agent binding is missing."))
+    agent = get_agent(normalized_agent_id, include_archived=False)
+    if not agent:
+        raise SessionValidationError(_session_agent_unavailable_message("missing_agent", lang=get_web_language()))
+    current_session_id = str(agent.get("directSessionId") or "").strip()
+    if current_session_id and get_session_detail(current_session_id):
+        return get_session_detail(current_session_id) or {}
+    lang = get_web_language()
+    with _CHAT_STATE_LOCK:
+        payload = load_chat_state(PROJECT_ROOT)
+        conversations = payload.get("conversations")
+        if not isinstance(conversations, list):
+            conversations = []
+            payload["conversations"] = conversations
+        existing_ids = {
+            str(item.get("conversation_id") or "").strip()
+            for item in conversations
+            if isinstance(item, dict)
+        }
+        now = _now_timestamp()
+        session_id = _new_conversation_id(existing_ids)
+        display_title = (
+            trim_lines(title or "", max_lines=1).strip()
+            or str(agent.get("displayName") or "").strip()
+            or text_for(lang, zh="Agent 私聊", en="Agent chat")
+        )
+        conversation = _make_empty_conversation(session_id, title=display_title, timestamp=now)
+        conversation["created_by"] = str(created_by or "agent_direct_session_repair").strip() or "agent_direct_session_repair"
+        conversation["createdBy"] = conversation["created_by"]
+        _ensure_conversation_workspace_metadata(conversation)
+        _bind_conversation_to_agent_instance(
+            conversation,
+            agent,
+            session_id=session_id,
+            source="ensure_agent_direct_session",
+        )
+        conversations.append(conversation)
+        payload["version"] = int(payload.get("version") or CHAT_STATE_VERSION)
+        payload["active_conversation_id"] = session_id
+        payload["updated_at"] = now
+        payload["conversations"] = conversations
+        save_chat_state(PROJECT_ROOT, payload)
+    _invalidate_session_list_cache()
+    return get_session_detail(session_id) or {}
+
+
 def list_child_sessions(session_id: str) -> list[dict[str, Any]]:
     normalized_session_id = str(session_id or "").strip()
     if not normalized_session_id:
