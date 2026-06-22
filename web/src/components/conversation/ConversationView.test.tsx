@@ -157,16 +157,28 @@ describe("ConversationView edit resend affordance", () => {
     expect(conversationViewStylesSource).toContain(".streamingResponseParagraph");
   });
 
-  it("advances large streaming chunks in small reveal steps", () => {
-    const target = "这是一段一次性到达的长回复，需要在前端逐步显示。";
-    const first = advanceStreamingRevealText("", target);
-    const second = advanceStreamingRevealText(first, target);
+  it("fast-forwards large streaming backlogs while keeping small deltas smooth", () => {
+    const smallTarget = "这是一段正在流式到达的短回复。";
+    const first = advanceStreamingRevealText("", smallTarget);
+    const second = advanceStreamingRevealText(first, smallTarget);
 
     expect(first.length).toBeGreaterThan(0);
-    expect(first.length).toBeLessThan(target.length);
+    expect(first.length).toBeLessThan(smallTarget.length);
     expect(second.length).toBeGreaterThan(first.length);
-    expect(second.length).toBeLessThanOrEqual(target.length);
+    expect(second.length).toBeLessThanOrEqual(smallTarget.length);
+
+    const target = "这是一段一次性到达的长回复，".repeat(16);
+    expect(advanceStreamingRevealText("", target)).toBe(target);
     expect(advanceStreamingRevealText("旧文本", target)).toBe(target);
+  });
+
+  it("does not reintroduce fixed-rate typing for large live assistant deltas", () => {
+    const target = "大块 assistant_delta 已经到达浏览器后应当快速显示，不能继续按固定打字机速度慢慢吐字。".repeat(10);
+    const first = advanceStreamingRevealText("", target);
+
+    expect(first).toBe(target);
+    expect(conversationViewSource).toContain("STREAMING_REVEAL_FAST_FORWARD_BACKLOG_CHARS");
+    expect(conversationViewSource).toContain("remaining >= STREAMING_REVEAL_FAST_FORWARD_BACKLOG_CHARS");
   });
 
   it("defaults to answer-only process display while keeping details expandable", () => {

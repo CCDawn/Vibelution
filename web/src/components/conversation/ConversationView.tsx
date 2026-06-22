@@ -68,6 +68,7 @@ const COMPUTER_USE_TOOL_NAME = "computer_use_task_tool";
 const STREAMING_REVEAL_INTERVAL_MS = 18;
 const STREAMING_REVEAL_MIN_CHARS_PER_TICK = 2;
 const STREAMING_REVEAL_MAX_CHARS_PER_TICK = 28;
+const STREAMING_REVEAL_FAST_FORWARD_BACKLOG_CHARS = 160;
 
 export type ConversationProcessDisplayMode = "answer" | "trace";
 
@@ -160,6 +161,9 @@ export function advanceStreamingRevealText(current: string, target: string) {
     return targetText;
   }
   const remaining = targetText.length - currentText.length;
+  if (remaining >= STREAMING_REVEAL_FAST_FORWARD_BACKLOG_CHARS) {
+    return targetText;
+  }
   const step = Math.max(
     STREAMING_REVEAL_MIN_CHARS_PER_TICK,
     Math.min(STREAMING_REVEAL_MAX_CHARS_PER_TICK, Math.ceil(remaining / 4)),
