@@ -435,6 +435,60 @@ def test_agent_directory_system_team_member_stub_hidden_from_user_index(tmp_path
     assert "session-team-member" not in {item["id"] for item in session_service.list_sessions()}
 
 
+def test_agent_direct_session_visibility_repairs_stale_hidden_index_flag(tmp_path, monkeypatch):
+    _seed_chat_state(
+        tmp_path,
+        conversations=[
+            {
+                "conversation_id": "session-team-visible",
+                "title": "资料入库",
+                "agent_id": "agent-visible",
+                "agentId": "agent-visible",
+                "hidden_from_index": True,
+                "hiddenFromIndex": True,
+                "session_kind": "main",
+                "updated_at": "2026-05-18T12:00:00",
+                "messages": [],
+            }
+        ],
+    )
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(team_service, "PROJECT_ROOT", tmp_path)
+    agent_directory_service.save_state(
+        {
+            "agents": [
+                {
+                    "agentId": "agent-visible",
+                    "agentCode": "A001",
+                    "displayName": "资料入库",
+                    "status": "active",
+                    "directSessionId": "session-team-visible",
+                    "primaryMode": "research",
+                    "roleKey": "knowledge_steward",
+                    "promptTemplateId": "prompt-chat-default",
+                    "metadata": {
+                        "showInSessionIndex": True,
+                        "directSessionVisibility": "active_session",
+                    },
+                }
+            ]
+        }
+    )
+
+    listed_ids = {item["id"] for item in session_service.list_sessions()}
+    detail = session_service.get_session_detail("session-team-visible")
+
+    assert "session-team-visible" in listed_ids
+    assert detail["agentId"] == "agent-visible"
+    assert detail["hiddenFromIndex"] is False
+    payload = load_chat_state(tmp_path)
+    stored = session_service._find_conversation_entry(payload, "session-team-visible")
+    assert stored is not None
+    assert "hidden_from_index" not in stored
+    assert "hiddenFromIndex" not in stored
+
+
 def test_persisted_empty_system_team_member_session_hidden_from_user_index(tmp_path, monkeypatch):
     _seed_chat_state(
         tmp_path,
