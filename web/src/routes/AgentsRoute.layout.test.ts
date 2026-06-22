@@ -621,8 +621,13 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("会话入口 Agent");
     expect(routeSource).toContain("团队/科研角色 Agent");
     expect(routeSource).toContain("function buildVisibleAgentColumns");
+    expect(routeSource).toContain("teamIndexGroups: AgentTeamIndexGroup[]");
+    expect(routeSource).toContain("group.section === \"team_index\"");
+    expect(routeSource).toContain("id: `team_agents:${group.id}`");
+    expect(routeSource).toContain("unassignedNonSessionAgents");
     expect(routeSource).toContain("copy.nonSessionAgentColumn");
     expect(routeSource).toContain("nonSessionAgents = agents.filter((agent) => !isWorkSessionAgent(agent))");
+    expect(routeSource).toContain("buildVisibleAgentColumns(visibleAgents, copy, teamIndexGroups)");
     expect(routeSource).toContain("styles.agentColumnGrid");
     expect(routeSource).toContain("styles.agentColumnHeader");
     expect(routeSource).toContain("非会话 Agent");
