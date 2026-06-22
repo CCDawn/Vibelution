@@ -398,7 +398,6 @@ const DEFAULT_BULK_CONFIG_APPLY: AgentBulkConfigApply = {
 const DEFAULT_SESSION_AGENT_ALLOWED_TOOLS = [
   "grep_search_tool",
   "glob_tool",
-  "read_file_tool",
   "get_core_context_tool",
   "get_current_goal_tool",
   "task_list_tool",
@@ -408,7 +407,6 @@ const DEFAULT_SESSION_AGENT_ALLOWED_TOOLS = [
 ];
 const DEFAULT_SESSION_AGENT_PREFERRED_TOOLS = [
   "grep_search_tool",
-  "read_file_tool",
   "conversation_log_inspect_tool",
   "get_core_context_tool",
 ];
