@@ -2869,7 +2869,7 @@ function indexHtml() {
         <aside class="dashboard-panel">
           <h2>审核摘要</h2>
           <div class="kpi-grid">
-            <div class="kpi"><b>当前阶段</b><strong>M6.64</strong><span>五阶段步骤卡已接入 Agent 私聊入口，资料来源元数据已标准化，便于过滤和追溯。</span></div>
+            <div class="kpi"><b>当前阶段</b><strong>M6.65</strong><span>科研团队标准 7 角色可自动重建；缺少 Agent 私聊绑定时可一键修复团队 Agent。</span></div>
             <div class="kpi"><b>流程节点</b><strong>${nodes.length}</strong><span>1-9 为知识入库主线，10-13 保留占位与维护节点。</span></div>
             <div class="kpi"><b>候选资料</b><strong>${currentResearchRun.sources.length}</strong><span>第一轮 source_manifest 已进入 candidate-only 工作区。</span></div>
             <div class="kpi"><b>正式写入</b><strong>0</strong><span>未写正式 Team Knowledge、RAG 或 official graph。</span></div>

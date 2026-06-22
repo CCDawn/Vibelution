@@ -4017,6 +4017,20 @@ export function TeamsRoute({
     },
   });
 
+  const repairChallengeCupTeamAgentsMutation = useMutation({
+    mutationFn: (teamId: string) =>
+      fetchJson<{ team: Team }>(`/api/teams/${encodeURIComponent(teamId)}/challenge-cup-agents/repair`, {
+        method: "POST",
+      }),
+    onSuccess: (payload, teamId) => {
+      if (payload.team) {
+        queryClient.setQueryData(queryKeys.team(payload.team.teamId), payload.team);
+      }
+      void chatWorkspaceCache.afterTeamChanged(payload.team?.teamId || teamId);
+      void chatWorkspaceCache.afterAgentWorkspaceChanged();
+    },
+  });
+
   const startTeamRoundMutation = useMutation({
     mutationFn: (payload: { roomId: string; teamId: string; topic: string; mode: string; purpose: string }) =>
       fetchJson<ChatRoomDetail>(`/api/chat-rooms/${payload.roomId}/rounds`, {
@@ -5195,9 +5209,9 @@ export function TeamsRoute({
       navigate(chatRoute);
       return;
     }
-    window.alert(lang === "zh"
-      ? "当前步骤 Agent 缺少可用私聊会话，请先修复团队 Agent 绑定。"
-      : "This step Agent has no direct chat session. Repair the Team Agent binding first.");
+    if (selectedTeam?.teamId === RESEARCH_TEAM_ID && !repairChallengeCupTeamAgentsMutation.isPending) {
+      repairChallengeCupTeamAgentsMutation.mutate(selectedTeam.teamId);
+    }
   }
 
   function renderSourceCollectionStageAgents(stageId: SourceCollectionStageModuleId) {
@@ -7316,13 +7330,19 @@ export function TeamsRoute({
                 type="button"
                 title={lang === "zh" ? "当前步骤缺少可用私聊，请先修复团队 Agent 绑定" : "No usable direct chat for this step"}
                 onClick={() => openSourceCollectionStageAgentChat(activeModule.id)}
+                disabled={repairChallengeCupTeamAgentsMutation.isPending}
               >
                 <MessageSquare size={13} />
-                {lang === "zh" ? "私聊未绑定" : "Chat missing"}
+                {repairChallengeCupTeamAgentsMutation.isPending
+                  ? (lang === "zh" ? "修复中" : "Repairing")
+                  : (lang === "zh" ? "修复团队 Agent" : "Repair Team Agents")}
               </button>
             )}
           </div>
         </div>
+        {repairChallengeCupTeamAgentsMutation.error instanceof Error ? (
+          <div className={styles.messageError}>{repairChallengeCupTeamAgentsMutation.error.message}</div>
+        ) : null}
         {resultPanel}
       </section>
     );

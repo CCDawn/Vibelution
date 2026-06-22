@@ -405,8 +405,12 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("renderSourceCollectionActiveStagePanel");
     expect(routeSource).toContain("researchStageAgentDirectChatRoute");
     expect(routeSource).toContain("openSourceCollectionStageAgentChat");
+    expect(routeSource).toContain("repairChallengeCupTeamAgentsMutation");
+    expect(routeSource).toContain("/challenge-cup-agents/repair");
+    expect(routeSource).toContain("修复团队 Agent");
     expect(routeSource).toContain("进入 Agent 私聊");
     expect(routeSource).toContain("Agent 私聊");
+    expect(routeSource).not.toContain("window.alert(lang === \"zh\"");
     expect(routeSource).not.toContain("sourceCollectionStageChatRoute");
     expect(routeSource).not.toContain("sourceCollectionStageRoomKey");
     expect(routeSource).not.toContain("createSourceCollectionStageChatRoomMutation");
@@ -616,6 +620,7 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).not.toContain("createdByAgent: sourceCollectionQualityAgentId");
     expect(routeSource).not.toContain("sourceCollectionStageRoomKey");
     expect(routeSource).toContain("openSourceCollectionStageAgentChat");
+    expect(routeSource).toContain("repairChallengeCupTeamAgentsMutation.mutate(selectedTeam.teamId)");
     expect(routeSource).toContain("进入 Agent 私聊");
     expect(routeSource).toContain("researchStageStartFeedbackText");
     expect(routeSource).toContain("已复用正在运行的");

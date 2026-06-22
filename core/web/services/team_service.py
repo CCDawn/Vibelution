@@ -544,24 +544,70 @@ def challenge_cup_research_team_agents_need_repair() -> bool:
         state = _load_index()
         team = _find_team(state, CHALLENGE_CUP_RESEARCH_TEAM_ID)
         if not team:
-            return False
+            return True
         agent_refs = _agent_reference_maps()
         active_agents = agent_refs.get("active_by_id") or {}
+        expected_roles = {
+            str(role.get("role") or "").strip()
+            for role in CHALLENGE_CUP_RESEARCH_TEAM_ROLES
+            if str(role.get("role") or "").strip()
+        }
+        member_agent_ids_by_role: dict[str, str] = {}
         for member in list(team.get("members") or []):
             if not isinstance(member, dict):
                 continue
+            role = str(member.get("role") or "").strip()
             agent_id = str(member.get("agentId") or "").strip()
             if agent_id and agent_id not in active_agents:
                 return True
+            if role in expected_roles:
+                if not agent_id:
+                    return True
+                agent = active_agents.get(agent_id)
+                if not agent:
+                    return True
+                metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
+                if (
+                    str(metadata.get("challengeCupTeamId") or "").strip() != CHALLENGE_CUP_RESEARCH_TEAM_ID
+                    or str(metadata.get("challengeCupTeamRole") or "").strip() != role
+                    or not _challenge_cup_research_team_agent_direct_session_available(agent)
+                ):
+                    return True
+                member_agent_ids_by_role[role] = agent_id
+        if set(member_agent_ids_by_role) != expected_roles:
+            return True
         canvas_path = _team_canvas_path(CHALLENGE_CUP_RESEARCH_TEAM_ID)
-        canvas = _read_json(canvas_path) if canvas_path.exists() else {}
+        if not canvas_path.exists():
+            return True
+        canvas = _read_json(canvas_path)
+        canvas_agent_ids_by_role: dict[str, str] = {}
         for node in list(canvas.get("nodes") or []):
             if not isinstance(node, dict):
                 continue
+            role = str(node.get("role") or "").strip()
             agent_id = str(node.get("agentId") or "").strip()
             if agent_id and agent_id not in active_agents:
                 return True
+            if role in expected_roles:
+                if not agent_id or member_agent_ids_by_role.get(role) != agent_id:
+                    return True
+                canvas_agent_ids_by_role[role] = agent_id
+        if set(canvas_agent_ids_by_role) != expected_roles:
+            return True
     return False
+
+
+def _challenge_cup_research_team_agent_direct_session_available(agent: dict[str, Any]) -> bool:
+    try:
+        from . import session_service
+    except Exception:
+        return bool(str(agent.get("directSessionId") or "").strip())
+    previous_root = session_service.PROJECT_ROOT
+    session_service.PROJECT_ROOT = Path(PROJECT_ROOT).resolve()
+    try:
+        return _agent_direct_session_available(agent, session_service=session_service)
+    finally:
+        session_service.PROJECT_ROOT = previous_root
 
 
 def ensure_challenge_cup_research_team_agents(*, purge_stale: bool = True) -> dict[str, Any]:
