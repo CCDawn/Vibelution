@@ -66,6 +66,17 @@ def test_tool_registry_lists_builtins_as_protected(tmp_path, monkeypatch):
     assert "grep_search_tool" in bundles["core"]["toolNames"]
     assert "research_knowledge_query_tool" in bundles["research"]["toolNames"]
     assert "unified_memory_search_tool" in bundles["research"]["toolNames"]
+    research_search_tools = {
+        "batch_web_search_tool",
+        "paper_search_tool",
+        "project_search_tool",
+        "news_search_tool",
+        "search_summarize_sources_tool",
+    }
+    assert research_search_tools.issubset(set(bundles["research"]["toolNames"]))
+    assert {"batch_web_search_tool", "paper_search_tool", "search_summarize_sources_tool"}.issubset(
+        set(bundles["research"]["preferredToolNames"])
+    )
     assert "unified_memory_search_tool" in bundles["memory_context"]["toolNames"]
     assert "research_agent_creation_proposal_tool" in bundles["collaboration"]["toolNames"]
     assert "research_communication_edge_proposal_tool" in bundles["collaboration"]["toolNames"]
@@ -89,6 +100,14 @@ def test_tool_registry_lists_builtins_as_protected(tmp_path, monkeypatch):
     assert log_tool["permissionTier"] == "low"
     assert log_tool["permissionPolicy"]["requiresExplicitAllow"] is False
     assert bundles["research"]["label"] == "科研工具包"
+    paper_tool = next(item for item in payload["tools"] if item["name"] == "paper_search_tool")
+    assert paper_tool["category"] == "web_research"
+    assert paper_tool["permissionTier"] == "high"
+    assert "no_quota_api" in paper_tool["capabilityTags"]
+    summarize_tool = next(item for item in payload["tools"] if item["name"] == "search_summarize_sources_tool")
+    assert summarize_tool["category"] == "web_research"
+    assert summarize_tool["permissionTier"] == "low"
+    assert summarize_tool["riskTags"] == []
 
 
 def test_tool_registry_exposes_tool_bundle_membership_without_duplicating_generated_tools(tmp_path, monkeypatch):
