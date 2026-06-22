@@ -243,6 +243,20 @@ class TestToolExecutorInit:
         assert result == "[搜索] ok"
         assert seen == {"query": "latest ai news", "max_results": 3}
 
+    def test_research_search_tools_are_registered_and_llm_facing(self):
+        canonical_names = {tool.name for tool in create_key_tools()}
+        llm_names = {tool.name for tool in create_llm_facing_tools()}
+        expected = {
+            "batch_web_search_tool",
+            "paper_search_tool",
+            "project_search_tool",
+            "news_search_tool",
+            "search_summarize_sources_tool",
+        }
+
+        assert expected.issubset(canonical_names)
+        assert expected.issubset(llm_names)
+
     def test_tool_error_text_is_recorded_as_failed_scene_event(self, monkeypatch):
         """Tools returning an agent-readable error string should not be logged as succeeded."""
         from core.infrastructure import tool_executor as tool_executor_module

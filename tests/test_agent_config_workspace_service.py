@@ -1703,6 +1703,9 @@ def test_repair_agent_directory_fills_research_agent_profiles(tmp_path, monkeypa
         "research_knowledge_query_tool",
         "web_search_tool",
         "web_fetch_tool",
+        "batch_web_search_tool",
+        "paper_search_tool",
+        "search_summarize_sources_tool",
     ]
     assert repaired["toolPolicy"]["mutationAccess"] == "none"
     assert repaired["toolPolicy"]["writeScopes"] == []
