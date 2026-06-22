@@ -108,6 +108,10 @@ def _now_timestamp() -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%S")
 
 
+def _is_windows_platform() -> bool:
+    return os.name == "nt"
+
+
 CONFIG_PANEL_PORT = _default_workbench_port()
 CONFIG_PANEL_BROWSER_PROFILE_DIR = PROJECT_ROOT / ".runtime" / "config_panel_browser"
 
@@ -116,12 +120,12 @@ def _preferred_python_executable() -> str:
     """Prefer python.exe for background Windows helpers when it is available."""
 
     project_python = PROJECT_ROOT / ".venv" / "Scripts" / "python.exe"
-    if os.name == "nt" and project_python.exists():
+    if _is_windows_platform() and project_python.exists():
         LOGGER.debug("Using project venv python.exe for workbench helper: %s", project_python)
         return str(project_python)
 
     candidate = Path(sys.executable)
-    if os.name != "nt":
+    if not _is_windows_platform():
         LOGGER.debug("Using current interpreter for workbench helper: %s", candidate)
         return str(candidate)
     if candidate.name.lower() == "python.exe":
@@ -175,7 +179,7 @@ def _preferred_config_panel_browser() -> str | None:
 
 
 def _close_stale_config_panel_windows() -> None:
-    if os.name != "nt":
+    if not _is_windows_platform():
         return
     marker = str(CONFIG_PANEL_BROWSER_PROFILE_DIR.resolve()).replace("'", "''")
     command = (

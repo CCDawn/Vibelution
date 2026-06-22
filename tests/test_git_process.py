@@ -13,7 +13,7 @@ def test_resolve_git_executable_prefers_direct_windows_git(monkeypatch, tmp_path
     cmd_git.write_text("", encoding="utf-8")
     direct_git.write_text("", encoding="utf-8")
 
-    monkeypatch.setattr(git_process.os, "name", "nt", raising=False)
+    monkeypatch.setattr(git_process, "_is_windows_platform", lambda: True)
     monkeypatch.setattr(git_process.shutil, "which", lambda name: str(cmd_git) if name == "git" else None)
     git_process.resolve_git_executable.cache_clear()
 
@@ -28,7 +28,7 @@ def test_resolve_git_executable_falls_back_to_discovered_git(monkeypatch, tmp_pa
     cmd_git.parent.mkdir(parents=True)
     cmd_git.write_text("", encoding="utf-8")
 
-    monkeypatch.setattr(git_process.os, "name", "nt", raising=False)
+    monkeypatch.setattr(git_process, "_is_windows_platform", lambda: True)
     monkeypatch.setattr(git_process.shutil, "which", lambda name: str(cmd_git) if name == "git" else None)
     git_process.resolve_git_executable.cache_clear()
 
@@ -44,7 +44,7 @@ def test_no_console_subprocess_kwargs_hides_windows_process(monkeypatch):
             self.dwFlags = 0
             self.wShowWindow = -1
 
-    monkeypatch.setattr(git_process.os, "name", "nt", raising=False)
+    monkeypatch.setattr(git_process, "_is_windows_platform", lambda: True)
     monkeypatch.setattr(git_process.subprocess, "CREATE_NO_WINDOW", 0x08000000, raising=False)
     monkeypatch.setattr(git_process.subprocess, "STARTUPINFO", DummyStartupInfo, raising=False)
     monkeypatch.setattr(git_process.subprocess, "STARTF_USESHOWWINDOW", 0x00000001, raising=False)
@@ -61,7 +61,7 @@ def test_run_git_uses_resolved_executable_and_no_console(monkeypatch, tmp_path):
     calls = []
     resolved_git = str(tmp_path / "Git" / "mingw64" / "bin" / "git.exe")
     monkeypatch.setattr(git_process, "resolve_git_executable", lambda: resolved_git)
-    monkeypatch.setattr(git_process.os, "name", "nt", raising=False)
+    monkeypatch.setattr(git_process, "_is_windows_platform", lambda: True)
     monkeypatch.setattr(git_process.subprocess, "CREATE_NO_WINDOW", 0x08000000, raising=False)
 
     def fake_run(args, **kwargs):

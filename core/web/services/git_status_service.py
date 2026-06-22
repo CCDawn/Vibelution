@@ -32,6 +32,7 @@ MAX_AI_FILE_DIFF_CHARS = 8_000
 MAX_COMMIT_MESSAGE_CHARS = 5_000
 DEFAULT_GIT_COMMIT_PROFILE = "primary"
 GIT_COMMIT_MESSAGE_PROFILE_ID = "__git_commit_message__"
+_WINDOWS_DRIVE_PATH_PATTERN = re.compile(r"^[A-Za-z]:")
 _GIT_STATUS_CACHE_LOCK = threading.Lock()
 _GIT_STATUS_SNAPSHOT_CACHE: dict[str, Any] = {}
 _GIT_STATUS_METADATA_CACHE: dict[str, Any] = {}
@@ -726,18 +727,19 @@ def generate_git_commit_message(
 
 
 def commit_git_changes(paths: list[str], message: str) -> dict[str, Any]:
-    service = get_git_memory_service()
-    available, error = service.is_git_available()
-    if not available:
-        raise ValueError(error or "git unavailable")
-
     commit_message = str(message or "").strip()
     if not commit_message:
         raise ValueError("Commit message is required")
     if len(commit_message) > MAX_COMMIT_MESSAGE_CHARS:
         raise ValueError(f"Commit message must be at most {MAX_COMMIT_MESSAGE_CHARS} characters")
+    selected_paths = _normalize_git_paths(paths)
 
-    selected_files = _selected_status_files(service, paths)
+    service = get_git_memory_service()
+    available, error = service.is_git_available()
+    if not available:
+        raise ValueError(error or "git unavailable")
+
+    selected_files = _selected_status_files(service, selected_paths)
     _assert_no_unmerged_files(selected_files)
     selected_paths = [item["path"] for item in selected_files]
     selected_set = set(selected_paths)
@@ -1152,14 +1154,7 @@ def _find_status_file(service: Any, path: str) -> dict[str, Any] | None:
 
 
 def _selected_status_files(service: Any, paths: list[str]) -> list[dict[str, Any]]:
-    normalized_paths: list[str] = []
-    for path in paths or []:
-        normalized = _normalize_git_path(path)
-        if normalized not in normalized_paths:
-            normalized_paths.append(normalized)
-    if not normalized_paths:
-        raise ValueError("Select at least one changed file")
-
+    normalized_paths = _normalize_git_paths(paths)
     snapshot = service.scan_working_tree(store=False)
     files = [_file_payload(_object_payload(item)) for item in snapshot.files]
     by_path = {item["path"]: item for item in files}
@@ -1174,6 +1169,17 @@ def _selected_status_files(service: Any, paths: list[str]) -> list[dict[str, Any
     if missing:
         raise ValueError(f"Selected paths are not currently changed: {', '.join(missing)}")
     return selected
+
+
+def _normalize_git_paths(paths: list[str]) -> list[str]:
+    normalized_paths: list[str] = []
+    for path in paths or []:
+        normalized = _normalize_git_path(path)
+        if normalized not in normalized_paths:
+            normalized_paths.append(normalized)
+    if not normalized_paths:
+        raise ValueError("Select at least one changed file")
+    return normalized_paths
 
 
 def _staged_unselected_paths(service: Any, selected_paths: set[str]) -> list[str]:
@@ -1197,7 +1203,7 @@ def _normalize_git_path(path: str) -> str:
     while raw.startswith("./"):
         raw = raw[2:]
     candidate = PurePosixPath(raw)
-    if not raw or candidate.is_absolute() or any(part == ".." for part in candidate.parts):
+    if not raw or _WINDOWS_DRIVE_PATH_PATTERN.match(raw) or candidate.is_absolute() or any(part == ".." for part in candidate.parts):
         raise ValueError("Path must stay inside the project root")
     resolved = (PROJECT_ROOT / raw).resolve()
     try:

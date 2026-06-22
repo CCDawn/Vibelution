@@ -27,7 +27,8 @@ def test_clear_chat_journal_state_requires_confirmation_and_clears_runtime(tmp_p
     assert preview["status"] == "preview"
     assert sessions_dir.exists()
     assert cli_session_dir.exists()
-    assert load_chat_state(project_root)["conversations"][0]["messages"][0]["content"] == "旧消息"
+    assert (sessions_dir / "turn_journal.jsonl").read_text(encoding="utf-8") == "dirty\n"
+    assert (cli_session_dir / "cli-term-1.json").read_text(encoding="utf-8") == "{}"
 
     cleared = clear_chat_journal_state(project_root, confirm_delete=True)
 
@@ -36,4 +37,4 @@ def test_clear_chat_journal_state_requires_confirmation_and_clears_runtime(tmp_p
     assert not cli_session_dir.exists()
     state = load_chat_state(project_root)
     assert state["conversations"][0]["conversation_id"] == "default"
-    assert state["conversations"][0]["messages"] == []
+    assert "messages" not in state["conversations"][0]

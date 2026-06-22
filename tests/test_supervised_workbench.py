@@ -2,6 +2,7 @@
 """Supervised Evolution workbench helper tests."""
 
 import json
+import os
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -305,6 +306,8 @@ def test_decision_history_helpers_sort_and_select(tmp_path: Path):
     newer = decisions_dir / "newer.json"
     older.write_text(json.dumps({"session_id": "older", "decision": "HOLD"}), encoding="utf-8")
     newer.write_text(json.dumps({"session_id": "newer", "decision": "PROMOTE"}), encoding="utf-8")
+    os.utime(older, (1_700_000_000, 1_700_000_000))
+    os.utime(newer, (1_700_000_010, 1_700_000_010))
 
     records = list_recent_decision_records(tmp_path)
     rendered = format_decision_history(records)

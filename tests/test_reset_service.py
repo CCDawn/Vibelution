@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+from core.chat.conversation_ledger import load_conversation_events
 from core.ui.chat_state import load_chat_state, save_chat_state
 from core.web.app import create_app
 from core.web.control import CONTROL_TOKEN_HEADER, get_control_token
@@ -188,8 +189,9 @@ def test_execute_chat_history_recreates_empty_default_session(reset_project: Pat
     state = load_chat_state(reset_project)
 
     assert result["items"][0]["deleted"][0]["action"] == "reset"
-    assert state["conversations"][0]["messages"] == []
     assert state["active_conversation_id"] == "default"
+    assert "messages" not in state["conversations"][0]
+    assert load_conversation_events(reset_project, "default") == []
 
 
 def test_reset_can_clear_sessions_rooms_teams_agents_and_bus(reset_project: Path):

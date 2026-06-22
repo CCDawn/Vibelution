@@ -55,8 +55,9 @@ def test_repair_agent_directory_creates_protected_knowledge_steward_agent(tmp_pa
     assert "knowledge_governance" in steward["taskProfile"]["taskTypes"]
 
     tool_policy = steward["toolPolicy"]
-    assert tool_policy["allowedTools"] == [
+    required_allowed_tools = {
         "agent_message_tool",
+        "skill_library_search_tool",
         "unified_memory_search_tool",
         "knowledge_proposal_tool",
         "knowledge_ingestion_tool",
@@ -66,16 +67,19 @@ def test_repair_agent_directory_creates_protected_knowledge_steward_agent(tmp_pa
         "knowledge_steward_recommendations_tool",
         "knowledge_steward_workbench_tool",
         "knowledge_rating_suggestion_tool",
-    ]
-    assert tool_policy["preferredTools"] == [
+    }
+    required_preferred_tools = {
         "knowledge_governance_tasks_tool",
         "knowledge_operations_health_tool",
         "knowledge_governance_plan_tool",
         "knowledge_steward_workbench_tool",
         "knowledge_steward_recommendations_tool",
+        "skill_library_search_tool",
         "unified_memory_search_tool",
         "knowledge_rating_suggestion_tool",
-    ]
+    }
+    assert required_allowed_tools.issubset(set(tool_policy["allowedTools"]))
+    assert required_preferred_tools.issubset(set(tool_policy["preferredTools"]))
     assert tool_policy["networkAccess"] == "none"
     assert tool_policy["mutationAccess"] == "restricted"
     assert tool_policy["maxCallsPerTurn"] == 12

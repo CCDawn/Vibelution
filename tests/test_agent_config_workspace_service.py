@@ -924,6 +924,11 @@ def test_agent_directory_config_list_skips_chat_and_inbox_activity_hydration(tmp
             if agent_directory_service.agent_dialogue_model_id(agent)
         }
 
+    monkeypatch.setattr(
+        agent_directory_service,
+        "agent_dialogue_model_id",
+        lambda agent: f"dialogue-{agent.get('agentId')}" if isinstance(agent, dict) and agent.get("agentId") else "",
+    )
     with agent_directory_service._AGENT_API_HYDRATION_CACHE_LOCK:
         agent_directory_service._AGENT_API_HYDRATION_CACHE_SIGNATURE = None
         agent_directory_service._AGENT_API_HYDRATION_CACHE_FAST_SIGNATURE = None
