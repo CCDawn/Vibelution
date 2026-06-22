@@ -1653,15 +1653,6 @@
   white-space: nowrap;
 }
 
-.sourceCollectionStageActionRow {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  min-width: 0;
-  align-items: center;
-  gap: 6px;
-  justify-content: stretch;
-}
-
 .sourceCollectionStagePrimaryAction,
 .sourceCollectionStageSecondaryAction {
   display: inline-flex;
@@ -1701,42 +1692,6 @@
 .sourceCollectionStageSecondaryAction:disabled {
   cursor: not-allowed;
   opacity: 0.52;
-}
-
-.sourceCollectionStageOperationPanel {
-  display: grid;
-  gap: 8px;
-  padding: 9px;
-  border: 1px solid var(--source-step-border, var(--border-soft));
-  border-radius: 7px;
-  background:
-    linear-gradient(90deg, var(--source-step-bg-soft, transparent), transparent 78%),
-    var(--source-workbench-card);
-}
-
-.sourceCollectionStageOperationPanel div {
-  display: grid;
-  gap: 3px;
-  min-width: 0;
-}
-
-.sourceCollectionStageOperationPanel strong,
-.sourceCollectionStageOperationPanel span {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.sourceCollectionStageOperationPanel strong {
-  color: var(--fg-primary);
-  font-size: 0.78rem;
-}
-
-.sourceCollectionStageOperationPanel span {
-  color: var(--source-step-fg, var(--fg-muted));
-  font-size: 0.66rem;
-  font-weight: 780;
 }
 
 .sourceCollectionStageAgentPanel {
@@ -2004,7 +1959,7 @@
 
 .sourceCollectionStageWorkspaceHeader {
   display: grid;
-  grid-template-columns: minmax(150px, 0.22fr) minmax(0, 1fr);
+  grid-template-columns: minmax(120px, 0.24fr) minmax(0, 1fr) max-content;
   gap: 8px;
   min-width: 0;
   padding: 8px;
@@ -2079,7 +2034,8 @@
 }
 
 .sourceCollectionStageChatActions {
-  display: inline-flex;
+  display: grid;
+  grid-template-columns: repeat(3, max-content);
   align-items: center;
   justify-content: flex-end;
   gap: 6px;
@@ -2121,6 +2077,22 @@
 .sourceCollectionStageChatActions button:disabled {
   cursor: wait;
   opacity: 0.68;
+}
+
+@media (max-width: 1320px) {
+  .sourceCollectionStageWorkspaceHeader {
+    grid-template-columns: minmax(120px, max-content) minmax(0, 1fr);
+  }
+
+  .sourceCollectionStageHandoff {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+
+  .sourceCollectionStageChatActions {
+    grid-column: 2;
+    grid-row: 1;
+  }
 }
 
 .sourceCollectionConversationPanel,
@@ -6295,8 +6267,23 @@
     grid-template-columns: 1fr;
   }
 
+  .sourceCollectionStageHandoff,
+  .sourceCollectionStageChatActions {
+    grid-column: auto;
+    grid-row: auto;
+  }
+
   .sourceCollectionStageChatActions,
   .sourceCollectionPagination {
+    width: 100%;
+  }
+
+  .sourceCollectionStageChatActions {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .sourceCollectionStageChatActions button,
+  .sourceCollectionStageChatActions a {
     width: 100%;
   }
 

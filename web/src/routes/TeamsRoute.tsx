@@ -322,7 +322,6 @@ type SourceCollectionStageModule = {
   actionIcon: "play" | "search" | "check" | "archive" | "refresh";
   onAction: () => void;
   onDetail: () => void;
-  onAgentChat: () => void;
 };
 
 type SourceCollectionStageAgentChatStatus = "ready" | "loading" | "error" | "repair";
@@ -5456,11 +5455,6 @@ export function TeamsRoute({
                     : (lang === "zh" ? "引用失效" : "missing reference")
                 : (lang === "zh" ? "待绑定" : "missing");
             const modelLabel = researchStageAgentModelLabel(binding.agent, lang);
-            const chatRoute = researchStageAgentDirectChatRoute(
-              binding.agent,
-              sourceCollectionStageReturnRoute(stageId),
-              sourceCollectionStageChatReturnLabel(stageId),
-            );
             return (
               <article
                 key={`source-step-${stageId}-${binding.key}`}
@@ -5485,12 +5479,6 @@ export function TeamsRoute({
                 </div>
                 <div className={styles.sourceCollectionStageAgentCardActions}>
                   <span>{statusLabel}</span>
-                  {chatRoute ? (
-                    <Link to={chatRoute}>
-                      <MessageSquare size={12} />
-                      {lang === "zh" ? "私聊" : "Chat"}
-                    </Link>
-                  ) : null}
                   <Link to={binding.agentId ? researchStageAgentManagementRoute(binding.agentId) : "/agents"}>
                     <Link2 size={12} />
                     {binding.agent ? (lang === "zh" ? "配置" : "Configure") : (lang === "zh" ? "绑定" : "Bind")}
@@ -7119,7 +7107,7 @@ export function TeamsRoute({
       >
         <div className={styles.workflowIngestionHeader}>
           <div>
-            <strong>{lang === "zh" ? "下一步操作" : "Next action"}</strong>
+            <strong>{lang === "zh" ? "步骤侧栏" : "Step side panel"}</strong>
             <span>
               {selectedSourceCollectionRun
                 ? `${sourceCollectionRunLabel(selectedSourceCollectionRun.runId)} · ${sourceCollectionStageFocusLabel}`
@@ -7130,21 +7118,6 @@ export function TeamsRoute({
             {sourceCollectionStatusLabel(sourceCollectionRunStatus?.runStatus || selectedSourceCollectionRun?.status || "pending", lang)}
           </span>
         </div>
-        <section className={styles.sourceCollectionStageOperationPanel}>
-          <div>
-            <strong>{activeModule.label}</strong>
-            <span>{activeModule.status} · {activeModule.metric}</span>
-          </div>
-          <button
-            type="button"
-            className={activeModule.actionTone === "primary" ? styles.sourceCollectionStagePrimaryAction : styles.sourceCollectionStageSecondaryAction}
-            disabled={activeModule.actionDisabled}
-            onClick={activeModule.onAction}
-          >
-            {renderSourceCollectionStageActionIcon(activeModule.actionIcon)}
-            {activeModule.actionLabel}
-          </button>
-        </section>
         {renderSourceCollectionSelectedSourcePanel()}
         {selectedSourceCollectionStageId === "collection" ? (
         <>
@@ -7517,6 +7490,13 @@ export function TeamsRoute({
         : primaryStageAgentRepairPending
           ? (lang === "zh" ? "修复中" : "Repairing")
           : (lang === "zh" ? "修复团队 Agent" : "Repair Team Agents");
+    const primaryStageAgentBinding = sourceCollectionStagePrimaryAgentBinding(activeModule.id);
+    const primaryStageAgentConfigRoute = primaryStageAgentBinding?.agentId
+      ? researchStageAgentManagementRoute(primaryStageAgentBinding.agentId)
+      : "/agents";
+    const primaryStageAgentConfigLabel = primaryStageAgentBinding?.agent
+      ? (lang === "zh" ? "配置 Agent" : "Configure Agent")
+      : (lang === "zh" ? "绑定 Agent" : "Bind Agent");
     const resultPanel = selectedSourceCollectionStageId === "screening"
       ? renderSourceCollectionScreeningPanel()
       : selectedSourceCollectionStageId === "candidate"
@@ -7544,6 +7524,16 @@ export function TeamsRoute({
             <span className={styles.sourceCollectionStageHandoffNext}><b>{lang === "zh" ? "下一步" : "Next"}</b>{activeModule.nextLabel}</span>
           </div>
           <div className={styles.sourceCollectionStageChatActions}>
+            <button
+              type="button"
+              className={activeModule.actionTone === "primary" ? styles.sourceCollectionStagePrimaryAction : styles.sourceCollectionStageSecondaryAction}
+              disabled={activeModule.actionDisabled}
+              onClick={activeModule.onAction}
+              title={activeModule.actionLabel}
+            >
+              {renderSourceCollectionStageActionIcon(activeModule.actionIcon)}
+              {activeModule.actionLabel}
+            </button>
             {primaryStageAgentChatRoute ? (
               <Link
                 to={primaryStageAgentChatRoute}
@@ -7563,6 +7553,10 @@ export function TeamsRoute({
                 {primaryStageAgentFallbackLabel}
               </button>
             )}
+            <Link to={primaryStageAgentConfigRoute} title={lang === "zh" ? "当前阶段 Agent 配置" : "Current stage Agent configuration"}>
+              <Link2 size={13} />
+              {primaryStageAgentConfigLabel}
+            </Link>
           </div>
         </div>
         {repairChallengeCupTeamAgentsMutation.error instanceof Error ? (
@@ -9646,7 +9640,6 @@ export function TeamsRoute({
       actionIcon: selectedSourceCollectionRun && sourceCollectionSearchOpenAssignmentCount > 0 ? "search" : "play",
       onAction: () => void startSourceCollectionStageSessionTask("collection"),
       onDetail: () => openSourceCollectionStage("collection"),
-      onAgentChat: () => openSourceCollectionStageAgentChat("collection"),
     },
     {
       id: "candidate",
@@ -9667,7 +9660,6 @@ export function TeamsRoute({
       actionIcon: selectedTeamExtractSourceCollectionCandidatesPending ? "refresh" : "archive",
       onAction: () => void startSourceCollectionStageSessionTask("candidate"),
       onDetail: () => openSourceCollectionStage("candidate"),
-      onAgentChat: () => openSourceCollectionStageAgentChat("candidate"),
     },
     {
       id: "screening",
@@ -9692,7 +9684,6 @@ export function TeamsRoute({
       actionIcon: "check",
       onAction: () => void startSourceCollectionStageSessionTask("screening"),
       onDetail: () => openSourceCollectionStage("screening"),
-      onAgentChat: () => openSourceCollectionStageAgentChat("screening"),
     },
     {
       id: "graph",
@@ -9717,7 +9708,6 @@ export function TeamsRoute({
       actionIcon: "refresh",
       onAction: () => void startSourceCollectionStageSessionTask("graph"),
       onDetail: () => openSourceCollectionStage("graph"),
-      onAgentChat: () => openSourceCollectionStageAgentChat("graph"),
     },
     {
       id: "memory",
@@ -9752,7 +9742,6 @@ export function TeamsRoute({
       actionIcon: "check",
       onAction: () => void startSourceCollectionStageSessionTask("memory"),
       onDetail: () => openSourceCollectionStage("memory"),
-      onAgentChat: () => openSourceCollectionStageAgentChat("memory"),
     },
   ];
   const sourceCollectionStageCardKeyDown = (
@@ -9898,27 +9887,6 @@ export function TeamsRoute({
                     <em>{module.metric}</em>
                     <small>{module.summary}</small>
                   </span>
-                  <div className={styles.sourceCollectionStageActionRow}>
-                    <button
-                      type="button"
-                      className={module.actionTone === "primary" ? styles.sourceCollectionStagePrimaryAction : styles.sourceCollectionStageSecondaryAction}
-                      disabled={module.actionDisabled}
-                      onClick={module.onAction}
-                      title={module.actionLabel}
-                    >
-                      {renderSourceCollectionStageActionIcon(module.actionIcon)}
-                      {module.actionLabel}
-                    </button>
-                    <button
-                      type="button"
-                      className={styles.sourceCollectionStageSecondaryAction}
-                      onClick={module.onAgentChat}
-                      title={SOURCE_COLLECTION_STAGE_CHAT_LABELS[module.id][lang]}
-                    >
-                      <MessageSquare size={13} />
-                      {lang === "zh" ? "Agent 私聊" : "Agent chat"}
-                    </button>
-                  </div>
                 </article>
               ))}
             </section>
