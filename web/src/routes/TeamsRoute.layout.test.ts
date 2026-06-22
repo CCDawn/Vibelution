@@ -419,6 +419,12 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("params.set(\"returnTo\", normalizedReturnTo)");
     expect(routeSource).toContain("params.set(\"returnLabel\", normalizedReturnLabel)");
     expect(routeSource).toContain("openSourceCollectionStageAgentChat");
+    expect(routeSource).toContain('type SourceCollectionStageAgentChatStatus = "ready" | "loading" | "error" | "repair"');
+    expect(routeSource).toContain("sourceCollectionStageAgentChatState(stageId");
+    expect(routeSource).toContain("workspaceQuery.isPending || workspaceQuery.isFetching");
+    expect(routeSource).toContain("primaryStageAgentChatLoading");
+    expect(routeSource).toContain("加载 Agent...");
+    expect(routeSource).toContain('chatState.status === "repair"');
     expect(routeSource).toContain("onAction: () => void startSourceCollectionStageSessionTask(\"collection\")");
     expect(routeSource).toContain("onAction: () => void startSourceCollectionStageSessionTask(\"candidate\")");
     expect(routeSource).toContain("onAction: () => void startSourceCollectionStageSessionTask(\"screening\")");

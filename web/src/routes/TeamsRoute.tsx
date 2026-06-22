@@ -325,6 +325,8 @@ type SourceCollectionStageModule = {
   onAgentChat: () => void;
 };
 
+type SourceCollectionStageAgentChatStatus = "ready" | "loading" | "error" | "repair";
+
 const SOURCE_COLLECTION_STAGE_AGENT_KEYS: Record<SourceCollectionStageModuleId, string[]> = {
   collection: ["data_discovery", "source_acquisition"],
   candidate: ["content_extraction"],
@@ -5293,6 +5295,30 @@ export function TeamsRoute({
     return bindings.find((binding) => researchStageAgentDirectChatRoute(binding.agent)) ?? bindings[0] ?? null;
   }
 
+  function sourceCollectionStageAgentChatState(stageId: SourceCollectionStageModuleId): {
+    binding: ReturnType<typeof sourceCollectionStagePrimaryAgentBinding>;
+    route: string;
+    status: SourceCollectionStageAgentChatStatus;
+  } {
+    const binding = sourceCollectionStagePrimaryAgentBinding(stageId);
+    const route = researchStageAgentDirectChatRoute(
+      binding?.agent,
+      sourceCollectionStageReturnRoute(stageId),
+      sourceCollectionStageChatReturnLabel(stageId),
+    );
+    if (route) {
+      return { binding, route, status: "ready" };
+    }
+    const hasBoundAgentId = Boolean(String(binding?.agentId || "").trim());
+    if (hasBoundAgentId && !binding?.agent && (workspaceQuery.isPending || workspaceQuery.isFetching)) {
+      return { binding, route, status: "loading" };
+    }
+    if (hasBoundAgentId && !binding?.agent && workspaceQuery.isError) {
+      return { binding, route, status: "error" };
+    }
+    return { binding, route, status: "repair" };
+  }
+
   function sourceCollectionStageReturnRoute(stageId: SourceCollectionStageModuleId) {
     return `${researchSourceCollectionRoute(selectedTeam?.teamId || RESEARCH_TEAM_ID)}&collectionStage=${stageId}`;
   }
@@ -5302,13 +5328,9 @@ export function TeamsRoute({
   }
 
   async function openSourceCollectionStageAgentChat(stageId: SourceCollectionStageModuleId) {
-    const binding = sourceCollectionStagePrimaryAgentBinding(stageId);
-    const chatRoute = researchStageAgentDirectChatRoute(
-      binding?.agent,
-      sourceCollectionStageReturnRoute(stageId),
-      sourceCollectionStageChatReturnLabel(stageId),
-    );
-    if (chatRoute) {
+    const chatState = sourceCollectionStageAgentChatState(stageId);
+    const binding = chatState.binding;
+    if (chatState.status === "ready" && chatState.route) {
       const teamId = selectedTeam?.teamId || RESEARCH_TEAM_ID;
       const runId = selectedSourceCollectionRunEffectiveId;
       const agentId = String(binding?.agent?.agentId || binding?.agentId || "").trim();
@@ -5325,10 +5347,10 @@ export function TeamsRoute({
           console.warn("Failed to seed source collection Agent session context before navigation.", error);
         }
       }
-      navigate(chatRoute);
+      navigate(chatState.route);
       return;
     }
-    if (selectedTeam?.teamId === RESEARCH_TEAM_ID && !repairChallengeCupTeamAgentsMutation.isPending) {
+    if (chatState.status === "repair" && selectedTeam?.teamId === RESEARCH_TEAM_ID && !repairChallengeCupTeamAgentsMutation.isPending) {
       repairChallengeCupTeamAgentsMutation.mutate(selectedTeam.teamId);
     }
   }
@@ -5338,12 +5360,15 @@ export function TeamsRoute({
       return;
     }
     openSourceCollectionStage(stageId);
-    const binding = sourceCollectionStagePrimaryAgentBinding(stageId);
+    const chatState = sourceCollectionStageAgentChatState(stageId);
+    const binding = chatState.binding;
     const agentId = String(binding?.agent?.agentId || binding?.agentId || "").trim();
     const agentRole = String(binding?.key || "").trim();
-    if (!agentId || !binding?.agent?.directSessionId) {
+    if (chatState.status !== "ready" || !agentId || !binding?.agent?.directSessionId) {
       if (selectedTeam.teamId === RESEARCH_TEAM_ID && !repairChallengeCupTeamAgentsMutation.isPending) {
-        repairChallengeCupTeamAgentsMutation.mutate(selectedTeam.teamId);
+        if (chatState.status === "repair") {
+          repairChallengeCupTeamAgentsMutation.mutate(selectedTeam.teamId);
+        }
       }
       return;
     }
@@ -5378,7 +5403,7 @@ export function TeamsRoute({
         returnLabel: sourceCollectionStageChatReturnLabel(stageId),
         requestedByAgent: sourceCollectionOwnerAgentId,
       });
-      navigate(payload.chatRoute || researchStageAgentDirectChatRoute(binding.agent, sourceCollectionStageReturnRoute(stageId), sourceCollectionStageChatReturnLabel(stageId)));
+      navigate(payload.chatRoute || chatState.route);
     } catch {
       return;
     }
@@ -5403,6 +5428,11 @@ export function TeamsRoute({
         </div>
         <div className={styles.sourceCollectionStageAgentList}>
           {bindings.map((binding) => {
+            const agentHydrationPending = Boolean(
+              binding.agentId
+              && !binding.agent
+              && (workspaceQuery.isPending || workspaceQuery.isFetching),
+            );
             const tone = binding.agent
               ? researchStageAgentConfigTone(binding.agent)
               : binding.agentId
@@ -5419,7 +5449,11 @@ export function TeamsRoute({
             const statusLabel = binding.agent
               ? researchStageAgentConfigStatusLabel(binding.agent, lang)
               : binding.agentId
-                ? (lang === "zh" ? "引用失效" : "missing reference")
+                ? agentHydrationPending
+                  ? (lang === "zh" ? "加载中" : "loading")
+                  : workspaceQuery.isError
+                    ? (lang === "zh" ? "Agent 加载失败" : "Agent load failed")
+                    : (lang === "zh" ? "引用失效" : "missing reference")
                 : (lang === "zh" ? "待绑定" : "missing");
             const modelLabel = researchStageAgentModelLabel(binding.agent, lang);
             const chatRoute = researchStageAgentDirectChatRoute(
@@ -7465,12 +7499,24 @@ export function TeamsRoute({
     const activeModule =
       sourceCollectionStageModules.find((module) => module.id === selectedSourceCollectionStageId)
       ?? sourceCollectionStageModules[0];
-    const primaryStageAgentBinding = sourceCollectionStagePrimaryAgentBinding(activeModule.id);
-    const primaryStageAgentChatRoute = researchStageAgentDirectChatRoute(
-      primaryStageAgentBinding?.agent,
-      sourceCollectionStageReturnRoute(activeModule.id),
-      sourceCollectionStageChatReturnLabel(activeModule.id),
-    );
+    const primaryStageAgentChatState = sourceCollectionStageAgentChatState(activeModule.id);
+    const primaryStageAgentChatRoute = primaryStageAgentChatState.route;
+    const primaryStageAgentChatLoading = primaryStageAgentChatState.status === "loading";
+    const primaryStageAgentChatError = primaryStageAgentChatState.status === "error";
+    const primaryStageAgentRepairPending =
+      primaryStageAgentChatState.status === "repair" && repairChallengeCupTeamAgentsMutation.isPending;
+    const primaryStageAgentFallbackTitle = primaryStageAgentChatLoading
+      ? (lang === "zh" ? "正在加载 Agent 配置，请稍候" : "Loading Agent configuration")
+      : primaryStageAgentChatError
+        ? (lang === "zh" ? "Agent 配置加载失败，请刷新后重试" : "Agent configuration failed to load")
+        : (lang === "zh" ? "当前步骤缺少可用私聊，请先修复团队 Agent 绑定" : "No usable direct chat for this step");
+    const primaryStageAgentFallbackLabel = primaryStageAgentChatLoading
+      ? (lang === "zh" ? "加载 Agent..." : "Loading Agent...")
+      : primaryStageAgentChatError
+        ? (lang === "zh" ? "Agent 加载失败" : "Agent load failed")
+        : primaryStageAgentRepairPending
+          ? (lang === "zh" ? "修复中" : "Repairing")
+          : (lang === "zh" ? "修复团队 Agent" : "Repair Team Agents");
     const resultPanel = selectedSourceCollectionStageId === "screening"
       ? renderSourceCollectionScreeningPanel()
       : selectedSourceCollectionStageId === "candidate"
@@ -7509,14 +7555,12 @@ export function TeamsRoute({
             ) : (
               <button
                 type="button"
-                title={lang === "zh" ? "当前步骤缺少可用私聊，请先修复团队 Agent 绑定" : "No usable direct chat for this step"}
+                title={primaryStageAgentFallbackTitle}
                 onClick={() => openSourceCollectionStageAgentChat(activeModule.id)}
-                disabled={repairChallengeCupTeamAgentsMutation.isPending}
+                disabled={primaryStageAgentChatLoading || primaryStageAgentChatError || primaryStageAgentRepairPending}
               >
                 <MessageSquare size={13} />
-                {repairChallengeCupTeamAgentsMutation.isPending
-                  ? (lang === "zh" ? "修复中" : "Repairing")
-                  : (lang === "zh" ? "修复团队 Agent" : "Repair Team Agents")}
+                {primaryStageAgentFallbackLabel}
               </button>
             )}
           </div>
