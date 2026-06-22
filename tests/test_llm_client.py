@@ -91,6 +91,7 @@ def test_local_lan_base_url_is_added_to_no_proxy(monkeypatch):
 
 
 def test_remote_base_url_does_not_change_no_proxy(monkeypatch):
+    monkeypatch.delenv("no_proxy", raising=False)
     monkeypatch.setenv("NO_PROXY", "localhost")
 
     _ensure_no_proxy_for_local_base_url("https://api.openai.com/v1")

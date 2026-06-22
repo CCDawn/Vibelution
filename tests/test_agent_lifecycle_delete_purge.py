@@ -7,6 +7,7 @@ from tests.test_agent_config_workspace_service import (
     ProviderConfig,
     _fake_config_workspace,
     _mark_config_agent_instances_present,
+    _mark_session_active,
     _raw_mode_binding,
     _seed_supervised_fixed_role_agent,
     _use_tmp_project_root,
@@ -255,6 +256,7 @@ def test_agent_delete_api_rejects_protected_agent_without_reference_cleanup(tmp_
     _use_tmp_project_root(tmp_path, monkeypatch)
     protected = session_service.create_chat_session(title="核心 Agent")
     peer = session_service.create_chat_session(title="普通 Agent")
+    _mark_session_active(tmp_path, protected["id"])
     agent_directory_service.update_agent_instance(protected["agentId"], metadata={"protected": True})
     agent_mode_binding_service.update_mode_binding(
         "chat",

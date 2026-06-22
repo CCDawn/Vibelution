@@ -727,7 +727,7 @@ def _build_command_args(
 
 
 def _subprocess_no_window_kwargs() -> dict[str, Any]:
-    if os.name != "nt":
+    if not _is_windows_platform():
         return {}
     kwargs: dict[str, Any] = {}
     flags = int(getattr(subprocess, "CREATE_NO_WINDOW", 0))
@@ -740,12 +740,16 @@ def _subprocess_no_window_kwargs() -> dict[str, Any]:
 
 
 def _hidden_startup_info() -> subprocess.STARTUPINFO | None:
-    if os.name != "nt" or not hasattr(subprocess, "STARTUPINFO"):
+    if not _is_windows_platform() or not hasattr(subprocess, "STARTUPINFO"):
         return None
     startupinfo = subprocess.STARTUPINFO()
     startupinfo.dwFlags |= int(getattr(subprocess, "STARTF_USESHOWWINDOW", 0))
     startupinfo.wShowWindow = int(getattr(subprocess, "SW_HIDE", 0))
     return startupinfo
+
+
+def _is_windows_platform() -> bool:
+    return os.name == "nt"
 
 
 def _run_environment() -> dict[str, str]:

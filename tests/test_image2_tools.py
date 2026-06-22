@@ -2,6 +2,10 @@ import json
 
 from fastapi.testclient import TestClient
 
+from core.chat.conversation_ledger import (
+    conversation_visible_messages_from_events,
+    load_conversation_events,
+)
 from core.ui.chat_state import build_chat_state, load_chat_state, save_chat_state
 from core.web.app import create_app
 from core.web.control import CONTROL_TOKEN_HEADER, get_control_token
@@ -40,6 +44,10 @@ def _bind_agent(root, session_id="session-image"):
     )
 
 
+def _latest_session_message(root, session_id="session-image"):
+    return conversation_visible_messages_from_events(load_conversation_events(root, session_id))[-1]
+
+
 def test_image2_tool_generates_session_artifact_message(tmp_path, monkeypatch):
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
@@ -73,8 +81,7 @@ def test_image2_tool_generates_session_artifact_message(tmp_path, monkeypatch):
     artifact_path = tmp_path / "workspace" / "sessions" / "session-image" / "artifacts" / "images" / result["artifactId"]
     assert artifact_path.read_bytes() == PNG_BYTES
 
-    state = load_chat_state(tmp_path)
-    message = state["conversations"][0]["messages"][-1]
+    message = _latest_session_message(tmp_path)
     assert message["role"] == "assistant"
     assert message["metadata"]["kind"] == "image2_generation"
     assert message["metadata"]["status"] == "succeeded"
@@ -123,8 +130,7 @@ def test_image2_tool_passes_session_input_artifact_to_request(tmp_path, monkeypa
     assert captured["input_image"]["contentType"] == "image/png"
     assert captured["input_image"]["imageBytes"] == PNG_BYTES
 
-    state = load_chat_state(tmp_path)
-    message = state["conversations"][0]["messages"][-1]
+    message = _latest_session_message(tmp_path)
     assert message["metadata"]["hasInputImage"] is True
     assert message["metadata"]["inputArtifactId"] == source["artifactId"]
 
@@ -318,8 +324,7 @@ def test_image2_tool_uses_global_default_model_ref(tmp_path, monkeypatch):
     assert captured["headers"]["Authorization"] == "Bearer image-secret"
     assert captured["timeout"] == 181
 
-    state = load_chat_state(tmp_path)
-    message = state["conversations"][0]["messages"][-1]
+    message = _latest_session_message(tmp_path)
     assert message["metadata"]["model"] == "configured-image-model"
     assert message["metadata"]["modelRef"] == "global_image_model"
 
@@ -459,8 +464,7 @@ def test_image2_tool_appends_failure_message_for_invalid_args(tmp_path, monkeypa
 
     assert result["ok"] is False
     assert result["errorType"] == "validation_error"
-    state = load_chat_state(tmp_path)
-    message = state["conversations"][0]["messages"][-1]
+    message = _latest_session_message(tmp_path)
     assert message["role"] == "assistant"
     assert "图片生成失败" in message["content"]
     assert message["metadata"]["kind"] == "image2_generation"

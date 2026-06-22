@@ -858,7 +858,7 @@ def _terminal_executable_args(executable: str) -> list[str]:
 
 
 def _resolve_windows_npm_cmd_shim(executable: str) -> list[str]:
-    if os.name != "nt":
+    if not _is_windows_platform():
         return []
     path = Path(str(executable or "")).expanduser()
     if path.suffix.lower() != ".cmd" or not path.exists():
@@ -893,7 +893,7 @@ def _spawn_terminal_process(args: list[str], *, cwd: str, rows: int, cols: int) 
     env.pop("NO_COLOR", None)
     rows = _clamp_int(rows, DEFAULT_ROWS, 4, 120)
     cols = _clamp_int(cols, DEFAULT_COLS, 20, 240)
-    if os.name == "nt" and PtyProcess is not None:
+    if _is_windows_platform() and PtyProcess is not None:
         return PtyProcess.spawn(args, cwd=cwd, env=env, dimensions=(rows, cols)), "conpty"
     process = subprocess.Popen(
         args,
@@ -909,6 +909,10 @@ def _spawn_terminal_process(args: list[str], *, cwd: str, rows: int, cols: int) 
         **cli_agent_service._subprocess_no_window_kwargs(),
     )
     return process, "pipe"
+
+
+def _is_windows_platform() -> bool:
+    return os.name == "nt"
 
 
 def _send_initial_task(runtime: _TerminalRuntime, initial_input: str) -> None:

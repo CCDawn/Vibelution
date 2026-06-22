@@ -99,6 +99,26 @@ def _isolate_chat_room_kernel(tmp_path, monkeypatch):
     monkeypatch.setattr(work_run_store, "WORK_RUNS_DIR", work_runs_root)
 
 
+def _install_chat_room_test_llm_config(monkeypatch, model_id: str = "chat-room-test-model") -> dict[str, dict[str, str]]:
+    base_config = session_service.get_config().model_copy(deep=True)
+    try:
+        provider_id = str(
+            base_config.llm.get_profile(profile_id=session_service.DEFAULT_SESSION_AGENT_PROFILE_ID).provider_id or ""
+        ).strip()
+    except Exception:
+        provider_id = ""
+    if not provider_id or provider_id not in base_config.llm.providers:
+        provider_id = next(iter(base_config.llm.providers.keys()), "default")
+    base_config.llm.model_library[model_id] = {
+        "provider_id": provider_id,
+        "model": "chat-room-test-model",
+        "streaming": False,
+        "tool_calling_mode": "disabled",
+    }
+    monkeypatch.setattr(session_service, "get_config", lambda: base_config)
+    return {"dialogue": {"modelId": model_id}}
+
+
 def _capture_session_lifecycle_events(monkeypatch):
     events = []
     condition = threading.Condition()
@@ -1615,14 +1635,13 @@ def test_update_agent_chat_room_membership_rejects_unknown_room(tmp_path, monkey
 
 @pytest.mark.slow
 def test_chat_room_participant_waits_for_active_direct_turn_on_same_agent(tmp_path, monkeypatch):
-    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
-    monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
-    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    _isolate_chat_room_kernel(tmp_path, monkeypatch)
     wait_for_lifecycle_phase, _events = _capture_session_lifecycle_events(monkeypatch)
     monkeypatch.setattr(session_service, "build_agent_context", _lightweight_agent_context)
     monkeypatch.setattr(chat_room_service, "build_agent_context", _lightweight_agent_context)
-    alpha = session_service.create_chat_session(title="Alpha Agent")
-    beta = session_service.create_chat_session(title="Beta Agent")
+    llm_bindings = _install_chat_room_test_llm_config(monkeypatch)
+    alpha = session_service.create_chat_session(title="Alpha Agent", llm_bindings=llm_bindings)
+    beta = session_service.create_chat_session(title="Beta Agent", llm_bindings=llm_bindings)
     room = chat_room_service.create_chat_room(
         title="同 Agent 串行群聊",
         participant_agent_ids=[alpha["agentId"], beta["agentId"]],
@@ -1709,14 +1728,13 @@ def test_chat_room_participant_waits_for_active_direct_turn_on_same_agent(tmp_pa
 
 @pytest.mark.slow
 def test_chat_room_waiting_speaker_keeps_fifo_before_later_direct_turn(tmp_path, monkeypatch):
-    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
-    monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
-    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    _isolate_chat_room_kernel(tmp_path, monkeypatch)
     wait_for_lifecycle_phase, _events = _capture_session_lifecycle_events(monkeypatch)
     monkeypatch.setattr(session_service, "build_agent_context", _lightweight_agent_context)
     monkeypatch.setattr(chat_room_service, "build_agent_context", _lightweight_agent_context)
-    alpha = session_service.create_chat_session(title="Alpha Agent")
-    beta = session_service.create_chat_session(title="Beta Agent")
+    llm_bindings = _install_chat_room_test_llm_config(monkeypatch)
+    alpha = session_service.create_chat_session(title="Alpha Agent", llm_bindings=llm_bindings)
+    beta = session_service.create_chat_session(title="Beta Agent", llm_bindings=llm_bindings)
     state = load_chat_state(tmp_path)
     for conversation in state["conversations"]:
         if conversation["conversation_id"] == beta["id"]:
@@ -1725,7 +1743,10 @@ def test_chat_room_waiting_speaker_keeps_fifo_before_later_direct_turn(tmp_path,
     save_chat_state(tmp_path, state)
     room = chat_room_service.create_chat_room(
         title="同 Agent FIFO 群聊",
-        participant_agent_ids=[alpha["agentId"], session_service.create_chat_session(title="Gamma Agent")["agentId"]],
+        participant_agent_ids=[
+            alpha["agentId"],
+            session_service.create_chat_session(title="Gamma Agent", llm_bindings=llm_bindings)["agentId"],
+        ],
         config={"maxSpeakers": 1},
     )
     executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="pytest-chat-room-fifo")
@@ -1831,14 +1852,13 @@ def test_chat_room_waiting_speaker_keeps_fifo_before_later_direct_turn(tmp_path,
 
 @pytest.mark.slow
 def test_force_stop_chat_room_round_cancels_waiting_agent_slot(tmp_path, monkeypatch):
-    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
-    monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
-    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    _isolate_chat_room_kernel(tmp_path, monkeypatch)
     wait_for_lifecycle_phase, _events = _capture_session_lifecycle_events(monkeypatch)
     monkeypatch.setattr(session_service, "build_agent_context", _lightweight_agent_context)
     monkeypatch.setattr(chat_room_service, "build_agent_context", _lightweight_agent_context)
-    alpha = session_service.create_chat_session(title="Alpha Agent")
-    beta = session_service.create_chat_session(title="Beta Agent")
+    llm_bindings = _install_chat_room_test_llm_config(monkeypatch)
+    alpha = session_service.create_chat_session(title="Alpha Agent", llm_bindings=llm_bindings)
+    beta = session_service.create_chat_session(title="Beta Agent", llm_bindings=llm_bindings)
     room = chat_room_service.create_chat_room(
         title="等待中的群聊",
         participant_agent_ids=[alpha["agentId"], beta["agentId"]],
