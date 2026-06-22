@@ -248,6 +248,46 @@ def test_team_workflow_route_starts_source_collection_run(tmp_path, monkeypatch)
     assert status_response.json()["boundaries"]["writesFormalKnowledge"] is False
 
 
+def test_team_workflow_route_seeds_source_collection_agent_session_context(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    client = _client()
+    discovery = agent_directory_service.create_agent_instance(display_name="资料发现")
+    direct_session = session_service.ensure_agent_direct_session(agent_id=discovery["agentId"], title="资料发现")
+    team = client.post(
+        "/api/teams",
+        json={"name": "挑战杯科研团队", "members": [{"agentId": discovery["agentId"], "role": "data_discovery", "agentName": "资料发现"}]},
+    ).json()
+    start_response = client.post(
+        f"/api/teams/{team['teamId']}/workflow-orchestration/source-collection-runs",
+        json={
+            "topic": "脑启发路由",
+            "agentRoles": ["data_discovery"],
+            "agentIds": {"data_discovery": discovery["agentId"]},
+            "querySeeds": ["brain-inspired routing"],
+            "promptCachePolicy": {"requirement": "disabled"},
+        },
+    )
+
+    response = client.post(
+        f"/api/teams/{team['teamId']}/workflow-orchestration/source-collection-runs/{start_response.json()['run']['runId']}/agent-session-context",
+        json={"stageId": "collection", "agentId": discovery["agentId"], "agentRole": "data_discovery"},
+    )
+    duplicate = client.post(
+        f"/api/teams/{team['teamId']}/workflow-orchestration/source-collection-runs/{start_response.json()['run']['runId']}/agent-session-context",
+        json={"stageId": "collection", "agentId": discovery["agentId"], "agentRole": "data_discovery"},
+    )
+
+    assert start_response.status_code == 201, start_response.text
+    assert response.status_code == 201, response.text
+    assert response.json()["created"] is True
+    assert response.json()["sessionId"] == direct_session["id"]
+    assert response.json()["message"]["metadata"]["kind"] == "source_collection_agent_context"
+    assert duplicate.status_code == 201, duplicate.text
+    assert duplicate.json()["alreadyPresent"] is True
+    detail = session_service.get_session_detail(direct_session["id"])
+    assert len([message for message in detail["messages"] if message.get("metadata", {}).get("kind") == "source_collection_agent_context"]) == 1
+
+
 def test_team_workflow_route_executes_source_collection_search(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
 
