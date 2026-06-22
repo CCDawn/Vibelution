@@ -389,6 +389,78 @@ class TestBuildAPI:
         assert isinstance(result, str)
         assert "优化代码" in result
 
+    def test_repeated_identical_build_reuses_short_window_result(self):
+        pm = PromptManager()
+        calls = {"count": 0}
+
+        def compute_dynamic():
+            calls["count"] += 1
+            return f"dynamic render {calls['count']}"
+
+        pm.register(
+            SystemPromptSection(
+                name="DYNAMIC_TEST",
+                priority=99,
+                compute=compute_dynamic,
+                cache_break=True,
+            )
+        )
+
+        first = pm.build(include=["DYNAMIC_TEST"], current_goal="same goal")
+        second = pm.build(include=["DYNAMIC_TEST"], current_goal="same goal")
+
+        assert second is first
+        assert calls["count"] == 1
+        assert pm._last_build_summary["reuse_cache_hit"] is True
+
+    def test_repeated_build_recomputes_after_dynamic_input_changes(self):
+        pm = PromptManager()
+        calls = {"count": 0}
+
+        def compute_dynamic():
+            calls["count"] += 1
+            return f"dynamic render {calls['count']}"
+
+        pm.register(
+            SystemPromptSection(
+                name="DYNAMIC_TEST",
+                priority=99,
+                compute=compute_dynamic,
+                cache_break=True,
+            )
+        )
+
+        first = pm.build(include=["DYNAMIC_TEST"], current_goal="goal one")
+        second = pm.build(include=["DYNAMIC_TEST"], current_goal="goal two")
+
+        assert second is not first
+        assert calls["count"] == 2
+        assert pm._last_build_summary["reuse_cache_hit"] is False
+
+    def test_repeated_build_does_not_reuse_live_task_checklist(self):
+        pm = PromptManager()
+        calls = {"count": 0}
+
+        def compute_dynamic():
+            calls["count"] += 1
+            return f"task list {calls['count']}"
+
+        pm.register(
+            SystemPromptSection(
+                name="TASK_CHECKLIST",
+                priority=20,
+                compute=compute_dynamic,
+                cache_break=True,
+            )
+        )
+
+        first = to_string(pm.build(include=["TASK_CHECKLIST"]))
+        second = to_string(pm.build(include=["TASK_CHECKLIST"]))
+
+        assert "task list 1" in first
+        assert "task list 2" in second
+        assert calls["count"] == 2
+
     def test_default_build_keeps_prefix_anchored_sections_but_prunes_volatile_dynamic_sections(self):
         """落进 cacheable system prefix 的 section 必须始终被包含，避免按 mode/goal 关键词闪烁
         破坏 prompt cache 字节稳定性；纯动态可选 section（ENV_INFO/CONFIG_AWARENESS）按相关性裁剪。"""
@@ -524,8 +596,8 @@ class TestBuildAPI:
         assert "命令平台纪律" in result
         assert "/dev/null" in result
         assert "Select-Object -First/-Last" in result
-        assert "读文件/搜索可用 `cli_tool`" in result
-        assert "Windows 兼容命令并限制输出" in result
+        assert "读文件/搜索默认用 `cli_tool`" in result
+        assert "Windows 兼容的 `rg`/PowerShell 小范围命令" in result
 
     def test_build_exclude_filter(self):
         pm = PromptManager()

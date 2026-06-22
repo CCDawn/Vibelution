@@ -14,8 +14,10 @@ core/prompt_manager/prompt_manager.py — 系统提示词管理器
 
 from __future__ import annotations
 
+import hashlib
 import os
 import re
+import time
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 
@@ -74,6 +76,11 @@ def build_state_memory_key(summary: str) -> str:
     text = re.sub(r"[ \t]+", " ", text)
     text = re.sub(r"\n{3,}", "\n\n", text)
     return text.strip()
+
+
+def _prompt_text_digest(value: Any) -> str:
+    text = str(value or "")
+    return hashlib.sha256(text.encode("utf-8", errors="replace")).hexdigest()[:16]
 
 
 def build_restart_focus_state_memory(allowed_tool_names: tuple[str, ...]) -> str:
@@ -239,6 +246,7 @@ class PromptManager:
     ]
     _OPTIONAL_RELEVANCE_SECTIONS = {"ENV_INFO", "CONFIG_AWARENESS", "GIT_RULES", "SPEC"}
     _HEAVY_SECTIONS = {"CODEBASE_MAP", "SPEC", "ENV_INFO", "CONFIG_AWARENESS", "GIT_RULES"}
+    _BUILD_REUSE_UNSAFE_SECTIONS = {"TASK_CHECKLIST"}
     _MODE_HINTS = {
         "orient": "全局定向",
         "diagnose": "诊断收束",
@@ -263,6 +271,9 @@ class PromptManager:
 
         # 章节级缓存
         self._section_cache = SystemPromptCache()
+        self._build_cache_generation = 0
+        self._build_reuse_ttl_seconds = 1.0
+        self._last_build_cache: Optional[Dict[str, Any]] = None
 
         # 构建上下文（每轮 build 前更新，MEMORY 章节的 compute 从中读取）
         self._build_context = BuildContext()
@@ -337,6 +348,7 @@ class PromptManager:
         """注册或覆盖一个章节。"""
         self._sections[section.name] = section
         self._section_cache.invalidate(section.name)
+        self._invalidate_build_reuse_cache()
         from core.logging import debug_logger
         debug_logger.debug(
             f"[PromptManager] 注册章节: {section.name} "
@@ -348,6 +360,7 @@ class PromptManager:
         if name in self._sections:
             del self._sections[name]
             self._section_cache.invalidate(name)
+            self._invalidate_build_reuse_cache()
 
     # ------------------------------------------------------------------------
     # build() — 核心组装入口
@@ -373,6 +386,7 @@ class PromptManager:
         Returns:
             SystemPrompt — 不可变字符串元组。
         """
+        build_started = time.perf_counter()
         # 更新构建上下文（MEMORY 章节的 compute 从中读取）
         effective_state_memory = (
             state_memory if state_memory is not None else self.state_memory
@@ -386,16 +400,39 @@ class PromptManager:
         self._build_context.prompt_mode = self._infer_prompt_mode()
 
         # 筛选章节
+        select_started = time.perf_counter()
         selected = self._select_sections(include, exclude)
+        select_duration_ms = (time.perf_counter() - select_started) * 1000
+        all_ordered_sections = self._order_sections(list(self._sections.values()))
+        cache_key = self._build_reuse_cache_key(
+            include=include,
+            exclude=exclude,
+            core_context=core_context,
+            current_goal=effective_current_goal,
+            state_memory=effective_state_memory,
+            selected=selected,
+        )
+        cached = self._get_reusable_build(cache_key)
+        reuse_allowed = self._can_reuse_build(selected)
+        if reuse_allowed and cached is not None:
+            self._last_index = [dict(item) for item in cached["last_index"]]
+            self._last_build_summary = dict(cached["summary"])
+            self._last_build_summary["reuse_cache_hit"] = True
+            self._last_build_summary["reuse_cache_age_ms"] = cached["age_ms"]
+            self._last_build_summary["select_duration_ms"] = select_duration_ms
+            self._last_build_summary["total_duration_ms"] = (time.perf_counter() - build_started) * 1000
+            self._log_build_summary()
+            return cached["prompt"]
 
         # 组装
-        all_ordered_sections = self._order_sections(list(self._sections.values()))
+        render_started = time.perf_counter()
         build_result = get_system_prompt(
             selected,
             self._section_cache,
             all_sections=all_ordered_sections,
         )
         sp = build_result.prompt
+        render_duration_ms = (time.perf_counter() - render_started) * 1000
 
         # 记录索引（复用本次真实构建结果，避免二次 compute）
         self._last_index = [
@@ -406,23 +443,120 @@ class PromptManager:
                 "cache_prefix": result.cache_prefix,
                 "required": result.required,
                 "is_empty": result.is_empty,
+                "source": result.source or "",
+                "duration_ms": round(float(result.duration_ms or 0.0), 3),
             }
             for result in build_result.section_results
         ]
+        string_started = time.perf_counter()
+        prompt_text = to_string(sp)
+        string_duration_ms = (time.perf_counter() - string_started) * 1000
         self._last_build_summary = self._build_summary(
             selected=selected,
             all_sections=all_ordered_sections,
             build_result=build_result,
         )
+        self._last_build_summary.update(
+            {
+                "select_duration_ms": select_duration_ms,
+                "render_duration_ms": render_duration_ms,
+                "tuple_join_duration_ms": build_result.join_duration_ms,
+                "string_join_duration_ms": string_duration_ms,
+                "total_duration_ms": (time.perf_counter() - build_started) * 1000,
+                "reuse_cache_hit": False,
+                "slow_sections": self._slow_section_timings(build_result),
+            }
+        )
+        if reuse_allowed:
+            self._store_reusable_build(cache_key, sp, self._last_index, self._last_build_summary)
 
         from core.logging import debug_logger
         debug_logger.info(
             f"[PromptManager] 构建完成 (sections={len(selected)}, "
-            f"len={len(to_string(sp))}, "
+            f"len={len(prompt_text)}, "
             f"cache={self._section_cache.stats})"
         )
         self._log_build_summary()
         return sp
+
+    def _invalidate_build_reuse_cache(self) -> None:
+        self._build_cache_generation += 1
+        self._last_build_cache = None
+
+    def _build_reuse_cache_key(
+        self,
+        *,
+        include: Optional[List[str]],
+        exclude: Optional[List[str]],
+        core_context: Optional[str],
+        current_goal: Optional[str],
+        state_memory: Optional[str],
+        selected: List[SystemPromptSection],
+    ) -> tuple[Any, ...]:
+        packet = self._build_context.runtime_goal_packet
+        packet_key = (
+            getattr(packet, "fingerprint", None)
+            or getattr(packet, "task_id", None)
+            or getattr(packet, "goal_id", None)
+            or repr(packet)
+        )
+        return (
+            self._build_cache_generation,
+            self._build_context.prompt_mode,
+            tuple(section.name for section in selected),
+            tuple(include or []),
+            tuple(exclude or []),
+            _prompt_text_digest(core_context),
+            _prompt_text_digest(current_goal),
+            _prompt_text_digest(state_memory),
+            _prompt_text_digest(packet_key),
+        )
+
+    def _get_reusable_build(self, cache_key: tuple[Any, ...]) -> Optional[Dict[str, Any]]:
+        cached = self._last_build_cache
+        if not cached or cached.get("key") != cache_key:
+            return None
+        age_ms = (time.perf_counter() - float(cached.get("created_at") or 0.0)) * 1000
+        if age_ms > self._build_reuse_ttl_seconds * 1000:
+            return None
+        return {**cached, "age_ms": age_ms}
+
+    def _can_reuse_build(self, selected: List[SystemPromptSection]) -> bool:
+        selected_names = {section.name for section in selected}
+        return not bool(selected_names & self._BUILD_REUSE_UNSAFE_SECTIONS)
+
+    def _store_reusable_build(
+        self,
+        cache_key: tuple[Any, ...],
+        prompt: SystemPrompt,
+        last_index: List[Dict[str, Any]],
+        summary: Dict[str, Any],
+    ) -> None:
+        self._last_build_cache = {
+            "key": cache_key,
+            "prompt": prompt,
+            "last_index": [dict(item) for item in last_index],
+            "summary": dict(summary),
+            "created_at": time.perf_counter(),
+        }
+
+    @staticmethod
+    def _slow_section_timings(build_result: PromptBuildResult) -> List[Dict[str, Any]]:
+        timings = []
+        for result in build_result.section_results:
+            duration_ms = float(result.duration_ms or 0.0)
+            if duration_ms < 5.0:
+                continue
+            timings.append(
+                {
+                    "name": result.name,
+                    "duration_ms": round(duration_ms, 3),
+                    "source": result.source or "",
+                    "length": len(result.content or ""),
+                }
+            )
+        timings.sort(key=lambda item: float(item["duration_ms"]), reverse=True)
+        return timings[:8]
 
     def _select_sections(
         self,
@@ -844,6 +978,24 @@ class PromptManager:
             f"rendered={','.join(summary.get('rendered_sections', [])) or '-'} "
             f"omitted_heavy={','.join(summary.get('omitted_heavy_sections', [])) or '-'}"
         )
+        message += (
+            f" timings_ms=select:{float(summary.get('select_duration_ms') or 0.0):.1f},"
+            f"render:{float(summary.get('render_duration_ms') or 0.0):.1f},"
+            f"tuple:{float(summary.get('tuple_join_duration_ms') or 0.0):.1f},"
+            f"string:{float(summary.get('string_join_duration_ms') or 0.0):.1f},"
+            f"total:{float(summary.get('total_duration_ms') or 0.0):.1f}"
+        )
+        if summary.get("reuse_cache_hit"):
+            message += f" reuse_hit=1 age_ms={float(summary.get('reuse_cache_age_ms') or 0.0):.1f}"
+        slow_sections = summary.get("slow_sections") or []
+        if slow_sections:
+            slow_text = ",".join(
+                f"{item.get('name')}:{float(item.get('duration_ms') or 0.0):.1f}/{item.get('source') or '-'}"
+                for item in slow_sections[:5]
+                if isinstance(item, dict)
+            )
+            if slow_text:
+                message += f" slow={slow_text}"
         inclusion_reasons = summary.get("optional_inclusion_reasons") or {}
         if inclusion_reasons:
             reason_text = ",".join(f"{name}:{reason}" for name, reason in inclusion_reasons.items())
@@ -873,12 +1025,14 @@ class PromptManager:
             from core.logging import debug_logger
             debug_logger.debug("[PromptManager] select_components 收到空列表，重置为默认")
             self._active_sections_override = None
+            self._invalidate_build_reuse_cache()
             return
 
         known = [c for c in components if c in self._sections]
         known = self._filter_components_for_runtime_goal(known)
         if known:
             self._active_sections_override = known
+            self._invalidate_build_reuse_cache()
             from core.logging import debug_logger
             debug_logger.info(f"[PromptManager] 动态切换章节: {known}")
         else:
@@ -892,6 +1046,7 @@ class PromptManager:
 
         self._build_context.runtime_goal_packet = packet
         self._section_cache.invalidate("RUNTIME_GOAL")
+        self._invalidate_build_reuse_cache()
 
     def get_runtime_goal_packet(self) -> Any:
         return self._build_context.runtime_goal_packet
@@ -924,11 +1079,16 @@ class PromptManager:
         if not goal or not goal.strip():
             return
 
-        self.current_goal = goal
+        normalized_goal = goal.strip()
+        if normalized_goal == (self.current_goal or "").strip():
+            return
+
+        self.current_goal = normalized_goal
         self._section_cache.invalidate("MEMORY")
+        self._invalidate_build_reuse_cache()
         from core.logging import debug_logger
         debug_logger.debug(
-            f"[PromptManager] current_goal 更新: {goal[:80]}"
+            f"[PromptManager] current_goal 更新: {normalized_goal[:80]}"
         )
 
     def get_current_goal(self) -> str:
@@ -946,6 +1106,7 @@ class PromptManager:
         if changed:
             self.state_memory = normalized
             self._section_cache.invalidate("MEMORY")
+            self._invalidate_build_reuse_cache()
             from core.logging import debug_logger
             debug_logger.debug(
                 f"[PromptManager] state_memory 更新，长度={len(normalized)}"
@@ -968,6 +1129,7 @@ class PromptManager:
             return
         self.state_memory = ""
         self._section_cache.invalidate("MEMORY")
+        self._invalidate_build_reuse_cache()
         if persist:
             try:
                 state_memory_path = self._dynamic_root / "STATE_MEMORY.md"
@@ -1073,6 +1235,7 @@ class PromptManager:
     def invalidate_cache(self, name: Optional[str] = None):
         """清除章节缓存。name 为 None 则清除全部。"""
         self._section_cache.invalidate(name)
+        self._invalidate_build_reuse_cache()
         from core.logging import debug_logger
         debug_logger.debug(
             f"[PromptManager] 清除缓存: {name or '全部'}"
