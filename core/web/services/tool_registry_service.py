@@ -1229,15 +1229,25 @@ def _is_tool_failure_result(result_text: Any) -> bool:
 
 def _builtin_tool_items() -> list[dict[str, Any]]:
     from tools.Key_Tools import create_key_tools, create_llm_facing_tools
+    from tools.web_search_tool import autoglm_search_tool_availability
 
     built_tools = create_key_tools()
     llm_visible_names = {str(tool.name) for tool in create_llm_facing_tools() if getattr(tool, "name", "")}
     available_tool_names = {str(getattr(tool, "name", "") or "").strip() for tool in built_tools if getattr(tool, "name", "")}
+    web_search_dependency = autoglm_search_tool_availability()
     items: list[dict[str, Any]] = []
     for tool in built_tools:
         name = str(getattr(tool, "name", "") or "").strip()
         if not name:
             continue
+        dependency_fields: dict[str, Any] = {}
+        llm_visible = name in llm_visible_names
+        block_reason = "Built-in tools are protected by the agent runtime."
+        if name == "web_search_tool":
+            dependency_fields["dependencyStatus"] = dict(web_search_dependency)
+            if not web_search_dependency.get("available"):
+                llm_visible = False
+                block_reason = str(web_search_dependency.get("blockReason") or "AutoGLM token service unavailable.")
         items.append(
             {
                 "id": name,
@@ -1249,16 +1259,17 @@ def _builtin_tool_items() -> list[dict[str, Any]]:
                 "status": "active",
                 "enabled": True,
                 "validated": True,
-                "llmVisible": name in llm_visible_names,
+                "llmVisible": llm_visible,
                 "runtimeActive": True,
                 "deleteAllowed": False,
-                "blockReason": "Built-in tools are protected by the agent runtime.",
+                "blockReason": block_reason,
                 "validationError": "",
                 "argsSchema": _args_schema_for_tool(tool),
                 "testPolicy": _builtin_test_policy(name),
                 "permissionPolicy": _permission_policy_for_tool(name),
                 "createdAt": "",
                 "updatedAt": "",
+                **dependency_fields,
             }
         )
     return sorted(items, key=lambda item: item["name"])

@@ -62,7 +62,7 @@ def test_public_web_search_parses_and_filters_results(monkeypatch):
     assert "域名过滤: allowed=arxiv.org" in result
 
 
-def test_web_search_falls_back_to_public_search_when_token_service_unavailable(monkeypatch):
+def test_web_search_does_not_fallback_when_token_service_unavailable(monkeypatch):
     calls = []
 
     def fake_request(method, url, **kwargs):
@@ -80,11 +80,10 @@ def test_web_search_falls_back_to_public_search_when_token_service_unavailable(m
 
     result = web_search_tool.web_search("fallback query", max_results=3)
 
-    assert result.startswith("[公开搜索降级]")
+    assert result.startswith("[错误]")
     assert "本地 AutoGLM token 服务不可用" in result
-    assert "[AutoGLM token 诊断]" in result
-    assert "Fallback Source" in result
-    assert [method for method, _ in calls] == ["GET", "GET"]
+    assert "Fallback Source" not in result
+    assert [method for method, _ in calls] == ["GET"]
 
 
 def test_batch_web_search_runs_queries_concurrently_and_isolates_failures(monkeypatch):
