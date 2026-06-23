@@ -857,27 +857,27 @@
 
 .answerOnlyProcessGroup {
   display: grid;
-  gap: 6px;
+  gap: 5px;
   min-width: 0;
   max-width: 100%;
 }
 
 .answerOnlyProcessToggle {
   display: inline-grid;
-  grid-template-columns: 18px auto auto minmax(0, 1fr) 16px;
+  grid-template-columns: 14px auto auto minmax(0, 1fr) 14px;
   align-items: center;
-  gap: 7px;
+  gap: 6px;
   width: fit-content;
   max-width: 100%;
-  min-height: 26px;
+  min-height: 22px;
   padding: 0;
   border: 0;
   border-radius: 0;
   background: transparent;
-  color: var(--fg-tertiary);
+  color: color-mix(in srgb, var(--fg-tertiary) 86%, transparent);
   cursor: pointer;
   font: inherit;
-  font-size: 0.72rem;
+  font-size: 0.7rem;
 }
 
 .answerOnlyProcessToggle:hover {
@@ -887,7 +887,7 @@
 .answerOnlyProcessIcon {
   display: inline-grid;
   place-items: center;
-  color: color-mix(in srgb, var(--accent-cool-2) 72%, var(--fg-tertiary));
+  color: color-mix(in srgb, var(--accent-cool-2) 58%, var(--fg-tertiary));
 }
 
 .answerOnlyProcessGroup_failed .answerOnlyProcessIcon,
@@ -896,8 +896,8 @@
 }
 
 .answerOnlyProcessTitle {
-  color: var(--fg-secondary);
-  font-weight: 650;
+  color: color-mix(in srgb, var(--fg-secondary) 82%, var(--fg-tertiary));
+  font-weight: 620;
   white-space: nowrap;
 }
 
@@ -911,12 +911,13 @@
 
 .answerOnlyProcessMeta {
   color: color-mix(in srgb, var(--fg-tertiary) 84%, transparent);
-  font-weight: 560;
+  font-weight: 520;
 }
 
 .answerOnlyProcessPreview {
-  max-width: min(42vw, 460px);
-  color: color-mix(in srgb, var(--fg-tertiary) 74%, transparent);
+  max-width: min(48vw, 520px);
+  color: color-mix(in srgb, var(--fg-tertiary) 68%, transparent);
+  font-weight: 430;
 }
 
 .answerOnlyProcessDetails {
