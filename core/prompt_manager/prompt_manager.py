@@ -305,6 +305,8 @@ class PromptManager:
 
         # 最近一次 build 的索引
         self._last_index: List[Dict[str, Any]] = []
+        self._last_runtime_goal_blocked_sections: List[str] = []
+        self._pending_runtime_goal_blocked_sections: List[str] = []
 
     # ------------------------------------------------------------------------
     # 章节注册
@@ -628,23 +630,22 @@ class PromptManager:
         include: Optional[List[str]],
         active_override: Optional[List[str]],
     ) -> List[SystemPromptSection]:
-        """按当前任务相关性裁剪高噪声可选 section。
-
-        约束：会落进 cacheable system prefix 的 section（静态章节，或
-        `cache_prefix=True` 的动态章节）不参与基于 mode/goal 的关键词裁剪——
-        关键词来源不稳定，让这类 section 闪烁会破坏 prompt cache 前缀的字节
-        稳定性。如要省 token，请用显式 `exclude=` 或 `_active_sections_override`。
-        """
+        """按当前任务相关性裁剪高噪声可选 section。"""
         explicit_names = set(include or active_override or [])
         pruned: List[SystemPromptSection] = []
+        self._last_runtime_goal_blocked_sections = list(self._pending_runtime_goal_blocked_sections)
+        self._pending_runtime_goal_blocked_sections = []
         for section in sections:
+            if not self._runtime_goal_allows_section(section.name):
+                self._last_runtime_goal_blocked_sections.append(section.name)
+                continue
             if section.name not in (self._OPTIONAL_RELEVANCE_SECTIONS | {"CODEBASE_MAP"}):
                 pruned.append(section)
                 continue
             if section.name in explicit_names:
                 pruned.append(section)
                 continue
-            if not section.cache_break or section.cache_prefix:
+            if section.name != "CODEBASE_MAP" and (not section.cache_break or section.cache_prefix):
                 pruned.append(section)
                 continue
             if self._is_optional_section_relevant(section.name):
@@ -962,6 +963,7 @@ class PromptManager:
             "rendered_sections": rendered_names,
             "omitted_sections": omitted_names,
             "omitted_heavy_sections": omitted_heavy,
+            "runtime_goal_blocked_sections": list(self._last_runtime_goal_blocked_sections),
             "dynamic_sections": dynamic_names,
             "cache_prefix_sections": cache_prefix_names,
             "optional_inclusion_reasons": inclusion_reasons,
@@ -987,6 +989,9 @@ class PromptManager:
         )
         if summary.get("reuse_cache_hit"):
             message += f" reuse_hit=1 age_ms={float(summary.get('reuse_cache_age_ms') or 0.0):.1f}"
+        blocked_sections = summary.get("runtime_goal_blocked_sections") or []
+        if blocked_sections:
+            message += f" blocked_by_runtime_goal={','.join(str(item) for item in blocked_sections)}"
         slow_sections = summary.get("slow_sections") or []
         if slow_sections:
             slow_text = ",".join(
@@ -1060,11 +1065,27 @@ class PromptManager:
             return components
         allowed = set(allowed_fn(self._sections.keys()))
         protected = set(self._PROTECTED_FLOOR_SECTIONS)
-        return [
+        filtered = [
             component
             for component in components
             if component in allowed or component in protected
         ]
+        self._pending_runtime_goal_blocked_sections = [
+            component
+            for component in components
+            if component not in filtered
+        ]
+        return filtered
+
+    def _runtime_goal_allows_section(self, section_name: str) -> bool:
+        packet = self._build_context.runtime_goal_packet
+        if packet is None:
+            return True
+        allowed_fn = getattr(packet, "allowed_components", None)
+        if not callable(allowed_fn):
+            return True
+        section = str(section_name or "").strip().upper()
+        return section in set(allowed_fn(self._sections.keys()))
 
     # ------------------------------------------------------------------------
     # 状态记忆
