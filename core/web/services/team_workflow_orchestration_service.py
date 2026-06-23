@@ -111,6 +111,7 @@ SOURCE_COLLECTION_SEARCH_REQUIRED_TOOLS = (
     "paper_search_tool",
 )
 SOURCE_COLLECTION_STAGE_SESSION_TASK_STATUSES = {"queued", "running", "completed", "needs_review", "blocked", "failed", "cancelled"}
+SOURCE_COLLECTION_STAGE_WRITEBACK_MATERIALIZED_STATUSES = {"completed", "needs_review"}
 SOURCE_COLLECTION_STORAGE_OPEN_TARGETS = {
     "run_directory",
     "artifacts_directory",
@@ -1099,9 +1100,18 @@ def writeback_source_collection_stage_session_task(
         "metadata": _normalize_metadata(request_payload.get("metadata")),
         "recordedAt": utc_now_iso(),
     }
+    materialized_sources = _materialize_source_collection_stage_writeback_sources(
+        normalized_team_id,
+        run_id,
+        task,
+        writeback,
+    )
+    writeback["materializedSources"] = materialized_sources
     task["status"] = status
     task["summary"] = writeback["summary"] or _trim_text(task.get("summary"), max_length=4000)
     task["result"] = writeback["result"]
+    if materialized_sources.get("createdRecordCount") or materialized_sources.get("importedCandidateCount"):
+        task["result"]["materializedSources"] = materialized_sources
     task["evidenceRefs"] = writeback["evidenceRefs"]
     task["nextActions"] = writeback["nextActions"]
     task["writeback"] = writeback
@@ -1120,6 +1130,10 @@ def writeback_source_collection_stage_session_task(
             "stageId": task.get("stageId", ""),
             "agentId": task.get("agentId", ""),
             "status": status,
+            "sourceLeadCount": materialized_sources.get("sourceLeadCount", 0),
+            "createdRecordCount": materialized_sources.get("createdRecordCount", 0),
+            "importedCandidateCount": materialized_sources.get("importedCandidateCount", 0),
+            "skippedDuplicateCount": materialized_sources.get("skippedDuplicateCount", 0),
         },
     )
     return {
@@ -2281,6 +2295,360 @@ def _source_collection_stage_round_status_after_search(
     ):
         return "needs_screening"
     return "completed"
+
+
+def _materialize_source_collection_stage_writeback_sources(
+    team_id: str,
+    run_id: str,
+    task: dict[str, Any],
+    writeback: dict[str, Any],
+) -> dict[str, Any]:
+    status = _trim_text(writeback.get("status"), max_length=80).lower()
+    result = writeback.get("result") if isinstance(writeback.get("result"), dict) else {}
+    if status not in SOURCE_COLLECTION_STAGE_WRITEBACK_MATERIALIZED_STATUSES:
+        return _source_collection_stage_writeback_materialization_summary(status="skipped_status")
+
+    leads = _source_collection_stage_writeback_source_leads(result)
+    if not leads:
+        return _source_collection_stage_writeback_materialization_summary(status="no_structured_sources")
+
+    try:
+        records_payload = data_processing_service.list_records(run_id)
+    except data_processing_service.DataProcessingError as exc:
+        return _source_collection_stage_writeback_materialization_summary(
+            status="failed",
+            failed=[{"reason": "records_unavailable", "error": str(exc)}],
+        )
+    existing_records = [item for item in list(records_payload.get("records") or []) if isinstance(item, dict)]
+    existing_identity_records = _source_collection_existing_identity_records(existing_records)
+
+    created_records: list[dict[str, Any]] = []
+    imported_candidates: list[dict[str, Any]] = []
+    skipped: list[dict[str, Any]] = []
+    failed: list[dict[str, Any]] = []
+    normalized_team_id = _trim_text(team_id, max_length=128)
+    normalized_run_id = _trim_text(run_id, max_length=128)
+    stage_id = _trim_text(task.get("stageId"), max_length=80)
+    agent_id = _trim_text(task.get("agentId"), max_length=160)
+    agent_role = _trim_text(task.get("agentRole"), max_length=80)
+    task_id = _trim_text(task.get("taskId"), max_length=160)
+
+    for index, lead in enumerate(leads, start=1):
+        record_payload = _source_collection_stage_writeback_record_payload(
+            lead,
+            team_id=normalized_team_id,
+            run_id=normalized_run_id,
+            task_id=task_id,
+            stage_id=stage_id,
+            agent_id=agent_id,
+            agent_role=agent_role,
+            index=index,
+        )
+        if not record_payload:
+            skipped.append(
+                {
+                    "reason": "insufficient_source_identity",
+                    "leadId": _trim_text(lead.get("leadId") or lead.get("id"), max_length=160),
+                    "title": _trim_text(lead.get("title"), max_length=240),
+                }
+            )
+            continue
+        source_identity_key = _source_collection_record_identity_key(record_payload)
+        record = existing_identity_records.get(source_identity_key) if source_identity_key else None
+        if record is None:
+            try:
+                record = data_processing_service.add_record(normalized_run_id, record_payload)
+            except data_processing_service.DataProcessingError as exc:
+                failed.append(
+                    {
+                        "reason": "data_record_create_failed",
+                        "leadId": _trim_text(lead.get("leadId") or lead.get("id"), max_length=160),
+                        "title": _trim_text(record_payload.get("title"), max_length=240),
+                        "error": str(exc),
+                    }
+                )
+                continue
+            created_records.append(record)
+            if source_identity_key:
+                existing_identity_records[source_identity_key] = record
+        try:
+            import_response = import_data_record_as_source_candidate(
+                normalized_team_id,
+                normalized_run_id,
+                _trim_text(record.get("recordId"), max_length=160),
+                {
+                    "createdByAgent": agent_id or agent_role or "source_collection_stage_writeback",
+                    "tags": [item for item in ["source_collection", "stage_writeback", agent_role] if item],
+                    "metadata": {
+                        "sourceCollectionStageWriteback": True,
+                        "sourceCollectionStageTaskId": task_id,
+                        "sourceCollectionStageId": stage_id,
+                        "sourceCollectionStageAgentId": agent_id,
+                        "sourceCollectionStageAgentRole": agent_role,
+                        "sourceCollectionLeadId": _trim_text(lead.get("leadId") or lead.get("id"), max_length=160),
+                    },
+                },
+            )
+        except TeamWorkflowOrchestrationError as exc:
+            failed.append(
+                {
+                    "reason": "candidate_import_failed",
+                    "recordId": _trim_text(record.get("recordId"), max_length=160),
+                    "error": str(exc),
+                }
+            )
+            continue
+        if import_response.get("created"):
+            candidate = import_response.get("candidate") if isinstance(import_response.get("candidate"), dict) else {}
+            imported_candidates.append(
+                {
+                    "candidateId": _trim_text(candidate.get("candidateId"), max_length=160),
+                    "recordId": _trim_text(record.get("recordId"), max_length=160),
+                    "title": _trim_text(candidate.get("title") or record.get("title"), max_length=240),
+                }
+            )
+        else:
+            candidate = import_response.get("candidate") if isinstance(import_response.get("candidate"), dict) else {}
+            skipped.append(
+                {
+                    "reason": "duplicate_source_candidate",
+                    "recordId": _trim_text(record.get("recordId"), max_length=160),
+                    "candidateId": _trim_text(candidate.get("candidateId"), max_length=160),
+                }
+            )
+
+    summary = _source_collection_stage_writeback_materialization_summary(
+        status="completed",
+        source_lead_count=len(leads),
+        created_records=created_records,
+        imported_candidates=imported_candidates,
+        skipped=skipped,
+        failed=failed,
+    )
+    _record_workflow_event(
+        "source_collection.stage_session_task_sources_materialized",
+        normalized_team_id,
+        fields={
+            "runId": normalized_run_id,
+            "taskId": task_id,
+            "stageId": stage_id,
+            "agentId": agent_id,
+            "sourceLeadCount": summary["sourceLeadCount"],
+            "createdRecordCount": summary["createdRecordCount"],
+            "importedCandidateCount": summary["importedCandidateCount"],
+            "skippedDuplicateCount": summary["skippedDuplicateCount"],
+            "failedCount": summary["failedCount"],
+        },
+        level="warning" if summary["failedCount"] else "info",
+        outcome="failed" if summary["failedCount"] and not summary["createdRecordCount"] else "completed",
+        lifecycle=bool(summary["failedCount"]),
+    )
+    return summary
+
+
+def _source_collection_stage_writeback_source_leads(result: dict[str, Any]) -> list[dict[str, Any]]:
+    leads: list[dict[str, Any]] = []
+    for key in (
+        "candidateLeads",
+        "sourceCandidates",
+        "source_candidates",
+        "sources",
+        "records",
+        "createdRecords",
+        "created_records",
+    ):
+        value = result.get(key)
+        if isinstance(value, list):
+            leads.extend(item for item in value if isinstance(item, dict))
+    for container_key in ("searchFrame", "handoff", "result", "outputs", "summary"):
+        container = result.get(container_key)
+        if not isinstance(container, dict):
+            continue
+        for key in ("candidateLeads", "sourceCandidates", "sources", "records"):
+            value = container.get(key)
+            if isinstance(value, list):
+                leads.extend(item for item in value if isinstance(item, dict))
+    deduped: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for lead in leads:
+        fingerprint = _source_collection_stage_writeback_lead_fingerprint(lead)
+        if fingerprint in seen:
+            continue
+        seen.add(fingerprint)
+        deduped.append(lead)
+    return deduped[:80]
+
+
+def _source_collection_stage_writeback_lead_fingerprint(lead: dict[str, Any]) -> str:
+    identity = _source_collection_identity_key(
+        source_ref=lead.get("sourceRef") or lead.get("source_ref") or lead.get("locator") or lead.get("doi"),
+        raw_location=lead.get("rawLocation") or lead.get("raw_location") or lead.get("url") or lead.get("sourceUrl"),
+        doi=lead.get("doi") or lead.get("DOI"),
+        url=lead.get("url") or lead.get("sourceUrl"),
+        title=lead.get("title"),
+        container=lead.get("container") or lead.get("venue") or lead.get("journal"),
+        published=lead.get("published") or lead.get("year"),
+    )
+    if identity:
+        return identity
+    fallback = "|".join(
+        [
+            _trim_text(lead.get("leadId") or lead.get("id"), max_length=160),
+            _trim_text(lead.get("title"), max_length=260).lower(),
+            _trim_text(lead.get("year"), max_length=20),
+        ]
+    )
+    return hashlib.sha256(fallback.encode("utf-8")).hexdigest()[:24]
+
+
+def _source_collection_stage_writeback_record_payload(
+    lead: dict[str, Any],
+    *,
+    team_id: str,
+    run_id: str,
+    task_id: str,
+    stage_id: str,
+    agent_id: str,
+    agent_role: str,
+    index: int,
+) -> dict[str, Any]:
+    doi = _source_collection_extract_doi(
+        lead.get("doi"),
+        lead.get("DOI"),
+        lead.get("locator"),
+        lead.get("sourceRef"),
+        lead.get("sourceUrl"),
+        lead.get("url"),
+    )
+    source_url = _trim_text(lead.get("sourceUrl") or lead.get("url"), max_length=2000)
+    source_ref = _trim_text(lead.get("sourceRef") or lead.get("source_ref"), max_length=2000)
+    locator = _trim_text(lead.get("locator"), max_length=2000)
+    if doi and not source_ref:
+        source_ref = f"https://doi.org/{doi}"
+    elif _looks_like_url(source_url) and not source_ref:
+        source_ref = source_url
+    elif _looks_like_url(locator) and not source_ref:
+        source_ref = locator
+        source_url = source_url or locator
+    elif doi:
+        source_ref = source_ref or f"https://doi.org/{doi}"
+    title = _trim_text(lead.get("title"), max_length=260)
+    year = _trim_text(lead.get("year") or lead.get("published"), max_length=80)
+    container = _trim_text(lead.get("container") or lead.get("venue") or lead.get("journal"), max_length=240)
+    if not source_ref and not source_url:
+        return {}
+    summary = _trim_text(
+        lead.get("summary")
+        or lead.get("abstract")
+        or lead.get("relevance")
+        or lead.get("notes")
+        or lead.get("description"),
+        max_length=4000,
+    )
+    metadata = _normalize_metadata(lead.get("metadata"))
+    metadata.update(
+        {
+            "sourceCollectionStageWriteback": True,
+            "sourceCollectionStageTaskId": task_id,
+            "sourceCollectionStageId": stage_id,
+            "sourceCollectionStageAgentId": agent_id,
+            "sourceCollectionStageAgentRole": agent_role,
+            "sourceCollectionLeadIndex": index,
+            "sourceCollectionLeadId": _trim_text(lead.get("leadId") or lead.get("id"), max_length=160),
+            "teamId": team_id,
+            "runId": run_id,
+            "doi": doi,
+            "year": year,
+            "containerTitle": container,
+            "authors": _source_collection_stage_writeback_authors(lead.get("authors")),
+            "certainty": _trim_text(lead.get("certainty"), max_length=120),
+            "priority": _trim_text(lead.get("priority"), max_length=80),
+        }
+    )
+    trace = {
+        "teamId": team_id,
+        "runId": run_id,
+        "taskId": task_id,
+        "stageId": stage_id,
+        "agentId": agent_id,
+        "agentRole": agent_role,
+        "query": _trim_text(lead.get("query"), max_length=1000),
+        "leadId": _trim_text(lead.get("leadId") or lead.get("id"), max_length=160),
+        "searchProvider": _trim_text(lead.get("searchProvider"), max_length=80) or "agent_stage_writeback",
+        "storageTarget": "data_processing.records",
+    }
+    metadata["sourceCollectionTrace"] = trace
+    source_identity_key = _source_collection_identity_key(
+        source_ref=source_ref,
+        raw_location=source_url or locator,
+        doi=doi,
+        url=source_url,
+        title=title,
+        container=container,
+        published=year,
+    )
+    quality_signals = _normalize_metadata(lead.get("qualitySignals"))
+    if source_identity_key:
+        metadata["sourceIdentityKey"] = source_identity_key
+        quality_signals["sourceIdentityKey"] = source_identity_key
+    quality_signals.update(
+        {
+            "stageWritebackMaterialized": True,
+            "certainty": metadata["certainty"],
+            "priority": metadata["priority"],
+        }
+    )
+    return {
+        "sourceType": _source_collection_data_processing_source_type(lead.get("sourceType") or lead.get("source_type") or lead.get("sourceKind") or "paper"),
+        "sourceRef": source_ref,
+        "rawLocation": source_url or locator,
+        "title": title or source_ref or source_url,
+        "summary": summary,
+        "status": "ready_for_review" if source_ref or source_url else "collected",
+        "metadata": metadata,
+        "qualitySignals": quality_signals,
+        "collectionTrace": trace,
+    }
+
+
+def _source_collection_stage_writeback_authors(value: Any) -> Any:
+    if isinstance(value, list):
+        return [_trim_text(item, max_length=160) for item in value[:24] if _trim_text(item, max_length=160)]
+    return _trim_text(value, max_length=1000)
+
+
+def _source_collection_stage_writeback_materialization_summary(
+    *,
+    status: str,
+    source_lead_count: int = 0,
+    created_records: list[dict[str, Any]] | None = None,
+    imported_candidates: list[dict[str, Any]] | None = None,
+    skipped: list[dict[str, Any]] | None = None,
+    failed: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    normalized_skipped = [item for item in list(skipped or []) if isinstance(item, dict)]
+    skipped_duplicate_count = sum(1 for item in normalized_skipped if "duplicate" in _trim_text(item.get("reason"), max_length=120))
+    return {
+        "status": status,
+        "sourceLeadCount": source_lead_count,
+        "createdRecordCount": len(list(created_records or [])),
+        "importedCandidateCount": len(list(imported_candidates or [])),
+        "skippedCount": len(normalized_skipped),
+        "skippedDuplicateCount": skipped_duplicate_count,
+        "failedCount": len(list(failed or [])),
+        "createdRecords": [
+            {
+                "recordId": _trim_text(item.get("recordId"), max_length=160),
+                "title": _trim_text(item.get("title"), max_length=240),
+                "sourceRef": _trim_text(item.get("sourceRef") or item.get("rawLocation"), max_length=240),
+            }
+            for item in list(created_records or [])[:24]
+            if isinstance(item, dict)
+        ],
+        "importedCandidates": list(imported_candidates or [])[:24],
+        "skipped": normalized_skipped[:24],
+        "failed": [item for item in list(failed or []) if isinstance(item, dict)][:24],
+    }
 
 
 def _source_collection_candidate_count_for_run(candidate_store: dict[str, Any], run_id: str) -> int:
@@ -9929,6 +10297,7 @@ def _reconcile_source_collection_stage_session_tasks(team_id: str) -> bool:
         store_changed = False
         for task in tasks:
             reconciled = _reconcile_source_collection_stage_session_task_from_turn_result(task)
+            reconciled = _reconcile_source_collection_stage_session_task_sources(team_id, run_id, reconciled)
             next_tasks.append(reconciled)
             store_changed = store_changed or reconciled is not task
         if store_changed:
@@ -9939,6 +10308,59 @@ def _reconcile_source_collection_stage_session_tasks(team_id: str) -> bool:
                     _sync_stage_round_with_source_collection_stage_task(team_id, run_id, task)
             changed = True
     return changed
+
+
+def _reconcile_source_collection_stage_session_task_sources(team_id: str, run_id: str, task: dict[str, Any]) -> dict[str, Any]:
+    writeback = task.get("writeback") if isinstance(task.get("writeback"), dict) else {}
+    if not writeback:
+        return task
+    status = _trim_text(writeback.get("status") or task.get("status"), max_length=80).lower()
+    if status not in SOURCE_COLLECTION_STAGE_WRITEBACK_MATERIALIZED_STATUSES:
+        return task
+    result = writeback.get("result") if isinstance(writeback.get("result"), dict) else {}
+    if not result and isinstance(task.get("result"), dict):
+        result = task["result"]
+        writeback = dict(writeback)
+        writeback["result"] = result
+    if not result:
+        return task
+    existing_summary = writeback.get("materializedSources") if isinstance(writeback.get("materializedSources"), dict) else {}
+    existing_status = _trim_text(existing_summary.get("status"), max_length=80).lower()
+    if existing_status and existing_status != "failed":
+        return task
+    materialized_sources = _materialize_source_collection_stage_writeback_sources(
+        team_id,
+        run_id,
+        task,
+        writeback,
+    )
+    next_writeback = dict(writeback)
+    next_writeback["materializedSources"] = materialized_sources
+    next_task = dict(task)
+    next_task["writeback"] = next_writeback
+    next_result = dict(result)
+    next_result["materializedSources"] = materialized_sources
+    next_task["result"] = next_result
+    next_task["updatedAt"] = utc_now_iso()
+    _record_workflow_event(
+        "source_collection.stage_session_task_sources_reconciled",
+        team_id,
+        fields={
+            "runId": run_id,
+            "taskId": _trim_text(task.get("taskId"), max_length=160),
+            "stageId": _trim_text(task.get("stageId"), max_length=80),
+            "agentId": _trim_text(task.get("agentId"), max_length=160),
+            "sourceLeadCount": materialized_sources.get("sourceLeadCount", 0),
+            "createdRecordCount": materialized_sources.get("createdRecordCount", 0),
+            "importedCandidateCount": materialized_sources.get("importedCandidateCount", 0),
+            "skippedDuplicateCount": materialized_sources.get("skippedDuplicateCount", 0),
+            "failedCount": materialized_sources.get("failedCount", 0),
+        },
+        level="warning" if materialized_sources.get("failedCount") else "info",
+        outcome="failed" if materialized_sources.get("failedCount") else "completed",
+        lifecycle=bool(materialized_sources.get("failedCount")),
+    )
+    return next_task
 
 
 def _reconcile_source_collection_stage_session_task_from_turn_result(task: dict[str, Any]) -> dict[str, Any]:
