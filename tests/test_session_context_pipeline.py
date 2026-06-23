@@ -318,6 +318,46 @@ def test_context_assembler_replaces_large_tool_results_only_for_compression(tmp_
     assert compressed.tool_result_replacement_state["replacements"][0]["originalChars"] == len(large_result.strip())
 
 
+def test_context_assembler_agent_inbox_profile_compacts_old_tool_noise(tmp_path):
+    large_fetch_result = "[网页内容] https://example.test/paper\n\n" + ("abstract body\n" * 900)
+    messages = [
+        {"role": "user", "content": "旧资料搜索任务"},
+        {
+            "role": "tool",
+            "tool_call_id": "call_timeout",
+            "content": "[错误] 请求超时 (30s): https://example.test/timeout",
+            "metadata": {"toolName": "web_fetch_tool", "toolStatus": "failed"},
+        },
+        {
+            "role": "tool",
+            "tool_call_id": "call_large_fetch",
+            "content": large_fetch_result,
+            "metadata": {"toolName": "web_fetch_tool", "toolStatus": "done"},
+        },
+        {"role": "assistant", "content": "旧长回答\n" + ("详细分析\n" * 900)},
+    ]
+
+    assembled = assemble_conversation_context(
+        [],
+        session_id="session-agent-inbox",
+        recent_message_limit=8,
+        ledger_events=_ledger_events_from_messages(tmp_path, "session-agent-inbox", messages),
+        history_seed_profile="agent_inbox",
+    )
+    joined = "\n".join(str(item.get("content") or "") for item in assembled.history_messages)
+
+    assert "旧资料搜索任务" in joined
+    assert "请求超时" in joined
+    assert "详情位置: 会话历史和工具日志仍保留原始结果" in joined
+    assert "abstract body\n" * 80 not in joined
+    assert "旧长回答" in joined
+    assert "详细分析\n" * 500 not in joined
+    assert "历史 assistant 回复已压缩" in joined
+    assert assembled.history_seed_compaction_state["profile"] == "agent_inbox"
+    assert assembled.history_seed_compaction_state["compactedMessageCount"] >= 3
+    assert assembled.history_seed_compaction_state["omittedToolFailureCount"] == 1
+
+
 def test_tool_result_replacement_handles_langchain_tool_messages():
     tool_message = ToolMessage(content="terminal-line\n" * 80, tool_call_id="call_langchain")
 

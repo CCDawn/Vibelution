@@ -28,6 +28,8 @@ from .conversation_ledger import (
 
 
 DEFAULT_RECENT_MESSAGE_LIMIT = 8
+AGENT_INBOX_TOOL_RESULT_CHAR_LIMIT = 900
+AGENT_INBOX_ASSISTANT_MESSAGE_CHAR_LIMIT = 1_800
 
 
 @dataclass(frozen=True)
@@ -65,6 +67,7 @@ class ContextAssemblyResult:
     tool_result_replacement_state: dict[str, Any] = field(
         default_factory=empty_tool_result_replacement_state
     )
+    history_seed_compaction_state: dict[str, Any] = field(default_factory=dict)
 
     def to_composition_patch(self) -> dict[str, Any]:
         return {
@@ -84,6 +87,7 @@ class ContextAssemblyResult:
             },
             "segments": [segment.to_dict() for segment in self.segments],
             "toolResultReplacement": dict(self.tool_result_replacement_state or {}),
+            "historySeedCompaction": dict(self.history_seed_compaction_state or {}),
         }
 
 
@@ -97,6 +101,7 @@ def assemble_conversation_context(
     ledger_events: Iterable[ConversationLedgerEvent] | None = None,
     replace_large_tool_results_for_compression: bool = False,
     tool_result_replacement_char_limit: int = 12_000,
+    history_seed_profile: str = "full",
 ) -> ContextAssemblyResult:
     """Return the bounded ledger history view used to seed an agent turn."""
 
@@ -127,6 +132,17 @@ def assemble_conversation_context(
             history_messages,
             char_limit=tool_result_replacement_char_limit,
             session_id=session_id,
+        )
+    history_compaction_state = empty_history_seed_compaction_state(profile=history_seed_profile)
+    if str(history_seed_profile or "").strip().lower() == "agent_inbox":
+        agent_inbox_tool_result_limit = min(
+            max(1, int(tool_result_replacement_char_limit or AGENT_INBOX_TOOL_RESULT_CHAR_LIMIT)),
+            AGENT_INBOX_TOOL_RESULT_CHAR_LIMIT,
+        )
+        history_messages, history_compaction_state = compact_agent_inbox_history_seed_messages(
+            history_messages,
+            tool_result_char_limit=agent_inbox_tool_result_limit,
+            assistant_message_char_limit=AGENT_INBOX_ASSISTANT_MESSAGE_CHAR_LIMIT,
         )
     included_event_ids = _included_event_ids(
         events,
@@ -210,7 +226,139 @@ def assemble_conversation_context(
         cacheable_prefix_hash=_hash_text("agent_protocol:v1"),
         dynamic_context_hash=_hash_messages(history_messages),
         tool_result_replacement_state=replacement_state,
+        history_seed_compaction_state=history_compaction_state,
     )
+
+
+def empty_history_seed_compaction_state(*, profile: str = "full") -> dict[str, Any]:
+    return {
+        "profile": str(profile or "full").strip() or "full",
+        "compactedMessageCount": 0,
+        "omittedToolFailureCount": 0,
+        "trimmedMessageCount": 0,
+        "originalChars": 0,
+        "compactedChars": 0,
+    }
+
+
+def compact_agent_inbox_history_seed_messages(
+    messages: Iterable[dict[str, Any]],
+    *,
+    tool_result_char_limit: int = AGENT_INBOX_TOOL_RESULT_CHAR_LIMIT,
+    assistant_message_char_limit: int = AGENT_INBOX_ASSISTANT_MESSAGE_CHAR_LIMIT,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Keep private-message wakeups focused without replaying bulky old evidence."""
+
+    state = empty_history_seed_compaction_state(profile="agent_inbox")
+    compacted_messages: list[dict[str, Any]] = []
+    bounded_tool_limit = max(240, min(int(tool_result_char_limit or AGENT_INBOX_TOOL_RESULT_CHAR_LIMIT), 2_000))
+    bounded_assistant_limit = max(480, min(int(assistant_message_char_limit or AGENT_INBOX_ASSISTANT_MESSAGE_CHAR_LIMIT), 4_000))
+    for raw in list(messages or []):
+        if not isinstance(raw, dict):
+            continue
+        message = dict(raw)
+        content = str(message.get("content") or "")
+        original_chars = len(content)
+        if _looks_like_historical_tool_result(content):
+            compacted_content, omitted_failure = _compact_historical_tool_result(content, char_limit=bounded_tool_limit)
+            if compacted_content != content:
+                message["content"] = compacted_content
+                state["compactedMessageCount"] += 1
+                state["originalChars"] += original_chars
+                state["compactedChars"] += len(compacted_content)
+                if omitted_failure:
+                    state["omittedToolFailureCount"] += 1
+            compacted_messages.append(message)
+            continue
+        if str(message.get("role") or "").strip().lower() == "assistant" and original_chars > bounded_assistant_limit:
+            compacted_content = _trim_history_text(
+                content,
+                char_limit=bounded_assistant_limit,
+                marker="历史 assistant 回复已压缩，仅保留前段摘要；如需全文请查询会话历史。",
+            )
+            message["content"] = compacted_content
+            state["compactedMessageCount"] += 1
+            state["trimmedMessageCount"] += 1
+            state["originalChars"] += original_chars
+            state["compactedChars"] += len(compacted_content)
+        compacted_messages.append(message)
+    return compacted_messages, state
+
+
+def _looks_like_historical_tool_result(content: str) -> bool:
+    text = str(content or "").lstrip()
+    return text.startswith("历史工具结果:") or text.startswith("历史工具证据:")
+
+
+def _compact_historical_tool_result(content: str, *, char_limit: int) -> tuple[str, bool]:
+    text = str(content or "").strip()
+    lowered = text.lower()
+    status = _historical_tool_result_status(text)
+    is_failure = status in {"failed", "error", "blocked", "timeout"} or any(
+        marker in lowered
+        for marker in (
+            "http 403",
+            "http 404",
+            "请求超时",
+            "timeout",
+            "[错误]",
+            "status: failed",
+            "status: error",
+            "status: blocked",
+        )
+    )
+    if is_failure:
+        return _historical_tool_failure_summary(text, status=status), True
+    if len(text) <= char_limit:
+        return text, False
+    return _trim_history_text(
+        text,
+        char_limit=char_limit,
+        marker="历史工具结果已压缩，原始结果仍保存在会话历史/工具日志中。",
+    ), False
+
+
+def _historical_tool_result_status(content: str) -> str:
+    for line in str(content or "").splitlines()[:6]:
+        normalized = line.strip()
+        if normalized.lower().startswith("status:"):
+            return normalized.split(":", 1)[1].strip().lower()
+    return ""
+
+
+def _historical_tool_failure_summary(content: str, *, status: str = "") -> str:
+    lines = [line.strip() for line in str(content or "").splitlines() if line.strip()]
+    header = lines[0] if lines else "历史工具结果"
+    status_line = f"status: {status or 'failed'}"
+    detail = ""
+    for line in lines[1:]:
+        lowered = line.lower()
+        if "http 403" in lowered or "http 404" in lowered or "请求超时" in line or "timeout" in lowered or line.startswith("[错误]"):
+            detail = line
+            break
+    if not detail:
+        detail = next((line for line in lines[1:] if line.lower().startswith("status:")), "")
+    return "\n".join(
+        part
+        for part in (
+            header,
+            status_line,
+            f"压缩原因: 历史私信上下文不重放失败工具正文，避免旧 403/404/timeout 噪声放大当前模型输入。",
+            f"失败摘要: {detail}" if detail else "",
+            "详情位置: 会话历史和工具日志仍保留原始结果。",
+        )
+        if part
+    )
+
+
+def _trim_history_text(content: str, *, char_limit: int, marker: str) -> str:
+    text = str(content or "").strip()
+    bounded_limit = max(120, int(char_limit or 0))
+    if len(text) <= bounded_limit:
+        return text
+    head_limit = max(80, bounded_limit - len(marker) - 64)
+    head = text[:head_limit].rstrip()
+    return f"{head}\n\n[{marker} 原始字符数: {len(text)}]"
 
 
 def _historical_ledger_events(
