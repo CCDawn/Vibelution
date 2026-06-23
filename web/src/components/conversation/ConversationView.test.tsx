@@ -163,6 +163,38 @@ describe("ConversationView edit resend affordance", () => {
     expect(conversationViewSource).not.toContain("advanceStreamingRevealText");
   });
 
+  it("keeps answer and process toggles as borderless text controls", () => {
+    const responseToggleRule = cssRule(".responseToggle");
+    const responseToggleHoverRule = cssRule(".responseToggle:hover");
+    const processToggleRule = cssRule(".answerOnlyProcessToggle");
+    const processToggleHoverRule = cssRule(".answerOnlyProcessToggle:hover");
+
+    expect(responseToggleRule).toContain("border: 0");
+    expect(responseToggleRule).toContain("background: transparent");
+    expect(responseToggleRule).toContain("padding: 0");
+    expect(responseToggleHoverRule).not.toContain("background");
+    expect(responseToggleHoverRule).not.toContain("border-color");
+    expect(processToggleRule).toContain("border: 0");
+    expect(processToggleRule).toContain("background: transparent");
+    expect(processToggleRule).toContain("padding: 0");
+    expect(processToggleHoverRule).not.toContain("background");
+    expect(processToggleHoverRule).not.toContain("border-color");
+  });
+
+  it("caches response and markdown parsing so repeated expands avoid synchronous reparsing", () => {
+    expect(conversationViewSource).toContain("const responseSegmentCacheRef = useRef<Map<string, ResponseSegment[]>>(new Map())");
+    expect(conversationViewSource).toContain("const markdownBlockCacheRef = useRef<Map<string, MarkdownBlock[]>>(new Map())");
+    expect(conversationViewSource).toContain("function getCachedResponseSegments(content: string)");
+    expect(conversationViewSource).toContain("function getCachedMarkdownBlocks(content: string)");
+    expect(conversationViewSource).toContain("trimOldestCacheEntries(responseSegmentCacheRef.current, RESPONSE_PARSE_CACHE_LIMIT)");
+    expect(conversationViewSource).toContain("trimOldestCacheEntries(markdownBlockCacheRef.current, MARKDOWN_PARSE_CACHE_LIMIT)");
+    expect(conversationViewSource).toContain("const responseSegments = showResponseBlock && responseExpanded && !isResponseStreaming");
+    expect(conversationViewSource).toContain("? getCachedResponseSegments(message.content)");
+    expect(conversationViewSource).toContain("const blocks = getCachedMarkdownBlocks(content)");
+    expect(conversationViewSource).toContain("const prewarmMessages = timelineMessages");
+    expect(conversationViewSource).toContain("window.setTimeout(prewarmNext, 48)");
+  });
+
   it("defaults to answer-only process display while keeping details expandable", () => {
     const html = renderConversation(
       [
