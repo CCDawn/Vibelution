@@ -1,13 +1,9 @@
-import { Component, type ErrorInfo, type ReactNode, useMemo, useState } from "react";
+import { Component, type ErrorInfo, type ReactNode, useEffect, useMemo, useState } from "react";
 
 import CodeMirror from "@uiw/react-codemirror";
 import { RangeSetBuilder } from "@codemirror/state";
+import type { Extension } from "@codemirror/state";
 import { Decoration, EditorView } from "@codemirror/view";
-import { javascript } from "@codemirror/lang-javascript";
-import { json } from "@codemirror/lang-json";
-import { markdown } from "@codemirror/lang-markdown";
-import { python } from "@codemirror/lang-python";
-import { yaml } from "@codemirror/lang-yaml";
 
 import { FileContent } from "../../api/types";
 import { workbenchCodeMirrorTheme } from "../../design/codeMirrorTheme";
@@ -95,23 +91,48 @@ export function buildFilePreviewKey({
   ].join("|");
 }
 
-function getExtensions(language: string) {
+async function loadLanguageExtensions(language: string): Promise<Extension[]> {
   switch (language) {
     case "python":
-      return [python(), EditorView.lineWrapping];
+      return import("@codemirror/lang-python").then((module) => [module.python()]);
     case "json":
-      return [json(), EditorView.lineWrapping];
+      return import("@codemirror/lang-json").then((module) => [module.json()]);
     case "markdown":
-      return [markdown(), EditorView.lineWrapping];
+      return import("@codemirror/lang-markdown").then((module) => [module.markdown()]);
     case "yaml":
-      return [yaml(), EditorView.lineWrapping];
+      return import("@codemirror/lang-yaml").then((module) => [module.yaml()]);
     case "javascript":
     case "typescript":
     case "tsx":
-      return [javascript({ typescript: true, jsx: language === "tsx" }), EditorView.lineWrapping];
+      return import("@codemirror/lang-javascript").then((module) => [
+        module.javascript({ typescript: true, jsx: language === "tsx" }),
+      ]);
     default:
-      return [EditorView.lineWrapping];
+      return [];
   }
+}
+
+function useFilePreviewLanguageExtensions(language: string) {
+  const [languageExtensions, setLanguageExtensions] = useState<Extension[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLanguageExtensions([]);
+    void loadLanguageExtensions(language).then((extensions) => {
+      if (!cancelled) {
+        setLanguageExtensions(extensions);
+      }
+    }).catch(() => {
+      if (!cancelled) {
+        setLanguageExtensions([]);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [language]);
+
+  return languageExtensions;
 }
 
 const logLineDecorations = EditorView.decorations.compute([], (state) => {
@@ -149,10 +170,11 @@ export function FilePreview({
 }: FilePreviewProps) {
   const { t } = useAppI18n();
   const [viewMode, setViewMode] = useState<"structured" | "raw">("structured");
+  const languageExtensions = useFilePreviewLanguageExtensions(file.language);
   const editorExtensions = useMemo(() => {
-    const extensions = getExtensions(file.language);
+    const extensions = [...languageExtensions, EditorView.lineWrapping];
     return highlightAsLog ? [...extensions, logLineDecorations, logHighlightTheme] : extensions;
-  }, [file.language, highlightAsLog]);
+  }, [languageExtensions, highlightAsLog]);
   const displayContent = useMemo(() => {
     if (!highlightAsLog || severityFilter === "all") {
       return file.content;
