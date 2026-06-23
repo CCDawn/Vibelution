@@ -103,6 +103,11 @@ const paperNoteChunkStatusQueryKey = (id: string) => ["teams", id, "workflow-orc
 const sourceQualityStatusQueryKey = (id: string) => ["teams", id, "workflow-orchestration", "source-quality", "status"] as const;
 const sourceCollectionRunRecordsQueryKey = (id: string) => ["data-processing", "runs", id, "records"] as const;
 
+function sourceCollectionStageTaskClickKey(stageId: string) {
+  const randomPart = Math.random().toString(36).slice(2, 10) || "manual";
+  return `stage_task_click:${stageId}:${Date.now().toString(36)}:${randomPart}`;
+}
+
 type ResearchStageWorkspaceView = "knowledge_collection" | "experiment" | "iteration";
 type ResearchLegacyWorkspaceView = "source_collection" | "coordination" | "ingestion" | "graph" | "candidates" | "discussion" | "canvas";
 type ResearchWorkspaceView = "overview" | ResearchStageWorkspaceView | ResearchLegacyWorkspaceView;
@@ -4093,6 +4098,7 @@ export function TeamsRoute({
       returnTo: string;
       returnLabel: string;
       requestedByAgent: string;
+      idempotencyKey: string;
     }) =>
       fetchJson<TeamWorkflowSourceCollectionStageSessionTaskPayload>(
         `/api/teams/${encodeURIComponent(payload.teamId)}/workflow-orchestration/source-collection-runs/${encodeURIComponent(payload.runId)}/stage-session-tasks`,
@@ -4106,6 +4112,7 @@ export function TeamsRoute({
             returnTo: payload.returnTo,
             returnLabel: payload.returnLabel,
             requestedByAgent: payload.requestedByAgent,
+            idempotencyKey: payload.idempotencyKey,
           }),
         },
       ),
@@ -5401,6 +5408,7 @@ export function TeamsRoute({
         returnTo: sourceCollectionStageReturnRoute(stageId),
         returnLabel: sourceCollectionStageChatReturnLabel(stageId),
         requestedByAgent: sourceCollectionOwnerAgentId,
+        idempotencyKey: sourceCollectionStageTaskClickKey(stageId),
       });
       navigate(payload.chatRoute || chatState.route);
     } catch {

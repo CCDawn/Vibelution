@@ -734,10 +734,11 @@ def test_start_source_collection_stage_session_task_submits_direct_session_task(
 
     def fake_submit_session_message(session_id, content, **kwargs):
         submitted.append({"sessionId": session_id, "content": content, "kwargs": kwargs})
+        turn_id = f"turn-stage-task-{len(submitted)}"
         return {
             "accepted": True,
             "sessionId": session_id,
-            "turnId": "turn-stage-task",
+            "turnId": turn_id,
             "status": "running",
         }
 
@@ -754,7 +755,7 @@ def test_start_source_collection_stage_session_task_submits_direct_session_task(
             "returnLabel": "返回搜索资料",
         },
     )
-    duplicate = team_workflow_orchestration_service.start_source_collection_stage_session_task(
+    second = team_workflow_orchestration_service.start_source_collection_stage_session_task(
         team["teamId"],
         run_response["run"]["runId"],
         {
@@ -765,12 +766,32 @@ def test_start_source_collection_stage_session_task_submits_direct_session_task(
             "returnLabel": "返回搜索资料",
         },
     )
+    explicit_once = team_workflow_orchestration_service.start_source_collection_stage_session_task(
+        team["teamId"],
+        run_response["run"]["runId"],
+        {
+            "stageId": "collection",
+            "agentId": discovery["agentId"],
+            "agentRole": "data_discovery",
+            "idempotencyKey": "stage-task-click-explicit",
+        },
+    )
+    explicit_duplicate = team_workflow_orchestration_service.start_source_collection_stage_session_task(
+        team["teamId"],
+        run_response["run"]["runId"],
+        {
+            "stageId": "collection",
+            "agentId": discovery["agentId"],
+            "agentRole": "data_discovery",
+            "idempotencyKey": "stage-task-click-explicit",
+        },
+    )
 
     assert task["created"] is True
     assert task["alreadyPresent"] is False
     assert task["sessionId"] == direct_session["id"]
     assert task["chatRoute"].startswith(f"/chat?session={direct_session['id']}")
-    assert task["turn"]["turnId"] == "turn-stage-task"
+    assert task["turn"]["turnId"] == "turn-stage-task-1"
     assert task["task"]["status"] == "running"
     assert task["task"]["writebackContract"]["writesFormalKnowledge"] is False
     assert task["task"]["writebackContract"]["endpoint"].endswith(f"/stage-session-tasks/{task['taskId']}/writeback")
@@ -786,9 +807,16 @@ def test_start_source_collection_stage_session_task_submits_direct_session_task(
     assert metadata["kind"] == "source_collection_stage_session_task"
     assert metadata["sourceCollectionStageTaskId"] == task["taskId"]
     assert metadata["writebackContract"]["taskId"] == task["taskId"]
-    assert duplicate["created"] is False
-    assert duplicate["alreadyPresent"] is True
-    assert len(submitted) == 1
+    assert second["created"] is True
+    assert second["alreadyPresent"] is False
+    assert second["taskId"] != task["taskId"]
+    assert second["turn"]["turnId"] == "turn-stage-task-2"
+    assert explicit_once["created"] is True
+    assert explicit_once["alreadyPresent"] is False
+    assert explicit_duplicate["created"] is False
+    assert explicit_duplicate["alreadyPresent"] is True
+    assert explicit_duplicate["taskId"] == explicit_once["taskId"]
+    assert len(submitted) == 3
 
 
 def test_source_collection_stage_session_task_writeback_records_structured_result(tmp_path, monkeypatch):

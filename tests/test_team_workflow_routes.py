@@ -311,23 +311,42 @@ def test_team_workflow_route_starts_source_collection_stage_session_task(tmp_pat
 
     def fake_submit_session_message(session_id, content, **kwargs):
         submitted.append({"sessionId": session_id, "content": content, "kwargs": kwargs})
-        return {"accepted": True, "sessionId": session_id, "turnId": "turn-stage-task", "status": "running"}
+        return {"accepted": True, "sessionId": session_id, "turnId": f"turn-stage-task-{len(submitted)}", "status": "running"}
 
     monkeypatch.setattr(session_service, "submit_session_message", fake_submit_session_message)
 
     response = client.post(
         f"/api/teams/{team['teamId']}/workflow-orchestration/source-collection-runs/{start_response.json()['run']['runId']}/stage-session-tasks",
-        json={"stageId": "collection", "agentId": discovery["agentId"], "agentRole": "data_discovery", "returnLabel": "返回搜索资料"},
+        json={"stageId": "collection", "agentId": discovery["agentId"], "agentRole": "data_discovery", "returnLabel": "返回搜索资料", "idempotencyKey": "stage-task-click-1"},
+    )
+    second_response = client.post(
+        f"/api/teams/{team['teamId']}/workflow-orchestration/source-collection-runs/{start_response.json()['run']['runId']}/stage-session-tasks",
+        json={"stageId": "collection", "agentId": discovery["agentId"], "agentRole": "data_discovery", "returnLabel": "返回搜索资料", "idempotencyKey": "stage-task-click-2"},
+    )
+    duplicate_response = client.post(
+        f"/api/teams/{team['teamId']}/workflow-orchestration/source-collection-runs/{start_response.json()['run']['runId']}/stage-session-tasks",
+        json={"stageId": "collection", "agentId": discovery["agentId"], "agentRole": "data_discovery", "returnLabel": "返回搜索资料", "idempotencyKey": "stage-task-click-2"},
     )
 
     assert start_response.status_code == 201, start_response.text
     assert response.status_code == 201, response.text
+    assert second_response.status_code == 201, second_response.text
+    assert duplicate_response.status_code == 201, duplicate_response.text
     payload = response.json()
+    second_payload = second_response.json()
+    duplicate_payload = duplicate_response.json()
     assert payload["created"] is True
     assert payload["sessionId"] == direct_session["id"]
     assert payload["chatRoute"].startswith(f"/chat?session={direct_session['id']}")
     assert payload["task"]["writebackContract"]["taskId"] == payload["taskId"]
     assert submitted[0]["kwargs"]["message_metadata"]["kind"] == "source_collection_stage_session_task"
+    assert second_payload["created"] is True
+    assert second_payload["alreadyPresent"] is False
+    assert second_payload["taskId"] != payload["taskId"]
+    assert duplicate_payload["created"] is False
+    assert duplicate_payload["alreadyPresent"] is True
+    assert duplicate_payload["taskId"] == second_payload["taskId"]
+    assert len(submitted) == 2
 
 
 def test_team_workflow_route_writebacks_source_collection_stage_session_task(tmp_path, monkeypatch):
