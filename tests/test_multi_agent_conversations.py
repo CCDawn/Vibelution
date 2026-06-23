@@ -728,6 +728,9 @@ def test_agent_directory_repairs_legacy_mode_role_and_prompt_fields(tmp_path, mo
 
 def test_conversation_index_exposes_agent_management_role_fields(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
+    avatar_dir = tmp_path / "workspace" / "avatars"
+    avatar_dir.mkdir(parents=True, exist_ok=True)
+    (avatar_dir / "01-session-agent.png").write_bytes(b"\x89PNG\r\n\x1a\navatar")
     detail = session_service.create_chat_session(title="科研成员")
     agent = agent_directory_service.update_agent_instance(
         detail["agentId"],
@@ -745,6 +748,9 @@ def test_conversation_index_exposes_agent_management_role_fields(tmp_path, monke
     assert session["agentRoleKey"] == "research_capability_steward"
     assert session["agentPromptTemplateId"] == "prompt-research-capability-steward"
     assert direct["agentId"] == agent["agentId"]
+    assert direct["agentAvatarImagePath"] == session["agentAvatarImagePath"]
+    assert direct["agentAvatarImageUrl"] == session["agentAvatarImageUrl"]
+    assert direct["agentAvatarImageUrl"].startswith("/api/agents/avatar-image/")
     assert direct["agentPrimaryMode"] == "research"
     assert direct["agentRoleKey"] == "research_capability_steward"
     assert direct["agentPromptTemplateId"] == "prompt-research-capability-steward"

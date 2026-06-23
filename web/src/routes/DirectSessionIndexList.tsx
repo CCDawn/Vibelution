@@ -57,6 +57,8 @@ export function conversationToSessionSummary(
     agentRoleKey: conversation.agentRoleKey,
     agentPromptTemplateId: conversation.agentPromptTemplateId,
     agentInboxPendingCount: conversation.agentInboxPendingCount,
+    agentAvatarImagePath: conversation.agentAvatarImagePath,
+    agentAvatarImageUrl: conversation.agentAvatarImageUrl,
     agentDisplayName: conversation.agentDisplayName,
     workspacePath: conversation.workspacePath,
     status: conversation.status,
