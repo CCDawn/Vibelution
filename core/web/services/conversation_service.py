@@ -28,6 +28,8 @@ def list_conversations() -> list[dict[str, Any]]:
                 "agentId": str(session.get("agentId") or "").strip(),
                 "agentCode": str(session.get("agentCode") or "").strip(),
                 "agentDisplayName": str(session.get("agentDisplayName") or "").strip(),
+                "agentAvatarImagePath": str(session.get("agentAvatarImagePath") or "").strip(),
+                "agentAvatarImageUrl": str(session.get("agentAvatarImageUrl") or "").strip(),
                 "directSessionId": str(session.get("id") or "").strip(),
                 "roomId": "",
                 "status": str(session.get("status") or "").strip(),
