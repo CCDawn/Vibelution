@@ -4325,8 +4325,8 @@ a.teamTreeChild:focus-visible {
   grid-template-columns: minmax(0, 1fr);
   gap: 0;
   text-align: left;
-  padding: 2px;
-  border-radius: var(--radius-panel);
+  padding: 3px 4px 3px 7px;
+  border-radius: 7px;
   border: 1px solid transparent;
   background: transparent;
   color: var(--fg-primary);
@@ -4337,12 +4337,14 @@ a.teamTreeChild:focus-visible {
 }
 
 .sessionItemActive {
-  border-color: transparent;
+  border-color: color-mix(in srgb, var(--accent-cool) 20%, transparent);
   box-shadow: none;
 }
 
 .sessionItem[aria-current="true"] {
-  background: color-mix(in srgb, var(--surface-card) 82%, transparent);
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--accent-cool) 20%, transparent) 0 2px, transparent 2px),
+    color-mix(in srgb, var(--surface-card) 68%, transparent);
 }
 
 .directSessionItem {
@@ -4366,17 +4368,19 @@ a.teamTreeChild:focus-visible {
 
 .sessionItem:hover,
 .sessionItem:focus-within {
-  background: color-mix(in srgb, var(--surface-card) 72%, transparent);
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--accent-cool) 13%, transparent) 0 2px, transparent 2px),
+    color-mix(in srgb, var(--surface-card) 56%, transparent);
 }
 
 .sessionItemMain {
   display: grid;
-  grid-template-columns: 32px minmax(0, 1fr);
+  grid-template-columns: 25px minmax(0, 1fr);
   align-items: center;
   gap: 7px;
   min-width: 0;
-  min-height: 46px;
-  padding: 2px 0;
+  min-height: 42px;
+  padding: 3px 0;
   border: 0;
   background: transparent;
   color: inherit;
@@ -4418,20 +4422,20 @@ a.teamTreeChild:focus-visible {
 .conversationAvatar {
   display: grid;
   place-items: center;
-  width: 32px;
-  height: 32px;
+  width: 24px;
+  height: 24px;
   border-radius: 50%;
   color: var(--fg-primary);
   font-family: var(--font-body);
-  font-size: 0.72rem;
-  font-weight: 800;
-  letter-spacing: 0.02em;
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, white 12%, transparent);
+  font-size: 0.66rem;
+  font-weight: 760;
+  letter-spacing: 0;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, white 8%, transparent);
 }
 
 .conversationAvatarDirect {
-  color: var(--accent-warm-2);
-  background: color-mix(in srgb, var(--accent-warm) 18%, var(--surface-card));
+  color: color-mix(in srgb, var(--accent-cool) 76%, var(--fg-primary));
+  background: color-mix(in srgb, var(--accent-cool) 10%, var(--surface-card));
 }
 
 .conversationAvatarGroup {
@@ -4442,11 +4446,19 @@ a.teamTreeChild:focus-visible {
 .conversationCopy {
   display: grid;
   min-width: 0;
-  gap: 2px;
+  gap: 3px;
 }
 
 .conversationTitleRow {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
+  align-items: center;
+  min-width: 0;
+  gap: 5px;
+}
+
+.conversationTitleMain {
+  display: inline-flex;
   align-items: center;
   min-width: 0;
   gap: 5px;
@@ -4456,9 +4468,12 @@ a.teamTreeChild:focus-visible {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: 16px;
-  padding: 0 4px;
-  border: 1px solid var(--border-soft);
+  flex: 0 0 auto;
+  width: 13px;
+  height: 13px;
+  min-height: 13px;
+  padding: 0 3px;
+  border: 0;
   border-radius: 999px;
   font-size: 0.6rem;
   font-weight: 700;
@@ -4467,15 +4482,13 @@ a.teamTreeChild:focus-visible {
 }
 
 .conversationKindBadgeDirect {
-  color: var(--accent-warm-2);
-  border-color: color-mix(in srgb, var(--accent-warm) 30%, var(--border-soft));
-  background: color-mix(in srgb, var(--accent-warm) 12%, transparent);
+  color: color-mix(in srgb, var(--accent-cool) 64%, var(--fg-tertiary));
+  background: transparent;
 }
 
 .conversationKindBadgeChild {
-  color: var(--accent-cool-2);
-  border-color: color-mix(in srgb, var(--accent-cool) 32%, var(--border-soft));
-  background: color-mix(in srgb, var(--accent-cool) 12%, transparent);
+  color: color-mix(in srgb, var(--accent-cool) 72%, var(--fg-tertiary));
+  background: transparent;
 }
 
 .conversationKindBadgeGroup {
@@ -4489,13 +4502,13 @@ a.teamTreeChild:focus-visible {
   align-items: center;
   justify-content: center;
   flex: 0 1 auto;
-  min-height: 16px;
+  min-height: 14px;
   max-width: 100%;
-  padding: 0 5px;
-  border: 1px solid var(--border-soft);
-  border-radius: 999px;
-  font-size: 0.61rem;
-  font-weight: 740;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  font-size: 0.62rem;
+  font-weight: 680;
   line-height: 1;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -4503,56 +4516,64 @@ a.teamTreeChild:focus-visible {
 }
 
 .agentRoleTag_chat {
-  border-color: color-mix(in srgb, var(--accent-warm) 34%, var(--border-soft));
-  background: color-mix(in srgb, var(--accent-warm) 12%, transparent);
-  color: var(--accent-warm-2);
+  background: transparent;
+  color: var(--fg-secondary);
 }
 
 .agentRoleTag_research {
-  border-color: color-mix(in srgb, var(--accent-cool) 36%, var(--border-soft));
-  background: color-mix(in srgb, var(--accent-cool) 13%, transparent);
-  color: var(--accent-cool-2);
+  background: transparent;
+  color: color-mix(in srgb, var(--accent-cool) 58%, var(--fg-secondary));
 }
 
 .agentRoleTag_self {
-  border-color: color-mix(in srgb, var(--state-success) 34%, var(--border-soft));
-  background: color-mix(in srgb, var(--state-success) 12%, transparent);
-  color: var(--state-success);
+  background: transparent;
+  color: color-mix(in srgb, var(--state-success) 70%, var(--fg-secondary));
 }
 
 .agentRoleTag_supervised {
-  border-color: color-mix(in srgb, var(--state-warning) 36%, var(--border-soft));
-  background: color-mix(in srgb, var(--state-warning) 12%, transparent);
-  color: var(--state-warning);
+  background: transparent;
+  color: color-mix(in srgb, var(--state-warning) 68%, var(--fg-secondary));
 }
 
 .agentRoleTag_tool,
 .agentRoleTag_memory,
 .agentRoleTag_general {
-  border-color: color-mix(in srgb, var(--fg-tertiary) 28%, var(--border-soft));
-  background: color-mix(in srgb, var(--fg-tertiary) 9%, transparent);
+  background: transparent;
   color: var(--fg-secondary);
 }
 
 .agentModelTag {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
-  flex: 1 1 112px;
+  gap: 2px;
+  flex: 1 1 92px;
   min-width: 0;
   max-width: 100%;
-  min-height: 16px;
-  padding: 0 5px;
-  border: 1px solid color-mix(in srgb, var(--accent-cool) 24%, var(--border-soft));
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--accent-cool) 8%, transparent);
+  min-height: 14px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
   color: var(--fg-secondary);
-  font-size: 0.6rem;
-  font-weight: 650;
+  font-size: 0.62rem;
+  font-weight: 640;
   line-height: 1;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.agentModelTitleTag {
+  flex: 0 1 auto;
+  max-width: 96px;
+  min-height: 17px;
+  padding: 0 5px;
+  border: 1px solid color-mix(in srgb, var(--accent-cool) 22%, var(--border-soft));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent-cool) 8%, transparent);
+  color: color-mix(in srgb, var(--accent-cool) 64%, var(--fg-secondary));
+  font-size: 0.6rem;
+  font-weight: 700;
 }
 
 .agentModelTag svg {
@@ -4584,6 +4605,14 @@ a.teamTreeChild:focus-visible {
   white-space: nowrap;
 }
 
+.sessionCurrentIndicator {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--accent-cool);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-cool) 18%, transparent);
+}
+
 .sessionTitleInput {
   min-width: 0;
   width: 100%;
@@ -4597,7 +4626,8 @@ a.teamTreeChild:focus-visible {
 
 .sessionState {
   flex: 0 0 auto;
-  color: var(--fg-tertiary);
+  display: inline-flex;
+  color: color-mix(in srgb, var(--fg-tertiary) 76%, transparent);
   font-size: 0.66rem;
 }
 
@@ -4633,13 +4663,13 @@ a.teamTreeChild:focus-visible {
 
 .conversationMetaRow {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) max-content;
+  grid-template-columns: minmax(0, 1fr) fit-content(86px);
   align-items: center;
   min-width: 0;
-  gap: 4px 6px;
+  gap: 3px 6px;
   color: var(--fg-tertiary);
   font-size: 0.66rem;
-  line-height: 1.15;
+  line-height: 1.1;
 }
 
 .conversationMetaMain,
@@ -4647,21 +4677,18 @@ a.teamTreeChild:focus-visible {
   display: inline-flex;
   align-items: center;
   min-width: 0;
-  gap: 4px;
+  gap: 3px;
 }
 
 .conversationMetaMain {
   overflow: hidden;
-}
-
-.conversationMetaMain .agentModelTag {
-  flex: 1 1 96px;
-  min-width: 92px;
+  color: var(--fg-secondary);
 }
 
 .conversationMetaTime {
   flex: 0 0 auto;
   justify-content: flex-end;
+  max-width: 86px;
   white-space: nowrap;
 }
 

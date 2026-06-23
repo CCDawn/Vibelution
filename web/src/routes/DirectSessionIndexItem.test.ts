@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 
 import type { SessionSummary } from "../api/types";
 import type { AgentDisplayInfo } from "./agentDisplay";
 import {
   buildDirectSessionIndexViewModel,
+  DirectSessionIndexItem,
   isAgentRootSession,
   isChildSession,
   sessionUnreadBadgeTitle,
@@ -40,7 +43,69 @@ function display(overrides: Partial<AgentDisplayInfo>): AgentDisplayInfo {
   };
 }
 
+function renderDirectItem(overrides: Partial<Parameters<typeof DirectSessionIndexItem>[0]> = {}) {
+  const session = makeSession({
+    agentDisplayName: "顾明澈",
+    title: "新会话",
+    updatedAt: "2026-06-22T18:54:34.000Z",
+    ...overrides.session,
+  });
+  return renderToStaticMarkup(createElement(DirectSessionIndexItem, {
+    active: true,
+    editing: false,
+    editingTitle: "",
+    itemMessage: "",
+    itemIsNotice: false,
+    missingAgentMessage: "",
+    renamePending: false,
+    session,
+    sessionAvatarFallback: "S",
+    sessionAvatarImageUrl: "",
+    sessionDisplay: display({ functionLabel: "会话入口", modelLabel: "mimo-v2.5" }),
+    sessionSummary: "暂无摘要",
+    sessionTitle: "新会话",
+    lang: "zh",
+    statusLabel: () => "空闲",
+    formatTime: () => "06/22 18:54",
+    t: (key) => key,
+    onCancelRename: () => undefined,
+    onContextMenu: () => undefined,
+    onDragStart: () => undefined,
+    onOpen: () => undefined,
+    onRenameTitleChange: () => undefined,
+    onSubmitRename: () => undefined,
+    ...overrides,
+  }));
+}
+
 describe("DirectSessionIndexItem helpers", () => {
+  it("renders current state as a lightweight indicator instead of a visible current-session badge", () => {
+    const markup = renderDirectItem();
+
+    expect(markup).toContain("sessionCurrentIndicator");
+    expect(markup).not.toContain("sessionCurrentBadge");
+    expect(markup).toContain("aria-label=\"currentSession\"");
+    expect(markup).toContain("模型：mimo-v2.5");
+  });
+
+  it("places the model badge beside the session title without repeating it in metadata", () => {
+    const markup = renderDirectItem();
+
+    expect(markup).toContain("agentModelTitleTag");
+    expect(markup).toContain("模型：mimo-v2.5");
+    expect(markup.match(/agentModelTag/g)).toHaveLength(1);
+  });
+
+  it("keeps unread counts as compact badges while current state stays textless", () => {
+    const markup = renderDirectItem({
+      session: makeSession({ agentInboxPendingCount: 2 }),
+    });
+
+    expect(markup).toContain("sessionCurrentIndicator");
+    expect(markup).toContain("sessionCurrentBadge");
+    expect(markup).toContain("未读信息：2 条");
+  });
+
   it("keeps root direct session titles driven by session title before agent display name", () => {
     expect(sessionListTitle(makeSession({ title: "用户改名", agentDisplayName: "Agent 名" }))).toBe("用户改名");
     expect(sessionListTitle(makeSession({ title: "", agentDisplayName: "Agent 名" }))).toBe("Agent 名");
