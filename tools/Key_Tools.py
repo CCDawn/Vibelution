@@ -27,6 +27,7 @@ from tools.memory_tools import (
 )
 from tools.search_tools import grep_search_tool as _grep_search_impl
 from tools.web_search_tool import (
+    is_autoglm_search_tool_available as _is_autoglm_search_tool_available,
     web_search as _web_search_impl,
 )
 from tools.research_search_tools import (
@@ -2185,4 +2186,6 @@ def create_llm_facing_tools() -> List[BaseTool]:
         "get_self_model_tool",
         "record_evolution_tool",
     }
+    if not _is_autoglm_search_tool_available():
+        excluded_names.add("web_search_tool")
     return [tool for tool in all_tools if getattr(tool, "name", "") not in excluded_names]

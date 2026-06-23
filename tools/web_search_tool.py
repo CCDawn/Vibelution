@@ -38,6 +38,8 @@ _DEFAULT_TOKEN_URL = "http://127.0.0.1:53699/get_token"
 _TOKEN_URL = os.environ.get("AUTOGLM_TOKEN_URL", _DEFAULT_TOKEN_URL).strip() or _DEFAULT_TOKEN_URL
 _REQUEST_TIMEOUT = 30.0  # 秒
 _TOKEN_TIMEOUT = 10.0  # 秒
+_TOKEN_HEALTH_TIMEOUT = 1.0  # 秒；用于工具可见性健康检查，避免每轮 LLM 组装卡住
+_TOKEN_HEALTH_CACHE_TTL = 15.0
 _PUBLIC_SEARCH_URL = "https://www.bing.com/search"
 _PUBLIC_SEARCH_TIMEOUT = 12.0
 _PUBLIC_SEARCH_MAX_RESULTS = 20
@@ -46,6 +48,7 @@ _WEB_FETCH_MAX_BYTES = 2 * 1024 * 1024
 _WEB_FETCH_MAX_REDIRECTS = 5
 _USER_AGENT = "Mozilla/5.0 (compatible; Vibelution/1.0; research search tools)"
 _BLOCKED_HOST_SUFFIXES = (".localhost", ".local", ".internal")
+_TOKEN_HEALTH_CACHE: dict[str, Any] = {"checkedAt": 0.0, "status": None}
 
 
 class AutoGLMTokenServiceError(RuntimeError):
@@ -107,10 +110,10 @@ def _format_token_service_error(error: AutoGLMTokenServiceError) -> str:
     return f"[错误] {error}{diagnostic}"
 
 
-def check_autoglm_token_service() -> dict[str, Any]:
+def check_autoglm_token_service(*, timeout: float | None = None) -> dict[str, Any]:
     """Probe the configured local AutoGLM token service without returning the token."""
     try:
-        token = _get_bearer_token()
+        token = _get_bearer_token(timeout=timeout)
     except AutoGLMTokenServiceError as error:
         return {
             "available": False,
@@ -126,10 +129,35 @@ def check_autoglm_token_service() -> dict[str, Any]:
     }
 
 
-def _get_bearer_token() -> str:
+def autoglm_search_tool_availability(*, force: bool = False) -> dict[str, Any]:
+    """Return cached availability for exposing AutoGLM-backed search to LLMs."""
+    now = time.monotonic()
+    cached = _TOKEN_HEALTH_CACHE.get("status")
+    if not force and isinstance(cached, dict) and now - float(_TOKEN_HEALTH_CACHE.get("checkedAt") or 0) < _TOKEN_HEALTH_CACHE_TTL:
+        return dict(cached)
+    status = check_autoglm_token_service(timeout=_TOKEN_HEALTH_TIMEOUT)
+    if not status.get("available"):
+        status = {
+            **status,
+            "blockReason": (
+                "AutoGLM token 服务不可用，web_search_tool 已临时禁用。"
+                "请启动 http://127.0.0.1:53699/get_token 或设置 AUTOGLM_TOKEN_URL 后刷新。"
+            ),
+        }
+    _TOKEN_HEALTH_CACHE["checkedAt"] = now
+    _TOKEN_HEALTH_CACHE["status"] = dict(status)
+    return status
+
+
+def is_autoglm_search_tool_available(*, force: bool = False) -> bool:
+    return bool(autoglm_search_tool_availability(force=force).get("available"))
+
+
+def _get_bearer_token(*, timeout: float | None = None) -> str:
     """从本地服务获取 Bearer token"""
+    request_timeout = _TOKEN_TIMEOUT if timeout is None else timeout
     try:
-        with httpx.Client(timeout=_TOKEN_TIMEOUT) as client:
+        with httpx.Client(timeout=request_timeout) as client:
             response = client.get(_TOKEN_URL)
             response.raise_for_status()
             token = response.text.strip()
@@ -424,19 +452,6 @@ def public_web_search(
     return _format_search_results(query.strip(), results, provider="public_web_search", note=domain_note)
 
 
-def _maybe_public_search_fallback(error: AutoGLMTokenServiceError, query: str, max_results: int) -> str | None:
-    if error.status == "empty_token":
-        return None
-    fallback = public_web_search(query=query, max_results=max_results)
-    if fallback.startswith("[错误]"):
-        return f"\n\n[公开搜索降级失败]\n{fallback}"
-    return (
-        "\n\n[公开搜索降级]\n"
-        "AutoGLM token 服务当前不可用，已改用无需 API key 的公开搜索页解析结果。\n"
-        f"{fallback}"
-    )
-
-
 # ============================================================================
 # 核心搜索函数
 # ============================================================================
@@ -460,11 +475,7 @@ def web_search(query: str, max_results: int = 10) -> str:
         token = _get_bearer_token()
     except AutoGLMTokenServiceError as e:
         _record_dependency_event(e)
-        diagnostic = _format_token_service_error(e)
-        fallback = _maybe_public_search_fallback(e, query.strip(), max_results)
-        if fallback and fallback.startswith("\n\n[公开搜索降级]\n"):
-            return fallback.strip() + "\n\n[AutoGLM token 诊断]\n" + diagnostic
-        return diagnostic + (fallback or "")
+        return _format_token_service_error(e)
 
     # 2. 构建请求
     headers, payload = _build_headers(token, query.strip())
