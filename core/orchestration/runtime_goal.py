@@ -9,6 +9,19 @@ from typing import Iterable
 from core.orchestration.agent_modes import AgentMode, ModePolicy
 
 
+_CODE_CONTEXT_TOOL_NAMES = {
+    "grep_search_tool",
+    "glob_tool",
+    "code_symbol_tool",
+    "apply_diff_edit_tool",
+    "apply_patch_tool",
+    "write_file_tool",
+    "python_lint_tool",
+    "run_test_for_tool",
+    "cli_tool",
+}
+
+
 @dataclass(frozen=True)
 class TurnCapabilityProfile:
     """One authoritative capability profile for a turn."""
@@ -39,16 +52,24 @@ class RuntimeGoalPacket:
     completion_standard: str
     forbidden_actions: tuple[str, ...] = field(default_factory=tuple)
     capability_profile: str = "default"
+    allow_code_context: bool | None = None
 
     def allowed_components(self, registered_components: Iterable[str]) -> set[str]:
         """返回当前目标包允许激活的提示词组件。"""
 
         allowed = {str(item).strip().upper() for item in registered_components if str(item).strip()}
-        if not self.allow_file_writes:
+        if not self.code_context_allowed():
             allowed.discard("CODEBASE_MAP")
         if not self.allow_git_commit and not self.allow_evolution_transaction:
             allowed.discard("GIT_RULES")
         return allowed
+
+    def code_context_allowed(self) -> bool:
+        """Return whether codebase prompt context is available for this turn."""
+
+        if self.allow_code_context is not None:
+            return bool(self.allow_code_context)
+        return bool(self.allow_file_writes)
 
     def render(self) -> str:
         forbidden = list(self.forbidden_actions) or ["无额外禁止项；仍遵守工具、日志、Git 和安全边界。"]
@@ -62,6 +83,7 @@ class RuntimeGoalPacket:
             "- 能力边界:",
             f"  - 自动持续推进: {_yes_no(self.allow_auto_continue)}",
             f"  - 写文件: {_yes_no(self.allow_file_writes)}",
+            f"  - 代码库上下文: {_yes_no(self.code_context_allowed())}",
             f"  - Git 提交: {_yes_no(self.allow_git_commit)}",
             f"  - 进化事务: {_yes_no(self.allow_evolution_transaction)}",
             f"  - 子 agent: {_yes_no(self.allow_subagents)}",
@@ -73,7 +95,12 @@ class RuntimeGoalPacket:
         return "\n".join(lines)
 
 
-def build_runtime_goal_packet(policy: ModePolicy, goal: str) -> RuntimeGoalPacket:
+def build_runtime_goal_packet(
+    policy: ModePolicy,
+    goal: str,
+    *,
+    agent_tool_policy: dict | None = None,
+) -> RuntimeGoalPacket:
     """根据当前策略构建目标包，但不改变 agent 身份。"""
 
     mode = policy.mode
@@ -90,6 +117,10 @@ def build_runtime_goal_packet(policy: ModePolicy, goal: str) -> RuntimeGoalPacke
             allow_git_commit=profile.allow_git_commit,
             allow_evolution_transaction=profile.allow_evolution_transaction,
             allow_subagents=profile.allow_subagents,
+            allow_code_context=_allow_code_context_for_turn(
+                profile.allow_file_writes,
+                agent_tool_policy,
+            ),
             completion_standard=profile.completion_standard,
             forbidden_actions=profile.forbidden_actions,
         )
@@ -104,6 +135,7 @@ def build_runtime_goal_packet(policy: ModePolicy, goal: str) -> RuntimeGoalPacke
             allow_git_commit=False,
             allow_evolution_transaction=True,
             allow_subagents=False,
+            allow_code_context=True,
             completion_standard="按给定 case 或评测请求产生可比较证据，并在边界内停止。",
             forbidden_actions=(
                 "不要把监督 case 当成新的长期人格或长期目标。",
@@ -120,9 +152,33 @@ def build_runtime_goal_packet(policy: ModePolicy, goal: str) -> RuntimeGoalPacke
         allow_git_commit=True,
         allow_evolution_transaction=True,
         allow_subagents=True,
+        allow_code_context=True,
         completion_standard="围绕 Vibelution 稳定性、进化效率或 UI/agent 一致性完成可验证改进。",
         forbidden_actions=("不要把当前入口解释成另一个 agent；仍然是同一个 Vibelution agent 面对自进化目标。",),
     )
+
+
+def _allow_code_context_for_turn(allow_file_writes: bool, agent_tool_policy: dict | None) -> bool:
+    """Decide whether CODEBASE_MAP is allowed for this Agent turn."""
+
+    if not isinstance(agent_tool_policy, dict):
+        return bool(allow_file_writes)
+    mutation_access = str(agent_tool_policy.get("mutationAccess") or "").strip().lower()
+    write_scopes = agent_tool_policy.get("writeScopes")
+    allowed_tools = {
+        str(item or "").strip()
+        for item in (agent_tool_policy.get("allowedTools") or [])
+        if str(item or "").strip()
+    }
+    has_code_tool = bool(allowed_tools & _CODE_CONTEXT_TOOL_NAMES)
+    if has_code_tool:
+        return True
+    if not allow_file_writes:
+        return False
+    has_write_scope = bool(write_scopes) if isinstance(write_scopes, list) else False
+    if mutation_access == "none" and not has_write_scope and not has_code_tool:
+        return False
+    return has_code_tool or has_write_scope or mutation_access not in {"", "none"}
 
 
 def _chat_capability_profile(policy: ModePolicy, goal_text: str) -> TurnCapabilityProfile:
