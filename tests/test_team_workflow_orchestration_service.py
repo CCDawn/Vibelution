@@ -963,6 +963,141 @@ def test_source_collection_stage_session_task_writeback_records_structured_resul
     assert any(item["taskId"] == task["taskId"] and item["status"] == "completed" for item in stage_results)
 
 
+def test_research_stage_status_reconciles_completed_stage_task_turn_result(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
+    _stub_source_collection_search_background(monkeypatch)
+    discovery = agent_directory_service.create_agent_instance(display_name="资料发现")
+    session_service.ensure_agent_direct_session(agent_id=discovery["agentId"], title="资料发现")
+    team = team_service.create_team(
+        name="挑战杯科研团队",
+        members=[{"agentId": discovery["agentId"], "role": "data_discovery", "agentName": "资料发现"}],
+    )
+    stage_response = team_workflow_orchestration_service.start_research_stage_round(
+        team["teamId"],
+        {
+            "stageType": "knowledge_collection",
+            "topic": "脑启发路由",
+            "goal": "搜集神经机制启发算法资料",
+            "agentRoles": ["data_discovery"],
+            "agentIds": {"data_discovery": discovery["agentId"]},
+            "querySeeds": ["brain-inspired routing"],
+            "promptCachePolicy": {"requirement": "disabled"},
+        },
+    )
+    run_id = stage_response["run"]["runId"]
+    monkeypatch.setattr(
+        session_service,
+        "submit_session_message",
+        lambda session_id, content, **kwargs: {
+            "accepted": True,
+            "sessionId": session_id,
+            "turnId": "turn-stage-task-completed",
+            "status": "running",
+        },
+    )
+    task = team_workflow_orchestration_service.start_source_collection_stage_session_task(
+        team["teamId"],
+        run_id,
+        {"stageId": "collection", "agentId": discovery["agentId"], "agentRole": "data_discovery"},
+    )
+    events_path = tmp_path / "workspace" / "agents" / discovery["agentId"] / "events" / "agent_turn_results.jsonl"
+    events_path.parent.mkdir(parents=True, exist_ok=True)
+    events_path.write_text(
+        json.dumps(
+            {
+                "eventId": "turn-result-completed",
+                "runId": "turn-stage-task-completed",
+                "agentId": discovery["agentId"],
+                "sessionId": task["sessionId"],
+                "status": "completed",
+                "summary": "已完成本轮资料搜集，结构化结果可进入下一步。",
+                "createdAt": "2026-06-23T00:00:00+00:00",
+            },
+            ensure_ascii=False,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    status_payload = team_workflow_orchestration_service.get_research_stage_round_status(team["teamId"])
+
+    latest_round = status_payload["latestRound"]
+    stage_tasks = latest_round.get("sourceCollectionStageSessionTasks", [])
+    reconciled = next(item for item in stage_tasks if item["taskId"] == task["taskId"])
+    assert reconciled["status"] == "completed"
+    task_store = team_workflow_orchestration_service._load_source_collection_stage_session_task_store(team["teamId"], run_id)
+    stored_task = next(item for item in task_store["tasks"] if item["taskId"] == task["taskId"])
+    assert stored_task["status"] == "completed"
+    assert stored_task["writeback"]["resultAuthority"] == "agent_turn_result_reconciliation"
+
+
+def test_research_stage_status_reconciles_blocked_stage_task_turn_result(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
+    _stub_source_collection_search_background(monkeypatch)
+    extraction = agent_directory_service.create_agent_instance(display_name="资料提炼")
+    session_service.ensure_agent_direct_session(agent_id=extraction["agentId"], title="资料提炼")
+    team = team_service.create_team(
+        name="挑战杯科研团队",
+        members=[{"agentId": extraction["agentId"], "role": "content_extraction", "agentName": "资料提炼"}],
+    )
+    stage_response = team_workflow_orchestration_service.start_research_stage_round(
+        team["teamId"],
+        {
+            "stageType": "knowledge_collection",
+            "topic": "脑启发路由",
+            "goal": "搜集神经机制启发算法资料",
+            "agentRoles": ["content_extraction"],
+            "agentIds": {"content_extraction": extraction["agentId"]},
+            "querySeeds": ["brain-inspired routing"],
+            "promptCachePolicy": {"requirement": "disabled"},
+        },
+    )
+    run_id = stage_response["run"]["runId"]
+    monkeypatch.setattr(
+        session_service,
+        "submit_session_message",
+        lambda session_id, content, **kwargs: {
+            "accepted": True,
+            "sessionId": session_id,
+            "turnId": "turn-stage-task-blocked",
+            "status": "running",
+        },
+    )
+    task = team_workflow_orchestration_service.start_source_collection_stage_session_task(
+        team["teamId"],
+        run_id,
+        {"stageId": "candidate", "agentId": extraction["agentId"], "agentRole": "content_extraction"},
+    )
+    events_path = tmp_path / "workspace" / "agents" / extraction["agentId"] / "events" / "agent_turn_results.jsonl"
+    events_path.parent.mkdir(parents=True, exist_ok=True)
+    events_path.write_text(
+        json.dumps(
+            {
+                "eventId": "turn-result-blocked",
+                "runId": "turn-stage-task-blocked",
+                "agentId": extraction["agentId"],
+                "sessionId": task["sessionId"],
+                "status": "completed",
+                "summary": "状态：blocked。缺少 source_collection_context_tool，无法完成结构化提炼。",
+                "createdAt": "2026-06-23T00:00:00+00:00",
+            },
+            ensure_ascii=False,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    status_payload = team_workflow_orchestration_service.get_research_stage_round_status(team["teamId"])
+
+    latest_round = status_payload["latestRound"]
+    stage_tasks = latest_round.get("sourceCollectionStageSessionTasks", [])
+    reconciled = next(item for item in stage_tasks if item["taskId"] == task["taskId"])
+    assert reconciled["status"] == "blocked"
+    assert latest_round["status"] == "needs_attention"
+
+
 def test_source_collection_stage_tools_read_context_and_writeback(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)
