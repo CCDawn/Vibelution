@@ -195,13 +195,15 @@ describe("ChatCodingRoute layout contract", () => {
   });
 
   it("keeps the conversation index compact enough for 1024px workbench use", () => {
-    expect(routeCssSource).toContain("grid-template-columns: 32px minmax(0, 1fr)");
-    expect(routeCssSource).toContain("min-height: 46px");
+    expect(routeCssSource).toContain("minmax(0, min(var(--chat-left-pane-width, 0px), 24vw))");
+    expect(routeCssSource).toContain("minmax(360px, 1fr)");
+    expect(routeCssSource).toContain("minmax(0, min(var(--chat-right-pane-width, 0px), 22vw))");
+    expect(routeCssSource).toContain("min-height: 42px");
     expect(routeCssSource).toContain("width: 32px");
     expect(routeCssSource).toContain("height: 32px");
     expect(routeCssSource).toContain("font-size: 0.7rem");
     expect(routeCssSource).toContain("font-size: 0.66rem");
-    expect(routeCssSource).toContain("grid-template-columns: minmax(0, 1fr) max-content");
+    expect(routeCssSource).toContain("grid-template-columns: minmax(0, 1fr) fit-content(86px)");
     expect(routeCssSource).toContain("max-width: 100%");
     expect(conversationCssSource).toContain(".surfaceCompact .timeline {\n  padding: 10px 14px 12px;");
     expect(conversationCssSource).toContain(".surfaceCompact .composer {\n  gap: 8px;\n  padding: 7px 11px 9px;");
@@ -1089,12 +1091,12 @@ describe("ChatCodingRoute layout contract", () => {
   it("keeps direct session model metadata and timestamps from clipping each other", () => {
     expect(directSessionIndexItemSource).toContain("styles.conversationMetaMain");
     expect(directSessionIndexItemSource).toContain("styles.conversationMetaTime");
-    expect(routeCssSource).toContain("grid-template-columns: minmax(0, 1fr) max-content");
+    expect(routeCssSource).toContain("grid-template-columns: minmax(0, 1fr) fit-content(86px)");
+    expect(routeCssSource).toContain("max-width: 86px");
     expect(routeCssSource).toContain(".conversationMetaTime time");
     expect(routeCssSource).toContain("overflow: visible");
     expect(routeCssSource).toContain("text-overflow: clip");
-    expect(routeCssSource).toContain("flex: 1 1 112px");
-    expect(routeCssSource).toContain("min-width: 92px");
+    expect(routeCssSource).toContain("flex: 0 0 auto");
     expect(routeCssSource).not.toContain("max-width: 104px");
   });
 
