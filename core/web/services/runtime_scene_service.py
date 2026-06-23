@@ -8,6 +8,7 @@ import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 from threading import Lock
+from time import monotonic
 from typing import Any
 
 from core.infrastructure import developer_sandbox
@@ -19,6 +20,7 @@ LAUNCHER_STATE_PATH = PROJECT_ROOT / ".runtime" / "launcher" / "state.json"
 MAX_TEXT_CHARS = 200_000
 MAX_PACKAGE_INDEX_SEARCH_TEXT_CHARS = 6_000
 JSONL_FILE_CACHE_LIMIT = 256
+RUNTIME_SCENE_PROMPT_INDEX_CACHE_TTL_SECONDS = 5.0
 BROWSER_TELEMETRY_RAW_PATH = "raw/browser.telemetry.log"
 BROWSER_TELEMETRY_COMPONENT = "browser_page"
 BROWSER_MEMORY_INDEX_MIN_SECONDS = 300.0
@@ -458,20 +460,26 @@ def list_runtime_scene_evidence_for_agent(
 def build_runtime_scene_prompt_index(limit: int = 3) -> str:
     """Return a compact prompt-facing index for the newest runtime scene packages."""
 
+    bounded_limit = max(1, min(int(limit or 3), 10))
     try:
-        scene_summaries = list_runtime_scenes(limit=max(1, min(int(limit or 3), 10)))
+        scene_summaries = list_runtime_scenes(limit=bounded_limit)
     except Exception:
         return ""
 
     if not scene_summaries:
         return ""
 
+    signature = _runtime_scene_prompt_index_signature(scene_summaries[:bounded_limit])
+    cached = _get_runtime_scene_prompt_index_cache(bounded_limit, signature)
+    if cached is not None:
+        return cached
+
     lines = [
         "## RUNTIME_LOG_INDEX",
         "- 最近运行现场索引；用于先定位日志包，再按需读取 detail/raw 子日志。",
         "- 只注入结构化摘要和路径，不注入 raw 日志全文、完整对话或完整工具输出。",
     ]
-    for index, summary in enumerate(scene_summaries[: max(1, min(int(limit or 3), 10))], start=1):
+    for index, summary in enumerate(scene_summaries[:bounded_limit], start=1):
         scene_id = str(summary.get("runtimeSceneId") or "").strip()
         detail: dict[str, Any] = {}
         if scene_id:
@@ -519,7 +527,68 @@ def build_runtime_scene_prompt_index(limit: int = 3) -> str:
         if next_step:
             lines.append(f"- agent 下一步: {next_step}")
 
-    return "\n".join(lines).strip()
+    rendered = "\n".join(lines).strip()
+    _remember_runtime_scene_prompt_index_cache(bounded_limit, signature, rendered)
+    return rendered
+
+
+_RUNTIME_SCENE_PROMPT_INDEX_CACHE_LOCK = Lock()
+_RUNTIME_SCENE_PROMPT_INDEX_CACHE: dict[tuple[int, tuple[tuple[str, str, str, str], ...]], tuple[float, str]] = {}
+
+
+def _runtime_scene_prompt_index_signature(scene_summaries: list[dict[str, Any]]) -> tuple[tuple[str, str, str, str], ...]:
+    items: list[tuple[str, str, str, str]] = []
+    for summary in scene_summaries:
+        if not isinstance(summary, dict):
+            continue
+        scene_id = str(summary.get("runtimeSceneId") or "").strip()
+        directory_name = str(summary.get("directoryName") or scene_id).strip()
+        package_dir = PROJECT_ROOT / "logs" / "runtime_scenes" / directory_name
+        package_index_path = package_dir / PACKAGE_INDEX_PATH
+        summary_path = package_dir / SUMMARY_PATH
+        try:
+            package_index_mtime = str(package_index_path.stat().st_mtime_ns) if package_index_path.exists() else "0"
+        except OSError:
+            package_index_mtime = "0"
+        try:
+            summary_mtime = str(summary_path.stat().st_mtime_ns) if summary_path.exists() else "0"
+        except OSError:
+            summary_mtime = "0"
+        items.append((scene_id, directory_name, package_index_mtime, summary_mtime))
+    return tuple(items)
+
+
+def _get_runtime_scene_prompt_index_cache(
+    limit: int,
+    signature: tuple[tuple[str, str, str, str], ...],
+) -> str | None:
+    cache_key = (limit, signature)
+    now = monotonic()
+    with _RUNTIME_SCENE_PROMPT_INDEX_CACHE_LOCK:
+        cached = _RUNTIME_SCENE_PROMPT_INDEX_CACHE.get(cache_key)
+        if cached is None:
+            return None
+        cached_at, rendered = cached
+        if now - cached_at > RUNTIME_SCENE_PROMPT_INDEX_CACHE_TTL_SECONDS:
+            _RUNTIME_SCENE_PROMPT_INDEX_CACHE.pop(cache_key, None)
+            return None
+        return rendered
+
+
+def _remember_runtime_scene_prompt_index_cache(
+    limit: int,
+    signature: tuple[tuple[str, str, str, str], ...],
+    rendered: str,
+) -> None:
+    cache_key = (limit, signature)
+    with _RUNTIME_SCENE_PROMPT_INDEX_CACHE_LOCK:
+        _RUNTIME_SCENE_PROMPT_INDEX_CACHE[cache_key] = (monotonic(), rendered)
+        if len(_RUNTIME_SCENE_PROMPT_INDEX_CACHE) > 8:
+            oldest_key = min(
+                _RUNTIME_SCENE_PROMPT_INDEX_CACHE,
+                key=lambda item: _RUNTIME_SCENE_PROMPT_INDEX_CACHE[item][0],
+            )
+            _RUNTIME_SCENE_PROMPT_INDEX_CACHE.pop(oldest_key, None)
 
 
 def read_runtime_scene_file(scene_id: str, relative_path: str) -> dict:
