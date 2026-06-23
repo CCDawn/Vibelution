@@ -2288,6 +2288,8 @@ export function ChatCodingRoute() {
   const hydrateSession = useChatWorkbenchStore((state) => state.hydrateSession);
   const removeSessionWorkspace = useChatWorkbenchStore((state) => state.removeSession);
   const closePreviewTab = useChatWorkbenchStore((state) => state.closePreviewTab);
+  const latestDirectSessionSelectionRef = useRef("");
+  const reselectDirectSessionRef = useRef<(sessionId: string) => void>(() => undefined);
   const setActiveTab = useChatWorkbenchStore((state) => state.setActiveTab);
   const [sessionFilter, setSessionFilter] = useState("");
   const [dragState, setDragState] = useState<DragState | null>(null);
@@ -2667,6 +2669,46 @@ export function ChatCodingRoute() {
     },
     [queryClient],
   );
+  const selectDirectSessionMutation = useMutation({
+    mutationFn: async (sessionId: string) =>
+      fetchJson<SessionDetail>(`/api/sessions/${encodeURIComponent(sessionId)}/select`, {
+        method: "POST",
+      }),
+    onSuccess: (nextDetail) => {
+      const latestSessionId = latestDirectSessionSelectionRef.current;
+      if (latestSessionId && latestSessionId !== nextDetail.id) {
+        reselectDirectSessionRef.current(latestSessionId);
+        return;
+      }
+      setSessionComposerErrors((current) => ({
+        ...current,
+        [nextDetail.id]: "",
+        __sessions__: "",
+      }));
+      syncSessionDetail(nextDetail);
+      void chatWorkspaceCache.afterSessionChanged({
+        sessionId: nextDetail.id,
+        agentId: nextDetail.agentId,
+      });
+    },
+    onError: (error, sessionId) => {
+      if (latestDirectSessionSelectionRef.current !== sessionId) {
+        return;
+      }
+      setSessionComposerErrors((current) => ({
+        ...current,
+        [sessionId]: describeError(error, lang === "zh" ? "选择会话失败" : "Select session failed"),
+      }));
+      void chatWorkspaceCache.refreshSessionRuntime(sessionId);
+    },
+  });
+  reselectDirectSessionRef.current = (sessionId: string) => {
+    const normalizedSessionId = String(sessionId || "").trim();
+    if (!normalizedSessionId) {
+      return;
+    }
+    selectDirectSessionMutation.mutate(normalizedSessionId);
+  };
   const syncChatRoomDetail = useCallback(
     (room: ChatRoomDetail) => {
       queryClient.setQueryData(queryKeys.chatRoom(room.roomId), room);
@@ -5947,15 +5989,23 @@ export function ChatCodingRoute() {
   }
 
   function handleOpenDirectSession(sessionId: string) {
-    if (!sessionId) {
+    const normalizedSessionId = String(sessionId || "").trim();
+    if (!normalizedSessionId) {
       return;
     }
     setSessionContextMenu(null);
-    setActiveSession(sessionId);
+    latestDirectSessionSelectionRef.current = normalizedSessionId;
+    setActiveSession(normalizedSessionId);
     setActiveGroupRoomId("");
     setRightIndexPanel("conversations");
     setGroupRoomActionError("");
-    navigate(`/chat?session=${encodeURIComponent(sessionId)}`, { replace: false });
+    setSessionComposerErrors((current) => ({
+      ...current,
+      [normalizedSessionId]: "",
+      __sessions__: "",
+    }));
+    selectDirectSessionMutation.mutate(normalizedSessionId);
+    navigate(`/chat?session=${encodeURIComponent(normalizedSessionId)}`, { replace: false });
   }
 
   function handleOpenMentionTarget(target: ChatMentionTarget) {
