@@ -94,6 +94,20 @@ class TestToolExecutorInit:
 
         assert "agent_message_tool" in names
 
+    def test_web_search_tool_is_hidden_when_autoglm_token_service_is_unavailable(self, monkeypatch):
+        monkeypatch.setattr(
+            "tools.Key_Tools._is_autoglm_search_tool_available",
+            lambda: False,
+        )
+
+        canonical_names = {tool.name for tool in create_key_tools()}
+        llm_names = {tool.name for tool in create_llm_facing_tools()}
+
+        assert "web_search_tool" in canonical_names
+        assert "web_search_tool" not in llm_names
+        assert "batch_web_search_tool" in llm_names
+        assert "paper_search_tool" in llm_names
+
     def test_research_knowledge_tool_is_registered_and_llm_facing(self):
         """科研知识库查询工具进入默认 LLM 工具目录。"""
         canonical_names = {tool.name for tool in create_key_tools()}

@@ -166,6 +166,37 @@ def test_tool_registry_lists_unified_memory_search_tool_as_agent_facing(tmp_path
     assert unified_tool["permissionPolicy"]["requiresExplicitAllow"] is _is_explicitly_allowed_tool("unified_memory_search_tool")
 
 
+def test_tool_registry_marks_web_search_not_llm_visible_when_autoglm_unavailable(tmp_path, monkeypatch):
+    monkeypatch.setattr(registry, "GENERATED_TOOLS_PATH", tmp_path / "generated_tools.json")
+    monkeypatch.setattr(
+        "tools.Key_Tools._is_autoglm_search_tool_available",
+        lambda: False,
+    )
+    monkeypatch.setattr(
+        "tools.web_search_tool.autoglm_search_tool_availability",
+        lambda: {
+            "available": False,
+            "dependency": "autoglm_token_service",
+            "stage": "token_fetch",
+            "status": "unavailable",
+            "tokenUrl": "http://127.0.0.1:53699/get_token",
+            "searchApiCalled": False,
+            "blockReason": "AutoGLM token 服务不可用，web_search_tool 已临时禁用。",
+        },
+        raising=False,
+    )
+
+    payload = registry.get_tool_registry()
+
+    web_search = next(item for item in payload["tools"] if item["name"] == "web_search_tool")
+    batch_search = next(item for item in payload["tools"] if item["name"] == "batch_web_search_tool")
+    assert web_search["llmVisible"] is False
+    assert web_search["dependencyStatus"]["available"] is False
+    assert "临时禁用" in web_search["blockReason"]
+    assert web_search["agentScopes"]["subagent_default"]["visible"] is False
+    assert batch_search["llmVisible"] is True
+
+
 def test_tool_registry_exposes_agent_scoped_tool_views(tmp_path, monkeypatch):
     monkeypatch.setattr(registry, "GENERATED_TOOLS_PATH", tmp_path / "generated_tools.json")
 

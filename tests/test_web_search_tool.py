@@ -55,6 +55,23 @@ def test_web_search_reports_local_token_service_connection_failure(monkeypatch):
             "searchApiCalled": False,
         }
     ]
+    assert "公开搜索降级" not in result
+
+
+def test_autoglm_search_tool_availability_reports_block_reason(monkeypatch):
+    def fake_get(method, url, **kwargs):
+        request = httpx.Request("GET", web_search_tool._TOKEN_URL)
+        raise httpx.ConnectError("refused", request=request)
+
+    install_fake_client(monkeypatch, fake_get)
+    web_search_tool._TOKEN_HEALTH_CACHE["checkedAt"] = 0.0
+    web_search_tool._TOKEN_HEALTH_CACHE["status"] = None
+
+    status = web_search_tool.autoglm_search_tool_availability(force=True)
+
+    assert status["available"] is False
+    assert status["dependency"] == "autoglm_token_service"
+    assert "web_search_tool 已临时禁用" in status["blockReason"]
 
 
 def test_web_search_reports_token_service_timeout(monkeypatch):
