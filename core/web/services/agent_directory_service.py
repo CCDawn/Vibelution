@@ -137,6 +137,8 @@ RESEARCH_SOURCE_ROLE_TOOL_PROFILES = {
         "allowedTools": (
             "agent_message_tool",
             "research_knowledge_query_tool",
+            "source_collection_context_tool",
+            "source_collection_stage_writeback_tool",
             "web_search_tool",
             "batch_web_search_tool",
             "paper_search_tool",
@@ -145,6 +147,8 @@ RESEARCH_SOURCE_ROLE_TOOL_PROFILES = {
             "search_summarize_sources_tool",
         ),
         "preferredTools": (
+            "source_collection_context_tool",
+            "source_collection_stage_writeback_tool",
             "batch_web_search_tool",
             "paper_search_tool",
             "web_search_tool",
@@ -157,6 +161,8 @@ RESEARCH_SOURCE_ROLE_TOOL_PROFILES = {
         "allowedTools": (
             "agent_message_tool",
             "research_knowledge_query_tool",
+            "source_collection_context_tool",
+            "source_collection_stage_writeback_tool",
             "web_search_tool",
             "web_fetch_tool",
             "batch_web_search_tool",
@@ -165,6 +171,8 @@ RESEARCH_SOURCE_ROLE_TOOL_PROFILES = {
             "search_summarize_sources_tool",
         ),
         "preferredTools": (
+            "source_collection_context_tool",
+            "source_collection_stage_writeback_tool",
             "web_fetch_tool",
             "web_search_tool",
             "batch_web_search_tool",
@@ -225,6 +233,20 @@ CHALLENGE_CUP_ROLE_PROMPT_TEMPLATE_IDS = {
     "challenge_cup_source_quality": "prompt-challenge-cup-source-quality",
 }
 RESEARCH_ROLE_TOOL_PROFILES = {
+    "candidate_graph": {
+        "allowedTools": (
+            "agent_message_tool",
+            "research_knowledge_query_tool",
+            "source_collection_context_tool",
+            "source_collection_stage_writeback_tool",
+        ),
+        "preferredTools": (
+            "source_collection_context_tool",
+            "source_collection_stage_writeback_tool",
+            "research_knowledge_query_tool",
+            "agent_message_tool",
+        ),
+    },
     "research_paper_reader": {
         "allowedTools": (
             "agent_message_tool",
@@ -4398,6 +4420,8 @@ def _knowledge_steward_tool_policy() -> dict[str, Any]:
             **default_tool_policy(KNOWLEDGE_STEWARD_TOOL_POLICY_ID),
             "allowedTools": [
                 "agent_message_tool",
+                "source_collection_context_tool",
+                "source_collection_stage_writeback_tool",
                 "skill_library_search_tool",
                 "unified_memory_search_tool",
                 "knowledge_proposal_tool",
@@ -4410,6 +4434,8 @@ def _knowledge_steward_tool_policy() -> dict[str, Any]:
                 "knowledge_rating_suggestion_tool",
             ],
             "preferredTools": [
+                "source_collection_context_tool",
+                "source_collection_stage_writeback_tool",
                 "knowledge_governance_tasks_tool",
                 "knowledge_operations_health_tool",
                 "knowledge_governance_plan_tool",
@@ -4474,7 +4500,7 @@ def _knowledge_steward_metadata() -> dict[str, Any]:
             "avoidTasks": "不要直接应用正式知识、删除知识、跨团队授权、修改 ACL 或绕过 reviewer。",
             "successCriteria": "每条建议都有来源、时间戳、目标知识库、理由和可审核状态。",
             "deliverables": "治理任务摘要、摄取包、精炼提案、评级建议、复审风险清单。",
-            "constraints": "正式 KnowledgeItem 落盘仍必须由具备审核权限的角色或用户确认。",
+            "constraints": "阶段私聊任务先用 source_collection_context_tool 读取资料上下文，完成、阻塞或失败都用 source_collection_stage_writeback_tool 回写；该回写只更新阶段任务状态，不等于正式 KnowledgeItem 落盘，正式入库仍必须由具备审核权限的角色或用户确认。",
             "handoffNotes": "需要最终审核时交给 Team owner/lead/steward/coordinator 或用户。",
             "taskTypes": ["knowledge_governance", "source_ingestion", "rating_suggestion", "review_preparation"],
         },
@@ -4735,7 +4761,7 @@ def _challenge_cup_agent_profile_defaults(role: str, functional_name: str) -> di
                 "avoidTasks": "不要抓取全文、不要提炼正文、不要写正式知识、不要把搜索摘要当成事实结论。",
                 "successCriteria": "每条线索都有标题、来源类型、关键词、URL/DOI 线索、价值说明和不确定性。",
                 "deliverables": "Search Frame、Candidate Leads、Acquisition Handoff、Blockers。",
-                "constraints": "工具边界以 batch_web_search_tool、paper_search_tool、project_search_tool、news_search_tool、web_search_tool、research_knowledge_query_tool 和 agent_message_tool 为主。",
+                "constraints": "阶段私聊任务先用 source_collection_context_tool 读取平台资料上下文，完成、阻塞或失败都用 source_collection_stage_writeback_tool 回写；该回写只更新阶段任务状态，不等于正式知识写入。",
                 "handoffNotes": "把可打开来源交给 challenge_cup_source_acquisition。",
                 "taskTypes": ["challenge_cup", "data_discovery", "source_leads"],
             },
@@ -4755,7 +4781,7 @@ def _challenge_cup_agent_profile_defaults(role: str, functional_name: str) -> di
                 "avoidTasks": "不要下载或改写本地文件、不要写正式知识、不要把无法访问来源标为已获取。",
                 "successCriteria": "每条来源都有可追踪 locator、访问状态、最小元数据和提炼注意事项。",
                 "deliverables": "Acquisition Summary、Source Records、Extraction Handoff、Gaps。",
-                "constraints": "工具边界允许 web_search_tool、web_fetch_tool、batch_web_search_tool、paper_search_tool、project_search_tool、search_summarize_sources_tool、research_knowledge_query_tool、agent_message_tool，无写文件权限。",
+                "constraints": "阶段私聊任务先用 source_collection_context_tool 读取平台资料上下文，完成、阻塞或失败都用 source_collection_stage_writeback_tool 回写；该回写只更新阶段任务状态，不写文件或正式知识。",
                 "handoffNotes": "把已获取可读来源交给 challenge_cup_content_extraction。",
                 "taskTypes": ["challenge_cup", "source_acquisition", "source_metadata"],
             },
