@@ -9807,6 +9807,16 @@ export function TeamsRoute({
   const showResearchIngestion = researchWorkflowTeamSelected && researchWorkspaceView === "ingestion";
   const showResearchGraph = researchWorkflowTeamSelected && researchWorkspaceView === "graph";
   const showResearchCandidates = researchWorkflowTeamSelected && researchWorkspaceView === "candidates";
+  const selectedTeamContextTitle = selectedTeam
+    ? [
+      selectedTeam.name,
+      selectedTeam.purpose || selectedTeam.teamId,
+      `${lang === "zh" ? "成员引用" : "Members"} ${selectedTeam.memberCount}`,
+      `${lang === "zh" ? "活跃成员" : "Active members"} ${activeTeamMemberCount}`,
+      `${lang === "zh" ? "更新" : "Updated"} ${formatTime(selectedTeam.updatedAt, lang)}`,
+      `${lang === "zh" ? "成员源" : "Member source"} Agent Center`,
+    ].filter(Boolean).join("\n")
+    : (lang === "zh" ? "仅显示 AI 搜索范围团队和挑战杯ai科研团队。" : "Only AI search and research teams are shown.");
 
   if (sourceCollectionStandalone) {
     return (
@@ -9929,24 +9939,12 @@ export function TeamsRoute({
 
   return (
     <section className={styles.route}>
-      <header className={styles.header}>
-        <div>
-          <p>{lang === "zh" ? "团队工作台 / 组织画布" : "Team Workspace / Canvas"}</p>
+      <header className={styles.teamContextBar} title={selectedTeamContextTitle}>
+        <div className={styles.teamTitleBlock}>
+          <span>{lang === "zh" ? "团队工作台 / 组织画布" : "Team Workspace / Canvas"}</span>
           <h1>{lang === "zh" ? "团队组织画布" : "Team Organization Canvas"}</h1>
         </div>
-        <button type="button" className={styles.iconButton} onClick={() => teamsQuery.refetch()} title={lang === "zh" ? "刷新" : "Refresh"}>
-          <RefreshCw size={15} />
-        </button>
-      </header>
-
-      <div className={styles.summaryBar}>
-        <span>{lang === "zh" ? "团队" : "Teams"} <strong>{visibleTeamSummary.activeTeamCount}</strong></span>
-        <span>{lang === "zh" ? "成员引用" : "Members"} <strong>{visibleTeamSummary.memberCount}</strong></span>
-        <span>{lang === "zh" ? "失效引用" : "Stale"} <strong>{visibleTeamSummary.staleMemberCount}</strong></span>
-        <span>{lang === "zh" ? "成员源" : "Member source"} <strong>Agent Center</strong></span>
-      </div>
-      <section className={`${styles.teamPickerPanel} ${styles.teamSwitcherBar}`}>
-        <label className={styles.teamPickerLabel}>
+        <label className={styles.teamSelectField}>
           <span>{lang === "zh" ? "团队" : "Team"}</span>
           <select
             value={selectedTeam?.teamId ?? effectiveTeamId}
@@ -9970,14 +9968,18 @@ export function TeamsRoute({
             )}
           </select>
         </label>
-        <div className={styles.teamPickerSummary}>
-          <strong>{selectedTeam?.name ?? (lang === "zh" ? "等待团队载入" : "Waiting for team")}</strong>
-          <span>{selectedTeam?.purpose || selectedTeam?.teamId || (lang === "zh" ? "仅显示科研与搜索两个团队入口。" : "Only research and search teams are shown.")}</span>
-          {selectedTeam ? (
-            <small>{selectedTeam.memberCount} agents · {formatTime(selectedTeam.updatedAt, lang)}</small>
-          ) : null}
+        <div className={styles.teamContextChips} aria-label={lang === "zh" ? "团队概况" : "Team summary"}>
+          <span>{lang === "zh" ? "团队" : "Teams"} <strong>{visibleTeamSummary.activeTeamCount}</strong></span>
+          <span>{lang === "zh" ? "成员" : "Members"} <strong>{visibleTeamSummary.memberCount}</strong></span>
+          <span>{lang === "zh" ? "失效" : "Stale"} <strong>{visibleTeamSummary.staleMemberCount}</strong></span>
+          <span>{lang === "zh" ? "来源" : "Source"} <strong>Agent Center</strong></span>
         </div>
-      </section>
+        <div className={styles.teamContextActions}>
+          <button type="button" className={styles.iconButton} onClick={() => teamsQuery.refetch()} title={lang === "zh" ? "刷新团队" : "Refresh teams"}>
+            <RefreshCw size={15} />
+          </button>
+        </div>
+      </header>
       <div className={workspaceClassName}>
         <main className={canvasPanelClassName} id="research-organization-canvas">
           <div className={styles.canvasToolbar}>
