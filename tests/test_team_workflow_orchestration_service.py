@@ -1052,6 +1052,206 @@ def test_source_collection_stage_session_task_writeback_records_structured_resul
     assert any(item["taskId"] == task["taskId"] and item["status"] == "completed" for item in stage_results)
 
 
+def test_source_collection_stage_session_task_writeback_materializes_search_leads(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
+    _stub_source_collection_search_background(monkeypatch)
+    discovery = agent_directory_service.create_agent_instance(display_name="资料发现")
+    session_service.ensure_agent_direct_session(agent_id=discovery["agentId"], title="资料发现")
+    team = team_service.create_team(
+        name="挑战杯科研团队",
+        members=[{"agentId": discovery["agentId"], "role": "data_discovery", "agentName": "资料发现"}],
+    )
+    stage_response = team_workflow_orchestration_service.start_research_stage_round(
+        team["teamId"],
+        {
+            "stageType": "knowledge_collection",
+            "topic": "预测编码",
+            "goal": "搜集可追踪资料",
+            "agentRoles": ["data_discovery"],
+            "agentIds": {"data_discovery": discovery["agentId"]},
+            "querySeeds": ["predictive coding"],
+            "promptCachePolicy": {"requirement": "disabled"},
+        },
+    )
+    run_id = stage_response["run"]["runId"]
+    monkeypatch.setattr(
+        session_service,
+        "submit_session_message",
+        lambda session_id, content, **kwargs: {
+            "accepted": True,
+            "sessionId": session_id,
+            "turnId": "turn-stage-task-materialize",
+            "status": "running",
+        },
+    )
+    task = team_workflow_orchestration_service.start_source_collection_stage_session_task(
+        team["teamId"],
+        run_id,
+        {"stageId": "collection", "agentId": discovery["agentId"], "agentRole": "data_discovery"},
+    )
+    payload = {
+        "status": "needs_review",
+        "summary": "整理出两条可追踪线索和一条待定位线索。",
+        "result": {
+            "candidateLeads": [
+                {
+                    "leadId": "lead-01",
+                    "title": "Predictive coding in the visual cortex",
+                    "authors": "Rao RPN, Ballard DH",
+                    "year": "1999",
+                    "locator": "DOI: 10.1038/4580",
+                    "sourceType": "paper",
+                    "relevance": "预测编码奠基论文。",
+                },
+                {
+                    "leadId": "lead-02",
+                    "title": "A free energy principle for the brain",
+                    "year": "2010",
+                    "url": "https://doi.org/10.1038/nrn2787",
+                    "sourceType": "review",
+                    "relevance": "自由能原理综述。",
+                },
+                {
+                    "leadId": "lead-03",
+                    "title": "A vague paper without locator",
+                    "year": "2020",
+                    "locator": "DOI待查",
+                    "sourceType": "paper",
+                },
+            ]
+        },
+    }
+
+    first = team_workflow_orchestration_service.writeback_source_collection_stage_session_task(team["teamId"], task["taskId"], payload)
+
+    materialized = first["writeback"]["materializedSources"]
+    assert materialized["sourceLeadCount"] == 3
+    assert materialized["createdRecordCount"] == 2
+    assert materialized["importedCandidateCount"] == 2
+    assert materialized["skippedCount"] == 1
+    assert materialized["skipped"][0]["reason"] == "insufficient_source_identity"
+    records = data_processing_service.list_records(run_id)
+    assert records["summary"]["recordCount"] == 2
+    candidates = team_workflow_orchestration_service.list_candidate_store(team["teamId"], candidate_type="source_manifest")
+    assert candidates["candidateCount"] == 2
+    assert {item["metadata"]["doi"] for item in candidates["candidates"]} == {"10.1038/4580", "10.1038/nrn2787"}
+
+    second = team_workflow_orchestration_service.writeback_source_collection_stage_session_task(team["teamId"], task["taskId"], payload)
+
+    assert second["writeback"]["materializedSources"]["createdRecordCount"] == 0
+    assert second["writeback"]["materializedSources"]["importedCandidateCount"] == 0
+    assert second["writeback"]["materializedSources"]["skippedDuplicateCount"] == 2
+    assert data_processing_service.list_records(run_id)["summary"]["recordCount"] == 2
+    assert team_workflow_orchestration_service.list_candidate_store(team["teamId"], candidate_type="source_manifest")["candidateCount"] == 2
+
+
+def test_research_stage_status_materializes_legacy_stage_task_writeback_sources(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
+    _stub_source_collection_search_background(monkeypatch)
+    discovery = agent_directory_service.create_agent_instance(display_name="资料发现")
+    session_service.ensure_agent_direct_session(agent_id=discovery["agentId"], title="资料发现")
+    team = team_service.create_team(
+        name="挑战杯科研团队",
+        members=[{"agentId": discovery["agentId"], "role": "data_discovery", "agentName": "资料发现"}],
+    )
+    stage_response = team_workflow_orchestration_service.start_research_stage_round(
+        team["teamId"],
+        {
+            "stageType": "knowledge_collection",
+            "topic": "预测编码",
+            "goal": "补齐历史任务资料池",
+            "agentRoles": ["data_discovery"],
+            "agentIds": {"data_discovery": discovery["agentId"]},
+            "querySeeds": ["predictive coding"],
+            "promptCachePolicy": {"requirement": "disabled"},
+        },
+    )
+    run_id = stage_response["run"]["runId"]
+    monkeypatch.setattr(
+        session_service,
+        "submit_session_message",
+        lambda session_id, content, **kwargs: {
+            "accepted": True,
+            "sessionId": session_id,
+            "turnId": "turn-stage-task-legacy-materialize",
+            "status": "running",
+        },
+    )
+    task = team_workflow_orchestration_service.start_source_collection_stage_session_task(
+        team["teamId"],
+        run_id,
+        {"stageId": "collection", "agentId": discovery["agentId"], "agentRole": "data_discovery"},
+    )
+    legacy_result = {
+        "candidateLeads": [
+            {
+                "leadId": "lead-legacy-01",
+                "title": "Predictive coding in the visual cortex",
+                "authors": "Rao RPN, Ballard DH",
+                "year": "1999",
+                "locator": "DOI: 10.1038/13067 (Nature Neuroscience)",
+                "sourceType": "paper",
+            },
+            {
+                "leadId": "lead-legacy-02",
+                "title": "The free-energy principle: a unified brain theory?",
+                "year": "2010",
+                "locator": "DOI: 10.1038/nrn2787 (Nature Reviews Neuroscience)",
+                "sourceType": "review",
+            },
+            {
+                "leadId": "lead-legacy-03",
+                "title": "Unverified predictive coding lead",
+                "year": "2022",
+                "locator": "DOI待查",
+                "sourceType": "paper",
+            },
+        ]
+    }
+    store = team_workflow_orchestration_service._load_source_collection_stage_session_task_store(team["teamId"], run_id)
+    stored_task = next(item for item in store["tasks"] if item["taskId"] == task["taskId"])
+    stored_task["status"] = "needs_review"
+    stored_task["summary"] = "旧任务已经回写候选线索，但尚未物化资料池。"
+    stored_task["result"] = legacy_result
+    stored_task["writeback"] = {
+        "status": "needs_review",
+        "summary": stored_task["summary"],
+        "result": legacy_result,
+        "resultAuthority": "source_collection_stage_writeback_tool",
+        "updatedAt": "2026-06-23T00:00:00+00:00",
+    }
+    team_workflow_orchestration_service._write_source_collection_stage_session_task_store(team["teamId"], run_id, store)
+    assert data_processing_service.list_records(run_id)["summary"]["recordCount"] == 0
+    assert team_workflow_orchestration_service.list_candidate_store(team["teamId"], candidate_type="source_manifest")["candidateCount"] == 0
+
+    status_payload = team_workflow_orchestration_service.get_research_stage_round_status(team["teamId"])
+
+    latest_round = status_payload["latestRound"]
+    stage_tasks = latest_round.get("sourceCollectionStageSessionTasks", [])
+    reconciled_ref = next(item for item in stage_tasks if item["taskId"] == task["taskId"])
+    assert reconciled_ref["status"] == "needs_review"
+    records = data_processing_service.list_records(run_id)
+    assert records["summary"]["recordCount"] == 2
+    candidates = team_workflow_orchestration_service.list_candidate_store(team["teamId"], candidate_type="source_manifest")
+    assert candidates["candidateCount"] == 2
+    assert {item["metadata"]["doi"] for item in candidates["candidates"]} == {"10.1038/13067", "10.1038/nrn2787"}
+    task_store = team_workflow_orchestration_service._load_source_collection_stage_session_task_store(team["teamId"], run_id)
+    reconciled_task = next(item for item in task_store["tasks"] if item["taskId"] == task["taskId"])
+    materialized = reconciled_task["writeback"]["materializedSources"]
+    assert materialized["sourceLeadCount"] == 3
+    assert materialized["createdRecordCount"] == 2
+    assert materialized["importedCandidateCount"] == 2
+    assert materialized["skippedCount"] == 1
+    assert materialized["skipped"][0]["reason"] == "insufficient_source_identity"
+
+    team_workflow_orchestration_service.get_research_stage_round_status(team["teamId"])
+
+    assert data_processing_service.list_records(run_id)["summary"]["recordCount"] == 2
+    assert team_workflow_orchestration_service.list_candidate_store(team["teamId"], candidate_type="source_manifest")["candidateCount"] == 2
+
+
 def test_research_stage_status_reconciles_completed_stage_task_turn_result(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)
