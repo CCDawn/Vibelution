@@ -1,7 +1,9 @@
 from types import SimpleNamespace
 import queue
 
+from core.ui.chat_state import load_chat_state, save_chat_state
 from core.web.services import session_service
+from core.web.services import agent_directory_service
 
 
 def test_session_stream_coalescing_preserves_assistant_delta_events():
@@ -64,6 +66,55 @@ def test_session_stream_full_queue_recovers_when_old_assistant_delta_must_drop()
     assert recovered["thoughtDelta"] == "思考"
     assert recovered["replaceContent"] is True
     assert recovered["replaceThought"] is True
+
+
+def test_get_session_detail_materializes_agent_directory_stub_without_switching_active(tmp_path, monkeypatch):
+    save_chat_state(
+        tmp_path,
+        {
+            "version": 1,
+            "active_conversation_id": "session-active",
+            "updated_at": "2026-05-18T12:00:00",
+            "conversations": [
+                {
+                    "conversation_id": "session-active",
+                    "title": "唐望舒",
+                    "agent_id": "agent-active",
+                    "agentId": "agent-active",
+                    "updated_at": "2026-05-18T12:00:00",
+                }
+            ],
+        },
+    )
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    agent_directory_service.save_state(
+        {
+            "agents": [
+                {
+                    "agentId": "agent-active",
+                    "displayName": "唐望舒",
+                    "directSessionId": "session-active",
+                    "status": "active",
+                    "workspacePath": "workspace/agents/agent-active",
+                },
+                {
+                    "agentId": "agent-knowledge-steward",
+                    "displayName": "资料入库",
+                    "directSessionId": "agent-knowledge-steward-direct",
+                    "status": "active",
+                    "workspacePath": "workspace/agents/agent-knowledge-steward",
+                },
+            ]
+        }
+    )
+
+    detail = session_service.get_session_detail("agent-knowledge-steward-direct")
+
+    assert detail is not None
+    assert detail["id"] == "agent-knowledge-steward-direct"
+    assert detail["agentId"] == "agent-knowledge-steward"
+    assert load_chat_state(tmp_path)["active_conversation_id"] == "session-active"
 
 
 def test_image_attachment_with_concrete_prompt_defaults_to_vision_route(monkeypatch):
