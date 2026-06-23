@@ -4651,6 +4651,25 @@ def submit_session_message(
         )
         persisted_message_metadata = dict(message_metadata or {}) if isinstance(message_metadata, dict) else {}
         persisted_message_metadata.setdefault("turnId", turn_control.turn_id)
+        kernel_trace = _create_direct_session_submit_kernel_trace(
+            conversation,
+            agent=agent,
+            turn_id=turn_control.turn_id,
+            message=message,
+            source=normalized_message_source,
+        )
+        if kernel_trace:
+            persisted_message_metadata["kernel"] = kernel_trace
+            if str(kernel_trace.get("status") or "").strip() == "recorded":
+                for source_key, metadata_key in (
+                    ("eventId", "kernelEventId"),
+                    ("taskId", "kernelTaskId"),
+                    ("workRunId", "kernelWorkRunId"),
+                    ("outcomeId", "kernelOutcomeId"),
+                ):
+                    value = str(kernel_trace.get(source_key) or "").strip()
+                    if value:
+                        persisted_message_metadata[metadata_key] = value
         if session_references:
             persisted_message_metadata["sessionReferences"] = session_references
         if skill_invocation:
@@ -4984,6 +5003,160 @@ def submit_session_message(
     if include_started_turn_id:
         detail["startedTurnId"] = turn_control.turn_id
     return detail
+
+
+def _create_direct_session_submit_kernel_trace(
+    conversation: dict[str, Any],
+    *,
+    agent: dict[str, Any] | None,
+    turn_id: str,
+    message: str,
+    source: str,
+) -> dict[str, Any]:
+    normalized_source = str(source or "").strip() or "raw"
+    if normalized_source in {"agent_inbox", "hot_restart_resume", "supervised_evolution"}:
+        return {}
+    if not isinstance(conversation, dict) or not isinstance(agent, dict):
+        return {}
+    session_id = str(conversation.get("id") or conversation.get("conversation_id") or "").strip()
+    normalized_turn_id = str(turn_id or "").strip()
+    agent_id = str(conversation.get("agent_id") or conversation.get("agentId") or agent.get("agentId") or "").strip()
+    if not session_id or not normalized_turn_id or not agent_id:
+        return {}
+    if str(agent.get("agentId") or "").strip() != agent_id:
+        return {}
+    if str(agent.get("directSessionId") or "").strip() != session_id:
+        return {}
+
+    content = str(message or "").strip()
+    if not content:
+        content = f"Direct session turn {normalized_turn_id}"
+    content_hash = hashlib.sha256(content.encode("utf-8", errors="replace")).hexdigest()[:16]
+    event_payload = {
+        "eventId": f"session-submit-{session_id}-{normalized_turn_id}",
+        "sender": {"type": "user", "id": "session_submit"},
+        "recipientAgentIds": [agent_id],
+        "semanticType": "agent.session_submit",
+        "payload": {
+            "goal": f"Direct session turn {normalized_turn_id}",
+            "sessionId": session_id,
+            "turnId": normalized_turn_id,
+            "messageSource": normalized_source,
+            "contentLength": len(content),
+            "contentHash": content_hash,
+        },
+        "correlationId": f"session:{session_id}",
+        "idempotencyKey": f"session-submit:{session_id}:{normalized_turn_id}",
+        "wakeTarget": False,
+        "traceOnly": True,
+        "metadata": {
+            "sourceSurface": "session_submit",
+            "sourceSessionId": session_id,
+            "sourceMessageId": normalized_turn_id,
+            "projectionRef": {"kind": "session_turn", "id": normalized_turn_id},
+            "adapterVersion": "session-submit-kernel-bridge-v1",
+            "source": normalized_source,
+            "targetAgentId": agent_id,
+            "agentId": agent_id,
+            "messageContentHash": content_hash,
+            "messageContentLength": len(content),
+        },
+    }
+    try:
+        from core.agent_kernel import service as agent_kernel_service
+
+        if getattr(agent_kernel_service, "PROJECT_ROOT", PROJECT_ROOT) != PROJECT_ROOT:
+            agent_kernel_service.PROJECT_ROOT = PROJECT_ROOT
+        result = agent_kernel_service.handle_kernel_event(event_payload)
+    except Exception as exc:
+        trace = {
+            "source": "agent_kernel",
+            "traceOnly": True,
+            "status": "failed",
+            "sourceSurface": "session_submit",
+            "errorType": type(exc).__name__,
+            "reason": trim_lines(str(exc), max_lines=2),
+        }
+        _record_direct_session_submit_kernel_trace_event(
+            conversation,
+            trace,
+            turn_id=normalized_turn_id,
+            agent_id=agent_id,
+            source=normalized_source,
+            level="warning",
+            outcome="failed",
+        )
+        return trace
+
+    event = result.get("event") if isinstance(result.get("event"), dict) else {}
+    task = result.get("task") if isinstance(result.get("task"), dict) else {}
+    execution = result.get("execution") if isinstance(result.get("execution"), dict) else {}
+    outcome_payload = result.get("outcome") if isinstance(result.get("outcome"), dict) else {}
+    trace = {
+        "source": "agent_kernel",
+        "sourceSurface": "session_submit",
+        "traceOnly": True,
+        "status": "recorded",
+        "eventId": str(event.get("eventId") or "").strip(),
+        "taskId": str(task.get("taskId") or "").strip(),
+        "workRunId": str(execution.get("workRunId") or "").strip(),
+        "outcomeId": str(outcome_payload.get("outcomeId") or "").strip(),
+        "outcomeStatus": str(outcome_payload.get("status") or task.get("status") or "").strip(),
+        "reused": bool(result.get("reused")),
+    }
+    _record_direct_session_submit_kernel_trace_event(
+        conversation,
+        trace,
+        turn_id=normalized_turn_id,
+        agent_id=agent_id,
+        source=normalized_source,
+        outcome=trace["outcomeStatus"] or "succeeded",
+    )
+    return trace
+
+
+def _record_direct_session_submit_kernel_trace_event(
+    conversation: dict[str, Any],
+    kernel_trace: dict[str, Any],
+    *,
+    turn_id: str,
+    agent_id: str,
+    source: str,
+    level: str = "info",
+    outcome: str = "observed",
+) -> None:
+    try:
+        record_runtime_scene_event(
+            "conversation",
+            "kernel",
+            (
+                "session.submit.kernel_trace_recorded"
+                if str(kernel_trace.get("status") or "").strip() == "recorded"
+                else "session.submit.kernel_trace_failed"
+            ),
+            message="Direct Agent session submit Kernel trace.",
+            level=level,
+            outcome=outcome,
+            fields={
+                "sessionId": str(conversation.get("id") or conversation.get("conversation_id") or "").strip(),
+                "turnId": str(turn_id or "").strip(),
+                "agentId": str(agent_id or "").strip(),
+                "source": str(source or "").strip(),
+                "kernelTraceOnly": bool(kernel_trace.get("traceOnly", True)),
+                "kernelTraceStatus": str(kernel_trace.get("status") or "").strip(),
+                "kernelEventId": str(kernel_trace.get("eventId") or "").strip(),
+                "kernelTaskId": str(kernel_trace.get("taskId") or "").strip(),
+                "kernelWorkRunId": str(kernel_trace.get("workRunId") or "").strip(),
+                "kernelOutcomeId": str(kernel_trace.get("outcomeId") or "").strip(),
+                "kernelOutcomeStatus": str(kernel_trace.get("outcomeStatus") or "").strip(),
+                "reused": bool(kernel_trace.get("reused")),
+                "errorType": str(kernel_trace.get("errorType") or "").strip(),
+                "reason": str(kernel_trace.get("reason") or "").strip(),
+            },
+            lifecycle=True,
+        )
+    except Exception:
+        return
 
 
 def _accepted_session_turn_payload(session_id: str, turn_id: str, *, status: str = "running") -> dict[str, Any]:
