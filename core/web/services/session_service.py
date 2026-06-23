@@ -3193,6 +3193,50 @@ def get_active_session_summary() -> dict | None:
     return _build_session_summary(target, hydrate_agent=False)
 
 
+def select_chat_session(session_id: str) -> dict:
+    """Make an existing or AgentDirectory direct session the active chat session."""
+
+    normalized_session_id = str(session_id or "").strip()
+    if not normalized_session_id:
+        raise SessionNotFoundError("Session not found")
+    _sync_agent_directory_project_root()
+    agent_by_id = _agent_lookup_for_conversations()
+    with _CHAT_STATE_LOCK:
+        payload = load_chat_state(PROJECT_ROOT)
+        conversations = payload.get("conversations")
+        if not isinstance(conversations, list):
+            conversations = []
+            payload["conversations"] = conversations
+        changed = False
+        conversation = _find_conversation_entry(payload, normalized_session_id)
+        if conversation is None:
+            changed = _materialize_agent_directory_conversation_locked(
+                payload,
+                normalized_session_id,
+                source="select_chat_session",
+                activate=True,
+            )
+            if not changed:
+                raise SessionNotFoundError("Session not found")
+            conversation = _find_conversation_entry(payload, normalized_session_id)
+        if conversation is None:
+            raise SessionNotFoundError("Session not found")
+        changed = _ensure_conversation_workspace_metadata(conversation) or changed
+        changed = _ensure_conversation_agent_metadata(conversation, agent_by_id=agent_by_id) or changed
+        previous_active_id = str(payload.get("active_conversation_id") or "").strip()
+        if previous_active_id != normalized_session_id:
+            payload["active_conversation_id"] = normalized_session_id
+            changed = True
+        if changed:
+            payload["updated_at"] = str(conversation.get("updated_at") or _now_timestamp())
+            save_chat_state(PROJECT_ROOT, payload)
+    _invalidate_session_list_cache()
+    detail = get_session_detail(normalized_session_id)
+    if detail is None:
+        raise SessionNotFoundError("Session not found")
+    return detail
+
+
 def _with_direct_session_agent_for_summary(
     conversation: dict[str, Any],
     *,
@@ -5955,19 +5999,35 @@ def _agent_directory_session_stub_for_id(
     return None
 
 
-def _ensure_agent_directory_conversation_materialized(session_id: str, *, source: str) -> bool:
+def _ensure_agent_directory_conversation_materialized(
+    session_id: str,
+    *,
+    source: str,
+    activate: bool = False,
+) -> bool:
     normalized_session_id = str(session_id or "").strip()
     if not normalized_session_id:
         return False
     with _CHAT_STATE_LOCK:
         payload = load_chat_state(PROJECT_ROOT)
-        changed = _materialize_agent_directory_conversation_locked(payload, normalized_session_id, source=source)
+        changed = _materialize_agent_directory_conversation_locked(
+            payload,
+            normalized_session_id,
+            source=source,
+            activate=activate,
+        )
         if changed:
             save_chat_state(PROJECT_ROOT, payload)
         return changed
 
 
-def _materialize_agent_directory_conversation_locked(payload: dict[str, Any], session_id: str, *, source: str) -> bool:
+def _materialize_agent_directory_conversation_locked(
+    payload: dict[str, Any],
+    session_id: str,
+    *,
+    source: str,
+    activate: bool = False,
+) -> bool:
     normalized_session_id = str(session_id or "").strip()
     if not normalized_session_id or _find_conversation_entry(payload, normalized_session_id) is not None:
         return False
@@ -5984,7 +6044,8 @@ def _materialize_agent_directory_conversation_locked(payload: dict[str, Any], se
         payload["conversations"] = conversations
     conversations.append(conversation)
     payload["version"] = int(payload.get("version") or CHAT_STATE_VERSION)
-    payload["active_conversation_id"] = normalized_session_id
+    if activate:
+        payload["active_conversation_id"] = normalized_session_id
     payload["updated_at"] = str(conversation.get("updated_at") or _now_timestamp())
     _record_agent_directory_conversation_materialized_event(agent, session_id=normalized_session_id, source=source)
     return True

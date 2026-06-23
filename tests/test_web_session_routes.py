@@ -872,6 +872,120 @@ def test_session_detail_marks_agent_direct_session_mismatch(tmp_path, monkeypatc
     assert payload["agentPrimaryDirectSessionId"] == "session-current"
     assert payload["activeTask"] is None
     assert agent_directory_service.get_agent("agent-live")["directSessionId"] == "session-current"
+
+
+def test_agent_directory_detail_materialization_does_not_switch_active_session(tmp_path, monkeypatch):
+    _seed_chat_state(
+        tmp_path,
+        conversations=[
+            {
+                "conversation_id": "session-active",
+                "title": "唐望舒",
+                "agent_id": "agent-active",
+                "agentId": "agent-active",
+                "updated_at": "2026-05-18T12:10:00",
+                "messages": [{"role": "user", "content": "当前会话", "timestamp": "2026-05-18T12:10:00"}],
+            }
+        ],
+    )
+    state = load_chat_state(tmp_path)
+    state["active_conversation_id"] = "session-active"
+    save_chat_state(tmp_path, state)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    agent_directory_service.save_state(
+        {
+            "agents": [
+                {
+                    "agentId": "agent-active",
+                    "agentCode": "A001",
+                    "displayName": "唐望舒",
+                    "directSessionId": "session-active",
+                    "primaryMode": "chat",
+                    "workspacePath": "workspace/agents/agent-active",
+                    "status": "active",
+                },
+                {
+                    "agentId": "agent-knowledge-steward",
+                    "agentCode": "A002",
+                    "displayName": "资料入库",
+                    "directSessionId": "agent-knowledge-steward-direct",
+                    "primaryMode": "general",
+                    "roleKey": "knowledge_steward",
+                    "workspacePath": "workspace/agents/agent-knowledge-steward",
+                    "status": "active",
+                },
+            ]
+        }
+    )
+
+    response = client.get("/api/sessions/agent-knowledge-steward-direct")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["id"] == "agent-knowledge-steward-direct"
+    assert payload["agentId"] == "agent-knowledge-steward"
+    persisted = load_chat_state(tmp_path)
+    assert persisted["active_conversation_id"] == "session-active"
+    assert client.get("/api/sessions").json()[0]["id"] == "session-active"
+
+
+def test_session_select_switches_active_and_materializes_agent_directory_session(tmp_path, monkeypatch):
+    _seed_chat_state(
+        tmp_path,
+        conversations=[
+            {
+                "conversation_id": "session-active",
+                "title": "唐望舒",
+                "agent_id": "agent-active",
+                "agentId": "agent-active",
+                "updated_at": "2026-05-18T12:10:00",
+                "messages": [{"role": "user", "content": "当前会话", "timestamp": "2026-05-18T12:10:00"}],
+            }
+        ],
+    )
+    state = load_chat_state(tmp_path)
+    state["active_conversation_id"] = "session-active"
+    save_chat_state(tmp_path, state)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    agent_directory_service.save_state(
+        {
+            "agents": [
+                {
+                    "agentId": "agent-active",
+                    "agentCode": "A001",
+                    "displayName": "唐望舒",
+                    "directSessionId": "session-active",
+                    "primaryMode": "chat",
+                    "workspacePath": "workspace/agents/agent-active",
+                    "status": "active",
+                },
+                {
+                    "agentId": "agent-knowledge-steward",
+                    "agentCode": "A002",
+                    "displayName": "资料入库",
+                    "directSessionId": "agent-knowledge-steward-direct",
+                    "primaryMode": "general",
+                    "roleKey": "knowledge_steward",
+                    "workspacePath": "workspace/agents/agent-knowledge-steward",
+                    "status": "active",
+                },
+            ]
+        }
+    )
+
+    response = client.post("/api/sessions/agent-knowledge-steward-direct/select")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["id"] == "agent-knowledge-steward-direct"
+    assert payload["agentId"] == "agent-knowledge-steward"
+    persisted = load_chat_state(tmp_path)
+    assert persisted["active_conversation_id"] == "agent-knowledge-steward-direct"
+    assert client.get("/api/sessions").json()[0]["id"] == "agent-knowledge-steward-direct"
+
+
 def test_session_detail_uses_targeted_conversation_read(tmp_path, monkeypatch):
     _seed_chat_state(
         tmp_path,
