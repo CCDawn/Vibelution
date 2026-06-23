@@ -578,12 +578,13 @@ def test_agent_directory_assigns_default_avatar_from_workspace_avatars(tmp_path,
 
     assert chat_agent["avatarImagePath"].startswith("workspace/avatars/")
     assert chat_agent["avatarImageUrl"].startswith("/api/agents/avatar-image/")
-    assert deep_agent["avatarImagePath"] == "workspace/avatars/06-deep-investigator.png"
-    assert deep_agent["avatarImageUrl"] == "/api/agents/avatar-image/06-deep-investigator.png"
+    assert chat_agent["avatarImagePath"] == "workspace/avatars/10-anime-session-agent.png"
+    assert deep_agent["avatarImagePath"] == "workspace/avatars/11-anime-deep-research-agent.png"
+    assert deep_agent["avatarImageUrl"] == "/api/agents/avatar-image/11-anime-deep-research-agent.png"
     assert agents[chat_agent["agentId"]]["avatarImageUrl"] == chat_agent["avatarImageUrl"]
     assert agents[deep_agent["agentId"]]["metadata"]["avatarImageSource"] == "default"
 
-    response = client.get("/api/agents/avatar-image/06-deep-investigator.png")
+    response = client.get("/api/agents/avatar-image/11-anime-deep-research-agent.png")
     assert response.status_code == 200
     assert response.content.startswith(b"\x89PNG")
 
@@ -624,7 +625,7 @@ def test_agent_avatar_can_be_selected_uploaded_and_reset(tmp_path, monkeypatch):
         json={"resetToDefault": True},
     )
     assert reset_response.status_code == 200
-    assert reset_response.json()["avatarImagePath"] == "workspace/avatars/06-deep-investigator.png"
+    assert reset_response.json()["avatarImagePath"] == "workspace/avatars/11-anime-deep-research-agent.png"
     assert reset_response.json()["metadata"]["avatarImageSource"] == "default"
 
 
