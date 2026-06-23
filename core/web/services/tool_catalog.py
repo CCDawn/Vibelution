@@ -571,7 +571,6 @@ TOOL_BUNDLE_DEFINITIONS: tuple[dict[str, Any], ...] = (
         "preferredToolNames": [
             "batch_web_search_tool",
             "paper_search_tool",
-            "web_search_tool",
             "web_fetch_tool",
             "search_summarize_sources_tool",
             "source_collection_context_tool",
