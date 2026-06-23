@@ -866,38 +866,47 @@ def start_source_collection_stage_session_task(
     matching_assignments = _source_collection_matching_assignments(assignments, agent_id=agent_id, agent_role=agent_role)
     if not requested_by:
         requested_by = _source_collection_owner_agent_id(team, {})
-    task_idempotency_key = idempotency_key or f"stage_task:{normalized_team_id}:{normalized_run_id}:{stage_id}:{agent_id}:{agent_role or 'agent'}"
-    existing_task = _find_source_collection_stage_session_task(
-        normalized_team_id,
-        normalized_run_id,
-        idempotency_key=task_idempotency_key,
-    )
-    if existing_task is not None:
-        return {
-            "schemaVersion": SCHEMA_VERSION,
-            "teamId": normalized_team_id,
-            "runId": normalized_run_id,
-            "stageId": stage_id,
-            "agentId": agent_id,
-            "agentRole": agent_role,
-            "sessionId": _trim_text(existing_task.get("sessionId"), max_length=160) or session_id,
-            "taskId": _trim_text(existing_task.get("taskId"), max_length=160),
-            "idempotencyKey": task_idempotency_key,
-            "created": False,
-            "alreadyPresent": True,
-            "task": existing_task,
-            "turn": existing_task.get("turn") if isinstance(existing_task.get("turn"), dict) else {},
-            "chatRoute": _source_collection_stage_task_chat_route(
-                _trim_text(existing_task.get("sessionId"), max_length=160) or session_id,
-                return_to=return_to or _trim_text(existing_task.get("returnTo"), max_length=1000),
-                return_label=return_label or _trim_text(existing_task.get("returnLabel"), max_length=240),
-            ),
-            "writebackContract": existing_task.get("writebackContract") if isinstance(existing_task.get("writebackContract"), dict) else {},
-            "boundaries": _source_collection_stage_session_task_boundaries(),
-        }
-
     storage_artifacts = _source_collection_storage_artifacts(normalized_team_id, normalized_run_id)
     task_id = _new_record_id("stagetask")
+    task_idempotency_key = _source_collection_stage_task_idempotency_key(
+        team_id=normalized_team_id,
+        run_id=normalized_run_id,
+        stage_id=stage_id,
+        agent_id=agent_id,
+        agent_role=agent_role,
+        task_id=task_id,
+        requested_key=idempotency_key,
+    )
+    if idempotency_key:
+        existing_task = _find_source_collection_stage_session_task(
+            normalized_team_id,
+            normalized_run_id,
+            idempotency_key=task_idempotency_key,
+        )
+        if existing_task is not None:
+            return {
+                "schemaVersion": SCHEMA_VERSION,
+                "teamId": normalized_team_id,
+                "runId": normalized_run_id,
+                "stageId": stage_id,
+                "agentId": agent_id,
+                "agentRole": agent_role,
+                "sessionId": _trim_text(existing_task.get("sessionId"), max_length=160) or session_id,
+                "taskId": _trim_text(existing_task.get("taskId"), max_length=160),
+                "idempotencyKey": task_idempotency_key,
+                "created": False,
+                "alreadyPresent": True,
+                "task": existing_task,
+                "turn": existing_task.get("turn") if isinstance(existing_task.get("turn"), dict) else {},
+                "chatRoute": _source_collection_stage_task_chat_route(
+                    _trim_text(existing_task.get("sessionId"), max_length=160) or session_id,
+                    return_to=return_to or _trim_text(existing_task.get("returnTo"), max_length=1000),
+                    return_label=return_label or _trim_text(existing_task.get("returnLabel"), max_length=240),
+                ),
+                "writebackContract": existing_task.get("writebackContract") if isinstance(existing_task.get("writebackContract"), dict) else {},
+                "boundaries": _source_collection_stage_session_task_boundaries(),
+            }
+
     writeback_contract = _source_collection_stage_task_writeback_contract(
         normalized_team_id,
         normalized_run_id,
@@ -9815,6 +9824,23 @@ def _source_collection_stage_task_writeback_contract(
         "writesOfficialGraph": False,
         "resultAuthority": "structured_writeback_endpoint",
     }
+
+
+def _source_collection_stage_task_idempotency_key(
+    *,
+    team_id: str,
+    run_id: str,
+    stage_id: str,
+    agent_id: str,
+    agent_role: str,
+    task_id: str,
+    requested_key: str,
+) -> str:
+    key_scope = f"{team_id}:{run_id}:{stage_id}:{agent_id}:{agent_role or 'agent'}"
+    if requested_key:
+        key_digest = hashlib.sha256(requested_key.encode("utf-8", errors="replace")).hexdigest()[:24]
+        return _trim_text(f"stage_task:{key_scope}:request:{key_digest}", max_length=240)
+    return _trim_text(f"stage_task:{key_scope}:task:{task_id}", max_length=240)
 
 
 def _source_collection_stage_task_title(stage_id: str) -> str:

@@ -95,6 +95,9 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("/source-collection-runs/${encodeURIComponent(payload.runId)}/stage-session-tasks");
     expect(routeSource).toContain("startSourceCollectionStageSessionTask(stageId");
     expect(routeSource).toContain("await startSourceCollectionStageSessionTaskMutation.mutateAsync");
+    expect(routeSource).toContain("sourceCollectionStageTaskClickKey(stageId)");
+    expect(routeSource).toContain("idempotencyKey: payload.idempotencyKey");
+    expect(routeSource).toContain("idempotencyKey: sourceCollectionStageTaskClickKey(stageId)");
     expect(routeSource).toContain('memory: ["knowledge_steward", "candidate_graph"]');
     expect(routeSource).toContain("priorityByKey");
     expect(routeSource).toContain("ExperimentFullRunResultRegisterPayload");
