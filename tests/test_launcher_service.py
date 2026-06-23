@@ -731,6 +731,7 @@ def test_launcher_status_exposes_guardian_adapter_migration_contract(tmp_path, m
     )
     monkeypatch.setattr(launcher_service, "load_pid", lambda: 2001)
     monkeypatch.setattr(launcher_service, "_is_process_alive", lambda pid: int(pid) in {2001, 4444})
+    monkeypatch.setattr(launcher_service, "is_runtime_manager_process", lambda pid: int(pid) == 2001)
     monkeypatch.setattr(
         launcher_service,
         "observe_workbench",
@@ -921,6 +922,69 @@ def test_launcher_status_exposes_control_plane_evidence(tmp_path, monkeypatch):
     assert evidence["recovery"]["resultOk"] is True
     assert evidence["recovery"]["resultPath"] == "cmd-recovered.json"
     assert "Workbench restarted." in evidence["recovery"]["statusLine"]
+
+
+def test_launcher_status_rejects_reused_foreign_runtime_manager_pid(tmp_path, monkeypatch):
+    runtime_dir = tmp_path / ".runtime" / "runtime-manager"
+    inbox_dir = runtime_dir / "inbox"
+    processing_dir = runtime_dir / "processing"
+    results_dir = runtime_dir / "results"
+    for directory in (inbox_dir, processing_dir, results_dir):
+        directory.mkdir(parents=True, exist_ok=True)
+    state_path = runtime_dir / "state.json"
+    events_path = runtime_dir / "events.jsonl"
+    state_path.write_text(
+        json.dumps(
+            {
+                "stateVersion": 17,
+                "runtimeState": "running",
+                "managerPid": 25820,
+                "daemonRunning": True,
+                "updatedAt": "2026-06-22T15:37:28+00:00",
+                "workbench": {
+                    "desiredState": "closed",
+                    "observedState": "open",
+                    "phase": "failed",
+                    "backendPid": 0,
+                    "backendHealthy": False,
+                    "backendPort": 8000,
+                    "browserWindowPid": 28792,
+                    "browserWindowAlive": True,
+                    "lifecycleConsistency": "orphaned_browser",
+                    "failureMessage": "Workbench frontend window is still open, but no backend service is reachable.",
+                },
+                "command": {"activeCommandId": "", "activeType": "", "requestedBy": "", "startedAt": ""},
+            }
+        ),
+        encoding="utf-8",
+    )
+    (inbox_dir / "cmd-pending.json").write_text(
+        json.dumps({"commandId": "cmd-pending", "type": "open_workbench", "requestedBy": "launcher_api"}),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(launcher_service, "STATE_PATH", state_path)
+    monkeypatch.setattr(launcher_service, "INBOX_DIR", inbox_dir)
+    monkeypatch.setattr(launcher_service, "PROCESSING_DIR", processing_dir)
+    monkeypatch.setattr(launcher_service, "RESULTS_DIR", results_dir)
+    monkeypatch.setattr(launcher_service, "EVENTS_PATH", events_path)
+    monkeypatch.setattr(launcher_service, "LAUNCHER_STATE_PATH", tmp_path / ".runtime" / "launcher" / "state.json")
+    monkeypatch.setattr(launcher_service, "load_state", lambda: json.loads(state_path.read_text(encoding="utf-8")))
+    monkeypatch.setattr(launcher_service, "load_pid", lambda: 25820)
+    monkeypatch.setattr(launcher_service, "_is_process_alive", lambda pid: int(pid) == 25820)
+    monkeypatch.setattr(launcher_service, "is_runtime_manager_process", lambda pid: False)
+    monkeypatch.setattr(launcher_service, "observe_workbench", lambda: {})
+
+    payload = launcher_service.get_launcher_status()
+
+    assert payload["runtimeManager"]["running"] is False
+    assert payload["runtimeManager"]["runtimeState"] == "idle"
+    assert payload["runtimeManager"]["managerPid"] == 0
+    evidence = payload["controlPlaneEvidence"]
+    assert evidence["state"]["runtimeState"] == "idle"
+    assert evidence["state"]["managerPid"] == 0
+    assert payload["lifecycleProof"]["components"][0]["state"] == "missing"
+    assert payload["controlPlaneEvidence"]["queue"]["pendingCount"] == 1
 
 
 def test_launcher_status_recovers_offline_stale_close_processing(tmp_path, monkeypatch):
@@ -1259,6 +1323,7 @@ def test_launcher_status_uses_fresh_runtime_manager_state_without_deep_observati
     monkeypatch.setattr(launcher_service, "load_state", lambda: runtime_state)
     monkeypatch.setattr(launcher_service, "load_pid", lambda: 3210)
     monkeypatch.setattr(launcher_service, "_is_process_alive", lambda pid: int(pid) == 3210)
+    monkeypatch.setattr(launcher_service, "is_runtime_manager_process", lambda pid: int(pid) == 3210)
     monkeypatch.setattr(launcher_service, "launcher_active_work_runs", lambda: [])
     observe_calls = []
     monkeypatch.setattr(

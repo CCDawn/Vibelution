@@ -21,6 +21,7 @@ from core.runtime_manager.constants import (
     STATE_PATH,
 )
 from core.runtime_manager.evolution_store import load_active_run_snapshot
+from core.runtime_manager.process_identity import is_runtime_manager_process
 from core.runtime_manager.scene_logging import append_runtime_manager_file_event
 from core.runtime_manager.state_store import load_pid, load_state
 from core.runtime_manager import work_run_store
@@ -1027,7 +1028,7 @@ def _runtime_manager_state() -> dict[str, Any]:
     payload = dict(state) if isinstance(state, dict) else {}
     try:
         manager_pid = load_pid()
-        manager_running = _is_process_alive(manager_pid)
+        manager_running = _is_process_alive(manager_pid) and is_runtime_manager_process(manager_pid)
     except Exception:
         manager_pid = 0
         manager_running = False
@@ -1583,7 +1584,7 @@ def _control_plane_evidence() -> dict[str, Any]:
     state = _load_json_file(STATE_PATH)
     try:
         manager_pid = load_pid()
-        manager_running = _is_process_alive(manager_pid)
+        manager_running = _is_process_alive(manager_pid) and is_runtime_manager_process(manager_pid)
     except Exception:
         manager_pid = 0
         manager_running = False
