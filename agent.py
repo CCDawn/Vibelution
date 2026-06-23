@@ -2020,7 +2020,20 @@ class SelfEvolvingAgent:
         self._last_llm_failure_attempts = 0
         self._last_llm_failure_max_attempts = 0
         self.prompt_manager.update_current_goal(effective_goal)
-        runtime_goal_packet = build_runtime_goal_packet(policy, effective_goal)
+        agent_tool_policy = None
+        try:
+            from core.web.services import agent_directory_service
+
+            current_runtime = agent_directory_service.current_agent_runtime()
+            if isinstance(current_runtime, dict):
+                agent_tool_policy = current_runtime.get("toolPolicy")
+        except Exception:
+            agent_tool_policy = None
+        runtime_goal_packet = build_runtime_goal_packet(
+            policy,
+            effective_goal,
+            agent_tool_policy=agent_tool_policy if isinstance(agent_tool_policy, dict) else None,
+        )
         try:
             get_session_state().set_runtime_goal_packet(runtime_goal_packet)
         except Exception:
@@ -2034,6 +2047,7 @@ class SelfEvolvingAgent:
                 "objective_type": runtime_goal_packet.objective_type,
                 "allow_auto_continue": runtime_goal_packet.allow_auto_continue,
                 "allow_file_writes": runtime_goal_packet.allow_file_writes,
+                "allow_code_context": runtime_goal_packet.allow_code_context,
                 "allow_git_commit": runtime_goal_packet.allow_git_commit,
                 "allow_evolution_transaction": runtime_goal_packet.allow_evolution_transaction,
                 "allow_subagents": runtime_goal_packet.allow_subagents,
