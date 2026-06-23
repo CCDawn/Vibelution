@@ -65,10 +65,6 @@ const DEFAULT_EXPANDED_RESPONSE_TAIL_COUNT = 1;
 const INITIAL_VISIBLE_MESSAGE_COUNT = 14;
 const INITIAL_VISIBLE_FEEDBACK_OPERATION_COUNT = 36;
 const COMPUTER_USE_TOOL_NAME = "computer_use_task_tool";
-const STREAMING_REVEAL_INTERVAL_MS = 18;
-const STREAMING_REVEAL_MIN_CHARS_PER_TICK = 2;
-const STREAMING_REVEAL_MAX_CHARS_PER_TICK = 28;
-const STREAMING_REVEAL_FAST_FORWARD_BACKLOG_CHARS = 160;
 
 export type ConversationProcessDisplayMode = "answer" | "trace";
 
@@ -151,71 +147,8 @@ type ComputerUseResult = {
   error: string;
 };
 
-export function advanceStreamingRevealText(current: string, target: string) {
-  const currentText = String(current ?? "");
-  const targetText = String(target ?? "");
-  if (!targetText || currentText === targetText) {
-    return targetText;
-  }
-  if (!targetText.startsWith(currentText) || currentText.length > targetText.length) {
-    return targetText;
-  }
-  const remaining = targetText.length - currentText.length;
-  if (remaining >= STREAMING_REVEAL_FAST_FORWARD_BACKLOG_CHARS) {
-    return targetText;
-  }
-  const step = Math.max(
-    STREAMING_REVEAL_MIN_CHARS_PER_TICK,
-    Math.min(STREAMING_REVEAL_MAX_CHARS_PER_TICK, Math.ceil(remaining / 4)),
-  );
-  return targetText.slice(0, currentText.length + step);
-}
-
-function useStreamingRevealText(target: string) {
-  const [visibleText, setVisibleText] = useState(target);
-  const visibleTextRef = useRef(target);
-
-  useEffect(() => {
-    visibleTextRef.current = visibleText;
-  }, [visibleText]);
-
-  useEffect(() => {
-    if (visibleTextRef.current === target) {
-      return undefined;
-    }
-    if (!target || !target.startsWith(visibleTextRef.current) || visibleTextRef.current.length > target.length) {
-      visibleTextRef.current = target;
-      setVisibleText(target);
-      return undefined;
-    }
-
-    let cancelled = false;
-    let timeoutId: number | undefined;
-    const pump = () => {
-      if (cancelled) {
-        return;
-      }
-      const nextText = advanceStreamingRevealText(visibleTextRef.current, target);
-      visibleTextRef.current = nextText;
-      setVisibleText(nextText);
-      if (nextText !== target) {
-        timeoutId = window.setTimeout(pump, STREAMING_REVEAL_INTERVAL_MS);
-      }
-    };
-    timeoutId = window.setTimeout(pump, STREAMING_REVEAL_INTERVAL_MS);
-    return () => {
-      cancelled = true;
-      if (timeoutId !== undefined) {
-        window.clearTimeout(timeoutId);
-      }
-    };
-  }, [target]);
-
-  return visibleText;
-}
-
 function StreamingResponseContent({ content }: { content: string }) {
-  const visibleContent = useStreamingRevealText(content);
+  const visibleContent = String(content ?? "");
   if (!visibleContent) {
     return null;
   }

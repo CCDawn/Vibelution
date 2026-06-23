@@ -153,7 +153,7 @@ _SESSION_STREAM_SUBSCRIBERS_LOCK = threading.Lock()
 _SESSION_STREAM_SUBSCRIBERS: dict[str, set[queue.Queue[dict[str, Any]]]] = {}
 _SESSION_STREAM_HEARTBEAT_SECONDS = 15.0
 _SESSION_STREAM_QUEUE_SIZE = 8
-_SESSION_STREAM_COALESCED_EVENT_TYPES = {"session_detail", "assistant_delta"}
+_SESSION_STREAM_COALESCED_EVENT_TYPES = {"session_detail"}
 _SESSION_STREAM_BUSY_PHASES = {"queued", "running", "stopping", "paused"}
 _SESSION_STREAM_MIN_BUSY_SNAPSHOT_INTERVAL_SECONDS = 0.75
 _SESSION_STREAM_LAST_SNAPSHOT_LOCK = threading.Lock()
@@ -18750,21 +18750,10 @@ def _publish_session_detail_snapshot(session_id: str, *, detail: dict[str, Any] 
     dropped_count = 0
     for subscriber in subscribers:
         dropped_count += _coalesce_session_stream_queue(subscriber, event_type="session_detail")
-        try:
-            subscriber.put_nowait(event)
+        delivered, dropped = _put_session_stream_event(subscriber, event)
+        dropped_count += dropped
+        if delivered:
             delivered_count += 1
-        except queue.Full:
-            try:
-                subscriber.get_nowait()
-                dropped_count += 1
-            except queue.Empty:
-                pass
-            try:
-                subscriber.put_nowait(event)
-                delivered_count += 1
-            except queue.Full:
-                dropped_count += 1
-                continue
     _record_session_detail_snapshot_published_event(
         session_id=session_id,
         elapsed_ms=_elapsed_ms(started_at),
@@ -18814,26 +18803,14 @@ def _publish_session_assistant_delta(
     delivered_count = 0
     dropped_count = 0
     for subscriber in subscribers:
-        dropped_count += _coalesce_session_stream_queue(
+        delivered, dropped = _put_session_stream_event(
             subscriber,
-            event_type="assistant_delta",
-            replacement_event=event,
+            event,
+            recover_assistant_delta_on_drop=True,
         )
-        try:
-            subscriber.put_nowait(event)
+        dropped_count += dropped
+        if delivered:
             delivered_count += 1
-        except queue.Full:
-            try:
-                subscriber.get_nowait()
-                dropped_count += 1
-            except queue.Empty:
-                pass
-            try:
-                subscriber.put_nowait(event)
-                delivered_count += 1
-            except queue.Full:
-                dropped_count += 1
-                continue
     _record_session_assistant_delta_published_event(
         session_id=session_id,
         turn_id=str(state.turn_id or "").strip(),
@@ -18848,11 +18825,76 @@ def _publish_session_assistant_delta(
     )
 
 
+def _put_session_stream_event(
+    subscriber: queue.Queue[dict[str, Any]],
+    event: dict[str, Any],
+    *,
+    recover_assistant_delta_on_drop: bool = False,
+) -> tuple[bool, int]:
+    dropped_count = 0
+    try:
+        subscriber.put_nowait(event)
+        return True, dropped_count
+    except queue.Full:
+        dropped_event, dropped_extra_count = _drop_session_stream_event_for_room(
+            subscriber,
+            prefer_non_assistant_delta=recover_assistant_delta_on_drop,
+        )
+        dropped_count += dropped_extra_count
+        if dropped_event is not None:
+            dropped_count += 1
+        queued_event = event
+        if recover_assistant_delta_on_drop and str((dropped_event or {}).get("type") or "") == "assistant_delta":
+            queued_event = _assistant_delta_recovery_stream_event(event)
+        try:
+            subscriber.put_nowait(queued_event)
+            return True, dropped_count
+        except queue.Full:
+            return False, dropped_count + 1
+
+
+def _drop_session_stream_event_for_room(
+    subscriber: queue.Queue[dict[str, Any]],
+    *,
+    prefer_non_assistant_delta: bool = False,
+) -> tuple[dict[str, Any] | None, int]:
+    queued_events: list[dict[str, Any]] = []
+    while True:
+        try:
+            queued_events.append(subscriber.get_nowait())
+        except queue.Empty:
+            break
+    if not queued_events:
+        return None, 0
+    drop_index = 0
+    if prefer_non_assistant_delta:
+        for index, queued_event in enumerate(queued_events):
+            if str(queued_event.get("type") or "") != "assistant_delta":
+                drop_index = index
+                break
+    dropped_event = queued_events.pop(drop_index)
+    dropped_extra_count = 0
+    for queued_event in queued_events:
+        try:
+            subscriber.put_nowait(queued_event)
+        except queue.Full:
+            dropped_extra_count += 1
+    return dropped_event, dropped_extra_count
+
+
+def _assistant_delta_recovery_stream_event(event: dict[str, Any]) -> dict[str, Any]:
+    recovered_event = dict(event)
+    recovered_event["contentDelta"] = str(event.get("content") or "")
+    recovered_event["thoughtDelta"] = str(event.get("thought") or "")
+    recovered_event["replaceContent"] = True
+    recovered_event["replaceThought"] = True
+    return recovered_event
+
+
 def _coalesce_session_stream_queue(
     subscriber: queue.Queue[dict[str, Any]],
     *,
     event_type: str,
-    replacement_event: dict[str, Any] | None = None,
 ) -> int:
     """Drop stale status snapshots for one SSE subscriber before enqueuing a newer one."""
 
@@ -18867,12 +18909,6 @@ def _coalesce_session_stream_queue(
         except queue.Empty:
             break
         if str(existing.get("type") or "").strip() == normalized_event_type:
-            if normalized_event_type == "assistant_delta" and replacement_event is not None:
-                if _merge_assistant_delta_stream_events(existing, replacement_event):
-                    dropped_count += 1
-                    continue
-                kept.append(existing)
-                continue
             dropped_count += 1
             continue
         kept.append(existing)
@@ -18882,38 +18918,6 @@ def _coalesce_session_stream_queue(
         except queue.Full:
             dropped_count += 1
     return dropped_count
-
-
-def _merge_assistant_delta_stream_events(existing: dict[str, Any], replacement: dict[str, Any]) -> bool:
-    if str(existing.get("sessionId") or "") != str(replacement.get("sessionId") or ""):
-        return False
-    if str(existing.get("turnId") or "") != str(replacement.get("turnId") or ""):
-        return False
-    for field_name, delta_key, replace_key in (
-        ("content", "contentDelta", "replaceContent"),
-        ("thought", "thoughtDelta", "replaceThought"),
-    ):
-        existing_delta = str(existing.get(delta_key) if existing.get(delta_key) is not None else existing.get(field_name) or "")
-        replacement_delta = str(
-            replacement.get(delta_key) if replacement.get(delta_key) is not None else replacement.get(field_name) or ""
-        )
-        if bool(replacement.get(replace_key)):
-            replacement[delta_key] = replacement_delta
-            replacement[replace_key] = True
-            continue
-        if bool(existing.get(replace_key)):
-            replacement[delta_key] = existing_delta + replacement_delta
-            replacement[replace_key] = True
-            continue
-        replacement[delta_key] = existing_delta + replacement_delta
-        replacement[replace_key] = False
-    if not replacement.get("stage"):
-        replacement["stage"] = str(existing.get("stage") or "")
-    if "feedbackEvents" not in replacement and "feedbackEvents" in existing:
-        replacement["feedbackEvents"] = list(existing.get("feedbackEvents") or [])
-    if "timelineItems" not in replacement and "timelineItems" in existing:
-        replacement["timelineItems"] = list(existing.get("timelineItems") or [])
-    return True
 
 
 def _encode_sse_event(event_name: str, payload: dict[str, Any]) -> str:
