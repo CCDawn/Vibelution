@@ -31,6 +31,7 @@ from core.llm.agent_runtime import (
 from core.logging import debug as _debug_logger
 from core.ui.chat_state import load_chat_state
 
+from . import agent_role_tool_profile_service
 from .runtime_scene_service import record_runtime_scene_event
 from .supervised_runtime_contract import supervised_role_runtime_tools
 
@@ -3125,27 +3126,43 @@ def default_system_no_tool_policy(policy_id: str) -> dict[str, Any]:
 
 def default_research_source_tool_policy(policy_id: str, *, role_key: str = "") -> dict[str, Any]:
     payload = default_tool_policy(policy_id)
-    profile = RESEARCH_SOURCE_ROLE_TOOL_PROFILES.get(_normalize_role_key(role_key), {})
-    payload["allowedTools"] = list(profile.get("allowedTools") or RESEARCH_SOURCE_ALLOWED_TOOLS)
-    payload["preferredTools"] = list(profile.get("preferredTools") or RESEARCH_SOURCE_PREFERRED_TOOLS)
-    payload["readScopes"] = ["private", "shared"]
-    payload["writeScopes"] = []
-    payload["networkAccess"] = "controlled"
-    payload["mutationAccess"] = "none"
-    payload["maxCallsPerTurn"] = 8
+    resolved = agent_role_tool_profile_service.resolve_role_tool_policy(
+        role_key=role_key,
+        primary_mode="research",
+        policy_id=policy_id,
+    )
+    if resolved:
+        payload.update(resolved)
+    else:
+        profile = RESEARCH_SOURCE_ROLE_TOOL_PROFILES.get(_normalize_role_key(role_key), {})
+        payload["allowedTools"] = list(profile.get("allowedTools") or RESEARCH_SOURCE_ALLOWED_TOOLS)
+        payload["preferredTools"] = list(profile.get("preferredTools") or RESEARCH_SOURCE_PREFERRED_TOOLS)
+        payload["readScopes"] = ["private", "shared"]
+        payload["writeScopes"] = []
+        payload["networkAccess"] = "controlled"
+        payload["mutationAccess"] = "none"
+        payload["maxCallsPerTurn"] = 8
     return payload
 
 
 def default_research_role_tool_policy(policy_id: str, *, role_key: str = "") -> dict[str, Any]:
     payload = default_tool_policy(policy_id)
-    profile = RESEARCH_ROLE_TOOL_PROFILES.get(_normalize_role_key(role_key), {})
-    payload["allowedTools"] = list(profile.get("allowedTools") or ("agent_message_tool", "research_knowledge_query_tool"))
-    payload["preferredTools"] = list(profile.get("preferredTools") or payload["allowedTools"])
-    payload["readScopes"] = ["private", "shared"]
-    payload["writeScopes"] = []
-    payload["networkAccess"] = "controlled"
-    payload["mutationAccess"] = "none"
-    payload["maxCallsPerTurn"] = 8
+    resolved = agent_role_tool_profile_service.resolve_role_tool_policy(
+        role_key=role_key,
+        primary_mode="research",
+        policy_id=policy_id,
+    )
+    if resolved:
+        payload.update(resolved)
+    else:
+        profile = RESEARCH_ROLE_TOOL_PROFILES.get(_normalize_role_key(role_key), {})
+        payload["allowedTools"] = list(profile.get("allowedTools") or ("agent_message_tool", "research_knowledge_query_tool"))
+        payload["preferredTools"] = list(profile.get("preferredTools") or payload["allowedTools"])
+        payload["readScopes"] = ["private", "shared"]
+        payload["writeScopes"] = []
+        payload["networkAccess"] = "controlled"
+        payload["mutationAccess"] = "none"
+        payload["maxCallsPerTurn"] = 8
     return payload
 
 

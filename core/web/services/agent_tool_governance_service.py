@@ -16,7 +16,7 @@ from typing import Any
 from core.chat.chat_task_types import trim_lines
 from core.logging import debug as _debug_logger
 
-from . import agent_directory_service
+from . import agent_directory_service, agent_role_tool_profile_service
 from .runtime_scene_service import record_runtime_scene_event
 from .tool_catalog import HIGH_PERMISSION_TIER, LOW_PERMISSION_TIER, permission_tier_for_tool, risk_tags_for_tool
 
@@ -116,6 +116,7 @@ def submit_tool_governance_request(
     if not any(delta.values()):
         raise AgentToolGovernanceError("Tool governance request must include at least one tool change.")
     _validate_disabled_tool_delta(delta)
+    _validate_role_tool_delta(target_agent, delta)
     normalized_grant_scope = _normalize_grant_scope(grant_scope)
     _validate_grant_scope_delta(normalized_grant_scope, delta)
 
@@ -229,6 +230,8 @@ def resolve_tool_governance_request(
 
         delta = item.get("policyDelta") if isinstance(item.get("policyDelta"), dict) else {}
         normalized_delta = _normalize_delta_from_payload(delta)
+        _validate_disabled_tool_delta(normalized_delta)
+        _validate_role_tool_delta(target_agent, normalized_delta)
         grant_scope = _normalize_grant_scope(str(item.get("grantScope") or "persistent"))
         item["status"] = "applied"
         item["resolvedAt"] = utc_now_iso()
@@ -374,6 +377,36 @@ def _validate_disabled_tool_delta(delta: dict[str, list[str]]) -> None:
         raise AgentToolGovernanceError(
             "Disabled tools cannot be granted or unblocked: " + ", ".join(disabled)
         )
+
+
+def _validate_role_tool_delta(target_agent: dict[str, Any], delta: dict[str, list[str]]) -> None:
+    requested = set(delta.get("grantTools") or []) | set(delta.get("unblockTools") or [])
+    if not requested:
+        return
+    metadata = target_agent.get("metadata") if isinstance(target_agent.get("metadata"), dict) else {}
+    role_key = str(target_agent.get("roleKey") or metadata.get("researchAgentKey") or "").strip()
+    primary_mode = str(target_agent.get("primaryMode") or "").strip()
+    forbidden = sorted(
+        tool
+        for tool in requested
+        if agent_role_tool_profile_service.role_forbids_tool(
+            role_key,
+            tool,
+            primary_mode=primary_mode,
+            metadata=metadata,
+        )
+    )
+    if not forbidden:
+        return
+    profile = agent_role_tool_profile_service.role_tool_profile_for_role(
+        role_key,
+        primary_mode=primary_mode,
+        metadata=metadata,
+    ) or {}
+    profile_id = str(profile.get("profileId") or role_key or "role").strip()
+    raise AgentToolGovernanceError(
+        f"Role tool profile {profile_id} forbids granting or unblocking: " + ", ".join(forbidden)
+    )
 
 
 def _unique_tools(values: list[str] | None) -> list[str]:

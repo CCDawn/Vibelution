@@ -12,7 +12,7 @@ from core.infrastructure import developer_sandbox
 from core.infrastructure.workspace_manager import get_workspace
 from core.logging import debug as _debug_logger
 
-from . import agent_mode_binding_service, session_service
+from . import agent_mode_binding_service, agent_role_tool_profile_service, session_service
 from .agent_directory_service import (
     AgentDirectoryError,
     AgentNotFoundError,
@@ -72,42 +72,11 @@ RESEARCH_AGENT_CREATION_TOOL = "research_agent_creation_proposal_tool"
 RESEARCH_COMMUNICATION_EDGE_TOOL = "research_communication_edge_proposal_tool"
 RESEARCH_PROPOSAL_APPLY_TOOL = "research_proposal_apply_tool"
 SUPERSEDED_PROPOSAL_STATUSES = {"superseded", "rejected", "applied"}
-CEO_AGENT_TOOLS = [
-    "agent_message_tool",
-    RESEARCH_AGENT_CREATION_TOOL,
-    RESEARCH_COMMUNICATION_EDGE_TOOL,
-    RESEARCH_PROPOSAL_APPLY_TOOL,
-    "batch_web_search_tool",
-    "paper_search_tool",
-    "web_fetch_tool",
-]
-ORGANIZATION_ADVISOR_TOOLS = [
-    "agent_message_tool",
-    "agent_tool_permission_request_tool",
-    RESEARCH_AGENT_CREATION_TOOL,
-    RESEARCH_COMMUNICATION_EDGE_TOOL,
-    RESEARCH_PROPOSAL_APPLY_TOOL,
-    "batch_web_search_tool",
-    "paper_search_tool",
-    "web_fetch_tool",
-]
-CAPABILITY_STEWARD_TOOLS = [
-    "agent_message_tool",
-    "agent_tool_permission_request_tool",
-    RESEARCH_AGENT_CREATION_TOOL,
-    RESEARCH_COMMUNICATION_EDGE_TOOL,
-    RESEARCH_PROPOSAL_APPLY_TOOL,
-    "batch_web_search_tool",
-    "paper_search_tool",
-    "web_fetch_tool",
-    "read_memory_tool",
-    "get_memory_summary_tool",
-    "search_memory_tool",
-    "read_dynamic_prompt_tool",
-    "research_knowledge_query_tool",
-]
-DEFAULT_CREATED_AGENT_TOOLS = ["agent_message_tool", "batch_web_search_tool", "paper_search_tool", "web_fetch_tool"]
-RTOKEN_SEARCH_DISABLED_TOOLS = {"web_search_tool"}
+CEO_AGENT_TOOLS = list((agent_role_tool_profile_service.get_role_tool_profile("research_org_ceo") or {}).get("allowedTools") or [])
+ORGANIZATION_ADVISOR_TOOLS = list((agent_role_tool_profile_service.get_role_tool_profile("research_org_organization_advisor") or {}).get("allowedTools") or [])
+CAPABILITY_STEWARD_TOOLS = list((agent_role_tool_profile_service.get_role_tool_profile("research_org_capability_steward") or {}).get("allowedTools") or [])
+DEFAULT_CREATED_AGENT_TOOLS = list((agent_role_tool_profile_service.get_role_tool_profile("research_role_default") or {}).get("allowedTools") or ["agent_message_tool", "research_knowledge_query_tool"])
+RTOKEN_SEARCH_DISABLED_TOOLS = set(agent_role_tool_profile_service.SEARCH_DISABLED_TOOLS)
 CREATE_AGENT_ROLE_ALIASES = {
     "memorycurator": "memory_management",
     "memorysteward": "memory_management",
@@ -940,6 +909,12 @@ def _ensure_core_agent(
         "responsibilities": responsibilities,
     }
     desired_tools = _normalize_allowed_tools(allowed_tools)
+    role_policy = agent_role_tool_profile_service.resolve_role_tool_policy(
+        role_key=role_key,
+        primary_mode="research",
+        metadata={"researchOrgRole": system_role, "systemRole": system_role},
+        policy_id=f"tool-{agent.get('agentId') or ''}",
+    ) or {}
     current_policy = agent.get("toolPolicy") if isinstance(agent.get("toolPolicy"), dict) else {}
     current_memory_policy = agent.get("memoryPolicy") if isinstance(agent.get("memoryPolicy"), dict) else {}
     desired_read_groups = _normalize_allowed_tools(memory_policy.get("readSharedGroups") or [])
@@ -960,7 +935,17 @@ def _ensure_core_agent(
             role_key=role_key,
             prompt_template_id=prompt_template_id,
             metadata=desired_metadata,
-            tool_policy=_explicit_tool_policy_payload(desired_tools, preferred_tools=["agent_message_tool"]),
+            tool_policy={
+                **_explicit_tool_policy_payload(
+                    desired_tools,
+                    preferred_tools=list(role_policy.get("preferredTools") or ["agent_message_tool"]),
+                ),
+                **{key: value for key, value in role_policy.items() if str(key).startswith("roleToolProfile")},
+                "mutationAccess": str(role_policy.get("mutationAccess") or "restricted"),
+                "networkAccess": str(role_policy.get("networkAccess") or "controlled"),
+                "maxCallsPerTurn": int(role_policy.get("maxCallsPerTurn") or 8),
+                "writeScopes": list(role_policy.get("writeScopes") or []),
+            },
             memory_policy={
                 "readSharedGroups": desired_read_groups,
                 "writeSharedGroups": desired_write_groups,
@@ -1916,11 +1901,12 @@ def _sanitize_proposal_action_tools(action: dict[str, Any]) -> dict[str, Any]:
     known_tool_names = _known_tool_names()
     if not known_tool_names:
         return {**action, "allowedTools": allowed_tools}
-    valid_tools = [tool for tool in allowed_tools if tool in known_tool_names and tool not in RTOKEN_SEARCH_DISABLED_TOOLS]
+    forbidden_tools = _role_forbidden_tools_for_action(action, action_type=action_type)
+    valid_tools = [tool for tool in allowed_tools if tool in known_tool_names and tool not in forbidden_tools]
     missing_tools = _normalize_allowed_tools(
         [
             *(action.get("missingTools") or []),
-            *[tool for tool in allowed_tools if tool not in known_tool_names or tool in RTOKEN_SEARCH_DISABLED_TOOLS],
+            *[tool for tool in allowed_tools if tool not in known_tool_names or tool in forbidden_tools],
         ]
     )
     if action_type == "create_agent" and not valid_tools:
@@ -1933,6 +1919,26 @@ def _sanitize_proposal_action_tools(action: dict[str, Any]) -> dict[str, Any]:
         next_action["requestedTools"] = requested_tools
         next_action["missingTools"] = missing_tools
     return next_action
+
+
+def _role_forbidden_tools_for_action(action: dict[str, Any], *, action_type: str) -> set[str]:
+    if action_type != "create_agent":
+        return set(RTOKEN_SEARCH_DISABLED_TOOLS)
+    role_key = _normalize_create_agent_role_alias(
+        action.get("roleKey")
+        or action.get("researchAgentKey")
+        or action.get("role")
+        or action.get("title")
+        or action.get("displayName")
+    )
+    primary_mode = str(action.get("primaryMode") or "research").strip() or "research"
+    return set(
+        agent_role_tool_profile_service.forbidden_tools_for_role(
+            role_key,
+            primary_mode=primary_mode,
+            metadata={"researchAgentKey": role_key},
+        )
+    ) | set(RTOKEN_SEARCH_DISABLED_TOOLS)
 
 
 def _sanitize_proposal_actions_in_place(proposal: dict[str, Any]) -> bool:
@@ -2146,9 +2152,22 @@ def _apply_create_agent_action(graph: dict[str, Any], action: dict[str, Any]) ->
     if not agent_id:
         raise ResearchOrganizationError("Failed to create Agent for organization proposal.")
     employee_rank = str(action.get("employeeRank") or "specialist").strip() or "specialist"
-    allowed_tools = _normalize_allowed_tools(action.get("allowedTools") or DEFAULT_CREATED_AGENT_TOOLS)
     research_role = str(action.get("role") or "research_specialist").strip() or "research_specialist"
-    role_key = str(action.get("roleKey") or research_role).strip() or research_role
+    role_key = _normalize_create_agent_role_alias(action.get("roleKey") or research_role) or research_role
+    role_policy = agent_role_tool_profile_service.resolve_role_tool_policy(
+        role_key=role_key,
+        primary_mode=str(action.get("primaryMode") or "research").strip() or "research",
+        metadata={"researchAgentKey": role_key},
+        policy_id=f"tool-{agent_id}",
+    ) or {}
+    requested_allowed_tools = _normalize_allowed_tools(action.get("allowedTools") or [])
+    role_allowed_tools = _normalize_allowed_tools(role_policy.get("allowedTools") or DEFAULT_CREATED_AGENT_TOOLS)
+    if requested_allowed_tools:
+        allowed_tools = [tool for tool in requested_allowed_tools if tool in set(role_allowed_tools)]
+        if not allowed_tools:
+            allowed_tools = role_allowed_tools
+    else:
+        allowed_tools = role_allowed_tools
     prompt_template_id = str(action.get("promptTemplateId") or "").strip()
     responsibilities = _normalize_contract_lines(action.get("responsibilities") or action.get("deliverables") or [])
     forbidden = _normalize_contract_lines(
@@ -2185,7 +2204,17 @@ def _apply_create_agent_action(graph: dict[str, Any], action: dict[str, Any]) ->
         role_key=role_key,
         prompt_template_id=prompt_template_id,
         metadata=metadata,
-        tool_policy=_explicit_tool_policy_payload(allowed_tools, preferred_tools=["agent_message_tool"]),
+        tool_policy={
+            **_explicit_tool_policy_payload(
+                allowed_tools,
+                preferred_tools=list(role_policy.get("preferredTools") or ["agent_message_tool"]),
+            ),
+            **{key: value for key, value in role_policy.items() if str(key).startswith("roleToolProfile")},
+            "mutationAccess": str(role_policy.get("mutationAccess") or "none"),
+            "networkAccess": str(role_policy.get("networkAccess") or "controlled"),
+            "maxCallsPerTurn": int(role_policy.get("maxCallsPerTurn") or 8),
+            "writeScopes": list(role_policy.get("writeScopes") or []),
+        },
         memory_policy={
             "readSharedGroups": metadata["roleContract"]["readSharedGroups"],
             "writeSharedGroups": metadata["roleContract"]["writeSharedGroups"],
