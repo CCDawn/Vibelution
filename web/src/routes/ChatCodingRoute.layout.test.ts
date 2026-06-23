@@ -1471,6 +1471,21 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.sessionLoadMoreStatus).toBeTypeOf("string");
   });
 
+  it("selects requested direct sessions without waiting for the session index", () => {
+    const requestedSessionBranchStart = routeSource.indexOf("requestedSessionId\n      && !requestedRoomId");
+    expect(requestedSessionBranchStart).toBeGreaterThan(0);
+    const requestedSessionBranch = routeSource.slice(
+      requestedSessionBranchStart,
+      routeSource.indexOf("if (!activeSessionId && sessionsQuery.data", requestedSessionBranchStart),
+    );
+    expect(requestedSessionBranch).toContain("activeSessionId !== requestedSessionId");
+    expect(requestedSessionBranch).toContain("setActiveGroupRoomId(\"\")");
+    expect(requestedSessionBranch).toContain("setActiveSession(requestedSessionId)");
+    expect(requestedSessionBranch).not.toContain("sessionsQuery.data?.some");
+    expect(routeSource).toContain("queryFn: () => fetchJson<SessionDetail>(`/api/sessions/${activeSessionId}`)");
+    expect(routeSource).toContain("enabled: Boolean(activeSessionId)");
+  });
+
   it("keeps paginated session query caches synchronized with optimistic list mutations", () => {
     expect(routeSource).toContain("updateSessionSummaryCaches(queryClient");
     expect(routeSource).toContain("captureSessionIndexCacheSnapshots(queryClient)");
