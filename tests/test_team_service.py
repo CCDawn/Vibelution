@@ -216,15 +216,42 @@ def test_research_team_sync_applies_challenge_cup_agent_tool_profiles(tmp_path, 
     cases = {
         discovery["agentId"]: (
             "challenge_cup_data_discovery",
-            ["agent_message_tool", "research_knowledge_query_tool", "web_search_tool"],
+            [
+                "agent_message_tool",
+                "research_knowledge_query_tool",
+                "source_collection_context_tool",
+                "source_collection_stage_writeback_tool",
+                "batch_web_search_tool",
+                "paper_search_tool",
+                "project_search_tool",
+                "news_search_tool",
+                "search_summarize_sources_tool",
+            ],
         ),
         acquisition["agentId"]: (
             "challenge_cup_source_acquisition",
-            ["agent_message_tool", "research_knowledge_query_tool", "web_search_tool", "web_fetch_tool"],
+            [
+                "agent_message_tool",
+                "research_knowledge_query_tool",
+                "source_collection_context_tool",
+                "source_collection_stage_writeback_tool",
+                "web_fetch_tool",
+                "batch_web_search_tool",
+                "paper_search_tool",
+                "project_search_tool",
+                "search_summarize_sources_tool",
+            ],
         ),
         extraction["agentId"]: (
             "challenge_cup_content_extraction",
-            ["agent_message_tool", "research_knowledge_query_tool", "web_fetch_tool"],
+            [
+                "agent_message_tool",
+                "research_knowledge_query_tool",
+                "source_collection_context_tool",
+                "source_collection_stage_writeback_tool",
+                "web_fetch_tool",
+                "search_summarize_sources_tool",
+            ],
         ),
     }
     for agent_id, (role_key, expected_tools) in cases.items():
@@ -263,7 +290,13 @@ def test_research_team_repair_applies_challenge_cup_agent_tool_profiles(tmp_path
     assert agent["toolPolicy"]["allowedTools"] == [
         "agent_message_tool",
         "research_knowledge_query_tool",
-        "web_search_tool",
+        "source_collection_context_tool",
+        "source_collection_stage_writeback_tool",
+        "batch_web_search_tool",
+        "paper_search_tool",
+        "project_search_tool",
+        "news_search_tool",
+        "search_summarize_sources_tool",
     ]
     assert agent["toolPolicy"]["mutationAccess"] == "none"
     assert agent["toolPolicy"]["writeScopes"] == []

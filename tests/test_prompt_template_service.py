@@ -1,4 +1,5 @@
 from pathlib import Path
+import re
 
 from core.web.services import prompt_template_service
 
@@ -6,6 +7,10 @@ from core.web.services import prompt_template_service
 def _use_tmp_project_root(tmp_path, monkeypatch):
     monkeypatch.setenv("VIBELUTION_DATA_HOME", str(tmp_path))
     monkeypatch.setattr(prompt_template_service, "PROJECT_ROOT", tmp_path)
+
+
+def _contains_tool_name(content: str, tool_name: str) -> bool:
+    return re.search(rf"(?<![A-Za-z0-9_]){re.escape(tool_name)}(?![A-Za-z0-9_])", content) is not None
 
 
 def test_prompt_template_registry_repairs_research_defaults(tmp_path, monkeypatch):
@@ -62,7 +67,8 @@ def test_prompt_template_registry_repairs_research_defaults(tmp_path, monkeypatc
     discovery_detail = prompt_template_service.get_prompt_template("prompt-challenge-cup-data-discovery")
     assert discovery_detail is not None
     assert discovery_detail["metadata"]["roleKey"] == "challenge_cup_data_discovery"
-    assert "web_search_tool" in discovery_detail["content"]
+    assert not _contains_tool_name(discovery_detail["content"], "web_search_tool")
+    assert _contains_tool_name(discovery_detail["content"], "batch_web_search_tool")
     assert "不调用 web_fetch_tool" in discovery_detail["content"]
     acquisition_detail = prompt_template_service.get_prompt_template("prompt-challenge-cup-source-acquisition")
     assert acquisition_detail is not None

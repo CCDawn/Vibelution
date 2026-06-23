@@ -216,6 +216,38 @@ def test_agent_tool_governance_uses_shared_tool_catalog_risk_metadata(tmp_path, 
     assert agent_directory_service.get_agent(target["agentId"])["toolPolicy"]["allowedTools"] == []
 
 
+def test_agent_tool_governance_rejects_disabled_rtoken_search_grants(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    advisor = agent_directory_service.create_agent_instance(
+        display_name="权限顾问",
+        metadata={"systemRole": "capability_steward", "researchOrgRole": "capability_steward"},
+    )
+    target = agent_directory_service.create_agent_instance(
+        display_name="搜索 Agent",
+        primary_mode="research",
+        role_key="research_broad",
+        prompt_template_id="prompt-research-broad",
+    )
+
+    with pytest.raises(agent_tool_governance_service.AgentToolGovernanceError, match="web_search_tool"):
+        agent_tool_governance_service.submit_tool_governance_request(
+            target["agentId"],
+            proposed_by_agent_id=advisor["agentId"],
+            grant_tools=["web_search_tool"],
+            reason="尝试重新打开 rtoken 搜索。",
+            apply_mode="auto",
+        )
+
+    with pytest.raises(agent_tool_governance_service.AgentToolGovernanceError, match="web_search_tool"):
+        agent_tool_governance_service.submit_tool_governance_request(
+            target["agentId"],
+            proposed_by_agent_id=advisor["agentId"],
+            unblock_tools=["web_search_tool"],
+            reason="尝试解除 rtoken 搜索阻断。",
+            apply_mode="auto",
+        )
+
+
 def test_agent_tool_governance_routes_create_and_resolve_requests(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     monkeypatch.setattr(agents_route, "_ensure_config_agent_instances", lambda: None)

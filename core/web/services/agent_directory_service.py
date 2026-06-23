@@ -116,7 +116,6 @@ RESEARCH_SOURCE_ROLE_KEYS = {
 RESEARCH_SOURCE_ALLOWED_TOOLS = (
     "agent_message_tool",
     "research_knowledge_query_tool",
-    "web_search_tool",
     "web_fetch_tool",
     "batch_web_search_tool",
     "paper_search_tool",
@@ -128,7 +127,7 @@ RESEARCH_SOURCE_ALLOWED_TOOLS = (
 RESEARCH_SOURCE_PREFERRED_TOOLS = (
     "research_knowledge_query_tool",
     "batch_web_search_tool",
-    "web_search_tool",
+    "paper_search_tool",
     "search_summarize_sources_tool",
     "agent_message_tool",
 )
@@ -139,7 +138,6 @@ RESEARCH_SOURCE_ROLE_TOOL_PROFILES = {
             "research_knowledge_query_tool",
             "source_collection_context_tool",
             "source_collection_stage_writeback_tool",
-            "web_search_tool",
             "batch_web_search_tool",
             "paper_search_tool",
             "project_search_tool",
@@ -151,7 +149,6 @@ RESEARCH_SOURCE_ROLE_TOOL_PROFILES = {
             "source_collection_stage_writeback_tool",
             "batch_web_search_tool",
             "paper_search_tool",
-            "web_search_tool",
             "search_summarize_sources_tool",
             "research_knowledge_query_tool",
             "agent_message_tool",
@@ -163,7 +160,6 @@ RESEARCH_SOURCE_ROLE_TOOL_PROFILES = {
             "research_knowledge_query_tool",
             "source_collection_context_tool",
             "source_collection_stage_writeback_tool",
-            "web_search_tool",
             "web_fetch_tool",
             "batch_web_search_tool",
             "paper_search_tool",
@@ -174,8 +170,8 @@ RESEARCH_SOURCE_ROLE_TOOL_PROFILES = {
             "source_collection_context_tool",
             "source_collection_stage_writeback_tool",
             "web_fetch_tool",
-            "web_search_tool",
             "batch_web_search_tool",
+            "paper_search_tool",
             "search_summarize_sources_tool",
             "research_knowledge_query_tool",
             "agent_message_tool",
@@ -205,7 +201,6 @@ RESEARCH_SOURCE_ROLE_TOOL_PROFILES = {
             "research_knowledge_query_tool",
             "source_collection_context_tool",
             "source_collection_stage_writeback_tool",
-            "web_search_tool",
             "web_fetch_tool",
             "batch_web_search_tool",
             "paper_search_tool",
@@ -219,8 +214,8 @@ RESEARCH_SOURCE_ROLE_TOOL_PROFILES = {
             "research_knowledge_query_tool",
             "web_fetch_tool",
             "search_summarize_sources_tool",
-            "web_search_tool",
             "batch_web_search_tool",
+            "paper_search_tool",
             "agent_message_tool",
         ),
     },
@@ -251,7 +246,6 @@ RESEARCH_ROLE_TOOL_PROFILES = {
         "allowedTools": (
             "agent_message_tool",
             "research_knowledge_query_tool",
-            "web_search_tool",
             "web_fetch_tool",
             "batch_web_search_tool",
             "paper_search_tool",
@@ -305,7 +299,7 @@ AGENT_AVATAR_FILENAMES = (
     "image2-1779953260549-43de200a.png",
     "image2-1779954683508-9fcd1834.png",
 )
-AGENT_AVATAR_LEGACY_DEFAULTS = (
+AGENT_AVATAR_PRIMARY_DEFAULTS = (
     "01-session-agent.png",
     "02-diagnose-agent.png",
     "03-inspect-agent.png",
@@ -316,12 +310,26 @@ AGENT_AVATAR_LEGACY_DEFAULTS = (
     "08-theme-synthesizer.png",
     "09-card-planner.png",
 )
+AGENT_AVATAR_GENERATED_FALLBACKS = (
+    "10-anime-session-agent.png",
+    "11-anime-deep-research-agent.png",
+    "12-anime-tool-executor-agent.png",
+    "13-anime-review-evaluator-agent.png",
+    "14-anime-source-collector-agent.png",
+    "15-anime-memory-steward-agent.png",
+    "16-anime-self-evolution-agent.png",
+    "17-anime-team-coordinator-agent.png",
+    "18-anime-system-service-agent.png",
+    "19-anime-creative-writer-agent.png",
+)
 AGENT_AVATAR_ROLE_DEFAULTS = (
     (("chat",), ("01-session-agent.png", "10-anime-session-agent.png")),
     (("general",), ("01-session-agent.png", "10-anime-session-agent.png")),
     (("source",), ("05-broad-explorer.png", "14-anime-source-collector-agent.png")),
     (("acquisition",), ("05-broad-explorer.png", "14-anime-source-collector-agent.png")),
     (("discovery",), ("05-broad-explorer.png", "14-anime-source-collector-agent.png")),
+    (("content",), ("02-diagnose-agent.png", "12-anime-tool-executor-agent.png")),
+    (("extraction",), ("02-diagnose-agent.png", "12-anime-tool-executor-agent.png")),
     (("memory",), ("04-summarize-agent.png", "15-anime-memory-steward-agent.png")),
     (("knowledge",), ("04-summarize-agent.png", "15-anime-memory-steward-agent.png")),
     (("steward",), ("04-summarize-agent.png", "15-anime-memory-steward-agent.png")),
@@ -3483,6 +3491,17 @@ def _normalize_agent_record_for_storage(agent: dict[str, Any]) -> dict[str, Any]
         normalized.get("contextCompressionPolicy") if isinstance(normalized.get("contextCompressionPolicy"), dict) else None
     )
     metadata = dict(normalized.get("metadata") or {})
+    avatar_path = _canonical_agent_avatar_metadata_path(metadata, normalized)
+    for stale_key in (
+        "agentAvatarImagePath",
+        "agentAvatarImageUrl",
+        "agentAvatarImageSource",
+        "avatarPath",
+        "avatarImageUrl",
+    ):
+        metadata.pop(stale_key, None)
+    if avatar_path:
+        metadata["avatarImagePath"] = avatar_path
     if _is_profileless_session_agent({**normalized, "metadata": metadata}):
         if isinstance(metadata.get("personaProfile"), dict):
             metadata.pop("personaProfile", None)
@@ -3508,14 +3527,20 @@ def _normalize_agent_record_for_storage(agent: dict[str, Any]) -> dict[str, Any]
     normalized.pop("profile_id", None)
     normalized.pop("templateId", None)
     normalized.pop("template_id", None)
+    normalized.pop("avatarImagePath", None)
+    normalized.pop("avatarImageUrl", None)
+    normalized.pop("agentAvatarImagePath", None)
+    normalized.pop("agentAvatarImageUrl", None)
+    normalized.pop("avatarPath", None)
     return normalized
 
 
 def _normalize_agent_legacy_metadata_fields(agent: dict[str, Any]) -> bool:
-    before = json.dumps(agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}, ensure_ascii=False, sort_keys=True)
+    before = json.dumps(agent, ensure_ascii=False, sort_keys=True)
     normalized = _normalize_agent_record_for_storage(agent)
-    agent["metadata"] = normalized.get("metadata", {})
-    after = json.dumps(agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}, ensure_ascii=False, sort_keys=True)
+    agent.clear()
+    agent.update(normalized)
+    after = json.dumps(agent, ensure_ascii=False, sort_keys=True)
     return before != after
 
 
@@ -4917,13 +4942,26 @@ def resolve_agent_avatar_file(filename: str) -> Path:
     return path
 
 
-def _agent_avatar_path_from_metadata(metadata: dict[str, Any]) -> str:
-    avatar_path = str(
+def _canonical_agent_avatar_metadata_path(
+    metadata: dict[str, Any],
+    agent: dict[str, Any] | None = None,
+) -> str:
+    agent_payload = agent if isinstance(agent, dict) else {}
+    raw_path = str(
         metadata.get("avatarImagePath")
         or metadata.get("agentAvatarImagePath")
         or metadata.get("avatarPath")
+        or agent_payload.get("avatarImagePath")
+        or agent_payload.get("agentAvatarImagePath")
+        or agent_payload.get("avatarPath")
         or ""
     ).strip()
+    filename = agent_avatar_filename(raw_path)
+    return str(AGENT_AVATAR_RELATIVE_DIR / filename) if filename else ""
+
+
+def _agent_avatar_path_from_metadata(metadata: dict[str, Any]) -> str:
+    avatar_path = str(metadata.get("avatarImagePath") or "").strip()
     filename = agent_avatar_filename(avatar_path)
     return str(AGENT_AVATAR_RELATIVE_DIR / filename) if filename else ""
 
@@ -4988,7 +5026,9 @@ def _default_agent_avatar_filename(agent: dict[str, Any]) -> str:
             for filename in filenames:
                 if filename in available:
                     return filename
-    fallback_pool = [filename for filename in AGENT_AVATAR_LEGACY_DEFAULTS if filename in available]
+    fallback_pool = [filename for filename in AGENT_AVATAR_PRIMARY_DEFAULTS if filename in available]
+    if not fallback_pool:
+        fallback_pool = [filename for filename in AGENT_AVATAR_GENERATED_FALLBACKS if filename in available]
     if not fallback_pool:
         fallback_pool = [filename for filename in AGENT_AVATAR_FILENAMES if filename in available]
     if not fallback_pool:
@@ -5000,9 +5040,6 @@ def _default_agent_avatar_filename(agent: dict[str, Any]) -> str:
 
 def _available_agent_avatar_filenames() -> list[str]:
     avatar_dir = _workspace_path("avatars").resolve()
-    legacy_avatar_dir = (_project_root() / AGENT_AVATAR_RELATIVE_DIR).resolve()
-    if not avatar_dir.exists() and legacy_avatar_dir.exists():
-        avatar_dir = legacy_avatar_dir
     if not avatar_dir.exists() or not avatar_dir.is_dir():
         return []
     existing = {

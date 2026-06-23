@@ -311,7 +311,7 @@ def _get_system_prompt_for_tool(tool_name: str, tool_desc: str, tool_params: str
             "不要发明 `memory_tools` 之类的聚合工具名。"
         ),
         "search_tools": (
-            "真实工具名只有 `web_search_tool`，不要发明 `search_tools` 之类的聚合工具名，"
+            "真实搜索工具名优先使用 `batch_web_search_tool`，论文用 `paper_search_tool`，不要发明 `search_tools` 之类的聚合工具名，"
             "也不要退化成只查看本地目录。"
         ),
     }
@@ -345,7 +345,7 @@ TOOL_TEST_SUITES: Dict[str, Dict] = {
         "name": "搜索工具",
         "description": "网络搜索和内容提取",
         "scenarios": [
-            {"scenario": "搜索", "prompt": "联网搜索 AI Agent 的最新资料", "expected_tool": "web_search_tool"},
+            {"scenario": "搜索", "prompt": "联网搜索 AI Agent 的最新资料", "expected_tool": "batch_web_search_tool"},
         ],
     },
     "create_child_session_tool": {

@@ -150,11 +150,18 @@ def test_agent_registry_repair_migrates_legacy_profile_fields_to_llm_bindings(tm
                         "promptTemplateId": "prompt-chat-default",
                         "directSessionId": "session-legacy",
                         "workspacePath": "workspace/agents/agent-legacy",
+                        "avatarImagePath": "workspace/avatars/02-diagnose-agent.png",
+                        "avatarImageUrl": "/api/agents/avatar-image/02-diagnose-agent.png",
                         "toolPolicyId": "default",
                         "memoryPolicyId": "memory-agent-legacy",
                         "createdBy": "legacy",
                         "status": "active",
-                        "metadata": {},
+                        "metadata": {
+                            "agentAvatarImagePath": "workspace/avatars/01-session-agent.png",
+                            "agentAvatarImageUrl": "/api/agents/avatar-image/01-session-agent.png",
+                            "avatarPath": "workspace/avatars/03-inspect-agent.png",
+                            "avatarImageUrl": "/api/agents/avatar-image/01-session-agent.png",
+                        },
                         "createdAt": "2026-06-04T00:00:00+00:00",
                         "updatedAt": "2026-06-04T00:00:00+00:00",
                     }
@@ -502,11 +509,18 @@ def test_repair_agent_directory_legacy_fields_is_idempotent(tmp_path, monkeypatc
                         "promptTemplateId": "prompt-chat-default",
                         "directSessionId": "session-legacy",
                         "workspacePath": "workspace/agents/agent-legacy",
+                        "avatarImagePath": "workspace/avatars/02-diagnose-agent.png",
+                        "avatarImageUrl": "/api/agents/avatar-image/02-diagnose-agent.png",
                         "toolPolicyId": "default",
                         "memoryPolicyId": "memory-agent-legacy",
                         "createdBy": "legacy",
                         "status": "active",
-                        "metadata": {},
+                        "metadata": {
+                            "agentAvatarImagePath": "workspace/avatars/01-session-agent.png",
+                            "agentAvatarImageUrl": "/api/agents/avatar-image/01-session-agent.png",
+                            "avatarPath": "workspace/avatars/03-inspect-agent.png",
+                            "avatarImageUrl": "/api/agents/avatar-image/01-session-agent.png",
+                        },
                         "createdAt": "2026-06-04T00:00:00+00:00",
                         "updatedAt": "2026-06-04T00:00:00+00:00",
                     }
@@ -535,8 +549,18 @@ def test_repair_agent_directory_legacy_fields_is_idempotent(tmp_path, monkeypatc
     second = agent_directory_service.repair_agent_directory()
 
     assert save_calls == 1
-    assert all("profileId" not in item for item in first["agents"] if isinstance(item, dict))
-    assert all("profileId" not in item for item in second["agents"] if isinstance(item, dict))
+    first_agent = next(item for item in first["agents"] if item.get("agentId") == "agent-legacy")
+    second_agent = next(item for item in second["agents"] if item.get("agentId") == "agent-legacy")
+    for agent in (first_agent, second_agent):
+        assert "profileId" not in agent
+        assert "avatarImagePath" not in agent
+        assert "avatarImageUrl" not in agent
+        metadata = agent["metadata"]
+        assert metadata["avatarImagePath"] == "workspace/avatars/01-session-agent.png"
+        assert "agentAvatarImagePath" not in metadata
+        assert "agentAvatarImageUrl" not in metadata
+        assert "avatarPath" not in metadata
+        assert "avatarImageUrl" not in metadata
 
 
 def test_work_session_boundary_skips_persona_task_and_team_onboarding_requirements(tmp_path, monkeypatch):
@@ -589,7 +613,7 @@ def test_agent_directory_assigns_default_avatar_from_workspace_avatars(tmp_path,
     assert response.content.startswith(b"\x89PNG")
 
 
-def test_agent_directory_uses_anime_avatar_when_legacy_default_missing(tmp_path, monkeypatch):
+def test_agent_directory_uses_generated_avatar_when_primary_default_missing(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     avatar_dir = tmp_path / "workspace" / "avatars"
     avatar_dir.mkdir(parents=True, exist_ok=True)
@@ -604,6 +628,28 @@ def test_agent_directory_uses_anime_avatar_when_legacy_default_missing(tmp_path,
 
     assert deep_agent["avatarImagePath"] == "workspace/avatars/11-anime-deep-research-agent.png"
     assert deep_agent["avatarImageUrl"] == "/api/agents/avatar-image/11-anime-deep-research-agent.png"
+
+
+def test_agent_directory_uses_primary_avatar_before_generated_fallback(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    avatar_dir = tmp_path / "workspace" / "avatars"
+    avatar_dir.mkdir(parents=True, exist_ok=True)
+    (avatar_dir / "06-deep-investigator.png").write_bytes(b"\x89PNG\r\n\x1a\navatar")
+
+    deep_agent = agent_directory_service.create_agent_instance(
+        display_name="深搜 Agent",
+        primary_mode="research",
+        role_key="research_deep",
+        prompt_template_id="prompt-research-deep",
+    )
+
+    (avatar_dir / "11-anime-deep-research-agent.png").write_bytes(b"\x89PNG\r\n\x1a\navatar")
+
+    default_path = agent_directory_service._default_agent_avatar_path(deep_agent)
+
+    assert deep_agent["avatarImagePath"] == "workspace/avatars/06-deep-investigator.png"
+    assert deep_agent["avatarImageUrl"] == "/api/agents/avatar-image/06-deep-investigator.png"
+    assert default_path == "workspace/avatars/06-deep-investigator.png"
 
 
 def test_agent_avatar_can_be_selected_uploaded_and_reset(tmp_path, monkeypatch):
@@ -1719,7 +1765,6 @@ def test_repair_agent_directory_fills_research_agent_profiles(tmp_path, monkeypa
     assert repaired["toolPolicy"]["allowedTools"] == [
         "agent_message_tool",
         "research_knowledge_query_tool",
-        "web_search_tool",
         "web_fetch_tool",
         "batch_web_search_tool",
         "paper_search_tool",

@@ -68,7 +68,12 @@ def research_agent_creation_proposal_tool(
             "employeeRank": trim_lines(str(employee_rank or "specialist"), max_lines=1).strip() or "specialist",
             "promptTemplateId": trim_lines(str(prompt_template_id or ""), max_lines=1).strip(),
             "responsibilities": _parse_lines(responsibilities),
-            "allowedTools": _parse_list(allowed_tools) or ["agent_message_tool", "web_search_tool", "web_fetch_tool"],
+            "allowedTools": _parse_list(allowed_tools) or [
+                "agent_message_tool",
+                "batch_web_search_tool",
+                "paper_search_tool",
+                "web_fetch_tool",
+            ],
             "readSharedGroups": _parse_list(read_shared_groups) or ["project", "research"],
             "writeSharedGroups": _parse_list(write_shared_groups),
             "communicationTargets": _parse_lines(communication_targets) or ["CEO", "Organization Advisor", "Capability Steward"],

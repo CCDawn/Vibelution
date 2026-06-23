@@ -67,9 +67,9 @@ HIGH_RISK_GRANT_TOOLS = {
     "update_diagnosis_rules_tool",
     "update_self_model_tool",
     "web_fetch_tool",
-    "web_search_tool",
     "write_file_tool",
 }
+DISABLED_GRANT_TOOLS = {"web_search_tool"}
 GOVERNANCE_SYSTEM_ROLES = {"ceo", "organization_advisor", "capability_steward"}
 REQUEST_STATUSES = {"pending_review", "applied", "rejected"}
 GRANT_SCOPES = {"persistent", "session", "turn"}
@@ -115,6 +115,7 @@ def submit_tool_governance_request(
     )
     if not any(delta.values()):
         raise AgentToolGovernanceError("Tool governance request must include at least one tool change.")
+    _validate_disabled_tool_delta(delta)
     normalized_grant_scope = _normalize_grant_scope(grant_scope)
     _validate_grant_scope_delta(normalized_grant_scope, delta)
 
@@ -364,6 +365,15 @@ def _validate_grant_scope_delta(grant_scope: str, delta: dict[str, list[str]]) -
         raise AgentToolGovernanceError("Temporary tool governance requests must grant at least one tool.")
     if delta.get("revokeTools") or delta.get("blockTools") or delta.get("unblockTools"):
         raise AgentToolGovernanceError("Temporary tool governance requests only support grantTools.")
+
+
+def _validate_disabled_tool_delta(delta: dict[str, list[str]]) -> None:
+    requested = set(delta.get("grantTools") or []) | set(delta.get("unblockTools") or [])
+    disabled = sorted(tool for tool in requested if tool in DISABLED_GRANT_TOOLS)
+    if disabled:
+        raise AgentToolGovernanceError(
+            "Disabled tools cannot be granted or unblocked: " + ", ".join(disabled)
+        )
 
 
 def _unique_tools(values: list[str] | None) -> list[str]:

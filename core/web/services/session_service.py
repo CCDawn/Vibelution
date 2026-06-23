@@ -1709,7 +1709,7 @@ def _conversation_agent_from_state(agent: dict[str, Any]) -> dict[str, Any]:
 def _agent_avatar_path(agent: dict[str, Any], metadata: dict[str, Any] | None = None) -> str:
     source = metadata if isinstance(metadata, dict) else agent.get("metadata")
     meta = source if isinstance(source, dict) else {}
-    raw_path = str(agent.get("avatarImagePath") or meta.get("avatarImagePath") or "").strip()
+    raw_path = str(meta.get("avatarImagePath") or "").strip()
     filename = agent_directory_service.agent_avatar_filename(raw_path)
     if not filename:
         return ""

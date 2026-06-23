@@ -41,6 +41,27 @@ describe("DirectSessionIndexList helpers", () => {
     expect(result.title).toBe("用户改名");
   });
 
+  it("fills missing cached session avatar fields from the conversation index", () => {
+    const cached = session({ id: "session-2", title: "用户改名", dialogueModelId: "gpt-5.5" });
+    const result = conversationToSessionSummary(
+      conversation({
+        directSessionId: "session-2",
+        title: "旧标题",
+        agentAvatarImagePath: "workspace/avatars/01-session-agent.png",
+        agentAvatarImageUrl: "/api/agents/avatar-image/01-session-agent.png",
+      }),
+      new Map([[cached.id, cached]]),
+    );
+
+    expect(result).not.toBe(cached);
+    expect(result).toMatchObject({
+      title: "用户改名",
+      dialogueModelId: "gpt-5.5",
+      agentAvatarImagePath: "workspace/avatars/01-session-agent.png",
+      agentAvatarImageUrl: "/api/agents/avatar-image/01-session-agent.png",
+    });
+  });
+
   it("preserves direct conversation metadata in the fallback session summary", () => {
     const result = conversationToSessionSummary(
       conversation({
