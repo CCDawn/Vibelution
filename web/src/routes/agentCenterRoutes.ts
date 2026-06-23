@@ -30,6 +30,20 @@ type AgentCenterPromptsRouteOptions = {
   returnTo?: string | null;
 };
 
+type AgentCenterModelsRouteOptions = {
+  agentId?: string | null;
+  section?: string | null;
+  returnLabel?: AgentCenterReturnLabel | string | null;
+  returnTo?: string | null;
+};
+
+type AgentCenterMemoryRouteOptions = {
+  agentId?: string | null;
+  view?: string | null;
+  returnLabel?: AgentCenterReturnLabel | string | null;
+  returnTo?: string | null;
+};
+
 export function safeAgentCenterReturnToPath(value: string | null | undefined) {
   const normalized = String(value || "").trim();
   if (!normalized || !normalized.startsWith("/") || normalized.startsWith("//")) {
@@ -118,4 +132,62 @@ export function agentCenterPromptsRoute({
 
   const query = params.toString();
   return query ? `/agents/prompts?${query}` : "/agents/prompts";
+}
+
+export function agentCenterModelsRoute({
+  agentId,
+  section = "models-profiles",
+  returnLabel,
+  returnTo,
+}: AgentCenterModelsRouteOptions) {
+  const params = new URLSearchParams();
+  const normalizedAgentId = String(agentId || "").trim();
+  const normalizedSection = String(section || "").trim();
+  const normalizedReturnLabel = String(returnLabel || "").trim();
+  const normalizedReturnTo = safeAgentCenterReturnToPath(returnTo);
+
+  if (normalizedAgentId) {
+    params.set("agent", normalizedAgentId);
+  }
+  if (normalizedSection) {
+    params.set("section", normalizedSection);
+  }
+  if (normalizedReturnTo) {
+    params.set("returnTo", normalizedReturnTo);
+  }
+  if (normalizedReturnLabel) {
+    params.set("returnLabel", normalizedReturnLabel);
+  }
+
+  const query = params.toString();
+  return query ? `/config?${query}` : "/config";
+}
+
+export function agentCenterMemoryRoute({
+  agentId,
+  view = "agents",
+  returnLabel,
+  returnTo,
+}: AgentCenterMemoryRouteOptions) {
+  const params = new URLSearchParams();
+  const normalizedAgentId = String(agentId || "").trim();
+  const normalizedView = String(view || "").trim();
+  const normalizedReturnLabel = String(returnLabel || "").trim();
+  const normalizedReturnTo = safeAgentCenterReturnToPath(returnTo);
+
+  if (normalizedAgentId) {
+    params.set("agentId", normalizedAgentId);
+  }
+  if (normalizedView) {
+    params.set("view", normalizedView);
+  }
+  if (normalizedReturnTo) {
+    params.set("returnTo", normalizedReturnTo);
+  }
+  if (normalizedReturnLabel) {
+    params.set("returnLabel", normalizedReturnLabel);
+  }
+
+  const query = params.toString();
+  return query ? `/memory/agents?${query}` : "/memory/agents";
 }

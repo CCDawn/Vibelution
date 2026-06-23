@@ -60,7 +60,12 @@ import {
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
 import { useShellI18n } from "../i18n/useShellI18n";
 import { AgentManagementNav } from "./AgentManagementNav";
-import { agentCenterPromptsRoute, agentCenterToolsRoute } from "./agentCenterRoutes";
+import {
+  agentCenterMemoryRoute,
+  agentCenterModelsRoute,
+  agentCenterPromptsRoute,
+  agentCenterToolsRoute,
+} from "./agentCenterRoutes";
 import { agentDisplayInfo } from "./agentDisplay";
 import { createChatWorkspaceCache } from "./chatWorkspaceCache";
 import styles from "./AgentsRoute.module.css";
@@ -3988,15 +3993,18 @@ export function AgentsRoute() {
     [lang, toolBundles, toolPolicyDraft, visiblePolicyTools],
   );
   const selectedAgent = selectedAgentFromList(visibleAgents, selectedAgentId, workspace?.agents ?? [], activeFilter);
+  const selectedAgentReturnRoute = selectedAgent?.agentId
+    ? `/agents?agent=${encodeURIComponent(selectedAgent.agentId)}&pane=config`
+    : "/agents?pane=config";
   const selectedAgentToolConfigRoute = useMemo(
     () => selectedAgent?.agentId
       ? agentCenterToolsRoute({
           agentId: selectedAgent.agentId,
           returnLabel: "agents",
-          returnTo: `/agents?agent=${encodeURIComponent(selectedAgent.agentId)}&pane=config`,
+          returnTo: selectedAgentReturnRoute,
         })
       : "/agents/tools",
-    [selectedAgent?.agentId],
+    [selectedAgent?.agentId, selectedAgentReturnRoute],
   );
   const selectedAgentPromptConfigRoute = useMemo(
     () => selectedAgent?.agentId
@@ -4005,10 +4013,43 @@ export function AgentsRoute() {
           templateId: configDraft.promptTemplateId || selectedAgent.promptTemplateId,
           focus: "editor",
           returnLabel: "agents",
-          returnTo: `/agents?agent=${encodeURIComponent(selectedAgent.agentId)}&pane=config`,
+          returnTo: selectedAgentReturnRoute,
         })
       : "/agents/prompts",
-    [configDraft.promptTemplateId, selectedAgent?.agentId, selectedAgent?.promptTemplateId],
+    [configDraft.promptTemplateId, selectedAgent?.agentId, selectedAgent?.promptTemplateId, selectedAgentReturnRoute],
+  );
+  const selectedAgentModelConfigRoute = useMemo(
+    () => selectedAgent?.agentId
+      ? agentCenterModelsRoute({
+          agentId: selectedAgent.agentId,
+          section: "models-profiles",
+          returnLabel: "agents",
+          returnTo: selectedAgentReturnRoute,
+        })
+      : "/config?section=models-profiles",
+    [selectedAgent?.agentId, selectedAgentReturnRoute],
+  );
+  const selectedAgentContextConfigRoute = useMemo(
+    () => selectedAgent?.agentId
+      ? agentCenterModelsRoute({
+          agentId: selectedAgent.agentId,
+          section: "runtime-context",
+          returnLabel: "agents",
+          returnTo: selectedAgentReturnRoute,
+        })
+      : "/config?section=runtime-context",
+    [selectedAgent?.agentId, selectedAgentReturnRoute],
+  );
+  const selectedAgentMemoryConfigRoute = useMemo(
+    () => selectedAgent?.agentId
+      ? agentCenterMemoryRoute({
+          agentId: selectedAgent.agentId,
+          view: "agents",
+          returnLabel: "agents",
+          returnTo: selectedAgentReturnRoute,
+        })
+      : "/memory/agents",
+    [selectedAgent?.agentId, selectedAgentReturnRoute],
   );
   const managementBrief = useMemo(() => buildAgentManagementBrief(selectedAgent, copy, lang), [copy, lang, selectedAgent]);
   const capabilityPreview = useMemo(
@@ -6523,6 +6564,16 @@ export function AgentsRoute() {
                         );
                       })}
                     </div>
+                    <div className={styles.configDeepLinkRow}>
+                      <button
+                        type="button"
+                        className={styles.secondaryButton}
+                        onClick={() => navigate(selectedAgentModelConfigRoute)}
+                      >
+                        <ExternalLink size={15} />
+                        {lang === "zh" ? "去模型库配置" : "Open model library"}
+                      </button>
+                    </div>
                   </section>
                   <section className={`${styles.fieldWide} ${styles.promptConfigField}`}>
                     <span>{copy.prompt}</span>
@@ -6725,6 +6776,16 @@ export function AgentsRoute() {
                         />
                         <span>{copy.contextCompressionExtractDecisions}</span>
                       </label>
+                    </div>
+                    <div className={styles.configDeepLinkRow}>
+                      <button
+                        type="button"
+                        className={styles.secondaryButton}
+                        onClick={() => navigate(selectedAgentContextConfigRoute)}
+                      >
+                        <ExternalLink size={15} />
+                        {lang === "zh" ? "去上下文配置" : "Open context config"}
+                      </button>
                     </div>
                   </section>
                 </div>
@@ -7328,6 +7389,14 @@ export function AgentsRoute() {
                   {memoryGroupOptions.map((group) => <option key={group} value={group} />)}
                 </datalist>
                 <div className={styles.editorActions}>
+                  <button
+                    type="button"
+                    className={styles.secondaryButton}
+                    onClick={() => navigate(selectedAgentMemoryConfigRoute)}
+                  >
+                    <ExternalLink size={15} />
+                    {lang === "zh" ? "去记忆页配置" : "Open memory page"}
+                  </button>
                   <button
                     type="button"
                     className={styles.secondaryButton}

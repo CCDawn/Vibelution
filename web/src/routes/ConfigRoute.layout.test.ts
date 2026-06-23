@@ -54,6 +54,21 @@ describe("ConfigRoute layout contract", () => {
     expect(stylesSource).toContain("grid-template-columns: repeat(3, minmax(180px, 1fr))");
   });
 
+  it("supports Agent Center return links and section deep links", () => {
+    expect(routeSource).toContain("useSearchParams");
+    expect(routeSource).toContain("safeAgentCenterReturnToPath");
+    expect(routeSource).toContain("const lastRequestedSectionRef = useRef(\"\")");
+    expect(routeSource).toContain("const requestedSectionId = String(searchParams.get(\"section\") || \"\").trim()");
+    expect(routeSource).toContain("const returnToPath = safeAgentCenterReturnToPath(searchParams.get(\"returnTo\"))");
+    expect(routeSource).toContain("const returnToLabel = searchParams.get(\"returnLabel\") === \"agents\" ? copy.returnToAgents : copy.returnToSource");
+    expect(routeSource).toContain("requestedSectionId !== lastRequestedSectionRef.current");
+    expect(routeSource).toContain("lastRequestedSectionRef.current = requestedSectionId");
+    expect(routeSource).toContain("setActiveSectionId(requestedSectionId)");
+    expect(routeSource).toContain("className={styles.returnButton}");
+    expect(routeSource).toContain("to={returnToPath}");
+    expect(stylesSource).toContain(".returnButton");
+  });
+
   it("splits model creation into vendor templates and concrete model discovery", () => {
     expect(routeSource).toContain("providerVendorGroups");
     expect(routeSource).toContain("selectedProviderVendorTemplates");

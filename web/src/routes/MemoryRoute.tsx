@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  ArrowLeft,
   Brain,
   CheckCircle2,
   Copy as CopyIcon,
@@ -19,7 +20,7 @@ import {
   XCircle,
 } from "lucide-react";
 import { lazy, Suspense, useEffect, useMemo, useState } from "react";
-import { NavLink, useSearchParams } from "react-router-dom";
+import { Link, NavLink, useSearchParams } from "react-router-dom";
 
 import { fetchJson } from "../api/client";
 import { queryKeys } from "../api/queryKeys";
@@ -64,6 +65,7 @@ import {
 } from "../api/types";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
 import { useShellI18n } from "../i18n/useShellI18n";
+import { safeAgentCenterReturnToPath } from "./agentCenterRoutes";
 import styles from "./MemoryRoute.module.css";
 
 const MemoryGraphCanvas = lazy(() => import("./MemoryGraphCanvas").then((module) => ({ default: module.MemoryGraphCanvas })));
@@ -89,6 +91,8 @@ type Copy = {
   eyebrow: string;
   title: string;
   subtitle: string;
+  returnToAgents: string;
+  returnToSource: string;
   refresh: string;
   loading: string;
   loadFailed: string;
@@ -625,6 +629,8 @@ const COPY: Record<"zh" | "en", Copy> = {
     eyebrow: "Memory Library",
     title: "记忆库",
     subtitle: "统一治理 Agent 私有记忆、团队知识库、来源证据和生效边界。",
+    returnToAgents: "返回 Agent 配置",
+    returnToSource: "返回来源页",
     refresh: "刷新",
     loading: "正在整理记忆...",
     loadFailed: "记忆概览加载失败",
@@ -1008,6 +1014,8 @@ const COPY: Record<"zh" | "en", Copy> = {
     eyebrow: "Memory Library",
     title: "Memory Library",
     subtitle: "Governs Agent private memory, team knowledge, source evidence, and effective scope in one place.",
+    returnToAgents: "Return to Agent config",
+    returnToSource: "Return to source page",
     refresh: "Refresh",
     loading: "Loading memory...",
     loadFailed: "Memory overview failed to load",
@@ -2229,6 +2237,8 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
   const pageVisible = usePageVisibility();
   const [searchParams, setSearchParams] = useSearchParams();
   const searchParamText = searchParams.toString();
+  const returnToPath = useMemo(() => safeAgentCenterReturnToPath(searchParams.get("returnTo")), [searchParamText]);
+  const returnToLabel = searchParams.get("returnLabel") === "agents" ? copy.returnToAgents : copy.returnToSource;
   const [activeSectionId, setActiveSectionId] = useState(() => searchParams.get("section") ?? "");
   const [activeItemId, setActiveItemId] = useState(() => searchParams.get("item") ?? "");
   const [activeFilter, setActiveFilter] = useState<FilterMode>(() => normalizeFilterMode(searchParams.get("filter")));
@@ -6724,6 +6734,12 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
           <RefreshCw size={16} />
           {copy.refresh}
         </button>
+        {returnToPath ? (
+          <Link to={returnToPath} className={styles.returnButton}>
+            <ArrowLeft size={16} />
+            {returnToLabel}
+          </Link>
+        ) : null}
       </header>
 
       <div className={styles.controlStrip}>
