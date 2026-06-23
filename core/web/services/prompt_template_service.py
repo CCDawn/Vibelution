@@ -17,6 +17,7 @@ from .runtime_scene_service import record_runtime_scene_event
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 PROMPT_TEMPLATE_INDEX_VERSION = 1
+CHALLENGE_CUP_STAGE_TASK_PROMPT_VERSION = 2
 PROMPT_TEMPLATE_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{1,95}$")
 PROMPT_TEMPLATE_PATH = developer_sandbox.formal_workspace_path(PROJECT_ROOT, "agent_config", "prompt_templates.json")
 
@@ -60,7 +61,11 @@ DEFAULT_PROMPT_TEMPLATES: tuple[dict[str, Any], ...] = (
             "- 不把未复核的大段原文、普通群聊或未脱敏资料写入正式知识。\n"
             "- 不声称已经完成需要审核权限或用户确认的动作。"
         ),
-        "metadata": {"builtin": True, "roleKey": "knowledge_steward"},
+        "metadata": {
+            "builtin": True,
+            "roleKey": "knowledge_steward",
+            "builtinContentVersion": CHALLENGE_CUP_STAGE_TASK_PROMPT_VERSION,
+        },
     },
     {
         "templateId": "prompt-research-ceo",
@@ -220,7 +225,11 @@ DEFAULT_PROMPT_TEMPLATES: tuple[dict[str, Any], ...] = (
             "3. Acquisition Handoff：交给资料获取 Agent 的 URL/DOI/检索式和优先级。\n"
             "4. Blockers：资料不足、来源不明或需要用户补充的点。"
         ),
-        "metadata": {"builtin": True, "roleKey": "challenge_cup_data_discovery"},
+        "metadata": {
+            "builtin": True,
+            "roleKey": "challenge_cup_data_discovery",
+            "builtinContentVersion": CHALLENGE_CUP_STAGE_TASK_PROMPT_VERSION,
+        },
     },
     {
         "templateId": "prompt-challenge-cup-coordinator",
@@ -272,7 +281,11 @@ DEFAULT_PROMPT_TEMPLATES: tuple[dict[str, Any], ...] = (
             "3. Extraction Handoff：交给资料提炼 Agent 的可读来源和注意事项。\n"
             "4. Gaps：缺 DOI、缺 URL、权限受限或需要人工补资料的项。"
         ),
-        "metadata": {"builtin": True, "roleKey": "challenge_cup_source_acquisition"},
+        "metadata": {
+            "builtin": True,
+            "roleKey": "challenge_cup_source_acquisition",
+            "builtinContentVersion": CHALLENGE_CUP_STAGE_TASK_PROMPT_VERSION,
+        },
     },
     {
         "templateId": "prompt-challenge-cup-content-extraction",
@@ -299,7 +312,11 @@ DEFAULT_PROMPT_TEMPLATES: tuple[dict[str, Any], ...] = (
             "3. Candidate Manifest：可交给资料审查/入库前审的结构化摘要。\n"
             "4. Return Reasons：需要补资料、重抓取或人工确认的项。"
         ),
-        "metadata": {"builtin": True, "roleKey": "challenge_cup_content_extraction"},
+        "metadata": {
+            "builtin": True,
+            "roleKey": "challenge_cup_content_extraction",
+            "builtinContentVersion": CHALLENGE_CUP_STAGE_TASK_PROMPT_VERSION,
+        },
     },
     {
         "templateId": "prompt-challenge-cup-source-quality",
@@ -326,7 +343,11 @@ DEFAULT_PROMPT_TEMPLATES: tuple[dict[str, Any], ...] = (
             "3. Steward Handoff：可进入入库前审的候选、理由和限制。\n"
             "4. Human Gate：必须人工确认的争议或高风险材料。"
         ),
-        "metadata": {"builtin": True, "roleKey": "challenge_cup_source_quality"},
+        "metadata": {
+            "builtin": True,
+            "roleKey": "challenge_cup_source_quality",
+            "builtinContentVersion": CHALLENGE_CUP_STAGE_TASK_PROMPT_VERSION,
+        },
     },
     {
         "templateId": "prompt-supervised-baseline",
@@ -722,8 +743,12 @@ def repair_prompt_templates() -> dict[str, Any]:
                 **dict(existing.get("metadata") or {}),
                 **dict(record.get("metadata") or {}),
             }
-            if _should_restore_builtin_content(merged, existing):
+            if _should_restore_builtin_content(record, existing):
                 merged["content"] = str(existing.get("content") or "")
+                merged["metadata"] = {
+                    **dict(merged.get("metadata") or {}),
+                    **dict(existing.get("metadata") or {}),
+                }
             templates_by_id[record["templateId"]] = _normalize_template_record(merged)
         else:
             templates_by_id[record["templateId"]] = record
@@ -857,6 +882,16 @@ def _should_restore_builtin_content(record: dict[str, Any], default: dict[str, A
     default_metadata = default.get("metadata") if isinstance(default.get("metadata"), dict) else {}
     if not bool(metadata.get("builtin") or default_metadata.get("builtin")):
         return False
+    try:
+        current_version = int(metadata.get("builtinContentVersion") or 0)
+    except (TypeError, ValueError):
+        current_version = 0
+    try:
+        default_version = int(default_metadata.get("builtinContentVersion") or 0)
+    except (TypeError, ValueError):
+        default_version = 0
+    if default_version > current_version:
+        return True
     return not str(record.get("content") or "").strip()
 
 
@@ -938,16 +973,18 @@ def _default_template_map() -> dict[str, dict[str, Any]]:
     }
 
 
-def _template_signature(templates: list[Any]) -> list[tuple[str, str, str, str]]:
-    signature: list[tuple[str, str, str, str]] = []
+def _template_signature(templates: list[Any]) -> list[tuple[str, str, str, str, str]]:
+    signature: list[tuple[str, str, str, str, str]] = []
     for item in templates:
         if isinstance(item, dict):
+            metadata = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
             signature.append(
                 (
                     str(item.get("templateId") or ""),
                     str(item.get("name") or ""),
                     str(item.get("category") or ""),
                     str(item.get("sourcePath") or ""),
+                    str(metadata.get("builtinContentVersion") or ""),
                 )
             )
     return sorted(signature)
