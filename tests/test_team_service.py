@@ -378,6 +378,21 @@ def test_challenge_cup_research_team_agent_repair_purges_stale_and_rebuilds_comp
         assert agent["metadata"]["challengeCupTeamId"] == "research-team"
         assert agent["metadata"]["challengeCupTeamRole"] == member["role"]
         assert agent["metadata"]["showInSessionIndex"] is True
+        if member["role"] in {
+            "data_discovery",
+            "source_acquisition",
+            "content_extraction",
+            "source_quality",
+            "candidate_graph",
+            "knowledge_steward",
+        }:
+            policy = agent_directory_service.resolve_tool_policy_for_agent(agent["agentId"])
+            assert "source_collection_context_tool" in policy["allowedTools"]
+            assert "source_collection_stage_writeback_tool" in policy["allowedTools"]
+            assert policy["preferredTools"][:2] == [
+                "source_collection_context_tool",
+                "source_collection_stage_writeback_tool",
+            ]
     canvas = team_service.get_team_canvas("research-team")
     assert {node["agentId"] for node in canvas["nodes"]} == {member["agentId"] for member in team["members"]}
     assert stale_agent["agentId"] not in {node["agentId"] for node in canvas["nodes"]}

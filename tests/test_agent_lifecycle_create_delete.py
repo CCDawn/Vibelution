@@ -279,17 +279,32 @@ def test_repair_tightens_ai_search_source_role_tool_policy(tmp_path, monkeypatch
     assert not any(item["code"] == "research_source_tool_policy_too_broad" for item in workspace_agent["health"])
 
 
-def test_challenge_content_extraction_policy_includes_stage_context_and_writeback_tools(tmp_path, monkeypatch):
+@pytest.mark.parametrize(
+    "role_key,primary_mode",
+    [
+        ("challenge_cup_data_discovery", "research"),
+        ("challenge_cup_source_acquisition", "research"),
+        ("challenge_cup_content_extraction", "research"),
+        ("challenge_cup_source_quality", "research"),
+        ("candidate_graph", "research"),
+        ("knowledge_steward", "general"),
+    ],
+)
+def test_challenge_stage_task_roles_include_context_and_writeback_tools(tmp_path, monkeypatch, role_key, primary_mode):
     _use_tmp_project_root(tmp_path, monkeypatch)
     from tools.Key_Tools import create_llm_facing_tools
 
-    agent = agent_directory_service.create_agent_instance(
-        display_name="资料提炼",
-        primary_mode="research",
-        role_key="challenge_cup_content_extraction",
-        metadata={"fixedRole": True},
-    )
-    agent_directory_service.repair_agent_directory()
+    if role_key == "knowledge_steward":
+        agent_directory_service.repair_agent_directory()
+        agent = agent_directory_service.get_agent(agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID)
+    else:
+        agent = agent_directory_service.create_agent_instance(
+            display_name=role_key,
+            primary_mode=primary_mode,
+            role_key=role_key,
+            metadata={"fixedRole": True},
+        )
+        agent_directory_service.repair_agent_directory()
 
     policy = agent_directory_service.resolve_tool_policy_for_agent(agent["agentId"])
     visibility = agent_directory_service.compute_effective_tool_visibility(
@@ -305,8 +320,12 @@ def test_challenge_content_extraction_policy_includes_stage_context_and_writebac
         "source_collection_context_tool",
         "source_collection_stage_writeback_tool",
     ]
-    assert policy["writeScopes"] == []
-    assert policy["mutationAccess"] == "none"
+    if role_key == "knowledge_steward":
+        assert policy["writeScopes"] == ["private"]
+        assert policy["mutationAccess"] == "restricted"
+    else:
+        assert policy["writeScopes"] == []
+        assert policy["mutationAccess"] == "none"
 
 
 def test_agent_create_api_rejects_incomplete_onboarding_payload(tmp_path, monkeypatch):

@@ -109,6 +109,8 @@ def test_repair_agent_directory_applies_challenge_cup_research_tool_profiles(tmp
         "challenge_cup_data_discovery": [
             "agent_message_tool",
             "research_knowledge_query_tool",
+            "source_collection_context_tool",
+            "source_collection_stage_writeback_tool",
             "web_search_tool",
             "batch_web_search_tool",
             "paper_search_tool",
@@ -119,6 +121,8 @@ def test_repair_agent_directory_applies_challenge_cup_research_tool_profiles(tmp
         "challenge_cup_source_acquisition": [
             "agent_message_tool",
             "research_knowledge_query_tool",
+            "source_collection_context_tool",
+            "source_collection_stage_writeback_tool",
             "web_search_tool",
             "web_fetch_tool",
             "batch_web_search_tool",
@@ -129,12 +133,16 @@ def test_repair_agent_directory_applies_challenge_cup_research_tool_profiles(tmp
         "challenge_cup_content_extraction": [
             "agent_message_tool",
             "research_knowledge_query_tool",
+            "source_collection_context_tool",
+            "source_collection_stage_writeback_tool",
             "web_fetch_tool",
             "search_summarize_sources_tool",
         ],
         "challenge_cup_source_quality": [
             "agent_message_tool",
             "research_knowledge_query_tool",
+            "source_collection_context_tool",
+            "source_collection_stage_writeback_tool",
             "web_search_tool",
             "web_fetch_tool",
             "batch_web_search_tool",
@@ -191,6 +199,10 @@ def test_repair_agent_directory_applies_challenge_cup_research_tool_profiles(tmp
         assert "挑战杯" in agent["personaProfile"]["background"]
         assert "challenge_cup" in agent["taskProfile"]["taskTypes"]
         assert agent["toolPolicy"]["allowedTools"] == expected_tools
+        assert agent["toolPolicy"]["preferredTools"][:2] == [
+            "source_collection_context_tool",
+            "source_collection_stage_writeback_tool",
+        ]
         assert agent["toolPolicy"]["writeScopes"] == []
         assert agent["toolPolicy"]["networkAccess"] == "controlled"
         assert agent["toolPolicy"]["mutationAccess"] == "none"
