@@ -5551,11 +5551,10 @@ export function AgentsRoute() {
               <em key={`${agent.agentId}:${mode}`}>{modeLabel(mode, lang)}</em>
             ))}
           </span>
-          <span className={styles.healthCell}>
+          <span className={styles.healthCell} title={issueSummary(agent.health, lang)}>
             <span className={`${styles.issuePill} ${styles[`issue_${tone}`]}`}>
               {issueLabel(agent.health, lang)}
             </span>
-            <small>{issueSummary(agent.health, lang)}</small>
           </span>
         </button>
       </div>
@@ -5565,10 +5564,9 @@ export function AgentsRoute() {
   return (
     <section className={styles.route}>
       <header className={styles.header}>
-        <div>
+        <div title={copy.subtitle}>
           <p className={styles.eyebrow}>{copy.eyebrow}</p>
           <h1 className={styles.title}>{copy.title}</h1>
-          <p className={styles.subtitle}>{copy.subtitle}</p>
         </div>
         <span
           className={`${styles.healthPill} ${styles[`health_${healthStatus}`]}`}
@@ -5857,7 +5855,6 @@ export function AgentsRoute() {
                             />
                             <span>
                               <strong>{bundle.label}</strong>
-                              <small>{toolBundleMeta(bundle, lang)}</small>
                             </span>
                           </label>
                         );
@@ -5871,10 +5868,12 @@ export function AgentsRoute() {
                     />
                   )}
                 </section>
-                <section className={`${styles.fieldWide} ${styles.createToolBundlePreview}`}>
+                <section
+                  className={`${styles.fieldWide} ${styles.createToolBundlePreview}`}
+                  title={createToolBundleSummaryValue.meta || copy.createAgentToolBundleEmpty}
+                >
                   <span>{copy.createAgentToolBundlePreview}</span>
                   <strong>{createToolBundleSummaryValue.label}</strong>
-                  <small>{createToolBundleSummaryValue.meta || copy.createAgentToolBundleEmpty}</small>
                 </section>
               </div>
               {notice ? (
@@ -5979,9 +5978,8 @@ export function AgentsRoute() {
               {visibleAgentColumns.map((column) => (
                 <section key={column.id} className={styles.agentColumn} aria-label={column.label}>
                   <div className={styles.agentColumnHeader}>
-                    <div>
+                    <div title={column.description}>
                       <strong>{column.label}</strong>
-                      <span>{column.description}</span>
                     </div>
                     <em>{column.agents.length}</em>
                   </div>
@@ -6233,11 +6231,10 @@ export function AgentsRoute() {
                   </span>
                 </div>
                 <div className={styles.detailHeaderActions}>
-                  <span className={styles.detailHealthStatus}>
+                  <span className={styles.detailHealthStatus} title={issueSummary(selectedAgent.health, lang)}>
                     <span className={`${styles.issuePill} ${styles[`issue_${issueTone(selectedAgent.health)}`]}`}>
                       {issueLabel(selectedAgent.health, lang)}
                     </span>
-                    <small>{issueSummary(selectedAgent.health, lang)}</small>
                   </span>
                 </div>
               </section>
@@ -6309,67 +6306,58 @@ export function AgentsRoute() {
                     {(() => {
                       const selectedModelDisplay = agentDialogueModelDisplay(selectedAgent, lang);
                       return (
-                    <section>
+                    <section title={selectedModelDisplay.detail}>
                       <Bot size={16} />
                       <span>{copy.model}</span>
                       <strong>{selectedModelDisplay.label}</strong>
-                      <small>{selectedModelDisplay.detail}</small>
                     </section>
                       );
                     })()}
-                    <section>
+                    <section title={llmSlots.map((slot) => `${slot.label}: ${agentLlmSlotModelId(selectedAgent.llmBindings, slot) || "-"}`).join(" / ")}>
                       <Brain size={16} />
                       <span>{copy.llmSlots}</span>
                       <strong>
                         {Object.keys(normalizeAgentLlmBindings(selectedAgent.llmBindings)).length}/{llmSlots.length}
                       </strong>
-                      <small>{llmSlots.map((slot) => `${slot.label}:${agentLlmSlotModelId(selectedAgent.llmBindings, slot) ? "on" : "off"}`).join(" / ")}</small>
                     </section>
-                    <section>
+                    <section title={selectedAgent.agentId || "-"}>
                       <Layers3 size={16} />
                       <span>{lang === "zh" ? "系统编号" : "System IDs"}</span>
                       <strong>{selectedAgent.agentCode || "-"}</strong>
-                      <small>{selectedAgent.agentId || "-"}</small>
                     </section>
-                    <section>
+                    <section title={selectedAgent.promptTemplate?.sourcePath || "-"}>
                       <Brain size={16} />
                       <span>{copy.prompt}</span>
                       <strong>{promptTemplateDisplayName(selectedAgent.promptTemplate, selectedAgent.promptTemplateId, lang)}</strong>
-                      <small>{selectedAgent.promptTemplate?.sourcePath || "-"}</small>
                     </section>
-                    <section>
+                    <section title={`allowed ${selectedAgent.toolPolicy?.allowedTools?.length ?? 0} / blocked ${selectedAgent.toolPolicy?.blockedTools?.length ?? 0}`}>
                       <Wrench size={16} />
                       <span>{copy.tools}</span>
                       <strong>{selectedAgent.toolPolicyId || "-"}</strong>
-                      <small>allowed {selectedAgent.toolPolicy?.allowedTools?.length ?? 0} / blocked {selectedAgent.toolPolicy?.blockedTools?.length ?? 0}</small>
                     </section>
-                    <section>
+                    <section title={selectedAgent.memoryPolicy?.privateMemoryRoot || "-"}>
                       <Database size={16} />
                       <span>{copy.memory}</span>
                       <strong>{selectedAgent.memoryPolicyId || "-"}</strong>
-                      <small>{selectedAgent.memoryPolicy?.privateMemoryRoot || "-"}</small>
                     </section>
                     {selectedAgentRequiresPersona ? (
-                      <section>
+                      <section title={(selectedAgent.personaProfile?.expertise ?? []).join(" / ") || copy.expertise}>
                         <UserRound size={16} />
                         <span>{copy.personaTitle}</span>
                         <strong>{personaProfileSummary(selectedAgent, lang)}</strong>
-                        <small>{(selectedAgent.personaProfile?.expertise ?? []).join(" / ") || copy.expertise}</small>
                       </section>
                     ) : null}
                     {selectedAgentRequiresTask ? (
-                      <section>
+                      <section title={(selectedAgent.taskProfile?.taskTypes ?? []).join(" / ") || copy.taskTypes}>
                         <CheckCircle2 size={16} />
                         <span>{copy.taskTitle}</span>
                         <strong>{taskProfileSummary(selectedAgent, lang)}</strong>
-                        <small>{(selectedAgent.taskProfile?.taskTypes ?? []).join(" / ") || copy.taskTypes}</small>
                       </section>
                     ) : null}
-                    <section>
+                    <section title={selectedAgent.workspaceTerritory?.privateRoot || selectedAgent.workspacePath || "-"}>
                       <FolderTree size={16} />
                       <span>{copy.territory}</span>
                       <strong>{selectedAgent.workspaceTerritory?.defaultWriteScope || "private"}</strong>
-                      <small>{selectedAgent.workspaceTerritory?.privateRoot || selectedAgent.workspacePath || "-"}</small>
                     </section>
                   </div>
 
@@ -6484,10 +6472,13 @@ export function AgentsRoute() {
                           lang,
                         );
                         return (
-                          <label key={slot.slot} className={styles.llmSlotField} title={slot.description}>
+                          <label
+                            key={slot.slot}
+                            className={styles.llmSlotField}
+                            title={`${slot.required ? copy.requiredSlot : copy.optionalSlot} · ${slot.description}`}
+                          >
                             <span>
                               <strong>{slot.label}</strong>
-                              <small>{slot.required ? copy.requiredSlot : copy.optionalSlot}</small>
                             </span>
                             <select
                               value={selectedSlotModelId}
@@ -6554,7 +6545,7 @@ export function AgentsRoute() {
                       </button>
                     </div>
                   </section>
-                  <label className={styles.field} title={toolPolicySource?.description || copy.toolPolicyPickerHint}>
+                  <label className={styles.field} title={[toolPolicySourceLine, toolPolicySource?.description || copy.toolPolicyPickerHint].filter(Boolean).join("\n")}>
                     <span>{copy.tools}</span>
                     <select value={configDraft.toolPolicyId} onChange={(event) => updateDraft({ toolPolicyId: event.target.value })}>
                       {workspace?.toolPolicies.map((policy) => (
@@ -6563,7 +6554,6 @@ export function AgentsRoute() {
                         </option>
                       ))}
                     </select>
-                    <small>{toolPolicySourceLine}</small>
                   </label>
                   <label className={styles.field} title={copy.memoryPolicyPickerHint}>
                     <span>{copy.memory}</span>
