@@ -90,8 +90,8 @@ export default defineConfig({
     environment: "node",
     include: ["src/**/*.test.ts", "src/**/*.test.tsx", "*.test.ts"],
   },
-  esbuild: {
-    jsx: "automatic",
+  build: {
+    chunkSizeWarningLimit: 760,
   },
   server: {
     host: "127.0.0.1",

@@ -117,4 +117,11 @@ describe("vite workbench ports", () => {
     expect(config.server?.port).toBe(5173);
     expect(config.server?.proxy?.["/api"]).toBe("http://127.0.0.1:8000");
   });
+
+  it("keeps build warning noise delegated to the bundle budget guard", async () => {
+    const config = await loadViteConfig();
+
+    expect(config.build?.chunkSizeWarningLimit).toBe(760);
+    expect("esbuild" in config).toBe(false);
+  });
 });
