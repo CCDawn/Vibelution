@@ -170,6 +170,33 @@ describe("conversationIndexModel", () => {
     expect(merged.map((item) => item.conversationId).sort()).toEqual(["session-existing", "session-missing"]);
   });
 
+  it("does not let an Agent placeholder overwrite a conversation with the same direct session id", () => {
+    const existing = conversation({
+      conversationId: "agent-shared-direct",
+      directSessionId: "agent-shared-direct",
+      agentId: "agent-original",
+      title: "资料入库",
+    });
+
+    const merged = mergeVisibleAgentsIntoConversations(
+      [existing],
+      [
+        agent({
+          agentId: "agent-other",
+          directSessionId: "agent-shared-direct",
+          displayName: "唐望舒",
+        }),
+      ],
+    );
+
+    expect(merged).toHaveLength(1);
+    expect(merged[0]).toMatchObject({
+      directSessionId: "agent-shared-direct",
+      agentId: "agent-original",
+      title: "资料入库",
+    });
+  });
+
   it("classifies and labels conversation groups", () => {
     expect(classifyConversation(conversation({ agentPrimaryMode: "research" }))).toBe("research");
     expect(classifyConversation(conversation({ title: "自进化 Agent" }))).toBe("selfEvolution");

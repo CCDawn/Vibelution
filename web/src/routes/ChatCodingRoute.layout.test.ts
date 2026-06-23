@@ -111,6 +111,18 @@ describe("ChatCodingRoute layout contract", () => {
     expect(conversationStyles.turnAvatarImage).toBeTypeOf("string");
   });
 
+  it("selects direct sessions through the backend active-session endpoint", () => {
+    expect(routeSource).toContain("latestDirectSessionSelectionRef");
+    expect(routeSource).toContain("selectDirectSessionMutation");
+    expect(routeSource).toContain("`/api/sessions/${encodeURIComponent(sessionId)}/select`");
+    expect(routeSource).toContain("latestDirectSessionSelectionRef.current = normalizedSessionId");
+    expect(routeSource).toContain("selectDirectSessionMutation.mutate(normalizedSessionId)");
+    expect(routeSource).toContain("if (latestSessionId && latestSessionId !== nextDetail.id)");
+    expect(routeSource.indexOf("selectDirectSessionMutation.mutate(normalizedSessionId)")).toBeLessThan(
+      routeSource.indexOf("navigate(`/chat?session=${encodeURIComponent(normalizedSessionId)}`"),
+    );
+  });
+
   it("keeps side panes collapsible while allowing narrow screens to prioritize the center pane", () => {
     expect(routeSource).toContain("CHAT_CENTER_FIRST_MEDIA_QUERY");
     expect(routeSource).toContain("centerFirstLayout");
@@ -1003,10 +1015,10 @@ describe("ChatCodingRoute layout contract", () => {
       routeSource.indexOf("function handleOpenMentionTarget"),
     );
 
-    expect(openDirectSessionSource).toContain("setActiveSession(sessionId)");
-    expect(openDirectSessionSource).toContain("navigate(`/chat?session=${encodeURIComponent(sessionId)}`, { replace: false })");
-    expect(openDirectSessionSource.indexOf("setActiveSession(sessionId)")).toBeLessThan(
-      openDirectSessionSource.indexOf("navigate(`/chat?session=${encodeURIComponent(sessionId)}`, { replace: false })"),
+    expect(openDirectSessionSource).toContain("setActiveSession(normalizedSessionId)");
+    expect(openDirectSessionSource).toContain("navigate(`/chat?session=${encodeURIComponent(normalizedSessionId)}`, { replace: false })");
+    expect(openDirectSessionSource.indexOf("setActiveSession(normalizedSessionId)")).toBeLessThan(
+      openDirectSessionSource.indexOf("navigate(`/chat?session=${encodeURIComponent(normalizedSessionId)}`, { replace: false })"),
     );
   });
 
@@ -1054,7 +1066,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(groupSessionIndexItemsSource).toContain("styles.conversationAvatarGroup");
     expect(directSessionIndexItemSource).toContain("styles.directSessionItem");
     expect(groupSessionIndexItemsSource).toContain("styles.groupSessionItem");
-    expect(routeSource).toContain("navigate(`/chat?session=${encodeURIComponent(sessionId)}`, { replace: false })");
+    expect(routeSource).toContain("navigate(`/chat?session=${encodeURIComponent(normalizedSessionId)}`, { replace: false })");
     expect(directSessionIndexItemSource).toContain("styles.conversationKindBadgeDirect");
     expect(directSessionIndexItemSource).toContain("styles.conversationKindBadgeChild");
     expect(groupSessionIndexItemsSource).toContain("styles.conversationKindBadgeGroup");
