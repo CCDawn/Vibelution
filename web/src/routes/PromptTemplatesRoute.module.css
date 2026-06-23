@@ -18,11 +18,19 @@
   background: var(--surface-header);
 }
 
-.header > div {
+.header > div:first-child {
   display: grid;
   grid-template-columns: auto auto minmax(0, 1fr);
   align-items: baseline;
   gap: 1px 7px;
+  min-width: 0;
+}
+
+.headerActions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
   min-width: 0;
 }
 
@@ -56,6 +64,7 @@
 }
 
 .refreshButton,
+.returnButton,
 .filterButton,
 .filterButtonActive,
 .primaryButton,
@@ -72,18 +81,25 @@
 }
 
 .refreshButton,
+.returnButton,
 .primaryButton,
 .secondaryButton {
   padding: 3px 8px;
 }
 
 .refreshButton:hover,
+.returnButton:hover,
 .filterButton:hover,
 .primaryButton:hover,
 .secondaryButton:hover {
   border-color: var(--border-strong);
   color: var(--fg-primary);
   background: var(--surface-panel-hover);
+}
+
+.returnButton {
+  color: var(--accent-cool);
+  text-decoration: none;
 }
 
 .primaryButton {
@@ -191,6 +207,10 @@
   grid-template-rows: auto auto auto minmax(260px, 1fr) minmax(112px, auto) auto;
   align-content: stretch;
   overflow: hidden;
+}
+
+.editorPanelFocused {
+  border-color: color-mix(in srgb, var(--accent-cool) 40%, var(--border-soft));
 }
 
 .panelHeader,
@@ -317,6 +337,12 @@
   align-items: center;
   gap: 5px;
   min-width: 0;
+}
+
+.selectableRowLinked .rowSelect,
+.selectableRowLinked .templateButton,
+.selectableRowLinked .templateButtonActive {
+  border-color: color-mix(in srgb, var(--accent-cool) 44%, var(--border-soft));
 }
 
 .rowSelect {
@@ -561,6 +587,11 @@
   border: 1px solid var(--border-soft);
   border-radius: 8px;
   background: var(--surface-card);
+}
+
+.agentItemLinked {
+  border-color: color-mix(in srgb, var(--accent-cool) 46%, var(--border-soft));
+  background: color-mix(in srgb, var(--accent-cool) 8%, var(--surface-card));
 }
 
 .agentItem span {

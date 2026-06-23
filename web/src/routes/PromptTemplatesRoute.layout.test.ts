@@ -52,13 +52,29 @@ describe("PromptTemplatesRoute layout contract", () => {
 
   it("supports category deep links and the expected workbench panels", () => {
     expect(routeSource).toContain('searchParams.get("category")');
-    expect(routeSource).toContain('categoryFilter === "all" ? {} : { category: categoryFilter }');
+    expect(routeSource).toContain('next.delete("category")');
+    expect(routeSource).toContain('next.set("category", categoryFilter)');
     expect(routeSource).toContain('"research"');
     expect(routeSource).toContain("styles.workspace");
     expect(routeSource).toContain("styles.listPanel");
     expect(routeSource).toContain("styles.editorPanel");
     expect(routeSource).toContain("styles.templateList");
     expect(routeSource).toContain("styles.agentList");
+  });
+
+  it("supports Agent config deep links and preserves return navigation", () => {
+    expect(routeSource).toContain('searchParams.get("agent")');
+    expect(routeSource).toContain('searchParams.get("template")');
+    expect(routeSource).toContain('searchParams.get("focus")');
+    expect(routeSource).toContain("safeAgentCenterReturnToPath(searchParams.get(\"returnTo\"))");
+    expect(routeSource).toContain("styles.returnButton");
+    expect(routeSource).toContain("styles.selectableRowLinked");
+    expect(routeSource).toContain("styles.agentItemLinked");
+    expect(routeSource).toContain("styles.editorPanelFocused");
+    expect(stylesSource).toContain(".returnButton");
+    expect(stylesSource).toContain(".selectableRowLinked");
+    expect(stylesSource).toContain(".agentItemLinked");
+    expect(stylesSource).toContain(".editorPanelFocused");
   });
 
   it("keeps the prompt content editor as the primary visible area", () => {

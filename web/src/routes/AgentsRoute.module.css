@@ -2760,8 +2760,29 @@
   line-height: 1.35;
 }
 
+.promptConfigField {
+  gap: 6px;
+}
+
+.promptConfigRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) max-content;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.promptConfigRow select {
+  min-width: 0;
+}
+
+.promptConfigRow button {
+  white-space: nowrap;
+}
+
 .field input:focus,
 .field select:focus,
+.promptConfigRow select:focus,
 .llmSlotField select:focus,
 .fieldWide textarea:focus {
   outline: 2px solid color-mix(in srgb, var(--accent-cool) 24%, transparent);

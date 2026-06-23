@@ -540,6 +540,93 @@ def build_agent_prompt_template_context(
     }
 
 
+def build_agent_prompt_snapshot(
+    template_id: str,
+    *,
+    agent_id: str = "",
+    agent_code: str = "",
+    agent_display_name: str = "",
+    project_root: Path | None = None,
+) -> dict[str, Any]:
+    """Freeze one Agent prompt template for a conversation/session."""
+
+    normalized = str(template_id or "").strip()
+    if not normalized:
+        return {
+            "schemaVersion": 1,
+            "promptTemplateId": "",
+            "templateId": "",
+            "reason": "missing_template_id",
+        }
+    template = _get_prompt_template_for_project(normalized, project_root=project_root)
+    if not template:
+        return {
+            "schemaVersion": 1,
+            "promptTemplateId": normalized,
+            "templateId": normalized,
+            "reason": "missing_template",
+        }
+    content = str(template.get("content") or "")
+    if not content.strip():
+        return {
+            "schemaVersion": 1,
+            "promptTemplateId": normalized,
+            "templateId": normalized,
+            "name": str(template.get("name") or "").strip(),
+            "category": str(template.get("category") or "").strip(),
+            "sourcePath": str(template.get("sourcePath") or "").strip(),
+            "sourceExists": bool(template.get("sourceExists")),
+            "content": "",
+            "contentHash": _content_hash(""),
+            "contentLength": 0,
+            "capturedAt": _now(),
+            "agentId": str(agent_id or "").strip(),
+            "agentCode": str(agent_code or "").strip(),
+            "agentDisplayName": str(agent_display_name or "").strip(),
+            "reason": "empty_template_content",
+        }
+    return {
+        "schemaVersion": 1,
+        "promptTemplateId": normalized,
+        "templateId": normalized,
+        "name": str(template.get("name") or "").strip(),
+        "category": str(template.get("category") or "").strip(),
+        "sourcePath": str(template.get("sourcePath") or "").strip(),
+        "sourceExists": bool(template.get("sourceExists")),
+        "content": content,
+        "contentHash": str(template.get("contentHash") or _content_hash(content)).strip(),
+        "contentLength": len(content),
+        "capturedAt": _now(),
+        "agentId": str(agent_id or "").strip(),
+        "agentCode": str(agent_code or "").strip(),
+        "agentDisplayName": str(agent_display_name or "").strip(),
+        "reason": "",
+    }
+
+
+def render_agent_prompt_snapshot_system_block(snapshot: dict[str, Any] | None) -> str:
+    """Render a frozen Agent prompt snapshot as a stable model-facing block."""
+
+    if not isinstance(snapshot, dict):
+        return ""
+    content = str(snapshot.get("content") or "").strip()
+    template_id = str(snapshot.get("promptTemplateId") or snapshot.get("templateId") or "").strip()
+    if not template_id or not content:
+        return ""
+    lines = [
+        "## Agent System Prompt Snapshot",
+        f"PromptTemplateId: {template_id}",
+    ]
+    content_hash = str(snapshot.get("contentHash") or "").strip()
+    if content_hash:
+        lines.append(f"ContentHash: {content_hash}")
+    category = str(snapshot.get("category") or "").strip()
+    if category:
+        lines.append(f"Category: {category}")
+    lines.extend(["", content])
+    return "\n".join(lines).strip()
+
+
 def update_prompt_template(
     template_id: str,
     *,

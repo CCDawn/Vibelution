@@ -16,6 +16,7 @@ import {
   Search,
   ShieldCheck,
   Square,
+  SquarePen,
   ExternalLink,
   Trash2,
   UserRound,
@@ -59,7 +60,7 @@ import {
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
 import { useShellI18n } from "../i18n/useShellI18n";
 import { AgentManagementNav } from "./AgentManagementNav";
-import { agentCenterToolsRoute } from "./agentCenterRoutes";
+import { agentCenterPromptsRoute, agentCenterToolsRoute } from "./agentCenterRoutes";
 import { agentDisplayInfo } from "./agentDisplay";
 import { createChatWorkspaceCache } from "./chatWorkspaceCache";
 import styles from "./AgentsRoute.module.css";
@@ -3997,6 +3998,18 @@ export function AgentsRoute() {
       : "/agents/tools",
     [selectedAgent?.agentId],
   );
+  const selectedAgentPromptConfigRoute = useMemo(
+    () => selectedAgent?.agentId
+      ? agentCenterPromptsRoute({
+          agentId: selectedAgent.agentId,
+          templateId: configDraft.promptTemplateId || selectedAgent.promptTemplateId,
+          focus: "editor",
+          returnLabel: "agents",
+          returnTo: `/agents?agent=${encodeURIComponent(selectedAgent.agentId)}&pane=config`,
+        })
+      : "/agents/prompts",
+    [configDraft.promptTemplateId, selectedAgent?.agentId, selectedAgent?.promptTemplateId],
+  );
   const managementBrief = useMemo(() => buildAgentManagementBrief(selectedAgent, copy, lang), [copy, lang, selectedAgent]);
   const capabilityPreview = useMemo(
     () => buildAgentCapabilityPreview(toolPolicyDraft, visiblePolicyTools, copy),
@@ -6520,17 +6533,27 @@ export function AgentsRoute() {
                       })}
                     </div>
                   </section>
-                  <label className={styles.field}>
+                  <section className={`${styles.fieldWide} ${styles.promptConfigField}`}>
                     <span>{copy.prompt}</span>
-                    <select value={configDraft.promptTemplateId} onChange={(event) => updateDraft({ promptTemplateId: event.target.value })}>
-                      <option value="">-</option>
-                      {workspace?.promptTemplates.map((template) => (
-                        <option key={template.promptTemplateId || template.templateId} value={template.promptTemplateId || template.templateId || ""}>
-                          {promptTemplateOptionLabel(template, lang)}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
+                    <div className={styles.promptConfigRow}>
+                      <select value={configDraft.promptTemplateId} onChange={(event) => updateDraft({ promptTemplateId: event.target.value })}>
+                        <option value="">-</option>
+                        {workspace?.promptTemplates.map((template) => (
+                          <option key={template.promptTemplateId || template.templateId} value={template.promptTemplateId || template.templateId || ""}>
+                            {promptTemplateOptionLabel(template, lang)}
+                          </option>
+                        ))}
+                      </select>
+                      <button
+                        type="button"
+                        className={styles.secondaryButton}
+                        onClick={() => navigate(selectedAgentPromptConfigRoute)}
+                      >
+                        <SquarePen size={15} />
+                        {lang === "zh" ? "配置提示词" : "Configure prompt"}
+                      </button>
+                    </div>
+                  </section>
                   <label className={styles.field} title={toolPolicySource?.description || copy.toolPolicyPickerHint}>
                     <span>{copy.tools}</span>
                     <select value={configDraft.toolPolicyId} onChange={(event) => updateDraft({ toolPolicyId: event.target.value })}>

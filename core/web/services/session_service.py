@@ -121,6 +121,7 @@ from . import agent_directory_service
 from .conversation_timeline_service import build_conversation_timeline_items
 from .i18n import get_web_language, text_for
 from .model_capability_service import model_record_image_input_support
+from . import prompt_template_service
 from .session_turn_scheduler import SessionTurnScheduler
 from .agent_directory_service import (
     AgentNotFoundError,
@@ -6521,6 +6522,7 @@ def _normalize_conversation(
         active_task = raw.get("activeTask")
     if not isinstance(active_task, dict):
         active_task = None
+    agent_prompt_snapshot = _public_agent_prompt_snapshot(raw.get("agentPromptSnapshot"))
     return {
         "id": conversation_id,
         "title": title,
@@ -6536,6 +6538,7 @@ def _normalize_conversation(
         "lastTurnStatus": last_turn_status,
         "lastTurnError": last_turn_error,
         "lastContextComposition": last_context_composition,
+        "agentPromptSnapshot": agent_prompt_snapshot,
         "activeSkillContract": active_skill_contract,
         "lastCacheComposition": last_cache_composition,
         "sessionKind": session_kind,
@@ -6553,6 +6556,31 @@ def _normalize_conversation(
         "_agent": dict(agent) if isinstance(agent, dict) else None,
         "_agentLookupChecked": bool(agent_lookup_checked),
     }
+
+
+def _public_agent_prompt_snapshot(snapshot: Any) -> dict[str, Any]:
+    if not isinstance(snapshot, dict):
+        return {}
+    result: dict[str, Any] = {}
+    for key in (
+        "schemaVersion",
+        "promptTemplateId",
+        "templateId",
+        "name",
+        "category",
+        "sourcePath",
+        "sourceExists",
+        "contentHash",
+        "contentLength",
+        "capturedAt",
+        "agentId",
+        "agentCode",
+        "agentDisplayName",
+        "reason",
+    ):
+        if key in snapshot:
+            result[key] = snapshot.get(key)
+    return result
 
 
 def _normalize_messages(conversation_id: str, items: Any) -> list[dict[str, Any]]:
@@ -7384,6 +7412,7 @@ def _build_session_summary(conversation: dict[str, Any], *, hydrate_agent: bool 
         "agentPrimaryMode": agent_primary_mode,
         "agentRoleKey": agent_role_key,
         "agentPromptTemplateId": agent_prompt_template_id,
+        "agentPromptSnapshot": _public_agent_prompt_snapshot(conversation.get("agentPromptSnapshot")),
         "agentInboxPendingCount": agent_inbox_pending_count,
         "agentMissingId": agent_missing_id,
         "agentDirectSessionMismatch": agent_direct_session_mismatch,
@@ -7564,6 +7593,7 @@ def _build_session_detail_from_summary(
         "cacheUsage": cache_usage,
         "llmUsage": llm_usage,
         "lastContextComposition": last_context_composition,
+        "agentPromptSnapshot": summary.get("agentPromptSnapshot") if isinstance(summary.get("agentPromptSnapshot"), dict) else {},
         "activeSkillContract": normalize_active_skill_contract(
             conversation.get("activeSkillContract") or conversation.get("active_skill_contract")
         ),
@@ -8876,6 +8906,7 @@ _AGENT_CONTEXT_SEGMENT_CATEGORIES = {
     "agent_runtime": "agent_spec",
     "research_organization": "project_context",
     "prompt_template": "agent_spec",
+    "agent_prompt_snapshot": "system_prompt",
     "project_rules": "developer_instructions",
     "project_agent_registry": "agent_registry",
     "agent_messages": "agent_messages",
@@ -9847,6 +9878,7 @@ def _session_prompt_cache_partition(
     llm_model_id: str = "",
     model_id: str = "",
     prompt_template_id: str = "",
+    prompt_snapshot_hash: str = "",
 ) -> str:
     """Build a short stable provider cache shard for the ordinary chat flow."""
 
@@ -9854,6 +9886,7 @@ def _session_prompt_cache_partition(
     normalized_agent_id = str(agent_id or "").strip()
     normalized_slot = str(llm_slot or SESSION_LLM_SLOT_DIALOGUE).strip() or SESSION_LLM_SLOT_DIALOGUE
     normalized_template = str(prompt_template_id or "").strip()
+    normalized_snapshot_hash = str(prompt_snapshot_hash or "").strip()
     if normalized_agent_id:
         raw_parts = [
             SESSION_PROMPT_CACHE_SCOPE_AGENT_STATIC,
@@ -9861,6 +9894,7 @@ def _session_prompt_cache_partition(
             normalized_slot,
             normalized_model,
             normalized_template,
+            normalized_snapshot_hash,
         ]
         raw = "|".join(raw_parts)
         digest = hashlib.sha256(raw.encode("utf-8", errors="replace")).hexdigest()[:16]
@@ -9875,6 +9909,159 @@ def _session_prompt_cache_partition(
     raw = "|".join(raw_parts)
     digest = hashlib.sha256(raw.encode("utf-8", errors="replace")).hexdigest()[:16]
     return developer_sandbox.sandbox_prompt_cache_partition(f"chat-session-{digest}", surface="chat", project_root=PROJECT_ROOT)
+
+
+def _agent_prompt_snapshot_matches_agent(
+    snapshot: Any,
+    *,
+    agent_id: str,
+) -> bool:
+    if not isinstance(snapshot, dict):
+        return False
+    if str(snapshot.get("reason") or "").strip():
+        return False
+    if str(snapshot.get("agentId") or "").strip() != str(agent_id or "").strip():
+        return False
+    return bool(str(snapshot.get("promptTemplateId") or snapshot.get("templateId") or "").strip())
+
+
+def _ensure_session_agent_prompt_snapshot(
+    session_id: str,
+    agent: dict[str, Any] | None,
+) -> dict[str, Any]:
+    normalized_session_id = str(session_id or "").strip()
+    if not normalized_session_id or not isinstance(agent, dict):
+        return {}
+    agent_id = str(agent.get("agentId") or "").strip()
+    prompt_template_id = str(agent.get("promptTemplateId") or "").strip()
+    if not agent_id or not prompt_template_id:
+        return {}
+    with _CHAT_STATE_LOCK, chat_state_transaction(PROJECT_ROOT):
+        payload = load_chat_state(PROJECT_ROOT)
+        conversation = _find_conversation_entry(payload, normalized_session_id)
+        if conversation is None:
+            return {}
+        existing = conversation.get("agentPromptSnapshot")
+        if _agent_prompt_snapshot_matches_agent(
+            existing,
+            agent_id=agent_id,
+        ):
+            _record_session_prompt_snapshot_event(
+                normalized_session_id,
+                agent_id=agent_id,
+                snapshot=existing,
+                outcome="reused",
+            )
+            return dict(existing)
+        snapshot = prompt_template_service.build_agent_prompt_snapshot(
+            prompt_template_id,
+            agent_id=agent_id,
+            agent_code=str(agent.get("agentCode") or "").strip(),
+            agent_display_name=str(agent.get("displayName") or "").strip(),
+            project_root=PROJECT_ROOT,
+        )
+        if str(snapshot.get("reason") or "").strip():
+            _record_session_prompt_snapshot_event(
+                normalized_session_id,
+                agent_id=agent_id,
+                snapshot=snapshot,
+                outcome="failed",
+            )
+            return dict(snapshot)
+        conversation["agentPromptSnapshot"] = dict(snapshot)
+        payload["updated_at"] = _now_timestamp()
+        save_chat_state(PROJECT_ROOT, payload)
+        _record_session_prompt_snapshot_event(
+            normalized_session_id,
+            agent_id=agent_id,
+            snapshot=snapshot,
+            outcome="created",
+        )
+        return dict(snapshot)
+
+
+def _render_agent_prompt_snapshot_block(snapshot: Any) -> str:
+    return prompt_template_service.render_agent_prompt_snapshot_system_block(snapshot if isinstance(snapshot, dict) else None)
+
+
+def _prompt_snapshot_context_segment(snapshot_block: str, snapshot: Any) -> dict[str, Any] | None:
+    text = str(snapshot_block or "").strip()
+    if not text:
+        return None
+    return {
+        "key": "agent_prompt_snapshot",
+        "block": text,
+        "placement": "cache_prefix",
+        "stability": "session_static",
+        "chars": len(text),
+        "hash": hashlib.sha256(text.encode("utf-8", errors="ignore")).hexdigest()[:16],
+        "promptTemplateId": str((snapshot or {}).get("promptTemplateId") or "").strip() if isinstance(snapshot, dict) else "",
+        "contentHash": str((snapshot or {}).get("contentHash") or "").strip() if isinstance(snapshot, dict) else "",
+    }
+
+
+def _session_context_segments_block(segments: Any, placement: str) -> str:
+    normalized_placement = str(placement or "").strip()
+    return "\n\n".join(
+        str(item.get("block") or "").strip()
+        for item in list(segments or [])
+        if isinstance(item, dict)
+        and str(item.get("placement") or "").strip() == normalized_placement
+        and str(item.get("block") or "").strip()
+    ).strip()
+
+
+def _session_context_segments_without_prompt_template(segments: Any) -> list[dict[str, Any]]:
+    filtered: list[dict[str, Any]] = []
+    for item in list(segments or []):
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("key") or "").strip() == "prompt_template":
+            continue
+        filtered.append(dict(item))
+    return filtered
+
+
+def _record_session_prompt_snapshot_event(
+    session_id: str,
+    *,
+    agent_id: str,
+    snapshot: dict[str, Any],
+    outcome: str,
+) -> None:
+    try:
+        record_runtime_scene_event(
+            "conversation",
+            "prompt_snapshot",
+            f"session.prompt_snapshot.{str(outcome or 'observed').strip() or 'observed'}",
+            level="warning" if outcome == "failed" else "info",
+            outcome=str(outcome or "observed").strip() or "observed",
+            message="Session Agent prompt snapshot state changed.",
+            fields={
+                "sessionId": str(session_id or "").strip(),
+                "agentId": str(agent_id or "").strip(),
+                "promptTemplateId": str(snapshot.get("promptTemplateId") or snapshot.get("templateId") or "").strip(),
+                "contentHash": str(snapshot.get("contentHash") or "").strip(),
+                "contentLength": int(snapshot.get("contentLength") or len(str(snapshot.get("content") or ""))),
+                "category": str(snapshot.get("category") or "").strip(),
+                "reason": str(snapshot.get("reason") or "").strip(),
+                "source": "session_service",
+            },
+            child_log_path=f"conversations/{_safe_session_workspace_token(session_id)}-prompt-snapshots.jsonl",
+            child_log_payload={
+                "session_id": str(session_id or "").strip(),
+                "agent_id": str(agent_id or "").strip(),
+                "prompt_template_id": str(snapshot.get("promptTemplateId") or snapshot.get("templateId") or "").strip(),
+                "content_hash": str(snapshot.get("contentHash") or "").strip(),
+                "content_length": int(snapshot.get("contentLength") or len(str(snapshot.get("content") or ""))),
+                "category": str(snapshot.get("category") or "").strip(),
+                "reason": str(snapshot.get("reason") or "").strip(),
+                "outcome": str(outcome or "").strip(),
+            },
+            lifecycle=True,
+        )
+    except Exception:
+        return
 
 
 def _session_prompt_cache_scope(*, agent_id: str = "") -> str:
@@ -10688,6 +10875,12 @@ def _run_session_turn(context: dict[str, Any]) -> None:
     supervised_runtime_role = _supervised_role_for_runtime_context(context, agent_instance)
     prepare_timings["agentLookupMs"] = _elapsed_ms(stage_started_at)
     stage_started_at = _perf_counter()
+    agent_prompt_snapshot = _ensure_session_agent_prompt_snapshot(session_id, agent_instance) if agent_instance else {}
+    agent_prompt_snapshot_block = _render_agent_prompt_snapshot_block(agent_prompt_snapshot)
+    prepare_timings["promptSnapshotMs"] = _elapsed_ms(stage_started_at)
+    prepare_timings["promptSnapshotIncluded"] = bool(agent_prompt_snapshot_block)
+    prepare_timings["promptSnapshotReason"] = str(agent_prompt_snapshot.get("reason") or "").strip() if isinstance(agent_prompt_snapshot, dict) else ""
+    stage_started_at = _perf_counter()
     turn_attachments = _normalize_message_attachments(context.get("attachments") or [])
     lightweight_chat_payload, lightweight_chat_payload_reason = _lightweight_chat_payload_decision(
         context,
@@ -10818,6 +11011,9 @@ def _run_session_turn(context: dict[str, Any]) -> None:
         llm_slot=llm_slot,
         model_id=llm_model_id_for_turn,
         prompt_template_id=str((agent_instance or {}).get("promptTemplateId") or "").strip(),
+        prompt_snapshot_hash=str((agent_prompt_snapshot or {}).get("contentHash") or "").strip()
+        if isinstance(agent_prompt_snapshot, dict)
+        else "",
     )
     prompt_cache_scope = _session_prompt_cache_scope(agent_id=agent_id)
     _record_session_turn_lifecycle_event(
@@ -10996,6 +11192,9 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                     llm_slot=llm_slot,
                     llm_model_id=resolved_llm_model_id,
                     prompt_template_id=agent_prompt_template_id,
+                    prompt_snapshot_hash=str((agent_prompt_snapshot or {}).get("contentHash") or "").strip()
+                    if isinstance(agent_prompt_snapshot, dict)
+                    else "",
                 )
                 prompt_cache_scope = _session_prompt_cache_scope(agent_id=agent_id)
                 _record_session_turn_lifecycle_event(
@@ -11012,6 +11211,10 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                         "llmModelId": resolved_llm_model_id,
                         "agentId": agent_id,
                         "promptTemplateId": agent_prompt_template_id,
+                        "promptSnapshotIncluded": bool(agent_prompt_snapshot_block),
+                        "promptSnapshotContentHash": str((agent_prompt_snapshot or {}).get("contentHash") or "").strip()
+                        if isinstance(agent_prompt_snapshot, dict)
+                        else "",
                         **_session_prompt_cache_log_fields(scope=prompt_cache_scope, partition=prompt_cache_partition),
                         "attachmentCount": len(attachments),
                         "agentCreateMs": agent_create_ms,
@@ -11049,16 +11252,18 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                 )
                 history_messages = context_assembly.history_messages
                 full_history_message_count = len(seedable_history_messages)
-                static_runtime_context_block = (
-                    str(getattr(agent_context_packet, "static_context_block", "") or "").strip()
+                runtime_context_segments = (
+                    _session_context_segments_without_prompt_template(
+                        getattr(agent_context_packet, "context_segments", []) if agent_context_packet is not None else []
+                    )
                     if agent_context_packet is not None
-                    else ""
+                    else []
                 )
-                dynamic_runtime_context_block = (
-                    str(getattr(agent_context_packet, "dynamic_context_block", "") or "").strip()
-                    if agent_context_packet is not None
-                    else ""
-                )
+                prompt_snapshot_segment = _prompt_snapshot_context_segment(agent_prompt_snapshot_block, agent_prompt_snapshot)
+                if prompt_snapshot_segment:
+                    runtime_context_segments.insert(0, prompt_snapshot_segment)
+                static_runtime_context_block = _session_context_segments_block(runtime_context_segments, "cache_prefix")
+                dynamic_runtime_context_block = _session_context_segments_block(runtime_context_segments, "volatile_turn")
                 runtime_context_block = (
                     str(getattr(agent_context_packet, "context_block", "") or "").strip()
                     if agent_context_packet is not None
@@ -11071,11 +11276,6 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                     for part in (static_runtime_context_block, dynamic_runtime_context_block)
                     if str(part or "").strip()
                 ).strip()
-                runtime_context_segments = (
-                    list(getattr(agent_context_packet, "context_segments", []) or [])
-                    if agent_context_packet is not None
-                    else []
-                )
                 guidance_context_block = _recent_session_guidance_context_block(session_id)
                 skill_invocation = context.get("skill_invocation")
                 skill_runtime_context_block = _skill_runtime_context_from_invocation(skill_invocation)
@@ -11157,6 +11357,10 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                         "historyCheckpointEventId": context_assembly.checkpoint_event_id,
                         "agentRuntimeContextIncluded": bool(static_runtime_context_block),
                         "staticRuntimeContextIncluded": bool(static_runtime_context_block),
+                        "promptSnapshotIncluded": bool(agent_prompt_snapshot_block),
+                        "promptSnapshotContentHash": str((agent_prompt_snapshot or {}).get("contentHash") or "").strip()
+                        if isinstance(agent_prompt_snapshot, dict)
+                        else "",
                         "dynamicRuntimeContextIncluded": dynamic_runtime_context_included,
                         "dynamicRuntimeContextAvailable": bool(dynamic_runtime_context_block),
                         "dynamicRuntimeContextOmittedFromModelInput": bool(dynamic_runtime_context_block)

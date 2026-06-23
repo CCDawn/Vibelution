@@ -133,6 +133,67 @@ def test_build_agent_prompt_template_context_reports_block_and_missing_reasons(t
     assert missing["promptTemplateId"] == "prompt-missing-valid"
 
 
+def test_build_agent_prompt_snapshot_freezes_template_content(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    prompt_template_service.update_prompt_template(
+        "prompt-chat-custom",
+        name="自定义会话提示词",
+        category="chat",
+        source_path="workspace/prompts/chat/custom.md",
+        content="第一版固定提示词。",
+    )
+
+    snapshot = prompt_template_service.build_agent_prompt_snapshot(
+        "prompt-chat-custom",
+        agent_id="agent-1",
+        agent_code="chat_agent",
+        agent_display_name="会话 Agent",
+        project_root=tmp_path,
+    )
+    prompt_template_service.update_prompt_template(
+        "prompt-chat-custom",
+        content="第二版提示词，不应该影响已有会话。",
+    )
+    current = prompt_template_service.build_agent_prompt_snapshot(
+        "prompt-chat-custom",
+        agent_id="agent-1",
+        project_root=tmp_path,
+    )
+
+    assert snapshot["reason"] == ""
+    assert snapshot["promptTemplateId"] == "prompt-chat-custom"
+    assert snapshot["content"] == "第一版固定提示词。"
+    assert snapshot["contentHash"].startswith("sha256:")
+    assert snapshot["agentId"] == "agent-1"
+    assert snapshot["agentCode"] == "chat_agent"
+    assert current["content"] == "第二版提示词，不应该影响已有会话。"
+    assert current["contentHash"] != snapshot["contentHash"]
+    system_block = prompt_template_service.render_agent_prompt_snapshot_system_block(snapshot)
+    assert "Agent System Prompt Snapshot" in system_block
+    assert "PromptTemplateId: prompt-chat-custom" in system_block
+    assert "第一版固定提示词。" in system_block
+    assert "第二版提示词" not in system_block
+
+
+def test_build_agent_prompt_snapshot_reports_missing_and_empty(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    prompt_template_service.update_prompt_template(
+        "prompt-chat-empty",
+        name="空提示词",
+        category="chat",
+        content="",
+    )
+
+    missing = prompt_template_service.build_agent_prompt_snapshot("prompt-missing-valid", project_root=tmp_path)
+    empty = prompt_template_service.build_agent_prompt_snapshot("prompt-chat-empty", project_root=tmp_path)
+
+    assert missing["reason"] == "missing_template"
+    assert missing["promptTemplateId"] == "prompt-missing-valid"
+    assert empty["reason"] == "empty_template_content"
+    assert empty["content"] == ""
+    assert prompt_template_service.render_agent_prompt_snapshot_system_block(empty) == ""
+
+
 def test_prompt_template_rejects_unsafe_source_path(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     prompt_template_service.repair_prompt_templates()
