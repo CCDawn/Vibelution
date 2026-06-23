@@ -1,3 +1,4 @@
+import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it } from "vitest";
@@ -84,7 +85,19 @@ function renderTree(overrides: Partial<{
       activeSessionId="session-1"
       addToReviewSucceededLabel="已加入评审"
       agentsById={new Map()}
-      avatarImageUrlFrom={() => ""}
+      avatarImageUrlFrom={(...sources: unknown[]) => {
+        for (const source of sources) {
+          if (!source || typeof source !== "object") {
+            continue;
+          }
+          const record = source as { avatarImageUrl?: unknown; agentAvatarImageUrl?: unknown };
+          const url = String(record.avatarImageUrl ?? record.agentAvatarImageUrl ?? "").trim();
+          if (url) {
+            return url;
+          }
+        }
+        return "";
+      }}
       avatarInitials={() => "A0"}
       buildSessionReferencePayload={(session: SessionSummary, displayName: string, summary: string): SessionReferenceAttachment => ({
         referenceId: `session:${session.id}`,
@@ -149,6 +162,20 @@ describe("ConversationIndexTree", () => {
     expect(markup).not.toContain("空团队");
     expect(markup).toContain("未归属群聊");
     expect(markup).toContain("团队群聊");
+  });
+
+  it("renders direct conversation avatar images when the index supplies an avatar URL", () => {
+    const markup = renderTree({
+      groupedConversations: [{
+        groupKey: "user",
+        label: "用户会话",
+        items: [directConversation({ agentAvatarImageUrl: "/api/agents/avatar-image/01-session-agent.png" })],
+      }],
+      filteredStandaloneGroupConversations: [],
+      filteredTeams: [],
+    });
+
+    expect(markup).toContain('src="/api/agents/avatar-image/01-session-agent.png"');
   });
 
   it("collapses conversation groups without removing team and standalone sections", () => {
