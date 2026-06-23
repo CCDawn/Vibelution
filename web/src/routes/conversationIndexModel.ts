@@ -376,11 +376,33 @@ export function mergeVisibleSessionsIntoConversations(
       .flatMap((conversation) => [conversation.directSessionId, conversation.conversationId])
       .filter((value): value is string => Boolean(value)),
   );
+  const conversationsBySessionId = new Map(
+    merged
+      .filter((conversation) => conversation.type === "direct_agent")
+      .flatMap((conversation) => {
+        const entries: Array<[string, ConversationSummary]> = [];
+        if (conversation.directSessionId) {
+          entries.push([conversation.directSessionId, conversation]);
+        }
+        if (conversation.conversationId) {
+          entries.push([conversation.conversationId, conversation]);
+        }
+        return entries;
+      }),
+  );
   sessions.forEach((session) => {
     if (knownSessionIds.has(session.id)) {
       return;
     }
-    merged.push(sessionToConversationSummary(session));
+    const conversation = conversationsBySessionId.get(session.id);
+    const mergedSession = conversation
+      ? {
+          ...session,
+          agentAvatarImagePath: session.agentAvatarImagePath || conversation.agentAvatarImagePath,
+          agentAvatarImageUrl: session.agentAvatarImageUrl || conversation.agentAvatarImageUrl,
+        }
+      : session;
+    merged.push(sessionToConversationSummary(mergedSession));
     knownSessionIds.add(session.id);
   });
   return merged.sort((left, right) =>

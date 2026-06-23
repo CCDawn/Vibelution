@@ -46,6 +46,18 @@ export function conversationToSessionSummary(
   const sessionId = conversation.directSessionId || conversation.conversationId;
   const existingSession = sessionsById.get(sessionId);
   if (existingSession) {
+    const agentAvatarImagePath = existingSession.agentAvatarImagePath || conversation.agentAvatarImagePath;
+    const agentAvatarImageUrl = existingSession.agentAvatarImageUrl || conversation.agentAvatarImageUrl;
+    if (
+      agentAvatarImagePath !== existingSession.agentAvatarImagePath
+      || agentAvatarImageUrl !== existingSession.agentAvatarImageUrl
+    ) {
+      return {
+        ...existingSession,
+        agentAvatarImagePath,
+        agentAvatarImageUrl,
+      };
+    }
     return existingSession;
   }
   return {

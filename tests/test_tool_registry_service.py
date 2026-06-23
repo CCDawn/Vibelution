@@ -66,6 +66,7 @@ def test_tool_registry_lists_builtins_as_protected(tmp_path, monkeypatch):
     assert "grep_search_tool" in bundles["core"]["toolNames"]
     assert "research_knowledge_query_tool" in bundles["research"]["toolNames"]
     assert "unified_memory_search_tool" in bundles["research"]["toolNames"]
+    assert "web_search_tool" not in bundles["research"]["toolNames"]
     research_search_tools = {
         "batch_web_search_tool",
         "paper_search_tool",

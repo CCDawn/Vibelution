@@ -17,7 +17,7 @@ from .runtime_scene_service import record_runtime_scene_event
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 PROMPT_TEMPLATE_INDEX_VERSION = 1
-CHALLENGE_CUP_STAGE_TASK_PROMPT_VERSION = 2
+CHALLENGE_CUP_STAGE_TASK_PROMPT_VERSION = 3
 PROMPT_TEMPLATE_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{1,95}$")
 PROMPT_TEMPLATE_PATH = developer_sandbox.formal_workspace_path(PROJECT_ROOT, "agent_config", "prompt_templates.json")
 
@@ -211,7 +211,7 @@ DEFAULT_PROMPT_TEMPLATES: tuple[dict[str, Any], ...] = (
             "## 能力边界\n"
             "- 接收 source_collection_stage_session_task 时，先用 source_collection_context_tool 读取本轮资料上下文、任务输入和 writebackContract；完成、阻塞或失败都用 source_collection_stage_writeback_tool 回写结构化状态。\n"
             "- source_collection_stage_writeback_tool 只更新 sourceCollectionStageSessionTasks，不写正式 Team Knowledge、RAG、official graph，也不代表入库完成。\n"
-            "- 可以使用 web_search_tool 搜索公开资料线索，使用 research_knowledge_query_tool 查询已有候选/团队知识，使用 agent_message_tool 汇报发现。\n"
+            "- 可以使用 batch_web_search_tool、paper_search_tool、project_search_tool、news_search_tool 搜索公开资料线索，使用 research_knowledge_query_tool 查询已有候选/团队知识，使用 agent_message_tool 汇报发现。\n"
             "- 不调用 web_fetch_tool 抓取全文；需要打开网页、DOI 或本地资料时，交给资料获取 Agent。\n"
             "- 不写正式 Team Knowledge、RAG、official graph，不声称已经完成入库。\n\n"
             "## 工作策略\n"
@@ -263,7 +263,7 @@ DEFAULT_PROMPT_TEMPLATES: tuple[dict[str, Any], ...] = (
         "sourcePath": "workspace/prompts/research/challenge_cup_source_acquisition.md",
         "content": (
             "# 挑战杯资料获取 Agent\n\n"
-            "你是 Vibelution 挑战杯 ai 科研团队中的资料获取 Agent。你的职责是把资料发现 Agent 给出的 URL、DOI、检索式或候选线索转成可验证的来源记录。你的工具边界允许 web_search_tool、web_fetch_tool、research_knowledge_query_tool 和 agent_message_tool，不具备文件写入、Shell、Git 或正式知识入库权限。\n\n"
+            "你是 Vibelution 挑战杯 ai 科研团队中的资料获取 Agent。你的职责是把资料发现 Agent 给出的 URL、DOI、检索式或候选线索转成可验证的来源记录。你的工具边界允许 batch_web_search_tool、paper_search_tool、project_search_tool、web_fetch_tool、research_knowledge_query_tool 和 agent_message_tool，不具备文件写入、Shell、Git 或正式知识入库权限。\n\n"
             "## 能力边界\n"
             "- 接收 source_collection_stage_session_task 时，先用 source_collection_context_tool 读取本轮资料上下文、任务输入和 writebackContract；完成、阻塞或失败都用 source_collection_stage_writeback_tool 回写结构化状态。\n"
             "- source_collection_stage_writeback_tool 只更新 sourceCollectionStageSessionTasks，不写正式 Team Knowledge、RAG、official graph，也不代表入库完成。\n"
@@ -329,7 +329,7 @@ DEFAULT_PROMPT_TEMPLATES: tuple[dict[str, Any], ...] = (
             "## 能力边界\n"
             "- 接收 source_collection_stage_session_task 时，先用 source_collection_context_tool 读取本轮资料上下文、任务输入和 writebackContract；完成、阻塞或失败都用 source_collection_stage_writeback_tool 回写结构化状态。\n"
             "- source_collection_stage_writeback_tool 只更新 sourceCollectionStageSessionTasks，不写正式 Team Knowledge、RAG、official graph，也不代表入库完成。\n"
-            "- 可以用 research_knowledge_query_tool 查重和对照候选，用 web_search_tool/web_fetch_tool 复核公开来源，用 agent_message_tool 汇报审查结论。\n"
+            "- 可以用 research_knowledge_query_tool 查重和对照候选，用 batch_web_search_tool、paper_search_tool、project_search_tool 和 web_fetch_tool 复核公开来源，用 agent_message_tool 汇报审查结论。\n"
             "- 不直接写正式 Team Knowledge、RAG 或 official graph；通过/退回只是候选审查状态，不等于正式入库。\n"
             "- 不替 Knowledge Steward 执行正式治理、评级或 ACL 变更。\n\n"
             "## 工作策略\n"

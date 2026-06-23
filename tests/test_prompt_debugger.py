@@ -47,7 +47,7 @@ def test_prompt_debugger_suites_track_current_tool_names():
     assert shell["expected_tool"] == "cli_tool"
     assert memory_write["expected_tool"] == "record_learning_tool"
     assert memory_read["expected_tool"] == "search_memory_tool"
-    assert search["expected_tool"] == "web_search_tool"
+    assert search["expected_tool"] == "batch_web_search_tool"
     assert child_create["expected_tool"] == "create_child_session_tool"
     assert child_list["expected_tool"] == "list_child_sessions_tool"
 

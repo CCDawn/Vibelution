@@ -75,7 +75,8 @@ def test_research_organization_initializes_protected_core_agents_with_explicit_t
         "research_agent_creation_proposal_tool",
         "research_communication_edge_proposal_tool",
         "research_proposal_apply_tool",
-        "web_search_tool",
+        "batch_web_search_tool",
+        "paper_search_tool",
         "web_fetch_tool",
     ]
     assert advisor["toolPolicy"]["allowedTools"] == [
@@ -84,7 +85,8 @@ def test_research_organization_initializes_protected_core_agents_with_explicit_t
         "research_agent_creation_proposal_tool",
         "research_communication_edge_proposal_tool",
         "research_proposal_apply_tool",
-        "web_search_tool",
+        "batch_web_search_tool",
+        "paper_search_tool",
         "web_fetch_tool",
     ]
     assert steward["toolPolicy"]["allowedTools"] == [
@@ -93,7 +95,8 @@ def test_research_organization_initializes_protected_core_agents_with_explicit_t
         "research_agent_creation_proposal_tool",
         "research_communication_edge_proposal_tool",
         "research_proposal_apply_tool",
-        "web_search_tool",
+        "batch_web_search_tool",
+        "paper_search_tool",
         "web_fetch_tool",
         "read_memory_tool",
         "get_memory_summary_tool",
@@ -875,7 +878,7 @@ def test_high_risk_create_agent_proposal_requires_user_apply(org_workspace):
                     "displayName": "神经科学专家 Agent",
                     "role": "neuroscience_specialist",
                     "employeeRank": "specialist",
-                    "allowedTools": ["agent_message_tool", "web_search_tool"],
+                    "allowedTools": ["agent_message_tool", "batch_web_search_tool"],
                 }
             ],
         }
@@ -894,7 +897,7 @@ def test_high_risk_create_agent_proposal_requires_user_apply(org_workspace):
     assert created["status"] == "applied"
     assert created["agentId"]
     created_node = next(node for node in applied["organization"]["agents"] if node["agentId"] == created["agentId"])
-    assert created_node["allowedTools"] == ["agent_message_tool", "web_search_tool"]
+    assert created_node["allowedTools"] == ["agent_message_tool", "batch_web_search_tool"]
     assert applied["proposal"]["auditTrail"][-1]["confirmation"]["text"] == "用户确认新增神经科学专家"
 
 
@@ -920,7 +923,7 @@ def test_equivalent_pending_create_agent_proposal_is_reused(org_workspace):
                     "displayName": "记忆库管理员",
                     "role": "memory_steward",
                     "roleKey": "memory_steward",
-                    "allowedTools": ["agent_message_tool", "web_search_tool"],
+                    "allowedTools": ["agent_message_tool", "batch_web_search_tool"],
                 }
             ],
         }
@@ -1044,6 +1047,7 @@ def test_create_agent_proposal_separates_unknown_tools_from_allowed_tools(org_wo
                         "memory_tools.py",
                         "codebase_analyzer",
                         "web_search_tool",
+                        "batch_web_search_tool",
                     ],
                 }
             ],
@@ -1051,9 +1055,9 @@ def test_create_agent_proposal_separates_unknown_tools_from_allowed_tools(org_wo
     )["proposal"]
     action = proposal["actions"][0]
 
-    assert action["allowedTools"] == ["agent_message_tool", "web_search_tool"]
-    assert action["missingTools"] == ["memory_tools.py", "codebase_analyzer"]
-    assert action["requestedTools"] == ["memory_tools.py", "codebase_analyzer"]
+    assert action["allowedTools"] == ["agent_message_tool", "batch_web_search_tool"]
+    assert action["missingTools"] == ["memory_tools.py", "codebase_analyzer", "web_search_tool"]
+    assert action["requestedTools"] == ["memory_tools.py", "codebase_analyzer", "web_search_tool"]
 
     applied = research_organization_service.apply_research_org_proposal(
         proposal["proposalId"],
@@ -1062,7 +1066,7 @@ def test_create_agent_proposal_separates_unknown_tools_from_allowed_tools(org_wo
 
     created = applied["results"][0]
     created_node = next(node for node in applied["organization"]["agents"] if node["agentId"] == created["agentId"])
-    assert created_node["allowedTools"] == ["agent_message_tool", "web_search_tool"]
+    assert created_node["allowedTools"] == ["agent_message_tool", "batch_web_search_tool"]
 
 
 def test_historical_pending_create_agent_proposal_allowed_tools_are_repaired(org_workspace):
@@ -1086,6 +1090,7 @@ def test_historical_pending_create_agent_proposal_allowed_tools_are_repaired(org
         "memory_tools.py",
         "codebase_analyzer",
         "web_search_tool",
+        "batch_web_search_tool",
     ]
     org_workspace.write_research_organization(graph)
 
@@ -1093,9 +1098,9 @@ def test_historical_pending_create_agent_proposal_allowed_tools_are_repaired(org
 
     repaired_proposal = next(item for item in repaired["proposals"] if item["proposalId"] == proposal["proposalId"])
     repaired_action = repaired_proposal["actions"][0]
-    assert repaired_action["allowedTools"] == ["agent_message_tool", "web_search_tool"]
-    assert repaired_action["missingTools"] == ["memory_tools.py", "codebase_analyzer"]
-    assert repaired_action["requestedTools"] == ["memory_tools.py", "codebase_analyzer"]
+    assert repaired_action["allowedTools"] == ["agent_message_tool", "batch_web_search_tool"]
+    assert repaired_action["missingTools"] == ["memory_tools.py", "codebase_analyzer", "web_search_tool"]
+    assert repaired_action["requestedTools"] == ["memory_tools.py", "codebase_analyzer", "web_search_tool"]
 
 
 def test_applying_confirmed_create_agent_proposal_is_idempotent(org_workspace):

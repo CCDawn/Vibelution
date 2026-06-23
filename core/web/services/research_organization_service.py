@@ -77,7 +77,8 @@ CEO_AGENT_TOOLS = [
     RESEARCH_AGENT_CREATION_TOOL,
     RESEARCH_COMMUNICATION_EDGE_TOOL,
     RESEARCH_PROPOSAL_APPLY_TOOL,
-    "web_search_tool",
+    "batch_web_search_tool",
+    "paper_search_tool",
     "web_fetch_tool",
 ]
 ORGANIZATION_ADVISOR_TOOLS = [
@@ -86,7 +87,8 @@ ORGANIZATION_ADVISOR_TOOLS = [
     RESEARCH_AGENT_CREATION_TOOL,
     RESEARCH_COMMUNICATION_EDGE_TOOL,
     RESEARCH_PROPOSAL_APPLY_TOOL,
-    "web_search_tool",
+    "batch_web_search_tool",
+    "paper_search_tool",
     "web_fetch_tool",
 ]
 CAPABILITY_STEWARD_TOOLS = [
@@ -95,7 +97,8 @@ CAPABILITY_STEWARD_TOOLS = [
     RESEARCH_AGENT_CREATION_TOOL,
     RESEARCH_COMMUNICATION_EDGE_TOOL,
     RESEARCH_PROPOSAL_APPLY_TOOL,
-    "web_search_tool",
+    "batch_web_search_tool",
+    "paper_search_tool",
     "web_fetch_tool",
     "read_memory_tool",
     "get_memory_summary_tool",
@@ -103,7 +106,8 @@ CAPABILITY_STEWARD_TOOLS = [
     "read_dynamic_prompt_tool",
     "research_knowledge_query_tool",
 ]
-DEFAULT_CREATED_AGENT_TOOLS = ["agent_message_tool", "web_search_tool", "web_fetch_tool"]
+DEFAULT_CREATED_AGENT_TOOLS = ["agent_message_tool", "batch_web_search_tool", "paper_search_tool", "web_fetch_tool"]
+RTOKEN_SEARCH_DISABLED_TOOLS = {"web_search_tool"}
 CREATE_AGENT_ROLE_ALIASES = {
     "memorycurator": "memory_management",
     "memorysteward": "memory_management",
@@ -1912,11 +1916,11 @@ def _sanitize_proposal_action_tools(action: dict[str, Any]) -> dict[str, Any]:
     known_tool_names = _known_tool_names()
     if not known_tool_names:
         return {**action, "allowedTools": allowed_tools}
-    valid_tools = [tool for tool in allowed_tools if tool in known_tool_names]
+    valid_tools = [tool for tool in allowed_tools if tool in known_tool_names and tool not in RTOKEN_SEARCH_DISABLED_TOOLS]
     missing_tools = _normalize_allowed_tools(
         [
             *(action.get("missingTools") or []),
-            *[tool for tool in allowed_tools if tool not in known_tool_names],
+            *[tool for tool in allowed_tools if tool not in known_tool_names or tool in RTOKEN_SEARCH_DISABLED_TOOLS],
         ]
     )
     if action_type == "create_agent" and not valid_tools:
