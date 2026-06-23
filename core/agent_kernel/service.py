@@ -492,11 +492,17 @@ def _deliver_event_to_recipients(event: dict[str, Any], task: dict[str, Any]) ->
     wake_target = bool(delivery_policy.get("wakeTarget", True))
     inbox_metadata = _kernel_inbox_metadata(event, task)
     source_room_id = _metadata_text(inbox_metadata, "sourceRoomId")
-    source_round_id = _metadata_text(inbox_metadata, "sourceMessageId") or _metadata_text(inbox_metadata, "projectBusEventId") or event["eventId"]
+    source_round_id = (
+        _metadata_text(inbox_metadata, "sourceRoundId")
+        or _metadata_text(inbox_metadata, "sourceMessageId")
+        or _metadata_text(inbox_metadata, "projectBusEventId")
+        or event["eventId"]
+    )
     thread_id = str(event.get("correlationId") or source_round_id or event["eventId"]).strip()
     inbox_kind = _metadata_text(inbox_metadata, "inboxKind") or "kernel_event"
     message_summary = _metadata_text(inbox_metadata, "messageSummary") or content
     inbox_created_by = _metadata_text(inbox_metadata, "inboxCreatedBy") or "kernel"
+    prompt_eligible = bool(inbox_metadata.get("promptEligible", True))
     deliveries: list[dict[str, Any]] = []
     for agent_id in list(event.get("recipients") or []):
         target_agent_id = str(agent_id or "").strip()
@@ -527,7 +533,7 @@ def _deliver_event_to_recipients(event: dict[str, Any], task: dict[str, Any]) ->
                 thread_id=thread_id,
                 kind=inbox_kind,
                 summary=message_summary,
-                prompt_eligible=True,
+                prompt_eligible=prompt_eligible,
                 created_by=inbox_created_by,
                 metadata=inbox_metadata,
             )
@@ -567,6 +573,7 @@ def _kernel_inbox_metadata(event: dict[str, Any], task: dict[str, Any]) -> dict[
         "sourceId",
         "sourceSessionId",
         "sourceRoomId",
+        "sourceRoundId",
         "sourceMessageId",
         "projectionRef",
         "adapterVersion",
@@ -584,6 +591,7 @@ def _kernel_inbox_metadata(event: dict[str, Any], task: dict[str, Any]) -> dict[
         "inboxKind",
         "messageSummary",
         "inboxCreatedBy",
+        "promptEligible",
         "replyToMessageId",
         "replyToTurnId",
         "sourceTurnId",
