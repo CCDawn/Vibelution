@@ -88,6 +88,14 @@ describe("DirectSessionIndexItem helpers", () => {
     expect(markup).toContain("模型：mimo-v2.5");
   });
 
+  it("places the model badge beside the session title without repeating it in metadata", () => {
+    const markup = renderDirectItem();
+
+    expect(markup).toContain("agentModelTitleTag");
+    expect(markup).toContain("模型：mimo-v2.5");
+    expect(markup.match(/agentModelTag/g)).toHaveLength(1);
+  });
+
   it("keeps unread counts as compact badges while current state stays textless", () => {
     const markup = renderDirectItem({
       session: makeSession({ agentInboxPendingCount: 2 }),

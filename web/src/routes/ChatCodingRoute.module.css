@@ -4451,7 +4451,14 @@ a.teamTreeChild:focus-visible {
 
 .conversationTitleRow {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
+  align-items: center;
+  min-width: 0;
+  gap: 5px;
+}
+
+.conversationTitleMain {
+  display: inline-flex;
   align-items: center;
   min-width: 0;
   gap: 5px;
@@ -4554,6 +4561,19 @@ a.teamTreeChild:focus-visible {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.agentModelTitleTag {
+  flex: 0 1 auto;
+  max-width: 96px;
+  min-height: 17px;
+  padding: 0 5px;
+  border: 1px solid color-mix(in srgb, var(--accent-cool) 22%, var(--border-soft));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent-cool) 8%, transparent);
+  color: color-mix(in srgb, var(--accent-cool) 64%, var(--fg-secondary));
+  font-size: 0.6rem;
+  font-weight: 700;
 }
 
 .agentModelTag svg {
@@ -4663,11 +4683,6 @@ a.teamTreeChild:focus-visible {
 .conversationMetaMain {
   overflow: hidden;
   color: var(--fg-secondary);
-}
-
-.conversationMetaMain .agentModelTag {
-  flex: 1 1 72px;
-  min-width: 44px;
 }
 
 .conversationMetaTime {
