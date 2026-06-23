@@ -203,6 +203,24 @@ describe("ConversationView edit resend affordance", () => {
     expect(conversationViewSource).toContain("window.setTimeout(prewarmNext, 48)");
   });
 
+  it("keeps tool detail expansion work off collapsed renders", () => {
+    expect(conversationViewSource).toContain("function DeferredOperationDetails");
+    expect(conversationViewSource).toContain("const deferredExpanded = useDeferredValue(expanded)");
+    expect(conversationViewSource).toContain("const detailRows = deferredExpanded ? buildDetailRows(operation) : []");
+    expect(conversationViewSource).toContain("const canExpandDetails = hasOperationDetails(operation)");
+    expect(conversationViewSource).toContain("<DeferredOperationDetails");
+    expect(conversationViewSource).toContain("buildDetailRows={operationDetailRows}");
+    expect(conversationViewSource).not.toContain("const detailRows = detailsExpanded ? operationDetailRows(operation) : []");
+  });
+
+  it("uses lightweight tool signals instead of full detail payloads for scroll tracking", () => {
+    expect(conversationViewSource).toContain("function lightweightJsonSignal(value: unknown)");
+    expect(conversationViewSource).toContain("function lightweightTextSignal(value: unknown)");
+    expect(conversationViewSource).toContain("lightweightJsonSignal(toolCall.arguments ?? {})");
+    expect(conversationViewSource).toContain("lightweightTextSignal(toolCall.resultPreview ?? \"\")");
+    expect(conversationViewSource).not.toContain("JSON.stringify(toolCall.arguments ?? {})");
+  });
+
   it("defaults to answer-only process display while keeping details expandable", () => {
     const html = renderConversation(
       [
@@ -2070,6 +2088,43 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).toContain("image2_generate_tool");
     expect(html).toContain('title="展开工具详情"');
     expect(html).not.toContain("生成美女图片");
+  });
+
+  it("keeps collapsed tool details out of the initial render cost", () => {
+    const html = renderConversation([
+      {
+        id: "message-tool-collapsed",
+        role: "assistant",
+        content: "已完成大批量搜索。",
+        timestamp: "2026-05-26T00:01:00Z",
+        streaming: true,
+        toolCalls: [
+          {
+            name: "batch_web_search_tool",
+            status: "done",
+            summary: "batch search done",
+            arguments: {
+              queries: [
+                "predictive coding neural network Rao Ballard 1999 review",
+                "predictive coding backpropagation equivalent implementation PyTorch",
+                "biologically plausible learning predictive coding survey 2020 2023",
+              ],
+            },
+            resultPreview: JSON.stringify({
+              summary: "找到多条学术结果",
+              details: new Array(10).fill("very long line of result text").join("\n"),
+            }),
+            resultType: "json",
+            resultLength: 12000,
+          },
+        ],
+      },
+    ]);
+
+    expect(html).toContain("batch_web_search_tool");
+    expect(html).toContain('title="展开工具详情"');
+    expect(html).not.toContain("predictive coding backpropagation equivalent implementation PyTorch");
+    expect(html).not.toContain("very long line of result text");
   });
 
   it("shows spinners only for active conversation sections", () => {

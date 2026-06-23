@@ -20,7 +20,7 @@ import {
   TerminalSquare,
   Wrench,
 } from "lucide-react";
-import { DragEvent, ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { DragEvent, ReactNode, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import {
   ChatNextStateSignalSummary,
@@ -70,6 +70,9 @@ const RESPONSE_PREWARM_MESSAGE_LIMIT = 8;
 const COMPUTER_USE_TOOL_NAME = "computer_use_task_tool";
 
 export type ConversationProcessDisplayMode = "answer" | "trace";
+
+type OperationDetailKind = "thought" | "status" | "tool";
+type OperationDetailRow = { label: string; value: string };
 
 type ComposerDragData = {
   files?: ArrayLike<File> | Iterable<File> | null;
@@ -173,6 +176,85 @@ function StreamingResponseContent({ content }: { content: string }) {
   );
 }
 
+function lightweightJsonSignal(value: unknown): string {
+  if (value === null || value === undefined) {
+    return "";
+  }
+  if (typeof value === "string") {
+    return `s:${value.length}:${value.slice(0, 64)}`;
+  }
+  if (typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+  if (Array.isArray(value)) {
+    return `a:${value.length}:${value.slice(0, 6).map((item) => lightweightJsonSignal(item)).join(",")}`;
+  }
+  if (typeof value === "object") {
+    return Object.entries(value as Record<string, unknown>)
+      .slice(0, 12)
+      .map(([key, item]) => `${key}:${lightweightJsonSignal(item)}`)
+      .join(",");
+  }
+  return String(value);
+}
+
+function lightweightTextSignal(value: unknown): string {
+  const text = String(value ?? "");
+  if (!text) {
+    return "";
+  }
+  return `${text.length}:${text.slice(0, 96)}:${text.slice(-32)}`;
+}
+
+function operationDetailsKind(operation: ConversationOperation): OperationDetailKind {
+  if (operation.kind === "thought") {
+    return "thought";
+  }
+  if (operation.kind === "status") {
+    return "status";
+  }
+  return "tool";
+}
+
+function DeferredOperationDetails({
+  operation,
+  expanded,
+  detailsId,
+  kind,
+  buildDetailRows,
+  className,
+}: {
+  operation: ConversationOperation;
+  expanded: boolean;
+  detailsId: string;
+  kind: OperationDetailKind;
+  buildDetailRows: (operation: ConversationOperation) => OperationDetailRow[];
+  className?: string;
+}) {
+  const deferredExpanded = useDeferredValue(expanded);
+  const detailRows = deferredExpanded ? buildDetailRows(operation) : [];
+  if (!deferredExpanded) {
+    return null;
+  }
+  return (
+    <div
+      id={detailsId}
+      className={
+        kind === "thought"
+          ? `${styles.operationDetails} ${styles.operationDetails_thought} ${className || ""}`.trim()
+          : `${styles.operationDetails} ${className || ""}`.trim()
+      }
+    >
+      {detailRows.map((row) => (
+        <div key={`${operation.id}-${row.label}`} className={styles.operationDetailRow}>
+          <span className={styles.operationDetailLabel}>{row.label}</span>
+          <pre className={styles.operationDetailValue}>{row.value}</pre>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function buildTimelineScrollSignal(messages: ConversationMessage[]) {
   return messages
     .map((message) => {
@@ -202,8 +284,8 @@ export function buildTimelineScrollSignal(messages: ConversationMessage[]) {
             toolCall.name,
             toolCall.status,
             toolCall.summary ?? "",
-            JSON.stringify(toolCall.arguments ?? {}),
-            toolCall.resultPreview ?? "",
+            lightweightJsonSignal(toolCall.arguments ?? {}),
+            lightweightTextSignal(toolCall.resultPreview ?? ""),
             toolCall.error ?? "",
             toolCall.durationMs ?? "",
             toolCall.timeoutSeconds ?? "",
@@ -219,7 +301,7 @@ export function buildTimelineScrollSignal(messages: ConversationMessage[]) {
             event.status,
             event.name ?? "",
             event.summary ?? "",
-            event.resultPreview ?? "",
+            lightweightTextSignal(event.resultPreview ?? ""),
             event.error ?? "",
             event.relatedThoughtSequence ?? "",
           ].join(":"),
@@ -1615,8 +1697,8 @@ export function ConversationView({
     );
   }
 
-  function operationDetailRows(operation: ConversationOperation) {
-    const rows: Array<{ label: string; value: string }> = [];
+  function operationDetailRows(operation: ConversationOperation): OperationDetailRow[] {
+    const rows: OperationDetailRow[] = [];
     const args = operation.arguments ?? {};
     if (operation.kind === "status" && operation.resultPreview) {
       rows.push({ label: lang === "zh" ? "完整状态" : "Full status", value: operation.resultPreview });
@@ -1821,8 +1903,7 @@ export function ConversationView({
           const duration = formatDuration(operation.durationSeconds);
           const detailsId = `operation-detail-${operation.id}`;
           const detailsExpanded = getExpansionState(operation.id, "details", false);
-          const detailRows = operationDetailRows(operation);
-          const canExpandDetails = detailRows.length > 0;
+          const canExpandDetails = hasOperationDetails(operation);
           const computerUseResult = renderComputerUseResult(operation);
           const detailToggleTitle = operation.kind === "thought"
             ? detailsExpanded ? t("thoughtProcessVisible") : t("thoughtProcessHidden")
@@ -1868,22 +1949,14 @@ export function ConversationView({
                   </span>
                 )}
               </div>
-              {canExpandDetails && detailsExpanded ? (
-                <div
-                  id={detailsId}
-                  className={
-                    operation.kind === "thought"
-                      ? `${styles.operationDetails} ${styles.operationDetails_thought}`
-                      : styles.operationDetails
-                  }
-                >
-                  {detailRows.map((row) => (
-                    <div key={`${operation.id}-${row.label}`} className={styles.operationDetailRow}>
-                      <span className={styles.operationDetailLabel}>{row.label}</span>
-                      <pre className={styles.operationDetailValue}>{row.value}</pre>
-                    </div>
-                  ))}
-                </div>
+              {canExpandDetails ? (
+                <DeferredOperationDetails
+                  operation={operation}
+                  expanded={detailsExpanded}
+                  detailsId={detailsId}
+                  kind={operationDetailsKind(operation)}
+                  buildDetailRows={operationDetailRows}
+                />
               ) : null}
               {computerUseResult}
             </div>
@@ -2035,11 +2108,10 @@ export function ConversationView({
     const operation = item.operation;
     const detailsId = `timeline-operation-detail-${operation.id}`;
     const detailsExpanded = getExpansionState(operation.id, "details", false);
-    const detailRows = operationDetailRows(operation);
-    const canExpandDetails = detailRows.length > 0;
+    const canExpandDetails = hasOperationDetails(operation);
     const duration = formatDuration(operation.durationSeconds);
     const computerUseResult = renderComputerUseResult(operation);
-    const readableResult = readableOperationResult(operation);
+    const readableResult = operation.kind === "tool" ? "" : readableOperationResult(operation);
     const showReadableResult = Boolean(operation.kind !== "tool" && readableResult && readableResult !== item.summary.trim());
     const visibleStatus = timelineStatusText(item.status);
     const className = [
@@ -2067,15 +2139,14 @@ export function ConversationView({
             </button>
           ) : null}
         </div>
-        {canExpandDetails && detailsExpanded ? (
-          <div id={detailsId} className={styles.operationDetails}>
-            {detailRows.map((row) => (
-              <div key={`${operation.id}-${row.label}`} className={styles.operationDetailRow}>
-                <span className={styles.operationDetailLabel}>{row.label}</span>
-                <pre className={styles.operationDetailValue}>{row.value}</pre>
-              </div>
-            ))}
-          </div>
+        {canExpandDetails ? (
+          <DeferredOperationDetails
+            operation={operation}
+            expanded={detailsExpanded}
+            detailsId={detailsId}
+            kind={operationDetailsKind(operation)}
+            buildDetailRows={operationDetailRows}
+          />
         ) : null}
         {showReadableResult ? <pre className={styles.timelineOperationResult}>{readableResult}</pre> : null}
         {computerUseResult}
@@ -2096,8 +2167,7 @@ export function ConversationView({
             const duration = formatDuration(operation.durationSeconds);
             const detailsId = `operation-detail-${operation.id}`;
             const detailsExpanded = getExpansionState(operation.id, "details", false);
-            const detailRows = operationDetailRows(operation);
-            const canExpandDetails = detailRows.length > 0;
+            const canExpandDetails = hasOperationDetails(operation);
             const computerUseResult = renderComputerUseResult(operation);
             return (
               <div key={operation.id} className={styles.reActToolItem}>
@@ -2124,15 +2194,14 @@ export function ConversationView({
                     </button>
                   ) : null}
                 </div>
-                {canExpandDetails && detailsExpanded ? (
-                  <div id={detailsId} className={styles.operationDetails}>
-                    {detailRows.map((row) => (
-                      <div key={`${operation.id}-${row.label}`} className={styles.operationDetailRow}>
-                        <span className={styles.operationDetailLabel}>{row.label}</span>
-                        <pre className={styles.operationDetailValue}>{row.value}</pre>
-                      </div>
-                    ))}
-                  </div>
+                {canExpandDetails ? (
+                  <DeferredOperationDetails
+                    operation={operation}
+                    expanded={detailsExpanded}
+                    detailsId={detailsId}
+                    kind="tool"
+                    buildDetailRows={operationDetailRows}
+                  />
                 ) : null}
                 {computerUseResult}
               </div>
