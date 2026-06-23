@@ -85,4 +85,18 @@ describe("FilePreview editor fallback contract", () => {
     expect(previewSource).toContain("className={styles.plainFallback}");
     expect(previewSource).toContain("[file-preview-fallback]");
   });
+
+  it("loads CodeMirror language extensions on demand", () => {
+    expect(previewSource).not.toContain('import { javascript } from "@codemirror/lang-javascript"');
+    expect(previewSource).not.toContain('import { json } from "@codemirror/lang-json"');
+    expect(previewSource).not.toContain('import { markdown } from "@codemirror/lang-markdown"');
+    expect(previewSource).not.toContain('import { python } from "@codemirror/lang-python"');
+    expect(previewSource).not.toContain('import { yaml } from "@codemirror/lang-yaml"');
+    expect(previewSource).toContain('import("@codemirror/lang-javascript")');
+    expect(previewSource).toContain('import("@codemirror/lang-json")');
+    expect(previewSource).toContain('import("@codemirror/lang-markdown")');
+    expect(previewSource).toContain('import("@codemirror/lang-python")');
+    expect(previewSource).toContain('import("@codemirror/lang-yaml")');
+    expect(previewSource).toContain("useFilePreviewLanguageExtensions(file.language)");
+  });
 });
