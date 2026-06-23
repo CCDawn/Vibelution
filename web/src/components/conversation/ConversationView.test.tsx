@@ -8,7 +8,6 @@ import { describe, expect, it } from "vitest";
 import { ChatNextStateSignalSummary, ConversationMessage, SessionTurnError } from "../../api/types";
 import conversationViewSource from "./ConversationView.tsx?raw";
 import {
-  advanceStreamingRevealText,
   buildStreamingTimelineScrollSignal,
   buildTimelineScrollSignal,
   COMPOSER_SESSION_REFERENCE_MIME,
@@ -147,7 +146,7 @@ describe("ConversationView edit resend affordance", () => {
   it("renders streaming assistant text through a light text path before markdown parsing", () => {
     expect(conversationViewSource).toContain("function renderStreamingResponseText(content: string)");
     expect(conversationViewSource).toContain("<StreamingResponseContent content={content} />");
-    expect(conversationViewSource).toContain("advanceStreamingRevealText(visibleTextRef.current, target)");
+    expect(conversationViewSource).toContain("const visibleContent = String(content ?? \"\")");
     expect(conversationViewSource).toContain("styles.streamingResponseText");
     expect(conversationViewSource).toContain("styles.streamingResponseParagraph");
     expect(conversationViewSource).toContain("const isResponseStreaming = Boolean(message.streaming) && showResponseBlock");
@@ -157,28 +156,43 @@ describe("ConversationView edit resend affordance", () => {
     expect(conversationViewStylesSource).toContain(".streamingResponseParagraph");
   });
 
-  it("fast-forwards large streaming backlogs while keeping small deltas smooth", () => {
-    const smallTarget = "这是一段正在流式到达的短回复。";
-    const first = advanceStreamingRevealText("", smallTarget);
-    const second = advanceStreamingRevealText(first, smallTarget);
-
-    expect(first.length).toBeGreaterThan(0);
-    expect(first.length).toBeLessThan(smallTarget.length);
-    expect(second.length).toBeGreaterThan(first.length);
-    expect(second.length).toBeLessThanOrEqual(smallTarget.length);
-
-    const target = "这是一段一次性到达的长回复，".repeat(16);
-    expect(advanceStreamingRevealText("", target)).toBe(target);
-    expect(advanceStreamingRevealText("旧文本", target)).toBe(target);
+  it("does not reintroduce a fixed-rate typewriter buffer for live assistant deltas", () => {
+    expect(conversationViewSource).not.toContain("STREAMING_REVEAL_INTERVAL_MS");
+    expect(conversationViewSource).not.toContain("STREAMING_REVEAL_FAST_FORWARD_BACKLOG_CHARS");
+    expect(conversationViewSource).not.toContain("setTimeout(pump");
+    expect(conversationViewSource).not.toContain("advanceStreamingRevealText");
   });
 
-  it("does not reintroduce fixed-rate typing for large live assistant deltas", () => {
-    const target = "大块 assistant_delta 已经到达浏览器后应当快速显示，不能继续按固定打字机速度慢慢吐字。".repeat(10);
-    const first = advanceStreamingRevealText("", target);
+  it("keeps answer and process toggles as borderless text controls", () => {
+    const responseToggleRule = cssRule(".responseToggle");
+    const responseToggleHoverRule = cssRule(".responseToggle:hover");
+    const processToggleRule = cssRule(".answerOnlyProcessToggle");
+    const processToggleHoverRule = cssRule(".answerOnlyProcessToggle:hover");
 
-    expect(first).toBe(target);
-    expect(conversationViewSource).toContain("STREAMING_REVEAL_FAST_FORWARD_BACKLOG_CHARS");
-    expect(conversationViewSource).toContain("remaining >= STREAMING_REVEAL_FAST_FORWARD_BACKLOG_CHARS");
+    expect(responseToggleRule).toContain("border: 0");
+    expect(responseToggleRule).toContain("background: transparent");
+    expect(responseToggleRule).toContain("padding: 0");
+    expect(responseToggleHoverRule).not.toContain("background");
+    expect(responseToggleHoverRule).not.toContain("border-color");
+    expect(processToggleRule).toContain("border: 0");
+    expect(processToggleRule).toContain("background: transparent");
+    expect(processToggleRule).toContain("padding: 0");
+    expect(processToggleHoverRule).not.toContain("background");
+    expect(processToggleHoverRule).not.toContain("border-color");
+  });
+
+  it("caches response and markdown parsing so repeated expands avoid synchronous reparsing", () => {
+    expect(conversationViewSource).toContain("const responseSegmentCacheRef = useRef<Map<string, ResponseSegment[]>>(new Map())");
+    expect(conversationViewSource).toContain("const markdownBlockCacheRef = useRef<Map<string, MarkdownBlock[]>>(new Map())");
+    expect(conversationViewSource).toContain("function getCachedResponseSegments(content: string)");
+    expect(conversationViewSource).toContain("function getCachedMarkdownBlocks(content: string)");
+    expect(conversationViewSource).toContain("trimOldestCacheEntries(responseSegmentCacheRef.current, RESPONSE_PARSE_CACHE_LIMIT)");
+    expect(conversationViewSource).toContain("trimOldestCacheEntries(markdownBlockCacheRef.current, MARKDOWN_PARSE_CACHE_LIMIT)");
+    expect(conversationViewSource).toContain("const responseSegments = showResponseBlock && responseExpanded && !isResponseStreaming");
+    expect(conversationViewSource).toContain("? getCachedResponseSegments(message.content)");
+    expect(conversationViewSource).toContain("const blocks = getCachedMarkdownBlocks(content)");
+    expect(conversationViewSource).toContain("const prewarmMessages = timelineMessages");
+    expect(conversationViewSource).toContain("window.setTimeout(prewarmNext, 48)");
   });
 
   it("defaults to answer-only process display while keeping details expandable", () => {
