@@ -645,6 +645,12 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).not.toContain("detail?.defaultFileContext ?? runtime?.defaultRoute");
   });
 
+  it("uses the model context window, not the compression threshold, for model input usage", () => {
+    expect(routeSource).toContain("const modelInputLimitTokens = Math.max(");
+    expect(routeSource).toContain("lastContextComposition?.limitTokens\n      ?? sessionContextUsage?.limit\n      ?? compression?.contextWindowLimit");
+    expect(routeSource).not.toContain("compression?.effectiveTokenLimit\n      ?? compression?.contextWindowLimit");
+  });
+
   it("moves recent control signals into the current session status bar", () => {
     expect(routeSource).toContain("const activeControlSignals = useMemo<ChatNextStateSignalSummary[]>");
     expect(routeSource).toContain("shouldShowNextStateSignalInConversation(signal, phase)");
