@@ -5081,10 +5081,9 @@ export function ChatCodingRoute() {
   );
   const modelInputLimitTokens = Math.max(
     0,
-    compression?.effectiveTokenLimit
-      ?? compression?.contextWindowLimit
+    lastContextComposition?.limitTokens
       ?? sessionContextUsage?.limit
-      ?? lastContextComposition?.limitTokens
+      ?? compression?.contextWindowLimit
       ?? 0,
   );
   const modelInputPercent = modelInputLimitTokens > 0
