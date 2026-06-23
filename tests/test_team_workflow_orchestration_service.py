@@ -87,6 +87,21 @@ def _use_tmp_project_root(tmp_path, monkeypatch):
     monkeypatch.setattr(chat_room_service, "_CHAT_ROOM_EXECUTOR", _NoopBackgroundExecutor())
 
 
+def _capture_workflow_events(monkeypatch):
+    events = []
+
+    def fake_record_runtime_scene_event(*args, **kwargs):
+        events.append((args, kwargs))
+        return {"accepted": True, "path": kwargs.get("child_log_path", "")}
+
+    monkeypatch.setattr(
+        team_workflow_orchestration_service,
+        "record_runtime_scene_event",
+        fake_record_runtime_scene_event,
+    )
+    return events
+
+
 def _stub_source_collection_search_background(monkeypatch):
     calls = []
 
@@ -900,6 +915,80 @@ def test_source_collection_stage_task_context_returns_bounded_records_for_extrac
     assert "file://" in context["usage"]["doNotUse"]
 
 
+def test_source_collection_stage_task_records_high_roi_runtime_events(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
+    events = _capture_workflow_events(monkeypatch)
+    discovery = agent_directory_service.create_agent_instance(display_name="资料发现")
+    session_service.ensure_agent_direct_session(agent_id=discovery["agentId"], title="资料发现")
+    team = team_service.create_team(
+        name="挑战杯科研团队",
+        members=[{"agentId": discovery["agentId"], "role": "data_discovery", "agentName": "资料发现"}],
+    )
+    run_response = team_workflow_orchestration_service.start_source_collection_run(
+        team["teamId"],
+        {
+            "topic": "脑启发路由",
+            "agentRoles": ["data_discovery"],
+            "agentIds": {"data_discovery": discovery["agentId"]},
+            "querySeeds": ["brain-inspired routing"],
+            "promptCachePolicy": {"requirement": "disabled"},
+        },
+    )
+    monkeypatch.setattr(
+        agent_directory_service,
+        "resolve_tool_policy_for_agent",
+        lambda agent_id, **kwargs: {
+            "policyId": "tool-missing-stage-writeback",
+            "allowedTools": ["source_collection_context_tool", "web_search_tool"],
+        },
+    )
+    monkeypatch.setattr(
+        session_service,
+        "submit_session_message",
+        lambda session_id, content, **kwargs: {
+            "accepted": False,
+            "sessionId": session_id,
+            "turnId": "",
+            "status": "busy",
+        },
+    )
+
+    created = team_workflow_orchestration_service.start_source_collection_stage_session_task(
+        team["teamId"],
+        run_response["run"]["runId"],
+        {
+            "stageId": "collection",
+            "agentId": discovery["agentId"],
+            "agentRole": "data_discovery",
+            "idempotencyKey": "stage-click",
+        },
+    )
+    reused = team_workflow_orchestration_service.start_source_collection_stage_session_task(
+        team["teamId"],
+        run_response["run"]["runId"],
+        {
+            "stageId": "collection",
+            "agentId": discovery["agentId"],
+            "agentRole": "data_discovery",
+            "idempotencyKey": "stage-click",
+        },
+    )
+
+    assert created["task"]["status"] == "queued"
+    assert reused["alreadyPresent"] is True
+    event_by_code = {args[2]: kwargs for args, kwargs in events}
+    missing = event_by_code["source_collection.stage_session_task_tool_contract_missing"]
+    assert missing["level"] == "warning"
+    assert missing["outcome"] == "blocked"
+    assert "source_collection_stage_writeback_tool" in missing["fields"]["missingTools"]
+    assert "batch_web_search_tool" in missing["fields"]["missingTools"]
+    not_accepted = event_by_code["source_collection.stage_session_task_submit_not_accepted"]
+    assert not_accepted["fields"]["turnStatus"] == "busy"
+    reused_event = event_by_code["source_collection.stage_session_task_reused"]
+    assert reused_event["fields"]["taskId"] == created["taskId"]
+
+
 def test_source_collection_stage_session_task_writeback_records_structured_result(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)
@@ -1101,8 +1190,15 @@ def test_research_stage_status_reconciles_blocked_stage_task_turn_result(tmp_pat
 def test_source_collection_stage_tools_read_context_and_writeback(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)
+    from core.web.services import runtime_scene_service
     from tools.source_collection_stage_tools import source_collection_context_tool, source_collection_stage_writeback_tool
 
+    tool_events = []
+    monkeypatch.setattr(
+        runtime_scene_service,
+        "record_runtime_scene_event",
+        lambda *args, **kwargs: tool_events.append((args, kwargs)) or {"accepted": True},
+    )
     agent = agent_directory_service.create_agent_instance(display_name="资料提炼")
     session_service.ensure_agent_direct_session(agent_id=agent["agentId"], title="资料提炼")
     team = team_service.create_team(
@@ -1164,6 +1260,42 @@ def test_source_collection_stage_tools_read_context_and_writeback(tmp_path, monk
     assert context_payload["records"][0]["doi"] == "10.0000/tool-context"
     assert writeback_payload["writeback"]["status"] == "completed"
     assert writeback_payload["task"]["result"]["extractedRecordCount"] == 1
+    tool_event_codes = [args[2] for args, _kwargs in tool_events]
+    assert "tool.source_collection_context.completed" in tool_event_codes
+    assert "tool.source_collection_stage_writeback.completed" in tool_event_codes
+    writeback_event = next(kwargs for args, kwargs in tool_events if args[2] == "tool.source_collection_stage_writeback.completed")
+    assert writeback_event["fields"]["taskId"] == task["taskId"]
+    assert writeback_event["fields"]["status"] == "completed"
+
+
+def test_source_collection_stage_tools_record_failure_runtime_events(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    from core.web.services import runtime_scene_service
+    from tools.source_collection_stage_tools import source_collection_context_tool, source_collection_stage_writeback_tool
+
+    tool_events = []
+    monkeypatch.setattr(
+        runtime_scene_service,
+        "record_runtime_scene_event",
+        lambda *args, **kwargs: tool_events.append((args, kwargs)) or {"accepted": True},
+    )
+
+    context_payload = json.loads(source_collection_context_tool(team_id="missing-team", run_id="missing-run", task_id="missing-task"))
+    writeback_payload = json.loads(
+        source_collection_stage_writeback_tool(
+            team_id="missing-team",
+            task_id="missing-task",
+            status="blocked",
+            summary="上下文缺失。",
+        )
+    )
+
+    assert context_payload["status"] == "error"
+    assert writeback_payload["status"] == "error"
+    failure_events = {args[2]: kwargs for args, kwargs in tool_events}
+    assert failure_events["tool.source_collection_context.failed"]["level"] == "warning"
+    assert failure_events["tool.source_collection_context.failed"]["fields"]["errorType"]
+    assert failure_events["tool.source_collection_stage_writeback.failed"]["fields"]["status"] == "blocked"
 
 
 def test_execute_source_collection_search_writes_records_and_imports_candidates(tmp_path, monkeypatch):
@@ -1253,6 +1385,7 @@ def test_execute_source_collection_search_writes_records_and_imports_candidates(
 
 def test_execute_source_collection_search_publishes_runtime_work_run(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
+    events = _capture_workflow_events(monkeypatch)
     source_work_runs = WorkRunStore(root=tmp_path / ".runtime" / "work_runs")
     monkeypatch.setattr(
         team_workflow_orchestration_service,
@@ -1298,6 +1431,12 @@ def test_execute_source_collection_search_publishes_runtime_work_run(tmp_path, m
     assert summary["latest"]["status"] == "completed"
     assert summary["latest"]["recordCount"] == 1
     assert summary["latest"]["importedCount"] == 1
+    search_event = next(kwargs for args, kwargs in events if args[2] == "source_collection.search_executed")
+    assert search_event["child_log_path"].startswith("artifacts/source-collection-")
+    assert search_event["child_log_payload"]["summary"]["executedQueryCount"] == 1
+    assert search_event["child_log_payload"]["queryEvents"]
+    assert search_event["child_log_payload"]["queryEvents"][0]["assignmentId"]
+    assert search_event["child_log_payload"]["queryEvents"][0]["queryId"]
 
 
 def test_execute_source_collection_search_does_not_mark_downstream_assignments_as_running_search(tmp_path, monkeypatch):
@@ -1683,6 +1822,7 @@ def test_source_collection_search_syncs_stage_round_terminal_state(tmp_path, mon
 
 def test_research_stage_status_recovers_stale_running_source_collection_round(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
+    events = _capture_workflow_events(monkeypatch)
     _stub_source_collection_search_background(monkeypatch)
 
     def fake_search(query, *, max_results, provider):
@@ -1736,6 +1876,14 @@ def test_research_stage_status_recovers_stale_running_source_collection_round(tm
     assert status_payload["phases"][0]["activeRoundId"] == ""
     assert latest_round["sourceCollectionSearchExecution"]["status"] == "needs_continue"
     assert latest_round["sourceCollectionSearchExecution"]["activeWorkRunId"] == ""
+    recovery_event = next(
+        kwargs
+        for args, kwargs in events
+        if args[2] == "research_stage_round.source_collection_search_recovered_from_work_run"
+    )
+    assert recovery_event["fields"]["runId"] == run_id
+    assert recovery_event["fields"]["searchStatus"] == "needs_continue"
+    assert recovery_event["fields"]["status"] == "needs_continue"
 
 
 def test_start_research_stage_round_reuses_active_knowledge_collection_round(tmp_path, monkeypatch):

@@ -101,6 +101,15 @@ SOURCE_COLLECTION_AGENT_CONTEXT_STAGE_ROLES = {
     "memory": ("knowledge_steward", "candidate_graph"),
 }
 SOURCE_COLLECTION_STAGE_SESSION_TASK_KIND = "source_collection_stage_session_task"
+SOURCE_COLLECTION_STAGE_REQUIRED_TOOLS = (
+    "source_collection_context_tool",
+    "source_collection_stage_writeback_tool",
+)
+SOURCE_COLLECTION_SEARCH_REQUIRED_TOOLS = (
+    "web_search_tool",
+    "batch_web_search_tool",
+    "paper_search_tool",
+)
 SOURCE_COLLECTION_STAGE_SESSION_TASK_STATUSES = {"queued", "running", "completed", "needs_review", "blocked", "failed", "cancelled"}
 SOURCE_COLLECTION_STORAGE_OPEN_TARGETS = {
     "run_directory",
@@ -884,6 +893,20 @@ def start_source_collection_stage_session_task(
             idempotency_key=task_idempotency_key,
         )
         if existing_task is not None:
+            _record_workflow_event(
+                "source_collection.stage_session_task_reused",
+                normalized_team_id,
+                fields={
+                    "runId": normalized_run_id,
+                    "stageId": stage_id,
+                    "agentId": agent_id,
+                    "agentRole": agent_role,
+                    "sessionId": _trim_text(existing_task.get("sessionId"), max_length=160) or session_id,
+                    "taskId": _trim_text(existing_task.get("taskId"), max_length=160),
+                    "idempotencyKey": task_idempotency_key,
+                    "status": _trim_text(existing_task.get("status"), max_length=80),
+                },
+            )
             return {
                 "schemaVersion": SCHEMA_VERSION,
                 "teamId": normalized_team_id,
@@ -907,6 +930,15 @@ def start_source_collection_stage_session_task(
                 "boundaries": _source_collection_stage_session_task_boundaries(),
             }
 
+    _record_source_collection_stage_task_tool_policy_event(
+        normalized_team_id,
+        normalized_run_id,
+        stage_id=stage_id,
+        agent_id=agent_id,
+        agent_role=agent_role,
+        session_id=session_id,
+        task_id=task_id,
+    )
     writeback_contract = _source_collection_stage_task_writeback_contract(
         normalized_team_id,
         normalized_run_id,
@@ -993,6 +1025,20 @@ def start_source_collection_stage_session_task(
         "status": _trim_text(turn_payload.get("status"), max_length=80),
         "acceptedAt": _trim_text(turn_payload.get("acceptedAt"), max_length=120),
     }
+    if not task_record["turn"]["accepted"]:
+        _record_workflow_event(
+            "source_collection.stage_session_task_submit_not_accepted",
+            normalized_team_id,
+            fields={
+                "runId": normalized_run_id,
+                "stageId": stage_id,
+                "agentId": agent_id,
+                "agentRole": agent_role,
+                "sessionId": session_id,
+                "taskId": task_id,
+                "turnStatus": task_record["turn"].get("status", ""),
+            },
+        )
     task_record["updatedAt"] = utc_now_iso()
     _upsert_source_collection_stage_session_task(normalized_team_id, normalized_run_id, task_record)
     _sync_stage_round_with_source_collection_stage_task(normalized_team_id, normalized_run_id, task_record)
@@ -1945,6 +1991,22 @@ def _execute_source_collection_search_impl(team_id: str, run_id: str, payload: d
             "hasMore": remaining_query_count > 0,
             "sourceCollectionRunDirectory": storage_artifacts["runDirectory"],
         },
+        child_log_path=f"artifacts/source-collection-{_safe_token(normalized_run_id, default='run', max_length=96)}-query-summary.jsonl",
+        child_log_payload={
+            "teamId": normalized_team_id,
+            "runId": normalized_run_id,
+            "provider": provider,
+            "queryEvents": _source_collection_query_event_summaries(execution_events),
+            "summary": {
+                "executedQueryCount": executed_query_count,
+                "skippedQueryCount": skipped_query_count,
+                "failedQueryCount": failed_query_count,
+                "recordCount": len(created_records),
+                "importedCount": len(imported),
+                "skippedDuplicateCount": skipped_duplicate_count,
+                "remainingQueryCount": remaining_query_count,
+            },
+        },
     )
     status_label = "executed" if created_records else ("duplicates_skipped" if skipped_duplicate_count else ("partial" if executed_query_count or failed_query_count else "no_open_assignment"))
     return {
@@ -2170,13 +2232,28 @@ def _sync_source_collection_stage_round_from_latest_work_run(team_id: str, run_i
         "hasMore": latest_status == "needs_continue",
         "sourceCollectionSummary": latest.get("sourceCollection") if isinstance(latest.get("sourceCollection"), dict) else {},
     }
-    return _sync_source_collection_stage_round_after_search(
+    synced = _sync_source_collection_stage_round_after_search(
         team_id,
         run_id,
         result,
         terminal_status=latest_status or "completed",
         terminal_summary=_trim_text(latest.get("summary"), max_length=500) or "资料搜索已结束。",
     )
+    if synced is not None:
+        _record_workflow_event(
+            "research_stage_round.source_collection_search_recovered_from_work_run",
+            team_id,
+            fields={
+                "runId": run_id,
+                "stageRoundId": synced.get("stageRoundId", ""),
+                "status": synced.get("status", ""),
+                "searchStatus": latest_status or "completed",
+                "recordCount": _source_collection_count(latest.get("recordCount")),
+                "importedCount": _source_collection_count(latest.get("importedCount")),
+                "remainingQueryCount": _source_collection_count(latest.get("searchOpenAssignmentCount")),
+            },
+        )
+    return synced
 
 
 def _source_collection_stage_round_status_after_search(
@@ -12724,17 +12801,117 @@ def _normalize_metadata_value(value: Any) -> Any:
     return _trim_text(value, max_length=1000)
 
 
-def _record_workflow_event(event_code: str, team_id: str, *, fields: dict[str, Any]) -> None:
+def _record_workflow_event(
+    event_code: str,
+    team_id: str,
+    *,
+    fields: dict[str, Any],
+    level: str = "info",
+    outcome: str = "observed",
+    child_log_path: str = "",
+    child_log_payload: dict[str, Any] | None = None,
+    lifecycle: bool = False,
+) -> None:
     try:
         record_runtime_scene_event(
             "team_workflow_orchestration",
             "workflow",
             event_code,
             message=event_code,
+            level=level,
+            outcome=outcome,
             fields={"teamId": team_id, **fields},
+            child_log_path=child_log_path,
+            child_log_payload=child_log_payload,
+            lifecycle=lifecycle,
         )
     except Exception:
         return
+
+
+def _record_source_collection_stage_task_tool_policy_event(
+    team_id: str,
+    run_id: str,
+    *,
+    stage_id: str,
+    agent_id: str,
+    agent_role: str,
+    session_id: str,
+    task_id: str,
+) -> None:
+    required_tools = list(SOURCE_COLLECTION_STAGE_REQUIRED_TOOLS)
+    if agent_role in SOURCE_COLLECTION_SEARCH_EXECUTION_AGENT_ROLES:
+        required_tools.extend(SOURCE_COLLECTION_SEARCH_REQUIRED_TOOLS)
+    try:
+        policy = agent_directory_service.resolve_tool_policy_for_agent(agent_id, session_id=session_id)
+    except Exception as exc:
+        _record_workflow_event(
+            "source_collection.stage_session_task_tool_policy_unavailable",
+            team_id,
+            level="warning",
+            outcome="failed",
+            lifecycle=True,
+            fields={
+                "runId": run_id,
+                "stageId": stage_id,
+                "agentId": agent_id,
+                "agentRole": agent_role,
+                "sessionId": session_id,
+                "taskId": task_id,
+                "errorType": type(exc).__name__,
+            },
+        )
+        return
+    allowed_tools = [str(item or "").strip() for item in list(policy.get("allowedTools") or []) if str(item or "").strip()]
+    visible_tools = [tool for tool in required_tools if tool in set(allowed_tools)]
+    missing_tools = [tool for tool in required_tools if tool not in set(allowed_tools)]
+    event_code = (
+        "source_collection.stage_session_task_tool_contract_missing"
+        if missing_tools
+        else "source_collection.stage_session_task_tool_contract_ready"
+    )
+    _record_workflow_event(
+        event_code,
+        team_id,
+        level="warning" if missing_tools else "info",
+        outcome="blocked" if missing_tools else "completed",
+        lifecycle=bool(missing_tools),
+        fields={
+            "runId": run_id,
+            "stageId": stage_id,
+            "agentId": agent_id,
+            "agentRole": agent_role,
+            "sessionId": session_id,
+            "taskId": task_id,
+            "requiredTools": required_tools,
+            "visibleRequiredTools": visible_tools,
+            "missingTools": missing_tools,
+            "allowedToolCount": len(allowed_tools),
+            "toolPolicyId": str(policy.get("policyId") or "").strip(),
+        },
+    )
+
+
+def _source_collection_query_event_summaries(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    summaries: list[dict[str, Any]] = []
+    for event in events[:80]:
+        if not isinstance(event, dict):
+            continue
+        assignment = event.get("assignment") if isinstance(event.get("assignment"), dict) else {}
+        query = event.get("query") if isinstance(event.get("query"), dict) else {}
+        summaries.append(
+            {
+                "eventType": _trim_text(event.get("eventType") or event.get("type"), max_length=120),
+                "status": _trim_text(event.get("status"), max_length=80),
+                "assignmentId": _trim_text(event.get("assignmentId") or assignment.get("assignmentId"), max_length=128),
+                "agentRole": _trim_text(event.get("agentRole") or assignment.get("agentRole"), max_length=80),
+                "queryId": _trim_text(event.get("queryId") or query.get("queryId"), max_length=160),
+                "provider": _trim_text(query.get("provider") or event.get("provider"), max_length=80),
+                "refCount": len(list(event.get("refs") or [])) if isinstance(event.get("refs"), list) else 0,
+                "storageRefCount": len(list(event.get("storageRefs") or [])) if isinstance(event.get("storageRefs"), list) else 0,
+            }
+        )
+    return summaries
 
 
 def _read_json(path: Path) -> dict[str, Any]:

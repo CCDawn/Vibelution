@@ -39,7 +39,33 @@ def source_collection_context_tool(
         )
         if isinstance(payload, dict) and resolution:
             payload.setdefault("toolResolution", resolution)
+        _record_stage_tool_event(
+            "tool.source_collection_context.completed",
+            outcome="completed",
+            fields={
+                "teamId": resolved_team_id,
+                "runId": _text(payload.get("runId")) if isinstance(payload, dict) else _text(run_id),
+                "stageId": _text(payload.get("stageId")) if isinstance(payload, dict) else _text(stage_id),
+                "taskId": _text(payload.get("taskId")) if isinstance(payload, dict) else _text(task_id),
+                "recordCount": _safe_count((payload.get("counts") or {}).get("recordCount")) if isinstance(payload, dict) else 0,
+                "returnedRecordCount": _safe_count((payload.get("counts") or {}).get("returnedRecordCount")) if isinstance(payload, dict) else 0,
+                "candidateCount": _safe_count((payload.get("counts") or {}).get("candidateCount")) if isinstance(payload, dict) else 0,
+                "teamIdSource": _text(resolution.get("teamIdSource")) if resolution else "",
+            },
+        )
     except Exception as exc:
+        _record_stage_tool_event(
+            "tool.source_collection_context.failed",
+            level="warning",
+            outcome="failed",
+            fields={
+                "teamId": _text(team_id),
+                "runId": _text(run_id),
+                "stageId": _text(stage_id),
+                "taskId": _text(task_id),
+                "errorType": type(exc).__name__,
+            },
+        )
         return json.dumps(
             {
                 "status": "error",
@@ -94,7 +120,34 @@ def source_collection_stage_writeback_tool(
             metadata.setdefault("toolResolution", resolution)
             payload["metadata"] = metadata
         response = workflow_service.writeback_source_collection_stage_session_task(resolved_team_id, task_id, payload)
+        _record_stage_tool_event(
+            "tool.source_collection_stage_writeback.completed",
+            outcome="completed",
+            fields={
+                "teamId": resolved_team_id,
+                "runId": _text(response.get("runId")) if isinstance(response, dict) else "",
+                "stageId": _text(response.get("stageId")) if isinstance(response, dict) else "",
+                "taskId": _text(task_id),
+                "status": _text(status),
+                "recordedByAgent": _text(recorded_by_agent),
+                "evidenceRefCount": len(payload["evidenceRefs"]),
+                "nextActionCount": len(payload["nextActions"]),
+                "teamIdSource": _text(resolution.get("teamIdSource")) if resolution else "",
+            },
+        )
     except Exception as exc:
+        _record_stage_tool_event(
+            "tool.source_collection_stage_writeback.failed",
+            level="warning",
+            outcome="failed",
+            fields={
+                "teamId": _text(team_id),
+                "taskId": _text(task_id),
+                "status": _text(status),
+                "recordedByAgent": _text(recorded_by_agent),
+                "errorType": type(exc).__name__,
+            },
+        )
         return json.dumps(
             {
                 "status": "error",
@@ -209,6 +262,37 @@ def _source_collection_context_recovery_hint(
                 return f"Retry with team_id={str(match['teamId'])!r}; this was inferred from the stage task."
         return "Provide team_id from the stage task message. If run_id is available, use the run's scope.teamId; for Challenge Cup source collection this is usually 'research-team'."
     return "Use source_collection_stage_writeback_tool with status=blocked if this context is required to finish the stage task."
+
+
+def _record_stage_tool_event(
+    event_code: str,
+    *,
+    level: str = "info",
+    outcome: str = "observed",
+    fields: dict[str, Any],
+) -> None:
+    try:
+        from core.web.services.runtime_scene_service import record_runtime_scene_event
+
+        record_runtime_scene_event(
+            "tool",
+            "source_collection_stage",
+            event_code,
+            message=event_code,
+            level=level,
+            outcome=outcome,
+            fields=fields,
+            lifecycle=level in {"warning", "error"},
+        )
+    except Exception:
+        return
+
+
+def _safe_count(value: Any) -> int:
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
 
 
 def _json_object(raw: str) -> dict[str, Any]:
