@@ -4831,7 +4831,21 @@ def test_submit_session_agent_inbox_turn_preserves_inbox_prompt_without_history_
                 "role": "user",
                 "content": "只需要创建记忆库管理员",
                 "timestamp": "2026-05-31T17:03:58",
-            }
+            },
+            {
+                "role": "tool",
+                "tool_call_id": "call_old_fetch_timeout",
+                "content": "[错误] 请求超时 (30s): https://example.test/old-timeout",
+                "timestamp": "2026-05-31T17:04:10",
+                "metadata": {"toolName": "web_fetch_tool", "toolStatus": "failed"},
+            },
+            {
+                "role": "tool",
+                "tool_call_id": "call_old_fetch_large",
+                "content": "[网页内容] https://example.test/old-paper\n\n" + ("old fetched page body\n" * 700),
+                "timestamp": "2026-05-31T17:04:20",
+                "metadata": {"toolName": "web_fetch_tool", "toolStatus": "done"},
+            },
         ],
         prefix="agent-inbox-base",
     )
@@ -4889,6 +4903,11 @@ def test_submit_session_agent_inbox_turn_preserves_inbox_prompt_without_history_
     assert prompt.startswith("[Agent 私信回复]")
     assert "记忆库管理员只需要配置 memory_tools" in prompt
     assert prompt != "只需要创建记忆库管理员"
+    seeded_text = "\n".join(str(item.get("content") or "") for item in captured["seeded"])
+    assert "只需要创建记忆库管理员" in seeded_text
+    assert "请求超时" in seeded_text
+    assert "详情位置: 会话历史和工具日志仍保留原始结果" in seeded_text
+    assert "old fetched page body\n" * 40 not in seeded_text
     assert not any(
         phase == "user_message_filtered" and fields.get("fallbackSource") == "history"
         for phase, fields in lifecycle_events
