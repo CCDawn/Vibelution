@@ -81,6 +81,28 @@ def test_prompt_template_registry_repairs_research_defaults(tmp_path, monkeypatc
     assert (tmp_path / "workspace" / "prompts" / "research" / "challenge_cup_data_discovery.md").exists()
 
 
+def test_prompt_template_repair_upgrades_builtin_challenge_stage_prompt_content(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    prompt_template_service.repair_prompt_templates()
+
+    prompt_template_service.update_prompt_template(
+        "prompt-challenge-cup-data-discovery",
+        content="# 旧资料发现提示词\n\n没有阶段任务协议。",
+        metadata={
+            "builtin": True,
+            "roleKey": "challenge_cup_data_discovery",
+            "builtinContentVersion": 1,
+        },
+    )
+
+    prompt_template_service.repair_prompt_templates()
+    detail = prompt_template_service.get_prompt_template("prompt-challenge-cup-data-discovery")
+
+    assert detail["metadata"]["builtinContentVersion"] == prompt_template_service.CHALLENGE_CUP_STAGE_TASK_PROMPT_VERSION
+    assert "source_collection_stage_session_task" in detail["content"]
+    assert "source_collection_stage_writeback_tool" in detail["content"]
+
+
 def test_prompt_template_update_writes_source_and_refreshes_hash(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     prompt_template_service.repair_prompt_templates()
