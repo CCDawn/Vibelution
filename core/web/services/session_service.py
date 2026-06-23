@@ -11244,11 +11244,15 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                 ]
                 if not conversation_context_events:
                     conversation_context_events = None
+                normalized_user_message_source = str(context.get("user_message_source") or "").strip()
+                history_seed_profile = "agent_inbox" if normalized_user_message_source == "agent_inbox" else "full"
                 context_assembly = assemble_conversation_context(
                     seedable_history_messages,
                     session_id=session_id,
                     current_turn_id=turn_id,
                     ledger_events=conversation_context_events,
+                    history_seed_profile=history_seed_profile,
+                    tool_result_replacement_char_limit=900 if history_seed_profile == "agent_inbox" else 12_000,
                 )
                 history_messages = context_assembly.history_messages
                 full_history_message_count = len(seedable_history_messages)
