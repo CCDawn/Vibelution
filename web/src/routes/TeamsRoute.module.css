@@ -38,6 +38,7 @@
 .toolbarActions .toolbarLink,
 .actionRow button {
   display: inline-flex;
+  flex: 0 0 auto;
   align-items: center;
   justify-content: center;
   gap: 6px;
@@ -49,6 +50,7 @@
   font-size: 0.78rem;
   font-weight: 750;
   text-decoration: none;
+  white-space: nowrap;
 }
 
 .iconButton:disabled,
@@ -66,30 +68,104 @@
   color: color-mix(in srgb, var(--accent-danger) 72%, var(--fg-primary));
 }
 
-.summaryBar {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0;
-  margin: 8px 12px 0;
+.teamContextBar {
+  display: grid;
+  grid-template-columns: minmax(172px, max-content) minmax(220px, 320px) minmax(280px, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 10px 0;
+  padding: 7px 8px;
   border: 1px solid var(--border-soft);
   border-radius: 8px;
-  background: var(--surface-panel);
-  overflow: hidden;
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--accent-cool) 8%, transparent), transparent 54%),
+    color-mix(in srgb, var(--surface-panel-strong) 82%, transparent);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, #fff 6%, transparent);
 }
 
-.summaryBar span {
+.teamTitleBlock {
+  display: grid;
+  grid-column: 1;
+  min-width: 0;
+  gap: 1px;
+}
+
+.teamTitleBlock span {
+  overflow: hidden;
+  color: var(--fg-muted);
+  font-size: 0.66rem;
+  font-weight: 780;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.teamTitleBlock h1 {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  color: var(--fg-primary);
+  font-size: 0.98rem;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.teamSelectField {
+  display: grid;
+  grid-column: 2;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+
+.teamSelectField span {
+  color: var(--fg-muted);
+  font-size: 0.68rem;
+  font-weight: 780;
+  white-space: nowrap;
+}
+
+.teamSelectField select:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
+.teamContextChips {
   display: flex;
+  grid-column: 3;
+  min-width: 0;
+  flex-wrap: wrap;
   align-items: center;
   gap: 6px;
-  min-height: 28px;
-  padding: 0 12px;
-  border-right: 1px solid var(--border-soft);
-  color: var(--fg-secondary);
-  font-size: 0.76rem;
 }
 
-.summaryBar strong {
+.teamContextChips span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 26px;
+  padding: 0 9px;
+  border: 1px solid color-mix(in srgb, var(--border-soft) 82%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface-panel) 76%, transparent);
+  color: var(--fg-secondary);
+  font-size: 0.72rem;
+  white-space: nowrap;
+}
+
+.teamContextChips strong {
   color: var(--fg-primary);
+  font-weight: 860;
+}
+
+.teamContextActions {
+  display: flex;
+  grid-column: 4;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
 }
 
 .workspace {
@@ -129,37 +205,7 @@
   flex-direction: column;
 }
 
-.teamPickerPanel {
-  display: grid;
-  grid-template-columns: minmax(220px, 320px) minmax(0, 1fr);
-  align-items: center;
-  gap: 8px;
-  margin: 8px 10px 0;
-  padding: 8px 10px;
-  border: 1px solid var(--border-soft);
-  border-radius: 8px;
-  background:
-    linear-gradient(90deg, color-mix(in srgb, var(--accent-cool) 9%, transparent), transparent 64%),
-    color-mix(in srgb, var(--surface-panel-strong) 70%, transparent);
-}
-
-.teamSwitcherBar {
-  flex: 0 0 auto;
-}
-
-.teamPickerLabel {
-  display: grid;
-  gap: 5px;
-  min-width: 0;
-}
-
-.teamPickerLabel span {
-  color: var(--fg-muted);
-  font-size: 0.68rem;
-  font-weight: 780;
-}
-
-.teamPickerLabel select,
+.teamSelectField select,
 .inspectorBody input,
 .inspectorBody select,
 .inspectorBody textarea,
@@ -175,50 +221,10 @@
   font-size: 0.78rem;
 }
 
-.teamPickerLabel select {
-  min-height: 34px;
+.teamSelectField select {
+  min-height: 30px;
+  min-width: 0;
   font-weight: 780;
-}
-
-.teamPickerLabel select:disabled {
-  cursor: not-allowed;
-  opacity: 0.58;
-}
-
-.teamPickerSummary {
-  display: grid;
-  min-width: 0;
-  gap: 3px;
-  padding: 8px;
-  border: 1px solid color-mix(in srgb, var(--border-soft) 78%, transparent);
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--surface-panel) 68%, transparent);
-}
-
-.teamPickerSummary strong,
-.teamPickerSummary span,
-.teamPickerSummary small {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.teamPickerSummary strong {
-  color: var(--fg-primary);
-  font-size: 0.8rem;
-}
-
-.teamPickerSummary span {
-  color: var(--fg-secondary);
-  font-size: 0.72rem;
-  line-height: 1.35;
-}
-
-.teamPickerSummary small {
-  color: var(--fg-muted);
-  font-size: 0.68rem;
-  font-weight: 720;
 }
 
 .inspectorBody textarea {
@@ -3962,6 +3968,7 @@
 
 .canvasToolbar {
   display: flex;
+  min-width: 0;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
@@ -4012,8 +4019,20 @@
   gap: 8px;
 }
 
+.toolbarActions {
+  min-width: 0;
+  flex: 0 1 auto;
+  flex-wrap: nowrap;
+  justify-content: flex-end;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-bottom: 1px;
+  scrollbar-width: thin;
+}
+
 .canvasLayoutModeSwitch {
   display: inline-flex;
+  flex: 0 0 auto;
   overflow: hidden;
   align-items: center;
   border: 1px solid var(--border-soft);
@@ -6207,8 +6226,18 @@
     min-height: 220px;
   }
 
-  .teamPickerPanel {
-    grid-template-columns: 1fr;
+  .teamContextBar {
+    grid-template-columns: minmax(0, 1fr) minmax(220px, 320px) auto;
+  }
+
+  .teamContextActions {
+    grid-column: 3;
+    grid-row: 1;
+  }
+
+  .teamContextChips {
+    grid-column: 1 / -1;
+    grid-row: 2;
   }
 
   .canvasPanel {

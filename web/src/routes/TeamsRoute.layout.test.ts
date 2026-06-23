@@ -218,10 +218,17 @@ describe("TeamsRoute layout contract", () => {
   });
 
   it("renders a dense list canvas inspector workflow", () => {
-    expect(routeSource).toContain("teamPickerPanel");
-    expect(routeSource).toContain("teamSwitcherBar");
-    expect(routeSource).toContain("teamPickerLabel");
-    expect(routeSource).toContain("teamPickerSummary");
+    expect(routeSource).toContain("teamContextBar");
+    expect(routeSource).toContain("teamSelectField");
+    expect(routeSource).toContain("teamContextChips");
+    expect(routeSource).toContain("selectedTeamContextTitle");
+    expect(routeSource).toContain("成员源");
+    expect(routeSource).toContain("Member source");
+    expect(routeSource).not.toContain("teamPickerPanel");
+    expect(routeSource).not.toContain("teamSwitcherBar");
+    expect(routeSource).not.toContain("teamPickerLabel");
+    expect(routeSource).not.toContain("teamPickerSummary");
+    expect(routeSource).not.toContain("summaryBar");
     expect(routeSource).toContain("aria-label={lang === \"zh\" ? \"选择团队\" : \"Select team\"}");
     expect(routeSource).not.toContain("className={styles.teamPanel}");
     expect(routeSource).toContain("canvasPanel");
@@ -741,10 +748,14 @@ describe("TeamsRoute layout contract", () => {
     expect(routeStyles.kernelTraceLink).toBeTypeOf("string");
     expect(routeSource).toContain("interrupt_targets");
     expect(routeSource).toContain("edges: canvas.edges.filter((edge) => edge.source !== deletedNodeId && edge.target !== deletedNodeId)");
-    expect(routeStyles.teamPickerPanel).toBeTypeOf("string");
-    expect(routeStyles.teamSwitcherBar).toBeTypeOf("string");
-    expect(routeStyles.teamPickerLabel).toBeTypeOf("string");
-    expect(routeStyles.teamPickerSummary).toBeTypeOf("string");
+    expect(routeStyles.teamContextBar).toBeTypeOf("string");
+    expect(routeStyles.teamTitleBlock).toBeTypeOf("string");
+    expect(routeStyles.teamSelectField).toBeTypeOf("string");
+    expect(routeStyles.teamContextChips).toBeTypeOf("string");
+    expect(routeStyles.teamContextActions).toBeTypeOf("string");
+    expect(routeStylesSource).not.toContain(".summaryBar");
+    expect(routeStylesSource).not.toContain(".teamPickerPanel");
+    expect(routeStylesSource).not.toContain(".teamPickerSummary");
     expect(routeStyles.nodeBindingSection).toBeTypeOf("string");
     expect(routeStyles.nodeBindingPlaceholder).toBeTypeOf("string");
     expect(routeStyles.workflowPanel).toBeTypeOf("string");
