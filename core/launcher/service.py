@@ -8,6 +8,7 @@ import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal, TypedDict
+from urllib.parse import urlparse
 
 from config.public_config import CONFIG_PATH, load_public_config, public_config_hash, save_public_config
 from core.runtime_manager import command_queue, ensure_daemon_running, submit_command
@@ -94,6 +95,17 @@ class LauncherCommandResponse(TypedDict, total=False):
     operation: LauncherOperation
     message: str
     activeWorkRuns: list[dict[str, str]]
+
+
+class LauncherRequestAudit(TypedDict, total=False):
+    operation: str
+    trigger: str
+    endpoint: str
+    method: str
+    clientHost: str
+    refererPath: str
+    originHost: str
+    userAgent: str
 
 
 class LauncherSupervisorCommandResponse(TypedDict, total=False):
@@ -737,21 +749,56 @@ def request_launcher_start() -> LauncherCommandResponse:
     }
 
 
-def request_launcher_stop() -> LauncherCommandResponse:
+def launcher_request_audit(
+    *,
+    operation: str,
+    trigger: str = "",
+    endpoint: str = "",
+    method: str = "",
+    client_host: str = "",
+    referer: str = "",
+    origin: str = "",
+    user_agent: str = "",
+) -> LauncherRequestAudit:
+    audit: LauncherRequestAudit = {
+        "operation": _audit_value(operation, 48),
+        "trigger": _audit_value(trigger, 80),
+        "endpoint": _audit_path(endpoint, 120),
+        "method": _audit_value(method, 16).upper(),
+        "clientHost": _audit_value(client_host, 80),
+        "refererPath": _audit_url_path(referer, 160),
+        "originHost": _audit_url_host(origin, 120),
+        "userAgent": _audit_value(user_agent, 160),
+    }
+    return {key: value for key, value in audit.items() if value}
+
+
+def request_launcher_stop(request_audit: LauncherRequestAudit | None = None) -> LauncherCommandResponse:
     """Request the managed project bundle to stop, blocked by active work."""
 
+    audit = dict(request_audit or {})
+    requested_fields: dict[str, Any] = {"source": "launcher_api"}
+    if audit:
+        requested_fields["requestAudit"] = audit
     _record_launcher_event(
         "launcher.bundle.stop.requested",
         phase="stop",
         message="Launcher project bundle stop requested.",
-        fields={"source": "launcher_api"},
+        fields=requested_fields,
     )
     _raise_if_active_work("stop")
     try:
         ensure_daemon_running()
+        command_args: dict[str, Any] = {
+            "reason": "launcher_stop_button",
+            "source": "launcher_api",
+            "stopManager": False,
+        }
+        if audit:
+            command_args["requestAudit"] = audit
         command = submit_command(
             "close_workbench",
-            args={"reason": "launcher_stop_button", "source": "launcher_api", "stopManager": False},
+            args=command_args,
             requested_by="launcher_api",
         )
     except Exception as exc:
@@ -783,19 +830,23 @@ def request_launcher_stop() -> LauncherCommandResponse:
     }
 
 
-def request_launcher_force_stop() -> LauncherCommandResponse:
+def request_launcher_force_stop(request_audit: LauncherRequestAudit | None = None) -> LauncherCommandResponse:
     """Request a force close for the managed workbench without stopping the Launcher control plane."""
 
     active_work_runs = launcher_active_work_runs()
+    audit = dict(request_audit or {})
+    requested_fields: dict[str, Any] = {
+        "source": "launcher_api",
+        "activeWorkCount": len(active_work_runs),
+        "activeWorkRuns": active_work_runs[:8],
+    }
+    if audit:
+        requested_fields["requestAudit"] = audit
     _record_launcher_event(
         "launcher.bundle.force_stop.requested",
         phase="stop",
         message="Launcher project bundle force-stop requested.",
-        fields={
-            "source": "launcher_api",
-            "activeWorkCount": len(active_work_runs),
-            "activeWorkRuns": active_work_runs[:8],
-        },
+        fields=requested_fields,
     )
     if _launcher_workbench_already_closed():
         _record_launcher_event(
@@ -820,9 +871,16 @@ def request_launcher_force_stop() -> LauncherCommandResponse:
         }
     try:
         ensure_daemon_running()
+        command_args: dict[str, Any] = {
+            "reason": "launcher_force_stop_button",
+            "source": "launcher_api",
+            "stopManager": False,
+        }
+        if audit:
+            command_args["requestAudit"] = audit
         command = submit_command(
             "force_close_workbench",
-            args={"reason": "launcher_force_stop_button", "source": "launcher_api", "stopManager": False},
+            args=command_args,
             requested_by="launcher_api",
         )
     except Exception as exc:
@@ -1974,3 +2032,43 @@ def _truncate(value: str, limit: int) -> str:
     if len(text) <= limit:
         return text
     return text[: max(0, limit - 1)] + "..."
+
+
+def _audit_value(value: object, limit: int) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    return _truncate(text.replace("\r", " ").replace("\n", " "), limit)
+
+
+def _audit_path(value: object, limit: int) -> str:
+    text = _audit_value(value, limit)
+    if not text:
+        return ""
+    if "?" in text:
+        text = text.split("?", 1)[0]
+    if "#" in text:
+        text = text.split("#", 1)[0]
+    return _truncate(text, limit)
+
+
+def _audit_url_path(value: object, limit: int) -> str:
+    text = _audit_value(value, limit)
+    if not text:
+        return ""
+    try:
+        parsed = urlparse(text)
+    except Exception:
+        return ""
+    return _truncate(parsed.path or "", limit)
+
+
+def _audit_url_host(value: object, limit: int) -> str:
+    text = _audit_value(value, limit)
+    if not text:
+        return ""
+    try:
+        parsed = urlparse(text)
+    except Exception:
+        return ""
+    return _truncate(parsed.netloc or "", limit)

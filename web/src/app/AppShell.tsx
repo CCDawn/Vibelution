@@ -911,7 +911,7 @@ export function AppShell() {
       shutdownLocalCompletionLoggedRef.current = false;
       emitBrowserTelemetry(buildShutdownRequestedTelemetry(), { preferBeacon: true });
 
-      const payload = await stopLauncherBundle();
+      const payload = await stopLauncherBundle("app_shell_shutdown_button");
       if (requestSeq !== lifecycleRequestSeqRef.current) {
         if (payload.commandId) {
           cancelSupersededLifecycleCommand(payload.commandId, "shutdown");
@@ -1024,7 +1024,7 @@ export function AppShell() {
         { preferBeacon: true },
       );
 
-      const payload = await forceStopLauncherBundle();
+      const payload = await forceStopLauncherBundle("app_shell_force_shutdown_button");
       if (requestSeq !== lifecycleRequestSeqRef.current) {
         return;
       }

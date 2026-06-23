@@ -102,6 +102,14 @@ def _capture_workflow_events(monkeypatch):
     return events
 
 
+def _workflow_scene_events_by_code(events, event_code):
+    return [
+        kwargs
+        for args, kwargs in events
+        if len(args) >= 3 and args[2] == event_code
+    ]
+
+
 def _stub_source_collection_search_background(monkeypatch):
     calls = []
 
@@ -357,6 +365,7 @@ def test_challenge_cup_workflow_registers_candidate_and_decides_transfer(tmp_pat
 
 def test_import_data_record_as_source_candidate_preserves_trace_and_is_idempotent(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
+    scene_events = _capture_workflow_events(monkeypatch)
     team = team_service.create_team(name="挑战杯科研团队")
     run = data_processing_service.create_processing_run(title="Source collection")
     record = data_processing_service.add_record(
@@ -398,6 +407,11 @@ def test_import_data_record_as_source_candidate_preserves_trace_and_is_idempoten
     assert candidate["metadata"]["importedFromDataRecord"]["recordId"] == record["recordId"]
     assert candidate["metadata"]["dataProcessingQualitySignals"]["confidence"] == 0.82
     assert {item["type"] for item in candidate["evidenceRefs"]} >= {"data_record", "data_processing_run"}
+    duplicate_events = _workflow_scene_events_by_code(scene_events, "candidate.import_duplicate_skipped")
+    assert duplicate_events
+    assert duplicate_events[-1]["fields"]["recordId"] == record["recordId"]
+    assert duplicate_events[-1]["fields"]["duplicateReason"] == "imported_from_data_record"
+    assert duplicate_events[-1]["fields"]["duplicateOfCandidateId"] == candidate["candidateId"]
 
 
 def test_import_data_record_as_source_candidate_rejects_missing_record(tmp_path, monkeypatch):
@@ -415,6 +429,7 @@ def test_import_data_record_as_source_candidate_rejects_missing_record(tmp_path,
 
 def test_extract_source_collection_candidates_imports_records_and_closes_extraction_assignment(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
+    scene_events = _capture_workflow_events(monkeypatch)
     team = team_service.create_team(name="挑战杯科研团队")
     run = data_processing_service.create_processing_run(
         title="Neural source collection",
@@ -482,6 +497,15 @@ def test_extract_source_collection_candidates_imports_records_and_closes_extract
     assert response["boundaries"]["writesFormalKnowledge"] is False
     assert response["boundaries"]["writesRag"] is False
     assert response["boundaries"]["writesOfficialGraph"] is False
+    extraction_events = _workflow_scene_events_by_code(scene_events, "source_collection.candidates_extracted")
+    assert extraction_events
+    child_payload = extraction_events[-1]["child_log_payload"]
+    assert extraction_events[-1]["child_log_path"].endswith("-candidate-extraction.jsonl")
+    assert child_payload["kind"] == "source_collection_candidate_extraction"
+    assert child_payload["importedCount"] == 0
+    assert child_payload["skippedCount"] == 2
+    assert {item["status"] for item in child_payload["recordOutcomes"]} == {"skipped"}
+    assert {item["reason"] for item in child_payload["recordOutcomes"]} == {"imported_from_data_record"}
 
 
 def test_extract_source_collection_candidates_keeps_assignment_open_when_batch_is_partial(tmp_path, monkeypatch):
@@ -3008,6 +3032,7 @@ def test_assess_source_quality_batch_processes_pending_sources_by_agent(tmp_path
 
 def test_assess_source_quality_batch_reports_no_pending_candidates(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
+    scene_events = _capture_workflow_events(monkeypatch)
     team = team_service.create_team(name="ai科学研究团队")
     candidate = team_workflow_orchestration_service.register_candidate_source(
         team["teamId"],
@@ -3030,6 +3055,11 @@ def test_assess_source_quality_batch_reports_no_pending_candidates(tmp_path, mon
     assert second["status"] == "no_pending_candidates"
     assert second["summary"]["assessedCandidateCount"] == 0
     assert second["summary"]["skippedCandidateCount"] == 1
+    batch_events = _workflow_scene_events_by_code(scene_events, "source_quality.batch_assessed")
+    assert batch_events
+    assert batch_events[-1]["child_log_payload"]["kind"] == "source_quality_batch_assessment"
+    assert batch_events[-1]["child_log_payload"]["summary"]["skippedCandidateCount"] == 1
+    assert batch_events[-1]["child_log_payload"]["skippedCandidates"][0]["reason"] == "already_assessed"
 
 
 def test_assess_source_quality_batch_force_rescreens_assessed_sources(tmp_path, monkeypatch):
@@ -3680,6 +3710,7 @@ def test_candidate_graph_reports_missing_candidate_links(tmp_path, monkeypatch):
 
 def test_candidate_graph_agent_curation_uses_approved_sources_only(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
+    scene_events = _capture_workflow_events(monkeypatch)
     team = team_service.create_team(name="ai科学研究团队")
     approved_source = team_workflow_orchestration_service.register_candidate_source(
         team["teamId"],
@@ -3737,6 +3768,10 @@ def test_candidate_graph_agent_curation_uses_approved_sources_only(tmp_path, mon
 
     assert reused["reusedCandidateGraph"] is True
     assert reused["candidateGraph"]["candidateId"] == response["candidateGraph"]["candidateId"]
+    reused_events = _workflow_scene_events_by_code(scene_events, "candidate_graph.reused")
+    assert reused_events
+    assert reused_events[-1]["fields"]["candidateId"] == response["candidateGraph"]["candidateId"]
+    assert reused_events[-1]["fields"]["ingestionFingerprint"] == response["ingestionFingerprint"]
 
 
 def test_knowledge_ingestion_precheck_creates_candidate_only_steward_pack(tmp_path, monkeypatch):
@@ -4151,6 +4186,7 @@ def test_steward_pack_approval_gate_applies_pending_ingestion_to_formal_knowledg
 
 def test_knowledge_collection_ingestion_notifies_steward_agent_for_final_ingestion(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
+    scene_events = _capture_workflow_events(monkeypatch)
     steward = agent_directory_service.create_agent_instance(display_name="Knowledge Steward Agent")
     deliveries = []
 
@@ -4262,6 +4298,18 @@ def test_knowledge_collection_ingestion_notifies_steward_agent_for_final_ingesti
     assert second["summary"]["stewardPackCandidateId"] == response["summary"]["stewardPackCandidateId"]
     assert response["statusSnapshot"]["summary"]["formalKnowledgeItemCount"] == 0
     assert knowledge_items["summary"]["itemCount"] == 0
+    steward_events = _workflow_scene_events_by_code(scene_events, "knowledge_collection.steward_notification_completed")
+    assert steward_events
+    assert steward_events[-1]["fields"]["status"] == "agent_wake_started"
+    assert steward_events[-1]["child_log_payload"]["turnId"] == "turn-steward-ingest"
+    ingestion_events = _workflow_scene_events_by_code(scene_events, "knowledge_collection.ingested")
+    assert ingestion_events[-2]["child_log_payload"]["kind"] == "knowledge_collection_ingestion"
+    assert ingestion_events[-2]["child_log_payload"]["status"] == "agent_notified"
+    assert [step["stageId"] for step in ingestion_events[-2]["child_log_payload"]["steps"]] == step_ids
+    assert ingestion_events[-2]["child_log_payload"]["knowledgeStewardActivation"]["status"] == "agent_wake_started"
+    precheck_reused_events = _workflow_scene_events_by_code(scene_events, "knowledge_ingestion.precheck_reused")
+    assert precheck_reused_events
+    assert precheck_reused_events[-1]["fields"]["candidateId"] == response["summary"]["stewardPackCandidateId"]
 
 
 def test_knowledge_ingestion_status_tracks_pending_and_official_sync(tmp_path, monkeypatch):

@@ -12,6 +12,7 @@ import {
   restartLauncherBundle,
   saveLauncherWorkbenchWindowMode,
   startLauncherBundle,
+  stopLauncherBundle,
   updateLauncherStartupSettings,
 } from "./launcher";
 
@@ -195,6 +196,37 @@ describe("launcher api helpers", () => {
     expect(fetchMock.mock.calls[1][0]).toBe("http://127.0.0.1:8765/api/launcher/force-stop");
     const requestInit = fetchMock.mock.calls[1][1] as RequestInit;
     expect(requestInit.method).toBe("POST");
+    expect((requestInit.headers as Headers).get("X-Vibelution-Launcher-Trigger")).toBe("launcher_route_force_stop_button");
+  });
+
+  it("marks stop requests with a launcher trigger header", async () => {
+    vi.stubGlobal("window", {
+      location: {
+        href: "http://127.0.0.1:8000/chat",
+        origin: "http://127.0.0.1:8000",
+      },
+    });
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          header: "X-Vibelution-Control-Token",
+          controlToken: "test-token",
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ accepted: true, operation: "stop", commandId: "cmd-stop" }),
+      });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const payload = await stopLauncherBundle("app_shell_shutdown_button");
+
+    expect(payload.operation).toBe("stop");
+    expect(fetchMock.mock.calls[1][0]).toBe("http://127.0.0.1:8765/api/launcher/stop");
+    const requestInit = fetchMock.mock.calls[1][1] as RequestInit;
+    expect(requestInit.method).toBe("POST");
+    expect((requestInit.headers as Headers).get("X-Vibelution-Launcher-Trigger")).toBe("app_shell_shutdown_button");
   });
 
   it("falls back to the workbench launcher adapter when direct launcher control is unreachable", async () => {

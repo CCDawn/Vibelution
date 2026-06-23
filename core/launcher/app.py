@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import APIRouter, FastAPI, HTTPException
+from fastapi import APIRouter, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
@@ -159,9 +159,9 @@ def project_start() -> dict:
 
 @router.post("/api/launcher/stop", status_code=202)
 @router.post("/api/project/stop", status_code=202)
-def project_stop() -> dict:
+def project_stop(request: Request) -> dict:
     try:
-        return launcher_service.request_launcher_stop()
+        return launcher_service.request_launcher_stop(_request_audit(request, operation="stop"))
     except launcher_service.LauncherActiveWorkBlocked as exc:
         raise HTTPException(
             status_code=409,
@@ -175,8 +175,8 @@ def project_stop() -> dict:
 
 @router.post("/api/launcher/force-stop", status_code=202)
 @router.post("/api/project/force-stop", status_code=202)
-def project_force_stop() -> dict:
-    return launcher_service.request_launcher_force_stop()
+def project_force_stop(request: Request) -> dict:
+    return launcher_service.request_launcher_force_stop(_request_audit(request, operation="force-stop"))
 
 
 @router.post("/api/launcher/restart", status_code=202)
@@ -193,6 +193,20 @@ def project_restart() -> dict:
                 "activeWorkRuns": exc.active_work_runs,
             },
         ) from exc
+
+
+def _request_audit(request: Request, *, operation: str) -> launcher_service.LauncherRequestAudit:
+    client = request.client.host if request.client else ""
+    return launcher_service.launcher_request_audit(
+        operation=operation,
+        trigger=request.headers.get("X-Vibelution-Launcher-Trigger", ""),
+        endpoint=request.url.path,
+        method=request.method,
+        client_host=client,
+        referer=request.headers.get("referer", ""),
+        origin=request.headers.get("origin", ""),
+        user_agent=request.headers.get("user-agent", ""),
+    )
 
 
 def create_launcher_app() -> FastAPI:

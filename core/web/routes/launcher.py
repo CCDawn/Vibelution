@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from core.launcher import service as launcher_service
@@ -123,9 +123,9 @@ def launcher_start() -> dict:
 
 
 @router.post("/launcher/stop", status_code=202)
-def launcher_stop() -> dict:
+def launcher_stop(request: Request) -> dict:
     try:
-        return launcher_service.request_launcher_stop()
+        return launcher_service.request_launcher_stop(_request_audit(request, operation="stop"))
     except launcher_service.LauncherActiveWorkBlocked as exc:
         raise HTTPException(
             status_code=409,
@@ -138,8 +138,8 @@ def launcher_stop() -> dict:
 
 
 @router.post("/launcher/force-stop", status_code=202)
-def launcher_force_stop() -> dict:
-    return launcher_service.request_launcher_force_stop()
+def launcher_force_stop(request: Request) -> dict:
+    return launcher_service.request_launcher_force_stop(_request_audit(request, operation="force-stop"))
 
 
 @router.post("/launcher/restart", status_code=202)
@@ -155,6 +155,20 @@ def launcher_restart() -> dict:
                 "activeWorkRuns": exc.active_work_runs,
             },
         ) from exc
+
+
+def _request_audit(request: Request, *, operation: str) -> launcher_service.LauncherRequestAudit:
+    client = request.client.host if request.client else ""
+    return launcher_service.launcher_request_audit(
+        operation=operation,
+        trigger=request.headers.get("X-Vibelution-Launcher-Trigger", ""),
+        endpoint=request.url.path,
+        method=request.method,
+        client_host=client,
+        referer=request.headers.get("referer", ""),
+        origin=request.headers.get("origin", ""),
+        user_agent=request.headers.get("user-agent", ""),
+    )
 
 
 @router.post("/launcher/supervisor/reattach", status_code=202)

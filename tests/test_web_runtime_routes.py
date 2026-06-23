@@ -1726,7 +1726,7 @@ def test_launcher_restart_blocks_active_work(monkeypatch):
 def test_launcher_stop_blocks_active_work(monkeypatch):
     active_work_runs = [{"kind": "chat_turn", "runId": "chat-turn-live", "status": "running"}]
 
-    def block_stop():
+    def block_stop(request_audit=None):
         raise standalone_launcher_service.LauncherActiveWorkBlocked(
             "有进行中的任务，无法停止 Vibelution。请等待任务完成或先停止任务。",
             active_work_runs,
@@ -1746,7 +1746,7 @@ def test_launcher_stop_delegates_runtime_shutdown_and_normalizes_response(monkey
     monkeypatch.setattr(
         standalone_launcher_service,
         "request_launcher_stop",
-        lambda: {
+        lambda request_audit=None: {
             "accepted": True,
             "mode": "runtime_manager",
             "launcherMode": "standalone_control_plane",
