@@ -360,6 +360,12 @@ def test_knowledge_steward_policy_includes_skill_library_search_tool():
 
     assert "skill_library_search_tool" in policy["allowedTools"]
     assert "skill_library_search_tool" in policy["preferredTools"]
+    assert "source_collection_context_tool" in policy["allowedTools"]
+    assert "source_collection_stage_writeback_tool" in policy["allowedTools"]
+    assert policy["preferredTools"][:2] == [
+        "source_collection_context_tool",
+        "source_collection_stage_writeback_tool",
+    ]
 
 
 def test_global_knowledge_steward_can_prepare_formal_kb_governance_without_applying(knowledge_env):
