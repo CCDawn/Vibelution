@@ -2739,7 +2739,6 @@ export function ChatCodingRoute() {
     if (
       requestedSessionId
       && !requestedRoomId
-      && sessionsQuery.data?.some((session) => session.id === requestedSessionId)
       && activeSessionId !== requestedSessionId
     ) {
       setActiveGroupRoomId("");
