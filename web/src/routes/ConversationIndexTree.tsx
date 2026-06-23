@@ -9,7 +9,7 @@ import type {
 } from "../api/types";
 import type { TranslationKey } from "../i18n/dictionary";
 import type { ModelLabelResolver } from "./agentDisplay";
-import type { ConversationIndexGroup, ConversationIndexGroupKey, ConversationIndexTeam } from "./conversationIndexModel";
+import type { ConversationIndexDynamicGroupKey, ConversationIndexGroup, ConversationIndexGroupKey, ConversationIndexTeam } from "./conversationIndexModel";
 import { isConfiguredConversationIndexTeam } from "./conversationIndexModel";
 import { ConversationIndexSection } from "./ConversationIndexSection";
 import { DirectSessionIndexList } from "./DirectSessionIndexList";
@@ -31,7 +31,7 @@ type ConversationIndexTreeProps = {
     displayName: string,
     summary: string,
   ) => SessionReferenceAttachment;
-  collapsedConversationGroups: Record<ConversationIndexGroupKey, boolean>;
+  collapsedConversationGroups: Record<string, boolean>;
   conversationGroupLabel: (groupKey: ConversationIndexGroupKey, lang: "zh" | "en") => string;
   deleteBusyLabel: string;
   editingSessionId: string | null;
@@ -59,7 +59,7 @@ type ConversationIndexTreeProps = {
   onOpenGroupRoom: (roomId: string) => void;
   onRenameTitleChange: (title: string) => void;
   onSubmitRename: (session: SessionSummary) => void;
-  onToggleConversationGroup: (groupKey: ConversationIndexGroupKey) => void;
+  onToggleConversationGroup: (groupKey: ConversationIndexDynamicGroupKey) => void;
 };
 
 function roomIdFromConversation(conversation: ConversationSummary) {
