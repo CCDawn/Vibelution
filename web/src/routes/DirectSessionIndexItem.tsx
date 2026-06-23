@@ -281,7 +281,13 @@ export function DirectSessionIndexItem({
                 onKeyDown={handleTitleKeyDown}
                 aria-label={renameLabel}
               />
-              {active ? <span className={styles.sessionCurrentBadge}>{t("currentSession")}</span> : null}
+              {active ? (
+                <span
+                  className={styles.sessionCurrentIndicator}
+                  title={t("currentSession")}
+                  aria-label={t("currentSession")}
+                />
+              ) : null}
               {unreadCount > 0 ? (
                 <span className={styles.sessionCurrentBadge} title={unreadTitle} aria-label={unreadTitle}>
                   {unreadCount}
@@ -336,7 +342,13 @@ export function DirectSessionIndexItem({
           <span className={styles.conversationCopy}>
             <span className={styles.conversationTitleRow}>
               <span className={styles.sessionItemTitle}>{sessionTitle}</span>
-              {active ? <span className={styles.sessionCurrentBadge}>{t("currentSession")}</span> : null}
+              {active ? (
+                <span
+                  className={styles.sessionCurrentIndicator}
+                  title={t("currentSession")}
+                  aria-label={t("currentSession")}
+                />
+              ) : null}
               {unreadCount > 0 ? (
                 <span className={styles.sessionCurrentBadge} title={unreadTitle} aria-label={unreadTitle}>
                   {unreadCount}
