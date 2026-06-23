@@ -272,15 +272,23 @@ export function DirectSessionIndexItem({
           {renderSessionAvatar(avatarClassName, sessionAvatarImageUrl, sessionAvatarFallback)}
           <span className={styles.conversationCopy}>
             <span className={styles.conversationTitleRow}>
-              <input
-                className={styles.sessionTitleInput}
-                value={editingTitle}
-                maxLength={120}
-                autoFocus
-                onChange={(event) => onRenameTitleChange(event.target.value)}
-                onKeyDown={handleTitleKeyDown}
-                aria-label={renameLabel}
-              />
+              <span className={styles.conversationTitleMain}>
+                <input
+                  className={styles.sessionTitleInput}
+                  value={editingTitle}
+                  maxLength={120}
+                  autoFocus
+                  onChange={(event) => onRenameTitleChange(event.target.value)}
+                  onKeyDown={handleTitleKeyDown}
+                  aria-label={renameLabel}
+                />
+                {sessionModelTitle ? (
+                  <span className={`${styles.agentModelTag} ${styles.agentModelTitleTag}`} title={sessionModelTitle} aria-label={sessionModelTitle}>
+                    <Cpu size={10} aria-hidden="true" />
+                    <span>{sessionModelLabel}</span>
+                  </span>
+                ) : null}
+              </span>
               {active ? (
                 <span
                   className={styles.sessionCurrentIndicator}
@@ -312,12 +320,6 @@ export function DirectSessionIndexItem({
                   <span className={`${styles.agentRoleTag} ${styles[agentRoleClass(sessionDisplay.tone)]}`} title={sessionDisplay.functionLabel}>
                     <Bot size={10} aria-hidden="true" />
                     {sessionDisplay.functionLabel}
-                  </span>
-                ) : null}
-                {sessionModelTitle ? (
-                  <span className={styles.agentModelTag} title={sessionModelTitle} aria-label={sessionModelTitle}>
-                    <Cpu size={10} aria-hidden="true" />
-                    <span>{sessionModelLabel}</span>
                   </span>
                 ) : null}
               </span>
@@ -341,7 +343,15 @@ export function DirectSessionIndexItem({
           {renderSessionAvatar(avatarClassName, sessionAvatarImageUrl, sessionAvatarFallback)}
           <span className={styles.conversationCopy}>
             <span className={styles.conversationTitleRow}>
-              <span className={styles.sessionItemTitle}>{sessionTitle}</span>
+              <span className={styles.conversationTitleMain}>
+                <span className={styles.sessionItemTitle}>{sessionTitle}</span>
+                {sessionModelTitle ? (
+                  <span className={`${styles.agentModelTag} ${styles.agentModelTitleTag}`} title={sessionModelTitle} aria-label={sessionModelTitle}>
+                    <Cpu size={10} aria-hidden="true" />
+                    <span>{sessionModelLabel}</span>
+                  </span>
+                ) : null}
+              </span>
               {active ? (
                 <span
                   className={styles.sessionCurrentIndicator}
@@ -373,12 +383,6 @@ export function DirectSessionIndexItem({
                   <span className={`${styles.agentRoleTag} ${styles[agentRoleClass(sessionDisplay.tone)]}`} title={sessionDisplay.functionLabel}>
                     <Bot size={10} aria-hidden="true" />
                     {sessionDisplay.functionLabel}
-                  </span>
-                ) : null}
-                {sessionModelTitle ? (
-                  <span className={styles.agentModelTag} title={sessionModelTitle} aria-label={sessionModelTitle}>
-                    <Cpu size={10} aria-hidden="true" />
-                    <span>{sessionModelLabel}</span>
                   </span>
                 ) : null}
               </span>
