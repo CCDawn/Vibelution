@@ -1255,6 +1255,83 @@ def test_agent_inbox_message_can_be_consumed_idempotently(tmp_path, monkeypatch)
     assert all_messages[0]["status"] == "consumed"
 
 
+def test_session_submit_kernel_bridge_records_trace_without_agent_inbox_delivery(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    recorded_events = []
+    monkeypatch.setattr(
+        session_service,
+        "record_runtime_scene_event",
+        lambda *args, **kwargs: recorded_events.append((args, kwargs)) or {"accepted": True},
+    )
+    captured_contexts = []
+    monkeypatch.setattr(session_service, "_schedule_session_turn", lambda context: captured_contexts.append(dict(context)))
+    detail = session_service.create_chat_session(title="Kernel Bridge Agent")
+
+    accepted = session_service.submit_session_message(
+        detail["id"],
+        "请把这个 direct session turn 接入 Kernel。",
+        include_started_turn_id=True,
+    )
+
+    user_message = next(item for item in accepted["messages"] if item["role"] == "user")
+    metadata = user_message["metadata"]
+    kernel_trace = metadata["kernel"]
+    assert accepted["startedTurnId"]
+    assert metadata["turnId"] == accepted["startedTurnId"]
+    assert metadata["kernelTaskId"] == kernel_trace["taskId"]
+    assert metadata["kernelEventId"] == kernel_trace["eventId"]
+    assert metadata["kernelWorkRunId"] == kernel_trace["workRunId"]
+    assert metadata["kernelOutcomeId"] == kernel_trace["outcomeId"]
+    assert kernel_trace["status"] == "recorded"
+    assert kernel_trace["sourceSurface"] == "session_submit"
+    assert kernel_trace["traceOnly"] is True
+
+    timeline = agent_kernel_service.get_kernel_task_timeline(metadata["kernelTaskId"])
+    assert timeline["event"]["deliveryPolicy"]["traceOnly"] is True
+    assert timeline["event"]["deliveryPolicy"]["wakeTarget"] is False
+    assert timeline["task"]["assignedAgentIds"] == [detail["agentId"]]
+    assert timeline["outcome"]["deliveries"] == []
+    assert {item["metadataKey"] for item in timeline["projectionRefs"]} == {
+        "sourceSessionId",
+        "sourceMessageId",
+        "projectionRef",
+    }
+    assert agent_directory_service.list_agent_inbox_messages_for_agent(detail["agentId"], status="") == []
+    assert captured_contexts[0]["message_metadata"]["kernelTaskId"] == metadata["kernelTaskId"]
+    assert any(
+        event[0][:3] == ("conversation", "kernel", "session.submit.kernel_trace_recorded")
+        and event[1]["fields"]["kernelTaskId"] == metadata["kernelTaskId"]
+        for event in recorded_events
+    )
+
+
+def test_session_submit_kernel_bridge_failure_does_not_block_turn(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        agent_kernel_service,
+        "handle_kernel_event",
+        lambda _payload: (_ for _ in ()).throw(RuntimeError("kernel unavailable")),
+    )
+    captured_contexts = []
+    monkeypatch.setattr(session_service, "_schedule_session_turn", lambda context: captured_contexts.append(dict(context)))
+    detail = session_service.create_chat_session(title="Kernel Failure Agent")
+
+    accepted = session_service.submit_session_message(
+        detail["id"],
+        "Kernel 临时不可用时也要继续本轮。",
+        include_started_turn_id=True,
+    )
+
+    user_message = next(item for item in accepted["messages"] if item["role"] == "user")
+    metadata = user_message["metadata"]
+    assert accepted["startedTurnId"]
+    assert metadata["turnId"] == accepted["startedTurnId"]
+    assert "kernelTaskId" not in metadata
+    assert metadata["kernel"]["status"] == "failed"
+    assert metadata["kernel"]["errorType"] == "RuntimeError"
+    assert captured_contexts[0]["message_metadata"]["kernel"]["status"] == "failed"
+
+
 def test_agent_inbox_message_api_round_trip(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     alpha = session_service.create_chat_session(title="Alpha Agent")
