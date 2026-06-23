@@ -4,11 +4,13 @@ from __future__ import annotations
 
 from time import perf_counter
 from typing import Any
+from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException, status
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict, Field
 
+from core.agent_kernel import KernelAdapterError, KernelError, KernelValidationError, submit_agent_message_event
 from core.orchestration.context_engine import list_agent_runs_for_agent
 from core.web.services import agent_directory_service, agent_tool_governance_service, session_service
 from core.web.services.runtime_scene_service import list_runtime_scene_evidence_for_agent, record_runtime_scene_event
@@ -36,7 +38,6 @@ from core.web.services.agent_directory_service import (
     store_agent_avatar_image,
     update_agent_avatar,
     update_agent_instance,
-    write_agent_inbox_message,
     write_project_memory_update_proposal,
 )
 from core.web.services.agent_bulk_delete_service import (
@@ -172,6 +173,103 @@ class AgentMessagePayload(BaseModel):
     createdBy: str = "agent"
     wakeTarget: bool = True
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+def _submit_agent_message_create_to_kernel(
+    *,
+    target_agent: dict,
+    source_agent: dict | None,
+    payload: AgentMessagePayload,
+) -> dict:
+    source_agent_id = str((source_agent or {}).get("agentId") or "").strip()
+    source_session_id = str(payload.sourceSessionId or (source_agent or {}).get("directSessionId") or "").strip()
+    metadata = dict(payload.metadata or {})
+    source_message_id = str(metadata.get("sourceMessageId") or "").strip()
+    projection_id = source_message_id or payload.sourceRoundId or payload.threadId or source_session_id or str(target_agent.get("agentId") or "").strip()
+    request_source_id = f"agent-message-api:{uuid4().hex}"
+    metadata.update(
+        {
+            "sourceSurface": "agent_message_api",
+            "sourceSessionId": source_session_id,
+            "sourceRoomId": str(payload.sourceRoomId or "").strip(),
+            "sourceRoundId": str(payload.sourceRoundId or "").strip(),
+            "sourceMessageId": source_message_id,
+            "projectionRef": {"kind": "agent_message_api", "id": projection_id},
+            "sourceAgentId": source_agent_id,
+            "senderAgentId": source_agent_id,
+            "targetAgentId": str(target_agent.get("agentId") or "").strip(),
+            "targetAgentCode": str(target_agent.get("agentCode") or "").strip(),
+            "inboxKind": payload.kind or "agent_direct_message",
+            "messageSummary": payload.summary,
+            "inboxCreatedBy": payload.createdBy,
+            "promptEligible": bool(payload.promptEligible),
+        }
+    )
+    sender = (
+        {"type": "agent", "id": source_agent_id, "agentId": source_agent_id}
+        if source_agent_id
+        else {"type": "user", "id": str(payload.createdBy or "agent_message_api").strip() or "agent_message_api"}
+    )
+    return submit_agent_message_event(
+        source="agent_message_api",
+        sender=sender,
+        recipient_agent_ids=[str(target_agent.get("agentId") or "").strip()],
+        content=payload.content,
+        correlation_id=payload.threadId,
+        wake_target=payload.wakeTarget,
+        metadata=metadata,
+        source_id=request_source_id,
+    )
+
+
+def _agent_message_create_response_from_kernel(*, target_agent_id: str, kernel_result: dict) -> dict:
+    kernel_delivery = _kernel_delivery_for_agent(kernel_result, target_agent_id)
+    if str(kernel_delivery.get("status") or "").strip() != "delivered":
+        reason = str(kernel_delivery.get("reason") or "Kernel delivery failed.").strip()
+        raise AgentDirectoryError(reason)
+    message = _agent_inbox_message_from_kernel_delivery(target_agent_id, kernel_delivery)
+    message["delivery"] = dict(kernel_delivery.get("wake") if isinstance(kernel_delivery.get("wake"), dict) else {})
+    message["kernel"] = _kernel_message_summary(kernel_result)
+    return message
+
+
+def _kernel_delivery_for_agent(kernel_result: dict, target_agent_id: str) -> dict:
+    outcome = kernel_result.get("outcome") if isinstance(kernel_result.get("outcome"), dict) else {}
+    deliveries = outcome.get("deliveries") if isinstance(outcome.get("deliveries"), list) else []
+    normalized_target = str(target_agent_id or "").strip()
+    for item in deliveries:
+        if isinstance(item, dict) and str(item.get("targetAgentId") or "").strip() == normalized_target:
+            return dict(item)
+    return dict(deliveries[0]) if deliveries and isinstance(deliveries[0], dict) else {}
+
+
+def _agent_inbox_message_from_kernel_delivery(target_agent_id: str, delivery: dict) -> dict:
+    message_id = str(
+        delivery.get("inboxMessageId")
+        or (delivery.get("wake", {}) if isinstance(delivery.get("wake"), dict) else {}).get("messageId")
+        or ""
+    ).strip()
+    if not message_id:
+        raise AgentDirectoryError("Kernel delivery did not return an inbox message id.")
+    for message in list_agent_inbox_messages_for_agent(target_agent_id, status="", limit=100):
+        if str(message.get("messageId") or message.get("eventId") or "").strip() == message_id:
+            return dict(message)
+    raise AgentMessageNotFoundError(f"Agent inbox message not found: {message_id}")
+
+
+def _kernel_message_summary(kernel_result: dict) -> dict:
+    event = kernel_result.get("event") if isinstance(kernel_result.get("event"), dict) else {}
+    task = kernel_result.get("task") if isinstance(kernel_result.get("task"), dict) else {}
+    execution = kernel_result.get("execution") if isinstance(kernel_result.get("execution"), dict) else {}
+    outcome = kernel_result.get("outcome") if isinstance(kernel_result.get("outcome"), dict) else {}
+    return {
+        "eventId": str(event.get("eventId") or "").strip(),
+        "taskId": str(task.get("taskId") or "").strip(),
+        "workRunId": str(execution.get("workRunId") or "").strip(),
+        "outcomeId": str(outcome.get("outcomeId") or "").strip(),
+        "outcomeStatus": str(outcome.get("status") or "").strip(),
+        "reused": bool(kernel_result.get("reused")),
+    }
 
 
 class AgentMessageConsumePayload(BaseModel):
@@ -564,36 +662,24 @@ def agent_message_list(agent_id: str, status: str = "pending", limit: int = 20) 
 @router.post("/agents/{agent_id}/messages", status_code=status.HTTP_201_CREATED)
 def agent_message_create(agent_id: str, payload: AgentMessagePayload) -> dict:
     try:
-        message = write_agent_inbox_message(
-            agent_id,
-            content=payload.content,
-            source_agent_id=payload.sourceAgentId,
-            source_session_id=payload.sourceSessionId,
-            source_room_id=payload.sourceRoomId,
-            source_round_id=payload.sourceRoundId,
-            thread_id=payload.threadId,
-            kind=payload.kind or "agent_direct_message",
-            summary=payload.summary,
-            prompt_eligible=payload.promptEligible,
-            created_by=payload.createdBy,
-            metadata=payload.metadata,
+        target_agent = get_agent(agent_id, include_archived=False)
+        if not target_agent:
+            raise AgentNotFoundError(f"Agent not found: {agent_id}")
+        source_agent = get_agent(payload.sourceAgentId, include_archived=True) if payload.sourceAgentId else None
+        if payload.sourceAgentId and not source_agent:
+            raise AgentNotFoundError(f"Source agent not found: {payload.sourceAgentId}")
+        kernel_result = _submit_agent_message_create_to_kernel(
+            target_agent=target_agent,
+            source_agent=source_agent,
+            payload=payload,
         )
-        if payload.wakeTarget:
-            message["delivery"] = session_service.wake_agent_for_inbox_message(message)
-        else:
-            message["delivery"] = {
-                "wakeRequested": False,
-                "wakeStatus": "not_requested",
-                "messageId": message.get("messageId") or message.get("eventId") or "",
-                "targetAgentId": message.get("targetAgentId") or "",
-                "targetSessionId": message.get("targetSessionId") or "",
-                "turnId": "",
-                "reason": "",
-            }
-        return message
+        return _agent_message_create_response_from_kernel(
+            target_agent_id=str(target_agent.get("agentId") or agent_id).strip(),
+            kernel_result=kernel_result,
+        )
     except AgentNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except AgentDirectoryError as exc:
+    except (AgentDirectoryError, KernelAdapterError, KernelValidationError, KernelError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
