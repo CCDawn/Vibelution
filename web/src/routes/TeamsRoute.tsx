@@ -9588,7 +9588,7 @@ export function TeamsRoute({
           : "idle";
   const sourceCollectionGraphStepState: SourceCollectionStepState = selectedTeamBuildCandidateGraphError || teamWorkflowCandidateGraphQuery.error
     ? "failed"
-      : selectedTeamBuildCandidateGraphPending || teamWorkflowCandidateGraphQuery.isFetching
+      : selectedTeamBuildCandidateGraphPending
         ? "active"
       : candidateGraphNodeCount > 0
         ? "done"
@@ -9597,7 +9597,7 @@ export function TeamsRoute({
           : "idle";
   const sourceCollectionMemoryStepState: SourceCollectionStepState = teamWorkflowKnowledgeIngestionStatusQuery.error || selectedTeamKnowledgePrecheckError || selectedTeamKnowledgeCollectionIngestError
     ? "failed"
-    : teamWorkflowKnowledgeIngestionStatusQuery.isFetching || selectedTeamKnowledgePrecheckPending || selectedTeamKnowledgeCollectionIngestPending
+    : selectedTeamKnowledgePrecheckPending || selectedTeamKnowledgeCollectionIngestPending
       ? "active"
       : formalKnowledgeItemCount > 0
         ? "done"
