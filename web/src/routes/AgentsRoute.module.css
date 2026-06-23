@@ -2730,6 +2730,17 @@
   white-space: nowrap;
 }
 
+.configDeepLinkRow {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  min-width: 0;
+}
+
+.configDeepLinkRow button {
+  white-space: nowrap;
+}
+
 .field input:focus,
 .field select:focus,
 .promptConfigRow select:focus,

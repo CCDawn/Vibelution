@@ -39,6 +39,16 @@ describe("MemoryRoute layout contract", () => {
     expect(memoryCssSource).toContain(".agentMemoryWorkspace");
   });
 
+  it("supports returning from Agent Center deep links", () => {
+    expect(routeSource).toContain("safeAgentCenterReturnToPath");
+    expect(routeSource).toContain("const returnToPath = useMemo(() => safeAgentCenterReturnToPath(searchParams.get(\"returnTo\")), [searchParamText])");
+    expect(routeSource).toContain("const returnToLabel = searchParams.get(\"returnLabel\") === \"agents\" ? copy.returnToAgents : copy.returnToSource");
+    expect(routeSource).toContain("className={styles.returnButton}");
+    expect(routeSource).toContain("to={returnToPath}");
+    expect(memoryCssSource).toContain(".returnButton");
+    expect(memoryCssSource).toContain("grid-template-columns: minmax(0, 1fr) auto auto");
+  });
+
   it("exposes manual memory management actions through guarded API mutations", () => {
     expect(routeSource).toContain("useMutation");
     expect(routeSource).toContain('fetchJson<MemoryMutationResponse>("/api/memory/items"');

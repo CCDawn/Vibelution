@@ -18,7 +18,7 @@ import {
   X,
 } from "lucide-react";
 import { type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link, type BlockerFunction, useBlocker } from "react-router-dom";
+import { Link, type BlockerFunction, useBlocker, useSearchParams } from "react-router-dom";
 
 import { fetchJson } from "../api/client";
 import { queryKeys } from "../api/queryKeys";
@@ -71,6 +71,7 @@ import {
   type PublicConfigShape,
 } from "./configRouteLogic";
 import { LazyJsonCodeMirror } from "../components/editor/LazyJsonCodeMirror";
+import { safeAgentCenterReturnToPath } from "./agentCenterRoutes";
 import styles from "./ConfigRoute.module.css";
 
 type ConfigLanguage = "zh" | "en";
@@ -288,6 +289,8 @@ export const CONFIG_COPY = {
     pageTitle: "统一配置工作台",
     subtitle: "结构化配置、模型资产与保存状态。启动设置在 Launcher 面板维护。",
     subtitleHint: "启动设置在 Launcher 面板维护；结构化编辑、完整配置检查和最终保存仍收口到外部 operator config.toml。",
+    returnToAgents: "返回 Agent 配置",
+    returnToSource: "返回来源页",
     loading: "正在加载统一配置工作区...",
     loadFailed: "配置工作区加载失败",
     sourceTitle: "保存与生效",
@@ -528,6 +531,8 @@ export const CONFIG_COPY = {
     pageTitle: "Unified Config Workbench",
     subtitle: "Structured config, model assets, and save state. Startup settings are maintained in Launcher.",
     subtitleHint: "Startup settings are maintained in Launcher; structured editing, full-config checks, and final writes still converge on the external operator config.toml.",
+    returnToAgents: "Return to Agent config",
+    returnToSource: "Return to source page",
     loading: "Loading unified config workspace...",
     loadFailed: "Failed to load config workspace",
     sourceTitle: "Save and Apply",
@@ -2487,9 +2492,11 @@ async function createCroppedAvatarFile(draft: AvatarCropDraft): Promise<File> {
 
 export function ConfigRoute() {
   const queryClient = useQueryClient();
+  const [searchParams] = useSearchParams();
   const pageRef = useRef<HTMLDivElement | null>(null);
   const modelEditorRef = useRef<HTMLDivElement | null>(null);
   const sidebarResizeCleanupRef = useRef<(() => void) | null>(null);
+  const lastRequestedSectionRef = useRef("");
   const workspaceQuery = useQuery({
     queryKey: queryKeys.configWorkspace(),
     queryFn: () => fetchJson<ConfigWorkspace>("/api/config/workspace"),
@@ -2517,7 +2524,7 @@ export function ConfigRoute() {
   const [selectedProviderVendorId, setSelectedProviderVendorId] = useState("");
   const [modelEditorExpanded, setModelEditorExpanded] = useState(false);
   const [sidebarIndexCollapsed, setSidebarIndexCollapsed] = useState(() => readStoredFlag(SIDEBAR_INDEX_COLLAPSED_STORAGE_KEY) ?? false);
-  const [activeSectionId, setActiveSectionId] = useState("");
+  const [activeSectionId, setActiveSectionId] = useState(() => searchParams.get("section") ?? "");
   const [sectionUiState, setSectionUiState] = useState<Record<string, ConfigSectionUiState>>({});
   const [sidebarWidth, setSidebarWidth] = useState(() => {
     const viewportWidth = typeof window === "undefined" ? 1440 : window.innerWidth;
@@ -2600,6 +2607,9 @@ export function ConfigRoute() {
   const workspace = activeWorkspace ?? workspaceQuery.data;
   const currentLanguage = getDraftLanguage(draftConfig, workspace?.language === "en" ? "en" : "zh");
   const copy = CONFIG_COPY[currentLanguage];
+  const requestedSectionId = String(searchParams.get("section") || "").trim();
+  const returnToPath = safeAgentCenterReturnToPath(searchParams.get("returnTo"));
+  const returnToLabel = searchParams.get("returnLabel") === "agents" ? copy.returnToAgents : copy.returnToSource;
   const sectionIndexTitle = currentLanguage === "en" ? "Section index" : "分区索引";
   const sectionIndexHint = currentLanguage === "en" ? "Jump directly to a config area" : "直接跳到具体配置区";
   const sectionIndexCollapsedHint = currentLanguage === "en" ? "Index hidden for focused editing" : "目录已收起，专注右侧编辑区";
@@ -2680,10 +2690,19 @@ export function ConfigRoute() {
       setActiveSectionId("");
       return;
     }
+    if (
+      requestedSectionId
+      && requestedSectionId !== lastRequestedSectionRef.current
+      && visibleSidebarGroups.some((section) => section.id === requestedSectionId)
+    ) {
+      lastRequestedSectionRef.current = requestedSectionId;
+      setActiveSectionId(requestedSectionId);
+      return;
+    }
     if (!visibleSidebarGroups.some((section) => section.id === activeSectionId)) {
       setActiveSectionId(visibleSidebarGroups[0].id);
     }
-  }, [activeSectionId, visibleSidebarGroups]);
+  }, [activeSectionId, requestedSectionId, visibleSidebarGroups]);
 
   const sectionMap = useMemo(() => {
     return new Map((workspace?.sections ?? []).map((section) => [section.id, section]));
@@ -3428,6 +3447,12 @@ export function ConfigRoute() {
           <p className={styles.eyebrow}>Config</p>
           <h1 className={styles.title}>{copy.pageTitle}</h1>
           <p className={styles.subtitle} title={copy.subtitleHint}>{copy.subtitle}</p>
+          {returnToPath ? (
+            <Link to={returnToPath} className={styles.returnButton}>
+              <ChevronRight size={14} />
+              {returnToLabel}
+            </Link>
+          ) : null}
         </div>
 
         <div className={styles.sidebarStatus}>

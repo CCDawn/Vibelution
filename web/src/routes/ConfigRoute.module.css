@@ -143,6 +143,33 @@
   -webkit-line-clamp: 2;
 }
 
+.returnButton {
+  display: inline-flex;
+  align-items: center;
+  justify-self: start;
+  gap: 5px;
+  min-height: 27px;
+  max-width: 100%;
+  padding: 0 8px;
+  border: 1px solid var(--border-hairline);
+  border-radius: var(--control-radius);
+  background: var(--surface-card-subtle);
+  color: var(--fg-secondary);
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.returnButton:hover {
+  border-color: var(--border-strong);
+  color: var(--fg-primary);
+  background: var(--surface-card-hover);
+}
+
+.returnButton svg {
+  transform: rotate(180deg);
+}
+
 .sectionNav {
   display: grid;
   align-content: start;

@@ -540,9 +540,10 @@ describe("AgentsRoute layout contract", () => {
 
   it("routes detailed Agent tool permissions to the Tools page", () => {
     expect(routeSource).toContain("agentCenterToolsRoute");
+    expect(routeSource).toContain("const selectedAgentReturnRoute = selectedAgent?.agentId");
     expect(routeSource).toContain("const selectedAgentToolConfigRoute = useMemo(");
     expect(routeSource).toContain('returnLabel: "agents"');
-    expect(routeSource).toContain("returnTo: `/agents?agent=${encodeURIComponent(selectedAgent.agentId)}&pane=config`");
+    expect(routeSource).toContain("returnTo: selectedAgentReturnRoute");
     expect(routeSource).toContain("copy.toolPolicyTitle");
     expect(routeSource).toContain("toolPolicySourceLine");
     expect(routeSource).toContain("toolPolicySource?.description");
@@ -559,10 +560,30 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("templateId: configDraft.promptTemplateId || selectedAgent.promptTemplateId");
     expect(routeSource).toContain('focus: "editor"');
     expect(routeSource).toContain('returnLabel: "agents"');
-    expect(routeSource).toContain("returnTo: `/agents?agent=${encodeURIComponent(selectedAgent.agentId)}&pane=config`");
+    expect(routeSource).toContain("returnTo: selectedAgentReturnRoute");
     expect(routeSource).toContain("styles.promptConfigRow");
     expect(routeSource).toContain("onClick={() => navigate(selectedAgentPromptConfigRoute)}");
     expect(routeSource).toContain("配置提示词");
+  });
+
+  it("adds cross-center links for model, context, and memory configuration", () => {
+    expect(routeSource).toContain("agentCenterModelsRoute");
+    expect(routeSource).toContain("agentCenterMemoryRoute");
+    expect(routeSource).toContain("const selectedAgentModelConfigRoute = useMemo(");
+    expect(routeSource).toContain("const selectedAgentContextConfigRoute = useMemo(");
+    expect(routeSource).toContain("const selectedAgentMemoryConfigRoute = useMemo(");
+    expect(routeSource).toContain('section: "models-profiles"');
+    expect(routeSource).toContain('section: "runtime-context"');
+    expect(routeSource).toContain('view: "agents"');
+    expect(routeSource).toContain("returnTo: selectedAgentReturnRoute");
+    expect(routeSource).toContain("styles.configDeepLinkRow");
+    expect(routeSource).toContain("onClick={() => navigate(selectedAgentModelConfigRoute)}");
+    expect(routeSource).toContain("onClick={() => navigate(selectedAgentContextConfigRoute)}");
+    expect(routeSource).toContain("onClick={() => navigate(selectedAgentMemoryConfigRoute)}");
+    expect(routeSource).toContain("去模型库配置");
+    expect(routeSource).toContain("去上下文配置");
+    expect(routeSource).toContain("去记忆页配置");
+    expect(styles.configDeepLinkRow).toBeTruthy();
   });
 
   it("surfaces advisor tool-governance requests without bypassing ToolPolicy", () => {

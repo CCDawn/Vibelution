@@ -8,7 +8,7 @@
 
 .header {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto auto;
   align-items: center;
   justify-content: space-between;
   gap: var(--route-topbar-gap);
@@ -74,6 +74,29 @@
 }
 
 .refreshButton:hover {
+  border-color: var(--border-strong);
+  color: var(--fg-primary);
+  background: var(--surface-panel-hover);
+}
+
+.returnButton {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-height: 26px;
+  max-width: 220px;
+  padding: 3px 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-control);
+  background: var(--surface-card);
+  color: var(--fg-secondary);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.returnButton:hover {
   border-color: var(--border-strong);
   color: var(--fg-primary);
   background: var(--surface-panel-hover);
