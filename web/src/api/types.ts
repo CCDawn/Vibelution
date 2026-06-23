@@ -2494,6 +2494,7 @@ export type SessionSummary = {
   agentPrimaryMode?: string;
   agentRoleKey?: string;
   agentPromptTemplateId?: string;
+  agentPromptSnapshot?: SessionAgentPromptSnapshot;
   dialogueModelId?: string;
   agentInboxPendingCount?: number;
   agentPrimaryDirectSessionId?: string;
@@ -2523,6 +2524,23 @@ export type SessionSummary = {
     updatedAt?: string;
     [key: string]: unknown;
   } | null;
+};
+
+export type SessionAgentPromptSnapshot = {
+  schemaVersion?: number;
+  promptTemplateId?: string;
+  templateId?: string;
+  name?: string;
+  category?: string;
+  sourcePath?: string;
+  sourceExists?: boolean;
+  contentHash?: string;
+  contentLength?: number;
+  capturedAt?: string;
+  agentId?: string;
+  agentCode?: string;
+  agentDisplayName?: string;
+  reason?: string;
 };
 
 export type SessionQueryResponse = {

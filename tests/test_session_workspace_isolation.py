@@ -285,7 +285,7 @@ def test_session_detail_repairs_stale_legacy_profile_from_agent_instance(tmp_pat
     assert repair_events[0]["fields"]["removedFieldNames"] == ["agentProfileId", "agent_profile_id"]
 
 
-def test_run_session_turn_seeds_agent_prompt_template_context(tmp_path, monkeypatch):
+def test_run_session_turn_uses_fixed_agent_prompt_snapshot(tmp_path, monkeypatch):
     _seed_session(tmp_path, "session-live")
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
@@ -308,7 +308,7 @@ def test_run_session_turn_seeds_agent_prompt_template_context(tmp_path, monkeypa
     state["conversations"][0]["agent_id"] = agent["agentId"]
     state["conversations"][0]["agentId"] = agent["agentId"]
     save_chat_state(tmp_path, state)
-    captured = {}
+    captured_contexts = []
 
     class PromptAwareAgent:
         def __init__(self, workspace_path=None, config=None):
@@ -318,7 +318,7 @@ def test_run_session_turn_seeds_agent_prompt_template_context(tmp_path, monkeypa
             self.messages = list(messages)
 
         def seed_runtime_context(self, content):
-            captured["runtime_context"] = content
+            captured_contexts.append(content)
 
         def run_single_turn(self, initial_prompt=None):
             return {
@@ -341,10 +341,52 @@ def test_run_session_turn_seeds_agent_prompt_template_context(tmp_path, monkeypa
     monkeypatch.setattr(session_service, "_schedule_session_turn", lambda context: session_service._run_session_turn(context))
 
     session_service.submit_session_message("session-live", "do it", mental_model_enabled=False)
+    prompt_template_service.update_prompt_template(
+        "prompt-chat-custom",
+        content="你是第二版会话 Agent。这个新内容只能影响新会话。",
+    )
+    session_service.submit_session_message("session-live", "continue", mental_model_enabled=False)
 
-    assert "Agent Prompt Template" in captured["runtime_context"]
-    assert "prompt-chat-custom" in captured["runtime_context"]
-    assert "统一 Agent 配置迁移" in captured["runtime_context"]
+    assert len(captured_contexts) == 2
+    assert "Agent System Prompt Snapshot" in captured_contexts[0]
+    assert "PromptTemplateId: prompt-chat-custom" in captured_contexts[0]
+    assert "统一 Agent 配置迁移" in captured_contexts[0]
+    assert "Agent Prompt Template" not in captured_contexts[0]
+    assert "这个新内容只能影响新会话" not in captured_contexts[1]
+    assert "统一 Agent 配置迁移" in captured_contexts[1]
+    stored_state = load_chat_state(tmp_path)
+    snapshot = stored_state["conversations"][0]["agentPromptSnapshot"]
+    assert snapshot["promptTemplateId"] == "prompt-chat-custom"
+    assert "统一 Agent 配置迁移" in snapshot["content"]
+
+
+def test_session_detail_exposes_prompt_snapshot_metadata_without_content(tmp_path, monkeypatch):
+    _seed_session(tmp_path, "session-live")
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    state = load_chat_state(tmp_path)
+    state["conversations"][0]["agentPromptSnapshot"] = {
+        "schemaVersion": 1,
+        "promptTemplateId": "prompt-chat-custom",
+        "templateId": "prompt-chat-custom",
+        "name": "会话提示词",
+        "category": "chat",
+        "content": "完整系统提示词不应该进入会话详情。",
+        "contentHash": "sha256:fixed",
+        "contentLength": 18,
+        "capturedAt": "2026-06-23T01:00:00Z",
+        "agentId": "agent-1",
+        "reason": "",
+    }
+    save_chat_state(tmp_path, state)
+
+    detail = session_service.get_session_detail("session-live")
+
+    assert detail is not None
+    snapshot = detail["agentPromptSnapshot"]
+    assert snapshot["promptTemplateId"] == "prompt-chat-custom"
+    assert snapshot["contentHash"] == "sha256:fixed"
+    assert snapshot["contentLength"] == 18
+    assert "content" not in snapshot
 
 
 def test_tool_storage_overrides_are_context_local(tmp_path):

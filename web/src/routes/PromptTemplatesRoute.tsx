@@ -1,13 +1,14 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Archive, CheckCircle2, CheckSquare, FileText, RefreshCw, RotateCcw, Save, Search, Square, SquarePen, Tags } from "lucide-react";
+import { Archive, ArrowLeft, CheckCircle2, CheckSquare, FileText, RefreshCw, RotateCcw, Save, Search, Square, SquarePen, Tags } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 
 import { fetchJson } from "../api/client";
 import { queryKeys } from "../api/queryKeys";
 import { AgentInstance, PromptTemplate, PromptTemplateWorkspace } from "../api/types";
 import { useShellI18n } from "../i18n/useShellI18n";
 import { AgentManagementNav } from "./AgentManagementNav";
+import { safeAgentCenterReturnToPath } from "./agentCenterRoutes";
 import styles from "./PromptTemplatesRoute.module.css";
 
 type PromptCategoryFilter = "all" | "chat" | "research" | "supervised_evolution" | "self_evolution" | "general";
@@ -76,6 +77,7 @@ function copyFor(lang: string) {
         yes: "是",
         no: "否",
         all: "全部",
+        returnToAgents: "返回 Agent 配置",
       }
     : {
         eyebrow: "Agent prompts",
@@ -123,6 +125,7 @@ function copyFor(lang: string) {
         yes: "Yes",
         no: "No",
         all: "All",
+        returnToAgents: "Back to Agent config",
       };
 }
 
@@ -184,6 +187,10 @@ export function PromptTemplatesRoute() {
   const queryClient = useQueryClient();
   const [searchParams, setSearchParams] = useSearchParams();
   const initialCategory = (searchParams.get("category") || "all") as PromptCategoryFilter;
+  const linkedAgentId = String(searchParams.get("agent") || "").trim();
+  const linkedTemplateId = String(searchParams.get("template") || "").trim();
+  const focusTarget = String(searchParams.get("focus") || "").trim();
+  const returnToPath = safeAgentCenterReturnToPath(searchParams.get("returnTo"));
   const [categoryFilter, setCategoryFilter] = useState<PromptCategoryFilter>(
     CATEGORY_FILTERS.includes(initialCategory) ? initialCategory : "all",
   );
@@ -238,15 +245,54 @@ export function PromptTemplatesRoute() {
   }, [searchParams]);
 
   useEffect(() => {
-    setSearchParams(categoryFilter === "all" ? {} : { category: categoryFilter }, { replace: true });
-  }, [categoryFilter, setSearchParams]);
+    const requestedTemplateId = linkedTemplateId || (
+      linkedAgentId
+        ? String(agents.find((agent) => agent.agentId === linkedAgentId)?.promptTemplateId || "").trim()
+        : ""
+    );
+    if (!requestedTemplateId || searchParams.get("category")) {
+      return;
+    }
+    const requestedTemplate = templates.find((template) => template.promptTemplateId === requestedTemplateId);
+    const requestedCategory = requestedTemplate?.category as PromptCategoryFilter | undefined;
+    if (requestedCategory && CATEGORY_FILTERS.includes(requestedCategory) && requestedCategory !== categoryFilter) {
+      setCategoryFilter(requestedCategory);
+    }
+  }, [agents, categoryFilter, linkedAgentId, linkedTemplateId, searchParams, templates]);
 
   useEffect(() => {
+    if (categoryFilter === "all" && !searchParams.has("category")) {
+      return;
+    }
+    if (categoryFilter !== "all" && searchParams.get("category") === categoryFilter) {
+      return;
+    }
+    setSearchParams((current) => {
+      const next = new URLSearchParams(current);
+      if (categoryFilter === "all") {
+        next.delete("category");
+      } else {
+        next.set("category", categoryFilter);
+      }
+      return next;
+    }, { replace: true });
+  }, [categoryFilter, searchParams, setSearchParams]);
+
+  useEffect(() => {
+    const requestedTemplateId = linkedTemplateId || (
+      linkedAgentId
+        ? String(agents.find((agent) => agent.agentId === linkedAgentId)?.promptTemplateId || "").trim()
+        : ""
+    );
+    if (requestedTemplateId && filteredTemplates.some((template) => template.promptTemplateId === requestedTemplateId)) {
+      setActiveTemplateId((current) => (current === requestedTemplateId ? current : requestedTemplateId));
+      return;
+    }
     if (activeTemplateId && filteredTemplates.some((template) => template.promptTemplateId === activeTemplateId)) {
       return;
     }
     setActiveTemplateId(filteredTemplates[0]?.promptTemplateId ?? "");
-  }, [activeTemplateId, filteredTemplates]);
+  }, [activeTemplateId, agents, filteredTemplates, linkedAgentId, linkedTemplateId]);
 
   useEffect(() => {
     setSelectedTemplateIds((current) => {
@@ -432,10 +478,18 @@ export function PromptTemplatesRoute() {
           <h1>{copy.title}</h1>
           <p>{copy.subtitle}</p>
         </div>
-        <button type="button" className={styles.refreshButton} onClick={() => templatesQuery.refetch()} disabled={templatesQuery.isFetching}>
-          <RefreshCw size={15} />
-          <span>{copy.refresh}</span>
-        </button>
+        <div className={styles.headerActions}>
+          {returnToPath ? (
+            <Link className={styles.returnButton} to={returnToPath} title={copy.returnToAgents}>
+              <ArrowLeft size={15} />
+              <span>{copy.returnToAgents}</span>
+            </Link>
+          ) : null}
+          <button type="button" className={styles.refreshButton} onClick={() => templatesQuery.refetch()} disabled={templatesQuery.isFetching}>
+            <RefreshCw size={15} />
+            <span>{copy.refresh}</span>
+          </button>
+        </div>
       </header>
 
       <div className={styles.controlStrip}>
@@ -550,8 +604,10 @@ export function PromptTemplatesRoute() {
               filteredTemplates.map((template) => {
                 const linkedCount = agentsByTemplate.get(template.promptTemplateId)?.length ?? 0;
                 const selected = selectedTemplateIds.has(template.promptTemplateId);
+                const linkedTarget = linkedTemplateId === template.promptTemplateId
+                  || Boolean(linkedAgentId && agentsByTemplate.get(template.promptTemplateId)?.some((agent) => agent.agentId === linkedAgentId));
                 return (
-                  <div key={template.promptTemplateId} className={styles.selectableRow}>
+                  <div key={template.promptTemplateId} className={`${styles.selectableRow} ${linkedTarget ? styles.selectableRowLinked : ""}`}>
                     <label className={styles.rowSelect} title={`${copy.bulkSelected}: ${template.name || template.promptTemplateId}`}>
                       <input
                         type="checkbox"
@@ -586,7 +642,7 @@ export function PromptTemplatesRoute() {
           </div>
         </aside>
 
-        <section className={styles.editorPanel}>
+        <section className={`${styles.editorPanel} ${focusTarget === "editor" ? styles.editorPanelFocused : ""}`}>
           {editor && editableTemplate ? (
             <>
               <div className={styles.editorHeader}>
@@ -641,7 +697,7 @@ export function PromptTemplatesRoute() {
                   <div className={styles.agentRows}>
                     {activeAgents.length ? (
                       activeAgents.map((agent) => (
-                        <article key={agent.agentId} className={styles.agentItem}>
+                        <article key={agent.agentId} className={`${styles.agentItem} ${agent.agentId === linkedAgentId ? styles.agentItemLinked : ""}`}>
                           <strong>{agent.displayName || agent.agentCode || agent.agentId}</strong>
                           <code>{agent.agentCode || agent.agentId}</code>
                           <span>{agent.primaryMode} / {agent.roleKey || "-"}</span>

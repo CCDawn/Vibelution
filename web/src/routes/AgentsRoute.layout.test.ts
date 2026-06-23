@@ -533,6 +533,18 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("copy.toolCategoryCount");
   });
 
+  it("routes Agent prompt configuration to the Prompt Center", () => {
+    expect(routeSource).toContain("agentCenterPromptsRoute");
+    expect(routeSource).toContain("const selectedAgentPromptConfigRoute = useMemo(");
+    expect(routeSource).toContain("templateId: configDraft.promptTemplateId || selectedAgent.promptTemplateId");
+    expect(routeSource).toContain('focus: "editor"');
+    expect(routeSource).toContain('returnLabel: "agents"');
+    expect(routeSource).toContain("returnTo: `/agents?agent=${encodeURIComponent(selectedAgent.agentId)}&pane=config`");
+    expect(routeSource).toContain("styles.promptConfigRow");
+    expect(routeSource).toContain("onClick={() => navigate(selectedAgentPromptConfigRoute)}");
+    expect(routeSource).toContain("配置提示词");
+  });
+
   it("surfaces advisor tool-governance requests without bypassing ToolPolicy", () => {
     expect(routeSource).toContain("AgentToolGovernanceRequest");
     expect(routeSource).toContain("toolGovernanceDraftFromAgent");
