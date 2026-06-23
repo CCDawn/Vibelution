@@ -35,15 +35,34 @@ def test_standalone_launcher_app_exposes_force_stop_route(monkeypatch):
     monkeypatch.setattr(
         launcher_service,
         "request_launcher_force_stop",
-        lambda: calls.append("force-stop") or {"accepted": True, "operation": "force-stop", "launcherMode": "standalone_control_plane"},
+        lambda request_audit=None: calls.append(request_audit)
+        or {"accepted": True, "operation": "force-stop", "launcherMode": "standalone_control_plane"},
     )
     client = TestClient(launcher_app.create_launcher_app())
 
-    response = client.post("/api/project/force-stop")
+    response = client.post(
+        "/api/project/force-stop",
+        headers={
+            "X-Vibelution-Launcher-Trigger": "pytest_force_stop_button",
+            "Referer": "http://127.0.0.1:8765/launcher?token=secret",
+            "Origin": "http://127.0.0.1:8765",
+        },
+    )
 
     assert response.status_code == 202
     assert response.json()["operation"] == "force-stop"
-    assert calls == ["force-stop"]
+    assert calls == [
+        {
+            "operation": "force-stop",
+            "trigger": "pytest_force_stop_button",
+            "endpoint": "/api/project/force-stop",
+            "method": "POST",
+            "clientHost": "testclient",
+            "refererPath": "/launcher",
+            "originHost": "127.0.0.1:8765",
+            "userAgent": "testclient",
+        }
+    ]
 
 
 def test_standalone_launcher_app_exposes_project_status_route(monkeypatch):
@@ -143,17 +162,30 @@ def test_workbench_launcher_adapter_exposes_force_stop_route(monkeypatch):
     monkeypatch.setattr(
         launcher_service,
         "request_launcher_force_stop",
-        lambda: calls.append("force-stop") or {"accepted": True, "operation": "force-stop", "launcherMode": "standalone_control_plane"},
+        lambda request_audit=None: calls.append(request_audit)
+        or {"accepted": True, "operation": "force-stop", "launcherMode": "standalone_control_plane"},
     )
     app = FastAPI()
     app.include_router(web_launcher_routes.router, prefix="/api")
     client = TestClient(app)
 
-    response = client.post("/api/launcher/force-stop")
+    response = client.post(
+        "/api/launcher/force-stop",
+        headers={"X-Vibelution-Launcher-Trigger": "pytest_web_adapter_force_stop"},
+    )
 
     assert response.status_code == 202
     assert response.json()["operation"] == "force-stop"
-    assert calls == ["force-stop"]
+    assert calls == [
+        {
+            "operation": "force-stop",
+            "trigger": "pytest_web_adapter_force_stop",
+            "endpoint": "/api/launcher/force-stop",
+            "method": "POST",
+            "clientHost": "testclient",
+            "userAgent": "testclient",
+        }
+    ]
 
 
 def test_standalone_launcher_app_serves_health_token_and_launcher_shell(monkeypatch, tmp_path):
@@ -600,6 +632,50 @@ def test_launcher_force_stop_queues_command_with_active_work_details(tmp_path, m
     accepted_event = next(event for event in events if event[0] == "launcher.bundle.force_stop.accepted")
     assert requested_event[1]["fields"]["activeWorkCount"] == 1
     assert accepted_event[1]["fields"]["commandId"] == "cmd-force-close"
+
+
+def test_launcher_stop_records_request_audit(monkeypatch):
+    events = []
+    commands = []
+    request_audit = {
+        "operation": "stop",
+        "trigger": "launcher_route_stop_button",
+        "endpoint": "/api/launcher/stop",
+        "method": "POST",
+        "clientHost": "127.0.0.1",
+        "refererPath": "/launcher",
+    }
+    monkeypatch.setattr(launcher_service, "_raise_if_active_work", lambda _operation: None)
+    monkeypatch.setattr(launcher_service, "ensure_daemon_running", lambda: None)
+    monkeypatch.setattr(
+        launcher_service,
+        "submit_command",
+        lambda command_type, *, args=None, requested_by="unknown": commands.append((command_type, args, requested_by))
+        or {"commandId": "cmd-stop"},
+    )
+    monkeypatch.setattr(
+        launcher_service,
+        "append_runtime_manager_file_event",
+        lambda event_code, payload, **kwargs: events.append((event_code, payload)) or "2026-06-06T00:00:00+00:00",
+    )
+
+    response = launcher_service.request_launcher_stop(request_audit)
+
+    assert response["commandId"] == "cmd-stop"
+    assert commands == [
+        (
+            "close_workbench",
+            {
+                "reason": "launcher_stop_button",
+                "source": "launcher_api",
+                "stopManager": False,
+                "requestAudit": request_audit,
+            },
+            "launcher_api",
+        )
+    ]
+    requested_event = next(event for event in events if event[0] == "launcher.bundle.stop.requested")
+    assert requested_event[1]["fields"]["requestAudit"] == request_audit
 
 
 def test_launcher_force_stop_skips_when_workbench_already_closed(monkeypatch):

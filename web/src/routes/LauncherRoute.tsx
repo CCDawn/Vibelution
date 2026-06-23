@@ -1722,10 +1722,10 @@ export function LauncherRoute() {
         return startLauncherBundle();
       }
       if (operation === "stop") {
-        return stopLauncherBundle();
+        return stopLauncherBundle("launcher_route_stop_button");
       }
       if (operation === "force-stop") {
-        return forceStopLauncherBundle();
+        return forceStopLauncherBundle("launcher_route_force_stop_button");
       }
       return restartLauncherBundle();
     },

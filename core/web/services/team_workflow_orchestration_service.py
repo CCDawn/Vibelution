@@ -397,21 +397,48 @@ def import_data_record_as_source_candidate(team_id: str, run_id: str, record_id:
     team_service.get_team(normalized_team_id)
     import_payload = payload if isinstance(payload, dict) else {}
     run, record = _load_data_processing_record(normalized_run_id, normalized_record_id)
+    source_identity_key = _source_collection_record_identity_key(record)
     with _WORKFLOW_LOCK:
         workflow = _load_or_create_workflow(normalized_team_id)
         candidate_store = _load_candidate_store(normalized_team_id)
         existing = _find_candidate_imported_from_data_record(candidate_store, normalized_run_id, normalized_record_id)
         if existing is not None:
+            _record_workflow_event(
+                "candidate.import_duplicate_skipped",
+                normalized_team_id,
+                fields={
+                    "workflowId": workflow["workflowId"],
+                    "runId": normalized_run_id,
+                    "recordId": normalized_record_id,
+                    "duplicateReason": "imported_from_data_record",
+                    "duplicateOfCandidateId": str(existing.get("candidateId") or ""),
+                    "sourceIdentityKey": source_identity_key,
+                },
+            )
             return {
                 "created": False,
+                "duplicate": True,
+                "duplicateReason": "imported_from_data_record",
+                "duplicateOfCandidateId": str(existing.get("candidateId") or ""),
                 "candidate": existing,
                 "dataRecordRef": _data_record_ref(run, record),
                 "validation": existing.get("validation") if isinstance(existing.get("validation"), dict) else validate_candidate_record(existing),
                 "workflow": _workflow_to_api(normalized_team_id, workflow, candidate_store),
             }
-        source_identity_key = _source_collection_record_identity_key(record)
         existing_by_identity = _find_source_candidate_by_identity_key(candidate_store, source_identity_key)
         if existing_by_identity is not None:
+            _record_workflow_event(
+                "candidate.import_duplicate_skipped",
+                normalized_team_id,
+                fields={
+                    "workflowId": workflow["workflowId"],
+                    "runId": normalized_run_id,
+                    "recordId": normalized_record_id,
+                    "duplicateReason": "source_identity_key",
+                    "duplicateOfCandidateId": str(existing_by_identity.get("candidateId") or ""),
+                    "sourceIdentityKey": source_identity_key,
+                },
+            )
             return {
                 "created": False,
                 "duplicate": True,
@@ -495,6 +522,7 @@ def extract_source_collection_candidates(team_id: str, payload: dict[str, Any] |
     imported: list[dict[str, Any]] = []
     skipped: list[dict[str, Any]] = []
     failed: list[dict[str, Any]] = []
+    record_outcomes: list[dict[str, Any]] = []
     execution_events: list[dict[str, Any]] = []
     extraction_assignment = next(
         (
@@ -524,6 +552,14 @@ def extract_source_collection_candidates(team_id: str, payload: dict[str, Any] |
             )
         except TeamWorkflowOrchestrationError as exc:
             failed.append({"recordId": record_id, "error": str(exc)})
+            record_outcomes.append(
+                {
+                    "recordId": record_id,
+                    "status": "failed",
+                    "reason": "source_manifest_import_failed",
+                    "errorType": type(exc).__name__,
+                }
+            )
             execution_events.append(
                 _source_collection_execution_event(
                     "storage.source_manifest_import_failed",
@@ -539,12 +575,28 @@ def extract_source_collection_candidates(team_id: str, payload: dict[str, Any] |
         event_status = "completed" if import_response.get("created") else "skipped"
         if import_response.get("created"):
             imported.append(import_response)
+            record_outcomes.append(
+                {
+                    "recordId": record_id,
+                    "status": "imported",
+                    "candidateId": import_response.get("candidate", {}).get("candidateId", ""),
+                }
+            )
         else:
+            duplicate_reason = _trim_text(import_response.get("duplicateReason"), max_length=120) or "already_imported"
             skipped.append(
                 {
                     "recordId": record_id,
                     "candidateId": import_response.get("candidate", {}).get("candidateId", ""),
-                    "reason": "already_imported",
+                    "reason": duplicate_reason,
+                }
+            )
+            record_outcomes.append(
+                {
+                    "recordId": record_id,
+                    "status": "skipped",
+                    "candidateId": import_response.get("candidate", {}).get("candidateId", ""),
+                    "reason": duplicate_reason,
                 }
             )
         execution_events.append(
@@ -654,6 +706,22 @@ def extract_source_collection_candidates(team_id: str, payload: dict[str, Any] |
             "failedCount": len(failed),
             "pendingRecordCount": pending_record_count,
             "completedExtractionAssignmentCount": completed_extraction_assignments,
+        },
+        child_log_path=f"artifacts/source-collection-{_safe_token(normalized_run_id, default='run', max_length=96)}-candidate-extraction.jsonl",
+        child_log_payload={
+            "kind": "source_collection_candidate_extraction",
+            "teamId": normalized_team_id,
+            "runId": normalized_run_id,
+            "status": status_label,
+            "recordCount": len(final_records),
+            "candidateCount": len(final_source_candidates),
+            "importedCount": len(imported),
+            "skippedCount": len(skipped),
+            "failedCount": len(failed),
+            "pendingRecordCount": pending_record_count,
+            "completedExtractionAssignmentCount": completed_extraction_assignments,
+            "recordOutcomes": record_outcomes[:80],
+            "truncatedRecordOutcomeCount": max(0, len(record_outcomes) - 80),
         },
     )
     return {
@@ -4147,6 +4215,22 @@ def assess_source_quality_batch(team_id: str, payload: dict[str, Any] | None = N
             **summary,
             "assessedCandidateIds": _workflow_log_sample_values(assessments, "candidateId"),
         },
+        child_log_path=f"artifacts/source-quality-{_safe_token(batch_run_id, default='batch', max_length=96)}-batch-assessment.jsonl",
+        child_log_payload={
+            "kind": "source_quality_batch_assessment",
+            "teamId": normalized_team_id,
+            "workflowId": workflow["workflowId"],
+            "batchRunId": batch_run_id,
+            "status": run_status,
+            "assessedByAgent": assessed_by_agent,
+            "summary": summary,
+            "assessments": assessments[:80],
+            "skippedCandidates": skipped_candidates[:80],
+            "failedCandidates": failed_candidates[:80],
+            "truncatedAssessmentCount": max(0, len(assessments) - 80),
+            "truncatedSkippedCandidateCount": max(0, len(skipped_candidates) - 80),
+            "truncatedFailedCandidateCount": max(0, len(failed_candidates) - 80),
+        },
     )
     return {
         "schemaVersion": SCHEMA_VERSION,
@@ -4708,6 +4792,23 @@ def build_candidate_graph(team_id: str, payload: dict[str, Any] | None = None) -
                 graph["summary"]["filteredCandidateCount"] = len(filtered_candidates)
                 graph["summary"]["createdByAgent"] = created_by_agent
                 graph["summary"]["stageAgentRole"] = "candidate_graph"
+                _record_workflow_event(
+                    "candidate_graph.reused",
+                    normalized_team_id,
+                    fields={
+                        "workflowId": workflow["workflowId"],
+                        "candidateId": str(reusable_graph.get("candidateId") or ""),
+                        "nodeCount": len(graph.get("nodes") or []),
+                        "edgeCount": len(graph.get("edges") or []),
+                        "missingLinkCount": len(graph.get("missingLinks") or []),
+                        "unreviewedNodeCount": len(graph.get("unreviewedNodes") or []),
+                        "archivedCandidateCount": len(archived_candidates),
+                        "filteredCandidateCount": len(filtered_candidates),
+                        "curationMode": curation_mode,
+                        "createdByAgent": created_by_agent,
+                        "ingestionFingerprint": graph_fingerprint,
+                    },
+                )
                 return {
                     "candidateGraph": reusable_graph,
                     "graph": graph,
@@ -4869,6 +4970,19 @@ def run_knowledge_ingestion_precheck(team_id: str, payload: dict[str, Any] | Non
             reusable_pack = _find_reusable_steward_pack(candidate_store, precheck_fingerprint)
             if reusable_pack is not None:
                 status_payload = get_knowledge_ingestion_status(normalized_team_id)
+                _record_workflow_event(
+                    "knowledge_ingestion.precheck_reused",
+                    normalized_team_id,
+                    fields={
+                        "workflowId": workflow_id,
+                        "candidateId": str(reusable_pack.get("candidateId") or ""),
+                        "selectedCandidateCount": len(selected_candidates),
+                        "filteredCandidateCount": filtered_candidate_count,
+                        "stewardAgentId": steward_agent_id,
+                        "candidateGraphId": str((latest_graph or {}).get("candidateId") or ""),
+                        "ingestionFingerprint": precheck_fingerprint,
+                    },
+                )
                 return {
                     "candidate": reusable_pack,
                     "validation": validate_candidate_record(reusable_pack),
@@ -5979,14 +6093,17 @@ def _notify_knowledge_steward_for_ingestion(
     }
     if not steward_agent_id:
         activation["status"] = "skipped_missing_steward_agent"
+        _record_knowledge_steward_activation_event(team_id, steward_candidate_id, activation)
         return activation
 
     target_agent = agent_directory_service.get_agent(steward_agent_id, include_archived=True)
     if not target_agent:
         activation["status"] = "skipped_missing_steward_agent"
+        _record_knowledge_steward_activation_event(team_id, steward_candidate_id, activation)
         return activation
     if str(target_agent.get("status") or "active").strip().lower() == "archived":
         activation["status"] = "skipped_archived_steward_agent"
+        _record_knowledge_steward_activation_event(team_id, steward_candidate_id, activation)
         return activation
 
     source_agent_id = requester_agent_id if requester_agent_id and agent_directory_service.get_agent(requester_agent_id, include_archived=True) else ""
@@ -6032,6 +6149,8 @@ def _notify_knowledge_steward_for_ingestion(
     except Exception as exc:
         activation["status"] = "message_failed"
         activation["error"] = str(exc)
+        activation["errorType"] = type(exc).__name__
+        _record_knowledge_steward_activation_event(team_id, steward_candidate_id, activation)
         return activation
 
     activation.update(
@@ -6050,7 +6169,78 @@ def _notify_knowledge_steward_for_ingestion(
             activation["status"] = "agent_wake_started"
         else:
             activation["status"] = f"agent_wake_{activation['wakeStatus']}"
+    _record_knowledge_steward_activation_event(team_id, steward_candidate_id, activation)
     return activation
+
+
+def _record_knowledge_steward_activation_event(
+    team_id: str,
+    steward_candidate_id: str,
+    activation: dict[str, Any],
+) -> None:
+    status = _trim_text(activation.get("status"), max_length=120) or "unknown"
+    failed = status == "message_failed" or status.startswith("skipped_")
+    _record_workflow_event(
+        "knowledge_collection.steward_notification_failed" if failed else "knowledge_collection.steward_notification_completed",
+        team_id,
+        level="warning" if failed else "info",
+        outcome="failed" if failed else "completed",
+        fields={
+            "stewardPackCandidateId": steward_candidate_id,
+            "targetAgentId": _trim_text(activation.get("targetAgentId"), max_length=160),
+            "knowledgeBaseId": _trim_text((activation.get("metadata") or {}).get("knowledgeBaseId"), max_length=128)
+            if isinstance(activation.get("metadata"), dict)
+            else "",
+            "status": status,
+            "messageId": _trim_text(activation.get("messageId"), max_length=160),
+            "threadId": _trim_text(activation.get("threadId"), max_length=240),
+            "wakeRequested": bool(activation.get("wakeRequested")),
+            "wakeStatus": _trim_text(activation.get("wakeStatus"), max_length=120),
+            "turnId": _trim_text((activation.get("delivery") or {}).get("turnId"), max_length=160)
+            if isinstance(activation.get("delivery"), dict)
+            else "",
+            "errorType": _trim_text(activation.get("errorType"), max_length=160),
+        },
+        child_log_path=f"artifacts/knowledge-steward-{_safe_token(steward_candidate_id, default='candidate', max_length=96)}-notification.jsonl",
+        child_log_payload={
+            "kind": "knowledge_steward_ingestion_notification",
+            "teamId": team_id,
+            "stewardPackCandidateId": steward_candidate_id,
+            "targetAgentId": _trim_text(activation.get("targetAgentId"), max_length=160),
+            "knowledgeBaseId": _trim_text((activation.get("metadata") or {}).get("knowledgeBaseId"), max_length=128)
+            if isinstance(activation.get("metadata"), dict)
+            else "",
+            "status": status,
+            "messageId": _trim_text(activation.get("messageId"), max_length=160),
+            "threadId": _trim_text(activation.get("threadId"), max_length=240),
+            "wakeRequested": bool(activation.get("wakeRequested")),
+            "wakeStatus": _trim_text(activation.get("wakeStatus"), max_length=120),
+            "turnId": _trim_text((activation.get("delivery") or {}).get("turnId"), max_length=160)
+            if isinstance(activation.get("delivery"), dict)
+            else "",
+            "kernel": activation.get("kernel") if isinstance(activation.get("kernel"), dict) else {},
+            "errorType": _trim_text(activation.get("errorType"), max_length=160),
+        },
+    )
+
+
+def _knowledge_steward_activation_log_payload(activation: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(activation, dict):
+        return {}
+    delivery = activation.get("delivery") if isinstance(activation.get("delivery"), dict) else {}
+    metadata = activation.get("metadata") if isinstance(activation.get("metadata"), dict) else {}
+    return {
+        "status": _trim_text(activation.get("status"), max_length=120),
+        "targetAgentId": _trim_text(activation.get("targetAgentId"), max_length=160),
+        "knowledgeBaseId": _trim_text(metadata.get("knowledgeBaseId"), max_length=128),
+        "messageId": _trim_text(activation.get("messageId"), max_length=160),
+        "threadId": _trim_text(activation.get("threadId"), max_length=240),
+        "wakeRequested": bool(activation.get("wakeRequested")),
+        "wakeStatus": _trim_text(activation.get("wakeStatus"), max_length=120),
+        "turnId": _trim_text(delivery.get("turnId"), max_length=160),
+        "kernel": activation.get("kernel") if isinstance(activation.get("kernel"), dict) else {},
+        "errorType": _trim_text(activation.get("errorType"), max_length=160),
+    }
 
 
 def run_knowledge_collection_ingestion(team_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -6357,6 +6547,31 @@ def run_knowledge_collection_ingestion(team_id: str, payload: dict[str, Any] | N
             "wakeStewardAgent": wake_steward_agent,
             "knowledgeStewardActivationStatus": activation_status,
             "knowledgeStewardInboxMessageId": str((knowledge_steward_activation or {}).get("messageId") or ""),
+            "reusedCandidateGraph": bool(candidate_graph.get("reusedCandidateGraph")),
+            "reusedStewardPack": bool(precheck.get("reusedStewardPack")),
+            "ingestionFingerprint": str(precheck.get("ingestionFingerprint") or candidate_graph.get("ingestionFingerprint") or ""),
+        },
+        child_log_path=f"artifacts/knowledge-collection-{_safe_token(normalized_team_id, default='team', max_length=96)}-ingestion.jsonl",
+        child_log_payload={
+            "kind": "knowledge_collection_ingestion",
+            "teamId": normalized_team_id,
+            "status": final_status,
+            "steps": steps[:24],
+            "truncatedStepCount": max(0, len(steps) - 24),
+            "sourceCandidateCount": source_candidate_count,
+            "approvedSourceCandidateCount": approved_count,
+            "candidateGraphId": str(candidate_graph["candidateGraph"].get("candidateId") or ""),
+            "candidateGraphNodeCount": int(graph_summary.get("nodeCount") or 0),
+            "candidateGraphEdgeCount": int(graph_summary.get("edgeCount") or 0),
+            "stewardPackCandidateId": steward_candidate_id,
+            "knowledgeBaseId": knowledge_base_id,
+            "formalKnowledgeItemCount": status_payload["summary"]["formalKnowledgeItemCount"],
+            "autoSubmit": auto_submit,
+            "autoReviewSource": auto_review_source,
+            "autoApprove": auto_approve,
+            "notifyStewardAgent": notify_steward_agent,
+            "wakeStewardAgent": wake_steward_agent,
+            "knowledgeStewardActivation": _knowledge_steward_activation_log_payload(knowledge_steward_activation),
             "reusedCandidateGraph": bool(candidate_graph.get("reusedCandidateGraph")),
             "reusedStewardPack": bool(precheck.get("reusedStewardPack")),
             "ingestionFingerprint": str(precheck.get("ingestionFingerprint") or candidate_graph.get("ingestionFingerprint") or ""),

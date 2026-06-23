@@ -13,6 +13,7 @@ SAFE_COMMAND_ARG_KEYS = {
     "mode",
     "noBrowser",
     "reason",
+    "requestAudit",
     "runId",
     "run_id",
     "scope",
@@ -71,6 +72,12 @@ def safe_command_args(args: dict[str, Any]) -> dict[str, Any]:
         value = args[key]
         if isinstance(value, (bool, int, float)) or value is None:
             safe[key] = value
+        elif key == "requestAudit" and isinstance(value, dict):
+            safe[key] = {
+                str(nested_key): truncate_event_text(str(nested_value), limit=160)
+                for nested_key, nested_value in sorted(value.items(), key=lambda item: str(item[0]))
+                if isinstance(nested_value, (str, int, float, bool)) or nested_value is None
+            }
         else:
             safe[key] = truncate_event_text(str(value), limit=160)
     extra_keys = sorted(str(key) for key in args.keys() if str(key) not in SAFE_COMMAND_ARG_KEYS)

@@ -62,6 +62,33 @@ def _patch_daemon_ownership_available(monkeypatch):
     monkeypatch.setattr(daemon, "_release_daemon_ownership", lambda pid: None)
 
 
+def test_safe_command_args_keeps_launcher_request_audit_bounded():
+    args = {
+        "reason": "launcher_stop_button",
+        "source": "launcher_api",
+        "requestAudit": {
+            "operation": "stop",
+            "trigger": "launcher_route_stop_button",
+            "endpoint": "/api/launcher/stop",
+            "refererPath": "/launcher",
+            "secret": {"nested": "ignored"},
+        },
+        "unsafeToken": "should-not-be-logged",
+    }
+
+    safe = scene_logging.safe_command_args(args)
+
+    assert safe["reason"] == "launcher_stop_button"
+    assert safe["requestAudit"] == {
+        "endpoint": "/api/launcher/stop",
+        "operation": "stop",
+        "refererPath": "/launcher",
+        "trigger": "launcher_route_stop_button",
+    }
+    assert "unsafeToken" not in safe
+    assert safe["argKeys"] == ["source", "unsafeToken"]
+
+
 @pytest.fixture(autouse=True)
 def _block_real_process_termination(monkeypatch, tmp_path):
     events_path = tmp_path / "runtime-manager-events.jsonl"

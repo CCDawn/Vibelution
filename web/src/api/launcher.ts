@@ -156,15 +156,17 @@ export function startLauncherBundle() {
   });
 }
 
-export function stopLauncherBundle() {
+export function stopLauncherBundle(trigger = "launcher_route_stop_button") {
   return fetchLauncherJson<LauncherControlResponse>("stop", {
     method: "POST",
+    headers: { "X-Vibelution-Launcher-Trigger": trigger },
   });
 }
 
-export function forceStopLauncherBundle() {
+export function forceStopLauncherBundle(trigger = "launcher_route_force_stop_button") {
   return fetchLauncherJson<LauncherControlResponse>("force-stop", {
     method: "POST",
+    headers: { "X-Vibelution-Launcher-Trigger": trigger },
   });
 }
 
