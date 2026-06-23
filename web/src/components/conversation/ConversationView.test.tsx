@@ -150,7 +150,7 @@ describe("ConversationView edit resend affordance", () => {
     expect(conversationViewSource).toContain("styles.streamingResponseText");
     expect(conversationViewSource).toContain("styles.streamingResponseParagraph");
     expect(conversationViewSource).toContain("const isResponseStreaming = Boolean(message.streaming) && showResponseBlock");
-    expect(conversationViewSource).toContain("showResponseBlock && responseExpanded && !isResponseStreaming");
+    expect(conversationViewSource).toContain("showResponseBlock && !isStreamingStatusPlaceholder && responseExpanded && !isResponseStreaming");
     expect(conversationViewSource).toContain("? renderStreamingResponseText(message.content)");
     expect(conversationViewStylesSource).toContain(".streamingResponseText");
     expect(conversationViewStylesSource).toContain(".streamingResponseParagraph");
@@ -181,6 +181,14 @@ describe("ConversationView edit resend affordance", () => {
     expect(processToggleHoverRule).not.toContain("border-color");
   });
 
+  it("folds streaming request placeholders into the process strip", () => {
+    expect(conversationViewSource).toContain("function isStreamingStatusPlaceholderContent(content: string)");
+    expect(conversationViewSource).toContain("const isStreamingStatusPlaceholder = Boolean(message.streaming)");
+    expect(conversationViewSource).toContain("compactStreamingStatusPlaceholder(message.content)");
+    expect(conversationViewSource).toContain("showResponseBlock && !isStreamingStatusPlaceholder");
+    expect(conversationViewStylesSource).toContain("grid-template-columns: 14px auto auto minmax(0, 1fr) 14px");
+  });
+
   it("caches response and markdown parsing so repeated expands avoid synchronous reparsing", () => {
     expect(conversationViewSource).toContain("const responseSegmentCacheRef = useRef<Map<string, ResponseSegment[]>>(new Map())");
     expect(conversationViewSource).toContain("const markdownBlockCacheRef = useRef<Map<string, MarkdownBlock[]>>(new Map())");
@@ -188,7 +196,7 @@ describe("ConversationView edit resend affordance", () => {
     expect(conversationViewSource).toContain("function getCachedMarkdownBlocks(content: string)");
     expect(conversationViewSource).toContain("trimOldestCacheEntries(responseSegmentCacheRef.current, RESPONSE_PARSE_CACHE_LIMIT)");
     expect(conversationViewSource).toContain("trimOldestCacheEntries(markdownBlockCacheRef.current, MARKDOWN_PARSE_CACHE_LIMIT)");
-    expect(conversationViewSource).toContain("const responseSegments = showResponseBlock && responseExpanded && !isResponseStreaming");
+    expect(conversationViewSource).toContain("const responseSegments = showResponseBlock && !isStreamingStatusPlaceholder && responseExpanded && !isResponseStreaming");
     expect(conversationViewSource).toContain("? getCachedResponseSegments(message.content)");
     expect(conversationViewSource).toContain("const blocks = getCachedMarkdownBlocks(content)");
     expect(conversationViewSource).toContain("const prewarmMessages = timelineMessages");
@@ -225,7 +233,7 @@ describe("ConversationView edit resend affordance", () => {
       { useDefaultProcessDisplayMode: true },
     );
 
-    expect(html).toContain("过程已收起");
+    expect(html).toContain("过程");
     expect(html).toContain("思考过程 1");
     expect(html).toContain("工具调用 1");
     expect(html).toContain("最终回答已经完成。");
@@ -1882,6 +1890,38 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).not.toContain("运行状态 3");
     expect(html).not.toContain("回答</span>");
     expect((html.match(new RegExp(fullModelStatus, "g")) ?? [])).toHaveLength(0);
+  });
+
+  it("shows model-request placeholder as a light process preview instead of a separate answer block", () => {
+    const placeholder = "正在请求模型，等待首个响应片段...\n上下文已组装完成，正在进入 LLM 调用。";
+    const html = renderConversation(
+      [
+        {
+          id: "message-model-request-preview",
+          role: "assistant",
+          content: placeholder,
+          timestamp: "2026-06-23T18:11:00Z",
+          streaming: true,
+          feedbackEvents: [
+            {
+              sequence: 1,
+              kind: "status",
+              status: "running",
+              name: "model_request",
+              summary: placeholder,
+            },
+          ],
+        },
+      ],
+      { useDefaultProcessDisplayMode: true },
+    );
+
+    expect(html).toContain("生成中");
+    expect(html).toContain("正在请求");
+    expect(html).toContain("正在请求模型，等待首个响应片段...");
+    expect(html).toContain("answerOnlyProcessPreview");
+    expect(html).not.toContain("回答</span>");
+    expect(html).not.toContain("responseSection");
   });
 
   it("keeps the active execution trace compact while preserving expandable details", () => {

@@ -150,6 +150,17 @@ type ComputerUseResult = {
   error: string;
 };
 
+const STREAMING_STATUS_CONTENT_MARKERS = [
+  "正在请求模型",
+  "等待首个响应片段",
+  "上下文已组装完成",
+  "正在进入 llm 调用",
+  "requesting the model",
+  "waiting for the first response chunk",
+  "context is assembled",
+  "llm call is starting",
+];
+
 function StreamingResponseContent({ content }: { content: string }) {
   const visibleContent = String(content ?? "");
   if (!visibleContent) {
@@ -1339,13 +1350,13 @@ export function ConversationView({
 
   function processSummaryTitle(tone: string) {
     if (tone === "running") {
-      return lang === "zh" ? "过程执行中" : "Process running";
+      return lang === "zh" ? "生成中" : "Generating";
     }
     if (tone === "failed") {
       return lang === "zh" ? "过程失败" : "Process failed";
     }
     if (tone === "done") {
-      return lang === "zh" ? "过程已收起" : "Process collapsed";
+      return lang === "zh" ? "过程" : "Process";
     }
     return lang === "zh" ? "过程待处理" : "Process pending";
   }
@@ -1379,6 +1390,21 @@ export function ConversationView({
         || "",
       120,
     );
+  }
+
+  function isStreamingStatusPlaceholderContent(content: string) {
+    const normalized = String(content ?? "")
+      .replace(/\s+/g, " ")
+      .trim()
+      .toLowerCase();
+    if (!normalized || normalized.length > 180) {
+      return false;
+    }
+    return STREAMING_STATUS_CONTENT_MARKERS.some((marker) => normalized.includes(marker));
+  }
+
+  function compactStreamingStatusPlaceholder(content: string) {
+    return compactPreview(String(content ?? "").replace(/\s+/g, " ").trim(), 92);
   }
 
   function processSummaryIcon(tone: string) {
@@ -2341,16 +2367,18 @@ export function ConversationView({
     operations: ConversationOperation[],
     defaultExpanded: boolean,
     renderDetails: () => ReactNode,
+    inlinePreview?: string,
   ) {
     if (operations.length === 0) {
       return null;
     }
     const tone = operationCollectionTone(operations);
+    const toneClass = styles[`answerOnlyProcessGroup_${tone}` as keyof typeof styles] ?? "";
     const expanded = getExpansionState(messageId, "process", defaultExpanded);
-    const preview = tone === "failed" ? processSummaryPreview(operations) : "";
+    const preview = inlinePreview || (tone === "failed" ? processSummaryPreview(operations) : "");
     const title = processSummaryTitle(tone);
     return (
-      <section className={`${styles.answerOnlyProcessGroup} ${styles[`answerOnlyProcessGroup_${tone}`]}`}>
+      <section className={[styles.answerOnlyProcessGroup, toneClass].filter(Boolean).join(" ")}>
         <button
           type="button"
           className={styles.answerOnlyProcessToggle}
@@ -3112,11 +3140,16 @@ export function ConversationView({
               && !groupTranscriptMessage
               && conversationTimelineItems.length > 0;
             const userAuthoredMessage = message.role === "user" && !agentInboxMessage;
-            const isResponseStreaming = Boolean(message.streaming) && showResponseBlock;
+            const isStreamingStatusPlaceholder = Boolean(message.streaming)
+              && showResponseBlock
+              && answerOnlyProcessMode
+              && hasFeedbackTimeline
+              && isStreamingStatusPlaceholderContent(message.content);
+            const isResponseStreaming = Boolean(message.streaming) && showResponseBlock && !isStreamingStatusPlaceholder;
             const showResponseSpinner = isResponseStreaming && !hasActiveProcess;
             const defaultResponseExpanded = Boolean(message.streaming) || defaultExpandedResponseIds.has(message.id);
             const responseExpanded = getExpansionState(message.id, "response", defaultResponseExpanded);
-            const responseSegments = showResponseBlock && responseExpanded && !isResponseStreaming
+            const responseSegments = showResponseBlock && !isStreamingStatusPlaceholder && responseExpanded && !isResponseStreaming
               ? getCachedResponseSegments(message.content)
               : [];
             const isEditingMessage = userAuthoredMessage && message.id === editingMessageId;
@@ -3259,7 +3292,13 @@ export function ConversationView({
                   {renderUserAttachments(message)}
 
                   {answerOnlyProcessMode ? (
-                    renderAnswerOnlyProcessGroup(message.id, operationGroups.timeline, processDefaultExpanded, renderProcessDetails)
+                    renderAnswerOnlyProcessGroup(
+                      message.id,
+                      operationGroups.timeline,
+                      processDefaultExpanded,
+                      renderProcessDetails,
+                      isStreamingStatusPlaceholder ? compactStreamingStatusPlaceholder(message.content) : undefined,
+                    )
                   ) : hasConversationTimeline ? (
                     renderConversationTimeline(message, conversationTimelineItems)
                   ) : hasFeedbackTimeline ? (
@@ -3295,7 +3334,7 @@ export function ConversationView({
                   ) : null}
                   {renderImageArtifact(message)}
 
-                  {showResponseBlock && (!hasConversationTimeline || answerOnlyProcessMode) ? (
+                  {showResponseBlock && !isStreamingStatusPlaceholder && (!hasConversationTimeline || answerOnlyProcessMode) ? (
                     <section className={styles.responseSection}>
                       <button
                         type="button"
