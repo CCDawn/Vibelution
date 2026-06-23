@@ -392,6 +392,21 @@ describe("AgentsRoute layout contract", () => {
   });
 
   it("keeps Agent Center helper copy in hover text instead of permanent explanatory blocks", () => {
+    expect(routeSource).toContain("<div title={copy.subtitle}>");
+    expect(routeSource).not.toContain("<p className={styles.subtitle}>{copy.subtitle}</p>");
+    expect(routeSource).toContain("<span className={styles.healthCell} title={issueSummary(agent.health, lang)}>");
+    expect(routeSource).not.toContain("<small>{issueSummary(agent.health, lang)}</small>");
+    expect(routeSource).toContain("<div title={column.description}>");
+    expect(routeSource).not.toContain("<span>{column.description}</span>");
+    expect(routeSource).toContain("title={createToolBundleSummaryValue.meta || copy.createAgentToolBundleEmpty}");
+    expect(routeSource).not.toContain("<small>{createToolBundleSummaryValue.meta || copy.createAgentToolBundleEmpty}</small>");
+    expect(routeSource).not.toContain("<small>{toolBundleMeta(bundle, lang)}</small>");
+    expect(routeSource).toContain("<span className={styles.detailHealthStatus} title={issueSummary(selectedAgent.health, lang)}>");
+    expect(routeSource).not.toContain("<small>{issueSummary(selectedAgent.health, lang)}</small>");
+    expect(routeSource).toContain("title={`${slot.required ? copy.requiredSlot : copy.optionalSlot} · ${slot.description}`}");
+    expect(routeSource).not.toContain("<small>{slot.required ? copy.requiredSlot : copy.optionalSlot}</small>");
+    expect(routeSource).toContain("title={[toolPolicySourceLine, toolPolicySource?.description || copy.toolPolicyPickerHint].filter(Boolean).join(\"\\n\")}");
+    expect(routeSource).not.toContain("<small>{toolPolicySourceLine}</small>");
     expect(routeSource).toContain("title={copy.createAgentHint}");
     expect(routeSource).toContain("title={copy.createAgentToolBundlesHint}");
     expect(routeSource).toContain("title={copy.returnBannerHint}");
@@ -410,6 +425,11 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).not.toContain("<p className={styles.contextLine}>{copy.taskHint}</p>");
     expect(routeSource).not.toContain("<p>{copy.maintenanceHint}</p>");
     expect(routeSource).not.toContain("<p>{copy.resetAgentHint}</p>");
+    expect(stylesSource).not.toContain(".subtitle");
+    expect(stylesSource).not.toContain(".healthCell small");
+    expect(stylesSource).not.toContain(".detailHealthStatus small");
+    expect(stylesSource).not.toContain(".createToolBundleOption small");
+    expect(stylesSource).not.toContain(".llmSlotField span small");
   });
 
   it("explains Agent health states with reason and next action instead of a bare hint pill", () => {
