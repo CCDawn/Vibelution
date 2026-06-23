@@ -305,43 +305,54 @@ AGENT_AVATAR_FILENAMES = (
     "image2-1779953260549-43de200a.png",
     "image2-1779954683508-9fcd1834.png",
 )
+AGENT_AVATAR_LEGACY_DEFAULTS = (
+    "01-session-agent.png",
+    "02-diagnose-agent.png",
+    "03-inspect-agent.png",
+    "04-summarize-agent.png",
+    "05-broad-explorer.png",
+    "06-deep-investigator.png",
+    "07-evidence-reviewer.png",
+    "08-theme-synthesizer.png",
+    "09-card-planner.png",
+)
 AGENT_AVATAR_ROLE_DEFAULTS = (
-    (("chat",), "10-anime-session-agent.png"),
-    (("general",), "10-anime-session-agent.png"),
-    (("source",), "14-anime-source-collector-agent.png"),
-    (("acquisition",), "14-anime-source-collector-agent.png"),
-    (("discovery",), "14-anime-source-collector-agent.png"),
-    (("memory",), "15-anime-memory-steward-agent.png"),
-    (("knowledge",), "15-anime-memory-steward-agent.png"),
-    (("steward",), "15-anime-memory-steward-agent.png"),
-    (("self_evolution",), "16-anime-self-evolution-agent.png"),
-    (("self-evolution",), "16-anime-self-evolution-agent.png"),
-    (("optimization",), "16-anime-self-evolution-agent.png"),
-    (("team",), "17-anime-team-coordinator-agent.png"),
-    (("coordinator",), "17-anime-team-coordinator-agent.png"),
-    (("orchestrat",), "17-anime-team-coordinator-agent.png"),
-    (("system",), "18-anime-system-service-agent.png"),
-    (("service",), "18-anime-system-service-agent.png"),
-    (("creative",), "19-anime-creative-writer-agent.png"),
-    (("writing",), "19-anime-creative-writer-agent.png"),
-    (("synthesis",), "19-anime-creative-writer-agent.png"),
-    (("research", "broad"), "14-anime-source-collector-agent.png"),
-    (("research", "deep"), "11-anime-deep-research-agent.png"),
-    (("research", "theme"), "19-anime-creative-writer-agent.png"),
-    (("research", "card"), "19-anime-creative-writer-agent.png"),
-    (("research", "planner"), "17-anime-team-coordinator-agent.png"),
-    (("summar",), "19-anime-creative-writer-agent.png"),
-    (("review",), "13-anime-review-evaluator-agent.png"),
-    (("evidence",), "13-anime-review-evaluator-agent.png"),
-    (("judge",), "13-anime-review-evaluator-agent.png"),
-    (("audit",), "13-anime-review-evaluator-agent.png"),
-    (("inspect",), "13-anime-review-evaluator-agent.png"),
-    (("diagnose",), "12-anime-tool-executor-agent.png"),
-    (("debug",), "12-anime-tool-executor-agent.png"),
-    (("tool",), "12-anime-tool-executor-agent.png"),
-    (("execute",), "12-anime-tool-executor-agent.png"),
-    (("baseline",), "13-anime-review-evaluator-agent.png"),
-    (("candidate",), "12-anime-tool-executor-agent.png"),
+    (("chat",), ("01-session-agent.png", "10-anime-session-agent.png")),
+    (("general",), ("01-session-agent.png", "10-anime-session-agent.png")),
+    (("source",), ("05-broad-explorer.png", "14-anime-source-collector-agent.png")),
+    (("acquisition",), ("05-broad-explorer.png", "14-anime-source-collector-agent.png")),
+    (("discovery",), ("05-broad-explorer.png", "14-anime-source-collector-agent.png")),
+    (("memory",), ("04-summarize-agent.png", "15-anime-memory-steward-agent.png")),
+    (("knowledge",), ("04-summarize-agent.png", "15-anime-memory-steward-agent.png")),
+    (("steward",), ("04-summarize-agent.png", "15-anime-memory-steward-agent.png")),
+    (("self_evolution",), ("03-inspect-agent.png", "16-anime-self-evolution-agent.png")),
+    (("self-evolution",), ("03-inspect-agent.png", "16-anime-self-evolution-agent.png")),
+    (("optimization",), ("03-inspect-agent.png", "16-anime-self-evolution-agent.png")),
+    (("team",), ("09-card-planner.png", "17-anime-team-coordinator-agent.png")),
+    (("coordinator",), ("09-card-planner.png", "17-anime-team-coordinator-agent.png")),
+    (("orchestrat",), ("09-card-planner.png", "17-anime-team-coordinator-agent.png")),
+    (("system",), ("03-inspect-agent.png", "18-anime-system-service-agent.png")),
+    (("service",), ("03-inspect-agent.png", "18-anime-system-service-agent.png")),
+    (("creative",), ("08-theme-synthesizer.png", "19-anime-creative-writer-agent.png")),
+    (("writing",), ("08-theme-synthesizer.png", "19-anime-creative-writer-agent.png")),
+    (("synthesis",), ("08-theme-synthesizer.png", "19-anime-creative-writer-agent.png")),
+    (("research", "broad"), ("05-broad-explorer.png", "14-anime-source-collector-agent.png")),
+    (("research", "deep"), ("06-deep-investigator.png", "11-anime-deep-research-agent.png")),
+    (("research", "theme"), ("08-theme-synthesizer.png", "19-anime-creative-writer-agent.png")),
+    (("research", "card"), ("09-card-planner.png", "19-anime-creative-writer-agent.png")),
+    (("research", "planner"), ("09-card-planner.png", "17-anime-team-coordinator-agent.png")),
+    (("summar",), ("04-summarize-agent.png", "19-anime-creative-writer-agent.png")),
+    (("review",), ("07-evidence-reviewer.png", "13-anime-review-evaluator-agent.png")),
+    (("evidence",), ("07-evidence-reviewer.png", "13-anime-review-evaluator-agent.png")),
+    (("judge",), ("07-evidence-reviewer.png", "13-anime-review-evaluator-agent.png")),
+    (("audit",), ("07-evidence-reviewer.png", "13-anime-review-evaluator-agent.png")),
+    (("inspect",), ("03-inspect-agent.png", "13-anime-review-evaluator-agent.png")),
+    (("diagnose",), ("02-diagnose-agent.png", "12-anime-tool-executor-agent.png")),
+    (("debug",), ("02-diagnose-agent.png", "12-anime-tool-executor-agent.png")),
+    (("tool",), ("02-diagnose-agent.png", "12-anime-tool-executor-agent.png")),
+    (("execute",), ("02-diagnose-agent.png", "12-anime-tool-executor-agent.png")),
+    (("baseline",), ("07-evidence-reviewer.png", "13-anime-review-evaluator-agent.png")),
+    (("candidate",), ("02-diagnose-agent.png", "12-anime-tool-executor-agent.png")),
 )
 AGENT_PERSONA_PROFILE_TEXT_FIELDS = (
     "gender",
@@ -4972,12 +4983,14 @@ def _default_agent_avatar_filename(agent: dict[str, Any]) -> str:
     if not available:
         return ""
     key = _agent_avatar_match_key(agent)
-    for tokens, filename in AGENT_AVATAR_ROLE_DEFAULTS:
-        if filename not in available:
-            continue
+    for tokens, filenames in AGENT_AVATAR_ROLE_DEFAULTS:
         if all(token in key for token in tokens):
-            return filename
-    fallback_pool = [filename for filename in AGENT_AVATAR_FILENAMES if filename in available]
+            for filename in filenames:
+                if filename in available:
+                    return filename
+    fallback_pool = [filename for filename in AGENT_AVATAR_LEGACY_DEFAULTS if filename in available]
+    if not fallback_pool:
+        fallback_pool = [filename for filename in AGENT_AVATAR_FILENAMES if filename in available]
     if not fallback_pool:
         fallback_pool = available
     stable_key = _normalize_agent_code(agent.get("agentCode")) or str(agent.get("agentId") or "")
