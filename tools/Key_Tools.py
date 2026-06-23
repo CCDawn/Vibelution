@@ -36,6 +36,10 @@ from tools.research_search_tools import (
     project_search as _project_search_impl,
     search_summarize_sources as _search_summarize_sources_impl,
 )
+from tools.source_collection_stage_tools import (
+    source_collection_context_tool as _source_collection_context_impl,
+    source_collection_stage_writeback_tool as _source_collection_stage_writeback_impl,
+)
 from tools.git_tools import (
     get_git_status_summary_tool as _get_git_status_summary_impl,
     get_recent_changes_tool as _get_recent_changes_impl,
@@ -543,6 +547,86 @@ def create_key_tools() -> List[BaseTool]:
             JSON 字符串，包含去重后的 title/url/domain
         """
         return _search_summarize_sources_impl(search_outputs=search_outputs, max_sources=max_sources)
+
+    @tool
+    def source_collection_context_tool(
+        team_id: str = "",
+        run_id: str = "",
+        stage_id: str = "",
+        task_id: str = "",
+        max_records: int = 24,
+        include_candidates: bool = True,
+    ) -> str:
+        """
+        【知识搜集阶段上下文】读取当前团队资料搜集阶段任务的受控上下文。
+
+        该工具不联网、不读取任意本地文件、不消耗 API 额度；只返回指定 team/run/task
+        已落盘到平台工作流中的 DataRecord、source_manifest 候选、任务合同和边界摘要。
+        适合资料提炼、资料审查、候选图谱和共享记忆前审 Agent 在私聊阶段任务中使用。
+
+        Args:
+            team_id: 团队 ID，阶段任务消息中的 teamId
+            run_id: 资料搜集运行 ID，阶段任务消息中的 runId
+            stage_id: 阶段 ID，可选 collection/candidate/screening/graph/memory
+            task_id: 阶段任务 ID；传入后会自动补齐 run/stage
+            max_records: 最多返回多少条资料记录，默认 24，上限由后端限制
+            include_candidates: 是否返回本轮已导入的 source_manifest 候选
+
+        Returns:
+            JSON 字符串，包含 bounded context、records、candidates、writebackContract 和边界
+        """
+        return _source_collection_context_impl(
+            team_id=team_id,
+            run_id=run_id,
+            stage_id=stage_id,
+            task_id=task_id,
+            max_records=max_records,
+            include_candidates=include_candidates,
+        )
+
+    @tool
+    def source_collection_stage_writeback_tool(
+        team_id: str = "",
+        task_id: str = "",
+        status: str = "completed",
+        summary: str = "",
+        result_json: str = "",
+        evidence_refs_json: str = "",
+        next_actions_json: str = "",
+        recorded_by_agent: str = "",
+        metadata_json: str = "",
+    ) -> str:
+        """
+        【知识搜集阶段回写】把当前私聊阶段任务的结构化结果写回团队工作流。
+
+        该工具只更新 source_collection_stage_session_task 结果，不写正式 Team Knowledge、
+        RAG 或官方图谱。完成、阻塞、失败都应通过此工具收口，避免团队页任务长期停在 running。
+
+        Args:
+            team_id: 团队 ID
+            task_id: 阶段任务 ID
+            status: completed / needs_review / blocked / failed / cancelled
+            summary: 给团队页展示的简短结论
+            result_json: JSON 对象字符串，放结构化结果
+            evidence_refs_json: JSON 数组字符串，放证据引用
+            next_actions_json: JSON 数组字符串，放下一步建议
+            recorded_by_agent: 记录结果的 Agent ID 或名称
+            metadata_json: 可选 JSON 对象字符串
+
+        Returns:
+            JSON 字符串，包含更新后的 task 和 writeback
+        """
+        return _source_collection_stage_writeback_impl(
+            team_id=team_id,
+            task_id=task_id,
+            status=status,
+            summary=summary,
+            result_json=result_json,
+            evidence_refs_json=evidence_refs_json,
+            next_actions_json=next_actions_json,
+            recorded_by_agent=recorded_by_agent,
+            metadata_json=metadata_json,
+        )
 
     @tool
     def get_git_status_summary_tool(limit: int = 5) -> str:
@@ -2007,6 +2091,8 @@ def create_key_tools() -> List[BaseTool]:
         project_search_tool,
         news_search_tool,
         search_summarize_sources_tool,
+        source_collection_context_tool,
+        source_collection_stage_writeback_tool,
         get_git_status_summary_tool,
         get_recent_changes_tool,
         get_entity_history_tool,

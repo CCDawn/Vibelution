@@ -1090,6 +1090,91 @@ def writeback_source_collection_stage_session_task(
     }
 
 
+def get_source_collection_stage_task_context(
+    team_id: str,
+    *,
+    run_id: str = "",
+    stage_id: str = "",
+    task_id: str = "",
+    max_records: int = 24,
+    include_candidates: bool = True,
+) -> dict[str, Any]:
+    normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
+    team_service.get_team(normalized_team_id)
+    normalized_task_id = _trim_text(task_id, max_length=160)
+    task: dict[str, Any] = {}
+    task_run_id = ""
+    if normalized_task_id:
+        found_task, found_run_id = _find_source_collection_stage_session_task_by_id(normalized_team_id, normalized_task_id)
+        if found_task is None or not found_run_id:
+            raise TeamWorkflowOrchestrationError(f"Stage session task not found: {normalized_task_id}")
+        task = dict(found_task)
+        task_run_id = found_run_id
+    normalized_run_id = (
+        _trim_text(run_id, max_length=128)
+        or task_run_id
+        or _trim_text(task.get("runId"), max_length=128)
+    )
+    normalized_run_id = _normalize_required_id(normalized_run_id, "Data processing run id is required.")
+    normalized_stage_id = (
+        _trim_text(stage_id, max_length=80)
+        or _trim_text(task.get("stageId"), max_length=80)
+        or "collection"
+    )
+    if normalized_stage_id not in SOURCE_COLLECTION_AGENT_CONTEXT_STAGE_ROLES:
+        raise TeamWorkflowOrchestrationError(f"Unsupported source collection stage: {normalized_stage_id}")
+    run_bundle = _source_collection_run_context_bundle(normalized_team_id, normalized_run_id)
+    task_agent_id = _trim_text(task.get("agentId"), max_length=160)
+    task_agent_role = _trim_text(task.get("agentRole"), max_length=80)
+    matching_assignments = _source_collection_matching_assignments(
+        run_bundle["assignments"],
+        agent_id=task_agent_id,
+        agent_role=task_agent_role,
+    )
+    limit = _normalize_int(max_records, default=24, minimum=1, maximum=80)
+    records = _rank_source_collection_context_records(
+        run_bundle["records"],
+        stage_id=normalized_stage_id,
+        source_candidates=run_bundle["sourceCandidates"],
+    )
+    selected_records = records[:limit]
+    source_candidates = run_bundle["sourceCandidates"] if include_candidates else []
+    storage_artifacts = _source_collection_storage_artifacts(normalized_team_id, normalized_run_id)
+    return {
+        "schemaVersion": SCHEMA_VERSION,
+        "status": "ok",
+        "contextKind": "source_collection_stage_task_context",
+        "teamId": normalized_team_id,
+        "runId": normalized_run_id,
+        "stageId": normalized_stage_id,
+        "taskId": normalized_task_id,
+        "agentId": task_agent_id,
+        "agentRole": task_agent_role,
+        "counts": {
+            "recordCount": len(run_bundle["records"]),
+            "returnedRecordCount": len(selected_records),
+            "candidateCount": len(run_bundle["sourceCandidates"]),
+            "returnedCandidateCount": len(source_candidates),
+            "assignmentCount": len(run_bundle["assignments"]),
+            "matchingAssignmentCount": len(matching_assignments),
+        },
+        "run": _source_collection_context_run_summary(run_bundle["run"], run_bundle["runStatus"], run_bundle["activeWorkRun"]),
+        "task": _source_collection_context_task_summary(task),
+        "assignments": [_source_collection_context_assignment_summary(item) for item in matching_assignments[:12]],
+        "records": [_source_collection_context_record_summary(item) for item in selected_records],
+        "candidates": [_source_collection_context_candidate_summary(item) for item in source_candidates[:limit]],
+        "storageArtifacts": storage_artifacts,
+        "writebackContract": task.get("writebackContract") if isinstance(task.get("writebackContract"), dict) else {},
+        "boundaries": _source_collection_stage_session_task_boundaries(),
+        "usage": {
+            "readTool": "source_collection_context_tool",
+            "writebackTool": "source_collection_stage_writeback_tool",
+            "doNotUse": ["file://", "localhost fetch", "web_fetch_tool for local paths"],
+            "fallback": "If required context is missing, write back status=blocked with a short reason.",
+        },
+    }
+
+
 def start_source_collection_run(team_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
     normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
     team = team_service.get_team(normalized_team_id)
@@ -9751,6 +9836,139 @@ def _source_collection_stage_session_tasks(team_id: str, run_id: str) -> list[di
     return [item for item in list(store.get("tasks") or []) if isinstance(item, dict)]
 
 
+def _rank_source_collection_context_records(
+    records: list[dict[str, Any]],
+    *,
+    stage_id: str,
+    source_candidates: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    imported_record_ids: set[str] = set()
+    for candidate in source_candidates:
+        if not isinstance(candidate, dict):
+            continue
+        metadata = candidate.get("metadata") if isinstance(candidate.get("metadata"), dict) else {}
+        imported_from = metadata.get("importedFromDataRecord") if isinstance(metadata.get("importedFromDataRecord"), dict) else {}
+        record_id = _trim_text(imported_from.get("recordId"), max_length=128)
+        if record_id:
+            imported_record_ids.add(record_id)
+
+    def score(record: dict[str, Any]) -> tuple[int, str]:
+        record_id = _trim_text(record.get("recordId"), max_length=128)
+        metadata = record.get("metadata") if isinstance(record.get("metadata"), dict) else {}
+        source_ref = _trim_text(record.get("sourceRef"), max_length=2000)
+        raw_location = _trim_text(record.get("rawLocation"), max_length=2000)
+        quality = record.get("qualitySignals") if isinstance(record.get("qualitySignals"), dict) else {}
+        value = 0
+        if stage_id == "candidate" and record_id not in imported_record_ids:
+            value += 60
+        if _source_collection_extract_doi(source_ref, raw_location, metadata.get("doi")):
+            value += 30
+        if _looks_like_url(source_ref) or _looks_like_url(raw_location):
+            value += 20
+        if _trim_text(record.get("title"), max_length=240):
+            value += 8
+        if _trim_text(record.get("summary"), max_length=1000):
+            value += 8
+        if quality:
+            value += 4
+        return (-value, _trim_text(record.get("createdAt"), max_length=120) or record_id)
+
+    return sorted([item for item in records if isinstance(item, dict)], key=score)
+
+
+def _source_collection_context_run_summary(
+    run: dict[str, Any],
+    run_status: dict[str, Any],
+    active_work_run: dict[str, Any],
+) -> dict[str, Any]:
+    scope = run.get("scope") if isinstance(run.get("scope"), dict) else {}
+    metadata = run.get("metadata") if isinstance(run.get("metadata"), dict) else {}
+    summary = run_status.get("summary") if isinstance(run_status.get("summary"), dict) else {}
+    return {
+        "runId": _trim_text(run.get("runId"), max_length=128),
+        "title": _trim_text(run.get("title") or metadata.get("title") or scope.get("topic"), max_length=240),
+        "topic": _trim_text(scope.get("topic"), max_length=240),
+        "goal": _trim_text(scope.get("goal"), max_length=500),
+        "status": _trim_text(run.get("status") or run_status.get("status") or active_work_run.get("status"), max_length=80),
+        "currentPhase": _trim_text(active_work_run.get("currentPhase") or summary.get("currentPhase"), max_length=120),
+        "summary": _trim_text(active_work_run.get("summary") or summary.get("summary"), max_length=500),
+    }
+
+
+def _source_collection_context_task_summary(task: dict[str, Any]) -> dict[str, Any]:
+    if not task:
+        return {}
+    return {
+        "taskId": _trim_text(task.get("taskId"), max_length=160),
+        "stageId": _trim_text(task.get("stageId"), max_length=80),
+        "agentId": _trim_text(task.get("agentId"), max_length=160),
+        "agentRole": _trim_text(task.get("agentRole"), max_length=80),
+        "sessionId": _trim_text(task.get("sessionId"), max_length=160),
+        "status": _trim_text(task.get("status"), max_length=80),
+        "title": _trim_text(task.get("title"), max_length=240),
+        "summary": _trim_text(task.get("summary"), max_length=500),
+        "createdAt": _trim_text(task.get("createdAt"), max_length=120),
+        "updatedAt": _trim_text(task.get("updatedAt"), max_length=120),
+    }
+
+
+def _source_collection_context_assignment_summary(assignment: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "assignmentId": _trim_text(assignment.get("assignmentId"), max_length=128),
+        "agentId": _trim_text(assignment.get("agentId"), max_length=160),
+        "agentRole": _trim_text(assignment.get("agentRole"), max_length=80),
+        "status": _trim_text(assignment.get("status"), max_length=80),
+        "purpose": _trim_text(assignment.get("purpose"), max_length=500),
+    }
+
+
+def _source_collection_context_record_summary(record: dict[str, Any]) -> dict[str, Any]:
+    metadata = record.get("metadata") if isinstance(record.get("metadata"), dict) else {}
+    metadata_trace = metadata.get("sourceCollectionTrace") if isinstance(metadata.get("sourceCollectionTrace"), dict) else {}
+    record_trace = record.get("collectionTrace") if isinstance(record.get("collectionTrace"), dict) else {}
+    trace = {**record_trace, **metadata_trace}
+    source_ref = _trim_text(record.get("sourceRef"), max_length=1000)
+    raw_location = _trim_text(record.get("rawLocation"), max_length=1000)
+    doi = _source_collection_extract_doi(source_ref, raw_location, metadata.get("doi"))
+    source_url = source_ref if _looks_like_url(source_ref) else (raw_location if _looks_like_url(raw_location) else "")
+    return {
+        "recordId": _trim_text(record.get("recordId"), max_length=128),
+        "title": _trim_text(record.get("title"), max_length=240),
+        "summary": _trim_text(record.get("summary"), max_length=1200),
+        "sourceType": _trim_text(record.get("sourceType"), max_length=80),
+        "sourceRef": source_ref,
+        "rawLocation": raw_location,
+        "sourceUrl": source_url,
+        "doi": doi,
+        "containerTitle": _trim_text(metadata.get("containerTitle"), max_length=240),
+        "issued": _trim_text(metadata.get("issued"), max_length=80),
+        "searchProvider": _trim_text(metadata.get("searchProvider") or trace.get("searchProvider"), max_length=80),
+        "query": _trim_text(trace.get("query") or metadata.get("query"), max_length=500),
+        "assignmentId": _trim_text(trace.get("assignmentId") or metadata.get("assignmentId"), max_length=128),
+        "identityKey": _source_collection_record_identity_key(record),
+        "qualitySignals": _normalize_metadata(record.get("qualitySignals")),
+    }
+
+
+def _source_collection_context_candidate_summary(candidate: dict[str, Any]) -> dict[str, Any]:
+    metadata = candidate.get("metadata") if isinstance(candidate.get("metadata"), dict) else {}
+    imported_from = metadata.get("importedFromDataRecord") if isinstance(metadata.get("importedFromDataRecord"), dict) else {}
+    return {
+        "candidateId": _trim_text(candidate.get("candidateId"), max_length=128),
+        "candidateType": _trim_text(candidate.get("candidateType"), max_length=80),
+        "title": _trim_text(candidate.get("title"), max_length=240),
+        "summary": _trim_text(candidate.get("summary"), max_length=1200),
+        "sourceKind": _trim_text(candidate.get("sourceKind"), max_length=80),
+        "sourceUrl": _trim_text(candidate.get("sourceUrl") or metadata.get("sourceUrl"), max_length=1000),
+        "sourcePath": _trim_text(candidate.get("sourcePath") or metadata.get("sourcePath"), max_length=1000),
+        "doi": _trim_text(metadata.get("doi") or imported_from.get("doi"), max_length=240),
+        "sourceRecordId": _trim_text(metadata.get("sourceRecordId") or imported_from.get("recordId"), max_length=128),
+        "sourceIdentityKey": _trim_text(metadata.get("sourceIdentityKey") or imported_from.get("sourceIdentityKey"), max_length=160),
+        "status": _trim_text(candidate.get("status"), max_length=80),
+        "validation": _normalize_metadata(candidate.get("validation")),
+    }
+
+
 def _find_source_collection_stage_session_task(team_id: str, run_id: str, *, idempotency_key: str) -> dict[str, Any] | None:
     key = _trim_text(idempotency_key, max_length=240)
     if not key:
@@ -9810,6 +10028,7 @@ def _source_collection_stage_task_writeback_contract(
     return {
         "schemaVersion": SCHEMA_VERSION,
         "contractKind": "source_collection_stage_session_task_writeback",
+        "toolName": "source_collection_stage_writeback_tool",
         "taskId": task_id,
         "teamId": team_id,
         "runId": run_id,
@@ -9822,7 +10041,7 @@ def _source_collection_stage_task_writeback_contract(
         "writesFormalKnowledge": False,
         "writesRag": False,
         "writesOfficialGraph": False,
-        "resultAuthority": "structured_writeback_endpoint",
+        "resultAuthority": "source_collection_stage_writeback_tool",
     }
 
 
@@ -9891,7 +10110,7 @@ def _source_collection_agent_context_message(
     open_matching_assignments = _source_collection_open_assignments(matching_assignments)
     stage_label = {
         "collection": "资料发现/获取/提炼",
-        "candidate": "资料关系生成",
+        "candidate": "资料提炼",
         "screening": "资料质量评估",
         "graph": "候选图谱构建",
         "memory": "知识入库治理",
@@ -9988,6 +10207,15 @@ def _source_collection_stage_session_task_message(
     )
     task_title = _source_collection_stage_task_title(stage_id)
     contract_json = json.dumps(writeback_contract, ensure_ascii=False, sort_keys=True)
+    context_tool_payload = {
+        "team_id": writeback_contract.get("teamId", ""),
+        "run_id": writeback_contract.get("runId", ""),
+        "stage_id": writeback_contract.get("stageId", stage_id),
+        "task_id": writeback_contract.get("taskId", ""),
+        "max_records": 24,
+        "include_candidates": True,
+    }
+    context_tool_json = json.dumps(context_tool_payload, ensure_ascii=False, sort_keys=True)
     return "\n".join(
         [
             f"## 资料搜集阶段任务：{task_title}",
@@ -9996,9 +10224,12 @@ def _source_collection_stage_session_task_message(
             "",
             "## 执行要求",
             "- 先用一句简短状态回应已接收任务，再按需要调用工具；不要让用户看到像未启动一样的空白等待。",
+            f"- 先调用 `source_collection_context_tool` 读取本轮受控资料上下文，参数如下：`{context_tool_json}`。",
             "- 在本会话里完成当前阶段任务，并把可审查的结论、证据引用和下一步写清楚。",
+            "- 不要使用 `web_fetch_tool` 读取 `file://` 本地路径或 localhost 回写接口；本地资料上下文只通过 `source_collection_context_tool` 获取。",
             "- 不要直接写正式 Team Knowledge、RAG 或官方图谱；只能按候选层和结构化回写合同提交结果。",
-            "- 完成后必须通过结构化 writeback contract 回写，不要让自然语言回复成为唯一结果来源。",
+            "- 完成后必须调用 `source_collection_stage_writeback_tool` 回写；不要让自然语言回复成为唯一结果来源。",
+            "- 如果上下文不足、工具失败或无法完成，请调用 `source_collection_stage_writeback_tool` 写入 status=blocked 或 failed，并说明原因。",
             "",
             "## 结构化回写合同",
             f"```json\n{contract_json}\n```",

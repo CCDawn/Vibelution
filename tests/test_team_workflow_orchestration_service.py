@@ -799,6 +799,9 @@ def test_start_source_collection_stage_session_task_submits_direct_session_task(
     assert "资料搜集阶段任务" in submitted[0]["content"]
     assert "会立即要求当前 Agent 在本会话执行" in submitted[0]["content"]
     assert "先用一句简短状态回应已接收任务" in submitted[0]["content"]
+    assert "source_collection_context_tool" in submitted[0]["content"]
+    assert "source_collection_stage_writeback_tool" in submitted[0]["content"]
+    assert "不要使用 `web_fetch_tool` 读取 `file://`" in submitted[0]["content"]
     assert "不会自动启动 Agent 回答" not in submitted[0]["content"]
     assert submitted[0]["kwargs"]["message_source"] == "team_workflow_stage_task"
     assert submitted[0]["kwargs"]["lightweight_response"] is True
@@ -817,6 +820,84 @@ def test_start_source_collection_stage_session_task_submits_direct_session_task(
     assert explicit_duplicate["alreadyPresent"] is True
     assert explicit_duplicate["taskId"] == explicit_once["taskId"]
     assert len(submitted) == 3
+
+
+def test_source_collection_stage_task_context_returns_bounded_records_for_extraction(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
+    team = team_service.create_team(name="挑战杯科研团队")
+    run_response = team_workflow_orchestration_service.start_source_collection_run(
+        team["teamId"],
+        {
+            "topic": "脑启发路由",
+            "goal": "搜集神经机制启发算法资料",
+            "agentRoles": ["content_extraction"],
+            "agentIds": {"content_extraction": "extraction-agent"},
+            "querySeeds": ["brain-inspired routing"],
+            "promptCachePolicy": {"requirement": "disabled"},
+        },
+    )
+    run_id = run_response["run"]["runId"]
+    assignment_id = run_response["assignments"][0]["assignmentId"]
+    data_processing_service.add_record(
+        run_id,
+        {
+            "sourceType": "paper",
+            "sourceRef": "https://doi.org/10.0000/predictive-coding",
+            "rawLocation": "https://example.test/paper",
+            "title": "Predictive coding for cortical hierarchy",
+            "summary": "A relevant neural mechanism source.",
+            "metadata": {
+                "doi": "10.0000/predictive-coding",
+                "containerTitle": "Neural Computation",
+                "issued": "2026",
+                "sourceCollectionTrace": {
+                    "query": "brain-inspired routing",
+                    "searchProvider": "crossref_rest_api",
+                    "assignmentId": assignment_id,
+                },
+            },
+        },
+    )
+    data_processing_service.add_record(
+        run_id,
+        {
+            "sourceType": "paper",
+            "sourceRef": "metadata-only-source",
+            "title": "Unrelated mineral prediction",
+            "summary": "A noisy Crossref result.",
+            "metadata": {"containerTitle": "Geology Journal"},
+        },
+    )
+    task = {
+        "taskId": "stagetask-context",
+        "runId": run_id,
+        "stageId": "candidate",
+        "agentId": "extraction-agent",
+        "agentRole": "content_extraction",
+        "sessionId": "session-extraction",
+        "status": "running",
+        "title": "资料提炼任务",
+        "writebackContract": {"taskId": "stagetask-context"},
+    }
+    team_workflow_orchestration_service._upsert_source_collection_stage_session_task(team["teamId"], run_id, task)
+
+    context = team_workflow_orchestration_service.get_source_collection_stage_task_context(
+        team["teamId"],
+        task_id="stagetask-context",
+        max_records=1,
+    )
+
+    assert context["status"] == "ok"
+    assert context["stageId"] == "candidate"
+    assert context["counts"]["recordCount"] == 2
+    assert context["counts"]["returnedRecordCount"] == 1
+    assert context["records"][0]["doi"] == "10.0000/predictive-coding"
+    assert context["records"][0]["query"] == "brain-inspired routing"
+    assert context["records"][0]["assignmentId"] == assignment_id
+    assert context["usage"]["readTool"] == "source_collection_context_tool"
+    assert context["usage"]["writebackTool"] == "source_collection_stage_writeback_tool"
+    assert "file://" in context["usage"]["doNotUse"]
 
 
 def test_source_collection_stage_session_task_writeback_records_structured_result(tmp_path, monkeypatch):
@@ -880,6 +961,74 @@ def test_source_collection_stage_session_task_writeback_records_structured_resul
     latest_round = status_payload["latestRound"]
     stage_results = latest_round.get("sourceCollectionStageSessionTasks", [])
     assert any(item["taskId"] == task["taskId"] and item["status"] == "completed" for item in stage_results)
+
+
+def test_source_collection_stage_tools_read_context_and_writeback(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
+    from tools.source_collection_stage_tools import source_collection_context_tool, source_collection_stage_writeback_tool
+
+    agent = agent_directory_service.create_agent_instance(display_name="资料提炼")
+    session_service.ensure_agent_direct_session(agent_id=agent["agentId"], title="资料提炼")
+    team = team_service.create_team(
+        name="挑战杯科研团队",
+        members=[{"agentId": agent["agentId"], "role": "content_extraction", "agentName": "资料提炼"}],
+    )
+    run_response = team_workflow_orchestration_service.start_source_collection_run(
+        team["teamId"],
+        {
+            "topic": "脑启发路由",
+            "agentRoles": ["content_extraction"],
+            "agentIds": {"content_extraction": agent["agentId"]},
+            "querySeeds": ["brain-inspired routing"],
+            "promptCachePolicy": {"requirement": "disabled"},
+        },
+    )
+    data_processing_service.add_record(
+        run_response["run"]["runId"],
+        {
+            "sourceType": "paper",
+            "sourceRef": "https://doi.org/10.0000/tool-context",
+            "title": "Tool context source",
+            "summary": "Relevant source for the tool smoke test.",
+            "metadata": {"doi": "10.0000/tool-context"},
+        },
+    )
+    monkeypatch.setattr(
+        session_service,
+        "submit_session_message",
+        lambda session_id, content, **kwargs: {"accepted": True, "sessionId": session_id, "turnId": "turn-stage-tool", "status": "running"},
+    )
+    task = team_workflow_orchestration_service.start_source_collection_stage_session_task(
+        team["teamId"],
+        run_response["run"]["runId"],
+        {"stageId": "candidate", "agentId": agent["agentId"], "agentRole": "content_extraction"},
+    )
+
+    context_payload = json.loads(
+        source_collection_context_tool(
+            team_id=team["teamId"],
+            task_id=task["taskId"],
+            max_records=5,
+        )
+    )
+    writeback_payload = json.loads(
+        source_collection_stage_writeback_tool(
+            team_id=team["teamId"],
+            task_id=task["taskId"],
+            status="completed",
+            summary="工具回写完成。",
+            result_json='{"extractedRecordCount": 1}',
+            evidence_refs_json=f'[{{"type":"run","id":"{run_response["run"]["runId"]}","label":"source run"}}]',
+            next_actions_json='["进入资料审查"]',
+            recorded_by_agent=agent["agentId"],
+        )
+    )
+
+    assert context_payload["status"] == "ok"
+    assert context_payload["records"][0]["doi"] == "10.0000/tool-context"
+    assert writeback_payload["writeback"]["status"] == "completed"
+    assert writeback_payload["task"]["result"]["extractedRecordCount"] == 1
 
 
 def test_execute_source_collection_search_writes_records_and_imports_candidates(tmp_path, monkeypatch):

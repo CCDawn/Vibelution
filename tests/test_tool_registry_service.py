@@ -74,6 +74,10 @@ def test_tool_registry_lists_builtins_as_protected(tmp_path, monkeypatch):
         "search_summarize_sources_tool",
     }
     assert research_search_tools.issubset(set(bundles["research"]["toolNames"]))
+    assert {
+        "source_collection_context_tool",
+        "source_collection_stage_writeback_tool",
+    }.issubset(set(bundles["research"]["toolNames"]))
     assert {"batch_web_search_tool", "paper_search_tool", "search_summarize_sources_tool"}.issubset(
         set(bundles["research"]["preferredToolNames"])
     )
@@ -108,6 +112,15 @@ def test_tool_registry_lists_builtins_as_protected(tmp_path, monkeypatch):
     assert summarize_tool["category"] == "web_research"
     assert summarize_tool["permissionTier"] == "low"
     assert summarize_tool["riskTags"] == []
+    stage_context_tool = next(item for item in payload["tools"] if item["name"] == "source_collection_context_tool")
+    assert stage_context_tool["source"] == "built_in"
+    assert stage_context_tool["category"] == "media_research"
+    assert "no_quota_api" in stage_context_tool["capabilityTags"]
+    assert stage_context_tool["permissionTier"] == "medium"
+    stage_writeback_tool = next(item for item in payload["tools"] if item["name"] == "source_collection_stage_writeback_tool")
+    assert stage_writeback_tool["source"] == "built_in"
+    assert stage_writeback_tool["category"] == "media_research"
+    assert stage_writeback_tool["permissionTier"] == "high"
 
 
 def test_tool_registry_exposes_tool_bundle_membership_without_duplicating_generated_tools(tmp_path, monkeypatch):
