@@ -8,7 +8,6 @@ import { describe, expect, it } from "vitest";
 import { ChatNextStateSignalSummary, ConversationMessage, SessionTurnError } from "../../api/types";
 import conversationViewSource from "./ConversationView.tsx?raw";
 import {
-  advanceStreamingRevealText,
   buildStreamingTimelineScrollSignal,
   buildTimelineScrollSignal,
   COMPOSER_SESSION_REFERENCE_MIME,
@@ -147,7 +146,7 @@ describe("ConversationView edit resend affordance", () => {
   it("renders streaming assistant text through a light text path before markdown parsing", () => {
     expect(conversationViewSource).toContain("function renderStreamingResponseText(content: string)");
     expect(conversationViewSource).toContain("<StreamingResponseContent content={content} />");
-    expect(conversationViewSource).toContain("advanceStreamingRevealText(visibleTextRef.current, target)");
+    expect(conversationViewSource).toContain("const visibleContent = String(content ?? \"\")");
     expect(conversationViewSource).toContain("styles.streamingResponseText");
     expect(conversationViewSource).toContain("styles.streamingResponseParagraph");
     expect(conversationViewSource).toContain("const isResponseStreaming = Boolean(message.streaming) && showResponseBlock");
@@ -157,28 +156,11 @@ describe("ConversationView edit resend affordance", () => {
     expect(conversationViewStylesSource).toContain(".streamingResponseParagraph");
   });
 
-  it("fast-forwards large streaming backlogs while keeping small deltas smooth", () => {
-    const smallTarget = "这是一段正在流式到达的短回复。";
-    const first = advanceStreamingRevealText("", smallTarget);
-    const second = advanceStreamingRevealText(first, smallTarget);
-
-    expect(first.length).toBeGreaterThan(0);
-    expect(first.length).toBeLessThan(smallTarget.length);
-    expect(second.length).toBeGreaterThan(first.length);
-    expect(second.length).toBeLessThanOrEqual(smallTarget.length);
-
-    const target = "这是一段一次性到达的长回复，".repeat(16);
-    expect(advanceStreamingRevealText("", target)).toBe(target);
-    expect(advanceStreamingRevealText("旧文本", target)).toBe(target);
-  });
-
-  it("does not reintroduce fixed-rate typing for large live assistant deltas", () => {
-    const target = "大块 assistant_delta 已经到达浏览器后应当快速显示，不能继续按固定打字机速度慢慢吐字。".repeat(10);
-    const first = advanceStreamingRevealText("", target);
-
-    expect(first).toBe(target);
-    expect(conversationViewSource).toContain("STREAMING_REVEAL_FAST_FORWARD_BACKLOG_CHARS");
-    expect(conversationViewSource).toContain("remaining >= STREAMING_REVEAL_FAST_FORWARD_BACKLOG_CHARS");
+  it("does not reintroduce a fixed-rate typewriter buffer for live assistant deltas", () => {
+    expect(conversationViewSource).not.toContain("STREAMING_REVEAL_INTERVAL_MS");
+    expect(conversationViewSource).not.toContain("STREAMING_REVEAL_FAST_FORWARD_BACKLOG_CHARS");
+    expect(conversationViewSource).not.toContain("setTimeout(pump");
+    expect(conversationViewSource).not.toContain("advanceStreamingRevealText");
   });
 
   it("defaults to answer-only process display while keeping details expandable", () => {

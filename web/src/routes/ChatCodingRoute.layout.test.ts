@@ -897,9 +897,9 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("queueSessionDetail(payload.detail, event.data.length)");
   });
 
-  it("coalesces lightweight assistant delta stream events into a local live overlay", () => {
-    expect(routeSource).toContain("const SESSION_ASSISTANT_DELTA_MIN_APPLY_INTERVAL_MS = 80");
-    expect(routeSource).toContain("const SESSION_ASSISTANT_DELTA_IMMEDIATE_FLUSH_CHARS = 160");
+  it("applies lightweight assistant delta stream events on browser frames without timer coalescing", () => {
+    expect(routeSource).not.toContain("SESSION_ASSISTANT_DELTA_MIN_APPLY_INTERVAL_MS");
+    expect(routeSource).not.toContain("SESSION_ASSISTANT_DELTA_IMMEDIATE_FLUSH_CHARS");
     expect(routeSource).toContain("function liveAssistantOverlayTurnId(turnId: string)");
     expect(routeSource).toContain("function liveAssistantMessageId(sessionId: string, turnId: string)");
     expect(routeSource).toContain("function liveAssistantMessageTurnId(message: ConversationMessage)");
@@ -928,13 +928,16 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("feedbackEventKey(event)");
     expect(routeSource).toContain("const nextFeedbackEvents = mergeLiveFeedbackEvents(previous?.feedbackEvents, payload.feedbackEvents)");
     expect(routeSource).toContain("return mergeSessionDetailWithLiveAssistantOverlay(previous, detail)");
-    expect(routeSource).toContain("let pendingAssistantDeltaMessages: ConversationMessage[] | undefined");
-    expect(routeSource).toContain("function applyPendingAssistantDelta(reason: \"timer\" | \"close\" | \"final\" | \"immediate\")");
+    expect(routeSource).toContain("let pendingAssistantDeltaPayloads: Array<{");
+    expect(routeSource).toContain("let assistantDeltaApplyFrame: number | null = null");
+    expect(routeSource).toContain("function applyPendingAssistantDeltas(reason: \"frame\" | \"close\" | \"final\")");
+    expect(routeSource).toContain("function scheduleAssistantDeltaFrame()");
+    expect(routeSource).toContain("window.requestAnimationFrame");
+    expect(routeSource).toContain("window.cancelAnimationFrame");
     expect(routeSource).toContain("function queueAssistantDelta(");
-    expect(routeSource).toContain("const shouldFlushAssistantDeltaImmediately =");
-    expect(routeSource).toContain("contentDeltaLength + thoughtDeltaLength >= SESSION_ASSISTANT_DELTA_IMMEDIATE_FLUSH_CHARS");
-    expect(routeSource).toContain("applyPendingAssistantDelta(payload.done ? \"final\" : \"immediate\")");
-    expect(routeSource).toContain("browser.session_stream.assistant_delta_queued");
+    expect(routeSource).toContain("pendingAssistantDeltaPayloads.push({ payload, payloadLength })");
+    expect(routeSource).toContain("applyPendingAssistantDeltas(\"final\")");
+    expect(routeSource).toContain("browser.session_stream.assistant_delta_frame_scheduled");
     expect(routeSource).toContain("browser.session_stream.initial_received");
     expect(routeSource).toContain("stream.addEventListener(\"session_initial\", handleSessionInitial as EventListener)");
     expect(routeSource).toContain("stream.addEventListener(\"assistant_delta\", handleAssistantDelta as EventListener)");
@@ -946,10 +949,10 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).not.toContain("pendingAssistantDeltaDetail = mergeAssistantDeltaIntoSessionDetail");
     expect(routeSource).not.toContain("queryClient.setQueryData<SessionDetail>(queryKeys.session(streamSessionId)");
     expect(routeSource).toContain("queueAssistantDelta(payload, event.data.length)");
-    expect(routeSource).toContain("applyPendingAssistantDelta(\"close\")");
+    expect(routeSource).toContain("applyPendingAssistantDeltas(\"close\")");
     expect(routeSource).toContain("browser.session_stream.assistant_delta_applied");
     expect(routeSource).toContain("pendingTextLength");
-    expect(routeSource).toContain("immediateFlushChars: SESSION_ASSISTANT_DELTA_IMMEDIATE_FLUSH_CHARS");
+    expect(routeSource).toContain("batchSize");
   });
 
   it("backs off index polling when detail streams are connected", () => {

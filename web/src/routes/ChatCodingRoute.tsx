@@ -1394,8 +1394,6 @@ const MAX_COMPOSER_IMAGE_BYTES = 8 * 1024 * 1024;
 const ACTIVE_INDEX_POLL_MS = 3_000;
 const ACTIVE_BACKGROUND_SYNC_POLL_MS = 5_000;
 const SESSION_STREAM_MIN_APPLY_INTERVAL_MS = 350;
-const SESSION_ASSISTANT_DELTA_MIN_APPLY_INTERVAL_MS = 80;
-const SESSION_ASSISTANT_DELTA_IMMEDIATE_FLUSH_CHARS = 160;
 const SESSION_STREAM_ROUTE_SWITCH_GRACE_MS = 4_000;
 const CHAT_CENTER_FIRST_MEDIA_QUERY = "(max-width: 980px)";
 
@@ -3561,9 +3559,11 @@ export function ChatCodingRoute() {
     let applyTimer: ReturnType<typeof window.setTimeout> | null = null;
     let lastAppliedAt = 0;
     let committedAssistantDeltaMessages = liveAssistantMessagesBySessionRef.current[streamSessionId] ?? [];
-    let pendingAssistantDeltaMessages: ConversationMessage[] | undefined;
-    let assistantDeltaApplyTimer: ReturnType<typeof window.setTimeout> | null = null;
-    let assistantDeltaLastAppliedAt = 0;
+    let pendingAssistantDeltaPayloads: Array<{
+      payload: Extract<SessionStreamEvent, { type: "assistant_delta" }>;
+      payloadLength: number;
+    }> = [];
+    let assistantDeltaApplyFrame: number | null = null;
     let pendingAssistantDeltaTelemetry: {
       payloadLength: number;
       turnId: string;
@@ -3571,6 +3571,7 @@ export function ChatCodingRoute() {
       contentDeltaLength: number;
       thoughtDeltaLength: number;
       pendingTextLength: number;
+      batchSize: number;
       done: boolean;
     } | null = null;
     const decisionSnapshot = sessionStreamDecisionSnapshotRef.current;
@@ -3678,19 +3679,45 @@ export function ChatCodingRoute() {
       }
     }
 
-    function applyPendingAssistantDelta(reason: "timer" | "close" | "final" | "immediate") {
-      if (!pendingAssistantDeltaMessages || disposed) {
+    function applyPendingAssistantDeltas(reason: "frame" | "close" | "final") {
+      if (pendingAssistantDeltaPayloads.length === 0 || disposed) {
         return;
       }
-      const pendingMessages = pendingAssistantDeltaMessages;
-      const telemetry = pendingAssistantDeltaTelemetry;
-      pendingAssistantDeltaMessages = undefined;
-      pendingAssistantDeltaTelemetry = null;
-      if (assistantDeltaApplyTimer) {
-        window.clearTimeout(assistantDeltaApplyTimer);
-        assistantDeltaApplyTimer = null;
+      const pendingPayloads = pendingAssistantDeltaPayloads;
+      pendingAssistantDeltaPayloads = [];
+      if (assistantDeltaApplyFrame !== null) {
+        window.cancelAnimationFrame(assistantDeltaApplyFrame);
+        assistantDeltaApplyFrame = null;
       }
-      assistantDeltaLastAppliedAt = Date.now();
+      let pendingMessages = committedAssistantDeltaMessages;
+      let telemetry = pendingAssistantDeltaTelemetry;
+      let appliedPayloadCount = 0;
+      let finalDone = false;
+      for (const entry of pendingPayloads) {
+        const nextMessages = mergeAssistantDeltaIntoLiveMessages(pendingMessages, entry.payload);
+        if (!nextMessages) {
+          continue;
+        }
+        pendingMessages = nextMessages;
+        appliedPayloadCount += 1;
+        finalDone = finalDone || entry.payload.done;
+      }
+      if (appliedPayloadCount === 0) {
+        pendingAssistantDeltaTelemetry = null;
+        return;
+      }
+      telemetry = telemetry
+        ? {
+          ...telemetry,
+          batchSize: appliedPayloadCount,
+          done: finalDone || telemetry.done,
+          pendingTextLength: pendingMessages.reduce(
+            (total, message) => total + String(message.content ?? "").length + String(message.thought ?? "").length,
+            0,
+          ),
+        }
+        : null;
+      pendingAssistantDeltaTelemetry = null;
       committedAssistantDeltaMessages = pendingMessages;
       setLiveAssistantMessagesBySession((current) =>
         setLiveAssistantMessagesForSession(current, streamSessionId, pendingMessages)
@@ -3716,15 +3743,24 @@ export function ChatCodingRoute() {
             contentDeltaLength: telemetry?.contentDeltaLength ?? 0,
             thoughtDeltaLength: telemetry?.thoughtDeltaLength ?? 0,
             pendingTextLength: telemetry?.pendingTextLength ?? 0,
+            batchSize: telemetry?.batchSize ?? appliedPayloadCount,
             done: telemetry?.done ?? false,
-            minApplyIntervalMs: SESSION_ASSISTANT_DELTA_MIN_APPLY_INTERVAL_MS,
-            immediateFlushChars: SESSION_ASSISTANT_DELTA_IMMEDIATE_FLUSH_CHARS,
           },
         });
       }
-      if (reason === "final" && telemetry?.done) {
+      if (reason === "final" && (telemetry?.done || finalDone)) {
         void queryClient.invalidateQueries({ queryKey: queryKeys.session(streamSessionId) });
       }
+    }
+
+    function scheduleAssistantDeltaFrame() {
+      if (assistantDeltaApplyFrame !== null || disposed) {
+        return;
+      }
+      assistantDeltaApplyFrame = window.requestAnimationFrame(() => {
+        assistantDeltaApplyFrame = null;
+        applyPendingAssistantDeltas("frame");
+      });
     }
 
     function queueAssistantDelta(
@@ -3733,49 +3769,35 @@ export function ChatCodingRoute() {
     ) {
       const stats = sessionStreamApplyStatsRef.current[streamSessionId] ?? { received: 0, applied: 0, dropped: 0 };
       stats.received += 1;
-      if (pendingAssistantDeltaMessages) {
-        stats.dropped += 1;
-      }
       sessionStreamApplyStatsRef.current[streamSessionId] = stats;
-      const baseMessages = pendingAssistantDeltaMessages ?? committedAssistantDeltaMessages;
-      pendingAssistantDeltaMessages = mergeAssistantDeltaIntoLiveMessages(baseMessages, payload);
-      if (!pendingAssistantDeltaMessages) {
-        return;
-      }
+      pendingAssistantDeltaPayloads.push({ payload, payloadLength });
       const contentDeltaLength = (payload.contentDelta ?? payload.content ?? "").length;
       const thoughtDeltaLength = (payload.thoughtDelta ?? payload.thought ?? "").length;
+      const projectedMessages = mergeAssistantDeltaIntoLiveMessages(committedAssistantDeltaMessages, payload);
       const telemetry = {
         payloadLength,
         turnId: payload.turnId,
         stage: payload.stage,
         contentDeltaLength,
         thoughtDeltaLength,
-        pendingTextLength: pendingAssistantDeltaMessages.reduce(
+        pendingTextLength: (projectedMessages ?? committedAssistantDeltaMessages).reduce(
           (total, message) => total + String(message.content ?? "").length + String(message.thought ?? "").length,
           0,
         ),
+        batchSize: pendingAssistantDeltaPayloads.length,
         done: payload.done,
       };
       pendingAssistantDeltaTelemetry = telemetry;
-      const shouldFlushAssistantDeltaImmediately =
-        payload.done || contentDeltaLength + thoughtDeltaLength >= SESSION_ASSISTANT_DELTA_IMMEDIATE_FLUSH_CHARS;
-      if (shouldFlushAssistantDeltaImmediately) {
-        applyPendingAssistantDelta(payload.done ? "final" : "immediate");
+      if (payload.done) {
+        applyPendingAssistantDeltas("final");
         return;
       }
-      const elapsed = Date.now() - assistantDeltaLastAppliedAt;
-      const delayMs = Math.max(0, SESSION_ASSISTANT_DELTA_MIN_APPLY_INTERVAL_MS - elapsed);
-      if (!assistantDeltaApplyTimer) {
-        assistantDeltaApplyTimer = window.setTimeout(() => {
-          assistantDeltaApplyTimer = null;
-          applyPendingAssistantDelta("timer");
-        }, delayMs);
-      }
+      scheduleAssistantDeltaFrame();
       if (stats.received === 1 || stats.received % 50 === 0) {
         postBrowserTelemetry({
           phase: "session_stream",
-          eventCode: "browser.session_stream.assistant_delta_queued",
-          message: "Session assistant delta stream was queued before live UI overlay apply.",
+          eventCode: "browser.session_stream.assistant_delta_frame_scheduled",
+          message: "Session assistant delta stream was scheduled for the next browser frame.",
           level: "info",
           fields: {
             sessionId: streamSessionId,
@@ -3788,9 +3810,8 @@ export function ChatCodingRoute() {
             contentDeltaLength: telemetry.contentDeltaLength,
             thoughtDeltaLength: telemetry.thoughtDeltaLength,
             pendingTextLength: telemetry.pendingTextLength,
+            batchSize: telemetry.batchSize,
             done: payload.done,
-            minApplyIntervalMs: SESSION_ASSISTANT_DELTA_MIN_APPLY_INTERVAL_MS,
-            immediateFlushChars: SESSION_ASSISTANT_DELTA_IMMEDIATE_FLUSH_CHARS,
           },
         });
       }
@@ -3934,16 +3955,16 @@ export function ChatCodingRoute() {
     return () => {
       const readyStateBeforeClose = stream.readyState;
       applyPendingDetail("close");
-      applyPendingAssistantDelta("close");
+      applyPendingAssistantDeltas("close");
       disposed = true;
       setSessionStreamConnected(false);
       if (applyTimer) {
         window.clearTimeout(applyTimer);
         applyTimer = null;
       }
-      if (assistantDeltaApplyTimer) {
-        window.clearTimeout(assistantDeltaApplyTimer);
-        assistantDeltaApplyTimer = null;
+      if (assistantDeltaApplyFrame !== null) {
+        window.cancelAnimationFrame(assistantDeltaApplyFrame);
+        assistantDeltaApplyFrame = null;
       }
       stream.removeEventListener("session_detail", handleSessionDetail as EventListener);
       stream.removeEventListener("session_initial", handleSessionInitial as EventListener);

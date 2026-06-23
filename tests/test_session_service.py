@@ -1,6 +1,69 @@
 from types import SimpleNamespace
+import queue
 
 from core.web.services import session_service
+
+
+def test_session_stream_coalescing_preserves_assistant_delta_events():
+    subscriber = queue.Queue()
+    subscriber.put_nowait({"type": "assistant_delta", "contentDelta": "你"})
+    subscriber.put_nowait({"type": "assistant_delta", "contentDelta": "好"})
+
+    dropped = session_service._coalesce_session_stream_queue(subscriber, event_type="assistant_delta")
+
+    assert dropped == 0
+    assert subscriber.get_nowait()["contentDelta"] == "你"
+    assert subscriber.get_nowait()["contentDelta"] == "好"
+    assert session_service._SESSION_STREAM_COALESCED_EVENT_TYPES == {"session_detail"}
+
+
+def test_session_stream_full_queue_prefers_dropping_snapshots_before_assistant_delta():
+    subscriber = queue.Queue(maxsize=2)
+    subscriber.put_nowait({"type": "assistant_delta", "contentDelta": "你"})
+    subscriber.put_nowait({"type": "session_detail", "ledgerSeq": 1})
+
+    delivered, dropped = session_service._put_session_stream_event(
+        subscriber,
+        {"type": "assistant_delta", "content": "你好", "contentDelta": "好", "replaceContent": False},
+        recover_assistant_delta_on_drop=True,
+    )
+
+    assert delivered is True
+    assert dropped == 1
+    first = subscriber.get_nowait()
+    second = subscriber.get_nowait()
+    assert first["type"] == "assistant_delta"
+    assert first["contentDelta"] == "你"
+    assert second["type"] == "assistant_delta"
+    assert second["contentDelta"] == "好"
+    assert second["replaceContent"] is False
+
+
+def test_session_stream_full_queue_recovers_when_old_assistant_delta_must_drop():
+    subscriber = queue.Queue(maxsize=1)
+    subscriber.put_nowait({"type": "assistant_delta", "contentDelta": "你"})
+
+    delivered, dropped = session_service._put_session_stream_event(
+        subscriber,
+        {
+            "type": "assistant_delta",
+            "content": "你好",
+            "thought": "思考",
+            "contentDelta": "好",
+            "thoughtDelta": "考",
+            "replaceContent": False,
+            "replaceThought": False,
+        },
+        recover_assistant_delta_on_drop=True,
+    )
+
+    assert delivered is True
+    assert dropped == 1
+    recovered = subscriber.get_nowait()
+    assert recovered["contentDelta"] == "你好"
+    assert recovered["thoughtDelta"] == "思考"
+    assert recovered["replaceContent"] is True
+    assert recovered["replaceThought"] is True
 
 
 def test_image_attachment_with_concrete_prompt_defaults_to_vision_route(monkeypatch):
