@@ -62,11 +62,14 @@ def test_tool_registry_lists_builtins_as_protected(tmp_path, monkeypatch):
     assert list_child_tool["category"] == "agent_collaboration"
     assert list_child_tool["permissionTier"] == "medium"
     bundles = {item["bundleId"]: item for item in payload["toolBundles"]}
-    assert {"core", "research", "coding", "collaboration"}.issubset(bundles)
+    assert {"core", "research", "source_collection_stage", "knowledge_steward", "coding", "collaboration"}.issubset(bundles)
     assert "grep_search_tool" in bundles["core"]["toolNames"]
     assert "research_knowledge_query_tool" in bundles["research"]["toolNames"]
     assert "unified_memory_search_tool" in bundles["research"]["toolNames"]
     assert "web_search_tool" not in bundles["research"]["toolNames"]
+    assert "knowledge_proposal_tool" not in bundles["research"]["toolNames"]
+    assert "knowledge_ingestion_tool" not in bundles["research"]["toolNames"]
+    assert "source_collection_stage_writeback_tool" not in bundles["research"]["toolNames"]
     research_search_tools = {
         "batch_web_search_tool",
         "paper_search_tool",
@@ -78,7 +81,12 @@ def test_tool_registry_lists_builtins_as_protected(tmp_path, monkeypatch):
     assert {
         "source_collection_context_tool",
         "source_collection_stage_writeback_tool",
-    }.issubset(set(bundles["research"]["toolNames"]))
+    }.issubset(set(bundles["source_collection_stage"]["toolNames"]))
+    assert {
+        "knowledge_proposal_tool",
+        "knowledge_ingestion_tool",
+        "knowledge_governance_tasks_tool",
+    }.issubset(set(bundles["knowledge_steward"]["toolNames"]))
     assert {"batch_web_search_tool", "paper_search_tool", "search_summarize_sources_tool"}.issubset(
         set(bundles["research"]["preferredToolNames"])
     )
