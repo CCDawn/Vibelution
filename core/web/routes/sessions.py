@@ -26,6 +26,7 @@ from core.web.services.session_service import (
     query_sessions,
     request_stop_session_turn,
     resolve_session_image_artifact,
+    select_chat_session,
     store_session_user_image_attachment,
     stream_session_events,
     submit_session_guidance,
@@ -183,6 +184,14 @@ def session_detail(session_id: str) -> dict:
     if detail is None:
         raise HTTPException(status_code=404, detail="Session not found")
     return detail
+
+
+@router.post("/sessions/{session_id}/select")
+def session_select(session_id: str) -> dict:
+    try:
+        return select_chat_session(session_id)
+    except SessionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @router.get("/sessions/{session_id}/child-sessions")
