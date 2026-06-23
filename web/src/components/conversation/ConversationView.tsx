@@ -64,6 +64,9 @@ const RUNNING_OPERATION_STATUSES = new Set(["queued", "pending", "running", "thi
 const DEFAULT_EXPANDED_RESPONSE_TAIL_COUNT = 1;
 const INITIAL_VISIBLE_MESSAGE_COUNT = 14;
 const INITIAL_VISIBLE_FEEDBACK_OPERATION_COUNT = 36;
+const RESPONSE_PARSE_CACHE_LIMIT = 80;
+const MARKDOWN_PARSE_CACHE_LIMIT = 160;
+const RESPONSE_PREWARM_MESSAGE_LIMIT = 8;
 const COMPUTER_USE_TOOL_NAME = "computer_use_task_tool";
 
 export type ConversationProcessDisplayMode = "answer" | "trace";
@@ -660,6 +663,8 @@ export function ConversationView({
   const atBottomRef = useRef(true);
   const lastComposerFocusSignalRef = useRef("");
   const defaultExpansionRef = useRef<Record<string, Record<string, boolean>>>({});
+  const responseSegmentCacheRef = useRef<Map<string, ResponseSegment[]>>(new Map());
+  const markdownBlockCacheRef = useRef<Map<string, MarkdownBlock[]>>(new Map());
   const [sectionExpansion, setSectionExpansion] = useState<Record<string, Record<string, boolean>>>({});
   const [isAtBottom, setIsAtBottom] = useState(true);
   const [previewImage, setPreviewImage] = useState<PreviewImageState | null>(null);
@@ -1003,8 +1008,88 @@ export function ConversationView({
   useEffect(() => {
     setAllMessagesVisible(false);
     defaultExpansionRef.current = {};
+    responseSegmentCacheRef.current.clear();
+    markdownBlockCacheRef.current.clear();
     setSectionExpansion({});
   }, [sessionId]);
+
+  useEffect(() => {
+    const prewarmMessages = timelineMessages
+      .filter((message) => message.role === "assistant" && !message.streaming && hasResponseBlock(message))
+      .slice(-RESPONSE_PREWARM_MESSAGE_LIMIT);
+    if (!prewarmMessages.length) {
+      return undefined;
+    }
+    let cancelled = false;
+    let timeoutId: number | undefined;
+    let index = 0;
+    const prewarmNext = () => {
+      if (cancelled) {
+        return;
+      }
+      const message = prewarmMessages[index];
+      if (message) {
+        getCachedResponseSegments(message.content).forEach((segment) => {
+          if (
+            segment.kind !== "code"
+            && !segment.language
+            && !(["commit", "verification"].includes(segment.kind) && segment.content.includes("\n"))
+          ) {
+            getCachedMarkdownBlocks(segment.content);
+          }
+        });
+      }
+      index += 1;
+      if (index < prewarmMessages.length) {
+        timeoutId = window.setTimeout(prewarmNext, 24);
+      }
+    };
+    timeoutId = window.setTimeout(prewarmNext, 48);
+    return () => {
+      cancelled = true;
+      if (timeoutId !== undefined) {
+        window.clearTimeout(timeoutId);
+      }
+    };
+  }, [sessionId, timelineMessages]);
+
+  function getCachedResponseSegments(content: string) {
+    const key = String(content ?? "");
+    const cached = responseSegmentCacheRef.current.get(key);
+    if (cached) {
+      responseSegmentCacheRef.current.delete(key);
+      responseSegmentCacheRef.current.set(key, cached);
+      return cached;
+    }
+    const parsed = parseResponseSegments(key);
+    responseSegmentCacheRef.current.set(key, parsed);
+    trimOldestCacheEntries(responseSegmentCacheRef.current, RESPONSE_PARSE_CACHE_LIMIT);
+    return parsed;
+  }
+
+  function getCachedMarkdownBlocks(content: string) {
+    const key = String(content ?? "");
+    const cached = markdownBlockCacheRef.current.get(key);
+    if (cached) {
+      markdownBlockCacheRef.current.delete(key);
+      markdownBlockCacheRef.current.set(key, cached);
+      return cached;
+    }
+    const parsed = parseMarkdownBlocks(key);
+    markdownBlockCacheRef.current.set(key, parsed);
+    trimOldestCacheEntries(markdownBlockCacheRef.current, MARKDOWN_PARSE_CACHE_LIMIT);
+    return parsed;
+  }
+
+  function trimOldestCacheEntries<T>(cache: Map<string, T>, limit: number) {
+    while (cache.size > limit) {
+      const oldestKey = cache.keys().next().value;
+      if (oldestKey === undefined) {
+        return;
+      }
+      cache.delete(oldestKey);
+    }
+  }
 
   function cognitiveStateLabel(snapshot: MentalStateSnapshot | undefined) {
     const value = String(snapshot?.cognitiveState ?? "").trim().toLowerCase() || "unknown";
@@ -1849,7 +1934,7 @@ export function ConversationView({
     message: ConversationMessage,
     item: Extract<ConversationTimelineItem, { kind: "assistant_text" }>,
   ) {
-    const segments = parseResponseSegments(item.text);
+    const segments = getCachedResponseSegments(item.text);
     return (
       <section key={item.id} className={styles.timelineAssistantTextCell}>
         {segments.map((segment) => renderResponseSegment(segment, imageArtifactUrlsBeforeMessage.get(message.id)))}
@@ -2484,12 +2569,12 @@ export function ConversationView({
     if (message.streaming) {
       return true;
     }
-    const segments = parseResponseSegments(message.content);
+    const segments = getCachedResponseSegments(message.content);
     return segments.some((segment) => segment.kind !== "status");
   }
 
   function renderResponseText(content: string, duplicateImageUrls?: Set<string>) {
-    const blocks = parseMarkdownBlocks(content);
+    const blocks = getCachedMarkdownBlocks(content);
     if (blocks.length === 0) {
       return null;
     }
@@ -3032,7 +3117,7 @@ export function ConversationView({
             const defaultResponseExpanded = Boolean(message.streaming) || defaultExpandedResponseIds.has(message.id);
             const responseExpanded = getExpansionState(message.id, "response", defaultResponseExpanded);
             const responseSegments = showResponseBlock && responseExpanded && !isResponseStreaming
-              ? parseResponseSegments(message.content)
+              ? getCachedResponseSegments(message.content)
               : [];
             const isEditingMessage = userAuthoredMessage && message.id === editingMessageId;
             const agentInboxExpanded = getExpansionState(message.id, "agentInbox", false);
