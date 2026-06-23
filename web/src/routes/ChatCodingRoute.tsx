@@ -155,7 +155,7 @@ import {
   rootSessionIdFor,
   sessionToConversationSummary,
   useConversationIndexModel,
-  type ConversationIndexGroupKey,
+  type ConversationIndexDynamicGroupKey,
 } from "./conversationIndexModel";
 import {
   isChildSession,
@@ -2324,7 +2324,7 @@ export function ChatCodingRoute() {
   const [groupModeDraft, setGroupModeDraft] = useState("round_robin");
   const [groupPurposeDraft, setGroupPurposeDraft] = useState("discussion");
   const [groupSelectedAgentIds, setGroupSelectedAgentIds] = useState<string[]>([]);
-  const [collapsedConversationGroups, setCollapsedConversationGroups] = useState<Record<ConversationIndexGroupKey, boolean>>(
+  const [collapsedConversationGroups, setCollapsedConversationGroups] = useState<Record<string, boolean>>(
     DEFAULT_COLLAPSED_CONVERSATION_GROUPS,
   );
   const [rightIndexPanel, setRightIndexPanel] = useState<RightIndexPanel>("conversations");
@@ -5466,7 +5466,7 @@ export function ChatCodingRoute() {
     return timeFormatter.format(parsed);
   }
 
-  function toggleConversationGroup(groupKey: ConversationIndexGroupKey) {
+  function toggleConversationGroup(groupKey: ConversationIndexDynamicGroupKey) {
     setCollapsedConversationGroups((current) => ({
       ...current,
       [groupKey]: !current[groupKey],

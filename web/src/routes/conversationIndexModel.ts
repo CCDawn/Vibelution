@@ -14,10 +14,14 @@ export type ConversationIndexGroupKey =
   | "standaloneGroups"
   | "other";
 
+export type ConversationIndexDynamicGroupKey = ConversationIndexGroupKey | `team:${string}`;
+
 export type ConversationIndexGroup = {
-  groupKey: ConversationIndexGroupKey;
+  groupKey: ConversationIndexDynamicGroupKey;
   label: string;
   items: ConversationSummary[];
+  teamId?: string;
+  groupKind?: "default" | "team";
 };
 
 export type ConversationIndexTeam = Team & {
@@ -46,6 +50,18 @@ export const CONVERSATION_GROUP_ORDER: ConversationIndexGroupKey[] = [
   "supervisedEvolution",
   "other",
 ];
+
+type TeamAwareConversationSummary = ConversationSummary & {
+  teamId?: string;
+  teamName?: string;
+};
+
+type ConversationTeamLookup = {
+  byAgentCode: Map<string, ConversationIndexTeam>;
+  byAgentId: Map<string, ConversationIndexTeam>;
+  byTeamId: Map<string, ConversationIndexTeam>;
+  byTeamName: Map<string, ConversationIndexTeam>;
+};
 
 const NON_DISCUSSION_TEAM_IDS = new Set(["self-evolution-team", "supervised-evolution-team"]);
 const NON_DISCUSSION_TEAM_KINDS = new Set(["self_evolution", "supervised_evolution"]);
@@ -99,6 +115,10 @@ function conversationTeamScore(team: Team, index: number) {
   return memberScore + roomScore + sourceScore - index / 1000;
 }
 
+export function conversationTeamGroupKey(teamId: string): `team:${string}` {
+  return `team:${teamId}`;
+}
+
 export function normalizeConversationIndexTeams(teams: Team[]): ConversationIndexTeam[] {
   const buckets = new Map<string, {
     representative: ConversationIndexTeam;
@@ -146,6 +166,91 @@ export function normalizeConversationIndexTeams(teams: Team[]): ConversationInde
         conversationIndexSetupReason: isConfiguredConversationIndexTeam(bucket.representative) ? undefined : "empty_members",
       };
     });
+}
+
+export function buildConversationTeamLookup(teams: ConversationIndexTeam[]): ConversationTeamLookup {
+  const lookup: ConversationTeamLookup = {
+    byAgentCode: new Map(),
+    byAgentId: new Map(),
+    byTeamId: new Map(),
+    byTeamName: new Map(),
+  };
+  teams.forEach((team) => {
+    const teamName = String(team.name ?? "").trim().toLowerCase();
+    if (teamName && !lookup.byTeamName.has(teamName)) {
+      lookup.byTeamName.set(teamName, team);
+    }
+    const teamIds = [
+      String(team.teamId ?? "").trim(),
+      ...(team.conversationIndexHiddenTeamIds ?? []).map((teamId) => String(teamId ?? "").trim()),
+    ].filter(Boolean);
+    teamIds.forEach((teamId) => lookup.byTeamId.set(teamId, team));
+    (team.members ?? []).forEach((member) => {
+      const agentId = String(member.agentId ?? "").trim();
+      const agentCode = String(member.agentCode ?? "").trim().toLowerCase();
+      if (agentId && !lookup.byAgentId.has(agentId)) {
+        lookup.byAgentId.set(agentId, team);
+      }
+      if (agentCode && !lookup.byAgentCode.has(agentCode)) {
+        lookup.byAgentCode.set(agentCode, team);
+      }
+    });
+  });
+  return lookup;
+}
+
+export function conversationTeamFor(
+  conversation: ConversationSummary,
+  lookup: ConversationTeamLookup,
+): ConversationIndexTeam | undefined {
+  if (conversation.type !== "direct_agent") {
+    return undefined;
+  }
+  const teamAwareConversation = conversation as TeamAwareConversationSummary;
+  const directTeamId = String(teamAwareConversation.teamId ?? "").trim();
+  if (directTeamId) {
+    const team = lookup.byTeamId.get(directTeamId);
+    if (team) {
+      return team;
+    }
+  }
+  const directTeamName = String(teamAwareConversation.teamName ?? "").trim().toLowerCase();
+  if (directTeamName) {
+    const team = lookup.byTeamName.get(directTeamName);
+    if (team) {
+      return team;
+    }
+  }
+  const agentId = String(conversation.agentId ?? "").trim();
+  if (agentId) {
+    const team = lookup.byAgentId.get(agentId);
+    if (team) {
+      return team;
+    }
+  }
+  const agentCode = String(conversation.agentCode ?? "").trim().toLowerCase();
+  if (agentCode) {
+    return lookup.byAgentCode.get(agentCode);
+  }
+  return undefined;
+}
+
+function conversationTeamSearchValues(team: ConversationIndexTeam | undefined): string[] {
+  if (!team) {
+    return [];
+  }
+  return [
+    team.teamId,
+    team.name,
+    team.purpose,
+    team.status,
+    team.teamKind,
+    team.teamCategory,
+    team.teamSource,
+    team.teamTemplateId ?? "",
+    team.linkedChatRoom?.title ?? "",
+    ...(team.members ?? []).flatMap((member) => [member.agentName, member.agentCode, member.role, member.purpose]),
+  ];
 }
 
 export function sessionToConversationSummary(session: SessionSummary): ConversationSummary {
@@ -398,6 +503,8 @@ export function buildConversationIndexModel({
     mergeVisibleSessionsIntoConversations(conversations, rightIndexSessions),
     agents,
   );
+  const discussionTeams = normalizeConversationIndexTeams(teams);
+  const conversationTeamLookup = buildConversationTeamLookup(discussionTeams);
   const visibleConversations = mergedConversations
     .filter((conversation) => conversation.type !== "group_room")
     .filter((conversation) => {
@@ -441,6 +548,7 @@ export function buildConversationIndexModel({
           conversation.agentPrimaryMode ?? "",
           conversation.agentRoleKey ?? "",
           conversation.agentPromptTemplateId ?? "",
+          ...conversationTeamSearchValues(conversationTeamFor(conversation, conversationTeamLookup)),
           ...sessionSearchValues,
         ].some((value) => String(value ?? "").toLowerCase().includes(term));
       })
@@ -459,7 +567,6 @@ export function buildConversationIndexModel({
         String(value ?? "").toLowerCase().includes(term),
       ),
     );
-  const discussionTeams = normalizeConversationIndexTeams(teams);
   const filteredTeams = term
     ? discussionTeams.filter((team) =>
         [
@@ -478,17 +585,58 @@ export function buildConversationIndexModel({
   const buckets = new Map<ConversationIndexGroupKey, ConversationSummary[]>(
     CONVERSATION_GROUP_ORDER.map((groupKey) => [groupKey, []]),
   );
+  const teamBuckets = new Map<string, { team: ConversationIndexTeam; items: ConversationSummary[] }>();
   filteredConversations.forEach((conversation) => {
+    const team = conversationTeamFor(conversation, conversationTeamLookup);
+    if (team) {
+      const teamId = String(team.teamId ?? "").trim();
+      if (teamId) {
+        const existing = teamBuckets.get(teamId);
+        if (existing) {
+          existing.items.push(conversation);
+        } else {
+          teamBuckets.set(teamId, { team, items: [conversation] });
+        }
+        return;
+      }
+    }
     const groupKey = classifyConversation(conversation);
     buckets.get(groupKey)?.push(conversation);
   });
-  const groupedConversations = CONVERSATION_GROUP_ORDER
+  const leadingGroupKeys: ConversationIndexGroupKey[] = ["user", "group"];
+  const trailingGroupKeys = CONVERSATION_GROUP_ORDER.filter((groupKey) => !leadingGroupKeys.includes(groupKey));
+  const teamConversationGroups: ConversationIndexGroup[] = [];
+  discussionTeams.forEach((team) => {
+    const teamId = String(team.teamId ?? "").trim();
+    const bucket = teamId ? teamBuckets.get(teamId) : undefined;
+    if (!bucket) {
+      return;
+    }
+    teamConversationGroups.push({
+      groupKey: conversationTeamGroupKey(teamId),
+      label: team.name || teamId,
+      items: bucket.items,
+      teamId,
+      groupKind: "team",
+    });
+  });
+  const groupedConversations = [
+    ...leadingGroupKeys
+      .map((groupKey) => ({
+        groupKey,
+        label: conversationGroupLabel(groupKey, lang),
+        items: buckets.get(groupKey) ?? [],
+        groupKind: "default" as const,
+      })),
+    ...teamConversationGroups,
+    ...trailingGroupKeys
     .map((groupKey) => ({
       groupKey,
       label: conversationGroupLabel(groupKey, lang),
       items: buckets.get(groupKey) ?? [],
-    }))
-    .filter((group) => group.items.length > 0);
+      groupKind: "default" as const,
+    })),
+  ].filter((group) => group.items.length > 0);
   return {
     filteredConversations,
     filteredStandaloneGroupConversations,
