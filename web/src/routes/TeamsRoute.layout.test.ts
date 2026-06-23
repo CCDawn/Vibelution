@@ -458,6 +458,16 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).not.toContain("sourceCollectionStageOperationPanel");
     expect(routeSource).toContain("aria-pressed");
     expect(routeSource).toContain("<small>{module.summary}</small>");
+    const graphStateExpression = routeSource.slice(
+      routeSource.indexOf("const sourceCollectionGraphStepState"),
+      routeSource.indexOf("const sourceCollectionMemoryStepState"),
+    );
+    const memoryStateExpression = routeSource.slice(
+      routeSource.indexOf("const sourceCollectionMemoryStepState"),
+      routeSource.indexOf("const sourceCollectionCollectionActionLabel"),
+    );
+    expect(graphStateExpression).not.toContain("teamWorkflowCandidateGraphQuery.isFetching");
+    expect(memoryStateExpression).not.toContain("teamWorkflowKnowledgeIngestionStatusQuery.isFetching");
     expect(routeSource).not.toContain("className={styles.sourceCollectionStageMiniFlow}");
     expect(routeSource).toContain("sourceCollectionStageHandoffNext");
     expect(routeSource).not.toContain("Agent过程");

@@ -2223,6 +2223,7 @@ def _source_collection_candidate_count_for_run(candidate_store: dict[str, Any], 
 def get_research_stage_round_status(team_id: str) -> dict[str, Any]:
     normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
     team = team_service.get_team(normalized_team_id)
+    _reconcile_source_collection_stage_session_tasks(normalized_team_id)
     with _WORKFLOW_LOCK:
         workflow = _load_or_create_workflow(normalized_team_id)
         store = _load_stage_round_store(normalized_team_id)
@@ -9836,6 +9837,127 @@ def _source_collection_stage_session_tasks(team_id: str, run_id: str) -> list[di
     return [item for item in list(store.get("tasks") or []) if isinstance(item, dict)]
 
 
+def _reconcile_source_collection_stage_session_tasks(team_id: str) -> bool:
+    runs_root = _team_workflow_root(team_id) / "source_collection_runs"
+    if not runs_root.exists():
+        return False
+    changed = False
+    for task_store_path in runs_root.glob("*/stage_session_tasks.json"):
+        run_id = task_store_path.parent.name
+        store = _read_json(task_store_path)
+        tasks = [item for item in list(store.get("tasks") or []) if isinstance(item, dict)]
+        if not tasks:
+            continue
+        next_tasks: list[dict[str, Any]] = []
+        store_changed = False
+        for task in tasks:
+            reconciled = _reconcile_source_collection_stage_session_task_from_turn_result(task)
+            next_tasks.append(reconciled)
+            store_changed = store_changed or reconciled is not task
+        if store_changed:
+            store["tasks"] = next_tasks
+            _write_source_collection_stage_session_task_store(team_id, run_id, store)
+            for task in next_tasks:
+                if _trim_text(task.get("status"), max_length=80) not in {"running", "queued"}:
+                    _sync_stage_round_with_source_collection_stage_task(team_id, run_id, task)
+            changed = True
+    return changed
+
+
+def _reconcile_source_collection_stage_session_task_from_turn_result(task: dict[str, Any]) -> dict[str, Any]:
+    status = _trim_text(task.get("status"), max_length=80).lower()
+    if status not in {"running", "queued"}:
+        return task
+    turn = task.get("turn") if isinstance(task.get("turn"), dict) else {}
+    turn_id = _trim_text(turn.get("turnId"), max_length=200)
+    session_id = _trim_text(task.get("sessionId") or turn.get("sessionId"), max_length=160)
+    agent_id = _trim_text(task.get("agentId"), max_length=160)
+    if not turn_id or not session_id or not agent_id:
+        return task
+    turn_result = _source_collection_stage_session_task_turn_result(agent_id, session_id, turn_id)
+    if not turn_result:
+        return task
+    next_status = _source_collection_stage_task_status_from_turn_result(turn_result)
+    if next_status in {"running", "queued"}:
+        return task
+    now = utc_now_iso()
+    next_task = dict(task)
+    next_task["status"] = next_status
+    next_task["summary"] = _trim_text(turn_result.get("summary"), max_length=500) or _trim_text(task.get("summary"), max_length=500)
+    next_task["updatedAt"] = now
+    next_task["reconciledFromTurn"] = {
+        "turnId": turn_id,
+        "status": _trim_text(turn_result.get("status"), max_length=80),
+        "resultEventId": _trim_text(turn_result.get("eventId"), max_length=160),
+        "createdAt": _trim_text(turn_result.get("createdAt"), max_length=120),
+        "reconciledAt": now,
+    }
+    next_turn = dict(turn)
+    next_turn["status"] = next_status
+    next_task["turn"] = next_turn
+    if not isinstance(next_task.get("writeback"), dict) or not next_task.get("writeback"):
+        next_task["writeback"] = {
+            "status": next_status,
+            "summary": next_task["summary"],
+            "resultAuthority": "agent_turn_result_reconciliation",
+            "updatedAt": now,
+        }
+    _record_workflow_event(
+        "source_collection_stage_session_task.reconciled_from_turn",
+        _trim_text(task.get("teamId"), max_length=128),
+        fields={
+            "runId": _trim_text(task.get("runId"), max_length=128),
+            "taskId": _trim_text(task.get("taskId"), max_length=160),
+            "stageId": _trim_text(task.get("stageId"), max_length=80),
+            "agentId": agent_id,
+            "sessionId": session_id,
+            "turnId": turn_id,
+            "previousStatus": status,
+            "status": next_status,
+        },
+    )
+    return next_task
+
+
+def _source_collection_stage_session_task_turn_result(agent_id: str, session_id: str, turn_id: str) -> dict[str, Any]:
+    events_path = developer_sandbox.seeded_sandbox_workspace_path(
+        _project_root(),
+        "agents",
+        _safe_token(agent_id, default="agent", max_length=160),
+        "events",
+        "agent_turn_results.jsonl",
+    )
+    for item in reversed(_read_jsonl(events_path)):
+        if _trim_text(item.get("runId"), max_length=200) != turn_id:
+            continue
+        if _trim_text(item.get("sessionId"), max_length=160) != session_id:
+            continue
+        return item
+    return {}
+
+
+def _source_collection_stage_task_status_from_turn_result(turn_result: dict[str, Any]) -> str:
+    status = _trim_text(turn_result.get("status"), max_length=80).lower()
+    summary = _trim_text(turn_result.get("summary"), max_length=2000).lower()
+    if status in {"failed", "error"}:
+        return "failed"
+    if status in {"cancelled", "canceled", "stopped", "superseded"}:
+        return "cancelled"
+    if status in {"completed", "done", "succeeded", "success"}:
+        blocked_markers = (
+            "状态：blocked",
+            "状态: blocked",
+            "状态：阻塞",
+            "状态: 阻塞",
+            "无法完成",
+            "无法访问",
+            "缺少",
+            "blocked",
+        )
+        return "blocked" if any(marker in summary for marker in blocked_markers) else "completed"
+    return status if status in {"running", "queued"} else "needs_review"
+
+
 def _rank_source_collection_context_records(
     records: list[dict[str, Any]],
     *,
@@ -10272,12 +10394,10 @@ def _sync_stage_round_with_source_collection_stage_task(team_id: str, run_id: st
         task_refs.append(task_ref)
         stage_round["sourceCollectionStageSessionTasks"] = sorted(task_refs, key=lambda item: str(item.get("updatedAt") or ""))
         stage_round["updatedAt"] = now
-        if task_ref["status"] in {"running", "queued"}:
-            stage_round["status"] = "running"
-        elif task_ref["status"] in {"failed", "blocked"}:
-            stage_round["status"] = "needs_attention"
-        elif task_ref["status"] in {"completed", "needs_review"} and str(stage_round.get("status") or "") in {"running", "planning", "initializing"}:
-            stage_round["status"] = "needs_attention" if task_ref["status"] == "needs_review" else "running"
+        stage_round["status"] = _source_collection_stage_round_status_from_task_refs(
+            stage_round,
+            stage_round["sourceCollectionStageSessionTasks"],
+        )
         workflow = _load_or_create_workflow(team_id)
         stage_round["teamMemoryRecord"] = _stage_memory_record(stage_round, workflow)
         stage_round["teamMemoryRecordId"] = stage_round["teamMemoryRecord"]["recordId"]
@@ -10292,6 +10412,26 @@ def _sync_stage_round_with_source_collection_stage_task(team_id: str, run_id: st
         workflow["updatedAt"] = now
         _write_json(_stage_round_store_path(team_id), store)
         _write_json(_workflow_path(team_id), workflow)
+
+
+def _source_collection_stage_round_status_from_task_refs(stage_round: dict[str, Any], task_refs: list[dict[str, Any]]) -> str:
+    statuses = {
+        _trim_text(item.get("status"), max_length=80).lower()
+        for item in task_refs
+        if isinstance(item, dict) and _trim_text(item.get("status"), max_length=80)
+    }
+    if statuses & {"running", "queued"}:
+        return "running"
+    if statuses & {"failed", "blocked", "needs_review"}:
+        return "needs_attention"
+    existing_status = _trim_text(stage_round.get("status"), max_length=80)
+    if existing_status not in {"running", "planning", "initializing"}:
+        return existing_status or "needs_continue"
+    search_execution = stage_round.get("sourceCollectionSearchExecution") if isinstance(stage_round.get("sourceCollectionSearchExecution"), dict) else {}
+    search_status = _trim_text(search_execution.get("status") or search_execution.get("resultStatus"), max_length=80)
+    if search_status and search_status not in {"running", "queued", "accepted"}:
+        return search_status
+    return "needs_continue" if statuses else existing_status
 
 
 def _source_collection_agent_context_next_actions(stage_id: str, record_count: int, candidate_count: int, open_assignment_count: int) -> list[str]:
@@ -10533,6 +10673,26 @@ def _append_jsonl(path: Path, records: list[dict[str, Any]]) -> None:
     with path.open("a", encoding="utf-8") as handle:
         for record in records:
             handle.write(json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n")
+
+
+def _read_jsonl(path: Path) -> list[dict[str, Any]]:
+    if not path.exists():
+        return []
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return []
+    records: list[dict[str, Any]] = []
+    for line in lines:
+        if not line.strip():
+            continue
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(payload, dict):
+            records.append(payload)
+    return records
 
 
 def _ensure_project_child(path: Path) -> Path:
