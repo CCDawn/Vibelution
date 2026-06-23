@@ -831,8 +831,6 @@
 .operationSummary:hover,
 .responseToggle:hover {
   color: var(--fg-primary);
-  border-color: color-mix(in srgb, var(--accent-warm) 24%, transparent);
-  background: color-mix(in srgb, var(--surface-card) 68%, var(--accent-warm) 5%);
 }
 
 .operationSummaryPreview {
@@ -872,10 +870,10 @@
   width: fit-content;
   max-width: 100%;
   min-height: 26px;
-  padding: 2px 7px;
+  padding: 0;
   border: 0;
-  border-radius: var(--radius-control);
-  background: color-mix(in srgb, var(--surface-card) 34%, transparent);
+  border-radius: 0;
+  background: transparent;
   color: var(--fg-tertiary);
   cursor: pointer;
   font: inherit;
@@ -883,7 +881,6 @@
 }
 
 .answerOnlyProcessToggle:hover {
-  background: color-mix(in srgb, var(--surface-card) 64%, var(--accent-cool) 5%);
   color: var(--fg-secondary);
 }
 
@@ -1786,10 +1783,10 @@ button.timelineCellHeader:hover,
   gap: 7px;
   width: fit-content;
   min-height: 22px;
-  padding: 1px 6px;
-  border: 1px solid transparent;
-  border-radius: var(--radius-control);
-  background: color-mix(in srgb, var(--surface-card) 18%, transparent);
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
   color: var(--fg-tertiary);
   cursor: pointer;
   font: inherit;
