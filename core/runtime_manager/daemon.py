@@ -46,6 +46,10 @@ from .constants import (
     ensure_runtime_manager_dirs,
 )
 from .hot_restart_backup import create_failure_package, create_stable_backup, latest_stable_backup, restore_stable_backup
+from .process_identity import (
+    is_runtime_manager_process as _is_runtime_manager_process,
+    runtime_manager_command_line_for_pid as _runtime_manager_command_line_for_pid,
+)
 from .restart_coordinator import claim_next_restart_intent, complete_restart_intent
 from .scene_logging import append_runtime_manager_file_event, record_runtime_manager_scene_event, runtime_manager_event_phase
 from .state_store import clear_pid, default_state, load_pid, load_state, now_iso, save_pid, save_state
@@ -653,6 +657,13 @@ def _terminate_daemon_process(pid: int) -> None:
     clear_pid(pid)
 
 
+def _record_stale_daemon_pid(pid: int, *, source: str = "") -> None:
+    payload: dict[str, Any] = {"pid": int(pid or 0), "reason": "pid_reused_by_foreign_process"}
+    if source:
+        payload["source"] = source
+    _append_event("daemon.stale_pid_ignored", payload)
+
+
 def _read_daemon_lock_pid() -> int:
     try:
         return int(DAEMON_LOCK_PATH.read_text(encoding="utf-8").strip() or "0")
@@ -667,6 +678,17 @@ def _claim_daemon_ownership(pid: int) -> bool:
     except OSError:
         pass
     existing_pid = load_pid()
+    if existing_pid and existing_pid != current_pid and _is_process_alive(existing_pid):
+        if not _is_runtime_manager_process(existing_pid):
+            _record_stale_daemon_pid(existing_pid, source="pid_file")
+            clear_pid(existing_pid)
+            existing_pid = 0
+        else:
+            _append_event(
+                "daemon.start_blocked_existing_owner",
+                {"pid": current_pid, "ownerPid": existing_pid, "source": "pid_file"},
+            )
+            return False
     if existing_pid and existing_pid != current_pid and _is_process_alive(existing_pid):
         _append_event(
             "daemon.start_blocked_existing_owner",
@@ -683,6 +705,17 @@ def _claim_daemon_ownership(pid: int) -> bool:
                 save_pid(current_pid)
                 return True
             if owner_pid and _is_process_alive(owner_pid):
+                if not _is_runtime_manager_process(owner_pid):
+                    _record_stale_daemon_pid(owner_pid, source="lock_file")
+                    try:
+                        DAEMON_LOCK_PATH.unlink(missing_ok=True)
+                    except OSError:
+                        _append_event(
+                            "daemon.start_blocked_existing_owner",
+                            {"pid": current_pid, "ownerPid": owner_pid, "source": "stale_lock_unlink_failed"},
+                        )
+                        return False
+                    continue
                 _append_event(
                     "daemon.start_blocked_existing_owner",
                     {"pid": current_pid, "ownerPid": owner_pid, "source": "lock_file"},
@@ -1329,7 +1362,8 @@ def _is_process_alive(pid: int) -> bool:
 
 
 def is_daemon_running() -> bool:
-    return _is_process_alive(load_pid())
+    current_pid = load_pid()
+    return _is_process_alive(current_pid) and _is_runtime_manager_process(current_pid)
 
 
 def _append_event(event_type: str, payload: dict[str, Any]) -> None:
@@ -1516,6 +1550,11 @@ def _select_daemon_python_runtime(python_executable: str) -> dict[str, Any]:
 
 def ensure_daemon_running(*, python_executable: str | None = None) -> bool:
     current_pid = load_pid()
+    if _is_process_alive(current_pid):
+        if not _is_runtime_manager_process(current_pid):
+            _record_stale_daemon_pid(current_pid)
+            clear_pid(current_pid)
+            current_pid = 0
     if _is_process_alive(current_pid):
         state = load_state()
         current_signature = _process_source_signature()

@@ -12,6 +12,7 @@ from core.runtime_manager import command_queue
 from core.runtime_manager import daemon
 from core.runtime_manager import constants
 from core.runtime_manager import evolution_store
+from core.runtime_manager import process_identity
 from core.runtime_manager import process_inventory
 from core.runtime_manager import scene_logging
 from core.runtime_manager import state_store
@@ -3764,6 +3765,7 @@ def test_ensure_daemon_running_restarts_stale_source_signature(monkeypatch, tmp_
 
     monkeypatch.setattr(daemon, "load_pid", lambda: 12345)
     monkeypatch.setattr(daemon, "_is_process_alive", lambda pid: pid == 12345)
+    monkeypatch.setattr(daemon, "_is_runtime_manager_process", lambda pid: pid == 12345)
     monkeypatch.setattr(
         daemon,
         "load_state",
@@ -3808,12 +3810,67 @@ def test_ensure_daemon_running_restarts_stale_source_signature(monkeypatch, tmp_
     assert popen_calls == [["python-test", "-m", "core.runtime_manager.cli", "daemon"]]
 
 
+def test_is_daemon_running_rejects_reused_foreign_pid(monkeypatch):
+    monkeypatch.setattr(daemon, "load_pid", lambda: 25820)
+    monkeypatch.setattr(daemon, "_is_process_alive", lambda pid: pid == 25820)
+    monkeypatch.setattr(
+        daemon,
+        "_runtime_manager_command_line_for_pid",
+        lambda pid: "C:\\Users\\17533\\AppData\\Local\\Feishu\\app\\Feishu.exe --type=endsec",
+    )
+
+    assert daemon.is_daemon_running() is False
+
+
+def test_runtime_manager_process_identity_matches_only_daemon_command():
+    assert process_identity.command_line_is_runtime_manager_daemon(
+        "python.exe -m core.runtime_manager.cli daemon"
+    )
+    assert process_identity.command_line_is_runtime_manager_daemon(
+        "python /repo/core/runtime_manager/cli.py daemon"
+    )
+    assert not process_identity.command_line_is_runtime_manager_daemon(
+        "C:\\Users\\17533\\AppData\\Local\\Feishu\\app\\Feishu.exe --type=endsec"
+    )
+    assert not process_identity.command_line_is_runtime_manager_daemon(
+        "python.exe -m core.runtime_manager.cli status"
+    )
+
+
+def test_ensure_daemon_running_ignores_reused_foreign_pid(monkeypatch, tmp_path):
+    events: list[tuple[str, dict]] = []
+    cleared: list[int] = []
+    popen_calls: list[list[str]] = []
+    running_checks = iter([False, True])
+
+    monkeypatch.setattr(daemon, "load_pid", lambda: 25820)
+    monkeypatch.setattr(daemon, "_is_process_alive", lambda pid: pid == 25820)
+    monkeypatch.setattr(daemon, "_is_runtime_manager_process", lambda pid: False)
+    monkeypatch.setattr(daemon, "clear_pid", lambda expected_pid=None: cleared.append(int(expected_pid or 0)))
+    monkeypatch.setattr(daemon, "_append_event", lambda event_type, payload: events.append((event_type, payload)))
+    monkeypatch.setattr(daemon, "ensure_runtime_manager_dirs", lambda: None)
+    monkeypatch.setattr(daemon, "is_daemon_running", lambda: next(running_checks))
+    monkeypatch.setattr(daemon, "DAEMON_STDOUT_PATH", tmp_path / "daemon.out.log")
+    monkeypatch.setattr(daemon, "DAEMON_STDERR_PATH", tmp_path / "daemon.err.log")
+    monkeypatch.setattr(
+        daemon.subprocess,
+        "Popen",
+        lambda args, **kwargs: popen_calls.append(args) or type("Proc", (), {"pid": 24680})(),
+    )
+
+    assert daemon.ensure_daemon_running(python_executable="python-test") is True
+    assert cleared == [25820]
+    assert ("daemon.stale_pid_ignored", {"pid": 25820, "reason": "pid_reused_by_foreign_process"}) in events
+    assert popen_calls == [["python-test", "-m", "core.runtime_manager.cli", "daemon"]]
+
+
 def test_ensure_daemon_running_defers_source_restart_for_recent_lifecycle_queue(monkeypatch):
     events: list[tuple[str, dict]] = []
     terminated: list[int] = []
 
     monkeypatch.setattr(daemon, "load_pid", lambda: 12345)
     monkeypatch.setattr(daemon, "_is_process_alive", lambda pid: pid == 12345)
+    monkeypatch.setattr(daemon, "_is_runtime_manager_process", lambda pid: pid == 12345)
     monkeypatch.setattr(
         daemon,
         "load_state",
@@ -3844,6 +3901,7 @@ def test_claim_daemon_ownership_blocks_existing_live_pid(monkeypatch, tmp_path):
     monkeypatch.setattr(daemon, "DAEMON_LOCK_PATH", lock_path)
     monkeypatch.setattr(daemon, "load_pid", lambda: 12345)
     monkeypatch.setattr(daemon, "_is_process_alive", lambda pid: int(pid) == 12345)
+    monkeypatch.setattr(daemon, "_is_runtime_manager_process", lambda pid: int(pid) == 12345)
     monkeypatch.setattr(daemon, "_append_event", lambda event_type, payload: events.append((event_type, payload)))
     monkeypatch.setattr(daemon, "save_pid", lambda pid: (_ for _ in ()).throw(AssertionError("must not replace live owner")))
 
@@ -3855,6 +3913,56 @@ def test_claim_daemon_ownership_blocks_existing_live_pid(monkeypatch, tmp_path):
         )
     ]
     assert not lock_path.exists()
+
+
+def test_claim_daemon_ownership_ignores_reused_foreign_pid_file(monkeypatch, tmp_path):
+    events: list[tuple[str, dict]] = []
+    saved: list[int] = []
+    cleared: list[int] = []
+    lock_path = tmp_path / "daemon.lock"
+
+    monkeypatch.setattr(daemon, "DAEMON_LOCK_PATH", lock_path)
+    monkeypatch.setattr(daemon, "load_pid", lambda: 25820)
+    monkeypatch.setattr(daemon, "_is_process_alive", lambda pid: int(pid) == 25820)
+    monkeypatch.setattr(daemon, "_is_runtime_manager_process", lambda pid: False)
+    monkeypatch.setattr(daemon, "_append_event", lambda event_type, payload: events.append((event_type, payload)))
+    monkeypatch.setattr(daemon, "save_pid", lambda pid: saved.append(pid))
+    monkeypatch.setattr(daemon, "clear_pid", lambda expected_pid=None: cleared.append(int(expected_pid or 0)))
+
+    assert daemon._claim_daemon_ownership(24680) is True
+    assert saved == [24680]
+    assert cleared == [25820]
+    assert lock_path.read_text(encoding="utf-8") == "24680"
+    assert events == [
+        (
+            "daemon.stale_pid_ignored",
+            {"pid": 25820, "reason": "pid_reused_by_foreign_process", "source": "pid_file"},
+        )
+    ]
+
+
+def test_claim_daemon_ownership_recovers_reused_foreign_lock_pid(monkeypatch, tmp_path):
+    events: list[tuple[str, dict]] = []
+    saved: list[int] = []
+    lock_path = tmp_path / "daemon.lock"
+    lock_path.write_text("25820", encoding="utf-8")
+
+    monkeypatch.setattr(daemon, "DAEMON_LOCK_PATH", lock_path)
+    monkeypatch.setattr(daemon, "load_pid", lambda: 0)
+    monkeypatch.setattr(daemon, "_is_process_alive", lambda pid: int(pid) == 25820)
+    monkeypatch.setattr(daemon, "_is_runtime_manager_process", lambda pid: False)
+    monkeypatch.setattr(daemon, "_append_event", lambda event_type, payload: events.append((event_type, payload)))
+    monkeypatch.setattr(daemon, "save_pid", lambda pid: saved.append(pid))
+
+    assert daemon._claim_daemon_ownership(24680) is True
+    assert saved == [24680]
+    assert lock_path.read_text(encoding="utf-8") == "24680"
+    assert events == [
+        (
+            "daemon.stale_pid_ignored",
+            {"pid": 25820, "reason": "pid_reused_by_foreign_process", "source": "lock_file"},
+        )
+    ]
 
 
 def test_claim_daemon_ownership_recovers_stale_lock(monkeypatch, tmp_path):
