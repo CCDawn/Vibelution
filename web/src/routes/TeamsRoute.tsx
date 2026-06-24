@@ -2782,6 +2782,46 @@ function sourceCollectionRunRefetchInterval(pageVisible: boolean, status: string
   );
 }
 
+function sourceCollectionStageCardsFromStatus(status: ResearchStageRoundStatusPayload | null | undefined) {
+  const knowledgePhase = (status?.phases ?? []).find((phase) => phase.stageType === "knowledge_collection");
+  const rounds = [
+    knowledgePhase?.latestRound ?? null,
+    status?.latestRound ?? null,
+    ...(status?.activeRounds ?? []),
+  ].filter((round): round is ResearchStageRound => Boolean(round && round.stageType === "knowledge_collection"));
+  const seen = new Set<string>();
+  return rounds.flatMap((round) => {
+    const key = round.stageRoundId || `${round.stageType}-${round.roundNumber}`;
+    if (seen.has(key)) {
+      return [];
+    }
+    seen.add(key);
+    return round.sourceCollectionStageCards ?? [];
+  });
+}
+
+function sourceCollectionStageWritebackRefetchInterval(
+  pageVisible: boolean,
+  status: ResearchStageRoundStatusPayload | null | undefined,
+) {
+  const cards = sourceCollectionStageCardsFromStatus(status);
+  const hasRunningAgentTask = cards.some((card) => {
+    const latestTaskStatus = String(card.latestTask?.status || "").toLowerCase();
+    const cardStatus = String(card.status || "").toLowerCase();
+    return cardStatus === "agent_running" || latestTaskStatus === "queued" || latestTaskStatus === "running";
+  });
+  const hasCompletedTaskAwaitingArtifact = cards.some((card) => {
+    const latestTaskStatus = String(card.latestTask?.status || "").toLowerCase();
+    return Boolean(card.latestTask?.taskId)
+      && latestTaskStatus === "completed"
+      && String(card.status || "").toLowerCase() === "agent_done_artifact_pending";
+  });
+  return resolvePollingInterval(
+    pageVisible,
+    hasRunningAgentTask ? 2000 : hasCompletedTaskAwaitingArtifact ? 5000 : false,
+  );
+}
+
 type SourceCollectionDisplayPhase =
   | "done"
   | "failed"
@@ -3780,6 +3820,19 @@ export function TeamsRoute({
     queryFn: () => fetchJson<TeamWorkflowOrchestration>(`/api/teams/${encodeURIComponent(effectiveTeamId)}/workflow-orchestration`),
     enabled: Boolean(effectiveTeamId && researchWorkflowTeamSelected),
   });
+  const researchStageRoundStatusQuery = useQuery({
+    queryKey: researchStageRoundStatusQueryKey(effectiveTeamId || "none"),
+    queryFn: () =>
+      fetchJson<ResearchStageRoundStatusPayload>(
+        `/api/teams/${encodeURIComponent(effectiveTeamId)}/workflow-orchestration/stage-rounds/status`,
+      ),
+    enabled: Boolean(effectiveTeamId && researchWorkflowTeamSelected && teamWorkflowQuery.data),
+    refetchInterval: (query) =>
+      sourceCollectionStageWritebackRefetchInterval(
+        pageVisible,
+        query.state.data as ResearchStageRoundStatusPayload | null | undefined,
+      ),
+  });
   const teamWorkflowCandidatesQuery = useQuery({
     queryKey: queryKeys.teamWorkflowCandidates(effectiveTeamId || "none", TEAM_WORKFLOW_CANDIDATE_PREVIEW_LIMIT),
     queryFn: () =>
@@ -3787,6 +3840,7 @@ export function TeamsRoute({
         `/api/teams/${encodeURIComponent(effectiveTeamId)}/workflow-orchestration/candidates?limit=${TEAM_WORKFLOW_CANDIDATE_PREVIEW_LIMIT}`,
       ),
     enabled: Boolean(effectiveTeamId && researchWorkflowTeamSelected && teamWorkflowQuery.data),
+    refetchInterval: () => sourceCollectionStageWritebackRefetchInterval(pageVisible, researchStageRoundStatusQuery.data),
   });
   const teamWorkflowCandidateGraphQuery = useQuery({
     queryKey: queryKeys.teamWorkflowCandidateGraph(effectiveTeamId || "none"),
@@ -3833,14 +3887,6 @@ export function TeamsRoute({
     queryFn: () =>
       fetchJson<TeamWorkflowPaperNoteChunkStatus>(
         `/api/teams/${encodeURIComponent(effectiveTeamId)}/workflow-orchestration/paper-note-chunks/status`,
-      ),
-    enabled: Boolean(effectiveTeamId && researchWorkflowTeamSelected && teamWorkflowQuery.data),
-  });
-  const researchStageRoundStatusQuery = useQuery({
-    queryKey: researchStageRoundStatusQueryKey(effectiveTeamId || "none"),
-    queryFn: () =>
-      fetchJson<ResearchStageRoundStatusPayload>(
-        `/api/teams/${encodeURIComponent(effectiveTeamId)}/workflow-orchestration/stage-rounds/status`,
       ),
     enabled: Boolean(effectiveTeamId && researchWorkflowTeamSelected && teamWorkflowQuery.data),
   });
@@ -9219,6 +9265,24 @@ export function TeamsRoute({
     openSourceCollectionStorageMutation.variables?.teamId === selectedTeam?.teamId && openSourceCollectionStorageMutation.error instanceof Error
       ? openSourceCollectionStorageMutation.error
       : null;
+  useEffect(() => {
+    if (!researchWorkflowTeamSelected || !pageVisible || !selectedTeam?.teamId || !selectedSourceCollectionRunEffectiveId) {
+      return;
+    }
+    void queryClient.invalidateQueries({ queryKey: researchStageRoundStatusQueryKey(selectedTeam.teamId) });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflowCandidates(selectedTeam.teamId, TEAM_WORKFLOW_CANDIDATE_PREVIEW_LIMIT) });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflowSourceCollectionRuns(selectedTeam.teamId, SOURCE_COLLECTION_RUN_PREVIEW_LIMIT) });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.dataProcessingRunStatus(selectedSourceCollectionRunEffectiveId) });
+    void queryClient.invalidateQueries({ queryKey: sourceCollectionRunRecordsQueryKey(selectedSourceCollectionRunEffectiveId) });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.dataProcessingCollectionAssignments(selectedSourceCollectionRunEffectiveId) });
+  }, [
+    pageVisible,
+    queryClient,
+    requestedSourceCollectionStage,
+    researchWorkflowTeamSelected,
+    selectedSourceCollectionRunEffectiveId,
+    selectedTeam?.teamId,
+  ]);
   useEffect(() => {
     if (!selectedTeam?.teamId || !selectedSourceCollectionRunEffectiveId || !selectedSourceCollectionSearchAccepted) {
       return;
