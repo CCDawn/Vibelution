@@ -7631,12 +7631,20 @@ def _build_session_summary(conversation: dict[str, Any], *, hydrate_agent: bool 
     has_ledger_messages = bool(_session_ledger_visible_messages(str(conversation.get("id") or "")))
     if session_kind == "child":
         display_title = task_title
-    elif has_ledger_messages or not _is_default_empty_session_title(task_title):
+    elif has_ledger_messages:
+        display_title = task_title
+    elif agent_id:
+        display_title = display_agent_name
+    elif not _is_default_empty_session_title(task_title):
         display_title = task_title
     else:
         display_title = display_agent_name
+    session_id = str(conversation["id"]).strip()
+    session_source_ref = _source_authority_ref("session", session_id)
+    session_projection_edit = _projection_edit_contract("session", session_id)
+    agent_source_ref = _source_authority_ref("agent", agent_id) if agent_id else None
     return {
-        "id": conversation["id"],
+        "id": session_id,
         "title": display_title,
         "agentId": agent_id,
         "agentCode": agent_code,
@@ -7669,6 +7677,9 @@ def _build_session_summary(conversation: dict[str, Any], *, hydrate_agent: bool 
         "childStatus": str(conversation.get("childStatus") or status).strip() or status,
         "taskTitle": task_title,
         "resultCard": _normalize_child_result_card(conversation.get("resultCard")),
+        "sourceRef": session_source_ref,
+        "projectionEdit": session_projection_edit,
+        "agentSourceRef": agent_source_ref,
     }
 
 
@@ -7680,6 +7691,18 @@ def _build_session_detail(conversation: dict[str, Any]) -> dict[str, Any]:
 def _build_lightweight_session_detail(conversation: dict[str, Any]) -> dict[str, Any]:
     summary = _build_session_summary(conversation, hydrate_agent=False)
     return _build_session_detail_from_summary(conversation, summary, hydrate_agent=False)
+
+
+def _source_authority_ref(kind: str, source_id: str, metadata: dict[str, Any] | None = None) -> dict[str, Any]:
+    from core.agent_kernel.source_authority import source_ref
+
+    return source_ref(kind, source_id, metadata)
+
+
+def _projection_edit_contract(kind: str, source_id: str, metadata: dict[str, Any] | None = None) -> dict[str, Any]:
+    from core.agent_kernel.source_authority import projection_edit_contract
+
+    return projection_edit_contract(kind, source_id, metadata)
 
 
 def _pending_tool_governance_requests_for_session(agent_id: str, *, limit: int = 3) -> list[dict[str, Any]]:
