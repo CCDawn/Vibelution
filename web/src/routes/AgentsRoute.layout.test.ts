@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import routeSource from "./AgentsRoute.tsx?raw";
 import agentManagementNavSource from "./AgentManagementNav.tsx?raw";
+import agentWorkspaceCacheSource from "./agentWorkspaceCache.ts?raw";
 import styles from "./AgentsRoute.module.css";
 import routerSource from "../app/router.tsx?raw";
 import shellSource from "../app/AppShell.tsx?raw";
@@ -112,8 +113,8 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain('source_scope: "Source scope"');
     expect(routeSource).toContain('moreFilters: "更多筛选"');
     expect(routeSource).toContain('moreFilters: "More filters"');
-    expect(routeSource).toContain("sourceScopeGroupId");
-    expect(routeSource).toContain("teamIndexesWithoutAgentIds");
+    expect(agentWorkspaceCacheSource).toContain("sourceScopeGroupId");
+    expect(agentWorkspaceCacheSource).toContain("teamIndexesWithoutAgentIds");
     expect(routeSource).toContain('section === "boundary"');
     expect(routeSource).toContain("managementSection,");
     expect(routeSource).toContain("styles.advancedFilterSection");
