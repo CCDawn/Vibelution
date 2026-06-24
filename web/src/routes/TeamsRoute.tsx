@@ -325,11 +325,45 @@ type SourceCollectionStageModule = {
   actionDisabled: boolean;
   actionTone: "primary" | "secondary";
   actionIcon: "play" | "search" | "check" | "archive" | "refresh";
+  projection?: SourceCollectionStageCardProjection | null;
   onAction: () => void;
   onDetail: () => void;
 };
 
 type SourceCollectionStageAgentChatStatus = "ready" | "loading" | "error" | "repair";
+
+type SourceCollectionStageCardProjection = {
+  stageId: SourceCollectionStageModuleId;
+  status: string;
+  isClosedLoop?: boolean;
+  agentTaskStatus?: string;
+  artifactStatus?: string;
+  artifactSummary?: string;
+  counts?: {
+    input?: number;
+    artifact?: number;
+    output?: number;
+    pending?: number;
+    task?: number;
+  };
+  latestTask?: {
+    taskId?: string;
+    stageId?: string;
+    agentId?: string;
+    agentRole?: string;
+    sessionId?: string;
+    status?: string;
+    summary?: string;
+    updatedAt?: string;
+    resultKeys?: string[];
+    evidenceRefCount?: number;
+    nextActionCount?: number;
+    materializedSources?: Record<string, unknown>;
+  };
+  resultKeys?: string[];
+  nextActions?: string[];
+  blockingReasons?: string[];
+};
 
 const SOURCE_COLLECTION_STAGE_AGENT_KEYS: Record<SourceCollectionStageModuleId, string[]> = {
   collection: ["data_discovery", "source_acquisition"],
@@ -363,6 +397,47 @@ function parseSourceCollectionStageModuleId(value: string | null): SourceCollect
   return value === "collection" || value === "screening" || value === "candidate" || value === "graph" || value === "memory"
     ? value
     : null;
+}
+
+function sourceCollectionStageProjectionState(
+  projection: SourceCollectionStageCardProjection | null | undefined,
+  fallback: SourceCollectionStepState,
+): SourceCollectionStepState {
+  if (!projection?.status) {
+    return fallback;
+  }
+  if (projection.status === "agent_running") {
+    return "active";
+  }
+  if (projection.status === "closed_loop" || projection.status === "artifact_ready_no_latest_agent_task") {
+    return "done";
+  }
+  if (projection.status === "agent_blocked") {
+    return "failed";
+  }
+  if (projection.status === "agent_done_artifact_pending" || projection.status === "pending") {
+    return "pending";
+  }
+  return projection.status === "idle" ? "idle" : fallback;
+}
+
+function sourceCollectionStageProjectionCount(
+  projection: SourceCollectionStageCardProjection | null | undefined,
+  key: keyof NonNullable<SourceCollectionStageCardProjection["counts"]>,
+  fallback: number,
+): number {
+  const value = projection?.counts?.[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
+function sourceCollectionStageProjectionTaskMetric(projection: SourceCollectionStageCardProjection | null | undefined) {
+  const latestTask = projection?.latestTask;
+  if (!latestTask?.taskId) {
+    return "";
+  }
+  const evidenceCount = typeof latestTask.evidenceRefCount === "number" ? latestTask.evidenceRefCount : 0;
+  const nextActionCount = typeof latestTask.nextActionCount === "number" ? latestTask.nextActionCount : 0;
+  return `${latestTask.status || projection?.agentTaskStatus || "task"} · evidence ${evidenceCount} · next ${nextActionCount}`;
 }
 
 type SourceCollectionStorageOpenTarget =
@@ -657,6 +732,19 @@ type ResearchStageRound = {
   sourceRunIds?: string[];
   querySeeds?: string[];
   promptCachePolicy?: TeamWorkflowSourceCollectionRunStartPayload["promptCachePolicy"];
+  sourceCollectionStageCards?: SourceCollectionStageCardProjection[];
+  sourceCollectionStageCardSummary?: {
+    stageCount?: number;
+    closedLoopCount?: number;
+    agentTaskCount?: number;
+    recordCount?: number;
+    sourceCandidateCount?: number;
+    assessedSourceCandidateCount?: number;
+    approvedSourceCandidateCount?: number;
+    graphNodeCount?: number;
+    stewardPackCount?: number;
+    formalKnowledgeSyncCount?: number;
+  };
   experimentPlanRef?: {
     planId: string;
     status: string;
@@ -6687,6 +6775,11 @@ export function TeamsRoute({
     const pagedCandidates = sourceCollectionPageItems("candidate", filteredCandidates);
     const visibleCandidates = pagedCandidates.items;
     const candidateListNeedsScrollHint = visibleCandidates.length > 4;
+    const candidateProjection = sourceCollectionCandidateProjection;
+    const candidateLatestTask = candidateProjection?.latestTask;
+    const candidateMaterializedSources = isRecord(candidateLatestTask?.materializedSources)
+      ? candidateLatestTask?.materializedSources
+      : null;
     return (
       <details
         id="source-collection-candidates-panel"
@@ -6718,6 +6811,33 @@ export function TeamsRoute({
           <span>{lang === "zh" ? "通过" : "approved"} <strong>{sourceCollectionRunApprovedCount}</strong></span>
           <span>{lang === "zh" ? "待 Agent 审查" : "pending agent review"} <strong>{sourceCollectionRunPendingScreeningCount}</strong></span>
         </div>
+        {candidateProjection ? (
+          <div className={styles.sourceCollectionStageTaskSummary}>
+            <div>
+              <strong>{sourceCollectionStageProjectionLabel(candidateProjection)}</strong>
+              <span>{candidateProjection.artifactSummary}</span>
+            </div>
+            {candidateLatestTask?.taskId ? (
+              <div>
+                <span>{lang === "zh" ? "Agent 任务" : "Agent task"} <strong>{candidateLatestTask.status || candidateProjection.agentTaskStatus || "-"}</strong></span>
+                <span>evidence <strong>{candidateLatestTask.evidenceRefCount ?? 0}</strong></span>
+                <span>next <strong>{candidateLatestTask.nextActionCount ?? 0}</strong></span>
+                {candidateMaterializedSources ? (
+                  <span>
+                    {lang === "zh" ? "物化" : "materialized"}{" "}
+                    <strong>
+                      {String(candidateMaterializedSources.importedCandidateCount ?? candidateMaterializedSources.createdRecordCount ?? 0)}
+                    </strong>
+                  </span>
+                ) : null}
+              </div>
+            ) : null}
+            {candidateLatestTask?.summary ? <p>{candidateLatestTask.summary}</p> : null}
+            {candidateProjection.blockingReasons?.length ? (
+              <p className={styles.sourceCollectionStageBlockers}>{candidateProjection.blockingReasons.join(" · ")}</p>
+            ) : null}
+          </div>
+        ) : null}
         {visibleCandidates.length ? (
           <div
             className={styles.sourceCollectionCandidateListShell}
@@ -6799,7 +6919,11 @@ export function TeamsRoute({
   }
 
   function renderSourceCollectionGraphPanel() {
-    const graphNodeSourceCategories = (teamWorkflowCandidateGraph?.nodes ?? []).map((node) => {
+    const graphForSelectedSourceRun =
+      selectedSourceCollectionRunEffectiveId && sourceCollectionGraphProjection
+        ? sourceCollectionProjectedGraphNodeCount > 0 ? teamWorkflowCandidateGraph : null
+        : teamWorkflowCandidateGraph;
+    const graphNodeSourceCategories = (graphForSelectedSourceRun?.nodes ?? []).map((node) => {
       const candidate = teamWorkflowCandidatesById.get(node.candidateId);
       return candidate ? sourceCollectionCandidateSourceCategory(candidate, lang) : "missing";
     });
@@ -6813,17 +6937,17 @@ export function TeamsRoute({
         })
         .map((node) => node.candidateId),
     );
-    const visibleGraph = teamWorkflowCandidateGraph
+    const visibleGraph = graphForSelectedSourceRun
       ? {
-          ...teamWorkflowCandidateGraph,
-          nodes: teamWorkflowCandidateGraph.nodes.filter((node) => visibleGraphNodeIds.has(node.candidateId)),
-          edges: teamWorkflowCandidateGraph.edges.filter((edge) =>
+          ...graphForSelectedSourceRun,
+          nodes: graphForSelectedSourceRun.nodes.filter((node) => visibleGraphNodeIds.has(node.candidateId)),
+          edges: graphForSelectedSourceRun.edges.filter((edge) =>
             visibleGraphNodeIds.has(edge.sourceCandidateId) && visibleGraphNodeIds.has(edge.targetCandidateId),
           ),
-          missingLinks: teamWorkflowCandidateGraph.missingLinks.filter((edge) =>
+          missingLinks: graphForSelectedSourceRun.missingLinks.filter((edge) =>
             visibleGraphNodeIds.has(edge.sourceCandidateId) || visibleGraphNodeIds.has(edge.targetCandidateId),
           ),
-          unreviewedNodes: teamWorkflowCandidateGraph.unreviewedNodes.filter((node) => visibleGraphNodeIds.has(node.candidateId)),
+          unreviewedNodes: graphForSelectedSourceRun.unreviewedNodes.filter((node) => visibleGraphNodeIds.has(node.candidateId)),
         }
       : null;
     const visibleGraphSummary = visibleGraph
@@ -6860,7 +6984,7 @@ export function TeamsRoute({
           onKeyDown={preventSourceCollectionPanelSummaryKeyToggle}
         >
           <span>{lang === "zh" ? "入库关系图" : "Ingestion relationship map"}</span>
-          <small>{visibleGraph ? `${pagedGraphNodes.start}-${pagedGraphNodes.end}/${visibleGraph.nodes.length}` : `${candidateGraphNodeCount} / ${candidateGraphEdgeCount}`}</small>
+          <small>{visibleGraph ? `${pagedGraphNodes.start}-${pagedGraphNodes.end}/${visibleGraph.nodes.length}` : `${sourceCollectionProjectedGraphNodeCount} / ${sourceCollectionProjectedGraphEdgeCount}`}</small>
         </summary>
         {renderSourceCollectionFilterBar(graphFilterCounts, lang === "zh" ? "入库关系过滤" : "Ingestion map filters")}
         {visibleGraph && visibleGraphLayout && visibleGraphSummary && visibleGraph.nodes.length ? (
@@ -6974,9 +7098,9 @@ export function TeamsRoute({
           </>
         ) : (
           <div className={styles.empty}>
-            {teamWorkflowCandidateGraph && !visibleGraph?.nodes.length
+            {graphForSelectedSourceRun && !visibleGraph?.nodes.length
               ? (lang === "zh" ? "当前过滤条件下没有入库关系节点。" : "No ingestion map nodes match this filter.")
-              : teamWorkflowCandidateGraphQuery.isPending
+            : teamWorkflowCandidateGraphQuery.isPending
               ? (lang === "zh" ? "正在读取入库关系图..." : "Loading ingestion map...")
               : (lang === "zh" ? "尚未生成入库关系图。" : "No ingestion map yet.")}
           </div>
@@ -8868,6 +8992,39 @@ export function TeamsRoute({
   const teamWorkflowPaperNoteChunkStatus = teamWorkflowPaperNoteChunkStatusQuery.data ?? null;
   const researchStageRoundStatus = researchStageRoundStatusQuery.data ?? null;
   const researchStagePhases = researchStageRoundStatus?.phases ?? [];
+  const sourceCollectionStageRound = useMemo(() => {
+    const knowledgePhase = researchStagePhases.find((phase) => phase.stageType === "knowledge_collection");
+    const candidateRounds = [
+      knowledgePhase?.latestRound ?? null,
+      researchStageRoundStatus?.latestRound ?? null,
+      ...(researchStageRoundStatus?.activeRounds ?? []),
+    ].filter((round): round is ResearchStageRound => Boolean(round && round.stageType === "knowledge_collection"));
+    const dedupedRounds = new Map<string, ResearchStageRound>();
+    candidateRounds.forEach((round) => {
+      dedupedRounds.set(round.stageRoundId || `${round.stageType}-${round.roundNumber}`, round);
+    });
+    const rounds = [...dedupedRounds.values()];
+    if (!selectedSourceCollectionRunEffectiveId) {
+      return rounds[0] ?? null;
+    }
+    return rounds.find((round) => (round.sourceRunIds ?? []).includes(selectedSourceCollectionRunEffectiveId)) ?? rounds[0] ?? null;
+  }, [
+    researchStagePhases,
+    researchStageRoundStatus?.activeRounds,
+    researchStageRoundStatus?.latestRound,
+    selectedSourceCollectionRunEffectiveId,
+  ]);
+  const sourceCollectionStageCards = sourceCollectionStageRound?.sourceCollectionStageCards ?? [];
+  const sourceCollectionStageCardById = useMemo(() => {
+    const mapping = new Map<SourceCollectionStageModuleId, SourceCollectionStageCardProjection>();
+    sourceCollectionStageCards.forEach((card) => {
+      const stageId = parseSourceCollectionStageModuleId(card.stageId);
+      if (stageId) {
+        mapping.set(stageId, { ...card, stageId });
+      }
+    });
+    return mapping;
+  }, [sourceCollectionStageCards]);
   const experimentPlanningStatus = experimentPlanningStatusQuery.data ?? null;
   const sourceCollectionRecords = sourceCollectionRecordsQuery.data?.records ?? [];
   const sourceCollectionAssignments = sourceCollectionAssignmentsQuery.data?.assignments ?? [];
@@ -9207,6 +9364,31 @@ export function TeamsRoute({
   const sourceCollectionRunPendingScreeningCount = Math.max(0, sourceCollectionRunCandidateCount - sourceCollectionRunAssessedCount);
   const sourceCollectionPendingCandidateImportCount = Math.max(0, sourceCollectionRawRecordCount - sourceCollectionRunCandidateCount);
   const sourceCollectionCollectedCount = sourceCollectionRawRecordCount;
+  const sourceCollectionCollectionProjection = sourceCollectionStageCardById.get("collection") ?? null;
+  const sourceCollectionCandidateProjection = sourceCollectionStageCardById.get("candidate") ?? null;
+  const sourceCollectionScreeningProjection = sourceCollectionStageCardById.get("screening") ?? null;
+  const sourceCollectionGraphProjection = sourceCollectionStageCardById.get("graph") ?? null;
+  const sourceCollectionMemoryProjection = sourceCollectionStageCardById.get("memory") ?? null;
+  const sourceCollectionProjectedCollectedCount = sourceCollectionStageProjectionCount(
+    sourceCollectionCollectionProjection,
+    "artifact",
+    sourceCollectionCollectedCount,
+  );
+  const sourceCollectionProjectedCandidateCount = sourceCollectionStageProjectionCount(
+    sourceCollectionCandidateProjection,
+    "artifact",
+    sourceCollectionRunCandidateCount,
+  );
+  const sourceCollectionProjectedAssessedCount = sourceCollectionStageProjectionCount(
+    sourceCollectionScreeningProjection,
+    "artifact",
+    sourceCollectionRunAssessedCount,
+  );
+  const sourceCollectionProjectedApprovedCount = sourceCollectionStageProjectionCount(
+    sourceCollectionScreeningProjection,
+    "output",
+    sourceCollectionRunApprovedCount,
+  );
   const sourceCollectionQueryCount =
     sourceCollectionSearchPlanRef?.queryCount
     ?? selectedTeamStartSourceCollectionResult?.searchPlan.queryCount
@@ -9331,6 +9513,26 @@ export function TeamsRoute({
   const knowledgeStewardPackCount = teamWorkflowKnowledgeIngestionStatus?.summary.stewardPackCandidateCount ?? 0;
   const knowledgePendingReviewCount = teamWorkflowKnowledgeIngestionStatus?.summary.pendingKnowledgeReviewCandidateCount ?? 0;
   const formalKnowledgeItemCount = teamWorkflowKnowledgeIngestionStatus?.summary.formalKnowledgeItemCount ?? 0;
+  const sourceCollectionProjectedGraphNodeCount = sourceCollectionStageProjectionCount(
+    sourceCollectionGraphProjection,
+    "artifact",
+    candidateGraphNodeCount,
+  );
+  const sourceCollectionProjectedGraphEdgeCount = sourceCollectionStageProjectionCount(
+    sourceCollectionGraphProjection,
+    "output",
+    candidateGraphEdgeCount,
+  );
+  const sourceCollectionProjectedStewardPackCount = sourceCollectionStageProjectionCount(
+    sourceCollectionMemoryProjection,
+    "artifact",
+    knowledgeStewardPackCount,
+  );
+  const sourceCollectionProjectedFormalKnowledgeCount = sourceCollectionStageProjectionCount(
+    sourceCollectionMemoryProjection,
+    "output",
+    formalKnowledgeItemCount,
+  );
   const sourceCollectionDefaultKnowledgeBaseId = teamWorkflowKnowledgeIngestionStatus?.knowledgeBases[0]?.knowledgeBaseId ?? "";
   const sourceCollectionPrecheckCandidateCount = Math.max(sourceCollectionApprovedCount, sourceCollectionRunApprovedCount);
   const sourceCollectionIngestCandidateCount = Math.max(sourceCollectionPrecheckCandidateCount, sourceCollectionRunCandidateCount);
@@ -9580,8 +9782,33 @@ export function TeamsRoute({
           failed: "failed",
           idle: "not started",
           pending: "pending",
-        };
+    };
     return labels[state];
+  };
+  const sourceCollectionStageProjectionLabel = (projection: SourceCollectionStageCardProjection | null | undefined) => {
+    if (!projection?.status) {
+      return "";
+    }
+    const labels: Record<string, string> = lang === "zh"
+      ? {
+          agent_running: "Agent 进行中",
+          closed_loop: "闭环完成",
+          artifact_ready_no_latest_agent_task: "产物已就绪",
+          agent_done_artifact_pending: "Agent 已完成 · 产物待生成",
+          agent_blocked: "Agent 受阻",
+          pending: "待产出",
+          idle: "未开始",
+        }
+      : {
+          agent_running: "Agent running",
+          closed_loop: "closed loop",
+          artifact_ready_no_latest_agent_task: "artifact ready",
+          agent_done_artifact_pending: "Agent done · artifact pending",
+          agent_blocked: "Agent blocked",
+          pending: "pending",
+          idle: "not started",
+        };
+    return labels[projection.status] ?? projection.status;
   };
   const sourceCollectionStepClassName = (state: SourceCollectionStepState) => ({
     active: styles.sourceCollectionStepActive,
@@ -9590,17 +9817,24 @@ export function TeamsRoute({
     idle: styles.sourceCollectionStepIdle,
     pending: styles.sourceCollectionStepPending,
   }[state]);
-  const sourceCollectionSearchStepState: SourceCollectionStepState = sourceCollectionDisplayState.searchStepState;
-  const sourceCollectionScreeningStepState: SourceCollectionStepState = selectedTeamSourceQualityError
+  const sourceCollectionSearchStepState: SourceCollectionStepState = sourceCollectionStageProjectionState(
+    sourceCollectionCollectionProjection,
+    sourceCollectionDisplayState.searchStepState,
+  );
+  const sourceCollectionScreeningFallbackStepState: SourceCollectionStepState = selectedTeamSourceQualityError
     ? "failed"
       : selectedTeamSourceQualityPending
         ? "active"
       : sourceCollectionRunAssessedCount > 0
         ? "done"
-        : sourceCollectionRunCandidateCount > 0 && sourceCollectionSearchOpenAssignmentCount <= 0
+      : sourceCollectionRunCandidateCount > 0 && sourceCollectionSearchOpenAssignmentCount <= 0
           ? "pending"
           : "idle";
-  const sourceCollectionCandidateStepState: SourceCollectionStepState = selectedTeamRecordSourceCollectionOutputError || selectedTeamExtractSourceCollectionCandidatesError
+  const sourceCollectionScreeningStepState: SourceCollectionStepState = sourceCollectionStageProjectionState(
+    sourceCollectionScreeningProjection,
+    sourceCollectionScreeningFallbackStepState,
+  );
+  const sourceCollectionCandidateFallbackStepState: SourceCollectionStepState = selectedTeamRecordSourceCollectionOutputError || selectedTeamExtractSourceCollectionCandidatesError
     ? "failed"
     : selectedTeamRecordSourceCollectionOutputPending || selectedTeamExtractSourceCollectionCandidatesPending
       ? "active"
@@ -9609,7 +9843,11 @@ export function TeamsRoute({
         : selectedSourceCollectionRun
           ? "pending"
           : "idle";
-  const sourceCollectionGraphStepState: SourceCollectionStepState = selectedTeamBuildCandidateGraphError || teamWorkflowCandidateGraphQuery.error
+  const sourceCollectionCandidateStepState: SourceCollectionStepState = sourceCollectionStageProjectionState(
+    sourceCollectionCandidateProjection,
+    sourceCollectionCandidateFallbackStepState,
+  );
+  const sourceCollectionGraphFallbackStepState: SourceCollectionStepState = selectedTeamBuildCandidateGraphError || teamWorkflowCandidateGraphQuery.error
     ? "failed"
       : selectedTeamBuildCandidateGraphPending
         ? "active"
@@ -9618,7 +9856,11 @@ export function TeamsRoute({
         : sourceCollectionRunApprovedCount > 0
           ? "pending"
           : "idle";
-  const sourceCollectionMemoryStepState: SourceCollectionStepState = teamWorkflowKnowledgeIngestionStatusQuery.error || selectedTeamKnowledgePrecheckError || selectedTeamKnowledgeCollectionIngestError
+  const sourceCollectionGraphStepState: SourceCollectionStepState = sourceCollectionStageProjectionState(
+    sourceCollectionGraphProjection,
+    sourceCollectionGraphFallbackStepState,
+  );
+  const sourceCollectionMemoryFallbackStepState: SourceCollectionStepState = teamWorkflowKnowledgeIngestionStatusQuery.error || selectedTeamKnowledgePrecheckError || selectedTeamKnowledgeCollectionIngestError
     ? "failed"
     : selectedTeamKnowledgePrecheckPending || selectedTeamKnowledgeCollectionIngestPending
       ? "active"
@@ -9627,6 +9869,10 @@ export function TeamsRoute({
         : knowledgePendingReviewCount > 0 || knowledgeStewardPackCount > 0 || sourceCollectionIngestCandidateCount > 0
           ? "pending"
           : "idle";
+  const sourceCollectionMemoryStepState: SourceCollectionStepState = sourceCollectionStageProjectionState(
+    sourceCollectionMemoryProjection,
+    sourceCollectionMemoryFallbackStepState,
+  );
   const sourceCollectionCollectionActionLabel = !selectedSourceCollectionRun
     ? sourceCollectionStageSessionTaskPendingStageId === "collection"
       ? (lang === "zh" ? "启动 Agent 中" : "Starting Agent")
@@ -9651,102 +9897,106 @@ export function TeamsRoute({
     {
       id: "collection",
       label: lang === "zh" ? "搜索资料" : "Search sources",
-      metric: lang === "zh" ? `原始资料 ${sourceCollectionCollectedCount} 条` : `${sourceCollectionCollectedCount} raw records`,
-      summary: !selectedSourceCollectionRun
+      metric: lang === "zh" ? `原始资料 ${sourceCollectionProjectedCollectedCount} 条` : `${sourceCollectionProjectedCollectedCount} raw records`,
+      summary: sourceCollectionCollectionProjection?.latestTask?.summary || (!selectedSourceCollectionRun
         ? (lang === "zh" ? "点击开始生成本轮任务" : "Start to create this run")
         : sourceCollectionSearchOpenAssignmentCount > 0
           ? (lang === "zh" ? `${sourceCollectionSearchOpenAssignmentCount} 个搜索任务待执行` : `${sourceCollectionSearchOpenAssignmentCount} search tasks remain`)
-          : (lang === "zh" ? `已入候选 ${sourceCollectionRunCandidateCount} 条` : `${sourceCollectionRunCandidateCount} imported to candidates`),
+          : (lang === "zh" ? `已入候选 ${sourceCollectionProjectedCandidateCount} 条` : `${sourceCollectionProjectedCandidateCount} imported to candidates`)),
       inputLabel: lang === "zh" ? `${sourceCollectionQueryCount} 个搜索问题` : `${sourceCollectionQueryCount} queries`,
-      outputLabel: lang === "zh" ? `${sourceCollectionCollectedCount} 条原始资料` : `${sourceCollectionCollectedCount} raw records`,
+      outputLabel: lang === "zh" ? `${sourceCollectionProjectedCollectedCount} 条原始资料` : `${sourceCollectionProjectedCollectedCount} raw records`,
       nextLabel: sourceCollectionSearchOpenAssignmentCount > 0
         ? (lang === "zh" ? "继续搜索" : "Continue search")
         : (lang === "zh" ? "进入资料提炼" : "Move to extraction"),
       state: sourceCollectionSearchStepState,
-      status: sourceCollectionStepStatusText(sourceCollectionSearchStepState),
+      status: sourceCollectionStageProjectionLabel(sourceCollectionCollectionProjection) || sourceCollectionStepStatusText(sourceCollectionSearchStepState),
       detailLabel: lang === "zh" ? "查看搜索结果" : "View search results",
       actionLabel: sourceCollectionStageTaskActionLabel("collection", sourceCollectionCollectionActionLabel),
       actionDisabled: sourceCollectionCollectionActionDisabled,
       actionTone: "primary",
       actionIcon: selectedSourceCollectionRun && sourceCollectionSearchOpenAssignmentCount > 0 ? "search" : "play",
+      projection: sourceCollectionCollectionProjection,
       onAction: () => void startSourceCollectionStageSessionTask("collection"),
       onDetail: () => openSourceCollectionStage("collection"),
     },
     {
       id: "candidate",
       label: lang === "zh" ? "资料提炼" : "Extract sources",
-      metric: lang === "zh" ? `候选资料 ${sourceCollectionRunCandidateCount} 条` : `${sourceCollectionRunCandidateCount} candidate sources`,
-      summary: sourceCollectionRunCandidateCount > 0
-        ? (lang === "zh" ? `已形成 ${sourceCollectionRunCandidateCount} 条可追溯候选资料` : `${sourceCollectionRunCandidateCount} traceable candidate sources`)
-        : (lang === "zh" ? "等待搜索结果入候选" : "Waiting for collected sources"),
-      inputLabel: lang === "zh" ? `${sourceCollectionCollectedCount} 条原始资料` : `${sourceCollectionCollectedCount} raw records`,
-      outputLabel: lang === "zh" ? `${sourceCollectionRunCandidateCount} 条候选可追溯` : `${sourceCollectionRunCandidateCount} traceable candidates`,
+      metric: lang === "zh" ? `候选资料 ${sourceCollectionProjectedCandidateCount} 条` : `${sourceCollectionProjectedCandidateCount} candidate sources`,
+      summary: sourceCollectionCandidateProjection?.latestTask?.summary || (sourceCollectionProjectedCandidateCount > 0
+        ? (lang === "zh" ? `已形成 ${sourceCollectionProjectedCandidateCount} 条可追溯候选资料` : `${sourceCollectionProjectedCandidateCount} traceable candidate sources`)
+        : (lang === "zh" ? "等待搜索结果入候选" : "Waiting for collected sources")),
+      inputLabel: lang === "zh" ? `${sourceCollectionProjectedCollectedCount} 条原始资料` : `${sourceCollectionProjectedCollectedCount} raw records`,
+      outputLabel: lang === "zh" ? `${sourceCollectionProjectedCandidateCount} 条候选可追溯` : `${sourceCollectionProjectedCandidateCount} traceable candidates`,
       nextLabel: lang === "zh" ? "交给资料审查" : "Send to review",
       state: sourceCollectionCandidateStepState,
-      status: sourceCollectionStepStatusText(sourceCollectionCandidateStepState),
+      status: sourceCollectionStageProjectionLabel(sourceCollectionCandidateProjection) || sourceCollectionStepStatusText(sourceCollectionCandidateStepState),
       detailLabel: lang === "zh" ? "查看提炼结果" : "View extraction results",
       actionLabel: sourceCollectionStageTaskActionLabel("candidate", sourceCollectionCandidateExtractionButtonText),
       actionDisabled: sourceCollectionStageTaskActionDisabled(sourceCollectionCandidateExtractionDisabled),
       actionTone: "primary",
       actionIcon: selectedTeamExtractSourceCollectionCandidatesPending ? "refresh" : "archive",
+      projection: sourceCollectionCandidateProjection,
       onAction: () => void startSourceCollectionStageSessionTask("candidate"),
       onDetail: () => openSourceCollectionStage("candidate"),
     },
     {
       id: "screening",
       label: lang === "zh" ? "资料审查" : "Review sources",
-      metric: lang === "zh" ? `已审 ${sourceCollectionRunAssessedCount}/${sourceCollectionRunCandidateCount}` : `${sourceCollectionRunAssessedCount}/${sourceCollectionRunCandidateCount} reviewed`,
+      metric: lang === "zh" ? `已审 ${sourceCollectionProjectedAssessedCount}/${sourceCollectionProjectedCandidateCount}` : `${sourceCollectionProjectedAssessedCount}/${sourceCollectionProjectedCandidateCount} reviewed`,
       summary: sourceCollectionRunCandidateCount <= 0
         ? (lang === "zh" ? "先完成资料提炼" : "Extract sources first")
         : sourceCollectionRunPendingScreeningCount > 0
           ? (lang === "zh" ? `${sourceCollectionRunPendingScreeningCount} 条等待 Agent 审查` : `${sourceCollectionRunPendingScreeningCount} wait for agent review`)
-          : (lang === "zh" ? `${sourceCollectionRunApprovedCount} 条已通过` : `${sourceCollectionRunApprovedCount} approved`),
-      inputLabel: lang === "zh" ? `${sourceCollectionRunCandidateCount} 条候选资料` : `${sourceCollectionRunCandidateCount} candidate sources`,
-      outputLabel: lang === "zh" ? `${sourceCollectionRunApprovedCount} 条通过 / ${sourceCollectionRunPendingScreeningCount} 条待审` : `${sourceCollectionRunApprovedCount} approved / ${sourceCollectionRunPendingScreeningCount} pending`,
+          : (lang === "zh" ? `${sourceCollectionProjectedApprovedCount} 条已通过` : `${sourceCollectionProjectedApprovedCount} approved`),
+      inputLabel: lang === "zh" ? `${sourceCollectionProjectedCandidateCount} 条候选资料` : `${sourceCollectionProjectedCandidateCount} candidate sources`,
+      outputLabel: lang === "zh" ? `${sourceCollectionProjectedApprovedCount} 条通过 / ${sourceCollectionRunPendingScreeningCount} 条待审` : `${sourceCollectionProjectedApprovedCount} approved / ${sourceCollectionRunPendingScreeningCount} pending`,
       nextLabel: sourceCollectionRunPendingScreeningCount > 0
         ? (lang === "zh" ? "Agent 继续审查" : "Agent continues review")
         : (lang === "zh" ? "进入资料入库" : "Move to ingestion"),
       state: sourceCollectionScreeningStepState,
-      status: sourceCollectionStepStatusText(sourceCollectionScreeningStepState),
+      status: sourceCollectionStageProjectionLabel(sourceCollectionScreeningProjection) || sourceCollectionStepStatusText(sourceCollectionScreeningStepState),
       detailLabel: lang === "zh" ? "查看审查结果" : "View review details",
       actionLabel: sourceCollectionStageTaskActionLabel("screening", sourceCollectionScreeningButtonText),
       actionDisabled: sourceCollectionStageTaskActionDisabled(sourceCollectionScreeningDisabled || selectedTeamSourceQualityPending),
       actionTone: "primary",
       actionIcon: "check",
+      projection: sourceCollectionScreeningProjection,
       onAction: () => void startSourceCollectionStageSessionTask("screening"),
       onDetail: () => openSourceCollectionStage("screening"),
     },
     {
       id: "graph",
       label: lang === "zh" ? "候选图谱" : "Candidate map",
-      metric: lang === "zh" ? `节点 ${candidateGraphNodeCount} / 关系 ${candidateGraphEdgeCount}` : `${candidateGraphNodeCount} nodes / ${candidateGraphEdgeCount} edges`,
-      summary: candidateGraphNodeCount > 0
+      metric: lang === "zh" ? `节点 ${sourceCollectionProjectedGraphNodeCount} / 关系 ${sourceCollectionProjectedGraphEdgeCount}` : `${sourceCollectionProjectedGraphNodeCount} nodes / ${sourceCollectionProjectedGraphEdgeCount} edges`,
+      summary: sourceCollectionGraphProjection?.latestTask?.summary || (sourceCollectionProjectedGraphNodeCount > 0
         ? (lang === "zh" ? "候选资料关系已生成" : "Candidate relationships are ready")
         : sourceCollectionRunCandidateCount > 0
           ? (lang === "zh" ? "可由 Agent 生成候选关系" : "Agent can build candidate relationships")
-          : (lang === "zh" ? "等候选资料生成后建图" : "Build after candidates exist"),
-      inputLabel: lang === "zh" ? `${sourceCollectionRunCandidateCount} 条候选资料` : `${sourceCollectionRunCandidateCount} candidate sources`,
-      outputLabel: lang === "zh" ? `${candidateGraphNodeCount} 个节点 / ${candidateGraphEdgeCount} 条关系` : `${candidateGraphNodeCount} nodes / ${candidateGraphEdgeCount} edges`,
-      nextLabel: candidateGraphNodeCount > 0
+          : (lang === "zh" ? "等候选资料生成后建图" : "Build after candidates exist")),
+      inputLabel: lang === "zh" ? `${sourceCollectionProjectedCandidateCount} 条候选资料` : `${sourceCollectionProjectedCandidateCount} candidate sources`,
+      outputLabel: lang === "zh" ? `${sourceCollectionProjectedGraphNodeCount} 个节点 / ${sourceCollectionProjectedGraphEdgeCount} 条关系` : `${sourceCollectionProjectedGraphNodeCount} nodes / ${sourceCollectionProjectedGraphEdgeCount} edges`,
+      nextLabel: sourceCollectionProjectedGraphNodeCount > 0
         ? (lang === "zh" ? "进入共享记忆前审" : "Move to memory precheck")
         : (lang === "zh" ? "生成候选图谱" : "Build candidate map"),
       state: sourceCollectionGraphStepState,
-      status: sourceCollectionStepStatusText(sourceCollectionGraphStepState),
+      status: sourceCollectionStageProjectionLabel(sourceCollectionGraphProjection) || sourceCollectionStepStatusText(sourceCollectionGraphStepState),
       detailLabel: lang === "zh" ? "查看候选图谱" : "View candidate map",
       actionLabel: sourceCollectionStageTaskActionLabel("graph", sourceCollectionGraphActionLabel),
       actionDisabled: sourceCollectionStageTaskActionDisabled(sourceCollectionGraphActionDisabled),
       actionTone: "primary",
       actionIcon: "refresh",
+      projection: sourceCollectionGraphProjection,
       onAction: () => void startSourceCollectionStageSessionTask("graph"),
       onDetail: () => openSourceCollectionStage("graph"),
     },
     {
       id: "memory",
       label: lang === "zh" ? "共享记忆前审" : "Memory precheck",
-      metric: lang === "zh" ? `正式知识 ${formalKnowledgeItemCount}` : `${formalKnowledgeItemCount} formal items`,
-      summary: formalKnowledgeItemCount > 0
+      metric: lang === "zh" ? `正式知识 ${sourceCollectionProjectedFormalKnowledgeCount}` : `${sourceCollectionProjectedFormalKnowledgeCount} formal items`,
+      summary: sourceCollectionMemoryProjection?.latestTask?.summary || (sourceCollectionProjectedFormalKnowledgeCount > 0
         ? (lang === "zh" ? "已进入团队知识库" : "Synced into Team Knowledge")
-        : knowledgeStewardPackCount > 0
+        : sourceCollectionProjectedStewardPackCount > 0
           ? (lang === "zh" ? "已生成资料入库包" : "Ingestion pack ready")
         : knowledgePendingReviewCount > 0
           ? (lang === "zh" ? "有待审入库对象" : "Review items pending")
@@ -9754,23 +10004,24 @@ export function TeamsRoute({
           ? (lang === "zh" ? "可通知知识库 Agent" : "Can notify steward Agent")
           : sourceCollectionRunCandidateCount > 0
             ? (lang === "zh" ? "可先审查再通知 Agent" : "Can review then notify Agent")
-            : (lang === "zh" ? "等资料提炼后入库" : "Ingest after extraction"),
+            : (lang === "zh" ? "等资料提炼后入库" : "Ingest after extraction")),
       inputLabel: sourceCollectionPrecheckCandidateCount > 0
         ? (lang === "zh" ? `${sourceCollectionPrecheckCandidateCount} 条通过资料` : `${sourceCollectionPrecheckCandidateCount} approved sources`)
-        : (lang === "zh" ? `${sourceCollectionRunCandidateCount} 条候选资料` : `${sourceCollectionRunCandidateCount} candidate sources`),
-      outputLabel: lang === "zh" ? `${formalKnowledgeItemCount} 条正式知识 / ${candidateGraphNodeCount} 个关系节点` : `${formalKnowledgeItemCount} formal / ${candidateGraphNodeCount} graph nodes`,
-      nextLabel: formalKnowledgeItemCount > 0
+        : (lang === "zh" ? `${sourceCollectionProjectedCandidateCount} 条候选资料` : `${sourceCollectionProjectedCandidateCount} candidate sources`),
+      outputLabel: lang === "zh" ? `${sourceCollectionProjectedFormalKnowledgeCount} 条正式知识 / ${sourceCollectionProjectedGraphNodeCount} 个关系节点` : `${sourceCollectionProjectedFormalKnowledgeCount} formal / ${sourceCollectionProjectedGraphNodeCount} graph nodes`,
+      nextLabel: sourceCollectionProjectedFormalKnowledgeCount > 0
         ? (lang === "zh" ? "进入实验规划" : "Move to experiment planning")
-        : knowledgeStewardPackCount > 0
+        : sourceCollectionProjectedStewardPackCount > 0
           ? (lang === "zh" ? "等待知识库 Agent" : "Wait for steward Agent")
           : (lang === "zh" ? "生成关系并通知" : "Build graph and notify"),
       state: sourceCollectionMemoryStepState,
-      status: sourceCollectionStepStatusText(sourceCollectionMemoryStepState),
+      status: sourceCollectionStageProjectionLabel(sourceCollectionMemoryProjection) || sourceCollectionStepStatusText(sourceCollectionMemoryStepState),
       detailLabel: lang === "zh" ? "查看入库详情" : "View ingestion details",
       actionLabel: sourceCollectionStageTaskActionLabel("memory", sourceCollectionMemoryActionLabel),
       actionDisabled: sourceCollectionStageTaskActionDisabled(sourceCollectionMemoryActionDisabled),
       actionTone: "primary",
       actionIcon: "check",
+      projection: sourceCollectionMemoryProjection,
       onAction: () => void startSourceCollectionStageSessionTask("memory"),
       onDetail: () => openSourceCollectionStage("memory"),
     },
@@ -9928,6 +10179,19 @@ export function TeamsRoute({
                     <em>{module.metric}</em>
                     <small>{module.summary}</small>
                   </span>
+                  {module.projection ? (
+                    <div className={styles.sourceCollectionStageProjection}>
+                      <span>{sourceCollectionStageProjectionLabel(module.projection)}</span>
+                      {sourceCollectionStageProjectionTaskMetric(module.projection) ? (
+                        <small>{sourceCollectionStageProjectionTaskMetric(module.projection)}</small>
+                      ) : null}
+                      {module.projection.blockingReasons?.length ? (
+                        <small className={styles.sourceCollectionStageBlockers}>{module.projection.blockingReasons[0]}</small>
+                      ) : module.projection.artifactSummary ? (
+                        <small>{module.projection.artifactSummary}</small>
+                      ) : null}
+                    </div>
+                  ) : null}
                 </article>
               ))}
             </section>
