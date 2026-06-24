@@ -22,6 +22,8 @@ _OWNER_BY_KIND = {
     "agent_status": "AgentDirectory",
     "tool_policy": "AgentDirectory",
     "memory_policy": "AgentDirectory",
+    "mode_binding": "AgentModeBindingService",
+    "agent_mode_binding": "AgentModeBindingService",
     "session": "ConversationLedger",
     "conversation": "ConversationLedger",
     "message": "ConversationLedger",
@@ -115,6 +117,9 @@ def _canonical_edit_route(kind: str, source_id: str, metadata: dict[str, Any]) -
         if kind == "memory_policy":
             return _route("/memory/agents", {"agentId": agent_id, "view": "agents"})
         return _route("/agents", {"agent": agent_id, "pane": "config"})
+    if kind in {"mode_binding", "agent_mode_binding"}:
+        agent_id = str(metadata.get("agentId") or "").strip()
+        return _route("/agents", {"agent": agent_id, "pane": "config"})
     if kind in {"session", "conversation"}:
         return _route("/chat", {"session": normalized_id})
     if kind in {"message", "conversation_message", "session_turn"}:
@@ -150,6 +155,11 @@ def _canonical_mutation_api(kind: str, source_id: str, metadata: dict[str, Any])
     if kind == "memory_policy":
         agent_id = str(metadata.get("agentId") or normalized_id).strip()
         return f"/api/agents/{agent_id}"
+    if kind in {"mode_binding", "agent_mode_binding"}:
+        agent_id = str(metadata.get("agentId") or "").strip()
+        if agent_id:
+            return f"/api/agents/{agent_id}/mode-membership"
+        return f"/api/agent-mode-bindings/{normalized_id}"
     if kind in {"session", "conversation"}:
         return f"/api/sessions/{normalized_id}"
     if kind in {"message", "conversation_message", "session_turn"}:

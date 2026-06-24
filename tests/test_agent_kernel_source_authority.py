@@ -28,6 +28,20 @@ def test_projection_edit_contract_for_session_requires_deeplink_to_source() -> N
     assert contract["canonicalEditRoute"] == "/chat?session=session-alpha"
 
 
+def test_mode_binding_projection_deeplinks_to_agent_configuration() -> None:
+    contract = projection_edit_contract(
+        "mode_binding",
+        "research",
+        {"agentId": "agent-research", "field": "pool"},
+    )
+
+    assert contract["canWrite"] is False
+    assert contract["mode"] == "deep_link_to_source"
+    assert contract["sourceOwner"] == "AgentModeBindingService"
+    assert contract["canonicalEditRoute"] == "/agents?agent=agent-research&pane=config"
+    assert contract["canonicalMutationApi"] == "/api/agents/agent-research/mode-membership"
+
+
 def test_message_projection_uses_source_session_for_deeplink() -> None:
     ref = attach_source_ref(
         {"kind": "conversation_message", "id": "message-alpha"},

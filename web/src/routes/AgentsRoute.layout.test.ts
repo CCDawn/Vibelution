@@ -533,6 +533,7 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain('team: "Team"');
     expect(routeSource).toContain("summary?.teamCount");
     expect(routeSource).toContain("referenceRoute(reference)");
+    expect(routeSource).toContain("reference.projectionEdit?.canonicalEditRoute || reference.sourceRef?.canonicalEditRoute");
     expect(routeSource).toContain('`/teams?team=${encodeURIComponent(reference.sourceId)}`');
     expect(routeSource).toContain("styles.referenceRouteButton");
     expect(routeSource).toContain("styles.referenceStatusStale");

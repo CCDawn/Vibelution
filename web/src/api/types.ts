@@ -3368,6 +3368,9 @@ export type AgentConfigReference = {
   field: string;
   route: string;
   status: string;
+  sourceRef?: SourceAuthorityRef;
+  projectionEdit?: ProjectionEditContract;
+  projectionCanWrite?: boolean;
 };
 
 export type AgentConfigHealthIssue = {

@@ -1013,6 +1013,10 @@ function referenceLabel(reference: AgentConfigReference, lang: "zh" | "en") {
 }
 
 function referenceRoute(reference: AgentConfigReference) {
+  const contractRoute = String(reference.projectionEdit?.canonicalEditRoute || reference.sourceRef?.canonicalEditRoute || "").trim();
+  if (contractRoute) {
+    return contractRoute;
+  }
   if (reference.kind === "team" && reference.sourceId) {
     return `/teams?team=${encodeURIComponent(reference.sourceId)}`;
   }
