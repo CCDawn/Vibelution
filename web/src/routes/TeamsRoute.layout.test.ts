@@ -685,6 +685,17 @@ describe("TeamsRoute layout contract", () => {
       routeSource.indexOf("const sourceCollectionAcceptedBackgroundActive"),
     );
     expect(sourceCollectionBackgroundRefreshSource).toContain("researchStageRoundStatusQueryKey(selectedTeam.teamId)");
+    expect(routeSource).toContain("sourceCollectionStageWritebackRefetchInterval");
+    expect(routeSource).toContain("refetchInterval: (query) =>");
+    expect(routeSource).toContain("refetchInterval: () => sourceCollectionStageWritebackRefetchInterval(pageVisible, researchStageRoundStatusQuery.data)");
+    const sourceCollectionStageReturnRefreshSource = routeSource.slice(
+      routeSource.indexOf("if (!researchWorkflowTeamSelected || !pageVisible"),
+      routeSource.indexOf("if (!selectedTeam?.teamId || !selectedSourceCollectionRunEffectiveId || !selectedSourceCollectionSearchAccepted"),
+    );
+    expect(sourceCollectionStageReturnRefreshSource).toContain("requestedSourceCollectionStage");
+    expect(sourceCollectionStageReturnRefreshSource).toContain("researchStageRoundStatusQueryKey(selectedTeam.teamId)");
+    expect(sourceCollectionStageReturnRefreshSource).toContain("queryKeys.teamWorkflowCandidates(selectedTeam.teamId");
+    expect(sourceCollectionStageReturnRefreshSource).toContain("sourceCollectionRunRecordsQueryKey(selectedSourceCollectionRunEffectiveId)");
     expect(routeSource).toContain("skippedDuplicateCount");
     expect(routeSource).toContain("条重复跳过");
     expect(routeSource).toContain("selectedSourceCollectionSearchAccepted");
