@@ -327,7 +327,8 @@ def _derive_references(
                     source_id=direct_session_id,
                     source_label=str(agent.get("displayName") or direct_session_id),
                     field="directSessionId",
-                    route="/chat",
+                    route=f"/chat?session={direct_session_id}" if direct_session_id else "/chat",
+                    source_kind="session",
                 )
             )
 
@@ -338,15 +339,36 @@ def _derive_references(
         default_agent_id = str(binding.get("defaultAgentId") or "").strip()
         if default_agent_id:
             references[default_agent_id].append(
-                _reference("mode_default", source_id=mode_label, source_label=f"{mode_label} default", mode=mode_label)
+                _reference(
+                    "mode_default",
+                    source_id=mode_label,
+                    source_label=f"{mode_label} default",
+                    mode=mode_label,
+                    source_kind="mode_binding",
+                    agent_id=default_agent_id,
+                )
             )
         for agent_id in _string_list(binding.get("availableAgentIds")):
             references[agent_id].append(
-                _reference("mode_available", source_id=mode_label, source_label=f"{mode_label} available", mode=mode_label)
+                _reference(
+                    "mode_available",
+                    source_id=mode_label,
+                    source_label=f"{mode_label} available",
+                    mode=mode_label,
+                    source_kind="mode_binding",
+                    agent_id=agent_id,
+                )
             )
         for agent_id in _string_list(binding.get("pool")):
             references[agent_id].append(
-                _reference("mode_pool", source_id=mode_label, source_label=f"{mode_label} pool", mode=mode_label)
+                _reference(
+                    "mode_pool",
+                    source_id=mode_label,
+                    source_label=f"{mode_label} pool",
+                    mode=mode_label,
+                    source_kind="mode_binding",
+                    agent_id=agent_id,
+                )
             )
         for key, agent_id in dict(binding.get("slots") or {}).items():
             normalized_agent_id = str(agent_id or "").strip()
@@ -358,6 +380,8 @@ def _derive_references(
                         source_label=f"{mode_label}.{key}",
                         mode=mode_label,
                         field=str(key),
+                        source_kind="mode_binding",
+                        agent_id=normalized_agent_id,
                     )
                 )
         for key, agent_id in dict(binding.get("flowBindings") or {}).items():
@@ -370,6 +394,8 @@ def _derive_references(
                         source_label=f"{mode_label}.{key}",
                         mode=mode_label,
                         field=str(key),
+                        source_kind="mode_binding",
+                        agent_id=normalized_agent_id,
                     )
                 )
 
@@ -390,6 +416,7 @@ def _derive_references(
                     field=str(participant.get("participantId") or ""),
                     route=f"/chat?room={room_id}" if room_id else "/chat",
                     status="active" if agent_id in active_agent_ids else "stale",
+                    source_kind="chat_room",
                 )
             )
 
@@ -409,8 +436,9 @@ def _derive_references(
                     source_id=team_id,
                     source_label=team_name,
                     field=str(member.get("role") or member.get("memberId") or ""),
-                    route="/teams",
+                    route=f"/teams?team={team_id}" if team_id else "/teams",
                     status="active" if team_status != "archived" and agent_id in active_agent_ids else "stale",
+                    source_kind="team",
                 )
             )
     return {agent_id: _dedupe_references(items) for agent_id, items in references.items()}
@@ -1801,6 +1829,18 @@ def _agent_task_profile(agent: dict[str, Any]) -> dict[str, Any]:
     return profile if isinstance(profile, dict) else {}
 
 
+def _source_authority_ref(kind: str, source_id: str, metadata: dict[str, Any] | None = None) -> dict[str, Any]:
+    from core.agent_kernel.source_authority import source_ref
+
+    return source_ref(kind, source_id, metadata)
+
+
+def _projection_edit_contract(kind: str, source_id: str, metadata: dict[str, Any] | None = None) -> dict[str, Any]:
+    from core.agent_kernel.source_authority import projection_edit_contract
+
+    return projection_edit_contract(kind, source_id, metadata)
+
+
 def _reference(
     kind: str,
     *,
@@ -1810,16 +1850,47 @@ def _reference(
     field: str = "",
     route: str = "",
     status: str = "active",
-) -> dict[str, str]:
+    source_kind: str = "",
+    agent_id: str = "",
+) -> dict[str, Any]:
+    normalized_kind = str(kind or "").strip()
+    normalized_source_id = str(source_id or "").strip()
+    normalized_source_kind = str(source_kind or _reference_source_kind(normalized_kind)).strip()
+    metadata = {
+        "agentId": str(agent_id or "").strip(),
+        "sourceSessionId": normalized_source_id if normalized_source_kind == "session" else "",
+        "sourceRoomId": normalized_source_id if normalized_source_kind == "chat_room" else "",
+        "mode": str(mode or "").strip(),
+        "field": str(field or "").strip(),
+        "referenceKind": normalized_kind,
+    }
+    source_ref = _source_authority_ref(normalized_source_kind, normalized_source_id, metadata)
+    projection_edit = _projection_edit_contract(normalized_source_kind, normalized_source_id, metadata)
+    canonical_route = str(projection_edit.get("canonicalEditRoute") or source_ref.get("canonicalEditRoute") or "").strip()
     return {
-        "kind": kind,
-        "sourceId": str(source_id or "").strip(),
+        "kind": normalized_kind,
+        "sourceId": normalized_source_id,
         "sourceLabel": str(source_label or "").strip(),
         "mode": str(mode or "").strip(),
         "field": str(field or "").strip(),
-        "route": str(route or "").strip(),
+        "route": str(route or canonical_route).strip(),
         "status": str(status or "active").strip() or "active",
+        "sourceRef": source_ref,
+        "projectionEdit": projection_edit,
+        "projectionCanWrite": False,
     }
+
+
+def _reference_source_kind(kind: str) -> str:
+    if kind == "direct_session":
+        return "session"
+    if kind in {"mode_default", "mode_available", "mode_pool", "mode_slot", "flow_binding"}:
+        return "mode_binding"
+    if kind == "chat_room":
+        return "chat_room"
+    if kind == "team":
+        return "team"
+    return kind
 
 
 def _dedupe_references(items: list[dict[str, Any]]) -> list[dict[str, Any]]:

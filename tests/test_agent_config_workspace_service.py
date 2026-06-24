@@ -259,11 +259,20 @@ def test_agent_config_workspace_lists_agents_once_and_derives_references(tmp_pat
     assert agents[research_agent["agentId"]]["agentBoundary"]["type"] == "team_role"
     assert agents[research_agent["agentId"]]["agentBoundary"]["directSessionRole"] == "recovery_channel"
     research_refs = payload["references"][research_agent["agentId"]]
-    assert any(item["kind"] == "mode_pool" and item["mode"] == "research" for item in research_refs)
+    mode_pool_ref = next(item for item in research_refs if item["kind"] == "mode_pool" and item["mode"] == "research")
+    assert mode_pool_ref["sourceRef"]["owner"] == "AgentModeBindingService"
+    assert mode_pool_ref["projectionCanWrite"] is False
+    assert mode_pool_ref["projectionEdit"]["mode"] == "deep_link_to_source"
+    assert mode_pool_ref["projectionEdit"]["canonicalEditRoute"] == (
+        f"/agents?agent={research_agent['agentId']}&pane=config"
+    )
     assert any(item["kind"] == "flow_binding" and item["field"] == "broad_search" for item in research_refs)
     assert any(item["kind"] == "chat_room" and item["sourceLabel"] == "研究群聊" for item in research_refs)
     chat_room_ref = next(item for item in research_refs if item["kind"] == "chat_room")
     assert chat_room_ref["route"].startswith("/chat?room=")
+    assert chat_room_ref["sourceRef"]["owner"] == "ChatRoomService"
+    assert chat_room_ref["projectionEdit"]["canWrite"] is False
+    assert chat_room_ref["projectionEdit"]["canonicalEditRoute"].startswith("/chat?room=")
     groups = {item["id"]: item for item in payload["groups"]}
     assert "all" not in groups
     assert groups["active"]["section"] == "status"
@@ -319,6 +328,10 @@ def test_agent_config_workspace_promotes_direct_session_after_activity(tmp_path,
     payload = agent_config_workspace_service.get_agent_config_workspace()
 
     agents = {item["agentId"]: item for item in payload["agents"]}
+    direct_session_ref = next(item for item in agents[agent_id]["references"] if item["kind"] == "direct_session")
+    assert direct_session_ref["sourceRef"]["owner"] == "ConversationLedger"
+    assert direct_session_ref["projectionCanWrite"] is False
+    assert direct_session_ref["projectionEdit"]["canonicalEditRoute"] == f"/chat?session={session['id']}"
     groups = {item["id"]: item for item in payload["groups"]}
     assert agents[agent_id]["agentBoundary"]["type"] == "work_session"
     assert agent_id in groups["work_session"]["agentIds"]
@@ -1296,7 +1309,10 @@ def test_agent_config_workspace_uses_compact_room_and_team_indexes(tmp_path, mon
     assert any(item["roomId"] == room["roomId"] for item in payload["chatRooms"])
     alpha_refs = payload["references"][alpha["agentId"]]
     assert any(item["kind"] == "chat_room" and item["sourceLabel"] == "配置中心群聊" for item in alpha_refs)
-    assert any(item["kind"] == "team" and item["sourceLabel"] == "配置中心团队" for item in alpha_refs)
+    team_ref = next(item for item in alpha_refs if item["kind"] == "team" and item["sourceLabel"] == "配置中心团队")
+    assert team_ref["sourceRef"]["owner"] == "TeamWorkflow"
+    assert team_ref["projectionEdit"]["canWrite"] is False
+    assert team_ref["projectionEdit"]["canonicalEditRoute"] == f"/teams?team={team['teamId']}"
     team_indexes = payload["teamIndexes"]
     assert any(
         item["section"] == "team_index"
