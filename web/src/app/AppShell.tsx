@@ -1,7 +1,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { lazy, Suspense, type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate, useNavigationType } from "react-router-dom";
-import { ChevronDown, LoaderCircle, Moon, Power, RefreshCw, Settings, Sun, Wrench } from "lucide-react";
+import { ArrowLeft, ChevronDown, LoaderCircle, Moon, Power, RefreshCw, Settings, Sun, Wrench } from "lucide-react";
 
 import { fetchJson, setFetchJsonFailureReporter, type FetchJsonFailureReport } from "../api/client";
 import { cancelRuntimeLifecycleCommand, forceStopLauncherBundle, restartLauncherBundle, stopLauncherBundle } from "../api/launcher";
@@ -39,6 +39,15 @@ import { recoverFromBuiltAssetResourceError, recoverFromDynamicImportFetchError 
 import { nextWorkbenchTheme, readStoredWorkbenchTheme, writeStoredWorkbenchTheme } from "./themePreference";
 import { isWorkbenchDomainEnabled, isWorkbenchModeEnabled } from "./workbenchContract";
 import { requestWorkbenchExitGuard } from "./workbenchExitGuard";
+import {
+  appendReturnNavigationEntry,
+  consumeReturnNavigationTarget,
+  isMeaningfulRouteChange,
+  parseReturnNavigationStack,
+  resolveReturnTarget,
+  serializeReturnNavigationStack,
+  type ReturnNavigationEntry,
+} from "./navigationReturn";
 import {
   applyBeforeUnloadProjectCloseGuard,
   buildProjectWindowCloseBlockedTelemetry,
@@ -215,6 +224,37 @@ const APP_VERSION = packageJson.version;
 const BROWSER_MEMORY_SAMPLE_INTERVAL_MS = 30_000;
 const PAGEHIDE_NETWORK_FAILURE_SUPPRESSION_MS = 2_500;
 const ROUTER_LOCATION_DESYNC_RECOVERY_DELAY_MS = 50;
+const RETURN_NAVIGATION_STACK_STORAGE_KEY = "vibelution:return-navigation-stack";
+
+function readStoredReturnNavigationStack(): ReturnNavigationEntry[] {
+  if (typeof window === "undefined") {
+    return [];
+  }
+  try {
+    return parseReturnNavigationStack(window.sessionStorage.getItem(RETURN_NAVIGATION_STACK_STORAGE_KEY));
+  } catch {
+    return [];
+  }
+}
+
+function writeStoredReturnNavigationStack(stack: ReturnNavigationEntry[]) {
+  if (typeof window === "undefined") {
+    return;
+  }
+  try {
+    window.sessionStorage.setItem(RETURN_NAVIGATION_STACK_STORAGE_KEY, serializeReturnNavigationStack(stack));
+  } catch {
+    // Session storage may be unavailable in restricted browser modes; the in-memory stack still works.
+  }
+}
+
+function routeLocationFromRouter(location: RouteLocationLike): RouteLocationLike {
+  return {
+    pathname: location.pathname,
+    search: location.search || "",
+    hash: location.hash || "",
+  };
+}
 
 export function shouldSuppressApiFailureTelemetry(
   failure: FetchJsonFailureReport,
@@ -537,6 +577,7 @@ export function AppShell() {
   );
   const [frontendRefreshRequested, setFrontendRefreshRequested] = useState(false);
   const [shellStartupDataReady, setShellStartupDataReady] = useState(false);
+  const [returnNavigationStack, setReturnNavigationStack] = useState(() => readStoredReturnNavigationStack());
   const shutdownPromiseRef = useRef<Promise<void> | null>(null);
   const restartPromiseRef = useRef<Promise<void> | null>(null);
   const restartCompletionDismissTimerRef = useRef<number | null>(null);
@@ -551,6 +592,8 @@ export function AppShell() {
   const startupWarmupTelemetryStateRef = useRef<"active" | "inactive" | null>(null);
   const apiFailureTelemetrySeenRef = useRef(new Map<string, number>());
   const pagehideAtMsRef = useRef(0);
+  const previousReturnLocationRef = useRef<RouteLocationLike>(routeLocationFromRouter(location));
+  const suppressNextReturnStackPushRef = useRef(false);
   const configQuery = useQuery({
     queryKey: queryKeys.configPublic(),
     queryFn: () => fetchJson<ConfigSummary>("/api/config/public"),
@@ -603,6 +646,24 @@ export function AppShell() {
     }
   }, [backendHealthQuery.data, configQuery.data, runtimeQuery.data]);
 
+  useEffect(() => {
+    const previous = previousReturnLocationRef.current;
+    const current = routeLocationFromRouter(location);
+    if (suppressNextReturnStackPushRef.current) {
+      suppressNextReturnStackPushRef.current = false;
+      previousReturnLocationRef.current = current;
+      return;
+    }
+    if (isMeaningfulRouteChange(previous, current)) {
+      setReturnNavigationStack((existing) => {
+        const next = appendReturnNavigationEntry(existing, previous, current);
+        writeStoredReturnNavigationStack(next);
+        return next;
+      });
+    }
+    previousReturnLocationRef.current = current;
+  }, [location, navigationType]);
+
   const workbench = runtimeQuery.data?.workbench;
   const lifecycleProof = runtimeQuery.data?.lifecycleProof;
   const shutdownInFlight = workbench?.desiredState === "closed" && workbench?.observedState !== "closed";
@@ -618,6 +679,35 @@ export function AppShell() {
   const cancelRestartLabel = lang === "en" ? "Cancel restart" : "取消重启";
   const cancellingLifecycleLabel = lang === "en" ? "Cancelling..." : "正在取消...";
   const themeToggleLabel = theme === "dark" ? t("switchToLightTheme") : t("switchToDarkTheme");
+  const returnNavigationTarget = useMemo(
+    () => resolveReturnTarget(routeLocationFromRouter(location), returnNavigationStack),
+    [location, returnNavigationStack],
+  );
+  const returnNavigationLabel = useMemo(() => {
+    if (!returnNavigationTarget) {
+      return "";
+    }
+    if (returnNavigationTarget.source === "explicit") {
+      const raw = String(new URLSearchParams(location.search).get("returnLabel") || "").trim();
+      if (raw && raw.length <= 80) {
+        return raw;
+      }
+    }
+    return lang === "en" ? "Back" : "返回";
+  }, [lang, location.search, returnNavigationTarget]);
+  const handleReturnNavigation = useCallback(() => {
+    if (!returnNavigationTarget) {
+      return;
+    }
+    const targetPath = returnNavigationTarget.path;
+    suppressNextReturnStackPushRef.current = true;
+    setReturnNavigationStack((current) => {
+      const next = consumeReturnNavigationTarget(current, targetPath);
+      writeStoredReturnNavigationStack(next);
+      return next;
+    });
+    navigate(targetPath);
+  }, [navigate, returnNavigationTarget]);
   const shutdownHeading = lang === "en" ? "Closing workbench" : "正在关闭工作台";
   const shutdownBody = lang === "en"
     ? "Please keep this window open. The runtime manager will close the backend and app window."
@@ -1964,6 +2054,17 @@ export function AppShell() {
       ) : null}
       <header className={styles.topBar}>
         <div className={styles.brandBlock}>
+          {returnNavigationTarget ? (
+            <button
+              type="button"
+              className={styles.returnButton}
+              onClick={handleReturnNavigation}
+              aria-label={returnNavigationLabel}
+              title={returnNavigationLabel}
+            >
+              <ArrowLeft size={16} />
+            </button>
+          ) : null}
           <div className={styles.brandCopy}>
             <span className={styles.brand}>Vibelution</span>
             <span className={styles.versionPill} title={`Vibelution v${APP_VERSION}`}>
