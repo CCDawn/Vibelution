@@ -1542,6 +1542,11 @@ function describeError(error: unknown, fallback: string) {
   return fallback;
 }
 
+function isSessionNotFoundError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  return /session not found|会话不存在|未找到会话/i.test(message);
+}
+
 const TOOL_APPROVAL_LABELS: Record<string, string> = {
   agent_message_tool: "助手消息",
   agent_tool_permission_request_tool: "权限申请",
@@ -2794,6 +2799,76 @@ export function ChatCodingRoute() {
       : false,
     refetchIntervalInBackground: chatStartupWarmupActive || directSessionBackgroundSyncActive,
   });
+  useEffect(() => {
+    if (
+      !activeSessionId
+      || !sessionsQuery.data
+      || !sessionDetailQuery.isError
+      || !isSessionNotFoundError(sessionDetailQuery.error)
+    ) {
+      return;
+    }
+    const nextActiveSessionId = sessionsQuery.data.find((session) => session.id !== activeSessionId)?.id || "";
+    removeSessionWorkspace(activeSessionId, nextActiveSessionId || null);
+    if (nextActiveSessionId) {
+      setActiveSession(nextActiveSessionId);
+    }
+    setSessionDrafts((current) => {
+      const { [activeSessionId]: _removed, ...remaining } = current;
+      return remaining;
+    });
+    setSessionImageAttachments((current) => clearSessionImageAttachments(current, activeSessionId));
+    delete imageUploadInFlightRef.current[activeSessionId];
+    setSessionImageUploadPending((current) => {
+      const { [activeSessionId]: _removed, ...remaining } = current;
+      return remaining;
+    });
+    setSessionComposerErrors((current) => {
+      const { [activeSessionId]: _removed, ...remaining } = current;
+      return nextActiveSessionId
+        ? {
+            ...remaining,
+            [nextActiveSessionId]: "",
+          }
+        : remaining;
+    });
+    queryClient.removeQueries({ queryKey: queryKeys.session(activeSessionId), exact: true });
+    updateSessionSummaryCaches(queryClient, (sessions) =>
+      sessions?.filter((session) => session.id !== activeSessionId),
+    );
+    queryClient.setQueryData<ConversationSummary[]>(queryKeys.conversations(), (conversations) =>
+      removeDeletedSessionFromConversations(conversations, activeSessionId),
+    );
+    setGroupManageSessionIds((current) => current.filter((sessionId) => sessionId !== activeSessionId));
+    if (requestedSessionId === activeSessionId) {
+      const nextSearchParams = new URLSearchParams(location.search);
+      if (nextActiveSessionId) {
+        nextSearchParams.set("session", nextActiveSessionId);
+      } else {
+        nextSearchParams.delete("session");
+      }
+      const nextSearch = nextSearchParams.toString();
+      navigate(`${location.pathname}${nextSearch ? `?${nextSearch}` : ""}`, { replace: true });
+    }
+    if (nextActiveSessionId) {
+      void chatWorkspaceCache.refreshSessionRuntime(nextActiveSessionId);
+    } else {
+      void chatWorkspaceCache.refreshConversationIndex();
+    }
+  }, [
+    activeSessionId,
+    chatWorkspaceCache,
+    queryClient,
+    location.pathname,
+    location.search,
+    navigate,
+    removeSessionWorkspace,
+    requestedSessionId,
+    sessionDetailQuery.error,
+    sessionDetailQuery.isError,
+    sessionsQuery.data,
+    setActiveSession,
+  ]);
   const activeRootSessionId = rootSessionIdFor(sessionDetailQuery.data ?? directSessionActiveSummary);
   const childSessionsQuery = useQuery({
     queryKey: queryKeys.sessionChildSessions(activeRootSessionId || "none"),

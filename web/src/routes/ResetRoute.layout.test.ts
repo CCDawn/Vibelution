@@ -17,6 +17,13 @@ describe("ResetRoute layout contract", () => {
     expect(routeSource).toContain('method: "POST"');
   });
 
+  it("reconciles Chat workspace state after destructive conversation reset", () => {
+    expect(routeSource).toContain("CHAT_WORKSPACE_RESET_ITEM_IDS");
+    expect(routeSource).toContain("resetResultAffectsChatWorkspace(payload)");
+    expect(routeSource).toContain("useChatWorkbenchStore.getState().resetSessions()");
+    expect(routeSource).toContain("chatWorkspaceCache.afterChatWorkspaceReset()");
+  });
+
   it("renders cleanup empty and loading states as compact ledger rows", () => {
     expect(routeSource).toContain("function ResetLedgerEmptyState");
     expect(routeSource).toContain("styles.ledgerEmptyState");

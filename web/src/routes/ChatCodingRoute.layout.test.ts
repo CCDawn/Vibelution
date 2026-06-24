@@ -1545,6 +1545,19 @@ describe("ChatCodingRoute layout contract", () => {
     expect(selectionEffectSource).not.toContain("!sessionsQuery.data.some((session) => session.id === activeSessionId)");
   });
 
+  it("reconciles stale active sessions when reset removes their backend record", () => {
+    expect(routeSource).toContain("function isSessionNotFoundError");
+    expect(routeSource).toContain("sessionDetailQuery.isError");
+    expect(routeSource).toContain("isSessionNotFoundError(sessionDetailQuery.error)");
+    expect(routeSource).toContain("removeSessionWorkspace(activeSessionId, nextActiveSessionId || null)");
+    expect(routeSource).toContain("queryClient.removeQueries({ queryKey: queryKeys.session(activeSessionId), exact: true })");
+    expect(routeSource).toContain("sessions?.filter((session) => session.id !== activeSessionId)");
+    expect(routeSource).toContain("removeDeletedSessionFromConversations(conversations, activeSessionId)");
+    expect(routeSource).toContain("requestedSessionId === activeSessionId");
+    expect(routeSource).toContain("navigate(`${location.pathname}${nextSearch ? `?${nextSearch}` : \"\"}`, { replace: true })");
+    expect(routeSource).toContain("chatWorkspaceCache.refreshConversationIndex()");
+  });
+
   it("keeps renamed direct session titles visible before conversation refetch finishes", () => {
     const renameStart = routeSource.indexOf("const renameSessionMutation");
     const renameEnd = routeSource.indexOf("const addSessionToReviewMutation", renameStart);

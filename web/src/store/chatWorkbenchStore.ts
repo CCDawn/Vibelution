@@ -11,6 +11,7 @@ type ChatWorkbenchState = {
   setActiveSession: (sessionId: string) => void;
   hydrateSession: (sessionId: string, previewTabs: string[], activePreviewPath?: string) => void;
   removeSession: (sessionId: string, nextActiveSessionId?: string | null) => void;
+  resetSessions: (nextActiveSessionId?: string | null) => void;
   openPreviewTab: (sessionId: string, path: string) => void;
   closePreviewTab: (sessionId: string, path: string) => void;
   setActiveTab: (sessionId: string, tabId: string) => void;
@@ -46,6 +47,11 @@ export const useChatWorkbenchStore = create<ChatWorkbenchState>((set) => ({
             : state.activeSessionId,
         sessionWorkspaces,
       };
+    }),
+  resetSessions: (nextActiveSessionId = null) =>
+    set({
+      activeSessionId: nextActiveSessionId ?? null,
+      sessionWorkspaces: {},
     }),
   openPreviewTab: (sessionId, path) =>
     set((state) => {

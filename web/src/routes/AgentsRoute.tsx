@@ -59,6 +59,7 @@ import {
 } from "../api/types";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
 import { useShellI18n } from "../i18n/useShellI18n";
+import { useChatWorkbenchStore } from "../store/chatWorkbenchStore";
 import { AgentManagementNav } from "./AgentManagementNav";
 import {
   agentCenterMemoryRoute,
@@ -177,6 +178,12 @@ type AgentResetOptions = {
   resetToolPolicy: boolean;
   resetMemoryPolicy: boolean;
   resetRuntimePolicy: boolean;
+};
+
+type AgentResetSummary = {
+  resetDirectSession?: boolean;
+  previousDirectSessionId?: unknown;
+  replacementDirectSessionId?: unknown;
 };
 
 type AgentDelegationPolicyDraft = AgentDelegationPolicy;
@@ -343,6 +350,27 @@ const DEFAULT_AGENT_RESET_OPTIONS: AgentResetOptions = {
   resetMemoryPolicy: false,
   resetRuntimePolicy: false,
 };
+
+function stringValue(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function reconcileResetDirectSession(summary: AgentResetSummary) {
+  if (!summary.resetDirectSession) {
+    return;
+  }
+  const previousDirectSessionId = stringValue(summary.previousDirectSessionId);
+  const replacementDirectSessionId = stringValue(summary.replacementDirectSessionId);
+  if (!previousDirectSessionId && !replacementDirectSessionId) {
+    return;
+  }
+  if (previousDirectSessionId) {
+    useChatWorkbenchStore.getState().removeSession(previousDirectSessionId, replacementDirectSessionId || null);
+    return;
+  }
+  useChatWorkbenchStore.getState().resetSessions(replacementDirectSessionId || null);
+}
+
 const DEFAULT_AGENT_CONTEXT_COMPRESSION_DRAFT: AgentContextCompressionPolicyDraft = {
   mode: "inherit",
   enabled: true,
@@ -4302,7 +4330,7 @@ export function AgentsRoute() {
 
   const resetAgentMutation = useMutation({
     mutationFn: (payload: { agentId: string; options: AgentResetOptions }) =>
-      fetchJson<{ agent: AgentConfigWorkspaceAgent; resetSummary: Record<string, unknown> }>(
+      fetchJson<{ agent: AgentConfigWorkspaceAgent; resetSummary: AgentResetSummary }>(
         `/api/agents/${encodeURIComponent(payload.agentId)}/reset`,
         {
           method: "POST",
@@ -4319,9 +4347,17 @@ export function AgentsRoute() {
     },
     onSuccess: (result) => {
       const agent = result.agent;
+      const previousDirectSessionId = stringValue(result.resetSummary.previousDirectSessionId);
+      reconcileResetDirectSession(result.resetSummary);
       setNotice({ tone: "success", text: copy.resetAgentSuccess });
       setResetOptions(DEFAULT_AGENT_RESET_OPTIONS);
       void chatWorkspaceCache.afterAgentWorkspaceChanged();
+      if (result.resetSummary.resetDirectSession) {
+        if (previousDirectSessionId) {
+          queryClient.removeQueries({ queryKey: queryKeys.session(previousDirectSessionId), exact: true });
+        }
+        void chatWorkspaceCache.afterChatWorkspaceReset();
+      }
       void queryClient.invalidateQueries({ queryKey: queryKeys.agentRuns(agent.agentId) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.agentMessages(agent.agentId, "pending") });
       void queryClient.invalidateQueries({ queryKey: queryKeys.agentRuntimeEvidence(agent.agentId) });
