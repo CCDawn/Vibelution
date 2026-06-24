@@ -1470,6 +1470,11 @@ def test_create_session_persists_new_active_empty_conversation(tmp_path, monkeyp
     assert payload["title"] != "新会话"
     assert payload["messages"] == []
     assert payload["currentPhase"] == "ready"
+    assert payload["sourceRef"]["owner"] == "ConversationLedger"
+    assert payload["sourceRef"]["canonicalEditRoute"] == f"/chat?session={payload['id']}"
+    assert payload["projectionEdit"]["canWrite"] is False
+    assert payload["agentSourceRef"]["owner"] == "AgentDirectory"
+    assert payload["agentSourceRef"]["canonicalEditRoute"] == f"/agents?agent={payload['agentId']}&pane=config"
 
     state = load_chat_state(tmp_path)
     assert state["active_conversation_id"] == payload["id"]

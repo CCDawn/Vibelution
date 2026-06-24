@@ -5104,6 +5104,8 @@ def _agent_to_api(
     task_profile = {} if profileless_session_agent else _task_profile_for_agent({**agent, "metadata": metadata})
     agent_id = str(agent.get("agentId") or "").strip()
     tool_policy = _tool_policy_for_agent(agent, hydration=hydration)
+    agent_source_ref = _source_authority_ref("agent", agent_id)
+    agent_projection_edit = _projection_edit_contract("agent", agent_id)
     return {
         "agentId": agent_id,
         "agentCode": _normalize_agent_code(agent.get("agentCode"))
@@ -5155,6 +5157,8 @@ def _agent_to_api(
             if include_activity or include_inbox_pending_count
             else 0
         ),
+        "sourceRef": agent_source_ref,
+        "projectionEdit": agent_projection_edit,
         "activityHydration": (
             "full"
             if include_activity
@@ -5172,6 +5176,8 @@ def _agent_to_api_summary(agent: dict[str, Any]) -> dict[str, Any]:
         metadata.pop("personaProfile", None)
         metadata.pop("taskProfile", None)
     agent_id = str(agent.get("agentId") or "").strip()
+    agent_source_ref = _source_authority_ref("agent", agent_id)
+    agent_projection_edit = _projection_edit_contract("agent", agent_id)
     return {
         "agentId": agent_id,
         "agentCode": _normalize_agent_code(agent.get("agentCode"))
@@ -5205,7 +5211,21 @@ def _agent_to_api_summary(agent: dict[str, Any]) -> dict[str, Any]:
         "metadata": metadata,
         "createdAt": str(agent.get("createdAt") or "").strip(),
         "updatedAt": str(agent.get("updatedAt") or "").strip(),
+        "sourceRef": agent_source_ref,
+        "projectionEdit": agent_projection_edit,
     }
+
+
+def _source_authority_ref(kind: str, source_id: str, metadata: dict[str, Any] | None = None) -> dict[str, Any]:
+    from core.agent_kernel.source_authority import source_ref
+
+    return source_ref(kind, source_id, metadata)
+
+
+def _projection_edit_contract(kind: str, source_id: str, metadata: dict[str, Any] | None = None) -> dict[str, Any]:
+    from core.agent_kernel.source_authority import projection_edit_contract
+
+    return projection_edit_contract(kind, source_id, metadata)
 
 
 def _build_agent_api_hydration_context(
