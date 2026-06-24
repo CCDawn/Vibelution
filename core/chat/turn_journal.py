@@ -347,7 +347,9 @@ def model_visible_messages_from_events(events: Iterable[TurnJournalEvent]) -> li
         payload = dict(event.payload or {})
         if event.event_type == EVENT_USER_MESSAGE:
             content = str(payload.get("content") or "").strip()
-            if content or payload.get("attachments"):
+            attachments = list(payload.get("attachments") or [])
+            references = list(payload.get("references") or [])
+            if content or attachments or references:
                 payload_metadata = payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {}
                 message_metadata = {
                     "kind": "journal_user_message",
@@ -361,7 +363,8 @@ def model_visible_messages_from_events(events: Iterable[TurnJournalEvent]) -> li
                         "role": "user",
                         "content": content,
                         "timestamp": event.timestamp,
-                        "attachments": list(payload.get("attachments") or []),
+                        "attachments": attachments,
+                        "references": references,
                         "metadata": message_metadata,
                     }
                 )
