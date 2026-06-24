@@ -49,6 +49,41 @@ _WEB_FETCH_MAX_REDIRECTS = 5
 _USER_AGENT = "Mozilla/5.0 (compatible; Vibelution/1.0; research search tools)"
 _BLOCKED_HOST_SUFFIXES = (".localhost", ".local", ".internal")
 _TOKEN_HEALTH_CACHE: dict[str, Any] = {"checkedAt": 0.0, "status": None}
+_SITE_QUERY_RE = re.compile(r"(?i)(?:^|[\s(])site:([A-Za-z0-9.-]+)")
+_PUBLIC_SEARCH_STOPWORDS = {
+    "about",
+    "after",
+    "analysis",
+    "and",
+    "before",
+    "benchmark",
+    "best",
+    "code",
+    "current",
+    "docs",
+    "for",
+    "from",
+    "how",
+    "implementation",
+    "latest",
+    "news",
+    "open",
+    "or",
+    "package",
+    "paper",
+    "preprint",
+    "project",
+    "repository",
+    "review",
+    "search",
+    "site",
+    "source",
+    "study",
+    "survey",
+    "the",
+    "to",
+    "with",
+}
 
 
 class AutoGLMTokenServiceError(RuntimeError):
@@ -298,6 +333,92 @@ def _domain_filter_allows(url: str, *, allowed_domains: str = "", blocked_domain
     return not allowed or any(_host_matches_domain(host, domain) for domain in allowed)
 
 
+def _extract_site_query_domains(query: str) -> list[str]:
+    domains: list[str] = []
+    for match in _SITE_QUERY_RE.finditer(str(query or "")):
+        domain = str(match.group(1) or "").strip().strip(".").lower()
+        if not domain or "." not in domain:
+            continue
+        domains.append(domain)
+    return list(dict.fromkeys(domains))
+
+
+def _merge_allowed_domains(allowed_domains: str, query: str) -> str:
+    domains = [*_split_domain_list(allowed_domains), *_extract_site_query_domains(query)]
+    return ",".join(dict.fromkeys(domain for domain in domains if domain))
+
+
+def _query_relevance_tokens(query: str) -> list[str]:
+    text = re.sub(r"(?i)\bsite:[A-Za-z0-9.-]+", " ", str(query or ""))
+    text = re.sub(r"https?://\S+", " ", text)
+    tokens: list[str] = []
+    for token in re.findall(r"[A-Za-z][A-Za-z0-9_-]{2,}", text.lower()):
+        if token in _PUBLIC_SEARCH_STOPWORDS:
+            continue
+        if "." in token or token.isdigit():
+            continue
+        tokens.append(token)
+    return list(dict.fromkeys(tokens))[:12]
+
+
+def _quoted_search_phrases(query: str) -> list[str]:
+    phrases: list[str] = []
+    for phrase in re.findall(r"[\"“”']([^\"“”']{4,80})[\"“”']", str(query or "")):
+        normalized = re.sub(r"\s+", " ", phrase).strip().lower()
+        if normalized:
+            phrases.append(normalized)
+    return list(dict.fromkeys(phrases))[:5]
+
+
+def _search_result_haystack(item: dict[str, str]) -> str:
+    parsed = urlparse(item.get("url", ""))
+    pieces = [
+        item.get("name", ""),
+        item.get("snippet", ""),
+        parsed.hostname or "",
+        parsed.path.replace("-", " ").replace("_", " "),
+    ]
+    return re.sub(r"\s+", " ", " ".join(pieces)).lower()
+
+
+def _result_matches_query_relevance(item: dict[str, str], *, query: str) -> bool:
+    haystack = _search_result_haystack(item)
+    if not haystack:
+        return False
+    phrases = _quoted_search_phrases(query)
+    if any(phrase in haystack for phrase in phrases):
+        return True
+    tokens = _query_relevance_tokens(query)
+    if not tokens:
+        return True
+    hits = sum(1 for token in tokens if token in haystack)
+    required = 1 if len(tokens) <= 2 else 2
+    return hits >= required
+
+
+def _format_public_search_quality_failure(
+    query: str,
+    *,
+    reason: str,
+    provider: str,
+    parsed_count: int,
+    domain_count: int,
+    allowed_domains: str = "",
+    blocked_domains: str = "",
+) -> str:
+    lines = [
+        f"[搜索质量不足] 公开搜索未返回可采信的「{query}」结果。",
+        f"原因: {reason}",
+        f"来源: {provider}",
+        f"解析结果数: {parsed_count}",
+        f"域名过滤后: {domain_count}",
+    ]
+    if allowed_domains or blocked_domains:
+        lines.append(f"域名过滤: allowed={allowed_domains or '*'}, blocked={blocked_domains or '-'}")
+    lines.append("处理: 已丢弃低相关或违反域名约束的结果；请改写查询、指定 allowed_domains，或使用更可靠的学术/项目检索入口。")
+    return "\n".join(lines)
+
+
 def _validate_public_http_url(url: str) -> str:
     parsed = urlparse(url)
     if parsed.scheme not in {"http", "https"}:
@@ -441,14 +562,40 @@ def public_web_search(
     except Exception as exc:
         return f"[错误] 公开搜索页解析失败: {type(exc).__name__}: {exc}"
 
+    parsed_results = _parse_public_search_html(document, max_results=limit * 3)
+    effective_allowed_domains = _merge_allowed_domains(allowed_domains, query)
+    domain_filtered = [
+        item
+        for item in parsed_results
+        if _domain_filter_allows(
+            item.get("url", ""),
+            allowed_domains=effective_allowed_domains,
+            blocked_domains=blocked_domains,
+        )
+    ]
     results = [
         item
-        for item in _parse_public_search_html(document, max_results=limit * 2)
-        if _domain_filter_allows(item.get("url", ""), allowed_domains=allowed_domains, blocked_domains=blocked_domains)
+        for item in domain_filtered
+        if _result_matches_query_relevance(item, query=query)
     ][:limit]
+    if parsed_results and not results:
+        reason = (
+            "搜索结果违反 site/allowed_domains 域名约束"
+            if effective_allowed_domains and not domain_filtered
+            else "搜索结果标题、摘要和 URL 与查询关键词相关性不足"
+        )
+        return _format_public_search_quality_failure(
+            query.strip(),
+            reason=reason,
+            provider="public_web_search",
+            parsed_count=len(parsed_results),
+            domain_count=len(domain_filtered),
+            allowed_domains=effective_allowed_domains,
+            blocked_domains=blocked_domains,
+        )
     domain_note = ""
-    if allowed_domains or blocked_domains:
-        domain_note = f"域名过滤: allowed={allowed_domains or '*'}, blocked={blocked_domains or '-'}"
+    if effective_allowed_domains or blocked_domains:
+        domain_note = f"域名过滤: allowed={effective_allowed_domains or '*'}, blocked={blocked_domains or '-'}"
     return _format_search_results(query.strip(), results, provider="public_web_search", note=domain_note)
 
 

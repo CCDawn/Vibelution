@@ -344,6 +344,18 @@ def _classify_tool_semantic_result(tool_name: str, result: Any) -> dict[str, Any
             "lifecycle": True,
             "fields": {**fields, "semanticStatus": "failed"},
         }
+    if text.startswith("[搜索质量不足]"):
+        return {
+            "eventCode": "tool.execute.degraded",
+            "level": "warning",
+            "outcome": "degraded",
+            "lifecycle": True,
+            "fields": {
+                **fields,
+                "semanticStatus": "degraded",
+                "failureClass": "low_quality_search_results",
+            },
+        }
     if tool_name == "cli_tool":
         if "[EXEC FAILURE" in text or "[执行失败" in text:
             return {
