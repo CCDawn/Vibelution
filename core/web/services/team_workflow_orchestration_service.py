@@ -2754,6 +2754,7 @@ def get_research_stage_round_status(team_id: str) -> dict[str, Any]:
             workflow = _load_or_create_workflow(normalized_team_id)
             store = _load_stage_round_store(normalized_team_id)
         rounds = _stage_rounds(store)
+    _attach_source_collection_stage_card_projections(normalized_team_id, rounds)
     phases = [
         _stage_phase_status(
             normalized_team_id,
@@ -2779,6 +2780,18 @@ def get_research_stage_round_status(team_id: str) -> dict[str, Any]:
         "boundaries": _research_stage_boundaries(),
         "updatedAt": str(store.get("updatedAt") or ""),
     }
+
+
+def _attach_source_collection_stage_card_projections(team_id: str, rounds: list[dict[str, Any]]) -> None:
+    for stage_round in rounds:
+        if not isinstance(stage_round, dict) or str(stage_round.get("stageType") or "") != "knowledge_collection":
+            continue
+        source_run_ids = [str(item) for item in list(stage_round.get("sourceRunIds") or []) if str(item or "").strip()]
+        if not source_run_ids:
+            continue
+        projection = _source_collection_stage_cards_projection(team_id, source_run_ids[-1])
+        stage_round["sourceCollectionStageCards"] = projection.get("cards", [])
+        stage_round["sourceCollectionStageCardSummary"] = projection.get("summary", {})
 
 
 def start_research_stage_round(team_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -10508,6 +10521,8 @@ def _reconcile_source_collection_stage_session_tasks(team_id: str) -> bool:
         tasks = [item for item in list(store.get("tasks") or []) if isinstance(item, dict)]
         if not tasks:
             continue
+        repaired_round = _repair_missing_source_collection_stage_round(team_id, run_id, tasks)
+        changed = repaired_round or changed
         next_tasks: list[dict[str, Any]] = []
         store_changed = False
         for task in tasks:
@@ -10523,6 +10538,445 @@ def _reconcile_source_collection_stage_session_tasks(team_id: str) -> bool:
                     _sync_stage_round_with_source_collection_stage_task(team_id, run_id, task)
             changed = True
     return changed
+
+
+def _repair_missing_source_collection_stage_round(team_id: str, run_id: str, tasks: list[dict[str, Any]]) -> bool:
+    normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
+    normalized_run_id = _normalize_required_id(run_id, "Data processing run id is required.")
+    try:
+        team_service.get_team(normalized_team_id)
+        run = data_processing_service.get_processing_run(normalized_run_id)
+        assignments_payload = data_processing_service.list_collection_assignments(normalized_run_id)
+        run_status = data_processing_service.get_processing_status(normalized_run_id)
+    except (team_service.TeamServiceError, data_processing_service.DataProcessingError):
+        return False
+    scope = run.get("scope") if isinstance(run.get("scope"), dict) else {}
+    metadata = run.get("metadata") if isinstance(run.get("metadata"), dict) else {}
+    if _trim_text(scope.get("teamId") or metadata.get("teamId"), max_length=128) not in {"", normalized_team_id}:
+        return False
+    if (
+        _trim_text(metadata.get("startedFrom"), max_length=160) != "team_workflow_source_collection"
+        and _trim_text(scope.get("workflowStage"), max_length=120) != "knowledge_collection"
+        and not tasks
+    ):
+        return False
+    with _WORKFLOW_LOCK:
+        store = _load_stage_round_store(normalized_team_id)
+        rounds = _stage_rounds(store)
+        existing = _latest_stage_round(
+            [
+                item
+                for item in rounds
+                if str(item.get("stageType") or "") == "knowledge_collection"
+                and normalized_run_id in {str(source_run_id) for source_run_id in list(item.get("sourceRunIds") or [])}
+            ]
+        )
+        if existing is not None:
+            return False
+        workflow = _load_or_create_workflow(normalized_team_id)
+        assignments = [
+            item for item in list(assignments_payload.get("assignments") or [])
+            if isinstance(item, dict)
+        ]
+        run_status_summary = run_status.get("summary") if isinstance(run_status.get("summary"), dict) else {}
+        candidate_store = _load_candidate_store(normalized_team_id)
+        run_candidate_count = _source_collection_candidate_count_for_run(candidate_store, normalized_run_id)
+        round_number = _normalize_int(scope.get("researchStageRoundNumber"), default=_stage_round_number(rounds, "knowledge_collection"), minimum=1, maximum=10000)
+        stage_round_id = (
+            _trim_text(scope.get("researchStageRoundId"), max_length=160)
+            or _new_record_id("stage-repaired")
+        )
+        now = utc_now_iso()
+        search_execution = {
+            "runId": normalized_run_id,
+            "status": _trim_text(run.get("status"), max_length=80) or _trim_text(run_status.get("runStatus"), max_length=80),
+            "resultStatus": _trim_text(run_status.get("runStatus"), max_length=80),
+            "executionMode": "repaired_from_source_run",
+            "accepted": False,
+            "provider": SOURCE_COLLECTION_SEARCH_PROVIDER_CROSSREF,
+            "recordCount": _source_collection_count(run_status_summary.get("recordCount")),
+            "remainingQueryCount": _source_collection_count(run_status_summary.get("openAssignmentCount")),
+            "summary": "Recovered knowledge-collection stage round from source collection run and stage task records.",
+            "updatedAt": now,
+        }
+        task_refs = _source_collection_stage_task_refs(normalized_run_id, tasks)
+        stage_status = _source_collection_stage_round_status_from_task_refs(
+            {"status": "running", "sourceCollectionSearchExecution": search_execution},
+            task_refs,
+        )
+        if not task_refs:
+            stage_status = _source_collection_stage_round_status_after_search(
+                str(search_execution.get("status") or ""),
+                result={},
+                run_status_summary=run_status_summary,
+                source_collection_summary={},
+                run_candidate_count=run_candidate_count,
+            )
+        stage_round = {
+            "schemaVersion": SCHEMA_VERSION,
+            "stageRoundId": stage_round_id,
+            "teamId": normalized_team_id,
+            "stageType": "knowledge_collection",
+            "roundNumber": round_number,
+            "status": stage_status,
+            "title": _trim_text(run.get("title"), max_length=180) or f"{RESEARCH_STAGE_DEFAULTS['knowledge_collection']['title']} {round_number}",
+            "topic": _trim_text(scope.get("topic") or metadata.get("topic"), max_length=500) or _stage_default_topic("knowledge_collection", None),
+            "goal": _trim_text(scope.get("goal") or metadata.get("goal"), max_length=1000) or _stage_default_goal("knowledge_collection", None),
+            "requestedByAgent": _trim_text(metadata.get("requestedByAgent"), max_length=160) or DEFAULT_OWNER_AGENT_ID,
+            "ownerAgentId": _trim_text(metadata.get("ownerAgentId"), max_length=160) or DEFAULT_OWNER_AGENT_ID,
+            "upstreamRoundIds": _normalize_text_list(scope.get("upstreamRoundIds"), max_items=24, max_length=160),
+            "sourceRunIds": [normalized_run_id],
+            "assignmentIds": [str(item.get("assignmentId") or "") for item in assignments if item.get("assignmentId")],
+            "agentRoleAssignments": [
+                {
+                    "agentRole": str(item.get("agentRole") or ""),
+                    "agentId": str(item.get("agentId") or ""),
+                    "assignmentId": str(item.get("assignmentId") or ""),
+                }
+                for item in assignments
+            ],
+            "querySeeds": _normalize_text_list(scope.get("querySeeds") or metadata.get("querySeeds"), max_items=40, max_length=220),
+            "suggestedQuerySeeds": [],
+            "inputRefs": _normalize_text_list(scope.get("inputRefs"), max_items=120, max_length=240),
+            "searchLanguages": _source_collection_search_languages(scope.get("searchLanguages")),
+            "sourceTypes": _source_collection_source_types(scope.get("sourceTypes")),
+            "maxResultsPerQuery": _normalize_int(scope.get("maxResultsPerQuery"), default=SOURCE_COLLECTION_DEFAULT_MAX_RESULTS_PER_QUERY, minimum=1, maximum=100),
+            "workflowItemRef": {"candidateId": normalized_run_id, "currentNode": "knowledge_collection"},
+            "dataSearchPlanRef": scope.get("dataSearchPlanRef") if isinstance(scope.get("dataSearchPlanRef"), dict) else {},
+            "sourceCollectionSearchExecution": search_execution,
+            "sourceCollectionSummary": {
+                "recordCount": _source_collection_count(run_status_summary.get("recordCount")),
+                "candidateCount": run_candidate_count,
+                "assignmentCount": len(assignments),
+                "openAssignmentCount": _source_collection_count(run_status_summary.get("openAssignmentCount")),
+            },
+            "sourceCollectionStageSessionTasks": task_refs,
+            "teamMemoryRecordId": "",
+            "teamMemoryRecord": {},
+            "coordinationContract": {},
+            "planningContract": {},
+            "warnings": [
+                {
+                    "code": "stage_round_repaired_from_source_run",
+                    "severity": "info",
+                    "message": "Recovered missing knowledge-collection stage round from source collection run/task storage.",
+                }
+            ],
+            "boundaries": _research_stage_boundaries(),
+            "createdAt": _trim_text(run.get("createdAt"), max_length=120) or now,
+            "updatedAt": now,
+        }
+        stage_round["teamMemoryRecord"] = _stage_memory_record(stage_round, workflow)
+        stage_round["teamMemoryRecordId"] = stage_round["teamMemoryRecord"]["recordId"]
+        store["rounds"] = rounds + [stage_round]
+        store["updatedAt"] = now
+        workflow["activeWorkflowItems"] = _upsert_active_item(
+            workflow.get("activeWorkflowItems"),
+            candidate_id=normalized_run_id,
+            current_node="knowledge_collection",
+            status=f"source_collection_{stage_status}",
+            transfer_id="",
+        )
+        workflow["updatedAt"] = now
+        _write_json(_stage_round_store_path(normalized_team_id), store)
+        _write_json(_workflow_path(normalized_team_id), workflow)
+    _record_workflow_event(
+        "research_stage_round.repaired_from_source_collection_run",
+        normalized_team_id,
+        fields={
+            "runId": normalized_run_id,
+            "stageRoundId": stage_round_id,
+            "status": stage_status,
+            "taskCount": len(task_refs),
+            "recordCount": _source_collection_count(run_status_summary.get("recordCount")),
+            "candidateCount": run_candidate_count,
+        },
+    )
+    return True
+
+
+def _source_collection_stage_task_refs(run_id: str, tasks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    refs: list[dict[str, Any]] = []
+    for task in tasks:
+        if not isinstance(task, dict):
+            continue
+        refs.append(
+            {
+                "taskId": _trim_text(task.get("taskId"), max_length=160),
+                "runId": run_id,
+                "stageId": _trim_text(task.get("stageId"), max_length=80),
+                "agentId": _trim_text(task.get("agentId"), max_length=160),
+                "agentRole": _trim_text(task.get("agentRole"), max_length=80),
+                "sessionId": _trim_text(task.get("sessionId"), max_length=160),
+                "status": _trim_text(task.get("status"), max_length=80),
+                "summary": _trim_text(task.get("summary"), max_length=500),
+                "updatedAt": _trim_text(task.get("updatedAt"), max_length=120),
+            }
+        )
+    return sorted(refs, key=lambda item: str(item.get("updatedAt") or ""))
+
+
+def _source_collection_stage_cards_projection(team_id: str, run_id: str) -> dict[str, Any]:
+    normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
+    normalized_run_id = _trim_text(run_id, max_length=160)
+    if not normalized_run_id:
+        return {"runId": "", "cards": [], "latestTasks": {}, "summary": {"closedLoopCount": 0, "stageCount": 0}}
+    try:
+        run_status = data_processing_service.get_processing_status(normalized_run_id)
+    except data_processing_service.DataProcessingError:
+        run_status = {}
+    run_summary = run_status.get("summary") if isinstance(run_status.get("summary"), dict) else {}
+    with _WORKFLOW_LOCK:
+        candidate_store = _load_candidate_store(normalized_team_id)
+    candidates = [item for item in list(candidate_store.get("candidates") or []) if isinstance(item, dict) and not _candidate_is_archived(item)]
+    source_candidates = [
+        item for item in candidates
+        if str(item.get("candidateType") or "") == "source_manifest"
+        and _source_collection_candidate_trace_run_id(item) == normalized_run_id
+    ]
+    assessed_sources = [item for item in source_candidates if _candidate_source_quality_assessment(item) is not None]
+    approved_sources = [item for item in source_candidates if _source_quality_bucket(item) == "approved"]
+    source_candidate_ids = {
+        _trim_text(item.get("candidateId"), max_length=160)
+        for item in source_candidates
+        if _trim_text(item.get("candidateId"), max_length=160)
+    }
+    graph_candidates = [
+        item for item in candidates
+        if str(item.get("candidateType") or "") == "candidate_graph"
+        and _source_collection_candidate_graph_matches_run(item, source_candidate_ids)
+    ]
+    latest_graph = _latest_candidate_record(graph_candidates)
+    latest_graph_metadata = latest_graph.get("metadata") if isinstance((latest_graph or {}).get("metadata"), dict) else {}
+    latest_graph_payload = latest_graph_metadata.get("graph") if isinstance(latest_graph_metadata.get("graph"), dict) else {}
+    graph_summary = latest_graph_payload.get("summary") if isinstance(latest_graph_payload.get("summary"), dict) else {}
+    steward_candidates = [
+        item
+        for item in candidates
+        if _source_collection_steward_candidate_matches_run(item, source_candidate_ids)
+    ]
+    steward_pack_count = len(steward_candidates)
+    formal_synced_count = sum(
+        1
+        for item in steward_candidates
+        if str(item.get("currentState") or "") in {"official_synced", "formal_knowledge_synced"}
+    )
+    tasks = _source_collection_stage_session_tasks(normalized_team_id, normalized_run_id)
+    tasks_by_stage: dict[str, list[dict[str, Any]]] = {}
+    for task in tasks:
+        stage_id = _trim_text(task.get("stageId"), max_length=80)
+        if stage_id:
+            tasks_by_stage.setdefault(stage_id, []).append(task)
+    cards = [
+        _source_collection_stage_card_projection(
+            "collection",
+            tasks_by_stage.get("collection", []),
+            artifact_count=_source_collection_count(run_summary.get("recordCount")),
+            input_count=_source_collection_count(run_summary.get("assignmentCount")),
+            output_count=_source_collection_count(run_summary.get("recordCount")),
+            pending_count=_source_collection_count(run_summary.get("openAssignmentCount")),
+            artifact_status="ready" if _source_collection_count(run_summary.get("recordCount")) > 0 else "empty",
+            artifact_summary=f"{_source_collection_count(run_summary.get('recordCount'))} DataRecord records; {_source_collection_count(run_summary.get('openAssignmentCount'))} assignments remain.",
+        ),
+        _source_collection_stage_card_projection(
+            "candidate",
+            tasks_by_stage.get("candidate", []),
+            artifact_count=len(source_candidates),
+            input_count=_source_collection_count(run_summary.get("recordCount")),
+            output_count=len(source_candidates),
+            pending_count=max(0, _source_collection_count(run_summary.get("recordCount")) - len(source_candidates)),
+            artifact_status="ready" if source_candidates else "empty",
+            artifact_summary=f"{len(source_candidates)} source_manifest candidates from this run.",
+        ),
+        _source_collection_stage_card_projection(
+            "screening",
+            tasks_by_stage.get("screening", []),
+            artifact_count=len(assessed_sources),
+            input_count=len(source_candidates),
+            output_count=len(approved_sources),
+            pending_count=max(0, len(source_candidates) - len(assessed_sources)),
+            artifact_status="ready" if len(assessed_sources) >= len(source_candidates) and source_candidates else ("partial" if assessed_sources else "empty"),
+            artifact_summary=f"{len(assessed_sources)}/{len(source_candidates)} source candidates assessed; {len(approved_sources)} approved.",
+        ),
+        _source_collection_stage_card_projection(
+            "graph",
+            tasks_by_stage.get("graph", []),
+            artifact_count=_source_collection_count(graph_summary.get("nodeCount")),
+            input_count=len(source_candidates),
+            output_count=_source_collection_count(graph_summary.get("edgeCount")),
+            pending_count=0 if graph_summary else len(source_candidates),
+            artifact_status="ready" if graph_summary else "empty",
+            artifact_summary=f"{_source_collection_count(graph_summary.get('nodeCount'))} graph nodes; {_source_collection_count(graph_summary.get('edgeCount'))} graph edges.",
+        ),
+        _source_collection_stage_card_projection(
+            "memory",
+            tasks_by_stage.get("memory", []),
+            artifact_count=max(steward_pack_count, formal_synced_count),
+            input_count=len(approved_sources) or len(source_candidates),
+            output_count=formal_synced_count,
+            pending_count=steward_pack_count,
+            artifact_status="ready" if formal_synced_count else ("partial" if steward_pack_count else "empty"),
+            artifact_summary=f"{steward_pack_count} steward packs; {formal_synced_count} formal knowledge sync markers.",
+        ),
+    ]
+    latest_tasks = {
+        card["stageId"]: card.get("latestTask", {})
+        for card in cards
+        if isinstance(card.get("latestTask"), dict) and card["latestTask"].get("taskId")
+    }
+    return {
+        "runId": normalized_run_id,
+        "cards": cards,
+        "latestTasks": latest_tasks,
+        "summary": {
+            "stageCount": len(cards),
+            "closedLoopCount": sum(1 for card in cards if card.get("isClosedLoop")),
+            "agentTaskCount": len(tasks),
+            "recordCount": _source_collection_count(run_summary.get("recordCount")),
+            "sourceCandidateCount": len(source_candidates),
+            "assessedSourceCandidateCount": len(assessed_sources),
+            "approvedSourceCandidateCount": len(approved_sources),
+            "graphNodeCount": _source_collection_count(graph_summary.get("nodeCount")),
+            "stewardPackCount": steward_pack_count,
+            "formalKnowledgeSyncCount": formal_synced_count,
+        },
+    }
+
+
+def _source_collection_stage_card_projection(
+    stage_id: str,
+    tasks: list[dict[str, Any]],
+    *,
+    artifact_count: int,
+    input_count: int,
+    output_count: int,
+    pending_count: int,
+    artifact_status: str,
+    artifact_summary: str,
+) -> dict[str, Any]:
+    latest_task = _latest_source_collection_stage_task(tasks)
+    agent_status = _trim_text(latest_task.get("status"), max_length=80).lower() if latest_task else "not_started"
+    task_completed = agent_status in {"completed", "needs_review"}
+    task_blocked = agent_status in {"blocked", "failed"}
+    artifact_ready = artifact_status == "ready" or artifact_count > 0
+    if agent_status in {"running", "queued"}:
+        card_status = "agent_running"
+    elif task_blocked:
+        card_status = "agent_blocked"
+    elif task_completed and artifact_ready:
+        card_status = "closed_loop"
+    elif task_completed:
+        card_status = "agent_done_artifact_pending"
+    elif artifact_ready:
+        card_status = "artifact_ready_no_latest_agent_task"
+    elif pending_count > 0 or input_count > 0:
+        card_status = "pending"
+    else:
+        card_status = "idle"
+    next_actions = latest_task.get("nextActions") if latest_task and isinstance(latest_task.get("nextActions"), list) else []
+    result = latest_task.get("result") if latest_task and isinstance(latest_task.get("result"), dict) else {}
+    result_keys = sorted(str(key) for key in result.keys()) if result else []
+    return {
+        "stageId": stage_id,
+        "status": card_status,
+        "isClosedLoop": card_status == "closed_loop",
+        "agentTaskStatus": agent_status,
+        "artifactStatus": artifact_status,
+        "artifactSummary": artifact_summary,
+        "counts": {
+            "input": input_count,
+            "artifact": artifact_count,
+            "output": output_count,
+            "pending": pending_count,
+            "task": len(tasks),
+        },
+        "latestTask": _source_collection_stage_task_card_summary(latest_task) if latest_task else {},
+        "resultKeys": result_keys,
+        "nextActions": [_trim_text(item, max_length=500) for item in next_actions if _trim_text(item, max_length=500)][:6],
+        "blockingReasons": _source_collection_stage_card_blocking_reasons(card_status, artifact_status, artifact_count, pending_count),
+    }
+
+
+def _latest_source_collection_stage_task(tasks: list[dict[str, Any]]) -> dict[str, Any] | None:
+    valid = [item for item in tasks if isinstance(item, dict)]
+    if not valid:
+        return None
+    return sorted(valid, key=lambda item: str(item.get("updatedAt") or item.get("createdAt") or ""))[-1]
+
+
+def _source_collection_stage_task_card_summary(task: dict[str, Any]) -> dict[str, Any]:
+    writeback = task.get("writeback") if isinstance(task.get("writeback"), dict) else {}
+    result = task.get("result") if isinstance(task.get("result"), dict) else {}
+    evidence_refs = task.get("evidenceRefs") if isinstance(task.get("evidenceRefs"), list) else []
+    next_actions = task.get("nextActions") if isinstance(task.get("nextActions"), list) else []
+    return {
+        "taskId": _trim_text(task.get("taskId"), max_length=160),
+        "stageId": _trim_text(task.get("stageId"), max_length=80),
+        "agentId": _trim_text(task.get("agentId"), max_length=160),
+        "agentRole": _trim_text(task.get("agentRole"), max_length=80),
+        "sessionId": _trim_text(task.get("sessionId"), max_length=160),
+        "status": _trim_text(task.get("status"), max_length=80),
+        "summary": _trim_text(task.get("summary"), max_length=1000),
+        "updatedAt": _trim_text(task.get("updatedAt"), max_length=120),
+        "resultKeys": sorted(str(key) for key in result.keys()),
+        "evidenceRefCount": len(evidence_refs),
+        "nextActionCount": len(next_actions),
+        "materializedSources": writeback.get("materializedSources") if isinstance(writeback.get("materializedSources"), dict) else {},
+    }
+
+
+def _source_collection_stage_card_blocking_reasons(card_status: str, artifact_status: str, artifact_count: int, pending_count: int) -> list[str]:
+    reasons: list[str] = []
+    if card_status == "agent_done_artifact_pending":
+        reasons.append("Agent task wrote back a structured result, but the expected stage artifact has not been created yet.")
+    if card_status == "agent_blocked":
+        reasons.append("Latest Agent task is blocked or failed.")
+    if artifact_status == "empty" and artifact_count <= 0 and pending_count > 0:
+        reasons.append("Inputs exist, but this stage has not produced its expected artifact yet.")
+    return reasons
+
+
+def _source_collection_candidate_trace_run_id(candidate: dict[str, Any]) -> str:
+    metadata = candidate.get("metadata") if isinstance(candidate.get("metadata"), dict) else {}
+    imported_from = metadata.get("importedFromDataRecord") if isinstance(metadata.get("importedFromDataRecord"), dict) else {}
+    return (
+        _trim_text(imported_from.get("runId"), max_length=160)
+        or _trim_text(metadata.get("sourceCollectionRunId"), max_length=160)
+    )
+
+
+def _source_collection_candidate_graph_matches_run(candidate: dict[str, Any], source_candidate_ids: set[str]) -> bool:
+    if not source_candidate_ids:
+        return False
+    metadata = candidate.get("metadata") if isinstance(candidate.get("metadata"), dict) else {}
+    generated_ids = set(_normalize_id_values(metadata.get("generatedFromCandidateIds")))
+    ingestion = metadata.get("knowledgeCollectionIngestion") if isinstance(metadata.get("knowledgeCollectionIngestion"), dict) else {}
+    input_ids = set(_normalize_id_values(ingestion.get("inputCandidateIds")))
+    graph = metadata.get("graph") if isinstance(metadata.get("graph"), dict) else {}
+    graph_node_ids = {
+        _trim_text(item.get("candidateId"), max_length=160)
+        for item in list(graph.get("nodes") or [])
+        if isinstance(item, dict) and _trim_text(item.get("candidateId"), max_length=160)
+    }
+    return bool((generated_ids | input_ids | graph_node_ids) & source_candidate_ids)
+
+
+def _source_collection_steward_candidate_matches_run(candidate: dict[str, Any], source_candidate_ids: set[str]) -> bool:
+    if not source_candidate_ids:
+        return False
+    metadata = candidate.get("metadata") if isinstance(candidate.get("metadata"), dict) else {}
+    output = metadata.get("output") if isinstance(metadata.get("output"), dict) else {}
+    task_type = str(metadata.get("taskType") or "")
+    is_steward = (
+        task_type == "steward_pack_draft"
+        or str(candidate.get("currentWorkflowNode") or "") == "steward_ingestion"
+    )
+    if not is_steward:
+        return False
+    candidate_ids = set(_normalize_id_values(output.get("candidateIds")))
+    source_trace = output.get("sourceTrace") if isinstance(output.get("sourceTrace"), dict) else {}
+    candidate_ids.update(_normalize_id_values(source_trace.get("sourceCandidateIds") or source_trace.get("sourceIds")))
+    return bool(candidate_ids & source_candidate_ids)
 
 
 def _reconcile_source_collection_stage_session_task_sources(team_id: str, run_id: str, task: dict[str, Any]) -> dict[str, Any]:
