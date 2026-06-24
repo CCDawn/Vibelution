@@ -1088,6 +1088,10 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.conversationMetaTime).toBeTypeOf("string");
     expect(routeStyles.directSessionItem).toBeTypeOf("string");
     expect(routeStyles.groupSessionItem).toBeTypeOf("string");
+    expect(routeStyles.sessionStatusCluster).toBeTypeOf("string");
+    expect(routeStyles.sessionCurrentBadge).toBeTypeOf("string");
+    expect(routeStyles.sessionRunningBadge).toBeTypeOf("string");
+    expect(routeStyles.sessionUnreadBadge).toBeTypeOf("string");
     expect(routeStyles.conversationKindBadge).toBeTypeOf("string");
     expect(routeStyles.conversationKindBadgeDirect).toBeTypeOf("string");
     expect(routeStyles.conversationKindBadgeChild).toBeTypeOf("string");
@@ -1097,13 +1101,19 @@ describe("ChatCodingRoute layout contract", () => {
   it("keeps direct session model metadata and timestamps from clipping each other", () => {
     expect(directSessionIndexItemSource).toContain("styles.conversationMetaMain");
     expect(directSessionIndexItemSource).toContain("styles.conversationMetaTime");
+    expect(directSessionIndexItemSource).toContain("styles.sessionStatusCluster");
+    expect(directSessionIndexItemSource).toContain("styles.sessionRunningBadge");
+    expect(directSessionIndexItemSource).toContain("styles.sessionUnreadBadge");
     expect(routeCssSource).toContain("grid-template-columns: minmax(0, 1fr) fit-content(86px)");
     expect(routeCssSource).toContain("max-width: 86px");
+    expect(routeCssSource).toContain("grid-template-columns: minmax(0, 1fr) max-content");
+    expect(routeCssSource).toContain("max-width: min(148px, 64%)");
     expect(routeCssSource).toContain(".conversationMetaTime time");
     expect(routeCssSource).toContain("overflow: visible");
     expect(routeCssSource).toContain("text-overflow: clip");
     expect(routeCssSource).toContain("flex: 0 0 auto");
     expect(routeCssSource).not.toContain("max-width: 104px");
+    expect(directSessionIndexItemSource).not.toContain("styles.sessionCurrentIndicator");
   });
 
   it("moves direct session actions into a right-click context menu", () => {

@@ -1,4 +1,4 @@
-import { Bot, Check, CircleDot, Clock3, Cpu, MessageCircle, X } from "lucide-react";
+import { Bot, Check, Clock3, Cpu, LoaderCircle, MessageCircle, X } from "lucide-react";
 import type { DragEvent, KeyboardEvent, MouseEvent } from "react";
 
 import type { AgentInstance, SessionSummary } from "../api/types";
@@ -88,11 +88,11 @@ export function showSessionSummaryInline(summary: string | undefined, lang: "zh"
   return sessionIsChild;
 }
 
-export function isChildSession(session: SessionSummary | undefined | null) {
+export function isChildSession(session: Pick<SessionSummary, "sessionKind"> | undefined | null) {
   return String(session?.sessionKind ?? "").trim() === "child";
 }
 
-export function isAgentRootSession(session: SessionSummary | undefined | null) {
+export function isAgentRootSession(session: Pick<SessionSummary, "agentId" | "sessionKind"> | undefined | null) {
   return Boolean(String(session?.agentId ?? "").trim()) && !isChildSession(session);
 }
 
@@ -106,6 +106,30 @@ export function sessionUnreadBadgeTitle(count: number, lang: "zh" | "en") {
     return "";
   }
   return lang === "zh" ? `未读信息：${count} 条` : `${count} unread message${count === 1 ? "" : "s"}`;
+}
+
+export function sessionStatusValue(session: Pick<SessionSummary, "childStatus" | "currentPhase" | "status" | "sessionKind">) {
+  const candidates = isChildSession(session)
+    ? [session.childStatus, session.currentPhase, session.status]
+    : [session.currentPhase, session.status];
+  return candidates.find(sessionIsRunningStatus) || candidates.find((value) => String(value ?? "").trim()) || "";
+}
+
+export function sessionIsRunningStatus(value: string | null | undefined) {
+  const status = String(value ?? "").trim().toLowerCase();
+  return ["queued", "running", "thinking", "tooling", "answering", "planning", "reading", "editing", "verifying", "starting"].includes(status);
+}
+
+export function sessionRunningBadgeLabel(lang: "zh" | "en") {
+  return lang === "zh" ? "运行中" : "Running";
+}
+
+export function sessionRunningBadgeTitle(statusText: string, lang: "zh" | "en") {
+  const text = String(statusText || "").trim();
+  if (!text) {
+    return sessionRunningBadgeLabel(lang);
+  }
+  return lang === "zh" ? `正在运行：${text}` : `Running: ${text}`;
 }
 
 export type DirectSessionIndexViewModel = {
@@ -232,7 +256,7 @@ export function DirectSessionIndexItem({
   onSubmitRename,
 }: DirectSessionIndexItemProps) {
   const sessionIsChild = isChildSession(session);
-  const sessionStatus = sessionIsChild ? (session.childStatus || session.currentPhase || session.status) : session.status;
+  const sessionStatus = sessionStatusValue(session);
   const sessionAgentMeta = sessionAgentMetaLabel(session);
   const sessionFunctionVisible = showSessionFunctionLabel(sessionDisplay, lang);
   const sessionModelLabel = sessionModelBadgeLabel(sessionDisplay.modelLabel);
@@ -240,6 +264,7 @@ export function DirectSessionIndexItem({
   const sessionSummaryVisible = showSessionSummaryInline(sessionSummary, lang, sessionIsChild);
   const unreadCount = sessionUnreadCount(session);
   const unreadTitle = sessionUnreadBadgeTitle(unreadCount, lang);
+  const sessionRunning = sessionIsRunningStatus(sessionStatus);
   const sessionItemClassName = active
     ? `${styles.sessionItem} ${styles.directSessionItem} ${sessionIsChild ? styles.childTopLevelSessionItem : ""} ${styles.sessionItemActive}`
     : `${styles.sessionItem} ${styles.directSessionItem} ${sessionIsChild ? styles.childTopLevelSessionItem : ""}`;
@@ -248,7 +273,35 @@ export function DirectSessionIndexItem({
   const saveLabel = t(sessionIsChild ? "saveTaskName" : isAgentRootSession(session) ? "saveAgentName" : "saveSessionName");
   const kindLabel = sessionIsChild ? (lang === "zh" ? "子对话" : "Child") : (lang === "zh" ? "会话" : "Chat");
   const statusText = statusLabel(sessionStatus);
-  const statusTitle = lang === "zh" && hasAsciiLetter(statusText) ? "状态" : `${lang === "zh" ? "状态：" : ""}${statusText}`;
+  const statusTitle = sessionRunningBadgeTitle(statusText, lang);
+  const currentTitle = t("currentSession");
+  const currentBadgeLabel = lang === "zh" ? "当前" : "Current";
+  const runningBadgeLabel = sessionRunningBadgeLabel(lang);
+
+  const statusCluster = (
+    <span className={styles.sessionStatusCluster}>
+      {active ? (
+        <span
+          className={styles.sessionCurrentBadge}
+          title={currentTitle}
+          aria-label={currentTitle}
+        >
+          {currentBadgeLabel}
+        </span>
+      ) : null}
+      {sessionRunning ? (
+        <span className={styles.sessionRunningBadge} title={statusTitle} aria-label={statusTitle}>
+          <LoaderCircle size={10} aria-hidden="true" />
+          <span>{runningBadgeLabel}</span>
+        </span>
+      ) : null}
+      {unreadCount > 0 ? (
+        <span className={styles.sessionUnreadBadge} title={unreadTitle} aria-label={unreadTitle}>
+          {unreadCount}
+        </span>
+      ) : null}
+    </span>
+  );
 
   function handleTitleKeyDown(event: KeyboardEvent<HTMLInputElement>) {
     if (event.key === "Enter") {
@@ -289,21 +342,7 @@ export function DirectSessionIndexItem({
                   </span>
                 ) : null}
               </span>
-              {active ? (
-                <span
-                  className={styles.sessionCurrentIndicator}
-                  title={t("currentSession")}
-                  aria-label={t("currentSession")}
-                />
-              ) : null}
-              {unreadCount > 0 ? (
-                <span className={styles.sessionCurrentBadge} title={unreadTitle} aria-label={unreadTitle}>
-                  {unreadCount}
-                </span>
-              ) : null}
-              <span className={styles.sessionState} title={statusTitle} aria-label={statusTitle}>
-                <CircleDot size={10} aria-hidden="true" />
-              </span>
+              {statusCluster}
             </span>
             {sessionSummaryVisible ? (
               <span className={styles.sessionItemSummary} title={sessionSummary}>
@@ -352,21 +391,7 @@ export function DirectSessionIndexItem({
                   </span>
                 ) : null}
               </span>
-              {active ? (
-                <span
-                  className={styles.sessionCurrentIndicator}
-                  title={t("currentSession")}
-                  aria-label={t("currentSession")}
-                />
-              ) : null}
-              {unreadCount > 0 ? (
-                <span className={styles.sessionCurrentBadge} title={unreadTitle} aria-label={unreadTitle}>
-                  {unreadCount}
-                </span>
-              ) : null}
-              <span className={styles.sessionState} title={statusTitle} aria-label={statusTitle}>
-                <CircleDot size={10} aria-hidden="true" />
-              </span>
+              {statusCluster}
             </span>
             {sessionSummaryVisible ? (
               <span className={styles.sessionItemSummary} title={sessionSummary}>
