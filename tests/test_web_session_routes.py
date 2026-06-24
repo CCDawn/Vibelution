@@ -298,18 +298,17 @@ def test_session_query_paginates_searches_and_filters(tmp_path, monkeypatch):
     first_page = client.get("/api/sessions/query?limit=2")
     assert first_page.status_code == 200
     first_payload = first_page.json()
-    assert [item["id"] for item in first_payload["items"]] == ["session-gamma", "session-beta"]
-    assert first_payload["nextCursor"] == "2"
-    assert first_payload["totalEstimate"] == 3
+    assert [item["id"] for item in first_payload["items"]] == ["session-gamma", "session-alpha"]
+    assert first_payload["nextCursor"] == ""
+    assert first_payload["totalEstimate"] == 2
 
-    second_page = client.get(f"/api/sessions/query?limit=2&cursor={first_payload['nextCursor']}")
-    assert second_page.status_code == 200
-    assert [item["id"] for item in second_page.json()["items"]] == ["session-alpha"]
-    assert second_page.json()["nextCursor"] == ""
+    child_response = client.get("/api/sessions/session-alpha/child-sessions")
+    assert child_response.status_code == 200
+    assert [item["id"] for item in child_response.json()] == ["session-beta"]
 
     search_response = client.get("/api/sessions/query?q=beta")
     assert search_response.status_code == 200
-    assert [item["id"] for item in search_response.json()["items"]] == ["session-beta"]
+    assert search_response.json()["items"] == []
 
     filtered_response = client.get("/api/sessions/query?agentId=agent-a&sessionKind=main&sort=title_asc")
     assert filtered_response.status_code == 200
