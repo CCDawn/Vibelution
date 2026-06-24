@@ -431,6 +431,17 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).not.toContain("module.onAgentChat");
     expect(routeSource).toContain("SourceCollectionStepState");
     expect(routeSource).toContain("SourceCollectionStageModuleId");
+    expect(routeSource).toContain("SourceCollectionStageCardProjection");
+    expect(routeSource).toContain("sourceCollectionStageCards");
+    expect(routeSource).toContain("sourceCollectionStageCardSummary");
+    expect(routeSource).toContain("sourceCollectionStageCardById");
+    expect(routeSource).toContain("sourceCollectionStageProjectionState");
+    expect(routeSource).toContain("agent_done_artifact_pending");
+    expect(routeSource).toContain("latestTask");
+    expect(routeSource).toContain("blockingReasons");
+    expect(routeSource).toContain("evidenceRefCount");
+    expect(routeSource).toContain("materializedSources");
+    expect(routeSource).toContain("graphForSelectedSourceRun");
     expect(routeSource).toContain("parseSourceCollectionStageModuleId");
     expect(routeSource).toContain("collectionStage");
     expect(routeSource).toContain("selectedSourceCollectionStageId");
@@ -476,6 +487,8 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).not.toContain("sourceCollectionStageOperationPanel");
     expect(routeSource).toContain("aria-pressed");
     expect(routeSource).toContain("<small>{module.summary}</small>");
+    expect(routeSource).toContain("styles.sourceCollectionStageProjection");
+    expect(routeSource).toContain("styles.sourceCollectionStageTaskSummary");
     const graphStateExpression = routeSource.slice(
       routeSource.indexOf("const sourceCollectionGraphStepState"),
       routeSource.indexOf("const sourceCollectionMemoryStepState"),
@@ -871,6 +884,9 @@ describe("TeamsRoute layout contract", () => {
     expect(routeStyles.sourceCollectionStageCard).toBeTypeOf("string");
     expect(routeStyles.sourceCollectionStageCardSelected).toBeTypeOf("string");
     expect(routeStyles.sourceCollectionStageCardHead).toBeTypeOf("string");
+    expect(routeStyles.sourceCollectionStageProjection).toBeTypeOf("string");
+    expect(routeStyles.sourceCollectionStageTaskSummary).toBeTypeOf("string");
+    expect(routeStyles.sourceCollectionStageBlockers).toBeTypeOf("string");
     expect(routeStyles.sourceCollectionStageMiniFlow).toBeTypeOf("string");
     expect(routeStyles.sourceCollectionStageWorkspace).toBeTypeOf("string");
     expect(routeStyles.sourceCollectionStageWorkspaceHeader).toBeTypeOf("string");

@@ -1276,6 +1276,178 @@ def test_research_stage_status_materializes_legacy_stage_task_writeback_sources(
     assert team_workflow_orchestration_service.list_candidate_store(team["teamId"], candidate_type="source_manifest")["candidateCount"] == 2
 
 
+def test_research_stage_status_repairs_missing_round_and_projects_stage_cards(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
+    _stub_source_collection_search_background(monkeypatch)
+    extraction = agent_directory_service.create_agent_instance(display_name="资料提炼")
+    session_service.ensure_agent_direct_session(agent_id=extraction["agentId"], title="资料提炼")
+    team = team_service.create_team(
+        name="挑战杯科研团队",
+        members=[{"agentId": extraction["agentId"], "role": "content_extraction", "agentName": "资料提炼"}],
+    )
+    stage_response = team_workflow_orchestration_service.start_research_stage_round(
+        team["teamId"],
+        {
+            "stageType": "knowledge_collection",
+            "topic": "脑启发路由",
+            "goal": "提炼本轮候选资料",
+            "agentRoles": ["content_extraction"],
+            "agentIds": {"content_extraction": extraction["agentId"]},
+            "querySeeds": ["brain inspired routing"],
+            "promptCachePolicy": {"requirement": "disabled"},
+        },
+    )
+    run_id = stage_response["run"]["runId"]
+    monkeypatch.setattr(
+        session_service,
+        "submit_session_message",
+        lambda session_id, content, **kwargs: {
+            "accepted": True,
+            "sessionId": session_id,
+            "turnId": "turn-stage-task-candidate",
+            "status": "running",
+        },
+    )
+    task = team_workflow_orchestration_service.start_source_collection_stage_session_task(
+        team["teamId"],
+        run_id,
+        {"stageId": "candidate", "agentId": extraction["agentId"], "agentRole": "content_extraction"},
+    )
+    store = team_workflow_orchestration_service._load_source_collection_stage_session_task_store(team["teamId"], run_id)
+    stored_task = next(item for item in store["tasks"] if item["taskId"] == task["taskId"])
+    stored_task["status"] = "completed"
+    stored_task["summary"] = "已在私聊完成资料提炼，但尚未生成团队候选资料卡。"
+    stored_task["result"] = {
+        "evidenceItems": [
+            {"title": f"Evidence {index}", "url": f"https://example.test/evidence-{index}"}
+            for index in range(1, 6)
+        ],
+        "nextActions": ["补 DOI", "筛选来源", "构建图谱", "准备入库预检"],
+    }
+    stored_task["evidenceRefs"] = [{"kind": "evidence", "ref": f"ev-{index}"} for index in range(1, 6)]
+    stored_task["nextActions"] = ["补 DOI", "筛选来源", "构建图谱", "准备入库预检"]
+    stored_task["writeback"] = {
+        "status": "completed",
+        "summary": stored_task["summary"],
+        "result": stored_task["result"],
+        "resultAuthority": "source_collection_stage_writeback_tool",
+        "updatedAt": "2026-06-24T05:06:17+00:00",
+    }
+    team_workflow_orchestration_service._write_source_collection_stage_session_task_store(team["teamId"], run_id, store)
+    round_store_path = team_workflow_orchestration_service._stage_round_store_path(team["teamId"])
+    team_workflow_orchestration_service._write_json(
+        round_store_path,
+        {"schemaVersion": 1, "teamId": team["teamId"], "rounds": [], "updatedAt": "2026-06-24T05:00:00+00:00"},
+    )
+
+    status_payload = team_workflow_orchestration_service.get_research_stage_round_status(team["teamId"])
+
+    assert status_payload["roundCount"] == 1
+    latest_round = status_payload["latestRound"]
+    assert latest_round["stageType"] == "knowledge_collection"
+    assert latest_round["sourceRunIds"] == [run_id]
+    assert any(item["taskId"] == task["taskId"] for item in latest_round["sourceCollectionStageSessionTasks"])
+    cards = latest_round["sourceCollectionStageCards"]
+    assert len(cards) == 5
+    card_by_stage = {card["stageId"]: card for card in cards}
+    candidate_card = card_by_stage["candidate"]
+    assert candidate_card["status"] == "agent_done_artifact_pending"
+    assert candidate_card["agentTaskStatus"] == "completed"
+    assert candidate_card["artifactStatus"] == "empty"
+    assert candidate_card["counts"]["artifact"] == 0
+    assert candidate_card["latestTask"]["taskId"] == task["taskId"]
+    assert candidate_card["latestTask"]["status"] == "completed"
+    assert candidate_card["latestTask"]["evidenceRefCount"] == 5
+    assert candidate_card["latestTask"]["nextActionCount"] == 4
+    assert candidate_card["blockingReasons"]
+    assert {"evidenceItems", "nextActions"} <= set(candidate_card["resultKeys"])
+    assert latest_round["sourceCollectionStageCardSummary"]["closedLoopCount"] == 0
+
+
+def test_source_collection_stage_card_projection_is_scoped_to_current_run_artifacts(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = team_service.create_team(name="挑战杯科研团队")
+    run_one = data_processing_service.create_processing_run(
+        title="Knowledge collection round 1",
+        scope={"teamId": team["teamId"], "workflowStage": "knowledge_collection"},
+        metadata={"startedFrom": "team_workflow_source_collection"},
+    )
+    record_one = data_processing_service.add_record(
+        run_one["runId"],
+        {
+            "sourceType": "paper",
+            "sourceRef": "https://doi.org/10.0000/round-one",
+            "title": "Round one neural evidence",
+            "summary": "Evidence from the first collection round.",
+        },
+    )
+    source_one = team_workflow_orchestration_service.import_data_record_as_source_candidate(
+        team["teamId"],
+        run_one["runId"],
+        record_one["recordId"],
+        {"createdByAgent": "content-extraction-agent"},
+    )["candidate"]
+    team_workflow_orchestration_service.assess_source_candidate_quality(
+        team["teamId"],
+        source_one["candidateId"],
+        {
+            "decision": "approved",
+            "assessedByAgent": "source-quality-agent",
+            "notes": "第一轮来源通过。",
+            "relevanceScore": 85,
+            "traceabilityScore": 80,
+            "credibilityScore": 80,
+        },
+    )
+    graph_response = team_workflow_orchestration_service.build_candidate_graph(
+        team["teamId"],
+        {"createdByAgent": "candidate-graph-agent", "curationMode": "agent_approved_only", "forceRebuild": True},
+    )
+    steward_response = team_workflow_orchestration_service.run_knowledge_ingestion_precheck(
+        team["teamId"],
+        {"stewardAgentId": "knowledge-steward-agent", "forceRebuild": True},
+    )
+
+    run_two = data_processing_service.create_processing_run(
+        title="Knowledge collection round 2",
+        scope={"teamId": team["teamId"], "workflowStage": "knowledge_collection"},
+        metadata={"startedFrom": "team_workflow_source_collection"},
+    )
+    record_two = data_processing_service.add_record(
+        run_two["runId"],
+        {
+            "sourceType": "paper",
+            "sourceRef": "https://doi.org/10.0000/round-two",
+            "title": "Round two neural evidence",
+            "summary": "Evidence from the second collection round.",
+        },
+    )
+    source_two = team_workflow_orchestration_service.import_data_record_as_source_candidate(
+        team["teamId"],
+        run_two["runId"],
+        record_two["recordId"],
+        {"createdByAgent": "content-extraction-agent"},
+    )["candidate"]
+
+    projection = team_workflow_orchestration_service._source_collection_stage_cards_projection(team["teamId"], run_two["runId"])
+
+    card_by_stage = {card["stageId"]: card for card in projection["cards"]}
+    assert source_one["candidateId"] in graph_response["candidateGraph"]["metadata"]["generatedFromCandidateIds"]
+    assert source_one["candidateId"] in steward_response["candidate"]["metadata"]["output"]["candidateIds"]
+    assert source_two["candidateId"] not in graph_response["candidateGraph"]["metadata"]["generatedFromCandidateIds"]
+    assert projection["summary"]["sourceCandidateCount"] == 1
+    assert projection["summary"]["graphNodeCount"] == 0
+    assert projection["summary"]["stewardPackCount"] == 0
+    assert projection["summary"]["formalKnowledgeSyncCount"] == 0
+    assert card_by_stage["candidate"]["status"] == "artifact_ready_no_latest_agent_task"
+    assert card_by_stage["candidate"]["counts"]["artifact"] == 1
+    assert card_by_stage["graph"]["status"] == "pending"
+    assert card_by_stage["graph"]["counts"]["artifact"] == 0
+    assert card_by_stage["memory"]["status"] == "pending"
+    assert card_by_stage["memory"]["counts"]["artifact"] == 0
+
+
 def test_research_stage_status_reconciles_completed_stage_task_turn_result(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)
