@@ -3564,6 +3564,9 @@ export type TeamCanvasNode = {
   agentId: string;
   agentCode: string;
   agentName: string;
+  agentSourceRef?: SourceAuthorityRef | null;
+  agentProjectionEdit?: ProjectionEditContract | null;
+  agentProjectionCanWrite?: boolean;
   role: string;
   purpose: string;
   responsibilities?: string[];

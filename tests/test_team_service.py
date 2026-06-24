@@ -1306,6 +1306,30 @@ def test_team_canvas_save_syncs_linked_chat_room_members(tmp_path, monkeypatch):
     assert linked_room["participants"][1]["teamResponsibilities"] == ["保留画布中的结构化职责。"]
 
 
+def test_team_canvas_agent_identity_snapshot_is_readonly_projection(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    agent = agent_directory_service.create_agent_instance(display_name="Alpha Source", direct_session_id="session-alpha")
+    team = team_service.create_team(name="Source Guard Team", members=[{"agentId": agent["agentId"], "role": "lead"}])
+    canvas = team_service.get_team_canvas(team["teamId"])
+    canvas["nodes"][0]["agentCode"] = "spoofed-code"
+    canvas["nodes"][0]["agentName"] = "Spoofed Name"
+    canvas["nodes"][0]["agentSourceRef"] = {"owner": "FakeProjection"}
+    canvas["nodes"][0]["agentProjectionEdit"] = {"canonicalEditRoute": "/teams?team=fake"}
+    canvas["nodes"][0]["agentProjectionCanWrite"] = True
+
+    updated_canvas = team_service.save_team_canvas(team["teamId"], canvas)
+
+    node = updated_canvas["nodes"][0]
+    assert node["agentCode"] == agent["agentCode"]
+    assert node["agentName"] == agent["displayName"]
+    assert node["agentSourceRef"]["owner"] == "AgentDirectory"
+    assert node["agentSourceRef"]["canonicalEditRoute"] == f"/agents?agent={agent['agentId']}&pane=config"
+    assert node["agentSourceRef"]["projectionCanWrite"] is False
+    assert node["agentProjectionEdit"]["canWrite"] is False
+    assert node["agentProjectionEdit"]["mode"] == "deep_link_to_source"
+    assert node["agentProjectionCanWrite"] is False
+
+
 def test_agent_can_only_belong_to_one_active_team(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     events = []
@@ -1627,12 +1651,18 @@ def test_agent_config_workspace_includes_team_reference(tmp_path, monkeypatch):
     monkeypatch.setattr(agent_config_workspace_service, "_safe_config_workspace", lambda: {"modelOptions": []})
     monkeypatch.setattr(agent_config_workspace_service, "_safe_chat_rooms", lambda: [])
     agent = agent_directory_service.create_agent_instance(display_name="Alpha", direct_session_id="session-alpha")
-    team_service.create_team(name="Reference Team", members=[{"agentId": agent["agentId"], "role": "owner"}])
+    team = team_service.create_team(name="Reference Team", members=[{"agentId": agent["agentId"], "role": "owner"}])
 
     workspace = agent_config_workspace_service.get_agent_config_workspace()
 
     enriched = next(item for item in workspace["agents"] if item["agentId"] == agent["agentId"])
-    assert any(item["kind"] == "team" and item["route"] == "/teams" for item in enriched["references"])
+    team_ref = next(item for item in enriched["references"] if item["kind"] == "team")
+    assert team_ref["route"] == f"/teams?team={team['teamId']}"
+    assert team_ref["sourceRef"]["owner"] == "TeamWorkflow"
+    assert team_ref["sourceRef"]["canonicalEditRoute"] == f"/teams?team={team['teamId']}"
+    assert team_ref["projectionEdit"]["canWrite"] is False
+    assert team_ref["projectionEdit"]["mode"] == "deep_link_to_source"
+    assert team_ref["projectionCanWrite"] is False
     assert workspace["summary"]["teamCount"] == 1
 
 

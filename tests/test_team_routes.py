@@ -214,6 +214,31 @@ def test_team_routes_save_canvas(tmp_path, monkeypatch):
     assert len(response.json()["nodes"]) == 2
 
 
+def test_team_canvas_route_returns_agent_identity_source_authority(tmp_path, monkeypatch):
+    _isolate_team_route_state(tmp_path, monkeypatch)
+    agent = agent_directory_service.create_agent_instance(display_name="Alpha Source", direct_session_id="session-alpha")
+    client = _client()
+    team = client.post("/api/teams", json={"name": "源边界团队", "members": [{"agentId": agent["agentId"], "role": "lead"}]}).json()
+    canvas = client.get(f"/api/teams/{team['teamId']}/canvas").json()
+    canvas["nodes"][0]["agentCode"] = "spoofed-code"
+    canvas["nodes"][0]["agentName"] = "Spoofed Name"
+    canvas["nodes"][0]["agentSourceRef"] = {"owner": "FakeProjection"}
+    canvas["nodes"][0]["agentProjectionEdit"] = {"canonicalEditRoute": "/teams?team=fake"}
+    canvas["nodes"][0]["agentProjectionCanWrite"] = True
+
+    response = client.put(f"/api/teams/{team['teamId']}/canvas", json=canvas)
+
+    assert response.status_code == 200, response.text
+    node = response.json()["nodes"][0]
+    assert node["agentCode"] == agent["agentCode"]
+    assert node["agentName"] == agent["displayName"]
+    assert node["agentSourceRef"]["owner"] == "AgentDirectory"
+    assert node["agentSourceRef"]["canonicalEditRoute"] == f"/agents?agent={agent['agentId']}&pane=config"
+    assert node["agentProjectionEdit"]["canWrite"] is False
+    assert node["agentProjectionEdit"]["mode"] == "deep_link_to_source"
+    assert node["agentProjectionCanWrite"] is False
+
+
 def test_team_routes_sync_linked_chat_room(tmp_path, monkeypatch):
     _isolate_team_route_state(tmp_path, monkeypatch)
     agent = agent_directory_service.create_agent_instance(display_name="Alpha", direct_session_id="session-alpha")
