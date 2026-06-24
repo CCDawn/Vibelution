@@ -435,6 +435,11 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("sourceCollectionStageCards");
     expect(routeSource).toContain("sourceCollectionStageCardSummary");
     expect(routeSource).toContain("sourceCollectionStageCardById");
+    expect(routeSource).toContain("sourceCollectionDisplayedCandidateCount");
+    expect(routeSource).toContain("sourceCollectionDisplayedCandidateFilterCounts");
+    expect(routeSource).toContain("sourceCollectionCandidateProjectionFallbackCount");
+    expect(routeSource).toContain("candidateListAwaitingRefresh");
+    expect(routeSource).toContain("列表正在同步");
     expect(routeSource).toContain("sourceCollectionStageProjectionState");
     expect(routeSource).toContain("agent_done_artifact_pending");
     expect(routeSource).toContain("latestTask");
@@ -562,8 +567,8 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("sourceCollectionMemoryActionDisabled");
     expect(routeSource).toContain("sourceCollectionMemoryActionLabel");
     expect(routeSource).toContain("maxCandidates: Math.max(1, Math.min(80, sourceCollectionIngestCandidateCount))");
-    expect(routeSource).toContain("forceReview: sourceCollectionPrecheckCandidateCount <= 0 && sourceCollectionRunCandidateCount > 0");
-    expect(routeSource).toContain("forceReview: sourceCollectionRunApprovedCount <= 0 && sourceCollectionRunCandidateCount > 0");
+    expect(routeSource).toContain("forceReview: sourceCollectionPrecheckCandidateCount <= 0 && sourceCollectionDisplayedCandidateCount > 0");
+    expect(routeSource).toContain("forceReview: sourceCollectionRunApprovedCount <= 0 && sourceCollectionDisplayedCandidateCount > 0");
     expect(routeSource).toContain("可先审查再通知 Agent");
     expect(routeSource).toContain("条候选资料");
     expect(routeSource).not.toContain("onAction: refreshSourceCollectionGraph");
