@@ -189,7 +189,7 @@ def news_search(topic: str, max_results: int = 8, date_hint: str = "") -> str:
         return "[错误] 新闻搜索主题不能为空"
     date_part = f" {str(date_hint).strip()}" if str(date_hint or "").strip() else " 2026"
     query = f'{topic_text} news latest analysis{date_part}{_domain_query(_NEWS_DOMAINS)}'
-    return public_web_search(query=query, max_results=max_results)
+    return public_web_search(query=query, max_results=max_results, allowed_domains=",".join(_NEWS_DOMAINS))
 
 
 def search_summarize_sources(search_outputs: str, max_sources: int = 20) -> str:

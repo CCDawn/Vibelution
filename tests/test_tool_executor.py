@@ -1430,6 +1430,41 @@ class TestToolExecutorErrorHandling:
         assert event["fields"]["semanticStatus"] == "degraded"
         assert event["fields"]["issueCount"] == 2
 
+    def test_low_quality_search_result_records_degraded_runtime_scene_event(self, executor, monkeypatch):
+        events = []
+
+        def fake_record_runtime_scene_event(component, phase, event_code, **kwargs):
+            events.append(
+                {
+                    "component": component,
+                    "phase": phase,
+                    "eventCode": event_code,
+                    **kwargs,
+                }
+            )
+            return {"accepted": True}
+
+        monkeypatch.setattr(
+            "core.web.services.runtime_scene_service.record_runtime_scene_event",
+            fake_record_runtime_scene_event,
+        )
+        executor.register_tool(
+            "public_web_search",
+            lambda query="": "[搜索质量不足] 公开搜索未返回可采信的结果。",
+            timeout=5,
+        )
+
+        result, action = executor.execute("public_web_search", {"query": "predictive coding site:arxiv.org"})
+
+        assert action is None
+        assert str(result).startswith("[搜索质量不足]")
+        event = events[-1]
+        assert event["eventCode"] == "tool.execute.degraded"
+        assert event["level"] == "warning"
+        assert event["outcome"] == "degraded"
+        assert event["fields"]["semanticStatus"] == "degraded"
+        assert event["fields"]["failureClass"] == "low_quality_search_results"
+
     def test_cli_pipe_pattern_executes_again_after_security_feedback(self, executor):
         """同轮同类 pipe 模式不再二次短路，由工具自身继续返回安全反馈。"""
         reset_session_state()

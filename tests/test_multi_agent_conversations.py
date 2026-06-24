@@ -1664,6 +1664,35 @@ def test_agent_message_tool_resolves_common_agent_label_variants(tmp_path, monke
     assert payload["targetAgentId"] == beta["agentId"]
 
 
+def test_agent_message_tool_resolves_unique_role_key_target(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    alpha = session_service.create_chat_session(title="Alpha Agent")
+    beta = session_service.create_chat_session(title="Beta Agent")
+    _allow_agent_message_tool(alpha["agentId"])
+    agent_directory_service.update_agent_instance(
+        beta["agentId"],
+        primary_mode="research",
+        role_key="challenge_cup_source_acquisition",
+    )
+
+    with agent_directory_service.active_agent_runtime(alpha["agentId"], session_id=alpha["id"]):
+        result, action = ToolExecutor().execute(
+            "agent_message_tool",
+            {
+                "target_agent": "challenge_cup_source_acquisition",
+                "content": "请接收资料发现阶段的候选线索。",
+                "summary": "资料获取交接",
+                "wake_target": False,
+            },
+        )
+
+    payload = json.loads(result)
+    assert action is None
+    assert payload["ok"] is True
+    assert payload["status"] == "sent"
+    assert payload["targetAgentId"] == beta["agentId"]
+
+
 def test_agent_message_tool_preserves_full_message_body(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     alpha = session_service.create_chat_session(title="Alpha Agent")

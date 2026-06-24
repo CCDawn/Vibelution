@@ -208,6 +208,22 @@ def _resolve_target_agent(target: str, agents: list[dict[str, Any]]) -> dict[str
             "error": "ambiguous_target_name",
             "message": "目标名称不唯一，请改用 agentId 或稳定代号。",
         }
+    role_matches = [
+        item for item in agents
+        if str(item.get("roleKey") or "").strip().casefold() in folded_labels
+        or str(
+            (item.get("metadata") if isinstance(item.get("metadata"), dict) else {}).get("researchAgentKey") or ""
+        ).strip().casefold() in folded_labels
+    ]
+    if len(role_matches) == 1:
+        return {"ok": True, "agent": role_matches[0]}
+    if len(role_matches) > 1:
+        return {
+            "ok": False,
+            "status": "blocked",
+            "error": "ambiguous_target_role",
+            "message": "目标 roleKey 匹配到多个 Agent，请改用 agentId 或稳定代号。",
+        }
     return {
         "ok": False,
         "status": "blocked",
