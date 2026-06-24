@@ -4,6 +4,7 @@
 """
 
 import inspect
+import subprocess
 
 from pathlib import Path
 
@@ -50,8 +51,23 @@ model = "{model}"
 
 
 def test_project_root_no_longer_tracks_operator_config_files():
-    assert not (PROJECT_ROOT / "config.toml").exists()
-    assert not (PROJECT_ROOT / "config.example.toml").exists()
+    tracked = subprocess.run(
+        ["git", "ls-files", "--", "config.toml", "config.example.toml"],
+        cwd=PROJECT_ROOT,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=True,
+    )
+
+    assert tracked.stdout.splitlines() == []
+
+
+def test_project_root_operator_config_files_are_ignored():
+    ignore_rules = (PROJECT_ROOT / ".gitignore").read_text(encoding="utf-8").splitlines()
+
+    assert "/config.toml" in ignore_rules
+    assert "/config.example.toml" in ignore_rules
 
 
 def test_windows_user_env_fallback_does_not_spawn_shells():

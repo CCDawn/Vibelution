@@ -49,6 +49,10 @@ log_info/
 *.log
 *.bak
 
+# Local operator config must live outside the repository.
+/config.toml
+/config.example.toml
+
 # Local web workbench outputs
 /web/dist/
 /web/.codex-temp/
