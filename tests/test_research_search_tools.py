@@ -43,7 +43,7 @@ def test_public_web_search_parses_and_filters_results(monkeypatch):
             200,
             request=httpx.Request("GET", url),
             text=bing_html(
-                ("Good Paper", "https://arxiv.org/abs/1234.5678", "paper snippet"),
+                ("Good Paper", "https://arxiv.org/abs/1234.5678", "agent paper snippet"),
                 ("Blocked Repo", "https://github.com/example/repo", "repo snippet"),
             ),
         )
@@ -60,6 +60,51 @@ def test_public_web_search_parses_and_filters_results(monkeypatch):
     assert "https://arxiv.org/abs/1234.5678" in result
     assert "Blocked Repo" not in result
     assert "域名过滤: allowed=arxiv.org" in result
+
+
+def test_public_web_search_infers_site_domain_and_rejects_cross_domain_noise(monkeypatch):
+    def fake_request(method, url, **kwargs):
+        assert method == "GET"
+        return httpx.Response(
+            200,
+            request=httpx.Request("GET", url),
+            text=bing_html(
+                ("ChatGPT DAN", "https://github.com/0xk1h0/ChatGPT_DAN", "ChatGPT jailbreak prompt"),
+                ("Bing quiz", "https://www.wikihow.com/Play-Bing-Homepage-Quiz", "Play the Bing quiz"),
+            ),
+        )
+
+    install_fake_client(monkeypatch, fake_request)
+
+    result = web_search_tool.public_web_search('"predictive coding" site:arxiv.org', max_results=5)
+
+    assert result.startswith("[搜索质量不足]")
+    assert "违反 site/allowed_domains 域名约束" in result
+    assert "allowed=arxiv.org" in result
+    assert "ChatGPT_DAN" not in result
+
+
+def test_public_web_search_rejects_low_relevance_same_domain_results(monkeypatch):
+    def fake_request(method, url, **kwargs):
+        assert method == "GET"
+        return httpx.Response(
+            200,
+            request=httpx.Request("GET", url),
+            text=bing_html(
+                ("unrelated repository", "https://github.com/example/support", "Microsoft support account help"),
+            ),
+        )
+
+    install_fake_client(monkeypatch, fake_request)
+
+    result = web_search_tool.public_web_search(
+        "predictive coding implementation site:github.com",
+        max_results=5,
+    )
+
+    assert result.startswith("[搜索质量不足]")
+    assert "相关性不足" in result
+    assert "unrelated repository" not in result
 
 
 def test_web_search_does_not_fallback_when_token_service_unavailable(monkeypatch):
@@ -140,6 +185,7 @@ def test_paper_project_and_news_search_build_no_quota_queries(monkeypatch):
     assert "site:github.com" in calls[1]["query"]
     assert "Python" in calls[1]["query"]
     assert "news latest analysis" in calls[2]["query"]
+    assert "reuters.com" in calls[2]["allowed_domains"]
 
 
 def test_search_summarize_sources_dedupes_markdown_and_bare_urls():

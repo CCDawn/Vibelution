@@ -287,6 +287,17 @@ class TestInferToolBusinessSuccess:
     def test_error_prefix_is_failure(self):
         assert infer_tool_business_success("[错误] something failed") is False
 
+    def test_low_quality_search_prefix_is_degraded_semantics(self):
+        payload = "[搜索质量不足] 公开搜索未返回可采信的结果。"
+
+        semantics = extract_tool_result_semantics(payload)
+        envelope = package_tool_result(payload)
+
+        assert semantics["semanticStatus"] == "degraded"
+        assert semantics["failureClass"] == "low_quality_search_results"
+        assert envelope.semantic_status == "degraded"
+        assert envelope.failure_class == "low_quality_search_results"
+
     def test_bom_prefixed_dict_status_is_business_failure(self):
         assert infer_tool_business_success({"status": "\ufefffailed", "error": "policy limited"}) is False
         assert infer_tool_business_success({"status": "\ufeffsuccess", "message": "ok"}) is True
