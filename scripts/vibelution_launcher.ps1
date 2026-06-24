@@ -5248,6 +5248,11 @@ namespace VibelutionLauncher {
     }
 
     public static class WinApi {
+        private const int IMAGE_ICON = 1;
+        private const int LR_LOADFROMFILE = 0x00000010;
+        private const int WM_SETICON = 0x0080;
+        private static readonly IntPtr ICON_SMALL = new IntPtr(0);
+        private static readonly IntPtr ICON_BIG = new IntPtr(1);
         private static readonly PROPERTYKEY AppUserModelId = new PROPERTYKEY("9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3", 5);
         private static readonly PROPERTYKEY RelaunchDisplayName = new PROPERTYKEY("9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3", 4);
         private static readonly PROPERTYKEY RelaunchIcon = new PROPERTYKEY("9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3", 3);
@@ -5257,6 +5262,12 @@ namespace VibelutionLauncher {
 
         [DllImport("user32.dll")]
         public static extern bool SetForegroundWindow(IntPtr hWnd);
+
+        [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern IntPtr LoadImage(IntPtr hInst, string lpszName, uint uType, int cxDesired, int cyDesired, uint fuLoad);
+
+        [DllImport("user32.dll")]
+        private static extern IntPtr SendMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
 
         [DllImport("shell32.dll")]
         private static extern int SHGetPropertyStoreForWindow(IntPtr hwnd, ref Guid riid, out IPropertyStore propertyStore);
@@ -5296,6 +5307,25 @@ namespace VibelutionLauncher {
                 Marshal.ReleaseComObject(store);
             }
         }
+
+        public static bool SetWindowIcon(IntPtr hwnd, string iconPath) {
+            if (hwnd == IntPtr.Zero || String.IsNullOrWhiteSpace(iconPath)) {
+                return false;
+            }
+
+            IntPtr bigIcon = LoadImage(IntPtr.Zero, iconPath, IMAGE_ICON, 32, 32, LR_LOADFROMFILE);
+            IntPtr smallIcon = LoadImage(IntPtr.Zero, iconPath, IMAGE_ICON, 16, 16, LR_LOADFROMFILE);
+            bool applied = false;
+            if (bigIcon != IntPtr.Zero) {
+                SendMessage(hwnd, WM_SETICON, ICON_BIG, bigIcon);
+                applied = true;
+            }
+            if (smallIcon != IntPtr.Zero) {
+                SendMessage(hwnd, WM_SETICON, ICON_SMALL, smallIcon);
+                applied = true;
+            }
+            return applied;
+        }
     }
 }
 "@
@@ -5315,13 +5345,15 @@ function Set-ManagedBrowserWindowAppIdentity {
     $isLauncherSurface = ($WindowPurpose -eq "launcher_control_surface")
     $appId = if ($isLauncherSurface) { "Vibelution.Launcher" } else { "Vibelution.Workbench" }
     $displayName = if ($isLauncherSurface) { "Vibelution Launcher" } else { "Vibelution Workbench" }
-    $iconResource = if (Test-Path -LiteralPath $launcherIconPath) { "$launcherIconPath,0" } else { "" }
+    $iconExists = Test-Path -LiteralPath $launcherIconPath
+    $iconResource = if ($iconExists) { "$launcherIconPath,0" } else { "" }
     $eventFields = @{
         window_pid = if ($WindowProcess) { [int]$WindowProcess.Id } else { 0 }
         main_window_handle = $handle.ToInt64()
         window_purpose = $WindowPurpose
         app_user_model_id = $appId
         icon_resource = $iconResource
+        icon_path = if ($iconExists) { $launcherIconPath } else { "" }
     }
 
     if ($handle -eq [IntPtr]::Zero) {
@@ -5332,6 +5364,7 @@ function Set-ManagedBrowserWindowAppIdentity {
             -Fields ($eventFields + @{ reason = "missing_window_handle"; applied = $false })
         return [pscustomobject]@{
             Applied = $false
+            WindowIconApplied = $false
             AppUserModelId = $appId
             IconResource = $iconResource
             Reason = "missing_window_handle"
@@ -5341,12 +5374,14 @@ function Set-ManagedBrowserWindowAppIdentity {
     try {
         Ensure-WinApi
         $applied = [VibelutionLauncher.WinApi]::SetWindowAppUserModelIdentity($handle, $appId, $displayName, $iconResource)
+        $windowIconApplied = if ($iconExists) { [VibelutionLauncher.WinApi]::SetWindowIcon($handle, $launcherIconPath) } else { $false }
         Write-LauncherControlLog `
             -Event "launcher.browser.window_app_identity.succeeded" `
             -Message "Managed browser window AppUserModel identity was applied." `
-            -Fields ($eventFields + @{ applied = [bool]$applied; display_name = $displayName })
+            -Fields ($eventFields + @{ applied = [bool]$applied; display_name = $displayName; window_icon_applied = [bool]$windowIconApplied })
         return [pscustomobject]@{
             Applied = [bool]$applied
+            WindowIconApplied = [bool]$windowIconApplied
             AppUserModelId = $appId
             IconResource = $iconResource
             Reason = ""
@@ -5359,6 +5394,7 @@ function Set-ManagedBrowserWindowAppIdentity {
             -Fields ($eventFields + @{ applied = $false; error = [string]$_.Exception.Message })
         return [pscustomobject]@{
             Applied = $false
+            WindowIconApplied = $false
             AppUserModelId = $appId
             IconResource = $iconResource
             Reason = "apply_failed"
@@ -5885,7 +5921,7 @@ function Start-ManagedBrowser {
     $appIdentity = Set-ManagedBrowserWindowAppIdentity -WindowProcess $windowProcess -WindowPurpose $WindowPurpose
 
     if ($script:currentRuntimeSceneId) {
-        Update-RuntimeSceneManifest @{ browser = @{ status = "open"; executable = $BrowserExecutable; launch_pid = $proc.Id; window_pid = $windowProcess.Id; window_mode = $windowMode; configured_window_mode = $configuredWindowMode; window_size = $windowSize; configured_window_size = $configuredWindowSize; window_size_argument = $windowSizeArgument; window_policy = $windowPolicy; fullscreen_forced = $fullscreenForced; profile_dir = $ProfileDir; app_url = $resolvedAppUrl; window_purpose = $WindowPurpose; app_user_model_id = $appIdentity.AppUserModelId; icon_resource = $appIdentity.IconResource; app_identity_applied = [bool]$appIdentity.Applied } }
+        Update-RuntimeSceneManifest @{ browser = @{ status = "open"; executable = $BrowserExecutable; launch_pid = $proc.Id; window_pid = $windowProcess.Id; window_mode = $windowMode; configured_window_mode = $configuredWindowMode; window_size = $windowSize; configured_window_size = $configuredWindowSize; window_size_argument = $windowSizeArgument; window_policy = $windowPolicy; fullscreen_forced = $fullscreenForced; profile_dir = $ProfileDir; app_url = $resolvedAppUrl; window_purpose = $WindowPurpose; app_user_model_id = $appIdentity.AppUserModelId; icon_resource = $appIdentity.IconResource; app_identity_applied = [bool]$appIdentity.Applied; window_icon_applied = [bool]$appIdentity.WindowIconApplied } }
         Append-RuntimeSceneRawLog -RelativePath (Get-RuntimeSceneRelativePaths).Browser -Message "Managed browser window opened (launch PID=$($proc.Id), window PID=$($windowProcess.Id))."
         Write-RuntimeSceneEvent `
             -Component "browser" `
@@ -5912,6 +5948,7 @@ function Start-ManagedBrowser {
                 app_user_model_id = $appIdentity.AppUserModelId
                 icon_resource = $appIdentity.IconResource
                 app_identity_applied = [bool]$appIdentity.Applied
+                window_icon_applied = [bool]$appIdentity.WindowIconApplied
             }
     }
 
