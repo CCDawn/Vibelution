@@ -7,6 +7,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from core.agent_kernel import service as agent_kernel_service
+from core.chat.conversation_ledger import EVENT_USER_MESSAGE, append_conversation_event
 from core.infrastructure import developer_sandbox
 from core.infrastructure.tool_executor import ToolExecutor
 from core.ui.chat_state import load_chat_state, save_chat_state
@@ -232,6 +233,16 @@ def test_session_list_uses_lightweight_message_preview(tmp_path, monkeypatch):
             ],
         },
     )
+    for index in range(250):
+        append_conversation_event(
+            tmp_path,
+            "session-long",
+            f"session-long-seed-{index:03d}",
+            EVENT_USER_MESSAGE,
+            status="recorded",
+            payload={"content": f"历史消息 {index}"},
+            timestamp=f"2026-05-26T10:00:{index % 60:02d}",
+        )
     normalized_count = 0
     real_sanitize_message_content = session_service._sanitize_message_content
 
@@ -832,7 +843,11 @@ def test_agent_directory_direct_session_can_accept_messages_after_materializatio
     persisted = state["conversations"][0]
     assert persisted["conversation_id"] == "session-research-ceo"
     assert persisted["agent_id"] == agent["agentId"]
-    assert persisted["messages"][-1]["role"] == "user"
+    assert "messages" not in persisted
+    detail = session_service.get_session_detail("session-research-ceo")
+    user_messages = [item for item in detail["messages"] if item["role"] == "user"]
+    assert user_messages
+    assert "科研 CEO" in user_messages[-1]["content"]
 
 
 def test_agent_directory_resolves_workspace_root_without_nested_workspace(tmp_path, monkeypatch):
