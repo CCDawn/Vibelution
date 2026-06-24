@@ -1302,6 +1302,13 @@ def test_session_submit_kernel_bridge_records_trace_without_agent_inbox_delivery
         "sourceMessageId",
         "projectionRef",
     }
+    assert all(item["projectionCanWrite"] is False for item in timeline["projectionRefs"])
+    session_ref = next(item for item in timeline["projectionRefs"] if item["metadataKey"] == "sourceSessionId")
+    message_ref = next(item for item in timeline["projectionRefs"] if item["metadataKey"] == "sourceMessageId")
+    assert session_ref["sourceRef"]["owner"] == "ConversationLedger"
+    assert session_ref["canonicalEditRoute"] == f"/chat?session={detail['id']}"
+    assert message_ref["projectionEdit"]["mode"] == "deep_link_to_source"
+    assert message_ref["canonicalEditRoute"].startswith(f"/chat?session={detail['id']}&message=")
     assert agent_directory_service.list_agent_inbox_messages_for_agent(detail["agentId"], status="") == []
     assert captured_contexts[0]["message_metadata"]["kernelTaskId"] == metadata["kernelTaskId"]
     assert any(

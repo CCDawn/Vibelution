@@ -2524,6 +2524,31 @@ export type SessionSummary = {
     updatedAt?: string;
     [key: string]: unknown;
   } | null;
+  sourceRef?: SourceAuthorityRef;
+  projectionEdit?: ProjectionEditContract;
+  agentSourceRef?: SourceAuthorityRef | null;
+};
+
+export type SourceAuthorityRef = {
+  kind: string;
+  id: string;
+  owner: string;
+  factAuthority: boolean;
+  canonicalEditRoute: string;
+  canonicalMutationApi: string;
+  projectionCanWrite: boolean;
+  allowedProjectionActions: string[];
+  sourceAuthorityVersion: number;
+};
+
+export type ProjectionEditContract = {
+  canWrite: boolean;
+  mode: string;
+  reason: string;
+  sourceOwner: string;
+  canonicalEditRoute: string;
+  canonicalMutationApi: string;
+  sourceAuthorityVersion: number;
 };
 
 export type SessionAgentPromptSnapshot = {
@@ -2957,14 +2982,28 @@ export type KernelTaskTimelinePayload = {
   deliveries: KernelDelivery[];
   proposals: KernelProposal[];
   runtimeEvidenceRefs: Array<Record<string, string>>;
-  projectionRefs: Array<Record<string, string>>;
+  projectionRefs: ProjectionSourceRef[];
   timeline: KernelTimelineItem[];
   readModel: {
     projection: boolean;
     factAuthority: boolean;
     truthSource: string;
+    sourceRef?: SourceAuthorityRef;
+    projectionEdit?: ProjectionEditContract;
     generatedAt: string;
   };
+};
+
+export type ProjectionSourceRef = Record<string, unknown> & {
+  kind: string;
+  id: string;
+  sourceSurface?: string;
+  metadataKey?: string;
+  sourceRef: SourceAuthorityRef;
+  projectionEdit: ProjectionEditContract;
+  sourceOwner: string;
+  canonicalEditRoute: string;
+  projectionCanWrite: boolean;
 };
 
 export type AgentDelegationPolicy = {
@@ -3099,6 +3138,8 @@ export type AgentInstance = {
   groupContextEvents?: GroupContextEvent[];
   agentInboxMessages?: AgentInboxMessage[];
   agentInboxPendingCount?: number;
+  sourceRef?: SourceAuthorityRef;
+  projectionEdit?: ProjectionEditContract;
 };
 
 export type AgentLlmBinding = {
@@ -4686,6 +4727,9 @@ export type ConversationSummary = {
   agentMissing?: boolean;
   agentStatusCode?: string;
   agentStatusMessage?: string;
+  sourceRef?: SourceAuthorityRef;
+  projectionEdit?: ProjectionEditContract;
+  agentSourceRef?: SourceAuthorityRef | null;
 };
 
 export type SessionActiveTask = {

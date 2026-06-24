@@ -375,17 +375,25 @@ function TimelineRow({ item }: { item: KernelTimelineItem }) {
   );
 }
 
-function RefList({ refs }: { refs: Array<Record<string, string>> }) {
+function RefList({ refs }: { refs: Array<Record<string, unknown>> }) {
   if (refs.length === 0) {
     return <div className={styles.emptyInline}>-</div>;
   }
   return (
     <div className={styles.refList}>
-      {refs.map((ref, index) => (
-        <code key={`${ref.kind ?? "ref"}-${ref.id ?? index}`}>
-          {ref.kind ?? "ref"}:{shortId(String(ref.id ?? ref.eventCode ?? ref.taskId ?? ""))}
-        </code>
-      ))}
+      {refs.map((ref, index) => {
+        const sourceRef = ref.sourceRef && typeof ref.sourceRef === "object"
+          ? ref.sourceRef as Record<string, unknown>
+          : null;
+        const route = String(ref.canonicalEditRoute ?? sourceRef?.canonicalEditRoute ?? "");
+        const owner = String(ref.sourceOwner ?? sourceRef?.owner ?? "");
+        return (
+          <code key={`${String(ref.kind ?? "ref")}-${String(ref.id ?? index)}`} title={route || owner}>
+            {String(ref.kind ?? "ref")}:{shortId(String(ref.id ?? ref.eventCode ?? ref.taskId ?? ""))}
+            {owner ? ` -> ${owner}` : ""}
+          </code>
+        );
+      })}
     </div>
   );
 }

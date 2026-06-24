@@ -118,7 +118,48 @@ describe("conversationIndexModel", () => {
       dialogueModelId: "gpt-5.5",
       agentRoleKey: "knowledge",
       agentInboxPendingCount: 4,
+      sourceRef: {
+        owner: "ConversationLedger",
+        canonicalEditRoute: "/chat?session=session-1",
+        projectionCanWrite: false,
+      },
+      projectionEdit: {
+        canWrite: false,
+        mode: "deep_link_to_source",
+      },
     });
+  });
+
+  it("preserves backend source authority refs when converting sessions", () => {
+    const summary = sessionToConversationSummary(session({
+      id: "session-source",
+      sourceRef: {
+        kind: "session",
+        id: "session-source",
+        owner: "ConversationLedger",
+        factAuthority: true,
+        canonicalEditRoute: "/chat?session=session-source",
+        canonicalMutationApi: "/api/sessions/session-source",
+        projectionCanWrite: false,
+        allowedProjectionActions: ["view", "link"],
+        sourceAuthorityVersion: 1,
+      },
+      agentSourceRef: {
+        kind: "agent",
+        id: "agent-source",
+        owner: "AgentDirectory",
+        factAuthority: true,
+        canonicalEditRoute: "/agents?agent=agent-source&pane=config",
+        canonicalMutationApi: "/api/agents/agent-source",
+        projectionCanWrite: false,
+        allowedProjectionActions: ["view", "link"],
+        sourceAuthorityVersion: 1,
+      },
+    }));
+
+    expect(summary.sourceRef?.canonicalEditRoute).toBe("/chat?session=session-source");
+    expect(summary.agentSourceRef?.canonicalEditRoute).toBe("/agents?agent=agent-source&pane=config");
+    expect(summary.projectionEdit?.canWrite).toBe(false);
   });
 
   it("merges missing direct sessions from the session index and keeps newest conversations first", () => {
@@ -150,6 +191,19 @@ describe("conversationIndexModel", () => {
       agentPromptTemplateId: "prompt-research-quality",
       dialogueModelId: "mimo-v2.5",
       agentInboxPendingCount: 2,
+      sourceRef: {
+        owner: "AgentDirectory",
+        canonicalEditRoute: "/agents?agent=agent-research&pane=config",
+        projectionCanWrite: false,
+      },
+      agentSourceRef: {
+        owner: "AgentDirectory",
+        canonicalEditRoute: "/agents?agent=agent-research&pane=config",
+      },
+      projectionEdit: {
+        canWrite: false,
+        mode: "deep_link_to_source",
+      },
     });
   });
 
