@@ -394,16 +394,6 @@ def _window_process_id(hwnd: int) -> int:
     return int(pid.value)
 
 
-def _window_text(hwnd: int) -> str:
-    user32 = ctypes.windll.user32
-    length = int(user32.GetWindowTextLengthW(ctypes.wintypes.HWND(hwnd)))
-    if length <= 0:
-        return ""
-    buffer = ctypes.create_unicode_buffer(length + 1)
-    user32.GetWindowTextW(ctypes.wintypes.HWND(hwnd), buffer, length + 1)
-    return str(buffer.value or "")
-
-
 def _visible_windows_for_process(pid: int) -> list[int]:
     if os.name != "nt" or pid <= 0:
         return []
@@ -414,23 +404,6 @@ def _visible_windows_for_process(pid: int) -> list[int]:
     @enum_proc
     def callback(hwnd, _lparam):
         if user32.IsWindowVisible(hwnd) and _window_process_id(int(hwnd)) == int(pid):
-            handles.append(int(hwnd))
-        return True
-
-    user32.EnumWindows(callback, 0)
-    return handles
-
-
-def _visible_vibelution_windows() -> list[int]:
-    if os.name != "nt":
-        return []
-    user32 = ctypes.windll.user32
-    handles: list[int] = []
-    enum_proc = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.wintypes.HWND, ctypes.wintypes.LPARAM)
-
-    @enum_proc
-    def callback(hwnd, _lparam):
-        if user32.IsWindowVisible(hwnd) and "Vibelution" in _window_text(int(hwnd)):
             handles.append(int(hwnd))
         return True
 
@@ -524,7 +497,7 @@ def _apply_managed_browser_app_identity(browser_pid: int, role: str) -> dict[str
     deadline = time.monotonic() + 5.0
     last_error = ""
     while time.monotonic() < deadline:
-        candidates = _visible_windows_for_process(int(browser_pid)) or _visible_vibelution_windows()
+        candidates = _visible_windows_for_process(int(browser_pid))
         for hwnd in candidates:
             try:
                 with contextlib.suppress(OSError):
