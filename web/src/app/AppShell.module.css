@@ -398,6 +398,34 @@
   pointer-events: auto;
 }
 
+.returnButton {
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--shell-surface) 88%, transparent);
+  color: var(--fg-secondary);
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+  transition: background-color 150ms ease, border-color 150ms ease, color 150ms ease;
+}
+
+.returnButton:hover {
+  border-color: color-mix(in srgb, var(--accent-cool) 34%, var(--border-soft));
+  background: color-mix(in srgb, var(--accent-cool) 10%, var(--shell-surface));
+  color: var(--fg-primary);
+}
+
+.returnButton:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent-cool) 46%, transparent);
+  outline-offset: 2px;
+}
+
 .brandCopy {
   display: inline-flex;
   align-items: baseline;

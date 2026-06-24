@@ -58,6 +58,7 @@ import {
   ToolRegistryPayload,
 } from "../api/types";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
+import { safeReturnToPath } from "../app/navigationReturn";
 import { useShellI18n } from "../i18n/useShellI18n";
 import { useChatWorkbenchStore } from "../store/chatWorkbenchStore";
 import { AgentManagementNav } from "./AgentManagementNav";
@@ -1396,11 +1397,7 @@ function normalizeAgentConfigPane(value: string | null | undefined): AgentConfig
 }
 
 function safeAgentCenterReturnTo(value: string | null | undefined) {
-  const normalized = String(value || "").trim();
-  if (!normalized || !normalized.startsWith("/") || normalized.startsWith("//")) {
-    return "";
-  }
-  return normalized;
+  return safeReturnToPath(value);
 }
 
 function agentCenterReturnLabel(value: string | null | undefined, lang: "zh" | "en") {
