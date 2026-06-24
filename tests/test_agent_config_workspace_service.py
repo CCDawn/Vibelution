@@ -122,6 +122,10 @@ def _seed_agent_avatars(root):
         (avatar_dir / filename).write_bytes(b"\x89PNG\r\n\x1a\navatar")
 
 
+def _avatar_url_path(value: str) -> str:
+    return str(value or "").split("?", 1)[0]
+
+
 def test_agent_registry_repair_migrates_legacy_profile_fields_to_llm_bindings(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     monkeypatch.setattr(config_service, "get_config_workspace", _fake_config_workspace)
@@ -617,13 +621,32 @@ def test_agent_directory_assigns_default_avatar_from_workspace_avatars(tmp_path,
     assert chat_agent["avatarImageUrl"].startswith("/api/agents/avatar-image/")
     assert chat_agent["avatarImagePath"] == "workspace/avatars/01-session-agent.png"
     assert deep_agent["avatarImagePath"] == "workspace/avatars/06-deep-investigator.png"
-    assert deep_agent["avatarImageUrl"] == "/api/agents/avatar-image/06-deep-investigator.png"
+    assert _avatar_url_path(deep_agent["avatarImageUrl"]) == "/api/agents/avatar-image/06-deep-investigator.png"
+    assert "?v=" in deep_agent["avatarImageUrl"]
     assert agents[chat_agent["agentId"]]["avatarImageUrl"] == chat_agent["avatarImageUrl"]
     assert agents[deep_agent["agentId"]]["metadata"]["avatarImageSource"] == "default"
 
     response = client.get("/api/agents/avatar-image/06-deep-investigator.png")
     assert response.status_code == 200
     assert response.content.startswith(b"\x89PNG")
+
+
+def test_agent_avatar_image_url_changes_when_file_changes(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    avatar_dir = tmp_path / "workspace" / "avatars"
+    avatar_dir.mkdir(parents=True, exist_ok=True)
+    avatar_file = avatar_dir / "01-session-agent.png"
+    avatar_file.write_bytes(b"\x89PNG\r\n\x1a\navatar-a")
+    first_url = agent_directory_service.agent_avatar_image_url("workspace/avatars/01-session-agent.png")
+
+    avatar_file.write_bytes(b"\x89PNG\r\n\x1a\navatar-a-changed")
+    second_url = agent_directory_service.agent_avatar_image_url("workspace/avatars/01-session-agent.png")
+
+    assert _avatar_url_path(first_url) == "/api/agents/avatar-image/01-session-agent.png"
+    assert _avatar_url_path(second_url) == "/api/agents/avatar-image/01-session-agent.png"
+    assert "?v=" in first_url
+    assert "?v=" in second_url
+    assert second_url != first_url
 
 
 def test_agent_directory_uses_generated_avatar_when_primary_default_missing(tmp_path, monkeypatch):
@@ -640,7 +663,7 @@ def test_agent_directory_uses_generated_avatar_when_primary_default_missing(tmp_
     )
 
     assert deep_agent["avatarImagePath"] == "workspace/avatars/11-anime-deep-research-agent.png"
-    assert deep_agent["avatarImageUrl"] == "/api/agents/avatar-image/11-anime-deep-research-agent.png"
+    assert _avatar_url_path(deep_agent["avatarImageUrl"]) == "/api/agents/avatar-image/11-anime-deep-research-agent.png"
 
 
 def test_agent_directory_uses_primary_avatar_before_generated_fallback(tmp_path, monkeypatch):
@@ -661,7 +684,7 @@ def test_agent_directory_uses_primary_avatar_before_generated_fallback(tmp_path,
     default_path = agent_directory_service._default_agent_avatar_path(deep_agent)
 
     assert deep_agent["avatarImagePath"] == "workspace/avatars/06-deep-investigator.png"
-    assert deep_agent["avatarImageUrl"] == "/api/agents/avatar-image/06-deep-investigator.png"
+    assert _avatar_url_path(deep_agent["avatarImageUrl"]) == "/api/agents/avatar-image/06-deep-investigator.png"
     assert default_path == "workspace/avatars/06-deep-investigator.png"
 
 
