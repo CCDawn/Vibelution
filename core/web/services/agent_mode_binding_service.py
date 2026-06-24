@@ -11,7 +11,13 @@ from typing import Any
 
 from core.infrastructure import developer_sandbox
 
-from .agent_directory_service import SESSION_AGENT_VISIBILITY_PENDING, get_agent, list_agents, session_agent_visibility
+from .agent_directory_service import (
+    SESSION_AGENT_VISIBILITY_ACTIVE,
+    SESSION_AGENT_VISIBILITY_PENDING,
+    get_agent,
+    list_agents,
+    session_agent_visibility,
+)
 from .runtime_scene_service import record_runtime_scene_event
 
 
@@ -527,7 +533,6 @@ def _seed_bindings_from_agents(
     *,
     agents: list[dict[str, Any]],
 ) -> dict[str, dict[str, Any]]:
-    active_ids = [str(agent.get("agentId") or "") for agent in agents]
     by_mode: dict[str, list[str]] = {}
     supervised_slots: dict[str, str] = {}
     self_slots: dict[str, str] = {}
@@ -544,11 +549,36 @@ def _seed_bindings_from_agents(
             if role_key:
                 self_slots[role_key] = agent_id
 
-    _seed_binding(bindings_by_mode, "chat", [])
+    _seed_binding(bindings_by_mode, "chat", _chat_seed_agent_ids(agents))
     _seed_binding(bindings_by_mode, "research", by_mode.get("research", []))
     _seed_binding(bindings_by_mode, "supervised_evolution", by_mode.get("supervised_evolution", []), slots=supervised_slots)
     _seed_binding(bindings_by_mode, "self_evolution", by_mode.get("self_evolution", []), slots=self_slots)
     return bindings_by_mode
+
+
+def _chat_seed_agent_ids(agents: list[dict[str, Any]]) -> list[str]:
+    """Seed only enterable chat Agents, not every primary_mode=chat record."""
+
+    seed_ids: list[str] = []
+    for agent in agents:
+        agent_id = str(agent.get("agentId") or "").strip()
+        if not agent_id or not _agent_allowed_in_mode("chat", agent):
+            continue
+        metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
+        creation_spec = metadata.get("creationSpec") if isinstance(metadata.get("creationSpec"), dict) else {}
+        created_by = str(agent.get("createdBy") or creation_spec.get("source") or "").strip()
+        direct_session_id = str(agent.get("directSessionId") or "").strip()
+        if not direct_session_id:
+            continue
+        if created_by == "api_agents":
+            seed_ids.append(agent_id)
+            continue
+        if bool(metadata.get("showInSessionIndex")):
+            seed_ids.append(agent_id)
+            continue
+        if session_agent_visibility(agent) == SESSION_AGENT_VISIBILITY_ACTIVE:
+            seed_ids.append(agent_id)
+    return _dedupe(seed_ids)
 
 
 def _eligible_seed_ids(binding: dict[str, Any], agent_ids: list[str]) -> list[str]:
