@@ -263,6 +263,7 @@ def _session_list_source_signature() -> tuple[Any, ...]:
         )
 
     return (
+        str(PROJECT_ROOT.resolve()),
         signature(chat_state_path(PROJECT_ROOT)),
         signature(agent_directory_service.registry_path()),
         tuple(inbox_signatures),
@@ -1653,6 +1654,11 @@ def _conversation_requires_agent_materialization(conversation: dict[str, Any]) -
         return True
     if list(conversation.get("messages") or []):
         return True
+    if "workspace_path" not in conversation and "workspacePath" not in conversation:
+        return True
+    conversation_id = str(conversation.get("conversation_id") or conversation.get("id") or DEFAULT_CHAT_CONVERSATION_ID).strip()
+    if conversation_id and _session_ledger_visible_messages(conversation_id):
+        return True
     active_task = conversation.get("active_task") or conversation.get("activeTask")
     if isinstance(active_task, dict) and active_task:
         return True
@@ -1879,7 +1885,7 @@ def _empty_direct_agent_session_hidden_from_index(
     """Hide stale empty Agent recovery channels while preserving real conversations."""
 
     session_id = str(conversation.get("id") or conversation.get("conversation_id") or "").strip()
-    if _session_ledger_visible_messages(session_id):
+    if _ledger_visible_messages_for_session(session_id):
         return False
     if isinstance(conversation.get("activeTask"), dict) and conversation.get("activeTask"):
         return False
@@ -5716,8 +5722,8 @@ def _load_conversation_detail_target(
             continue
         if repair:
             changed = _repair_stale_running_conversation(raw) or changed
-            changed = _ensure_conversation_workspace_metadata(raw) or changed
             changed = _ensure_conversation_agent_metadata(raw, agent_by_id=agent_by_id) or changed
+            changed = _ensure_conversation_workspace_metadata(raw) or changed
         conversation = _normalize_conversation(
             raw,
             agent_by_id=agent_by_id,
@@ -6708,11 +6714,12 @@ def _normalize_conversation(
         missing_agent_id = agent_id
         agent_missing = True
         agent_status_code = "missing_agent"
-    ledger_messages = _session_ledger_visible_messages(conversation_id)
     if lightweight:
+        ledger_messages = _ledger_visible_messages_for_session(conversation_id)
         messages = _normalize_latest_preview_messages(conversation_id, ledger_messages)
         visible_runtime_notices: list[dict[str, Any]] = []
     else:
+        ledger_messages = _session_ledger_visible_messages(conversation_id)
         messages = ledger_messages
         runtime_notices = _normalize_session_runtime_notices(
             raw.get("runtime_notices") or raw.get("runtimeNotices") or []
@@ -7628,7 +7635,7 @@ def _build_session_summary(conversation: dict[str, Any], *, hydrate_agent: bool 
     session_kind = str(conversation.get("sessionKind") or "main").strip() or "main"
     task_title = str(conversation.get("taskTitle") or raw_title).strip() or raw_title
     display_agent_name = agent_display_name or raw_title
-    has_ledger_messages = bool(_session_ledger_visible_messages(str(conversation.get("id") or "")))
+    has_ledger_messages = bool(normalized_summary_messages)
     if session_kind == "child":
         display_title = task_title
     elif has_ledger_messages:
@@ -10365,7 +10372,7 @@ def _conversation_phase(conversation_id: str, conversation: dict[str, Any]) -> s
         "superseded",
     }:
         return normalized
-    if _session_ledger_visible_messages(conversation_id):
+    if _ledger_visible_messages_for_session(conversation_id):
         return "ready"
     return "idle"
 

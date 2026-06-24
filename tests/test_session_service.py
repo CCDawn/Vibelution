@@ -117,6 +117,58 @@ def test_get_session_detail_materializes_agent_directory_stub_without_switching_
     assert load_chat_state(tmp_path)["active_conversation_id"] == "session-active"
 
 
+def test_get_session_detail_materializes_legacy_workspace_less_session(tmp_path, monkeypatch):
+    save_chat_state(
+        tmp_path,
+        {
+            "version": 1,
+            "active_conversation_id": "session-active",
+            "updated_at": "2026-05-18T12:00:00",
+            "conversations": [
+                {
+                    "conversation_id": "session-active",
+                    "title": "唐望舒",
+                    "agent_id": "agent-active",
+                    "agentId": "agent-active",
+                    "workspace_path": "workspace/sessions/session-active",
+                    "updated_at": "2026-05-18T12:00:00",
+                },
+                {
+                    "conversation_id": "session-legacy",
+                    "title": "旧会话",
+                    "updated_at": "2026-05-18T12:01:00",
+                },
+            ],
+        },
+    )
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    agent_directory_service.save_state(
+        {
+            "agents": [
+                {
+                    "agentId": "agent-active",
+                    "displayName": "唐望舒",
+                    "directSessionId": "session-active",
+                    "status": "active",
+                    "workspacePath": "workspace/agents/agent-active",
+                }
+            ]
+        }
+    )
+
+    detail = session_service.get_session_detail("session-legacy")
+
+    state = load_chat_state(tmp_path)
+    legacy = next(item for item in state["conversations"] if item["conversation_id"] == "session-legacy")
+    assert detail is not None
+    assert detail["id"] == "session-legacy"
+    assert detail["agentId"]
+    assert legacy["agentId"] == detail["agentId"]
+    assert legacy["workspace_path"] == "workspace/sessions/session-legacy"
+    assert state["active_conversation_id"] == "session-active"
+
+
 def test_image_attachment_with_concrete_prompt_defaults_to_vision_route(monkeypatch):
     monkeypatch.setattr(
         session_service,
