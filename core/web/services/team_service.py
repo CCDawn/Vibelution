@@ -1666,6 +1666,8 @@ def _normalize_node(
         active_agent = agent_directory_service.get_agent(agent_id, include_archived=False) if agent_id else None
     node_type = _safe_token(item.get("type"), default="role", max_length=40)
     status = "bound" if active_agent else "stale" if agent_id else "unbound"
+    agent_source_ref = _source_authority_ref("agent", agent_id) if agent_id else None
+    agent_projection_edit = _projection_edit_contract("agent", agent_id) if agent_id else None
     return {
         "id": node_id,
         "label": trim_lines(item.get("label") or (agent or {}).get("displayName") or f"角色 {index + 1}", max_lines=1).strip(),
@@ -1676,6 +1678,9 @@ def _normalize_node(
         "agentId": agent_id,
         "agentCode": str((agent or {}).get("agentCode") or "").strip(),
         "agentName": str((agent or {}).get("displayName") or "").strip(),
+        "agentSourceRef": agent_source_ref,
+        "agentProjectionEdit": agent_projection_edit,
+        "agentProjectionCanWrite": False,
         "role": trim_lines(item.get("role") or "", max_lines=1).strip(),
         "purpose": trim_lines(item.get("purpose") or "", max_lines=4).strip(),
         "responsibilities": [
@@ -1701,6 +1706,18 @@ def _normalize_edge(item: Any, index: int, node_ids: set[str]) -> dict[str, Any]
         "label": trim_lines(item.get("label") or "", max_lines=1).strip(),
         "type": edge_type if edge_type in EDGE_TYPES else "collaborates_with",
     }
+
+
+def _source_authority_ref(kind: str, source_id: str, metadata: dict[str, Any] | None = None) -> dict[str, Any]:
+    from core.agent_kernel.source_authority import source_ref
+
+    return source_ref(kind, source_id, metadata)
+
+
+def _projection_edit_contract(kind: str, source_id: str, metadata: dict[str, Any] | None = None) -> dict[str, Any]:
+    from core.agent_kernel.source_authority import projection_edit_contract
+
+    return projection_edit_contract(kind, source_id, metadata)
 
 
 def _validate_canvas(

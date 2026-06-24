@@ -177,6 +177,11 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("成员源");
     expect(routeSource).toContain("Member source");
     expect(routeSource).toContain("Agent Center");
+    expect(routeSource).toContain("teamCanvasNodeAgentSourceRoute");
+    expect(routeSource).toContain("writableTeamCanvas(nextCanvas)");
+    expect(routeSource).toContain("delete writableNode.agentSourceRef");
+    expect(routeSource).toContain("delete writableNode.agentProjectionEdit");
+    expect(routeSource).toContain("delete writableNode.agentProjectionCanWrite");
     expect(routeSource).toContain("team_organization_canvas");
     expect(routeSource).not.toContain("/api/research/flow-canvas");
   });
@@ -254,6 +259,12 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("审核流程");
     expect(routeSource).toContain("styles.nodeBindingSection");
     expect(routeSource).toContain("styles.nodeBindingPlaceholder");
+    expect(routeSource).toContain("styles.nodeSourceAuthority");
+    expect(routeSource).toContain("Agent 身份只读投影");
+    expect(routeSource).toContain("Read-only Agent identity");
+    expect(routeSource).toContain("到 AgentDirectory 源配置修改");
+    expect(routeSource).toContain("selectedNode.agentSourceRef?.owner");
+    expect(routeSource).toContain("teamCanvasNodeAgentSourceRoute(selectedNode)");
     expect(routeSource).toContain("正在读取团队节点");
     expect(routeSource).toContain("agentTeamMembership");
     expect(routeSource).toContain("membership.teamId !== selectedTeam?.teamId");
@@ -768,6 +779,7 @@ describe("TeamsRoute layout contract", () => {
     expect(routeStylesSource).not.toContain(".teamPickerSummary");
     expect(routeStyles.nodeBindingSection).toBeTypeOf("string");
     expect(routeStyles.nodeBindingPlaceholder).toBeTypeOf("string");
+    expect(routeStyles.nodeSourceAuthority).toBeTypeOf("string");
     expect(routeStyles.workflowPanel).toBeTypeOf("string");
     expect(routeStyles.workflowStats).toBeTypeOf("string");
     expect(routeStyles.workflowIngestionPanel).toBeTypeOf("string");

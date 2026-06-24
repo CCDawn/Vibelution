@@ -2414,6 +2414,29 @@ function researchStageAgentManagementRoute(agentId: string) {
   return `/agents?${params.toString()}`;
 }
 
+function teamCanvasNodeAgentSourceRoute(node: TeamCanvasNode, fallbackAgentId = "") {
+  const projectionRoute = String(node.agentProjectionEdit?.canonicalEditRoute || node.agentSourceRef?.canonicalEditRoute || "").trim();
+  if (projectionRoute) {
+    return projectionRoute;
+  }
+  return researchStageAgentManagementRoute(String(node.agentId || fallbackAgentId || "").trim());
+}
+
+function writableTeamCanvasNode(node: TeamCanvasNode): TeamCanvasNode {
+  const writableNode = { ...node };
+  delete writableNode.agentSourceRef;
+  delete writableNode.agentProjectionEdit;
+  delete writableNode.agentProjectionCanWrite;
+  return writableNode;
+}
+
+function writableTeamCanvas(canvas: TeamOrganizationCanvas): TeamOrganizationCanvas {
+  return {
+    ...canvas,
+    nodes: canvas.nodes.map(writableTeamCanvasNode),
+  };
+}
+
 function researchStageAgentDirectChatRoute(
   agent: AgentConfigWorkspaceAgent | null | undefined,
   returnTo?: string,
@@ -5034,7 +5057,7 @@ export function TeamsRoute({
     if (!nextCanvas || canvasSavePendingForTeam(nextCanvas.teamId)) {
       return;
     }
-    saveCanvasMutation.mutate(nextCanvas);
+    saveCanvasMutation.mutate(writableTeamCanvas(nextCanvas));
   }
 
   function selectResearchWorkspaceView(view: ResearchWorkspaceView) {
@@ -10202,6 +10225,18 @@ export function TeamsRoute({
               </section>
             ) : showNodeBindingPanel && selectedNode ? (
               <section className={styles.nodeBindingSection}>
+              {selectedNode.agentId ? (
+                <div className={styles.nodeSourceAuthority}>
+                  <div>
+                    <strong>{lang === "zh" ? "Agent 身份只读投影" : "Read-only Agent identity"}</strong>
+                    <span>{selectedNode.agentSourceRef?.owner || "AgentDirectory"} · {selectedNode.agentCode || selectedNode.agentName || selectedNode.agentId}</span>
+                  </div>
+                  <Link to={teamCanvasNodeAgentSourceRoute(selectedNode)} title={lang === "zh" ? "到 AgentDirectory 源配置修改" : "Edit in the AgentDirectory source"}>
+                    <Link2 size={14} />
+                    {lang === "zh" ? "源配置" : "Source"}
+                  </Link>
+                </div>
+              ) : null}
               <label>
                 <span>{lang === "zh" ? "节点名称" : "Node label"}</span>
                 <input value={nodeDraft.label} onChange={(event) => setNodeDraft((current) => ({ ...current, label: event.target.value }))} />
