@@ -507,6 +507,9 @@ def test_agent_patch_tool_policy_creates_agent_private_policy_and_logs(tmp_path,
     assert payload["toolPolicy"]["blockedTools"] == ["shell_command"]
     assert payload["toolPolicy"]["writeScopes"] == ["shared"]
     assert payload["toolPolicy"]["readScopes"] == ["shared", "private"]
+    assert payload["sourceRef"]["owner"] == "AgentDirectory"
+    assert payload["sourceRef"]["canonicalEditRoute"] == f"/agents?agent={agent['agentId']}&pane=config"
+    assert payload["projectionEdit"]["canWrite"] is False
     assert any(
         event[0][:3] == ("agent_directory", "tool_policy", "agent.tool_policy.updated")
         and event[1]["fields"]["allowedToolCount"] == 1

@@ -18,6 +18,7 @@ from core.infrastructure import developer_sandbox
 from core.web.services import agent_directory_service, session_service
 from core.web.services.runtime_scene_service import record_runtime_scene_event
 
+from .source_authority import attach_source_ref, projection_edit_contract, source_ref
 from .store import KernelJsonlStore, utc_now_iso
 
 
@@ -199,6 +200,8 @@ def get_kernel_task_timeline(task_id: str) -> dict[str, Any]:
                 "projection": True,
                 "factAuthority": False,
                 "truthSource": "TaskLedger",
+                "sourceRef": source_ref("task", normalized),
+                "projectionEdit": projection_edit_contract("task", normalized),
                 "generatedAt": utc_now_iso(),
             },
         }
@@ -900,10 +903,10 @@ def _timeline_ref(kind: str, id_key: str, value: str) -> dict[str, str]:
     return {"kind": kind, id_key: str(value or "").strip(), "id": str(value or "").strip()}
 
 
-def _kernel_projection_refs(event: dict[str, Any]) -> list[dict[str, str]]:
+def _kernel_projection_refs(event: dict[str, Any]) -> list[dict[str, Any]]:
     metadata = event.get("metadata") if isinstance(event.get("metadata"), dict) else {}
     source_surface = str(metadata.get("sourceSurface") or "").strip()
-    refs: list[dict[str, str]] = []
+    refs: list[dict[str, Any]] = []
     seen: set[tuple[str, str, str]] = set()
 
     def add_ref(kind: str, value: Any, metadata_key: str) -> None:
@@ -917,12 +920,15 @@ def _kernel_projection_refs(event: dict[str, Any]) -> list[dict[str, str]]:
                 continue
             seen.add(dedupe_key)
             refs.append(
-                {
-                    "kind": ref_kind,
-                    "id": ref_id,
-                    "sourceSurface": source_surface,
-                    "metadataKey": metadata_key,
-                }
+                attach_source_ref(
+                    {
+                        "kind": ref_kind,
+                        "id": ref_id,
+                        "sourceSurface": source_surface,
+                        "metadataKey": metadata_key,
+                    },
+                    metadata,
+                )
             )
 
     add_ref("session", metadata.get("sourceSessionId"), "sourceSessionId")
