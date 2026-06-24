@@ -381,6 +381,11 @@ PKEY_APPUSERMODEL_ID = _property_key(5)
 PKEY_APPUSERMODEL_RELAUNCH_DISPLAY_NAME = _property_key(4)
 PKEY_APPUSERMODEL_RELAUNCH_ICON_RESOURCE = _property_key(3)
 IID_IPROPERTY_STORE = _guid("886D8EEB-8CF2-4446-8D02-CDBA1DBDCF99")
+WM_SETICON = 0x0080
+ICON_SMALL = 0
+ICON_BIG = 1
+IMAGE_ICON = 1
+LR_LOADFROMFILE = 0x00000010
 
 
 def _window_process_id(hwnd: int) -> int:
@@ -477,6 +482,39 @@ def _set_window_app_identity(hwnd: int, app_id: str, display_name: str, icon_res
         release(store_ptr.value)
 
 
+def _apply_window_icon(hwnd: int, icon_path: Path) -> bool:
+    if os.name != "nt" or not icon_path.exists():
+        return False
+    user32 = ctypes.windll.user32
+    user32.LoadImageW.argtypes = (
+        ctypes.wintypes.HINSTANCE,
+        ctypes.wintypes.LPCWSTR,
+        ctypes.wintypes.UINT,
+        ctypes.c_int,
+        ctypes.c_int,
+        ctypes.wintypes.UINT,
+    )
+    user32.LoadImageW.restype = ctypes.wintypes.HANDLE
+    user32.SendMessageW.argtypes = (
+        ctypes.wintypes.HWND,
+        ctypes.wintypes.UINT,
+        ctypes.wintypes.WPARAM,
+        ctypes.wintypes.LPARAM,
+    )
+    user32.SendMessageW.restype = ctypes.wintypes.LPARAM
+    icon_text = str(icon_path)
+    big_icon = user32.LoadImageW(None, icon_text, IMAGE_ICON, 32, 32, LR_LOADFROMFILE)
+    small_icon = user32.LoadImageW(None, icon_text, IMAGE_ICON, 16, 16, LR_LOADFROMFILE)
+    applied = False
+    if big_icon:
+        user32.SendMessageW(ctypes.wintypes.HWND(hwnd), WM_SETICON, ICON_BIG, int(big_icon))
+        applied = True
+    if small_icon:
+        user32.SendMessageW(ctypes.wintypes.HWND(hwnd), WM_SETICON, ICON_SMALL, int(small_icon))
+        applied = True
+    return applied
+
+
 def _apply_managed_browser_app_identity(browser_pid: int, role: str) -> dict[str, object]:
     app_id = "Vibelution.Launcher" if role == "launcher" else "Vibelution.Workbench"
     display_name = "Vibelution Launcher" if role == "launcher" else "Vibelution Workbench"
@@ -492,8 +530,10 @@ def _apply_managed_browser_app_identity(browser_pid: int, role: str) -> dict[str
                 with contextlib.suppress(OSError):
                     ctypes.windll.ole32.CoInitialize(None)
                 _set_window_app_identity(int(hwnd), app_id, display_name, icon_resource)
+                window_icon_applied = _apply_window_icon(int(hwnd), LAUNCHER_ICON_PATH)
                 result = {
                     "applied": True,
+                    "windowIconApplied": bool(window_icon_applied),
                     "windowPid": _window_process_id(int(hwnd)),
                     "appUserModelId": app_id,
                     "iconResource": icon_resource,
@@ -506,6 +546,7 @@ def _apply_managed_browser_app_identity(browser_pid: int, role: str) -> dict[str
         time.sleep(0.2)
     result = {
         "applied": False,
+        "windowIconApplied": False,
         "windowPid": int(browser_pid),
         "appUserModelId": app_id,
         "iconResource": icon_resource,
