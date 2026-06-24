@@ -4,6 +4,9 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
+import ctypes
+import ctypes.wintypes
 import json
 import os
 import shutil
@@ -31,6 +34,7 @@ BACKEND_STDOUT_PATH = RUNTIME_DIR / "backend.stdout.log"
 BACKEND_STDERR_PATH = RUNTIME_DIR / "backend.stderr.log"
 FRONTEND_BUILD_LOG_PATH = RUNTIME_DIR / "frontend-build.log"
 WORKBENCH_BROWSER_PROFILE_DIR = RUNTIME_DIR / "workbench-app-profile"
+LAUNCHER_ICON_PATH = PROJECT_ROOT / "assets" / "icons" / "vibelution.ico"
 DEFAULT_HOST = "127.0.0.1"
 TRUSTED_WEB_HOSTS_ENV = "VIBELUTION_TRUSTED_WEB_HOSTS"
 FRONTEND_PACKAGE_MANAGER_ENV = "VIBELUTION_FRONTEND_PM"
@@ -335,6 +339,176 @@ def _edge_executable() -> str:
     raise RuntimeError("Microsoft Edge was not found.")
 
 
+class _GUID(ctypes.Structure):
+    _fields_ = (
+        ("Data1", ctypes.c_ulong),
+        ("Data2", ctypes.c_ushort),
+        ("Data3", ctypes.c_ushort),
+        ("Data4", ctypes.c_ubyte * 8),
+    )
+
+
+class _PROPERTYKEY(ctypes.Structure):
+    _fields_ = (
+        ("fmtid", _GUID),
+        ("pid", ctypes.c_ulong),
+    )
+
+
+class _PROPVARIANT(ctypes.Structure):
+    _fields_ = (
+        ("vt", ctypes.c_ushort),
+        ("wReserved1", ctypes.c_ushort),
+        ("wReserved2", ctypes.c_ushort),
+        ("wReserved3", ctypes.c_ushort),
+        ("p", ctypes.c_void_p),
+        ("p2", ctypes.c_int),
+    )
+
+
+def _guid(value: str) -> _GUID:
+    return _GUID.from_buffer_copy(uuid.UUID(value).bytes_le)
+
+
+def _property_key(pid: int) -> _PROPERTYKEY:
+    return _PROPERTYKEY(_guid("9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3"), int(pid))
+
+
+PKEY_APPUSERMODEL_ID = _property_key(5)
+PKEY_APPUSERMODEL_RELAUNCH_DISPLAY_NAME = _property_key(4)
+PKEY_APPUSERMODEL_RELAUNCH_ICON_RESOURCE = _property_key(3)
+IID_IPROPERTY_STORE = _guid("886D8EEB-8CF2-4446-8D02-CDBA1DBDCF99")
+
+
+def _window_process_id(hwnd: int) -> int:
+    pid = ctypes.wintypes.DWORD()
+    ctypes.windll.user32.GetWindowThreadProcessId(ctypes.wintypes.HWND(hwnd), ctypes.byref(pid))
+    return int(pid.value)
+
+
+def _window_text(hwnd: int) -> str:
+    user32 = ctypes.windll.user32
+    length = int(user32.GetWindowTextLengthW(ctypes.wintypes.HWND(hwnd)))
+    if length <= 0:
+        return ""
+    buffer = ctypes.create_unicode_buffer(length + 1)
+    user32.GetWindowTextW(ctypes.wintypes.HWND(hwnd), buffer, length + 1)
+    return str(buffer.value or "")
+
+
+def _visible_windows_for_process(pid: int) -> list[int]:
+    if os.name != "nt" or pid <= 0:
+        return []
+    user32 = ctypes.windll.user32
+    handles: list[int] = []
+    enum_proc = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.wintypes.HWND, ctypes.wintypes.LPARAM)
+
+    @enum_proc
+    def callback(hwnd, _lparam):
+        if user32.IsWindowVisible(hwnd) and _window_process_id(int(hwnd)) == int(pid):
+            handles.append(int(hwnd))
+        return True
+
+    user32.EnumWindows(callback, 0)
+    return handles
+
+
+def _visible_vibelution_windows() -> list[int]:
+    if os.name != "nt":
+        return []
+    user32 = ctypes.windll.user32
+    handles: list[int] = []
+    enum_proc = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.wintypes.HWND, ctypes.wintypes.LPARAM)
+
+    @enum_proc
+    def callback(hwnd, _lparam):
+        if user32.IsWindowVisible(hwnd) and "Vibelution" in _window_text(int(hwnd)):
+            handles.append(int(hwnd))
+        return True
+
+    user32.EnumWindows(callback, 0)
+    return handles
+
+
+def _set_property_store_string(store_ptr: int, key: _PROPERTYKEY, value: str) -> None:
+    vtable = ctypes.cast(store_ptr, ctypes.POINTER(ctypes.POINTER(ctypes.c_void_p))).contents
+    set_value = ctypes.WINFUNCTYPE(
+        ctypes.c_long,
+        ctypes.c_void_p,
+        ctypes.POINTER(_PROPERTYKEY),
+        ctypes.POINTER(_PROPVARIANT),
+    )(vtable[6])
+    variant = _PROPVARIANT()
+    variant.vt = 31  # VT_LPWSTR
+    buffer = ctypes.create_unicode_buffer(str(value or ""))
+    variant.p = ctypes.cast(buffer, ctypes.c_void_p).value
+    hr = int(set_value(store_ptr, ctypes.byref(key), ctypes.byref(variant)))
+    if hr < 0:
+        raise OSError(hr, "IPropertyStore.SetValue failed")
+
+
+def _set_window_app_identity(hwnd: int, app_id: str, display_name: str, icon_resource: str) -> None:
+    shell32 = ctypes.windll.shell32
+    store_ptr = ctypes.c_void_p()
+    shell32.SHGetPropertyStoreForWindow.argtypes = (
+        ctypes.wintypes.HWND,
+        ctypes.POINTER(_GUID),
+        ctypes.POINTER(ctypes.c_void_p),
+    )
+    shell32.SHGetPropertyStoreForWindow.restype = ctypes.c_long
+    hr = int(shell32.SHGetPropertyStoreForWindow(ctypes.wintypes.HWND(hwnd), ctypes.byref(IID_IPROPERTY_STORE), ctypes.byref(store_ptr)))
+    if hr < 0 or not store_ptr.value:
+        raise OSError(hr, "SHGetPropertyStoreForWindow failed")
+    vtable = ctypes.cast(store_ptr, ctypes.POINTER(ctypes.POINTER(ctypes.c_void_p))).contents
+    commit = ctypes.WINFUNCTYPE(ctypes.c_long, ctypes.c_void_p)(vtable[7])
+    release = ctypes.WINFUNCTYPE(ctypes.c_ulong, ctypes.c_void_p)(vtable[2])
+    try:
+        _set_property_store_string(store_ptr.value, PKEY_APPUSERMODEL_ID, app_id)
+        _set_property_store_string(store_ptr.value, PKEY_APPUSERMODEL_RELAUNCH_DISPLAY_NAME, display_name)
+        if icon_resource:
+            _set_property_store_string(store_ptr.value, PKEY_APPUSERMODEL_RELAUNCH_ICON_RESOURCE, icon_resource)
+        hr = int(commit(store_ptr.value))
+        if hr < 0:
+            raise OSError(hr, "IPropertyStore.Commit failed")
+    finally:
+        release(store_ptr.value)
+
+
+def _apply_managed_browser_app_identity(browser_pid: int, role: str) -> dict[str, object]:
+    app_id = "Vibelution.Launcher" if role == "launcher" else "Vibelution.Workbench"
+    display_name = "Vibelution Launcher" if role == "launcher" else "Vibelution Workbench"
+    icon_resource = f"{LAUNCHER_ICON_PATH},0" if LAUNCHER_ICON_PATH.exists() else ""
+    if os.name != "nt":
+        return {"applied": False, "windowPid": int(browser_pid), "appUserModelId": app_id, "iconResource": icon_resource, "reason": "non_windows"}
+    deadline = time.monotonic() + 5.0
+    last_error = ""
+    while time.monotonic() < deadline:
+        candidates = _visible_windows_for_process(int(browser_pid)) or _visible_vibelution_windows()
+        for hwnd in candidates:
+            try:
+                with contextlib.suppress(OSError):
+                    ctypes.windll.ole32.CoInitialize(None)
+                _set_window_app_identity(int(hwnd), app_id, display_name, icon_resource)
+                return {
+                    "applied": True,
+                    "windowPid": _window_process_id(int(hwnd)),
+                    "appUserModelId": app_id,
+                    "iconResource": icon_resource,
+                    "hwnd": int(hwnd),
+                }
+            except Exception as exc:  # pragma: no cover - Windows shell integration is smoke-tested manually.
+                last_error = str(exc)
+        time.sleep(0.2)
+    return {
+        "applied": False,
+        "windowPid": int(browser_pid),
+        "appUserModelId": app_id,
+        "iconResource": icon_resource,
+        "reason": "window_not_found_or_identity_failed",
+        "error": last_error,
+    }
+
+
 def _managed_edge_args(url: str, profile_dir: Path) -> list[str]:
     window_mode = _configured_window_mode()
     window_size = _configured_window_size()
@@ -383,12 +557,16 @@ def _start_managed_browser(url: str) -> dict[str, object]:
         creationflags=_windows_creation_flags(),
         startupinfo=_hidden_startup_info(),
     )
+    app_identity = _apply_managed_browser_app_identity(int(process.pid), "workbench")
     return {
         "browserManaged": True,
         "browserExecutable": executable,
         "browserLaunchPid": int(process.pid),
-        "browserWindowPid": int(process.pid),
+        "browserWindowPid": int(app_identity.get("windowPid") or process.pid),
         "browserProfileDir": str(WORKBENCH_BROWSER_PROFILE_DIR),
+        "browserAppUserModelId": str(app_identity.get("appUserModelId") or ""),
+        "browserIconResource": str(app_identity.get("iconResource") or ""),
+        "browserAppIdentityApplied": bool(app_identity.get("applied")),
     }
 
 

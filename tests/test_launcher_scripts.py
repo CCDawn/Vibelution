@@ -66,6 +66,42 @@ def test_launcher_native_entry_source_and_build_contract():
     assert "Microsoft.NET\\Framework64\\v4.0.30319\\csc.exe" in build_script
 
 
+def test_managed_edge_windows_apply_vibelution_app_identity():
+    source = LAUNCHER_SCRIPT.read_text(encoding="utf-8")
+
+    assert "SHGetPropertyStoreForWindow" in source
+    assert "SetWindowAppUserModelIdentity" in source
+    assert "function Set-ManagedBrowserWindowAppIdentity" in source
+    assert "Set-ManagedBrowserWindowAppIdentity -WindowProcess $windowProcess -WindowPurpose $WindowPurpose" in source
+    assert "Vibelution.Launcher" in source
+    assert "Vibelution.Workbench" in source
+    assert "assets\\icons\\vibelution.ico" in source
+    assert "launcher.browser.window_app_identity.succeeded" in source
+    assert "app_identity_applied" in source
+
+
+def test_python_launcher_workbench_window_applies_vibelution_app_identity():
+    source = (PROJECT_ROOT / "scripts" / "vibelution_launcher.py").read_text(encoding="utf-8")
+
+    assert "SHGetPropertyStoreForWindow" in source
+    assert "PKEY_APPUSERMODEL_ID" in source
+    assert "Vibelution.Workbench" in source
+    assert "LAUNCHER_ICON_PATH" in source
+    assert "_apply_managed_browser_app_identity(int(process.pid), \"workbench\")" in source
+    assert "browserAppIdentityApplied" in source
+
+
+def test_desktop_entry_launcher_window_applies_vibelution_app_identity():
+    source = DESKTOP_ENTRY_PY.read_text(encoding="utf-8")
+
+    assert "SHGetPropertyStoreForWindow" in source
+    assert "PKEY_APPUSERMODEL_ID" in source
+    assert "Vibelution.Launcher" in source
+    assert "LAUNCHER_ICON_PATH" in source
+    assert "_apply_managed_browser_app_identity(int(process.pid), \"launcher\")" in source
+    assert "launcher.browser.window_app_identity.succeeded" in source
+
+
 def test_launcher_script_reconciles_stale_control_state_before_lifecycle_actions():
     source = LAUNCHER_SCRIPT.read_text(encoding="utf-8")
 
@@ -3648,6 +3684,7 @@ $script:events = @()
 
 function Acquire-LauncherMutex {}
 function Release-LauncherMutex { $script:releaseCalls += 1 }
+function Repair-StaleLauncherControlState {}
 function Sync-LauncherEndpointFromState {}
 function Open-LauncherControlSurface { $script:openCalls += 1 }
 function Get-State {
