@@ -39,6 +39,7 @@ describe("AppShell layout contract", () => {
   it("keeps the global shell top bar compact", () => {
     expect(styles.statusSummaryChip).toBeTypeOf("string");
     expect(styles.statusSummaryCount).toBeTypeOf("string");
+    expect(styles.returnButton).toBeTypeOf("string");
     expect(styles.statusGuideGrid).toBeTypeOf("string");
     expect(styles.lifecycleProofMeta).toBeTypeOf("string");
     expect(styles.lifecycleProofList).toBeTypeOf("string");
@@ -51,6 +52,20 @@ describe("AppShell layout contract", () => {
     expect(shellStyles).toContain(".topClock span:last-child");
     expect(shellStyles).toContain("@media (max-width: 980px)");
     expect(shellStyles).toContain("overscroll-behavior-x: contain");
+    expect(shellStyles).toContain(".returnButton");
+    expect(shellStyles).toContain("width: 32px");
+  });
+
+  it("exposes a shell-level semantic return action without visible helper copy", () => {
+    expect(shellSource).toContain("resolveReturnTarget(routeLocationFromRouter(location), returnNavigationStack)");
+    expect(shellSource).toContain("consumeReturnNavigationTarget(current, targetPath)");
+    expect(shellSource).toContain("suppressNextReturnStackPushRef.current = true");
+    expect(shellSource).toContain("RETURN_NAVIGATION_STACK_STORAGE_KEY");
+    expect(shellSource).toContain("className={styles.returnButton}");
+    expect(shellSource).toContain("aria-label={returnNavigationLabel}");
+    expect(shellSource).toContain("title={returnNavigationLabel}");
+    expect(shellSource).toContain("<ArrowLeft size={16} />");
+    expect(shellSource).not.toContain("returnNavigationHelper");
   });
 
   it("keeps the global shell background in the layered starfield treatment", () => {
