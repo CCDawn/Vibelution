@@ -70,9 +70,12 @@ def test_prompt_template_registry_repairs_research_defaults(tmp_path, monkeypatc
     assert not _contains_tool_name(discovery_detail["content"], "web_search_tool")
     assert _contains_tool_name(discovery_detail["content"], "batch_web_search_tool")
     assert "不调用 web_fetch_tool" in discovery_detail["content"]
+    assert "[搜索质量不足]" in discovery_detail["content"]
+    assert "low_quality_search_results" in discovery_detail["content"]
     acquisition_detail = prompt_template_service.get_prompt_template("prompt-challenge-cup-source-acquisition")
     assert acquisition_detail is not None
     assert "web_fetch_tool" in acquisition_detail["content"]
+    assert "[搜索质量不足]" in acquisition_detail["content"]
     extraction_detail = prompt_template_service.get_prompt_template("prompt-challenge-cup-content-extraction")
     assert extraction_detail is not None
     assert "不直接写正式 Team Knowledge" in extraction_detail["content"]
@@ -107,6 +110,7 @@ def test_prompt_template_repair_upgrades_builtin_challenge_stage_prompt_content(
     assert detail["metadata"]["builtinContentVersion"] == prompt_template_service.CHALLENGE_CUP_STAGE_TASK_PROMPT_VERSION
     assert "source_collection_stage_session_task" in detail["content"]
     assert "source_collection_stage_writeback_tool" in detail["content"]
+    assert "[搜索质量不足]" in detail["content"]
 
 
 def test_prompt_template_update_writes_source_and_refreshes_hash(tmp_path, monkeypatch):

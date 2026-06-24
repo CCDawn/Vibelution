@@ -167,6 +167,9 @@ def extract_tool_result_semantics(result: Any) -> dict[str, Any]:
     elif text.startswith(("[错误]", "[短路]")):
         semantics["semanticStatus"] = "failed"
         semantics["failureClass"] = semantics["failureClass"] or "tool_error"
+    elif text.startswith("[搜索质量不足]"):
+        semantics["semanticStatus"] = "degraded"
+        semantics["failureClass"] = semantics["failureClass"] or "low_quality_search_results"
 
     if semantics["semanticStatus"] in BUSINESS_FAILURE_STATUSES and not semantics["failureClass"]:
         semantics["failureClass"] = str(semantics["semanticStatus"])

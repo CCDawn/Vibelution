@@ -17,7 +17,7 @@ from .runtime_scene_service import record_runtime_scene_event
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 PROMPT_TEMPLATE_INDEX_VERSION = 1
-CHALLENGE_CUP_STAGE_TASK_PROMPT_VERSION = 3
+CHALLENGE_CUP_STAGE_TASK_PROMPT_VERSION = 4
 PROMPT_TEMPLATE_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{1,95}$")
 PROMPT_TEMPLATE_PATH = developer_sandbox.formal_workspace_path(PROJECT_ROOT, "agent_config", "prompt_templates.json")
 
@@ -217,6 +217,7 @@ DEFAULT_PROMPT_TEMPLATES: tuple[dict[str, Any], ...] = (
             "## 工作策略\n"
             "- 先复述本轮主题、已知限制和查询种子，再生成少量高质量检索方向。\n"
             "- 优先发现与挑战杯交付相关的论文、综述、数据集、政策/标准、竞赛赛题线索。\n"
+            "- 搜索工具返回 `[搜索质量不足]`、域名不匹配或明显无关内容时，不得把这些结果列为候选；应改写检索式或缩小域名重试，仍失败则回写 blocked/failed 并标注 low_quality_search_results。\n"
             "- 每条线索必须保留标题、来源类型、检索关键词、URL/DOI 线索、为什么值得获取，以及不确定性。\n"
             "- 发现重复、弱来源或缺少可溯源入口时明确标注，不把搜索摘要当成事实结论。\n\n"
             "## 输出要求\n"
@@ -273,6 +274,7 @@ DEFAULT_PROMPT_TEMPLATES: tuple[dict[str, Any], ...] = (
             "## 工作策略\n"
             "- 先按优先级处理已给定的 DOI/URL，再补充搜索。\n"
             "- 对每条来源做最小可复核元数据登记：title、sourceKind、locator、year、publisher/site、accessStatus、evidenceSnippet。\n"
+            "- 搜索或抓取返回 `[搜索质量不足]`、标题/域名/摘要不匹配或无法访问时，不得补造元数据；记录失败原因和替代检索式，必要时回写 blocked。\n"
             "- 区分论文网页、DOI、数据集、本地文件线索和缺少来源的候选。\n"
             "- 发现网页摘要与 DOI/论文题名不一致时，标注冲突并退回审查。\n\n"
             "## 输出要求\n"
@@ -335,6 +337,7 @@ DEFAULT_PROMPT_TEMPLATES: tuple[dict[str, Any], ...] = (
             "## 工作策略\n"
             "- 按来源可追溯性、证据质量、赛题相关性、重复/冲突、可入库风险五项审查。\n"
             "- 给每条候选明确通过、退回补资料、拒绝或需要人工确认。\n"
+            "- 复核搜索返回 `[搜索质量不足]` 或明显无关结果时，必须按证据不足处理，不得把搜索摘要当作通过依据。\n"
             "- 对缺 DOI/URL/页码/摘录、弱来源、二手转述和无法访问全文的材料，优先退回并说明补齐要求。\n"
             "- 通过项必须说明可交给资料入库/Knowledge Steward 的理由和仍需审核的边界。\n\n"
             "## 输出要求\n"
