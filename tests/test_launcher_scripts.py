@@ -71,6 +71,8 @@ def test_managed_edge_windows_apply_vibelution_app_identity():
 
     assert "SHGetPropertyStoreForWindow" in source
     assert "SetWindowAppUserModelIdentity" in source
+    assert "SetWindowIcon" in source
+    assert "WM_SETICON" in source
     assert "function Set-ManagedBrowserWindowAppIdentity" in source
     assert "Set-ManagedBrowserWindowAppIdentity -WindowProcess $windowProcess -WindowPurpose $WindowPurpose" in source
     assert "Vibelution.Launcher" in source
@@ -78,6 +80,7 @@ def test_managed_edge_windows_apply_vibelution_app_identity():
     assert "assets\\icons\\vibelution.ico" in source
     assert "launcher.browser.window_app_identity.succeeded" in source
     assert "app_identity_applied" in source
+    assert "window_icon_applied" in source
 
 
 def test_python_launcher_workbench_window_applies_vibelution_app_identity():
@@ -87,8 +90,11 @@ def test_python_launcher_workbench_window_applies_vibelution_app_identity():
     assert "PKEY_APPUSERMODEL_ID" in source
     assert "Vibelution.Workbench" in source
     assert "LAUNCHER_ICON_PATH" in source
+    assert "WM_SETICON" in source
+    assert "_apply_window_icon(int(hwnd), LAUNCHER_ICON_PATH)" in source
     assert "_apply_managed_browser_app_identity(int(process.pid), \"workbench\")" in source
     assert "browserAppIdentityApplied" in source
+    assert "browserWindowIconApplied" in source
 
 
 def test_desktop_entry_launcher_window_applies_vibelution_app_identity():
@@ -98,6 +104,8 @@ def test_desktop_entry_launcher_window_applies_vibelution_app_identity():
     assert "PKEY_APPUSERMODEL_ID" in source
     assert "Vibelution.Launcher" in source
     assert "LAUNCHER_ICON_PATH" in source
+    assert "WM_SETICON" in source
+    assert "_apply_window_icon(int(hwnd), LAUNCHER_ICON_PATH)" in source
     assert "_apply_managed_browser_app_identity(int(process.pid), \"launcher\")" in source
     assert "launcher.browser.window_app_identity.succeeded" in source
 
