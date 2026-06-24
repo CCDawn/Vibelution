@@ -1306,7 +1306,14 @@ def test_agent_config_workspace_uses_compact_room_and_team_indexes(tmp_path, mon
 
     assert payload["summary"]["chatRoomCount"] == 2
     assert payload["summary"]["teamCount"] == 1
-    assert any(item["roomId"] == room["roomId"] for item in payload["chatRooms"])
+    compact_room = next(item for item in payload["chatRooms"] if item["roomId"] == room["roomId"])
+    assert compact_room["sourceRef"]["owner"] == "ChatRoomService"
+    assert compact_room["projectionCanWrite"] is False
+    assert compact_room["projectionEdit"]["canonicalEditRoute"] == f"/chat?room={room['roomId']}"
+    compact_team = next(item for item in payload["teams"] if item["teamId"] == team["teamId"])
+    assert compact_team["sourceRef"]["owner"] == "TeamWorkflow"
+    assert compact_team["projectionCanWrite"] is False
+    assert compact_team["projectionEdit"]["canonicalEditRoute"] == f"/teams?team={team['teamId']}"
     alpha_refs = payload["references"][alpha["agentId"]]
     assert any(item["kind"] == "chat_room" and item["sourceLabel"] == "配置中心群聊" for item in alpha_refs)
     team_ref = next(item for item in alpha_refs if item["kind"] == "team" and item["sourceLabel"] == "配置中心团队")

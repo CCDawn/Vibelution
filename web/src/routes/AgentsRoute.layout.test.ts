@@ -518,7 +518,8 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("selectedAgent.references.filter((reference) => reference.kind === \"chat_room\").length");
     expect(routeSource).toContain("styles.roomMembershipList");
     expect(routeSource).toContain("styles.roomCheckField");
-    expect(routeSource).toContain("navigate(`/chat?room=${encodeURIComponent(room.roomId)}`)");
+    expect(routeSource).toContain("compactProjectionRoute(room");
+    expect(routeSource).toContain("`/chat?room=${encodeURIComponent(room.roomId)}`");
     expect(routeSource).toContain("打开群聊");
     expect(routeSource).toContain("群聊成员关系在对话页的群设置中维护；团队关联群聊由团队页同步。");
     expect(routeSource).not.toContain("AgentChatRoomMembershipDraft");
@@ -534,6 +535,7 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("summary?.teamCount");
     expect(routeSource).toContain("referenceRoute(reference)");
     expect(routeSource).toContain("reference.projectionEdit?.canonicalEditRoute || reference.sourceRef?.canonicalEditRoute");
+    expect(routeSource).toContain("compactProjectionRoute(room");
     expect(routeSource).toContain('`/teams?team=${encodeURIComponent(reference.sourceId)}`');
     expect(routeSource).toContain("styles.referenceRouteButton");
     expect(routeSource).toContain("styles.referenceStatusStale");
