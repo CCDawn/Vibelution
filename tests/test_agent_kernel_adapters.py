@@ -206,12 +206,23 @@ def test_kernel_task_timeline_returns_read_model_with_delivery_and_projection_re
     assert timeline["deliveries"][0]["wake"]["wakeStatus"] == "not_requested"
     assert timeline["readModel"]["truthSource"] == "TaskLedger"
     assert timeline["readModel"]["factAuthority"] is False
+    assert timeline["readModel"]["sourceRef"]["owner"] == "TaskLedger"
+    assert timeline["readModel"]["sourceRef"]["canonicalEditRoute"] == f"/kernel?taskId={created['task']['taskId']}"
     assert any(item["kind"] == "event.accepted" for item in timeline["timeline"])
     assert any(item["kind"] == "task.succeeded" for item in timeline["timeline"])
     assert any(item["kind"] == "delivery.delivered" and item["wakeStatus"] == "not_requested" for item in timeline["timeline"])
     assert any(ref["kind"] == "session" and ref["id"] == "session-alpha" for ref in timeline["projectionRefs"])
     assert any(ref["kind"] == "message" and ref["id"] == "timeline-message" for ref in timeline["projectionRefs"])
     assert any(ref["kind"] == "conversation_message" and ref["id"] == "projection-timeline-message" for ref in timeline["projectionRefs"])
+    session_ref = next(ref for ref in timeline["projectionRefs"] if ref["kind"] == "session")
+    message_ref = next(ref for ref in timeline["projectionRefs"] if ref["kind"] == "message")
+    projection_ref = next(ref for ref in timeline["projectionRefs"] if ref["kind"] == "conversation_message")
+    assert session_ref["sourceRef"]["owner"] == "ConversationLedger"
+    assert session_ref["projectionCanWrite"] is False
+    assert session_ref["projectionEdit"]["mode"] == "deep_link_to_source"
+    assert session_ref["canonicalEditRoute"] == "/chat?session=session-alpha"
+    assert message_ref["canonicalEditRoute"] == "/chat?session=session-alpha&message=timeline-message"
+    assert projection_ref["canonicalEditRoute"] == "/chat?session=session-alpha&message=projection-timeline-message"
     assert timeline["runtimeEvidenceRefs"][0]["eventCode"] == "kernel.event.completed"
 
 

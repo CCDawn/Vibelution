@@ -1,6 +1,13 @@
 import { useMemo } from "react";
 
-import type { AgentInstance, ConversationSummary, SessionSummary, Team } from "../api/types";
+import type {
+  AgentInstance,
+  ConversationSummary,
+  ProjectionEditContract,
+  SessionSummary,
+  SourceAuthorityRef,
+  Team,
+} from "../api/types";
 import { isChildSession, sessionListTitle } from "./DirectSessionIndexItem";
 
 export type ConversationIndexGroupKey =
@@ -66,6 +73,8 @@ type ConversationTeamLookup = {
 const NON_DISCUSSION_TEAM_IDS = new Set(["self-evolution-team", "supervised-evolution-team"]);
 const NON_DISCUSSION_TEAM_KINDS = new Set(["self_evolution", "supervised_evolution"]);
 const NON_DISCUSSION_TEAM_SOURCES = new Set(["self_evolution", "supervised_evolution"]);
+const SOURCE_AUTHORITY_VERSION = 1;
+const ALLOWED_PROJECTION_ACTIONS = ["view", "link", "refresh", "repair"];
 
 export function isDiscussionTeam(team: Team | undefined | null) {
   if (!team) {
@@ -254,6 +263,10 @@ function conversationTeamSearchValues(team: ConversationIndexTeam | undefined): 
 }
 
 export function sessionToConversationSummary(session: SessionSummary): ConversationSummary {
+  const sourceRef = session.sourceRef ?? makeSourceAuthorityRef("session", session.id);
+  const projectionEdit = session.projectionEdit ?? makeProjectionEditContract(sourceRef);
+  const agentSourceRef = session.agentSourceRef
+    ?? (session.agentId ? makeSourceAuthorityRef("agent", session.agentId) : null);
   return {
     conversationId: session.id,
     type: "direct_agent",
@@ -274,6 +287,9 @@ export function sessionToConversationSummary(session: SessionSummary): Conversat
     agentPromptTemplateId: session.agentPromptTemplateId,
     dialogueModelId: session.dialogueModelId,
     agentInboxPendingCount: session.agentInboxPendingCount,
+    sourceRef,
+    projectionEdit,
+    agentSourceRef,
   };
 }
 
@@ -290,6 +306,9 @@ export function isVisibleConversationAgent(agent: AgentInstance | undefined | nu
 
 export function agentToConversationSummary(agent: AgentInstance): ConversationSummary {
   const directSessionId = String(agent.directSessionId ?? "").trim();
+  const sourceRef = agent.sourceRef ?? makeSourceAuthorityRef("agent", agent.agentId);
+  const projectionEdit = makeProjectionEditContract(sourceRef);
+  const agentSourceRef = agent.sourceRef ?? makeSourceAuthorityRef("agent", agent.agentId);
   return {
     conversationId: directSessionId || agent.agentId,
     type: "direct_agent",
@@ -310,7 +329,95 @@ export function agentToConversationSummary(agent: AgentInstance): ConversationSu
     agentPromptTemplateId: agent.promptTemplateId,
     dialogueModelId: agent.llmBindings?.dialogue?.modelId,
     agentInboxPendingCount: agent.agentInboxPendingCount,
+    sourceRef,
+    projectionEdit,
+    agentSourceRef,
   };
+}
+
+function makeSourceAuthorityRef(kind: string, id: string): SourceAuthorityRef {
+  const normalizedKind = String(kind || "").trim();
+  const normalizedId = String(id || "").trim();
+  const owner = sourceOwnerFor(normalizedKind);
+  return {
+    kind: normalizedKind,
+    id: normalizedId,
+    owner,
+    factAuthority: Boolean(normalizedId && owner !== "unknown"),
+    canonicalEditRoute: canonicalEditRouteFor(normalizedKind, normalizedId),
+    canonicalMutationApi: canonicalMutationApiFor(normalizedKind, normalizedId),
+    projectionCanWrite: false,
+    allowedProjectionActions: ALLOWED_PROJECTION_ACTIONS,
+    sourceAuthorityVersion: SOURCE_AUTHORITY_VERSION,
+  };
+}
+
+function makeProjectionEditContract(sourceRef: SourceAuthorityRef): ProjectionEditContract {
+  return {
+    canWrite: false,
+    mode: "deep_link_to_source",
+    reason: "projection_read_model",
+    sourceOwner: sourceRef.owner,
+    canonicalEditRoute: sourceRef.canonicalEditRoute,
+    canonicalMutationApi: sourceRef.canonicalMutationApi,
+    sourceAuthorityVersion: sourceRef.sourceAuthorityVersion,
+  };
+}
+
+function sourceOwnerFor(kind: string) {
+  if (kind === "agent") {
+    return "AgentDirectory";
+  }
+  if (kind === "session" || kind === "conversation") {
+    return "ConversationLedger";
+  }
+  if (kind === "room" || kind === "chat_room") {
+    return "ChatRoomService";
+  }
+  if (kind === "task" || kind === "kernel_task") {
+    return "TaskLedger";
+  }
+  return "unknown";
+}
+
+function canonicalEditRouteFor(kind: string, id: string) {
+  const encodedId = encodeURIComponent(id);
+  if (!id) {
+    return "";
+  }
+  if (kind === "agent") {
+    return `/agents?agent=${encodedId}&pane=config`;
+  }
+  if (kind === "session" || kind === "conversation") {
+    return `/chat?session=${encodedId}`;
+  }
+  if (kind === "room" || kind === "chat_room") {
+    return `/chat?room=${encodedId}`;
+  }
+  if (kind === "task" || kind === "kernel_task") {
+    return `/kernel?taskId=${encodedId}`;
+  }
+  return "";
+}
+
+function canonicalMutationApiFor(kind: string, id: string) {
+  const encodedId = encodeURIComponent(id);
+  if (!id) {
+    return "";
+  }
+  if (kind === "agent") {
+    return `/api/agents/${encodedId}`;
+  }
+  if (kind === "session" || kind === "conversation") {
+    return `/api/sessions/${encodedId}`;
+  }
+  if (kind === "room" || kind === "chat_room") {
+    return `/api/chat-rooms/${encodedId}`;
+  }
+  if (kind === "task" || kind === "kernel_task") {
+    return `/api/kernel/tasks/${encodedId}`;
+  }
+  return "";
 }
 
 export function isVisibleDirectSession(session: SessionSummary | undefined | null) {
