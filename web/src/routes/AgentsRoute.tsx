@@ -67,6 +67,17 @@ import {
   agentCenterToolsRoute,
 } from "./agentCenterRoutes";
 import { agentDisplayInfo } from "./agentDisplay";
+import {
+  archivedWorkspaceCache,
+  bulkPurgeWorkspaceCache,
+  bulkUpdatedAgentWorkspaceCache,
+  purgedWorkspaceCache,
+  updatedAgentWorkspaceCache,
+  type AgentBulkActionItem,
+  type AgentBulkActionResponse,
+  type AgentConfigWorkspaceWithTeamIndexes,
+  type AgentTeamIndexGroup,
+} from "./agentWorkspaceCache";
 import { createChatWorkspaceCache } from "./chatWorkspaceCache";
 import styles from "./AgentsRoute.module.css";
 
@@ -234,22 +245,7 @@ type AgentManagementFilterGroup = {
   description?: string;
   healthCount?: number;
 };
-type AgentTeamIndexGroup = AgentManagementFilterGroup & {
-  section: "team_index" | "source_scope";
-  agentIds: string[];
-  teamId?: string;
-  teamKind?: string;
-  teamCategory?: string;
-  sourceScopeGroupId?: string;
-  sourceCount?: number;
-  enabledByDefault?: boolean;
-  evidenceRole?: string;
-  source?: string;
-};
 type AgentFilterGroup = AgentConfigWorkspaceGroup | AgentTeamIndexGroup;
-type AgentConfigWorkspaceWithTeamIndexes = AgentConfigWorkspace & {
-  teamIndexes?: AgentTeamIndexGroup[];
-};
 type AgentActivityTimelineItem = {
   id: string;
   kind: "run" | "sub_run" | "inbox" | "context";
@@ -261,31 +257,6 @@ type AgentActivityTimelineItem = {
   messageId: string;
   canOpenLogs: boolean;
   evidence: AgentRuntimeEvidenceMatch | null;
-};
-type AgentBulkActionItem = {
-  agentId: string;
-  reason?: string;
-  message?: string;
-  status?: string;
-  deleted?: boolean;
-  archiveSummary?: Record<string, unknown>;
-  purgeSummary?: Record<string, unknown>;
-};
-type AgentBulkActionResponse = {
-  status: string;
-  requestedAgentIds: string[];
-  success: AgentBulkActionItem[];
-  skipped: AgentBulkActionItem[];
-  failed: AgentBulkActionItem[];
-  summary: {
-    requestedCount: number;
-    successCount: number;
-    skippedCount: number;
-    failedCount: number;
-  };
-  cleanupSummary?: Record<string, unknown>;
-  timingsMs?: Record<string, number>;
-  durationMs?: number;
 };
 type AgentBulkPromptTemplateResponse = Omit<AgentBulkActionResponse, "success"> & {
   success: AgentConfigWorkspaceAgent[];
@@ -1427,24 +1398,6 @@ function agentCenterReturnLabel(value: string | null | undefined, lang: "zh" | "
   return lang === "zh" ? "返回来源页" : "Back";
 }
 
-function teamIndexesWithoutAgentIds(
-  workspace: AgentConfigWorkspace | undefined,
-  removedAgentIds: Set<string>,
-): AgentTeamIndexGroup[] | undefined {
-  const indexes = workspaceTeamIndexes(workspace);
-  if (!indexes.length) {
-    return undefined;
-  }
-  return indexes.map((group) => {
-    const agentIds = group.agentIds.filter((id) => !removedAgentIds.has(id));
-    return {
-      ...group,
-      agentIds,
-      count: agentIds.length,
-    };
-  });
-}
-
 function draftSyncSourceFromAgent(
   workspace: AgentConfigWorkspace | undefined,
   agent: AgentConfigWorkspaceAgent | null | undefined,
@@ -1459,59 +1412,6 @@ function draftSyncSourceFromAgent(
     memoryPolicy: memoryPolicyDraftFromAgent(agent),
     delegationPolicy: delegationPolicyDraftFromAgent(agent),
     supervisionPolicy: supervisionPolicyDraftFromAgent(agent),
-  };
-}
-
-function archivedWorkspaceCache(
-  workspace: AgentConfigWorkspace | undefined,
-  archivedAgent: AgentConfigWorkspaceAgent,
-): AgentConfigWorkspace | undefined {
-  if (!workspace) {
-    return workspace;
-  }
-  const agentId = archivedAgent.agentId;
-  const cachedAgent = workspace.agents.find((agent) => agent.agentId === agentId);
-  const wasActive = cachedAgent ? cachedAgent.status !== "archived" : false;
-  const nextAgents = workspace.agents.map((agent) =>
-    agent.agentId === agentId
-      ? {
-          ...agent,
-          ...archivedAgent,
-          status: "archived",
-          runtimeStatus: {
-            state: "archived",
-            label: archivedAgent.runtimeStatus?.label || "Archived",
-            reason: archivedAgent.runtimeStatus?.reason || "agent_archived",
-            runId: archivedAgent.runtimeStatus?.runId || agent.runtimeStatus?.runId || "",
-            runKind: archivedAgent.runtimeStatus?.runKind || agent.runtimeStatus?.runKind || "",
-            sessionId: archivedAgent.runtimeStatus?.sessionId || agent.runtimeStatus?.sessionId || agent.directSessionId || "",
-            summary: archivedAgent.runtimeStatus?.summary || "",
-            updatedAt: archivedAgent.runtimeStatus?.updatedAt || archivedAgent.updatedAt || agent.updatedAt || "",
-          },
-        }
-      : agent,
-  );
-  const nextGroups = workspace.groups.map((group) => {
-    const agentIds = group.id === "archived"
-      ? Array.from(new Set([...group.agentIds, agentId]))
-      : group.agentIds.filter((id) => id !== agentId);
-    return {
-      ...group,
-      agentIds,
-      count: agentIds.length,
-    };
-  });
-  const nextTeamIndexes = teamIndexesWithoutAgentIds(workspace, new Set([agentId]));
-  return {
-    ...workspace,
-    agents: nextAgents,
-    groups: nextGroups,
-    ...(nextTeamIndexes ? { teamIndexes: nextTeamIndexes } : {}),
-    summary: {
-      ...workspace.summary,
-      activeAgentCount: wasActive ? Math.max(0, workspace.summary.activeAgentCount - 1) : workspace.summary.activeAgentCount,
-      archivedAgentCount: wasActive ? workspace.summary.archivedAgentCount + 1 : workspace.summary.archivedAgentCount,
-    },
   };
 }
 
@@ -1536,120 +1436,6 @@ function optimisticArchivedAgent(agent: AgentConfigWorkspaceAgent): AgentConfigW
       latestHistoricalUpdatedAt: agent.runtimeStatus?.latestHistoricalUpdatedAt,
     },
   };
-}
-
-function purgedWorkspaceCache(
-  workspace: AgentConfigWorkspace | undefined,
-  purgedAgentId: string,
-): AgentConfigWorkspace | undefined {
-  if (!workspace) {
-    return workspace;
-  }
-  const agentId = String(purgedAgentId || "").trim();
-  if (!agentId) {
-    return workspace;
-  }
-  const cachedAgent = workspace.agents.find((agent) => agent.agentId === agentId);
-  const nextAgents = workspace.agents.filter((agent) => agent.agentId !== agentId);
-  const nextGroups = workspace.groups.map((group) => {
-    const agentIds = group.agentIds.filter((id) => id !== agentId);
-    return {
-      ...group,
-      agentIds,
-      count: agentIds.length,
-    };
-  });
-  const nextTeamIndexes = teamIndexesWithoutAgentIds(workspace, new Set([agentId]));
-  const wasActive = cachedAgent ? cachedAgent.status !== "archived" : false;
-  const wasArchived = cachedAgent ? cachedAgent.status === "archived" : false;
-  return {
-    ...workspace,
-    agents: nextAgents,
-    groups: nextGroups,
-    ...(nextTeamIndexes ? { teamIndexes: nextTeamIndexes } : {}),
-    summary: {
-      ...workspace.summary,
-      activeAgentCount: wasActive ? Math.max(0, workspace.summary.activeAgentCount - 1) : workspace.summary.activeAgentCount,
-      archivedAgentCount: wasArchived ? Math.max(0, workspace.summary.archivedAgentCount - 1) : workspace.summary.archivedAgentCount,
-    },
-  };
-}
-
-function bulkPurgeWorkspaceCache(
-  workspace: AgentConfigWorkspace | undefined,
-  bulkResponse: AgentBulkActionResponse,
-): AgentConfigWorkspace | undefined {
-  if (!workspace) {
-    return workspace;
-  }
-  const purgedAgentIds = new Set(
-    bulkResponse.success
-      .map((item) => String(item.agentId || "").trim())
-      .filter(Boolean),
-  );
-  if (!purgedAgentIds.size) {
-    return workspace;
-  }
-  const removedAgents = workspace.agents.filter((agent) => purgedAgentIds.has(agent.agentId));
-  const removedActiveCount = removedAgents.filter((agent) => agent.status !== "archived").length;
-  const removedArchivedCount = removedAgents.filter((agent) => agent.status === "archived").length;
-  const nextGroups = workspace.groups.map((group) => {
-    const agentIds = group.agentIds.filter((id) => !purgedAgentIds.has(id));
-    return {
-      ...group,
-      agentIds,
-      count: agentIds.length,
-    };
-  });
-  const nextTeamIndexes = teamIndexesWithoutAgentIds(workspace, purgedAgentIds);
-  return {
-    ...workspace,
-    agents: workspace.agents.filter((agent) => !purgedAgentIds.has(agent.agentId)),
-    groups: nextGroups,
-    ...(nextTeamIndexes ? { teamIndexes: nextTeamIndexes } : {}),
-    summary: {
-      ...workspace.summary,
-      activeAgentCount: Math.max(0, workspace.summary.activeAgentCount - removedActiveCount),
-      archivedAgentCount: Math.max(0, workspace.summary.archivedAgentCount - removedArchivedCount),
-    },
-  };
-}
-
-function updatedAgentWorkspaceCache(
-  workspace: AgentConfigWorkspace | undefined,
-  updatedAgent: Partial<AgentConfigWorkspaceAgent> & Pick<AgentConfigWorkspaceAgent, "agentId">,
-): AgentConfigWorkspace | undefined {
-  if (!workspace) {
-    return workspace;
-  }
-  const nextAgents = workspace.agents.map((agent) =>
-    agent.agentId === updatedAgent.agentId
-      ? {
-          ...agent,
-          ...updatedAgent,
-          references: updatedAgent.references ?? agent.references,
-          health: updatedAgent.health ?? agent.health,
-          runtimeStatus: updatedAgent.runtimeStatus ?? agent.runtimeStatus,
-          dialogueModel: updatedAgent.dialogueModel ?? agent.dialogueModel,
-          llmBindingModels: updatedAgent.llmBindingModels ?? agent.llmBindingModels,
-          promptTemplate: updatedAgent.promptTemplate ?? agent.promptTemplate,
-        }
-      : agent,
-  );
-  return {
-    ...workspace,
-    agents: nextAgents,
-  };
-}
-
-function bulkUpdatedAgentWorkspaceCache(
-  workspace: AgentConfigWorkspace | undefined,
-  updatedAgents: Array<Partial<AgentConfigWorkspaceAgent> & Pick<AgentConfigWorkspaceAgent, "agentId">>,
-): AgentConfigWorkspace | undefined {
-  return updatedAgents.reduce(
-    (current, updatedAgent) => updatedAgentWorkspaceCache(current, updatedAgent),
-    workspace,
-  );
 }
 
 function groupDisplayLabel(group: { id: string; label?: string } | undefined, copy: ReturnType<typeof agentsRouteCopy>) {
