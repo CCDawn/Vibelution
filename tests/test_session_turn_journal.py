@@ -60,6 +60,43 @@ def test_turn_journal_appends_and_replays_interrupted_partial(tmp_path):
     assert TURN_INTERRUPTED_MARKER in messages[-1]["content"]
 
 
+def test_turn_journal_replays_user_message_with_references_only(tmp_path):
+    references = [
+        {
+            "referenceId": "session:beta",
+            "kind": "session",
+            "sessionId": "beta",
+            "title": "Beta Agent",
+        }
+    ]
+    append_turn_event(
+        tmp_path,
+        "session-a",
+        "turn-1",
+        EVENT_USER_MESSAGE,
+        status="recorded",
+        payload={"content": "", "references": references},
+        timestamp="2026-06-24T00:00:00Z",
+    )
+
+    messages = model_visible_messages_from_events(load_turn_events(tmp_path, "session-a"))
+
+    assert messages == [
+        {
+            "role": "user",
+            "content": "",
+            "timestamp": "2026-06-24T00:00:00Z",
+            "attachments": [],
+            "references": references,
+            "metadata": {
+                "kind": "journal_user_message",
+                "turnId": "turn-1",
+                "eventId": messages[0]["metadata"]["eventId"],
+            },
+        }
+    ]
+
+
 def test_turn_journal_synthesizes_unfinished_tool_call_result(tmp_path):
     append_turn_event(tmp_path, "session-a", "turn-1", EVENT_TURN_STARTED, status="running")
     append_turn_event(

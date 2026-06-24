@@ -7,7 +7,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from core.agent_kernel import service as agent_kernel_service
-from core.chat.conversation_ledger import EVENT_USER_MESSAGE, append_conversation_event
+from core.chat.conversation_ledger import EVENT_ASSISTANT_MESSAGE, EVENT_USER_MESSAGE, append_conversation_event
 from core.infrastructure import developer_sandbox
 from core.infrastructure.tool_executor import ToolExecutor
 from core.ui.chat_state import load_chat_state, save_chat_state
@@ -109,6 +109,22 @@ def _seed_chat_sessions(root):
             ],
         },
     )
+
+
+def _seed_ledger_messages(root, session_id: str, messages: list[dict[str, str]]) -> None:
+    for index, message in enumerate(messages, start=1):
+        role = str(message.get("role") or "").strip().lower()
+        event_type = EVENT_ASSISTANT_MESSAGE if role == "assistant" else EVENT_USER_MESSAGE
+        append_conversation_event(
+            root,
+            session_id,
+            f"{session_id}-seed-{index}",
+            event_type,
+            status="recorded",
+            payload={"content": str(message.get("content") or "")},
+            timestamp=str(message.get("timestamp") or ""),
+            source="test_seed",
+        )
 
 
 def test_create_chat_session_creates_persistent_agent_and_direct_conversation(tmp_path, monkeypatch):
@@ -1540,14 +1556,14 @@ def test_session_reference_message_persists_reference_and_schedules_query_contex
     _use_tmp_project_root(tmp_path, monkeypatch)
     alpha = session_service.create_chat_session(title="Alpha Agent")
     beta = session_service.create_chat_session(title="Beta Agent")
-    state = load_chat_state(tmp_path)
-    for conversation in state["conversations"]:
-        if (conversation.get("id") or conversation.get("conversation_id")) == beta["id"]:
-            conversation["messages"] = [
-                {"role": "user", "content": "Beta 历史目标", "timestamp": "2026-06-05T01:00:00Z"},
-                {"role": "assistant", "content": "Beta 历史结论", "timestamp": "2026-06-05T01:01:00Z"},
-            ]
-    save_chat_state(tmp_path, state)
+    _seed_ledger_messages(
+        tmp_path,
+        beta["id"],
+        [
+            {"role": "user", "content": "Beta 历史目标", "timestamp": "2026-06-05T01:00:00Z"},
+            {"role": "assistant", "content": "Beta 历史结论", "timestamp": "2026-06-05T01:01:00Z"},
+        ],
+    )
     scheduled = []
     monkeypatch.setattr(session_service, "_submit_scheduled_session_turn", lambda context: scheduled.append(context))
 
@@ -1580,14 +1596,14 @@ def test_session_reference_query_tool_only_reads_current_turn_references(tmp_pat
     _use_tmp_project_root(tmp_path, monkeypatch)
     alpha = session_service.create_chat_session(title="Alpha Agent")
     beta = session_service.create_chat_session(title="Beta Agent")
-    state = load_chat_state(tmp_path)
-    for conversation in state["conversations"]:
-        if (conversation.get("id") or conversation.get("conversation_id")) == beta["id"]:
-            conversation["messages"] = [
-                {"role": "user", "content": "需要分析缓存命中", "timestamp": "2026-06-05T01:00:00Z"},
-                {"role": "assistant", "content": "缓存命中来自上游 usage。", "timestamp": "2026-06-05T01:01:00Z"},
-            ]
-    save_chat_state(tmp_path, state)
+    _seed_ledger_messages(
+        tmp_path,
+        beta["id"],
+        [
+            {"role": "user", "content": "需要分析缓存命中", "timestamp": "2026-06-05T01:00:00Z"},
+            {"role": "assistant", "content": "缓存命中来自上游 usage。", "timestamp": "2026-06-05T01:01:00Z"},
+        ],
+    )
 
     with session_reference_context([
         {
@@ -2251,6 +2267,16 @@ def test_agent_configuration_indexes_repair_update_and_persist(tmp_path, monkeyp
     _use_tmp_project_root(tmp_path, monkeypatch)
     alpha = session_service.create_chat_session(title="Alpha Agent")
     beta = session_service.create_chat_session(title="Beta Agent")
+    _seed_ledger_messages(
+        tmp_path,
+        alpha["id"],
+        [{"role": "user", "content": "Alpha 已有真实会话活动", "timestamp": "2026-06-05T01:00:00Z"}],
+    )
+    _seed_ledger_messages(
+        tmp_path,
+        beta["id"],
+        [{"role": "user", "content": "Beta 已有真实会话活动", "timestamp": "2026-06-05T01:01:00Z"}],
+    )
 
     template_index = prompt_template_service.list_prompt_templates()
     template_ids = {item["templateId"] for item in template_index["templates"]}
@@ -2313,10 +2339,8 @@ def test_chat_room_completion_appends_visible_group_transcript_to_participant_se
         },
     )
 
-    state = load_chat_state(tmp_path)
-    conversations = {item["conversation_id"]: item for item in state["conversations"]}
-    alpha_messages = conversations["session-alpha"]["messages"]
-    beta_messages = conversations["session-beta"]["messages"]
+    alpha_messages = session_service.get_session_detail("session-alpha")["messages"]
+    beta_messages = session_service.get_session_detail("session-beta")["messages"]
     latest_round = detail["rounds"][-1]
 
     for messages, own_title, peer_title in (
@@ -2334,13 +2358,10 @@ def test_chat_room_completion_appends_visible_group_transcript_to_participant_se
         assert peer_title in synced["content"]
 
     chat_room_service._sync_group_round_to_participant_sessions(detail, latest_round)
-    state_after_resync = load_chat_state(tmp_path)
-    conversations_after_resync = {
-        item["conversation_id"]: item
-        for item in state_after_resync["conversations"]
-    }
-    assert len(conversations_after_resync["session-alpha"]["messages"]) == len(alpha_messages)
-    assert len(conversations_after_resync["session-beta"]["messages"]) == len(beta_messages)
+    alpha_messages_after_resync = session_service.get_session_detail("session-alpha")["messages"]
+    beta_messages_after_resync = session_service.get_session_detail("session-beta")["messages"]
+    assert len(alpha_messages_after_resync) == len(alpha_messages)
+    assert len(beta_messages_after_resync) == len(beta_messages)
 
 
 def test_tool_policy_blocks_before_tool_execution_and_returns_correctable_error(tmp_path, monkeypatch):
