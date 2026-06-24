@@ -5201,15 +5201,168 @@ using System;
 using System.Runtime.InteropServices;
 
 namespace VibelutionLauncher {
+    [StructLayout(LayoutKind.Sequential, Pack = 4)]
+    public struct PROPERTYKEY {
+        public Guid fmtid;
+        public uint pid;
+
+        public PROPERTYKEY(string fmtid, uint pid) {
+            this.fmtid = new Guid(fmtid);
+            this.pid = pid;
+        }
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct PROPVARIANT {
+        public ushort vt;
+        public ushort wReserved1;
+        public ushort wReserved2;
+        public ushort wReserved3;
+        public IntPtr p;
+        public int p2;
+
+        public static PROPVARIANT FromString(string value) {
+            PROPVARIANT variant = new PROPVARIANT();
+            variant.vt = 31; // VT_LPWSTR
+            variant.p = Marshal.StringToCoTaskMemUni(value ?? "");
+            return variant;
+        }
+
+        public void Clear() {
+            PropVariantClear(ref this);
+        }
+
+        [DllImport("ole32.dll")]
+        private static extern int PropVariantClear(ref PROPVARIANT pvar);
+    }
+
+    [ComImport]
+    [Guid("886D8EEB-8CF2-4446-8D02-CDBA1DBDCF99")]
+    [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    public interface IPropertyStore {
+        [PreserveSig] int GetCount(out uint cProps);
+        [PreserveSig] int GetAt(uint iProp, out PROPERTYKEY pkey);
+        [PreserveSig] int GetValue(ref PROPERTYKEY key, out PROPVARIANT pv);
+        [PreserveSig] int SetValue(ref PROPERTYKEY key, ref PROPVARIANT pv);
+        [PreserveSig] int Commit();
+    }
+
     public static class WinApi {
+        private static readonly PROPERTYKEY AppUserModelId = new PROPERTYKEY("9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3", 5);
+        private static readonly PROPERTYKEY RelaunchDisplayName = new PROPERTYKEY("9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3", 4);
+        private static readonly PROPERTYKEY RelaunchIcon = new PROPERTYKEY("9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3", 3);
+
         [DllImport("user32.dll")]
         public static extern bool ShowWindowAsync(IntPtr hWnd, int nCmdShow);
 
         [DllImport("user32.dll")]
         public static extern bool SetForegroundWindow(IntPtr hWnd);
+
+        [DllImport("shell32.dll")]
+        private static extern int SHGetPropertyStoreForWindow(IntPtr hwnd, ref Guid riid, out IPropertyStore propertyStore);
+
+        private static void SetStringProperty(IPropertyStore store, PROPERTYKEY key, string value) {
+            PROPVARIANT variant = PROPVARIANT.FromString(value);
+            try {
+                Marshal.ThrowExceptionForHR(store.SetValue(ref key, ref variant));
+            } finally {
+                variant.Clear();
+            }
+        }
+
+        public static bool SetWindowAppUserModelIdentity(IntPtr hwnd, string appId, string displayName, string iconResource) {
+            if (hwnd == IntPtr.Zero || String.IsNullOrWhiteSpace(appId)) {
+                return false;
+            }
+
+            Guid iid = new Guid("886D8EEB-8CF2-4446-8D02-CDBA1DBDCF99");
+            IPropertyStore store = null;
+            int hr = SHGetPropertyStoreForWindow(hwnd, ref iid, out store);
+            if (hr != 0 || store == null) {
+                Marshal.ThrowExceptionForHR(hr);
+                return false;
+            }
+            try {
+                SetStringProperty(store, AppUserModelId, appId);
+                if (!String.IsNullOrWhiteSpace(displayName)) {
+                    SetStringProperty(store, RelaunchDisplayName, displayName);
+                }
+                if (!String.IsNullOrWhiteSpace(iconResource)) {
+                    SetStringProperty(store, RelaunchIcon, iconResource);
+                }
+                Marshal.ThrowExceptionForHR(store.Commit());
+                return true;
+            } finally {
+                Marshal.ReleaseComObject(store);
+            }
+        }
     }
 }
 "@
+    }
+}
+
+function Set-ManagedBrowserWindowAppIdentity {
+    param(
+        [Parameter(Mandatory = $true)]$WindowProcess,
+        [string]$WindowPurpose = "workbench"
+    )
+
+    $handle = [IntPtr]::Zero
+    if ($WindowProcess -and $WindowProcess.MainWindowHandle) {
+        $handle = [IntPtr]$WindowProcess.MainWindowHandle
+    }
+    $isLauncherSurface = ($WindowPurpose -eq "launcher_control_surface")
+    $appId = if ($isLauncherSurface) { "Vibelution.Launcher" } else { "Vibelution.Workbench" }
+    $displayName = if ($isLauncherSurface) { "Vibelution Launcher" } else { "Vibelution Workbench" }
+    $iconResource = if (Test-Path -LiteralPath $launcherIconPath) { "$launcherIconPath,0" } else { "" }
+    $eventFields = @{
+        window_pid = if ($WindowProcess) { [int]$WindowProcess.Id } else { 0 }
+        main_window_handle = $handle.ToInt64()
+        window_purpose = $WindowPurpose
+        app_user_model_id = $appId
+        icon_resource = $iconResource
+    }
+
+    if ($handle -eq [IntPtr]::Zero) {
+        Write-LauncherControlLog `
+            -Event "launcher.browser.window_app_identity.skipped" `
+            -Message "Managed browser window AppUserModel identity was skipped because no main window handle was available." `
+            -Level "warning" `
+            -Fields ($eventFields + @{ reason = "missing_window_handle"; applied = $false })
+        return [pscustomobject]@{
+            Applied = $false
+            AppUserModelId = $appId
+            IconResource = $iconResource
+            Reason = "missing_window_handle"
+        }
+    }
+
+    try {
+        Ensure-WinApi
+        $applied = [VibelutionLauncher.WinApi]::SetWindowAppUserModelIdentity($handle, $appId, $displayName, $iconResource)
+        Write-LauncherControlLog `
+            -Event "launcher.browser.window_app_identity.succeeded" `
+            -Message "Managed browser window AppUserModel identity was applied." `
+            -Fields ($eventFields + @{ applied = [bool]$applied; display_name = $displayName })
+        return [pscustomobject]@{
+            Applied = [bool]$applied
+            AppUserModelId = $appId
+            IconResource = $iconResource
+            Reason = ""
+        }
+    } catch {
+        Write-LauncherControlLog `
+            -Event "launcher.browser.window_app_identity.failed" `
+            -Message "Managed browser window AppUserModel identity could not be applied." `
+            -Level "warning" `
+            -Fields ($eventFields + @{ applied = $false; error = [string]$_.Exception.Message })
+        return [pscustomobject]@{
+            Applied = $false
+            AppUserModelId = $appId
+            IconResource = $iconResource
+            Reason = "apply_failed"
+        }
     }
 }
 
@@ -5729,8 +5882,10 @@ function Start-ManagedBrowser {
         throw "Managed Edge app window did not open successfully."
     }
 
+    $appIdentity = Set-ManagedBrowserWindowAppIdentity -WindowProcess $windowProcess -WindowPurpose $WindowPurpose
+
     if ($script:currentRuntimeSceneId) {
-        Update-RuntimeSceneManifest @{ browser = @{ status = "open"; executable = $BrowserExecutable; launch_pid = $proc.Id; window_pid = $windowProcess.Id; window_mode = $windowMode; configured_window_mode = $configuredWindowMode; window_size = $windowSize; configured_window_size = $configuredWindowSize; window_size_argument = $windowSizeArgument; window_policy = $windowPolicy; fullscreen_forced = $fullscreenForced; profile_dir = $ProfileDir; app_url = $resolvedAppUrl; window_purpose = $WindowPurpose } }
+        Update-RuntimeSceneManifest @{ browser = @{ status = "open"; executable = $BrowserExecutable; launch_pid = $proc.Id; window_pid = $windowProcess.Id; window_mode = $windowMode; configured_window_mode = $configuredWindowMode; window_size = $windowSize; configured_window_size = $configuredWindowSize; window_size_argument = $windowSizeArgument; window_policy = $windowPolicy; fullscreen_forced = $fullscreenForced; profile_dir = $ProfileDir; app_url = $resolvedAppUrl; window_purpose = $WindowPurpose; app_user_model_id = $appIdentity.AppUserModelId; icon_resource = $appIdentity.IconResource; app_identity_applied = [bool]$appIdentity.Applied } }
         Append-RuntimeSceneRawLog -RelativePath (Get-RuntimeSceneRelativePaths).Browser -Message "Managed browser window opened (launch PID=$($proc.Id), window PID=$($windowProcess.Id))."
         Write-RuntimeSceneEvent `
             -Component "browser" `
@@ -5754,6 +5909,9 @@ function Start-ManagedBrowser {
                 window_policy = $windowPolicy
                 fullscreen_forced = $fullscreenForced
                 profile_dir = $ProfileDir
+                app_user_model_id = $appIdentity.AppUserModelId
+                icon_resource = $appIdentity.IconResource
+                app_identity_applied = [bool]$appIdentity.Applied
             }
     }
 
