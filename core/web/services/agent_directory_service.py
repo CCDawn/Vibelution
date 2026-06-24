@@ -4261,7 +4261,18 @@ def agent_avatar_image_url(avatar_image_path: object) -> str:
     filename = agent_avatar_filename(avatar_image_path)
     if not filename:
         return ""
-    return f"/api/agents/avatar-image/{quote(filename)}"
+    version = _agent_avatar_image_version(filename)
+    suffix = f"?v={version}" if version else ""
+    return f"/api/agents/avatar-image/{quote(filename)}{suffix}"
+
+
+def _agent_avatar_image_version(filename: str) -> str:
+    try:
+        path = resolve_agent_avatar_file(filename)
+        stat = path.stat()
+    except (FileNotFoundError, OSError):
+        return ""
+    return f"{stat.st_mtime_ns:x}-{stat.st_size:x}"
 
 
 def list_agent_avatar_options() -> dict[str, Any]:
