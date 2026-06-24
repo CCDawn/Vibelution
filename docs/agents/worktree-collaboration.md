@@ -22,6 +22,37 @@ Use `git fetch origin` only as a read-only observation step unless the user expl
 
 The task slug should describe one goal, for example `fix-ci-timezone-test` or `llm-protocol-routing`.
 
+## Active Dispatch
+
+The current main integration session may actively dispatch work to other Codex sessions or sub-agents only when the user has asked for parallel work, delegation, or coordinator-driven task assignment.
+
+Before dispatching, the main integration session must:
+
+- state the main goal and immediate local critical path;
+- split only independent side tasks or bounded implementation slices;
+- assign a disjoint write scope to every worker;
+- keep hot shared files under one explicitly named owner;
+- decide what the main integration session will continue doing locally while workers run;
+- avoid delegating work that blocks the main integration session's very next action.
+
+Use read-only explorer agents for narrow codebase questions. Use worker agents only for concrete implementation, verification, or repair tasks with clear ownership.
+
+## Dispatch Packet
+
+Every active-dispatch worker prompt should include:
+
+- role: `explorer` or `worker`;
+- objective: one concrete deliverable;
+- ownership: exact modules, files, or responsibility slice;
+- forbidden scope: files or behaviors the worker must not touch;
+- coordination note: other Agents may be editing nearby code, so do not revert or overwrite unknown changes;
+- Git surface: worktree path and branch when using a full task worktree;
+- validation: narrow commands or evidence expected;
+- handoff: required final report fields;
+- memory: project-memory updates must be reported as proposals, not applied directly.
+
+Workers must stop and report if they discover their write scope overlaps a hot file or another active worker's scope.
+
 ## Agent Responsibilities
 
 Inside its own worktree, an Agent should:
@@ -86,6 +117,36 @@ Avoid concurrent edits to shared hot files unless the current main integration s
 - `PROJECT_MEMORY.html`
 
 Project memory is single-writer state. Parallel Agents should write append-only memory proposals or report lane/update payloads; the current memory-sync step applies them after code merges.
+
+## Communication Channels
+
+Use these channels in order of authority:
+
+1. Git branch, commit, diff, and test output.
+2. Structured handoff report.
+3. Project-memory proposal queue for memory updates.
+4. Agent inbox, thread message, or runtime private message for notifications only.
+
+Inbox/thread messages are not authoritative for code state or final decisions. They should not replace commits, diffs, validation evidence, registry state, or runtime logs.
+
+## Handoff Report
+
+Every worker completion report should include:
+
+```text
+Task:
+Worktree:
+Branch:
+Commit:
+Changed files:
+Validation:
+Launcher refresh:
+Project-memory proposal:
+Risks / blockers:
+Next recommended step:
+```
+
+If the worker did not commit, it must explicitly say why and list dirty files.
 
 ## User Involvement
 
