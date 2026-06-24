@@ -11,10 +11,14 @@ import {
   isChildSession,
   sessionUnreadBadgeTitle,
   sessionUnreadCount,
+  sessionIsRunningStatus,
   sessionModelBadgeLabel,
   sessionModelTooltip,
+  sessionRunningBadgeLabel,
+  sessionRunningBadgeTitle,
   sessionAgentMetaLabel,
   sessionListTitle,
+  sessionStatusValue,
   showSessionFunctionLabel,
   showSessionSummaryInline,
 } from "./DirectSessionIndexItem";
@@ -79,11 +83,11 @@ function renderDirectItem(overrides: Partial<Parameters<typeof DirectSessionInde
 }
 
 describe("DirectSessionIndexItem helpers", () => {
-  it("renders current state as a lightweight indicator instead of a visible current-session badge", () => {
+  it("renders current state as a visible compact badge", () => {
     const markup = renderDirectItem();
 
-    expect(markup).toContain("sessionCurrentIndicator");
-    expect(markup).not.toContain("sessionCurrentBadge");
+    expect(markup).toContain("sessionStatusCluster");
+    expect(markup).toContain("sessionCurrentBadge");
     expect(markup).toContain("aria-label=\"currentSession\"");
     expect(markup).toContain("模型：mimo-v2.5");
   });
@@ -96,14 +100,25 @@ describe("DirectSessionIndexItem helpers", () => {
     expect(markup.match(/agentModelTag/g)).toHaveLength(1);
   });
 
-  it("keeps unread counts as compact badges while current state stays textless", () => {
+  it("keeps unread counts as compact badges separate from the current-session badge", () => {
     const markup = renderDirectItem({
       session: makeSession({ agentInboxPendingCount: 2 }),
     });
 
-    expect(markup).toContain("sessionCurrentIndicator");
     expect(markup).toContain("sessionCurrentBadge");
+    expect(markup).toContain("sessionUnreadBadge");
     expect(markup).toContain("未读信息：2 条");
+  });
+
+  it("shows running sessions with a readable running badge", () => {
+    const markup = renderDirectItem({
+      session: makeSession({ currentPhase: "tooling", status: "running" }),
+      statusLabel: () => "工具调用中",
+    });
+
+    expect(markup).toContain("sessionRunningBadge");
+    expect(markup).toContain("运行中");
+    expect(markup).toContain("正在运行：工具调用中");
   });
 
   it("keeps root direct session titles driven by session title before agent display name", () => {
@@ -164,6 +179,15 @@ describe("DirectSessionIndexItem helpers", () => {
     expect(sessionUnreadBadgeTitle(3, "zh")).toBe("未读信息：3 条");
     expect(sessionUnreadBadgeTitle(1, "en")).toBe("1 unread message");
     expect(sessionUnreadBadgeTitle(2, "en")).toBe("2 unread messages");
+  });
+
+  it("normalizes session run state from current phase, status, or child status", () => {
+    expect(sessionIsRunningStatus("tooling")).toBe(true);
+    expect(sessionIsRunningStatus("idle")).toBe(false);
+    expect(sessionRunningBadgeLabel("zh")).toBe("运行中");
+    expect(sessionRunningBadgeTitle("工具调用中", "zh")).toBe("正在运行：工具调用中");
+    expect(sessionStatusValue(makeSession({ currentPhase: "idle", status: "running" }))).toBe("running");
+    expect(sessionStatusValue(makeSession({ childStatus: "thinking", currentPhase: "idle", sessionKind: "child", status: "idle" }))).toBe("thinking");
   });
 
   it("builds the compact direct session item view model for normal sessions", () => {

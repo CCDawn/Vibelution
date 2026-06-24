@@ -4451,7 +4451,7 @@ a.teamTreeChild:focus-visible {
 
 .conversationTitleRow {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto auto;
+  grid-template-columns: minmax(0, 1fr) max-content;
   align-items: center;
   min-width: 0;
   gap: 5px;
@@ -4565,7 +4565,7 @@ a.teamTreeChild:focus-visible {
 
 .agentModelTitleTag {
   flex: 0 1 auto;
-  max-width: 96px;
+  max-width: min(148px, 64%);
   min-height: 17px;
   padding: 0 5px;
   border: 1px solid color-mix(in srgb, var(--accent-cool) 22%, var(--border-soft));
@@ -4574,6 +4574,15 @@ a.teamTreeChild:focus-visible {
   color: color-mix(in srgb, var(--accent-cool) 64%, var(--fg-secondary));
   font-size: 0.6rem;
   font-weight: 700;
+}
+
+.sessionStatusCluster {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .agentModelTag svg {
@@ -4595,13 +4604,16 @@ a.teamTreeChild:focus-visible {
 .sessionCurrentBadge {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
+  min-height: 16px;
   padding: 1px 5px;
-  border: 1px solid color-mix(in srgb, var(--accent-warm) 28%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent-cool) 26%, transparent);
   border-radius: 999px;
-  background: color-mix(in srgb, var(--accent-warm) 12%, transparent);
-  color: var(--accent-warm-2);
+  background: color-mix(in srgb, var(--accent-cool) 10%, transparent);
+  color: color-mix(in srgb, var(--accent-cool) 72%, var(--fg-primary));
   font-size: 0.64rem;
   font-weight: 700;
+  line-height: 1;
   white-space: nowrap;
 }
 
@@ -4611,6 +4623,39 @@ a.teamTreeChild:focus-visible {
   border-radius: 999px;
   background: var(--accent-cool);
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-cool) 18%, transparent);
+}
+
+.sessionRunningBadge,
+.sessionUnreadBadge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 16px;
+  border-radius: 999px;
+  font-size: 0.64rem;
+  font-weight: 720;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.sessionRunningBadge {
+  gap: 3px;
+  padding: 1px 5px;
+  border: 1px solid color-mix(in srgb, var(--state-success) 26%, transparent);
+  background: color-mix(in srgb, var(--state-success) 10%, transparent);
+  color: color-mix(in srgb, var(--state-success) 76%, var(--fg-primary));
+}
+
+.sessionRunningBadge svg {
+  flex: 0 0 auto;
+}
+
+.sessionUnreadBadge {
+  min-width: 16px;
+  padding: 1px 5px;
+  border: 1px solid color-mix(in srgb, var(--accent-warm) 30%, transparent);
+  background: color-mix(in srgb, var(--accent-warm) 12%, transparent);
+  color: var(--accent-warm-2);
 }
 
 .sessionTitleInput {
