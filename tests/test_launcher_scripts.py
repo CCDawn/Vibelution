@@ -97,6 +97,16 @@ def test_python_launcher_workbench_window_applies_vibelution_app_identity():
     assert "browserWindowIconApplied" in source
 
 
+def test_python_launcher_icon_binding_requires_exact_browser_process_window():
+    launcher_source = (PROJECT_ROOT / "scripts" / "vibelution_launcher.py").read_text(encoding="utf-8")
+    desktop_source = DESKTOP_ENTRY_PY.read_text(encoding="utf-8")
+
+    for source in (launcher_source, desktop_source):
+        assert "_visible_windows_for_process(int(browser_pid))" in source
+        assert "_visible_vibelution_windows" not in source
+        assert "or _visible_vibelution_windows()" not in source
+
+
 def test_desktop_entry_launcher_window_applies_vibelution_app_identity():
     source = DESKTOP_ENTRY_PY.read_text(encoding="utf-8")
 
