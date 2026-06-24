@@ -4,6 +4,7 @@ import { queryKeys } from "../api/queryKeys";
 
 type QueryClientLike = {
   invalidateQueries: (options: { queryKey: QueryKey }) => Promise<unknown> | unknown;
+  removeQueries?: (options: { queryKey: QueryKey; exact?: boolean }) => void;
 };
 
 type ChatWorkspaceCacheOptions = {
@@ -119,6 +120,15 @@ export function createChatWorkspaceCache(queryClient: QueryClientLike) {
         queryKeys.agentModeBindings(),
         queryKeys.sessions(),
         queryKeys.conversations(),
+      ]);
+    },
+    afterChatWorkspaceReset() {
+      queryClient.removeQueries?.({ queryKey: queryKeys.sessions() });
+      return invalidateAll(queryClient, [
+        queryKeys.sessions(),
+        queryKeys.conversations(),
+        queryKeys.chatRooms(),
+        queryKeys.runtimeSummary(),
       ]);
     },
     afterAgentChatRoomsChanged() {

@@ -49,4 +49,29 @@ describe("chatWorkbenchStore", () => {
       activeTab: "core/web/services/session_service.py",
     });
   });
+
+  it("clears all session workspaces after destructive reset", () => {
+    const store = useChatWorkbenchStore.getState();
+
+    store.setActiveSession("session-live");
+    store.openPreviewTab("session-live", "config/settings.py");
+    store.openPreviewTab("session-next", "core/web/services/session_service.py");
+
+    useChatWorkbenchStore.getState().resetSessions();
+
+    expect(useChatWorkbenchStore.getState().activeSessionId).toBeNull();
+    expect(useChatWorkbenchStore.getState().sessionWorkspaces).toEqual({});
+  });
+
+  it("can switch directly to a replacement session after reset", () => {
+    const store = useChatWorkbenchStore.getState();
+
+    store.setActiveSession("session-old");
+    store.openPreviewTab("session-old", "config/settings.py");
+
+    useChatWorkbenchStore.getState().resetSessions("session-replacement");
+
+    expect(useChatWorkbenchStore.getState().activeSessionId).toBe("session-replacement");
+    expect(useChatWorkbenchStore.getState().sessionWorkspaces).toEqual({});
+  });
 });

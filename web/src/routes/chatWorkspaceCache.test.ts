@@ -5,9 +5,10 @@ import { createChatWorkspaceCache } from "./chatWorkspaceCache";
 
 function makeCache() {
   const invalidateQueries = vi.fn();
-  const cache = createChatWorkspaceCache({ invalidateQueries });
+  const removeQueries = vi.fn();
+  const cache = createChatWorkspaceCache({ invalidateQueries, removeQueries });
   const queryKeysFromCalls = () => invalidateQueries.mock.calls.map(([options]) => options.queryKey);
-  return { cache, invalidateQueries, queryKeysFromCalls };
+  return { cache, invalidateQueries, removeQueries, queryKeysFromCalls };
 }
 
 describe("createChatWorkspaceCache", () => {
@@ -100,6 +101,20 @@ describe("createChatWorkspaceCache", () => {
       queryKeys.conversations(),
       queryKeys.agentConfigWorkspace(),
       queryKeys.projectAgentBus(),
+    ]);
+  });
+
+  it("removes stale session detail caches after destructive chat reset", async () => {
+    const { cache, removeQueries, queryKeysFromCalls } = makeCache();
+
+    await cache.afterChatWorkspaceReset();
+
+    expect(removeQueries).toHaveBeenCalledWith({ queryKey: queryKeys.sessions() });
+    expect(queryKeysFromCalls()).toEqual([
+      queryKeys.sessions(),
+      queryKeys.conversations(),
+      queryKeys.chatRooms(),
+      queryKeys.runtimeSummary(),
     ]);
   });
 });

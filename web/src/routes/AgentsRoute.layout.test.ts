@@ -855,6 +855,16 @@ describe("AgentsRoute layout contract", () => {
     expect(styles.resetOptionField).toBeTruthy();
   });
 
+  it("reconciles stale direct-session caches after resetting an Agent session", () => {
+    expect(routeSource).toContain("type AgentResetSummary");
+    expect(routeSource).toContain("function reconcileResetDirectSession");
+    expect(routeSource).toContain("previousDirectSessionId");
+    expect(routeSource).toContain("replacementDirectSessionId");
+    expect(routeSource).toContain("reconcileResetDirectSession(result.resetSummary)");
+    expect(routeSource).toContain("queryClient.removeQueries({ queryKey: queryKeys.session(previousDirectSessionId), exact: true })");
+    expect(routeSource).toContain("chatWorkspaceCache.afterChatWorkspaceReset()");
+  });
+
   it("keeps per-Agent avatar, governance, and inbox actions scoped to their target object", () => {
     expect(routeSource).toContain("selectedAgentAvatarUpdatePending");
     expect(routeSource).toContain("selectedAgentAvatarUploadPending");

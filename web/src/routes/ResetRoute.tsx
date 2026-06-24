@@ -21,6 +21,8 @@ import {
   ResetSummary,
 } from "../api/types";
 import { useShellI18n } from "../i18n/useShellI18n";
+import { useChatWorkbenchStore } from "../store/chatWorkbenchStore";
+import { createChatWorkspaceCache } from "./chatWorkspaceCache";
 import styles from "./ResetRoute.module.css";
 
 type Notice = {
@@ -136,6 +138,16 @@ function previewSignature(itemIds: string[]) {
   return [...itemIds].sort().join("|");
 }
 
+const CHAT_WORKSPACE_RESET_ITEM_IDS = new Set(["chat_history", "workspace_sessions", "chat_rooms"]);
+
+function resetResultAffectsChatWorkspace(payload: ResetExecuteResponse) {
+  return payload.items.some((item) =>
+    CHAT_WORKSPACE_RESET_ITEM_IDS.has(item.id)
+    && item.failed.length === 0
+    && (item.deleted.length > 0 || payload.selectedItemIds.includes(item.id)),
+  );
+}
+
 function ResetLedgerEmptyState({
   label,
   detail,
@@ -167,6 +179,7 @@ export function ResetRoute() {
   const { lang } = useShellI18n();
   const copy = COPY[lang];
   const queryClient = useQueryClient();
+  const chatWorkspaceCache = useMemo(() => createChatWorkspaceCache(queryClient), [queryClient]);
   const location = useLocation();
   const resetQuery = useQuery({
     queryKey: queryKeys.resetSummary(),
@@ -246,6 +259,10 @@ export function ResetRoute() {
       setNotice({ tone: "success", message: payload.summary });
       setPreviewedSignature("");
       queryClient.invalidateQueries({ queryKey: queryKeys.resetSummary() });
+      if (resetResultAffectsChatWorkspace(payload)) {
+        useChatWorkbenchStore.getState().resetSessions();
+        void chatWorkspaceCache.afterChatWorkspaceReset();
+      }
     },
     onError: (error) => {
       setNotice({ tone: "error", message: describeError(error, copy.executeFailed) });
