@@ -143,6 +143,43 @@ def test_mode_binding_repair_removes_ineligible_chat_references(tmp_path, monkey
     assert any(item["agentId"] == research_reader["agentId"] for item in payload["repairWarnings"])
 
 
+def test_mode_binding_seeds_only_enterable_chat_agents(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    no_session = agent_directory_service.create_agent_instance(
+        display_name="无直连会话 Agent",
+        primary_mode="chat",
+    )
+    pending = agent_directory_service.create_agent_instance(
+        display_name="待激活会话 Agent",
+        primary_mode="chat",
+        direct_session_id="session-pending",
+        metadata={
+            "legacySessionWorkspacePath": "workspace/sessions/session-pending",
+            "directSessionVisibility": agent_directory_service.SESSION_AGENT_VISIBILITY_PENDING,
+        },
+    )
+    active = agent_directory_service.create_agent_instance(
+        display_name="可进入会话 Agent",
+        primary_mode="chat",
+        direct_session_id="session-active",
+        metadata={"directSessionVisibility": agent_directory_service.SESSION_AGENT_VISIBILITY_ACTIVE},
+    )
+    api_created = agent_directory_service.create_agent_instance(
+        display_name="显式创建 Agent",
+        primary_mode="chat",
+        direct_session_id="session-api-agent",
+        created_by="api_agents",
+    )
+
+    payload = agent_mode_binding_service.get_mode_bindings_payload()
+    chat = payload["modes"]["chat"]
+
+    assert set(chat["availableAgentIds"]) == {active["agentId"], api_created["agentId"]}
+    assert chat["defaultAgentId"] in {active["agentId"], api_created["agentId"]}
+    assert no_session["agentId"] not in chat["availableAgentIds"]
+    assert pending["agentId"] not in chat["availableAgentIds"]
+
+
 def test_mode_binding_repair_removes_pending_empty_direct_session_agents(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     agent = agent_directory_service.create_agent_instance(
