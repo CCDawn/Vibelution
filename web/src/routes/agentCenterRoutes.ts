@@ -1,3 +1,5 @@
+import { safeReturnToPath } from "../app/navigationReturn";
+
 export type AgentCenterPane = "overview" | "config" | "activity";
 
 export type AgentCenterReturnLabel =
@@ -45,11 +47,7 @@ type AgentCenterMemoryRouteOptions = {
 };
 
 export function safeAgentCenterReturnToPath(value: string | null | undefined) {
-  const normalized = String(value || "").trim();
-  if (!normalized || !normalized.startsWith("/") || normalized.startsWith("//")) {
-    return "";
-  }
-  return normalized;
+  return safeReturnToPath(value);
 }
 
 export function agentCenterConfigRoute({

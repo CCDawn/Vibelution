@@ -51,8 +51,8 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("safeAgentCenterReturnTo(searchParams.get(\"returnTo\"))");
     expect(routeSource).toContain("agentCenterReturnLabel(searchParams.get(\"returnLabel\"), lang)");
     expect(routeSource).toContain('normalized === "config" || normalized === "activity" || normalized === "overview"');
-    expect(routeSource).toContain('normalized.startsWith("/")');
-    expect(routeSource).toContain('normalized.startsWith("//")');
+    expect(routeSource).toContain("safeReturnToPath");
+    expect(routeSource).toContain("return safeReturnToPath(value)");
     expect(routeSource).toContain("const routeTargetKey = requestedAgentId ? `${requestedAgentId}:${requestedPane}` : \"\"");
     expect(routeSource).toContain("workspace.agents.find((agent) => agent.agentId === requestedAgentId)");
     expect(routeSource).toContain("setSelectedAgentId(targetAgent.agentId)");

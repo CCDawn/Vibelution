@@ -32,6 +32,7 @@ describe("agentCenterRoutes", () => {
 
   it("drops unsafe return targets", () => {
     expect(safeAgentCenterReturnToPath("//example.com")).toBe("");
+    expect(safeAgentCenterReturnToPath("/\\example.com")).toBe("");
     expect(agentCenterToolsRoute({ agentId: "agent-1", returnTo: "https://example.com" })).toBe("/agents/tools?agent=agent-1");
   });
 });
