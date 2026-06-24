@@ -1023,6 +1023,10 @@ function referenceRoute(reference: AgentConfigReference) {
   return reference.route || "";
 }
 
+function compactProjectionRoute(item: { sourceRef?: { canonicalEditRoute?: string }; projectionEdit?: { canonicalEditRoute?: string } }, fallback: string) {
+  return String(item.projectionEdit?.canonicalEditRoute || item.sourceRef?.canonicalEditRoute || fallback || "").trim();
+}
+
 function uniqueModes(agent: AgentConfigWorkspaceAgent) {
   return Array.from(
     new Set(
@@ -7527,7 +7531,7 @@ export function AgentsRoute() {
                           <button
                             type="button"
                             className={styles.referenceRouteButton}
-                            onClick={() => navigate(`/chat?room=${encodeURIComponent(room.roomId)}`)}
+                            onClick={() => navigate(compactProjectionRoute(room, `/chat?room=${encodeURIComponent(room.roomId)}`))}
                           >
                             <ExternalLink size={12} />
                             {lang === "zh" ? "打开群聊" : "Open room"}

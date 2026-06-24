@@ -3498,6 +3498,9 @@ export type AgentConfigWorkspace = {
     participantCount: number;
     roundCount: number;
     updatedAt: string;
+    sourceRef?: SourceAuthorityRef;
+    projectionEdit?: ProjectionEditContract;
+    projectionCanWrite?: boolean;
   }>;
   teams?: Array<{
     teamId: string;
@@ -3507,6 +3510,9 @@ export type AgentConfigWorkspace = {
     agentIds: string[];
     memberCount: number;
     updatedAt: string;
+    sourceRef?: SourceAuthorityRef;
+    projectionEdit?: ProjectionEditContract;
+    projectionCanWrite?: boolean;
   }>;
   references: Record<string, AgentConfigReference[]>;
   health: {

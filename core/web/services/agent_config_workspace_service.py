@@ -1453,43 +1453,59 @@ def _extend_chat_room_participant_model_issues(
 
 
 def _compact_chat_rooms(rooms: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    return [
-        {
-            "roomId": str(room.get("roomId") or "").strip(),
-            "title": str(room.get("title") or "").strip(),
-            "mode": str(room.get("mode") or "").strip(),
-            "status": str(room.get("status") or "").strip(),
-            "activeRoundId": str(room.get("activeRoundId") or "").strip(),
-            "agentIds": [
-                str(participant.get("agentId") or "").strip()
-                for participant in list(room.get("participants") or [])
-                if isinstance(participant, dict) and str(participant.get("agentId") or "").strip()
-            ],
-            "participantCount": len(list(room.get("participants") or [])),
-            "roundCount": len(list(room.get("rounds") or [])),
-            "updatedAt": str(room.get("updatedAt") or "").strip(),
-        }
-        for room in rooms
-    ]
+    compact_rooms: list[dict[str, Any]] = []
+    for room in rooms:
+        room_id = str(room.get("roomId") or "").strip()
+        source_ref = _source_authority_ref("chat_room", room_id)
+        projection_edit = _projection_edit_contract("chat_room", room_id)
+        compact_rooms.append(
+            {
+                "roomId": room_id,
+                "title": str(room.get("title") or "").strip(),
+                "mode": str(room.get("mode") or "").strip(),
+                "status": str(room.get("status") or "").strip(),
+                "activeRoundId": str(room.get("activeRoundId") or "").strip(),
+                "agentIds": [
+                    str(participant.get("agentId") or "").strip()
+                    for participant in list(room.get("participants") or [])
+                    if isinstance(participant, dict) and str(participant.get("agentId") or "").strip()
+                ],
+                "participantCount": len(list(room.get("participants") or [])),
+                "roundCount": len(list(room.get("rounds") or [])),
+                "updatedAt": str(room.get("updatedAt") or "").strip(),
+                "sourceRef": source_ref,
+                "projectionEdit": projection_edit,
+                "projectionCanWrite": False,
+            }
+        )
+    return compact_rooms
 
 
 def _compact_teams(teams: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    return [
-        {
-            "teamId": str(team.get("teamId") or "").strip(),
-            "name": str(team.get("name") or "").strip(),
-            "purpose": str(team.get("purpose") or "").strip(),
-            "status": str(team.get("status") or "").strip(),
-            "agentIds": [
-                str(member.get("agentId") or "").strip()
-                for member in list(team.get("members") or [])
-                if isinstance(member, dict) and str(member.get("agentId") or "").strip()
-            ],
-            "memberCount": len(list(team.get("members") or [])),
-            "updatedAt": str(team.get("updatedAt") or "").strip(),
-        }
-        for team in teams
-    ]
+    compact_teams: list[dict[str, Any]] = []
+    for team in teams:
+        team_id = str(team.get("teamId") or "").strip()
+        source_ref = _source_authority_ref("team", team_id)
+        projection_edit = _projection_edit_contract("team", team_id)
+        compact_teams.append(
+            {
+                "teamId": team_id,
+                "name": str(team.get("name") or "").strip(),
+                "purpose": str(team.get("purpose") or "").strip(),
+                "status": str(team.get("status") or "").strip(),
+                "agentIds": [
+                    str(member.get("agentId") or "").strip()
+                    for member in list(team.get("members") or [])
+                    if isinstance(member, dict) and str(member.get("agentId") or "").strip()
+                ],
+                "memberCount": len(list(team.get("members") or [])),
+                "updatedAt": str(team.get("updatedAt") or "").strip(),
+                "sourceRef": source_ref,
+                "projectionEdit": projection_edit,
+                "projectionCanWrite": False,
+            }
+        )
+    return compact_teams
 
 
 def _safe_prompt_workspace() -> dict[str, Any]:
