@@ -13,6 +13,7 @@ from core.web.services.team_service import (
     archive_team,
     create_team,
     ensure_challenge_cup_research_team_agents,
+    ensure_knowledge_expansion_team_agents,
     get_team,
     get_team_canvas,
     list_ai_search_source_scope_runs,
@@ -211,5 +212,15 @@ def team_challenge_cup_agents_repair(team_id: str) -> dict:
         raise HTTPException(status_code=404, detail="Challenge Cup research Team not found.")
     try:
         return ensure_challenge_cup_research_team_agents(purge_stale=True)
+    except TeamServiceError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.post("/teams/{team_id}/knowledge-expansion-agents/repair")
+def team_knowledge_expansion_agents_repair(team_id: str) -> dict:
+    if team_id != "knowledge-expansion-team":
+        raise HTTPException(status_code=404, detail="Knowledge expansion Team not found.")
+    try:
+        return ensure_knowledge_expansion_team_agents(purge_stale=True)
     except TeamServiceError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc

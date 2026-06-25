@@ -31,6 +31,8 @@ CANVAS_KIND = "team_organization_canvas"
 RESEARCH_TEAM_DISPLAY_NAME = "挑战杯ai科研团队"
 AI_SEARCH_TEAM_ID = "ai-search-team"
 AI_SEARCH_TEAM_DISPLAY_NAME = "AI 搜索范围团队"
+KNOWLEDGE_EXPANSION_TEAM_ID = "knowledge-expansion-team"
+KNOWLEDGE_EXPANSION_TEAM_DISPLAY_NAME = "知识库内容扩充团队"
 DEFAULT_TEAM_STATUS = "active"
 TEAM_STATUSES = {"active", "archived"}
 NODE_TYPES = {"role", "agent", "group", "user", "external"}
@@ -86,6 +88,7 @@ EVOLUTION_SYSTEM_TEAM_SPECS = (
 TEAM_KIND_DEFAULTS = {
     "custom": {"teamCategory": "自定义团队", "teamSource": "manual", "chatRoomPurpose": "discussion"},
     "research": {"teamCategory": "科研组织团队", "teamSource": "research_organization", "chatRoomPurpose": "research_coordination"},
+    "knowledge_expansion": {"teamCategory": "知识库扩充团队", "teamSource": "knowledge_expansion", "chatRoomPurpose": "knowledge_expansion"},
     "ai_search": {"teamCategory": "AI 搜索系统团队", "teamSource": "ai_search", "chatRoomPurpose": "ai_search"},
     "self_evolution": {"teamCategory": "自进化系统团队", "teamSource": "self_evolution", "chatRoomPurpose": "self_evolution"},
     "supervised_evolution": {"teamCategory": "监督进化系统团队", "teamSource": "supervised_evolution", "chatRoomPurpose": "supervised_evolution"},
@@ -94,6 +97,7 @@ TEAM_KIND_DEFAULTS = {
 TEAM_SOURCE_TO_KIND = {
     "manual": "custom",
     "research_organization": "research",
+    "knowledge_expansion": "knowledge_expansion",
     "ai_search": "ai_search",
     "self_evolution": "self_evolution",
     "supervised_evolution": "supervised_evolution",
@@ -101,6 +105,7 @@ TEAM_SOURCE_TO_KIND = {
 }
 TEAM_ID_TO_KIND = {
     "research-team": "research",
+    KNOWLEDGE_EXPANSION_TEAM_ID: "knowledge_expansion",
     AI_SEARCH_TEAM_ID: "ai_search",
     "self-evolution-team": "self_evolution",
     "supervised-evolution-team": "supervised_evolution",
@@ -197,6 +202,44 @@ CHALLENGE_CUP_RESEARCH_TEAM_ROLES: tuple[dict[str, Any], ...] = (
         "label": "知识库管理员",
         "purpose": "知识库管理员入库审核",
         "responsibilities": ["审查入库门槛", "接收入库审核请求", "防止未审资料进入正式知识"],
+    },
+)
+KNOWLEDGE_EXPANSION_TEAM_AGENT_CREATED_BY = "knowledge_expansion_team"
+KNOWLEDGE_EXPANSION_TEAM_ROLES: tuple[dict[str, Any], ...] = (
+    {
+        "role": "source_intake",
+        "roleKey": "knowledge_expansion_source_intake",
+        "label": "资料发现与导入",
+        "purpose": "本地资料导入与网络资料发现",
+        "responsibilities": ["扫描本地知识资料", "搜索公开资料线索", "把来源写回受控资料批次"],
+    },
+    {
+        "role": "content_extraction",
+        "roleKey": "knowledge_expansion_content_extraction",
+        "label": "资料提炼",
+        "purpose": "摘要、证据片段与候选资料提炼",
+        "responsibilities": ["提炼可入库摘要", "标注证据引用", "把结构化结果写回团队批次"],
+    },
+    {
+        "role": "source_quality",
+        "roleKey": "knowledge_expansion_source_quality",
+        "label": "资料质检",
+        "purpose": "可信度、完整性与入库风险审查",
+        "responsibilities": ["判断资料是否通过", "标注风险和缺口", "退回低质量来源"],
+    },
+    {
+        "role": "candidate_graph",
+        "roleKey": "knowledge_expansion_candidate_graph",
+        "label": "候选关系生成",
+        "purpose": "候选知识关系预览",
+        "responsibilities": ["生成候选关系", "检查断链", "保持正式图谱写入边界"],
+    },
+    {
+        "role": "knowledge_steward",
+        "roleKey": "knowledge_steward",
+        "label": "知识库管理员",
+        "purpose": "入库审核与正式 Team Knowledge 写入",
+        "responsibilities": ["复核高置信资料", "执行正式知识库入库", "拒绝低置信或缺证据资料"],
     },
 )
 TEMPLATE_MEMBER_PREFIX_TO_TEMPLATE_ID = {
@@ -746,6 +789,172 @@ def ensure_challenge_cup_research_team_agents(*, purge_stale: bool = True) -> di
     return result
 
 
+def knowledge_expansion_team_agents_need_repair() -> bool:
+    """Return whether the knowledge-expansion Team has stale Agent bindings."""
+
+    with _TEAM_LOCK:
+        state = _load_index()
+        team = _find_team(state, KNOWLEDGE_EXPANSION_TEAM_ID)
+        if not team:
+            return True
+        agent_refs = _agent_reference_maps()
+        active_agents = agent_refs.get("active_by_id") or {}
+        expected_roles = {
+            str(role.get("role") or "").strip()
+            for role in KNOWLEDGE_EXPANSION_TEAM_ROLES
+            if str(role.get("role") or "").strip()
+        }
+        member_agent_ids_by_role: dict[str, str] = {}
+        for member in list(team.get("members") or []):
+            if not isinstance(member, dict):
+                continue
+            role = str(member.get("role") or "").strip()
+            agent_id = str(member.get("agentId") or "").strip()
+            if agent_id and agent_id not in active_agents:
+                return True
+            if role in expected_roles:
+                if not agent_id:
+                    return True
+                agent = active_agents.get(agent_id)
+                if not agent:
+                    return True
+                metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
+                if (
+                    str(metadata.get("knowledgeExpansionTeamId") or "").strip() != KNOWLEDGE_EXPANSION_TEAM_ID
+                    or str(metadata.get("knowledgeExpansionTeamRole") or "").strip() != role
+                    or not _knowledge_expansion_team_agent_direct_session_available(agent)
+                ):
+                    return True
+                member_agent_ids_by_role[role] = agent_id
+        if set(member_agent_ids_by_role) != expected_roles:
+            return True
+        canvas_path = _team_canvas_path(KNOWLEDGE_EXPANSION_TEAM_ID)
+        if not canvas_path.exists():
+            return True
+        canvas = _read_json(canvas_path)
+        canvas_agent_ids_by_role: dict[str, str] = {}
+        for node in list(canvas.get("nodes") or []):
+            if not isinstance(node, dict):
+                continue
+            role = str(node.get("role") or "").strip()
+            agent_id = str(node.get("agentId") or "").strip()
+            if agent_id and agent_id not in active_agents:
+                return True
+            if role in expected_roles:
+                if not agent_id or member_agent_ids_by_role.get(role) != agent_id:
+                    return True
+                canvas_agent_ids_by_role[role] = agent_id
+        if set(canvas_agent_ids_by_role) != expected_roles:
+            return True
+    return False
+
+
+def _knowledge_expansion_team_agent_direct_session_available(agent: dict[str, Any]) -> bool:
+    try:
+        from . import session_service
+    except Exception:
+        return bool(str(agent.get("directSessionId") or "").strip())
+    previous_root = session_service.PROJECT_ROOT
+    session_service.PROJECT_ROOT = Path(PROJECT_ROOT).resolve()
+    try:
+        return _agent_direct_session_available(agent, session_service=session_service)
+    finally:
+        session_service.PROJECT_ROOT = previous_root
+
+
+def ensure_knowledge_expansion_team_agents(*, purge_stale: bool = True) -> dict[str, Any]:
+    """Ensure the dedicated knowledge-expansion Team and role Agents exist."""
+
+    ensured_agents = _ensure_knowledge_expansion_team_role_agents()
+    members = _knowledge_expansion_team_members_from_agents(ensured_agents)
+    now = utc_now_iso()
+    agent_refs = _merged_agent_reference_maps(_load_lightweight_agent_references(), ensured_agents)
+    with _TEAM_LOCK:
+        state = _load_index()
+        changed = _repair_index_shape(state)
+        for existing_team in list(state.get("teams") or []):
+            if not isinstance(existing_team, dict):
+                continue
+            if str(existing_team.get("teamId") or "").strip() == KNOWLEDGE_EXPANSION_TEAM_ID:
+                continue
+            changed = _repair_team(existing_team, agent_refs=agent_refs) or changed
+        team = _find_team(state, KNOWLEDGE_EXPANSION_TEAM_ID)
+        created = team is None
+        if team is None:
+            team = {
+                "teamId": KNOWLEDGE_EXPANSION_TEAM_ID,
+                "name": KNOWLEDGE_EXPANSION_TEAM_DISPLAY_NAME,
+                "description": "用于把本地和网络资料提炼为团队正式知识的系统团队。",
+                "purpose": "组织资料发现、本地导入、资料提炼、质检、候选关系和知识库管理员入库。",
+                "status": DEFAULT_TEAM_STATUS,
+                "members": members,
+                "linkedChatRoomId": "",
+                "canvasPath": _relative_path(_team_canvas_path(KNOWLEDGE_EXPANSION_TEAM_ID)),
+                "createdAt": now,
+                "updatedAt": now,
+            }
+            _apply_team_contract(team, team_kind="knowledge_expansion", team_source="knowledge_expansion")
+            state.setdefault("teams", []).append(team)
+            changed = True
+        else:
+            if team.get("name") != KNOWLEDGE_EXPANSION_TEAM_DISPLAY_NAME:
+                team["name"] = KNOWLEDGE_EXPANSION_TEAM_DISPLAY_NAME
+                changed = True
+            if str(team.get("description") or "").strip() != "用于把本地和网络资料提炼为团队正式知识的系统团队。":
+                team["description"] = "用于把本地和网络资料提炼为团队正式知识的系统团队。"
+                changed = True
+            expected_purpose = "组织资料发现、本地导入、资料提炼、质检、候选关系和知识库管理员入库。"
+            if str(team.get("purpose") or "").strip() != expected_purpose:
+                team["purpose"] = expected_purpose
+                changed = True
+            if team.get("members") != members:
+                team["members"] = members
+                changed = True
+            team["status"] = DEFAULT_TEAM_STATUS
+            team["canvasPath"] = _relative_path(_team_canvas_path(KNOWLEDGE_EXPANSION_TEAM_ID))
+            _apply_team_contract(team, team_kind="knowledge_expansion", team_source="knowledge_expansion")
+        if changed:
+            team["updatedAt"] = now
+            state["updatedAt"] = now
+            _save_index(state)
+        canvas = _default_canvas_for_team(team)
+        _write_json(_team_canvas_path(KNOWLEDGE_EXPANSION_TEAM_ID), canvas)
+        _ensure_team_chat_room_link(team, agent_refs=agent_refs)
+        team["updatedAt"] = now
+        state["updatedAt"] = now
+        _save_index(state)
+    result = {
+        "schemaVersion": SCHEMA_VERSION,
+        "teamId": KNOWLEDGE_EXPANSION_TEAM_ID,
+        "created": created,
+        "memberCount": len(members),
+        "agentCount": len(ensured_agents),
+        "directSessionCount": sum(1 for agent in ensured_agents if str(agent.get("directSessionId") or "").strip()),
+        "purgedAgentIds": [],
+        "purgeResults": [],
+        "roles": [
+            {
+                "role": str(role.get("role") or ""),
+                "roleKey": str(role.get("roleKey") or ""),
+                "label": str(role.get("label") or ""),
+            }
+            for role in KNOWLEDGE_EXPANSION_TEAM_ROLES
+        ],
+        "team": get_team(KNOWLEDGE_EXPANSION_TEAM_ID),
+    }
+    _record_team_event(
+        "team.knowledge_expansion_agents_repaired",
+        result["team"],
+        fields={
+            "created": created,
+            "memberCount": result["memberCount"],
+            "agentCount": result["agentCount"],
+            "directSessionCount": result["directSessionCount"],
+        },
+    )
+    return result
+
+
 def ensure_evolution_system_teams() -> dict[str, Any]:
     """Ensure self-evolution and supervised-evolution roles are visible as Teams."""
 
@@ -890,6 +1099,8 @@ def _system_team_bootstrap_required_steps() -> list[str]:
         required_steps.append("ai_search_system_team")
     if challenge_cup_research_team_agents_need_repair():
         required_steps.append("challenge_cup_research_team_agents")
+    if knowledge_expansion_team_agents_need_repair():
+        required_steps.append("knowledge_expansion_team_agents")
     return required_steps
 
 
@@ -922,6 +1133,8 @@ def _run_system_team_bootstrap(request_id: str, required_steps: list[str], reaso
             ensure_ai_search_system_team()
         if "challenge_cup_research_team_agents" in required_steps:
             ensure_challenge_cup_research_team_agents(purge_stale=True)
+        if "knowledge_expansion_team_agents" in required_steps:
+            ensure_knowledge_expansion_team_agents(purge_stale=True)
         remaining_steps = _system_team_bootstrap_required_steps()
         elapsed_ms = _elapsed_ms(started_at)
         status = "ready" if not remaining_steps else "needs_retry"
@@ -2010,6 +2223,99 @@ def _ensure_challenge_cup_research_team_role_agent(role: dict[str, Any], *, sess
     return existing
 
 
+def _ensure_knowledge_expansion_team_role_agents() -> list[dict[str, Any]]:
+    project_root = Path(PROJECT_ROOT).resolve()
+    ensured: list[dict[str, Any]] = []
+    try:
+        from . import session_service
+
+        previous_root = session_service.PROJECT_ROOT
+        session_service.PROJECT_ROOT = project_root
+        try:
+            for role in KNOWLEDGE_EXPANSION_TEAM_ROLES:
+                agent = _ensure_knowledge_expansion_team_role_agent(role, session_service=session_service)
+                if agent:
+                    ensured.append(agent)
+        finally:
+            session_service.PROJECT_ROOT = previous_root
+    except Exception as exc:
+        _record_system_team_sync_failed("knowledge_expansion_team", exc)
+        raise
+    return ensured
+
+
+def _ensure_knowledge_expansion_team_role_agent(role: dict[str, Any], *, session_service: Any) -> dict[str, Any] | None:
+    role_name = str(role.get("role") or "").strip()
+    role_key = str(role.get("roleKey") or role_name).strip()
+    label = str(role.get("label") or role_name).strip() or role_name
+    if not role_name or not role_key:
+        return None
+
+    if role_key == agent_directory_service.KNOWLEDGE_STEWARD_ROLE_KEY:
+        agent_directory_service.repair_agent_directory()
+        existing = agent_directory_service.get_agent(agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID, include_archived=False)
+    else:
+        existing = _find_knowledge_expansion_team_agent(role_name)
+
+    if existing and not _agent_direct_session_available(existing, session_service=session_service):
+        session_service.ensure_agent_direct_session(
+            agent_id=str(existing.get("agentId") or ""),
+            title=label,
+            created_by=KNOWLEDGE_EXPANSION_TEAM_AGENT_CREATED_BY,
+        )
+        existing = agent_directory_service.get_agent(str(existing.get("agentId") or ""), include_archived=False)
+
+    if not existing or not str(existing.get("directSessionId") or "").strip():
+        session_detail = session_service.create_chat_session(
+            title=label,
+            llm_bindings=session_service.default_session_llm_bindings(),
+            created_by=KNOWLEDGE_EXPANSION_TEAM_AGENT_CREATED_BY,
+        )
+        agent_id = str(session_detail.get("agentId") or "").strip()
+        existing = agent_directory_service.get_agent(agent_id) if agent_id else None
+        if not existing:
+            raise TeamServiceError(f"Knowledge expansion role Agent was not created for role: {role_name}")
+
+    if str(existing.get("status") or "active").strip() == "archived":
+        existing = agent_directory_service.reactivate_agent_instance(
+            str(existing.get("agentId") or ""),
+            reason="knowledge_expansion_team_required",
+            metadata=_knowledge_expansion_team_role_metadata(role),
+        )
+
+    agent_id = str(existing.get("agentId") or "").strip()
+    if not agent_id:
+        return None
+    expected_metadata = _knowledge_expansion_team_role_metadata(role)
+    prompt_template_id = (
+        agent_directory_service.KNOWLEDGE_EXPANSION_ROLE_PROMPT_TEMPLATE_IDS.get(role_key, "")
+        or "prompt-chat-default"
+    )
+    if role_key == agent_directory_service.KNOWLEDGE_STEWARD_ROLE_KEY:
+        tool_policy = agent_directory_service._knowledge_steward_tool_policy()
+    elif role_key in agent_directory_service.RESEARCH_SOURCE_ROLE_KEYS:
+        tool_policy = agent_directory_service.default_research_source_tool_policy(
+            str(existing.get("toolPolicyId") or f"tool-{agent_id}"),
+            role_key=role_key,
+        )
+    else:
+        tool_policy = agent_directory_service.default_research_role_tool_policy(
+            str(existing.get("toolPolicyId") or f"tool-{agent_id}"),
+            role_key=role_key,
+        )
+    update_kwargs: dict[str, Any] = {
+        "display_name": label,
+        "primary_mode": "research",
+        "role_key": role_key,
+        "metadata": expected_metadata,
+        "status": "active",
+        "tool_policy": tool_policy,
+    }
+    if prompt_template_id:
+        update_kwargs["prompt_template_id"] = prompt_template_id
+    return agent_directory_service.update_agent_instance(agent_id, **update_kwargs)
+
+
 def _agent_direct_session_available(agent: dict[str, Any], *, session_service: Any) -> bool:
     session_id = str(agent.get("directSessionId") or "").strip()
     if not session_id:
@@ -2030,6 +2336,21 @@ def _find_challenge_cup_research_team_agent(role_name: str) -> dict[str, Any] | 
             str(metadata.get("challengeCupTeamId") or "").strip() == CHALLENGE_CUP_RESEARCH_TEAM_ID
             and str(metadata.get("challengeCupTeamRole") or "").strip() == normalized_role
             and int(metadata.get("challengeCupTeamManagedVersion") or 0) >= 1
+        ):
+            return agent
+    return None
+
+
+def _find_knowledge_expansion_team_agent(role_name: str) -> dict[str, Any] | None:
+    normalized_role = str(role_name or "").strip()
+    if not normalized_role:
+        return None
+    for agent in agent_directory_service.list_agents(include_archived=True, detail="summary"):
+        metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
+        if (
+            str(metadata.get("knowledgeExpansionTeamId") or "").strip() == KNOWLEDGE_EXPANSION_TEAM_ID
+            and str(metadata.get("knowledgeExpansionTeamRole") or "").strip() == normalized_role
+            and int(metadata.get("knowledgeExpansionTeamManagedVersion") or 0) >= 1
         ):
             return agent
     return None
@@ -2063,6 +2384,34 @@ def _challenge_cup_research_team_role_metadata(role: dict[str, Any]) -> dict[str
     }
 
 
+def _knowledge_expansion_team_role_metadata(role: dict[str, Any]) -> dict[str, Any]:
+    role_name = str(role.get("role") or "").strip()
+    role_key = str(role.get("roleKey") or role_name).strip()
+    label = str(role.get("label") or role_name).strip() or role_name
+    responsibilities = [
+        str(item or "").strip()
+        for item in list(role.get("responsibilities") or [])
+        if str(item or "").strip()
+    ]
+    return {
+        "agentMode": "research",
+        "configSurface": "team",
+        "fixedRole": True,
+        "showInSessionIndex": True,
+        "directSessionVisibility": "active_session",
+        "knowledgeExpansionTeamId": KNOWLEDGE_EXPANSION_TEAM_ID,
+        "knowledgeExpansionTeamManagedVersion": 1,
+        "knowledgeExpansionTeamRole": role_name,
+        "knowledgeExpansionTeamRoleKey": role_key,
+        "researchTeamRole": role_name,
+        "researchTeamRoleKey": role_key,
+        "researchAgentKey": role_key,
+        "functionalDisplayName": label,
+        "managedDomain": "team_knowledge_expansion",
+        "responsibilities": responsibilities,
+    }
+
+
 def _challenge_cup_research_team_members_from_agents(agents: list[dict[str, Any]]) -> list[dict[str, Any]]:
     agents_by_role: dict[str, dict[str, Any]] = {}
     for agent in agents:
@@ -2080,6 +2429,39 @@ def _challenge_cup_research_team_members_from_agents(agents: list[dict[str, Any]
         members.append(
             {
                 "memberId": f"challenge-cup-{index:02d}-{role_name}",
+                "agentId": agent_id,
+                "agentCode": str((agent or {}).get("agentCode") or "").strip(),
+                "agentName": str((agent or {}).get("displayName") or role.get("label") or "").strip(),
+                "role": role_name,
+                "purpose": str(role.get("purpose") or role.get("label") or "").strip(),
+                "responsibilities": [
+                    str(item or "").strip()
+                    for item in list(role.get("responsibilities") or [])
+                    if str(item or "").strip()
+                ],
+                "agentStatus": "active",
+            }
+        )
+    return members
+
+
+def _knowledge_expansion_team_members_from_agents(agents: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    agents_by_role: dict[str, dict[str, Any]] = {}
+    for agent in agents:
+        metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
+        role = str(metadata.get("knowledgeExpansionTeamRole") or "").strip()
+        if role:
+            agents_by_role[role] = agent
+    members: list[dict[str, Any]] = []
+    for index, role in enumerate(KNOWLEDGE_EXPANSION_TEAM_ROLES, start=1):
+        role_name = str(role.get("role") or "").strip()
+        agent = agents_by_role.get(role_name)
+        agent_id = str((agent or {}).get("agentId") or "").strip()
+        if not agent_id:
+            continue
+        members.append(
+            {
+                "memberId": f"knowledge-expansion-{index:02d}-{role_name}",
                 "agentId": agent_id,
                 "agentCode": str((agent or {}).get("agentCode") or "").strip(),
                 "agentName": str((agent or {}).get("displayName") or role.get("label") or "").strip(),

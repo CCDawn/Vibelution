@@ -67,7 +67,8 @@ const RESEARCH_CANVAS_AUTO_LAYOUT_ROW_GAP = 122;
 const TEAM_ORGANIZATION_CANVAS_KIND = "team_organization_canvas";
 const RESEARCH_TEAM_ID = "research-team";
 const AI_SEARCH_TEAM_ID = "ai-search-team";
-const TEAM_PICKER_TEAM_IDS = [AI_SEARCH_TEAM_ID, RESEARCH_TEAM_ID] as const;
+const KNOWLEDGE_EXPANSION_TEAM_ID = "knowledge-expansion-team";
+const TEAM_PICKER_TEAM_IDS = [AI_SEARCH_TEAM_ID, KNOWLEDGE_EXPANSION_TEAM_ID, RESEARCH_TEAM_ID] as const;
 const EVOLUTION_SYSTEM_TEAM_IDS = new Set(["self-evolution-team", "supervised-evolution-team"]);
 const LINKED_ROOM_ACTIVE_REFETCH_MS = 5_000;
 const LINKED_ROOM_IDLE_REFETCH_MS = 30_000;
@@ -88,8 +89,12 @@ const WORKFLOW_GRAPH_MARGIN_Y = 28;
 const SOURCE_COLLECTION_RUN_PREVIEW_LIMIT = 20;
 const SOURCE_COLLECTION_RESULT_PAGE_SIZE = 8;
 const SOURCE_COLLECTION_DEFAULT_ROLES = ["data_discovery", "source_acquisition", "content_extraction", "source_quality"];
-const SOURCE_COLLECTION_TEAM_AGENT_ROLES = [...SOURCE_COLLECTION_DEFAULT_ROLES, "candidate_graph", "knowledge_steward"];
-const SOURCE_COLLECTION_SEARCH_EXECUTION_ROLES = new Set(["data_discovery", "source_acquisition"]);
+const SOURCE_COLLECTION_KNOWLEDGE_EXPANSION_ROLES = ["source_intake", "content_extraction", "source_quality"];
+const SOURCE_COLLECTION_TEAM_AGENT_ROLES = [
+  ...new Set([...SOURCE_COLLECTION_DEFAULT_ROLES, ...SOURCE_COLLECTION_KNOWLEDGE_EXPANSION_ROLES, "candidate_graph", "knowledge_steward"]),
+];
+const SOURCE_COLLECTION_SEARCH_EXECUTION_ROLES = new Set(["data_discovery", "source_acquisition", "source_intake"]);
+const SOURCE_COLLECTION_LOCAL_SCAN_DEFAULT_ROOTS = "workspace/knowledge";
 const SOURCE_COLLECTION_PROMPT_CACHE_POLICY = {
   requirement: "required_for_llm_execution",
 };
@@ -260,7 +265,11 @@ type SourceCollectionDraft = {
   searchLanguages: string;
   sourceTypes: string;
   maxResultsPerQuery: number;
+  collectionMode: SourceCollectionMode;
+  localScanRoots: string;
 };
+
+type SourceCollectionMode = "web_search" | "local_workspace" | "mixed";
 
 type SourceCollectionOutputDraft = {
   assignmentId: string;
@@ -371,7 +380,7 @@ type SourceCollectionStageCardProjection = {
 };
 
 const SOURCE_COLLECTION_STAGE_AGENT_KEYS: Record<SourceCollectionStageModuleId, string[]> = {
-  collection: ["data_discovery", "source_acquisition"],
+  collection: ["source_intake", "data_discovery", "source_acquisition"],
   candidate: ["content_extraction"],
   screening: ["source_quality"],
   graph: ["candidate_graph"],
@@ -760,6 +769,54 @@ const RESEARCH_STAGE_AGENT_ROLES: Record<ResearchStageType, ResearchStageAgentRo
       fallbackAgentId: "agent-knowledge-steward",
     },
   ],
+};
+
+const KNOWLEDGE_EXPANSION_STAGE_AGENT_ROLES: Record<ResearchStageType, ResearchStageAgentRoleDefinition[]> = {
+  knowledge_collection: [
+    {
+      key: "source_intake",
+      roleKeys: ["source_intake"],
+      zh: "资料发现与导入",
+      en: "Source discovery and import",
+      zhFocus: "网络搜集、本地导入与来源登记",
+      enFocus: "Web search, local import, and provenance",
+    },
+    {
+      key: "content_extraction",
+      roleKeys: ["content_extraction"],
+      zh: "内容提炼",
+      en: "Content extraction",
+      zhFocus: "摘要、证据片段与候选资料",
+      enFocus: "Summary, evidence anchors, and candidates",
+    },
+    {
+      key: "source_quality",
+      roleKeys: ["source_quality"],
+      zh: "资料质量评估",
+      en: "Source quality",
+      zhFocus: "筛选、复审与退回",
+      enFocus: "Screen and review",
+    },
+    {
+      key: "candidate_graph",
+      roleKeys: ["candidate_graph", "candidate_graph_preview", "graph_builder"],
+      zh: "候选关系生成",
+      en: "Candidate relationship mapping",
+      zhFocus: "候选知识关系与断链预览",
+      enFocus: "Candidate links and gaps",
+    },
+    {
+      key: "knowledge_steward",
+      roleKeys: ["knowledge_steward", "steward", "ingestion_approval"],
+      zh: "知识库管理员",
+      en: "Knowledge base admin",
+      zhFocus: "正式入库审核与治理门禁",
+      enFocus: "Formal ingestion review and governance gate",
+      fallbackAgentId: "agent-knowledge-steward",
+    },
+  ],
+  experiment: [],
+  iteration: [],
 };
 
 type ResearchStageRound = {
@@ -2414,7 +2471,7 @@ function sourceCollectionAgentIdsFromCanvas(canvas: TeamOrganizationCanvas | nul
 }
 
 function sourceCollectionOwnerAgentIdFromCanvas(canvas: TeamOrganizationCanvas | null) {
-  const preferredRoles = ["research_coordination", "data_intake_coordinator", "ceo", "organization_coordinator"];
+  const preferredRoles = ["research_coordination", "data_intake_coordinator", "source_intake", "knowledge_steward", "ceo", "organization_coordinator"];
   for (const role of preferredRoles) {
     const node = canvas?.nodes.find((item) => normalizeAgentRoleKey(item.role) === role && item.agentId);
     if (node?.agentId) {
@@ -3157,11 +3214,22 @@ function chatRoomStatusLabel(status: string, lang: "zh" | "en") {
   return lang === "zh" ? "就绪" : "Ready";
 }
 
-function isResearchWorkflowTeam(team: Team | null | undefined) {
+function isChallengeCupResearchWorkflowTeam(team: Team | null | undefined) {
   if (!team) {
     return false;
   }
   return team.teamId === RESEARCH_TEAM_ID || team.teamSource === "research_organization" || team.teamKind === "research";
+}
+
+function isKnowledgeExpansionWorkflowTeam(team: Team | null | undefined) {
+  if (!team) {
+    return false;
+  }
+  return team.teamId === KNOWLEDGE_EXPANSION_TEAM_ID || team.teamSource === "knowledge_expansion" || team.teamKind === "knowledge_expansion";
+}
+
+function isResearchWorkflowTeam(team: Team | null | undefined) {
+  return isChallengeCupResearchWorkflowTeam(team) || isKnowledgeExpansionWorkflowTeam(team);
 }
 
 function isEvolutionSystemTeam(team: Team | null | undefined) {
@@ -3186,6 +3254,44 @@ function isAiSearchScopeTeam(team: Team | null | undefined) {
 
 function isSystemManagedTeam(team: Team | null | undefined) {
   return isResearchWorkflowTeam(team) || isEvolutionSystemTeam(team) || isAiSearchScopeTeam(team);
+}
+
+function sourceCollectionWorkflowKindForTeam(team: Team | null | undefined) {
+  return isKnowledgeExpansionWorkflowTeam(team) ? "knowledge_expansion" : "challenge_cup_research";
+}
+
+function sourceCollectionWorkflowPurposeForTeam(team: Team | null | undefined) {
+  return isKnowledgeExpansionWorkflowTeam(team) ? "knowledge_expansion" : "challenge_cup_research";
+}
+
+function sourceCollectionAgentRolesForTeam(team: Team | null | undefined) {
+  return isKnowledgeExpansionWorkflowTeam(team) ? SOURCE_COLLECTION_KNOWLEDGE_EXPANSION_ROLES : SOURCE_COLLECTION_DEFAULT_ROLES;
+}
+
+function sourceCollectionModeForTeam(team: Team | null | undefined, draft: SourceCollectionDraft): SourceCollectionMode {
+  if (!isKnowledgeExpansionWorkflowTeam(team)) {
+    return "web_search";
+  }
+  return draft.collectionMode || "mixed";
+}
+
+function sourceCollectionLocalScanScopeForDraft(mode: SourceCollectionMode, draft: SourceCollectionDraft) {
+  if (mode === "web_search") {
+    return {};
+  }
+  return {
+    roots: splitDraftList(draft.localScanRoots || SOURCE_COLLECTION_LOCAL_SCAN_DEFAULT_ROOTS, 12),
+    maxFiles: 24,
+  };
+}
+
+function sourceCollectionCollectionModeLabel(mode: SourceCollectionMode, lang: "zh" | "en") {
+  const labels: Record<SourceCollectionMode, { zh: string; en: string }> = {
+    web_search: { zh: "网络搜集", en: "Web search" },
+    local_workspace: { zh: "本地导入", en: "Local import" },
+    mixed: { zh: "混合", en: "Mixed" },
+  };
+  return labels[mode][lang];
 }
 
 function systemManagedTeamArchiveReason(team: Team | null | undefined, lang: "zh" | "en") {
@@ -3702,6 +3808,8 @@ export function TeamsRoute({
     searchLanguages: "en\nzh",
     sourceTypes: "paper\nreview\ndataset",
     maxResultsPerQuery: 8,
+    collectionMode: "mixed",
+    localScanRoots: SOURCE_COLLECTION_LOCAL_SCAN_DEFAULT_ROOTS,
   });
   const [aiSearchRunTopic, setAiSearchRunTopic] = useState("AI 最新动态");
   const [selectedSourceCollectionRunId, setSelectedSourceCollectionRunId] = useState("");
@@ -3871,6 +3979,7 @@ export function TeamsRoute({
     enabled: Boolean(effectiveTeamId),
   });
   const selectedTeam = teamDetailQuery.data ?? visibleTeams.find((team) => team.teamId === effectiveTeamId) ?? null;
+  const knowledgeExpansionWorkflowTeamSelected = isKnowledgeExpansionWorkflowTeam(selectedTeam);
   const researchWorkflowTeamSelected = isResearchWorkflowTeam(selectedTeam);
   const aiSearchScopeTeamSelected = isAiSearchScopeTeam(selectedTeam);
   const researchCanvasReadOnly = researchWorkflowTeamSelected && researchWorkspaceView === "canvas";
@@ -4111,6 +4220,7 @@ export function TeamsRoute({
   const sourceCollectionKnowledgeStewardAgentId = sourceCollectionAgentIds.knowledge_steward || "agent-knowledge-steward";
   const researchStageAgentBindingsByStage = useMemo(() => {
     const roleBindings = new Map<string, { agentId: string; label: string; source: "canvas" | "member" | "fallback" }>();
+    const roleDefinitions = knowledgeExpansionWorkflowTeamSelected ? KNOWLEDGE_EXPANSION_STAGE_AGENT_ROLES : RESEARCH_STAGE_AGENT_ROLES;
 
     for (const node of canvas?.nodes ?? []) {
       const role = normalizeAgentRoleKey(node.role);
@@ -4127,8 +4237,8 @@ export function TeamsRoute({
     }
 
     return Object.fromEntries(
-      (Object.keys(RESEARCH_STAGE_AGENT_ROLES) as ResearchStageType[]).map((stageType) => {
-        const bindings = RESEARCH_STAGE_AGENT_ROLES[stageType].map((definition) => {
+      (Object.keys(roleDefinitions) as ResearchStageType[]).map((stageType) => {
+        const bindings = roleDefinitions[stageType].map((definition) => {
           const matched = definition.roleKeys
             .map((role) => roleBindings.get(normalizeAgentRoleKey(role)))
             .find(Boolean);
@@ -4152,7 +4262,7 @@ export function TeamsRoute({
       bindingLabel: string;
       bindingSource: string;
     }>>;
-  }, [activeAgentsById, canvas, selectedTeam?.members]);
+  }, [activeAgentsById, canvas, knowledgeExpansionWorkflowTeamSelected, selectedTeam?.members]);
   const selectedSourceCollectionRun =
     sourceCollectionRuns.find((run) => run.runId === selectedSourceCollectionRunId) ?? sourceCollectionRuns[0] ?? null;
   const selectedSourceCollectionRunEffectiveId = selectedSourceCollectionRun?.runId ?? "";
@@ -4375,6 +4485,20 @@ export function TeamsRoute({
     },
   });
 
+  const repairKnowledgeExpansionTeamAgentsMutation = useMutation({
+    mutationFn: (teamId: string) =>
+      fetchJson<{ team: Team }>(`/api/teams/${encodeURIComponent(teamId)}/knowledge-expansion-agents/repair`, {
+        method: "POST",
+      }),
+    onSuccess: (payload, teamId) => {
+      if (payload.team) {
+        queryClient.setQueryData(queryKeys.team(payload.team.teamId), payload.team);
+      }
+      void chatWorkspaceCache.afterTeamChanged(payload.team?.teamId || teamId);
+      void chatWorkspaceCache.afterAgentWorkspaceChanged();
+    },
+  });
+
   const seedSourceCollectionAgentSessionContextMutation = useMutation({
     mutationFn: (payload: { teamId: string; runId: string; stageId: SourceCollectionStageModuleId; agentId: string; agentRole: string }) =>
       fetchJson<TeamWorkflowSourceCollectionAgentSessionContextPayload>(
@@ -4474,29 +4598,39 @@ export function TeamsRoute({
   const startSourceCollectionRunMutation = useMutation({
     mutationFn: (payload: { teamId: string; draft: SourceCollectionDraft }) => {
       const querySeeds = compactSourceCollectionQuerySeeds(payload.draft.topic, payload.draft.querySeeds);
+      const workflowKind = sourceCollectionWorkflowKindForTeam(selectedTeam);
+      const workflowPurpose = sourceCollectionWorkflowPurposeForTeam(selectedTeam);
+      const collectionMode = sourceCollectionModeForTeam(selectedTeam, payload.draft);
       return fetchJson<TeamWorkflowSourceCollectionRunStartPayload>(
         `/api/teams/${encodeURIComponent(payload.teamId)}/workflow-orchestration/source-collection-runs`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            title: payload.draft.title.trim() || "Challenge Cup source collection",
+            title: payload.draft.title.trim() || (knowledgeExpansionWorkflowTeamSelected ? "Knowledge expansion source intake" : "Challenge Cup source collection"),
             topic: payload.draft.topic.trim(),
             goal: payload.draft.goal.trim(),
             ownerAgentId: sourceCollectionOwnerAgentId,
             requestedByAgent: sourceCollectionOwnerAgentId,
-            agentRoles: SOURCE_COLLECTION_DEFAULT_ROLES,
+            workflowPurpose,
+            workflowKind,
+            collectionMode,
+            agentRoles: sourceCollectionAgentRolesForTeam(selectedTeam),
             agentIds: sourceCollectionAgentIds,
             inputRefs: splitDraftList(payload.draft.inputRefs, 24),
             querySeeds,
             searchLanguages: splitDraftList(payload.draft.searchLanguages, 8),
             sourceTypes: splitDraftList(payload.draft.sourceTypes, 12),
             maxResultsPerQuery: payload.draft.maxResultsPerQuery,
+            localScanScope: sourceCollectionLocalScanScopeForDraft(collectionMode, payload.draft),
             promptCachePolicy: SOURCE_COLLECTION_PROMPT_CACHE_POLICY,
             scope: {
-              domain: "neuroscience-inspired algorithm discovery",
+              domain: knowledgeExpansionWorkflowTeamSelected ? "team knowledge expansion" : "neuroscience-inspired algorithm discovery",
               workflowStage: "knowledge_collection",
-              uiEntry: "teams_research_source_collection_panel",
+              workflowKind,
+              workflowPurpose,
+              collectionMode,
+              uiEntry: knowledgeExpansionWorkflowTeamSelected ? "teams_knowledge_expansion_source_collection_panel" : "teams_research_source_collection_panel",
             },
           }),
         },
@@ -5658,6 +5792,19 @@ export function TeamsRoute({
     return `${lang === "zh" ? "返回" : "Back to"} ${SOURCE_COLLECTION_STAGE_CHAT_LABELS[stageId][lang]}`;
   }
 
+  function repairSelectedWorkflowTeamAgentsIfNeeded() {
+    if (!selectedTeam?.teamId) {
+      return;
+    }
+    if (knowledgeExpansionWorkflowTeamSelected && !repairKnowledgeExpansionTeamAgentsMutation.isPending) {
+      repairKnowledgeExpansionTeamAgentsMutation.mutate(selectedTeam.teamId);
+      return;
+    }
+    if (isChallengeCupResearchWorkflowTeam(selectedTeam) && !repairChallengeCupTeamAgentsMutation.isPending) {
+      repairChallengeCupTeamAgentsMutation.mutate(selectedTeam.teamId);
+    }
+  }
+
   async function openSourceCollectionStageAgentChat(stageId: SourceCollectionStageModuleId) {
     const chatState = sourceCollectionStageAgentChatState(stageId);
     const binding = chatState.binding;
@@ -5681,8 +5828,8 @@ export function TeamsRoute({
       navigate(chatState.route);
       return;
     }
-    if (chatState.status === "repair" && selectedTeam?.teamId === RESEARCH_TEAM_ID && !repairChallengeCupTeamAgentsMutation.isPending) {
-      repairChallengeCupTeamAgentsMutation.mutate(selectedTeam.teamId);
+    if (chatState.status === "repair") {
+      repairSelectedWorkflowTeamAgentsIfNeeded();
     }
   }
 
@@ -5761,29 +5908,42 @@ export function TeamsRoute({
     const agentId = String(binding?.agent?.agentId || binding?.agentId || "").trim();
     const agentRole = String(binding?.key || "").trim();
     if (chatState.status !== "ready" || !agentId || !binding?.agent?.directSessionId) {
-      if (selectedTeam.teamId === RESEARCH_TEAM_ID && !repairChallengeCupTeamAgentsMutation.isPending) {
-        if (chatState.status === "repair") {
-          repairChallengeCupTeamAgentsMutation.mutate(selectedTeam.teamId);
-        }
+      if (chatState.status === "repair") {
+        repairSelectedWorkflowTeamAgentsIfNeeded();
       }
       return;
     }
     let runId = selectedSourceCollectionRunEffectiveId;
     if (!runId && stageId === "collection") {
-      if (!researchStageCanLaunch || selectedTeamStartResearchStagePending) {
-        return;
+      if (knowledgeExpansionWorkflowTeamSelected) {
+        if (!sourceCollectionCanStart || selectedTeamStartSourceCollectionPending) {
+          return;
+        }
+        try {
+          const runPayload = await startSourceCollectionRunMutation.mutateAsync({
+            teamId: selectedTeam.teamId,
+            draft: sourceCollectionDraft,
+          });
+          runId = runPayload.run.runId;
+        } catch {
+          return;
+        }
+      } else {
+        if (!researchStageCanLaunch || selectedTeamStartResearchStagePending) {
+          return;
+        }
+        let stagePayload: ResearchStageRoundStartPayload;
+        try {
+          stagePayload = await startResearchStageRoundMutation.mutateAsync({
+            teamId: selectedTeam.teamId,
+            stageType: "knowledge_collection",
+            draft: sourceCollectionDraft,
+          });
+        } catch {
+          return;
+        }
+        runId = stagePayload.run?.runId || stagePayload.stageRound.sourceRunIds?.[0] || "";
       }
-      let stagePayload: ResearchStageRoundStartPayload;
-      try {
-        stagePayload = await startResearchStageRoundMutation.mutateAsync({
-          teamId: selectedTeam.teamId,
-          stageType: "knowledge_collection",
-          draft: sourceCollectionDraft,
-        });
-      } catch {
-        return;
-      }
-      runId = stagePayload.run?.runId || stagePayload.stageRound.sourceRunIds?.[0] || "";
     }
     if (!runId) {
       return;
@@ -6006,7 +6166,7 @@ export function TeamsRoute({
     if (!researchWorkflowTeamSelected) {
       return null;
     }
-    const phaseOrder: ResearchStageType[] = ["knowledge_collection", "experiment", "iteration"];
+    const phaseOrder: ResearchStageType[] = knowledgeExpansionWorkflowTeamSelected ? ["knowledge_collection"] : ["knowledge_collection", "experiment", "iteration"];
     const phaseFallback: Record<ResearchStageType, { label: string; primaryAction: string }> = {
       knowledge_collection: {
         label: lang === "zh" ? "知识搜集" : "Knowledge",
@@ -6023,7 +6183,9 @@ export function TeamsRoute({
     };
     const knowledgeCollectionStatusLabel = sourceCollectionDisplayState.statusText;
     const knowledgeCollectionPrimaryActionLabel = !selectedSourceCollectionRun
-      ? (lang === "zh" ? "开始知识搜集" : "Start knowledge")
+      ? knowledgeExpansionWorkflowTeamSelected
+        ? (lang === "zh" ? "开始扩充" : "Start expansion")
+        : (lang === "zh" ? "开始知识搜集" : "Start knowledge")
       : sourceCollectionSearchOpenAssignmentCount > 0
         ? (selectedTeamExecuteSourceCollectionSearchPending || sourceCollectionAcceptedBackgroundActive
           ? (lang === "zh" ? "搜索中" : "Searching")
@@ -6034,7 +6196,9 @@ export function TeamsRoute({
           ? (lang === "zh" ? "进入资料审查" : "Open review")
           : (lang === "zh" ? "进入搜集工作台" : "Open collection workspace");
     const knowledgeCollectionPrimaryDisabled = !selectedSourceCollectionRun
-      ? selectedTeamStartResearchStagePending || !researchStageCanLaunch
+      ? knowledgeExpansionWorkflowTeamSelected
+        ? selectedTeamStartSourceCollectionPending || !sourceCollectionCanStart
+        : selectedTeamStartResearchStagePending || !researchStageCanLaunch
       : sourceCollectionSearchOpenAssignmentCount > 0
         ? !canExecuteSourceCollectionSearch
         : false;
@@ -6059,6 +6223,16 @@ export function TeamsRoute({
         return;
       }
       if (!selectedSourceCollectionRun) {
+        if (knowledgeExpansionWorkflowTeamSelected) {
+          if (!sourceCollectionCanStart || selectedTeamStartSourceCollectionPending) {
+            return;
+          }
+          startSourceCollectionRunMutation.mutate({
+            teamId: selectedTeam.teamId,
+            draft: sourceCollectionDraft,
+          });
+          return;
+        }
         launchResearchStage("knowledge_collection");
         return;
       }
@@ -6199,7 +6373,27 @@ export function TeamsRoute({
                     {primaryLabel}
                   </button>
                   {stageType === "knowledge_collection" ? (
-                    <button type="button" onClick={() => launchResearchStage(stageType, "new_round")} disabled={selectedTeamStartResearchStagePending || !researchStageCanLaunch}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (!selectedTeam?.teamId) {
+                          return;
+                        }
+                        if (knowledgeExpansionWorkflowTeamSelected) {
+                          startSourceCollectionRunMutation.mutate({
+                            teamId: selectedTeam.teamId,
+                            draft: sourceCollectionDraft,
+                          });
+                          return;
+                        }
+                        launchResearchStage(stageType, "new_round");
+                      }}
+                      disabled={
+                        knowledgeExpansionWorkflowTeamSelected
+                          ? selectedTeamStartSourceCollectionPending || !sourceCollectionCanStart
+                          : selectedTeamStartResearchStagePending || !researchStageCanLaunch
+                      }
+                    >
                       <Plus size={13} />
                       {lang === "zh" ? "新一轮搜集" : "New round"}
                     </button>
@@ -7578,6 +7772,45 @@ export function TeamsRoute({
     );
   }
 
+  function renderSourceCollectionModeFields() {
+    if (!knowledgeExpansionWorkflowTeamSelected) {
+      return null;
+    }
+    const mode = sourceCollectionDraft.collectionMode || "mixed";
+    return (
+      <>
+        <label>
+          <span>{lang === "zh" ? "来源模式" : "Source mode"}</span>
+          <select
+            value={mode}
+            onChange={(event) =>
+              setSourceCollectionDraft((current) => ({
+                ...current,
+                collectionMode: event.target.value as SourceCollectionMode,
+              }))
+            }
+          >
+            {(["mixed", "web_search", "local_workspace"] as SourceCollectionMode[]).map((item) => (
+              <option key={item} value={item}>
+                {sourceCollectionCollectionModeLabel(item, lang)}
+              </option>
+            ))}
+          </select>
+        </label>
+        {mode !== "web_search" ? (
+          <label>
+            <span>{lang === "zh" ? "本地根目录" : "Local roots"}</span>
+            <input
+              value={sourceCollectionDraft.localScanRoots}
+              onChange={(event) => setSourceCollectionDraft((current) => ({ ...current, localScanRoots: event.target.value }))}
+              placeholder={SOURCE_COLLECTION_LOCAL_SCAN_DEFAULT_ROOTS}
+            />
+          </label>
+        ) : null}
+      </>
+    );
+  }
+
   function renderSourceCollectionControlsPanel() {
     const activeModule =
       sourceCollectionStageModules.find((module) => module.id === selectedSourceCollectionStageId)
@@ -7661,6 +7894,7 @@ export function TeamsRoute({
               placeholder={lang === "zh" ? "可选：本地文件、seed-query:..." : "Optional: local file, seed-query:..."}
             />
           </label>
+          {renderSourceCollectionModeFields()}
           <label>
             <span>{lang === "zh" ? "语言" : "Languages"}</span>
             <input
@@ -10596,7 +10830,7 @@ export function TeamsRoute({
       `${lang === "zh" ? "更新" : "Updated"} ${formatTime(selectedTeam.updatedAt, lang)}`,
       `${lang === "zh" ? "成员源" : "Member source"} Agent Center`,
     ].filter(Boolean).join("\n")
-    : (lang === "zh" ? "仅显示 AI 搜索范围团队和挑战杯ai科研团队。" : "Only AI search and research teams are shown.");
+    : (lang === "zh" ? "仅显示 AI 搜索、知识库扩充和挑战杯科研团队。" : "Only AI search, knowledge expansion, and research teams are shown.");
 
   if (sourceCollectionStandalone) {
     return (
@@ -11260,6 +11494,7 @@ export function TeamsRoute({
                               placeholder={lang === "zh" ? "可选：本地文件、seed-query:..." : "Optional: local file, seed-query:..."}
                             />
                           </label>
+                          {renderSourceCollectionModeFields()}
                           <label>
                             <span>{lang === "zh" ? "语言" : "Languages"}</span>
                             <input

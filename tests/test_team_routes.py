@@ -41,6 +41,20 @@ def test_team_routes_create_detail_and_canvas(tmp_path, monkeypatch):
     assert canvas_response.json()["canvasKind"] == "team_organization_canvas"
 
 
+def test_team_routes_repair_knowledge_expansion_team_agents(tmp_path, monkeypatch):
+    _isolate_team_route_state(tmp_path, monkeypatch)
+    client = _client()
+
+    response = client.post("/api/teams/knowledge-expansion-team/knowledge-expansion-agents/repair")
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["teamId"] == "knowledge-expansion-team"
+    assert payload["memberCount"] == 5
+    assert payload["team"]["teamKind"] == "knowledge_expansion"
+    assert payload["team"]["linkedChatRoom"]["purpose"] == "knowledge_expansion"
+
+
 def test_team_routes_reject_agent_that_already_belongs_to_active_team(tmp_path, monkeypatch):
     _isolate_team_route_state(tmp_path, monkeypatch)
     agent = agent_directory_service.create_agent_instance(display_name="Alpha", direct_session_id="session-alpha")
@@ -181,7 +195,7 @@ def test_team_list_route_reports_ready_when_system_teams_exist(tmp_path, monkeyp
     assert response.status_code == 200, response.text
     payload = response.json()
     teams = {team["teamId"]: team for team in payload["teams"]}
-    assert {"self-evolution-team", "supervised-evolution-team", "ai-search-team"}.issubset(teams)
+    assert {"self-evolution-team", "supervised-evolution-team", "ai-search-team", "knowledge-expansion-team"}.issubset(teams)
     assert payload["systemTeamBootstrap"]["status"] == "ready"
     assert payload["systemTeamBootstrap"]["requiredSteps"] == []
 
