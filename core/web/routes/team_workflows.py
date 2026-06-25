@@ -65,6 +65,7 @@ from core.web.services.team_workflow_orchestration_service import (
     submit_transfer_request,
     submit_steward_pack_to_knowledge_ingestion,
     validate_candidate_store,
+    validate_prd,
     writeback_source_collection_stage_session_task,
 )
 from core.web.services.runtime_scene_service import record_runtime_scene_event
@@ -472,6 +473,10 @@ class IterationProposePayload(BaseModel):
 
 
 class DeliverableExportPayload(BaseModel):
+    requestedByAgent: str = Field("", max_length=160)
+
+
+class PrdValidatePayload(BaseModel):
     requestedByAgent: str = Field("", max_length=160)
 
 
@@ -1237,6 +1242,25 @@ def team_workflow_deliverables_export(team_id: str, payload: DeliverableExportPa
     except (TeamServiceError, TeamWorkflowOrchestrationError) as exc:
         _raise_team_workflow_route_error(
             "deliverables.export",
+            team_id,
+            exc,
+            status_code=422,
+            fields={"requestedByAgent": payload.requestedByAgent},
+        )
+
+
+@router.post("/teams/{team_id}/workflow-orchestration/prd/validate", status_code=status.HTTP_201_CREATED)
+def team_workflow_prd_validate(team_id: str, payload: PrdValidatePayload) -> dict:
+    try:
+        registered_paths = [str(getattr(route, "path", "")) for route in router.routes]
+        return validate_prd(team_id, payload.model_dump(), registered_paths=registered_paths)
+    except TeamNotFoundError as exc:
+        _raise_team_workflow_route_error(
+            "prd.validate", team_id, exc, status_code=404, fields={"requestedByAgent": payload.requestedByAgent}
+        )
+    except (TeamServiceError, TeamWorkflowOrchestrationError) as exc:
+        _raise_team_workflow_route_error(
+            "prd.validate",
             team_id,
             exc,
             status_code=422,
