@@ -3864,6 +3864,8 @@ export function TeamsRoute({
   const researchWorkflowTeamSelected = isResearchWorkflowTeam(selectedTeam);
   const aiSearchScopeTeamSelected = isAiSearchScopeTeam(selectedTeam);
   const researchCanvasReadOnly = researchWorkflowTeamSelected && researchWorkspaceView === "canvas";
+  const sourceCollectionWorkspaceSelected =
+    researchWorkflowTeamSelected && (sourceCollectionStandalone || researchWorkspaceView === "source_collection" || researchWorkspaceView === "knowledge_collection");
   const teamWorkflowSourceQualityEnabled = Boolean(
     effectiveTeamId
     && researchWorkflowTeamSelected
