@@ -3941,6 +3941,202 @@ def extract_neuro_mechanism_from_paper_note(
     return invoke_response
 
 
+def map_mechanism_to_abstraction(
+    team_id: str,
+    payload: dict[str, Any] | None = None,
+    *,
+    llm_client_factory: Any = None,
+) -> dict[str, Any]:
+    """N-03：把 neuro_mechanism 候选映射为 mechanism_mapping 候选（节点 04 专用编排）。
+
+    门禁：overAnalogyRisk=high → review_needs_human，不自动进入节点 05；在 neuro_mechanism 上
+    以 metadata.mappingDrafts 记录 maps_to 谱系。
+    """
+    normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
+    team_service.get_team(normalized_team_id)
+    payload = payload if isinstance(payload, dict) else {}
+    mechanism_id = _normalize_required_id(payload.get("mechanismId") or payload.get("candidateId"), "mechanismId is required.")
+    created_by_agent = _trim_text(payload.get("createdByAgent"), max_length=160) or "Mechanism Mapping Agent"
+    model_id = _trim_text(payload.get("modelId"), max_length=160)
+    with _WORKFLOW_LOCK:
+        candidate_store = _load_candidate_store(normalized_team_id)
+        mechanism = _find_candidate(candidate_store, mechanism_id)
+        if mechanism is None:
+            raise TeamWorkflowOrchestrationError("Candidate not found.")
+        if str(mechanism.get("candidateType") or "") != "neuro_mechanism":
+            raise TeamWorkflowOrchestrationError("Mechanism mapping requires a neuro_mechanism candidate.")
+        mech_payload = mechanism.get("payload") if isinstance(mechanism.get("payload"), dict) else {}
+        source_refs = _normalize_ref_list(mechanism.get("sourceRefs") or mech_payload.get("sourceRefs"), max_items=24)
+        evidence_refs = _normalize_ref_list(mechanism.get("evidenceRefs") or mech_payload.get("evidenceRefs"), max_items=24)
+        if not evidence_refs:
+            raise TeamWorkflowOrchestrationError("neuro_mechanism candidate has no evidenceRefs for mapping.")
+        candidate_refs = [{"type": "neuro_mechanism", "id": mechanism_id, "label": str(mechanism.get("title") or mechanism_id)}]
+        excerpt = _trim_text(payload.get("excerpt"), max_length=24_000) or _trim_text(mechanism.get("summary"), max_length=24_000)
+
+    invoke_response = invoke_local_research_model(
+        normalized_team_id,
+        {
+            "taskType": "mechanism_mapping",
+            "modelId": model_id,
+            "sourceRefs": source_refs,
+            "evidenceRefs": evidence_refs,
+            "candidateRefs": candidate_refs,
+            "neuroMechanismIds": [mechanism_id],
+            "excerpt": excerpt,
+            "createdByAgent": created_by_agent,
+        },
+        llm_client_factory=llm_client_factory,
+    )
+    mapping_candidate = invoke_response.get("candidate") if isinstance(invoke_response.get("candidate"), dict) else {}
+    validation = invoke_response.get("validation") if isinstance(invoke_response.get("validation"), dict) else {"valid": False, "issues": []}
+    task = invoke_response.get("task") if isinstance(invoke_response.get("task"), dict) else {}
+    over_analogy = str(mapping_candidate.get("overAnalogyRisk") or "").strip().lower()
+    gate = "ready" if (validation.get("valid") is True and over_analogy != "high") else "review_needs_human"
+    now = utc_now_iso()
+    with _WORKFLOW_LOCK:
+        workflow = _load_or_create_workflow(normalized_team_id)
+        candidate_store = _load_candidate_store(normalized_team_id)
+        mechanism = _find_candidate(candidate_store, mechanism_id)
+        if mechanism is not None:
+            metadata = mechanism.get("metadata") if isinstance(mechanism.get("metadata"), dict) else {}
+            drafts = metadata.get("mappingDrafts") if isinstance(metadata.get("mappingDrafts"), list) else []
+            metadata["mappingDrafts"] = [
+                *drafts[-23:],
+                {
+                    "candidateId": str(mapping_candidate.get("candidateId") or ""),
+                    "taskId": str(task.get("taskId") or ""),
+                    "edgeType": "maps_to",
+                    "gate": gate,
+                    "overAnalogyRisk": over_analogy,
+                    "valid": validation.get("valid") is True,
+                    "createdByAgent": created_by_agent,
+                    "createdAt": now,
+                },
+            ]
+            mechanism["metadata"] = metadata
+            mechanism["updatedAt"] = now
+            candidate_store["updatedAt"] = now
+            _write_json(_candidate_store_path(normalized_team_id), candidate_store)
+        else:
+            mechanism = {}
+    _record_workflow_event(
+        "candidate.mechanism_mapping_created",
+        normalized_team_id,
+        fields={
+            "workflowId": workflow["workflowId"],
+            "neuroMechanismCandidateId": mechanism_id,
+            "mappingCandidateId": str(mapping_candidate.get("candidateId") or ""),
+            "gate": gate,
+            "overAnalogyRisk": over_analogy,
+            "valid": validation.get("valid") is True,
+        },
+    )
+    invoke_response["mechanismCandidate"] = mechanism
+    invoke_response["mappingGate"] = gate
+    invoke_response["workflow"] = _workflow_to_api(normalized_team_id, workflow, candidate_store)
+    return invoke_response
+
+
+def generate_algorithm_hypothesis_from_mechanism_mapping(
+    team_id: str,
+    payload: dict[str, Any] | None = None,
+    *,
+    llm_client_factory: Any = None,
+) -> dict[str, Any]:
+    """N-04：从 mechanism_mapping 生成 algorithm_hypothesis 候选（节点 05 专用编排）。
+
+    门禁：上游 overAnalogyRisk=high 不得生成（须先过 Review Gate）；输出须含 experimentPlan/baseline
+    （由 schema 校验保证），否则 revise_required；在 mechanism_mapping 上以 metadata.hypothesisDrafts
+    记录 inspires 谱系。
+    """
+    normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
+    team_service.get_team(normalized_team_id)
+    payload = payload if isinstance(payload, dict) else {}
+    mapping_id = _normalize_required_id(payload.get("mappingId") or payload.get("candidateId"), "mappingId is required.")
+    created_by_agent = _trim_text(payload.get("createdByAgent"), max_length=160) or "Algorithm Hypothesis Agent"
+    model_id = _trim_text(payload.get("modelId"), max_length=160)
+    with _WORKFLOW_LOCK:
+        candidate_store = _load_candidate_store(normalized_team_id)
+        mapping = _find_candidate(candidate_store, mapping_id)
+        if mapping is None:
+            raise TeamWorkflowOrchestrationError("Candidate not found.")
+        if str(mapping.get("candidateType") or "") != "mechanism_mapping":
+            raise TeamWorkflowOrchestrationError("Hypothesis generation requires a mechanism_mapping candidate.")
+        map_payload = mapping.get("payload") if isinstance(mapping.get("payload"), dict) else {}
+        map_metadata = mapping.get("metadata") if isinstance(mapping.get("metadata"), dict) else {}
+        over_analogy = str(
+            mapping.get("overAnalogyRisk") or map_payload.get("overAnalogyRisk") or map_metadata.get("overAnalogyRisk") or ""
+        ).strip().lower()
+        if over_analogy == "high":
+            raise TeamWorkflowOrchestrationError("high overAnalogyRisk mapping must pass Review Gate before hypothesis generation.")
+        source_refs = _normalize_ref_list(mapping.get("sourceRefs") or map_payload.get("sourceRefs"), max_items=24)
+        evidence_refs = _normalize_ref_list(mapping.get("evidenceRefs") or map_payload.get("evidenceRefs"), max_items=24)
+        if not evidence_refs:
+            raise TeamWorkflowOrchestrationError("mechanism_mapping candidate has no evidenceRefs for hypothesis generation.")
+        candidate_refs = [{"type": "mechanism_mapping", "id": mapping_id, "label": str(mapping.get("title") or mapping_id)}]
+        excerpt = _trim_text(payload.get("excerpt"), max_length=24_000) or _trim_text(mapping.get("summary"), max_length=24_000)
+
+    invoke_response = invoke_local_research_model(
+        normalized_team_id,
+        {
+            "taskType": "algorithm_hypothesis_draft",
+            "modelId": model_id,
+            "sourceRefs": source_refs,
+            "evidenceRefs": evidence_refs,
+            "candidateRefs": candidate_refs,
+            "mechanismMappingIds": [mapping_id],
+            "excerpt": excerpt,
+            "createdByAgent": created_by_agent,
+        },
+        llm_client_factory=llm_client_factory,
+    )
+    hypothesis_candidate = invoke_response.get("candidate") if isinstance(invoke_response.get("candidate"), dict) else {}
+    validation = invoke_response.get("validation") if isinstance(invoke_response.get("validation"), dict) else {"valid": False, "issues": []}
+    task = invoke_response.get("task") if isinstance(invoke_response.get("task"), dict) else {}
+    gate = "review_ready" if validation.get("valid") is True else "revise_required"
+    now = utc_now_iso()
+    with _WORKFLOW_LOCK:
+        workflow = _load_or_create_workflow(normalized_team_id)
+        candidate_store = _load_candidate_store(normalized_team_id)
+        mapping = _find_candidate(candidate_store, mapping_id)
+        if mapping is not None:
+            metadata = mapping.get("metadata") if isinstance(mapping.get("metadata"), dict) else {}
+            drafts = metadata.get("hypothesisDrafts") if isinstance(metadata.get("hypothesisDrafts"), list) else []
+            metadata["hypothesisDrafts"] = [
+                *drafts[-23:],
+                {
+                    "candidateId": str(hypothesis_candidate.get("candidateId") or ""),
+                    "taskId": str(task.get("taskId") or ""),
+                    "edgeType": "inspires",
+                    "gate": gate,
+                    "valid": validation.get("valid") is True,
+                    "createdByAgent": created_by_agent,
+                    "createdAt": now,
+                },
+            ]
+            mapping["metadata"] = metadata
+            mapping["updatedAt"] = now
+            candidate_store["updatedAt"] = now
+            _write_json(_candidate_store_path(normalized_team_id), candidate_store)
+        else:
+            mapping = {}
+    _record_workflow_event(
+        "candidate.algorithm_hypothesis_generated",
+        normalized_team_id,
+        fields={
+            "workflowId": workflow["workflowId"],
+            "mechanismMappingCandidateId": mapping_id,
+            "hypothesisCandidateId": str(hypothesis_candidate.get("candidateId") or ""),
+            "gate": gate,
+            "valid": validation.get("valid") is True,
+        },
+    )
+    invoke_response["mappingCandidate"] = mapping
+    invoke_response["hypothesisGate"] = gate
+    invoke_response["workflow"] = _workflow_to_api(normalized_team_id, workflow, candidate_store)
+    return invoke_response
+
+
 def plan_paper_note_chunks_from_source_candidate(team_id: str, candidate_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
     normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
     normalized_candidate_id = _normalize_required_id(candidate_id, "Candidate id is required.")
