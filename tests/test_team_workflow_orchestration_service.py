@@ -4537,6 +4537,42 @@ def test_candidate_store_list_skips_validation_by_default(tmp_path, monkeypatch)
     assert response["validationSummary"]["skipped"] is True
 
 
+def test_workflow_overview_uses_lightweight_team_existence(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = team_service.create_team(name="挑战杯科研团队")
+    team_workflow_orchestration_service.ensure_team_workflow_orchestration(team["teamId"])
+
+    def fail_full_team_read(team_id):
+        raise AssertionError("workflow overview must not hydrate full team detail")
+
+    monkeypatch.setattr(team_workflow_orchestration_service.team_service, "get_team", fail_full_team_read)
+
+    payload = team_workflow_orchestration_service.get_team_workflow_orchestration(team["teamId"])
+
+    assert payload["teamId"] == team["teamId"]
+    assert payload["workflowId"]
+
+
+def test_workflow_overview_does_not_rewrite_existing_workflow(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = team_service.create_team(name="挑战杯科研团队")
+    team_workflow_orchestration_service.ensure_team_workflow_orchestration(team["teamId"])
+    workflow_path = team_workflow_orchestration_service._workflow_path(team["teamId"]).resolve()
+    real_write_json = team_workflow_orchestration_service._write_json
+
+    def guarded_write_json(path, payload):
+        if path.resolve() == workflow_path:
+            raise AssertionError("workflow overview GET should not rewrite an existing workflow")
+        return real_write_json(path, payload)
+
+    monkeypatch.setattr(team_workflow_orchestration_service, "_write_json", guarded_write_json)
+
+    payload = team_workflow_orchestration_service.get_team_workflow_orchestration(team["teamId"])
+
+    assert payload["teamId"] == team["teamId"]
+    assert payload["workflowId"]
+
+
 def test_source_collection_summary_uses_lightweight_team_existence(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)

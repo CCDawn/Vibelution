@@ -272,9 +272,9 @@ def utc_now_iso() -> str:
 
 def get_team_workflow_orchestration(team_id: str) -> dict[str, Any]:
     normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
-    team_service.get_team(normalized_team_id)
+    team_service.assert_team_exists(normalized_team_id)
     with _WORKFLOW_LOCK:
-        workflow = _load_or_create_workflow(normalized_team_id)
+        workflow = _load_or_create_workflow(normalized_team_id, persist_repair=False)
         candidate_store = _load_candidate_store(normalized_team_id)
     return _workflow_to_api(normalized_team_id, workflow, candidate_store)
 
@@ -10925,11 +10925,13 @@ def _repair_workflow(payload: dict[str, Any], team_id: str) -> dict[str, Any]:
     return base
 
 
-def _load_or_create_workflow(team_id: str) -> dict[str, Any]:
+def _load_or_create_workflow(team_id: str, *, persist_repair: bool = True) -> dict[str, Any]:
     path = _workflow_path(team_id)
     if path.exists():
-        workflow = _repair_workflow(_read_json(path), team_id)
-        _write_json(path, workflow)
+        raw_workflow = _read_json(path)
+        workflow = _repair_workflow(raw_workflow, team_id)
+        if persist_repair and workflow != raw_workflow:
+            _write_json(path, workflow)
         return workflow
     workflow = _default_workflow(
         team_id,
