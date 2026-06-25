@@ -19,6 +19,7 @@ from core.web.services.team_workflow_orchestration_service import (
     decide_transfer_request,
     ensure_team_workflow_orchestration,
     execute_source_collection_search,
+    extract_neuro_mechanism_from_paper_note,
     extract_source_collection_candidates,
     get_experiment_planning_status,
     get_knowledge_ingestion_status,
@@ -417,6 +418,13 @@ class PaperNoteAutodraftPayload(BaseModel):
     summary: str = Field("", max_length=4000)
     excerpt: str = Field("", max_length=24000)
     chunkId: str = Field("", max_length=128)
+
+
+class NeuroMechanismExtractPayload(BaseModel):
+    paperNoteId: str = Field("", max_length=128)
+    createdByAgent: str = Field("", max_length=160)
+    modelId: str = Field("", max_length=160)
+    excerpt: str = Field("", max_length=24000)
 
 
 class PaperNoteChunkPlanPayload(BaseModel):
@@ -1055,6 +1063,28 @@ def team_workflow_candidate_paper_note_autodraft(team_id: str, candidate_id: str
             exc,
             status_code=422,
             fields={"candidateId": candidate_id, "createdByAgent": payload.createdByAgent, "modelId": payload.modelId},
+        )
+
+
+@router.post("/teams/{team_id}/workflow-orchestration/research/mechanisms/extract", status_code=status.HTTP_201_CREATED)
+def team_workflow_research_mechanisms_extract(team_id: str, payload: NeuroMechanismExtractPayload) -> dict:
+    try:
+        return extract_neuro_mechanism_from_paper_note(team_id, payload.model_dump())
+    except TeamNotFoundError as exc:
+        _raise_team_workflow_route_error(
+            "research.mechanisms_extract",
+            team_id,
+            exc,
+            status_code=404,
+            fields={"paperNoteId": payload.paperNoteId},
+        )
+    except (TeamServiceError, TeamWorkflowOrchestrationError) as exc:
+        _raise_team_workflow_route_error(
+            "research.mechanisms_extract",
+            team_id,
+            exc,
+            status_code=422,
+            fields={"paperNoteId": payload.paperNoteId, "createdByAgent": payload.createdByAgent},
         )
 
 
