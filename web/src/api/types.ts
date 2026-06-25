@@ -5616,6 +5616,26 @@ export type EvolutionActiveRunAgentBinding = {
   llmBindings?: Record<string, { modelId?: string }>;
 };
 
+export type EvolutionRoleConversationSession = {
+  role: string;
+  status: string;
+  agentId?: string;
+  displayName?: string;
+  roleLabel?: string;
+  conversationPath?: string;
+  conversationSessionId?: string;
+  conversationTurnId?: string;
+  caseId?: string;
+  caseIndex?: number | null;
+  caseTotal?: number | null;
+  scenario?: string;
+  mode?: string;
+  latestMessage?: string;
+  latestOutputKind?: string;
+  latestOutputLabel?: string;
+  updatedAt?: string;
+};
+
 export type EvolutionCurrentAgentBindingIssue = {
   role?: string;
   agentId?: string;
@@ -5651,6 +5671,7 @@ export type EvolutionActiveRun = {
   currentCasePrompt: string;
   currentAgentBinding: EvolutionActiveRunAgentBinding;
   currentCaseIo: EvolutionActiveRunCaseIo | null;
+  roleConversationSessions?: Record<string, EvolutionRoleConversationSession>;
   currentTask: string;
   decision: string;
   reason: string;

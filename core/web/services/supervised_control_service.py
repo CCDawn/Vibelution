@@ -1669,6 +1669,7 @@ def _handle_progress_event(run_id: str, event: dict[str, Any]) -> None:
             state["currentCasePrompt"] = str(event.get("prompt") or "")
             state["currentAgentBinding"] = _agent_binding_snapshot(event.get("agent_binding"))
             state["currentCaseIo"] = None
+            _sync_role_conversation_session_locked(state, event, status="starting")
             state["latestMessage"] = _event_summary(event)
             state["runtimeStatus"] = "stopping" if stop_requested else "waiting" if pause_requested else "running"
             if stop_requested:
@@ -1705,6 +1706,7 @@ def _handle_progress_event(run_id: str, event: dict[str, Any]) -> None:
             state["currentCasePrompt"] = str(event.get("prompt") or state.get("currentCasePrompt") or "")
             state["currentAgentBinding"] = _agent_binding_snapshot(event.get("agent_binding") or state.get("currentAgentBinding"))
             state["currentCaseIo"] = _case_io_payload(event)
+            _sync_role_conversation_session_locked(state, event, case_io=state.get("currentCaseIo"), status="running")
             phase = str(event.get("phase") or "").strip()
             latest_output = str(((state.get("currentCaseIo") or {}).get("latestOutput")) or "").strip()
             latest_label = str(((state.get("currentCaseIo") or {}).get("latestOutputLabel")) or "").strip()
@@ -1766,6 +1768,11 @@ def _handle_progress_event(run_id: str, event: dict[str, Any]) -> None:
             state["currentCaseId"] = str(event.get("case_id") or "")
             state["currentRole"] = str(event.get("role") or "")
             state["currentAgentBinding"] = _agent_binding_snapshot(event.get("agent_binding") or state.get("currentAgentBinding"))
+            _sync_role_conversation_session_locked(
+                state,
+                event,
+                status="completed" if event_type == "role_finish" else "reused",
+            )
             state["latestMessage"] = _event_summary(event)
             state["runtimeStatus"] = "stopping" if stop_requested else "waiting" if pause_requested else "running"
             if stop_requested:
@@ -1898,6 +1905,7 @@ def _initial_run_state(context: dict[str, Any]) -> dict[str, Any]:
         "currentCasePrompt": "",
         "currentAgentBinding": {},
         "currentCaseIo": None,
+        "roleConversationSessions": {},
         "currentTask": text_for(
             lang,
             zh="监督任务已排队，等待开始。",
@@ -2705,6 +2713,104 @@ def _event_summary(event: dict[str, Any]) -> str:
             f"status={preflight.get('status') or '-'} available={preflight.get('available')}"
         )
     return json.dumps(event, ensure_ascii=False)
+
+
+def _sync_role_conversation_session_locked(
+    state: dict[str, Any],
+    event: dict[str, Any],
+    *,
+    case_io: dict[str, Any] | None = None,
+    status: str = "",
+) -> None:
+    role = str(event.get("role") or state.get("currentRole") or "").strip().lower()
+    if not role:
+        return
+    sessions = state.get("roleConversationSessions")
+    if not isinstance(sessions, dict):
+        sessions = {}
+        state["roleConversationSessions"] = sessions
+    existing = sessions.get(role) if isinstance(sessions.get(role), dict) else {}
+    preserve_existing_session = status != "starting"
+    io_payload = case_io if isinstance(case_io, dict) else {}
+    binding = _agent_binding_snapshot(event.get("agent_binding") or state.get("currentAgentBinding"))
+
+    def _text(*values: Any) -> str:
+        for value in values:
+            text = str(value or "").strip()
+            if text:
+                return text
+        return ""
+
+    def _int_value(*values: Any) -> int:
+        for value in values:
+            if value is None:
+                continue
+            text = str(value).strip()
+            if not text:
+                continue
+            try:
+                return max(0, int(text))
+            except (TypeError, ValueError):
+                continue
+        return 0
+
+    conversation_session_id = _text(
+        event.get("conversation_session_id"),
+        event.get("conversationSessionId"),
+        io_payload.get("conversationSessionId"),
+        existing.get("conversationSessionId") if preserve_existing_session else "",
+    )
+    conversation_path = _text(
+        event.get("conversation_path"),
+        event.get("conversationPath"),
+        io_payload.get("conversationPath"),
+        existing.get("conversationPath") if preserve_existing_session else "",
+    )
+    if not conversation_path and conversation_session_id:
+        conversation_path = f"session:{conversation_session_id}"
+    conversation_turn_id = _text(
+        event.get("conversation_turn_id"),
+        event.get("conversationTurnId"),
+        event.get("turn_id"),
+        event.get("turnId"),
+        io_payload.get("conversationTurnId"),
+        existing.get("conversationTurnId") if preserve_existing_session else "",
+    )
+    latest_message = _text(
+        event.get("latest_output"),
+        io_payload.get("latestOutput"),
+        event.get("latest_output_label"),
+        event.get("phase"),
+        existing.get("latestMessage") if preserve_existing_session else "",
+    )
+
+    sessions[role] = {
+        "role": role,
+        "status": str(status or existing.get("status") or "").strip(),
+        "agentId": str(binding.get("agentId") or existing.get("agentId") or "").strip(),
+        "displayName": str(binding.get("displayName") or existing.get("displayName") or "").strip(),
+        "roleLabel": str(binding.get("roleLabel") or existing.get("roleLabel") or "").strip(),
+        "conversationPath": conversation_path,
+        "conversationSessionId": conversation_session_id,
+        "conversationTurnId": conversation_turn_id,
+        "caseId": _text(event.get("case_id"), state.get("currentCaseId"), existing.get("caseId") if preserve_existing_session else ""),
+        "caseIndex": _int_value(event.get("case_index"), state.get("currentCaseIndex")),
+        "caseTotal": _int_value(event.get("case_total"), state.get("caseTotal")),
+        "scenario": _text(event.get("scenario"), state.get("currentCaseScenario"), existing.get("scenario") if preserve_existing_session else ""),
+        "mode": _text(event.get("mode"), state.get("currentCaseMode"), existing.get("mode") if preserve_existing_session else ""),
+        "latestMessage": latest_message,
+        "latestOutputKind": _text(
+            event.get("latest_output_kind"),
+            io_payload.get("latestOutputKind"),
+            existing.get("latestOutputKind") if preserve_existing_session else "",
+        ),
+        "latestOutputLabel": _text(
+            event.get("latest_output_label"),
+            io_payload.get("latestOutputLabel"),
+            existing.get("latestOutputLabel") if preserve_existing_session else "",
+        ),
+        "updatedAt": _text(event.get("updated_at"), io_payload.get("updatedAt"), state.get("updatedAt")),
+    }
 
 
 def _case_io_payload(event: dict[str, Any]) -> dict[str, Any] | None:
