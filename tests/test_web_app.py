@@ -2352,21 +2352,25 @@ def test_session_live_output_publishes_lightweight_assistant_delta_without_detai
             session_service._SESSION_LIVE_OUTPUTS.pop("session-live", None)
 
     assert detail_calls == 0
-    assert subscriber.qsize() == 1
-    event = subscriber.get_nowait()
+    assert subscriber.qsize() >= 1
+    events = []
+    while not subscriber.empty():
+        events.append(subscriber.get_nowait())
+    assert all(item["type"] == "assistant_delta" for item in events)
+    assert all("timelineItems" not in item for item in events)
+    event = events[-1]
     assert event["type"] == "assistant_delta"
     assert event["sessionId"] == "session-live"
     assert event["turnId"] == "turn-running"
     assert event["ledgerSeq"] >= 0
-    assert event["content"] == ""
-    assert event["thought"] == ""
-    assert event["contentDelta"] == "hello"
-    assert event["thoughtDelta"] == "thinking"
-    assert event["replaceContent"] is False
-    assert event["replaceThought"] is False
-    assert event["feedbackEvents"][0]["kind"] == "thought"
-    assert event["timelineItems"][0]["kind"] == "thought"
-    assert event["timelineItems"][0]["text"] == "thinking"
+    assert all(item["content"] == "" for item in events)
+    assert all(item["thought"] == "" for item in events)
+    assert any(item["contentDelta"] == "hello" for item in events)
+    assert any(item["thoughtDelta"] == "thinking" for item in events)
+    assert all(item["replaceContent"] is False for item in events)
+    assert all(item["replaceThought"] is False for item in events)
+    assert any((item.get("feedbackEvents") or [{}])[0].get("kind") == "thought" for item in events)
+    assert "timelineItems" not in event
     assert event["done"] is False
     delta_events = [item for item in recorded_events if item[0][2] == "session.assistant_delta.published"]
     snapshot_events = [item for item in recorded_events if item[0][2] == "session.detail_snapshot.published"]

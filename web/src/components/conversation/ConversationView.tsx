@@ -1460,18 +1460,31 @@ export function ConversationView({
   }
 
   function processSummaryPreview(operations: ConversationOperation[]) {
+    const tone = operationCollectionTone(operations);
+    const running = [...operations]
+      .reverse()
+      .find((operation) => isRunningOperationStatus(operation.status) && shouldShowTimelineOperation(operation));
     const failed = operations.find((operation) => operationStatusTone(operation) === "failed");
-    const readable = operations.find((operation) => shouldShowTimelineOperation(operation) && operation.summary.trim());
-    const fallback = operations.find((operation) => operation.summary.trim() || operation.error?.trim());
-    return compactPreview(
-      failed?.error?.trim()
+    if (tone !== "running" && tone !== "failed") {
+      return "";
+    }
+    const readable = tone === "failed"
+      ? operations.find((operation) => shouldShowTimelineOperation(operation) && operation.summary.trim())
+      : undefined;
+    const fallback = tone === "failed"
+      ? operations.find((operation) => operation.summary.trim() || operation.error?.trim())
+      : undefined;
+    const preview = tone === "running"
+      ? running?.summary.trim()
+        || running?.resultPreview?.trim()
+        || (running ? operationLabel(running).trim() : "")
+      : failed?.error?.trim()
         || failed?.summary.trim()
         || readable?.summary.trim()
         || fallback?.error?.trim()
         || fallback?.summary.trim()
-        || "",
-      120,
-    );
+        || "";
+    return compactPreview(preview || "", 120);
   }
 
   function isStreamingStatusPlaceholderContent(content: string) {
@@ -2444,7 +2457,7 @@ export function ConversationView({
     const tone = operationCollectionTone(operations);
     const toneClass = styles[`answerOnlyProcessGroup_${tone}` as keyof typeof styles] ?? "";
     const expanded = getExpansionState(messageId, "process", defaultExpanded);
-    const preview = inlinePreview || (tone === "failed" ? processSummaryPreview(operations) : "");
+    const preview = inlinePreview || processSummaryPreview(operations);
     const title = processSummaryTitle(tone);
     return (
       <section className={[styles.answerOnlyProcessGroup, toneClass].filter(Boolean).join(" ")}>
@@ -3270,6 +3283,47 @@ export function ConversationView({
               }
               return renderLegacyProcessDetails(true);
             };
+            const responseSectionNode = showResponseBlock && !isStreamingStatusPlaceholder && (!hasConversationTimeline || answerOnlyProcessMode) ? (
+              <section className={styles.responseSection}>
+                <button
+                  type="button"
+                  className={styles.responseToggle}
+                  aria-expanded={responseExpanded}
+                  onClick={() => toggleSection(message.id, "response", defaultResponseExpanded)}
+                  title={responseExpanded ? t("responseHidden") : t("responseVisible")}
+                >
+                  {responseExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                  <span>{t("responseLabel")}</span>
+                  {showResponseSpinner ? <LoaderCircle className={styles.statusSpinner} size={14} /> : null}
+                </button>
+                {responseExpanded ? (
+                  <div className={styles.responseBody}>
+                    {isResponseStreaming
+                      ? renderStreamingResponseText(message.content)
+                      : responseSegments.map((segment) =>
+                        renderResponseSegment(segment, imageArtifactUrlsBeforeMessage.get(message.id)),
+                      )}
+                  </div>
+                ) : null}
+              </section>
+            ) : null;
+            const processNode = answerOnlyProcessMode ? (
+              renderAnswerOnlyProcessGroup(
+                message.id,
+                operationGroups.timeline,
+                processDefaultExpanded,
+                renderProcessDetails,
+                isStreamingStatusPlaceholder ? compactStreamingStatusPlaceholder(message.content) : undefined,
+              )
+            ) : hasConversationTimeline ? (
+              renderConversationTimeline(message, conversationTimelineItems)
+            ) : hasFeedbackTimeline ? (
+              renderFeedbackTimelineGroup(
+                message.id,
+                operationGroups.timeline,
+                false,
+              )
+            ) : renderLegacyProcessDetails();
             return (
               <article
                 key={message.id}
@@ -3360,23 +3414,8 @@ export function ConversationView({
                   ) : null}
                   {renderUserAttachments(message)}
 
-                  {answerOnlyProcessMode ? (
-                    renderAnswerOnlyProcessGroup(
-                      message.id,
-                      operationGroups.timeline,
-                      processDefaultExpanded,
-                      renderProcessDetails,
-                      isStreamingStatusPlaceholder ? compactStreamingStatusPlaceholder(message.content) : undefined,
-                    )
-                  ) : hasConversationTimeline ? (
-                    renderConversationTimeline(message, conversationTimelineItems)
-                  ) : hasFeedbackTimeline ? (
-                    renderFeedbackTimelineGroup(
-                      message.id,
-                      operationGroups.timeline,
-                      false,
-                    )
-                  ) : renderLegacyProcessDetails()}
+                  {answerOnlyProcessMode ? responseSectionNode : null}
+                  {processNode}
                   {turnErrorMessage ? (
                     <div className={styles.turnErrorNotice} role="status" aria-live="polite">
                       <div className={styles.turnErrorNoticeIcon} aria-hidden="true">
@@ -3403,30 +3442,7 @@ export function ConversationView({
                   ) : null}
                   {renderImageArtifact(message)}
 
-                  {showResponseBlock && !isStreamingStatusPlaceholder && (!hasConversationTimeline || answerOnlyProcessMode) ? (
-                    <section className={styles.responseSection}>
-                      <button
-                        type="button"
-                        className={styles.responseToggle}
-                        aria-expanded={responseExpanded}
-                        onClick={() => toggleSection(message.id, "response", defaultResponseExpanded)}
-                        title={responseExpanded ? t("responseHidden") : t("responseVisible")}
-                      >
-                        {responseExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-                        <span>{t("responseLabel")}</span>
-                        {showResponseSpinner ? <LoaderCircle className={styles.statusSpinner} size={14} /> : null}
-                      </button>
-                      {responseExpanded ? (
-                        <div className={styles.responseBody}>
-                          {isResponseStreaming
-                            ? renderStreamingResponseText(message.content)
-                            : responseSegments.map((segment) =>
-                              renderResponseSegment(segment, imageArtifactUrlsBeforeMessage.get(message.id)),
-                            )}
-                        </div>
-                      ) : null}
-                    </section>
-                  ) : null}
+                  {!answerOnlyProcessMode ? responseSectionNode : null}
                 </div>
               </article>
             );
