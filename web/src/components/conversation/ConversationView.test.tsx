@@ -255,9 +255,45 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).toContain("思考过程 1");
     expect(html).toContain("工具调用 1");
     expect(html).toContain("最终回答已经完成。");
+    expect(html.indexOf("responseSection")).toBeLessThan(html.indexOf("answerOnlyProcessGroup"));
     expect(html).toContain('title="展开执行明细"');
     expect(html).not.toContain("先分析缓存链路");
     expect(html).not.toContain("opened session_service.py");
+  });
+
+  it("surfaces the current running process after the live answer in the default display", () => {
+    const html = renderConversation(
+      [
+        {
+          id: "message-running-process",
+          role: "assistant",
+          content: "正在整理回答。",
+          timestamp: "2026-06-21T10:00:00Z",
+          streaming: true,
+          feedbackEvents: [
+            {
+              sequence: 1,
+              kind: "thought",
+              status: "done",
+              summary: "已确定检查范围",
+            },
+            {
+              sequence: 2,
+              kind: "tool",
+              status: "running",
+              name: "read_file",
+              summary: "正在读取 ConversationView 渲染链路",
+            },
+          ],
+        },
+      ],
+      { useDefaultProcessDisplayMode: true },
+    );
+
+    expect(html).toContain("正在整理回答。");
+    expect(html).toContain("正在读取 ConversationView 渲染链路");
+    expect(html.indexOf("responseSection")).toBeLessThan(html.indexOf("answerOnlyProcessGroup"));
+    expect(html).not.toContain("已确定检查范围");
   });
 
   it("can render the opt-in compact workbench density", () => {
