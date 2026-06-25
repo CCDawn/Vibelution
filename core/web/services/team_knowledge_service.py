@@ -181,7 +181,7 @@ def _build_knowledge_steward_overview(
         ),
         reverse=True,
     )
-    permission_boundary = "proposal_and_rating_suggestion_only"
+    permission_boundary = "governed_stage_writeback_ingestion"
     metadata = dict((steward or {}).get("metadata") or {}) if isinstance((steward or {}).get("metadata"), dict) else {}
     if metadata.get("permissionBoundary"):
         permission_boundary = str(metadata.get("permissionBoundary") or permission_boundary).strip() or permission_boundary

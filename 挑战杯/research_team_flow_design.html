@@ -267,7 +267,7 @@
 <a class="node-card" href="research_flow_pages/07-steward-ingestion.html">
                 <span class="num">07</span>
                 <h3>知识治理入库</h3>
-                <p>steward_pack_draft 先作为团队待入库知识包暂存，搜集流程向知识库管理员发送入库请求并唤醒它处理最终入库。</p>
+                <p>知识库管理员在 memory 阶段审核本轮候选；approved 回写会由后端经 Team Knowledge 治理门禁创建正式 KnowledgeItem。</p>
                 <div class="tag-row"><span class="tag active">待知识治理审查</span><span class="tag">知识库管理员 · agent-knowledge-steward</span></div>
               </a>
 <a class="node-card" href="research_flow_pages/08-candidate-graph.html">
@@ -577,13 +577,13 @@
                 </div>
 <div class="state-row">
                   <b>knowledge_steward_agent_notified</b>
-                  <strong>已通知知识库管理员</strong>
-                  <span>steward_pack_draft 已写入 CandidateStore，并向知识库管理员 inbox 发送入库请求。</span>
+                  <strong>知识库管理员任务已投递</strong>
+                  <span>阶段任务已投递到知识库管理员 direct session，等待 memory 阶段结构化回写。</span>
                 </div>
 <div class="state-row">
                   <b>steward_pending_knowledge_review</b>
                   <strong>待审入库对象</strong>
-                  <span>知识库管理员已创建 SourceArtifact、pending RefinementProposal，可选 pending ratingSuggestion；等待审批门禁。</span>
+                  <span>知识库管理员 approved 回写已创建 SourceArtifact、pending RefinementProposal，可选 pending ratingSuggestion；等待或执行审批门禁。</span>
                 </div>
 <div class="state-row">
                   <b>knowledge_ingestion_needs_review</b>
@@ -633,12 +633,12 @@
 <div class="artifact-row">
                   <code>steward_ingestion_pack_YYYYMMDD_NNN.json</code>
                   <b>知识治理摄取包</b>
-                  <span>治理建议、评级建议、目标知识域和正式入库申请；默认先作为待入库包通知知识库管理员。</span>
+                  <span>治理建议、评级建议、目标知识域和正式入库申请；由知识库管理员 memory 阶段 approved 回写触发后端构建或复用。</span>
                 </div>
 <div class="artifact-row">
-                  <code>agent_inbox_messages.jsonl</code>
-                  <b>知识库管理员入库请求</b>
-                  <span>challenge_cup_knowledge_ingestion_request 消息记录 teamId、stewardPackCandidateId、knowledgeBaseId 和最终入库边界。</span>
+                  <code>stage_session_tasks.json</code>
+                  <b>知识库管理员阶段任务</b>
+                  <span>记录 teamId、runId、stageId=memory、agentRole=knowledge_steward、approved candidateIds 和 materializedKnowledgeIngestion 闭环结果。</span>
                 </div>
 <div class="artifact-row">
                   <code>candidate_graph.json</code>
@@ -974,14 +974,14 @@
               <p><b>失败：</b>退回 steward_needs_revision</p>
             </article>
 <article class="gate-card">
-              <h3>Agent 通知门</h3>
-              <p><b>通过：</b>资料搜集流程只发送入库请求并激活知识库管理员，不直接创建 SourceArtifact/Proposal/KnowledgeItem</p>
+              <h3>知识库管理员任务门</h3>
+              <p><b>通过：</b>资料入库阶段必须投递给 knowledge_steward 的 memory stage-session task，并通过 source_collection_stage_writeback_tool 回写 approved 候选</p>
               <p><b>进入：</b>knowledge_steward_agent_notified</p>
               <p><b>失败：</b>停在 steward_pack_draft</p>
             </article>
 <article class="gate-card">
               <h3>治理门</h3>
-              <p><b>通过：</b>知识库管理员收到请求后只创建 SourceArtifact + pending RefinementProposal + 可选 pending ratingSuggestion，不直接创建 KnowledgeItem</p>
+              <p><b>通过：</b>后端只接受本轮且 source_quality approved 的 source_manifest，并复用 Team Knowledge source review、proposal review/apply gate</p>
               <p><b>进入：</b>steward_pending_knowledge_review</p>
               <p><b>失败：</b>退回 steward_needs_revision</p>
             </article>
@@ -1246,7 +1246,7 @@
 <div class="blueprint-row compact">
               <b>POST</b>
               <strong>/api/teams/{team_id}/workflow-orchestration/knowledge-collection/ingest</strong>
-              <span>批量审查候选、生成候选图谱和 steward_pack_draft；默认只发送知识库管理员入库请求并唤醒 Agent，不直接正式入库。</span>
+              <span>批量审查候选、生成候选图谱和 steward_pack_draft；旧聚合入口只准备治理证据，正式入库以知识库管理员 memory 阶段 writeback 或 steward pack review gate 为准。</span>
             </div>
 <div class="blueprint-row compact">
               <b>POST</b>
@@ -1462,7 +1462,7 @@
                 </div>
 <div class="service-row">
                   <b>memory_ingestion_bridge</b>
-                  <span>已复用 Agent Inbox、Team Knowledge create_ingestion_package、review_refinement_proposal、rating suggestion review/create 和 KnowledgeItem metadata patch；steward_pack_draft 默认先通知知识库管理员，Agent 后续可提交 pending proposal，审批通过后创建正式 KnowledgeItem、迁移待审评分建议，并写入 officialResearchGraph 正式科研边。</span>
+                  <span>已复用 Team Knowledge source review、create_ingestion_package、review_refinement_proposal、rating suggestion review/create 和 KnowledgeItem metadata patch；知识库管理员 memory 阶段 approved writeback 会由后端创建或复用 steward_pack_draft，串起 pending proposal 与 review/apply gate，审批通过后创建正式 KnowledgeItem、迁移待审评分建议，并写入 officialResearchGraph 正式科研边。</span>
                 </div>
 <div class="service-row">
                   <b>knowledge_ingestion_status</b>
@@ -1662,7 +1662,7 @@
             </div>
 <div class="service-row">
               <strong>07 知识治理入库</strong>
-              <span>只生成 steward_pack_draft 草稿；approvalRequired 必须为 true，且不得请求 officialSync/applyNow/writeOfficialGraph。</span>
+              <span>本地模型只生成 steward_pack_draft 草稿；知识库管理员 memory 阶段 approved writeback 才可触发后端治理门禁，不得绕过 gate 请求 officialSync/applyNow/writeOfficialGraph。</span>
             </div>
       </div>
       <div class="tag-row" style="margin-top: 12px;">
@@ -2360,7 +2360,7 @@
               <b>M6.52</b>
               <strong>候选图谱与前审一键 Agent 节点</strong>
               <span>候选图谱步骤卡从刷新改为 Agent 生成图谱，只使用已通过资料质量筛选的候选；知识库管理员入库审核步骤卡从检查状态改为 Agent 完成前审，自动汇总通过候选和候选图谱生成 steward_pack_draft 前审包。</span>
-              <span>这两个节点都不要求用户逐条选择资料；噪声候选会被自动过滤，产物仍停在 CandidateStore candidate-only 层，不写正式 Team Knowledge、不写 RAG、不写 official graph。</span>
+              <span>候选图谱仍停在 CandidateStore candidate-only 层；知识库管理员 memory 阶段 approved writeback 可经治理门禁写入正式 Team Knowledge，不给普通阶段 Agent 正式入库权限。</span>
             </div>
 <div class="blueprint-row">
               <b>M6.53</b>
@@ -2378,7 +2378,7 @@
               <b>M6.55</b>
               <strong>知识搜集四步闭环入库</strong>
               <span>知识搜集阶段从旧五步收敛为搜索资料、资料提炼、资料审查、资料入库四张用户步骤卡；候选关系图和入库包不再作为独立用户阶段，而是合并进资料入库的 Agent 动作。</span>
-              <span>第一阶段可从资料搜索结果推进到待入库知识包：搜索资料写 DataRecord/source_manifest，资料提炼展示候选资料，资料审查批量写 sourceQualityAssessment，资料入库复用候选关系和 steward_pack_draft，并向知识库管理员发送入库请求；正式 Team Knowledge/RAG/official graph 仍由知识库管理员后续走审核门禁。</span>
+              <span>第一阶段可从资料搜索结果推进到正式入库闭环：搜索资料写 DataRecord/source_manifest，资料提炼展示候选资料，资料审查批量写 sourceQualityAssessment，资料入库由知识库管理员审核 approved 后经 Team Knowledge 治理门禁创建 KnowledgeItem。</span>
             </div>
 <div class="blueprint-row">
               <b>M6.57</b>
@@ -2389,8 +2389,8 @@
 <div class="blueprint-row">
               <b>M6.58</b>
               <strong>资料入库入口贯通候选资料</strong>
-              <span>资料入库步骤不再只看已通过资料数量；只要本轮已有候选资料，就允许点击 Agent 提炼并通知知识库管理员。</span>
-              <span>前端把候选资料数作为待入库包输入上限；后端 knowledge-collection/ingest 会先调用资料审查，再生成候选关系和 steward_pack_draft，并通过 Agent Inbox 向知识库管理员发送入库请求，避免用户被卡在必须先手动跑完每个中间门禁，同时不绕过最终知识库管理员。</span>
+              <span>资料入库步骤不再只看已通过资料数量；只要本轮已有候选资料，就允许进入知识库管理员阶段任务。</span>
+              <span>前端把候选资料数作为待入库包输入上限；后端会先补齐资料审查、候选关系和 steward_pack_draft 证据，再由知识库管理员 memory 阶段 approved writeback 触发治理门禁，避免用户被卡在必须手动跑完每个中间门禁，同时不绕过最终知识库管理员。</span>
             </div>
 <div class="blueprint-row">
               <b>M6.59</b>

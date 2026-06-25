@@ -48,10 +48,10 @@ def test_repair_agent_directory_creates_protected_knowledge_steward_agent(tmp_pa
     assert steward["memoryPolicyId"] == "memory-knowledge-steward"
     assert steward["metadata"]["systemRole"] == "knowledge_steward"
     assert steward["metadata"]["protected"] is True
-    assert steward["metadata"]["permissionBoundary"] == "proposal_and_rating_suggestion_only"
+    assert steward["metadata"]["permissionBoundary"] == "governed_stage_writeback_ingestion"
     assert steward["metadata"]["managedDomain"] == "team_knowledge"
     assert "维护团队知识库质量" in steward["taskProfile"]["mission"]
-    assert "直接应用正式知识" in steward["taskProfile"]["avoidTasks"]
+    assert "知识治理门禁" in steward["taskProfile"]["avoidTasks"]
     assert "knowledge_governance" in steward["taskProfile"]["taskTypes"]
 
     tool_policy = steward["toolPolicy"]
@@ -305,7 +305,7 @@ def test_repair_agent_directory_logs_knowledge_steward_creation(tmp_path, monkey
     assert event[1]["fields"]["agentId"] == agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID
     assert event[1]["fields"]["toolPolicyId"] == "tool-knowledge-steward"
     assert event[1]["fields"]["memoryPolicyId"] == "memory-knowledge-steward"
-    assert event[1]["fields"]["permissionBoundary"] == "proposal_and_rating_suggestion_only"
+    assert event[1]["fields"]["permissionBoundary"] == "governed_stage_writeback_ingestion"
     assert "agent" in event[1]["fields"]["repairedFields"]
 
 
