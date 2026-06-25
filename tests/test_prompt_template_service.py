@@ -113,6 +113,19 @@ def test_prompt_template_repair_upgrades_builtin_challenge_stage_prompt_content(
     assert "[搜索质量不足]" in detail["content"]
 
 
+def test_source_quality_prompt_requires_candidate_paging_and_structured_decisions(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    prompt_template_service.repair_prompt_templates()
+
+    detail = prompt_template_service.get_prompt_template("prompt-challenge-cup-source-quality")
+
+    assert "candidate_offset" in detail["content"]
+    assert "candidate_limit" in detail["content"]
+    assert "candidateDecisions" in detail["content"]
+    assert "candidateId" in detail["content"]
+    assert "未审候选" in detail["content"]
+
+
 def test_prompt_template_update_writes_source_and_refreshes_hash(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     prompt_template_service.repair_prompt_templates()

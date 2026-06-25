@@ -1734,6 +1734,195 @@ def test_source_collection_stage_tools_read_context_and_writeback(tmp_path, monk
     assert writeback_event["fields"]["status"] == "completed"
 
 
+def test_source_collection_context_reports_actual_candidate_page(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
+    agent = agent_directory_service.create_agent_instance(display_name="资料审查")
+    session_service.ensure_agent_direct_session(agent_id=agent["agentId"], title="资料审查")
+    team = team_service.create_team(
+        name="挑战杯科研团队",
+        members=[{"agentId": agent["agentId"], "role": "source_quality", "agentName": "资料审查"}],
+    )
+    run_response = team_workflow_orchestration_service.start_source_collection_run(
+        team["teamId"],
+        {
+            "topic": "预测编码皮层层级",
+            "agentRoles": ["source_quality"],
+            "agentIds": {"source_quality": agent["agentId"]},
+            "querySeeds": ["predictive coding cortical hierarchy"],
+            "promptCachePolicy": {"requirement": "disabled"},
+        },
+    )
+    run_id = run_response["run"]["runId"]
+    for index in range(3):
+        team_workflow_orchestration_service.register_candidate_source(
+            team["teamId"],
+            {
+                "title": f"Predictive coding candidate {index}",
+                "sourceUrl": f"https://doi.org/10.0000/context-page-{index}",
+                "sourceKind": "paper",
+                "summary": "Neural predictive coding evidence.",
+                "allowedForAnalysis": True,
+                "metadata": {"sourceCollectionRunId": run_id, "doi": f"10.0000/context-page-{index}"},
+                "createdByAgent": "content-extraction-agent",
+            },
+        )
+    monkeypatch.setattr(
+        session_service,
+        "submit_session_message",
+        lambda session_id, content, **kwargs: {"accepted": True, "sessionId": session_id, "turnId": "turn-context-page", "status": "running"},
+    )
+    task = team_workflow_orchestration_service.start_source_collection_stage_session_task(
+        team["teamId"],
+        run_id,
+        {"stageId": "screening", "agentId": agent["agentId"], "agentRole": "source_quality"},
+    )
+
+    context = team_workflow_orchestration_service.get_source_collection_stage_task_context(
+        team["teamId"],
+        task_id=task["taskId"],
+        max_records=2,
+    )
+
+    assert len(context["candidates"]) == 2
+    assert context["counts"]["candidateCount"] == 3
+    assert context["counts"]["returnedCandidateCount"] == 2
+    assert context["candidatePage"] == {
+        "offset": 0,
+        "limit": 2,
+        "returned": 2,
+        "total": 3,
+        "hasMore": True,
+        "nextOffset": 2,
+    }
+    assert context["unassessedCandidateIds"] == [item["candidateId"] for item in context["candidates"]]
+    assert all(item["qualityBucket"] == "pending" for item in context["candidates"])
+
+
+def test_source_quality_stage_writeback_materializes_candidate_decisions(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
+    agent = agent_directory_service.create_agent_instance(display_name="资料审查")
+    session_service.ensure_agent_direct_session(agent_id=agent["agentId"], title="资料审查")
+    team = team_service.create_team(
+        name="挑战杯科研团队",
+        members=[{"agentId": agent["agentId"], "role": "source_quality", "agentName": "资料审查"}],
+    )
+    run_response = team_workflow_orchestration_service.start_source_collection_run(
+        team["teamId"],
+        {
+            "topic": "神经算法资料质检",
+            "agentRoles": ["source_quality"],
+            "agentIds": {"source_quality": agent["agentId"]},
+            "querySeeds": ["predictive coding neural algorithm"],
+            "promptCachePolicy": {"requirement": "disabled"},
+        },
+    )
+    run_id = run_response["run"]["runId"]
+    approved = team_workflow_orchestration_service.register_candidate_source(
+        team["teamId"],
+        {
+            "title": "Predictive coding cortical hierarchy neural network paper",
+            "sourceUrl": "https://doi.org/10.0000/source-quality-approved",
+            "sourceKind": "paper",
+            "summary": "Neural predictive coding evidence for network learning and attention mechanisms.",
+            "tags": ["neuro", "algorithm"],
+            "allowedForAnalysis": True,
+            "metadata": {"sourceCollectionRunId": run_id, "doi": "10.0000/source-quality-approved"},
+            "createdByAgent": "content-extraction-agent",
+        },
+    )["candidate"]
+    rejected = team_workflow_orchestration_service.register_candidate_source(
+        team["teamId"],
+        {
+            "title": "Satellite SAR ionosphere encoding source",
+            "sourceUrl": "https://doi.org/10.0000/source-quality-rejected",
+            "sourceKind": "paper",
+            "summary": "Ionosphere measurement encoding unrelated to neural algorithms.",
+            "allowedForAnalysis": True,
+            "metadata": {"sourceCollectionRunId": run_id, "doi": "10.0000/source-quality-rejected"},
+            "createdByAgent": "content-extraction-agent",
+        },
+    )["candidate"]
+    needs_info = team_workflow_orchestration_service.register_candidate_source(
+        team["teamId"],
+        {
+            "title": "Pain coding cortical source needing abstract",
+            "sourceUrl": "https://doi.org/10.0000/source-quality-needs-info",
+            "sourceKind": "paper",
+            "summary": "Potentially relevant cortical coding source but abstract is missing.",
+            "allowedForAnalysis": True,
+            "metadata": {"sourceCollectionRunId": run_id, "doi": "10.0000/source-quality-needs-info"},
+            "createdByAgent": "content-extraction-agent",
+        },
+    )["candidate"]
+    monkeypatch.setattr(
+        session_service,
+        "submit_session_message",
+        lambda session_id, content, **kwargs: {"accepted": True, "sessionId": session_id, "turnId": "turn-source-quality", "status": "running"},
+    )
+    task = team_workflow_orchestration_service.start_source_collection_stage_session_task(
+        team["teamId"],
+        run_id,
+        {"stageId": "screening", "agentId": agent["agentId"], "agentRole": "source_quality"},
+    )
+
+    response = team_workflow_orchestration_service.writeback_source_collection_stage_session_task(
+        team["teamId"],
+        task["taskId"],
+        {
+            "status": "needs_review",
+            "summary": "审查 3/3 条候选：通过 1，拒绝 1，退回补充 1。",
+            "result": {
+                "reviewSummary": {"total": 3, "assessed": 3, "pass": 1, "rejected": 1, "needsMoreInfo": 1},
+                "candidateDecisions": [
+                    {
+                        "candidateId": approved["candidateId"],
+                        "decision": "pass",
+                        "reason": "神经预测编码主题相关，元数据可追踪。",
+                        "evidenceRefs": [{"type": "doi", "id": "10.0000/source-quality-approved"}],
+                    },
+                    {
+                        "candidateId": rejected["candidateId"],
+                        "decision": "reject",
+                        "reason": "SAR 电离层编码，不属于神经算法资料。",
+                        "riskFlags": ["topic_mismatch"],
+                    },
+                    {
+                        "candidateId": needs_info["candidateId"],
+                        "decision": "needs_more_info",
+                        "reason": "标题可能相关，但缺摘要，需补充公开内容。",
+                        "requiredFixes": ["补充摘要或正文证据。"],
+                    },
+                ],
+            },
+            "recordedByAgent": agent["agentId"],
+        },
+    )
+
+    status = team_workflow_orchestration_service.get_source_quality_status(team["teamId"])
+    candidates = {
+        item["candidateId"]: item
+        for item in team_workflow_orchestration_service.list_candidate_store(team["teamId"], candidate_type="source_manifest")["candidates"]
+    }
+    materialized = response["writeback"]["materializedSourceQuality"]
+    assert materialized["assessedCandidateCount"] == 3
+    assert materialized["approvedCandidateCount"] == 1
+    assert materialized["rejectedCandidateCount"] == 1
+    assert materialized["needsRevisionCandidateCount"] == 1
+    assert candidates[approved["candidateId"]]["qualityStatus"] == "source_quality_approved"
+    assert candidates[rejected["candidateId"]]["qualityStatus"] == "source_quality_rejected"
+    assert candidates[needs_info["candidateId"]]["qualityStatus"] == "source_quality_needs_revision"
+    assert status["summary"]["assessedSourceCandidateCount"] == 3
+    assert status["summary"]["approvedSourceCandidateCount"] == 1
+    assert status["summary"]["rejectedSourceCandidateCount"] == 1
+    assert status["summary"]["needsRevisionSourceCandidateCount"] == 1
+    screening_projection = team_workflow_orchestration_service._source_collection_stage_cards_projection(team["teamId"], run_id)["cards"][2]
+    assert screening_projection["status"] == "closed_loop"
+    assert screening_projection["counts"]["artifact"] == 3
+    assert screening_projection["counts"]["pending"] == 0
+
+
 def test_source_collection_stage_tools_record_failure_runtime_events(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     from core.web.services import runtime_scene_service
