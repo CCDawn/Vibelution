@@ -198,6 +198,28 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("setSearchParams({ team: team.teamId })");
   });
 
+  it("exposes Team and member Agent memory deep links from the Team workspace", () => {
+    expect(routeSource).toContain("teamMemoryRoute");
+    expect(routeSource).toContain("agentCenterMemoryRoute");
+    expect(routeSource).toContain("selectedTeamReturnRoute");
+    expect(routeSource).toContain("selectedTeamKnowledgeRoute");
+    expect(routeSource).toContain("selectedTeamGraphRoute");
+    expect(routeSource).toContain("renderTeamMemoryIndex()");
+    expect(routeSource).toContain("styles.teamMemoryIndex");
+    expect(routeSource).toContain("styles.teamMemoryMemberGrid");
+    expect(routeSource).toContain("团队记忆索引");
+    expect(routeSource).toContain("团队知识库");
+    expect(routeSource).toContain("团队记忆图谱");
+    expect(routeSource).toContain("成员 Agent 记忆");
+    expect(routeSource).toContain("Agent 记忆");
+    expect(routeSource).toContain("记忆配置");
+    expect(routeSource).toContain('view: "agents"');
+    expect(routeSource).toContain('view: "knowledge"');
+    expect(routeSource).toContain('view: "graph"');
+    expect(routeSource).toContain("teamId: selectedTeam.teamId");
+    expect(routeSource).toContain("teamId: selectedTeam?.teamId");
+  });
+
   it("keeps only the fixed research and AI search teams in the picker", () => {
     expect(routeSource).toContain("EVOLUTION_SYSTEM_TEAM_IDS");
     expect(routeSource).toContain('"self-evolution-team"');

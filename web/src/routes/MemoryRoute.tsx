@@ -2245,6 +2245,10 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
   const [activeManageFilter, setActiveManageFilter] = useState<ManageFilterMode>(() => normalizeManageFilterMode(searchParams.get("manage")));
   const [activeChannel, setActiveChannel] = useState<ChannelFilter>(() => normalizeChannelFilter(searchParams.get("channel")));
   const [searchText, setSearchText] = useState(() => searchParams.get("q") ?? "");
+  const requestedKnowledgeActorAgentId = (searchParams.get("agentId") ?? "").trim();
+  const requestedTeamId = (searchParams.get("teamId") ?? "").trim();
+  const requestedKnowledgeBaseId = (searchParams.get("knowledgeBaseId") ?? "").trim();
+  const requestedGraphNodeId = (searchParams.get("nodeId") ?? "").trim();
   const [copyFeedback, setCopyFeedback] = useState<{ tone: "idle" | "success" | "error"; text: string }>({
     tone: "idle",
     text: "",
@@ -2275,7 +2279,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
   const [selectedAgentMemoryItemId, setSelectedAgentMemoryItemId] = useState("");
   const [graphSearchText, setGraphSearchText] = useState("");
   const [activeGraphNodeType, setActiveGraphNodeType] = useState("");
-  const [selectedGraphNodeId, setSelectedGraphNodeId] = useState("");
+  const [selectedGraphNodeId, setSelectedGraphNodeId] = useState(() => requestedGraphNodeId);
   const [selectedCleanupTargetKeys, setSelectedCleanupTargetKeys] = useState<string[]>([]);
   const [cleanupConfirmationText, setCleanupConfirmationText] = useState("");
   const [cleanupPreview, setCleanupPreview] = useState<MemoryCleanupPreviewResponse | null>(null);
@@ -2288,7 +2292,6 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
     tone: "idle",
     text: "",
   });
-  const requestedKnowledgeActorAgentId = (searchParams.get("agentId") ?? "").trim();
   const [memoryProposalStatusFilter, setMemoryProposalStatusFilter] = useState<MemoryProposalStatusFilter>("pending");
   const [memoryProposalResolutionNotes, setMemoryProposalResolutionNotes] = useState<Record<string, string>>({});
 
@@ -2367,9 +2370,12 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
   });
 
   const memoryKnowledgeGraphQuery = useQuery({
-    queryKey: queryKeys.memoryKnowledgeGraph(fallbackKnowledgeActorAgentId, "officialResearchGraph"),
+    queryKey: queryKeys.memoryKnowledgeGraph(fallbackKnowledgeActorAgentId, "officialResearchGraph", requestedTeamId),
     queryFn: () => {
       const params = appendAgentParam(new URLSearchParams({ include: "officialResearchGraph" }), fallbackKnowledgeActorAgentId);
+      if (requestedTeamId) {
+        params.set("teamId", requestedTeamId);
+      }
       return fetchJson<MemoryKnowledgeGraphPayload>(`/api/memory/knowledge-graph?${params.toString()}`);
     },
     refetchInterval: resolvePollingInterval(pageVisible, 60_000),
@@ -2531,7 +2537,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
       invalidateMemoryQueries(queryClient);
       invalidateKnowledgeDashboard(queryClient, fallbackKnowledgeActorAgentId);
       void queryClient.invalidateQueries({ queryKey: queryKeys.agents() });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.memoryKnowledgeGraph(fallbackKnowledgeActorAgentId, "officialResearchGraph") });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.memoryKnowledgeGraph(fallbackKnowledgeActorAgentId, "officialResearchGraph", requestedTeamId) });
       void queryClient.invalidateQueries({ queryKey: ["knowledge"] });
     },
     onError: (error) => {
@@ -2710,6 +2716,22 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
   const knowledgeOperationsHealth = knowledgeDashboardSnapshot?.operationsHealth;
   const knowledgeGovernancePlan = knowledgeDashboardSnapshot?.governancePlan;
   const knowledgeBases = knowledgeOverview?.knowledgeBases ?? [];
+  const requestedTeamKnowledgeBase =
+    knowledgeBases.find((base) => {
+      const requestId = knowledgeBaseRequestId(base);
+      if (requestedKnowledgeBaseId && (
+        requestId === requestedKnowledgeBaseId
+        || base.knowledgeBaseId === requestedKnowledgeBaseId
+        || base.scopedKnowledgeBaseId === requestedKnowledgeBaseId
+      )) {
+        return true;
+      }
+      if (!requestedTeamId) {
+        return false;
+      }
+      const ownerId = knowledgeBaseOwnerId(base);
+      return String(base.ownerType || "team") === "team" && (ownerId === requestedTeamId || base.teamId === requestedTeamId);
+    }) ?? null;
   const activeKnowledgeBase: TeamKnowledgeBase | null =
     knowledgeBases.find((base) => knowledgeBaseRequestId(base) === activeKnowledgeBaseId) ?? knowledgeBases[0] ?? null;
   const activeKnowledgeBaseForItems = knowledgeBaseRequestId(activeKnowledgeBase);
@@ -3495,10 +3517,14 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
       }
       return;
     }
+    if (requestedTeamKnowledgeBase && activeKnowledgeBaseId !== knowledgeBaseRequestId(requestedTeamKnowledgeBase)) {
+      setActiveKnowledgeBaseId(knowledgeBaseRequestId(requestedTeamKnowledgeBase));
+      return;
+    }
     if (!activeKnowledgeBaseId || !knowledgeBases.some((base) => knowledgeBaseRequestId(base) === activeKnowledgeBaseId)) {
       setActiveKnowledgeBaseId(knowledgeBaseRequestId(knowledgeBases[0]));
     }
-  }, [activeKnowledgeBaseId, knowledgeBases]);
+  }, [activeKnowledgeBaseId, knowledgeBases, requestedTeamKnowledgeBase]);
 
   useEffect(() => {
     const ownerId = knowledgeBaseOwnerId(activeKnowledgeBase);

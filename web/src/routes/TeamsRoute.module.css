@@ -1751,6 +1751,132 @@
   opacity: 0.52;
 }
 
+.teamMemoryIndex {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid color-mix(in srgb, var(--accent-cool) 24%, var(--border-soft));
+  border-radius: 8px;
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--accent-success) 6%, transparent), transparent 72%),
+    var(--surface-panel-strong);
+}
+
+.teamMemoryIndexHeader,
+.teamMemoryMemberHeader {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.teamMemoryIndexHeader > div {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.teamMemoryIndexHeader strong,
+.teamMemoryIndexHeader span,
+.teamMemoryMemberHeader span,
+.teamMemoryMemberCard strong,
+.teamMemoryMemberCard span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.teamMemoryIndexHeader strong {
+  color: var(--fg-primary);
+  font-size: 0.78rem;
+}
+
+.teamMemoryIndexHeader span,
+.teamMemoryMemberHeader span,
+.teamMemoryMemberCard span {
+  color: var(--fg-muted);
+  font-size: 0.64rem;
+  font-weight: 760;
+}
+
+.teamMemoryIndexHeader a,
+.teamMemoryActionGrid a,
+.teamMemoryMemberActions a {
+  display: inline-flex;
+  min-height: 26px;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 0 8px;
+  border: 1px solid color-mix(in srgb, var(--accent-cool) 30%, var(--border-soft));
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--surface-panel) 82%, transparent);
+  color: var(--fg-primary);
+  font-size: 0.66rem;
+  font-weight: 820;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.teamMemoryActionGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.teamMemoryActionGrid a {
+  width: 100%;
+}
+
+.teamMemoryMemberHeader strong {
+  display: inline-flex;
+  min-width: 24px;
+  justify-content: center;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent-success) 14%, var(--surface-card));
+  color: color-mix(in srgb, var(--accent-success) 74%, var(--fg-primary));
+  font-size: 0.68rem;
+}
+
+.teamMemoryMemberGrid {
+  display: grid;
+  gap: 6px;
+}
+
+.teamMemoryMemberCard {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+  padding: 7px;
+  border: 1px solid color-mix(in srgb, var(--border-soft) 86%, transparent);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--surface-card) 76%, transparent);
+}
+
+.teamMemoryMemberCard > div:first-child {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.teamMemoryMemberCard strong {
+  color: var(--fg-primary);
+  font-size: 0.72rem;
+}
+
+.teamMemoryMemberActions {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 5px;
+}
+
 .sourceCollectionStageAgentPanel {
   display: grid;
   gap: 7px;
