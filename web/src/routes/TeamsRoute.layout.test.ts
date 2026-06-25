@@ -436,9 +436,14 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("sourceCollectionStageCardSummary");
     expect(routeSource).toContain("sourceCollectionStageCardById");
     expect(routeSource).toContain("sourceCollectionDisplayedCandidateCount");
+    expect(routeSource).toContain("sourceCollectionPrimaryDataLoading");
+    expect(routeSource).toContain("sourceCollectionLoadingText");
+    expect(routeSource).toContain("sourceCollectionLoadingSummary");
     expect(routeSource).toContain("sourceCollectionDisplayedCandidateFilterCounts");
     expect(routeSource).toContain("sourceCollectionCandidateProjectionFallbackCount");
     expect(routeSource).toContain("candidateListAwaitingRefresh");
+    expect(routeSource).toContain("正在加载资料提炼结果");
+    expect(routeSource).toContain("正在读取资料提炼结果");
     expect(routeSource).toContain("列表正在同步");
     expect(routeSource).toContain("sourceCollectionStageProjectionState");
     expect(routeSource).toContain("agent_done_artifact_pending");
@@ -693,6 +698,9 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("sourceCollectionStageWritebackRefetchInterval");
     expect(routeSource).toContain("refetchInterval: (query) =>");
     expect(routeSource).toContain("refetchInterval: () => sourceCollectionStageWritebackRefetchInterval(pageVisible, researchStageRoundStatusQuery.data)");
+    expect(routeSource).toContain("enabled: Boolean(effectiveTeamId && researchWorkflowTeamSelected)");
+    expect(routeSource).not.toContain("researchStageRoundStatusQueryKey(effectiveTeamId || \"none\"),\n    queryFn: () =>\n      fetchJson<ResearchStageRoundStatusPayload>(\n        `/api/teams/${encodeURIComponent(effectiveTeamId)}/workflow-orchestration/stage-rounds/status`,\n      ),\n    enabled: Boolean(effectiveTeamId && researchWorkflowTeamSelected && teamWorkflowQuery.data)");
+    expect(routeSource).not.toContain("queryKeys.teamWorkflowCandidates(effectiveTeamId || \"none\", TEAM_WORKFLOW_CANDIDATE_PREVIEW_LIMIT),\n    queryFn: () =>\n      fetchJson<TeamWorkflowCandidateListPayload>(\n        `/api/teams/${encodeURIComponent(effectiveTeamId)}/workflow-orchestration/candidates?limit=${TEAM_WORKFLOW_CANDIDATE_PREVIEW_LIMIT}`,\n      ),\n    enabled: Boolean(effectiveTeamId && researchWorkflowTeamSelected && teamWorkflowQuery.data)");
     const sourceCollectionStageReturnRefreshSource = routeSource.slice(
       routeSource.indexOf("if (!researchWorkflowTeamSelected || !pageVisible"),
       routeSource.indexOf("if (!selectedTeam?.teamId || !selectedSourceCollectionRunEffectiveId || !selectedSourceCollectionSearchAccepted"),
