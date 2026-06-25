@@ -34,6 +34,10 @@ def test_prompt_template_registry_repairs_research_defaults(tmp_path, monkeypatc
         "prompt-challenge-cup-source-acquisition",
         "prompt-challenge-cup-content-extraction",
         "prompt-challenge-cup-source-quality",
+        "prompt-knowledge-expansion-source-intake",
+        "prompt-knowledge-expansion-content-extraction",
+        "prompt-knowledge-expansion-source-quality",
+        "prompt-knowledge-expansion-candidate-graph",
     } <= research_template_ids
     assert "prompt-challenge-cup-coordinator" in template_ids
     assert broad["category"] == "research"
@@ -79,6 +83,20 @@ def test_prompt_template_registry_repairs_research_defaults(tmp_path, monkeypatc
     extraction_detail = prompt_template_service.get_prompt_template("prompt-challenge-cup-content-extraction")
     assert extraction_detail is not None
     assert "不直接写正式 Team Knowledge" in extraction_detail["content"]
+    knowledge_source_intake = prompt_template_service.get_prompt_template("prompt-knowledge-expansion-source-intake")
+    assert knowledge_source_intake is not None
+    assert knowledge_source_intake["metadata"]["roleKey"] == "knowledge_expansion_source_intake"
+    assert "本地资料导入" in knowledge_source_intake["content"]
+    assert "source_collection_context_tool" in knowledge_source_intake["content"]
+    assert "source_collection_stage_writeback_tool" in knowledge_source_intake["content"]
+    assert "batch_web_search_tool" in knowledge_source_intake["content"]
+    assert not _contains_tool_name(knowledge_source_intake["content"], "web_search_tool")
+    assert not _contains_tool_name(knowledge_source_intake["content"], "knowledge_ingestion_tool")
+    knowledge_graph = prompt_template_service.get_prompt_template("prompt-knowledge-expansion-candidate-graph")
+    assert knowledge_graph is not None
+    assert knowledge_graph["metadata"]["roleKey"] == "knowledge_expansion_candidate_graph"
+    assert "候选关系" in knowledge_graph["content"]
+    assert "不写 official graph" in knowledge_graph["content"]
     coordinator_detail = prompt_template_service.get_prompt_template("prompt-challenge-cup-coordinator")
     assert coordinator_detail is not None
     assert coordinator_detail["category"] == "chat"
@@ -88,6 +106,7 @@ def test_prompt_template_registry_repairs_research_defaults(tmp_path, monkeypatc
     assert (tmp_path / "workspace" / "prompts" / "research" / "organization_advisor.md").exists()
     assert (tmp_path / "workspace" / "prompts" / "research" / "capability_steward.md").exists()
     assert (tmp_path / "workspace" / "prompts" / "research" / "challenge_cup_data_discovery.md").exists()
+    assert (tmp_path / "workspace" / "prompts" / "research" / "knowledge_expansion_source_intake.md").exists()
 
 
 def test_prompt_template_repair_upgrades_builtin_challenge_stage_prompt_content(tmp_path, monkeypatch):

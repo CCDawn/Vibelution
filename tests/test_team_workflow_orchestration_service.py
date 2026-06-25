@@ -27,6 +27,33 @@ def test_source_collection_stage_round_sync_has_single_implementation():
     assert source.count("def _sync_source_collection_stage_round_after_search(") == 1
 
 
+def test_source_collection_formal_knowledge_boundary_requires_steward_memory_stage():
+    assert team_workflow_orchestration_service._source_collection_stage_can_materialize_formal_knowledge(
+        "memory",
+        "knowledge_steward",
+    ) is True
+    assert team_workflow_orchestration_service._source_collection_stage_can_materialize_formal_knowledge(
+        "memory",
+        "content_extraction",
+    ) is False
+    assert team_workflow_orchestration_service._source_collection_stage_can_materialize_formal_knowledge(
+        "candidate",
+        "knowledge_steward",
+    ) is False
+
+    contract = team_workflow_orchestration_service._source_collection_stage_task_writeback_contract(
+        "team-boundary",
+        "run-boundary",
+        "task-boundary",
+        stage_id="memory",
+        agent_id="content-agent",
+        agent_role="content_extraction",
+    )
+    assert contract["writesFormalKnowledge"] is False
+    assert contract["writesOfficialGraph"] is False
+    assert contract["resultAuthority"] == "source_collection_stage_writeback_tool"
+
+
 class _FakeLocalResearchMessage:
     def __init__(self, content, *, reasoning_content=""):
         self.content = content
@@ -1053,6 +1080,51 @@ def test_start_source_collection_run_creates_generic_run_and_assignments(tmp_pat
     assert response["workflow"]["activeWorkflowItems"][0]["status"] == "source_collection_started"
 
 
+def test_start_source_collection_run_imports_local_workspace_sources_for_knowledge_expansion(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    result = team_service.ensure_knowledge_expansion_team_agents(purge_stale=True)
+    team = result["team"]
+    source_member = next(member for member in team["members"] if member["role"] == "source_intake")
+    source_file = tmp_path / "workspace" / "knowledge" / "notes" / "predictive-coding.md"
+    source_file.parent.mkdir(parents=True, exist_ok=True)
+    source_file.write_text(
+        "# Predictive coding\n\nEvidence for cortical hierarchy and error minimization.",
+        encoding="utf-8",
+    )
+
+    response = team_workflow_orchestration_service.start_source_collection_run(
+        team["teamId"],
+        {
+            "title": "Knowledge expansion local intake",
+            "workflowPurpose": "knowledge_expansion",
+            "collectionMode": "local_workspace",
+            "topic": "predictive coding",
+            "goal": "扩充团队知识库",
+            "agentRoles": ["source_intake", "content_extraction", "source_quality"],
+            "agentIds": {"source_intake": source_member["agentId"]},
+            "localScanScope": {"roots": ["workspace/knowledge"], "maxFiles": 10},
+            "promptCachePolicy": {"requirement": "disabled"},
+        },
+    )
+    run_id = response["run"]["runId"]
+    context = team_workflow_orchestration_service._source_collection_run_context_bundle(team["teamId"], run_id)
+
+    assert response["run"]["scope"]["workflowKind"] == "knowledge_expansion"
+    assert response["run"]["metadata"]["collectionMode"] == "local_workspace"
+    assert response["searchPlan"]["collectionMode"] == "local_workspace"
+    assert response["localWorkspaceScan"]["status"] == "completed"
+    assert response["localWorkspaceScan"]["importedCount"] == 1
+    assert response["localWorkspaceScan"]["skippedCount"] == 0
+    assert context["runStatus"]["summary"]["recordCount"] == 1
+    assert len(context["records"]) == 1
+    assert len(context["sourceCandidates"]) == 1
+    candidate = context["sourceCandidates"][0]
+    assert candidate["metadata"]["sourceCollectionRunId"] == run_id
+    assert candidate["metadata"]["sourceCategory"] == "local_file"
+    assert candidate["metadata"]["localWorkspaceImport"]["relativePath"] == "workspace/knowledge/notes/predictive-coding.md"
+    assert candidate["sourcePath"].endswith("workspace/knowledge/notes/predictive-coding.md")
+
+
 def test_start_source_collection_run_blocks_without_required_prompt_cache(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     monkeypatch.setattr(
@@ -1376,11 +1448,14 @@ def test_start_source_collection_memory_stage_routes_to_knowledge_base_admin(tmp
     assert task["agentRole"] == "knowledge_steward"
     assert task["sessionId"] == admin_session["id"]
     assert task["task"]["title"] == "知识库管理员入库审核任务"
-    assert task["task"]["writesFormalKnowledge"] is False
+    assert task["task"]["writesFormalKnowledge"] is True
+    assert task["writebackContract"]["writesFormalKnowledge"] is True
+    assert task["writebackContract"]["resultAuthority"] == "source_collection_stage_writeback_tool+knowledge_ingestion_gate"
     assert submitted[0]["sessionId"] == admin_session["id"]
     assert "知识库管理员入库审核" in submitted[0]["content"]
     assert "资料入库 Agent" not in submitted[0]["content"]
     assert "共享记忆前审" not in submitted[0]["content"]
+    assert "approved" in submitted[0]["content"]
     metadata = submitted[0]["kwargs"]["message_metadata"]
     assert metadata["agentId"] == agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID
     assert metadata["agentRole"] == "knowledge_steward"
@@ -1763,6 +1838,234 @@ def test_source_collection_stage_session_task_writeback_materializes_search_lead
     assert second["writeback"]["materializedSources"]["skippedDuplicateCount"] == 2
     assert data_processing_service.list_records(run_id)["summary"]["recordCount"] == 2
     assert team_workflow_orchestration_service.list_candidate_store(team["teamId"], candidate_type="source_manifest")["candidateCount"] == 2
+
+
+def test_knowledge_steward_writeback_auto_ingests_high_confidence_sources(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
+    result = team_service.ensure_knowledge_expansion_team_agents(purge_stale=True)
+    team = result["team"]
+    steward = next(member for member in team["members"] if member["role"] == "knowledge_steward")
+    steward_agent_id = steward["agentId"]
+    steward_session = session_service.ensure_agent_direct_session(agent_id=steward_agent_id, title="知识库管理员")
+    agent_directory_service.update_agent_instance(steward_agent_id, direct_session_id=steward_session["id"])
+    knowledge_base = team_knowledge_service.create_knowledge_base(
+        team["teamId"],
+        name="Knowledge Expansion Library",
+        actor_agent_id=steward_agent_id,
+    )
+    run_response = team_workflow_orchestration_service.start_source_collection_run(
+        team["teamId"],
+        {
+            "workflowPurpose": "knowledge_expansion",
+            "collectionMode": "web_search",
+            "topic": "predictive coding",
+            "agentRoles": ["source_intake", "content_extraction", "source_quality"],
+            "promptCachePolicy": {"requirement": "disabled"},
+        },
+    )
+    run_id = run_response["run"]["runId"]
+    source = team_workflow_orchestration_service.register_candidate_source(
+        team["teamId"],
+        {
+            "candidateType": "source_manifest",
+            "title": "Predictive coding cortical hierarchy",
+            "sourceUrl": "https://doi.org/10.0000/predictive-coding",
+            "sourceKind": "paper",
+            "summary": "High-confidence source for predictive coding.",
+            "metadata": {
+                "sourceCollectionRunId": run_id,
+                "doi": "10.0000/predictive-coding",
+            },
+            "createdByAgent": "knowledge-expansion-source-intake",
+        },
+    )["candidate"]
+    team_workflow_orchestration_service.assess_source_candidate_quality(
+        team["teamId"],
+        source["candidateId"],
+        {
+            "assessedByAgent": "knowledge-expansion-source-quality",
+            "decision": "approved",
+            "notes": "Source is traceable and relevant.",
+        },
+    )
+    pack_output = _steward_pack_output(candidate_ids=[source["candidateId"]], confidence=0.92)
+    pack_output.update(
+        {
+            "targetDomain": "team_knowledge_expansion",
+            "sourceTrace": {
+                "sourceIds": [source["candidateId"]],
+                "sourceCollectionRunId": run_id,
+            },
+            "riskSummary": "Traceable source with high confidence; suitable for governed Team Knowledge.",
+            "proposalPayload": {
+                "title": "Predictive coding cortical hierarchy",
+                "summary": "Add predictive coding hierarchy as governed Team Knowledge.",
+            },
+            "ratingSuggestion": {
+                "importanceLevel": "high",
+                "confidence": 0.92,
+                "stability": "evolving",
+                "reviewPriority": "elevated",
+            },
+        }
+    )
+    monkeypatch.setattr(
+        session_service,
+        "submit_session_message",
+        lambda session_id, content, **kwargs: {
+            "accepted": True,
+            "sessionId": session_id,
+            "turnId": "turn-knowledge-expansion-steward",
+            "status": "running",
+        },
+    )
+    task = team_workflow_orchestration_service.start_source_collection_stage_session_task(
+        team["teamId"],
+        run_id,
+        {"stageId": "memory", "agentId": steward_agent_id, "agentRole": "knowledge_steward"},
+    )
+
+    response = team_workflow_orchestration_service.writeback_source_collection_stage_session_task(
+        team["teamId"],
+        task["taskId"],
+        {
+            "status": "completed",
+            "summary": "知识库管理员已审核并入库高置信资料。",
+            "result": {
+                "knowledgeBaseId": knowledge_base["knowledgeBaseId"],
+                "stewardPackDraft": pack_output,
+                "autoIngestDecision": {
+                    "decision": "approved",
+                    "confidence": 0.92,
+                    "reason": "Source quality approved and steward confidence is high.",
+                },
+            },
+            "recordedByAgent": steward_agent_id,
+            "evidenceRefs": [{"kind": "candidate", "ref": source["candidateId"]}],
+            "nextActions": ["继续下一轮知识扩充"],
+        },
+    )
+    knowledge_items = team_knowledge_service.list_knowledge_items(
+        knowledge_base["knowledgeBaseId"],
+        agent_id=steward_agent_id,
+    )
+    projection = team_workflow_orchestration_service._source_collection_stage_cards_projection(team["teamId"], run_id)
+    memory_card = next(card for card in projection["cards"] if card["stageId"] == "memory")
+
+    assert response["task"]["writesFormalKnowledge"] is True
+    assert response["writeback"]["materializedKnowledgeIngestion"]["status"] == "completed"
+    assert response["writeback"]["materializedKnowledgeIngestion"]["approvedCandidateCount"] == 1
+    assert response["writeback"]["materializedKnowledgeIngestion"]["formalKnowledgeItemCount"] == 1
+    assert knowledge_items["summary"]["itemCount"] == 1
+    assert memory_card["status"] == "closed_loop"
+    assert memory_card["counts"]["output"] == 1
+    assert memory_card["latestTask"]["materializedKnowledgeIngestion"]["status"] == "completed"
+
+
+def test_knowledge_steward_writeback_auto_ingests_approved_candidate_summary(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
+    result = team_service.ensure_knowledge_expansion_team_agents(purge_stale=True)
+    team = result["team"]
+    steward = next(member for member in team["members"] if member["role"] == "knowledge_steward")
+    steward_agent_id = steward["agentId"]
+    steward_session = session_service.ensure_agent_direct_session(agent_id=steward_agent_id, title="知识库管理员")
+    agent_directory_service.update_agent_instance(steward_agent_id, direct_session_id=steward_session["id"])
+    knowledge_base = team_knowledge_service.create_knowledge_base(
+        team["teamId"],
+        name="Knowledge Expansion Library",
+        actor_agent_id=steward_agent_id,
+    )
+    run_response = team_workflow_orchestration_service.start_source_collection_run(
+        team["teamId"],
+        {
+            "workflowPurpose": "knowledge_expansion",
+            "collectionMode": "web_search",
+            "topic": "predictive coding",
+            "agentRoles": ["source_intake", "content_extraction", "source_quality"],
+            "promptCachePolicy": {"requirement": "disabled"},
+        },
+    )
+    run_id = run_response["run"]["runId"]
+    source = team_workflow_orchestration_service.register_candidate_source(
+        team["teamId"],
+        {
+            "candidateType": "source_manifest",
+            "title": "Predictive coding candidate summary source",
+            "sourceUrl": "https://doi.org/10.0000/predictive-coding-summary",
+            "sourceKind": "paper",
+            "summary": "High-confidence candidate summary source.",
+            "metadata": {
+                "sourceCollectionRunId": run_id,
+                "doi": "10.0000/predictive-coding-summary",
+            },
+            "createdByAgent": "knowledge-expansion-source-intake",
+        },
+    )["candidate"]
+    team_workflow_orchestration_service.assess_source_candidate_quality(
+        team["teamId"],
+        source["candidateId"],
+        {
+            "assessedByAgent": "knowledge-expansion-source-quality",
+            "decision": "approved",
+            "notes": "Source is traceable and relevant.",
+        },
+    )
+    monkeypatch.setattr(
+        session_service,
+        "submit_session_message",
+        lambda session_id, content, **kwargs: {
+            "accepted": True,
+            "sessionId": session_id,
+            "turnId": "turn-knowledge-expansion-steward-summary",
+            "status": "running",
+        },
+    )
+    task = team_workflow_orchestration_service.start_source_collection_stage_session_task(
+        team["teamId"],
+        run_id,
+        {"stageId": "memory", "agentId": steward_agent_id, "agentRole": "knowledge_steward"},
+    )
+
+    response = team_workflow_orchestration_service.writeback_source_collection_stage_session_task(
+        team["teamId"],
+        task["taskId"],
+        {
+            "status": "completed",
+            "summary": "知识库管理员通过 1 条候选，进入正式入库。",
+            "result": {
+                "knowledgeBaseId": knowledge_base["knowledgeBaseId"],
+                "candidate_summary": {
+                    "approved": {
+                        "count": 1,
+                        "candidates": [
+                            {
+                                "candidateId": source["candidateId"],
+                                "title": source["title"],
+                                "overall_score": 92,
+                                "assessment_notes": "可直接进入知识库扩充。",
+                            }
+                        ],
+                    }
+                },
+                "steward_assessment": {"decision": "approved", "targetDomain": "team_knowledge_expansion"},
+            },
+            "recordedByAgent": steward_agent_id,
+            "evidenceRefs": [{"kind": "candidate", "ref": source["candidateId"]}],
+            "nextActions": ["继续下一轮知识扩充"],
+        },
+    )
+    knowledge_items = team_knowledge_service.list_knowledge_items(
+        knowledge_base["knowledgeBaseId"],
+        agent_id=steward_agent_id,
+    )
+
+    assert response["writeback"]["materializedKnowledgeIngestion"]["status"] == "completed"
+    assert response["writeback"]["materializedKnowledgeIngestion"]["approvedCandidateCount"] == 1
+    assert response["writeback"]["materializedKnowledgeIngestion"]["formalKnowledgeItemCount"] == 1
+    assert response["task"]["writesFormalKnowledge"] is True
+    assert knowledge_items["summary"]["itemCount"] == 1
 
 
 def test_research_stage_status_materializes_legacy_stage_task_writeback_sources(tmp_path, monkeypatch):
