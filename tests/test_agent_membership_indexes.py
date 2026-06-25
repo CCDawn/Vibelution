@@ -148,12 +148,42 @@ def test_repair_agent_directory_applies_challenge_cup_research_tool_profiles(tmp
             "news_search_tool",
             "search_summarize_sources_tool",
         ],
+        "challenge_cup_experiment_planner": [
+            "agent_message_tool",
+            "research_knowledge_query_tool",
+            "challenge_cup_experiment_context_tool",
+            "challenge_cup_experiment_writeback_tool",
+        ],
+        "challenge_cup_experiment_ledger": [
+            "agent_message_tool",
+            "research_knowledge_query_tool",
+            "challenge_cup_experiment_context_tool",
+            "challenge_cup_experiment_writeback_tool",
+        ],
+        "challenge_cup_iteration_planner": [
+            "agent_message_tool",
+            "research_knowledge_query_tool",
+            "challenge_cup_iteration_context_tool",
+            "challenge_cup_iteration_writeback_tool",
+            "challenge_cup_experiment_context_tool",
+        ],
+        "challenge_cup_versioning": [
+            "agent_message_tool",
+            "research_knowledge_query_tool",
+            "challenge_cup_versioning_context_tool",
+            "challenge_cup_versioning_writeback_tool",
+            "challenge_cup_iteration_context_tool",
+        ],
     }
     expected_prompt_templates = {
         "challenge_cup_data_discovery": "prompt-challenge-cup-data-discovery",
         "challenge_cup_source_acquisition": "prompt-challenge-cup-source-acquisition",
         "challenge_cup_content_extraction": "prompt-challenge-cup-content-extraction",
         "challenge_cup_source_quality": "prompt-challenge-cup-source-quality",
+        "challenge_cup_experiment_planner": "prompt-challenge-cup-experiment-planner",
+        "challenge_cup_experiment_ledger": "prompt-challenge-cup-experiment-ledger",
+        "challenge_cup_iteration_planner": "prompt-challenge-cup-iteration-planner",
+        "challenge_cup_versioning": "prompt-challenge-cup-versioning",
     }
     created_ids = {
         role_key: agent_directory_service.create_agent_instance(
@@ -196,13 +226,42 @@ def test_repair_agent_directory_applies_challenge_cup_research_tool_profiles(tmp
         assert "挑战杯" in agent["personaProfile"]["background"]
         assert "challenge_cup" in agent["taskProfile"]["taskTypes"]
         assert agent["toolPolicy"]["allowedTools"] == expected_tools
-        assert agent["toolPolicy"]["preferredTools"][:2] == [
-            "source_collection_context_tool",
-            "source_collection_stage_writeback_tool",
-        ]
-        assert agent["toolPolicy"]["writeScopes"] == []
-        assert agent["toolPolicy"]["networkAccess"] == "controlled"
-        assert agent["toolPolicy"]["mutationAccess"] == "none"
+        if role_key in {
+            "challenge_cup_data_discovery",
+            "challenge_cup_source_acquisition",
+            "challenge_cup_content_extraction",
+            "challenge_cup_source_quality",
+        }:
+            assert agent["toolPolicy"]["preferredTools"][:2] == [
+                "source_collection_context_tool",
+                "source_collection_stage_writeback_tool",
+            ]
+        elif role_key in {"challenge_cup_experiment_planner", "challenge_cup_experiment_ledger"}:
+            assert agent["toolPolicy"]["preferredTools"][:2] == [
+                "challenge_cup_experiment_context_tool",
+                "challenge_cup_experiment_writeback_tool",
+            ]
+        elif role_key == "challenge_cup_iteration_planner":
+            assert agent["toolPolicy"]["preferredTools"][:2] == [
+                "challenge_cup_iteration_context_tool",
+                "challenge_cup_iteration_writeback_tool",
+            ]
+        elif role_key == "challenge_cup_versioning":
+            assert agent["toolPolicy"]["preferredTools"][:2] == [
+                "challenge_cup_versioning_context_tool",
+                "challenge_cup_versioning_writeback_tool",
+            ]
+        if role_key in {
+            "challenge_cup_experiment_planner",
+            "challenge_cup_experiment_ledger",
+            "challenge_cup_iteration_planner",
+            "challenge_cup_versioning",
+        }:
+            assert agent["toolPolicy"]["writeScopes"] == ["team_workflow_ledger"]
+        else:
+            assert agent["toolPolicy"]["writeScopes"] == []
+        assert agent["toolPolicy"]["networkAccess"] in {"controlled", "none"}
+        assert agent["toolPolicy"]["mutationAccess"] in {"none", "restricted"}
         assert "cli_tool" not in agent["toolPolicy"]["allowedTools"]
         assert "apply_patch_tool" not in agent["toolPolicy"]["allowedTools"]
     coordinator = agent_directory_service.get_agent(coordinator_id)

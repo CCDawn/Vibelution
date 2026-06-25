@@ -302,6 +302,23 @@ def test_research_team_repair_applies_challenge_cup_agent_tool_profiles(tmp_path
     assert agent["toolPolicy"]["writeScopes"] == []
 
 
+def test_challenge_cup_research_team_uses_knowledge_base_admin_for_ingestion_review(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+
+    result = team_service.ensure_challenge_cup_research_team_agents(purge_stale=True)
+    team = result["team"]
+    admin_member = next(member for member in team["members"] if member["role"] == "knowledge_steward")
+    admin_agent = agent_directory_service.get_agent(admin_member["agentId"])
+
+    assert admin_member["agentId"] == agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID
+    assert admin_member["purpose"] == "知识库管理员入库审核"
+    assert all("资料入库" not in str(value) for value in [admin_member["agentName"], admin_member["purpose"]])
+    assert admin_agent["displayName"]
+    assert "资料入库" not in admin_agent["displayName"]
+    assert admin_agent["metadata"]["functionalDisplayName"] == agent_directory_service.KNOWLEDGE_STEWARD_FUNCTIONAL_NAME
+    assert admin_agent["metadata"]["challengeCupTeamRole"] == "knowledge_steward"
+
+
 def test_challenge_cup_research_team_agent_repair_purges_stale_and_rebuilds_complete_team(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     stale_agent = agent_directory_service.create_agent_instance(
@@ -398,6 +415,10 @@ def test_challenge_cup_research_team_agent_repair_purges_stale_and_rebuilds_comp
         "content_extraction",
         "source_quality",
         "candidate_graph",
+        "experiment_planner",
+        "experiment_ledger",
+        "iteration_planner",
+        "iteration_versioning",
         "knowledge_steward",
     ]
     active_agents_by_id = {
@@ -417,15 +438,35 @@ def test_challenge_cup_research_team_agent_repair_purges_stale_and_rebuilds_comp
             "content_extraction",
             "source_quality",
             "candidate_graph",
+            "experiment_planner",
+            "experiment_ledger",
+            "iteration_planner",
+            "iteration_versioning",
             "knowledge_steward",
         }:
             policy = agent_directory_service.resolve_tool_policy_for_agent(agent["agentId"])
-            assert "source_collection_context_tool" in policy["allowedTools"]
-            assert "source_collection_stage_writeback_tool" in policy["allowedTools"]
-            assert policy["preferredTools"][:2] == [
-                "source_collection_context_tool",
-                "source_collection_stage_writeback_tool",
-            ]
+            if member["role"] in {"experiment_planner", "experiment_ledger"}:
+                assert "challenge_cup_experiment_context_tool" in policy["allowedTools"]
+                assert "challenge_cup_experiment_writeback_tool" in policy["allowedTools"]
+                assert "web_search_tool" not in policy["allowedTools"]
+                assert "cli_tool" not in policy["allowedTools"]
+            elif member["role"] == "iteration_planner":
+                assert "challenge_cup_iteration_context_tool" in policy["allowedTools"]
+                assert "challenge_cup_iteration_writeback_tool" in policy["allowedTools"]
+                assert "web_search_tool" not in policy["allowedTools"]
+                assert "cli_tool" not in policy["allowedTools"]
+            elif member["role"] == "iteration_versioning":
+                assert "challenge_cup_versioning_context_tool" in policy["allowedTools"]
+                assert "challenge_cup_versioning_writeback_tool" in policy["allowedTools"]
+                assert "knowledge_ingestion_tool" not in policy["allowedTools"]
+                assert "cli_tool" not in policy["allowedTools"]
+            else:
+                assert "source_collection_context_tool" in policy["allowedTools"]
+                assert "source_collection_stage_writeback_tool" in policy["allowedTools"]
+                assert policy["preferredTools"][:2] == [
+                    "source_collection_context_tool",
+                    "source_collection_stage_writeback_tool",
+                ]
     canvas = team_service.get_team_canvas("research-team")
     assert {node["agentId"] for node in canvas["nodes"]} == {member["agentId"] for member in team["members"]}
     assert stale_agent["agentId"] not in {node["agentId"] for node in canvas["nodes"]}

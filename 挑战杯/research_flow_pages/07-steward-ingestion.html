@@ -30,8 +30,8 @@
         <section class="plan-hero">
           <div class="kicker">Research Flow Node 07</div>
           <h1>知识治理入库</h1>
-          <p class="subtitle">steward_pack_draft 先作为团队待入库知识包暂存，搜集流程向 Knowledge Steward Agent 发送入库请求并唤醒它处理最终入库。</p>
-          <div class="tag-row"><span class="tag active">待知识治理审查</span><span class="tag">Knowledge Steward Agent · agent-knowledge-steward</span><span class="tag">独立计划页</span></div>
+          <p class="subtitle">steward_pack_draft 先作为团队待入库知识包暂存，搜集流程向知识库管理员发送入库请求并唤醒它处理最终入库。</p>
+          <div class="tag-row"><span class="tag active">待知识治理审查</span><span class="tag">知识库管理员 · agent-knowledge-steward</span><span class="tag">独立计划页</span></div>
           <div class="diagram">
             <div class="flow-cell"><strong>输入</strong><span>review_record 候选 / algorithm_hypothesis 候选</span></div>
             <div class="flow-cell"><strong>动作</strong><span>校验 candidateIds、targetDomain、sourceTrace、riskSummary、proposalPayload、ratingSuggestion。</span></div>
@@ -54,8 +54,8 @@
             <article class="plan-card"><h2>处理动作</h2><ul><li>校验 candidateIds、targetDomain、sourceTrace、riskSummary、proposalPayload、ratingSuggestion。</li>
 <li>强制 approvalRequired=true，禁止 officialSync、applyNow 或 writeOfficialGraph 等立即正式写入意图。</li>
 <li>合格草稿先进入 steward_pack_draft，作为团队提炼后的待入库知识包暂存。</li>
-<li>知识搜集入库入口默认向 Knowledge Steward Agent inbox 发送 challenge_cup_knowledge_ingestion_request 并尝试唤醒该 Agent。</li>
-<li>Knowledge Steward Agent 收到请求后再提交 Team Knowledge 待审队列，进入 steward_pending_knowledge_review。</li>
+<li>知识搜集入库入口默认向知识库管理员 inbox 发送 challenge_cup_knowledge_ingestion_request 并尝试唤醒该 Agent。</li>
+<li>知识库管理员收到请求后再提交 Team Knowledge 待审队列，进入 steward_pending_knowledge_review。</li>
 <li>Ingestion Approval Gate 批准后进入 official_synced；拒绝后回到 steward_needs_revision。</li>
 <li>审批通过且创建正式 KnowledgeItem 后，将 proposal 级 pending ratingSuggestion 迁移为 KnowledgeItem 级 pending ratingSuggestion。</li>
 <li>审批通过后把 sourceTrace / candidateIds 转为 KnowledgeItem metadata.officialResearchGraph 中的 supports、maps_to、inspires、approved_for_ingestion 正式边。</li>
@@ -85,7 +85,7 @@
           </div>
           <div class="status-grid">
             <div class="status-item"><b>候选状态</b><span>待知识治理审查</span></div>
-            <div class="status-item"><b>记忆平台</b><span>待入库包通知阶段不创建正式 KnowledgeItem；Knowledge Steward Agent 后续审批通过后复用 Team Knowledge review/apply 创建正式 KnowledgeItem；状态总览只读聚合 formalKnowledgeItemCount、pendingProposalCount 和 Agent 通知结果。</span></div>
+            <div class="status-item"><b>记忆平台</b><span>待入库包通知阶段不创建正式 KnowledgeItem；知识库管理员后续审批通过后复用 Team Knowledge review/apply 创建正式 KnowledgeItem；状态总览只读聚合 formalKnowledgeItemCount、pendingProposalCount 和 Agent 通知结果。</span></div>
             <div class="status-item"><b>图谱同步</b><span>审批通过后正式 KnowledgeItem metadata 记录 officialResearchGraph；状态总览明确 candidate_graph_preview_only 与 official_research_trace_synced 的边界。</span></div>
           </div>
         </section>
@@ -98,15 +98,15 @@
       </div>
       <div class="status-grid">
         <div class="status-item"><b>状态</b><span>steward_pending_knowledge_review</span></div>
-        <div class="status-item"><b>功能岗位</b><span>Knowledge Steward Agent / agent-knowledge-steward</span></div>
+        <div class="status-item"><b>功能岗位</b><span>知识库管理员 / agent-knowledge-steward</span></div>
         <div class="status-item"><b>Agent 状态</b><span>后端草稿包门禁、Team Knowledge 待审入库桥、审批门禁和入库状态总览已接入</span></div>
         <div class="status-item"><b>进入条件</b><span>review_record 或候选图谱已给出可追溯 candidateIds，且具备目标知识域。</span></div>
         <div class="status-item"><b>退出条件</b><span>合格草稿提交后进入 steward_pending_knowledge_review；批准后进入 official_synced、记录 officialSyncRecord 和 officialResearchGraph，并创建 KnowledgeItem 级 pending ratingSuggestion；status=ready 表示入库链路已跑通。</span></div>
-        <div class="status-item"><b>审核门禁</b><span>必须经 Knowledge Steward Agent / Ingestion Approval Gate 确认，不能由科研执行 Agent 或本地模型直接入库。</span></div>
+        <div class="status-item"><b>审核门禁</b><span>必须经知识库管理员 / Ingestion Approval Gate 确认，不能由科研执行 Agent 或本地模型直接入库。</span></div>
       </div>
       <div class="plan-grid">
         <article class="plan-card"><h2>本步操作</h2><p class="hint">生成带 sourceTrace、riskSummary、proposalPayload、ratingSuggestion、approvalRequired=true 的 CandidateStore 草稿包，并可提交到指定 knowledgeBaseId 的待审入库队列；status API 汇总 pendingProposalCount、formalKnowledgeItemCount、actionItems 和 officialBoundary。</p></article>
-        <article class="plan-card"><h2>本地研究模型用法</h2><p class="hint">本地 9B 模型只能生成 steward_pack_draft 草稿，正式建议仍由 Knowledge Steward Agent 检查；禁止在输出中请求正式写入。</p></article>
+        <article class="plan-card"><h2>本地研究模型用法</h2><p class="hint">本地 9B 模型只能生成 steward_pack_draft 草稿，正式建议仍由知识库管理员检查；禁止在输出中请求正式写入。</p></article>
         <article class="plan-card"><h2>所需功能</h2><ul><li>sourceTrace 校验</li>
 <li>proposalPayload</li>
 <li>ratingSuggestion</li>

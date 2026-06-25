@@ -1299,7 +1299,7 @@ const COPY: Record<"zh" | "en", Copy> = {
     sourceChain: "Source chain",
     outputContract: "Output contract",
     createsKnowledgeItem: "Creates formal item",
-    knowledgeSteward: "Knowledge Steward",
+    knowledgeSteward: "Knowledge Base Admin",
     stewardMission: "Governance mission",
     stewardDirectChat: "Open steward",
     stewardBoundary: "Permission boundary",

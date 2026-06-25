@@ -1318,6 +1318,74 @@ def test_start_source_collection_stage_session_task_submits_direct_session_task(
     assert len(submitted) == 3
 
 
+def test_start_source_collection_memory_stage_routes_to_knowledge_base_admin(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
+    submitted: list[dict] = []
+
+    discovery = agent_directory_service.create_agent_instance(display_name="资料发现")
+    session_service.ensure_agent_direct_session(agent_id=discovery["agentId"], title="资料发现")
+    agent_directory_service.repair_agent_directory()
+    admin = agent_directory_service.get_agent(agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID)
+    assert admin is not None
+    admin_session = session_service.ensure_agent_direct_session(
+        agent_id=admin["agentId"],
+        title=agent_directory_service.KNOWLEDGE_STEWARD_FUNCTIONAL_NAME,
+    )
+    admin = agent_directory_service.update_agent_instance(admin["agentId"], direct_session_id=admin_session["id"])
+    team = team_service.create_team(
+        name="挑战杯科研团队",
+        members=[
+            {"agentId": discovery["agentId"], "role": "data_discovery", "agentName": "资料发现"},
+        ],
+    )
+    run_response = team_workflow_orchestration_service.start_source_collection_run(
+        team["teamId"],
+        {
+            "topic": "脑启发路由",
+            "goal": "搜集神经机制启发算法资料",
+            "agentRoles": ["data_discovery"],
+            "agentIds": {"data_discovery": discovery["agentId"]},
+            "querySeeds": ["brain-inspired routing"],
+            "promptCachePolicy": {"requirement": "disabled"},
+        },
+    )
+
+    def fake_submit_session_message(session_id, content, **kwargs):
+        submitted.append({"sessionId": session_id, "content": content, "kwargs": kwargs})
+        return {
+            "accepted": True,
+            "sessionId": session_id,
+            "turnId": "turn-kb-admin-ingestion",
+            "status": "running",
+        }
+
+    monkeypatch.setattr(session_service, "submit_session_message", fake_submit_session_message)
+
+    task = team_workflow_orchestration_service.start_source_collection_stage_session_task(
+        team["teamId"],
+        run_response["run"]["runId"],
+        {
+            "stageId": "memory",
+            "returnTo": "/teams?team=research-team&researchView=knowledge_collection&collectionStage=memory",
+            "returnLabel": "返回知识库管理员入库审核",
+        },
+    )
+
+    assert task["agentId"] == agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID
+    assert task["agentRole"] == "knowledge_steward"
+    assert task["sessionId"] == admin_session["id"]
+    assert task["task"]["title"] == "知识库管理员入库审核任务"
+    assert task["task"]["writesFormalKnowledge"] is False
+    assert submitted[0]["sessionId"] == admin_session["id"]
+    assert "知识库管理员入库审核" in submitted[0]["content"]
+    assert "资料入库 Agent" not in submitted[0]["content"]
+    assert "共享记忆前审" not in submitted[0]["content"]
+    metadata = submitted[0]["kwargs"]["message_metadata"]
+    assert metadata["agentId"] == agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID
+    assert metadata["agentRole"] == "knowledge_steward"
+
+
 def test_source_collection_stage_task_context_returns_bounded_records_for_extraction(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)

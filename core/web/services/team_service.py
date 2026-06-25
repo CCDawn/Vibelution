@@ -112,6 +112,10 @@ RESEARCH_TEAM_MEMBER_ROLE_KEYS = {
     "content_extraction": "challenge_cup_content_extraction",
     "source_quality": "challenge_cup_source_quality",
     "candidate_graph": "candidate_graph",
+    "experiment_planner": "challenge_cup_experiment_planner",
+    "experiment_ledger": "challenge_cup_experiment_ledger",
+    "iteration_planner": "challenge_cup_iteration_planner",
+    "iteration_versioning": "challenge_cup_versioning",
     "knowledge_steward": "knowledge_steward",
 }
 CHALLENGE_CUP_RESEARCH_TEAM_ID = "research-team"
@@ -160,11 +164,39 @@ CHALLENGE_CUP_RESEARCH_TEAM_ROLES: tuple[dict[str, Any], ...] = (
         "responsibilities": ["生成候选关系", "标注断链缺口", "预览图谱边界"],
     },
     {
+        "role": "experiment_planner",
+        "roleKey": "challenge_cup_experiment_planner",
+        "label": "实验规划",
+        "purpose": "实验计划账本",
+        "responsibilities": ["生成实验计划草稿", "对齐 dataset/metric/baseline", "标注 smoke gate 和人工门禁"],
+    },
+    {
+        "role": "experiment_ledger",
+        "roleKey": "challenge_cup_experiment_ledger",
+        "label": "实验证据",
+        "purpose": "实验结果证据登记",
+        "responsibilities": ["登记 baseline 工件", "登记 smoke/full-run 结果", "整理实验结果入库申请"],
+    },
+    {
+        "role": "iteration_planner",
+        "roleKey": "challenge_cup_iteration_planner",
+        "label": "迭代决策",
+        "purpose": "Research Loop 决策账本",
+        "responsibilities": ["创建 Research Loop", "登记迭代证据", "生成下一轮修复/接受/归档决策"],
+    },
+    {
+        "role": "iteration_versioning",
+        "roleKey": "challenge_cup_versioning",
+        "label": "版本治理",
+        "purpose": "候选版本与拒绝归档",
+        "responsibilities": ["维护 versionHistory", "记录 supersedes/derived_from", "归档 rejectionArchive"],
+    },
+    {
         "role": "knowledge_steward",
         "roleKey": "knowledge_steward",
-        "label": "资料入库",
-        "purpose": "团队知识库入库门禁",
-        "responsibilities": ["审查入库门槛", "接收入库请求", "防止未审资料进入正式知识"],
+        "label": "知识库管理员",
+        "purpose": "知识库管理员入库审核",
+        "responsibilities": ["审查入库门槛", "接收入库审核请求", "防止未审资料进入正式知识"],
     },
 )
 TEMPLATE_MEMBER_PREFIX_TO_TEMPLATE_ID = {

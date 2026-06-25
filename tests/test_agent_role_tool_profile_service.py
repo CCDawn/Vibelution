@@ -42,3 +42,50 @@ def test_knowledge_steward_profile_owns_formal_knowledge_tools():
     assert policy["networkAccess"] == "none"
     assert policy["mutationAccess"] == "restricted"
     assert policy["roleToolProfileId"] == "knowledge_steward"
+
+
+def test_challenge_cup_experiment_iteration_roles_are_bounded_operation_agents():
+    cases = {
+        "challenge_cup_experiment_planner": {
+            "challenge_cup_experiment_context_tool",
+            "challenge_cup_experiment_writeback_tool",
+        },
+        "challenge_cup_experiment_ledger": {
+            "challenge_cup_experiment_context_tool",
+            "challenge_cup_experiment_writeback_tool",
+        },
+        "challenge_cup_iteration_planner": {
+            "challenge_cup_iteration_context_tool",
+            "challenge_cup_iteration_writeback_tool",
+        },
+        "challenge_cup_versioning": {
+            "challenge_cup_versioning_context_tool",
+            "challenge_cup_versioning_writeback_tool",
+        },
+    }
+    forbidden = {
+        "web_search_tool",
+        "knowledge_proposal_tool",
+        "knowledge_ingestion_tool",
+        "cli_tool",
+        "apply_patch_tool",
+        "write_file_tool",
+        "run_test_for_tool",
+    }
+
+    for role_key, required_tools in cases.items():
+        policy = agent_role_tool_profile_service.resolve_role_tool_policy(
+            role_key=role_key,
+            primary_mode="research",
+            policy_id=f"tool-{role_key}",
+        )
+
+        assert policy is not None
+        assert required_tools.issubset(set(policy["allowedTools"]))
+        assert required_tools.issubset(set(policy["preferredTools"]))
+        assert forbidden.isdisjoint(set(policy["allowedTools"]))
+        assert forbidden.issubset(set(agent_role_tool_profile_service.forbidden_tools_for_role(role_key, primary_mode="research")))
+        assert policy["mutationAccess"] == "restricted"
+        assert policy["networkAccess"] == "none"
+        assert policy["writeScopes"] == ["team_workflow_ledger"]
+        assert policy["roleToolProfileId"] == role_key

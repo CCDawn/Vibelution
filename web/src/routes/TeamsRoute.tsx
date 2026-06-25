@@ -158,7 +158,7 @@ const RESEARCH_WORKSPACE_NAV_ITEMS: Array<{
     en: "Knowledge collection",
     zhDetail: "搜索、提炼、审查与入库",
     enDetail: "Search, extraction, review, and ingestion",
-    zhModules: "搜索资料 / 资料提炼 / 资料审查 / 资料入库",
+    zhModules: "搜索资料 / 资料提炼 / 资料审查 / 管理员入库审核",
     enModules: "Search / extraction / review / ingestion",
   },
   {
@@ -188,7 +188,7 @@ const RESEARCH_WORKSPACE_LABELS: Record<ResearchWorkspaceView, { zh: string; en:
   iteration: { zh: "迭代", en: "Iteration" },
   source_collection: { zh: "搜索资料", en: "Source search" },
   coordination: { zh: "团队协调", en: "Coordination" },
-  ingestion: { zh: "资料入库", en: "Ingestion" },
+  ingestion: { zh: "入库审核", en: "Ingestion review" },
   graph: { zh: "入库关系", en: "Ingestion map" },
   candidates: { zh: "候选资料", en: "Candidates" },
   discussion: { zh: "团队沟通", en: "Team discussion" },
@@ -374,7 +374,7 @@ const SOURCE_COLLECTION_STAGE_AGENT_KEYS: Record<SourceCollectionStageModuleId, 
   candidate: ["content_extraction"],
   screening: ["source_quality"],
   graph: ["candidate_graph"],
-  memory: ["knowledge_steward", "candidate_graph"],
+  memory: ["knowledge_steward"],
 };
 
 const SOURCE_COLLECTION_STAGE_CHAT_LABELS: Record<SourceCollectionStageModuleId, { zh: string; en: string }> = {
@@ -382,7 +382,7 @@ const SOURCE_COLLECTION_STAGE_CHAT_LABELS: Record<SourceCollectionStageModuleId,
   candidate: { zh: "资料提炼 Agent 私聊", en: "Source extraction Agent chat" },
   screening: { zh: "资料审查 Agent 私聊", en: "Source review Agent chat" },
   graph: { zh: "资料关系 Agent 私聊", en: "Source graph Agent chat" },
-  memory: { zh: "资料入库 Agent 私聊", en: "Knowledge ingestion Agent chat" },
+  memory: { zh: "知识库管理员私聊", en: "Knowledge base admin chat" },
 };
 
 function parseSourceCollectionStageModuleId(value: string | null): SourceCollectionStageModuleId | null {
@@ -699,53 +699,29 @@ const RESEARCH_STAGE_AGENT_ROLES: Record<ResearchStageType, ResearchStageAgentRo
     {
       key: "knowledge_steward",
       roleKeys: ["knowledge_steward", "steward", "ingestion_approval"],
-      zh: "资料入库",
-      en: "Knowledge ingestion",
-      zhFocus: "团队知识库入库门禁",
-      enFocus: "Team Knowledge ingestion gate",
+      zh: "知识库管理员",
+      en: "Knowledge base admin",
+      zhFocus: "入库审核与治理门禁",
+      enFocus: "Ingestion review and governance gate",
       fallbackAgentId: "agent-knowledge-steward",
     },
   ],
   experiment: [
     {
-      key: "paper_note_extraction",
-      roleKeys: ["paper_note_extraction", "paper_note", "source_extraction"],
-      zh: "论文笔记",
-      en: "Paper notes",
-      zhFocus: "把资料转成可引用笔记",
-      enFocus: "Citable notes",
+      key: "experiment_planner",
+      roleKeys: ["experiment_planner", "challenge_cup_experiment_planner"],
+      zh: "实验规划",
+      en: "Experiment planner",
+      zhFocus: "计划、baseline 与 smoke gate",
+      enFocus: "Plan, baseline, smoke gate",
     },
     {
-      key: "neuro_mechanism",
-      roleKeys: ["neuro_mechanism", "neuro_mechanism_extraction"],
-      zh: "神经机制提取",
-      en: "Neuro mechanism",
-      zhFocus: "机制、证据和不确定性",
-      enFocus: "Mechanism evidence",
-    },
-    {
-      key: "mechanism_mapping",
-      roleKeys: ["mechanism_mapping"],
-      zh: "机制映射",
-      en: "Mechanism mapping",
-      zhFocus: "机制到计算抽象",
-      enFocus: "Mechanism to computation",
-    },
-    {
-      key: "algorithm_hypothesis",
-      roleKeys: ["algorithm_hypothesis", "algorithm_hypothesis_draft"],
-      zh: "算法假设",
-      en: "Algorithm hypothesis",
-      zhFocus: "baseline、指标与实验计划",
-      enFocus: "Baseline and plan",
-    },
-    {
-      key: "evidence_review",
-      roleKeys: ["evidence_review", "review", "quality_review"],
-      zh: "证据审查",
-      en: "Evidence review",
-      zhFocus: "可测性、风险和返工",
-      enFocus: "Risk and rework",
+      key: "experiment_ledger",
+      roleKeys: ["experiment_ledger", "challenge_cup_experiment_ledger"],
+      zh: "实验证据",
+      en: "Experiment ledger",
+      zhFocus: "artifact、metric 与结果登记",
+      enFocus: "Artifacts, metrics, results",
     },
   ],
   iteration: [
@@ -758,28 +734,20 @@ const RESEARCH_STAGE_AGENT_ROLES: Record<ResearchStageType, ResearchStageAgentRo
       enFocus: "Review coordination",
     },
     {
+      key: "iteration_planner",
+      roleKeys: ["iteration_planner", "challenge_cup_iteration_planner"],
+      zh: "迭代决策",
+      en: "Iteration planner",
+      zhFocus: "Research Loop 与下一轮决策",
+      enFocus: "Research Loop and next step",
+    },
+    {
       key: "iteration_versioning",
-      roleKeys: ["iteration_versioning", "versioning", "iteration"],
-      zh: "迭代版本化",
-      en: "Iteration versioning",
-      zhFocus: "版本、参数和变更边界",
-      enFocus: "Version boundaries",
-    },
-    {
-      key: "evidence_review",
-      roleKeys: ["evidence_review", "review", "quality_review"],
-      zh: "结果审查",
-      en: "Result review",
-      zhFocus: "实验结论和保留假设",
-      enFocus: "Results and hypotheses",
-    },
-    {
-      key: "challenge_cup_delivery",
-      roleKeys: ["challenge_cup_delivery", "delivery", "submission"],
-      zh: "挑战杯交付",
-      en: "Challenge Cup delivery",
-      zhFocus: "材料、复现和交付门禁",
-      enFocus: "Delivery gate",
+      roleKeys: ["iteration_versioning", "challenge_cup_versioning", "versioning"],
+      zh: "版本治理",
+      en: "Versioning",
+      zhFocus: "versionHistory 与拒绝归档",
+      enFocus: "Version history and archive",
     },
     {
       key: "knowledge_steward",
@@ -1824,7 +1792,7 @@ function sourceCollectionStatusLabel(value: string | undefined | null, lang: "zh
   const zh: Record<string, string> = {
     active: "进行中",
     agent_notification_failed: "通知 Agent 失败",
-    agent_notified: "等待知识库 Agent",
+    agent_notified: "等待知识库管理员",
     agent_wake_pending: "Agent 待唤醒",
     blocked: "阻塞",
     collecting: "待继续搜集",
@@ -1882,13 +1850,13 @@ function sourceCollectionAgentRoleLabel(value: string | undefined | null, lang: 
     "Source Intake Agent": "资料入候选 Agent",
     "Source Quality Assessment Agent": "资料质量评估 Agent",
     "Candidate Graph Preview Agent": "资料关系生成 Agent",
-    "Knowledge Steward Agent": "资料入库 Agent",
+    "Knowledge Steward Agent": "知识库管理员",
     data_discovery: "资料发现 Agent",
     source_acquisition: "来源获取 Agent",
     content_extraction: "内容提炼 Agent",
     source_quality: "资料质量评估 Agent",
     candidate_graph: "资料关系生成 Agent",
-    knowledge_steward: "资料入库 Agent",
+    knowledge_steward: "知识库管理员",
   };
   return zh[normalized] ?? normalized;
 }
@@ -3041,7 +3009,7 @@ export function deriveSourceCollectionDisplayState(input: SourceCollectionDispla
       "ingesting",
       "active",
       "done",
-      input.graphPending ? (zh ? "正在生成入库关系图" : "Building ingestion map") : (zh ? "正在资料入库" : "Ingesting sources"),
+      input.graphPending ? (zh ? "正在生成入库关系图" : "Building ingestion map") : (zh ? "正在等待管理员审核" : "Waiting for admin review"),
       zh ? "资料已通过搜集阶段，正在准备入库链路。" : "Source collection is ready; the ingestion path is being prepared.",
       true,
     );
@@ -3369,7 +3337,7 @@ function workflowStateLabel(value: string, lang: "zh" | "en") {
   const zh: Record<string, string> = {
     knowledge_collection: "知识搜集",
     source_screening: "资料审查",
-    candidate_ingestion: "资料入库",
+    candidate_ingestion: "入库审核",
     team_memory_ready: "团队知识库已接入",
     source_registered: "资料已登记",
     source_needs_confirmation: "资料待确认",
@@ -7432,7 +7400,7 @@ export function TeamsRoute({
           onClick={preventSourceCollectionPanelSummaryToggle}
           onKeyDown={preventSourceCollectionPanelSummaryKeyToggle}
         >
-          <span>{lang === "zh" ? "资料入库" : "Knowledge ingestion"}</span>
+          <span>{lang === "zh" ? "入库审核" : "Knowledge ingestion review"}</span>
           <small>{pagedMemoryCandidates.start}-{pagedMemoryCandidates.end}/{visibleMemoryCandidates.length}</small>
         </summary>
         {renderSourceCollectionFilterBar(sourceCollectionCandidateFilterCounts, lang === "zh" ? "入库资料过滤" : "Ingestion source filters")}
@@ -7837,7 +7805,7 @@ export function TeamsRoute({
                   {selectedTeamKnowledgeCollectionIngestResult.status === "completed"
                     ? (lang === "zh" ? "资料已写入团队知识库" : "Sources ingested into Team Knowledge")
                     : selectedTeamKnowledgeCollectionIngestResult.status === "agent_notified"
-                      ? (lang === "zh" ? "已通知知识库 Agent" : "Steward Agent notified")
+                      ? (lang === "zh" ? "已通知知识库管理员" : "Knowledge base admin notified")
                     : selectedTeamKnowledgeCollectionIngestResult.status === "agent_wake_pending"
                       ? (lang === "zh" ? "已发送，等待唤醒 Agent" : "Sent; waiting to wake Agent")
                     : sourceCollectionStatusLabel(selectedTeamKnowledgeCollectionIngestResult.status, lang)}
@@ -7848,7 +7816,7 @@ export function TeamsRoute({
                         ? `${selectedTeamKnowledgeCollectionIngestResult.summary.approvedSourceCandidateCount} 条资料通过审查，${selectedTeamKnowledgeCollectionIngestResult.summary.formalKnowledgeItemCount} 条正式知识可用于后续实验。`
                         : `${selectedTeamKnowledgeCollectionIngestResult.summary.approvedSourceCandidateCount} sources approved; ${selectedTeamKnowledgeCollectionIngestResult.summary.formalKnowledgeItemCount} formal items are ready for experiments.`)
                     : (lang === "zh"
-                        ? `${selectedTeamKnowledgeCollectionIngestResult.summary.approvedSourceCandidateCount} 条资料通过审查，待入库知识包已发送给知识库 Agent；当前正式知识 ${selectedTeamKnowledgeCollectionIngestResult.summary.formalKnowledgeItemCount} 条。`
+                        ? `${selectedTeamKnowledgeCollectionIngestResult.summary.approvedSourceCandidateCount} 条资料通过审查，待入库知识包已发送给知识库管理员；当前正式知识 ${selectedTeamKnowledgeCollectionIngestResult.summary.formalKnowledgeItemCount} 条。`
                         : `${selectedTeamKnowledgeCollectionIngestResult.summary.approvedSourceCandidateCount} sources approved; the ingestion pack was sent to the steward Agent. Current formal items: ${selectedTeamKnowledgeCollectionIngestResult.summary.formalKnowledgeItemCount}.`)}
                 </span>
               </div>
@@ -8634,7 +8602,7 @@ export function TeamsRoute({
                           <span>{activeFullRunResult.metricName || activePlan.experimentPlan.metric || "metric"} · {activeFullRunResult.metricValue || "-"}</span>
                           <span>
                             {activePlan.readiness.readyForKnowledgeIngestion
-                              ? (lang === "zh" ? "可通知知识库 Agent" : "knowledge review ready")
+                              ? (lang === "zh" ? "可通知知识库管理员" : "knowledge review ready")
                               : (lang === "zh" ? "知识入库阻塞" : "knowledge blocked")}
                           </span>
                         </div>
@@ -8760,7 +8728,7 @@ export function TeamsRoute({
                       <span>
                         {knowledgeIngestion
                           ? `${knowledgeIngestion.status} · ${knowledgeIngestion.experimentResultPack?.packId || knowledgeIngestion.knowledgeBaseId}`
-                          : (lang === "zh" ? "生成结果包并通知 Knowledge Steward；正式知识仍需复核。" : "Create a result pack and notify the Knowledge Steward.")}
+                          : (lang === "zh" ? "生成结果包并通知知识库管理员；正式知识仍需复核。" : "Create a result pack and notify the knowledge base admin.")}
                       </span>
                     </div>
                     {!knowledgeIngestion ? (
@@ -8811,13 +8779,13 @@ export function TeamsRoute({
                             checked={experimentKnowledgeIngestionDraft.wakeStewardAgent}
                             onChange={(event) => setExperimentKnowledgeIngestionDraft((draft) => ({ ...draft, wakeStewardAgent: event.target.checked }))}
                           />
-                          <span>{lang === "zh" ? "立即唤醒 Knowledge Steward" : "Wake Knowledge Steward"}</span>
+                          <span>{lang === "zh" ? "立即唤醒知识库管理员" : "Wake knowledge base admin"}</span>
                         </label>
                         <button type="button" onClick={() => requestExperimentKnowledgeIngestionFromWorkspace(activePlan)} disabled={!canRequestKnowledgeIngestion}>
                           <Send size={13} />
                           {selectedTeamRequestExperimentKnowledgeIngestionPending
                             ? (lang === "zh" ? "通知中" : "Notifying")
-                            : (lang === "zh" ? "通知知识库 Agent" : "Notify steward")}
+                            : (lang === "zh" ? "通知知识库管理员" : "Notify admin")}
                         </button>
                       </div>
                     ) : null}
@@ -9934,12 +9902,12 @@ export function TeamsRoute({
     || sourceCollectionIngestCandidateCount <= 0
     || selectedTeamKnowledgeCollectionIngestPending;
   const sourceCollectionMemoryActionLabel = selectedTeamKnowledgeCollectionIngestPending
-    ? (lang === "zh" ? "通知 Agent 中" : "Notifying Agent")
+    ? (lang === "zh" ? "通知管理员中" : "Notifying admin")
     : sourceCollectionPrecheckCandidateCount > 0
-      ? (lang === "zh" ? "通知知识库 Agent" : "Notify steward Agent")
+      ? (lang === "zh" ? "通知知识库管理员" : "Notify knowledge base admin")
       : sourceCollectionDisplayedCandidateCount > 0
-        ? (lang === "zh" ? "提炼并通知 Agent" : "Prepare and notify Agent")
-        : (lang === "zh" ? "通知知识库 Agent" : "Notify steward Agent");
+        ? (lang === "zh" ? "提炼并通知管理员" : "Prepare and notify admin")
+        : (lang === "zh" ? "通知知识库管理员" : "Notify knowledge base admin");
   const sourceCollectionCanBuildGraph = sourceCollectionRunApprovedCount > 0 || sourceCollectionDisplayedCandidateCount > 0;
   const sourceCollectionGraphActionDisabled =
     !selectedTeam?.teamId
@@ -10374,7 +10342,7 @@ export function TeamsRoute({
         : (lang === "zh" ? `${sourceCollectionProjectedApprovedCountText} 条通过 / ${sourceCollectionRunPendingScreeningCountText} 条待审` : `${sourceCollectionProjectedApprovedCountText} approved / ${sourceCollectionRunPendingScreeningCountText} pending`),
       nextLabel: sourceCollectionRunPendingScreeningCount > 0
         ? (lang === "zh" ? "Agent 继续审查" : "Agent continues review")
-        : (lang === "zh" ? "进入资料入库" : "Move to ingestion"),
+        : (lang === "zh" ? "交给管理员审核" : "Send to admin review"),
       state: sourceCollectionScreeningStepState,
       status: sourceCollectionStageProjectionLabel(sourceCollectionScreeningProjection) || sourceCollectionStepStatusText(sourceCollectionScreeningStepState),
       detailLabel: lang === "zh" ? "查看审查结果" : "View review details",
@@ -10400,7 +10368,7 @@ export function TeamsRoute({
         : (lang === "zh" ? `${sourceCollectionProjectedCandidateCountText} 条候选资料` : `${sourceCollectionProjectedCandidateCountText} candidate sources`),
       outputLabel: lang === "zh" ? `${sourceCollectionProjectedGraphNodeCount} 个节点 / ${sourceCollectionProjectedGraphEdgeCount} 条关系` : `${sourceCollectionProjectedGraphNodeCount} nodes / ${sourceCollectionProjectedGraphEdgeCount} edges`,
       nextLabel: sourceCollectionProjectedGraphNodeCount > 0
-        ? (lang === "zh" ? "进入共享记忆前审" : "Move to memory precheck")
+        ? (lang === "zh" ? "进入管理员入库审核" : "Move to admin review")
         : (lang === "zh" ? "生成候选图谱" : "Build candidate map"),
       state: sourceCollectionGraphStepState,
       status: sourceCollectionStageProjectionLabel(sourceCollectionGraphProjection) || sourceCollectionStepStatusText(sourceCollectionGraphStepState),
@@ -10415,19 +10383,19 @@ export function TeamsRoute({
     },
     {
       id: "memory",
-      label: lang === "zh" ? "共享记忆前审" : "Memory precheck",
+      label: lang === "zh" ? "知识库管理员入库审核" : "Knowledge base admin review",
       metric: lang === "zh" ? `正式知识 ${sourceCollectionProjectedFormalKnowledgeCount}` : `${sourceCollectionProjectedFormalKnowledgeCount} formal items`,
       summary: sourceCollectionMemoryProjection?.latestTask?.summary || (sourceCollectionProjectedFormalKnowledgeCount > 0
         ? (lang === "zh" ? "已进入团队知识库" : "Synced into Team Knowledge")
         : sourceCollectionProjectedStewardPackCount > 0
-          ? (lang === "zh" ? "已生成资料入库包" : "Ingestion pack ready")
+          ? (lang === "zh" ? "已生成管理员待审包" : "Admin review pack ready")
         : knowledgePendingReviewCount > 0
           ? (lang === "zh" ? "有待审入库对象" : "Review items pending")
         : sourceCollectionPrecheckCandidateCount > 0
-          ? (lang === "zh" ? "可通知知识库 Agent" : "Can notify steward Agent")
+          ? (lang === "zh" ? "可通知知识库管理员" : "Can notify knowledge base admin")
           : sourceCollectionDisplayedCandidateCount > 0
-            ? (lang === "zh" ? "可先审查再通知 Agent" : "Can review then notify Agent")
-            : (lang === "zh" ? "等资料提炼后入库" : "Ingest after extraction")),
+            ? (lang === "zh" ? "可先审查再通知管理员" : "Can review then notify admin")
+            : (lang === "zh" ? "等资料提炼后审核" : "Review after extraction")),
       inputLabel: sourceCollectionPrecheckCandidateCount > 0
         ? (lang === "zh" ? `${sourceCollectionPrecheckCandidateCount} 条通过资料` : `${sourceCollectionPrecheckCandidateCount} approved sources`)
         : sourceCollectionPrimaryDataLoading
@@ -10437,11 +10405,11 @@ export function TeamsRoute({
       nextLabel: sourceCollectionProjectedFormalKnowledgeCount > 0
         ? (lang === "zh" ? "进入实验规划" : "Move to experiment planning")
         : sourceCollectionProjectedStewardPackCount > 0
-          ? (lang === "zh" ? "等待知识库 Agent" : "Wait for steward Agent")
-          : (lang === "zh" ? "生成关系并通知" : "Build graph and notify"),
+          ? (lang === "zh" ? "等待知识库管理员" : "Wait for admin")
+          : (lang === "zh" ? "通知管理员审核" : "Notify admin for review"),
       state: sourceCollectionMemoryStepState,
       status: sourceCollectionStageProjectionLabel(sourceCollectionMemoryProjection) || sourceCollectionStepStatusText(sourceCollectionMemoryStepState),
-      detailLabel: lang === "zh" ? "查看入库详情" : "View ingestion details",
+      detailLabel: lang === "zh" ? "查看审核详情" : "View review details",
       actionLabel: sourceCollectionStageTaskActionLabel("memory", sourceCollectionMemoryActionLabel),
       actionDisabled: sourceCollectionStageTaskActionDisabled(sourceCollectionMemoryActionDisabled),
       actionTone: "primary",
@@ -11518,7 +11486,7 @@ export function TeamsRoute({
                       <div className={styles.workflowIngestionPanel} id="research-workflow-ingestion">
                         <div className={styles.workflowIngestionHeader}>
                           <div>
-                            <strong>{lang === "zh" ? "资料入库状态" : "Knowledge ingestion"}</strong>
+                            <strong>{lang === "zh" ? "入库审核状态" : "Knowledge ingestion review"}</strong>
                             <span>
                               {teamWorkflowKnowledgeIngestionStatus
                                 ? `${teamWorkflowKnowledgeIngestionStatus.summary.pendingProposalCount} pending / ${teamWorkflowKnowledgeIngestionStatus.summary.formalKnowledgeItemCount} formal`
@@ -11580,7 +11548,7 @@ export function TeamsRoute({
                           <div className={styles.empty}>
                             {teamWorkflowKnowledgeIngestionStatusQuery.isPending
                               ? (lang === "zh" ? "正在汇总 CandidateStore、Team Knowledge 和正式同步边界..." : "Aggregating CandidateStore, Team Knowledge, and sync boundary...")
-                              : (lang === "zh" ? "暂无资料入库状态。" : "No knowledge ingestion status yet.")}
+                              : (lang === "zh" ? "暂无入库审核状态。" : "No knowledge ingestion review status yet.")}
                           </div>
                         )}
                         {teamWorkflowKnowledgeIngestionStatusQuery.error instanceof Error ? (
