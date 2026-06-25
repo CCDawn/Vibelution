@@ -854,11 +854,9 @@ def _research_direct_session_is_current(
         if str(item.get("conversation_id") or "").strip() != normalized_session_id:
             continue
         current_agent_id = str(item.get("agent_id") or item.get("agentId") or "").strip()
-        current_profile_id = str(item.get("agent_profile_id") or item.get("agentProfileId") or "").strip()
         return (
             (not expected_title or str(item.get("title") or "").strip() == expected_title)
             and (not expected_agent_id or current_agent_id == expected_agent_id)
-            and (not current_profile_id or current_profile_id == expected_profile_id)
         )
     return False
 

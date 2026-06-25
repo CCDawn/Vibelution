@@ -11,7 +11,7 @@ from core.infrastructure.mental_model import (
 )
 from core.orchestration.task_planner import task_storage_override
 from core.ui.chat_state import CHAT_STATE_VERSION, load_chat_state, save_chat_state
-from core.web.services import agent_directory_service, prompt_template_service, session_service
+from core.web.services import agent_directory_service, chat_room_service, conversation_service, prompt_template_service, session_service
 from tools.memory_tools import memory_storage_override
 from tools.shell_tools import create_file, workspace_root_override
 from tools.memory_tools import task_create_tool
@@ -270,11 +270,20 @@ def test_session_detail_repairs_stale_legacy_profile_from_agent_instance(tmp_pat
 
     detail = session_service.get_session_detail("session-live")
     sessions = session_service.list_sessions()
+    conversations = conversation_service.list_conversations()
+    participant = chat_room_service._participant_from_session(sessions[0], active_agent=agent)
 
     assert detail is not None
     assert detail["agentId"] == agent["agentId"]
     assert "agentProfileId" not in detail
     assert "agentProfileId" not in sessions[0]
+    direct_conversation = next(item for item in conversations if item["conversationId"] == "session-live")
+    assert "agentProfileId" not in direct_conversation
+    assert "agentTemplateLabel" not in direct_conversation
+    assert "agentProfileId" not in participant
+    assert "agentTemplateId" not in participant
+    assert "agentTemplateLabel" not in participant
+    assert participant["dialogueModelId"] == "model-subagent-explorer"
     repaired_state = load_chat_state(tmp_path)
     repaired = repaired_state["conversations"][0]
     assert "agent_profile_id" not in repaired
