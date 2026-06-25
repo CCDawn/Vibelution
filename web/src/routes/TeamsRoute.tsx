@@ -77,6 +77,7 @@ const AI_SEARCH_RUN_PREVIEW_LIMIT = 6;
 const TEAM_BOOTSTRAP_ACTIVE_REFETCH_MS = 2_000;
 const TEAM_BOOTSTRAP_BACKGROUND_REFETCH_MS = 12_000;
 const TEAM_BOOTSTRAP_REFETCH_STATUSES = new Set(["running", "needs_retry"]);
+const SOURCE_COLLECTION_STAGE_WRITEBACK_SYNC_GRACE_MS = 30_000;
 const WORKFLOW_GRAPH_WIDTH = 1120;
 const WORKFLOW_GRAPH_MIN_HEIGHT = 320;
 const WORKFLOW_GRAPH_NODE_WIDTH = 168;
@@ -437,7 +438,11 @@ function sourceCollectionStageProjectionCount(
 function sourceCollectionStageProjectionTaskMetric(
   projection: SourceCollectionStageCardProjection | null | undefined,
   lang: "zh" | "en",
+  syncing = false,
 ) {
+  if (syncing) {
+    return lang === "zh" ? "等待团队页刷新最新写回" : "Waiting for latest writeback";
+  }
   const latestTask = projection?.latestTask;
   if (!latestTask?.taskId) {
     return "";
@@ -2878,7 +2883,13 @@ function sourceCollectionRunRefetchInterval(pageVisible: boolean, status: string
   );
 }
 
-function sourceCollectionStageCardsFromStatus(status: ResearchStageRoundStatusPayload | null | undefined) {
+function sourceCollectionStageCardsFromStatus(status: ResearchStageRoundStatusPayload | SourceCollectionSummaryPayload | null | undefined) {
+  if (status && "stageCards" in status) {
+    return status.stageCards ?? [];
+  }
+  if (!status || !("phases" in status)) {
+    return [];
+  }
   const knowledgePhase = (status?.phases ?? []).find((phase) => phase.stageType === "knowledge_collection");
   const rounds = [
     knowledgePhase?.latestRound ?? null,
@@ -2898,7 +2909,8 @@ function sourceCollectionStageCardsFromStatus(status: ResearchStageRoundStatusPa
 
 function sourceCollectionStageWritebackRefetchInterval(
   pageVisible: boolean,
-  status: ResearchStageRoundStatusPayload | null | undefined,
+  status: ResearchStageRoundStatusPayload | SourceCollectionSummaryPayload | null | undefined,
+  forceSync = false,
 ) {
   const cards = sourceCollectionStageCardsFromStatus(status);
   const hasRunningAgentTask = cards.some((card) => {
@@ -2914,7 +2926,7 @@ function sourceCollectionStageWritebackRefetchInterval(
   });
   return resolvePollingInterval(
     pageVisible,
-    hasRunningAgentTask ? 2000 : hasCompletedTaskAwaitingArtifact ? 5000 : false,
+    hasRunningAgentTask || forceSync ? 2000 : hasCompletedTaskAwaitingArtifact ? 5000 : false,
   );
 }
 
@@ -3801,6 +3813,7 @@ export function TeamsRoute({
   const [selectedSourceCollectionStageId, setSelectedSourceCollectionStageId] = useState<SourceCollectionStageModuleId>(
     requestedSourceCollectionStage ?? "collection",
   );
+  const [sourceCollectionStageSyncUntilMs, setSourceCollectionStageSyncUntilMs] = useState(0);
   const [sourceCollectionResultPageByStage, setSourceCollectionResultPageByStage] = useState<Record<SourceCollectionStageModuleId, number>>({
     collection: 1,
     screening: 1,
@@ -3935,6 +3948,7 @@ export function TeamsRoute({
     && researchWorkflowTeamSelected
     && !sourceCollectionWorkspaceSelected,
   );
+  const sourceCollectionStageWritebackSyncActive = sourceCollectionStageSyncUntilMs > Date.now();
   const aiSearchRunsQuery = useQuery({
     queryKey: queryKeys.teamAiSearchRuns(effectiveTeamId || "none", AI_SEARCH_RUN_PREVIEW_LIMIT),
     queryFn: () =>
@@ -3969,6 +3983,7 @@ export function TeamsRoute({
       sourceCollectionStageWritebackRefetchInterval(
         pageVisible,
         query.state.data as ResearchStageRoundStatusPayload | null | undefined,
+        sourceCollectionStageWritebackSyncActive,
       ),
   });
   const teamWorkflowCandidatesQuery = useQuery({
@@ -3978,7 +3993,7 @@ export function TeamsRoute({
         `/api/teams/${encodeURIComponent(effectiveTeamId)}/workflow-orchestration/candidates?limit=${TEAM_WORKFLOW_CANDIDATE_PREVIEW_LIMIT}&includeValidation=false`,
       ),
     enabled: teamWorkflowCandidateListEnabled,
-    refetchInterval: () => sourceCollectionStageWritebackRefetchInterval(pageVisible, researchStageRoundStatusQuery.data),
+    refetchInterval: () => sourceCollectionStageWritebackRefetchInterval(pageVisible, researchStageRoundStatusQuery.data, sourceCollectionStageWritebackSyncActive),
   });
   const teamWorkflowCandidateGraphQuery = useQuery({
     queryKey: queryKeys.teamWorkflowCandidateGraph(effectiveTeamId || "none"),
@@ -4186,7 +4201,9 @@ export function TeamsRoute({
     refetchInterval: (query) => {
       const payload = query.state.data as SourceCollectionSummaryPayload | undefined;
       const active = payload?.status === "active";
-      return resolvePollingInterval(pageVisible, active ? 1500 : false);
+      return active
+        ? resolvePollingInterval(pageVisible, 1500)
+        : sourceCollectionStageWritebackRefetchInterval(pageVisible, payload, sourceCollectionStageWritebackSyncActive);
     },
   });
   const runtimeSummaryQuery = useQuery({
@@ -4435,6 +4452,7 @@ export function TeamsRoute({
       ),
     onSuccess: (payload, variables) => {
       setSelectedSourceCollectionRunId(payload.runId);
+      setSourceCollectionStageSyncUntilMs(Date.now() + SOURCE_COLLECTION_STAGE_WRITEBACK_SYNC_GRACE_MS);
       void chatWorkspaceCache.afterDirectTurnAccepted(payload.sessionId);
       void queryClient.invalidateQueries({ queryKey: researchStageRoundStatusQueryKey(variables.teamId) });
       void queryClient.invalidateQueries({ queryKey: sourceCollectionSummaryQueryPrefix(variables.teamId) });
@@ -9510,6 +9528,9 @@ export function TeamsRoute({
     if (!researchWorkflowTeamSelected || !pageVisible || !selectedTeam?.teamId || !selectedSourceCollectionRunEffectiveId) {
       return;
     }
+    if (requestedSourceCollectionStage) {
+      setSourceCollectionStageSyncUntilMs(Date.now() + SOURCE_COLLECTION_STAGE_WRITEBACK_SYNC_GRACE_MS);
+    }
     void queryClient.invalidateQueries({ queryKey: researchStageRoundStatusQueryKey(selectedTeam.teamId) });
     void queryClient.invalidateQueries({ queryKey: sourceCollectionSummaryQueryKey(selectedTeam.teamId, selectedSourceCollectionRunEffectiveId) });
     void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflowCandidates(selectedTeam.teamId, TEAM_WORKFLOW_CANDIDATE_PREVIEW_LIMIT) });
@@ -10152,9 +10173,19 @@ export function TeamsRoute({
     };
     return labels[state];
   };
+  const sourceCollectionStageProjectionSyncing = (projection: SourceCollectionStageCardProjection | null | undefined) => {
+    if (!sourceCollectionStageWritebackSyncActive || !projection) {
+      return false;
+    }
+    const latestTaskStatus = String(projection.latestTask?.status || "").toLowerCase();
+    return projection.status === "agent_running" || latestTaskStatus === "queued" || latestTaskStatus === "running";
+  };
   const sourceCollectionStageProjectionLabel = (projection: SourceCollectionStageCardProjection | null | undefined) => {
     if (!projection?.status) {
       return "";
+    }
+    if (sourceCollectionStageProjectionSyncing(projection)) {
+      return lang === "zh" ? "正在同步 Agent 结果" : "Syncing Agent result";
     }
     const labels: Record<string, string> = lang === "zh"
       ? {
@@ -10569,8 +10600,8 @@ export function TeamsRoute({
                   {module.projection ? (
                     <div className={styles.sourceCollectionStageProjection}>
                       <span>{sourceCollectionStageProjectionLabel(module.projection)}</span>
-                      {sourceCollectionStageProjectionTaskMetric(module.projection, lang) ? (
-                        <small>{sourceCollectionStageProjectionTaskMetric(module.projection, lang)}</small>
+                      {sourceCollectionStageProjectionTaskMetric(module.projection, lang, sourceCollectionStageProjectionSyncing(module.projection)) ? (
+                        <small>{sourceCollectionStageProjectionTaskMetric(module.projection, lang, sourceCollectionStageProjectionSyncing(module.projection))}</small>
                       ) : null}
                       {module.projection.blockingReasons?.length ? (
                         <small className={styles.sourceCollectionStageBlockers}>
