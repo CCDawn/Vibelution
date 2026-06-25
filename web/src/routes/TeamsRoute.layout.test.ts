@@ -704,8 +704,15 @@ describe("TeamsRoute layout contract", () => {
     );
     expect(sourceCollectionBackgroundRefreshSource).toContain("researchStageRoundStatusQueryKey(selectedTeam.teamId)");
     expect(routeSource).toContain("sourceCollectionStageWritebackRefetchInterval");
+    expect(routeSource).toContain("SOURCE_COLLECTION_STAGE_WRITEBACK_SYNC_GRACE_MS");
+    expect(routeSource).toContain("sourceCollectionStageSyncUntilMs");
+    expect(routeSource).toContain("sourceCollectionStageWritebackSyncActive");
+    expect(routeSource).toContain("正在同步 Agent 结果");
+    expect(routeSource).toContain("Syncing Agent result");
     expect(routeSource).toContain("refetchInterval: (query) =>");
-    expect(routeSource).toContain("refetchInterval: () => sourceCollectionStageWritebackRefetchInterval(pageVisible, researchStageRoundStatusQuery.data)");
+    expect(routeSource).toContain("query.state.data as ResearchStageRoundStatusPayload | null | undefined");
+    expect(routeSource).toContain("sourceCollectionStageWritebackSyncActive,");
+    expect(routeSource).toContain("sourceCollectionStageWritebackRefetchInterval(pageVisible, researchStageRoundStatusQuery.data, sourceCollectionStageWritebackSyncActive)");
     expect(routeSource).toContain("SourceCollectionSummaryPayload");
     expect(routeSource).toContain("sourceCollectionSummaryQueryKey");
     expect(routeSource).toContain("/workflow-orchestration/source-collection/summary");
