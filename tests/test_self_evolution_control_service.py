@@ -681,7 +681,7 @@ def test_self_evolution_agent_bindings_block_archived_slot_replacement(tmp_path,
     slots = dict(current["slots"])
     slots["executor"] = replacement["agentId"]
     agent_mode_binding_service.update_mode_binding("self_evolution", slots=slots)
-    agent_directory_service.archive_agent_instance(replacement["agentId"])
+    agent_directory_service.archive_agent_instance(replacement["agentId"], repair_mode_bindings=False)
 
     with pytest.raises(service.SelfEvolutionRunValidationError, match="executor"):
         service.self_evolution_agent_bindings()
