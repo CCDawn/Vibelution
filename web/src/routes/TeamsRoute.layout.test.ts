@@ -752,7 +752,7 @@ describe("TeamsRoute layout contract", () => {
       routeSource.indexOf("const selectedSourceCollectionActiveWorkRun"),
       routeSource.indexOf("const sourceCollectionAcceptedBackgroundActive"),
     );
-    expect(sourceCollectionBackgroundRefreshSource).toContain("researchStageRoundStatusQueryKey(selectedTeam.teamId)");
+    expect(sourceCollectionBackgroundRefreshSource).not.toContain("researchStageRoundStatusQueryKey(selectedTeam.teamId)");
     expect(routeSource).toContain("sourceCollectionStageWritebackRefetchInterval");
     expect(routeSource).toContain("SOURCE_COLLECTION_STAGE_WRITEBACK_SYNC_GRACE_MS");
     expect(routeSource).toContain("sourceCollectionStageSyncUntilMs");
@@ -802,9 +802,21 @@ describe("TeamsRoute layout contract", () => {
       routeSource.indexOf("if (!selectedTeam?.teamId || !selectedSourceCollectionRunEffectiveId || !selectedSourceCollectionSearchAccepted"),
     );
     expect(sourceCollectionStageReturnRefreshSource).toContain("requestedSourceCollectionStage");
-    expect(sourceCollectionStageReturnRefreshSource).toContain("researchStageRoundStatusQueryKey(selectedTeam.teamId)");
-    expect(sourceCollectionStageReturnRefreshSource).toContain("queryKeys.teamWorkflowCandidates(selectedTeam.teamId");
+    expect(sourceCollectionStageReturnRefreshSource).not.toContain("researchStageRoundStatusQueryKey(selectedTeam.teamId)");
+    expect(sourceCollectionStageReturnRefreshSource).not.toContain("queryKeys.teamWorkflowCandidates(selectedTeam.teamId");
+    expect(sourceCollectionStageReturnRefreshSource).not.toContain("sourceQualityStatusQueryKey(selectedTeam.teamId)");
     expect(sourceCollectionStageReturnRefreshSource).toContain("sourceCollectionRunRecordsQueryKey(selectedSourceCollectionRunEffectiveId)");
+    const sourceCollectionSearchAcceptedRefreshSource = routeSource.slice(
+      routeSource.indexOf("if (!selectedTeam?.teamId || !selectedSourceCollectionRunEffectiveId || !selectedSourceCollectionSearchAccepted"),
+      routeSource.indexOf("const openSourceCollectionStorageTarget = (target: SourceCollectionStorageOpenTarget"),
+    );
+    expect(sourceCollectionSearchAcceptedRefreshSource).toContain("selectedSourceCollectionSearchAccepted");
+    expect(sourceCollectionSearchAcceptedRefreshSource).toContain("sourceCollectionSummaryQueryKey(selectedTeam.teamId");
+    expect(sourceCollectionSearchAcceptedRefreshSource).not.toContain("queryKeys.teamWorkflowCandidates(selectedTeam.teamId");
+    expect(sourceCollectionSearchAcceptedRefreshSource).not.toContain("researchStageRoundStatusQueryKey(selectedTeam.teamId)");
+    expect(sourceCollectionSearchAcceptedRefreshSource).not.toContain("queryKeys.teamWorkflowKnowledgeIngestionStatus(selectedTeam.teamId)");
+    expect(sourceCollectionSearchAcceptedRefreshSource).not.toContain("sourceCollectionRunStatus?.runStatus");
+    expect(sourceCollectionSearchAcceptedRefreshSource).not.toContain("sourceCollectionRunStatus?.summary.recordCount");
     expect(routeSource).toContain("skippedDuplicateCount");
     expect(routeSource).toContain("条重复跳过");
     expect(routeSource).toContain("selectedSourceCollectionSearchAccepted");
