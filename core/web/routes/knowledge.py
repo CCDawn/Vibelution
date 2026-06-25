@@ -85,6 +85,12 @@ class SourceInboxReviewPayload(BaseModel):
     reviewedByAgentId: str = Field("", max_length=160)
     resolutionNote: str = Field("", max_length=2000)
     duplicateOf: str = Field("", max_length=160)
+    ingestOnAccept: bool = False
+    knowledgeBaseId: str = Field("", max_length=160)
+    knowledgeTitle: str = Field("", max_length=240)
+    knowledgeSummary: str = Field("", max_length=4000)
+    knowledgeContent: str = Field("", max_length=40000)
+    tags: list[str] = Field(default_factory=list, max_length=40)
 
 
 class SourceGovernanceUpdatePayload(BaseModel):
@@ -466,6 +472,12 @@ def knowledge_source_inbox_review(owner_type: str, owner_id: str, inbox_source_i
             reviewed_by_agent_id=payload.reviewedByAgentId,
             resolution_note=payload.resolutionNote,
             duplicate_of=payload.duplicateOf,
+            ingest_on_accept=payload.ingestOnAccept,
+            knowledge_base_id=payload.knowledgeBaseId,
+            knowledge_title=payload.knowledgeTitle,
+            knowledge_summary=payload.knowledgeSummary,
+            knowledge_content=payload.knowledgeContent,
+            tags=payload.tags,
         )
     except TeamKnowledgePermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc

@@ -214,14 +214,19 @@ def knowledge_ingestion_tool(
     tags: str = "",
     evidence_range_json: str = "{}",
     source_created_at: str = "",
+    inbox_source_id: str = "",
+    owner_type: str = "",
+    owner_id: str = "",
+    review_decision: str = "accepted",
+    resolution_note: str = "",
 ) -> str:
     """
-    Submit a standard semi-automatic ingestion package from a central source.
+    Submit a knowledge ingestion package, or direct-ingest a screened inbox source.
 
-    The tool only creates a central-curated SourceArtifact + pending
-    RefinementProposal. It does not parse files, search the web, collect raw
-    sources, or create formal KnowledgeItems. The central source is the source
-    of truth for SourceArtifact provenance.
+    When inbox_source_id + owner_type + owner_id are provided, the tool reviews
+    that owner inbox source and direct-ingests accepted content as a formal
+    KnowledgeItem. Without inbox_source_id, it keeps the older central-source
+    package behavior and creates SourceArtifact + pending RefinementProposal.
     """
 
     runtime = _current_runtime()
@@ -239,6 +244,45 @@ def knowledge_ingestion_tool(
         return _json_result(_invalid_json_result(agent_id, evidence_range))
     try:
         from core.web.services import team_knowledge_service
+
+        normalized_inbox_source_id = str(inbox_source_id or "").strip()
+        if normalized_inbox_source_id:
+            review = team_knowledge_service.review_owner_inbox_source(
+                owner_type,
+                owner_id,
+                normalized_inbox_source_id,
+                decision=review_decision or "accepted",
+                reviewed_by_agent_id=agent_id,
+                resolution_note=resolution_note,
+                ingest_on_accept=True,
+                knowledge_base_id=base_id,
+                knowledge_title=proposal_title or source_title,
+                knowledge_summary=proposal_summary or source_summary,
+                knowledge_content=proposal_content or excerpt,
+                tags=_split_tags(tags),
+            )
+            direct_ingestion = review.get("directIngestion") if isinstance(review.get("directIngestion"), dict) else {}
+            _record_event(
+                "knowledge.tool.ingestion.direct_ingested",
+                runtime=runtime,
+                outcome="succeeded",
+                fields={
+                    "knowledgeBaseId": base_id,
+                    "ownerType": owner_type,
+                    "ownerId": owner_id,
+                    "inboxSourceId": normalized_inbox_source_id,
+                    "knowledgeItemId": ((direct_ingestion.get("item") or {}) if isinstance(direct_ingestion.get("item"), dict) else {}).get("knowledgeItemId", ""),
+                },
+            )
+            return _json_result(
+                {
+                    "ok": True,
+                    "status": str(direct_ingestion.get("status") or "ingested"),
+                    "agentId": agent_id,
+                    "review": review,
+                    "directIngestion": direct_ingestion,
+                }
+            )
 
         package = team_knowledge_service.create_ingestion_package(
             base_id,

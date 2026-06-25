@@ -230,6 +230,118 @@ def test_owner_inbox_promotes_source_to_central_registry_and_formal_artifact(kno
     assert applied["item"]["centralSourceIds"] == [central_source["centralSourceId"]]
 
 
+def test_owner_source_review_directly_ingests_accepted_source_into_formal_knowledge(knowledge_env):
+    inbox_source = team_knowledge_service.collect_source_to_inbox(
+        "team",
+        knowledge_env["team"]["teamId"],
+        source_type="external_search_refinement",
+        source_ref={"url": "https://example.test/direct", "query": "direct memory ingestion"},
+        original_content="Direct ingestion source content with evidence for governed team memory.",
+        original_filename="direct-ingestion.txt",
+        title="Direct ingestion source",
+        summary="Knowledge steward accepted source should become formal knowledge without a proposal wait.",
+        actor_agent_id=knowledge_env["member"]["agentId"],
+    )
+
+    reviewed = team_knowledge_service.review_owner_inbox_source(
+        "team",
+        knowledge_env["team"]["teamId"],
+        inbox_source["inboxSourceId"],
+        decision="accepted",
+        reviewed_by_agent_id=knowledge_env["lead"]["agentId"],
+        resolution_note="筛选通过，直接入库。",
+        ingest_on_accept=True,
+        knowledge_base_id=knowledge_env["base"]["knowledgeBaseId"],
+        knowledge_title="Direct ingestion becomes governed memory",
+        knowledge_summary="Accepted source review can create a formal KnowledgeItem directly.",
+        knowledge_content="Accepted owner inbox sources can be screened once and then become searchable formal team knowledge.",
+        tags=["direct-ingestion", "memory-platform"],
+    )
+
+    direct = reviewed["directIngestion"]
+    items = team_knowledge_service.list_knowledge_items(
+        knowledge_env["base"]["knowledgeBaseId"],
+        agent_id=knowledge_env["member"]["agentId"],
+    )
+    governance = team_knowledge_service.list_knowledge_governance_tasks(agent_id=knowledge_env["lead"]["agentId"])
+
+    assert reviewed["source"]["status"] == "accepted"
+    assert direct["status"] == "ingested"
+    assert direct["sourceArtifact"]["centralSourceId"] == reviewed["centralSource"]["centralSourceId"]
+    assert direct["item"]["centralSourceIds"] == [reviewed["centralSource"]["centralSourceId"]]
+    assert direct["item"]["sourceArtifactIds"] == [direct["sourceArtifact"]["sourceArtifactId"]]
+    assert direct["item"]["title"] == "Direct ingestion becomes governed memory"
+    assert items["summary"]["itemCount"] == 1
+    assert items["items"][0]["knowledgeItemId"] == direct["item"]["knowledgeItemId"]
+    assert governance["summary"]["proposalReviewCount"] == 0
+
+
+def test_global_knowledge_steward_can_direct_ingest_screened_team_source(knowledge_env):
+    steward_id = agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID
+    inbox_source = team_knowledge_service.collect_source_to_inbox(
+        "team",
+        knowledge_env["team"]["teamId"],
+        source_type="manual_user_entry",
+        source_ref={"note": "steward direct source"},
+        original_content="Knowledge steward direct ingestion source.",
+        title="Steward direct source",
+        actor_agent_id=knowledge_env["member"]["agentId"],
+    )
+
+    reviewed = team_knowledge_service.review_owner_inbox_source(
+        "team",
+        knowledge_env["team"]["teamId"],
+        inbox_source["inboxSourceId"],
+        decision="accepted",
+        reviewed_by_agent_id=steward_id,
+        ingest_on_accept=True,
+        knowledge_base_id=knowledge_env["base"]["knowledgeBaseId"],
+        knowledge_title="Knowledge steward direct memory",
+        knowledge_content="The global knowledge steward can screen a Team source and direct-ingest it into the Team knowledge base.",
+        tags=["steward", "direct-ingestion"],
+    )
+    items = team_knowledge_service.list_knowledge_items(
+        knowledge_env["base"]["knowledgeBaseId"],
+        agent_id=knowledge_env["member"]["agentId"],
+    )
+
+    assert reviewed["directIngestion"]["status"] == "ingested"
+    assert reviewed["directIngestion"]["item"]["reviewedByAgentId"] == steward_id
+    assert items["summary"]["itemCount"] == 1
+
+
+def test_direct_ingestion_rejects_cross_owner_target_knowledge_base(knowledge_env):
+    other_lead = agent_directory_service.create_agent_instance(display_name="Other Lead")
+    other_team = team_service.create_team(name="Other Knowledge Team", members=[{"agentId": other_lead["agentId"], "role": "lead"}])
+    other_base = team_knowledge_service.create_knowledge_base(
+        other_team["teamId"],
+        name="Other Team KB",
+        actor_agent_id=other_lead["agentId"],
+    )
+    inbox_source = team_knowledge_service.collect_source_to_inbox(
+        "team",
+        knowledge_env["team"]["teamId"],
+        source_type="manual_user_entry",
+        source_ref={"note": "cross owner source"},
+        original_content="Cross owner source should stay scoped to its owner.",
+        title="Cross owner source",
+        actor_agent_id=knowledge_env["member"]["agentId"],
+    )
+
+    with pytest.raises(team_knowledge_service.TeamKnowledgePermissionError):
+        team_knowledge_service.review_owner_inbox_source(
+            "team",
+            knowledge_env["team"]["teamId"],
+            inbox_source["inboxSourceId"],
+            decision="accepted",
+            reviewed_by_agent_id=knowledge_env["lead"]["agentId"],
+            ingest_on_accept=True,
+            knowledge_base_id=other_base["knowledgeBaseId"],
+            knowledge_title="Should not cross owner",
+            knowledge_content="A source owned by one team cannot direct-ingest into another team's knowledge base.",
+        )
+
+
 def test_developer_mode_routes_owner_knowledge_state_to_sandbox(tmp_path, monkeypatch):
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
@@ -595,6 +707,39 @@ def test_duplicate_knowledge_base_ids_require_owner_scope(tmp_path, monkeypatch)
     assert scoped_items["summary"]["itemCount"] == 1
     assert scoped_items["items"][0]["knowledgeItemId"] == reviewed["item"]["knowledgeItemId"]
     assert second_items["summary"]["itemCount"] == 0
+
+    direct_source = team_knowledge_service.collect_source_to_inbox(
+        "team",
+        first_team["teamId"],
+        source_type="manual_user_entry",
+        source_ref={"note": "first direct scoped source"},
+        original_content="Direct scoped source content.",
+        title="First direct scoped source",
+        actor_agent_id=first_agent["agentId"],
+    )
+    direct_review = team_knowledge_service.review_owner_inbox_source(
+        "team",
+        first_team["teamId"],
+        direct_source["inboxSourceId"],
+        decision="accepted",
+        reviewed_by_agent_id=first_agent["agentId"],
+        ingest_on_accept=True,
+        knowledge_base_id=first_base["scopedKnowledgeBaseId"],
+        knowledge_title="First scoped direct item",
+        knowledge_content="Direct ingestion must use the scoped knowledge base id after resolving the owner.",
+    )
+    scoped_items_after_direct = team_knowledge_service.list_knowledge_items(
+        first_base["scopedKnowledgeBaseId"],
+        agent_id=first_agent["agentId"],
+    )
+    second_items_after_direct = team_knowledge_service.list_knowledge_items(
+        second_base["scopedKnowledgeBaseId"],
+        agent_id=second_agent["agentId"],
+    )
+
+    assert direct_review["directIngestion"]["scopedKnowledgeBaseId"] == first_base["scopedKnowledgeBaseId"]
+    assert scoped_items_after_direct["summary"]["itemCount"] == 2
+    assert second_items_after_direct["summary"]["itemCount"] == 0
 
 
 def test_empty_actor_cannot_create_or_read_governed_knowledge_service(knowledge_env):

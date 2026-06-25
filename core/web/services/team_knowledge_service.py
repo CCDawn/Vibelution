@@ -227,11 +227,13 @@ def _build_knowledge_steward_overview(
             "openTasks": open_tasks[:8],
         },
         "operatingBoundary": {
-            "canDirectlyApplyKnowledge": False,
+            "canDirectlyApplyKnowledge": True,
+            "canDirectlyIngestScreenedSources": True,
             "canDeleteKnowledge": False,
             "canChangeAcl": False,
             "canBypassReviewer": False,
-            "formalKnowledgeRequiresReviewer": True,
+            "formalKnowledgeRequiresReviewer": False,
+            "screeningAgentIsReviewer": True,
             "knowledgeBodiesInPrompt": False,
         },
         "updatedAt": utc_now_iso(),
@@ -251,6 +253,13 @@ def list_ingestion_adapters() -> dict[str, Any]:
                 "proposalStatus": "pending",
                 "createsKnowledgeItem": False,
                 "requiresReview": True,
+            },
+            "directReviewContract": {
+                "entrypoint": "owner_source_inbox_review",
+                "creates": ["CentralSource", "SourceArtifact", "KnowledgeItem"],
+                "createsKnowledgeItem": True,
+                "requiresScreening": True,
+                "proposalStatus": "not_required",
             },
         }
         for source_type in sorted(INGESTION_ADAPTERS)
@@ -585,15 +594,30 @@ def review_owner_inbox_source(
     reviewed_by_agent_id: str = "",
     resolution_note: str = "",
     duplicate_of: str = "",
+    ingest_on_accept: bool = False,
+    knowledge_base_id: str = "",
+    knowledge_title: str = "",
+    knowledge_summary: str = "",
+    knowledge_content: str = "",
+    tags: list[str] | None = None,
 ) -> dict[str, Any]:
-    """Resolve one owner inbox source and optionally promote it into central source storage."""
+    """Resolve one owner inbox source and optionally direct-ingest it as formal knowledge."""
 
     owner = _require_owner_context(owner_type, owner_id)
     reviewer_id = str(reviewed_by_agent_id or "").strip()
     if not _can_review_owner_source(owner, reviewer_id):
         raise TeamKnowledgePermissionError("Agent is not allowed to review this owner source inbox.")
     normalized_decision = _normalize_source_review_decision(decision)
+    wants_direct_ingest = bool(
+        ingest_on_accept
+        or str(knowledge_base_id or "").strip()
+        or str(knowledge_content or "").strip()
+        or str(knowledge_title or "").strip()
+    )
+    if wants_direct_ingest and normalized_decision != "accepted":
+        raise TeamKnowledgeError("Direct ingestion is only supported for accepted source reviews.")
     now = utc_now_iso()
+    direct_ingestion: dict[str, Any] | None = None
     with _LOCK:
         sources = _read_jsonl(_owner_source_index_path(owner))
         source = _find_by_id(sources, "inboxSourceId", inbox_source_id)
@@ -615,6 +639,22 @@ def review_owner_inbox_source(
             source["curationStatus"] = "central_curated"
             source["centralSourceId"] = central_source["centralSourceId"]
             source["dedupeStatus"] = str(promotion.get("dedupeStatus") or "")
+            if wants_direct_ingest:
+                direct_ingestion = _direct_ingest_accepted_source_locked(
+                    owner,
+                    source,
+                    central_source,
+                    reviewer_id=reviewer_id,
+                    knowledge_base_id=knowledge_base_id,
+                    knowledge_title=knowledge_title,
+                    knowledge_summary=knowledge_summary,
+                    knowledge_content=knowledge_content,
+                    tags=tags,
+                    now=now,
+                )
+                source["curationStatus"] = "formal_knowledge"
+                source["knowledgeBaseId"] = direct_ingestion["knowledgeBaseId"]
+                source["knowledgeItemId"] = direct_ingestion["item"]["knowledgeItemId"]
         elif normalized_decision == "duplicate":
             central_source = _resolve_duplicate_central_source_locked(source, duplicate_of=duplicate_of)
             promotion = _append_owner_ref_for_central_source_locked(
@@ -655,6 +695,8 @@ def review_owner_inbox_source(
             "inboxSourceId": str(inbox_source_id or "").strip(),
             "decision": normalized_decision,
             "centralSourceId": str((central_source or {}).get("centralSourceId") or ""),
+            "directIngestionStatus": str((direct_ingestion or {}).get("status") or ""),
+            "knowledgeItemId": str(((direct_ingestion or {}).get("item") or {}).get("knowledgeItemId") or ""),
         },
     )
     return {
@@ -664,6 +706,7 @@ def review_owner_inbox_source(
         "source": source,
         "centralSource": central_source,
         "promotion": promotion,
+        "directIngestion": direct_ingestion,
         "updatedAt": utc_now_iso(),
     }
 
@@ -3196,6 +3239,120 @@ def _item_from_proposal(
         "markedBy": "",
         "markedAt": "",
         "markingReason": "",
+    }
+
+
+def _direct_ingest_accepted_source_locked(
+    owner_value: dict[str, Any],
+    source: dict[str, Any],
+    central_source: dict[str, Any],
+    *,
+    reviewer_id: str,
+    knowledge_base_id: str,
+    knowledge_title: str,
+    knowledge_summary: str,
+    knowledge_content: str,
+    tags: list[str] | None,
+    now: str,
+) -> dict[str, Any]:
+    owner = _coerce_owner_context(owner_value)
+    target_owner, base = _require_base_with_owner(knowledge_base_id)
+    target_owner = _coerce_owner_context(target_owner)
+    if target_owner["ownerType"] != owner["ownerType"] or target_owner["ownerId"] != owner["ownerId"]:
+        raise TeamKnowledgePermissionError("Direct ingestion target knowledge base must belong to the reviewed owner.")
+    if not _can_review_owner_source(owner, reviewer_id):
+        raise TeamKnowledgePermissionError("Agent is not allowed to direct-ingest this owner source.")
+    normalized_title = trim_lines(knowledge_title or source.get("title") or central_source.get("title") or "", max_lines=1).strip()
+    normalized_summary = trim_lines(
+        knowledge_summary or source.get("summary") or central_source.get("summary") or "",
+        max_lines=6,
+    ).strip()
+    normalized_content = trim_lines(knowledge_content or "", max_lines=120).strip()
+    if not normalized_title:
+        raise TeamKnowledgeError("Direct ingestion requires knowledgeTitle or source title.")
+    if not normalized_content:
+        raise TeamKnowledgeError("Direct ingestion requires knowledgeContent.")
+
+    scoped_base_id = _owner_scoped_knowledge_base_id(owner, base["knowledgeBaseId"])
+    source_artifact = create_source_artifact_from_central_source(
+        scoped_base_id,
+        str(central_source.get("centralSourceId") or ""),
+        actor_agent_id=reviewer_id,
+        title=normalized_title,
+        summary=normalized_summary,
+    )
+    batch = {
+        "batchId": _new_event_id("kbatch"),
+        "ownerType": owner["ownerType"],
+        "ownerId": owner["ownerId"],
+        "teamId": owner["ownerId"] if owner["ownerType"] == "team" else "",
+        "agentId": owner["ownerId"] if owner["ownerType"] == "agent" else "",
+        "knowledgeBaseId": base["knowledgeBaseId"],
+        "proposalIds": [],
+        "sourceArtifactIds": [source_artifact["sourceArtifactId"]],
+        "centralSourceIds": [str(central_source.get("centralSourceId") or "")],
+        "reviewedByAgentId": reviewer_id,
+        "appliedAt": now,
+        "status": "applied",
+        "ingestionMode": "source_review_direct",
+    }
+    item = {
+        "knowledgeItemId": _new_event_id("kitem"),
+        "ownerType": owner["ownerType"],
+        "ownerId": owner["ownerId"],
+        "teamId": owner["ownerId"] if owner["ownerType"] == "team" else "",
+        "agentId": owner["ownerId"] if owner["ownerType"] == "agent" else "",
+        "knowledgeBaseId": base["knowledgeBaseId"],
+        "batchId": batch["batchId"],
+        "sourceArtifactIds": [source_artifact["sourceArtifactId"]],
+        "centralSourceIds": [str(central_source.get("centralSourceId") or "")],
+        "title": normalized_title,
+        "summary": normalized_summary,
+        "content": normalized_content,
+        "tags": _unique_strings(tags or [])[:24],
+        "importanceLevel": "medium",
+        "confidence": 0.75,
+        "stability": "evolving",
+        "scope": "team" if owner["ownerType"] == "team" else "agent",
+        "reviewPriority": "normal",
+        "createdAt": now,
+        "updatedAt": now,
+        "reviewedAt": now,
+        "appliedAt": now,
+        "reviewedByAgentId": reviewer_id,
+        "markedBy": "",
+        "markedAt": "",
+        "markingReason": "",
+        "ingestionMode": "source_review_direct",
+    }
+    _append_jsonl(_batches_path_for_owner(owner), batch)
+    _append_jsonl(_items_path_for_owner(owner), item)
+    _append_audit(owner, "knowledge.item.direct_ingested", item, actor_agent_id=reviewer_id)
+    _record_event(
+        "knowledge.item.direct_ingested",
+        owner,
+        base["knowledgeBaseId"],
+        actor_agent_id=reviewer_id,
+        fields={
+            "sourceArtifactId": source_artifact["sourceArtifactId"],
+            "centralSourceId": str(central_source.get("centralSourceId") or ""),
+            "knowledgeItemId": item["knowledgeItemId"],
+            "ingestionMode": "source_review_direct",
+        },
+    )
+    return {
+        "schemaVersion": SCHEMA_VERSION,
+        "status": "ingested",
+        "ownerType": owner["ownerType"],
+        "ownerId": owner["ownerId"],
+        "teamId": owner["ownerId"] if owner["ownerType"] == "team" else "",
+        "agentId": owner["ownerId"] if owner["ownerType"] == "agent" else "",
+        "knowledgeBaseId": base["knowledgeBaseId"],
+        "scopedKnowledgeBaseId": scoped_base_id,
+        "sourceArtifact": source_artifact,
+        "batch": batch,
+        "item": item,
+        "updatedAt": now,
     }
 
 

@@ -252,6 +252,54 @@ def test_knowledge_source_inbox_routes_promote_and_attach_central_source(tmp_pat
     assert artifact_response.json()["centralSourceId"] == central_source["centralSourceId"]
 
 
+def test_knowledge_source_review_route_can_directly_ingest_to_formal_knowledge(tmp_path, monkeypatch):
+    client, team, lead, member, _outsider = _setup(tmp_path, monkeypatch)
+    base = client.post(
+        f"/api/teams/{team['teamId']}/knowledge-bases",
+        json={"name": "Direct Ingest KB", "actorAgentId": lead["agentId"]},
+    ).json()
+    collect_response = client.post(
+        "/api/knowledge/sources/inbox",
+        json={
+            "ownerType": "team",
+            "ownerId": team["teamId"],
+            "sourceType": "manual_user_entry",
+            "sourceRef": {"note": "direct route source"},
+            "originalContent": "Direct route source content.",
+            "originalFilename": "direct-route-source.txt",
+            "title": "Direct route source",
+            "summary": "Route review should create formal knowledge.",
+            "actorAgentId": member["agentId"],
+        },
+    )
+    inbox_source = collect_response.json()
+
+    review_response = client.patch(
+        f"/api/knowledge/sources/inbox/team/{team['teamId']}/{inbox_source['inboxSourceId']}/review",
+        json={
+            "decision": "accepted",
+            "reviewedByAgentId": lead["agentId"],
+            "resolutionNote": "筛选通过，直接进入正式知识库。",
+            "ingestOnAccept": True,
+            "knowledgeBaseId": base["knowledgeBaseId"],
+            "knowledgeTitle": "Direct route source becomes memory",
+            "knowledgeSummary": "The review route can write a formal KnowledgeItem directly.",
+            "knowledgeContent": "The knowledge source review API supports direct formal ingestion after steward screening.",
+            "tags": ["direct-ingestion", "route"],
+        },
+    )
+    items_response = client.get(
+        f"/api/knowledge-bases/{base['knowledgeBaseId']}/items",
+        params={"agentId": member["agentId"]},
+    )
+
+    assert review_response.status_code == 200, review_response.text
+    payload = review_response.json()
+    assert payload["directIngestion"]["status"] == "ingested"
+    assert payload["directIngestion"]["item"]["title"] == "Direct route source becomes memory"
+    assert items_response.json()["summary"]["itemCount"] == 1
+
+
 def test_knowledge_routes_reject_non_member_and_legacy_source_artifact_route(tmp_path, monkeypatch):
     client, team, lead, _member, outsider = _setup(tmp_path, monkeypatch)
     base = client.post(
@@ -718,11 +766,13 @@ def test_knowledge_steward_overview_surfaces_agent_boundary_and_queue(tmp_path, 
     assert payload["steward"]["directChatPath"].startswith("/chat?session=")
     assert "knowledge_governance_tasks_tool" in payload["steward"]["toolPolicy"]["allowedTools"]
     assert "research_proposal_apply_tool" not in payload["steward"]["toolPolicy"]["allowedTools"]
-    assert payload["operatingBoundary"]["canDirectlyApplyKnowledge"] is False
+    assert payload["operatingBoundary"]["canDirectlyApplyKnowledge"] is True
+    assert payload["operatingBoundary"]["canDirectlyIngestScreenedSources"] is True
     assert payload["operatingBoundary"]["canDeleteKnowledge"] is False
     assert payload["operatingBoundary"]["canChangeAcl"] is False
     assert payload["operatingBoundary"]["canBypassReviewer"] is False
-    assert payload["operatingBoundary"]["formalKnowledgeRequiresReviewer"] is True
+    assert payload["operatingBoundary"]["formalKnowledgeRequiresReviewer"] is False
+    assert payload["operatingBoundary"]["screeningAgentIsReviewer"] is True
     assert payload["governance"]["summary"]["openTaskCount"] >= 1
     assert any(task["targetId"] == proposal["proposalId"] for task in payload["governance"]["openTasks"])
 

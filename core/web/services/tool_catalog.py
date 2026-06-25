@@ -503,8 +503,8 @@ TOOL_CATALOG: dict[str, dict[str, Any]] = {
     },
     "knowledge_ingestion_tool": {
         "category": "memory_context",
-        "capabilityTags": ["team_knowledge", "ingestion_package", "central_source_attachment"],
-        "riskTags": ["team_knowledge_proposal"],
+        "capabilityTags": ["team_knowledge", "source_review", "direct_ingestion", "knowledge_item_write", "central_source_attachment"],
+        "riskTags": ["team_knowledge_write", "formal_knowledge_mutation"],
         "permissionTier": HIGH_PERMISSION_TIER,
     },
     "knowledge_governance_tasks_tool": {
