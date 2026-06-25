@@ -221,6 +221,8 @@ If developer mode is affected, validation should include the smallest useful evi
 
 Structural migrations must converge on one normal path. Compatibility layers, duplicate routing paths, adapter shims, dual writers, legacy aliases, and old data/layout surfaces may exist only as temporary development scaffolding. Before stable merge or release, remove the old structure and its tests, docs, config entries, and call sites so only the new structure remains; otherwise record a bounded migration exception with owner, expiry or removal trigger, validation evidence, and rollback reason.
 
+Structural changes must also align the related tests before the implementation result is trusted. When changing architecture, source-of-truth boundaries, projections, lifecycle ownership, routing, caches, data structures, algorithm structure, or runtime boundaries, review the relevant existing tests first or in the same round. Classify them as `keep`, `update`, `migrate/remove`, or `add`: keep tests that still protect stable product invariants; update tests whose assertions are useful but tied to the old structure; migrate or remove tests that only preserve a retired path, duplicate writer, stale projection edit surface, or old cache contract; and add tests for the new source-of-truth, projection, migration, or boundary invariant. Do not treat old tests passing as sufficient proof when those tests do not exercise the new architecture contract. If a temporary compatibility test must remain, record its owner, removal trigger, and validation reason.
+
 ### 8.2 Rust Accelerator Boundary
 
 Python remains the primary runtime for Vibelution business logic, Agent orchestration, web APIs, tests, and evolution workflows. Rust is allowed only as a bounded accelerator layer, not as a replacement for product semantics or the main Agent runtime.
@@ -648,6 +650,7 @@ A development round is not done until:
 - implementation stayed within claimed scope;
 - logging decision is explicit;
 - test decision is explicit;
+- architecture and test alignment decision is explicit for structural changes;
 - relevant tests/checks ran or blockers are reported;
 - Launcher refresh decision is explicit;
 - Git status was reviewed;
