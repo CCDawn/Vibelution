@@ -423,6 +423,30 @@ def test_supervised_agent_bindings_follow_mode_binding_slot_replacement(tmp_path
     assert agent_directory_service.get_agent(replacement["agentId"])["llmBindings"]["dialogue"]["modelId"] == "model-primary"
 
 
+def test_supervised_agent_bindings_ignore_stale_slot_warning_for_previous_agent(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    agents = _seed_supervised_fixed_role_agents()
+    baseline = next(agent for agent in agents if agent["metadata"]["supervisedRole"] == "baseline")
+    original_payload = agent_mode_binding_service.get_mode_bindings_payload
+
+    def stale_warning_payload(*args, **kwargs):
+        payload = original_payload(*args, **kwargs)
+        payload["repairWarnings"] = [
+            {
+                "mode": "supervised_evolution",
+                "field": "slots.baseline",
+                "agentId": "agent-previous-baseline",
+            }
+        ]
+        return payload
+
+    monkeypatch.setattr(agent_mode_binding_service, "get_mode_bindings_payload", stale_warning_payload)
+
+    bindings = supervised_agent_service.supervised_agent_bindings()
+
+    assert bindings["baseline"]["agentId"] == baseline["agentId"]
+
+
 def test_supervised_agent_bindings_block_archived_slot_replacement(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _seed_supervised_fixed_role_agents()

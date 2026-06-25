@@ -1543,7 +1543,7 @@ def test_start_supervised_run_reports_stale_agent_slot_as_validation_error(tmp_p
     slots = dict(current["slots"])
     slots["baseline"] = replacement["agentId"]
     agent_mode_binding_service.update_mode_binding("supervised_evolution", slots=slots)
-    agent_directory_service.archive_agent_instance(replacement["agentId"])
+    agent_directory_service.archive_agent_instance(replacement["agentId"], repair_mode_bindings=False)
 
     response = client.post(
         "/api/evolution/runs",

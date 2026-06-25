@@ -301,14 +301,14 @@ def supervised_agent_bindings() -> dict[str, dict[str, Any]]:
             raise SupervisedAgentBindingError(
                 f"Supervised role slot points to an archived or missing Agent: {role} ({raw_agent_id})"
             )
-        stale_warning = _supervised_slot_warning(mode_payload, role)
-        if stale_warning:
-            agent_id = str(stale_warning.get("agentId") or "").strip()
-            _record_supervised_binding_failure(role, agent_id=agent_id, reason="missing_or_archived_slot_agent")
-            raise SupervisedAgentBindingError(
-                f"Supervised role slot points to an archived or missing Agent: {role} ({agent_id or 'unknown'})"
-            )
         agent_id = str((slots or {}).get(role) or "").strip()
+        stale_warning = _supervised_slot_warning(mode_payload, role, agent_id=agent_id)
+        if stale_warning:
+            warning_agent_id = str(stale_warning.get("agentId") or "").strip()
+            _record_supervised_binding_failure(role, agent_id=warning_agent_id, reason="missing_or_archived_slot_agent")
+            raise SupervisedAgentBindingError(
+                f"Supervised role slot points to an archived or missing Agent: {role} ({warning_agent_id or 'unknown'})"
+            )
         if not agent_id:
             _record_supervised_binding_failure(role, agent_id="", reason="missing_slot_agent")
             raise SupervisedAgentBindingError(f"Supervised role slot is not configured: {role}")
@@ -630,14 +630,18 @@ def _raw_supervised_mode_slots() -> dict[str, str]:
     return {}
 
 
-def _supervised_slot_warning(mode_payload: dict[str, Any], role: str) -> dict[str, str] | None:
+def _supervised_slot_warning(mode_payload: dict[str, Any], role: str, *, agent_id: str = "") -> dict[str, str] | None:
     expected_field = f"slots.{role}"
+    current_agent_id = str(agent_id or "").strip()
     for warning in mode_payload.get("repairWarnings") or []:
         if not isinstance(warning, dict):
             continue
         if str(warning.get("mode") or "").strip() != "supervised_evolution":
             continue
         if str(warning.get("field") or "").strip() == expected_field:
+            warning_agent_id = str(warning.get("agentId") or "").strip()
+            if current_agent_id and warning_agent_id != current_agent_id:
+                continue
             return {str(key): str(value or "") for key, value in warning.items()}
     return None
 
