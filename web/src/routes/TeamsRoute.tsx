@@ -16,7 +16,6 @@ import {
 } from "../api/projectAgentBus";
 import { queryKeys } from "../api/queryKeys";
 import {
-  AgentConfigWorkspace,
   AgentConfigWorkspaceAgent,
   AiSearchRun,
   AiSearchRunListPayload,
@@ -71,7 +70,7 @@ const TEAM_PICKER_TEAM_IDS = [AI_SEARCH_TEAM_ID, RESEARCH_TEAM_ID] as const;
 const EVOLUTION_SYSTEM_TEAM_IDS = new Set(["self-evolution-team", "supervised-evolution-team"]);
 const LINKED_ROOM_ACTIVE_REFETCH_MS = 5_000;
 const LINKED_ROOM_IDLE_REFETCH_MS = 30_000;
-const TEAM_WORKFLOW_CANDIDATE_PREVIEW_LIMIT = 500;
+const TEAM_WORKFLOW_CANDIDATE_PREVIEW_LIMIT = 80;
 const TEAM_WORKFLOW_CANDIDATE_GRAPH_LIMIT = 20;
 const AI_SEARCH_RUN_PREVIEW_LIMIT = 6;
 const TEAM_BOOTSTRAP_ACTIVE_REFETCH_MS = 2_000;
@@ -3841,18 +3840,18 @@ export function TeamsRoute({
         ? resolvePollingInterval(pageVisible, TEAM_BOOTSTRAP_ACTIVE_REFETCH_MS, { backgroundMs: TEAM_BOOTSTRAP_BACKGROUND_REFETCH_MS })
         : false,
   });
-  const workspaceQuery = useQuery({
-    queryKey: queryKeys.agentConfigWorkspace(),
-    queryFn: () => fetchJson<AgentConfigWorkspace>("/api/agents/config-workspace"),
-    enabled: teamsQuery.isSuccess,
+  const agentSummaryQuery = useQuery({
+    queryKey: queryKeys.agentSummary(true),
+    queryFn: () => fetchJson<AgentConfigWorkspaceAgent[]>("/api/agents?includeArchived=true&detail=summary"),
+    staleTime: 10_000,
   });
   const projectBusQuery = useQuery({
     queryKey: queryKeys.projectAgentBus(),
     queryFn: () => listProjectAgentBusTimeline(PROJECT_AGENT_BUS_TEAM_TIMELINE_LIMIT),
   });
   const activeAgents = useMemo(
-    () => (workspaceQuery.data?.agents ?? []).filter((agent) => agent.status !== "archived"),
-    [workspaceQuery.data],
+    () => (agentSummaryQuery.data ?? []).filter((agent) => agent.status !== "archived"),
+    [agentSummaryQuery.data],
   );
   const activeAgentsById = useMemo(() => new Map(activeAgents.map((agent) => [agent.agentId, agent])), [activeAgents]);
   const teams = teamsQuery.data?.teams ?? [];
@@ -5673,10 +5672,10 @@ export function TeamsRoute({
       return { binding, route, status: "ready" };
     }
     const hasBoundAgentId = Boolean(String(binding?.agentId || "").trim());
-    if (hasBoundAgentId && !binding?.agent && (workspaceQuery.isPending || workspaceQuery.isFetching)) {
+    if (hasBoundAgentId && !binding?.agent && (agentSummaryQuery.isPending || agentSummaryQuery.isFetching)) {
       return { binding, route, status: "loading" };
     }
-    if (hasBoundAgentId && !binding?.agent && workspaceQuery.isError) {
+    if (hasBoundAgentId && !binding?.agent && agentSummaryQuery.isError) {
       return { binding, route, status: "error" };
     }
     return { binding, route, status: "repair" };
@@ -5795,7 +5794,7 @@ export function TeamsRoute({
             const agentHydrationPending = Boolean(
               binding.agentId
               && !binding.agent
-              && (workspaceQuery.isPending || workspaceQuery.isFetching),
+              && (agentSummaryQuery.isPending || agentSummaryQuery.isFetching),
             );
             const tone = binding.agent
               ? researchStageAgentConfigTone(binding.agent)
@@ -5815,7 +5814,7 @@ export function TeamsRoute({
               : binding.agentId
                 ? agentHydrationPending
                   ? (lang === "zh" ? "加载中" : "loading")
-                  : workspaceQuery.isError
+                  : agentSummaryQuery.isError
                     ? (lang === "zh" ? "Agent 加载失败" : "Agent load failed")
                     : (lang === "zh" ? "引用失效" : "missing reference")
                 : (lang === "zh" ? "待绑定" : "missing");
@@ -10997,9 +10996,9 @@ export function TeamsRoute({
               </div>
               </section>
             ) : showNodeBindingPanel ? (
-              <section className={`${styles.nodeBindingSection} ${styles.nodeBindingPlaceholder}`} aria-busy={teamDetailQuery.isPending || workspaceQuery.isPending}>
+              <section className={`${styles.nodeBindingSection} ${styles.nodeBindingPlaceholder}`} aria-busy={teamDetailQuery.isPending || agentSummaryQuery.isPending}>
                 <div className={styles.empty}>
-                  {teamDetailQuery.isPending || workspaceQuery.isPending
+                  {teamDetailQuery.isPending || agentSummaryQuery.isPending
                     ? (lang === "zh" ? "正在读取团队节点..." : "Loading team nodes...")
                     : (lang === "zh" ? "创建或选择一个团队节点。" : "Create or select a team node.")}
                 </div>
