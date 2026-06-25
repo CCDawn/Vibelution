@@ -9698,8 +9698,6 @@ export function TeamsRoute({
     && (
       (sourceCollectionRunsQuery.isPending && !sourceCollectionRunsQuery.data)
       || (sourceCollectionSummaryQuery.isPending && sourceCollectionWorkspaceSelected && !sourceCollectionSummaryQuery.data)
-      || (researchStageRoundStatusQuery.isPending && researchStageRoundStatusEnabled && !researchStageRoundStatusQuery.data)
-      || (teamWorkflowCandidatesQuery.isPending && teamWorkflowCandidateListEnabled && !teamWorkflowCandidatesQuery.data)
     ),
   );
   const sourceCollectionSourceQualityLoading = Boolean(

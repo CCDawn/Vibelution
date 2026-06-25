@@ -753,6 +753,13 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("sourceCollectionSummaryCounts");
     expect(routeSource).toContain("summarySourceCollectionActiveWorkRun");
     expect(routeSource).toContain("enabled: Boolean(effectiveTeamId && researchWorkflowTeamSelected)");
+    const sourceCollectionPrimaryLoadingSource = routeSource.slice(
+      routeSource.indexOf("const sourceCollectionPrimaryDataLoading = Boolean("),
+      routeSource.indexOf("const sourceCollectionSourceQualityLoading = Boolean("),
+    );
+    expect(sourceCollectionPrimaryLoadingSource).toContain("sourceCollectionSummaryQuery.isPending");
+    expect(sourceCollectionPrimaryLoadingSource).not.toContain("researchStageRoundStatusQuery.isPending");
+    expect(sourceCollectionPrimaryLoadingSource).not.toContain("teamWorkflowCandidatesQuery.isPending");
     expect(routeSource).not.toContain("researchStageRoundStatusQueryKey(effectiveTeamId || \"none\"),\n    queryFn: () =>\n      fetchJson<ResearchStageRoundStatusPayload>(\n        `/api/teams/${encodeURIComponent(effectiveTeamId)}/workflow-orchestration/stage-rounds/status`,\n      ),\n    enabled: Boolean(effectiveTeamId && researchWorkflowTeamSelected && teamWorkflowQuery.data)");
     expect(routeSource).not.toContain("queryKeys.teamWorkflowCandidates(effectiveTeamId || \"none\", TEAM_WORKFLOW_CANDIDATE_PREVIEW_LIMIT),\n    queryFn: () =>\n      fetchJson<TeamWorkflowCandidateListPayload>(\n        `/api/teams/${encodeURIComponent(effectiveTeamId)}/workflow-orchestration/candidates?limit=${TEAM_WORKFLOW_CANDIDATE_PREVIEW_LIMIT}`,\n      ),\n    enabled: Boolean(effectiveTeamId && researchWorkflowTeamSelected && teamWorkflowQuery.data)");
     expect(routeSource).not.toContain("enabled: Boolean(effectiveTeamId && researchWorkflowTeamSelected && teamWorkflowQuery.data)");
