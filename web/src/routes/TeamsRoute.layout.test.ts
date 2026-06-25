@@ -437,6 +437,8 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("sourceCollectionStageCardById");
     expect(routeSource).toContain("sourceCollectionDisplayedCandidateCount");
     expect(routeSource).toContain("sourceCollectionPrimaryDataLoading");
+    expect(routeSource).toContain("sourceCollectionSourceQualityLoading");
+    expect(routeSource).toContain("sourceCollectionScreeningDataLoading");
     expect(routeSource).toContain("sourceCollectionLoadingText");
     expect(routeSource).toContain("sourceCollectionLoadingSummary");
     expect(routeSource).toContain("sourceCollectionDisplayedCandidateFilterCounts");
@@ -713,6 +715,13 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("query.state.data as ResearchStageRoundStatusPayload | null | undefined");
     expect(routeSource).toContain("sourceCollectionStageWritebackSyncActive,");
     expect(routeSource).toContain("sourceCollectionStageWritebackRefetchInterval(pageVisible, researchStageRoundStatusQuery.data, sourceCollectionStageWritebackSyncActive)");
+    expect(routeSource).toContain("refetchInterval: () => sourceCollectionStageWritebackRefetchInterval(pageVisible, researchStageRoundStatusQuery.data, sourceCollectionStageWritebackSyncActive)");
+    const sourceQualityStatusQuerySource = routeSource.slice(
+      routeSource.indexOf("const teamWorkflowSourceQualityStatusQuery"),
+      routeSource.indexOf("const teamWorkflowPaperNoteChunkStatusQuery"),
+    );
+    expect(sourceQualityStatusQuerySource).toContain("refetchInterval");
+    expect(sourceQualityStatusQuerySource).toContain("sourceCollectionStageWritebackSyncActive");
     expect(routeSource).toContain("SourceCollectionSummaryPayload");
     expect(routeSource).toContain("sourceCollectionSummaryQueryKey");
     expect(routeSource).toContain("/workflow-orchestration/source-collection/summary");
