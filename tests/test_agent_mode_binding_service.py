@@ -286,6 +286,37 @@ def test_mode_binding_repairs_supervised_slots_from_agent_instances(tmp_path, mo
     assert payload["modes"]["supervised_evolution"]["slots"]["baseline"] == baseline["agentId"]
 
 
+def test_mode_binding_repair_drops_stale_slot_warning_after_current_slot_is_valid(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    baseline = agent_directory_service.create_agent_instance(
+        display_name="当前监督进化基线 Agent",
+        llm_bindings={"dialogue": {"modelId": "model-supervised-baseline"}},
+        primary_mode="supervised_evolution",
+        role_key="baseline",
+        prompt_template_id="prompt-supervised-baseline",
+        direct_session_id="session-baseline-current",
+        metadata={"supervisedRole": "baseline"},
+    )
+    seeded = agent_mode_binding_service.get_mode_bindings_payload()
+    state = agent_mode_binding_service.default_mode_binding_state()
+    state["modes"] = copy.deepcopy(seeded["modes"])
+    state["repairWarnings"] = [
+        {
+            "mode": "supervised_evolution",
+            "field": "slots.baseline",
+            "agentId": "agent-old-baseline",
+        }
+    ]
+    agent_mode_binding_service.save_mode_binding_state(state)
+
+    payload = agent_mode_binding_service.get_mode_bindings_payload()
+    persisted = agent_mode_binding_service._load_mode_bindings()
+
+    assert payload["modes"]["supervised_evolution"]["slots"]["baseline"] == baseline["agentId"]
+    assert not any(item.get("agentId") == "agent-old-baseline" for item in payload["repairWarnings"])
+    assert not any(item.get("agentId") == "agent-old-baseline" for item in persisted["repairWarnings"])
+
+
 def test_mode_binding_drops_archived_agent_with_repair_warning(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     agent = agent_directory_service.create_agent_instance(
@@ -298,7 +329,7 @@ def test_mode_binding_drops_archived_agent_with_repair_warning(tmp_path, monkeyp
     state["modes"]["chat"]["defaultAgentId"] = agent["agentId"]
     state["modes"]["chat"]["availableAgentIds"] = [agent["agentId"]]
     agent_mode_binding_service.save_mode_binding_state(state)
-    agent_directory_service.archive_agent_instance(agent["agentId"])
+    agent_directory_service.archive_agent_instance(agent["agentId"], repair_mode_bindings=False)
 
     payload = agent_mode_binding_service.get_mode_bindings_payload(agent_options=[])
 
