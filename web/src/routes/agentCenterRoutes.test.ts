@@ -7,6 +7,7 @@ import {
   agentCenterPromptsRoute,
   agentCenterToolsRoute,
   safeAgentCenterReturnToPath,
+  teamMemoryRoute,
 } from "./agentCenterRoutes";
 
 describe("agentCenterRoutes", () => {
@@ -27,6 +28,15 @@ describe("agentCenterRoutes", () => {
     );
     expect(agentCenterMemoryRoute({ agentId: "agent-1", view: "agents", returnLabel: "agents", returnTo })).toBe(
       "/memory/agents?agentId=agent-1&view=agents&returnTo=%2Fagents%3Fagent%3Dagent-1%26pane%3Dconfig&returnLabel=agents",
+    );
+    expect(agentCenterMemoryRoute({ agentId: "agent-1", teamId: "team-a", view: "agents", returnLabel: "teams", returnTo: "/teams?team=team-a" })).toBe(
+      "/memory/agents?agentId=agent-1&teamId=team-a&view=agents&returnTo=%2Fteams%3Fteam%3Dteam-a&returnLabel=teams",
+    );
+    expect(teamMemoryRoute({ teamId: "team-a", view: "knowledge", returnLabel: "teams", returnTo: "/teams?team=team-a" })).toBe(
+      "/memory/knowledge?teamId=team-a&view=knowledge&returnTo=%2Fteams%3Fteam%3Dteam-a&returnLabel=teams",
+    );
+    expect(teamMemoryRoute({ teamId: "team-a", view: "graph", agentId: "agent-1", nodeId: "team:team-a" })).toBe(
+      "/memory/graph?teamId=team-a&agentId=agent-1&nodeId=team%3Ateam-a&view=graph",
     );
   });
 

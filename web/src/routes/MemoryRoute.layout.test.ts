@@ -166,7 +166,7 @@ describe("MemoryRoute layout contract", () => {
   });
 
   it("wires the read-only 3D memory knowledge graph API and canvas shell", () => {
-    expect(routeSource).toContain('queryKeys.memoryKnowledgeGraph(fallbackKnowledgeActorAgentId, "officialResearchGraph")');
+    expect(routeSource).toContain('queryKeys.memoryKnowledgeGraph(fallbackKnowledgeActorAgentId, "officialResearchGraph", requestedTeamId)');
     expect(routeSource).toContain('appendAgentParam(new URLSearchParams({ include: "officialResearchGraph" }), fallbackKnowledgeActorAgentId)');
     expect(routeSource).toContain("fetchJson<MemoryKnowledgeGraphPayload>(`/api/memory/knowledge-graph?${params.toString()}`)");
     expect(routeSource).toContain("MemoryKnowledgeGraphNodeDetailPayload");
@@ -755,5 +755,17 @@ describe("MemoryRoute layout contract", () => {
     expect(memoryCssSource).toContain(".stewardWorkbench {\n  display: none;");
     expect(memoryCssSource).toContain(".stewardMission small,\n.stewardMetric small {\n  display: none;");
     expect(memoryCssSource).toContain(".knowledgeGovernanceDeck {\n    grid-template-columns: minmax(0, 1fr);");
+  });
+
+  it("honors Team workspace deep-link parameters for team knowledge and graph focus", () => {
+    expect(routeSource).toContain('const requestedTeamId = (searchParams.get("teamId") ?? "").trim()');
+    expect(routeSource).toContain('const requestedKnowledgeBaseId = (searchParams.get("knowledgeBaseId") ?? "").trim()');
+    expect(routeSource).toContain('const requestedGraphNodeId = (searchParams.get("nodeId") ?? "").trim()');
+    expect(routeSource).toContain("requestedTeamKnowledgeBase");
+    expect(routeSource).toContain("setActiveKnowledgeBaseId(knowledgeBaseRequestId(requestedTeamKnowledgeBase))");
+    expect(routeSource).toContain("useState(() => requestedGraphNodeId)");
+    expect(routeSource).toContain('queryKeys.memoryKnowledgeGraph(fallbackKnowledgeActorAgentId, "officialResearchGraph", requestedTeamId)');
+    expect(routeSource).toContain('new URLSearchParams({ include: "officialResearchGraph" })');
+    expect(routeSource).toContain('params.set("teamId", requestedTeamId)');
   });
 });
