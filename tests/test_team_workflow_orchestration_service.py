@@ -405,6 +405,74 @@ def test_extract_neuro_mechanism_requires_paper_note_candidate(tmp_path, monkeyp
         )
 
 
+def _register_typed_candidate(team_id, candidate_type, *, metadata=None):
+    payload = {
+        "candidateType": candidate_type,
+        "title": f"{candidate_type} candidate",
+        "sourceUrl": "https://example.test/c",
+        "evidenceRefs": [{"type": "page_anchor", "id": "anchor-1"}],
+    }
+    if metadata:
+        payload["metadata"] = metadata
+    return team_workflow_orchestration_service.register_candidate_source(team_id, payload)["candidate"]["candidateId"]
+
+
+def _mock_local_research_invoke(monkeypatch, candidate, *, valid=True):
+    monkeypatch.setattr(
+        team_workflow_orchestration_service,
+        "invoke_local_research_model",
+        lambda team_id, payload, *, llm_client_factory=None: {
+            "candidate": candidate,
+            "validation": {"valid": valid, "issues": []},
+            "task": {"taskId": "task-x"},
+        },
+    )
+
+
+def test_map_mechanism_to_abstraction_gates_high_over_analogy(tmp_path, monkeypatch):
+    """N-03：映射建 maps_to 谱系；overAnalogyRisk=high → review_needs_human。"""
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = team_service.create_team(name="挑战杯科研团队")
+    mech_id = _register_typed_candidate(team["teamId"], "neuro_mechanism")
+
+    _mock_local_research_invoke(
+        monkeypatch, {"candidateId": "map-1", "candidateType": "mechanism_mapping", "overAnalogyRisk": "medium"}
+    )
+    res = team_workflow_orchestration_service.map_mechanism_to_abstraction(team["teamId"], {"mechanismId": mech_id})
+    assert res["mappingGate"] == "ready"
+    assert res["mechanismCandidate"]["metadata"]["mappingDrafts"][-1]["edgeType"] == "maps_to"
+
+    _mock_local_research_invoke(
+        monkeypatch, {"candidateId": "map-2", "candidateType": "mechanism_mapping", "overAnalogyRisk": "high"}
+    )
+    res2 = team_workflow_orchestration_service.map_mechanism_to_abstraction(team["teamId"], {"mechanismId": mech_id})
+    assert res2["mappingGate"] == "review_needs_human"
+
+
+def test_generate_hypothesis_review_ready_and_links(tmp_path, monkeypatch):
+    """N-04：从 mechanism_mapping 生成假设，建 inspires 谱系；有效 → review_ready。"""
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = team_service.create_team(name="挑战杯科研团队")
+    map_id = _register_typed_candidate(team["teamId"], "mechanism_mapping")
+    _mock_local_research_invoke(monkeypatch, {"candidateId": "hyp-1", "candidateType": "algorithm_hypothesis"})
+    res = team_workflow_orchestration_service.generate_algorithm_hypothesis_from_mechanism_mapping(
+        team["teamId"], {"mappingId": map_id}
+    )
+    assert res["hypothesisGate"] == "review_ready"
+    assert res["mappingCandidate"]["metadata"]["hypothesisDrafts"][-1]["edgeType"] == "inspires"
+
+
+def test_generate_hypothesis_blocks_high_over_analogy_mapping(tmp_path, monkeypatch):
+    """N-04 门禁：上游 overAnalogyRisk=high 的 mapping 不得生成假设（须先过 Review Gate）。"""
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = team_service.create_team(name="挑战杯科研团队")
+    map_id = _register_typed_candidate(team["teamId"], "mechanism_mapping", metadata={"overAnalogyRisk": "high"})
+    with pytest.raises(team_workflow_orchestration_service.TeamWorkflowOrchestrationError):
+        team_workflow_orchestration_service.generate_algorithm_hypothesis_from_mechanism_mapping(
+            team["teamId"], {"mappingId": map_id}
+        )
+
+
 def test_challenge_cup_workflow_registers_candidate_and_decides_transfer(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     team = team_service.create_team(name="挑战杯科研团队")
