@@ -315,6 +315,213 @@ def _create_experiment_plan_with_active_baseline(team_id):
     return {"stage": stage, "draft": draft, "baseline": baseline}
 
 
+def test_register_candidate_source_strict_blocks_invalid(tmp_path, monkeypatch):
+    """写入口统一校验：缺来源位置的候选——非 strict 隔离写入；strict 硬拦截。envelope 级始终通过。"""
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = team_service.create_team(name="挑战杯科研团队")
+
+    response = team_workflow_orchestration_service.register_candidate_source(
+        team["teamId"], {"title": "No source location note"}
+    )
+    assert response["candidate"]["currentState"] == "source_needs_confirmation"
+    assert response["candidate"]["qualityStatus"] == "source_manifest_invalid"
+    assert response["candidate"]["envelopeValidation"]["valid"] is True
+
+    with pytest.raises(team_workflow_orchestration_service.TeamWorkflowOrchestrationError):
+        team_workflow_orchestration_service.register_candidate_source(
+            team["teamId"], {"title": "No source location note"}, strict=True
+        )
+
+
+def _register_paper_note(team_id, *, evidence=True):
+    payload = {
+        "candidateType": "paper_note",
+        "title": "Predictive coding note",
+        "sourceUrl": "https://example.test/paper",
+        "summary": "predictive coding key finding",
+    }
+    if evidence:
+        payload["evidenceRefs"] = [{"type": "page_anchor", "id": "anchor-1"}]
+    return team_workflow_orchestration_service.register_candidate_source(team_id, payload)["candidate"]["candidateId"]
+
+
+def test_extract_neuro_mechanism_from_paper_note_links_and_gates(tmp_path, monkeypatch):
+    """N-02：从 paper_note 抽取 neuro_mechanism，建 supports 谱系；高置信度 → ready。"""
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = team_service.create_team(name="挑战杯科研团队")
+    note_id = _register_paper_note(team["teamId"])
+
+    captured = {}
+
+    def fake_invoke(team_id, payload, *, llm_client_factory=None):
+        captured["payload"] = payload
+        return {
+            "candidate": {"candidateId": "mech-1", "candidateType": "neuro_mechanism", "confidence": 0.72},
+            "validation": {"valid": True, "issues": []},
+            "task": {"taskId": "task-1"},
+        }
+
+    monkeypatch.setattr(team_workflow_orchestration_service, "invoke_local_research_model", fake_invoke)
+    response = team_workflow_orchestration_service.extract_neuro_mechanism_from_paper_note(
+        team["teamId"], {"paperNoteId": note_id}
+    )
+
+    assert response["mechanismGate"] == "ready"
+    assert captured["payload"]["taskType"] == "neuro_mechanism_extract"
+    assert captured["payload"]["paperNoteIds"] == [note_id]
+    drafts = response["paperNoteCandidate"]["metadata"]["mechanismDrafts"]
+    assert drafts[-1]["candidateId"] == "mech-1"
+    assert drafts[-1]["edgeType"] == "supports"
+
+
+def test_extract_neuro_mechanism_low_confidence_needs_human(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = team_service.create_team(name="挑战杯科研团队")
+    note_id = _register_paper_note(team["teamId"])
+    monkeypatch.setattr(
+        team_workflow_orchestration_service,
+        "invoke_local_research_model",
+        lambda team_id, payload, *, llm_client_factory=None: {
+            "candidate": {"candidateId": "m2", "candidateType": "neuro_mechanism", "confidence": 0.3},
+            "validation": {"valid": True, "issues": []},
+            "task": {"taskId": "t2"},
+        },
+    )
+    response = team_workflow_orchestration_service.extract_neuro_mechanism_from_paper_note(
+        team["teamId"], {"paperNoteId": note_id}
+    )
+    assert response["mechanismGate"] == "review_needs_human"
+
+
+def test_extract_neuro_mechanism_requires_paper_note_candidate(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = team_service.create_team(name="挑战杯科研团队")
+    source = team_workflow_orchestration_service.register_candidate_source(
+        team["teamId"], {"title": "s", "sourceUrl": "https://example.test/s"}
+    )
+    with pytest.raises(team_workflow_orchestration_service.TeamWorkflowOrchestrationError):
+        team_workflow_orchestration_service.extract_neuro_mechanism_from_paper_note(
+            team["teamId"], {"paperNoteId": source["candidate"]["candidateId"]}
+        )
+
+
+def _register_typed_candidate(team_id, candidate_type, *, metadata=None):
+    payload = {
+        "candidateType": candidate_type,
+        "title": f"{candidate_type} candidate",
+        "sourceUrl": "https://example.test/c",
+        "evidenceRefs": [{"type": "page_anchor", "id": "anchor-1"}],
+    }
+    if metadata:
+        payload["metadata"] = metadata
+    return team_workflow_orchestration_service.register_candidate_source(team_id, payload)["candidate"]["candidateId"]
+
+
+def _mock_local_research_invoke(monkeypatch, candidate, *, valid=True):
+    monkeypatch.setattr(
+        team_workflow_orchestration_service,
+        "invoke_local_research_model",
+        lambda team_id, payload, *, llm_client_factory=None: {
+            "candidate": candidate,
+            "validation": {"valid": valid, "issues": []},
+            "task": {"taskId": "task-x"},
+        },
+    )
+
+
+def test_map_mechanism_to_abstraction_gates_high_over_analogy(tmp_path, monkeypatch):
+    """N-03：映射建 maps_to 谱系；overAnalogyRisk=high → review_needs_human。"""
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = team_service.create_team(name="挑战杯科研团队")
+    mech_id = _register_typed_candidate(team["teamId"], "neuro_mechanism")
+
+    _mock_local_research_invoke(
+        monkeypatch, {"candidateId": "map-1", "candidateType": "mechanism_mapping", "overAnalogyRisk": "medium"}
+    )
+    res = team_workflow_orchestration_service.map_mechanism_to_abstraction(team["teamId"], {"mechanismId": mech_id})
+    assert res["mappingGate"] == "ready"
+    assert res["mechanismCandidate"]["metadata"]["mappingDrafts"][-1]["edgeType"] == "maps_to"
+
+    _mock_local_research_invoke(
+        monkeypatch, {"candidateId": "map-2", "candidateType": "mechanism_mapping", "overAnalogyRisk": "high"}
+    )
+    res2 = team_workflow_orchestration_service.map_mechanism_to_abstraction(team["teamId"], {"mechanismId": mech_id})
+    assert res2["mappingGate"] == "review_needs_human"
+
+
+def test_generate_hypothesis_review_ready_and_links(tmp_path, monkeypatch):
+    """N-04：从 mechanism_mapping 生成假设，建 inspires 谱系；有效 → review_ready。"""
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = team_service.create_team(name="挑战杯科研团队")
+    map_id = _register_typed_candidate(team["teamId"], "mechanism_mapping")
+    _mock_local_research_invoke(monkeypatch, {"candidateId": "hyp-1", "candidateType": "algorithm_hypothesis"})
+    res = team_workflow_orchestration_service.generate_algorithm_hypothesis_from_mechanism_mapping(
+        team["teamId"], {"mappingId": map_id}
+    )
+    assert res["hypothesisGate"] == "review_ready"
+    assert res["mappingCandidate"]["metadata"]["hypothesisDrafts"][-1]["edgeType"] == "inspires"
+
+
+def test_generate_hypothesis_blocks_high_over_analogy_mapping(tmp_path, monkeypatch):
+    """N-04 门禁：上游 overAnalogyRisk=high 的 mapping 不得生成假设（须先过 Review Gate）。"""
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = team_service.create_team(name="挑战杯科研团队")
+    map_id = _register_typed_candidate(team["teamId"], "mechanism_mapping", metadata={"overAnalogyRisk": "high"})
+    with pytest.raises(team_workflow_orchestration_service.TeamWorkflowOrchestrationError):
+        team_workflow_orchestration_service.generate_algorithm_hypothesis_from_mechanism_mapping(
+            team["teamId"], {"mappingId": map_id}
+        )
+
+
+def test_decide_research_review_approves_clean_hypothesis(tmp_path, monkeypatch):
+    """N-05：证据/事实分界/可测性齐全且无高过度类比 → approve（review_ready）。"""
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = team_service.create_team(name="挑战杯科研团队")
+    hyp_id = _register_typed_candidate(
+        team["teamId"],
+        "algorithm_hypothesis",
+        metadata={"experimentPlan": {"dataset": "d", "metric": ["acc"], "baseline": "b"}, "factLayer": ["f"]},
+    )
+    res = team_workflow_orchestration_service.decide_research_review(team["teamId"], {"candidateIds": [hyp_id]})
+    assert res["decision"] == "approve"
+    assert res["reviewRecord"]["candidateType"] == "review_record"
+    assert res["reviewRecord"]["currentState"] == "review_ready"
+    assert res["riskFlags"] == []
+
+
+def test_decide_research_review_blocks_approve_on_high_over_analogy(tmp_path, monkeypatch):
+    """N-05 硬门禁：high_over_analogy → 自动 needs_human；显式 approve 被拦截。"""
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = team_service.create_team(name="挑战杯科研团队")
+    map_id = _register_typed_candidate(
+        team["teamId"], "mechanism_mapping", metadata={"overAnalogyRisk": "high", "factLayer": ["f"]}
+    )
+    res = team_workflow_orchestration_service.decide_research_review(team["teamId"], {"candidateIds": [map_id]})
+    assert res["decision"] == "needs_human"
+    assert "high_over_analogy" in res["riskFlags"]
+    with pytest.raises(team_workflow_orchestration_service.TeamWorkflowOrchestrationError):
+        team_workflow_orchestration_service.decide_research_review(
+            team["teamId"], {"candidateIds": [map_id], "decision": "approve"}
+        )
+
+
+def test_decide_research_review_reject_requires_reason(tmp_path, monkeypatch):
+    """N-05：reject 必须带 rejectionReason（requiredChanges 或 comments）。"""
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = team_service.create_team(name="挑战杯科研团队")
+    hyp_id = _register_typed_candidate(
+        team["teamId"], "algorithm_hypothesis", metadata={"experimentPlan": {"x": 1}, "factLayer": ["f"]}
+    )
+    with pytest.raises(team_workflow_orchestration_service.TeamWorkflowOrchestrationError):
+        team_workflow_orchestration_service.decide_research_review(
+            team["teamId"], {"candidateIds": [hyp_id], "decision": "reject"}
+        )
+    res = team_workflow_orchestration_service.decide_research_review(
+        team["teamId"], {"candidateIds": [hyp_id], "decision": "reject", "requiredChanges": ["fix baseline"]}
+    )
+    assert res["decision"] == "reject"
+
+
 def test_challenge_cup_workflow_registers_candidate_and_decides_transfer(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     team = team_service.create_team(name="挑战杯科研团队")

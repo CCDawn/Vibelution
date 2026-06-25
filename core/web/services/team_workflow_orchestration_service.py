@@ -24,7 +24,7 @@ from config.public_config import build_effective_config, load_public_config
 from core.infrastructure import developer_sandbox
 from core.llm import LLMClient, LLMInvocationContext, invoke_llm
 from core.runtime_manager import work_run_store
-from core.web.services import agent_directory_service, chat_room_service, data_processing_service, session_service, team_knowledge_service, team_service
+from core.web.services import agent_directory_service, candidate_schema_registry, chat_room_service, data_processing_service, session_service, team_knowledge_service, team_service
 from core.web.services.runtime_scene_service import record_runtime_scene_event
 
 
@@ -317,7 +317,7 @@ def ensure_team_workflow_orchestration(
     return _workflow_to_api(normalized_team_id, workflow, candidate_store)
 
 
-def register_candidate_source(team_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+def register_candidate_source(team_id: str, payload: dict[str, Any], *, strict: bool = False) -> dict[str, Any]:
     normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
     team_service.get_team(normalized_team_id)
     candidate_type = _normalize_candidate_type(payload.get("candidateType") or "source_manifest")
@@ -358,7 +358,16 @@ def register_candidate_source(team_id: str, payload: dict[str, Any]) -> dict[str
         }
         validation = validate_candidate_record(candidate)
         candidate["validation"] = validation
-        if not validation["valid"]:
+        # 统一写入口校验：registry 提供 envelope 级守卫（candidateId/teamId/类型等恒在，零回归），
+        # 逐类型深校验仍由 validate_candidate_record 承担。strict=True 时硬拦截（供科研生成链调用方选用）。
+        envelope_validation = candidate_schema_registry.validate_envelope(candidate)
+        candidate["envelopeValidation"] = envelope_validation
+        candidate_valid = bool(validation.get("valid")) and bool(envelope_validation.get("valid"))
+        if strict and not candidate_valid:
+            raise TeamWorkflowOrchestrationError(
+                f"Candidate failed schema validation: {validation.get('issues', [])} {envelope_validation.get('issues', [])}"
+            )
+        if not candidate_valid:
             candidate["currentState"] = "source_needs_confirmation"
             candidate["qualityStatus"] = "source_manifest_invalid"
         candidate_store.setdefault("candidates", []).append(candidate)
@@ -4079,6 +4088,430 @@ def draft_paper_note_from_source_candidate(
     invoke_response["sourceCandidate"] = source_candidate
     invoke_response["workflow"] = _workflow_to_api(normalized_team_id, workflow, candidate_store)
     return invoke_response
+
+
+def extract_neuro_mechanism_from_paper_note(
+    team_id: str,
+    payload: dict[str, Any] | None = None,
+    *,
+    llm_client_factory: Any = None,
+) -> dict[str, Any]:
+    """N-02：从 paper_note 候选抽取 neuro_mechanism 候选（节点 03 专用编排）。
+
+    复用 invoke_local_research_model 的 neuro_mechanism_extract 任务（含 schema 校验）；
+    在 paper_note 上以 metadata.mechanismDrafts 记录 supports 边/谱系；并施加置信度门禁：
+    confidence < 0.45 → review_needs_human，不自动进入节点 04。
+    """
+    normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
+    team_service.get_team(normalized_team_id)
+    payload = payload if isinstance(payload, dict) else {}
+    paper_note_id = _normalize_required_id(payload.get("paperNoteId") or payload.get("candidateId"), "paperNoteId is required.")
+    created_by_agent = _trim_text(payload.get("createdByAgent"), max_length=160) or "NeuroMechanism Extraction Agent"
+    model_id = _trim_text(payload.get("modelId"), max_length=160)
+    with _WORKFLOW_LOCK:
+        candidate_store = _load_candidate_store(normalized_team_id)
+        paper_note = _find_candidate(candidate_store, paper_note_id)
+        if paper_note is None:
+            raise TeamWorkflowOrchestrationError("Candidate not found.")
+        if str(paper_note.get("candidateType") or "") != "paper_note":
+            raise TeamWorkflowOrchestrationError("Neuro mechanism extraction requires a paper_note candidate.")
+        note_payload = paper_note.get("payload") if isinstance(paper_note.get("payload"), dict) else {}
+        source_refs = _normalize_ref_list(paper_note.get("sourceRefs") or note_payload.get("sourceRefs"), max_items=24)
+        evidence_refs = _normalize_ref_list(paper_note.get("evidenceRefs") or note_payload.get("evidenceRefs"), max_items=24)
+        if not evidence_refs:
+            raise TeamWorkflowOrchestrationError("paper_note candidate has no evidenceRefs for mechanism extraction.")
+        candidate_refs = [{"type": "paper_note", "id": paper_note_id, "label": str(paper_note.get("title") or paper_note_id)}]
+        excerpt = _trim_text(payload.get("excerpt"), max_length=24_000) or _trim_text(paper_note.get("summary"), max_length=24_000)
+
+    invoke_response = invoke_local_research_model(
+        normalized_team_id,
+        {
+            "taskType": "neuro_mechanism_extract",
+            "modelId": model_id,
+            "sourceRefs": source_refs,
+            "evidenceRefs": evidence_refs,
+            "candidateRefs": candidate_refs,
+            "paperNoteIds": [paper_note_id],
+            "excerpt": excerpt,
+            "createdByAgent": created_by_agent,
+        },
+        llm_client_factory=llm_client_factory,
+    )
+    mechanism_candidate = invoke_response.get("candidate") if isinstance(invoke_response.get("candidate"), dict) else {}
+    validation = invoke_response.get("validation") if isinstance(invoke_response.get("validation"), dict) else {"valid": False, "issues": []}
+    task = invoke_response.get("task") if isinstance(invoke_response.get("task"), dict) else {}
+    raw_confidence = mechanism_candidate.get("confidence")
+    try:
+        confidence = float(raw_confidence) if raw_confidence is not None and str(raw_confidence) != "" else None
+    except (TypeError, ValueError):
+        confidence = None
+    gate = "ready" if (validation.get("valid") is True and (confidence is None or confidence >= 0.45)) else "review_needs_human"
+    now = utc_now_iso()
+    with _WORKFLOW_LOCK:
+        workflow = _load_or_create_workflow(normalized_team_id)
+        candidate_store = _load_candidate_store(normalized_team_id)
+        paper_note = _find_candidate(candidate_store, paper_note_id)
+        if paper_note is not None:
+            metadata = paper_note.get("metadata") if isinstance(paper_note.get("metadata"), dict) else {}
+            drafts = metadata.get("mechanismDrafts") if isinstance(metadata.get("mechanismDrafts"), list) else []
+            metadata["mechanismDrafts"] = [
+                *drafts[-23:],
+                {
+                    "candidateId": str(mechanism_candidate.get("candidateId") or ""),
+                    "taskId": str(task.get("taskId") or ""),
+                    "edgeType": "supports",
+                    "gate": gate,
+                    "confidence": confidence,
+                    "valid": validation.get("valid") is True,
+                    "createdByAgent": created_by_agent,
+                    "createdAt": now,
+                },
+            ]
+            paper_note["metadata"] = metadata
+            paper_note["updatedAt"] = now
+            candidate_store["updatedAt"] = now
+            _write_json(_candidate_store_path(normalized_team_id), candidate_store)
+        else:
+            paper_note = {}
+    _record_workflow_event(
+        "candidate.neuro_mechanism_extracted",
+        normalized_team_id,
+        fields={
+            "workflowId": workflow["workflowId"],
+            "paperNoteCandidateId": paper_note_id,
+            "mechanismCandidateId": str(mechanism_candidate.get("candidateId") or ""),
+            "gate": gate,
+            "valid": validation.get("valid") is True,
+        },
+    )
+    invoke_response["paperNoteCandidate"] = paper_note
+    invoke_response["mechanismGate"] = gate
+    invoke_response["workflow"] = _workflow_to_api(normalized_team_id, workflow, candidate_store)
+    return invoke_response
+
+
+def map_mechanism_to_abstraction(
+    team_id: str,
+    payload: dict[str, Any] | None = None,
+    *,
+    llm_client_factory: Any = None,
+) -> dict[str, Any]:
+    """N-03：把 neuro_mechanism 候选映射为 mechanism_mapping 候选（节点 04 专用编排）。
+
+    门禁：overAnalogyRisk=high → review_needs_human，不自动进入节点 05；在 neuro_mechanism 上
+    以 metadata.mappingDrafts 记录 maps_to 谱系。
+    """
+    normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
+    team_service.get_team(normalized_team_id)
+    payload = payload if isinstance(payload, dict) else {}
+    mechanism_id = _normalize_required_id(payload.get("mechanismId") or payload.get("candidateId"), "mechanismId is required.")
+    created_by_agent = _trim_text(payload.get("createdByAgent"), max_length=160) or "Mechanism Mapping Agent"
+    model_id = _trim_text(payload.get("modelId"), max_length=160)
+    with _WORKFLOW_LOCK:
+        candidate_store = _load_candidate_store(normalized_team_id)
+        mechanism = _find_candidate(candidate_store, mechanism_id)
+        if mechanism is None:
+            raise TeamWorkflowOrchestrationError("Candidate not found.")
+        if str(mechanism.get("candidateType") or "") != "neuro_mechanism":
+            raise TeamWorkflowOrchestrationError("Mechanism mapping requires a neuro_mechanism candidate.")
+        mech_payload = mechanism.get("payload") if isinstance(mechanism.get("payload"), dict) else {}
+        source_refs = _normalize_ref_list(mechanism.get("sourceRefs") or mech_payload.get("sourceRefs"), max_items=24)
+        evidence_refs = _normalize_ref_list(mechanism.get("evidenceRefs") or mech_payload.get("evidenceRefs"), max_items=24)
+        if not evidence_refs:
+            raise TeamWorkflowOrchestrationError("neuro_mechanism candidate has no evidenceRefs for mapping.")
+        candidate_refs = [{"type": "neuro_mechanism", "id": mechanism_id, "label": str(mechanism.get("title") or mechanism_id)}]
+        excerpt = _trim_text(payload.get("excerpt"), max_length=24_000) or _trim_text(mechanism.get("summary"), max_length=24_000)
+
+    invoke_response = invoke_local_research_model(
+        normalized_team_id,
+        {
+            "taskType": "mechanism_mapping",
+            "modelId": model_id,
+            "sourceRefs": source_refs,
+            "evidenceRefs": evidence_refs,
+            "candidateRefs": candidate_refs,
+            "neuroMechanismIds": [mechanism_id],
+            "excerpt": excerpt,
+            "createdByAgent": created_by_agent,
+        },
+        llm_client_factory=llm_client_factory,
+    )
+    mapping_candidate = invoke_response.get("candidate") if isinstance(invoke_response.get("candidate"), dict) else {}
+    validation = invoke_response.get("validation") if isinstance(invoke_response.get("validation"), dict) else {"valid": False, "issues": []}
+    task = invoke_response.get("task") if isinstance(invoke_response.get("task"), dict) else {}
+    over_analogy = str(mapping_candidate.get("overAnalogyRisk") or "").strip().lower()
+    gate = "ready" if (validation.get("valid") is True and over_analogy != "high") else "review_needs_human"
+    now = utc_now_iso()
+    with _WORKFLOW_LOCK:
+        workflow = _load_or_create_workflow(normalized_team_id)
+        candidate_store = _load_candidate_store(normalized_team_id)
+        mechanism = _find_candidate(candidate_store, mechanism_id)
+        if mechanism is not None:
+            metadata = mechanism.get("metadata") if isinstance(mechanism.get("metadata"), dict) else {}
+            drafts = metadata.get("mappingDrafts") if isinstance(metadata.get("mappingDrafts"), list) else []
+            metadata["mappingDrafts"] = [
+                *drafts[-23:],
+                {
+                    "candidateId": str(mapping_candidate.get("candidateId") or ""),
+                    "taskId": str(task.get("taskId") or ""),
+                    "edgeType": "maps_to",
+                    "gate": gate,
+                    "overAnalogyRisk": over_analogy,
+                    "valid": validation.get("valid") is True,
+                    "createdByAgent": created_by_agent,
+                    "createdAt": now,
+                },
+            ]
+            mechanism["metadata"] = metadata
+            mechanism["updatedAt"] = now
+            candidate_store["updatedAt"] = now
+            _write_json(_candidate_store_path(normalized_team_id), candidate_store)
+        else:
+            mechanism = {}
+    _record_workflow_event(
+        "candidate.mechanism_mapping_created",
+        normalized_team_id,
+        fields={
+            "workflowId": workflow["workflowId"],
+            "neuroMechanismCandidateId": mechanism_id,
+            "mappingCandidateId": str(mapping_candidate.get("candidateId") or ""),
+            "gate": gate,
+            "overAnalogyRisk": over_analogy,
+            "valid": validation.get("valid") is True,
+        },
+    )
+    invoke_response["mechanismCandidate"] = mechanism
+    invoke_response["mappingGate"] = gate
+    invoke_response["workflow"] = _workflow_to_api(normalized_team_id, workflow, candidate_store)
+    return invoke_response
+
+
+def generate_algorithm_hypothesis_from_mechanism_mapping(
+    team_id: str,
+    payload: dict[str, Any] | None = None,
+    *,
+    llm_client_factory: Any = None,
+) -> dict[str, Any]:
+    """N-04：从 mechanism_mapping 生成 algorithm_hypothesis 候选（节点 05 专用编排）。
+
+    门禁：上游 overAnalogyRisk=high 不得生成（须先过 Review Gate）；输出须含 experimentPlan/baseline
+    （由 schema 校验保证），否则 revise_required；在 mechanism_mapping 上以 metadata.hypothesisDrafts
+    记录 inspires 谱系。
+    """
+    normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
+    team_service.get_team(normalized_team_id)
+    payload = payload if isinstance(payload, dict) else {}
+    mapping_id = _normalize_required_id(payload.get("mappingId") or payload.get("candidateId"), "mappingId is required.")
+    created_by_agent = _trim_text(payload.get("createdByAgent"), max_length=160) or "Algorithm Hypothesis Agent"
+    model_id = _trim_text(payload.get("modelId"), max_length=160)
+    with _WORKFLOW_LOCK:
+        candidate_store = _load_candidate_store(normalized_team_id)
+        mapping = _find_candidate(candidate_store, mapping_id)
+        if mapping is None:
+            raise TeamWorkflowOrchestrationError("Candidate not found.")
+        if str(mapping.get("candidateType") or "") != "mechanism_mapping":
+            raise TeamWorkflowOrchestrationError("Hypothesis generation requires a mechanism_mapping candidate.")
+        map_payload = mapping.get("payload") if isinstance(mapping.get("payload"), dict) else {}
+        map_metadata = mapping.get("metadata") if isinstance(mapping.get("metadata"), dict) else {}
+        over_analogy = str(
+            mapping.get("overAnalogyRisk") or map_payload.get("overAnalogyRisk") or map_metadata.get("overAnalogyRisk") or ""
+        ).strip().lower()
+        if over_analogy == "high":
+            raise TeamWorkflowOrchestrationError("high overAnalogyRisk mapping must pass Review Gate before hypothesis generation.")
+        source_refs = _normalize_ref_list(mapping.get("sourceRefs") or map_payload.get("sourceRefs"), max_items=24)
+        evidence_refs = _normalize_ref_list(mapping.get("evidenceRefs") or map_payload.get("evidenceRefs"), max_items=24)
+        if not evidence_refs:
+            raise TeamWorkflowOrchestrationError("mechanism_mapping candidate has no evidenceRefs for hypothesis generation.")
+        candidate_refs = [{"type": "mechanism_mapping", "id": mapping_id, "label": str(mapping.get("title") or mapping_id)}]
+        excerpt = _trim_text(payload.get("excerpt"), max_length=24_000) or _trim_text(mapping.get("summary"), max_length=24_000)
+
+    invoke_response = invoke_local_research_model(
+        normalized_team_id,
+        {
+            "taskType": "algorithm_hypothesis_draft",
+            "modelId": model_id,
+            "sourceRefs": source_refs,
+            "evidenceRefs": evidence_refs,
+            "candidateRefs": candidate_refs,
+            "mechanismMappingIds": [mapping_id],
+            "excerpt": excerpt,
+            "createdByAgent": created_by_agent,
+        },
+        llm_client_factory=llm_client_factory,
+    )
+    hypothesis_candidate = invoke_response.get("candidate") if isinstance(invoke_response.get("candidate"), dict) else {}
+    validation = invoke_response.get("validation") if isinstance(invoke_response.get("validation"), dict) else {"valid": False, "issues": []}
+    task = invoke_response.get("task") if isinstance(invoke_response.get("task"), dict) else {}
+    gate = "review_ready" if validation.get("valid") is True else "revise_required"
+    now = utc_now_iso()
+    with _WORKFLOW_LOCK:
+        workflow = _load_or_create_workflow(normalized_team_id)
+        candidate_store = _load_candidate_store(normalized_team_id)
+        mapping = _find_candidate(candidate_store, mapping_id)
+        if mapping is not None:
+            metadata = mapping.get("metadata") if isinstance(mapping.get("metadata"), dict) else {}
+            drafts = metadata.get("hypothesisDrafts") if isinstance(metadata.get("hypothesisDrafts"), list) else []
+            metadata["hypothesisDrafts"] = [
+                *drafts[-23:],
+                {
+                    "candidateId": str(hypothesis_candidate.get("candidateId") or ""),
+                    "taskId": str(task.get("taskId") or ""),
+                    "edgeType": "inspires",
+                    "gate": gate,
+                    "valid": validation.get("valid") is True,
+                    "createdByAgent": created_by_agent,
+                    "createdAt": now,
+                },
+            ]
+            mapping["metadata"] = metadata
+            mapping["updatedAt"] = now
+            candidate_store["updatedAt"] = now
+            _write_json(_candidate_store_path(normalized_team_id), candidate_store)
+        else:
+            mapping = {}
+    _record_workflow_event(
+        "candidate.algorithm_hypothesis_generated",
+        normalized_team_id,
+        fields={
+            "workflowId": workflow["workflowId"],
+            "mechanismMappingCandidateId": mapping_id,
+            "hypothesisCandidateId": str(hypothesis_candidate.get("candidateId") or ""),
+            "gate": gate,
+            "valid": validation.get("valid") is True,
+        },
+    )
+    invoke_response["mappingCandidate"] = mapping
+    invoke_response["hypothesisGate"] = gate
+    invoke_response["workflow"] = _workflow_to_api(normalized_team_id, workflow, candidate_store)
+    return invoke_response
+
+
+RESEARCH_REVIEW_DECISIONS = {"approve", "revise", "reject", "needs_human"}
+
+
+def _research_review_checklist(candidate: dict[str, Any]) -> tuple[dict[str, bool], list[str]]:
+    """对单个候选做科研审稿 checklist，返回 (checklist, blockingRiskFlags)。"""
+    candidate_type = str(candidate.get("candidateType") or "")
+    cpayload = candidate.get("payload") if isinstance(candidate.get("payload"), dict) else {}
+    cmeta = candidate.get("metadata") if isinstance(candidate.get("metadata"), dict) else {}
+
+    def field(name: str) -> Any:
+        return candidate.get(name) or cpayload.get(name) or cmeta.get(name)
+
+    evidence = candidate.get("evidenceRefs") or cpayload.get("evidenceRefs")
+    over_analogy = str(field("overAnalogyRisk") or "").strip().lower()
+    has_experiment = bool(field("experimentPlan"))
+    needs_fact_boundary = candidate_type in ("mechanism_mapping", "algorithm_hypothesis")
+    checklist = {
+        "citation": bool(evidence),
+        "factBoundary": (not needs_fact_boundary) or bool(field("factLayer") or field("inferenceLayer")),
+        "overAnalogy": over_analogy != "high",
+        "testability": candidate_type != "algorithm_hypothesis" or has_experiment,
+    }
+    flags: list[str] = []
+    if not checklist["citation"]:
+        flags.append("missing_evidence")
+    if not checklist["overAnalogy"]:
+        flags.append("high_over_analogy")
+    if not checklist["testability"]:
+        flags.append("no_metric")
+    return checklist, flags
+
+
+def decide_research_review(team_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    """N-05：科研审稿决策门禁（节点 06）。对候选链路做 checklist，输出 review_record 决策。
+
+    硬门禁：missing_evidence / high_over_analogy / no_metric 任一为真 → 不得 approve；
+    reject 必须带 rejectionReason（requiredChanges 或 comments）。在被审候选上以
+    metadata.reviewRecords 记录 reviewed_by 谱系。
+    """
+    normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
+    team_service.get_team(normalized_team_id)
+    payload = payload if isinstance(payload, dict) else {}
+    candidate_ids = _normalize_text_list(payload.get("candidateIds"), max_items=24, max_length=128)
+    if not candidate_ids:
+        raise TeamWorkflowOrchestrationError("candidateIds is required for research review.")
+    reviewed_by = _trim_text(payload.get("reviewedByAgent"), max_length=160) or "Evidence Review Agent"
+    requested_decision = _trim_text(payload.get("decision"), max_length=40).strip().lower()
+    if requested_decision and requested_decision not in RESEARCH_REVIEW_DECISIONS:
+        raise TeamWorkflowOrchestrationError("decision must be approve/revise/reject/needs_human.")
+    comments = _trim_text(payload.get("comments"), max_length=4000)
+    required_changes = _normalize_text_list(payload.get("requiredChanges"), max_items=24, max_length=400)
+    now = utc_now_iso()
+    with _WORKFLOW_LOCK:
+        candidate_store = _load_candidate_store(normalized_team_id)
+        reviewed: list[dict[str, Any]] = []
+        checklist_all: dict[str, dict[str, bool]] = {}
+        risk_flags: set[str] = set()
+        for candidate_id in candidate_ids:
+            candidate = _find_candidate(candidate_store, candidate_id)
+            if candidate is None:
+                raise TeamWorkflowOrchestrationError(f"Candidate not found: {candidate_id}")
+            checklist, flags = _research_review_checklist(candidate)
+            checklist_all[candidate_id] = checklist
+            risk_flags.update(flags)
+            reviewed.append(candidate)
+        risk_flag_list = sorted(risk_flags)
+        recommended = "needs_human" if risk_flag_list else "approve"
+        decision = requested_decision or recommended
+        if decision == "approve" and risk_flag_list:
+            raise TeamWorkflowOrchestrationError(f"Cannot approve with blocking risk flags: {risk_flag_list}.")
+        if decision == "reject" and not (required_changes or comments):
+            raise TeamWorkflowOrchestrationError("reject requires a rejectionReason via requiredChanges or comments.")
+        review_id = _new_record_id("candidate")
+        review_record = {
+            "schemaVersion": SCHEMA_VERSION,
+            "candidateId": review_id,
+            "candidateType": "review_record",
+            "teamId": normalized_team_id,
+            "title": f"review_record for {', '.join(candidate_ids[:3])}",
+            "currentState": "review_ready" if decision == "approve" else decision,
+            "qualityStatus": "reviewed",
+            "reviewedCandidateIds": candidate_ids,
+            "decision": decision,
+            "checklist": checklist_all,
+            "riskFlags": risk_flag_list,
+            "requiredChanges": required_changes,
+            "comments": comments,
+            "reviewedByAgent": reviewed_by,
+            "createdByAgent": reviewed_by,
+            "createdAt": now,
+            "updatedAt": now,
+        }
+        review_record["envelopeValidation"] = candidate_schema_registry.validate_envelope(review_record)
+        candidate_store.setdefault("candidates", []).append(review_record)
+        for candidate in reviewed:
+            metadata = candidate.get("metadata") if isinstance(candidate.get("metadata"), dict) else {}
+            records = metadata.get("reviewRecords") if isinstance(metadata.get("reviewRecords"), list) else []
+            metadata["reviewRecords"] = [
+                *records[-23:],
+                {"reviewRecordId": review_id, "decision": decision, "edgeType": "reviewed_by", "createdAt": now},
+            ]
+            candidate["metadata"] = metadata
+            candidate["updatedAt"] = now
+        candidate_store["updatedAt"] = now
+        _write_json(_candidate_store_path(normalized_team_id), candidate_store)
+        workflow = _load_or_create_workflow(normalized_team_id)
+    _record_workflow_event(
+        "research.review_decided",
+        normalized_team_id,
+        fields={
+            "workflowId": workflow["workflowId"],
+            "reviewRecordId": review_id,
+            "decision": decision,
+            "candidateCount": len(candidate_ids),
+            "riskFlagCount": len(risk_flag_list),
+        },
+    )
+    return {
+        "schemaVersion": SCHEMA_VERSION,
+        "teamId": normalized_team_id,
+        "reviewRecord": review_record,
+        "decision": decision,
+        "riskFlags": risk_flag_list,
+        "checklist": checklist_all,
+        "workflow": _workflow_to_api(normalized_team_id, workflow, candidate_store),
+    }
 
 
 def plan_paper_note_chunks_from_source_candidate(team_id: str, candidate_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
