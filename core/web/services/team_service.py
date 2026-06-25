@@ -1219,6 +1219,14 @@ def get_team(team_id: str) -> dict[str, Any]:
     return detail
 
 
+def assert_team_exists(team_id: str) -> None:
+    normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
+    with _TEAM_LOCK:
+        state = _load_index()
+        if _find_team(state, normalized_team_id) is None:
+            raise TeamNotFoundError("Team not found.")
+
+
 def update_team(
     team_id: str,
     *,

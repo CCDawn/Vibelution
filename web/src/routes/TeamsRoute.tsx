@@ -16,7 +16,6 @@ import {
 } from "../api/projectAgentBus";
 import { queryKeys } from "../api/queryKeys";
 import {
-  AgentConfigWorkspace,
   AgentConfigWorkspaceAgent,
   AiSearchRun,
   AiSearchRunListPayload,
@@ -71,7 +70,7 @@ const TEAM_PICKER_TEAM_IDS = [AI_SEARCH_TEAM_ID, RESEARCH_TEAM_ID] as const;
 const EVOLUTION_SYSTEM_TEAM_IDS = new Set(["self-evolution-team", "supervised-evolution-team"]);
 const LINKED_ROOM_ACTIVE_REFETCH_MS = 5_000;
 const LINKED_ROOM_IDLE_REFETCH_MS = 30_000;
-const TEAM_WORKFLOW_CANDIDATE_PREVIEW_LIMIT = 500;
+const TEAM_WORKFLOW_CANDIDATE_PREVIEW_LIMIT = 80;
 const TEAM_WORKFLOW_CANDIDATE_GRAPH_LIMIT = 20;
 const AI_SEARCH_RUN_PREVIEW_LIMIT = 6;
 const TEAM_BOOTSTRAP_ACTIVE_REFETCH_MS = 2_000;
@@ -102,6 +101,10 @@ const researchLoopStatusQueryKey = (id: string) => ["teams", id, "workflow-orche
 const officialModelEvidenceStatusQueryKey = (id: string) => ["teams", id, "workflow-orchestration", "official-model-evidence", "status"] as const;
 const paperNoteChunkStatusQueryKey = (id: string) => ["teams", id, "workflow-orchestration", "paper-note-chunks", "status"] as const;
 const sourceQualityStatusQueryKey = (id: string) => ["teams", id, "workflow-orchestration", "source-quality", "status"] as const;
+const sourceCollectionSummaryQueryPrefix = (id: string) =>
+  ["teams", id, "workflow-orchestration", "source-collection", "summary"] as const;
+const sourceCollectionSummaryQueryKey = (id: string, runId: string) =>
+  [...sourceCollectionSummaryQueryPrefix(id), runId || "latest"] as const;
 const sourceCollectionRunRecordsQueryKey = (id: string) => ["data-processing", "runs", id, "records"] as const;
 
 function sourceCollectionStageTaskClickKey(stageId: string) {
@@ -861,6 +864,34 @@ type ResearchStageRoundStatusPayload = {
     autoTransitionsNextStage: boolean;
     stageRecordsOnly: boolean;
   };
+};
+
+type SourceCollectionSummaryPayload = {
+  schemaVersion: number;
+  teamId: string;
+  runId: string;
+  status: string;
+  run?: DataProcessingRunListPayload["runs"][number] | Record<string, unknown>;
+  runStatus?: DataProcessingStatus;
+  summary?: {
+    recordCount?: number;
+    assignmentCount?: number;
+    openAssignmentCount?: number;
+    outputCount?: number;
+    sourceCandidateCount?: number;
+    assessedSourceCandidateCount?: number;
+    approvedSourceCandidateCount?: number;
+    graphNodeCount?: number;
+    stewardPackCount?: number;
+    formalKnowledgeSyncCount?: number;
+  };
+  stageCards?: SourceCollectionStageCardProjection[];
+  stageCardSummary?: ResearchStageRound["sourceCollectionStageCardSummary"];
+  latestTasks?: Record<string, SourceCollectionStageCardProjection["latestTask"]>;
+  stageRound?: Partial<ResearchStageRound>;
+  activeWorkRun?: WorkRunSnapshot | Record<string, unknown>;
+  storageArtifacts?: Partial<SourceCollectionStorageArtifacts>;
+  updatedAt?: string;
 };
 
 type ResearchStageRoundStartPayload = {
@@ -2847,7 +2878,13 @@ function sourceCollectionRunRefetchInterval(pageVisible: boolean, status: string
   );
 }
 
-function sourceCollectionStageCardsFromStatus(status: ResearchStageRoundStatusPayload | null | undefined) {
+function sourceCollectionStageCardsFromStatus(status: ResearchStageRoundStatusPayload | SourceCollectionSummaryPayload | null | undefined) {
+  if (status && "stageCards" in status) {
+    return status.stageCards ?? [];
+  }
+  if (!status || !("phases" in status)) {
+    return [];
+  }
   const knowledgePhase = (status?.phases ?? []).find((phase) => phase.stageType === "knowledge_collection");
   const rounds = [
     knowledgePhase?.latestRound ?? null,
@@ -2867,7 +2904,7 @@ function sourceCollectionStageCardsFromStatus(status: ResearchStageRoundStatusPa
 
 function sourceCollectionStageWritebackRefetchInterval(
   pageVisible: boolean,
-  status: ResearchStageRoundStatusPayload | null | undefined,
+  status: ResearchStageRoundStatusPayload | SourceCollectionSummaryPayload | null | undefined,
   forceSync = false,
 ) {
   const cards = sourceCollectionStageCardsFromStatus(status);
@@ -3799,18 +3836,18 @@ export function TeamsRoute({
         ? resolvePollingInterval(pageVisible, TEAM_BOOTSTRAP_ACTIVE_REFETCH_MS, { backgroundMs: TEAM_BOOTSTRAP_BACKGROUND_REFETCH_MS })
         : false,
   });
-  const workspaceQuery = useQuery({
-    queryKey: queryKeys.agentConfigWorkspace(),
-    queryFn: () => fetchJson<AgentConfigWorkspace>("/api/agents/config-workspace"),
-    enabled: teamsQuery.isSuccess,
+  const agentSummaryQuery = useQuery({
+    queryKey: queryKeys.agentSummary(true),
+    queryFn: () => fetchJson<AgentConfigWorkspaceAgent[]>("/api/agents?includeArchived=true&detail=summary"),
+    staleTime: 10_000,
   });
   const projectBusQuery = useQuery({
     queryKey: queryKeys.projectAgentBus(),
     queryFn: () => listProjectAgentBusTimeline(PROJECT_AGENT_BUS_TEAM_TIMELINE_LIMIT),
   });
   const activeAgents = useMemo(
-    () => (workspaceQuery.data?.agents ?? []).filter((agent) => agent.status !== "archived"),
-    [workspaceQuery.data],
+    () => (agentSummaryQuery.data ?? []).filter((agent) => agent.status !== "archived"),
+    [agentSummaryQuery.data],
   );
   const activeAgentsById = useMemo(() => new Map(activeAgents.map((agent) => [agent.agentId, agent])), [activeAgents]);
   const teams = teamsQuery.data?.teams ?? [];
@@ -3866,6 +3903,33 @@ export function TeamsRoute({
   const researchCanvasReadOnly = researchWorkflowTeamSelected && researchWorkspaceView === "canvas";
   const sourceCollectionWorkspaceSelected =
     researchWorkflowTeamSelected && (sourceCollectionStandalone || researchWorkspaceView === "source_collection" || researchWorkspaceView === "knowledge_collection");
+  const sourceCollectionNeedsCandidateList =
+    sourceCollectionWorkspaceSelected && selectedSourceCollectionStageId !== "collection";
+  const teamWorkflowCandidateListEnabled = Boolean(
+    effectiveTeamId
+    && researchWorkflowTeamSelected
+    && (
+      researchWorkspaceView === "overview"
+      || researchWorkspaceView === "candidates"
+      || sourceCollectionNeedsCandidateList
+    ),
+  );
+  const teamWorkflowGraphEnabled = Boolean(
+    effectiveTeamId
+    && researchWorkflowTeamSelected
+    && (
+      researchWorkspaceView === "graph"
+      || (sourceCollectionWorkspaceSelected && (selectedSourceCollectionStageId === "graph" || selectedSourceCollectionStageId === "memory"))
+    ),
+  );
+  const teamWorkflowKnowledgeIngestionEnabled = Boolean(
+    effectiveTeamId
+    && researchWorkflowTeamSelected
+    && (
+      researchWorkspaceView === "ingestion"
+      || (sourceCollectionWorkspaceSelected && selectedSourceCollectionStageId === "memory")
+    ),
+  );
   const teamWorkflowSourceQualityEnabled = Boolean(
     effectiveTeamId
     && researchWorkflowTeamSelected
@@ -3873,6 +3937,11 @@ export function TeamsRoute({
       researchWorkspaceView === "graph"
       || (sourceCollectionWorkspaceSelected && (selectedSourceCollectionStageId === "screening" || selectedSourceCollectionStageId === "graph" || selectedSourceCollectionStageId === "memory"))
     ),
+  );
+  const researchStageRoundStatusEnabled = Boolean(
+    effectiveTeamId
+    && researchWorkflowTeamSelected
+    && !sourceCollectionWorkspaceSelected,
   );
   const sourceCollectionStageWritebackSyncActive = sourceCollectionStageSyncUntilMs > Date.now();
   const aiSearchRunsQuery = useQuery({
@@ -3904,7 +3973,7 @@ export function TeamsRoute({
       fetchJson<ResearchStageRoundStatusPayload>(
         `/api/teams/${encodeURIComponent(effectiveTeamId)}/workflow-orchestration/stage-rounds/status`,
       ),
-    enabled: Boolean(effectiveTeamId && researchWorkflowTeamSelected),
+    enabled: researchStageRoundStatusEnabled,
     refetchInterval: (query) =>
       sourceCollectionStageWritebackRefetchInterval(
         pageVisible,
@@ -3916,9 +3985,9 @@ export function TeamsRoute({
     queryKey: queryKeys.teamWorkflowCandidates(effectiveTeamId || "none", TEAM_WORKFLOW_CANDIDATE_PREVIEW_LIMIT),
     queryFn: () =>
       fetchJson<TeamWorkflowCandidateListPayload>(
-        `/api/teams/${encodeURIComponent(effectiveTeamId)}/workflow-orchestration/candidates?limit=${TEAM_WORKFLOW_CANDIDATE_PREVIEW_LIMIT}`,
+        `/api/teams/${encodeURIComponent(effectiveTeamId)}/workflow-orchestration/candidates?limit=${TEAM_WORKFLOW_CANDIDATE_PREVIEW_LIMIT}&includeValidation=false`,
       ),
-    enabled: Boolean(effectiveTeamId && researchWorkflowTeamSelected),
+    enabled: teamWorkflowCandidateListEnabled,
     refetchInterval: () => sourceCollectionStageWritebackRefetchInterval(pageVisible, researchStageRoundStatusQuery.data, sourceCollectionStageWritebackSyncActive),
   });
   const teamWorkflowCandidateGraphQuery = useQuery({
@@ -3927,7 +3996,7 @@ export function TeamsRoute({
       fetchJson<TeamWorkflowCandidateListPayload>(
         `/api/teams/${encodeURIComponent(effectiveTeamId)}/workflow-orchestration/candidates?candidateType=candidate_graph&limit=${TEAM_WORKFLOW_CANDIDATE_GRAPH_LIMIT}`,
       ),
-    enabled: Boolean(effectiveTeamId && researchWorkflowTeamSelected && teamWorkflowQuery.data),
+    enabled: teamWorkflowGraphEnabled,
   });
   const teamWorkflowCoordinationStatusQuery = useQuery({
     queryKey: queryKeys.teamWorkflowCoordinationStatus(effectiveTeamId || "none"),
@@ -3935,7 +4004,7 @@ export function TeamsRoute({
       fetchJson<TeamWorkflowCoordinationStatus>(
         `/api/teams/${encodeURIComponent(effectiveTeamId)}/workflow-orchestration/coordination/status`,
       ),
-    enabled: Boolean(effectiveTeamId && researchWorkflowTeamSelected && teamWorkflowQuery.data),
+    enabled: Boolean(effectiveTeamId && researchWorkflowTeamSelected && researchWorkspaceView === "coordination"),
   });
   const teamWorkflowKnowledgeIngestionStatusQuery = useQuery({
     queryKey: queryKeys.teamWorkflowKnowledgeIngestionStatus(effectiveTeamId || "none"),
@@ -3943,7 +4012,13 @@ export function TeamsRoute({
       fetchJson<TeamWorkflowKnowledgeIngestionStatus>(
         `/api/teams/${encodeURIComponent(effectiveTeamId)}/workflow-orchestration/knowledge-ingestion/status`,
       ),
-    enabled: Boolean(effectiveTeamId && researchWorkflowTeamSelected && teamWorkflowQuery.data),
+    enabled: teamWorkflowKnowledgeIngestionEnabled,
+    refetchInterval: (query) => {
+      const data = query.state.data as TeamWorkflowKnowledgeIngestionStatus | undefined;
+      const dataRecord: Record<string, unknown> = data ? (data as unknown as Record<string, unknown>) : {};
+      const activeWorkRun = dataRecord.activeWorkRun;
+      return resolvePollingInterval(pageVisible, activeWorkRun ? 2000 : false);
+    },
   });
   const teamWorkflowOfficialModelEvidenceStatusQuery = useQuery({
     queryKey: officialModelEvidenceStatusQueryKey(effectiveTeamId || "none"),
@@ -3951,7 +4026,7 @@ export function TeamsRoute({
       fetchJson<TeamWorkflowOfficialModelEvidenceStatus>(
         `/api/teams/${encodeURIComponent(effectiveTeamId)}/workflow-orchestration/official-model-evidence/status`,
       ),
-    enabled: Boolean(effectiveTeamId && researchWorkflowTeamSelected && teamWorkflowQuery.data),
+    enabled: Boolean(effectiveTeamId && researchWorkflowTeamSelected && researchWorkspaceView === "overview" && teamWorkflowQuery.data),
   });
   const teamWorkflowSourceQualityStatusQuery = useQuery({
     queryKey: sourceQualityStatusQueryKey(effectiveTeamId || "none"),
@@ -3968,7 +4043,7 @@ export function TeamsRoute({
       fetchJson<TeamWorkflowPaperNoteChunkStatus>(
         `/api/teams/${encodeURIComponent(effectiveTeamId)}/workflow-orchestration/paper-note-chunks/status`,
       ),
-    enabled: Boolean(effectiveTeamId && researchWorkflowTeamSelected && teamWorkflowQuery.data),
+    enabled: Boolean(effectiveTeamId && researchWorkflowTeamSelected && researchWorkspaceView === "overview" && teamWorkflowQuery.data),
   });
   const experimentPlanningStatusQuery = useQuery({
     queryKey: experimentPlanningStatusQueryKey(effectiveTeamId || "none"),
@@ -3976,7 +4051,7 @@ export function TeamsRoute({
       fetchJson<ExperimentPlanningStatusPayload>(
         `/api/teams/${encodeURIComponent(effectiveTeamId)}/workflow-orchestration/experiments/status`,
       ),
-    enabled: Boolean(effectiveTeamId && researchWorkflowTeamSelected && teamWorkflowQuery.data),
+    enabled: Boolean(effectiveTeamId && researchWorkflowTeamSelected && !sourceCollectionWorkspaceSelected && teamWorkflowQuery.data),
   });
   const researchLoopTemplatesQuery = useQuery({
     queryKey: researchLoopTemplatesQueryKey(effectiveTeamId || "none"),
@@ -3984,7 +4059,7 @@ export function TeamsRoute({
       fetchJson<ResearchLoopTemplatesPayload>(
         `/api/teams/${encodeURIComponent(effectiveTeamId)}/workflow-orchestration/research-loop/templates`,
       ),
-    enabled: Boolean(effectiveTeamId && researchWorkflowTeamSelected && teamWorkflowQuery.data),
+    enabled: Boolean(effectiveTeamId && researchWorkflowTeamSelected && !sourceCollectionWorkspaceSelected && teamWorkflowQuery.data),
   });
   const researchLoopStatusQuery = useQuery({
     queryKey: researchLoopStatusQueryKey(effectiveTeamId || "none"),
@@ -3992,7 +4067,7 @@ export function TeamsRoute({
       fetchJson<ResearchLoopStatusPayload>(
         `/api/teams/${encodeURIComponent(effectiveTeamId)}/workflow-orchestration/research-loop/status`,
       ),
-    enabled: Boolean(effectiveTeamId && researchWorkflowTeamSelected && teamWorkflowQuery.data),
+    enabled: Boolean(effectiveTeamId && researchWorkflowTeamSelected && !sourceCollectionWorkspaceSelected && teamWorkflowQuery.data),
   });
   const sourceCollectionRunsQuery = useQuery({
     queryKey: queryKeys.teamWorkflowSourceCollectionRuns(effectiveTeamId || "none", SOURCE_COLLECTION_RUN_PREVIEW_LIMIT),
@@ -4109,6 +4184,25 @@ export function TeamsRoute({
   const selectedSourceCollectionRun =
     sourceCollectionRuns.find((run) => run.runId === selectedSourceCollectionRunId) ?? sourceCollectionRuns[0] ?? null;
   const selectedSourceCollectionRunEffectiveId = selectedSourceCollectionRun?.runId ?? "";
+  const sourceCollectionSummaryQuery = useQuery({
+    queryKey: sourceCollectionSummaryQueryKey(effectiveTeamId || "none", selectedSourceCollectionRunEffectiveId || "latest"),
+    queryFn: () => {
+      const params = selectedSourceCollectionRunEffectiveId
+        ? `?runId=${encodeURIComponent(selectedSourceCollectionRunEffectiveId)}`
+        : "";
+      return fetchJson<SourceCollectionSummaryPayload>(
+        `/api/teams/${encodeURIComponent(effectiveTeamId)}/workflow-orchestration/source-collection/summary${params}`,
+      );
+    },
+    enabled: Boolean(effectiveTeamId && sourceCollectionWorkspaceSelected),
+    refetchInterval: (query) => {
+      const payload = query.state.data as SourceCollectionSummaryPayload | undefined;
+      const active = payload?.status === "active";
+      return active
+        ? resolvePollingInterval(pageVisible, 1500)
+        : sourceCollectionStageWritebackRefetchInterval(pageVisible, payload, sourceCollectionStageWritebackSyncActive);
+    },
+  });
   const runtimeSummaryQuery = useQuery({
     queryKey: queryKeys.runtimeSummary(),
     queryFn: () => fetchJson<RuntimeSummary>("/api/runtime/summary"),
@@ -4358,6 +4452,7 @@ export function TeamsRoute({
       setSourceCollectionStageSyncUntilMs(Date.now() + SOURCE_COLLECTION_STAGE_WRITEBACK_SYNC_GRACE_MS);
       void chatWorkspaceCache.afterDirectTurnAccepted(payload.sessionId);
       void queryClient.invalidateQueries({ queryKey: researchStageRoundStatusQueryKey(variables.teamId) });
+      void queryClient.invalidateQueries({ queryKey: sourceCollectionSummaryQueryPrefix(variables.teamId) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflowSourceCollectionRuns(variables.teamId, SOURCE_COLLECTION_RUN_PREVIEW_LIMIT) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.dataProcessingRunStatus(payload.runId) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.dataProcessingCollectionAssignments(payload.runId) });
@@ -4444,6 +4539,7 @@ export function TeamsRoute({
       }));
       queryClient.setQueryData(queryKeys.teamWorkflow(variables.teamId), payload.workflow);
       void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflowSourceCollectionRuns(variables.teamId, SOURCE_COLLECTION_RUN_PREVIEW_LIMIT) });
+      void queryClient.invalidateQueries({ queryKey: sourceCollectionSummaryQueryPrefix(variables.teamId) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.dataProcessingRunStatus(payload.run.runId) });
       void queryClient.invalidateQueries({ queryKey: sourceCollectionRunRecordsQueryKey(payload.run.runId) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.dataProcessingCollectionAssignments(payload.run.runId) });
@@ -4558,6 +4654,7 @@ export function TeamsRoute({
           navigate(researchSourceCollectionRoute(variables.teamId));
         }
         void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflowSourceCollectionRuns(variables.teamId, SOURCE_COLLECTION_RUN_PREVIEW_LIMIT) });
+        void queryClient.invalidateQueries({ queryKey: sourceCollectionSummaryQueryPrefix(variables.teamId) });
         void queryClient.invalidateQueries({ queryKey: queryKeys.dataProcessingRunStatus(sourceRunId) });
         void queryClient.invalidateQueries({ queryKey: sourceCollectionRunRecordsQueryKey(sourceRunId) });
         void queryClient.invalidateQueries({ queryKey: queryKeys.dataProcessingCollectionAssignments(sourceRunId) });
@@ -5554,10 +5651,10 @@ export function TeamsRoute({
       return { binding, route, status: "ready" };
     }
     const hasBoundAgentId = Boolean(String(binding?.agentId || "").trim());
-    if (hasBoundAgentId && !binding?.agent && (workspaceQuery.isPending || workspaceQuery.isFetching)) {
+    if (hasBoundAgentId && !binding?.agent && (agentSummaryQuery.isPending || agentSummaryQuery.isFetching)) {
       return { binding, route, status: "loading" };
     }
-    if (hasBoundAgentId && !binding?.agent && workspaceQuery.isError) {
+    if (hasBoundAgentId && !binding?.agent && agentSummaryQuery.isError) {
       return { binding, route, status: "error" };
     }
     return { binding, route, status: "repair" };
@@ -5676,7 +5773,7 @@ export function TeamsRoute({
             const agentHydrationPending = Boolean(
               binding.agentId
               && !binding.agent
-              && (workspaceQuery.isPending || workspaceQuery.isFetching),
+              && (agentSummaryQuery.isPending || agentSummaryQuery.isFetching),
             );
             const tone = binding.agent
               ? researchStageAgentConfigTone(binding.agent)
@@ -5696,7 +5793,7 @@ export function TeamsRoute({
               : binding.agentId
                 ? agentHydrationPending
                   ? (lang === "zh" ? "加载中" : "loading")
-                  : workspaceQuery.isError
+                  : agentSummaryQuery.isError
                     ? (lang === "zh" ? "Agent 加载失败" : "Agent load failed")
                     : (lang === "zh" ? "引用失效" : "missing reference")
                 : (lang === "zh" ? "待绑定" : "missing");
@@ -9154,9 +9251,28 @@ export function TeamsRoute({
   const teamWorkflowPaperNoteChunkStatus = teamWorkflowPaperNoteChunkStatusQuery.data ?? null;
   const researchStageRoundStatus = researchStageRoundStatusQuery.data ?? null;
   const researchStagePhases = researchStageRoundStatus?.phases ?? [];
+  const sourceCollectionSummary = sourceCollectionSummaryQuery.data ?? null;
+  const sourceCollectionSummaryStageRound = useMemo<ResearchStageRound | null>(() => {
+    if (!sourceCollectionSummary?.runId && !sourceCollectionSummary?.stageCards?.length) {
+      return null;
+    }
+    const roundRef = sourceCollectionSummary.stageRound ?? {};
+    return {
+      stageRoundId: String(roundRef.stageRoundId || `source-summary-${sourceCollectionSummary.runId || "latest"}`),
+      stageType: "knowledge_collection",
+      roundNumber: Number(roundRef.roundNumber || 0),
+      status: String(roundRef.status || sourceCollectionSummary.status || "ready"),
+      topic: "",
+      goal: "",
+      sourceRunIds: sourceCollectionSummary.runId ? [sourceCollectionSummary.runId] : [],
+      sourceCollectionStageCards: sourceCollectionSummary.stageCards ?? [],
+      sourceCollectionStageCardSummary: sourceCollectionSummary.stageCardSummary ?? sourceCollectionSummary.summary ?? {},
+    };
+  }, [sourceCollectionSummary]);
   const sourceCollectionStageRound = useMemo(() => {
     const knowledgePhase = researchStagePhases.find((phase) => phase.stageType === "knowledge_collection");
     const candidateRounds = [
+      sourceCollectionSummaryStageRound,
       knowledgePhase?.latestRound ?? null,
       researchStageRoundStatus?.latestRound ?? null,
       ...(researchStageRoundStatus?.activeRounds ?? []),
@@ -9175,6 +9291,7 @@ export function TeamsRoute({
     researchStageRoundStatus?.activeRounds,
     researchStageRoundStatus?.latestRound,
     selectedSourceCollectionRunEffectiveId,
+    sourceCollectionSummaryStageRound,
   ]);
   const sourceCollectionStageCards = sourceCollectionStageRound?.sourceCollectionStageCards ?? [];
   const sourceCollectionStageCardById = useMemo(() => {
@@ -9190,7 +9307,7 @@ export function TeamsRoute({
   const experimentPlanningStatus = experimentPlanningStatusQuery.data ?? null;
   const sourceCollectionRecords = sourceCollectionRecordsQuery.data?.records ?? [];
   const sourceCollectionAssignments = sourceCollectionAssignmentsQuery.data?.assignments ?? [];
-  const sourceCollectionRunStatus = sourceCollectionRunStatusQuery.data ?? null;
+  const sourceCollectionRunStatus = sourceCollectionRunStatusQuery.data ?? sourceCollectionSummary?.runStatus ?? null;
   const sourceCollectionSearchPlanRef = selectedSourceCollectionRun?.scope?.dataSearchPlanRef ?? null;
   const aiSearchRuns = aiSearchRunsQuery.data?.runs ?? [];
   const selectedTeamStartAiSearchPending =
@@ -9366,12 +9483,17 @@ export function TeamsRoute({
     runtimeSummaryQuery.data,
     selectedSourceCollectionRunEffectiveId,
   );
+  const summarySourceCollectionActiveWorkRun = isRecord(sourceCollectionSummary?.activeWorkRun)
+    ? sourceCollectionSummary.activeWorkRun as WorkRunSnapshot
+    : undefined;
   const selectedSourceCollectionActiveWorkRun =
     runtimeSummaryQuery.data
       ? runtimeSourceCollectionActiveWorkRun ?? undefined
-      : selectedSourceCollectionSearchExecutionResult?.activeWorkRun;
+      : summarySourceCollectionActiveWorkRun ?? selectedSourceCollectionSearchExecutionResult?.activeWorkRun;
+  const sourceCollectionSummaryStorageArtifacts = sourceCollectionSummary?.storageArtifacts as SourceCollectionStorageArtifacts | undefined;
   const selectedSourceCollectionStorageArtifacts =
     selectedSourceCollectionSearchExecutionResult?.storageArtifacts
+    ?? sourceCollectionSummaryStorageArtifacts
     ?? sourceCollectionStorageArtifactsForRun(selectedTeam?.teamId ?? effectiveTeamId, selectedSourceCollectionRunEffectiveId);
   const selectedSourceCollectionStorageOpenPending =
     openSourceCollectionStorageMutation.isPending && openSourceCollectionStorageMutation.variables?.teamId === selectedTeam?.teamId;
@@ -9389,6 +9511,7 @@ export function TeamsRoute({
       setSourceCollectionStageSyncUntilMs(Date.now() + SOURCE_COLLECTION_STAGE_WRITEBACK_SYNC_GRACE_MS);
     }
     void queryClient.invalidateQueries({ queryKey: researchStageRoundStatusQueryKey(selectedTeam.teamId) });
+    void queryClient.invalidateQueries({ queryKey: sourceCollectionSummaryQueryKey(selectedTeam.teamId, selectedSourceCollectionRunEffectiveId) });
     void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflowCandidates(selectedTeam.teamId, TEAM_WORKFLOW_CANDIDATE_PREVIEW_LIMIT) });
     void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflowSourceCollectionRuns(selectedTeam.teamId, SOURCE_COLLECTION_RUN_PREVIEW_LIMIT) });
     void queryClient.invalidateQueries({ queryKey: queryKeys.dataProcessingRunStatus(selectedSourceCollectionRunEffectiveId) });
@@ -9412,6 +9535,7 @@ export function TeamsRoute({
     void queryClient.invalidateQueries({ queryKey: sourceCollectionRunRecordsQueryKey(selectedSourceCollectionRunEffectiveId) });
     void queryClient.invalidateQueries({ queryKey: queryKeys.dataProcessingCollectionAssignments(selectedSourceCollectionRunEffectiveId) });
     void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflowCandidates(selectedTeam.teamId, TEAM_WORKFLOW_CANDIDATE_PREVIEW_LIMIT) });
+    void queryClient.invalidateQueries({ queryKey: sourceCollectionSummaryQueryKey(selectedTeam.teamId, selectedSourceCollectionRunEffectiveId) });
     void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflowKnowledgeIngestionStatus(selectedTeam.teamId) });
     void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflowCoordinationStatus(selectedTeam.teamId) });
     void queryClient.invalidateQueries({ queryKey: sourceQualityStatusQueryKey(selectedTeam.teamId) });
@@ -9535,8 +9659,9 @@ export function TeamsRoute({
     ),
     [lang, sourceCollectionRunCandidates, sourceCollectionSourceFilter],
   );
+  const sourceCollectionSummaryCounts = sourceCollectionSummary?.summary ?? {};
   const sourceCollectionRawRecordCount =
-    Number(sourceCollectionRecordsQuery.data?.summary?.recordCount ?? sourceCollectionRunSummary?.recordCount ?? sourceCollectionRecords.length) || 0;
+    Number(sourceCollectionRecordsQuery.data?.summary?.recordCount ?? sourceCollectionSummaryCounts.recordCount ?? sourceCollectionRunSummary?.recordCount ?? sourceCollectionRecords.length) || 0;
   const sourceCollectionRecordClickableSourceCount = sourceCollectionRecordProvenances.filter((item) => item.href).length;
   const sourceCollectionRecordLocalFileCount = sourceCollectionRecordProvenances.filter((item) => item.kind === "file").length;
   const sourceCollectionRecordMissingSourceCount = sourceCollectionRecordProvenances.filter((item) => item.kind === "missing").length;
@@ -9551,7 +9676,10 @@ export function TeamsRoute({
   const sourceCollectionScreeningProjection = sourceCollectionStageCardById.get("screening") ?? null;
   const sourceCollectionGraphProjection = sourceCollectionStageCardById.get("graph") ?? null;
   const sourceCollectionMemoryProjection = sourceCollectionStageCardById.get("memory") ?? null;
-  const sourceCollectionStageSummaryCandidateCount = Number(sourceCollectionStageRound?.sourceCollectionStageCardSummary?.sourceCandidateCount);
+  const sourceCollectionStageSummaryCandidateCount = Number(
+    sourceCollectionStageRound?.sourceCollectionStageCardSummary?.sourceCandidateCount
+    ?? sourceCollectionSummaryCounts.sourceCandidateCount,
+  );
   const sourceCollectionCandidateProjectionFallbackCount = Number.isFinite(sourceCollectionStageSummaryCandidateCount)
     ? Math.max(sourceCollectionRunCandidateCount, Math.max(0, sourceCollectionStageSummaryCandidateCount))
     : sourceCollectionRunCandidateCount;
@@ -9581,8 +9709,9 @@ export function TeamsRoute({
     && sourceCollectionDisplayedCandidateCount <= 0
     && (
       (sourceCollectionRunsQuery.isPending && !sourceCollectionRunsQuery.data)
-      || (researchStageRoundStatusQuery.isPending && !researchStageRoundStatusQuery.data)
-      || (teamWorkflowCandidatesQuery.isPending && !teamWorkflowCandidatesQuery.data)
+      || (sourceCollectionSummaryQuery.isPending && sourceCollectionWorkspaceSelected && !sourceCollectionSummaryQuery.data)
+      || (researchStageRoundStatusQuery.isPending && researchStageRoundStatusEnabled && !researchStageRoundStatusQuery.data)
+      || (teamWorkflowCandidatesQuery.isPending && teamWorkflowCandidateListEnabled && !teamWorkflowCandidatesQuery.data)
     ),
   );
   const sourceCollectionSourceQualityLoading = Boolean(
@@ -9628,7 +9757,10 @@ export function TeamsRoute({
     sourceCollectionSearchPlanRef?.queryCount
     ?? selectedTeamStartSourceCollectionResult?.searchPlan.queryCount
     ?? sourceCollectionAssignments.reduce((total, assignment) => total + (assignment.scope.queryCount ?? assignment.scope.assignedQueries?.length ?? 0), 0);
-  const sourceCollectionApprovedCount = teamWorkflowSourceQualityStatus?.summary.approvedSourceCandidateCount ?? 0;
+  const sourceCollectionApprovedCount =
+    teamWorkflowSourceQualityStatus?.summary.approvedSourceCandidateCount
+    ?? sourceCollectionSummaryCounts.approvedSourceCandidateCount
+    ?? 0;
   const sourceCollectionStageFocusLabel = !selectedSourceCollectionRun
     ? (lang === "zh" ? "尚未启动" : "not started")
     : sourceCollectionSearchOpenAssignmentCount > 0
@@ -9743,11 +9875,11 @@ export function TeamsRoute({
     activeWorkSummary: workRunString(selectedSourceCollectionActiveWorkRun, "currentTask")
       || workRunString(selectedSourceCollectionActiveWorkRun, "summary"),
   });
-  const candidateGraphNodeCount = teamWorkflowCandidateGraph?.summary.nodeCount ?? 0;
+  const candidateGraphNodeCount = teamWorkflowCandidateGraph?.summary.nodeCount ?? sourceCollectionSummaryCounts.graphNodeCount ?? 0;
   const candidateGraphEdgeCount = teamWorkflowCandidateGraph?.summary.edgeCount ?? 0;
-  const knowledgeStewardPackCount = teamWorkflowKnowledgeIngestionStatus?.summary.stewardPackCandidateCount ?? 0;
+  const knowledgeStewardPackCount = teamWorkflowKnowledgeIngestionStatus?.summary.stewardPackCandidateCount ?? sourceCollectionSummaryCounts.stewardPackCount ?? 0;
   const knowledgePendingReviewCount = teamWorkflowKnowledgeIngestionStatus?.summary.pendingKnowledgeReviewCandidateCount ?? 0;
-  const formalKnowledgeItemCount = teamWorkflowKnowledgeIngestionStatus?.summary.formalKnowledgeItemCount ?? 0;
+  const formalKnowledgeItemCount = teamWorkflowKnowledgeIngestionStatus?.summary.formalKnowledgeItemCount ?? sourceCollectionSummaryCounts.formalKnowledgeSyncCount ?? 0;
   const sourceCollectionProjectedGraphNodeCount = sourceCollectionStageProjectionCount(
     sourceCollectionGraphProjection,
     "artifact",
@@ -10828,9 +10960,9 @@ export function TeamsRoute({
               </div>
               </section>
             ) : showNodeBindingPanel ? (
-              <section className={`${styles.nodeBindingSection} ${styles.nodeBindingPlaceholder}`} aria-busy={teamDetailQuery.isPending || workspaceQuery.isPending}>
+              <section className={`${styles.nodeBindingSection} ${styles.nodeBindingPlaceholder}`} aria-busy={teamDetailQuery.isPending || agentSummaryQuery.isPending}>
                 <div className={styles.empty}>
-                  {teamDetailQuery.isPending || workspaceQuery.isPending
+                  {teamDetailQuery.isPending || agentSummaryQuery.isPending
                     ? (lang === "zh" ? "正在读取团队节点..." : "Loading team nodes...")
                     : (lang === "zh" ? "创建或选择一个团队节点。" : "Create or select a team node.")}
                 </div>

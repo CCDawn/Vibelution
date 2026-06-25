@@ -43,7 +43,9 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("TEAM_PICKER_TEAM_IDS");
     expect(routeSource).toContain("const TEAM_PICKER_TEAM_IDS = [AI_SEARCH_TEAM_ID, RESEARCH_TEAM_ID] as const");
     expect(routeSource).toContain("fetchJson<Team>(`/api/teams/${encodeURIComponent(effectiveTeamId)}`)");
-    expect(routeSource).toContain('fetchJson<AgentConfigWorkspace>("/api/agents/config-workspace")');
+    expect(routeSource).toContain("queryKeys.agentSummary(true)");
+    expect(routeSource).toContain('fetchJson<AgentConfigWorkspaceAgent[]>("/api/agents?includeArchived=true&detail=summary")');
+    expect(routeSource).not.toContain('fetchJson<AgentConfigWorkspace>("/api/agents/config-workspace")');
     expect(routeSource).toContain("fetchJson<Team>(`/api/teams/${encodeURIComponent(teamId)}`");
     expect(routeSource).toContain('method: "DELETE"');
     expect(routeSource).toContain("sendTeamProjectBusMessage(payload)");
@@ -475,7 +477,7 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("openSourceCollectionStageAgentChat");
     expect(routeSource).toContain('type SourceCollectionStageAgentChatStatus = "ready" | "loading" | "error" | "repair"');
     expect(routeSource).toContain("sourceCollectionStageAgentChatState(stageId");
-    expect(routeSource).toContain("workspaceQuery.isPending || workspaceQuery.isFetching");
+    expect(routeSource).toContain("agentSummaryQuery.isPending || agentSummaryQuery.isFetching");
     expect(routeSource).toContain("primaryStageAgentChatLoading");
     expect(routeSource).toContain("加载 Agent...");
     expect(routeSource).toContain('chatState.status === "repair"');
@@ -718,6 +720,13 @@ describe("TeamsRoute layout contract", () => {
     expect(sourceQualityStatusQuerySource).toContain("refetchInterval");
     expect(sourceQualityStatusQuerySource).toContain("teamWorkflowSourceQualityEnabled");
     expect(sourceQualityStatusQuerySource).toContain("sourceCollectionStageWritebackSyncActive");
+    expect(routeSource).toContain("SourceCollectionSummaryPayload");
+    expect(routeSource).toContain("sourceCollectionSummaryQueryKey");
+    expect(routeSource).toContain("/workflow-orchestration/source-collection/summary");
+    expect(routeSource).toContain("sourceCollectionSummaryQueryPrefix");
+    expect(routeSource).toContain("includeValidation=false");
+    expect(routeSource).toContain("const TEAM_WORKFLOW_CANDIDATE_PREVIEW_LIMIT = 80;");
+    expect(routeSource).not.toContain("const TEAM_WORKFLOW_CANDIDATE_PREVIEW_LIMIT = 500;");
     expect(routeSource).toContain("teamWorkflowSourceQualityEnabled");
     expect(routeSource).toContain("enabled: Boolean(effectiveTeamId && researchWorkflowTeamSelected)");
     expect(routeSource).not.toContain("researchStageRoundStatusQueryKey(effectiveTeamId || \"none\"),\n    queryFn: () =>\n      fetchJson<ResearchStageRoundStatusPayload>(\n        `/api/teams/${encodeURIComponent(effectiveTeamId)}/workflow-orchestration/stage-rounds/status`,\n      ),\n    enabled: Boolean(effectiveTeamId && researchWorkflowTeamSelected && teamWorkflowQuery.data)");
