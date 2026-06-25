@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "universal_candidate_envelope.schema.json",
+  "title": "UniversalCandidateEnvelope",
+  "description": "挑战杯科研候选统一信封；所有 Agent 写 CandidateStore 前的最外层契约。",
+  "type": "object",
+  "required": [
+    "candidateId",
+    "candidateType",
+    "teamId",
+    "schemaVersion",
+    "currentState"
+  ],
+  "properties": {
+    "candidateId": {
+      "type": "string"
+    },
+    "candidateType": {
+      "type": "string",
+      "enum": [
+        "source_manifest",
+        "paper_note",
+        "neuro_mechanism",
+        "mechanism_mapping",
+        "algorithm_hypothesis",
+        "review_record",
+        "candidate_graph"
+      ]
+    },
+    "teamId": {
+      "type": "string"
+    },
+    "schemaVersion": {
+      "type": [
+        "integer",
+        "string"
+      ]
+    },
+    "currentState": {
+      "type": "string"
+    },
+    "stageRoundId": {
+      "type": "string"
+    },
+    "sourceTrace": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "createdByAgent": {
+      "type": "string"
+    },
+    "riskFlags": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "officialBoundary": {
+      "type": "object",
+      "properties": {
+        "candidateOnly": {
+          "type": "boolean"
+        },
+        "officialWriteAllowed": {
+          "type": "boolean"
+        },
+        "requiresStewardApproval": {
+          "type": "boolean"
+        }
+      }
+    },
+    "payload": {
+      "type": "object"
+    }
+  }
+}
