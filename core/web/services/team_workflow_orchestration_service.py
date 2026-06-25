@@ -4728,6 +4728,104 @@ def propose_iteration(team_id: str, payload: dict[str, Any] | None = None) -> di
     }
 
 
+def export_deliverables(team_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    """N-13：交付材料导出（节点 12）。只读 official/approved/明确标注的证据，生成
+    deliverable_manifest + blockers；不反写知识库。证据不足时输出 blocker 清单而非伪造完整材料。
+    """
+    normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
+    team_service.get_team(normalized_team_id)
+    payload = payload if isinstance(payload, dict) else {}
+    requested_by = _trim_text(payload.get("requestedByAgent"), max_length=160) or "Challenge Cup Delivery Agent"
+    now = utc_now_iso()
+
+    candidate_store = _load_candidate_store(normalized_team_id)
+    candidates = [item for item in list(candidate_store.get("candidates") or []) if isinstance(item, dict)]
+    candidate_breakdown: dict[str, int] = {}
+    for candidate in candidates:
+        candidate_type = str(candidate.get("candidateType") or "")
+        candidate_breakdown[candidate_type] = candidate_breakdown.get(candidate_type, 0) + 1
+
+    reviewed_hypotheses = [
+        candidate
+        for candidate in candidates
+        if candidate.get("candidateType") == "algorithm_hypothesis"
+        and isinstance(candidate.get("metadata"), dict)
+        and any(
+            str(record.get("decision")) == "approve"
+            for record in (candidate["metadata"].get("reviewRecords") or [])
+            if isinstance(record, dict)
+        )
+    ]
+
+    plan_store = _load_experiment_plan_store(normalized_team_id)
+    artifact_refs: list[dict[str, Any]] = []
+    for plan in list(plan_store.get("plans") or []):
+        if not isinstance(plan, dict):
+            continue
+        for run in plan.get("smokeRunResults") or []:
+            if isinstance(run, dict) and run.get("artifactHash"):
+                artifact_refs.append(
+                    {
+                        "planId": plan.get("planId"),
+                        "smokeRunId": run.get("smokeRunId"),
+                        "artifactHash": run.get("artifactHash"),
+                        "status": run.get("status"),
+                    }
+                )
+
+    ingestion_status = get_knowledge_ingestion_status(normalized_team_id)
+    formal_item_count = int((ingestion_status.get("summary") or {}).get("formalKnowledgeItemCount") or 0)
+
+    evidence_refs: list[dict[str, str]] = []
+    for candidate in reviewed_hypotheses:
+        evidence_refs.extend(_normalize_ref_list(candidate.get("evidenceRefs"), max_items=24))
+
+    blockers: list[dict[str, str]] = []
+    if not reviewed_hypotheses:
+        blockers.append({"code": "no_reviewed_hypothesis", "message": "至少需要 1 个已审稿通过的 algorithm_hypothesis。"})
+    if not artifact_refs:
+        blockers.append({"code": "experiment_loop_incomplete", "message": "缺 runner_result/artifactHash；实验闭环未完成。"})
+    if formal_item_count <= 0:
+        blockers.append({"code": "no_official_knowledge", "message": "尚无正式 KnowledgeItem（official_synced）。"})
+
+    sections = [
+        {"key": "problem", "label": "问题定义", "ready": bool(reviewed_hypotheses)},
+        {"key": "architecture", "label": "方法/架构", "ready": bool(reviewed_hypotheses)},
+        {"key": "experiment", "label": "实验与证据", "ready": bool(artifact_refs)},
+        {"key": "reproducibility", "label": "复现包", "ready": bool(artifact_refs)},
+        {"key": "official_knowledge", "label": "正式知识", "ready": formal_item_count > 0},
+    ]
+    manifest = {
+        "deliverableId": _new_record_id("deliverable"),
+        "teamId": normalized_team_id,
+        "generatedAt": now,
+        "requestedByAgent": requested_by,
+        "sections": sections,
+        "evidenceRefs": evidence_refs[:48],
+        "artifactRefs": artifact_refs[:48],
+        "officialBoundary": {
+            "formalKnowledgeItemCount": formal_item_count,
+            "reusesOfficialOnly": True,
+            "writesBackToKnowledge": False,
+        },
+        "candidateBreakdown": candidate_breakdown,
+        "blockers": blockers,
+        "status": "ready" if not blockers else "blocked",
+    }
+    _record_workflow_event(
+        "deliverables.exported",
+        normalized_team_id,
+        fields={"deliverableId": manifest["deliverableId"], "status": manifest["status"], "blockerCount": len(blockers)},
+    )
+    return {
+        "schemaVersion": SCHEMA_VERSION,
+        "teamId": normalized_team_id,
+        "deliverableManifest": manifest,
+        "status": manifest["status"],
+        "blockers": blockers,
+    }
+
+
 def plan_paper_note_chunks_from_source_candidate(team_id: str, candidate_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
     normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
     normalized_candidate_id = _normalize_required_id(candidate_id, "Candidate id is required.")
