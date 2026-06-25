@@ -449,6 +449,14 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("agent_done_artifact_pending");
     expect(routeSource).toContain("latestTask");
     expect(routeSource).toContain("blockingReasons");
+    expect(routeSource).toContain("sourceCollectionStageBlockingReasonLabel");
+    expect(routeSource).toContain("sourceCollectionStageBlockingReasonsLabel");
+    expect(routeSource).toContain("sourceCollectionStageArtifactSummaryLabel");
+    expect(routeSource).toContain("待 Agent 产出");
+    expect(routeSource).toContain("已有输入，等待该阶段生成目标产物。");
+    expect(routeSource).toContain("证据 ${evidenceCount}");
+    expect(routeSource).not.toContain("candidateProjection.blockingReasons.join");
+    expect(routeSource).not.toContain("{module.projection.blockingReasons[0]}</small>");
     expect(routeSource).toContain("evidenceRefCount");
     expect(routeSource).toContain("materializedSources");
     expect(routeSource).toContain("graphForSelectedSourceRun");
