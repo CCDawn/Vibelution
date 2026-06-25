@@ -319,6 +319,49 @@ def test_challenge_cup_research_team_uses_knowledge_base_admin_for_ingestion_rev
     assert admin_agent["metadata"]["challengeCupTeamRole"] == "knowledge_steward"
 
 
+def test_knowledge_expansion_team_agents_seed_complete_team(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+
+    result = team_service.ensure_knowledge_expansion_team_agents(purge_stale=True)
+    team = result["team"]
+
+    assert result["teamId"] == "knowledge-expansion-team"
+    assert team["teamKind"] == "knowledge_expansion"
+    assert team["teamSource"] == "knowledge_expansion"
+    assert team["linkedChatRoom"]["purpose"] == "knowledge_expansion"
+    assert [member["role"] for member in team["members"]] == [
+        "source_intake",
+        "content_extraction",
+        "source_quality",
+        "candidate_graph",
+        "knowledge_steward",
+    ]
+    source_member = next(member for member in team["members"] if member["role"] == "source_intake")
+    steward_member = next(member for member in team["members"] if member["role"] == "knowledge_steward")
+    source_agent = agent_directory_service.get_agent(source_member["agentId"])
+    steward_agent = agent_directory_service.get_agent(steward_member["agentId"])
+
+    assert source_agent["roleKey"] == "knowledge_expansion_source_intake"
+    assert source_agent["metadata"]["knowledgeExpansionTeamId"] == "knowledge-expansion-team"
+    assert source_agent["metadata"]["knowledgeExpansionTeamRole"] == "source_intake"
+    assert source_agent["directSessionId"]
+    assert session_service.get_session_detail(source_agent["directSessionId"])
+    assert steward_agent["roleKey"] == "knowledge_steward"
+    assert steward_agent["agentId"] == agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID
+    assert steward_agent["metadata"]["knowledgeExpansionTeamRole"] == "knowledge_steward"
+
+    source_policy = agent_directory_service.resolve_tool_policy_for_agent(source_agent["agentId"])
+    steward_policy = agent_directory_service.resolve_tool_policy_for_agent(steward_agent["agentId"])
+    assert "paper_search_tool" in source_policy["allowedTools"]
+    assert "knowledge_ingestion_tool" not in source_policy["allowedTools"]
+    assert "knowledge_ingestion_tool" in steward_policy["allowedTools"]
+    assert "knowledge_proposal_tool" in steward_policy["allowedTools"]
+
+    canvas = team_service.get_team_canvas("knowledge-expansion-team")
+    assert {node["agentId"] for node in canvas["nodes"]} == {member["agentId"] for member in team["members"]}
+    assert team_service.knowledge_expansion_team_agents_need_repair() is False
+
+
 def test_challenge_cup_research_team_agent_repair_purges_stale_and_rebuilds_complete_team(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     stale_agent = agent_directory_service.create_agent_instance(

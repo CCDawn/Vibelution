@@ -151,6 +151,9 @@ class DataRecordSourceImportPayload(BaseModel):
 
 class SourceCollectionRunStartPayload(BaseModel):
     title: str = Field("", max_length=180)
+    workflowPurpose: str = Field("", max_length=80)
+    workflowKind: str = Field("", max_length=80)
+    collectionMode: str = Field("web_search", max_length=80)
     goal: str = Field("", max_length=1000)
     topic: str = Field("", max_length=500)
     ownerAgentId: str = Field("", max_length=160)
@@ -163,6 +166,7 @@ class SourceCollectionRunStartPayload(BaseModel):
     sourceTypes: list[str] = Field(default_factory=list, max_length=16)
     maxResultsPerQuery: int = Field(10, ge=1, le=100)
     promptCachePolicy: dict[str, Any] = Field(default_factory=dict)
+    localScanScope: dict[str, Any] = Field(default_factory=dict)
     scope: dict[str, Any] = Field(default_factory=dict)
 
 

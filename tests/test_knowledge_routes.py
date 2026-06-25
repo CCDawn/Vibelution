@@ -713,7 +713,7 @@ def test_knowledge_steward_overview_surfaces_agent_boundary_and_queue(tmp_path, 
     payload = response.json()
     assert payload["steward"]["agentId"] == agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID
     assert payload["steward"]["functionalDisplayName"] == "知识库管理员"
-    assert payload["steward"]["permissionBoundary"] == "proposal_and_rating_suggestion_only"
+    assert payload["steward"]["permissionBoundary"] == "governed_stage_writeback_ingestion"
     assert payload["steward"]["protected"] is True
     assert payload["steward"]["directChatPath"].startswith("/chat?session=")
     assert "knowledge_governance_tasks_tool" in payload["steward"]["toolPolicy"]["allowedTools"]

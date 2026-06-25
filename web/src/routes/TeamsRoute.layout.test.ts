@@ -41,7 +41,7 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).not.toContain("/api/team-templates/${encodeURIComponent(templateId)}/instantiate");
     expect(routeSource).not.toContain("instantiateTeamTemplateMutation");
     expect(routeSource).toContain("TEAM_PICKER_TEAM_IDS");
-    expect(routeSource).toContain("const TEAM_PICKER_TEAM_IDS = [AI_SEARCH_TEAM_ID, RESEARCH_TEAM_ID] as const");
+    expect(routeSource).toContain("const TEAM_PICKER_TEAM_IDS = [AI_SEARCH_TEAM_ID, KNOWLEDGE_EXPANSION_TEAM_ID, RESEARCH_TEAM_ID] as const");
     expect(routeSource).toContain("fetchJson<Team>(`/api/teams/${encodeURIComponent(effectiveTeamId)}`)");
     expect(routeSource).toContain("queryKeys.agentSummary(true)");
     expect(routeSource).toContain('fetchJson<AgentConfigWorkspaceAgent[]>("/api/agents?includeArchived=true&detail=summary")');
@@ -133,6 +133,15 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("noTrainingExecution: true");
     expect(routeSource).toContain("commandPreviewOnly: true");
     expect(routeSource).toContain("startSourceCollectionRunMutation");
+    expect(routeSource).toContain("knowledgeExpansionWorkflowTeamSelected");
+    expect(routeSource).toContain("SOURCE_COLLECTION_KNOWLEDGE_EXPANSION_ROLES");
+    expect(routeSource).toContain("source_intake");
+    expect(routeSource).toContain("collectionMode");
+    expect(routeSource).toContain("local_workspace");
+    expect(routeSource).toContain("mixed");
+    expect(routeSource).toContain("localScanScope");
+    expect(routeSource).toContain("workflowPurpose");
+    expect(routeSource).toContain("workflowKind");
     expect(routeSource).toContain("recordSourceCollectionOutputMutation");
     expect(routeSource).toContain("executeSourceCollectionSearchMutation");
     const executeSearchMutationSource = routeSource.slice(
@@ -226,6 +235,7 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain('"supervised-evolution-team"');
     expect(routeSource).toContain('const RESEARCH_TEAM_ID = "research-team"');
     expect(routeSource).toContain('const AI_SEARCH_TEAM_ID = "ai-search-team"');
+    expect(routeSource).toContain('const KNOWLEDGE_EXPANSION_TEAM_ID = "knowledge-expansion-team"');
     expect(routeSource).toContain("TEAM_PICKER_TEAM_IDS.map((teamId) => teamsById.get(teamId))");
     expect(routeSource).toContain("isEvolutionSystemTeam");
     expect(routeSource).toContain("team.teamKind === \"self_evolution\"");
@@ -522,6 +532,8 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("onAction: () => void startSourceCollectionStageSessionTask(\"memory\")");
     expect(routeSource).toContain("repairChallengeCupTeamAgentsMutation");
     expect(routeSource).toContain("/challenge-cup-agents/repair");
+    expect(routeSource).toContain("repairKnowledgeExpansionTeamAgentsMutation");
+    expect(routeSource).toContain("/knowledge-expansion-agents/repair");
     expect(routeSource).toContain("修复团队 Agent");
     expect(routeSource).toContain("进入 Agent 私聊");
     expect(routeSource).toContain("Agent 私聊");
@@ -797,7 +809,7 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("条重复跳过");
     expect(routeSource).toContain("selectedSourceCollectionSearchAccepted");
     expect(routeSource).not.toContain('collection: ["research_coordination", "data_discovery", "source_acquisition", "content_extraction"]');
-    expect(routeSource).toContain('collection: ["data_discovery", "source_acquisition"]');
+    expect(routeSource).toContain('collection: ["source_intake", "data_discovery", "source_acquisition"]');
     expect(routeSource).toContain('candidate: ["content_extraction"]');
     expect(routeSource).not.toContain('graph: ["source_quality"]');
     expect(routeSource).toContain('graph: ["candidate_graph"]');

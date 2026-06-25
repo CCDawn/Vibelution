@@ -248,6 +248,34 @@ def test_team_workflow_route_starts_source_collection_run(tmp_path, monkeypatch)
     assert status_response.json()["boundaries"]["writesFormalKnowledge"] is False
 
 
+def test_team_workflow_route_starts_knowledge_expansion_local_source_collection(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    client = _client()
+    team = team_service.ensure_knowledge_expansion_team_agents(purge_stale=True)["team"]
+    source_file = tmp_path / "workspace" / "knowledge" / "notes" / "predictive-coding.md"
+    source_file.parent.mkdir(parents=True, exist_ok=True)
+    source_file.write_text("# Predictive coding\n\nEvidence for hierarchical prediction.", encoding="utf-8")
+
+    response = client.post(
+        f"/api/teams/{team['teamId']}/workflow-orchestration/source-collection-runs",
+        json={
+            "workflowPurpose": "knowledge_expansion",
+            "collectionMode": "local_workspace",
+            "topic": "predictive coding",
+            "agentRoles": ["source_intake", "content_extraction", "source_quality"],
+            "localScanScope": {"roots": ["workspace/knowledge"], "maxFiles": 10},
+            "promptCachePolicy": {"requirement": "disabled"},
+        },
+    )
+
+    assert response.status_code == 201, response.text
+    payload = response.json()
+    assert payload["run"]["scope"]["workflowKind"] == "knowledge_expansion"
+    assert payload["run"]["metadata"]["collectionMode"] == "local_workspace"
+    assert payload["searchPlan"]["collectionMode"] == "local_workspace"
+    assert payload["localWorkspaceScan"]["importedCount"] == 1
+
+
 def test_team_workflow_route_seeds_source_collection_agent_session_context(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     client = _client()
