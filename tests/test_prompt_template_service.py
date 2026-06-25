@@ -126,6 +126,51 @@ def test_source_quality_prompt_requires_candidate_paging_and_structured_decision
     assert "未审候选" in detail["content"]
 
 
+def test_prompt_template_registry_repairs_challenge_cup_experiment_iteration_roles(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    prompt_template_service.repair_prompt_templates()
+
+    cases = {
+        "prompt-challenge-cup-experiment-planner": (
+            "challenge_cup_experiment_planner",
+            "challenge_cup_experiment_context_tool",
+            "challenge_cup_experiment_writeback_tool",
+            "不自动执行训练",
+        ),
+        "prompt-challenge-cup-experiment-ledger": (
+            "challenge_cup_experiment_ledger",
+            "challenge_cup_experiment_context_tool",
+            "challenge_cup_experiment_writeback_tool",
+            "只登记证据账本",
+        ),
+        "prompt-challenge-cup-iteration-planner": (
+            "challenge_cup_iteration_planner",
+            "challenge_cup_iteration_context_tool",
+            "challenge_cup_iteration_writeback_tool",
+            "Research Loop",
+        ),
+        "prompt-challenge-cup-versioning": (
+            "challenge_cup_versioning",
+            "challenge_cup_versioning_context_tool",
+            "challenge_cup_versioning_writeback_tool",
+            "versionHistory",
+        ),
+    }
+    for template_id, (role_key, read_tool, write_tool, required_text) in cases.items():
+        detail = prompt_template_service.get_prompt_template(template_id)
+        assert detail is not None
+        assert detail["category"] == "research"
+        assert detail["metadata"]["roleKey"] == role_key
+        assert detail["metadata"]["builtinContentVersion"] == prompt_template_service.CHALLENGE_CUP_STAGE_TASK_PROMPT_VERSION
+        assert _contains_tool_name(detail["content"], read_tool)
+        assert _contains_tool_name(detail["content"], write_tool)
+        assert required_text in detail["content"]
+        assert not _contains_tool_name(detail["content"], "web_search_tool")
+
+    assert (tmp_path / "workspace" / "prompts" / "research" / "challenge_cup_experiment_planner.md").exists()
+    assert (tmp_path / "workspace" / "prompts" / "research" / "challenge_cup_versioning.md").exists()
+
+
 def test_prompt_template_update_writes_source_and_refreshes_hash(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     prompt_template_service.repair_prompt_templates()

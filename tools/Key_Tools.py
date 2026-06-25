@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """
 LangChain 工具包装模块
 
@@ -40,6 +40,14 @@ from tools.research_search_tools import (
 from tools.source_collection_stage_tools import (
     source_collection_context_tool as _source_collection_context_impl,
     source_collection_stage_writeback_tool as _source_collection_stage_writeback_impl,
+)
+from tools.challenge_cup_operations_tools import (
+    challenge_cup_experiment_context_tool as _challenge_cup_experiment_context_impl,
+    challenge_cup_experiment_writeback_tool as _challenge_cup_experiment_writeback_impl,
+    challenge_cup_iteration_context_tool as _challenge_cup_iteration_context_impl,
+    challenge_cup_iteration_writeback_tool as _challenge_cup_iteration_writeback_impl,
+    challenge_cup_versioning_context_tool as _challenge_cup_versioning_context_impl,
+    challenge_cup_versioning_writeback_tool as _challenge_cup_versioning_writeback_impl,
 )
 from tools.git_tools import (
     get_git_status_summary_tool as _get_git_status_summary_impl,
@@ -568,7 +576,7 @@ def create_key_tools() -> List[BaseTool]:
 
         该工具不联网、不读取任意本地文件、不消耗 API 额度；只返回指定 team/run/task
         已落盘到平台工作流中的 DataRecord、source_manifest 候选、任务合同和边界摘要。
-        适合资料提炼、资料审查、候选图谱和共享记忆前审 Agent 在私聊阶段任务中使用。
+        适合资料提炼、资料审查、候选图谱和知识库管理员 在私聊阶段任务中使用。
 
         Args:
             team_id: 团队 ID，阶段任务消息中的 teamId
@@ -632,6 +640,170 @@ def create_key_tools() -> List[BaseTool]:
             next_actions_json=next_actions_json,
             recorded_by_agent=recorded_by_agent,
             metadata_json=metadata_json,
+        )
+
+    @tool
+    def challenge_cup_experiment_context_tool(team_id: str = "research-team", include_research_loop: bool = False) -> str:
+        """
+        【挑战杯实验上下文】读取实验规划账本状态，不执行训练或 smoke runner。
+
+        Args:
+            team_id: 团队 ID，默认 research-team
+            include_research_loop: 是否同时返回 Research Loop 状态
+
+        Returns:
+            JSON 字符串，包含实验计划、readiness、边界和下一步
+        """
+        return _challenge_cup_experiment_context_impl(team_id=team_id, include_research_loop=include_research_loop)
+
+    @tool
+    def challenge_cup_experiment_writeback_tool(
+        team_id: str = "research-team",
+        operation: str = "create_plan",
+        plan_id: str = "",
+        payload_json: str = "",
+        recorded_by_agent: str = "",
+    ) -> str:
+        """
+        【挑战杯实验账本回写】登记实验计划、baseline、smoke/full-run 结果或入库申请。
+
+        该工具只写实验账本，不执行训练、smoke runner、Shell、Git、RAG 或 official graph。
+        operation 支持 create_plan / register_baseline_artifact / register_smoke_result /
+        register_full_run_result / request_knowledge_ingestion。
+
+        Args:
+            team_id: 团队 ID
+            operation: 回写动作
+            plan_id: 实验计划 ID，create_plan 可留空
+            payload_json: JSON 对象字符串
+            recorded_by_agent: 记录者 Agent
+
+        Returns:
+            JSON 字符串，包含回写结果和边界
+        """
+        return _challenge_cup_experiment_writeback_impl(
+            team_id=team_id,
+            operation=operation,
+            plan_id=plan_id,
+            payload_json=payload_json,
+            recorded_by_agent=recorded_by_agent,
+        )
+
+    @tool
+    def challenge_cup_iteration_context_tool(team_id: str = "research-team", include_experiment: bool = True) -> str:
+        """
+        【挑战杯迭代上下文】读取 Research Loop 模板、循环状态和可选实验账本。
+
+        该工具只读状态，不运行命令。
+
+        Args:
+            team_id: 团队 ID
+            include_experiment: 是否同时返回实验规划状态
+
+        Returns:
+            JSON 字符串，包含 Research Loop 状态、模板和边界
+        """
+        return _challenge_cup_iteration_context_impl(team_id=team_id, include_experiment=include_experiment)
+
+    @tool
+    def challenge_cup_iteration_writeback_tool(
+        team_id: str = "research-team",
+        operation: str = "create_loop",
+        loop_id: str = "",
+        payload_json: str = "",
+        recorded_by_agent: str = "",
+    ) -> str:
+        """
+        【挑战杯迭代账本回写】创建 Research Loop、登记证据或记录迭代决策。
+
+        该工具只写 Research Loop 账本，不执行命令、训练、Shell、Git、RAG 或 official graph。
+
+        Args:
+            team_id: 团队 ID
+            operation: create_loop / record_evidence / record_decision
+            loop_id: Research Loop ID，create_loop 可留空
+            payload_json: JSON 对象字符串
+            recorded_by_agent: 记录者 Agent
+
+        Returns:
+            JSON 字符串，包含回写结果和边界
+        """
+        return _challenge_cup_iteration_writeback_impl(
+            team_id=team_id,
+            operation=operation,
+            loop_id=loop_id,
+            payload_json=payload_json,
+            recorded_by_agent=recorded_by_agent,
+        )
+
+    @tool
+    def challenge_cup_versioning_context_tool(team_id: str = "research-team") -> str:
+        """
+        【挑战杯版本账本上下文】读取候选版本历史、派生/替代关系和拒绝归档。
+
+        该工具只读候选版本账本，不读取任意本地文件。
+
+        Args:
+            team_id: 团队 ID
+
+        Returns:
+            JSON 字符串，包含 versionHistory、relations、rejectionArchive 和边界
+        """
+        return _challenge_cup_versioning_context_impl(team_id=team_id)
+
+    @tool
+    def challenge_cup_versioning_writeback_tool(
+        team_id: str = "research-team",
+        operation: str = "record_version",
+        candidate_id: str = "",
+        version_label: str = "",
+        summary: str = "",
+        reason: str = "",
+        related_candidate_id: str = "",
+        supersedes_version_id: str = "",
+        derived_from_version_id: str = "",
+        evidence_refs_json: str = "",
+        change_set_json: str = "",
+        metadata_json: str = "",
+        recorded_by_agent: str = "",
+    ) -> str:
+        """
+        【挑战杯版本账本回写】登记候选版本、替代关系、派生关系或拒绝归档。
+
+        该工具只写候选版本账本，不写正式知识、RAG 或 official graph。
+
+        Args:
+            team_id: 团队 ID
+            operation: record_version / supersede / derive / reject
+            candidate_id: 候选 ID
+            version_label: 版本标签
+            summary: 版本或归档摘要
+            reason: 替代、派生或拒绝原因
+            related_candidate_id: 相关候选 ID
+            supersedes_version_id: 被替代版本 ID
+            derived_from_version_id: 派生来源版本 ID
+            evidence_refs_json: JSON 数组字符串
+            change_set_json: JSON 数组字符串
+            metadata_json: JSON 对象字符串
+            recorded_by_agent: 记录者 Agent
+
+        Returns:
+            JSON 字符串，包含回写结果和边界
+        """
+        return _challenge_cup_versioning_writeback_impl(
+            team_id=team_id,
+            operation=operation,
+            candidate_id=candidate_id,
+            version_label=version_label,
+            summary=summary,
+            reason=reason,
+            related_candidate_id=related_candidate_id,
+            supersedes_version_id=supersedes_version_id,
+            derived_from_version_id=derived_from_version_id,
+            evidence_refs_json=evidence_refs_json,
+            change_set_json=change_set_json,
+            metadata_json=metadata_json,
+            recorded_by_agent=recorded_by_agent,
         )
 
     @tool
@@ -1937,7 +2109,7 @@ def create_key_tools() -> List[BaseTool]:
     @tool
     def knowledge_steward_recommendations_tool(limit: int = 8) -> str:
         """
-        【知识库管理员建议】读取 Knowledge Steward 派生的治理建议。
+        【知识库管理员建议】读取 知识库管理员 派生的治理建议。
 
         建议由 open governance tasks 派生，只读返回 review_proposal、review_rating_suggestion、draft_refinement_proposal 等下一步动作。
         本工具不会审核、应用、删除、改 ACL 或直接写正式知识；正式知识仍需要 reviewer 确认。
@@ -1953,7 +2125,7 @@ def create_key_tools() -> List[BaseTool]:
     @tool
     def knowledge_steward_workbench_tool(limit: int = 8) -> str:
         """
-        【知识库管理员工作台】读取 Knowledge Steward 的统一治理工作台。
+        【知识库管理员工作台】读取 知识库管理员的统一治理工作台。
 
         返回管理员身份、治理阶段、下一步建议、验收清单和权限边界；只读，不会审核、应用、删除、改 ACL 或直接写正式知识。
 
@@ -2099,6 +2271,12 @@ def create_key_tools() -> List[BaseTool]:
         search_summarize_sources_tool,
         source_collection_context_tool,
         source_collection_stage_writeback_tool,
+        challenge_cup_experiment_context_tool,
+        challenge_cup_experiment_writeback_tool,
+        challenge_cup_iteration_context_tool,
+        challenge_cup_iteration_writeback_tool,
+        challenge_cup_versioning_context_tool,
+        challenge_cup_versioning_writeback_tool,
         get_git_status_summary_tool,
         get_recent_changes_tool,
         get_entity_history_tool,
