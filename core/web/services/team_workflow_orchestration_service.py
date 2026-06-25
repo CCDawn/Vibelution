@@ -1180,8 +1180,15 @@ def writeback_source_collection_stage_session_task(
         task,
         writeback,
     )
+    materialized_candidate_graph = _materialize_source_collection_stage_writeback_candidate_graph(
+        normalized_team_id,
+        run_id,
+        task,
+        writeback,
+    )
     writeback["materializedSources"] = materialized_sources
     writeback["materializedSourceQuality"] = materialized_source_quality
+    writeback["materializedCandidateGraph"] = materialized_candidate_graph
     task["status"] = status
     task["summary"] = writeback["summary"] or _trim_text(task.get("summary"), max_length=4000)
     task["result"] = writeback["result"]
@@ -1189,6 +1196,8 @@ def writeback_source_collection_stage_session_task(
         task["result"]["materializedSources"] = materialized_sources
     if materialized_source_quality.get("assessedCandidateCount"):
         task["result"]["materializedSourceQuality"] = materialized_source_quality
+    if materialized_candidate_graph.get("candidateGraphId"):
+        task["result"]["materializedCandidateGraph"] = materialized_candidate_graph
     task["evidenceRefs"] = writeback["evidenceRefs"]
     task["nextActions"] = writeback["nextActions"]
     task["writeback"] = writeback
@@ -1213,6 +1222,9 @@ def writeback_source_collection_stage_session_task(
             "skippedDuplicateCount": materialized_sources.get("skippedDuplicateCount", 0),
             "sourceQualityAssessedCandidateCount": materialized_source_quality.get("assessedCandidateCount", 0),
             "sourceQualitySkippedCandidateCount": materialized_source_quality.get("skippedCandidateCount", 0),
+            "candidateGraphId": materialized_candidate_graph.get("candidateGraphId", ""),
+            "candidateGraphCreatedCount": materialized_candidate_graph.get("createdCandidateGraphCount", 0),
+            "candidateGraphReused": bool(materialized_candidate_graph.get("reusedCandidateGraph")),
         },
     )
     return {
@@ -2669,6 +2681,107 @@ def _materialize_source_collection_stage_writeback_quality(
     return summary
 
 
+def _materialize_source_collection_stage_writeback_candidate_graph(
+    team_id: str,
+    run_id: str,
+    task: dict[str, Any],
+    writeback: dict[str, Any],
+) -> dict[str, Any]:
+    stage_id = _trim_text(task.get("stageId"), max_length=80)
+    agent_role = _trim_text(task.get("agentRole"), max_length=80)
+    if stage_id != "graph" and agent_role != "candidate_graph":
+        return _source_collection_stage_writeback_candidate_graph_summary(status="skipped_stage")
+    status = _trim_text(writeback.get("status"), max_length=80).lower()
+    if status not in SOURCE_COLLECTION_STAGE_WRITEBACK_MATERIALIZED_STATUSES:
+        return _source_collection_stage_writeback_candidate_graph_summary(status="skipped_status")
+    result = writeback.get("result") if isinstance(writeback.get("result"), dict) else {}
+    agent_graph = result.get("candidateGraph") if isinstance(result.get("candidateGraph"), dict) else {}
+    created_by_agent = (
+        _trim_text(writeback.get("recordedByAgent"), max_length=160)
+        or _trim_text(task.get("agentId"), max_length=160)
+        or "Candidate Graph Agent"
+    )
+    try:
+        graph_response = build_candidate_graph(
+            team_id,
+            {
+                "createdByAgent": created_by_agent,
+                "sourceCollectionRunId": run_id,
+                "title": _trim_text(writeback.get("summary"), max_length=240) or "Source collection candidate graph",
+            },
+        )
+    except (team_service.TeamServiceError, TeamWorkflowOrchestrationError) as exc:
+        summary = _source_collection_stage_writeback_candidate_graph_summary(
+            status="failed",
+            failed=[{"reason": "candidate_graph_build_failed", "error": str(exc)}],
+        )
+        _record_workflow_event(
+            "source_collection.stage_session_task_candidate_graph_materialized",
+            team_id,
+            fields={
+                "runId": _trim_text(run_id, max_length=160),
+                "taskId": _trim_text(task.get("taskId"), max_length=160),
+                "stageId": stage_id,
+                "agentId": _trim_text(task.get("agentId"), max_length=160),
+                "failedCount": summary["failedCandidateGraphCount"],
+            },
+            level="warning",
+            outcome="failed",
+            lifecycle=True,
+        )
+        return summary
+
+    candidate_graph = graph_response.get("candidateGraph") if isinstance(graph_response.get("candidateGraph"), dict) else {}
+    graph = graph_response.get("graph") if isinstance(graph_response.get("graph"), dict) else {}
+    graph_summary = graph.get("summary") if isinstance(graph.get("summary"), dict) else {}
+    candidate_graph_id = _trim_text(candidate_graph.get("candidateId"), max_length=160)
+    if candidate_graph_id:
+        _attach_candidate_graph_stage_writeback_metadata(
+            team_id,
+            candidate_graph_id,
+            task=task,
+            writeback=writeback,
+            graph_response=graph_response,
+            agent_graph=agent_graph,
+        )
+    materialized = {
+        "candidateGraphId": candidate_graph_id,
+        "nodeCount": _source_collection_count(graph_summary.get("nodeCount")),
+        "edgeCount": _source_collection_count(graph_summary.get("edgeCount")),
+        "missingLinkCount": _source_collection_count(graph_summary.get("missingLinkCount")),
+        "unreviewedNodeCount": _source_collection_count(graph_summary.get("unreviewedNodeCount")),
+        "inputCandidateCount": _source_collection_count(graph_summary.get("inputCandidateCount")),
+        "filteredCandidateCount": _source_collection_count(graph_summary.get("filteredCandidateCount")),
+        "reusedCandidateGraph": bool(graph_response.get("reusedCandidateGraph")),
+        "ingestionFingerprint": _trim_text(graph_response.get("ingestionFingerprint"), max_length=160),
+    }
+    summary = _source_collection_stage_writeback_candidate_graph_summary(
+        status="completed" if candidate_graph_id else "failed",
+        candidate_graph=materialized,
+        failed=[] if candidate_graph_id else [{"reason": "candidate_graph_missing_id"}],
+    )
+    _record_workflow_event(
+        "source_collection.stage_session_task_candidate_graph_materialized",
+        team_id,
+        fields={
+            "runId": _trim_text(run_id, max_length=160),
+            "taskId": _trim_text(task.get("taskId"), max_length=160),
+            "stageId": stage_id,
+            "agentId": _trim_text(task.get("agentId"), max_length=160),
+            "candidateGraphId": candidate_graph_id,
+            "nodeCount": summary["nodeCount"],
+            "edgeCount": summary["edgeCount"],
+            "createdCandidateGraphCount": summary["createdCandidateGraphCount"],
+            "reusedCandidateGraph": summary["reusedCandidateGraph"],
+            "failedCount": summary["failedCandidateGraphCount"],
+        },
+        level="warning" if summary["failedCandidateGraphCount"] else "info",
+        outcome="failed" if summary["failedCandidateGraphCount"] else "completed",
+        lifecycle=bool(summary["failedCandidateGraphCount"]),
+    )
+    return summary
+
+
 def _source_collection_stage_writeback_candidate_decisions(result: dict[str, Any]) -> list[dict[str, Any]]:
     candidates: list[dict[str, Any]] = []
     for key in (
@@ -2755,6 +2868,86 @@ def _source_collection_stage_writeback_quality_summary(
         "skippedCandidates": skipped_items[:80],
         "failedCandidates": failed_items[:80],
     }
+
+
+def _source_collection_stage_writeback_candidate_graph_summary(
+    *,
+    status: str,
+    candidate_graph: dict[str, Any] | None = None,
+    failed: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    graph = candidate_graph if isinstance(candidate_graph, dict) else {}
+    failed_items = [item for item in list(failed or []) if isinstance(item, dict)]
+    candidate_graph_id = _trim_text(graph.get("candidateGraphId"), max_length=160)
+    reused = bool(graph.get("reusedCandidateGraph"))
+    return {
+        "status": status,
+        "candidateGraphId": candidate_graph_id,
+        "createdCandidateGraphCount": 0 if reused or not candidate_graph_id else 1,
+        "reusedCandidateGraph": reused,
+        "nodeCount": _source_collection_count(graph.get("nodeCount")),
+        "edgeCount": _source_collection_count(graph.get("edgeCount")),
+        "missingLinkCount": _source_collection_count(graph.get("missingLinkCount")),
+        "unreviewedNodeCount": _source_collection_count(graph.get("unreviewedNodeCount")),
+        "inputCandidateCount": _source_collection_count(graph.get("inputCandidateCount")),
+        "filteredCandidateCount": _source_collection_count(graph.get("filteredCandidateCount")),
+        "ingestionFingerprint": _trim_text(graph.get("ingestionFingerprint"), max_length=160),
+        "failedCandidateGraphCount": len(failed_items),
+        "failedCandidateGraphs": failed_items[:24],
+    }
+
+
+def _attach_candidate_graph_stage_writeback_metadata(
+    team_id: str,
+    candidate_graph_id: str,
+    *,
+    task: dict[str, Any],
+    writeback: dict[str, Any],
+    graph_response: dict[str, Any],
+    agent_graph: dict[str, Any],
+) -> None:
+    normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
+    normalized_candidate_graph_id = _trim_text(candidate_graph_id, max_length=160)
+    if not normalized_candidate_graph_id:
+        return
+    writeback_ref = {
+        "taskId": _trim_text(task.get("taskId"), max_length=160),
+        "runId": _trim_text(task.get("runId"), max_length=160),
+        "stageId": _trim_text(task.get("stageId"), max_length=80),
+        "agentId": _trim_text(task.get("agentId"), max_length=160),
+        "agentRole": _trim_text(task.get("agentRole"), max_length=80),
+        "status": _trim_text(writeback.get("status"), max_length=80),
+        "summary": _trim_text(writeback.get("summary"), max_length=1000),
+        "recordedAt": _trim_text(writeback.get("recordedAt"), max_length=120),
+        "recordedByAgent": _trim_text(writeback.get("recordedByAgent"), max_length=160),
+        "result": {"candidateGraph": _normalize_metadata(agent_graph)} if agent_graph else {},
+    }
+    with _WORKFLOW_LOCK:
+        candidate_store = _load_candidate_store(normalized_team_id)
+        changed = False
+        for candidate in list(candidate_store.get("candidates") or []):
+            if not isinstance(candidate, dict) or str(candidate.get("candidateId") or "") != normalized_candidate_graph_id:
+                continue
+            metadata = candidate.get("metadata") if isinstance(candidate.get("metadata"), dict) else {}
+            metadata = dict(metadata)
+            existing_refs = metadata.get("stageTaskWritebacks") if isinstance(metadata.get("stageTaskWritebacks"), list) else []
+            refs = [
+                item for item in existing_refs
+                if isinstance(item, dict) and _trim_text(item.get("taskId"), max_length=160) != writeback_ref["taskId"]
+            ]
+            refs.append(writeback_ref)
+            metadata["agentWriteback"] = writeback_ref
+            metadata["stageTaskWritebacks"] = refs[-24:]
+            metadata["sourceCollectionStageTaskId"] = writeback_ref["taskId"]
+            metadata["sourceCollectionRunId"] = writeback_ref["runId"]
+            metadata["reusedCandidateGraph"] = bool(graph_response.get("reusedCandidateGraph"))
+            candidate["metadata"] = metadata
+            candidate["updatedAt"] = utc_now_iso()
+            changed = True
+            break
+        if changed:
+            candidate_store["updatedAt"] = utc_now_iso()
+            _write_json(_candidate_store_path(normalized_team_id), candidate_store)
 
 
 def _source_collection_stage_writeback_source_leads(result: dict[str, Any]) -> list[dict[str, Any]]:
@@ -5002,6 +5195,7 @@ def build_candidate_graph(team_id: str, payload: dict[str, Any] | None = None) -
     curation_mode = _trim_text(payload.get("curationMode"), max_length=80) or "all_active"
     created_by_agent = _trim_text(payload.get("createdByAgent"), max_length=160) or "Candidate Graph Preview Agent"
     source_quality_agent_id = _trim_text(payload.get("sourceQualityAgentId"), max_length=160) or "Source Quality Assessment Agent"
+    source_collection_run_id = _trim_text(payload.get("sourceCollectionRunId") or payload.get("runId"), max_length=160)
     force_rebuild = bool(payload.get("forceRebuild"))
     if bool(payload.get("forceReview")):
         assess_source_quality_batch(
@@ -5022,6 +5216,12 @@ def build_candidate_graph(team_id: str, payload: dict[str, Any] | None = None) -
             for item in list(candidate_store.get("candidates") or [])
             if isinstance(item, dict) and _candidate_allowed_for_agent_graph_input(item)
         ]
+        if source_collection_run_id:
+            all_candidates = [
+                item
+                for item in all_candidates
+                if _source_collection_candidate_trace_run_id(item) == source_collection_run_id
+            ]
         archived_candidates = [item for item in all_candidates if _candidate_is_archived(item)]
         active_candidates = [item for item in all_candidates if not _candidate_is_archived(item)]
         filtered_candidates: list[dict[str, Any]] = []
@@ -5048,6 +5248,8 @@ def build_candidate_graph(team_id: str, payload: dict[str, Any] | None = None) -
                 graph["summary"]["filteredCandidateCount"] = len(filtered_candidates)
                 graph["summary"]["createdByAgent"] = created_by_agent
                 graph["summary"]["stageAgentRole"] = "candidate_graph"
+                if source_collection_run_id:
+                    graph["summary"]["sourceCollectionRunId"] = source_collection_run_id
                 _record_workflow_event(
                     "candidate_graph.reused",
                     normalized_team_id,
@@ -5061,6 +5263,7 @@ def build_candidate_graph(team_id: str, payload: dict[str, Any] | None = None) -
                         "archivedCandidateCount": len(archived_candidates),
                         "filteredCandidateCount": len(filtered_candidates),
                         "curationMode": curation_mode,
+                        "sourceCollectionRunId": source_collection_run_id,
                         "createdByAgent": created_by_agent,
                         "ingestionFingerprint": graph_fingerprint,
                     },
@@ -5079,6 +5282,8 @@ def build_candidate_graph(team_id: str, payload: dict[str, Any] | None = None) -
         graph["summary"]["filteredCandidateCount"] = len(filtered_candidates)
         graph["summary"]["createdByAgent"] = created_by_agent
         graph["summary"]["stageAgentRole"] = "candidate_graph"
+        if source_collection_run_id:
+            graph["summary"]["sourceCollectionRunId"] = source_collection_run_id
         graph["summary"]["ingestionFingerprint"] = graph_fingerprint
         agent_process = [
             {
@@ -5134,6 +5339,7 @@ def build_candidate_graph(team_id: str, payload: dict[str, Any] | None = None) -
                     "fingerprint": graph_fingerprint,
                     "purpose": "candidate_graph",
                     "inputCandidateIds": [str(item.get("candidateId") or "") for item in candidates],
+                    "sourceCollectionRunId": source_collection_run_id,
                 },
             },
             "createdByAgent": created_by_agent,
@@ -5168,6 +5374,7 @@ def build_candidate_graph(team_id: str, payload: dict[str, Any] | None = None) -
             "archivedCandidateCount": len(archived_candidates),
             "filteredCandidateCount": len(filtered_candidates),
             "curationMode": curation_mode,
+            "sourceCollectionRunId": source_collection_run_id,
             "createdByAgent": created_by_agent,
             "ingestionFingerprint": graph_fingerprint,
         },
@@ -11288,6 +11495,23 @@ def _reconcile_source_collection_stage_session_task_sources(team_id: str, run_id
         )
         next_writeback["materializedSourceQuality"] = materialized_quality
         next_result["materializedSourceQuality"] = materialized_quality
+        changed = True
+
+    existing_graph_summary = writeback.get("materializedCandidateGraph") if isinstance(writeback.get("materializedCandidateGraph"), dict) else {}
+    existing_graph_status = _trim_text(existing_graph_summary.get("status"), max_length=80).lower()
+    should_reconcile_graph = (
+        (_trim_text(task.get("stageId"), max_length=80) == "graph" or _trim_text(task.get("agentRole"), max_length=80) == "candidate_graph")
+        and isinstance(result.get("candidateGraph"), dict)
+    )
+    if should_reconcile_graph and (not existing_graph_status or existing_graph_status == "failed"):
+        materialized_graph = _materialize_source_collection_stage_writeback_candidate_graph(
+            team_id,
+            run_id,
+            task,
+            writeback,
+        )
+        next_writeback["materializedCandidateGraph"] = materialized_graph
+        next_result["materializedCandidateGraph"] = materialized_graph
         changed = True
 
     if not changed:
