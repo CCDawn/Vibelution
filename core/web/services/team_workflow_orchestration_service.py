@@ -4276,7 +4276,7 @@ def assess_source_quality_batch(team_id: str, payload: dict[str, Any] | None = N
 
 def get_source_quality_status(team_id: str) -> dict[str, Any]:
     normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
-    team_service.get_team(normalized_team_id)
+    team_service.assert_team_exists(normalized_team_id)
     with _WORKFLOW_LOCK:
         workflow = _load_or_create_workflow(normalized_team_id)
         candidate_store = _load_candidate_store(normalized_team_id)
@@ -4358,6 +4358,88 @@ def get_source_quality_status(team_id: str) -> dict[str, Any]:
     return payload
 
 
+def get_source_collection_summary(team_id: str, *, run_id: str = "") -> dict[str, Any]:
+    """Return the fast first-paint source collection state without heavy repair reads."""
+
+    normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
+    team_service.assert_team_exists(normalized_team_id)
+    normalized_run_id = _trim_text(run_id, max_length=160)
+    selected_run: dict[str, Any] | None = None
+    if normalized_run_id:
+        try:
+            selected_run = data_processing_service.get_processing_run(normalized_run_id)
+        except data_processing_service.DataProcessingError as exc:
+            raise TeamWorkflowOrchestrationError(str(exc)) from exc
+        if not _source_collection_run_belongs_to_team(selected_run, normalized_team_id):
+            raise TeamWorkflowOrchestrationError("Data processing run does not belong to this team.")
+    else:
+        try:
+            runs_payload = data_processing_service.list_processing_runs(
+                limit=1,
+                metadata_filters={"startedFrom": "team_workflow_source_collection", "teamId": normalized_team_id},
+            )
+        except data_processing_service.DataProcessingError as exc:
+            raise TeamWorkflowOrchestrationError(str(exc)) from exc
+        selected_run = next(
+            (
+                item for item in list(runs_payload.get("runs") or [])
+                if isinstance(item, dict) and _source_collection_run_belongs_to_team(item, normalized_team_id)
+            ),
+            None,
+        )
+        normalized_run_id = _trim_text((selected_run or {}).get("runId"), max_length=160)
+    run_status: dict[str, Any] = {}
+    run_summary: dict[str, Any] = {}
+    if normalized_run_id:
+        try:
+            run_status = data_processing_service.get_processing_status(normalized_run_id)
+        except data_processing_service.DataProcessingError as exc:
+            raise TeamWorkflowOrchestrationError(str(exc)) from exc
+        run_summary = run_status.get("summary") if isinstance(run_status.get("summary"), dict) else {}
+    projection = _source_collection_stage_cards_projection(normalized_team_id, normalized_run_id) if normalized_run_id else {
+        "runId": "",
+        "cards": [],
+        "latestTasks": {},
+        "summary": {"closedLoopCount": 0, "stageCount": 0},
+    }
+    projection_summary = projection.get("summary") if isinstance(projection.get("summary"), dict) else {}
+    stage_round_ref = _source_collection_stage_round_ref_for_run(normalized_team_id, normalized_run_id) if normalized_run_id else {}
+    active_snapshot = _source_collection_work_run_store().load_active_snapshot(SOURCE_COLLECTION_WORK_RUN_KIND) if normalized_run_id else {}
+    active_work_run = (
+        active_snapshot
+        if _source_collection_background_snapshot_is_active(active_snapshot, normalized_team_id, normalized_run_id)
+        else {}
+    )
+    return {
+        "schemaVersion": SCHEMA_VERSION,
+        "teamId": normalized_team_id,
+        "runId": normalized_run_id,
+        "status": "active" if normalized_run_id and str(run_status.get("runStatus") or "").lower() in {"collecting", "processing"} else ("ready" if normalized_run_id else "idle"),
+        "run": selected_run or {},
+        "runStatus": run_status,
+        "summary": {
+            "recordCount": _source_collection_count(run_summary.get("recordCount")),
+            "assignmentCount": _source_collection_count(run_summary.get("assignmentCount")),
+            "openAssignmentCount": _source_collection_count(run_summary.get("openAssignmentCount")),
+            "outputCount": _source_collection_count(run_summary.get("outputCount")),
+            "sourceCandidateCount": _source_collection_count(projection_summary.get("sourceCandidateCount")),
+            "assessedSourceCandidateCount": _source_collection_count(projection_summary.get("assessedSourceCandidateCount")),
+            "approvedSourceCandidateCount": _source_collection_count(projection_summary.get("approvedSourceCandidateCount")),
+            "graphNodeCount": _source_collection_count(projection_summary.get("graphNodeCount")),
+            "stewardPackCount": _source_collection_count(projection_summary.get("stewardPackCount")),
+            "formalKnowledgeSyncCount": _source_collection_count(projection_summary.get("formalKnowledgeSyncCount")),
+        },
+        "stageCards": projection.get("cards", []),
+        "stageCardSummary": projection_summary,
+        "latestTasks": projection.get("latestTasks", {}),
+        "stageRound": stage_round_ref,
+        "activeWorkRun": active_work_run,
+        "storageArtifacts": _source_collection_storage_artifacts(normalized_team_id, normalized_run_id) if normalized_run_id else {},
+        "boundaries": _research_stage_boundaries(),
+        "updatedAt": utc_now_iso(),
+    }
+
+
 def list_candidate_store(
     team_id: str,
     *,
@@ -4365,9 +4447,10 @@ def list_candidate_store(
     current_state: str = "",
     quality_status: str = "",
     limit: int = 100,
+    include_validation: bool = False,
 ) -> dict[str, Any]:
     normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
-    team_service.get_team(normalized_team_id)
+    team_service.assert_team_exists(normalized_team_id)
     normalized_candidate_type = _trim_text(candidate_type, max_length=80)
     if normalized_candidate_type:
         normalized_candidate_type = _normalize_candidate_type(normalized_candidate_type)
@@ -4383,7 +4466,19 @@ def list_candidate_store(
             current_state=normalized_state,
             quality_status=normalized_quality,
         )[:normalized_limit]
-        validation_report = validate_candidate_store(normalized_team_id)
+        all_candidates = [item for item in list(candidate_store.get("candidates") or []) if isinstance(item, dict)]
+    if include_validation:
+        validation_summary = validate_candidate_store(normalized_team_id)["summary"]
+    else:
+        validation_summary = {
+            "candidateCount": len(all_candidates),
+            "validCandidateCount": 0,
+            "invalidCandidateCount": 0,
+            "errorCount": 0,
+            "warningCount": 0,
+            "skipped": True,
+            "reason": "not_requested",
+        }
     return {
         "teamId": normalized_team_id,
         "workflowId": workflow["workflowId"],
@@ -4396,13 +4491,13 @@ def list_candidate_store(
         "candidates": candidates,
         "candidateCount": len(candidates),
         "store": _workflow_to_api(normalized_team_id, workflow, candidate_store)["candidateStore"],
-        "validationSummary": validation_report["summary"],
+        "validationSummary": validation_summary,
     }
 
 
 def validate_candidate_store(team_id: str) -> dict[str, Any]:
     normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
-    team_service.get_team(normalized_team_id)
+    team_service.assert_team_exists(normalized_team_id)
     with _WORKFLOW_LOCK:
         workflow = _load_or_create_workflow(normalized_team_id)
         candidate_store = _load_candidate_store(normalized_team_id)
@@ -4451,7 +4546,7 @@ def get_knowledge_ingestion_status(team_id: str) -> dict[str, Any]:
     """Return a read-only status view for the Challenge Cup knowledge ingestion funnel."""
 
     normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
-    team_service.get_team(normalized_team_id)
+    team_service.assert_team_exists(normalized_team_id)
     ingestion_store = _knowledge_ingestion_work_run_store()
     ingestion_active_snapshot = ingestion_store.load_active_snapshot(KNOWLEDGE_INGESTION_WORK_RUN_KIND)
     if not _knowledge_ingestion_snapshot_is_active(ingestion_active_snapshot, normalized_team_id):
@@ -4697,7 +4792,7 @@ def get_team_workflow_coordination_status(team_id: str) -> dict[str, Any]:
     """Return a read-only coordination queue for the Challenge Cup research workflow."""
 
     normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
-    team_service.get_team(normalized_team_id)
+    team_service.assert_team_exists(normalized_team_id)
     with _WORKFLOW_LOCK:
         workflow = _load_or_create_workflow(normalized_team_id)
         candidate_store = _load_candidate_store(normalized_team_id)
@@ -10941,6 +11036,43 @@ def _source_collection_stage_task_refs(run_id: str, tasks: list[dict[str, Any]])
             }
         )
     return sorted(refs, key=lambda item: str(item.get("updatedAt") or ""))
+
+
+def _source_collection_run_belongs_to_team(run: dict[str, Any], team_id: str) -> bool:
+    scope = run.get("scope") if isinstance(run.get("scope"), dict) else {}
+    metadata = run.get("metadata") if isinstance(run.get("metadata"), dict) else {}
+    run_team_id = _trim_text(scope.get("teamId") or metadata.get("teamId"), max_length=160)
+    started_from = _trim_text(metadata.get("startedFrom"), max_length=160)
+    workflow_stage = _trim_text(scope.get("workflowStage"), max_length=120)
+    return run_team_id == team_id and (
+        started_from == "team_workflow_source_collection"
+        or workflow_stage == "knowledge_collection"
+    )
+
+
+def _source_collection_stage_round_ref_for_run(team_id: str, run_id: str) -> dict[str, Any]:
+    normalized_run_id = _trim_text(run_id, max_length=160)
+    if not normalized_run_id:
+        return {}
+    with _WORKFLOW_LOCK:
+        store = _load_stage_round_store(team_id)
+    rounds = [
+        item for item in _stage_rounds(store)
+        if isinstance(item, dict)
+        and str(item.get("stageType") or "") == "knowledge_collection"
+        and normalized_run_id in {str(source_run_id) for source_run_id in list(item.get("sourceRunIds") or [])}
+    ]
+    latest_round = _latest_stage_round(rounds)
+    if not latest_round:
+        return {}
+    return {
+        "stageRoundId": _trim_text(latest_round.get("stageRoundId"), max_length=160),
+        "stageType": "knowledge_collection",
+        "roundNumber": _source_collection_count(latest_round.get("roundNumber")),
+        "status": _trim_text(latest_round.get("status"), max_length=80),
+        "sourceRunIds": [str(item) for item in list(latest_round.get("sourceRunIds") or []) if str(item or "").strip()],
+        "updatedAt": _trim_text(latest_round.get("updatedAt"), max_length=120),
+    }
 
 
 def _source_collection_stage_cards_projection(team_id: str, run_id: str) -> dict[str, Any]:

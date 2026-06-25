@@ -24,6 +24,7 @@ CONFIG_STARTER_TEXT = """# Vibelution operator config
 EXAMPLE_CONFIG_STARTER_TEXT = """# Vibelution example operator config
 # This example belongs to the external config home, not to the project repository.
 """
+_CONFIGURED_DATA_HOME_CACHE: dict[str, tuple[int, int, Path | None]] = {}
 
 
 def default_config_home() -> Path:
@@ -191,21 +192,33 @@ def _should_write_meta(meta_path: Path, existing_meta: dict[str, Any], next_meta
 
 def _configured_data_home(*, config_path: str | os.PathLike[str] | None = None) -> Path | None:
     path = resolve_config_path(config_path)
-    if not path.exists():
+    try:
+        stat = path.stat()
+    except OSError:
+        _CONFIGURED_DATA_HOME_CACHE.pop(str(path), None)
         return None
+    cache_key = str(path)
+    cached = _CONFIGURED_DATA_HOME_CACHE.get(cache_key)
+    if cached and cached[0] == stat.st_mtime_ns and cached[1] == stat.st_size:
+        return cached[2]
     try:
         import tomllib
 
         payload = tomllib.loads(path.read_text(encoding="utf-8"))
     except (OSError, tomllib.TOMLDecodeError):
+        _CONFIGURED_DATA_HOME_CACHE[cache_key] = (stat.st_mtime_ns, stat.st_size, None)
         return None
     storage = payload.get("storage") if isinstance(payload, dict) else None
     if not isinstance(storage, dict):
+        _CONFIGURED_DATA_HOME_CACHE[cache_key] = (stat.st_mtime_ns, stat.st_size, None)
         return None
     raw = str(storage.get("data_home") or "").strip()
     if not raw:
+        _CONFIGURED_DATA_HOME_CACHE[cache_key] = (stat.st_mtime_ns, stat.st_size, None)
         return None
-    return _resolve_operator_path(raw, base_dir=path.parent)
+    resolved = _resolve_operator_path(raw, base_dir=path.parent)
+    _CONFIGURED_DATA_HOME_CACHE[cache_key] = (stat.st_mtime_ns, stat.st_size, resolved)
+    return resolved
 
 
 def _resolve_operator_path(value: str | os.PathLike[str], *, base_dir: Path | None = None) -> Path:

@@ -349,6 +349,38 @@ def test_team_workflow_route_starts_source_collection_stage_session_task(tmp_pat
     assert len(submitted) == 2
 
 
+def test_team_workflow_route_returns_source_collection_summary(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    captured = {}
+
+    def fake_summary(team_id, *, run_id=""):
+        captured["teamId"] = team_id
+        captured["runId"] = run_id
+        return {
+            "schemaVersion": 1,
+            "teamId": team_id,
+            "runId": run_id,
+            "status": "ready",
+            "summary": {"recordCount": 2, "sourceCandidateCount": 1},
+            "stageCards": [{"stageId": "candidate", "status": "closed_loop"}],
+            "stageCardSummary": {"sourceCandidateCount": 1},
+        }
+
+    monkeypatch.setattr(team_workflows, "get_source_collection_summary", fake_summary)
+    client = _client()
+    team = client.post("/api/teams", json={"name": "挑战杯科研团队"}).json()
+
+    response = client.get(
+        f"/api/teams/{team['teamId']}/workflow-orchestration/source-collection/summary",
+        params={"runId": "dprun-test"},
+    )
+
+    assert response.status_code == 200, response.text
+    assert captured == {"teamId": team["teamId"], "runId": "dprun-test"}
+    assert response.json()["summary"]["recordCount"] == 2
+    assert response.json()["stageCards"][0]["stageId"] == "candidate"
+
+
 def test_team_workflow_route_writebacks_source_collection_stage_session_task(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _stub_source_collection_search_background(monkeypatch)
