@@ -991,8 +991,55 @@ def test_handle_progress_event_updates_current_case_io_snapshot():
     assert snapshot["currentCaseIo"]["conversationMessages"][1]["toolCalls"][0]["name"] == "inspect_case"
     assert snapshot["currentCaseIo"]["transcript"][0]["kind"] == "input"
     assert snapshot["currentCaseIo"]["transcript"][1]["status"] == "recovered"
+    candidate_session = snapshot["roleConversationSessions"]["candidate"]
+    assert candidate_session["status"] == "running"
+    assert candidate_session["conversationPath"] == "log_info/conversation_case_1.jsonl"
+    assert candidate_session["conversationSessionId"] == "session-hidden-case-1"
+    assert candidate_session["conversationTurnId"] == "turn-case-1"
+    assert candidate_session["caseId"] == "case_1"
+    assert candidate_session["caseIndex"] == 1
+    assert candidate_session["caseTotal"] == 2
+    assert candidate_session["scenario"] == "transaction"
+    assert candidate_session["mode"] == "single_turn"
     assert snapshot["latestMessage"] == "assistant produced a live update"
     assert snapshot["eventTail"][-1]["event"] == "role_start"
+
+    service._handle_progress_event(
+        run_id,
+        {
+            "event": "role_finish",
+            "case_index": 1,
+            "case_total": 2,
+            "case_id": "case_1",
+            "role": "candidate",
+            "status": "success",
+        },
+    )
+    snapshot = service.get_supervised_run_snapshot(run_id)
+    assert snapshot["roleConversationSessions"]["candidate"]["status"] == "completed"
+    assert snapshot["roleConversationSessions"]["candidate"]["conversationSessionId"] == "session-hidden-case-1"
+
+    service._handle_progress_event(
+        run_id,
+        {
+            "event": "role_start",
+            "case_index": 2,
+            "case_total": 2,
+            "case_id": "case_2",
+            "role": "candidate",
+            "scenario": "transaction",
+            "mode": "single_turn",
+            "prompt": "compare the next candidate behavior",
+        },
+    )
+    snapshot = service.get_supervised_run_snapshot(run_id)
+    candidate_session = snapshot["roleConversationSessions"]["candidate"]
+    assert candidate_session["status"] == "starting"
+    assert candidate_session["conversationPath"] == ""
+    assert candidate_session["conversationSessionId"] == ""
+    assert candidate_session["conversationTurnId"] == ""
+    assert candidate_session["caseId"] == "case_2"
+    assert candidate_session["caseIndex"] == 2
 
 
 def test_handle_progress_event_records_environment_preflight_live_event():

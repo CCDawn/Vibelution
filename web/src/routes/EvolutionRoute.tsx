@@ -52,6 +52,7 @@ import {
   SelfEvolutionHandoffResponse,
   SelfEvolutionRunStreamEvent,
   EvolutionRun,
+  EvolutionRoleConversationSession,
 } from "../api/types";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
 import { PaneCollapseHandle } from "../components/layout/PaneCollapseHandle";
@@ -137,6 +138,9 @@ type SupervisedRunMember = {
   modelId: string;
   agentId: string;
   status: "active" | "configured" | "missing";
+  conversationSession?: EvolutionRoleConversationSession;
+  chatRoute: string;
+  configRoute: string;
 };
 type SupervisedMemberStep = {
   id: SupervisedMemberStepId;
@@ -366,6 +370,23 @@ function supervisedMemberAgentManagementRoute(agentId: string, returnTo: string)
     params.set("returnTo", normalizedReturnTo);
   }
   return `/agents?${params.toString()}`;
+}
+
+function supervisedMemberChatRoute(sessionId: string, returnTo: string, returnLabel: string) {
+  const normalizedSessionId = String(sessionId || "").trim();
+  if (!normalizedSessionId) {
+    return "";
+  }
+  const params = new URLSearchParams({ session: normalizedSessionId });
+  const normalizedReturnTo = String(returnTo || "").trim();
+  const normalizedReturnLabel = String(returnLabel || "").trim();
+  if (normalizedReturnTo) {
+    params.set("returnTo", normalizedReturnTo);
+  }
+  if (normalizedReturnLabel) {
+    params.set("returnLabel", normalizedReturnLabel);
+  }
+  return `/chat?${params.toString()}`;
 }
 
 function supervisedPreflightIssue(run: EvolutionActiveRun | null | undefined, lang: "zh" | "en"): SupervisedPreflightIssue | null {
@@ -1219,16 +1240,20 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     ? displayDecisionLabel(monitoredRun.decision)
     : statusLabel(monitoredRun?.status || "");
   const supervisedMemberReturnTo = `${location.pathname}${location.search}` || "/supervised-evolution";
+  const supervisedMemberReturnLabel = lang === "zh" ? "返回监督进化" : "Back to supervised evolution";
   const supervisedMembersRunIdentity = supervisedMembersRun?.runId || supervisedMembersRun?.sessionId || "";
   useEffect(() => {
     setSelectedSupervisedMemberStepId(null);
   }, [supervisedMembersRunIdentity]);
   const supervisedRunMembers = useMemo<SupervisedRunMember[]>(() => {
     const bindings = supervisedMembersBindings;
+    const roleSessions = supervisedMembersRun?.roleConversationSessions ?? {};
     const currentRole = String(supervisedMembersRun?.currentRole || "").trim().toLowerCase();
     const currentAgentId = String(supervisedMembersRun?.currentAgentBinding?.agentId || "").trim();
     return SUPERVISED_RUN_MEMBER_ROLES.map((role) => {
       const binding = bindings[role] ?? {};
+      const conversationSession = roleSessions[role];
+      const conversationSessionId = String(conversationSession?.conversationSessionId || "").trim();
       const agentId = String(binding.agentId || "").trim();
       const roleText = String(binding.roleLabel || "").trim() || runRoleLabel(role);
       const displayName = String(binding.displayName || binding.agentCode || agentId || "").trim();
@@ -1244,9 +1269,21 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
         modelId,
         agentId,
         status: isActive ? "active" : agentId ? "configured" : "missing",
+        conversationSession,
+        chatRoute: supervisedMemberChatRoute(conversationSessionId, supervisedMemberReturnTo, supervisedMemberReturnLabel),
+        configRoute: agentId ? supervisedMemberAgentManagementRoute(agentId, supervisedMemberReturnTo) : "",
       };
     });
-  }, [lang, resolveModelLabel, supervisedMembersBindings, supervisedMembersRun?.currentAgentBinding?.agentId, supervisedMembersRun?.currentRole]);
+  }, [
+    lang,
+    resolveModelLabel,
+    supervisedMemberReturnLabel,
+    supervisedMemberReturnTo,
+    supervisedMembersBindings,
+    supervisedMembersRun?.currentAgentBinding?.agentId,
+    supervisedMembersRun?.currentRole,
+    supervisedMembersRun?.roleConversationSessions,
+  ]);
   const supervisedRunMemberByRole = useMemo(
     () => new Map(supervisedRunMembers.map((member) => [member.role, member])),
     [supervisedRunMembers],
@@ -3036,6 +3073,10 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                   </div>
                   <div className={styles.supervisedMembersList}>
                     {supervisedSelectedStepMembers.map((member) => {
+                      const memberRoute = member.chatRoute || member.configRoute;
+                      const memberCaseLabel = member.conversationSession?.caseId
+                        ? `${member.conversationSession.caseIndex || "--"}/${member.conversationSession.caseTotal || "--"} ${member.conversationSession.caseId}`
+                        : "";
                       const rowClassName =
                           member.status === "active"
                             ? `${styles.supervisedMemberRow} ${styles.supervisedMemberRowActive}`
@@ -3048,21 +3089,33 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                             <span>{member.label}</span>
                             {member.status === "active" ? (
                               <strong>{lang === "zh" ? "当前执行" : "Active"}</strong>
+                            ) : member.chatRoute ? (
+                              <strong>{lang === "zh" ? "会话" : "Session"}</strong>
                             ) : null}
                           </div>
                           <div className={styles.supervisedMemberIdentity}>
                             <strong>{member.name}</strong>
-                            <span title={member.modelId || member.model}>{member.model}</span>
+                            <span title={memberCaseLabel || member.modelId || member.model}>
+                              {memberCaseLabel || member.model}
+                            </span>
                           </div>
                         </>
                       );
-                      return member.agentId ? (
+                      return memberRoute ? (
                         <Link
                           key={member.role}
                           className={`${rowClassName} ${styles.supervisedMemberLink}`}
-                          to={supervisedMemberAgentManagementRoute(member.agentId, supervisedMemberReturnTo)}
-                          title={lang === "zh" ? `配置 ${member.name}` : `Configure ${member.name}`}
-                          aria-label={lang === "zh" ? `配置监督成员 ${member.name}` : `Configure supervised member ${member.name}`}
+                          to={memberRoute}
+                          title={
+                            member.chatRoute
+                              ? lang === "zh" ? `打开 ${member.name} 的监督会话` : `Open supervised session for ${member.name}`
+                              : lang === "zh" ? `配置 ${member.name}` : `Configure ${member.name}`
+                          }
+                          aria-label={
+                            member.chatRoute
+                              ? lang === "zh" ? `打开监督成员 ${member.name} 的会话` : `Open supervised member session for ${member.name}`
+                              : lang === "zh" ? `配置监督成员 ${member.name}` : `Configure supervised member ${member.name}`
+                          }
                         >
                           {memberBody}
                           <ArrowUpRight size={13} aria-hidden="true" />

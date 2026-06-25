@@ -7,6 +7,7 @@ import routeSource from "./EvolutionRoute.tsx?raw";
 const stylesSource = readFileSync(new URL("./EvolutionRoute.module.css", import.meta.url), "utf-8");
 const worktreeReviewStylesSource = readFileSync(new URL("./SupervisedWorktreeReviewPanel.module.css", import.meta.url), "utf-8");
 const dictionarySource = readFileSync(new URL("../i18n/dictionary.ts", import.meta.url), "utf-8");
+const apiTypesSource = readFileSync(new URL("../api/types.ts", import.meta.url), "utf-8");
 
 describe("EvolutionRoute library user flow contract", () => {
   it("shows self-evolution candidates as local pending details instead of proposal details", () => {
@@ -247,13 +248,25 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).toContain("binding?.dialogueModelLabel || binding?.dialogueModelName");
     expect(routeSource).toContain("modelDisplayLabel(supervisedMemberModelId(binding), resolveModelLabel)");
     expect(routeSource).toContain("configQuery.data?.modelLabels");
-    expect(routeSource).toContain("title={member.modelId || member.model}");
+    expect(routeSource).toContain("EvolutionRoleConversationSession");
+    expect(apiTypesSource).toContain("roleConversationSessions?: Record<string, EvolutionRoleConversationSession>");
+    expect(routeSource).toContain("function supervisedMemberChatRoute");
+    expect(routeSource).toContain("const roleSessions = supervisedMembersRun?.roleConversationSessions ?? {}");
+    expect(routeSource).toContain("const conversationSession = roleSessions[role]");
+    expect(routeSource).toContain("conversationSessionId");
+    expect(routeSource).toContain("chatRoute: supervisedMemberChatRoute");
+    expect(routeSource).toContain("configRoute: agentId ? supervisedMemberAgentManagementRoute");
+    expect(routeSource).toContain("const memberRoute = member.chatRoute || member.configRoute");
+    expect(routeSource).toContain("member.chatRoute");
+    expect(routeSource).toContain("打开监督成员");
+    expect(routeSource).toContain("返回监督进化");
+    expect(routeSource).toContain("title={memberCaseLabel || member.modelId || member.model}");
     expect(routeSource).toContain("supervisedMemberAgentManagementRoute");
     expect(routeSource).toContain('new URLSearchParams({ pane: "config", returnLabel: "supervised_evolution" })');
     expect(routeSource).toContain('params.set("agent", normalizedAgentId)');
     expect(routeSource).toContain('params.set("returnTo", normalizedReturnTo)');
     expect(routeSource).toContain("const supervisedMemberReturnTo = `${location.pathname}${location.search}`");
-    expect(routeSource).toContain("to={supervisedMemberAgentManagementRoute(member.agentId, supervisedMemberReturnTo)}");
+    expect(routeSource).toContain("to={memberRoute}");
     expect(routeSource).toContain("styles.supervisedMemberLink");
     expect(routeSource).toContain("<ArrowUpRight size={13} aria-hidden=\"true\" />");
     expect(routeSource).toContain("onClick={() => setSelectedSupervisedMemberStepId(step.id)}");
