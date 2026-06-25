@@ -3437,7 +3437,7 @@ def test_candidate_store_lists_candidates_with_filters(tmp_path, monkeypatch):
         },
     )
 
-    source_list = team_workflow_orchestration_service.list_candidate_store(team["teamId"], candidate_type="source_manifest")
+    source_list = team_workflow_orchestration_service.list_candidate_store(team["teamId"], candidate_type="source_manifest", include_validation=True)
     paper_notes = team_workflow_orchestration_service.list_candidate_store(team["teamId"], candidate_type="paper_note")
 
     assert source_list["candidateCount"] == 1
@@ -3445,6 +3445,77 @@ def test_candidate_store_lists_candidates_with_filters(tmp_path, monkeypatch):
     assert source_list["validationSummary"]["candidateCount"] == 2
     assert paper_notes["candidateCount"] == 1
     assert paper_notes["candidates"][0]["candidateType"] == "paper_note"
+
+
+def test_candidate_store_list_skips_validation_by_default(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = team_service.create_team(name="挑战杯科研团队")
+    team_workflow_orchestration_service.register_candidate_source(
+        team["teamId"],
+        {
+            "title": "Fast list source",
+            "sourcePath": "C:/papers/fast.pdf",
+            "sourceKind": "pdf",
+            "sha256": "b" * 64,
+            "allowedForAnalysis": True,
+            "createdByAgent": "Source Intake Agent",
+        },
+    )
+
+    def fail_validation(team_id):
+        raise AssertionError("candidate list should not validate unless requested")
+
+    monkeypatch.setattr(team_workflow_orchestration_service, "validate_candidate_store", fail_validation)
+
+    response = team_workflow_orchestration_service.list_candidate_store(team["teamId"], candidate_type="source_manifest")
+
+    assert response["candidateCount"] == 1
+    assert response["validationSummary"]["skipped"] is True
+
+
+def test_source_collection_summary_uses_lightweight_team_existence(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
+    team = team_service.create_team(name="挑战杯科研团队")
+    run_response = team_workflow_orchestration_service.start_source_collection_run(
+        team["teamId"],
+        {
+            "topic": "predictive coding",
+            "agentRoles": ["data_discovery"],
+            "querySeeds": ["predictive coding"],
+            "promptCachePolicy": {"requirement": "disabled"},
+        },
+    )
+    run_id = run_response["run"]["runId"]
+    record = data_processing_service.add_record(
+        run_id,
+        {
+            "sourceType": "paper",
+            "sourceRef": "https://doi.org/10.1038/4580",
+            "title": "Predictive coding in the visual cortex",
+            "summary": "A useful source.",
+            "metadata": {"allowedForAnalysis": True},
+        },
+    )
+    team_workflow_orchestration_service.import_data_record_as_source_candidate(
+        team["teamId"],
+        run_id,
+        record["recordId"],
+        {"createdByAgent": "Content Extraction Agent"},
+    )
+
+    def fail_full_team_read(team_id):
+        raise AssertionError("summary must not hydrate full team detail")
+
+    monkeypatch.setattr(team_workflow_orchestration_service.team_service, "get_team", fail_full_team_read)
+
+    payload = team_workflow_orchestration_service.get_source_collection_summary(team["teamId"], run_id=run_id)
+
+    assert payload["runId"] == run_id
+    assert payload["summary"]["recordCount"] == 1
+    assert payload["summary"]["sourceCandidateCount"] == 1
+    assert len(payload["stageCards"]) == 5
+    assert payload["stageCardSummary"]["sourceCandidateCount"] == 1
 
 
 def test_local_research_model_output_requires_evidence_refs(tmp_path, monkeypatch):

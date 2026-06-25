@@ -4472,6 +4472,8 @@ export type TeamWorkflowValidationSummary = {
   invalidCandidateCount: number;
   errorCount: number;
   warningCount: number;
+  skipped?: boolean;
+  reason?: string;
 };
 
 export type TeamWorkflowCandidateListPayload = {
