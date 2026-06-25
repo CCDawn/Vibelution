@@ -15,7 +15,11 @@ import { postBrowserTelemetry } from "./browserTelemetry";
 import { recoverFromDynamicImportFetchError } from "./routeChunkRecovery";
 
 const AgentsRoute = lazyRoute(() => import("../routes/AgentsRoute").then((module) => ({ default: module.AgentsRoute })));
-const ChatCodingRoute = lazyRoute(() => {
+type ChatCodingRouteModule = typeof import("../routes/ChatCodingRoute");
+
+export function loadChatCodingRouteChunk(
+  loader: () => Promise<ChatCodingRouteModule> = () => import("../routes/ChatCodingRoute"),
+) {
   const startedAt = nowMs();
   postBrowserTelemetry({
     phase: "navigation",
@@ -25,7 +29,7 @@ const ChatCodingRoute = lazyRoute(() => {
       pathname: currentPathname(),
     },
   });
-  return import("../routes/ChatCodingRoute").then((module) => {
+  return loader().then((module) => {
     postBrowserTelemetry({
       phase: "navigation",
       eventCode: "browser.chat_route.chunk_loaded",
@@ -37,7 +41,9 @@ const ChatCodingRoute = lazyRoute(() => {
     });
     return { default: module.ChatCodingRoute };
   });
-});
+}
+
+const ChatCodingRoute = lazyRoute(loadChatCodingRouteChunk);
 const ConfigRoute = lazyRoute(() => import("../routes/ConfigRoute").then((module) => ({ default: module.ConfigRoute })));
 const EvolutionRoute = lazyRoute(() => import("../routes/EvolutionRoute").then((module) => ({ default: module.EvolutionRoute })));
 const GitRoute = lazyRoute(() => import("../routes/GitRoute").then((module) => ({ default: module.GitRoute })));
