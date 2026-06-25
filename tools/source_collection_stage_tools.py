@@ -18,6 +18,8 @@ def source_collection_context_tool(
     task_id: str = "",
     max_records: int = 24,
     include_candidates: bool = True,
+    candidate_offset: int = 0,
+    candidate_limit: int = 0,
 ) -> str:
     """Return bounded source-collection task context without exposing local file access."""
 
@@ -36,6 +38,8 @@ def source_collection_context_tool(
             task_id=task_id,
             max_records=max_records,
             include_candidates=include_candidates,
+            candidate_offset=candidate_offset,
+            candidate_limit=candidate_limit or None,
         )
         if isinstance(payload, dict) and resolution:
             payload.setdefault("toolResolution", resolution)
@@ -50,6 +54,7 @@ def source_collection_context_tool(
                 "recordCount": _safe_count((payload.get("counts") or {}).get("recordCount")) if isinstance(payload, dict) else 0,
                 "returnedRecordCount": _safe_count((payload.get("counts") or {}).get("returnedRecordCount")) if isinstance(payload, dict) else 0,
                 "candidateCount": _safe_count((payload.get("counts") or {}).get("candidateCount")) if isinstance(payload, dict) else 0,
+                "returnedCandidateCount": _safe_count((payload.get("counts") or {}).get("returnedCandidateCount")) if isinstance(payload, dict) else 0,
                 "teamIdSource": _text(resolution.get("teamIdSource")) if resolution else "",
             },
         )
