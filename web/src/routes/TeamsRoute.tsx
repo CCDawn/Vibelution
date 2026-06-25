@@ -86,6 +86,7 @@ const WORKFLOW_GRAPH_MARGIN_X = 22;
 const WORKFLOW_GRAPH_MARGIN_Y = 28;
 const SOURCE_COLLECTION_RUN_PREVIEW_LIMIT = 20;
 const SOURCE_COLLECTION_RESULT_PAGE_SIZE = 8;
+const SOURCE_COLLECTION_STAGE_WRITEBACK_SYNC_GRACE_MS = 30_000;
 const SOURCE_COLLECTION_DEFAULT_ROLES = ["data_discovery", "source_acquisition", "content_extraction", "source_quality"];
 const SOURCE_COLLECTION_TEAM_AGENT_ROLES = [...SOURCE_COLLECTION_DEFAULT_ROLES, "candidate_graph", "knowledge_steward"];
 const SOURCE_COLLECTION_SEARCH_EXECUTION_ROLES = new Set(["data_discovery", "source_acquisition"]);
@@ -2867,6 +2868,7 @@ function sourceCollectionStageCardsFromStatus(status: ResearchStageRoundStatusPa
 function sourceCollectionStageWritebackRefetchInterval(
   pageVisible: boolean,
   status: ResearchStageRoundStatusPayload | null | undefined,
+  forceSync = false,
 ) {
   const cards = sourceCollectionStageCardsFromStatus(status);
   const hasRunningAgentTask = cards.some((card) => {
@@ -2882,7 +2884,7 @@ function sourceCollectionStageWritebackRefetchInterval(
   });
   return resolvePollingInterval(
     pageVisible,
-    hasRunningAgentTask ? 2000 : hasCompletedTaskAwaitingArtifact ? 5000 : false,
+    hasRunningAgentTask || forceSync ? 2000 : hasCompletedTaskAwaitingArtifact ? 5000 : false,
   );
 }
 
@@ -3780,6 +3782,7 @@ export function TeamsRoute({
   const [sourceCollectionFocusedPanelId, setSourceCollectionFocusedPanelId] = useState("");
   const [sourceCollectionSourceFilter, setSourceCollectionSourceFilter] = useState<SourceCollectionSourceFilter>("all");
   const [selectedSourceCollectionCandidateId, setSelectedSourceCollectionCandidateId] = useState("");
+  const [sourceCollectionStageSyncUntilMs, setSourceCollectionStageSyncUntilMs] = useState(0);
   const [nodePositionDrafts, setNodePositionDrafts] = useState<Record<string, { x: number; y: number }>>({});
   const [canvasFrameSize, setCanvasFrameSize] = useState<CanvasFrameSize>({ width: CANVAS_VIEWPORT_WIDTH, height: CANVAS_VIEWPORT_HEIGHT });
   const [lockedCanvasViewportStyle, setLockedCanvasViewportStyle] = useState<CanvasViewportStyle | null>(null);
@@ -3861,6 +3864,15 @@ export function TeamsRoute({
   const researchWorkflowTeamSelected = isResearchWorkflowTeam(selectedTeam);
   const aiSearchScopeTeamSelected = isAiSearchScopeTeam(selectedTeam);
   const researchCanvasReadOnly = researchWorkflowTeamSelected && researchWorkspaceView === "canvas";
+  const teamWorkflowSourceQualityEnabled = Boolean(
+    effectiveTeamId
+    && researchWorkflowTeamSelected
+    && (
+      researchWorkspaceView === "graph"
+      || (sourceCollectionWorkspaceSelected && (selectedSourceCollectionStageId === "screening" || selectedSourceCollectionStageId === "graph" || selectedSourceCollectionStageId === "memory"))
+    ),
+  );
+  const sourceCollectionStageWritebackSyncActive = sourceCollectionStageSyncUntilMs > Date.now();
   const aiSearchRunsQuery = useQuery({
     queryKey: queryKeys.teamAiSearchRuns(effectiveTeamId || "none", AI_SEARCH_RUN_PREVIEW_LIMIT),
     queryFn: () =>
@@ -3895,6 +3907,7 @@ export function TeamsRoute({
       sourceCollectionStageWritebackRefetchInterval(
         pageVisible,
         query.state.data as ResearchStageRoundStatusPayload | null | undefined,
+        sourceCollectionStageWritebackSyncActive,
       ),
   });
   const teamWorkflowCandidatesQuery = useQuery({
@@ -3904,7 +3917,7 @@ export function TeamsRoute({
         `/api/teams/${encodeURIComponent(effectiveTeamId)}/workflow-orchestration/candidates?limit=${TEAM_WORKFLOW_CANDIDATE_PREVIEW_LIMIT}`,
       ),
     enabled: Boolean(effectiveTeamId && researchWorkflowTeamSelected),
-    refetchInterval: () => sourceCollectionStageWritebackRefetchInterval(pageVisible, researchStageRoundStatusQuery.data),
+    refetchInterval: () => sourceCollectionStageWritebackRefetchInterval(pageVisible, researchStageRoundStatusQuery.data, sourceCollectionStageWritebackSyncActive),
   });
   const teamWorkflowCandidateGraphQuery = useQuery({
     queryKey: queryKeys.teamWorkflowCandidateGraph(effectiveTeamId || "none"),
@@ -3944,7 +3957,8 @@ export function TeamsRoute({
       fetchJson<TeamWorkflowSourceQualityStatus>(
         `/api/teams/${encodeURIComponent(effectiveTeamId)}/workflow-orchestration/source-quality/status`,
       ),
-    enabled: Boolean(effectiveTeamId && researchWorkflowTeamSelected && teamWorkflowQuery.data),
+    enabled: teamWorkflowSourceQualityEnabled,
+    refetchInterval: () => sourceCollectionStageWritebackRefetchInterval(pageVisible, researchStageRoundStatusQuery.data, sourceCollectionStageWritebackSyncActive),
   });
   const teamWorkflowPaperNoteChunkStatusQuery = useQuery({
     queryKey: paperNoteChunkStatusQueryKey(effectiveTeamId || "none"),
@@ -4339,6 +4353,7 @@ export function TeamsRoute({
       ),
     onSuccess: (payload, variables) => {
       setSelectedSourceCollectionRunId(payload.runId);
+      setSourceCollectionStageSyncUntilMs(Date.now() + SOURCE_COLLECTION_STAGE_WRITEBACK_SYNC_GRACE_MS);
       void chatWorkspaceCache.afterDirectTurnAccepted(payload.sessionId);
       void queryClient.invalidateQueries({ queryKey: researchStageRoundStatusQueryKey(variables.teamId) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflowSourceCollectionRuns(variables.teamId, SOURCE_COLLECTION_RUN_PREVIEW_LIMIT) });
@@ -9368,12 +9383,16 @@ export function TeamsRoute({
     if (!researchWorkflowTeamSelected || !pageVisible || !selectedTeam?.teamId || !selectedSourceCollectionRunEffectiveId) {
       return;
     }
+    if (requestedSourceCollectionStage) {
+      setSourceCollectionStageSyncUntilMs(Date.now() + SOURCE_COLLECTION_STAGE_WRITEBACK_SYNC_GRACE_MS);
+    }
     void queryClient.invalidateQueries({ queryKey: researchStageRoundStatusQueryKey(selectedTeam.teamId) });
     void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflowCandidates(selectedTeam.teamId, TEAM_WORKFLOW_CANDIDATE_PREVIEW_LIMIT) });
     void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflowSourceCollectionRuns(selectedTeam.teamId, SOURCE_COLLECTION_RUN_PREVIEW_LIMIT) });
     void queryClient.invalidateQueries({ queryKey: queryKeys.dataProcessingRunStatus(selectedSourceCollectionRunEffectiveId) });
     void queryClient.invalidateQueries({ queryKey: sourceCollectionRunRecordsQueryKey(selectedSourceCollectionRunEffectiveId) });
     void queryClient.invalidateQueries({ queryKey: queryKeys.dataProcessingCollectionAssignments(selectedSourceCollectionRunEffectiveId) });
+    void queryClient.invalidateQueries({ queryKey: sourceQualityStatusQueryKey(selectedTeam.teamId) });
   }, [
     pageVisible,
     queryClient,
@@ -9564,6 +9583,13 @@ export function TeamsRoute({
       || (teamWorkflowCandidatesQuery.isPending && !teamWorkflowCandidatesQuery.data)
     ),
   );
+  const sourceCollectionSourceQualityLoading = Boolean(
+    researchWorkflowTeamSelected
+    && teamWorkflowSourceQualityEnabled
+    && !teamWorkflowSourceQualityStatus
+    && (teamWorkflowSourceQualityStatusQuery.isPending || teamWorkflowSourceQualityStatusQuery.isFetching)
+  );
+  const sourceCollectionScreeningDataLoading = sourceCollectionPrimaryDataLoading || sourceCollectionSourceQualityLoading;
   const sourceCollectionLoadingText = lang === "zh" ? "加载中" : "loading";
   const sourceCollectionLoadingSummary = lang === "zh" ? "正在读取资料提炼结果" : "Loading extraction results";
   const sourceCollectionDisplayedCandidateCountText = sourceCollectionPrimaryDataLoading
@@ -9572,10 +9598,10 @@ export function TeamsRoute({
   const sourceCollectionProjectedCandidateCountText = sourceCollectionPrimaryDataLoading
     ? sourceCollectionLoadingText
     : String(sourceCollectionProjectedCandidateCount);
-  const sourceCollectionProjectedAssessedCountText = sourceCollectionPrimaryDataLoading
+  const sourceCollectionProjectedAssessedCountText = sourceCollectionScreeningDataLoading
     ? sourceCollectionLoadingText
     : String(sourceCollectionProjectedAssessedCount);
-  const sourceCollectionProjectedApprovedCountText = sourceCollectionPrimaryDataLoading
+  const sourceCollectionProjectedApprovedCountText = sourceCollectionScreeningDataLoading
     ? sourceCollectionLoadingText
     : String(sourceCollectionProjectedApprovedCount);
   const sourceCollectionDisplayedCandidateFilterCounts = useMemo(() => {
@@ -9592,7 +9618,7 @@ export function TeamsRoute({
     sourceCollectionRunCandidateCount,
   ]);
   const sourceCollectionRunPendingScreeningCount = Math.max(0, sourceCollectionProjectedCandidateCount - sourceCollectionProjectedAssessedCount);
-  const sourceCollectionRunPendingScreeningCountText = sourceCollectionPrimaryDataLoading
+  const sourceCollectionRunPendingScreeningCountText = sourceCollectionScreeningDataLoading
     ? sourceCollectionLoadingText
     : String(sourceCollectionRunPendingScreeningCount);
   const sourceCollectionPendingCandidateImportCount = Math.max(0, sourceCollectionRawRecordCount - sourceCollectionDisplayedCandidateCount);
@@ -10160,20 +10186,20 @@ export function TeamsRoute({
     {
       id: "screening",
       label: lang === "zh" ? "资料审查" : "Review sources",
-      metric: sourceCollectionPrimaryDataLoading
+      metric: sourceCollectionScreeningDataLoading
         ? (lang === "zh" ? "已审 加载中" : "review loading")
         : (lang === "zh" ? `已审 ${sourceCollectionProjectedAssessedCountText}/${sourceCollectionProjectedCandidateCountText}` : `${sourceCollectionProjectedAssessedCountText}/${sourceCollectionProjectedCandidateCountText} reviewed`),
-      summary: sourceCollectionPrimaryDataLoading
+      summary: sourceCollectionScreeningDataLoading
         ? (lang === "zh" ? "正在读取候选资料" : "Loading candidate sources")
         : sourceCollectionDisplayedCandidateCount <= 0
         ? (lang === "zh" ? "先完成资料提炼" : "Extract sources first")
         : sourceCollectionRunPendingScreeningCount > 0
           ? (lang === "zh" ? `${sourceCollectionRunPendingScreeningCountText} 条等待 Agent 审查` : `${sourceCollectionRunPendingScreeningCountText} wait for agent review`)
           : (lang === "zh" ? `${sourceCollectionProjectedApprovedCountText} 条已通过` : `${sourceCollectionProjectedApprovedCountText} approved`),
-      inputLabel: sourceCollectionPrimaryDataLoading
+      inputLabel: sourceCollectionScreeningDataLoading
         ? (lang === "zh" ? "候选资料加载中" : "candidate sources loading")
         : (lang === "zh" ? `${sourceCollectionProjectedCandidateCountText} 条候选资料` : `${sourceCollectionProjectedCandidateCountText} candidate sources`),
-      outputLabel: sourceCollectionPrimaryDataLoading
+      outputLabel: sourceCollectionScreeningDataLoading
         ? (lang === "zh" ? "审查结果加载中" : "review status loading")
         : (lang === "zh" ? `${sourceCollectionProjectedApprovedCountText} 条通过 / ${sourceCollectionRunPendingScreeningCountText} 条待审` : `${sourceCollectionProjectedApprovedCountText} approved / ${sourceCollectionRunPendingScreeningCountText} pending`),
       nextLabel: sourceCollectionRunPendingScreeningCount > 0
