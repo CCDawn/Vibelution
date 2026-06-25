@@ -23,6 +23,7 @@ from config.paths import resolve_workspace_home
 from config.public_config import build_effective_config, load_public_config
 from core.infrastructure import developer_sandbox
 from core.llm import LLMClient, LLMInvocationContext, invoke_llm
+from core.research import smoke_runner
 from core.runtime_manager import work_run_store
 from core.web.services import agent_directory_service, candidate_schema_registry, chat_room_service, data_processing_service, session_service, team_knowledge_service, team_service
 from core.web.services.runtime_scene_service import record_runtime_scene_event
@@ -3401,6 +3402,116 @@ def register_experiment_baseline_artifact(team_id: str, plan_id: str, payload: d
         "workflow": _workflow_to_api(normalized_team_id, workflow, candidate_store),
         "team": {"teamId": team.get("teamId", normalized_team_id), "name": team.get("name", "")},
         "boundaries": _experiment_planning_boundaries(),
+    }
+
+
+_SMOKE_DECISION_TO_STATUS = {
+    "accept": "passed",
+    "iterate": "passed",
+    "reject": "failed",
+    "needs_full_run": "needs_review",
+}
+
+
+def run_experiment_smoke_run(team_id: str, plan_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    """N-11：对 experiment plan 执行 V1 CPU 确定性 smoke runner，并记录结果。
+
+    门禁：plan 缺 dataset/metric/baseline/smokePlan 之一 → 禁止运行。runner 仅跑白名单 adapter、
+    固定 seed、无网络、不执行任意代码（见 core.research.smoke_runner）。decisionHint 映射到
+    smoke 状态后复用 register_experiment_smoke_result 落账。
+    """
+    normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
+    normalized_plan_id = _normalize_required_id(plan_id, "Experiment plan id is required.")
+    team_service.get_team(normalized_team_id)
+    payload = payload if isinstance(payload, dict) else {}
+    with _WORKFLOW_LOCK:
+        plan_store = _load_experiment_plan_store(normalized_team_id)
+        plan = _find_experiment_plan(plan_store, normalized_plan_id)
+        if plan is None:
+            raise TeamWorkflowOrchestrationError("Experiment plan not found.")
+        plan_snapshot = dict(plan)
+    missing = [field for field in EXPERIMENT_PLAN_REQUIRED_FIELDS if not _has_value(plan_snapshot.get(field))]
+    if missing:
+        raise TeamWorkflowOrchestrationError(f"Experiment plan missing required fields for smoke run: {missing}.")
+    smoke_plan = plan_snapshot.get("smokePlan") if isinstance(plan_snapshot.get("smokePlan"), dict) else {}
+    adapter = (
+        _trim_text(payload.get("adapter") or smoke_plan.get("adapter"), max_length=120)
+        or "synthetic_classification_baseline_vs_variant"
+    )
+    seed_raw = payload.get("seed") if payload.get("seed") is not None else smoke_plan.get("seed", 42)
+    try:
+        seed = int(seed_raw)
+    except (TypeError, ValueError):
+        seed = 42
+    threshold_raw = payload.get("threshold") if payload.get("threshold") is not None else smoke_plan.get("successThreshold")
+    if isinstance(threshold_raw, dict):
+        threshold_raw = threshold_raw.get("macro_f1_delta") or threshold_raw.get("macro_f1")
+    try:
+        threshold = float(threshold_raw) if threshold_raw is not None else None
+    except (TypeError, ValueError):
+        threshold = None
+    try:
+        runner_result = smoke_runner.run_smoke_adapter(adapter, seed=seed, threshold=threshold)
+    except smoke_runner.SmokeRunnerError as exc:
+        raise TeamWorkflowOrchestrationError(str(exc)) from exc
+    decision = str(runner_result.get("decisionHint") or "needs_full_run")
+    status = "needs_review" if runner_result.get("status") == "non_executable" else _SMOKE_DECISION_TO_STATUS.get(decision, "needs_review")
+    now = utc_now_iso()
+    smoke_run_id = _new_record_id("smokerun")
+    smoke_record = {
+        "smokeRunId": smoke_run_id,
+        "adapter": adapter,
+        "seed": runner_result.get("seed"),
+        "runnerMode": runner_result.get("runnerMode"),
+        "status": status,
+        "decisionHint": decision,
+        "metrics": runner_result.get("metrics"),
+        "artifactHash": runner_result.get("artifactHash"),
+        "logs": runner_result.get("logs"),
+        "recordedByAgent": _trim_text(payload.get("recordedByAgent"), max_length=160) or "Smoke Runner Service",
+        "recordedAt": now,
+    }
+    # 自包含执行器直接落账（runner 同时算 baseline+variant，无需手动 baseline artifact 前置）。
+    with _WORKFLOW_LOCK:
+        plan_store = _load_experiment_plan_store(normalized_team_id)
+        plan = _find_experiment_plan(plan_store, normalized_plan_id)
+        if plan is None:
+            raise TeamWorkflowOrchestrationError("Experiment plan not found.")
+        runs = [item for item in list(plan.get("smokeRunResults") or []) if isinstance(item, dict)]
+        runs.append(smoke_record)
+        plan["smokeRunResults"] = runs[-12:]
+        plan["activeSmokeRunId"] = smoke_run_id
+        plan["activeSmokeRun"] = smoke_record
+        plan["status"] = "smoke_passed" if status == "passed" else f"smoke_{status}"
+        plan["updatedAt"] = now
+        plan_status = plan["status"]
+        plan_store["activePlanId"] = plan["planId"]
+        plan_store["updatedAt"] = now
+        _write_json(_experiment_plan_store_path(normalized_team_id), plan_store)
+        workflow = _load_or_create_workflow(normalized_team_id)
+    _record_workflow_event(
+        "experiment.smoke_run_completed",
+        normalized_team_id,
+        fields={
+            "planId": normalized_plan_id,
+            "smokeRunId": smoke_run_id,
+            "adapter": adapter,
+            "status": status,
+            "decisionHint": decision,
+        },
+    )
+    return {
+        "schemaVersion": SCHEMA_VERSION,
+        "teamId": normalized_team_id,
+        "planId": normalized_plan_id,
+        "adapter": adapter,
+        "seed": seed,
+        "status": status,
+        "decisionHint": decision,
+        "runnerResult": runner_result,
+        "smokeRun": smoke_record,
+        "experimentStatus": plan_status,
+        "workflowId": workflow["workflowId"],
     }
 
 
