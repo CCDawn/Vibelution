@@ -20,6 +20,7 @@ from core.web.services.team_workflow_orchestration_service import (
     decide_transfer_request,
     ensure_team_workflow_orchestration,
     execute_source_collection_search,
+    export_deliverables,
     extract_neuro_mechanism_from_paper_note,
     extract_source_collection_candidates,
     generate_algorithm_hypothesis_from_mechanism_mapping,
@@ -468,6 +469,10 @@ class IterationProposePayload(BaseModel):
     mergeWithCandidateId: str = Field("", max_length=128)
     proposedByAgent: str = Field("", max_length=160)
     evidenceRefs: list[dict[str, Any]] = Field(default_factory=list, max_length=24)
+
+
+class DeliverableExportPayload(BaseModel):
+    requestedByAgent: str = Field("", max_length=160)
 
 
 class PaperNoteChunkPlanPayload(BaseModel):
@@ -1218,6 +1223,24 @@ def team_workflow_iterations_propose(team_id: str, payload: IterationProposePayl
             exc,
             status_code=422,
             fields={"parentCandidateId": payload.parentCandidateId, "action": payload.action},
+        )
+
+
+@router.post("/teams/{team_id}/workflow-orchestration/deliverables/export", status_code=status.HTTP_201_CREATED)
+def team_workflow_deliverables_export(team_id: str, payload: DeliverableExportPayload) -> dict:
+    try:
+        return export_deliverables(team_id, payload.model_dump())
+    except TeamNotFoundError as exc:
+        _raise_team_workflow_route_error(
+            "deliverables.export", team_id, exc, status_code=404, fields={"requestedByAgent": payload.requestedByAgent}
+        )
+    except (TeamServiceError, TeamWorkflowOrchestrationError) as exc:
+        _raise_team_workflow_route_error(
+            "deliverables.export",
+            team_id,
+            exc,
+            status_code=422,
+            fields={"requestedByAgent": payload.requestedByAgent},
         )
 
 
