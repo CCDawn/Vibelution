@@ -422,7 +422,7 @@ def repair_mode_bindings(*, agent_options: list[dict[str, Any]] | None = None) -
         merged["excludedSlots"] = _safe_key_list([*list(existing.get("excludedSlots") or []), *list(record.get("excludedSlots") or [])])
         bindings_by_mode[record["mode"]] = _normalize_binding(merged)
 
-    prior_warnings = [
+    existing_warnings = [
         item
         for item in list(payload.get("repairWarnings") or [])
         if isinstance(item, dict) and str(item.get("agentId") or "").strip()
@@ -443,21 +443,18 @@ def repair_mode_bindings(*, agent_options: list[dict[str, Any]] | None = None) -
         )
         repaired.append(next_binding)
         repair_warnings.extend(warnings)
-    if repair_warnings:
-        combined_warnings = [*prior_warnings, *repair_warnings]
-    elif not changed:
-        combined_warnings = prior_warnings
-    else:
-        combined_warnings = repair_warnings
+    current_warnings = repair_warnings[-50:]
     next_payload = {
         "schemaVersion": MODE_BINDING_VERSION,
         "updatedAt": str(payload.get("updatedAt") or _now()),
         "bindings": sorted(repaired, key=lambda item: str(item.get("mode") or "")),
-        "repairWarnings": combined_warnings[-50:],
+        "repairWarnings": current_warnings,
     }
     if payload.get("schemaVersion") != MODE_BINDING_VERSION:
         changed = True
     if _binding_signature(payload.get("bindings") or []) != _binding_signature(next_payload["bindings"]):
+        changed = True
+    if existing_warnings[-50:] != current_warnings:
         changed = True
     if repair_warnings:
         changed = True
