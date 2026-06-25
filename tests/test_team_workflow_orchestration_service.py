@@ -333,6 +333,78 @@ def test_register_candidate_source_strict_blocks_invalid(tmp_path, monkeypatch):
         )
 
 
+def _register_paper_note(team_id, *, evidence=True):
+    payload = {
+        "candidateType": "paper_note",
+        "title": "Predictive coding note",
+        "sourceUrl": "https://example.test/paper",
+        "summary": "predictive coding key finding",
+    }
+    if evidence:
+        payload["evidenceRefs"] = [{"type": "page_anchor", "id": "anchor-1"}]
+    return team_workflow_orchestration_service.register_candidate_source(team_id, payload)["candidate"]["candidateId"]
+
+
+def test_extract_neuro_mechanism_from_paper_note_links_and_gates(tmp_path, monkeypatch):
+    """N-02：从 paper_note 抽取 neuro_mechanism，建 supports 谱系；高置信度 → ready。"""
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = team_service.create_team(name="挑战杯科研团队")
+    note_id = _register_paper_note(team["teamId"])
+
+    captured = {}
+
+    def fake_invoke(team_id, payload, *, llm_client_factory=None):
+        captured["payload"] = payload
+        return {
+            "candidate": {"candidateId": "mech-1", "candidateType": "neuro_mechanism", "confidence": 0.72},
+            "validation": {"valid": True, "issues": []},
+            "task": {"taskId": "task-1"},
+        }
+
+    monkeypatch.setattr(team_workflow_orchestration_service, "invoke_local_research_model", fake_invoke)
+    response = team_workflow_orchestration_service.extract_neuro_mechanism_from_paper_note(
+        team["teamId"], {"paperNoteId": note_id}
+    )
+
+    assert response["mechanismGate"] == "ready"
+    assert captured["payload"]["taskType"] == "neuro_mechanism_extract"
+    assert captured["payload"]["paperNoteIds"] == [note_id]
+    drafts = response["paperNoteCandidate"]["metadata"]["mechanismDrafts"]
+    assert drafts[-1]["candidateId"] == "mech-1"
+    assert drafts[-1]["edgeType"] == "supports"
+
+
+def test_extract_neuro_mechanism_low_confidence_needs_human(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = team_service.create_team(name="挑战杯科研团队")
+    note_id = _register_paper_note(team["teamId"])
+    monkeypatch.setattr(
+        team_workflow_orchestration_service,
+        "invoke_local_research_model",
+        lambda team_id, payload, *, llm_client_factory=None: {
+            "candidate": {"candidateId": "m2", "candidateType": "neuro_mechanism", "confidence": 0.3},
+            "validation": {"valid": True, "issues": []},
+            "task": {"taskId": "t2"},
+        },
+    )
+    response = team_workflow_orchestration_service.extract_neuro_mechanism_from_paper_note(
+        team["teamId"], {"paperNoteId": note_id}
+    )
+    assert response["mechanismGate"] == "review_needs_human"
+
+
+def test_extract_neuro_mechanism_requires_paper_note_candidate(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = team_service.create_team(name="挑战杯科研团队")
+    source = team_workflow_orchestration_service.register_candidate_source(
+        team["teamId"], {"title": "s", "sourceUrl": "https://example.test/s"}
+    )
+    with pytest.raises(team_workflow_orchestration_service.TeamWorkflowOrchestrationError):
+        team_workflow_orchestration_service.extract_neuro_mechanism_from_paper_note(
+            team["teamId"], {"paperNoteId": source["candidate"]["candidateId"]}
+        )
+
+
 def test_challenge_cup_workflow_registers_candidate_and_decides_transfer(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     team = team_service.create_team(name="挑战杯科研团队")

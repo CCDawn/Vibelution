@@ -3841,6 +3841,106 @@ def draft_paper_note_from_source_candidate(
     return invoke_response
 
 
+def extract_neuro_mechanism_from_paper_note(
+    team_id: str,
+    payload: dict[str, Any] | None = None,
+    *,
+    llm_client_factory: Any = None,
+) -> dict[str, Any]:
+    """N-02：从 paper_note 候选抽取 neuro_mechanism 候选（节点 03 专用编排）。
+
+    复用 invoke_local_research_model 的 neuro_mechanism_extract 任务（含 schema 校验）；
+    在 paper_note 上以 metadata.mechanismDrafts 记录 supports 边/谱系；并施加置信度门禁：
+    confidence < 0.45 → review_needs_human，不自动进入节点 04。
+    """
+    normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
+    team_service.get_team(normalized_team_id)
+    payload = payload if isinstance(payload, dict) else {}
+    paper_note_id = _normalize_required_id(payload.get("paperNoteId") or payload.get("candidateId"), "paperNoteId is required.")
+    created_by_agent = _trim_text(payload.get("createdByAgent"), max_length=160) or "NeuroMechanism Extraction Agent"
+    model_id = _trim_text(payload.get("modelId"), max_length=160)
+    with _WORKFLOW_LOCK:
+        candidate_store = _load_candidate_store(normalized_team_id)
+        paper_note = _find_candidate(candidate_store, paper_note_id)
+        if paper_note is None:
+            raise TeamWorkflowOrchestrationError("Candidate not found.")
+        if str(paper_note.get("candidateType") or "") != "paper_note":
+            raise TeamWorkflowOrchestrationError("Neuro mechanism extraction requires a paper_note candidate.")
+        note_payload = paper_note.get("payload") if isinstance(paper_note.get("payload"), dict) else {}
+        source_refs = _normalize_ref_list(paper_note.get("sourceRefs") or note_payload.get("sourceRefs"), max_items=24)
+        evidence_refs = _normalize_ref_list(paper_note.get("evidenceRefs") or note_payload.get("evidenceRefs"), max_items=24)
+        if not evidence_refs:
+            raise TeamWorkflowOrchestrationError("paper_note candidate has no evidenceRefs for mechanism extraction.")
+        candidate_refs = [{"type": "paper_note", "id": paper_note_id, "label": str(paper_note.get("title") or paper_note_id)}]
+        excerpt = _trim_text(payload.get("excerpt"), max_length=24_000) or _trim_text(paper_note.get("summary"), max_length=24_000)
+
+    invoke_response = invoke_local_research_model(
+        normalized_team_id,
+        {
+            "taskType": "neuro_mechanism_extract",
+            "modelId": model_id,
+            "sourceRefs": source_refs,
+            "evidenceRefs": evidence_refs,
+            "candidateRefs": candidate_refs,
+            "paperNoteIds": [paper_note_id],
+            "excerpt": excerpt,
+            "createdByAgent": created_by_agent,
+        },
+        llm_client_factory=llm_client_factory,
+    )
+    mechanism_candidate = invoke_response.get("candidate") if isinstance(invoke_response.get("candidate"), dict) else {}
+    validation = invoke_response.get("validation") if isinstance(invoke_response.get("validation"), dict) else {"valid": False, "issues": []}
+    task = invoke_response.get("task") if isinstance(invoke_response.get("task"), dict) else {}
+    raw_confidence = mechanism_candidate.get("confidence")
+    try:
+        confidence = float(raw_confidence) if raw_confidence is not None and str(raw_confidence) != "" else None
+    except (TypeError, ValueError):
+        confidence = None
+    gate = "ready" if (validation.get("valid") is True and (confidence is None or confidence >= 0.45)) else "review_needs_human"
+    now = utc_now_iso()
+    with _WORKFLOW_LOCK:
+        workflow = _load_or_create_workflow(normalized_team_id)
+        candidate_store = _load_candidate_store(normalized_team_id)
+        paper_note = _find_candidate(candidate_store, paper_note_id)
+        if paper_note is not None:
+            metadata = paper_note.get("metadata") if isinstance(paper_note.get("metadata"), dict) else {}
+            drafts = metadata.get("mechanismDrafts") if isinstance(metadata.get("mechanismDrafts"), list) else []
+            metadata["mechanismDrafts"] = [
+                *drafts[-23:],
+                {
+                    "candidateId": str(mechanism_candidate.get("candidateId") or ""),
+                    "taskId": str(task.get("taskId") or ""),
+                    "edgeType": "supports",
+                    "gate": gate,
+                    "confidence": confidence,
+                    "valid": validation.get("valid") is True,
+                    "createdByAgent": created_by_agent,
+                    "createdAt": now,
+                },
+            ]
+            paper_note["metadata"] = metadata
+            paper_note["updatedAt"] = now
+            candidate_store["updatedAt"] = now
+            _write_json(_candidate_store_path(normalized_team_id), candidate_store)
+        else:
+            paper_note = {}
+    _record_workflow_event(
+        "candidate.neuro_mechanism_extracted",
+        normalized_team_id,
+        fields={
+            "workflowId": workflow["workflowId"],
+            "paperNoteCandidateId": paper_note_id,
+            "mechanismCandidateId": str(mechanism_candidate.get("candidateId") or ""),
+            "gate": gate,
+            "valid": validation.get("valid") is True,
+        },
+    )
+    invoke_response["paperNoteCandidate"] = paper_note
+    invoke_response["mechanismGate"] = gate
+    invoke_response["workflow"] = _workflow_to_api(normalized_team_id, workflow, candidate_store)
+    return invoke_response
+
+
 def plan_paper_note_chunks_from_source_candidate(team_id: str, candidate_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
     normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
     normalized_candidate_id = _normalize_required_id(candidate_id, "Candidate id is required.")
