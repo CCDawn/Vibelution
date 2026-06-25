@@ -49,6 +49,7 @@ from core.web.services.team_workflow_orchestration_service import (
     run_knowledge_collection_ingestion,
     run_knowledge_ingestion_precheck,
     seed_source_collection_agent_session_context,
+    start_knowledge_collection_ingestion_background,
     start_source_collection_stage_session_task,
     start_research_stage_round,
     start_source_collection_search_background,
@@ -376,6 +377,7 @@ class KnowledgeCollectionIngestionPayload(BaseModel):
     sourceQualityAgentId: str = Field("", max_length=160)
     candidateGraphAgentId: str = Field("", max_length=160)
     stewardAgentId: str = Field("", max_length=160)
+    reviewerAgentId: str = Field("", max_length=160)
     knowledgeBaseId: str = Field("", max_length=128)
     targetDomain: str = Field("", max_length=240)
     maxCandidates: int = Field(80, ge=1, le=200)
@@ -387,6 +389,7 @@ class KnowledgeCollectionIngestionPayload(BaseModel):
     autoApprove: bool = False
     notifyStewardAgent: bool = True
     wakeStewardAgent: bool = True
+    backgroundExecution: bool = False
     requesterAgentId: str = Field("", max_length=160)
 
 
@@ -938,7 +941,10 @@ def team_workflow_knowledge_collection_extract(team_id: str, payload: KnowledgeC
 @router.post("/teams/{team_id}/workflow-orchestration/knowledge-collection/ingest", status_code=status.HTTP_201_CREATED)
 def team_workflow_knowledge_collection_ingest(team_id: str, payload: KnowledgeCollectionIngestionPayload) -> dict:
     try:
-        return run_knowledge_collection_ingestion(team_id, payload.model_dump())
+        payload_dict = payload.model_dump()
+        if payload.backgroundExecution:
+            return start_knowledge_collection_ingestion_background(team_id, payload_dict)
+        return run_knowledge_collection_ingestion(team_id, payload_dict)
     except TeamNotFoundError as exc:
         _raise_team_workflow_route_error("knowledge_collection.ingest", team_id, exc, status_code=404)
     except (TeamServiceError, TeamWorkflowOrchestrationError) as exc:

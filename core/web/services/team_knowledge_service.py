@@ -327,6 +327,35 @@ def create_knowledge_base(
     return _create_knowledge_base_for_owner(owner, name=name, description=description, actor_agent_id=normalized_actor, acl=acl)
 
 
+def ensure_knowledge_base_review_grant(knowledge_base_id: str, agent_id: str) -> dict[str, Any]:
+    """Idempotently grant one agent review permission on a knowledge base.
+
+    Used by the trusted team knowledge-ingestion gate to honor separation of
+    duties: the steward proposes, a distinct coordinator/lead reviews. This only
+    extends the per-base ACL review grant for the named agent; it never widens
+    the shared REVIEW_ROLES set or any other knowledge base.
+    """
+    normalized_agent_id = str(agent_id or "").strip()
+    if not normalized_agent_id:
+        raise TeamKnowledgePermissionError("Agent identity is required to grant knowledge base review.")
+    owner, base = _require_base_with_owner(knowledge_base_id)
+    with _LOCK:
+        state = _load_bases_state_for_owner(owner)
+        bases = state.get("knowledgeBases") if isinstance(state.get("knowledgeBases"), list) else []
+        target = _find_by_id(bases, "knowledgeBaseId", base["knowledgeBaseId"])
+        if not target:
+            raise TeamKnowledgeNotFoundError("Knowledge base not found.")
+        acl = _normalize_acl(target.get("acl"))
+        review_grants = list(acl["grants"].get("review") or [])
+        if normalized_agent_id not in review_grants:
+            review_grants.append(normalized_agent_id)
+            acl["grants"]["review"] = _unique_strings(review_grants)
+            target["acl"] = acl
+            target["updatedAt"] = utc_now_iso()
+            _save_bases_state_for_owner(owner, state)
+        return dict(target)
+
+
 def create_agent_knowledge_base(
     agent_id: str,
     *,
