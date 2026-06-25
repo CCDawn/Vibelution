@@ -184,6 +184,7 @@ Do not perform broad formatting, opportunistic cleanup, renaming, or splitting i
 ## 8. Implementation Boundaries
 
 - Prefer project-native tools and structured APIs over broad shell commands.
+- Follow reuse-first development in every development round: before adding a new service, helper, route, component, cache, tool, script, or process, search for existing project-native functionality and extend or compose it when it can satisfy the behavior; introduce a parallel path only when the existing path demonstrably cannot support the requirement, and record why in the plan, review, or final report.
 - Use focused tests and small validation loops before widening scope.
 - Do not repeat the same blocked tool pattern in the same round.
 - Keep Windows shell behavior in mind. Avoid Unix-only habits that add noise.
