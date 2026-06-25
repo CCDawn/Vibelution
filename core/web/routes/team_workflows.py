@@ -16,6 +16,7 @@ from core.web.services.team_workflow_orchestration_service import (
     assess_source_quality_batch,
     build_candidate_graph,
     create_experiment_plan,
+    decide_research_review,
     decide_transfer_request,
     ensure_team_workflow_orchestration,
     execute_source_collection_search,
@@ -441,6 +442,14 @@ class AlgorithmHypothesisPayload(BaseModel):
     createdByAgent: str = Field("", max_length=160)
     modelId: str = Field("", max_length=160)
     excerpt: str = Field("", max_length=24000)
+
+
+class ResearchReviewDecidePayload(BaseModel):
+    candidateIds: list[str] = Field(default_factory=list, max_length=24)
+    reviewedByAgent: str = Field("", max_length=160)
+    decision: str = Field("", max_length=40)
+    comments: str = Field("", max_length=4000)
+    requiredChanges: list[str] = Field(default_factory=list, max_length=24)
 
 
 class PaperNoteChunkPlanPayload(BaseModel):
@@ -1137,6 +1146,24 @@ def team_workflow_research_hypotheses_generate(team_id: str, payload: AlgorithmH
             exc,
             status_code=422,
             fields={"mappingId": payload.mappingId, "createdByAgent": payload.createdByAgent},
+        )
+
+
+@router.post("/teams/{team_id}/workflow-orchestration/research/review/decide", status_code=status.HTTP_201_CREATED)
+def team_workflow_research_review_decide(team_id: str, payload: ResearchReviewDecidePayload) -> dict:
+    try:
+        return decide_research_review(team_id, payload.model_dump())
+    except TeamNotFoundError as exc:
+        _raise_team_workflow_route_error(
+            "research.review_decide", team_id, exc, status_code=404, fields={"decision": payload.decision}
+        )
+    except (TeamServiceError, TeamWorkflowOrchestrationError) as exc:
+        _raise_team_workflow_route_error(
+            "research.review_decide",
+            team_id,
+            exc,
+            status_code=422,
+            fields={"decision": payload.decision, "reviewedByAgent": payload.reviewedByAgent},
         )
 
 

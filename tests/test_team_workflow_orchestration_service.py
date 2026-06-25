@@ -473,6 +473,55 @@ def test_generate_hypothesis_blocks_high_over_analogy_mapping(tmp_path, monkeypa
         )
 
 
+def test_decide_research_review_approves_clean_hypothesis(tmp_path, monkeypatch):
+    """N-05：证据/事实分界/可测性齐全且无高过度类比 → approve（review_ready）。"""
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = team_service.create_team(name="挑战杯科研团队")
+    hyp_id = _register_typed_candidate(
+        team["teamId"],
+        "algorithm_hypothesis",
+        metadata={"experimentPlan": {"dataset": "d", "metric": ["acc"], "baseline": "b"}, "factLayer": ["f"]},
+    )
+    res = team_workflow_orchestration_service.decide_research_review(team["teamId"], {"candidateIds": [hyp_id]})
+    assert res["decision"] == "approve"
+    assert res["reviewRecord"]["candidateType"] == "review_record"
+    assert res["reviewRecord"]["currentState"] == "review_ready"
+    assert res["riskFlags"] == []
+
+
+def test_decide_research_review_blocks_approve_on_high_over_analogy(tmp_path, monkeypatch):
+    """N-05 硬门禁：high_over_analogy → 自动 needs_human；显式 approve 被拦截。"""
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = team_service.create_team(name="挑战杯科研团队")
+    map_id = _register_typed_candidate(
+        team["teamId"], "mechanism_mapping", metadata={"overAnalogyRisk": "high", "factLayer": ["f"]}
+    )
+    res = team_workflow_orchestration_service.decide_research_review(team["teamId"], {"candidateIds": [map_id]})
+    assert res["decision"] == "needs_human"
+    assert "high_over_analogy" in res["riskFlags"]
+    with pytest.raises(team_workflow_orchestration_service.TeamWorkflowOrchestrationError):
+        team_workflow_orchestration_service.decide_research_review(
+            team["teamId"], {"candidateIds": [map_id], "decision": "approve"}
+        )
+
+
+def test_decide_research_review_reject_requires_reason(tmp_path, monkeypatch):
+    """N-05：reject 必须带 rejectionReason（requiredChanges 或 comments）。"""
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = team_service.create_team(name="挑战杯科研团队")
+    hyp_id = _register_typed_candidate(
+        team["teamId"], "algorithm_hypothesis", metadata={"experimentPlan": {"x": 1}, "factLayer": ["f"]}
+    )
+    with pytest.raises(team_workflow_orchestration_service.TeamWorkflowOrchestrationError):
+        team_workflow_orchestration_service.decide_research_review(
+            team["teamId"], {"candidateIds": [hyp_id], "decision": "reject"}
+        )
+    res = team_workflow_orchestration_service.decide_research_review(
+        team["teamId"], {"candidateIds": [hyp_id], "decision": "reject", "requiredChanges": ["fix baseline"]}
+    )
+    assert res["decision"] == "reject"
+
+
 def test_challenge_cup_workflow_registers_candidate_and_decides_transfer(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     team = team_service.create_team(name="挑战杯科研团队")

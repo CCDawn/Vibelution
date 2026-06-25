@@ -4137,6 +4137,134 @@ def generate_algorithm_hypothesis_from_mechanism_mapping(
     return invoke_response
 
 
+RESEARCH_REVIEW_DECISIONS = {"approve", "revise", "reject", "needs_human"}
+
+
+def _research_review_checklist(candidate: dict[str, Any]) -> tuple[dict[str, bool], list[str]]:
+    """对单个候选做科研审稿 checklist，返回 (checklist, blockingRiskFlags)。"""
+    candidate_type = str(candidate.get("candidateType") or "")
+    cpayload = candidate.get("payload") if isinstance(candidate.get("payload"), dict) else {}
+    cmeta = candidate.get("metadata") if isinstance(candidate.get("metadata"), dict) else {}
+
+    def field(name: str) -> Any:
+        return candidate.get(name) or cpayload.get(name) or cmeta.get(name)
+
+    evidence = candidate.get("evidenceRefs") or cpayload.get("evidenceRefs")
+    over_analogy = str(field("overAnalogyRisk") or "").strip().lower()
+    has_experiment = bool(field("experimentPlan"))
+    needs_fact_boundary = candidate_type in ("mechanism_mapping", "algorithm_hypothesis")
+    checklist = {
+        "citation": bool(evidence),
+        "factBoundary": (not needs_fact_boundary) or bool(field("factLayer") or field("inferenceLayer")),
+        "overAnalogy": over_analogy != "high",
+        "testability": candidate_type != "algorithm_hypothesis" or has_experiment,
+    }
+    flags: list[str] = []
+    if not checklist["citation"]:
+        flags.append("missing_evidence")
+    if not checklist["overAnalogy"]:
+        flags.append("high_over_analogy")
+    if not checklist["testability"]:
+        flags.append("no_metric")
+    return checklist, flags
+
+
+def decide_research_review(team_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    """N-05：科研审稿决策门禁（节点 06）。对候选链路做 checklist，输出 review_record 决策。
+
+    硬门禁：missing_evidence / high_over_analogy / no_metric 任一为真 → 不得 approve；
+    reject 必须带 rejectionReason（requiredChanges 或 comments）。在被审候选上以
+    metadata.reviewRecords 记录 reviewed_by 谱系。
+    """
+    normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
+    team_service.get_team(normalized_team_id)
+    payload = payload if isinstance(payload, dict) else {}
+    candidate_ids = _normalize_text_list(payload.get("candidateIds"), max_items=24, max_length=128)
+    if not candidate_ids:
+        raise TeamWorkflowOrchestrationError("candidateIds is required for research review.")
+    reviewed_by = _trim_text(payload.get("reviewedByAgent"), max_length=160) or "Evidence Review Agent"
+    requested_decision = _trim_text(payload.get("decision"), max_length=40).strip().lower()
+    if requested_decision and requested_decision not in RESEARCH_REVIEW_DECISIONS:
+        raise TeamWorkflowOrchestrationError("decision must be approve/revise/reject/needs_human.")
+    comments = _trim_text(payload.get("comments"), max_length=4000)
+    required_changes = _normalize_text_list(payload.get("requiredChanges"), max_items=24, max_length=400)
+    now = utc_now_iso()
+    with _WORKFLOW_LOCK:
+        candidate_store = _load_candidate_store(normalized_team_id)
+        reviewed: list[dict[str, Any]] = []
+        checklist_all: dict[str, dict[str, bool]] = {}
+        risk_flags: set[str] = set()
+        for candidate_id in candidate_ids:
+            candidate = _find_candidate(candidate_store, candidate_id)
+            if candidate is None:
+                raise TeamWorkflowOrchestrationError(f"Candidate not found: {candidate_id}")
+            checklist, flags = _research_review_checklist(candidate)
+            checklist_all[candidate_id] = checklist
+            risk_flags.update(flags)
+            reviewed.append(candidate)
+        risk_flag_list = sorted(risk_flags)
+        recommended = "needs_human" if risk_flag_list else "approve"
+        decision = requested_decision or recommended
+        if decision == "approve" and risk_flag_list:
+            raise TeamWorkflowOrchestrationError(f"Cannot approve with blocking risk flags: {risk_flag_list}.")
+        if decision == "reject" and not (required_changes or comments):
+            raise TeamWorkflowOrchestrationError("reject requires a rejectionReason via requiredChanges or comments.")
+        review_id = _new_record_id("candidate")
+        review_record = {
+            "schemaVersion": SCHEMA_VERSION,
+            "candidateId": review_id,
+            "candidateType": "review_record",
+            "teamId": normalized_team_id,
+            "title": f"review_record for {', '.join(candidate_ids[:3])}",
+            "currentState": "review_ready" if decision == "approve" else decision,
+            "qualityStatus": "reviewed",
+            "reviewedCandidateIds": candidate_ids,
+            "decision": decision,
+            "checklist": checklist_all,
+            "riskFlags": risk_flag_list,
+            "requiredChanges": required_changes,
+            "comments": comments,
+            "reviewedByAgent": reviewed_by,
+            "createdByAgent": reviewed_by,
+            "createdAt": now,
+            "updatedAt": now,
+        }
+        review_record["envelopeValidation"] = candidate_schema_registry.validate_envelope(review_record)
+        candidate_store.setdefault("candidates", []).append(review_record)
+        for candidate in reviewed:
+            metadata = candidate.get("metadata") if isinstance(candidate.get("metadata"), dict) else {}
+            records = metadata.get("reviewRecords") if isinstance(metadata.get("reviewRecords"), list) else []
+            metadata["reviewRecords"] = [
+                *records[-23:],
+                {"reviewRecordId": review_id, "decision": decision, "edgeType": "reviewed_by", "createdAt": now},
+            ]
+            candidate["metadata"] = metadata
+            candidate["updatedAt"] = now
+        candidate_store["updatedAt"] = now
+        _write_json(_candidate_store_path(normalized_team_id), candidate_store)
+        workflow = _load_or_create_workflow(normalized_team_id)
+    _record_workflow_event(
+        "research.review_decided",
+        normalized_team_id,
+        fields={
+            "workflowId": workflow["workflowId"],
+            "reviewRecordId": review_id,
+            "decision": decision,
+            "candidateCount": len(candidate_ids),
+            "riskFlagCount": len(risk_flag_list),
+        },
+    )
+    return {
+        "schemaVersion": SCHEMA_VERSION,
+        "teamId": normalized_team_id,
+        "reviewRecord": review_record,
+        "decision": decision,
+        "riskFlags": risk_flag_list,
+        "checklist": checklist_all,
+        "workflow": _workflow_to_api(normalized_team_id, workflow, candidate_store),
+    }
+
+
 def plan_paper_note_chunks_from_source_candidate(team_id: str, candidate_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
     normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
     normalized_candidate_id = _normalize_required_id(candidate_id, "Candidate id is required.")
