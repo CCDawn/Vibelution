@@ -1455,7 +1455,7 @@ def test_start_source_collection_memory_stage_routes_to_knowledge_base_admin(tmp
     assert "知识库管理员入库审核" in submitted[0]["content"]
     assert "资料入库 Agent" not in submitted[0]["content"]
     assert "共享记忆前审" not in submitted[0]["content"]
-    assert "approved" in submitted[0]["content"]
+    assert "approved 候选" in submitted[0]["content"]
     metadata = submitted[0]["kwargs"]["message_metadata"]
     assert metadata["agentId"] == agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID
     assert metadata["agentRole"] == "knowledge_steward"
@@ -2749,6 +2749,139 @@ def test_source_quality_stage_writeback_materializes_candidate_decisions(tmp_pat
     assert screening_projection["status"] == "closed_loop"
     assert screening_projection["counts"]["artifact"] == 3
     assert screening_projection["counts"]["pending"] == 0
+
+
+def test_knowledge_steward_memory_writeback_auto_ingests_approved_candidates(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
+    agent_directory_service.repair_agent_directory()
+    steward = agent_directory_service.get_agent(agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID)
+    assert steward is not None
+    steward_session = session_service.ensure_agent_direct_session(
+        agent_id=steward["agentId"],
+        title=agent_directory_service.KNOWLEDGE_STEWARD_FUNCTIONAL_NAME,
+    )
+    agent_directory_service.update_agent_instance(steward["agentId"], direct_session_id=steward_session["id"])
+    coordinator = agent_directory_service.create_agent_instance(display_name="科研协调")
+    session_service.ensure_agent_direct_session(agent_id=coordinator["agentId"], title="科研协调")
+    team = team_service.create_team(
+        name="挑战杯科研团队",
+        members=[{"agentId": coordinator["agentId"], "role": "research_coordination", "agentName": "科研协调"}],
+    )
+    knowledge_base = team_knowledge_service.create_knowledge_base(
+        team["teamId"],
+        name="挑战杯科研知识库",
+        actor_agent_id=coordinator["agentId"],
+    )
+    run_response = team_workflow_orchestration_service.start_source_collection_run(
+        team["teamId"],
+        {
+            "topic": "神经预测编码",
+            "agentRoles": ["knowledge_steward"],
+            "agentIds": {"knowledge_steward": steward["agentId"]},
+            "querySeeds": ["predictive coding neural algorithm"],
+            "promptCachePolicy": {"requirement": "disabled"},
+        },
+    )
+    run_id = run_response["run"]["runId"]
+    source = team_workflow_orchestration_service.register_candidate_source(
+        team["teamId"],
+        {
+            "title": "Predictive coding cortical hierarchy neural network paper",
+            "sourceUrl": "https://doi.org/10.0000/steward-auto-ingest",
+            "sourceKind": "paper",
+            "summary": "Neural predictive coding evidence for neural-network hierarchy and attention mechanisms.",
+            "tags": ["neuroscience", "algorithm"],
+            "allowedForAnalysis": True,
+            "metadata": {"sourceCollectionRunId": run_id, "doi": "10.0000/steward-auto-ingest"},
+            "createdByAgent": "content-extraction-agent",
+        },
+    )["candidate"]
+    team_workflow_orchestration_service.assess_source_candidate_quality(
+        team["teamId"],
+        source["candidateId"],
+        {
+            "assessedByAgent": "source-quality-agent",
+            "decision": "approved",
+            "notes": "神经预测编码主题相关，元数据可追踪。",
+            "evidenceRefs": [{"type": "doi", "id": "10.0000/steward-auto-ingest"}],
+        },
+    )
+    monkeypatch.setattr(
+        session_service,
+        "submit_session_message",
+        lambda session_id, content, **kwargs: {"accepted": True, "sessionId": session_id, "turnId": "turn-memory-ingest", "status": "running"},
+    )
+    task = team_workflow_orchestration_service.start_source_collection_stage_session_task(
+        team["teamId"],
+        run_id,
+        {"stageId": "memory", "agentId": steward["agentId"], "agentRole": "knowledge_steward"},
+    )
+    writeback_payload = {
+        "status": "completed",
+        "summary": "知识库管理员通过 1 条候选，直接入库。",
+        "result": {
+            "knowledgeBaseId": knowledge_base["knowledgeBaseId"],
+            "candidate_summary": {
+                "approved": {
+                    "count": 1,
+                    "candidates": [
+                        {
+                            "candidateId": source["candidateId"],
+                            "title": source["title"],
+                            "doi": "10.0000/steward-auto-ingest",
+                            "overall_score": 88,
+                            "relevance_score": 96,
+                            "assessment_notes": "可直接支撑神经预测编码算法假设。",
+                        }
+                    ],
+                }
+            },
+            "steward_assessment": {"decision": "approved", "targetDomain": "神经机制启发神经网络算法"},
+        },
+        "recordedByAgent": steward["agentId"],
+        "evidenceRefs": [{"type": "candidate", "id": source["candidateId"]}],
+        "nextActions": ["进入实验规划"],
+    }
+
+    response = team_workflow_orchestration_service.writeback_source_collection_stage_session_task(
+        team["teamId"],
+        task["taskId"],
+        writeback_payload,
+    )
+
+    materialized = response["writeback"]["materializedKnowledgeIngestion"]
+    knowledge_base_id = materialized["knowledgeBaseId"]
+    knowledge_items = team_knowledge_service.list_knowledge_items(
+        knowledge_base_id,
+        agent_id=steward["agentId"],
+    )
+    memory_projection = team_workflow_orchestration_service._source_collection_stage_cards_projection(team["teamId"], run_id)["cards"][4]
+
+    assert materialized["status"] == "completed"
+    assert materialized["approvedCandidateCount"] == 1
+    assert materialized["formalKnowledgeItemCount"] == 1
+    assert materialized["writesFormalKnowledge"] is True
+    assert knowledge_base_id == knowledge_base["knowledgeBaseId"]
+    assert knowledge_items["summary"]["itemCount"] == 1
+    assert source["title"] in knowledge_items["items"][0]["title"]
+    assert response["task"]["writesFormalKnowledge"] is True
+    assert memory_projection["status"] == "closed_loop"
+    assert memory_projection["counts"]["output"] == 1
+
+    second_response = team_workflow_orchestration_service.writeback_source_collection_stage_session_task(
+        team["teamId"],
+        task["taskId"],
+        writeback_payload,
+    )
+    second_items = team_knowledge_service.list_knowledge_items(
+        knowledge_base_id,
+        agent_id=steward["agentId"],
+    )
+    second_materialized = second_response["writeback"]["materializedKnowledgeIngestion"]
+    assert second_materialized["status"] == "completed"
+    assert second_materialized["reusedOfficialSync"] is True
+    assert second_items["summary"]["itemCount"] == 1
 
 
 def test_candidate_graph_stage_writeback_materializes_candidate_graph(tmp_path, monkeypatch):

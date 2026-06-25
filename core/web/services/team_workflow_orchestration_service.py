@@ -1296,7 +1296,7 @@ def writeback_source_collection_stage_session_task(
     task["writeback"] = writeback
     task["writesFormalKnowledge"] = bool(materialized_knowledge_ingestion.get("writesFormalKnowledge"))
     task["writesRag"] = False
-    task["writesOfficialGraph"] = bool(materialized_knowledge_ingestion.get("writesFormalKnowledge"))
+    task["writesOfficialGraph"] = bool(materialized_knowledge_ingestion.get("writesOfficialGraph"))
     turn = task.get("turn") if isinstance(task.get("turn"), dict) else {}
     if turn:
         next_turn = dict(turn)
@@ -1325,6 +1325,7 @@ def writeback_source_collection_stage_session_task(
             "candidateGraphReused": bool(materialized_candidate_graph.get("reusedCandidateGraph")),
             "knowledgeIngestionStatus": materialized_knowledge_ingestion.get("status", ""),
             "formalKnowledgeItemCount": materialized_knowledge_ingestion.get("formalKnowledgeItemCount", 0),
+            "stewardPackCandidateId": materialized_knowledge_ingestion.get("stewardPackCandidateId", ""),
         },
     )
     return {
@@ -1338,8 +1339,8 @@ def writeback_source_collection_stage_session_task(
         "task": task,
         "writeback": writeback,
         "boundaries": _source_collection_stage_session_task_boundaries(
-            stage_id=str(task.get("stageId", "")),
-            agent_role=str(task.get("agentRole", "")),
+            stage_id=_trim_text(task.get("stageId"), max_length=80),
+            agent_role=_trim_text(task.get("agentRole"), max_length=80),
         ),
     }
 
@@ -2921,7 +2922,9 @@ def _materialize_source_collection_stage_writeback_knowledge_ingestion(
     previous_writeback = task.get("writeback") if isinstance(task.get("writeback"), dict) else {}
     previous_materialized = previous_writeback.get("materializedKnowledgeIngestion") if isinstance(previous_writeback.get("materializedKnowledgeIngestion"), dict) else {}
     if str(previous_materialized.get("status") or "") == "completed" and previous_materialized.get("stewardPackCandidateId"):
-        return previous_materialized
+        reused_materialized = dict(previous_materialized)
+        reused_materialized["reusedOfficialSync"] = True
+        return reused_materialized
 
     result = writeback.get("result") if isinstance(writeback.get("result"), dict) else {}
     source_candidates = _source_collection_candidates_for_run(team_id, run_id)
@@ -3034,6 +3037,7 @@ def _materialize_source_collection_stage_writeback_knowledge_ingestion(
                 actor_agent_id=steward_agent_id,
             )
             knowledge_base_id = _trim_text(knowledge_base.get("knowledgeBaseId"), max_length=160)
+        team_knowledge_service.ensure_knowledge_base_review_grant(knowledge_base_id, steward_agent_id)
         pack_record = record_local_research_model_output(
             team_id,
             {
@@ -14090,7 +14094,7 @@ def _source_collection_stage_session_task_message(
     can_materialize_formal_knowledge = _source_collection_stage_can_materialize_formal_knowledge(stage_id, agent_role)
     boundary_text = (
         "边界：这是知识库管理员入库审核任务，会立即要求当前 Agent 在本会话执行；"
-        "对本轮已通过候选调用 source_collection_stage_writeback_tool 写回 approved 结果后，"
+        "对本轮已通过候选调用 source_collection_stage_writeback_tool 写回 approved 候选结果后，"
         "后端会复用 Team Knowledge source review、proposal review/apply gate 创建正式 KnowledgeItem；"
         "不要绕过该治理门禁直接写库、写 RAG 或改 ACL。"
         if can_materialize_formal_knowledge

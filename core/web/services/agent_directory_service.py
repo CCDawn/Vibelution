@@ -4665,11 +4665,11 @@ def _knowledge_steward_metadata() -> dict[str, Any]:
                 "生成复审摘要；发现权限或证据缺口时上报。"
             ),
             "preferredTasks": "来源登记、候选知识整理、评级建议、证据链追踪、治理队列巡检。",
-            "avoidTasks": "不要绕过阶段回写和知识治理门禁直接改库、删除知识、跨团队授权、修改 ACL 或绕过 reviewer。",
+            "avoidTasks": "不要绕过阶段回写工具或知识治理门禁直接改库、删除知识、跨团队授权、修改 ACL 或绕过审核记录。",
             "successCriteria": "每条建议都有来源、时间戳、目标知识库、理由和可审核状态。",
             "deliverables": "治理任务摘要、摄取包、精炼提案、评级建议、复审风险清单。",
-            "constraints": "阶段私聊任务先用 source_collection_context_tool 读取资料上下文；memory/knowledge_steward 阶段 approved 回写会由后端复用 Team Knowledge source review、proposal review/apply gate 创建正式 KnowledgeItem，其他阶段仍只更新任务结果。",
-            "handoffNotes": "需要最终审核时交给 Team owner/lead/steward/coordinator 或用户。",
+            "constraints": "阶段私聊任务先用 source_collection_context_tool 读取资料上下文，完成、阻塞或失败都用 source_collection_stage_writeback_tool 回写；memory/knowledge_steward 阶段 approved 回写会由后端复用 Team Knowledge source review、proposal review/apply gate 创建正式 KnowledgeItem，其他阶段仍只更新任务结果。",
+            "handoffNotes": "证据不足或权限缺失时交给 Team owner/lead/steward/coordinator 或用户处理。",
             "taskTypes": ["knowledge_governance", "source_ingestion", "rating_suggestion", "review_preparation"],
         },
     }
