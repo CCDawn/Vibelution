@@ -77,6 +77,35 @@ def test_resolve_data_home_uses_storage_config_when_no_env(monkeypatch, tmp_path
     assert resolve_workspace_home() == tmp_path / "operator-data" / "workspace"
 
 
+def test_resolve_data_home_caches_storage_config_until_file_changes(monkeypatch, tmp_path):
+    from config import paths
+
+    config_path = tmp_path / "config" / "config.toml"
+    config_path.parent.mkdir()
+    config_path.write_text("[storage]\ndata_home = \"../operator-data\"\n", encoding="utf-8")
+    monkeypatch.delenv(DATA_HOME_ENV, raising=False)
+    monkeypatch.setenv(CONFIG_PATH_ENV, str(config_path))
+    paths._CONFIGURED_DATA_HOME_CACHE.clear()
+    original_read_text = Path.read_text
+    reads = []
+
+    def counting_read_text(self, *args, **kwargs):
+        if self == config_path:
+            reads.append(str(self))
+        return original_read_text(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", counting_read_text)
+
+    assert resolve_data_home() == tmp_path / "operator-data"
+    assert resolve_data_home() == tmp_path / "operator-data"
+    assert len(reads) == 1
+
+    config_path.write_text("[storage]\ndata_home = \"../operator-data-v2\"\n", encoding="utf-8")
+
+    assert resolve_data_home() == tmp_path / "operator-data-v2"
+    assert len(reads) == 2
+
+
 def test_model_capability_cache_defaults_next_to_external_config(monkeypatch, tmp_path):
     config_path = tmp_path / "operator-config" / "operator.toml"
     monkeypatch.setenv(CONFIG_PATH_ENV, str(config_path))

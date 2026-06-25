@@ -25,6 +25,7 @@ from core.web.services.team_workflow_orchestration_service import (
     get_official_model_evidence_status,
     get_paper_note_chunk_status,
     get_research_stage_round_status,
+    get_source_collection_summary,
     get_source_quality_status,
     get_team_workflow_coordination_status,
     get_team_workflow_orchestration,
@@ -637,6 +638,28 @@ def team_workflow_source_collection_stage_session_task_writeback(team_id: str, t
         )
 
 
+@router.get("/teams/{team_id}/workflow-orchestration/source-collection/summary")
+def team_workflow_source_collection_summary(team_id: str, runId: str = "") -> dict:
+    try:
+        return get_source_collection_summary(team_id, run_id=runId)
+    except TeamNotFoundError as exc:
+        _raise_team_workflow_route_error(
+            "source_collection.summary",
+            team_id,
+            exc,
+            status_code=404,
+            fields={"runId": runId},
+        )
+    except (TeamServiceError, TeamWorkflowOrchestrationError) as exc:
+        _raise_team_workflow_route_error(
+            "source_collection.summary",
+            team_id,
+            exc,
+            status_code=422,
+            fields={"runId": runId},
+        )
+
+
 @router.post("/teams/{team_id}/workflow-orchestration/source-collection-runs/{run_id}/storage/open")
 def team_workflow_source_collection_storage_open(team_id: str, run_id: str, payload: SourceCollectionStorageOpenPayload) -> dict:
     try:
@@ -867,6 +890,7 @@ def team_workflow_candidate_list(
     currentState: str = "",
     qualityStatus: str = "",
     limit: int = 100,
+    includeValidation: bool = False,
 ) -> dict:
     try:
         return list_candidate_store(
@@ -875,6 +899,7 @@ def team_workflow_candidate_list(
             current_state=currentState,
             quality_status=qualityStatus,
             limit=limit,
+            include_validation=includeValidation,
         )
     except TeamNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
