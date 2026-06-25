@@ -706,7 +706,7 @@ describe("TeamsRoute layout contract", () => {
       routeSource.indexOf("const selectedSourceCollectionActiveWorkRun"),
       routeSource.indexOf("const sourceCollectionAcceptedBackgroundActive"),
     );
-    expect(sourceCollectionBackgroundRefreshSource).toContain("researchStageRoundStatusQueryKey(selectedTeam.teamId)");
+    expect(sourceCollectionBackgroundRefreshSource).not.toContain("researchStageRoundStatusQueryKey(selectedTeam.teamId)");
     expect(routeSource).toContain("sourceCollectionStageWritebackRefetchInterval");
     expect(routeSource).toContain("refetchInterval: (query) =>");
     expect(routeSource).toContain("query.state.data as ResearchStageRoundStatusPayload | null | undefined");
@@ -729,6 +729,13 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).not.toContain("const TEAM_WORKFLOW_CANDIDATE_PREVIEW_LIMIT = 500;");
     expect(routeSource).toContain("teamWorkflowSourceQualityEnabled");
     expect(routeSource).toContain("enabled: Boolean(effectiveTeamId && researchWorkflowTeamSelected)");
+    const sourceCollectionPrimaryLoadingSource = routeSource.slice(
+      routeSource.indexOf("const sourceCollectionPrimaryDataLoading = Boolean("),
+      routeSource.indexOf("const sourceCollectionSourceQualityLoading = Boolean("),
+    );
+    expect(sourceCollectionPrimaryLoadingSource).toContain("sourceCollectionSummaryQuery.isPending");
+    expect(sourceCollectionPrimaryLoadingSource).not.toContain("researchStageRoundStatusQuery.isPending");
+    expect(sourceCollectionPrimaryLoadingSource).not.toContain("teamWorkflowCandidatesQuery.isPending");
     expect(routeSource).not.toContain("researchStageRoundStatusQueryKey(effectiveTeamId || \"none\"),\n    queryFn: () =>\n      fetchJson<ResearchStageRoundStatusPayload>(\n        `/api/teams/${encodeURIComponent(effectiveTeamId)}/workflow-orchestration/stage-rounds/status`,\n      ),\n    enabled: Boolean(effectiveTeamId && researchWorkflowTeamSelected && teamWorkflowQuery.data)");
     expect(routeSource).not.toContain("queryKeys.teamWorkflowCandidates(effectiveTeamId || \"none\", TEAM_WORKFLOW_CANDIDATE_PREVIEW_LIMIT),\n    queryFn: () =>\n      fetchJson<TeamWorkflowCandidateListPayload>(\n        `/api/teams/${encodeURIComponent(effectiveTeamId)}/workflow-orchestration/candidates?limit=${TEAM_WORKFLOW_CANDIDATE_PREVIEW_LIMIT}`,\n      ),\n    enabled: Boolean(effectiveTeamId && researchWorkflowTeamSelected && teamWorkflowQuery.data)");
     const sourceCollectionStageReturnRefreshSource = routeSource.slice(
@@ -736,9 +743,21 @@ describe("TeamsRoute layout contract", () => {
       routeSource.indexOf("if (!selectedTeam?.teamId || !selectedSourceCollectionRunEffectiveId || !selectedSourceCollectionSearchAccepted"),
     );
     expect(sourceCollectionStageReturnRefreshSource).toContain("requestedSourceCollectionStage");
-    expect(sourceCollectionStageReturnRefreshSource).toContain("researchStageRoundStatusQueryKey(selectedTeam.teamId)");
-    expect(sourceCollectionStageReturnRefreshSource).toContain("queryKeys.teamWorkflowCandidates(selectedTeam.teamId");
+    expect(sourceCollectionStageReturnRefreshSource).not.toContain("researchStageRoundStatusQueryKey(selectedTeam.teamId)");
+    expect(sourceCollectionStageReturnRefreshSource).not.toContain("queryKeys.teamWorkflowCandidates(selectedTeam.teamId");
+    expect(sourceCollectionStageReturnRefreshSource).not.toContain("sourceQualityStatusQueryKey(selectedTeam.teamId)");
     expect(sourceCollectionStageReturnRefreshSource).toContain("sourceCollectionRunRecordsQueryKey(selectedSourceCollectionRunEffectiveId)");
+    const sourceCollectionSearchAcceptedRefreshSource = routeSource.slice(
+      routeSource.indexOf("if (!selectedTeam?.teamId || !selectedSourceCollectionRunEffectiveId || !selectedSourceCollectionSearchAccepted"),
+      routeSource.indexOf("const openSourceCollectionStorageTarget = (target: SourceCollectionStorageOpenTarget"),
+    );
+    expect(sourceCollectionSearchAcceptedRefreshSource).toContain("selectedSourceCollectionSearchAccepted");
+    expect(sourceCollectionSearchAcceptedRefreshSource).toContain("sourceCollectionSummaryQueryKey(selectedTeam.teamId");
+    expect(sourceCollectionSearchAcceptedRefreshSource).not.toContain("queryKeys.teamWorkflowCandidates(selectedTeam.teamId");
+    expect(sourceCollectionSearchAcceptedRefreshSource).not.toContain("researchStageRoundStatusQueryKey(selectedTeam.teamId)");
+    expect(sourceCollectionSearchAcceptedRefreshSource).not.toContain("queryKeys.teamWorkflowKnowledgeIngestionStatus(selectedTeam.teamId)");
+    expect(sourceCollectionSearchAcceptedRefreshSource).not.toContain("sourceCollectionRunStatus?.runStatus");
+    expect(sourceCollectionSearchAcceptedRefreshSource).not.toContain("sourceCollectionRunStatus?.summary.recordCount");
     expect(routeSource).toContain("skippedDuplicateCount");
     expect(routeSource).toContain("条重复跳过");
     expect(routeSource).toContain("selectedSourceCollectionSearchAccepted");
