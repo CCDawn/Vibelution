@@ -9848,9 +9848,7 @@ export function TeamsRoute({
     if (requestedSourceCollectionStage) {
       setSourceCollectionStageSyncUntilMs(Date.now() + SOURCE_COLLECTION_STAGE_WRITEBACK_SYNC_GRACE_MS);
     }
-    void queryClient.invalidateQueries({ queryKey: researchStageRoundStatusQueryKey(selectedTeam.teamId) });
     void queryClient.invalidateQueries({ queryKey: sourceCollectionSummaryQueryKey(selectedTeam.teamId, selectedSourceCollectionRunEffectiveId) });
-    void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflowCandidates(selectedTeam.teamId, TEAM_WORKFLOW_CANDIDATE_PREVIEW_LIMIT) });
     void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflowSourceCollectionRuns(selectedTeam.teamId, SOURCE_COLLECTION_RUN_PREVIEW_LIMIT) });
     void queryClient.invalidateQueries({ queryKey: queryKeys.dataProcessingRunStatus(selectedSourceCollectionRunEffectiveId) });
     void queryClient.invalidateQueries({ queryKey: sourceCollectionRunRecordsQueryKey(selectedSourceCollectionRunEffectiveId) });
@@ -9871,20 +9869,12 @@ export function TeamsRoute({
     void queryClient.invalidateQueries({ queryKey: queryKeys.dataProcessingRunStatus(selectedSourceCollectionRunEffectiveId) });
     void queryClient.invalidateQueries({ queryKey: sourceCollectionRunRecordsQueryKey(selectedSourceCollectionRunEffectiveId) });
     void queryClient.invalidateQueries({ queryKey: queryKeys.dataProcessingCollectionAssignments(selectedSourceCollectionRunEffectiveId) });
-    void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflowCandidates(selectedTeam.teamId, TEAM_WORKFLOW_CANDIDATE_PREVIEW_LIMIT) });
     void queryClient.invalidateQueries({ queryKey: sourceCollectionSummaryQueryKey(selectedTeam.teamId, selectedSourceCollectionRunEffectiveId) });
-    void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflowKnowledgeIngestionStatus(selectedTeam.teamId) });
-    void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflowCoordinationStatus(selectedTeam.teamId) });
-    void queryClient.invalidateQueries({ queryKey: sourceQualityStatusQueryKey(selectedTeam.teamId) });
-    void queryClient.invalidateQueries({ queryKey: paperNoteChunkStatusQueryKey(selectedTeam.teamId) });
-    void queryClient.invalidateQueries({ queryKey: researchStageRoundStatusQueryKey(selectedTeam.teamId) });
   }, [
     queryClient,
     selectedSourceCollectionRunEffectiveId,
     selectedSourceCollectionSearchAccepted,
     selectedTeam?.teamId,
-    sourceCollectionRunStatus?.runStatus,
-    sourceCollectionRunStatus?.summary.recordCount,
   ]);
   const openSourceCollectionStorageTarget = (target: SourceCollectionStorageOpenTarget, runIdOverride?: string) => {
     const runId = runIdOverride || selectedSourceCollectionRunEffectiveId;
