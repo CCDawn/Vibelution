@@ -2333,6 +2333,105 @@ def test_source_quality_stage_writeback_materializes_candidate_decisions(tmp_pat
     assert screening_projection["counts"]["pending"] == 0
 
 
+def test_candidate_graph_stage_writeback_materializes_candidate_graph(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
+    agent = agent_directory_service.create_agent_instance(display_name="候选图谱")
+    session_service.ensure_agent_direct_session(agent_id=agent["agentId"], title="候选图谱")
+    team = team_service.create_team(
+        name="挑战杯科研团队",
+        members=[{"agentId": agent["agentId"], "role": "candidate_graph", "agentName": "候选图谱"}],
+    )
+    run_response = team_workflow_orchestration_service.start_source_collection_run(
+        team["teamId"],
+        {
+            "topic": "神经预测编码候选图谱",
+            "agentRoles": ["candidate_graph"],
+            "agentIds": {"candidate_graph": agent["agentId"]},
+            "querySeeds": ["predictive coding neural graph"],
+            "promptCachePolicy": {"requirement": "disabled"},
+        },
+    )
+    run_id = run_response["run"]["runId"]
+    source_one = team_workflow_orchestration_service.register_candidate_source(
+        team["teamId"],
+        {
+            "title": "Predictive coding hierarchy source",
+            "sourceUrl": "https://doi.org/10.0000/graph-source-one",
+            "sourceKind": "paper",
+            "summary": "Predictive coding hierarchy supports neural algorithm design.",
+            "allowedForAnalysis": True,
+            "metadata": {"sourceCollectionRunId": run_id, "doi": "10.0000/graph-source-one"},
+            "createdByAgent": "content-extraction-agent",
+        },
+    )["candidate"]
+    source_two = team_workflow_orchestration_service.register_candidate_source(
+        team["teamId"],
+        {
+            "title": "Attention precision source",
+            "sourceUrl": "https://doi.org/10.0000/graph-source-two",
+            "sourceKind": "paper",
+            "summary": "Attention modulates precision in predictive processing.",
+            "allowedForAnalysis": True,
+            "metadata": {"sourceCollectionRunId": run_id, "doi": "10.0000/graph-source-two"},
+            "createdByAgent": "content-extraction-agent",
+        },
+    )["candidate"]
+    monkeypatch.setattr(
+        session_service,
+        "submit_session_message",
+        lambda session_id, content, **kwargs: {"accepted": True, "sessionId": session_id, "turnId": "turn-candidate-graph", "status": "running"},
+    )
+    task = team_workflow_orchestration_service.start_source_collection_stage_session_task(
+        team["teamId"],
+        run_id,
+        {"stageId": "graph", "agentId": agent["agentId"], "agentRole": "candidate_graph"},
+    )
+
+    response = team_workflow_orchestration_service.writeback_source_collection_stage_session_task(
+        team["teamId"],
+        task["taskId"],
+        {
+            "status": "completed",
+            "summary": "基于 2 条 source_manifest 候选构建候选关系图。",
+            "result": {
+                "candidateGraph": {
+                    "theme": "神经预测编码",
+                    "nodes": [
+                        {"candidateId": source_one["candidateId"], "label": "predictive hierarchy"},
+                        {"candidateId": source_two["candidateId"], "label": "attention precision"},
+                    ],
+                    "edges": [
+                        {
+                            "sourceCandidateId": source_one["candidateId"],
+                            "targetCandidateId": source_two["candidateId"],
+                            "relation": "supports_precision_modulation",
+                        }
+                    ],
+                    "graphSummary": {"totalNodes": 2, "totalEdges": 1},
+                }
+            },
+            "recordedByAgent": agent["agentId"],
+        },
+    )
+
+    materialized = response["writeback"]["materializedCandidateGraph"]
+    graph_list = team_workflow_orchestration_service.list_candidate_store(team["teamId"], candidate_type="candidate_graph")
+    graph_candidate = graph_list["candidates"][0]
+    graph_projection = team_workflow_orchestration_service._source_collection_stage_cards_projection(team["teamId"], run_id)["cards"][3]
+    assert materialized["createdCandidateGraphCount"] == 1
+    assert materialized["candidateGraphId"] == graph_candidate["candidateId"]
+    assert materialized["nodeCount"] == 2
+    assert materialized["edgeCount"] >= 0
+    assert graph_candidate["candidateType"] == "candidate_graph"
+    assert graph_candidate["metadata"]["stageAgentRole"] == "candidate_graph"
+    assert graph_candidate["metadata"]["agentWriteback"]["taskId"] == task["taskId"]
+    assert graph_candidate["metadata"]["agentWriteback"]["result"]["candidateGraph"]["theme"] == "神经预测编码"
+    assert graph_projection["stageId"] == "graph"
+    assert graph_projection["status"] == "closed_loop"
+    assert graph_projection["counts"]["artifact"] == 2
+
+
 def test_research_stage_status_reconciles_legacy_source_quality_writeback(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)
@@ -2411,6 +2510,107 @@ def test_research_stage_status_reconciles_legacy_source_quality_writeback(tmp_pa
     assert refreshed_task["writeback"]["materializedSourceQuality"]["assessedCandidateCount"] == 1
     screening_card = next(item for item in status_payload["latestRound"]["sourceCollectionStageCards"] if item["stageId"] == "screening")
     assert screening_card["status"] == "closed_loop"
+
+
+def test_research_stage_status_reconciles_legacy_candidate_graph_writeback(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
+    _stub_source_collection_search_background(monkeypatch)
+    agent = agent_directory_service.create_agent_instance(display_name="候选图谱")
+    session_service.ensure_agent_direct_session(agent_id=agent["agentId"], title="候选图谱")
+    team = team_service.create_team(
+        name="挑战杯科研团队",
+        members=[{"agentId": agent["agentId"], "role": "candidate_graph", "agentName": "候选图谱"}],
+    )
+    stage_response = team_workflow_orchestration_service.start_research_stage_round(
+        team["teamId"],
+        {
+            "stageType": "knowledge_collection",
+            "topic": "预测编码候选图谱",
+            "agentRoles": ["candidate_graph"],
+            "agentIds": {"candidate_graph": agent["agentId"]},
+            "querySeeds": ["predictive coding candidate graph"],
+            "promptCachePolicy": {"requirement": "disabled"},
+        },
+    )
+    run_id = stage_response["run"]["runId"]
+    source_one = team_workflow_orchestration_service.register_candidate_source(
+        team["teamId"],
+        {
+            "title": "Predictive coding source for legacy graph",
+            "sourceUrl": "https://doi.org/10.0000/legacy-graph-one",
+            "sourceKind": "paper",
+            "summary": "Predictive coding source for graph building.",
+            "allowedForAnalysis": True,
+            "metadata": {"sourceCollectionRunId": run_id, "doi": "10.0000/legacy-graph-one"},
+            "createdByAgent": "content-extraction-agent",
+        },
+    )["candidate"]
+    source_two = team_workflow_orchestration_service.register_candidate_source(
+        team["teamId"],
+        {
+            "title": "Precision attention source for legacy graph",
+            "sourceUrl": "https://doi.org/10.0000/legacy-graph-two",
+            "sourceKind": "paper",
+            "summary": "Precision attention source for graph building.",
+            "allowedForAnalysis": True,
+            "metadata": {"sourceCollectionRunId": run_id, "doi": "10.0000/legacy-graph-two"},
+            "createdByAgent": "content-extraction-agent",
+        },
+    )["candidate"]
+    monkeypatch.setattr(
+        session_service,
+        "submit_session_message",
+        lambda session_id, content, **kwargs: {"accepted": True, "sessionId": session_id, "turnId": "turn-legacy-graph", "status": "running"},
+    )
+    task = team_workflow_orchestration_service.start_source_collection_stage_session_task(
+        team["teamId"],
+        run_id,
+        {"stageId": "graph", "agentId": agent["agentId"], "agentRole": "candidate_graph"},
+    )
+    result = {
+        "candidateGraph": {
+            "theme": "旧任务图谱",
+            "nodes": [
+                {"candidateId": source_one["candidateId"], "label": "predictive coding"},
+                {"candidateId": source_two["candidateId"], "label": "attention precision"},
+            ],
+            "edges": [
+                {
+                    "sourceCandidateId": source_one["candidateId"],
+                    "targetCandidateId": source_two["candidateId"],
+                    "relation": "supports",
+                }
+            ],
+        }
+    }
+    store = team_workflow_orchestration_service._load_source_collection_stage_session_task_store(team["teamId"], run_id)
+    stored_task = next(item for item in store["tasks"] if item["taskId"] == task["taskId"])
+    stored_task["status"] = "completed"
+    stored_task["summary"] = "旧候选图谱任务已写回图谱结构。"
+    stored_task["result"] = result
+    stored_task["writeback"] = {
+        "status": "completed",
+        "summary": stored_task["summary"],
+        "result": result,
+        "resultAuthority": "source_collection_stage_writeback_tool",
+        "recordedByAgent": agent["agentId"],
+        "recordedAt": "2026-06-25T00:00:00+00:00",
+    }
+    team_workflow_orchestration_service._write_source_collection_stage_session_task_store(team["teamId"], run_id, store)
+
+    status_payload = team_workflow_orchestration_service.get_research_stage_round_status(team["teamId"])
+
+    graph_list = team_workflow_orchestration_service.list_candidate_store(team["teamId"], candidate_type="candidate_graph")
+    refreshed_store = team_workflow_orchestration_service._load_source_collection_stage_session_task_store(team["teamId"], run_id)
+    refreshed_task = next(item for item in refreshed_store["tasks"] if item["taskId"] == task["taskId"])
+    graph_card = next(item for item in status_payload["latestRound"]["sourceCollectionStageCards"] if item["stageId"] == "graph")
+    assert len(graph_list["candidates"]) == 1
+    assert refreshed_task["writeback"]["materializedCandidateGraph"]["candidateGraphId"] == graph_list["candidates"][0]["candidateId"]
+    assert refreshed_task["writeback"]["materializedCandidateGraph"]["createdCandidateGraphCount"] == 1
+    assert graph_list["candidates"][0]["metadata"]["agentWriteback"]["result"]["candidateGraph"]["theme"] == "旧任务图谱"
+    assert graph_card["status"] == "closed_loop"
+    assert graph_card["counts"]["artifact"] == 2
 
 
 def test_source_collection_stage_tools_record_failure_runtime_events(tmp_path, monkeypatch):
