@@ -24,7 +24,7 @@ from config.public_config import build_effective_config, load_public_config
 from core.infrastructure import developer_sandbox
 from core.llm import LLMClient, LLMInvocationContext, invoke_llm
 from core.runtime_manager import work_run_store
-from core.web.services import agent_directory_service, chat_room_service, data_processing_service, session_service, team_knowledge_service, team_service
+from core.web.services import agent_directory_service, candidate_schema_registry, chat_room_service, data_processing_service, session_service, team_knowledge_service, team_service
 from core.web.services.runtime_scene_service import record_runtime_scene_event
 
 
@@ -316,7 +316,7 @@ def ensure_team_workflow_orchestration(
     return _workflow_to_api(normalized_team_id, workflow, candidate_store)
 
 
-def register_candidate_source(team_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+def register_candidate_source(team_id: str, payload: dict[str, Any], *, strict: bool = False) -> dict[str, Any]:
     normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
     team_service.get_team(normalized_team_id)
     candidate_type = _normalize_candidate_type(payload.get("candidateType") or "source_manifest")
@@ -357,7 +357,16 @@ def register_candidate_source(team_id: str, payload: dict[str, Any]) -> dict[str
         }
         validation = validate_candidate_record(candidate)
         candidate["validation"] = validation
-        if not validation["valid"]:
+        # 统一写入口校验：registry 提供 envelope 级守卫（candidateId/teamId/类型等恒在，零回归），
+        # 逐类型深校验仍由 validate_candidate_record 承担。strict=True 时硬拦截（供科研生成链调用方选用）。
+        envelope_validation = candidate_schema_registry.validate_envelope(candidate)
+        candidate["envelopeValidation"] = envelope_validation
+        candidate_valid = bool(validation.get("valid")) and bool(envelope_validation.get("valid"))
+        if strict and not candidate_valid:
+            raise TeamWorkflowOrchestrationError(
+                f"Candidate failed schema validation: {validation.get('issues', [])} {envelope_validation.get('issues', [])}"
+            )
+        if not candidate_valid:
             candidate["currentState"] = "source_needs_confirmation"
             candidate["qualityStatus"] = "source_manifest_invalid"
         candidate_store.setdefault("candidates", []).append(candidate)
