@@ -16,10 +16,13 @@ from core.web.services.team_workflow_orchestration_service import (
     assess_source_quality_batch,
     build_candidate_graph,
     create_experiment_plan,
+    decide_research_review,
     decide_transfer_request,
     ensure_team_workflow_orchestration,
     execute_source_collection_search,
+    extract_neuro_mechanism_from_paper_note,
     extract_source_collection_candidates,
+    generate_algorithm_hypothesis_from_mechanism_mapping,
     get_experiment_planning_status,
     get_knowledge_ingestion_status,
     get_official_model_evidence_status,
@@ -35,6 +38,7 @@ from core.web.services.team_workflow_orchestration_service import (
     import_data_record_as_source_candidate,
     invoke_local_research_model,
     list_candidate_store,
+    map_mechanism_to_abstraction,
     open_source_collection_storage_target,
     plan_paper_note_chunks_from_source_candidate,
     record_local_research_model_output,
@@ -417,6 +421,35 @@ class PaperNoteAutodraftPayload(BaseModel):
     summary: str = Field("", max_length=4000)
     excerpt: str = Field("", max_length=24000)
     chunkId: str = Field("", max_length=128)
+
+
+class NeuroMechanismExtractPayload(BaseModel):
+    paperNoteId: str = Field("", max_length=128)
+    createdByAgent: str = Field("", max_length=160)
+    modelId: str = Field("", max_length=160)
+    excerpt: str = Field("", max_length=24000)
+
+
+class MechanismMappingPayload(BaseModel):
+    mechanismId: str = Field("", max_length=128)
+    createdByAgent: str = Field("", max_length=160)
+    modelId: str = Field("", max_length=160)
+    excerpt: str = Field("", max_length=24000)
+
+
+class AlgorithmHypothesisPayload(BaseModel):
+    mappingId: str = Field("", max_length=128)
+    createdByAgent: str = Field("", max_length=160)
+    modelId: str = Field("", max_length=160)
+    excerpt: str = Field("", max_length=24000)
+
+
+class ResearchReviewDecidePayload(BaseModel):
+    candidateIds: list[str] = Field(default_factory=list, max_length=24)
+    reviewedByAgent: str = Field("", max_length=160)
+    decision: str = Field("", max_length=40)
+    comments: str = Field("", max_length=4000)
+    requiredChanges: list[str] = Field(default_factory=list, max_length=24)
 
 
 class PaperNoteChunkPlanPayload(BaseModel):
@@ -1055,6 +1088,82 @@ def team_workflow_candidate_paper_note_autodraft(team_id: str, candidate_id: str
             exc,
             status_code=422,
             fields={"candidateId": candidate_id, "createdByAgent": payload.createdByAgent, "modelId": payload.modelId},
+        )
+
+
+@router.post("/teams/{team_id}/workflow-orchestration/research/mechanisms/extract", status_code=status.HTTP_201_CREATED)
+def team_workflow_research_mechanisms_extract(team_id: str, payload: NeuroMechanismExtractPayload) -> dict:
+    try:
+        return extract_neuro_mechanism_from_paper_note(team_id, payload.model_dump())
+    except TeamNotFoundError as exc:
+        _raise_team_workflow_route_error(
+            "research.mechanisms_extract",
+            team_id,
+            exc,
+            status_code=404,
+            fields={"paperNoteId": payload.paperNoteId},
+        )
+    except (TeamServiceError, TeamWorkflowOrchestrationError) as exc:
+        _raise_team_workflow_route_error(
+            "research.mechanisms_extract",
+            team_id,
+            exc,
+            status_code=422,
+            fields={"paperNoteId": payload.paperNoteId, "createdByAgent": payload.createdByAgent},
+        )
+
+
+@router.post("/teams/{team_id}/workflow-orchestration/research/mechanisms/map", status_code=status.HTTP_201_CREATED)
+def team_workflow_research_mechanisms_map(team_id: str, payload: MechanismMappingPayload) -> dict:
+    try:
+        return map_mechanism_to_abstraction(team_id, payload.model_dump())
+    except TeamNotFoundError as exc:
+        _raise_team_workflow_route_error(
+            "research.mechanisms_map", team_id, exc, status_code=404, fields={"mechanismId": payload.mechanismId}
+        )
+    except (TeamServiceError, TeamWorkflowOrchestrationError) as exc:
+        _raise_team_workflow_route_error(
+            "research.mechanisms_map",
+            team_id,
+            exc,
+            status_code=422,
+            fields={"mechanismId": payload.mechanismId, "createdByAgent": payload.createdByAgent},
+        )
+
+
+@router.post("/teams/{team_id}/workflow-orchestration/research/hypotheses/generate", status_code=status.HTTP_201_CREATED)
+def team_workflow_research_hypotheses_generate(team_id: str, payload: AlgorithmHypothesisPayload) -> dict:
+    try:
+        return generate_algorithm_hypothesis_from_mechanism_mapping(team_id, payload.model_dump())
+    except TeamNotFoundError as exc:
+        _raise_team_workflow_route_error(
+            "research.hypotheses_generate", team_id, exc, status_code=404, fields={"mappingId": payload.mappingId}
+        )
+    except (TeamServiceError, TeamWorkflowOrchestrationError) as exc:
+        _raise_team_workflow_route_error(
+            "research.hypotheses_generate",
+            team_id,
+            exc,
+            status_code=422,
+            fields={"mappingId": payload.mappingId, "createdByAgent": payload.createdByAgent},
+        )
+
+
+@router.post("/teams/{team_id}/workflow-orchestration/research/review/decide", status_code=status.HTTP_201_CREATED)
+def team_workflow_research_review_decide(team_id: str, payload: ResearchReviewDecidePayload) -> dict:
+    try:
+        return decide_research_review(team_id, payload.model_dump())
+    except TeamNotFoundError as exc:
+        _raise_team_workflow_route_error(
+            "research.review_decide", team_id, exc, status_code=404, fields={"decision": payload.decision}
+        )
+    except (TeamServiceError, TeamWorkflowOrchestrationError) as exc:
+        _raise_team_workflow_route_error(
+            "research.review_decide",
+            team_id,
+            exc,
+            status_code=422,
+            fields={"decision": payload.decision, "reviewedByAgent": payload.reviewedByAgent},
         )
 
 
