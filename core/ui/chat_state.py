@@ -6,7 +6,6 @@ from __future__ import annotations
 import json
 import os
 import shutil
-import tempfile
 import threading
 import time
 from contextlib import contextmanager
@@ -15,6 +14,7 @@ from pathlib import Path
 from typing import Any, BinaryIO
 
 from core.infrastructure import developer_sandbox
+from core.infrastructure.atomic_io import atomic_write_text
 from core.logging import debug as _debug_logger
 from core.orchestration.output_boundary import (
     sanitize_assistant_thought_text,
@@ -299,7 +299,7 @@ def load_chat_state(project_root: Path) -> dict[str, Any]:
         cleaned, changed = _drop_legacy_chat_state_messages(payload)
         if changed:
             try:
-                _atomic_write_text(path, json.dumps(cleaned, ensure_ascii=False, indent=2))
+                atomic_write_text(path, json.dumps(cleaned, ensure_ascii=False, indent=2))
             except OSError as exc:
                 _debug_logger.warning(
                     f"[ChatState] failed to clean legacy chat messages from {path}: {type(exc).__name__}: {exc}"
@@ -312,7 +312,7 @@ def save_chat_state(project_root: Path, state: dict[str, Any]) -> None:
         path = chat_state_path(project_root)
         path.parent.mkdir(parents=True, exist_ok=True)
         cleaned, _changed = _drop_legacy_chat_state_messages(state)
-        _atomic_write_text(path, json.dumps(cleaned, ensure_ascii=False, indent=2))
+        atomic_write_text(path, json.dumps(cleaned, ensure_ascii=False, indent=2))
 
 
 def _drop_legacy_chat_state_messages(state: dict[str, Any]) -> tuple[dict[str, Any], bool]:
@@ -351,41 +351,6 @@ def _backup_corrupt_chat_state(path: Path, exc: Exception) -> None:
             f"[ChatState] chat_state load failed and corrupt backup failed for {path}: "
             f"{type(exc).__name__}: {exc}; backup_error={type(backup_exc).__name__}: {backup_exc}"
         )
-
-
-def _atomic_write_text(path: Path, payload: str) -> None:
-    tmp_path = ""
-    fd = -1
-    try:
-        fd, tmp_path = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=str(path.parent))
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            fd = -1
-            handle.write(payload)
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(tmp_path, path)
-        _fsync_parent_dir(path.parent)
-    finally:
-        if fd >= 0:
-            os.close(fd)
-        if tmp_path:
-            try:
-                Path(tmp_path).unlink(missing_ok=True)
-            except OSError:
-                pass
-
-
-def _fsync_parent_dir(path: Path) -> None:
-    if os.name == "nt":
-        return
-    try:
-        fd = os.open(str(path), os.O_RDONLY)
-    except OSError:
-        return
-    try:
-        os.fsync(fd)
-    finally:
-        os.close(fd)
 
 
 def get_active_chat_conversation(state: dict[str, Any]) -> dict[str, Any]:
