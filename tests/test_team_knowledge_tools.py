@@ -194,6 +194,43 @@ def test_knowledge_ingestion_tool_submits_standard_package(tmp_path, monkeypatch
     assert result["package"]["sourceArtifact"]["sourceType"] == "external_search_refinement"
 
 
+def test_knowledge_ingestion_tool_directly_ingests_reviewed_inbox_source(tmp_path, monkeypatch):
+    env = _seed_team_knowledge(tmp_path, monkeypatch)
+    inbox_source = team_knowledge_service.collect_source_to_inbox(
+        "team",
+        env["team"]["teamId"],
+        source_type="manual_user_entry",
+        source_ref={"note": "tool direct source"},
+        original_content="Tool direct source content.",
+        original_filename="tool-direct-source.txt",
+        title="Tool direct source",
+        actor_agent_id=env["member"]["agentId"],
+    )
+
+    with agent_directory_service.active_agent_runtime(env["lead"]["agentId"], session_id="session-knowledge-lead"):
+        result = json.loads(
+            team_knowledge_tools.knowledge_ingestion_tool(
+                knowledge_base_id=_kb_ref(env),
+                source_type="manual_user_entry",
+                source_ref_json='{"note":"tool direct source"}',
+                proposal_title="Tool direct source becomes memory",
+                proposal_content="The ingestion tool can screen an inbox source and create a formal KnowledgeItem directly.",
+                inbox_source_id=inbox_source["inboxSourceId"],
+                owner_type="team",
+                owner_id=env["team"]["teamId"],
+                resolution_note="筛选通过，直接入库。",
+                tags="direct-ingestion,tool",
+            )
+        )
+
+    items = team_knowledge_service.list_knowledge_items(_kb_ref(env), agent_id=env["member"]["agentId"])
+
+    assert result["ok"] is True
+    assert result["status"] == "ingested"
+    assert result["directIngestion"]["item"]["title"] == "Tool direct source becomes memory"
+    assert items["summary"]["itemCount"] == 1
+
+
 def test_knowledge_governance_tasks_tool_reads_open_queue(tmp_path, monkeypatch):
     env = _seed_team_knowledge(tmp_path, monkeypatch)
     team_knowledge_service.create_refinement_proposal(

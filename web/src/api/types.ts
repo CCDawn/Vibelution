@@ -427,10 +427,12 @@ export type KnowledgeStewardOverview = {
   };
   operatingBoundary: {
     canDirectlyApplyKnowledge: boolean;
+    canDirectlyIngestScreenedSources: boolean;
     canDeleteKnowledge: boolean;
     canChangeAcl: boolean;
     canBypassReviewer: boolean;
     formalKnowledgeRequiresReviewer: boolean;
+    screeningAgentIsReviewer: boolean;
     knowledgeBodiesInPrompt: boolean;
   };
   updatedAt: string;
@@ -797,6 +799,8 @@ export type KnowledgeOwnerSource = {
   curationStatus: string;
   centralSourceId: string;
   dedupeStatus: string;
+  knowledgeBaseId?: string;
+  knowledgeItemId?: string;
   reviewedAt: string;
   reviewedByAgentId: string;
   resolutionNote: string;
@@ -895,6 +899,34 @@ export type KnowledgeSourceInboxReviewResponse = {
     dedupeStatus?: string;
     reviewedByAgentId?: string;
     createdAt?: string;
+  } | null;
+  directIngestion: {
+    schemaVersion: number;
+    status: string;
+    ownerType: KnowledgeSourceOwnerType;
+    ownerId: string;
+    teamId: string;
+    agentId: string;
+    knowledgeBaseId: string;
+    scopedKnowledgeBaseId: string;
+    sourceArtifact: KnowledgeSourceArtifact;
+    batch: {
+      batchId: string;
+      ownerType: KnowledgeSourceOwnerType;
+      ownerId: string;
+      teamId: string;
+      agentId: string;
+      knowledgeBaseId: string;
+      proposalIds: string[];
+      sourceArtifactIds: string[];
+      centralSourceIds: string[];
+      reviewedByAgentId: string;
+      appliedAt: string;
+      status: string;
+      ingestionMode?: string;
+    };
+    item: KnowledgeItem;
+    updatedAt: string;
   } | null;
   updatedAt: string;
 };
@@ -1134,6 +1166,13 @@ export type KnowledgeIngestionAdapter = {
     proposalStatus: string;
     createsKnowledgeItem: boolean;
     requiresReview: boolean;
+  };
+  directReviewContract?: {
+    entrypoint: string;
+    creates: string[];
+    createsKnowledgeItem: boolean;
+    requiresScreening: boolean;
+    proposalStatus: string;
   };
 };
 

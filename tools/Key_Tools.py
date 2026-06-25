@@ -2022,19 +2022,26 @@ def create_key_tools() -> List[BaseTool]:
         tags: str = "",
         evidence_range_json: str = "{}",
         source_created_at: str = "",
+        inbox_source_id: str = "",
+        owner_type: str = "",
+        owner_id: str = "",
+        review_decision: str = "accepted",
+        resolution_note: str = "",
     ) -> str:
         """
-        【团队知识半自动摄取】基于中央来源提交 SourceArtifact + pending RefinementProposal。
+        【团队知识摄取】基于已筛选来源直接入库，或基于中央来源提交待审摄取包。
 
-        该工具不联网搜索、不解析 PDF、不收集原始来源、不直接创建正式知识；parser/searcher 需要先把原始材料交给 Owner source inbox。
-        正式 SourceArtifact 溯源以 central_source_id 对应的中央来源为准。
+        如果提供 inbox_source_id、owner_type、owner_id，本工具会审核该 Owner source inbox 来源；
+        accepted 来源会通过 Team Knowledge 治理门禁直接生成 SourceArtifact 和正式 KnowledgeItem。
+        如果不提供 inbox_source_id，则保留旧路径：基于 central_source_id 生成 SourceArtifact + pending RefinementProposal。
+        该工具不联网搜索、不解析 PDF、不收集原始来源；parser/searcher 需要先把原始材料交给 Owner source inbox。
         是否能向目标知识库提交由团队访问边界和 MemoryPolicy 决定。
 
         Args:
             knowledge_base_id: 目标团队知识库 ID
             source_type: 来源类型，需要与 central_source_id 指向的中央来源一致
             source_ref_json: 调用方上下文 JSON；正式 SourceArtifact 溯源以中央来源为准
-            proposal_title: 待审提案标题
+            proposal_title: 直接入库时的知识标题；旧摄取包路径中作为待审提案标题
             excerpt: 已提取的来源摘录
             proposal_content: 可选候选知识正文；为空时使用 excerpt/source_summary
             central_source_id: 已由 Steward 审核通过的中央来源 ID
@@ -2044,9 +2051,14 @@ def create_key_tools() -> List[BaseTool]:
             tags: 逗号分隔标签
             evidence_range_json: 可选证据范围 JSON
             source_created_at: 可选来源产生时间
+            inbox_source_id: 可选 Owner source inbox 来源 ID；提供后进入筛选直接入库路径
+            owner_type: inbox source 所属 owner 类型，team 或 agent
+            owner_id: inbox source 所属 owner ID
+            review_decision: inbox source 审核结论，默认 accepted
+            resolution_note: 审核说明
 
         Returns:
-            JSON 格式的摄取包结果，包含 SourceArtifact 和 pending RefinementProposal
+            JSON 格式结果；直接入库路径包含 directIngestion，旧路径包含 SourceArtifact 和 pending RefinementProposal
         """
         return _knowledge_ingestion_impl(
             knowledge_base_id=knowledge_base_id,
@@ -2062,6 +2074,11 @@ def create_key_tools() -> List[BaseTool]:
             tags=tags,
             evidence_range_json=evidence_range_json,
             source_created_at=source_created_at,
+            inbox_source_id=inbox_source_id,
+            owner_type=owner_type,
+            owner_id=owner_id,
+            review_decision=review_decision,
+            resolution_note=resolution_note,
         )
 
     @tool
