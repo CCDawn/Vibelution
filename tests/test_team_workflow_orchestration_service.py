@@ -492,6 +492,55 @@ def _seed_plan_with_smoke_run(team_id):
     )
 
 
+_PRD_VALIDATE_PATHS = [
+    "/teams/{team_id}/workflow-orchestration/" + endpoint
+    for endpoint in (
+        "knowledge-collection/extract",
+        "research/mechanisms/extract",
+        "research/mechanisms/map",
+        "research/hypotheses/generate",
+        "research/review/decide",
+        "experiments/plans/{plan_id}/smoke-run",
+        "iterations/propose",
+        "deliverables/export",
+    )
+]
+
+
+def test_validate_prd_passes_for_consistent_code(tmp_path, monkeypatch):
+    """N-14：schemas/registry/端点/runner 一致时 valid=True。"""
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = team_service.create_team(name="挑战杯科研团队")
+    res = team_workflow_orchestration_service.validate_prd(team["teamId"], {}, registered_paths=_PRD_VALIDATE_PATHS)
+    assert res["valid"] is True
+    assert res["failedCount"] == 0
+    names = {item["check"] for item in res["checks"]}
+    assert {
+        "schemas_present",
+        "candidate_types_in_sync",
+        "research_task_outputs_in_sync",
+        "research_endpoints_registered",
+        "smoke_runner_markers",
+    } <= names
+
+
+def test_validate_prd_detects_candidate_type_drift(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = team_service.create_team(name="挑战杯科研团队")
+    monkeypatch.setattr(team_workflow_orchestration_service, "CANDIDATE_TYPES", {"source_manifest"})
+    res = team_workflow_orchestration_service.validate_prd(team["teamId"], {})
+    assert res["valid"] is False
+    assert any(item["check"] == "candidate_types_in_sync" and not item["ok"] for item in res["checks"])
+
+
+def test_validate_prd_detects_missing_endpoint(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = team_service.create_team(name="挑战杯科研团队")
+    res = team_workflow_orchestration_service.validate_prd(team["teamId"], {}, registered_paths=["/only/one/path"])
+    assert res["valid"] is False
+    assert any(item["check"] == "research_endpoints_registered" and not item["ok"] for item in res["checks"])
+
+
 def test_export_deliverables_empty_team_is_blocked(tmp_path, monkeypatch):
     """N-13：证据不足时返回 blocker 清单而非伪造完整材料；不回写知识库。"""
     _use_tmp_project_root(tmp_path, monkeypatch)
