@@ -53,6 +53,7 @@ from core.web.services.team_workflow_orchestration_service import (
     review_steward_pack_knowledge_ingestion,
     retry_research_stage_round_coordination,
     retry_research_stage_round_memory_record,
+    rollback_official_research_graph,
     run_experiment_smoke_run,
     run_knowledge_collection_ingestion,
     run_knowledge_ingestion_precheck,
@@ -64,6 +65,7 @@ from core.web.services.team_workflow_orchestration_service import (
     start_source_collection_run,
     submit_transfer_request,
     submit_steward_pack_to_knowledge_ingestion,
+    sync_official_research_graph,
     validate_candidate_store,
     validate_prd,
     writeback_source_collection_stage_session_task,
@@ -478,6 +480,15 @@ class DeliverableExportPayload(BaseModel):
 
 class PrdValidatePayload(BaseModel):
     requestedByAgent: str = Field("", max_length=160)
+
+
+class KnowledgeGraphSyncPayload(BaseModel):
+    syncedByAgent: str = Field("", max_length=160)
+    force: bool = False
+
+
+class KnowledgeGraphRollbackPayload(BaseModel):
+    rolledBackByAgent: str = Field("", max_length=160)
 
 
 class PaperNoteChunkPlanPayload(BaseModel):
@@ -1265,6 +1276,42 @@ def team_workflow_prd_validate(team_id: str, payload: PrdValidatePayload) -> dic
             exc,
             status_code=422,
             fields={"requestedByAgent": payload.requestedByAgent},
+        )
+
+
+@router.post("/teams/{team_id}/workflow-orchestration/knowledge-graph/sync", status_code=status.HTTP_201_CREATED)
+def team_workflow_knowledge_graph_sync(team_id: str, payload: KnowledgeGraphSyncPayload) -> dict:
+    try:
+        return sync_official_research_graph(team_id, payload.model_dump())
+    except TeamNotFoundError as exc:
+        _raise_team_workflow_route_error(
+            "knowledge_graph.sync", team_id, exc, status_code=404, fields={"syncedByAgent": payload.syncedByAgent}
+        )
+    except (TeamServiceError, TeamWorkflowOrchestrationError) as exc:
+        _raise_team_workflow_route_error(
+            "knowledge_graph.sync",
+            team_id,
+            exc,
+            status_code=422,
+            fields={"syncedByAgent": payload.syncedByAgent, "force": payload.force},
+        )
+
+
+@router.post("/teams/{team_id}/workflow-orchestration/knowledge-graph/{sync_id}/rollback")
+def team_workflow_knowledge_graph_rollback(team_id: str, sync_id: str, payload: KnowledgeGraphRollbackPayload) -> dict:
+    try:
+        return rollback_official_research_graph(team_id, sync_id, payload.model_dump())
+    except TeamNotFoundError as exc:
+        _raise_team_workflow_route_error(
+            "knowledge_graph.rollback", team_id, exc, status_code=404, fields={"syncId": sync_id}
+        )
+    except (TeamServiceError, TeamWorkflowOrchestrationError) as exc:
+        _raise_team_workflow_route_error(
+            "knowledge_graph.rollback",
+            team_id,
+            exc,
+            status_code=422,
+            fields={"syncId": sync_id, "rolledBackByAgent": payload.rolledBackByAgent},
         )
 
 

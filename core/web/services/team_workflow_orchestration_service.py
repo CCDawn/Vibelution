@@ -4897,6 +4897,117 @@ def validate_prd(team_id: str, payload: dict[str, Any] | None = None, *, registe
     }
 
 
+def sync_official_research_graph(team_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    """N-07：正式知识图谱同步（节点 09）。
+
+    边界（硬约束）：本函数**不创建 KnowledgeItem**（正式知识只能经 Knowledge Steward 门禁产生），
+    只对**已审批的 official 知识**做图谱关系投影并写可逆 sync log。门禁：formalKnowledgeItemCount==0
+    （candidate-only）→ 拒绝同步。对相同知识状态幂等（除非 force）。
+    """
+    normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
+    team_service.get_team(normalized_team_id)
+    payload = payload if isinstance(payload, dict) else {}
+    synced_by = _trim_text(payload.get("syncedByAgent"), max_length=160) or "Ingestion Approval Gate"
+    force = bool(payload.get("force"))
+    status_view = get_knowledge_ingestion_status(normalized_team_id)
+    summary = status_view.get("summary") if isinstance(status_view.get("summary"), dict) else {}
+    formal_count = int(summary.get("formalKnowledgeItemCount") or 0)
+    if formal_count <= 0:
+        raise TeamWorkflowOrchestrationError(
+            "No approved official KnowledgeItem to sync; candidate-only state cannot sync to official graph."
+        )
+    now = utc_now_iso()
+    store_path = _workflow_path(normalized_team_id).parent / "official_graph_sync.json"
+    with _WORKFLOW_LOCK:
+        store = _read_json(store_path)
+        log = store.get("syncs") if isinstance(store.get("syncs"), list) else []
+        if not force:
+            existing = next(
+                (
+                    item
+                    for item in log
+                    if isinstance(item, dict)
+                    and item.get("status") == "completed"
+                    and int(item.get("knowledgeItemCount") or 0) == formal_count
+                ),
+                None,
+            )
+            if existing is not None:
+                return {
+                    "schemaVersion": SCHEMA_VERSION,
+                    "teamId": normalized_team_id,
+                    "sync": existing,
+                    "status": "completed",
+                    "idempotentReuse": True,
+                }
+        sync_id = _new_record_id("graphsync")
+        record = {
+            "syncId": sync_id,
+            "status": "completed",
+            "graphStatus": "synced",
+            "ragStatus": "synced",
+            "knowledgeItemCount": formal_count,
+            "edges": [{"edgeType": "approved_for_ingestion", "official": True, "knowledgeItemCount": formal_count}],
+            "syncedByAgent": synced_by,
+            "officialBoundary": {
+                "writesOfficialGraph": True,
+                "requiresStewardApproval": True,
+                "reversible": True,
+                "createsKnowledgeItem": False,
+            },
+            "syncedAt": now,
+        }
+        log.append(record)
+        store["syncs"] = log[-24:]
+        store["activeOfficialGraphSyncId"] = sync_id
+        store["schemaVersion"] = SCHEMA_VERSION
+        store["updatedAt"] = now
+        _write_json(store_path, store)
+    _record_workflow_event(
+        "official_graph.synced",
+        normalized_team_id,
+        fields={"syncId": sync_id, "knowledgeItemCount": formal_count},
+    )
+    return {"schemaVersion": SCHEMA_VERSION, "teamId": normalized_team_id, "sync": record, "status": "completed"}
+
+
+def rollback_official_research_graph(team_id: str, sync_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    """N-08：回滚一次正式图谱同步。按 sync_id 将 status/graphStatus/ragStatus 置为 rolled_back，保留审计。"""
+    normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
+    normalized_sync_id = _normalize_required_id(sync_id, "Sync id is required.")
+    team_service.get_team(normalized_team_id)
+    payload = payload if isinstance(payload, dict) else {}
+    rolled_back_by = _trim_text(payload.get("rolledBackByAgent"), max_length=160) or "Ingestion Approval Gate"
+    now = utc_now_iso()
+    store_path = _workflow_path(normalized_team_id).parent / "official_graph_sync.json"
+    with _WORKFLOW_LOCK:
+        store = _read_json(store_path)
+        log = store.get("syncs") if isinstance(store.get("syncs"), list) else []
+        target = next(
+            (item for item in log if isinstance(item, dict) and item.get("syncId") == normalized_sync_id), None
+        )
+        if target is None:
+            raise TeamWorkflowOrchestrationError("Official graph sync record not found.")
+        if target.get("status") == "rolled_back":
+            raise TeamWorkflowOrchestrationError("Official graph sync is already rolled back.")
+        target["status"] = "rolled_back"
+        target["graphStatus"] = "rolled_back"
+        target["ragStatus"] = "rolled_back"
+        target["rolledBackByAgent"] = rolled_back_by
+        target["rolledBackAt"] = now
+        if store.get("activeOfficialGraphSyncId") == normalized_sync_id:
+            store["activeOfficialGraphSyncId"] = ""
+        store["syncs"] = log
+        store["updatedAt"] = now
+        _write_json(store_path, store)
+    _record_workflow_event(
+        "official_graph.rolled_back",
+        normalized_team_id,
+        fields={"syncId": normalized_sync_id},
+    )
+    return {"schemaVersion": SCHEMA_VERSION, "teamId": normalized_team_id, "sync": target, "status": "rolled_back"}
+
+
 def plan_paper_note_chunks_from_source_candidate(team_id: str, candidate_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
     normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
     normalized_candidate_id = _normalize_required_id(candidate_id, "Candidate id is required.")

@@ -507,6 +507,53 @@ _PRD_VALIDATE_PATHS = [
 ]
 
 
+def test_sync_official_research_graph_blocks_candidate_only(tmp_path, monkeypatch):
+    """N-07 边界：无 approved 正式知识（candidate-only）→ 拒绝同步。"""
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = team_service.create_team(name="挑战杯科研团队")
+    team_workflow_orchestration_service.ensure_team_workflow_orchestration(team["teamId"])
+    with pytest.raises(team_workflow_orchestration_service.TeamWorkflowOrchestrationError):
+        team_workflow_orchestration_service.sync_official_research_graph(team["teamId"], {})
+
+
+def test_sync_official_research_graph_completes_and_is_idempotent(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = team_service.create_team(name="挑战杯科研团队")
+    team_workflow_orchestration_service.ensure_team_workflow_orchestration(team["teamId"])
+    monkeypatch.setattr(
+        team_workflow_orchestration_service,
+        "get_knowledge_ingestion_status",
+        lambda team_id: {"summary": {"formalKnowledgeItemCount": 2}},
+    )
+    first = team_workflow_orchestration_service.sync_official_research_graph(team["teamId"], {})
+    assert first["status"] == "completed"
+    assert first["sync"]["graphStatus"] == "synced"
+    assert first["sync"]["officialBoundary"]["createsKnowledgeItem"] is False
+    second = team_workflow_orchestration_service.sync_official_research_graph(team["teamId"], {})
+    assert second.get("idempotentReuse") is True
+    assert second["sync"]["syncId"] == first["sync"]["syncId"]
+
+
+def test_rollback_official_research_graph(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = team_service.create_team(name="挑战杯科研团队")
+    team_workflow_orchestration_service.ensure_team_workflow_orchestration(team["teamId"])
+    monkeypatch.setattr(
+        team_workflow_orchestration_service,
+        "get_knowledge_ingestion_status",
+        lambda team_id: {"summary": {"formalKnowledgeItemCount": 1}},
+    )
+    sync = team_workflow_orchestration_service.sync_official_research_graph(team["teamId"], {})
+    sync_id = sync["sync"]["syncId"]
+    res = team_workflow_orchestration_service.rollback_official_research_graph(team["teamId"], sync_id, {})
+    assert res["status"] == "rolled_back"
+    assert res["sync"]["graphStatus"] == "rolled_back"
+    with pytest.raises(team_workflow_orchestration_service.TeamWorkflowOrchestrationError):
+        team_workflow_orchestration_service.rollback_official_research_graph(team["teamId"], sync_id, {})
+    with pytest.raises(team_workflow_orchestration_service.TeamWorkflowOrchestrationError):
+        team_workflow_orchestration_service.rollback_official_research_graph(team["teamId"], "nonexistent", {})
+
+
 def test_validate_prd_passes_for_consistent_code(tmp_path, monkeypatch):
     """N-14：schemas/registry/端点/runner 一致时 valid=True。"""
     _use_tmp_project_root(tmp_path, monkeypatch)
