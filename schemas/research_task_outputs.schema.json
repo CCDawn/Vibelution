@@ -1,0 +1,148 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "research_task_outputs.schema.json",
+  "title": "ResearchTaskOutputs",
+  "description": "local-research-model 各任务输出契约；与 service.LOCAL_RESEARCH_TASKS 同步。",
+  "type": "object",
+  "$defs": {
+    "source_screening": {
+      "type": "object",
+      "required": [
+        "candidateType",
+        "sourceRefs",
+        "evidenceRefs",
+        "claims",
+        "riskFlags",
+        "confidence",
+        "nextAction",
+        "requiresReview"
+      ],
+      "x-targetCandidateType": "source_manifest"
+    },
+    "paper_note_draft": {
+      "type": "object",
+      "required": [
+        "candidateType",
+        "sourceRefs",
+        "evidenceRefs",
+        "claims",
+        "uncertainty",
+        "riskFlags",
+        "confidence",
+        "nextAction",
+        "requiresReview",
+        "keyFindings",
+        "methods",
+        "limitations",
+        "citations"
+      ],
+      "x-targetCandidateType": "paper_note"
+    },
+    "neuro_mechanism_extract": {
+      "type": "object",
+      "required": [
+        "candidateType",
+        "sourceRefs",
+        "evidenceRefs",
+        "claims",
+        "uncertainty",
+        "riskFlags",
+        "confidence",
+        "nextAction",
+        "requiresReview",
+        "paperNoteIds",
+        "description",
+        "brainSystems",
+        "cognitiveFunctions",
+        "experimentalPhenomena",
+        "authorInterpretation",
+        "projectInterpretation"
+      ],
+      "x-targetCandidateType": "neuro_mechanism"
+    },
+    "mechanism_mapping": {
+      "type": "object",
+      "required": [
+        "candidateType",
+        "sourceRefs",
+        "evidenceRefs",
+        "claims",
+        "uncertainty",
+        "riskFlags",
+        "confidence",
+        "nextAction",
+        "requiresReview",
+        "neuroMechanismIds",
+        "computationalAbstraction",
+        "factLayer",
+        "inferenceLayer",
+        "overAnalogyRisk",
+        "engineeringImplication"
+      ],
+      "x-targetCandidateType": "mechanism_mapping"
+    },
+    "algorithm_hypothesis_draft": {
+      "type": "object",
+      "required": [
+        "candidateType",
+        "sourceRefs",
+        "evidenceRefs",
+        "claims",
+        "uncertainty",
+        "riskFlags",
+        "confidence",
+        "nextAction",
+        "requiresReview",
+        "mechanismMappingIds",
+        "hypothesis",
+        "baseline",
+        "expectedBenefit",
+        "expectedComputeCost",
+        "experimentPlan"
+      ],
+      "x-targetCandidateType": "algorithm_hypothesis"
+    },
+    "review_prefilter": {
+      "type": "object",
+      "required": [
+        "candidateType",
+        "sourceRefs",
+        "evidenceRefs",
+        "claims",
+        "uncertainty",
+        "riskFlags",
+        "confidence",
+        "nextAction",
+        "requiresReview",
+        "candidateIds",
+        "checklist",
+        "comments",
+        "requiredChanges",
+        "needsDecision"
+      ],
+      "x-targetCandidateType": "review_record"
+    },
+    "steward_pack_draft": {
+      "type": "object",
+      "required": [
+        "candidateType",
+        "sourceRefs",
+        "evidenceRefs",
+        "claims",
+        "uncertainty",
+        "riskFlags",
+        "confidence",
+        "nextAction",
+        "requiresReview",
+        "candidateIds",
+        "targetDomain",
+        "sourceTrace",
+        "riskSummary",
+        "proposalPayload",
+        "ratingSuggestion",
+        "approvalRequired"
+      ],
+      "x-targetCandidateType": "review_record"
+    }
+  }
+}
