@@ -82,6 +82,11 @@ CHAT_ROOM_PURPOSES = [
         "description": "Research organization coordination with role-aware reporting, evidence, and task routing.",
     },
     {
+        "id": "knowledge_expansion",
+        "label": "Knowledge expansion",
+        "description": "Knowledge expansion coordination across source intake, extraction, quality review, candidate graph, and steward ingestion.",
+    },
+    {
         "id": "ai_search",
         "label": "AI search",
         "description": "AI source-scope curation, source tiering, default enablement, and signal quality checks.",

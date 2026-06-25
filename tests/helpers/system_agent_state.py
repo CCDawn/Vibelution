@@ -119,6 +119,8 @@ def _create_supervised_role_agent(role: str, label: str) -> dict[str, Any]:
 
 
 def _seed_system_team_bootstrap_ready() -> None:
+    team_service.ensure_challenge_cup_research_team_agents(purge_stale=False)
+    team_service.ensure_knowledge_expansion_team_agents(purge_stale=False)
     now = team_service.utc_now_iso()
     state = team_service._load_index()
     teams = [
