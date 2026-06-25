@@ -1122,9 +1122,9 @@ def start_source_collection_stage_session_task(
         "matchingAssignmentCount": len(matching_assignments),
         "storageArtifacts": storage_artifacts,
         "writebackContract": writeback_contract,
-        "writesFormalKnowledge": False,
+        "writesFormalKnowledge": bool(writeback_contract.get("writesFormalKnowledge")),
         "writesRag": False,
-        "writesOfficialGraph": False,
+        "writesOfficialGraph": bool(writeback_contract.get("writesOfficialGraph")),
         "turn": {},
         "result": {},
         "writeback": {},
@@ -1207,7 +1207,7 @@ def start_source_collection_stage_session_task(
         "turn": task_record["turn"],
         "chatRoute": _source_collection_stage_task_chat_route(session_id, return_to=return_to, return_label=return_label),
         "writebackContract": writeback_contract,
-        "boundaries": _source_collection_stage_session_task_boundaries(),
+        "boundaries": _source_collection_stage_session_task_boundaries(stage_id=stage_id, agent_role=agent_role),
     }
 
 
@@ -1253,9 +1253,16 @@ def writeback_source_collection_stage_session_task(
         task,
         writeback,
     )
+    materialized_knowledge_ingestion = _materialize_source_collection_stage_writeback_knowledge_ingestion(
+        normalized_team_id,
+        run_id,
+        task,
+        writeback,
+    )
     writeback["materializedSources"] = materialized_sources
     writeback["materializedSourceQuality"] = materialized_source_quality
     writeback["materializedCandidateGraph"] = materialized_candidate_graph
+    writeback["materializedKnowledgeIngestion"] = materialized_knowledge_ingestion
     task["status"] = status
     task["summary"] = writeback["summary"] or _trim_text(task.get("summary"), max_length=4000)
     task["result"] = writeback["result"]
@@ -1265,12 +1272,14 @@ def writeback_source_collection_stage_session_task(
         task["result"]["materializedSourceQuality"] = materialized_source_quality
     if materialized_candidate_graph.get("candidateGraphId"):
         task["result"]["materializedCandidateGraph"] = materialized_candidate_graph
+    if materialized_knowledge_ingestion.get("formalKnowledgeItemCount") or materialized_knowledge_ingestion.get("stewardPackCandidateId"):
+        task["result"]["materializedKnowledgeIngestion"] = materialized_knowledge_ingestion
     task["evidenceRefs"] = writeback["evidenceRefs"]
     task["nextActions"] = writeback["nextActions"]
     task["writeback"] = writeback
-    task["writesFormalKnowledge"] = False
-    task["writesRag"] = False
-    task["writesOfficialGraph"] = False
+    task["writesFormalKnowledge"] = bool(materialized_knowledge_ingestion.get("writesFormalKnowledge"))
+    task["writesRag"] = bool(materialized_knowledge_ingestion.get("writesRag"))
+    task["writesOfficialGraph"] = bool(materialized_knowledge_ingestion.get("writesOfficialGraph"))
     turn = task.get("turn") if isinstance(task.get("turn"), dict) else {}
     if turn:
         next_turn = dict(turn)
@@ -1297,6 +1306,9 @@ def writeback_source_collection_stage_session_task(
             "candidateGraphId": materialized_candidate_graph.get("candidateGraphId", ""),
             "candidateGraphCreatedCount": materialized_candidate_graph.get("createdCandidateGraphCount", 0),
             "candidateGraphReused": bool(materialized_candidate_graph.get("reusedCandidateGraph")),
+            "knowledgeIngestionStatus": materialized_knowledge_ingestion.get("status", ""),
+            "formalKnowledgeItemCount": materialized_knowledge_ingestion.get("formalKnowledgeItemCount", 0),
+            "stewardPackCandidateId": materialized_knowledge_ingestion.get("stewardPackCandidateId", ""),
         },
     )
     return {
@@ -1309,7 +1321,10 @@ def writeback_source_collection_stage_session_task(
         "agentRole": task.get("agentRole", ""),
         "task": task,
         "writeback": writeback,
-        "boundaries": _source_collection_stage_session_task_boundaries(),
+        "boundaries": _source_collection_stage_session_task_boundaries(
+            stage_id=_trim_text(task.get("stageId"), max_length=80),
+            agent_role=_trim_text(task.get("agentRole"), max_length=80),
+        ),
     }
 
 
@@ -2852,6 +2867,486 @@ def _materialize_source_collection_stage_writeback_candidate_graph(
         lifecycle=bool(summary["failedCandidateGraphCount"]),
     )
     return summary
+
+
+def _materialize_source_collection_stage_writeback_knowledge_ingestion(
+    team_id: str,
+    run_id: str,
+    task: dict[str, Any],
+    writeback: dict[str, Any],
+) -> dict[str, Any]:
+    stage_id = _trim_text(task.get("stageId"), max_length=80)
+    agent_role = _trim_text(task.get("agentRole"), max_length=80)
+    if not _source_collection_stage_can_materialize_formal_knowledge(stage_id, agent_role):
+        return _source_collection_stage_writeback_knowledge_ingestion_summary(status="skipped_stage")
+    status = _trim_text(writeback.get("status"), max_length=80).lower()
+    if status not in SOURCE_COLLECTION_STAGE_WRITEBACK_MATERIALIZED_STATUSES:
+        return _source_collection_stage_writeback_knowledge_ingestion_summary(status="skipped_status")
+
+    result = writeback.get("result") if isinstance(writeback.get("result"), dict) else {}
+    approved_refs = _source_collection_stage_writeback_approved_candidate_refs(result, writeback)
+    if not approved_refs:
+        return _source_collection_stage_writeback_knowledge_ingestion_summary(status="no_approved_candidates")
+
+    source_candidates = {
+        _trim_text(item.get("candidateId"), max_length=160): item
+        for item in _source_collection_candidates_for_run(team_id, run_id)
+        if _trim_text(item.get("candidateId"), max_length=160)
+    }
+    source_candidate_ids = set(source_candidates.keys())
+    selected_candidates: list[dict[str, Any]] = []
+    skipped: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for ref in approved_refs:
+        candidate_id = _trim_text(ref.get("candidateId"), max_length=160)
+        if not candidate_id:
+            skipped.append({"reason": "missing_candidate_id"})
+            continue
+        if candidate_id in seen:
+            skipped.append({"candidateId": candidate_id, "reason": "duplicate_approved_candidate"})
+            continue
+        seen.add(candidate_id)
+        candidate = source_candidates.get(candidate_id)
+        if candidate is None:
+            skipped.append({"candidateId": candidate_id, "reason": "candidate_not_in_source_collection_run"})
+            continue
+        if _source_quality_bucket(candidate) != "approved":
+            skipped.append({"candidateId": candidate_id, "reason": "candidate_not_source_quality_approved"})
+            continue
+        selected_candidates.append(candidate)
+
+    if not selected_candidates:
+        return _source_collection_stage_writeback_knowledge_ingestion_summary(
+            status="no_ingestable_candidates",
+            approved=approved_refs,
+            skipped=skipped,
+        )
+
+    steward_agent_id = (
+        _trim_text(writeback.get("recordedByAgent"), max_length=160)
+        or _trim_text(task.get("agentId"), max_length=160)
+        or agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID
+    )
+    try:
+        with _WORKFLOW_LOCK:
+            workflow = _load_or_create_workflow(team_id)
+            candidate_store = _load_candidate_store(team_id)
+            stored_candidates = [item for item in list(candidate_store.get("candidates") or []) if isinstance(item, dict)]
+            selected_candidate_ids = {str(item.get("candidateId") or "") for item in selected_candidates if str(item.get("candidateId") or "")}
+            existing = _source_collection_existing_official_knowledge_ingestion(
+                stored_candidates,
+                source_candidate_ids=source_candidate_ids,
+                selected_candidate_ids=selected_candidate_ids,
+            )
+            graph_candidates = [
+                item
+                for item in stored_candidates
+                if str(item.get("candidateType") or "") == "candidate_graph"
+                and not _candidate_is_archived(item)
+                and _source_collection_candidate_graph_matches_run(item, source_candidate_ids)
+            ]
+            latest_graph = _latest_candidate_record(graph_candidates)
+            workflow_id = str(workflow.get("workflowId") or "")
+        if existing:
+            return _source_collection_stage_writeback_existing_knowledge_ingestion_summary(
+                existing,
+                selected_candidates=selected_candidates,
+                skipped=skipped,
+            )
+
+        knowledge_base = _source_collection_stage_writeback_resolve_knowledge_base(team_id, steward_agent_id)
+        knowledge_base_id = _trim_text(knowledge_base.get("knowledgeBaseId"), max_length=160)
+        if not knowledge_base_id:
+            raise TeamWorkflowOrchestrationError("Knowledge base id is required before steward writeback ingestion.")
+        team_knowledge_service.ensure_knowledge_base_review_grant(knowledge_base_id, steward_agent_id)
+        target_domain = _source_collection_stage_writeback_target_domain(result)
+        output = _build_knowledge_ingestion_precheck_output(
+            team_id,
+            workflow_id,
+            selected_candidates,
+            latest_graph,
+            target_domain=target_domain,
+        )
+        proposal_payload = output.get("proposalPayload") if isinstance(output.get("proposalPayload"), dict) else {}
+        if len(selected_candidates) == 1:
+            candidate_title = _source_manifest_label(selected_candidates[0])
+            proposal_payload["title"] = candidate_title
+            proposal_payload["summary"] = _trim_text(selected_candidates[0].get("summary"), max_length=1000) or proposal_payload.get("summary", "")
+            output["proposalPayload"] = proposal_payload
+        source_trace = output.get("sourceTrace") if isinstance(output.get("sourceTrace"), dict) else {}
+        source_trace.update(
+            {
+                "sourceCollectionRunId": _trim_text(run_id, max_length=160),
+                "stageTaskId": _trim_text(task.get("taskId"), max_length=160),
+                "stageId": stage_id,
+                "approvedByAgentId": steward_agent_id,
+            }
+        )
+        output["sourceTrace"] = source_trace
+        output["knowledgeCollectionIngestion"] = {
+            "purpose": "source_collection_stage_writeback",
+            "sourceCollectionRunId": _trim_text(run_id, max_length=160),
+            "stageTaskId": _trim_text(task.get("taskId"), max_length=160),
+        }
+        record_response = record_local_research_model_output(
+            team_id,
+            {
+                "taskType": "steward_pack_draft",
+                "title": "知识库管理员入库审核包",
+                "summary": _trim_text(writeback.get("summary"), max_length=1000)
+                or f"知识库管理员通过 {len(selected_candidates)} 条资料，生成团队知识库入库包。",
+                "createdByAgent": steward_agent_id,
+                "output": output,
+            },
+        )
+        steward_candidate = record_response.get("candidate") if isinstance(record_response.get("candidate"), dict) else {}
+        steward_candidate_id = _trim_text(steward_candidate.get("candidateId"), max_length=160)
+        source_pending = submit_steward_pack_to_knowledge_ingestion(
+            team_id,
+            steward_candidate_id,
+            {
+                "knowledgeBaseId": knowledge_base_id,
+                "proposedByAgentId": steward_agent_id,
+            },
+        )
+        source_metadata = (source_pending.get("candidate") or {}).get("metadata") if isinstance((source_pending.get("candidate") or {}).get("metadata"), dict) else {}
+        source_ingestion = source_metadata.get("knowledgeIngestion") if isinstance(source_metadata.get("knowledgeIngestion"), dict) else {}
+        inbox_source_id = _trim_text(source_ingestion.get("inboxSourceId"), max_length=160)
+        if not inbox_source_id:
+            raise TeamWorkflowOrchestrationError("Steward pack source inbox id was not created.")
+        reviewed_source = team_knowledge_service.review_owner_inbox_source(
+            "team",
+            team_id,
+            inbox_source_id,
+            decision="accepted",
+            reviewed_by_agent_id=steward_agent_id,
+            resolution_note="知识库管理员阶段回写通过资料，自动接受入库包来源。",
+        )
+        central_source_id = _trim_text((reviewed_source.get("centralSource") or {}).get("centralSourceId"), max_length=160)
+        knowledge_submission = submit_steward_pack_to_knowledge_ingestion(
+            team_id,
+            steward_candidate_id,
+            {
+                "knowledgeBaseId": knowledge_base_id,
+                "proposedByAgentId": steward_agent_id,
+                "centralSourceId": central_source_id,
+            },
+        )
+        knowledge_review = review_steward_pack_knowledge_ingestion(
+            team_id,
+            steward_candidate_id,
+            {
+                "knowledgeBaseId": knowledge_base_id,
+                "reviewedByAgentId": steward_agent_id,
+                "decision": "approved",
+                "resolutionNote": "知识库管理员已在阶段私聊中审核通过候选资料，按现有知识治理门禁应用为正式团队知识。",
+            },
+        )
+    except (
+        TeamWorkflowOrchestrationError,
+        team_service.TeamServiceError,
+        team_knowledge_service.TeamKnowledgeError,
+        team_knowledge_service.TeamKnowledgeNotFoundError,
+    ) as exc:
+        summary = _source_collection_stage_writeback_knowledge_ingestion_summary(
+            status="failed",
+            approved=approved_refs,
+            skipped=skipped,
+            failed=[{"reason": "knowledge_ingestion_failed", "error": _trim_text(exc, max_length=800)}],
+        )
+        _record_workflow_event(
+            "source_collection.stage_session_task_knowledge_ingestion_failed",
+            team_id,
+            fields={
+                "runId": _trim_text(run_id, max_length=160),
+                "taskId": _trim_text(task.get("taskId"), max_length=160),
+                "stageId": stage_id,
+                "agentId": _trim_text(task.get("agentId"), max_length=160),
+                "approvedCandidateCount": len(selected_candidates),
+                "errorType": type(exc).__name__,
+                "error": _trim_text(exc, max_length=500),
+            },
+            level="warning",
+            outcome="failed",
+            lifecycle=True,
+        )
+        return summary
+
+    review_ingestion = knowledge_review.get("knowledgeIngestion") if isinstance(knowledge_review.get("knowledgeIngestion"), dict) else {}
+    official_record = review_ingestion.get("officialSyncRecord") if isinstance(review_ingestion.get("officialSyncRecord"), dict) else {}
+    knowledge_item_ids = _normalize_id_values(official_record.get("knowledgeItemIds"))
+    submission_candidate = knowledge_submission.get("candidate") if isinstance(knowledge_submission.get("candidate"), dict) else {}
+    submission_metadata = submission_candidate.get("metadata") if isinstance(submission_candidate.get("metadata"), dict) else {}
+    submission_ingestion = submission_metadata.get("knowledgeIngestion") if isinstance(submission_metadata.get("knowledgeIngestion"), dict) else {}
+    summary = _source_collection_stage_writeback_knowledge_ingestion_summary(
+        status="completed" if knowledge_item_ids else "applied_without_formal_item",
+        approved=approved_refs,
+        ingested=selected_candidates,
+        skipped=skipped,
+        steward_pack_candidate_id=steward_candidate_id,
+        knowledge_base_id=knowledge_base_id,
+        knowledge_item_ids=knowledge_item_ids,
+        writes_official_graph=bool(official_record.get("writesOfficialGraph")),
+        source_review_status=_trim_text(reviewed_source.get("status"), max_length=80)
+        or _trim_text((reviewed_source.get("source") or {}).get("status"), max_length=80),
+        proposal_id=_trim_text(submission_ingestion.get("proposalId"), max_length=160),
+        reused=False,
+    )
+    _record_workflow_event(
+        "source_collection.stage_session_task_knowledge_ingestion_materialized",
+        team_id,
+        fields={
+            "runId": _trim_text(run_id, max_length=160),
+            "taskId": _trim_text(task.get("taskId"), max_length=160),
+            "stageId": stage_id,
+            "agentId": _trim_text(task.get("agentId"), max_length=160),
+            "stewardAgentId": steward_agent_id,
+            "approvedCandidateCount": summary["approvedCandidateCount"],
+            "formalKnowledgeItemCount": summary["formalKnowledgeItemCount"],
+            "knowledgeBaseId": knowledge_base_id,
+            "stewardPackCandidateId": steward_candidate_id,
+            "writesOfficialGraph": summary["writesOfficialGraph"],
+        },
+    )
+    return summary
+
+
+def _source_collection_stage_writeback_approved_candidate_refs(
+    result: dict[str, Any],
+    writeback: dict[str, Any],
+) -> list[dict[str, Any]]:
+    refs: list[dict[str, Any]] = []
+
+    def add_candidate(value: Any, *, source: str) -> None:
+        if isinstance(value, dict):
+            candidate_id = _trim_text(
+                value.get("candidateId") or value.get("candidate_id") or value.get("id"),
+                max_length=160,
+            )
+            if candidate_id:
+                refs.append({"candidateId": candidate_id, "source": source, "payload": _normalize_metadata(value)})
+            return
+        candidate_id = _trim_text(value, max_length=160)
+        if candidate_id:
+            refs.append({"candidateId": candidate_id, "source": source})
+
+    def add_from_approved_container(container: Any, *, source: str) -> None:
+        if isinstance(container, list):
+            for item in container:
+                add_candidate(item, source=source)
+            return
+        if not isinstance(container, dict):
+            add_candidate(container, source=source)
+            return
+        for key in ("candidates", "candidateIds", "candidate_ids", "items", "sources", "sourceCandidates"):
+            value = container.get(key)
+            if isinstance(value, list):
+                for item in value:
+                    add_candidate(item, source=f"{source}.{key}")
+        add_candidate(container, source=source)
+
+    containers = [result]
+    for key in ("candidate_summary", "candidateSummary", "steward_assessment", "stewardAssessment", "summary", "outputs"):
+        value = result.get(key)
+        if isinstance(value, dict):
+            containers.append(value)
+    for container in containers:
+        for key in (
+            "approved",
+            "accepted",
+            "passed",
+            "approvedCandidates",
+            "approved_candidates",
+            "acceptedCandidates",
+            "accepted_candidates",
+        ):
+            if key in container:
+                add_from_approved_container(container.get(key), source=key)
+        for key in ("approvedCandidateIds", "approved_candidate_ids", "acceptedCandidateIds", "candidateIds"):
+            value = container.get(key)
+            if isinstance(value, list):
+                for item in value:
+                    add_candidate(item, source=key)
+
+    for decision in _source_collection_stage_writeback_candidate_decisions(result):
+        if _source_collection_stage_writeback_quality_decision(decision) == "approved":
+            add_candidate(decision, source="candidate_decision")
+
+    steward_assessment = result.get("steward_assessment") if isinstance(result.get("steward_assessment"), dict) else {}
+    if not steward_assessment and isinstance(result.get("stewardAssessment"), dict):
+        steward_assessment = result["stewardAssessment"]
+    if _source_collection_stage_writeback_quality_decision(steward_assessment) == "approved":
+        for ref in list(writeback.get("evidenceRefs") or []):
+            if not isinstance(ref, dict):
+                continue
+            ref_type = _trim_text(ref.get("type") or ref.get("kind"), max_length=80).lower()
+            if ref_type in {"candidate", "source_candidate", "source_manifest"}:
+                add_candidate(ref.get("id") or ref.get("candidateId"), source="evidence_ref")
+
+    deduped: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for ref in refs:
+        candidate_id = _trim_text(ref.get("candidateId"), max_length=160)
+        if not candidate_id or candidate_id in seen:
+            continue
+        seen.add(candidate_id)
+        deduped.append(ref)
+    return deduped[:200]
+
+
+def _source_collection_existing_official_knowledge_ingestion(
+    candidates: list[dict[str, Any]],
+    *,
+    source_candidate_ids: set[str],
+    selected_candidate_ids: set[str],
+) -> dict[str, Any]:
+    if not source_candidate_ids or not selected_candidate_ids:
+        return {}
+    for candidate in sorted(candidates, key=lambda item: str(item.get("updatedAt") or item.get("createdAt") or ""), reverse=True):
+        if not isinstance(candidate, dict):
+            continue
+        if str(candidate.get("currentState") or "") not in {"official_synced", "formal_knowledge_synced"}:
+            continue
+        metadata = candidate.get("metadata") if isinstance(candidate.get("metadata"), dict) else {}
+        if str(metadata.get("taskType") or "") != "steward_pack_draft":
+            continue
+        if not _source_collection_steward_candidate_matches_run(candidate, source_candidate_ids):
+            continue
+        output = metadata.get("output") if isinstance(metadata.get("output"), dict) else {}
+        candidate_ids = set(_normalize_id_values(output.get("candidateIds")))
+        if selected_candidate_ids and not selected_candidate_ids.issubset(candidate_ids):
+            continue
+        return candidate
+    return {}
+
+
+def _source_collection_stage_writeback_existing_knowledge_ingestion_summary(
+    candidate: dict[str, Any],
+    *,
+    selected_candidates: list[dict[str, Any]],
+    skipped: list[dict[str, Any]],
+) -> dict[str, Any]:
+    metadata = candidate.get("metadata") if isinstance(candidate.get("metadata"), dict) else {}
+    official_record = metadata.get("officialSyncRecord") if isinstance(metadata.get("officialSyncRecord"), dict) else {}
+    ingestion = metadata.get("knowledgeIngestion") if isinstance(metadata.get("knowledgeIngestion"), dict) else {}
+    knowledge_item_ids = _normalize_id_values(official_record.get("knowledgeItemIds") or ingestion.get("knowledgeItemIds"))
+    return _source_collection_stage_writeback_knowledge_ingestion_summary(
+        status="completed",
+        approved=[{"candidateId": str(item.get("candidateId") or ""), "source": "existing_official_sync"} for item in selected_candidates],
+        ingested=selected_candidates,
+        skipped=skipped,
+        steward_pack_candidate_id=_trim_text(candidate.get("candidateId"), max_length=160),
+        knowledge_base_id=_trim_text(official_record.get("knowledgeBaseId") or ingestion.get("knowledgeBaseId"), max_length=160),
+        knowledge_item_ids=knowledge_item_ids,
+        writes_official_graph=bool(official_record.get("writesOfficialGraph") or ingestion.get("writesOfficialGraph")),
+        proposal_id=_trim_text(official_record.get("proposalId") or ingestion.get("proposalId"), max_length=160),
+        reused=True,
+    )
+
+
+def _source_collection_stage_writeback_resolve_knowledge_base(team_id: str, steward_agent_id: str) -> dict[str, Any]:
+    status_payload = get_knowledge_ingestion_status(team_id)
+    existing_bases = [item for item in list(status_payload.get("knowledgeBases") or []) if isinstance(item, dict)]
+    if existing_bases:
+        return existing_bases[0]
+    team = team_service.get_team(team_id)
+    actor_agent_id = _source_collection_stage_writeback_knowledge_base_creator_agent(team, steward_agent_id)
+    if not actor_agent_id:
+        raise TeamWorkflowOrchestrationError("No team member is available to create the Team Knowledge base.")
+    return team_knowledge_service.create_knowledge_base(
+        team_id,
+        name="挑战杯科研知识库",
+        description="由知识库管理员阶段回写自动创建，用于保存通过审核的挑战杯资料。",
+        actor_agent_id=actor_agent_id,
+    )
+
+
+def _source_collection_stage_writeback_knowledge_base_creator_agent(team: dict[str, Any], steward_agent_id: str) -> str:
+    members = [item for item in list((team or {}).get("members") or []) if isinstance(item, dict)]
+    steward_id = _trim_text(steward_agent_id, max_length=160)
+    for member in members:
+        agent_id = _trim_text(member.get("agentId"), max_length=160)
+        if agent_id and agent_id == steward_id:
+            return agent_id
+    for hint in ("steward", "coordination", "coordinator", "lead", "owner"):
+        for member in members:
+            agent_id = _trim_text(member.get("agentId"), max_length=160)
+            role = _trim_text(member.get("role"), max_length=120).lower()
+            if agent_id and hint in role:
+                return agent_id
+    for member in members:
+        agent_id = _trim_text(member.get("agentId"), max_length=160)
+        if agent_id:
+            return agent_id
+    return ""
+
+
+def _source_collection_stage_writeback_target_domain(result: dict[str, Any]) -> str:
+    for container in (
+        result,
+        result.get("steward_assessment") if isinstance(result.get("steward_assessment"), dict) else {},
+        result.get("stewardAssessment") if isinstance(result.get("stewardAssessment"), dict) else {},
+        result.get("candidate_summary") if isinstance(result.get("candidate_summary"), dict) else {},
+        result.get("candidateSummary") if isinstance(result.get("candidateSummary"), dict) else {},
+    ):
+        if not isinstance(container, dict):
+            continue
+        value = _trim_text(container.get("targetDomain") or container.get("target_domain") or container.get("domain"), max_length=240)
+        if value:
+            return value
+    return "神经机制启发神经网络算法"
+
+
+def _source_collection_stage_writeback_knowledge_ingestion_summary(
+    *,
+    status: str,
+    approved: list[dict[str, Any]] | None = None,
+    ingested: list[dict[str, Any]] | None = None,
+    skipped: list[dict[str, Any]] | None = None,
+    failed: list[dict[str, Any]] | None = None,
+    steward_pack_candidate_id: str = "",
+    knowledge_base_id: str = "",
+    knowledge_item_ids: list[str] | None = None,
+    writes_official_graph: bool = False,
+    source_review_status: str = "",
+    proposal_id: str = "",
+    reused: bool = False,
+) -> dict[str, Any]:
+    approved_items = [item for item in list(approved or []) if isinstance(item, dict)]
+    ingested_items = [item for item in list(ingested or []) if isinstance(item, dict)]
+    skipped_items = [item for item in list(skipped or []) if isinstance(item, dict)]
+    failed_items = [item for item in list(failed or []) if isinstance(item, dict)]
+    normalized_knowledge_item_ids = [item for item in _normalize_id_values(knowledge_item_ids) if item]
+    return {
+        "status": status,
+        "approvedCandidateCount": len(ingested_items) or len(approved_items),
+        "ingestedCandidateCount": len(ingested_items),
+        "skippedCandidateCount": len(skipped_items),
+        "failedCount": len(failed_items),
+        "stewardPackCandidateId": _trim_text(steward_pack_candidate_id, max_length=160),
+        "knowledgeBaseId": _trim_text(knowledge_base_id, max_length=160),
+        "knowledgeItemIds": normalized_knowledge_item_ids[:80],
+        "formalKnowledgeItemCount": len(normalized_knowledge_item_ids),
+        "writesFormalKnowledge": status in {"completed", "applied_without_formal_item"} and bool(normalized_knowledge_item_ids),
+        "writesRag": False,
+        "writesOfficialGraph": bool(writes_official_graph),
+        "sourceReviewStatus": _trim_text(source_review_status, max_length=80),
+        "proposalId": _trim_text(proposal_id, max_length=160),
+        "reusedOfficialSync": bool(reused),
+        "approvedCandidates": [
+            {"candidateId": _trim_text(item.get("candidateId"), max_length=160), "source": _trim_text(item.get("source"), max_length=120)}
+            for item in approved_items[:80]
+        ],
+        "ingestedCandidates": [
+            {
+                "candidateId": _trim_text(item.get("candidateId"), max_length=160),
+                "title": _trim_text(item.get("title"), max_length=240),
+            }
+            for item in ingested_items[:80]
+        ],
+        "skippedCandidates": skipped_items[:80],
+        "failed": failed_items[:12],
+    }
 
 
 def _source_collection_stage_writeback_candidate_decisions(result: dict[str, Any]) -> list[dict[str, Any]]:
@@ -12225,11 +12720,16 @@ def _source_collection_matching_assignments(
     ]
 
 
-def _source_collection_stage_session_task_boundaries() -> dict[str, bool]:
+def _source_collection_stage_can_materialize_formal_knowledge(stage_id: str, agent_role: str) -> bool:
+    return _trim_text(stage_id, max_length=80) == "memory" and _trim_text(agent_role, max_length=80) == "knowledge_steward"
+
+
+def _source_collection_stage_session_task_boundaries(*, stage_id: str = "", agent_role: str = "") -> dict[str, bool]:
+    can_materialize_formal_knowledge = _source_collection_stage_can_materialize_formal_knowledge(stage_id, agent_role)
     return {
-        "writesFormalKnowledge": False,
+        "writesFormalKnowledge": can_materialize_formal_knowledge,
         "writesRag": False,
-        "writesOfficialGraph": False,
+        "writesOfficialGraph": can_materialize_formal_knowledge,
         "updatesStageTaskResult": True,
         "requiresStructuredWriteback": True,
     }
@@ -12743,6 +13243,9 @@ def _source_collection_stage_task_card_summary(task: dict[str, Any]) -> dict[str
         "evidenceRefCount": len(evidence_refs),
         "nextActionCount": len(next_actions),
         "materializedSources": writeback.get("materializedSources") if isinstance(writeback.get("materializedSources"), dict) else {},
+        "materializedKnowledgeIngestion": writeback.get("materializedKnowledgeIngestion")
+        if isinstance(writeback.get("materializedKnowledgeIngestion"), dict)
+        else {},
     }
 
 
@@ -12882,6 +13385,29 @@ def _reconcile_source_collection_stage_session_task_sources(team_id: str, run_id
         )
         next_writeback["materializedCandidateGraph"] = materialized_graph
         next_result["materializedCandidateGraph"] = materialized_graph
+        changed = True
+
+    existing_knowledge_summary = writeback.get("materializedKnowledgeIngestion") if isinstance(writeback.get("materializedKnowledgeIngestion"), dict) else {}
+    existing_knowledge_status = _trim_text(existing_knowledge_summary.get("status"), max_length=80).lower()
+    should_reconcile_knowledge = (
+        _source_collection_stage_can_materialize_formal_knowledge(
+            _trim_text(task.get("stageId"), max_length=80),
+            _trim_text(task.get("agentRole"), max_length=80),
+        )
+        and bool(_source_collection_stage_writeback_approved_candidate_refs(result, writeback))
+    )
+    if should_reconcile_knowledge and (not existing_knowledge_status or existing_knowledge_status == "failed"):
+        materialized_knowledge = _materialize_source_collection_stage_writeback_knowledge_ingestion(
+            team_id,
+            run_id,
+            task,
+            writeback,
+        )
+        next_writeback["materializedKnowledgeIngestion"] = materialized_knowledge
+        next_result["materializedKnowledgeIngestion"] = materialized_knowledge
+        next_task["writesFormalKnowledge"] = bool(materialized_knowledge.get("writesFormalKnowledge"))
+        next_task["writesRag"] = bool(materialized_knowledge.get("writesRag"))
+        next_task["writesOfficialGraph"] = bool(materialized_knowledge.get("writesOfficialGraph"))
         changed = True
 
     if not changed:
@@ -13206,6 +13732,7 @@ def _source_collection_stage_task_writeback_contract(
     agent_role: str,
 ) -> dict[str, Any]:
     endpoint = f"/api/teams/{urllib.parse.quote(team_id, safe='')}/workflow-orchestration/stage-session-tasks/{urllib.parse.quote(task_id, safe='')}/writeback"
+    can_materialize_formal_knowledge = _source_collection_stage_can_materialize_formal_knowledge(stage_id, agent_role)
     return {
         "schemaVersion": SCHEMA_VERSION,
         "contractKind": "source_collection_stage_session_task_writeback",
@@ -13219,10 +13746,12 @@ def _source_collection_stage_task_writeback_contract(
         "endpoint": endpoint,
         "acceptedStatuses": sorted(SOURCE_COLLECTION_STAGE_SESSION_TASK_STATUSES),
         "requiredFields": ["status", "summary", "result"],
-        "writesFormalKnowledge": False,
+        "writesFormalKnowledge": can_materialize_formal_knowledge,
         "writesRag": False,
-        "writesOfficialGraph": False,
-        "resultAuthority": "source_collection_stage_writeback_tool",
+        "writesOfficialGraph": can_materialize_formal_knowledge,
+        "resultAuthority": "source_collection_stage_writeback_tool+knowledge_ingestion_gate"
+        if can_materialize_formal_knowledge
+        else "source_collection_stage_writeback_tool",
     }
 
 
@@ -13368,6 +13897,22 @@ def _source_collection_stage_session_task_message(
     storage_artifacts: dict[str, str],
     writeback_contract: dict[str, Any],
 ) -> str:
+    can_materialize_formal_knowledge = _source_collection_stage_can_materialize_formal_knowledge(stage_id, agent_role)
+    boundary_text = (
+        "边界：这是知识库管理员入库审核任务，会立即要求当前 Agent 在本会话执行；"
+        "对本轮已通过候选调用 source_collection_stage_writeback_tool 写回 approved 结果后，"
+        "后端会通过现有知识治理门禁物化正式 Team Knowledge 和 official trace；不要绕过该链路直接改库。"
+        if can_materialize_formal_knowledge
+        else (
+            "边界：这是阶段任务启动消息，会立即要求当前 Agent 在本会话执行；"
+            "正式知识库、RAG 和官方图谱写入仍由后续治理入口控制。"
+        )
+    )
+    write_boundary = (
+        "- 本阶段可在 `source_collection_stage_writeback_tool` 中提交 approved 候选；后端只会对本轮且已通过质检的候选走知识治理门禁入库，不要用其他路径写正式知识。"
+        if can_materialize_formal_knowledge
+        else "- 不要直接写正式 Team Knowledge、RAG 或官方图谱；只能按候选层和结构化回写合同提交结果。"
+    )
     context = _source_collection_agent_context_message(
         team=team,
         agent=agent,
@@ -13381,10 +13926,7 @@ def _source_collection_stage_session_task_message(
         records=records,
         source_candidates=source_candidates,
         storage_artifacts=storage_artifacts,
-        boundary_text=(
-            "边界：这是阶段任务启动消息，会立即要求当前 Agent 在本会话执行；"
-            "正式知识库、RAG 和官方图谱写入仍由后续治理入口控制。"
-        ),
+        boundary_text=boundary_text,
     )
     task_title = _source_collection_stage_task_title(stage_id)
     contract_json = json.dumps(writeback_contract, ensure_ascii=False, sort_keys=True)
@@ -13408,7 +13950,7 @@ def _source_collection_stage_session_task_message(
             f"- 先调用 `source_collection_context_tool` 读取本轮受控资料上下文，参数如下：`{context_tool_json}`。",
             "- 在本会话里完成当前阶段任务，并把可审查的结论、证据引用和下一步写清楚。",
             "- 不要使用 `web_fetch_tool` 读取 `file://` 本地路径或 localhost 回写接口；本地资料上下文只通过 `source_collection_context_tool` 获取。",
-            "- 不要直接写正式 Team Knowledge、RAG 或官方图谱；只能按候选层和结构化回写合同提交结果。",
+            write_boundary,
             "- 完成后必须调用 `source_collection_stage_writeback_tool` 回写；不要让自然语言回复成为唯一结果来源。",
             "- 如果上下文不足、工具失败或无法完成，请调用 `source_collection_stage_writeback_tool` 写入 status=blocked 或 failed，并说明原因。",
             "",
