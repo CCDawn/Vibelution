@@ -4625,6 +4625,109 @@ def decide_research_review(team_id: str, payload: dict[str, Any] | None = None) 
     }
 
 
+ITERATION_ACTIONS = {"iterate", "reject", "merge", "hold"}
+
+
+def propose_iteration(team_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    """N-12：持续迭代与版本化（节点 11）。根据 RunnerResult/审稿/steward 决策提出迭代提案。
+
+    硬约束：不覆盖原候选，只新建版本/归档；无 changeReason 的状态变化拒绝写入；检测并拒绝
+    circular supersedes。版本链边记录在父候选 metadata.versionEdges（supersedes / rejected_because /
+    merged_with），提案记录在 metadata.iterationProposals。
+    """
+    normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
+    team_service.get_team(normalized_team_id)
+    payload = payload if isinstance(payload, dict) else {}
+    parent_id = _normalize_required_id(payload.get("parentCandidateId") or payload.get("candidateId"), "parentCandidateId is required.")
+    action = _trim_text(payload.get("action"), max_length=40).strip().lower()
+    if action not in ITERATION_ACTIONS:
+        raise TeamWorkflowOrchestrationError("action must be iterate/reject/merge/hold.")
+    change_reason = _trim_text(payload.get("changeReason"), max_length=2000)
+    if action != "hold" and not change_reason:
+        raise TeamWorkflowOrchestrationError(f"{action} iteration requires a changeReason.")
+    proposed_by = _trim_text(payload.get("proposedByAgent"), max_length=160) or "Iteration Versioning Agent"
+    merge_with = _trim_text(payload.get("mergeWithCandidateId"), max_length=128)
+    now = utc_now_iso()
+    with _WORKFLOW_LOCK:
+        candidate_store = _load_candidate_store(normalized_team_id)
+        parent = _find_candidate(candidate_store, parent_id)
+        if parent is None:
+            raise TeamWorkflowOrchestrationError("Candidate not found.")
+        metadata = parent.get("metadata") if isinstance(parent.get("metadata"), dict) else {}
+        version_edges = metadata.get("versionEdges") if isinstance(metadata.get("versionEdges"), list) else []
+        proposal_id = _new_record_id("iteration")
+        new_edges: list[dict[str, Any]] = []
+        new_draft: dict[str, Any] | None = None
+        rejection_archive: dict[str, Any] | None = None
+        if action == "iterate":
+            draft_id = _new_record_id("candidate")
+            new_draft = {
+                "candidateId": draft_id,
+                "parentCandidateId": parent_id,
+                "candidateType": str(parent.get("candidateType") or ""),
+                "status": "iteration_draft",
+                "changeReason": change_reason,
+            }
+            new_edges.append({"edgeType": "supersedes", "from": draft_id, "to": parent_id})
+        elif action == "reject":
+            rejection_archive = {
+                "parentCandidateId": parent_id,
+                "reason": change_reason,
+                "evidenceRefs": _normalize_ref_list(payload.get("evidenceRefs"), max_items=24),
+                "archivedAt": now,
+            }
+            new_edges.append({"edgeType": "rejected_because", "from": parent_id, "to": proposal_id})
+        elif action == "merge":
+            if not merge_with:
+                raise TeamWorkflowOrchestrationError("merge iteration requires mergeWithCandidateId.")
+            new_edges.append({"edgeType": "merged_with", "from": parent_id, "to": merge_with})
+        for edge in new_edges:
+            if edge["edgeType"] != "supersedes":
+                continue
+            for existing in version_edges:
+                if (
+                    existing.get("edgeType") == "supersedes"
+                    and existing.get("from") == edge["to"]
+                    and existing.get("to") == edge["from"]
+                ):
+                    raise TeamWorkflowOrchestrationError("Circular supersedes detected; cannot create version cycle.")
+        proposal = {
+            "proposalId": proposal_id,
+            "parentCandidateId": parent_id,
+            "action": action,
+            "changeReason": change_reason,
+            "versionEdges": new_edges,
+            "newCandidateDraft": new_draft,
+            "rejectionArchive": rejection_archive,
+            "mergeWithCandidateId": merge_with,
+            "proposedByAgent": proposed_by,
+            "createdAt": now,
+        }
+        proposals = metadata.get("iterationProposals") if isinstance(metadata.get("iterationProposals"), list) else []
+        metadata["iterationProposals"] = [*proposals[-23:], proposal]
+        metadata["versionEdges"] = [*version_edges, *new_edges]
+        parent["metadata"] = metadata
+        parent["updatedAt"] = now
+        candidate_store["updatedAt"] = now
+        _write_json(_candidate_store_path(normalized_team_id), candidate_store)
+        workflow = _load_or_create_workflow(normalized_team_id)
+        version_edges_after = list(metadata["versionEdges"])
+    _record_workflow_event(
+        "candidate.iteration_proposed",
+        normalized_team_id,
+        fields={"parentCandidateId": parent_id, "proposalId": proposal_id, "action": action},
+    )
+    return {
+        "schemaVersion": SCHEMA_VERSION,
+        "teamId": normalized_team_id,
+        "parentCandidateId": parent_id,
+        "action": action,
+        "proposal": proposal,
+        "versionEdges": version_edges_after,
+        "workflowId": workflow["workflowId"],
+    }
+
+
 def plan_paper_note_chunks_from_source_candidate(team_id: str, candidate_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
     normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
     normalized_candidate_id = _normalize_required_id(candidate_id, "Candidate id is required.")
