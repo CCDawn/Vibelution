@@ -24,6 +24,14 @@ KNOWLEDGE_GOVERNANCE_TOOLS = (
 )
 KNOWLEDGE_STEWARD_TOOLS = FORMAL_KNOWLEDGE_WRITE_TOOLS + KNOWLEDGE_GOVERNANCE_TOOLS
 SEARCH_DISABLED_TOOLS = ("web_search_tool",)
+CODE_MUTATION_TOOLS = (
+    "cli_tool",
+    "cli_agent_run_tool",
+    "apply_patch_tool",
+    "write_file_tool",
+    "run_test_for_tool",
+    "commit_changes_tool",
+)
 RESEARCH_FORBIDDEN_TOOLS = KNOWLEDGE_STEWARD_TOOLS
 
 RESEARCH_STAGE_TOOLS = (
@@ -45,6 +53,31 @@ RESEARCH_GOVERNANCE_TOOLS = (
     "research_agent_creation_proposal_tool",
     "research_communication_edge_proposal_tool",
     "research_proposal_apply_tool",
+)
+CHALLENGE_CUP_EXPERIMENT_TOOLS = (
+    "agent_message_tool",
+    "research_knowledge_query_tool",
+    "challenge_cup_experiment_context_tool",
+    "challenge_cup_experiment_writeback_tool",
+)
+CHALLENGE_CUP_ITERATION_TOOLS = (
+    "agent_message_tool",
+    "research_knowledge_query_tool",
+    "challenge_cup_iteration_context_tool",
+    "challenge_cup_iteration_writeback_tool",
+)
+CHALLENGE_CUP_VERSIONING_TOOLS = (
+    "agent_message_tool",
+    "research_knowledge_query_tool",
+    "challenge_cup_versioning_context_tool",
+    "challenge_cup_versioning_writeback_tool",
+)
+CHALLENGE_CUP_OPERATION_FORBIDDEN_TOOLS = (
+    *RESEARCH_FORBIDDEN_TOOLS,
+    *SEARCH_DISABLED_TOOLS,
+    *CODE_MUTATION_TOOLS,
+    *SEARCH_TOOLS,
+    *FETCH_TOOLS,
 )
 
 
@@ -234,6 +267,68 @@ ROLE_TOOL_PROFILES: dict[str, dict[str, Any]] = {
             "agent_message_tool",
         ),
         forbidden_tools=(*RESEARCH_FORBIDDEN_TOOLS, *SEARCH_DISABLED_TOOLS),
+    ),
+    "challenge_cup_experiment_planner": _profile(
+        "challenge_cup_experiment_planner",
+        allowed_tools=CHALLENGE_CUP_EXPERIMENT_TOOLS,
+        preferred_tools=(
+            "challenge_cup_experiment_context_tool",
+            "challenge_cup_experiment_writeback_tool",
+            "research_knowledge_query_tool",
+            "agent_message_tool",
+        ),
+        forbidden_tools=CHALLENGE_CUP_OPERATION_FORBIDDEN_TOOLS,
+        write_scopes=("team_workflow_ledger",),
+        network_access="none",
+        mutation_access="restricted",
+        max_calls_per_turn=8,
+    ),
+    "challenge_cup_experiment_ledger": _profile(
+        "challenge_cup_experiment_ledger",
+        allowed_tools=CHALLENGE_CUP_EXPERIMENT_TOOLS,
+        preferred_tools=(
+            "challenge_cup_experiment_context_tool",
+            "challenge_cup_experiment_writeback_tool",
+            "research_knowledge_query_tool",
+            "agent_message_tool",
+        ),
+        forbidden_tools=CHALLENGE_CUP_OPERATION_FORBIDDEN_TOOLS,
+        write_scopes=("team_workflow_ledger",),
+        network_access="none",
+        mutation_access="restricted",
+        max_calls_per_turn=8,
+    ),
+    "challenge_cup_iteration_planner": _profile(
+        "challenge_cup_iteration_planner",
+        allowed_tools=(*CHALLENGE_CUP_ITERATION_TOOLS, "challenge_cup_experiment_context_tool"),
+        preferred_tools=(
+            "challenge_cup_iteration_context_tool",
+            "challenge_cup_iteration_writeback_tool",
+            "challenge_cup_experiment_context_tool",
+            "research_knowledge_query_tool",
+            "agent_message_tool",
+        ),
+        forbidden_tools=CHALLENGE_CUP_OPERATION_FORBIDDEN_TOOLS,
+        write_scopes=("team_workflow_ledger",),
+        network_access="none",
+        mutation_access="restricted",
+        max_calls_per_turn=8,
+    ),
+    "challenge_cup_versioning": _profile(
+        "challenge_cup_versioning",
+        allowed_tools=(*CHALLENGE_CUP_VERSIONING_TOOLS, "challenge_cup_iteration_context_tool"),
+        preferred_tools=(
+            "challenge_cup_versioning_context_tool",
+            "challenge_cup_versioning_writeback_tool",
+            "challenge_cup_iteration_context_tool",
+            "research_knowledge_query_tool",
+            "agent_message_tool",
+        ),
+        forbidden_tools=CHALLENGE_CUP_OPERATION_FORBIDDEN_TOOLS,
+        write_scopes=("team_workflow_ledger",),
+        network_access="none",
+        mutation_access="restricted",
+        max_calls_per_turn=8,
     ),
     "research_paper_reader": _profile(
         "research_paper_reader",

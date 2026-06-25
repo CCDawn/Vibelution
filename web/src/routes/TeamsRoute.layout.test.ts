@@ -100,7 +100,7 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("sourceCollectionStageTaskClickKey(stageId)");
     expect(routeSource).toContain("idempotencyKey: payload.idempotencyKey");
     expect(routeSource).toContain("idempotencyKey: sourceCollectionStageTaskClickKey(stageId)");
-    expect(routeSource).toContain('memory: ["knowledge_steward", "candidate_graph"]');
+    expect(routeSource).toContain('memory: ["knowledge_steward"]');
     expect(routeSource).toContain("priorityByKey");
     expect(routeSource).toContain("ExperimentFullRunResultRegisterPayload");
     expect(routeSource).toContain("ExperimentResultKnowledgeIngestionPayload");
@@ -109,7 +109,7 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("registerExperimentFullRunResultMutation");
     expect(routeSource).toContain("requestExperimentKnowledgeIngestionMutation");
     expect(routeSource).toContain("登记 full-run");
-    expect(routeSource).toContain("通知知识库 Agent");
+    expect(routeSource).toContain("通知知识库管理员");
     expect(routeSource).toContain("manualFullRunResult: true");
     expect(routeSource).toContain("explicitUserBoundary: true");
     expect(routeSource).toContain("stewardReviewRequired: true");
@@ -335,6 +335,18 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain('view: "knowledge_collection"');
     expect(routeSource).toContain('view: "experiment"');
     expect(routeSource).toContain('view: "iteration"');
+    expect(routeSource).toContain('key: "experiment_planner"');
+    expect(routeSource).toContain('challenge_cup_experiment_planner');
+    expect(routeSource).toContain('key: "experiment_ledger"');
+    expect(routeSource).toContain('challenge_cup_experiment_ledger');
+    expect(routeSource).toContain('key: "iteration_planner"');
+    expect(routeSource).toContain('challenge_cup_iteration_planner');
+    expect(routeSource).toContain('key: "iteration_versioning"');
+    expect(routeSource).toContain('challenge_cup_versioning');
+    expect(routeSource).not.toContain('key: "paper_note_extraction"');
+    expect(routeSource).not.toContain('key: "neuro_mechanism"');
+    expect(routeSource).not.toContain('key: "mechanism_mapping"');
+    expect(routeSource).not.toContain('key: "challenge_cup_delivery"');
     expect(routeSource).not.toContain('view: "source_collection", zh: "资料搜集"');
     expect(routeSource).toContain("组织画布");
     expect(routeSource).toContain('canvas: { zh: "组织画布", en: "Canvas" }');
@@ -573,8 +585,8 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("runSourceCollectionMemoryPrecheckAction");
     expect(routeSource).toContain("agent_approved_only");
     expect(routeSource).toContain("Agent 生成关系图");
-    expect(routeSource).toContain("通知知识库 Agent");
-    expect(routeSource).toContain("提炼并通知 Agent");
+    expect(routeSource).toContain("通知知识库管理员");
+    expect(routeSource).toContain("提炼并通知管理员");
     expect(routeSource).toContain("资料已写入团队知识库");
     expect(routeSource).toContain("sourceCollectionPrecheckCandidateCount");
     expect(routeSource).toContain("sourceCollectionIngestCandidateCount");
@@ -586,7 +598,7 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("maxCandidates: Math.max(1, Math.min(80, sourceCollectionIngestCandidateCount))");
     expect(routeSource).toContain("forceReview: sourceCollectionPrecheckCandidateCount <= 0 && sourceCollectionDisplayedCandidateCount > 0");
     expect(routeSource).toContain("forceReview: sourceCollectionRunApprovedCount <= 0 && sourceCollectionDisplayedCandidateCount > 0");
-    expect(routeSource).toContain("可先审查再通知 Agent");
+    expect(routeSource).toContain("可先审查再通知管理员");
     expect(routeSource).toContain("条候选资料");
     expect(routeSource).not.toContain("onAction: refreshSourceCollectionGraph");
     expect(routeSource).not.toContain("onAction: refreshSourceCollectionMemoryPrecheck");
@@ -594,7 +606,7 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("force: forceRescreen");
     expect(routeSource).toContain("sourceCollectionPanelActions");
     expect(routeSource).toContain("Source Quality Assessment Agent re-screened already assessed source_manifest candidates");
-    expect(routeSource).toContain("通知知识库 Agent");
+    expect(routeSource).toContain("通知知识库管理员");
     expect(routeSource).not.toContain("待继续搜索");
     expect(routeSource).toContain("/storage/open");
     expect(routeSource).toContain("本轮产物");
@@ -636,7 +648,7 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("查看关系图");
     expect(routeSource).toContain("researchCanvasRoute(selectedTeam?.teamId || RESEARCH_TEAM_ID)");
     expect(routeSource).toContain("搜索、提炼、审查与入库");
-    expect(routeSource).toContain("搜索资料 / 资料提炼 / 资料审查 / 资料入库");
+    expect(routeSource).toContain("搜索资料 / 资料提炼 / 资料审查 / 管理员入库审核");
     expect(routeSource).toContain("实验规划 / Baseline / 指标 / 结果记录");
     expect(routeSource).toContain("复盘 / 版本化 / 改进计划 / 交付门禁");
     expect(routeSource).toContain("value === \"source_collection\"");
@@ -802,7 +814,7 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("renderResearchStageStandalonePage");
     expect(routeSource).toContain("不自动进入下一阶段。");
     expect(routeSource).toContain("Source Quality Assessment Agent");
-    expect(routeSource).toContain("资料入库状态");
+    expect(routeSource).toContain("入库审核状态");
     expect(routeSource).toContain("模型调用证据链");
     expect(routeSource).toContain("证据登记，不是正式知识");
     expect(routeSource).toContain("CandidateStore、Team Knowledge 和正式同步边界");
@@ -1150,5 +1162,14 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("onPointerMove={researchCanvasReadOnly ? undefined : moveNodeDrag}");
     expect(routeSource).toContain("onPointerUp={researchCanvasReadOnly ? undefined : finishNodeDrag}");
     expect(routeSource).toContain("edgeLine(edge, displayCanvasNodes, visibleEdges)");
+  });
+
+  it("routes the source collection ingestion step to the knowledge base admin instead of a standalone ingestion Agent", () => {
+    expect(routeSource).toContain('memory: ["knowledge_steward"]');
+    expect(routeSource).toContain("知识库管理员入库审核");
+    expect(routeSource).toContain("知识库管理员私聊");
+    expect(routeSource).not.toContain("资料入库 Agent");
+    expect(routeSource).not.toContain("共享记忆前审");
+    expect(routeSource).not.toContain('memory: ["knowledge_steward", "candidate_graph"]');
   });
 });
