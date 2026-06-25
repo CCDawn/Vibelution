@@ -19,6 +19,42 @@ def test_session_stream_coalescing_preserves_assistant_delta_events():
     assert session_service._SESSION_STREAM_COALESCED_EVENT_TYPES == {"session_detail"}
 
 
+def test_session_assistant_delta_queue_coalesces_pending_same_turn_deltas():
+    subscriber = queue.Queue(maxsize=4)
+    subscriber.put_nowait(
+        {
+            "type": "assistant_delta",
+            "sessionId": "session-live",
+            "turnId": "turn-1",
+            "contentDelta": "你",
+            "thoughtDelta": "",
+            "replaceContent": False,
+            "replaceThought": False,
+        },
+    )
+    subscriber.put_nowait({"type": "session_detail", "ledgerSeq": 1})
+
+    merged, dropped = session_service._coalesce_session_assistant_delta_queue(
+        subscriber,
+        {
+            "type": "assistant_delta",
+            "sessionId": "session-live",
+            "turnId": "turn-1",
+            "contentDelta": "好",
+            "thoughtDelta": "思考",
+            "replaceContent": False,
+            "replaceThought": False,
+        },
+    )
+
+    assert dropped == 1
+    assert merged["contentDelta"] == "你好"
+    assert merged["thoughtDelta"] == "思考"
+    assert merged["replaceContent"] is False
+    assert merged["replaceThought"] is False
+    assert subscriber.get_nowait()["type"] == "session_detail"
+
+
 def test_session_stream_full_queue_prefers_dropping_snapshots_before_assistant_delta():
     subscriber = queue.Queue(maxsize=2)
     subscriber.put_nowait({"type": "assistant_delta", "contentDelta": "你"})
