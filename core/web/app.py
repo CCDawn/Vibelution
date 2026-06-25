@@ -73,6 +73,7 @@ SENSITIVE_QUERY_KEYWORDS = (
     "cookie",
     "bearer",
 )
+API_RUNTIME_SLOW_GET_THRESHOLD_MS = 800.0
 
 
 class UTF8JSONResponse(JSONResponse):
@@ -112,9 +113,13 @@ def _is_windows_proactor_disconnect_noise(context: dict[str, Any]) -> bool:
     return "proactorbasepipetransport._call_connection_lost" in haystack
 
 
+def _api_runtime_perf_counter() -> float:
+    return time.perf_counter()
+
+
 class RuntimeSceneApiEventMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next) -> Response:
-        start = time.perf_counter()
+        start = _api_runtime_perf_counter()
         should_record = _should_record_api_runtime_event(request)
         try:
             response = await call_next(request)
@@ -123,16 +128,17 @@ class RuntimeSceneApiEventMiddleware(BaseHTTPMiddleware):
                 _record_api_runtime_event(
                     request,
                     status_code=500,
-                    duration_ms=(time.perf_counter() - start) * 1000,
+                    duration_ms=(_api_runtime_perf_counter() - start) * 1000,
                     exception=exc,
                 )
             raise
 
-        if should_record and _is_signal_api_response(request, response.status_code):
+        duration_ms = (_api_runtime_perf_counter() - start) * 1000
+        if should_record and _is_signal_api_response(request, response.status_code, duration_ms=duration_ms):
             _record_api_runtime_event(
                 request,
                 status_code=response.status_code,
-                duration_ms=(time.perf_counter() - start) * 1000,
+                duration_ms=duration_ms,
             )
         return response
 
@@ -146,9 +152,11 @@ def _should_record_api_runtime_event(request: Request) -> bool:
     return True
 
 
-def _is_signal_api_response(request: Request, status_code: int) -> bool:
+def _is_signal_api_response(request: Request, status_code: int, *, duration_ms: float = 0.0) -> bool:
     method = request.method.upper()
     if method in {"POST", "PUT", "PATCH", "DELETE"}:
+        return True
+    if method == "GET" and float(duration_ms or 0.0) >= API_RUNTIME_SLOW_GET_THRESHOLD_MS:
         return True
     return int(status_code or 0) >= 400
 
@@ -162,13 +170,14 @@ def _record_api_runtime_event(
 ) -> None:
     try:
         route = request.scope.get("route")
-        path_template = str(getattr(route, "path", "") or request.url.path)
+        request_path = str(request.url.path or "")
+        path_template = _api_runtime_path_template(request_path, str(getattr(route, "path", "") or ""))
         client = request.client.host if request.client else ""
         query_diagnostics = _request_query_diagnostics(request)
         record_backend_api_event(
             {
                 "method": request.method.upper(),
-                "path": str(request.url.path or ""),
+                "path": request_path,
                 "path_template": path_template,
                 "query": query_diagnostics["summary"],
                 "query_keys": query_diagnostics["keys"],
@@ -187,6 +196,18 @@ def _record_api_runtime_event(
         )
     except Exception:
         pass
+
+
+def _api_runtime_path_template(request_path: str, route_path: str) -> str:
+    normalized_request_path = str(request_path or "")
+    normalized_route_path = str(route_path or "") or normalized_request_path
+    if (
+        normalized_request_path.startswith("/api/")
+        and normalized_route_path.startswith("/")
+        and not normalized_route_path.startswith("/api/")
+    ):
+        return f"/api{normalized_route_path}"
+    return normalized_route_path
 
 
 def _request_query_diagnostics(request: Request) -> dict[str, Any]:
