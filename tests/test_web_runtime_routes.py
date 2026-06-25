@@ -3385,6 +3385,69 @@ def test_backend_api_runtime_event_records_request_source_summary(tmp_path, monk
     assert api_event["fields"]["requestOrigin"] == "http://testserver"
     assert api_event["fields"]["userAgentFamily"] == "edge"
 
+
+def test_backend_api_runtime_event_records_slow_get_request(tmp_path, monkeypatch):
+    scene_dir = _seed_runtime_scene_bundle(tmp_path, scene_id="scene-slow-get", status="running")
+    launcher_state_path = tmp_path / ".runtime" / "launcher" / "state.json"
+    launcher_state_path.parent.mkdir(parents=True, exist_ok=True)
+    launcher_state_path.write_text(
+        json.dumps(
+            {
+                "runtimeSceneId": "scene-slow-get",
+                "runtimeSceneDir": str(scene_dir),
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(runtime_scene_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(runtime_scene_service, "LAUNCHER_STATE_PATH", launcher_state_path)
+    perf_values = iter([100.0, 101.2])
+    monkeypatch.setattr(web_app, "_api_runtime_perf_counter", lambda: next(perf_values, 101.2), raising=False)
+
+    response = client.get("/api/runtime/summary")
+
+    assert response.status_code == 200
+    backend_raw = (scene_dir / "raw" / "backend.api.log").read_text(encoding="utf-8")
+    assert "backend.api.request" in backend_raw
+    assert "/api/runtime/summary" in backend_raw
+
+    backend_events = [
+        json.loads(line)
+        for line in (scene_dir / "events" / "backend.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    api_event = backend_events[-1]
+    assert api_event["event_code"] == "backend.api.request"
+    assert api_event["fields"]["method"] == "GET"
+    assert api_event["fields"]["path"] == "/api/runtime/summary"
+    assert api_event["fields"]["statusCode"] == 200
+    assert api_event["fields"]["durationMs"] >= 1200
+
+
+def test_backend_api_runtime_event_skips_fast_success_get_request(tmp_path, monkeypatch):
+    scene_dir = _seed_runtime_scene_bundle(tmp_path, scene_id="scene-fast-get", status="running")
+    launcher_state_path = tmp_path / ".runtime" / "launcher" / "state.json"
+    launcher_state_path.parent.mkdir(parents=True, exist_ok=True)
+    launcher_state_path.write_text(
+        json.dumps(
+            {
+                "runtimeSceneId": "scene-fast-get",
+                "runtimeSceneDir": str(scene_dir),
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(runtime_scene_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(runtime_scene_service, "LAUNCHER_STATE_PATH", launcher_state_path)
+    perf_values = iter([200.0, 200.05])
+    monkeypatch.setattr(web_app, "_api_runtime_perf_counter", lambda: next(perf_values, 200.05), raising=False)
+
+    response = client.get("/api/runtime/summary")
+
+    assert response.status_code == 200
+    assert not (scene_dir / "raw" / "backend.api.log").exists()
+
+
 def test_backend_api_runtime_event_marks_model_discovery_client_error_operational(tmp_path, monkeypatch):
     scene_dir = _seed_runtime_scene_bundle(tmp_path, scene_id="scene-model-discovery-api", status="running")
     launcher_state_path = tmp_path / ".runtime" / "launcher" / "state.json"
