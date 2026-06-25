@@ -522,6 +522,60 @@ def test_decide_research_review_reject_requires_reason(tmp_path, monkeypatch):
     assert res["decision"] == "reject"
 
 
+def _seed_experiment_plan(team_id, plan_id="exp_plan_smoke", *, baseline=True):
+    store = team_workflow_orchestration_service._load_experiment_plan_store(team_id)
+    plan = {
+        "planId": plan_id,
+        "status": "draft",
+        "dataset": "synthetic_classification",
+        "metric": ["accuracy", "macro_f1"],
+        "smokePlan": {"seed": 42, "successThreshold": {"macro_f1_delta": 0.0}},
+        "smokeResults": [],
+        "updatedAt": "2026-06-25T00:00:00+00:00",
+    }
+    if baseline:
+        plan["baseline"] = "nearest_centroid"
+    store.setdefault("plans", []).append(plan)
+    store["activePlanId"] = plan_id
+    team_workflow_orchestration_service._write_json(
+        team_workflow_orchestration_service._experiment_plan_store_path(team_id), store
+    )
+    return plan_id
+
+
+def test_run_experiment_smoke_run_executes_records_and_reproducible(tmp_path, monkeypatch):
+    """N-11：对 plan 执行 V1 smoke runner，落账并复现（同 seed → artifactHash 一致）。"""
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = team_service.create_team(name="挑战杯科研团队")
+    team_workflow_orchestration_service.ensure_team_workflow_orchestration(team["teamId"])
+    plan_id = _seed_experiment_plan(team["teamId"])
+    res = team_workflow_orchestration_service.run_experiment_smoke_run(team["teamId"], plan_id, {"seed": 42})
+    assert res["runnerResult"]["status"] == "completed"
+    assert res["runnerResult"]["artifactHash"].startswith("sha256:")
+    assert res["status"] in {"passed", "failed", "needs_review"}
+    assert res["decisionHint"] in {"accept", "iterate", "reject", "needs_full_run"}
+    res2 = team_workflow_orchestration_service.run_experiment_smoke_run(team["teamId"], plan_id, {"seed": 42})
+    assert res2["runnerResult"]["artifactHash"] == res["runnerResult"]["artifactHash"]
+
+
+def test_run_experiment_smoke_run_blocks_missing_baseline(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = team_service.create_team(name="挑战杯科研团队")
+    plan_id = _seed_experiment_plan(team["teamId"], plan_id="exp_no_baseline", baseline=False)
+    with pytest.raises(team_workflow_orchestration_service.TeamWorkflowOrchestrationError):
+        team_workflow_orchestration_service.run_experiment_smoke_run(team["teamId"], plan_id, {})
+
+
+def test_run_experiment_smoke_run_rejects_non_whitelisted_adapter(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = team_service.create_team(name="挑战杯科研团队")
+    plan_id = _seed_experiment_plan(team["teamId"], plan_id="exp_bad_adapter")
+    with pytest.raises(team_workflow_orchestration_service.TeamWorkflowOrchestrationError):
+        team_workflow_orchestration_service.run_experiment_smoke_run(
+            team["teamId"], plan_id, {"adapter": "arbitrary_user_code"}
+        )
+
+
 def test_challenge_cup_workflow_registers_candidate_and_decides_transfer(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     team = team_service.create_team(name="挑战杯科研团队")

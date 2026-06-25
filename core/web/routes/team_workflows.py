@@ -51,6 +51,7 @@ from core.web.services.team_workflow_orchestration_service import (
     review_steward_pack_knowledge_ingestion,
     retry_research_stage_round_coordination,
     retry_research_stage_round_memory_record,
+    run_experiment_smoke_run,
     run_knowledge_collection_ingestion,
     run_knowledge_ingestion_precheck,
     seed_source_collection_agent_session_context,
@@ -260,6 +261,13 @@ class ExperimentSmokeResultPayload(BaseModel):
     evidenceRefs: list[dict[str, Any]] = Field(default_factory=list, max_length=12)
     notes: str = Field("", max_length=4000)
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class ExperimentSmokeRunPayload(BaseModel):
+    adapter: str = Field("", max_length=120)
+    seed: int | None = Field(None)
+    threshold: float | None = Field(None)
+    recordedByAgent: str = Field("", max_length=160)
 
 
 class ExperimentFullRunResultPayload(BaseModel):
@@ -820,6 +828,24 @@ def team_workflow_experiment_smoke_result_register(team_id: str, plan_id: str, p
             exc,
             status_code=422,
             fields={"planId": plan_id, "recordedByAgent": payload.recordedByAgent, "status": payload.status},
+        )
+
+
+@router.post("/teams/{team_id}/workflow-orchestration/experiments/plans/{plan_id}/smoke-run", status_code=status.HTTP_201_CREATED)
+def team_workflow_experiment_smoke_run(team_id: str, plan_id: str, payload: ExperimentSmokeRunPayload) -> dict:
+    try:
+        return run_experiment_smoke_run(team_id, plan_id, payload.model_dump())
+    except TeamNotFoundError as exc:
+        _raise_team_workflow_route_error(
+            "experiment_smoke_run.execute", team_id, exc, status_code=404, fields={"planId": plan_id}
+        )
+    except (TeamServiceError, TeamWorkflowOrchestrationError) as exc:
+        _raise_team_workflow_route_error(
+            "experiment_smoke_run.execute",
+            team_id,
+            exc,
+            status_code=422,
+            fields={"planId": plan_id, "adapter": payload.adapter},
         )
 
 
