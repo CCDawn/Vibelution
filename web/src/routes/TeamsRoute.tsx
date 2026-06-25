@@ -3826,7 +3826,7 @@ export function TeamsRoute({
       fetchJson<ResearchStageRoundStatusPayload>(
         `/api/teams/${encodeURIComponent(effectiveTeamId)}/workflow-orchestration/stage-rounds/status`,
       ),
-    enabled: Boolean(effectiveTeamId && researchWorkflowTeamSelected && teamWorkflowQuery.data),
+    enabled: Boolean(effectiveTeamId && researchWorkflowTeamSelected),
     refetchInterval: (query) =>
       sourceCollectionStageWritebackRefetchInterval(
         pageVisible,
@@ -3839,7 +3839,7 @@ export function TeamsRoute({
       fetchJson<TeamWorkflowCandidateListPayload>(
         `/api/teams/${encodeURIComponent(effectiveTeamId)}/workflow-orchestration/candidates?limit=${TEAM_WORKFLOW_CANDIDATE_PREVIEW_LIMIT}`,
       ),
-    enabled: Boolean(effectiveTeamId && researchWorkflowTeamSelected && teamWorkflowQuery.data),
+    enabled: Boolean(effectiveTeamId && researchWorkflowTeamSelected),
     refetchInterval: () => sourceCollectionStageWritebackRefetchInterval(pageVisible, researchStageRoundStatusQuery.data),
   });
   const teamWorkflowCandidateGraphQuery = useQuery({
@@ -5660,7 +5660,9 @@ export function TeamsRoute({
   function renderSourceCollectionFilterBar(
     counts: Record<SourceCollectionSourceFilter, number>,
     label: string,
+    loading = false,
   ) {
+    const loadingValue = lang === "zh" ? "加载中" : "loading";
     return (
       <div className={styles.sourceCollectionFilterBar} aria-label={label}>
         {SOURCE_COLLECTION_SOURCE_FILTERS.map((filter) => {
@@ -5674,7 +5676,7 @@ export function TeamsRoute({
               aria-pressed={selected}
             >
               <span>{sourceCollectionSourceFilterLabel(filter, lang)}</span>
-              <strong>{counts[filter] ?? 0}</strong>
+              <strong>{loading ? loadingValue : counts[filter] ?? 0}</strong>
             </button>
           );
         })}
@@ -5936,7 +5938,7 @@ export function TeamsRoute({
                     <span>{lang === "zh" ? `可搜索 ${sourceCollectionSearchOpenAssignmentCount}` : `search ${sourceCollectionSearchOpenAssignmentCount}`}</span>
                     <span>{lang === "zh" ? `后续 ${sourceCollectionDownstreamOpenAssignmentCount}` : `next ${sourceCollectionDownstreamOpenAssignmentCount}`}</span>
                     <span>{lang === "zh" ? `原始 ${sourceCollectionRawRecordCount}` : `raw ${sourceCollectionRawRecordCount}`}</span>
-                    <span>{lang === "zh" ? `候选 ${sourceCollectionDisplayedCandidateCount}` : `candidates ${sourceCollectionDisplayedCandidateCount}`}</span>
+                    <span>{lang === "zh" ? `候选 ${sourceCollectionDisplayedCandidateCountText}` : `candidates ${sourceCollectionDisplayedCandidateCountText}`}</span>
                     <span>{lang === "zh" ? `查询 ${sourceCollectionQueryCount}` : `queries ${sourceCollectionQueryCount}`}</span>
                   </div>
                 ) : (
@@ -6318,7 +6320,7 @@ export function TeamsRoute({
           {renderSourceCollectionFilterBar(sourceCollectionRecordFilterCounts, lang === "zh" ? "资料来源过滤" : "Source filters")}
           <div className={styles.sourceCollectionResultStats}>
             <span>{lang === "zh" ? "原始记录" : "raw records"} <strong>{sourceCollectionCollectedCount}</strong></span>
-            <span>{lang === "zh" ? "已入候选" : "imported to candidates"} <strong>{sourceCollectionDisplayedCandidateCount}</strong></span>
+            <span>{lang === "zh" ? "已入候选" : "imported to candidates"} <strong>{sourceCollectionDisplayedCandidateCountText}</strong></span>
             <span>{lang === "zh" ? "可点击来源" : "clickable sources"} <strong>{sourceCollectionRecordClickableSourceCount}</strong></span>
             <span>{lang === "zh" ? "本地文件" : "local files"} <strong>{sourceCollectionRecordLocalFileCount}</strong></span>
           </div>
@@ -6597,7 +6599,12 @@ export function TeamsRoute({
     const screeningPanelFilteredCount = sourceCollectionSourceFilter === "all"
       ? sourceCollectionDisplayedCandidateCount
       : filteredScreeningCandidates.length;
-    const screeningPanelRange = screeningCandidates.length
+    const screeningPanelFilteredCountText = sourceCollectionPrimaryDataLoading
+      ? sourceCollectionLoadingText
+      : String(screeningPanelFilteredCount);
+    const screeningPanelRange = sourceCollectionPrimaryDataLoading
+      ? sourceCollectionLoadingText
+      : screeningCandidates.length
       ? `${pagedScreeningCandidates.start}-${pagedScreeningCandidates.end}/${filteredScreeningCandidates.length}`
       : `0/${screeningPanelFilteredCount}`;
     return (
@@ -6624,13 +6631,13 @@ export function TeamsRoute({
           <span>{lang === "zh" ? "资料审查" : "Source review"}</span>
           <small>{screeningPanelRange}</small>
         </summary>
-        {renderSourceCollectionFilterBar(sourceCollectionDisplayedCandidateFilterCounts, lang === "zh" ? "审查资料过滤" : "Review source filters")}
+        {renderSourceCollectionFilterBar(sourceCollectionDisplayedCandidateFilterCounts, lang === "zh" ? "审查资料过滤" : "Review source filters", sourceCollectionPrimaryDataLoading)}
         <div id="source-collection-screening-stats" className={styles.workflowSourceQualityStats}>
-          <span>{lang === "zh" ? "本轮候选" : "run candidates"} <strong>{sourceCollectionDisplayedCandidateCount}</strong></span>
-          <span>{lang === "zh" ? "当前过滤" : "filtered"} <strong>{screeningPanelFilteredCount}</strong></span>
-          <span>{lang === "zh" ? "已审查" : "reviewed"} <strong>{sourceCollectionProjectedAssessedCount}</strong></span>
-          <span>{lang === "zh" ? "通过" : "approved"} <strong>{sourceCollectionProjectedApprovedCount}</strong></span>
-          <span>{lang === "zh" ? "待 Agent 审查" : "pending agent review"} <strong>{sourceCollectionRunPendingScreeningCount}</strong></span>
+          <span>{lang === "zh" ? "本轮候选" : "run candidates"} <strong>{sourceCollectionDisplayedCandidateCountText}</strong></span>
+          <span>{lang === "zh" ? "当前过滤" : "filtered"} <strong>{screeningPanelFilteredCountText}</strong></span>
+          <span>{lang === "zh" ? "已审查" : "reviewed"} <strong>{sourceCollectionProjectedAssessedCountText}</strong></span>
+          <span>{lang === "zh" ? "通过" : "approved"} <strong>{sourceCollectionProjectedApprovedCountText}</strong></span>
+          <span>{lang === "zh" ? "待 Agent 审查" : "pending agent review"} <strong>{sourceCollectionRunPendingScreeningCountText}</strong></span>
         </div>
         <div className={styles.sourceCollectionPanelActions}>
           <button
@@ -6797,7 +6804,9 @@ export function TeamsRoute({
           </div>
         ) : (
           <div className={styles.empty}>
-            {sourceCollectionDisplayedCandidateCount
+            {sourceCollectionPrimaryDataLoading
+              ? (lang === "zh" ? "正在加载资料审查候选..." : "Loading review candidates...")
+            : sourceCollectionDisplayedCandidateCount
               ? (lang === "zh" ? "当前过滤条件下没有候选资料。" : "No candidates match this filter.")
             : (lang === "zh" ? "本轮还没有候选资料。先完成搜索资料并导入候选。" : "No candidates from this run yet.")}
           </div>
@@ -6835,7 +6844,12 @@ export function TeamsRoute({
     const candidatePanelFilteredCount = sourceCollectionSourceFilter === "all"
       ? sourceCollectionDisplayedCandidateCount
       : filteredCandidates.length;
-    const candidatePanelRange = visibleCandidates.length
+    const candidatePanelFilteredCountText = sourceCollectionPrimaryDataLoading
+      ? sourceCollectionLoadingText
+      : String(candidatePanelFilteredCount);
+    const candidatePanelRange = sourceCollectionPrimaryDataLoading
+      ? sourceCollectionLoadingText
+      : visibleCandidates.length
       ? `${pagedCandidates.start}-${pagedCandidates.end}/${filteredCandidates.length}`
       : `0/${candidatePanelFilteredCount}`;
     const candidateListAwaitingRefresh = !sourceCollectionRunCandidateCount && sourceCollectionDisplayedCandidateCount > 0;
@@ -6862,13 +6876,13 @@ export function TeamsRoute({
           <span>{lang === "zh" ? "资料提炼结果" : "Extracted sources"}</span>
           <small>{candidatePanelRange}</small>
         </summary>
-        {renderSourceCollectionFilterBar(sourceCollectionDisplayedCandidateFilterCounts, lang === "zh" ? "提炼资料过滤" : "Extracted source filters")}
+        {renderSourceCollectionFilterBar(sourceCollectionDisplayedCandidateFilterCounts, lang === "zh" ? "提炼资料过滤" : "Extracted source filters", sourceCollectionPrimaryDataLoading)}
         <div className={styles.workflowSourceQualityStats}>
-          <span>{lang === "zh" ? "本轮候选" : "run candidates"} <strong>{sourceCollectionDisplayedCandidateCount}</strong></span>
-          <span>{lang === "zh" ? "当前过滤" : "filtered"} <strong>{candidatePanelFilteredCount}</strong></span>
-          <span>{lang === "zh" ? "已审查" : "reviewed"} <strong>{sourceCollectionProjectedAssessedCount}</strong></span>
-          <span>{lang === "zh" ? "通过" : "approved"} <strong>{sourceCollectionProjectedApprovedCount}</strong></span>
-          <span>{lang === "zh" ? "待 Agent 审查" : "pending agent review"} <strong>{sourceCollectionRunPendingScreeningCount}</strong></span>
+          <span>{lang === "zh" ? "本轮候选" : "run candidates"} <strong>{sourceCollectionDisplayedCandidateCountText}</strong></span>
+          <span>{lang === "zh" ? "当前过滤" : "filtered"} <strong>{candidatePanelFilteredCountText}</strong></span>
+          <span>{lang === "zh" ? "已审查" : "reviewed"} <strong>{sourceCollectionProjectedAssessedCountText}</strong></span>
+          <span>{lang === "zh" ? "通过" : "approved"} <strong>{sourceCollectionProjectedApprovedCountText}</strong></span>
+          <span>{lang === "zh" ? "待 Agent 审查" : "pending agent review"} <strong>{sourceCollectionRunPendingScreeningCountText}</strong></span>
         </div>
         {candidateProjection ? (
           <div className={styles.sourceCollectionStageTaskSummary}>
@@ -6967,7 +6981,9 @@ export function TeamsRoute({
           </div>
         ) : (
           <div className={styles.empty}>
-            {candidateListAwaitingRefresh
+            {sourceCollectionPrimaryDataLoading
+              ? (lang === "zh" ? "正在加载资料提炼结果..." : "Loading extracted sources...")
+            : candidateListAwaitingRefresh
               ? (lang === "zh"
                 ? `Agent 已生成 ${sourceCollectionDisplayedCandidateCount} 条候选资料，列表正在同步；请刷新或稍候。`
                 : `Agent produced ${sourceCollectionDisplayedCandidateCount} candidates; the list is syncing. Refresh or wait a moment.`)
@@ -7585,17 +7601,17 @@ export function TeamsRoute({
         ) : null}
         {selectedSourceCollectionStageId === "screening" ? (
           <div className={styles.workflowSourceQualityStats}>
-            <span>{lang === "zh" ? "本轮候选" : "run candidates"} <strong>{sourceCollectionDisplayedCandidateCount}</strong></span>
-            <span>{lang === "zh" ? "已审查" : "reviewed"} <strong>{sourceCollectionRunAssessedCount}</strong></span>
-            <span>{lang === "zh" ? "通过" : "approved"} <strong>{sourceCollectionRunApprovedCount}</strong></span>
-            <span>{lang === "zh" ? "待 Agent 审查" : "pending agent review"} <strong>{sourceCollectionRunPendingScreeningCount}</strong></span>
+            <span>{lang === "zh" ? "本轮候选" : "run candidates"} <strong>{sourceCollectionDisplayedCandidateCountText}</strong></span>
+            <span>{lang === "zh" ? "已审查" : "reviewed"} <strong>{sourceCollectionProjectedAssessedCountText}</strong></span>
+            <span>{lang === "zh" ? "通过" : "approved"} <strong>{sourceCollectionProjectedApprovedCountText}</strong></span>
+            <span>{lang === "zh" ? "待 Agent 审查" : "pending agent review"} <strong>{sourceCollectionRunPendingScreeningCountText}</strong></span>
           </div>
         ) : null}
         {selectedSourceCollectionStageId === "candidate" ? (
           <>
             <div className={styles.workflowSourceQualityStats}>
-              <span>{lang === "zh" ? "本轮候选" : "run candidates"} <strong>{sourceCollectionDisplayedCandidateCount}</strong></span>
-              <span>{lang === "zh" ? "通过筛选" : "approved"} <strong>{sourceCollectionRunApprovedCount}</strong></span>
+              <span>{lang === "zh" ? "本轮候选" : "run candidates"} <strong>{sourceCollectionDisplayedCandidateCountText}</strong></span>
+              <span>{lang === "zh" ? "通过筛选" : "approved"} <strong>{sourceCollectionProjectedApprovedCountText}</strong></span>
             </div>
             {renderSourceCollectionStorageActions()}
           </>
@@ -9473,6 +9489,29 @@ export function TeamsRoute({
     sourceCollectionRunApprovedCount,
   );
   const sourceCollectionDisplayedCandidateCount = Math.max(sourceCollectionRunCandidateCount, sourceCollectionProjectedCandidateCount);
+  const sourceCollectionPrimaryDataLoading = Boolean(
+    researchWorkflowTeamSelected
+    && sourceCollectionDisplayedCandidateCount <= 0
+    && (
+      (sourceCollectionRunsQuery.isPending && !sourceCollectionRunsQuery.data)
+      || (researchStageRoundStatusQuery.isPending && !researchStageRoundStatusQuery.data)
+      || (teamWorkflowCandidatesQuery.isPending && !teamWorkflowCandidatesQuery.data)
+    ),
+  );
+  const sourceCollectionLoadingText = lang === "zh" ? "加载中" : "loading";
+  const sourceCollectionLoadingSummary = lang === "zh" ? "正在读取资料提炼结果" : "Loading extraction results";
+  const sourceCollectionDisplayedCandidateCountText = sourceCollectionPrimaryDataLoading
+    ? sourceCollectionLoadingText
+    : String(sourceCollectionDisplayedCandidateCount);
+  const sourceCollectionProjectedCandidateCountText = sourceCollectionPrimaryDataLoading
+    ? sourceCollectionLoadingText
+    : String(sourceCollectionProjectedCandidateCount);
+  const sourceCollectionProjectedAssessedCountText = sourceCollectionPrimaryDataLoading
+    ? sourceCollectionLoadingText
+    : String(sourceCollectionProjectedAssessedCount);
+  const sourceCollectionProjectedApprovedCountText = sourceCollectionPrimaryDataLoading
+    ? sourceCollectionLoadingText
+    : String(sourceCollectionProjectedApprovedCount);
   const sourceCollectionDisplayedCandidateFilterCounts = useMemo(() => {
     if (sourceCollectionDisplayedCandidateCount <= sourceCollectionRunCandidateCount) {
       return sourceCollectionCandidateFilterCounts;
@@ -9487,6 +9526,9 @@ export function TeamsRoute({
     sourceCollectionRunCandidateCount,
   ]);
   const sourceCollectionRunPendingScreeningCount = Math.max(0, sourceCollectionProjectedCandidateCount - sourceCollectionProjectedAssessedCount);
+  const sourceCollectionRunPendingScreeningCountText = sourceCollectionPrimaryDataLoading
+    ? sourceCollectionLoadingText
+    : String(sourceCollectionRunPendingScreeningCount);
   const sourceCollectionPendingCandidateImportCount = Math.max(0, sourceCollectionRawRecordCount - sourceCollectionDisplayedCandidateCount);
   const sourceCollectionQueryCount =
     sourceCollectionSearchPlanRef?.queryCount
@@ -9668,8 +9710,10 @@ export function TeamsRoute({
         : (lang === "zh" ? "资料审查" : "Review");
   const sourceCollectionScreeningStatusText = selectedTeamSourceQualityPending
     ? (lang === "zh" ? "进行中" : "running")
+    : sourceCollectionPrimaryDataLoading
+      ? sourceCollectionLoadingText
     : sourceCollectionRunPendingScreeningCount > 0
-      ? `${sourceCollectionRunPendingScreeningCount} ${lang === "zh" ? "待 Agent 审查" : "pending agent review"}`
+      ? `${sourceCollectionRunPendingScreeningCountText} ${lang === "zh" ? "待 Agent 审查" : "pending agent review"}`
       : sourceCollectionDisplayedCandidateCount > 0
         ? (lang === "zh" ? "已审查" : "done")
         : (lang === "zh" ? "暂无候选" : "no candidates");
@@ -10001,7 +10045,9 @@ export function TeamsRoute({
         ? (lang === "zh" ? "点击开始生成本轮任务" : "Start to create this run")
         : sourceCollectionSearchOpenAssignmentCount > 0
           ? (lang === "zh" ? `${sourceCollectionSearchOpenAssignmentCount} 个搜索任务待执行` : `${sourceCollectionSearchOpenAssignmentCount} search tasks remain`)
-          : (lang === "zh" ? `已入候选 ${sourceCollectionProjectedCandidateCount} 条` : `${sourceCollectionProjectedCandidateCount} imported to candidates`)),
+          : sourceCollectionPrimaryDataLoading
+            ? (lang === "zh" ? "正在读取候选入库结果" : "Loading imported candidates")
+            : (lang === "zh" ? `已入候选 ${sourceCollectionProjectedCandidateCountText} 条` : `${sourceCollectionProjectedCandidateCountText} imported to candidates`)),
       inputLabel: lang === "zh" ? `${sourceCollectionQueryCount} 个搜索问题` : `${sourceCollectionQueryCount} queries`,
       outputLabel: lang === "zh" ? `${sourceCollectionProjectedCollectedCount} 条原始资料` : `${sourceCollectionProjectedCollectedCount} raw records`,
       nextLabel: sourceCollectionSearchOpenAssignmentCount > 0
@@ -10021,12 +10067,18 @@ export function TeamsRoute({
     {
       id: "candidate",
       label: lang === "zh" ? "资料提炼" : "Extract sources",
-      metric: lang === "zh" ? `候选资料 ${sourceCollectionProjectedCandidateCount} 条` : `${sourceCollectionProjectedCandidateCount} candidate sources`,
-      summary: sourceCollectionCandidateProjection?.latestTask?.summary || (sourceCollectionProjectedCandidateCount > 0
-        ? (lang === "zh" ? `已形成 ${sourceCollectionProjectedCandidateCount} 条可追溯候选资料` : `${sourceCollectionProjectedCandidateCount} traceable candidate sources`)
-        : (lang === "zh" ? "等待搜索结果入候选" : "Waiting for collected sources")),
+      metric: sourceCollectionPrimaryDataLoading
+        ? (lang === "zh" ? "候选资料 加载中" : "candidate sources loading")
+        : (lang === "zh" ? `候选资料 ${sourceCollectionProjectedCandidateCountText} 条` : `${sourceCollectionProjectedCandidateCountText} candidate sources`),
+      summary: sourceCollectionCandidateProjection?.latestTask?.summary || (sourceCollectionPrimaryDataLoading
+        ? sourceCollectionLoadingSummary
+        : sourceCollectionProjectedCandidateCount > 0
+          ? (lang === "zh" ? `已形成 ${sourceCollectionProjectedCandidateCountText} 条可追溯候选资料` : `${sourceCollectionProjectedCandidateCountText} traceable candidate sources`)
+          : (lang === "zh" ? "等待搜索结果入候选" : "Waiting for collected sources")),
       inputLabel: lang === "zh" ? `${sourceCollectionProjectedCollectedCount} 条原始资料` : `${sourceCollectionProjectedCollectedCount} raw records`,
-      outputLabel: lang === "zh" ? `${sourceCollectionProjectedCandidateCount} 条候选可追溯` : `${sourceCollectionProjectedCandidateCount} traceable candidates`,
+      outputLabel: sourceCollectionPrimaryDataLoading
+        ? (lang === "zh" ? "候选可追溯 加载中" : "traceable candidates loading")
+        : (lang === "zh" ? `${sourceCollectionProjectedCandidateCountText} 条候选可追溯` : `${sourceCollectionProjectedCandidateCountText} traceable candidates`),
       nextLabel: lang === "zh" ? "交给资料审查" : "Send to review",
       state: sourceCollectionCandidateStepState,
       status: sourceCollectionStageProjectionLabel(sourceCollectionCandidateProjection) || sourceCollectionStepStatusText(sourceCollectionCandidateStepState),
@@ -10042,14 +10094,22 @@ export function TeamsRoute({
     {
       id: "screening",
       label: lang === "zh" ? "资料审查" : "Review sources",
-      metric: lang === "zh" ? `已审 ${sourceCollectionProjectedAssessedCount}/${sourceCollectionProjectedCandidateCount}` : `${sourceCollectionProjectedAssessedCount}/${sourceCollectionProjectedCandidateCount} reviewed`,
-      summary: sourceCollectionDisplayedCandidateCount <= 0
+      metric: sourceCollectionPrimaryDataLoading
+        ? (lang === "zh" ? "已审 加载中" : "review loading")
+        : (lang === "zh" ? `已审 ${sourceCollectionProjectedAssessedCountText}/${sourceCollectionProjectedCandidateCountText}` : `${sourceCollectionProjectedAssessedCountText}/${sourceCollectionProjectedCandidateCountText} reviewed`),
+      summary: sourceCollectionPrimaryDataLoading
+        ? (lang === "zh" ? "正在读取候选资料" : "Loading candidate sources")
+        : sourceCollectionDisplayedCandidateCount <= 0
         ? (lang === "zh" ? "先完成资料提炼" : "Extract sources first")
         : sourceCollectionRunPendingScreeningCount > 0
-          ? (lang === "zh" ? `${sourceCollectionRunPendingScreeningCount} 条等待 Agent 审查` : `${sourceCollectionRunPendingScreeningCount} wait for agent review`)
-          : (lang === "zh" ? `${sourceCollectionProjectedApprovedCount} 条已通过` : `${sourceCollectionProjectedApprovedCount} approved`),
-      inputLabel: lang === "zh" ? `${sourceCollectionProjectedCandidateCount} 条候选资料` : `${sourceCollectionProjectedCandidateCount} candidate sources`,
-      outputLabel: lang === "zh" ? `${sourceCollectionProjectedApprovedCount} 条通过 / ${sourceCollectionRunPendingScreeningCount} 条待审` : `${sourceCollectionProjectedApprovedCount} approved / ${sourceCollectionRunPendingScreeningCount} pending`,
+          ? (lang === "zh" ? `${sourceCollectionRunPendingScreeningCountText} 条等待 Agent 审查` : `${sourceCollectionRunPendingScreeningCountText} wait for agent review`)
+          : (lang === "zh" ? `${sourceCollectionProjectedApprovedCountText} 条已通过` : `${sourceCollectionProjectedApprovedCountText} approved`),
+      inputLabel: sourceCollectionPrimaryDataLoading
+        ? (lang === "zh" ? "候选资料加载中" : "candidate sources loading")
+        : (lang === "zh" ? `${sourceCollectionProjectedCandidateCountText} 条候选资料` : `${sourceCollectionProjectedCandidateCountText} candidate sources`),
+      outputLabel: sourceCollectionPrimaryDataLoading
+        ? (lang === "zh" ? "审查结果加载中" : "review status loading")
+        : (lang === "zh" ? `${sourceCollectionProjectedApprovedCountText} 条通过 / ${sourceCollectionRunPendingScreeningCountText} 条待审` : `${sourceCollectionProjectedApprovedCountText} approved / ${sourceCollectionRunPendingScreeningCountText} pending`),
       nextLabel: sourceCollectionRunPendingScreeningCount > 0
         ? (lang === "zh" ? "Agent 继续审查" : "Agent continues review")
         : (lang === "zh" ? "进入资料入库" : "Move to ingestion"),
@@ -10073,7 +10133,9 @@ export function TeamsRoute({
         : sourceCollectionDisplayedCandidateCount > 0
           ? (lang === "zh" ? "可由 Agent 生成候选关系" : "Agent can build candidate relationships")
           : (lang === "zh" ? "等候选资料生成后建图" : "Build after candidates exist")),
-      inputLabel: lang === "zh" ? `${sourceCollectionProjectedCandidateCount} 条候选资料` : `${sourceCollectionProjectedCandidateCount} candidate sources`,
+      inputLabel: sourceCollectionPrimaryDataLoading
+        ? (lang === "zh" ? "候选资料加载中" : "candidate sources loading")
+        : (lang === "zh" ? `${sourceCollectionProjectedCandidateCountText} 条候选资料` : `${sourceCollectionProjectedCandidateCountText} candidate sources`),
       outputLabel: lang === "zh" ? `${sourceCollectionProjectedGraphNodeCount} 个节点 / ${sourceCollectionProjectedGraphEdgeCount} 条关系` : `${sourceCollectionProjectedGraphNodeCount} nodes / ${sourceCollectionProjectedGraphEdgeCount} edges`,
       nextLabel: sourceCollectionProjectedGraphNodeCount > 0
         ? (lang === "zh" ? "进入共享记忆前审" : "Move to memory precheck")
@@ -10106,7 +10168,9 @@ export function TeamsRoute({
             : (lang === "zh" ? "等资料提炼后入库" : "Ingest after extraction")),
       inputLabel: sourceCollectionPrecheckCandidateCount > 0
         ? (lang === "zh" ? `${sourceCollectionPrecheckCandidateCount} 条通过资料` : `${sourceCollectionPrecheckCandidateCount} approved sources`)
-        : (lang === "zh" ? `${sourceCollectionProjectedCandidateCount} 条候选资料` : `${sourceCollectionProjectedCandidateCount} candidate sources`),
+        : sourceCollectionPrimaryDataLoading
+          ? (lang === "zh" ? "候选资料加载中" : "candidate sources loading")
+          : (lang === "zh" ? `${sourceCollectionProjectedCandidateCountText} 条候选资料` : `${sourceCollectionProjectedCandidateCountText} candidate sources`),
       outputLabel: lang === "zh" ? `${sourceCollectionProjectedFormalKnowledgeCount} 条正式知识 / ${sourceCollectionProjectedGraphNodeCount} 个关系节点` : `${sourceCollectionProjectedFormalKnowledgeCount} formal / ${sourceCollectionProjectedGraphNodeCount} graph nodes`,
       nextLabel: sourceCollectionProjectedFormalKnowledgeCount > 0
         ? (lang === "zh" ? "进入实验规划" : "Move to experiment planning")
