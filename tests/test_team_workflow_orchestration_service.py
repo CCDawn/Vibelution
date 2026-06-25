@@ -4484,6 +4484,186 @@ def test_knowledge_collection_ingestion_notifies_steward_agent_for_final_ingesti
     assert precheck_reused_events[-1]["fields"]["candidateId"] == response["summary"]["stewardPackCandidateId"]
 
 
+def test_knowledge_collection_ingestion_auto_closes_to_formal_item_via_coordinator(tmp_path, monkeypatch):
+    """同步闭环：steward 提案、coordinator 审批，一键直接产出正式 KnowledgeItem。
+
+    回归保护：步骤4「一键入库」走 autoSubmit/autoReviewSource/autoApprove 同步路径时，
+    最终审批由独立的 coordinator/lead 成员完成（职责分离），不再依赖唤醒 steward agent。
+    """
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    steward_id = agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID
+    coordinator = agent_directory_service.create_agent_instance(display_name="Research Coordinator")
+    team = team_service.create_team(
+        name="ai科学研究团队",
+        members=[
+            {"agentId": steward_id, "role": "knowledge_steward"},
+            {"agentId": coordinator["agentId"], "role": "research_coordination"},
+        ],
+    )
+    for source_payload in (
+        {
+            "title": "Predictive coding cortical hierarchy neural network paper",
+            "sourceUrl": "https://doi.org/10.0000/predictive-coding",
+            "sourceKind": "paper",
+            "summary": "Neural predictive coding evidence for neural-network hierarchy and learning.",
+            "tags": ["neuroscience", "algorithm"],
+            "allowedForAnalysis": True,
+            "createdByAgent": "Data Discovery Agent",
+        },
+        {
+            "title": "Synaptic plasticity learning rule review",
+            "sourceUrl": "https://doi.org/10.0000/stdp-review",
+            "sourceKind": "review",
+            "summary": "Synaptic plasticity evidence can support learning-rule hypotheses.",
+            "tags": ["neuroscience", "learning"],
+            "allowedForAnalysis": True,
+            "createdByAgent": "Source Acquisition Agent",
+        },
+    ):
+        team_workflow_orchestration_service.register_candidate_source(team["teamId"], source_payload)
+
+    response = team_workflow_orchestration_service.run_knowledge_collection_ingestion(
+        team["teamId"],
+        {
+            "stewardAgentId": steward_id,
+            "targetDomain": "神经学启发神经网络算法",
+            "maxCandidates": 10,
+            "autoCreateKnowledgeBase": True,
+            "autoSubmit": True,
+            "autoReviewSource": True,
+            "autoApprove": True,
+            "notifyStewardAgent": False,
+            "wakeStewardAgent": False,
+        },
+    )
+
+    knowledge_base_id = response["summary"]["knowledgeBaseId"]
+    knowledge_items = team_knowledge_service.list_knowledge_items(
+        knowledge_base_id, agent_id=coordinator["agentId"]
+    )
+
+    # 同步闭环真正产出正式 KnowledgeItem，且没有回落到唤醒 steward agent 的异步路径。
+    assert response["knowledgeReview"] is not None
+    assert response["knowledgeStewardActivation"] is None
+    assert response["summary"]["formalKnowledgeItemCount"] >= 1
+    assert response["statusSnapshot"]["summary"]["formalKnowledgeItemCount"] >= 1
+    assert knowledge_items["summary"]["itemCount"] >= 1
+
+
+def test_knowledge_collection_ingestion_auto_approve_needs_distinct_reviewer(tmp_path, monkeypatch):
+    """职责分离负例：团队没有 coordinator/lead 审批人时，autoApprove 不应自提自批出正式知识。"""
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    steward_id = agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID
+    team = team_service.create_team(
+        name="ai科学研究团队",
+        members=[{"agentId": steward_id, "role": "knowledge_steward"}],
+    )
+    team_workflow_orchestration_service.register_candidate_source(
+        team["teamId"],
+        {
+            "title": "Predictive coding cortical hierarchy neural network paper",
+            "sourceUrl": "https://doi.org/10.0000/predictive-coding",
+            "sourceKind": "paper",
+            "summary": "Neural predictive coding evidence for neural-network hierarchy and learning.",
+            "tags": ["neuroscience", "algorithm"],
+            "allowedForAnalysis": True,
+            "createdByAgent": "Data Discovery Agent",
+        },
+    )
+
+    response = team_workflow_orchestration_service.run_knowledge_collection_ingestion(
+        team["teamId"],
+        {
+            "stewardAgentId": steward_id,
+            "maxCandidates": 10,
+            "autoCreateKnowledgeBase": True,
+            "autoSubmit": True,
+            "autoReviewSource": True,
+            "autoApprove": True,
+            "notifyStewardAgent": False,
+            "wakeStewardAgent": False,
+        },
+    )
+
+    assert response["knowledgeReview"] is None
+    assert response["statusSnapshot"]["summary"]["formalKnowledgeItemCount"] == 0
+
+
+def test_knowledge_collection_ingestion_background_completes_and_reports_status(tmp_path, monkeypatch):
+    """后台执行：点击立即返回 accepted；worker 完成后 status 显示终态 + 正式 KnowledgeItem。"""
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    isolated_store = WorkRunStore(root=tmp_path / "work_runs")
+    monkeypatch.setattr(
+        team_workflow_orchestration_service, "_knowledge_ingestion_work_run_store", lambda: isolated_store
+    )
+
+    class _ImmediateThread:
+        def __init__(self, *, target=None, args=(), name="", daemon=None, **_kwargs):
+            self._target = target
+            self._args = args
+            self.name = name
+
+        def start(self):
+            self._target(*self._args)
+
+    monkeypatch.setattr(team_workflow_orchestration_service.threading, "Thread", _ImmediateThread)
+
+    steward_id = agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID
+    coordinator = agent_directory_service.create_agent_instance(display_name="Research Coordinator")
+    team = team_service.create_team(
+        name="ai科学研究团队",
+        members=[
+            {"agentId": steward_id, "role": "knowledge_steward"},
+            {"agentId": coordinator["agentId"], "role": "research_coordination"},
+        ],
+    )
+    for source_payload in (
+        {
+            "title": "Predictive coding cortical hierarchy neural network paper",
+            "sourceUrl": "https://doi.org/10.0000/predictive-coding",
+            "sourceKind": "paper",
+            "summary": "Neural predictive coding evidence for neural-network hierarchy and learning.",
+            "tags": ["neuroscience", "algorithm"],
+            "allowedForAnalysis": True,
+            "createdByAgent": "Data Discovery Agent",
+        },
+        {
+            "title": "Synaptic plasticity learning rule review",
+            "sourceUrl": "https://doi.org/10.0000/stdp-review",
+            "sourceKind": "review",
+            "summary": "Synaptic plasticity evidence can support learning-rule hypotheses.",
+            "tags": ["neuroscience", "learning"],
+            "allowedForAnalysis": True,
+            "createdByAgent": "Source Acquisition Agent",
+        },
+    ):
+        team_workflow_orchestration_service.register_candidate_source(team["teamId"], source_payload)
+
+    accepted = team_workflow_orchestration_service.start_knowledge_collection_ingestion_background(
+        team["teamId"],
+        {
+            "stewardAgentId": steward_id,
+            "maxCandidates": 10,
+            "autoCreateKnowledgeBase": True,
+            "autoSubmit": True,
+            "autoReviewSource": True,
+            "autoApprove": True,
+            "notifyStewardAgent": False,
+            "wakeStewardAgent": False,
+        },
+    )
+
+    assert accepted["accepted"] is True
+    assert accepted["executionMode"] == "background"
+    assert accepted["activeWorkRun"]["status"] == "running"
+
+    status = team_workflow_orchestration_service.get_knowledge_ingestion_status(team["teamId"])
+    assert status["activeWorkRun"] is None
+    assert status["latestWorkRun"]["status"] == "completed"
+    assert status["latestWorkRun"]["result"]["formalKnowledgeItemCount"] >= 1
+    assert status["summary"]["formalKnowledgeItemCount"] >= 1
+
+
 def test_knowledge_ingestion_status_tracks_pending_and_official_sync(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     steward = agent_directory_service.create_agent_instance(display_name="Knowledge Steward Agent")
