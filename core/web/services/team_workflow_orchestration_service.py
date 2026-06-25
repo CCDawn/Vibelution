@@ -128,6 +128,7 @@ SOURCE_COLLECTION_PROMPT_CACHE_DISABLED_MODES = {"disabled", "off", "none"}
 SOURCE_COLLECTION_SUPPORTED_PROMPT_CACHE_MODES = {"automatic", "explicit_cache_control"}
 SOURCE_COLLECTION_PROMPT_CACHE_SCOPE = "research_team_knowledge_collection"
 SOURCE_COLLECTION_WORK_RUN_KIND = "source_collection_run"
+KNOWLEDGE_INGESTION_WORK_RUN_KIND = "knowledge_ingestion_run"
 RESEARCH_STAGE_TYPES = ("knowledge_collection", "experiment", "iteration")
 RESEARCH_STAGE_ACTIVE_STATUSES = {"running", "planning", "needs_attention"}
 RESEARCH_STAGE_DEFAULTS = {
@@ -4451,6 +4452,13 @@ def get_knowledge_ingestion_status(team_id: str) -> dict[str, Any]:
 
     normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
     team_service.get_team(normalized_team_id)
+    ingestion_store = _knowledge_ingestion_work_run_store()
+    ingestion_active_snapshot = ingestion_store.load_active_snapshot(KNOWLEDGE_INGESTION_WORK_RUN_KIND)
+    if not _knowledge_ingestion_snapshot_is_active(ingestion_active_snapshot, normalized_team_id):
+        ingestion_active_snapshot = None
+    ingestion_latest_snapshot = ingestion_store.load_latest_snapshot(KNOWLEDGE_INGESTION_WORK_RUN_KIND)
+    if isinstance(ingestion_latest_snapshot, dict) and _trim_text(ingestion_latest_snapshot.get("teamId"), max_length=160) != normalized_team_id:
+        ingestion_latest_snapshot = None
     with _WORKFLOW_LOCK:
         workflow = _load_or_create_workflow(normalized_team_id)
         candidate_store = _load_candidate_store(normalized_team_id)
@@ -4547,6 +4555,8 @@ def get_knowledge_ingestion_status(team_id: str) -> dict[str, Any]:
             "candidateStorePath": _relative_path(_candidate_store_path(normalized_team_id)),
             "transferRecordsPath": _relative_path(_transfer_records_path(normalized_team_id)),
         },
+        "activeWorkRun": ingestion_active_snapshot,
+        "latestWorkRun": ingestion_latest_snapshot,
         "updatedAt": utc_now_iso(),
     }
     _record_workflow_event(
@@ -4944,7 +4954,8 @@ def run_knowledge_ingestion_precheck(team_id: str, payload: dict[str, Any] | Non
     normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
     team_service.get_team(normalized_team_id)
     payload = payload if isinstance(payload, dict) else {}
-    steward_agent_id = _trim_text(payload.get("stewardAgentId"), max_length=160) or "Knowledge Steward Agent"
+    # 默认必须是团队成员 agentId（而非显示名），否则建库/审核的成员校验会失败。
+    steward_agent_id = _trim_text(payload.get("stewardAgentId"), max_length=160) or agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID
     target_domain = _trim_text(payload.get("targetDomain"), max_length=240) or "神经机制启发神经网络算法"
     max_candidates = _normalize_int(payload.get("maxCandidates"), default=32, minimum=1, maximum=200)
     force_rebuild = bool(payload.get("forceRebuild"))
@@ -6256,6 +6267,203 @@ def _knowledge_steward_activation_log_payload(activation: dict[str, Any] | None)
     }
 
 
+# 可作为知识提案审批人的团队角色线索（coordinator / lead / owner）。
+# 与 team_knowledge_service.REVIEW_ROLES 对应，但这里用子串匹配以兼容
+# research_coordination 这类带前缀的研究流角色。
+_TEAM_REVIEW_ROLE_HINTS = ("coordination", "coordinator", "lead", "owner")
+
+
+def _resolve_team_review_agent_id(team: dict[str, Any], *, exclude_agent_id: str = "") -> str:
+    """Resolve a team member that can act as the knowledge-review authority.
+
+    Separation of duties: the steward proposes; a distinct coordinator/lead
+    member reviews and applies. Returns the matched member agentId, or "" when
+    the team has no coordinator/lead member to act as reviewer.
+    """
+    excluded = str(exclude_agent_id or "").strip()
+    members = team.get("members") if isinstance(team, dict) else None
+    if not isinstance(members, list):
+        return ""
+    for hint in _TEAM_REVIEW_ROLE_HINTS:
+        for member in members:
+            if not isinstance(member, dict):
+                continue
+            agent_id = str(member.get("agentId") or "").strip()
+            role = str(member.get("role") or "").strip().lower()
+            if not agent_id or agent_id == excluded:
+                continue
+            if hint in role:
+                return agent_id
+    return ""
+
+
+def _knowledge_ingestion_work_run_store() -> work_run_store.WorkRunStore:
+    return work_run_store.WorkRunStore(root=work_run_store.WORK_RUNS_DIR)
+
+
+def _persist_knowledge_ingestion_work_run(
+    team_id: str,
+    run_id: str,
+    *,
+    status: str,
+    current_phase: str,
+    summary: str,
+    active: bool,
+    result: dict[str, Any] | None = None,
+    error: str = "",
+    error_type: str = "",
+) -> dict[str, Any]:
+    now = utc_now_iso()
+    snapshot: dict[str, Any] = {
+        "runId": run_id,
+        "runKind": KNOWLEDGE_INGESTION_WORK_RUN_KIND,
+        "kind": KNOWLEDGE_INGESTION_WORK_RUN_KIND,
+        "status": status,
+        "currentPhase": current_phase,
+        "stageType": "knowledge_ingestion",
+        "teamId": team_id,
+        "summary": _trim_text(summary, max_length=500),
+        "currentTask": _trim_text(summary, max_length=500),
+        "updatedAt": now,
+    }
+    if not active:
+        snapshot["finishedAt"] = now
+    if isinstance(result, dict):
+        result_summary = result.get("summary") if isinstance(result.get("summary"), dict) else {}
+        snapshot["result"] = {
+            "status": _trim_text(result.get("status"), max_length=80),
+            "formalKnowledgeItemCount": _source_collection_count(result_summary.get("formalKnowledgeItemCount")),
+            "knowledgeBaseId": _trim_text(result_summary.get("knowledgeBaseId"), max_length=128),
+            "stewardPackCandidateId": _trim_text(result_summary.get("stewardPackCandidateId"), max_length=160),
+        }
+    if error:
+        snapshot["error"] = _trim_text(error, max_length=500)
+    if error_type:
+        snapshot["errorType"] = _trim_text(error_type, max_length=120)
+    return _knowledge_ingestion_work_run_store().persist_snapshot(
+        KNOWLEDGE_INGESTION_WORK_RUN_KIND,
+        snapshot,
+        active_run_id=run_id if active else "",
+    )
+
+
+def _knowledge_ingestion_snapshot_is_active(snapshot: dict[str, Any] | None, team_id: str) -> bool:
+    if not isinstance(snapshot, dict):
+        return False
+    if _trim_text(snapshot.get("teamId"), max_length=160) != team_id:
+        return False
+    status = _trim_text(snapshot.get("status"), max_length=80).lower()
+    current_phase = _trim_text(snapshot.get("currentPhase"), max_length=80).lower()
+    return status in {"queued", "running"} or current_phase in {"queued", "running"}
+
+
+def _knowledge_ingestion_background_response(team_id: str, snapshot: dict[str, Any], *, already_running: bool) -> dict[str, Any]:
+    return {
+        "schemaVersion": SCHEMA_VERSION,
+        "teamId": team_id,
+        "status": "accepted",
+        "executionMode": "background",
+        "accepted": True,
+        "alreadyRunning": already_running,
+        "activeWorkRun": snapshot,
+        "summary": {
+            "formalKnowledgeItemCount": 0,
+            "knowledgeBaseId": "",
+            "stewardPackCandidateId": "",
+        },
+        "nextActions": [
+            "资料入库已进入后台执行，页面可继续操作。",
+            "保持页面打开或稍后返回；入库状态会在不阻塞请求的情况下刷新。",
+        ],
+    }
+
+
+def start_knowledge_collection_ingestion_background(team_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Queue the synchronous knowledge-collection ingestion on a background worker.
+
+    首次入库会现场用真实模型生成 steward pack（耗时分钟级）。后台执行让点击立即返回，
+    UI 通过 knowledge-ingestion/status 的 activeWorkRun 轮询进度，避免同步 HTTP 超时。
+    """
+    normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
+    team_service.get_team(normalized_team_id)
+    request_payload = dict(payload) if isinstance(payload, dict) else {}
+    store = _knowledge_ingestion_work_run_store()
+    with _WORKFLOW_LOCK:
+        active_snapshot = store.load_active_snapshot(KNOWLEDGE_INGESTION_WORK_RUN_KIND)
+        if _knowledge_ingestion_snapshot_is_active(active_snapshot, normalized_team_id):
+            _record_workflow_event(
+                "knowledge_collection.ingestion_background_already_running",
+                normalized_team_id,
+                fields={"runId": _trim_text(active_snapshot.get("runId"), max_length=160)},
+            )
+            return _knowledge_ingestion_background_response(normalized_team_id, active_snapshot, already_running=True)
+        run_id = _new_record_id("knowledge-ingestion")
+        snapshot = _persist_knowledge_ingestion_work_run(
+            normalized_team_id,
+            run_id,
+            status="running",
+            current_phase="running",
+            summary="资料入库已进入后台执行：审查→候选图→入库包→提交→审核→正式入库。",
+            active=True,
+        )
+    worker = threading.Thread(
+        target=_run_knowledge_collection_ingestion_background,
+        args=(normalized_team_id, run_id, request_payload),
+        name=f"knowledge-ingestion-{run_id[:24]}",
+        daemon=True,
+    )
+    worker.start()
+    _record_workflow_event(
+        "knowledge_collection.ingestion_background_accepted",
+        normalized_team_id,
+        fields={"runId": run_id, "threadName": worker.name},
+    )
+    return _knowledge_ingestion_background_response(normalized_team_id, snapshot, already_running=False)
+
+
+def _run_knowledge_collection_ingestion_background(team_id: str, run_id: str, payload: dict[str, Any]) -> None:
+    try:
+        result = run_knowledge_collection_ingestion(team_id, payload)
+    except Exception as exc:
+        _persist_knowledge_ingestion_work_run(
+            team_id,
+            run_id,
+            status="failed",
+            current_phase="failed",
+            summary=_trim_text(exc, max_length=300) or "资料入库后台执行失败。",
+            active=False,
+            error=_trim_text(exc, max_length=500),
+            error_type=type(exc).__name__,
+        )
+        _record_workflow_event(
+            "knowledge_collection.ingestion_background_failed",
+            team_id,
+            fields={"runId": run_id, "errorType": type(exc).__name__, "error": _trim_text(exc, max_length=500)},
+        )
+        return
+    result_summary = result.get("summary") if isinstance(result.get("summary"), dict) else {}
+    formal_count = _source_collection_count(result_summary.get("formalKnowledgeItemCount"))
+    terminal_status = _trim_text(result.get("status"), max_length=80) or "completed"
+    _persist_knowledge_ingestion_work_run(
+        team_id,
+        run_id,
+        status="completed" if formal_count > 0 else terminal_status,
+        current_phase="completed" if formal_count > 0 else terminal_status,
+        summary=(
+            f"资料入库完成：正式 KnowledgeItem {formal_count} 条。"
+            if formal_count > 0
+            else f"资料入库结束：{terminal_status}。"
+        ),
+        active=False,
+        result=result,
+    )
+    _record_workflow_event(
+        "knowledge_collection.ingestion_background_completed",
+        team_id,
+        fields={"runId": run_id, "status": terminal_status, "formalKnowledgeItemCount": formal_count},
+    )
+
+
 def run_knowledge_collection_ingestion(team_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
     """Run the four-step knowledge collection gate from screened sources to Team Knowledge.
 
@@ -6265,11 +6473,16 @@ def run_knowledge_collection_ingestion(team_id: str, payload: dict[str, Any] | N
     """
 
     normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
-    team_service.get_team(normalized_team_id)
+    team_detail = team_service.get_team(normalized_team_id)
     payload = payload if isinstance(payload, dict) else {}
     source_quality_agent_id = _trim_text(payload.get("sourceQualityAgentId"), max_length=160) or "Source Quality Assessment Agent"
     candidate_graph_agent_id = _trim_text(payload.get("candidateGraphAgentId"), max_length=160) or "Candidate Graph Preview Agent"
-    steward_agent_id = _trim_text(payload.get("stewardAgentId"), max_length=160) or "Knowledge Steward Agent"
+    # 默认必须是团队成员 agentId（而非显示名），否则建库/审核的成员校验会失败。
+    steward_agent_id = _trim_text(payload.get("stewardAgentId"), max_length=160) or agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID
+    # 职责分离：steward 提案，由独立的 coordinator/lead 成员审批，避免自提自批。
+    reviewer_agent_id = _trim_text(payload.get("reviewerAgentId"), max_length=160) or _resolve_team_review_agent_id(
+        team_detail, exclude_agent_id=steward_agent_id
+    )
     target_domain = _trim_text(payload.get("targetDomain"), max_length=240) or "神经机制启发神经网络算法"
     max_candidates = _normalize_int(payload.get("maxCandidates"), default=80, minimum=1, maximum=200)
     force_review = bool(payload.get("forceReview"))
@@ -6422,6 +6635,14 @@ def run_knowledge_collection_ingestion(team_id: str, payload: dict[str, Any] | N
     if not knowledge_base_id:
         raise TeamWorkflowOrchestrationError("Knowledge base id is required before knowledge collection ingestion.")
 
+    # 职责分离下让 coordinator/lead 审批：给该审批人补一条 per-base review 授权，
+    # 对新建或既有知识库都生效，避免最终审批关因角色不在 REVIEW_ROLES 而无人可过。
+    if auto_approve and reviewer_agent_id:
+        try:
+            team_knowledge_service.ensure_knowledge_base_review_grant(knowledge_base_id, reviewer_agent_id)
+        except (team_knowledge_service.TeamKnowledgeError, team_knowledge_service.TeamKnowledgeNotFoundError) as exc:
+            raise TeamWorkflowOrchestrationError(f"Knowledge review grant failed: {exc}") from exc
+
     source_review: dict[str, Any] | None = None
     knowledge_submission: dict[str, Any] | None = None
     knowledge_review: dict[str, Any] | None = None
@@ -6481,15 +6702,21 @@ def run_knowledge_collection_ingestion(team_id: str, payload: dict[str, Any] | N
                 detail="资料入库包已成为知识库待审提案。",
                 artifact_id=str(((knowledge_submission.get("knowledgeIngestion") or {}).get("package") or {}).get("proposal", {}).get("proposalId") or ""),
             )
-        if auto_approve and knowledge_submission and str((knowledge_submission.get("knowledgeIngestion") or {}).get("status") or "") == "pending_review":
+        if (
+            auto_approve
+            and reviewer_agent_id
+            and knowledge_submission
+            and str((knowledge_submission.get("knowledgeIngestion") or {}).get("status") or "") == "pending_review"
+        ):
+            # 职责分离：由 coordinator/lead 审批人（≠ steward 提案人）批准入库。
             knowledge_review = review_steward_pack_knowledge_ingestion(
                 normalized_team_id,
                 steward_candidate_id,
                 {
                     "knowledgeBaseId": knowledge_base_id,
-                    "reviewedByAgentId": steward_agent_id,
+                    "reviewedByAgentId": reviewer_agent_id,
                     "decision": "approved",
-                    "resolutionNote": "一键入库流程通过资料审查、入库关系和知识库门禁后，由知识治理 Agent 批准入库。",
+                    "resolutionNote": "一键入库流程通过资料审查、入库关系和知识库门禁后，由团队审批人批准入库。",
                 },
             )
             append_step(

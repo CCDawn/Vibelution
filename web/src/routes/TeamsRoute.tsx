@@ -3865,6 +3865,11 @@ export function TeamsRoute({
         `/api/teams/${encodeURIComponent(effectiveTeamId)}/workflow-orchestration/knowledge-ingestion/status`,
       ),
     enabled: Boolean(effectiveTeamId && researchWorkflowTeamSelected && teamWorkflowQuery.data),
+    // 后台入库进行中（activeWorkRun 存在）时轮询，完成后停止。
+    refetchInterval: (query) => {
+      const data = query.state.data as TeamWorkflowKnowledgeIngestionStatus | undefined;
+      return resolvePollingInterval(pageVisible, data?.activeWorkRun ? 2000 : false);
+    },
   });
   const teamWorkflowOfficialModelEvidenceStatusQuery = useQuery({
     queryKey: officialModelEvidenceStatusQueryKey(effectiveTeamId || "none"),
@@ -5164,18 +5169,27 @@ export function TeamsRoute({
             forceReview: variables.forceReview ?? false,
             forceRebuild: variables.forceRebuild ?? false,
             autoCreateKnowledgeBase: true,
-            autoSubmit: false,
-            autoReviewSource: false,
-            autoApprove: false,
-            notifyStewardAgent: true,
-            wakeStewardAgent: true,
+            // 一键入库走同步闭环：提交→来源审核→知识提案→审批→正式 KnowledgeItem。
+            // 职责分离：steward 提案，由后端解析的 coordinator/lead 审批，不再依赖唤醒 agent 的异步交接。
+            autoSubmit: true,
+            autoReviewSource: true,
+            autoApprove: true,
+            notifyStewardAgent: false,
+            wakeStewardAgent: false,
+            // 首次入库需现场生成 steward pack（分钟级）；后台执行让点击立即返回，状态由 activeWorkRun 轮询。
+            backgroundExecution: true,
             requesterAgentId: sourceCollectionOwnerAgentId,
           }),
         },
       ),
     onSuccess: (payload, variables) => {
-      queryClient.setQueryData(queryKeys.teamWorkflow(variables.teamId), payload.workflow);
-      queryClient.setQueryData(queryKeys.teamWorkflowKnowledgeIngestionStatus(variables.teamId), payload.statusSnapshot);
+      // 后台执行时响应是 accepted（无 workflow/statusSnapshot）：只失效查询，让 activeWorkRun 轮询接管。
+      if (payload.workflow) {
+        queryClient.setQueryData(queryKeys.teamWorkflow(variables.teamId), payload.workflow);
+      }
+      if (payload.statusSnapshot) {
+        queryClient.setQueryData(queryKeys.teamWorkflowKnowledgeIngestionStatus(variables.teamId), payload.statusSnapshot);
+      }
       void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflowCandidates(variables.teamId, TEAM_WORKFLOW_CANDIDATE_PREVIEW_LIMIT) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflowCandidateGraph(variables.teamId) });
       void queryClient.invalidateQueries({ queryKey: sourceQualityStatusQueryKey(variables.teamId) });
@@ -9537,8 +9551,11 @@ export function TeamsRoute({
     && runKnowledgeIngestionPrecheckMutation.error instanceof Error
       ? runKnowledgeIngestionPrecheckMutation.error
       : null;
+  const selectedTeamKnowledgeIngestionActiveWorkRun =
+    teamWorkflowKnowledgeIngestionStatusQuery.data?.activeWorkRun ?? null;
   const selectedTeamKnowledgeCollectionIngestPending =
-    runKnowledgeCollectionIngestMutation.isPending && runKnowledgeCollectionIngestMutation.variables?.teamId === selectedTeam?.teamId;
+    (runKnowledgeCollectionIngestMutation.isPending && runKnowledgeCollectionIngestMutation.variables?.teamId === selectedTeam?.teamId)
+    || Boolean(selectedTeamKnowledgeIngestionActiveWorkRun);
   const selectedTeamKnowledgeCollectionIngestError =
     runKnowledgeCollectionIngestMutation.variables?.teamId === selectedTeam?.teamId
     && runKnowledgeCollectionIngestMutation.error instanceof Error
