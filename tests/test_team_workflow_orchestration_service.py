@@ -473,6 +473,54 @@ def test_generate_hypothesis_blocks_high_over_analogy_mapping(tmp_path, monkeypa
         )
 
 
+def _seed_plan_with_smoke_run(team_id):
+    store = team_workflow_orchestration_service._load_experiment_plan_store(team_id)
+    plan = {
+        "planId": "exp_deliverable",
+        "status": "smoke_passed",
+        "dataset": "synthetic",
+        "metric": ["accuracy"],
+        "baseline": "nearest_centroid",
+        "smokePlan": {},
+        "smokeRunResults": [{"smokeRunId": "sr-1", "artifactHash": "sha256:abc", "status": "passed"}],
+        "updatedAt": "2026-06-25T00:00:00+00:00",
+    }
+    store.setdefault("plans", []).append(plan)
+    store["activePlanId"] = "exp_deliverable"
+    team_workflow_orchestration_service._write_json(
+        team_workflow_orchestration_service._experiment_plan_store_path(team_id), store
+    )
+
+
+def test_export_deliverables_empty_team_is_blocked(tmp_path, monkeypatch):
+    """N-13：证据不足时返回 blocker 清单而非伪造完整材料；不回写知识库。"""
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = team_service.create_team(name="挑战杯科研团队")
+    team_workflow_orchestration_service.ensure_team_workflow_orchestration(team["teamId"])
+    res = team_workflow_orchestration_service.export_deliverables(team["teamId"], {})
+    assert res["status"] == "blocked"
+    codes = {item["code"] for item in res["blockers"]}
+    assert {"no_reviewed_hypothesis", "experiment_loop_incomplete", "no_official_knowledge"} <= codes
+    assert res["deliverableManifest"]["officialBoundary"]["writesBackToKnowledge"] is False
+
+
+def test_export_deliverables_with_reviewed_hypothesis_and_artifact(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = team_service.create_team(name="挑战杯科研团队")
+    team_workflow_orchestration_service.ensure_team_workflow_orchestration(team["teamId"])
+    _register_typed_candidate(
+        team["teamId"],
+        "algorithm_hypothesis",
+        metadata={"reviewRecords": [{"decision": "approve", "reviewRecordId": "rev-1"}]},
+    )
+    _seed_plan_with_smoke_run(team["teamId"])
+    res = team_workflow_orchestration_service.export_deliverables(team["teamId"], {})
+    codes = {item["code"] for item in res["blockers"]}
+    assert "no_reviewed_hypothesis" not in codes
+    assert "experiment_loop_incomplete" not in codes
+    assert res["deliverableManifest"]["artifactRefs"][0]["artifactHash"] == "sha256:abc"
+
+
 def test_propose_iteration_iterate_creates_supersedes_and_draft(tmp_path, monkeypatch):
     """N-12：iterate 新建 v2 draft + supersedes 边，保留 parentCandidateId/changeReason，不覆盖原候选。"""
     _use_tmp_project_root(tmp_path, monkeypatch)
