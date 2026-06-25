@@ -41,9 +41,16 @@ type AgentCenterModelsRouteOptions = {
 
 type AgentCenterMemoryRouteOptions = {
   agentId?: string | null;
+  teamId?: string | null;
+  knowledgeBaseId?: string | null;
+  nodeId?: string | null;
   view?: string | null;
   returnLabel?: AgentCenterReturnLabel | string | null;
   returnTo?: string | null;
+};
+
+type TeamMemoryRouteOptions = AgentCenterMemoryRouteOptions & {
+  teamId: string;
 };
 
 export function safeAgentCenterReturnToPath(value: string | null | undefined) {
@@ -163,18 +170,33 @@ export function agentCenterModelsRoute({
 
 export function agentCenterMemoryRoute({
   agentId,
+  teamId,
+  knowledgeBaseId,
+  nodeId,
   view = "agents",
   returnLabel,
   returnTo,
 }: AgentCenterMemoryRouteOptions) {
   const params = new URLSearchParams();
   const normalizedAgentId = String(agentId || "").trim();
+  const normalizedTeamId = String(teamId || "").trim();
+  const normalizedKnowledgeBaseId = String(knowledgeBaseId || "").trim();
+  const normalizedNodeId = String(nodeId || "").trim();
   const normalizedView = String(view || "").trim();
   const normalizedReturnLabel = String(returnLabel || "").trim();
   const normalizedReturnTo = safeAgentCenterReturnToPath(returnTo);
 
   if (normalizedAgentId) {
     params.set("agentId", normalizedAgentId);
+  }
+  if (normalizedTeamId) {
+    params.set("teamId", normalizedTeamId);
+  }
+  if (normalizedKnowledgeBaseId) {
+    params.set("knowledgeBaseId", normalizedKnowledgeBaseId);
+  }
+  if (normalizedNodeId) {
+    params.set("nodeId", normalizedNodeId);
   }
   if (normalizedView) {
     params.set("view", normalizedView);
@@ -188,4 +210,49 @@ export function agentCenterMemoryRoute({
 
   const query = params.toString();
   return query ? `/memory/agents?${query}` : "/memory/agents";
+}
+
+export function teamMemoryRoute({
+  teamId,
+  agentId,
+  knowledgeBaseId,
+  nodeId,
+  view = "knowledge",
+  returnLabel,
+  returnTo,
+}: TeamMemoryRouteOptions) {
+  const normalizedView = String(view || "knowledge").trim();
+  const path = normalizedView ? `/memory/${encodeURIComponent(normalizedView)}` : "/memory";
+  const params = new URLSearchParams();
+  const normalizedTeamId = String(teamId || "").trim();
+  const normalizedAgentId = String(agentId || "").trim();
+  const normalizedKnowledgeBaseId = String(knowledgeBaseId || "").trim();
+  const normalizedNodeId = String(nodeId || "").trim();
+  const normalizedReturnLabel = String(returnLabel || "").trim();
+  const normalizedReturnTo = safeAgentCenterReturnToPath(returnTo);
+
+  if (normalizedTeamId) {
+    params.set("teamId", normalizedTeamId);
+  }
+  if (normalizedAgentId) {
+    params.set("agentId", normalizedAgentId);
+  }
+  if (normalizedKnowledgeBaseId) {
+    params.set("knowledgeBaseId", normalizedKnowledgeBaseId);
+  }
+  if (normalizedNodeId) {
+    params.set("nodeId", normalizedNodeId);
+  }
+  if (normalizedView) {
+    params.set("view", normalizedView);
+  }
+  if (normalizedReturnTo) {
+    params.set("returnTo", normalizedReturnTo);
+  }
+  if (normalizedReturnLabel) {
+    params.set("returnLabel", normalizedReturnLabel);
+  }
+
+  const query = params.toString();
+  return query ? `${path}?${query}` : path;
 }
