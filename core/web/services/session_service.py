@@ -19236,20 +19236,14 @@ def _publish_session_assistant_delta(
         "updatedAt": str(state.updated_at or "").strip() or _now_timestamp(),
         "done": bool(done),
     }
-    timeline_items = _build_message_timeline_items(
-        message_id=_live_assistant_message_id(session_id, state.turn_id),
-        content=str(state.content or ""),
-        feedback_events=state.feedback_events,
-        streaming=not done,
-    )
-    if timeline_items:
-        event["timelineItems"] = timeline_items
     delivered_count = 0
     dropped_count = 0
     for subscriber in subscribers:
+        queued_event, coalesced_count = _coalesce_session_assistant_delta_queue(subscriber, event)
+        dropped_count += coalesced_count
         delivered, dropped = _put_session_stream_event(
             subscriber,
-            event,
+            queued_event,
             recover_assistant_delta_on_drop=True,
         )
         dropped_count += dropped
@@ -19267,6 +19261,65 @@ def _publish_session_assistant_delta(
         thought_chars=len(str(state.thought_delta or "")),
         done=done,
     )
+
+
+def _coalesce_session_assistant_delta_queue(
+    subscriber: queue.Queue[dict[str, Any]],
+    event: dict[str, Any],
+) -> tuple[dict[str, Any], int]:
+    queued_events: list[dict[str, Any]] = []
+    merged_event = dict(event)
+    dropped_count = 0
+    session_id = str(event.get("sessionId") or "")
+    turn_id = str(event.get("turnId") or "")
+    while True:
+        try:
+            existing = subscriber.get_nowait()
+        except queue.Empty:
+            break
+        if (
+            str(existing.get("type") or "") == "assistant_delta"
+            and str(existing.get("sessionId") or "") == session_id
+            and str(existing.get("turnId") or "") == turn_id
+        ):
+            merged_event = _merge_session_assistant_delta_events(existing, merged_event)
+            dropped_count += 1
+            continue
+        queued_events.append(existing)
+    for existing in queued_events:
+        try:
+            subscriber.put_nowait(existing)
+        except queue.Full:
+            dropped_count += 1
+    return merged_event, dropped_count
+
+
+def _merge_session_assistant_delta_events(
+    previous: dict[str, Any],
+    current: dict[str, Any],
+) -> dict[str, Any]:
+    merged = dict(current)
+    previous_content_delta = str(previous.get("contentDelta") or "")
+    current_content_delta = str(current.get("contentDelta") or "")
+    previous_thought_delta = str(previous.get("thoughtDelta") or "")
+    current_thought_delta = str(current.get("thoughtDelta") or "")
+    previous_replace_content = bool(previous.get("replaceContent"))
+    current_replace_content = bool(current.get("replaceContent"))
+    previous_replace_thought = bool(previous.get("replaceThought"))
+    current_replace_thought = bool(current.get("replaceThought"))
+    if current_replace_content:
+        merged["contentDelta"] = current_content_delta
+    else:
+        merged["contentDelta"] = previous_content_delta + current_content_delta
+        merged["replaceContent"] = previous_replace_content
+    if current_replace_thought:
+        merged["thoughtDelta"] = current_thought_delta
+    else:
+        merged["thoughtDelta"] = previous_thought_delta + current_thought_delta
+        merged["replaceThought"] = previous_replace_thought
+    if not merged.get("feedbackEvents") and previous.get("feedbackEvents"):
+        merged["feedbackEvents"] = list(previous.get("feedbackEvents") or [])
+    return merged
 
 
 def _put_session_stream_event(
