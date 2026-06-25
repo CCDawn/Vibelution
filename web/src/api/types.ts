@@ -4574,7 +4574,28 @@ export type TeamWorkflowKnowledgeIngestionStatus = {
     candidateStorePath: string;
     transferRecordsPath: string;
   };
+  activeWorkRun?: TeamWorkflowKnowledgeIngestionWorkRun | null;
+  latestWorkRun?: TeamWorkflowKnowledgeIngestionWorkRun | null;
   updatedAt: string;
+};
+
+export type TeamWorkflowKnowledgeIngestionWorkRun = {
+  runId: string;
+  status: string;
+  currentPhase: string;
+  teamId: string;
+  summary?: string;
+  currentTask?: string;
+  updatedAt?: string;
+  finishedAt?: string;
+  error?: string;
+  errorType?: string;
+  result?: {
+    status?: string;
+    formalKnowledgeItemCount?: number;
+    knowledgeBaseId?: string;
+    stewardPackCandidateId?: string;
+  };
 };
 
 export type TeamWorkflowKnowledgeCollectionIngestionPayload = {
