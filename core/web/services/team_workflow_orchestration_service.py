@@ -11625,42 +11625,64 @@ def _reconcile_source_collection_stage_session_task_sources(team_id: str, run_id
         writeback["result"] = result
     if not result:
         return task
+    next_writeback = dict(writeback)
+    next_task = dict(task)
+    next_result = dict(result)
+    changed = False
+
     existing_summary = writeback.get("materializedSources") if isinstance(writeback.get("materializedSources"), dict) else {}
     existing_status = _trim_text(existing_summary.get("status"), max_length=80).lower()
-    if existing_status and existing_status != "failed":
-        return task
-    materialized_sources = _materialize_source_collection_stage_writeback_sources(
-        team_id,
-        run_id,
-        task,
-        writeback,
+    if not existing_status or existing_status == "failed":
+        materialized_sources = _materialize_source_collection_stage_writeback_sources(
+            team_id,
+            run_id,
+            task,
+            writeback,
+        )
+        next_writeback["materializedSources"] = materialized_sources
+        next_result["materializedSources"] = materialized_sources
+        changed = True
+        _record_workflow_event(
+            "source_collection.stage_session_task_sources_reconciled",
+            team_id,
+            fields={
+                "runId": run_id,
+                "taskId": _trim_text(task.get("taskId"), max_length=160),
+                "stageId": _trim_text(task.get("stageId"), max_length=80),
+                "agentId": _trim_text(task.get("agentId"), max_length=160),
+                "sourceLeadCount": materialized_sources.get("sourceLeadCount", 0),
+                "createdRecordCount": materialized_sources.get("createdRecordCount", 0),
+                "importedCandidateCount": materialized_sources.get("importedCandidateCount", 0),
+                "skippedDuplicateCount": materialized_sources.get("skippedDuplicateCount", 0),
+                "failedCount": materialized_sources.get("failedCount", 0),
+            },
+            level="warning" if materialized_sources.get("failedCount") else "info",
+            outcome="failed" if materialized_sources.get("failedCount") else "completed",
+            lifecycle=bool(materialized_sources.get("failedCount")),
+        )
+
+    existing_quality_summary = writeback.get("materializedSourceQuality") if isinstance(writeback.get("materializedSourceQuality"), dict) else {}
+    existing_quality_status = _trim_text(existing_quality_summary.get("status"), max_length=80).lower()
+    should_reconcile_quality = (
+        (_trim_text(task.get("stageId"), max_length=80) == "screening" or _trim_text(task.get("agentRole"), max_length=80) == "source_quality")
+        and bool(_source_collection_stage_writeback_candidate_decisions(result))
     )
-    next_writeback = dict(writeback)
-    next_writeback["materializedSources"] = materialized_sources
-    next_task = dict(task)
+    if should_reconcile_quality and (not existing_quality_status or existing_quality_status == "failed"):
+        materialized_quality = _materialize_source_collection_stage_writeback_quality(
+            team_id,
+            run_id,
+            task,
+            writeback,
+        )
+        next_writeback["materializedSourceQuality"] = materialized_quality
+        next_result["materializedSourceQuality"] = materialized_quality
+        changed = True
+
+    if not changed:
+        return task
     next_task["writeback"] = next_writeback
-    next_result = dict(result)
-    next_result["materializedSources"] = materialized_sources
     next_task["result"] = next_result
     next_task["updatedAt"] = utc_now_iso()
-    _record_workflow_event(
-        "source_collection.stage_session_task_sources_reconciled",
-        team_id,
-        fields={
-            "runId": run_id,
-            "taskId": _trim_text(task.get("taskId"), max_length=160),
-            "stageId": _trim_text(task.get("stageId"), max_length=80),
-            "agentId": _trim_text(task.get("agentId"), max_length=160),
-            "sourceLeadCount": materialized_sources.get("sourceLeadCount", 0),
-            "createdRecordCount": materialized_sources.get("createdRecordCount", 0),
-            "importedCandidateCount": materialized_sources.get("importedCandidateCount", 0),
-            "skippedDuplicateCount": materialized_sources.get("skippedDuplicateCount", 0),
-            "failedCount": materialized_sources.get("failedCount", 0),
-        },
-        level="warning" if materialized_sources.get("failedCount") else "info",
-        outcome="failed" if materialized_sources.get("failedCount") else "completed",
-        lifecycle=bool(materialized_sources.get("failedCount")),
-    )
     return next_task
 
 
