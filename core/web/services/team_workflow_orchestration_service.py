@@ -4826,6 +4826,77 @@ def export_deliverables(team_id: str, payload: dict[str, Any] | None = None) -> 
     }
 
 
+_PRD_EXPECTED_ENDPOINTS = (
+    "knowledge-collection/extract",
+    "research/mechanisms/extract",
+    "research/mechanisms/map",
+    "research/hypotheses/generate",
+    "research/review/decide",
+    "experiments/plans/{plan_id}/smoke-run",
+    "iterations/propose",
+    "deliverables/export",
+)
+
+
+def validate_prd(team_id: str, payload: dict[str, Any] | None = None, *, registered_paths: list[str] | None = None) -> dict[str, Any]:
+    """N-14：PRD 校验门禁（节点 13）。校验代码侧契约一致性，避免 PRD 与实现脱节（R7）。
+
+    检查项：①schemas/ 声明文件存在且可加载；②registry 与 service 的 CANDIDATE_TYPES /
+    LOCAL_RESEARCH_TASKS 一致（防漂移）；③科研生成链端点已注册（需路由层传入 registered_paths）；
+    ④smoke runner 具白名单 + 固定 seed + artifactHash。任一失败 → valid=False。
+    """
+    normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
+    team_service.get_team(normalized_team_id)
+    checks: list[dict[str, Any]] = []
+
+    def add(name: str, ok: bool, detail: str = "") -> None:
+        checks.append({"check": name, "ok": bool(ok), "detail": detail})
+
+    schema_ids = candidate_schema_registry.candidate_schema_ids()
+    try:
+        for name in schema_ids:
+            candidate_schema_registry.load_schema(name)
+        add("schemas_present", True, f"{len(schema_ids)} schema file(s)")
+    except (OSError, ValueError) as exc:
+        add("schemas_present", False, str(exc))
+
+    add(
+        "candidate_types_in_sync",
+        set(candidate_schema_registry.CANDIDATE_TYPES) == set(CANDIDATE_TYPES),
+        "registry vs service CANDIDATE_TYPES",
+    )
+    task_sync = set(candidate_schema_registry.RESEARCH_TASK_REQUIRED_OUTPUT) == set(LOCAL_RESEARCH_TASKS) and all(
+        tuple(LOCAL_RESEARCH_TASKS[task]["requiredOutput"]) == fields
+        for task, fields in candidate_schema_registry.RESEARCH_TASK_REQUIRED_OUTPUT.items()
+    )
+    add("research_task_outputs_in_sync", task_sync, "registry vs LOCAL_RESEARCH_TASKS requiredOutput")
+
+    if registered_paths is not None:
+        joined = "\n".join(str(path) for path in registered_paths)
+        missing = [endpoint for endpoint in _PRD_EXPECTED_ENDPOINTS if endpoint not in joined]
+        add("research_endpoints_registered", not missing, f"missing={missing}" if missing else "all present")
+
+    try:
+        sample = smoke_runner.run_smoke_adapter("synthetic_classification_baseline_vs_variant", seed=42)
+        runner_ok = (
+            bool(smoke_runner.WHITELIST_ADAPTERS)
+            and str(sample.get("artifactHash", "")).startswith("sha256:")
+            and "seed" in sample
+        )
+        add("smoke_runner_markers", runner_ok, f"whitelist={len(smoke_runner.WHITELIST_ADAPTERS)}")
+    except smoke_runner.SmokeRunnerError as exc:
+        add("smoke_runner_markers", False, str(exc))
+
+    failed = [item for item in checks if not item["ok"]]
+    return {
+        "schemaVersion": SCHEMA_VERSION,
+        "teamId": normalized_team_id,
+        "valid": not failed,
+        "checks": checks,
+        "failedCount": len(failed),
+    }
+
+
 def plan_paper_note_chunks_from_source_candidate(team_id: str, candidate_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
     normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
     normalized_candidate_id = _normalize_required_id(candidate_id, "Candidate id is required.")
