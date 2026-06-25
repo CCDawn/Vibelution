@@ -41,6 +41,7 @@ from core.web.services.team_workflow_orchestration_service import (
     map_mechanism_to_abstraction,
     open_source_collection_storage_target,
     plan_paper_note_chunks_from_source_candidate,
+    propose_iteration,
     record_local_research_model_output,
     register_experiment_baseline_artifact,
     register_experiment_full_run_result,
@@ -458,6 +459,15 @@ class ResearchReviewDecidePayload(BaseModel):
     decision: str = Field("", max_length=40)
     comments: str = Field("", max_length=4000)
     requiredChanges: list[str] = Field(default_factory=list, max_length=24)
+
+
+class IterationProposePayload(BaseModel):
+    parentCandidateId: str = Field("", max_length=128)
+    action: str = Field("", max_length=40)
+    changeReason: str = Field("", max_length=2000)
+    mergeWithCandidateId: str = Field("", max_length=128)
+    proposedByAgent: str = Field("", max_length=160)
+    evidenceRefs: list[dict[str, Any]] = Field(default_factory=list, max_length=24)
 
 
 class PaperNoteChunkPlanPayload(BaseModel):
@@ -1190,6 +1200,24 @@ def team_workflow_research_review_decide(team_id: str, payload: ResearchReviewDe
             exc,
             status_code=422,
             fields={"decision": payload.decision, "reviewedByAgent": payload.reviewedByAgent},
+        )
+
+
+@router.post("/teams/{team_id}/workflow-orchestration/iterations/propose", status_code=status.HTTP_201_CREATED)
+def team_workflow_iterations_propose(team_id: str, payload: IterationProposePayload) -> dict:
+    try:
+        return propose_iteration(team_id, payload.model_dump())
+    except TeamNotFoundError as exc:
+        _raise_team_workflow_route_error(
+            "iterations.propose", team_id, exc, status_code=404, fields={"parentCandidateId": payload.parentCandidateId}
+        )
+    except (TeamServiceError, TeamWorkflowOrchestrationError) as exc:
+        _raise_team_workflow_route_error(
+            "iterations.propose",
+            team_id,
+            exc,
+            status_code=422,
+            fields={"parentCandidateId": payload.parentCandidateId, "action": payload.action},
         )
 
 
