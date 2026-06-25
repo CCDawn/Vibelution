@@ -473,6 +473,58 @@ def test_generate_hypothesis_blocks_high_over_analogy_mapping(tmp_path, monkeypa
         )
 
 
+def test_propose_iteration_iterate_creates_supersedes_and_draft(tmp_path, monkeypatch):
+    """N-12：iterate 新建 v2 draft + supersedes 边，保留 parentCandidateId/changeReason，不覆盖原候选。"""
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = team_service.create_team(name="挑战杯科研团队")
+    hyp_id = _register_typed_candidate(team["teamId"], "algorithm_hypothesis")
+    res = team_workflow_orchestration_service.propose_iteration(
+        team["teamId"], {"parentCandidateId": hyp_id, "action": "iterate", "changeReason": "tune routing gate"}
+    )
+    assert res["action"] == "iterate"
+    draft = res["proposal"]["newCandidateDraft"]
+    assert draft["parentCandidateId"] == hyp_id and draft["changeReason"] == "tune routing gate"
+    edges = res["versionEdges"]
+    assert any(e["edgeType"] == "supersedes" and e["to"] == hyp_id and e["from"] == draft["candidateId"] for e in edges)
+
+
+def test_propose_iteration_requires_change_reason(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = team_service.create_team(name="挑战杯科研团队")
+    hyp_id = _register_typed_candidate(team["teamId"], "algorithm_hypothesis")
+    with pytest.raises(team_workflow_orchestration_service.TeamWorkflowOrchestrationError):
+        team_workflow_orchestration_service.propose_iteration(
+            team["teamId"], {"parentCandidateId": hyp_id, "action": "iterate"}
+        )
+
+
+def test_propose_iteration_reject_writes_archive_edge(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = team_service.create_team(name="挑战杯科研团队")
+    hyp_id = _register_typed_candidate(team["teamId"], "algorithm_hypothesis")
+    res = team_workflow_orchestration_service.propose_iteration(
+        team["teamId"], {"parentCandidateId": hyp_id, "action": "reject", "changeReason": "variant underperformed"}
+    )
+    assert res["proposal"]["rejectionArchive"]["reason"] == "variant underperformed"
+    assert any(e["edgeType"] == "rejected_because" and e["from"] == hyp_id for e in res["versionEdges"])
+
+
+def test_propose_iteration_merge_requires_target(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = team_service.create_team(name="挑战杯科研团队")
+    hyp_id = _register_typed_candidate(team["teamId"], "algorithm_hypothesis")
+    with pytest.raises(team_workflow_orchestration_service.TeamWorkflowOrchestrationError):
+        team_workflow_orchestration_service.propose_iteration(
+            team["teamId"], {"parentCandidateId": hyp_id, "action": "merge", "changeReason": "dedupe"}
+        )
+    other_id = _register_typed_candidate(team["teamId"], "algorithm_hypothesis")
+    res = team_workflow_orchestration_service.propose_iteration(
+        team["teamId"],
+        {"parentCandidateId": hyp_id, "action": "merge", "changeReason": "dedupe", "mergeWithCandidateId": other_id},
+    )
+    assert any(e["edgeType"] == "merged_with" and e["to"] == other_id for e in res["versionEdges"])
+
+
 def test_decide_research_review_approves_clean_hypothesis(tmp_path, monkeypatch):
     """N-05：证据/事实分界/可测性齐全且无高过度类比 → approve（review_ready）。"""
     _use_tmp_project_root(tmp_path, monkeypatch)
