@@ -51,7 +51,7 @@
 - 原始文件不改写，只登记路径、hash、页码范围和来源可信度。
 - 所有候选 JSON 都有 id、status、createdAt、updatedAt、sourceRefs、links、review、graphSync。
 - 候选数据不直接进入 Team Knowledge 或正式 RAG。
-- 正式入库只允许通过 Knowledge Steward Agent 提交 proposal/rating/ingestion pack，再经 Ingestion Approval Gate 通过。
+- 正式入库只允许通过 知识库管理员 提交 proposal/rating/ingestion pack，再经 Ingestion Approval Gate 通过。
 - 能用 Team Knowledge 表达的正式内容，不在 knowledge_candidates 里重复建一套正式库。
 
 ## 4. 核心 JSON Schema
@@ -236,7 +236,7 @@ source_registered
 | 算法假设不可测 | hypothesis_needs_revision | 05 算法假设 hypothesis_candidate | Algorithm Hypothesis Agent | experiment_plan_fix |
 | 审稿要求返工 | review_ready + needs_revision | 最近责任节点 | 原产出 Agent | review_record、requiredChanges |
 | 图谱断链 | candidate_graph_visible + broken_links | 对应缺失节点状态 | Candidate Graph Preview Agent 协调原产出 Agent | broken_link_report |
-| 入库治理退回 | steward_needs_revision | 06 审稿或 07 知识治理 | Evidence Review Agent / Knowledge Steward Agent | steward_feedback |
+| 入库治理退回 | steward_needs_revision | 06 审稿或 07 知识治理 | Evidence Review Agent / 知识库管理员 | steward_feedback |
 | 审批门禁拒绝 | approved_to_ingest + rejected_by_gate | rejection_archive 或 06 审稿 | Ingestion Approval Gate 指定 | ingestion_rejection_reason |
 | 权限或能力缺口 | 任意状态 | risk_escalation | Research Coordination Agent | risk_record、proposal |
 
@@ -417,7 +417,7 @@ Agent 创建策略：
 - 负责资料初筛、paper_note 草稿、neuro_mechanism 候选、机制到计算抽象、algorithm_hypothesis 草稿和 review prefilter。
 - 不作为最终科研裁决模型。
 - 不直接写正式 Team Knowledge、正式 RAG 或正式知识图谱。
-- 不替代 Evidence Review Agent、Knowledge Steward Agent 或 Ingestion Approval Gate。
+- 不替代 Evidence Review Agent、知识库管理员 或 Ingestion Approval Gate。
 - Vibelution 模型库 ID：`houmo_qwen35_9b_agent`。
 - 服务地址：`http://192.168.20.30:8081/v1`。
 - 模型文件：`HiModel_xh2_qwen3.5_9b_256_256k_b1_1chip_2cores_v1.3.0_20260429.gguf`。
@@ -445,7 +445,7 @@ Agent 创建策略：
 | 04 机制到计算抽象 | 生成多种计算抽象映射，强制区分 factLayer、inferenceLayer、overAnalogyRisk |
 | 05 生成 algorithm_hypothesis | 生成算法假设草稿，补 baseline、expectedBenefit、expectedComputeCost、experimentPlan |
 | 06 科研审稿 | 只做 review prefilter，给 riskFlags 和 requiredChanges，不做最终审稿裁决 |
-| 07 知识治理入库 | 只生成 proposal/ingestion pack 草稿，正式建议仍由 Knowledge Steward Agent 检查 |
+| 07 知识治理入库 | 只生成 proposal/ingestion pack 草稿，正式建议仍由 知识库管理员 检查 |
 
 输出契约：
 
@@ -554,7 +554,7 @@ Agent 创建策略：
 - 可输出 riskFlags、requiredChanges 和 needsDecision。
 - 不写最终 review.decision。
 
-### Knowledge Steward Agent
+### 知识库管理员
 
 职责：
 
@@ -565,7 +565,7 @@ Agent 创建策略：
 本地模型用法：
 
 - 本地 9B 研究模型只能生成 proposal/ingestion pack 草稿。
-- 正式建议仍由 Knowledge Steward Agent 检查。
+- 正式建议仍由 知识库管理员 检查。
 
 可用工具：
 
@@ -593,7 +593,7 @@ Agent 创建策略：
 
 治理阶段：
 
-- Knowledge Steward Agent 把 ready_for_steward 候选转为可审核 SourceArtifact、RefinementProposal、rating suggestion 或 ingestion pack。
+- 知识库管理员 把 ready_for_steward 候选转为可审核 SourceArtifact、RefinementProposal、rating suggestion 或 ingestion pack。
 - ingestion pack 记录 sourceTrace、riskSummary、targetDomain。
 - 优先调用现有 knowledge_proposal_tool、knowledge_ingestion_tool、knowledge_rating_suggestion_tool，不新增挑战杯专用入库工具。
 
@@ -773,7 +773,7 @@ Agent 创建策略：
 - 已覆盖：合格 steward pack 草稿进入 `steward_pack_draft`，且只写 CandidateStore。
 - 已覆盖：`approvalRequired` 非 true 时进入 `steward_needs_revision`。
 - 已覆盖：包含 `officialSync`、`applyNow=true` 或 `writeOfficialGraph=true` 等立即正式写入意图时进入 `steward_needs_revision`。
-- 已覆盖：Knowledge Steward Agent 可将草稿包映射为 Team Knowledge 待审 SourceArtifact / pending RefinementProposal / pending ratingSuggestion。
+- 已覆盖：知识库管理员 可将草稿包映射为 Team Knowledge 待审 SourceArtifact / pending RefinementProposal / pending ratingSuggestion。
 - 已覆盖：未通过授权审批门禁不能创建正式 KnowledgeItem、RAG 或正式图谱。
 - 已覆盖：Ingestion Approval Gate 批准后创建正式 `KnowledgeItem`，候选进入 `official_synced`，并记录 `officialSyncRecord`。
 - 已覆盖：Ingestion Approval Gate 拒绝后不创建正式 `KnowledgeItem`，候选进入 `steward_needs_revision`。
@@ -889,7 +889,7 @@ Vibelution 已经具备团队沟通基础能力，不需要为挑战杯从零实
 
 知识治理层：
 
-- Knowledge Steward Agent / agent-knowledge-steward
+- 知识库管理员 / agent-knowledge-steward
 - Ingestion Approval Gate
 - Knowledge Platform
 
@@ -901,14 +901,14 @@ Vibelution 已经具备团队沟通基础能力，不需要为挑战杯从零实
 
 - Research Coordination Agent reports_to Research Organization Agent。
 - 科研执行层 reports_to Research Coordination Agent。
-- Knowledge Steward Agent reports_to Capability Governance Agent。
+- 知识库管理员 reports_to Capability Governance Agent。
 - Ingestion Approval Gate 作为正式审批门禁，不参与普通任务派发。
 
 通信边：
 
 - Research Coordination Agent -> 所有执行 Agent：task_assignment、evidence_request、validation_plan。
 - 执行 Agent -> Research Coordination Agent：status_report、risk_escalation、final_report。
-- Evidence Review Agent <-> Knowledge Steward Agent：knowledge_update、permission_review、decision_request。
+- Evidence Review Agent <-> 知识库管理员：knowledge_update、permission_review、decision_request。
 - Research Organization Agent <-> Capability Governance Agent：organization_design、capability_policy、tool_policy、memory_policy。
 
 群聊用途：
@@ -927,7 +927,7 @@ Vibelution 已经具备团队沟通基础能力，不需要为挑战杯从零实
 Team linkedChatRoom round
   -> team_chat_refinement SourceArtifact
   -> RefinementProposal
-  -> Knowledge Steward Agent 审查
+  -> 知识库管理员 审查
   -> Ingestion Approval Gate 审批
   -> Team Knowledge / RAG / 正式知识图谱
 ```
@@ -971,7 +971,7 @@ Team linkedChatRoom round
 - 协调先行，执行后发言：Research Coordination Agent 先发布议题包、输入范围、预期产物和截止条件，避免执行 Agent 在上下文不齐时重复讨论。
 - 小范围闭环，必要时升级：能在执行层解决的问题不进入组织层；涉及工具权限、记忆权限、Agent 新增或通信边变更时再升级到 Research Organization Agent / Capability Governance Agent。
 - 结论结构化，过程轻量化：群聊正文只保留必要讨论；可复用结论必须沉淀为 decision_record、review_record、algorithm_hypothesis 或 ingestion package。
-- 候选和正式分层：团队讨论可以生成候选记忆，但正式 Team Knowledge/RAG/图谱仍必须经过 Evidence Review Agent、Knowledge Steward Agent 和 Ingestion Approval Gate。
+- 候选和正式分层：团队讨论可以生成候选记忆，但正式 Team Knowledge/RAG/图谱仍必须经过 Evidence Review Agent、知识库管理员 和 Ingestion Approval Gate。
 
 推荐轮次类型：
 
@@ -980,7 +980,7 @@ Team linkedChatRoom round
 | agenda_brief | 新阶段、新资料批次、新实验方向 | Research Coordination Agent + 必要执行 Agent | opportunistic，协调 Agent 优先 | agenda_packet、task_assignment |
 | status_sync | 阶段内例行同步 | 当前活跃执行 Agent | round_robin | status_digest、blocker_list |
 | evidence_closure | 证据冲突、引用不足、结论待复核 | Evidence Review Agent + 相关执行 Agent | round_robin | review_record、decision_request |
-| decision_gate | 准备入库或同步正式图谱 | Knowledge Steward Agent + Evidence Review Agent + Ingestion Approval Gate | opportunistic，门禁相关 Agent 优先 | ingestion_decision、official_sync_record |
+| decision_gate | 准备入库或同步正式图谱 | 知识库管理员 + Evidence Review Agent + Ingestion Approval Gate | opportunistic，门禁相关 Agent 优先 | ingestion_decision、official_sync_record |
 | risk_escalation | 权限、数据可信度、工具缺口、流程阻塞 | Research Coordination Agent + Organization/Governance Agent | opportunistic | risk_record、proposal 或 rollback_request |
 
 消息契约：
@@ -1005,4 +1005,4 @@ Team linkedChatRoom round
 - unresolved_blocker_age：阻塞项停留在 blocker_list 的时长。
 - duplicate_question_count：同一 claim/sourceRef 被重复追问的次数。
 - chat_to_memory_conversion_rate：群聊轮次中成功转成 SourceArtifact / RefinementProposal 的比例。
-- rejected_due_to_evidence_gap：因证据不足被 Knowledge Steward 或审批门禁退回的数量。
+- rejected_due_to_evidence_gap：因证据不足被 知识库管理员 或审批门禁退回的数量。

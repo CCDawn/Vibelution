@@ -402,7 +402,7 @@ def knowledge_governance_plan_tool(limit: int = 8) -> str:
 
 
 def knowledge_steward_recommendations_tool(limit: int = 8) -> str:
-    """Read the current Agent's Knowledge Steward governance recommendations."""
+    """Read the current Agent's knowledge base admin governance recommendations."""
 
     runtime = _current_runtime()
     agent_id = str(runtime.get("agentId") or "").strip()
@@ -440,7 +440,7 @@ def knowledge_steward_recommendations_tool(limit: int = 8) -> str:
 
 
 def knowledge_steward_workbench_tool(limit: int = 8) -> str:
-    """Read the current Agent's consolidated Knowledge Steward workbench."""
+    """Read the current Agent's consolidated knowledge base admin workbench."""
 
     runtime = _current_runtime()
     agent_id = str(runtime.get("agentId") or "").strip()

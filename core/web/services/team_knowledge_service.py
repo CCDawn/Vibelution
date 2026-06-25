@@ -192,7 +192,7 @@ def _build_knowledge_steward_overview(
         "steward": {
             "agentId": steward_id,
             "agentCode": str((steward or {}).get("agentCode") or "").strip(),
-            "displayName": str((steward or {}).get("displayName") or "").strip() or "Knowledge Steward",
+            "displayName": str((steward or {}).get("displayName") or "").strip() or "知识库管理员",
             "functionalDisplayName": str(metadata.get("functionalDisplayName") or "知识库管理员").strip(),
             "status": str((steward or {}).get("status") or "missing").strip(),
             "directSessionId": str((steward or {}).get("directSessionId") or "").strip(),
@@ -1301,7 +1301,7 @@ def _build_knowledge_steward_recommendations(
 
 
 def get_knowledge_steward_workbench(*, agent_id: str = "", limit: int = 12, internal: bool = False) -> dict[str, Any]:
-    """Return the Knowledge Steward's consolidated read-only workbench."""
+    """Return the knowledge base admin's consolidated read-only workbench."""
 
     payload = _build_knowledge_steward_workbench(agent_id=agent_id, limit=limit, internal=internal)
     _record_event(
