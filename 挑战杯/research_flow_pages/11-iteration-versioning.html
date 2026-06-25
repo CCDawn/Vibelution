@@ -30,13 +30,13 @@
         <section class="plan-hero">
           <div class="kicker">Research Flow Node 11</div>
           <h1>持续迭代与版本化</h1>
-          <p class="subtitle">防止研究假设失控堆积，保留可追溯版本。</p>
-          <div class="tag-row"><span class="tag pending">待规划</span><span class="tag">Iteration Versioning Agent</span><span class="tag">独立计划页</span></div>
+          <p class="subtitle">迭代阶段拆成两个操作型 Agent：迭代决策 Agent 只登记 Research Loop 证据与决策，版本治理 Agent 只维护 candidate version ledger、supersede/derive/reject 关系和拒绝归档。</p>
+          <div class="tag-row"><span class="tag active">迭代决策与候选版本账本操作 Agent 已接入</span><span class="tag">Iteration Planner Agent / Candidate Versioning Agent</span><span class="tag">独立计划页</span></div>
           <div class="diagram">
-            <div class="flow-cell"><strong>输入</strong><span>候选 index / review_record</span></div>
-            <div class="flow-cell"><strong>动作</strong><span>待规划：versionHistory。</span></div>
-            <div class="flow-cell"><strong>输出</strong><span>版本链 / 拒绝归档</span></div>
-            <div class="flow-cell"><strong>记忆/图谱</strong><span>未来边：supersedes、derived_from、rejected_because。</span></div>
+            <div class="flow-cell"><strong>输入</strong><span>research_loop / experiment_result_pack</span></div>
+            <div class="flow-cell"><strong>动作</strong><span>Iteration Planner Agent 使用 challenge_cup_iteration_context_tool 读取 Research Loop、实验计划和证据缺口。</span></div>
+            <div class="flow-cell"><strong>输出</strong><span>research_loop / evidenceRecords</span></div>
+            <div class="flow-cell"><strong>记忆/图谱</strong><span>候选版本关系只作为账本关系存在；不创建正式图谱边，后续正式边必须来自已审批 KnowledgeItem trace。</span></div>
           </div>
         </section>
 
@@ -46,21 +46,31 @@
             <p class="hint">本页只展示 11 节点。通过左侧导航可进入其它节点页。</p>
           </div>
           <div class="plan-grid">
-            <article class="plan-card"><h2>目标</h2><p class="hint">管理候选修订、拒绝原因、同类假设合并和挑战杯材料摘要视图。</p></article>
-            <article class="plan-card"><h2>输入</h2><ul><li>候选 index</li>
+            <article class="plan-card"><h2>目标</h2><p class="hint">管理候选修订、拒绝原因、同类假设合并和下一轮实验建议，同时保持候选版本账本与正式知识/RAG/official graph 的边界。</p></article>
+            <article class="plan-card"><h2>输入</h2><ul><li>research_loop</li>
+<li>experiment_result_pack</li>
+<li>candidateIds</li>
 <li>review_record</li>
-<li>experiment_result</li>
-<li>ingested 知识</li></ul></article>
-            <article class="plan-card"><h2>处理动作</h2><ul><li>待规划：versionHistory。</li>
-<li>待规划：supersededBy。</li>
-<li>待规划：rejectionArchive。</li></ul></article>
-            <article class="plan-card"><h2>输出物</h2><ul><li>版本链</li>
-<li>拒绝归档</li>
-<li>可复用总结</li></ul></article>
+<li>versionHistory</li>
+<li>ingested 知识状态</li></ul></article>
+            <article class="plan-card"><h2>处理动作</h2><ul><li>Iteration Planner Agent 使用 challenge_cup_iteration_context_tool 读取 Research Loop、实验计划和证据缺口。</li>
+<li>Iteration Planner Agent 使用 challenge_cup_iteration_writeback_tool(create_loop/record_evidence/record_decision) 写入 Research Loop 账本。</li>
+<li>Candidate Versioning Agent 使用 challenge_cup_versioning_context_tool 读取 candidate_versions/index.json 中的 versionHistory、relations 和 rejectionArchive。</li>
+<li>Candidate Versioning Agent 使用 challenge_cup_versioning_writeback_tool(record_version/supersede/derive/reject) 维护候选版本链。</li>
+<li>强制边界：不自动应用迭代决策，不写正式知识，不写 RAG，不写 official graph，不创建训练任务。</li></ul></article>
+            <article class="plan-card"><h2>输出物</h2><ul><li>research_loop</li>
+<li>evidenceRecords</li>
+<li>decision</li>
+<li>iterationProposal</li>
+<li>candidate_versions/index.json</li>
+<li>versionHistory</li>
+<li>relations</li>
+<li>rejectionArchive</li></ul></article>
             <article class="plan-card"><h2>风险</h2><ul><li>同类假设重复</li>
 <li>拒绝原因丢失</li>
-<li>正式知识与候选版本混淆</li></ul></article>
-            <article class="plan-card placeholder"><h2>未决事项</h2><ul><li>是否需要独立 version policy。</li></ul></article>
+<li>正式知识与候选版本混淆</li>
+<li>迭代 Agent 被误授搜索、代码执行或正式知识写入工具</li></ul></article>
+            <article class="plan-card "><h2>未决事项</h2><ul><li>版本治理当前是轻量账本，不替代后续正式 ExperimentResult schema 或交付材料版本库。</li></ul></article>
           </div>
         </section>
 
@@ -70,9 +80,9 @@
             <p class="hint">区分候选工作区、知识治理 Agent、正式 Team Knowledge 和正式知识图谱。</p>
           </div>
           <div class="status-grid">
-            <div class="status-item"><b>候选状态</b><span>待规划</span></div>
-            <div class="status-item"><b>记忆平台</b><span>版本化记录应保留但不默认进入正式知识。</span></div>
-            <div class="status-item"><b>图谱同步</b><span>未来边：supersedes、derived_from、rejected_because。</span></div>
+            <div class="status-item"><b>候选状态</b><span>迭代决策与候选版本账本操作 Agent 已接入</span></div>
+            <div class="status-item"><b>记忆平台</b><span>迭代决策和版本治理只进入 Team workflow runtime memory / team_workflow_ledger；正式知识仍由 知识库管理员 与审批门禁负责。</span></div>
+            <div class="status-item"><b>图谱同步</b><span>候选版本关系只作为账本关系存在；不创建正式图谱边，后续正式边必须来自已审批 KnowledgeItem trace。</span></div>
           </div>
         </section>
 

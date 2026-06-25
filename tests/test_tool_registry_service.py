@@ -62,7 +62,16 @@ def test_tool_registry_lists_builtins_as_protected(tmp_path, monkeypatch):
     assert list_child_tool["category"] == "agent_collaboration"
     assert list_child_tool["permissionTier"] == "medium"
     bundles = {item["bundleId"]: item for item in payload["toolBundles"]}
-    assert {"core", "research", "source_collection_stage", "knowledge_steward", "coding", "collaboration"}.issubset(bundles)
+    assert {
+        "core",
+        "research",
+        "source_collection_stage",
+        "challenge_cup_experiment",
+        "challenge_cup_iteration",
+        "knowledge_steward",
+        "coding",
+        "collaboration",
+    }.issubset(bundles)
     assert "grep_search_tool" in bundles["core"]["toolNames"]
     assert "research_knowledge_query_tool" in bundles["research"]["toolNames"]
     assert "unified_memory_search_tool" in bundles["research"]["toolNames"]
@@ -70,6 +79,8 @@ def test_tool_registry_lists_builtins_as_protected(tmp_path, monkeypatch):
     assert "knowledge_proposal_tool" not in bundles["research"]["toolNames"]
     assert "knowledge_ingestion_tool" not in bundles["research"]["toolNames"]
     assert "source_collection_stage_writeback_tool" not in bundles["research"]["toolNames"]
+    assert "challenge_cup_experiment_writeback_tool" not in bundles["research"]["toolNames"]
+    assert "challenge_cup_iteration_writeback_tool" not in bundles["research"]["toolNames"]
     research_search_tools = {
         "batch_web_search_tool",
         "paper_search_tool",
@@ -130,6 +141,26 @@ def test_tool_registry_lists_builtins_as_protected(tmp_path, monkeypatch):
     assert stage_writeback_tool["source"] == "built_in"
     assert stage_writeback_tool["category"] == "media_research"
     assert stage_writeback_tool["permissionTier"] == "high"
+    experiment_context_tool = next(item for item in payload["tools"] if item["name"] == "challenge_cup_experiment_context_tool")
+    assert experiment_context_tool["category"] == "media_research"
+    assert experiment_context_tool["permissionTier"] == "medium"
+    experiment_writeback_tool = next(item for item in payload["tools"] if item["name"] == "challenge_cup_experiment_writeback_tool")
+    assert experiment_writeback_tool["category"] == "media_research"
+    assert experiment_writeback_tool["permissionTier"] == "high"
+    iteration_context_tool = next(item for item in payload["tools"] if item["name"] == "challenge_cup_iteration_context_tool")
+    assert iteration_context_tool["permissionTier"] == "medium"
+    versioning_writeback_tool = next(item for item in payload["tools"] if item["name"] == "challenge_cup_versioning_writeback_tool")
+    assert versioning_writeback_tool["permissionTier"] == "high"
+    assert {
+        "challenge_cup_experiment_context_tool",
+        "challenge_cup_experiment_writeback_tool",
+    }.issubset(set(bundles["challenge_cup_experiment"]["toolNames"]))
+    assert {
+        "challenge_cup_iteration_context_tool",
+        "challenge_cup_iteration_writeback_tool",
+        "challenge_cup_versioning_context_tool",
+        "challenge_cup_versioning_writeback_tool",
+    }.issubset(set(bundles["challenge_cup_iteration"]["toolNames"]))
 
 
 def test_tool_registry_exposes_tool_bundle_membership_without_duplicating_generated_tools(tmp_path, monkeypatch):

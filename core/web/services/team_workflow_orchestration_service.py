@@ -99,7 +99,7 @@ SOURCE_COLLECTION_AGENT_CONTEXT_STAGE_ROLES = {
     "candidate": ("content_extraction",),
     "screening": ("source_quality",),
     "graph": ("candidate_graph",),
-    "memory": ("knowledge_steward", "candidate_graph"),
+    "memory": ("knowledge_steward",),
 }
 SOURCE_COLLECTION_STAGE_SESSION_TASK_KIND = "source_collection_stage_session_task"
 SOURCE_COLLECTION_STAGE_REQUIRED_TOOLS = (
@@ -236,7 +236,7 @@ LOCAL_RESEARCH_TASKS = {
     "steward_pack_draft": {
         "workflowNode": "steward_ingestion",
         "targetCandidateType": "review_record",
-        "purpose": "生成 proposal/ingestion pack 草稿，供 Knowledge Steward Agent 复核。",
+        "purpose": "生成 proposal/ingestion pack 草稿，供知识库管理员复核。",
         "requiredOutput": (
             *LOCAL_RESEARCH_OUTPUT_FIELDS,
             "candidateIds",
@@ -912,6 +912,55 @@ def seed_source_collection_agent_session_context(
     }
 
 
+def _source_collection_default_stage_agent(stage_id: str, *, agent_role: str = "") -> dict[str, Any] | None:
+    if stage_id != "memory":
+        return None
+    normalized_role = _trim_text(agent_role, max_length=80)
+    if normalized_role and normalized_role != agent_directory_service.KNOWLEDGE_STEWARD_ROLE_KEY:
+        return None
+    agent_directory_service.repair_agent_directory()
+    agent = agent_directory_service.get_agent(agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID, include_archived=False)
+    if not isinstance(agent, dict):
+        return None
+    return _ensure_source_collection_stage_agent_direct_session(
+        agent,
+        stage_id=stage_id,
+        agent_role=agent_directory_service.KNOWLEDGE_STEWARD_ROLE_KEY,
+    )
+
+
+def _ensure_source_collection_stage_agent_direct_session(
+    agent: dict[str, Any],
+    *,
+    stage_id: str,
+    agent_role: str,
+) -> dict[str, Any]:
+    agent_id = _trim_text(agent.get("agentId"), max_length=160)
+    if (
+        stage_id != "memory"
+        or (
+            agent_id != agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID
+            and _trim_text(agent_role, max_length=80) != agent_directory_service.KNOWLEDGE_STEWARD_ROLE_KEY
+        )
+    ):
+        return agent
+    session = session_service.ensure_agent_direct_session(
+        agent_id=agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID,
+        title=agent_directory_service.KNOWLEDGE_STEWARD_FUNCTIONAL_NAME,
+        created_by="source_collection_memory_stage",
+    )
+    session_id = _trim_text(session.get("id") or session.get("sessionId"), max_length=160)
+    if session_id and _trim_text(agent.get("directSessionId"), max_length=160) != session_id:
+        return agent_directory_service.update_agent_instance(
+            agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID,
+            direct_session_id=session_id,
+            display_name=agent_directory_service.KNOWLEDGE_STEWARD_FUNCTIONAL_NAME,
+            preserve_generated_display_name=True,
+        )
+    refreshed = agent_directory_service.get_agent(agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID, include_archived=False)
+    return refreshed if isinstance(refreshed, dict) else agent
+
+
 def start_source_collection_stage_session_task(
     team_id: str,
     run_id: str,
@@ -931,11 +980,17 @@ def start_source_collection_stage_session_task(
     if stage_id not in SOURCE_COLLECTION_AGENT_CONTEXT_STAGE_ROLES:
         raise TeamWorkflowOrchestrationError(f"Unsupported source collection stage: {stage_id}")
     if not agent_id:
+        default_agent = _source_collection_default_stage_agent(stage_id, agent_role=agent_role)
+        if default_agent:
+            agent_id = _trim_text(default_agent.get("agentId"), max_length=160)
+            agent_role = agent_role or "knowledge_steward"
+    if not agent_id:
         raise TeamWorkflowOrchestrationError("Agent id is required for source collection stage session task.")
 
     agent = agent_directory_service.get_agent(agent_id)
     if not isinstance(agent, dict):
         raise TeamWorkflowOrchestrationError(f"Agent not found: {agent_id}")
+    agent = _ensure_source_collection_stage_agent_direct_session(agent, stage_id=stage_id, agent_role=agent_role)
     session_id = _trim_text(agent.get("directSessionId"), max_length=160)
     if not session_id:
         raise TeamWorkflowOrchestrationError(f"Agent has no direct session: {agent_id}")
@@ -5093,7 +5148,7 @@ def validate_prd(team_id: str, payload: dict[str, Any] | None = None, *, registe
 def sync_official_research_graph(team_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
     """N-07：正式知识图谱同步（节点 09）。
 
-    边界（硬约束）：本函数**不创建 KnowledgeItem**（正式知识只能经 Knowledge Steward 门禁产生），
+    边界（硬约束）：本函数**不创建 KnowledgeItem**（正式知识只能经 知识库管理员 门禁产生），
     只对**已审批的 official 知识**做图谱关系投影并写可逆 sync log。门禁：formalKnowledgeItemCount==0
     （candidate-only）→ 拒绝同步。对相同知识状态幂等（除非 force）。
     """
@@ -8222,7 +8277,7 @@ def run_knowledge_collection_ingestion(team_id: str, payload: dict[str, Any] | N
         )
         append_step(
             "knowledge_steward_request",
-            "通知知识库 Agent",
+            "通知知识库管理员",
             str(knowledge_steward_activation.get("status") or "message_written"),
             input_count=1,
             output_count=1 if knowledge_steward_activation.get("messageId") else 0,
@@ -8325,7 +8380,7 @@ def run_knowledge_collection_ingestion(team_id: str, payload: dict[str, Any] | N
             "reusedCandidateGraph": bool(candidate_graph.get("reusedCandidateGraph")),
             "reusedStewardPack": bool(precheck.get("reusedStewardPack")),
             "ingestionFingerprint": str(precheck.get("ingestionFingerprint") or candidate_graph.get("ingestionFingerprint") or ""),
-            "nextAction": "进入实验规划" if knowledge_review else ("等待知识库 Agent 最终入库" if knowledge_steward_activation else "检查资料入库门禁"),
+            "nextAction": "进入实验规划" if knowledge_review else ("等待知识库管理员最终入库" if knowledge_steward_activation else "检查入库审核门禁"),
         },
         "workflow": (
             knowledge_review["workflow"]
@@ -9268,7 +9323,7 @@ def _coordination_action_items(summary: dict[str, Any], queues: dict[str, list[d
                 "code": "stewardship_queue_ready",
                 "severity": "needs_review",
                 "message": f"{summary['stewardshipCandidateCount']} stewardship item(s) are waiting for governance review or sync.",
-                "nextAction": "Knowledge Steward Agent should keep these under approval gate until reviewed.",
+                "nextAction": "知识库管理员需要将这些候选保留在审核门禁下，完成复核后再推进。",
                 "queue": "stewardship",
             }
         )
@@ -9413,7 +9468,7 @@ def _coordination_target_agent_role(queue: str, node: str, state: str) -> str:
     if queue == "pending_transfer":
         return DEFAULT_OWNER_AGENT_ID
     if queue == "stewardship" or node == "steward_ingestion" or "steward" in state:
-        return "Knowledge Steward Agent"
+        return "知识库管理员"
     if node in {"knowledge_collection", "source_screening"} or state.startswith("source_"):
         return "Source Intake Agent"
     if node == "paper_note" or "paper_note" in state:
@@ -12582,7 +12637,7 @@ def _source_collection_stage_cards_projection(team_id: str, run_id: str) -> dict
             output_count=formal_synced_count,
             pending_count=steward_pack_count,
             artifact_status="ready" if formal_synced_count else ("partial" if steward_pack_count else "empty"),
-            artifact_summary=f"{steward_pack_count} steward packs; {formal_synced_count} formal knowledge sync markers.",
+            artifact_summary=f"{steward_pack_count} 个入库审核包；{formal_synced_count} 个正式知识同步标记。",
         ),
     ]
     latest_tasks = {
@@ -13194,7 +13249,7 @@ def _source_collection_stage_task_title(stage_id: str) -> str:
         "candidate": "资料提炼任务",
         "screening": "资料审查任务",
         "graph": "候选图谱任务",
-        "memory": "共享记忆前审任务",
+        "memory": "知识库管理员入库审核任务",
     }.get(stage_id, "知识搜集阶段任务")
 
 
@@ -13239,7 +13294,7 @@ def _source_collection_agent_context_message(
         "candidate": "资料提炼",
         "screening": "资料质量评估",
         "graph": "候选图谱构建",
-        "memory": "知识入库治理",
+        "memory": "知识库管理员入库审核",
     }.get(stage_id, stage_id)
     active_summary = _trim_text(active_work_run.get("summary"), max_length=240) if active_work_run else ""
     run_title = _trim_text(run.get("title") or run_scope.get("topic") or run_metadata.get("title"), max_length=180)
@@ -13452,7 +13507,7 @@ def _source_collection_agent_context_next_actions(stage_id: str, record_count: i
     if stage_id == "graph":
         return ["基于已通过质量评估的候选构建候选关系图。"]
     if stage_id == "memory":
-        return ["只处理已通过质量和图谱治理的候选入库包。"]
+        return ["由知识库管理员审核候选入库包；正式知识写入仍受审核门禁控制。"]
     if open_assignment_count:
         return ["继续处理未完成的本角色分派任务。"]
     return []
@@ -15009,7 +15064,7 @@ def _experiment_planning_gaps(
         elif not active_full_run_result:
             gaps.append({"code": "full_run_result_not_recorded", "severity": "pending", "message": "smoke 已通过；等待显式 full-run 结果登记。"})
         elif not isinstance(active_plan.get("knowledgeIngestion"), dict):
-            gaps.append({"code": "experiment_result_not_submitted_to_knowledge", "severity": "pending", "message": "full-run 结果已通过；等待生成实验结果包并通知知识库 Agent。"})
+            gaps.append({"code": "experiment_result_not_submitted_to_knowledge", "severity": "pending", "message": "full-run 结果已通过；等待生成实验结果包并通知知识库管理员。"})
     return gaps
 
 
@@ -15022,11 +15077,11 @@ def _experiment_planning_readiness_reason(
         return "需要先启动实验规划轮次。"
     knowledge_ingestion = active_plan.get("knowledgeIngestion") if isinstance((active_plan or {}).get("knowledgeIngestion"), dict) else None
     if active_plan and knowledge_ingestion:
-        return "实验结果包已进入知识库 Agent 入库请求链路；正式知识仍等待知识治理门禁。"
+        return "实验结果包已进入知识库管理员入库请求链路；正式知识仍等待知识治理门禁。"
     active_full_run = active_plan.get("activeFullRunResult") if isinstance((active_plan or {}).get("activeFullRunResult"), dict) else None
     active_full_run_status = _trim_text((active_full_run or {}).get("status"), max_length=80).lower()
     if active_plan and active_full_run_status == "passed":
-        return "full-run evidence 已通过；可以生成实验结果包并通知知识库 Agent。"
+        return "full-run evidence 已通过；可以生成实验结果包并通知知识库管理员。"
     if active_plan and active_full_run_status:
         return "full-run evidence 已登记但尚未通过；需要复核或修复后再进入知识入库。"
     if active_plan and bool((active_plan.get("readiness") or {}).get("readyForFullRun")):
@@ -15043,7 +15098,7 @@ def _experiment_planning_readiness_reason(
 def _experiment_planning_next_actions(*, active_plan: dict[str, Any] | None, gaps: list[dict[str, str]]) -> list[str]:
     gap_codes = {item.get("code") for item in gaps}
     if active_plan and isinstance(active_plan.get("knowledgeIngestion"), dict):
-        return ["Wait for the Knowledge Steward Agent to review the experiment result pack.", "Keep raw logs outside RAG until the steward approves a curated knowledge item."]
+        return ["等待知识库管理员复核实验结果入库包。", "在知识库管理员批准精炼知识项之前，原始日志保持在 RAG 之外。"]
     if "missing_experiment_stage_round" in gap_codes:
         return ["Start the experiment planning stage round.", "Keep training execution disabled until a plan is reviewed."]
     if "missing_algorithm_hypotheses" in gap_codes or "incomplete_experiment_plan" in gap_codes:
@@ -15059,7 +15114,7 @@ def _experiment_planning_next_actions(*, active_plan: dict[str, Any] | None, gap
     if "full_run_result_not_passed" in gap_codes:
         return ["Review the full-run evidence.", "Repair the experiment or record a passing full-run result before requesting knowledge ingestion."]
     if "experiment_result_not_submitted_to_knowledge" in gap_codes:
-        return ["Generate an experiment result ingestion pack.", "Notify the Knowledge Steward Agent for final Team Knowledge ingestion."]
+        return ["生成实验结果入库审核包。", "通知知识库管理员进行最终 Team Knowledge 入库审核。"]
     if active_plan:
         return ["Review the passed smoke evidence.", "Make a separate explicit decision before any full-run execution."]
     return ["Draft an experiment plan from ready algorithm hypotheses.", "Do not auto-run training."]
