@@ -315,6 +315,24 @@ def _create_experiment_plan_with_active_baseline(team_id):
     return {"stage": stage, "draft": draft, "baseline": baseline}
 
 
+def test_register_candidate_source_strict_blocks_invalid(tmp_path, monkeypatch):
+    """写入口统一校验：缺来源位置的候选——非 strict 隔离写入；strict 硬拦截。envelope 级始终通过。"""
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = team_service.create_team(name="挑战杯科研团队")
+
+    response = team_workflow_orchestration_service.register_candidate_source(
+        team["teamId"], {"title": "No source location note"}
+    )
+    assert response["candidate"]["currentState"] == "source_needs_confirmation"
+    assert response["candidate"]["qualityStatus"] == "source_manifest_invalid"
+    assert response["candidate"]["envelopeValidation"]["valid"] is True
+
+    with pytest.raises(team_workflow_orchestration_service.TeamWorkflowOrchestrationError):
+        team_workflow_orchestration_service.register_candidate_source(
+            team["teamId"], {"title": "No source location note"}, strict=True
+        )
+
+
 def test_challenge_cup_workflow_registers_candidate_and_decides_transfer(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     team = team_service.create_team(name="挑战杯科研团队")
