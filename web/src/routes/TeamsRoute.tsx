@@ -434,14 +434,78 @@ function sourceCollectionStageProjectionCount(
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
 }
 
-function sourceCollectionStageProjectionTaskMetric(projection: SourceCollectionStageCardProjection | null | undefined) {
+function sourceCollectionStageProjectionTaskMetric(
+  projection: SourceCollectionStageCardProjection | null | undefined,
+  lang: "zh" | "en",
+) {
   const latestTask = projection?.latestTask;
   if (!latestTask?.taskId) {
     return "";
   }
   const evidenceCount = typeof latestTask.evidenceRefCount === "number" ? latestTask.evidenceRefCount : 0;
   const nextActionCount = typeof latestTask.nextActionCount === "number" ? latestTask.nextActionCount : 0;
+  if (lang === "zh") {
+    return `${latestTask.status || projection?.agentTaskStatus || "任务"} · 证据 ${evidenceCount} · 后续 ${nextActionCount}`;
+  }
   return `${latestTask.status || projection?.agentTaskStatus || "task"} · evidence ${evidenceCount} · next ${nextActionCount}`;
+}
+
+function sourceCollectionStageArtifactSummaryLabel(
+  projection: SourceCollectionStageCardProjection | null | undefined,
+  lang: "zh" | "en",
+) {
+  if (!projection) {
+    return "";
+  }
+  if (lang !== "zh") {
+    return projection.artifactSummary || "";
+  }
+  const counts = projection.counts ?? {};
+  const input = typeof counts.input === "number" ? counts.input : 0;
+  const artifact = typeof counts.artifact === "number" ? counts.artifact : 0;
+  const output = typeof counts.output === "number" ? counts.output : 0;
+  const pending = typeof counts.pending === "number" ? counts.pending : 0;
+  if (projection.stageId === "collection") {
+    return `${artifact} 条原始资料；${pending} 个搜索任务待执行`;
+  }
+  if (projection.stageId === "candidate") {
+    return `${artifact} 条候选资料来自本轮`;
+  }
+  if (projection.stageId === "screening") {
+    return `已审 ${artifact}/${input}；通过 ${output}`;
+  }
+  if (projection.stageId === "graph") {
+    return `节点 ${artifact} / 关系 ${output}`;
+  }
+  if (projection.stageId === "memory") {
+    return `${pending} 个入库前审包；${output} 个正式同步标记`;
+  }
+  return projection.artifactSummary || "";
+}
+
+function sourceCollectionStageBlockingReasonLabel(reason: string, lang: "zh" | "en") {
+  if (lang !== "zh") {
+    return reason;
+  }
+  const normalized = reason.trim();
+  const labels: Record<string, string> = {
+    "Agent task wrote back a structured result, but the expected stage artifact has not been created yet.":
+      "Agent 已回写结构化结果，但该阶段的目标产物还没有生成。",
+    "Latest Agent task is blocked or failed.":
+      "最近一次 Agent 任务受阻或失败。",
+    "Inputs exist, but this stage has not produced its expected artifact yet.":
+      "已有输入，等待该阶段生成目标产物。",
+  };
+  return labels[normalized] ?? normalized;
+}
+
+function sourceCollectionStageBlockingReasonsLabel(
+  reasons: string[] | undefined,
+  lang: "zh" | "en",
+) {
+  return (reasons ?? [])
+    .map((reason) => sourceCollectionStageBlockingReasonLabel(reason, lang))
+    .filter(Boolean);
 }
 
 type SourceCollectionStorageOpenTarget =
@@ -7005,7 +7069,7 @@ export function TeamsRoute({
           <div className={styles.sourceCollectionStageTaskSummary}>
             <div>
               <strong>{sourceCollectionStageProjectionLabel(candidateProjection)}</strong>
-              <span>{candidateProjection.artifactSummary}</span>
+              <span>{sourceCollectionStageArtifactSummaryLabel(candidateProjection, lang)}</span>
             </div>
             {candidateLatestTask?.taskId ? (
               <div>
@@ -7024,7 +7088,9 @@ export function TeamsRoute({
             ) : null}
             {candidateLatestTask?.summary ? <p>{candidateLatestTask.summary}</p> : null}
             {candidateProjection.blockingReasons?.length ? (
-              <p className={styles.sourceCollectionStageBlockers}>{candidateProjection.blockingReasons.join(" · ")}</p>
+              <p className={styles.sourceCollectionStageBlockers}>
+                {sourceCollectionStageBlockingReasonsLabel(candidateProjection.blockingReasons, lang).join(" · ")}
+              </p>
             ) : null}
           </div>
         ) : null}
@@ -10097,7 +10163,7 @@ export function TeamsRoute({
           artifact_ready_no_latest_agent_task: "产物已就绪",
           agent_done_artifact_pending: "Agent 已完成 · 产物待生成",
           agent_blocked: "Agent 受阻",
-          pending: "待产出",
+          pending: "待 Agent 产出",
           idle: "未开始",
         }
       : {
@@ -10503,13 +10569,15 @@ export function TeamsRoute({
                   {module.projection ? (
                     <div className={styles.sourceCollectionStageProjection}>
                       <span>{sourceCollectionStageProjectionLabel(module.projection)}</span>
-                      {sourceCollectionStageProjectionTaskMetric(module.projection) ? (
-                        <small>{sourceCollectionStageProjectionTaskMetric(module.projection)}</small>
+                      {sourceCollectionStageProjectionTaskMetric(module.projection, lang) ? (
+                        <small>{sourceCollectionStageProjectionTaskMetric(module.projection, lang)}</small>
                       ) : null}
                       {module.projection.blockingReasons?.length ? (
-                        <small className={styles.sourceCollectionStageBlockers}>{module.projection.blockingReasons[0]}</small>
+                        <small className={styles.sourceCollectionStageBlockers}>
+                          {sourceCollectionStageBlockingReasonLabel(module.projection.blockingReasons[0], lang)}
+                        </small>
                       ) : module.projection.artifactSummary ? (
-                        <small>{module.projection.artifactSummary}</small>
+                        <small>{sourceCollectionStageArtifactSummaryLabel(module.projection, lang)}</small>
                       ) : null}
                     </div>
                   ) : null}
