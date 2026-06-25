@@ -25,6 +25,7 @@ from core.web.services.team_workflow_orchestration_service import (
     get_official_model_evidence_status,
     get_paper_note_chunk_status,
     get_research_stage_round_status,
+    get_source_collection_summary,
     get_source_quality_status,
     get_team_workflow_coordination_status,
     get_team_workflow_orchestration,
@@ -664,6 +665,28 @@ def team_workflow_research_stage_round_status(team_id: str) -> dict:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except (TeamServiceError, TeamWorkflowOrchestrationError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.get("/teams/{team_id}/workflow-orchestration/source-collection/summary")
+def team_workflow_source_collection_summary(team_id: str, runId: str = "") -> dict:
+    try:
+        return get_source_collection_summary(team_id, run_id=runId)
+    except TeamNotFoundError as exc:
+        _raise_team_workflow_route_error(
+            "source_collection.summary",
+            team_id,
+            exc,
+            status_code=404,
+            fields={"runId": runId},
+        )
+    except (TeamServiceError, TeamWorkflowOrchestrationError) as exc:
+        _raise_team_workflow_route_error(
+            "source_collection.summary",
+            team_id,
+            exc,
+            status_code=422,
+            fields={"runId": runId},
+        )
 
 
 @router.post("/teams/{team_id}/workflow-orchestration/stage-rounds/start", status_code=status.HTTP_201_CREATED)

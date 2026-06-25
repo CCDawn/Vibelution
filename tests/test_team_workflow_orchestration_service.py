@@ -27,6 +27,51 @@ def test_source_collection_stage_round_sync_has_single_implementation():
     assert source.count("def _sync_source_collection_stage_round_after_search(") == 1
 
 
+def test_source_collection_summary_uses_lightweight_team_existence(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
+    team = team_service.create_team(name="挑战杯科研团队")
+    run_response = team_workflow_orchestration_service.start_source_collection_run(
+        team["teamId"],
+        {
+            "topic": "predictive coding",
+            "agentRoles": ["data_discovery"],
+            "querySeeds": ["predictive coding"],
+            "promptCachePolicy": {"requirement": "disabled"},
+        },
+    )
+    run_id = run_response["run"]["runId"]
+    record = data_processing_service.add_record(
+        run_id,
+        {
+            "sourceType": "paper",
+            "sourceRef": "https://doi.org/10.1038/4580",
+            "title": "Predictive coding in the visual cortex",
+            "summary": "A useful source.",
+            "metadata": {"allowedForAnalysis": True},
+        },
+    )
+    team_workflow_orchestration_service.import_data_record_as_source_candidate(
+        team["teamId"],
+        run_id,
+        record["recordId"],
+        {"createdByAgent": "Content Extraction Agent"},
+    )
+
+    def fail_full_team_read(team_id):
+        raise AssertionError("summary must not hydrate full team detail")
+
+    monkeypatch.setattr(team_workflow_orchestration_service.team_service, "get_team", fail_full_team_read)
+
+    payload = team_workflow_orchestration_service.get_source_collection_summary(team["teamId"], run_id=run_id)
+
+    assert payload["runId"] == run_id
+    assert payload["summary"]["recordCount"] == 1
+    assert payload["summary"]["sourceCandidateCount"] == 1
+    assert len(payload["stageCards"]) == 5
+    assert payload["stageCardSummary"]["sourceCandidateCount"] == 1
+
+
 class _FakeLocalResearchMessage:
     def __init__(self, content, *, reasoning_content=""):
         self.content = content

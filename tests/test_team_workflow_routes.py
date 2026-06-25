@@ -396,6 +396,35 @@ def test_team_workflow_route_writebacks_source_collection_stage_session_task(tmp
     assert any(item["taskId"] == task_response.json()["taskId"] and item["status"] == "completed" for item in stage_tasks)
 
 
+def test_team_workflow_route_returns_source_collection_summary(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    client = _client()
+    team = client.post("/api/teams", json={"name": "挑战杯科研团队"}).json()
+
+    def fake_summary(team_id: str, *, run_id: str = "") -> dict:
+        return {
+            "schemaVersion": 1,
+            "teamId": team_id,
+            "runId": run_id,
+            "status": "ready",
+            "summary": {"recordCount": 3, "sourceCandidateCount": 2},
+            "stageCards": [],
+            "stageCardSummary": {},
+            "updatedAt": "2026-06-25T00:00:00Z",
+        }
+
+    monkeypatch.setattr(team_workflows, "get_source_collection_summary", fake_summary)
+
+    response = client.get(
+        f"/api/teams/{team['teamId']}/workflow-orchestration/source-collection/summary?runId=run-1",
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["teamId"] == team["teamId"]
+    assert response.json()["runId"] == "run-1"
+    assert response.json()["summary"]["sourceCandidateCount"] == 2
+
+
 def test_team_workflow_route_executes_source_collection_search(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
 
