@@ -111,6 +111,7 @@ SOURCE_COLLECTION_SEARCH_REQUIRED_TOOLS = (
     "paper_search_tool",
 )
 SOURCE_COLLECTION_STAGE_SESSION_TASK_STATUSES = {"queued", "running", "completed", "needs_review", "blocked", "failed", "cancelled"}
+SOURCE_COLLECTION_STAGE_SESSION_TASK_ACTIVE_STATUSES = {"queued", "running"}
 SOURCE_COLLECTION_STAGE_WRITEBACK_MATERIALIZED_STATUSES = {"completed", "needs_review"}
 SOURCE_COLLECTION_STORAGE_OPEN_TARGETS = {
     "run_directory",
@@ -1187,6 +1188,11 @@ def writeback_source_collection_stage_session_task(
     task["writesFormalKnowledge"] = False
     task["writesRag"] = False
     task["writesOfficialGraph"] = False
+    turn = task.get("turn") if isinstance(task.get("turn"), dict) else {}
+    if turn:
+        next_turn = dict(turn)
+        next_turn["status"] = status
+        task["turn"] = next_turn
     task["updatedAt"] = writeback["recordedAt"]
     _upsert_source_collection_stage_session_task(normalized_team_id, run_id, task)
     _sync_stage_round_with_source_collection_stage_task(normalized_team_id, run_id, task)
@@ -10832,6 +10838,28 @@ def _source_collection_stage_session_tasks(team_id: str, run_id: str) -> list[di
     return [item for item in list(store.get("tasks") or []) if isinstance(item, dict)]
 
 
+def _reconcile_source_collection_stage_session_task_turn_status(task: dict[str, Any]) -> dict[str, Any]:
+    status = _trim_text(task.get("status"), max_length=80).lower()
+    if status not in SOURCE_COLLECTION_STAGE_SESSION_TASK_STATUSES:
+        return task
+    writeback = task.get("writeback") if isinstance(task.get("writeback"), dict) else {}
+    writeback_status = _trim_text(writeback.get("status"), max_length=80).lower() if writeback else ""
+    if writeback_status and writeback_status not in SOURCE_COLLECTION_STAGE_SESSION_TASK_STATUSES:
+        writeback_status = ""
+    settled_status = writeback_status or status
+    if settled_status in SOURCE_COLLECTION_STAGE_SESSION_TASK_ACTIVE_STATUSES:
+        return task
+    turn = task.get("turn") if isinstance(task.get("turn"), dict) else {}
+    if not turn or _trim_text(turn.get("status"), max_length=80).lower() == settled_status:
+        return task
+    next_task = dict(task)
+    next_task["status"] = settled_status
+    next_turn = dict(turn)
+    next_turn["status"] = settled_status
+    next_task["turn"] = next_turn
+    return next_task
+
+
 def _reconcile_source_collection_stage_session_tasks(team_id: str) -> bool:
     runs_root = _team_workflow_root(team_id) / "source_collection_runs"
     if not runs_root.exists():
@@ -10848,7 +10876,8 @@ def _reconcile_source_collection_stage_session_tasks(team_id: str) -> bool:
         next_tasks: list[dict[str, Any]] = []
         store_changed = False
         for task in tasks:
-            reconciled = _reconcile_source_collection_stage_session_task_from_turn_result(task)
+            reconciled = _reconcile_source_collection_stage_session_task_turn_status(task)
+            reconciled = _reconcile_source_collection_stage_session_task_from_turn_result(reconciled)
             reconciled = _reconcile_source_collection_stage_session_task_sources(team_id, run_id, reconciled)
             next_tasks.append(reconciled)
             store_changed = store_changed or reconciled is not task

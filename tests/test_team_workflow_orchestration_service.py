@@ -1076,6 +1076,76 @@ def test_source_collection_stage_session_task_writeback_records_structured_resul
     assert any(item["taskId"] == task["taskId"] and item["status"] == "completed" for item in stage_results)
 
 
+def test_source_collection_stage_session_task_writeback_closes_running_turn_status(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
+    _stub_source_collection_search_background(monkeypatch)
+    discovery = agent_directory_service.create_agent_instance(display_name="资料发现")
+    session_service.ensure_agent_direct_session(agent_id=discovery["agentId"], title="资料发现")
+    team = team_service.create_team(
+        name="挑战杯科研团队",
+        members=[{"agentId": discovery["agentId"], "role": "data_discovery", "agentName": "资料发现"}],
+    )
+    stage_response = team_workflow_orchestration_service.start_research_stage_round(
+        team["teamId"],
+        {
+            "stageType": "knowledge_collection",
+            "topic": "脑启发路由",
+            "goal": "搜集神经机制启发算法资料",
+            "agentRoles": ["data_discovery"],
+            "agentIds": {"data_discovery": discovery["agentId"]},
+            "querySeeds": ["brain-inspired routing"],
+            "promptCachePolicy": {"requirement": "disabled"},
+        },
+    )
+    run_id = stage_response["run"]["runId"]
+    monkeypatch.setattr(
+        session_service,
+        "submit_session_message",
+        lambda session_id, content, **kwargs: {
+            "accepted": True,
+            "sessionId": session_id,
+            "turnId": "turn-stage-task-needs-review",
+            "status": "running",
+        },
+    )
+    task = team_workflow_orchestration_service.start_source_collection_stage_session_task(
+        team["teamId"],
+        run_id,
+        {"stageId": "collection", "agentId": discovery["agentId"], "agentRole": "data_discovery"},
+    )
+
+    result = team_workflow_orchestration_service.writeback_source_collection_stage_session_task(
+        team["teamId"],
+        task["taskId"],
+        {
+            "status": "needs_review",
+            "summary": "搜索工具质量不足，但已回写可审查文献线索。",
+            "result": {"candidate_leads": [{"title": "Predictive coding", "locator": "DOI:10.1038/4580"}]},
+            "evidenceRefs": [{"type": "paper", "label": "lead-rao1999"}],
+            "nextActions": ["资料获取 Agent 打开 DOI 验证"],
+        },
+    )
+
+    assert result["task"]["status"] == "needs_review"
+    assert result["task"]["turn"]["status"] == "needs_review"
+    task_store = team_workflow_orchestration_service._load_source_collection_stage_session_task_store(team["teamId"], run_id)
+    stored_task = next(item for item in task_store["tasks"] if item["taskId"] == task["taskId"])
+    assert stored_task["turn"]["status"] == "needs_review"
+    stored_task["turn"]["status"] = "running"
+    team_workflow_orchestration_service._write_source_collection_stage_session_task_store(team["teamId"], run_id, task_store)
+
+    status_payload = team_workflow_orchestration_service.get_research_stage_round_status(team["teamId"])
+    latest_round = status_payload["latestRound"]
+    collection_card = next(card for card in latest_round["sourceCollectionStageCards"] if card["stageId"] == "collection")
+    assert collection_card["agentTaskStatus"] == "needs_review"
+    assert collection_card["latestTask"]["status"] == "needs_review"
+    assert collection_card["status"] != "agent_running"
+    task_store = team_workflow_orchestration_service._load_source_collection_stage_session_task_store(team["teamId"], run_id)
+    stored_task = next(item for item in task_store["tasks"] if item["taskId"] == task["taskId"])
+    assert stored_task["turn"]["status"] == "needs_review"
+
+
 def test_source_collection_stage_session_task_writeback_materializes_search_leads(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)
