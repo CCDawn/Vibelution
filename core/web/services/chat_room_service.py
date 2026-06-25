@@ -2790,9 +2790,6 @@ def _participant_from_session(
         "sessionId": session_id,
         "title": title,
         "workspacePath": str(summary.get("workspacePath") or detail.get("workspacePath") or ""),
-        "agentProfileId": "",
-        "agentTemplateId": "",
-        "agentTemplateLabel": dialogue_model_id,
         "dialogueModelId": dialogue_model_id,
         "llmBindings": llm_bindings,
         "agentMissing": agent_missing,
@@ -2874,7 +2871,6 @@ def _refresh_participants(
                 dialogue_model_id = agent_directory_service.agent_dialogue_model_id({"llmBindings": llm_bindings})
                 fallback["dialogueModelId"] = dialogue_model_id
                 fallback["llmBindings"] = llm_bindings
-                fallback["agentTemplateLabel"] = dialogue_model_id
                 fallback["agentMissing"] = False
                 fallback["agentStatusCode"] = ""
                 fallback["agentStatusMessage"] = ""

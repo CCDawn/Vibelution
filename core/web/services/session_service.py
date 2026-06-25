@@ -1461,7 +1461,7 @@ def _repair_conversation_agent_legacy_model_fields(
     *,
     conversation_id: str,
     agent_id: str,
-    agent: dict[str, Any],
+    agent: dict[str, Any] | None = None,
 ) -> bool:
     previous_fields = {
         "agent_profile_id": str(conversation.get("agent_profile_id") or "").strip(),
@@ -1479,8 +1479,8 @@ def _repair_conversation_agent_legacy_model_fields(
             conversation_id,
             agent_id=agent_id,
             previous_fields=previous_fields,
-            prompt_template_id=str(agent.get("promptTemplateId") or "").strip(),
-            role_key=str(agent.get("roleKey") or "").strip(),
+            prompt_template_id=str((agent or {}).get("promptTemplateId") or "").strip(),
+            role_key=str((agent or {}).get("roleKey") or "").strip(),
         )
     return changed
 
@@ -1529,6 +1529,11 @@ def _ensure_conversation_agent_metadata(
         if conversation.get("agentPrimaryDirectSessionId"):
             conversation["agentPrimaryDirectSessionId"] = ""
             changed = True
+        changed = _repair_conversation_agent_legacy_model_fields(
+            conversation,
+            conversation_id=conversation_id,
+            agent_id=deleted_agent_id,
+        ) or changed
         return changed
     existing_agent = _agent_from_lookup(agent_by_id, existing_agent_id) if existing_agent_id else None
     if existing_agent is None:
@@ -1570,6 +1575,11 @@ def _ensure_conversation_agent_metadata(
         if conversation.get("agentDirectSessionMismatch"):
             conversation["agentDirectSessionMismatch"] = False
             changed = True
+        changed = _repair_conversation_agent_legacy_model_fields(
+            conversation,
+            conversation_id=conversation_id,
+            agent_id=existing_agent_id,
+        ) or changed
         return changed
     if existing_agent and str(existing_agent.get("status") or "active").strip().lower() == "archived":
         changed = False

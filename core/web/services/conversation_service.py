@@ -36,8 +36,6 @@ def list_conversations() -> list[dict[str, Any]]:
                 "summary": str(session.get("taskSummary") or "").strip(),
                 "updatedAt": str(session.get("updatedAt") or session.get("lastActive") or "").strip(),
                 "workspacePath": str(session.get("agentWorkspacePath") or session.get("workspacePath") or "").strip(),
-                "agentProfileId": str(session.get("agentProfileId") or "").strip(),
-                "agentTemplateLabel": str(session.get("agentTemplateLabel") or "").strip(),
                 "agentPrimaryMode": str(session.get("agentPrimaryMode") or "").strip(),
                 "agentRoleKey": str(session.get("agentRoleKey") or "").strip(),
                 "agentPromptTemplateId": str(session.get("agentPromptTemplateId") or "").strip(),
