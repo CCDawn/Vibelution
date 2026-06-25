@@ -1923,6 +1923,86 @@ def test_source_quality_stage_writeback_materializes_candidate_decisions(tmp_pat
     assert screening_projection["counts"]["pending"] == 0
 
 
+def test_research_stage_status_reconciles_legacy_source_quality_writeback(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
+    _stub_source_collection_search_background(monkeypatch)
+    agent = agent_directory_service.create_agent_instance(display_name="资料审查")
+    session_service.ensure_agent_direct_session(agent_id=agent["agentId"], title="资料审查")
+    team = team_service.create_team(
+        name="挑战杯科研团队",
+        members=[{"agentId": agent["agentId"], "role": "source_quality", "agentName": "资料审查"}],
+    )
+    stage_response = team_workflow_orchestration_service.start_research_stage_round(
+        team["teamId"],
+        {
+            "stageType": "knowledge_collection",
+            "topic": "预测编码资料审查",
+            "agentRoles": ["source_quality"],
+            "agentIds": {"source_quality": agent["agentId"]},
+            "querySeeds": ["predictive coding source review"],
+            "promptCachePolicy": {"requirement": "disabled"},
+        },
+    )
+    run_id = stage_response["run"]["runId"]
+    source = team_workflow_orchestration_service.register_candidate_source(
+        team["teamId"],
+        {
+            "title": "Predictive coding source for legacy writeback",
+            "sourceUrl": "https://doi.org/10.0000/legacy-source-quality",
+            "sourceKind": "paper",
+            "summary": "Neural predictive coding evidence.",
+            "allowedForAnalysis": True,
+            "metadata": {"sourceCollectionRunId": run_id, "doi": "10.0000/legacy-source-quality"},
+            "createdByAgent": "content-extraction-agent",
+        },
+    )["candidate"]
+    monkeypatch.setattr(
+        session_service,
+        "submit_session_message",
+        lambda session_id, content, **kwargs: {"accepted": True, "sessionId": session_id, "turnId": "turn-legacy-quality", "status": "running"},
+    )
+    task = team_workflow_orchestration_service.start_source_collection_stage_session_task(
+        team["teamId"],
+        run_id,
+        {"stageId": "screening", "agentId": agent["agentId"], "agentRole": "source_quality"},
+    )
+    result = {
+        "candidateDecisions": [
+            {
+                "candidateId": source["candidateId"],
+                "decision": "pass",
+                "reason": "旧任务已经完成审查，但当时没有物化候选质检状态。",
+            }
+        ]
+    }
+    store = team_workflow_orchestration_service._load_source_collection_stage_session_task_store(team["teamId"], run_id)
+    stored_task = next(item for item in store["tasks"] if item["taskId"] == task["taskId"])
+    stored_task["status"] = "needs_review"
+    stored_task["summary"] = "旧资料审查任务已写回候选决策。"
+    stored_task["result"] = result
+    stored_task["writeback"] = {
+        "status": "needs_review",
+        "summary": stored_task["summary"],
+        "result": result,
+        "resultAuthority": "source_collection_stage_writeback_tool",
+        "recordedByAgent": agent["agentId"],
+        "recordedAt": "2026-06-25T00:00:00+00:00",
+    }
+    team_workflow_orchestration_service._write_source_collection_stage_session_task_store(team["teamId"], run_id, store)
+
+    status_payload = team_workflow_orchestration_service.get_research_stage_round_status(team["teamId"])
+
+    source_quality = team_workflow_orchestration_service.get_source_quality_status(team["teamId"])
+    refreshed_store = team_workflow_orchestration_service._load_source_collection_stage_session_task_store(team["teamId"], run_id)
+    refreshed_task = next(item for item in refreshed_store["tasks"] if item["taskId"] == task["taskId"])
+    assert source_quality["summary"]["assessedSourceCandidateCount"] == 1
+    assert source_quality["summary"]["approvedSourceCandidateCount"] == 1
+    assert refreshed_task["writeback"]["materializedSourceQuality"]["assessedCandidateCount"] == 1
+    screening_card = next(item for item in status_payload["latestRound"]["sourceCollectionStageCards"] if item["stageId"] == "screening")
+    assert screening_card["status"] == "closed_loop"
+
+
 def test_source_collection_stage_tools_record_failure_runtime_events(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     from core.web.services import runtime_scene_service
