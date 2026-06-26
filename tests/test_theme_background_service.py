@@ -110,3 +110,38 @@ def test_promptsref_wallpaper_top5_backgrounds_are_registered_as_bundled_theme_b
     for filename, zh_label, en_label in expected:
         assert_bundled_background_registered(filename, zh_label=zh_label, en_label=en_label)
         assert_bundled_background_file_resolves(filename)
+
+
+def test_prompt_trend_wallpapers_are_registered_as_bundled_theme_backgrounds(monkeypatch, tmp_path):
+    monkeypatch.setattr(theme_background_service, "CONFIG_PATH", tmp_path / "config.toml")
+    expected = [
+        (
+            "prompt-trend-wallpaper-01-mountain-observatory.png",
+            "提示词趋势 高山观测站",
+            "Prompt Trend Mountain Observatory",
+        ),
+        (
+            "prompt-trend-wallpaper-02-memory-atrium.png",
+            "提示词趋势 记忆中庭",
+            "Prompt Trend Memory Atrium",
+        ),
+        (
+            "prompt-trend-wallpaper-03-pixel-skyline.png",
+            "提示词趋势 像素天际线",
+            "Prompt Trend Pixel Skyline",
+        ),
+        (
+            "prompt-trend-wallpaper-04-floating-archive-islands.png",
+            "提示词趋势 漂浮档案群岛",
+            "Prompt Trend Floating Archive Islands",
+        ),
+        (
+            "prompt-trend-wallpaper-05-eco-cyber-city.png",
+            "提示词趋势 生态赛博城市",
+            "Prompt Trend Eco Cyber City",
+        ),
+    ]
+
+    for filename, zh_label, en_label in expected:
+        assert_bundled_background_registered(filename, zh_label=zh_label, en_label=en_label)
+        assert_bundled_background_file_resolves(filename)
