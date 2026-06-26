@@ -8859,6 +8859,128 @@ def _knowledge_collection_completion_payload(payload: dict[str, Any] | None = No
     return request_payload
 
 
+def _knowledge_collection_completion_step(
+    stage_id: str,
+    status: str,
+    *,
+    input_count: int = 0,
+    output_count: int = 0,
+    artifact_id: str = "",
+    error_type: str = "",
+) -> dict[str, Any]:
+    step = {
+        "stageId": stage_id,
+        "status": _trim_text(status, max_length=120) or "unknown",
+        "inputCount": _source_collection_count(input_count),
+        "outputCount": _source_collection_count(output_count),
+    }
+    if artifact_id:
+        step["artifactId"] = _trim_text(artifact_id, max_length=160)
+    if error_type:
+        step["errorType"] = _trim_text(error_type, max_length=160)
+    return step
+
+
+def _knowledge_collection_completion_log_payload(
+    team_id: str,
+    run_id: str,
+    result: dict[str, Any] | None = None,
+    *,
+    status: str = "",
+    source_run_id: str = "",
+    steps: list[dict[str, Any]] | None = None,
+    error_type: str = "",
+) -> dict[str, Any]:
+    payload = result if isinstance(result, dict) else {}
+    summary = payload.get("summary") if isinstance(payload.get("summary"), dict) else {}
+    ingestion = payload.get("ingestion") if isinstance(payload.get("ingestion"), dict) else {}
+    ingestion_summary = ingestion.get("summary") if isinstance(ingestion.get("summary"), dict) else {}
+    normalized_steps = [item for item in list(steps or payload.get("completionSteps") or []) if isinstance(item, dict)]
+    if not normalized_steps and payload:
+        normalized_steps = _knowledge_collection_completion_steps_from_result(payload)
+    knowledge_base_id = _trim_text(summary.get("knowledgeBaseId") or ingestion_summary.get("knowledgeBaseId"), max_length=160)
+    formal_count = _source_collection_count(summary.get("formalKnowledgeItemCount") or ingestion_summary.get("formalKnowledgeItemCount"))
+    return {
+        "kind": "knowledge_collection_completion",
+        "teamId": team_id,
+        "runId": run_id,
+        "status": _trim_text(status or payload.get("status"), max_length=120) or "unknown",
+        "sourceRunId": _trim_text(source_run_id or payload.get("sourceRunId"), max_length=160),
+        "steps": normalized_steps[:24],
+        "truncatedStepCount": max(0, len(normalized_steps) - 24),
+        "searchExecutionCount": _source_collection_count(summary.get("searchExecutionCount") or len(payload.get("searchExecutions") or [])),
+        "extractedCandidateCount": _source_collection_count(summary.get("extractedCandidateCount")),
+        "formalKnowledgeItemCount": formal_count,
+        "knowledgeBaseId": knowledge_base_id,
+        "errorType": _trim_text(error_type, max_length=160),
+    }
+
+
+def _knowledge_collection_completion_steps_from_result(result: dict[str, Any]) -> list[dict[str, Any]]:
+    search_executions = [item for item in list(result.get("searchExecutions") or []) if isinstance(item, dict)]
+    last_search = search_executions[-1] if search_executions else {}
+    search_summary = last_search.get("summary") if isinstance(last_search.get("summary"), dict) else {}
+    extraction = result.get("extraction") if isinstance(result.get("extraction"), dict) else {}
+    ingestion = result.get("ingestion") if isinstance(result.get("ingestion"), dict) else {}
+    ingestion_summary = ingestion.get("summary") if isinstance(ingestion.get("summary"), dict) else {}
+    return [
+        _knowledge_collection_completion_step(
+            "remaining_search",
+            _trim_text(last_search.get("status"), max_length=120) if last_search else "skipped",
+            input_count=len(search_executions),
+            output_count=_source_collection_count(search_summary.get("recordCount")),
+        ),
+        _knowledge_collection_completion_step(
+            "candidate_extraction",
+            _trim_text(extraction.get("status"), max_length=120) if extraction else "skipped",
+            input_count=_source_collection_count(extraction.get("importedCount"))
+            + _source_collection_count(extraction.get("skippedCount"))
+            + _source_collection_count(extraction.get("failedCount")),
+            output_count=_source_collection_count(extraction.get("importedCount")),
+        ),
+        _knowledge_collection_completion_step(
+            "knowledge_ingestion",
+            _trim_text(ingestion.get("status"), max_length=120) if ingestion else "skipped",
+            input_count=_source_collection_count((ingestion_summary or {}).get("approvedSourceCandidateCount")),
+            output_count=_source_collection_count(ingestion_summary.get("formalKnowledgeItemCount")),
+            artifact_id=_trim_text(ingestion_summary.get("knowledgeBaseId"), max_length=160),
+        ),
+    ]
+
+
+def _attach_knowledge_completion_failure_payload(
+    exc: Exception,
+    *,
+    team_id: str,
+    run_id: str = "",
+    source_run_id: str = "",
+    steps: list[dict[str, Any]] | None = None,
+    failed_stage_id: str = "",
+) -> Exception:
+    normalized_steps = [item for item in list(steps or []) if isinstance(item, dict)]
+    if failed_stage_id:
+        normalized_steps.append(
+            _knowledge_collection_completion_step(
+                failed_stage_id,
+                "failed",
+                error_type=type(exc).__name__,
+            )
+        )
+    setattr(
+        exc,
+        "completion_log_payload",
+        _knowledge_collection_completion_log_payload(
+            team_id,
+            run_id,
+            status="failed",
+            source_run_id=source_run_id,
+            steps=normalized_steps,
+            error_type=type(exc).__name__,
+        ),
+    )
+    return exc
+
+
 def start_knowledge_collection_completion_background(team_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
     """Start the phase-card one-click completion path for knowledge collection."""
 
@@ -8929,43 +9051,104 @@ def run_knowledge_collection_completion(team_id: str, payload: dict[str, Any] | 
     extraction_agent_id = _trim_text(request_payload.get("extractionAgentId"), max_length=160) or "Content Extraction Agent"
 
     search_executions: list[dict[str, Any]] = []
+    completion_steps: list[dict[str, Any]] = []
     if source_run_id and max_search_batches > 0:
-        for _index in range(max_search_batches):
-            search_result = execute_source_collection_search(
-                normalized_team_id,
-                source_run_id,
-                {
-                    "maxQueries": max_queries_per_batch,
-                    "maxResultsPerQuery": max_results_per_query,
-                },
+        try:
+            for _index in range(max_search_batches):
+                search_result = execute_source_collection_search(
+                    normalized_team_id,
+                    source_run_id,
+                    {
+                        "maxQueries": max_queries_per_batch,
+                        "maxResultsPerQuery": max_results_per_query,
+                    },
+                )
+                search_executions.append(search_result)
+                status = _trim_text(search_result.get("status"), max_length=80).lower()
+                summary = search_result.get("summary") if isinstance(search_result.get("summary"), dict) else {}
+                open_assignment_count = _source_collection_count(summary.get("openAssignmentCount"))
+                next_query_ids = search_result.get("nextRunnableQueryIds")
+                if open_assignment_count <= 0:
+                    break
+                if isinstance(next_query_ids, list) and not next_query_ids:
+                    break
+                if status not in {"needs_continue", "running"}:
+                    break
+        except Exception as exc:
+            raise _attach_knowledge_completion_failure_payload(
+                exc,
+                team_id=normalized_team_id,
+                source_run_id=source_run_id,
+                steps=completion_steps,
+                failed_stage_id="remaining_search",
             )
-            search_executions.append(search_result)
-            status = _trim_text(search_result.get("status"), max_length=80).lower()
-            summary = search_result.get("summary") if isinstance(search_result.get("summary"), dict) else {}
-            open_assignment_count = _source_collection_count(summary.get("openAssignmentCount"))
-            next_query_ids = search_result.get("nextRunnableQueryIds")
-            if open_assignment_count <= 0:
-                break
-            if isinstance(next_query_ids, list) and not next_query_ids:
-                break
-            if status not in {"needs_continue", "running"}:
-                break
+        last_search = search_executions[-1] if search_executions else {}
+        search_summary = last_search.get("summary") if isinstance(last_search.get("summary"), dict) else {}
+        completion_steps.append(
+            _knowledge_collection_completion_step(
+                "remaining_search",
+                _trim_text(last_search.get("status"), max_length=120) if last_search else "skipped",
+                input_count=len(search_executions),
+                output_count=_source_collection_count(search_summary.get("recordCount")),
+            )
+        )
+    else:
+        completion_steps.append(_knowledge_collection_completion_step("remaining_search", "skipped"))
 
     extraction: dict[str, Any] | None = None
     if source_run_id:
-        extraction = extract_source_collection_candidates(
-            normalized_team_id,
-            {
-                "runId": source_run_id,
-                "extractionAgentId": extraction_agent_id,
-                "maxRecords": max_records,
-                "force": bool(request_payload.get("forceExtraction", False)),
-                "notes": "One-click knowledge collection completion extracted DataRecords before governed ingestion.",
-            },
+        try:
+            extraction = extract_source_collection_candidates(
+                normalized_team_id,
+                {
+                    "runId": source_run_id,
+                    "extractionAgentId": extraction_agent_id,
+                    "maxRecords": max_records,
+                    "force": bool(request_payload.get("forceExtraction", False)),
+                    "notes": "One-click knowledge collection completion extracted DataRecords before governed ingestion.",
+                },
+            )
+        except Exception as exc:
+            raise _attach_knowledge_completion_failure_payload(
+                exc,
+                team_id=normalized_team_id,
+                source_run_id=source_run_id,
+                steps=completion_steps,
+                failed_stage_id="candidate_extraction",
+            )
+        completion_steps.append(
+            _knowledge_collection_completion_step(
+                "candidate_extraction",
+                _trim_text(extraction.get("status"), max_length=120) if extraction else "skipped",
+                input_count=_source_collection_count((extraction or {}).get("importedCount"))
+                + _source_collection_count((extraction or {}).get("skippedCount"))
+                + _source_collection_count((extraction or {}).get("failedCount")),
+                output_count=_source_collection_count((extraction or {}).get("importedCount")),
+            )
         )
+    else:
+        completion_steps.append(_knowledge_collection_completion_step("candidate_extraction", "skipped"))
 
-    ingestion = run_knowledge_collection_ingestion(normalized_team_id, request_payload)
+    try:
+        ingestion = run_knowledge_collection_ingestion(normalized_team_id, request_payload)
+    except Exception as exc:
+        raise _attach_knowledge_completion_failure_payload(
+            exc,
+            team_id=normalized_team_id,
+            source_run_id=source_run_id,
+            steps=completion_steps,
+            failed_stage_id="knowledge_ingestion",
+        )
     ingestion_summary = ingestion.get("summary") if isinstance(ingestion.get("summary"), dict) else {}
+    completion_steps.append(
+        _knowledge_collection_completion_step(
+            "knowledge_ingestion",
+            _trim_text(ingestion.get("status"), max_length=120) or "completed",
+            input_count=_source_collection_count(ingestion_summary.get("approvedSourceCandidateCount")),
+            output_count=_source_collection_count(ingestion_summary.get("formalKnowledgeItemCount")),
+            artifact_id=_trim_text(ingestion_summary.get("knowledgeBaseId"), max_length=160),
+        )
+    )
     return {
         "schemaVersion": SCHEMA_VERSION,
         "teamId": normalized_team_id,
@@ -8974,6 +9157,7 @@ def run_knowledge_collection_completion(team_id: str, payload: dict[str, Any] | 
         "searchExecutions": search_executions,
         "extraction": extraction,
         "ingestion": ingestion,
+        "completionSteps": completion_steps,
         "summary": {
             "searchExecutionCount": len(search_executions),
             "extractedCandidateCount": _source_collection_count((extraction or {}).get("importedCount")),
@@ -9009,6 +9193,20 @@ def _run_knowledge_collection_completion_background(team_id: str, run_id: str, p
             "knowledge_collection.completion_background_failed",
             team_id,
             fields={"runId": run_id, "errorType": type(exc).__name__, "error": _trim_text(exc, max_length=500)},
+            level="warning",
+            outcome="failed",
+            child_log_path=f"artifacts/knowledge-collection-{_safe_token(run_id, default='run', max_length=96)}-completion.jsonl",
+            child_log_payload=getattr(
+                exc,
+                "completion_log_payload",
+                _knowledge_collection_completion_log_payload(
+                    team_id,
+                    run_id,
+                    status="failed",
+                    source_run_id=_trim_text(payload.get("runId") or payload.get("sourceRunId"), max_length=160),
+                    error_type=type(exc).__name__,
+                ),
+            ),
         )
         return
     result_summary = result.get("summary") if isinstance(result.get("summary"), dict) else {}
@@ -9037,6 +9235,13 @@ def _run_knowledge_collection_completion_background(team_id: str, run_id: str, p
             "searchExecutionCount": _source_collection_count(result_summary.get("searchExecutionCount")),
             "formalKnowledgeItemCount": formal_count,
         },
+        child_log_path=f"artifacts/knowledge-collection-{_safe_token(run_id, default='run', max_length=96)}-completion.jsonl",
+        child_log_payload=_knowledge_collection_completion_log_payload(
+            team_id,
+            run_id,
+            result,
+            status=terminal_status,
+        ),
     )
 
 

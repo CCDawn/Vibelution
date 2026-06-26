@@ -6668,6 +6668,7 @@ def test_knowledge_collection_ingestion_background_completes_and_reports_status(
 
 def test_knowledge_collection_completion_background_normalizes_one_click_defaults(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
+    scene_events = _capture_workflow_events(monkeypatch)
     isolated_store = WorkRunStore(root=tmp_path / "completion-work-runs")
     monkeypatch.setattr(
         team_workflow_orchestration_service, "_knowledge_ingestion_work_run_store", lambda: isolated_store
@@ -6688,6 +6689,10 @@ def test_knowledge_collection_completion_background_normalizes_one_click_default
         captured["payload"] = payload
         return {
             "status": "completed",
+            "sourceRunId": "source-run-1",
+            "searchExecutions": [{"status": "completed", "summary": {"recordCount": 4, "openAssignmentCount": 0}}],
+            "extraction": {"status": "completed", "importedCount": 3, "skippedCount": 1, "failedCount": 0},
+            "ingestion": {"status": "completed", "summary": {"formalKnowledgeItemCount": 1, "knowledgeBaseId": "kb-1"}},
             "summary": {"formalKnowledgeItemCount": 1, "knowledgeBaseId": "kb-1"},
         }
 
@@ -6720,6 +6725,71 @@ def test_knowledge_collection_completion_background_normalizes_one_click_default
     assert captured["payload"]["stewardAgentId"] == "knowledge-steward"
     assert captured["payload"]["targetDomain"] == "神经预测编码"
     assert captured["payload"]["maxCandidates"] == 16
+
+    completed_events = _workflow_scene_events_by_code(scene_events, "knowledge_collection.completion_background_completed")
+    assert completed_events
+    child_payload = completed_events[-1]["child_log_payload"]
+    assert child_payload["kind"] == "knowledge_collection_completion"
+    assert child_payload["status"] == "completed"
+    assert child_payload["sourceRunId"] == "source-run-1"
+    assert [step["stageId"] for step in child_payload["steps"]] == [
+        "remaining_search",
+        "candidate_extraction",
+        "knowledge_ingestion",
+    ]
+    assert child_payload["steps"][0]["outputCount"] == 4
+    assert child_payload["steps"][1]["outputCount"] == 3
+    assert child_payload["formalKnowledgeItemCount"] == 1
+
+
+def test_knowledge_collection_completion_background_failure_logs_child_payload(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    scene_events = _capture_workflow_events(monkeypatch)
+    isolated_store = WorkRunStore(root=tmp_path / "completion-work-runs")
+    monkeypatch.setattr(
+        team_workflow_orchestration_service, "_knowledge_ingestion_work_run_store", lambda: isolated_store
+    )
+
+    class _ImmediateThread:
+        def __init__(self, *, target=None, args=(), name="", daemon=None, **_kwargs):
+            self._target = target
+            self._args = args
+            self.name = name
+
+        def start(self):
+            self._target(*self._args)
+
+    def fake_completion(_team_id, _payload):
+        exc = team_workflow_orchestration_service.TeamWorkflowOrchestrationError("Source extraction failed.")
+        exc.completion_log_payload = {
+            "kind": "knowledge_collection_completion",
+            "status": "failed",
+            "sourceRunId": "source-run-failed",
+            "steps": [
+                {"stageId": "remaining_search", "status": "completed", "inputCount": 1, "outputCount": 2},
+                {"stageId": "candidate_extraction", "status": "failed", "inputCount": 2, "outputCount": 0, "errorType": "TeamWorkflowOrchestrationError"},
+            ],
+        }
+        raise exc
+
+    monkeypatch.setattr(team_workflow_orchestration_service.threading, "Thread", _ImmediateThread)
+    monkeypatch.setattr(team_workflow_orchestration_service, "run_knowledge_collection_completion", fake_completion)
+    team = team_service.create_team(name="挑战杯科研团队", members=[])
+
+    accepted = team_workflow_orchestration_service.start_knowledge_collection_completion_background(
+        team["teamId"],
+        {"runId": "source-run-failed", "stewardAgentId": "knowledge-steward"},
+    )
+
+    assert accepted["accepted"] is True
+    failed_events = _workflow_scene_events_by_code(scene_events, "knowledge_collection.completion_background_failed")
+    assert failed_events
+    child_payload = failed_events[-1]["child_log_payload"]
+    assert child_payload["kind"] == "knowledge_collection_completion"
+    assert child_payload["status"] == "failed"
+    assert child_payload["sourceRunId"] == "source-run-failed"
+    assert child_payload["steps"][-1]["stageId"] == "candidate_extraction"
+    assert child_payload["steps"][-1]["errorType"] == "TeamWorkflowOrchestrationError"
 
 
 def test_knowledge_collection_completion_runs_search_extract_before_ingestion(tmp_path, monkeypatch):

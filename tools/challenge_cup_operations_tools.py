@@ -144,6 +144,12 @@ def challenge_cup_iteration_writeback_tool(
                 "loopId": _text(loop_id),
                 "recordedByAgent": _text(recorded_by_agent),
             },
+            child_log_payload=_iteration_writeback_child_log_payload(
+                team_id=_text(team_id),
+                operation=normalized_operation,
+                requested_loop_id=_text(loop_id),
+                response=response,
+            ),
         )
         return _json_dump({"status": "ok", "operation": normalized_operation, "response": response, "boundaries": _operation_boundaries("research_loop_manual_record_and_command_preview_only")})
     except Exception as exc:
@@ -214,6 +220,11 @@ def challenge_cup_versioning_writeback_tool(
         _record_tool_event(
             "tool.challenge_cup_versioning_writeback.completed",
             fields={"teamId": _text(team_id), "operation": _text(operation), "candidateId": _text(candidate_id)},
+            child_log_payload=_versioning_writeback_child_log_payload(
+                team_id=_text(team_id),
+                operation=_text(operation),
+                response=response,
+            ),
         )
         return _json_dump({"status": "ok", "operation": _text(operation), "response": response, "boundaries": _operation_boundaries("candidate_versioning_ledger_only_not_official_graph")})
     except Exception as exc:
@@ -230,6 +241,62 @@ def _stamp_agent(payload: dict[str, Any], recorded_by_agent: str, *, keys: tuple
         return
     for key in keys:
         payload.setdefault(key, agent)
+
+
+def _iteration_writeback_child_log_payload(
+    *,
+    team_id: str,
+    operation: str,
+    requested_loop_id: str,
+    response: dict[str, Any],
+) -> dict[str, Any]:
+    loop = response.get("loop") if isinstance(response.get("loop"), dict) else {}
+    evidence = response.get("evidence") if isinstance(response.get("evidence"), dict) else {}
+    decision = response.get("decision") if isinstance(response.get("decision"), dict) else {}
+    proposal = response.get("iterationProposal") if isinstance(response.get("iterationProposal"), dict) else {}
+    readiness = loop.get("readiness") if isinstance(loop.get("readiness"), dict) else {}
+    return {
+        "kind": "challenge_cup_iteration_writeback",
+        "teamId": team_id,
+        "operation": operation,
+        "loopId": _text(requested_loop_id or loop.get("loopId") or response.get("loopId")),
+        "templateId": _text(loop.get("templateId")),
+        "evidenceId": _text(evidence.get("evidenceId")),
+        "evidenceType": _text(evidence.get("evidenceType")),
+        "evidenceStatus": _text(evidence.get("status")),
+        "decisionId": _text(decision.get("decisionId")),
+        "decision": _text(decision.get("decision")),
+        "statusAfterDecision": _text(decision.get("statusAfterDecision") or loop.get("status")),
+        "iterationProposalId": _text(proposal.get("proposalId") or decision.get("iterationProposalId")),
+        "readyForDecision": bool(readiness.get("readyForDecision")),
+        "artifactRefCount": len([item for item in list(evidence.get("artifactRefs") or []) if isinstance(item, dict)]),
+        "sourceRefCount": len([item for item in list(evidence.get("sourceRefs") or []) if isinstance(item, dict)]),
+        "boundary": "research_loop_manual_record_and_command_preview_only",
+    }
+
+
+def _versioning_writeback_child_log_payload(
+    *,
+    team_id: str,
+    operation: str,
+    response: dict[str, Any],
+) -> dict[str, Any]:
+    event = response.get("event") if isinstance(response.get("event"), dict) else {}
+    relation = response.get("relation") if isinstance(response.get("relation"), dict) else {}
+    rejection = response.get("rejection") if isinstance(response.get("rejection"), dict) else {}
+    return {
+        "kind": "challenge_cup_versioning_writeback",
+        "teamId": team_id,
+        "operation": operation,
+        "candidateId": _text(event.get("candidateId")),
+        "versionId": _text(event.get("versionId")),
+        "versionLabel": _text(event.get("versionLabel")),
+        "relationId": _text(relation.get("relationId")),
+        "rejectionId": _text(rejection.get("rejectionId")),
+        "evidenceRefCount": len([item for item in list(event.get("evidenceRefs") or []) if isinstance(item, dict)]),
+        "changeSetCount": len([item for item in list(event.get("changeSet") or []) if isinstance(item, dict)]),
+        "boundary": "candidate_versioning_ledger_only_not_official_graph",
+    }
 
 
 def _unsupported_operation(operation: str, *, boundary: str) -> str:
@@ -316,6 +383,7 @@ def _record_tool_event(
     level: str = "info",
     outcome: str = "completed",
     fields: dict[str, Any] | None = None,
+    child_log_payload: dict[str, Any] | None = None,
 ) -> None:
     try:
         from core.web.services.runtime_scene_service import record_runtime_scene_event
@@ -327,6 +395,8 @@ def _record_tool_event(
             level=level,
             message=event_code,
             fields={"outcome": outcome, **dict(fields or {})},
+            child_log_path="artifacts/challenge-cup-operations-tool-writeback.jsonl",
+            child_log_payload=child_log_payload,
         )
     except Exception:
         return
