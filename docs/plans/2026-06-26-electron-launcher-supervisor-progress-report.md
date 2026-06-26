@@ -101,12 +101,12 @@ missing              No current implementation found.
 | Task 5: Generic Window Provider State in Backend | partial | `core/launcher/window_provider_dispatcher.py`, `core/launcher/desktop_session_store.py`, and `core/launcher/service.py` provide Electron desktop session projection and `windowProvider`/`windowManaged` fields while preserving compatibility. | Edge fallback and `browserManaged` compatibility still exist. Need explicit entry/fallback catalog and removal triggers. |
 | Task 6: Electron Window Provider | partial | `ElectronWindowProvider`, launcher/workbench window factories, URL resolver, URL policy, Desktop Session client, and tests exist. | Need stronger event coverage for `ready-to-show`, `loadURL` failure, `render-process-gone`, `unresponsive`, and stale heartbeat behavior before release. |
 | Task 7: Long-lived Python Launcher Service Handshake | partial | `vibelution_desktop_entry.py` implements `bootstrap` JSON; Electron parser/client consume it; tests validate required capabilities. | Handshake lacks full terminal ownership model. Continue hardening through Python lifecycle store and runtime-scene terminal evidence. |
-| Task 8: Python Lifecycle Intent Store and Desktop Action Contract | mostly done for V1 terminal truth | `core/launcher/lifecycle_intent_store.py` now supports `accepted -> executing -> succeeded/failed/superseded`, bounded terminal result summaries, desktop action parent-intent completion, wrong-session ack/fail protection, expired lease reclaim, and retry-budget exhaustion -> failed. `core/launcher/service.py` reconciles completed Runtime Manager result files into lifecycle intent terminal status, and guarded GET intent routes expose the Python-owned truth. | Remaining V1 hardening: runtime-scene event emission for intent terminal transitions and wider route/security regression coverage. |
-| Task 9: Self-Evolution Lifecycle Intent Integration | partial, validation slice done | `core/web/services/self_evolution_control_service.py` now validates self-evolution lifecycle intents against trusted run snapshots before submitting to Launcher. `restart_after_apply` requires a completed run with available rollback state; `resume_self_evolution` rejects unknown, terminal, and already-running runs. Source run/task/worktree context is derived from trusted run state, and `GET /api/launcher/lifecycle-intents/{intentId}` now exposes source fields for status polling. | Still not full E2E. Remaining work: real Runtime Manager command terminal evidence for self-evolution resume/restart, broader runtime-scene terminal reconciliation checks, and live Launcher/package verification. |
+| Task 8: Python Lifecycle Intent Store and Desktop Action Contract | mostly done for V1 terminal truth | `core/launcher/lifecycle_intent_store.py` now supports `accepted -> executing -> succeeded/failed/superseded`, bounded terminal result summaries, desktop action parent-intent completion, wrong-session ack/fail protection, expired lease reclaim, and retry-budget exhaustion -> failed. `core/launcher/service.py` reconciles completed Runtime Manager result files into lifecycle intent terminal status, records bounded `launcher.lifecycle_intent.runtime_terminal` evidence, and guarded GET intent routes expose the Python-owned truth. | Remaining V1 hardening: wider route/security regression coverage and live Launcher integration evidence. |
+| Task 9: Self-Evolution Lifecycle Intent Integration | partial, validation and terminal-evidence slices done | `core/web/services/self_evolution_control_service.py` now validates self-evolution lifecycle intents against trusted run snapshots before submitting to Launcher. `restart_after_apply` requires a completed run with available rollback state; `resume_self_evolution` rejects unknown, terminal, and already-running runs. Source run/task/worktree context is derived from trusted run state, and `GET /api/launcher/lifecycle-intents/{intentId}` now exposes source fields for status polling. Runtime Manager success/failure result files now reconcile to terminal lifecycle status and emit bounded terminal evidence with `intentId`, `commandId`, source run/task, `status`, and `ok`. | Still not full E2E. Remaining work: live self-evolution resume/restart evidence, broader runtime-scene terminal reconciliation checks, and live Launcher/package verification. |
 | Task 10: Electron Consumes Approved Desktop Actions | partial | `desktopActionClient.ts` maps desktop actions to window operations; rejects runtime-effect actions from Electron; uses claim/ack/fail endpoints. `main.ts` polls and records Electron supervisor events. Existing Electron tests prove runtime-effect actions fail as unsupported desktop actions. | Add integration evidence against a live Launcher that acked/failed actions are never redelivered after the new parent-intent terminal updates. |
 | Task 11: Security and IPC Boundary | partial | Preload/IPC bridge exists; sender validation and URL allowlist tests exist; shutdown coordinator blocks active work and distinguishes attached vs owned Launcher service. | Need final release security gate: `will-navigate`, `setWindowOpenHandler`, permission denial, renderer token non-exposure, and Python route control-token regression tests. |
 | Task 12: Packaging Skeleton | done for skeleton, partial for product | `build_desktop_package.ps1`, `verify_desktop_package.ps1`, package profile writer, package smoke, and lifecycle verifier exist. | Product installer/signing/shortcut rules are not done. Lifecycle positive verification is blocked while a packaged `Vibelution.exe` is already running. |
-| Task 13: Runtime Scene Evidence for Electron Supervisor | partial | `RuntimeSceneBridge` exists; Electron records supervisor/action/window events; Python Launcher route accepts bounded Electron runtime-scene events. | Need runtime-effect intent terminal events: request, validation, dispatch, command terminal, final lifecycle status. |
+| Task 13: Runtime Scene Evidence for Electron Supervisor | partial | `RuntimeSceneBridge` exists; Electron records supervisor/action/window events; Python Launcher route accepts bounded Electron runtime-scene events. Python Launcher now records runtime-effect lifecycle terminal events when Runtime Manager result files are reconciled. | Need full request -> validation -> dispatch -> command terminal -> final lifecycle status correlation in a live/runtime-scene package. |
 
 ## Migration Gate Snapshot
 
@@ -116,7 +116,7 @@ missing              No current implementation found.
 | Gate 1: Electron Scaffold Ready | done | Electron package, build, main/preload, tests, and package skeleton exist. | Keep npm/package-lock as the build source. |
 | Gate 2: Generic Window Provider Ready | partial | Electron desktop session projection exists; `windowProvider="electron"` can be projected. | Edge fallback and old `browserManaged` fields remain; need catalog/removal trigger. |
 | Gate 3: Electron Provider Can Open Launcher and Workbench | needs-verification | Electron window provider and Desktop Action client exist; package/lifecycle verifier exists. | Positive lifecycle verification must be rerun after the current packaged desktop process is closed by the user or with explicit authorization. |
-| Gate 4: Python Intent Store and Desktop Action Loop Ready | mostly done for V1 terminal truth | SQLite store, claim/lease/ack/fail, runtime dispatcher, Electron action client, wrong-session tests, retry-exhaustion tests, runtime-effect `executing` state, Runtime Manager result reconciliation, and guarded intent status GET routes exist. | Runtime-scene terminal transition logging and broader live Launcher integration remain before release readiness. |
+| Gate 4: Python Intent Store and Desktop Action Loop Ready | mostly done for V1 terminal truth | SQLite store, claim/lease/ack/fail, runtime dispatcher, Electron action client, wrong-session tests, retry-exhaustion tests, runtime-effect `executing` state, Runtime Manager result reconciliation, bounded terminal evidence logging, and guarded intent status GET routes exist. | Broader live Launcher integration and runtime-scene package correlation remain before release readiness. |
 | Gate 5: Packaging Skeleton Ready | partial | Unpacked package and package verifier exist. | Single public entry, shortcut policy, deep-link registration, and product release runbook are not complete. |
 
 ## Current Positive Verification State
@@ -126,6 +126,9 @@ Known good evidence from recent runs:
 - `pytest tests/test_web_runtime_routes.py -k "launcher_lifecycle"` passed with 9 selected tests after lifecycle terminal truth hardening.
 - `pytest tests/test_web_runtime_routes.py -k "launcher_lifecycle_intent or self_evolution_restart_request_uses_launcher_lifecycle_service"` passed with 5 selected tests after Runtime Manager result reconciliation.
 - `pytest tests/test_web_runtime_routes.py -k "self_evolution_restart_request_uses_launcher_lifecycle_service or self_evolution_lifecycle_intent_uses_trusted_run_context or self_evolution_restart_after_apply_rejects_invalid_apply_rollback_state or self_evolution_resume_lifecycle_intent_rejects_unknown_terminal_or_running_runs or self_evolution_lifecycle_intent_status_route_uses_trusted_context"` passed with 8 selected tests after the self-evolution lifecycle validation slice.
+- `pytest tests/test_web_runtime_routes.py -k "launcher_lifecycle_reconciles_runtime_manager_success_result or launcher_lifecycle_intent_status_route_reconciles_runtime_manager_failure"` passed with 2 selected tests after terminal evidence logging was added.
+- `pytest tests/test_web_runtime_routes.py -k "launcher_lifecycle or self_evolution_lifecycle or self_evolution_restart_request"` passed with 11 selected tests after terminal evidence logging was added.
+- `pytest tests/test_web_runtime_routes.py` passed with 111 tests after the legacy shutdown active-chat-turn test was realigned to seed an Agent Directory source record for `session-live`.
 - `npm --prefix desktop/electron test` passed with 15 files / 51 tests.
 - `npm --prefix desktop/electron run build` passed.
 - `git diff --check` passed.
@@ -151,8 +154,8 @@ Known blocked evidence:
 
 - `browserManaged` and Edge fallback compatibility still exist and are intentionally not removed yet.
 - Window provider default and fallback semantics must be documented in an entry catalog before any removal work.
-- Runtime-effect lifecycle intents can dispatch Runtime Manager commands, but the intent store does not yet prove final terminal status.
-- Self-evolution lifecycle integration is not yet a full closed loop, but the request-side validation and trusted source context slice is now implemented.
+- Runtime-effect lifecycle intents can dispatch Runtime Manager commands, reconcile Runtime Manager terminal results, and record bounded terminal evidence; the live runtime-scene package still needs full correlation proof.
+- Self-evolution lifecycle integration is not yet a full closed loop, but the request-side validation, trusted source context, and terminal reconciliation evidence slices are now implemented.
 - The source plan checkboxes are stale relative to implementation. This report is the current synchronization layer.
 
 ## Recommended Next Execution Order
@@ -345,20 +348,20 @@ Next Agents should follow these rules:
 7. For architecture changes, update or add tests in the same slice. Passing old Edge tests alone is not evidence of Electron parity.
 8. Keep logging bounded: no secrets, full prompts, full env, full stdout/stderr, or unbounded command output.
 
-## Recommended Next Commit After This Report
+## Recommended Next Commit After Terminal Evidence
 
-The first self-evolution validation slice after this report has been executed through the existing Launcher lifecycle store and status route. The next implementation commit should focus on terminal runtime-scene reconciliation:
+The self-evolution validation slice and bounded terminal evidence slice have now been executed through the existing Launcher lifecycle store and status route. The next implementation commit should focus on live/runtime-scene correlation rather than creating another lifecycle queue or logging path:
 
 ```text
-feat: record self-evolution lifecycle terminal evidence
+test: verify self-evolution lifecycle scene correlation
 ```
 
 Suggested order:
 
-1. Write failing tests for self-evolution restart/resume Runtime Manager result files reconciling to terminal lifecycle status.
-2. Assert runtime-scene evidence records request, validation, dispatch, and terminal status without secrets or unbounded output.
-3. Keep source-context validation tests green while adding terminal reconciliation.
-4. Defer package lifecycle verifier and installer work until the self-evolution closed loop is diagnosable.
+1. Write failing tests or a bounded verifier for request -> validation -> dispatch -> command terminal -> final lifecycle status correlation.
+2. Assert runtime-scene evidence has stable correlation ids and excludes secrets, full prompts, full env, and unbounded stdout/stderr.
+3. Keep source-context validation and terminal reconciliation tests green while adding live/package evidence.
+4. Defer installer, code signing, auto-update, and Edge removal until the self-evolution closed loop is diagnosable.
 
 Do not start with installer, code signing, auto-update, or Edge removal.
 
