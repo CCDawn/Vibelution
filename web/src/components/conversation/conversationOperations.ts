@@ -380,7 +380,10 @@ export function normalizeTimelineOperations(
     : -1;
   const latestProgressIndex = findLatestConcreteProgressIndex(merged);
   return merged.map((operation, index) => {
-    if (isSyntheticFailedOperation(operation) && index < latestProgressIndex) {
+    if (
+      isSyntheticFailedOperation(operation)
+      && (["thought", "mental"].includes(operation.kind) || index < latestProgressIndex)
+    ) {
       return {
         ...operation,
         status: "done",
