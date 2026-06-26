@@ -18,6 +18,7 @@ from core.gym.promotion import (
     rollback_gym_promotion_proposal,
 )
 from core.runtime_manager import constants as runtime_manager_constants
+from core.runtime_manager import evolution_store
 from core.web.app import create_app
 from core.web.control import CONTROL_TOKEN_HEADER, get_control_token
 from core.web.routes import evolution as evolution_routes
@@ -34,6 +35,7 @@ from core.web.services import (
     supervised_control_service,
     supervised_worktree_evolution_service,
 )
+from core.runtime_manager.evolution_store import clear_evolution_store
 from tests.helpers.web_runtime_scene import _seed_runtime_scene_bundle
 from tests.test_gym_runner import RunnerFakeAdapter
 
@@ -50,6 +52,11 @@ def disable_runtime_manager_live_control(monkeypatch: pytest.MonkeyPatch):
 
 @pytest.fixture(autouse=True)
 def isolate_evolution_live_state():
+    clear_evolution_store()
+    try:
+        evolution_store._WORK_RUN_STORE.clear()
+    except Exception:
+        pass
     self_evolution_service.invalidate_self_evolution_overview_cache()
     with supervised_control_service._RUN_STATE_LOCK:
         supervised_control_service._RUN_STATES.clear()
@@ -63,6 +70,25 @@ def isolate_evolution_live_state():
         self_evolution_control_service._ACTIVE_RUN_ID = None
     with self_evolution_control_service._RUN_SUBSCRIBERS_LOCK:
         self_evolution_control_service._RUN_SUBSCRIBERS.clear()
+    with session_service._RUNNING_SESSIONS_LOCK:
+        session_service._RUNNING_SESSION_IDS.clear()
+        session_service._SESSION_ACTIVE_TURN_IDS.clear()
+        session_service._SESSION_ACTIVE_TURN_LEASES.clear()
+    with session_service._SESSION_STREAM_SUBSCRIBERS_LOCK:
+        session_service._SESSION_STREAM_SUBSCRIBERS.clear()
+    with session_service._SESSION_TURN_CONTROLS_LOCK:
+        session_service._SESSION_TURN_CONTROLS.clear()
+    with session_service._SESSION_LIVE_OUTPUTS_LOCK:
+        session_service._SESSION_LIVE_OUTPUTS.clear()
+    with session_service._SESSION_LIST_CACHE_LOCK:
+        session_service._SESSION_LIST_CACHE.clear()
+    with session_service._SESSION_CONVERSATION_EVENTS_CACHE_LOCK:
+        session_service._SESSION_CONVERSATION_EVENTS_CACHE.clear()
+    clear_evolution_store()
+    try:
+        evolution_store._WORK_RUN_STORE.clear()
+    except Exception:
+        pass
     yield
     self_evolution_service.invalidate_self_evolution_overview_cache()
     with supervised_control_service._RUN_STATE_LOCK:
@@ -77,6 +103,20 @@ def isolate_evolution_live_state():
         self_evolution_control_service._ACTIVE_RUN_ID = None
     with self_evolution_control_service._RUN_SUBSCRIBERS_LOCK:
         self_evolution_control_service._RUN_SUBSCRIBERS.clear()
+    with session_service._RUNNING_SESSIONS_LOCK:
+        session_service._RUNNING_SESSION_IDS.clear()
+        session_service._SESSION_ACTIVE_TURN_IDS.clear()
+        session_service._SESSION_ACTIVE_TURN_LEASES.clear()
+    with session_service._SESSION_STREAM_SUBSCRIBERS_LOCK:
+        session_service._SESSION_STREAM_SUBSCRIBERS.clear()
+    with session_service._SESSION_TURN_CONTROLS_LOCK:
+        session_service._SESSION_TURN_CONTROLS.clear()
+    with session_service._SESSION_LIVE_OUTPUTS_LOCK:
+        session_service._SESSION_LIVE_OUTPUTS.clear()
+    with session_service._SESSION_LIST_CACHE_LOCK:
+        session_service._SESSION_LIST_CACHE.clear()
+    with session_service._SESSION_CONVERSATION_EVENTS_CACHE_LOCK:
+        session_service._SESSION_CONVERSATION_EVENTS_CACHE.clear()
 
 def _read_first_sse_event(response):
     event_name = ""
@@ -382,6 +422,7 @@ def test_evolution_workspace_snapshot_combines_dashboard_payloads(tmp_path, monk
     monkeypatch.setattr(self_evolution_control_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(evolution_routes, "get_latest_self_evolution_run", lambda: pytest.fail("default snapshot should not load self latest run"))
     monkeypatch.setattr(evolution_routes, "list_self_evolution_transactions", lambda: [])
+    monkeypatch.setattr(evolution_routes, "get_latest_supervised_run", lambda **kwargs: None)
     monkeypatch.setattr(
         evolution_routes,
         "current_supervised_agent_bindings_snapshot",
@@ -960,7 +1001,7 @@ def test_supervised_worktree_run_routes_start_and_list_simulation(tmp_path, monk
             return None
 
     def fake_worktree_factory(root: Path, run_id: str) -> dict:
-        candidate = tmp_path / "candidate"
+        candidate = tmp_path.parent / f"supervised-worktree-{run_id}"
         candidate.mkdir(parents=True, exist_ok=True)
         subprocess.run(["git", "init"], cwd=str(candidate), check=True, capture_output=True, text=True)
         subprocess.run(["git", "config", "user.email", "test@example.local"], cwd=str(candidate), check=True)
@@ -1038,6 +1079,40 @@ def test_supervised_worktree_run_routes_start_and_list_simulation(tmp_path, monk
     ]
     assert child_payloads[0]["startRequest"]["requestSource"] == "api:evolution.worktree-runs"
     assert child_payloads[0]["startRequest"]["uiRoute"] == "/evolution?view=overview"
+
+
+def test_supervised_worktree_run_route_get_run_cleanses_invalid_candidate_path(tmp_path, monkeypatch):
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    bad_candidate_path = tmp_path / "candidate-file.py"
+    bad_candidate_path.write_text("print('legacy path')\n", encoding="utf-8")
+    run_id = "swte-web-invalid-route"
+
+    monkeypatch.setattr(supervised_worktree_evolution_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        supervised_worktree_evolution_service.work_run_store,
+        "WORK_RUNS_DIR",
+        tmp_path / "work_runs",
+    )
+
+    supervisor_snapshot = {
+        "runId": run_id,
+        "runKind": supervised_worktree_evolution_service.RUN_KIND,
+        "status": "done",
+        "projectRoot": str(project_root),
+        "candidateWorktree": {"path": str(bad_candidate_path), "preserved": True},
+        "updatedAt": "2026-06-01T00:00:00+00:00",
+    }
+    supervised_worktree_evolution_service._persist_snapshot(supervisor_snapshot)
+
+    response = client.get(f"/api/evolution/worktree-runs/{run_id}")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["runId"] == run_id
+    assert payload["candidateWorktree"]["pathValidationError"]
+    assert "path" not in payload["candidateWorktree"]
+
 
 def test_supervised_worktree_run_route_requires_real_llm_cost_confirmation(tmp_path, monkeypatch):
     bundle_dir = tmp_path / "workspace" / "evaluation" / "bundles"
@@ -1574,6 +1649,7 @@ def test_start_supervised_run_from_web_does_not_write_real_runtime_manager_store
         "submit",
         lambda fn, *args, **kwargs: object(),
     )
+    monkeypatch.setattr(supervised_control_service, "_publish_run_snapshot", lambda run_id, terminal=False: None)
 
     response = client.post(
         "/api/evolution/runs",
@@ -1787,20 +1863,25 @@ def test_start_supervised_run_rejects_when_self_evolution_lease_active(tmp_path,
     }
     self_evolution_control_service.persist_manager_run_snapshot("self", self_snapshot, active_run_id=self_snapshot["runId"])
 
-    response = client.post(
-        "/api/evolution/runs",
-        json={
-            "sourceKind": "bundle",
-            "bundleName": "manual_bundle",
-            "keepWorktree": False,
-        },
-    )
+    run_path, index_path = _real_runtime_manager_evolution_paths("self", self_snapshot["runId"])
+    original_index_text = _read_optional_text(index_path)
 
-    assert response.status_code == 409
-    assert "resource" in response.json()["detail"].lower() or "资源" in response.json()["detail"]
+    try:
+        response = client.post(
+            "/api/evolution/runs",
+            json={
+                "sourceKind": "bundle",
+                "bundleName": "manual_bundle",
+                "keepWorktree": False,
+            },
+        )
 
-    _reset_supervised_live_state()
-    _reset_self_evolution_live_state()
+        assert response.status_code == 409
+        assert "resource" in response.json()["detail"].lower() or "资源" in response.json()["detail"]
+    finally:
+        _restore_real_runtime_index_if_touched("self", self_snapshot["runId"], original_index_text)
+        _reset_supervised_live_state()
+        _reset_self_evolution_live_state()
 
 def test_supervised_run_control_routes_pause_resume_and_terminate(tmp_path, monkeypatch):
     bundle_path = tmp_path / "workspace" / "evaluation" / "bundles" / "manual_bundle.json"
@@ -2789,6 +2870,7 @@ def test_start_self_evolution_run_from_web_exposes_active_snapshot(monkeypatch):
         "submit",
         lambda fn, *args, **kwargs: object(),
     )
+    monkeypatch.setattr(self_evolution_control_service, "_publish_run_snapshot", lambda run_id, terminal=False, **kwargs: None)
 
     response = client.post("/api/evolution/self/runs", json={"goal": "网页触发一轮自进化"})
     active_response = client.get("/api/evolution/self/active-run")
@@ -2837,6 +2919,19 @@ def test_start_self_evolution_run_from_web_does_not_write_real_runtime_manager_s
         self_evolution_control_service._RUN_EXECUTOR,
         "submit",
         lambda fn, *args, **kwargs: object(),
+    )
+    assert self_evolution_control_service._runtime_manager_live_control_enabled() is False
+    monkeypatch.setattr(
+        self_evolution_control_service,
+        "_submit_self_runtime_manager_command",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("runtime manager command should not be used in local-mode test")
+        ),
+    )
+    monkeypatch.setattr(
+        self_evolution_control_service,
+        "persist_manager_run_snapshot",
+        lambda kind, snapshot, *, active_run_id="": dict(snapshot),
     )
 
     response = client.post("/api/evolution/self/runs", json={"goal": "隔离真实 runtime store"})

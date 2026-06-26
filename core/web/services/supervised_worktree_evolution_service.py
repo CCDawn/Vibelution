@@ -1059,11 +1059,11 @@ def _coerce_candidate_worktree_path(
         )
     try:
         candidate_path.relative_to(project_root)
-        raise SupervisedWorktreeRunValidationError(
-            f"候选工作树路径不能在主项目目录内（runId={run_id}）：{candidate_path}"
-        )
     except ValueError:
         return candidate_path
+    raise SupervisedWorktreeRunValidationError(
+        f"候选工作树路径不能在主项目目录内（runId={run_id}）：{candidate_path}"
+    )
 
 
 def _coerce_candidate_worktree_path_soft(
