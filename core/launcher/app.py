@@ -250,6 +250,15 @@ def launcher_submit_lifecycle_intent(request: Request, payload: LifecycleIntentP
         ) from exc
 
 
+@router.get("/api/launcher/lifecycle-intents/{intent_id}")
+def launcher_get_lifecycle_intent(request: Request, intent_id: str) -> dict:
+    _ensure_control_request(request)
+    result = launcher_service.get_lifecycle_intent(intent_id)
+    if not result:
+        raise HTTPException(status_code=404, detail={"code": "lifecycle_intent_not_found"})
+    return result
+
+
 @router.post("/api/launcher/desktop-actions/claim")
 def launcher_claim_desktop_action(request: Request, payload: DesktopActionClaimPayload) -> dict:
     _ensure_control_request(request)

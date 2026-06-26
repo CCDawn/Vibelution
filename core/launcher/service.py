@@ -734,6 +734,74 @@ def submit_lifecycle_intent(payload: dict[str, Any], *, actor_context: dict[str,
     return result
 
 
+def get_lifecycle_intent(intent_id: str) -> dict[str, Any]:
+    intent = lifecycle_intent_store.get_lifecycle_intent(intent_id)
+    if not intent.get("intentId"):
+        return {}
+    return reconcile_lifecycle_intent(intent)
+
+
+def reconcile_lifecycle_intent(intent: dict[str, Any]) -> dict[str, Any]:
+    command_id = str(intent.get("commandId") or "").strip()
+    if not command_id or str(intent.get("status") or "") in lifecycle_intent_store.TERMINAL_INTENT_STATUSES:
+        return intent
+    result = _load_runtime_manager_command_result(command_id)
+    if not result:
+        return intent
+    terminal_status = _lifecycle_status_for_runtime_result(result)
+    if terminal_status == "":
+        return intent
+    return lifecycle_intent_store.complete_lifecycle_intent(
+        str(intent.get("intentId") or ""),
+        status=terminal_status,
+        result=_lifecycle_result_summary(result),
+    )
+
+
+def _load_runtime_manager_command_result(command_id: str) -> dict[str, Any]:
+    normalized_command_id = str(command_id or "").strip()
+    if not normalized_command_id:
+        return {}
+    result_path = RESULTS_DIR / f"{normalized_command_id}.json"
+    result = _load_json_file(result_path)
+    result_command_id = str(result.get("commandId") or normalized_command_id).strip() or normalized_command_id
+    if result_command_id != normalized_command_id or result.get("completed") is not True:
+        return {}
+    return result
+
+
+def _lifecycle_status_for_runtime_result(result: dict[str, Any]) -> str:
+    status = str(result.get("status") or "").strip().lower()
+    if status == "superseded" or result.get("supersededByCommandId"):
+        return "superseded"
+    if result.get("ok") is False or status in {"failed", "error", "cancelled"}:
+        return "failed"
+    if result.get("completed") is True:
+        return "succeeded"
+    return ""
+
+
+def _lifecycle_result_summary(result: dict[str, Any]) -> dict[str, Any]:
+    summary: dict[str, Any] = {
+        "commandId": str(result.get("commandId") or "").strip(),
+        "completed": bool(result.get("completed")),
+        "ok": bool(result.get("ok")),
+    }
+    status = str(result.get("status") or "").strip()
+    if status:
+        summary["status"] = _truncate(status, 80)
+    message = str(result.get("message") or "").strip()
+    if message:
+        summary["message"] = _truncate(message, 500)
+    error_type = str(result.get("errorType") or "").strip()
+    if error_type:
+        summary["errorType"] = _truncate(error_type, 160)
+    superseded_by = str(result.get("supersededByCommandId") or "").strip()
+    if superseded_by:
+        summary["supersededByCommandId"] = _truncate(superseded_by, 160)
+    return summary
+
+
 def claim_desktop_action(desktop_session_id: str, *, lease_seconds: int = 30) -> dict[str, Any]:
     return lifecycle_intent_store.claim_desktop_action(
         desktop_session_id=desktop_session_id,

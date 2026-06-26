@@ -1879,6 +1879,78 @@ def test_launcher_lifecycle_runtime_dispatch_and_completion_are_terminal_truth(t
     assert completed["result"]["ok"] is True
 
 
+def test_launcher_lifecycle_reconciles_runtime_manager_success_result(tmp_path, monkeypatch):
+    from core.launcher import lifecycle_intent_store
+
+    results_dir = tmp_path / "runtime_manager" / "results"
+    results_dir.mkdir(parents=True)
+    monkeypatch.setattr(lifecycle_intent_store, "LIFECYCLE_DB_PATH", tmp_path / "launcher" / "lifecycle.sqlite3")
+    monkeypatch.setattr(standalone_launcher_service, "RESULTS_DIR", results_dir)
+    intent = lifecycle_intent_store.submit_lifecycle_intent(
+        {"action": "restart_after_apply", "reason": "apply complete", "idempotencyKey": "run-1:restart"},
+        actor_context={
+            "actorType": "self_evolution_agent",
+            "actorId": "self-agent",
+            "sourceRunId": "run-1",
+            "sourceTaskId": "task-1",
+            "sourceWorktree": str(tmp_path / "worktree"),
+        },
+        active_work_runs=[],
+    )
+    lifecycle_intent_store.record_runtime_dispatch(intent["intentId"], command_id="cmd-success")
+    (results_dir / "cmd-success.json").write_text(
+        json.dumps({"commandId": "cmd-success", "completed": True, "ok": True, "message": "done"}),
+        encoding="utf-8",
+    )
+
+    reconciled = standalone_launcher_service.get_lifecycle_intent(intent["intentId"])
+
+    assert reconciled["status"] == "succeeded"
+    assert reconciled["result"]["commandId"] == "cmd-success"
+    assert reconciled["result"]["ok"] is True
+
+
+def test_launcher_lifecycle_intent_status_route_reconciles_runtime_manager_failure(tmp_path, monkeypatch):
+    from core.launcher import lifecycle_intent_store
+
+    results_dir = tmp_path / "runtime_manager" / "results"
+    results_dir.mkdir(parents=True)
+    monkeypatch.setattr(lifecycle_intent_store, "LIFECYCLE_DB_PATH", tmp_path / "launcher" / "lifecycle.sqlite3")
+    monkeypatch.setattr(standalone_launcher_service, "RESULTS_DIR", results_dir)
+    intent = lifecycle_intent_store.submit_lifecycle_intent(
+        {"action": "recover_after_crash", "reason": "recover", "idempotencyKey": "run-1:recover"},
+        actor_context={
+            "actorType": "launcher_api",
+            "actorId": "launcher-control-plane",
+            "sourceRunId": "",
+            "sourceTaskId": "",
+            "sourceWorktree": "",
+        },
+        active_work_runs=[],
+    )
+    lifecycle_intent_store.record_runtime_dispatch(intent["intentId"], command_id="cmd-failed")
+    (results_dir / "cmd-failed.json").write_text(
+        json.dumps(
+            {
+                "commandId": "cmd-failed",
+                "completed": True,
+                "ok": False,
+                "message": "recover failed",
+                "errorType": "RuntimeError",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    response = client.get(f"/api/launcher/lifecycle-intents/{intent['intentId']}")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "failed"
+    assert payload["result"]["commandId"] == "cmd-failed"
+    assert payload["result"]["ok"] is False
+
+
 def test_self_evolution_restart_request_uses_launcher_lifecycle_service(monkeypatch):
     captured: dict[str, object] = {}
     captured_context: dict[str, object] = {}
