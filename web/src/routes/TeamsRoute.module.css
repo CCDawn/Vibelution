@@ -1753,17 +1753,14 @@
 
 .teamMemoryIndex {
   display: grid;
-  gap: 8px;
-  padding: 10px;
+  gap: 6px;
+  padding: 8px;
   border: 1px solid color-mix(in srgb, var(--accent-cool) 24%, var(--border-soft));
   border-radius: 8px;
-  background:
-    linear-gradient(90deg, color-mix(in srgb, var(--accent-success) 6%, transparent), transparent 72%),
-    var(--surface-panel-strong);
+  background: var(--surface-panel-strong);
 }
 
-.teamMemoryIndexHeader,
-.teamMemoryMemberHeader {
+.teamMemoryIndexHeader {
   display: flex;
   min-width: 0;
   align-items: center;
@@ -1778,10 +1775,7 @@
 }
 
 .teamMemoryIndexHeader strong,
-.teamMemoryIndexHeader span,
-.teamMemoryMemberHeader span,
-.teamMemoryMemberCard strong,
-.teamMemoryMemberCard span {
+.teamMemoryIndexHeader span {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1794,87 +1788,154 @@
 }
 
 .teamMemoryIndexHeader span,
-.teamMemoryMemberHeader span,
+.teamMemoryMemberHeading,
 .teamMemoryMemberCard span {
   color: var(--fg-muted);
   font-size: 0.64rem;
   font-weight: 760;
 }
 
-.teamMemoryIndexHeader a,
-.teamMemoryActionGrid a,
+.teamMemoryActionRail,
+.teamMemoryMemberActions {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 5px;
+}
+
+.teamMemoryActionRail a,
 .teamMemoryMemberActions a {
   display: inline-flex;
-  min-height: 26px;
+  min-height: 24px;
   align-items: center;
   justify-content: center;
-  gap: 5px;
-  padding: 0 8px;
+  gap: 4px;
+  padding: 0 7px;
   border: 1px solid color-mix(in srgb, var(--accent-cool) 30%, var(--border-soft));
   border-radius: var(--radius-control);
-  background: color-mix(in srgb, var(--surface-panel) 82%, transparent);
+  background: color-mix(in srgb, var(--surface-panel) 88%, transparent);
   color: var(--fg-primary);
-  font-size: 0.66rem;
+  font-size: 0.64rem;
   font-weight: 820;
   text-decoration: none;
   white-space: nowrap;
 }
 
-.teamMemoryActionGrid {
+.teamMemoryActionRail a:hover,
+.teamMemoryMemberActions a:hover {
+  border-color: color-mix(in srgb, var(--accent-cool) 46%, var(--border-soft));
+  background: color-mix(in srgb, var(--accent-cool) 8%, var(--surface-panel));
+}
+
+.teamMemoryMemberTable {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 6px;
+  gap: 4px;
 }
 
-.teamMemoryActionGrid a {
-  width: 100%;
-}
-
-.teamMemoryMemberHeader strong {
-  display: inline-flex;
-  min-width: 24px;
-  justify-content: center;
-  padding: 2px 7px;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--accent-success) 14%, var(--surface-card));
-  color: color-mix(in srgb, var(--accent-success) 74%, var(--fg-primary));
-  font-size: 0.68rem;
-}
-
-.teamMemoryMemberGrid {
-  display: grid;
-  gap: 6px;
-}
-
+.teamMemoryMemberHeading,
 .teamMemoryMemberCard {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(160px, 0.9fr) minmax(120px, 0.7fr) minmax(90px, 0.45fr) minmax(108px, 0.5fr);
   gap: 8px;
   align-items: center;
   min-width: 0;
-  padding: 7px;
-  border: 1px solid color-mix(in srgb, var(--border-soft) 86%, transparent);
-  border-radius: 7px;
-  background: color-mix(in srgb, var(--surface-card) 76%, transparent);
 }
 
-.teamMemoryMemberCard > div:first-child {
+.teamMemoryMemberHeading {
+  padding: 0 7px;
+  color: var(--fg-subtle);
+  text-transform: uppercase;
+}
+
+.teamMemoryMemberHeading span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.teamMemoryMemberCard {
+  min-height: 38px;
+  padding: 5px 7px;
+  border: 1px solid color-mix(in srgb, var(--border-soft) 86%, transparent);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--surface-card) 82%, transparent);
+}
+
+.teamMemoryMemberIdentity {
   display: grid;
   min-width: 0;
-  gap: 2px;
+  gap: 1px;
 }
 
-.teamMemoryMemberCard strong {
+.teamMemoryMemberIdentity strong,
+.teamMemoryMemberIdentity span,
+.teamMemoryRole,
+.teamMemoryStatusBadge {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.teamMemoryMemberIdentity strong {
   color: var(--fg-primary);
   font-size: 0.72rem;
 }
 
-.teamMemoryMemberActions {
-  display: flex;
-  flex: 0 0 auto;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: 5px;
+.teamMemoryMemberIdentity span {
+  color: var(--fg-subtle);
+  font-size: 0.61rem;
+  font-weight: 760;
+}
+
+.teamMemoryRole {
+  color: var(--fg-muted);
+}
+
+.teamMemoryStatusBadge {
+  justify-self: start;
+  max-width: 100%;
+  padding: 2px 7px;
+  border: 1px solid color-mix(in srgb, var(--accent-success) 28%, var(--border-soft));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent-success) 10%, var(--surface-panel));
+  color: color-mix(in srgb, var(--accent-success) 70%, var(--fg-primary));
+  font-size: 0.62rem;
+  font-weight: 840;
+}
+
+.teamMemoryStatusBadge[data-tone="blocked"],
+.teamMemoryStatusBadge[data-tone="missing"] {
+  border-color: color-mix(in srgb, var(--state-danger) 28%, var(--border-soft));
+  background: color-mix(in srgb, var(--state-danger) 8%, var(--surface-panel));
+  color: color-mix(in srgb, var(--state-danger) 72%, var(--fg-primary));
+}
+
+.teamMemoryStatusBadge[data-tone="warning"] {
+  border-color: color-mix(in srgb, var(--state-warning) 32%, var(--border-soft));
+  background: color-mix(in srgb, var(--state-warning) 9%, var(--surface-panel));
+  color: color-mix(in srgb, var(--state-warning) 74%, var(--fg-primary));
+}
+
+@media (max-width: 760px) {
+  .teamMemoryIndexHeader {
+    align-items: flex-start;
+  }
+
+  .teamMemoryMemberHeading {
+    display: none;
+  }
+
+  .teamMemoryMemberCard {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .teamMemoryRole,
+  .teamMemoryStatusBadge {
+    display: none;
+  }
 }
 
 .sourceCollectionStageAgentPanel {
