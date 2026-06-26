@@ -29,6 +29,7 @@ from core.runtime_manager import work_run_store
 from core.runtime_manager.work_run_store import WorkRunStore
 from core.runtime_manager.workbench_controller import _is_process_alive, observe_workbench
 from core.runtime_manager.window_provider_state import window_provider_projection
+from . import lifecycle_action_dispatcher, lifecycle_intent_store
 from . import developer_mode as launcher_developer_mode
 
 
@@ -703,6 +704,57 @@ def launcher_active_work_runs() -> list[dict[str, str]]:
         _append_active_work_run(items, seen, kind=kind, payload=payload)
 
     return items
+
+
+def trusted_lifecycle_actor_context() -> dict[str, str]:
+    return {
+        "actorType": "launcher_api",
+        "actorId": "launcher-control-plane",
+        "sourceRunId": "",
+        "sourceTaskId": "",
+        "sourceWorktree": "",
+    }
+
+
+def submit_lifecycle_intent(payload: dict[str, Any], *, actor_context: dict[str, Any] | None = None) -> dict[str, Any]:
+    context = actor_context or trusted_lifecycle_actor_context()
+    result = lifecycle_intent_store.submit_lifecycle_intent(
+        payload,
+        actor_context=context,
+        active_work_runs=launcher_active_work_runs(),
+    )
+    if result.get("status") == "accepted" and result.get("action") in lifecycle_intent_store.RUNTIME_EFFECT_ACTIONS:
+        dispatch_result = lifecycle_action_dispatcher.dispatch_runtime_effect_intent({**context, **payload, **result})
+        if dispatch_result.get("commandId"):
+            result = lifecycle_intent_store.record_runtime_dispatch(
+                str(result.get("intentId") or ""),
+                command_id=str(dispatch_result.get("commandId") or ""),
+            )
+        result["dispatch"] = dispatch_result
+    return result
+
+
+def claim_desktop_action(desktop_session_id: str, *, lease_seconds: int = 30) -> dict[str, Any]:
+    return lifecycle_intent_store.claim_desktop_action(
+        desktop_session_id=desktop_session_id,
+        lease_seconds=lease_seconds,
+    )
+
+
+def ack_desktop_action(action_id: str, desktop_session_id: str, result: dict[str, Any]) -> dict[str, Any]:
+    return lifecycle_intent_store.ack_desktop_action(
+        action_id,
+        desktop_session_id=desktop_session_id,
+        result=result,
+    )
+
+
+def fail_desktop_action(action_id: str, desktop_session_id: str, result: dict[str, Any]) -> dict[str, Any]:
+    return lifecycle_intent_store.fail_desktop_action(
+        action_id,
+        desktop_session_id=desktop_session_id,
+        result=result,
+    )
 
 
 def request_launcher_start() -> LauncherCommandResponse:

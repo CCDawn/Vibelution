@@ -40,6 +40,22 @@ class DeveloperCleanupApplyPayload(BaseModel):
     confirm: bool = False
 
 
+class LifecycleIntentPayload(BaseModel):
+    action: str
+    reason: str = ""
+    idempotencyKey: str
+
+
+class DesktopActionClaimPayload(BaseModel):
+    desktopSessionId: str
+    leaseSeconds: int = 30
+
+
+class DesktopActionResultPayload(BaseModel):
+    desktopSessionId: str
+    result: dict = Field(default_factory=dict)
+
+
 @router.get("/launcher/status")
 def launcher_status() -> dict:
     return launcher_service.get_launcher_status()
@@ -155,6 +171,32 @@ def launcher_restart() -> dict:
                 "activeWorkRuns": exc.active_work_runs,
             },
         ) from exc
+
+
+@router.post("/launcher/lifecycle-intents", status_code=202)
+def launcher_submit_lifecycle_intent(payload: LifecycleIntentPayload) -> dict:
+    try:
+        return launcher_service.submit_lifecycle_intent(payload.model_dump())
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "invalid_lifecycle_intent", "message": str(exc)},
+        ) from exc
+
+
+@router.post("/launcher/desktop-actions/claim")
+def launcher_claim_desktop_action(payload: DesktopActionClaimPayload) -> dict:
+    return launcher_service.claim_desktop_action(payload.desktopSessionId, lease_seconds=payload.leaseSeconds)
+
+
+@router.post("/launcher/desktop-actions/{action_id}/ack", status_code=202)
+def launcher_ack_desktop_action(action_id: str, payload: DesktopActionResultPayload) -> dict:
+    return launcher_service.ack_desktop_action(action_id, payload.desktopSessionId, payload.result)
+
+
+@router.post("/launcher/desktop-actions/{action_id}/fail", status_code=202)
+def launcher_fail_desktop_action(action_id: str, payload: DesktopActionResultPayload) -> dict:
+    return launcher_service.fail_desktop_action(action_id, payload.desktopSessionId, payload.result)
 
 
 def _request_audit(request: Request, *, operation: str) -> launcher_service.LauncherRequestAudit:
