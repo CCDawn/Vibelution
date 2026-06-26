@@ -3276,6 +3276,56 @@ def test_runtime_scene_detail_repairs_historical_running_package_from_reconcilia
     assert manifest_after["status"] == "stopped"
     assert manifest_after["ended_at"] == "2026-05-18T12:05:00+00:00"
 
+def test_runtime_scene_list_does_not_repair_or_rewrite_sidecars(tmp_path, monkeypatch):
+    scene_dir = _seed_runtime_scene_bundle(tmp_path, scene_id="scene-history-list", status="running")
+    with (scene_dir / "timeline.jsonl").open("a", encoding="utf-8") as handle:
+        handle.write(
+            json.dumps(
+                {
+                    "runtime_scene_id": "scene-history-list",
+                    "ts": "2026-05-18T12:05:00Z",
+                    "seq": 1,
+                    "component": "runtime_manager",
+                    "phase": "runtime",
+                    "event_code": "runtime.snapshot.reconciled",
+                    "level": "info",
+                    "outcome": "observed",
+                    "message": "Runtime manager runtime event: runtime.snapshot.reconciled",
+                    "fields": {
+                        "managerRunning": False,
+                        "managerPid": 0,
+                        "desiredState": "closed",
+                        "observedState": "closed",
+                        "backendPid": 0,
+                        "browserWindowPid": 0,
+                        "lifecycleConsistency": "consistent",
+                    },
+                    "raw_refs": [],
+                    "lifecycle": True,
+                },
+                ensure_ascii=False,
+            )
+            + "\n"
+        )
+    manifest_path = scene_dir / "manifest.json"
+    package_index_path = scene_dir / "package_index.json"
+    package_index = json.loads(package_index_path.read_text(encoding="utf-8"))
+    package_index["search_text"] = "stale package index search text"
+    package_index_path.write_text(json.dumps(package_index, ensure_ascii=False, indent=2), encoding="utf-8")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["package"]["search_text"] = "stale manifest package search text"
+    manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+    manifest_before = manifest_path.read_text(encoding="utf-8")
+    package_index_before = package_index_path.read_text(encoding="utf-8")
+    monkeypatch.setattr(runtime_scene_service, "PROJECT_ROOT", tmp_path)
+
+    [summary] = runtime_scene_service.list_runtime_scenes()
+
+    assert summary["runtimeSceneId"] == "scene-history-list"
+    assert summary["status"] == "running"
+    assert manifest_path.read_text(encoding="utf-8") == manifest_before
+    assert package_index_path.read_text(encoding="utf-8") == package_index_before
+
 def test_runtime_scene_lifecycle_fallback_indexes_operational_phases(tmp_path, monkeypatch):
     scene_dir = _seed_runtime_scene_bundle(tmp_path, scene_id="scene-lifecycle-fallback", status="running")
     timeline_path = scene_dir / "timeline.jsonl"
