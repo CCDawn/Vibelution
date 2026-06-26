@@ -4979,7 +4979,7 @@ def _challenge_cup_agent_profile_defaults(role: str, functional_name: str) -> di
                 "personality": "审慎、挑剔，优先发现来源缺口、重复和证据风险。",
                 "communicationStyle": "先给审查分布，再逐条列通过/退回/拒绝/人工确认的依据。",
                 "background": f"{functional_name} 是挑战杯资料审查 Agent，负责 source_manifest 入库前审查。",
-                "collaborationPreference": "把通过项交给资料入库/知识库管理员，把缺口退回资料发现、获取或提炼 Agent。",
+                "collaborationPreference": "把通过项交给知识库管理员进入资料入库步骤，把缺口退回资料发现、获取或提炼 Agent。",
                 "expertise": ["来源质量评估", "证据审查", "入库前审"],
             },
             "taskProfile": {
@@ -4990,7 +4990,7 @@ def _challenge_cup_agent_profile_defaults(role: str, functional_name: str) -> di
                 "successCriteria": "每条候选都有清晰决定、证据、风险、补齐要求或 Steward 交接理由。",
                 "deliverables": "Review Summary、Candidate Decisions、Steward Handoff、Human Gate。",
                 "constraints": "阶段私聊任务先用 source_collection_context_tool 读取平台资料上下文，完成、阻塞或失败都用 source_collection_stage_writeback_tool 回写；仍可使用 research/web/search 工具补充公开来源审查，不读取 file:// 或 localhost。",
-                "handoffNotes": "通过项交给 知识库管理员 或资料入库步骤，退回项交给对应执行 Agent。",
+                "handoffNotes": "通过项交给知识库管理员处理资料入库步骤，退回项交给对应执行 Agent。",
                 "taskTypes": ["challenge_cup", "source_quality", "pre_ingestion_review"],
             },
         },

@@ -471,7 +471,7 @@
             <h2>边界提醒</h2>
             <div class="focus-list">
               <div class="focus-item"><b>候选</b><span>科研功能 Agent 只能写 CandidateStore。</span></div>
-              <div class="focus-item"><b>治理</b><span>知识库管理员只提交建议与待审对象。</span></div>
+              <div class="focus-item"><b>治理</b><span>只有知识库管理员 approved 回写可触发正式入库门禁。</span></div>
               <div class="focus-item"><b>正式</b><span>审批通过后才进入 Team Knowledge/RAG/official graph。</span></div>
             </div>
           </div>
@@ -583,7 +583,7 @@
 <div class="state-row">
                   <b>steward_pending_knowledge_review</b>
                   <strong>待审入库对象</strong>
-                  <span>知识库管理员 approved 回写已创建 SourceArtifact、pending RefinementProposal，可选 pending ratingSuggestion；等待或执行审批门禁。</span>
+                  <span>知识库管理员 approved 回写已创建 SourceArtifact、pending RefinementProposal，可选 pending ratingSuggestion，并推动审批门禁进入正式入库闭环。</span>
                 </div>
 <div class="state-row">
                   <b>knowledge_ingestion_needs_review</b>
@@ -876,9 +876,9 @@
       </div>
 <div class="alignment-row">
         <strong>知识治理 Agent</strong>
-        <span>agent-knowledge-steward 固定存在；ToolPolicy 含 knowledge proposal/ingestion/governance/rating 工具；边界 proposal_and_rating_suggestion_only</span>
+        <span>agent-knowledge-steward 固定存在；ToolPolicy 含 knowledge proposal/ingestion/governance/rating 工具；边界为知识库管理员受治理门禁入库</span>
         <b class="status-pill ready">高度匹配</b>
-        <span>07 节点已对齐 Team Knowledge 待审摄取包；该 Agent 不能直接应用正式知识，只能提交建议和待审对象。</span>
+        <span>07 节点已对齐 Team Knowledge 待审摄取包；只有知识库管理员的 memory 阶段 approved 回写可以触发后端治理门禁并形成正式入库闭环。</span>
       </div>
 <div class="alignment-row">
         <strong>正式知识平台</strong>
@@ -1251,7 +1251,7 @@
 <div class="blueprint-row compact">
               <b>POST</b>
               <strong>/api/teams/{team_id}/workflow-orchestration/steward-packs/{candidate_id}/knowledge-ingestion</strong>
-              <span>由知识库管理员把有效 steward_pack_draft 提交为 SourceArtifact + pending RefinementProposal，可选 pending ratingSuggestion；不创建 KnowledgeItem/RAG/正式图谱。</span>
+              <span>由知识库管理员把有效 steward_pack_draft 提交为 SourceArtifact + pending RefinementProposal，可选 pending ratingSuggestion；正式 KnowledgeItem/RAG/正式图谱只能继续经 review/apply 门禁产生。</span>
             </div>
 <div class="blueprint-row compact">
               <b>POST</b>
@@ -1318,7 +1318,7 @@
             </article>
 <article class="role-card">
               <h3>知识库管理员 / agent-knowledge-steward</h3>
-              <p>生成治理建议、评级建议和摄取包，不绕过审核。</p>
+              <p>审核资料入库步骤；approved 回写触发治理门禁和正式 KnowledgeItem 闭环，不绕过审核。</p>
             </article>
 <article class="role-card">
               <h3>Ingestion Approval Gate</h3>
@@ -1972,7 +1972,7 @@
 <div class="blueprint-row compact">
               <b>steward_pack 待审入库</b>
               <strong>/api/teams/{teamId}/workflow-orchestration/steward-packs/{candidateId}/knowledge-ingestion</strong>
-              <span>有效 steward_pack_draft 可提交到指定 knowledgeBaseId，创建 SourceArtifact、pending RefinementProposal 和可选 pending ratingSuggestion；候选进入 steward_pending_knowledge_review。</span>
+              <span>有效 steward_pack_draft 可由知识库管理员提交到指定 knowledgeBaseId，创建 SourceArtifact、pending RefinementProposal 和可选 pending ratingSuggestion；正式 KnowledgeItem 继续由 review/apply 门禁创建。</span>
             </div>
 <div class="blueprint-row compact">
               <b>steward_pack 审批门禁</b>
@@ -2431,8 +2431,8 @@
 <div class="blueprint-row">
               <b>M6.65</b>
               <strong>科研团队 Agent 结构性重绑</strong>
-              <span>research-team 增加标准 7 角色修复入口：科研协调、资料发现、来源获取、内容提炼、资料质量评估、候选图谱、资料入库；旧成员、旧画布节点和重复 challengeCupTeamId Agent 可被物理清理。</span>
-              <span>阶段 Agent 必须拥有 directSessionId 且在会话页可见；阶段私聊入口只跳转到对应 Agent 私有对话页，缺少私聊会话时提示修复团队 Agent，不再退回 Agent 管理页。</span>
+              <span>research-team 增加标准 7 角色修复入口：科研协调、资料发现、来源获取、内容提炼、资料质量评估、候选图谱、知识库管理员；旧成员、旧画布节点和重复 challengeCupTeamId Agent 可被物理清理。</span>
+              <span>阶段 Agent 必须拥有 directSessionId 且在会话页可见；资料入库步骤只绑定知识库管理员，不再保留独立资料入库 Agent；阶段私聊入口只跳转到对应 Agent 私有对话页，缺少私聊会话时提示修复团队 Agent，不再退回 Agent 管理页。</span>
             </div>
 <div class="blueprint-row">
               <b>M6.66</b>
