@@ -832,6 +832,59 @@ def _bootstrap_launcher(args: argparse.Namespace) -> dict[str, object]:
     }
 
 
+def _stop_owned_launcher(args: argparse.Namespace) -> dict[str, object]:
+    state = _read_state()
+    expected_backend_pid = int(args.owned_backend_pid or 0)
+    backend_pid = int(state.get("launcherBackendPid") or 0)
+    backend_launch_pid = int(state.get("launcherBackendLaunchPid") or 0)
+    port = int(state.get("launcherControlPort") or _launcher_control_port())
+    if expected_backend_pid > 0 and expected_backend_pid not in {backend_pid, backend_launch_pid}:
+        _append_log(
+            "desktop_entry_python.stop.skipped",
+            level="warning",
+            reason="owned_backend_pid_mismatch",
+            expected_backend_pid=expected_backend_pid,
+            launcher_backend_pid=backend_pid,
+            launcher_backend_launch_pid=backend_launch_pid,
+        )
+        return {
+            "schemaVersion": 1,
+            "status": "skipped",
+            "reason": "owned_backend_pid_mismatch",
+            "expectedBackendPid": expected_backend_pid,
+            "launcherBackendPid": backend_pid,
+            "terminatedPids": [],
+        }
+    pids = _launcher_pids_from_state(state)
+    for pid in pids:
+        _terminate_pid(pid)
+    if port > 0:
+        _wait_for_launcher_control_stopped(port)
+    next_state = dict(state)
+    now = _now_iso()
+    next_state.update(
+        {
+            "launcherBackendPid": 0,
+            "launcherBackendLaunchPid": 0,
+            "launcherBrowserWindowPid": 0,
+            "launcherBrowserLaunchPid": 0,
+            "browserManaged": False,
+            "launcherControlStoppedAt": now,
+            "updatedAt": now,
+        }
+    )
+    _write_state(next_state)
+    _append_log("desktop_entry_python.stop.succeeded", port=port, terminated_pids=pids)
+    return {
+        "schemaVersion": 1,
+        "status": "stopped",
+        "reason": "",
+        "expectedBackendPid": expected_backend_pid,
+        "launcherBackendPid": backend_pid,
+        "terminatedPids": pids,
+    }
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Open the Vibelution Launcher without a console window.")
     parser.add_argument("--action", default="launcher")
@@ -841,13 +894,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--no-browser", action="store_true")
     parser.add_argument("--python-exe", default="")
     parser.add_argument("--run-id", default="")
+    parser.add_argument("--owned-backend-pid", type=int, default=0)
     return parser.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     action = str(args.action or "launcher").strip().lower()
-    if action not in {"launcher", "bootstrap"}:
+    if action not in {"launcher", "bootstrap", "stop-launcher"}:
         raise SystemExit(f"Unsupported desktop-entry Python bridge action: {action}")
     try:
         _append_log("desktop_entry_python.open.started", action=action, no_browser=bool(args.no_browser), run_id=args.run_id)
@@ -857,6 +911,12 @@ def main(argv: list[str] | None = None) -> int:
                 print(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
             else:
                 print(f"Launcher bootstrap {payload['mode']} at {payload['launcherUrl']}")
+        elif action == "stop-launcher":
+            payload = _stop_owned_launcher(args)
+            if args.output == "json":
+                print(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
+            else:
+                print(f"Launcher stop {payload['status']}")
         else:
             _open_launcher(args)
         _append_log("desktop_entry_python.open.succeeded", action=action, run_id=args.run_id)

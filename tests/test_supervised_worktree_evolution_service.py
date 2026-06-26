@@ -518,6 +518,45 @@ def test_legacy_harness_name_must_live_under_temp_dir(tmp_path):
     assert plan["reason"] == "unowned_candidate_path"
 
 
+def test_candidate_path_file_path_is_rejected_by_flow(tmp_path):
+    project_root = tmp_path / "project"
+    _init_repo(project_root)
+    _write_bundle(project_root)
+    bad_path = tmp_path / "candidate-agent.py"
+    bad_path.write_text("def candidate_agent():\n    pass\n", encoding="utf-8")
+
+    snapshot = service.run_supervised_worktree_flow(
+        {"sourceKind": "bundle", "bundleName": "closed_loop_v1", "mode": "manual"},
+        project_root=project_root,
+        dependencies=service.WorktreeRunDependencies(
+            evaluation_runner=_fake_evaluator,
+            candidate_modifier=lambda *_: {"status": "success"},
+            worktree_factory=lambda *_: {"path": str(bad_path)},
+        ),
+    )
+
+    assert snapshot["status"] == "failed"
+    assert snapshot["errorType"] == "SupervisedWorktreeRunValidationError"
+    assert "候选工作树路径不是目录" in snapshot["error"]
+    assert snapshot["candidateWorktree"] == {}
+
+
+def test_candidate_worktree_cleanup_plan_rejects_file_path(tmp_path):
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    bad_path = tmp_path / "candidate-agent.py"
+    bad_path.write_text("def candidate_agent():\n    pass\n", encoding="utf-8")
+
+    plan = service._candidate_worktree_cleanup_plan(
+        {"runId": "swte-candidate-file"},
+        project_root=project_root,
+        worktree={"path": str(bad_path)},
+    )
+
+    assert plan["status"] == "skipped"
+    assert plan["reason"] == "not_directory"
+
+
 def test_real_llm_mode_requires_explicit_cost_confirmation(tmp_path):
     project_root = tmp_path / "project"
     _write_bundle(project_root)
