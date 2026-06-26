@@ -83,6 +83,47 @@ def test_build_chat_coding_result_contract_keeps_explicit_progress_even_with_com
     assert contract["next_action"] == "继续收口剩余日志路径。"
 
 
+def test_build_chat_coding_result_contract_blocks_cross_platform_pytest_warning():
+    contract = build_chat_coding_result_contract(
+        {
+            "status": "completed",
+            "summary": "测试通过。再运行配置相关的测试验证：",
+            "raw_output": "测试通过。再运行配置相关的测试验证：",
+            "tool_call_count": 3,
+            "tool_trace": [
+                {
+                    "name": "apply_diff_edit_tool",
+                    "args": {"file_path": "config/settings.py"},
+                    "result_preview": "[编辑] 成功修改 config/settings.py",
+                },
+                {
+                    "name": "run_test_for_tool",
+                    "args": {"source_path": "config/workbench.py"},
+                    "result_preview": "37 passed in 10.10s",
+                },
+                {
+                    "name": "cli_tool",
+                    "args": {
+                        "command": (
+                            "python -m pytest tests/test_config.py -x -q "
+                            "2>&1 | head -50"
+                        )
+                    },
+                    "result_preview": (
+                        "[跨平台警告] 在 Windows 上检测到 Unix shell 片段: "
+                        "python -m pytest tests/test_config.py -x -q 2>&1 | head -50"
+                    ),
+                },
+            ],
+        }
+    )
+
+    assert contract["verification_status"] == "failed"
+    assert "跨平台警告" in contract["verification_summary"]
+    assert contract["blocked_reason"] == "pytest 命令被跨平台检查拦截，验证尚未执行。"
+    assert contract["outcome"] == "blocked"
+
+
 def test_format_chat_reply_adds_structured_coding_summary():
     reply = format_chat_reply(
         {

@@ -788,6 +788,43 @@ def test_auto_continue_pause_result_without_visible_reply_needs_continue():
     assert session_service._chat_turn_result_status("completed", result, stop_requested=False) == "needs_continue"
 
 
+def test_process_reply_with_blocked_pytest_validation_needs_continue():
+    result = {
+        "status": "completed",
+        "summary": "测试通过。再运行配置相关的测试验证：",
+        "raw_output": "测试通过。再运行配置相关的测试验证：",
+        "tool_call_count": 20,
+        "tool_trace": [
+            {
+                "name": "apply_diff_edit_tool",
+                "args": {"file_path": "config/settings.py"},
+                "result_preview": "[编辑] 成功修改 config/settings.py",
+            },
+            {
+                "name": "run_test_for_tool",
+                "args": {"source_path": "config/workbench.py"},
+                "result_preview": "37 passed in 10.10s",
+            },
+            {
+                "name": "cli_tool",
+                "args": {
+                    "command": (
+                        "python -m pytest tests/test_config.py -x -q "
+                        "2>&1 | head -50"
+                    )
+                },
+                "result_preview": (
+                    "[跨平台警告] 在 Windows 上检测到 Unix shell 片段: "
+                    "python -m pytest tests/test_config.py -x -q 2>&1 | head -50"
+                ),
+            },
+        ],
+    }
+
+    assert session_service._is_session_turn_terminal(result) is True
+    assert session_service._chat_turn_result_status("completed", result, stop_requested=False) == "needs_continue"
+
+
 def test_history_search_tool_uses_current_runtime_session(tmp_path, monkeypatch):
     save_chat_state(
         tmp_path,

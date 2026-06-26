@@ -18790,6 +18790,19 @@ def _visible_reply_summary_candidate(result: dict[str, Any]) -> str:
     return ""
 
 
+def _chat_contract_blocks_unexecuted_validation(contract: dict[str, Any]) -> bool:
+    if not isinstance(contract, dict):
+        return False
+    if str(contract.get("outcome") or "").strip().lower() != "blocked":
+        return False
+    text = "\n".join(
+        str(contract.get(key) or "")
+        for key in ("blocked_reason", "verification_summary")
+        if contract.get(key)
+    )
+    return "验证尚未执行" in text or "跨平台检查拦截" in text or "[跨平台警告]" in text
+
+
 def _remember_continuation_visible_result(
     result: Any,
     current: dict[str, Any] | None,
@@ -18890,6 +18903,8 @@ def _chat_turn_result_status(result_status: str, result: Any, *, stop_requested:
         outcome = str(contract.get("outcome") or result.get("outcome") or result.get("task_outcome") or "").strip().lower()
         explicit_outcome = _explicit_chat_result_outcome(result)
         visible = _visible_reply_candidate(result)
+        if normalized == "completed" and _chat_contract_blocks_unexecuted_validation(contract):
+            return "needs_continue"
         if normalized == "completed" and explicit_outcome != "progress" and visible:
             return "completed"
         tool_count = _coerce_nonnegative_int(result.get("tool_call_count") or 0)
