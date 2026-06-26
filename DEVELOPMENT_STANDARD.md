@@ -131,6 +131,8 @@ The root workspace:
 
 is the local `main` integration workspace. It is for syncing, merging, final validation, project-memory serialization, and user-authorized publication. Ordinary development belongs in task worktrees.
 
+This root path is the durable local development-main checkout and must stay checked out on branch `main`. Do not leave `C:\Users\17533\Desktop\Vibelution` on a task branch, unresolved merge, or long-lived dirty experiment. If root is found on a non-main branch, first preserve or migrate that branch's dirty work into `C:\Users\17533\Desktop\Vibelution-worktrees\<task-slug>` or a named stash, then restore root to `main` before continuing normal development or integration. A separate `main` worktree may be used only as a short-lived recovery exception while root is blocked, and it should be retired once root has been restored.
+
 Default task worktree path:
 
 `C:\Users\17533\Desktop\Vibelution-worktrees\<task-slug>`

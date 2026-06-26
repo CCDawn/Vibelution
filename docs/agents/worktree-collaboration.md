@@ -4,7 +4,8 @@ This document defines the default collaboration protocol for multiple Agents wor
 
 ## Work Surfaces
 
-- `C:\Users\17533\Desktop\Vibelution` is the local `main` integration workspace. Use it for local syncing, merging, final validation, project-memory serialization, and publishing only after the user explicitly authorizes a GitHub sync/release.
+- `C:\Users\17533\Desktop\Vibelution` is the durable local `main` development/integration workspace. Keep this path checked out on branch `main`; use it for local syncing, merging, final validation, project-memory serialization, and publishing only after the user explicitly authorizes a GitHub sync/release.
+- If `C:\Users\17533\Desktop\Vibelution` is found on a non-main branch, preserve or migrate that work into `C:\Users\17533\Desktop\Vibelution-worktrees\<task-slug>` or a named stash, then restore the root path to `main` before continuing normal development or integration.
 - Development Agents use task-specific worktrees under `C:\Users\17533\Desktop\Vibelution-worktrees\`.
 - If that external worktree root is unavailable, use `.claude/worktrees\<task-slug>` or another explicit task worktree path and record the actual path in preflight/claim evidence.
 - Each active task gets one worktree and one branch. Do not reuse an old task worktree for a new goal.
