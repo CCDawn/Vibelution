@@ -20,6 +20,15 @@ const routeCssSource = readFileSync(new URL("./ChatCodingRoute.module.css", impo
 const conversationCssSource = readFileSync(new URL("../components/conversation/ConversationView.module.css", import.meta.url), "utf-8");
 const appShellCssSource = readFileSync(new URL("../app/AppShell.module.css", import.meta.url), "utf-8");
 
+function cssRule(source: string, selector: string) {
+  const start = source.indexOf(`${selector} {`);
+  if (start === -1) {
+    return "";
+  }
+  const end = source.indexOf("\n}", start);
+  return end === -1 ? source.slice(start) : source.slice(start, end + 2);
+}
+
 describe("ChatCodingRoute layout contract", () => {
   it("keeps the center conversation readable and the composer as a stable bottom layer", () => {
     expect(conversationStyles.timeline).toBeTypeOf("string");
@@ -48,14 +57,42 @@ describe("ChatCodingRoute layout contract", () => {
       /\.centerSurface\s*\{[\s\S]*?background:\s*color-mix\(in srgb, var\(--surface-panel-strong\) 6%, transparent\);[\s\S]*?\}/,
     );
     expect(conversationCssSource).toMatch(
-      /\.timeline\s*\{[\s\S]*?color-mix\(in srgb, var\(--surface-panel-strong\) 10%, transparent\);[\s\S]*?backdrop-filter:\s*blur\(2px\);[\s\S]*?\}/,
+      /\.timeline\s*\{[\s\S]*?background:\s*color-mix\(in srgb, var\(--surface-page\) 18%, transparent\);[\s\S]*?\}/,
     );
     expect(conversationCssSource).toMatch(
-      /\.surfaceCompact \.timeline\s*\{[\s\S]*?color-mix\(in srgb, var\(--surface-panel-strong\) 12%, transparent\);[\s\S]*?\}/,
+      /\.surfaceCompact \.timeline\s*\{[\s\S]*?background:\s*color-mix\(in srgb, var\(--surface-page\) 14%, transparent\);[\s\S]*?\}/,
     );
     expect(appShellCssSource).not.toContain("--theme-background-overlay-mid: rgba(255, 255, 255, 0.62);");
     expect(routeCssSource).not.toContain("background: color-mix(in srgb, var(--surface-page) 92%, var(--bg-canvas));");
     expect(routeCssSource).not.toContain(".centerSurface {\n  display: grid;\n  height: 100%;\n  min-height: 0;\n  background: var(--surface-panel-strong);");
+  });
+
+  it("keeps the conversation page aligned to the V2.1 quiet light style system", () => {
+    const compactSurface = cssRule(conversationCssSource, ".surfaceCompact");
+    const composer = cssRule(conversationCssSource, ".composer");
+    const sendButton = cssRule(conversationCssSource, ".sendButton");
+    const sendButtonHover = cssRule(conversationCssSource, ".sendButton:hover:not(:disabled)");
+    const userCard = cssRule(conversationCssSource, ".userCard");
+    const currentSessionItem = cssRule(routeCssSource, ".sessionItem[aria-current=\"true\"]");
+
+    expect(compactSurface).toContain("background: color-mix(in srgb, var(--surface-panel) 72%, transparent);");
+    expect(compactSurface).not.toContain("background: var(--surface-panel-strong);");
+
+    expect(composer).toContain("background: color-mix(in srgb, var(--surface-panel) 74%, transparent);");
+    expect(composer).toContain("backdrop-filter: blur(6px);");
+    expect(composer).not.toContain("var(--surface-panel-strong) 92%");
+
+    expect(sendButton).toContain("background: color-mix(in srgb, var(--accent-cool) 14%, var(--surface-card));");
+    expect(sendButton).toContain("box-shadow: none;");
+    expect(sendButton).not.toContain("background: #111318;");
+    expect(sendButtonHover).not.toContain("translateY(-1px)");
+
+    expect(userCard).toContain("background: color-mix(in srgb, var(--accent-cool) 8%, var(--surface-panel));");
+    expect(userCard).not.toContain("background: var(--surface-panel-strong);");
+
+    expect(currentSessionItem).toContain("box-shadow: inset 1px 0 0");
+    expect(currentSessionItem).not.toContain("linear-gradient");
+    expect(currentSessionItem).not.toContain("0 2px");
   });
 
   it("renders runtime notices outside the Agent reply timeline", () => {
@@ -231,8 +268,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeCssSource).toContain("font-size: 0.66rem");
     expect(routeCssSource).toContain("grid-template-columns: minmax(0, 1fr) fit-content(86px)");
     expect(routeCssSource).toContain("max-width: 100%");
-    expect(conversationCssSource).toContain(".surfaceCompact .timeline {\n  padding: 10px 14px 12px;");
-    expect(conversationCssSource).toContain(".surfaceCompact .composer {\n  gap: 8px;\n  padding: 7px 11px 9px;");
+    expect(conversationCssSource).toContain(".surfaceCompact .timeline {\n  padding: 9px 12px 11px;");
+    expect(conversationCssSource).toContain(".surfaceCompact .composer {\n  gap: 7px;\n  padding: 6px 10px 8px;");
   });
 
   it("clamps responsive side panes so the center conversation remains visible near 1024px", () => {
