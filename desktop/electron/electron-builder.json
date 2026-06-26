@@ -1,0 +1,17 @@
+{
+  "appId": "com.vibelution.desktop",
+  "productName": "Vibelution",
+  "directories": {
+    "output": "../../dist/desktop"
+  },
+  "files": [
+    "dist/**/*",
+    "package.json"
+  ],
+  "win": {
+    "target": [
+      "dir"
+    ],
+    "artifactName": "Vibelution-${version}-${arch}.${ext}"
+  }
+}
