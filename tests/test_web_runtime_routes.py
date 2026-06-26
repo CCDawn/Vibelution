@@ -1882,10 +1882,16 @@ def test_launcher_lifecycle_runtime_dispatch_and_completion_are_terminal_truth(t
 def test_launcher_lifecycle_reconciles_runtime_manager_success_result(tmp_path, monkeypatch):
     from core.launcher import lifecycle_intent_store
 
+    scene_events: list[tuple[str, dict]] = []
     results_dir = tmp_path / "runtime_manager" / "results"
     results_dir.mkdir(parents=True)
     monkeypatch.setattr(lifecycle_intent_store, "LIFECYCLE_DB_PATH", tmp_path / "launcher" / "lifecycle.sqlite3")
     monkeypatch.setattr(standalone_launcher_service, "RESULTS_DIR", results_dir)
+    monkeypatch.setattr(
+        standalone_launcher_service,
+        "append_runtime_manager_file_event",
+        lambda event_code, payload, **kwargs: scene_events.append((event_code, payload)) or "2026-06-26T09:00:00Z",
+    )
     intent = lifecycle_intent_store.submit_lifecycle_intent(
         {"action": "restart_after_apply", "reason": "apply complete", "idempotencyKey": "run-1:restart"},
         actor_context={
@@ -1908,15 +1914,31 @@ def test_launcher_lifecycle_reconciles_runtime_manager_success_result(tmp_path, 
     assert reconciled["status"] == "succeeded"
     assert reconciled["result"]["commandId"] == "cmd-success"
     assert reconciled["result"]["ok"] is True
+    assert scene_events[-1][0] == "launcher.lifecycle_intent.runtime_terminal"
+    assert scene_events[-1][1]["fields"] == {
+        "action": "restart_after_apply",
+        "commandId": "cmd-success",
+        "intentId": intent["intentId"],
+        "ok": True,
+        "sourceRunId": "run-1",
+        "sourceTaskId": "task-1",
+        "status": "succeeded",
+    }
 
 
 def test_launcher_lifecycle_intent_status_route_reconciles_runtime_manager_failure(tmp_path, monkeypatch):
     from core.launcher import lifecycle_intent_store
 
+    scene_events: list[tuple[str, dict]] = []
     results_dir = tmp_path / "runtime_manager" / "results"
     results_dir.mkdir(parents=True)
     monkeypatch.setattr(lifecycle_intent_store, "LIFECYCLE_DB_PATH", tmp_path / "launcher" / "lifecycle.sqlite3")
     monkeypatch.setattr(standalone_launcher_service, "RESULTS_DIR", results_dir)
+    monkeypatch.setattr(
+        standalone_launcher_service,
+        "append_runtime_manager_file_event",
+        lambda event_code, payload, **kwargs: scene_events.append((event_code, payload)) or "2026-06-26T09:00:00Z",
+    )
     intent = lifecycle_intent_store.submit_lifecycle_intent(
         {"action": "recover_after_crash", "reason": "recover", "idempotencyKey": "run-1:recover"},
         actor_context={
@@ -1949,6 +1971,12 @@ def test_launcher_lifecycle_intent_status_route_reconciles_runtime_manager_failu
     assert payload["status"] == "failed"
     assert payload["result"]["commandId"] == "cmd-failed"
     assert payload["result"]["ok"] is False
+    assert scene_events[-1][0] == "launcher.lifecycle_intent.runtime_terminal"
+    assert scene_events[-1][1]["fields"]["intentId"] == intent["intentId"]
+    assert scene_events[-1][1]["fields"]["status"] == "failed"
+    assert scene_events[-1][1]["fields"]["commandId"] == "cmd-failed"
+    assert scene_events[-1][1]["fields"]["ok"] is False
+    assert scene_events[-1][1]["fields"]["errorType"] == "RuntimeError"
 
 
 def test_self_evolution_restart_request_uses_launcher_lifecycle_service(monkeypatch):
@@ -2375,6 +2403,12 @@ def test_runtime_restart_blocks_confirmed_active_work_without_releasing_tasks(mo
 def test_runtime_shutdown_blocks_active_chat_turn_before_manager_close(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path, task_status="done")
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    agent_directory_service.ensure_agent_for_session(
+        "session-live",
+        display_name="真实会话",
+        prompt_template_id="prompt-chat-default",
+    )
     monkeypatch.setattr(session_service, "_schedule_session_turn", lambda context: None)
     script_path = tmp_path / "vibelution_launcher.ps1"
     script_path.write_text("Write-Host managed\n", encoding="utf-8")
