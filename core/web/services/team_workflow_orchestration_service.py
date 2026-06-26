@@ -1,4 +1,4 @@
-"""Team workflow orchestration and candidate-store service."""
+﻿"""Team workflow orchestration and candidate-store service."""
 
 from __future__ import annotations
 
@@ -1080,7 +1080,10 @@ def start_source_collection_stage_session_task(
                     return_label=return_label or _trim_text(existing_task.get("returnLabel"), max_length=240),
                 ),
                 "writebackContract": existing_task.get("writebackContract") if isinstance(existing_task.get("writebackContract"), dict) else {},
-                "boundaries": _source_collection_stage_session_task_boundaries(),
+                "boundaries": _source_collection_stage_session_task_boundaries(
+                    stage_id=stage_id,
+                    agent_role=agent_role,
+                ),
             }
 
     _record_source_collection_stage_task_tool_policy_event(
@@ -1155,9 +1158,10 @@ def start_source_collection_stage_session_task(
         mental_model_enabled=False,
         turn_mode="task",
         write_intent=False,
-        message_source="team_workflow_stage_task",
+        message_source="agent_inbox",
         message_metadata={
             "kind": SOURCE_COLLECTION_STAGE_SESSION_TASK_KIND,
+            "sourceSurface": "team_workflow_stage_task",
             "teamId": normalized_team_id,
             "runId": normalized_run_id,
             "stageId": stage_id,
@@ -1460,7 +1464,10 @@ def get_source_collection_stage_task_context(
         "allUnassessedCandidateCount": sum(1 for item in source_candidates if _source_quality_bucket(item) == "pending"),
         "storageArtifacts": storage_artifacts,
         "writebackContract": task.get("writebackContract") if isinstance(task.get("writebackContract"), dict) else {},
-        "boundaries": _source_collection_stage_session_task_boundaries(),
+        "boundaries": _source_collection_stage_session_task_boundaries(
+            stage_id=normalized_stage_id,
+            agent_role=task_agent_role,
+        ),
         "usage": {
             "readTool": "source_collection_context_tool",
             "writebackTool": "source_collection_stage_writeback_tool",
@@ -2994,6 +3001,14 @@ def _materialize_source_collection_stage_writeback_knowledge_ingestion(
             pack_output["sourceTrace"] = source_trace
     if not pack_output:
         return _source_collection_stage_writeback_knowledge_ingestion_summary(status="no_steward_pack")
+    pack_output = _source_collection_stage_writeback_standardize_steward_pack_output(
+        team_id,
+        run_id,
+        task,
+        result,
+        pack_output,
+        source_candidates_by_id,
+    )
 
     decision = result.get("autoIngestDecision") if isinstance(result.get("autoIngestDecision"), dict) else {}
     if not decision and isinstance(result.get("steward_assessment"), dict):
@@ -3002,7 +3017,17 @@ def _materialize_source_collection_stage_writeback_knowledge_ingestion(
         decision = {"decision": "approved", "confidence": _source_collection_stage_writeback_approved_confidence(result)}
     normalized_decision = _safe_token(decision.get("decision"), default="", max_length=80)
     confidence = _source_collection_stage_writeback_knowledge_confidence(decision, pack_output)
-    if normalized_decision not in {"approved", "approve", "accepted"} or confidence < 0.8:
+    approved_decisions = {
+        "approved",
+        "approve",
+        "accepted",
+        "approved_for_ingestion",
+        "approve_for_ingestion",
+        "accepted_for_ingestion",
+        "ingestion_approved",
+        "approved_to_ingest",
+    }
+    if normalized_decision not in approved_decisions or confidence < 0.8:
         return _source_collection_stage_writeback_knowledge_ingestion_summary(
             status="pending_review",
             skipped=[{"reason": "auto_ingest_gate_not_satisfied", "decision": normalized_decision, "confidence": confidence}],
@@ -3289,9 +3314,97 @@ def _source_collection_stage_writeback_steward_pack_output(result: dict[str, Any
     for key in ("stewardPackDraft", "steward_pack_draft", "stewardPack", "knowledgeIngestionPack"):
         value = result.get(key)
         if isinstance(value, dict):
-            return _normalize_metadata(value)
+            normalized = _normalize_metadata(value)
+            candidate_ids = _normalize_text_list(normalized.get("candidateIds"), max_items=64, max_length=160)
+            if not candidate_ids:
+                candidate_ids = _source_collection_stage_writeback_approved_candidate_ids(normalized, {})
+            if candidate_ids:
+                normalized["candidateIds"] = candidate_ids
+            return normalized
     return {}
 
+
+def _source_collection_stage_writeback_standardize_steward_pack_output(
+    team_id: str,
+    run_id: str,
+    task: dict[str, Any],
+    result: dict[str, Any],
+    pack_output: dict[str, Any],
+    source_candidates_by_id: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    issues = _validate_steward_pack_output(pack_output)
+    if not any(item.get("severity") == "error" for item in issues):
+        return pack_output
+    candidate_ids = _normalize_text_list(pack_output.get("candidateIds"), max_items=64, max_length=160)
+    if not candidate_ids:
+        candidate_ids = _source_collection_stage_writeback_approved_candidate_ids(result, {})
+    if not candidate_ids:
+        return pack_output
+    selected_candidates = [
+        source_candidates_by_id[candidate_id]
+        for candidate_id in candidate_ids
+        if candidate_id in source_candidates_by_id and _source_quality_bucket(source_candidates_by_id[candidate_id]) == "approved"
+    ]
+    if not selected_candidates:
+        return pack_output
+    source_candidate_ids = set(source_candidates_by_id.keys())
+    with _WORKFLOW_LOCK:
+        workflow = _load_or_create_workflow(team_id)
+        candidate_store = _load_candidate_store(team_id)
+        stored_candidates = [item for item in list(candidate_store.get("candidates") or []) if isinstance(item, dict)]
+        graph_candidates = [
+            item
+            for item in stored_candidates
+            if str(item.get("candidateType") or "") == "candidate_graph"
+            and not _candidate_is_archived(item)
+            and _source_collection_candidate_graph_matches_run(item, source_candidate_ids)
+        ]
+        latest_graph = _latest_candidate_record(graph_candidates)
+        workflow_id = str(workflow.get("workflowId") or "")
+    target_domain = _trim_text(pack_output.get("targetDomain"), max_length=160) or _source_collection_stage_writeback_target_domain(result)
+    standardized = _build_knowledge_ingestion_precheck_output(
+        team_id,
+        workflow_id,
+        selected_candidates,
+        latest_graph,
+        target_domain=target_domain,
+    )
+    standardized["candidateIds"] = candidate_ids
+    proposal_payload = standardized.get("proposalPayload") if isinstance(standardized.get("proposalPayload"), dict) else {}
+    incoming_proposal = pack_output.get("proposalPayload") if isinstance(pack_output.get("proposalPayload"), dict) else {}
+    if incoming_proposal:
+        proposal_payload.update(_normalize_metadata(incoming_proposal))
+        standardized["proposalPayload"] = proposal_payload
+    risk_summary = _trim_text(pack_output.get("riskSummary"), max_length=4000)
+    if risk_summary:
+        standardized["riskSummary"] = risk_summary
+    incoming_rating = pack_output.get("ratingSuggestion") if isinstance(pack_output.get("ratingSuggestion"), dict) else {}
+    rating = standardized.get("ratingSuggestion") if isinstance(standardized.get("ratingSuggestion"), dict) else {}
+    if incoming_rating:
+        rating.update(_normalize_metadata(incoming_rating))
+    confidence = max(
+        _source_collection_stage_writeback_knowledge_confidence({}, pack_output),
+        _source_collection_stage_writeback_approved_confidence(pack_output),
+        _source_collection_stage_writeback_approved_confidence(result),
+        _source_collection_stage_writeback_knowledge_confidence({}, standardized),
+    )
+    if confidence:
+        standardized["confidence"] = confidence
+        rating["confidence"] = confidence
+    standardized["ratingSuggestion"] = rating
+    source_trace = standardized.get("sourceTrace") if isinstance(standardized.get("sourceTrace"), dict) else {}
+    incoming_trace = pack_output.get("sourceTrace") if isinstance(pack_output.get("sourceTrace"), dict) else {}
+    if incoming_trace:
+        source_trace.update(_normalize_metadata(incoming_trace))
+    source_trace.update(
+        {
+            "sourceCollectionRunId": _trim_text(run_id, max_length=160),
+            "stageTaskId": _trim_text(task.get("taskId"), max_length=160),
+            "stageId": _trim_text(task.get("stageId"), max_length=80),
+        }
+    )
+    standardized["sourceTrace"] = source_trace
+    return standardized
 
 def _source_collection_stage_writeback_approved_candidate_ids(result: dict[str, Any], writeback: dict[str, Any]) -> list[str]:
     candidate_ids: list[str] = []
@@ -3306,6 +3419,27 @@ def _source_collection_stage_writeback_approved_candidate_ids(result: dict[str, 
         add(result.get(key))
     for key in ("approvedCandidates", "approved_candidates"):
         candidates = result.get(key)
+        if isinstance(candidates, list):
+            for candidate in candidates:
+                if isinstance(candidate, dict):
+                    add(candidate.get("candidateId") or candidate.get("id"))
+                else:
+                    add(candidate)
+
+    for container_key in (
+        "autoIngestDecision",
+        "auto_ingest_decision",
+        "stewardPackDraft",
+        "steward_pack_draft",
+        "stewardPack",
+        "knowledgeIngestionPack",
+    ):
+        container = result.get(container_key)
+        if not isinstance(container, dict):
+            continue
+        add(container.get("approvedCandidateIds") or container.get("approved_candidate_ids"))
+        add(container.get("candidateIds") or container.get("candidate_ids"))
+        candidates = container.get("approvedCandidates") or container.get("approved_candidates")
         if isinstance(candidates, list):
             for candidate in candidates:
                 if isinstance(candidate, dict):
@@ -3400,6 +3534,10 @@ def _source_collection_stage_writeback_knowledge_confidence(
         value = rating.get("confidence")
     if value is None:
         value = pack_output.get("confidence")
+    if value is None:
+        approved_confidence = _source_collection_stage_writeback_approved_confidence(pack_output)
+        if approved_confidence:
+            return approved_confidence
     try:
         return max(0.0, min(1.0, float(value)))
     except (TypeError, ValueError):
