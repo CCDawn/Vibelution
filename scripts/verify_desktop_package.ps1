@@ -13,6 +13,7 @@ $projectDir = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $buildScript = Join-Path $projectDir "scripts/build_desktop_package.ps1"
 $desktopResourcesDir = Join-Path $projectDir "dist/desktop/win-unpacked/resources"
 $desktopExe = Join-Path $projectDir "dist/desktop/win-unpacked/Vibelution.exe"
+$desktopIconPath = Join-Path $projectDir "assets/icons/vibelution.ico"
 $launchProfilePath = Join-Path $desktopResourcesDir "vibelution-launch-profile.json"
 $summaryPath = Join-Path $projectDir ".runtime/launcher/electron-smoke-summary.json"
 
@@ -102,6 +103,66 @@ function Wait-ForNoNewDesktopPackageProcesses {
     throw "Desktop smoke left new Vibelution.exe processes running:`n$details"
 }
 
+function Get-IconBitmapHash {
+    param(
+        [Parameter(Mandatory = $true)]
+        [System.Drawing.Icon]$Icon
+    )
+
+    $bitmap = $null
+    $stream = $null
+    $sha256 = $null
+    try {
+        $bitmap = $Icon.ToBitmap()
+        $stream = New-Object System.IO.MemoryStream
+        $bitmap.Save($stream, [System.Drawing.Imaging.ImageFormat]::Png)
+        $sha256 = [System.Security.Cryptography.SHA256]::Create()
+        return ([System.BitConverter]::ToString($sha256.ComputeHash($stream.ToArray())) -replace "-", "").ToLowerInvariant()
+    } finally {
+        if ($sha256) {
+            $sha256.Dispose()
+        }
+        if ($stream) {
+            $stream.Dispose()
+        }
+        if ($bitmap) {
+            $bitmap.Dispose()
+        }
+    }
+}
+
+function Assert-DesktopExeIcon {
+    if (-not (Test-Path -LiteralPath $desktopIconPath)) {
+        throw "Shared Vibelution icon is missing: $desktopIconPath"
+    }
+
+    Add-Type -AssemblyName System.Drawing
+    $extractedIcon = $null
+    $sharedIcon = $null
+    try {
+        $extractedIcon = [System.Drawing.Icon]::ExtractAssociatedIcon($desktopExe)
+        if ($null -eq $extractedIcon) {
+            throw "Unable to extract desktop package executable icon: $desktopExe"
+        }
+        $sharedIcon = [System.Drawing.Icon]::ExtractAssociatedIcon($desktopIconPath)
+        if ($null -eq $sharedIcon) {
+            throw "Unable to extract shared Vibelution icon: $desktopIconPath"
+        }
+        $executableIconHash = Get-IconBitmapHash $extractedIcon
+        $sharedIconHash = Get-IconBitmapHash $sharedIcon
+        if ($executableIconHash -ne $sharedIconHash) {
+            throw "Desktop package executable icon does not match shared Vibelution icon."
+        }
+    } finally {
+        if ($sharedIcon) {
+            $sharedIcon.Dispose()
+        }
+        if ($extractedIcon) {
+            $extractedIcon.Dispose()
+        }
+    }
+}
+
 function Assert-LaunchProfile {
     $bytes = [System.IO.File]::ReadAllBytes($launchProfilePath)
     if ($bytes.Length -ge 3 -and $bytes[0] -eq 0xef -and $bytes[1] -eq 0xbb -and $bytes[2] -eq 0xbf) {
@@ -154,6 +215,7 @@ if (-not (Test-Path -LiteralPath $desktopExe)) {
     throw "Desktop package executable is missing: $desktopExe"
 }
 
+Assert-DesktopExeIcon
 $profile = Assert-LaunchProfile
 $baselineProcessIds = @((Get-DesktopPackageProcesses | ForEach-Object { [int]$_.ProcessId }))
 
