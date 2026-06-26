@@ -233,6 +233,16 @@ def _stamp_agent(payload: dict[str, Any], recorded_by_agent: str, *, keys: tuple
 
 
 def _unsupported_operation(operation: str, *, boundary: str) -> str:
+    _record_tool_event(
+        "tool.challenge_cup_operation.unsupported_blocked",
+        level="warning",
+        outcome="blocked",
+        fields={
+            "operation": _text(operation),
+            "boundary": _text(boundary),
+            "errorType": "unsupported_operation",
+        },
+    )
     return _json_dump(
         {
             "status": "error",

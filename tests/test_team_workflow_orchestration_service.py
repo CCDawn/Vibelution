@@ -1779,6 +1779,7 @@ def test_source_collection_stage_session_task_writeback_materializes_search_lead
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)
     _stub_source_collection_search_background(monkeypatch)
+    scene_events = _capture_workflow_events(monkeypatch)
     discovery = agent_directory_service.create_agent_instance(display_name="资料发现")
     session_service.ensure_agent_direct_session(agent_id=discovery["agentId"], title="资料发现")
     team = team_service.create_team(
@@ -1867,11 +1868,19 @@ def test_source_collection_stage_session_task_writeback_materializes_search_lead
     assert second["writeback"]["materializedSources"]["skippedDuplicateCount"] == 2
     assert data_processing_service.list_records(run_id)["summary"]["recordCount"] == 2
     assert team_workflow_orchestration_service.list_candidate_store(team["teamId"], candidate_type="source_manifest")["candidateCount"] == 2
+    writeback_events = _workflow_scene_events_by_code(scene_events, "source_collection.stage_session_task_writeback")
+    assert writeback_events[-1]["child_log_payload"]["kind"] == "source_collection_stage_writeback_materialization"
+    assert writeback_events[-1]["child_log_payload"]["materializedSources"]["status"] == "completed"
+    assert writeback_events[-1]["child_log_payload"]["materializedSources"]["skippedDuplicateCount"] == 2
+    assert writeback_events[-1]["child_log_payload"]["materializedSourceQuality"]["status"] == "skipped_stage"
+    assert writeback_events[-1]["child_log_payload"]["materializedCandidateGraph"]["status"] == "skipped_stage"
+    assert writeback_events[-1]["child_log_payload"]["materializedKnowledgeIngestion"]["status"] == "skipped_stage"
 
 
 def test_knowledge_steward_writeback_auto_ingests_high_confidence_sources(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)
+    scene_events = _capture_workflow_events(monkeypatch)
     result = team_service.ensure_knowledge_expansion_team_agents(purge_stale=True)
     team = result["team"]
     steward = next(member for member in team["members"] if member["role"] == "knowledge_steward")
@@ -1990,6 +1999,12 @@ def test_knowledge_steward_writeback_auto_ingests_high_confidence_sources(tmp_pa
     assert memory_card["status"] == "closed_loop"
     assert memory_card["counts"]["output"] == 1
     assert memory_card["latestTask"]["materializedKnowledgeIngestion"]["status"] == "completed"
+    ingestion_events = _workflow_scene_events_by_code(scene_events, "source_collection.stage_session_task_knowledge_ingestion_materialized")
+    assert ingestion_events[-1]["child_log_payload"]["kind"] == "source_collection_stage_knowledge_ingestion_materialization"
+    assert ingestion_events[-1]["child_log_payload"]["status"] == "completed"
+    assert ingestion_events[-1]["child_log_payload"]["steps"][0]["stageId"] == "auto_ingest_gate"
+    assert ingestion_events[-1]["child_log_payload"]["steps"][-1]["stageId"] == "official_sync"
+    assert ingestion_events[-1]["child_log_payload"]["formalKnowledgeItemIds"] == response["writeback"]["materializedKnowledgeIngestion"]["formalKnowledgeItemIds"]
 
 
 def test_knowledge_steward_writeback_auto_ingests_approved_candidate_summary(tmp_path, monkeypatch):
@@ -4271,6 +4286,7 @@ def test_experiment_full_run_result_requires_passing_smoke_result(tmp_path, monk
 
 def test_experiment_result_knowledge_ingestion_request_notifies_steward_agent(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
+    scene_events = _capture_workflow_events(monkeypatch)
     requester = agent_directory_service.create_agent_instance(display_name="Experiment Planning Agent")
     deliveries = []
 
@@ -4329,6 +4345,13 @@ def test_experiment_result_knowledge_ingestion_request_notifies_steward_agent(tm
     assert inbox_messages[0]["metadata"]["kernelTaskId"] == requested["knowledgeStewardActivation"]["kernel"]["taskId"]
     assert inbox_messages[0]["metadata"]["experimentResultPackId"] == requested["experimentResultPack"]["packId"]
     assert inbox_messages[0]["metadata"]["fullRunResultId"] == full_run["fullRunResult"]["fullRunResultId"]
+    notification_events = _workflow_scene_events_by_code(scene_events, "experiment_plan.steward_notification_completed")
+    assert notification_events
+    assert notification_events[-1]["fields"]["status"] == "agent_wake_started"
+    assert notification_events[-1]["fields"]["experimentResultPackId"] == requested["experimentResultPack"]["packId"]
+    assert notification_events[-1]["child_log_payload"]["kind"] == "experiment_result_steward_notification"
+    assert notification_events[-1]["child_log_payload"]["turnId"] == "turn-experiment-ingest"
+    assert notification_events[-1]["child_log_payload"]["fullRunResultId"] == full_run["fullRunResult"]["fullRunResultId"]
 
 
 def test_experiment_plan_requires_experiment_stage_round(tmp_path, monkeypatch):
