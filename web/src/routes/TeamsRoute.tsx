@@ -6371,11 +6371,11 @@ export function TeamsRoute({
                 {stageType === "knowledge_collection" && selectedSourceCollectionRun ? (
                   <div className={styles.researchStageCardMetrics}>
                     <span>{sourceCollectionRunLabel(selectedSourceCollectionRun.runId)}</span>
-                    <span>{lang === "zh" ? `可搜索 ${sourceCollectionSearchOpenAssignmentCount}` : `search ${sourceCollectionSearchOpenAssignmentCount}`}</span>
-                    <span>{lang === "zh" ? `后续 ${sourceCollectionDownstreamOpenAssignmentCount}` : `next ${sourceCollectionDownstreamOpenAssignmentCount}`}</span>
-                    <span>{lang === "zh" ? `原始 ${sourceCollectionRawRecordCount}` : `raw ${sourceCollectionRawRecordCount}`}</span>
+                    <span>{lang === "zh" ? `可搜索 ${sourceCollectionSearchOpenAssignmentCountText}` : `search ${sourceCollectionSearchOpenAssignmentCountText}`}</span>
+                    <span>{lang === "zh" ? `后续 ${sourceCollectionDownstreamOpenAssignmentCountText}` : `next ${sourceCollectionDownstreamOpenAssignmentCountText}`}</span>
+                    <span>{lang === "zh" ? `原始 ${sourceCollectionCollectedCountText}` : `raw ${sourceCollectionCollectedCountText}`}</span>
                     <span>{lang === "zh" ? `候选 ${sourceCollectionDisplayedCandidateCountText}` : `candidates ${sourceCollectionDisplayedCandidateCountText}`}</span>
-                    <span>{lang === "zh" ? `查询 ${sourceCollectionQueryCount}` : `queries ${sourceCollectionQueryCount}`}</span>
+                    <span>{lang === "zh" ? `查询 ${sourceCollectionQueryCountText}` : `queries ${sourceCollectionQueryCountText}`}</span>
                   </div>
                 ) : (
                   <em>{navItem ? (lang === "zh" ? navItem.zhModules : navItem.enModules) : ""}</em>
@@ -6756,29 +6756,39 @@ export function TeamsRoute({
   function renderSourceCollectionConversation() {
     const pagedResults = sourceCollectionPageItems("collection", sourceCollectionFilteredRecords);
     const visibleResults = pagedResults.items;
+    const rawRecordRangeText = sourceCollectionRecordsDataLoading
+      ? sourceCollectionLoadingText
+      : `${pagedResults.start}-${pagedResults.end} / ${sourceCollectionFilteredRecords.length}`;
+    const rawRecordHeaderText = sourceCollectionRecordsDataLoading
+      ? (lang === "zh" ? "正在加载原始资料记录" : "Loading raw records")
+      : lang === "zh"
+        ? `显示 ${visibleResults.length} / 已过滤 ${sourceCollectionFilteredRecords.length} / 原始总数 ${sourceCollectionRawRecordCount}`
+        : `Showing ${visibleResults.length} / ${sourceCollectionFilteredRecords.length} filtered / ${sourceCollectionRawRecordCount} raw records`;
+    const sourceCollectionRecordClickableSourceCountText = sourceCollectionRecordsDataLoading
+      ? sourceCollectionLoadingText
+      : String(sourceCollectionRecordClickableSourceCount);
+    const sourceCollectionRecordLocalFileCountText = sourceCollectionRecordsDataLoading
+      ? sourceCollectionLoadingText
+      : String(sourceCollectionRecordLocalFileCount);
     return (
       <section id="source-collection-process" className={styles.sourceCollectionConversationPanel} aria-label={lang === "zh" ? "搜集对话流" : "Collection conversation"}>
         <div className={styles.sourceCollectionConversationHeader}>
           <div>
             <strong>{lang === "zh" ? "本轮原始资料记录" : "Raw records in this run"}</strong>
           </div>
-          <small>{pagedResults.start}-{pagedResults.end} / {sourceCollectionFilteredRecords.length}</small>
+          <small>{rawRecordRangeText}</small>
         </div>
         <section id="source-collection-results" className={styles.sourceCollectionResultsPanel} aria-label={lang === "zh" ? "本轮原始资料记录" : "Raw collected records"}>
           <div className={styles.sourceCollectionResultsHeader}>
             <strong>{lang === "zh" ? "本轮原始资料记录" : "Raw records in this run"}</strong>
-            <span>
-              {lang === "zh"
-                ? `显示 ${visibleResults.length} / 已过滤 ${sourceCollectionFilteredRecords.length} / 原始总数 ${sourceCollectionRawRecordCount}`
-                : `Showing ${visibleResults.length} / ${sourceCollectionFilteredRecords.length} filtered / ${sourceCollectionRawRecordCount} raw records`}
-            </span>
+            <span>{rawRecordHeaderText}</span>
           </div>
-          {renderSourceCollectionFilterBar(sourceCollectionRecordFilterCounts, lang === "zh" ? "资料来源过滤" : "Source filters")}
+          {renderSourceCollectionFilterBar(sourceCollectionRecordFilterCounts, lang === "zh" ? "资料来源过滤" : "Source filters", sourceCollectionRecordsDataLoading)}
           <div className={styles.sourceCollectionResultStats}>
-            <span>{lang === "zh" ? "原始记录" : "raw records"} <strong>{sourceCollectionCollectedCount}</strong></span>
+            <span>{lang === "zh" ? "原始记录" : "raw records"} <strong>{sourceCollectionCollectedCountText}</strong></span>
             <span>{lang === "zh" ? "已入候选" : "imported to candidates"} <strong>{sourceCollectionDisplayedCandidateCountText}</strong></span>
-            <span>{lang === "zh" ? "可点击来源" : "clickable sources"} <strong>{sourceCollectionRecordClickableSourceCount}</strong></span>
-            <span>{lang === "zh" ? "本地文件" : "local files"} <strong>{sourceCollectionRecordLocalFileCount}</strong></span>
+            <span>{lang === "zh" ? "可点击来源" : "clickable sources"} <strong>{sourceCollectionRecordClickableSourceCountText}</strong></span>
+            <span>{lang === "zh" ? "本地文件" : "local files"} <strong>{sourceCollectionRecordLocalFileCountText}</strong></span>
           </div>
           {sourceCollectionPendingCandidateImportCount > 0 ? (
             <div className={styles.sourceCollectionResultWarning}>
@@ -6858,12 +6868,14 @@ export function TeamsRoute({
             </div>
           ) : (
             <div className={styles.empty}>
-              {sourceCollectionRecords.length
+              {sourceCollectionRecordsDataLoading
+                ? (lang === "zh" ? "正在加载原始资料记录..." : "Loading raw records...")
+              : sourceCollectionRecords.length
                 ? (lang === "zh" ? "当前过滤条件下没有原始资料记录。" : "No raw records match this filter.")
               : (lang === "zh" ? "暂无原始资料记录。点击搜索资料卡的开始按钮后，搜索结果会先写到这里。" : "No raw records yet.")}
             </div>
           )}
-          {renderSourceCollectionPagination("collection", sourceCollectionFilteredRecords.length)}
+          {sourceCollectionRecordsDataLoading ? null : renderSourceCollectionPagination("collection", sourceCollectionFilteredRecords.length)}
         </section>
       </section>
     );
@@ -10012,6 +10024,32 @@ export function TeamsRoute({
   const sourceCollectionRunAssessedCount = sourceCollectionRunCandidates.filter((candidate) => sourceCollectionCandidateQualityState(candidate).assessed).length;
   const sourceCollectionRunApprovedCount = sourceCollectionRunCandidates.filter((candidate) => sourceCollectionCandidateQualityState(candidate).approved).length;
   const sourceCollectionCollectedCount = sourceCollectionRawRecordCount;
+  const sourceCollectionRunSummaryHasRecordCount = typeof sourceCollectionRunSummary?.recordCount === "number";
+  const sourceCollectionSummaryHasRecordCount = typeof sourceCollectionSummaryCounts.recordCount === "number";
+  const sourceCollectionRunSummaryHasAssignmentCounts = [
+    sourceCollectionRunSummary?.openAssignmentCount,
+    sourceCollectionRunSummary?.searchOpenAssignmentCount,
+    sourceCollectionRunSummary?.downstreamOpenAssignmentCount,
+  ].some((value) => typeof value === "number");
+  const sourceCollectionRecordsDataLoading = Boolean(
+    researchWorkflowTeamSelected
+    && selectedSourceCollectionRunEffectiveId
+    && !sourceCollectionRecordsQuery.data
+    && !sourceCollectionSummaryHasRecordCount
+    && !sourceCollectionRunSummaryHasRecordCount
+    && (
+      sourceCollectionRecordsQuery.isPending
+      || sourceCollectionSummaryQuery.isPending
+      || sourceCollectionRunStatusQuery.isPending
+    ),
+  );
+  const sourceCollectionAssignmentsDataLoading = Boolean(
+    researchWorkflowTeamSelected
+    && selectedSourceCollectionRunEffectiveId
+    && !sourceCollectionAssignmentsQuery.data
+    && !sourceCollectionRunSummaryHasAssignmentCounts
+    && (sourceCollectionAssignmentsQuery.isPending || sourceCollectionRunStatusQuery.isPending),
+  );
   const sourceCollectionCollectionProjection = sourceCollectionStageCardById.get("collection") ?? null;
   const sourceCollectionCandidateProjection = sourceCollectionStageCardById.get("candidate") ?? null;
   const sourceCollectionScreeningProjection = sourceCollectionStageCardById.get("screening") ?? null;
@@ -10045,11 +10083,17 @@ export function TeamsRoute({
     sourceCollectionRunApprovedCount,
   );
   const sourceCollectionDisplayedCandidateCount = Math.max(sourceCollectionRunCandidateCount, sourceCollectionProjectedCandidateCount);
+  const sourceCollectionQueryCount =
+    sourceCollectionSearchPlanRef?.queryCount
+    ?? selectedTeamStartSourceCollectionResult?.searchPlan.queryCount
+    ?? sourceCollectionAssignments.reduce((total, assignment) => total + (assignment.scope.queryCount ?? assignment.scope.assignedQueries?.length ?? 0), 0);
   const sourceCollectionPrimaryDataLoading = Boolean(
     researchWorkflowTeamSelected
     && sourceCollectionDisplayedCandidateCount <= 0
     && (
-      (sourceCollectionRunsQuery.isPending && !sourceCollectionRunsQuery.data)
+      sourceCollectionRecordsDataLoading
+      || sourceCollectionAssignmentsDataLoading
+      || (sourceCollectionRunsQuery.isPending && !sourceCollectionRunsQuery.data)
       || (sourceCollectionSummaryQuery.isPending && sourceCollectionWorkspaceSelected && !sourceCollectionSummaryQuery.data)
     ),
   );
@@ -10062,6 +10106,51 @@ export function TeamsRoute({
   const sourceCollectionScreeningDataLoading = sourceCollectionPrimaryDataLoading || sourceCollectionSourceQualityLoading;
   const sourceCollectionLoadingText = lang === "zh" ? "加载中" : "loading";
   const sourceCollectionLoadingSummary = lang === "zh" ? "正在读取资料提炼结果" : "Loading extraction results";
+  const sourceCollectionCountWithUnit = (loading: boolean, value: number, zhUnit: string, enUnit = "") => {
+    if (loading) {
+      return sourceCollectionLoadingText;
+    }
+    if (lang === "zh") {
+      return `${value} ${zhUnit}`;
+    }
+    return enUnit ? `${value} ${enUnit}` : String(value);
+  };
+  const sourceCollectionCollectedCountText = sourceCollectionRecordsDataLoading
+    ? sourceCollectionLoadingText
+    : String(sourceCollectionCollectedCount);
+  const sourceCollectionProjectedCollectedCountText = sourceCollectionRecordsDataLoading
+    ? sourceCollectionLoadingText
+    : String(sourceCollectionProjectedCollectedCount);
+  const sourceCollectionSearchOpenAssignmentCountText = sourceCollectionAssignmentsDataLoading
+    ? sourceCollectionLoadingText
+    : String(sourceCollectionSearchOpenAssignmentCount);
+  const sourceCollectionDownstreamOpenAssignmentCountText = sourceCollectionAssignmentsDataLoading
+    ? sourceCollectionLoadingText
+    : String(sourceCollectionDownstreamOpenAssignmentCount);
+  const sourceCollectionQueryDataLoading = Boolean(
+    sourceCollectionAssignmentsDataLoading
+    && sourceCollectionSearchPlanRef?.queryCount == null
+    && selectedTeamStartSourceCollectionResult?.searchPlan.queryCount == null
+    && sourceCollectionAssignments.length <= 0,
+  );
+  const sourceCollectionQueryCountText = sourceCollectionQueryDataLoading
+    ? sourceCollectionLoadingText
+    : String(sourceCollectionQueryCount);
+  const sourceCollectionCollectedCountLabel = sourceCollectionCountWithUnit(sourceCollectionRecordsDataLoading, sourceCollectionCollectedCount, "条", "raw records");
+  const sourceCollectionProjectedCollectedCountLabel = sourceCollectionCountWithUnit(sourceCollectionRecordsDataLoading, sourceCollectionProjectedCollectedCount, "条", "raw records");
+  const sourceCollectionSearchOpenAssignmentCountLabel = sourceCollectionCountWithUnit(sourceCollectionAssignmentsDataLoading, sourceCollectionSearchOpenAssignmentCount, "项");
+  const sourceCollectionDownstreamOpenAssignmentCountLabel = sourceCollectionCountWithUnit(sourceCollectionAssignmentsDataLoading, sourceCollectionDownstreamOpenAssignmentCount, "项");
+  const sourceCollectionQueryCountLabel = sourceCollectionCountWithUnit(sourceCollectionQueryDataLoading, sourceCollectionQueryCount, "个");
+  const sourceCollectionCollectedRunSummaryText = sourceCollectionRecordsDataLoading
+    ? sourceCollectionLoadingText
+    : lang === "zh"
+    ? `${sourceCollectionCollectedCount} 条资料`
+    : `${sourceCollectionCollectedCount} records`;
+  const sourceCollectionAssignmentRunSummaryText = sourceCollectionAssignmentsDataLoading
+    ? sourceCollectionLoadingText
+    : lang === "zh"
+    ? `${sourceCollectionAssignments.length} 个任务`
+    : `${sourceCollectionAssignments.length} assignments`;
   const sourceCollectionDisplayedCandidateCountText = sourceCollectionPrimaryDataLoading
     ? sourceCollectionLoadingText
     : String(sourceCollectionDisplayedCandidateCount);
@@ -10092,10 +10181,7 @@ export function TeamsRoute({
     ? sourceCollectionLoadingText
     : String(sourceCollectionRunPendingScreeningCount);
   const sourceCollectionPendingCandidateImportCount = Math.max(0, sourceCollectionRawRecordCount - sourceCollectionDisplayedCandidateCount);
-  const sourceCollectionQueryCount =
-    sourceCollectionSearchPlanRef?.queryCount
-    ?? selectedTeamStartSourceCollectionResult?.searchPlan.queryCount
-    ?? sourceCollectionAssignments.reduce((total, assignment) => total + (assignment.scope.queryCount ?? assignment.scope.assignedQueries?.length ?? 0), 0);
+
   const sourceCollectionApprovedCount =
     teamWorkflowSourceQualityStatus?.summary.approvedSourceCandidateCount
     ?? sourceCollectionSummaryCounts.approvedSourceCandidateCount
@@ -10621,7 +10707,7 @@ export function TeamsRoute({
     {
       id: "collection",
       label: lang === "zh" ? "搜索资料" : "Search sources",
-      metric: lang === "zh" ? `原始资料 ${sourceCollectionProjectedCollectedCount} 条` : `${sourceCollectionProjectedCollectedCount} raw records`,
+      metric: lang === "zh" ? `原始资料 ${sourceCollectionProjectedCollectedCountLabel}` : sourceCollectionProjectedCollectedCountLabel,
       summary: sourceCollectionCollectionProjection?.latestTask?.summary || (!selectedSourceCollectionRun
         ? (lang === "zh" ? "点击开始生成本轮任务" : "Start to create this run")
         : sourceCollectionSearchOpenAssignmentCount > 0
@@ -10629,8 +10715,8 @@ export function TeamsRoute({
           : sourceCollectionPrimaryDataLoading
             ? (lang === "zh" ? "正在读取候选入库结果" : "Loading imported candidates")
             : (lang === "zh" ? `已入候选 ${sourceCollectionProjectedCandidateCountText} 条` : `${sourceCollectionProjectedCandidateCountText} imported to candidates`)),
-      inputLabel: lang === "zh" ? `${sourceCollectionQueryCount} 个搜索问题` : `${sourceCollectionQueryCount} queries`,
-      outputLabel: lang === "zh" ? `${sourceCollectionProjectedCollectedCount} 条原始资料` : `${sourceCollectionProjectedCollectedCount} raw records`,
+      inputLabel: lang === "zh" ? `${sourceCollectionQueryCountLabel} 搜索问题` : `${sourceCollectionQueryCountText} queries`,
+      outputLabel: lang === "zh" ? `${sourceCollectionProjectedCollectedCountLabel} 原始资料` : sourceCollectionProjectedCollectedCountLabel,
       nextLabel: sourceCollectionSearchOpenAssignmentCount > 0
         ? (lang === "zh" ? "继续搜索" : "Continue search")
         : (lang === "zh" ? "进入资料提炼" : "Move to extraction"),
@@ -10656,7 +10742,7 @@ export function TeamsRoute({
         : sourceCollectionProjectedCandidateCount > 0
           ? (lang === "zh" ? `已形成 ${sourceCollectionProjectedCandidateCountText} 条可追溯候选资料` : `${sourceCollectionProjectedCandidateCountText} traceable candidate sources`)
           : (lang === "zh" ? "等待搜索结果入候选" : "Waiting for collected sources")),
-      inputLabel: lang === "zh" ? `${sourceCollectionProjectedCollectedCount} 条原始资料` : `${sourceCollectionProjectedCollectedCount} raw records`,
+      inputLabel: lang === "zh" ? `${sourceCollectionProjectedCollectedCountLabel} 原始资料` : sourceCollectionProjectedCollectedCountLabel,
       outputLabel: sourceCollectionPrimaryDataLoading
         ? (lang === "zh" ? "候选可追溯 加载中" : "traceable candidates loading")
         : (lang === "zh" ? `${sourceCollectionProjectedCandidateCountText} 条候选可追溯` : `${sourceCollectionProjectedCandidateCountText} traceable candidates`),
@@ -10886,10 +10972,10 @@ export function TeamsRoute({
               </div>
               <div className={styles.sourceCollectionCommandStats}>
                 <span>{lang === "zh" ? "下一步" : "next"} <strong>{sourceCollectionStageFocusLabel}</strong></span>
-                <span>{lang === "zh" ? "可搜索" : "search"} <strong>{lang === "zh" ? `${sourceCollectionSearchOpenAssignmentCount} 项` : sourceCollectionSearchOpenAssignmentCount}</strong></span>
-                <span>{lang === "zh" ? "后续" : "next work"} <strong>{lang === "zh" ? `${sourceCollectionDownstreamOpenAssignmentCount} 项` : sourceCollectionDownstreamOpenAssignmentCount}</strong></span>
-                <span>{lang === "zh" ? "原始资料" : "raw records"} <strong>{lang === "zh" ? `${sourceCollectionCollectedCount} 条` : sourceCollectionCollectedCount}</strong></span>
-                <span>{lang === "zh" ? "搜索问题" : "search questions"} <strong>{lang === "zh" ? `${sourceCollectionQueryCount} 个` : sourceCollectionQueryCount}</strong></span>
+                <span>{lang === "zh" ? "可搜索" : "search"} <strong>{sourceCollectionSearchOpenAssignmentCountLabel}</strong></span>
+                <span>{lang === "zh" ? "后续" : "next work"} <strong>{sourceCollectionDownstreamOpenAssignmentCountLabel}</strong></span>
+                <span>{lang === "zh" ? "原始资料" : "raw records"} <strong>{sourceCollectionCollectedCountLabel}</strong></span>
+                <span>{lang === "zh" ? "搜索问题" : "search questions"} <strong>{sourceCollectionQueryCountLabel}</strong></span>
                 <span>{lang === "zh" ? "缓存" : "cache"} <strong>{sourceCollectionPromptCacheStatusLabel(sourceCollectionPromptCacheStatus, lang)}</strong></span>
               </div>
             </section>
@@ -11435,8 +11521,8 @@ export function TeamsRoute({
                             <span>
                               {selectedSourceCollectionRun
                                 ? lang === "zh"
-                                  ? `${sourceCollectionRunLabel(selectedSourceCollectionRun.runId)} · ${sourceCollectionRunSummary?.recordCount ?? 0} 条资料 / ${sourceCollectionAssignments.length} 个任务`
-                                  : `${sourceCollectionRunLabel(selectedSourceCollectionRun.runId)} · ${sourceCollectionRunSummary?.recordCount ?? 0} records / ${sourceCollectionAssignments.length} assignments`
+                                  ? `${sourceCollectionRunLabel(selectedSourceCollectionRun.runId)} · ${sourceCollectionCollectedRunSummaryText} / ${sourceCollectionAssignmentRunSummaryText}`
+                                  : `${sourceCollectionRunLabel(selectedSourceCollectionRun.runId)} · ${sourceCollectionCollectedRunSummaryText} / ${sourceCollectionAssignmentRunSummaryText}`
                                 : sourceCollectionRunsQuery.isPending
                                 ? (lang === "zh" ? "读取批次中" : "loading runs")
                                 : (lang === "zh" ? "等待启动批次" : "waiting for run")}
@@ -11555,10 +11641,10 @@ export function TeamsRoute({
                             </select>
                           </label>
                           <div className={styles.workflowSourceCollectionStats}>
-                            <span>{lang === "zh" ? "资料" : "records"} <strong>{sourceCollectionRunSummary?.recordCount ?? 0}</strong></span>
-                            <span>{lang === "zh" ? "可搜索" : "search"} <strong>{sourceCollectionSearchOpenAssignmentCount}</strong></span>
-                            <span>{lang === "zh" ? "后续" : "next work"} <strong>{sourceCollectionDownstreamOpenAssignmentCount}</strong></span>
-                            <span>{lang === "zh" ? "搜索问题" : "queries"} <strong>{sourceCollectionSearchPlanRef?.queryCount ?? selectedTeamStartSourceCollectionResult?.searchPlan.queryCount ?? 0}</strong></span>
+                            <span>{lang === "zh" ? "资料" : "records"} <strong>{sourceCollectionCollectedCountText}</strong></span>
+                            <span>{lang === "zh" ? "可搜索" : "search"} <strong>{sourceCollectionSearchOpenAssignmentCountText}</strong></span>
+                            <span>{lang === "zh" ? "后续" : "next work"} <strong>{sourceCollectionDownstreamOpenAssignmentCountText}</strong></span>
+                            <span>{lang === "zh" ? "搜索问题" : "queries"} <strong>{sourceCollectionQueryCountText}</strong></span>
                             <span>KV <strong>{sourceCollectionPromptCacheStatusLabel(sourceCollectionPromptCacheStatus, lang)}{sourceCollectionPromptCacheMode ? ` · ${sourceCollectionPromptCacheMode}` : ""}</strong></span>
                           </div>
                         </div>
