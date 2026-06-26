@@ -89,6 +89,12 @@ def record_candidate_version_event(team_id: str, payload: dict[str, Any] | None 
             "rejectionId": str((rejection_record or {}).get("rejectionId") or ""),
             "recordedByAgent": recorded_by_agent,
         },
+        child_log_payload=_versioning_record_child_log_payload(
+            normalized_team_id,
+            version_record,
+            relation_record=relation_record,
+            rejection_record=rejection_record,
+        ),
     )
     return {
         "event": version_record,
@@ -349,7 +355,38 @@ def _normalize_metadata_value(value: Any) -> Any:
     return _trim_text(value, max_length=1000)
 
 
-def _record_versioning_event(event_code: str, team_id: str, *, fields: dict[str, Any]) -> None:
+def _versioning_record_child_log_payload(
+    team_id: str,
+    version_record: dict[str, Any],
+    *,
+    relation_record: dict[str, Any] | None = None,
+    rejection_record: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    return {
+        "kind": "challenge_cup_versioning_record",
+        "teamId": team_id,
+        "operation": _trim_text(version_record.get("operation"), max_length=80),
+        "candidateId": _trim_text(version_record.get("candidateId"), max_length=160),
+        "versionId": _trim_text(version_record.get("versionId"), max_length=160),
+        "versionLabel": _trim_text(version_record.get("versionLabel"), max_length=120),
+        "relationId": _trim_text((relation_record or {}).get("relationId"), max_length=160),
+        "rejectionId": _trim_text((rejection_record or {}).get("rejectionId"), max_length=160),
+        "supersedesVersionId": _trim_text(version_record.get("supersedesVersionId"), max_length=160),
+        "derivedFromVersionId": _trim_text(version_record.get("derivedFromVersionId"), max_length=160),
+        "evidenceRefCount": len([item for item in list(version_record.get("evidenceRefs") or []) if isinstance(item, dict)]),
+        "changeSetCount": len([item for item in list(version_record.get("changeSet") or []) if isinstance(item, dict)]),
+        "recordedByAgent": _trim_text(version_record.get("recordedByAgent"), max_length=160),
+        "boundary": "candidate_versioning_ledger_only_not_official_graph",
+    }
+
+
+def _record_versioning_event(
+    event_code: str,
+    team_id: str,
+    *,
+    fields: dict[str, Any],
+    child_log_payload: dict[str, Any] | None = None,
+) -> None:
     try:
         record_runtime_scene_event(
             "challenge_cup_versioning",
@@ -357,6 +394,8 @@ def _record_versioning_event(event_code: str, team_id: str, *, fields: dict[str,
             event_code,
             message=event_code,
             fields={"teamId": team_id, **fields},
+            child_log_path=f"artifacts/challenge-cup-versioning-{_safe_token(team_id, default='team', max_length=96)}.jsonl",
+            child_log_payload=child_log_payload,
         )
     except Exception:
         return

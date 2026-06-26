@@ -21,6 +21,12 @@ def _create_research_team():
 
 def test_candidate_versioning_store_records_versions_relations_and_rejections(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
+    scene_events = []
+    monkeypatch.setattr(
+        challenge_cup_versioning_service,
+        "record_runtime_scene_event",
+        lambda *args, **kwargs: scene_events.append((args, kwargs)) or {"accepted": True},
+    )
     team = _create_research_team()
 
     initial = challenge_cup_versioning_service.get_candidate_versioning_status(team["teamId"])
@@ -70,6 +76,16 @@ def test_candidate_versioning_store_records_versions_relations_and_rejections(tm
     )
     assert rejected["status"]["summary"]["rejectionCount"] == 1
     assert rejected["status"]["rejectionArchive"][0]["candidateId"] == "candidate-b"
+
+    recorded_events = [kwargs for args, kwargs in scene_events if len(args) >= 3 and args[2] == "challenge_cup.versioning_recorded"]
+    assert recorded_events
+    child_payload = recorded_events[-1]["child_log_payload"]
+    assert child_payload["kind"] == "challenge_cup_versioning_record"
+    assert child_payload["operation"] == "reject"
+    assert child_payload["candidateId"] == "candidate-b"
+    assert child_payload["versionId"] == rejected["event"]["versionId"]
+    assert child_payload["rejectionId"] == rejected["rejection"]["rejectionId"]
+    assert child_payload["evidenceRefCount"] == 1
 
 
 def test_candidate_versioning_requires_relation_target_version(tmp_path, monkeypatch):
