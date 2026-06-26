@@ -1771,6 +1771,31 @@ def test_launcher_lifecycle_intent_releases_expired_desktop_action_lease(tmp_pat
     assert second["claimAttempt"] == 2
 
 
+def test_self_evolution_restart_request_uses_launcher_lifecycle_service(monkeypatch):
+    captured: dict[str, object] = {}
+    captured_context: dict[str, object] = {}
+
+    def fake_submit(payload: dict[str, object], *, actor_context: dict[str, object]) -> dict[str, object]:
+        captured.update(payload)
+        captured_context.update(actor_context)
+        return {"intentId": "intent-1", "status": "accepted", "action": payload["action"]}
+
+    monkeypatch.setattr(self_evolution_control_service.launcher_service, "submit_lifecycle_intent", fake_submit)
+
+    result = self_evolution_control_service.request_lifecycle_intent(
+        action="restart_after_apply",
+        reason="apply completed",
+        run_id="self-run-1",
+        task_id="task-1",
+        worktree="C:/worktree",
+    )
+
+    assert result["intentId"] == "intent-1"
+    assert captured["action"] == "restart_after_apply"
+    assert captured_context["actorType"] == "self_evolution_agent"
+    assert captured_context["sourceRunId"] == "self-run-1"
+
+
 def test_launcher_start_queues_open_workbench_and_records_lifecycle(monkeypatch):
     calls: list[object] = []
     scene_events: list[tuple[str, dict]] = []
