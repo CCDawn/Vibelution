@@ -448,6 +448,14 @@
   border-radius: inherit;
   object-fit: cover;
 }
+.assistantTurnContinuation .turnAvatar {
+  border-color: transparent;
+  background: transparent;
+}
+
+.assistantTurnContinuation .turnContent {
+  gap: 4px;
+}
 
 .turnContent {
   display: grid;
