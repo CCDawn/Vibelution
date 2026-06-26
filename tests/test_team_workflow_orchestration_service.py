@@ -6583,25 +6583,35 @@ def test_knowledge_collection_ingestion_background_completes_and_reports_status(
 
 def test_knowledge_collection_completion_background_normalizes_one_click_defaults(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
+    isolated_store = WorkRunStore(root=tmp_path / "completion-work-runs")
+    monkeypatch.setattr(
+        team_workflow_orchestration_service, "_knowledge_ingestion_work_run_store", lambda: isolated_store
+    )
     captured = {}
 
-    def fake_start_background(team_id, payload):
+    class _ImmediateThread:
+        def __init__(self, *, target=None, args=(), name="", daemon=None, **_kwargs):
+            self._target = target
+            self._args = args
+            self.name = name
+
+        def start(self):
+            self._target(*self._args)
+
+    def fake_completion(team_id, payload):
         captured["team_id"] = team_id
         captured["payload"] = payload
         return {
-            "accepted": True,
-            "executionMode": "background",
-            "activeWorkRun": {"status": "running"},
+            "status": "completed",
+            "summary": {"formalKnowledgeItemCount": 1, "knowledgeBaseId": "kb-1"},
         }
 
-    monkeypatch.setattr(
-        team_workflow_orchestration_service,
-        "start_knowledge_collection_ingestion_background",
-        fake_start_background,
-    )
+    monkeypatch.setattr(team_workflow_orchestration_service.threading, "Thread", _ImmediateThread)
+    monkeypatch.setattr(team_workflow_orchestration_service, "run_knowledge_collection_completion", fake_completion)
+    team = team_service.create_team(name="挑战杯科研团队", members=[])
 
     accepted = team_workflow_orchestration_service.start_knowledge_collection_completion_background(
-        "challenge-team",
+        team["teamId"],
         {
             "stewardAgentId": "knowledge-steward",
             "sourceQualityAgentId": "source-quality",
@@ -6612,7 +6622,7 @@ def test_knowledge_collection_completion_background_normalizes_one_click_default
     )
 
     assert accepted["accepted"] is True
-    assert captured["team_id"] == "challenge-team"
+    assert captured["team_id"] == team["teamId"]
     assert captured["payload"]["backgroundExecution"] is True
     assert captured["payload"]["autoCreateKnowledgeBase"] is True
     assert captured["payload"]["autoSubmit"] is True
@@ -6625,6 +6635,66 @@ def test_knowledge_collection_completion_background_normalizes_one_click_default
     assert captured["payload"]["stewardAgentId"] == "knowledge-steward"
     assert captured["payload"]["targetDomain"] == "神经预测编码"
     assert captured["payload"]["maxCandidates"] == 16
+
+
+def test_knowledge_collection_completion_runs_search_extract_before_ingestion(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    calls: list[tuple[str, dict]] = []
+
+    def fake_search(team_id, run_id, payload):
+        calls.append(("search", {"teamId": team_id, "runId": run_id, "payload": payload}))
+        return {
+            "status": "completed",
+            "summary": {"recordCount": 3, "openAssignmentCount": 0},
+        }
+
+    def fake_extract(team_id, payload):
+        calls.append(("extract", {"teamId": team_id, "payload": payload}))
+        return {"status": "completed", "importedCount": 3, "skippedCount": 0, "failedCount": 0}
+
+    def fake_ingest(team_id, payload):
+        calls.append(("ingest", {"teamId": team_id, "payload": payload}))
+        return {
+            "status": "completed",
+            "summary": {"formalKnowledgeItemCount": 2, "knowledgeBaseId": "kb-1"},
+            "statusSnapshot": {"summary": {"formalKnowledgeItemCount": 2}},
+        }
+
+    monkeypatch.setattr(team_workflow_orchestration_service, "execute_source_collection_search", fake_search)
+    monkeypatch.setattr(team_workflow_orchestration_service, "extract_source_collection_candidates", fake_extract)
+    monkeypatch.setattr(team_workflow_orchestration_service, "run_knowledge_collection_ingestion", fake_ingest)
+
+    result = team_workflow_orchestration_service.run_knowledge_collection_completion(
+        "challenge-team",
+        {
+            "runId": "source-run-1",
+            "extractionAgentId": "content-extraction-agent",
+            "sourceQualityAgentId": "source-quality",
+            "candidateGraphAgentId": "candidate-graph",
+            "stewardAgentId": "knowledge-steward",
+            "maxSearchBatches": 1,
+            "maxQueriesPerBatch": 5,
+            "maxResultsPerQuery": 4,
+            "maxRecords": 120,
+        },
+    )
+
+    assert [name for name, _ in calls] == ["search", "extract", "ingest"]
+    assert calls[0][1]["runId"] == "source-run-1"
+    assert calls[0][1]["payload"]["maxQueries"] == 5
+    assert calls[0][1]["payload"]["maxResultsPerQuery"] == 4
+    assert calls[1][1]["payload"]["runId"] == "source-run-1"
+    assert calls[1][1]["payload"]["extractionAgentId"] == "content-extraction-agent"
+    assert calls[1][1]["payload"]["maxRecords"] == 120
+    assert calls[2][1]["payload"]["backgroundExecution"] is True
+    assert calls[2][1]["payload"]["autoSubmit"] is True
+    assert calls[2][1]["payload"]["autoReviewSource"] is True
+    assert calls[2][1]["payload"]["autoApprove"] is True
+    assert calls[2][1]["payload"]["notifyStewardAgent"] is False
+    assert result["searchExecutions"][0]["status"] == "completed"
+    assert result["extraction"]["importedCount"] == 3
+    assert result["ingestion"]["summary"]["formalKnowledgeItemCount"] == 2
+    assert result["summary"]["formalKnowledgeItemCount"] == 2
 
 
 def test_knowledge_ingestion_status_tracks_pending_and_official_sync(tmp_path, monkeypatch):
