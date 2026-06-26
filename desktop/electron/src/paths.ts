@@ -38,3 +38,7 @@ export function resolvePreloadPath(paths: DesktopPaths): string {
 export function resolveWorkspaceRuntimeDir(paths: DesktopPaths): string {
   return resolve(paths.workspaceRoot, ".runtime", "launcher");
 }
+
+export function resolveWorkspaceIconPath(paths: DesktopPaths): string {
+  return resolve(paths.workspaceRoot, "assets", "icons", "vibelution.ico");
+}
