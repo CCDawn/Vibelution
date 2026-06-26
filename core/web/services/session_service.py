@@ -52,6 +52,7 @@ from core.chat.conversation_ledger import (
     EVENT_USER_MESSAGE,
     TURN_INTERRUPTED_MARKER,
     append_conversation_event,
+    conversation_ledger_path,
     conversation_visible_messages_from_events,
     latest_ledger_sequence,
     latest_open_turn_id,
@@ -175,6 +176,9 @@ _SESSION_LIST_CACHE_LOCK = threading.Lock()
 _SESSION_LIST_CACHE_CONDITION = threading.Condition(_SESSION_LIST_CACHE_LOCK)
 _SESSION_LIST_CACHE_TTL_SECONDS = 4.0
 _SESSION_LIST_CACHE: dict[str, Any] = {}
+_SESSION_CONVERSATION_EVENTS_CACHE_LOCK = threading.Lock()
+_SESSION_CONVERSATION_EVENTS_CACHE_MAX_ENTRIES = 64
+_SESSION_CONVERSATION_EVENTS_CACHE: dict[str, dict[str, Any]] = {}
 _AGENT_DIRECTORY_STUB_HIDDEN_CREATED_BY = {
     "ai_search_team",
     "research_agent_pool",
@@ -435,6 +439,66 @@ def _invalidate_session_list_cache() -> None:
         _SESSION_LIST_CACHE_CONDITION.notify_all()
     with _DIRECT_SESSION_COLLISION_REPAIR_LOCK:
         _DIRECT_SESSION_COLLISION_REPAIR_SIGNATURE = None
+
+
+def _session_conversation_events_signature(session_id: str) -> tuple[str, int, int, int]:
+    normalized_session_id = str(session_id or "").strip()
+    if not normalized_session_id:
+        return ("", 0, -1, -1)
+    path = conversation_ledger_path(PROJECT_ROOT, normalized_session_id)
+    try:
+        stat = path.stat()
+        modified_ns = int(stat.st_mtime_ns)
+        size = int(stat.st_size)
+    except OSError:
+        modified_ns = -1
+        size = -1
+    try:
+        sequence = latest_ledger_sequence(PROJECT_ROOT, normalized_session_id)
+    except Exception:
+        sequence = 0
+    return (str(path), int(sequence or 0), modified_ns, size)
+
+
+def _prune_session_conversation_events_cache_locked() -> None:
+    while len(_SESSION_CONVERSATION_EVENTS_CACHE) > _SESSION_CONVERSATION_EVENTS_CACHE_MAX_ENTRIES:
+        oldest_key = min(
+            _SESSION_CONVERSATION_EVENTS_CACHE,
+            key=lambda key: float(_SESSION_CONVERSATION_EVENTS_CACHE.get(key, {}).get("last_access") or 0.0),
+        )
+        _SESSION_CONVERSATION_EVENTS_CACHE.pop(oldest_key, None)
+
+
+def _invalidate_session_conversation_events_cache(session_id: str = "") -> None:
+    normalized_session_id = str(session_id or "").strip()
+    with _SESSION_CONVERSATION_EVENTS_CACHE_LOCK:
+        if normalized_session_id:
+            _SESSION_CONVERSATION_EVENTS_CACHE.pop(normalized_session_id, None)
+        else:
+            _SESSION_CONVERSATION_EVENTS_CACHE.clear()
+
+
+def _load_session_conversation_events_cached(session_id: str) -> list[Any]:
+    normalized_session_id = str(session_id or "").strip()
+    if not normalized_session_id:
+        return []
+    signature = _session_conversation_events_signature(normalized_session_id)
+    now = _perf_counter()
+    with _SESSION_CONVERSATION_EVENTS_CACHE_LOCK:
+        cached = _SESSION_CONVERSATION_EVENTS_CACHE.get(normalized_session_id)
+        if cached and cached.get("signature") == signature:
+            cached["last_access"] = now
+            return list(cached.get("events") or ())
+
+    events = list(load_conversation_events(PROJECT_ROOT, normalized_session_id) or [])
+    with _SESSION_CONVERSATION_EVENTS_CACHE_LOCK:
+        _SESSION_CONVERSATION_EVENTS_CACHE[normalized_session_id] = {
+            "signature": signature,
+            "events": tuple(events),
+            "last_access": now,
+        }
+        _prune_session_conversation_events_cache_locked()
+    return list(events)
 
 
 def _elapsed_ms(started_at: float) -> int:
@@ -807,6 +871,7 @@ def _append_session_conversation_event(
             correlation_id=correlation_id,
             source_kind=source_kind,
         )
+        _invalidate_session_conversation_events_cache(normalized_session_id)
     except Exception as exc:
         try:
             record_runtime_scene_event(
@@ -871,6 +936,7 @@ def _reconcile_stale_session_ledger(session_id: str, *, active_turn_id: str = ""
             },
             source="session_service",
         )
+        _invalidate_session_conversation_events_cache(normalized_session_id)
         _delete_session_live_output_checkpoint(normalized_session_id)
     except Exception:
         return
@@ -11641,7 +11707,7 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                     stop_configurer(lambda: _get_turn_control_stop_reason(turn_control))
                 raw_history_messages = list(context.get("history_messages") or [])
                 seedable_history_messages = _history_messages_for_agent_seed(raw_history_messages)
-                conversation_ledger_events = list(load_conversation_events(PROJECT_ROOT, session_id) or [])
+                conversation_ledger_events = _load_session_conversation_events_cached(session_id)
                 conversation_context_events = [
                     event
                     for event in conversation_ledger_events
@@ -16988,7 +17054,7 @@ def _ledger_visible_messages_for_session(session_id: str) -> list[dict[str, Any]
     normalized_session_id = str(session_id or "").strip()
     if not normalized_session_id:
         return []
-    events = load_conversation_events(PROJECT_ROOT, normalized_session_id)
+    events = _load_session_conversation_events_cached(normalized_session_id)
     if not events:
         return []
     return conversation_visible_messages_from_events(events)
@@ -17003,7 +17069,7 @@ def _truncate_session_ledger_before_message(session_id: str, message: dict[str, 
     event_id = str(metadata.get("eventId") or "").strip()
     if not event_id:
         return
-    events = load_conversation_events(PROJECT_ROOT, session_id)
+    events = _load_session_conversation_events_cached(session_id)
     target_index = -1
     target_turn_id = ""
     for index, event in enumerate(events):
@@ -17021,6 +17087,7 @@ def _truncate_session_ledger_before_message(session_id: str, message: dict[str, 
                 truncate_index = index
                 break
     rewrite_conversation_events(PROJECT_ROOT, session_id, events[:truncate_index])
+    _invalidate_session_conversation_events_cache(session_id)
 
 
 def _messages_with_live_output(session_id: str) -> list[dict[str, Any]]:
