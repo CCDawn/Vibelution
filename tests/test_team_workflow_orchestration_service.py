@@ -1,4 +1,4 @@
-import json
+﻿import json
 from concurrent.futures import Future
 from pathlib import Path
 
@@ -1400,11 +1400,12 @@ def test_start_source_collection_stage_session_task_submits_direct_session_task(
     assert "source_collection_stage_writeback_tool" in submitted[0]["content"]
     assert "不要使用 `web_fetch_tool` 读取 `file://`" in submitted[0]["content"]
     assert "不会自动启动 Agent 回答" not in submitted[0]["content"]
-    assert submitted[0]["kwargs"]["message_source"] == "team_workflow_stage_task"
+    assert submitted[0]["kwargs"]["message_source"] == "agent_inbox"
     assert submitted[0]["kwargs"]["lightweight_response"] is True
     assert submitted[0]["kwargs"]["include_started_turn_id"] is True
     metadata = submitted[0]["kwargs"]["message_metadata"]
     assert metadata["kind"] == "source_collection_stage_session_task"
+    assert metadata["sourceSurface"] == "team_workflow_stage_task"
     assert metadata["sourceCollectionStageTaskId"] == task["taskId"]
     assert metadata["writebackContract"]["taskId"] == task["taskId"]
     assert second["created"] is True
@@ -1567,6 +1568,49 @@ def test_source_collection_stage_task_context_returns_bounded_records_for_extrac
     assert context["usage"]["writebackTool"] == "source_collection_stage_writeback_tool"
     assert "file://" in context["usage"]["doNotUse"]
 
+
+def test_source_collection_stage_task_context_uses_memory_steward_boundaries(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
+    team = team_service.create_team(name="挑战杯科研团队")
+    run_response = team_workflow_orchestration_service.start_source_collection_run(
+        team["teamId"],
+        {
+            "topic": "神经预测编码",
+            "agentRoles": ["knowledge_steward"],
+            "agentIds": {"knowledge_steward": "agent-knowledge-steward"},
+            "querySeeds": ["predictive coding neural algorithm"],
+            "promptCachePolicy": {"requirement": "disabled"},
+        },
+    )
+    run_id = run_response["run"]["runId"]
+    task = {
+        "taskId": "stagetask-memory-context",
+        "runId": run_id,
+        "stageId": "memory",
+        "agentId": "agent-knowledge-steward",
+        "agentRole": "knowledge_steward",
+        "sessionId": "session-steward",
+        "status": "running",
+        "title": "知识库管理员入库审核",
+        "writebackContract": {
+            "taskId": "stagetask-memory-context",
+            "writesFormalKnowledge": True,
+            "writesOfficialGraph": True,
+        },
+    }
+    team_workflow_orchestration_service._upsert_source_collection_stage_session_task(team["teamId"], run_id, task)
+
+    context = team_workflow_orchestration_service.get_source_collection_stage_task_context(
+        team["teamId"],
+        task_id="stagetask-memory-context",
+    )
+
+    assert context["stageId"] == "memory"
+    assert context["agentRole"] == "knowledge_steward"
+    assert context["boundaries"]["writesFormalKnowledge"] is True
+    assert context["boundaries"]["writesOfficialGraph"] is True
+    assert context["writebackContract"]["writesFormalKnowledge"] is True
 
 def test_source_collection_stage_task_records_high_roi_runtime_events(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
@@ -2927,6 +2971,128 @@ def test_knowledge_steward_memory_writeback_auto_ingests_approved_candidates(tmp
     assert second_materialized["reusedOfficialSync"] is True
     assert second_items["summary"]["itemCount"] == 1
 
+
+def test_knowledge_steward_memory_writeback_auto_ingests_real_steward_pack_shape(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
+    agent_directory_service.repair_agent_directory()
+    steward = agent_directory_service.get_agent(agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID)
+    assert steward is not None
+    steward_session = session_service.ensure_agent_direct_session(
+        agent_id=steward["agentId"],
+        title=agent_directory_service.KNOWLEDGE_STEWARD_FUNCTIONAL_NAME,
+    )
+    agent_directory_service.update_agent_instance(steward["agentId"], direct_session_id=steward_session["id"])
+    coordinator = agent_directory_service.create_agent_instance(display_name="科研协调")
+    session_service.ensure_agent_direct_session(agent_id=coordinator["agentId"], title="科研协调")
+    team = team_service.create_team(
+        name="挑战杯科研团队",
+        members=[{"agentId": coordinator["agentId"], "role": "research_coordination", "agentName": "科研协调"}],
+    )
+    knowledge_base = team_knowledge_service.create_knowledge_base(
+        team["teamId"],
+        name="挑战杯科研知识库",
+        actor_agent_id=coordinator["agentId"],
+    )
+    run_response = team_workflow_orchestration_service.start_source_collection_run(
+        team["teamId"],
+        {
+            "topic": "神经预测编码",
+            "agentRoles": ["knowledge_steward"],
+            "agentIds": {"knowledge_steward": steward["agentId"]},
+            "querySeeds": ["predictive coding neural algorithm"],
+            "promptCachePolicy": {"requirement": "disabled"},
+        },
+    )
+    run_id = run_response["run"]["runId"]
+    source = team_workflow_orchestration_service.register_candidate_source(
+        team["teamId"],
+        {
+            "title": "Predictive coding cortical hierarchy DOI source",
+            "sourceUrl": "https://doi.org/10.0000/real-steward-pack-shape",
+            "sourceKind": "paper",
+            "summary": "Traceable predictive coding source with DOI metadata.",
+            "tags": ["neuroscience", "algorithm"],
+            "allowedForAnalysis": True,
+            "metadata": {"sourceCollectionRunId": run_id, "doi": "10.0000/real-steward-pack-shape"},
+            "createdByAgent": "content-extraction-agent",
+        },
+    )["candidate"]
+    team_workflow_orchestration_service.assess_source_candidate_quality(
+        team["teamId"],
+        source["candidateId"],
+        {
+            "assessedByAgent": "source-quality-agent",
+            "decision": "approved",
+            "notes": "主题相关、来源可追踪，允许知识库管理员入库。",
+            "evidenceRefs": [{"type": "doi", "id": "10.0000/real-steward-pack-shape"}],
+        },
+    )
+    monkeypatch.setattr(
+        session_service,
+        "submit_session_message",
+        lambda session_id, content, **kwargs: {"accepted": True, "sessionId": session_id, "turnId": "turn-real-pack", "status": "running"},
+    )
+    task = team_workflow_orchestration_service.start_source_collection_stage_session_task(
+        team["teamId"],
+        run_id,
+        {"stageId": "memory", "agentId": steward["agentId"], "agentRole": "knowledge_steward"},
+    )
+
+    response = team_workflow_orchestration_service.writeback_source_collection_stage_session_task(
+        team["teamId"],
+        task["taskId"],
+        {
+            "status": "completed",
+            "summary": "知识库管理员审核通过，批准本轮候选直接入库。",
+            "result": {
+                "knowledgeBaseId": knowledge_base["knowledgeBaseId"],
+                "stewardPackDraft": {
+                    "approvedCandidateIds": [source["candidateId"]],
+                    "targetDomain": "神经机制启发神经网络算法",
+                    "proposalPayload": {
+                        "title": source["title"],
+                        "summary": "将已通过质检的预测编码 DOI 资料写入团队知识库。",
+                    },
+                    "candidate_summary": {
+                        "approved": {
+                            "count": 1,
+                            "candidates": [
+                                {
+                                    "candidateId": source["candidateId"],
+                                    "title": source["title"],
+                                    "overall_score": 72,
+                                    "relevance_score": 98,
+                                    "assessment_notes": "来源可追踪且与挑战杯神经算法方向高度相关。",
+                                }
+                            ],
+                        }
+                    },
+                },
+                "autoIngestDecision": {
+                    "decision": "approved_for_ingestion",
+                    "reason": "候选已通过资料质检，知识库管理员批准直接入库。",
+                    "approvedCandidates": [{"candidateId": source["candidateId"], "title": source["title"]}],
+                },
+            },
+            "recordedByAgent": steward["agentId"],
+            "evidenceRefs": [{"type": "candidate", "id": source["candidateId"]}],
+            "nextActions": ["进入实验规划"],
+        },
+    )
+
+    materialized = response["writeback"]["materializedKnowledgeIngestion"]
+
+    assert materialized["status"] == "completed"
+    assert materialized["approvedCandidateIds"] == [source["candidateId"]]
+    assert materialized["formalKnowledgeItemCount"] == 1
+    assert materialized["writesFormalKnowledge"] is True
+
+    knowledge_items = team_knowledge_service.list_knowledge_items(
+        materialized["knowledgeBaseId"],
+        agent_id=steward["agentId"],
+    )
+    assert knowledge_items["summary"]["itemCount"] == 1
 
 def test_candidate_graph_stage_writeback_materializes_candidate_graph(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
