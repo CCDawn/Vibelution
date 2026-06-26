@@ -4,7 +4,7 @@ Set-StrictMode -Version Latest
 $projectDir = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $electronDir = Join-Path $projectDir "desktop/electron"
 $desktopResourcesDir = Join-Path $projectDir "dist/desktop/win-unpacked/resources"
-$desktopLaunchProfilePath = Join-Path $desktopResourcesDir "vibelution-launch-profile.json"
+$desktopLaunchProfileWriter = Join-Path $electronDir "dist/scripts/writeLaunchProfile.js"
 $operatorConfigPath = Join-Path ([Environment]::GetFolderPath("MyDocuments")) "Vibelution/config/config.toml"
 $knownCodexPythonPath = Join-Path $env:USERPROFILE ".cache/codex-runtimes/codex-primary-runtime/dependencies/python/python.exe"
 
@@ -24,15 +24,13 @@ function Resolve-PythonPathForDesktopProfile {
 npm --prefix $electronDir install
 npm --prefix $electronDir run package:dir
 
-$desktopLaunchProfile = [ordered]@{
-    schemaVersion = 1
-    workspaceRoot = $projectDir
-    operatorConfigPath = $operatorConfigPath
-    pythonPath = Resolve-PythonPathForDesktopProfile
+$pythonPath = Resolve-PythonPathForDesktopProfile
+if (-not $pythonPath) {
+    throw "Unable to resolve a Python executable for the Electron launch profile. Set VIBELUTION_PYTHON_PATH or PYTHON before packaging."
 }
 
-New-Item -ItemType Directory -Path $desktopResourcesDir -Force | Out-Null
-$desktopLaunchProfileJson = $desktopLaunchProfile | ConvertTo-Json -Depth 4
-$utf8NoBom = New-Object System.Text.UTF8Encoding($false)
-[System.IO.File]::WriteAllText($desktopLaunchProfilePath, $desktopLaunchProfileJson, $utf8NoBom)
-Write-Host "Wrote desktop launch profile: $desktopLaunchProfilePath"
+node $desktopLaunchProfileWriter `
+    --resources-root $desktopResourcesDir `
+    --workspace-root $projectDir `
+    --operator-config $operatorConfigPath `
+    --python-path $pythonPath

@@ -6,6 +6,7 @@ import {
   applyDesktopLaunchSettingsToEnvironment,
   resolveDesktopLaunchSettings
 } from "../src/launch/desktopLaunchSettings.js";
+import { createDesktopLaunchProfile, serializeDesktopLaunchProfile } from "../src/launch/desktopLaunchProfileWriter.js";
 
 function resolveWithFiles(input: {
   env?: NodeJS.ProcessEnv;
@@ -129,6 +130,37 @@ describe("desktop launch settings", () => {
     expect(settings.workspaceRoot).toBe("C:/Users/17533/Desktop/Vibelution");
     expect(settings.configPath).toBe("C:/Users/17533/Documents/Vibelution/config/config.toml");
     expect(settings.pythonPath).toBe("C:/Python/python.exe");
+    expect(settings.profileError).toBe("");
+  });
+
+  it("round-trips generated package launch profiles through the runtime resolver", () => {
+    const resourcesRoot = "C:/Users/17533/Desktop/Vibelution/dist/desktop/win-unpacked/resources";
+    const profilePath = join(resourcesRoot, DESKTOP_LAUNCH_PROFILE_FILE);
+    const profile = createDesktopLaunchProfile({
+      workspaceRoot: "C:/Users/17533/Desktop/Vibelution",
+      operatorConfigPath: "C:/Users/17533/Documents/Vibelution/config/config.toml",
+      pythonPath: "C:/Users/17533/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/python.exe"
+    });
+    const serialized = serializeDesktopLaunchProfile(profile);
+
+    expect(serialized.charCodeAt(0)).not.toBe(0xfeff);
+    expect(JSON.parse(serialized)).toEqual({
+      schemaVersion: 1,
+      workspaceRoot: "C:/Users/17533/Desktop/Vibelution",
+      operatorConfigPath: "C:/Users/17533/Documents/Vibelution/config/config.toml",
+      pythonPath: "C:/Users/17533/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/python.exe"
+    });
+
+    const settings = resolveWithFiles({
+      resourcesRoot,
+      files: {
+        [profilePath]: serialized
+      }
+    });
+
+    expect(settings.workspaceRoot).toBe(profile.workspaceRoot);
+    expect(settings.configPath).toBe(profile.operatorConfigPath);
+    expect(settings.pythonPath).toBe(profile.pythonPath);
     expect(settings.profileError).toBe("");
   });
 });
