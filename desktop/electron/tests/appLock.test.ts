@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { singleInstanceDecision } from "../src/appLock.js";
 import { createDesktopPaths, resolveWorkspaceRuntimeDir } from "../src/paths.js";
 
 describe("Electron desktop paths", () => {
@@ -10,5 +11,15 @@ describe("Electron desktop paths", () => {
       workspaceRoot: "C:/repo"
     });
     expect(resolveWorkspaceRuntimeDir(paths).replace(/\\/g, "/")).toBe("C:/repo/.runtime/launcher");
+  });
+});
+
+describe("singleInstanceDecision", () => {
+  it("continues as primary when the app owns the lock", () => {
+    expect(singleInstanceDecision(true)).toEqual({ action: "continue_as_primary" });
+  });
+
+  it("focuses the existing launcher for secondary launches", () => {
+    expect(singleInstanceDecision(false)).toEqual({ action: "focus_existing", reason: "secondary_launch" });
   });
 });

@@ -1,7 +1,13 @@
 import { app, BrowserWindow, ipcMain } from "electron";
+import { singleInstanceDecision } from "./appLock.js";
 import { createDesktopPaths, resolvePreloadPath } from "./paths.js";
 
 let launcherWindow: BrowserWindow | null = null;
+
+const lockDecision = singleInstanceDecision(app.requestSingleInstanceLock());
+if (lockDecision.action === "focus_existing") {
+  app.quit();
+}
 
 function createLauncherWindow(): BrowserWindow {
   const workspaceRoot = process.env.VIBELUTION_WORKSPACE_ROOT;
@@ -36,6 +42,15 @@ app.whenReady().then(() => {
   launcherWindow.on("closed", () => {
     launcherWindow = null;
   });
+});
+
+app.on("second-instance", () => {
+  if (launcherWindow) {
+    if (launcherWindow.isMinimized()) {
+      launcherWindow.restore();
+    }
+    launcherWindow.focus();
+  }
 });
 
 app.on("window-all-closed", () => {
