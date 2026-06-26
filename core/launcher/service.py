@@ -28,6 +28,7 @@ from core.runtime_manager.state_store import load_pid, load_state
 from core.runtime_manager import work_run_store
 from core.runtime_manager.work_run_store import WorkRunStore
 from core.runtime_manager.workbench_controller import _is_process_alive, observe_workbench
+from core.runtime_manager.window_provider_state import window_provider_projection
 from . import developer_mode as launcher_developer_mode
 
 
@@ -1273,7 +1274,7 @@ def _workbench_payload(*, runtime_state: dict[str, Any], observed_workbench: dic
     else:
         status_line = "工作台已关闭。"
 
-    return {
+    payload = {
         "desiredState": desired_state,
         "observedState": observed_state,
         "sessionRole": session_role,
@@ -1300,6 +1301,8 @@ def _workbench_payload(*, runtime_state: dict[str, Any], observed_workbench: dic
         "failureMessage": failure_message,
         "staleRuntimeStateReconciled": stale_open_state_reconciled,
     }
+    payload.update(window_provider_projection(payload))
+    return payload
 
 
 def _runtime_manager_payload(runtime_state: dict[str, Any]) -> dict[str, Any]:
@@ -1436,6 +1439,9 @@ def _project_bundle_from_workbench(
         workbench["browserManaged"] = bool(launcher_state.get("browserManaged", False))
         workbench["browserWindowAlive"] = False
         workbench["browserWindowPid"] = 0
+        workbench.update(window_provider_projection(workbench))
+
+    window_projection = window_provider_projection(workbench)
 
     frontend_dist_ready = not bool(workbench.get("frontendOrphaned"))
     backend_component = _component_state(
@@ -1456,10 +1462,10 @@ def _project_bundle_from_workbench(
     )
     browser_component = _component_state(
         "browser",
-        ok=bool(workbench.get("browserWindowAlive")) or not bool(workbench.get("browserManaged", True)),
+        ok=bool(workbench.get("browserWindowAlive")) or not bool(window_projection.get("browserManaged", True)),
         state="running" if bool(workbench.get("browserWindowAlive")) else "stopped",
-        required_for_running=bool(workbench.get("browserManaged", True)),
-        pid=int(workbench.get("browserWindowPid") or 0),
+        required_for_running=bool(window_projection.get("browserManaged", True)),
+        pid=int(window_projection.get("browserWindowPid") or 0),
         detail="",
     )
     return {
@@ -1474,6 +1480,11 @@ def _project_bundle_from_workbench(
         "lifecycleConsistency": str(workbench.get("lifecycleConsistency") or "consistent"),
         "statusLine": str(workbench.get("statusLine") or ""),
         "url": str(workbench.get("url") or ""),
+        "windowProvider": str(window_projection.get("windowProvider") or "none"),
+        "windowManaged": bool(window_projection.get("windowManaged")),
+        "windowId": int(window_projection.get("windowId") or 0),
+        "rendererProcessId": int(window_projection.get("rendererProcessId") or 0),
+        "windowProfileDir": str(window_projection.get("windowProfileDir") or ""),
         "lastReason": str(workbench.get("lastReason") or ""),
         "failureMessage": str(workbench.get("failureMessage") or ""),
         "lastOperation": {
@@ -1497,8 +1508,10 @@ def _project_bundle_from_workbench(
             "orphaned": bool(workbench.get("frontendOrphaned")),
         },
         "browser": {
-            "managed": bool(workbench.get("browserManaged", True)),
-            "windowPid": int(workbench.get("browserWindowPid") or 0),
+            "provider": str(window_projection.get("windowProvider") or "none"),
+            "managed": bool(window_projection.get("browserManaged")),
+            "windowPid": int(window_projection.get("browserWindowPid") or 0),
+            "profileDir": str(window_projection.get("browserProfileDir") or ""),
             "alive": bool(workbench.get("browserWindowAlive")),
         },
     }
@@ -1508,7 +1521,8 @@ def _guardian_adapter_from_workbench(*, runtime_manager: dict[str, Any], workben
     supervisor = _launcher_supervisor_snapshot()
     manager_running = bool(runtime_manager.get("running"))
     manager_pid = int(runtime_manager.get("managerPid") or 0)
-    browser_managed = bool(workbench.get("browserManaged", True))
+    window_projection = window_provider_projection(workbench)
+    browser_managed = bool(window_projection.get("browserManaged", True))
     responsibilities = [
         _guardian_responsibility(
             "project_bundle_lifecycle",

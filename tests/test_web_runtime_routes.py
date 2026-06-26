@@ -594,6 +594,12 @@ def test_runtime_summary_exposes_runtime_manager_workbench_state(monkeypatch):
     assert payload["workbench"]["observedState"] == "open"
     assert payload["workbench"]["phase"] == "closing"
     assert payload["workbench"]["backendPid"] == 3001
+    assert payload["workbench"]["windowProvider"] in {"none", "edge_app", "electron"}
+    assert isinstance(payload["workbench"]["windowManaged"], bool)
+    assert payload["workbench"]["browserManaged"] == (
+        payload["workbench"]["windowProvider"] == "edge_app"
+        and payload["workbench"]["windowManaged"]
+    )
 
 
 def test_runtime_summary_uses_light_runtime_manager_snapshot(monkeypatch):

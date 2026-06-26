@@ -4362,6 +4362,14 @@ def test_observe_workbench_reports_managed_browser_missing_as_partial(monkeypatc
     assert observation["backendMissing"] is False
     assert observation["frontendOrphaned"] is False
     assert observation["browserManaged"] is True
+    assert observation["windowProvider"] in {"none", "edge_app", "electron"}
+    assert isinstance(observation["windowManaged"], bool)
+    assert observation["browserManaged"] == (
+        observation["windowProvider"] == "edge_app" and observation["windowManaged"]
+    )
+    assert observation["windowProfileDir"] == observation["browserProfileDir"]
+    assert observation["windowId"] == 0
+    assert observation["rendererProcessId"] == 0
     assert observation["browserWindowAlive"] is False
     assert observation["lifecycleConsistency"] == "browser_missing"
 

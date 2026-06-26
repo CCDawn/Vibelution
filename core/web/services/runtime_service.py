@@ -23,6 +23,7 @@ from core.runtime_manager.evolution_store import (
     load_latest_run_snapshot as load_evolution_latest_run_snapshot,
 )
 from core.runtime_manager.state_store import load_state as load_runtime_manager_state
+from core.runtime_manager.window_provider_state import window_provider_projection
 from core.runtime_manager.work_run_leases import leases_for_snapshot
 from core.chat.conversation_ledger import (
     context_compression_projection,
@@ -1065,7 +1066,7 @@ def _workbench_payload(lang: str, runtime_manager: dict) -> dict[str, object]:
             en="The workbench is closed.",
         )
 
-    return {
+    payload = {
         "desiredState": desired_state,
         "observedState": observed_state,
         "sessionRole": session_role,
@@ -1090,6 +1091,8 @@ def _workbench_payload(lang: str, runtime_manager: dict) -> dict[str, object]:
         "statusLine": status_line,
         "failureMessage": failure_message,
     }
+    payload.update(window_provider_projection(payload))
+    return payload
 
 
 def _runtime_lifecycle_proof(lang: str, runtime_manager: dict, workbench: dict, work_runs: dict) -> dict[str, object]:

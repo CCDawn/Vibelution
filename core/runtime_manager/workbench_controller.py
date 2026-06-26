@@ -31,6 +31,7 @@ from .constants import (
 )
 from .process_inventory import list_repo_runtime_processes, managed_browser_process_payload
 from .scene_logging import append_runtime_manager_file_event, truncate_event_text
+from .window_provider_state import window_provider_projection, with_window_provider_projection
 
 INTERNAL_LAUNCHER_ENV = "VIBELUTION_RUNTIME_MANAGER_INTERNAL_LAUNCHER"
 INTERNAL_LAUNCHER_VALUE = "1"
@@ -245,6 +246,7 @@ def persist_workbench_launcher_state_after_open(
             "updatedAt": datetime.now(timezone.utc).isoformat(),
         }
     )
+    payload.update(window_provider_projection(payload))
     try:
         _write_launcher_state(payload)
     except Exception as exc:
@@ -455,9 +457,17 @@ def observe_workbench(
         or launcher_state.get("browserProfileDir")
         or ""
     ).strip()
-    browser_managed = bool(launcher_state.get("browserManaged", True))
     launcher_browser_launch_pid = int(launcher_state.get("launcherBrowserLaunchPid") or 0)
     launcher_browser_window_pid = int(launcher_state.get("launcherBrowserWindowPid") or 0)
+    window_projection = window_provider_projection(
+        {
+            **launcher_state,
+            "browserWindowPid": browser_window_pid,
+            "browserProfileDir": browser_profile_dir,
+        }
+    )
+    browser_profile_dir = str(window_projection.get("windowProfileDir") or browser_profile_dir)
+    browser_managed = bool(window_projection.get("browserManaged"))
 
     port = _port_for_url(url)
     launcher_browser_window_alive = _is_process_alive(launcher_browser_window_pid)
@@ -469,7 +479,7 @@ def observe_workbench(
         and browser_window_pid <= 0
         and not _port_is_listening_socket(port)
     ):
-        return {
+        return with_window_provider_projection({
             "launcherStatePresent": bool(launcher_state),
             "sessionId": str(launcher_state.get("sessionId") or "").strip(),
             "sessionRole": session_role,
@@ -502,7 +512,7 @@ def observe_workbench(
             "frontendOrphaned": False,
             "lifecycleConsistency": "consistent",
             "observationFastPath": "launcher_control_surface_no_workbench_pids",
-        }
+        })
 
     state_backend_alive = _is_process_alive(state_backend_pid)
     browser_window_alive = _is_process_alive(browser_window_pid)
@@ -513,7 +523,7 @@ def observe_workbench(
         and not browser_window_alive
         and not _port_is_listening_socket(port)
     ):
-        return {
+        return with_window_provider_projection({
             "launcherStatePresent": bool(launcher_state),
             "sessionId": str(launcher_state.get("sessionId") or "").strip(),
             "sessionRole": "launcher_control_surface" if launcher_browser_window_alive else session_role,
@@ -547,7 +557,7 @@ def observe_workbench(
             "frontendOrphaned": False,
             "lifecycleConsistency": "consistent",
             "observationFastPath": "stale_workbench_pids_closed",
-        }
+        })
     health_probe_url = url if launcher_state else DEFAULT_URL
     healthy = _is_backend_healthy(health_probe_url)
     port_owner_pid = _listening_pid_for_port(port)
@@ -622,7 +632,7 @@ def observe_workbench(
     else:
         lifecycle_consistency = "consistent"
 
-    return {
+    return with_window_provider_projection({
         "launcherStatePresent": bool(launcher_state),
         "sessionId": str(launcher_state.get("sessionId") or "").strip(),
         "sessionRole": observed_session_role,
@@ -655,7 +665,7 @@ def observe_workbench(
         "backendMissing": backend_missing,
         "frontendOrphaned": frontend_orphaned,
         "lifecycleConsistency": lifecycle_consistency,
-    }
+    })
 
 
 def _creation_flag_names(*, detach: bool = False) -> tuple[str, ...]:
