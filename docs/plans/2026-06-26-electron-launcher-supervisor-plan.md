@@ -4,7 +4,7 @@
 
 **Goal:** Convert Vibelution to a single-entry Electron desktop application where the Electron main process acts as the Launcher supervisor, owns lifecycle authority, and manages Workbench, backend, Runtime Manager, self-evolution lifecycle intents, and worker processes as children.
 
-**Architecture:** Vibelution keeps one user-visible entrypoint, one lifecycle source of truth, and multiple managed child processes. Electron replaces the current Edge app window provider, but it must reuse existing Launcher, Runtime Manager, FastAPI, runtime-scene, active-work guard, config, and control-token contracts instead of creating a parallel lifecycle system.
+**Architecture:** Vibelution keeps one user-visible entrypoint, one lifecycle source of truth, and multiple managed child processes. Electron replaces the current Edge app window provider, but it must behave like a thin desktop shell plus supervisor. The Codex reference repo shows the useful pattern is not "put product logic into Electron"; it is a deep-linkable desktop entry backed by a typed app-server/runtime protocol. Vibelution must therefore reuse existing Launcher, Runtime Manager, FastAPI, runtime-scene, active-work guard, config, and control-token contracts instead of creating a parallel lifecycle system.
 
 **Tech Stack:** Electron, Node.js, TypeScript, React/Vite `web/dist`, FastAPI backend, Python Runtime Manager, existing `scripts/vibelution_launcher.ps1` / `scripts/vibelution_launcher.py`, existing Launcher API, Vitest, pytest.
 
@@ -17,6 +17,10 @@
 - Self-evolution Agent cannot spawn or kill the project directly; it writes structured lifecycle intents that Launcher validates and executes.
 - Electron main process must not contain product business logic, LLM calls, file scanning, agent execution, or tool execution; it supervises and delegates.
 - Reuse-first rule: reuse current Launcher APIs, Runtime Manager commands, runtime-scene logging, control-token guard, and web build output before adding new paths.
+- Codex reference rule: do not assume the reference repo contains reusable Electron packaging code. Its reusable idea is the separation between desktop entry, deep link, app-server protocol, daemon lifecycle commands, and packaged runtime artifacts.
+- Protocol-first rule: before adding Electron IPC or child-process behavior, define the machine-readable Launcher protocol shape that Electron, web UI, self-evolution, and tests all consume.
+- Deep-link rule: secondary entrypoints may only wake or focus the single Launcher supervisor through a deep link such as `vibelution://threads/new?path=...`; they must not start backend or Workbench directly.
+- Machine-readable lifecycle rule: every start, stop, restart, status, and lifecycle-intent command must return bounded JSON that tests can parse, following the Codex app-server daemon style.
 - Architecture/test alignment rule: update old tests that assert `msedge.exe`, `--app=`, `browserManaged`, or Edge profile details so they protect the new window-provider contract instead of the retired implementation.
 - Security baseline: renderer Node integration stays disabled; `contextIsolation` stays enabled; preload exposes only narrow lifecycle IPC calls.
 - Package manager baseline: use `npm` and lockfiles; Bun remains auxiliary and must not become the release build path.
@@ -50,6 +54,22 @@ The product behavior must feel like one app:
 - Self-evolution can request a restart or resume only by writing a lifecycle intent.
 - Launcher records who requested a lifecycle action, why it was accepted or rejected, which process executed it, and what happened.
 
+## Codex Reference Audit
+
+The local reference project at `C:\Users\17533\Desktop\Agent论文\projects\60_openai_codex` did not contain an Electron app source tree, Electron main process, preload script, or `electron-builder` / `electron-forge` packaging config. Its useful desktop pattern is a different one:
+
+- `codex app` is a CLI bridge. On Windows/macOS it detects or installs the external Codex Desktop app, then opens a deep link like `codex://threads/new?path=...`.
+- The desktop experience is treated as a client of `codex app-server`, not as the owner of agent/runtime semantics.
+- `codex app-server` exposes a JSON-RPC-like protocol over stdio, websocket, unix socket, or off mode, with generated TypeScript and JSON schema fixtures.
+- `codex app-server daemon` owns machine-readable lifecycle commands such as `start`, `restart`, `stop`, `version`, and `bootstrap`, returning one JSON object on success.
+- The package builder packages `codex` and `codex-app-server` runtime artifacts and resources. It does not collapse desktop UI, CLI, app-server, and agent logic into one process.
+
+Implication for Vibelution:
+
+- Electron is still feasible, but it should be the single visible shell and root supervisor, not a new business runtime.
+- The first architecture slice should harden deep-link, protocol, status, and lifecycle command contracts before packaging.
+- Vibelution should not add a second app-server if FastAPI + Runtime Manager already provide the needed authority. Instead, define a narrow Launcher protocol adapter over the existing routes and command queue.
+
 ## Non-Goals For Version 1
 
 - Do not rewrite FastAPI routes into Electron IPC.
@@ -69,6 +89,9 @@ The product behavior must feel like one app:
 | Backend API | FastAPI backend | Electron loads the backend URL and does not replace API routes. |
 | UI surface | React/Vite `web/dist` | Existing web app remains the UI implementation. |
 | Self-evolution restart intent | Lifecycle intent queue | Agent writes intent; Launcher validates and executes. |
+| Deep links | Launcher supervisor | `vibelution://...` wakes or focuses the single supervisor and submits typed intents; it never starts runtime children directly. |
+| Launcher protocol | Existing Launcher / Runtime Manager / FastAPI contracts | Electron consumes a typed adapter; it does not invent a second command or status model. |
+| Protocol schema | Generated TypeScript / JSON schema or equivalent fixtures | Protocol drift must be caught by tests before Electron packaging is trusted. |
 | Evidence | Runtime scene package | Every branch, rejection, child exit, restart, and recovery is diagnosable. |
 | Operator config | External config at `C:\Users\17533\Documents\Vibelution\config\config.toml` | Package must not move this source of truth. |
 
@@ -93,6 +116,11 @@ desktop/electron/
       managedProcessTypes.ts
       pythonRuntime.ts
       runtimeManagerClient.ts
+    protocol/
+      deepLink.ts
+      launcherProtocol.ts
+      launcherProtocolSchema.ts
+      lifecycleCommandOutput.ts
     lifecycle/
       lifecycleIntentStore.ts
       lifecycleIntentTypes.ts
@@ -109,6 +137,8 @@ desktop/electron/
     childProcessSupervisor.test.ts
     lifecycleIntentStore.test.ts
     lifecyclePolicy.test.ts
+    launcherProtocol.test.ts
+    deepLink.test.ts
     windowProvider.test.ts
 ```
 
@@ -216,7 +246,102 @@ type WindowProviderResult = {
 
 The first Electron implementation can live entirely in the desktop layer, but backend status APIs must expose the generic provider fields.
 
+## Deep Link And Launcher Protocol Contract
+
+Codex uses `codex://threads/new?path=...` as the bridge from CLI or OS entrypoint into the desktop app. Vibelution should use the same idea without copying Codex-specific routes:
+
+```text
+vibelution://launcher/focus
+vibelution://workbench/open?path=C%3A%5CUsers%5C17533%5CDesktop%5CVibelution
+vibelution://lifecycle/intent?action=restart_after_apply&idempotencyKey=...
+```
+
+Rules:
+
+- Deep links are entry intents, not runtime execution authority.
+- Electron main parses and validates the link, then translates it into a Launcher protocol request.
+- Unsupported links return or record a safe machine-readable rejection.
+- Path values must be canonicalized and never replace the active operator config source.
+- Tests must cover Windows path encoding, duplicate secondary launch focus, invalid action rejection, and idempotency.
+
+Launcher protocol response shape:
+
+```ts
+type LauncherCommandStatus = "ok" | "accepted" | "rejected" | "failed";
+
+type LauncherCommandResponse = {
+  schemaVersion: 1;
+  commandId: string;
+  command: "status" | "start" | "stop" | "restart" | "focus" | "lifecycle_intent";
+  status: LauncherCommandStatus;
+  provider: "edge_app" | "electron" | "launcher_protocol";
+  message: string;
+  activeWorkBlocked: boolean;
+  runtimeSceneRef?: string;
+  childProcesses?: Array<{
+    role: "fastapi_backend" | "runtime_manager" | "self_evolution_worker" | "tool_worker";
+    pid: number;
+    status: "starting" | "running" | "stopping" | "exited" | "failed";
+  }>;
+};
+```
+
+This contract lets Electron stay thin: it displays, focuses, and supervises, while the existing backend and Runtime Manager continue to own product behavior.
+
 ## Phase Plan
+
+### Task 0: Codex-Informed Protocol Boundary Audit
+
+**Files:**
+- Create: `docs/testing/electron-launcher-protocol-contract.md`
+- Test: none
+
+**Interfaces:**
+- Consumes: current Launcher routes, Runtime Manager commands, self-evolution lifecycle calls, and existing tests for `browserManaged` / Launcher control tokens.
+- Produces: a protocol contract ledger that prevents Electron from becoming a duplicate backend.
+
+- [ ] **Step 1: Record the reference finding**
+
+Create `docs/testing/electron-launcher-protocol-contract.md`:
+
+```markdown
+# Electron Launcher Protocol Contract
+
+日期：2026-06-26
+参考：`C:\Users\17533\Desktop\Agent论文\projects\60_openai_codex`
+
+## Reference Findings
+
+- The reference repo has no Electron source packaging to copy.
+- `codex app` opens or installs an external desktop app and passes workspace context through a deep link.
+- Runtime behavior is exposed through an app-server protocol and daemon lifecycle commands.
+- Protocol schemas and app-server integration tests are first-class review surfaces.
+
+## Vibelution Contract
+
+- Electron main is the single visible shell and root supervisor.
+- Existing Launcher, Runtime Manager, FastAPI routes, runtime-scene logging, and active-work guard remain authoritative.
+- Deep links submit intents to the Launcher supervisor; they do not directly start backend, Workbench, or agent workers.
+- Lifecycle command responses are machine-readable JSON with `schemaVersion`, `commandId`, `status`, `provider`, `message`, and `runtimeSceneRef`.
+- Protocol drift must be caught by TypeScript tests and focused pytest route/service tests.
+```
+
+- [ ] **Step 2: Record contract checks for the ledger**
+
+Task 1 must include these rows when it creates `docs/testing/electron-launcher-window-provider-test-alignment.md`:
+
+```markdown
+| `desktop/electron/tests/deepLink.test.ts` | `vibelution://` parsing and Windows path encoding | add | Validate focus/open/lifecycle links without launching children | Invalid or duplicate links become safe typed responses |
+| `desktop/electron/tests/launcherProtocol.test.ts` | Machine-readable Launcher command response | add | Assert schema fields and command/status/provider enums | Electron and backend adapter share one response shape |
+| `tests/test_web_runtime_routes.py` | Launcher command adapter and active-work guard | add/update | Assert JSON lifecycle responses and blocked active-work states | Runtime commands stay Launcher-gated |
+```
+
+- [ ] **Step 3: Commit**
+
+```powershell
+git add docs/testing/electron-launcher-protocol-contract.md
+git commit -m "docs: define electron launcher protocol boundary"
+```
 
 ### Task 1: Baseline Inventory And Test Alignment Ledger
 
@@ -234,7 +359,7 @@ The first Electron implementation can live entirely in the desktop layer, but ba
 Run:
 
 ```powershell
-rg -n "msedge|--app=|browserManaged|workbench-app-profile|launcher_control_surface|open_workbench|restart_workbench" tests web/src -g "*.py" -g "*.ts" -g "*.tsx"
+rg -n "msedge|--app=|browserManaged|workbench-app-profile|launcher_control_surface|open_workbench|restart_workbench|lifecycle_intent|control-token|runtime_scene" tests web/src desktop -g "*.py" -g "*.ts" -g "*.tsx" -g "*.md"
 ```
 
 Expected: output includes `tests/test_runtime_manager.py`, `tests/test_launcher_service.py`, `tests/test_launcher_scripts.py`, `tests/test_web_runtime_routes.py`, `web/src/api/launcher.test.ts`, and `web/src/app/systemStatus.test.ts`.
@@ -266,6 +391,9 @@ Create `docs/testing/electron-launcher-window-provider-test-alignment.md` with t
 | `tests/test_web_runtime_routes.py` | Launcher API, runtime shutdown, self-evolution cancellation | keep/update | Keep shutdown and active-work behavior; update provider naming | Runtime routes expose generic window provider state |
 | `web/src/api/launcher.test.ts` | Launcher endpoint control-token behavior | keep | Keep endpoint and token tests unchanged | Electron shell uses same guarded Launcher endpoints |
 | `web/src/app/systemStatus.test.ts` | Managed browser status wording | update | Rename assertions to managed window semantics | UI status reads Electron provider without Edge-specific wording |
+| `desktop/electron/tests/deepLink.test.ts` | `vibelution://` parsing and Windows path encoding | add | Validate focus/open/lifecycle links without launching children | Invalid or duplicate links become safe typed responses |
+| `desktop/electron/tests/launcherProtocol.test.ts` | Machine-readable Launcher command response | add | Assert schema fields and command/status/provider enums | Electron and backend adapter share one response shape |
+| `tests/test_web_runtime_routes.py` | Launcher command adapter and active-work guard | add/update | Assert JSON lifecycle responses and blocked active-work states | Runtime commands stay Launcher-gated |
 ```
 
 - [ ] **Step 3: Commit**
@@ -283,12 +411,16 @@ git commit -m "docs: align tests for electron launcher migration"
 - Create: `desktop/electron/src/main.ts`
 - Create: `desktop/electron/src/preload.ts`
 - Create: `desktop/electron/src/paths.ts`
+- Create: `desktop/electron/src/protocol/deepLink.ts`
+- Create: `desktop/electron/src/protocol/launcherProtocol.ts`
 - Create: `desktop/electron/tests/appLock.test.ts`
+- Create: `desktop/electron/tests/deepLink.test.ts`
+- Create: `desktop/electron/tests/launcherProtocol.test.ts`
 - Modify: none
 
 **Interfaces:**
 - Consumes: existing `web/dist` and existing local HTTP backend URL.
-- Produces: a compilable Electron desktop package that can open a static test window but does not start backend processes.
+- Produces: a compilable Electron desktop package plus deep-link and Launcher protocol types that do not start backend processes.
 
 - [ ] **Step 1: Add package metadata**
 
@@ -356,7 +488,143 @@ export function resolveRuntimeDir(projectRoot = resolveProjectRoot()): string {
 }
 ```
 
-- [ ] **Step 4: Add minimal preload**
+- [ ] **Step 4: Add machine-readable Launcher protocol types**
+
+Create `desktop/electron/src/protocol/launcherProtocol.ts`:
+
+```ts
+export type LauncherCommand =
+  | "status"
+  | "start"
+  | "stop"
+  | "restart"
+  | "focus"
+  | "lifecycle_intent";
+
+export type LauncherCommandStatus = "ok" | "accepted" | "rejected" | "failed";
+
+export type LauncherProvider = "edge_app" | "electron" | "launcher_protocol";
+
+export type LauncherChildProcessStatus = "starting" | "running" | "stopping" | "exited" | "failed";
+
+export type LauncherCommandResponse = {
+  schemaVersion: 1;
+  commandId: string;
+  command: LauncherCommand;
+  status: LauncherCommandStatus;
+  provider: LauncherProvider;
+  message: string;
+  activeWorkBlocked: boolean;
+  runtimeSceneRef?: string;
+  childProcesses?: Array<{
+    role: "fastapi_backend" | "runtime_manager" | "self_evolution_worker" | "tool_worker";
+    pid: number;
+    status: LauncherChildProcessStatus;
+  }>;
+};
+
+export function launcherCommandAccepted(
+  commandId: string,
+  command: LauncherCommand,
+  message: string
+): LauncherCommandResponse {
+  return {
+    schemaVersion: 1,
+    commandId,
+    command,
+    status: "accepted",
+    provider: "launcher_protocol",
+    message,
+    activeWorkBlocked: false
+  };
+}
+```
+
+- [ ] **Step 5: Add deep-link parser**
+
+Create `desktop/electron/src/protocol/deepLink.ts`:
+
+```ts
+export type VibelutionDeepLink =
+  | { kind: "focus_launcher" }
+  | { kind: "open_workbench"; path: string }
+  | { kind: "lifecycle_intent"; action: string; idempotencyKey: string };
+
+export function parseVibelutionDeepLink(rawUrl: string): VibelutionDeepLink {
+  const url = new URL(rawUrl);
+  if (url.protocol !== "vibelution:") {
+    throw new Error(`unsupported protocol: ${url.protocol}`);
+  }
+  const route = `${url.hostname}${url.pathname}`;
+  if (route === "launcher/focus") {
+    return { kind: "focus_launcher" };
+  }
+  if (route === "workbench/open") {
+    const path = url.searchParams.get("path");
+    if (!path) {
+      throw new Error("missing workbench path");
+    }
+    return { kind: "open_workbench", path };
+  }
+  if (route === "lifecycle/intent") {
+    const action = url.searchParams.get("action");
+    const idempotencyKey = url.searchParams.get("idempotencyKey");
+    if (!action || !idempotencyKey) {
+      throw new Error("missing lifecycle intent action or idempotencyKey");
+    }
+    return { kind: "lifecycle_intent", action, idempotencyKey };
+  }
+  throw new Error(`unsupported deep link route: ${route}`);
+}
+```
+
+- [ ] **Step 6: Add protocol tests**
+
+Create `desktop/electron/tests/launcherProtocol.test.ts`:
+
+```ts
+import { describe, expect, it } from "vitest";
+import { launcherCommandAccepted } from "../src/protocol/launcherProtocol.js";
+
+describe("Launcher protocol", () => {
+  it("returns a machine-readable accepted response", () => {
+    expect(launcherCommandAccepted("cmd-1", "focus", "focusing launcher")).toEqual({
+      schemaVersion: 1,
+      commandId: "cmd-1",
+      command: "focus",
+      status: "accepted",
+      provider: "launcher_protocol",
+      message: "focusing launcher",
+      activeWorkBlocked: false
+    });
+  });
+});
+```
+
+Create `desktop/electron/tests/deepLink.test.ts`:
+
+```ts
+import { describe, expect, it } from "vitest";
+import { parseVibelutionDeepLink } from "../src/protocol/deepLink.js";
+
+describe("Vibelution deep links", () => {
+  it("parses launcher focus links", () => {
+    expect(parseVibelutionDeepLink("vibelution://launcher/focus")).toEqual({ kind: "focus_launcher" });
+  });
+
+  it("preserves Windows workspace paths", () => {
+    expect(
+      parseVibelutionDeepLink("vibelution://workbench/open?path=C%3A%5CUsers%5C17533%5CDesktop%5CVibelution")
+    ).toEqual({ kind: "open_workbench", path: "C:\\Users\\17533\\Desktop\\Vibelution" });
+  });
+
+  it("rejects unsupported protocols", () => {
+    expect(() => parseVibelutionDeepLink("https://example.com")).toThrow("unsupported protocol");
+  });
+});
+```
+
+- [ ] **Step 7: Add minimal preload**
 
 Create `desktop/electron/src/preload.ts`:
 
@@ -368,7 +636,7 @@ contextBridge.exposeInMainWorld("vibelutionLauncher", {
 });
 ```
 
-- [ ] **Step 5: Add minimal main process**
+- [ ] **Step 8: Add minimal main process**
 
 Create `desktop/electron/src/main.ts`:
 
@@ -410,7 +678,7 @@ app.on("window-all-closed", () => {
 });
 ```
 
-- [ ] **Step 6: Add a path test**
+- [ ] **Step 9: Add a path test**
 
 Create `desktop/electron/tests/appLock.test.ts`:
 
@@ -425,7 +693,7 @@ describe("Electron desktop paths", () => {
 });
 ```
 
-- [ ] **Step 7: Verify**
+- [ ] **Step 10: Verify**
 
 Run:
 
@@ -437,7 +705,7 @@ npm --prefix desktop/electron test -- --run
 
 Expected: TypeScript build passes and the Vitest path test passes.
 
-- [ ] **Step 8: Commit**
+- [ ] **Step 11: Commit**
 
 ```powershell
 git add desktop/electron/package.json desktop/electron/package-lock.json desktop/electron/tsconfig.json desktop/electron/src desktop/electron/tests
@@ -1605,6 +1873,23 @@ git commit -m "feat: record electron launcher supervisor evidence"
 
 ## Migration Gates
 
+### Gate 0: Protocol Boundary Ready
+
+Evidence required:
+
+```powershell
+npm --prefix desktop/electron run build
+npm --prefix desktop/electron test -- tests/deepLink.test.ts tests/launcherProtocol.test.ts
+pytest tests/test_web_runtime_routes.py -k "launcher and protocol" -q
+```
+
+Pass condition:
+
+- `vibelution://` deep links parse into typed intents without starting child processes.
+- Launcher command responses have one machine-readable JSON shape.
+- Unsupported deep links and blocked lifecycle actions produce safe rejections.
+- Existing Launcher control-token and active-work guard semantics remain authoritative.
+
 ### Gate 1: Electron Scaffold Ready
 
 Evidence required:
@@ -1618,6 +1903,7 @@ Pass condition:
 
 - Electron package compiles.
 - Single-instance lock tests pass.
+- Deep-link and Launcher protocol tests pass.
 - No runtime process is spawned during tests.
 
 ### Gate 2: Generic Window Provider Ready
@@ -1634,6 +1920,7 @@ Pass condition:
 
 - Status APIs expose `windowProvider` and `windowManaged`.
 - Compatibility `browserManaged` field remains stable during migration.
+- Launcher protocol responses can report provider state without Edge-specific field names.
 - UI status no longer depends on Edge-specific language.
 
 ### Gate 3: Electron Provider Can Open Launcher And Workbench
@@ -1748,7 +2035,7 @@ Recommended version treatment:
 When this plan is committed or implementation starts, sync `agent-runtime-core` memory with:
 
 ```text
-Electron Launcher supervisor plan created: single visible entry, Electron main as lifecycle supervisor, Workbench/backend/Runtime Manager/self-evolution workers as managed children, lifecycle intents for self-evolution restart/resume, and window provider migration from Edge app to Electron.
+Electron Launcher supervisor plan optimized with Codex reference findings: the reference repo does not provide Electron packaging to copy; the reusable pattern is deep-link desktop entry, app-server/runtime protocol boundary, machine-readable lifecycle commands, schema fixtures, and tests. Vibelution plan now keeps Electron as a thin single visible shell and supervisor over existing Launcher, Runtime Manager, FastAPI, runtime-scene, active-work guard, and lifecycle-intent contracts.
 ```
 
 ## Execution Handoff
@@ -1762,6 +2049,6 @@ docs/plans/2026-06-26-electron-launcher-supervisor-plan.md
 Recommended execution mode:
 
 1. Subagent-driven execution: one task per implementation slice, with review after each commit.
-2. Inline execution: only for Tasks 1-4, because later tasks touch lifecycle, packaging, Runtime Manager, self-evolution, and tests across multiple surfaces.
+2. Inline execution: only for Tasks 0-4, because later tasks touch lifecycle, packaging, Runtime Manager, self-evolution, and tests across multiple surfaces.
 
-First implementation slice should be Tasks 1-4 only. Do not start with packaging or self-evolution restart automation before the generic window provider and test alignment are stable.
+First implementation slice should be Tasks 0-4 only. Do not start with packaging or self-evolution restart automation before the deep-link contract, Launcher protocol response shape, generic window provider, and test alignment ledger are stable.
