@@ -8,6 +8,20 @@ $desktopLaunchProfileWriter = Join-Path $electronDir "dist/scripts/writeLaunchPr
 $operatorConfigPath = Join-Path ([Environment]::GetFolderPath("MyDocuments")) "Vibelution/config/config.toml"
 $knownCodexPythonPath = Join-Path $env:USERPROFILE ".cache/codex-runtimes/codex-primary-runtime/dependencies/python/python.exe"
 
+function Invoke-CheckedNative {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$FilePath,
+        [Parameter(Mandatory = $true)]
+        [string[]]$ArgumentList
+    )
+
+    & $FilePath @ArgumentList
+    if ($LASTEXITCODE -ne 0) {
+        throw "$FilePath failed with exit code $LASTEXITCODE"
+    }
+}
+
 function Resolve-PythonPathForDesktopProfile {
     if ($env:VIBELUTION_PYTHON_PATH -and $env:VIBELUTION_PYTHON_PATH.Trim()) {
         return $env:VIBELUTION_PYTHON_PATH.Trim()
@@ -21,16 +35,18 @@ function Resolve-PythonPathForDesktopProfile {
     return ""
 }
 
-npm --prefix $electronDir install
-npm --prefix $electronDir run package:dir
+Invoke-CheckedNative npm @("--prefix", $electronDir, "install")
+Invoke-CheckedNative npm @("--prefix", $electronDir, "run", "package:dir")
 
 $pythonPath = Resolve-PythonPathForDesktopProfile
 if (-not $pythonPath) {
     throw "Unable to resolve a Python executable for the Electron launch profile. Set VIBELUTION_PYTHON_PATH or PYTHON before packaging."
 }
 
-node $desktopLaunchProfileWriter `
-    --resources-root $desktopResourcesDir `
-    --workspace-root $projectDir `
-    --operator-config $operatorConfigPath `
-    --python-path $pythonPath
+Invoke-CheckedNative node @(
+    $desktopLaunchProfileWriter,
+    "--resources-root", $desktopResourcesDir,
+    "--workspace-root", $projectDir,
+    "--operator-config", $operatorConfigPath,
+    "--python-path", $pythonPath
+)
