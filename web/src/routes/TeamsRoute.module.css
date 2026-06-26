@@ -1836,7 +1836,7 @@
 .teamMemoryMemberHeading,
 .teamMemoryMemberCard {
   display: grid;
-  grid-template-columns: minmax(160px, 0.9fr) minmax(120px, 0.7fr) minmax(90px, 0.45fr) minmax(108px, 0.5fr);
+  grid-template-columns: minmax(180px, 0.8fr) minmax(160px, 0.75fr) max-content max-content;
   gap: 8px;
   align-items: center;
   min-width: 0;
@@ -1856,17 +1856,18 @@
 }
 
 .teamMemoryMemberCard {
-  min-height: 38px;
-  padding: 5px 7px;
+  min-height: 32px;
+  padding: 3px 7px;
   border: 1px solid color-mix(in srgb, var(--border-soft) 86%, transparent);
   border-radius: 6px;
   background: color-mix(in srgb, var(--surface-card) 82%, transparent);
 }
 
 .teamMemoryMemberIdentity {
-  display: grid;
+  display: flex;
   min-width: 0;
-  gap: 1px;
+  align-items: center;
+  gap: 6px;
 }
 
 .teamMemoryMemberIdentity strong,
@@ -1885,6 +1886,10 @@
 }
 
 .teamMemoryMemberIdentity span {
+  flex: 0 0 auto;
+  padding: 1px 5px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface-panel) 74%, transparent);
   color: var(--fg-subtle);
   font-size: 0.61rem;
   font-weight: 760;
