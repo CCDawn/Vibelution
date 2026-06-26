@@ -9172,14 +9172,9 @@ def test_evolution_store_is_isolated_from_real_runtime_during_pytest():
 
 
 def test_evolution_store_delete_snapshot_clears_active_and_repoints_latest(tmp_path, monkeypatch):
-    runs_dir = tmp_path / "supervised" / "runs"
-    index_path = tmp_path / "supervised" / "index.json"
-
-    def fake_kind_paths(kind: str):
-        assert kind == "supervised"
-        return runs_dir, index_path
-
-    monkeypatch.setattr(evolution_store, "_kind_paths", fake_kind_paths)
+    store = work_run_store.WorkRunStore(root=tmp_path / "evolution")
+    monkeypatch.setattr(evolution_store, "_WORK_RUN_STORE", store)
+    runs_dir = tmp_path / "evolution" / "supervised" / "runs"
     runs_dir.mkdir(parents=True, exist_ok=True)
 
     old = {
@@ -9209,14 +9204,9 @@ def test_evolution_store_delete_snapshot_clears_active_and_repoints_latest(tmp_p
 
 
 def test_evolution_store_delete_corrupt_index_only_run_clears_index(tmp_path, monkeypatch):
-    runs_dir = tmp_path / "supervised" / "runs"
-    index_path = tmp_path / "supervised" / "index.json"
-
-    def fake_kind_paths(kind: str):
-        assert kind == "supervised"
-        return runs_dir, index_path
-
-    monkeypatch.setattr(evolution_store, "_kind_paths", fake_kind_paths)
+    store = work_run_store.WorkRunStore(root=tmp_path / "evolution")
+    monkeypatch.setattr(evolution_store, "_WORK_RUN_STORE", store)
+    runs_dir = tmp_path / "evolution" / "supervised" / "runs"
     runs_dir.mkdir(parents=True, exist_ok=True)
 
     evolution_store.save_run_index("supervised", active_run_id="missing-run", latest_run_id="missing-run")
