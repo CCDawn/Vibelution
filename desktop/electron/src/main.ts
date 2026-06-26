@@ -109,7 +109,13 @@ function createWindowProvider(paths: DesktopPaths, bootstrap: LauncherBootstrapR
     {
       createLauncherWindow,
       createWorkbenchWindow,
-      reportState: (state) => reportManagedWindowState(paths, bootstrap, state)
+      reportState: (state) => reportManagedWindowState(paths, bootstrap, state),
+      shouldInterceptLauncherClose: () => !shutdownApproved,
+      onLauncherCloseRequest: () => {
+        void requestDesktopShellExit().catch((error: unknown) => {
+          console.warn(error instanceof Error ? error.message : String(error));
+        });
+      }
     }
   );
 }

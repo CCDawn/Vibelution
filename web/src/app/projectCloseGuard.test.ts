@@ -8,6 +8,7 @@ import {
   hasRecentControlledProjectLifecycleOperation,
   markControlledProjectLifecycleOperation,
   projectWindowCloseGuardMessage,
+  shouldArmBrowserProjectCloseGuard,
   shouldBlockProjectWindowClose,
   shouldBlockWorkbenchWindowClose,
 } from "./projectCloseGuard";
@@ -241,6 +242,12 @@ describe("project close guard", () => {
     expect(applyBeforeUnloadProjectCloseGuard(event, "Stop the project first.")).toBe("Stop the project first.");
     expect(event.preventDefault).toHaveBeenCalledTimes(1);
     expect(event.returnValue).toBe("Stop the project first.");
+  });
+
+  it("does not arm browser beforeunload guards inside the Electron desktop shell", () => {
+    expect(shouldArmBrowserProjectCloseGuard({ closeBlocked: true, electronDesktopShell: true })).toBe(false);
+    expect(shouldArmBrowserProjectCloseGuard({ closeBlocked: false, electronDesktopShell: true })).toBe(false);
+    expect(shouldArmBrowserProjectCloseGuard({ closeBlocked: true, electronDesktopShell: false })).toBe(true);
   });
 
   it("builds bounded telemetry for blocked close attempts", () => {

@@ -19,6 +19,10 @@ type CookieLikeDocument = {
   cookie: string;
 };
 
+type DesktopShellLike = {
+  vibelutionLauncher?: unknown;
+};
+
 const CONTROLLED_LIFECYCLE_COOKIE = "vibelution_lifecycle_operation";
 const CONTROLLED_LIFECYCLE_WINDOW_MS = 120_000;
 const OPEN_PROJECT_STATES = new Set(["ready", "open", "partial", "starting", "running", "restarting", "opening"]);
@@ -126,6 +130,17 @@ export function shouldBlockWorkbenchWindowClose(options: WorkbenchCloseGuardOpti
     return false;
   }
   return normalizeState(options.runtimeControllerState) !== "closing";
+}
+
+export function isElectronDesktopShell(globalLike: DesktopShellLike = globalThis as DesktopShellLike) {
+  return typeof globalLike.vibelutionLauncher === "object" && globalLike.vibelutionLauncher !== null;
+}
+
+export function shouldArmBrowserProjectCloseGuard(options: {
+  closeBlocked: boolean;
+  electronDesktopShell?: boolean;
+}) {
+  return options.closeBlocked && !options.electronDesktopShell;
 }
 
 export function markControlledProjectLifecycleOperation(
