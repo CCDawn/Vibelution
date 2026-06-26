@@ -911,10 +911,10 @@ def test_invoke_records_safe_payload_shape_without_prompt_text(monkeypatch):
     assert "user-secret-message" not in serialized
 
 
-def test_llm_error_exposes_legacy_error_type_alias():
+def test_llm_error_stores_error_category():
     error = LLMError("provider_protocol_error", "bad request", retryable=False)
 
-    assert error.error_type == "provider_protocol_error"
+    assert error.category == "provider_protocol_error"
 
 
 def test_invoke_failure_records_category_without_masking_provider_error(monkeypatch):

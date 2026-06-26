@@ -5,8 +5,6 @@ from __future__ import annotations
 _EXPORTS = {
     "AvatarManager": ("core.ui.ascii_art", "AvatarManager"),
     "get_avatar_manager": ("core.ui.ascii_art", "get_avatar_manager"),
-    "get_lobster_banner": ("core.ui.ascii_art", "get_lobster_banner"),
-    "get_status_lobster": ("core.ui.ascii_art", "get_status_lobster"),
     "UIManager": ("core.ui.cli_ui", "UIManager"),
     "get_ui": ("core.ui.cli_ui", "get_ui"),
     "ui_error": ("core.ui.cli_ui", "ui_error"),

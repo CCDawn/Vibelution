@@ -58,15 +58,12 @@ class ToolLifecycleBridge:
         "read_memory_tool",
         "get_memory_summary_tool",
         "code_symbol_tool",
-        "code_analysis_tool",  # legacy alias, kept for compatibility with older prompts
-        "codebase_analyzer_tool",  # legacy alias, kept for compatibility with older prompts
         "conversation_log_inspect_tool",
         "history_search_tool",
         "history_fetch_tool",
         "history_timeline_tool",
         "history_checkpoint_tool",
         "search_memory_tool",
-        "key_info_extractor_tool",  # legacy alias
     }
 
     DEFAULT_PARALLEL_READONLY_WORKERS: ClassVar[int] = 4

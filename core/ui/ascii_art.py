@@ -1601,24 +1601,3 @@ def get_avatar_manager(preset: str = None) -> AvatarManager:
     elif preset:
         _avatar_manager.switch(preset)
     return _avatar_manager
-
-
-def get_lobster_banner(name: str = "Baby Claw", version: str = "v1.0", pet_data: dict = None) -> str:
-    """生成 Banner（兼容旧接口）"""
-    return get_avatar_manager().get_banner(name, version, pet_data)
-
-
-def get_status_lobster(status: str) -> str:
-    """根据状态获取形象（兼容旧接口）"""
-    return get_avatar_manager().get_art(status)
-
-
-# 保留旧的全局常量（兼容）
-LOBSTER_HAPPY = LobsterASCII.HAPPY
-LOBSTER_THINKING = LobsterASCII.THINKING
-LOBSTER_WORKING = LobsterASCII.WORKING
-LOBSTER_SLEEPING = LobsterASCII.SLEEPING
-LOBSTER_SURPRISED = LobsterASCII.SURPRISED
-LOBSTER_SUCCESS = LobsterASCII.SUCCESS
-LOBSTER_SAD = LobsterASCII.SAD
-LOBSTER_LOVE = LobsterASCII.LOVE
