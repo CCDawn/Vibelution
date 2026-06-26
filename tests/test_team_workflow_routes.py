@@ -2062,6 +2062,55 @@ def test_team_workflow_routes_run_knowledge_collection_ingestion(tmp_path, monke
     assert deliveries and deliveries[0]["kind"] == "challenge_cup_knowledge_ingestion_request"
 
 
+def test_team_workflow_route_completes_knowledge_collection_in_background(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    client = _client()
+    captured = {}
+
+    def fake_start_completion(team_id, payload):
+        captured["team_id"] = team_id
+        captured["payload"] = payload
+        return {
+            "accepted": True,
+            "executionMode": "background",
+            "activeWorkRun": {
+                "runId": "work-run-knowledge-complete",
+                "status": "running",
+            },
+        }
+
+    monkeypatch.setattr(team_workflows, "start_knowledge_collection_completion_background", fake_start_completion, raising=False)
+    team = client.post("/api/teams", json={"name": "挑战杯科研团队"}).json()
+
+    response = client.post(
+        f"/api/teams/{team['teamId']}/workflow-orchestration/knowledge-collection/complete",
+        json={
+            "sourceQualityAgentId": "资料审查 Agent",
+            "candidateGraphAgentId": "候选关系 Agent",
+            "stewardAgentId": "知识库管理员",
+            "targetDomain": "神经预测编码",
+            "maxCandidates": 16,
+        },
+    )
+
+    assert response.status_code == 201, response.text
+    assert response.json()["accepted"] is True
+    assert response.json()["executionMode"] == "background"
+    assert captured["team_id"] == team["teamId"]
+    assert captured["payload"]["backgroundExecution"] is True
+    assert captured["payload"]["autoCreateKnowledgeBase"] is True
+    assert captured["payload"]["autoSubmit"] is True
+    assert captured["payload"]["autoReviewSource"] is True
+    assert captured["payload"]["autoApprove"] is True
+    assert captured["payload"]["notifyStewardAgent"] is False
+    assert captured["payload"]["wakeStewardAgent"] is False
+    assert captured["payload"]["sourceQualityAgentId"] == "资料审查 Agent"
+    assert captured["payload"]["candidateGraphAgentId"] == "候选关系 Agent"
+    assert captured["payload"]["stewardAgentId"] == "知识库管理员"
+    assert captured["payload"]["targetDomain"] == "神经预测编码"
+    assert captured["payload"]["maxCandidates"] == 16
+
+
 def test_team_workflow_routes_extract_source_collection_candidates(monkeypatch):
     client = _client()
     captured = {}

@@ -58,6 +58,7 @@ from core.web.services.team_workflow_orchestration_service import (
     run_knowledge_collection_ingestion,
     run_knowledge_ingestion_precheck,
     seed_source_collection_agent_session_context,
+    start_knowledge_collection_completion_background,
     start_knowledge_collection_ingestion_background,
     start_source_collection_stage_session_task,
     start_research_stage_round,
@@ -1078,6 +1079,38 @@ def team_workflow_knowledge_collection_ingest(team_id: str, payload: KnowledgeCo
                 "autoApprove": payload.autoApprove,
                 "notifyStewardAgent": payload.notifyStewardAgent,
                 "wakeStewardAgent": payload.wakeStewardAgent,
+            },
+        )
+
+
+@router.post("/teams/{team_id}/workflow-orchestration/knowledge-collection/complete", status_code=status.HTTP_201_CREATED)
+def team_workflow_knowledge_collection_complete(team_id: str, payload: KnowledgeCollectionIngestionPayload) -> dict:
+    try:
+        payload_dict = payload.model_dump()
+        payload_dict.update(
+            {
+                "backgroundExecution": True,
+                "autoCreateKnowledgeBase": True,
+                "autoSubmit": True,
+                "autoReviewSource": True,
+                "autoApprove": True,
+                "notifyStewardAgent": False,
+                "wakeStewardAgent": False,
+            }
+        )
+        return start_knowledge_collection_completion_background(team_id, payload_dict)
+    except TeamNotFoundError as exc:
+        _raise_team_workflow_route_error("knowledge_collection.complete", team_id, exc, status_code=404)
+    except (TeamServiceError, TeamWorkflowOrchestrationError) as exc:
+        _raise_team_workflow_route_error(
+            "knowledge_collection.complete",
+            team_id,
+            exc,
+            status_code=422,
+            fields={
+                "stewardAgentId": payload.stewardAgentId,
+                "knowledgeBaseId": payload.knowledgeBaseId,
+                "autoApprove": True,
             },
         )
 
