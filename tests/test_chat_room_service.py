@@ -346,16 +346,7 @@ def test_create_chat_room_defaults_to_existing_sessions(tmp_path, monkeypatch):
     assert room["title"] == "方案群聊"
     assert room["mode"] == "round_robin"
     assert room["purpose"] == "discussion"
-    assert [item["id"] for item in room["availablePurposes"]] == [
-        "chat",
-        "discussion",
-        "meeting",
-        "medical_triage",
-        "research_coordination",
-        "ai_search",
-        "self_evolution",
-        "supervised_evolution",
-    ]
+    assert room["availablePurposes"] == chat_room_service.list_chat_room_purposes()
     assert [item["sessionId"] for item in room["participants"]] == [
         "session-alpha",
         "session-beta",

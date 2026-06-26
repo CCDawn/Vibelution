@@ -8,6 +8,8 @@ import subprocess
 
 from pathlib import Path
 
+import pytest
+
 from config import ConfigLoader, Settings
 
 
@@ -51,6 +53,17 @@ model = "{model}"
 
 
 def test_project_root_no_longer_tracks_operator_config_files():
+    git_probe = subprocess.run(
+        ["git", "rev-parse", "--is-inside-work-tree"],
+        cwd=PROJECT_ROOT,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    if git_probe.returncode != 0:
+        pytest.skip("Git tracking assertion requires a Git worktree; remote test archives omit .git metadata.")
+
     tracked = subprocess.run(
         ["git", "ls-files", "--", "config.toml", "config.example.toml"],
         cwd=PROJECT_ROOT,
