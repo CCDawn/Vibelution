@@ -93,6 +93,15 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).not.toContain('import { COMPOSER_SESSION_REFERENCE_MIME, ConversationView } from "../components/conversation/ConversationView"');
   });
 
+  it("keeps live assistant output in an active turn layer outside committed session messages", () => {
+    expect(routeSource).toContain("activeTurnLayersBySession");
+    expect(routeSource).toContain("activeTurnMessage={activeTurnMessage}");
+    expect(routeSource).toContain("mergeAssistantDeltaIntoActiveTurnLayer");
+    expect(routeSource).toContain("isActiveTurnSettledByDetail");
+    expect(routeSource).not.toContain("mergeLiveAssistantMessagesIntoSessionDetail");
+    expect(routeSource).not.toContain("setLiveAssistantMessagesBySession");
+  });
+
   it("disables image attachment affordance when the active Agent image route model cannot read images", () => {
     expect(routeSource).toContain("modelImageInputSupportById");
     expect(routeSource).toContain("imageInputModelIdForAgent(activeSessionAgent, detail?.dialogueModelId)");
@@ -622,9 +631,10 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("const rawSessionDetail = sessionDetailQuery.data");
     expect(routeSource).toContain("const selectedSessionDetail =");
     expect(routeSource).toContain("rawSessionDetail && rawSessionDetail.id === activeSessionId ? rawSessionDetail : undefined");
-    expect(routeSource).toContain("const liveAssistantMessages = activeSessionId ? liveAssistantMessagesBySession[activeSessionId] : undefined");
-    expect(routeSource).toContain("const detail = useMemo(");
-    expect(routeSource).toContain("mergeLiveAssistantMessagesIntoSessionDetail(selectedSessionDetail, liveAssistantMessages)");
+    expect(routeSource).toContain("const detail = selectedSessionDetail");
+    expect(routeSource).toContain("const activeTurnLayer = activeSessionId ? activeTurnLayersBySession[activeSessionId] : undefined");
+    expect(routeSource).toContain("const activeTurnMessage = useMemo(");
+    expect(routeSource).toContain("activeTurnLayerToConversationMessage(activeTurnLayer)");
     expect(routeSource).toContain("const runtimeMatchesSelectedSession = Boolean(");
     expect(routeSource).toContain("runtimeActiveChatTurnSessionIds.has(activeSessionId)");
     expect(routeSource).toContain("const runtimeMismatchLine = runtimeActiveChatTurnSessionId && !runtimeMatchesSelectedSession");
@@ -908,8 +918,8 @@ describe("ChatCodingRoute layout contract", () => {
 
   it("coalesces high-frequency direct session stream snapshots before updating UI cache", () => {
     expect(routeSource).toContain("const SESSION_STREAM_MIN_APPLY_INTERVAL_MS = 350");
-    expect(routeSource).toContain("function sessionDetailWithoutLiveAssistantOverlay(detail: SessionDetail)");
-    expect(routeSource).toContain("sessionDetailSnapshotKey(comparablePrevious) === sessionDetailSnapshotKey(detail)");
+    expect(routeSource).toContain("sessionDetailSnapshotKey(previous) === sessionDetailSnapshotKey(detail)");
+    expect(routeSource).toContain("setActiveTurnLayerForSession(current, streamSessionId, undefined)");
     expect(routeSource).toContain("let pendingDetail: SessionDetail | null = null");
     expect(routeSource).toContain("function queueSessionDetail(detail: SessionDetail, payloadLength: number)");
     expect(routeSource).toContain("browser.session_stream.snapshot_queued");
@@ -920,34 +930,18 @@ describe("ChatCodingRoute layout contract", () => {
   it("applies lightweight assistant delta stream events on browser frames without timer coalescing", () => {
     expect(routeSource).not.toContain("SESSION_ASSISTANT_DELTA_MIN_APPLY_INTERVAL_MS");
     expect(routeSource).not.toContain("SESSION_ASSISTANT_DELTA_IMMEDIATE_FLUSH_CHARS");
-    expect(routeSource).toContain("function liveAssistantOverlayTurnId(turnId: string)");
-    expect(routeSource).toContain("function liveAssistantMessageId(sessionId: string, turnId: string)");
-    expect(routeSource).toContain("function liveAssistantMessageTurnId(message: ConversationMessage)");
-    expect(routeSource).toContain("function isLiveAssistantMessageForTurn(message: ConversationMessage, turnId: string)");
-    expect(routeSource).toContain("function uniqueLiveAssistantMessagesByTurn(messages: ConversationMessage[])");
-    expect(routeSource).toContain("function mergeSessionDetailWithLiveAssistantOverlay(");
-    expect(routeSource).toContain("function mergeAssistantDeltaIntoMessages(");
-    expect(routeSource).toContain("function mergeAssistantDeltaIntoLiveMessages(");
-    expect(routeSource).toContain("function mergeLiveAssistantMessagesIntoSessionDetail(");
-    expect(routeSource).toContain("liveAssistantMessagesBySession");
-    expect(routeSource).toContain("liveAssistantMessagesBySessionRef");
-    expect(routeSource).toContain("setLiveAssistantMessagesForSession(current, streamSessionId, pendingMessages)");
-    expect(routeSource).toContain("kind: \"session_live_overlay\"");
-    expect(routeSource).toContain("const settledAssistantTurnIds = new Set(");
-    expect(routeSource).toContain("const detailLiveTurnIds = new Set(");
+    expect(routeSource).toContain("activeTurnLayersBySession");
+    expect(routeSource).toContain("activeTurnLayersBySessionRef");
+    expect(routeSource).toContain("mergeAssistantDeltaIntoActiveTurnLayer(pendingLayer, entry.payload)");
+    expect(routeSource).toContain("setActiveTurnLayerForSession(current, streamSessionId, pendingLayer)");
+    expect(routeSource).toContain("isActiveTurnSettledByDetail(activeLayer, detail)");
+    expect(routeSource).toContain("activeTurnMessage={activeTurnMessage}");
     expect(routeSource).toContain("function isStaleLedgerUpdate(currentSeq: unknown, incomingSeq: unknown)");
-    expect(routeSource).toContain("if (isStaleLedgerUpdate(latestLiveAssistantLedgerSeq(messages), payload.ledgerSeq))");
-    expect(routeSource).toContain("ledgerSeq: maxLedgerSeq(previous?.metadata?.ledgerSeq, payload.ledgerSeq)");
-    expect(routeSource).toContain("const liveTurnId = liveAssistantOverlayTurnId(payload.turnId)");
-    expect(routeSource).toContain("const firstLiveIndex = originalMessages.findIndex((message) => isLiveAssistantMessageForTurn(message, liveTurnId))");
-    expect(routeSource).toContain("isLiveAssistantMessageForTurn(message, liveTurnId)");
-    expect(routeSource).toContain("const contentDelta = payload.contentDelta ?? (payload.replaceContent || !previous ? payload.content ?? \"\" : \"\")");
-    expect(routeSource).toContain("const thoughtDelta = payload.thoughtDelta ?? (payload.replaceThought || !previous ? payload.thought ?? \"\" : \"\")");
-    expect(routeSource).toContain("const nextContent = payload.replaceContent");
-    expect(routeSource).toContain("function mergeLiveFeedbackEvents(");
-    expect(routeSource).toContain("feedbackEventKey(event)");
-    expect(routeSource).toContain("const nextFeedbackEvents = mergeLiveFeedbackEvents(previous?.feedbackEvents, payload.feedbackEvents)");
-    expect(routeSource).toContain("return mergeSessionDetailWithLiveAssistantOverlay(previous, detail)");
+    expect(routeSource).not.toContain("function mergeLiveAssistantMessagesIntoSessionDetail(");
+    expect(routeSource).not.toContain("kind: \"session_live_overlay\"");
+    expect(routeSource).toContain("const projectedLayer = mergeAssistantDeltaIntoActiveTurnLayer(committedAssistantDeltaLayer, payload)");
+    expect(routeSource).toContain("committedAssistantDeltaLayer = pendingLayer");
+    expect(routeSource).toContain("pendingTextLength: String(pendingLayer?.content ?? \"\").length + String(pendingLayer?.thought ?? \"\").length");
     expect(routeSource).toContain("let pendingAssistantDeltaPayloads: Array<{");
     expect(routeSource).toContain("let assistantDeltaApplyFrame: number | null = null");
     expect(routeSource).toContain("function applyPendingAssistantDeltas(reason: \"frame\" | \"close\" | \"final\")");

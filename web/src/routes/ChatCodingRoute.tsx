@@ -78,7 +78,6 @@ import {
   TeamListPayload,
   ConversationMessage,
   ConversationAttachment,
-  ConversationFeedbackEvent,
   ToolCall,
 } from "../api/types";
 import {
@@ -157,6 +156,11 @@ import {
   useConversationIndexModel,
   type ConversationIndexDynamicGroupKey,
 } from "./conversationIndexModel";
+import {
+  activeTurnLayerToConversationMessage,
+  isActiveTurnSettledByDetail,
+  mergeAssistantDeltaIntoActiveTurnLayer,
+} from "./chatActiveTurnLayer";
 import {
   isChildSession,
   isAgentRootSession,
@@ -2007,253 +2011,6 @@ function sessionDetailSnapshotKey(detail: SessionDetail): string {
   ].join("|");
 }
 
-function liveAssistantOverlayTurnId(turnId: string) {
-  const normalizedTurnId = String(turnId || "").trim() || "current";
-  return normalizedTurnId;
-}
-
-function liveAssistantMessageId(sessionId: string, turnId: string) {
-  const normalizedTurnId = liveAssistantOverlayTurnId(turnId);
-  return `${sessionId}-message-live-${normalizedTurnId}`;
-}
-
-function messageTurnId(message: ConversationMessage) {
-  return String(message.metadata?.turnId ?? "").trim();
-}
-
-function isLiveAssistantDeltaMessage(message: ConversationMessage) {
-  return message.role === "assistant" && String(message.metadata?.kind ?? "").trim() === "session_live_overlay";
-}
-
-function liveAssistantMessageTurnId(message: ConversationMessage) {
-  return messageTurnId(message) || "current";
-}
-
-function isLiveAssistantMessageForTurn(message: ConversationMessage, turnId: string) {
-  return isLiveAssistantDeltaMessage(message) && liveAssistantMessageTurnId(message) === liveAssistantOverlayTurnId(turnId);
-}
-
-function uniqueLiveAssistantMessagesByTurn(messages: ConversationMessage[]) {
-  const byTurnId = new Map<string, ConversationMessage>();
-  for (const message of messages) {
-    byTurnId.set(liveAssistantMessageTurnId(message), message);
-  }
-  return [...byTurnId.values()];
-}
-
-function feedbackEventKey(event: ConversationFeedbackEvent) {
-  const sequence = Number(event.sequence ?? 0);
-  if (Number.isFinite(sequence) && sequence > 0) {
-    return `seq:${sequence}`;
-  }
-  return [
-    event.kind ?? "",
-    event.name ?? "",
-    event.status ?? "",
-    event.summary ?? "",
-    event.resultPreview ?? "",
-  ].join(":");
-}
-
-function mergeLiveFeedbackEvents(
-  previous: ConversationFeedbackEvent[] | undefined,
-  incoming: ConversationFeedbackEvent[] | undefined,
-) {
-  if (!incoming) {
-    return previous ?? [];
-  }
-  if (!incoming.length) {
-    return [];
-  }
-  const merged = new Map<string, ConversationFeedbackEvent>();
-  for (const event of previous ?? []) {
-    merged.set(feedbackEventKey(event), event);
-  }
-  for (const event of incoming) {
-    merged.set(feedbackEventKey(event), event);
-  }
-  return [...merged.values()].sort((left, right) => Number(left.sequence ?? 0) - Number(right.sequence ?? 0));
-}
-
-function mergeSessionDetailWithLiveAssistantOverlay(
-  previous: SessionDetail | undefined,
-  detail: SessionDetail,
-): SessionDetail {
-  if (isStaleLedgerUpdate(previous?.ledgerSeq, detail.ledgerSeq)) {
-    return previous ?? detail;
-  }
-  const previousLiveMessages = uniqueLiveAssistantMessagesByTurn((previous?.messages ?? []).filter(isLiveAssistantDeltaMessage));
-  if (previousLiveMessages.length === 0) {
-    return detail;
-  }
-  const settledAssistantTurnIds = new Set(
-    (detail.messages ?? [])
-      .filter((message) => message.role === "assistant" && !isLiveAssistantDeltaMessage(message))
-      .map(messageTurnId)
-      .filter(Boolean),
-  );
-  const detailLiveTurnIds = new Set(
-    (detail.messages ?? [])
-      .filter(isLiveAssistantDeltaMessage)
-      .map(liveAssistantMessageTurnId)
-      .filter(Boolean),
-  );
-  const detailMessageIds = new Set((detail.messages ?? []).map((message) => message.id));
-  const liveMessages = previousLiveMessages.filter((message) => {
-    const turnId = liveAssistantMessageTurnId(message);
-    return !detailMessageIds.has(message.id) && !detailLiveTurnIds.has(turnId) && !settledAssistantTurnIds.has(turnId);
-  });
-  if (liveMessages.length === 0) {
-    return detail;
-  }
-  return {
-    ...detail,
-    messages: [...(detail.messages ?? []), ...liveMessages],
-  };
-}
-
-function sessionDetailWithoutLiveAssistantOverlay(detail: SessionDetail): SessionDetail {
-  const messages = detail.messages ?? [];
-  if (!messages.some(isLiveAssistantDeltaMessage)) {
-    return detail;
-  }
-  return {
-    ...detail,
-    messages: messages.filter((message) => !isLiveAssistantDeltaMessage(message)),
-  };
-}
-
-function mergeAssistantDeltaIntoMessages(
-  originalMessages: ConversationMessage[],
-  payload: Extract<SessionStreamEvent, { type: "assistant_delta" }>,
-): ConversationMessage[] {
-  const liveMessageId = liveAssistantMessageId(payload.sessionId, payload.turnId);
-  const liveTurnId = liveAssistantOverlayTurnId(payload.turnId);
-  const now = payload.updatedAt || new Date().toISOString();
-  const firstLiveIndex = originalMessages.findIndex((message) => isLiveAssistantMessageForTurn(message, liveTurnId));
-  const messages = originalMessages.filter((message, index) =>
-    !isLiveAssistantDeltaMessage(message) || (index === firstLiveIndex && isLiveAssistantMessageForTurn(message, liveTurnId))
-  );
-  const liveIndex = messages.findIndex((message) => isLiveAssistantMessageForTurn(message, liveTurnId));
-  const previous = liveIndex >= 0 ? messages[liveIndex] : undefined;
-  const contentDelta = payload.contentDelta ?? (payload.replaceContent || !previous ? payload.content ?? "" : "");
-  const thoughtDelta = payload.thoughtDelta ?? (payload.replaceThought || !previous ? payload.thought ?? "" : "");
-  const nextContent = payload.replaceContent
-    ? contentDelta
-    : `${previous?.content ?? ""}${contentDelta}`;
-  const nextThought = payload.replaceThought
-    ? thoughtDelta
-    : `${previous?.thought ?? ""}${thoughtDelta}`;
-  const nextFeedbackEvents = mergeLiveFeedbackEvents(previous?.feedbackEvents, payload.feedbackEvents);
-  if (!nextContent && !nextThought && !payload.stage && !nextFeedbackEvents.length) {
-    return messages.filter((message) => message.id !== liveMessageId);
-  }
-  const nextLiveMessage: ConversationMessage = {
-    id: liveMessageId,
-    role: "assistant",
-    content: nextContent,
-    timestamp: now,
-    streaming: !payload.done,
-    streamStage: payload.stage || undefined,
-    thought: nextThought || undefined,
-    feedbackEvents: nextFeedbackEvents,
-    timelineItems: payload.timelineItems ?? previous?.timelineItems,
-    metadata: {
-      ...(previous?.metadata ?? {}),
-      kind: "session_live_overlay",
-      turnId: liveTurnId,
-      ledgerSeq: maxLedgerSeq(previous?.metadata?.ledgerSeq, payload.ledgerSeq),
-    },
-  };
-  if (liveIndex >= 0) {
-    const previousLiveMessage = messages[liveIndex];
-    const merged: ConversationMessage = {
-      ...previousLiveMessage,
-      ...nextLiveMessage,
-      mentalSnapshot: previousLiveMessage.mentalSnapshot,
-      toolCalls: previousLiveMessage.toolCalls,
-      timelineItems: nextLiveMessage.timelineItems ?? previousLiveMessage.timelineItems,
-    };
-    return [
-      ...messages.slice(0, liveIndex),
-      merged,
-      ...messages.slice(liveIndex + 1),
-    ];
-  }
-  return [...messages, nextLiveMessage];
-}
-
-function mergeLiveAssistantMessagesIntoSessionDetail(
-  detail: SessionDetail | undefined,
-  liveMessages: ConversationMessage[] | undefined,
-): SessionDetail | undefined {
-  if (!detail || !liveMessages?.length) {
-    return detail;
-  }
-  return mergeSessionDetailWithLiveAssistantOverlay(
-    {
-      ...detail,
-      messages: [...(detail.messages ?? []), ...liveMessages],
-    },
-    detail,
-  );
-}
-
-function latestLiveAssistantLedgerSeq(messages: ConversationMessage[] | undefined) {
-  let latest = 0;
-  for (const message of messages ?? []) {
-    latest = Math.max(latest, normalizedLedgerSeq(message.metadata?.ledgerSeq));
-  }
-  return latest > 0 ? latest : undefined;
-}
-
-function mergeAssistantDeltaIntoLiveMessages(
-  messages: ConversationMessage[] | undefined,
-  payload: Extract<SessionStreamEvent, { type: "assistant_delta" }>,
-): ConversationMessage[] {
-  if (isStaleLedgerUpdate(latestLiveAssistantLedgerSeq(messages), payload.ledgerSeq)) {
-    return messages ?? [];
-  }
-  return mergeAssistantDeltaIntoMessages(messages ?? [], payload);
-}
-
-function sameLiveAssistantMessages(left: ConversationMessage[] | undefined, right: ConversationMessage[] | undefined) {
-  const leftMessages = left ?? [];
-  const rightMessages = right ?? [];
-  if (leftMessages.length !== rightMessages.length) {
-    return false;
-  }
-  return leftMessages.every((message, index) => message === rightMessages[index]);
-}
-
-function setLiveAssistantMessagesForSession(
-  current: Record<string, ConversationMessage[]>,
-  sessionId: string,
-  messages: ConversationMessage[],
-) {
-  const normalizedSessionId = String(sessionId || "").trim();
-  if (!normalizedSessionId) {
-    return current;
-  }
-  const previous = current[normalizedSessionId];
-  const nextMessages = messages.filter(isLiveAssistantDeltaMessage);
-  if (sameLiveAssistantMessages(previous, nextMessages)) {
-    return current;
-  }
-  if (!nextMessages.length) {
-    if (!previous) {
-      return current;
-    }
-    const next = { ...current };
-    delete next[normalizedSessionId];
-    return next;
-  }
-  return {
-    ...current,
-    [normalizedSessionId]: nextMessages,
-  };
-}
-
 function normalizedLedgerSeq(value: unknown): number {
   const numeric = Number(value ?? 0);
   return Number.isFinite(numeric) && numeric > 0 ? numeric : 0;
@@ -2265,9 +2022,30 @@ function isStaleLedgerUpdate(currentSeq: unknown, incomingSeq: unknown): boolean
   return current > 0 && incoming > 0 && incoming < current;
 }
 
-function maxLedgerSeq(left: unknown, right: unknown): number | undefined {
-  const max = Math.max(normalizedLedgerSeq(left), normalizedLedgerSeq(right));
-  return max > 0 ? max : undefined;
+function setActiveTurnLayerForSession(
+  current: Record<string, ConversationMessage>,
+  sessionId: string,
+  layer: ConversationMessage | undefined,
+) {
+  const normalizedSessionId = String(sessionId || "").trim();
+  if (!normalizedSessionId) {
+    return current;
+  }
+  if (!layer) {
+    if (!current[normalizedSessionId]) {
+      return current;
+    }
+    const next = { ...current };
+    delete next[normalizedSessionId];
+    return next;
+  }
+  if (current[normalizedSessionId] === layer) {
+    return current;
+  }
+  return {
+    ...current,
+    [normalizedSessionId]: layer,
+  };
 }
 
 function latestMentalSnapshot(messages: ConversationMessage[] | undefined): MentalStateSnapshot | undefined {
@@ -2314,7 +2092,7 @@ export function ChatCodingRoute() {
   const [editingSessionTitle, setEditingSessionTitle] = useState("");
   const [sessionContextMenu, setSessionContextMenu] = useState<SessionContextMenuState | null>(null);
   const [sessionStreamConnected, setSessionStreamConnected] = useState(false);
-  const [liveAssistantMessagesBySession, setLiveAssistantMessagesBySession] = useState<Record<string, ConversationMessage[]>>({});
+  const [activeTurnLayersBySession, setActiveTurnLayersBySession] = useState<Record<string, ConversationMessage>>({});
   const [groupStreamConnected, setGroupStreamConnected] = useState(false);
   const [tokenSpeedTracker, setTokenSpeedTracker] = useState<TokenSpeedTrackerState | null>(null);
   const [petActionFeedback, setPetActionFeedback] = useState("");
@@ -2351,7 +2129,7 @@ export function ChatCodingRoute() {
   const sessionStreamErrorLoggedRef = useRef<Record<string, boolean>>({});
   const sessionStreamPayloadErrorLoggedRef = useRef<Record<string, boolean>>({});
   const sessionStreamApplyStatsRef = useRef<Record<string, { received: number; applied: number; dropped: number }>>({});
-  const liveAssistantMessagesBySessionRef = useRef<Record<string, ConversationMessage[]>>({});
+  const activeTurnLayersBySessionRef = useRef<Record<string, ConversationMessage>>({});
   const sessionStreamDecisionSnapshotRef = useRef({
     sessionId: "",
     shouldConnect: false,
@@ -2387,8 +2165,8 @@ export function ChatCodingRoute() {
     return raw;
   }, [lang, location.search]);
   useEffect(() => {
-    liveAssistantMessagesBySessionRef.current = liveAssistantMessagesBySession;
-  }, [liveAssistantMessagesBySession]);
+    activeTurnLayersBySessionRef.current = activeTurnLayersBySession;
+  }, [activeTurnLayersBySession]);
   useEffect(() => {
     if (chatRouteShellMountedLoggedRef.current) {
       return;
@@ -2655,12 +2433,15 @@ export function ChatCodingRoute() {
     (detail: SessionDetail) => {
       let shouldSyncSummaries = true;
       queryClient.setQueryData<SessionDetail>(queryKeys.session(detail.id), (previous) => {
-        const comparablePrevious = previous ? sessionDetailWithoutLiveAssistantOverlay(previous) : undefined;
-        if (comparablePrevious && sessionDetailSnapshotKey(comparablePrevious) === sessionDetailSnapshotKey(detail)) {
+        if (isStaleLedgerUpdate(previous?.ledgerSeq, detail.ledgerSeq)) {
+          shouldSyncSummaries = false;
+          return previous ?? detail;
+        }
+        if (previous && sessionDetailSnapshotKey(previous) === sessionDetailSnapshotKey(detail)) {
           shouldSyncSummaries = false;
           return previous;
         }
-        return mergeSessionDetailWithLiveAssistantOverlay(previous, detail);
+        return detail;
       });
       if (!shouldSyncSummaries) {
         return;
@@ -3694,7 +3475,7 @@ export function ChatCodingRoute() {
     let pendingDetail: SessionDetail | null = null;
     let applyTimer: ReturnType<typeof window.setTimeout> | null = null;
     let lastAppliedAt = 0;
-    let committedAssistantDeltaMessages = liveAssistantMessagesBySessionRef.current[streamSessionId] ?? [];
+    let committedAssistantDeltaLayer: ConversationMessage | undefined = activeTurnLayersBySessionRef.current[streamSessionId];
     let pendingAssistantDeltaPayloads: Array<{
       payload: Extract<SessionStreamEvent, { type: "assistant_delta" }>;
       payloadLength: number;
@@ -3767,9 +3548,11 @@ export function ChatCodingRoute() {
       }
       syncSessionDetail(detail);
       const phase = String(detail.currentPhase || detail.status || "").trim().toLowerCase();
-      if (phase && !isBusyPhase(phase)) {
-        setLiveAssistantMessagesBySession((current) =>
-          setLiveAssistantMessagesForSession(current, streamSessionId, [])
+      const activeLayer = activeTurnLayersBySessionRef.current[streamSessionId];
+      if ((activeLayer && isActiveTurnSettledByDetail(activeLayer, detail)) || (phase && !isBusyPhase(phase))) {
+        committedAssistantDeltaLayer = undefined;
+        setActiveTurnLayersBySession((current) =>
+          setActiveTurnLayerForSession(current, streamSessionId, undefined)
         );
       }
     }
@@ -3825,16 +3608,12 @@ export function ChatCodingRoute() {
         window.cancelAnimationFrame(assistantDeltaApplyFrame);
         assistantDeltaApplyFrame = null;
       }
-      let pendingMessages = committedAssistantDeltaMessages;
+      let pendingLayer = committedAssistantDeltaLayer;
       let telemetry = pendingAssistantDeltaTelemetry;
       let appliedPayloadCount = 0;
       let finalDone = false;
       for (const entry of pendingPayloads) {
-        const nextMessages = mergeAssistantDeltaIntoLiveMessages(pendingMessages, entry.payload);
-        if (!nextMessages) {
-          continue;
-        }
-        pendingMessages = nextMessages;
+        pendingLayer = mergeAssistantDeltaIntoActiveTurnLayer(pendingLayer, entry.payload);
         appliedPayloadCount += 1;
         finalDone = finalDone || entry.payload.done;
       }
@@ -3847,16 +3626,13 @@ export function ChatCodingRoute() {
           ...telemetry,
           batchSize: appliedPayloadCount,
           done: finalDone || telemetry.done,
-          pendingTextLength: pendingMessages.reduce(
-            (total, message) => total + String(message.content ?? "").length + String(message.thought ?? "").length,
-            0,
-          ),
+          pendingTextLength: String(pendingLayer?.content ?? "").length + String(pendingLayer?.thought ?? "").length,
         }
         : null;
       pendingAssistantDeltaTelemetry = null;
-      committedAssistantDeltaMessages = pendingMessages;
-      setLiveAssistantMessagesBySession((current) =>
-        setLiveAssistantMessagesForSession(current, streamSessionId, pendingMessages)
+      committedAssistantDeltaLayer = pendingLayer;
+      setActiveTurnLayersBySession((current) =>
+        setActiveTurnLayerForSession(current, streamSessionId, pendingLayer)
       );
       const stats = sessionStreamApplyStatsRef.current[streamSessionId] ?? { received: 0, applied: 0, dropped: 0 };
       stats.applied += 1;
@@ -3865,7 +3641,7 @@ export function ChatCodingRoute() {
         postBrowserTelemetry({
           phase: "session_stream",
           eventCode: "browser.session_stream.assistant_delta_applied",
-          message: "Session assistant delta stream was applied to the live UI overlay.",
+          message: "Session assistant delta stream was applied to the active turn layer.",
           level: "info",
           fields: {
             sessionId: streamSessionId,
@@ -3909,17 +3685,14 @@ export function ChatCodingRoute() {
       pendingAssistantDeltaPayloads.push({ payload, payloadLength });
       const contentDeltaLength = (payload.contentDelta ?? payload.content ?? "").length;
       const thoughtDeltaLength = (payload.thoughtDelta ?? payload.thought ?? "").length;
-      const projectedMessages = mergeAssistantDeltaIntoLiveMessages(committedAssistantDeltaMessages, payload);
+      const projectedLayer = mergeAssistantDeltaIntoActiveTurnLayer(committedAssistantDeltaLayer, payload);
       const telemetry = {
         payloadLength,
         turnId: payload.turnId,
         stage: payload.stage,
         contentDeltaLength,
         thoughtDeltaLength,
-        pendingTextLength: (projectedMessages ?? committedAssistantDeltaMessages).reduce(
-          (total, message) => total + String(message.content ?? "").length + String(message.thought ?? "").length,
-          0,
-        ),
+        pendingTextLength: String(projectedLayer?.content ?? "").length + String(projectedLayer?.thought ?? "").length,
         batchSize: pendingAssistantDeltaPayloads.length,
         done: payload.done,
       };
@@ -4090,8 +3863,8 @@ export function ChatCodingRoute() {
 
     return () => {
       const readyStateBeforeClose = stream.readyState;
-      applyPendingDetail("close");
       applyPendingAssistantDeltas("close");
+      applyPendingDetail("close");
       disposed = true;
       setSessionStreamConnected(false);
       if (applyTimer) {
@@ -4367,10 +4140,11 @@ export function ChatCodingRoute() {
   const rawSessionDetail = sessionDetailQuery.data;
   const selectedSessionDetail =
     rawSessionDetail && rawSessionDetail.id === activeSessionId ? rawSessionDetail : undefined;
-  const liveAssistantMessages = activeSessionId ? liveAssistantMessagesBySession[activeSessionId] : undefined;
-  const detail = useMemo(
-    () => mergeLiveAssistantMessagesIntoSessionDetail(selectedSessionDetail, liveAssistantMessages),
-    [selectedSessionDetail, liveAssistantMessages],
+  const detail = selectedSessionDetail;
+  const activeTurnLayer = activeSessionId ? activeTurnLayersBySession[activeSessionId] : undefined;
+  const activeTurnMessage = useMemo(
+    () => activeTurnLayerToConversationMessage(activeTurnLayer),
+    [activeTurnLayer],
   );
   const closedCliAgentRunTokens = activeSessionId ? (closedCliAgentRunTokensBySession[activeSessionId] ?? []) : [];
   const closedCliAgentRunTokenSet = useMemo(() => new Set(closedCliAgentRunTokens), [closedCliAgentRunTokens]);
@@ -7681,6 +7455,7 @@ export function ChatCodingRoute() {
                   title={detail.title}
                   phase={detail.currentPhase}
                   messages={detail.messages}
+                  activeTurnMessage={activeTurnMessage}
                   assistantDisplayName={activeAgentDisplayName}
                   assistantAvatarImageUrl={activeAgentAvatarImageUrl}
                   assistantAvatarFallback={activeAgentAvatarFallback}
