@@ -1605,7 +1605,7 @@ export function ConversationView({
 
   function processSummaryIcon(tone: string) {
     if (tone === "running") {
-      return <LoaderCircle className={styles.statusSpinner} size={14} />;
+      return <CircleDot size={14} />;
     }
     if (tone === "failed") {
       return <TerminalSquare size={14} />;
