@@ -629,6 +629,8 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("runKnowledgeCollectionCompletionAction");
     expect(routeSource).toContain("runKnowledgeCollectionCompletionMutation");
     expect(routeSource).toContain("/workflow-orchestration/knowledge-collection/complete");
+    expect(routeSource).toContain("runId: selectedSourceCollectionRunEffectiveId");
+    expect(routeSource).toContain("extractionAgentId: sourceCollectionExtractionAgentId");
     expect(routeSource).toContain("agent_approved_only");
     expect(routeSource).toContain("Agent 生成关系图");
     expect(routeSource).toContain("通知知识库管理员");
