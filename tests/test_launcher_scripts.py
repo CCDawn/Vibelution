@@ -875,6 +875,64 @@ def test_desktop_entry_python_bridge_reuses_current_launcher(monkeypatch):
     assert saved_states[-1]["launcherBrowserWindowPid"] == 222
 
 
+def test_desktop_entry_bootstrap_json_reports_attached_or_started(monkeypatch, tmp_path, capsys):
+    bridge = _load_desktop_entry_py()
+
+    @contextlib.contextmanager
+    def fake_lock():
+        yield True
+
+    saved_states: list[dict[str, object]] = []
+    monkeypatch.setattr(bridge, "RUNTIME_DIR", tmp_path / ".runtime" / "launcher")
+    monkeypatch.setattr(bridge, "_append_log", lambda *args, **kwargs: None)
+    monkeypatch.setattr(bridge, "_single_launcher_open_lock", fake_lock)
+    monkeypatch.setattr(bridge, "_launcher_control_port", lambda: 8765)
+    monkeypatch.setattr(bridge, "_source_signature", lambda: "sig-1")
+    monkeypatch.setattr(bridge, "_launcher_control_healthy", lambda port: True)
+    monkeypatch.setattr(bridge, "_launcher_backend_source_current", lambda state, pid, signature: True)
+    monkeypatch.setattr(
+        bridge,
+        "_read_state",
+        lambda: {
+            "launcherBackendPid": 1234,
+            "launcherControlSourceSignature": "sig-1",
+            "launcherControlPort": 8765,
+            "sessionId": "launcher-session-1",
+            "workspaceId": "workspace-1",
+            "url": "http://127.0.0.1:8000",
+        },
+    )
+    monkeypatch.setattr(bridge, "_write_state", lambda state: saved_states.append(dict(state)))
+    monkeypatch.setattr(bridge, "_start_launcher_backend", lambda python_exe, port: (_ for _ in ()).throw(AssertionError("current launcher should attach")))
+    monkeypatch.setattr(bridge, "_open_launcher_window", lambda url: (_ for _ in ()).throw(AssertionError("bootstrap no-browser should not open a window")))
+
+    result = bridge.main(
+        [
+            "--action",
+            "bootstrap",
+            "--output",
+            "json",
+            "--workspace",
+            str(tmp_path),
+            "--config",
+            "C:/operator/config.toml",
+            "--no-browser",
+        ]
+    )
+
+    assert result == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["schemaVersion"] == 1
+    assert payload["mode"] == "attached"
+    assert payload["workspaceRoot"] == str(tmp_path)
+    assert payload["operatorConfigPath"] == "C:/operator/config.toml"
+    assert payload["launcherBackendPid"] == 1234
+    assert payload["launcherUrl"].startswith("http://127.0.0.1:")
+    assert payload["ready"] is True
+    assert payload["protocolVersion"] >= 1
+    assert "desktop_actions.claim" in payload["capabilities"]
+
+
 def test_desktop_entry_python_bridge_replaces_orphaned_launcher_window(monkeypatch):
     bridge = _load_desktop_entry_py()
     state = {

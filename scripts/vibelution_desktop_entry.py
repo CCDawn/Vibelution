@@ -806,9 +806,42 @@ def _open_launcher(args: argparse.Namespace) -> None:
         )
 
 
+def _bootstrap_launcher(args: argparse.Namespace) -> dict[str, object]:
+    before = _read_state()
+    before_pid = int(before.get("launcherBackendPid") or 0)
+    _open_launcher(args)
+    after = _read_state()
+    backend_pid = int(after.get("launcherBackendPid") or 0)
+    port = int(after.get("launcherControlPort") or _launcher_control_port())
+    mode = "attached" if before_pid > 0 and before_pid == backend_pid else "started"
+    return {
+        "schemaVersion": 1,
+        "workspaceRoot": str(args.workspace or PROJECT_ROOT),
+        "operatorConfigPath": str(args.config or ""),
+        "workspaceId": str(after.get("workspaceId") or ""),
+        "launcherInstanceId": str(after.get("sessionId") or ""),
+        "mode": mode,
+        "launcherBackendPid": backend_pid,
+        "launcherUrl": _launcher_control_url(port),
+        "workbenchUrl": str(after.get("url") or ""),
+        "ready": _launcher_control_healthy(port),
+        "protocolVersion": 1,
+        "minDesktopProtocolVersion": 1,
+        "maxDesktopProtocolVersion": 1,
+        "capabilities": [
+            "desktop_actions.claim",
+            "desktop_sessions.heartbeat",
+            "runtime_scene.electron_event",
+        ],
+    }
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Open the Vibelution Launcher without a console window.")
     parser.add_argument("--action", default="launcher")
+    parser.add_argument("--output", choices=("text", "json"), default="text")
+    parser.add_argument("--workspace", default="")
+    parser.add_argument("--config", default="")
     parser.add_argument("--no-browser", action="store_true")
     parser.add_argument("--python-exe", default="")
     parser.add_argument("--run-id", default="")
@@ -818,11 +851,18 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     action = str(args.action or "launcher").strip().lower()
-    if action != "launcher":
+    if action not in {"launcher", "bootstrap"}:
         raise SystemExit(f"Unsupported desktop-entry Python bridge action: {action}")
     try:
         _append_log("desktop_entry_python.open.started", action=action, no_browser=bool(args.no_browser), run_id=args.run_id)
-        _open_launcher(args)
+        if action == "bootstrap":
+            payload = _bootstrap_launcher(args)
+            if args.output == "json":
+                print(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
+            else:
+                print(f"Launcher bootstrap {payload['mode']} at {payload['launcherUrl']}")
+        else:
+            _open_launcher(args)
         _append_log("desktop_entry_python.open.succeeded", action=action, run_id=args.run_id)
         return 0
     except Exception as exc:
