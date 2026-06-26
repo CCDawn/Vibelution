@@ -9,6 +9,7 @@
     "package.json"
   ],
   "win": {
+    "icon": "../../assets/icons/vibelution.ico",
     "target": [
       "dir"
     ],
