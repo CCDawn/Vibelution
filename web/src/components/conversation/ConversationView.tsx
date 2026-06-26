@@ -928,6 +928,10 @@ export function ConversationView({
     () => activeTurnMessage ? [...timelineMessages, activeTurnMessage] : timelineMessages,
     [activeTurnMessage, timelineMessages],
   );
+  const streamingTimelineMessages = useMemo(() => {
+    const streamingMessages = timelineMessages.filter((message) => message.streaming);
+    return activeTurnMessage ? [...streamingMessages, activeTurnMessage] : streamingMessages;
+  }, [activeTurnMessage, timelineMessages]);
   const imageArtifactUrlsBeforeMessage = useMemo(() => {
     const urlsByMessageId = new Map<string, Set<string>>();
     const seenImageUrls = new Set<string>();
@@ -970,17 +974,10 @@ export function ConversationView({
         : timelineMessages.map((message) => ({ ...message, mentalSnapshot: undefined })),
     [showMentalSnapshots, timelineMessages],
   );
-  const activeTimelineSignalMessages = useMemo(
-    () =>
-      showMentalSnapshots
-        ? activeTimelineMessages
-        : activeTimelineMessages.map((message) => ({ ...message, mentalSnapshot: undefined })),
-    [activeTimelineMessages, showMentalSnapshots],
-  );
   const timelineScrollSignal = useMemo(() => buildTimelineScrollSignal(timelineSignalMessages), [timelineSignalMessages]);
   const streamingTimelineScrollSignal = useMemo(
-    () => buildStreamingTimelineScrollSignal(activeTimelineSignalMessages),
-    [activeTimelineSignalMessages],
+    () => buildStreamingTimelineScrollSignal(streamingTimelineMessages),
+    [streamingTimelineMessages],
   );
   const hasSessionMeta = resolvedStats.length > 0 || latestToolCalls.length > 0;
   const hasMetaSection = showSessionOverview && (hasSessionMeta || Boolean(supplementalContent));
