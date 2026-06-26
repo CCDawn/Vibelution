@@ -2,17 +2,18 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `subagent-driven-development` (recommended) or `executing-plans` to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Convert Vibelution to a single-entry Electron desktop application where the Electron main process acts as the Launcher supervisor, owns lifecycle authority, and manages Workbench, backend, Runtime Manager, self-evolution lifecycle intents, and worker processes as children.
+**Goal:** Convert Vibelution to a single-entry Electron desktop application where Electron is the desktop supervisor and single visible shell, while Python Launcher and Runtime Manager remain the runtime lifecycle authority.
 
-**Architecture:** Vibelution keeps one user-visible entrypoint, one lifecycle source of truth, and multiple managed child processes. Electron replaces the current Edge app window provider, but it must behave like a thin desktop shell plus supervisor. The Codex reference repo shows the useful pattern is not "put product logic into Electron"; it is a deep-linkable desktop entry backed by a typed app-server/runtime protocol. Vibelution must therefore reuse existing Launcher, Runtime Manager, FastAPI, runtime-scene, active-work guard, config, and control-token contracts instead of creating a parallel lifecycle system.
+**Architecture:** Vibelution keeps one user-visible entrypoint and one source of truth per authority domain. Electron replaces the current Edge app window provider and directly supervises desktop windows plus one Python Launcher Service child; Python Launcher owns active-work policy, lifecycle intent persistence, runtime command decisions, and Runtime Manager delegation. The Codex reference repo shows the useful pattern is not "put product logic into Electron"; it is a deep-linkable desktop entry backed by a typed app-server/runtime protocol. Vibelution must therefore reuse existing Launcher, Runtime Manager, FastAPI, runtime-scene, active-work guard, config, and control-token contracts instead of creating a parallel lifecycle system.
 
-**Tech Stack:** Electron, Node.js, TypeScript, React/Vite `web/dist`, FastAPI backend, Python Runtime Manager, existing `scripts/vibelution_launcher.ps1` / `scripts/vibelution_launcher.py`, existing Launcher API, Vitest, pytest.
+**Tech Stack:** Electron, Node.js, TypeScript, React/Vite web UI loaded through local HTTP, FastAPI backend, Python Runtime Manager, existing `scripts/vibelution_launcher.ps1` / `scripts/vibelution_launcher.py`, existing Launcher API, Vitest, pytest.
 
 ## Global Constraints
 
 - Single visible user entrypoint: one packaged `Vibelution` launcher entry, not separate public Launcher and Workbench shortcuts.
-- Single lifecycle authority: Launcher supervisor owns start, stop, restart, recover, focus, child process status, and runtime-scene lifecycle evidence.
-- Multi-process runtime: Electron main process is the root supervisor; Workbench window, Launcher window, FastAPI backend, Runtime Manager daemon, self-evolution workers, and tool workers are child windows or child processes.
+- Two-layer supervision rule: Electron main is the desktop session supervisor; Python Launcher is the runtime policy and lifecycle command authority.
+- Single-domain authority rule: Electron owns single-instance, protocol handler, BrowserWindow state, and the Python Launcher Service child; Python owns active-work, apply/rollback, Runtime Manager commands, lifecycle intents, and runtime-scene policy.
+- Multi-process runtime: Electron main is the OS-visible root process, but backend, Runtime Manager, self-evolution workers, and tool workers remain Python-managed descendants or projections rather than Electron-owned direct children.
 - Workbench cannot start the project directly; it is opened, focused, and closed only through Launcher commands.
 - Self-evolution Agent cannot spawn or kill the project directly; it writes structured lifecycle intents that Launcher validates and executes.
 - Electron main process must not contain product business logic, LLM calls, file scanning, agent execution, or tool execution; it supervises and delegates.
@@ -22,6 +23,7 @@
 - Deep-link rule: secondary entrypoints may only wake or focus the single Launcher supervisor through a deep link such as `vibelution://threads/new?path=...`; they must not start backend or Workbench directly.
 - Machine-readable lifecycle rule: every start, stop, restart, status, and lifecycle-intent command must return bounded JSON that tests can parse, following the Codex app-server daemon style.
 - Low-risk/high-ROI rule: prefer protocol adapters, status projections, tests, and feature-flagged Electron windows before changing startup ownership, packaging, or self-evolution restart execution.
+- V1 packaging scope rule: version 1 is a Windows workspace-bound desktop package, not a zero-dependency installer. It may require the external Vibelution workspace, existing Python environment, and operator config until a separate V2 packaging project proves bundled runtime parity.
 - No-drift rule: any compatibility field, adapter, feature flag, or legacy provider must have an owner, removal trigger, and test that proves it does not become a second source of truth.
 - Config/environment rule: Electron must resolve Python, Node, ports, control tokens, user data, and operator config through existing project contracts or explicit environment adapters; it must not introduce hidden defaults that compete with `C:\Users\17533\Documents\Vibelution\config\config.toml`.
 - Architecture/test alignment rule: update old tests that assert `msedge.exe`, `--app=`, `browserManaged`, or Edge profile details so they protect the new window-provider contract instead of the retired implementation.
@@ -37,14 +39,15 @@ This plan is based on the aligned requirement:
 
 ```text
 Vibelution.exe
-└─ Electron Main Process: Launcher Supervisor
+└─ Electron Main Process: Desktop Supervisor
    ├─ Launcher Renderer Window
    ├─ Workbench Renderer Window
-   ├─ Python FastAPI Backend
-   ├─ Runtime Manager Daemon
-   ├─ Self-Evolution Agent Worker(s)
-   ├─ Supervised/Coding/Tool Worker(s)
-   └─ Lifecycle Intent Queue
+   └─ Python Launcher Service
+      ├─ FastAPI Backend / Launcher API
+      ├─ Runtime Manager Daemon
+      ├─ Self-Evolution Agent Worker(s)
+      ├─ Supervised/Coding/Tool Worker(s)
+      └─ Lifecycle Intent Store / Desktop Action Queue
 ```
 
 The product behavior must feel like one app:
@@ -55,7 +58,7 @@ The product behavior must feel like one app:
 - Closing Workbench does not necessarily close Launcher.
 - Closing Launcher runs active-work checks before closing managed children.
 - Self-evolution can request a restart or resume only by writing a lifecycle intent.
-- Launcher records who requested a lifecycle action, why it was accepted or rejected, which process executed it, and what happened.
+- Python Launcher records who requested a lifecycle action, why it was accepted or rejected, which runtime command or desktop action was emitted, and what happened.
 
 ## Codex Reference Audit
 
@@ -69,9 +72,10 @@ The local reference project at `C:\Users\17533\Desktop\Agent论文\projects\60_o
 
 Implication for Vibelution:
 
-- Electron is still feasible, but it should be the single visible shell and root supervisor, not a new business runtime.
+- Electron is still feasible, but it should be the single visible shell and Desktop Supervisor, not a new business runtime.
 - The first architecture slice should harden deep-link, protocol, status, and lifecycle command contracts before packaging.
 - Vibelution should not add a second app-server if FastAPI + Runtime Manager already provide the needed authority. Instead, define a narrow Launcher protocol adapter over the existing routes and command queue.
+- External review follow-up: avoid the phrase "Electron owns lifecycle authority" unless the scope is explicitly desktop-only. The safer contract is "Electron Desktop Supervisor + Python Runtime Authority".
 
 ## Non-Goals For Version 1
 
@@ -87,12 +91,13 @@ Implication for Vibelution:
 | Domain | Authority | Notes |
 |---|---|---|
 | User-visible entry | Electron packaged `Vibelution` entry | Only public shortcut / app entry in version 1. |
-| Lifecycle state | Launcher supervisor + existing Launcher state files | Electron main writes through the same contract or an explicitly versioned successor. |
+| Desktop session state | Electron Desktop Supervisor | Single-instance lock, deep-link protocol handler, BrowserWindow lifecycle, and Python Launcher Service child state. |
+| Runtime lifecycle state | Python Launcher + Runtime Manager | Active-work, start/stop/restart/recover policy, Runtime Manager command queue, and runtime reconciliation. |
 | Runtime commands | Runtime Manager command queue | Launcher submits commands; Runtime Manager executes workbench lifecycle operations. |
 | Backend API | FastAPI backend | Electron loads the backend URL and does not replace API routes. |
-| UI surface | React/Vite `web/dist` | Existing web app remains the UI implementation. |
-| Self-evolution restart intent | Lifecycle intent queue | Agent writes intent; Launcher validates and executes. |
-| Deep links | Launcher supervisor | `vibelution://...` wakes or focuses the single supervisor and submits typed intents; it never starts runtime children directly. |
+| UI surface | React/Vite web UI served by the existing local HTTP stack | Existing web app remains the UI implementation; Electron does not bundle or replace it in V1. |
+| Self-evolution restart intent | Python Launcher Lifecycle Intent Store | Agent submits an intent; Python Launcher validates, deduplicates, persists, and emits runtime commands or desktop actions. |
+| Deep links | Electron protocol handler + Python Launcher validation | `vibelution://...` wakes or focuses the single desktop supervisor and submits typed requests; it never starts runtime children directly. |
 | Launcher protocol | Existing Launcher / Runtime Manager / FastAPI contracts | Electron consumes a typed adapter; it does not invent a second command or status model. |
 | Protocol schema | Generated TypeScript / JSON schema or equivalent fixtures | Protocol drift must be caught by tests before Electron packaging is trusted. |
 | Evidence | Runtime scene package | Every branch, rejection, child exit, restart, and recovery is diagnosable. |
@@ -105,7 +110,7 @@ The Electron migration touches core lifecycle surfaces. Treat it as a sequence o
 
 | Impact area | Current authority | Risk if changed too early | Low-risk/high-ROI action | Guardrail |
 |---|---|---|---|---|
-| Launcher startup | Existing PowerShell/Python Launcher | Duplicate starts, stale child processes, active-work bypass | Add typed status/protocol adapter first | Active-work guard tests must pass before Electron starts children |
+| Launcher startup | Existing PowerShell/Python Launcher | Duplicate starts, stale child processes, active-work bypass | Add typed status/protocol adapter first | Active-work guard tests must pass before Electron starts Python Launcher Service |
 | Runtime Manager | Python daemon and command queue | Runtime commands split between Node and Python | Keep Runtime Manager as executor; Electron submits commands only | No direct `uvicorn`, port kill, or tool-worker spawn as normal path |
 | Workbench window | Edge app provider | UI status and process detection regressions | Add generic `windowProvider/windowManaged` projection | Keep `browserManaged` compatibility until tests move |
 | Backend/FastAPI | Existing routes and SSE/control-token flow | Broken API auth, SSE, runtime telemetry | Keep local HTTP loading; do not replace routes with IPC | `/api/*`, SSE, and control-token tests remain unchanged or stronger |
@@ -117,9 +122,9 @@ The Electron migration touches core lifecycle surfaces. Treat it as a sequence o
 Risk budget by phase:
 
 - Tasks 0-4: documentation, protocol types, deep-link parsing, status state, and pure tests only. No runtime child process ownership change.
-- Tasks 5-7: generic provider and Launcher-controlled startup under feature flag. Existing Edge/Launcher path remains default.
-- Tasks 8-11: lifecycle intent execution and IPC. All actions remain Launcher-gated and machine-readable.
-- Tasks 12-13: packaging and runtime-scene evidence. Packaging is last because it multiplies any earlier drift.
+- Tasks 5-7: generic provider and long-lived Python Launcher Service supervision under feature flag. Existing Edge/Launcher path remains default.
+- Tasks 8-11: Python-owned lifecycle intent store, desktop action queue, and narrow IPC. Electron consumes approved actions and returns ack/result; it does not read or write intent JSONL.
+- Tasks 12-13: workspace-bound packaging and runtime-scene evidence. Packaging is last because it multiplies any earlier drift.
 
 ## Config And Environment Contract
 
@@ -143,7 +148,7 @@ Implementation must add a small environment inventory output before child startu
 ```ts
 type LauncherEnvironmentSummary = {
   schemaVersion: 1;
-  pythonSource: "launcher_resolver" | "env_override" | "packaged_runtime";
+  pythonSource: "launcher_resolver" | "env_override";
   pythonPath: string;
   operatorConfigPath: string;
   launcherUrl: string;
@@ -172,20 +177,17 @@ desktop/electron/
     ipc.ts
     preload.ts
     process/
-      childProcessSupervisor.ts
+      launcherServiceProcess.ts
       managedProcessTypes.ts
       pythonRuntime.ts
-      runtimeManagerClient.ts
     protocol/
       deepLink.ts
       launcherProtocol.ts
       launcherProtocolSchema.ts
       lifecycleCommandOutput.ts
+      desktopActionClient.ts
       environmentSummary.ts
     lifecycle/
-      lifecycleIntentStore.ts
-      lifecycleIntentTypes.ts
-      lifecyclePolicy.ts
       launcherStateAdapter.ts
       runtimeSceneBridge.ts
     windows/
@@ -195,9 +197,8 @@ desktop/electron/
       electronWindowProvider.ts
   tests/
     appLock.test.ts
-    childProcessSupervisor.test.ts
-    lifecycleIntentStore.test.ts
-    lifecyclePolicy.test.ts
+    launcherServiceProcess.test.ts
+    desktopActionClient.test.ts
     launcherProtocol.test.ts
     deepLink.test.ts
     windowProvider.test.ts
@@ -239,7 +240,7 @@ type WorkbenchWindowState = {
 
 ## Lifecycle Intent Contract
 
-Self-evolution and other agents may request lifecycle actions only by appending an intent:
+Self-evolution and other agents may request lifecycle actions only by submitting an intent to the Python Launcher API. They do not append files directly, and Electron never reads or writes the intent store.
 
 ```ts
 type LifecycleIntent = {
@@ -278,9 +279,10 @@ Storage:
 
 Rules:
 
-- Intent writes are append-only; `index.json` is a projection.
-- Launcher validates active work, worktree review state, apply/rollback safety, and duplicate idempotency keys.
-- Accepted intents become Runtime Manager commands.
+- Python Launcher is the single writer of `intents.jsonl`; `index.json` is a projection.
+- Launcher validates active work, worktree review state, apply/rollback safety, and duplicate idempotency keys before persistence changes state.
+- Accepted intents become either Runtime Manager commands or Desktop Actions.
+- Desktop Actions are consumed through a guarded Launcher API and acked by Electron with result metadata.
 - Rejected intents stay visible with a safe reason.
 - Intent execution records runtime-scene events before and after command submission.
 
@@ -381,9 +383,9 @@ Create `docs/testing/electron-launcher-protocol-contract.md`:
 
 ## Vibelution Contract
 
-- Electron main is the single visible shell and root supervisor.
+- Electron main is the single visible shell and Desktop Supervisor.
 - Existing Launcher, Runtime Manager, FastAPI routes, runtime-scene logging, and active-work guard remain authoritative.
-- Deep links submit intents to the Launcher supervisor; they do not directly start backend, Workbench, or agent workers.
+- Deep links submit typed requests for Launcher validation; they do not directly start backend, Workbench, or agent workers.
 - Lifecycle command responses are machine-readable JSON with `schemaVersion`, `commandId`, `status`, `provider`, `message`, and `runtimeSceneRef`.
 - Protocol drift must be caught by TypeScript tests and focused pytest route/service tests.
 ```
@@ -514,7 +516,7 @@ git commit -m "docs: align tests for electron launcher migration"
 - Modify: none
 
 **Interfaces:**
-- Consumes: existing `web/dist` and existing local HTTP backend URL.
+- Consumes: existing local HTTP Launcher/Workbench URLs and existing web UI served by the Python workspace.
 - Produces: a compilable Electron desktop package plus deep-link and Launcher protocol types that do not start backend processes.
 
 - [ ] **Step 1: Add package metadata**
@@ -529,20 +531,23 @@ Create `desktop/electron/package.json`:
   "type": "module",
   "main": "dist/main.js",
   "scripts": {
-    "build": "tsc -p tsconfig.json",
-    "test": "vitest run",
-    "dev": "tsc -p tsconfig.json && electron dist/main.js"
+    "build": "tsc -p tsconfig.json && npm run build:preload",
+    "build:preload": "esbuild src/preload.ts --bundle --platform=node --format=cjs --outfile=dist/preload.cjs --external:electron",
+    "test": "vitest run tests",
+    "dev": "npm run build && electron dist/main.js"
   },
-  "dependencies": {
-    "electron": "^37.2.0"
-  },
+  "dependencies": {},
   "devDependencies": {
     "@types/node": "^24.0.0",
+    "electron": "42.5.0",
+    "esbuild": "^0.25.12",
     "typescript": "^5.9.3",
     "vitest": "^3.2.4"
   }
 }
 ```
+
+Electron is an exact dev dependency because the desktop runtime is built and packaged from this project; do not use an unsupported major or a floating `^` range for the shell. The preload script is bundled to CommonJS so it can run under Electron sandbox preload constraints.
 
 - [ ] **Step 2: Add TypeScript config**
 
@@ -556,11 +561,12 @@ Create `desktop/electron/tsconfig.json`:
     "moduleResolution": "NodeNext",
     "strict": true,
     "outDir": "dist",
-    "rootDir": ".",
+    "rootDir": "src",
     "types": ["node", "vitest"],
     "skipLibCheck": true
   },
-  "include": ["src/**/*.ts", "tests/**/*.ts"]
+  "include": ["src/**/*.ts"],
+  "exclude": ["tests/**/*.ts"]
 }
 ```
 
@@ -726,7 +732,7 @@ Create `desktop/electron/src/protocol/environmentSummary.ts`:
 ```ts
 export type LauncherEnvironmentSummary = {
   schemaVersion: 1;
-  pythonSource: "launcher_resolver" | "env_override" | "packaged_runtime";
+  pythonSource: "launcher_resolver" | "env_override";
   pythonPath: string;
   operatorConfigPath: string;
   launcherUrl: string;
@@ -816,7 +822,7 @@ function createLauncherWindow(): BrowserWindow {
     height: 760,
     title: "Vibelution Launcher",
     webPreferences: {
-      preload: resolve(projectRoot, "desktop", "electron", "dist", "src", "preload.js"),
+      preload: resolve(projectRoot, "desktop", "electron", "dist", "preload.cjs"),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true
@@ -957,27 +963,23 @@ git add desktop/electron/src/main.ts desktop/electron/src/appLock.ts desktop/ele
 git commit -m "feat: enforce single electron launcher instance"
 ```
 
-### Task 4: Managed Child Process Supervisor
+### Task 4: Python Launcher Service Supervisor
 
 **Files:**
 - Create: `desktop/electron/src/process/managedProcessTypes.ts`
-- Create: `desktop/electron/src/process/childProcessSupervisor.ts`
-- Test: `desktop/electron/tests/childProcessSupervisor.test.ts`
+- Create: `desktop/electron/src/process/launcherServiceProcess.ts`
+- Test: `desktop/electron/tests/launcherServiceProcess.test.ts`
 
 **Interfaces:**
-- Consumes: Node child process lifecycle events.
-- Produces: reusable state transitions for backend, Runtime Manager, and worker child processes.
+- Consumes: Node child process lifecycle events for the one Python Launcher Service that Electron directly owns.
+- Produces: desktop-supervisor state for the Launcher Service only; backend, Runtime Manager, and worker states remain Python-owned projections.
 
-- [ ] **Step 1: Add process state types**
+- [ ] **Step 1: Add Launcher Service state types**
 
 Create `desktop/electron/src/process/managedProcessTypes.ts`:
 
 ```ts
-export type ManagedProcessRole =
-  | "fastapi_backend"
-  | "runtime_manager"
-  | "self_evolution_worker"
-  | "tool_worker";
+export type ManagedProcessRole = "python_launcher_service";
 
 export type ManagedProcessStatus = "idle" | "starting" | "running" | "stopping" | "exited" | "failed";
 
@@ -1006,9 +1008,9 @@ export function initialManagedProcessState(role: ManagedProcessRole): ManagedPro
 }
 ```
 
-- [ ] **Step 2: Add transition helpers**
+- [ ] **Step 2: Add Launcher Service transition helpers**
 
-Create `desktop/electron/src/process/childProcessSupervisor.ts`:
+Create `desktop/electron/src/process/launcherServiceProcess.ts`:
 
 ```ts
 import type { ManagedProcessState } from "./managedProcessTypes.js";
@@ -1037,20 +1039,20 @@ export function markProcessFailed(state: ManagedProcessState, message: string, n
 
 - [ ] **Step 3: Add tests**
 
-Create `desktop/electron/tests/childProcessSupervisor.test.ts`:
+Create `desktop/electron/tests/launcherServiceProcess.test.ts`:
 
 ```ts
 import { describe, expect, it } from "vitest";
 import { initialManagedProcessState } from "../src/process/managedProcessTypes.js";
-import { markProcessExited, markProcessFailed, markProcessRunning, markProcessStarting } from "../src/process/childProcessSupervisor.js";
+import { markProcessExited, markProcessFailed, markProcessRunning, markProcessStarting } from "../src/process/launcherServiceProcess.js";
 
-describe("child process supervisor transitions", () => {
-  it("records start and running pid", () => {
-    const idle = initialManagedProcessState("fastapi_backend");
+describe("python launcher service supervisor transitions", () => {
+  it("records start and running pid for the single directly owned child", () => {
+    const idle = initialManagedProcessState("python_launcher_service");
     const starting = markProcessStarting(idle, "2026-06-26T00:00:00.000Z");
     const running = markProcessRunning(starting, 1234);
     expect(running).toMatchObject({
-      role: "fastapi_backend",
+      role: "python_launcher_service",
       status: "running",
       pid: 1234,
       startedAt: "2026-06-26T00:00:00.000Z"
@@ -1058,13 +1060,13 @@ describe("child process supervisor transitions", () => {
   });
 
   it("clears pid and records exit evidence", () => {
-    const running = markProcessRunning(markProcessStarting(initialManagedProcessState("runtime_manager"), "start"), 2222);
+    const running = markProcessRunning(markProcessStarting(initialManagedProcessState("python_launcher_service"), "start"), 2222);
     const exited = markProcessExited(running, 0, "", "end");
     expect(exited).toMatchObject({ status: "exited", pid: 0, exitCode: 0, exitedAt: "end" });
   });
 
   it("records failure reason", () => {
-    const failed = markProcessFailed(initialManagedProcessState("tool_worker"), "spawn failed", "now");
+    const failed = markProcessFailed(initialManagedProcessState("python_launcher_service"), "spawn failed", "now");
     expect(failed).toMatchObject({ status: "failed", lastError: "spawn failed", exitedAt: "now" });
   });
 });
@@ -1079,13 +1081,13 @@ npm --prefix desktop/electron run build
 npm --prefix desktop/electron test -- --run
 ```
 
-Expected: all Electron unit tests pass.
+Expected: all Electron unit tests pass, and no test implies Electron directly supervises backend, Runtime Manager, or worker processes.
 
 - [ ] **Step 5: Commit**
 
 ```powershell
-git add desktop/electron/src/process desktop/electron/tests/childProcessSupervisor.test.ts
-git commit -m "feat: add electron child process supervisor state"
+git add desktop/electron/src/process desktop/electron/tests/launcherServiceProcess.test.ts
+git commit -m "feat: track python launcher service state"
 ```
 
 ### Task 5: Generic Window Provider State In Backend
@@ -1249,7 +1251,7 @@ export function createLauncherWindow(url: string): BrowserWindow {
     height: 760,
     title: "Vibelution Launcher",
     webPreferences: {
-      preload: resolve(projectRoot, "desktop", "electron", "dist", "src", "preload.js"),
+      preload: resolve(projectRoot, "desktop", "electron", "dist", "preload.cjs"),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true
@@ -1276,7 +1278,7 @@ export function createWorkbenchWindow(url: string): BrowserWindow {
     height: 960,
     title: "Vibelution Workbench",
     webPreferences: {
-      preload: resolve(projectRoot, "desktop", "electron", "dist", "src", "preload.js"),
+      preload: resolve(projectRoot, "desktop", "electron", "dist", "preload.cjs"),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true
@@ -1346,17 +1348,17 @@ git add desktop/electron/src/windows desktop/electron/src/main.ts desktop/electr
 git commit -m "feat: add electron window provider"
 ```
 
-### Task 7: Launcher-Controlled Backend And Runtime Manager Startup
+### Task 7: Long-Lived Python Launcher Service Handshake
 
 **Files:**
 - Create: `desktop/electron/src/process/pythonRuntime.ts`
-- Create: `desktop/electron/src/process/runtimeManagerClient.ts`
+- Create: `desktop/electron/src/process/launcherServiceClient.ts`
 - Modify: `desktop/electron/src/main.ts`
-- Test: `desktop/electron/tests/childProcessSupervisor.test.ts`
+- Test: `desktop/electron/tests/launcherServiceProcess.test.ts`
 
 **Interfaces:**
-- Consumes: existing Python runtime paths, existing `scripts/vibelution_launcher.py` or Runtime Manager command API.
-- Produces: Electron main can start the existing Launcher/Runtime Manager path without introducing a parallel backend startup contract.
+- Consumes: existing Python runtime resolution and existing Launcher startup/status API.
+- Produces: Electron main can start or attach to one Python Launcher Service, wait for authenticated readiness, and then load Launcher UI without directly starting backend, Runtime Manager, or workers.
 
 - [ ] **Step 1: Add Python runtime resolver**
 
@@ -1368,25 +1370,25 @@ import { resolve } from "node:path";
 
 export type PythonRuntimeResolution = {
   pythonPath: string;
-  source: "env" | "project_venv";
+  source: "env_override" | "project_venv";
 };
 
 export function resolvePythonRuntime(projectRoot: string, env = process.env): PythonRuntimeResolution {
   const override = String(env.VIBELUTION_PYTHON_EXE || "").trim();
   if (override) {
-    return { pythonPath: override, source: "env" };
+    return { pythonPath: override, source: "env_override" };
   }
   const candidate = resolve(projectRoot, ".venv", "Scripts", "python.exe");
   if (existsSync(candidate)) {
     return { pythonPath: candidate, source: "project_venv" };
   }
-  return { pythonPath: "python", source: "env" };
+  throw new Error("Python runtime is unresolved; use the existing Launcher resolver or set VIBELUTION_PYTHON_EXE for dev/test");
 }
 ```
 
 - [ ] **Step 2: Add tests for resolver**
 
-Append to `desktop/electron/tests/childProcessSupervisor.test.ts`:
+Append to `desktop/electron/tests/launcherServiceProcess.test.ts`:
 
 ```ts
 import { resolvePythonRuntime } from "../src/process/pythonRuntime.js";
@@ -1395,28 +1397,43 @@ describe("resolvePythonRuntime", () => {
   it("prefers VIBELUTION_PYTHON_EXE", () => {
     expect(resolvePythonRuntime("C:/repo", { VIBELUTION_PYTHON_EXE: "C:/Python/python.exe" } as NodeJS.ProcessEnv)).toEqual({
       pythonPath: "C:/Python/python.exe",
-      source: "env"
+      source: "env_override"
     });
+  });
+
+  it("does not silently fall back to PATH python", () => {
+    expect(() => resolvePythonRuntime("C:/missing", {} as NodeJS.ProcessEnv)).toThrow("Python runtime is unresolved");
   });
 });
 ```
 
-- [ ] **Step 3: Add Runtime Manager launcher client**
+- [ ] **Step 3: Add Launcher Service client**
 
-Create `desktop/electron/src/process/runtimeManagerClient.ts`:
+Create `desktop/electron/src/process/launcherServiceClient.ts`:
 
 ```ts
 import { spawn } from "node:child_process";
 import { resolve } from "node:path";
 
-export type LauncherAdapterCommand = "launcher" | "start" | "stop" | "restart" | "status";
+export type LauncherServiceStartInput = {
+  projectRoot: string;
+  pythonPath: string;
+  operatorConfigPath: string;
+};
 
-export function spawnPythonLauncherAdapter(projectRoot: string, pythonPath: string, action: LauncherAdapterCommand) {
+export function spawnPythonLauncherService(input: LauncherServiceStartInput) {
   return spawn(
-    pythonPath,
-    [resolve(projectRoot, "scripts", "vibelution_launcher.py"), "--action", action, "--no-browser"],
+    input.pythonPath,
+    [
+      resolve(input.projectRoot, "scripts", "vibelution_launcher.py"),
+      "--action",
+      "launcher",
+      "--no-browser",
+      "--config",
+      input.operatorConfigPath
+    ],
     {
-      cwd: projectRoot,
+      cwd: input.projectRoot,
       windowsHide: true,
       stdio: "pipe"
     }
@@ -1424,15 +1441,24 @@ export function spawnPythonLauncherAdapter(projectRoot: string, pythonPath: stri
 }
 ```
 
-- [ ] **Step 4: Wire startup through adapter**
+- [ ] **Step 4: Wire startup as attach-or-start**
 
-Update Electron main so first startup calls the existing launcher adapter with `launcher`, then loads Launcher window. Keep this behind an environment switch during the first implementation:
+Update Electron main so startup follows this order:
+
+1. acquire Electron single-instance lock;
+2. resolve external operator config through existing project contract;
+3. check whether an authenticated Launcher API for this workspace is already ready;
+4. if not ready and feature flag allows it, spawn one Python Launcher Service;
+5. poll health/readiness with a bounded timeout and control token;
+6. load Launcher window only after readiness succeeds.
+
+Keep process startup behind an environment switch during the first implementation:
 
 ```ts
 const shouldStartLauncher = process.env.VIBELUTION_ELECTRON_START_LAUNCHER !== "0";
 ```
 
-This prevents local developer runs from spawning runtime processes while unit tests compile the package.
+This prevents local developer runs from spawning runtime processes while unit tests compile the package. Runtime commands after readiness still go through Python Launcher/Runtime Manager APIs; Electron does not spawn `start`, `stop`, or `restart` scripts per action.
 
 - [ ] **Step 5: Verify**
 
@@ -1444,222 +1470,63 @@ npm --prefix desktop/electron test -- --run
 python scripts/vibelution_launcher.py --action status --no-browser
 ```
 
-Expected: Electron build/tests pass and the existing Python launcher adapter still reports status.
+Expected: Electron build/tests pass, the existing Python launcher adapter still reports status, and tests prove unresolved Python/config values fail closed instead of using hidden defaults.
 
 - [ ] **Step 6: Commit**
 
 ```powershell
-git add desktop/electron/src/process desktop/electron/src/main.ts desktop/electron/tests/childProcessSupervisor.test.ts
-git commit -m "feat: let electron supervisor reuse launcher adapter"
+git add desktop/electron/src/process desktop/electron/src/main.ts desktop/electron/tests/launcherServiceProcess.test.ts
+git commit -m "feat: start electron through python launcher service"
 ```
 
-### Task 8: Lifecycle Intent Store
+### Task 8: Python Lifecycle Intent Store And Desktop Action Contract
 
 **Files:**
-- Create: `desktop/electron/src/lifecycle/lifecycleIntentTypes.ts`
-- Create: `desktop/electron/src/lifecycle/lifecycleIntentStore.ts`
-- Create: `desktop/electron/src/lifecycle/lifecyclePolicy.ts`
-- Test: `desktop/electron/tests/lifecycleIntentStore.test.ts`
-
-**Interfaces:**
-- Consumes: self-evolution run IDs, source task IDs, idempotency keys.
-- Produces: append-only lifecycle intent records and policy decisions.
-
-- [ ] **Step 1: Add intent types**
-
-Create `desktop/electron/src/lifecycle/lifecycleIntentTypes.ts`:
-
-```ts
-export type LifecycleIntentAction =
-  | "open_workbench"
-  | "focus_workbench"
-  | "restart_after_apply"
-  | "resume_self_evolution"
-  | "recover_after_crash";
-
-export type LifecycleIntentStatus = "queued" | "accepted" | "rejected" | "executing" | "succeeded" | "failed" | "superseded";
-
-export type LifecycleIntent = {
-  intentId: string;
-  schemaVersion: 1;
-  requestedBy: {
-    actorType: "self_evolution_agent" | "supervised_agent" | "user" | "system";
-    actorId: string;
-  };
-  action: LifecycleIntentAction;
-  reason: string;
-  sourceRunId: string;
-  sourceTaskId: string;
-  sourceWorktree: string;
-  idempotencyKey: string;
-  status: LifecycleIntentStatus;
-  createdAt: string;
-  updatedAt: string;
-  rejectionReason: string;
-  commandId: string;
-  runtimeSceneRef: string;
-};
-```
-
-- [ ] **Step 2: Add policy helper**
-
-Create `desktop/electron/src/lifecycle/lifecyclePolicy.ts`:
-
-```ts
-import type { LifecycleIntent } from "./lifecycleIntentTypes.js";
-
-export type LifecyclePolicyInput = {
-  activeWorkCount: number;
-  selfEvolutionRunActive: boolean;
-  applyWindowOpen: boolean;
-};
-
-export type LifecyclePolicyDecision =
-  | { accepted: true; reason: "allowed" }
-  | { accepted: false; reason: "active_work_running" | "self_evolution_already_active" | "apply_window_closed" };
-
-export function decideLifecycleIntent(intent: LifecycleIntent, input: LifecyclePolicyInput): LifecyclePolicyDecision {
-  if (input.activeWorkCount > 0 && intent.action !== "focus_workbench") {
-    return { accepted: false, reason: "active_work_running" };
-  }
-  if (intent.action === "resume_self_evolution" && input.selfEvolutionRunActive) {
-    return { accepted: false, reason: "self_evolution_already_active" };
-  }
-  if (intent.action === "restart_after_apply" && !input.applyWindowOpen) {
-    return { accepted: false, reason: "apply_window_closed" };
-  }
-  return { accepted: true, reason: "allowed" };
-}
-```
-
-- [ ] **Step 3: Add policy tests**
-
-Create `desktop/electron/tests/lifecycleIntentStore.test.ts`:
-
-```ts
-import { describe, expect, it } from "vitest";
-import type { LifecycleIntent } from "../src/lifecycle/lifecycleIntentTypes.js";
-import { decideLifecycleIntent } from "../src/lifecycle/lifecyclePolicy.js";
-
-const baseIntent: LifecycleIntent = {
-  intentId: "intent-1",
-  schemaVersion: 1,
-  requestedBy: { actorType: "self_evolution_agent", actorId: "self-agent" },
-  action: "restart_after_apply",
-  reason: "apply completed",
-  sourceRunId: "self-run-1",
-  sourceTaskId: "task-1",
-  sourceWorktree: "C:/worktree",
-  idempotencyKey: "self-run-1:restart",
-  status: "queued",
-  createdAt: "2026-06-26T00:00:00.000Z",
-  updatedAt: "2026-06-26T00:00:00.000Z",
-  rejectionReason: "",
-  commandId: "",
-  runtimeSceneRef: ""
-};
-
-describe("decideLifecycleIntent", () => {
-  it("blocks restart while active work is running", () => {
-    expect(decideLifecycleIntent(baseIntent, { activeWorkCount: 1, selfEvolutionRunActive: false, applyWindowOpen: true })).toEqual({
-      accepted: false,
-      reason: "active_work_running"
-    });
-  });
-
-  it("allows restart after apply when guards pass", () => {
-    expect(decideLifecycleIntent(baseIntent, { activeWorkCount: 0, selfEvolutionRunActive: false, applyWindowOpen: true })).toEqual({
-      accepted: true,
-      reason: "allowed"
-    });
-  });
-});
-```
-
-- [ ] **Step 4: Implement append-only store**
-
-Create `desktop/electron/src/lifecycle/lifecycleIntentStore.ts`:
-
-```ts
-import { mkdirSync, appendFileSync, readFileSync, existsSync } from "node:fs";
-import { dirname } from "node:path";
-import type { LifecycleIntent } from "./lifecycleIntentTypes.js";
-
-export function appendLifecycleIntent(path: string, intent: LifecycleIntent): void {
-  mkdirSync(dirname(path), { recursive: true });
-  appendFileSync(path, `${JSON.stringify(intent)}\n`, { encoding: "utf8" });
-}
-
-export function readLifecycleIntents(path: string): LifecycleIntent[] {
-  if (!existsSync(path)) {
-    return [];
-  }
-  return readFileSync(path, "utf8")
-    .split(/\r?\n/)
-    .filter(Boolean)
-    .map((line) => JSON.parse(line) as LifecycleIntent);
-}
-```
-
-- [ ] **Step 5: Add store tests**
-
-Append to `desktop/electron/tests/lifecycleIntentStore.test.ts`:
-
-```ts
-import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { appendLifecycleIntent, readLifecycleIntents } from "../src/lifecycle/lifecycleIntentStore.js";
-
-describe("lifecycle intent store", () => {
-  it("appends and reads intents as jsonl", () => {
-    const path = join(mkdtempSync(join(tmpdir(), "vibelution-intents-")), "intents.jsonl");
-    appendLifecycleIntent(path, baseIntent);
-    expect(readLifecycleIntents(path)).toEqual([baseIntent]);
-  });
-});
-```
-
-- [ ] **Step 6: Verify**
-
-Run:
-
-```powershell
-npm --prefix desktop/electron run build
-npm --prefix desktop/electron test -- --run
-```
-
-Expected: intent policy and store tests pass.
-
-- [ ] **Step 7: Commit**
-
-```powershell
-git add desktop/electron/src/lifecycle desktop/electron/tests/lifecycleIntentStore.test.ts
-git commit -m "feat: add launcher lifecycle intent queue"
-```
-
-### Task 9: Self-Evolution Lifecycle Intent Integration
-
-**Files:**
-- Modify: `core/web/services/self_evolution_control_service.py`
+- Create: `core/launcher/lifecycle_intent_store.py`
+- Modify: `core/launcher/service.py`
 - Modify: `core/web/routes/launcher.py`
 - Modify: `tests/test_web_runtime_routes.py`
 - Test: `tests/test_web_runtime_routes.py`
 
 **Interfaces:**
-- Consumes: existing self-evolution run state and runtime-scene logging.
-- Produces: structured lifecycle intents instead of direct process actions from self-evolution.
+- Consumes: existing Launcher active-work checks, Runtime Manager command queue, control-token guarded Launcher routes, and runtime-scene logging.
+- Produces: Python-owned `submit_lifecycle_intent(...)`, `next_desktop_action(...)`, and `ack_desktop_action(...)` APIs. Electron and agents do not write lifecycle JSONL files.
 
-- [ ] **Step 1: Write failing route/service tests**
+- [ ] **Step 1: Write failing Python single-writer tests**
 
 Add a test to `tests/test_web_runtime_routes.py`:
 
 ```python
-def test_self_evolution_restart_request_writes_lifecycle_intent(tmp_path, monkeypatch):
-    intents_path = tmp_path / ".runtime" / "launcher" / "lifecycle-intents" / "intents.jsonl"
-    monkeypatch.setattr(self_evolution_control_service, "LIFECYCLE_INTENTS_PATH", intents_path)
+from core.launcher import lifecycle_intent_store
 
-    result = self_evolution_control_service.request_lifecycle_intent(
+
+def test_launcher_lifecycle_intent_store_is_python_single_writer(tmp_path, monkeypatch):
+    monkeypatch.setattr(lifecycle_intent_store, "LIFECYCLE_INTENTS_DIR", tmp_path)
+
+    result = lifecycle_intent_store.submit_lifecycle_intent(
+        {
+            "requestedBy": {"actorType": "self_evolution_agent", "actorId": "self-agent"},
+            "action": "focus_workbench",
+            "reason": "recover focus after apply",
+            "sourceRunId": "self-run-1",
+            "sourceTaskId": "task-1",
+            "sourceWorktree": str(tmp_path / "worktree"),
+            "idempotencyKey": "self-run-1:focus",
+        },
+        active_work_runs=[],
+    )
+
+    assert result["status"] == "accepted"
+    assert (tmp_path / "intents.jsonl").exists()
+    action = lifecycle_intent_store.next_desktop_action()
+    assert action["action"] == "focus_workbench"
+    assert action["intentId"] == result["intentId"]
+
+
+def test_launcher_lifecycle_intent_rejects_runtime_effects_during_active_work(tmp_path, monkeypatch):
+    monkeypatch.setattr(lifecycle_intent_store, "LIFECYCLE_INTENTS_DIR", tmp_path)
+
+    result = lifecycle_intent_store.submit_lifecycle_intent(
         {
             "requestedBy": {"actorType": "self_evolution_agent", "actorId": "self-agent"},
             "action": "restart_after_apply",
@@ -1668,67 +1535,258 @@ def test_self_evolution_restart_request_writes_lifecycle_intent(tmp_path, monkey
             "sourceTaskId": "task-1",
             "sourceWorktree": str(tmp_path / "worktree"),
             "idempotencyKey": "self-run-1:restart",
-        }
+        },
+        active_work_runs=[{"runId": "active-1", "status": "running"}],
     )
 
-    assert result["status"] == "queued"
-    assert intents_path.exists()
-    assert "restart_after_apply" in intents_path.read_text(encoding="utf-8")
+    assert result["status"] == "rejected"
+    assert result["rejectionReason"] == "active_work_running"
+    assert lifecycle_intent_store.next_desktop_action() == {}
 ```
 
 Run:
 
 ```powershell
-$env:TEMP="$PWD\\.tmp\\pytest-temp"; $env:TMP="$PWD\\.tmp\\pytest-temp"; pytest tests/test_web_runtime_routes.py -k "self_evolution_restart_request_writes_lifecycle_intent" -q --basetemp "$PWD\\.tmp\\pytest-basetemp"
+$env:TEMP="$PWD\\.tmp\\pytest-temp"; $env:TMP="$PWD\\.tmp\\pytest-temp"; pytest tests/test_web_runtime_routes.py -k "launcher_lifecycle_intent" -q --basetemp "$PWD\\.tmp\\pytest-basetemp"
 ```
 
-Expected: failure because `request_lifecycle_intent` is not implemented.
+Expected: failure because `core.launcher.lifecycle_intent_store` is not implemented.
 
-- [ ] **Step 2: Implement service function**
+- [ ] **Step 2: Implement Python-owned store and desktop action queue**
 
-Add to `core/web/services/self_evolution_control_service.py`:
+Create `core/launcher/lifecycle_intent_store.py`:
 
 ```python
-LIFECYCLE_INTENTS_PATH = PROJECT_ROOT / ".runtime" / "launcher" / "lifecycle-intents" / "intents.jsonl"
+from __future__ import annotations
+
+import json
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+from uuid import uuid4
+
+from core.runtime_manager.constants import PROJECT_ROOT
 
 
-def request_lifecycle_intent(payload: dict[str, Any]) -> dict[str, Any]:
-    now = _now_timestamp()
+LIFECYCLE_INTENTS_DIR = PROJECT_ROOT / ".runtime" / "launcher" / "lifecycle-intents"
+DESKTOP_ACTIONS = {"open_workbench", "focus_workbench", "close_workbench"}
+RUNTIME_EFFECT_ACTIONS = {"restart_after_apply", "resume_self_evolution", "recover_after_crash", "request_app_exit"}
+ALLOWED_ACTIONS = DESKTOP_ACTIONS | RUNTIME_EFFECT_ACTIONS
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _path(name: str) -> Path:
+    return LIFECYCLE_INTENTS_DIR / name
+
+
+def _append_jsonl(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8", newline="\n") as stream:
+        stream.write(json.dumps(payload, ensure_ascii=False, sort_keys=True) + "\n")
+
+
+def _safe_text(value: Any, *, max_length: int = 500) -> str:
+    return str(value or "").strip()[:max_length]
+
+
+def submit_lifecycle_intent(payload: dict[str, Any], *, active_work_runs: list[dict[str, Any]]) -> dict[str, Any]:
+    action = _safe_text(payload.get("action"), max_length=80)
+    if action not in ALLOWED_ACTIONS:
+        raise ValueError(f"unsupported lifecycle intent action: {action}")
+    now = _now_iso()
+    active_work_running = bool(active_work_runs) and action in RUNTIME_EFFECT_ACTIONS
     intent = {
         "intentId": f"intent-{uuid4().hex}",
         "schemaVersion": 1,
         "requestedBy": payload.get("requestedBy") or {},
-        "action": str(payload.get("action") or ""),
-        "reason": str(payload.get("reason") or ""),
-        "sourceRunId": str(payload.get("sourceRunId") or ""),
-        "sourceTaskId": str(payload.get("sourceTaskId") or ""),
-        "sourceWorktree": str(payload.get("sourceWorktree") or ""),
-        "idempotencyKey": str(payload.get("idempotencyKey") or ""),
-        "status": "queued",
+        "action": action,
+        "reason": _safe_text(payload.get("reason")),
+        "sourceRunId": _safe_text(payload.get("sourceRunId"), max_length=160),
+        "sourceTaskId": _safe_text(payload.get("sourceTaskId"), max_length=160),
+        "sourceWorktree": _safe_text(payload.get("sourceWorktree")),
+        "idempotencyKey": _safe_text(payload.get("idempotencyKey"), max_length=240),
+        "status": "rejected" if active_work_running else "accepted",
         "createdAt": now,
         "updatedAt": now,
-        "rejectionReason": "",
+        "rejectionReason": "active_work_running" if active_work_running else "",
         "commandId": "",
         "runtimeSceneRef": "",
     }
-    LIFECYCLE_INTENTS_PATH.parent.mkdir(parents=True, exist_ok=True)
-    with LIFECYCLE_INTENTS_PATH.open("a", encoding="utf-8") as stream:
-        stream.write(json.dumps(intent, ensure_ascii=False) + "\n")
-    _record_self_scene_event(
-        "lifecycle_intent",
-        "self_evolution.lifecycle_intent.queued",
-        run_id=intent["sourceRunId"],
-        message="Self-evolution lifecycle intent queued.",
-        outcome="started",
-        fields={
-            "intentId": intent["intentId"],
-            "action": intent["action"],
-            "sourceTaskId": intent["sourceTaskId"],
-            "idempotencyKey": intent["idempotencyKey"],
-        },
-        lifecycle=True,
-    )
+    _append_jsonl(_path("intents.jsonl"), intent)
+    if intent["status"] == "accepted" and action in DESKTOP_ACTIONS:
+        _append_jsonl(
+            _path("desktop-actions.jsonl"),
+            {
+                "actionId": f"desktop-action-{uuid4().hex}",
+                "intentId": intent["intentId"],
+                "action": action,
+                "status": "pending",
+                "createdAt": now,
+                "updatedAt": now,
+                "payload": {"sourceRunId": intent["sourceRunId"], "sourceTaskId": intent["sourceTaskId"]},
+            },
+        )
     return intent
+
+
+def _read_jsonl(path: Path) -> list[dict[str, Any]]:
+    if not path.exists():
+        return []
+    records: list[dict[str, Any]] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if line.strip():
+            records.append(json.loads(line))
+    return records
+
+
+def next_desktop_action() -> dict[str, Any]:
+    for action in _read_jsonl(_path("desktop-actions.jsonl")):
+        if action.get("status") == "pending":
+            return action
+    return {}
+
+
+def ack_desktop_action(action_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    result = {
+        "actionId": _safe_text(action_id, max_length=160),
+        "status": _safe_text(payload.get("status"), max_length=40) or "succeeded",
+        "message": _safe_text(payload.get("message")),
+        "ackedAt": _now_iso(),
+    }
+    _append_jsonl(_path("desktop-action-results.jsonl"), result)
+    return result
+```
+
+- [ ] **Step 3: Add guarded Launcher routes**
+
+Modify `core/web/routes/launcher.py`:
+
+```python
+from core.launcher import lifecycle_intent_store
+
+
+class LifecycleIntentPayload(BaseModel):
+    requestedBy: dict = Field(default_factory=dict)
+    action: str
+    reason: str = ""
+    sourceRunId: str = ""
+    sourceTaskId: str = ""
+    sourceWorktree: str = ""
+    idempotencyKey: str
+
+
+class DesktopActionAckPayload(BaseModel):
+    status: str = "succeeded"
+    message: str = ""
+
+
+@router.post("/launcher/lifecycle-intents", status_code=202)
+def launcher_submit_lifecycle_intent(payload: LifecycleIntentPayload) -> dict:
+    try:
+        return launcher_service.submit_lifecycle_intent(payload.model_dump())
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail={"code": "invalid_lifecycle_intent", "message": str(exc)}) from exc
+
+
+@router.get("/launcher/desktop-actions/next")
+def launcher_next_desktop_action() -> dict:
+    return launcher_service.next_desktop_action()
+
+
+@router.post("/launcher/desktop-actions/{action_id}/ack", status_code=202)
+def launcher_ack_desktop_action(action_id: str, payload: DesktopActionAckPayload) -> dict:
+    return launcher_service.ack_desktop_action(action_id, payload.model_dump())
+```
+
+Add thin service wrappers to `core/launcher/service.py` so route code does not bypass Launcher active-work policy:
+
+```python
+from core.launcher import lifecycle_intent_store
+
+
+def submit_lifecycle_intent(payload: dict[str, Any]) -> dict[str, Any]:
+    return lifecycle_intent_store.submit_lifecycle_intent(payload, active_work_runs=launcher_active_work_runs())
+
+
+def next_desktop_action() -> dict[str, Any]:
+    return lifecycle_intent_store.next_desktop_action()
+
+
+def ack_desktop_action(action_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    return lifecycle_intent_store.ack_desktop_action(action_id, payload)
+```
+
+- [ ] **Step 4: Verify**
+
+Run:
+
+```powershell
+$env:TEMP="$PWD\\.tmp\\pytest-temp"; $env:TMP="$PWD\\.tmp\\pytest-temp"; pytest tests/test_web_runtime_routes.py -k "launcher_lifecycle_intent or launcher_control_token or active_work" -q --basetemp "$PWD\\.tmp\\pytest-basetemp"
+```
+
+Expected: lifecycle intent tests pass, Launcher route token/active-work behavior remains guarded, and no Electron file writer exists for intents.
+
+- [ ] **Step 5: Commit**
+
+```powershell
+git add core/launcher/lifecycle_intent_store.py core/launcher/service.py core/web/routes/launcher.py tests/test_web_runtime_routes.py
+git commit -m "feat: add python-owned lifecycle intent store"
+```
+
+### Task 9: Self-Evolution Lifecycle Intent Integration
+
+**Files:**
+- Modify: `core/web/services/self_evolution_control_service.py`
+- Modify: `tests/test_web_runtime_routes.py`
+- Test: `tests/test_web_runtime_routes.py`
+
+**Interfaces:**
+- Consumes: existing self-evolution run state and Task 8 `launcher_service.submit_lifecycle_intent(...)`.
+- Produces: structured lifecycle requests from self-evolution without direct process control or direct JSONL writes.
+
+- [ ] **Step 1: Write failing service test**
+
+Add to `tests/test_web_runtime_routes.py`:
+
+```python
+def test_self_evolution_restart_request_uses_launcher_lifecycle_service(monkeypatch):
+    captured: dict[str, object] = {}
+
+    def fake_submit(payload: dict[str, object]) -> dict[str, object]:
+        captured.update(payload)
+        return {"intentId": "intent-1", "status": "accepted", "action": payload["action"]}
+
+    monkeypatch.setattr(self_evolution_control_service.launcher_service, "submit_lifecycle_intent", fake_submit)
+
+    result = self_evolution_control_service.request_lifecycle_intent(
+        {
+            "requestedBy": {"actorType": "self_evolution_agent", "actorId": "self-agent"},
+            "action": "restart_after_apply",
+            "reason": "apply completed",
+            "sourceRunId": "self-run-1",
+            "sourceTaskId": "task-1",
+            "sourceWorktree": "C:/worktree",
+            "idempotencyKey": "self-run-1:restart",
+        }
+    )
+
+    assert result["intentId"] == "intent-1"
+    assert captured["action"] == "restart_after_apply"
+```
+
+- [ ] **Step 2: Implement self-evolution adapter**
+
+Add or update `core/web/services/self_evolution_control_service.py`:
+
+```python
+from core.launcher import service as launcher_service
+
+
+def request_lifecycle_intent(payload: dict[str, Any]) -> dict[str, Any]:
+    return launcher_service.submit_lifecycle_intent(payload)
 ```
 
 - [ ] **Step 3: Verify**
@@ -1736,85 +1794,102 @@ def request_lifecycle_intent(payload: dict[str, Any]) -> dict[str, Any]:
 Run:
 
 ```powershell
-$env:TEMP="$PWD\\.tmp\\pytest-temp"; $env:TMP="$PWD\\.tmp\\pytest-temp"; pytest tests/test_web_runtime_routes.py -k "self_evolution_restart_request_writes_lifecycle_intent or self_evolution_control_paths_record_child_log" -q --basetemp "$PWD\\.tmp\\pytest-basetemp"
+$env:TEMP="$PWD\\.tmp\\pytest-temp"; $env:TMP="$PWD\\.tmp\\pytest-temp"; pytest tests/test_web_runtime_routes.py -k "self_evolution_restart_request_uses_launcher_lifecycle_service or launcher_lifecycle_intent" -q --basetemp "$PWD\\.tmp\\pytest-basetemp"
 ```
 
-Expected: lifecycle intent test passes and existing self-evolution runtime-scene child log test still passes.
+Expected: self-evolution uses Launcher service as the only lifecycle writer and existing Launcher lifecycle tests still pass.
 
 - [ ] **Step 4: Commit**
 
 ```powershell
 git add core/web/services/self_evolution_control_service.py tests/test_web_runtime_routes.py
-git commit -m "feat: queue self-evolution lifecycle intents"
+git commit -m "feat: route self-evolution lifecycle intents through launcher"
 ```
 
-### Task 10: Launcher Executes Accepted Lifecycle Intents
+### Task 10: Electron Consumes Approved Desktop Actions
 
 **Files:**
-- Modify: `desktop/electron/src/lifecycle/lifecycleIntentStore.ts`
-- Modify: `desktop/electron/src/lifecycle/lifecyclePolicy.ts`
-- Modify: `desktop/electron/src/process/runtimeManagerClient.ts`
+- Create: `desktop/electron/src/protocol/desktopActionClient.ts`
 - Modify: `desktop/electron/src/main.ts`
-- Test: `desktop/electron/tests/lifecycleIntentStore.test.ts`
+- Test: `desktop/electron/tests/desktopActionClient.test.ts`
 
 **Interfaces:**
-- Consumes: queued lifecycle intents and active-work status.
-- Produces: accepted intents become existing Launcher/Runtime Manager commands.
+- Consumes: Task 8 guarded Launcher Desktop Action API.
+- Produces: Electron executes only approved desktop actions (`open_workbench`, `focus_workbench`, `close_workbench`) and returns ack/result. Runtime-effect actions remain Python Launcher/Runtime Manager responsibilities.
 
-- [ ] **Step 1: Add command mapping tests**
+- [ ] **Step 1: Add action mapping tests**
 
-Append to `desktop/electron/tests/lifecycleIntentStore.test.ts`:
+Create `desktop/electron/tests/desktopActionClient.test.ts`:
 
 ```ts
-import { runtimeCommandForIntent } from "../src/process/runtimeManagerClient.js";
+import { describe, expect, it } from "vitest";
+import { desktopWindowOperationForAction } from "../src/protocol/desktopActionClient.js";
 
-describe("runtimeCommandForIntent", () => {
-  it("maps restart_after_apply to restart", () => {
-    expect(runtimeCommandForIntent("restart_after_apply")).toBe("restart");
+describe("desktopWindowOperationForAction", () => {
+  it("maps approved desktop actions to window operations", () => {
+    expect(desktopWindowOperationForAction("open_workbench")).toBe("open_or_focus_workbench");
+    expect(desktopWindowOperationForAction("focus_workbench")).toBe("focus_workbench");
+    expect(desktopWindowOperationForAction("close_workbench")).toBe("close_workbench");
   });
 
-  it("maps focus_workbench to launcher", () => {
-    expect(runtimeCommandForIntent("focus_workbench")).toBe("launcher");
+  it("does not map runtime-effect actions into Electron process commands", () => {
+    expect(desktopWindowOperationForAction("restart_after_apply")).toBe("none");
+    expect(desktopWindowOperationForAction("recover_after_crash")).toBe("none");
   });
 });
 ```
 
-- [ ] **Step 2: Implement command mapping**
+- [ ] **Step 2: Implement Desktop Action client types**
 
-Update `desktop/electron/src/process/runtimeManagerClient.ts`:
+Create `desktop/electron/src/protocol/desktopActionClient.ts`:
 
 ```ts
-import type { LifecycleIntentAction } from "../lifecycle/lifecycleIntentTypes.js";
+export type DesktopActionName =
+  | "open_workbench"
+  | "focus_workbench"
+  | "close_workbench"
+  | "restart_after_apply"
+  | "recover_after_crash";
 
-export function runtimeCommandForIntent(action: LifecycleIntentAction): LauncherAdapterCommand {
-  if (action === "restart_after_apply" || action === "recover_after_crash") {
-    return "restart";
-  }
-  if (action === "open_workbench" || action === "resume_self_evolution") {
-    return "start";
+export type DesktopWindowOperation = "open_or_focus_workbench" | "focus_workbench" | "close_workbench" | "none";
+
+export type DesktopAction = {
+  actionId: string;
+  intentId: string;
+  action: DesktopActionName;
+  status: "pending" | "claimed" | "succeeded" | "failed";
+  payload: Record<string, string>;
+};
+
+export function desktopWindowOperationForAction(action: string): DesktopWindowOperation {
+  if (action === "open_workbench") {
+    return "open_or_focus_workbench";
   }
   if (action === "focus_workbench") {
-    return "launcher";
+    return "focus_workbench";
   }
-  return "status";
+  if (action === "close_workbench") {
+    return "close_workbench";
+  }
+  return "none";
 }
 ```
 
-- [ ] **Step 3: Add polling loop in Electron main**
+- [ ] **Step 3: Add Electron action loop**
 
-In `desktop/electron/src/main.ts`, add a timer that:
+In `desktop/electron/src/main.ts`, add a bounded loop that:
 
-1. reads queued intents;
-2. applies `decideLifecycleIntent`;
-3. records accepted or rejected status;
-4. maps accepted actions to existing Launcher adapter commands;
-5. spawns the command through `spawnPythonLauncherAdapter`;
-6. records command ID and child exit result.
+1. calls `GET /api/launcher/desktop-actions/next` with the existing control token;
+2. maps the action through `desktopWindowOperationForAction`;
+3. executes only BrowserWindow operations;
+4. posts `POST /api/launcher/desktop-actions/{actionId}/ack`;
+5. does not read `.runtime/launcher/lifecycle-intents/*.jsonl`;
+6. does not spawn Runtime Manager or worker processes.
 
-Keep the polling interval conservative in version 1:
+Use a conservative interval:
 
 ```ts
-const LIFECYCLE_INTENT_POLL_MS = 2000;
+const DESKTOP_ACTION_POLL_MS = 2000;
 ```
 
 - [ ] **Step 4: Verify**
@@ -1826,13 +1901,13 @@ npm --prefix desktop/electron run build
 npm --prefix desktop/electron test -- --run
 ```
 
-Expected: command mapping tests pass; build remains strict.
+Expected: desktop action mapping tests pass, build remains strict, and no Electron test imports a lifecycle intent store.
 
 - [ ] **Step 5: Commit**
 
 ```powershell
-git add desktop/electron/src/lifecycle desktop/electron/src/process/runtimeManagerClient.ts desktop/electron/src/main.ts desktop/electron/tests/lifecycleIntentStore.test.ts
-git commit -m "feat: execute lifecycle intents through launcher supervisor"
+git add desktop/electron/src/protocol/desktopActionClient.ts desktop/electron/src/main.ts desktop/electron/tests/desktopActionClient.test.ts
+git commit -m "feat: consume launcher-approved desktop actions"
 ```
 
 ### Task 11: Security And IPC Boundary
@@ -1913,11 +1988,11 @@ git commit -m "feat: constrain electron launcher ipc bridge"
 - Create: `desktop/electron/electron-builder.json`
 - Modify: `desktop/electron/package.json`
 - Create: `scripts/build_desktop_package.ps1`
-- Test: no installer test in version 1; build smoke only
+- Test: package directory smoke only; no installer or zero-dependency claim in version 1
 
 **Interfaces:**
-- Consumes: `web/dist`, Python runtime, existing project files.
-- Produces: a local packaged Electron application skeleton.
+- Consumes: Electron desktop build output and an external Vibelution workspace/config at runtime.
+- Produces: a local `win-unpacked` Electron shell that starts or attaches to the existing workspace-bound Python Launcher Service. It does not bundle Python, backend source, requirements, or a writable workspace.
 
 - [ ] **Step 1: Add builder config**
 
@@ -1934,18 +2009,14 @@ Create `desktop/electron/electron-builder.json`:
     "dist/**/*",
     "package.json"
   ],
-  "extraResources": [
-    { "from": "../../web/dist", "to": "web/dist" },
-    { "from": "../../scripts", "to": "scripts" },
-    { "from": "../../core", "to": "core" },
-    { "from": "../../requirements.txt", "to": "requirements.txt" }
-  ],
   "win": {
     "target": ["dir"],
     "artifactName": "Vibelution-${version}-${arch}.${ext}"
   }
 }
 ```
+
+Do not add `core/`, `scripts/`, `requirements.txt`, or `web/dist` to `extraResources` in V1. Runtime code, web UI, Python, and operator config remain in the external workspace until a separate V2 bundled-runtime plan handles dependency freezing, writable data directories, update, and rollback.
 
 - [ ] **Step 2: Add package script**
 
@@ -1970,7 +2041,6 @@ $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
 $projectDir = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
-npm --prefix (Join-Path $projectDir "web") run build
 npm --prefix (Join-Path $projectDir "desktop/electron") install
 npm --prefix (Join-Path $projectDir "desktop/electron") run package:dir
 ```
@@ -1983,7 +2053,7 @@ Run:
 powershell -ExecutionPolicy Bypass -File scripts/build_desktop_package.ps1
 ```
 
-Expected: `dist/desktop/win-unpacked` or equivalent directory target is produced.
+Expected: `dist/desktop/win-unpacked` or equivalent directory target is produced, and the package contains Electron desktop files only. It must not contain copied `core/`, `scripts/`, `requirements.txt`, root `config.toml`, or `config.example.toml`.
 
 - [ ] **Step 5: Commit**
 
@@ -2012,11 +2082,11 @@ Use these event codes:
 electron.launcher.supervisor.started
 electron.launcher.window.opened
 electron.workbench.window.opened
-electron.child_process.started
-electron.child_process.exited
-electron.lifecycle_intent.accepted
-electron.lifecycle_intent.rejected
-electron.lifecycle_intent.executed
+electron.launcher_service.started
+electron.launcher_service.exited
+electron.desktop_action.claimed
+electron.desktop_action.succeeded
+electron.desktop_action.failed
 ```
 
 - [ ] **Step 2: Add backend helper test**
@@ -2078,7 +2148,7 @@ pytest tests/test_web_runtime_routes.py -k "launcher and protocol" -q
 
 Pass condition:
 
-- `vibelution://` deep links parse into typed intents without starting child processes.
+- `vibelution://` deep links parse into typed Launcher requests without starting child processes.
 - Launcher command responses have one machine-readable JSON shape.
 - Unsupported deep links and blocked lifecycle actions produce safe rejections.
 - Existing Launcher control-token and active-work guard semantics remain authoritative.
@@ -2140,7 +2210,7 @@ Manual check:
 - Closing Launcher runs active-work guard.
 - Production mode refuses to start when Launcher URL, control token, or operator config path is unresolved.
 
-### Gate 4: Self-Evolution Intent Loop Ready
+### Gate 4: Python Intent Store And Desktop Action Loop Ready
 
 Evidence required:
 
@@ -2151,10 +2221,12 @@ npm --prefix desktop/electron test -- --run
 
 Pass condition:
 
-- Self-evolution restart request writes a queued intent.
-- Launcher accepts or rejects the intent with a safe reason.
-- Accepted intent maps to existing Runtime Manager / Launcher commands.
-- Runtime-scene evidence records request, decision, command, and outcome.
+- Self-evolution restart request calls the Launcher lifecycle service instead of writing JSONL directly.
+- Python Launcher is the only writer of lifecycle intent and desktop action files.
+- Launcher accepts or rejects the intent with a safe reason and active-work evidence.
+- Runtime-effect actions map to existing Runtime Manager / Launcher command paths inside Python.
+- Desktop actions are exposed through guarded Launcher API, consumed by Electron, and acked with bounded result metadata.
+- Runtime-scene evidence records request, decision, desktop action, command, and outcome at the owning layer.
 
 ### Gate 5: Packaging Skeleton Ready
 
@@ -2169,6 +2241,8 @@ Pass condition:
 - Local unpacked desktop package is produced.
 - Package uses one visible product entry.
 - Workbench has no independent public shortcut.
+- Package does not copy `core/`, `scripts/`, `requirements.txt`, root `config.toml`, or `config.example.toml`.
+- Package requires an external workspace/Python/operator config unless a separate V2 bundled-runtime plan is approved.
 - Packaged app does not read root `config.toml` or `config.example.toml` as active operator config.
 - Package smoke records a redacted environment summary and no full env dump.
 
@@ -2204,15 +2278,16 @@ Version 1 must support fallback:
 
 ## Logging Decision
 
-New logs are required because this plan changes lifecycle, process supervision, self-evolution restart behavior, packaging, and window management.
+New logs are required because this plan changes desktop supervision, Launcher Service attachment, self-evolution lifecycle requests, packaging, and window management.
 
 Log through existing runtime-scene helpers or bounded Electron bridge payloads:
 
 - supervisor startup and shutdown;
-- child process start/exit/failure;
+- Python Launcher Service start/exit/failure;
 - window open/focus/close;
-- lifecycle intent queued/accepted/rejected/executed;
-- Runtime Manager command submission and result;
+- Python-owned lifecycle intent queued/accepted/rejected/executed;
+- Electron desktop action claimed/succeeded/failed;
+- Runtime Manager command submission and result from Python;
 - Electron provider fallback or failure.
 
 Do not log:
@@ -2239,7 +2314,7 @@ Recommended version treatment:
 When this plan is committed or implementation starts, sync `agent-runtime-core` memory with:
 
 ```text
-Electron Launcher supervisor plan optimized with Codex reference findings: the reference repo does not provide Electron packaging to copy; the reusable pattern is deep-link desktop entry, app-server/runtime protocol boundary, machine-readable lifecycle commands, schema fixtures, and tests. Vibelution plan now keeps Electron as a thin single visible shell and supervisor over existing Launcher, Runtime Manager, FastAPI, runtime-scene, active-work guard, lifecycle-intent contracts, external operator config, and existing environment resolution. The first implementation slice is intentionally low risk: protocol, impact/environment ledger, deep-link parsing, environment summary, generic provider state, and tests before packaging or lifecycle ownership changes.
+Electron Launcher supervisor plan refined after external review: Electron is the Desktop Supervisor and single visible shell; Python Launcher remains the runtime lifecycle, active-work, lifecycle-intent, and Runtime Manager authority. V1 is a Windows workspace-bound desktop package, not a zero-dependency installer. Lifecycle intents are Python single-writer records; Electron consumes only Launcher-approved Desktop Actions and acks results. The first implementation slice remains low risk: protocol, impact/environment ledger, deep-link parsing, environment summary, Python Launcher Service state, generic provider state, and test alignment before packaging or runtime ownership changes.
 ```
 
 ## Execution Handoff
@@ -2255,4 +2330,4 @@ Recommended execution mode:
 1. Subagent-driven execution: one task per implementation slice, with review after each commit.
 2. Inline execution: only for Tasks 0-4, because later tasks touch lifecycle, packaging, Runtime Manager, self-evolution, and tests across multiple surfaces.
 
-First implementation slice should be Tasks 0-4 only. Do not start with packaging or self-evolution restart automation before the deep-link contract, Launcher protocol response shape, generic window provider, and test alignment ledger are stable.
+First implementation slice should be Tasks 0-4 only. Do not start with packaging, Python Launcher Service startup, or self-evolution lifecycle automation before the deep-link contract, Launcher protocol response shape, Python Launcher Service state, generic window provider, and test alignment ledger are stable.
