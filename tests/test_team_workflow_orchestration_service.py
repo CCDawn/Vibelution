@@ -1486,6 +1486,8 @@ def test_start_source_collection_memory_stage_routes_to_knowledge_base_admin(tmp
     assert "资料入库 Agent" not in submitted[0]["content"]
     assert "共享记忆前审" not in submitted[0]["content"]
     assert "approved 候选" in submitted[0]["content"]
+    assert "只处理 source_quality_approved" in submitted[0]["content"]
+    assert "不要推断截断或隐藏候选" in submitted[0]["content"]
     metadata = submitted[0]["kwargs"]["message_metadata"]
     assert metadata["agentId"] == agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID
     assert metadata["agentRole"] == "knowledge_steward"
@@ -1611,6 +1613,96 @@ def test_source_collection_stage_task_context_uses_memory_steward_boundaries(tmp
     assert context["boundaries"]["writesFormalKnowledge"] is True
     assert context["boundaries"]["writesOfficialGraph"] is True
     assert context["writebackContract"]["writesFormalKnowledge"] is True
+
+
+def test_memory_steward_context_returns_approved_candidate_action_packet_without_pending_body(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
+    team = team_service.create_team(name="挑战杯科研团队")
+    run_response = team_workflow_orchestration_service.start_source_collection_run(
+        team["teamId"],
+        {
+            "topic": "神经预测编码",
+            "agentRoles": ["knowledge_steward"],
+            "agentIds": {"knowledge_steward": "agent-knowledge-steward"},
+            "querySeeds": ["predictive coding neural algorithm"],
+            "promptCachePolicy": {"requirement": "disabled"},
+        },
+    )
+    run_id = run_response["run"]["runId"]
+    approved = team_workflow_orchestration_service.register_candidate_source(
+        team["teamId"],
+        {
+            "title": "Predictive coding cortical hierarchy neural network paper",
+            "sourceUrl": "https://doi.org/10.0000/steward-context-approved",
+            "sourceKind": "paper",
+            "summary": "Neural predictive coding evidence for hierarchy and attention mechanisms.",
+            "allowedForAnalysis": True,
+            "metadata": {"sourceCollectionRunId": run_id, "doi": "10.0000/steward-context-approved"},
+            "createdByAgent": "content-extraction-agent",
+        },
+    )["candidate"]
+    team_workflow_orchestration_service.assess_source_candidate_quality(
+        team["teamId"],
+        approved["candidateId"],
+        {
+            "assessedByAgent": "source-quality-agent",
+            "decision": "approved",
+            "notes": "神经预测编码主题相关，元数据可追踪。",
+            "evidenceRefs": [{"type": "doi", "id": "10.0000/steward-context-approved"}],
+        },
+    )
+    pending_marker = "PENDING_BODY_SHOULD_NOT_BE_VISIBLE"
+    for index in range(14):
+        team_workflow_orchestration_service.register_candidate_source(
+            team["teamId"],
+            {
+                "title": f"Pending candidate {index}",
+                "sourceUrl": f"https://doi.org/10.0000/steward-context-pending-{index}",
+                "sourceKind": "paper",
+                "summary": f"{pending_marker} " * 120,
+                "allowedForAnalysis": True,
+                "metadata": {
+                    "sourceCollectionRunId": run_id,
+                    "doi": f"10.0000/steward-context-pending-{index}",
+                },
+                "createdByAgent": "content-extraction-agent",
+            },
+        )
+    task = {
+        "taskId": "stagetask-memory-context-approved-action",
+        "runId": run_id,
+        "stageId": "memory",
+        "agentId": "agent-knowledge-steward",
+        "agentRole": "knowledge_steward",
+        "sessionId": "session-steward",
+        "status": "running",
+        "title": "知识库管理员入库审核",
+        "writebackContract": {
+            "taskId": "stagetask-memory-context-approved-action",
+            "writesFormalKnowledge": True,
+            "writesOfficialGraph": True,
+        },
+    }
+    team_workflow_orchestration_service._upsert_source_collection_stage_session_task(team["teamId"], run_id, task)
+
+    context = team_workflow_orchestration_service.get_source_collection_stage_task_context(
+        team["teamId"],
+        task_id="stagetask-memory-context-approved-action",
+        candidate_limit=80,
+    )
+
+    action_packet = context["stewardActionPacket"]
+    assert action_packet["action"] == "writeback_approved_candidates"
+    assert action_packet["approvedCandidateIds"] == [approved["candidateId"]]
+    assert action_packet["deferredCandidateCounts"]["pending"] == 14
+    assert action_packet["doNotInferHiddenOrTruncatedCandidates"] is True
+    assert action_packet["writebackResultSkeleton"]["approvedCandidateIds"] == [approved["candidateId"]]
+    assert context["candidates"] == [
+        item for item in context["candidates"] if item["qualityBucket"] == "approved"
+    ]
+    assert pending_marker not in json.dumps(context, ensure_ascii=False)
+
 
 def test_source_collection_stage_task_records_high_roi_runtime_events(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
