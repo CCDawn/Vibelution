@@ -11,7 +11,11 @@ import { bootstrapPythonLauncherService } from "./process/launcherServiceClient.
 import type { LauncherBootstrapResult } from "./process/launcherBootstrap.js";
 import { assertTrustedIpcSender } from "./security/ipcSenderValidation.js";
 import { decideShutdown, fetchLauncherActiveWorkStatus, type ShutdownDecision } from "./shutdown/shutdownCoordinator.js";
-import { desktopSmokeSummary, desktopSmokeSummaryPath } from "./smoke/desktopSmoke.js";
+import {
+  desktopSmokeSummary,
+  desktopSmokeSummaryPath,
+  type DesktopSmokeBootstrapSummary
+} from "./smoke/desktopSmoke.js";
 import { closeDesktopSession, registerDesktopSession, reportDesktopWindowState } from "./windows/desktopSessionClient.js";
 import { ElectronWindowProvider } from "./windows/electronWindowProvider.js";
 import type { ManagedWindowState } from "./windows/windowProviderTypes.js";
@@ -262,10 +266,11 @@ async function closeDesktopSessionIfRegistered(): Promise<void> {
   }
 }
 
-function runSmokeAndQuit(paths: DesktopPaths): void {
+async function runSmokeAndQuit(paths: DesktopPaths): Promise<void> {
   const desktopEnv = desktopEnvironment();
-  const launcherUrl = String(desktopEnv.VIBELUTION_LAUNCHER_URL || "http://127.0.0.1:8765/launcher");
-  const workbenchUrl = String(desktopEnv.VIBELUTION_WORKBENCH_URL || "http://127.0.0.1:8000/");
+  const bootstrap = await resolveSmokeBootstrap(paths, desktopEnv);
+  const launcherUrl = bootstrap.launcherUrl || String(desktopEnv.VIBELUTION_LAUNCHER_URL || "http://127.0.0.1:8765/launcher");
+  const workbenchUrl = bootstrap.workbenchUrl || String(desktopEnv.VIBELUTION_WORKBENCH_URL || "http://127.0.0.1:8000/");
   const controlToken = String(desktopEnv.VIBELUTION_WEB_CONTROL_TOKEN || "");
   const summary = desktopSmokeSummary({
     workspaceRoot: paths.workspaceRoot,
@@ -273,14 +278,88 @@ function runSmokeAndQuit(paths: DesktopPaths): void {
     launcherUrl,
     workbenchUrl,
     controlToken,
-    packaged: app.isPackaged
+    packaged: app.isPackaged,
+    bootstrap: bootstrap.summary
   });
   const summaryPath = desktopSmokeSummaryPath(paths.workspaceRoot);
   mkdirSync(dirname(summaryPath), { recursive: true });
   writeFileSync(summaryPath, JSON.stringify(summary, null, 2), "utf-8");
   console.log(JSON.stringify(summary, null, 2));
+  if (bootstrap.summary.attempted && !bootstrap.summary.parsed) {
+    process.exitCode = 1;
+  }
   shutdownApproved = true;
   app.quit();
+}
+
+async function resolveSmokeBootstrap(
+  paths: DesktopPaths,
+  desktopEnv: NodeJS.ProcessEnv
+): Promise<{ summary: DesktopSmokeBootstrapSummary; launcherUrl: string; workbenchUrl: string }> {
+  const pythonPath = String(desktopEnv.VIBELUTION_PYTHON_PATH || desktopEnv.PYTHON || "").trim();
+  const bootstrapRequested = String(desktopEnv.VIBELUTION_ELECTRON_SMOKE_BOOTSTRAP || "").trim() === "1";
+  const shouldAttempt = bootstrapRequested || Boolean(pythonPath);
+  if (!shouldAttempt) {
+    return { summary: emptySmokeBootstrapSummary({ attempted: false }), launcherUrl: "", workbenchUrl: "" };
+  }
+  try {
+    const result = await bootstrapLauncherIfEnabled(paths);
+    if (result === null) {
+      return { summary: emptySmokeBootstrapSummary({ attempted: true }), launcherUrl: "", workbenchUrl: "" };
+    }
+    return {
+      summary: {
+        attempted: true,
+        parsed: true,
+        mode: result.mode,
+        launcherBackendPid: result.launcherBackendPid,
+        protocolVersion: result.protocolVersion,
+        capabilities: [...result.capabilities].sort(),
+        launcherOrigin: safeOrigin(result.launcherUrl),
+        workbenchOrigin: safeOrigin(result.workbenchUrl),
+        errorType: "",
+        errorMessage: ""
+      },
+      launcherUrl: result.launcherUrl,
+      workbenchUrl: result.workbenchUrl
+    };
+  } catch (error: unknown) {
+    return {
+      summary: emptySmokeBootstrapSummary({
+        attempted: true,
+        errorType: error instanceof Error ? error.name : "Error",
+        errorMessage: (error instanceof Error ? error.message : String(error)).slice(0, 500)
+      }),
+      launcherUrl: "",
+      workbenchUrl: ""
+    };
+  }
+}
+
+function emptySmokeBootstrapSummary(
+  overrides: Partial<DesktopSmokeBootstrapSummary> = {}
+): DesktopSmokeBootstrapSummary {
+  return {
+    attempted: false,
+    parsed: false,
+    mode: "",
+    launcherBackendPid: 0,
+    protocolVersion: 0,
+    capabilities: [],
+    launcherOrigin: "",
+    workbenchOrigin: "",
+    errorType: "",
+    errorMessage: "",
+    ...overrides
+  };
+}
+
+function safeOrigin(value: string): string {
+  try {
+    return new URL(value).origin;
+  } catch {
+    return "";
+  }
 }
 
 function trustedIpcOrigins(): string[] {
@@ -368,7 +447,7 @@ app.whenReady()
   .then(async () => {
     const paths = createDesktopPathsForApp();
     if (desktopCliArgs.smoke) {
-      runSmokeAndQuit(paths);
+      await runSmokeAndQuit(paths);
       return;
     }
     launcherBootstrap = await bootstrapLauncherIfEnabled(paths);

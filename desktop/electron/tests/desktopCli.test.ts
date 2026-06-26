@@ -43,7 +43,19 @@ describe("desktop CLI arguments", () => {
       packaged: true,
       launcherOrigin: "http://127.0.0.1:8765",
       workbenchOrigin: "http://127.0.0.1:8000",
-      controlTokenPresent: true
+      controlTokenPresent: true,
+      bootstrap: {
+        attempted: false,
+        parsed: false,
+        mode: "",
+        launcherBackendPid: 0,
+        protocolVersion: 0,
+        capabilities: [],
+        launcherOrigin: "",
+        workbenchOrigin: "",
+        errorType: "",
+        errorMessage: ""
+      }
     });
     expect(desktopSmokeSummaryPath("C:/Users/17533/Desktop/Vibelution").replaceAll("\\", "/")).toBe(
       "C:/Users/17533/Desktop/Vibelution/.runtime/launcher/electron-smoke-summary.json"
