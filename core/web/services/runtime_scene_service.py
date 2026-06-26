@@ -55,6 +55,16 @@ STRUCTURED_TELEMETRY_KEYS = {"llm_bindings", "llmbindings", "agent_binding", "ag
 BROWSER_VISIBILITY_TIMELINE_MIN_SECONDS = 60.0
 WORK_RUN_SNAPSHOT_EVENT_CODE = "work_run.snapshot.persisted"
 WORK_RUN_SNAPSHOT_SUMMARY_EVENT_CODE = "work_run.snapshot.summary"
+ELECTRON_SUPERVISOR_EVENT_CODES = {
+    "electron.launcher.supervisor.started",
+    "electron.launcher.window.opened",
+    "electron.workbench.window.opened",
+    "electron.launcher_service.started",
+    "electron.launcher_service.exited",
+    "electron.desktop_action.claimed",
+    "electron.desktop_action.succeeded",
+    "electron.desktop_action.failed",
+}
 WORK_RUN_HIGH_FREQUENCY_SNAPSHOT_THRESHOLD = 5
 MAX_CONVERSATION_TEXT_CHARS = 20_000
 REDACTED_FIELD_VALUE = "[redacted]"
@@ -893,6 +903,31 @@ def record_runtime_scene_event(
         "recordedAt": timestamp,
         "path": normalized_child_path,
     }
+
+
+def record_electron_supervisor_event(
+    event_code: str,
+    *,
+    message: str = "",
+    fields: dict[str, Any] | None = None,
+    level: str = "info",
+    outcome: str = "observed",
+    occurred_at: str = "",
+) -> dict[str, Any]:
+    event_name = str(event_code or "").strip()
+    if event_name not in ELECTRON_SUPERVISOR_EVENT_CODES:
+        raise ValueError(f"unsupported electron supervisor event: {event_name}")
+    return record_runtime_scene_event(
+        "electron_launcher",
+        "desktop_supervisor",
+        event_name,
+        message=message or event_name,
+        level=level,
+        outcome=outcome,
+        fields=fields,
+        occurred_at=occurred_at,
+        lifecycle=True,
+    )
 
 
 def record_research_scene_event(

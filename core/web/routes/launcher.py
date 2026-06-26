@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from core.launcher import service as launcher_service
+from core.web.services import runtime_scene_service
 
 
 router = APIRouter(tags=["launcher"])
@@ -54,6 +55,15 @@ class DesktopActionClaimPayload(BaseModel):
 class DesktopActionResultPayload(BaseModel):
     desktopSessionId: str
     result: dict = Field(default_factory=dict)
+
+
+class LauncherRuntimeSceneEventPayload(BaseModel):
+    eventCode: str
+    message: str = ""
+    fields: dict = Field(default_factory=dict)
+    level: str = "info"
+    outcome: str = "observed"
+    occurredAt: str = ""
 
 
 @router.get("/launcher/status")
@@ -197,6 +207,24 @@ def launcher_ack_desktop_action(action_id: str, payload: DesktopActionResultPayl
 @router.post("/launcher/desktop-actions/{action_id}/fail", status_code=202)
 def launcher_fail_desktop_action(action_id: str, payload: DesktopActionResultPayload) -> dict:
     return launcher_service.fail_desktop_action(action_id, payload.desktopSessionId, payload.result)
+
+
+@router.post("/launcher/runtime-scene/events", status_code=202)
+def launcher_runtime_scene_event(payload: LauncherRuntimeSceneEventPayload) -> dict:
+    try:
+        return runtime_scene_service.record_electron_supervisor_event(
+            payload.eventCode,
+            message=payload.message,
+            fields=payload.fields,
+            level=payload.level,
+            outcome=payload.outcome,
+            occurred_at=payload.occurredAt,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "invalid_electron_runtime_scene_event", "message": str(exc)},
+        ) from exc
 
 
 def _request_audit(request: Request, *, operation: str) -> launcher_service.LauncherRequestAudit:

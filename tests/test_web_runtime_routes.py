@@ -2637,6 +2637,48 @@ def test_runtime_scene_event_helper_records_structured_lifecycle_event(tmp_path,
     assert manifest["package"]["timeline_path"] == "timeline.jsonl"
     assert manifest["package"]["lifecycle_path"] == "lifecycle.jsonl"
 
+def test_launcher_runtime_scene_event_records_electron_supervisor_event(tmp_path, monkeypatch):
+    scene_dir = _seed_runtime_scene_bundle(tmp_path, scene_id="scene-electron", status="running")
+    launcher_state_path = tmp_path / ".runtime" / "launcher" / "state.json"
+    launcher_state_path.parent.mkdir(parents=True, exist_ok=True)
+    launcher_state_path.write_text(
+        json.dumps(
+            {
+                "runtimeSceneId": "scene-electron",
+                "runtimeSceneDir": str(scene_dir),
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(runtime_scene_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(runtime_scene_service, "LAUNCHER_STATE_PATH", launcher_state_path)
+
+    response = client.post(
+        "/api/launcher/runtime-scene/events",
+        json={
+            "eventCode": "electron.desktop_action.claimed",
+            "message": "Desktop action claimed.",
+            "fields": {
+                "actionId": "desktop-action-1",
+                "desktopSessionId": "desktop-session-1",
+                "controlToken": "secret-token",
+            },
+        },
+    )
+
+    assert response.status_code == 202
+    assert response.json()["accepted"] is True
+    timeline = (scene_dir / "timeline.jsonl").read_text(encoding="utf-8")
+    assert "electron.desktop_action.claimed" in timeline
+    event_rows = [
+        json.loads(line)
+        for line in (scene_dir / "events" / "electron_launcher.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    assert event_rows[-1]["component"] == "electron_launcher"
+    assert event_rows[-1]["phase"] == "desktop_supervisor"
+    assert event_rows[-1]["fields"]["controlToken"] == runtime_scene_service.REDACTED_FIELD_VALUE
+
 def test_runtime_scene_event_helper_keeps_noisy_observations_out_of_timeline(tmp_path, monkeypatch):
     scene_dir = _seed_runtime_scene_bundle(tmp_path, scene_id="scene-event-noise", status="running")
     launcher_state_path = tmp_path / ".runtime" / "launcher" / "state.json"
