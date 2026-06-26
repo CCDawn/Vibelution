@@ -160,9 +160,11 @@ def _processing_run_matches_filters(
 
 def get_processing_run(run_id: str) -> dict[str, Any]:
     run = _load_run(run_id)
+    status = get_processing_status(run_id)
     return {
         **run,
-        "summary": get_processing_status(run_id)["summary"],
+        "summary": status["summary"],
+        "processingStatus": status,
     }
 
 

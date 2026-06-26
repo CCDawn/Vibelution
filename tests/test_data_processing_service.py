@@ -62,6 +62,30 @@ def test_processing_run_records_intake_to_workspace(tmp_path, monkeypatch):
     assert _read_jsonl(records_path)[0]["recordId"] == record["recordId"]
 
 
+def test_processing_run_exposes_reusable_status_payload(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    run = data_processing_service.create_processing_run(
+        "generic_document_processing",
+        title="Reusable status run",
+        scope={"topic": "any domain"},
+    )
+    data_processing_service.add_record(
+        run["runId"],
+        {
+            "sourceType": "file",
+            "sourceRef": "local-paper.pdf",
+            "title": "Candidate source",
+        },
+    )
+
+    payload = data_processing_service.get_processing_run(run["runId"])
+
+    assert payload["processingStatus"]["runId"] == run["runId"]
+    assert payload["summary"] == payload["processingStatus"]["summary"]
+    assert payload["processingStatus"]["summary"]["recordCount"] == 1
+    assert payload["processingStatus"]["boundaries"]["writesFormalKnowledge"] is False
+
+
 def test_processing_run_list_filters_before_limit(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     target = data_processing_service.create_processing_run(
