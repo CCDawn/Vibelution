@@ -2461,6 +2461,34 @@ export function ChatCodingRoute() {
     },
     [queryClient],
   );
+  const clearSessionTransientUiState = useCallback(
+    (sessionId: string) => {
+      const normalizedSessionId = String(sessionId || "").trim();
+      if (!normalizedSessionId) {
+        return;
+      }
+      setActiveTurnLayersBySession((current) =>
+        setActiveTurnLayerForSession(current, normalizedSessionId, undefined)
+      );
+      setSessionDrafts((current) => {
+        const { [normalizedSessionId]: _removed, ...remaining } = current;
+        return remaining;
+      });
+      setSessionImageAttachments((current) => clearSessionImageAttachments(current, normalizedSessionId));
+      setSessionReferenceAttachments((current) => clearSessionReferenceAttachments(current, normalizedSessionId));
+      delete imageUploadInFlightRef.current[normalizedSessionId];
+      setSessionImageUploadPending((current) => {
+        const { [normalizedSessionId]: _removed, ...remaining } = current;
+        return remaining;
+      });
+      setSessionComposerErrors((current) => {
+        const { [normalizedSessionId]: _removed, ...remaining } = current;
+        return remaining;
+      });
+      queryClient.removeQueries({ queryKey: queryKeys.session(normalizedSessionId), exact: true });
+    },
+    [queryClient],
+  );
   const selectDirectSessionMutation = useMutation({
     mutationFn: async (sessionId: string) =>
       fetchJson<SessionDetail>(`/api/sessions/${encodeURIComponent(sessionId)}/select`, {
@@ -2590,30 +2618,17 @@ export function ChatCodingRoute() {
       return;
     }
     const nextActiveSessionId = sessionsQuery.data.find((session) => session.id !== activeSessionId)?.id || "";
+    clearSessionTransientUiState(activeSessionId);
     removeSessionWorkspace(activeSessionId, nextActiveSessionId || null);
     if (nextActiveSessionId) {
       setActiveSession(nextActiveSessionId);
     }
-    setSessionDrafts((current) => {
-      const { [activeSessionId]: _removed, ...remaining } = current;
-      return remaining;
-    });
-    setSessionImageAttachments((current) => clearSessionImageAttachments(current, activeSessionId));
-    delete imageUploadInFlightRef.current[activeSessionId];
-    setSessionImageUploadPending((current) => {
-      const { [activeSessionId]: _removed, ...remaining } = current;
-      return remaining;
-    });
-    setSessionComposerErrors((current) => {
-      const { [activeSessionId]: _removed, ...remaining } = current;
-      return nextActiveSessionId
-        ? {
-            ...remaining,
-            [nextActiveSessionId]: "",
-          }
-        : remaining;
-    });
-    queryClient.removeQueries({ queryKey: queryKeys.session(activeSessionId), exact: true });
+    if (nextActiveSessionId) {
+      setSessionComposerErrors((current) => ({
+        ...current,
+        [nextActiveSessionId]: "",
+      }));
+    }
     updateSessionSummaryCaches(queryClient, (sessions) =>
       sessions?.filter((session) => session.id !== activeSessionId),
     );
@@ -2639,6 +2654,7 @@ export function ChatCodingRoute() {
   }, [
     activeSessionId,
     chatWorkspaceCache,
+    clearSessionTransientUiState,
     queryClient,
     location.pathname,
     location.search,
@@ -3186,28 +3202,15 @@ export function ChatCodingRoute() {
       }),
     onSuccess: (deleteResult, variables) => {
       const nextActiveSessionId = deleteResult.nextActiveSessionId || "";
+      clearSessionTransientUiState(variables.sessionId);
       removeSessionWorkspace(variables.sessionId, nextActiveSessionId);
       setActiveSession(nextActiveSessionId);
-      setSessionDrafts((current) => {
-        const { [variables.sessionId]: _removed, ...remaining } = current;
-        return remaining;
-      });
-      setSessionImageAttachments((current) => clearSessionImageAttachments(current, variables.sessionId));
-      delete imageUploadInFlightRef.current[variables.sessionId];
-      setSessionImageUploadPending((current) => {
-        const { [variables.sessionId]: _removed, ...remaining } = current;
-        return remaining;
-      });
-      setSessionComposerErrors((current) => {
-        const { [variables.sessionId]: _removed, ...remaining } = current;
-        return nextActiveSessionId
-          ? {
-              ...remaining,
-              [nextActiveSessionId]: "",
-            }
-          : remaining;
-      });
-      queryClient.removeQueries({ queryKey: queryKeys.session(variables.sessionId), exact: true });
+      if (nextActiveSessionId) {
+        setSessionComposerErrors((current) => ({
+          ...current,
+          [nextActiveSessionId]: "",
+        }));
+      }
       updateSessionSummaryCaches(queryClient, (sessions) =>
         sessions?.filter((session) => session.id !== variables.sessionId),
       );

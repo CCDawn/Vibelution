@@ -52,7 +52,61 @@ def test_session_assistant_delta_queue_coalesces_pending_same_turn_deltas():
     assert merged["thoughtDelta"] == "思考"
     assert merged["replaceContent"] is False
     assert merged["replaceThought"] is False
+    assert "feedbackEvents" not in merged
     assert subscriber.get_nowait()["type"] == "session_detail"
+
+
+def test_session_assistant_delta_queue_merges_feedback_events_for_same_turn_deltas():
+    subscriber = queue.Queue(maxsize=4)
+    subscriber.put_nowait(
+        {
+            "type": "assistant_delta",
+            "sessionId": "session-live",
+            "turnId": "turn-1",
+            "contentDelta": "准备",
+            "thoughtDelta": "",
+            "replaceContent": False,
+            "replaceThought": False,
+            "feedbackEvents": [
+                {
+                    "sequence": 1,
+                    "kind": "status",
+                    "status": "running",
+                    "name": "context_prepare",
+                    "summary": "正在准备上下文",
+                }
+            ],
+        },
+    )
+
+    merged, dropped = session_service._coalesce_session_assistant_delta_queue(
+        subscriber,
+        {
+            "type": "assistant_delta",
+            "sessionId": "session-live",
+            "turnId": "turn-1",
+            "contentDelta": "请求模型",
+            "thoughtDelta": "",
+            "replaceContent": False,
+            "replaceThought": False,
+            "feedbackEvents": [
+                {
+                    "sequence": 2,
+                    "kind": "status",
+                    "status": "running",
+                    "name": "model_request",
+                    "summary": "正在请求模型",
+                }
+            ],
+        },
+    )
+
+    assert dropped == 1
+    assert merged["contentDelta"] == "准备请求模型"
+    assert [event["name"] for event in merged["feedbackEvents"]] == [
+        "context_prepare",
+        "model_request",
+    ]
 
 
 def test_session_stream_full_queue_prefers_dropping_snapshots_before_assistant_delta():

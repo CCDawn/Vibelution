@@ -330,6 +330,14 @@ describe("ConversationView edit resend affordance", () => {
     expect(html.indexOf("上一轮正式回答。")).toBeLessThan(html.indexOf("当前回答正在流式显示。"));
   });
 
+  it("keeps active streaming scroll signals on a small streaming-only tail", () => {
+    expect(conversationViewSource).toContain("const streamingTimelineMessages = useMemo(");
+    expect(conversationViewSource).toContain("timelineMessages.filter((message) => message.streaming)");
+    expect(conversationViewSource).toContain("activeTurnMessage ? [...streamingMessages, activeTurnMessage] : streamingMessages");
+    expect(conversationViewSource).toContain("buildStreamingTimelineScrollSignal(streamingTimelineMessages)");
+    expect(conversationViewSource).not.toContain("activeTimelineSignalMessages");
+  });
+
   it("can render the opt-in compact workbench density", () => {
     const html = renderConversation([], { density: "compact" });
 

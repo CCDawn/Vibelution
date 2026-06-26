@@ -19396,9 +19396,48 @@ def _merge_session_assistant_delta_events(
     else:
         merged["thoughtDelta"] = previous_thought_delta + current_thought_delta
         merged["replaceThought"] = previous_replace_thought
-    if not merged.get("feedbackEvents") and previous.get("feedbackEvents"):
-        merged["feedbackEvents"] = list(previous.get("feedbackEvents") or [])
+    feedback_events = _merge_session_assistant_delta_feedback_events(
+        previous.get("feedbackEvents"),
+        current.get("feedbackEvents"),
+    )
+    if feedback_events:
+        merged["feedbackEvents"] = feedback_events
+    else:
+        merged.pop("feedbackEvents", None)
     return merged
+
+
+def _session_assistant_delta_feedback_event_key(event: dict[str, Any]) -> str:
+    sequence = _coerce_nonnegative_int(event.get("sequence"))
+    if sequence > 0:
+        return f"seq:{sequence}"
+    return ":".join(
+        str(event.get(key) or "")
+        for key in ("kind", "name", "status", "summary", "resultPreview", "error")
+    )
+
+
+def _merge_session_assistant_delta_feedback_events(
+    previous: Any,
+    current: Any,
+) -> list[dict[str, Any]]:
+    merged: dict[str, tuple[int, dict[str, Any]]] = {}
+    for index, event in enumerate(list(previous or []) + list(current or [])):
+        if not isinstance(event, dict):
+            continue
+        key = _session_assistant_delta_feedback_event_key(event)
+        merged[key] = (merged.get(key, (index, {}))[0], dict(event))
+    return [
+        event
+        for _, event in sorted(
+            merged.values(),
+            key=lambda item: (
+                0 if _coerce_nonnegative_int(item[1].get("sequence")) > 0 else 1,
+                _coerce_nonnegative_int(item[1].get("sequence")) or item[0],
+                item[0],
+            ),
+        )
+    ]
 
 
 def _put_session_stream_event(
