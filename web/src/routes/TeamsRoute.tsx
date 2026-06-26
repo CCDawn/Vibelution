@@ -9653,6 +9653,9 @@ export function TeamsRoute({
   const researchStageRoundStatus = researchStageRoundStatusQuery.data ?? null;
   const researchStagePhases = researchStageRoundStatus?.phases ?? [];
   const sourceCollectionSummary = sourceCollectionSummaryQuery.data ?? null;
+  const sourceCollectionSummaryRun = isRecord(sourceCollectionSummary?.run) ? sourceCollectionSummary.run : null;
+  const sourceCollectionSummaryRunId = String(sourceCollectionSummaryRun?.runId || sourceCollectionSummary?.runId || "");
+  const sourceCollectionActionRunId = selectedSourceCollectionRunEffectiveId || sourceCollectionSummaryRunId;
   const sourceCollectionSummaryStageRound = useMemo<ResearchStageRound | null>(() => {
     if (!sourceCollectionSummary?.runId && !sourceCollectionSummary?.stageCards?.length) {
       return null;
@@ -10384,7 +10387,7 @@ export function TeamsRoute({
         : (lang === "zh" ? "通知知识库管理员" : "Notify knowledge base admin");
   const sourceCollectionCompletionActionDisabled =
     !selectedTeam?.teamId
-    || !selectedSourceCollectionRun
+    || !sourceCollectionActionRunId
     || (sourceCollectionIngestCandidateCount <= 0 && sourceCollectionRawRecordCount <= 0 && sourceCollectionSearchOpenAssignmentCount <= 0)
     || selectedTeamKnowledgeCollectionIngestPending;
   const sourceCollectionCompletionActionLabel = selectedTeamKnowledgeCollectionIngestPending
@@ -10568,7 +10571,7 @@ export function TeamsRoute({
     }
     runKnowledgeCollectionCompletionMutation.mutate({
       teamId: selectedTeam.teamId,
-      runId: selectedSourceCollectionRunEffectiveId,
+      runId: sourceCollectionActionRunId,
       extractionAgentId: sourceCollectionExtractionAgentId,
       sourceQualityAgentId: sourceCollectionQualityAgentId,
       candidateGraphAgentId: sourceCollectionGraphAgentId,
