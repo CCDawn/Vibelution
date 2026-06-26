@@ -5,11 +5,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-try:
-    import tomllib
-except ImportError:  # pragma: no cover - Python < 3.11 compatibility
-    import toml as tomllib  # type: ignore[no-redef]
-
+import tomllib
 from .paths import ensure_global_config_initialized, resolve_config_path
 
 

@@ -14,11 +14,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
-try:
-    import tomllib
-except ImportError:  # pragma: no cover - Python < 3.11 compatibility
-    import toml as tomllib  # type: ignore[no-redef]
-
+import tomllib
 from core.llm import LLMInvocationContext, assert_llm_compatibility, invoke_llm
 from .llm_security import (
     coerce_llm_probe_timeout,
