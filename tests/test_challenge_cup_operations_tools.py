@@ -1,6 +1,6 @@
 import json
 
-from core.web.services import research_loop_service, team_workflow_orchestration_service
+from core.web.services import research_loop_service, runtime_scene_service, team_workflow_orchestration_service
 from tools.challenge_cup_operations_tools import (
     challenge_cup_experiment_context_tool,
     challenge_cup_experiment_writeback_tool,
@@ -10,6 +10,12 @@ from tools.challenge_cup_operations_tools import (
 
 
 def test_challenge_cup_experiment_tool_wraps_ledger_without_execution(monkeypatch):
+    scene_events = []
+    monkeypatch.setattr(
+        runtime_scene_service,
+        "record_runtime_scene_event",
+        lambda *args, **kwargs: scene_events.append((args, kwargs)) or {"accepted": True},
+    )
     monkeypatch.setattr(
         team_workflow_orchestration_service,
         "get_experiment_planning_status",
@@ -46,6 +52,11 @@ def test_challenge_cup_experiment_tool_wraps_ledger_without_execution(monkeypatc
     assert blocked["status"] == "error"
     assert blocked["errorType"] == "unsupported_operation"
     assert blocked["boundaries"]["autoExecution"] is False
+    blocked_events = [kwargs for args, kwargs in scene_events if len(args) >= 3 and args[2] == "tool.challenge_cup_operation.unsupported_blocked"]
+    assert blocked_events
+    assert blocked_events[-1]["fields"]["operation"] == "run_smoke"
+    assert blocked_events[-1]["fields"]["boundary"] == "experiment_planning_ledger_only_not_training_execution"
+    assert blocked_events[-1]["level"] == "warning"
 
 
 def test_challenge_cup_iteration_tool_wraps_research_loop_decisions(monkeypatch):

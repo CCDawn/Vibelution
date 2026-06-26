@@ -1327,6 +1327,16 @@ def writeback_source_collection_stage_session_task(
             "formalKnowledgeItemCount": materialized_knowledge_ingestion.get("formalKnowledgeItemCount", 0),
             "stewardPackCandidateId": materialized_knowledge_ingestion.get("stewardPackCandidateId", ""),
         },
+        child_log_path=f"artifacts/source-collection-{_safe_token(run_id, default='run', max_length=96)}-stage-writeback.jsonl",
+        child_log_payload=_source_collection_stage_writeback_child_log_payload(
+            team_id=normalized_team_id,
+            run_id=run_id,
+            task=task,
+            materialized_sources=materialized_sources,
+            materialized_source_quality=materialized_source_quality,
+            materialized_candidate_graph=materialized_candidate_graph,
+            materialized_knowledge_ingestion=materialized_knowledge_ingestion,
+        ),
     )
     return {
         "schemaVersion": SCHEMA_VERSION,
@@ -3100,6 +3110,14 @@ def _materialize_source_collection_stage_writeback_knowledge_ingestion(
             },
             level="warning",
             outcome="failed",
+            child_log_path=f"artifacts/source-collection-{_safe_token(run_id, default='run', max_length=96)}-knowledge-ingestion-materialization.jsonl",
+            child_log_payload=_source_collection_stage_knowledge_ingestion_child_log_payload(
+                team_id=team_id,
+                run_id=run_id,
+                task=task,
+                summary=summary,
+                decision=decision,
+            ),
             lifecycle=True,
         )
         return summary
@@ -3140,6 +3158,14 @@ def _materialize_source_collection_stage_writeback_knowledge_ingestion(
             "approvedCandidateCount": summary["approvedCandidateCount"],
             "formalKnowledgeItemCount": summary["formalKnowledgeItemCount"],
         },
+        child_log_path=f"artifacts/source-collection-{_safe_token(run_id, default='run', max_length=96)}-knowledge-ingestion-materialization.jsonl",
+        child_log_payload=_source_collection_stage_knowledge_ingestion_child_log_payload(
+            team_id=team_id,
+            run_id=run_id,
+            task=task,
+            summary=summary,
+            decision=decision,
+        ),
     )
     return summary
 
@@ -3438,6 +3464,203 @@ def _source_collection_stage_writeback_knowledge_ingestion_summary(
         "skipped": skipped_items[:24],
         "failed": failed_items[:24],
     }
+
+
+def _source_collection_stage_writeback_child_log_payload(
+    *,
+    team_id: str,
+    run_id: str,
+    task: dict[str, Any],
+    materialized_sources: dict[str, Any],
+    materialized_source_quality: dict[str, Any],
+    materialized_candidate_graph: dict[str, Any],
+    materialized_knowledge_ingestion: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        "kind": "source_collection_stage_writeback_materialization",
+        "teamId": _trim_text(team_id, max_length=160),
+        "runId": _trim_text(run_id, max_length=160),
+        "taskId": _trim_text(task.get("taskId"), max_length=160),
+        "stageId": _trim_text(task.get("stageId"), max_length=80),
+        "agentId": _trim_text(task.get("agentId"), max_length=160),
+        "agentRole": _trim_text(task.get("agentRole"), max_length=80),
+        "status": _trim_text(task.get("status"), max_length=80),
+        "materializedSources": _source_collection_stage_writeback_materialization_child_summary(materialized_sources),
+        "materializedSourceQuality": _source_collection_stage_quality_materialization_child_summary(materialized_source_quality),
+        "materializedCandidateGraph": _source_collection_stage_candidate_graph_materialization_child_summary(materialized_candidate_graph),
+        "materializedKnowledgeIngestion": _source_collection_stage_knowledge_ingestion_materialization_child_summary(materialized_knowledge_ingestion),
+    }
+
+
+def _source_collection_stage_writeback_materialization_child_summary(summary: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "status": _trim_text(summary.get("status"), max_length=80),
+        "sourceLeadCount": _source_collection_count(summary.get("sourceLeadCount")),
+        "createdRecordCount": _source_collection_count(summary.get("createdRecordCount")),
+        "importedCandidateCount": _source_collection_count(summary.get("importedCandidateCount")),
+        "skippedCount": _source_collection_count(summary.get("skippedCount")),
+        "skippedDuplicateCount": _source_collection_count(summary.get("skippedDuplicateCount")),
+        "failedCount": _source_collection_count(summary.get("failedCount")),
+        "createdRecords": _bounded_log_items(summary.get("createdRecords"), ("recordId", "title", "sourceRef"), max_items=24),
+        "importedCandidates": _bounded_log_items(summary.get("importedCandidates"), ("candidateId", "recordId", "title"), max_items=24),
+        "skipped": _bounded_log_items(summary.get("skipped"), ("reason", "leadId", "recordId", "candidateId", "title"), max_items=24),
+        "failed": _bounded_log_items(summary.get("failed"), ("reason", "leadId", "recordId", "title", "errorType", "error"), max_items=24),
+    }
+
+
+def _source_collection_stage_quality_materialization_child_summary(summary: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "status": _trim_text(summary.get("status"), max_length=80),
+        "assessedCandidateCount": _source_collection_count(summary.get("assessedCandidateCount")),
+        "approvedCandidateCount": _source_collection_count(summary.get("approvedCandidateCount")),
+        "needsRevisionCandidateCount": _source_collection_count(summary.get("needsRevisionCandidateCount")),
+        "rejectedCandidateCount": _source_collection_count(summary.get("rejectedCandidateCount")),
+        "skippedCandidateCount": _source_collection_count(summary.get("skippedCandidateCount")),
+        "failedCandidateCount": _source_collection_count(summary.get("failedCandidateCount")),
+        "assessedCandidates": _bounded_log_items(summary.get("assessedCandidates"), ("candidateId", "decision", "assessmentId"), max_items=40),
+        "skippedCandidates": _bounded_log_items(summary.get("skippedCandidates"), ("candidateId", "reason"), max_items=40),
+        "failedCandidates": _bounded_log_items(summary.get("failedCandidates"), ("candidateId", "reason", "errorType", "error"), max_items=24),
+    }
+
+
+def _source_collection_stage_candidate_graph_materialization_child_summary(summary: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "status": _trim_text(summary.get("status"), max_length=80),
+        "candidateGraphId": _trim_text(summary.get("candidateGraphId"), max_length=160),
+        "createdCandidateGraphCount": _source_collection_count(summary.get("createdCandidateGraphCount")),
+        "reusedCandidateGraph": bool(summary.get("reusedCandidateGraph")),
+        "nodeCount": _source_collection_count(summary.get("nodeCount")),
+        "edgeCount": _source_collection_count(summary.get("edgeCount")),
+        "missingLinkCount": _source_collection_count(summary.get("missingLinkCount")),
+        "unreviewedNodeCount": _source_collection_count(summary.get("unreviewedNodeCount")),
+        "inputCandidateCount": _source_collection_count(summary.get("inputCandidateCount")),
+        "filteredCandidateCount": _source_collection_count(summary.get("filteredCandidateCount")),
+        "ingestionFingerprint": _trim_text(summary.get("ingestionFingerprint"), max_length=160),
+        "failedCandidateGraphCount": _source_collection_count(summary.get("failedCandidateGraphCount")),
+        "failedCandidateGraphs": _bounded_log_items(summary.get("failedCandidateGraphs"), ("reason", "errorType", "error"), max_items=24),
+    }
+
+
+def _source_collection_stage_knowledge_ingestion_materialization_child_summary(summary: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "status": _trim_text(summary.get("status"), max_length=80),
+        "stewardPackCandidateId": _trim_text(summary.get("stewardPackCandidateId"), max_length=160),
+        "knowledgeBaseId": _trim_text(summary.get("knowledgeBaseId"), max_length=160),
+        "approvedCandidateCount": _source_collection_count(summary.get("approvedCandidateCount")),
+        "approvedCandidateIds": _bounded_text_items(summary.get("approvedCandidateIds"), max_items=40, max_length=160),
+        "formalKnowledgeItemCount": _source_collection_count(summary.get("formalKnowledgeItemCount")),
+        "formalKnowledgeItemIds": _bounded_text_items(summary.get("formalKnowledgeItemIds"), max_items=40, max_length=160),
+        "writesFormalKnowledge": bool(summary.get("writesFormalKnowledge")),
+        "confidence": summary.get("confidence") if isinstance(summary.get("confidence"), (int, float)) else 0.0,
+        "sourceReviewStatus": _trim_text(summary.get("sourceReviewStatus"), max_length=80),
+        "knowledgeSubmissionStatus": _trim_text(summary.get("knowledgeSubmissionStatus"), max_length=80),
+        "knowledgeReviewStatus": _trim_text(summary.get("knowledgeReviewStatus"), max_length=80),
+        "createdKnowledgeBaseId": _trim_text(summary.get("createdKnowledgeBaseId"), max_length=160),
+        "skippedCount": _source_collection_count(summary.get("skippedCount")),
+        "failedCount": _source_collection_count(summary.get("failedCount")),
+        "skipped": _bounded_log_items(summary.get("skipped"), ("reason", "decision", "confidence", "candidateIds"), max_items=24),
+        "failed": _bounded_log_items(summary.get("failed"), ("reason", "errorType", "error"), max_items=24),
+    }
+
+
+def _source_collection_stage_knowledge_ingestion_child_log_payload(
+    *,
+    team_id: str,
+    run_id: str,
+    task: dict[str, Any],
+    summary: dict[str, Any],
+    decision: dict[str, Any],
+) -> dict[str, Any]:
+    materialized = _source_collection_stage_knowledge_ingestion_materialization_child_summary(summary)
+    steps = [
+        {
+            "stageId": "auto_ingest_gate",
+            "status": "passed" if materialized["status"] == "completed" else materialized["status"],
+            "decision": _safe_token(decision.get("decision"), default="", max_length=80),
+            "confidence": materialized["confidence"],
+        },
+        {
+            "stageId": "candidate_scope",
+            "status": "completed" if materialized["approvedCandidateCount"] else materialized["status"],
+            "approvedCandidateCount": materialized["approvedCandidateCount"],
+            "approvedCandidateIds": materialized["approvedCandidateIds"],
+        },
+        {
+            "stageId": "knowledge_base",
+            "status": "created" if materialized["createdKnowledgeBaseId"] else ("reused" if materialized["knowledgeBaseId"] else materialized["status"]),
+            "knowledgeBaseId": materialized["knowledgeBaseId"],
+            "createdKnowledgeBaseId": materialized["createdKnowledgeBaseId"],
+        },
+        {
+            "stageId": "steward_pack",
+            "status": "completed" if materialized["stewardPackCandidateId"] else materialized["status"],
+            "stewardPackCandidateId": materialized["stewardPackCandidateId"],
+        },
+        {
+            "stageId": "source_gate",
+            "status": materialized["sourceReviewStatus"],
+            "knowledgeBaseId": materialized["knowledgeBaseId"],
+        },
+        {
+            "stageId": "knowledge_gate",
+            "status": materialized["knowledgeSubmissionStatus"] or materialized["knowledgeReviewStatus"],
+            "knowledgeBaseId": materialized["knowledgeBaseId"],
+        },
+        {
+            "stageId": "official_sync",
+            "status": "completed" if materialized["formalKnowledgeItemCount"] else materialized["status"],
+            "formalKnowledgeItemCount": materialized["formalKnowledgeItemCount"],
+            "formalKnowledgeItemIds": materialized["formalKnowledgeItemIds"],
+        },
+    ]
+    return {
+        "kind": "source_collection_stage_knowledge_ingestion_materialization",
+        "teamId": _trim_text(team_id, max_length=160),
+        "runId": _trim_text(run_id, max_length=160),
+        "taskId": _trim_text(task.get("taskId"), max_length=160),
+        "stageId": _trim_text(task.get("stageId"), max_length=80),
+        "agentId": _trim_text(task.get("agentId"), max_length=160),
+        "status": materialized["status"],
+        "stewardPackCandidateId": materialized["stewardPackCandidateId"],
+        "knowledgeBaseId": materialized["knowledgeBaseId"],
+        "approvedCandidateIds": materialized["approvedCandidateIds"],
+        "formalKnowledgeItemIds": materialized["formalKnowledgeItemIds"],
+        "skipped": materialized["skipped"],
+        "failed": materialized["failed"],
+        "steps": steps,
+    }
+
+
+def _bounded_text_items(value: Any, *, max_items: int, max_length: int) -> list[str]:
+    return [
+        _trim_text(item, max_length=max_length)
+        for item in list(value or [])[:max_items]
+        if _trim_text(item, max_length=max_length)
+    ]
+
+
+def _bounded_log_items(value: Any, keys: tuple[str, ...], *, max_items: int) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+    for item in list(value or [])[:max_items]:
+        if not isinstance(item, dict):
+            continue
+        bounded: dict[str, Any] = {}
+        for key in keys:
+            raw = item.get(key)
+            if isinstance(raw, list):
+                text_items = _bounded_text_items(raw, max_items=12, max_length=160)
+                if text_items:
+                    bounded[key] = text_items
+            elif isinstance(raw, (int, float, bool)) or raw is None:
+                if raw is not None:
+                    bounded[key] = raw
+            else:
+                text = _trim_text(raw, max_length=240 if key in {"title", "error"} else 160)
+                if text:
+                    bounded[key] = text
+        if bounded:
+            items.append(bounded)
+    return items
 
 
 def _attach_candidate_graph_stage_writeback_metadata(
@@ -4563,6 +4786,38 @@ def request_experiment_result_knowledge_ingestion(team_id: str, plan_id: str, pa
             "knowledgeStewardInboxMessageId": str(activation.get("messageId") or ""),
             "requestedByAgent": requested_by_agent,
         },
+    )
+    notification_failed = activation_status not in {"message_written", "agent_wake_started"} and not activation_status.startswith("agent_wake_")
+    _record_workflow_event(
+        "experiment_plan.steward_notification_failed" if notification_failed else "experiment_plan.steward_notification_completed",
+        normalized_team_id,
+        fields={
+            "workflowId": workflow["workflowId"],
+            "stageRoundId": str(plan.get("stageRoundId") or ""),
+            "planId": plan["planId"],
+            "experimentResultPackId": experiment_result_pack["packId"],
+            "fullRunResultId": experiment_result_pack["fullRunResultId"],
+            "knowledgeBaseId": knowledge_base_id,
+            "targetAgentId": str(activation.get("targetAgentId") or ""),
+            "status": activation_status,
+            "messageId": str(activation.get("messageId") or ""),
+            "threadId": str(activation.get("threadId") or ""),
+            "wakeStatus": str(activation.get("wakeStatus") or ""),
+            "requestedByAgent": requested_by_agent,
+            "errorType": type(activation.get("error")).__name__ if activation.get("error") and not isinstance(activation.get("error"), str) else "",
+        },
+        level="warning" if notification_failed else "info",
+        outcome="failed" if notification_failed else "completed",
+        child_log_path=f"artifacts/experiment-result-{_safe_token(experiment_result_pack['packId'], default='pack', max_length=96)}-steward-notification.jsonl",
+        child_log_payload=_experiment_result_steward_notification_child_log_payload(
+            team_id=normalized_team_id,
+            experiment_result_pack=experiment_result_pack,
+            activation=activation,
+            knowledge_base_id=knowledge_base_id,
+            target_domain=target_domain,
+            requested_by_agent=requested_by_agent,
+        ),
+        lifecycle=notification_failed,
     )
     return {
         "experimentResultPack": experiment_result_pack,
@@ -8027,6 +8282,43 @@ def _team_workflow_kernel_summary(kernel_result: dict[str, Any]) -> dict[str, An
         "outcomeStatus": str(outcome.get("status") or "").strip(),
         "adapterVersion": str(adapter.get("adapterVersion") or "").strip(),
         "reused": bool(kernel_result.get("reused", False)),
+    }
+
+
+def _experiment_result_steward_notification_child_log_payload(
+    *,
+    team_id: str,
+    experiment_result_pack: dict[str, Any],
+    activation: dict[str, Any],
+    knowledge_base_id: str,
+    target_domain: str,
+    requested_by_agent: str,
+) -> dict[str, Any]:
+    delivery = activation.get("delivery") if isinstance(activation.get("delivery"), dict) else {}
+    kernel = activation.get("kernel") if isinstance(activation.get("kernel"), dict) else {}
+    return {
+        "kind": "experiment_result_steward_notification",
+        "teamId": _trim_text(team_id, max_length=160),
+        "planId": _trim_text(experiment_result_pack.get("planId"), max_length=160),
+        "experimentResultPackId": _trim_text(experiment_result_pack.get("packId"), max_length=160),
+        "fullRunResultId": _trim_text(experiment_result_pack.get("fullRunResultId"), max_length=160),
+        "knowledgeBaseId": _trim_text(knowledge_base_id, max_length=160),
+        "targetDomain": _trim_text(target_domain, max_length=240),
+        "requestedByAgent": _trim_text(requested_by_agent, max_length=160),
+        "targetAgentId": _trim_text(activation.get("targetAgentId"), max_length=160),
+        "status": _trim_text(activation.get("status"), max_length=80),
+        "messageId": _trim_text(activation.get("messageId"), max_length=160),
+        "threadId": _trim_text(activation.get("threadId"), max_length=240),
+        "wakeRequested": bool(activation.get("wakeRequested")),
+        "wakeStatus": _trim_text(activation.get("wakeStatus"), max_length=80),
+        "turnId": _trim_text(delivery.get("turnId"), max_length=160),
+        "kernel": {
+            "taskId": _trim_text(kernel.get("taskId"), max_length=160),
+            "workRunId": _trim_text(kernel.get("workRunId"), max_length=160),
+            "outcomeStatus": _trim_text(kernel.get("outcomeStatus"), max_length=80),
+            "reused": bool(kernel.get("reused")),
+        },
+        "error": _trim_text(activation.get("error"), max_length=500),
     }
 
 
