@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 
 from __future__ import annotations
 
@@ -356,6 +356,60 @@ def test_context_assembler_agent_inbox_profile_compacts_old_tool_noise(tmp_path)
     assert assembled.history_seed_compaction_state["profile"] == "agent_inbox"
     assert assembled.history_seed_compaction_state["compactedMessageCount"] >= 3
     assert assembled.history_seed_compaction_state["omittedToolFailureCount"] == 1
+
+
+
+def test_context_assembler_agent_inbox_profile_summarizes_old_source_collection_stage_tasks(tmp_path):
+    old_stage_prompt = "## 资料搜集阶段任务：搜索资料\n" + ("旧阶段任务执行细节\n" * 500)
+    append_conversation_event(
+        tmp_path,
+        "session-stage-task-history",
+        "turn-old-stage-task",
+        EVENT_USER_MESSAGE,
+        status="recorded",
+        payload={
+            "content": old_stage_prompt,
+            "metadata": {
+                "kind": "source_collection_stage_session_task",
+                "sourceCollectionStageTaskId": "stagetask-old-1",
+                "stageId": "collection",
+                "agentRole": "data_discovery",
+            },
+        },
+    )
+    append_conversation_event(
+        tmp_path,
+        "session-stage-task-history",
+        "turn-old-stage-task",
+        EVENT_ASSISTANT_MESSAGE,
+        status="completed",
+        payload={"content": "旧任务完成\n" + ("旧任务分析正文\n" * 500)},
+    )
+    append_conversation_event(
+        tmp_path,
+        "session-stage-task-history",
+        "turn-human-followup",
+        EVENT_USER_MESSAGE,
+        status="recorded",
+        payload={"content": "人工补充：继续关注 DOI 资料。"},
+    )
+
+    assembled = assemble_conversation_context(
+        [],
+        session_id="session-stage-task-history",
+        recent_message_limit=8,
+        ledger_events=load_conversation_events(tmp_path, "session-stage-task-history"),
+        history_seed_profile="agent_inbox",
+    )
+    joined = "\n".join(str(item.get("content") or "") for item in assembled.history_messages)
+
+    assert "历史阶段任务启动消息已压缩" in joined
+    assert "stagetask-old-1" in joined
+    assert "旧阶段任务执行细节\n" * 40 not in joined
+    assert "人工补充：继续关注 DOI 资料。" in joined
+    assert assembled.history_seed_compaction_state["profile"] == "agent_inbox"
+    assert assembled.history_seed_compaction_state["compactedMessageCount"] >= 2
+    assert assembled.history_seed_compaction_state["trimmedMessageCount"] >= 2
 
 
 def test_tool_result_replacement_handles_langchain_tool_messages():
