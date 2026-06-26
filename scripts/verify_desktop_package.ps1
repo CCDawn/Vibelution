@@ -202,6 +202,17 @@ function Assert-SmokeSummary {
     if ($summary.bootstrap.parsed -ne $true) {
         throw "Electron package smoke did not parse Launcher bootstrap."
     }
+    if ($summary.shutdown.attempted -ne $true) {
+        throw "Electron package smoke did not run the desktop shutdown path."
+    }
+    if ($summary.bootstrap.mode -eq "started") {
+        if ($summary.shutdown.stopStatus -ne "stopped") {
+            throw "Electron package smoke started an owned Launcher but did not stop it. Stop status: $($summary.shutdown.stopStatus)"
+        }
+        if ([int]$summary.shutdown.stoppedPidCount -lt 1) {
+            throw "Electron package smoke reported no stopped Launcher processes."
+        }
+    }
     return $summary
 }
 
@@ -240,6 +251,8 @@ Wait-ForNoNewDesktopPackageProcesses $baselineProcessIds
     workspaceRoot = $profile.workspaceRoot
     operatorConfigPath = $summary.operatorConfigPath
     bootstrapMode = $summary.bootstrap.mode
+    shutdownStopStatus = $summary.shutdown.stopStatus
+    shutdownStoppedPidCount = $summary.shutdown.stoppedPidCount
     launcherOrigin = $summary.bootstrap.launcherOrigin
     workbenchOrigin = $summary.bootstrap.workbenchOrigin
 } | ConvertTo-Json -Depth 4

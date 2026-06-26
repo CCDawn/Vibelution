@@ -44,6 +44,8 @@ describe("desktop package script", () => {
     expect(script).toContain("Start-Process -FilePath $desktopExe -ArgumentList @(\"--smoke\") -PassThru");
     expect(script).toContain("ConvertFrom-Json");
     expect(script).toContain("$summary.bootstrap.parsed -ne $true");
+    expect(script).toContain("$summary.bootstrap.mode -eq \"started\"");
+    expect(script).toContain("$summary.shutdown.stopStatus -ne \"stopped\"");
     expect(script).not.toContain("taskkill");
     expect(script).not.toContain("Stop-Process -Name Vibelution");
   });

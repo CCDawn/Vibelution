@@ -25,8 +25,10 @@ import { decideShutdown, fetchLauncherActiveWorkStatus, type ShutdownDecision } 
 import {
   desktopSmokeSummary,
   desktopSmokeSummaryPath,
+  emptyDesktopSmokeBootstrapSummary,
   type DesktopSmokeBootstrapSummary
 } from "./smoke/desktopSmoke.js";
+import { prepareDesktopSmokeShutdown } from "./smoke/desktopSmokeShutdown.js";
 import { closeDesktopSession, registerDesktopSession, reportDesktopWindowState } from "./windows/desktopSessionClient.js";
 import { ElectronWindowProvider } from "./windows/electronWindowProvider.js";
 import type { ManagedWindowState } from "./windows/windowProviderTypes.js";
@@ -332,9 +334,28 @@ async function stopOwnedPythonLauncherService(): Promise<LauncherServiceStopResu
 async function runSmokeAndQuit(paths: DesktopPaths): Promise<void> {
   const desktopEnv = desktopEnvironment();
   const bootstrap = await resolveSmokeBootstrap(paths, desktopEnv);
+  launcherBootstrap = bootstrap.result;
   const launcherUrl = bootstrap.launcherUrl || String(desktopEnv.VIBELUTION_LAUNCHER_URL || "http://127.0.0.1:8765/launcher");
   const workbenchUrl = bootstrap.workbenchUrl || String(desktopEnv.VIBELUTION_WORKBENCH_URL || "http://127.0.0.1:8000/");
   const controlToken = String(desktopEnv.VIBELUTION_WEB_CONTROL_TOKEN || "");
+  const shutdown = await prepareDesktopSmokeShutdown({
+    bootstrap: bootstrap.result,
+    closeDesktopSession: closeDesktopSessionIfRegistered,
+    recordEvent: async (event) => {
+      await recordElectronSupervisorEvent(launcherBootstrap, {
+        ...event,
+        fields: {
+          ownershipMode: launcherBootstrap?.mode ?? "attached",
+          ...(event.fields ?? {})
+        }
+      });
+    },
+    stopPythonLauncher: stopOwnedPythonLauncherService,
+    approveShutdown: () => {
+      shutdownApproved = true;
+    },
+    stopDesktopActionLoop
+  });
   const summary = desktopSmokeSummary({
     workspaceRoot: paths.workspaceRoot,
     configPath: String(desktopEnv.VIBELUTION_CONFIG_PATH || ""),
@@ -342,7 +363,8 @@ async function runSmokeAndQuit(paths: DesktopPaths): Promise<void> {
     workbenchUrl,
     controlToken,
     packaged: app.isPackaged,
-    bootstrap: bootstrap.summary
+    bootstrap: bootstrap.summary,
+    shutdown
   });
   const summaryPath = desktopSmokeSummaryPath(paths.workspaceRoot);
   mkdirSync(dirname(summaryPath), { recursive: true });
@@ -351,24 +373,31 @@ async function runSmokeAndQuit(paths: DesktopPaths): Promise<void> {
   if (bootstrap.summary.attempted && !bootstrap.summary.parsed) {
     process.exitCode = 1;
   }
-  shutdownApproved = true;
+  if (!shutdownApproved) {
+    shutdownApproved = true;
+  }
   app.quit();
 }
 
 async function resolveSmokeBootstrap(
   paths: DesktopPaths,
   desktopEnv: NodeJS.ProcessEnv
-): Promise<{ summary: DesktopSmokeBootstrapSummary; launcherUrl: string; workbenchUrl: string }> {
+): Promise<{
+  summary: DesktopSmokeBootstrapSummary;
+  result: LauncherBootstrapResult | null;
+  launcherUrl: string;
+  workbenchUrl: string;
+}> {
   const pythonPath = String(desktopEnv.VIBELUTION_PYTHON_PATH || desktopEnv.PYTHON || "").trim();
   const bootstrapRequested = String(desktopEnv.VIBELUTION_ELECTRON_SMOKE_BOOTSTRAP || "").trim() === "1";
   const shouldAttempt = bootstrapRequested || Boolean(pythonPath);
   if (!shouldAttempt) {
-    return { summary: emptySmokeBootstrapSummary({ attempted: false }), launcherUrl: "", workbenchUrl: "" };
+    return { summary: emptySmokeBootstrapSummary({ attempted: false }), result: null, launcherUrl: "", workbenchUrl: "" };
   }
   try {
     const result = await bootstrapLauncherIfEnabled(paths);
     if (result === null) {
-      return { summary: emptySmokeBootstrapSummary({ attempted: true }), launcherUrl: "", workbenchUrl: "" };
+      return { summary: emptySmokeBootstrapSummary({ attempted: true }), result: null, launcherUrl: "", workbenchUrl: "" };
     }
     return {
       summary: {
@@ -383,6 +412,7 @@ async function resolveSmokeBootstrap(
         errorType: "",
         errorMessage: ""
       },
+      result,
       launcherUrl: result.launcherUrl,
       workbenchUrl: result.workbenchUrl
     };
@@ -392,7 +422,8 @@ async function resolveSmokeBootstrap(
         attempted: true,
         errorType: error instanceof Error ? error.name : "Error",
         errorMessage: (error instanceof Error ? error.message : String(error)).slice(0, 500)
-      }),
+        }),
+      result: null,
       launcherUrl: "",
       workbenchUrl: ""
     };
@@ -402,19 +433,7 @@ async function resolveSmokeBootstrap(
 function emptySmokeBootstrapSummary(
   overrides: Partial<DesktopSmokeBootstrapSummary> = {}
 ): DesktopSmokeBootstrapSummary {
-  return {
-    attempted: false,
-    parsed: false,
-    mode: "",
-    launcherBackendPid: 0,
-    protocolVersion: 0,
-    capabilities: [],
-    launcherOrigin: "",
-    workbenchOrigin: "",
-    errorType: "",
-    errorMessage: "",
-    ...overrides
-  };
+  return { ...emptyDesktopSmokeBootstrapSummary(), ...overrides };
 }
 
 function safeOrigin(value: string): string {

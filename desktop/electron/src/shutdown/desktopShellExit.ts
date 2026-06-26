@@ -12,9 +12,18 @@ export type ApprovedDesktopShellShutdownInput = {
   quitApp: () => void;
 };
 
-export async function executeApprovedDesktopShellShutdown(input: ApprovedDesktopShellShutdownInput): Promise<void> {
+export type ApprovedDesktopShellShutdownResult = {
+  stopPythonLauncher: boolean;
+  stopStatus: "stopped" | "skipped" | "failed" | "not_requested";
+  stoppedPidCount: number;
+  stopError: string;
+};
+
+export async function executeApprovedDesktopShellShutdown(
+  input: ApprovedDesktopShellShutdownInput
+): Promise<ApprovedDesktopShellShutdownResult | null> {
   if (!input.decision.allowed) {
-    return;
+    return null;
   }
 
   await input.closeDesktopSession();
@@ -38,16 +47,24 @@ export async function executeApprovedDesktopShellShutdown(input: ApprovedDesktop
     }
   }
 
+  const result: ApprovedDesktopShellShutdownResult = {
+    stopPythonLauncher: input.decision.stopPythonLauncher,
+    stopStatus: stopResult?.status ?? (stopError ? "failed" : "not_requested"),
+    stoppedPidCount: stopResult?.terminatedPids.length ?? 0,
+    stopError
+  };
+
   await input.recordEvent({
     eventCode: "electron.launcher_service.exited",
     message: "Electron desktop shell exit approved.",
     fields: {
-      stopPythonLauncher: input.decision.stopPythonLauncher,
-      stopStatus: stopResult?.status ?? (stopError ? "failed" : "not_requested"),
-      stoppedPidCount: stopResult?.terminatedPids.length ?? 0
+      stopPythonLauncher: result.stopPythonLauncher,
+      stopStatus: result.stopStatus,
+      stoppedPidCount: result.stoppedPidCount
     }
   });
   input.approveShutdown();
   input.stopDesktopActionLoop();
   input.quitApp();
+  return result;
 }
