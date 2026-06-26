@@ -1,6 +1,7 @@
 import { app, ipcMain } from "electron";
 import { singleInstanceDecision } from "./appLock.js";
 import { IPC_CHANNELS } from "./ipc.js";
+import { RuntimeSceneBridge, type RuntimeSceneElectronEvent } from "./lifecycle/runtimeSceneBridge.js";
 import { createDesktopPaths, type DesktopPaths } from "./paths.js";
 import { fetchLauncherControlToken, runDesktopActionOnce } from "./protocol/desktopActionClient.js";
 import { bootstrapPythonLauncherService } from "./process/launcherServiceClient.js";
@@ -14,12 +15,14 @@ import { resolveLauncherUrl, resolveWorkbenchUrl } from "./windows/windowUrlReso
 
 const DESKTOP_ACTION_POLL_MS = 2000;
 const DESKTOP_ACTION_LEASE_SECONDS = 30;
+const RUNTIME_SCENE_MAX_BUFFERED_EVENTS = 50;
 
 let windowProvider: ElectronWindowProvider | null = null;
 let launcherBootstrap: LauncherBootstrapResult | null = null;
 let desktopActionTimer: ReturnType<typeof setInterval> | null = null;
 let desktopActionPollRunning = false;
 let desktopActionContext: DesktopActionLoopContext | null = null;
+let runtimeSceneBridge: RuntimeSceneBridge | null = null;
 let shutdownApproved = false;
 let shutdownRequestRunning = false;
 
@@ -96,7 +99,7 @@ function startDesktopActionLoop(bootstrap: LauncherBootstrapResult | null, provi
     desktopActionPollRunning = true;
     try {
       const context = await resolveDesktopActionLoopContext(bootstrap);
-      await runDesktopActionOnce({
+      const result = await runDesktopActionOnce({
         ...context,
         leaseSeconds: DESKTOP_ACTION_LEASE_SECONDS,
         operations: {
@@ -105,6 +108,25 @@ function startDesktopActionLoop(bootstrap: LauncherBootstrapResult | null, provi
           closeWorkbench: () => provider.closeWorkbench()
         }
       });
+      if (result.claimed) {
+        await recordElectronSupervisorEvent(bootstrap, {
+          eventCode: "electron.desktop_action.claimed",
+          message: "Desktop action claimed.",
+          fields: { actionId: result.actionId, action: result.action, desktopSessionId: context.desktopSessionId }
+        });
+        await recordElectronSupervisorEvent(bootstrap, {
+          eventCode: result.status === "acked" ? "electron.desktop_action.succeeded" : "electron.desktop_action.failed",
+          message: `Desktop action ${result.status}.`,
+          fields: { actionId: result.actionId, action: result.action, desktopSessionId: context.desktopSessionId }
+        });
+        if (result.action === "open_workbench" && result.status === "acked") {
+          await recordElectronSupervisorEvent(bootstrap, {
+            eventCode: "electron.workbench.window.opened",
+            message: "Workbench window opened by Electron.",
+            fields: { desktopSessionId: context.desktopSessionId }
+          });
+        }
+      }
     } catch (error: unknown) {
       console.warn(error instanceof Error ? error.message : String(error));
     } finally {
@@ -130,6 +152,34 @@ async function resolveDesktopActionLoopContext(bootstrap: LauncherBootstrapResul
     desktopSessionId: currentDesktopSessionId(bootstrap, desktopEnv)
   };
   return desktopActionContext;
+}
+
+async function resolveRuntimeSceneBridge(bootstrap: LauncherBootstrapResult): Promise<RuntimeSceneBridge> {
+  if (runtimeSceneBridge !== null) {
+    return runtimeSceneBridge;
+  }
+  const context = await resolveDesktopActionLoopContext(bootstrap);
+  runtimeSceneBridge = new RuntimeSceneBridge({
+    launcherOrigin: context.launcherOrigin,
+    controlToken: context.controlToken,
+    maxBufferedEvents: RUNTIME_SCENE_MAX_BUFFERED_EVENTS
+  });
+  return runtimeSceneBridge;
+}
+
+async function recordElectronSupervisorEvent(
+  bootstrap: LauncherBootstrapResult | null,
+  event: RuntimeSceneElectronEvent
+): Promise<void> {
+  if (bootstrap === null) {
+    return;
+  }
+  try {
+    const bridge = await resolveRuntimeSceneBridge(bootstrap);
+    await bridge.record(event);
+  } catch (error: unknown) {
+    console.warn(error instanceof Error ? error.message : String(error));
+  }
 }
 
 function currentDesktopSessionId(
@@ -185,6 +235,14 @@ async function requestDesktopShellExit(): Promise<ShutdownDecision> {
       }
     });
     if (decision.allowed) {
+      await recordElectronSupervisorEvent(launcherBootstrap, {
+        eventCode: "electron.launcher_service.exited",
+        message: "Electron desktop shell exit approved.",
+        fields: {
+          ownershipMode: launcherBootstrap?.mode ?? "attached",
+          stopPythonLauncher: decision.stopPythonLauncher
+        }
+      });
       shutdownApproved = true;
       stopDesktopActionLoop();
       app.quit();
@@ -236,6 +294,24 @@ app.whenReady()
     launcherBootstrap = await bootstrapLauncherIfEnabled(paths);
     windowProvider = createWindowProvider(paths, launcherBootstrap);
     await windowProvider.openLauncher();
+    await recordElectronSupervisorEvent(launcherBootstrap, {
+      eventCode: "electron.launcher.supervisor.started",
+      message: "Electron launcher supervisor started.",
+      fields: { provider: "electron" }
+    });
+    await recordElectronSupervisorEvent(launcherBootstrap, {
+      eventCode: "electron.launcher_service.started",
+      message: "Python launcher service is attached to Electron.",
+      fields: {
+        mode: launcherBootstrap?.mode ?? "",
+        launcherBackendPid: launcherBootstrap?.launcherBackendPid ?? 0
+      }
+    });
+    await recordElectronSupervisorEvent(launcherBootstrap, {
+      eventCode: "electron.launcher.window.opened",
+      message: "Launcher window opened by Electron.",
+      fields: { provider: "electron" }
+    });
     startDesktopActionLoop(launcherBootstrap, windowProvider);
   })
   .catch((error: unknown) => {

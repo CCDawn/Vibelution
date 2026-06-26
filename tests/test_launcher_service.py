@@ -110,6 +110,104 @@ def test_standalone_launcher_app_exposes_project_status_route(monkeypatch):
     assert response.json()["launcher"]["mode"] == "standalone_control_plane"
 
 
+def test_standalone_launcher_app_exposes_lifecycle_intent_and_desktop_action_routes(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        launcher_service,
+        "submit_lifecycle_intent",
+        lambda payload: calls.append(("intent", payload))
+        or {"intentId": "intent-1", "status": "accepted", "action": payload["action"]},
+    )
+    monkeypatch.setattr(
+        launcher_service,
+        "claim_desktop_action",
+        lambda desktop_session_id, *, lease_seconds=30: calls.append(("claim", desktop_session_id, lease_seconds))
+        or {"actionId": "action-1", "status": "claimed"},
+    )
+    monkeypatch.setattr(
+        launcher_service,
+        "ack_desktop_action",
+        lambda action_id, desktop_session_id, result: calls.append(("ack", action_id, desktop_session_id, result))
+        or {"actionId": action_id, "status": "succeeded"},
+    )
+    monkeypatch.setattr(
+        launcher_service,
+        "fail_desktop_action",
+        lambda action_id, desktop_session_id, result: calls.append(("fail", action_id, desktop_session_id, result))
+        or {"actionId": action_id, "status": "failed"},
+    )
+    client = TestClient(launcher_app.create_launcher_app())
+    token_headers = {"X-Vibelution-Control-Token": client.get("/api/control-token").json()["controlToken"]}
+
+    intent = client.post(
+        "/api/launcher/lifecycle-intents",
+        headers=token_headers,
+        json={"action": "open_workbench", "reason": "pytest", "idempotencyKey": "intent-key-1"},
+    )
+    claim = client.post(
+        "/api/launcher/desktop-actions/claim",
+        headers=token_headers,
+        json={"desktopSessionId": "desktop-session-1", "leaseSeconds": 12},
+    )
+    ack = client.post(
+        "/api/launcher/desktop-actions/action-1/ack",
+        headers=token_headers,
+        json={"desktopSessionId": "desktop-session-1", "result": {"ok": True}},
+    )
+    fail = client.post(
+        "/api/launcher/desktop-actions/action-2/fail",
+        headers=token_headers,
+        json={"desktopSessionId": "desktop-session-1", "result": {"ok": False}},
+    )
+
+    assert intent.status_code == 202
+    assert claim.status_code == 200
+    assert ack.status_code == 202
+    assert fail.status_code == 202
+    assert calls == [
+        ("intent", {"action": "open_workbench", "reason": "pytest", "idempotencyKey": "intent-key-1"}),
+        ("claim", "desktop-session-1", 12),
+        ("ack", "action-1", "desktop-session-1", {"ok": True}),
+        ("fail", "action-2", "desktop-session-1", {"ok": False}),
+    ]
+
+
+def test_standalone_launcher_runtime_scene_event_route_requires_control_token(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        launcher_app.runtime_scene_service,
+        "record_electron_supervisor_event",
+        lambda event_code, **kwargs: calls.append((event_code, kwargs)) or {"accepted": True, "runtimeSceneId": "scene-1"},
+    )
+    client = TestClient(launcher_app.create_launcher_app())
+
+    rejected = client.post(
+        "/api/launcher/runtime-scene/events",
+        json={"eventCode": "electron.desktop_action.claimed", "message": "claimed", "fields": {}},
+    )
+    token = client.get("/api/control-token").json()["controlToken"]
+    accepted = client.post(
+        "/api/launcher/runtime-scene/events",
+        headers={"X-Vibelution-Control-Token": token},
+        json={"eventCode": "electron.desktop_action.claimed", "message": "claimed", "fields": {"actionId": "a1"}},
+    )
+
+    assert rejected.status_code == 403
+    assert accepted.status_code == 202
+    assert calls == [
+        (
+            "electron.desktop_action.claimed",
+            {
+                "message": "claimed",
+                "fields": {"actionId": "a1"},
+                "level": "info",
+                "outcome": "observed",
+                "occurred_at": "",
+            },
+        )
+    ]
+
+
 def test_standalone_launcher_app_exposes_workbench_window_setting(monkeypatch):
     calls = []
     monkeypatch.setattr(

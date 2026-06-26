@@ -10,7 +10,8 @@ from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 
 from core.version import get_product_version
-from core.web.control import CONTROL_TOKEN_HEADER, control_token_payload, trusted_control_origins
+from core.web.control import CONTROL_TOKEN_HEADER, control_token_payload, trusted_control_origins, validate_control_request
+from core.web.services import runtime_scene_service
 from . import service as launcher_service
 
 
@@ -53,6 +54,31 @@ class DeveloperCleanupApplyPayload(BaseModel):
     planId: str
     planHash: str
     confirm: bool = False
+
+
+class LifecycleIntentPayload(BaseModel):
+    action: str
+    reason: str = ""
+    idempotencyKey: str
+
+
+class DesktopActionClaimPayload(BaseModel):
+    desktopSessionId: str
+    leaseSeconds: int = 30
+
+
+class DesktopActionResultPayload(BaseModel):
+    desktopSessionId: str
+    result: dict = Field(default_factory=dict)
+
+
+class LauncherRuntimeSceneEventPayload(BaseModel):
+    eventCode: str
+    message: str = ""
+    fields: dict = Field(default_factory=dict)
+    level: str = "info"
+    outcome: str = "observed"
+    occurredAt: str = ""
 
 
 @router.get("/api/health")
@@ -193,6 +219,61 @@ def project_restart() -> dict:
                 "activeWorkRuns": exc.active_work_runs,
             },
         ) from exc
+
+
+@router.post("/api/launcher/lifecycle-intents", status_code=202)
+def launcher_submit_lifecycle_intent(request: Request, payload: LifecycleIntentPayload) -> dict:
+    _ensure_control_request(request)
+    try:
+        return launcher_service.submit_lifecycle_intent(payload.model_dump())
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "invalid_lifecycle_intent", "message": str(exc)},
+        ) from exc
+
+
+@router.post("/api/launcher/desktop-actions/claim")
+def launcher_claim_desktop_action(request: Request, payload: DesktopActionClaimPayload) -> dict:
+    _ensure_control_request(request)
+    return launcher_service.claim_desktop_action(payload.desktopSessionId, lease_seconds=payload.leaseSeconds)
+
+
+@router.post("/api/launcher/desktop-actions/{action_id}/ack", status_code=202)
+def launcher_ack_desktop_action(request: Request, action_id: str, payload: DesktopActionResultPayload) -> dict:
+    _ensure_control_request(request)
+    return launcher_service.ack_desktop_action(action_id, payload.desktopSessionId, payload.result)
+
+
+@router.post("/api/launcher/desktop-actions/{action_id}/fail", status_code=202)
+def launcher_fail_desktop_action(request: Request, action_id: str, payload: DesktopActionResultPayload) -> dict:
+    _ensure_control_request(request)
+    return launcher_service.fail_desktop_action(action_id, payload.desktopSessionId, payload.result)
+
+
+@router.post("/api/launcher/runtime-scene/events", status_code=202)
+def launcher_runtime_scene_event(request: Request, payload: LauncherRuntimeSceneEventPayload) -> dict:
+    _ensure_control_request(request)
+    try:
+        return runtime_scene_service.record_electron_supervisor_event(
+            payload.eventCode,
+            message=payload.message,
+            fields=payload.fields,
+            level=payload.level,
+            outcome=payload.outcome,
+            occurred_at=payload.occurredAt,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "invalid_electron_runtime_scene_event", "message": str(exc)},
+        ) from exc
+
+
+def _ensure_control_request(request: Request) -> None:
+    error = validate_control_request(request)
+    if error is not None:
+        raise HTTPException(status_code=error.status_code, detail=error.detail)
 
 
 def _request_audit(request: Request, *, operation: str) -> launcher_service.LauncherRequestAudit:
