@@ -2526,6 +2526,91 @@ def test_source_collection_stage_card_projection_is_scoped_to_current_run_artifa
     assert card_by_stage["memory"]["counts"]["artifact"] == 0
 
 
+def test_source_collection_stage_card_projection_ignores_stale_agent_tasks_for_current_team(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    current_agent = agent_directory_service.create_agent_instance(display_name="当前资料提炼")
+    team = team_service.create_team(
+        name="挑战杯科研团队",
+        members=[{"agentId": current_agent["agentId"], "role": "content_extraction", "agentName": "当前资料提炼"}],
+    )
+    run = data_processing_service.create_processing_run(
+        title="Knowledge collection current round",
+        scope={"teamId": team["teamId"], "workflowStage": "knowledge_collection"},
+        metadata={"startedFrom": "team_workflow_source_collection"},
+    )
+    record = data_processing_service.add_record(
+        run["runId"],
+        {
+            "sourceType": "paper",
+            "sourceRef": "https://doi.org/10.0000/current-round",
+            "title": "Current round source",
+            "summary": "Evidence from the current collection round.",
+        },
+    )
+    source = team_workflow_orchestration_service.import_data_record_as_source_candidate(
+        team["teamId"],
+        run["runId"],
+        record["recordId"],
+        {"createdByAgent": current_agent["agentId"]},
+    )["candidate"]
+    team_workflow_orchestration_service._upsert_source_collection_stage_session_task(
+        team["teamId"],
+        run["runId"],
+        {
+            "taskId": "stagetask-stale-candidate",
+            "runId": run["runId"],
+            "stageId": "candidate",
+            "agentId": "agent-old-content-extraction",
+            "agentRole": "content_extraction",
+            "sessionId": "session-old-content-extraction",
+            "status": "running",
+            "summary": "旧会话的资料提炼任务仍显示运行中。",
+            "createdAt": "2026-06-20T00:00:00+00:00",
+            "updatedAt": "2026-06-20T00:00:00+00:00",
+        },
+    )
+
+    projection = team_workflow_orchestration_service._source_collection_stage_cards_projection(team["teamId"], run["runId"])
+
+    candidate_card = next(item for item in projection["cards"] if item["stageId"] == "candidate")
+    assert source["candidateId"]
+    assert candidate_card["status"] == "artifact_ready_no_latest_agent_task"
+    assert candidate_card["agentTaskStatus"] == "not_started"
+    assert candidate_card["latestTask"] == {}
+    assert candidate_card["counts"]["task"] == 0
+    assert candidate_card["counts"]["historicalTask"] == 1
+
+
+def test_source_collection_stage_card_projection_does_not_close_partial_needs_review_artifacts():
+    card = team_workflow_orchestration_service._source_collection_stage_card_projection(
+        "screening",
+        [
+            {
+                "taskId": "stagetask-needs-review",
+                "stageId": "screening",
+                "agentId": "source-quality-agent",
+                "agentRole": "source_quality",
+                "sessionId": "session-source-quality",
+                "status": "needs_review",
+                "summary": "Agent 已回写部分审查结果，但还有候选资料待审。",
+                "updatedAt": "2026-06-25T00:00:00+00:00",
+            }
+        ],
+        artifact_count=5,
+        input_count=10,
+        output_count=1,
+        pending_count=5,
+        artifact_status="partial",
+        artifact_summary="5/10 source candidates assessed; 1 approved.",
+    )
+
+    assert card["status"] == "agent_done_artifact_pending"
+    assert card["isClosedLoop"] is False
+    assert card["agentTaskStatus"] == "needs_review"
+    assert card["counts"]["pending"] == 5
+    assert card["blockingReasons"]
+
+
 def test_research_stage_status_reconciles_completed_stage_task_turn_result(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)
