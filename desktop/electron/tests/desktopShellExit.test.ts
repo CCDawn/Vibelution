@@ -5,7 +5,7 @@ describe("executeApprovedDesktopShellShutdown", () => {
   it("stops the owned Python Launcher before quitting the desktop shell", async () => {
     const calls: string[] = [];
 
-    await executeApprovedDesktopShellShutdown({
+    const result = await executeApprovedDesktopShellShutdown({
       decision: { allowed: true, reason: "no_active_work", stopPythonLauncher: true },
       closeDesktopSession: async () => {
         calls.push("close-session");
@@ -44,12 +44,18 @@ describe("executeApprovedDesktopShellShutdown", () => {
       "stop-action-loop",
       "quit-app"
     ]);
+    expect(result).toEqual({
+      stopPythonLauncher: true,
+      stopStatus: "stopped",
+      stoppedPidCount: 1,
+      stopError: ""
+    });
   });
 
   it("detaches without stopping Python when the Launcher was attached", async () => {
     const calls: string[] = [];
 
-    await executeApprovedDesktopShellShutdown({
+    const result = await executeApprovedDesktopShellShutdown({
       decision: { allowed: true, reason: "no_active_work", stopPythonLauncher: false },
       closeDesktopSession: async () => {
         calls.push("close-session");
@@ -86,5 +92,11 @@ describe("executeApprovedDesktopShellShutdown", () => {
       "stop-action-loop",
       "quit-app"
     ]);
+    expect(result).toEqual({
+      stopPythonLauncher: false,
+      stopStatus: "not_requested",
+      stoppedPidCount: 0,
+      stopError: ""
+    });
   });
 });

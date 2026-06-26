@@ -55,6 +55,13 @@ describe("desktop CLI arguments", () => {
         workbenchOrigin: "",
         errorType: "",
         errorMessage: ""
+      },
+      shutdown: {
+        attempted: false,
+        stopPythonLauncher: false,
+        stopStatus: "not_requested",
+        stoppedPidCount: 0,
+        stopError: ""
       }
     });
     expect(desktopSmokeSummaryPath("C:/Users/17533/Desktop/Vibelution").replaceAll("\\", "/")).toBe(
