@@ -551,15 +551,24 @@ def _execute_flow(
         _transition(snapshot, "running", "candidate_worktree", "正在创建候选隔离工作树。")
         _raise_if_run_cancelled(snapshot)
         candidate_worktree = worktree_factory(root, run_id)
+        candidate_path = _coerce_candidate_worktree_path(
+            candidate_worktree,
+            project_root=root,
+            run_id=run_id,
+        )
         _raise_if_run_cancelled(snapshot)
         candidate_worktree["preserved"] = True
+        candidate_worktree["path"] = str(candidate_path)
         snapshot["candidateWorktree"] = candidate_worktree
         _persist_snapshot(snapshot, active_run_id=run_id if _ACTIVE_RUN_ID == run_id else "")
-        _ensure_bundle_available_in_candidate(root, candidate_path=Path(str(candidate_worktree.get("path") or "")), bundle_name=str(options["bundleName"]))
+        _ensure_bundle_available_in_candidate(
+            root,
+            candidate_path=candidate_path,
+            bundle_name=str(options["bundleName"]),
+        )
 
         _raise_if_run_cancelled(snapshot)
         _transition(snapshot, "running", "candidate_modify", "候选 agent 正在反思并修改自身。")
-        candidate_path = Path(str(candidate_worktree.get("path") or ""))
         _raise_if_run_cancelled(snapshot)
         modification = modifier(
             candidate_path,
@@ -1018,6 +1027,61 @@ def _default_worktree_factory(project_root: Path, run_id: str) -> dict[str, Any]
     }
 
 
+def _coerce_candidate_worktree_path(
+    candidate_worktree: dict[str, Any],
+    *,
+    project_root: Path,
+    run_id: str,
+) -> Path:
+    raw_path = str(candidate_worktree.get("path") or "").strip()
+    if not raw_path:
+        raise SupervisedWorktreeRunValidationError(
+            f"候选工作树路径缺失（runId={run_id}）。请检查兼容层或历史快照。"
+        )
+    try:
+        candidate_path = Path(raw_path).expanduser().resolve()
+    except Exception:
+        raise SupervisedWorktreeRunValidationError(
+            f"候选工作树路径格式无效（runId={run_id}）：{raw_path}"
+        )
+    if not candidate_path.exists():
+        raise SupervisedWorktreeRunValidationError(
+            f"候选工作树路径不存在（runId={run_id}）：{candidate_path}"
+        )
+    if not candidate_path.is_dir():
+        raise SupervisedWorktreeRunValidationError(
+            f"候选工作树路径不是目录（runId={run_id}）：{candidate_path}"
+        )
+    project_root = project_root.resolve()
+    if candidate_path == project_root:
+        raise SupervisedWorktreeRunValidationError(
+            f"候选工作树路径不可为主项目目录（runId={run_id}）。"
+        )
+    try:
+        candidate_path.relative_to(project_root)
+        raise SupervisedWorktreeRunValidationError(
+            f"候选工作树路径不能在主项目目录内（runId={run_id}）：{candidate_path}"
+        )
+    except ValueError:
+        return candidate_path
+
+
+def _coerce_candidate_worktree_path_soft(
+    candidate_worktree: dict[str, Any],
+    *,
+    project_root: Path,
+    run_id: str,
+) -> tuple[Path | None, str]:
+    try:
+        return _coerce_candidate_worktree_path(
+            candidate_worktree,
+            project_root=project_root,
+            run_id=run_id,
+        ), ""
+    except SupervisedWorktreeRunValidationError as exc:
+        return None, str(exc)
+
+
 def _ensure_bundle_available_in_candidate(project_root: Path, *, candidate_path: Path, bundle_name: str) -> None:
     if not bundle_name or not candidate_path.exists():
         return
@@ -1218,11 +1282,11 @@ def _build_merge_analysis(snapshot: dict[str, Any]) -> dict[str, Any]:
     project_root = _snapshot_project_root(snapshot)
     worktree = snapshot.get("candidateWorktree") if isinstance(snapshot.get("candidateWorktree"), dict) else {}
     candidate_path = Path(str(worktree.get("path") or ""))
-    if not candidate_path.exists():
+    if not candidate_path.exists() or not candidate_path.is_dir():
         return {
             "status": "unavailable",
             "mergeAllowed": False,
-            "reason": "候选工作树不存在，无法合并。",
+            "reason": "候选工作树不可用，无法合并。",
             "changedFiles": [],
             "overlapFiles": [],
             "highRiskFiles": [],
@@ -1269,6 +1333,8 @@ def _merge_candidate(snapshot: dict[str, Any], *, force: bool) -> dict[str, Any]
         )
     worktree = updated.get("candidateWorktree") if isinstance(updated.get("candidateWorktree"), dict) else {}
     candidate_path = Path(str(worktree.get("path") or ""))
+    if not candidate_path.exists() or not candidate_path.is_dir():
+        raise SupervisedWorktreeRunActionError("候选工作树不可用或已被清理，无法执行合并。")
     changed_files = list(analysis.get("changedFiles") or [])
     rollback_manifest = _apply_candidate_files(
         _snapshot_project_root(updated),
@@ -1460,23 +1526,29 @@ def _cleanup_candidate_worktree(snapshot: dict[str, Any]) -> dict[str, Any]:
     checkpoint_ref = str(worktree.get("checkpointRef") or "").strip() or None
     cleanup: dict[str, Any] = {"status": "skipped", "reason": "missing_path", "path": raw_path}
     if raw_path:
-        cleanup = _candidate_worktree_cleanup_plan(snapshot, project_root=project_root, worktree=worktree)
-        if cleanup["status"] == "allowed":
-            try:
-                remove_worktree(project_root, Path(raw_path))
-                cleanup = {**cleanup, "status": "removed", "removedAt": _now_iso()}
-            except Exception as exc:
-                cleanup = {
-                    **cleanup,
-                    "status": "failed",
-                    "reason": type(exc).__name__,
-                    "message": str(exc)[:300],
-                    "failedAt": _now_iso(),
-                }
+        candidate_path = Path(raw_path)
+        if candidate_path.exists() and not candidate_path.is_dir():
+            cleanup = {"status": "skipped", "reason": "not_directory", "path": raw_path}
+            if cleanup["status"] in {"skipped", "failed"}:
+                _record_candidate_cleanup_event(snapshot, cleanup)
         else:
-            cleanup = {**cleanup, "skippedAt": _now_iso()}
-        if cleanup["status"] in {"skipped", "failed"}:
-            _record_candidate_cleanup_event(snapshot, cleanup)
+            cleanup = _candidate_worktree_cleanup_plan(snapshot, project_root=project_root, worktree=worktree)
+            if cleanup["status"] == "allowed":
+                try:
+                    remove_worktree(project_root, Path(raw_path))
+                    cleanup = {**cleanup, "status": "removed", "removedAt": _now_iso()}
+                except Exception as exc:
+                    cleanup = {
+                        **cleanup,
+                        "status": "failed",
+                        "reason": type(exc).__name__,
+                        "message": str(exc)[:300],
+                        "failedAt": _now_iso(),
+                    }
+            else:
+                cleanup = {**cleanup, "skippedAt": _now_iso()}
+            if cleanup["status"] in {"skipped", "failed"}:
+                _record_candidate_cleanup_event(snapshot, cleanup)
     try:
         delete_checkpoint_ref(project_root, checkpoint_ref)
     except Exception:
@@ -1514,6 +1586,11 @@ def _candidate_worktree_cleanup_plan(
         return {"status": "skipped", "reason": "candidate_inside_project_root", "path": str(candidate_path)}
     except ValueError:
         pass
+
+    if not candidate_path.exists():
+        return {"status": "skipped", "reason": "missing_path", "path": str(candidate_path)}
+    if not candidate_path.is_dir():
+        return {"status": "skipped", "reason": "not_directory", "path": str(candidate_path)}
 
     cleanup_owner = str(worktree.get("cleanupOwner") or "").strip()
     cleanup_run_id = str(worktree.get("cleanupRunId") or "").strip()
@@ -1995,6 +2072,18 @@ def _decorate_snapshot(snapshot: dict[str, Any] | None) -> dict[str, Any] | None
     if snapshot is None:
         return None
     payload = _clone(snapshot)
+    worktree = payload.get("candidateWorktree")
+    if isinstance(worktree, dict) and str(worktree.get("path") or "").strip():
+        project_root = _snapshot_project_root(payload)
+        run_id = str(payload.get("runId") or "")
+        _, reason = _coerce_candidate_worktree_path_soft(
+            worktree,
+            project_root=project_root,
+            run_id=run_id,
+        )
+        if reason:
+            worktree.pop("path", None)
+            worktree["pathValidationError"] = reason
     payload["actionStates"] = _action_states(payload)
     return payload
 
