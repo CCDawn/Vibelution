@@ -523,6 +523,120 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).toContain("白予安");
   });
 
+  it("shows the assistant avatar only once for a consecutive process thread", () => {
+    const html = renderConversation(
+      [
+        {
+          id: "assistant-process-prepare",
+          role: "assistant",
+          content: "",
+          timestamp: "2026-06-27T01:00:00Z",
+          streaming: true,
+          feedbackEvents: [
+            {
+              sequence: 1,
+              kind: "status",
+              status: "running",
+              name: "agent_prepare",
+              summary: "正在绑定 Agent",
+            },
+          ],
+        },
+        {
+          id: "assistant-process-tool",
+          role: "assistant",
+          content: "",
+          timestamp: "2026-06-27T01:00:04Z",
+          feedbackEvents: [
+            {
+              sequence: 2,
+              kind: "tool",
+              status: "done",
+              name: "source_collection_context_tool",
+              summary: "读取受控资料上下文",
+            },
+          ],
+        },
+        {
+          id: "assistant-process-answer",
+          role: "assistant",
+          content: "上下文已读取，继续整理结果。",
+          timestamp: "2026-06-27T01:00:08Z",
+          feedbackEvents: [
+            {
+              sequence: 3,
+              kind: "thought",
+              status: "done",
+              summary: "整理结果",
+            },
+          ],
+        },
+      ],
+      {
+        useDefaultProcessDisplayMode: true,
+        assistantDisplayName: "周南栀",
+        assistantAvatarImageUrl: "/api/agents/avatar-image/agent-zhounanzhi.png",
+        assistantAvatarFallback: "周",
+      },
+    );
+
+    expect(html.match(/src="\/api\/agents\/avatar-image\/agent-zhounanzhi\.png"/g)?.length ?? 0).toBe(1);
+    expect(html.match(/周南栀/g)?.length ?? 0).toBe(1);
+    expect(html.match(/assistantTurnContinuation/g)?.length ?? 0).toBe(2);
+  });
+
+  it("starts a new assistant avatar group after a user turn", () => {
+    const html = renderConversation(
+      [
+        {
+          id: "assistant-process-before-user",
+          role: "assistant",
+          content: "",
+          timestamp: "2026-06-27T01:00:00Z",
+          feedbackEvents: [
+            {
+              sequence: 1,
+              kind: "tool",
+              status: "done",
+              name: "read_file",
+              summary: "读取上下文",
+            },
+          ],
+        },
+        {
+          id: "user-break",
+          role: "user",
+          content: "继续",
+          timestamp: "2026-06-27T01:01:00Z",
+        },
+        {
+          id: "assistant-process-after-user",
+          role: "assistant",
+          content: "",
+          timestamp: "2026-06-27T01:01:05Z",
+          feedbackEvents: [
+            {
+              sequence: 1,
+              kind: "tool",
+              status: "done",
+              name: "read_file",
+              summary: "读取下一轮上下文",
+            },
+          ],
+        },
+      ],
+      {
+        useDefaultProcessDisplayMode: true,
+        assistantDisplayName: "周南栀",
+        assistantAvatarImageUrl: "/api/agents/avatar-image/agent-zhounanzhi.png",
+        assistantAvatarFallback: "周",
+      },
+    );
+
+    expect(html.match(/src="\/api\/agents\/avatar-image\/agent-zhounanzhi\.png"/g)?.length ?? 0).toBe(2);
+    expect(html.match(/assistantTurnContinuation/g)?.length ?? 0).toBe(0);
+  });
+
   it("falls back to assistant initials when no avatar image is configured", () => {
     const html = renderConversation(
       [

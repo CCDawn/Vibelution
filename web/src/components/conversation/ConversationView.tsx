@@ -573,6 +573,43 @@ function isSameConversationTurn(left: ConversationMessage, right: ConversationMe
   return Boolean(leftTurnId) && leftTurnId === conversationMessageTurnId(right);
 }
 
+function isAssistantProcessThreadCandidate(message: ConversationMessage) {
+  if (
+    message.role !== "assistant"
+    || isRuntimeNoticeMessage(message)
+    || isCliAgentLifecycleMessage(message)
+    || isGroupRoomTranscriptMessage(message)
+  ) {
+    return false;
+  }
+  return Boolean(
+    message.streaming
+    || String(message.streamStage ?? "").trim()
+    || (message.feedbackEvents?.length ?? 0) > 0
+    || (message.timelineItems?.length ?? 0) > 0
+    || (message.toolCalls?.length ?? 0) > 0
+    || hasThoughtBlock(message)
+    || hasMentalBlock(message)
+    || isTurnErrorMessage(message)
+  );
+}
+
+function conversationVisualThreadKey(message: ConversationMessage | undefined) {
+  if (!message || !isAssistantProcessThreadCandidate(message)) {
+    return "";
+  }
+  const turnId = conversationMessageTurnId(message);
+  if (turnId) {
+    return `assistant-turn:${turnId}`;
+  }
+  return "assistant-process-thread";
+}
+
+function shouldCompactConversationTurnHeader(previous: ConversationMessage | undefined, message: ConversationMessage) {
+  const threadKey = conversationVisualThreadKey(message);
+  return Boolean(threadKey && threadKey === conversationVisualThreadKey(previous));
+}
+
 function mergeUniqueJsonItems<T>(...itemGroups: Array<T[] | undefined>) {
   const merged: T[] = [];
   const seen = new Set<string>();
@@ -3286,7 +3323,7 @@ export function ConversationView({
                 </button>
               </div>
             ) : null}
-            {activeTimelineMessages.map((message) => {
+            {activeTimelineMessages.map((message, index) => {
             if (isCliAgentLifecycleMessage(message)) {
               const detail = cliAgentLifecycleDetail(message);
               return (
@@ -3311,6 +3348,7 @@ export function ConversationView({
             const turnErrorMessage = isTurnErrorMessage(message);
             const agentInboxMessage = isAgentInboxMessage(message);
             const groupTranscriptMessage = isGroupRoomTranscriptMessage(message);
+            const compactTurnHeader = shouldCompactConversationTurnHeader(activeTimelineMessages[index - 1], message);
             const conversationTimelineItems = buildConversationTimelineItems(message, operationGroups.timeline, {
               lang,
               includeAssistantText: showResponseBlock && !answerOnlyProcessMode,
@@ -3348,6 +3386,7 @@ export function ConversationView({
                   ? styles.agentInboxTurn
                   : styles.userTurn,
               turnErrorMessage ? styles.turnErrorTurn : "",
+              compactTurnHeader ? styles.assistantTurnContinuation : "",
               isEditingMessage ? styles.turnEditing : "",
             ].filter(Boolean).join(" ");
             const speakerLabel = groupTranscriptMessage
@@ -3431,48 +3470,52 @@ export function ConversationView({
                 className={turnClassName}
               >
                 <div className={styles.turnAvatar} aria-hidden="true">
-                  {renderTurnAvatarContent(
-                    resolveMessageTurnAvatar(message, {
-                      resolveTurnAvatar,
-                      assistantAvatarImageUrl,
-                      assistantAvatarFallback,
-                      assistantLabel,
-                      userAvatarImageUrl,
-                      userAvatarLabel,
-                      agentInboxMessage,
-                      groupTranscriptMessage,
-                    }),
-                  )}
+                  {compactTurnHeader
+                    ? null
+                    : renderTurnAvatarContent(
+                      resolveMessageTurnAvatar(message, {
+                        resolveTurnAvatar,
+                        assistantAvatarImageUrl,
+                        assistantAvatarFallback,
+                        assistantLabel,
+                        userAvatarImageUrl,
+                        userAvatarLabel,
+                        agentInboxMessage,
+                        groupTranscriptMessage,
+                      }),
+                    )}
                 </div>
             <div className={styles.turnContent}>
-                  <div className={styles.turnMeta}>
-                    <div className={styles.turnMetaIdentity}>
-                      <span className={styles.turnSpeaker}>
-                        {speakerLabel}
+                  {compactTurnHeader ? null : (
+                    <div className={styles.turnMeta}>
+                      <div className={styles.turnMetaIdentity}>
+                        <span className={styles.turnSpeaker}>
+                          {speakerLabel}
+                        </span>
+                        {isEditingMessage ? <span className={styles.turnEditBadge}>{t("editMessage")}</span> : null}
+                      </div>
+                      <span className={styles.turnMetaActions}>
+                        {message.timestamp ? <span>{formatTimestamp(message.timestamp)}</span> : null}
+                        {userAuthoredMessage && message.id === latestUserMessageId && onEditUserMessage ? (
+                          <button
+                            type="button"
+                            className={
+                              isEditingMessage
+                                ? `${styles.turnIconButton} ${styles.turnIconButtonActive}`
+                                : styles.turnIconButton
+                            }
+                            onClick={() => onEditUserMessage(message)}
+                            disabled={editDisabled}
+                            aria-pressed={isEditingMessage}
+                            title={editDisabled ? composerPlaceholder : editUserMessageLabel ?? t("editMessage")}
+                            aria-label={editUserMessageLabel ?? t("editMessage")}
+                          >
+                            <Pencil size={14} />
+                          </button>
+                        ) : null}
                       </span>
-                      {isEditingMessage ? <span className={styles.turnEditBadge}>{t("editMessage")}</span> : null}
                     </div>
-                    <span className={styles.turnMetaActions}>
-                      {message.timestamp ? <span>{formatTimestamp(message.timestamp)}</span> : null}
-                      {userAuthoredMessage && message.id === latestUserMessageId && onEditUserMessage ? (
-                        <button
-                          type="button"
-                          className={
-                            isEditingMessage
-                              ? `${styles.turnIconButton} ${styles.turnIconButtonActive}`
-                              : styles.turnIconButton
-                          }
-                          onClick={() => onEditUserMessage(message)}
-                          disabled={editDisabled}
-                          aria-pressed={isEditingMessage}
-                          title={editDisabled ? composerPlaceholder : editUserMessageLabel ?? t("editMessage")}
-                          aria-label={editUserMessageLabel ?? t("editMessage")}
-                        >
-                          <Pencil size={14} />
-                        </button>
-                      ) : null}
-                    </span>
-                  </div>
+                  )}
 
                   {agentInboxMessage ? (
                     <section className={styles.agentInboxSection}>
