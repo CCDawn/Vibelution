@@ -52,8 +52,10 @@ import {
   applyBeforeUnloadProjectCloseGuard,
   buildProjectWindowCloseBlockedTelemetry,
   hasRecentControlledProjectLifecycleOperation,
+  isElectronDesktopShell,
   markControlledProjectLifecycleOperation,
   projectWindowCloseGuardMessage,
+  shouldArmBrowserProjectCloseGuard,
   shouldBlockWorkbenchWindowClose,
 } from "./projectCloseGuard";
 import { getPageInstanceId } from "./pageInstance";
@@ -1399,7 +1401,7 @@ export function AppShell() {
       runtimeControllerState,
       shutdownRequested,
     });
-    if (!closeBlocked) {
+    if (!shouldArmBrowserProjectCloseGuard({ closeBlocked, electronDesktopShell: isElectronDesktopShell() })) {
       return;
     }
 

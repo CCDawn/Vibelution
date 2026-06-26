@@ -24,6 +24,8 @@ export type ElectronWindowProviderOptions = {
   createLauncherWindow?: ElectronWindowFactory;
   createWorkbenchWindow?: ElectronWindowFactory;
   reportState?: (state: ManagedWindowState) => void | Promise<void>;
+  shouldInterceptLauncherClose?: () => boolean;
+  onLauncherCloseRequest?: () => void;
 };
 
 export class ElectronWindowProvider {
@@ -32,6 +34,8 @@ export class ElectronWindowProvider {
   private readonly createLauncherWindow: ElectronWindowFactory;
   private readonly createWorkbenchWindow: ElectronWindowFactory;
   private readonly reportState: (state: ManagedWindowState) => void | Promise<void>;
+  private readonly shouldInterceptLauncherClose: () => boolean;
+  private readonly onLauncherCloseRequest: () => void;
 
   constructor(
     private readonly paths: DesktopPaths,
@@ -42,6 +46,8 @@ export class ElectronWindowProvider {
     this.createLauncherWindow = options.createLauncherWindow ?? missingWindowFactory("launcher");
     this.createWorkbenchWindow = options.createWorkbenchWindow ?? missingWindowFactory("workbench");
     this.reportState = options.reportState ?? (() => undefined);
+    this.shouldInterceptLauncherClose = options.shouldInterceptLauncherClose ?? (() => false);
+    this.onLauncherCloseRequest = options.onLauncherCloseRequest ?? (() => undefined);
   }
 
   async openLauncher(): Promise<ManagedWindowState> {
@@ -89,6 +95,15 @@ export class ElectronWindowProvider {
   }
 
   private attachWindowEvents(role: ElectronWindowRole, window: ElectronWindowLike): void {
+    if (role === "launcher") {
+      window.on("close", (event) => {
+        if (!this.shouldInterceptLauncherClose()) {
+          return;
+        }
+        preventWindowClose(event);
+        this.onLauncherCloseRequest();
+      });
+    }
     window.on("closed", () => {
       if (role === "launcher" && this.launcherWindow === window) {
         this.launcherWindow = null;
@@ -130,4 +145,13 @@ function missingWindowFactory(role: ElectronWindowRole): ElectronWindowFactory {
   return () => {
     throw new Error(`missing ${role} window factory`);
   };
+}
+
+function preventWindowClose(event: unknown): void {
+  if (typeof event === "object" && event !== null && "preventDefault" in event) {
+    const preventDefault = (event as { preventDefault?: unknown }).preventDefault;
+    if (typeof preventDefault === "function") {
+      preventDefault.call(event);
+    }
+  }
 }
