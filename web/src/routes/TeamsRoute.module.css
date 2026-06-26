@@ -1830,34 +1830,22 @@
 
 .teamMemoryMemberTable {
   display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
   gap: 4px;
 }
 
-.teamMemoryMemberHeading,
+.teamMemoryMemberHeading {
+  display: none;
+}
+
 .teamMemoryMemberCard {
   display: grid;
-  grid-template-columns: minmax(180px, 0.8fr) minmax(160px, 0.75fr) max-content max-content;
-  gap: 8px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 3px 8px;
   align-items: center;
   min-width: 0;
-}
-
-.teamMemoryMemberHeading {
-  padding: 0 7px;
-  color: var(--fg-subtle);
-  text-transform: uppercase;
-}
-
-.teamMemoryMemberHeading span {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.teamMemoryMemberCard {
-  min-height: 32px;
-  padding: 3px 7px;
+  min-height: 44px;
+  padding: 5px 7px;
   border: 1px solid color-mix(in srgb, var(--border-soft) 86%, transparent);
   border-radius: 6px;
   background: color-mix(in srgb, var(--surface-card) 82%, transparent);
@@ -1896,10 +1884,14 @@
 }
 
 .teamMemoryRole {
+  grid-column: 1;
+  grid-row: 2;
   color: var(--fg-muted);
 }
 
 .teamMemoryStatusBadge {
+  grid-column: 2;
+  grid-row: 1;
   justify-self: start;
   max-width: 100%;
   padding: 2px 7px;
@@ -1909,6 +1901,22 @@
   color: color-mix(in srgb, var(--accent-success) 70%, var(--fg-primary));
   font-size: 0.62rem;
   font-weight: 840;
+}
+
+.teamMemoryMemberActions {
+  grid-column: 2;
+  grid-row: 2;
+  justify-self: end;
+}
+
+.teamMemoryMemberActions a {
+  width: 26px;
+  min-width: 26px;
+  padding: 0;
+}
+
+.teamMemoryMemberActions a span {
+  display: none;
 }
 
 .teamMemoryStatusBadge[data-tone="blocked"],
