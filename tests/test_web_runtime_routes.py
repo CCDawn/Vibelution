@@ -1954,6 +1954,15 @@ def test_launcher_lifecycle_intent_status_route_reconciles_runtime_manager_failu
 def test_self_evolution_restart_request_uses_launcher_lifecycle_service(monkeypatch):
     captured: dict[str, object] = {}
     captured_context: dict[str, object] = {}
+    with self_evolution_control_service._RUN_STATE_LOCK:
+        self_evolution_control_service._RUN_STATES["self-run-1"] = {
+            "runId": "self-run-1",
+            "status": "done",
+            "phase": "done",
+            "taskId": "task-1",
+            "worktree": "C:/worktree",
+            "rollback": {"status": "available"},
+        }
 
     def fake_submit(payload: dict[str, object], *, actor_context: dict[str, object]) -> dict[str, object]:
         captured.update(payload)
@@ -1974,6 +1983,162 @@ def test_self_evolution_restart_request_uses_launcher_lifecycle_service(monkeypa
     assert captured["action"] == "restart_after_apply"
     assert captured_context["actorType"] == "self_evolution_agent"
     assert captured_context["sourceRunId"] == "self-run-1"
+
+
+def test_self_evolution_lifecycle_intent_uses_trusted_run_context(monkeypatch):
+    captured: dict[str, object] = {}
+    captured_context: dict[str, object] = {}
+    with self_evolution_control_service._RUN_STATE_LOCK:
+        self_evolution_control_service._RUN_STATES["self-run-trusted"] = {
+            "runId": "self-run-trusted",
+            "status": "done",
+            "phase": "done",
+            "taskId": "trusted-task",
+            "worktree": "C:/trusted-worktree",
+            "rollback": {"status": "available"},
+        }
+
+    def fake_submit(payload: dict[str, object], *, actor_context: dict[str, object]) -> dict[str, object]:
+        captured.update(payload)
+        captured_context.update(actor_context)
+        return {"intentId": "intent-trusted", "status": "accepted", "action": payload["action"]}
+
+    monkeypatch.setattr(self_evolution_control_service.launcher_service, "submit_lifecycle_intent", fake_submit)
+
+    result = self_evolution_control_service.request_lifecycle_intent(
+        action="restart_after_apply",
+        reason="apply completed",
+        run_id="self-run-trusted",
+        task_id="payload-task",
+        worktree="C:/payload-worktree",
+    )
+
+    assert result["intentId"] == "intent-trusted"
+    assert captured["idempotencyKey"] == "self-run-trusted:restart_after_apply"
+    assert captured_context["sourceRunId"] == "self-run-trusted"
+    assert captured_context["sourceTaskId"] == "trusted-task"
+    assert captured_context["sourceWorktree"] == "C:/trusted-worktree"
+
+
+@pytest.mark.parametrize(
+    ("status", "rollback_status"),
+    [
+        ("running", "available"),
+        ("done", "unavailable"),
+    ],
+)
+def test_self_evolution_restart_after_apply_rejects_invalid_apply_rollback_state(
+    monkeypatch,
+    status,
+    rollback_status,
+):
+    with self_evolution_control_service._RUN_STATE_LOCK:
+        self_evolution_control_service._RUN_STATES["self-run-invalid-apply"] = {
+            "runId": "self-run-invalid-apply",
+            "status": status,
+            "phase": status,
+            "taskId": "task-1",
+            "worktree": "C:/worktree",
+            "rollback": {"status": rollback_status},
+        }
+
+    monkeypatch.setattr(
+        self_evolution_control_service.launcher_service,
+        "submit_lifecycle_intent",
+        lambda *args, **kwargs: pytest.fail("invalid apply state must not be submitted to Launcher"),
+    )
+
+    with pytest.raises(self_evolution_control_service.SelfEvolutionRunValidationError):
+        self_evolution_control_service.request_lifecycle_intent(
+            action="restart_after_apply",
+            reason="apply completed",
+            run_id="self-run-invalid-apply",
+            task_id="task-1",
+            worktree="C:/worktree",
+        )
+
+
+@pytest.mark.parametrize(
+    ("run_status", "expected_error"),
+    [
+        (None, self_evolution_control_service.SelfEvolutionRunNotFoundError),
+        ("done", self_evolution_control_service.SelfEvolutionRunValidationError),
+        ("running", self_evolution_control_service.SelfEvolutionRunValidationError),
+    ],
+)
+def test_self_evolution_resume_lifecycle_intent_rejects_unknown_terminal_or_running_runs(
+    monkeypatch,
+    run_status,
+    expected_error,
+):
+    if run_status is not None:
+        with self_evolution_control_service._RUN_STATE_LOCK:
+            self_evolution_control_service._RUN_STATES["self-run-resume"] = {
+                "runId": "self-run-resume",
+                "status": run_status,
+                "phase": run_status,
+                "taskId": "task-1",
+                "worktree": "C:/worktree",
+                "rollback": {"status": "available"},
+            }
+
+    monkeypatch.setattr(
+        self_evolution_control_service.launcher_service,
+        "submit_lifecycle_intent",
+        lambda *args, **kwargs: pytest.fail("invalid resume state must not be submitted to Launcher"),
+    )
+
+    with pytest.raises(expected_error):
+        self_evolution_control_service.request_lifecycle_intent(
+            action="resume_self_evolution",
+            reason="resume after pause",
+            run_id="self-run-resume",
+            task_id="task-1",
+            worktree="C:/worktree",
+        )
+
+
+def test_self_evolution_lifecycle_intent_status_route_uses_trusted_context(tmp_path, monkeypatch):
+    from core.launcher import lifecycle_action_dispatcher, lifecycle_intent_store
+
+    monkeypatch.setattr(lifecycle_intent_store, "LIFECYCLE_DB_PATH", tmp_path / "launcher" / "lifecycle.sqlite3")
+    monkeypatch.setattr(standalone_launcher_service, "launcher_active_work_runs", lambda: [])
+    monkeypatch.setattr(
+        lifecycle_action_dispatcher,
+        "dispatch_runtime_effect_intent",
+        lambda intent: {"commandId": "cmd-self-1", "action": intent["action"]},
+    )
+    with self_evolution_control_service._RUN_STATE_LOCK:
+        self_evolution_control_service._RUN_STATES["self-run-route"] = {
+            "runId": "self-run-route",
+            "status": "done",
+            "phase": "done",
+            "taskId": "trusted-route-task",
+            "worktree": str(tmp_path / "trusted-worktree"),
+            "rollback": {"status": "available"},
+        }
+
+    intent = self_evolution_control_service.request_lifecycle_intent(
+        action="restart_after_apply",
+        reason="apply completed",
+        run_id="self-run-route",
+        task_id="payload-task",
+        worktree=str(tmp_path / "payload-worktree"),
+    )
+
+    response = client.get(f"/api/launcher/lifecycle-intents/{intent['intentId']}")
+
+    assert intent["sourceRunId"] == "self-run-route"
+    assert intent["sourceTaskId"] == "trusted-route-task"
+    assert intent["sourceWorktree"] == str(tmp_path / "trusted-worktree")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["intentId"] == intent["intentId"]
+    assert payload["status"] == "executing"
+    assert payload["commandId"] == "cmd-self-1"
+    assert payload["sourceRunId"] == "self-run-route"
+    assert payload["sourceTaskId"] == "trusted-route-task"
+    assert payload["sourceWorktree"] == str(tmp_path / "trusted-worktree")
 
 
 def test_launcher_start_queues_open_workbench_and_records_lifecycle(monkeypatch):
