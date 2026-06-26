@@ -832,6 +832,10 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("sourceCollectionCollectedCountText");
     expect(routeSource).toContain("sourceCollectionSearchOpenAssignmentCountText");
     expect(routeSource).toContain("sourceCollectionQueryCountText");
+    expect(routeSource).toContain("产物部分就绪");
+    expect(routeSource).toContain("partial artifact ready");
+    expect(routeSource).toContain("historicalTask");
+    expect(routeSource).toContain("历史任务 ${historicalTaskCount} 已忽略");
     const sourceCollectionCommandStatsSource = routeSource.slice(
       routeSource.indexOf("<div className={styles.sourceCollectionCommandStats}>"),
       routeSource.indexOf("<section id=\"source-collection-stage-status\"")
