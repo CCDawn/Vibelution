@@ -74,7 +74,7 @@ def test_llm_client_payload_rejects_ui_tool_calls_before_provider_projection():
             {"role": "user", "content": "继续"},
         ])
 
-    assert exc_info.value.error_type == "payload_protocol_error"
+    assert exc_info.value.category == "payload_protocol_error"
     assert exc_info.value.details["forbiddenField"] == "toolCalls"
 
 

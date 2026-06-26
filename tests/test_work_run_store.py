@@ -351,15 +351,9 @@ def test_work_run_store_records_rejected_run_id_failures(tmp_path, monkeypatch):
     ]
 
 
-def test_evolution_store_delegates_through_legacy_paths(tmp_path, monkeypatch):
-    runs_dir = tmp_path / "supervised" / "runs"
-    index_path = tmp_path / "supervised" / "index.json"
-
-    def fake_kind_paths(kind: str):
-        assert kind == "supervised"
-        return runs_dir, index_path
-
-    monkeypatch.setattr(evolution_store, "_kind_paths", fake_kind_paths)
+def test_evolution_store_delegates_to_work_run_store(tmp_path, monkeypatch):
+    store = work_run_store.WorkRunStore(root=tmp_path / "evolution")
+    monkeypatch.setattr(evolution_store, "_WORK_RUN_STORE", store)
 
     payload = evolution_store.persist_run_snapshot(
         "supervised",
@@ -373,6 +367,6 @@ def test_evolution_store_delegates_through_legacy_paths(tmp_path, monkeypatch):
     )
 
     assert payload["runId"] == "supervised_1"
-    assert json.loads((runs_dir / "supervised_1.json").read_text(encoding="utf-8"))["status"] == "queued"
+    assert json.loads((tmp_path / "evolution" / "supervised" / "runs" / "supervised_1.json").read_text(encoding="utf-8"))["status"] == "queued"
     assert evolution_store.load_active_run_snapshot("supervised")["runId"] == "supervised_1"
     assert evolution_store.load_latest_run_snapshot("supervised")["runId"] == "supervised_1"

@@ -93,14 +93,4 @@ def extract_subagent_primary_goal(prompt: str | None) -> str:
         if goal:
             return goal
 
-    legacy_match = re.search(
-        r"请围绕以下唯一任务开展分析.*?\n\n(.+?)\n\nJSON 至少包含:",
-        text,
-        flags=re.DOTALL,
-    )
-    if legacy_match:
-        goal = legacy_match.group(1).strip()
-        if goal:
-            return goal
-
     return text

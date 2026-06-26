@@ -6,7 +6,6 @@ import json
 import os
 import tempfile
 import time
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -22,10 +21,7 @@ SUPERVISED_INDEX_PATH = EVOLUTION_DIR / "supervised" / "index.json"
 WRITE_RETRY_TIMEOUT_SECONDS = 5.0
 READ_RETRY_ATTEMPTS = 5
 READ_RETRY_DELAY_SECONDS = 0.05
-
-
-def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
+_WORK_RUN_STORE = WorkRunStore(root=EVOLUTION_DIR)
 
 
 def ensure_evolution_store_dirs() -> None:
@@ -87,43 +83,6 @@ def _load_json(path: Path) -> dict[str, Any]:
     return {}
 
 
-def _kind_paths(kind: str) -> tuple[Path, Path]:
-    normalized = str(kind or "").strip().lower()
-    if normalized == "self":
-        return SELF_RUNS_DIR, SELF_INDEX_PATH
-    if normalized == "supervised":
-        return SUPERVISED_RUNS_DIR, SUPERVISED_INDEX_PATH
-    raise ValueError(f"Unsupported evolution store kind: {kind}")
-
-
-class _LegacyEvolutionWorkRunStore(WorkRunStore):
-    def runs_dir(self, run_kind: str) -> Path:
-        runs_dir, _ = _kind_paths(_legacy_kind(run_kind))
-        return runs_dir
-
-    def index_path(self, run_kind: str) -> Path:
-        _, index_path = _kind_paths(_legacy_kind(run_kind))
-        return index_path
-
-    def ensure_kind_dirs(self, run_kind: str) -> None:
-        ensure_evolution_store_dirs()
-
-
-def _legacy_kind(kind: str) -> str:
-    normalized = str(kind or "").strip().lower()
-    if normalized == "self_evolution_run":
-        return "self"
-    if normalized == "supervised_evolution_run":
-        return "supervised"
-    if normalized in {"self", "supervised"}:
-        return normalized
-    raise ValueError(f"Unsupported evolution store kind: {kind}")
-
-
-def _legacy_store() -> WorkRunStore:
-    return _LegacyEvolutionWorkRunStore(root=EVOLUTION_DIR)
-
-
 def _normalize_run_id(run_id: str) -> str:
     try:
         return normalize_run_id(run_id)
@@ -131,30 +90,20 @@ def _normalize_run_id(run_id: str) -> str:
         raise ValueError("Invalid evolution run id.") from exc
 
 
-def _default_index() -> dict[str, Any]:
-    now = _now_iso()
-    return {
-        "version": 1,
-        "updatedAt": now,
-        "activeRunId": "",
-        "latestRunId": "",
-    }
-
-
 def load_run_index(kind: str) -> dict[str, Any]:
-    return _legacy_store().load_run_index(kind)
+    return _WORK_RUN_STORE.load_run_index(kind)
 
 
 def save_run_index(kind: str, *, active_run_id: str = "", latest_run_id: str = "") -> dict[str, Any]:
-    return _legacy_store().save_run_index(kind, active_run_id=active_run_id, latest_run_id=latest_run_id)
+    return _WORK_RUN_STORE.save_run_index(kind, active_run_id=active_run_id, latest_run_id=latest_run_id)
 
 
 def persist_run_snapshot(kind: str, snapshot: dict[str, Any], *, active_run_id: str = "") -> dict[str, Any]:
     try:
-        run_id = _normalize_run_id(str(snapshot.get("runId") or ""))
+        _normalize_run_id(str(snapshot.get("runId") or ""))
     except ValueError as exc:
         raise ValueError("Run snapshot is missing runId.") from exc
-    return _legacy_store().persist_snapshot(kind, snapshot, active_run_id=active_run_id)
+    return _WORK_RUN_STORE.persist_snapshot(kind, snapshot, active_run_id=active_run_id)
 
 
 def load_run_snapshot(kind: str, run_id: str) -> dict[str, Any] | None:
@@ -162,27 +111,19 @@ def load_run_snapshot(kind: str, run_id: str) -> dict[str, Any] | None:
         _normalize_run_id(run_id)
     except ValueError:
         return None
-    return _legacy_store().load_snapshot(kind, run_id)
-
-
-def _run_sort_key(payload: dict[str, Any]) -> tuple[str, str, str]:
-    return (
-        str(payload.get("updatedAt") or ""),
-        str(payload.get("startedAt") or ""),
-        str(payload.get("runId") or ""),
-    )
+    return _WORK_RUN_STORE.load_snapshot(kind, run_id)
 
 
 def delete_run_snapshot(kind: str, run_id: str) -> dict[str, Any]:
-    return _legacy_store().delete_snapshot(kind, run_id)
+    return _WORK_RUN_STORE.delete_snapshot(kind, run_id)
 
 
 def load_active_run_snapshot(kind: str) -> dict[str, Any] | None:
-    return _legacy_store().load_active_snapshot(kind)
+    return _WORK_RUN_STORE.load_active_snapshot(kind)
 
 
 def load_latest_run_snapshot(kind: str) -> dict[str, Any] | None:
-    return _legacy_store().load_latest_snapshot(kind)
+    return _WORK_RUN_STORE.load_latest_snapshot(kind)
 
 
 def build_evolution_summary() -> dict[str, Any]:
