@@ -802,6 +802,24 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("sourceCollectionSummaryCounts");
     expect(routeSource).toContain("summarySourceCollectionActiveWorkRun");
     expect(routeSource).toContain("enabled: Boolean(effectiveTeamId && researchWorkflowTeamSelected)");
+    expect(routeSource).toContain("const sourceCollectionDetailQueriesEnabled = Boolean(");
+    expect(routeSource).toContain("sourceCollectionSummaryQuery.isSuccess");
+    expect(routeSource).toContain("sourceCollectionSummaryQuery.isError");
+    const sourceCollectionRunStatusQuerySource = routeSource.slice(
+      routeSource.indexOf("const sourceCollectionRunStatusQuery = useQuery({"),
+      routeSource.indexOf("const sourceCollectionRecordsQuery = useQuery({"),
+    );
+    const sourceCollectionRecordsQuerySource = routeSource.slice(
+      routeSource.indexOf("const sourceCollectionRecordsQuery = useQuery({"),
+      routeSource.indexOf("const sourceCollectionAssignmentsQuery = useQuery({"),
+    );
+    const sourceCollectionAssignmentsQuerySource = routeSource.slice(
+      routeSource.indexOf("const sourceCollectionAssignmentsQuery = useQuery({"),
+      routeSource.indexOf("const autoCanvasViewportStyle"),
+    );
+    expect(sourceCollectionRunStatusQuerySource).toContain("enabled: sourceCollectionDetailQueriesEnabled");
+    expect(sourceCollectionRecordsQuerySource).toContain("enabled: sourceCollectionDetailQueriesEnabled");
+    expect(sourceCollectionAssignmentsQuerySource).toContain("enabled: sourceCollectionDetailQueriesEnabled");
     const sourceCollectionPrimaryLoadingSource = routeSource.slice(
       routeSource.indexOf("const sourceCollectionPrimaryDataLoading = Boolean("),
       routeSource.indexOf("const sourceCollectionSourceQualityLoading = Boolean("),
@@ -814,6 +832,10 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("sourceCollectionCollectedCountText");
     expect(routeSource).toContain("sourceCollectionSearchOpenAssignmentCountText");
     expect(routeSource).toContain("sourceCollectionQueryCountText");
+    expect(routeSource).toContain("产物部分就绪");
+    expect(routeSource).toContain("partial artifact ready");
+    expect(routeSource).toContain("historicalTask");
+    expect(routeSource).toContain("历史任务 ${historicalTaskCount} 已忽略");
     const sourceCollectionCommandStatsSource = routeSource.slice(
       routeSource.indexOf("<div className={styles.sourceCollectionCommandStats}>"),
       routeSource.indexOf("<section id=\"source-collection-stage-status\"")

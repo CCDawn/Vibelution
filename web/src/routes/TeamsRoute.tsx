@@ -359,6 +359,7 @@ type SourceCollectionStageCardProjection = {
     output?: number;
     pending?: number;
     task?: number;
+    historicalTask?: number;
   };
   latestTask?: {
     taskId?: string;
@@ -453,15 +454,19 @@ function sourceCollectionStageProjectionTaskMetric(
     return lang === "zh" ? "等待团队页刷新最新写回" : "Waiting for latest writeback";
   }
   const latestTask = projection?.latestTask;
+  const historicalTaskCount = typeof projection?.counts?.historicalTask === "number" ? projection.counts.historicalTask : 0;
   if (!latestTask?.taskId) {
+    if (historicalTaskCount > 0) {
+      return lang === "zh" ? `历史任务 ${historicalTaskCount} 已忽略` : `${historicalTaskCount} historical tasks ignored`;
+    }
     return "";
   }
   const evidenceCount = typeof latestTask.evidenceRefCount === "number" ? latestTask.evidenceRefCount : 0;
   const nextActionCount = typeof latestTask.nextActionCount === "number" ? latestTask.nextActionCount : 0;
   if (lang === "zh") {
-    return `${latestTask.status || projection?.agentTaskStatus || "任务"} · 证据 ${evidenceCount} · 后续 ${nextActionCount}`;
+    return `${latestTask.status || projection?.agentTaskStatus || "任务"} · 证据 ${evidenceCount} · 后续 ${nextActionCount}${historicalTaskCount > 0 ? ` · 历史 ${historicalTaskCount}` : ""}`;
   }
-  return `${latestTask.status || projection?.agentTaskStatus || "task"} · evidence ${evidenceCount} · next ${nextActionCount}`;
+  return `${latestTask.status || projection?.agentTaskStatus || "task"} · evidence ${evidenceCount} · next ${nextActionCount}${historicalTaskCount > 0 ? ` · historical ${historicalTaskCount}` : ""}`;
 }
 
 function sourceCollectionStageArtifactSummaryLabel(
@@ -4285,6 +4290,15 @@ export function TeamsRoute({
         : sourceCollectionStageWritebackRefetchInterval(pageVisible, payload, sourceCollectionStageWritebackSyncActive);
     },
   });
+  const sourceCollectionDetailQueriesEnabled = Boolean(
+    researchWorkflowTeamSelected
+    && selectedSourceCollectionRunEffectiveId
+    && (
+      !sourceCollectionWorkspaceSelected
+      || sourceCollectionSummaryQuery.isSuccess
+      || sourceCollectionSummaryQuery.isError
+    ),
+  );
   const runtimeSummaryQuery = useQuery({
     queryKey: queryKeys.runtimeSummary(),
     queryFn: () => fetchJson<RuntimeSummary>("/api/runtime/summary"),
@@ -4298,7 +4312,7 @@ export function TeamsRoute({
   const sourceCollectionRunStatusQuery = useQuery({
     queryKey: queryKeys.dataProcessingRunStatus(selectedSourceCollectionRunEffectiveId || "none"),
     queryFn: () => fetchJson<DataProcessingStatus>(`/api/data-processing/runs/${encodeURIComponent(selectedSourceCollectionRunEffectiveId)}/status`),
-    enabled: Boolean(researchWorkflowTeamSelected && selectedSourceCollectionRunEffectiveId),
+    enabled: sourceCollectionDetailQueriesEnabled,
     refetchInterval: (query) => {
       const status = query.state.data as DataProcessingStatus | undefined;
       return sourceCollectionRunRefetchInterval(pageVisible, status?.runStatus || "");
@@ -4310,7 +4324,7 @@ export function TeamsRoute({
       fetchJson<DataProcessingRecordListPayload>(
         `/api/data-processing/runs/${encodeURIComponent(selectedSourceCollectionRunEffectiveId)}/records`,
       ),
-    enabled: Boolean(researchWorkflowTeamSelected && selectedSourceCollectionRunEffectiveId),
+    enabled: sourceCollectionDetailQueriesEnabled,
     refetchInterval: () => sourceCollectionRunRefetchInterval(pageVisible, sourceCollectionRunStatusQuery.data?.runStatus || ""),
   });
   const sourceCollectionAssignmentsQuery = useQuery({
@@ -4319,7 +4333,7 @@ export function TeamsRoute({
       fetchJson<DataProcessingCollectionAssignmentListPayload>(
         `/api/data-processing/runs/${encodeURIComponent(selectedSourceCollectionRunEffectiveId)}/collection-assignments`,
       ),
-    enabled: Boolean(researchWorkflowTeamSelected && selectedSourceCollectionRunEffectiveId),
+    enabled: sourceCollectionDetailQueriesEnabled,
     refetchInterval: () => sourceCollectionRunRefetchInterval(pageVisible, sourceCollectionRunStatusQuery.data?.runStatus || ""),
   });
   const autoCanvasViewportStyle = useMemo(() => canvasViewStyle(displayCanvasNodes, canvasFrameSize), [canvasFrameSize, displayCanvasNodes]);
@@ -10635,6 +10649,9 @@ export function TeamsRoute({
     }
     if (sourceCollectionStageProjectionSyncing(projection)) {
       return lang === "zh" ? "正在同步 Agent 结果" : "Syncing Agent result";
+    }
+    if (projection.status === "pending" && Number(projection.counts?.artifact ?? 0) > 0) {
+      return lang === "zh" ? "产物部分就绪" : "partial artifact ready";
     }
     const labels: Record<string, string> = lang === "zh"
       ? {
