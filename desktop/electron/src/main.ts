@@ -1,15 +1,19 @@
-import { app, BrowserWindow, ipcMain } from "electron";
+import { app, ipcMain } from "electron";
 import { singleInstanceDecision } from "./appLock.js";
 import { createDesktopPaths, resolvePreloadPath } from "./paths.js";
+import { ElectronWindowProvider } from "./windows/electronWindowProvider.js";
+import { createLauncherWindow } from "./windows/launcherWindow.js";
+import { createWorkbenchWindow } from "./windows/workbenchWindow.js";
+import { resolveLauncherUrl, resolveWorkbenchUrl } from "./windows/windowUrlResolver.js";
 
-let launcherWindow: BrowserWindow | null = null;
+let windowProvider: ElectronWindowProvider | null = null;
 
 const lockDecision = singleInstanceDecision(app.requestSingleInstanceLock());
 if (lockDecision.action === "focus_existing") {
   app.quit();
 }
 
-function createLauncherWindow(): BrowserWindow {
+function createWindowProvider(): ElectronWindowProvider {
   const workspaceRoot = process.env.VIBELUTION_WORKSPACE_ROOT;
   if (!workspaceRoot) {
     throw new Error("VIBELUTION_WORKSPACE_ROOT is required until the first-run workspace picker exists");
@@ -20,37 +24,27 @@ function createLauncherWindow(): BrowserWindow {
     userDataRoot: app.getPath("userData"),
     workspaceRoot
   });
-  const window = new BrowserWindow({
-    width: 1180,
-    height: 760,
-    title: "Vibelution Launcher",
-    webPreferences: {
-      preload: resolvePreloadPath(paths),
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: true
-    }
-  });
-  void window.loadURL("about:blank");
-  return window;
+  const desktopEnv: NodeJS.ProcessEnv = {
+    ...process.env,
+    NODE_ENV: process.env.NODE_ENV || (app.isPackaged ? "production" : "development")
+  };
+  return new ElectronWindowProvider(
+    paths,
+    resolveLauncherUrl(desktopEnv),
+    resolveWorkbenchUrl(desktopEnv),
+    { createLauncherWindow, createWorkbenchWindow }
+  );
 }
 
 ipcMain.handle("launcher:get-version", () => app.getVersion());
 
 app.whenReady().then(() => {
-  launcherWindow = createLauncherWindow();
-  launcherWindow.on("closed", () => {
-    launcherWindow = null;
-  });
+  windowProvider = createWindowProvider();
+  void windowProvider.openLauncher();
 });
 
 app.on("second-instance", () => {
-  if (launcherWindow) {
-    if (launcherWindow.isMinimized()) {
-      launcherWindow.restore();
-    }
-    launcherWindow.focus();
-  }
+  void windowProvider?.openLauncher();
 });
 
 app.on("window-all-closed", () => {
