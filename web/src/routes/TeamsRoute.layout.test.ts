@@ -625,10 +625,14 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("runKnowledgeIngestionPrecheckMutation");
     expect(routeSource).toContain("knowledge-ingestion/precheck");
     expect(routeSource).toContain("runSourceCollectionGraphAction");
-    expect(routeSource).toContain("runSourceCollectionMemoryPrecheckAction");
+    expect(routeSource).not.toContain("runSourceCollectionMemoryPrecheckAction");
+    expect(routeSource).toContain("runKnowledgeCollectionCompletionAction");
+    expect(routeSource).toContain("runKnowledgeCollectionCompletionMutation");
+    expect(routeSource).toContain("/workflow-orchestration/knowledge-collection/complete");
     expect(routeSource).toContain("agent_approved_only");
     expect(routeSource).toContain("Agent 生成关系图");
     expect(routeSource).toContain("通知知识库管理员");
+    expect(routeSource).toContain("一键完成知识搜集");
     expect(routeSource).toContain("提炼并通知管理员");
     expect(routeSource).toContain("资料已写入团队知识库");
     expect(routeSource).toContain("sourceCollectionPrecheckCandidateCount");
@@ -1133,6 +1137,28 @@ describe("TeamsRoute layout contract", () => {
     expect(routeStylesSource).toContain("height: 100%");
     expect(routeStylesSource).toContain("overflow: hidden");
     expect(routeStylesSource).toContain(".canvasLayoutModeSwitch");
+  });
+
+  it("keeps the whole knowledge collection completion action on the phase card, not the steward stage card", () => {
+    const launcherSource = routeSource.slice(
+      routeSource.indexOf("function renderResearchStageLauncher"),
+      routeSource.indexOf("function renderResearchStageStandalonePage"),
+    );
+    expect(launcherSource).toContain("runKnowledgeCollectionCompletionAction");
+    expect(launcherSource).toContain("一键完成知识搜集");
+
+    const stageModuleSource = routeSource.slice(
+      routeSource.indexOf("const sourceCollectionStageModules"),
+      routeSource.indexOf("const sourceCollectionStageCardKeyDown"),
+    );
+    const memoryModuleSource = stageModuleSource.slice(
+      stageModuleSource.indexOf('id: "memory"'),
+      stageModuleSource.indexOf("];"),
+    );
+    expect(memoryModuleSource).toContain('onAction: () => void startSourceCollectionStageSessionTask("memory")');
+    expect(memoryModuleSource).not.toContain("runKnowledgeCollectionCompletionAction");
+    expect(memoryModuleSource).not.toContain("runKnowledgeCollectionCompletionMutation");
+    expect(memoryModuleSource).not.toContain("runKnowledgeCollectionIngestMutation.mutate");
   });
 
   it("keeps Team actions scoped to the selected Team or message event", () => {

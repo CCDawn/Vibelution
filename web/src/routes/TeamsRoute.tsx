@@ -5429,7 +5429,7 @@ export function TeamsRoute({
     },
   });
 
-  const runKnowledgeCollectionIngestMutation = useMutation({
+  const runKnowledgeCollectionCompletionMutation = useMutation({
     mutationFn: (variables: {
       teamId: string;
       sourceQualityAgentId: string;
@@ -5442,7 +5442,7 @@ export function TeamsRoute({
       forceRebuild?: boolean;
     }) =>
       fetchJson<TeamWorkflowKnowledgeCollectionIngestionPayload>(
-        `/api/teams/${encodeURIComponent(variables.teamId)}/workflow-orchestration/knowledge-collection/ingest`,
+        `/api/teams/${encodeURIComponent(variables.teamId)}/workflow-orchestration/knowledge-collection/complete`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -6386,6 +6386,17 @@ export function TeamsRoute({
                     {stageType === "knowledge_collection" && selectedSourceCollectionRun && sourceCollectionSearchOpenAssignmentCount > 0 ? <Search size={13} /> : <Play size={13} />}
                     {primaryLabel}
                   </button>
+                  {stageType === "knowledge_collection" ? (
+                    <button
+                      type="button"
+                      onClick={runKnowledgeCollectionCompletionAction}
+                      disabled={sourceCollectionCompletionActionDisabled}
+                      title={lang === "zh" ? "一键完成知识搜集" : "Complete knowledge collection"}
+                    >
+                      <CheckCircle2 size={13} />
+                      {sourceCollectionCompletionActionLabel}
+                    </button>
+                  ) : null}
                   {stageType === "knowledge_collection" ? (
                     <button
                       type="button"
@@ -10233,16 +10244,16 @@ export function TeamsRoute({
   const selectedTeamKnowledgeIngestionActiveWorkRun =
     teamWorkflowKnowledgeIngestionStatusQuery.data?.activeWorkRun ?? null;
   const selectedTeamKnowledgeCollectionIngestPending =
-    (runKnowledgeCollectionIngestMutation.isPending && runKnowledgeCollectionIngestMutation.variables?.teamId === selectedTeam?.teamId)
+    (runKnowledgeCollectionCompletionMutation.isPending && runKnowledgeCollectionCompletionMutation.variables?.teamId === selectedTeam?.teamId)
     || Boolean(selectedTeamKnowledgeIngestionActiveWorkRun);
   const selectedTeamKnowledgeCollectionIngestError =
-    runKnowledgeCollectionIngestMutation.variables?.teamId === selectedTeam?.teamId
-    && runKnowledgeCollectionIngestMutation.error instanceof Error
-      ? runKnowledgeCollectionIngestMutation.error
+    runKnowledgeCollectionCompletionMutation.variables?.teamId === selectedTeam?.teamId
+    && runKnowledgeCollectionCompletionMutation.error instanceof Error
+      ? runKnowledgeCollectionCompletionMutation.error
       : null;
   const selectedTeamKnowledgeCollectionIngestResult =
-    runKnowledgeCollectionIngestMutation.variables?.teamId === selectedTeam?.teamId
-      ? runKnowledgeCollectionIngestMutation.data
+    runKnowledgeCollectionCompletionMutation.variables?.teamId === selectedTeam?.teamId
+      ? runKnowledgeCollectionCompletionMutation.data
       : null;
   const selectedTeamPlanPaperNoteChunksPending =
     planPaperNoteChunksMutation.isPending && planPaperNoteChunksMutation.variables?.teamId === selectedTeam?.teamId;
@@ -10345,6 +10356,14 @@ export function TeamsRoute({
       : sourceCollectionDisplayedCandidateCount > 0
         ? (lang === "zh" ? "提炼并通知管理员" : "Prepare and notify admin")
         : (lang === "zh" ? "通知知识库管理员" : "Notify knowledge base admin");
+  const sourceCollectionCompletionActionDisabled =
+    !selectedTeam?.teamId
+    || !selectedSourceCollectionRun
+    || sourceCollectionIngestCandidateCount <= 0
+    || selectedTeamKnowledgeCollectionIngestPending;
+  const sourceCollectionCompletionActionLabel = selectedTeamKnowledgeCollectionIngestPending
+    ? (lang === "zh" ? "一键完成中" : "Completing")
+    : (lang === "zh" ? "一键完成知识搜集" : "Complete knowledge collection");
   const sourceCollectionCanBuildGraph = sourceCollectionRunApprovedCount > 0 || sourceCollectionDisplayedCandidateCount > 0;
   const sourceCollectionGraphActionDisabled =
     !selectedTeam?.teamId
@@ -10517,11 +10536,11 @@ export function TeamsRoute({
     });
     openSourceCollectionStage("graph");
   };
-  const runSourceCollectionMemoryPrecheckAction = () => {
-    if (sourceCollectionMemoryActionDisabled) {
+  const runKnowledgeCollectionCompletionAction = () => {
+    if (sourceCollectionCompletionActionDisabled) {
       return;
     }
-    runKnowledgeCollectionIngestMutation.mutate({
+    runKnowledgeCollectionCompletionMutation.mutate({
       teamId: selectedTeam.teamId,
       sourceQualityAgentId: sourceCollectionQualityAgentId,
       candidateGraphAgentId: sourceCollectionGraphAgentId,
