@@ -229,10 +229,11 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain('view: "graph"');
     expect(routeSource).toContain("teamId: selectedTeam.teamId");
     expect(routeSource).toContain("teamId: selectedTeam?.teamId");
-    expect(routeStylesSource).toContain("grid-template-columns: minmax(160px, 0.9fr) minmax(120px, 0.7fr) minmax(90px, 0.45fr) minmax(108px, 0.5fr)");
+    expect(routeStylesSource).toContain("grid-template-columns: minmax(180px, 0.8fr) minmax(160px, 0.75fr) max-content max-content");
     expect(routeStylesSource).toContain(".teamMemoryMemberTable");
     expect(routeStylesSource).toContain(".teamMemoryMemberHeading");
     expect(routeStylesSource).toContain(".teamMemoryActionRail");
+    expect(routeStylesSource).toContain("min-height: 32px");
   });
 
   it("keeps only the fixed research and AI search teams in the picker", () => {
