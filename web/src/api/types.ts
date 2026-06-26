@@ -2055,6 +2055,8 @@ export type RuntimeLifecycleProof = {
   };
 };
 
+export type WindowProvider = "none" | "edge_app" | "electron";
+
 export type RuntimeSummary = {
   status: string;
   mode: string;
@@ -2155,6 +2157,11 @@ export type RuntimeSummary = {
     phase: string;
     backendPid: number;
     browserWindowPid: number;
+    windowManaged: boolean;
+    windowProvider: WindowProvider;
+    windowId: number;
+    rendererProcessId: number;
+    windowProfileDir: string;
     backendAlive: boolean;
     backendHealthy: boolean;
     backendObserved: boolean;

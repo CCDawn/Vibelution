@@ -30,6 +30,37 @@ def test_standalone_launcher_app_exposes_project_lifecycle_routes(monkeypatch):
     assert calls == ["start"]
 
 
+def test_window_provider_dispatcher_routes_electron_to_desktop_action_without_edge_call():
+    from core.launcher.window_provider_dispatcher import WindowProviderDispatcher
+
+    actions = []
+
+    class EdgeProvider:
+        def __init__(self):
+            self.calls = []
+
+        def open_workbench(self, *, reason: str):
+            self.calls.append(("open_workbench", reason))
+            return {"ok": True, "provider": "edge_app"}
+
+        def focus_workbench(self, *, reason: str):
+            self.calls.append(("focus_workbench", reason))
+            return {"ok": True, "provider": "edge_app"}
+
+    edge_provider = EdgeProvider()
+    dispatcher = WindowProviderDispatcher(
+        provider="electron",
+        desktop_action_writer=lambda action, payload: actions.append((action, payload)) or {"ok": True, "provider": "electron"},
+        edge_provider=edge_provider,
+    )
+
+    result = dispatcher.open_workbench(reason="launcher_start")
+
+    assert result == {"ok": True, "provider": "electron"}
+    assert actions == [("open_workbench", {"reason": "launcher_start"})]
+    assert edge_provider.calls == []
+
+
 def test_standalone_launcher_app_exposes_force_stop_route(monkeypatch):
     calls = []
     monkeypatch.setattr(
@@ -279,6 +310,12 @@ def test_launcher_status_is_independent_from_web_runtime_service(monkeypatch, tm
     assert payload["launcher"]["controlPlane"]["url"] == ""
     assert payload["launcher"]["controlPlane"]["port"] == 0
     assert payload["projectBundle"]["observedState"] == "closed"
+    assert payload["projectBundle"]["windowProvider"] in {"none", "edge_app", "electron"}
+    assert isinstance(payload["projectBundle"]["windowManaged"], bool)
+    assert payload["projectBundle"]["browser"]["managed"] == (
+        payload["projectBundle"]["windowProvider"] == "edge_app"
+        and payload["projectBundle"]["windowManaged"]
+    )
 
 
 def test_launcher_status_exposes_configured_control_plane_url(tmp_path, monkeypatch):
