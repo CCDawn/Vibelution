@@ -22,6 +22,7 @@ from contextvars import ContextVar, copy_context
 from concurrent.futures import ThreadPoolExecutor, TimeoutError
 
 # 核心模块导入
+from core.chat.chat_result_contract import verification_from_tool_record
 from core.infrastructure.event_bus import get_event_bus, EventNames
 from core.infrastructure.agent_session import get_session_state
 from core.infrastructure.evolution_governor import get_evolution_governor
@@ -1334,15 +1335,12 @@ class ToolExecutor:
 
         command = str((tool_args or {}).get("command") or "")
         if tool_name in {"run_test_for_tool", "cli_tool"} and ("pytest" in command or tool_name == "run_test_for_tool"):
-            is_cross_platform_warning = "[跨平台警告]" in result_text
-            passed = (
-                not is_cross_platform_warning
-                and "[运行测试] 未找到对应测试文件" not in result_text
-                and ("passed" in result_text.lower() or "PASSED" in result_text)
+            verification_status, verification_summary, _ = verification_from_tool_record(
+                {"name": tool_name, "args": tool_args or {}, "result_preview": result_text}
             )
-            summary = "pytest 通过" if passed else result_text[:200]
-            if tool_name == "run_test_for_tool" and "未找到对应测试文件" in result_text:
-                summary = "未找到映射测试文件，已退回手动 pytest"
+            is_cross_platform_warning = "[跨平台警告]" in result_text
+            passed = verification_status == "passed"
+            summary = "pytest 通过" if passed else (verification_summary or result_text)[:200]
             if is_cross_platform_warning:
                 session.record_blocked_tool_pattern(
                     "cli_tool:unix_shell_on_windows",
@@ -1372,25 +1370,32 @@ class ToolExecutor:
                 if pet and passed:
                     pet.reward_validation("tests", True)
         elif tool_name == "cli_tool" and "py_compile" in command:
-            passed = "[命令执行完成，无输出]" in result_text
-            session.record_validation_result("python -m py_compile 通过" if passed else result_text[:200], passed, kind="compile")
+            verification_status, verification_summary, _ = verification_from_tool_record(
+                {"name": tool_name, "args": tool_args or {}, "result_preview": result_text}
+            )
+            passed = verification_status == "passed"
+            summary = verification_summary or ("python -m py_compile 通过" if passed else result_text[:200])
+            session.record_validation_result(summary, passed, kind="compile")
             session.note_feedback_loop(
                 loop_type="compile",
                 target=command or "python -m py_compile",
-                result="python -m py_compile 通过" if passed else result_text[:200],
+                result=summary,
                 phase="reproduce",
             )
             session.set_diagnostic_phase("reproduce")
             self._event_bus.publish(EventNames.VALIDATION_COMPLETED, {
                 "kind": "compile",
                 "passed": passed,
-                "message": "python -m py_compile 通过" if passed else result_text[:200],
+                "message": summary,
             })
             if pet and passed:
                 pet.reward_validation("compile", True)
         elif tool_name == "python_lint_tool":
-            passed = '"status": "ok"' in result_text and '"issue_count": 0' in result_text
-            summary = "ruff lint 通过" if passed else result_text[:200]
+            verification_status, verification_summary, _ = verification_from_tool_record(
+                {"name": tool_name, "args": tool_args or {}, "result_preview": result_text}
+            )
+            passed = verification_status == "passed"
+            summary = "ruff lint 通过" if passed else (verification_summary or result_text)[:200]
             session.record_validation_result(summary, passed, kind="lint")
             session.note_feedback_loop(
                 loop_type="lint",

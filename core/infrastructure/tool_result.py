@@ -164,6 +164,15 @@ def extract_tool_result_semantics(result: Any) -> dict[str, Any]:
         semantics["semanticStatus"] = "timeout"
         semantics["timedOut"] = True
         semantics["failureClass"] = "timeout"
+    elif text.startswith("[跨平台警告]"):
+        semantics["semanticStatus"] = "degraded"
+        semantics["failureClass"] = semantics["failureClass"] or "cross_platform_command"
+    elif text.startswith("[安全拦截]"):
+        semantics["semanticStatus"] = "blocked"
+        semantics["failureClass"] = semantics["failureClass"] or "security_block"
+    elif text.startswith("[运行测试] 未找到对应测试文件"):
+        semantics["semanticStatus"] = "failed"
+        semantics["failureClass"] = semantics["failureClass"] or "missing_mapped_test"
     elif text.startswith(("[错误]", "[短路]")):
         semantics["semanticStatus"] = "failed"
         semantics["failureClass"] = semantics["failureClass"] or "tool_error"
@@ -244,7 +253,17 @@ def infer_tool_business_success(result: Any) -> bool:
         stripped = _normalize_text_payload(result)
         if stripped.lower() in BUSINESS_FAILURE_STATUSES:
             return False
-        if stripped.startswith(("[错误]", "[超时]", "[短路]", "[EXEC FAILURE", "[WARNING | Exit Code", "[执行失败")):
+        if stripped.startswith((
+            "[错误]",
+            "[超时]",
+            "[短路]",
+            "[EXEC FAILURE",
+            "[WARNING | Exit Code",
+            "[执行失败",
+            "[跨平台警告]",
+            "[安全拦截]",
+            "[运行测试] 未找到对应测试文件",
+        )):
             return False
         if stripped.startswith("{"):
             try:

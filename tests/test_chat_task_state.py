@@ -124,6 +124,75 @@ def test_build_chat_coding_result_contract_blocks_cross_platform_pytest_warning(
     assert contract["outcome"] == "blocked"
 
 
+def test_build_chat_coding_result_contract_does_not_pass_missing_mapped_test():
+    contract = build_chat_coding_result_contract(
+        {
+            "status": "completed",
+            "summary": "已修改文件，准备验证。",
+            "changed_files": ["core/ui/cli_ui.py"],
+            "tool_trace": [
+                {
+                    "name": "run_test_for_tool",
+                    "args": {"source_path": "core/ui/cli_ui.py"},
+                    "result_preview": (
+                        "[运行测试] 未找到对应测试文件\n"
+                        "提示: 请先创建测试文件，或手动运行 pytest"
+                    ),
+                }
+            ],
+        }
+    )
+
+    assert contract["verification_status"] == "failed"
+    assert "未找到对应测试文件" in contract["verification_summary"]
+    assert contract["blocked_reason"] == "run_test_for_tool 未找到映射测试，验证尚未执行。"
+    assert contract["outcome"] == "blocked"
+
+
+def test_build_chat_coding_result_contract_lint_issues_are_failed_verification():
+    contract = build_chat_coding_result_contract(
+        {
+            "status": "completed",
+            "summary": "已修改文件并运行 lint。",
+            "changed_files": ["agent.py"],
+            "tool_trace": [
+                {
+                    "name": "python_lint_tool",
+                    "args": {"target": "agent.py"},
+                    "result_preview": '{"status": "ok", "issue_count": 2, "issues": []}',
+                }
+            ],
+        }
+    )
+
+    assert contract["verification_status"] == "failed"
+    assert "issue_count" in contract["verification_summary"]
+    assert contract["blocked_reason"] == "python_lint_tool 发现 lint 问题，验证未通过。"
+    assert contract["outcome"] == "blocked"
+
+
+def test_build_chat_coding_result_contract_py_compile_warning_is_failed_verification():
+    contract = build_chat_coding_result_contract(
+        {
+            "status": "completed",
+            "summary": "已修改文件并运行编译检查。",
+            "changed_files": ["agent.py"],
+            "tool_trace": [
+                {
+                    "name": "cli_tool",
+                    "args": {"command": "python -m py_compile agent.py"},
+                    "result_preview": "[WARNING | Exit Code: 1]\nSyntaxError: invalid syntax",
+                }
+            ],
+        }
+    )
+
+    assert contract["verification_status"] == "failed"
+    assert "SyntaxError" in contract["verification_summary"]
+    assert contract["blocked_reason"] == "python -m py_compile 执行失败，验证未通过。"
+    assert contract["outcome"] == "blocked"
+
+
 def test_format_chat_reply_adds_structured_coding_summary():
     reply = format_chat_reply(
         {
