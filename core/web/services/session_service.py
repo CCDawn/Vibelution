@@ -5808,8 +5808,8 @@ def _load_conversations(
             changed = _repair_child_root_agent_direct_session_bindings(payload, agent_by_id=agent_by_id) or changed
         for raw in list(payload.get("conversations") or []):
             if repair and isinstance(raw, dict):
-                changed = _ensure_conversation_workspace_metadata(raw) or changed
                 changed = _ensure_conversation_agent_metadata(raw, agent_by_id=agent_by_id) or changed
+                changed = _ensure_conversation_workspace_metadata(raw) or changed
             conversation = _normalize_conversation(
                 raw,
                 agent_by_id=agent_by_id,
@@ -5851,8 +5851,8 @@ def _load_conversation_detail_target(
             continue
         if repair:
             changed = _repair_stale_running_conversation(raw) or changed
-            changed = _ensure_conversation_workspace_metadata(raw) or changed
             changed = _ensure_conversation_agent_metadata(raw, agent_by_id=agent_by_id) or changed
+            changed = _ensure_conversation_workspace_metadata(raw) or changed
         conversation = _normalize_conversation(
             raw,
             agent_by_id=agent_by_id,
