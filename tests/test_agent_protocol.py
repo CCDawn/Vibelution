@@ -1152,10 +1152,8 @@ class TestToolMessageFlow:
             "_record_agent_scene_event",
             lambda *args, **kwargs: None,
         )
-        monkeypatch.setattr(
-            agent_module,
-            "build_runtime_goal_packet",
-            lambda policy, goal: SimpleNamespace(
+        def build_runtime_goal_packet_stub(policy, goal, **_kwargs):
+            return SimpleNamespace(
                 source="xml_unit",
                 objective_type="unit",
                 allow_auto_continue=True,
@@ -1163,8 +1161,9 @@ class TestToolMessageFlow:
                 allow_git_commit=False,
                 allow_evolution_transaction=True,
                 allow_subagents=False,
-            ),
-        )
+            )
+
+        monkeypatch.setattr(agent_module, "build_runtime_goal_packet", build_runtime_goal_packet_stub)
         monkeypatch.setattr(
             agent_module,
             "build_cacheable_system_prefix_message",
@@ -1416,10 +1415,8 @@ class TestToolMessageFlow:
         monkeypatch.setattr(agent_module, "get_ui", lambda: DummyUI())
         monkeypatch.setattr(agent_module, "get_session_state", lambda: DummySessionState())
         monkeypatch.setattr(agent_module, "_record_agent_scene_event", lambda *args, **kwargs: None)
-        monkeypatch.setattr(
-            agent_module,
-            "build_runtime_goal_packet",
-            lambda policy, goal: SimpleNamespace(
+        def build_runtime_goal_packet_stub(policy, goal, **_kwargs):
+            return SimpleNamespace(
                 source="xml_unit",
                 objective_type="unit",
                 allow_auto_continue=True,
@@ -1427,8 +1424,9 @@ class TestToolMessageFlow:
                 allow_git_commit=False,
                 allow_evolution_transaction=True,
                 allow_subagents=False,
-            ),
-        )
+            )
+
+        monkeypatch.setattr(agent_module, "build_runtime_goal_packet", build_runtime_goal_packet_stub)
         monkeypatch.setattr(agent_module, "build_cacheable_system_prefix_message", lambda sp: SystemMessage(content=str(sp)))
         monkeypatch.setattr(agent_module, "build_dynamic_system_context_message", lambda current_prompt: None)
         monkeypatch.setattr(agent_module, "extend_system_message_cacheable_prefix", lambda message, blocks: (message, False))
@@ -1649,10 +1647,8 @@ class TestToolMessageFlow:
             "_record_agent_scene_event",
             lambda *args, **kwargs: None,
         )
-        monkeypatch.setattr(
-            agent_module,
-            "build_runtime_goal_packet",
-            lambda policy, goal: SimpleNamespace(
+        def build_runtime_goal_packet_stub(policy, goal, **_kwargs):
+            return SimpleNamespace(
                 source="xml_unit",
                 objective_type="unit",
                 allow_auto_continue=True,
@@ -1660,8 +1656,9 @@ class TestToolMessageFlow:
                 allow_git_commit=False,
                 allow_evolution_transaction=True,
                 allow_subagents=False,
-            ),
-        )
+            )
+
+        monkeypatch.setattr(agent_module, "build_runtime_goal_packet", build_runtime_goal_packet_stub)
         monkeypatch.setattr(
             agent_module,
             "build_cacheable_system_prefix_message",
