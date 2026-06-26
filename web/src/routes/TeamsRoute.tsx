@@ -5842,30 +5842,38 @@ export function TeamsRoute({
         <div className={styles.teamMemoryIndexHeader}>
           <div>
             <strong>{lang === "zh" ? "团队记忆索引" : "Team memory index"}</strong>
-            <span>{lang === "zh" ? "跳转到团队知识、图谱和成员 Agent 私有记忆" : "Jump to team knowledge, graph, and member Agent memory"}</span>
+            <span>{selectedTeamMemoryMembers.length} {lang === "zh" ? "个成员" : "members"}</span>
           </div>
-          <Link to={selectedTeamGraphRoute} title={lang === "zh" ? "打开团队记忆图谱" : "Open team memory graph"}>
-            <Eye size={13} />
-            {lang === "zh" ? "团队记忆图谱" : "Memory graph"}
-          </Link>
+          <div className={styles.teamMemoryActionRail}>
+            <Link to={selectedTeamKnowledgeRoute} title={lang === "zh" ? "打开当前团队知识库" : "Open this team's knowledge bases"}>
+              <Link2 size={13} />
+              <span>{lang === "zh" ? "知识库" : "Knowledge"}</span>
+            </Link>
+            <Link to={selectedTeamGraphRoute} title={lang === "zh" ? "打开团队记忆图谱" : "Open team memory graph"}>
+              <Eye size={13} />
+              <span>{lang === "zh" ? "图谱" : "Graph"}</span>
+            </Link>
+          </div>
         </div>
-        <div className={styles.teamMemoryActionGrid}>
-          <Link to={selectedTeamKnowledgeRoute} title={lang === "zh" ? "打开当前团队知识库" : "Open this team's knowledge bases"}>
-            <Link2 size={13} />
-            <span>{lang === "zh" ? "团队知识库" : "Team knowledge"}</span>
-          </Link>
-          <Link to={selectedTeamGraphRoute} title={lang === "zh" ? "打开团队图谱并聚焦团队节点" : "Open graph focused on this team"}>
-            <Link2 size={13} />
-            <span>{lang === "zh" ? "团队记忆图谱" : "Team graph"}</span>
-          </Link>
-        </div>
-        <div className={styles.teamMemoryMemberHeader}>
-          <span>{lang === "zh" ? "成员 Agent 记忆" : "Member Agent memory"}</span>
-          <strong>{selectedTeamMemoryMembers.length}</strong>
-        </div>
-        <div className={styles.teamMemoryMemberGrid}>
+        <div className={styles.teamMemoryMemberTable}>
+          {selectedTeamMemoryMembers.length ? (
+            <div className={styles.teamMemoryMemberHeading} aria-hidden="true">
+              <span>Agent</span>
+              <span>{lang === "zh" ? "职责" : "Role"}</span>
+              <span>{lang === "zh" ? "状态" : "Status"}</span>
+              <span>{lang === "zh" ? "入口" : "Open"}</span>
+            </div>
+          ) : null}
           {selectedTeamMemoryMembers.map(({ member, agent, display }) => {
             const agentId = String(member.agentId || "").trim();
+            const agentName = display.name || member.agentName || member.agentCode || agentId;
+            const agentCode = member.agentCode || agent?.agentCode || agentId;
+            const roleLabel = member.role || agent?.roleKey || agent?.primaryMode || "-";
+            const roleTitle = [roleLabel, member.purpose, ...(member.responsibilities ?? [])].filter(Boolean).join(" · ");
+            const statusLabel = researchStageAgentConfigStatusLabel(agent, lang);
+            const statusTitle = agent
+              ? researchStageAgentModelLabel(agent, lang)
+              : (lang === "zh" ? "未找到 Agent 目录绑定" : "Agent directory binding missing");
             const agentMemoryRoute = agentCenterMemoryRoute({
               agentId,
               teamId: selectedTeam?.teamId,
@@ -5875,16 +5883,22 @@ export function TeamsRoute({
             });
             return (
               <section key={`team-memory-${selectedTeam.teamId}-${agentId}`} className={styles.teamMemoryMemberCard}>
-                <div>
-                  <strong>{display.name || member.agentName || member.agentCode || agentId}</strong>
-                  <span>{member.role || agent?.roleKey || agent?.primaryMode || member.agentStatus || "-"}</span>
+                <div className={styles.teamMemoryMemberIdentity}>
+                  <strong>{agentName}</strong>
+                  <span>{agentCode}</span>
                 </div>
+                <span className={styles.teamMemoryRole} title={roleTitle || undefined}>{roleLabel}</span>
+                <span className={styles.teamMemoryStatusBadge} data-tone={researchStageAgentConfigTone(agent)} title={statusTitle}>
+                  {statusLabel}
+                </span>
                 <div className={styles.teamMemoryMemberActions}>
                   <Link to={agentMemoryRoute} title={lang === "zh" ? "打开该 Agent 私有记忆" : "Open this Agent's private memory"}>
-                    {lang === "zh" ? "Agent 记忆" : "Agent memory"}
+                    <Bot size={13} />
+                    <span>{lang === "zh" ? "记忆" : "Memory"}</span>
                   </Link>
                   <Link to={researchStageAgentManagementRoute(agentId)} title={lang === "zh" ? "打开该 Agent 记忆配置" : "Open this Agent's memory configuration"}>
-                    {lang === "zh" ? "记忆配置" : "Memory config"}
+                    <Link2 size={13} />
+                    <span>{lang === "zh" ? "配置" : "Config"}</span>
                   </Link>
                 </div>
               </section>

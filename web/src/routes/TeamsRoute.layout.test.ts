@@ -215,18 +215,24 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("selectedTeamGraphRoute");
     expect(routeSource).toContain("renderTeamMemoryIndex()");
     expect(routeSource).toContain("styles.teamMemoryIndex");
-    expect(routeSource).toContain("styles.teamMemoryMemberGrid");
+    expect(routeSource).toContain("styles.teamMemoryMemberTable");
+    expect(routeSource).toContain("styles.teamMemoryMemberHeading");
+    expect(routeSource).toContain("styles.teamMemoryActionRail");
     expect(routeSource).toContain("团队记忆索引");
     expect(routeSource).toContain("团队知识库");
     expect(routeSource).toContain("团队记忆图谱");
-    expect(routeSource).toContain("成员 Agent 记忆");
-    expect(routeSource).toContain("Agent 记忆");
-    expect(routeSource).toContain("记忆配置");
+    expect(routeSource).toContain("职责");
+    expect(routeSource).toContain("入口");
+    expect(routeSource).not.toContain("跳转到团队知识、图谱和成员 Agent 私有记忆");
     expect(routeSource).toContain('view: "agents"');
     expect(routeSource).toContain('view: "knowledge"');
     expect(routeSource).toContain('view: "graph"');
     expect(routeSource).toContain("teamId: selectedTeam.teamId");
     expect(routeSource).toContain("teamId: selectedTeam?.teamId");
+    expect(routeStylesSource).toContain("grid-template-columns: minmax(160px, 0.9fr) minmax(120px, 0.7fr) minmax(90px, 0.45fr) minmax(108px, 0.5fr)");
+    expect(routeStylesSource).toContain(".teamMemoryMemberTable");
+    expect(routeStylesSource).toContain(".teamMemoryMemberHeading");
+    expect(routeStylesSource).toContain(".teamMemoryActionRail");
   });
 
   it("keeps only the fixed research and AI search teams in the picker", () => {
