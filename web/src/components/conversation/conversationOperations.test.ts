@@ -433,6 +433,26 @@ describe("conversationOperations", () => {
     expect(operations[0].rawStatus).toBe("running");
   });
 
+  it("keeps terminal synthetic thought failures neutral after a completed tool", () => {
+    const message: ConversationMessage = {
+      id: "message-terminal-synthetic-thought-failure",
+      role: "assistant",
+      content: "你好！我是 Vibelution agent，目前工作区状态正常。有什么可以帮你的吗？",
+      timestamp: "2026-06-05T00:00:00Z",
+      feedbackEvents: [
+        { sequence: 1, kind: "tool", status: "done", name: "get_git_status_summary_tool", summary: "工作区干净" },
+        { sequence: 2, kind: "thought", status: "failed", summary: "现在可以回应用户。", resultPreview: "现在可以回应用户。" },
+      ],
+    };
+
+    const operations = buildConversationOperations(message, labels);
+
+    expect(operations.map((item) => `${item.kind}:${item.status}:${item.rawStatus}`)).toEqual([
+      "tool:done:done",
+      "thought:done:failed",
+    ]);
+  });
+
   it("keeps completed progress neutral when a final failed turn marked earlier stages failed", () => {
     const message: ConversationMessage = {
       id: "message-synthetic-failed-prefix",

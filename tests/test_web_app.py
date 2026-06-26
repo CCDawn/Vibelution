@@ -776,6 +776,54 @@ def test_persist_turn_result_marks_only_latest_unfinished_feedback_failed(tmp_pa
     assert [item["status"] for item in feedback_events] == ["done", "done", "done", "failed"]
 
 
+def test_persist_completed_visible_reply_with_tool_trace_stays_completed(tmp_path, monkeypatch):
+    _seed_chat_state(tmp_path, task_status="done")
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        session_service,
+        "record_runtime_scene_event",
+        lambda *args, **kwargs: {"accepted": True},
+    )
+    session_service._set_session_running("session-live", True, turn_id="turn-tool-visible")
+
+    session_service._persist_session_turn_result(
+        "session-live",
+        {
+            "status": "completed",
+            "summary": "你好！我是 Vibelution agent，目前工作区状态正常。有什么可以帮你的吗？",
+            "raw_output": "你好！我是 Vibelution agent，目前工作区状态正常。有什么可以帮你的吗？",
+            "tool_call_count": 1,
+            "tool_trace": [
+                {
+                    "name": "get_git_status_summary_tool",
+                    "status": "done",
+                    "summary": "工作区干净。",
+                }
+            ],
+            "feedback_events": [
+                {"sequence": 1, "kind": "status", "status": "running", "name": "context_prepare", "summary": "准备上下文。"},
+                {"sequence": 2, "kind": "tool", "status": "done", "name": "get_git_status_summary_tool", "summary": "工作区干净。"},
+                {"sequence": 3, "kind": "thought", "status": "running", "summary": "现在可以回应用户。"},
+            ],
+        },
+        turn_id="turn-tool-visible",
+    )
+
+    conversation = load_chat_state(tmp_path)["conversations"][0]
+    assert conversation["last_turn_status"] == "ready"
+
+    journal_events = load_conversation_events(tmp_path, "session-live")
+    completed_event = next(item for item in reversed(journal_events) if item.event_type == "turn_completed")
+    assert completed_event.status == "completed"
+    assert completed_event.payload["resultStatus"] == "completed"
+    assert completed_event.payload["finalStatus"] == "completed"
+
+    detail = session_service.get_session_detail("session-live")
+    assistant = detail["messages"][-1]
+    assert assistant["content"] == "你好！我是 Vibelution agent，目前工作区状态正常。有什么可以帮你的吗？"
+    assert [item["status"] for item in assistant["feedbackEvents"]] == ["done", "done", "done"]
+
+
 def test_persist_turn_result_records_provider_llm_usage(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path, task_status="done")
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)

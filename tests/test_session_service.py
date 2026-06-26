@@ -109,6 +109,38 @@ def test_session_assistant_delta_queue_merges_feedback_events_for_same_turn_delt
     ]
 
 
+def test_completed_visible_reply_with_tool_trace_is_terminal():
+    result = {
+        "status": "completed",
+        "summary": "你好！我是 Vibelution agent，目前工作区状态正常。有什么可以帮你的吗？",
+        "raw_output": "你好！我是 Vibelution agent，目前工作区状态正常。有什么可以帮你的吗？",
+        "tool_call_count": 1,
+        "tool_trace": [
+            {
+                "name": "get_git_status_summary_tool",
+                "status": "done",
+                "summary": "工作区干净",
+            }
+        ],
+    }
+
+    assert session_service._chat_turn_result_status("completed", result, stop_requested=False) == "completed"
+
+
+def test_needs_continue_feedback_finalization_does_not_mark_thought_failed():
+    result = {
+        "feedback_events": [
+            {"sequence": 1, "kind": "status", "status": "running", "name": "context_prepare", "summary": "准备上下文。"},
+            {"sequence": 2, "kind": "tool", "status": "done", "name": "get_git_status_summary_tool", "summary": "工作区干净。"},
+            {"sequence": 3, "kind": "thought", "status": "running", "summary": "现在可以回应用户。"},
+        ],
+    }
+
+    feedback_events = session_service._extract_chat_feedback_events(result, final_status="needs_continue")
+
+    assert [item["status"] for item in feedback_events] == ["done", "done", "done"]
+
+
 def test_session_stream_full_queue_prefers_dropping_snapshots_before_assistant_delta():
     subscriber = queue.Queue(maxsize=2)
     subscriber.put_nowait({"type": "assistant_delta", "contentDelta": "你"})
