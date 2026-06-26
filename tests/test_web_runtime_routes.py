@@ -2679,6 +2679,52 @@ def test_launcher_runtime_scene_event_records_electron_supervisor_event(tmp_path
     assert event_rows[-1]["phase"] == "desktop_supervisor"
     assert event_rows[-1]["fields"]["controlToken"] == runtime_scene_service.REDACTED_FIELD_VALUE
 
+def test_launcher_desktop_session_routes_write_revisioned_window_projection(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        standalone_launcher_service,
+        "register_desktop_session",
+        lambda payload: calls.append(("register", payload))
+        or {"desktopSessionId": payload["desktopSessionId"], "revision": 1, "status": "active"},
+    )
+    monkeypatch.setattr(
+        standalone_launcher_service,
+        "update_desktop_session_window",
+        lambda desktop_session_id, role, payload: calls.append(("window", desktop_session_id, role, payload))
+        or {"desktopSessionId": desktop_session_id, "revision": 2, "status": "active"},
+    )
+    monkeypatch.setattr(
+        standalone_launcher_service,
+        "heartbeat_desktop_session",
+        lambda desktop_session_id: calls.append(("heartbeat", desktop_session_id))
+        or {"desktopSessionId": desktop_session_id, "revision": 3, "status": "active"},
+    )
+    monkeypatch.setattr(
+        standalone_launcher_service,
+        "close_desktop_session",
+        lambda desktop_session_id: calls.append(("close", desktop_session_id))
+        or {"desktopSessionId": desktop_session_id, "revision": 4, "status": "closed"},
+    )
+
+    registered = client.post(
+        "/api/launcher/desktop-sessions",
+        json={"desktopSessionId": "desktop-session-1", "provider": "electron", "capabilities": ["desktop_actions.claim"]},
+    )
+    window = client.put(
+        "/api/launcher/desktop-sessions/desktop-session-1/windows/launcher",
+        json={"revision": 1, "provider": "electron", "open": True, "focused": True, "windowId": 7, "rendererProcessId": 7070, "url": "http://127.0.0.1:8765/launcher"},
+    )
+    heartbeat = client.post("/api/launcher/desktop-sessions/desktop-session-1/heartbeat")
+    closed = client.delete("/api/launcher/desktop-sessions/desktop-session-1")
+
+    assert registered.status_code == 201
+    assert window.status_code == 200
+    assert heartbeat.status_code == 200
+    assert closed.status_code == 200
+    assert calls[0][0] == "register"
+    assert calls[1][0:3] == ("window", "desktop-session-1", "launcher")
+    assert calls[2:] == [("heartbeat", "desktop-session-1"), ("close", "desktop-session-1")]
+
 def test_runtime_scene_event_helper_keeps_noisy_observations_out_of_timeline(tmp_path, monkeypatch):
     scene_dir = _seed_runtime_scene_bundle(tmp_path, scene_id="scene-event-noise", status="running")
     launcher_state_path = tmp_path / ".runtime" / "launcher" / "state.json"
