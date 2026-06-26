@@ -8863,11 +8863,41 @@ def start_knowledge_collection_completion_background(team_id: str, payload: dict
     """Start the phase-card one-click completion path for knowledge collection."""
 
     normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
+    team_service.get_team(normalized_team_id)
     request_payload = _knowledge_collection_completion_payload(payload)
+    store = _knowledge_ingestion_work_run_store()
+    with _WORKFLOW_LOCK:
+        active_snapshot = store.load_active_snapshot(KNOWLEDGE_INGESTION_WORK_RUN_KIND)
+        if _knowledge_ingestion_snapshot_is_active(active_snapshot, normalized_team_id):
+            _record_workflow_event(
+                "knowledge_collection.completion_background_already_running",
+                normalized_team_id,
+                fields={"runId": _trim_text(active_snapshot.get("runId"), max_length=160)},
+            )
+            return _knowledge_ingestion_background_response(normalized_team_id, active_snapshot, already_running=True)
+        run_id = _new_record_id("knowledge-completion")
+        snapshot = _persist_knowledge_ingestion_work_run(
+            normalized_team_id,
+            run_id,
+            status="running",
+            current_phase="running",
+            summary="知识搜集一键完成已进入后台执行：搜索→提炼→审查→候选图→入库。",
+            active=True,
+        )
+    worker = threading.Thread(
+        target=_run_knowledge_collection_completion_background,
+        args=(normalized_team_id, run_id, request_payload),
+        name=f"knowledge-completion-{run_id[:24]}",
+        daemon=True,
+    )
+    worker.start()
     _record_workflow_event(
         "knowledge_collection.completion_background_requested",
         normalized_team_id,
         fields={
+            "runId": run_id,
+            "sourceRunId": _trim_text(request_payload.get("runId"), max_length=160),
+            "threadName": worker.name,
             "sourceQualityAgentId": _trim_text(request_payload.get("sourceQualityAgentId"), max_length=160),
             "candidateGraphAgentId": _trim_text(request_payload.get("candidateGraphAgentId"), max_length=160),
             "stewardAgentId": _trim_text(request_payload.get("stewardAgentId"), max_length=160),
@@ -8875,7 +8905,139 @@ def start_knowledge_collection_completion_background(team_id: str, payload: dict
             "autoApprove": request_payload.get("autoApprove"),
         },
     )
-    return start_knowledge_collection_ingestion_background(normalized_team_id, request_payload)
+    return _knowledge_ingestion_background_response(normalized_team_id, snapshot, already_running=False)
+
+
+def run_knowledge_collection_completion(team_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Run the phase-card knowledge collection completion chain.
+
+    The chain continues from the current source collection run when runId is
+    provided: remaining search batches, DataRecord extraction, then the existing
+    governed ingestion path.
+    """
+
+    normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
+    request_payload = _knowledge_collection_completion_payload(payload)
+    source_run_id = _trim_text(
+        request_payload.get("runId") or request_payload.get("sourceRunId") or request_payload.get("sourceCollectionRunId"),
+        max_length=128,
+    )
+    max_search_batches = _normalize_int(request_payload.get("maxSearchBatches"), default=20, minimum=0, maximum=100)
+    max_queries_per_batch = _normalize_int(request_payload.get("maxQueriesPerBatch"), default=4, minimum=1, maximum=50)
+    max_results_per_query = _normalize_int(request_payload.get("maxResultsPerQuery"), default=3, minimum=1, maximum=20)
+    max_records = _normalize_int(request_payload.get("maxRecords"), default=500, minimum=1, maximum=1000)
+    extraction_agent_id = _trim_text(request_payload.get("extractionAgentId"), max_length=160) or "Content Extraction Agent"
+
+    search_executions: list[dict[str, Any]] = []
+    if source_run_id and max_search_batches > 0:
+        for _index in range(max_search_batches):
+            search_result = execute_source_collection_search(
+                normalized_team_id,
+                source_run_id,
+                {
+                    "maxQueries": max_queries_per_batch,
+                    "maxResultsPerQuery": max_results_per_query,
+                },
+            )
+            search_executions.append(search_result)
+            status = _trim_text(search_result.get("status"), max_length=80).lower()
+            summary = search_result.get("summary") if isinstance(search_result.get("summary"), dict) else {}
+            open_assignment_count = _source_collection_count(summary.get("openAssignmentCount"))
+            next_query_ids = search_result.get("nextRunnableQueryIds")
+            if open_assignment_count <= 0:
+                break
+            if isinstance(next_query_ids, list) and not next_query_ids:
+                break
+            if status not in {"needs_continue", "running"}:
+                break
+
+    extraction: dict[str, Any] | None = None
+    if source_run_id:
+        extraction = extract_source_collection_candidates(
+            normalized_team_id,
+            {
+                "runId": source_run_id,
+                "extractionAgentId": extraction_agent_id,
+                "maxRecords": max_records,
+                "force": bool(request_payload.get("forceExtraction", False)),
+                "notes": "One-click knowledge collection completion extracted DataRecords before governed ingestion.",
+            },
+        )
+
+    ingestion = run_knowledge_collection_ingestion(normalized_team_id, request_payload)
+    ingestion_summary = ingestion.get("summary") if isinstance(ingestion.get("summary"), dict) else {}
+    return {
+        "schemaVersion": SCHEMA_VERSION,
+        "teamId": normalized_team_id,
+        "status": ingestion.get("status") or "completed",
+        "sourceRunId": source_run_id,
+        "searchExecutions": search_executions,
+        "extraction": extraction,
+        "ingestion": ingestion,
+        "summary": {
+            "searchExecutionCount": len(search_executions),
+            "extractedCandidateCount": _source_collection_count((extraction or {}).get("importedCount")),
+            "formalKnowledgeItemCount": _source_collection_count(ingestion_summary.get("formalKnowledgeItemCount")),
+            "knowledgeBaseId": _trim_text(ingestion_summary.get("knowledgeBaseId"), max_length=160),
+        },
+    }
+
+
+def _run_knowledge_collection_completion_background(team_id: str, run_id: str, payload: dict[str, Any]) -> None:
+    try:
+        _persist_knowledge_ingestion_work_run(
+            team_id,
+            run_id,
+            status="running",
+            current_phase="running",
+            summary="知识搜集一键完成正在执行：搜索、提炼、审查、候选图谱和入库审核。",
+            active=True,
+        )
+        result = run_knowledge_collection_completion(team_id, payload)
+    except Exception as exc:
+        _persist_knowledge_ingestion_work_run(
+            team_id,
+            run_id,
+            status="failed",
+            current_phase="failed",
+            summary=_trim_text(exc, max_length=300) or "知识搜集一键完成失败。",
+            active=False,
+            error=_trim_text(exc, max_length=500),
+            error_type=type(exc).__name__,
+        )
+        _record_workflow_event(
+            "knowledge_collection.completion_background_failed",
+            team_id,
+            fields={"runId": run_id, "errorType": type(exc).__name__, "error": _trim_text(exc, max_length=500)},
+        )
+        return
+    result_summary = result.get("summary") if isinstance(result.get("summary"), dict) else {}
+    formal_count = _source_collection_count(result_summary.get("formalKnowledgeItemCount"))
+    terminal_status = _trim_text(result.get("status"), max_length=80) or "completed"
+    _persist_knowledge_ingestion_work_run(
+        team_id,
+        run_id,
+        status="completed" if formal_count > 0 else terminal_status,
+        current_phase="completed" if formal_count > 0 else terminal_status,
+        summary=(
+            f"知识搜集一键完成：正式 KnowledgeItem {formal_count} 条。"
+            if formal_count > 0
+            else f"知识搜集一键完成结束：{terminal_status}。"
+        ),
+        active=False,
+        result=result,
+    )
+    _record_workflow_event(
+        "knowledge_collection.completion_background_completed",
+        team_id,
+        fields={
+            "runId": run_id,
+            "status": terminal_status,
+            "sourceRunId": _trim_text(result.get("sourceRunId"), max_length=160),
+            "searchExecutionCount": _source_collection_count(result_summary.get("searchExecutionCount")),
+            "formalKnowledgeItemCount": formal_count,
+        },
+    )
 
 
 def start_knowledge_collection_ingestion_background(team_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
