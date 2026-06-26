@@ -397,6 +397,8 @@ class KnowledgeIngestionPrecheckPayload(BaseModel):
 
 
 class KnowledgeCollectionIngestionPayload(BaseModel):
+    runId: str = Field("", max_length=128)
+    extractionAgentId: str = Field("", max_length=160)
     sourceQualityAgentId: str = Field("", max_length=160)
     candidateGraphAgentId: str = Field("", max_length=160)
     stewardAgentId: str = Field("", max_length=160)
@@ -404,6 +406,10 @@ class KnowledgeCollectionIngestionPayload(BaseModel):
     knowledgeBaseId: str = Field("", max_length=128)
     targetDomain: str = Field("", max_length=240)
     maxCandidates: int = Field(80, ge=1, le=200)
+    maxSearchBatches: int = Field(20, ge=0, le=100)
+    maxQueriesPerBatch: int = Field(4, ge=1, le=50)
+    maxResultsPerQuery: int = Field(3, ge=1, le=20)
+    maxRecords: int = Field(500, ge=1, le=1000)
     forceReview: bool = False
     forceRebuild: bool = False
     autoCreateKnowledgeBase: bool = True

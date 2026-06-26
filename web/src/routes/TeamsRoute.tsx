@@ -5432,12 +5432,18 @@ export function TeamsRoute({
   const runKnowledgeCollectionCompletionMutation = useMutation({
     mutationFn: (variables: {
       teamId: string;
+      runId?: string;
+      extractionAgentId?: string;
       sourceQualityAgentId: string;
       candidateGraphAgentId: string;
       stewardAgentId: string;
       knowledgeBaseId?: string;
       targetDomain?: string;
       maxCandidates?: number;
+      maxSearchBatches?: number;
+      maxQueriesPerBatch?: number;
+      maxResultsPerQuery?: number;
+      maxRecords?: number;
       forceReview?: boolean;
       forceRebuild?: boolean;
     }) =>
@@ -5447,12 +5453,18 @@ export function TeamsRoute({
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
+            runId: variables.runId || "",
+            extractionAgentId: variables.extractionAgentId || "",
             sourceQualityAgentId: variables.sourceQualityAgentId,
             candidateGraphAgentId: variables.candidateGraphAgentId,
             stewardAgentId: variables.stewardAgentId,
             knowledgeBaseId: variables.knowledgeBaseId || "",
             targetDomain: variables.targetDomain || sourceCollectionDraft.topic || "神经机制启发神经网络算法",
             maxCandidates: variables.maxCandidates || 80,
+            maxSearchBatches: variables.maxSearchBatches ?? 20,
+            maxQueriesPerBatch: variables.maxQueriesPerBatch ?? 4,
+            maxResultsPerQuery: variables.maxResultsPerQuery || Math.max(1, Math.min(5, sourceCollectionDraft.maxResultsPerQuery || 3)),
+            maxRecords: variables.maxRecords ?? 500,
             forceReview: variables.forceReview ?? false,
             forceRebuild: variables.forceRebuild ?? false,
             autoCreateKnowledgeBase: true,
@@ -10359,7 +10371,7 @@ export function TeamsRoute({
   const sourceCollectionCompletionActionDisabled =
     !selectedTeam?.teamId
     || !selectedSourceCollectionRun
-    || sourceCollectionIngestCandidateCount <= 0
+    || (sourceCollectionIngestCandidateCount <= 0 && sourceCollectionRawRecordCount <= 0 && sourceCollectionSearchOpenAssignmentCount <= 0)
     || selectedTeamKnowledgeCollectionIngestPending;
   const sourceCollectionCompletionActionLabel = selectedTeamKnowledgeCollectionIngestPending
     ? (lang === "zh" ? "一键完成中" : "Completing")
@@ -10542,12 +10554,18 @@ export function TeamsRoute({
     }
     runKnowledgeCollectionCompletionMutation.mutate({
       teamId: selectedTeam.teamId,
+      runId: selectedSourceCollectionRunEffectiveId,
+      extractionAgentId: sourceCollectionExtractionAgentId,
       sourceQualityAgentId: sourceCollectionQualityAgentId,
       candidateGraphAgentId: sourceCollectionGraphAgentId,
       stewardAgentId: sourceCollectionKnowledgeStewardAgentId,
       knowledgeBaseId: sourceCollectionDefaultKnowledgeBaseId,
       targetDomain: sourceCollectionDraft.topic || "神经机制启发神经网络算法",
       maxCandidates: Math.max(1, Math.min(80, sourceCollectionIngestCandidateCount)),
+      maxSearchBatches: 20,
+      maxQueriesPerBatch: Math.max(1, Math.min(50, sourceCollectionSearchOpenAssignmentCount || 4)),
+      maxResultsPerQuery: Math.max(1, Math.min(5, sourceCollectionDraft.maxResultsPerQuery || 3)),
+      maxRecords: Math.max(1, Math.min(1000, Math.max(sourceCollectionRawRecordCount, sourceCollectionDisplayedCandidateCount, 100))),
       forceReview: sourceCollectionPrecheckCandidateCount <= 0 && sourceCollectionDisplayedCandidateCount > 0,
     });
     openSourceCollectionStage("memory");
