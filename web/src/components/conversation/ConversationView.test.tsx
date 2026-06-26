@@ -73,6 +73,7 @@ function renderConversation(
     showComposer?: boolean;
     processDisplayMode?: ConversationProcessDisplayMode;
     useDefaultProcessDisplayMode?: boolean;
+    activeTurnMessage?: ConversationMessage;
   } = {},
 ) {
   const queryClient = new QueryClient({
@@ -92,6 +93,7 @@ function renderConversation(
         title="Session"
         phase="ready"
         messages={messages}
+        activeTurnMessage={options.activeTurnMessage}
         density={options.density}
         showHeader={false}
         showSessionOverview={false}
@@ -294,6 +296,38 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).toContain("正在读取 ConversationView 渲染链路");
     expect(html.indexOf("responseSection")).toBeLessThan(html.indexOf("answerOnlyProcessGroup"));
     expect(html).not.toContain("已确定检查范围");
+  });
+
+  it("renders the active assistant turn after committed history without requiring it in messages", () => {
+    const html = renderConversation(
+      [
+        {
+          id: "message-committed",
+          role: "assistant",
+          content: "上一轮正式回答。",
+          timestamp: "2026-06-26T08:00:00Z",
+        },
+      ],
+      {
+        useDefaultProcessDisplayMode: true,
+        activeTurnMessage: {
+          id: "session-1-message-active-turn-1",
+          role: "assistant",
+          content: "当前回答正在流式显示。",
+          timestamp: "2026-06-26T08:01:00Z",
+          streaming: true,
+          streamStage: "responding",
+          metadata: {
+            kind: "session_active_turn_layer",
+            turnId: "turn-1",
+          },
+        },
+      },
+    );
+
+    expect(html).toContain("上一轮正式回答。");
+    expect(html).toContain("当前回答正在流式显示。");
+    expect(html.indexOf("上一轮正式回答。")).toBeLessThan(html.indexOf("当前回答正在流式显示。"));
   });
 
   it("can render the opt-in compact workbench density", () => {

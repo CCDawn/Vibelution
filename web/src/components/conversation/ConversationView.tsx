@@ -609,6 +609,7 @@ export type ConversationViewProps = {
   title: string;
   phase: string;
   messages: ConversationMessage[];
+  activeTurnMessage?: ConversationMessage;
   className?: string;
   density?: "default" | "compact";
   eyebrowLabel?: string;
@@ -683,6 +684,7 @@ export function ConversationView({
   title,
   phase,
   messages,
+  activeTurnMessage,
   className,
   density = "default",
   eyebrowLabel,
@@ -922,6 +924,10 @@ export function ConversationView({
     () => displayMessages.slice(displayMessages.length - visibleMessageCount),
     [displayMessages, visibleMessageCount],
   );
+  const activeTimelineMessages = useMemo(
+    () => activeTurnMessage ? [...timelineMessages, activeTurnMessage] : timelineMessages,
+    [activeTurnMessage, timelineMessages],
+  );
   const imageArtifactUrlsBeforeMessage = useMemo(() => {
     const urlsByMessageId = new Map<string, Set<string>>();
     const seenImageUrls = new Set<string>();
@@ -964,10 +970,17 @@ export function ConversationView({
         : timelineMessages.map((message) => ({ ...message, mentalSnapshot: undefined })),
     [showMentalSnapshots, timelineMessages],
   );
+  const activeTimelineSignalMessages = useMemo(
+    () =>
+      showMentalSnapshots
+        ? activeTimelineMessages
+        : activeTimelineMessages.map((message) => ({ ...message, mentalSnapshot: undefined })),
+    [activeTimelineMessages, showMentalSnapshots],
+  );
   const timelineScrollSignal = useMemo(() => buildTimelineScrollSignal(timelineSignalMessages), [timelineSignalMessages]);
   const streamingTimelineScrollSignal = useMemo(
-    () => buildStreamingTimelineScrollSignal(timelineSignalMessages),
-    [timelineSignalMessages],
+    () => buildStreamingTimelineScrollSignal(activeTimelineSignalMessages),
+    [activeTimelineSignalMessages],
   );
   const hasSessionMeta = resolvedStats.length > 0 || latestToolCalls.length > 0;
   const hasMetaSection = showSessionOverview && (hasSessionMeta || Boolean(supplementalContent));
@@ -3165,7 +3178,7 @@ export function ConversationView({
       ) : null}
 
       <div ref={timelineRef} className={styles.timeline}>
-        {displayMessages.length === 0 ? (
+        {displayMessages.length === 0 && !activeTurnMessage ? (
           <div className={styles.emptyState}>{t("sessionNoMessages")}</div>
         ) : (
           <>
@@ -3185,7 +3198,7 @@ export function ConversationView({
                 </button>
               </div>
             ) : null}
-            {timelineMessages.map((message) => {
+            {activeTimelineMessages.map((message) => {
             if (isCliAgentLifecycleMessage(message)) {
               const detail = cliAgentLifecycleDetail(message);
               return (
