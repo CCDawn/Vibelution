@@ -48,6 +48,17 @@ describe("desktop package script", () => {
     expect(script).not.toContain("Stop-Process -Name Vibelution");
   });
 
+  it("verifies the packaged executable embeds the shared Vibelution icon", () => {
+    const script = readFileSync(verifyScriptPath, "utf8");
+
+    expect(script).toContain("$desktopIconPath = Join-Path $projectDir \"assets/icons/vibelution.ico\"");
+    expect(script).toContain("function Assert-DesktopExeIcon");
+    expect(script).toContain("[System.Drawing.Icon]::ExtractAssociatedIcon($desktopExe)");
+    expect(script).toContain("[System.Drawing.Icon]::ExtractAssociatedIcon($desktopIconPath)");
+    expect(script).toContain("Desktop package executable icon does not match shared Vibelution icon.");
+    expect(script).toContain("Assert-DesktopExeIcon");
+  });
+
   it("provides a reusable lifecycle verification entrypoint without duplicating package checks", () => {
     const script = readFileSync(lifecycleScriptPath, "utf8");
 
