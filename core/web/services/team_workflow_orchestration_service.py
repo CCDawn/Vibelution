@@ -8843,6 +8843,41 @@ def _knowledge_ingestion_background_response(team_id: str, snapshot: dict[str, A
     }
 
 
+def _knowledge_collection_completion_payload(payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    request_payload = dict(payload) if isinstance(payload, dict) else {}
+    request_payload.update(
+        {
+            "autoCreateKnowledgeBase": True,
+            "autoSubmit": True,
+            "autoReviewSource": True,
+            "autoApprove": True,
+            "notifyStewardAgent": False,
+            "wakeStewardAgent": False,
+            "backgroundExecution": True,
+        }
+    )
+    return request_payload
+
+
+def start_knowledge_collection_completion_background(team_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Start the phase-card one-click completion path for knowledge collection."""
+
+    normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
+    request_payload = _knowledge_collection_completion_payload(payload)
+    _record_workflow_event(
+        "knowledge_collection.completion_background_requested",
+        normalized_team_id,
+        fields={
+            "sourceQualityAgentId": _trim_text(request_payload.get("sourceQualityAgentId"), max_length=160),
+            "candidateGraphAgentId": _trim_text(request_payload.get("candidateGraphAgentId"), max_length=160),
+            "stewardAgentId": _trim_text(request_payload.get("stewardAgentId"), max_length=160),
+            "maxCandidates": _normalize_int(request_payload.get("maxCandidates"), default=80, minimum=1, maximum=200),
+            "autoApprove": request_payload.get("autoApprove"),
+        },
+    )
+    return start_knowledge_collection_ingestion_background(normalized_team_id, request_payload)
+
+
 def start_knowledge_collection_ingestion_background(team_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
     """Queue the synchronous knowledge-collection ingestion on a background worker.
 

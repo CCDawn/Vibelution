@@ -6581,6 +6581,52 @@ def test_knowledge_collection_ingestion_background_completes_and_reports_status(
     assert status["summary"]["formalKnowledgeItemCount"] >= 1
 
 
+def test_knowledge_collection_completion_background_normalizes_one_click_defaults(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    captured = {}
+
+    def fake_start_background(team_id, payload):
+        captured["team_id"] = team_id
+        captured["payload"] = payload
+        return {
+            "accepted": True,
+            "executionMode": "background",
+            "activeWorkRun": {"status": "running"},
+        }
+
+    monkeypatch.setattr(
+        team_workflow_orchestration_service,
+        "start_knowledge_collection_ingestion_background",
+        fake_start_background,
+    )
+
+    accepted = team_workflow_orchestration_service.start_knowledge_collection_completion_background(
+        "challenge-team",
+        {
+            "stewardAgentId": "knowledge-steward",
+            "sourceQualityAgentId": "source-quality",
+            "candidateGraphAgentId": "candidate-graph",
+            "targetDomain": "神经预测编码",
+            "maxCandidates": 16,
+        },
+    )
+
+    assert accepted["accepted"] is True
+    assert captured["team_id"] == "challenge-team"
+    assert captured["payload"]["backgroundExecution"] is True
+    assert captured["payload"]["autoCreateKnowledgeBase"] is True
+    assert captured["payload"]["autoSubmit"] is True
+    assert captured["payload"]["autoReviewSource"] is True
+    assert captured["payload"]["autoApprove"] is True
+    assert captured["payload"]["notifyStewardAgent"] is False
+    assert captured["payload"]["wakeStewardAgent"] is False
+    assert captured["payload"]["sourceQualityAgentId"] == "source-quality"
+    assert captured["payload"]["candidateGraphAgentId"] == "candidate-graph"
+    assert captured["payload"]["stewardAgentId"] == "knowledge-steward"
+    assert captured["payload"]["targetDomain"] == "神经预测编码"
+    assert captured["payload"]["maxCandidates"] == 16
+
+
 def test_knowledge_ingestion_status_tracks_pending_and_official_sync(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     steward = agent_directory_service.create_agent_instance(display_name="Knowledge Steward Agent")
