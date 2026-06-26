@@ -1413,6 +1413,13 @@ def get_source_collection_stage_task_context(
         run_bundle["sourceCandidates"],
         stage_id=normalized_stage_id,
     ) if include_candidates else []
+    memory_steward_mode = _source_collection_stage_can_materialize_formal_knowledge(
+        normalized_stage_id,
+        task_agent_role,
+    )
+    pageable_candidates = [
+        item for item in source_candidates if _source_quality_bucket(item) == "approved"
+    ] if memory_steward_mode else source_candidates
     candidate_page_offset = _normalize_int(candidate_offset, default=0, minimum=0, maximum=10000)
     candidate_page_limit = _normalize_int(
         candidate_limit if candidate_limit is not None else limit,
@@ -1420,16 +1427,16 @@ def get_source_collection_stage_task_context(
         minimum=1,
         maximum=80,
     )
-    selected_candidates = source_candidates[candidate_page_offset:candidate_page_offset + candidate_page_limit]
+    selected_candidates = pageable_candidates[candidate_page_offset:candidate_page_offset + candidate_page_limit]
     next_candidate_offset = candidate_page_offset + len(selected_candidates)
-    candidate_has_more = next_candidate_offset < len(source_candidates)
+    candidate_has_more = next_candidate_offset < len(pageable_candidates)
     storage_artifacts = _source_collection_storage_artifacts(normalized_team_id, normalized_run_id)
     selected_unassessed_candidate_ids = [
         _trim_text(item.get("candidateId"), max_length=128)
         for item in selected_candidates
         if _trim_text(item.get("candidateId"), max_length=128) and _source_quality_bucket(item) == "pending"
     ]
-    return {
+    context = {
         "schemaVersion": SCHEMA_VERSION,
         "status": "ok",
         "contextKind": "source_collection_stage_task_context",
@@ -1456,7 +1463,7 @@ def get_source_collection_stage_task_context(
             "offset": candidate_page_offset,
             "limit": candidate_page_limit,
             "returned": len(selected_candidates),
-            "total": len(source_candidates),
+            "total": len(pageable_candidates),
             "hasMore": candidate_has_more,
             "nextOffset": next_candidate_offset if candidate_has_more else None,
         },
@@ -1475,6 +1482,16 @@ def get_source_collection_stage_task_context(
             "fallback": "If required context is missing, write back status=blocked with a short reason.",
         },
     }
+    if memory_steward_mode:
+        context["stewardActionPacket"] = _source_collection_memory_steward_action_packet(
+            source_candidates,
+            writeback_contract=context["writebackContract"],
+        )
+        context["usage"]["fallback"] = (
+            "Use stewardActionPacket. Do not infer hidden or truncated candidates; "
+            "if no approvedCandidateIds are present, write back status=blocked with a short reason."
+        )
+    return context
 
 
 def start_source_collection_run(team_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -13398,6 +13415,95 @@ def _source_collection_stage_session_task_boundaries(*, stage_id: str = "", agen
     }
 
 
+def _source_collection_memory_steward_action_packet(
+    source_candidates: list[dict[str, Any]],
+    *,
+    writeback_contract: dict[str, Any],
+) -> dict[str, Any]:
+    bucket_counts = {"approved": 0, "pending": 0, "rejected": 0, "needs_revision": 0}
+    approved_candidates: list[dict[str, Any]] = []
+    deferred_candidate_ids: dict[str, list[str]] = {
+        "pending": [],
+        "rejected": [],
+        "needs_revision": [],
+    }
+    for candidate in [item for item in source_candidates if isinstance(item, dict)]:
+        bucket = _source_quality_bucket(candidate)
+        if bucket not in bucket_counts:
+            bucket = "pending"
+        bucket_counts[bucket] += 1
+        candidate_id = _trim_text(candidate.get("candidateId"), max_length=160)
+        if bucket == "approved":
+            approved_candidates.append(candidate)
+        elif candidate_id and bucket in deferred_candidate_ids:
+            deferred_candidate_ids[bucket].append(candidate_id)
+
+    approved_summaries = [
+        _source_collection_context_candidate_summary(item)
+        for item in approved_candidates[:40]
+    ]
+    approved_candidate_ids = [
+        item["candidateId"]
+        for item in approved_summaries
+        if _trim_text(item.get("candidateId"), max_length=160)
+    ]
+    recommended_status = "completed" if approved_candidate_ids else "blocked"
+    summary = (
+        f"知识库管理员通过 {len(approved_candidate_ids)} 条 source_quality_approved 候选，按治理门禁写回。"
+        if approved_candidate_ids
+        else "本轮没有 source_quality_approved 候选可入库，写回 blocked 并等待资料质检完成。"
+    )
+    result_skeleton = {
+        "approvedCandidateIds": approved_candidate_ids,
+        "candidate_summary": {
+            "approved": {
+                "count": len(approved_candidate_ids),
+                "candidateIds": approved_candidate_ids,
+                "candidates": approved_summaries,
+            },
+            "deferredCounts": {
+                "pending": bucket_counts["pending"],
+                "rejected": bucket_counts["rejected"],
+                "needs_revision": bucket_counts["needs_revision"],
+            },
+        },
+        "steward_assessment": {
+            "decision": "approved" if approved_candidate_ids else "blocked",
+            "reason": (
+                "Only source_quality_approved candidates are eligible for governed ingestion."
+            ),
+        },
+    }
+    return {
+        "schemaVersion": SCHEMA_VERSION,
+        "packetKind": "knowledge_steward_approved_candidate_action",
+        "action": "writeback_approved_candidates" if approved_candidate_ids else "writeback_blocked_no_approved_candidates",
+        "recommendedStatus": recommended_status,
+        "summary": summary,
+        "approvedCandidateIds": approved_candidate_ids,
+        "approvedCandidateCount": len(approved_candidate_ids),
+        "visibleApprovedCandidateCount": len(approved_summaries),
+        "candidateInventoryCounts": bucket_counts,
+        "deferredCandidateCounts": {
+            "pending": bucket_counts["pending"],
+            "rejected": bucket_counts["rejected"],
+            "needs_revision": bucket_counts["needs_revision"],
+        },
+        "deferredCandidateIds": {key: value[:40] for key, value in deferred_candidate_ids.items()},
+        "doNotInferHiddenOrTruncatedCandidates": True,
+        "doNotReviewPendingCandidates": True,
+        "writebackTool": "source_collection_stage_writeback_tool",
+        "writebackContractTaskId": _trim_text(writeback_contract.get("taskId"), max_length=160),
+        "writebackResultSkeleton": result_skeleton,
+        "instructions": [
+            "Only use approvedCandidateIds from this packet for formal knowledge ingestion writeback.",
+            "Do not infer hidden or truncated candidates from counts, candidatePage, or earlier chat history.",
+            "Do not continue screening pending/rejected/needs_revision candidates in this memory-stage task.",
+            "Always call source_collection_stage_writeback_tool; natural-language-only answers do not complete the task.",
+        ],
+    }
+
+
 def _normalize_source_collection_stage_session_task_status(value: Any) -> str:
     normalized = _trim_text(value, max_length=80).lower()
     return normalized if normalized in SOURCE_COLLECTION_STAGE_SESSION_TASK_STATUSES else "needs_review"
@@ -14579,6 +14685,8 @@ def _source_collection_stage_session_task_message(
         "max_records": 24,
         "include_candidates": True,
     }
+    if can_materialize_formal_knowledge:
+        context_tool_payload["candidate_limit"] = 80
     context_tool_json = json.dumps(context_tool_payload, ensure_ascii=False, sort_keys=True)
     return "\n".join(
         [
@@ -14592,10 +14700,14 @@ def _source_collection_stage_session_task_message(
             "- 在本会话里完成当前阶段任务，并把可审查的结论、证据引用和下一步写清楚。",
             "- 不要使用 `web_fetch_tool` 读取 `file://` 本地路径或 localhost 回写接口；本地资料上下文只通过 `source_collection_context_tool` 获取。",
             (
-                "- 本任务是知识库管理员入库审核：若通过，请在 result 中提供 stewardPackDraft+autoIngestDecision，或 candidate_summary.approved.candidates / approvedCandidateIds；"
-                "后端只采纳本轮且 source_quality approved 的候选，并经治理门禁入库。"
+                "- 本任务是知识库管理员入库审核：只处理 source_quality_approved 的本轮 approved 候选；优先使用 `source_collection_context_tool` 返回的 `stewardActionPacket.approvedCandidateIds` 和 `writebackResultSkeleton` 写回。"
                 if can_materialize_formal_knowledge
                 else "- 不要直接写正式 Team Knowledge、RAG 或官方图谱；只能按候选层和结构化回写合同提交结果。"
+            ),
+            (
+                "- 不要推断截断或隐藏候选；pending/rejected/needs_revision 只作为 deferredCandidateCounts 汇报，不要在 memory 阶段继续审查或补全它们。"
+                if can_materialize_formal_knowledge
+                else "- 当前非入库阶段只提交阶段结果，不处理知识入库。"
             ),
             "- 完成后必须调用 `source_collection_stage_writeback_tool` 回写；不要让自然语言回复成为唯一结果来源。",
             "- 如果上下文不足、工具失败或无法完成，请调用 `source_collection_stage_writeback_tool` 写入 status=blocked 或 failed，并说明原因。",
