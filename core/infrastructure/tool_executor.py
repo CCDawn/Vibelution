@@ -1344,7 +1344,6 @@ class ToolExecutor:
             if tool_name == "run_test_for_tool" and "未找到对应测试文件" in result_text:
                 summary = "未找到映射测试文件，已退回手动 pytest"
             if is_cross_platform_warning:
-                platform_summary = "Windows 平台检查通过：已拦截 Unix shell 片段"
                 session.record_blocked_tool_pattern(
                     "cli_tool:unix_shell_on_windows",
                     "跨平台检查已拦截 Unix shell 片段",
@@ -1356,21 +1355,6 @@ class ToolExecutor:
                     "改用 PowerShell 等价命令或结构化工具",
                     severity="hint",
                 )
-                session.record_validation_result(platform_summary, True, kind="platform_check")
-                session.note_feedback_loop(
-                    loop_type="platform_check",
-                    target=command or "Windows shell compatibility",
-                    result=platform_summary,
-                    phase="observe",
-                )
-                session.note_scope_completion("平台兼容性已完成最小验证，直接给出结论。")
-                self._event_bus.publish(EventNames.VALIDATION_COMPLETED, {
-                    "kind": "platform_check",
-                    "passed": True,
-                    "message": platform_summary,
-                })
-                if pet:
-                    pet.reward_validation("platform_check", True)
             else:
                 session.record_validation_result(summary, passed, kind="tests")
                 session.note_feedback_loop(

@@ -1491,8 +1491,8 @@ class TestToolExecutorErrorHandling:
         assert "已授权" in pipe_hint
         assert "read_file_tool / grep_search_tool" not in pipe_hint
 
-    def test_cross_platform_warning_is_recorded_as_successful_platform_check(self, executor):
-        """跨平台命令拦截是平台检查通过，不能污染 pytest 失败状态。"""
+    def test_cross_platform_warning_does_not_complete_validation_scope(self, executor):
+        """跨平台命令拦截说明命令未执行，不能伪装成验证通过或终态。"""
         reset_session_state()
 
         def fake_cli_tool(command="", timeout=60):
@@ -1511,13 +1511,17 @@ class TestToolExecutorErrorHandling:
         assert action is None
         assert "[跨平台警告]" in str(result)
         snapshot = get_session_state().get_attention_snapshot()
-        assert snapshot["last_validation_summary"] == "Windows 平台检查通过：已拦截 Unix shell 片段"
-        assert snapshot["last_validation_passed"] is True
-        assert snapshot["recent_validation_results"][-1]["kind"] == "platform_check"
-        assert snapshot["feedback_loop_ready"] is True
-        assert snapshot["feedback_loop_type"] == "platform_check"
-        assert snapshot["convergence_state"] == "ready_to_stop"
+        assert snapshot["last_validation_summary"] is None
+        assert snapshot["last_validation_passed"] is None
+        assert snapshot["recent_validation_results"] == []
+        assert snapshot["feedback_loop_ready"] is False
+        assert snapshot["feedback_loop_type"] == ""
+        assert snapshot["convergence_state"] != "ready_to_stop"
         assert "cli_tool:unix_shell_on_windows" in snapshot["blocked_tool_patterns"]
+        assert any(
+            blocker.get("kind") == "cross_platform_command"
+            for blocker in snapshot["recent_blockers"]
+        )
 
     def test_lint_validation_establishes_feedback_loop_and_freezes_scope(self, executor):
         reset_session_state()

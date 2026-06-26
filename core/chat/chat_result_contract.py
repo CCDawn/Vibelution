@@ -25,6 +25,8 @@ VERIFY_TOOL_NAMES = {
     "python_lint_tool",
 }
 
+PYTEST_CROSS_PLATFORM_BLOCKED_REASON = "pytest 命令被跨平台检查拦截，验证尚未执行。"
+
 PATH_ARG_KEYS = (
     "file_path",
     "path",
@@ -37,6 +39,39 @@ PATH_ARG_KEYS = (
 def _tool_args_dict(record: Dict[str, Any]) -> Dict[str, Any]:
     value = record.get("args") or {}
     return value if isinstance(value, dict) else {}
+
+
+def _tool_command(record: Dict[str, Any]) -> str:
+    return str(_tool_args_dict(record).get("command") or "").strip()
+
+
+def _tool_result_preview(record: Dict[str, Any]) -> str:
+    return trim_lines(
+        record.get("result_preview")
+        or record.get("resultPreview")
+        or record.get("summary")
+        or record.get("raw_output")
+        or record.get("result")
+        or "",
+        max_lines=3,
+    )
+
+
+def _is_pytest_cli_record(record: Dict[str, Any]) -> bool:
+    return str(record.get("name") or "").strip() == "cli_tool" and "pytest" in _tool_command(record).lower()
+
+
+def _has_cross_platform_warning(text: str) -> bool:
+    return "[跨平台警告]" in str(text or "")
+
+
+def blocked_reason_from_tool_trace(tool_trace: List[Dict[str, Any]]) -> str:
+    for record in reversed(list(tool_trace or [])):
+        if not _is_pytest_cli_record(record):
+            continue
+        if _has_cross_platform_warning(_tool_result_preview(record)):
+            return PYTEST_CROSS_PLATFORM_BLOCKED_REASON
+    return ""
 
 
 def extract_paths(record: Dict[str, Any]) -> List[str]:
@@ -54,9 +89,12 @@ def extract_paths(record: Dict[str, Any]) -> List[str]:
 def verification_from_tool_trace(tool_trace: List[Dict[str, Any]]) -> Tuple[str, str]:
     for record in reversed(list(tool_trace or [])):
         name = str(record.get("name") or "").strip()
-        if name not in VERIFY_TOOL_NAMES:
+        is_pytest_cli = _is_pytest_cli_record(record)
+        if name not in VERIFY_TOOL_NAMES and not is_pytest_cli:
             continue
-        preview = trim_lines(record.get("result_preview") or "", max_lines=3)
+        preview = _tool_result_preview(record)
+        if is_pytest_cli and _has_cross_platform_warning(preview):
+            return ("failed", preview or PYTEST_CROSS_PLATFORM_BLOCKED_REASON)
         lowered = preview.lower()
         if preview.startswith("[错误]") or preview.startswith("[超时]") or " failed" in lowered or "失败" in preview:
             return ("failed", preview or f"{name} 失败")
@@ -80,6 +118,8 @@ def activity_from_tool_trace(tool_trace: List[Dict[str, Any]]) -> Dict[str, Any]
             changed_files.extend(paths)
             saw_write = True
         if name in VERIFY_TOOL_NAMES:
+            saw_verify = True
+        if _is_pytest_cli_record(record):
             saw_verify = True
     return {
         "read_files": dedupe_strings(read_files, limit=12),
@@ -168,6 +208,7 @@ def _preferred_outcome(
     read_files: List[str],
     changed_files: List[str],
     verification_status: str,
+    blocked_reason: str,
 ) -> str:
     explicit = str(result.get("outcome") or result.get("task_outcome") or "").strip().lower()
     if explicit:
@@ -176,7 +217,7 @@ def _preferred_outcome(
         return "needs_input"
     if result.get("required_user_input"):
         return "needs_input"
-    if result.get("blocked_reason"):
+    if blocked_reason:
         return "blocked"
     status = str(result.get("status") or "").strip().lower()
     if status in {"failed", "timeout"} or verification_status == "failed":
@@ -207,7 +248,7 @@ def build_chat_coding_result_contract(result: Dict[str, Any] | Any) -> Dict[str,
         limit=12,
     )
     verification_status, verification_summary = _preferred_verification(result, tool_trace)
-    blocked_reason = _preferred_blocked_reason(result)
+    blocked_reason = _preferred_blocked_reason(result) or blocked_reason_from_tool_trace(tool_trace)
     required_user_input = _preferred_required_user_input(result)
     next_action = _preferred_next_action(result)
     outcome = _preferred_outcome(
@@ -215,6 +256,7 @@ def build_chat_coding_result_contract(result: Dict[str, Any] | Any) -> Dict[str,
         read_files=read_files,
         changed_files=changed_files,
         verification_status=verification_status,
+        blocked_reason=blocked_reason,
     )
     return {
         "read_files": read_files,
@@ -236,6 +278,7 @@ __all__ = [
     "VERIFY_TOOL_NAMES",
     "WRITE_TOOL_NAMES",
     "activity_from_tool_trace",
+    "blocked_reason_from_tool_trace",
     "build_chat_coding_result_contract",
     "extract_paths",
     "verification_from_tool_trace",
