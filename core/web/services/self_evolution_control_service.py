@@ -163,6 +163,152 @@ class SelfEvolutionRunNotFoundError(LookupError):
     """Raised when a requested self-evolution run cannot be found."""
 
 
+def _lifecycle_string(value: Any) -> str:
+    return str(value or "").strip()
+
+
+def _lifecycle_nested_string(payload: dict[str, Any], key: str) -> str:
+    value = payload.get(key)
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, dict):
+        for nested_key in ("id", "taskId", "path", "root"):
+            nested = _lifecycle_string(value.get(nested_key))
+            if nested:
+                return nested
+    return ""
+
+
+def _trusted_lifecycle_task_id(snapshot: dict[str, Any], fallback: str) -> str:
+    for key in ("sourceTaskId", "taskId", "currentTaskId"):
+        value = _lifecycle_nested_string(snapshot, key)
+        if value:
+            return value
+    for key in ("task", "activeTask"):
+        value = _lifecycle_nested_string(snapshot, key)
+        if value:
+            return value
+    return fallback
+
+
+def _trusted_lifecycle_worktree(snapshot: dict[str, Any]) -> str:
+    for key in ("sourceWorktree", "worktree", "worktreeRoot", "workspaceRoot", "projectRoot"):
+        value = _lifecycle_nested_string(snapshot, key)
+        if value:
+            return value
+    artifacts = snapshot.get("artifacts") if isinstance(snapshot.get("artifacts"), dict) else {}
+    for key in ("sourceWorktree", "worktree", "worktreeRoot", "workspaceRoot", "projectRoot"):
+        value = _lifecycle_nested_string(artifacts, key)
+        if value:
+            return value
+    return str(PROJECT_ROOT)
+
+
+def _record_lifecycle_intent_decision(
+    *,
+    action: str,
+    run_id: str,
+    reason: str,
+    decision: str,
+    outcome: str,
+    snapshot: dict[str, Any] | None = None,
+    detail: str = "",
+) -> None:
+    rollback = snapshot.get("rollback") if isinstance(snapshot, dict) and isinstance(snapshot.get("rollback"), dict) else {}
+    fields = {
+        "action": action,
+        "reason": reason[:200],
+        "decision": decision,
+        "detail": detail[:240],
+        "status": _lifecycle_string((snapshot or {}).get("status")) if isinstance(snapshot, dict) else "",
+        "rollbackStatus": _lifecycle_string(rollback.get("status")),
+    }
+    _record_self_scene_event(
+        "lifecycle_intent",
+        f"self_evolution_run.lifecycle_intent.{decision}",
+        run_id=run_id,
+        message=f"Self-evolution lifecycle intent {decision}.",
+        level="error" if outcome == "failed" else "info",
+        outcome=outcome,
+        fields=fields,
+        lifecycle=True,
+    )
+
+
+def _require_lifecycle_run_snapshot(action: str, run_id: str, reason: str) -> dict[str, Any]:
+    normalized = _lifecycle_string(run_id)
+    if not normalized:
+        _record_lifecycle_intent_decision(
+            action=action,
+            run_id="",
+            reason=reason,
+            decision="rejected",
+            outcome="failed",
+            detail="missing_run_id",
+        )
+        raise SelfEvolutionRunValidationError(
+            text_for(get_web_language(), zh="缺少自进化 run id。", en="Missing self-evolution run id.")
+        )
+    snapshot = get_self_evolution_run_snapshot(normalized)
+    if snapshot is None:
+        _record_lifecycle_intent_decision(
+            action=action,
+            run_id=normalized,
+            reason=reason,
+            decision="rejected",
+            outcome="failed",
+            detail="run_not_found",
+        )
+        raise SelfEvolutionRunNotFoundError(
+            text_for(get_web_language(), zh="未找到这条自进化记录。", en="Self-evolution run not found.")
+        )
+    return snapshot
+
+
+def _validate_lifecycle_action_state(action: str, snapshot: dict[str, Any], reason: str) -> None:
+    run_id = _lifecycle_string(snapshot.get("runId"))
+    status = _lifecycle_string(snapshot.get("status")).lower()
+    rollback = snapshot.get("rollback") if isinstance(snapshot.get("rollback"), dict) else {}
+    rollback_status = _lifecycle_string(rollback.get("status")).lower()
+    if action == "restart_after_apply":
+        if status != "done" or rollback_status != "available":
+            _record_lifecycle_intent_decision(
+                action=action,
+                run_id=run_id,
+                reason=reason,
+                decision="rejected",
+                outcome="failed",
+                snapshot=snapshot,
+                detail="apply_or_rollback_not_ready",
+            )
+            raise SelfEvolutionRunValidationError(
+                text_for(
+                    get_web_language(),
+                    zh="只有已完成且具备可用回滚清单的自进化记录才能请求应用后重启。",
+                    en="restart_after_apply requires a completed self-evolution run with an available rollback manifest.",
+                )
+            )
+        return
+    if action == "resume_self_evolution":
+        if status != "paused":
+            _record_lifecycle_intent_decision(
+                action=action,
+                run_id=run_id,
+                reason=reason,
+                decision="rejected",
+                outcome="failed",
+                snapshot=snapshot,
+                detail="run_not_paused",
+            )
+            raise SelfEvolutionRunValidationError(
+                text_for(
+                    get_web_language(),
+                    zh="只有已暂停的自进化记录才能请求继续。",
+                    en="resume_self_evolution requires a paused self-evolution run.",
+                )
+            )
+
+
 def _runtime_manager_live_control_enabled() -> bool:
     return runtime_manager_live_control_enabled(PROJECT_ROOT)
 
@@ -174,20 +320,51 @@ def _ensure_runtime_manager_daemon() -> None:
 
 
 def request_lifecycle_intent(*, action: str, reason: str, run_id: str, task_id: str, worktree: str) -> dict[str, Any]:
-    return launcher_service.submit_lifecycle_intent(
+    normalized_action = _lifecycle_string(action)
+    normalized_reason = _lifecycle_string(reason)
+    snapshot = _require_lifecycle_run_snapshot(normalized_action, run_id, normalized_reason)
+    _validate_lifecycle_action_state(normalized_action, snapshot, normalized_reason)
+    trusted_run_id = _lifecycle_string(snapshot.get("runId")) or _lifecycle_string(run_id)
+    trusted_task_id = _trusted_lifecycle_task_id(snapshot, _lifecycle_string(task_id))
+    trusted_worktree = _trusted_lifecycle_worktree(snapshot)
+    _record_lifecycle_intent_decision(
+        action=normalized_action,
+        run_id=trusted_run_id,
+        reason=normalized_reason,
+        decision="validated",
+        outcome="succeeded",
+        snapshot=snapshot,
+    )
+    result = launcher_service.submit_lifecycle_intent(
         {
-            "action": action,
-            "reason": reason,
-            "idempotencyKey": f"{run_id}:{action}",
+            "action": normalized_action,
+            "reason": normalized_reason,
+            "idempotencyKey": f"{trusted_run_id}:{normalized_action}",
         },
         actor_context={
             "actorType": "self_evolution_agent",
             "actorId": "self-evolution",
-            "sourceRunId": run_id,
-            "sourceTaskId": task_id,
-            "sourceWorktree": worktree,
+            "sourceRunId": trusted_run_id,
+            "sourceTaskId": trusted_task_id,
+            "sourceWorktree": trusted_worktree,
         },
     )
+    result = {
+        **result,
+        "sourceRunId": trusted_run_id,
+        "sourceTaskId": trusted_task_id,
+        "sourceWorktree": trusted_worktree,
+    }
+    _record_lifecycle_intent_decision(
+        action=normalized_action,
+        run_id=trusted_run_id,
+        reason=normalized_reason,
+        decision=str(result.get("status") or "submitted"),
+        outcome="failed" if str(result.get("status") or "") == "rejected" else "succeeded",
+        snapshot=snapshot,
+        detail=str(result.get("intentId") or ""),
+    )
+    return result
 
 
 def _map_runtime_manager_error(message: str, error_type: str) -> Exception:
