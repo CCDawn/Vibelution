@@ -68,6 +68,11 @@ def test_prompt_template_registry_repairs_research_defaults(tmp_path, monkeypatc
     assert "research_proposal_apply_tool" in steward_detail["content"]
     assert "Tool Plan" in steward_detail["content"]
     assert "ToolPolicy.allowedTools" not in steward_detail["content"]
+    knowledge_steward_detail = prompt_template_service.get_prompt_template("prompt-knowledge-steward")
+    assert knowledge_steward_detail is not None
+    assert knowledge_steward_detail["metadata"]["roleKey"] == "knowledge_steward"
+    assert "只处理 source_quality_approved" in knowledge_steward_detail["content"]
+    assert "不要推断截断或隐藏候选" in knowledge_steward_detail["content"]
     discovery_detail = prompt_template_service.get_prompt_template("prompt-challenge-cup-data-discovery")
     assert discovery_detail is not None
     assert discovery_detail["metadata"]["roleKey"] == "challenge_cup_data_discovery"

@@ -17,7 +17,7 @@ from .runtime_scene_service import record_runtime_scene_event
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 PROMPT_TEMPLATE_INDEX_VERSION = 1
-CHALLENGE_CUP_STAGE_TASK_PROMPT_VERSION = 7
+CHALLENGE_CUP_STAGE_TASK_PROMPT_VERSION = 8
 PROMPT_TEMPLATE_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{1,95}$")
 PROMPT_TEMPLATE_PATH = developer_sandbox.formal_workspace_path(PROJECT_ROOT, "agent_config", "prompt_templates.json")
 
@@ -46,6 +46,8 @@ DEFAULT_PROMPT_TEMPLATES: tuple[dict[str, Any], ...] = (
             "- 接收 source_collection_stage_session_task 时，先调用 source_collection_context_tool 读取本轮资料上下文、任务输入和 writebackContract。\n"
             "- 完成、阻塞或失败都调用 source_collection_stage_writeback_tool 回写结构化状态；memory / knowledge_steward 阶段的 approved 候选会由后端复用 Team Knowledge source review、proposal review/apply gate 创建正式 KnowledgeItem。\n"
             "- 通过入库时，result 应包含 stewardPackDraft + autoIngestDecision，或 candidate_summary.approved.candidates / approvedCandidateIds；后端只采纳本轮且 source_quality approved 的候选，其他阶段仍只更新任务结果。\n"
+            "- memory / knowledge_steward 阶段只处理 source_quality_approved 的 approved 候选；优先使用 source_collection_context_tool 返回的 stewardActionPacket.approvedCandidateIds 和 writebackResultSkeleton。\n"
+            "- 不要推断截断或隐藏候选；pending、rejected、needs_revision 只作为 deferredCandidateCounts 汇报，不要在 memory 阶段继续审查或补全它们。\n"
             "- 如果上下文或回写工具不可用，直接报告缺口，不要声称已完成入库或治理。\n\n"
             "## 工作策略\n"
             "- 先确认来源、证据锚点、目标知识库和当前治理状态，再给出建议。\n"
