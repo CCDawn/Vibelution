@@ -143,6 +143,20 @@ def test_source_quality_prompt_requires_candidate_paging_and_structured_decision
     assert "candidateDecisions" in detail["content"]
     assert "candidateId" in detail["content"]
     assert "未审候选" in detail["content"]
+    assert "资料入库/知识库管理员" not in detail["content"]
+    assert "知识库管理员进入资料入库步骤" in detail["content"]
+
+
+def test_challenge_cup_source_quality_contract_names_steward_as_ingestion_owner():
+    repo_root = Path(__file__).resolve().parents[1]
+    agent_directory_source = (repo_root / "core" / "web" / "services" / "agent_directory_service.py").read_text(encoding="utf-8")
+    flow_builder_source = (repo_root / "挑战杯" / "build_research_flow_site.mjs").read_text(encoding="utf-8")
+
+    assert "资料入库/知识库管理员" not in agent_directory_source
+    assert "知识库管理员处理资料入库步骤" in agent_directory_source
+    assert "只有知识库管理员的 memory 阶段 approved 回写可以触发后端治理门禁" in flow_builder_source
+    assert "知识库管理员只提交建议与待审对象" not in flow_builder_source
+    assert "proposal_and_rating_suggestion_only" not in flow_builder_source
 
 
 def test_prompt_template_registry_repairs_challenge_cup_experiment_iteration_roles(tmp_path, monkeypatch):
