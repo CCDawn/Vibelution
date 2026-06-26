@@ -44,6 +44,8 @@ $arguments = @(
     "/target:winexe",
     "/optimize+",
     "/platform:anycpu",
+    "/reference:System.Windows.Forms.dll",
+    "/reference:System.Drawing.dll",
     ("/win32icon:{0}" -f $iconPath),
     ("/out:{0}" -f $OutputPath),
     $sourcePath
