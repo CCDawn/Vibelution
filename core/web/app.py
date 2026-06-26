@@ -74,6 +74,7 @@ SENSITIVE_QUERY_KEYWORDS = (
     "bearer",
 )
 API_RUNTIME_SLOW_GET_THRESHOLD_MS = 800.0
+API_RUNTIME_TEAM_WORKBENCH_REFERER_PATHS = frozenset({"/teams", "/agents/teams"})
 
 
 class UTF8JSONResponse(JSONResponse):
@@ -156,9 +157,15 @@ def _is_signal_api_response(request: Request, status_code: int, *, duration_ms: 
     method = request.method.upper()
     if method in {"POST", "PUT", "PATCH", "DELETE"}:
         return True
+    if method == "GET" and _is_team_workbench_api_probe_request(request):
+        return True
     if method == "GET" and float(duration_ms or 0.0) >= API_RUNTIME_SLOW_GET_THRESHOLD_MS:
         return True
     return int(status_code or 0) >= 400
+
+
+def _is_team_workbench_api_probe_request(request: Request) -> bool:
+    return _safe_referer_path(request) in API_RUNTIME_TEAM_WORKBENCH_REFERER_PATHS
 
 
 def _record_api_runtime_event(

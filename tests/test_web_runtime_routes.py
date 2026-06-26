@@ -3951,6 +3951,8 @@ def test_backend_api_runtime_event_records_mutating_request(tmp_path, monkeypatc
     monkeypatch.setattr(runtime_service, "_schedule_local_backend_exit", lambda delay_seconds=0.35: None)
     monkeypatch.setattr(runtime_service, "LAUNCHER_SCRIPT_PATH", tmp_path / "missing-launcher.ps1")
     monkeypatch.setattr(runtime_service, "LAUNCHER_STATE_PATH", tmp_path / "missing-state.json")
+    monkeypatch.setattr(runtime_service, "list_active_session_work_runs", lambda: [])
+    monkeypatch.setattr(runtime_service, "_work_run_summary", lambda: {"active": {}, "activeItems": {}})
 
     response = client.post("/api/runtime/shutdown")
 
@@ -4092,6 +4094,47 @@ def test_backend_api_runtime_event_skips_fast_success_get_request(tmp_path, monk
 
     assert response.status_code == 200
     assert not (scene_dir / "raw" / "backend.api.log").exists()
+
+
+def test_backend_api_runtime_event_records_fast_team_workbench_get_request(tmp_path, monkeypatch):
+    scene_dir = _seed_runtime_scene_bundle(tmp_path, scene_id="scene-fast-team-workbench-get", status="running")
+    launcher_state_path = tmp_path / ".runtime" / "launcher" / "state.json"
+    launcher_state_path.parent.mkdir(parents=True, exist_ok=True)
+    launcher_state_path.write_text(
+        json.dumps(
+            {
+                "runtimeSceneId": "scene-fast-team-workbench-get",
+                "runtimeSceneDir": str(scene_dir),
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(runtime_scene_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(runtime_scene_service, "LAUNCHER_STATE_PATH", launcher_state_path)
+    perf_values = iter([300.0, 300.05])
+    monkeypatch.setattr(web_app, "_api_runtime_perf_counter", lambda: next(perf_values, 300.05), raising=False)
+
+    response = client.get(
+        "/api/runtime/summary",
+        headers={"referer": "http://testserver/teams?team=research-team&researchView=source_collection"},
+    )
+
+    assert response.status_code == 200
+    backend_raw = (scene_dir / "raw" / "backend.api.log").read_text(encoding="utf-8")
+    assert "backend.api.request" in backend_raw
+    assert "/api/runtime/summary" in backend_raw
+
+    backend_events = [
+        json.loads(line)
+        for line in (scene_dir / "events" / "backend.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    api_event = backend_events[-1]
+    assert api_event["event_code"] == "backend.api.request"
+    assert api_event["fields"]["method"] == "GET"
+    assert api_event["fields"]["path"] == "/api/runtime/summary"
+    assert api_event["fields"]["refererPath"] == "/teams"
+    assert api_event["fields"]["durationMs"] < web_app.API_RUNTIME_SLOW_GET_THRESHOLD_MS
 
 
 def test_backend_api_runtime_event_marks_model_discovery_client_error_operational(tmp_path, monkeypatch):
