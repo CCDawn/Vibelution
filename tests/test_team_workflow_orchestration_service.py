@@ -54,6 +54,35 @@ def test_source_collection_formal_knowledge_boundary_requires_steward_memory_sta
     assert contract["resultAuthority"] == "source_collection_stage_writeback_tool"
 
 
+def test_source_collection_summary_reuses_processing_status_for_projection(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
+    team = team_service.create_team(name="挑战杯科研团队")
+    run_response = team_workflow_orchestration_service.start_source_collection_run(
+        team["teamId"],
+        {
+            "topic": "predictive coding",
+            "agentRoles": ["data_discovery"],
+            "querySeeds": ["predictive coding"],
+            "promptCachePolicy": {"requirement": "disabled"},
+        },
+    )
+    run_id = run_response["run"]["runId"]
+    real_get_processing_status = data_processing_service.get_processing_status
+    status_calls = []
+
+    def counted_get_processing_status(requested_run_id):
+        status_calls.append(requested_run_id)
+        return real_get_processing_status(requested_run_id)
+
+    monkeypatch.setattr(data_processing_service, "get_processing_status", counted_get_processing_status)
+
+    payload = team_workflow_orchestration_service.get_source_collection_summary(team["teamId"], run_id=run_id)
+
+    assert payload["runId"] == run_id
+    assert status_calls == [run_id]
+
+
 class _FakeLocalResearchMessage:
     def __init__(self, content, *, reasoning_content=""):
         self.content = content

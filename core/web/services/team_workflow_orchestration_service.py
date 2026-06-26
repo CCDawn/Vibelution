@@ -6286,17 +6286,31 @@ def get_source_collection_summary(team_id: str, *, run_id: str = "") -> dict[str
     run_status: dict[str, Any] = {}
     run_summary: dict[str, Any] = {}
     if normalized_run_id:
-        try:
-            run_status = data_processing_service.get_processing_status(normalized_run_id)
-        except data_processing_service.DataProcessingError as exc:
-            raise TeamWorkflowOrchestrationError(str(exc)) from exc
+        selected_run_status = selected_run.get("processingStatus") if isinstance(selected_run, dict) else None
+        if (
+            isinstance(selected_run_status, dict)
+            and _trim_text(selected_run_status.get("runId"), max_length=160) == normalized_run_id
+        ):
+            run_status = selected_run_status
+        else:
+            try:
+                run_status = data_processing_service.get_processing_status(normalized_run_id)
+            except data_processing_service.DataProcessingError as exc:
+                raise TeamWorkflowOrchestrationError(str(exc)) from exc
         run_summary = run_status.get("summary") if isinstance(run_status.get("summary"), dict) else {}
-    projection = _source_collection_stage_cards_projection(normalized_team_id, normalized_run_id) if normalized_run_id else {
-        "runId": "",
-        "cards": [],
-        "latestTasks": {},
-        "summary": {"closedLoopCount": 0, "stageCount": 0},
-    }
+    if normalized_run_id:
+        projection = _source_collection_stage_cards_projection(
+            normalized_team_id,
+            normalized_run_id,
+            run_status=run_status,
+        )
+    else:
+        projection = {
+            "runId": "",
+            "cards": [],
+            "latestTasks": {},
+            "summary": {"closedLoopCount": 0, "stageCount": 0},
+        }
     projection_summary = projection.get("summary") if isinstance(projection.get("summary"), dict) else {}
     stage_round_ref = _source_collection_stage_round_ref_for_run(normalized_team_id, normalized_run_id) if normalized_run_id else {}
     active_snapshot = _source_collection_work_run_store().load_active_snapshot(SOURCE_COLLECTION_WORK_RUN_KIND) if normalized_run_id else {}
@@ -13255,16 +13269,23 @@ def _source_collection_stage_round_ref_for_run(team_id: str, run_id: str) -> dic
     }
 
 
-def _source_collection_stage_cards_projection(team_id: str, run_id: str) -> dict[str, Any]:
+def _source_collection_stage_cards_projection(
+    team_id: str,
+    run_id: str,
+    *,
+    run_status: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
     normalized_run_id = _trim_text(run_id, max_length=160)
     if not normalized_run_id:
         return {"runId": "", "cards": [], "latestTasks": {}, "summary": {"closedLoopCount": 0, "stageCount": 0}}
-    try:
-        run_status = data_processing_service.get_processing_status(normalized_run_id)
-    except data_processing_service.DataProcessingError:
-        run_status = {}
-    run_summary = run_status.get("summary") if isinstance(run_status.get("summary"), dict) else {}
+    resolved_run_status = run_status if isinstance(run_status, dict) else None
+    if resolved_run_status is None:
+        try:
+            resolved_run_status = data_processing_service.get_processing_status(normalized_run_id)
+        except data_processing_service.DataProcessingError:
+            resolved_run_status = {}
+    run_summary = resolved_run_status.get("summary") if isinstance(resolved_run_status.get("summary"), dict) else {}
     with _WORKFLOW_LOCK:
         candidate_store = _load_candidate_store(normalized_team_id)
     all_candidates = [item for item in list(candidate_store.get("candidates") or []) if isinstance(item, dict)]
