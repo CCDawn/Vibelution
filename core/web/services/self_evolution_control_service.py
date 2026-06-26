@@ -25,6 +25,7 @@ from core.evaluation.self_evolution_reflection import (
     record_bounded_self_evolution_reflection,
 )
 from core.infrastructure import developer_sandbox, git_process
+from core.launcher import service as launcher_service
 from core.infrastructure.agent_session import get_session_state
 from core.orchestration.context_engine import build_agent_context, record_agent_turn_result
 from core.orchestration.turn_runner import AgentSingleTurnRequest, run_agent_single_turn
@@ -170,6 +171,23 @@ def _ensure_runtime_manager_daemon() -> None:
     from core.runtime_manager.daemon import ensure_daemon_running
 
     ensure_daemon_running()
+
+
+def request_lifecycle_intent(*, action: str, reason: str, run_id: str, task_id: str, worktree: str) -> dict[str, Any]:
+    return launcher_service.submit_lifecycle_intent(
+        {
+            "action": action,
+            "reason": reason,
+            "idempotencyKey": f"{run_id}:{action}",
+        },
+        actor_context={
+            "actorType": "self_evolution_agent",
+            "actorId": "self-evolution",
+            "sourceRunId": run_id,
+            "sourceTaskId": task_id,
+            "sourceWorktree": worktree,
+        },
+    )
 
 
 def _map_runtime_manager_error(message: str, error_type: str) -> Exception:
