@@ -751,11 +751,14 @@ def reconcile_lifecycle_intent(intent: dict[str, Any]) -> dict[str, Any]:
     terminal_status = _lifecycle_status_for_runtime_result(result)
     if terminal_status == "":
         return intent
-    return lifecycle_intent_store.complete_lifecycle_intent(
+    result_summary = _lifecycle_result_summary(result)
+    completed = lifecycle_intent_store.complete_lifecycle_intent(
         str(intent.get("intentId") or ""),
         status=terminal_status,
-        result=_lifecycle_result_summary(result),
+        result=result_summary,
     )
+    _record_lifecycle_terminal_event(intent, status=terminal_status, result=result_summary)
+    return completed
 
 
 def _load_runtime_manager_command_result(command_id: str) -> dict[str, Any]:
@@ -800,6 +803,32 @@ def _lifecycle_result_summary(result: dict[str, Any]) -> dict[str, Any]:
     if superseded_by:
         summary["supersededByCommandId"] = _truncate(superseded_by, 160)
     return summary
+
+
+def _record_lifecycle_terminal_event(intent: dict[str, Any], *, status: str, result: dict[str, Any]) -> None:
+    fields: dict[str, object] = {
+        "action": str(intent.get("action") or ""),
+        "commandId": str(result.get("commandId") or intent.get("commandId") or ""),
+        "intentId": str(intent.get("intentId") or ""),
+        "ok": bool(result.get("ok")),
+        "sourceRunId": str(intent.get("sourceRunId") or ""),
+        "sourceTaskId": str(intent.get("sourceTaskId") or ""),
+        "status": str(status or ""),
+    }
+    error_type = str(result.get("errorType") or "").strip()
+    if error_type:
+        fields["errorType"] = _truncate(error_type, 160)
+    superseded_by = str(result.get("supersededByCommandId") or "").strip()
+    if superseded_by:
+        fields["supersededByCommandId"] = _truncate(superseded_by, 160)
+    _record_launcher_event(
+        "launcher.lifecycle_intent.runtime_terminal",
+        phase="lifecycle_intent",
+        message="Launcher reconciled lifecycle intent terminal runtime result.",
+        outcome="failed" if status == "failed" else status,
+        level="error" if status == "failed" else "info",
+        fields=fields,
+    )
 
 
 def claim_desktop_action(desktop_session_id: str, *, lease_seconds: int = 30) -> dict[str, Any]:
