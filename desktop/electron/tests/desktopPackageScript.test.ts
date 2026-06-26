@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 
 const buildScriptPath = fileURLToPath(new URL("../../../scripts/build_desktop_package.ps1", import.meta.url));
 const verifyScriptPath = fileURLToPath(new URL("../../../scripts/verify_desktop_package.ps1", import.meta.url));
+const lifecycleScriptPath = fileURLToPath(new URL("../../../scripts/verify_desktop_lifecycle.ps1", import.meta.url));
 
 describe("desktop package script", () => {
   it("does not mask npm or node failures before writing the launch profile", () => {
@@ -36,5 +37,32 @@ describe("desktop package script", () => {
     expect(script).toContain("$summary.bootstrap.parsed -ne $true");
     expect(script).not.toContain("taskkill");
     expect(script).not.toContain("Stop-Process -Name Vibelution");
+  });
+
+  it("provides a reusable lifecycle verification entrypoint without duplicating package checks", () => {
+    const script = readFileSync(lifecycleScriptPath, "utf8");
+
+    expect(script).toContain("param(");
+    expect(script).toContain("function Invoke-CheckedNative");
+    expect(script).toContain("function Get-AllVibelutionDesktopProcesses");
+    expect(script).toContain("function Get-DesktopPackageProcesses");
+    expect(script).toContain("function Assert-NoOtherVibelutionDesktopProcesses");
+    expect(script).toContain("function Format-DesktopCommandLine");
+    expect(script).toContain("$MaxCommandLineLength = 260");
+    expect(script).toContain("function Wait-ForDesktopRootProcess");
+    expect(script).toContain("function Stop-OwnedDesktopProcesses");
+    expect(script).toContain("function Wait-ForNoOwnedDesktopProcesses");
+    expect(script).toContain("$packageVerifier = Join-Path $projectDir \"scripts/verify_desktop_package.ps1\"");
+    expect(script).toContain("$desktopExe = Join-Path $projectDir \"dist/desktop/win-unpacked/Vibelution.exe\"");
+    expect(script).toContain("Invoke-CheckedNative powershell @(\"-ExecutionPolicy\", \"Bypass\", \"-File\", $packageVerifier");
+    expect(script).toContain("Start-Process -FilePath $desktopExe -PassThru");
+    expect(script).toContain("Start-Process -FilePath $desktopExe -PassThru");
+    expect(script).toContain("Stop-Process -Id");
+    expect(script).toContain("First desktop launch did not remain running.");
+    expect(script).toContain("firstInstanceStayedRunning");
+    expect(script).toContain("secondInstanceCreatedExtraRoot");
+    expect(script).not.toContain("taskkill");
+    expect(script).not.toContain("Stop-Process -Name Vibelution");
+    expect(script).not.toContain("scripts/build_desktop_package.ps1");
   });
 });
