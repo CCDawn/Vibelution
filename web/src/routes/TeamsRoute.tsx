@@ -4285,6 +4285,15 @@ export function TeamsRoute({
         : sourceCollectionStageWritebackRefetchInterval(pageVisible, payload, sourceCollectionStageWritebackSyncActive);
     },
   });
+  const sourceCollectionDetailQueriesEnabled = Boolean(
+    researchWorkflowTeamSelected
+    && selectedSourceCollectionRunEffectiveId
+    && (
+      !sourceCollectionWorkspaceSelected
+      || sourceCollectionSummaryQuery.isSuccess
+      || sourceCollectionSummaryQuery.isError
+    ),
+  );
   const runtimeSummaryQuery = useQuery({
     queryKey: queryKeys.runtimeSummary(),
     queryFn: () => fetchJson<RuntimeSummary>("/api/runtime/summary"),
@@ -4298,7 +4307,7 @@ export function TeamsRoute({
   const sourceCollectionRunStatusQuery = useQuery({
     queryKey: queryKeys.dataProcessingRunStatus(selectedSourceCollectionRunEffectiveId || "none"),
     queryFn: () => fetchJson<DataProcessingStatus>(`/api/data-processing/runs/${encodeURIComponent(selectedSourceCollectionRunEffectiveId)}/status`),
-    enabled: Boolean(researchWorkflowTeamSelected && selectedSourceCollectionRunEffectiveId),
+    enabled: sourceCollectionDetailQueriesEnabled,
     refetchInterval: (query) => {
       const status = query.state.data as DataProcessingStatus | undefined;
       return sourceCollectionRunRefetchInterval(pageVisible, status?.runStatus || "");
@@ -4310,7 +4319,7 @@ export function TeamsRoute({
       fetchJson<DataProcessingRecordListPayload>(
         `/api/data-processing/runs/${encodeURIComponent(selectedSourceCollectionRunEffectiveId)}/records`,
       ),
-    enabled: Boolean(researchWorkflowTeamSelected && selectedSourceCollectionRunEffectiveId),
+    enabled: sourceCollectionDetailQueriesEnabled,
     refetchInterval: () => sourceCollectionRunRefetchInterval(pageVisible, sourceCollectionRunStatusQuery.data?.runStatus || ""),
   });
   const sourceCollectionAssignmentsQuery = useQuery({
@@ -4319,7 +4328,7 @@ export function TeamsRoute({
       fetchJson<DataProcessingCollectionAssignmentListPayload>(
         `/api/data-processing/runs/${encodeURIComponent(selectedSourceCollectionRunEffectiveId)}/collection-assignments`,
       ),
-    enabled: Boolean(researchWorkflowTeamSelected && selectedSourceCollectionRunEffectiveId),
+    enabled: sourceCollectionDetailQueriesEnabled,
     refetchInterval: () => sourceCollectionRunRefetchInterval(pageVisible, sourceCollectionRunStatusQuery.data?.runStatus || ""),
   });
   const autoCanvasViewportStyle = useMemo(() => canvasViewStyle(displayCanvasNodes, canvasFrameSize), [canvasFrameSize, displayCanvasNodes]);
