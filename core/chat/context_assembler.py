@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """Cache-friendly conversation context assembly."""
 
 from __future__ import annotations
@@ -259,6 +259,16 @@ def compact_agent_inbox_history_seed_messages(
         message = dict(raw)
         content = str(message.get("content") or "")
         original_chars = len(content)
+        if _looks_like_historical_source_collection_stage_task_message(message):
+            compacted_content = _historical_source_collection_stage_task_summary(message)
+            if compacted_content != content:
+                message["content"] = compacted_content
+                state["compactedMessageCount"] += 1
+                state["trimmedMessageCount"] += 1
+                state["originalChars"] += original_chars
+                state["compactedChars"] += len(compacted_content)
+            compacted_messages.append(message)
+            continue
         if _looks_like_historical_tool_result(content):
             compacted_content, omitted_failure = _compact_historical_tool_result(content, char_limit=bounded_tool_limit)
             if compacted_content != content:
@@ -285,6 +295,42 @@ def compact_agent_inbox_history_seed_messages(
     return compacted_messages, state
 
 
+def _looks_like_historical_source_collection_stage_task_message(message: dict[str, Any]) -> bool:
+    if str(message.get("role") or "").strip().lower() != "user":
+        return False
+    metadata = message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
+    kind = str(metadata.get("kind") or "").strip()
+    if kind == "source_collection_stage_session_task":
+        return True
+    if str(metadata.get("sourceCollectionStageTaskId") or metadata.get("source_collection_stage_task_id") or "").strip():
+        return True
+    return str(message.get("content") or "").lstrip().startswith("## 资料搜集阶段任务：")
+
+
+def _historical_source_collection_stage_task_summary(message: dict[str, Any]) -> str:
+    metadata = message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
+    content = str(message.get("content") or "").strip()
+    title = next((line.strip("# ").strip() for line in content.splitlines() if line.strip()), "资料搜集阶段任务")
+    task_id = str(metadata.get("sourceCollectionStageTaskId") or metadata.get("source_collection_stage_task_id") or "").strip()
+    run_id = str(metadata.get("runId") or metadata.get("run_id") or "").strip()
+    stage_id = str(metadata.get("stageId") or metadata.get("stage_id") or "").strip()
+    agent_role = str(metadata.get("agentRole") or metadata.get("agent_role") or "").strip()
+    facts = [
+        f"任务: {title}" if title else "",
+        f"stageTaskId: {task_id}" if task_id else "",
+        f"runId: {run_id}" if run_id else "",
+        f"stageId: {stage_id}" if stage_id else "",
+        f"agentRole: {agent_role}" if agent_role else "",
+    ]
+    return "\n".join(
+        part
+        for part in [
+            "历史阶段任务启动消息已压缩；当前轮请以本轮任务消息和 source_collection_context_tool 返回的上下文为准。",
+            *facts,
+            "旧任务完整启动提示仍保存在会话历史中。",
+        ]
+        if part
+    )
 def _looks_like_historical_tool_result(content: str) -> bool:
     text = str(content or "").lstrip()
     return text.startswith("历史工具结果:") or text.startswith("历史工具证据:")
