@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
+import type { IpcMainInvokeEvent } from "electron";
+import { IPC_CHANNELS } from "../src/ipc.js";
 import { assertLocalHttpUrl } from "../src/security/urlPolicy.js";
+import { assertTrustedIpcSender } from "../src/security/ipcSenderValidation.js";
 import { resolveLauncherUrl } from "../src/windows/windowUrlResolver.js";
 import { ElectronWindowProvider, type ElectronWindowLike } from "../src/windows/electronWindowProvider.js";
 import { closedWindowState } from "../src/windows/windowProviderTypes.js";
@@ -135,3 +138,38 @@ describe("resolveLauncherUrl", () => {
     );
   });
 });
+
+describe("IPC channels", () => {
+  it("keeps the bridge narrow", () => {
+    expect(Object.keys(IPC_CHANNELS).sort()).toEqual([
+      "focusWorkbenchWindow",
+      "getDesktopShellSummary",
+      "getVersion",
+      "requestDesktopShellExit"
+    ]);
+  });
+
+  it("rejects sender frames outside the launcher and workbench origins", () => {
+    expect(() =>
+      assertTrustedIpcSender(fakeIpcEvent("http://127.0.0.1:8765/launcher"), [
+        "http://127.0.0.1:8765",
+        "http://127.0.0.1:8000"
+      ])
+    ).not.toThrow();
+    expect(() =>
+      assertTrustedIpcSender(fakeIpcEvent("https://example.com/launcher"), [
+        "http://127.0.0.1:8765",
+        "http://127.0.0.1:8000"
+      ])
+    ).toThrow("blocked ipc sender origin: https://example.com");
+    expect(() =>
+      assertTrustedIpcSender({ senderFrame: null } as IpcMainInvokeEvent, ["http://127.0.0.1:8765"])
+    ).toThrow("blocked ipc sender origin: <unknown>");
+  });
+});
+
+function fakeIpcEvent(url: string): IpcMainInvokeEvent {
+  return {
+    senderFrame: { url }
+  } as IpcMainInvokeEvent;
+}

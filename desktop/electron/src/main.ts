@@ -1,9 +1,12 @@
 import { app, ipcMain } from "electron";
 import { singleInstanceDecision } from "./appLock.js";
+import { IPC_CHANNELS } from "./ipc.js";
 import { createDesktopPaths, type DesktopPaths } from "./paths.js";
 import { fetchLauncherControlToken, runDesktopActionOnce } from "./protocol/desktopActionClient.js";
 import { bootstrapPythonLauncherService } from "./process/launcherServiceClient.js";
 import type { LauncherBootstrapResult } from "./process/launcherBootstrap.js";
+import { assertTrustedIpcSender } from "./security/ipcSenderValidation.js";
+import { decideShutdown, fetchLauncherActiveWorkStatus, type ShutdownDecision } from "./shutdown/shutdownCoordinator.js";
 import { ElectronWindowProvider } from "./windows/electronWindowProvider.js";
 import { createLauncherWindow } from "./windows/launcherWindow.js";
 import { createWorkbenchWindow } from "./windows/workbenchWindow.js";
@@ -17,6 +20,8 @@ let launcherBootstrap: LauncherBootstrapResult | null = null;
 let desktopActionTimer: ReturnType<typeof setInterval> | null = null;
 let desktopActionPollRunning = false;
 let desktopActionContext: DesktopActionLoopContext | null = null;
+let shutdownApproved = false;
+let shutdownRequestRunning = false;
 
 type DesktopActionLoopContext = {
   launcherOrigin: string;
@@ -119,14 +124,30 @@ async function resolveDesktopActionLoopContext(bootstrap: LauncherBootstrapResul
   const launcherOrigin = resolveLauncherUrl(desktopEnv, bootstrap.launcherUrl);
   const envToken = String(desktopEnv.VIBELUTION_WEB_CONTROL_TOKEN || "").trim();
   const controlToken = envToken || (await fetchLauncherControlToken({ launcherOrigin }));
-  const envDesktopSessionId = String(desktopEnv.VIBELUTION_DESKTOP_SESSION_ID || "").trim();
-  const bootstrapId = String(bootstrap.launcherInstanceId || bootstrap.workspaceId || process.pid).trim();
   desktopActionContext = {
     launcherOrigin,
     controlToken,
-    desktopSessionId: envDesktopSessionId || `electron-${bootstrapId}`
+    desktopSessionId: currentDesktopSessionId(bootstrap, desktopEnv)
   };
   return desktopActionContext;
+}
+
+function currentDesktopSessionId(
+  bootstrap: LauncherBootstrapResult | null,
+  desktopEnv: NodeJS.ProcessEnv = desktopEnvironment()
+): string {
+  const envDesktopSessionId = String(desktopEnv.VIBELUTION_DESKTOP_SESSION_ID || "").trim();
+  if (envDesktopSessionId) {
+    return envDesktopSessionId;
+  }
+  if (desktopActionContext?.desktopSessionId) {
+    return desktopActionContext.desktopSessionId;
+  }
+  if (bootstrap === null) {
+    return "";
+  }
+  const bootstrapId = String(bootstrap.launcherInstanceId || bootstrap.workspaceId || process.pid).trim();
+  return `electron-${bootstrapId}`;
 }
 
 function stopDesktopActionLoop(): void {
@@ -137,7 +158,77 @@ function stopDesktopActionLoop(): void {
   desktopActionPollRunning = false;
 }
 
-ipcMain.handle("launcher:get-version", () => app.getVersion());
+function trustedIpcOrigins(): string[] {
+  const desktopEnv = desktopEnvironment();
+  return Array.from(
+    new Set([
+      new URL(resolveLauncherUrl(desktopEnv, launcherBootstrap?.launcherUrl)).origin,
+      new URL(resolveWorkbenchUrl(desktopEnv, launcherBootstrap?.workbenchUrl)).origin
+    ])
+  );
+}
+
+async function requestDesktopShellExit(): Promise<ShutdownDecision> {
+  if (shutdownRequestRunning) {
+    return { allowed: false, reason: "active_work_running", message: "Desktop shell exit is already being evaluated." };
+  }
+  shutdownRequestRunning = true;
+  try {
+    const decision = await decideShutdown({
+      ownershipMode: launcherBootstrap?.mode ?? "attached",
+      activeWorkStatus: async () => {
+        if (launcherBootstrap === null) {
+          return { active: false, message: "" };
+        }
+        const context = await resolveDesktopActionLoopContext(launcherBootstrap);
+        return fetchLauncherActiveWorkStatus(context);
+      }
+    });
+    if (decision.allowed) {
+      shutdownApproved = true;
+      stopDesktopActionLoop();
+      app.quit();
+    }
+    return decision;
+  } finally {
+    shutdownRequestRunning = false;
+  }
+}
+
+ipcMain.handle(IPC_CHANNELS.getVersion, (event) => {
+  assertTrustedIpcSender(event, trustedIpcOrigins());
+  return app.getVersion();
+});
+
+ipcMain.handle(IPC_CHANNELS.getDesktopShellSummary, (event) => {
+  assertTrustedIpcSender(event, trustedIpcOrigins());
+  return {
+    schemaVersion: 1,
+    provider: "electron",
+    desktopSessionId: currentDesktopSessionId(launcherBootstrap),
+    windows: windowProvider?.snapshot() ?? null,
+    bootstrap: launcherBootstrap
+      ? {
+          mode: launcherBootstrap.mode,
+          launcherBackendPid: launcherBootstrap.launcherBackendPid,
+          protocolVersion: launcherBootstrap.protocolVersion,
+          minDesktopProtocolVersion: launcherBootstrap.minDesktopProtocolVersion,
+          maxDesktopProtocolVersion: launcherBootstrap.maxDesktopProtocolVersion,
+          capabilities: launcherBootstrap.capabilities
+        }
+      : null
+  };
+});
+
+ipcMain.handle(IPC_CHANNELS.focusWorkbenchWindow, async (event) => {
+  assertTrustedIpcSender(event, trustedIpcOrigins());
+  return await windowProvider?.focusWorkbench();
+});
+
+ipcMain.handle(IPC_CHANNELS.requestDesktopShellExit, async (event) => {
+  assertTrustedIpcSender(event, trustedIpcOrigins());
+  return await requestDesktopShellExit();
+});
 
 app.whenReady()
   .then(async () => {
@@ -156,10 +247,19 @@ app.on("second-instance", () => {
   void windowProvider?.openLauncher();
 });
 
-app.on("before-quit", () => {
-  stopDesktopActionLoop();
+app.on("before-quit", (event) => {
+  if (shutdownApproved) {
+    stopDesktopActionLoop();
+    return;
+  }
+  event.preventDefault();
+  void requestDesktopShellExit().catch((error: unknown) => {
+    console.warn(error instanceof Error ? error.message : String(error));
+  });
 });
 
 app.on("window-all-closed", () => {
-  // Task 11 replaces this with ShutdownCoordinator; scaffold must not bypass active-work guard.
+  void requestDesktopShellExit().catch((error: unknown) => {
+    console.warn(error instanceof Error ? error.message : String(error));
+  });
 });
