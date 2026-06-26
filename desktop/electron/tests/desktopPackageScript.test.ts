@@ -2,11 +2,12 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
-const scriptPath = fileURLToPath(new URL("../../../scripts/build_desktop_package.ps1", import.meta.url));
+const buildScriptPath = fileURLToPath(new URL("../../../scripts/build_desktop_package.ps1", import.meta.url));
+const verifyScriptPath = fileURLToPath(new URL("../../../scripts/verify_desktop_package.ps1", import.meta.url));
 
 describe("desktop package script", () => {
   it("does not mask npm or node failures before writing the launch profile", () => {
-    const script = readFileSync(scriptPath, "utf8");
+    const script = readFileSync(buildScriptPath, "utf8");
 
     expect(script).toContain("function Invoke-CheckedNative");
     expect(script).toContain("if ($LASTEXITCODE -ne 0)");
@@ -15,5 +16,25 @@ describe("desktop package script", () => {
     expect(script).toMatch(/Invoke-CheckedNative node @\(/);
     expect(script).not.toMatch(/^\s*npm --prefix/m);
     expect(script).not.toMatch(/^\s*node \$desktopLaunchProfileWriter/m);
+  });
+
+  it("provides a reusable package verification entrypoint", () => {
+    const script = readFileSync(verifyScriptPath, "utf8");
+
+    expect(script).toContain("param(");
+    expect(script).toContain("function Invoke-CheckedNative");
+    expect(script).toContain("function Assert-NoDesktopPackageProcesses");
+    expect(script).toContain("function Wait-ForNoNewDesktopPackageProcesses");
+    expect(script).toContain("[AllowEmptyCollection()]");
+    expect(script).toContain("$buildScript = Join-Path $projectDir \"scripts/build_desktop_package.ps1\"");
+    expect(script).toContain("$desktopExe = Join-Path $projectDir \"dist/desktop/win-unpacked/Vibelution.exe\"");
+    expect(script).toContain("$launchProfilePath = Join-Path $desktopResourcesDir \"vibelution-launch-profile.json\"");
+    expect(script).toContain("$summaryPath = Join-Path $projectDir \".runtime/launcher/electron-smoke-summary.json\"");
+    expect(script).toContain("Invoke-CheckedNative powershell @(\"-ExecutionPolicy\", \"Bypass\", \"-File\", $buildScript)");
+    expect(script).toContain("Start-Process -FilePath $desktopExe -ArgumentList @(\"--smoke\") -PassThru");
+    expect(script).toContain("ConvertFrom-Json");
+    expect(script).toContain("$summary.bootstrap.parsed -ne $true");
+    expect(script).not.toContain("taskkill");
+    expect(script).not.toContain("Stop-Process -Name Vibelution");
   });
 });
