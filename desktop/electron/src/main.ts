@@ -4,6 +4,12 @@ import { dirname } from "node:path";
 import { singleInstanceDecision } from "./appLock.js";
 import { applyDesktopCliToEnvironment, parseDesktopCliArgs } from "./cli/desktopCli.js";
 import { IPC_CHANNELS } from "./ipc.js";
+import {
+  DESKTOP_LAUNCH_PROFILE_FILE,
+  applyDesktopLaunchSettingsToEnvironment,
+  resolveDesktopLaunchSettings,
+  type DesktopLaunchSettings
+} from "./launch/desktopLaunchSettings.js";
 import { RuntimeSceneBridge, type RuntimeSceneElectronEvent } from "./lifecycle/runtimeSceneBridge.js";
 import { createDesktopPaths, type DesktopPaths } from "./paths.js";
 import { fetchLauncherControlToken, runDesktopActionOnce } from "./protocol/desktopActionClient.js";
@@ -38,6 +44,7 @@ let desktopSessionRevision = 0;
 let shutdownApproved = false;
 let shutdownRequestRunning = false;
 const desktopCliArgs = parseDesktopCliArgs(process.argv.slice(1));
+let cachedDesktopLaunchSettings: DesktopLaunchSettings | null = null;
 
 type DesktopActionLoopContext = {
   launcherOrigin: string;
@@ -51,9 +58,17 @@ if (!desktopCliArgs.smoke && lockDecision.action === "focus_existing") {
 }
 
 function createDesktopPathsForApp(): DesktopPaths {
+  const launchSettings = desktopLaunchSettings();
   const workspaceRoot = desktopEnvironment().VIBELUTION_WORKSPACE_ROOT;
   if (!workspaceRoot) {
-    throw new Error("VIBELUTION_WORKSPACE_ROOT is required until the first-run workspace picker exists");
+    const profileHint = [
+      `Provide --workspace, VIBELUTION_WORKSPACE_ROOT, or ${DESKTOP_LAUNCH_PROFILE_FILE}.`,
+      `Searched: ${launchSettings.searchedProfilePaths.join("; ") || "none"}.`,
+      launchSettings.profileError ? `Profile warning: ${launchSettings.profileError}.` : ""
+    ]
+      .filter(Boolean)
+      .join(" ");
+    throw new Error(`VIBELUTION_WORKSPACE_ROOT is required until the first-run workspace picker exists. ${profileHint}`);
   }
   const paths = createDesktopPaths({
     importMetaUrl: import.meta.url,
@@ -64,12 +79,25 @@ function createDesktopPathsForApp(): DesktopPaths {
   return paths;
 }
 
+function desktopLaunchSettings(): DesktopLaunchSettings {
+  if (cachedDesktopLaunchSettings !== null) {
+    return cachedDesktopLaunchSettings;
+  }
+  cachedDesktopLaunchSettings = resolveDesktopLaunchSettings({
+    env: process.env,
+    cliArgs: desktopCliArgs,
+    resourcesRoot: process.resourcesPath,
+    userDataRoot: app.getPath("userData")
+  });
+  return cachedDesktopLaunchSettings;
+}
+
 function desktopEnvironment(): NodeJS.ProcessEnv {
   const baseEnv = {
     ...process.env,
     NODE_ENV: process.env.NODE_ENV || (app.isPackaged ? "production" : "development")
   };
-  return applyDesktopCliToEnvironment(baseEnv, desktopCliArgs);
+  return applyDesktopLaunchSettingsToEnvironment(applyDesktopCliToEnvironment(baseEnv, desktopCliArgs), desktopLaunchSettings());
 }
 
 function createWindowProvider(paths: DesktopPaths, bootstrap: LauncherBootstrapResult | null): ElectronWindowProvider {
