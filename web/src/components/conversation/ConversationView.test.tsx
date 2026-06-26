@@ -330,10 +330,68 @@ describe("ConversationView edit resend affordance", () => {
     expect(html.indexOf("上一轮正式回答。")).toBeLessThan(html.indexOf("当前回答正在流式显示。"));
   });
 
+  it("merges a same-turn live overlay into the active assistant turn instead of rendering duplicates", () => {
+    const html = renderConversation(
+      [
+        {
+          id: "session-1-message-live-turn-1",
+          role: "assistant",
+          content: "正在唤起对话 agent...\n正在绑定 Agent 实例、私人工作区、记忆根和工具工作区。",
+          timestamp: "2026-06-26T10:30:00Z",
+          streaming: true,
+          streamStage: "agent_prepare",
+          feedbackEvents: [
+            {
+              sequence: 1,
+              kind: "status",
+              status: "running",
+              name: "agent_prepare",
+              summary: "正在绑定 Agent",
+            },
+          ],
+          metadata: {
+            kind: "session_live_overlay",
+            turnId: "turn-1",
+          },
+        },
+      ],
+      {
+        useDefaultProcessDisplayMode: true,
+        activeTurnMessage: {
+          id: "session-1-message-active-turn-1",
+          role: "assistant",
+          content: "",
+          timestamp: "2026-06-26T10:30:01Z",
+          streaming: true,
+          streamStage: "model_request",
+          feedbackEvents: [
+            {
+              sequence: 2,
+              kind: "status",
+              status: "running",
+              name: "model_request",
+              summary: "正在请求模型，等待首个响应片段。",
+            },
+          ],
+          metadata: {
+            kind: "session_active_turn_layer",
+            turnId: "turn-1",
+          },
+        },
+      },
+    );
+
+    expect(html).toContain("正在唤起对话 agent");
+    expect(html).toContain("正在请求");
+    expect(html.match(/assistantTurn/g)?.length ?? 0).toBe(1);
+    expect(html.indexOf("正在唤起对话 agent")).toBeLessThan(html.indexOf("正在请求"));
+  });
+
   it("keeps active streaming scroll signals on a small streaming-only tail", () => {
     expect(conversationViewSource).toContain("const streamingTimelineMessages = useMemo(");
-    expect(conversationViewSource).toContain("timelineMessages.filter((message) => message.streaming)");
-    expect(conversationViewSource).toContain("activeTurnMessage ? [...streamingMessages, activeTurnMessage] : streamingMessages");
+    expect(conversationViewSource).toContain("activeTimelineMessages.filter((message) => message.streaming)");
+    expect(conversationViewSource).toContain("isSessionLiveOverlayMessage(message)");
+    expect(conversationViewSource).toContain("mergeLiveOverlayIntoActiveTurnMessage(message, mergedActiveTurnMessage)");
     expect(conversationViewSource).toContain("buildStreamingTimelineScrollSignal(streamingTimelineMessages)");
     expect(conversationViewSource).not.toContain("activeTimelineSignalMessages");
   });
