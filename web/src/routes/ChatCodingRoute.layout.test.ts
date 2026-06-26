@@ -102,6 +102,23 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).not.toContain("setLiveAssistantMessagesBySession");
   });
 
+  it("clears transient active-turn UI state when a session is removed or stale", () => {
+    expect(routeSource).toContain("const clearSessionTransientUiState = useCallback(");
+    expect(routeSource).toContain("setActiveTurnLayersBySession((current) =>");
+    expect(routeSource).toContain("setActiveTurnLayerForSession(current, normalizedSessionId, undefined)");
+    expect(routeSource).toContain("queryClient.removeQueries({ queryKey: queryKeys.session(normalizedSessionId), exact: true })");
+
+    const staleCleanupIndex = routeSource.indexOf("clearSessionTransientUiState(activeSessionId");
+    const staleRemoveIndex = routeSource.indexOf("removeSessionWorkspace(activeSessionId");
+    expect(staleCleanupIndex).toBeGreaterThan(0);
+    expect(staleCleanupIndex).toBeLessThan(staleRemoveIndex);
+
+    const deleteCleanupIndex = routeSource.indexOf("clearSessionTransientUiState(variables.sessionId");
+    const deleteRemoveIndex = routeSource.indexOf("removeSessionWorkspace(variables.sessionId");
+    expect(deleteCleanupIndex).toBeGreaterThan(0);
+    expect(deleteCleanupIndex).toBeLessThan(deleteRemoveIndex);
+  });
+
   it("disables image attachment affordance when the active Agent image route model cannot read images", () => {
     expect(routeSource).toContain("modelImageInputSupportById");
     expect(routeSource).toContain("imageInputModelIdForAgent(activeSessionAgent, detail?.dialogueModelId)");
@@ -1554,7 +1571,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("sessionDetailQuery.isError");
     expect(routeSource).toContain("isSessionNotFoundError(sessionDetailQuery.error)");
     expect(routeSource).toContain("removeSessionWorkspace(activeSessionId, nextActiveSessionId || null)");
-    expect(routeSource).toContain("queryClient.removeQueries({ queryKey: queryKeys.session(activeSessionId), exact: true })");
+    expect(routeSource).toContain("clearSessionTransientUiState(activeSessionId)");
     expect(routeSource).toContain("sessions?.filter((session) => session.id !== activeSessionId)");
     expect(routeSource).toContain("removeDeletedSessionFromConversations(conversations, activeSessionId)");
     expect(routeSource).toContain("requestedSessionId === activeSessionId");
