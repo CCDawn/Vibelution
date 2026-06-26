@@ -21,11 +21,7 @@ import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
-try:
-    import tomllib
-except ModuleNotFoundError:  # pragma: no cover - Python < 3.11 fallback for developer shells.
-    tomllib = None  # type: ignore[assignment]
-
+import tomllib
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 RUNTIME_DIR = PROJECT_ROOT / ".runtime" / "launcher"

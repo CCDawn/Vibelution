@@ -53,15 +53,7 @@ from .providers import (
     show_model_info,
 )
 
-# TOML 库兼容处理
-try:
-    import tomllib
-except ImportError:
-    try:
-        import toml as tomllib
-    except ImportError:
-        tomllib = None
-
+import tomllib
 
 # ============================================================================
 # 配置文件路径
