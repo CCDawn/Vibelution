@@ -838,6 +838,22 @@ def _stop_owned_launcher(args: argparse.Namespace) -> dict[str, object]:
     backend_pid = int(state.get("launcherBackendPid") or 0)
     backend_launch_pid = int(state.get("launcherBackendLaunchPid") or 0)
     port = int(state.get("launcherControlPort") or _launcher_control_port())
+    if expected_backend_pid <= 0:
+        _append_log(
+            "desktop_entry_python.stop.skipped",
+            level="warning",
+            reason="owned_backend_pid_required",
+            launcher_backend_pid=backend_pid,
+            launcher_backend_launch_pid=backend_launch_pid,
+        )
+        return {
+            "schemaVersion": 1,
+            "status": "skipped",
+            "reason": "owned_backend_pid_required",
+            "expectedBackendPid": expected_backend_pid,
+            "launcherBackendPid": backend_pid,
+            "terminatedPids": [],
+        }
     if expected_backend_pid > 0 and expected_backend_pid not in {backend_pid, backend_launch_pid}:
         _append_log(
             "desktop_entry_python.stop.skipped",

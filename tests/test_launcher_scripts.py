@@ -996,6 +996,34 @@ def test_desktop_entry_stop_owned_launcher_refuses_mismatched_backend_pid(monkey
     assert saved_states == []
 
 
+def test_desktop_entry_stop_owned_launcher_requires_owned_backend_pid(monkeypatch, capsys):
+    bridge = _load_desktop_entry_py()
+    state = {
+        "sessionRole": "launcher_control_surface",
+        "launcherBackendPid": 111,
+        "launcherBackendLaunchPid": 111,
+        "launcherBrowserWindowPid": 222,
+        "launcherBrowserLaunchPid": 222,
+        "launcherControlPort": 8765,
+    }
+    terminated: list[int] = []
+    saved_states: list[dict[str, object]] = []
+
+    monkeypatch.setattr(bridge, "_append_log", lambda *args, **kwargs: None)
+    monkeypatch.setattr(bridge, "_read_state", lambda: dict(state))
+    monkeypatch.setattr(bridge, "_write_state", lambda next_state: saved_states.append(dict(next_state)))
+    monkeypatch.setattr(bridge, "_terminate_pid", lambda pid: terminated.append(pid))
+
+    result = bridge.main(["--action", "stop-launcher", "--output", "json"])
+
+    assert result == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["status"] == "skipped"
+    assert payload["reason"] == "owned_backend_pid_required"
+    assert terminated == []
+    assert saved_states == []
+
+
 def test_desktop_entry_python_bridge_replaces_orphaned_launcher_window(monkeypatch):
     bridge = _load_desktop_entry_py()
     state = {
