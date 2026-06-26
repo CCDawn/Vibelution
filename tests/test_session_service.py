@@ -104,6 +104,83 @@ def test_session_stream_full_queue_recovers_when_old_assistant_delta_must_drop()
     assert recovered["replaceThought"] is True
 
 
+def test_session_stream_full_queue_recovers_from_explicit_snapshot_when_public_delta_is_lightweight():
+    subscriber = queue.Queue(maxsize=1)
+    subscriber.put_nowait({"type": "assistant_delta", "contentDelta": "你"})
+
+    delivered, dropped = session_service._put_session_stream_event(
+        subscriber,
+        {
+            "type": "assistant_delta",
+            "content": "",
+            "thought": "",
+            "contentDelta": "好",
+            "thoughtDelta": "考",
+            "replaceContent": False,
+            "replaceThought": False,
+        },
+        recover_assistant_delta_on_drop=True,
+        assistant_delta_recovery_event={
+            "type": "assistant_delta",
+            "content": "",
+            "thought": "",
+            "contentDelta": "你好",
+            "thoughtDelta": "思考",
+            "replaceContent": True,
+            "replaceThought": True,
+        },
+    )
+
+    assert delivered is True
+    assert dropped == 1
+    recovered = subscriber.get_nowait()
+    assert recovered["content"] == ""
+    assert recovered["thought"] == ""
+    assert recovered["contentDelta"] == "你好"
+    assert recovered["thoughtDelta"] == "思考"
+    assert recovered["replaceContent"] is True
+    assert recovered["replaceThought"] is True
+
+
+def test_session_assistant_delta_publish_recovers_full_snapshot_with_lightweight_public_event(monkeypatch):
+    subscriber = queue.Queue(maxsize=1)
+    subscriber.put_nowait(
+        {
+            "type": "assistant_delta",
+            "sessionId": "session-live",
+            "turnId": "turn-old",
+            "contentDelta": "旧",
+        }
+    )
+    monkeypatch.setattr(session_service, "_session_ledger_sequence", lambda session_id: 42)
+    session_service._register_session_stream_subscriber("session-live", subscriber)
+    try:
+        session_service._publish_session_assistant_delta(
+            "session-live",
+            session_service.SessionLiveOutputState(
+                session_id="session-live",
+                turn_id="turn-1",
+                content="你好",
+                thought="思考",
+                content_delta="好",
+                thought_delta="考",
+            ),
+        )
+    finally:
+        session_service._unregister_session_stream_subscriber("session-live", subscriber)
+
+    recovered = subscriber.get_nowait()
+    assert recovered["sessionId"] == "session-live"
+    assert recovered["turnId"] == "turn-1"
+    assert recovered["ledgerSeq"] == 42
+    assert recovered["content"] == ""
+    assert recovered["thought"] == ""
+    assert recovered["contentDelta"] == "你好"
+    assert recovered["thoughtDelta"] == "思考"
+    assert recovered["replaceContent"] is True
+    assert recovered["replaceThought"] is True
+
+
 def test_get_session_detail_materializes_agent_directory_stub_without_switching_active(tmp_path, monkeypatch):
     save_chat_state(
         tmp_path,

@@ -5808,8 +5808,8 @@ def _load_conversations(
             changed = _repair_child_root_agent_direct_session_bindings(payload, agent_by_id=agent_by_id) or changed
         for raw in list(payload.get("conversations") or []):
             if repair and isinstance(raw, dict):
-                changed = _ensure_conversation_workspace_metadata(raw) or changed
                 changed = _ensure_conversation_agent_metadata(raw, agent_by_id=agent_by_id) or changed
+                changed = _ensure_conversation_workspace_metadata(raw) or changed
             conversation = _normalize_conversation(
                 raw,
                 agent_by_id=agent_by_id,
@@ -5851,8 +5851,8 @@ def _load_conversation_detail_target(
             continue
         if repair:
             changed = _repair_stale_running_conversation(raw) or changed
-            changed = _ensure_conversation_workspace_metadata(raw) or changed
             changed = _ensure_conversation_agent_metadata(raw, agent_by_id=agent_by_id) or changed
+            changed = _ensure_conversation_workspace_metadata(raw) or changed
         conversation = _normalize_conversation(
             raw,
             agent_by_id=agent_by_id,
@@ -17186,6 +17186,8 @@ def _set_session_live_output(
                     session_id=state.session_id,
                     turn_id=state.turn_id,
                     stage=state.stage,
+                    thought=state.thought,
+                    content=state.content,
                     thought_delta=thought_delta,
                     content_delta=content_delta,
                     replace_thought=replace_thought,
@@ -17200,6 +17202,8 @@ def _set_session_live_output(
                 session_id=state.session_id,
                 turn_id=state.turn_id,
                 stage=state.stage,
+                thought=state.thought,
+                content=state.content,
                 thought_delta=thought_delta,
                 content_delta=content_delta,
                 replace_thought=replace_thought,
@@ -19226,8 +19230,8 @@ def _publish_session_assistant_delta(
         "turnId": str(state.turn_id or "").strip(),
         "ledgerSeq": _session_ledger_sequence(session_id),
         "stage": str(state.stage or "").strip(),
-        "content": str(state.content or ""),
-        "thought": str(state.thought or ""),
+        "content": "",
+        "thought": "",
         "contentDelta": str(state.content_delta or ""),
         "thoughtDelta": str(state.thought_delta or ""),
         "replaceContent": bool(state.replace_content),
@@ -19236,6 +19240,13 @@ def _publish_session_assistant_delta(
         "updatedAt": str(state.updated_at or "").strip() or _now_timestamp(),
         "done": bool(done),
     }
+    recovery_event = _assistant_delta_recovery_stream_event(
+        {
+            **event,
+            "content": str(state.content or ""),
+            "thought": str(state.thought or ""),
+        }
+    )
     delivered_count = 0
     dropped_count = 0
     for subscriber in subscribers:
@@ -19245,6 +19256,7 @@ def _publish_session_assistant_delta(
             subscriber,
             queued_event,
             recover_assistant_delta_on_drop=True,
+            assistant_delta_recovery_event=recovery_event,
         )
         dropped_count += dropped
         if delivered:
@@ -19327,6 +19339,7 @@ def _put_session_stream_event(
     event: dict[str, Any],
     *,
     recover_assistant_delta_on_drop: bool = False,
+    assistant_delta_recovery_event: dict[str, Any] | None = None,
 ) -> tuple[bool, int]:
     dropped_count = 0
     try:
@@ -19342,7 +19355,7 @@ def _put_session_stream_event(
             dropped_count += 1
         queued_event = event
         if recover_assistant_delta_on_drop and str((dropped_event or {}).get("type") or "") == "assistant_delta":
-            queued_event = _assistant_delta_recovery_stream_event(event)
+            queued_event = assistant_delta_recovery_event or _assistant_delta_recovery_stream_event(event)
         try:
             subscriber.put_nowait(queued_event)
             return True, dropped_count
@@ -19383,6 +19396,8 @@ def _assistant_delta_recovery_stream_event(event: dict[str, Any]) -> dict[str, A
     recovered_event = dict(event)
     recovered_event["contentDelta"] = str(event.get("content") or "")
     recovered_event["thoughtDelta"] = str(event.get("thought") or "")
+    recovered_event["content"] = ""
+    recovered_event["thought"] = ""
     recovered_event["replaceContent"] = True
     recovered_event["replaceThought"] = True
     return recovered_event
