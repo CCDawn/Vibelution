@@ -7,6 +7,20 @@ export type DesktopSmokeSummaryInput = {
   workbenchUrl: string;
   controlToken: string;
   packaged: boolean;
+  bootstrap?: DesktopSmokeBootstrapSummary;
+};
+
+export type DesktopSmokeBootstrapSummary = {
+  attempted: boolean;
+  parsed: boolean;
+  mode: string;
+  launcherBackendPid: number;
+  protocolVersion: number;
+  capabilities: string[];
+  launcherOrigin: string;
+  workbenchOrigin: string;
+  errorType: string;
+  errorMessage: string;
 };
 
 export function desktopSmokeSummary(input: DesktopSmokeSummaryInput) {
@@ -18,7 +32,19 @@ export function desktopSmokeSummary(input: DesktopSmokeSummaryInput) {
     packaged: input.packaged,
     launcherOrigin: input.launcherUrl ? new URL(input.launcherUrl).origin : "",
     workbenchOrigin: input.workbenchUrl ? new URL(input.workbenchUrl).origin : "",
-    controlTokenPresent: Boolean(input.controlToken)
+    controlTokenPresent: Boolean(input.controlToken),
+    bootstrap: input.bootstrap ?? {
+      attempted: false,
+      parsed: false,
+      mode: "",
+      launcherBackendPid: 0,
+      protocolVersion: 0,
+      capabilities: [],
+      launcherOrigin: "",
+      workbenchOrigin: "",
+      errorType: "",
+      errorMessage: ""
+    }
   };
 }
 
