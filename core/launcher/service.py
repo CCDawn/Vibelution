@@ -29,7 +29,7 @@ from core.runtime_manager import work_run_store
 from core.runtime_manager.work_run_store import WorkRunStore
 from core.runtime_manager.workbench_controller import _is_process_alive, observe_workbench
 from core.runtime_manager.window_provider_state import window_provider_projection
-from . import lifecycle_action_dispatcher, lifecycle_intent_store
+from . import desktop_session_store, lifecycle_action_dispatcher, lifecycle_intent_store
 from . import developer_mode as launcher_developer_mode
 
 
@@ -757,6 +757,22 @@ def fail_desktop_action(action_id: str, desktop_session_id: str, result: dict[st
     )
 
 
+def register_desktop_session(payload: dict[str, Any]) -> dict[str, Any]:
+    return desktop_session_store.register_desktop_session(payload)
+
+
+def update_desktop_session_window(desktop_session_id: str, role: str, payload: dict[str, Any]) -> dict[str, Any]:
+    return desktop_session_store.update_desktop_session_window(desktop_session_id, role, payload)
+
+
+def heartbeat_desktop_session(desktop_session_id: str) -> dict[str, Any]:
+    return desktop_session_store.heartbeat_desktop_session(desktop_session_id)
+
+
+def close_desktop_session(desktop_session_id: str) -> dict[str, Any]:
+    return desktop_session_store.close_desktop_session(desktop_session_id)
+
+
 def request_launcher_start() -> LauncherCommandResponse:
     """Request the managed project bundle to start."""
 
@@ -1230,6 +1246,9 @@ def _runtime_manager_state_is_fresh(runtime_state: dict[str, Any]) -> bool:
 def _workbench_payload(*, runtime_state: dict[str, Any], observed_workbench: dict[str, Any]) -> dict[str, Any]:
     state_workbench = runtime_state.get("workbench") if isinstance(runtime_state.get("workbench"), dict) else {}
     observed = observed_workbench if isinstance(observed_workbench, dict) else {}
+    desktop_window = _desktop_session_workbench_projection()
+    if desktop_window:
+        observed = {**observed, **desktop_window}
     has_observation = bool(observed)
 
     def observed_or_state(key: str, default: Any = None) -> Any:
@@ -1352,9 +1371,46 @@ def _workbench_payload(*, runtime_state: dict[str, Any], observed_workbench: dic
         "statusLine": status_line,
         "failureMessage": failure_message,
         "staleRuntimeStateReconciled": stale_open_state_reconciled,
+        "desktopSessionId": str(observed_or_state("desktopSessionId", "") or "").strip(),
+        "desktopSessionRevision": int(observed_or_state("desktopSessionRevision", 0) or 0),
+        "desktopSessionLeaseExpiresAt": str(observed_or_state("desktopSessionLeaseExpiresAt", "") or "").strip(),
     }
+    window_provider = str(observed_or_state("windowProvider", "") or "").strip()
+    if window_provider:
+        payload["windowProvider"] = window_provider
+    if (has_observation and "windowManaged" in observed) or "windowManaged" in state_workbench:
+        payload["windowManaged"] = bool(observed_or_state("windowManaged", False))
+    window_id = int(observed_or_state("windowId", 0) or 0)
+    if window_id:
+        payload["windowId"] = window_id
+    renderer_process_id = int(observed_or_state("rendererProcessId", 0) or 0)
+    if renderer_process_id:
+        payload["rendererProcessId"] = renderer_process_id
     payload.update(window_provider_projection(payload))
     return payload
+
+
+def _desktop_session_workbench_projection() -> dict[str, Any]:
+    try:
+        window = desktop_session_store.latest_active_desktop_window("workbench")
+    except Exception:
+        return {}
+    if not window:
+        return {}
+    is_open = bool(window.get("open", False))
+    return {
+        "observedState": "open" if is_open else "closed",
+        "browserWindowAlive": is_open,
+        "browserManaged": False,
+        "windowProvider": "electron",
+        "windowManaged": is_open,
+        "windowId": int(window.get("windowId") or 0),
+        "rendererProcessId": int(window.get("rendererProcessId") or 0),
+        "url": str(window.get("url") or "").strip(),
+        "desktopSessionId": str(window.get("desktopSessionId") or "").strip(),
+        "desktopSessionRevision": int(window.get("desktopSessionRevision") or 0),
+        "desktopSessionLeaseExpiresAt": str(window.get("desktopSessionLeaseExpiresAt") or "").strip(),
+    }
 
 
 def _runtime_manager_payload(runtime_state: dict[str, Any]) -> dict[str, Any]:
@@ -1537,6 +1593,9 @@ def _project_bundle_from_workbench(
         "windowId": int(window_projection.get("windowId") or 0),
         "rendererProcessId": int(window_projection.get("rendererProcessId") or 0),
         "windowProfileDir": str(window_projection.get("windowProfileDir") or ""),
+        "desktopSessionId": str(workbench.get("desktopSessionId") or ""),
+        "desktopSessionRevision": int(workbench.get("desktopSessionRevision") or 0),
+        "desktopSessionLeaseExpiresAt": str(workbench.get("desktopSessionLeaseExpiresAt") or ""),
         "lastReason": str(workbench.get("lastReason") or ""),
         "failureMessage": str(workbench.get("failureMessage") or ""),
         "lastOperation": {

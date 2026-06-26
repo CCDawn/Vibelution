@@ -1,5 +1,8 @@
 import { app, ipcMain } from "electron";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
 import { singleInstanceDecision } from "./appLock.js";
+import { applyDesktopCliToEnvironment, parseDesktopCliArgs } from "./cli/desktopCli.js";
 import { IPC_CHANNELS } from "./ipc.js";
 import { RuntimeSceneBridge, type RuntimeSceneElectronEvent } from "./lifecycle/runtimeSceneBridge.js";
 import { createDesktopPaths, type DesktopPaths } from "./paths.js";
@@ -8,7 +11,10 @@ import { bootstrapPythonLauncherService } from "./process/launcherServiceClient.
 import type { LauncherBootstrapResult } from "./process/launcherBootstrap.js";
 import { assertTrustedIpcSender } from "./security/ipcSenderValidation.js";
 import { decideShutdown, fetchLauncherActiveWorkStatus, type ShutdownDecision } from "./shutdown/shutdownCoordinator.js";
+import { desktopSmokeSummary, desktopSmokeSummaryPath } from "./smoke/desktopSmoke.js";
+import { closeDesktopSession, registerDesktopSession, reportDesktopWindowState } from "./windows/desktopSessionClient.js";
 import { ElectronWindowProvider } from "./windows/electronWindowProvider.js";
+import type { ManagedWindowState } from "./windows/windowProviderTypes.js";
 import { createLauncherWindow } from "./windows/launcherWindow.js";
 import { createWorkbenchWindow } from "./windows/workbenchWindow.js";
 import { resolveLauncherUrl, resolveWorkbenchUrl } from "./windows/windowUrlResolver.js";
@@ -23,8 +29,11 @@ let desktopActionTimer: ReturnType<typeof setInterval> | null = null;
 let desktopActionPollRunning = false;
 let desktopActionContext: DesktopActionLoopContext | null = null;
 let runtimeSceneBridge: RuntimeSceneBridge | null = null;
+let desktopSessionRegistered = false;
+let desktopSessionRevision = 0;
 let shutdownApproved = false;
 let shutdownRequestRunning = false;
+const desktopCliArgs = parseDesktopCliArgs(process.argv.slice(1));
 
 type DesktopActionLoopContext = {
   launcherOrigin: string;
@@ -33,12 +42,12 @@ type DesktopActionLoopContext = {
 };
 
 const lockDecision = singleInstanceDecision(app.requestSingleInstanceLock());
-if (lockDecision.action === "focus_existing") {
+if (!desktopCliArgs.smoke && lockDecision.action === "focus_existing") {
   app.quit();
 }
 
 function createDesktopPathsForApp(): DesktopPaths {
-  const workspaceRoot = process.env.VIBELUTION_WORKSPACE_ROOT;
+  const workspaceRoot = desktopEnvironment().VIBELUTION_WORKSPACE_ROOT;
   if (!workspaceRoot) {
     throw new Error("VIBELUTION_WORKSPACE_ROOT is required until the first-run workspace picker exists");
   }
@@ -52,10 +61,11 @@ function createDesktopPathsForApp(): DesktopPaths {
 }
 
 function desktopEnvironment(): NodeJS.ProcessEnv {
-  return {
+  const baseEnv = {
     ...process.env,
     NODE_ENV: process.env.NODE_ENV || (app.isPackaged ? "production" : "development")
   };
+  return applyDesktopCliToEnvironment(baseEnv, desktopCliArgs);
 }
 
 function createWindowProvider(paths: DesktopPaths, bootstrap: LauncherBootstrapResult | null): ElectronWindowProvider {
@@ -64,18 +74,19 @@ function createWindowProvider(paths: DesktopPaths, bootstrap: LauncherBootstrapR
     paths,
     resolveLauncherUrl(desktopEnv, bootstrap?.launcherUrl),
     resolveWorkbenchUrl(desktopEnv, bootstrap?.workbenchUrl),
-    { createLauncherWindow, createWorkbenchWindow }
+    {
+      createLauncherWindow,
+      createWorkbenchWindow,
+      reportState: (state) => reportManagedWindowState(paths, bootstrap, state)
+    }
   );
 }
 
 async function bootstrapLauncherIfEnabled(paths: DesktopPaths): Promise<LauncherBootstrapResult | null> {
-  if (process.env.VIBELUTION_ELECTRON_START_LAUNCHER === "0") {
+  const desktopEnv = desktopEnvironment();
+  if (desktopEnv.VIBELUTION_ELECTRON_START_LAUNCHER === "0") {
     return null;
   }
-  const desktopEnv: NodeJS.ProcessEnv = {
-    ...process.env,
-    NODE_ENV: process.env.NODE_ENV || (app.isPackaged ? "production" : "development")
-  };
   const pythonPath = String(desktopEnv.VIBELUTION_PYTHON_PATH || desktopEnv.PYTHON || "").trim();
   if (!pythonPath) {
     throw new Error("VIBELUTION_PYTHON_PATH or PYTHON is required to bootstrap the Launcher Service");
@@ -136,6 +147,37 @@ function startDesktopActionLoop(bootstrap: LauncherBootstrapResult | null, provi
 
   void pollOnce();
   desktopActionTimer = setInterval(() => void pollOnce(), DESKTOP_ACTION_POLL_MS);
+}
+
+async function reportManagedWindowState(
+  paths: DesktopPaths,
+  bootstrap: LauncherBootstrapResult | null,
+  state: ManagedWindowState
+): Promise<void> {
+  if (bootstrap === null) {
+    return;
+  }
+  try {
+    const context = await resolveDesktopActionLoopContext(bootstrap);
+    if (!desktopSessionRegistered) {
+      const registration = await registerDesktopSession({
+        ...context,
+        workspaceRoot: paths.workspaceRoot,
+        capabilities: bootstrap.capabilities
+      });
+      desktopSessionRevision = registration.revision;
+      desktopSessionRegistered = true;
+    }
+    const result = await reportDesktopWindowState({
+      ...context,
+      role: state.role,
+      revision: desktopSessionRevision,
+      state
+    });
+    desktopSessionRevision = result.revision;
+  } catch (error: unknown) {
+    console.warn(error instanceof Error ? error.message : String(error));
+  }
 }
 
 async function resolveDesktopActionLoopContext(bootstrap: LauncherBootstrapResult): Promise<DesktopActionLoopContext> {
@@ -208,6 +250,39 @@ function stopDesktopActionLoop(): void {
   desktopActionPollRunning = false;
 }
 
+async function closeDesktopSessionIfRegistered(): Promise<void> {
+  if (!desktopSessionRegistered || launcherBootstrap === null) {
+    return;
+  }
+  try {
+    await closeDesktopSession(await resolveDesktopActionLoopContext(launcherBootstrap));
+    desktopSessionRegistered = false;
+  } catch (error: unknown) {
+    console.warn(error instanceof Error ? error.message : String(error));
+  }
+}
+
+function runSmokeAndQuit(paths: DesktopPaths): void {
+  const desktopEnv = desktopEnvironment();
+  const launcherUrl = String(desktopEnv.VIBELUTION_LAUNCHER_URL || "http://127.0.0.1:8765/launcher");
+  const workbenchUrl = String(desktopEnv.VIBELUTION_WORKBENCH_URL || "http://127.0.0.1:8000/");
+  const controlToken = String(desktopEnv.VIBELUTION_WEB_CONTROL_TOKEN || "");
+  const summary = desktopSmokeSummary({
+    workspaceRoot: paths.workspaceRoot,
+    configPath: String(desktopEnv.VIBELUTION_CONFIG_PATH || ""),
+    launcherUrl,
+    workbenchUrl,
+    controlToken,
+    packaged: app.isPackaged
+  });
+  const summaryPath = desktopSmokeSummaryPath(paths.workspaceRoot);
+  mkdirSync(dirname(summaryPath), { recursive: true });
+  writeFileSync(summaryPath, JSON.stringify(summary, null, 2), "utf-8");
+  console.log(JSON.stringify(summary, null, 2));
+  shutdownApproved = true;
+  app.quit();
+}
+
 function trustedIpcOrigins(): string[] {
   const desktopEnv = desktopEnvironment();
   return Array.from(
@@ -235,6 +310,7 @@ async function requestDesktopShellExit(): Promise<ShutdownDecision> {
       }
     });
     if (decision.allowed) {
+      await closeDesktopSessionIfRegistered();
       await recordElectronSupervisorEvent(launcherBootstrap, {
         eventCode: "electron.launcher_service.exited",
         message: "Electron desktop shell exit approved.",
@@ -291,6 +367,10 @@ ipcMain.handle(IPC_CHANNELS.requestDesktopShellExit, async (event) => {
 app.whenReady()
   .then(async () => {
     const paths = createDesktopPathsForApp();
+    if (desktopCliArgs.smoke) {
+      runSmokeAndQuit(paths);
+      return;
+    }
     launcherBootstrap = await bootstrapLauncherIfEnabled(paths);
     windowProvider = createWindowProvider(paths, launcherBootstrap);
     await windowProvider.openLauncher();

@@ -57,6 +57,23 @@ class DesktopActionResultPayload(BaseModel):
     result: dict = Field(default_factory=dict)
 
 
+class DesktopSessionPayload(BaseModel):
+    desktopSessionId: str
+    provider: str = "electron"
+    workspaceRoot: str = ""
+    capabilities: list[str] = Field(default_factory=list)
+
+
+class DesktopSessionWindowPayload(BaseModel):
+    revision: int = 0
+    provider: str = "electron"
+    open: bool = False
+    focused: bool = False
+    windowId: int = 0
+    rendererProcessId: int = 0
+    url: str = ""
+
+
 class LauncherRuntimeSceneEventPayload(BaseModel):
     eventCode: str
     message: str = ""
@@ -207,6 +224,36 @@ def launcher_ack_desktop_action(action_id: str, payload: DesktopActionResultPayl
 @router.post("/launcher/desktop-actions/{action_id}/fail", status_code=202)
 def launcher_fail_desktop_action(action_id: str, payload: DesktopActionResultPayload) -> dict:
     return launcher_service.fail_desktop_action(action_id, payload.desktopSessionId, payload.result)
+
+
+@router.post("/launcher/desktop-sessions", status_code=201)
+def launcher_register_desktop_session(payload: DesktopSessionPayload) -> dict:
+    return launcher_service.register_desktop_session(payload.model_dump())
+
+
+@router.put("/launcher/desktop-sessions/{desktop_session_id}/windows/{role}")
+def launcher_update_desktop_session_window(
+    desktop_session_id: str,
+    role: str,
+    payload: DesktopSessionWindowPayload,
+) -> dict:
+    try:
+        return launcher_service.update_desktop_session_window(desktop_session_id, role, payload.model_dump())
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "invalid_desktop_session_window", "message": str(exc)},
+        ) from exc
+
+
+@router.post("/launcher/desktop-sessions/{desktop_session_id}/heartbeat")
+def launcher_heartbeat_desktop_session(desktop_session_id: str) -> dict:
+    return launcher_service.heartbeat_desktop_session(desktop_session_id)
+
+
+@router.delete("/launcher/desktop-sessions/{desktop_session_id}")
+def launcher_close_desktop_session(desktop_session_id: str) -> dict:
+    return launcher_service.close_desktop_session(desktop_session_id)
 
 
 @router.post("/launcher/runtime-scene/events", status_code=202)
