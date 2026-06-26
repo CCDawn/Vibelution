@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 const buildScriptPath = fileURLToPath(new URL("../../../scripts/build_desktop_package.ps1", import.meta.url));
 const verifyScriptPath = fileURLToPath(new URL("../../../scripts/verify_desktop_package.ps1", import.meta.url));
 const lifecycleScriptPath = fileURLToPath(new URL("../../../scripts/verify_desktop_lifecycle.ps1", import.meta.url));
+const electronBuilderConfigPath = fileURLToPath(new URL("../electron-builder.json", import.meta.url));
 
 describe("desktop package script", () => {
   it("does not mask npm or node failures before writing the launch profile", () => {
@@ -17,6 +18,14 @@ describe("desktop package script", () => {
     expect(script).toMatch(/Invoke-CheckedNative node @\(/);
     expect(script).not.toMatch(/^\s*npm --prefix/m);
     expect(script).not.toMatch(/^\s*node \$desktopLaunchProfileWriter/m);
+  });
+
+  it("packages the desktop executable with the shared Vibelution icon", () => {
+    const config = JSON.parse(readFileSync(electronBuilderConfigPath, "utf8")) as {
+      win?: { icon?: string };
+    };
+
+    expect(config.win?.icon).toBe("../../assets/icons/vibelution.ico");
   });
 
   it("provides a reusable package verification entrypoint", () => {
