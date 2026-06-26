@@ -606,7 +606,7 @@ def test_runtime_scene_list_exposes_resolved_diagnosis_separate_from_raw_counts(
         "controlSignalCount": 0,
     }
 
-def test_runtime_scene_list_rebuilds_search_text_without_cached_feedback_loop(tmp_path, monkeypatch):
+def test_runtime_scene_list_returns_search_text_without_cached_feedback_loop(tmp_path, monkeypatch):
     scene_id = "search-text-feedback-scene"
     scene_dir = tmp_path / "logs" / "runtime_scenes" / f"20260524T120001Z__{scene_id}"
     scene_dir.mkdir(parents=True)
@@ -656,6 +656,8 @@ def test_runtime_scene_list_rebuilds_search_text_without_cached_feedback_loop(tm
         ),
         encoding="utf-8",
     )
+    package_index_before = scene_dir.joinpath("package_index.json").read_text(encoding="utf-8")
+    manifest_before = scene_dir.joinpath("manifest.json").read_text(encoding="utf-8")
     monkeypatch.setattr(runtime_scene_service, "PROJECT_ROOT", tmp_path)
 
     scenes = runtime_scene_service.list_runtime_scenes(limit=1)
@@ -663,8 +665,8 @@ def test_runtime_scene_list_rebuilds_search_text_without_cached_feedback_loop(tm
     search_text = scenes[0]["packageIndex"]["searchText"]
     assert len(search_text) < 1_000
     assert search_text.count("cached diagnosis text") == 1
-    refreshed_index = json.loads(scene_dir.joinpath("package_index.json").read_text(encoding="utf-8"))
-    assert refreshed_index["search_text"] == search_text
+    assert scene_dir.joinpath("package_index.json").read_text(encoding="utf-8") == package_index_before
+    assert scene_dir.joinpath("manifest.json").read_text(encoding="utf-8") == manifest_before
 
 
 def test_runtime_scene_list_prunes_old_packages_to_retention_limit(tmp_path, monkeypatch):

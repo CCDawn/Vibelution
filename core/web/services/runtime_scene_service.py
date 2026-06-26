@@ -286,14 +286,12 @@ def list_runtime_scenes(limit: int = 80) -> list[dict]:
     scenes: list[dict] = []
     for scene_dir in _scene_dirs():
         manifest = _load_scene_manifest(scene_dir)
-        _repair_runtime_scene_from_reconciliation_history(scene_dir, manifest)
         scene_id = _scene_id(scene_dir, manifest)
         if not scene_id:
             continue
         summary_payload = _load_scene_json(scene_dir / SUMMARY_PATH)
         event_counts = summary_payload.get("event_counts") if isinstance(summary_payload.get("event_counts"), dict) else {}
         package_index = _runtime_scene_lightweight_package_index(scene_dir, manifest, scene_id, summary_payload)
-        _sync_runtime_scene_package_index_if_stale(scene_dir, manifest, package_index)
         scenes.append(
             {
                 "runtimeSceneId": scene_id,
