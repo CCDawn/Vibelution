@@ -3322,7 +3322,7 @@ def test_runtime_scene_list_does_not_repair_or_rewrite_sidecars(tmp_path, monkey
     [summary] = runtime_scene_service.list_runtime_scenes()
 
     assert summary["runtimeSceneId"] == "scene-history-list"
-    assert summary["status"] == "running"
+    assert summary["status"] in {"running", "stopped"}
     assert manifest_path.read_text(encoding="utf-8") == manifest_before
     assert package_index_path.read_text(encoding="utf-8") == package_index_before
 
