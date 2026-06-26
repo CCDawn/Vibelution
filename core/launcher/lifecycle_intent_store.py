@@ -14,6 +14,7 @@ LIFECYCLE_DB_PATH = PROJECT_ROOT / ".runtime" / "launcher" / "lifecycle.sqlite3"
 DESKTOP_ACTIONS = {"open_workbench", "focus_workbench", "close_workbench"}
 RUNTIME_EFFECT_ACTIONS = {"restart_after_apply", "resume_self_evolution", "recover_after_crash", "request_app_exit"}
 ALLOWED_ACTIONS = DESKTOP_ACTIONS | RUNTIME_EFFECT_ACTIONS
+TERMINAL_INTENT_STATUSES = {"succeeded", "failed", "superseded"}
 
 
 def _now_iso() -> str:
@@ -52,6 +53,8 @@ def _init_schema(conn: sqlite3.Connection) -> None:
           rejection_reason TEXT NOT NULL DEFAULT '',
           command_id TEXT NOT NULL DEFAULT '',
           runtime_scene_ref TEXT NOT NULL DEFAULT '',
+          result_json TEXT NOT NULL DEFAULT '{}',
+          completed_at TEXT NOT NULL DEFAULT '',
           created_at TEXT NOT NULL,
           updated_at TEXT NOT NULL
         );
@@ -73,6 +76,14 @@ def _init_schema(conn: sqlite3.Connection) -> None:
           ON desktop_actions(status, lease_expires_at, created_at);
         """
     )
+    _ensure_column(conn, "lifecycle_intents", "result_json", "TEXT NOT NULL DEFAULT '{}'")
+    _ensure_column(conn, "lifecycle_intents", "completed_at", "TEXT NOT NULL DEFAULT ''")
+
+
+def _ensure_column(conn: sqlite3.Connection, table: str, column: str, definition: str) -> None:
+    columns = {str(row["name"]) for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+    if column not in columns:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
 
 
 def _row_to_dict(row: sqlite3.Row | None) -> dict[str, Any]:
@@ -127,8 +138,8 @@ def submit_lifecycle_intent(
             INSERT INTO lifecycle_intents (
               intent_id, schema_version, action, status, actor_type, actor_id, reason,
               source_run_id, source_task_id, source_worktree, idempotency_key,
-              rejection_reason, command_id, runtime_scene_ref, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              rejection_reason, command_id, runtime_scene_ref, result_json, completed_at, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 intent_id,
@@ -144,6 +155,8 @@ def submit_lifecycle_intent(
                 intent["idempotencyKey"],
                 intent["rejectionReason"],
                 "",
+                "",
+                "{}",
                 "",
                 now,
                 now,
@@ -173,6 +186,15 @@ def submit_lifecycle_intent(
     return intent
 
 
+def get_lifecycle_intent(intent_id: str) -> dict[str, Any]:
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT * FROM lifecycle_intents WHERE intent_id = ?",
+            (_safe_text(intent_id, max_length=160),),
+        ).fetchone()
+    return _public_intent(_row_to_dict(row))
+
+
 def record_runtime_dispatch(intent_id: str, *, command_id: str, runtime_scene_ref: str = "") -> dict[str, Any]:
     now = _now_iso()
     with _connect() as conn:
@@ -180,7 +202,13 @@ def record_runtime_dispatch(intent_id: str, *, command_id: str, runtime_scene_re
         conn.execute(
             """
             UPDATE lifecycle_intents
-            SET command_id = ?, runtime_scene_ref = ?, updated_at = ?
+            SET status = CASE
+                    WHEN status IN ('accepted', 'executing') THEN 'executing'
+                    ELSE status
+                END,
+                command_id = ?,
+                runtime_scene_ref = ?,
+                updated_at = ?
             WHERE intent_id = ?
             """,
             (_safe_text(command_id, max_length=160), _safe_text(runtime_scene_ref, max_length=300), now, intent_id),
@@ -190,7 +218,52 @@ def record_runtime_dispatch(intent_id: str, *, command_id: str, runtime_scene_re
     return _public_intent(_row_to_dict(row))
 
 
+def complete_lifecycle_intent(intent_id: str, *, status: str, result: dict[str, Any]) -> dict[str, Any]:
+    normalized_status = _safe_text(status, max_length=80)
+    if normalized_status not in TERMINAL_INTENT_STATUSES:
+        raise ValueError(f"unsupported lifecycle terminal status: {status}")
+    now = _now_iso()
+    with _connect() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        _complete_lifecycle_intent_locked(
+            conn,
+            intent_id=_safe_text(intent_id, max_length=160),
+            status=normalized_status,
+            result=result,
+            now=now,
+        )
+        row = conn.execute("SELECT * FROM lifecycle_intents WHERE intent_id = ?", (intent_id,)).fetchone()
+        conn.execute("COMMIT")
+    return _public_intent(_row_to_dict(row))
+
+
+def _complete_lifecycle_intent_locked(
+    conn: sqlite3.Connection,
+    *,
+    intent_id: str,
+    status: str,
+    result: dict[str, Any],
+    now: str,
+) -> None:
+    conn.execute(
+        """
+        UPDATE lifecycle_intents
+        SET status = ?,
+            result_json = ?,
+            completed_at = ?,
+            updated_at = ?
+        WHERE intent_id = ?
+        """,
+        (status, json.dumps(result, ensure_ascii=False, sort_keys=True), now, now, intent_id),
+    )
+
+
 def _public_intent(row: dict[str, Any]) -> dict[str, Any]:
+    result_raw = row.get("result_json") or "{}"
+    try:
+        result = json.loads(str(result_raw))
+    except json.JSONDecodeError:
+        result = {}
     return {
         "intentId": row.get("intent_id"),
         "schemaVersion": int(row.get("schema_version") or 1),
@@ -199,6 +272,8 @@ def _public_intent(row: dict[str, Any]) -> dict[str, Any]:
         "rejectionReason": row.get("rejection_reason") or "",
         "commandId": row.get("command_id") or "",
         "runtimeSceneRef": row.get("runtime_scene_ref") or "",
+        "result": result if isinstance(result, dict) else {},
+        "completedAt": row.get("completed_at") or "",
         "createdAt": row.get("created_at"),
         "updatedAt": row.get("updated_at"),
     }
@@ -209,6 +284,7 @@ def claim_desktop_action(*, desktop_session_id: str, lease_seconds: int = 30) ->
     lease_expires_at = datetime.now(timezone.utc).timestamp() + max(1, int(lease_seconds))
     with _connect() as conn:
         conn.execute("BEGIN IMMEDIATE")
+        _fail_exhausted_desktop_actions_locked(conn, now=now)
         row = conn.execute(
             """
             SELECT * FROM desktop_actions
@@ -241,6 +317,38 @@ def claim_desktop_action(*, desktop_session_id: str, lease_seconds: int = 30) ->
     return _public_desktop_action(claimed)
 
 
+def _fail_exhausted_desktop_actions_locked(conn: sqlite3.Connection, *, now: str) -> None:
+    rows = conn.execute(
+        """
+        SELECT * FROM desktop_actions
+        WHERE status = 'claimed' AND lease_expires_at < ? AND claim_attempt >= 3
+        """,
+        (now,),
+    ).fetchall()
+    for row in rows:
+        result = {
+            "reason": "desktop_action_retry_exhausted",
+            "claimAttempt": int(row["claim_attempt"] or 0),
+        }
+        conn.execute(
+            """
+            UPDATE desktop_actions
+            SET status = 'failed',
+                result_json = ?,
+                updated_at = ?
+            WHERE action_id = ?
+            """,
+            (json.dumps(result, ensure_ascii=False, sort_keys=True), now, row["action_id"]),
+        )
+        _complete_lifecycle_intent_locked(
+            conn,
+            intent_id=str(row["intent_id"] or ""),
+            status="failed",
+            result=result,
+            now=now,
+        )
+
+
 def ack_desktop_action(action_id: str, *, desktop_session_id: str, result: dict[str, Any]) -> dict[str, Any]:
     return _finish_desktop_action(action_id, desktop_session_id=desktop_session_id, status="succeeded", result=result)
 
@@ -267,6 +375,13 @@ def _finish_desktop_action(action_id: str, *, desktop_session_id: str, status: s
             WHERE action_id = ?
             """,
             (status, json.dumps(result, ensure_ascii=False, sort_keys=True), now, action_id),
+        )
+        _complete_lifecycle_intent_locked(
+            conn,
+            intent_id=str(row["intent_id"] or ""),
+            status=status,
+            result=result,
+            now=now,
         )
         updated = conn.execute("SELECT * FROM desktop_actions WHERE action_id = ?", (action_id,)).fetchone()
         conn.execute("COMMIT")

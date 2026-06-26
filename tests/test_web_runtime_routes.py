@@ -1771,6 +1771,114 @@ def test_launcher_lifecycle_intent_releases_expired_desktop_action_lease(tmp_pat
     assert second["claimAttempt"] == 2
 
 
+def test_launcher_lifecycle_wrong_session_cannot_finish_desktop_action(tmp_path, monkeypatch):
+    from core.launcher import lifecycle_intent_store
+
+    db_path = tmp_path / "launcher" / "lifecycle.sqlite3"
+    monkeypatch.setattr(lifecycle_intent_store, "LIFECYCLE_DB_PATH", db_path)
+    intent = lifecycle_intent_store.submit_lifecycle_intent(
+        {"action": "focus_workbench", "reason": "focus", "idempotencyKey": "run-1:focus"},
+        actor_context={
+            "actorType": "desktop_supervisor",
+            "actorId": "desktop-1",
+            "sourceRunId": "",
+            "sourceTaskId": "",
+            "sourceWorktree": "",
+        },
+        active_work_runs=[],
+    )
+    claimed = lifecycle_intent_store.claim_desktop_action(desktop_session_id="desktop-session-1", lease_seconds=30)
+
+    assert lifecycle_intent_store.ack_desktop_action(
+        claimed["actionId"],
+        desktop_session_id="desktop-session-2",
+        result={"windowId": 42},
+    ) == {}
+    assert lifecycle_intent_store.fail_desktop_action(
+        claimed["actionId"],
+        desktop_session_id="desktop-session-2",
+        result={"reason": "wrong session"},
+    ) == {}
+    assert lifecycle_intent_store.get_lifecycle_intent(intent["intentId"])["status"] == "accepted"
+
+    acked = lifecycle_intent_store.ack_desktop_action(
+        claimed["actionId"],
+        desktop_session_id="desktop-session-1",
+        result={"windowId": 42},
+    )
+    assert acked["status"] == "succeeded"
+    assert lifecycle_intent_store.get_lifecycle_intent(intent["intentId"])["status"] == "succeeded"
+
+
+def test_launcher_lifecycle_desktop_action_retry_exhaustion_fails_parent_intent(tmp_path, monkeypatch):
+    from core.launcher import lifecycle_intent_store
+
+    db_path = tmp_path / "launcher" / "lifecycle.sqlite3"
+    monkeypatch.setattr(lifecycle_intent_store, "LIFECYCLE_DB_PATH", db_path)
+    intent = lifecycle_intent_store.submit_lifecycle_intent(
+        {"action": "open_workbench", "reason": "open", "idempotencyKey": "run-1:open"},
+        actor_context={
+            "actorType": "desktop_supervisor",
+            "actorId": "desktop-1",
+            "sourceRunId": "",
+            "sourceTaskId": "",
+            "sourceWorktree": "",
+        },
+        active_work_runs=[],
+    )
+
+    action_id = ""
+    for expected_attempt in (1, 2, 3):
+        claimed = lifecycle_intent_store.claim_desktop_action(
+            desktop_session_id=f"desktop-session-{expected_attempt}",
+            lease_seconds=1,
+        )
+        assert claimed["claimAttempt"] == expected_attempt
+        action_id = claimed["actionId"]
+        expired = (datetime.now(timezone.utc) - timedelta(seconds=5)).isoformat()
+        with sqlite3.connect(db_path) as conn:
+            conn.execute(
+                "UPDATE desktop_actions SET lease_expires_at = ? WHERE action_id = ?",
+                (expired, action_id),
+            )
+
+    assert lifecycle_intent_store.claim_desktop_action(desktop_session_id="desktop-session-4", lease_seconds=30) == {}
+
+    with sqlite3.connect(db_path) as conn:
+        row = conn.execute("SELECT status FROM desktop_actions WHERE action_id = ?", (action_id,)).fetchone()
+    assert row[0] == "failed"
+    assert lifecycle_intent_store.get_lifecycle_intent(intent["intentId"])["status"] == "failed"
+
+
+def test_launcher_lifecycle_runtime_dispatch_and_completion_are_terminal_truth(tmp_path, monkeypatch):
+    from core.launcher import lifecycle_intent_store
+
+    monkeypatch.setattr(lifecycle_intent_store, "LIFECYCLE_DB_PATH", tmp_path / "launcher" / "lifecycle.sqlite3")
+    intent = lifecycle_intent_store.submit_lifecycle_intent(
+        {"action": "restart_after_apply", "reason": "apply complete", "idempotencyKey": "run-1:restart"},
+        actor_context={
+            "actorType": "self_evolution_agent",
+            "actorId": "self-agent",
+            "sourceRunId": "run-1",
+            "sourceTaskId": "task-1",
+            "sourceWorktree": str(tmp_path / "worktree"),
+        },
+        active_work_runs=[],
+    )
+
+    executing = lifecycle_intent_store.record_runtime_dispatch(intent["intentId"], command_id="cmd-1")
+    assert executing["status"] == "executing"
+    assert executing["commandId"] == "cmd-1"
+
+    completed = lifecycle_intent_store.complete_lifecycle_intent(
+        intent["intentId"],
+        status="succeeded",
+        result={"commandId": "cmd-1", "ok": True},
+    )
+    assert completed["status"] == "succeeded"
+    assert completed["result"]["ok"] is True
+
+
 def test_self_evolution_restart_request_uses_launcher_lifecycle_service(monkeypatch):
     captured: dict[str, object] = {}
     captured_context: dict[str, object] = {}
