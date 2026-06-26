@@ -1,8 +1,10 @@
 import copy
 import json
 import shutil
+import sqlite3
 import threading
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -1672,6 +1674,102 @@ def test_launcher_status_exposes_project_bundle(tmp_path, monkeypatch):
     assert payload["projectBundle"]["browser"]["windowPid"] == 4001
     assert [component["id"] for component in payload["projectBundle"]["components"]] == ["backend", "frontend", "browser"]
     assert payload["projectBundle"]["components"][0]["requiredForRunning"] is True
+
+
+def test_launcher_lifecycle_intent_claim_ack_updates_pending_row(tmp_path, monkeypatch):
+    from core.launcher import lifecycle_intent_store
+
+    db_path = tmp_path / "launcher" / "lifecycle.sqlite3"
+    monkeypatch.setattr(lifecycle_intent_store, "LIFECYCLE_DB_PATH", db_path)
+
+    result = lifecycle_intent_store.submit_lifecycle_intent(
+        {
+            "action": "focus_workbench",
+            "reason": "recover focus after apply",
+            "idempotencyKey": "self-run-1:focus",
+        },
+        actor_context={
+            "actorType": "self_evolution_agent",
+            "actorId": "self-agent",
+            "sourceRunId": "self-run-1",
+            "sourceTaskId": "task-1",
+            "sourceWorktree": str(tmp_path / "worktree"),
+        },
+        active_work_runs=[],
+    )
+
+    assert result["status"] == "accepted"
+    claimed = lifecycle_intent_store.claim_desktop_action(
+        desktop_session_id="desktop-session-1",
+        lease_seconds=30,
+    )
+    assert claimed["action"] == "focus_workbench"
+    assert claimed["status"] == "claimed"
+    assert lifecycle_intent_store.claim_desktop_action(desktop_session_id="desktop-session-2", lease_seconds=30) == {}
+
+    acked = lifecycle_intent_store.ack_desktop_action(
+        claimed["actionId"],
+        desktop_session_id="desktop-session-1",
+        result={"windowId": 42, "rendererProcessId": 4242},
+    )
+    assert acked["status"] == "succeeded"
+    assert lifecycle_intent_store.claim_desktop_action(desktop_session_id="desktop-session-1", lease_seconds=30) == {}
+
+
+def test_launcher_lifecycle_intent_rejects_runtime_effects_during_active_work(tmp_path, monkeypatch):
+    from core.launcher import lifecycle_intent_store
+
+    monkeypatch.setattr(lifecycle_intent_store, "LIFECYCLE_DB_PATH", tmp_path / "launcher" / "lifecycle.sqlite3")
+
+    result = lifecycle_intent_store.submit_lifecycle_intent(
+        {
+            "action": "restart_after_apply",
+            "reason": "apply completed",
+            "idempotencyKey": "self-run-1:restart",
+        },
+        actor_context={
+            "actorType": "self_evolution_agent",
+            "actorId": "self-agent",
+            "sourceRunId": "self-run-1",
+            "sourceTaskId": "task-1",
+            "sourceWorktree": str(tmp_path / "worktree"),
+        },
+        active_work_runs=[{"runId": "active-1", "status": "running"}],
+    )
+
+    assert result["status"] == "rejected"
+    assert result["rejectionReason"] == "active_work_running"
+    assert lifecycle_intent_store.claim_desktop_action(desktop_session_id="desktop-session-1", lease_seconds=30) == {}
+
+
+def test_launcher_lifecycle_intent_releases_expired_desktop_action_lease(tmp_path, monkeypatch):
+    from core.launcher import lifecycle_intent_store
+
+    db_path = tmp_path / "launcher" / "lifecycle.sqlite3"
+    monkeypatch.setattr(lifecycle_intent_store, "LIFECYCLE_DB_PATH", db_path)
+    lifecycle_intent_store.submit_lifecycle_intent(
+        {"action": "open_workbench", "reason": "focus", "idempotencyKey": "run-1:open"},
+        actor_context={
+            "actorType": "desktop_supervisor",
+            "actorId": "desktop-1",
+            "sourceRunId": "",
+            "sourceTaskId": "",
+            "sourceWorktree": "",
+        },
+        active_work_runs=[],
+    )
+    first = lifecycle_intent_store.claim_desktop_action(desktop_session_id="desktop-session-1", lease_seconds=1)
+    expired = (datetime.now(timezone.utc) - timedelta(seconds=5)).isoformat()
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            "UPDATE desktop_actions SET lease_expires_at = ? WHERE action_id = ?",
+            (expired, first["actionId"]),
+        )
+
+    second = lifecycle_intent_store.claim_desktop_action(desktop_session_id="desktop-session-2", lease_seconds=30)
+    assert second["actionId"] == first["actionId"]
+    assert second["claimAttempt"] == 2
+
 
 def test_launcher_start_queues_open_workbench_and_records_lifecycle(monkeypatch):
     calls: list[object] = []
