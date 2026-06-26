@@ -14061,56 +14061,65 @@ def _source_collection_stage_cards_projection(
         stage_id = _trim_text(task.get("stageId"), max_length=80)
         if stage_id:
             tasks_by_stage.setdefault(stage_id, []).append(task)
+    stage_task_groups = {
+        stage_id: _source_collection_stage_tasks_for_current_team(normalized_team_id, stage_id, stage_tasks)
+        for stage_id, stage_tasks in tasks_by_stage.items()
+    }
     cards = [
         _source_collection_stage_card_projection(
             "collection",
-            tasks_by_stage.get("collection", []),
+            stage_task_groups.get("collection", ([], []))[0],
             artifact_count=_source_collection_count(run_summary.get("recordCount")),
             input_count=_source_collection_count(run_summary.get("assignmentCount")),
             output_count=_source_collection_count(run_summary.get("recordCount")),
             pending_count=_source_collection_count(run_summary.get("openAssignmentCount")),
             artifact_status="ready" if _source_collection_count(run_summary.get("recordCount")) > 0 else "empty",
             artifact_summary=f"{_source_collection_count(run_summary.get('recordCount'))} DataRecord records; {_source_collection_count(run_summary.get('openAssignmentCount'))} assignments remain.",
+            historical_task_count=len(stage_task_groups.get("collection", ([], []))[1]),
         ),
         _source_collection_stage_card_projection(
             "candidate",
-            tasks_by_stage.get("candidate", []),
+            stage_task_groups.get("candidate", ([], []))[0],
             artifact_count=len(source_candidates),
             input_count=_source_collection_count(run_summary.get("recordCount")),
             output_count=len(source_candidates),
             pending_count=max(0, _source_collection_count(run_summary.get("recordCount")) - len(source_candidates)),
             artifact_status="ready" if source_candidates else "empty",
             artifact_summary=f"{len(source_candidates)} source_manifest candidates from this run.",
+            historical_task_count=len(stage_task_groups.get("candidate", ([], []))[1]),
         ),
         _source_collection_stage_card_projection(
             "screening",
-            tasks_by_stage.get("screening", []),
+            stage_task_groups.get("screening", ([], []))[0],
             artifact_count=len(assessed_sources),
             input_count=len(source_candidates),
             output_count=len(approved_sources),
             pending_count=max(0, len(source_candidates) - len(assessed_sources)),
             artifact_status="ready" if len(assessed_sources) >= len(source_candidates) and source_candidates else ("partial" if assessed_sources else "empty"),
             artifact_summary=f"{len(assessed_sources)}/{len(source_candidates)} source candidates assessed; {len(approved_sources)} approved.",
+            historical_task_count=len(stage_task_groups.get("screening", ([], []))[1]),
         ),
         _source_collection_stage_card_projection(
             "graph",
-            tasks_by_stage.get("graph", []),
+            stage_task_groups.get("graph", ([], []))[0],
             artifact_count=_source_collection_count(graph_summary.get("nodeCount")),
             input_count=len(source_candidates),
             output_count=_source_collection_count(graph_summary.get("edgeCount")),
             pending_count=0 if graph_summary else len(source_candidates),
             artifact_status="ready" if graph_summary else "empty",
             artifact_summary=f"{_source_collection_count(graph_summary.get('nodeCount'))} graph nodes; {_source_collection_count(graph_summary.get('edgeCount'))} graph edges.",
+            historical_task_count=len(stage_task_groups.get("graph", ([], []))[1]),
         ),
         _source_collection_stage_card_projection(
             "memory",
-            tasks_by_stage.get("memory", []),
+            stage_task_groups.get("memory", ([], []))[0],
             artifact_count=max(steward_pack_count, formal_synced_count),
             input_count=len(approved_sources) or len(source_candidates),
             output_count=formal_synced_count,
             pending_count=steward_pack_count,
             artifact_status="ready" if formal_synced_count else ("partial" if steward_pack_count else "empty"),
             artifact_summary=f"{steward_pack_count} 个入库审核包；{formal_synced_count} 个正式知识同步标记。",
+            historical_task_count=len(stage_task_groups.get("memory", ([], []))[1]),
         ),
     ]
     latest_tasks = {
@@ -14147,21 +14156,22 @@ def _source_collection_stage_card_projection(
     pending_count: int,
     artifact_status: str,
     artifact_summary: str,
+    historical_task_count: int = 0,
 ) -> dict[str, Any]:
     latest_task = _latest_source_collection_stage_task(tasks)
     agent_status = _trim_text(latest_task.get("status"), max_length=80).lower() if latest_task else "not_started"
-    task_completed = agent_status in {"completed", "needs_review"}
+    task_settled = agent_status in {"completed", "needs_review"}
     task_blocked = agent_status in {"blocked", "failed"}
-    artifact_ready = artifact_status == "ready" or artifact_count > 0
+    artifact_complete = artifact_status == "ready" and pending_count <= 0 and artifact_count > 0
     if agent_status in {"running", "queued"}:
         card_status = "agent_running"
     elif task_blocked:
         card_status = "agent_blocked"
-    elif task_completed and artifact_ready:
+    elif task_settled and artifact_complete:
         card_status = "closed_loop"
-    elif task_completed:
+    elif task_settled:
         card_status = "agent_done_artifact_pending"
-    elif artifact_ready:
+    elif artifact_complete:
         card_status = "artifact_ready_no_latest_agent_task"
     elif pending_count > 0 or input_count > 0:
         card_status = "pending"
@@ -14183,6 +14193,7 @@ def _source_collection_stage_card_projection(
             "output": output_count,
             "pending": pending_count,
             "task": len(tasks),
+            "historicalTask": max(0, _source_collection_count(historical_task_count)),
         },
         "latestTask": _source_collection_stage_task_card_summary(latest_task) if latest_task else {},
         "resultKeys": result_keys,
@@ -14196,6 +14207,47 @@ def _latest_source_collection_stage_task(tasks: list[dict[str, Any]]) -> dict[st
     if not valid:
         return None
     return sorted(valid, key=lambda item: str(item.get("updatedAt") or item.get("createdAt") or ""))[-1]
+
+
+def _source_collection_stage_tasks_for_current_team(
+    team_id: str,
+    stage_id: str,
+    tasks: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    valid_tasks = [item for item in tasks if isinstance(item, dict)]
+    current_agent_ids = _source_collection_current_stage_agent_ids(team_id, stage_id)
+    if not current_agent_ids:
+        return valid_tasks, []
+    current: list[dict[str, Any]] = []
+    historical: list[dict[str, Any]] = []
+    for task in valid_tasks:
+        agent_id = _trim_text(task.get("agentId"), max_length=160)
+        if agent_id and agent_id in current_agent_ids:
+            current.append(task)
+        else:
+            historical.append(task)
+    return current, historical
+
+
+def _source_collection_current_stage_agent_ids(team_id: str, stage_id: str) -> set[str]:
+    allowed_roles = set(SOURCE_COLLECTION_AGENT_CONTEXT_STAGE_ROLES.get(stage_id, ()))
+    if not allowed_roles:
+        return set()
+    agent_ids: set[str] = set()
+    try:
+        team = team_service.get_team(team_id)
+    except Exception:
+        team = {}
+    for member in list(team.get("members") or []) if isinstance(team, dict) else []:
+        if not isinstance(member, dict):
+            continue
+        member_role = _trim_text(member.get("role") or member.get("agentRole"), max_length=80)
+        member_agent_id = _trim_text(member.get("agentId"), max_length=160)
+        if member_role in allowed_roles and member_agent_id:
+            agent_ids.add(member_agent_id)
+    if stage_id == "memory":
+        agent_ids.add(agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID)
+    return agent_ids
 
 
 def _source_collection_stage_task_card_summary(task: dict[str, Any]) -> dict[str, Any]:
