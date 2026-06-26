@@ -843,6 +843,11 @@ def seed_source_collection_agent_session_context(
     storage_artifacts = _source_collection_storage_artifacts(normalized_team_id, normalized_run_id)
     source_candidates = _source_collection_candidates_for_run(normalized_team_id, normalized_run_id)
     active_snapshot = _source_collection_work_run_store().load_active_snapshot(SOURCE_COLLECTION_WORK_RUN_KIND)
+    active_snapshot = _decorate_source_collection_work_run_snapshot(
+        active_snapshot,
+        team_id=normalized_team_id,
+        run_id=normalized_run_id,
+    )
     active_work_run = (
         active_snapshot
         if _source_collection_background_snapshot_is_active(active_snapshot, normalized_team_id, normalized_run_id)
@@ -1781,6 +1786,11 @@ def start_source_collection_search_background(team_id: str, run_id: str, payload
     storage_artifacts = _source_collection_storage_artifacts(normalized_team_id, normalized_run_id)
     with _WORKFLOW_LOCK:
         existing_active_snapshot = _source_collection_work_run_store().load_active_snapshot(SOURCE_COLLECTION_WORK_RUN_KIND)
+        existing_active_snapshot = _decorate_source_collection_work_run_snapshot(
+            existing_active_snapshot,
+            team_id=normalized_team_id,
+            run_id=normalized_run_id,
+        )
         if _source_collection_background_snapshot_is_active(existing_active_snapshot, normalized_team_id, normalized_run_id):
             _record_workflow_event(
                 "source_collection.search_background_already_running",
@@ -1823,6 +1833,11 @@ def start_source_collection_search_background(team_id: str, run_id: str, payload
                 "queuedSearchExecution": True,
             },
         )
+    active_snapshot = _decorate_source_collection_work_run_snapshot(
+        active_snapshot,
+        team_id=normalized_team_id,
+        run_id=normalized_run_id,
+    )
     worker = threading.Thread(
         target=_run_source_collection_search_background,
         args=(normalized_team_id, normalized_run_id, request_payload),
@@ -1865,6 +1880,81 @@ def _source_collection_background_snapshot_is_active(snapshot: dict[str, Any] | 
     status = _trim_text(snapshot.get("status"), max_length=80).lower()
     current_phase = _trim_text(snapshot.get("currentPhase"), max_length=80).lower()
     return status in {"queued", "running"} or current_phase in {"queued", "running"}
+
+
+def _coerce_source_collection_storage_path_soft(
+    source_collection_work_run: dict[str, Any],
+    *,
+    team_id: str,
+    run_id: str,
+) -> tuple[Path | None, str]:
+    raw_path = str(source_collection_work_run.get("storagePath") or "").strip()
+    if not raw_path:
+        return None, ""
+    try:
+        storage_path = Path(raw_path).expanduser()
+    except Exception:
+        return None, f"source collection storage path 无法解析（runId={run_id}）：{raw_path}"
+    try:
+        if not storage_path.is_absolute():
+            storage_path = _project_root() / storage_path
+        storage_path = storage_path.resolve()
+        project_root = _project_root().resolve()
+    except Exception:
+        return None, f"source collection storage path 解析失败（runId={run_id}）：{raw_path}"
+    if not storage_path.exists():
+        return None, f"source collection storage path 不存在（runId={run_id}）：{storage_path}"
+    if not storage_path.is_dir():
+        return None, f"source collection storage path 不是目录（runId={run_id}）：{storage_path}"
+    if storage_path == project_root:
+        return None, f"source collection storage path 不可与主项目目录一致（runId={run_id}）。"
+    try:
+        storage_path.relative_to(project_root)
+    except ValueError:
+        return None, f"source collection storage path 不在项目目录内（runId={run_id}）：{storage_path}"
+    normalized_team_id = _trim_text(team_id, max_length=96)
+    normalized_run_id = _trim_text(run_id, max_length=96)
+    if normalized_team_id and normalized_run_id:
+        expected_run_directory = _source_collection_storage_artifact_paths(
+            normalized_team_id,
+            normalized_run_id,
+        )["runDirectory"]
+        try:
+            expected_resolved = expected_run_directory.resolve()
+        except Exception:
+            expected_resolved = expected_run_directory
+        if storage_path != expected_resolved:
+            return (
+                None,
+                "source collection storage path 与历史快照中 teamId/runId 的预期路径不一致。"
+                f" expected={_relative_path(expected_resolved)}",
+            )
+    return storage_path, ""
+
+
+def _decorate_source_collection_work_run_snapshot(
+    source_collection_work_run: dict[str, Any] | None,
+    *,
+    team_id: str = "",
+    run_id: str = "",
+) -> dict[str, Any] | None:
+    if not isinstance(source_collection_work_run, dict):
+        return None
+    payload = dict(source_collection_work_run)
+    normalized_team_id = team_id or _trim_text(payload.get("teamId"), max_length=96)
+    normalized_run_id = run_id or _trim_text(payload.get("runId"), max_length=96)
+    _, reason = _coerce_source_collection_storage_path_soft(
+        payload,
+        team_id=normalized_team_id,
+        run_id=normalized_run_id,
+    )
+    if reason:
+        payload.pop("storagePath", None)
+        existing_reason = str(payload.get("pathValidationError") or "").strip()
+        payload["pathValidationError"] = (
+            f"{existing_reason}; {reason}" if existing_reason and existing_reason != reason else reason
+        )
+    return payload
 
 
 def _source_collection_search_background_response(
@@ -2399,9 +2489,24 @@ def open_source_collection_storage_target(team_id: str, run_id: str, payload: di
 def load_source_collection_work_run_summary() -> dict[str, Any]:
     store = _source_collection_work_run_store()
     active = store.load_active_snapshot(SOURCE_COLLECTION_WORK_RUN_KIND)
+    latest = store.load_latest_snapshot(SOURCE_COLLECTION_WORK_RUN_KIND)
+    active_team_id = _trim_text(active.get("teamId"), max_length=96) if isinstance(active, dict) else ""
+    active_run_id = _trim_text(active.get("runId"), max_length=96) if isinstance(active, dict) else ""
+    latest_team_id = _trim_text(latest.get("teamId"), max_length=96) if isinstance(latest, dict) else ""
+    latest_run_id = _trim_text(latest.get("runId"), max_length=96) if isinstance(latest, dict) else ""
+    active = _decorate_source_collection_work_run_snapshot(
+        active,
+        team_id=active_team_id,
+        run_id=active_run_id,
+    )
+    latest = _decorate_source_collection_work_run_snapshot(
+        latest,
+        team_id=latest_team_id,
+        run_id=latest_run_id,
+    )
     return {
         "active": active,
-        "latest": store.load_latest_snapshot(SOURCE_COLLECTION_WORK_RUN_KIND),
+        "latest": latest,
         "activeItems": [active] if isinstance(active, dict) else [],
     }
 
@@ -6724,6 +6829,15 @@ def get_source_collection_summary(team_id: str, *, run_id: str = "") -> dict[str
     projection_summary = projection.get("summary") if isinstance(projection.get("summary"), dict) else {}
     stage_round_ref = _source_collection_stage_round_ref_for_run(normalized_team_id, normalized_run_id) if normalized_run_id else {}
     active_snapshot = _source_collection_work_run_store().load_active_snapshot(SOURCE_COLLECTION_WORK_RUN_KIND) if normalized_run_id else {}
+    active_snapshot = (
+        _decorate_source_collection_work_run_snapshot(
+            active_snapshot,
+            team_id=normalized_team_id,
+            run_id=normalized_run_id,
+        )
+        if isinstance(active_snapshot, dict)
+        else {}
+    )
     active_work_run = (
         active_snapshot
         if _source_collection_background_snapshot_is_active(active_snapshot, normalized_team_id, normalized_run_id)
@@ -13771,6 +13885,11 @@ def _source_collection_run_context_bundle(team_id: str, run_id: str) -> dict[str
     records = [item for item in list(records_payload.get("records") or []) if isinstance(item, dict)]
     source_candidates = _source_collection_candidates_for_run(team_id, run_id)
     active_snapshot = _source_collection_work_run_store().load_active_snapshot(SOURCE_COLLECTION_WORK_RUN_KIND)
+    active_snapshot = _decorate_source_collection_work_run_snapshot(
+        active_snapshot,
+        team_id=team_id,
+        run_id=run_id,
+    )
     active_work_run = (
         active_snapshot
         if _source_collection_background_snapshot_is_active(active_snapshot, team_id, run_id)

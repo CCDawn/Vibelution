@@ -557,6 +557,96 @@ def test_candidate_worktree_cleanup_plan_rejects_file_path(tmp_path):
     assert plan["reason"] == "not_directory"
 
 
+def test_get_supervised_worktree_run_cleanses_invalid_candidate_worktree_path(tmp_path):
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    bad_path = tmp_path / "candidate-file.py"
+    bad_path.write_text("print('legacy')\n", encoding="utf-8")
+    run_id = "swte-get-invalid-candidate-worktree"
+    service._persist_snapshot(
+        {
+            "runId": run_id,
+            "runKind": service.RUN_KIND,
+            "status": "done",
+            "projectRoot": str(project_root),
+            "candidateWorktree": {"path": str(bad_path), "preserved": True},
+            "updatedAt": "2026-06-01T00:00:00+00:00",
+        }
+    )
+
+    snapshot = service.get_supervised_worktree_run(run_id)
+    assert snapshot is not None
+    assert "path" not in snapshot["candidateWorktree"]
+    assert "pathValidationError" in snapshot["candidateWorktree"]
+    assert snapshot["actionStates"]["preserve"]["enabled"] is False
+
+
+def test_get_supervised_worktree_run_cleanses_nested_candidate_worktree_path(tmp_path):
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    nested_path = project_root / ".temp-candidate"
+    nested_path.mkdir()
+    run_id = "swte-get-nested-candidate-worktree"
+    service._persist_snapshot(
+        {
+            "runId": run_id,
+            "runKind": service.RUN_KIND,
+            "status": "done",
+            "projectRoot": str(project_root),
+            "candidateWorktree": {"path": str(nested_path), "preserved": True},
+            "updatedAt": "2026-06-01T00:00:03+00:00",
+        }
+    )
+
+    snapshot = service.get_supervised_worktree_run(run_id)
+    assert snapshot is not None
+    assert "path" not in snapshot["candidateWorktree"]
+    assert "pathValidationError" in snapshot["candidateWorktree"]
+    assert "主项目目录内" in snapshot["candidateWorktree"]["pathValidationError"]
+    assert snapshot["actionStates"]["discard"]["enabled"] is False
+
+
+def test_list_supervised_worktree_runs_cleanses_invalid_candidate_worktree_path(tmp_path):
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    invalid_path = tmp_path / "candidate-file.py"
+    invalid_path.write_text("print('legacy')\n", encoding="utf-8")
+    valid_path = tmp_path / "candidate-dir"
+    valid_path.mkdir()
+    invalid_run_id = "swte-list-invalid-candidate-worktree"
+    valid_run_id = "swte-list-valid-candidate-worktree"
+
+    service._persist_snapshot(
+        {
+            "runId": invalid_run_id,
+            "runKind": service.RUN_KIND,
+            "status": "done",
+            "projectRoot": str(project_root),
+            "candidateWorktree": {"path": str(invalid_path), "preserved": True},
+            "updatedAt": "2026-06-01T00:00:01+00:00",
+        }
+    )
+    service._persist_snapshot(
+        {
+            "runId": valid_run_id,
+            "runKind": service.RUN_KIND,
+            "status": "done",
+            "projectRoot": str(project_root),
+            "candidateWorktree": {"path": str(valid_path), "preserved": True},
+            "updatedAt": "2026-06-01T00:00:02+00:00",
+        }
+    )
+
+    snapshots = service.list_supervised_worktree_runs(limit=10)
+    snapshots_by_id = {snapshot.get("runId"): snapshot for snapshot in snapshots}
+    invalid_snapshot = snapshots_by_id[invalid_run_id]
+    assert "path" not in invalid_snapshot["candidateWorktree"]
+    assert "pathValidationError" in invalid_snapshot["candidateWorktree"]
+    assert invalid_snapshot["candidateWorktree"]["pathValidationError"]
+    valid_snapshot = snapshots_by_id[valid_run_id]
+    assert "path" in valid_snapshot["candidateWorktree"]
+
+
 def test_real_llm_mode_requires_explicit_cost_confirmation(tmp_path):
     project_root = tmp_path / "project"
     _write_bundle(project_root)

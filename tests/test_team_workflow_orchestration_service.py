@@ -5449,6 +5449,122 @@ def test_source_collection_summary_uses_lightweight_team_existence(tmp_path, mon
     assert payload["stageCardSummary"]["sourceCandidateCount"] == 1
 
 
+def test_load_source_collection_work_run_summary_cleanses_invalid_storage_path(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = team_service.create_team(name="挑战杯科研团队")
+    source_work_runs = WorkRunStore(root=tmp_path / ".runtime" / "work_runs")
+    monkeypatch.setattr(
+        team_workflow_orchestration_service,
+        "_source_collection_work_run_store",
+        lambda: source_work_runs,
+    )
+    invalid_path = tmp_path / "workspace" / "legacy-source-collection-run"
+    invalid_path.mkdir(parents=True, exist_ok=True)
+    run_id = "run-invalid-storage-path"
+
+    source_work_runs.persist_snapshot(
+        team_workflow_orchestration_service.SOURCE_COLLECTION_WORK_RUN_KIND,
+        {
+            "runId": run_id,
+            "runKind": team_workflow_orchestration_service.SOURCE_COLLECTION_WORK_RUN_KIND,
+            "status": "running",
+            "teamId": team["teamId"],
+            "storagePath": str(invalid_path),
+        },
+        active_run_id=run_id,
+    )
+
+    summary = team_workflow_orchestration_service.load_source_collection_work_run_summary()
+
+    assert summary["active"]["runId"] == run_id
+    assert summary["latest"]["runId"] == run_id
+    assert "storagePath" not in summary["active"]
+    assert "pathValidationError" in summary["active"]
+    assert "pathValidationError" in summary["latest"]
+
+
+def test_source_collection_summary_cleanses_active_work_run_invalid_storage_path(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
+    team = team_service.create_team(name="挑战杯科研团队")
+    source_work_runs = WorkRunStore(root=tmp_path / ".runtime" / "work_runs")
+    monkeypatch.setattr(
+        team_workflow_orchestration_service,
+        "_source_collection_work_run_store",
+        lambda: source_work_runs,
+    )
+    run_response = team_workflow_orchestration_service.start_source_collection_run(
+        team["teamId"],
+        {
+            "topic": "predictive coding",
+            "agentRoles": ["data_discovery"],
+            "querySeeds": ["predictive coding"],
+            "promptCachePolicy": {"requirement": "disabled"},
+        },
+    )
+    run_id = run_response["run"]["runId"]
+    invalid_path = tmp_path / "workspace" / "legacy-source-collection-summary"
+    invalid_path.mkdir(parents=True, exist_ok=True)
+    source_work_runs.persist_snapshot(
+        team_workflow_orchestration_service.SOURCE_COLLECTION_WORK_RUN_KIND,
+        {
+            "runId": run_id,
+            "runKind": team_workflow_orchestration_service.SOURCE_COLLECTION_WORK_RUN_KIND,
+            "status": "running",
+            "teamId": team["teamId"],
+            "storagePath": str(invalid_path),
+        },
+        active_run_id=run_id,
+    )
+
+    payload = team_workflow_orchestration_service.get_source_collection_summary(team["teamId"], run_id=run_id)
+
+    assert payload["activeWorkRun"]["runId"] == run_id
+    assert "storagePath" not in payload["activeWorkRun"]
+    assert "pathValidationError" in payload["activeWorkRun"]
+
+
+def test_source_collection_run_context_bundle_cleanses_invalid_active_storage_path(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
+    team = team_service.create_team(name="挑战杯科研团队")
+    source_work_runs = WorkRunStore(root=tmp_path / ".runtime" / "work_runs")
+    monkeypatch.setattr(
+        team_workflow_orchestration_service,
+        "_source_collection_work_run_store",
+        lambda: source_work_runs,
+    )
+    run_response = team_workflow_orchestration_service.start_source_collection_run(
+        team["teamId"],
+        {
+            "topic": "predictive coding",
+            "agentRoles": ["data_discovery"],
+            "querySeeds": ["predictive coding"],
+            "promptCachePolicy": {"requirement": "disabled"},
+        },
+    )
+    run_id = run_response["run"]["runId"]
+    invalid_path = tmp_path / "workspace" / "legacy-source-collection-context"
+    invalid_path.mkdir(parents=True, exist_ok=True)
+    source_work_runs.persist_snapshot(
+        team_workflow_orchestration_service.SOURCE_COLLECTION_WORK_RUN_KIND,
+        {
+            "runId": run_id,
+            "runKind": team_workflow_orchestration_service.SOURCE_COLLECTION_WORK_RUN_KIND,
+            "status": "running",
+            "teamId": team["teamId"],
+            "storagePath": str(invalid_path),
+        },
+        active_run_id=run_id,
+    )
+
+    bundle = team_workflow_orchestration_service._source_collection_run_context_bundle(team["teamId"], run_id)
+
+    assert bundle["activeWorkRun"]["runId"] == run_id
+    assert "storagePath" not in bundle["activeWorkRun"]
+    assert "pathValidationError" in bundle["activeWorkRun"]
+
+
 def test_local_research_model_output_requires_evidence_refs(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     team = team_service.create_team(name="挑战杯科研团队")
