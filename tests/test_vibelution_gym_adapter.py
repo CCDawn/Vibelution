@@ -145,7 +145,7 @@ def test_vibelution_adapter_rejects_forbidden_coordination_tools(tmp_path: Path)
 def test_vibelution_adapter_requires_strategy_evidence_tool(tmp_path: Path):
     def fake_runner(**kwargs):
         result = _fake_harness_result(status="success", harness_id="strategy")
-        result.evolution_summary["tool_sequence_tail"] = ["read_file_tool:success"]
+        result.evolution_summary["tool_sequence_tail"] = ["cli_tool:success"]
         return result
 
     adapter = VibelutionAgentHarnessAdapter(project_root=tmp_path, harness_runner=fake_runner)
