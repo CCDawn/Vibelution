@@ -4,19 +4,19 @@
 
 **Goal:** Convert Vibelution to a single-entry Electron desktop application where Electron is the desktop supervisor and single visible shell, while Python Launcher and Runtime Manager remain the runtime lifecycle authority.
 
-**Architecture:** Vibelution keeps one user-visible entrypoint and one source of truth per authority domain. Electron replaces the current Edge app window provider and directly supervises desktop windows plus one Python Launcher Service child; Python Launcher owns active-work policy, lifecycle intent persistence, runtime command decisions, and Runtime Manager delegation. The Codex reference repo shows the useful pattern is not "put product logic into Electron"; it is a deep-linkable desktop entry backed by a typed app-server/runtime protocol. Vibelution must therefore reuse existing Launcher, Runtime Manager, FastAPI, runtime-scene, active-work guard, config, and control-token contracts instead of creating a parallel lifecycle system.
+**Architecture:** Vibelution keeps one user-visible entrypoint and one source of truth per authority domain. Electron replaces the current Edge app window provider, owns only the desktop shell/window layer, and bootstraps or attaches to the Python Launcher control service; Python Launcher owns active-work policy, lifecycle intent persistence, runtime command decisions, and Runtime Manager delegation. The Codex reference repo shows the useful pattern is not "put product logic into Electron"; it is a deep-linkable desktop entry backed by a typed app-server/runtime protocol. Vibelution must therefore reuse existing Launcher, Runtime Manager, FastAPI, runtime-scene, active-work guard, config, and control-token contracts instead of creating a parallel lifecycle system.
 
 **Tech Stack:** Electron, Node.js, TypeScript, React/Vite web UI loaded through local HTTP, FastAPI backend, Python Runtime Manager, existing `scripts/vibelution_launcher.ps1` / `scripts/vibelution_launcher.py`, existing Launcher API, Vitest, pytest.
 
 ## Global Constraints
 
 - Single visible user entrypoint: one packaged `Vibelution` launcher entry, not separate public Launcher and Workbench shortcuts.
-- Two-layer supervision rule: Electron main is the desktop session supervisor; Python Launcher is the runtime policy and lifecycle command authority.
-- Single-domain authority rule: Electron owns single-instance, protocol handler, BrowserWindow state, and the Python Launcher Service child; Python owns active-work, apply/rollback, Runtime Manager commands, lifecycle intents, and runtime-scene policy.
-- Multi-process runtime: Electron main is the OS-visible root process, but backend, Runtime Manager, self-evolution workers, and tool workers remain Python-managed descendants or projections rather than Electron-owned direct children.
+- Two-layer supervision rule: Electron main is the desktop session supervisor only; Python Launcher is the runtime policy and lifecycle command authority.
+- Single-domain authority rule: Electron owns single-instance, protocol handler, BrowserWindow state, and the Launcher bootstrap/attach handle; Python owns active-work, apply/rollback, Runtime Manager commands, lifecycle intents, runtime-scene policy, and runtime child ownership.
+- Multi-process runtime: Electron main is the packaged OS-visible entry process, but backend, Runtime Manager, self-evolution workers, and tool workers remain Python-owned runtime processes. They must not become Electron-owned direct children in the product authority model, even if a development bootstrap temporarily creates an OS process tree under the desktop entry.
 - Workbench cannot start the project directly; it is opened, focused, and closed only through Launcher commands.
 - Self-evolution Agent cannot spawn or kill the project directly; it writes structured lifecycle intents that Launcher validates and executes.
-- Electron main process must not contain product business logic, LLM calls, file scanning, agent execution, or tool execution; it supervises and delegates.
+- Electron main process must not contain product business logic, LLM calls, file scanning, agent execution, runtime command interpretation, lifecycle intent interpretation, or tool execution; it supervises desktop windows and delegates all runtime authority to Python.
 - Reuse-first rule: reuse current Launcher APIs, Runtime Manager commands, runtime-scene logging, control-token guard, and web build output before adding new paths.
 - Codex reference rule: do not assume the reference repo contains reusable Electron packaging code. Its reusable idea is the separation between desktop entry, deep link, app-server protocol, daemon lifecycle commands, and packaged runtime artifacts.
 - Protocol-first rule: before adding Electron IPC or child-process behavior, define the machine-readable Launcher protocol shape that Electron, web UI, self-evolution, and tests all consume.
@@ -27,7 +27,7 @@
 - No-drift rule: any compatibility field, adapter, feature flag, or legacy provider must have an owner, removal trigger, and test that proves it does not become a second source of truth.
 - Config/environment rule: Electron must resolve Python, Node, ports, control tokens, user data, and operator config through existing project contracts or explicit environment adapters; it must not introduce hidden defaults that compete with `C:\Users\17533\Documents\Vibelution\config\config.toml`.
 - Architecture/test alignment rule: update old tests that assert `msedge.exe`, `--app=`, `browserManaged`, or Edge profile details so they protect the new window-provider contract instead of the retired implementation.
-- Security baseline: renderer Node integration stays disabled; `contextIsolation` stays enabled; preload exposes only narrow lifecycle IPC calls.
+- Security baseline: renderer Node integration stays disabled; `contextIsolation` stays enabled; preload exposes only narrow desktop-shell IPC calls.
 - Package manager baseline: use `npm` and lockfiles; Bun remains auxiliary and must not become the release build path.
 - Runtime refresh during implementation remains Launcher-gated; do not use ad hoc process killing as the normal validation path.
 
@@ -42,7 +42,7 @@ Vibelution.exe
 └─ Electron Main Process: Desktop Supervisor
    ├─ Launcher Renderer Window
    ├─ Workbench Renderer Window
-   └─ Python Launcher Service
+   └─ Python Launcher Control Service (bootstrap/attach handle; runtime authority remains in Python)
       ├─ FastAPI Backend / Launcher API
       ├─ Runtime Manager Daemon
       ├─ Self-Evolution Agent Worker(s)
@@ -56,7 +56,7 @@ The product behavior must feel like one app:
 - Launcher control surface appears first.
 - User starts or focuses Workbench through Launcher.
 - Closing Workbench does not necessarily close Launcher.
-- Closing Launcher runs active-work checks before closing managed children.
+- Closing Launcher runs Python active-work checks before closing desktop windows or requesting any Python-owned runtime shutdown.
 - Self-evolution can request a restart or resume only by writing a lifecycle intent.
 - Python Launcher records who requested a lifecycle action, why it was accepted or rejected, which runtime command or desktop action was emitted, and what happened.
 
@@ -367,8 +367,10 @@ Rules:
 - Python Launcher is the single writer of `lifecycle.sqlite3`.
 - Server code derives `requestedBy`, `sourceRunId`, and `sourceWorktree`; callers cannot self-declare trusted actor identity or arbitrary worktree paths.
 - Launcher validates active work, worktree review state, apply/rollback safety, source run existence, source worktree ownership, retry budget, rollback conflicts, and duplicate idempotency keys before persistence changes state.
-- Accepted intents become one of three owned outputs: Runtime Manager commands, Desktop Actions, or Desktop Supervisor exit requests.
-- Desktop Actions are claimed through a guarded Launcher API with lease semantics and acked by Electron with result metadata.
+- Every accepted intent is routed through one Python Policy Engine decision before any side effect occurs.
+- The Python Policy Engine must emit exactly one terminal dispatch output per intent: `RuntimeCommand`, `DesktopAction`, `Rejected`, or `Superseded`. A single intent must never emit both a Runtime Manager command and a Desktop Action.
+- Desktop Actions are created only by the Python Policy Engine, claimed through a guarded Launcher API with lease semantics, and acked by Electron with result metadata.
+- Electron never interprets lifecycle intents, never reads the intent store, and never decides whether an intent becomes a runtime command or a desktop action.
 - Rejected intents stay visible with a safe reason.
 - Intent execution records runtime-scene events before and after command submission.
 
@@ -2944,7 +2946,7 @@ git commit -m "feat: consume launcher-approved desktop actions"
 
 **Interfaces:**
 - Consumes: Electron IPC, verified local Launcher origin, Task 7 bootstrap ownership mode, and Python Launcher active-work status.
-- Produces: narrow renderer-to-main bridge, validated IPC sender origin, and one shutdown path that cannot bypass active-work guard.
+- Produces: narrow renderer-to-main desktop-shell bridge, validated IPC sender origin, and one shutdown path that cannot bypass active-work guard.
 
 - [ ] **Step 1: Add IPC channel constants**
 
@@ -2953,9 +2955,9 @@ Create `desktop/electron/src/ipc.ts`:
 ```ts
 export const IPC_CHANNELS = {
   getVersion: "launcher:get-version",
-  getLifecycleSummary: "launcher:get-lifecycle-summary",
-  focusWorkbench: "launcher:focus-workbench",
-  requestAppExit: "launcher:request-app-exit"
+  getDesktopShellSummary: "launcher:get-desktop-shell-summary",
+  focusWorkbenchWindow: "launcher:focus-workbench-window",
+  requestDesktopShellExit: "launcher:request-desktop-shell-exit"
 } as const;
 
 export type IpcChannel = (typeof IPC_CHANNELS)[keyof typeof IPC_CHANNELS];
@@ -2971,11 +2973,13 @@ import { IPC_CHANNELS } from "./ipc.js";
 
 contextBridge.exposeInMainWorld("vibelutionLauncher", {
   getVersion: () => ipcRenderer.invoke(IPC_CHANNELS.getVersion),
-  getLifecycleSummary: () => ipcRenderer.invoke(IPC_CHANNELS.getLifecycleSummary),
-  focusWorkbench: () => ipcRenderer.invoke(IPC_CHANNELS.focusWorkbench),
-  requestAppExit: () => ipcRenderer.invoke(IPC_CHANNELS.requestAppExit)
+  getDesktopShellSummary: () => ipcRenderer.invoke(IPC_CHANNELS.getDesktopShellSummary),
+  focusWorkbenchWindow: () => ipcRenderer.invoke(IPC_CHANNELS.focusWorkbenchWindow),
+  requestDesktopShellExit: () => ipcRenderer.invoke(IPC_CHANNELS.requestDesktopShellExit)
 });
 ```
+
+`getDesktopShellSummary` may return only Electron shell facts such as window role, focus state, desktop session id, provider, revision, and bootstrap capability summary. It must not return Python lifecycle queues, active-work internals, Runtime Manager command state, or lifecycle intent records. Runtime lifecycle state visible to the web UI must continue to come from the existing authenticated Launcher/FastAPI routes.
 
 - [ ] **Step 3: Add IPC sender validation**
 
@@ -2995,13 +2999,13 @@ export function assertTrustedIpcSender(event: IpcMainInvokeEvent, allowedOrigins
 Register every IPC handler in `desktop/electron/src/main.ts` through this validator:
 
 ```ts
-ipcMain.handle(IPC_CHANNELS.focusWorkbench, async (event) => {
+ipcMain.handle(IPC_CHANNELS.focusWorkbenchWindow, async (event) => {
   assertTrustedIpcSender(event, [launcherOrigin, workbenchOrigin]);
   return await electronWindowProvider.focusWorkbench();
 });
 ```
 
-Renderer IPC must not accept arbitrary URLs, process IDs, command names, Python paths, workspace paths, or lifecycle action payloads.
+Renderer IPC must not accept arbitrary URLs, process IDs, command names, Python paths, workspace paths, lifecycle action payloads, runtime action names, or Desktop Action ids. IPC handlers may request local window focus/navigation or request the desktop shell exit flow, but the exit flow must still call Python active-work status through `ShutdownCoordinator`.
 
 - [ ] **Step 4: Add ShutdownCoordinator**
 
@@ -3039,7 +3043,7 @@ export async function decideShutdown(input: {
 }
 ```
 
-Wire `before-quit`, `window-all-closed`, Launcher window close, renderer `requestAppExit`, and second-instance shutdown requests through `decideShutdown(...)`. `window-all-closed` must not call `app.quit()` directly.
+Wire `before-quit`, `window-all-closed`, Launcher window close, renderer `requestDesktopShellExit`, and second-instance shutdown requests through `decideShutdown(...)`. `window-all-closed` must not call `app.quit()` directly.
 
 - [ ] **Step 5: Add coordinator tests**
 
@@ -3083,7 +3087,12 @@ import { IPC_CHANNELS } from "../src/ipc.js";
 
 describe("IPC channels", () => {
   it("keeps the bridge narrow", () => {
-    expect(Object.keys(IPC_CHANNELS).sort()).toEqual(["focusWorkbench", "getLifecycleSummary", "getVersion", "requestAppExit"]);
+    expect(Object.keys(IPC_CHANNELS).sort()).toEqual([
+      "focusWorkbenchWindow",
+      "getDesktopShellSummary",
+      "getVersion",
+      "requestDesktopShellExit"
+    ]);
   });
 });
 ```
@@ -3499,7 +3508,7 @@ During implementation, old tests must be classified before being changed:
 | `browserManaged is True` | update | New invariant is `windowManaged`; `browserManaged` remains Edge-only compatibility projection. |
 | `windowProcessId` exists | update/remove | Replace with `windowId` and `rendererProcessId`; accept `windowProcessId` only as temporary read compatibility inside backend projection code. |
 | `workbench-app-profile` exists | update | Replace with `windowProfileDir`; Edge profile path is provider-specific. |
-| Launcher start/stop/restart active-work blockers | keep | Must also cover Electron `window-all-closed`, Launcher window close, and renderer `requestAppExit`. |
+| Launcher start/stop/restart active-work blockers | keep | Must also cover Electron `window-all-closed`, Launcher window close, and renderer `requestDesktopShellExit`. |
 | control-token and `/api/launcher/*` guarded endpoints | keep | Add Desktop Action claim/ack/fail and Desktop Session route coverage under the same guard. |
 | direct `uvicorn` or direct browser launch as normal lifecycle path | reject | Tests should fail if Electron introduces normal runtime process control outside Python Launcher/Runtime Manager. |
 | JSONL lifecycle intent append path | migrate/remove | Replace with SQLite claim/lease tests; legacy JSONL tests must not keep append-only ACK semantics alive. |
