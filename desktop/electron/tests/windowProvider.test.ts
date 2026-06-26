@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { IpcMainInvokeEvent } from "electron";
 import { IPC_CHANNELS } from "../src/ipc.js";
 import { assertLocalHttpUrl } from "../src/security/urlPolicy.js";
@@ -15,7 +15,7 @@ class FakeWindow implements ElectronWindowLike {
   closeCount = 0;
   private destroyed = false;
   private focused = false;
-  private handlers = new Map<string, Array<() => void>>();
+  private handlers = new Map<string, Array<(...args: unknown[]) => void>>();
 
   constructor(id: number, private readonly url: string, rendererProcessId: number) {
     this.id = id;
@@ -48,14 +48,14 @@ class FakeWindow implements ElectronWindowLike {
     return this.focused;
   }
 
-  on(event: string, listener: () => void): this {
+  on(event: string, listener: (...args: unknown[]) => void): this {
     this.handlers.set(event, [...(this.handlers.get(event) ?? []), listener]);
     return this;
   }
 
-  emit(event: string): void {
+  emit(event: string, ...args: unknown[]): void {
     for (const listener of this.handlers.get(event) ?? []) {
-      listener();
+      listener(...args);
     }
   }
 }
@@ -107,6 +107,27 @@ describe("Electron window provider state", () => {
       rendererProcessId: 4242,
       url: "http://127.0.0.1:8000/"
     });
+  });
+
+  it("routes launcher window close through the desktop shell exit guard before the renderer unloads", async () => {
+    const closeRequests: string[] = [];
+    const launcherWindow = new FakeWindow(7, "http://127.0.0.1:8765/launcher", 7070);
+    const provider = new ElectronWindowProvider(desktopPaths, "http://127.0.0.1:8765/launcher", "http://127.0.0.1:8000", {
+      createLauncherWindow: () => launcherWindow,
+      createWorkbenchWindow: (url) => new FakeWindow(42, url, 4242),
+      shouldInterceptLauncherClose: () => true,
+      onLauncherCloseRequest: () => {
+        closeRequests.push("launcher");
+      }
+    });
+    await provider.openLauncher();
+
+    const closeEvent = { preventDefault: vi.fn() };
+    launcherWindow.emit("close", closeEvent);
+
+    expect(closeEvent.preventDefault).toHaveBeenCalledTimes(1);
+    expect(closeRequests).toEqual(["launcher"]);
+    expect(launcherWindow.isDestroyed()).toBe(false);
   });
 });
 

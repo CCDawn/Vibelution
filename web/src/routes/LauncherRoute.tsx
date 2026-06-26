@@ -36,8 +36,10 @@ import {
   applyBeforeUnloadProjectCloseGuard,
   buildProjectWindowCloseBlockedTelemetry,
   clearControlledProjectLifecycleOperation,
+  isElectronDesktopShell,
   markControlledProjectLifecycleOperation,
   projectWindowCloseGuardMessage,
+  shouldArmBrowserProjectCloseGuard,
   shouldBlockProjectWindowClose,
 } from "../app/projectCloseGuard";
 import { useShellI18n } from "../i18n/useShellI18n";
@@ -2175,6 +2177,10 @@ export function LauncherRoute() {
   const launcherCloseBlocked = shouldBlockProjectWindowClose(status, {
     lifecycleOperationInFlight: controlledCloseOperationInFlight,
   });
+  const launcherCloseGuardArmed = shouldArmBrowserProjectCloseGuard({
+    closeBlocked: launcherCloseBlocked,
+    electronDesktopShell: isElectronDesktopShell(),
+  });
 
   useEffect(() => {
     if (!trackedCommand || !trackedResult) {
@@ -2207,7 +2213,7 @@ export function LauncherRoute() {
   }, [shouldClearStaleLifecycleNotice]);
 
   useEffect(() => {
-    if (!launcherCloseBlocked) {
+    if (!launcherCloseGuardArmed) {
       return;
     }
 
@@ -2231,7 +2237,7 @@ export function LauncherRoute() {
 
     window.addEventListener("beforeunload", handleBeforeUnload);
     return () => window.removeEventListener("beforeunload", handleBeforeUnload);
-  }, [launcherCloseBlocked, launcherCloseGuardMessage, status]);
+  }, [launcherCloseGuardArmed, launcherCloseGuardMessage, status]);
 
   return (
     <section className={styles.route} aria-label={copy.title}>
