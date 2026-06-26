@@ -2044,6 +2044,7 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).not.toContain("运行状态 3");
     expect(html).not.toContain("回答</span>");
     expect((html.match(new RegExp(fullModelStatus, "g")) ?? [])).toHaveLength(0);
+    expect(html.match(/statusSpinner/g)?.length).toBe(1);
   });
 
   it("shows model-request placeholder as a light process preview instead of a separate answer block", () => {
@@ -2076,6 +2077,44 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).toContain("answerOnlyProcessPreview");
     expect(html).not.toContain("回答</span>");
     expect(html).not.toContain("responseSection");
+  });
+
+  it("keeps the collapsed answer-only process summary static before details are expanded", () => {
+    const placeholder = "正在请求模型，等待首个响应片段...\n上下文已组装完成，正在进入 LLM 调用。";
+    const html = renderConversation(
+      [
+        {
+          id: "message-model-request-single-spinner",
+          role: "assistant",
+          content: placeholder,
+          timestamp: "2026-06-23T18:11:00Z",
+          streaming: true,
+          feedbackEvents: [
+            {
+              sequence: 1,
+              kind: "status",
+              status: "running",
+              name: "model_request",
+              summary: placeholder,
+            },
+          ],
+        },
+      ],
+      { useDefaultProcessDisplayMode: true },
+    );
+
+    expect(html).toContain("生成中");
+    expect(html).toContain("正在请求");
+    expect(html).not.toContain("statusSpinner");
+  });
+
+  it("does not use an animated spinner for the answer-only process summary icon", () => {
+    const start = conversationViewSource.indexOf("function processSummaryIcon");
+    const end = conversationViewSource.indexOf("function operationMatchesAny", start);
+    const processSummaryIconSource = conversationViewSource.slice(start, end);
+
+    expect(processSummaryIconSource).toContain("function processSummaryIcon");
+    expect(processSummaryIconSource).not.toContain("styles.statusSpinner");
   });
 
   it("keeps the active execution trace compact while preserving expandable details", () => {
