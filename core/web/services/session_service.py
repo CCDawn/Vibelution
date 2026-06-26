@@ -15972,7 +15972,9 @@ def _extract_chat_feedback_events(result: Any, *, final_status: str = "") -> lis
         return events
     finalized: list[dict[str, Any]] = []
     latest_unfinished_index = -1
-    if status_key not in {"completed", "done", "ready"}:
+    failure_statuses = {"failed", "failed_runtime", "failed_provider", "timeout", "error"}
+    should_fail_latest_unfinished = status_key in failure_statuses
+    if should_fail_latest_unfinished:
         for index, item in enumerate(events):
             if str(item.get("status") or "").strip().lower() in {"running", "pending"}:
                 latest_unfinished_index = index
@@ -15981,7 +15983,7 @@ def _extract_chat_feedback_events(result: Any, *, final_status: str = "") -> lis
         if str(entry.get("status") or "").strip().lower() in {"running", "pending"}:
             entry["status"] = (
                 "done"
-                if status_key in {"completed", "done", "ready"} or index < latest_unfinished_index
+                if not should_fail_latest_unfinished or index < latest_unfinished_index
                 else "failed"
             )
         finalized.append(entry)
@@ -18888,12 +18890,7 @@ def _chat_turn_result_status(result_status: str, result: Any, *, stop_requested:
         outcome = str(contract.get("outcome") or result.get("outcome") or result.get("task_outcome") or "").strip().lower()
         explicit_outcome = _explicit_chat_result_outcome(result)
         visible = _visible_reply_candidate(result)
-        if (
-            normalized == "completed"
-            and explicit_outcome != "progress"
-            and visible
-            and (has_conclusion_signal(visible) or has_next_action_signal(visible))
-        ):
+        if normalized == "completed" and explicit_outcome != "progress" and visible:
             return "completed"
         tool_count = _coerce_nonnegative_int(result.get("tool_call_count") or 0)
         tool_trace = list(result.get("tool_trace") or result.get("tool_calls") or [])
