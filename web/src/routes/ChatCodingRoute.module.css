@@ -23,7 +23,7 @@
   flex-direction: column;
   gap: 5px;
   padding: 6px;
-  background: color-mix(in srgb, var(--surface-panel-muted) 86%, transparent);
+  background: color-mix(in srgb, var(--surface-panel-muted) 64%, transparent);
   overflow: auto;
 }
 
@@ -38,7 +38,7 @@
   padding: 7px;
   border: 1px solid var(--border-soft);
   border-radius: 8px;
-  background: var(--surface-panel);
+  background: color-mix(in srgb, var(--surface-panel) 72%, transparent);
 }
 
 .currentSessionBlock {
@@ -4342,9 +4342,8 @@ a.teamTreeChild:focus-visible {
 }
 
 .sessionItem[aria-current="true"] {
-  background:
-    linear-gradient(90deg, color-mix(in srgb, var(--accent-cool) 20%, transparent) 0 2px, transparent 2px),
-    color-mix(in srgb, var(--surface-card) 68%, transparent);
+  background: color-mix(in srgb, var(--surface-card) 68%, transparent);
+  box-shadow: inset 1px 0 0 color-mix(in srgb, var(--accent-cool) 42%, transparent);
 }
 
 .directSessionItem {
@@ -4362,15 +4361,14 @@ a.teamTreeChild:focus-visible {
 .groupSessionItem.sessionItemActive,
 .groupSessionItem[aria-current="true"] {
   border-color: transparent;
-  background: color-mix(in srgb, var(--accent-cool) 14%, var(--surface-card));
-  box-shadow: none;
+  background: color-mix(in srgb, var(--accent-cool) 10%, var(--surface-card));
+  box-shadow: inset 1px 0 0 color-mix(in srgb, var(--accent-cool) 36%, transparent);
 }
 
 .sessionItem:hover,
 .sessionItem:focus-within {
-  background:
-    linear-gradient(90deg, color-mix(in srgb, var(--accent-cool) 13%, transparent) 0 2px, transparent 2px),
-    color-mix(in srgb, var(--surface-card) 56%, transparent);
+  background: color-mix(in srgb, var(--surface-card) 58%, transparent);
+  box-shadow: inset 1px 0 0 color-mix(in srgb, var(--accent-cool) 28%, transparent);
 }
 
 .sessionItemMain {
@@ -4622,7 +4620,7 @@ a.teamTreeChild:focus-visible {
   height: 6px;
   border-radius: 999px;
   background: var(--accent-cool);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-cool) 18%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent-cool) 18%, transparent);
 }
 
 .sessionRunningBadge,
@@ -4815,9 +4813,10 @@ a.teamTreeChild:focus-visible {
   padding: 4px;
   border: 1px solid color-mix(in srgb, var(--border-strong) 78%, transparent);
   border-radius: 8px;
-  background:
-    linear-gradient(180deg, color-mix(in srgb, var(--surface-card) 96%, white 4%), var(--surface-card));
-  box-shadow: 0 14px 32px color-mix(in srgb, black 26%, transparent);
+  background: color-mix(in srgb, var(--surface-card) 92%, transparent);
+  box-shadow: 0 12px 28px color-mix(in srgb, black 14%, transparent);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
 }
 
 .sessionContextMenuItem {
