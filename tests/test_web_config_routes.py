@@ -306,6 +306,11 @@ def test_config_workspace_exposes_editor_schema_without_launcher_owned_startup_s
         "theme_backgrounds/default-wallpaper-neon-hunter-stage.png",
         "theme_backgrounds/default-wallpaper-golden-stadium.png",
         "theme_backgrounds/default-wallpaper-neon-casino-lounge.png",
+        "theme_backgrounds/prompt-trend-wallpaper-01-mountain-observatory.png",
+        "theme_backgrounds/prompt-trend-wallpaper-02-memory-atrium.png",
+        "theme_backgrounds/prompt-trend-wallpaper-03-pixel-skyline.png",
+        "theme_backgrounds/prompt-trend-wallpaper-04-floating-archive-islands.png",
+        "theme_backgrounds/prompt-trend-wallpaper-05-eco-cyber-city.png",
     }
     assert editor_meta["ui.workbench_theme.background_readability"]["kind"] == "select"
     assert [option["value"] for option in editor_meta["ui.workbench_theme.background_readability"]["options"]] == [

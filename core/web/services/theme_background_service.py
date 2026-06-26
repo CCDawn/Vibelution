@@ -88,6 +88,26 @@ DEFAULT_THEME_BACKGROUNDS = (
         "filename": "default-wallpaper-neon-casino-lounge.png",
         "label": {"zh": "壁纸 霓虹赌场", "en": "Wallpaper Neon Casino"},
     },
+    {
+        "filename": "prompt-trend-wallpaper-01-mountain-observatory.png",
+        "label": {"zh": "提示词趋势 高山观测站", "en": "Prompt Trend Mountain Observatory"},
+    },
+    {
+        "filename": "prompt-trend-wallpaper-02-memory-atrium.png",
+        "label": {"zh": "提示词趋势 记忆中庭", "en": "Prompt Trend Memory Atrium"},
+    },
+    {
+        "filename": "prompt-trend-wallpaper-03-pixel-skyline.png",
+        "label": {"zh": "提示词趋势 像素天际线", "en": "Prompt Trend Pixel Skyline"},
+    },
+    {
+        "filename": "prompt-trend-wallpaper-04-floating-archive-islands.png",
+        "label": {"zh": "提示词趋势 漂浮档案群岛", "en": "Prompt Trend Floating Archive Islands"},
+    },
+    {
+        "filename": "prompt-trend-wallpaper-05-eco-cyber-city.png",
+        "label": {"zh": "提示词趋势 生态赛博城市", "en": "Prompt Trend Eco Cyber City"},
+    },
 )
 DEFAULT_THEME_BACKGROUND_FILENAMES = {str(item["filename"]) for item in DEFAULT_THEME_BACKGROUNDS}
 _CONTENT_TYPE_EXTENSIONS = {
