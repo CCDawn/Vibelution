@@ -13,9 +13,14 @@ import {
 import { RuntimeSceneBridge, type RuntimeSceneElectronEvent } from "./lifecycle/runtimeSceneBridge.js";
 import { createDesktopPaths, type DesktopPaths } from "./paths.js";
 import { fetchLauncherControlToken, runDesktopActionOnce } from "./protocol/desktopActionClient.js";
-import { bootstrapPythonLauncherService } from "./process/launcherServiceClient.js";
+import {
+  bootstrapPythonLauncherService,
+  stopPythonLauncherService,
+  type LauncherServiceStopResult
+} from "./process/launcherServiceClient.js";
 import type { LauncherBootstrapResult } from "./process/launcherBootstrap.js";
 import { assertTrustedIpcSender } from "./security/ipcSenderValidation.js";
+import { executeApprovedDesktopShellShutdown } from "./shutdown/desktopShellExit.js";
 import { decideShutdown, fetchLauncherActiveWorkStatus, type ShutdownDecision } from "./shutdown/shutdownCoordinator.js";
 import {
   desktopSmokeSummary,
@@ -300,6 +305,30 @@ async function closeDesktopSessionIfRegistered(): Promise<void> {
   }
 }
 
+async function stopOwnedPythonLauncherService(): Promise<LauncherServiceStopResult> {
+  if (launcherBootstrap === null || launcherBootstrap.launcherBackendPid <= 0) {
+    return {
+      schemaVersion: 1,
+      status: "skipped",
+      reason: "missing_owned_launcher_backend_pid",
+      expectedBackendPid: 0,
+      launcherBackendPid: launcherBootstrap?.launcherBackendPid ?? 0,
+      terminatedPids: []
+    };
+  }
+  const desktopEnv = desktopEnvironment();
+  const pythonPath = String(desktopEnv.VIBELUTION_PYTHON_PATH || desktopEnv.PYTHON || "").trim();
+  if (!pythonPath) {
+    throw new Error("VIBELUTION_PYTHON_PATH or PYTHON is required to stop the owned Launcher Service");
+  }
+  return await stopPythonLauncherService({
+    workspaceRoot: launcherBootstrap.workspaceRoot,
+    pythonPath,
+    operatorConfigPath: launcherBootstrap.operatorConfigPath || String(desktopEnv.VIBELUTION_CONFIG_PATH || "").trim(),
+    launcherBackendPid: launcherBootstrap.launcherBackendPid
+  });
+}
+
 async function runSmokeAndQuit(paths: DesktopPaths): Promise<void> {
   const desktopEnv = desktopEnvironment();
   const bootstrap = await resolveSmokeBootstrap(paths, desktopEnv);
@@ -423,18 +452,27 @@ async function requestDesktopShellExit(): Promise<ShutdownDecision> {
       }
     });
     if (decision.allowed) {
-      await closeDesktopSessionIfRegistered();
-      await recordElectronSupervisorEvent(launcherBootstrap, {
-        eventCode: "electron.launcher_service.exited",
-        message: "Electron desktop shell exit approved.",
-        fields: {
-          ownershipMode: launcherBootstrap?.mode ?? "attached",
-          stopPythonLauncher: decision.stopPythonLauncher
+      await executeApprovedDesktopShellShutdown({
+        decision,
+        closeDesktopSession: closeDesktopSessionIfRegistered,
+        recordEvent: async (event) => {
+          await recordElectronSupervisorEvent(launcherBootstrap, {
+            ...event,
+            fields: {
+              ownershipMode: launcherBootstrap?.mode ?? "attached",
+              ...(event.fields ?? {})
+            }
+          });
+        },
+        stopPythonLauncher: stopOwnedPythonLauncherService,
+        approveShutdown: () => {
+          shutdownApproved = true;
+        },
+        stopDesktopActionLoop,
+        quitApp: () => {
+          app.quit();
         }
       });
-      shutdownApproved = true;
-      stopDesktopActionLoop();
-      app.quit();
     }
     return decision;
   } finally {
