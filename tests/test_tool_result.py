@@ -337,6 +337,36 @@ class TestInferToolBusinessSuccess:
         assert envelope.exit_code == 255
         assert envelope.failure_class == "process_exit"
 
+    def test_cross_platform_warning_is_not_business_success(self):
+        payload = "[跨平台警告] 在 Windows 上检测到 Unix shell 片段: pytest -q | head -5"
+
+        assert infer_tool_business_success(payload) is False
+        semantics = extract_tool_result_semantics(payload)
+        envelope = package_tool_result(payload)
+
+        assert semantics["semanticStatus"] == "degraded"
+        assert semantics["failureClass"] == "cross_platform_command"
+        assert envelope.semantic_status == "degraded"
+        assert envelope.failure_class == "cross_platform_command"
+
+    def test_security_block_is_not_business_success(self):
+        payload = "[安全拦截] [Whitelist Block] 命令包含危险字符：|"
+
+        assert infer_tool_business_success(payload) is False
+        semantics = extract_tool_result_semantics(payload)
+
+        assert semantics["semanticStatus"] == "blocked"
+        assert semantics["failureClass"] == "security_block"
+
+    def test_missing_mapped_test_is_not_business_success(self):
+        payload = "[运行测试] 未找到对应测试文件\n提示: 请先创建测试文件，或手动运行 pytest"
+
+        assert infer_tool_business_success(payload) is False
+        semantics = extract_tool_result_semantics(payload)
+
+        assert semantics["semanticStatus"] == "failed"
+        assert semantics["failureClass"] == "missing_mapped_test"
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

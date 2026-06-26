@@ -13,6 +13,46 @@ def _write_jsonl(path: Path, records):
             f.write(json.dumps(record, ensure_ascii=False) + "\n")
 
 
+def test_task_analyzer_validation_checks_do_not_pass_unexecuted_or_failed_verification(tmp_path):
+    analyzer = TaskAnalyzer(str(tmp_path))
+
+    validations = analyzer._extract_validation_checks(
+        [
+            {
+                "tool_name": "run_test_for_tool",
+                "tool_args": {"source_path": "core/ui/cli_ui.py"},
+                "tool_result": "[运行测试] 未找到对应测试文件\n提示: 请先创建测试文件，或手动运行 pytest",
+                "status": "success",
+            },
+            {
+                "tool_name": "python_lint_tool",
+                "tool_args": {"target": "agent.py"},
+                "tool_result": '{"status": "ok", "issue_count": 2}',
+                "status": "success",
+            },
+            {
+                "tool_name": "cli_tool",
+                "tool_args": {"command": "python -m pytest tests/test_config.py -q 2>&1 | head -20"},
+                "tool_result": "[跨平台警告] 在 Windows 上检测到 Unix shell 片段",
+                "status": "success",
+            },
+            {
+                "tool_name": "cli_tool",
+                "tool_args": {"command": "python -m py_compile agent.py"},
+                "tool_result": "[WARNING | Exit Code: 1]\nSyntaxError: invalid syntax",
+                "status": "success",
+            },
+        ]
+    )
+
+    assert len(validations) == 4
+    assert all(item["passed"] is False for item in validations)
+    assert any("未找到对应测试文件" in item["summary"] for item in validations)
+    assert any("issue_count" in item["summary"] for item in validations)
+    assert any("跨平台警告" in item["summary"] for item in validations)
+    assert any("SyntaxError" in item["summary"] for item in validations)
+
+
 def test_analyze_evolution_session_extracts_goal_validations_and_blocker(tmp_path):
     project_root = tmp_path
     log_dir = project_root / "log_info"

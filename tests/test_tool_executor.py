@@ -1523,6 +1523,31 @@ class TestToolExecutorErrorHandling:
             for blocker in snapshot["recent_blockers"]
         )
 
+    def test_python_lint_issues_do_not_publish_passed_validation_event(self, executor):
+        events = []
+
+        def on_validation(event):
+            events.append(event.data)
+
+        bus = get_event_bus()
+        callback_id = "test_tool_executor_lint_issue_validation_event"
+        bus.subscribe(EventNames.VALIDATION_COMPLETED, on_validation, callback_id=callback_id)
+
+        def fake_lint_tool(file_path=""):
+            return '{"status": "ok", "issue_count": 2}'
+
+        executor.register_tool("python_lint_tool", fake_lint_tool, timeout=5)
+
+        try:
+            result, action = executor.execute("python_lint_tool", {"file_path": "agent.py"})
+            assert action is None
+            assert '"issue_count": 2' in str(result)
+            assert events
+            assert events[-1]["kind"] == "lint"
+            assert events[-1]["passed"] is False
+        finally:
+            bus.unsubscribe_by_id(callback_id)
+
     def test_lint_validation_establishes_feedback_loop_and_freezes_scope(self, executor):
         reset_session_state()
 

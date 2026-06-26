@@ -23,6 +23,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 
+from core.chat.chat_result_contract import verification_from_tool_record
+
 
 # ============================================================================
 # 枚举定义
@@ -734,29 +736,25 @@ class TaskAnalyzer:
             result = str(record.get("tool_result") or "")
             command = str(args.get("command") or "")
 
-            if "py_compile" in command:
+            if "py_compile" in command or "pytest" in command or tool_name in {"run_test_for_tool", "python_lint_tool"}:
+                status, summary, _ = verification_from_tool_record(
+                    {"name": tool_name, "args": args, "result_preview": result}
+                )
+                if not status and not summary:
+                    continue
+                if "py_compile" in command:
+                    kind = "编译检查"
+                elif tool_name == "run_test_for_tool":
+                    kind = "测试映射检查"
+                elif tool_name == "python_lint_tool":
+                    kind = "Lint 检查"
+                else:
+                    kind = "测试验证"
                 validations.append({
-                    "kind": "编译检查",
+                    "kind": kind,
                     "tool": tool_name,
-                    "passed": "[命令执行完成，无输出]" in result or "success" == record.get("status"),
-                    "summary": "python -m py_compile 通过" if "[命令执行完成，无输出]" in result else result[:180],
-                })
-            elif "pytest" in command:
-                passed = " passed" in result or "PASSED" in result
-                match = re.search(r"=+\s*(\d+)\s+passed", result)
-                count = match.group(1) if match else ""
-                validations.append({
-                    "kind": "测试验证",
-                    "tool": tool_name,
-                    "passed": passed,
-                    "summary": f"pytest 通过{count + ' 项' if count else ''}" if passed else result[:180],
-                })
-            elif tool_name == "run_test_for_tool":
-                validations.append({
-                    "kind": "测试映射检查",
-                    "tool": tool_name,
-                    "passed": "未找到对应测试文件" not in result,
-                    "summary": "已找到映射测试文件" if "未找到对应测试文件" not in result else "未找到映射测试文件，已退回手动 pytest",
+                    "passed": status == "passed",
+                    "summary": summary[:180],
                 })
         return validations
 
