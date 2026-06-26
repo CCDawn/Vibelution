@@ -21,6 +21,9 @@
 - Protocol-first rule: before adding Electron IPC or child-process behavior, define the machine-readable Launcher protocol shape that Electron, web UI, self-evolution, and tests all consume.
 - Deep-link rule: secondary entrypoints may only wake or focus the single Launcher supervisor through a deep link such as `vibelution://threads/new?path=...`; they must not start backend or Workbench directly.
 - Machine-readable lifecycle rule: every start, stop, restart, status, and lifecycle-intent command must return bounded JSON that tests can parse, following the Codex app-server daemon style.
+- Low-risk/high-ROI rule: prefer protocol adapters, status projections, tests, and feature-flagged Electron windows before changing startup ownership, packaging, or self-evolution restart execution.
+- No-drift rule: any compatibility field, adapter, feature flag, or legacy provider must have an owner, removal trigger, and test that proves it does not become a second source of truth.
+- Config/environment rule: Electron must resolve Python, Node, ports, control tokens, user data, and operator config through existing project contracts or explicit environment adapters; it must not introduce hidden defaults that compete with `C:\Users\17533\Documents\Vibelution\config\config.toml`.
 - Architecture/test alignment rule: update old tests that assert `msedge.exe`, `--app=`, `browserManaged`, or Edge profile details so they protect the new window-provider contract instead of the retired implementation.
 - Security baseline: renderer Node integration stays disabled; `contextIsolation` stays enabled; preload exposes only narrow lifecycle IPC calls.
 - Package manager baseline: use `npm` and lockfiles; Bun remains auxiliary and must not become the release build path.
@@ -94,6 +97,63 @@ Implication for Vibelution:
 | Protocol schema | Generated TypeScript / JSON schema or equivalent fixtures | Protocol drift must be caught by tests before Electron packaging is trusted. |
 | Evidence | Runtime scene package | Every branch, rejection, child exit, restart, and recovery is diagnosable. |
 | Operator config | External config at `C:\Users\17533\Documents\Vibelution\config\config.toml` | Package must not move this source of truth. |
+| Environment resolution | Existing Launcher/runtime-manager environment resolver | Electron may pass through resolved values, but it must not invent separate Python, port, token, or config defaults. |
+
+## Project Impact And Risk Budget
+
+The Electron migration touches core lifecycle surfaces. Treat it as a sequence of low-risk, high-ROI contracts, not a single replacement.
+
+| Impact area | Current authority | Risk if changed too early | Low-risk/high-ROI action | Guardrail |
+|---|---|---|---|---|
+| Launcher startup | Existing PowerShell/Python Launcher | Duplicate starts, stale child processes, active-work bypass | Add typed status/protocol adapter first | Active-work guard tests must pass before Electron starts children |
+| Runtime Manager | Python daemon and command queue | Runtime commands split between Node and Python | Keep Runtime Manager as executor; Electron submits commands only | No direct `uvicorn`, port kill, or tool-worker spawn as normal path |
+| Workbench window | Edge app provider | UI status and process detection regressions | Add generic `windowProvider/windowManaged` projection | Keep `browserManaged` compatibility until tests move |
+| Backend/FastAPI | Existing routes and SSE/control-token flow | Broken API auth, SSE, runtime telemetry | Keep local HTTP loading; do not replace routes with IPC | `/api/*`, SSE, and control-token tests remain unchanged or stronger |
+| Self-evolution | Existing self-evolution services | Agent gains unsafe process authority | Agent writes lifecycle intents only | Launcher validates intent, idempotency, worktree, and active-work state |
+| Config | External operator config | Packaged app silently uses root template config | Reuse existing config loader/resolution | Tests prove external config path remains authoritative |
+| Environment | Launcher/runtime env preparation | Wrong Python/Node, missing PATH, port conflicts, visible terminals | Add explicit environment inventory and adapter tests | No hidden hard-coded port or executable defaults |
+| Packaging | Current dev/run scripts | Installer ships stale web/backend files or exposes extra entrypoints | Package only after protocol/window gates pass | Unpacked package smoke proves one public entry |
+
+Risk budget by phase:
+
+- Tasks 0-4: documentation, protocol types, deep-link parsing, status state, and pure tests only. No runtime child process ownership change.
+- Tasks 5-7: generic provider and Launcher-controlled startup under feature flag. Existing Edge/Launcher path remains default.
+- Tasks 8-11: lifecycle intent execution and IPC. All actions remain Launcher-gated and machine-readable.
+- Tasks 12-13: packaging and runtime-scene evidence. Packaging is last because it multiplies any earlier drift.
+
+## Config And Environment Contract
+
+Electron must not become a new configuration layer. It can read or pass through resolved values, but the existing project resolver remains authoritative.
+
+Required environment/config decisions before implementation:
+
+| Concern | Required source | Allowed Electron behavior | Disallowed behavior |
+|---|---|---|---|
+| Operator config | `C:\Users\17533\Documents\Vibelution\config\config.toml` via existing config loader | Display resolved path, pass it to existing Launcher adapter if already supported | Reading root `config.toml` or `config.example.toml` as active runtime config |
+| Python executable | Existing Launcher/runtime-manager resolver, then explicit `VIBELUTION_PYTHON_EXE` only for dev/test override | Validate path exists and record source in status JSON | Silently falling back to arbitrary `python` on PATH for packaged runtime |
+| Node/npm | Project package manager contract (`npm`, lockfiles) | Use `npm --prefix web` and `npm --prefix desktop/electron` during build | Replacing npm/package-lock flow with Bun or ad hoc package installs |
+| Ports and URLs | Existing Launcher status/control surface | Read resolved Launcher/Workbench URLs from status or explicit dev env | Hard-coding `127.0.0.1:8765` as production default |
+| Control tokens | Existing Launcher/FastAPI control-token contract | Send token through existing guarded API path | Creating an Electron-only privileged bypass |
+| User data/cache | Existing `.runtime/launcher` and explicit Electron app data path | Keep Electron window/profile cache separate from project source data | Writing cache/state into source files or operator config |
+| Child process env | Existing redacted runtime env builder | Pass allowlisted env vars and redact status/log fields | Dumping full env, secrets, prompts, or provider keys into logs |
+| Windows no-console behavior | Existing no-window process helper policy | Reuse no-console helpers or prove equivalent startup flags | Spawning `.cmd`, `taskkill.exe`, shell wrappers, or Git wrappers as normal lifecycle path |
+
+Implementation must add a small environment inventory output before child startup:
+
+```ts
+type LauncherEnvironmentSummary = {
+  schemaVersion: 1;
+  pythonSource: "launcher_resolver" | "env_override" | "packaged_runtime";
+  pythonPath: string;
+  operatorConfigPath: string;
+  launcherUrl: string;
+  workbenchUrl: string;
+  controlTokenPresent: boolean;
+  nodeEnv: "development" | "production" | "test";
+};
+```
+
+This summary is safe to log only after redaction. It must never include token values, API keys, full environment variables, or full command output.
 
 ## Proposed File Structure
 
@@ -121,6 +181,7 @@ desktop/electron/
       launcherProtocol.ts
       launcherProtocolSchema.ts
       lifecycleCommandOutput.ts
+      environmentSummary.ts
     lifecycle/
       lifecycleIntentStore.ts
       lifecycleIntentTypes.ts
@@ -290,15 +351,16 @@ This contract lets Electron stay thin: it displays, focuses, and supervises, whi
 
 ## Phase Plan
 
-### Task 0: Codex-Informed Protocol Boundary Audit
+### Task 0: Codex-Informed Protocol, Impact, And Environment Boundary Audit
 
 **Files:**
 - Create: `docs/testing/electron-launcher-protocol-contract.md`
+- Create: `docs/testing/electron-launcher-impact-and-environment-ledger.md`
 - Test: none
 
 **Interfaces:**
 - Consumes: current Launcher routes, Runtime Manager commands, self-evolution lifecycle calls, and existing tests for `browserManaged` / Launcher control tokens.
-- Produces: a protocol contract ledger that prevents Electron from becoming a duplicate backend.
+- Produces: protocol, impact, and environment ledgers that prevent Electron from becoming a duplicate backend or hidden configuration source.
 
 - [ ] **Step 1: Record the reference finding**
 
@@ -326,7 +388,36 @@ Create `docs/testing/electron-launcher-protocol-contract.md`:
 - Protocol drift must be caught by TypeScript tests and focused pytest route/service tests.
 ```
 
-- [ ] **Step 2: Record contract checks for the ledger**
+- [ ] **Step 2: Record impact and environment boundaries**
+
+Create `docs/testing/electron-launcher-impact-and-environment-ledger.md`:
+
+```markdown
+# Electron Launcher Impact And Environment Ledger
+
+日期：2026-06-26
+范围：low-risk Electron Launcher supervisor migration
+
+## Impact Rules
+
+- Do not change startup ownership before protocol, active-work guard, and generic provider tests pass.
+- Do not remove Edge provider or `browserManaged` compatibility before Electron is default and old tests are migrated.
+- Do not let Electron main own product semantics, LLM routing, tool execution, Git execution, memory writes, or self-evolution decisions.
+- Do not package until unpacked smoke proves one public entry and no independent Workbench shortcut.
+
+## Config And Environment Rules
+
+- Active operator config remains `C:\Users\17533\Documents\Vibelution\config\config.toml`.
+- Root `config.toml` and `config.example.toml` are legacy/template surfaces, not packaged runtime authority.
+- Python path, ports, Launcher URL, Workbench URL, and control-token presence come from existing Launcher/runtime-manager resolution or explicit dev/test override.
+- Electron must not hard-code production ports, spawn shell wrappers as normal lifecycle, or log full environment variables.
+
+## Exit Condition
+
+Implementation can move past Tasks 0-4 only when tests prove protocol shape, deep-link parsing, generic provider state, and config/environment resolution are stable without starting runtime children.
+```
+
+- [ ] **Step 3: Record contract checks for the ledger**
 
 Task 1 must include these rows when it creates `docs/testing/electron-launcher-window-provider-test-alignment.md`:
 
@@ -334,13 +425,14 @@ Task 1 must include these rows when it creates `docs/testing/electron-launcher-w
 | `desktop/electron/tests/deepLink.test.ts` | `vibelution://` parsing and Windows path encoding | add | Validate focus/open/lifecycle links without launching children | Invalid or duplicate links become safe typed responses |
 | `desktop/electron/tests/launcherProtocol.test.ts` | Machine-readable Launcher command response | add | Assert schema fields and command/status/provider enums | Electron and backend adapter share one response shape |
 | `tests/test_web_runtime_routes.py` | Launcher command adapter and active-work guard | add/update | Assert JSON lifecycle responses and blocked active-work states | Runtime commands stay Launcher-gated |
+| `desktop/electron/tests/environmentSummary.test.ts` | Config/environment resolution summary | add | Assert external operator config, URL, Python source, and token presence are reported without secrets | Electron does not invent hidden config/env defaults |
 ```
 
-- [ ] **Step 3: Commit**
+- [ ] **Step 4: Commit**
 
 ```powershell
-git add docs/testing/electron-launcher-protocol-contract.md
-git commit -m "docs: define electron launcher protocol boundary"
+git add docs/testing/electron-launcher-protocol-contract.md docs/testing/electron-launcher-impact-and-environment-ledger.md
+git commit -m "docs: define electron launcher protocol and risk boundary"
 ```
 
 ### Task 1: Baseline Inventory And Test Alignment Ledger
@@ -394,6 +486,7 @@ Create `docs/testing/electron-launcher-window-provider-test-alignment.md` with t
 | `desktop/electron/tests/deepLink.test.ts` | `vibelution://` parsing and Windows path encoding | add | Validate focus/open/lifecycle links without launching children | Invalid or duplicate links become safe typed responses |
 | `desktop/electron/tests/launcherProtocol.test.ts` | Machine-readable Launcher command response | add | Assert schema fields and command/status/provider enums | Electron and backend adapter share one response shape |
 | `tests/test_web_runtime_routes.py` | Launcher command adapter and active-work guard | add/update | Assert JSON lifecycle responses and blocked active-work states | Runtime commands stay Launcher-gated |
+| `desktop/electron/tests/environmentSummary.test.ts` | Config/environment resolution summary | add | Assert external operator config, URL, Python source, and token presence are reported without secrets | Electron does not invent hidden config/env defaults |
 ```
 
 - [ ] **Step 3: Commit**
@@ -412,9 +505,11 @@ git commit -m "docs: align tests for electron launcher migration"
 - Create: `desktop/electron/src/preload.ts`
 - Create: `desktop/electron/src/paths.ts`
 - Create: `desktop/electron/src/protocol/deepLink.ts`
+- Create: `desktop/electron/src/protocol/environmentSummary.ts`
 - Create: `desktop/electron/src/protocol/launcherProtocol.ts`
 - Create: `desktop/electron/tests/appLock.test.ts`
 - Create: `desktop/electron/tests/deepLink.test.ts`
+- Create: `desktop/electron/tests/environmentSummary.test.ts`
 - Create: `desktop/electron/tests/launcherProtocol.test.ts`
 - Modify: none
 
@@ -624,7 +719,74 @@ describe("Vibelution deep links", () => {
 });
 ```
 
-- [ ] **Step 7: Add minimal preload**
+- [ ] **Step 7: Add environment summary contract**
+
+Create `desktop/electron/src/protocol/environmentSummary.ts`:
+
+```ts
+export type LauncherEnvironmentSummary = {
+  schemaVersion: 1;
+  pythonSource: "launcher_resolver" | "env_override" | "packaged_runtime";
+  pythonPath: string;
+  operatorConfigPath: string;
+  launcherUrl: string;
+  workbenchUrl: string;
+  controlTokenPresent: boolean;
+  nodeEnv: "development" | "production" | "test";
+};
+
+export function createLauncherEnvironmentSummary(input: LauncherEnvironmentSummary): LauncherEnvironmentSummary {
+  return { ...input, schemaVersion: 1 };
+}
+
+export function redactEnvironmentSummary(summary: LauncherEnvironmentSummary): LauncherEnvironmentSummary {
+  return { ...summary, controlTokenPresent: summary.controlTokenPresent };
+}
+```
+
+Create `desktop/electron/tests/environmentSummary.test.ts`:
+
+```ts
+import { describe, expect, it } from "vitest";
+import { createLauncherEnvironmentSummary, redactEnvironmentSummary } from "../src/protocol/environmentSummary.js";
+
+describe("Launcher environment summary", () => {
+  it("keeps external operator config explicit", () => {
+    const summary = createLauncherEnvironmentSummary({
+      schemaVersion: 1,
+      pythonSource: "launcher_resolver",
+      pythonPath: "C:/repo/.venv/Scripts/python.exe",
+      operatorConfigPath: "C:/Users/17533/Documents/Vibelution/config/config.toml",
+      launcherUrl: "http://127.0.0.1:8765/launcher",
+      workbenchUrl: "http://127.0.0.1:8765/",
+      controlTokenPresent: true,
+      nodeEnv: "test"
+    });
+
+    expect(summary.operatorConfigPath.replace(/\\/g, "/")).toBe(
+      "C:/Users/17533/Documents/Vibelution/config/config.toml"
+    );
+    expect(summary).not.toHaveProperty("controlToken");
+  });
+
+  it("redacts by reporting token presence only", () => {
+    const summary = createLauncherEnvironmentSummary({
+      schemaVersion: 1,
+      pythonSource: "env_override",
+      pythonPath: "C:/Python/python.exe",
+      operatorConfigPath: "C:/Users/17533/Documents/Vibelution/config/config.toml",
+      launcherUrl: "http://127.0.0.1:8765/launcher",
+      workbenchUrl: "http://127.0.0.1:8765/",
+      controlTokenPresent: true,
+      nodeEnv: "test"
+    });
+
+    expect(redactEnvironmentSummary(summary)).toEqual(summary);
+  });
+});
+```
+
+- [ ] **Step 8: Add minimal preload**
 
 Create `desktop/electron/src/preload.ts`:
 
@@ -636,7 +798,7 @@ contextBridge.exposeInMainWorld("vibelutionLauncher", {
 });
 ```
 
-- [ ] **Step 8: Add minimal main process**
+- [ ] **Step 9: Add minimal main process**
 
 Create `desktop/electron/src/main.ts`:
 
@@ -678,7 +840,7 @@ app.on("window-all-closed", () => {
 });
 ```
 
-- [ ] **Step 9: Add a path test**
+- [ ] **Step 10: Add a path test**
 
 Create `desktop/electron/tests/appLock.test.ts`:
 
@@ -693,7 +855,7 @@ describe("Electron desktop paths", () => {
 });
 ```
 
-- [ ] **Step 10: Verify**
+- [ ] **Step 11: Verify**
 
 Run:
 
@@ -705,7 +867,7 @@ npm --prefix desktop/electron test -- --run
 
 Expected: TypeScript build passes and the Vitest path test passes.
 
-- [ ] **Step 11: Commit**
+- [ ] **Step 12: Commit**
 
 ```powershell
 git add desktop/electron/package.json desktop/electron/package-lock.json desktop/electron/tsconfig.json desktop/electron/src desktop/electron/tests
@@ -1025,7 +1187,7 @@ git commit -m "feat: expose generic workbench window provider state"
 - Test: `desktop/electron/tests/windowProvider.test.ts`
 
 **Interfaces:**
-- Consumes: local Launcher URL and Workbench URL.
+- Consumes: resolved Launcher URL and Workbench URL from existing Launcher status, or explicit development/test environment overrides.
 - Produces: Launcher and Workbench BrowserWindows controlled by Electron main process.
 
 - [ ] **Step 1: Add provider types**
@@ -1125,17 +1287,48 @@ export function createWorkbenchWindow(url: string): BrowserWindow {
 }
 ```
 
-- [ ] **Step 5: Wire provider into main process**
+- [ ] **Step 5: Resolve Launcher URL without production hard-coding**
+
+Add a resolver before wiring the provider:
+
+```ts
+export function resolveLauncherUrl(env: NodeJS.ProcessEnv, launcherStatusUrl?: string): string {
+  const explicit = String(env.VIBELUTION_LAUNCHER_URL || "").trim();
+  if (explicit) {
+    return explicit;
+  }
+  if (launcherStatusUrl) {
+    return launcherStatusUrl;
+  }
+  if (env.NODE_ENV === "test" || env.NODE_ENV === "development") {
+    return "http://127.0.0.1:8765/launcher";
+  }
+  throw new Error("Launcher URL is not resolved; start through existing Launcher status or explicit dev override");
+}
+```
+
+Add tests that prove production does not silently hard-code a port:
+
+```ts
+expect(() => resolveLauncherUrl({ NODE_ENV: "production" } as NodeJS.ProcessEnv)).toThrow(
+  "Launcher URL is not resolved"
+);
+expect(resolveLauncherUrl({ VIBELUTION_LAUNCHER_URL: "http://127.0.0.1:9000/launcher" } as NodeJS.ProcessEnv)).toBe(
+  "http://127.0.0.1:9000/launcher"
+);
+```
+
+- [ ] **Step 6: Wire provider into main process**
 
 Update `desktop/electron/src/main.ts` to open the Launcher URL first:
 
 ```ts
-const DEFAULT_LAUNCHER_URL = process.env.VIBELUTION_LAUNCHER_URL || "http://127.0.0.1:8765/launcher";
+const launcherUrl = resolveLauncherUrl(process.env, existingLauncherStatus?.launcherUrl);
 ```
 
-Use `createLauncherWindow(DEFAULT_LAUNCHER_URL)` instead of loading `about:blank`.
+Use `createLauncherWindow(launcherUrl)` instead of loading `about:blank`.
 
-- [ ] **Step 6: Verify**
+- [ ] **Step 7: Verify**
 
 Run:
 
@@ -1146,7 +1339,7 @@ npm --prefix desktop/electron test -- --run
 
 Expected: Electron package builds and window provider tests pass.
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 8: Commit**
 
 ```powershell
 git add desktop/electron/src/windows desktop/electron/src/main.ts desktop/electron/tests/windowProvider.test.ts
@@ -1879,7 +2072,7 @@ Evidence required:
 
 ```powershell
 npm --prefix desktop/electron run build
-npm --prefix desktop/electron test -- tests/deepLink.test.ts tests/launcherProtocol.test.ts
+npm --prefix desktop/electron test -- tests/deepLink.test.ts tests/launcherProtocol.test.ts tests/environmentSummary.test.ts
 pytest tests/test_web_runtime_routes.py -k "launcher and protocol" -q
 ```
 
@@ -1889,6 +2082,8 @@ Pass condition:
 - Launcher command responses have one machine-readable JSON shape.
 - Unsupported deep links and blocked lifecycle actions produce safe rejections.
 - Existing Launcher control-token and active-work guard semantics remain authoritative.
+- Impact and environment ledgers exist and classify config, ports, Python path, control tokens, and provider compatibility.
+- Environment summary reports token presence only and keeps external operator config authoritative.
 
 ### Gate 1: Electron Scaffold Ready
 
@@ -1904,6 +2099,7 @@ Pass condition:
 - Electron package compiles.
 - Single-instance lock tests pass.
 - Deep-link and Launcher protocol tests pass.
+- Environment summary tests pass.
 - No runtime process is spawned during tests.
 
 ### Gate 2: Generic Window Provider Ready
@@ -1921,6 +2117,7 @@ Pass condition:
 - Status APIs expose `windowProvider` and `windowManaged`.
 - Compatibility `browserManaged` field remains stable during migration.
 - Launcher protocol responses can report provider state without Edge-specific field names.
+- Status APIs expose the resolved config/environment source without leaking secrets.
 - UI status no longer depends on Edge-specific language.
 
 ### Gate 3: Electron Provider Can Open Launcher And Workbench
@@ -1937,9 +2134,11 @@ Manual check:
 
 - One visible Vibelution entry starts.
 - Launcher window appears first.
+- Launcher URL and Workbench URL are resolved from existing Launcher status or explicit dev override.
 - Workbench opens only from Launcher.
 - Closing Workbench leaves Launcher alive.
 - Closing Launcher runs active-work guard.
+- Production mode refuses to start when Launcher URL, control token, or operator config path is unresolved.
 
 ### Gate 4: Self-Evolution Intent Loop Ready
 
@@ -1970,6 +2169,8 @@ Pass condition:
 - Local unpacked desktop package is produced.
 - Package uses one visible product entry.
 - Workbench has no independent public shortcut.
+- Packaged app does not read root `config.toml` or `config.example.toml` as active operator config.
+- Package smoke records a redacted environment summary and no full env dump.
 
 ## Old Test Alignment Rules
 
@@ -1995,8 +2196,11 @@ Version 1 must support fallback:
 - Keep PowerShell and Python launcher adapters working.
 - Keep `browserManaged` compatibility fields while frontend and tests migrate.
 - Keep Electron startup behind a feature flag until Gate 3 passes.
+- Keep feature flags scoped and named with removal triggers: `windowProvider=edge_app|electron` and `VIBELUTION_ELECTRON_START_LAUNCHER=0` are temporary migration controls, not long-term alternate products.
 - If Electron startup fails, Launcher status must report `windowProvider=electron`, `phase=failed`, and a safe `failureMessage`.
 - The user can still start the current Launcher path during the migration until the Electron path is selected as default.
+- Roll back by selecting `windowProvider=edge_app`; do not delete Electron state files as the primary recovery path.
+- Before removing fallback, run the full Gate 0-5 evidence set plus a manual Launcher refresh through the existing guarded path.
 
 ## Logging Decision
 
@@ -2035,7 +2239,7 @@ Recommended version treatment:
 When this plan is committed or implementation starts, sync `agent-runtime-core` memory with:
 
 ```text
-Electron Launcher supervisor plan optimized with Codex reference findings: the reference repo does not provide Electron packaging to copy; the reusable pattern is deep-link desktop entry, app-server/runtime protocol boundary, machine-readable lifecycle commands, schema fixtures, and tests. Vibelution plan now keeps Electron as a thin single visible shell and supervisor over existing Launcher, Runtime Manager, FastAPI, runtime-scene, active-work guard, and lifecycle-intent contracts.
+Electron Launcher supervisor plan optimized with Codex reference findings: the reference repo does not provide Electron packaging to copy; the reusable pattern is deep-link desktop entry, app-server/runtime protocol boundary, machine-readable lifecycle commands, schema fixtures, and tests. Vibelution plan now keeps Electron as a thin single visible shell and supervisor over existing Launcher, Runtime Manager, FastAPI, runtime-scene, active-work guard, lifecycle-intent contracts, external operator config, and existing environment resolution. The first implementation slice is intentionally low risk: protocol, impact/environment ledger, deep-link parsing, environment summary, generic provider state, and tests before packaging or lifecycle ownership changes.
 ```
 
 ## Execution Handoff
