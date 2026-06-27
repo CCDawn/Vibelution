@@ -90,6 +90,7 @@ function agent(overrides: Partial<AgentInstance> = {}): AgentInstance {
     toolPolicyId: "default",
     memoryPolicyId: "default",
     createdBy: "user",
+    conversationIndexVisibility: "user_visible",
     status: "idle",
     metadata: {},
     createdAt: "2026-06-09T00:00:00.000Z",
@@ -214,6 +215,14 @@ describe("conversationIndexModel", () => {
       [
         agent({ agentId: "agent-existing", directSessionId: "session-existing", displayName: "已有会话" }),
         agent({ agentId: "agent-missing", directSessionId: "session-missing", displayName: "缺席分页 Agent" }),
+        agent({
+          agentId: "agent-team-private",
+          directSessionId: "session-team-private",
+          displayName: "挑战杯资料发现",
+          createdBy: "challenge_cup_team",
+          conversationIndexVisibility: "team_private",
+          metadata: { challengeCupTeamId: "research-team" },
+        }),
         agent({ agentId: "agent-archived", directSessionId: "session-archived", status: "archived" }),
         agent({ agentId: "agent-no-session", directSessionId: "" }),
       ],
@@ -221,6 +230,22 @@ describe("conversationIndexModel", () => {
 
     expect(isVisibleConversationAgent(agent({ status: "archived" }))).toBe(false);
     expect(isVisibleConversationAgent(agent({ directSessionId: "" }))).toBe(false);
+    expect(isVisibleConversationAgent(agent({ conversationIndexVisibility: "team_private" }))).toBe(false);
+    expect(isVisibleConversationAgent(agent({ conversationIndexVisibility: "internal_recovery" }))).toBe(false);
+    expect(
+      isVisibleConversationAgent(agent({
+        createdBy: "challenge_cup_team",
+        conversationIndexVisibility: undefined,
+        metadata: { challengeCupTeamId: "research-team" },
+      })),
+    ).toBe(false);
+    expect(
+      isVisibleConversationAgent(agent({
+        conversationIndexVisibility: undefined,
+        roleKey: "challenge_cup_data_discovery",
+        metadata: {},
+      })),
+    ).toBe(false);
     expect(merged.map((item) => item.conversationId).sort()).toEqual(["session-existing", "session-missing"]);
   });
 
