@@ -6,6 +6,7 @@
   },
   "files": [
     "dist/**/*",
+    "desktop-entry-catalog.json",
     "package.json"
   ],
   "win": {

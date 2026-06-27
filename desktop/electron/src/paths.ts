@@ -35,6 +35,10 @@ export function resolvePreloadPath(paths: DesktopPaths): string {
   return resolve(paths.desktopBundleRoot, "preload.cjs");
 }
 
+export function resolveDesktopEntryCatalogPath(paths: DesktopPaths): string {
+  return resolve(paths.desktopBundleRoot, "..", "desktop-entry-catalog.json");
+}
+
 export function resolveWorkspaceRuntimeDir(paths: DesktopPaths): string {
   return resolve(paths.workspaceRoot, ".runtime", "launcher");
 }
