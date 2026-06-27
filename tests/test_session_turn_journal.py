@@ -144,6 +144,62 @@ def test_turn_journal_preserves_complete_tool_result_for_context(tmp_path):
     assert tool_call["resultPreview"] == "terminal-line"
 
 
+def test_turn_journal_replays_returned_degraded_tool_result_as_terminal(tmp_path):
+    append_turn_event(tmp_path, "session-a", "turn-1", EVENT_TURN_STARTED, status="running")
+    append_turn_event(
+        tmp_path,
+        "session-a",
+        "turn-1",
+        EVENT_TOOL_RESULT,
+        status="running",
+        payload={
+            "toolCall": {
+                "name": "cli_tool",
+                "status": "running",
+                "summary": "[跨平台警告] 在 Windows 上检测到 Unix shell 片段",
+                "result": "[跨平台警告] 在 Windows 上检测到 Unix shell 片段",
+                "transportStatus": "returned",
+                "semanticStatus": "degraded",
+                "timedOut": False,
+            }
+        },
+    )
+
+    messages = model_visible_messages_from_events(load_turn_events(tmp_path, "session-a"))
+    tool_call = messages[-1]["toolCalls"][0]
+
+    assert tool_call["status"] == "done"
+    assert tool_call["semanticStatus"] == "degraded"
+    assert "[跨平台警告]" in tool_call["summary"]
+
+
+def test_turn_journal_replays_returned_timed_out_tool_result_as_timeout(tmp_path):
+    append_turn_event(tmp_path, "session-a", "turn-1", EVENT_TURN_STARTED, status="running")
+    append_turn_event(
+        tmp_path,
+        "session-a",
+        "turn-1",
+        EVENT_TOOL_RESULT,
+        status="running",
+        payload={
+            "toolCall": {
+                "name": "cli_tool",
+                "status": "running",
+                "summary": "[超时] cli_tool 执行超时",
+                "result": "[超时] cli_tool 执行超时",
+                "transportStatus": "returned",
+                "timedOut": True,
+            }
+        },
+    )
+
+    messages = model_visible_messages_from_events(load_turn_events(tmp_path, "session-a"))
+    tool_call = messages[-1]["toolCalls"][0]
+
+    assert tool_call["status"] == "timeout"
+    assert tool_call["timedOut"] is True
+
+
 def test_turn_journal_skips_paired_tool_start_when_result_exists(tmp_path):
     append_turn_event(tmp_path, "session-a", "turn-1", EVENT_TURN_STARTED, status="running")
     append_turn_event(

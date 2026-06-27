@@ -15478,6 +15478,8 @@ def _normalize_tool_call_status(value: Any, *, default: str = "done") -> str:
         "completed",
         "finished",
         "ready",
+        "degraded",
+        "observed",
         "failed",
         "error",
         "blocked",
@@ -15487,8 +15489,8 @@ def _normalize_tool_call_status(value: Any, *, default: str = "done") -> str:
         "in_progress",
         "timeout",
         "timed_out",
-        }:
-        if status in {"success", "succeeded", "completed", "finished", "ready"}:
+    }:
+        if status in {"success", "succeeded", "completed", "finished", "ready", "degraded", "observed"}:
             return "done"
         if status == "error":
             return "failed"
