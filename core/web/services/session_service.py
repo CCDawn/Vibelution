@@ -1485,6 +1485,140 @@ def _conversation_index_classification(
     return {"kind": kind, "errors": errors}
 
 
+def repair_conversation_index_records() -> dict[str, Any]:
+    """Explicitly migrate legacy direct-agent conversation index records.
+
+    This is intentionally not part of the read path. Missing or invalid records
+    still surface as invalid until this migration is called.
+    """
+
+    _sync_agent_directory_project_root()
+    hidden_team_member_agent_ids = _agent_directory_stub_hidden_team_member_ids()
+    state = agent_directory_service.load_state()
+    agents = list(state.get("agents") or []) if isinstance(state.get("agents"), list) else []
+    repaired_agents: list[dict[str, str]] = []
+    for agent in agents:
+        if not isinstance(agent, dict):
+            continue
+        repair_kind = _legacy_agent_conversation_index_repair_kind(
+            agent,
+            hidden_team_member_agent_ids=hidden_team_member_agent_ids,
+        )
+        if not repair_kind:
+            continue
+        metadata = dict(agent.get("metadata") or {})
+        metadata["conversationIndexKind"] = repair_kind
+        metadata["conversationIndexVisibility"] = _conversation_index_visibility_for_kind(repair_kind)
+        agent["metadata"] = metadata
+        agent["updatedAt"] = agent_directory_service.utc_now_iso()
+        repaired_agents.append(
+            {
+                "agentId": str(agent.get("agentId") or "").strip(),
+                "directSessionId": str(agent.get("directSessionId") or "").strip(),
+                "kind": repair_kind,
+            }
+        )
+    if repaired_agents:
+        state["agents"] = agents
+        agent_directory_service.save_state(state)
+
+    payload = load_chat_state(PROJECT_ROOT)
+    conversations = payload.get("conversations")
+    repaired_conversations: list[dict[str, str]] = []
+    agent_by_id = {
+        str(agent.get("agentId") or "").strip(): agent
+        for agent in agents
+        if isinstance(agent, dict) and str(agent.get("agentId") or "").strip()
+    }
+    if isinstance(conversations, list):
+        for conversation in conversations:
+            if not isinstance(conversation, dict):
+                continue
+            raw_kind, normalized_raw_kind = _conversation_index_kind_from_raw(conversation)
+            if raw_kind and normalized_raw_kind != agent_directory_service.CONVERSATION_INDEX_KIND_INVALID:
+                continue
+            if raw_kind and not normalized_raw_kind:
+                continue
+            agent_id = str(conversation.get("agent_id") or conversation.get("agentId") or "").strip()
+            agent = agent_by_id.get(agent_id)
+            if not isinstance(agent, dict):
+                continue
+            agent_classification = agent_directory_service.agent_conversation_index_classification(
+                agent,
+                hidden_team_member_agent_ids=hidden_team_member_agent_ids,
+            )
+            agent_kind = str(agent_classification.get("kind") or "").strip()
+            if agent_kind not in {
+                agent_directory_service.CONVERSATION_INDEX_KIND_PERSONAL_AGENT,
+                agent_directory_service.CONVERSATION_INDEX_KIND_TEAM_AGENT,
+                agent_directory_service.CONVERSATION_INDEX_KIND_HIDDEN,
+            }:
+                continue
+            conversation["conversation_index_kind"] = agent_kind
+            conversation["conversationIndexKind"] = agent_kind
+            repaired_conversations.append(
+                {
+                    "sessionId": str(conversation.get("conversation_id") or "").strip(),
+                    "agentId": agent_id,
+                    "kind": agent_kind,
+                }
+            )
+    if repaired_conversations:
+        save_chat_state(PROJECT_ROOT, payload)
+
+    if repaired_agents or repaired_conversations:
+        _invalidate_session_list_cache()
+    return {
+        "changed": bool(repaired_agents or repaired_conversations),
+        "agentCount": len(repaired_agents),
+        "conversationCount": len(repaired_conversations),
+        "agents": repaired_agents,
+        "conversations": repaired_conversations,
+    }
+
+
+def _legacy_agent_conversation_index_repair_kind(
+    agent: dict[str, Any],
+    *,
+    hidden_team_member_agent_ids: set[str],
+) -> str:
+    metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
+    raw_kind = str(agent.get("conversationIndexKind") or metadata.get("conversationIndexKind") or "").strip()
+    if raw_kind:
+        return ""
+    agent_id = str(agent.get("agentId") or "").strip()
+    creation_spec = metadata.get("creationSpec") if isinstance(metadata.get("creationSpec"), dict) else {}
+    created_by = str(agent.get("createdBy") or creation_spec.get("source") or "").strip()
+    if created_by in agent_directory_service.INTERNAL_RECOVERY_DIRECT_SESSION_CREATED_BY:
+        return agent_directory_service.CONVERSATION_INDEX_KIND_HIDDEN
+    if created_by == "session_repair":
+        return agent_directory_service.CONVERSATION_INDEX_KIND_PERSONAL_AGENT
+    role_key = str(agent.get("roleKey") or "").strip()
+    has_team_marker = bool(
+        str(metadata.get("teamId") or "").strip()
+        or str(metadata.get("challengeCupTeamId") or "").strip()
+        or str(metadata.get("knowledgeExpansionTeamId") or "").strip()
+        or (agent_id and agent_id in hidden_team_member_agent_ids)
+    )
+    looks_team_owned = (
+        has_team_marker
+        or role_key.startswith("challenge_cup_")
+        or role_key.startswith("knowledge_expansion_")
+        or created_by in agent_directory_service.TEAM_PRIVATE_DIRECT_SESSION_CREATED_BY
+    )
+    if looks_team_owned:
+        return agent_directory_service.CONVERSATION_INDEX_KIND_TEAM_AGENT
+    return ""
+
+
+def _conversation_index_visibility_for_kind(kind: str) -> str:
+    if kind == agent_directory_service.CONVERSATION_INDEX_KIND_TEAM_AGENT:
+        return agent_directory_service.CONVERSATION_INDEX_VISIBILITY_TEAM_PRIVATE
+    if kind == agent_directory_service.CONVERSATION_INDEX_KIND_HIDDEN:
+        return agent_directory_service.CONVERSATION_INDEX_VISIBILITY_HIDDEN
+    return agent_directory_service.CONVERSATION_INDEX_VISIBILITY_USER_VISIBLE
+
+
 def _conversation_hidden_from_index(raw: dict[str, Any], agent: dict[str, Any] | None) -> bool:
     classification = _conversation_index_classification(raw, agent)
     kind = str(classification.get("kind") or "").strip()
@@ -6211,13 +6345,23 @@ def _agent_directory_stub_hidden_from_user_index(
     agent: dict[str, Any],
     hidden_team_member_agent_ids: set[str],
 ) -> bool:
-    """Hide only explicit hidden Agent conversation stubs from the index."""
+    """Hide non-user Agent conversation stubs from the ordinary chat index."""
 
     classification = agent_directory_service.agent_conversation_index_classification(
         agent,
         hidden_team_member_agent_ids=hidden_team_member_agent_ids,
     )
-    return str(classification.get("kind") or "").strip() == agent_directory_service.CONVERSATION_INDEX_KIND_HIDDEN
+    kind = str(classification.get("kind") or "").strip()
+    if kind == agent_directory_service.CONVERSATION_INDEX_KIND_HIDDEN:
+        return True
+    agent_id = str(agent.get("agentId") or "").strip()
+    if agent_id and agent_id in hidden_team_member_agent_ids:
+        visibility = agent_directory_service.agent_conversation_index_visibility(
+            agent,
+            hidden_team_member_agent_ids=hidden_team_member_agent_ids,
+        )
+        return visibility == agent_directory_service.CONVERSATION_INDEX_VISIBILITY_TEAM_PRIVATE
+    return False
 
 
 def _agent_directory_stub_hidden_team_member_ids() -> set[str]:
