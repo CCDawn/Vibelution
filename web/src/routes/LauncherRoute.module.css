@@ -37,6 +37,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: var(--route-topbar-gap);
   min-width: 0;
   padding: 8px 12px;
@@ -93,8 +94,79 @@
   min-width: 0;
 }
 
+.statusBar {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) max-content;
+  align-items: center;
+  gap: 8px;
+  flex: 1 1 620px;
+  min-width: 0;
+  max-width: 760px;
+}
+
+.statusBarReason {
+  display: grid;
+  grid-template-columns: minmax(76px, max-content) minmax(94px, max-content) minmax(0, 1fr);
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  min-height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--surface-card) 90%, #ffffff);
+}
+
+.statusBarReason span {
+  color: var(--fg-tertiary);
+  font-size: 0.66rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.statusBarReason strong,
+.statusBarReason small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.statusBarReason strong {
+  color: var(--fg-primary);
+  font-size: 0.82rem;
+}
+
+.statusBarReason small {
+  color: var(--fg-secondary);
+  font-size: 0.74rem;
+}
+
+.statusBarReason[data-tone="success"] {
+  border-color: color-mix(in srgb, var(--state-success) 34%, var(--border-soft));
+}
+
+.statusBarReason[data-tone="warning"] {
+  border-color: color-mix(in srgb, var(--state-warning) 38%, var(--border-soft));
+}
+
+.statusBarReason[data-tone="error"] {
+  border-color: color-mix(in srgb, var(--state-error) 38%, var(--border-soft));
+}
+
+.statusBarActions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+
 .primaryButton,
-.iconButton {
+.iconButton,
+.statusBarButton {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -120,7 +192,8 @@
   color: var(--fg-primary);
 }
 
-.iconButton {
+.iconButton,
+.statusBarButton {
   background: color-mix(in srgb, var(--surface-card) 86%, #ffffff);
 }
 
@@ -131,7 +204,8 @@
 }
 
 .primaryButton:hover,
-.iconButton:hover {
+.iconButton:hover,
+.statusBarButton:hover {
   border-color: var(--border-strong);
   color: var(--fg-primary);
   background: var(--surface-panel-hover);
@@ -144,7 +218,8 @@
 }
 
 .primaryButton:disabled,
-.iconButton:disabled {
+.iconButton:disabled,
+.statusBarButton:disabled {
   opacity: 0.56;
   cursor: default;
 }
@@ -205,6 +280,41 @@
 
 .userGuide[data-tone="error"] {
   border-color: color-mix(in srgb, var(--state-error) 42%, var(--border-soft));
+}
+
+.dangerZone {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr) max-content;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  margin: 6px 12px 0;
+  padding: 6px 9px;
+  border: 1px solid color-mix(in srgb, var(--danger) 30%, var(--border-soft));
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--danger) 4%, var(--surface-panel));
+}
+
+.dangerZone span {
+  color: color-mix(in srgb, var(--danger) 72%, var(--fg-primary));
+  font-size: 0.72rem;
+  font-weight: 720;
+  white-space: nowrap;
+}
+
+.dangerZone small {
+  min-width: 0;
+  color: var(--fg-secondary);
+  font-size: 0.74rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dangerActions {
+  display: flex;
+  justify-content: flex-end;
+  min-width: 0;
 }
 
 .settingsStrip {
@@ -1054,6 +1164,18 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .statusBar {
+    grid-template-columns: minmax(0, 1fr);
+    justify-items: stretch;
+    flex: 0 1 auto;
+    max-width: none;
+    width: 100%;
+  }
+
+  .statusBarActions {
+    justify-content: flex-start;
+  }
+
   .userGuide {
     grid-template-columns: max-content minmax(132px, max-content) minmax(0, 1fr);
   }
@@ -1095,6 +1217,19 @@
     justify-content: flex-start;
   }
 
+  .statusBarReason {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .statusBarReason span,
+  .statusBarReason strong,
+  .statusBarReason small {
+    overflow: visible;
+    overflow-wrap: anywhere;
+    text-overflow: clip;
+    white-space: normal;
+  }
+
   .settingsStrip {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -1125,6 +1260,21 @@
 
   .userGuide em {
     grid-column: auto;
+  }
+
+  .dangerZone {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .dangerZone small {
+    overflow: visible;
+    overflow-wrap: anywhere;
+    text-overflow: clip;
+    white-space: normal;
+  }
+
+  .dangerActions {
+    justify-content: flex-start;
   }
 
   .header > div:first-child {
@@ -1175,6 +1325,7 @@
   .compactItem,
   .commandLine,
   .userGuide,
+  .dangerZone,
   .guardStrip,
   .diagnosticsBody,
   .cleanupMetrics,

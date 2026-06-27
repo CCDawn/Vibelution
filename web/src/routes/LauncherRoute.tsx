@@ -207,6 +207,7 @@ type LauncherCopy = {
   lifecycleStoppingDetail: string;
   lifecycleUnknown: string;
   lifecycleUnknownDetail: string;
+  lifecycleControls: string;
   openWorkbenchSummary: string;
   safeToUse: string;
   startProjectSummary: string;
@@ -214,6 +215,7 @@ type LauncherCopy = {
   stopDisabledInFlight: string;
   restartDisabledClosed: string;
   forceStop: string;
+  forceStopHint: string;
   forceStopDisabledClosed: string;
   forceStopDisabledInFlight: string;
   useCheckAction: string;
@@ -1286,6 +1288,7 @@ export function LauncherRoute() {
         forceStop: "强制关闭",
         restart: "重启",
         open: "打开",
+        lifecycleControls: "生命周期控制",
         startDisabled: "启动暂不可用",
         startDisabledBusy: "正在处理上一个生命周期操作",
         startDisabledRunning: "项目已在运行",
@@ -1296,6 +1299,7 @@ export function LauncherRoute() {
         restartDisabledClosed: "项目已经关闭；请使用启动",
         forceStopDisabledClosed: "工作台已经关闭",
         forceStopDisabledInFlight: "关闭命令已经在处理中",
+        forceStopHint: "仅在普通停止无法收口时使用，会请求中断活动任务。",
         projectStatus: "项目状态",
         launcherStatus: "Launcher 维护",
         lifecycleStatus: "生命周期",
@@ -1498,6 +1502,7 @@ export function LauncherRoute() {
         forceStop: "Force close",
         restart: "Restart",
         open: "Open",
+        lifecycleControls: "Lifecycle controls",
         startDisabled: "Start is temporarily unavailable",
         startDisabledBusy: "A lifecycle command is still settling",
         startDisabledRunning: "Project is already running",
@@ -1508,6 +1513,7 @@ export function LauncherRoute() {
         restartDisabledClosed: "Project is already closed; use Start",
         forceStopDisabledClosed: "Workbench is already closed",
         forceStopDisabledInFlight: "A close command is already running",
+        forceStopHint: "Use only when normal Stop cannot settle; active work may be interrupted.",
         projectStatus: "Project Status",
         launcherStatus: "Launcher Care",
         lifecycleStatus: "Lifecycle",
@@ -2026,6 +2032,24 @@ export function LauncherRoute() {
           ? copy.userGuideClosedDetail
           : lifecycleDisplay.detail || copy.userGuideProblemDetail;
   const userGuideDetailShort = summarizeLauncherMessage(userGuideDetail, copy, uiLang) || userGuideDetail;
+  const statusBarBlockerReason = activeWorkCount > 0
+    ? activeWorkDetail
+    : restartQueuePending || restartQueueActive
+      ? restartQueue?.statusLine || copy.userGuideChangingDetail
+      : launcherControlLimited
+        ? copy.controlLimitedDetail
+        : launcherStatusDisconnected
+          ? copy.loadFailed
+          : closeCommandInFlight
+            ? stopDisabledReason
+            : controlBusy || !controlPlaneIdle
+              ? copy.startDisabledBusy
+              : projectIsChanging
+                ? lifecycleDisplay.detail || copy.userGuideChangingDetail
+                : projectIsClosed
+                  ? copy.lifecycleClosedDetail
+                  : lifecycleDisplay.detail || copy.noActiveWorkSummary;
+  const statusBarReasonText = summarizeLauncherMessage(statusBarBlockerReason, copy, uiLang) || statusBarBlockerReason;
   const noticeTextShort = summarizeLauncherMessage(notice.text, copy, uiLang) || notice.text;
   const actionLockLabel = projectIsClosed ? copy.actionsStartOnly : destructiveActionDisabled ? copy.actionsLocked : copy.actionsAvailable;
   const guardianProgress = `${guardian?.ownedCount ?? 0}/${guardian?.adapterCount ?? 0}`;
@@ -2247,33 +2271,36 @@ export function LauncherRoute() {
           <h1 className={styles.title}>{copy.title}</h1>
           <p className={styles.subtitle} title={lifecycleDisplay.detail || copy.subtitle}>{lifecycleDetailShort || copy.subtitle}</p>
         </div>
-        <div className={styles.actions}>
-          <button type="button" className={styles.iconButton} onClick={() => void statusQuery.refetch()} disabled={statusQuery.isFetching} title={copy.refresh}>
-            {statusQuery.isFetching ? <LoaderCircle size={15} className={styles.spin} /> : <RefreshCw size={15} />}
-            <span>{copy.refresh}</span>
-          </button>
-          <button type="button" className={styles.primaryButton} onClick={() => controlMutation.mutate("start")} disabled={startDisabled} title={startDisabled ? startDisabledReason : copy.start}>
-            <Play size={15} />
-            <span>{copy.start}</span>
-          </button>
-          <button type="button" className={styles.iconButton} onClick={() => controlMutation.mutate("stop")} disabled={stopDisabled} title={stopDisabled ? stopDisabledReason : copy.stop}>
-            <Square size={15} />
-            <span>{copy.stop}</span>
-          </button>
-          <button type="button" className={`${styles.iconButton} ${styles.dangerButton}`} onClick={() => controlMutation.mutate("force-stop")} disabled={forceStopDisabled} title={forceStopDisabled ? forceStopDisabledReason : copy.forceStop}>
-            <Power size={15} />
-            <span>{copy.forceStop}</span>
-          </button>
-          <button type="button" className={styles.iconButton} onClick={() => controlMutation.mutate("restart")} disabled={destructiveActionDisabled} title={destructiveActionDisabled ? destructiveActionDisabledReason : copy.restart}>
-            <RefreshCw size={15} />
-            <span>{copy.restart}</span>
-          </button>
-          {bundle?.url ? (
-            <a className={styles.iconButton} href={bundle.url} target="_blank" rel="noreferrer" title={copy.open}>
-              <ExternalLink size={15} />
-              <span>{copy.open}</span>
-            </a>
-          ) : null}
+        <div className={styles.statusBar}>
+          <div className={styles.statusBarReason} data-tone={userGuideTone} title={statusBarBlockerReason}>
+            <span>{copy.lifecycleStatus}</span>
+            <strong>{projectSummary}</strong>
+            <small>{statusBarReasonText}</small>
+          </div>
+          <div className={styles.statusBarActions} aria-label={copy.lifecycleControls}>
+            <button type="button" className={styles.statusBarButton} onClick={() => void statusQuery.refetch()} disabled={statusQuery.isFetching} title={copy.refresh}>
+              {statusQuery.isFetching ? <LoaderCircle size={15} className={styles.spin} /> : <RefreshCw size={15} />}
+              <span>{copy.refresh}</span>
+            </button>
+            <button type="button" className={`${styles.statusBarButton} ${styles.primaryButton}`} onClick={() => controlMutation.mutate("start")} disabled={startDisabled} title={startDisabled ? startDisabledReason : copy.start}>
+              <Play size={15} />
+              <span>{copy.start}</span>
+            </button>
+            <button type="button" className={styles.statusBarButton} onClick={() => controlMutation.mutate("restart")} disabled={destructiveActionDisabled} title={destructiveActionDisabled ? destructiveActionDisabledReason : copy.restart}>
+              <RefreshCw size={15} />
+              <span>{copy.restart}</span>
+            </button>
+            <button type="button" className={styles.statusBarButton} onClick={() => controlMutation.mutate("stop")} disabled={stopDisabled} title={stopDisabled ? stopDisabledReason : copy.stop}>
+              <Square size={15} />
+              <span>{copy.stop}</span>
+            </button>
+            {bundle?.url ? (
+              <a className={styles.statusBarButton} href={bundle.url} target="_blank" rel="noreferrer" title={copy.open}>
+                <ExternalLink size={15} />
+                <span>{copy.open}</span>
+              </a>
+            ) : null}
+          </div>
         </div>
       </header>
 
@@ -2294,6 +2321,17 @@ export function LauncherRoute() {
         <span>{copy.userGuide}</span>
         <strong>{userGuideTitle}</strong>
         <em>{actionLockLabel}</em>
+      </div>
+
+      <div className={styles.dangerZone}>
+        <span>{copy.forceStop}</span>
+        <small>{forceStopDisabled ? forceStopDisabledReason : copy.forceStopHint}</small>
+        <div className={styles.dangerActions}>
+          <button type="button" className={`${styles.iconButton} ${styles.dangerButton}`} onClick={() => controlMutation.mutate("force-stop")} disabled={forceStopDisabled} title={forceStopDisabled ? forceStopDisabledReason : copy.forceStop}>
+            <Power size={15} />
+            <span>{copy.forceStop}</span>
+          </button>
+        </div>
       </div>
 
       <LauncherStartupSettingsPanel
