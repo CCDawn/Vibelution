@@ -178,6 +178,39 @@ describe("conversationIndexModel", () => {
     expect(merged.map((item) => item.conversationId)).toEqual(["new", "old"]);
   });
 
+  it("hydrates existing direct conversations from the session index before classification", () => {
+    const merged = mergeVisibleSessionsIntoConversations(
+      [
+        conversation({
+          conversationId: "session-direct",
+          directSessionId: "session-direct",
+          title: "唐映白",
+          conversationIndexKind: undefined,
+          conversationIndexErrors: undefined,
+        }),
+      ],
+      [
+        session({
+          id: "session-direct",
+          title: "唐映白",
+          conversationIndexKind: "personal_agent",
+          conversationIndexVisibility: "user_visible",
+          conversationIndexErrors: [],
+        }),
+      ],
+    );
+
+    expect(merged).toHaveLength(1);
+    expect(merged[0]).toMatchObject({
+      conversationId: "session-direct",
+      directSessionId: "session-direct",
+      conversationIndexKind: "personal_agent",
+      conversationIndexVisibility: "user_visible",
+      conversationIndexErrors: [],
+    });
+    expect(classifyConversation(merged[0])).toBe("personalAgent");
+  });
+
   it("converts visible persistent Agents into direct conversations for the categorized chat index", () => {
     const summary = agentToConversationSummary(agent({
       agentId: "agent-research",

@@ -14,6 +14,7 @@ from core.web.control import CONTROL_TOKEN_HEADER, get_control_token
 from core.web.services import (
     agent_directory_service,
     agent_mode_binding_service,
+    chat_room_service,
     team_service,
     runtime_service,
     self_evolution_control_service,
@@ -319,6 +320,52 @@ def test_session_query_paginates_searches_and_filters(tmp_path, monkeypatch):
     filtered_response = client.get("/api/sessions/query?agentId=agent-a&sessionKind=main&sort=title_asc")
     assert filtered_response.status_code == 200
     assert {item["id"] for item in filtered_response.json()["items"]} == {"session-alpha", "session-gamma"}
+
+
+def test_conversation_index_exposes_direct_agent_classification_fields(tmp_path, monkeypatch):
+    _seed_chat_state(
+        tmp_path,
+        conversations=[
+            {
+                "conversation_id": "session-direct",
+                "title": "唐映白",
+                "agent_id": "agent-direct",
+                "agentId": "agent-direct",
+                "conversation_index_kind": "personal_agent",
+                "conversationIndexKind": "personal_agent",
+                "updated_at": "2026-06-27T10:05:28.787731+00:00",
+                "messages": [{"role": "user", "content": "继续", "timestamp": "2026-06-27T10:05:00"}],
+            }
+        ],
+    )
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(team_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
+    agent_directory_service.save_state(
+        {
+            "agents": [
+                {
+                    "agentId": "agent-direct",
+                    "displayName": "唐映白",
+                    "status": "active",
+                    "directSessionId": "session-direct",
+                    "metadata": {"conversationIndexKind": "personal_agent"},
+                }
+            ]
+        }
+    )
+
+    response = client.get("/api/conversations")
+
+    assert response.status_code == 200
+    direct = next(item for item in response.json() if item["conversationId"] == "session-direct")
+    assert direct["type"] == "direct_agent"
+    assert direct["conversationIndexKind"] == "personal_agent"
+    assert direct["conversationIndexVisibility"] == "user_visible"
+    assert direct["conversationIndexErrors"] == []
+
+
 def test_session_query_default_page_skips_per_item_filtering(tmp_path, monkeypatch):
     conversations = [
         {
