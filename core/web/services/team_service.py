@@ -96,6 +96,13 @@ TEAM_KIND_DEFAULTS = {
     "supervised_evolution": {"teamCategory": "监督进化系统团队", "teamSource": "supervised_evolution", "chatRoomPurpose": "supervised_evolution"},
     "template_demo": {"teamCategory": "演示业务团队", "teamSource": "team_template", "chatRoomPurpose": "meeting"},
 }
+DERIVED_TEAM_KINDS = {
+    "research",
+    "knowledge_expansion",
+    "ai_search",
+    "self_evolution",
+    "supervised_evolution",
+}
 TEAM_SOURCE_TO_KIND = {
     "manual": "custom",
     "research_organization": "research",
@@ -1004,7 +1011,7 @@ def ensure_evolution_system_teams() -> dict[str, Any]:
             _save_index(state)
     return {
         "schemaVersion": SCHEMA_VERSION,
-        "teams": [get_team(str(team.get("teamId") or "")) for team in teams],
+        "teams": [_team_detail_to_api(team, agent_refs=agent_refs) for team in teams],
         "updatedAt": utc_now_iso(),
     }
 
@@ -4473,16 +4480,87 @@ def _repair_team(
     if _apply_team_contract(team):
         changed = True
     members = team.get("members") if isinstance(team.get("members"), list) else []
+    stale_member_agent_ids = _stale_member_agent_ids(members)
     repaired_members = _repair_members(members, agent_refs=agent_refs)
     if repaired_members != members:
         team["members"] = repaired_members
         changed = True
+    removed_agent_ids = _prune_unavailable_derived_team_members(
+        team,
+        agent_refs=agent_refs,
+        stale_member_agent_ids=stale_member_agent_ids,
+    )
+    if removed_agent_ids:
+        changed = True
+        for removed_agent_id in removed_agent_ids:
+            _remove_agent_from_team_canvas(team, removed_agent_id)
     if _infer_team_kind(team) == "research":
-        _sync_research_team_member_agent_roles(repaired_members)
-    if _team_chat_room_needs_sync(team, agent_refs=agent_refs):
+        _sync_research_team_member_agent_roles(team.get("members") or [])
+    if removed_agent_ids or _team_chat_room_needs_sync(team, agent_refs=agent_refs):
         _ensure_team_chat_room_link(team, agent_refs=agent_refs)
         changed = True
+    if removed_agent_ids:
+        _record_team_event(
+            "team.derived_unavailable_members_pruned",
+            team,
+            fields={
+                "removedAgentIds": removed_agent_ids,
+                "removedAgentCount": len(removed_agent_ids),
+                "teamKind": _infer_team_kind(team),
+            },
+        )
     return changed
+
+
+def _prune_unavailable_derived_team_members(
+    team: dict[str, Any],
+    *,
+    agent_refs: dict[str, dict[str, dict[str, Any]]] | None = None,
+    stale_member_agent_ids: set[str] | None = None,
+) -> list[str]:
+    if str(team.get("status") or DEFAULT_TEAM_STATUS).strip() == "archived":
+        return []
+    if _infer_team_kind(team) not in DERIVED_TEAM_KINDS:
+        return []
+    stale_member_agent_ids = {
+        str(agent_id or "").strip()
+        for agent_id in set(stale_member_agent_ids or set())
+        if str(agent_id or "").strip()
+    }
+    if not stale_member_agent_ids:
+        return []
+    kept_members: list[dict[str, Any]] = []
+    removed_agent_ids: list[str] = []
+    seen_removed: set[str] = set()
+    for member in list(team.get("members") or []):
+        if not isinstance(member, dict):
+            continue
+        agent_id = str(member.get("agentId") or "").strip()
+        if not agent_id:
+            continue
+        if agent_id not in stale_member_agent_ids:
+            kept_members.append(member)
+            continue
+        if _agent_reference(agent_id, include_archived=False, agent_refs=agent_refs):
+            kept_members.append(member)
+            continue
+        if agent_id not in seen_removed:
+            seen_removed.add(agent_id)
+            removed_agent_ids.append(agent_id)
+    if removed_agent_ids:
+        team["members"] = kept_members
+        team["updatedAt"] = utc_now_iso()
+    return removed_agent_ids
+
+
+def _stale_member_agent_ids(members: list[Any]) -> set[str]:
+    return {
+        str(member.get("agentId") or "").strip()
+        for member in list(members or [])
+        if isinstance(member, dict)
+        and str(member.get("agentId") or "").strip()
+        and str(member.get("agentStatus") or "").strip().lower() == "stale"
+    }
 
 
 def _repair_members(

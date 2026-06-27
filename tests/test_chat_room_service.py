@@ -354,6 +354,50 @@ def test_create_chat_room_defaults_to_existing_sessions(tmp_path, monkeypatch):
     assert room["rounds"] == []
 
 
+def test_create_chat_room_resolves_explicit_hidden_team_agent_session(tmp_path, monkeypatch):
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    agent = agent_directory_service.create_agent_instance(
+        display_name="资料发现",
+        direct_session_id="session-hidden-team-agent",
+        primary_mode="research",
+        role_key="challenge_cup_data_discovery",
+        created_by="challenge_cup_team",
+    )
+    save_chat_state(
+        tmp_path,
+        {
+            "version": 1,
+            "active_conversation_id": "",
+            "conversations": [
+                {
+                    "conversation_id": "session-hidden-team-agent",
+                    "title": "资料发现",
+                    "agent_id": agent["agentId"],
+                    "agentId": agent["agentId"],
+                    "conversation_index_kind": "team_agent",
+                    "conversationIndexKind": "team_agent",
+                    "hidden_from_index": True,
+                    "hiddenFromIndex": True,
+                    "session_kind": "main",
+                    "sessionKind": "main",
+                }
+            ],
+        },
+    )
+
+    monkeypatch.setattr(session_service, "list_sessions", lambda *args, **kwargs: [])
+
+    room = chat_room_service.create_chat_room(
+        title="挑战杯团队群聊",
+        participant_session_ids=["session-hidden-team-agent"],
+    )
+
+    assert [participant["sessionId"] for participant in room["participants"]] == ["session-hidden-team-agent"]
+    assert room["participants"][0]["agentId"] == agent["agentId"]
+
+
 def test_list_chat_rooms_compact_does_not_hydrate_sessions_or_agents(tmp_path, monkeypatch):
     _seed_chat_sessions(tmp_path)
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)

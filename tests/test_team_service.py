@@ -1830,6 +1830,66 @@ def test_get_team_repairs_linked_room_stale_archived_participant(tmp_path, monke
     assert [participant["agentId"] for participant in room_after["participants"]] == [alpha["agentId"]]
 
 
+def test_get_team_prunes_missing_members_from_derived_team_and_room(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    alpha = agent_directory_service.create_agent_instance(display_name="Alpha", direct_session_id="session-alpha")
+    team = team_service.create_team(name="系统团队", members=[{"agentId": alpha["agentId"], "role": "runner"}])
+    missing_agent_id = "agent-missing-system"
+
+    state = team_service._load_index()
+    stored = next(item for item in state["teams"] if item["teamId"] == team["teamId"])
+    stored["teamKind"] = "self_evolution"
+    stored["teamSource"] = "self_evolution"
+    stored["systemTeamKind"] = "self_evolution"
+    stored["members"].append(
+        {
+            "memberId": "missing-member",
+            "agentId": missing_agent_id,
+            "agentName": "Missing",
+            "role": "legacy",
+            "agentStatus": "stale",
+        }
+    )
+    team_service._save_index(state)
+
+    canvas_path = team_service._team_canvas_path(team["teamId"])
+    canvas = json.loads(canvas_path.read_text(encoding="utf-8"))
+    canvas["nodes"].append(
+        {
+            "id": "missing-node",
+            "label": "Missing",
+            "type": "agent",
+            "x": 480,
+            "y": 120,
+            "agentId": missing_agent_id,
+            "role": "legacy",
+        }
+    )
+    canvas_path.write_text(json.dumps(canvas, ensure_ascii=False), encoding="utf-8")
+
+    store = chat_room_service._store()
+    rooms_payload = store.load()
+    room = next(item for item in rooms_payload["rooms"] if item["roomId"] == team["linkedChatRoomId"])
+    room["participants"].append(
+        {
+            "participantId": f"agent:{missing_agent_id}",
+            "agentId": missing_agent_id,
+            "sessionId": "session-missing-system",
+            "displayName": "Missing",
+            "enabled": True,
+        }
+    )
+    store.save(rooms_payload)
+
+    repaired = team_service.get_team(team["teamId"])
+    room_after = chat_room_service.get_chat_room_detail(repaired["linkedChatRoomId"])
+    canvas_after = team_service.get_team_canvas(team["teamId"])
+
+    assert [member["agentId"] for member in repaired["members"]] == [alpha["agentId"]]
+    assert [participant["agentId"] for participant in room_after["participants"]] == [alpha["agentId"]]
+    assert all(node.get("agentId") != missing_agent_id for node in canvas_after["nodes"])
+
+
 def test_save_team_canvas_rejects_missing_edge_endpoint(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     team = team_service.create_team(name="Edge Team")
