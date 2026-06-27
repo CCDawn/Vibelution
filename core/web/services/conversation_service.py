@@ -42,6 +42,8 @@ def list_conversations() -> list[dict[str, Any]]:
                 "agentInboxPendingCount": int(session.get("agentInboxPendingCount") or 0),
                 "conversationIndexVisibility": str(session.get("conversationIndexVisibility") or "user_visible").strip()
                 or "user_visible",
+                "conversationIndexKind": str(session.get("conversationIndexKind") or "").strip(),
+                "conversationIndexErrors": _conversation_index_errors(session),
             }
         )
     filtered_archived_team_room_count = 0
@@ -77,6 +79,13 @@ def list_conversations() -> list[dict[str, Any]]:
 
 def _archived_team_room_ids() -> set[str]:
     return team_service.list_archived_team_linked_chat_room_ids()
+
+
+def _conversation_index_errors(session: dict[str, Any]) -> list[str]:
+    raw_errors = session.get("conversationIndexErrors") or []
+    if isinstance(raw_errors, list):
+        return [str(item).strip() for item in raw_errors if str(item).strip()]
+    return [str(raw_errors).strip()] if str(raw_errors).strip() else []
 
 
 def _record_conversation_index_loaded(
