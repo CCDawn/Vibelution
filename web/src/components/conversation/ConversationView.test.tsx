@@ -444,6 +444,114 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).not.toContain("正在读取受控资料上下文");
   });
 
+  it("projects consecutive same-turn process-only tool messages into one compact assistant turn", () => {
+    const html = renderConversation(
+      [
+        {
+          id: "message-tool-1",
+          role: "assistant",
+          content: "",
+          timestamp: "2026-06-26T14:56:00Z",
+          feedbackEvents: [
+            {
+              sequence: 1,
+              kind: "tool",
+              status: "done",
+              name: "apply_diff_edit_tool",
+              summary: "[编辑] 成功修改 config/public_config.py 共处理 1 个块",
+              durationSeconds: 0.8,
+            },
+          ],
+          metadata: { turnId: "turn-edit" },
+        },
+        {
+          id: "message-tool-2",
+          role: "assistant",
+          content: "",
+          timestamp: "2026-06-26T14:56:01Z",
+          feedbackEvents: [
+            {
+              sequence: 2,
+              kind: "tool",
+              status: "done",
+              name: "apply_diff_edit_tool",
+              summary: "[编辑] 成功修改 config/workbench.py 共处理 1 个块",
+              durationSeconds: 0.6,
+            },
+          ],
+          metadata: { turnId: "turn-edit" },
+        },
+        {
+          id: "message-tool-3",
+          role: "assistant",
+          content: "",
+          timestamp: "2026-06-26T14:56:02Z",
+          feedbackEvents: [
+            {
+              sequence: 3,
+              kind: "tool",
+              status: "done",
+              name: "apply_diff_edit_tool",
+              summary: "[编辑] 成功修改 config/settings.py 共处理 1 个块",
+              durationSeconds: 0.9,
+            },
+          ],
+          metadata: { turnId: "turn-edit" },
+        },
+        {
+          id: "message-tool-4",
+          role: "assistant",
+          content: "",
+          timestamp: "2026-06-26T14:56:03Z",
+          feedbackEvents: [
+            {
+              sequence: 4,
+              kind: "tool",
+              status: "done",
+              name: "apply_diff_edit_tool",
+              summary: "[编辑] 成功修改 scripts/vibelution_desktop_entry.py 共处理 1 个块",
+              durationSeconds: 0.6,
+            },
+          ],
+          metadata: { turnId: "turn-edit" },
+        },
+      ],
+      { useDefaultProcessDisplayMode: true },
+    );
+
+    expect(html.match(/<article class="_assistantTurn_/g)?.length ?? 0).toBe(1);
+    expect(html).toContain("工具调用 4");
+    expect(html).not.toContain("工具调用 1");
+  });
+
+  it("does not repeat the tool-call label inside an expanded tool-only process packet", () => {
+    const html = renderConversation(
+      [
+        {
+          id: "message-failed-tool-only",
+          role: "assistant",
+          content: "",
+          timestamp: "2026-06-26T14:57:00Z",
+          feedbackEvents: [
+            {
+              sequence: 1,
+              kind: "tool",
+              status: "failed",
+              name: "apply_diff_edit_tool",
+              summary: "[编辑] 修改 config/public_config.py 失败",
+              error: "patch context not found",
+            },
+          ],
+        },
+      ],
+      { useDefaultProcessDisplayMode: true },
+    );
+
+    expect(html.match(/工具调用/g)?.length ?? 0).toBe(1);
+    expect(html).toContain("apply_diff_edit_tool");
+    expect(html).toContain("[编辑] 修改 config/public_config.py 失败");
+  });
+
   it("keeps active streaming scroll signals on a small streaming-only tail", () => {
     expect(conversationViewSource).toContain("const streamingTimelineMessages = useMemo(");
     expect(conversationViewSource).toContain("activeTimelineMessages.filter((message) => message.streaming)");
@@ -580,7 +688,7 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).toContain("白予安");
   });
 
-  it("shows the assistant avatar only once for a consecutive process thread", () => {
+  it("compacts a process-only prefix while keeping the following answer in the same avatar group", () => {
     const html = renderConversation(
       [
         {
@@ -639,7 +747,8 @@ describe("ConversationView edit resend affordance", () => {
 
     expect(html.match(/src="\/api\/agents\/avatar-image\/agent-zhounanzhi\.png"/g)?.length ?? 0).toBe(1);
     expect(html.match(/周南栀/g)?.length ?? 0).toBe(1);
-    expect(html.match(/assistantTurnContinuation/g)?.length ?? 0).toBe(2);
+    expect(html.match(/<article class="_assistantTurn_/g)?.length ?? 0).toBe(2);
+    expect(html.match(/assistantTurnContinuation/g)?.length ?? 0).toBe(1);
   });
 
   it("starts a new assistant avatar group after a user turn", () => {
