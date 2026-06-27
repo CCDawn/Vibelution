@@ -66,6 +66,8 @@ AUDIT_ONLY_EVENT_TYPES = {
     EVENT_TURN_FAILED,
 }
 
+POST_TERMINAL_MODEL_EVENT_TYPES = MODEL_VISIBLE_EVENT_TYPES - {EVENT_TURN_INTERRUPTED}
+
 TURN_INTERRUPTED_MARKER = (
     "<turn_interrupted>\n"
     "上一轮在完成前中断。已产生的助手内容、工具结果和 CLI 结果已经保留在上文；"
@@ -180,15 +182,25 @@ def append_turn_event(
 ) -> TurnJournalEvent:
     path = turn_journal_path(project_root, session_id)
     path.parent.mkdir(parents=True, exist_ok=True)
+    normalized_session_id = str(session_id or "").strip()
+    normalized_turn_id = str(turn_id or "").strip()
+    normalized_event_type = str(event_type or "").strip()
     with _SEQUENCE_CACHE_LOCK:
+        if (
+            normalized_event_type in POST_TERMINAL_MODEL_EVENT_TYPES
+            and _turn_has_terminal_event(path, normalized_turn_id)
+        ):
+            raise ValueError(
+                f"Cannot append {normalized_event_type} after terminal event for turn {normalized_turn_id}."
+            )
         sequence = _next_sequence(path)
         event = TurnJournalEvent(
             schema_version=SCHEMA_VERSION,
-            event_id=f"{_safe_event_token(turn_id or session_id)}-{sequence:06d}-{uuid4().hex[:8]}",
-            session_id=str(session_id or "").strip(),
-            turn_id=str(turn_id or "").strip(),
+            event_id=f"{_safe_event_token(normalized_turn_id or normalized_session_id)}-{sequence:06d}-{uuid4().hex[:8]}",
+            session_id=normalized_session_id,
+            turn_id=normalized_turn_id,
             sequence=sequence,
-            event_type=str(event_type or "").strip(),
+            event_type=normalized_event_type,
             status=str(status or "").strip(),
             timestamp=str(timestamp or "").strip() or _now_timestamp(),
             source=str(source or "").strip(),
@@ -206,6 +218,32 @@ def append_turn_event(
             handle.write("\n")
         _remember_sequence(path, sequence)
     return event
+
+
+def _turn_has_terminal_event(path: Path, turn_id: str) -> bool:
+    normalized_turn_id = str(turn_id or "").strip()
+    if not normalized_turn_id or not path.exists():
+        return False
+    try:
+        with path.open(encoding="utf-8") as handle:
+            for line in handle:
+                raw = line.strip()
+                if not raw:
+                    continue
+                try:
+                    parsed = json.loads(raw)
+                except json.JSONDecodeError:
+                    continue
+                event = TurnJournalEvent.from_dict(parsed)
+                if (
+                    event is not None
+                    and event.turn_id == normalized_turn_id
+                    and event.event_type in TERMINAL_EVENTS
+                ):
+                    return True
+    except OSError:
+        return False
+    return False
 
 
 def load_turn_events(project_root: Path, session_id: str) -> list[TurnJournalEvent]:

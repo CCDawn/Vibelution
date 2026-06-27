@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+import pytest
+
 from core.chat.turn_journal import (
+    EVENT_ASSISTANT_MESSAGE,
     EVENT_CLI_SESSION_LIFECYCLE,
     EVENT_CLI_TASK_RESULT,
     EVENT_COMPACTION_CHECKPOINT,
     EVENT_ASSISTANT_PARTIAL,
     EVENT_TOOL_CALL_STARTED,
     EVENT_TOOL_RESULT,
+    EVENT_TURN_COMPLETED,
     EVENT_TURN_INTERRUPTED,
     EVENT_TURN_STARTED,
     EVENT_USER_MESSAGE,
@@ -18,6 +22,34 @@ from core.chat.turn_journal import (
     model_visible_messages_from_events,
     turn_journal_path,
 )
+
+
+def test_turn_journal_rejects_model_visible_events_after_terminal_turn(tmp_path):
+    append_turn_event(tmp_path, "session-a", "turn-1", EVENT_TURN_STARTED, status="running")
+    append_turn_event(tmp_path, "session-a", "turn-1", EVENT_TURN_COMPLETED, status="completed")
+
+    with pytest.raises(ValueError, match="terminal event"):
+        append_turn_event(
+            tmp_path,
+            "session-a",
+            "turn-1",
+            EVENT_TOOL_RESULT,
+            status="done",
+            payload={"toolCall": {"name": "read_file_tool", "status": "done", "result": "late"}},
+        )
+
+    with pytest.raises(ValueError, match="terminal event"):
+        append_turn_event(
+            tmp_path,
+            "session-a",
+            "turn-1",
+            EVENT_ASSISTANT_MESSAGE,
+            status="completed",
+            payload={"content": "late answer"},
+        )
+
+    events = load_turn_events(tmp_path, "session-a")
+    assert [event.event_type for event in events] == [EVENT_TURN_STARTED, EVENT_TURN_COMPLETED]
 
 
 def test_turn_journal_appends_and_replays_interrupted_partial(tmp_path):
