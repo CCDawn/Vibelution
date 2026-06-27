@@ -2957,12 +2957,26 @@ function sourceCollectionStageCardsFromStatus(status: ResearchStageRoundStatusPa
   });
 }
 
+function sourceCollectionStageWritebackObservedTaskIds(cards: SourceCollectionStageCardProjection[]) {
+  const taskIds = new Set<string>();
+  cards.forEach((card) => {
+    const taskId = String(card.latestTask?.taskId || "").trim();
+    if (taskId) {
+      taskIds.add(taskId);
+    }
+  });
+  return taskIds;
+}
+
 function sourceCollectionStageWritebackRefetchInterval(
   pageVisible: boolean,
   status: ResearchStageRoundStatusPayload | SourceCollectionSummaryPayload | null | undefined,
   forceSync = false,
+  pendingTaskIds: readonly string[] = [],
 ) {
   const cards = sourceCollectionStageCardsFromStatus(status);
+  const observedTaskIds = sourceCollectionStageWritebackObservedTaskIds(cards);
+  const hasUnobservedPendingTask = pendingTaskIds.some((taskId) => taskId && !observedTaskIds.has(taskId));
   const hasRunningAgentTask = cards.some((card) => {
     const latestTaskStatus = String(card.latestTask?.status || "").toLowerCase();
     const cardStatus = String(card.status || "").toLowerCase();
@@ -2976,7 +2990,7 @@ function sourceCollectionStageWritebackRefetchInterval(
   });
   return resolvePollingInterval(
     pageVisible,
-    hasRunningAgentTask || forceSync ? 2000 : hasCompletedTaskAwaitingArtifact ? 5000 : false,
+    hasRunningAgentTask || forceSync || hasUnobservedPendingTask ? 2000 : hasCompletedTaskAwaitingArtifact ? 5000 : false,
   );
 }
 
@@ -3915,6 +3929,7 @@ export function TeamsRoute({
     requestedSourceCollectionStage ?? "collection",
   );
   const [sourceCollectionStageSyncUntilMs, setSourceCollectionStageSyncUntilMs] = useState(0);
+  const [sourceCollectionPendingStageTaskIds, setSourceCollectionPendingStageTaskIds] = useState<Partial<Record<SourceCollectionStageModuleId, string[]>>>({});
   const [sourceCollectionResultPageByStage, setSourceCollectionResultPageByStage] = useState<Record<SourceCollectionStageModuleId, number>>({
     collection: 1,
     screening: 1,
@@ -4051,6 +4066,11 @@ export function TeamsRoute({
     && !sourceCollectionWorkspaceSelected,
   );
   const sourceCollectionStageWritebackSyncActive = sourceCollectionStageSyncUntilMs > Date.now();
+  const sourceCollectionPendingStageTaskIdList = useMemo(
+    () => Object.values(sourceCollectionPendingStageTaskIds).flat().filter((taskId): taskId is string => Boolean(taskId)),
+    [sourceCollectionPendingStageTaskIds],
+  );
+  const sourceCollectionStageWritebackAwaitingTask = sourceCollectionStageWritebackSyncActive && sourceCollectionPendingStageTaskIdList.length > 0;
   const aiSearchRunsQuery = useQuery({
     queryKey: queryKeys.teamAiSearchRuns(effectiveTeamId || "none", AI_SEARCH_RUN_PREVIEW_LIMIT),
     queryFn: () =>
@@ -4086,6 +4106,7 @@ export function TeamsRoute({
         pageVisible,
         query.state.data as ResearchStageRoundStatusPayload | null | undefined,
         sourceCollectionStageWritebackSyncActive,
+        sourceCollectionPendingStageTaskIdList,
       ),
   });
   const teamWorkflowCandidatesQuery = useQuery({
@@ -4095,7 +4116,12 @@ export function TeamsRoute({
         `/api/teams/${encodeURIComponent(effectiveTeamId)}/workflow-orchestration/candidates?limit=${TEAM_WORKFLOW_CANDIDATE_PREVIEW_LIMIT}&includeValidation=false`,
       ),
     enabled: teamWorkflowCandidateListEnabled,
-    refetchInterval: () => sourceCollectionStageWritebackRefetchInterval(pageVisible, researchStageRoundStatusQuery.data, sourceCollectionStageWritebackSyncActive),
+    refetchInterval: () => sourceCollectionStageWritebackRefetchInterval(
+      pageVisible,
+      researchStageRoundStatusQuery.data,
+      sourceCollectionStageWritebackSyncActive,
+      sourceCollectionPendingStageTaskIdList,
+    ),
   });
   const teamWorkflowCandidateGraphQuery = useQuery({
     queryKey: queryKeys.teamWorkflowCandidateGraph(effectiveTeamId || "none"),
@@ -4141,7 +4167,12 @@ export function TeamsRoute({
         `/api/teams/${encodeURIComponent(effectiveTeamId)}/workflow-orchestration/source-quality/status`,
       ),
     enabled: teamWorkflowSourceQualityEnabled,
-    refetchInterval: () => sourceCollectionStageWritebackRefetchInterval(pageVisible, researchStageRoundStatusQuery.data, sourceCollectionStageWritebackSyncActive),
+    refetchInterval: () => sourceCollectionStageWritebackRefetchInterval(
+      pageVisible,
+      researchStageRoundStatusQuery.data,
+      sourceCollectionStageWritebackSyncActive,
+      sourceCollectionPendingStageTaskIdList,
+    ),
   });
   const teamWorkflowPaperNoteChunkStatusQuery = useQuery({
     queryKey: paperNoteChunkStatusQueryKey(effectiveTeamId || "none"),
@@ -4575,18 +4606,6 @@ export function TeamsRoute({
     onSuccess: (payload, variables) => {
       setSelectedSourceCollectionRunId(payload.runId);
       setSourceCollectionStageSyncUntilMs(Date.now() + SOURCE_COLLECTION_STAGE_WRITEBACK_SYNC_GRACE_MS);
-      if (payload.taskId) {
-        setSourceCollectionPendingStageTaskIds((current) => {
-          const currentStageTaskIds = current[variables.stageId] ?? [];
-          if (currentStageTaskIds.includes(payload.taskId)) {
-            return current;
-          }
-          return {
-            ...current,
-            [variables.stageId]: [...currentStageTaskIds, payload.taskId],
-          };
-        });
-      }
       void chatWorkspaceCache.afterDirectTurnAccepted(payload.sessionId);
       void queryClient.invalidateQueries({ queryKey: researchStageRoundStatusQueryKey(variables.teamId) });
       void queryClient.invalidateQueries({ queryKey: sourceCollectionSummaryQueryPrefix(variables.teamId) });

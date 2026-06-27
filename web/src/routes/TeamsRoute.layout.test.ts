@@ -8,7 +8,6 @@ import routeStyles from "./TeamsRoute.module.css";
 import routerSource from "../app/router.tsx?raw";
 
 const routeStylesSource = readFileSync(new URL("./TeamsRoute.module.css", import.meta.url), "utf-8");
-const routeFileSource = readFileSync(new URL("./TeamsRoute.tsx", import.meta.url), "utf-8");
 
 describe("TeamsRoute layout contract", () => {
   it("uses shell language state without loading the full app dictionary", () => {
@@ -267,7 +266,6 @@ describe("TeamsRoute layout contract", () => {
   });
 
   it("renders a dense list canvas inspector workflow", () => {
-    const routeSource = routeFileSource;
     expect(routeSource).toContain("teamContextBar");
     expect(routeSource).toContain("teamSelectField");
     expect(routeSource).toContain("teamContextChips");
