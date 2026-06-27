@@ -394,6 +394,174 @@ def test_agent_config_workspace_summary_counts_only_actionable_health_issues():
     assert summary["inboxPendingCount"] == 3
 
 
+def test_agent_config_workspace_health_flags_non_chat_agents_using_default_chat_prompt():
+    agent = {
+        "agentId": "agent-search",
+        "agentCode": "A100",
+        "displayName": "搜索范围",
+        "status": "active",
+        "primaryMode": "research",
+        "roleKey": "ai_search_scope_lead",
+        "promptTemplateId": "prompt-chat-default",
+        "directSessionId": "session-search",
+        "workspacePath": "workspace/agents/agent-search",
+        "toolPolicyId": "tool-search",
+        "memoryPolicyId": "memory-search",
+        "toolPolicy": {
+            "allowedTools": ["batch_web_search_tool", "paper_search_tool", "agent_message_tool"],
+        },
+        "llmBindings": {"dialogue": {"modelId": "model-primary"}},
+    }
+
+    health = agent_config_workspace_service._derive_health(
+        agents=[agent],
+        prompt_refs={
+            "prompt-chat-default": {
+                "promptTemplateId": "prompt-chat-default",
+                "contentLength": 0,
+                "contentPreview": "",
+                "sourcePath": "workspace/prompts/DYNAMIC.md",
+                "sourceExists": True,
+            }
+        },
+        model_refs={"model-primary": {"modelId": "model-primary", "requiresApiKey": False}},
+        mode_bindings={"modes": {}},
+        chat_rooms=[],
+        teams=[],
+        active_agent_ids={"agent-search"},
+    )
+
+    assert any(item["code"] == "non_chat_agent_uses_default_chat_prompt" for item in health["issues"])
+
+
+def test_agent_config_workspace_health_flags_prompt_tools_not_allowed():
+    agent = {
+        "agentId": "agent-supervised",
+        "agentCode": "A101",
+        "displayName": "基线",
+        "status": "active",
+        "primaryMode": "supervised_evolution",
+        "roleKey": "baseline",
+        "promptTemplateId": "prompt-supervised-baseline",
+        "directSessionId": "session-supervised",
+        "workspacePath": "workspace/agents/agent-supervised",
+        "toolPolicyId": "tool-supervised",
+        "memoryPolicyId": "memory-supervised",
+        "toolPolicy": {"allowedTools": []},
+        "llmBindings": {"dialogue": {"modelId": "model-primary"}},
+    }
+
+    health = agent_config_workspace_service._derive_health(
+        agents=[agent],
+        prompt_refs={
+            "prompt-supervised-baseline": {
+                "promptTemplateId": "prompt-supervised-baseline",
+                "contentLength": 80,
+                "contentPreview": "必须先调用 open_evolution_transaction_tool，再记录证据。",
+                "content": "必须先调用 open_evolution_transaction_tool，再记录证据。",
+                "sourcePath": "",
+                "sourceExists": False,
+            }
+        },
+        model_refs={"model-primary": {"modelId": "model-primary", "requiresApiKey": False}},
+        mode_bindings={"modes": {}},
+        chat_rooms=[],
+        teams=[],
+        active_agent_ids={"agent-supervised"},
+    )
+
+    tool_issues = [item for item in health["issues"] if item["code"] == "prompt_mentions_unallowed_tool"]
+    assert len(tool_issues) == 1
+    assert "open_evolution_transaction_tool" in tool_issues[0]["detail"]
+
+
+def test_agent_directory_repair_aligns_fixed_role_prompt_templates(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setattr(config_service, "get_config_workspace", _fake_config_workspace)
+    registry_path = tmp_path / "workspace" / "agents" / "agents.json"
+    registry_path.parent.mkdir(parents=True, exist_ok=True)
+    registry_path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "agents": [
+                    {
+                        "agentId": "agent-ai-search",
+                        "agentCode": "A201",
+                        "displayName": "搜索范围",
+                        "kind": "persistent",
+                        "primaryMode": "research",
+                        "roleKey": "ai_search_scope_lead",
+                        "promptTemplateId": "prompt-chat-default",
+                        "directSessionId": "session-ai-search",
+                        "workspacePath": "workspace/agents/agent-ai-search",
+                        "toolPolicyId": "tool-agent-ai-search",
+                        "memoryPolicyId": "memory-agent-ai-search",
+                        "createdBy": "ai_search_team",
+                        "status": "active",
+                        "metadata": {},
+                    },
+                    {
+                        "agentId": "agent-graph",
+                        "agentCode": "A202",
+                        "displayName": "候选图谱",
+                        "kind": "persistent",
+                        "primaryMode": "research",
+                        "roleKey": "candidate_graph",
+                        "promptTemplateId": "prompt-research-candidate_graph",
+                        "directSessionId": "session-graph",
+                        "workspacePath": "workspace/agents/agent-graph",
+                        "toolPolicyId": "tool-agent-graph",
+                        "memoryPolicyId": "memory-agent-graph",
+                        "createdBy": "challenge_cup_team",
+                        "status": "active",
+                        "metadata": {},
+                    },
+                    {
+                        "agentId": "agent-session",
+                        "agentCode": "A203",
+                        "displayName": "操作会话",
+                        "kind": "persistent",
+                        "primaryMode": "chat",
+                        "roleKey": "",
+                        "promptTemplateId": "prompt-chat-default",
+                        "directSessionId": "session-operation",
+                        "workspacePath": "workspace/agents/agent-session",
+                        "toolPolicyId": "tool-agent-session",
+                        "memoryPolicyId": "memory-agent-session",
+                        "createdBy": "session_repair",
+                        "status": "active",
+                        "metadata": {},
+                    },
+                ],
+                "toolPolicies": {
+                    "tool-agent-ai-search": agent_directory_service.default_research_source_tool_policy(
+                        "tool-agent-ai-search",
+                        role_key="ai_search_scope_lead",
+                    ),
+                    "tool-agent-graph": agent_directory_service.default_research_role_tool_policy(
+                        "tool-agent-graph",
+                        role_key="candidate_graph",
+                    ),
+                    "tool-agent-session": agent_directory_service.default_session_agent_tool_policy("tool-agent-session"),
+                },
+                "memoryPolicies": {},
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    repaired = agent_directory_service.repair_agent_directory()
+    agents = {item["agentId"]: item for item in repaired["agents"]}
+
+    assert agents["agent-ai-search"]["promptTemplateId"] == "prompt-ai-search-scope-lead"
+    assert agents["agent-graph"]["promptTemplateId"] == "prompt-challenge-cup-candidate-graph"
+    assert agents["agent-session"]["promptTemplateId"] == "prompt-chat-operation-default"
+
+
 def test_agent_config_workspace_persists_context_compression_policy(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     monkeypatch.setattr(config_service, "get_config_workspace", _fake_config_workspace)

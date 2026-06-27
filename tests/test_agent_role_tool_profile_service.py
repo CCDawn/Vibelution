@@ -91,6 +91,90 @@ def test_knowledge_steward_profile_owns_formal_knowledge_tools():
     assert policy["roleToolProfileId"] == "knowledge_steward"
 
 
+def test_ai_search_roles_have_explicit_search_profiles_without_legacy_web_search():
+    cases = {
+        "ai_search_scope_lead": {
+            "batch_web_search_tool",
+            "paper_search_tool",
+            "project_search_tool",
+            "news_search_tool",
+            "search_summarize_sources_tool",
+            "agent_message_tool",
+        },
+        "global_primary_sources": {
+            "batch_web_search_tool",
+            "paper_search_tool",
+            "project_search_tool",
+            "web_fetch_tool",
+            "search_summarize_sources_tool",
+            "agent_message_tool",
+        },
+        "cn_primary_sources": {
+            "batch_web_search_tool",
+            "news_search_tool",
+            "project_search_tool",
+            "web_fetch_tool",
+            "search_summarize_sources_tool",
+            "agent_message_tool",
+        },
+        "signal_quality_gate": {
+            "batch_web_search_tool",
+            "paper_search_tool",
+            "project_search_tool",
+            "news_search_tool",
+            "web_fetch_tool",
+            "search_summarize_sources_tool",
+            "agent_message_tool",
+        },
+    }
+
+    for role_key, expected_tools in cases.items():
+        policy = agent_role_tool_profile_service.resolve_role_tool_policy(
+            role_key=role_key,
+            primary_mode="research",
+            policy_id=f"tool-{role_key}",
+        )
+
+        assert policy is not None
+        assert policy["roleToolProfileId"] == role_key
+        assert expected_tools.issubset(set(policy["allowedTools"]))
+        assert "web_search_tool" not in policy["allowedTools"]
+        assert "web_search_tool" in agent_role_tool_profile_service.forbidden_tools_for_role(
+            role_key,
+            primary_mode="research",
+        )
+        assert policy["networkAccess"] == "controlled"
+        assert policy["mutationAccess"] == "none"
+
+
+def test_challenge_cup_coordinator_is_bounded_to_coordination_and_context_reads():
+    policy = agent_role_tool_profile_service.resolve_role_tool_policy(
+        role_key="challenge_cup_coordinator",
+        primary_mode="research",
+        policy_id="tool-challenge-cup-coordinator",
+    )
+
+    assert policy is not None
+    assert policy["roleToolProfileId"] == "challenge_cup_coordinator"
+    assert set(policy["allowedTools"]) == {
+        "agent_message_tool",
+        "research_knowledge_query_tool",
+        "source_collection_context_tool",
+        "challenge_cup_experiment_context_tool",
+        "challenge_cup_iteration_context_tool",
+        "challenge_cup_versioning_context_tool",
+    }
+    assert policy["preferredTools"][:2] == ["agent_message_tool", "research_knowledge_query_tool"]
+    assert "batch_web_search_tool" not in policy["allowedTools"]
+    assert "web_fetch_tool" not in policy["allowedTools"]
+    assert "batch_web_search_tool" in agent_role_tool_profile_service.forbidden_tools_for_role(
+        "challenge_cup_coordinator",
+        primary_mode="research",
+    )
+    assert policy["networkAccess"] == "none"
+    assert policy["mutationAccess"] == "none"
+
+
 def test_challenge_cup_experiment_iteration_roles_are_bounded_operation_agents():
     cases = {
         "challenge_cup_experiment_planner": {

@@ -265,10 +265,17 @@ CHALLENGE_CUP_ROLE_PROMPT_TEMPLATE_IDS = {
     "challenge_cup_source_acquisition": "prompt-challenge-cup-source-acquisition",
     "challenge_cup_content_extraction": "prompt-challenge-cup-content-extraction",
     "challenge_cup_source_quality": "prompt-challenge-cup-source-quality",
+    "candidate_graph": "prompt-challenge-cup-candidate-graph",
     "challenge_cup_experiment_planner": "prompt-challenge-cup-experiment-planner",
     "challenge_cup_experiment_ledger": "prompt-challenge-cup-experiment-ledger",
     "challenge_cup_iteration_planner": "prompt-challenge-cup-iteration-planner",
     "challenge_cup_versioning": "prompt-challenge-cup-versioning",
+}
+AI_SEARCH_ROLE_PROMPT_TEMPLATE_IDS = {
+    "ai_search_scope_lead": "prompt-ai-search-scope-lead",
+    "global_primary_sources": "prompt-ai-search-global-primary-sources",
+    "cn_primary_sources": "prompt-ai-search-cn-primary-sources",
+    "signal_quality_gate": "prompt-ai-search-signal-quality-gate",
 }
 KNOWLEDGE_EXPANSION_ROLE_PROMPT_TEMPLATE_IDS = {
     "knowledge_expansion_source_intake": "prompt-knowledge-expansion-source-intake",
@@ -6392,7 +6399,13 @@ def _normalize_prompt_template_id(value: Any) -> str:
 
 
 def _prompt_template_id_for_role(role_key: Any) -> str:
-    return CHALLENGE_CUP_ROLE_PROMPT_TEMPLATE_IDS.get(_normalize_role_key(role_key), "")
+    normalized_role = _normalize_role_key(role_key)
+    return (
+        AI_SEARCH_ROLE_PROMPT_TEMPLATE_IDS.get(normalized_role)
+        or CHALLENGE_CUP_ROLE_PROMPT_TEMPLATE_IDS.get(normalized_role)
+        or KNOWLEDGE_EXPANSION_ROLE_PROMPT_TEMPLATE_IDS.get(normalized_role)
+        or ""
+    )
 
 
 def _should_repair_agent_prompt_template_id(current: str, expected: str) -> bool:
@@ -6400,7 +6413,23 @@ def _should_repair_agent_prompt_template_id(current: str, expected: str) -> bool
     normalized_expected = _normalize_prompt_template_id(expected)
     if not normalized_expected:
         return False
-    return not normalized_current or normalized_current == "prompt-chat-default"
+    return (
+        not normalized_current
+        or normalized_current == "prompt-chat-default"
+        or normalized_current == "prompt-research-candidate_graph"
+    )
+
+
+def _is_operation_chat_agent(agent: dict[str, Any]) -> bool:
+    metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
+    created_by = str(agent.get("createdBy") or metadata.get("createdBy") or "").strip()
+    if created_by == "session_repair":
+        return True
+    if bool(metadata.get("operationChat")):
+        return True
+    if str(metadata.get("agentBoundary") or "").strip() == "operation_chat":
+        return True
+    return False
 
 
 def _infer_agent_primary_mode(agent: dict[str, Any]) -> str:
@@ -6448,6 +6477,8 @@ def _infer_agent_prompt_template_id(agent: dict[str, Any]) -> str:
     if supervised_role:
         return _normalize_prompt_template_id(f"prompt-supervised-{supervised_role}")
     if _infer_agent_primary_mode(agent) == "chat":
+        if _is_operation_chat_agent(agent):
+            return "prompt-chat-operation-default"
         return "prompt-chat-default"
     return ""
 
