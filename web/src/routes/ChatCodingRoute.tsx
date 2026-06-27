@@ -158,8 +158,10 @@ import {
 } from "./conversationIndexModel";
 import {
   activeTurnLayerToConversationMessage,
+  activeTurnLayerTextLength,
   isActiveTurnSettledByDetail,
   mergeAssistantDeltaIntoActiveTurnLayer,
+  type ActiveTurnLayerState,
 } from "./chatActiveTurnLayer";
 import {
   isChildSession,
@@ -2023,9 +2025,9 @@ function isStaleLedgerUpdate(currentSeq: unknown, incomingSeq: unknown): boolean
 }
 
 function setActiveTurnLayerForSession(
-  current: Record<string, ConversationMessage>,
+  current: Record<string, ActiveTurnLayerState>,
   sessionId: string,
-  layer: ConversationMessage | undefined,
+  layer: ActiveTurnLayerState | undefined,
 ) {
   const normalizedSessionId = String(sessionId || "").trim();
   if (!normalizedSessionId) {
@@ -2092,7 +2094,7 @@ export function ChatCodingRoute() {
   const [editingSessionTitle, setEditingSessionTitle] = useState("");
   const [sessionContextMenu, setSessionContextMenu] = useState<SessionContextMenuState | null>(null);
   const [sessionStreamConnected, setSessionStreamConnected] = useState(false);
-  const [activeTurnLayersBySession, setActiveTurnLayersBySession] = useState<Record<string, ConversationMessage>>({});
+  const [activeTurnLayersBySession, setActiveTurnLayersBySession] = useState<Record<string, ActiveTurnLayerState>>({});
   const [groupStreamConnected, setGroupStreamConnected] = useState(false);
   const [tokenSpeedTracker, setTokenSpeedTracker] = useState<TokenSpeedTrackerState | null>(null);
   const [petActionFeedback, setPetActionFeedback] = useState("");
@@ -2129,7 +2131,7 @@ export function ChatCodingRoute() {
   const sessionStreamErrorLoggedRef = useRef<Record<string, boolean>>({});
   const sessionStreamPayloadErrorLoggedRef = useRef<Record<string, boolean>>({});
   const sessionStreamApplyStatsRef = useRef<Record<string, { received: number; applied: number; dropped: number }>>({});
-  const activeTurnLayersBySessionRef = useRef<Record<string, ConversationMessage>>({});
+  const activeTurnLayersBySessionRef = useRef<Record<string, ActiveTurnLayerState>>({});
   const sessionStreamDecisionSnapshotRef = useRef({
     sessionId: "",
     shouldConnect: false,
@@ -3478,7 +3480,7 @@ export function ChatCodingRoute() {
     let pendingDetail: SessionDetail | null = null;
     let applyTimer: number | null = null;
     let lastAppliedAt = 0;
-    let committedAssistantDeltaLayer: ConversationMessage | undefined = activeTurnLayersBySessionRef.current[streamSessionId];
+    let committedAssistantDeltaLayer: ActiveTurnLayerState | undefined = activeTurnLayersBySessionRef.current[streamSessionId];
     let pendingAssistantDeltaPayloads: Array<{
       payload: Extract<SessionStreamEvent, { type: "assistant_delta" }>;
       payloadLength: number;
@@ -3629,7 +3631,7 @@ export function ChatCodingRoute() {
           ...telemetry,
           batchSize: appliedPayloadCount,
           done: finalDone || telemetry.done,
-          pendingTextLength: String(pendingLayer?.content ?? "").length + String(pendingLayer?.thought ?? "").length,
+          pendingTextLength: activeTurnLayerTextLength(pendingLayer),
         }
         : null;
       pendingAssistantDeltaTelemetry = null;
@@ -3695,7 +3697,7 @@ export function ChatCodingRoute() {
         stage: payload.stage,
         contentDeltaLength,
         thoughtDeltaLength,
-        pendingTextLength: String(projectedLayer?.content ?? "").length + String(projectedLayer?.thought ?? "").length,
+        pendingTextLength: activeTurnLayerTextLength(projectedLayer),
         batchSize: pendingAssistantDeltaPayloads.length,
         done: payload.done,
       };
