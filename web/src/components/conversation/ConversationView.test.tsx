@@ -149,6 +149,11 @@ describe("ConversationView edit resend affordance", () => {
     expect(conversationViewSource).toContain("function renderStreamingResponseText(content: string)");
     expect(conversationViewSource).toContain("<StreamingResponseContent content={content} />");
     expect(conversationViewSource).toContain("STREAMING_RESPONSE_REVEAL_MAX_CHARS");
+    expect(conversationViewSource).toContain("STREAMING_RESPONSE_CATCH_UP_BACKLOG_CHARS");
+    expect(conversationViewSource).toContain("type StreamingRevealState");
+    expect(conversationViewSource).toContain("stableText");
+    expect(conversationViewSource).toContain("revealTail");
+    expect(conversationViewSource).toContain("appendStableText");
     expect(conversationViewSource).toContain("requestAnimationFrame");
     expect(conversationViewSource).toContain("setVisibleContent");
     expect(conversationViewSource).toContain("styles.streamingResponseText");

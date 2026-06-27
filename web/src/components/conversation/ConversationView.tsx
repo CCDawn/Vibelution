@@ -73,6 +73,9 @@ const COMPUTER_USE_TOOL_NAME = "computer_use_task_tool";
 const STREAMING_RESPONSE_REVEAL_MIN_CHARS = 2;
 const STREAMING_RESPONSE_REVEAL_MAX_CHARS = 36;
 const STREAMING_RESPONSE_REVEAL_BACKLOG_RATIO = 0.18;
+const STREAMING_RESPONSE_CATCH_UP_BACKLOG_CHARS = 420;
+const STREAMING_RESPONSE_CATCH_UP_MAX_CHARS = 180;
+const STREAMING_RESPONSE_STABLE_TAIL_CHARS = 240;
 
 export type ConversationProcessDisplayMode = "answer" | "trace";
 
@@ -224,19 +227,49 @@ function nextStreamingRevealLength(currentLength: number, targetLength: number) 
   if (backlog === 0) {
     return currentLength;
   }
+  const catchUpActive = backlog >= STREAMING_RESPONSE_CATCH_UP_BACKLOG_CHARS;
+  const maxStep = catchUpActive ? STREAMING_RESPONSE_CATCH_UP_MAX_CHARS : STREAMING_RESPONSE_REVEAL_MAX_CHARS;
+  const ratio = catchUpActive ? 0.42 : STREAMING_RESPONSE_REVEAL_BACKLOG_RATIO;
   const step = Math.min(
-    STREAMING_RESPONSE_REVEAL_MAX_CHARS,
-    Math.max(STREAMING_RESPONSE_REVEAL_MIN_CHARS, Math.ceil(backlog * STREAMING_RESPONSE_REVEAL_BACKLOG_RATIO)),
+    maxStep,
+    Math.max(STREAMING_RESPONSE_REVEAL_MIN_CHARS, Math.ceil(backlog * ratio)),
   );
   return Math.min(targetLength, currentLength + step);
 }
 
+type StreamingRevealState = {
+  stableText: string;
+  revealTail: string;
+};
+
+function streamingRevealText(state: StreamingRevealState) {
+  return `${state.stableText}${state.revealTail}`;
+}
+
+function appendStableText(_previous: StreamingRevealState, nextVisibleText: string): StreamingRevealState {
+  const stableLength = Math.max(0, nextVisibleText.length - STREAMING_RESPONSE_STABLE_TAIL_CHARS);
+  return {
+    stableText: nextVisibleText.slice(0, stableLength),
+    revealTail: nextVisibleText.slice(stableLength),
+  };
+}
+
+const EMPTY_STREAMING_REVEAL_STATE: StreamingRevealState = {
+  stableText: "",
+  revealTail: "",
+};
+
 function StreamingResponseContent({ content }: { content: string }) {
   const targetContent = String(content ?? "");
-  const [visibleContent, setVisibleContent] = useState(() => (typeof window === "undefined" ? targetContent : ""));
+  const [visibleContent, setVisibleContent] = useState<StreamingRevealState>(() =>
+    typeof window === "undefined"
+      ? appendStableText(EMPTY_STREAMING_REVEAL_STATE, targetContent)
+      : EMPTY_STREAMING_REVEAL_STATE
+  );
   const targetContentRef = useRef(targetContent);
   const visibleContentRef = useRef(visibleContent);
   const frameIdRef = useRef<number | null>(null);
+  const visibleText = streamingRevealText(visibleContent);
 
   useEffect(() => {
     visibleContentRef.current = visibleContent;
@@ -248,25 +281,26 @@ function StreamingResponseContent({ content }: { content: string }) {
       return undefined;
     }
     if (!targetContent) {
-      visibleContentRef.current = "";
-      setVisibleContent("");
+      visibleContentRef.current = EMPTY_STREAMING_REVEAL_STATE;
+      setVisibleContent(EMPTY_STREAMING_REVEAL_STATE);
       return undefined;
     }
-    if (!targetContent.startsWith(visibleContentRef.current)) {
-      visibleContentRef.current = targetContent;
-      setVisibleContent(targetContent);
+    if (!targetContent.startsWith(streamingRevealText(visibleContentRef.current))) {
+      const recoveredState = appendStableText(visibleContentRef.current, targetContent);
+      visibleContentRef.current = recoveredState;
+      setVisibleContent(recoveredState);
       return undefined;
     }
 
     const revealNextFrame = () => {
       frameIdRef.current = null;
       const target = targetContentRef.current;
-      const current = visibleContentRef.current;
+      const current = streamingRevealText(visibleContentRef.current);
       if (current.length >= target.length) {
         return;
       }
       const nextLength = nextStreamingRevealLength(current.length, target.length);
-      const nextVisible = target.slice(0, nextLength);
+      const nextVisible = appendStableText(visibleContentRef.current, target.slice(0, nextLength));
       visibleContentRef.current = nextVisible;
       setVisibleContent(nextVisible);
       if (nextLength < target.length) {
@@ -285,12 +319,12 @@ function StreamingResponseContent({ content }: { content: string }) {
     };
   }, [targetContent]);
 
-  if (!visibleContent) {
+  if (!visibleText) {
     return null;
   }
   return (
     <div className={`${styles.markdownBody} ${styles.streamingResponseText}`}>
-      <p className={styles.streamingResponseParagraph}>{visibleContent}</p>
+      <p className={styles.streamingResponseParagraph}>{visibleText}</p>
     </div>
   );
 }

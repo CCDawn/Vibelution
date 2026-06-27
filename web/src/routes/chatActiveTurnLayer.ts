@@ -2,7 +2,19 @@ import { mergeConversationFeedbackEvents } from "../components/conversation/conv
 import type { ConversationMessage, SessionDetail, SessionStreamEvent } from "../api/types";
 
 export type AssistantDeltaEvent = Extract<SessionStreamEvent, { type: "assistant_delta" }>;
-export type ActiveTurnLayerMessage = ConversationMessage;
+export type ActiveTurnLayerState = {
+  id: string;
+  sessionId: string;
+  turnId: string;
+  updatedAt: string;
+  streaming: boolean;
+  processStage?: string;
+  answerContent: string;
+  thoughtContent: string;
+  feedbackEvents: NonNullable<ConversationMessage["feedbackEvents"]>;
+  timelineItems?: ConversationMessage["timelineItems"];
+  ledgerSeq: number;
+};
 
 function normalizedLedgerSeq(value: unknown): number {
   const numeric = Number(value ?? 0);
@@ -25,10 +37,10 @@ function messageTurnId(message: ConversationMessage) {
 }
 
 export function mergeAssistantDeltaIntoActiveTurnLayer(
-  previous: ActiveTurnLayerMessage | undefined,
+  previous: ActiveTurnLayerState | undefined,
   payload: AssistantDeltaEvent,
-): ActiveTurnLayerMessage | undefined {
-  if (isStaleLedgerUpdate(previous?.metadata?.ledgerSeq, payload.ledgerSeq)) {
+): ActiveTurnLayerState | undefined {
+  if (isStaleLedgerUpdate(previous?.ledgerSeq, payload.ledgerSeq)) {
     return previous;
   }
   const sessionId = String(payload.sessionId || "").trim();
@@ -37,12 +49,12 @@ export function mergeAssistantDeltaIntoActiveTurnLayer(
     return previous;
   }
   const now = payload.updatedAt || new Date().toISOString();
-  const sameTurn = previous && messageTurnId(previous) === turnId;
+  const sameTurn = previous && previous.turnId === turnId;
   const base = sameTurn ? previous : undefined;
   const contentDelta = payload.contentDelta ?? (payload.replaceContent || !base ? payload.content ?? "" : "");
   const thoughtDelta = payload.thoughtDelta ?? (payload.replaceThought || !base ? payload.thought ?? "" : "");
-  const content = payload.replaceContent ? contentDelta : `${base?.content ?? ""}${contentDelta}`;
-  const thought = payload.replaceThought ? thoughtDelta : `${base?.thought ?? ""}${thoughtDelta}`;
+  const content = payload.replaceContent ? contentDelta : `${base?.answerContent ?? ""}${contentDelta}`;
+  const thought = payload.replaceThought ? thoughtDelta : `${base?.thoughtContent ?? ""}${thoughtDelta}`;
   const feedbackEvents = payload.feedbackEvents
     ? mergeConversationFeedbackEvents(base?.feedbackEvents, payload.feedbackEvents)
     : base?.feedbackEvents ?? [];
@@ -51,38 +63,56 @@ export function mergeAssistantDeltaIntoActiveTurnLayer(
   }
   return {
     id: activeTurnMessageId(sessionId, turnId),
-    role: "assistant",
-    content,
-    timestamp: now,
+    sessionId,
+    turnId,
+    updatedAt: now,
     streaming: !payload.done,
-    streamStage: payload.stage || undefined,
-    thought: thought || undefined,
+    processStage: payload.stage || base?.processStage || undefined,
+    answerContent: content,
+    thoughtContent: thought,
     feedbackEvents,
     timelineItems: payload.timelineItems ?? base?.timelineItems,
-    metadata: {
-      ...(base?.metadata ?? {}),
-      kind: "session_active_turn_layer",
-      sessionId,
-      turnId,
-      ledgerSeq: Math.max(normalizedLedgerSeq(base?.metadata?.ledgerSeq), normalizedLedgerSeq(payload.ledgerSeq)),
-    },
+    ledgerSeq: Math.max(normalizedLedgerSeq(base?.ledgerSeq), normalizedLedgerSeq(payload.ledgerSeq)),
   };
 }
 
 export function activeTurnLayerToConversationMessage(
-  layer: ActiveTurnLayerMessage | undefined,
+  layer: ActiveTurnLayerState | undefined,
 ): ConversationMessage | undefined {
-  return layer;
+  if (!layer) {
+    return undefined;
+  }
+  return {
+    id: layer.id,
+    role: "assistant",
+    content: layer.answerContent,
+    timestamp: layer.updatedAt,
+    streaming: layer.streaming,
+    streamStage: layer.processStage,
+    thought: layer.thoughtContent || undefined,
+    feedbackEvents: layer.feedbackEvents.length > 0 ? layer.feedbackEvents : undefined,
+    timelineItems: layer.timelineItems,
+    metadata: {
+      kind: "session_active_turn_layer",
+      sessionId: layer.sessionId,
+      turnId: layer.turnId,
+      ledgerSeq: layer.ledgerSeq,
+    },
+  };
+}
+
+export function activeTurnLayerTextLength(layer: ActiveTurnLayerState | undefined): number {
+  return String(layer?.answerContent ?? "").length + String(layer?.thoughtContent ?? "").length;
 }
 
 export function isActiveTurnSettledByDetail(
-  layer: ActiveTurnLayerMessage | undefined,
+  layer: ActiveTurnLayerState | undefined,
   detail: SessionDetail | undefined,
 ) {
   if (!layer || !detail) {
     return false;
   }
-  const activeTurnId = messageTurnId(layer);
+  const activeTurnId = layer.turnId;
   if (!activeTurnId) {
     return false;
   }

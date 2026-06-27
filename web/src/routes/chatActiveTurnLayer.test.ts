@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { ConversationMessage, SessionDetail, SessionStreamEvent } from "../api/types";
 import {
   activeTurnLayerToConversationMessage,
+  type ActiveTurnLayerState,
   isActiveTurnSettledByDetail,
   mergeAssistantDeltaIntoActiveTurnLayer,
 } from "./chatActiveTurnLayer";
@@ -34,8 +35,8 @@ describe("chat active turn layer", () => {
     const first = mergeAssistantDeltaIntoActiveTurnLayer(undefined, assistantDelta({ contentDelta: "你" }));
     const second = mergeAssistantDeltaIntoActiveTurnLayer(first, assistantDelta({ contentDelta: "好" }));
 
-    expect(second?.content).toBe("你好");
-    expect(second?.thought ?? "").toBe("");
+    expect(second?.answerContent).toBe("你好");
+    expect(second?.thoughtContent ?? "").toBe("");
     expect(second?.streaming).toBe(true);
 
     const message = activeTurnLayerToConversationMessage(second);
@@ -58,8 +59,8 @@ describe("chat active turn layer", () => {
       }),
     );
 
-    expect(recovered?.content).toBe("完整内容");
-    expect(recovered?.thought).toBe("完整思考");
+    expect(recovered?.answerContent).toBe("完整内容");
+    expect(recovered?.thoughtContent).toBe("完整思考");
   });
 
   it("updates the same unsequenced feedback event instead of appending a duplicate", () => {
@@ -122,13 +123,76 @@ describe("chat active turn layer", () => {
       }),
     );
 
-    expect(active?.content).toBe("");
-    expect(active?.streamStage).toBe("agent_prepare");
+    expect(active?.answerContent).toBe("");
+    expect(active?.processStage).toBe("agent_prepare");
     expect(active?.feedbackEvents?.[0]).toMatchObject({
       kind: "status",
       name: "agent_prepare",
       status: "running",
     });
+
+    const message = activeTurnLayerToConversationMessage(active);
+
+    expect(message?.content).toBe("");
+    expect(message?.streamStage).toBe("agent_prepare");
+    expect(message?.feedbackEvents?.[0]).toMatchObject({
+      kind: "status",
+      name: "agent_prepare",
+      status: "running",
+    });
+  });
+
+  it("keeps process state and answer text in separate active-layer fields", () => {
+    const preparing = mergeAssistantDeltaIntoActiveTurnLayer(
+      undefined,
+      assistantDelta({
+        stage: "agent_prepare",
+        feedbackEvents: [
+          {
+            sequence: 1,
+            kind: "status",
+            status: "running",
+            name: "agent_prepare",
+            summary: "正在唤起对话 agent",
+          },
+        ],
+      }),
+    );
+    const responding = mergeAssistantDeltaIntoActiveTurnLayer(
+      preparing,
+      assistantDelta({
+        stage: "responding",
+        contentDelta: "真正回答",
+        feedbackEvents: [
+          {
+            sequence: 2,
+            kind: "status",
+            status: "running",
+            name: "model_request",
+            summary: "正在请求模型",
+          },
+        ],
+      }),
+    );
+
+    expect(responding).toMatchObject<Partial<ActiveTurnLayerState>>({
+      answerContent: "真正回答",
+      thoughtContent: "",
+      processStage: "responding",
+      streaming: true,
+    });
+    expect(responding?.feedbackEvents?.map((event) => event.name)).toEqual([
+      "agent_prepare",
+      "model_request",
+    ]);
+    const message = activeTurnLayerToConversationMessage(responding);
+
+    expect(message?.content).toBe("真正回答");
+    expect(message?.metadata?.kind).toBe("session_active_turn_layer");
+    expect(message?.feedbackEvents?.map((event) => event.name)).toEqual([
+      "agent_prepare",
+      "model_request",
+    ]);
   });
 
   it("treats the active layer as settled once committed detail has the same assistant turn", () => {
