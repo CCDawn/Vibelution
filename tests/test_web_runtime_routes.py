@@ -16,6 +16,8 @@ from core.launcher import service as standalone_launcher_service
 from core.runtime_manager.work_run_store import WorkRunStore
 from core.ui.chat_state import save_chat_state
 from core.web import app as web_app
+from core.web import lifecycle as web_lifecycle
+from core.web.middleware import runtime_scene_api
 from core.web.app import create_app
 from core.web.control import CONTROL_TOKEN_HEADER, get_control_token
 from core.web.services import (
@@ -1549,7 +1551,7 @@ def test_runtime_summary_falls_back_to_mental_diagnosis_when_state_is_empty(monk
     assert payload["mentalState"]["updatedAt"] == "2026-05-18T20:00:03"
 
 def test_ignores_windows_proactor_disconnect_noise(monkeypatch):
-    monkeypatch.setattr(web_app.os, "name", "nt", raising=False)
+    monkeypatch.setattr(web_lifecycle.os, "name", "nt", raising=False)
 
     context = {
         "message": "Exception in callback _ProactorBasePipeTransport._call_connection_lost(None)",
@@ -1557,12 +1559,12 @@ def test_ignores_windows_proactor_disconnect_noise(monkeypatch):
         "handle": "<Handle _ProactorBasePipeTransport._call_connection_lost(None)>",
     }
 
-    assert web_app._is_windows_proactor_disconnect_noise(context) is True
+    assert web_lifecycle.is_windows_proactor_disconnect_noise(context) is True
 
 def test_keeps_non_proactor_or_non_windows_disconnects_visible(monkeypatch):
-    monkeypatch.setattr(web_app.os, "name", "nt", raising=False)
+    monkeypatch.setattr(web_lifecycle.os, "name", "nt", raising=False)
 
-    assert web_app._is_windows_proactor_disconnect_noise(
+    assert web_lifecycle.is_windows_proactor_disconnect_noise(
         {
             "message": "Exception in callback some_other_handle",
             "exception": ConnectionResetError(10054, "connection reset"),
@@ -1570,8 +1572,8 @@ def test_keeps_non_proactor_or_non_windows_disconnects_visible(monkeypatch):
         }
     ) is False
 
-    monkeypatch.setattr(web_app.os, "name", "posix", raising=False)
-    assert web_app._is_windows_proactor_disconnect_noise(
+    monkeypatch.setattr(web_lifecycle.os, "name", "posix", raising=False)
+    assert web_lifecycle.is_windows_proactor_disconnect_noise(
         {
             "message": "Exception in callback _ProactorBasePipeTransport._call_connection_lost(None)",
             "exception": ConnectionResetError(10054, "connection reset"),
@@ -4102,7 +4104,7 @@ def test_backend_api_runtime_event_records_slow_get_request(tmp_path, monkeypatc
     monkeypatch.setattr(runtime_scene_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(runtime_scene_service, "LAUNCHER_STATE_PATH", launcher_state_path)
     perf_values = iter([100.0, 101.2])
-    monkeypatch.setattr(web_app, "_api_runtime_perf_counter", lambda: next(perf_values, 101.2), raising=False)
+    monkeypatch.setattr(runtime_scene_api, "_api_runtime_perf_counter", lambda: next(perf_values, 101.2), raising=False)
 
     response = client.get("/api/runtime/summary")
 
@@ -4140,7 +4142,7 @@ def test_backend_api_runtime_event_skips_fast_success_get_request(tmp_path, monk
     monkeypatch.setattr(runtime_scene_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(runtime_scene_service, "LAUNCHER_STATE_PATH", launcher_state_path)
     perf_values = iter([200.0, 200.05])
-    monkeypatch.setattr(web_app, "_api_runtime_perf_counter", lambda: next(perf_values, 200.05), raising=False)
+    monkeypatch.setattr(runtime_scene_api, "_api_runtime_perf_counter", lambda: next(perf_values, 200.05), raising=False)
 
     response = client.get("/api/runtime/summary")
 
@@ -4164,7 +4166,7 @@ def test_backend_api_runtime_event_records_fast_team_workbench_get_request(tmp_p
     monkeypatch.setattr(runtime_scene_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(runtime_scene_service, "LAUNCHER_STATE_PATH", launcher_state_path)
     perf_values = iter([300.0, 300.05])
-    monkeypatch.setattr(web_app, "_api_runtime_perf_counter", lambda: next(perf_values, 300.05), raising=False)
+    monkeypatch.setattr(runtime_scene_api, "_api_runtime_perf_counter", lambda: next(perf_values, 300.05), raising=False)
 
     response = client.get(
         "/api/runtime/summary",
@@ -4186,7 +4188,7 @@ def test_backend_api_runtime_event_records_fast_team_workbench_get_request(tmp_p
     assert api_event["fields"]["method"] == "GET"
     assert api_event["fields"]["path"] == "/api/runtime/summary"
     assert api_event["fields"]["refererPath"] == "/teams"
-    assert api_event["fields"]["durationMs"] < web_app.API_RUNTIME_SLOW_GET_THRESHOLD_MS
+    assert api_event["fields"]["durationMs"] < runtime_scene_api.API_RUNTIME_SLOW_GET_THRESHOLD_MS
 
 
 def test_backend_api_runtime_event_marks_model_discovery_client_error_operational(tmp_path, monkeypatch):

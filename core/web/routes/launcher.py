@@ -3,84 +3,25 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel, Field
 
+from core.launcher.api_contract import (
+    DesktopActionClaimPayload,
+    DesktopActionResultPayload,
+    DesktopSessionPayload,
+    DesktopSessionWindowPayload,
+    DeveloperCleanupApplyPayload,
+    DeveloperCleanupPreviewPayload,
+    DeveloperModePayload,
+    LauncherRuntimeSceneEventPayload,
+    LauncherStartupSettingsPayload,
+    LifecycleIntentPayload,
+    WorkbenchWindowModePayload,
+)
 from core.launcher import service as launcher_service
 from core.web.services import runtime_scene_service
 
 
 router = APIRouter(tags=["launcher"])
-
-
-class WorkbenchWindowModePayload(BaseModel):
-    mode: str
-    baseHash: str = ""
-
-
-class LauncherStartupSettingsPayload(BaseModel):
-    launcher: dict = Field(default_factory=dict)
-    runtime: dict = Field(default_factory=dict)
-    workbench: dict = Field(default_factory=dict)
-    interface: dict = Field(default_factory=dict)
-    baseHash: str = ""
-
-
-class DeveloperModePayload(BaseModel):
-    enabled: bool
-    baseHash: str = ""
-
-
-class DeveloperCleanupPreviewPayload(BaseModel):
-    action: str
-
-
-class DeveloperCleanupApplyPayload(BaseModel):
-    action: str
-    planId: str
-    planHash: str
-    confirm: bool = False
-
-
-class LifecycleIntentPayload(BaseModel):
-    action: str
-    reason: str = ""
-    idempotencyKey: str
-
-
-class DesktopActionClaimPayload(BaseModel):
-    desktopSessionId: str
-    leaseSeconds: int = 30
-
-
-class DesktopActionResultPayload(BaseModel):
-    desktopSessionId: str
-    result: dict = Field(default_factory=dict)
-
-
-class DesktopSessionPayload(BaseModel):
-    desktopSessionId: str
-    provider: str = "electron"
-    workspaceRoot: str = ""
-    capabilities: list[str] = Field(default_factory=list)
-
-
-class DesktopSessionWindowPayload(BaseModel):
-    revision: int = 0
-    provider: str = "electron"
-    open: bool = False
-    focused: bool = False
-    windowId: int = 0
-    rendererProcessId: int = 0
-    url: str = ""
-
-
-class LauncherRuntimeSceneEventPayload(BaseModel):
-    eventCode: str
-    message: str = ""
-    fields: dict = Field(default_factory=dict)
-    level: str = "info"
-    outcome: str = "observed"
-    occurredAt: str = ""
 
 
 @router.get("/launcher/status")

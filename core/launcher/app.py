@@ -7,12 +7,26 @@ from pathlib import Path
 from fastapi import APIRouter, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
-from pydantic import BaseModel, Field
 
 from core.version import get_product_version
 from core.web.control import CONTROL_TOKEN_HEADER, control_token_payload, trusted_control_origins, validate_control_request
 from core.web.services import runtime_scene_service
 from . import service as launcher_service
+from .api_contract import (
+    DesktopActionClaimPayload,
+    DesktopActionResultPayload,
+    DesktopSessionPayload,
+    DesktopSessionWindowPayload,
+    DeveloperCleanupApplyPayload,
+    DeveloperCleanupPreviewPayload,
+    DeveloperModePayload,
+    LauncherMaintenanceApplyPayload,
+    LauncherMaintenancePreviewPayload,
+    LauncherRuntimeSceneEventPayload,
+    LauncherStartupSettingsPayload,
+    LifecycleIntentPayload,
+    WorkbenchWindowModePayload,
+)
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -25,88 +39,6 @@ INDEX_CACHE_HEADERS = {
 }
 
 router = APIRouter()
-
-
-class WorkbenchWindowModePayload(BaseModel):
-    mode: str
-    baseHash: str = ""
-
-
-class LauncherStartupSettingsPayload(BaseModel):
-    launcher: dict = Field(default_factory=dict)
-    runtime: dict = Field(default_factory=dict)
-    workbench: dict = Field(default_factory=dict)
-    interface: dict = Field(default_factory=dict)
-    baseHash: str = ""
-
-
-class DeveloperModePayload(BaseModel):
-    enabled: bool
-    baseHash: str = ""
-
-
-class DeveloperCleanupPreviewPayload(BaseModel):
-    action: str
-
-
-class DeveloperCleanupApplyPayload(BaseModel):
-    action: str
-    planId: str
-    planHash: str
-    confirm: bool = False
-
-
-class LauncherMaintenancePreviewPayload(BaseModel):
-    profileId: str = "custom"
-    itemIds: list[str] = Field(default_factory=list)
-
-
-class LauncherMaintenanceApplyPayload(BaseModel):
-    planId: str
-    planHash: str
-    confirm: bool = False
-
-
-class LifecycleIntentPayload(BaseModel):
-    action: str
-    reason: str = ""
-    idempotencyKey: str
-
-
-class DesktopActionClaimPayload(BaseModel):
-    desktopSessionId: str
-    leaseSeconds: int = 30
-
-
-class DesktopActionResultPayload(BaseModel):
-    desktopSessionId: str
-    result: dict = Field(default_factory=dict)
-
-
-class DesktopSessionPayload(BaseModel):
-    desktopSessionId: str
-    provider: str = "electron"
-    workspaceRoot: str = ""
-    capabilities: list[str] = Field(default_factory=list)
-
-
-class DesktopSessionWindowPayload(BaseModel):
-    revision: int = 0
-    provider: str = "electron"
-    open: bool = False
-    focused: bool = False
-    windowId: int = 0
-    rendererProcessId: int = 0
-    url: str = ""
-
-
-class LauncherRuntimeSceneEventPayload(BaseModel):
-    eventCode: str
-    message: str = ""
-    fields: dict = Field(default_factory=dict)
-    level: str = "info"
-    outcome: str = "observed"
-    occurredAt: str = ""
 
 
 @router.get("/api/health")
