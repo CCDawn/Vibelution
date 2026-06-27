@@ -2126,6 +2126,7 @@ def _execute_source_collection_search_impl(team_id: str, run_id: str, payload: d
     skipped_query_count = 0
     failed_query_count = 0
     result_count = 0
+    rejected_result_count = 0
     skipped_duplicate_count = 0
     duplicate_source_keys: list[str] = []
 
@@ -2207,6 +2208,39 @@ def _execute_source_collection_search_impl(team_id: str, run_id: str, payload: d
                 )
             )
             for result in search_results:
+                quality_gate = _source_collection_search_result_quality_gate(query, result)
+                if not bool(quality_gate.get("accepted")):
+                    rejected_result_count += 1
+                    execution_events.append(
+                        _source_collection_execution_event(
+                            "search.low_quality_rejected",
+                            assignment=assignment,
+                            query=query,
+                            status="blocked",
+                            title=f"Rejected low-quality source: {result.get('title') or result.get('sourceRef')}",
+                            summary=(
+                                "The metadata result did not pass query relevance and quality gates: "
+                                + ", ".join(str(reason) for reason in list(quality_gate.get("reasons") or [])[:4])
+                            ),
+                            refs=[
+                                _trim_text(result.get("sourceRef"), max_length=240),
+                                *[
+                                    f"matched:{term}"
+                                    for term in list(quality_gate.get("matchedTerms") or [])[:4]
+                                ],
+                                *[
+                                    f"blocked:{term}"
+                                    for term in list(quality_gate.get("blockingTerms") or [])[:4]
+                                ],
+                            ],
+                            raw_location=_trim_text(result.get("rawLocation") or result.get("sourceRef"), max_length=1000),
+                        )
+                    )
+                    continue
+                result_quality_signals = _normalize_metadata(result.get("qualitySignals"))
+                result_quality_signals["sourceCollectionQualityGate"] = quality_gate
+                result = dict(result)
+                result["qualitySignals"] = result_quality_signals
                 candidate_record = _source_collection_record_from_search_result(
                     normalized_team_id,
                     run,
@@ -2411,6 +2445,7 @@ def _execute_source_collection_search_impl(team_id: str, run_id: str, payload: d
             "recordCount": len(created_records),
             "createdUniqueRecordCount": len(created_records),
             "importedCount": len(imported),
+            "rejectedResultCount": rejected_result_count,
             "skippedDuplicateCount": skipped_duplicate_count,
             "duplicateSourceKeys": duplicate_source_keys[:20],
             "remainingQueryCount": remaining_query_count,
@@ -2429,6 +2464,7 @@ def _execute_source_collection_search_impl(team_id: str, run_id: str, payload: d
                 "failedQueryCount": failed_query_count,
                 "recordCount": len(created_records),
                 "importedCount": len(imported),
+                "rejectedResultCount": rejected_result_count,
                 "skippedDuplicateCount": skipped_duplicate_count,
                 "remainingQueryCount": remaining_query_count,
             },
@@ -2449,6 +2485,7 @@ def _execute_source_collection_search_impl(team_id: str, run_id: str, payload: d
         "createdUniqueRecordCount": len(created_records),
         "outputCount": len(outputs),
         "importedCount": len(imported),
+        "rejectedResultCount": rejected_result_count,
         "skippedDuplicateCount": skipped_duplicate_count,
         "duplicateSourceKeys": duplicate_source_keys[:20],
         "remainingQueryCount": remaining_query_count,
@@ -14102,6 +14139,112 @@ def _source_collection_result_from_crossref_item(item: dict[str, Any], *, fallba
             "hasDoi": bool(doi),
             "hasAbstract": bool(abstract),
         },
+    }
+
+
+_SOURCE_COLLECTION_GENERIC_SEARCH_TERMS = {
+    "paper",
+    "papers",
+    "preprint",
+    "preprints",
+    "benchmark",
+    "benchmarks",
+    "survey",
+    "review",
+    "reviews",
+    "peer",
+    "reviewed",
+    "source",
+    "sources",
+    "dataset",
+    "datasets",
+    "data",
+    "latest",
+    "analysis",
+    "study",
+    "studies",
+}
+_SOURCE_COLLECTION_LOW_QUALITY_TERMS = {
+    "高考",
+    "志愿填报",
+    "专业目录",
+    "招生",
+    "录取",
+    "词典",
+    "dictionary",
+    "adjective",
+    "noun",
+    "quiz",
+}
+_SOURCE_COLLECTION_QUERY_TERM_TRANSLATIONS = {
+    "预测": ("predictive", "prediction"),
+    "编码": ("coding", "encoding"),
+    "预测编码": ("predictive", "coding", "predictive coding"),
+    "皮层": ("cortical", "cortex"),
+    "层级": ("hierarchy", "hierarchical"),
+    "突触": ("synaptic", "synapse"),
+    "可塑性": ("plasticity",),
+    "学习": ("learning",),
+    "神经": ("neural", "neuron"),
+    "门控": ("gating", "gate"),
+    "注意": ("attention",),
+    "机制": ("mechanism",),
+}
+
+
+def _source_collection_search_quality_terms(query_text: str) -> set[str]:
+    text = _trim_text(query_text, max_length=1000)
+    lowered = text.lower()
+    terms = {
+        token
+        for token in re.findall(r"[a-z][a-z0-9_-]{3,}", lowered)
+        if token not in _SOURCE_COLLECTION_GENERIC_SEARCH_TERMS
+    }
+    cjk_chars = re.findall(r"[\u4e00-\u9fff]", text)
+    for size in (2, 3, 4):
+        for index in range(0, max(0, len(cjk_chars) - size + 1)):
+            term = "".join(cjk_chars[index : index + size])
+            if term:
+                terms.add(term)
+    for cjk_term, translations in _SOURCE_COLLECTION_QUERY_TERM_TRANSLATIONS.items():
+        if cjk_term in text:
+            terms.update(translations)
+    return {term for term in terms if len(term.strip()) >= 2}
+
+
+def _source_collection_search_result_quality_gate(query: dict[str, Any], result: dict[str, Any]) -> dict[str, Any]:
+    query_text = _trim_text(query.get("query"), max_length=1000)
+    query_terms = _source_collection_search_quality_terms(query_text)
+    metadata = result.get("metadata") if isinstance(result.get("metadata"), dict) else {}
+    haystack = " ".join(
+        _trim_text(value, max_length=2000)
+        for value in (
+            result.get("title"),
+            result.get("summary"),
+            result.get("sourceRef"),
+            result.get("rawLocation"),
+            metadata.get("containerTitle"),
+        )
+        if value
+    ).lower()
+    blocking_terms = sorted(term for term in _SOURCE_COLLECTION_LOW_QUALITY_TERMS if term.lower() in haystack)
+    matched_terms = sorted(term for term in query_terms if term.lower() in haystack)
+    required_matches = 1 if len(query_terms) <= 1 else 2
+    accepted = bool(query_terms) and len(matched_terms) >= required_matches and not blocking_terms
+    reasons: list[str] = []
+    if not query_terms:
+        reasons.append("query_has_no_quality_terms")
+    if len(matched_terms) < required_matches:
+        reasons.append("insufficient_query_overlap")
+    if blocking_terms:
+        reasons.append("low_quality_context_terms")
+    return {
+        "accepted": accepted,
+        "matchedTerms": matched_terms[:12],
+        "requiredMatchCount": required_matches,
+        "queryTermCount": len(query_terms),
+        "blockingTerms": blocking_terms[:12],
+        "reasons": reasons,
     }
 
 

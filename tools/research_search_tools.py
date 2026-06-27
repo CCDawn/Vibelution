@@ -8,6 +8,7 @@ import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from urllib.parse import urlparse
 
+from tools import research_search_backends
 from tools.web_search_tool import public_web_search
 
 
@@ -101,10 +102,84 @@ def _merge_domains(defaults: tuple[str, ...], include_domains: str) -> list[str]
 def _render_batch_result(title: str, rows: list[tuple[str, str]]) -> str:
     if not rows:
         return "[错误] 未提供有效搜索词"
-    parts = [f"[{title}] 共执行 {len(rows)} 个查询。"]
+    low_quality_count = sum(1 for _, result in rows if str(result or "").strip().startswith("[搜索质量不足]"))
+    error_count = sum(1 for _, result in rows if str(result or "").strip().startswith("[错误]"))
+    if low_quality_count == len(rows):
+        prefix = f"[搜索质量不足] {title} 全部查询都未返回可采信结果。共执行 {len(rows)} 个查询。"
+    elif low_quality_count or error_count:
+        prefix = f"[{title}] 共执行 {len(rows)} 个查询；低质量 {low_quality_count} 个，失败 {error_count} 个。"
+    else:
+        prefix = f"[{title}] 共执行 {len(rows)} 个查询。"
+    parts = [prefix]
     for index, (query, result) in enumerate(rows, 1):
         parts.append(f"\n## {index}. {query}\n{result}")
     return "\n".join(parts)
+
+
+def _render_provider_payload(title: str, payload: dict) -> str:
+    query = str(payload.get("query") or "").strip()
+    providers = [
+        f"{item.get('provider')}:{item.get('status')}({item.get('resultCount', 0)})"
+        for item in list(payload.get("providers") or [])
+        if isinstance(item, dict)
+    ]
+    results = [item for item in list(payload.get("results") or []) if isinstance(item, dict)]
+    if not results:
+        return (
+            f"[搜索质量不足] {title} 未返回可采信结果。"
+            f"providerTrace={'; '.join(providers) or 'none'}; "
+            f"rawResultCount={payload.get('rawResultCount', 0)}; "
+            f"rejectedCount={payload.get('rejectedCount', 0)}; "
+            f"query={query}"
+        )
+    parts = [
+        f"[{title}] 找到 {len(results)} 条可采信结果。"
+        f"providerTrace={'; '.join(providers) or 'none'}; "
+        f"rejectedCount={payload.get('rejectedCount', 0)}"
+    ]
+    for index, result in enumerate(results, 1):
+        title_text = str(result.get("title") or result.get("url") or "Untitled").strip()
+        url = str(result.get("url") or "").strip()
+        snippet = str(result.get("snippet") or "").strip()
+        provider = str(result.get("provider") or "").strip()
+        metadata = []
+        for key in ("sourceType", "published", "doi", "stars", "language", "source"):
+            value = str(result.get(key) or "").strip()
+            if value:
+                metadata.append(f"{key}={value}")
+        parts.append(f"\n{index}. [{title_text}]({url})")
+        if provider or metadata:
+            parts.append(f"   - provider={provider}{'; ' + '; '.join(metadata) if metadata else ''}")
+        if snippet:
+            parts.append(f"   - {snippet[:500]}")
+    return "\n".join(parts)
+
+
+def _provider_or_legacy_web_search(
+    query: str,
+    *,
+    max_results: int,
+    allowed_domains: str = "",
+    blocked_domains: str = "",
+) -> str:
+    payload = research_search_backends.collect_provider_results(
+        query,
+        [
+            ("searxng", lambda: research_search_backends.searxng_search(query, max_results=max_results)),
+            ("ddgs", lambda: research_search_backends.ddgs_search(query, max_results=max_results)),
+        ],
+        max_results=max_results,
+        allowed_domains=allowed_domains,
+        blocked_domains=blocked_domains,
+    )
+    if payload.get("results"):
+        return _render_provider_payload("批量公开搜索", payload)
+    return public_web_search(
+        query=query,
+        max_results=max_results,
+        allowed_domains=allowed_domains,
+        blocked_domains=blocked_domains,
+    )
 
 
 def _run_searches(
@@ -122,7 +197,7 @@ def _run_searches(
     rows: list[tuple[str, str] | None] = [None] * len(queries)
 
     def _search_one(query: str) -> str:
-        return public_web_search(
+        return _provider_or_legacy_web_search(
             query=query,
             max_results=limit,
             allowed_domains=allowed_domains,
@@ -167,6 +242,19 @@ def paper_search(topic: str, max_results: int = 8, year_hint: str = "", include_
         return "[错误] 论文搜索主题不能为空"
     domains = _merge_domains(_PAPER_DOMAINS, include_domains)
     year = f" {str(year_hint).strip()}" if str(year_hint or "").strip() else ""
+    provider_query = f"{topic_text}{year}".strip()
+    provider_payload = research_search_backends.collect_provider_results(
+        provider_query,
+        [
+            ("openalex", lambda: research_search_backends.openalex_paper_search(provider_query, max_results=max_results)),
+            ("arxiv", lambda: research_search_backends.arxiv_paper_search(provider_query, max_results=max_results)),
+            ("searxng", lambda: research_search_backends.searxng_search(provider_query, max_results=max_results, category="science")),
+            ("ddgs", lambda: research_search_backends.ddgs_search(provider_query, max_results=max_results)),
+        ],
+        max_results=max_results,
+    )
+    if provider_payload.get("results"):
+        return _render_provider_payload("论文公开搜索", provider_payload)
     query = f'{topic_text} paper OR preprint OR benchmark OR survey{year}{_domain_query(domains)}'
     return public_web_search(query=query, max_results=max_results, allowed_domains=",".join(domains))
 
@@ -178,6 +266,18 @@ def project_search(topic: str, max_results: int = 8, language: str = "", include
         return "[错误] 项目搜索主题不能为空"
     domains = _merge_domains(_PROJECT_DOMAINS, include_domains)
     language_hint = f" {str(language).strip()}" if str(language or "").strip() else ""
+    provider_query = f"{topic_text}{language_hint}".strip()
+    provider_payload = research_search_backends.collect_provider_results(
+        provider_query,
+        [
+            ("github_public_rest", lambda: research_search_backends.github_project_search(provider_query, max_results=max_results, language=str(language or "").strip())),
+            ("searxng", lambda: research_search_backends.searxng_search(provider_query, max_results=max_results)),
+            ("ddgs", lambda: research_search_backends.ddgs_search(provider_query, max_results=max_results)),
+        ],
+        max_results=max_results,
+    )
+    if provider_payload.get("results"):
+        return _render_provider_payload("项目公开搜索", provider_payload)
     query = f'{topic_text}{language_hint} open source project repository package docs{_domain_query(domains)}'
     return public_web_search(query=query, max_results=max_results, allowed_domains=",".join(domains))
 
@@ -188,6 +288,18 @@ def news_search(topic: str, max_results: int = 8, date_hint: str = "") -> str:
     if not topic_text:
         return "[错误] 新闻搜索主题不能为空"
     date_part = f" {str(date_hint).strip()}" if str(date_hint or "").strip() else " 2026"
+    provider_query = f"{topic_text}{date_part}".strip()
+    provider_payload = research_search_backends.collect_provider_results(
+        provider_query,
+        [
+            ("google_news_rss", lambda: research_search_backends.google_news_rss_search(provider_query, max_results=max_results)),
+            ("searxng", lambda: research_search_backends.searxng_search(provider_query, max_results=max_results, category="news")),
+            ("ddgs", lambda: research_search_backends.ddgs_search(provider_query, max_results=max_results, kind="news")),
+        ],
+        max_results=max_results,
+    )
+    if provider_payload.get("results"):
+        return _render_provider_payload("新闻公开搜索", provider_payload)
     query = f'{topic_text} news latest analysis{date_part}{_domain_query(_NEWS_DOMAINS)}'
     return public_web_search(query=query, max_results=max_results, allowed_domains=",".join(_NEWS_DOMAINS))
 

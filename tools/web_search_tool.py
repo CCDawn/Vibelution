@@ -679,6 +679,20 @@ def _read_response_text(response: httpx.Response) -> str:
 
 
 def _extract_plain_text(document: str) -> str:
+    try:
+        import trafilatura
+
+        extracted = trafilatura.extract(
+            document,
+            include_comments=False,
+            include_tables=True,
+            favor_precision=True,
+        )
+        if extracted and extracted.strip():
+            return re.sub(r"\n\s*\n\s*", "\n\n", extracted.strip())
+    except Exception:
+        pass
+
     text = re.sub(r"<!--.*?-->", " ", document, flags=re.DOTALL)
     text = re.sub(r"<script[^>]*>.*?</script>", " ", text, flags=re.DOTALL | re.IGNORECASE)
     text = re.sub(r"<style[^>]*>.*?</style>", " ", text, flags=re.DOTALL | re.IGNORECASE)
