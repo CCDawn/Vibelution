@@ -496,7 +496,9 @@ button.summaryCard:disabled {
 
 .fileCopyButton strong,
 .commitItem strong {
+  display: block;
   min-width: 0;
+  max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -582,6 +584,7 @@ button.summaryCard:disabled {
 .commitItem {
   display: grid;
   gap: 6px;
+  min-width: 0;
   width: 100%;
   padding: 9px;
   border: 1px solid var(--border-soft);
@@ -600,9 +603,14 @@ button.summaryCard:disabled {
 
 .manualCommitPanel {
   display: grid;
+  align-content: start;
   gap: 9px;
+  min-height: 0;
+  max-height: min(100%, calc(100dvh - 190px));
+  overflow: auto;
   padding: 0 0 10px;
   border-bottom: 1px solid var(--border-soft);
+  scrollbar-width: thin;
 }
 
 .commitScopeBox {
@@ -738,7 +746,7 @@ button.summaryCard:disabled {
 }
 
 .promptTemplateField textarea {
-  min-height: 118px;
+  min-height: 86px;
   font-family: var(--font-mono);
   font-size: 0.76rem;
 }
@@ -765,10 +773,25 @@ button.summaryCard:disabled {
   white-space: nowrap;
 }
 
+.modelActionRow {
+  grid-template-columns: auto;
+  justify-content: end;
+}
+
 .commitActions {
   display: grid;
-  grid-template-columns: 1fr;
+  grid-template-columns: repeat(2, max-content);
   gap: 8px;
+  justify-content: end;
+  min-width: 0;
+}
+
+.commitActions .secondaryButton,
+.commitActions .primaryButton {
+  width: fit-content;
+  min-width: 112px;
+  max-width: 100%;
+  white-space: nowrap;
 }
 
 .secondaryButton,
@@ -935,7 +958,7 @@ button.summaryCard:disabled {
   .workspace {
     grid-template-rows: none;
     gap: 14px;
-    min-height: 720px;
+    min-height: 0;
   }
 
   .commitPanel {
@@ -947,6 +970,8 @@ button.summaryCard:disabled {
 
   .manualCommitPanel {
     grid-row: auto;
+    max-height: none;
+    overflow: visible;
     padding: 0 0 14px;
     border-right: 0;
     border-bottom: 1px solid var(--border-soft);
