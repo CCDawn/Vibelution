@@ -792,6 +792,11 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("SOURCE_COLLECTION_STAGE_WRITEBACK_SYNC_GRACE_MS");
     expect(routeSource).toContain("sourceCollectionStageSyncUntilMs");
     expect(routeSource).toContain("sourceCollectionStageWritebackSyncActive");
+    expect(routeSource).toContain("sourceCollectionPendingStageTaskIds");
+    expect(routeSource).toContain("sourceCollectionPendingStageTaskIdList");
+    expect(routeSource).toContain("sourceCollectionStageWritebackAwaitingTask");
+    expect(routeSource).toContain("setSourceCollectionPendingStageTaskIds");
+    expect(routeSource).toContain("payload.taskId");
     expect(routeSource).toContain("正在同步 Agent 结果");
     expect(routeSource).toContain("Syncing Agent result");
     expect(routeSource).toContain("refetchInterval: (query) =>");

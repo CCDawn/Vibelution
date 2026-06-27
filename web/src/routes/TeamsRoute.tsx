@@ -4606,6 +4606,18 @@ export function TeamsRoute({
     onSuccess: (payload, variables) => {
       setSelectedSourceCollectionRunId(payload.runId);
       setSourceCollectionStageSyncUntilMs(Date.now() + SOURCE_COLLECTION_STAGE_WRITEBACK_SYNC_GRACE_MS);
+      if (payload.taskId) {
+        setSourceCollectionPendingStageTaskIds((current) => {
+          const currentStageTaskIds = current[variables.stageId] ?? [];
+          if (currentStageTaskIds.includes(payload.taskId)) {
+            return current;
+          }
+          return {
+            ...current,
+            [variables.stageId]: [...currentStageTaskIds, payload.taskId],
+          };
+        });
+      }
       void chatWorkspaceCache.afterDirectTurnAccepted(payload.sessionId);
       void queryClient.invalidateQueries({ queryKey: researchStageRoundStatusQueryKey(variables.teamId) });
       void queryClient.invalidateQueries({ queryKey: sourceCollectionSummaryQueryPrefix(variables.teamId) });
