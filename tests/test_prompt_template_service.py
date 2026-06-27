@@ -22,6 +22,10 @@ def test_prompt_template_registry_repairs_research_defaults(tmp_path, monkeypatc
 
     broad = next(item for item in payload["templates"] if item["promptTemplateId"] == "prompt-research-broad")
     assert {
+        "prompt-ai-search-scope-lead",
+        "prompt-ai-search-global-primary-sources",
+        "prompt-ai-search-cn-primary-sources",
+        "prompt-ai-search-signal-quality-gate",
         "prompt-research-ceo",
         "prompt-research-organization-advisor",
         "prompt-research-capability-steward",
@@ -34,6 +38,7 @@ def test_prompt_template_registry_repairs_research_defaults(tmp_path, monkeypatc
         "prompt-challenge-cup-source-acquisition",
         "prompt-challenge-cup-content-extraction",
         "prompt-challenge-cup-source-quality",
+        "prompt-challenge-cup-candidate-graph",
         "prompt-knowledge-expansion-source-intake",
         "prompt-knowledge-expansion-content-extraction",
         "prompt-knowledge-expansion-source-quality",
@@ -107,16 +112,52 @@ def test_prompt_template_registry_repairs_research_defaults(tmp_path, monkeypatc
     assert knowledge_graph["metadata"]["roleKey"] == "knowledge_expansion_candidate_graph"
     assert "候选关系" in knowledge_graph["content"]
     assert "不写 official graph" in knowledge_graph["content"]
+    challenge_graph = prompt_template_service.get_prompt_template("prompt-challenge-cup-candidate-graph")
+    assert challenge_graph is not None
+    assert challenge_graph["metadata"]["roleKey"] == "candidate_graph"
+    assert _contains_tool_name(challenge_graph["content"], "source_collection_context_tool")
+    assert _contains_tool_name(challenge_graph["content"], "source_collection_stage_writeback_tool")
+    assert "不写 official graph" in challenge_graph["content"]
     coordinator_detail = prompt_template_service.get_prompt_template("prompt-challenge-cup-coordinator")
     assert coordinator_detail is not None
     assert coordinator_detail["category"] == "chat"
-    assert "不具备直接联网搜索" in coordinator_detail["content"]
+    assert "不直接执行公开搜索" in coordinator_detail["content"]
+    assert not _contains_tool_name(coordinator_detail["content"], "batch_web_search_tool")
+    assert not _contains_tool_name(coordinator_detail["content"], "web_fetch_tool")
+    operation_chat = prompt_template_service.get_prompt_template("prompt-chat-operation-default")
+    assert operation_chat is not None
+    assert operation_chat["category"] == "chat"
+    assert operation_chat["metadata"]["roleKey"] == "operation_chat"
+    assert "默认操作型会话 Agent" in operation_chat["content"]
+    assert "rg" in operation_chat["content"]
+    assert _contains_tool_name(operation_chat["content"], "apply_patch_tool")
+    assert _contains_tool_name(operation_chat["content"], "run_test_for_tool")
+    search_scope = prompt_template_service.get_prompt_template("prompt-ai-search-scope-lead")
+    assert search_scope is not None
+    assert search_scope["metadata"]["roleKey"] == "ai_search_scope_lead"
+    assert "source tier" in search_scope["content"]
+    assert "[搜索质量不足]" in search_scope["content"]
+    cn_sources = prompt_template_service.get_prompt_template("prompt-ai-search-cn-primary-sources")
+    assert cn_sources is not None
+    assert cn_sources["metadata"]["roleKey"] == "cn_primary_sources"
+    assert "中国官方源" in cn_sources["content"]
+    assert not _contains_tool_name(cn_sources["content"], "paper_search_tool")
+    signal_gate = prompt_template_service.get_prompt_template("prompt-ai-search-signal-quality-gate")
+    assert signal_gate is not None
+    assert signal_gate["metadata"]["roleKey"] == "signal_quality_gate"
+    assert "不得把社区信号当成事实结论" in signal_gate["content"]
     assert (tmp_path / "workspace" / "agent_config" / "prompt_templates.json").exists()
     assert (tmp_path / "workspace" / "prompts" / "research" / "ceo.md").exists()
     assert (tmp_path / "workspace" / "prompts" / "research" / "organization_advisor.md").exists()
     assert (tmp_path / "workspace" / "prompts" / "research" / "capability_steward.md").exists()
     assert (tmp_path / "workspace" / "prompts" / "research" / "challenge_cup_data_discovery.md").exists()
+    assert (tmp_path / "workspace" / "prompts" / "research" / "challenge_cup_candidate_graph.md").exists()
     assert (tmp_path / "workspace" / "prompts" / "research" / "knowledge_expansion_source_intake.md").exists()
+    supervised_baseline = prompt_template_service.get_prompt_template("prompt-supervised-baseline")
+    assert supervised_baseline is not None
+    assert supervised_baseline["metadata"]["builtinContentVersion"] == prompt_template_service.CHALLENGE_CUP_STAGE_TASK_PROMPT_VERSION
+    assert "当前默认无工具权限" in supervised_baseline["content"]
+    assert not _contains_tool_name(supervised_baseline["content"], "open_evolution_transaction_tool")
 
 
 def test_prompt_template_repair_upgrades_builtin_challenge_stage_prompt_content(tmp_path, monkeypatch):
@@ -140,6 +181,9 @@ def test_prompt_template_repair_upgrades_builtin_challenge_stage_prompt_content(
     assert "source_collection_stage_session_task" in detail["content"]
     assert "source_collection_stage_writeback_tool" in detail["content"]
     assert "[搜索质量不足]" in detail["content"]
+    source_content = (tmp_path / "workspace" / "prompts" / "research" / "challenge_cup_data_discovery.md").read_text(encoding="utf-8")
+    assert "source_collection_stage_session_task" in source_content
+    assert "没有阶段任务协议" not in source_content
 
 
 def test_source_quality_prompt_requires_candidate_paging_and_structured_decisions(tmp_path, monkeypatch):
@@ -254,8 +298,9 @@ def test_build_agent_prompt_template_context_reports_block_and_missing_reasons(t
     assert supervised["reason"] == ""
     assert "PromptTemplateId: prompt-supervised-baseline" in supervised["contextBlock"]
     assert "监督进化基线 Agent" in supervised["contextBlock"]
-    assert "open_evolution_transaction_tool" in supervised["contextBlock"]
-    assert "close_evolution_transaction_tool" in supervised["contextBlock"]
+    assert "open_evolution_transaction_tool" not in supervised["contextBlock"]
+    assert "close_evolution_transaction_tool" not in supervised["contextBlock"]
+    assert "当前默认无工具权限" in supervised["contextBlock"]
     assert supervised["sourcePath"] == ""
     assert supervised["sourceExists"] is False
     judge = prompt_template_service.get_prompt_template("prompt-supervised-judge")

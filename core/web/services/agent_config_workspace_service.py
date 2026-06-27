@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import re
 import threading
 from collections import defaultdict
 from datetime import datetime, timezone
@@ -26,7 +27,7 @@ from .agent_directory_service import normalize_agent_llm_bindings
 from .agent_directory_service import registry_path
 from .agent_directory_service import session_agent_visibility
 from .agent_mode_binding_service import get_mode_bindings_payload, mode_binding_path
-from .prompt_template_service import list_prompt_templates, prompt_template_path
+from .prompt_template_service import get_prompt_template, list_prompt_templates, prompt_template_path
 from .runtime_scene_service import record_runtime_scene_event
 
 
@@ -96,6 +97,19 @@ RESEARCH_SOURCE_ROLE_KEYS = {
     "cn_primary_sources",
     "signal_quality_gate",
 }
+TOOL_NAME_PATTERN = re.compile(r"\b[a-z][a-z0-9_]*_tool\b")
+TOOL_NEGATION_PREFIXES = (
+    "不调用",
+    "不要调用",
+    "不得调用",
+    "禁止调用",
+    "不使用",
+    "不要使用",
+    "不得使用",
+    "禁止使用",
+    "不具备",
+    "不能使用",
+)
 WORKSPACE_CACHE_TTL_SECONDS = 3.0
 _WORKSPACE_CACHE_LOCK = threading.Lock()
 _WORKSPACE_CACHE_PAYLOAD: dict[str, Any] | None = None
@@ -451,6 +465,41 @@ def _prompt_template_has_runtime_content(prompt: dict[str, Any]) -> bool:
         return bool(str(prompt.get("contentPreview") or "").strip())
 
 
+def _prompt_template_runtime_content(prompt_template_id: str, prompt: dict[str, Any]) -> str:
+    content = str(prompt.get("content") or "")
+    if content:
+        return content
+    preview = str(prompt.get("contentPreview") or "")
+    try:
+        if int(prompt.get("contentLength") or 0) <= len(preview):
+            return preview
+    except (TypeError, ValueError):
+        if preview:
+            return preview
+    try:
+        detail = get_prompt_template(prompt_template_id)
+    except Exception:
+        detail = None
+    if isinstance(detail, dict):
+        return str(detail.get("content") or detail.get("contentPreview") or "")
+    return preview
+
+
+def _prompt_mentioned_required_tools(content: str) -> list[str]:
+    mentions: list[str] = []
+    seen: set[str] = set()
+    text = str(content or "")
+    for match in TOOL_NAME_PATTERN.finditer(text):
+        tool_name = match.group(0)
+        prefix = text[max(0, match.start() - 12): match.start()]
+        if any(item in prefix for item in TOOL_NEGATION_PREFIXES):
+            continue
+        if tool_name not in seen:
+            mentions.append(tool_name)
+            seen.add(tool_name)
+    return mentions
+
+
 def _agent_has_system_fixed_role(agent: dict[str, Any]) -> bool:
     metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
     if bool(metadata.get("fixedRole")):
@@ -561,6 +610,16 @@ def _derive_health(
                         f"{prompt_template_id} 指向的 sourcePath 不存在。",
                     )
                 )
+            if str(agent.get("primaryMode") or "").strip() != "chat" and prompt_template_id == "prompt-chat-default":
+                issues.append(
+                    _agent_issue(
+                        agent,
+                        "warning",
+                        "non_chat_agent_uses_default_chat_prompt",
+                        "非会话 Agent 使用默认聊天提示词",
+                        "固定角色 Agent 应绑定角色专用提示词模板；prompt-chat-default 只适合作为普通聊天兼容入口。",
+                    )
+                )
             if not _prompt_template_has_runtime_content(prompt) and prompt_template_id != "prompt-chat-default":
                 issues.append(
                     _agent_issue(
@@ -571,6 +630,28 @@ def _derive_health(
                         f"{prompt_template_id} 没有可注入的模板内容；运行时只会使用 Agent 身份档案，Prompt Template 段为空。",
                     )
                 )
+            prompt_content = _prompt_template_runtime_content(prompt_template_id, prompt)
+            mentioned_required_tools = _prompt_mentioned_required_tools(prompt_content)
+            if mentioned_required_tools:
+                tool_policy = agent.get("toolPolicy") if isinstance(agent.get("toolPolicy"), dict) else {}
+                allowed_tool_set = {
+                    str(item or "").strip()
+                    for item in list(tool_policy.get("allowedTools") or [])
+                    if str(item or "").strip()
+                }
+                missing_prompt_tools = [item for item in mentioned_required_tools if item not in allowed_tool_set]
+                if missing_prompt_tools:
+                    issues.append(
+                        _agent_issue(
+                            agent,
+                            "warning",
+                            "prompt_mentions_unallowed_tool",
+                            "提示词引用了未授权工具",
+                            "提示词要求或默认调用的工具未在 ToolPolicy.allowedTools 中授权："
+                            + "、".join(missing_prompt_tools[:8])
+                            + "。",
+                        )
+                    )
 
         if not str(agent.get("directSessionId") or "").strip():
             issues.append(_agent_issue(agent, "warning", "missing_direct_session", "缺少直连会话", "群聊和主动唤醒需要一个可恢复的 directSessionId。"))

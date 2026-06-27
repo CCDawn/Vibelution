@@ -2576,10 +2576,20 @@ def _resolve_participants(session_ids: list[str] | None) -> list[dict[str, Any]]
     by_id = {str(item.get("id") or "").strip(): item for item in summaries}
     requested = [str(item or "").strip() for item in list(session_ids or []) if str(item or "").strip()]
     if session_ids is not None:
+        _hydrate_requested_session_details(by_id, requested)
         return [_participant_from_session(by_id[session_id]) for session_id in _dedupe_requested_session_ids(requested, by_id)]
     if not requested:
         requested = [str(item.get("id") or "").strip() for item in summaries if str(item.get("id") or "").strip()]
     return [_participant_from_session(by_id[session_id]) for session_id in _dedupe_requested_session_ids(requested, by_id)]
+
+
+def _hydrate_requested_session_details(by_id: dict[str, dict[str, Any]], requested: list[str]) -> None:
+    for session_id in requested:
+        if not session_id or session_id in by_id:
+            continue
+        detail = session_service.get_session_detail(session_id)
+        if isinstance(detail, dict) and str(detail.get("id") or "").strip() == session_id:
+            by_id[session_id] = detail
 
 
 def _dedupe_requested_session_ids(requested: list[str], by_id: dict[str, dict[str, Any]]) -> list[str]:
