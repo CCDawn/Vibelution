@@ -8106,7 +8106,9 @@ def submit_steward_pack_to_knowledge_ingestion(team_id: str, candidate_id: str, 
     normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
     normalized_candidate_id = _normalize_required_id(candidate_id, "Candidate id is required.")
     team_service.get_team(normalized_team_id)
-    knowledge_base_id = _normalize_required_id(payload.get("knowledgeBaseId"), "Knowledge base id is required.")
+    knowledge_base_id = _trim_text(payload.get("knowledgeBaseId"), max_length=256)
+    if not knowledge_base_id:
+        raise TeamWorkflowOrchestrationError("Knowledge base id is required.")
     proposed_by_agent_id = _normalize_required_id(payload.get("proposedByAgentId"), "Proposed by Agent id is required.")
     central_source_id = _trim_text(payload.get("centralSourceId"), max_length=160)
 
@@ -8317,7 +8319,9 @@ def review_steward_pack_knowledge_ingestion(team_id: str, candidate_id: str, pay
     normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
     normalized_candidate_id = _normalize_required_id(candidate_id, "Candidate id is required.")
     team_service.get_team(normalized_team_id)
-    knowledge_base_id = _normalize_required_id(payload.get("knowledgeBaseId"), "Knowledge base id is required.")
+    knowledge_base_id = _trim_text(payload.get("knowledgeBaseId"), max_length=256)
+    if not knowledge_base_id:
+        raise TeamWorkflowOrchestrationError("Knowledge base id is required.")
     reviewed_by_agent_id = _normalize_required_id(payload.get("reviewedByAgentId"), "Reviewed by Agent id is required.")
     decision = _normalize_steward_review_decision(payload.get("decision"))
     resolution_note = _trim_text(payload.get("resolutionNote"), max_length=2000)
@@ -8677,6 +8681,7 @@ def _notify_knowledge_steward_for_ingestion(
     knowledge_base_id: str,
     target_domain: str,
     wake_target: bool,
+    scoped_knowledge_base_id: str = "",
 ) -> dict[str, Any]:
     activation = {
         "status": "disabled",
@@ -8691,6 +8696,7 @@ def _notify_knowledge_steward_for_ingestion(
             "teamId": team_id,
             "stewardPackCandidateId": steward_candidate_id,
             "knowledgeBaseId": knowledge_base_id,
+            "scopedKnowledgeBaseId": scoped_knowledge_base_id,
             "targetDomain": target_domain,
         },
     }
@@ -8716,6 +8722,7 @@ def _notify_knowledge_steward_for_ingestion(
             f"团队: {team_id}",
             f"待入库知识包: {steward_candidate_id}",
             f"目标知识库: {knowledge_base_id}",
+            f"目标知识库唯一定位: {scoped_knowledge_base_id or knowledge_base_id}",
             f"知识域: {target_domain}",
             "",
             "请作为知识库管理员 Agent 处理这个团队已提炼知识包：",
@@ -8889,6 +8896,9 @@ def _persist_knowledge_ingestion_work_run(
     summary: str,
     active: bool,
     result: dict[str, Any] | None = None,
+    completion_steps: list[dict[str, Any]] | None = None,
+    flow_visualization: dict[str, Any] | None = None,
+    source_run_id: str = "",
     error: str = "",
     error_type: str = "",
 ) -> dict[str, Any]:
@@ -8905,6 +8915,23 @@ def _persist_knowledge_ingestion_work_run(
         "currentTask": _trim_text(summary, max_length=500),
         "updatedAt": now,
     }
+    result_source_run_id = (result or {}).get("sourceRunId") if isinstance(result, dict) else ""
+    normalized_source_run_id = _trim_text(source_run_id or result_source_run_id, max_length=160)
+    if normalized_source_run_id:
+        snapshot["sourceRunId"] = normalized_source_run_id
+    normalized_completion_steps = _knowledge_collection_completion_steps_for_snapshot(result, completion_steps)
+    if normalized_completion_steps:
+        snapshot["completionSteps"] = normalized_completion_steps
+    if isinstance(flow_visualization, dict):
+        snapshot["flowVisualization"] = flow_visualization
+    elif normalized_completion_steps:
+        snapshot["flowVisualization"] = _knowledge_collection_completion_flow_visualization(
+            status,
+            steps=normalized_completion_steps,
+            result=result,
+            error=error,
+            error_type=error_type,
+        )
     if not active:
         snapshot["finishedAt"] = now
     if isinstance(result, dict):
@@ -8913,6 +8940,7 @@ def _persist_knowledge_ingestion_work_run(
             "status": _trim_text(result.get("status"), max_length=80),
             "formalKnowledgeItemCount": _source_collection_count(result_summary.get("formalKnowledgeItemCount")),
             "knowledgeBaseId": _trim_text(result_summary.get("knowledgeBaseId"), max_length=128),
+            "scopedKnowledgeBaseId": _trim_text(result_summary.get("scopedKnowledgeBaseId"), max_length=256),
             "stewardPackCandidateId": _trim_text(result_summary.get("stewardPackCandidateId"), max_length=160),
         }
     if error:
@@ -8993,6 +9021,209 @@ def _knowledge_collection_completion_step(
     if error_type:
         step["errorType"] = _trim_text(error_type, max_length=160)
     return step
+
+
+_KNOWLEDGE_COLLECTION_COMPLETION_FLOW_STAGES: tuple[dict[str, Any], ...] = (
+    {
+        "stageId": "collection",
+        "label": "搜索资料",
+        "agentRole": "source_collection",
+        "stepIds": {"remaining_search"},
+    },
+    {
+        "stageId": "candidate",
+        "label": "资料提炼",
+        "agentRole": "content_extraction",
+        "stepIds": {"candidate_extraction"},
+    },
+    {
+        "stageId": "screening",
+        "label": "资料审查",
+        "agentRole": "source_quality",
+        "stepIds": {"source_review"},
+    },
+    {
+        "stageId": "graph",
+        "label": "候选图谱",
+        "agentRole": "candidate_graph",
+        "stepIds": {"candidate_graph"},
+    },
+    {
+        "stageId": "memory",
+        "label": "知识库管理员入库审核",
+        "agentRole": "knowledge_steward",
+        "stepIds": {
+            "steward_pack",
+            "source_gate",
+            "knowledge_proposal",
+            "knowledge_ingestion",
+            "official_knowledge",
+            "knowledge_steward_request",
+        },
+    },
+)
+
+
+def _knowledge_base_raw_id(value: Any) -> str:
+    text = _trim_text(value, max_length=256)
+    parts = text.split(":", 2)
+    if len(parts) == 3 and parts[0] in {"team", "agent"} and parts[1] and parts[2]:
+        return parts[2]
+    return text
+
+
+def _knowledge_base_scoped_id_for_team(team_id: str, value: Any, base: dict[str, Any] | None = None) -> str:
+    if isinstance(base, dict):
+        scoped = _trim_text(base.get("scopedKnowledgeBaseId"), max_length=256)
+        if scoped:
+            return scoped
+    text = _trim_text(value, max_length=256)
+    if not text:
+        return ""
+    parts = text.split(":", 2)
+    if len(parts) == 3 and parts[0] in {"team", "agent"} and parts[1] and parts[2]:
+        return text
+    return f"team:{team_id}:{text}"
+
+
+def _knowledge_collection_completion_steps_for_snapshot(
+    result: dict[str, Any] | None = None,
+    steps: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    payload = result if isinstance(result, dict) else {}
+    normalized_steps = [dict(item) for item in list(steps or []) if isinstance(item, dict)]
+    if not normalized_steps:
+        normalized_steps = [dict(item) for item in list(payload.get("completionSteps") or []) if isinstance(item, dict)]
+    if not normalized_steps and payload:
+        normalized_steps = _knowledge_collection_completion_steps_from_result(payload)
+    ingestion = payload.get("ingestion") if isinstance(payload.get("ingestion"), dict) else {}
+    ingestion_steps = [dict(item) for item in list(ingestion.get("steps") or []) if isinstance(item, dict)]
+    seen_stage_ids = {
+        _trim_text(item.get("stageId"), max_length=120)
+        for item in normalized_steps
+        if _trim_text(item.get("stageId"), max_length=120)
+    }
+    for step in ingestion_steps:
+        stage_id = _trim_text(step.get("stageId"), max_length=120)
+        if stage_id and stage_id not in seen_stage_ids:
+            normalized_steps.append(step)
+            seen_stage_ids.add(stage_id)
+    return normalized_steps[:48]
+
+
+def _knowledge_collection_flow_step_status(value: Any) -> str:
+    status = _trim_text(value, max_length=120).lower()
+    if status in {"failed", "blocked", "error", "agent_notification_failed"} or status.startswith("failed"):
+        return "failed"
+    if status in {"running", "in_progress", "queued", "started"} or status.endswith("_running"):
+        return "running"
+    if status in {
+        "pending",
+        "pending_review",
+        "needs_review",
+        "needs_revision",
+        "precheck_ready",
+        "agent_notified",
+        "agent_wake_pending",
+        "message_written",
+        "agent_wake_started",
+    }:
+        return "pending"
+    if status in {"completed", "complete", "applied", "approved", "official_synced", "synced", "ready"}:
+        return "completed"
+    if status == "skipped":
+        return "skipped"
+    return status or "queued"
+
+
+def _knowledge_collection_flow_node_status(step_statuses: list[str]) -> str:
+    if not step_statuses:
+        return "queued"
+    if any(status == "failed" for status in step_statuses):
+        return "failed"
+    if any(status == "running" for status in step_statuses):
+        return "running"
+    if any(status == "pending" for status in step_statuses):
+        return "pending"
+    if any(status == "completed" for status in step_statuses):
+        return "completed"
+    if all(status == "skipped" for status in step_statuses):
+        return "skipped"
+    return step_statuses[-1] or "queued"
+
+
+def _knowledge_collection_completion_flow_visualization(
+    status: str,
+    *,
+    steps: list[dict[str, Any]] | None = None,
+    result: dict[str, Any] | None = None,
+    error: str = "",
+    error_type: str = "",
+) -> dict[str, Any]:
+    normalized_steps = _knowledge_collection_completion_steps_for_snapshot(result, steps)
+    steps_by_stage_id: dict[str, list[dict[str, Any]]] = {}
+    for step in normalized_steps:
+        stage_id = _trim_text(step.get("stageId"), max_length=120)
+        if not stage_id:
+            continue
+        steps_by_stage_id.setdefault(stage_id, []).append(step)
+    nodes: list[dict[str, Any]] = []
+    current_stage_id = ""
+    for stage in _KNOWLEDGE_COLLECTION_COMPLETION_FLOW_STAGES:
+        stage_step_ids = set(stage["stepIds"])
+        stage_steps = [
+            step
+            for step_id, items in steps_by_stage_id.items()
+            if step_id in stage_step_ids
+            for step in items
+        ]
+        step_statuses = [_knowledge_collection_flow_step_status(step.get("status")) for step in stage_steps]
+        node_status = _knowledge_collection_flow_node_status(step_statuses)
+        node_error_type = next(
+            (_trim_text(step.get("errorType"), max_length=160) for step in stage_steps if _trim_text(step.get("errorType"), max_length=160)),
+            "",
+        )
+        node = {
+            "stageId": stage["stageId"],
+            "label": stage["label"],
+            "agentRole": stage["agentRole"],
+            "status": node_status,
+            "inputCount": sum(_source_collection_count(step.get("inputCount")) for step in stage_steps),
+            "outputCount": sum(_source_collection_count(step.get("outputCount")) for step in stage_steps),
+            "artifactIds": [
+                _trim_text(step.get("artifactId"), max_length=160)
+                for step in stage_steps
+                if _trim_text(step.get("artifactId"), max_length=160)
+            ][:12],
+            "detail": next(
+                (_trim_text(step.get("detail"), max_length=300) for step in reversed(stage_steps) if _trim_text(step.get("detail"), max_length=300)),
+                "",
+            ),
+            "errorType": node_error_type,
+        }
+        if node_status in {"running", "failed", "pending"} and not current_stage_id:
+            current_stage_id = node["stageId"]
+        nodes.append(node)
+    flow_status = _trim_text(status, max_length=120) or "unknown"
+    if flow_status == "running" and not any(node["status"] == "running" for node in nodes):
+        for node in nodes:
+            if node["status"] not in {"completed", "skipped"}:
+                node["status"] = "running"
+                current_stage_id = node["stageId"]
+                break
+    if flow_status == "completed":
+        for node in nodes:
+            if node["status"] == "queued":
+                node["status"] = "completed"
+    return {
+        "kind": "knowledge_collection_completion",
+        "schemaVersion": SCHEMA_VERSION,
+        "status": flow_status,
+        "currentStageId": current_stage_id,
+        "nodes": nodes,
+        "error": _trim_text(error, max_length=500),
+        "errorType": _trim_text(error_type, max_length=160),
+    }
 
 
 def _knowledge_collection_completion_log_payload(
@@ -9112,6 +9343,8 @@ def start_knowledge_collection_completion_background(team_id: str, payload: dict
             )
             return _knowledge_ingestion_background_response(normalized_team_id, active_snapshot, already_running=True)
         run_id = _new_record_id("knowledge-completion")
+        initial_steps = [_knowledge_collection_completion_step("remaining_search", "running")]
+        initial_flow = _knowledge_collection_completion_flow_visualization("running", steps=initial_steps)
         snapshot = _persist_knowledge_ingestion_work_run(
             normalized_team_id,
             run_id,
@@ -9119,6 +9352,9 @@ def start_knowledge_collection_completion_background(team_id: str, payload: dict
             current_phase="running",
             summary="知识搜集一键完成已进入后台执行：搜索→提炼→审查→候选图→入库。",
             active=True,
+            completion_steps=initial_steps,
+            flow_visualization=initial_flow,
+            source_run_id=_trim_text(request_payload.get("runId") or request_payload.get("sourceRunId"), max_length=160),
         )
     worker = threading.Thread(
         target=_run_knowledge_collection_completion_background,
@@ -9277,11 +9513,13 @@ def run_knowledge_collection_completion(team_id: str, payload: dict[str, Any] | 
             "extractedCandidateCount": _source_collection_count((extraction or {}).get("importedCount")),
             "formalKnowledgeItemCount": _source_collection_count(ingestion_summary.get("formalKnowledgeItemCount")),
             "knowledgeBaseId": _trim_text(ingestion_summary.get("knowledgeBaseId"), max_length=160),
+            "scopedKnowledgeBaseId": _trim_text(ingestion_summary.get("scopedKnowledgeBaseId"), max_length=256),
         },
     }
 
 
 def _run_knowledge_collection_completion_background(team_id: str, run_id: str, payload: dict[str, Any]) -> None:
+    running_steps = [_knowledge_collection_completion_step("remaining_search", "running")]
     try:
         _persist_knowledge_ingestion_work_run(
             team_id,
@@ -9290,9 +9528,22 @@ def _run_knowledge_collection_completion_background(team_id: str, run_id: str, p
             current_phase="running",
             summary="知识搜集一键完成正在执行：搜索、提炼、审查、候选图谱和入库审核。",
             active=True,
+            completion_steps=running_steps,
+            flow_visualization=_knowledge_collection_completion_flow_visualization("running", steps=running_steps),
+            source_run_id=_trim_text(payload.get("runId") or payload.get("sourceRunId"), max_length=160),
         )
         result = run_knowledge_collection_completion(team_id, payload)
     except Exception as exc:
+        failure_payload = getattr(exc, "completion_log_payload", {})
+        if not isinstance(failure_payload, dict):
+            failure_payload = {}
+        failure_steps = _knowledge_collection_completion_steps_for_snapshot(steps=[
+            item for item in list(failure_payload.get("steps") or []) if isinstance(item, dict)
+        ])
+        failure_source_run_id = _trim_text(
+            failure_payload.get("sourceRunId") or payload.get("runId") or payload.get("sourceRunId"),
+            max_length=160,
+        )
         _persist_knowledge_ingestion_work_run(
             team_id,
             run_id,
@@ -9300,6 +9551,14 @@ def _run_knowledge_collection_completion_background(team_id: str, run_id: str, p
             current_phase="failed",
             summary=_trim_text(exc, max_length=300) or "知识搜集一键完成失败。",
             active=False,
+            completion_steps=failure_steps,
+            flow_visualization=_knowledge_collection_completion_flow_visualization(
+                "failed",
+                steps=failure_steps,
+                error=str(exc),
+                error_type=type(exc).__name__,
+            ),
+            source_run_id=failure_source_run_id,
             error=_trim_text(exc, max_length=500),
             error_type=type(exc).__name__,
         )
@@ -9326,6 +9585,7 @@ def _run_knowledge_collection_completion_background(team_id: str, run_id: str, p
     result_summary = result.get("summary") if isinstance(result.get("summary"), dict) else {}
     formal_count = _source_collection_count(result_summary.get("formalKnowledgeItemCount"))
     terminal_status = _trim_text(result.get("status"), max_length=80) or "completed"
+    completion_steps = _knowledge_collection_completion_steps_for_snapshot(result)
     _persist_knowledge_ingestion_work_run(
         team_id,
         run_id,
@@ -9338,6 +9598,13 @@ def _run_knowledge_collection_completion_background(team_id: str, run_id: str, p
         ),
         active=False,
         result=result,
+        completion_steps=completion_steps,
+        flow_visualization=_knowledge_collection_completion_flow_visualization(
+            "completed" if formal_count > 0 else terminal_status,
+            steps=completion_steps,
+            result=result,
+        ),
+        source_run_id=_trim_text(result.get("sourceRunId"), max_length=160),
     )
     _record_workflow_event(
         "knowledge_collection.completion_background_completed",
@@ -9594,14 +9861,21 @@ def run_knowledge_collection_ingestion(team_id: str, payload: dict[str, Any] | N
         artifact_id=steward_candidate_id,
     )
 
-    knowledge_base_id = _trim_text(payload.get("knowledgeBaseId"), max_length=128)
+    requested_knowledge_base_id = _trim_text(payload.get("knowledgeBaseId"), max_length=256)
+    knowledge_base_id = _knowledge_base_raw_id(requested_knowledge_base_id)
+    scoped_knowledge_base_id = _knowledge_base_scoped_id_for_team(normalized_team_id, requested_knowledge_base_id)
     knowledge_base: dict[str, Any] | None = None
-    if not knowledge_base_id:
+    if not scoped_knowledge_base_id:
         status_before_submit = get_knowledge_ingestion_status(normalized_team_id)
         existing_bases = [item for item in list(status_before_submit.get("knowledgeBases") or []) if isinstance(item, dict)]
         if existing_bases:
-            knowledge_base_id = str(existing_bases[0].get("knowledgeBaseId") or "")
             knowledge_base = existing_bases[0]
+            knowledge_base_id = _knowledge_base_raw_id(knowledge_base.get("knowledgeBaseId"))
+            scoped_knowledge_base_id = _knowledge_base_scoped_id_for_team(
+                normalized_team_id,
+                knowledge_base_id,
+                knowledge_base,
+            )
         elif auto_create_knowledge_base:
             try:
                 knowledge_base = team_knowledge_service.create_knowledge_base(
@@ -9610,17 +9884,22 @@ def run_knowledge_collection_ingestion(team_id: str, payload: dict[str, Any] | N
                     description="由 ai科学研究团队第一阶段一键入库流程创建。",
                     actor_agent_id=steward_agent_id,
                 )
-                knowledge_base_id = str(knowledge_base.get("knowledgeBaseId") or "")
+                knowledge_base_id = _knowledge_base_raw_id(knowledge_base.get("knowledgeBaseId"))
+                scoped_knowledge_base_id = _knowledge_base_scoped_id_for_team(
+                    normalized_team_id,
+                    knowledge_base_id,
+                    knowledge_base,
+                )
             except (team_knowledge_service.TeamKnowledgeError, team_knowledge_service.TeamKnowledgeNotFoundError) as exc:
                 raise TeamWorkflowOrchestrationError(f"Knowledge base auto-create failed: {exc}") from exc
-    if not knowledge_base_id:
+    if not scoped_knowledge_base_id:
         raise TeamWorkflowOrchestrationError("Knowledge base id is required before knowledge collection ingestion.")
 
     # 职责分离下让 coordinator/lead 审批：给该审批人补一条 per-base review 授权，
     # 对新建或既有知识库都生效，避免最终审批关因角色不在 REVIEW_ROLES 而无人可过。
     if auto_approve and reviewer_agent_id:
         try:
-            team_knowledge_service.ensure_knowledge_base_review_grant(knowledge_base_id, reviewer_agent_id)
+            team_knowledge_service.ensure_knowledge_base_review_grant(scoped_knowledge_base_id, reviewer_agent_id)
         except (team_knowledge_service.TeamKnowledgeError, team_knowledge_service.TeamKnowledgeNotFoundError) as exc:
             raise TeamWorkflowOrchestrationError(f"Knowledge review grant failed: {exc}") from exc
 
@@ -9633,7 +9912,7 @@ def run_knowledge_collection_ingestion(team_id: str, payload: dict[str, Any] | N
             normalized_team_id,
             steward_candidate_id,
             {
-                "knowledgeBaseId": knowledge_base_id,
+                "knowledgeBaseId": scoped_knowledge_base_id,
                 "proposedByAgentId": steward_agent_id,
             },
         )
@@ -9669,7 +9948,7 @@ def run_knowledge_collection_ingestion(team_id: str, payload: dict[str, Any] | N
                 normalized_team_id,
                 steward_candidate_id,
                 {
-                    "knowledgeBaseId": knowledge_base_id,
+                    "knowledgeBaseId": scoped_knowledge_base_id,
                     "proposedByAgentId": steward_agent_id,
                     "centralSourceId": central_source_id,
                 },
@@ -9694,7 +9973,7 @@ def run_knowledge_collection_ingestion(team_id: str, payload: dict[str, Any] | N
                 normalized_team_id,
                 steward_candidate_id,
                 {
-                    "knowledgeBaseId": knowledge_base_id,
+                    "knowledgeBaseId": scoped_knowledge_base_id,
                     "reviewedByAgentId": reviewer_agent_id,
                     "decision": "approved",
                     "resolutionNote": "一键入库流程通过资料审查、入库关系和知识库门禁后，由团队审批人批准入库。",
@@ -9720,6 +9999,7 @@ def run_knowledge_collection_ingestion(team_id: str, payload: dict[str, Any] | N
             requester_agent_id=requester_agent_id,
             steward_candidate_id=steward_candidate_id,
             knowledge_base_id=knowledge_base_id,
+            scoped_knowledge_base_id=scoped_knowledge_base_id,
             target_domain=target_domain,
             wake_target=wake_steward_agent,
         )
@@ -9760,6 +10040,7 @@ def run_knowledge_collection_ingestion(team_id: str, payload: dict[str, Any] | N
             "candidateGraphId": str(candidate_graph["candidateGraph"].get("candidateId") or ""),
             "stewardPackCandidateId": steward_candidate_id,
             "knowledgeBaseId": knowledge_base_id,
+            "scopedKnowledgeBaseId": scoped_knowledge_base_id,
             "formalKnowledgeItemCount": status_payload["summary"]["formalKnowledgeItemCount"],
             "autoSubmit": auto_submit,
             "autoReviewSource": auto_review_source,
@@ -9786,6 +10067,7 @@ def run_knowledge_collection_ingestion(team_id: str, payload: dict[str, Any] | N
             "candidateGraphEdgeCount": int(graph_summary.get("edgeCount") or 0),
             "stewardPackCandidateId": steward_candidate_id,
             "knowledgeBaseId": knowledge_base_id,
+            "scopedKnowledgeBaseId": scoped_knowledge_base_id,
             "formalKnowledgeItemCount": status_payload["summary"]["formalKnowledgeItemCount"],
             "autoSubmit": auto_submit,
             "autoReviewSource": auto_review_source,
@@ -9813,7 +10095,7 @@ def run_knowledge_collection_ingestion(team_id: str, payload: dict[str, Any] | N
         "reusedCandidateGraph": bool(candidate_graph.get("reusedCandidateGraph")),
         "reusedStewardPack": bool(precheck.get("reusedStewardPack")),
         "ingestionFingerprint": str(precheck.get("ingestionFingerprint") or candidate_graph.get("ingestionFingerprint") or ""),
-        "knowledgeBase": knowledge_base or {"knowledgeBaseId": knowledge_base_id},
+        "knowledgeBase": knowledge_base or {"knowledgeBaseId": knowledge_base_id, "scopedKnowledgeBaseId": scoped_knowledge_base_id},
         "statusSnapshot": status_payload,
         "summary": {
             "sourceCandidateCount": source_candidate_count,
@@ -9822,6 +10104,7 @@ def run_knowledge_collection_ingestion(team_id: str, payload: dict[str, Any] | N
             "candidateGraphEdgeCount": int(graph_summary.get("edgeCount") or 0),
             "stewardPackCandidateId": steward_candidate_id,
             "knowledgeBaseId": knowledge_base_id,
+            "scopedKnowledgeBaseId": scoped_knowledge_base_id,
             "formalKnowledgeItemCount": status_payload["summary"]["formalKnowledgeItemCount"],
             "knowledgeStewardInboxMessageId": str((knowledge_steward_activation or {}).get("messageId") or ""),
             "knowledgeStewardActivationStatus": activation_status,
@@ -10976,6 +11259,9 @@ def _knowledge_ingestion_knowledge_bases(knowledge_overview: dict[str, Any]) -> 
         bases.append(
             {
                 "knowledgeBaseId": str(base.get("knowledgeBaseId") or ""),
+                "scopedKnowledgeBaseId": str(base.get("scopedKnowledgeBaseId") or ""),
+                "ownerType": str(base.get("ownerType") or ""),
+                "ownerId": str(base.get("ownerId") or ""),
                 "name": str(base.get("name") or ""),
                 "status": str(base.get("status") or ""),
                 "stats": {

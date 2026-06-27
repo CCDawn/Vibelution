@@ -4615,6 +4615,9 @@ export type TeamWorkflowKnowledgeIngestionStatus = {
   };
   knowledgeBases: Array<{
     knowledgeBaseId: string;
+    scopedKnowledgeBaseId?: string;
+    ownerType?: string;
+    ownerId?: string;
     name: string;
     status: string;
     stats: TeamKnowledgeBase["stats"];
@@ -4634,16 +4637,47 @@ export type TeamWorkflowKnowledgeIngestionWorkRun = {
   status: string;
   currentPhase: string;
   teamId: string;
+  sourceRunId?: string;
   summary?: string;
   currentTask?: string;
   updatedAt?: string;
   finishedAt?: string;
   error?: string;
   errorType?: string;
+  completionSteps?: Array<{
+    stageId: string;
+    label?: string;
+    status: string;
+    inputCount?: number;
+    outputCount?: number;
+    detail?: string;
+    artifactId?: string;
+    errorType?: string;
+  }>;
+  flowVisualization?: {
+    kind: "knowledge_collection_completion" | string;
+    schemaVersion?: number;
+    status: string;
+    currentStageId?: string;
+    error?: string;
+    errorType?: string;
+    nodes: Array<{
+      stageId: string;
+      label: string;
+      agentRole: string;
+      status: string;
+      inputCount?: number;
+      outputCount?: number;
+      artifactIds?: string[];
+      detail?: string;
+      errorType?: string;
+    }>;
+  };
   result?: {
     status?: string;
     formalKnowledgeItemCount?: number;
     knowledgeBaseId?: string;
+    scopedKnowledgeBaseId?: string;
     stewardPackCandidateId?: string;
   };
 };
@@ -4673,6 +4707,7 @@ export type TeamWorkflowKnowledgeCollectionIngestionPayload = {
   ingestionFingerprint?: string;
   knowledgeBase: {
     knowledgeBaseId: string;
+    scopedKnowledgeBaseId?: string;
     [key: string]: unknown;
   } | null;
   statusSnapshot: TeamWorkflowKnowledgeIngestionStatus;
@@ -4683,6 +4718,7 @@ export type TeamWorkflowKnowledgeCollectionIngestionPayload = {
     candidateGraphEdgeCount?: number;
     stewardPackCandidateId?: string;
     knowledgeBaseId?: string;
+    scopedKnowledgeBaseId?: string;
     knowledgeStewardInboxMessageId?: string;
     knowledgeStewardActivationStatus?: string;
     reusedCandidateGraph?: boolean;
