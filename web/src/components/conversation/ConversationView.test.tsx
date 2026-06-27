@@ -148,7 +148,9 @@ describe("ConversationView edit resend affordance", () => {
   it("renders streaming assistant text through a light text path before markdown parsing", () => {
     expect(conversationViewSource).toContain("function renderStreamingResponseText(content: string)");
     expect(conversationViewSource).toContain("<StreamingResponseContent content={content} />");
-    expect(conversationViewSource).toContain("const visibleContent = String(content ?? \"\")");
+    expect(conversationViewSource).toContain("STREAMING_RESPONSE_REVEAL_MAX_CHARS");
+    expect(conversationViewSource).toContain("requestAnimationFrame");
+    expect(conversationViewSource).toContain("setVisibleContent");
     expect(conversationViewSource).toContain("styles.streamingResponseText");
     expect(conversationViewSource).toContain("styles.streamingResponseParagraph");
     expect(conversationViewSource).toContain("const isResponseStreaming = Boolean(message.streaming) && showResponseBlock");
@@ -163,6 +165,7 @@ describe("ConversationView edit resend affordance", () => {
     expect(conversationViewSource).not.toContain("STREAMING_REVEAL_FAST_FORWARD_BACKLOG_CHARS");
     expect(conversationViewSource).not.toContain("setTimeout(pump");
     expect(conversationViewSource).not.toContain("advanceStreamingRevealText");
+    expect(conversationViewSource).not.toContain("setInterval");
   });
 
   it("keeps answer and process toggles as borderless text controls", () => {
@@ -381,10 +384,10 @@ describe("ConversationView edit resend affordance", () => {
       },
     );
 
-    expect(html).toContain("正在唤起对话 agent");
     expect(html).toContain("正在请求");
+    expect(html).not.toContain("正在唤起对话 agent");
+    expect(html).not.toContain("正在绑定 Agent 实例");
     expect(html.match(/assistantTurn/g)?.length ?? 0).toBe(1);
-    expect(html.indexOf("正在请求")).toBeLessThan(html.indexOf("正在唤起对话 agent"));
   });
 
   it("coalesces same-tool feedback updates when merging live overlay with the active turn", () => {
@@ -2338,7 +2341,7 @@ describe("ConversationView edit resend affordance", () => {
     expect(html.match(/statusSpinner/g)?.length).toBe(1);
   });
 
-  it("shows model-request placeholder as a light process preview instead of a separate answer block", () => {
+  it("shows model-request placeholder as a compact process state instead of a separate answer block", () => {
     const placeholder = "正在请求模型，等待首个响应片段...\n上下文已组装完成，正在进入 LLM 调用。";
     const html = renderConversation(
       [
@@ -2364,8 +2367,9 @@ describe("ConversationView edit resend affordance", () => {
 
     expect(html).toContain("生成中");
     expect(html).toContain("正在请求");
-    expect(html).toContain("正在请求模型，等待首个响应片段...");
-    expect(html).toContain("answerOnlyProcessPreview");
+    expect(html).not.toContain("正在请求模型，等待首个响应片段...");
+    expect(html).not.toContain("上下文已组装完成");
+    expect(html).not.toContain("answerOnlyProcessPreview");
     expect(html).not.toContain("回答</span>");
     expect(html).not.toContain("responseSection");
   });

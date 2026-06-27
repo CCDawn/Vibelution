@@ -103,6 +103,34 @@ describe("chat active turn layer", () => {
     });
   });
 
+  it("keeps status-only assistant deltas out of answer content", () => {
+    const active = mergeAssistantDeltaIntoActiveTurnLayer(
+      undefined,
+      assistantDelta({
+        stage: "agent_prepare",
+        content: "",
+        contentDelta: "",
+        feedbackEvents: [
+          {
+            sequence: 1,
+            kind: "status",
+            status: "running",
+            name: "agent_prepare",
+            summary: "正在唤起对话 agent",
+          },
+        ],
+      }),
+    );
+
+    expect(active?.content).toBe("");
+    expect(active?.streamStage).toBe("agent_prepare");
+    expect(active?.feedbackEvents?.[0]).toMatchObject({
+      kind: "status",
+      name: "agent_prepare",
+      status: "running",
+    });
+  });
+
   it("treats the active layer as settled once committed detail has the same assistant turn", () => {
     const active = mergeAssistantDeltaIntoActiveTurnLayer(undefined, assistantDelta({ contentDelta: "临时回答" }));
     const detail = {
