@@ -2977,6 +2977,13 @@ def test_source_collection_context_compact_candidate_paging_stays_model_visible(
     assert pages[0]["candidatePage"]["nextOffset"] == 5
     assert "candidate_offset=5" in pages[0]["usage"]["continuationHint"]
     assert pages[2]["candidatePage"]["hasMore"] is False
+    assert pages[0]["fieldMode"] == "preview_only"
+    assert pages[0]["candidateFieldsTruncated"] is True
+    assert pages[0]["doNotUsePreviewAsEvidence"] is True
+    assert pages[0]["visibleCandidateCount"] == 5
+    assert pages[0]["omittedReturnedCandidateCount"] == 0
+    assert "summaryPreview" in pages[0]["candidates"][0]
+    assert "summary" not in pages[0]["candidates"][0]
     assert len(json.dumps(pages[0], ensure_ascii=False)) < 4000
 
 
