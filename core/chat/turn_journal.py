@@ -519,7 +519,7 @@ def _tool_message_from_event(event: TurnJournalEvent) -> dict[str, Any]:
     name = str(tool_call.get("name") or tool_call.get("toolName") or tool_call.get("tool_name") or "").strip()
     if not name:
         return {}
-    status = str(event.status or tool_call.get("status") or "").strip()
+    status = _tool_status_from_event(event, tool_call)
     normalized = {"name": name, "status": status or "running"}
     tool_call_id = _event_tool_call_id(event)
     if tool_call_id:
@@ -550,6 +550,21 @@ def _tool_message_from_event(event: TurnJournalEvent) -> dict[str, Any]:
         "cliSessionId",
         "taskId",
         "completionReason",
+        "transportStatus",
+        "transport_status",
+        "semanticStatus",
+        "semantic_status",
+        "failureClass",
+        "failure_class",
+        "exitCode",
+        "exit_code",
+        "timedOut",
+        "timed_out",
+        "resultKind",
+        "result_kind",
+        "truncated",
+        "originalLength",
+        "original_length",
     ):
         if key in tool_call:
             normalized[key] = tool_call[key]
@@ -569,6 +584,52 @@ def _tool_message_from_event(event: TurnJournalEvent) -> dict[str, Any]:
             "resultKey": str(event.correlation_id or "").strip() if event.event_type == EVENT_CLI_TASK_RESULT else "",
         },
     }
+
+
+def _tool_status_from_event(event: TurnJournalEvent, tool_call: dict[str, Any]) -> str:
+    event_status = str(event.status or "").strip().lower()
+    tool_status = str(tool_call.get("status") or "").strip().lower()
+    if event.event_type not in {EVENT_TOOL_RESULT, EVENT_CLI_TASK_RESULT}:
+        return event_status or tool_status or "running"
+    semantic_status = str(tool_call.get("semanticStatus") or tool_call.get("semantic_status") or "").strip().lower()
+    transport_status = str(tool_call.get("transportStatus") or tool_call.get("transport_status") or "").strip().lower()
+    for candidate in (semantic_status, tool_status, event_status):
+        normalized = _normalize_terminal_tool_status(candidate)
+        if normalized in {"failed", "timeout", "blocked", "cancelled", "no_result", "interrupted"}:
+            return normalized
+    timed_out = tool_call.get("timedOut", tool_call.get("timed_out"))
+    if timed_out is True or str(timed_out).strip().lower() in {"1", "true", "yes", "y", "on"}:
+        return "timeout"
+    for candidate in (semantic_status, tool_status, event_status):
+        normalized = _normalize_terminal_tool_status(candidate)
+        if normalized:
+            return normalized
+    if transport_status == "returned" and _tool_call_has_result_payload(tool_call):
+        return "done"
+    if event_status or tool_status:
+        return event_status or tool_status
+    return "done" if _tool_call_has_result_payload(tool_call) else "running"
+
+
+def _normalize_terminal_tool_status(status: str) -> str:
+    normalized = str(status or "").strip().lower()
+    if normalized in {"done", "success", "succeeded", "completed", "finished", "ready", "degraded", "observed"}:
+        return "done"
+    if normalized in {"failed", "failure", "error"}:
+        return "failed"
+    if normalized in {"timeout", "timed_out"}:
+        return "timeout"
+    if normalized in {"blocked", "cancelled", "no_result", "interrupted"}:
+        return normalized
+    return ""
+
+
+def _tool_call_has_result_payload(tool_call: dict[str, Any]) -> bool:
+    for key in ("summary", "result", "resultPreview", "result_preview", "error"):
+        value = tool_call.get(key)
+        if value is not None and str(value).strip():
+            return True
+    return False
 
 
 def _checkpoint_message_from_event(event: TurnJournalEvent) -> dict[str, Any]:

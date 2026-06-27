@@ -5994,6 +5994,53 @@ def test_capture_session_ui_stream_preserves_ordered_feedback_events(tmp_path, m
     assert live_state.feedback_events[4]["relatedThoughtSequence"] == live_state.feedback_events[3]["sequence"]
 
 
+def test_capture_session_ui_stream_does_not_mark_returned_degraded_tool_running(tmp_path, monkeypatch):
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(session_service, "_publish_session_detail_snapshot", lambda _session_id: None)
+    stub_ui = SimpleNamespace(
+        stream_thought=lambda *args, **kwargs: None,
+        clear_thought_stream=lambda *args, **kwargs: None,
+        stream_response=lambda *args, **kwargs: None,
+        clear_response_stream=lambda *args, **kwargs: None,
+        set_pet_mental_state=lambda *args, **kwargs: None,
+    )
+    monkeypatch.setattr("core.ui.get_ui", lambda: stub_ui)
+
+    capture = session_service.SessionTurnCapture(session_id="session-feedback", turn_id="turn-degraded")
+    with session_service._capture_session_ui_stream("session-feedback", capture):
+        session_service.get_event_bus().publish(
+            session_service.EventNames.TOOL_START,
+            {
+                "name": "cli_tool",
+                "args": {"command": "cd C:\\Users\\17533\\Desktop\\Vibelution && pytest | head -50"},
+            },
+        )
+        session_service.get_event_bus().publish(
+            session_service.EventNames.TOOL_SUCCESS,
+            {
+                "name": "cli_tool",
+                "args": {"command": "cd C:\\Users\\17533\\Desktop\\Vibelution && pytest | head -50"},
+                "summary": "[跨平台警告] 在 Windows 上检测到 Unix shell 片段",
+                "result": "[跨平台警告] 在 Windows 上检测到 Unix shell 片段",
+                "transportStatus": "returned",
+                "semanticStatus": "degraded",
+                "durationMs": 546,
+            },
+        )
+
+    live_state = session_service._snapshot_session_live_output("session-feedback")
+    assert live_state is not None
+    tool_events = [item for item in live_state.feedback_events if item["kind"] == "tool"]
+    assert [item["status"] for item in tool_events] == ["done"]
+    assert tool_events[0]["semanticStatus"] == "degraded"
+
+    events = load_conversation_events(tmp_path, "session-feedback")
+    tool_result = next(item for item in events if item.event_type == EVENT_TOOL_RESULT)
+    assert tool_result.status == "done"
+    assert tool_result.payload["toolCall"]["status"] == "done"
+    assert tool_result.payload["toolCall"]["semanticStatus"] == "degraded"
+
+
 def test_capture_session_ui_stream_filters_llm_status_by_event_context(tmp_path, monkeypatch):
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     published: list[str] = []

@@ -469,6 +469,36 @@ describe("conversationOperations", () => {
     expect(operations[0].rawStatus).toBe("running");
   });
 
+  it("treats degraded returned tool feedback as terminal instead of running", () => {
+    const message: ConversationMessage = {
+      id: "message-degraded-tool",
+      role: "assistant",
+      content: "测试通过。再运行配置相关的测试验证：",
+      timestamp: "2026-06-26T14:57:56Z",
+      feedbackEvents: [
+        {
+          sequence: 1,
+          kind: "tool",
+          status: "degraded",
+          name: "cli_tool",
+          summary: "[跨平台警告] 在 Windows 上检测到 Unix shell 片段",
+          resultPreview: "[跨平台警告] 在 Windows 上检测到 Unix shell 片段",
+        },
+      ],
+    };
+
+    const operations = buildConversationOperations(message, labels);
+
+    expect(operations).toHaveLength(1);
+    expect(operations[0]).toMatchObject({
+      kind: "tool",
+      label: "命令",
+      status: "done",
+      rawStatus: "degraded",
+      summary: "[跨平台警告] 在 Windows 上检测到 Unix shell 片段",
+    });
+  });
+
   it("keeps terminal synthetic thought failures neutral after a completed tool", () => {
     const message: ConversationMessage = {
       id: "message-terminal-synthetic-thought-failure",
