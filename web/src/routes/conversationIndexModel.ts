@@ -579,33 +579,37 @@ export function mergeVisibleSessionsIntoConversations(
       .flatMap((conversation) => [conversation.directSessionId, conversation.conversationId])
       .filter((value): value is string => Boolean(value)),
   );
-  const conversationsBySessionId = new Map(
-    merged
-      .filter((conversation) => conversation.type === "direct_agent")
-      .flatMap((conversation) => {
-        const entries: Array<[string, ConversationSummary]> = [];
-        if (conversation.directSessionId) {
-          entries.push([conversation.directSessionId, conversation]);
-        }
-        if (conversation.conversationId) {
-          entries.push([conversation.conversationId, conversation]);
-        }
-        return entries;
-      }),
-  );
+  const conversationIndexesBySessionId = new Map<string, number>();
+  merged.forEach((conversation, index) => {
+    if (conversation.type !== "direct_agent") {
+      return;
+    }
+    if (conversation.directSessionId) {
+      conversationIndexesBySessionId.set(conversation.directSessionId, index);
+    }
+    if (conversation.conversationId) {
+      conversationIndexesBySessionId.set(conversation.conversationId, index);
+    }
+  });
   sessions.forEach((session) => {
+    const existingIndex = conversationIndexesBySessionId.get(session.id);
+    if (existingIndex !== undefined) {
+      const conversation = merged[existingIndex];
+      const mergedSession = {
+        ...session,
+        agentAvatarImagePath: session.agentAvatarImagePath || conversation.agentAvatarImagePath,
+        agentAvatarImageUrl: session.agentAvatarImageUrl || conversation.agentAvatarImageUrl,
+      };
+      merged[existingIndex] = {
+        ...conversation,
+        ...sessionToConversationSummary(mergedSession),
+      };
+      return;
+    }
     if (knownSessionIds.has(session.id)) {
       return;
     }
-    const conversation = conversationsBySessionId.get(session.id);
-    const mergedSession = conversation
-      ? {
-          ...session,
-          agentAvatarImagePath: session.agentAvatarImagePath || conversation.agentAvatarImagePath,
-          agentAvatarImageUrl: session.agentAvatarImageUrl || conversation.agentAvatarImageUrl,
-        }
-      : session;
-    merged.push(sessionToConversationSummary(mergedSession));
+    merged.push(sessionToConversationSummary(session));
     knownSessionIds.add(session.id);
   });
   return merged.sort((left, right) =>
