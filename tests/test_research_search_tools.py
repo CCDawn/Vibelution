@@ -3,7 +3,7 @@ import time
 
 import httpx
 
-from tools import research_search_tools, web_search_tool
+from tools import research_search_backends, research_search_quality, research_search_tools, web_search_tool
 
 
 class FakeClient:
@@ -133,6 +133,18 @@ def test_web_search_does_not_fallback_when_token_service_unavailable(monkeypatch
 
 def test_batch_web_search_runs_queries_concurrently_and_isolates_failures(monkeypatch):
     starts = []
+    monkeypatch.setattr(
+        research_search_backends,
+        "collect_provider_results",
+        lambda *args, **kwargs: {
+            "status": "degraded",
+            "query": args[0] if args else "",
+            "results": [],
+            "rawResultCount": 0,
+            "rejectedCount": 0,
+            "providers": [],
+        },
+    )
 
     def fake_public_web_search(query, max_results=10, allowed_domains="", blocked_domains=""):
         starts.append((query, time.perf_counter()))
@@ -154,12 +166,51 @@ def test_batch_web_search_runs_queries_concurrently_and_isolates_failures(monkey
     assert elapsed < 0.13
 
 
+def test_batch_web_search_marks_all_low_quality_rows_as_low_quality(monkeypatch):
+    monkeypatch.setattr(
+        research_search_backends,
+        "collect_provider_results",
+        lambda *args, **kwargs: {
+            "status": "degraded",
+            "query": args[0] if args else "",
+            "results": [],
+            "rawResultCount": 0,
+            "rejectedCount": 0,
+            "providers": [],
+        },
+    )
+
+    def fake_public_web_search(query, max_results=10, allowed_domains="", blocked_domains=""):
+        return f"[搜索质量不足] 公开搜索未返回可采信的「{query}」结果。"
+
+    monkeypatch.setattr(research_search_tools, "public_web_search", fake_public_web_search)
+
+    result = research_search_tools.batch_web_search("predictive coding\nneural gating")
+
+    assert result.startswith("[搜索质量不足]")
+    assert "共执行 2 个查询" in result
+    assert "全部查询都未返回可采信结果" in result
+
+
 def test_batch_web_search_handles_empty_input():
     assert research_search_tools.batch_web_search(" \n ") == "[错误] 未提供有效搜索词"
 
 
 def test_paper_project_and_news_search_build_no_quota_queries(monkeypatch):
     calls = []
+
+    monkeypatch.setattr(
+        research_search_backends,
+        "collect_provider_results",
+        lambda *args, **kwargs: {
+            "status": "degraded",
+            "query": args[0] if args else "",
+            "results": [],
+            "rawResultCount": 0,
+            "rejectedCount": 0,
+            "providers": [],
+        },
+    )
 
     def fake_public_web_search(query, max_results=10, allowed_domains="", blocked_domains=""):
         calls.append(
@@ -186,6 +237,87 @@ def test_paper_project_and_news_search_build_no_quota_queries(monkeypatch):
     assert "Python" in calls[1]["query"]
     assert "news latest analysis" in calls[2]["query"]
     assert "reuters.com" in calls[2]["allowed_domains"]
+
+
+def test_openalex_paper_search_parses_public_metadata(monkeypatch):
+    monkeypatch.setattr(
+        research_search_backends,
+        "_http_get_json",
+        lambda *args, **kwargs: {
+            "results": [
+                {
+                    "id": "https://openalex.org/W1",
+                    "doi": "https://doi.org/10.1234/predictive",
+                    "display_name": "Predictive coding in cortical hierarchy",
+                    "publication_year": 2024,
+                    "primary_location": {
+                        "landing_page_url": "https://doi.org/10.1234/predictive",
+                        "source": {"display_name": "Journal of Neural Computation"},
+                    },
+                }
+            ]
+        },
+    )
+
+    results, event = research_search_backends.openalex_paper_search(
+        "predictive coding cortical hierarchy",
+        max_results=3,
+    )
+
+    assert event["provider"] == "openalex"
+    assert event["status"] == "ok"
+    assert results[0]["title"] == "Predictive coding in cortical hierarchy"
+    assert results[0]["doi"] == "https://doi.org/10.1234/predictive"
+
+
+def test_paper_search_renders_provider_results_before_legacy(monkeypatch):
+    monkeypatch.setattr(
+        research_search_backends,
+        "collect_provider_results",
+        lambda *args, **kwargs: {
+            "status": "ok",
+            "query": "predictive coding cortical hierarchy",
+            "results": [
+                {
+                    "title": "Predictive coding in cortical hierarchy",
+                    "url": "https://doi.org/10.1234/predictive",
+                    "snippet": "A neural predictive coding paper.",
+                    "provider": "openalex",
+                    "sourceType": "paper",
+                    "published": "2024",
+                    "qualityGate": {"accepted": True},
+                }
+            ],
+            "rawResultCount": 1,
+            "rejectedCount": 0,
+            "providers": [{"provider": "openalex", "status": "ok", "resultCount": 1}],
+        },
+    )
+    monkeypatch.setattr(
+        research_search_tools,
+        "public_web_search",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("legacy search should not be called")),
+    )
+
+    result = research_search_tools.paper_search("predictive coding cortical hierarchy", max_results=3)
+
+    assert result.startswith("[论文公开搜索]")
+    assert "Predictive coding in cortical hierarchy" in result
+    assert "provider=openalex" in result
+
+
+def test_research_search_quality_rejects_low_quality_admissions_noise():
+    gate = research_search_quality.evaluate_search_result(
+        "predictive coding cortical hierarchy",
+        {
+            "title": "机械设计与自动化控制中应注意的问题",
+            "url": "https://example.test/admission",
+            "snippet": "高考志愿填报与专业目录页面，未提供神经预测编码论文。",
+        },
+    )
+
+    assert gate["accepted"] is False
+    assert "low_quality_context_terms" in gate["reasons"]
 
 
 def test_search_summarize_sources_dedupes_markdown_and_bare_urls():

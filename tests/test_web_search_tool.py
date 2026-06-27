@@ -1,4 +1,6 @@
 import importlib
+import sys
+import types
 
 import httpx
 
@@ -167,3 +169,14 @@ def test_autoglm_token_url_can_be_overridden_by_environment(monkeypatch):
     finally:
         monkeypatch.delenv("AUTOGLM_TOKEN_URL", raising=False)
         importlib.reload(web_search_tool)
+
+
+def test_extract_plain_text_prefers_trafilatura_when_available(monkeypatch):
+    fake_trafilatura = types.SimpleNamespace(
+        extract=lambda *args, **kwargs: "Main article text\n\nMain article text"
+    )
+    monkeypatch.setitem(sys.modules, "trafilatura", fake_trafilatura)
+
+    text = web_search_tool._extract_plain_text("<html><body><script>x()</script><article>fallback</article></body></html>")
+
+    assert text == "Main article text\n\nMain article text"
