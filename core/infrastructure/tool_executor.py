@@ -442,6 +442,56 @@ def _coerce_int(value: Any) -> int:
         return 0
 
 
+def _detect_unquoted_cli_operator(command: str) -> str | None:
+    in_single = False
+    in_double = False
+    escaped = False
+    has_pipe = False
+    has_subexpression = False
+    index = 0
+    text = str(command or "")
+    length = len(text)
+
+    while index < length:
+        char = text[index]
+        if escaped:
+            escaped = False
+            index += 1
+            continue
+        if char == "\\" and in_double:
+            escaped = True
+            index += 1
+            continue
+        if char == "'" and not in_double:
+            in_single = not in_single
+            index += 1
+            continue
+        if char == '"' and not in_single:
+            in_double = not in_double
+            index += 1
+            continue
+        if in_single or in_double:
+            index += 1
+            continue
+        if text.startswith("&&", index) or text.startswith("||", index):
+            return "cli_tool:command_chain"
+        if text.startswith("$(", index):
+            has_subexpression = True
+            index += 2
+            continue
+        if char in {";", "`"}:
+            return "cli_tool:command_chain"
+        if char == "|":
+            has_pipe = True
+        index += 1
+
+    if has_pipe:
+        return "cli_tool:pipe"
+    if has_subexpression:
+        return "cli_tool:subexpression"
+    return None
+
+
 class ToolExecutor:
     """
     工具执行器
@@ -1508,13 +1558,7 @@ class ToolExecutor:
         if tool_name != "cli_tool":
             return None
         command = str((tool_args or {}).get("command") or "")
-        if "&&" in command or "||" in command or ";" in command or "`" in command:
-            return "cli_tool:command_chain"
-        if "|" in command:
-            return "cli_tool:pipe"
-        if "$(" in command:
-            return "cli_tool:subexpression"
-        return None
+        return _detect_unquoted_cli_operator(command)
 
     @staticmethod
     def _pattern_hint(pattern: str) -> str:
