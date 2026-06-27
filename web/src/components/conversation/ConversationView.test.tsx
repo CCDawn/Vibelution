@@ -387,6 +387,63 @@ describe("ConversationView edit resend affordance", () => {
     expect(html.indexOf("正在唤起对话 agent")).toBeLessThan(html.indexOf("正在请求"));
   });
 
+  it("coalesces same-tool feedback updates when merging live overlay with the active turn", () => {
+    const html = renderConversation(
+      [
+        {
+          id: "session-1-message-live-turn-1",
+          role: "assistant",
+          content: "",
+          timestamp: "2026-06-26T10:30:00Z",
+          streaming: true,
+          streamStage: "tooling",
+          feedbackEvents: [
+            {
+              sequence: 0,
+              kind: "tool",
+              status: "running",
+              name: "source_collection_context_tool",
+              summary: "正在读取受控资料上下文",
+            },
+          ],
+          metadata: {
+            kind: "session_live_overlay",
+            turnId: "turn-1",
+          },
+        },
+      ],
+      {
+        activeTurnMessage: {
+          id: "session-1-message-active-turn-1",
+          role: "assistant",
+          content: "上下文已读取，正在整理回答。",
+          timestamp: "2026-06-26T10:30:01Z",
+          streaming: true,
+          streamStage: "responding",
+          feedbackEvents: [
+            {
+              sequence: 0,
+              kind: "tool",
+              status: "done",
+              name: "source_collection_context_tool",
+              summary: "上下文已读取",
+              resultPreview: "candidatePage.returned=19",
+            },
+          ],
+          metadata: {
+            kind: "session_active_turn_layer",
+            turnId: "turn-1",
+          },
+        },
+      },
+    );
+
+    expect(html.match(/assistantTurn/g)?.length ?? 0).toBe(1);
+    expect(html.match(/source_collection_context_tool/g)?.length ?? 0).toBe(1);
+    expect(html).toContain("上下文已读取");
+    expect(html).not.toContain("正在读取受控资料上下文");
+  });
+
   it("keeps active streaming scroll signals on a small streaming-only tail", () => {
     expect(conversationViewSource).toContain("const streamingTimelineMessages = useMemo(");
     expect(conversationViewSource).toContain("activeTimelineMessages.filter((message) => message.streaming)");

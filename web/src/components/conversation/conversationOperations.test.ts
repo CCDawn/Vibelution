@@ -105,6 +105,42 @@ describe("conversationOperations", () => {
     expect(changed[0].summary).toBe("先看最新日志");
   });
 
+  it("keeps only the latest feedback update for the same unsequenced tool event", () => {
+    const message: ConversationMessage = {
+      id: "message-unsequenced-feedback-update",
+      role: "assistant",
+      content: "Done",
+      timestamp: "2026-06-05T00:00:00Z",
+      feedbackEvents: [
+        {
+          sequence: 0,
+          kind: "tool",
+          status: "running",
+          name: "source_collection_context_tool",
+          summary: "正在读取受控资料上下文",
+        },
+        {
+          sequence: 0,
+          kind: "tool",
+          status: "done",
+          name: "source_collection_context_tool",
+          summary: "上下文已读取",
+          resultPreview: "candidatePage.returned=19",
+        },
+      ],
+    };
+
+    const operations = buildConversationOperations(message, labels);
+
+    expect(operations).toHaveLength(1);
+    expect(operations[0]).toMatchObject({
+      kind: "tool",
+      status: "done",
+      summary: "上下文已读取",
+      resultPreview: "candidatePage.returned=19",
+    });
+  });
+
   it("builds ordered assistant operations from thought, mental snapshot, and tools", () => {
     const message: ConversationMessage = {
       id: "message-1",

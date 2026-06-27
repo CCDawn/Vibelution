@@ -19423,9 +19423,27 @@ def _session_assistant_delta_feedback_event_key(event: dict[str, Any]) -> str:
     sequence = _coerce_nonnegative_int(event.get("sequence"))
     if sequence > 0:
         return f"seq:{sequence}"
+    kind = str(event.get("kind") or "").strip()
+    name = str(event.get("name") or "").strip()
+    related_thought_sequence = _coerce_nonnegative_int(event.get("relatedThoughtSequence"))
+    try:
+        arguments_signal = json.dumps(event.get("arguments") or {}, sort_keys=True, ensure_ascii=False)
+    except TypeError:
+        arguments_signal = str(event.get("arguments") or "")
+    if name:
+        return ":".join(("named", kind, name, str(related_thought_sequence or ""), arguments_signal))
+    transport_status = str(event.get("transportStatus") or event.get("semanticStatus") or "").strip()
+    if kind == "status" and transport_status:
+        return ":".join(("status", transport_status, str(related_thought_sequence or "")))
+    trace_path = str(event.get("tracePath") or "").strip()
+    if trace_path:
+        return f"trace:{trace_path}"
+    timestamp = str(event.get("timestamp") or "").strip()
+    if timestamp:
+        return ":".join(("timestamp", kind, timestamp))
     return ":".join(
         str(event.get(key) or "")
-        for key in ("kind", "name", "status", "summary", "resultPreview", "error")
+        for key in ("kind", "summary", "resultPreview", "error")
     )
 
 
@@ -19438,7 +19456,8 @@ def _merge_session_assistant_delta_feedback_events(
         if not isinstance(event, dict):
             continue
         key = _session_assistant_delta_feedback_event_key(event)
-        merged[key] = (merged.get(key, (index, {}))[0], dict(event))
+        first_index, previous_event = merged.get(key, (index, {}))
+        merged[key] = (first_index, {**previous_event, **dict(event)})
     return [
         event
         for _, event in sorted(

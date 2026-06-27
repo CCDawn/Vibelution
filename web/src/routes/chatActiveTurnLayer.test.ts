@@ -62,6 +62,47 @@ describe("chat active turn layer", () => {
     expect(recovered?.thought).toBe("完整思考");
   });
 
+  it("updates the same unsequenced feedback event instead of appending a duplicate", () => {
+    const first = mergeAssistantDeltaIntoActiveTurnLayer(
+      undefined,
+      assistantDelta({
+        feedbackEvents: [
+          {
+            sequence: 0,
+            kind: "tool",
+            status: "running",
+            name: "source_collection_context_tool",
+            summary: "正在读取受控资料上下文",
+          },
+        ],
+      }),
+    );
+    const updated = mergeAssistantDeltaIntoActiveTurnLayer(
+      first,
+      assistantDelta({
+        feedbackEvents: [
+          {
+            sequence: 0,
+            kind: "tool",
+            status: "done",
+            name: "source_collection_context_tool",
+            summary: "上下文已读取",
+            resultPreview: "candidatePage.returned=19",
+          },
+        ],
+      }),
+    );
+
+    expect(updated?.feedbackEvents).toHaveLength(1);
+    expect(updated?.feedbackEvents?.[0]).toMatchObject({
+      kind: "tool",
+      name: "source_collection_context_tool",
+      status: "done",
+      summary: "上下文已读取",
+      resultPreview: "candidatePage.returned=19",
+    });
+  });
+
   it("treats the active layer as settled once committed detail has the same assistant turn", () => {
     const active = mergeAssistantDeltaIntoActiveTurnLayer(undefined, assistantDelta({ contentDelta: "临时回答" }));
     const detail = {
