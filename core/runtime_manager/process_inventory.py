@@ -271,6 +271,10 @@ def residual_process_payload(
     }
 
 
+def _elapsed_ms(started: float) -> float:
+    return round(max(0.0, (time.perf_counter() - started) * 1000.0), 3)
+
+
 def terminate_unmanaged_workbench_processes(
     *,
     project_root: Path | str = PROJECT_ROOT,
@@ -279,49 +283,88 @@ def terminate_unmanaged_workbench_processes(
 ) -> dict[str, Any]:
     """Terminate repo-local workbench processes that are not the active managed backend."""
 
+    total_started = time.perf_counter()
+    timings_ms: dict[str, float] = {}
     if psutil is None:
         return {
             "supported": False,
             "requested": [],
             "terminated": [],
             "remaining": [],
+            "timingsMs": timings_ms,
+            "processCounts": {
+                "residualCandidates": 0,
+                "targetProcesses": 0,
+                "liveTargets": 0,
+                "remaining": 0,
+            },
         }
 
     excluded = {int(pid) for pid in (exclude_pids or []) if int(pid) > 0}
+    candidate_scan_started = time.perf_counter()
     candidates = list_residual_runtime_processes(project_root=project_root, exclude_pids=excluded)
     target_pids = _target_process_tree_pids(candidates, excluded=excluded)
+    timings_ms["candidateScanMs"] = _elapsed_ms(candidate_scan_started)
     if not target_pids:
+        timings_ms["totalMs"] = _elapsed_ms(total_started)
         return {
             "supported": True,
             "requested": [],
             "terminated": [],
             "remaining": [],
+            "timingsMs": timings_ms,
+            "processCounts": {
+                "residualCandidates": len(candidates),
+                "targetProcesses": 0,
+                "liveTargets": 0,
+                "remaining": 0,
+            },
         }
 
+    live_collect_started = time.perf_counter()
     target_processes = _live_processes(target_pids)
+    timings_ms["liveProcessCollectMs"] = _elapsed_ms(live_collect_started)
+    terminate_signal_started = time.perf_counter()
     for proc in sorted(target_processes, key=lambda item: _process_depth(item), reverse=True):
         try:
             proc.terminate()
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             continue
+    timings_ms["terminateSignalMs"] = _elapsed_ms(terminate_signal_started)
 
+    terminate_wait_started = time.perf_counter()
     gone, alive = psutil.wait_procs(target_processes, timeout=max(0.1, float(timeout_seconds)))
+    timings_ms["terminateWaitMs"] = _elapsed_ms(terminate_wait_started)
+    kill_signal_started = time.perf_counter()
     for proc in alive:
         try:
             proc.kill()
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             continue
+    timings_ms["killSignalMs"] = _elapsed_ms(kill_signal_started)
+    kill_wait_started = time.perf_counter()
     if alive:
         psutil.wait_procs(alive, timeout=1.0)
+    timings_ms["killWaitMs"] = _elapsed_ms(kill_wait_started)
 
+    remaining_started = time.perf_counter()
     time.sleep(0.05)
     remaining = list_residual_runtime_processes(project_root=project_root, exclude_pids=excluded)
+    timings_ms["remainingCheckMs"] = _elapsed_ms(remaining_started)
     remaining_pids = {item.pid for item in remaining}
+    timings_ms["totalMs"] = _elapsed_ms(total_started)
     return {
         "supported": True,
         "requested": sorted(target_pids),
         "terminated": sorted(pid for pid in target_pids if pid not in remaining_pids),
         "remaining": [item.to_dict() for item in remaining],
+        "timingsMs": timings_ms,
+        "processCounts": {
+            "residualCandidates": len(candidates),
+            "targetProcesses": len(target_pids),
+            "liveTargets": len(target_processes),
+            "remaining": len(remaining),
+        },
     }
 
 
@@ -335,6 +378,8 @@ def terminate_workbench_processes(
 ) -> dict[str, Any]:
     """Terminate repo-owned workbench backend/frontend processes and managed browser profile processes."""
 
+    total_started = time.perf_counter()
+    timings_ms: dict[str, float] = {}
     if psutil is None:
         return {
             "supported": False,
@@ -343,9 +388,18 @@ def terminate_workbench_processes(
             "remaining": [],
             "repoCandidates": [],
             "browserCandidates": [],
+            "timingsMs": timings_ms,
+            "processCounts": {
+                "repoCandidates": 0,
+                "browserCandidates": 0,
+                "targetProcesses": 0,
+                "liveTargets": 0,
+                "remaining": 0,
+            },
         }
 
     excluded = {int(pid) for pid in (exclude_pids or []) if int(pid) > 0}
+    candidate_scan_started = time.perf_counter()
     repo_candidates = [
         item
         for item in list_repo_runtime_processes(project_root=project_root)
@@ -364,8 +418,10 @@ def terminate_workbench_processes(
             if isinstance(item, dict) and int(item.get("pid") or 0) > 0
         ]
         target_pids.update(int(item.get("pid") or 0) for item in browser_candidates if int(item.get("pid") or 0) not in excluded)
+    timings_ms["candidateScanMs"] = _elapsed_ms(candidate_scan_started)
 
     if not target_pids:
+        timings_ms["totalMs"] = _elapsed_ms(total_started)
         return {
             "supported": True,
             "requested": [],
@@ -373,24 +429,43 @@ def terminate_workbench_processes(
             "remaining": [],
             "repoCandidates": [item.to_dict() for item in repo_candidates],
             "browserCandidates": browser_candidates,
+            "timingsMs": timings_ms,
+            "processCounts": {
+                "repoCandidates": len(repo_candidates),
+                "browserCandidates": len(browser_candidates),
+                "targetProcesses": 0,
+                "liveTargets": 0,
+                "remaining": 0,
+            },
         }
 
+    live_collect_started = time.perf_counter()
     target_processes = _live_processes(target_pids)
+    timings_ms["liveProcessCollectMs"] = _elapsed_ms(live_collect_started)
+    terminate_signal_started = time.perf_counter()
     for proc in sorted(target_processes, key=lambda item: _process_depth(item), reverse=True):
         try:
             proc.terminate()
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             continue
+    timings_ms["terminateSignalMs"] = _elapsed_ms(terminate_signal_started)
 
+    terminate_wait_started = time.perf_counter()
     _, alive = psutil.wait_procs(target_processes, timeout=max(0.1, float(timeout_seconds)))
+    timings_ms["terminateWaitMs"] = _elapsed_ms(terminate_wait_started)
+    kill_signal_started = time.perf_counter()
     for proc in alive:
         try:
             proc.kill()
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             continue
+    timings_ms["killSignalMs"] = _elapsed_ms(kill_signal_started)
+    kill_wait_started = time.perf_counter()
     if alive:
         psutil.wait_procs(alive, timeout=1.0)
+    timings_ms["killWaitMs"] = _elapsed_ms(kill_wait_started)
 
+    remaining_started = time.perf_counter()
     time.sleep(0.05)
     remaining: list[dict[str, Any]]
     if verify_remaining_with_inventory:
@@ -441,7 +516,9 @@ def terminate_workbench_processes(
                     "source": "target_process_tree",
                 }
             )
+    timings_ms["remainingCheckMs"] = _elapsed_ms(remaining_started)
     remaining_pids = {int(item.get("pid") or 0) for item in remaining if isinstance(item, dict)}
+    timings_ms["totalMs"] = _elapsed_ms(total_started)
     return {
         "supported": True,
         "requested": sorted(target_pids),
@@ -451,6 +528,14 @@ def terminate_workbench_processes(
         "browserCandidates": browser_candidates,
         "browserProfileDir": profile_text,
         "remainingCheck": "inventory" if verify_remaining_with_inventory else "target_processes",
+        "timingsMs": timings_ms,
+        "processCounts": {
+            "repoCandidates": len(repo_candidates),
+            "browserCandidates": len(browser_candidates),
+            "targetProcesses": len(target_pids),
+            "liveTargets": len(target_processes),
+            "remaining": len(remaining),
+        },
     }
 
 

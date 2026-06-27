@@ -1525,7 +1525,7 @@ def test_run_forever_refreshes_manager_started_at(monkeypatch):
     assert saved_states[0]["runtimeManager"]["sourceSignature"] == "sig-current"
 
 
-def test_run_forever_recovers_processing_queue_after_startup_reconcile(monkeypatch):
+def test_run_forever_recovers_processing_queue_after_marking_daemon_running(monkeypatch):
     class StopLoop(Exception):
         pass
 
@@ -1580,8 +1580,125 @@ def test_run_forever_recovers_processing_queue_after_startup_reconcile(monkeypat
     assert recovered["managerPid"] == runtime_daemon._pid
     assert recovered["daemonRunning"] is True
     assert recovered["workbench"]["desiredState"] == "closed"
-    assert recovered["workbench"]["observedState"] == "closed"
+    assert recovered["workbench"]["observedState"] == "open"
     assert recovered["workbench"]["phase"] == "closing"
+
+
+def test_run_forever_claims_lifecycle_command_before_startup_reconcile(monkeypatch, tmp_path):
+    class StopLoop(Exception):
+        pass
+
+    runtime_daemon = daemon.RuntimeManagerDaemon()
+    events = []
+    claimed = {"value": False}
+    claim_calls = {"count": 0}
+    command_path = tmp_path / "cmd-close.json"
+    command_payload = {
+        "commandId": "cmd-close",
+        "type": "close_workbench",
+        "requestedBy": "launcher_api",
+        "args": {"reason": "launcher_stop_button"},
+    }
+
+    monkeypatch.setattr(daemon, "ensure_runtime_manager_dirs", lambda: None)
+    _patch_daemon_ownership_available(monkeypatch)
+    monkeypatch.setattr(daemon, "save_pid", lambda pid: None)
+    monkeypatch.setattr(
+        daemon,
+        "load_state",
+        lambda: {
+            "runtimeState": "idle",
+            "managerPid": 0,
+            "daemonRunning": False,
+            "command": {},
+            "workbench": {"desiredState": "closed", "observedState": "open", "phase": "closing"},
+        },
+    )
+    monkeypatch.setattr(daemon, "now_iso", lambda: "2026-06-27T07:30:00+00:00")
+    monkeypatch.setattr(daemon, "_process_source_signature", lambda: "sig-current")
+    monkeypatch.setattr(daemon, "save_state", lambda state: events.append("save_state") or state)
+    monkeypatch.setattr(daemon, "recover_processing_queue", lambda: events.append("recover"))
+    monkeypatch.setattr(daemon, "complete_command", lambda path, result: events.append(("complete", path, result)))
+    monkeypatch.setattr(daemon, "clear_pid", lambda pid: None)
+
+    def fake_reconcile(self, state, *, observation=None):
+        if not claimed["value"]:
+            raise AssertionError("startup reconcile must not run before a pending lifecycle command is claimed")
+        events.append("reconcile_after_claim")
+        return state
+
+    def fake_claim_next_command():
+        claim_calls["count"] += 1
+        if claim_calls["count"] == 1:
+            claimed["value"] = True
+            events.append("claim")
+            return command_path, dict(command_payload)
+        if claim_calls["count"] == 2:
+            return None
+        raise StopLoop()
+
+    monkeypatch.setattr(type(runtime_daemon), "_reconcile_observation", fake_reconcile)
+    monkeypatch.setattr(daemon, "claim_next_command", fake_claim_next_command)
+    monkeypatch.setattr(
+        type(runtime_daemon),
+        "_handle_command",
+        lambda self, payload: events.append(("handle", payload))
+        or {"commandId": payload["commandId"], "ok": True, "message": "ok"},
+    )
+
+    with pytest.raises(StopLoop):
+        runtime_daemon.run_forever()
+
+    assert events.index("claim") < events.index("reconcile_after_claim")
+    assert ("handle", command_payload) in events
+
+
+def test_run_forever_emits_command_loop_ready_before_startup_reconcile(monkeypatch):
+    class StopLoop(Exception):
+        pass
+
+    runtime_daemon = daemon.RuntimeManagerDaemon()
+    order: list[str] = []
+
+    monkeypatch.setattr(daemon, "ensure_runtime_manager_dirs", lambda: None)
+    _patch_daemon_ownership_available(monkeypatch)
+    monkeypatch.setattr(daemon, "save_pid", lambda pid: None)
+    monkeypatch.setattr(
+        daemon,
+        "load_state",
+        lambda: {
+            "runtimeState": "idle",
+            "managerPid": 0,
+            "daemonRunning": False,
+            "command": {},
+            "workbench": {"desiredState": "closed", "observedState": "open", "phase": "closing"},
+        },
+    )
+    monkeypatch.setattr(daemon, "now_iso", lambda: "2026-06-27T08:15:00+00:00")
+    monkeypatch.setattr(daemon, "_process_source_signature", lambda: "sig-current")
+    monkeypatch.setattr(daemon, "save_state", lambda state: state)
+    monkeypatch.setattr(daemon, "recover_processing_queue", lambda: order.append("recover"))
+    monkeypatch.setattr(daemon, "clear_pid", lambda pid: None)
+    monkeypatch.setattr(daemon, "claim_next_command", lambda: order.append("claim") or (_ for _ in ()).throw(StopLoop()))
+
+    def fake_append_event(event_type, payload):
+        if event_type == "daemon.command_loop_ready":
+            order.append("ready")
+            assert payload["managerPid"] == runtime_daemon._pid
+            assert payload["startupReconcileDeferred"] is True
+
+    def fake_reconcile(self, state, *, observation=None):
+        order.append("reconcile")
+        return state
+
+    monkeypatch.setattr(daemon, "_append_event", fake_append_event)
+    monkeypatch.setattr(daemon.RuntimeManagerDaemon, "_reconcile_observation", fake_reconcile)
+
+    with pytest.raises(StopLoop):
+        runtime_daemon.run_forever()
+
+    assert order.index("recover") < order.index("ready") < order.index("claim")
+    assert "reconcile" not in order
 
 
 def test_daemon_unexpected_exit_marks_manager_not_running(monkeypatch):
@@ -4589,6 +4706,92 @@ def test_snapshot_residual_excluded_pids_includes_active_backend_parent(monkeypa
     )
 
     assert {32344, 44052, 37160, 26360}.issubset(excluded)
+
+
+def test_terminate_workbench_processes_reports_cleanup_stage_timings(monkeypatch, tmp_path):
+    class FakeProc:
+        def __init__(self, pid):
+            self.pid = pid
+            self.terminated = False
+            self.killed = False
+
+        def parent(self):
+            return None
+
+        def terminate(self):
+            self.terminated = True
+
+        def kill(self):
+            self.killed = True
+
+        def name(self):
+            return f"proc-{self.pid}"
+
+    root = tmp_path / "repo"
+    profile_dir = tmp_path / "profile"
+    repo_proc = process_inventory.RuntimeProcess(
+        pid=101,
+        parent_pid=1,
+        kind="managed_workbench_backend",
+        name="pythonw.exe",
+        command_line="pythonw scripts/web_workbench.py --managed-by-launcher --port 8000",
+        cwd=str(root),
+        port=8000,
+    )
+    live_processes = {101: FakeProc(101), 202: FakeProc(202)}
+
+    monkeypatch.setattr(process_inventory, "list_repo_runtime_processes", lambda project_root=None: [repo_proc])
+    monkeypatch.setattr(
+        process_inventory,
+        "managed_browser_process_payload",
+        lambda profile_dir, command_preview_chars=220: {
+            "items": [{"pid": 202, "name": "msedge.exe", "kind": "managed_workbench_browser"}]
+        },
+    )
+    monkeypatch.setattr(
+        process_inventory,
+        "_target_process_tree_pids",
+        lambda candidates, *, excluded: {item.pid for item in candidates if item.pid not in excluded},
+    )
+    live_scan_count = {"value": 0}
+
+    def fake_live_processes(pids):
+        live_scan_count["value"] += 1
+        if live_scan_count["value"] == 1:
+            return [live_processes[pid] for pid in sorted(pids) if pid in live_processes]
+        return []
+
+    monkeypatch.setattr(process_inventory, "_live_processes", fake_live_processes)
+    monkeypatch.setattr(process_inventory.time, "sleep", lambda seconds: None)
+    monkeypatch.setattr(process_inventory.psutil, "wait_procs", lambda processes, timeout: (list(processes), []))
+
+    result = process_inventory.terminate_workbench_processes(
+        project_root=root,
+        browser_profile_dir=profile_dir,
+        timeout_seconds=0.1,
+        verify_remaining_with_inventory=False,
+    )
+
+    assert result["requested"] == [101, 202]
+    assert result["terminated"] == [101, 202]
+    assert result["processCounts"] == {
+        "repoCandidates": 1,
+        "browserCandidates": 1,
+        "targetProcesses": 2,
+        "liveTargets": 2,
+        "remaining": 0,
+    }
+    assert {
+        "candidateScanMs",
+        "liveProcessCollectMs",
+        "terminateSignalMs",
+        "terminateWaitMs",
+        "killSignalMs",
+        "killWaitMs",
+        "remainingCheckMs",
+        "totalMs",
+    }.issubset(result["timingsMs"])
+    assert all(isinstance(result["timingsMs"][key], (int, float)) for key in result["timingsMs"])
 
 
 def test_run_launcher_action_passes_configured_port_to_launcher_env(monkeypatch):
