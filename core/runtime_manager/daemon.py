@@ -109,6 +109,8 @@ _CLOSE_VERIFICATION_TIMEOUT_SECONDS = 8.0
 _CLOSE_VERIFICATION_POLL_INTERVAL_SECONDS = 0.4
 _FAST_CLOSE_PROCESS_TERMINATE_TIMEOUT_SECONDS = 1.0
 _DEFERRED_RESTART_ACTIVE_WORK_POLL_SECONDS = 10.0
+_STARTUP_COMMAND_GRACE_SECONDS = 1.0
+_STARTUP_COMMAND_GRACE_POLL_SECONDS = 0.05
 _RESTART_BUILD_PREFLIGHT_TIMEOUT_SECONDS = 120.0
 _ACTIVE_WORK_LIFECYCLE_BLOCKED_MESSAGE = "有进行中的任务，无法重启 Vibelution。请等待任务完成或先停止任务。"
 
@@ -2237,6 +2239,65 @@ class RuntimeManagerDaemon:
         self._pid = os.getpid()
         self._owns_daemon_lock = False
 
+    def _claim_startup_grace_command(self) -> tuple[Path, dict[str, Any]] | None:
+        deadline = time.monotonic() + _STARTUP_COMMAND_GRACE_SECONDS
+        attempts = 0
+        while True:
+            attempts += 1
+            command = claim_next_command()
+            if command is not None:
+                _path, payload = command
+                _append_event(
+                    "daemon.startup_command_grace.claimed",
+                    {
+                        "managerPid": self._pid,
+                        "commandId": str(payload.get("commandId") or ""),
+                        "type": str(payload.get("type") or ""),
+                        "attempts": attempts,
+                        "graceMs": round(_STARTUP_COMMAND_GRACE_SECONDS * 1000.0, 1),
+                    },
+                )
+                return command
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return None
+            time.sleep(min(_STARTUP_COMMAND_GRACE_POLL_SECONDS, remaining))
+
+    def _process_claimed_command(self, path: Path, payload: dict[str, Any]) -> bool:
+        result = self._handle_command(payload)
+        if bool(result.get("deferCommandUntilActiveWorkClear")):
+            defer_processing_command_for_active_work(
+                path,
+                payload,
+                active_work_runs=list(result.get("activeWorkRuns") or []),
+                delay_seconds=_DEFERRED_RESTART_ACTIVE_WORK_POLL_SECONDS,
+            )
+            self._clear_active_command()
+            time.sleep(DAEMON_LOOP_INTERVAL_SECONDS)
+            return False
+        if bool(result.get("stopDaemon")):
+            shutdown_cleanup = _prepare_daemon_shutdown()
+            if shutdown_cleanup.get("closedEvolutionRuns"):
+                result["closedEvolutionRuns"] = shutdown_cleanup["closedEvolutionRuns"]
+            result["descendantCleanup"] = shutdown_cleanup.get("descendantCleanup")
+            result["rejectedPendingCommands"] = shutdown_cleanup.get("rejectedPendingCommands")
+            state = load_state()
+            if isinstance(state, dict):
+                state["runtimeState"] = "stopping"
+                state["managerPid"] = self._pid
+                state["daemonRunning"] = True
+                save_state(state)
+            _append_event("daemon.stopped", {"commandId": str(result.get("commandId") or "")})
+        complete_command(path, result)
+        if bool(result.get("runDeferredWorkbenchOpen")):
+            self._run_deferred_workbench_open(result)
+        if bool(result.get("stopDaemon")):
+            _finalize_daemon_stopped_state(manager_pid=self._pid)
+            clear_pid(self._pid)
+            _exit_current_process(0)
+            return True
+        return False
+
     def run_forever(self) -> None:
         ensure_runtime_manager_dirs()
         if not _claim_daemon_ownership(self._pid):
@@ -2267,41 +2328,20 @@ class RuntimeManagerDaemon:
                 command = claim_next_command()
                 if command is not None:
                     path, payload = command
-                    result = self._handle_command(payload)
-                    if bool(result.get("deferCommandUntilActiveWorkClear")):
-                        defer_processing_command_for_active_work(
-                            path,
-                            payload,
-                            active_work_runs=list(result.get("activeWorkRuns") or []),
-                            delay_seconds=_DEFERRED_RESTART_ACTIVE_WORK_POLL_SECONDS,
-                        )
-                        self._clear_active_command()
-                        time.sleep(DAEMON_LOOP_INTERVAL_SECONDS)
-                        continue
-                    if bool(result.get("stopDaemon")):
-                        shutdown_cleanup = _prepare_daemon_shutdown()
-                        if shutdown_cleanup.get("closedEvolutionRuns"):
-                            result["closedEvolutionRuns"] = shutdown_cleanup["closedEvolutionRuns"]
-                        result["descendantCleanup"] = shutdown_cleanup.get("descendantCleanup")
-                        result["rejectedPendingCommands"] = shutdown_cleanup.get("rejectedPendingCommands")
-                        state = load_state()
-                        if isinstance(state, dict):
-                            state["runtimeState"] = "stopping"
-                            state["managerPid"] = self._pid
-                            state["daemonRunning"] = True
-                            save_state(state)
-                        _append_event("daemon.stopped", {"commandId": str(result.get("commandId") or "")})
-                    complete_command(path, result)
-                    if bool(result.get("runDeferredWorkbenchOpen")):
-                        self._run_deferred_workbench_open(result)
-                    if bool(result.get("stopDaemon")):
-                        _finalize_daemon_stopped_state(manager_pid=self._pid)
-                        clear_pid(self._pid)
-                        _exit_current_process(0)
+                    if self._process_claimed_command(path, payload):
                         return
+                    if not startup_reconciled:
+                        startup_reconciled = True
                     continue
 
                 if not startup_reconciled:
+                    command = self._claim_startup_grace_command()
+                    if command is not None:
+                        path, payload = command
+                        if self._process_claimed_command(path, payload):
+                            return
+                        startup_reconciled = True
+                        continue
                     state = self._reconcile_observation(load_state())
                     save_state(state)
                     startup_reconciled = True
@@ -3636,17 +3676,27 @@ class RuntimeManagerDaemon:
         return final_result
 
     def _handle_force_close_workbench(self, *, command_id: str, args: dict[str, Any]) -> dict[str, Any]:
+        lifecycle_timings_ms: dict[str, Any] = {}
+        force_close_started = time.monotonic()
         reason = str(args.get("reason") or "explicit_force_close").strip() or "explicit_force_close"
         source = str(args.get("source") or "").strip()
         state = load_state()
         workbench = state.setdefault("workbench", {})
+        observation_started = time.monotonic()
         initial_observation = _observe_workbench_for_close()
+        lifecycle_timings_ms["initial_observation_ms"] = _elapsed_monotonic_ms(observation_started)
         already_satisfied = _close_request_already_satisfied(initial_observation) and not _closed_observation_has_residual_evidence(
             initial_observation
         )
+        active_work_started = time.monotonic()
         active_work_runs = _persistent_active_work_run_snapshots()
+        lifecycle_timings_ms["active_work_snapshot_ms"] = _elapsed_monotonic_ms(active_work_started)
+        evolution_close_started = time.monotonic()
         closed_runs = _close_active_evolution_runs_for_shutdown()
+        lifecycle_timings_ms["evolution_close_ms"] = _elapsed_monotonic_ms(evolution_close_started)
+        force_stop_runs_started = time.monotonic()
         force_stopped_runs = _mark_persistent_active_work_runs_force_stopped(reason)
+        lifecycle_timings_ms["force_stop_work_runs_ms"] = _elapsed_monotonic_ms(force_stop_runs_started)
 
         workbench.update(
             {
@@ -3658,7 +3708,9 @@ class RuntimeManagerDaemon:
                 "failureMessage": "",
             }
         )
+        state_reconcile_started = time.monotonic()
         save_state(self._reconcile_observation(state, observation=initial_observation))
+        lifecycle_timings_ms["state_reconcile_ms"] = _elapsed_monotonic_ms(state_reconcile_started)
         _append_event(
             "workbench.force_close.requested",
             _close_verification_event_payload(
@@ -3681,6 +3733,7 @@ class RuntimeManagerDaemon:
                     for item in active_work_runs[:8]
                     if isinstance(item, dict)
                 ],
+                "timingsMs": lifecycle_timings_ms,
             },
         )
         if already_satisfied:
@@ -3691,12 +3744,15 @@ class RuntimeManagerDaemon:
                 "remaining": [],
                 "skipped": "already_closed_no_residual",
             }
+            state_cleanup_started = time.monotonic()
             launcher_state_cleanup = _clear_launcher_state_after_verified_close(
                 initial_observation,
                 command_id=command_id,
                 cleanup_result=cleanup_result,
                 event_type="workbench.force_close.already_satisfied_state_cleanup",
             )
+            lifecycle_timings_ms["launcher_state_cleanup_ms"] = _elapsed_monotonic_ms(state_cleanup_started)
+            lifecycle_timings_ms["force_close_total_ms"] = _elapsed_monotonic_ms(force_close_started)
             _append_event(
                 "workbench.force_close.already_satisfied",
                 _close_verification_event_payload(
@@ -3705,7 +3761,7 @@ class RuntimeManagerDaemon:
                     message="Force close skipped process cleanup because the workbench was already closed.",
                     cleanup_result=cleanup_result,
                 )
-                | {"attempts": 0},
+                | {"attempts": 0, "timingsMs": lifecycle_timings_ms},
             )
             return self._finish_command(
                 command_id,
@@ -3717,16 +3773,35 @@ class RuntimeManagerDaemon:
                     "forceStoppedWorkRuns": force_stopped_runs,
                     "alreadySatisfied": True,
                     "launcherStateCleanup": launcher_state_cleanup,
+                    "lifecycleTimingsMs": lifecycle_timings_ms,
                 },
                 reconcile_observation=initial_observation,
             )
 
+        cleanup_started = time.monotonic()
         cleanup_result = self._force_cleanup_workbench_processes(initial_observation)
-        closed, verification, verification_attempts = _wait_for_close_verification()
+        lifecycle_timings_ms["force_cleanup_ms"] = _elapsed_monotonic_ms(cleanup_started)
+        verification_source = "observe_workbench"
+        verification_started = time.monotonic()
+        if _cleanup_result_confirms_workbench_closed(cleanup_result, initial_observation):
+            closed = True
+            verification = _closed_observation_from_cleanup_result(initial_observation, cleanup_result)
+            verification_attempts = 0
+            verification_source = "cleanup_result"
+        else:
+            closed, verification, verification_attempts = _wait_for_close_verification()
+        lifecycle_timings_ms["close_verification_ms"] = _elapsed_monotonic_ms(verification_started)
+        lifecycle_timings_ms["close_verification_attempts"] = verification_attempts
         if not closed:
+            retry_cleanup_started = time.monotonic()
             cleanup_retry_result = self._force_cleanup_workbench_processes(verification)
+            lifecycle_timings_ms["retry_cleanup_ms"] = _elapsed_monotonic_ms(retry_cleanup_started)
+            retry_verification_started = time.monotonic()
             closed, verification, retry_attempts = _wait_for_close_verification()
+            lifecycle_timings_ms["retry_verification_ms"] = _elapsed_monotonic_ms(retry_verification_started)
+            lifecycle_timings_ms["retry_verification_attempts"] = retry_attempts
             verification_attempts += retry_attempts
+            lifecycle_timings_ms["close_verification_attempts"] = verification_attempts
             cleanup_result = {
                 "first": cleanup_result,
                 "retry": cleanup_retry_result,
@@ -3734,6 +3809,7 @@ class RuntimeManagerDaemon:
 
         if not closed:
             message = _close_verification_failure_message(verification)
+            lifecycle_timings_ms["force_close_total_ms"] = _elapsed_monotonic_ms(force_close_started)
             _append_event(
                 "workbench.force_close.verification_failed",
                 _close_verification_event_payload(
@@ -3742,7 +3818,7 @@ class RuntimeManagerDaemon:
                     message=message,
                     cleanup_result=cleanup_result,
                 )
-                | {"attempts": verification_attempts},
+                | {"attempts": verification_attempts, "verificationSource": verification_source, "timingsMs": lifecycle_timings_ms},
             )
             return self._finish_command(
                 command_id,
@@ -3755,6 +3831,7 @@ class RuntimeManagerDaemon:
                     "residualCleanup": cleanup_result,
                     "closedEvolutionRuns": closed_runs,
                     "forceStoppedWorkRuns": force_stopped_runs,
+                    "lifecycleTimingsMs": lifecycle_timings_ms,
                 },
             )
 
@@ -3765,7 +3842,7 @@ class RuntimeManagerDaemon:
                 command_id=command_id,
                 cleanup_result=cleanup_result,
             )
-            | {"attempts": verification_attempts},
+            | {"attempts": verification_attempts, "verificationSource": verification_source, "timingsMs": lifecycle_timings_ms},
         )
         state = load_state()
         workbench = state.setdefault("workbench", {})
@@ -3776,13 +3853,18 @@ class RuntimeManagerDaemon:
                 "failureMessage": "",
             }
         )
+        final_reconcile_started = time.monotonic()
         save_state(self._reconcile_observation(state, observation=verification))
+        lifecycle_timings_ms["final_reconcile_ms"] = _elapsed_monotonic_ms(final_reconcile_started)
+        state_cleanup_started = time.monotonic()
         launcher_state_cleanup = _clear_launcher_state_after_verified_close(
             verification,
             command_id=command_id,
             cleanup_result=cleanup_result,
             event_type="workbench.force_close.launcher_state_cleanup",
         )
+        lifecycle_timings_ms["launcher_state_cleanup_ms"] = _elapsed_monotonic_ms(state_cleanup_started)
+        lifecycle_timings_ms["force_close_total_ms"] = _elapsed_monotonic_ms(force_close_started)
         return self._finish_command(
             command_id,
             ok=True,
@@ -3792,6 +3874,7 @@ class RuntimeManagerDaemon:
                 "closedEvolutionRuns": closed_runs,
                 "forceStoppedWorkRuns": force_stopped_runs,
                 "launcherStateCleanup": launcher_state_cleanup,
+                "lifecycleTimingsMs": lifecycle_timings_ms,
             },
             reconcile_observation=verification,
         )
