@@ -69,6 +69,7 @@ from core.web.services.supervised_control_service import (
     SupervisedRunValidationError,
     delete_supervised_run_snapshot,
     execute_supervised_action,
+    build_supervised_closed_loop_record,
     get_active_supervised_run,
     get_latest_supervised_run,
     get_supervised_runtime_manager_command_status,
@@ -213,6 +214,12 @@ def evolution_workspace_snapshot(includeSelf: bool = False) -> dict:
     )
     active_run = workbench.get("activeRun") if isinstance(workbench, dict) else None
     latest_run = timed("latest_run", lambda: get_latest_supervised_run(active_run=active_run, active_run_loaded=True))
+    latest_closed_loop_record = timed(
+        "latest_closed_loop_record",
+        lambda: latest_run.get("closedLoopRecord")
+        if isinstance(latest_run, dict) and isinstance(latest_run.get("closedLoopRecord"), dict)
+        else build_supervised_closed_loop_record(latest_run),
+    )
     current_agent_bindings = timed("current_agent_bindings", current_supervised_agent_bindings_snapshot)
     if isinstance(current_agent_bindings, dict):
         current_agent_binding_payload = current_agent_bindings.get("agentBindings") or {}
@@ -239,6 +246,7 @@ def evolution_workspace_snapshot(includeSelf: bool = False) -> dict:
         "workbench": workbench,
         "activeRun": active_run,
         "latestRun": latest_run,
+        "latestClosedLoopRecord": latest_closed_loop_record,
         "currentAgentBindings": current_agent_binding_payload,
         "currentAgentBindingSource": current_agent_binding_source,
         "currentAgentBindingStatus": current_agent_binding_status,

@@ -1243,6 +1243,114 @@ def test_runtime_manager_latest_supervised_run_reuses_loaded_active_snapshot(mon
     assert result["actionStates"]["pause"]["enabled"] is True
 
 
+def test_supervised_closed_loop_record_projects_decision_policy_and_role_sessions(tmp_path):
+    policy_path = tmp_path / "workspace" / "supervised_evolution" / "policy" / "supervised_session.json"
+    proposal_path = tmp_path / "workspace" / "evolution" / "proposals" / "candidate.json"
+    lineage_path = tmp_path / "workspace" / "evolution" / "proposals" / "lineage_index.json"
+    policy_path.parent.mkdir(parents=True, exist_ok=True)
+    proposal_path.parent.mkdir(parents=True, exist_ok=True)
+    lineage_path.parent.mkdir(parents=True, exist_ok=True)
+    policy_payload = {
+        "action": "HOLD",
+        "summary": "observe one more benchmark before promotion",
+        "policy_record_path": str(policy_path),
+        "proposal_paths": [str(proposal_path)],
+        "lineage_index_path": str(lineage_path),
+        "touched_files": [str(policy_path), str(proposal_path), str(lineage_path)],
+        "case_evidence": [{"case_id": "case_1"}],
+    }
+    policy_path.write_text(json.dumps(policy_payload), encoding="utf-8")
+    decision_path = tmp_path / "workspace" / "supervised_evolution" / "decisions" / "supervised_session.json"
+    decision_path.parent.mkdir(parents=True, exist_ok=True)
+    decision_path.write_text(
+        json.dumps(
+            {
+                "session_id": "supervised_session",
+                "decision": "HOLD",
+                "reason": "candidate needs another sample",
+                "policy_action": policy_payload,
+            }
+        ),
+        encoding="utf-8",
+    )
+    snapshot = {
+        "runId": "web-supervised-finished",
+        "status": "done",
+        "currentPhase": "done",
+        "runtimeStatus": "idle",
+        "sourceKind": "bundle",
+        "sessionId": "supervised_session",
+        "bundleName": "manual_bundle",
+        "datasetName": "",
+        "datasetLimit": 1,
+        "startedAt": "2026-06-27T10:00:00Z",
+        "updatedAt": "2026-06-27T10:04:00Z",
+        "finishedAt": "2026-06-27T10:04:00Z",
+        "decision": "HOLD",
+        "reason": "candidate needs another sample",
+        "decisionPath": str(decision_path),
+        "policyAction": "HOLD",
+        "lineageIndexPath": str(lineage_path),
+        "lineageSummary": "candidate recorded as observation",
+        "currentCasePrompt": "this prompt must not be copied into the closed-loop ledger",
+        "roleConversationSessions": {
+            "baseline": {
+                "role": "baseline",
+                "status": "completed",
+                "conversationSessionId": "session-baseline",
+                "conversationTurnId": "turn-baseline",
+                "caseId": "case_1",
+            },
+            "candidate": {
+                "role": "candidate",
+                "status": "completed",
+                "conversationSessionId": "session-candidate",
+                "conversationTurnId": "turn-candidate",
+                "caseId": "case_1",
+                "latestMessage": "candidate answer",
+            },
+            "judge": {
+                "role": "judge",
+                "status": "completed",
+                "conversationSessionId": "session-judge",
+                "conversationTurnId": "turn-judge",
+                "caseId": "case_1",
+            },
+            "reviewer": {
+                "role": "reviewer",
+                "status": "legacy",
+                "conversationSessionId": "session-reviewer",
+            },
+        },
+        "agentBindings": _valid_agent_bindings(),
+        "actionStates": {"retry": {"enabled": True, "reason": ""}},
+    }
+
+    record = service.build_supervised_closed_loop_record(snapshot)
+
+    assert record["runId"] == "web-supervised-finished"
+    assert record["sessionId"] == "supervised_session"
+    assert record["status"] == "done"
+    assert record["decision"] == "HOLD"
+    assert record["policyAction"] == "HOLD"
+    assert record["recordStatus"] == "ready_for_review"
+    assert record["roleSessions"]["baseline"]["conversationSessionId"] == "session-baseline"
+    assert record["roleSessions"]["candidate"]["conversationSessionId"] == "session-candidate"
+    assert record["roleSessions"]["judge"]["conversationSessionId"] == "session-judge"
+    assert "reviewer" not in record["roleSessions"]
+    assert record["evidence"]["decisionPath"] == str(decision_path)
+    assert record["evidence"]["policyRecordPath"] == str(policy_path)
+    assert record["evidence"]["lineageIndexPath"] == str(lineage_path)
+    assert record["evidence"]["proposalPaths"] == [str(proposal_path)]
+    assert record["counts"]["roleSessionCount"] == 3
+    assert record["counts"]["proposalCount"] == 1
+    assert record["counts"]["caseEvidenceCount"] == 1
+    assert record["nextAction"]["kind"] == "observe"
+    assert "currentCasePrompt" not in json.dumps(record)
+    decorated = service._decorate_supervised_snapshot(copy.deepcopy(snapshot))
+    assert decorated["closedLoopRecord"]["runId"] == "web-supervised-finished"
+
+
 def test_runtime_manager_workbench_can_skip_catalog_scan(monkeypatch):
     monkeypatch.setattr(service, "_runtime_manager_live_control_enabled", lambda: True)
     monkeypatch.setattr(service, "default_bundle_name", lambda: "default_bundle")

@@ -88,8 +88,8 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).toContain('normalizedDecision === "INCONCLUSIVE"');
     expect(routeSource).toContain("statusIcon(monitoredRun.status, monitoredRun.decision)");
     expect(routeSource).toContain("monitoredStatusLabel");
-    expect(routeSource).toContain("latestRunStatusLabel");
-    expect(routeSource).toContain("latestSupervisedResult");
+    expect(routeSource).toContain("supervisedClosedLoopDecisionLabel");
+    expect(routeSource).toContain("closedLoopLedger");
     expect(routeSource).toContain('status === "agent_harness_ready"');
     expect(routeSource).toContain('status === "custom_harness_ready"');
     expect(routeSource).toContain("自定义评测");
@@ -116,7 +116,7 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(dictionarySource).not.toContain('retrySupervisedRun: "重跑失败项"');
   });
 
-  it("keeps the latest finished supervised run in the idle result instead of the live monitor", () => {
+  it("keeps the latest finished supervised run out of the live monitor and into the closed-loop ledger", () => {
     expect(routeSource).toContain("queryKeys.evolutionWorkspaceSnapshot()");
     expect(routeSource).toContain('"/api/evolution/workspace-snapshot"');
     expect(routeSource).toContain("latestSupervisedRunSnapshot");
@@ -129,7 +129,10 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).toContain("const supervisedMembersBindings = supervisedMembersUseRunBindings");
     expect(routeSource).not.toContain("supervisedMembersRun = monitoredRun\n    ?? latestSupervisedRunSnapshot");
     expect(routeSource).not.toContain("latestSupervisedRunSnapshot?.agentBindings");
-    expect(routeSource).toContain("styles.latestSupervisedResult");
+    expect(routeSource).toContain("const supervisedClosedLoopRecord");
+    expect(routeSource).toContain("workspaceSnapshot?.latestClosedLoopRecord");
+    expect(routeSource).not.toContain("styles.latestSupervisedResult");
+    expect(routeSource).toContain("styles.closedLoopLedger");
   });
 
   it("loads self-evolution from dedicated endpoints before falling back to the workspace snapshot", () => {
@@ -308,6 +311,21 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).toContain("const supervisedStartSubmitting = startRunMutation.isPending || isLocalSupervisedStartPlaceholder(liveActiveRun)");
     expect(routeSource).toContain("监督运行中");
     expect(routeSource).toContain("supervisedStartButtonLabel");
+  });
+
+  it("keeps supervised closed-loop review in a dedicated ledger projection", () => {
+    expect(apiTypesSource).toContain("export type EvolutionClosedLoopRecord");
+    expect(apiTypesSource).toContain("export type EvolutionClosedLoopRoleSession");
+    expect(apiTypesSource).toContain("closedLoopRecord?: EvolutionClosedLoopRecord | null");
+    expect(apiTypesSource).toContain("latestClosedLoopRecord: EvolutionClosedLoopRecord | null");
+    expect(routeSource).toContain("const supervisedClosedLoopRecord");
+    expect(routeSource).toContain("workspaceSnapshot?.latestClosedLoopRecord");
+    expect(routeSource).toContain("styles.closedLoopLedger");
+    expect(routeSource).toContain("styles.closedLoopLedgerEvidenceGrid");
+    expect(routeSource).toContain("闭环记录库");
+    expect(routeSource).toContain("审查入口");
+    expect(routeSource).toContain("supervisedClosedLoopRecord.nextAction");
+    expect(routeSource).toContain("supervisedClosedLoopRecord.evidence.proposalPaths.length");
   });
 
   it("explains closed-loop launch and dataset case limits without changing review actions", () => {

@@ -53,6 +53,7 @@ import {
   SelfEvolutionRunStreamEvent,
   EvolutionRun,
   EvolutionRoleConversationSession,
+  EvolutionClosedLoopRecord,
 } from "../api/types";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
 import { PaneCollapseHandle } from "../components/layout/PaneCollapseHandle";
@@ -142,6 +143,7 @@ type SupervisedRunMember = {
   chatRoute: string;
   configRoute: string;
 };
+type SupervisedClosedLoopRecord = EvolutionClosedLoopRecord;
 type SupervisedMemberStep = {
   id: SupervisedMemberStepId;
   zh: string;
@@ -1144,6 +1146,10 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     && !selfOverview
     && (selfOverviewQuery.isLoading || workspaceSnapshotQuery.isLoading);
   const latestRun = runs[0] ?? null;
+  const supervisedClosedLoopRecord: SupervisedClosedLoopRecord | null =
+    workspaceSnapshot?.latestClosedLoopRecord
+    ?? latestSupervisedRunSnapshot?.closedLoopRecord
+    ?? null;
   const showTrackToggle = !forcedTrack && selfTrackEnabled && supervisedTrackEnabled;
   const routeEyebrow = activeTrack === "self" ? t("navSelfEvolution") : t("navSupervisedEvolution");
   const routeTitle =
@@ -1304,9 +1310,13 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
       .map((role) => supervisedRunMemberByRole.get(role))
       .filter((member): member is SupervisedRunMember => Boolean(member)),
   }));
-  const latestRunStatusLabel = latestRun?.decision
-    ? displayDecisionLabel(latestRun.decision)
-    : statusLabel(latestRun?.status || "");
+  const supervisedClosedLoopDecisionLabel = supervisedClosedLoopRecord?.decision
+    ? displayDecisionLabel(supervisedClosedLoopRecord.decision)
+    : statusLabel(supervisedClosedLoopRecord?.status || "");
+  const supervisedClosedLoopProposalCount = supervisedClosedLoopRecord ? supervisedClosedLoopRecord.evidence.proposalPaths.length : 0;
+  const supervisedClosedLoopLineageLabel = supervisedClosedLoopRecord?.evidence.lineageIndexPath
+    ? (lang === "zh" ? "已记录" : "Recorded")
+    : "--";
   const supervisedMembersRunStatusLabel = supervisedMembersRun?.decision === "INCONCLUSIVE"
     ? displayDecisionLabel(supervisedMembersRun.decision)
     : statusLabel(supervisedMembersRun?.status || "");
@@ -3323,26 +3333,60 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
               ) : (
                 <div className={styles.idleMonitor}>
                   <p className={styles.noticeText}>{t("noActiveSupervisedRun")}</p>
-                  {latestRun ? (
-                    <div className={styles.latestSupervisedResult}>
-                      <div className={styles.latestSupervisedResultHeader}>
-                        <span className={latestRun.status === "failed" ? styles.statusPill : styles.secondaryPill}>
-                          {latestRunStatusLabel || "--"}
+                  {supervisedClosedLoopRecord ? (
+                    <div className={styles.closedLoopLedger}>
+                      <div className={styles.closedLoopLedgerHeader}>
+                        <div>
+                          <span className={styles.eyebrow}>{lang === "zh" ? "闭环记录库" : "Closed-loop ledger"}</span>
+                          <strong className={styles.truncateText} title={supervisedClosedLoopRecord.runId}>
+                            {supervisedClosedLoopRecord.runId}
+                          </strong>
+                        </div>
+                        <span className={supervisedClosedLoopRecord.status === "failed" ? styles.statusPill : styles.secondaryPill}>
+                          {supervisedClosedLoopDecisionLabel || "--"}
                         </span>
-                        <strong className={styles.truncateText} title={latestRun.id}>{latestRun.id}</strong>
                       </div>
-                      <p title={latestRun.diagnosis || latestRun.summary || latestRun.nextAction}>
+                      <p>
                         {displaySupervisedTechnicalText(
-                          latestRun.diagnosis || latestRun.summary || latestRun.nextAction,
-                          latestRun.decision,
+                          supervisedClosedLoopRecord.policySummary
+                          || supervisedClosedLoopRecord.reason
+                          || supervisedClosedLoopRecord.nextAction.description,
+                          supervisedClosedLoopRecord.decision,
                           lang,
                           decisionLabel,
-                        )}
+                        ) || "--"}
                       </p>
-                      <div className={styles.latestSupervisedResultMeta}>
-                        <span>baseline {latestRun.baselineScore}</span>
-                        <span>candidate {latestRun.candidateScore}</span>
-                        <span>{compactTimestamp(latestRun.endedAt)}</span>
+                      <div className={styles.closedLoopLedgerEvidenceGrid}>
+                        <article>
+                          <span>{lang === "zh" ? "审查入口" : "Review entry"}</span>
+                          <strong>{supervisedClosedLoopRecord.nextAction.label || "--"}</strong>
+                        </article>
+                        <article>
+                          <span>{lang === "zh" ? "Agent 会话" : "Agent sessions"}</span>
+                          <strong>{supervisedClosedLoopRecord.counts.roleSessionCount}</strong>
+                        </article>
+                        <article>
+                          <span>{lang === "zh" ? "提案证据" : "Proposal evidence"}</span>
+                          <strong>{supervisedClosedLoopProposalCount}</strong>
+                        </article>
+                        <article>
+                          <span>{lang === "zh" ? "lineage" : "lineage"}</span>
+                          <strong>{supervisedClosedLoopLineageLabel}</strong>
+                        </article>
+                      </div>
+                      <div className={styles.actionRow}>
+                        <button
+                          type="button"
+                          className={styles.inlineAction}
+                          onClick={() => {
+                            setLibraryView("pending");
+                            goToSupervisedView("library");
+                          }}
+                          title={supervisedClosedLoopRecord.nextAction.description}
+                        >
+                          <LibraryBig size={15} />
+                          {lang === "zh" ? "审查入口" : "Review"}
+                        </button>
                       </div>
                     </div>
                   ) : null}
