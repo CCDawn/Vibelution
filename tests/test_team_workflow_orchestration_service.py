@@ -5450,6 +5450,27 @@ def test_source_collection_summary_uses_lightweight_team_existence(tmp_path, mon
     assert payload["stageCardSummary"]["sourceCandidateCount"] == 1
 
 
+def test_research_stage_round_status_uses_lightweight_team_snapshot(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = team_service.create_team(name="挑战杯科研团队")
+    team_workflow_orchestration_service.ensure_team_workflow_orchestration(team["teamId"])
+
+    def fail_full_team_read(team_id):
+        raise AssertionError("stage round status must not hydrate full team detail")
+
+    monkeypatch.setattr(team_workflow_orchestration_service.team_service, "get_team", fail_full_team_read)
+
+    payload = team_workflow_orchestration_service.get_research_stage_round_status(team["teamId"])
+
+    assert payload["teamId"] == team["teamId"]
+    assert payload["roundCount"] == 0
+    assert payload["currentStage"] == "knowledge_collection"
+    assert {phase["stageType"] for phase in payload["phases"]} == set(
+        team_workflow_orchestration_service.RESEARCH_STAGE_TYPES
+    )
+    assert {phase["coordinationRoomId"] for phase in payload["phases"]} == {team["linkedChatRoomId"]}
+
+
 def test_source_collection_stage_card_projection_resolves_current_stage_agents_once(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     team = team_service.create_team(name="挑战杯科研团队")
@@ -5588,6 +5609,7 @@ def test_source_collection_stage_card_projection_keeps_ready_artifact_when_lates
 
 def test_load_source_collection_work_run_summary_cleanses_invalid_storage_path(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
     team = team_service.create_team(name="挑战杯科研团队")
     source_work_runs = WorkRunStore(root=tmp_path / ".runtime" / "work_runs")
     monkeypatch.setattr(
@@ -5595,9 +5617,18 @@ def test_load_source_collection_work_run_summary_cleanses_invalid_storage_path(t
         "_source_collection_work_run_store",
         lambda: source_work_runs,
     )
+    run_response = team_workflow_orchestration_service.start_source_collection_run(
+        team["teamId"],
+        {
+            "topic": "predictive coding",
+            "agentRoles": ["data_discovery"],
+            "querySeeds": ["predictive coding"],
+            "promptCachePolicy": {"requirement": "disabled"},
+        },
+    )
+    run_id = run_response["run"]["runId"]
     invalid_path = tmp_path / "workspace" / "legacy-source-collection-run"
     invalid_path.mkdir(parents=True, exist_ok=True)
-    run_id = "run-invalid-storage-path"
 
     source_work_runs.persist_snapshot(
         team_workflow_orchestration_service.SOURCE_COLLECTION_WORK_RUN_KIND,
@@ -5618,6 +5649,39 @@ def test_load_source_collection_work_run_summary_cleanses_invalid_storage_path(t
     assert "storagePath" not in summary["active"]
     assert "pathValidationError" in summary["active"]
     assert "pathValidationError" in summary["latest"]
+
+
+def test_load_source_collection_work_run_summary_marks_missing_data_run_stale(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = team_service.create_team(name="挑战杯科研团队")
+    source_work_runs = WorkRunStore(root=tmp_path / ".runtime" / "work_runs")
+    monkeypatch.setattr(
+        team_workflow_orchestration_service,
+        "_source_collection_work_run_store",
+        lambda: source_work_runs,
+    )
+    run_id = "dprun-missing-source-data-run"
+
+    source_work_runs.persist_snapshot(
+        team_workflow_orchestration_service.SOURCE_COLLECTION_WORK_RUN_KIND,
+        {
+            "runId": run_id,
+            "runKind": team_workflow_orchestration_service.SOURCE_COLLECTION_WORK_RUN_KIND,
+            "status": "running",
+            "teamId": team["teamId"],
+            "updatedAt": "2026-06-27T10:40:00Z",
+        },
+        active_run_id=run_id,
+    )
+
+    summary = team_workflow_orchestration_service.load_source_collection_work_run_summary()
+
+    assert summary["active"] is None
+    assert summary["activeItems"] == []
+    assert summary["latest"]["runId"] == run_id
+    assert summary["latest"]["dataRunExists"] is False
+    assert summary["latest"]["staleReason"] == "missing_data_processing_run"
+    assert "missing_data_processing_run" in summary["latest"]["staleReasons"]
 
 
 def test_source_collection_summary_cleanses_active_work_run_invalid_storage_path(tmp_path, monkeypatch):
@@ -7140,6 +7204,47 @@ def test_knowledge_collection_completion_background_failure_logs_child_payload(t
     assert failed_nodes["candidate"]["status"] == "failed"
     assert failed_nodes["candidate"]["errorType"] == "TeamWorkflowOrchestrationError"
     assert "Source extraction failed" in failed_flow["error"]
+
+
+def test_knowledge_ingestion_status_backfills_failed_completion_flow(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    isolated_store = WorkRunStore(root=tmp_path / "completion-work-runs")
+    monkeypatch.setattr(
+        team_workflow_orchestration_service,
+        "_knowledge_ingestion_work_run_store",
+        lambda: isolated_store,
+    )
+    team = team_service.create_team(name="挑战杯科研团队", members=[])
+    run_id = "knowledge-completion-flowless-failure"
+
+    isolated_store.persist_snapshot(
+        team_workflow_orchestration_service.KNOWLEDGE_INGESTION_WORK_RUN_KIND,
+        {
+            "runId": run_id,
+            "runKind": team_workflow_orchestration_service.KNOWLEDGE_INGESTION_WORK_RUN_KIND,
+            "teamId": team["teamId"],
+            "status": "failed",
+            "currentPhase": "knowledge_ingestion",
+            "error": "Knowledge review grant failed: Knowledge base id is ambiguous across owners.",
+            "errorType": "TeamWorkflowOrchestrationError",
+            "summary": {"formalKnowledgeItemCount": 0},
+            "updatedAt": "2026-06-27T10:42:00Z",
+        },
+        active_run_id=run_id,
+    )
+
+    status = team_workflow_orchestration_service.get_knowledge_ingestion_status(team["teamId"])
+    latest_run = status["latestWorkRun"]
+    flow = latest_run["flowVisualization"]
+    nodes = {node["stageId"]: node for node in flow["nodes"]}
+
+    assert status["activeWorkRun"] is None
+    assert latest_run["runId"] == run_id
+    assert flow["status"] == "failed"
+    assert flow["currentStageId"] == "memory"
+    assert nodes["memory"]["status"] == "failed"
+    assert nodes["memory"]["errorType"] == "TeamWorkflowOrchestrationError"
+    assert "Knowledge review grant failed" in flow["error"]
 
 
 def test_knowledge_collection_completion_runs_search_extract_before_ingestion(tmp_path, monkeypatch):
