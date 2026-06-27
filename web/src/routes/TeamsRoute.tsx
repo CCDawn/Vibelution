@@ -482,6 +482,7 @@ function sourceCollectionStageProjectionCount(
 function sourceCollectionCoverageMetric(
   coverage: SourceCollectionCoverageSummary | null | undefined,
   lang: "zh" | "en",
+  stageId?: SourceCollectionStageModuleId | string | null,
 ) {
   if (!coverage?.applicable) {
     return "";
@@ -494,9 +495,35 @@ function sourceCollectionCoverageMetric(
     return "";
   }
   if (lang === "zh") {
-    return `已处理 ${processed}/${total}${missing > 0 ? ` · 待补读 ${missing}` : ""}${invalid > 0 ? ` · 无效 ID ${invalid}` : ""}`;
+    const normalizedStageId = String(stageId || "").toLowerCase();
+    const stageCopy: Record<string, { verb: string; missing: string }> = {
+      collection: { verb: "已读取", missing: "待补读" },
+      candidate: { verb: "已提炼", missing: "待补提炼" },
+      screening: { verb: "已审", missing: "待补审" },
+      graph: { verb: "已建图", missing: "待补建图" },
+      memory: { verb: "已审核", missing: "待补入库审核" },
+    };
+    const copy = stageCopy[normalizedStageId] ?? { verb: "已处理", missing: "待补读" };
+    return `${copy.verb} ${processed}/${total}${missing > 0 ? ` · ${copy.missing} ${missing}` : ""}${invalid > 0 ? ` · 无效 ID ${invalid}` : ""}`;
   }
   return `processed ${processed}/${total}${missing > 0 ? ` · missing ${missing}` : ""}${invalid > 0 ? ` · invalid IDs ${invalid}` : ""}`;
+}
+
+function sourceCollectionStageTaskStatusLabel(status: string | null | undefined, lang: "zh" | "en") {
+  const normalized = String(status || "").trim().toLowerCase();
+  if (lang !== "zh") {
+    return normalized || "task";
+  }
+  const labels: Record<string, string> = {
+    queued: "待执行",
+    running: "进行中",
+    completed: "已回写",
+    needs_review: "待补齐",
+    blocked: "受阻",
+    failed: "失败",
+    cancelled: "已取消",
+  };
+  return labels[normalized] ?? (normalized || "任务");
 }
 
 function sourceCollectionStageProjectionTaskMetric(
@@ -517,14 +544,15 @@ function sourceCollectionStageProjectionTaskMetric(
   }
   const evidenceCount = typeof latestTask.evidenceRefCount === "number" ? latestTask.evidenceRefCount : 0;
   const nextActionCount = typeof latestTask.nextActionCount === "number" ? latestTask.nextActionCount : 0;
-  const coverageMetric = sourceCollectionCoverageMetric(latestTask.coverageSummary, lang);
+  const taskStatusLabel = sourceCollectionStageTaskStatusLabel(latestTask.status || projection?.agentTaskStatus, lang);
+  const coverageMetric = sourceCollectionCoverageMetric(latestTask.coverageSummary, lang, projection?.stageId);
   if (coverageMetric) {
-    return `${latestTask.status || projection?.agentTaskStatus || (lang === "zh" ? "任务" : "task")} · ${coverageMetric}${historicalTaskCount > 0 ? (lang === "zh" ? ` · 历史 ${historicalTaskCount}` : ` · historical ${historicalTaskCount}`) : ""}`;
+    return `${taskStatusLabel} · ${coverageMetric}${historicalTaskCount > 0 ? (lang === "zh" ? ` · 历史 ${historicalTaskCount}` : ` · historical ${historicalTaskCount}`) : ""}`;
   }
   if (lang === "zh") {
-    return `${latestTask.status || projection?.agentTaskStatus || "任务"} · 证据 ${evidenceCount} · 后续 ${nextActionCount}${historicalTaskCount > 0 ? ` · 历史 ${historicalTaskCount}` : ""}`;
+    return `${taskStatusLabel} · 证据 ${evidenceCount} · 后续 ${nextActionCount}${historicalTaskCount > 0 ? ` · 历史 ${historicalTaskCount}` : ""}`;
   }
-  return `${latestTask.status || projection?.agentTaskStatus || "task"} · evidence ${evidenceCount} · next ${nextActionCount}${historicalTaskCount > 0 ? ` · historical ${historicalTaskCount}` : ""}`;
+  return `${taskStatusLabel} · evidence ${evidenceCount} · next ${nextActionCount}${historicalTaskCount > 0 ? ` · historical ${historicalTaskCount}` : ""}`;
 }
 
 function sourceCollectionStageArtifactSummaryLabel(
@@ -546,14 +574,14 @@ function sourceCollectionStageArtifactSummaryLabel(
     return `${artifact} 条原始资料；${pending} 个搜索任务待执行`;
   }
   if (projection.stageId === "candidate") {
-    const coverage = sourceCollectionCoverageMetric(projection.latestTask?.coverageSummary, lang);
+    const coverage = sourceCollectionCoverageMetric(projection.latestTask?.coverageSummary, lang, projection.stageId);
     if (coverage) {
       return coverage;
     }
     return `${artifact} 条候选资料来自本轮`;
   }
   if (projection.stageId === "screening") {
-    const coverage = sourceCollectionCoverageMetric(projection.latestTask?.coverageSummary, lang);
+    const coverage = sourceCollectionCoverageMetric(projection.latestTask?.coverageSummary, lang, projection.stageId);
     if (coverage) {
       return coverage;
     }
@@ -7544,7 +7572,7 @@ export function TeamsRoute({
     const candidateListNeedsScrollHint = visibleCandidates.length > 4;
     const candidateProjection = sourceCollectionCandidateProjection;
     const candidateLatestTask = candidateProjection?.latestTask;
-    const candidateCoverageMetric = sourceCollectionCoverageMetric(candidateLatestTask?.coverageSummary, lang);
+    const candidateCoverageMetric = sourceCollectionCoverageMetric(candidateLatestTask?.coverageSummary, lang, "candidate");
     const candidateInvalidIdCount = Array.isArray(candidateLatestTask?.invalidCandidateIds)
       ? candidateLatestTask.invalidCandidateIds.length
       : 0;
@@ -7605,7 +7633,10 @@ export function TeamsRoute({
             </div>
             {candidateLatestTask?.taskId ? (
               <div>
-                <span>{lang === "zh" ? "Agent 任务" : "Agent task"} <strong>{candidateLatestTask.status || candidateProjection.agentTaskStatus || "-"}</strong></span>
+                <span>
+                  {lang === "zh" ? "Agent 任务" : "Agent task"}{" "}
+                  <strong>{sourceCollectionStageTaskStatusLabel(candidateLatestTask.status || candidateProjection.agentTaskStatus, lang)}</strong>
+                </span>
                 {candidateCoverageMetric ? (
                   <span>{candidateCoverageMetric}</span>
                 ) : null}
@@ -10885,7 +10916,14 @@ export function TeamsRoute({
     }
     const coverage = projection.latestTask?.coverageSummary;
     if (coverage?.applicable && coverage.complete === false) {
-      return lang === "zh" ? "覆盖不足 · 待补读" : "partial coverage";
+      const incompleteLabels: Record<SourceCollectionStageModuleId, { zh: string; en: string }> = {
+        collection: { zh: "覆盖不足 · 待补读", en: "partial source coverage" },
+        candidate: { zh: "覆盖不足 · 待补提炼", en: "partial extraction coverage" },
+        screening: { zh: "覆盖不足 · 待补审", en: "partial review coverage" },
+        graph: { zh: "覆盖不足 · 待补建图", en: "partial graph coverage" },
+        memory: { zh: "覆盖不足 · 待补入库审核", en: "partial steward coverage" },
+      };
+      return incompleteLabels[projection.stageId]?.[lang] ?? (lang === "zh" ? "覆盖不足" : "partial coverage");
     }
     if (projection.status === "pending" && Number(projection.counts?.artifact ?? 0) > 0) {
       return lang === "zh" ? "产物部分就绪" : "partial artifact ready";
@@ -10895,7 +10933,7 @@ export function TeamsRoute({
           agent_running: "Agent 进行中",
           closed_loop: "闭环完成",
           artifact_ready_no_latest_agent_task: "产物已就绪",
-          agent_done_artifact_pending: "Agent 已完成 · 产物待生成",
+          agent_done_artifact_pending: "Agent 已回写，仍待补产物",
           agent_blocked: "Agent 受阻",
           pending: "待 Agent 产出",
           idle: "未开始",
@@ -10904,7 +10942,7 @@ export function TeamsRoute({
           agent_running: "Agent running",
           closed_loop: "closed loop",
           artifact_ready_no_latest_agent_task: "artifact ready",
-          agent_done_artifact_pending: "Agent done · artifact pending",
+          agent_done_artifact_pending: "Agent wrote back · artifact pending",
           agent_blocked: "Agent blocked",
           pending: "pending",
           idle: "not started",
