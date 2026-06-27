@@ -109,6 +109,65 @@ def test_session_assistant_delta_queue_merges_feedback_events_for_same_turn_delt
     ]
 
 
+def test_session_assistant_delta_queue_updates_unsequenced_feedback_event():
+    subscriber = queue.Queue(maxsize=4)
+    subscriber.put_nowait(
+        {
+            "type": "assistant_delta",
+            "sessionId": "session-live",
+            "turnId": "turn-1",
+            "contentDelta": "",
+            "thoughtDelta": "",
+            "replaceContent": False,
+            "replaceThought": False,
+            "feedbackEvents": [
+                {
+                    "sequence": 0,
+                    "kind": "tool",
+                    "status": "running",
+                    "name": "source_collection_context_tool",
+                    "summary": "正在读取受控资料上下文",
+                }
+            ],
+        },
+    )
+
+    merged, dropped = session_service._coalesce_session_assistant_delta_queue(
+        subscriber,
+        {
+            "type": "assistant_delta",
+            "sessionId": "session-live",
+            "turnId": "turn-1",
+            "contentDelta": "",
+            "thoughtDelta": "",
+            "replaceContent": False,
+            "replaceThought": False,
+            "feedbackEvents": [
+                {
+                    "sequence": 0,
+                    "kind": "tool",
+                    "status": "done",
+                    "name": "source_collection_context_tool",
+                    "summary": "上下文已读取",
+                    "resultPreview": "candidatePage.returned=19",
+                }
+            ],
+        },
+    )
+
+    assert dropped == 1
+    assert merged["feedbackEvents"] == [
+        {
+            "sequence": 0,
+            "kind": "tool",
+            "status": "done",
+            "name": "source_collection_context_tool",
+            "summary": "上下文已读取",
+            "resultPreview": "candidatePage.returned=19",
+        }
+    ]
+
+
 def test_completed_visible_reply_with_tool_trace_is_terminal():
     result = {
         "status": "completed",

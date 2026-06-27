@@ -33,6 +33,7 @@ import { fetchJson } from "../../api/client";
 import { useAppI18n } from "../../i18n/useAppI18n";
 import { shouldSubmitComposerOnKeydown } from "./composerShortcuts";
 import { COMPOSER_SESSION_REFERENCE_MIME } from "./conversationConstants";
+import { mergeConversationFeedbackEvents } from "./conversationFeedbackEvents";
 import {
   buildConversationOperationGroups,
   buildConversationReActOperationGroups,
@@ -658,6 +659,10 @@ function mergeLiveOverlayIntoActiveTurnMessage(
   liveOverlayMessage: ConversationMessage,
   activeTurnMessage: ConversationMessage,
 ): ConversationMessage {
+  const feedbackEvents = mergeConversationFeedbackEvents(
+    liveOverlayMessage.feedbackEvents,
+    activeTurnMessage.feedbackEvents,
+  );
   return {
     ...liveOverlayMessage,
     ...activeTurnMessage,
@@ -666,7 +671,7 @@ function mergeLiveOverlayIntoActiveTurnMessage(
     streamStage: activeTurnMessage.streamStage || liveOverlayMessage.streamStage,
     streaming: activeTurnMessage.streaming ?? liveOverlayMessage.streaming,
     mentalSnapshot: activeTurnMessage.mentalSnapshot ?? liveOverlayMessage.mentalSnapshot,
-    feedbackEvents: mergeUniqueJsonItems(liveOverlayMessage.feedbackEvents, activeTurnMessage.feedbackEvents),
+    feedbackEvents: feedbackEvents.length > 0 ? feedbackEvents : undefined,
     timelineItems: mergeUniqueJsonItems(liveOverlayMessage.timelineItems, activeTurnMessage.timelineItems),
     toolCalls: mergeUniqueJsonItems(liveOverlayMessage.toolCalls, activeTurnMessage.toolCalls),
     attachments: mergeUniqueJsonItems(liveOverlayMessage.attachments, activeTurnMessage.attachments),

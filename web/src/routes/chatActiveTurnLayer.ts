@@ -1,9 +1,5 @@
-import type {
-  ConversationFeedbackEvent,
-  ConversationMessage,
-  SessionDetail,
-  SessionStreamEvent,
-} from "../api/types";
+import { mergeConversationFeedbackEvents } from "../components/conversation/conversationFeedbackEvents";
+import type { ConversationMessage, SessionDetail, SessionStreamEvent } from "../api/types";
 
 export type AssistantDeltaEvent = Extract<SessionStreamEvent, { type: "assistant_delta" }>;
 export type ActiveTurnLayerMessage = ConversationMessage;
@@ -21,40 +17,6 @@ function isStaleLedgerUpdate(currentSeq: unknown, incomingSeq: unknown): boolean
 
 function activeTurnMessageId(sessionId: string, turnId: string) {
   return `${sessionId}-message-active-${turnId || "current"}`;
-}
-
-function feedbackEventKey(event: ConversationFeedbackEvent) {
-  const sequence = Number(event.sequence ?? 0);
-  if (Number.isFinite(sequence) && sequence > 0) {
-    return `seq:${sequence}`;
-  }
-  return [
-    event.kind ?? "",
-    event.name ?? "",
-    event.status ?? "",
-    event.summary ?? "",
-    event.resultPreview ?? "",
-  ].join(":");
-}
-
-function mergeFeedbackEvents(
-  previous: ConversationFeedbackEvent[] | undefined,
-  incoming: ConversationFeedbackEvent[] | undefined,
-) {
-  if (!incoming) {
-    return previous ?? [];
-  }
-  if (!incoming.length) {
-    return [];
-  }
-  const merged = new Map<string, ConversationFeedbackEvent>();
-  for (const event of previous ?? []) {
-    merged.set(feedbackEventKey(event), event);
-  }
-  for (const event of incoming) {
-    merged.set(feedbackEventKey(event), event);
-  }
-  return [...merged.values()].sort((left, right) => Number(left.sequence ?? 0) - Number(right.sequence ?? 0));
 }
 
 function messageTurnId(message: ConversationMessage) {
@@ -81,7 +43,9 @@ export function mergeAssistantDeltaIntoActiveTurnLayer(
   const thoughtDelta = payload.thoughtDelta ?? (payload.replaceThought || !base ? payload.thought ?? "" : "");
   const content = payload.replaceContent ? contentDelta : `${base?.content ?? ""}${contentDelta}`;
   const thought = payload.replaceThought ? thoughtDelta : `${base?.thought ?? ""}${thoughtDelta}`;
-  const feedbackEvents = mergeFeedbackEvents(base?.feedbackEvents, payload.feedbackEvents);
+  const feedbackEvents = payload.feedbackEvents
+    ? mergeConversationFeedbackEvents(base?.feedbackEvents, payload.feedbackEvents)
+    : base?.feedbackEvents ?? [];
   if (!content && !thought && !payload.stage && !feedbackEvents.length) {
     return undefined;
   }
