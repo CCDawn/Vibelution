@@ -1,4 +1,5 @@
 import { ConversationFeedbackEvent, ConversationMessage, ToolCall } from "../../api/types";
+import { mergeConversationFeedbackEvents } from "./conversationFeedbackEvents";
 import { hasMentalBlock, hasThoughtBlock, hasToolBlock } from "./messageSections";
 
 export type ConversationOperationKind = "thought" | "mental" | "tool" | "status";
@@ -134,7 +135,7 @@ function feedbackOperationCacheKey(
   labels: ConversationOperationLabels,
   resolvedStatus: string,
 ) {
-  const events = message.feedbackEvents ?? [];
+  const events = mergeConversationFeedbackEvents(message.feedbackEvents);
   const eventsFingerprint = events.map((event) => [
     event.sequence ?? "",
     event.timestamp ?? "",
@@ -309,7 +310,7 @@ function buildOperationsFromFeedbackEvents(
   labels: ConversationOperationLabels,
   resolvedStatus: string,
 ) {
-  const operations = [...(message.feedbackEvents ?? [])]
+  const operations = mergeConversationFeedbackEvents(message.feedbackEvents)
     .sort((a, b) => (numberOrNull(a.sequence) ?? 0) - (numberOrNull(b.sequence) ?? 0))
     .map((event, index) => feedbackEventToOperation(message.id, event, index, labels, resolvedStatus))
     .filter((operation): operation is ConversationOperation => operation !== null);
