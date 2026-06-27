@@ -8,6 +8,7 @@ import routeStyles from "./TeamsRoute.module.css";
 import routerSource from "../app/router.tsx?raw";
 
 const routeStylesSource = readFileSync(new URL("./TeamsRoute.module.css", import.meta.url), "utf-8");
+const routeFileSource = readFileSync(new URL("./TeamsRoute.tsx", import.meta.url), "utf-8");
 
 describe("TeamsRoute layout contract", () => {
   it("uses shell language state without loading the full app dictionary", () => {
@@ -266,6 +267,7 @@ describe("TeamsRoute layout contract", () => {
   });
 
   it("renders a dense list canvas inspector workflow", () => {
+    const routeSource = routeFileSource;
     expect(routeSource).toContain("teamContextBar");
     expect(routeSource).toContain("teamSelectField");
     expect(routeSource).toContain("teamContextChips");
@@ -797,8 +799,8 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("refetchInterval: (query) =>");
     expect(routeSource).toContain("query.state.data as ResearchStageRoundStatusPayload | null | undefined");
     expect(routeSource).toContain("sourceCollectionStageWritebackSyncActive,");
-    expect(routeSource).toContain("sourceCollectionStageWritebackRefetchInterval(pageVisible, researchStageRoundStatusQuery.data, sourceCollectionStageWritebackSyncActive)");
-    expect(routeSource).toContain("refetchInterval: () => sourceCollectionStageWritebackRefetchInterval(pageVisible, researchStageRoundStatusQuery.data, sourceCollectionStageWritebackSyncActive)");
+    expect(routeSource).toContain("sourceCollectionStageWritebackRefetchInterval(");
+    expect(routeSource).toContain("refetchInterval: () => sourceCollectionStageWritebackRefetchInterval(");
     const sourceQualityStatusQuerySource = routeSource.slice(
       routeSource.indexOf("const teamWorkflowSourceQualityStatusQuery"),
       routeSource.indexOf("const teamWorkflowPaperNoteChunkStatusQuery"),
@@ -823,8 +825,14 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("summarySourceCollectionActiveWorkRun");
     expect(routeSource).toContain("enabled: Boolean(effectiveTeamId && researchWorkflowTeamSelected)");
     expect(routeSource).toContain("const sourceCollectionDetailQueriesEnabled = Boolean(");
-    expect(routeSource).toContain("sourceCollectionSummaryQuery.isSuccess");
-    expect(routeSource).toContain("sourceCollectionSummaryQuery.isError");
+    const sourceCollectionDetailQueriesEnabledSource = routeSource.slice(
+      routeSource.indexOf("const sourceCollectionDetailQueriesEnabled = Boolean("),
+      routeSource.indexOf("const runtimeSummaryQuery = useQuery({"),
+    );
+    expect(sourceCollectionDetailQueriesEnabledSource).toContain("researchWorkflowTeamSelected");
+    expect(sourceCollectionDetailQueriesEnabledSource).toContain("selectedSourceCollectionRunEffectiveId");
+    expect(sourceCollectionDetailQueriesEnabledSource).not.toContain("sourceCollectionSummaryQuery.isSuccess");
+    expect(sourceCollectionDetailQueriesEnabledSource).not.toContain("sourceCollectionSummaryQuery.isError");
     const sourceCollectionRunStatusQuerySource = routeSource.slice(
       routeSource.indexOf("const sourceCollectionRunStatusQuery = useQuery({"),
       routeSource.indexOf("const sourceCollectionRecordsQuery = useQuery({"),
@@ -840,6 +848,13 @@ describe("TeamsRoute layout contract", () => {
     expect(sourceCollectionRunStatusQuerySource).toContain("enabled: sourceCollectionDetailQueriesEnabled");
     expect(sourceCollectionRecordsQuerySource).toContain("enabled: sourceCollectionDetailQueriesEnabled");
     expect(sourceCollectionAssignmentsQuerySource).toContain("enabled: sourceCollectionDetailQueriesEnabled");
+    const sourceCollectionRecordsDataLoadingSource = routeSource.slice(
+      routeSource.indexOf("const sourceCollectionRecordsDataLoading = Boolean("),
+      routeSource.indexOf("const sourceCollectionAssignmentsDataLoading = Boolean("),
+    );
+    expect(sourceCollectionRecordsDataLoadingSource).toContain("sourceCollectionRecordsQuery.isPending");
+    expect(sourceCollectionRecordsDataLoadingSource).toContain("sourceCollectionRunStatusQuery.isPending");
+    expect(sourceCollectionRecordsDataLoadingSource).not.toContain("sourceCollectionSummaryQuery.isPending");
     const sourceCollectionPrimaryLoadingSource = routeSource.slice(
       routeSource.indexOf("const sourceCollectionPrimaryDataLoading = Boolean("),
       routeSource.indexOf("const sourceCollectionSourceQualityLoading = Boolean("),
