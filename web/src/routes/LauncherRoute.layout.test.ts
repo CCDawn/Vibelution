@@ -14,6 +14,14 @@ import launcherShellStyles from "../app/LauncherShell.module.css";
 const routeStylesSource = readFileSync(new URL("./LauncherRoute.module.css", import.meta.url), "utf8");
 const launcherShellStylesSource = readFileSync(new URL("../app/LauncherShell.module.css", import.meta.url), "utf8");
 
+const sourceSlice = (source: string, startMarker: string, endMarker: string): string => {
+  const startIndex = source.indexOf(startMarker);
+  expect(startIndex).toBeGreaterThanOrEqual(0);
+  const endIndex = source.indexOf(endMarker, startIndex + startMarker.length);
+  expect(endIndex).toBeGreaterThan(startIndex);
+  return source.slice(startIndex, endIndex);
+};
+
 describe("LauncherRoute layout contract", () => {
   it("uses shell language state without loading the full app dictionary", () => {
     expect(routeSource).toContain("useShellI18n");
@@ -331,6 +339,45 @@ describe("LauncherRoute layout contract", () => {
     expect(routeSource).toContain('windowMode: "fullscreen"');
     expect(routeSource).toContain('windowMode: "windowed"');
     expect(routeSource).toContain("supervisorMutation.mutate()");
+  });
+
+  it("collects normal lifecycle controls into the Launcher status bar", () => {
+    expect(styles.statusBar).toBeTypeOf("string");
+    expect(styles.statusBarReason).toBeTypeOf("string");
+    expect(styles.statusBarActions).toBeTypeOf("string");
+    expect(styles.statusBarButton).toBeTypeOf("string");
+    expect(styles.dangerActions).toBeTypeOf("string");
+
+    expect(routeSource).toContain("lifecycleControls");
+    expect(routeSource).toContain("const statusBarBlockerReason =");
+    expect(routeSource).toContain("const statusBarReasonText =");
+    expect(routeSource).toContain("title={statusBarBlockerReason}");
+
+    const statusBarActions = sourceSlice(
+      routeSource,
+      '<div className={styles.statusBarActions} aria-label={copy.lifecycleControls}>',
+      "\n          </div>\n        </div>",
+    );
+    const refreshIndex = statusBarActions.indexOf("statusQuery.refetch()");
+    const startIndex = statusBarActions.indexOf('controlMutation.mutate("start")');
+    const restartIndex = statusBarActions.indexOf('controlMutation.mutate("restart")');
+    const stopIndex = statusBarActions.indexOf('controlMutation.mutate("stop")');
+    expect(refreshIndex).toBeGreaterThanOrEqual(0);
+    expect(startIndex).toBeGreaterThan(refreshIndex);
+    expect(restartIndex).toBeGreaterThan(startIndex);
+    expect(stopIndex).toBeGreaterThan(restartIndex);
+    expect(statusBarActions).not.toContain('controlMutation.mutate("force-stop")');
+    expect(statusBarActions).not.toContain("copy.forceStop");
+    expect(statusBarActions).not.toContain("dangerButton");
+
+    const dangerActions = sourceSlice(
+      routeSource,
+      '<div className={styles.dangerActions}>',
+      "\n        </div>\n      </div>",
+    );
+    expect(dangerActions).toContain('controlMutation.mutate("force-stop")');
+    expect(dangerActions).toContain("copy.forceStop");
+    expect(dangerActions).toContain("dangerButton");
   });
 
   it("lets Launcher own startup settings without restarting immediately", () => {
