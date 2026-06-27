@@ -521,7 +521,13 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("sourceCollectionCoverageMetric");
     expect(routeSource).toContain("invalidCandidateIds");
     expect(routeSource).toContain("materializedContentExtraction");
-    expect(routeSource).toContain("覆盖不足 · 待补读");
+    expect(routeSource).toContain("覆盖不足 · 待补提炼");
+    expect(routeSource).toContain("覆盖不足 · 待补审");
+    expect(routeSource).toContain("Agent 已回写，仍待补产物");
+    expect(routeSource).toContain("已提炼");
+    expect(routeSource).toContain("待补提炼");
+    expect(routeSource).toContain("已审");
+    expect(routeSource).toContain("待补审");
     expect(routeSource).toContain("无效回写 ID");
     expect(routeSource).toContain("graphForSelectedSourceRun");
     expect(routeSource).toContain("parseSourceCollectionStageModuleId");
