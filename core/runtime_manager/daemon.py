@@ -2251,9 +2251,16 @@ class RuntimeManagerDaemon:
         state["daemonRunning"] = True
         state["runtimeManager"] = {"sourceSignature": _process_source_signature()}
         state["startedAt"] = now_iso()
-        state = self._reconcile_observation(state)
         save_state(state)
         recover_processing_queue()
+        _append_event(
+            "daemon.command_loop_ready",
+            {
+                "managerPid": self._pid,
+                "startupReconcileDeferred": True,
+            },
+        )
+        startup_reconciled = False
 
         try:
             while True:
@@ -2292,6 +2299,12 @@ class RuntimeManagerDaemon:
                         clear_pid(self._pid)
                         _exit_current_process(0)
                         return
+                    continue
+
+                if not startup_reconciled:
+                    state = self._reconcile_observation(load_state())
+                    save_state(state)
+                    startup_reconciled = True
                     continue
 
                 self._process_self_evolution_restart_intent()
