@@ -1532,6 +1532,34 @@ class TestToolExecutorErrorHandling:
         assert "已授权" in pipe_hint
         assert "read_file_tool / grep_search_tool" not in pipe_hint
 
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "python -c \"print('a;b|c')\"",
+            "python -c \"print('$(')\"",
+            "python -c \"print('`')\"",
+            "powershell -NoProfile -Command \"Write-Output 'a;b|c'\"",
+        ],
+    )
+    def test_cli_pattern_detection_ignores_quoted_operator_characters(self, executor, command):
+        """高价值失败模式识别不能把参数字符串里的符号误判成命令操作符。"""
+        pattern = executor._detect_tool_pattern("cli_tool", {"command": command})
+
+        assert pattern is None
+
+    @pytest.mark.parametrize(
+        ("command", "expected_pattern"),
+        [
+            ("python -m py_compile agent.py && python -m pytest tests/test_tool_executor.py -q", "cli_tool:command_chain"),
+            ("git diff --stat | more", "cli_tool:pipe"),
+            ("powershell -NoProfile -Command Write-Output $(Get-Date)", "cli_tool:subexpression"),
+        ],
+    )
+    def test_cli_pattern_detection_keeps_real_command_operators(self, executor, command, expected_pattern):
+        pattern = executor._detect_tool_pattern("cli_tool", {"command": command})
+
+        assert pattern == expected_pattern
+
     def test_cross_platform_warning_does_not_complete_validation_scope(self, executor):
         """跨平台命令拦截说明命令未执行，不能伪装成验证通过或终态。"""
         reset_session_state()
