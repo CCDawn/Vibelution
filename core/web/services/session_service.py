@@ -17786,7 +17786,6 @@ def _set_session_turn_progress_live_output(session_id: str, stage: str, *, turn_
         session_id,
         turn_id=turn_id,
         stage=stage_key,
-        content=content,
         feedback_events=feedback_events,
     )
     _touch_chat_turn_work_run(session_id=session_id, turn_id=turn_id, stage=stage_key, summary=trim_lines(content, max_lines=1))

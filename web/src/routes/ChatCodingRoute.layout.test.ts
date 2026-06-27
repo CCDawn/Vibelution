@@ -986,6 +986,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).not.toContain("SESSION_ASSISTANT_DELTA_IMMEDIATE_FLUSH_CHARS");
     expect(routeSource).toContain("activeTurnLayersBySession");
     expect(routeSource).toContain("activeTurnLayersBySessionRef");
+    expect(routeSource).toContain("Record<string, ActiveTurnLayerState>");
     expect(routeSource).toContain("mergeAssistantDeltaIntoActiveTurnLayer(pendingLayer, entry.payload)");
     expect(routeSource).toContain("setActiveTurnLayerForSession(current, streamSessionId, pendingLayer)");
     expect(routeSource).toContain("isActiveTurnSettledByDetail(activeLayer, detail)");
@@ -995,7 +996,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).not.toContain("kind: \"session_live_overlay\"");
     expect(routeSource).toContain("const projectedLayer = mergeAssistantDeltaIntoActiveTurnLayer(committedAssistantDeltaLayer, payload)");
     expect(routeSource).toContain("committedAssistantDeltaLayer = pendingLayer");
-    expect(routeSource).toContain("pendingTextLength: String(pendingLayer?.content ?? \"\").length + String(pendingLayer?.thought ?? \"\").length");
+    expect(routeSource).toContain("pendingTextLength: activeTurnLayerTextLength(pendingLayer)");
     expect(routeSource).toContain("let pendingAssistantDeltaPayloads: Array<{");
     expect(routeSource).toContain("let assistantDeltaApplyFrame: number | null = null");
     expect(routeSource).toContain("function applyPendingAssistantDeltas(reason: \"frame\" | \"close\" | \"final\")");
@@ -1021,6 +1022,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("browser.session_stream.assistant_delta_applied");
     expect(routeSource).toContain("pendingTextLength");
     expect(routeSource).toContain("batchSize");
+    expect(routeSource).not.toContain("pendingTextLength: String(projectedLayer?.content ?? \"\").length + String(projectedLayer?.thought ?? \"\").length");
   });
 
   it("backs off index polling when detail streams are connected", () => {

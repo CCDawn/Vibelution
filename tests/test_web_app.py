@@ -1073,7 +1073,11 @@ def test_session_detail_exposes_pre_model_progress_stage(tmp_path, monkeypatch):
     assert live_message["id"] == "session-live-message-live-turn-progress"
     assert live_message["streaming"] is True
     assert live_message["streamStage"] == "context_prepare"
-    assert live_message["content"] == CONTEXT_PREPARE_LIVE_MESSAGE
+    assert live_message["content"] == ""
+    assert live_message["feedbackEvents"][0]["kind"] == "status"
+    assert live_message["feedbackEvents"][0]["name"] == "context_prepare"
+    assert live_message["feedbackEvents"][0]["resultPreview"] == CONTEXT_PREPARE_LIVE_MESSAGE
+    assert "assistant_text" not in [item.get("kind") for item in live_message.get("timelineItems", [])]
     assert live_message["metadata"]["kind"] == "session_live_overlay"
     assert live_message["metadata"]["turnId"] == "turn-progress"
     assert live_message["metadata"]["ledgerSeq"] >= 0
@@ -1144,12 +1148,14 @@ def test_session_detail_exposes_pre_model_progress_as_ordered_feedback_events(tm
     payload = response.json()
     live_message = payload["messages"][-1]
     assert live_message["streamStage"] == "model_request"
+    assert live_message["content"] == ""
     assert [item["kind"] for item in live_message["feedbackEvents"]] == ["status", "status", "status"]
     assert [item["name"] for item in live_message["feedbackEvents"]] == [
         "context_prepare",
         "agent_prepare",
         "model_request",
     ]
+    assert "assistant_text" not in [item.get("kind") for item in live_message.get("timelineItems", [])]
     work_run = session_service._WORK_RUN_STORE.load_snapshot("chat_turn", "turn-progress-events")
     assert work_run is not None
     assert work_run["updatedAt"] != "2026-06-05T00:00:00"
@@ -3564,7 +3570,9 @@ def test_submit_session_message_shows_waiting_live_message_while_turn_runs(tmp_p
         live_message = payload["messages"][-1]
         assert live_message["role"] == "assistant"
         assert live_message["streaming"] is True
-        assert live_message["content"] == CONTEXT_PREPARE_LIVE_MESSAGE
+        assert live_message["content"] == ""
+        assert live_message["streamStage"] == "context_prepare"
+        assert live_message["feedbackEvents"][0]["resultPreview"] == CONTEXT_PREPARE_LIVE_MESSAGE
     finally:
         session_service._set_session_running("session-live", False)
         session_service._clear_session_turn_control("session-live")
@@ -3590,7 +3598,8 @@ def test_submit_session_message_recovers_content_from_utf8_base64_fallback(tmp_p
     payload = response.json()
     assert payload["messages"][-2]["content"] == content
     assert payload["messages"][-1]["streaming"] is True
-    assert payload["messages"][-1]["content"] == CONTEXT_PREPARE_LIVE_MESSAGE
+    assert payload["messages"][-1]["content"] == ""
+    assert payload["messages"][-1]["feedbackEvents"][0]["resultPreview"] == CONTEXT_PREPARE_LIVE_MESSAGE
     state = load_chat_state(tmp_path)
     assert "messages" not in state["conversations"][0]
     assert session_service.get_session_detail("session-live")["messages"][-2]["content"] == content
@@ -4330,7 +4339,8 @@ def test_edit_resubmit_session_message_recovers_content_from_utf8_base64_fallbac
     payload = response.json()
     assert payload["messages"][-2]["content"] == content
     assert payload["messages"][-1]["streaming"] is True
-    assert payload["messages"][-1]["content"] == CONTEXT_PREPARE_LIVE_MESSAGE
+    assert payload["messages"][-1]["content"] == ""
+    assert payload["messages"][-1]["feedbackEvents"][0]["resultPreview"] == CONTEXT_PREPARE_LIVE_MESSAGE
     state = load_chat_state(tmp_path)
     assert "messages" not in state["conversations"][0]
     assert session_service.get_session_detail("session-live")["messages"][-2]["content"] == content
@@ -4392,7 +4402,8 @@ def test_edit_resubmit_session_message_truncates_following_history_and_starts_tu
     assert payload["currentPhase"] == "running"
     assert [item["content"] for item in payload["messages"][:-1]] == ["原始需求", "原始回答", "编辑后的需求"]
     assert payload["messages"][-1]["streaming"] is True
-    assert payload["messages"][-1]["content"] == CONTEXT_PREPARE_LIVE_MESSAGE
+    assert payload["messages"][-1]["content"] == ""
+    assert payload["messages"][-1]["feedbackEvents"][0]["resultPreview"] == CONTEXT_PREPARE_LIVE_MESSAGE
     assert len(scheduled_contexts) == 1
     assert scheduled_contexts[0]["user_message"] == "编辑后的需求"
     assert [item["content"] for item in scheduled_contexts[0]["history_messages"]] == ["原始需求", "原始回答"]
@@ -4469,7 +4480,8 @@ def test_edit_resubmit_session_message_allows_latest_user_message(tmp_path, monk
     payload = response.json()
     assert [item["content"] for item in payload["messages"][:-1]] == ["原始需求", "原始回答", "编辑最新的需求"]
     assert payload["messages"][-1]["streaming"] is True
-    assert payload["messages"][-1]["content"] == CONTEXT_PREPARE_LIVE_MESSAGE
+    assert payload["messages"][-1]["content"] == ""
+    assert payload["messages"][-1]["feedbackEvents"][0]["resultPreview"] == CONTEXT_PREPARE_LIVE_MESSAGE
     assert len(scheduled_contexts) == 1
     assert scheduled_contexts[0]["user_message"] == "编辑最新的需求"
     assert [item["content"] for item in scheduled_contexts[0]["history_messages"]] == ["原始需求", "原始回答"]
@@ -5821,7 +5833,13 @@ def test_capture_session_ui_stream_surfaces_live_thought_as_model_thinking(tmp_p
     live_state = session_service._snapshot_session_live_output("session-live-thought")
     assert live_state is not None
     assert live_state.stage == "model_thinking"
-    assert "正在思考" in live_state.content
+    assert live_state.content == ""
+    assert any(
+        item.get("kind") == "status"
+        and item.get("name") == "model_thinking"
+        and "正在思考" in str(item.get("resultPreview") or "")
+        for item in live_state.feedback_events
+    )
     assert live_state.thought == "先看最新日志，再判断是否真的卡住。"
     assert capture.thought == "先看最新日志，再判断是否真的卡住。"
     assert published
@@ -6640,7 +6658,8 @@ def test_stale_stopped_turn_does_not_run_after_immediate_continue(tmp_path, monk
         assert payload["messages"][-2]["content"] == "第二轮已经开始"
         assert payload["messages"][-1]["role"] == "assistant"
         assert payload["messages"][-1]["streaming"] is True
-        assert payload["messages"][-1]["content"] == CONTEXT_PREPARE_LIVE_MESSAGE
+        assert payload["messages"][-1]["content"] == ""
+        assert payload["messages"][-1]["feedbackEvents"][0]["resultPreview"] == CONTEXT_PREPARE_LIVE_MESSAGE
     finally:
         session_service._set_session_running("session-live", False)
         session_service._clear_session_turn_control("session-live")
