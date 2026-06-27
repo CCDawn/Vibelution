@@ -461,6 +461,66 @@ def test_standalone_launcher_app_rejects_stale_workbench_window_setting(monkeypa
     assert response.json()["detail"]["code"] == "launcher_workbench_window_mode_conflict"
 
 
+def test_standalone_launcher_app_exposes_maintenance_reset_routes(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        launcher_service,
+        "get_launcher_maintenance_summary",
+        lambda: calls.append(("summary", None)) or {"executionOwner": "launcher", "profiles": []},
+    )
+    monkeypatch.setattr(
+        launcher_service,
+        "preview_launcher_maintenance_plan",
+        lambda payload: calls.append(("preview", payload))
+        or {"ok": True, "plan": {"planId": "maintplan-1", "planHash": "hash-1"}},
+    )
+    monkeypatch.setattr(
+        launcher_service,
+        "apply_launcher_maintenance_plan",
+        lambda payload: calls.append(("apply", payload))
+        or {"ok": True, "planId": "maintplan-1", "planHash": "hash-1"},
+    )
+    client = TestClient(launcher_app.create_launcher_app())
+
+    summary = client.get("/api/launcher/maintenance/reset/summary")
+    preview = client.post("/api/launcher/maintenance/reset/preview", json={"profileId": "factory_runtime"})
+    apply = client.post(
+        "/api/launcher/maintenance/reset/apply",
+        json={"planId": "maintplan-1", "planHash": "hash-1", "confirm": True},
+    )
+
+    assert summary.status_code == 200
+    assert summary.json()["executionOwner"] == "launcher"
+    assert preview.status_code == 200
+    assert preview.json()["plan"]["planId"] == "maintplan-1"
+    assert apply.status_code == 200
+    assert apply.json()["planHash"] == "hash-1"
+    assert calls == [
+        ("summary", None),
+        ("preview", {"profileId": "factory_runtime", "itemIds": []}),
+        ("apply", {"planId": "maintplan-1", "planHash": "hash-1", "confirm": True}),
+    ]
+
+
+def test_standalone_launcher_app_rejects_invalid_maintenance_plan_id(monkeypatch):
+    monkeypatch.setattr(
+        launcher_service,
+        "apply_launcher_maintenance_plan",
+        lambda payload: (_ for _ in ()).throw(
+            launcher_service.LauncherMaintenancePlanError("invalid_plan_id", "bad plan id")
+        ),
+    )
+    client = TestClient(launcher_app.create_launcher_app())
+
+    response = client.post(
+        "/api/launcher/maintenance/reset/apply",
+        json={"planId": "bad", "planHash": "hash-1", "confirm": True},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"]["code"] == "invalid_plan_id"
+
+
 def test_workbench_launcher_adapter_exposes_workbench_window_setting(monkeypatch):
     calls = []
     monkeypatch.setattr(

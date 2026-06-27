@@ -2410,6 +2410,76 @@ export type LauncherDeveloperCleanupApplyResponse = {
   message: string;
 };
 
+export type LauncherMaintenanceProfileId = "custom" | "clean_start" | "factory_runtime";
+
+export type LauncherMaintenanceSummary = ResetSummary & {
+  executionOwner: "launcher" | string;
+  profiles: Array<{
+    id: LauncherMaintenanceProfileId | string;
+    label: string;
+    description: string;
+    itemIds: string[];
+  }>;
+  applyContract: {
+    requiresLauncher: boolean;
+    requiresPlanId: boolean;
+    requiresPlanHash: boolean;
+    requiresConfirm: boolean;
+    blocksActiveWork: boolean;
+    retiredWebApi: boolean;
+  };
+};
+
+export type LauncherMaintenancePreviewRequest = {
+  profileId: LauncherMaintenanceProfileId | string;
+  itemIds?: string[];
+};
+
+export type LauncherMaintenancePlan = {
+  schemaVersion: number;
+  planId: string;
+  planHash: string;
+  profileId: LauncherMaintenanceProfileId | string;
+  createdAt: string;
+  expiresAt: string;
+  projectRoot: string;
+  selectedItemIds: string[];
+  targetCount: number;
+  estimatedBytes: number;
+  requiresConfirm: boolean;
+  blocksActiveWork: boolean;
+  preview: ResetPreviewResponse;
+};
+
+export type LauncherMaintenancePreviewResponse = {
+  ok: boolean;
+  mode: "preview" | string;
+  plan: LauncherMaintenancePlan;
+  preview: ResetPreviewResponse;
+  message: string;
+};
+
+export type LauncherMaintenanceApplyRequest = {
+  planId: string;
+  planHash: string;
+  confirm: boolean;
+};
+
+export type LauncherMaintenanceApplyResponse = {
+  ok: boolean;
+  mode: "apply" | string;
+  planId: string;
+  planHash: string;
+  profileId: LauncherMaintenanceProfileId | string;
+  result: ResetExecuteResponse;
+  frontendInvalidation: {
+    clearChatWorkspace: boolean;
+    clearSessionUrl: boolean;
+    invalidate: string[];
+  };
+  message: string;
+};
+
 export type LauncherStartupSettings = {
   runtime: {
     profile: string;

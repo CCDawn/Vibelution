@@ -1,14 +1,17 @@
-"""Reset overview routes."""
+"""Retired Web reset routes."""
 
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-from core.web.services.reset_service import execute_reset, get_reset_summary, preview_reset
-
 
 router = APIRouter(tags=["reset"])
+RESET_MIGRATED_DETAIL = {
+    "code": "reset_migrated_to_launcher",
+    "message": "Reset 清理与恢复初始化已迁移到 Launcher 维护中心；Web backend 不再执行清理。",
+    "launcherPath": "/launcher",
+}
 
 
 class ResetSelectionPayload(BaseModel):
@@ -21,20 +24,14 @@ class ResetExecutePayload(ResetSelectionPayload):
 
 @router.get("/reset/summary")
 def reset_summary() -> dict:
-    return get_reset_summary()
+    raise HTTPException(status_code=410, detail=RESET_MIGRATED_DETAIL)
 
 
 @router.post("/reset/preview")
 def reset_preview(payload: ResetSelectionPayload) -> dict:
-    try:
-        return preview_reset(payload.itemIds)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    raise HTTPException(status_code=410, detail=RESET_MIGRATED_DETAIL)
 
 
 @router.post("/reset/execute")
 def reset_execute(payload: ResetExecutePayload) -> dict:
-    try:
-        return execute_reset(payload.itemIds, confirmed=payload.confirmed)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    raise HTTPException(status_code=410, detail=RESET_MIGRATED_DETAIL)

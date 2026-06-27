@@ -91,7 +91,7 @@ def test_reset_summary_records_timing_event(reset_project: Path, monkeypatch: py
             }
         )
 
-    monkeypatch.setattr(reset_service, "record_runtime_scene_event", capture_reset_event)
+    monkeypatch.setattr(reset_service, "record_runtime_scene_event", capture_reset_event, raising=False)
 
     summary = reset_service.get_reset_summary()
 
@@ -466,19 +466,53 @@ def test_unknown_reset_item_is_rejected(reset_project: Path):
         reset_service.preview_reset(["../workspace"])
 
 
-def test_reset_routes_expose_preview_and_execute(reset_project: Path):
+def test_launcher_maintenance_summary_exposes_profiles_and_contract(reset_project: Path):
+    summary = reset_service.get_launcher_maintenance_summary()
+
+    assert summary["executionOwner"] == "launcher"
+    assert summary["mode"] == "launcher_maintenance"
+    assert summary["applyContract"]["requiresLauncher"] is True
+    assert summary["applyContract"]["retiredWebApi"] is True
+    assert summary["applyContract"]["blocksActiveWork"] is True
+    profile_ids = {profile["id"] for profile in summary["profiles"]}
+    assert {"clean_start", "factory_runtime"} <= profile_ids
+
+
+def test_launcher_maintenance_plan_requires_confirm_and_active_work_clear(reset_project: Path):
+    plan_dir = reset_project / ".runtime" / "launcher" / "maintenance-reset-plans"
+    preview = reset_service.preview_launcher_maintenance_plan({"profileId": "clean_start"}, plan_dir=plan_dir)
+    plan = preview["plan"]
+
+    with pytest.raises(reset_service.LauncherMaintenancePlanError) as confirm_error:
+        reset_service.apply_launcher_maintenance_plan(
+            {"planId": plan["planId"], "planHash": plan["planHash"], "confirm": False},
+            plan_dir=plan_dir,
+        )
+    assert confirm_error.value.code == "confirm_required"
+
+    with pytest.raises(reset_service.LauncherMaintenancePlanError) as active_work_error:
+        reset_service.apply_launcher_maintenance_plan(
+            {"planId": plan["planId"], "planHash": plan["planHash"], "confirm": True},
+            active_work_runs=[{"id": "run-1", "kind": "chat_turn"}],
+            plan_dir=plan_dir,
+        )
+    assert active_work_error.value.code == "active_work_blocked"
+
+
+def test_reset_routes_report_migration_to_launcher(reset_project: Path):
     _write(reset_project / "web" / "dist" / "index.html", "<html></html>")
     client = TestClient(create_app(), headers={CONTROL_TOKEN_HEADER: get_control_token()})
 
     summary_response = client.get("/api/reset/summary")
     preview_response = client.post("/api/reset/preview", json={"itemIds": ["web_dist"]})
-    rejected_response = client.post("/api/reset/preview", json={"itemIds": ["bad"]})
     execute_response = client.post("/api/reset/execute", json={"itemIds": ["web_dist"], "confirmed": True})
 
-    assert summary_response.status_code == 200
-    assert summary_response.json()["mode"] == "custom"
-    assert preview_response.status_code == 200
-    assert preview_response.json()["totals"]["deleteCount"] == 1
-    assert rejected_response.status_code == 400
-    assert execute_response.status_code == 200
-    assert not (reset_project / "web" / "dist").exists()
+    assert summary_response.status_code == 410
+    assert preview_response.status_code == 410
+    assert execute_response.status_code == 410
+    detail = summary_response.json()["detail"]
+    assert detail["code"] == "reset_migrated_to_launcher"
+    assert detail["launcherPath"] == "/launcher"
+    assert preview_response.json()["detail"] == detail
+    assert execute_response.json()["detail"] == detail
+    assert (reset_project / "web" / "dist").exists()

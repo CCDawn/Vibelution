@@ -56,6 +56,17 @@ class DeveloperCleanupApplyPayload(BaseModel):
     confirm: bool = False
 
 
+class LauncherMaintenancePreviewPayload(BaseModel):
+    profileId: str = "custom"
+    itemIds: list[str] = Field(default_factory=list)
+
+
+class LauncherMaintenanceApplyPayload(BaseModel):
+    planId: str
+    planHash: str
+    confirm: bool = False
+
+
 class LifecycleIntentPayload(BaseModel):
     action: str
     reason: str = ""
@@ -192,6 +203,30 @@ def apply_developer_cleanup(payload: DeveloperCleanupApplyPayload) -> dict:
         raise HTTPException(status_code=409, detail={"code": exc.code, "message": exc.message, **exc.detail}) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail={"code": "invalid_developer_cleanup_apply", "message": str(exc)}) from exc
+
+
+@router.get("/api/launcher/maintenance/reset/summary")
+def launcher_maintenance_reset_summary() -> dict:
+    return launcher_service.get_launcher_maintenance_summary()
+
+
+@router.post("/api/launcher/maintenance/reset/preview")
+def preview_launcher_maintenance_reset(payload: LauncherMaintenancePreviewPayload) -> dict:
+    try:
+        return launcher_service.preview_launcher_maintenance_plan(payload.model_dump())
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail={"code": "invalid_launcher_maintenance_preview", "message": str(exc)}) from exc
+
+
+@router.post("/api/launcher/maintenance/reset/apply")
+def apply_launcher_maintenance_reset(payload: LauncherMaintenanceApplyPayload) -> dict:
+    try:
+        return launcher_service.apply_launcher_maintenance_plan(payload.model_dump())
+    except launcher_service.LauncherMaintenancePlanError as exc:
+        status_code = 409 if exc.code != "invalid_plan_id" else 400
+        raise HTTPException(status_code=status_code, detail={"code": exc.code, "message": exc.message, **exc.detail}) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail={"code": "invalid_launcher_maintenance_apply", "message": str(exc)}) from exc
 
 
 @router.post("/api/launcher/start", status_code=202)

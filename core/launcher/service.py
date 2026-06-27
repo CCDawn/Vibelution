@@ -32,6 +32,7 @@ from core.runtime_manager.workbench_controller import _is_process_alive, observe
 from core.runtime_manager.window_provider_state import window_provider_projection
 from . import desktop_session_store, lifecycle_action_dispatcher, lifecycle_intent_store
 from . import developer_mode as launcher_developer_mode
+from . import maintenance_reset as launcher_maintenance_reset
 
 
 LauncherOperation = Literal["start", "stop", "restart", "force-stop"]
@@ -120,6 +121,7 @@ class LauncherSettingsConflict(ValueError):
 
 DeveloperModeDisabled = launcher_developer_mode.DeveloperModeDisabled
 DeveloperCleanupPlanError = launcher_developer_mode.DeveloperCleanupPlanError
+LauncherMaintenancePlanError = launcher_maintenance_reset.LauncherMaintenancePlanError
 
 
 class LauncherCommandResponse(TypedDict, total=False):
@@ -247,6 +249,31 @@ def apply_launcher_developer_cleanup(payload: dict[str, Any]) -> dict[str, Any]:
         confirm=bool(payload.get("confirm", False)),
         config_path=CONFIG_PATH,
         project_root=PROJECT_ROOT,
+    )
+
+
+def get_launcher_maintenance_summary() -> dict[str, Any]:
+    """Return Launcher-owned reset and initialization maintenance inventory."""
+
+    return launcher_maintenance_reset.get_launcher_maintenance_summary()
+
+
+def preview_launcher_maintenance_plan(payload: dict[str, Any]) -> dict[str, Any]:
+    """Preview a Launcher-owned project reset/initialization plan."""
+
+    if not isinstance(payload, dict):
+        raise ValueError("maintenance preview payload must be an object")
+    return launcher_maintenance_reset.preview_launcher_maintenance_plan(payload)
+
+
+def apply_launcher_maintenance_plan(payload: dict[str, Any]) -> dict[str, Any]:
+    """Apply a Launcher-owned project reset/initialization plan."""
+
+    if not isinstance(payload, dict):
+        raise ValueError("maintenance apply payload must be an object")
+    return launcher_maintenance_reset.apply_launcher_maintenance_plan(
+        payload,
+        active_work_runs=launcher_active_work_runs(),
     )
 
 

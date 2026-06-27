@@ -45,20 +45,10 @@ def test_web_search_health_endpoint_reports_token_dependency(monkeypatch):
     assert payload["searchApiCalled"] is False
 
 
-def test_reset_summary_shape():
+def test_reset_routes_report_migration_to_launcher():
     response = client.get("/api/reset/summary")
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["mode"] == "custom"
-    assert payload["presets"] == []
-    assert payload["items"]
-    assert payload["categories"]
-    item_ids = {item["id"] for item in payload["items"]}
-    assert "chat_history" in item_ids
-    assert "web_dist" in item_ids
-    protected_paths = {path for group in payload["protected"] for path in group["paths"]}
-    assert "workspace/agent_brain.db" not in protected_paths
-    assert "workspace/memory/" not in protected_paths
-    assert "workspace/prompts/" not in protected_paths
-    assert "workspace/prompts/DYNAMIC.md" in protected_paths
-    assert ".docs/project-memory/" in protected_paths
+
+    assert response.status_code == 410
+    payload = response.json()["detail"]
+    assert payload["code"] == "reset_migrated_to_launcher"
+    assert payload["launcherPath"] == "/launcher"

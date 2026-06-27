@@ -438,6 +438,25 @@ describe("LauncherRoute layout contract", () => {
     expect(launcherApiSource).toContain("developer-mode/cleanup/apply");
   });
 
+  it("makes Launcher the owner of project reset and initialization maintenance", () => {
+    expect(routeSource).toContain("ProjectMaintenancePanel");
+    expect(routeSource).toContain("getLauncherMaintenanceSummary");
+    expect(routeSource).toContain("previewLauncherMaintenancePlan");
+    expect(routeSource).toContain("applyLauncherMaintenancePlan");
+    expect(routeSource).toContain("maintenanceProfile");
+    expect(routeSource).toContain("launcherMaintenanceSummary()");
+    expect(routeSource).toContain("maintenance/reset/summary");
+    expect(routeSource).toContain("maintenance/reset/preview");
+    expect(routeSource).toContain("maintenance/reset/apply");
+    expect(routeSource).toContain("Launcher 维护中心");
+    expect(routeSource).toContain("恢复初始化");
+    expect(routeSource).toContain("active work");
+    expect(launcherApiSource).toContain("maintenance/reset/summary");
+    expect(launcherApiSource).toContain("maintenance/reset/preview");
+    expect(launcherApiSource).toContain("maintenance/reset/apply");
+    expect(routeSource).not.toContain('"/api/reset/');
+  });
+
   it("treats status disconnect after stop as an expected closed state", () => {
     expect(routeSource).toContain("stoppedStatusUnavailable");
     expect(routeSource).toContain("isLauncherStatusNetworkDisconnect");
