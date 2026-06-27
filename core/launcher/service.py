@@ -953,6 +953,22 @@ def request_launcher_stop(request_audit: LauncherRequestAudit | None = None) -> 
         fields=requested_fields,
     )
     _raise_if_active_work("stop")
+    if _launcher_workbench_already_closed():
+        _record_launcher_event(
+            "launcher.bundle.stop.skipped_already_closed",
+            phase="stop",
+            message="Launcher project bundle stop skipped because the workbench is already closed.",
+            outcome="skipped",
+            fields={"mode": "standalone_control_plane"},
+        )
+        return {
+            "accepted": False,
+            "mode": "runtime_manager",
+            "launcherMode": "standalone_control_plane",
+            "operation": "stop",
+            "commandId": "",
+            "message": "项目工作台已经关闭，无需再次停止。",
+        }
     try:
         ensure_daemon_running()
         command_args: dict[str, Any] = {
