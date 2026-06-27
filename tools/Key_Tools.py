@@ -572,8 +572,11 @@ def create_key_tools() -> List[BaseTool]:
         run_id: str = "",
         stage_id: str = "",
         task_id: str = "",
-        max_records: int = 24,
+        max_records: int = 5,
         include_candidates: bool = True,
+        candidate_offset: int = 0,
+        candidate_limit: int = 5,
+        context_mode: str = "compact",
     ) -> str:
         """
         【知识搜集阶段上下文】读取当前团队资料搜集阶段任务的受控上下文。
@@ -587,11 +590,14 @@ def create_key_tools() -> List[BaseTool]:
             run_id: 资料搜集运行 ID，阶段任务消息中的 runId
             stage_id: 阶段 ID，可选 collection/candidate/screening/graph/memory
             task_id: 阶段任务 ID；传入后会自动补齐 run/stage
-            max_records: 最多返回多少条资料记录，默认 24，上限由后端限制
+            max_records: 最多返回多少条资料记录，默认 5，上限由后端限制
             include_candidates: 是否返回本轮已导入的 source_manifest 候选
+            candidate_offset: 候选资料分页起点，默认 0；下一页用 candidatePage.nextOffset
+            candidate_limit: 每页候选资料数量，默认 5；阶段 Agent 应逐页读完
+            context_mode: compact 或 full；默认 compact，避免工具结果被通用截断
 
         Returns:
-            JSON 字符串，包含 bounded context、records、candidates、writebackContract 和边界
+            JSON 字符串，包含 counts、candidatePage、真实 candidateId、records、candidates、writebackContract 和边界
         """
         return _source_collection_context_impl(
             team_id=team_id,
@@ -600,6 +606,9 @@ def create_key_tools() -> List[BaseTool]:
             task_id=task_id,
             max_records=max_records,
             include_candidates=include_candidates,
+            candidate_offset=candidate_offset,
+            candidate_limit=candidate_limit,
+            context_mode=context_mode,
         )
 
     @tool

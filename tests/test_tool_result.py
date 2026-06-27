@@ -10,6 +10,7 @@
 """
 
 import sys
+import json
 from pathlib import Path
 
 import pytest
@@ -133,6 +134,57 @@ class TestTruncateResult:
         assert packaged.truncated is True
         assert packaged.result_kind == "search"
         assert packaged.strategy in {"structured_compact", "annotated_truncate", "legacy_prefix_truncate"}
+
+    def test_package_tool_result_compacts_source_collection_context_with_paging_ids(self):
+        payload = {
+            "status": "ok",
+            "contextKind": "source_collection_stage_task_context",
+            "contextMode": "full",
+            "counts": {
+                "recordCount": 15,
+                "returnedRecordCount": 10,
+                "candidateCount": 15,
+                "returnedCandidateCount": 5,
+            },
+            "candidatePage": {
+                "offset": 0,
+                "limit": 5,
+                "returned": 5,
+                "total": 15,
+                "hasMore": True,
+                "nextOffset": 5,
+            },
+            "candidates": [
+                {
+                    "candidateId": f"candidate-{index}",
+                    "title": "Long candidate title " + ("X" * 240),
+                    "sourceKind": "论文网页/DOI",
+                    "qualityBucket": "pending",
+                    "abstract": "A" * 1200,
+                }
+                for index in range(5)
+            ],
+            "records": [{"recordId": f"record-{index}", "title": "R" * 1000} for index in range(10)],
+            "usage": {
+                "readTool": "source_collection_context_tool",
+                "writebackTool": "source_collection_stage_writeback_tool",
+            },
+        }
+
+        packaged = package_tool_result(
+            json.dumps(payload, ensure_ascii=False),
+            tool_name="source_collection_context_tool",
+            max_chars=900,
+        )
+
+        assert packaged.truncated is True
+        assert packaged.result_kind == "source_collection_context"
+        assert packaged.strategy == "structured_compact"
+        assert "candidate-0" in packaged.content
+        assert "candidate-4" in packaged.content
+        assert "candidate_offset=5" in packaged.content
+        assert "hasMore" in packaged.content
+        assert packaged.continuation_hint
 
 
 class TestFormatToolMessage:

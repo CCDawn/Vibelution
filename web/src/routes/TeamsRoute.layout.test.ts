@@ -516,6 +516,13 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).not.toContain("{module.projection.blockingReasons[0]}</small>");
     expect(routeSource).toContain("evidenceRefCount");
     expect(routeSource).toContain("materializedSources");
+    expect(routeSource).toContain("SourceCollectionCoverageSummary");
+    expect(routeSource).toContain("coverageSummary");
+    expect(routeSource).toContain("sourceCollectionCoverageMetric");
+    expect(routeSource).toContain("invalidCandidateIds");
+    expect(routeSource).toContain("materializedContentExtraction");
+    expect(routeSource).toContain("覆盖不足 · 待补读");
+    expect(routeSource).toContain("无效回写 ID");
     expect(routeSource).toContain("graphForSelectedSourceRun");
     expect(routeSource).toContain("parseSourceCollectionStageModuleId");
     expect(routeSource).toContain("collectionStage");

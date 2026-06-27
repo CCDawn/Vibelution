@@ -1263,7 +1263,25 @@ def writeback_source_collection_stage_session_task(
         "metadata": _normalize_metadata(request_payload.get("metadata")),
         "recordedAt": utc_now_iso(),
     }
+    coverage_summary = _source_collection_stage_writeback_candidate_coverage(
+        normalized_team_id,
+        run_id,
+        task,
+        writeback,
+    )
+    if coverage_summary.get("applicable"):
+        if status == "completed" and not bool(coverage_summary.get("complete")):
+            status = "needs_review"
+            writeback["status"] = status
+        writeback["coverageSummary"] = coverage_summary
+        writeback["invalidCandidateIds"] = list(coverage_summary.get("invalidCandidateIds") or [])
     materialized_sources = _materialize_source_collection_stage_writeback_sources(
+        normalized_team_id,
+        run_id,
+        task,
+        writeback,
+    )
+    materialized_content_extraction = _materialize_source_collection_stage_writeback_content_extraction(
         normalized_team_id,
         run_id,
         task,
@@ -1288,14 +1306,20 @@ def writeback_source_collection_stage_session_task(
         writeback,
     )
     writeback["materializedSources"] = materialized_sources
+    writeback["materializedContentExtraction"] = materialized_content_extraction
     writeback["materializedSourceQuality"] = materialized_source_quality
     writeback["materializedCandidateGraph"] = materialized_candidate_graph
     writeback["materializedKnowledgeIngestion"] = materialized_knowledge_ingestion
     task["status"] = status
     task["summary"] = writeback["summary"] or _trim_text(task.get("summary"), max_length=4000)
     task["result"] = writeback["result"]
+    if coverage_summary.get("applicable"):
+        task["result"]["coverageSummary"] = coverage_summary
+        task["result"]["invalidCandidateIds"] = list(coverage_summary.get("invalidCandidateIds") or [])
     if materialized_sources.get("createdRecordCount") or materialized_sources.get("importedCandidateCount"):
         task["result"]["materializedSources"] = materialized_sources
+    if materialized_content_extraction.get("extractedCandidateCount"):
+        task["result"]["materializedContentExtraction"] = materialized_content_extraction
     if materialized_source_quality.get("assessedCandidateCount"):
         task["result"]["materializedSourceQuality"] = materialized_source_quality
     if materialized_candidate_graph.get("candidateGraphId"):
@@ -1329,7 +1353,11 @@ def writeback_source_collection_stage_session_task(
             "createdRecordCount": materialized_sources.get("createdRecordCount", 0),
             "importedCandidateCount": materialized_sources.get("importedCandidateCount", 0),
             "skippedDuplicateCount": materialized_sources.get("skippedDuplicateCount", 0),
+            "contentExtractionCandidateCount": materialized_content_extraction.get("extractedCandidateCount", 0),
             "sourceQualityAssessedCandidateCount": materialized_source_quality.get("assessedCandidateCount", 0),
+            "coverageProcessedCount": coverage_summary.get("processed", 0) if coverage_summary.get("applicable") else 0,
+            "coverageMissingCount": coverage_summary.get("missing", 0) if coverage_summary.get("applicable") else 0,
+            "coverageInvalidCount": coverage_summary.get("invalid", 0) if coverage_summary.get("applicable") else 0,
             "sourceQualitySkippedCandidateCount": materialized_source_quality.get("skippedCandidateCount", 0),
             "candidateGraphId": materialized_candidate_graph.get("candidateGraphId", ""),
             "candidateGraphCreatedCount": materialized_candidate_graph.get("createdCandidateGraphCount", 0),
@@ -1376,6 +1404,7 @@ def get_source_collection_stage_task_context(
     include_candidates: bool = True,
     candidate_offset: int = 0,
     candidate_limit: int | None = None,
+    context_mode: str = "compact",
 ) -> dict[str, Any]:
     normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
     team_service.get_team(normalized_team_id)
@@ -1447,6 +1476,7 @@ def get_source_collection_stage_task_context(
         "schemaVersion": SCHEMA_VERSION,
         "status": "ok",
         "contextKind": "source_collection_stage_task_context",
+        "contextMode": _normalize_source_collection_context_mode(context_mode),
         "teamId": normalized_team_id,
         "runId": normalized_run_id,
         "stageId": normalized_stage_id,
@@ -1489,6 +1519,10 @@ def get_source_collection_stage_task_context(
             "fallback": "If required context is missing, write back status=blocked with a short reason.",
         },
     }
+    context["usage"]["continuationHint"] = _source_collection_context_continuation_hint(
+        context["candidatePage"],
+        context_mode=context["contextMode"],
+    )
     if memory_steward_mode:
         context["stewardActionPacket"] = _source_collection_memory_steward_action_packet(
             source_candidates,
@@ -1498,7 +1532,13 @@ def get_source_collection_stage_task_context(
             "Use stewardActionPacket. Do not infer hidden or truncated candidates; "
             "if no approvedCandidateIds are present, write back status=blocked with a short reason."
         )
-    return context
+        context["usage"]["continuationHint"] = _source_collection_context_continuation_hint(
+            context["candidatePage"],
+            context_mode=context["contextMode"],
+        )
+    if context["contextMode"] == "full":
+        return context
+    return _compact_source_collection_stage_task_context(context)
 
 
 def start_source_collection_run(team_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -2760,6 +2800,263 @@ def _source_collection_stage_round_status_after_search(
     ):
         return "needs_screening"
     return "completed"
+
+
+def _source_collection_stage_writeback_candidate_id(payload: dict[str, Any]) -> str:
+    return _trim_text(
+        payload.get("candidateId")
+        or payload.get("candidate_id")
+        or payload.get("sourceCandidateId")
+        or payload.get("source_candidate_id")
+        or payload.get("id"),
+        max_length=160,
+    )
+
+
+def _source_collection_stage_writeback_candidate_extractions(result: dict[str, Any]) -> list[dict[str, Any]]:
+    extractions: list[dict[str, Any]] = []
+    for key in (
+        "candidateExtractions",
+        "candidate_extractions",
+        "extractions",
+        "candidateFindings",
+        "candidate_findings",
+        "extractedCandidates",
+        "extracted_candidates",
+    ):
+        value = result.get(key)
+        if isinstance(value, list):
+            extractions.extend(item for item in value if isinstance(item, dict))
+    for container_key in ("contentExtraction", "content_extraction", "extractionSummary", "outputs", "summary"):
+        container = result.get(container_key)
+        if not isinstance(container, dict):
+            continue
+        for key in ("candidateExtractions", "candidate_extractions", "extractions", "candidateFindings", "extractedCandidates"):
+            value = container.get(key)
+            if isinstance(value, list):
+                extractions.extend(item for item in value if isinstance(item, dict))
+    return extractions[:300]
+
+
+def _source_collection_stage_writeback_candidate_coverage(
+    team_id: str,
+    run_id: str,
+    task: dict[str, Any],
+    writeback: dict[str, Any],
+) -> dict[str, Any]:
+    stage_id = _trim_text(task.get("stageId"), max_length=80)
+    agent_role = _trim_text(task.get("agentRole"), max_length=80)
+    result = writeback.get("result") if isinstance(writeback.get("result"), dict) else {}
+    if stage_id == "candidate" or agent_role == "content_extraction":
+        coverage_kind = "candidate_extractions"
+        entries = _source_collection_stage_writeback_candidate_extractions(result)
+    elif stage_id == "screening" or agent_role == "source_quality":
+        coverage_kind = "candidate_decisions"
+        entries = _source_collection_stage_writeback_candidate_decisions(result)
+    else:
+        return {"applicable": False, "coverageKind": ""}
+
+    source_candidates = _source_collection_candidates_for_run(team_id, run_id)
+    source_candidate_ids = [
+        _trim_text(item.get("candidateId"), max_length=160)
+        for item in source_candidates
+        if _trim_text(item.get("candidateId"), max_length=160)
+    ]
+    source_candidate_id_set = set(source_candidate_ids)
+    processed_ids: list[str] = []
+    invalid_ids: list[str] = []
+    blocked_ids: list[str] = []
+    duplicate_ids: list[str] = []
+    seen: set[str] = set()
+    for entry in entries:
+        candidate_id = _source_collection_stage_writeback_candidate_id(entry)
+        if not candidate_id:
+            invalid_ids.append("")
+            continue
+        if candidate_id in seen:
+            duplicate_ids.append(candidate_id)
+            continue
+        seen.add(candidate_id)
+        if candidate_id not in source_candidate_id_set:
+            invalid_ids.append(candidate_id)
+            continue
+        processed_ids.append(candidate_id)
+        entry_status = _trim_text(
+            entry.get("status")
+            or entry.get("decision")
+            or entry.get("result")
+            or entry.get("bucket"),
+            max_length=80,
+        ).lower()
+        if entry_status in {"blocked", "needs_more_info", "need_more_info", "needs_fulltext", "missing_source", "needs_revision"}:
+            blocked_ids.append(candidate_id)
+
+    missing_ids = [candidate_id for candidate_id in source_candidate_ids if candidate_id not in set(processed_ids)]
+    invalid_clean = [candidate_id for candidate_id in invalid_ids if candidate_id]
+    complete = bool(source_candidate_ids) and not missing_ids and not invalid_clean
+    if not source_candidate_ids:
+        complete = True
+    return {
+        "applicable": True,
+        "coverageKind": coverage_kind,
+        "total": len(source_candidate_ids),
+        "processed": len(processed_ids),
+        "missing": len(missing_ids),
+        "invalid": len(invalid_clean),
+        "blocked": len(blocked_ids),
+        "duplicate": len(duplicate_ids),
+        "complete": complete,
+        "processedCandidateIds": processed_ids[:120],
+        "missingCandidateIds": missing_ids[:120],
+        "invalidCandidateIds": invalid_clean[:80],
+        "blockedCandidateIds": blocked_ids[:80],
+        "duplicateCandidateIds": duplicate_ids[:80],
+    }
+
+
+def _source_collection_stage_writeback_content_extraction_summary(
+    *,
+    status: str,
+    extracted: list[dict[str, Any]] | None = None,
+    skipped: list[dict[str, Any]] | None = None,
+    failed: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    extracted_items = [item for item in list(extracted or []) if isinstance(item, dict)]
+    skipped_items = [item for item in list(skipped or []) if isinstance(item, dict)]
+    failed_items = [item for item in list(failed or []) if isinstance(item, dict)]
+    return {
+        "status": status,
+        "extractedCandidateCount": len(extracted_items),
+        "extractedCandidateIds": [
+            _trim_text(item.get("candidateId"), max_length=160)
+            for item in extracted_items
+            if _trim_text(item.get("candidateId"), max_length=160)
+        ][:120],
+        "skippedCandidateCount": len(skipped_items),
+        "failedCandidateCount": len(failed_items),
+        "skipped": skipped_items[:24],
+        "failed": failed_items[:24],
+    }
+
+
+def _materialize_source_collection_stage_writeback_content_extraction(
+    team_id: str,
+    run_id: str,
+    task: dict[str, Any],
+    writeback: dict[str, Any],
+) -> dict[str, Any]:
+    stage_id = _trim_text(task.get("stageId"), max_length=80)
+    agent_role = _trim_text(task.get("agentRole"), max_length=80)
+    if stage_id != "candidate" and agent_role != "content_extraction":
+        return _source_collection_stage_writeback_content_extraction_summary(status="skipped_stage")
+    status = _trim_text(writeback.get("status"), max_length=80).lower()
+    if status not in SOURCE_COLLECTION_STAGE_WRITEBACK_MATERIALIZED_STATUSES:
+        return _source_collection_stage_writeback_content_extraction_summary(status="skipped_status")
+    result = writeback.get("result") if isinstance(writeback.get("result"), dict) else {}
+    extractions = _source_collection_stage_writeback_candidate_extractions(result)
+    if not extractions:
+        return _source_collection_stage_writeback_content_extraction_summary(status="no_candidate_extractions")
+
+    source_candidate_ids = {
+        _trim_text(item.get("candidateId"), max_length=160)
+        for item in _source_collection_candidates_for_run(team_id, run_id)
+        if _trim_text(item.get("candidateId"), max_length=160)
+    }
+    task_id = _trim_text(task.get("taskId"), max_length=160)
+    recorded_by_agent = (
+        _trim_text(writeback.get("recordedByAgent"), max_length=160)
+        or _trim_text(task.get("agentId"), max_length=160)
+        or "Content Extraction Agent"
+    )
+    extracted: list[dict[str, Any]] = []
+    skipped: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    now = utc_now_iso()
+    with _WORKFLOW_LOCK:
+        candidate_store = _load_candidate_store(team_id)
+        candidates = [item for item in list(candidate_store.get("candidates") or []) if isinstance(item, dict)]
+        candidate_by_id = {
+            _trim_text(item.get("candidateId"), max_length=160): item
+            for item in candidates
+            if _trim_text(item.get("candidateId"), max_length=160)
+        }
+        changed = False
+        for extraction in extractions:
+            candidate_id = _source_collection_stage_writeback_candidate_id(extraction)
+            if not candidate_id:
+                skipped.append({"reason": "missing_candidate_id"})
+                continue
+            if candidate_id in seen:
+                skipped.append({"candidateId": candidate_id, "reason": "duplicate_extraction"})
+                continue
+            seen.add(candidate_id)
+            if candidate_id not in source_candidate_ids:
+                skipped.append({"candidateId": candidate_id, "reason": "candidate_not_in_source_collection_run"})
+                continue
+            candidate = candidate_by_id.get(candidate_id)
+            if not candidate:
+                skipped.append({"candidateId": candidate_id, "reason": "candidate_not_found"})
+                continue
+            metadata = candidate.get("metadata") if isinstance(candidate.get("metadata"), dict) else {}
+            normalized_extraction = {
+                "status": _trim_text(extraction.get("status") or "extracted", max_length=80),
+                "summary": _trim_text(
+                    extraction.get("summary")
+                    or extraction.get("finding")
+                    or extraction.get("notes")
+                    or extraction.get("reason"),
+                    max_length=2000,
+                ),
+                "keyFindings": _normalize_text_list(
+                    extraction.get("keyFindings") or extraction.get("key_findings") or extraction.get("findings"),
+                    max_items=12,
+                    max_length=240,
+                ),
+                "riskFlags": _normalize_text_list(
+                    extraction.get("riskFlags") or extraction.get("risk_flags") or extraction.get("risks"),
+                    max_items=12,
+                    max_length=120,
+                ),
+                "evidenceRefs": _normalize_ref_list(
+                    extraction.get("evidenceRefs") or extraction.get("evidence_refs") or writeback.get("evidenceRefs"),
+                    max_items=24,
+                ),
+                "taskId": task_id,
+                "runId": _trim_text(run_id, max_length=160),
+                "stageId": stage_id,
+                "recordedByAgent": recorded_by_agent,
+                "recordedAt": now,
+            }
+            metadata["contentExtraction"] = normalized_extraction
+            candidate["metadata"] = metadata
+            candidate["updatedAt"] = now
+            extracted.append({"candidateId": candidate_id, "status": normalized_extraction["status"]})
+            changed = True
+        if changed:
+            candidate_store["updatedAt"] = now
+            _write_json(_candidate_store_path(team_id), candidate_store)
+    summary = _source_collection_stage_writeback_content_extraction_summary(
+        status="completed" if extracted else "no_valid_candidate_extractions",
+        extracted=extracted,
+        skipped=skipped,
+    )
+    if extracted or skipped:
+        _record_workflow_event(
+            "source_collection.stage_session_task_content_extraction_materialized",
+            team_id,
+            fields={
+                "runId": _trim_text(run_id, max_length=160),
+                "taskId": task_id,
+                "stageId": stage_id,
+                "agentId": _trim_text(task.get("agentId"), max_length=160),
+                "extractedCandidateCount": summary["extractedCandidateCount"],
+                "skippedCandidateCount": summary["skippedCandidateCount"],
+            },
+            level="warning" if skipped and not extracted else "info",
+            outcome="failed" if skipped and not extracted else "completed",
+            lifecycle=bool(skipped and not extracted),
+        )
+    return summary
 
 
 def _materialize_source_collection_stage_writeback_sources(
@@ -15053,10 +15350,14 @@ def _source_collection_stage_card_projection(
 ) -> dict[str, Any]:
     latest_task = _latest_source_collection_stage_task(tasks)
     agent_status = _trim_text(latest_task.get("status"), max_length=80).lower() if latest_task else "not_started"
+    coverage_summary = _source_collection_stage_task_coverage_summary(latest_task or {})
+    coverage_missing = _source_collection_count(coverage_summary.get("missing")) + _source_collection_count(coverage_summary.get("invalid"))
+    coverage_incomplete = bool(coverage_summary.get("applicable")) and not bool(coverage_summary.get("complete"))
+    effective_pending_count = max(pending_count, coverage_missing)
     task_settled = agent_status in {"completed", "needs_review"}
     task_blocked = agent_status in {"blocked", "failed"}
     artifact_ready = artifact_status == "ready" and artifact_count > 0
-    artifact_complete = artifact_ready and pending_count <= 0
+    artifact_complete = artifact_ready and effective_pending_count <= 0 and not coverage_incomplete
     if agent_status in {"running", "queued"}:
         card_status = "agent_running"
     elif task_blocked and artifact_ready:
@@ -15071,7 +15372,7 @@ def _source_collection_stage_card_projection(
         card_status = "agent_done_artifact_pending"
     elif artifact_complete:
         card_status = "artifact_ready_no_latest_agent_task"
-    elif pending_count > 0 or input_count > 0:
+    elif effective_pending_count > 0 or input_count > 0:
         card_status = "pending"
     else:
         card_status = "idle"
@@ -15089,14 +15390,14 @@ def _source_collection_stage_card_projection(
             "input": input_count,
             "artifact": artifact_count,
             "output": output_count,
-            "pending": pending_count,
+            "pending": effective_pending_count,
             "task": len(tasks),
             "historicalTask": max(0, _source_collection_count(historical_task_count)),
         },
         "latestTask": _source_collection_stage_task_card_summary(latest_task) if latest_task else {},
         "resultKeys": result_keys,
         "nextActions": [_trim_text(item, max_length=500) for item in next_actions if _trim_text(item, max_length=500)][:6],
-        "blockingReasons": _source_collection_stage_card_blocking_reasons(card_status, artifact_status, artifact_count, pending_count),
+        "blockingReasons": _source_collection_stage_card_blocking_reasons(card_status, artifact_status, artifact_count, effective_pending_count, coverage_summary),
     }
 
 
@@ -15211,13 +15512,43 @@ def _source_collection_stage_task_card_summary(task: dict[str, Any]) -> dict[str
         "resultKeys": sorted(str(key) for key in result.keys()),
         "evidenceRefCount": len(evidence_refs),
         "nextActionCount": len(next_actions),
+        "coverageSummary": _source_collection_stage_task_coverage_summary(task),
+        "invalidCandidateIds": (
+            list(writeback.get("invalidCandidateIds") or [])
+            if isinstance(writeback.get("invalidCandidateIds"), list)
+            else list(result.get("invalidCandidateIds") or []) if isinstance(result.get("invalidCandidateIds"), list) else []
+        )[:80],
         "materializedSources": writeback.get("materializedSources") if isinstance(writeback.get("materializedSources"), dict) else {},
+        "materializedContentExtraction": writeback.get("materializedContentExtraction") if isinstance(writeback.get("materializedContentExtraction"), dict) else {},
         "materializedKnowledgeIngestion": writeback.get("materializedKnowledgeIngestion") if isinstance(writeback.get("materializedKnowledgeIngestion"), dict) else {},
     }
 
 
-def _source_collection_stage_card_blocking_reasons(card_status: str, artifact_status: str, artifact_count: int, pending_count: int) -> list[str]:
+def _source_collection_stage_task_coverage_summary(task: dict[str, Any]) -> dict[str, Any]:
+    writeback = task.get("writeback") if isinstance(task.get("writeback"), dict) else {}
+    result = task.get("result") if isinstance(task.get("result"), dict) else {}
+    coverage = writeback.get("coverageSummary") if isinstance(writeback.get("coverageSummary"), dict) else {}
+    if not coverage:
+        coverage = result.get("coverageSummary") if isinstance(result.get("coverageSummary"), dict) else {}
+    return _normalize_metadata(coverage)
+
+
+def _source_collection_stage_card_blocking_reasons(
+    card_status: str,
+    artifact_status: str,
+    artifact_count: int,
+    pending_count: int,
+    coverage_summary: dict[str, Any] | None = None,
+) -> list[str]:
     reasons: list[str] = []
+    coverage = coverage_summary if isinstance(coverage_summary, dict) else {}
+    if bool(coverage.get("applicable")) and not bool(coverage.get("complete")):
+        reasons.append(
+            "Agent writeback has partial candidate coverage: "
+            f"{_source_collection_count(coverage.get('processed'))}/{_source_collection_count(coverage.get('total'))} processed, "
+            f"{_source_collection_count(coverage.get('missing'))} missing, "
+            f"{_source_collection_count(coverage.get('invalid'))} invalid candidate ids."
+        )
     if card_status == "agent_done_artifact_pending":
         reasons.append("Agent task wrote back a structured result, but the expected stage artifact has not been created yet.")
     if card_status == "artifact_ready_agent_blocked":
@@ -15602,6 +15933,7 @@ def _source_collection_context_record_summary(record: dict[str, Any]) -> dict[st
 def _source_collection_context_candidate_summary(candidate: dict[str, Any]) -> dict[str, Any]:
     metadata = candidate.get("metadata") if isinstance(candidate.get("metadata"), dict) else {}
     imported_from = metadata.get("importedFromDataRecord") if isinstance(metadata.get("importedFromDataRecord"), dict) else {}
+    content_extraction = metadata.get("contentExtraction") if isinstance(metadata.get("contentExtraction"), dict) else {}
     return {
         "candidateId": _trim_text(candidate.get("candidateId"), max_length=128),
         "candidateType": _trim_text(candidate.get("candidateType"), max_length=80),
@@ -15618,7 +15950,198 @@ def _source_collection_context_candidate_summary(candidate: dict[str, Any]) -> d
         "qualityStatus": _trim_text(candidate.get("qualityStatus"), max_length=80),
         "qualityBucket": _source_quality_bucket(candidate),
         "latestAssessment": _normalize_metadata(_candidate_source_quality_assessment(candidate) or {}),
+        "contentExtraction": _normalize_metadata(content_extraction),
         "validation": _normalize_metadata(candidate.get("validation")),
+    }
+
+
+def _normalize_source_collection_context_mode(value: Any) -> str:
+    return "full" if _trim_text(value, max_length=40).lower() == "full" else "compact"
+
+
+def _source_collection_context_continuation_hint(candidate_page: dict[str, Any], *, context_mode: str) -> str:
+    if not isinstance(candidate_page, dict) or not bool(candidate_page.get("hasMore")):
+        return ""
+    next_offset = _source_collection_count(candidate_page.get("nextOffset"))
+    limit = _source_collection_count(candidate_page.get("limit")) or 5
+    mode = _normalize_source_collection_context_mode(context_mode)
+    return f"hasMore: source_collection_context_tool(candidate_offset={next_offset}, candidate_limit={limit}, context_mode={mode})"
+
+
+def _compact_source_collection_stage_task_context(context: dict[str, Any]) -> dict[str, Any]:
+    candidate_page = context.get("candidatePage") if isinstance(context.get("candidatePage"), dict) else {}
+    usage = context.get("usage") if isinstance(context.get("usage"), dict) else {}
+    compact_usage = {
+        "readTool": "source_collection_context_tool",
+        "writebackTool": "source_collection_stage_writeback_tool",
+        "doNotUse": usage.get("doNotUse") if isinstance(usage.get("doNotUse"), list) else [],
+        "fallback": _trim_text(usage.get("fallback"), max_length=300),
+        "continuationHint": _source_collection_context_continuation_hint(candidate_page, context_mode="compact"),
+    }
+    records = [
+        _compact_source_collection_context_record(item)
+        for item in list(context.get("records") or [])
+        if isinstance(item, dict)
+    ]
+    candidates = [
+        _compact_source_collection_context_candidate(item)
+        for item in list(context.get("candidates") or [])
+        if isinstance(item, dict)
+    ]
+    compact = {
+        "schemaVersion": context.get("schemaVersion"),
+        "status": context.get("status"),
+        "contextKind": context.get("contextKind"),
+        "contextMode": "compact",
+        "teamId": _trim_text(context.get("teamId"), max_length=128),
+        "runId": _trim_text(context.get("runId"), max_length=128),
+        "stageId": _trim_text(context.get("stageId"), max_length=80),
+        "taskId": _trim_text(context.get("taskId"), max_length=160),
+        "agentId": _trim_text(context.get("agentId"), max_length=160),
+        "agentRole": _trim_text(context.get("agentRole"), max_length=80),
+        "counts": _normalize_metadata(context.get("counts")),
+        "run": _compact_source_collection_context_run(context.get("run") if isinstance(context.get("run"), dict) else {}),
+        "task": _compact_source_collection_context_task(context.get("task") if isinstance(context.get("task"), dict) else {}),
+        "assignments": [
+            _compact_source_collection_context_assignment(item)
+            for item in list(context.get("assignments") or [])[:6]
+            if isinstance(item, dict)
+        ],
+        "records": records,
+        "candidates": candidates,
+        "candidatePage": _normalize_metadata(candidate_page),
+        "candidateIds": [
+            _trim_text(item.get("candidateId"), max_length=160)
+            for item in candidates
+            if _trim_text(item.get("candidateId"), max_length=160)
+        ],
+        "unassessedCandidateIds": _normalize_text_list(context.get("unassessedCandidateIds"), max_items=80, max_length=160),
+        "allUnassessedCandidateCount": _source_collection_count(context.get("allUnassessedCandidateCount")),
+        "writebackContract": _compact_source_collection_writeback_contract(
+            context.get("writebackContract") if isinstance(context.get("writebackContract"), dict) else {}
+        ),
+        "boundaries": _compact_source_collection_boundaries(
+            context.get("boundaries") if isinstance(context.get("boundaries"), dict) else {}
+        ),
+        "usage": compact_usage,
+    }
+    if isinstance(context.get("stewardActionPacket"), dict):
+        compact["stewardActionPacket"] = context["stewardActionPacket"]
+    return compact
+
+
+def _compact_source_collection_context_record(record: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "recordId": _trim_text(record.get("recordId"), max_length=128),
+        "title": _trim_text(record.get("title"), max_length=180),
+        "summary": _trim_text(record.get("summary"), max_length=260),
+        "sourceType": _trim_text(record.get("sourceType"), max_length=80),
+        "sourceUrl": _trim_text(record.get("sourceUrl"), max_length=320),
+        "doi": _trim_text(record.get("doi"), max_length=160),
+        "containerTitle": _trim_text(record.get("containerTitle"), max_length=160),
+        "issued": _trim_text(record.get("issued"), max_length=80),
+        "query": _trim_text(record.get("query"), max_length=240),
+        "assignmentId": _trim_text(record.get("assignmentId"), max_length=128),
+        "identityKey": _trim_text(record.get("identityKey"), max_length=180),
+    }
+
+
+def _compact_source_collection_context_candidate(candidate: dict[str, Any]) -> dict[str, Any]:
+    latest_assessment = candidate.get("latestAssessment") if isinstance(candidate.get("latestAssessment"), dict) else {}
+    content_extraction = candidate.get("contentExtraction") if isinstance(candidate.get("contentExtraction"), dict) else {}
+    doi = _trim_text(candidate.get("doi"), max_length=160)
+    source_url = _trim_text(candidate.get("sourceUrl"), max_length=180)
+    source_path = _trim_text(candidate.get("sourcePath"), max_length=180)
+    locator = doi or source_url or source_path
+    compact: dict[str, Any] = {
+        "candidateId": _trim_text(candidate.get("candidateId"), max_length=128),
+        "title": _trim_text(candidate.get("title"), max_length=140),
+        "summary": _trim_text(candidate.get("summary"), max_length=70),
+        "sourceKind": _trim_text(candidate.get("sourceKind"), max_length=80),
+        "locator": locator,
+        "sourceRecordId": _trim_text(candidate.get("sourceRecordId"), max_length=128),
+        "qualityStatus": _trim_text(candidate.get("qualityStatus"), max_length=80),
+        "qualityBucket": _trim_text(candidate.get("qualityBucket"), max_length=80),
+    }
+    if latest_assessment:
+        compact["latestAssessment"] = {
+            "decision": _trim_text(latest_assessment.get("decision"), max_length=80),
+            "assessedByAgent": _trim_text(latest_assessment.get("assessedByAgent"), max_length=160),
+            "notes": _trim_text(latest_assessment.get("notes"), max_length=220),
+        }
+    if content_extraction:
+        compact["contentExtraction"] = {
+            "status": _trim_text(content_extraction.get("status"), max_length=80),
+            "summary": _trim_text(content_extraction.get("summary"), max_length=140),
+            "taskId": _trim_text(content_extraction.get("taskId"), max_length=160),
+        }
+    return {
+        key: value
+        for key, value in compact.items()
+        if value not in ("", [], {})
+    }
+
+
+def _compact_source_collection_context_run(run: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "runId": _trim_text(run.get("runId"), max_length=128),
+        "status": _trim_text(run.get("status"), max_length=80),
+        "title": _trim_text(run.get("title"), max_length=180),
+        "topic": _trim_text(run.get("topic"), max_length=240),
+    }
+
+
+def _compact_source_collection_context_task(task: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "taskId": _trim_text(task.get("taskId"), max_length=160),
+        "stageId": _trim_text(task.get("stageId"), max_length=80),
+        "agentId": _trim_text(task.get("agentId"), max_length=160),
+        "agentRole": _trim_text(task.get("agentRole"), max_length=80),
+        "status": _trim_text(task.get("status"), max_length=80),
+        "summary": _trim_text(task.get("summary"), max_length=240),
+    }
+
+
+def _compact_source_collection_context_assignment(assignment: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "assignmentId": _trim_text(assignment.get("assignmentId"), max_length=128),
+        "agentId": _trim_text(assignment.get("agentId"), max_length=160),
+        "agentRole": _trim_text(assignment.get("agentRole"), max_length=80),
+        "status": _trim_text(assignment.get("status"), max_length=80),
+        "purpose": _trim_text(assignment.get("purpose"), max_length=200),
+    }
+
+
+def _compact_source_collection_writeback_contract(contract: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: contract.get(key)
+        for key in (
+            "taskId",
+            "teamId",
+            "runId",
+            "stageId",
+            "writebackTool",
+            "requiresStructuredResult",
+            "resultAuthority",
+            "writesFormalKnowledge",
+            "writesOfficialGraph",
+        )
+        if key in contract
+    }
+
+
+def _compact_source_collection_boundaries(boundaries: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: boundaries.get(key)
+        for key in (
+            "writesFormalKnowledge",
+            "writesRag",
+            "writesOfficialGraph",
+            "requiresStructuredWriteback",
+            "externalSearchAllowed",
+            "localFileReadAllowed",
+        )
+        if key in boundaries
     }
 
 
@@ -15877,8 +16400,11 @@ def _source_collection_stage_session_task_message(
         "run_id": writeback_contract.get("runId", ""),
         "stage_id": writeback_contract.get("stageId", stage_id),
         "task_id": writeback_contract.get("taskId", ""),
-        "max_records": 24,
+        "max_records": 5,
         "include_candidates": True,
+        "candidate_offset": 0,
+        "candidate_limit": 5,
+        "context_mode": "compact",
     }
     if can_materialize_formal_knowledge:
         context_tool_payload["candidate_limit"] = 80
@@ -15893,6 +16419,8 @@ def _source_collection_stage_session_task_message(
             "- 先用一句简短状态回应已接收任务，再按需要调用工具；不要让用户看到像未启动一样的空白等待。",
             f"- 先调用 `source_collection_context_tool` 读取本轮受控资料上下文，参数如下：`{context_tool_json}`。",
             "- 在本会话里完成当前阶段任务，并把可审查的结论、证据引用和下一步写清楚。",
+            "- 如果返回的 `candidatePage.hasMore=true`，必须继续按 `candidate_offset=candidatePage.nextOffset` 分页读取，直到本阶段应处理候选都有真实 candidateId 的结论。",
+            "- 不要推断截断或隐藏候选；不要把 `remaining_11_candidates` 这类聚合占位符当作 candidateId。",
             "- 不要使用 `web_fetch_tool` 读取 `file://` 本地路径或 localhost 回写接口；本地资料上下文只通过 `source_collection_context_tool` 获取。",
             (
                 "- 本任务是知识库管理员入库审核：只处理 source_quality_approved 的本轮 approved 候选；优先使用 `source_collection_context_tool` 返回的 `stewardActionPacket.approvedCandidateIds` 和 `writebackResultSkeleton` 写回。"

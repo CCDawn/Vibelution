@@ -16,12 +16,13 @@ def source_collection_context_tool(
     run_id: str = "",
     stage_id: str = "",
     task_id: str = "",
-    max_records: int = 24,
+    max_records: int = 5,
     include_candidates: bool = True,
     candidate_offset: int = 0,
-    candidate_limit: int = 0,
+    candidate_limit: int = 5,
+    context_mode: str = "compact",
 ) -> str:
-    """Return bounded source-collection task context without exposing local file access."""
+    """Return paged source-collection task context without exposing local file access."""
 
     try:
         from core.web.services import team_workflow_orchestration_service as workflow_service
@@ -40,6 +41,7 @@ def source_collection_context_tool(
             include_candidates=include_candidates,
             candidate_offset=candidate_offset,
             candidate_limit=candidate_limit or None,
+            context_mode=context_mode,
         )
         if isinstance(payload, dict) and resolution:
             payload.setdefault("toolResolution", resolution)
@@ -55,6 +57,9 @@ def source_collection_context_tool(
                 "returnedRecordCount": _safe_count((payload.get("counts") or {}).get("returnedRecordCount")) if isinstance(payload, dict) else 0,
                 "candidateCount": _safe_count((payload.get("counts") or {}).get("candidateCount")) if isinstance(payload, dict) else 0,
                 "returnedCandidateCount": _safe_count((payload.get("counts") or {}).get("returnedCandidateCount")) if isinstance(payload, dict) else 0,
+                "candidateOffset": _safe_count(((payload.get("candidatePage") or {}) if isinstance(payload, dict) else {}).get("offset")),
+                "candidateLimit": _safe_count(((payload.get("candidatePage") or {}) if isinstance(payload, dict) else {}).get("limit")),
+                "contextMode": _text(payload.get("contextMode")) if isinstance(payload, dict) else _text(context_mode),
                 "teamIdSource": _text(resolution.get("teamIdSource")) if resolution else "",
             },
         )
