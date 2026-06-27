@@ -474,6 +474,25 @@ def _managed_browser_window_candidates(browser_pid: int, role: str) -> list[dict
     return candidates
 
 
+def _repair_existing_launcher_browser_window(browser_pid: int) -> int:
+    for candidate in _managed_browser_window_candidates(int(browser_pid), "launcher"):
+        process_id = int(candidate.get("processId") or 0)
+        if process_id <= 0:
+            continue
+        app_identity = _apply_managed_browser_app_identity(process_id, "launcher")
+        resolved_pid = int(app_identity.get("windowPid") or process_id)
+        _append_log(
+            "desktop_entry_python.browser.identity_repaired",
+            browser_pid=int(browser_pid),
+            resolved_browser_pid=resolved_pid,
+            resolved_by=str(candidate.get("resolvedBy") or ""),
+            app_identity_applied=bool(app_identity.get("applied")),
+            window_icon_applied=bool(app_identity.get("windowIconApplied")),
+        )
+        return resolved_pid
+    return 0
+
+
 def _set_property_store_string(store_ptr: int, key: _PROPERTYKEY, value: str) -> None:
     vtable = ctypes.cast(store_ptr, ctypes.POINTER(ctypes.POINTER(ctypes.c_void_p))).contents
     set_value = ctypes.WINFUNCTYPE(
@@ -865,8 +884,13 @@ def _open_launcher(args: argparse.Namespace) -> None:
             _append_log("desktop_entry_python.backend.started", port=port, backend_pid=backend_pid)
         if not args.no_browser:
             if browser_pid <= 0 or not _pid_alive(browser_pid):
-                browser_pid = _open_launcher_window(_launcher_control_url(port))
-                _append_log("desktop_entry_python.browser.opened", port=port, browser_pid=browser_pid)
+                repaired_pid = _repair_existing_launcher_browser_window(browser_pid)
+                if repaired_pid > 0:
+                    browser_pid = repaired_pid
+                    _append_log("desktop_entry_python.browser.reused_profile_window", port=port, browser_pid=browser_pid)
+                else:
+                    browser_pid = _open_launcher_window(_launcher_control_url(port))
+                    _append_log("desktop_entry_python.browser.opened", port=port, browser_pid=browser_pid)
             else:
                 _append_log("desktop_entry_python.browser.reused", port=port, browser_pid=browser_pid)
         _save_launcher_state(
