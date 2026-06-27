@@ -10,9 +10,12 @@ $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
 $projectDir = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
+$entryCatalogScript = Join-Path $projectDir "scripts/desktop_entry_catalog.ps1"
+. $entryCatalogScript
+$entryCatalog = Assert-DesktopEntryCatalog -ProjectDir $projectDir
 $buildScript = Join-Path $projectDir "scripts/build_desktop_package.ps1"
 $desktopResourcesDir = Join-Path $projectDir "dist/desktop/win-unpacked/resources"
-$desktopExe = Join-Path $projectDir "dist/desktop/win-unpacked/Vibelution.exe"
+$desktopExe = Resolve-DesktopPublicEntryPath -Catalog $entryCatalog -ProjectDir $projectDir
 $desktopIconPath = Join-Path $projectDir "assets/icons/vibelution.ico"
 $launchProfilePath = Join-Path $desktopResourcesDir "vibelution-launch-profile.json"
 $summaryPath = Join-Path $projectDir ".runtime/launcher/electron-smoke-summary.json"

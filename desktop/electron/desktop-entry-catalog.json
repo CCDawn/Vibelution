@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 1,
+  "publicProductEntries": [
+    {
+      "id": "vibelution-desktop-package",
+      "label": "Vibelution",
+      "path": "dist/desktop/win-unpacked/Vibelution.exe",
+      "target": "launcher",
+      "windowProvider": "electron",
+      "shortcutAllowed": true,
+      "publicProductEntry": true
+    }
+  ],
+  "operatorEntries": [
+    {
+      "id": "powershell-launcher-adapter",
+      "path": "scripts/vibelution_launcher.ps1",
+      "publicProductEntry": false,
+      "reason": "Operator and development adapter; not a packaged product shortcut."
+    },
+    {
+      "id": "python-launcher-adapter",
+      "path": "scripts/vibelution_launcher.py",
+      "publicProductEntry": false,
+      "reason": "Operator and development adapter; not a packaged product shortcut."
+    }
+  ],
+  "fallbackProviders": [
+    {
+      "id": "legacy-edge-app-window-provider",
+      "provider": "edge_app",
+      "publicProductEntry": false,
+      "reason": "Compatibility fallback while Electron becomes the default product shell."
+    }
+  ],
+  "forbiddenProductEntries": [
+    {
+      "id": "direct-workbench-shortcut",
+      "target": "workbench",
+      "reason": "Workbench opens through Launcher/Supervisor so lifecycle and active-work guards remain authoritative."
+    }
+  ],
+  "deepLinks": [
+    {
+      "route": "vibelution://launcher/focus",
+      "action": "focus_launcher",
+      "publicProductEntry": true
+    },
+    {
+      "route": "vibelution://workbench/open",
+      "action": "open_workbench",
+      "publicProductEntry": false,
+      "reason": "Internal/provisional route; not a separate public entry."
+    }
+  ]
+}

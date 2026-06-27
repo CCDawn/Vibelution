@@ -33,11 +33,15 @@ describe("desktop package script", () => {
 
     expect(script).toContain("param(");
     expect(script).toContain("function Invoke-CheckedNative");
+    expect(script).toContain("$entryCatalogScript = Join-Path $projectDir \"scripts/desktop_entry_catalog.ps1\"");
+    expect(script).toContain(". $entryCatalogScript");
+    expect(script).toContain("$desktopExe = Resolve-DesktopPublicEntryPath");
+    expect(script).toContain("Assert-DesktopEntryCatalog");
     expect(script).toContain("function Assert-NoDesktopPackageProcesses");
     expect(script).toContain("function Wait-ForNoNewDesktopPackageProcesses");
     expect(script).toContain("[AllowEmptyCollection()]");
     expect(script).toContain("$buildScript = Join-Path $projectDir \"scripts/build_desktop_package.ps1\"");
-    expect(script).toContain("$desktopExe = Join-Path $projectDir \"dist/desktop/win-unpacked/Vibelution.exe\"");
+    expect(script).not.toContain("$desktopExe = Join-Path $projectDir \"dist/desktop/win-unpacked/Vibelution.exe\"");
     expect(script).toContain("$launchProfilePath = Join-Path $desktopResourcesDir \"vibelution-launch-profile.json\"");
     expect(script).toContain("$summaryPath = Join-Path $projectDir \".runtime/launcher/electron-smoke-summary.json\"");
     expect(script).toContain("Invoke-CheckedNative powershell @(\"-ExecutionPolicy\", \"Bypass\", \"-File\", $buildScript)");
@@ -66,6 +70,10 @@ describe("desktop package script", () => {
 
     expect(script).toContain("param(");
     expect(script).toContain("function Invoke-CheckedNative");
+    expect(script).toContain("$entryCatalogScript = Join-Path $projectDir \"scripts/desktop_entry_catalog.ps1\"");
+    expect(script).toContain(". $entryCatalogScript");
+    expect(script).toContain("$desktopExe = Resolve-DesktopPublicEntryPath");
+    expect(script).toContain("Assert-DesktopEntryCatalog");
     expect(script).toContain("function Get-AllVibelutionDesktopProcesses");
     expect(script).toContain("function Get-DesktopPackageProcesses");
     expect(script).toContain("function Assert-NoOtherVibelutionDesktopProcesses");
@@ -75,7 +83,7 @@ describe("desktop package script", () => {
     expect(script).toContain("function Stop-OwnedDesktopProcesses");
     expect(script).toContain("function Wait-ForNoOwnedDesktopProcesses");
     expect(script).toContain("$packageVerifier = Join-Path $projectDir \"scripts/verify_desktop_package.ps1\"");
-    expect(script).toContain("$desktopExe = Join-Path $projectDir \"dist/desktop/win-unpacked/Vibelution.exe\"");
+    expect(script).not.toContain("$desktopExe = Join-Path $projectDir \"dist/desktop/win-unpacked/Vibelution.exe\"");
     expect(script).toContain("Invoke-CheckedNative powershell @(\"-ExecutionPolicy\", \"Bypass\", \"-File\", $packageVerifier");
     expect(script).toContain("Start-Process -FilePath $desktopExe -PassThru");
     expect(script).toContain("Start-Process -FilePath $desktopExe -PassThru");

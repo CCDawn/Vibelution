@@ -9,8 +9,11 @@ $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
 $projectDir = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
+$entryCatalogScript = Join-Path $projectDir "scripts/desktop_entry_catalog.ps1"
+. $entryCatalogScript
+$entryCatalog = Assert-DesktopEntryCatalog -ProjectDir $projectDir
 $packageVerifier = Join-Path $projectDir "scripts/verify_desktop_package.ps1"
-$desktopExe = Join-Path $projectDir "dist/desktop/win-unpacked/Vibelution.exe"
+$desktopExe = Resolve-DesktopPublicEntryPath -Catalog $entryCatalog -ProjectDir $projectDir
 $MaxCommandLineLength = 260
 
 function Invoke-CheckedNative {
