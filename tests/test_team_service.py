@@ -344,6 +344,10 @@ def test_knowledge_expansion_team_agents_seed_complete_team(tmp_path, monkeypatc
     assert source_agent["roleKey"] == "knowledge_expansion_source_intake"
     assert source_agent["metadata"]["knowledgeExpansionTeamId"] == "knowledge-expansion-team"
     assert source_agent["metadata"]["knowledgeExpansionTeamRole"] == "source_intake"
+    assert source_agent["metadata"]["conversationIndexVisibility"] == (
+        agent_directory_service.CONVERSATION_INDEX_VISIBILITY_TEAM_PRIVATE
+    )
+    assert source_agent["metadata"]["showInSessionIndex"] is False
     assert source_agent["directSessionId"]
     assert session_service.get_session_detail(source_agent["directSessionId"])
     assert steward_agent["roleKey"] == "knowledge_steward"
@@ -474,7 +478,10 @@ def test_challenge_cup_research_team_agent_repair_purges_stale_and_rebuilds_comp
         assert session_service.get_session_detail(agent["directSessionId"])
         assert agent["metadata"]["challengeCupTeamId"] == "research-team"
         assert agent["metadata"]["challengeCupTeamRole"] == member["role"]
-        assert agent["metadata"]["showInSessionIndex"] is True
+        assert agent["metadata"]["showInSessionIndex"] is False
+        assert agent["metadata"]["conversationIndexVisibility"] == (
+            agent_directory_service.CONVERSATION_INDEX_VISIBILITY_TEAM_PRIVATE
+        )
         if member["role"] in {
             "data_discovery",
             "source_acquisition",
@@ -556,13 +563,17 @@ def test_challenge_cup_research_team_agent_repair_detects_missing_roles_and_dire
     assert team_service.challenge_cup_research_team_agents_need_repair() is True
 
 
-def test_challenge_cup_research_team_agents_remain_visible_in_session_index(tmp_path, monkeypatch):
+def test_challenge_cup_research_team_agents_stay_out_of_ordinary_session_index(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     result = team_service.ensure_challenge_cup_research_team_agents(purge_stale=True)
     data_discovery = next(member for member in result["team"]["members"] if member["role"] == "data_discovery")
     agent = agent_directory_service.get_agent(data_discovery["agentId"])
 
-    assert session_service._agent_directory_stub_hidden_from_user_index(agent, {agent["agentId"]}) is False
+    assert agent_directory_service.agent_conversation_index_visibility(
+        agent,
+        hidden_team_member_agent_ids={agent["agentId"]},
+    ) == agent_directory_service.CONVERSATION_INDEX_VISIBILITY_TEAM_PRIVATE
+    assert session_service._agent_directory_stub_hidden_from_user_index(agent, {agent["agentId"]}) is True
 
 
 def test_research_team_canvas_separates_reporting_and_communication_edges(tmp_path, monkeypatch):

@@ -179,13 +179,6 @@ _SESSION_LIST_CACHE: dict[str, Any] = {}
 _SESSION_CONVERSATION_EVENTS_CACHE_LOCK = threading.Lock()
 _SESSION_CONVERSATION_EVENTS_CACHE_MAX_ENTRIES = 64
 _SESSION_CONVERSATION_EVENTS_CACHE: dict[str, dict[str, Any]] = {}
-_AGENT_DIRECTORY_STUB_HIDDEN_CREATED_BY = {
-    "ai_search_team",
-    "research_agent_pool",
-    "self_evolution",
-    "supervised_evolution",
-    "system_repair",
-}
 _AGENT_DIRECTORY_STUB_HIDDEN_TEAM_SOURCES = {
     "ai_search",
     "research_organization",
@@ -1427,17 +1420,15 @@ def _ensure_conversation_workspace_metadata(conversation: dict[str, Any]) -> boo
 
 
 def _agent_requests_visible_direct_session(agent: dict[str, Any] | None) -> bool:
-    if not isinstance(agent, dict):
-        return False
-    metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
-    return bool(metadata.get("showInSessionIndex")) or (
-        str(metadata.get("directSessionVisibility") or "").strip() == "active_session"
+    return (
+        agent_directory_service.agent_conversation_index_visibility(agent)
+        == agent_directory_service.CONVERSATION_INDEX_VISIBILITY_USER_VISIBLE
     )
 
 
 def _conversation_hidden_from_index(raw: dict[str, Any], agent: dict[str, Any] | None) -> bool:
-    if _agent_requests_visible_direct_session(agent):
-        return False
+    if isinstance(agent, dict):
+        return not _agent_requests_visible_direct_session(agent)
     return bool(raw.get("hidden_from_index") or raw.get("hiddenFromIndex"))
 
 
@@ -1841,11 +1832,13 @@ def _ensure_conversation_agent_metadata(
 def _conversation_requires_agent_materialization(conversation: dict[str, Any]) -> bool:
     if str(conversation.get("agent_id") or conversation.get("agentId") or "").strip():
         return True
+    conversation_id = str(conversation.get("conversation_id") or conversation.get("id") or DEFAULT_CHAT_CONVERSATION_ID).strip()
     if list(conversation.get("messages") or []):
         return True
+    if conversation_id.startswith("session-seed-"):
+        return False
     if "workspace_path" not in conversation and "workspacePath" not in conversation:
         return True
-    conversation_id = str(conversation.get("conversation_id") or conversation.get("id") or DEFAULT_CHAT_CONVERSATION_ID).strip()
     if conversation_id and _session_ledger_visible_messages(conversation_id):
         return True
     active_task = conversation.get("active_task") or conversation.get("activeTask")
@@ -6140,17 +6133,13 @@ def _agent_directory_stub_hidden_from_user_index(
 ) -> bool:
     """Hide internal recovery channels from the ordinary user-session list."""
 
-    agent_id = str(agent.get("agentId") or "").strip()
-    if not agent_id:
-        return True
-    metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
-    if bool(metadata.get("showInSessionIndex")) or str(metadata.get("directSessionVisibility") or "").strip() == "active_session":
-        return False
-    if agent_id in hidden_team_member_agent_ids:
-        return True
-    creation_spec = metadata.get("creationSpec") if isinstance(metadata.get("creationSpec"), dict) else {}
-    created_by = str(agent.get("createdBy") or creation_spec.get("source") or "").strip()
-    return created_by in _AGENT_DIRECTORY_STUB_HIDDEN_CREATED_BY
+    return (
+        agent_directory_service.agent_conversation_index_visibility(
+            agent,
+            hidden_team_member_agent_ids=hidden_team_member_agent_ids,
+        )
+        != agent_directory_service.CONVERSATION_INDEX_VISIBILITY_USER_VISIBLE
+    )
 
 
 def _agent_directory_stub_hidden_team_member_ids() -> set[str]:
@@ -6971,6 +6960,11 @@ def _normalize_conversation(
     if not isinstance(active_task, dict):
         active_task = None
     agent_prompt_snapshot = _public_agent_prompt_snapshot(raw.get("agentPromptSnapshot"))
+    conversation_index_visibility = (
+        agent_directory_service.agent_conversation_index_visibility(agent)
+        if isinstance(agent, dict)
+        else agent_directory_service.CONVERSATION_INDEX_VISIBILITY_USER_VISIBLE
+    )
     return {
         "id": conversation_id,
         "title": title,
@@ -6991,6 +6985,7 @@ def _normalize_conversation(
         "lastCacheComposition": last_cache_composition,
         "sessionKind": session_kind,
         "hiddenFromIndex": _conversation_hidden_from_index(raw, agent),
+        "conversationIndexVisibility": conversation_index_visibility,
         "parentSessionId": parent_session_id,
         "rootSessionId": root_session_id,
         "childSessionIds": child_session_ids,

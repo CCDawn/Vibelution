@@ -37,6 +37,16 @@ export type ConversationIndexTeam = Team & {
   conversationIndexSetupReason?: "empty_members";
 };
 
+const USER_VISIBLE_CONVERSATION_INDEX_VISIBILITY = "user_visible";
+const TEAM_PRIVATE_AGENT_CREATED_BY = new Set(["challenge_cup_team", "knowledge_expansion_team"]);
+const INTERNAL_RECOVERY_AGENT_CREATED_BY = new Set([
+  "ai_search_team",
+  "research_organization",
+  "self_evolution",
+  "supervised_evolution",
+  "system_repair",
+]);
+
 export const DEFAULT_COLLAPSED_CONVERSATION_GROUPS: Record<ConversationIndexGroupKey, boolean> = {
   user: false,
   group: false,
@@ -287,10 +297,39 @@ export function sessionToConversationSummary(session: SessionSummary): Conversat
     agentPromptTemplateId: session.agentPromptTemplateId,
     dialogueModelId: session.dialogueModelId,
     agentInboxPendingCount: session.agentInboxPendingCount,
+    conversationIndexVisibility: session.conversationIndexVisibility,
     sourceRef,
     projectionEdit,
     agentSourceRef,
   };
+}
+
+function agentMetadataString(agent: AgentInstance, key: string) {
+  return String(agent.metadata?.[key] ?? "").trim();
+}
+
+function agentConversationIndexVisibility(agent: AgentInstance) {
+  const explicit = String(
+    agent.conversationIndexVisibility ?? agent.metadata?.conversationIndexVisibility ?? "",
+  ).trim();
+  if (explicit) {
+    return explicit;
+  }
+  if (agentMetadataString(agent, "challengeCupTeamId") || agentMetadataString(agent, "knowledgeExpansionTeamId")) {
+    return "team_private";
+  }
+  const roleKey = String(agent.roleKey ?? "").trim();
+  if (roleKey.startsWith("challenge_cup_") || roleKey.startsWith("knowledge_expansion_")) {
+    return "team_private";
+  }
+  const createdBy = String(agent.createdBy ?? "").trim();
+  if (TEAM_PRIVATE_AGENT_CREATED_BY.has(createdBy)) {
+    return "team_private";
+  }
+  if (INTERNAL_RECOVERY_AGENT_CREATED_BY.has(createdBy)) {
+    return "internal_recovery";
+  }
+  return USER_VISIBLE_CONVERSATION_INDEX_VISIBILITY;
 }
 
 export function isVisibleConversationAgent(agent: AgentInstance | undefined | null) {
@@ -301,6 +340,7 @@ export function isVisibleConversationAgent(agent: AgentInstance | undefined | nu
     String(agent.kind ?? "").trim() === "persistent"
     && String(agent.status ?? "").trim().toLowerCase() !== "archived"
     && Boolean(String(agent.directSessionId ?? "").trim())
+    && agentConversationIndexVisibility(agent) === USER_VISIBLE_CONVERSATION_INDEX_VISIBILITY
   );
 }
 
@@ -329,6 +369,7 @@ export function agentToConversationSummary(agent: AgentInstance): ConversationSu
     agentPromptTemplateId: agent.promptTemplateId,
     dialogueModelId: agent.llmBindings?.dialogue?.modelId,
     agentInboxPendingCount: agent.agentInboxPendingCount,
+    conversationIndexVisibility: agentConversationIndexVisibility(agent),
     sourceRef,
     projectionEdit,
     agentSourceRef,

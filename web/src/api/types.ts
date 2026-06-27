@@ -2573,6 +2573,7 @@ export type SessionSummary = {
   sourceRef?: SourceAuthorityRef;
   projectionEdit?: ProjectionEditContract;
   agentSourceRef?: SourceAuthorityRef | null;
+  conversationIndexVisibility?: ConversationIndexVisibility;
 };
 
 export type SourceAuthorityRef = {
@@ -3160,6 +3161,7 @@ export type AgentInstance = {
   contextCompressionEffectivePolicy?: AgentContextCompressionEffectivePolicy;
   promptTemplateId: string;
   directSessionId: string;
+  conversationIndexVisibility?: ConversationIndexVisibility;
   workspacePath: string;
   workspaceTerritory?: AgentWorkspaceTerritory;
   toolPolicyId: string;
@@ -4805,6 +4807,7 @@ export type ConversationSummary = {
   agentPromptTemplateId?: string;
   dialogueModelId?: string;
   agentInboxPendingCount?: number;
+  conversationIndexVisibility?: ConversationIndexVisibility;
   agentMissing?: boolean;
   agentStatusCode?: string;
   agentStatusMessage?: string;
@@ -4812,6 +4815,13 @@ export type ConversationSummary = {
   projectionEdit?: ProjectionEditContract;
   agentSourceRef?: SourceAuthorityRef | null;
 };
+
+export type ConversationIndexVisibility =
+  | "user_visible"
+  | "team_private"
+  | "internal_recovery"
+  | "hidden"
+  | string;
 
 export type SessionActiveTask = {
   taskId: string;

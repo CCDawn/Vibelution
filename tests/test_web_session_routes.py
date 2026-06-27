@@ -370,6 +370,14 @@ def test_agent_directory_internal_direct_session_stub_hidden_from_user_index(tmp
         direct_session_id="session-ai-internal",
         created_by="ai_search_team",
     )
+    organization_agent = agent_directory_service.create_agent_instance(
+        display_name="组织规划 Agent",
+        primary_mode="research",
+        role_key="research_organization_advisor",
+        prompt_template_id="prompt-chat-default",
+        direct_session_id="session-organization-internal",
+        created_by="research_organization",
+    )
     visible_agent = agent_directory_service.create_agent_instance(
         display_name="能力管家 Agent",
         primary_mode="research",
@@ -382,6 +390,7 @@ def test_agent_directory_internal_direct_session_stub_hidden_from_user_index(tmp
     listed_ids = {item["id"] for item in session_service.list_sessions()}
 
     assert "session-ai-internal" not in listed_ids
+    assert "session-organization-internal" not in listed_ids
     assert "session-visible-recovery" in listed_ids
     assert visible_agent["agentId"]
 
@@ -390,6 +399,9 @@ def test_agent_directory_internal_direct_session_stub_hidden_from_user_index(tmp
     assert detail["agentId"] == internal_agent["agentId"]
     assert detail["hiddenFromIndex"] is True
     assert "session-ai-internal" not in {item["id"] for item in session_service.list_sessions()}
+    organization_detail = session_service.get_session_detail("session-organization-internal")
+    assert organization_detail["agentId"] == organization_agent["agentId"]
+    assert organization_detail["hiddenFromIndex"] is True
 
 
 def test_agent_directory_system_team_member_stub_hidden_from_user_index(tmp_path, monkeypatch):
@@ -425,6 +437,9 @@ def test_agent_directory_system_team_member_stub_hidden_from_user_index(tmp_path
         }
     )
 
+    assert team_agent["conversationIndexVisibility"] == (
+        agent_directory_service.CONVERSATION_INDEX_VISIBILITY_TEAM_PRIVATE
+    )
     assert "session-team-member" not in {item["id"] for item in session_service.list_sessions()}
 
     detail = session_service.get_session_detail("session-team-member")
@@ -434,12 +449,12 @@ def test_agent_directory_system_team_member_stub_hidden_from_user_index(tmp_path
     assert "session-team-member" not in {item["id"] for item in session_service.list_sessions()}
 
 
-def test_agent_direct_session_visibility_repairs_stale_hidden_index_flag(tmp_path, monkeypatch):
+def test_user_visible_agent_direct_session_repairs_stale_hidden_index_flag(tmp_path, monkeypatch):
     _seed_chat_state(
         tmp_path,
         conversations=[
             {
-                "conversation_id": "session-team-visible",
+                "conversation_id": "session-user-visible",
                 "title": "资料入库",
                 "agent_id": "agent-visible",
                 "agentId": "agent-visible",
@@ -462,11 +477,14 @@ def test_agent_direct_session_visibility_repairs_stale_hidden_index_flag(tmp_pat
                     "agentCode": "A001",
                     "displayName": "资料入库",
                     "status": "active",
-                    "directSessionId": "session-team-visible",
+                    "directSessionId": "session-user-visible",
                     "primaryMode": "research",
                     "roleKey": "knowledge_steward",
                     "promptTemplateId": "prompt-chat-default",
                     "metadata": {
+                        "conversationIndexVisibility": (
+                            agent_directory_service.CONVERSATION_INDEX_VISIBILITY_USER_VISIBLE
+                        ),
                         "showInSessionIndex": True,
                         "directSessionVisibility": "active_session",
                     },
@@ -476,16 +494,71 @@ def test_agent_direct_session_visibility_repairs_stale_hidden_index_flag(tmp_pat
     )
 
     listed_ids = {item["id"] for item in session_service.list_sessions()}
-    detail = session_service.get_session_detail("session-team-visible")
+    detail = session_service.get_session_detail("session-user-visible")
 
-    assert "session-team-visible" in listed_ids
+    assert "session-user-visible" in listed_ids
     assert detail["agentId"] == "agent-visible"
     assert detail["hiddenFromIndex"] is False
     payload = load_chat_state(tmp_path)
-    stored = session_service._find_conversation_entry(payload, "session-team-visible")
+    stored = session_service._find_conversation_entry(payload, "session-user-visible")
     assert stored is not None
     assert "hidden_from_index" not in stored
     assert "hiddenFromIndex" not in stored
+
+
+def test_team_private_agent_direct_session_stays_hidden_from_user_index(tmp_path, monkeypatch):
+    _seed_chat_state(
+        tmp_path,
+        conversations=[
+            {
+                "conversation_id": "session-team-private",
+                "title": "挑战杯资料发现",
+                "agent_id": "agent-team-private",
+                "agentId": "agent-team-private",
+                "hidden_from_index": False,
+                "hiddenFromIndex": False,
+                "session_kind": "main",
+                "updated_at": "2026-05-18T12:00:00",
+                "messages": [],
+            }
+        ],
+    )
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(team_service, "PROJECT_ROOT", tmp_path)
+    agent_directory_service.save_state(
+        {
+            "agents": [
+                {
+                    "agentId": "agent-team-private",
+                    "agentCode": "A001",
+                    "displayName": "挑战杯资料发现",
+                    "status": "active",
+                    "directSessionId": "session-team-private",
+                    "primaryMode": "research",
+                    "roleKey": "challenge_cup_data_discovery",
+                    "promptTemplateId": "prompt-chat-default",
+                    "createdBy": "challenge_cup_team",
+                    "metadata": {
+                        "conversationIndexVisibility": (
+                            agent_directory_service.CONVERSATION_INDEX_VISIBILITY_TEAM_PRIVATE
+                        ),
+                        "challengeCupTeamId": "research-team",
+                        "challengeCupTeamRole": "data_discovery",
+                        "showInSessionIndex": True,
+                        "directSessionVisibility": "active_session",
+                    },
+                }
+            ]
+        }
+    )
+
+    listed_ids = {item["id"] for item in session_service.list_sessions()}
+    detail = session_service.get_session_detail("session-team-private")
+
+    assert "session-team-private" not in listed_ids
+    assert detail["agentId"] == "agent-team-private"
+    assert detail["hiddenFromIndex"] is True
 
 
 def test_persisted_empty_system_team_member_session_hidden_from_user_index(tmp_path, monkeypatch):

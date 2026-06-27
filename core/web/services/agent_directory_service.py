@@ -85,6 +85,27 @@ DISABLED_AGENT_DIRECT_READ_TOOL_NAMES = {
 SESSION_AGENT_VISIBILITY_ACTIVE = "active_session"
 SESSION_AGENT_VISIBILITY_PENDING = "pending_activity"
 SESSION_AGENT_VISIBILITY_NONE = "none"
+CONVERSATION_INDEX_VISIBILITY_USER_VISIBLE = "user_visible"
+CONVERSATION_INDEX_VISIBILITY_TEAM_PRIVATE = "team_private"
+CONVERSATION_INDEX_VISIBILITY_INTERNAL_RECOVERY = "internal_recovery"
+CONVERSATION_INDEX_VISIBILITY_HIDDEN = "hidden"
+CONVERSATION_INDEX_VISIBILITIES = {
+    CONVERSATION_INDEX_VISIBILITY_USER_VISIBLE,
+    CONVERSATION_INDEX_VISIBILITY_TEAM_PRIVATE,
+    CONVERSATION_INDEX_VISIBILITY_INTERNAL_RECOVERY,
+    CONVERSATION_INDEX_VISIBILITY_HIDDEN,
+}
+TEAM_PRIVATE_DIRECT_SESSION_CREATED_BY = {
+    "challenge_cup_team",
+    "knowledge_expansion_team",
+}
+INTERNAL_RECOVERY_DIRECT_SESSION_CREATED_BY = {
+    "ai_search_team",
+    "research_organization",
+    "self_evolution",
+    "supervised_evolution",
+    "system_repair",
+}
 SESSION_AGENT_ACTIVITY_FILES = (
     "turn_journal.jsonl",
     "logs/conversation.jsonl",
@@ -1062,6 +1083,56 @@ def session_agent_visibility(agent: dict[str, Any] | None) -> str:
         direct_session_id,
         session_workspace_path=legacy_workspace_path,
     )
+
+
+def normalize_conversation_index_visibility(value: Any) -> str:
+    visibility = str(value or "").strip()
+    if visibility in CONVERSATION_INDEX_VISIBILITIES:
+        return visibility
+    return ""
+
+
+def agent_conversation_index_visibility(
+    agent: dict[str, Any] | None,
+    *,
+    hidden_team_member_agent_ids: set[str] | None = None,
+) -> str:
+    """Return how an Agent direct session may appear in the ordinary chat index."""
+
+    if not isinstance(agent, dict):
+        return CONVERSATION_INDEX_VISIBILITY_HIDDEN
+    if str(agent.get("kind") or DEFAULT_AGENT_KIND).strip() != DEFAULT_AGENT_KIND:
+        return CONVERSATION_INDEX_VISIBILITY_HIDDEN
+    if str(agent.get("status") or "active").strip().lower() == "archived":
+        return CONVERSATION_INDEX_VISIBILITY_HIDDEN
+    agent_id = str(agent.get("agentId") or "").strip()
+    direct_session_id = str(agent.get("directSessionId") or "").strip()
+    if not agent_id or not direct_session_id:
+        return CONVERSATION_INDEX_VISIBILITY_HIDDEN
+    metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
+    explicit = normalize_conversation_index_visibility(
+        agent.get("conversationIndexVisibility") or metadata.get("conversationIndexVisibility")
+    )
+    if explicit:
+        return explicit
+    if hidden_team_member_agent_ids and agent_id in hidden_team_member_agent_ids:
+        return CONVERSATION_INDEX_VISIBILITY_TEAM_PRIVATE
+    if str(metadata.get("challengeCupTeamId") or "").strip() or str(metadata.get("knowledgeExpansionTeamId") or "").strip():
+        return CONVERSATION_INDEX_VISIBILITY_TEAM_PRIVATE
+    role_key = _normalize_role_key(agent.get("roleKey") or _infer_agent_role_key(agent))
+    if role_key.startswith("challenge_cup_") or role_key.startswith("knowledge_expansion_"):
+        return CONVERSATION_INDEX_VISIBILITY_TEAM_PRIVATE
+    creation_spec = metadata.get("creationSpec") if isinstance(metadata.get("creationSpec"), dict) else {}
+    created_by = str(agent.get("createdBy") or creation_spec.get("source") or "").strip()
+    if created_by in TEAM_PRIVATE_DIRECT_SESSION_CREATED_BY:
+        return CONVERSATION_INDEX_VISIBILITY_TEAM_PRIVATE
+    if created_by in INTERNAL_RECOVERY_DIRECT_SESSION_CREATED_BY:
+        return CONVERSATION_INDEX_VISIBILITY_INTERNAL_RECOVERY
+    if bool(metadata.get("showInSessionIndex")):
+        return CONVERSATION_INDEX_VISIBILITY_USER_VISIBLE
+    if str(metadata.get("directSessionVisibility") or "").strip() == SESSION_AGENT_VISIBILITY_ACTIVE:
+        return CONVERSATION_INDEX_VISIBILITY_USER_VISIBLE
+    return CONVERSATION_INDEX_VISIBILITY_USER_VISIBLE
 
 
 def _active_chat_session_id() -> str:
@@ -5272,6 +5343,7 @@ def _agent_to_api(
     tool_policy = _tool_policy_for_agent(agent, hydration=hydration)
     agent_source_ref = _source_authority_ref("agent", agent_id)
     agent_projection_edit = _projection_edit_contract("agent", agent_id)
+    conversation_index_visibility = agent_conversation_index_visibility({**agent, "metadata": metadata})
     return {
         "agentId": agent_id,
         "agentCode": _normalize_agent_code(agent.get("agentCode"))
@@ -5293,6 +5365,7 @@ def _agent_to_api(
             agent.get("promptTemplateId") or _infer_agent_prompt_template_id(agent)
         ),
         "directSessionId": str(agent.get("directSessionId") or "").strip(),
+        "conversationIndexVisibility": conversation_index_visibility,
         "workspacePath": workspace,
         "workspaceTerritory": _agent_workspace_territory(agent),
         "toolPolicyId": str(agent.get("toolPolicyId") or DEFAULT_TOOL_POLICY_ID).strip() or DEFAULT_TOOL_POLICY_ID,
@@ -5344,6 +5417,7 @@ def _agent_to_api_summary(agent: dict[str, Any]) -> dict[str, Any]:
     agent_id = str(agent.get("agentId") or "").strip()
     agent_source_ref = _source_authority_ref("agent", agent_id)
     agent_projection_edit = _projection_edit_contract("agent", agent_id)
+    conversation_index_visibility = agent_conversation_index_visibility({**agent, "metadata": metadata})
     return {
         "agentId": agent_id,
         "agentCode": _normalize_agent_code(agent.get("agentCode"))
@@ -5364,6 +5438,7 @@ def _agent_to_api_summary(agent: dict[str, Any]) -> dict[str, Any]:
             agent.get("promptTemplateId") or _infer_agent_prompt_template_id(agent)
         ),
         "directSessionId": str(agent.get("directSessionId") or "").strip(),
+        "conversationIndexVisibility": conversation_index_visibility,
         "workspacePath": workspace,
         "workspaceTerritory": _agent_workspace_territory(agent),
         "toolPolicyId": str(agent.get("toolPolicyId") or DEFAULT_TOOL_POLICY_ID).strip() or DEFAULT_TOOL_POLICY_ID,
