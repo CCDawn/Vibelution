@@ -319,6 +319,25 @@ def _fake_source_search_response(query, *, max_results, provider):
     }
 
 
+def _fake_low_quality_source_search_response(query, *, max_results, provider):
+    query_text = str(query.get("query") or "neural source")
+    return {
+        "provider": provider,
+        "searchUrl": f"https://api.example.test/search?q={query_text.replace(' ', '+')}",
+        "results": [
+            {
+                "title": "机械设计与自动化控制中应注意的问题",
+                "sourceRef": "https://doi.org/10.0000/mechanical-design",
+                "rawLocation": "https://api.example.test/works/10.0000/mechanical-design",
+                "summary": "高考志愿填报与专业目录页面摘录，未讨论神经预测编码、皮层层级或突触可塑性。",
+                "sourceType": "paper",
+                "metadata": {"doi": "10.0000/mechanical-design", "containerTitle": "Vocational Education Weekly"},
+                "qualitySignals": {"providerScore": 88.1, "hasDoi": True},
+            },
+        ][:max_results],
+    }
+
+
 def _create_experiment_plan_with_active_baseline(team_id):
     team_workflow_orchestration_service.record_local_research_model_output(
         team_id,
@@ -3667,6 +3686,50 @@ def test_execute_source_collection_search_writes_records_and_imports_candidates(
     ]
 
 
+def test_execute_source_collection_search_rejects_low_relevance_results_before_storage(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        team_workflow_orchestration_service,
+        "_execute_source_collection_query",
+        _fake_low_quality_source_search_response,
+    )
+    team = team_service.create_team(name="ai科学研究团队")
+    run_response = team_workflow_orchestration_service.start_source_collection_run(
+        team["teamId"],
+        {
+            "title": "Neural algorithm source batch",
+            "topic": "predictive coding cortical hierarchy",
+            "querySeeds": ["predictive coding cortical hierarchy"],
+            "searchLanguages": ["en"],
+            "sourceTypes": ["paper"],
+            "maxResultsPerQuery": 1,
+            "agentRoles": ["data_discovery"],
+            "agentIds": {"data_discovery": "Data Discovery Agent"},
+        },
+    )
+
+    execution = team_workflow_orchestration_service.execute_source_collection_search(
+        team["teamId"],
+        run_response["run"]["runId"],
+        {"maxQueries": 1, "maxResultsPerQuery": 1},
+    )
+    records = data_processing_service.list_records(run_response["run"]["runId"])["records"]
+    candidates = team_workflow_orchestration_service.list_candidate_store(team["teamId"], candidate_type="source_manifest")
+    event_types = {event["eventType"] for event in execution["executionEvents"]}
+
+    assert execution["status"] == "partial"
+    assert execution["resultCount"] == 1
+    assert execution["recordCount"] == 0
+    assert execution["createdUniqueRecordCount"] == 0
+    assert execution["importedCount"] == 0
+    assert execution["rejectedResultCount"] == 1
+    assert records == []
+    assert candidates["candidateCount"] == 0
+    assert "search.low_quality_rejected" in event_types
+    assert "storage.data_record_written" not in event_types
+    assert "storage.source_manifest_imported" not in event_types
+
+
 def test_execute_source_collection_search_publishes_runtime_work_run(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     events = _capture_workflow_events(monkeypatch)
@@ -3912,18 +3975,18 @@ def test_execute_source_collection_search_dedupes_metadata_doi_and_sorted_url_qu
             "searchUrl": "https://api.example.test/search?q=first",
             "results": [
                 {
-                    "title": "Metadata DOI source identity",
+                    "title": "First metadata DOI source identity",
                     "sourceRef": "metadata-doi-source",
                     "rawLocation": "metadata-doi-location",
-                    "summary": "DOI only appears in metadata.",
+                    "summary": "First query DOI only appears in metadata.",
                     "sourceType": "paper",
                     "metadata": {"doi": "10.0000/metadata-only", "containerTitle": "Journal", "issued": "2025"},
                 },
                 {
-                    "title": "URL query order source identity",
+                    "title": "First URL query order source identity",
                     "sourceRef": "https://example.test/source?b=2&a=1&utm_source=tracker",
                     "rawLocation": "https://example.test/source?a=1&b=2",
-                    "summary": "Equivalent URLs should dedupe.",
+                    "summary": "First query equivalent URLs should dedupe.",
                     "sourceType": "paper",
                     "metadata": {"containerTitle": "Journal", "issued": "2025"},
                 },
@@ -3934,18 +3997,18 @@ def test_execute_source_collection_search_dedupes_metadata_doi_and_sorted_url_qu
             "searchUrl": "https://api.example.test/search?q=second",
             "results": [
                 {
-                    "title": "Metadata DOI source identity duplicate",
+                    "title": "Second metadata DOI source identity duplicate",
                     "sourceRef": "different-source-ref",
                     "rawLocation": "different-location",
-                    "summary": "Same DOI only appears in metadata.",
+                    "summary": "Second query same DOI only appears in metadata.",
                     "sourceType": "paper",
                     "metadata": {"doi": "10.0000/metadata-only", "containerTitle": "Journal", "issued": "2025"},
                 },
                 {
-                    "title": "URL query order source identity duplicate",
+                    "title": "Second URL query order source identity duplicate",
                     "sourceRef": "https://example.test/source?a=1&b=2",
                     "rawLocation": "https://example.test/source?b=2&a=1",
-                    "summary": "Equivalent URL with different query order.",
+                    "summary": "Second query equivalent URL with different query order.",
                     "sourceType": "paper",
                     "metadata": {"containerTitle": "Journal", "issued": "2025"},
                 },

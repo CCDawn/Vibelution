@@ -456,8 +456,9 @@ def create_key_tools() -> List[BaseTool]:
         """
         【批量公开搜索】并发执行多个网络搜索，单个查询失败不影响其他查询。
 
-        不依赖 Tavily/Brave/SerpAPI/NewsAPI 等付费或额度型 API；适合搜索 Agent
-        同时探索多个检索式、关键词变体或来源域。
+        不依赖 Tavily/Brave/SerpAPI/NewsAPI 等付费或额度型 API；优先使用本地
+        SearXNG/可选 DDGS，必要时退回公开搜索页解析，适合搜索 Agent 同时探索多个
+        检索式、关键词变体或来源域。
         查询中的 site:domain 会被工具层当作硬域名过滤；如果返回 `[搜索质量不足]`，
         表示结果已被判定为低相关或违反域名约束，不能当作候选来源。
 
@@ -484,7 +485,8 @@ def create_key_tools() -> List[BaseTool]:
         """
         【论文公开搜索】搜索论文、预印本、会议页、综述和 benchmark 线索。
 
-        仅使用公开搜索页解析，不调用 Semantic Scholar、Crossref 或其他需要额度的 API。
+        优先使用 OpenAlex、arXiv 公开索引和本地 SearXNG/可选 DDGS，不调用
+        Semantic Scholar、Crossref 或其他需要 key/额度的 API。
         返回 `[搜索质量不足]` 时不要补造论文候选，应改写检索式或回写阻塞。
 
         Args:
@@ -508,7 +510,8 @@ def create_key_tools() -> List[BaseTool]:
         """
         【项目公开搜索】搜索开源项目、代码仓库、包页面和项目文档。
 
-        不调用 GitHub/GitLab/PyPI/npm API，不需要 token 或额度。
+        优先使用 GitHub public REST、SearXNG/可选 DDGS，不需要 token 或付费额度；
+        GitHub 未认证查询可能受公开限流影响。
         返回 `[搜索质量不足]` 时不要把无关仓库当作候选项目。
 
         Args:
@@ -532,8 +535,9 @@ def create_key_tools() -> List[BaseTool]:
         """
         【新闻公开搜索】搜索公开新闻和近期报道线索。
 
-        不调用 NewsAPI 或其他需要 key/额度的新闻 API；适合资料搜集阶段获取当前事件线索。
-        工具会限制主流新闻域名；返回 `[搜索质量不足]` 时不要引用结果。
+        优先使用 Google News RSS、SearXNG/可选 DDGS，不调用 NewsAPI 或其他需要
+        key/额度的新闻 API；适合资料搜集阶段获取当前事件线索。返回
+        `[搜索质量不足]` 时不要引用结果。
 
         Args:
             topic: 新闻主题、公司、政策、论文或项目名
