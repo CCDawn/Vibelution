@@ -30,6 +30,7 @@ PYTHON_BRIDGE_LOG_PATH = RUNTIME_DIR / "desktop-entry-python.log"
 LAUNCHER_STDOUT_PATH = RUNTIME_DIR / "launcher-backend.stdout.log"
 LAUNCHER_STDERR_PATH = RUNTIME_DIR / "launcher-backend.stderr.log"
 LAUNCHER_BROWSER_PROFILE_DIR = RUNTIME_DIR / "launcher-control-profile"
+WORKBENCH_BROWSER_PROFILE_DIR = RUNTIME_DIR / "workbench-app-profile"
 LAUNCHER_ICON_PATH = PROJECT_ROOT / "assets" / "icons" / "vibelution.ico"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_WORKBENCH_PORT = 8000
@@ -407,6 +408,72 @@ def _visible_windows_for_process(pid: int) -> list[int]:
     return handles
 
 
+def _managed_browser_profile_dir(role: str) -> Path:
+    return LAUNCHER_BROWSER_PROFILE_DIR if role == "launcher" else WORKBENCH_BROWSER_PROFILE_DIR
+
+
+def _managed_browser_pids_for_profile(profile_dir: Path) -> list[int]:
+    if os.name != "nt":
+        return []
+    try:
+        import psutil  # type: ignore
+    except Exception:
+        return []
+
+    profile_text = str(profile_dir).lower()
+    profile_text_alt = profile_text.replace("\\", "/")
+    pids: list[int] = []
+    for proc in psutil.process_iter(["pid", "name", "cmdline"]):
+        try:
+            name = str(proc.info.get("name") or "").lower()
+            if name not in {"msedge.exe", "msedgewebview2.exe"}:
+                continue
+            cmdline = proc.info.get("cmdline") or []
+            command_text = " ".join(str(item) for item in cmdline).lower()
+            command_text_alt = command_text.replace("\\", "/")
+            if profile_text not in command_text and profile_text_alt not in command_text_alt:
+                continue
+            pid = int(proc.info.get("pid") or 0)
+            if pid > 0 and pid not in pids:
+                pids.append(pid)
+        except Exception:
+            continue
+    return pids
+
+
+def _managed_browser_window_candidates(browser_pid: int, role: str) -> list[dict[str, object]]:
+    candidates: list[dict[str, object]] = []
+    seen: set[int] = set()
+
+    for hwnd in _visible_windows_for_process(int(browser_pid)):
+        if hwnd in seen:
+            continue
+        seen.add(hwnd)
+        candidates.append(
+            {
+                "hwnd": int(hwnd),
+                "processId": _window_process_id(int(hwnd)),
+                "resolvedBy": "launch_pid",
+            }
+        )
+
+    profile_dir = _managed_browser_profile_dir(role)
+    resolved_by = "launcher_control_profile" if role == "launcher" else "workbench_profile"
+    for pid in _managed_browser_pids_for_profile(profile_dir):
+        for hwnd in _visible_windows_for_process(int(pid)):
+            if hwnd in seen:
+                continue
+            seen.add(hwnd)
+            candidates.append(
+                {
+                    "hwnd": int(hwnd),
+                    "processId": _window_process_id(int(hwnd)),
+                    "resolvedBy": resolved_by,
+                }
+            )
+    return candidates
+
+
 def _set_property_store_string(store_ptr: int, key: _PROPERTYKEY, value: str) -> None:
     vtable = ctypes.cast(store_ptr, ctypes.POINTER(ctypes.POINTER(ctypes.c_void_p))).contents
     set_value = ctypes.WINFUNCTYPE(
@@ -492,21 +559,28 @@ def _apply_managed_browser_app_identity(browser_pid: int, role: str) -> dict[str
         return {"applied": False, "windowPid": int(browser_pid), "appUserModelId": app_id, "iconResource": icon_resource, "reason": "non_windows"}
     deadline = time.monotonic() + 5.0
     last_error = ""
+    last_candidates: list[dict[str, object]] = []
     while time.monotonic() < deadline:
-        candidates = _visible_windows_for_process(int(browser_pid))
-        for hwnd in candidates:
+        candidates = _managed_browser_window_candidates(int(browser_pid), role)
+        last_candidates = candidates
+        for candidate in candidates:
+            hwnd = int(candidate.get("hwnd") or 0)
+            if hwnd <= 0:
+                continue
             try:
                 with contextlib.suppress(OSError):
                     ctypes.windll.ole32.CoInitialize(None)
-                _set_window_app_identity(int(hwnd), app_id, display_name, icon_resource)
-                window_icon_applied = _apply_window_icon(int(hwnd), LAUNCHER_ICON_PATH)
+                _set_window_app_identity(hwnd, app_id, display_name, icon_resource)
+                window_icon_applied = _apply_window_icon(hwnd, LAUNCHER_ICON_PATH)
                 result = {
                     "applied": True,
                     "windowIconApplied": bool(window_icon_applied),
-                    "windowPid": _window_process_id(int(hwnd)),
+                    "windowPid": _window_process_id(hwnd),
                     "appUserModelId": app_id,
                     "iconResource": icon_resource,
-                    "hwnd": int(hwnd),
+                    "hwnd": hwnd,
+                    "resolvedBy": str(candidate.get("resolvedBy") or ""),
+                    "candidateProcessId": int(candidate.get("processId") or 0),
                 }
                 _append_log("launcher.browser.window_app_identity.succeeded", **result)
                 return result
@@ -521,6 +595,9 @@ def _apply_managed_browser_app_identity(browser_pid: int, role: str) -> dict[str
         "iconResource": icon_resource,
         "reason": "window_not_found_or_identity_failed",
         "error": last_error,
+        "candidateCount": len(last_candidates),
+        "candidatePids": [int(item.get("processId") or 0) for item in last_candidates],
+        "candidateSources": [str(item.get("resolvedBy") or "") for item in last_candidates],
     }
     _append_log("launcher.browser.window_app_identity.failed", level="warning", **result)
     return result
