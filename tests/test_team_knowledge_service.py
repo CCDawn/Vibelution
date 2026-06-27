@@ -804,6 +804,20 @@ def test_empty_actor_cannot_create_or_read_governed_knowledge_service(knowledge_
     assert internal_health["summary"]["knowledgeBaseCount"] == 1
 
 
+def test_internal_team_knowledge_base_list_uses_lightweight_team_identity(knowledge_env, monkeypatch):
+    team = knowledge_env["team"]
+
+    def fail_full_team_read(team_id):
+        raise AssertionError("internal knowledge-base listing must not hydrate full team detail")
+
+    monkeypatch.setattr(team_knowledge_service.team_service, "get_team", fail_full_team_read)
+
+    payload = team_knowledge_service.list_team_knowledge_bases(team["teamId"], internal=True)
+
+    assert payload["teamId"] == team["teamId"]
+    assert payload["summary"]["knowledgeBaseCount"] == 1
+
+
 def test_team_knowledge_memory_section_summary_uses_lightweight_disk_counts(tmp_path, monkeypatch):
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)

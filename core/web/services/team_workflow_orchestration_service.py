@@ -1875,6 +1875,8 @@ def start_source_collection_search_background(team_id: str, run_id: str, payload
 def _source_collection_background_snapshot_is_active(snapshot: dict[str, Any] | None, team_id: str, run_id: str) -> bool:
     if not isinstance(snapshot, dict):
         return False
+    if _source_collection_work_run_snapshot_is_stale(snapshot):
+        return False
     if _trim_text(snapshot.get("runId"), max_length=160) != run_id:
         return False
     if _trim_text(snapshot.get("teamId"), max_length=160) != team_id:
@@ -1956,7 +1958,46 @@ def _decorate_source_collection_work_run_snapshot(
         payload["pathValidationError"] = (
             f"{existing_reason}; {reason}" if existing_reason and existing_reason != reason else reason
         )
+    if normalized_run_id:
+        data_run_exists = _source_collection_data_run_exists(normalized_run_id)
+        payload["dataRunExists"] = data_run_exists
+        if not data_run_exists:
+            _mark_source_collection_work_run_stale(payload, "missing_data_processing_run")
     return payload
+
+
+def _source_collection_data_run_exists(run_id: str) -> bool:
+    normalized_run_id = _trim_text(run_id, max_length=160)
+    if not normalized_run_id:
+        return False
+    try:
+        data_processing_service.get_processing_run(normalized_run_id)
+    except data_processing_service.DataProcessingError:
+        return False
+    return True
+
+
+def _mark_source_collection_work_run_stale(payload: dict[str, Any], reason: str) -> None:
+    normalized_reason = _trim_text(reason, max_length=160)
+    if not normalized_reason:
+        return
+    reasons = [
+        _trim_text(item, max_length=160)
+        for item in list(payload.get("staleReasons") or [])
+        if _trim_text(item, max_length=160)
+    ]
+    if normalized_reason not in reasons:
+        reasons.append(normalized_reason)
+    payload["staleReasons"] = reasons
+    payload["staleReason"] = reasons[0]
+
+
+def _source_collection_work_run_snapshot_is_stale(snapshot: dict[str, Any] | None) -> bool:
+    if not isinstance(snapshot, dict):
+        return False
+    if snapshot.get("dataRunExists") is False:
+        return True
+    return bool([item for item in list(snapshot.get("staleReasons") or []) if _trim_text(item, max_length=160)])
 
 
 def _source_collection_search_background_response(
@@ -2506,10 +2547,11 @@ def load_source_collection_work_run_summary() -> dict[str, Any]:
         team_id=latest_team_id,
         run_id=latest_run_id,
     )
+    active_for_lifecycle = None if _source_collection_work_run_snapshot_is_stale(active) else active
     return {
-        "active": active,
+        "active": active_for_lifecycle,
         "latest": latest,
-        "activeItems": [active] if isinstance(active, dict) else [],
+        "activeItems": [active_for_lifecycle] if isinstance(active_for_lifecycle, dict) else [],
     }
 
 
@@ -4199,7 +4241,7 @@ def _source_collection_candidate_count_for_run(candidate_store: dict[str, Any], 
 
 def get_research_stage_round_status(team_id: str) -> dict[str, Any]:
     normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
-    team = team_service.get_team(normalized_team_id)
+    team = _source_collection_team_identity_snapshot(normalized_team_id)
     _reconcile_source_collection_stage_session_tasks(normalized_team_id)
     with _WORKFLOW_LOCK:
         workflow = _load_or_create_workflow(normalized_team_id)
@@ -7012,10 +7054,14 @@ def get_knowledge_ingestion_status(team_id: str) -> dict[str, Any]:
     normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
     team_service.assert_team_exists(normalized_team_id)
     ingestion_store = _knowledge_ingestion_work_run_store()
-    ingestion_active_snapshot = ingestion_store.load_active_snapshot(KNOWLEDGE_INGESTION_WORK_RUN_KIND)
+    ingestion_active_snapshot = _decorate_knowledge_ingestion_work_run_snapshot(
+        ingestion_store.load_active_snapshot(KNOWLEDGE_INGESTION_WORK_RUN_KIND)
+    )
     if not _knowledge_ingestion_snapshot_is_active(ingestion_active_snapshot, normalized_team_id):
         ingestion_active_snapshot = None
-    ingestion_latest_snapshot = ingestion_store.load_latest_snapshot(KNOWLEDGE_INGESTION_WORK_RUN_KIND)
+    ingestion_latest_snapshot = _decorate_knowledge_ingestion_work_run_snapshot(
+        ingestion_store.load_latest_snapshot(KNOWLEDGE_INGESTION_WORK_RUN_KIND)
+    )
     if isinstance(ingestion_latest_snapshot, dict) and _trim_text(ingestion_latest_snapshot.get("teamId"), max_length=160) != normalized_team_id:
         ingestion_latest_snapshot = None
     with _WORKFLOW_LOCK:
@@ -8993,6 +9039,58 @@ def _knowledge_ingestion_snapshot_is_active(snapshot: dict[str, Any] | None, tea
     status = _trim_text(snapshot.get("status"), max_length=80).lower()
     current_phase = _trim_text(snapshot.get("currentPhase"), max_length=80).lower()
     return status in {"queued", "running"} or current_phase in {"queued", "running"}
+
+
+def _decorate_knowledge_ingestion_work_run_snapshot(snapshot: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not isinstance(snapshot, dict):
+        return None
+    payload = dict(snapshot)
+    if isinstance(payload.get("flowVisualization"), dict):
+        return payload
+    result = payload.get("result") if isinstance(payload.get("result"), dict) else {}
+    raw_steps = payload.get("completionSteps") if isinstance(payload.get("completionSteps"), list) else []
+    steps = _knowledge_collection_completion_steps_for_snapshot(result, raw_steps)
+    status = _trim_text(payload.get("status"), max_length=120) or "unknown"
+    error = _trim_text(payload.get("error"), max_length=500)
+    error_type = _trim_text(payload.get("errorType"), max_length=160)
+    run_id = _trim_text(payload.get("runId"), max_length=160)
+    source_run_id = _trim_text(payload.get("sourceRunId"), max_length=160)
+    should_backfill_flow = bool(steps) or bool(source_run_id) or run_id.startswith("knowledge-completion")
+    if not steps and _knowledge_collection_flow_step_status(status) == "failed":
+        steps = [_knowledge_collection_failed_step_for_snapshot(payload)]
+        should_backfill_flow = True
+    if should_backfill_flow:
+        payload["flowVisualization"] = _knowledge_collection_completion_flow_visualization(
+            status,
+            steps=steps,
+            result=result,
+            error=error,
+            error_type=error_type,
+        )
+    return payload
+
+
+def _knowledge_collection_failed_step_for_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
+    phase = _trim_text(snapshot.get("currentPhase") or snapshot.get("stageType"), max_length=120).lower()
+    if "search" in phase or "collection" in phase:
+        stage_id = "remaining_search"
+    elif "candidate" in phase or "extract" in phase:
+        stage_id = "candidate_extraction"
+    elif "screen" in phase or "quality" in phase or "review" in phase:
+        stage_id = "source_review"
+    elif "graph" in phase:
+        stage_id = "candidate_graph"
+    else:
+        stage_id = "knowledge_ingestion"
+    step = _knowledge_collection_completion_step(
+        stage_id,
+        "failed",
+        error_type=_trim_text(snapshot.get("errorType"), max_length=160),
+    )
+    error = _trim_text(snapshot.get("error"), max_length=300)
+    if error:
+        step["detail"] = error
+    return step
 
 
 def _knowledge_ingestion_background_response(team_id: str, snapshot: dict[str, Any], *, already_running: bool) -> dict[str, Any]:
@@ -14696,6 +14794,7 @@ def _source_collection_stage_cards_projection(
         for item in steward_candidates
         if str(item.get("currentState") or "") in {"official_synced", "formal_knowledge_synced"}
     )
+    pending_steward_pack_count = max(0, steward_pack_count - formal_synced_count)
     tasks = _source_collection_stage_session_tasks(normalized_team_id, normalized_run_id)
     tasks_by_stage: dict[str, list[dict[str, Any]]] = {}
     for task in tasks:
@@ -14767,7 +14866,7 @@ def _source_collection_stage_cards_projection(
             artifact_count=max(steward_pack_count, formal_synced_count),
             input_count=len(approved_sources) or len(source_candidates),
             output_count=formal_synced_count,
-            pending_count=steward_pack_count,
+            pending_count=pending_steward_pack_count,
             artifact_status="ready" if formal_synced_count else ("partial" if steward_pack_count else "empty"),
             artifact_summary=f"{steward_pack_count} 个入库审核包；{formal_synced_count} 个正式知识同步标记。",
             historical_task_count=len(stage_task_groups.get("memory", ([], []))[1]),
@@ -14903,6 +15002,24 @@ def _source_collection_team_member_snapshot(team_id: str) -> list[dict[str, Any]
         for member in list((team or {}).get("members") or [])
         if isinstance(member, dict)
     ]
+
+
+def _source_collection_team_identity_snapshot(team_id: str) -> dict[str, Any]:
+    normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
+    try:
+        with team_service._TEAM_LOCK:  # type: ignore[attr-defined]
+            state = team_service._load_index()  # type: ignore[attr-defined]
+            team = team_service._find_team(state, normalized_team_id)  # type: ignore[attr-defined]
+    except Exception:
+        team = None
+    if isinstance(team, dict):
+        return {
+            "teamId": normalized_team_id,
+            "name": _trim_text(team.get("name"), max_length=160),
+            "linkedChatRoomId": _trim_text(team.get("linkedChatRoomId"), max_length=160),
+        }
+    team_service.assert_team_exists(normalized_team_id)
+    return {"teamId": normalized_team_id, "name": "", "linkedChatRoomId": ""}
 
 
 def _source_collection_current_stage_agent_ids_by_stage(team_id: str, stage_ids: Iterable[str]) -> dict[str, set[str]]:
