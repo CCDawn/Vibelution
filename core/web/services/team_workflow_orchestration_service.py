@@ -11,13 +11,14 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
 
 from config.paths import resolve_workspace_home
 from config.public_config import build_effective_config, load_public_config
@@ -95,6 +96,7 @@ SOURCE_COLLECTION_SEARCH_EXECUTION_DEFAULT_MAX_QUERIES = 4
 SOURCE_COLLECTION_SEARCH_EXECUTION_MAX_QUERIES = 12
 SOURCE_COLLECTION_SEARCH_EXECUTION_DEFAULT_RESULTS_PER_QUERY = 2
 SOURCE_COLLECTION_SEARCH_EXECUTION_MAX_RESULTS_PER_QUERY = 5
+SOURCE_COLLECTION_SUMMARY_SLOW_EVENT_MS = 1000
 SOURCE_COLLECTION_AGENT_CONTEXT_STAGE_ROLES = {
     "collection": ("source_intake", "data_discovery", "source_acquisition"),
     "candidate": ("content_extraction",),
@@ -6771,6 +6773,7 @@ def get_source_quality_status(team_id: str) -> dict[str, Any]:
 def get_source_collection_summary(team_id: str, *, run_id: str = "") -> dict[str, Any]:
     """Return the fast first-paint source collection state without heavy repair reads."""
 
+    started_at = time.perf_counter()
     normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
     team_service.assert_team_exists(normalized_team_id)
     normalized_run_id = _trim_text(run_id, max_length=160)
@@ -6843,7 +6846,7 @@ def get_source_collection_summary(team_id: str, *, run_id: str = "") -> dict[str
         if _source_collection_background_snapshot_is_active(active_snapshot, normalized_team_id, normalized_run_id)
         else {}
     )
-    return {
+    payload = {
         "schemaVersion": SCHEMA_VERSION,
         "teamId": normalized_team_id,
         "runId": normalized_run_id,
@@ -6871,6 +6874,34 @@ def get_source_collection_summary(team_id: str, *, run_id: str = "") -> dict[str
         "boundaries": _research_stage_boundaries(),
         "updatedAt": utc_now_iso(),
     }
+    _record_source_collection_summary_timing(normalized_team_id, normalized_run_id, payload, started_at)
+    return payload
+
+
+def _record_source_collection_summary_timing(
+    team_id: str,
+    run_id: str,
+    payload: dict[str, Any],
+    started_at: float,
+) -> None:
+    duration_ms = int(round((time.perf_counter() - started_at) * 1000))
+    if duration_ms < SOURCE_COLLECTION_SUMMARY_SLOW_EVENT_MS:
+        return
+    summary = payload.get("summary") if isinstance(payload.get("summary"), dict) else {}
+    _record_workflow_event(
+        "source_collection.summary.slow",
+        team_id,
+        level="warning",
+        outcome="degraded",
+        fields={
+            "runId": _trim_text(run_id, max_length=160),
+            "durationMs": duration_ms,
+            "recordCount": _source_collection_count(summary.get("recordCount")),
+            "sourceCandidateCount": _source_collection_count(summary.get("sourceCandidateCount")),
+            "stageCardCount": len(list(payload.get("stageCards") or [])),
+            "activeWorkRun": bool(payload.get("activeWorkRun")),
+        },
+    )
 
 
 def list_candidate_store(
@@ -14671,8 +14702,18 @@ def _source_collection_stage_cards_projection(
         stage_id = _trim_text(task.get("stageId"), max_length=80)
         if stage_id:
             tasks_by_stage.setdefault(stage_id, []).append(task)
+    current_agent_ids_by_stage = (
+        _source_collection_current_stage_agent_ids_by_stage(normalized_team_id, tasks_by_stage.keys())
+        if tasks_by_stage
+        else {}
+    )
     stage_task_groups = {
-        stage_id: _source_collection_stage_tasks_for_current_team(normalized_team_id, stage_id, stage_tasks)
+        stage_id: _source_collection_stage_tasks_for_current_team(
+            normalized_team_id,
+            stage_id,
+            stage_tasks,
+            current_agent_ids=current_agent_ids_by_stage.get(stage_id),
+        )
         for stage_id, stage_tasks in tasks_by_stage.items()
     }
     cards = [
@@ -14772,13 +14813,18 @@ def _source_collection_stage_card_projection(
     agent_status = _trim_text(latest_task.get("status"), max_length=80).lower() if latest_task else "not_started"
     task_settled = agent_status in {"completed", "needs_review"}
     task_blocked = agent_status in {"blocked", "failed"}
-    artifact_complete = artifact_status == "ready" and pending_count <= 0 and artifact_count > 0
+    artifact_ready = artifact_status == "ready" and artifact_count > 0
+    artifact_complete = artifact_ready and pending_count <= 0
     if agent_status in {"running", "queued"}:
         card_status = "agent_running"
+    elif task_blocked and artifact_ready:
+        card_status = "artifact_ready_agent_blocked"
     elif task_blocked:
         card_status = "agent_blocked"
     elif task_settled and artifact_complete:
         card_status = "closed_loop"
+    elif task_settled and artifact_ready:
+        card_status = "artifact_ready_agent_needs_review"
     elif task_settled:
         card_status = "agent_done_artifact_pending"
     elif artifact_complete:
@@ -14823,9 +14869,12 @@ def _source_collection_stage_tasks_for_current_team(
     team_id: str,
     stage_id: str,
     tasks: list[dict[str, Any]],
+    *,
+    current_agent_ids: set[str] | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     valid_tasks = [item for item in tasks if isinstance(item, dict)]
-    current_agent_ids = _source_collection_current_stage_agent_ids(team_id, stage_id)
+    if current_agent_ids is None:
+        current_agent_ids = _source_collection_current_stage_agent_ids(team_id, stage_id)
     if not current_agent_ids:
         return valid_tasks, []
     current: list[dict[str, Any]] = []
@@ -14839,25 +14888,50 @@ def _source_collection_stage_tasks_for_current_team(
     return current, historical
 
 
-def _source_collection_current_stage_agent_ids(team_id: str, stage_id: str) -> set[str]:
-    allowed_roles = set(SOURCE_COLLECTION_AGENT_CONTEXT_STAGE_ROLES.get(stage_id, ()))
-    if not allowed_roles:
-        return set()
-    agent_ids: set[str] = set()
+def _source_collection_team_member_snapshot(team_id: str) -> list[dict[str, Any]]:
     try:
-        team = team_service.get_team(team_id)
+        with team_service._TEAM_LOCK:  # type: ignore[attr-defined]
+            state = team_service._load_index()  # type: ignore[attr-defined]
+            team = team_service._find_team(state, team_id)  # type: ignore[attr-defined]
     except Exception:
-        team = {}
-    for member in list(team.get("members") or []) if isinstance(team, dict) else []:
-        if not isinstance(member, dict):
-            continue
+        try:
+            team = team_service.get_team(team_id)
+        except Exception:
+            team = {}
+    return [
+        dict(member)
+        for member in list((team or {}).get("members") or [])
+        if isinstance(member, dict)
+    ]
+
+
+def _source_collection_current_stage_agent_ids_by_stage(team_id: str, stage_ids: Iterable[str]) -> dict[str, set[str]]:
+    normalized_stage_ids = [
+        _trim_text(stage_id, max_length=80)
+        for stage_id in stage_ids
+        if _trim_text(stage_id, max_length=80) in SOURCE_COLLECTION_AGENT_CONTEXT_STAGE_ROLES
+    ]
+    result = {stage_id: set() for stage_id in normalized_stage_ids}
+    if not result:
+        return result
+    role_to_stage_ids: dict[str, list[str]] = {}
+    for stage_id in result:
+        for role in SOURCE_COLLECTION_AGENT_CONTEXT_STAGE_ROLES.get(stage_id, ()):
+            role_to_stage_ids.setdefault(role, []).append(stage_id)
+    for member in _source_collection_team_member_snapshot(team_id):
         member_role = _trim_text(member.get("role") or member.get("agentRole"), max_length=80)
         member_agent_id = _trim_text(member.get("agentId"), max_length=160)
-        if member_role in allowed_roles and member_agent_id:
-            agent_ids.add(member_agent_id)
-    if stage_id == "memory":
-        agent_ids.add(agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID)
-    return agent_ids
+        if not member_agent_id:
+            continue
+        for stage_id in role_to_stage_ids.get(member_role, ()):
+            result[stage_id].add(member_agent_id)
+    if "memory" in result:
+        result["memory"].add(agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID)
+    return result
+
+
+def _source_collection_current_stage_agent_ids(team_id: str, stage_id: str) -> set[str]:
+    return _source_collection_current_stage_agent_ids_by_stage(team_id, [stage_id]).get(stage_id, set())
 
 
 def _source_collection_stage_task_card_summary(task: dict[str, Any]) -> dict[str, Any]:
@@ -14886,6 +14960,8 @@ def _source_collection_stage_card_blocking_reasons(card_status: str, artifact_st
     reasons: list[str] = []
     if card_status == "agent_done_artifact_pending":
         reasons.append("Agent task wrote back a structured result, but the expected stage artifact has not been created yet.")
+    if card_status == "artifact_ready_agent_blocked":
+        reasons.append("Ready artifact exists, but the latest Agent task is blocked or failed.")
     if card_status == "agent_blocked":
         reasons.append("Latest Agent task is blocked or failed.")
     if artifact_status == "empty" and artifact_count <= 0 and pending_count > 0:

@@ -1,6 +1,7 @@
 ﻿import json
 from concurrent.futures import Future
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -5447,6 +5448,142 @@ def test_source_collection_summary_uses_lightweight_team_existence(tmp_path, mon
     assert payload["summary"]["sourceCandidateCount"] == 1
     assert len(payload["stageCards"]) == 5
     assert payload["stageCardSummary"]["sourceCandidateCount"] == 1
+
+
+def test_source_collection_stage_card_projection_resolves_current_stage_agents_once(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = team_service.create_team(name="挑战杯科研团队")
+    run_id = "run-stage-card-projection-fast-path"
+    for stage_id in ("collection", "candidate", "screening", "graph", "memory"):
+        team_workflow_orchestration_service._upsert_source_collection_stage_session_task(
+            team["teamId"],
+            run_id,
+            {
+                "taskId": f"task-{stage_id}",
+                "stageId": stage_id,
+                "agentId": f"agent-{stage_id}",
+                "agentRole": "knowledge_steward" if stage_id == "memory" else "data_discovery",
+                "sessionId": f"session-{stage_id}",
+                "status": "completed",
+                "summary": f"{stage_id} done",
+                "updatedAt": f"2026-06-27T09:00:0{len(stage_id) % 10}Z",
+            },
+        )
+
+    team_reads = []
+
+    def counted_get_team(team_id):
+        team_reads.append(team_id)
+        return {
+            "teamId": team_id,
+            "members": [
+                {"agentId": "agent-collection", "role": "data_discovery"},
+                {"agentId": "agent-candidate", "role": "content_extraction"},
+                {"agentId": "agent-screening", "role": "source_quality"},
+                {"agentId": "agent-graph", "role": "candidate_graph"},
+                {"agentId": "agent-memory", "role": "knowledge_steward"},
+            ],
+        }
+
+    monkeypatch.setattr(team_workflow_orchestration_service.team_service, "get_team", counted_get_team)
+
+    projection = team_workflow_orchestration_service._source_collection_stage_cards_projection(
+        team["teamId"],
+        run_id,
+        run_status={"summary": {"recordCount": 1, "assignmentCount": 1, "openAssignmentCount": 0}},
+    )
+
+    assert len(projection["cards"]) == 5
+    assert team_reads == []
+
+
+def test_source_collection_summary_records_slow_runtime_event(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
+    team = team_service.create_team(name="挑战杯科研团队")
+    run_response = team_workflow_orchestration_service.start_source_collection_run(
+        team["teamId"],
+        {
+            "topic": "predictive coding",
+            "agentRoles": ["data_discovery"],
+            "querySeeds": ["predictive coding"],
+            "promptCachePolicy": {"requirement": "disabled"},
+        },
+    )
+    run_id = run_response["run"]["runId"]
+    data_processing_service.add_record(
+        run_id,
+        {
+            "sourceType": "paper",
+            "sourceRef": "https://doi.org/10.1038/slow-summary",
+            "title": "Predictive coding evidence",
+            "summary": "A source used to prove slow summary diagnostics.",
+        },
+    )
+    ticks = iter([10.0, 11.6])
+    events = []
+
+    def fake_record_runtime_scene_event(component, category, event_code, **kwargs):
+        events.append(
+            {
+                "component": component,
+                "category": category,
+                "eventCode": event_code,
+                **kwargs,
+            },
+        )
+
+    monkeypatch.setattr(
+        team_workflow_orchestration_service,
+        "time",
+        SimpleNamespace(perf_counter=lambda: next(ticks)),
+        raising=False,
+    )
+    monkeypatch.setattr(team_workflow_orchestration_service, "record_runtime_scene_event", fake_record_runtime_scene_event)
+
+    payload = team_workflow_orchestration_service.get_source_collection_summary(team["teamId"], run_id=run_id)
+
+    slow_events = [event for event in events if event["eventCode"] == "source_collection.summary.slow"]
+    assert payload["summary"]["recordCount"] == 1
+    assert len(slow_events) == 1
+    assert slow_events[0]["fields"]["teamId"] == team["teamId"]
+    assert slow_events[0]["fields"]["runId"] == run_id
+    assert slow_events[0]["fields"]["durationMs"] == 1600
+    assert slow_events[0]["fields"]["recordCount"] == 1
+    assert slow_events[0]["fields"]["stageCardCount"] == 5
+
+
+def test_source_collection_stage_card_projection_keeps_ready_artifact_when_latest_task_blocked():
+    card = team_workflow_orchestration_service._source_collection_stage_card_projection(
+        "collection",
+        [
+            {
+                "taskId": "task-supplemental-search-blocked",
+                "stageId": "collection",
+                "status": "blocked",
+                "summary": "Supplemental public search was blocked by low quality results.",
+                "updatedAt": "2026-06-27T09:10:00Z",
+                "evidenceRefs": [{"id": "tool-quality", "label": "search quality gate blocked"}],
+                "nextActions": ["Use DOI direct acquisition for classic references."],
+            }
+        ],
+        artifact_count=20,
+        input_count=4,
+        output_count=20,
+        pending_count=3,
+        artifact_status="ready",
+        artifact_summary="20 DataRecord records; 3 assignments remain.",
+        historical_task_count=1,
+    )
+
+    assert card["status"] == "artifact_ready_agent_blocked"
+    assert card["agentTaskStatus"] == "blocked"
+    assert card["artifactStatus"] == "ready"
+    assert card["counts"]["artifact"] == 20
+    assert card["latestTask"]["taskId"] == "task-supplemental-search-blocked"
+    assert card["latestTask"]["status"] == "blocked"
+    assert "Latest Agent task is blocked or failed." not in card["blockingReasons"]
+    assert "Ready artifact exists, but the latest Agent task is blocked or failed." in card["blockingReasons"]
 
 
 def test_load_source_collection_work_run_summary_cleanses_invalid_storage_path(tmp_path, monkeypatch):
