@@ -245,6 +245,7 @@ def isolate_runtime_manager_evolution_store(tmp_path, monkeypatch, request):
     monkeypatch.setattr(evolution_store, "SUPERVISED_RUNS_DIR", supervised_runs_dir)
     monkeypatch.setattr(evolution_store, "SELF_INDEX_PATH", evolution_dir / "self" / "index.json")
     monkeypatch.setattr(evolution_store, "SUPERVISED_INDEX_PATH", evolution_dir / "supervised" / "index.json")
+    monkeypatch.setattr(evolution_store, "_WORK_RUN_STORE", work_run_store.WorkRunStore(root=evolution_dir))
     monkeypatch.setattr(work_run_store, "WORK_RUNS_DIR", work_runs_dir)
     monkeypatch.setattr(runtime_scene_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(runtime_scene_service, "LAUNCHER_STATE_PATH", launcher_state_path)

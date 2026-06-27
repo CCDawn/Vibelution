@@ -982,6 +982,7 @@ def test_launcher_stop_records_request_audit(monkeypatch):
         "refererPath": "/launcher",
     }
     monkeypatch.setattr(launcher_service, "_raise_if_active_work", lambda _operation: None)
+    monkeypatch.setattr(launcher_service, "_launcher_workbench_already_closed", lambda: False)
     monkeypatch.setattr(launcher_service, "ensure_daemon_running", lambda: None)
     monkeypatch.setattr(
         launcher_service,
@@ -1012,6 +1013,31 @@ def test_launcher_stop_records_request_audit(monkeypatch):
     ]
     requested_event = next(event for event in events if event[0] == "launcher.bundle.stop.requested")
     assert requested_event[1]["fields"]["requestAudit"] == request_audit
+
+
+def test_launcher_stop_skips_when_workbench_already_closed(monkeypatch):
+    events = []
+    monkeypatch.setattr(launcher_service, "_raise_if_active_work", lambda _operation: None)
+    monkeypatch.setattr(launcher_service, "_launcher_workbench_already_closed", lambda: True)
+    monkeypatch.setattr(launcher_service, "ensure_daemon_running", lambda: (_ for _ in ()).throw(AssertionError("must not queue")))
+    monkeypatch.setattr(
+        launcher_service,
+        "submit_command",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("must not queue")),
+    )
+    monkeypatch.setattr(
+        launcher_service,
+        "append_runtime_manager_file_event",
+        lambda event_code, payload, **kwargs: events.append((event_code, payload)) or "2026-06-06T00:00:00+00:00",
+    )
+
+    response = launcher_service.request_launcher_stop()
+
+    assert response["accepted"] is False
+    assert response["operation"] == "stop"
+    assert response["commandId"] == ""
+    assert "已经关闭" in response["message"]
+    assert "launcher.bundle.stop.skipped_already_closed" in [event[0] for event in events]
 
 
 def test_launcher_force_stop_skips_when_workbench_already_closed(monkeypatch):
