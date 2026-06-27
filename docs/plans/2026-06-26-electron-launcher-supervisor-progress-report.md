@@ -1,8 +1,8 @@
 # Electron Launcher Supervisor Progress Report
 
-Date: 2026-06-26
+Date: 2026-06-26; updated 2026-06-27 after lifecycle positive gate
 Workspace baseline: `C:\Users\17533\Desktop\Vibelution`
-Branch used for this report: `codex/electron-progress-report`
+Branch used for latest report sync: `codex/electron-progress-lifecycle-gate`
 Source plan: `docs/plans/2026-06-26-electron-launcher-supervisor-plan.md`
 
 ## Purpose
@@ -23,12 +23,12 @@ Electron must not own runtime lifecycle policy, self-evolution restart semantics
 ## Current Workspace Snapshot
 
 - Root `C:\Users\17533\Desktop\Vibelution` remains the local `main` integration checkout.
-- At the time of this report, root was `main...origin/main [ahead 71]`.
-- An unrelated active claim existed for Challenge Cup / Teams work:
-  - `claim-70db18d7582a`
-  - lane: `web-workbench-surface`
-  - agent: `codex-challenge-team-contract-closure`
-  - scope includes `core/web/services/team_workflow_orchestration_service.py`, team route tests, Teams UI, and `挑战杯/**`.
+- At the 2026-06-27 lifecycle-gate sync, root was `main...origin/main [ahead 2]`.
+- An unrelated active claim existed for chat visual projection work:
+  - `claim-f54bc70d1bc3`
+  - lane: `chat-coding-surface`
+  - agent: `codex-chat-process-visual-projection-merge`
+  - scope: `web/src/components/conversation/**`.
 - This report's scope is documentation only: `docs/plans/2026-06-26-electron-launcher-supervisor-progress-report.md`.
 - No `.docs/project-memory/**`, `AGENTS.md`, `DEVELOPMENT_STANDARD.md`, runtime source, or tests are modified by this report.
 
@@ -77,6 +77,10 @@ Recent Electron-related commits observed:
 - `dab6e30a fix: fail desktop package build on native command errors`
 - `a91a7fb6 test: add desktop package verifier script`
 - `2383296e test: add desktop lifecycle verifier`
+- `9a93fbc5 fix: stop owned launcher service on electron exit`
+- `cfd31bd1 fix: stop owned launcher during electron package smoke`
+- `d750de99 fix: stabilize launcher console identity`
+- `13e8d3e7 fix: reuse stale launcher console window`
 
 ## Status Legend
 
@@ -97,15 +101,15 @@ missing              No current implementation found.
 | Task 1: Baseline inventory and test alignment ledger | partial | Inline plan sections exist for protocol, impact/environment, and test alignment. Electron tests now cover paths, deep links, package scripts, bootstrap, sessions, actions, shutdown, IPC, and runtime-scene bridge. | A dedicated progress/ledger document now begins here. Future Agents should update this report instead of re-deriving status from old unchecked boxes. |
 | Task 2: Electron package scaffold without runtime ownership | done | `desktop/electron/package.json`, `tsconfig.json`, `electron-builder.json`, `src/main.ts`, `src/preload.ts`, `src/paths.ts`, protocol/types, tests, and package scripts exist. `DesktopPaths` separates bundle/resources/workspace/userData. | First-run workspace picker is not implemented and is not required for V1 workspace-bound package. |
 | Task 3: Single-instance Launcher Supervisor lock | done | `desktop/electron/src/appLock.ts`; `main.ts` uses `app.requestSingleInstanceLock()`; `appLock.test.ts` covers primary/secondary decisions. | OS deep-link second-instance queue is not productized yet; track under deep-link productization, not under this task. |
-| Task 4: Python Launcher Service Supervisor | partial | Electron calls `scripts/vibelution_desktop_entry.py --action bootstrap --output json`; `parseLauncherBootstrap` validates readiness and capabilities; no-console spawn uses `windowsHide: true`. | Ownership/attach semantics are still minimal. Add stronger terminal-state handling and bootstrap failure evidence before release gate. |
+| Task 4: Python Launcher Service Supervisor | partial, owned shutdown slice done | Electron calls `scripts/vibelution_desktop_entry.py --action bootstrap --output json`; `parseLauncherBootstrap` validates readiness and capabilities; no-console spawn uses `windowsHide: true`. Electron shutdown now routes owned Launcher stop through the Python desktop entry bridge with `--owned-backend-pid`, and package smoke records `shutdown.stopStatus`. | Still need broader bootstrap failure evidence and release-mode terminal-state handling, but the owned/attached shutdown distinction is now tested. |
 | Task 5: Generic Window Provider State in Backend | partial | `core/launcher/window_provider_dispatcher.py`, `core/launcher/desktop_session_store.py`, and `core/launcher/service.py` provide Electron desktop session projection and `windowProvider`/`windowManaged` fields while preserving compatibility. | Edge fallback and `browserManaged` compatibility still exist. Need explicit entry/fallback catalog and removal triggers. |
 | Task 6: Electron Window Provider | partial | `ElectronWindowProvider`, launcher/workbench window factories, URL resolver, URL policy, Desktop Session client, and tests exist. | Need stronger event coverage for `ready-to-show`, `loadURL` failure, `render-process-gone`, `unresponsive`, and stale heartbeat behavior before release. |
-| Task 7: Long-lived Python Launcher Service Handshake | partial | `vibelution_desktop_entry.py` implements `bootstrap` JSON; Electron parser/client consume it; tests validate required capabilities. | Handshake lacks full terminal ownership model. Continue hardening through Python lifecycle store and runtime-scene terminal evidence. |
+| Task 7: Long-lived Python Launcher Service Handshake | partial, lifecycle smoke verified | `vibelution_desktop_entry.py` implements `bootstrap` JSON; Electron parser/client consume it; tests validate required capabilities. `verify_desktop_package.ps1` now proves `bootstrapMode=started` can stop its owned Launcher backend during smoke. | Continue hardening through Python lifecycle store and runtime-scene terminal evidence; attached-mode live operation is still not the same as Electron-default product mode. |
 | Task 8: Python Lifecycle Intent Store and Desktop Action Contract | mostly done for V1 terminal truth | `core/launcher/lifecycle_intent_store.py` now supports `accepted -> executing -> succeeded/failed/superseded`, bounded terminal result summaries, desktop action parent-intent completion, wrong-session ack/fail protection, expired lease reclaim, and retry-budget exhaustion -> failed. `core/launcher/service.py` reconciles completed Runtime Manager result files into lifecycle intent terminal status, records bounded `launcher.lifecycle_intent.runtime_terminal` evidence, and guarded GET intent routes expose the Python-owned truth. | Remaining V1 hardening: wider route/security regression coverage and live Launcher integration evidence. |
 | Task 9: Self-Evolution Lifecycle Intent Integration | partial, validation and terminal-evidence slices done | `core/web/services/self_evolution_control_service.py` now validates self-evolution lifecycle intents against trusted run snapshots before submitting to Launcher. `restart_after_apply` requires a completed run with available rollback state; `resume_self_evolution` rejects unknown, terminal, and already-running runs. Source run/task/worktree context is derived from trusted run state, and `GET /api/launcher/lifecycle-intents/{intentId}` now exposes source fields for status polling. Runtime Manager success/failure result files now reconcile to terminal lifecycle status and emit bounded terminal evidence with `intentId`, `commandId`, source run/task, `status`, and `ok`. | Still not full E2E. Remaining work: live self-evolution resume/restart evidence, broader runtime-scene terminal reconciliation checks, and live Launcher/package verification. |
 | Task 10: Electron Consumes Approved Desktop Actions | partial | `desktopActionClient.ts` maps desktop actions to window operations; rejects runtime-effect actions from Electron; uses claim/ack/fail endpoints. `main.ts` polls and records Electron supervisor events. Existing Electron tests prove runtime-effect actions fail as unsupported desktop actions. | Add integration evidence against a live Launcher that acked/failed actions are never redelivered after the new parent-intent terminal updates. |
-| Task 11: Security and IPC Boundary | partial | Preload/IPC bridge exists; sender validation and URL allowlist tests exist; shutdown coordinator blocks active work and distinguishes attached vs owned Launcher service. | Need final release security gate: `will-navigate`, `setWindowOpenHandler`, permission denial, renderer token non-exposure, and Python route control-token regression tests. |
-| Task 12: Packaging Skeleton | done for skeleton, partial for product | `build_desktop_package.ps1`, `verify_desktop_package.ps1`, package profile writer, package smoke, and lifecycle verifier exist. | Product installer/signing/shortcut rules are not done. Lifecycle positive verification is blocked while a packaged `Vibelution.exe` is already running. |
+| Task 11: Security and IPC Boundary | partial | Preload/IPC bridge exists; sender validation and URL allowlist tests exist; shutdown coordinator blocks active work and distinguishes attached vs owned Launcher service. Electron launcher close and window-all-closed paths route through the shell guard. | Need final release security gate: `will-navigate`, `setWindowOpenHandler`, permission denial, renderer token non-exposure, and Python route control-token regression tests. |
+| Task 12: Packaging Skeleton | done for skeleton, partial for product | `build_desktop_package.ps1`, `verify_desktop_package.ps1`, package profile writer, package smoke, and lifecycle verifier exist. On 2026-06-27, `verify_desktop_lifecycle.ps1` passed and proved single-instance behavior plus verifier-owned cleanup. | Product installer/signing/shortcut rules are not done. Single-public-entry catalog and shortcut/deep-link policy remain open. |
 | Task 13: Runtime Scene Evidence for Electron Supervisor | partial | `RuntimeSceneBridge` exists; Electron records supervisor/action/window events; Python Launcher route accepts bounded Electron runtime-scene events. Python Launcher now records runtime-effect lifecycle terminal events when Runtime Manager result files are reconciled. | Need full request -> validation -> dispatch -> command terminal -> final lifecycle status correlation in a live/runtime-scene package. |
 
 ## Migration Gate Snapshot
@@ -115,9 +119,9 @@ missing              No current implementation found.
 | Gate 0: Protocol Boundary Ready | partial | Electron protocol, deep-link parser, bootstrap parser, environment summary, and package smoke summary exist. | Python lifecycle terminal semantics are incomplete. |
 | Gate 1: Electron Scaffold Ready | done | Electron package, build, main/preload, tests, and package skeleton exist. | Keep npm/package-lock as the build source. |
 | Gate 2: Generic Window Provider Ready | partial | Electron desktop session projection exists; `windowProvider="electron"` can be projected. | Edge fallback and old `browserManaged` fields remain; need catalog/removal trigger. |
-| Gate 3: Electron Provider Can Open Launcher and Workbench | needs-verification | Electron window provider and Desktop Action client exist; package/lifecycle verifier exists. | Positive lifecycle verification must be rerun after the current packaged desktop process is closed by the user or with explicit authorization. |
+| Gate 3: Electron Provider Can Open Launcher And Workbench | passed for lifecycle verifier, still not default-product mode | Electron window provider and Desktop Action client exist; package/lifecycle verifier exists. On 2026-06-27, `verify_desktop_lifecycle.ps1` returned `ok: true`, `firstInstanceStayedRunning: true`, and `secondInstanceCreatedExtraRoot: false`. | Current live runtime state can still use `windowProvider="edge_app"`; separate work is needed before Electron is the default product provider. |
 | Gate 4: Python Intent Store and Desktop Action Loop Ready | mostly done for V1 terminal truth | SQLite store, claim/lease/ack/fail, runtime dispatcher, Electron action client, wrong-session tests, retry-exhaustion tests, runtime-effect `executing` state, Runtime Manager result reconciliation, bounded terminal evidence logging, and guarded intent status GET routes exist. | Broader live Launcher integration and runtime-scene package correlation remain before release readiness. |
-| Gate 5: Packaging Skeleton Ready | partial | Unpacked package and package verifier exist. | Single public entry, shortcut policy, deep-link registration, and product release runbook are not complete. |
+| Gate 5: Packaging Skeleton Ready | partial, smoke/lifecycle gates passed | Unpacked package and package verifier exist. Package smoke now records owned shutdown status, and lifecycle verifier passed in root. | Single public entry, shortcut policy, deep-link registration, and product release runbook are not complete. |
 
 ## Current Positive Verification State
 
@@ -129,16 +133,17 @@ Known good evidence from recent runs:
 - `pytest tests/test_web_runtime_routes.py -k "launcher_lifecycle_reconciles_runtime_manager_success_result or launcher_lifecycle_intent_status_route_reconciles_runtime_manager_failure"` passed with 2 selected tests after terminal evidence logging was added.
 - `pytest tests/test_web_runtime_routes.py -k "launcher_lifecycle or self_evolution_lifecycle or self_evolution_restart_request"` passed with 11 selected tests after terminal evidence logging was added.
 - `pytest tests/test_web_runtime_routes.py` passed with 111 tests after the legacy shutdown active-chat-turn test was realigned to seed an Agent Directory source record for `session-live`.
-- `npm --prefix desktop/electron test` passed with 15 files / 51 tests.
-- `npm --prefix desktop/electron run build` passed.
-- `git diff --check` passed.
-- `scripts/verify_desktop_package.ps1 -SkipBuild` produced `ok: true` in a previous run.
+- `npm --prefix desktop/electron test -- --run` passed with 19 files / 61 tests on root after package-smoke owned-shutdown hardening.
+- `npm --prefix desktop/electron run build` passed on root after package-smoke owned-shutdown hardening.
+- `git diff --check HEAD~1..HEAD` passed for the owned-shutdown smoke fix.
+- `scripts/verify_desktop_package.ps1 -SkipBuild` produced `ok: true`, `bootstrapMode: started`, `shutdownStopStatus: stopped`, and `shutdownStoppedPidCount: 1` on root.
+- `scripts/verify_desktop_lifecycle.ps1` passed on root on 2026-06-27. It rebuilt the desktop package, ran package smoke, started the packaged `Vibelution.exe`, verified the first instance stayed running, verified the second launch did not create an extra root process, and cleaned only verifier-owned process ids.
 
-Known blocked evidence:
+Resolved blocker:
 
-- `scripts/verify_desktop_lifecycle.ps1` positive run is blocked while a root packaged `Vibelution.exe` is already running.
-- The lifecycle verifier correctly refuses to continue when any `Vibelution.exe` already exists, because Electron single-instance locks are shared across package paths and can create false positives.
-- Do not kill or close the running packaged process without user authorization.
+- The previous `scripts/verify_desktop_lifecycle.ps1` blocker was resolved by running it when no packaged `Vibelution.exe` process existed.
+- The verifier still must refuse to continue when any `Vibelution.exe` already exists, because Electron single-instance locks are shared across package paths and can create false positives.
+- Current live root runtime still had Python Launcher/Workbench listeners on 8765/8000 after verification; that is allowed and is separate from packaged `Vibelution.exe` lifecycle verification.
 
 ## Current Runtime / Product Boundaries
 
@@ -149,11 +154,13 @@ Known blocked evidence:
 - Runtime-effect actions are not mapped to Electron window operations.
 - Launcher routes protect desktop action, desktop session, lifecycle intent, and runtime-scene event APIs with control-token validation.
 - Workspace path, Python path, operator config path, and launch profile are explicit in package bootstrap.
+- Package smoke and lifecycle verification now distinguish attached Python Launcher state from owned Python Launcher state; owned state must stop through the Python desktop entry bridge rather than Electron process killing.
 
 ### Remaining drift risks
 
 - `browserManaged` and Edge fallback compatibility still exist and are intentionally not removed yet.
 - Window provider default and fallback semantics must be documented in an entry catalog before any removal work.
+- Current live runtime state may still report `windowProvider="edge_app"`; passing the lifecycle verifier does not mean Electron is already the default product provider.
 - Runtime-effect lifecycle intents can dispatch Runtime Manager commands, reconcile Runtime Manager terminal results, and record bounded terminal evidence; the live runtime-scene package still needs full correlation proof.
 - Self-evolution lifecycle integration is not yet a full closed loop, but the request-side validation, trusted source context, and terminal reconciliation evidence slices are now implemented.
 - The source plan checkboxes are stale relative to implementation. This report is the current synchronization layer.
@@ -161,6 +168,8 @@ Known blocked evidence:
 ## Recommended Next Execution Order
 
 ### Phase 1: Controlled lifecycle positive verification
+
+Status: passed on root on 2026-06-27. Keep the command below as the repeatable release gate.
 
 Goal:
 
@@ -174,7 +183,7 @@ Start packaged Vibelution.exe
 
 Precondition:
 
-- User closes the currently running packaged `Vibelution.exe`, or explicitly authorizes a safe close path.
+- No packaged `Vibelution.exe` process is already running. If one exists, the verifier must stop before acting.
 - Agent must not use `taskkill`, `Stop-Process -Name Vibelution`, or global process killing.
 
 Command:
@@ -189,6 +198,18 @@ Expected evidence:
 - `firstInstanceStayedRunning: true`
 - `secondInstanceCreatedExtraRoot: false`
 - `cleanedProcessIds` only contains verifier-owned process ids.
+
+Latest root evidence:
+
+```json
+{
+  "ok": true,
+  "firstInstanceStayedRunning": true,
+  "secondInstanceCreatedExtraRoot": false,
+  "rootsBeforeSecondLaunch": 1,
+  "rootsAfterSecondLaunch": 1
+}
+```
 
 ### Phase 2: Python lifecycle store terminal-state hardening
 
