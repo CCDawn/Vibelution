@@ -13,6 +13,7 @@ import {
 import { RuntimeSceneBridge, type RuntimeSceneElectronEvent } from "./lifecycle/runtimeSceneBridge.js";
 import { createDesktopPaths, resolveDesktopEntryCatalogPath, type DesktopPaths } from "./paths.js";
 import { fetchLauncherControlToken, runDesktopActionOnce } from "./protocol/desktopActionClient.js";
+import { findVibelutionDeepLinkArg, parsePublicVibelutionDeepLink } from "./protocol/deepLink.js";
 import {
   buildDeepLinkRegistrationPlan,
   readDesktopEntryCatalog,
@@ -66,6 +67,14 @@ type DesktopActionLoopContext = {
   desktopSessionId: string;
 };
 
+type PublicDeepLinkSource = "open_url" | "second_instance" | "startup";
+
+type PendingPublicDeepLink = {
+  rawUrl: string;
+  source: PublicDeepLinkSource;
+};
+
+const pendingPublicDeepLinks: PendingPublicDeepLink[] = [];
 const lockDecision = singleInstanceDecision(app.requestSingleInstanceLock());
 if (!desktopCliArgs.smoke && lockDecision.action === "focus_existing") {
   app.quit();
@@ -291,6 +300,42 @@ async function recordElectronSupervisorEvent(
     await bridge.record(event);
   } catch (error: unknown) {
     console.warn(error instanceof Error ? error.message : String(error));
+  }
+}
+
+async function handlePublicDeepLinkUrl(rawUrl: string, source: PublicDeepLinkSource): Promise<void> {
+  if (windowProvider === null) {
+    pendingPublicDeepLinks.push({ rawUrl, source });
+    return;
+  }
+
+  try {
+    const link = parsePublicVibelutionDeepLink(rawUrl);
+    if (link.kind === "focus_launcher") {
+      await windowProvider.openLauncher();
+    }
+    await recordElectronSupervisorEvent(launcherBootstrap, {
+      eventCode: "electron.deep_link.accepted",
+      message: "Electron public deep link accepted.",
+      fields: { source, action: link.kind }
+    });
+  } catch (error: unknown) {
+    await windowProvider.openLauncher();
+    await recordElectronSupervisorEvent(launcherBootstrap, {
+      eventCode: "electron.deep_link.rejected",
+      message: "Electron public deep link rejected.",
+      fields: {
+        source,
+        reason: error instanceof Error ? error.message : String(error)
+      }
+    });
+  }
+}
+
+async function flushPendingPublicDeepLinks(): Promise<void> {
+  const pending = pendingPublicDeepLinks.splice(0);
+  for (const item of pending) {
+    await handlePublicDeepLinkUrl(item.rawUrl, item.source);
   }
 }
 
@@ -593,6 +638,11 @@ app.whenReady()
       message: "Launcher window opened by Electron.",
       fields: { provider: "electron" }
     });
+    const rawUrl = findVibelutionDeepLinkArg(process.argv.slice(1));
+    if (rawUrl) {
+      await handlePublicDeepLinkUrl(rawUrl, "startup");
+    }
+    await flushPendingPublicDeepLinks();
     startDesktopActionLoop(launcherBootstrap, windowProvider);
   })
   .catch((error: unknown) => {
@@ -600,8 +650,18 @@ app.whenReady()
     app.quit();
   });
 
-app.on("second-instance", () => {
+app.on("second-instance", (_event, argv) => {
+  const rawUrl = findVibelutionDeepLinkArg(argv);
+  if (rawUrl) {
+    void handlePublicDeepLinkUrl(rawUrl, "second_instance");
+    return;
+  }
   void windowProvider?.openLauncher();
+});
+
+app.on("open-url", (event, rawUrl) => {
+  event.preventDefault();
+  void handlePublicDeepLinkUrl(rawUrl, "open_url");
 });
 
 app.on("before-quit", (event) => {
