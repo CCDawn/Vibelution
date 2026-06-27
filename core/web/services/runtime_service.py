@@ -865,7 +865,7 @@ def _force_cancel_supervised_worktree_evolution_for_shutdown(reason: str) -> lis
 
 
 def _work_run_summary() -> dict[str, dict[str, dict | None]]:
-    chat = load_chat_turn_work_run_summary()
+    chat = _safe_load_chat_turn_work_run_summary()
     chat_room = _safe_load_chat_room_work_run_summary()
     source_collection = _safe_load_source_collection_work_run_summary()
     self_active = _safe_load_evolution_work_run("self", active=True)
@@ -905,6 +905,23 @@ def _work_run_summary() -> dict[str, dict[str, dict | None]]:
                 if isinstance(item, dict)
             ],
         },
+    }
+
+
+def _safe_load_chat_turn_work_run_summary() -> dict[str, object]:
+    try:
+        payload = load_chat_turn_work_run_summary()
+    except Exception:
+        return {"active": None, "latest": None, "activeItems": []}
+    if not isinstance(payload, dict):
+        return {"active": None, "latest": None, "activeItems": []}
+    return {
+        "active": payload.get("active") if isinstance(payload.get("active"), dict) else None,
+        "latest": payload.get("latest") if isinstance(payload.get("latest"), dict) else None,
+        "activeItems": [
+            item for item in list(payload.get("activeItems") or [])
+            if isinstance(item, dict)
+        ],
     }
 
 

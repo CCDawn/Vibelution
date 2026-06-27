@@ -13,7 +13,7 @@ from core.prompt_manager import PromptManager, split_sys_prompt_prefix
 from core.research.agent_runner import LLMResearchAgentRunner
 from core.research.models import ResearchDiscoverySession
 from core.research.providers import DeterministicResearchSearchProvider
-from core.web.services import agent_directory_service, prompt_template_service
+from core.web.services import agent_directory_service, prompt_template_service, session_service
 from core.web.services.session_service import (
     SESSION_PROMPT_CACHE_SCOPE_AGENT_STATIC,
     SESSION_PROMPT_CACHE_SCOPE_SESSION_FALLBACK,
@@ -140,6 +140,77 @@ def test_session_list_cache_ttl_covers_chat_index_poll_interval():
     assert should_build is True
     assert waited is False
     _finish_session_list_cache_build(signature=signature)
+
+
+def test_session_list_cache_reclaims_stale_inflight_without_long_wait(monkeypatch):
+    _invalidate_session_list_cache()
+    signature = (("chat-state.json", 1, 10), ("agent-registry.json", 1, 10))
+    with session_service._SESSION_LIST_CACHE_CONDITION:
+        session_service._SESSION_LIST_CACHE.clear()
+        session_service._SESSION_LIST_CACHE.update(
+            {
+                "inflight_signature": signature,
+                "inflight_started_at": 10.0,
+            }
+        )
+
+    def fail_wait(timeout=None):
+        raise AssertionError("stale session index inflight should be reclaimed without a long wait")
+
+    monkeypatch.setattr(session_service._SESSION_LIST_CACHE_CONDITION, "wait", fail_wait)
+
+    cached, should_build, waited = _begin_session_list_cache_build(
+        now=20.0,
+        signature=signature,
+    )
+
+    assert cached is None
+    assert should_build is True
+    assert waited is True
+    with session_service._SESSION_LIST_CACHE_CONDITION:
+        assert session_service._SESSION_LIST_CACHE["inflight_signature"] == signature
+        assert session_service._SESSION_LIST_CACHE["inflight_started_at"] == 20.0
+    _finish_session_list_cache_build(signature=signature)
+
+
+def test_session_list_cache_ignores_late_finish_from_reclaimed_inflight():
+    _invalidate_session_list_cache()
+    signature = (("chat-state.json", 1, 10), ("agent-registry.json", 1, 10))
+
+    cached, should_build, waited = _begin_session_list_cache_build(now=10.0, signature=signature)
+    assert cached is None
+    assert should_build is True
+    assert waited is False
+
+    cached, should_build, waited = _begin_session_list_cache_build(now=13.0, signature=signature)
+    assert cached is None
+    assert should_build is True
+    assert waited is True
+
+    _finish_session_list_cache_build(
+        signature=signature,
+        sessions=[{"id": "fresh-session"}],
+        started_at=13.0,
+        conversation_count=1,
+        agent_count=1,
+    )
+    _finish_session_list_cache_build(
+        signature=signature,
+        sessions=[{"id": "old-session"}],
+        started_at=10.0,
+        conversation_count=1,
+        agent_count=1,
+    )
+
+    cached, should_build, waited = _begin_session_list_cache_build(
+        now=13.1,
+        signature=signature,
+    )
+
+    assert should_build is False
+    assert waited is False
+    assert cached is not None
+    assert cached[0] == [{"id": "fresh-session"}]
 
 
 def test_cacheable_system_message_marks_plain_static_prompt_prefix():
