@@ -8,6 +8,11 @@ import type {
   LauncherDeveloperModeUpdateRequest,
   LauncherDeveloperModeUpdateResponse,
   LauncherDeveloperNoiseOverview,
+  LauncherMaintenanceApplyRequest,
+  LauncherMaintenanceApplyResponse,
+  LauncherMaintenancePreviewRequest,
+  LauncherMaintenancePreviewResponse,
+  LauncherMaintenanceSummary,
   LauncherControlResponse,
   LauncherStartupSettings as BaseLauncherStartupSettings,
   LauncherStatus as BaseLauncherStatus,
@@ -251,6 +256,26 @@ export function previewLauncherDeveloperCleanup(action: LauncherDeveloperCleanup
 
 export function applyLauncherDeveloperCleanup(request: LauncherDeveloperCleanupApplyRequest) {
   return fetchLauncherJson<LauncherDeveloperCleanupApplyResponse>("developer-mode/cleanup/apply", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(request),
+  });
+}
+
+export function getLauncherMaintenanceSummary() {
+  return fetchLauncherJson<LauncherMaintenanceSummary>("maintenance/reset/summary");
+}
+
+export function previewLauncherMaintenancePlan(request: LauncherMaintenancePreviewRequest) {
+  return fetchLauncherJson<LauncherMaintenancePreviewResponse>("maintenance/reset/preview", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(request),
+  });
+}
+
+export function applyLauncherMaintenancePlan(request: LauncherMaintenanceApplyRequest) {
+  return fetchLauncherJson<LauncherMaintenanceApplyResponse>("maintenance/reset/apply", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(request),

@@ -88,6 +88,16 @@ describe("ConfigRoute layout contract", () => {
     expect(routeSource).not.toContain("developer-mode/cleanup");
   });
 
+  it("routes cleanup diagnostics to Launcher maintenance instead of Web Reset", () => {
+    expect(routeSource).toContain("healthOpenLauncher");
+    expect(routeSource).toContain('href="/launcher"');
+    expect(routeSource).toContain("queryKeys.launcherMaintenanceSummary()");
+    expect(routeSource).not.toContain("healthOpenReset");
+    expect(routeSource).not.toContain("queryKeys.resetSummary()");
+    expect(routeSource).not.toContain("`/reset?item=");
+    expect(routeSource).not.toContain('href={`/reset?item=');
+  });
+
   it("keeps workbench background image settings separate from avatar cropping", () => {
     expect(routeSource).toContain("themeBackgroundImagePreviewUrl");
     expect(routeSource).toContain("renderThemeBackgroundControl");

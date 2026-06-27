@@ -9,27 +9,28 @@ describe("ResetRoute layout contract", () => {
     expect(routeSource).not.toContain("useAppI18n");
   });
 
-  it("keeps reset inventory and guarded mutations on the reset API", () => {
-    expect(routeSource).toContain("queryKeys.resetSummary()");
-    expect(routeSource).toContain('fetchJson<ResetSummary>("/api/reset/summary")');
-    expect(routeSource).toContain('fetchJson<ResetPreviewResponse>("/api/reset/preview"');
-    expect(routeSource).toContain('fetchJson<ResetExecuteResponse>("/api/reset/execute"');
-    expect(routeSource).toContain('method: "POST"');
+  it("retires the Web Reset surface in favor of Launcher maintenance", () => {
+    expect(routeSource).toContain("Launcher 维护中心");
+    expect(routeSource).toContain('href="/launcher"');
+    expect(routeSource).toContain('data-reset-retired="launcher-owned"');
+    expect(routeSource).not.toContain("queryKeys.resetSummary()");
+    expect(routeSource).not.toContain('"/api/reset/summary"');
+    expect(routeSource).not.toContain('"/api/reset/preview"');
+    expect(routeSource).not.toContain('"/api/reset/execute"');
   });
 
-  it("reconciles Chat workspace state after destructive conversation reset", () => {
-    expect(routeSource).toContain("CHAT_WORKSPACE_RESET_ITEM_IDS");
-    expect(routeSource).toContain("resetResultAffectsChatWorkspace(payload)");
-    expect(routeSource).toContain("useChatWorkbenchStore.getState().resetSessions()");
-    expect(routeSource).toContain("chatWorkspaceCache.afterChatWorkspaceReset()");
+  it("keeps destructive reset execution out of the Web workbench", () => {
+    expect(routeSource).not.toContain("CHAT_WORKSPACE_RESET_ITEM_IDS");
+    expect(routeSource).not.toContain("resetResultAffectsChatWorkspace(payload)");
+    expect(routeSource).not.toContain("useChatWorkbenchStore.getState().resetSessions()");
+    expect(routeSource).not.toContain("chatWorkspaceCache.afterChatWorkspaceReset()");
+    expect(routeSource).not.toContain("useMutation");
   });
 
-  it("renders cleanup empty and loading states as compact ledger rows", () => {
-    expect(routeSource).toContain("function ResetLedgerEmptyState");
-    expect(routeSource).toContain("styles.ledgerEmptyState");
-    expect(routeSource).toContain("styles.ledgerEmptyRows");
-    expect(routeSource).toContain("resetQuery.isLoading && !summary");
-    expect(routeSource).not.toContain("<p className={styles.emptyState}>{copy.noPreview}</p>");
-    expect(routeSource).not.toContain("<p className={styles.emptyState}>{copy.noResult}</p>");
+  it("does not preserve the old cleanup ledger implementation", () => {
+    expect(routeSource).not.toContain("function ResetLedgerEmptyState");
+    expect(routeSource).not.toContain("styles.ledgerEmptyState");
+    expect(routeSource).not.toContain("styles.ledgerEmptyRows");
+    expect(routeSource).not.toContain("resetQuery.isLoading && !summary");
   });
 });

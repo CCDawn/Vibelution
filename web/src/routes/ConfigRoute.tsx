@@ -148,7 +148,7 @@ type LogHelperCopy = {
   healthNoFindings: string;
   healthOpenLogs: string;
   healthOpenChat: string;
-  healthOpenReset: string;
+  healthOpenLauncher: string;
   healthOpen: string;
   healthFiles: string;
   healthDirs: string;
@@ -161,7 +161,7 @@ type LogHelperCopy = {
   healthUpdated: string;
   healthSize: string;
   healthProtected: string;
-  healthResetAvailable: string;
+  healthMaintenanceAvailable: string;
   healthStatusOk: string;
   healthStatusWarning: string;
   healthStatusBlocked: string;
@@ -352,7 +352,7 @@ export const CONFIG_COPY = {
     healthNoFindings: "当前没有阻塞或注意项。",
     healthOpenLogs: "打开日志页",
     healthOpenChat: "打开会话页",
-    healthOpenReset: "去 Reset 清理",
+    healthOpenLauncher: "去 Launcher 维护",
     healthOpen: "打开",
     healthFiles: "文件",
     healthDirs: "目录",
@@ -365,7 +365,7 @@ export const CONFIG_COPY = {
     healthUpdated: "更新时间",
     healthSize: "体量",
     healthProtected: "保护",
-    healthResetAvailable: "可从 Reset 清理",
+    healthMaintenanceAvailable: "可从 Launcher 维护",
     healthStatusOk: "正常",
     healthStatusWarning: "注意",
     healthStatusBlocked: "阻塞",
@@ -594,7 +594,7 @@ export const CONFIG_COPY = {
     healthNoFindings: "No blocked or warning findings.",
     healthOpenLogs: "Open logs",
     healthOpenChat: "Open chat",
-    healthOpenReset: "Open Reset",
+    healthOpenLauncher: "Open Launcher",
     healthOpen: "Open",
     healthFiles: "files",
     healthDirs: "dirs",
@@ -607,7 +607,7 @@ export const CONFIG_COPY = {
     healthUpdated: "Updated",
     healthSize: "Size",
     healthProtected: "Protected",
-    healthResetAvailable: "Reset cleanup available",
+    healthMaintenanceAvailable: "Launcher maintenance available",
     healthStatusOk: "OK",
     healthStatusWarning: "Attention",
     healthStatusBlocked: "Blocked",
@@ -1237,9 +1237,9 @@ function HealthFindingCard({ finding, copy }: { finding: HealthFinding; copy: Lo
           {copy.healthOpen}
         </a>
         {finding.resetItemId ? (
-          <a className={styles.actionButton} href={`/reset?item=${encodeURIComponent(finding.resetItemId)}`}>
+          <a className={styles.actionButton} href="/launcher" target="_blank" rel="noreferrer">
             <ExternalLink size={14} />
-            {copy.healthOpenReset}
+            {copy.healthOpenLauncher}
           </a>
         ) : null}
       </div>
@@ -1248,8 +1248,9 @@ function HealthFindingCard({ finding, copy }: { finding: HealthFinding; copy: Lo
 }
 
 function HealthQuickActionLink({ action, copy }: { action: HealthQuickAction; copy: LogHelperCopy }) {
+  const href = action.resetItemId ? "/launcher" : action.route || "/logs";
   return (
-    <a className={styles.quickActionItem} href={action.route || "/logs"}>
+    <a className={styles.quickActionItem} href={href}>
       <div>
         <span className={healthSeverityClassName(action.severity)}>
           {action.findingId ? formatFindingId(action.findingId) : action.source}
@@ -1366,7 +1367,7 @@ function LogHelperCard({ helper, lang, copy }: { helper: LogHelper; lang: Config
       <p className={styles.cardSubtle}>{helper.recommendedAction}</p>
       <div className={styles.cardBadges}>
         <span className={helper.protected ? `${styles.inlineBadge} ${styles.inlineBadgeWarning}` : styles.inlineBadge}>
-          {helper.protected ? copy.healthProtected : copy.healthResetAvailable}
+          {helper.protected ? copy.healthProtected : copy.healthMaintenanceAvailable}
         </span>
         {helper.findingIds?.length ? (
           <span className={styles.inlineBadge}>
@@ -1381,9 +1382,9 @@ function LogHelperCard({ helper, lang, copy }: { helper: LogHelper; lang: Config
           {copy.healthOpenLogs}
         </a>
         {helper.resetItemId ? (
-          <a className={styles.actionButton} href={`/reset?item=${encodeURIComponent(helper.resetItemId)}`}>
+          <a className={styles.actionButton} href="/launcher" target="_blank" rel="noreferrer">
             <ExternalLink size={14} />
-            {copy.healthOpenReset}
+            {copy.healthOpenLauncher}
           </a>
         ) : null}
       </div>
@@ -2786,7 +2787,7 @@ export function ConfigRoute() {
       queryClient.invalidateQueries({ queryKey: queryKeys.configWorkspace() }),
       queryClient.invalidateQueries({ queryKey: queryKeys.runtimeSummary() }),
       queryClient.invalidateQueries({ queryKey: queryKeys.sessions() }),
-      queryClient.invalidateQueries({ queryKey: queryKeys.resetSummary() }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.launcherMaintenanceSummary() }),
     ];
     if (domains.includes("evolution")) {
       invalidations.push(
