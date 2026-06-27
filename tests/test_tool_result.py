@@ -160,6 +160,7 @@ class TestTruncateResult:
                     "title": "Long candidate title " + ("X" * 240),
                     "sourceKind": "论文网页/DOI",
                     "qualityBucket": "pending",
+                    "summary": "This is only a preview and must not be used as final evidence.",
                     "abstract": "A" * 1200,
                 }
                 for index in range(5)
@@ -185,6 +186,14 @@ class TestTruncateResult:
         assert "candidate_offset=5" in packaged.content
         assert "hasMore" in packaged.content
         assert packaged.continuation_hint
+        compact = json.loads(packaged.content)
+        assert compact["fieldMode"] == "preview_only"
+        assert compact["candidateFieldsTruncated"] is True
+        assert compact["doNotUsePreviewAsEvidence"] is True
+        assert compact["visibleCandidateCount"] == 5
+        assert compact["omittedReturnedCandidateCount"] == 0
+        assert "summaryPreview" in compact["candidates"][0]
+        assert "summary" not in compact["candidates"][0]
 
 
 class TestFormatToolMessage:

@@ -15988,11 +15988,17 @@ def _compact_source_collection_stage_task_context(context: dict[str, Any]) -> di
         for item in list(context.get("candidates") or [])
         if isinstance(item, dict)
     ]
+    returned_candidate_count = _source_collection_count(candidate_page.get("returned"))
     compact = {
         "schemaVersion": context.get("schemaVersion"),
         "status": context.get("status"),
         "contextKind": context.get("contextKind"),
         "contextMode": "compact",
+        "fieldMode": "preview_only",
+        "candidateFieldsTruncated": True,
+        "doNotUsePreviewAsEvidence": True,
+        "visibleCandidateCount": len(candidates),
+        "omittedReturnedCandidateCount": max(0, returned_candidate_count - len(candidates)),
         "teamId": _trim_text(context.get("teamId"), max_length=128),
         "runId": _trim_text(context.get("runId"), max_length=128),
         "stageId": _trim_text(context.get("stageId"), max_length=80),
@@ -16056,7 +16062,7 @@ def _compact_source_collection_context_candidate(candidate: dict[str, Any]) -> d
     compact: dict[str, Any] = {
         "candidateId": _trim_text(candidate.get("candidateId"), max_length=128),
         "title": _trim_text(candidate.get("title"), max_length=140),
-        "summary": _trim_text(candidate.get("summary"), max_length=70),
+        "summaryPreview": _trim_text(candidate.get("summary"), max_length=30),
         "sourceKind": _trim_text(candidate.get("sourceKind"), max_length=80),
         "locator": locator,
         "sourceRecordId": _trim_text(candidate.get("sourceRecordId"), max_length=128),

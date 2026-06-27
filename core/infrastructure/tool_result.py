@@ -440,7 +440,7 @@ def _compact_source_collection_context_result(result_str: str, max_chars: int, c
                 "sourceKind": str(item.get("sourceKind") or "")[:80],
                 "locator": doi or source_url or source_path,
                 "qualityBucket": str(item.get("qualityBucket") or "")[:80],
-                "summary": str(item.get("summary") or "")[:220],
+                "summaryPreview": str(item.get("summary") or "")[:220],
             }
         )
     compact_usage = {
@@ -457,6 +457,11 @@ def _compact_source_collection_context_result(result_str: str, max_chars: int, c
         "status": payload.get("status"),
         "contextKind": payload.get("contextKind"),
         "contextMode": "compact_from_tool_result",
+        "fieldMode": "preview_only",
+        "candidateFieldsTruncated": True,
+        "doNotUsePreviewAsEvidence": True,
+        "visibleCandidateCount": len(compact_candidates),
+        "omittedReturnedCandidateCount": max(0, int(page.get("returned") or len(compact_candidates)) - len(compact_candidates)),
         "counts": payload.get("counts") if isinstance(payload.get("counts"), dict) else {},
         "candidatePage": page,
         "candidateIds": [item.get("candidateId") for item in compact_candidates if item.get("candidateId")],
@@ -465,20 +470,22 @@ def _compact_source_collection_context_result(result_str: str, max_chars: int, c
         "usage": compact_usage,
         "truncationGuard": {
             "originalLength": len(result_str),
-            "message": "source_collection_context_tool result was structurally compacted; continue paging with real candidateId values only.",
+            "message": "source_collection_context_tool result was structurally compacted; previews are not final evidence.",
         },
     }
     content = json.dumps(compact, ensure_ascii=False, sort_keys=True)
     if len(content) <= max_chars + 500:
         return content
     for item in compact_candidates:
-        item["summary"] = str(item.get("summary") or "")[:80]
+        item["summaryPreview"] = str(item.get("summaryPreview") or "")[:80]
         item["title"] = str(item.get("title") or "")[:120]
     content = json.dumps(compact, ensure_ascii=False, sort_keys=True)
     if len(content) <= max_chars + 500:
         return content
     compact["candidates"] = compact_candidates[:5]
     compact["candidateIds"] = [item.get("candidateId") for item in compact["candidates"] if item.get("candidateId")]
+    compact["visibleCandidateCount"] = len(compact["candidates"])
+    compact["omittedReturnedCandidateCount"] = max(0, int(page.get("returned") or len(compact_candidates)) - len(compact["candidates"]))
     return json.dumps(compact, ensure_ascii=False, sort_keys=True)
 
 
