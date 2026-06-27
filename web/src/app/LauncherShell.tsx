@@ -13,6 +13,7 @@ export function LauncherShell() {
 
   useEffect(() => {
     applyWorkbenchDocumentLanguage(document, lang);
+    document.title = "Vibelution Launcher";
   }, [lang]);
 
   useEffect(() => {
