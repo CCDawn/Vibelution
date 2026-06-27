@@ -1015,6 +1015,39 @@ def test_launcher_stop_records_request_audit(monkeypatch):
     assert requested_event[1]["fields"]["requestAudit"] == request_audit
 
 
+def test_launcher_stop_records_prequeue_timing(monkeypatch):
+    events = []
+    monkeypatch.setattr(launcher_service, "_raise_if_active_work", lambda _operation: None)
+    monkeypatch.setattr(launcher_service, "_launcher_workbench_already_closed", lambda: False)
+    monkeypatch.setattr(launcher_service, "ensure_daemon_running", lambda: None)
+    monkeypatch.setattr(
+        launcher_service,
+        "submit_command",
+        lambda command_type, *, args=None, requested_by="unknown": {"commandId": "cmd-stop"},
+    )
+    monkeypatch.setattr(
+        launcher_service,
+        "append_runtime_manager_file_event",
+        lambda event_code, payload, **kwargs: events.append((event_code, payload)) or "2026-06-06T00:00:00+00:00",
+    )
+
+    response = launcher_service.request_launcher_stop()
+
+    assert response["commandId"] == "cmd-stop"
+    timing_event = next(event for event in events if event[0] == "launcher.bundle.stop.prequeue_timing")
+    fields = timing_event[1]["fields"]
+    assert fields["commandId"] == "cmd-stop"
+    assert fields["outcome"] == "accepted"
+    assert {
+        "activeWorkMs",
+        "alreadyClosedMs",
+        "ensureDaemonMs",
+        "submitCommandMs",
+        "totalPrequeueMs",
+    }.issubset(fields["timingsMs"])
+    assert all(isinstance(fields["timingsMs"][key], (int, float)) for key in fields["timingsMs"])
+
+
 def test_launcher_stop_skips_when_workbench_already_closed(monkeypatch):
     events = []
     monkeypatch.setattr(launcher_service, "_raise_if_active_work", lambda _operation: None)

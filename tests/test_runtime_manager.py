@@ -1653,6 +1653,78 @@ def test_run_forever_claims_lifecycle_command_before_startup_reconcile(monkeypat
     assert ("handle", command_payload) in events
 
 
+def test_run_forever_startup_grace_claims_command_after_first_miss(monkeypatch, tmp_path):
+    class StopLoop(Exception):
+        pass
+
+    runtime_daemon = daemon.RuntimeManagerDaemon()
+    events = []
+    claimed = {"value": False}
+    claim_calls = {"count": 0}
+    command_path = tmp_path / "cmd-open.json"
+    command_payload = {
+        "commandId": "cmd-open",
+        "type": "open_workbench",
+        "requestedBy": "launcher_api",
+        "args": {"reason": "launcher_start_button"},
+    }
+
+    monkeypatch.setattr(daemon, "ensure_runtime_manager_dirs", lambda: None)
+    _patch_daemon_ownership_available(monkeypatch)
+    monkeypatch.setattr(daemon, "save_pid", lambda pid: None)
+    monkeypatch.setattr(
+        daemon,
+        "load_state",
+        lambda: {
+            "runtimeState": "idle",
+            "managerPid": 0,
+            "daemonRunning": False,
+            "command": {},
+            "workbench": {"desiredState": "closed", "observedState": "closed", "phase": "steady"},
+        },
+    )
+    monkeypatch.setattr(daemon, "now_iso", lambda: "2026-06-27T08:40:00+00:00")
+    monkeypatch.setattr(daemon, "_process_source_signature", lambda: "sig-current")
+    monkeypatch.setattr(daemon, "save_state", lambda state: events.append("save_state") or state)
+    monkeypatch.setattr(daemon, "recover_processing_queue", lambda: events.append("recover"))
+    monkeypatch.setattr(daemon, "complete_command", lambda path, result: events.append(("complete", path, result)))
+    monkeypatch.setattr(daemon, "clear_pid", lambda pid: None)
+    monkeypatch.setattr(daemon.time, "sleep", lambda seconds: events.append(("sleep", seconds)))
+
+    def fake_reconcile(self, state, *, observation=None):
+        if not claimed["value"]:
+            raise AssertionError("startup grace must poll for commands before startup reconcile")
+        events.append("reconcile_after_claim")
+        return state
+
+    def fake_claim_next_command():
+        claim_calls["count"] += 1
+        if claim_calls["count"] == 1:
+            events.append("initial_miss")
+            return None
+        if claim_calls["count"] == 2:
+            claimed["value"] = True
+            events.append("claim_after_miss")
+            return command_path, dict(command_payload)
+        raise StopLoop()
+
+    monkeypatch.setattr(type(runtime_daemon), "_reconcile_observation", fake_reconcile)
+    monkeypatch.setattr(daemon, "claim_next_command", fake_claim_next_command)
+    monkeypatch.setattr(
+        type(runtime_daemon),
+        "_handle_command",
+        lambda self, payload: events.append(("handle", payload))
+        or {"commandId": payload["commandId"], "ok": True, "message": "ok"},
+    )
+
+    with pytest.raises(StopLoop):
+        runtime_daemon.run_forever()
+
+    assert "reconcile_after_claim" not in events
+    assert events.index("initial_miss") < events.index("claim_after_miss")
+    assert ("handle", command_payload) in events
+
+
 def test_run_forever_emits_command_loop_ready_before_startup_reconcile(monkeypatch):
     class StopLoop(Exception):
         pass
@@ -7488,6 +7560,7 @@ def test_handle_force_close_workbench_marks_work_runs_and_verifies_close(monkeyp
         "_wait_for_close_verification",
         lambda: (True, dict(closed_observation), 1),
     )
+    monkeypatch.setattr(daemon, "_cleanup_result_confirms_workbench_closed", lambda cleanup_result, observation: False)
     monkeypatch.setattr(
         daemon,
         "clear_workbench_launcher_state_after_close",
@@ -7525,6 +7598,89 @@ def test_handle_force_close_workbench_marks_work_runs_and_verifies_close(monkeyp
     succeeded_event = next(payload for event_type, payload in events if event_type == "workbench.force_close.verification_succeeded")
     assert requested_event["activeWorkCount"] == 1
     assert succeeded_event["attempts"] == 1
+
+
+def test_handle_force_close_workbench_uses_cleanup_result_as_verification(monkeypatch):
+    runtime_daemon = daemon.RuntimeManagerDaemon()
+    state_holder = {
+        "value": {
+            "command": {"activeCommandId": "cmd-force"},
+            "workbench": {
+                "desiredState": "open",
+                "observedState": "open",
+                "phase": "steady",
+            },
+        },
+    }
+    saved_states: list[dict] = []
+    events: list[tuple[str, dict]] = []
+    state_cleanup_calls: list[str] = []
+    open_observation = {
+        "observedState": "open",
+        "launcherStatePresent": True,
+        "browserManaged": True,
+        "browserWindowAlive": True,
+        "backendPid": 28888,
+        "browserLaunchPid": 29999,
+        "browserWindowPid": 29999,
+        "backendAlive": True,
+        "backendHealthy": True,
+        "backendObserved": True,
+        "backendPort": 0,
+        "backendPortListening": False,
+        "backendPortOwnerPid": 0,
+        "sessionId": "managed-session",
+        "url": "http://127.0.0.1:8000",
+        "browserProfileDir": "C:/tmp/vibelution-workbench-profile",
+    }
+
+    monkeypatch.setattr(daemon, "load_state", lambda: json.loads(json.dumps(state_holder["value"])))
+
+    def fake_save_state(next_state):
+        persisted = json.loads(json.dumps(next_state))
+        state_holder["value"] = persisted
+        saved_states.append(persisted)
+        return persisted
+
+    monkeypatch.setattr(daemon, "save_state", fake_save_state)
+    monkeypatch.setattr(daemon, "now_iso", lambda: "2026-06-27T08:45:00+00:00")
+    monkeypatch.setattr(daemon, "observe_workbench", lambda: dict(open_observation))
+    monkeypatch.setattr(daemon, "build_evolution_summary", lambda: {"self": {}, "supervised": {}})
+    monkeypatch.setattr(daemon, "_persistent_active_work_run_snapshots", lambda: [])
+    monkeypatch.setattr(daemon, "_mark_persistent_active_work_runs_force_stopped", lambda reason: [])
+    monkeypatch.setattr(daemon, "_close_active_evolution_runs_for_shutdown", lambda: [])
+    monkeypatch.setattr(daemon, "_append_event", lambda event_type, payload: events.append((event_type, payload)))
+    monkeypatch.setattr(
+        daemon,
+        "_wait_for_close_verification",
+        lambda: (_ for _ in ()).throw(AssertionError("cleanup result should skip close verification polling")),
+    )
+    monkeypatch.setattr(
+        daemon,
+        "clear_workbench_launcher_state_after_close",
+        lambda: state_cleanup_calls.append("cleanup") or {"preservedLauncherControlState": True},
+    )
+
+    def fake_cleanup(self, observation=None):
+        return {"supported": True, "requested": [28888, 29999], "terminated": [28888, 29999], "remaining": []}
+
+    monkeypatch.setattr(daemon.RuntimeManagerDaemon, "_force_cleanup_workbench_processes", fake_cleanup)
+
+    result = runtime_daemon._handle_force_close_workbench(
+        command_id="cmd-force",
+        args={"reason": "launcher_force_stop_button", "source": "launcher_api"},
+    )
+
+    assert result["ok"] is True
+    assert result["message"] == "Workbench force closed."
+    assert result["residualCleanup"]["terminated"] == [28888, 29999]
+    assert result["lifecycleTimingsMs"]["force_cleanup_ms"] >= 0
+    assert result["lifecycleTimingsMs"]["close_verification_attempts"] == 0
+    assert state_cleanup_calls == ["cleanup"]
+    assert saved_states[-1]["workbench"]["phase"] == "steady"
+    succeeded_event = next(payload for event_type, payload in events if event_type == "workbench.force_close.verification_succeeded")
+    assert succeeded_event["attempts"] == 0
+    assert succeeded_event["verificationSource"] == "cleanup_result"
 
 
 def test_handle_force_close_workbench_cleans_launcher_state_when_already_satisfied(monkeypatch):

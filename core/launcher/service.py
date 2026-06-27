@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal, TypedDict
@@ -70,6 +71,38 @@ _WORKBENCH_WINDOW_MODE_DETAILS = {
     },
 }
 _RUNTIME_MANAGER_STATUS_FAST_PATH_MAX_AGE_SECONDS = 15.0
+
+
+def _launcher_elapsed_ms(started_at: float) -> float:
+    return round(max(0.0, (time.monotonic() - started_at) * 1000.0), 1)
+
+
+def _record_launcher_prequeue_timing(
+    operation: LauncherOperation,
+    *,
+    phase: str,
+    timings_ms: dict[str, Any],
+    command_id: str = "",
+    outcome: str = "accepted",
+    extra_fields: dict[str, Any] | None = None,
+) -> None:
+    event_operation = operation.replace("-", "_")
+    fields: dict[str, Any] = {
+        "mode": "standalone_control_plane",
+        "operation": operation,
+        "commandId": command_id,
+        "outcome": outcome,
+        "timingsMs": dict(timings_ms),
+    }
+    if extra_fields:
+        fields.update(extra_fields)
+    _record_launcher_event(
+        f"launcher.bundle.{event_operation}.prequeue_timing",
+        phase=phase,
+        message="Launcher lifecycle command prequeue timing captured.",
+        outcome=outcome,
+        fields=fields,
+    )
 
 
 class LauncherActiveWorkBlocked(Exception):
@@ -873,6 +906,8 @@ def close_desktop_session(desktop_session_id: str) -> dict[str, Any]:
 def request_launcher_start() -> LauncherCommandResponse:
     """Request the managed project bundle to start."""
 
+    prequeue_started = time.monotonic()
+    prequeue_timings_ms: dict[str, Any] = {}
     _record_launcher_event(
         "launcher.bundle.start.requested",
         phase="start",
@@ -880,13 +915,25 @@ def request_launcher_start() -> LauncherCommandResponse:
         fields={"source": "launcher_api"},
     )
     try:
+        ensure_started = time.monotonic()
         ensure_daemon_running()
+        prequeue_timings_ms["ensureDaemonMs"] = _launcher_elapsed_ms(ensure_started)
+        submit_started = time.monotonic()
         command = submit_command(
             "open_workbench",
             args={"reason": "launcher_start_button", "source": "launcher_api", "noBrowser": False},
             requested_by="launcher_api",
         )
+        prequeue_timings_ms["submitCommandMs"] = _launcher_elapsed_ms(submit_started)
     except Exception as exc:
+        prequeue_timings_ms["totalPrequeueMs"] = _launcher_elapsed_ms(prequeue_started)
+        _record_launcher_prequeue_timing(
+            "start",
+            phase="start",
+            timings_ms=prequeue_timings_ms,
+            outcome="failed",
+            extra_fields={"errorType": type(exc).__name__},
+        )
         _record_launcher_event(
             "launcher.bundle.start.failed",
             phase="start",
@@ -898,6 +945,14 @@ def request_launcher_start() -> LauncherCommandResponse:
         raise
 
     command_id = str(command.get("commandId") or "")
+    prequeue_timings_ms["totalPrequeueMs"] = _launcher_elapsed_ms(prequeue_started)
+    _record_launcher_prequeue_timing(
+        "start",
+        phase="start",
+        timings_ms=prequeue_timings_ms,
+        command_id=command_id,
+        outcome="accepted",
+    )
     _record_launcher_event(
         "launcher.bundle.start.accepted",
         phase="start",
@@ -942,6 +997,8 @@ def launcher_request_audit(
 def request_launcher_stop(request_audit: LauncherRequestAudit | None = None) -> LauncherCommandResponse:
     """Request the managed project bundle to stop, blocked by active work."""
 
+    prequeue_started = time.monotonic()
+    prequeue_timings_ms: dict[str, Any] = {}
     audit = dict(request_audit or {})
     requested_fields: dict[str, Any] = {"source": "launcher_api"}
     if audit:
@@ -952,8 +1009,21 @@ def request_launcher_stop(request_audit: LauncherRequestAudit | None = None) -> 
         message="Launcher project bundle stop requested.",
         fields=requested_fields,
     )
+    active_work_started = time.monotonic()
     _raise_if_active_work("stop")
-    if _launcher_workbench_already_closed():
+    prequeue_timings_ms["activeWorkMs"] = _launcher_elapsed_ms(active_work_started)
+    already_closed_started = time.monotonic()
+    already_closed = _launcher_workbench_already_closed()
+    prequeue_timings_ms["alreadyClosedMs"] = _launcher_elapsed_ms(already_closed_started)
+    if already_closed:
+        prequeue_timings_ms["totalPrequeueMs"] = _launcher_elapsed_ms(prequeue_started)
+        _record_launcher_prequeue_timing(
+            "stop",
+            phase="stop",
+            timings_ms=prequeue_timings_ms,
+            outcome="skipped",
+            extra_fields={"alreadyClosed": True},
+        )
         _record_launcher_event(
             "launcher.bundle.stop.skipped_already_closed",
             phase="stop",
@@ -970,7 +1040,9 @@ def request_launcher_stop(request_audit: LauncherRequestAudit | None = None) -> 
             "message": "项目工作台已经关闭，无需再次停止。",
         }
     try:
+        ensure_started = time.monotonic()
         ensure_daemon_running()
+        prequeue_timings_ms["ensureDaemonMs"] = _launcher_elapsed_ms(ensure_started)
         command_args: dict[str, Any] = {
             "reason": "launcher_stop_button",
             "source": "launcher_api",
@@ -978,12 +1050,22 @@ def request_launcher_stop(request_audit: LauncherRequestAudit | None = None) -> 
         }
         if audit:
             command_args["requestAudit"] = audit
+        submit_started = time.monotonic()
         command = submit_command(
             "close_workbench",
             args=command_args,
             requested_by="launcher_api",
         )
+        prequeue_timings_ms["submitCommandMs"] = _launcher_elapsed_ms(submit_started)
     except Exception as exc:
+        prequeue_timings_ms["totalPrequeueMs"] = _launcher_elapsed_ms(prequeue_started)
+        _record_launcher_prequeue_timing(
+            "stop",
+            phase="stop",
+            timings_ms=prequeue_timings_ms,
+            outcome="failed",
+            extra_fields={"errorType": type(exc).__name__},
+        )
         _record_launcher_event(
             "launcher.bundle.stop.failed",
             phase="stop",
@@ -995,6 +1077,14 @@ def request_launcher_stop(request_audit: LauncherRequestAudit | None = None) -> 
         raise
 
     command_id = str(command.get("commandId") or "")
+    prequeue_timings_ms["totalPrequeueMs"] = _launcher_elapsed_ms(prequeue_started)
+    _record_launcher_prequeue_timing(
+        "stop",
+        phase="stop",
+        timings_ms=prequeue_timings_ms,
+        command_id=command_id,
+        outcome="accepted",
+    )
     _record_launcher_event(
         "launcher.bundle.stop.accepted",
         phase="stop",
@@ -1015,7 +1105,11 @@ def request_launcher_stop(request_audit: LauncherRequestAudit | None = None) -> 
 def request_launcher_force_stop(request_audit: LauncherRequestAudit | None = None) -> LauncherCommandResponse:
     """Request a force close for the managed workbench without stopping the Launcher control plane."""
 
+    prequeue_started = time.monotonic()
+    prequeue_timings_ms: dict[str, Any] = {}
+    active_work_started = time.monotonic()
     active_work_runs = launcher_active_work_runs()
+    prequeue_timings_ms["activeWorkMs"] = _launcher_elapsed_ms(active_work_started)
     audit = dict(request_audit or {})
     requested_fields: dict[str, Any] = {
         "source": "launcher_api",
@@ -1030,7 +1124,18 @@ def request_launcher_force_stop(request_audit: LauncherRequestAudit | None = Non
         message="Launcher project bundle force-stop requested.",
         fields=requested_fields,
     )
-    if _launcher_workbench_already_closed():
+    already_closed_started = time.monotonic()
+    already_closed = _launcher_workbench_already_closed()
+    prequeue_timings_ms["alreadyClosedMs"] = _launcher_elapsed_ms(already_closed_started)
+    if already_closed:
+        prequeue_timings_ms["totalPrequeueMs"] = _launcher_elapsed_ms(prequeue_started)
+        _record_launcher_prequeue_timing(
+            "force-stop",
+            phase="stop",
+            timings_ms=prequeue_timings_ms,
+            outcome="skipped",
+            extra_fields={"alreadyClosed": True, "activeWorkCount": len(active_work_runs)},
+        )
         _record_launcher_event(
             "launcher.bundle.force_stop.skipped_already_closed",
             phase="stop",
@@ -1052,7 +1157,9 @@ def request_launcher_force_stop(request_audit: LauncherRequestAudit | None = Non
             "activeWorkRuns": active_work_runs[:8],
         }
     try:
+        ensure_started = time.monotonic()
         ensure_daemon_running()
+        prequeue_timings_ms["ensureDaemonMs"] = _launcher_elapsed_ms(ensure_started)
         command_args: dict[str, Any] = {
             "reason": "launcher_force_stop_button",
             "source": "launcher_api",
@@ -1060,12 +1167,22 @@ def request_launcher_force_stop(request_audit: LauncherRequestAudit | None = Non
         }
         if audit:
             command_args["requestAudit"] = audit
+        submit_started = time.monotonic()
         command = submit_command(
             "force_close_workbench",
             args=command_args,
             requested_by="launcher_api",
         )
+        prequeue_timings_ms["submitCommandMs"] = _launcher_elapsed_ms(submit_started)
     except Exception as exc:
+        prequeue_timings_ms["totalPrequeueMs"] = _launcher_elapsed_ms(prequeue_started)
+        _record_launcher_prequeue_timing(
+            "force-stop",
+            phase="stop",
+            timings_ms=prequeue_timings_ms,
+            outcome="failed",
+            extra_fields={"errorType": type(exc).__name__, "activeWorkCount": len(active_work_runs)},
+        )
         _record_launcher_event(
             "launcher.bundle.force_stop.failed",
             phase="stop",
@@ -1077,6 +1194,15 @@ def request_launcher_force_stop(request_audit: LauncherRequestAudit | None = Non
         raise
 
     command_id = str(command.get("commandId") or "")
+    prequeue_timings_ms["totalPrequeueMs"] = _launcher_elapsed_ms(prequeue_started)
+    _record_launcher_prequeue_timing(
+        "force-stop",
+        phase="stop",
+        timings_ms=prequeue_timings_ms,
+        command_id=command_id,
+        outcome="accepted",
+        extra_fields={"activeWorkCount": len(active_work_runs)},
+    )
     _record_launcher_event(
         "launcher.bundle.force_stop.accepted",
         phase="stop",
@@ -1122,21 +1248,37 @@ def _launcher_workbench_already_closed() -> bool:
 def request_launcher_restart() -> LauncherCommandResponse:
     """Request the managed project bundle to restart as one lifecycle unit."""
 
+    prequeue_started = time.monotonic()
+    prequeue_timings_ms: dict[str, Any] = {}
     _record_launcher_event(
         "launcher.bundle.restart.requested",
         phase="restart",
         message="Launcher project bundle restart requested.",
         fields={"source": "launcher_api"},
     )
+    active_work_started = time.monotonic()
     _raise_if_active_work("restart")
+    prequeue_timings_ms["activeWorkMs"] = _launcher_elapsed_ms(active_work_started)
     try:
+        ensure_started = time.monotonic()
         ensure_daemon_running()
+        prequeue_timings_ms["ensureDaemonMs"] = _launcher_elapsed_ms(ensure_started)
+        submit_started = time.monotonic()
         command = submit_command(
             "restart_workbench",
             args={"reason": "launcher_restart_button", "source": "launcher_api", "noBrowser": False},
             requested_by="launcher_api",
         )
+        prequeue_timings_ms["submitCommandMs"] = _launcher_elapsed_ms(submit_started)
     except Exception as exc:
+        prequeue_timings_ms["totalPrequeueMs"] = _launcher_elapsed_ms(prequeue_started)
+        _record_launcher_prequeue_timing(
+            "restart",
+            phase="restart",
+            timings_ms=prequeue_timings_ms,
+            outcome="failed",
+            extra_fields={"errorType": type(exc).__name__},
+        )
         _record_launcher_event(
             "launcher.bundle.restart.failed",
             phase="restart",
@@ -1148,6 +1290,14 @@ def request_launcher_restart() -> LauncherCommandResponse:
         raise
 
     command_id = str(command.get("commandId") or "")
+    prequeue_timings_ms["totalPrequeueMs"] = _launcher_elapsed_ms(prequeue_started)
+    _record_launcher_prequeue_timing(
+        "restart",
+        phase="restart",
+        timings_ms=prequeue_timings_ms,
+        command_id=command_id,
+        outcome="accepted",
+    )
     _record_launcher_event(
         "launcher.bundle.restart.accepted",
         phase="restart",
