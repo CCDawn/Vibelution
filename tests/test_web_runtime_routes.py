@@ -544,6 +544,58 @@ def test_runtime_summary_uses_active_agent_context_compression_policy(monkeypatc
     assert compression["strategy"]["preserveErrors"] is False
 
 
+def test_runtime_summary_keeps_applied_runtime_compression_snapshot_for_inherited_agent(monkeypatch):
+    monkeypatch.setattr(runtime_service, "get_active_session_summary", lambda: {"agentId": "agent-inherit"})
+    monkeypatch.setattr(
+        runtime_service,
+        "_load_runtime_state",
+        lambda: {
+            "current_context_tokens": 43372,
+            "context_token_limit": 1000000,
+            "updated_at": "2026-06-27T16:14:01",
+            "context_compression": {
+                "enabled": True,
+                "effectiveTokenLimit": 500000,
+                "contextWindowLimit": 1000000,
+                "updatedAt": "2026-06-27T16:04:31",
+            },
+        },
+    )
+    fake_config = SimpleNamespace(
+        context_compression=SimpleNamespace(
+            enabled=True,
+            max_token_limit=32768,
+            max_compressions_per_session=20,
+            levels=SimpleNamespace(light=0.6, standard=0.8, deep=0.9, emergency=0.95),
+            summary_chars=SimpleNamespace(light=500, standard=1000, deep=2000, emergency=3000),
+            preservation=SimpleNamespace(
+                keep_ai_messages=5,
+                preserve_errors=True,
+                extract_key_decisions=True,
+            ),
+        )
+    )
+    agent = {
+        "agentId": "agent-inherit",
+        "contextCompressionPolicy": {"mode": "inherit"},
+    }
+    monkeypatch.setattr(runtime_service, "get_config", lambda: fake_config)
+    monkeypatch.setattr(agent_directory_service, "get_agent", lambda agent_id, include_archived=True: agent)
+
+    payload = runtime_service.get_runtime_summary()
+    compression = payload["contextCompression"]
+
+    assert compression["policyMode"] == "inherit"
+    assert compression["policySource"] == "runtime_state_applied_policy"
+    assert compression["policyAgentId"] == "agent-inherit"
+    assert compression["currentTokens"] == 43372
+    assert compression["effectiveTokenLimit"] == 500000
+    assert compression["contextWindowLimit"] == 1000000
+    assert compression["usageRatio"] == pytest.approx(0.0867)
+    assert compression["currentLevel"] == "normal"
+    assert compression["strategy"]["levels"][0]["thresholdTokens"] == 300000
+
+
 def test_runtime_summary_prefers_current_phase_over_stale_task_progress(monkeypatch):
     monkeypatch.setattr(
         runtime_service,
