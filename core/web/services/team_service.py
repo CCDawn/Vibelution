@@ -2163,6 +2163,7 @@ def _ensure_challenge_cup_research_team_role_agent(role: dict[str, Any], *, sess
             agent_id=str(existing.get("agentId") or ""),
             title=label,
             created_by=CHALLENGE_CUP_RESEARCH_TEAM_AGENT_CREATED_BY,
+            conversation_index_kind=agent_directory_service.CONVERSATION_INDEX_KIND_TEAM_AGENT,
         )
         existing = agent_directory_service.get_agent(str(existing.get("agentId") or ""), include_archived=False)
 
@@ -2171,6 +2172,7 @@ def _ensure_challenge_cup_research_team_role_agent(role: dict[str, Any], *, sess
             title=label,
             llm_bindings=session_service.default_session_llm_bindings(),
             created_by=CHALLENGE_CUP_RESEARCH_TEAM_AGENT_CREATED_BY,
+            conversation_index_kind=agent_directory_service.CONVERSATION_INDEX_KIND_TEAM_AGENT,
         )
         agent_id = str(session_detail.get("agentId") or "").strip()
         existing = agent_directory_service.get_agent(agent_id) if agent_id else None
@@ -2262,6 +2264,7 @@ def _ensure_knowledge_expansion_team_role_agent(role: dict[str, Any], *, session
             agent_id=str(existing.get("agentId") or ""),
             title=label,
             created_by=KNOWLEDGE_EXPANSION_TEAM_AGENT_CREATED_BY,
+            conversation_index_kind=agent_directory_service.CONVERSATION_INDEX_KIND_TEAM_AGENT,
         )
         existing = agent_directory_service.get_agent(str(existing.get("agentId") or ""), include_archived=False)
 
@@ -2270,6 +2273,7 @@ def _ensure_knowledge_expansion_team_role_agent(role: dict[str, Any], *, session
             title=label,
             llm_bindings=session_service.default_session_llm_bindings(),
             created_by=KNOWLEDGE_EXPANSION_TEAM_AGENT_CREATED_BY,
+            conversation_index_kind=agent_directory_service.CONVERSATION_INDEX_KIND_TEAM_AGENT,
         )
         agent_id = str(session_detail.get("agentId") or "").strip()
         existing = agent_directory_service.get_agent(agent_id) if agent_id else None
@@ -2370,6 +2374,7 @@ def _challenge_cup_research_team_role_metadata(role: dict[str, Any]) -> dict[str
         "configSurface": "team",
         "fixedRole": True,
         "showInSessionIndex": False,
+        "conversationIndexKind": agent_directory_service.CONVERSATION_INDEX_KIND_TEAM_AGENT,
         "conversationIndexVisibility": agent_directory_service.CONVERSATION_INDEX_VISIBILITY_TEAM_PRIVATE,
         "directSessionVisibility": "active_session",
         "challengeCupTeamId": CHALLENGE_CUP_RESEARCH_TEAM_ID,
@@ -2399,6 +2404,7 @@ def _knowledge_expansion_team_role_metadata(role: dict[str, Any]) -> dict[str, A
         "configSurface": "team",
         "fixedRole": True,
         "showInSessionIndex": False,
+        "conversationIndexKind": agent_directory_service.CONVERSATION_INDEX_KIND_TEAM_AGENT,
         "conversationIndexVisibility": agent_directory_service.CONVERSATION_INDEX_VISIBILITY_TEAM_PRIVATE,
         "directSessionVisibility": "active_session",
         "knowledgeExpansionTeamId": KNOWLEDGE_EXPANSION_TEAM_ID,

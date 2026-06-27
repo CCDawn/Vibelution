@@ -259,6 +259,8 @@ def test_session_query_paginates_searches_and_filters(tmp_path, monkeypatch):
             "agent_id": "agent-a",
             "agentId": "agent-a",
             "session_kind": "main",
+            "conversation_index_kind": "user_chat",
+            "conversationIndexKind": "user_chat",
             "updated_at": "2026-05-18T12:00:00",
             "messages": [{"role": "assistant", "content": "Alpha summary", "timestamp": "2026-05-18T12:00:00"}],
         },
@@ -270,6 +272,8 @@ def test_session_query_paginates_searches_and_filters(tmp_path, monkeypatch):
             "session_kind": "child",
             "parent_session_id": "session-alpha",
             "root_session_id": "session-alpha",
+            "conversation_index_kind": "hidden",
+            "conversationIndexKind": "hidden",
             "updated_at": "2026-05-18T13:00:00",
             "messages": [{"role": "assistant", "content": "Beta summary", "timestamp": "2026-05-18T13:00:00"}],
         },
@@ -279,6 +283,8 @@ def test_session_query_paginates_searches_and_filters(tmp_path, monkeypatch):
             "agent_id": "agent-a",
             "agentId": "agent-a",
             "session_kind": "main",
+            "conversation_index_kind": "user_chat",
+            "conversationIndexKind": "user_chat",
             "updated_at": "2026-05-18T14:00:00",
             "messages": [{"role": "assistant", "content": "Gamma summary", "timestamp": "2026-05-18T14:00:00"}],
         },
@@ -369,6 +375,7 @@ def test_agent_directory_internal_direct_session_stub_hidden_from_user_index(tmp
         prompt_template_id="prompt-chat-default",
         direct_session_id="session-ai-internal",
         created_by="ai_search_team",
+        metadata={"conversationIndexKind": "hidden"},
     )
     organization_agent = agent_directory_service.create_agent_instance(
         display_name="组织规划 Agent",
@@ -377,6 +384,7 @@ def test_agent_directory_internal_direct_session_stub_hidden_from_user_index(tmp
         prompt_template_id="prompt-chat-default",
         direct_session_id="session-organization-internal",
         created_by="research_organization",
+        metadata={"conversationIndexKind": "hidden"},
     )
     visible_agent = agent_directory_service.create_agent_instance(
         display_name="能力管家 Agent",
@@ -393,6 +401,9 @@ def test_agent_directory_internal_direct_session_stub_hidden_from_user_index(tmp
     assert "session-organization-internal" not in listed_ids
     assert "session-visible-recovery" in listed_ids
     assert visible_agent["agentId"]
+    visible_detail = session_service.get_session_detail("session-visible-recovery")
+    assert visible_detail["conversationIndexKind"] == "invalid"
+    assert "session_repair_missing_conversation_index_kind" in visible_detail["conversationIndexErrors"]
 
     detail = session_service.get_session_detail("session-ai-internal")
 
@@ -404,7 +415,7 @@ def test_agent_directory_internal_direct_session_stub_hidden_from_user_index(tmp
     assert organization_detail["hiddenFromIndex"] is True
 
 
-def test_agent_directory_system_team_member_stub_hidden_from_user_index(tmp_path, monkeypatch):
+def test_agent_directory_system_team_member_without_index_kind_is_invalid_and_listed(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path, conversations=[])
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
@@ -437,19 +448,21 @@ def test_agent_directory_system_team_member_stub_hidden_from_user_index(tmp_path
         }
     )
 
-    assert team_agent["conversationIndexVisibility"] == (
-        agent_directory_service.CONVERSATION_INDEX_VISIBILITY_TEAM_PRIVATE
-    )
-    assert "session-team-member" not in {item["id"] for item in session_service.list_sessions()}
+    assert team_agent["conversationIndexKind"] == "invalid"
+    assert "team_agent_missing_conversation_index_kind" in team_agent["conversationIndexErrors"]
+    listed = {item["id"]: item for item in session_service.list_sessions()}
+    assert "session-team-member" in listed
+    assert listed["session-team-member"]["conversationIndexKind"] == "invalid"
 
     detail = session_service.get_session_detail("session-team-member")
 
     assert detail["agentId"] == team_agent["agentId"]
-    assert detail["hiddenFromIndex"] is True
-    assert "session-team-member" not in {item["id"] for item in session_service.list_sessions()}
+    assert detail["hiddenFromIndex"] is False
+    assert detail["conversationIndexKind"] == "invalid"
+    assert "team_agent_missing_conversation_index_kind" in detail["conversationIndexErrors"]
 
 
-def test_user_visible_agent_direct_session_repairs_stale_hidden_index_flag(tmp_path, monkeypatch):
+def test_user_visible_agent_direct_session_with_stale_hidden_flag_is_invalid_without_repair(tmp_path, monkeypatch):
     _seed_chat_state(
         tmp_path,
         conversations=[
@@ -499,14 +512,67 @@ def test_user_visible_agent_direct_session_repairs_stale_hidden_index_flag(tmp_p
     assert "session-user-visible" in listed_ids
     assert detail["agentId"] == "agent-visible"
     assert detail["hiddenFromIndex"] is False
+    assert detail["conversationIndexKind"] == "invalid"
+    assert "missing_conversation_index_kind" in detail["conversationIndexErrors"]
     payload = load_chat_state(tmp_path)
     stored = session_service._find_conversation_entry(payload, "session-user-visible")
     assert stored is not None
-    assert "hidden_from_index" not in stored
-    assert "hiddenFromIndex" not in stored
+    assert stored["hidden_from_index"] is True
+    assert stored["hiddenFromIndex"] is True
 
 
-def test_team_private_agent_direct_session_stays_hidden_from_user_index(tmp_path, monkeypatch):
+def test_session_repair_direct_agent_without_index_kind_is_invalid_and_listed(tmp_path, monkeypatch):
+    _seed_chat_state(
+        tmp_path,
+        conversations=[
+            {
+                "conversation_id": "session-repaired",
+                "title": "真实会话",
+                "agent_id": "agent-repaired",
+                "agentId": "agent-repaired",
+                "session_kind": "main",
+                "updated_at": "2026-05-18T12:00:00",
+                "messages": [],
+            }
+        ],
+    )
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(team_service, "PROJECT_ROOT", tmp_path)
+    agent_directory_service.save_state(
+        {
+            "agents": [
+                {
+                    "agentId": "agent-repaired",
+                    "agentCode": "A001",
+                    "displayName": "周南栀",
+                    "status": "active",
+                    "directSessionId": "session-repaired",
+                    "primaryMode": "chat",
+                    "roleKey": "",
+                    "promptTemplateId": "prompt-chat-default",
+                    "createdBy": "session_repair",
+                    "metadata": {
+                        "functionalDisplayName": "真实会话",
+                        "directSessionVisibility": "active_session",
+                    },
+                }
+            ]
+        }
+    )
+
+    listed = {item["id"]: item for item in session_service.list_sessions()}
+    detail = session_service.get_session_detail("session-repaired")
+
+    assert "session-repaired" in listed
+    assert listed["session-repaired"]["conversationIndexKind"] == "invalid"
+    assert "missing_conversation_index_kind" in listed["session-repaired"]["conversationIndexErrors"]
+    assert "session_repair_missing_conversation_index_kind" in listed["session-repaired"]["conversationIndexErrors"]
+    assert detail["conversationIndexKind"] == "invalid"
+    assert detail["hiddenFromIndex"] is False
+
+
+def test_legacy_team_private_agent_direct_session_without_index_kind_is_invalid_and_listed(tmp_path, monkeypatch):
     _seed_chat_state(
         tmp_path,
         conversations=[
@@ -553,15 +619,19 @@ def test_team_private_agent_direct_session_stays_hidden_from_user_index(tmp_path
         }
     )
 
-    listed_ids = {item["id"] for item in session_service.list_sessions()}
+    listed = {item["id"]: item for item in session_service.list_sessions()}
     detail = session_service.get_session_detail("session-team-private")
 
-    assert "session-team-private" not in listed_ids
+    assert "session-team-private" in listed
+    assert listed["session-team-private"]["conversationIndexKind"] == "invalid"
     assert detail["agentId"] == "agent-team-private"
-    assert detail["hiddenFromIndex"] is True
+    assert detail["hiddenFromIndex"] is False
+    assert detail["conversationIndexKind"] == "invalid"
+    assert "missing_conversation_index_kind" in detail["conversationIndexErrors"]
+    assert "team_agent_missing_conversation_index_kind" in detail["conversationIndexErrors"]
 
 
-def test_persisted_empty_system_team_member_session_hidden_from_user_index(tmp_path, monkeypatch):
+def test_persisted_empty_system_team_member_without_index_kind_is_invalid_and_listed(tmp_path, monkeypatch):
     _seed_chat_state(
         tmp_path,
         conversations=[
@@ -580,6 +650,8 @@ def test_persisted_empty_system_team_member_session_hidden_from_user_index(tmp_p
                 "agent_id": "agent-user",
                 "agentId": "agent-user",
                 "session_kind": "main",
+                "conversation_index_kind": "user_chat",
+                "conversationIndexKind": "user_chat",
                 "updated_at": "2026-05-18T12:01:00",
                 "messages": [],
             },
@@ -589,6 +661,8 @@ def test_persisted_empty_system_team_member_session_hidden_from_user_index(tmp_p
                 "agent_id": "agent-research",
                 "agentId": "agent-research",
                 "session_kind": "main",
+                "conversation_index_kind": "personal_agent",
+                "conversationIndexKind": "personal_agent",
                 "updated_at": "2026-05-18T12:02:00",
                 "messages": [{"role": "user", "content": "继续读论文", "timestamp": "2026-05-18T12:02:00"}],
             },
@@ -642,11 +716,15 @@ def test_persisted_empty_system_team_member_session_hidden_from_user_index(tmp_p
         }
     )
 
-    listed_ids = {item["id"] for item in session_service.list_sessions()}
+    listed = {item["id"]: item for item in session_service.list_sessions()}
 
-    assert "session-team-persisted" not in listed_ids
-    assert "session-user-empty" in listed_ids
-    assert "session-research-history" in listed_ids
+    assert "session-team-persisted" in listed
+    assert listed["session-team-persisted"]["conversationIndexKind"] == "invalid"
+    assert "missing_conversation_index_kind" in listed["session-team-persisted"]["conversationIndexErrors"]
+    assert "session-user-empty" in listed
+    assert listed["session-user-empty"]["conversationIndexKind"] == "user_chat"
+    assert "session-research-history" in listed
+    assert listed["session-research-history"]["conversationIndexKind"] == "personal_agent"
 
 
 def test_session_summary_prefers_real_conversation_title_over_generated_agent_name(tmp_path, monkeypatch):

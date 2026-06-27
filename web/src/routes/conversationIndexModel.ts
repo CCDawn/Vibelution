@@ -13,13 +13,15 @@ import { isChildSession, sessionListTitle } from "./DirectSessionIndexItem";
 export type ConversationIndexGroupKey =
   | "user"
   | "group"
+  | "personalAgent"
   | "research"
   | "selfEvolution"
   | "supervisedEvolution"
   | "teams"
   | "setupTeams"
   | "standaloneGroups"
-  | "other";
+  | "other"
+  | "invalid";
 
 export type ConversationIndexDynamicGroupKey = ConversationIndexGroupKey | `team:${string}`;
 
@@ -38,18 +40,27 @@ export type ConversationIndexTeam = Team & {
 };
 
 const USER_VISIBLE_CONVERSATION_INDEX_VISIBILITY = "user_visible";
-const TEAM_PRIVATE_AGENT_CREATED_BY = new Set(["challenge_cup_team", "knowledge_expansion_team"]);
-const INTERNAL_RECOVERY_AGENT_CREATED_BY = new Set([
-  "ai_search_team",
-  "research_organization",
-  "self_evolution",
-  "supervised_evolution",
-  "system_repair",
+const TEAM_PRIVATE_CONVERSATION_INDEX_VISIBILITY = "team_private";
+const HIDDEN_CONVERSATION_INDEX_VISIBILITY = "hidden";
+const CONVERSATION_INDEX_KIND_USER_CHAT = "user_chat";
+const CONVERSATION_INDEX_KIND_PERSONAL_AGENT = "personal_agent";
+const CONVERSATION_INDEX_KIND_TEAM_AGENT = "team_agent";
+const CONVERSATION_INDEX_KIND_SYSTEM_ENTRY = "system_entry";
+const CONVERSATION_INDEX_KIND_HIDDEN = "hidden";
+const CONVERSATION_INDEX_KIND_INVALID = "invalid";
+const CONVERSATION_INDEX_KINDS = new Set([
+  CONVERSATION_INDEX_KIND_USER_CHAT,
+  CONVERSATION_INDEX_KIND_PERSONAL_AGENT,
+  CONVERSATION_INDEX_KIND_TEAM_AGENT,
+  CONVERSATION_INDEX_KIND_SYSTEM_ENTRY,
+  CONVERSATION_INDEX_KIND_HIDDEN,
+  CONVERSATION_INDEX_KIND_INVALID,
 ]);
 
 export const DEFAULT_COLLAPSED_CONVERSATION_GROUPS: Record<ConversationIndexGroupKey, boolean> = {
   user: false,
   group: false,
+  personalAgent: false,
   research: false,
   selfEvolution: false,
   supervisedEvolution: false,
@@ -57,15 +68,18 @@ export const DEFAULT_COLLAPSED_CONVERSATION_GROUPS: Record<ConversationIndexGrou
   setupTeams: true,
   standaloneGroups: true,
   other: false,
+  invalid: false,
 };
 
 export const CONVERSATION_GROUP_ORDER: ConversationIndexGroupKey[] = [
   "user",
   "group",
+  "personalAgent",
   "research",
   "selfEvolution",
   "supervisedEvolution",
   "other",
+  "invalid",
 ];
 
 type TeamAwareConversationSummary = ConversationSummary & {
@@ -298,49 +312,81 @@ export function sessionToConversationSummary(session: SessionSummary): Conversat
     dialogueModelId: session.dialogueModelId,
     agentInboxPendingCount: session.agentInboxPendingCount,
     conversationIndexVisibility: session.conversationIndexVisibility,
+    conversationIndexKind: session.conversationIndexKind,
+    conversationIndexErrors: session.conversationIndexErrors ?? [],
     sourceRef,
     projectionEdit,
     agentSourceRef,
   };
 }
 
-function agentMetadataString(agent: AgentInstance, key: string) {
+function normalizeConversationIndexKind(value: unknown) {
+  const kind = String(value ?? "").trim();
+  return CONVERSATION_INDEX_KINDS.has(kind) ? kind : "";
+}
+
+function metadataString(agent: AgentInstance, key: string) {
   return String(agent.metadata?.[key] ?? "").trim();
 }
 
-function agentConversationIndexVisibility(agent: AgentInstance) {
-  const explicit = String(
-    agent.conversationIndexVisibility ?? agent.metadata?.conversationIndexVisibility ?? "",
-  ).trim();
-  if (explicit) {
-    return explicit;
+function agentConversationIndexClassification(agent: AgentInstance) {
+  const rawKind = String(agent.conversationIndexKind ?? agent.metadata?.conversationIndexKind ?? "").trim();
+  const explicitKind = normalizeConversationIndexKind(rawKind);
+  const errors: string[] = [];
+  if (rawKind && !explicitKind) {
+    errors.push("invalid_conversation_index_kind");
   }
-  if (agentMetadataString(agent, "challengeCupTeamId") || agentMetadataString(agent, "knowledgeExpansionTeamId")) {
-    return "team_private";
-  }
-  const roleKey = String(agent.roleKey ?? "").trim();
-  if (roleKey.startsWith("challenge_cup_") || roleKey.startsWith("knowledge_expansion_")) {
-    return "team_private";
+  if (!explicitKind) {
+    errors.push("missing_conversation_index_kind");
   }
   const createdBy = String(agent.createdBy ?? "").trim();
-  if (TEAM_PRIVATE_AGENT_CREATED_BY.has(createdBy)) {
-    return "team_private";
+  if (!explicitKind && createdBy === "session_repair") {
+    errors.push("session_repair_missing_conversation_index_kind");
   }
-  if (INTERNAL_RECOVERY_AGENT_CREATED_BY.has(createdBy)) {
-    return "internal_recovery";
+  const kind = explicitKind || CONVERSATION_INDEX_KIND_INVALID;
+  if (kind === CONVERSATION_INDEX_KIND_TEAM_AGENT) {
+    const hasTeamMarker = Boolean(
+      metadataString(agent, "teamId")
+      || metadataString(agent, "challengeCupTeamId")
+      || metadataString(agent, "knowledgeExpansionTeamId"),
+    );
+    if (!hasTeamMarker) {
+      errors.push("team_agent_missing_team_id");
+    }
   }
-  return USER_VISIBLE_CONVERSATION_INDEX_VISIBILITY;
+  if (kind === CONVERSATION_INDEX_KIND_USER_CHAT) {
+    errors.push("agent_direct_session_cannot_be_user_chat");
+  }
+  return {
+    kind: errors.length > 0 ? CONVERSATION_INDEX_KIND_INVALID : kind,
+    errors: [...new Set([...(agent.conversationIndexErrors ?? []), ...errors])],
+  };
+}
+
+function conversationIndexVisibilityForKind(kind: string) {
+  if (kind === CONVERSATION_INDEX_KIND_TEAM_AGENT) {
+    return TEAM_PRIVATE_CONVERSATION_INDEX_VISIBILITY;
+  }
+  if (
+    kind === CONVERSATION_INDEX_KIND_USER_CHAT
+    || kind === CONVERSATION_INDEX_KIND_PERSONAL_AGENT
+    || kind === CONVERSATION_INDEX_KIND_SYSTEM_ENTRY
+  ) {
+    return USER_VISIBLE_CONVERSATION_INDEX_VISIBILITY;
+  }
+  return HIDDEN_CONVERSATION_INDEX_VISIBILITY;
 }
 
 export function isVisibleConversationAgent(agent: AgentInstance | undefined | null) {
   if (!agent) {
     return false;
   }
+  const classification = agentConversationIndexClassification(agent);
   return (
     String(agent.kind ?? "").trim() === "persistent"
     && String(agent.status ?? "").trim().toLowerCase() !== "archived"
     && Boolean(String(agent.directSessionId ?? "").trim())
-    && agentConversationIndexVisibility(agent) === USER_VISIBLE_CONVERSATION_INDEX_VISIBILITY
+    && classification.kind !== CONVERSATION_INDEX_KIND_HIDDEN
   );
 }
 
@@ -349,6 +395,7 @@ export function agentToConversationSummary(agent: AgentInstance): ConversationSu
   const sourceRef = agent.sourceRef ?? makeSourceAuthorityRef("agent", agent.agentId);
   const projectionEdit = makeProjectionEditContract(sourceRef);
   const agentSourceRef = agent.sourceRef ?? makeSourceAuthorityRef("agent", agent.agentId);
+  const classification = agentConversationIndexClassification(agent);
   return {
     conversationId: directSessionId || agent.agentId,
     type: "direct_agent",
@@ -369,7 +416,9 @@ export function agentToConversationSummary(agent: AgentInstance): ConversationSu
     agentPromptTemplateId: agent.promptTemplateId,
     dialogueModelId: agent.llmBindings?.dialogue?.modelId,
     agentInboxPendingCount: agent.agentInboxPendingCount,
-    conversationIndexVisibility: agentConversationIndexVisibility(agent),
+    conversationIndexVisibility: conversationIndexVisibilityForKind(classification.kind),
+    conversationIndexKind: classification.kind,
+    conversationIndexErrors: classification.errors,
     sourceRef,
     projectionEdit,
     agentSourceRef,
@@ -499,8 +548,14 @@ export function isVisibleConversation(
   if (conversation.type !== "direct_agent") {
     return true;
   }
+  if (String(conversation.conversationIndexKind ?? "").trim() === CONVERSATION_INDEX_KIND_HIDDEN) {
+    return false;
+  }
   const sessionId = conversation.directSessionId || conversation.conversationId;
   const session = sessionId && sessionsById ? sessionsById.get(sessionId) : undefined;
+  if (String(session?.conversationIndexKind ?? "").trim() === CONVERSATION_INDEX_KIND_HIDDEN) {
+    return false;
+  }
   if (session) {
     return isVisibleDirectSession(session);
   }
@@ -599,40 +654,27 @@ export function classifyConversation(conversation: ConversationSummary): Convers
   if (conversation.type === "group_room") {
     return "group";
   }
-  const primaryMode = String(conversation.agentPrimaryMode ?? "").trim().toLowerCase();
-  const roleKey = String(conversation.agentRoleKey ?? "").trim().toLowerCase();
-  const promptTemplateId = String(conversation.agentPromptTemplateId ?? "").trim().toLowerCase();
-  const title = String(conversation.title ?? "").trim().toLowerCase();
-  const combined = `${primaryMode} ${roleKey} ${promptTemplateId} ${title}`;
-  if (
-    primaryMode === "research"
-    || roleKey.startsWith("research_")
-    || promptTemplateId.startsWith("prompt-research-")
-    || combined.includes("research")
-    || combined.includes("广撒网 agent")
-    || combined.includes("定向深搜 agent")
-    || combined.includes("证据审查 agent")
-    || combined.includes("主题生成 agent")
-    || combined.includes("主题卡 agent")
-  ) {
-    return "research";
+  const kind = normalizeConversationIndexKind(conversation.conversationIndexKind);
+  if (kind === CONVERSATION_INDEX_KIND_USER_CHAT) {
+    return "user";
   }
-  if (combined.includes("self_evolution") || combined.includes("自进化")) {
-    return "selfEvolution";
+  if (kind === CONVERSATION_INDEX_KIND_PERSONAL_AGENT) {
+    return "personalAgent";
   }
-  if (combined.includes("supervised") || combined.includes("监督进化")) {
-    return "supervisedEvolution";
+  if (kind === CONVERSATION_INDEX_KIND_TEAM_AGENT) {
+    return "personalAgent";
   }
-  if (title.includes("agent")) {
+  if (kind === CONVERSATION_INDEX_KIND_SYSTEM_ENTRY) {
     return "other";
   }
-  return "user";
+  return "invalid";
 }
 
 export function conversationGroupLabel(groupKey: ConversationIndexGroupKey, lang: "zh" | "en") {
   const labels: Record<ConversationIndexGroupKey, { zh: string; en: string }> = {
     user: { zh: "用户会话", en: "User chats" },
     group: { zh: "群聊", en: "Group chats" },
+    personalAgent: { zh: "个人 Agent 会话", en: "Personal agent chats" },
     research: { zh: "科研助手", en: "Research agents" },
     selfEvolution: { zh: "自进化助手", en: "Self-evolution agents" },
     supervisedEvolution: { zh: "监督进化助手", en: "Supervised agents" },
@@ -640,6 +682,7 @@ export function conversationGroupLabel(groupKey: ConversationIndexGroupKey, lang
     setupTeams: { zh: "待配置团队", en: "Teams to configure" },
     standaloneGroups: { zh: "未归属群聊", en: "Standalone groups" },
     other: { zh: "其他助手", en: "Other agents" },
+    invalid: { zh: "异常会话", en: "Invalid sessions" },
   };
   return labels[groupKey][lang];
 }
