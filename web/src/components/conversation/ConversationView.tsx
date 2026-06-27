@@ -70,6 +70,9 @@ const RESPONSE_PARSE_CACHE_LIMIT = 80;
 const MARKDOWN_PARSE_CACHE_LIMIT = 160;
 const RESPONSE_PREWARM_MESSAGE_LIMIT = 8;
 const COMPUTER_USE_TOOL_NAME = "computer_use_task_tool";
+const STREAMING_RESPONSE_REVEAL_MIN_CHARS = 2;
+const STREAMING_RESPONSE_REVEAL_MAX_CHARS = 36;
+const STREAMING_RESPONSE_REVEAL_BACKLOG_RATIO = 0.18;
 
 export type ConversationProcessDisplayMode = "answer" | "trace";
 
@@ -156,18 +159,132 @@ type ComputerUseResult = {
 };
 
 const STREAMING_STATUS_CONTENT_MARKERS = [
+  "正在准备对话上下文",
+  "正在读取当前会话",
+  "正在唤起对话 agent",
+  "正在绑定 agent 实例",
+  "私有工作区",
+  "工具工作区",
   "正在请求模型",
   "等待首个响应片段",
   "上下文已组装完成",
   "正在进入 llm 调用",
+  "preparing the conversation context",
+  "reading the current session",
+  "preparing the conversation agent",
+  "binding the agent instance",
+  "private workspace",
+  "tool workspace",
   "requesting the model",
   "waiting for the first response chunk",
   "context is assembled",
   "llm call is starting",
 ];
 
+const INTERNAL_STREAMING_STATUS_STAGES = new Set([
+  "context_prepare",
+  "queued",
+  "agent_prepare",
+  "history_restore",
+  "model_request",
+  "model_thinking",
+  "followup_prepare",
+]);
+
+function normalizeStreamingStatusText(content: string) {
+  return String(content ?? "").replace(/\s+/g, " ").trim().toLowerCase();
+}
+
+function isInternalStreamingStatusContent(content: string) {
+  const normalized = normalizeStreamingStatusText(content);
+  if (!normalized || normalized.length > 360) {
+    return false;
+  }
+  return STREAMING_STATUS_CONTENT_MARKERS.some((marker) => normalized.includes(marker));
+}
+
+function isInternalStreamingStatusStage(stage: unknown) {
+  return INTERNAL_STREAMING_STATUS_STAGES.has(String(stage ?? "").trim().toLowerCase());
+}
+
+function messageHasInternalStreamingStatusContent(message: ConversationMessage) {
+  if (!message.content) {
+    return false;
+  }
+  const metadataKind = String(message.metadata?.kind ?? "").trim();
+  return (
+    (metadataKind === "session_live_overlay" || metadataKind === "session_active_turn_layer" || Boolean(message.streaming))
+    && isInternalStreamingStatusStage(message.streamStage)
+    && isInternalStreamingStatusContent(message.content)
+  );
+}
+
+function nextStreamingRevealLength(currentLength: number, targetLength: number) {
+  const backlog = Math.max(0, targetLength - currentLength);
+  if (backlog === 0) {
+    return currentLength;
+  }
+  const step = Math.min(
+    STREAMING_RESPONSE_REVEAL_MAX_CHARS,
+    Math.max(STREAMING_RESPONSE_REVEAL_MIN_CHARS, Math.ceil(backlog * STREAMING_RESPONSE_REVEAL_BACKLOG_RATIO)),
+  );
+  return Math.min(targetLength, currentLength + step);
+}
+
 function StreamingResponseContent({ content }: { content: string }) {
-  const visibleContent = String(content ?? "");
+  const targetContent = String(content ?? "");
+  const [visibleContent, setVisibleContent] = useState(() => (typeof window === "undefined" ? targetContent : ""));
+  const targetContentRef = useRef(targetContent);
+  const visibleContentRef = useRef(visibleContent);
+  const frameIdRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    visibleContentRef.current = visibleContent;
+  }, [visibleContent]);
+
+  useEffect(() => {
+    targetContentRef.current = targetContent;
+    if (typeof window === "undefined") {
+      return undefined;
+    }
+    if (!targetContent) {
+      visibleContentRef.current = "";
+      setVisibleContent("");
+      return undefined;
+    }
+    if (!targetContent.startsWith(visibleContentRef.current)) {
+      visibleContentRef.current = targetContent;
+      setVisibleContent(targetContent);
+      return undefined;
+    }
+
+    const revealNextFrame = () => {
+      frameIdRef.current = null;
+      const target = targetContentRef.current;
+      const current = visibleContentRef.current;
+      if (current.length >= target.length) {
+        return;
+      }
+      const nextLength = nextStreamingRevealLength(current.length, target.length);
+      const nextVisible = target.slice(0, nextLength);
+      visibleContentRef.current = nextVisible;
+      setVisibleContent(nextVisible);
+      if (nextLength < target.length) {
+        frameIdRef.current = window.requestAnimationFrame(revealNextFrame);
+      }
+    };
+
+    if (frameIdRef.current === null) {
+      frameIdRef.current = window.requestAnimationFrame(revealNextFrame);
+    }
+    return () => {
+      if (frameIdRef.current !== null) {
+        window.cancelAnimationFrame(frameIdRef.current);
+        frameIdRef.current = null;
+      }
+    };
+  }, [targetContent]);
+
   if (!visibleContent) {
     return null;
   }
@@ -664,10 +781,13 @@ function mergeLiveOverlayIntoActiveTurnMessage(
     liveOverlayMessage.feedbackEvents,
     activeTurnMessage.feedbackEvents,
   );
+  const liveOverlayAnswerContent = messageHasInternalStreamingStatusContent(liveOverlayMessage)
+    ? ""
+    : liveOverlayMessage.content;
   return {
     ...liveOverlayMessage,
     ...activeTurnMessage,
-    content: mergeConversationText(liveOverlayMessage.content, activeTurnMessage.content),
+    content: mergeConversationText(liveOverlayAnswerContent, activeTurnMessage.content),
     thought: mergeConversationText(liveOverlayMessage.thought, activeTurnMessage.thought) || undefined,
     streamStage: activeTurnMessage.streamStage || liveOverlayMessage.streamStage,
     streaming: activeTurnMessage.streaming ?? liveOverlayMessage.streaming,
@@ -1632,17 +1752,13 @@ export function ConversationView({
   }
 
   function isStreamingStatusPlaceholderContent(content: string) {
-    const normalized = String(content ?? "")
-      .replace(/\s+/g, " ")
-      .trim()
-      .toLowerCase();
-    if (!normalized || normalized.length > 180) {
-      return false;
-    }
-    return STREAMING_STATUS_CONTENT_MARKERS.some((marker) => normalized.includes(marker));
+    return isInternalStreamingStatusContent(content);
   }
 
   function compactStreamingStatusPlaceholder(content: string) {
+    if (isInternalStreamingStatusContent(content)) {
+      return "";
+    }
     return compactPreview(String(content ?? "").replace(/\s+/g, " ").trim(), 92);
   }
 
