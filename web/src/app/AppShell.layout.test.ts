@@ -180,7 +180,7 @@ describe("AppShell layout contract", () => {
   it("uses one shared page instance id and stops periodic memory sampling while hidden", () => {
     expect(shellSource).toContain("getPageInstanceId");
     expect(shellSource).toContain("useRef(getPageInstanceId())");
-    expect(shellSource).toContain("if (!frontendVisible) {\n      return;\n    }");
+    expect(shellSource).toMatch(/if \(!frontendVisible\) \{\s+return;\s+\}/);
     expect(shellSource).toContain("window.setInterval(() => emitMemorySample(\"periodic\"), BROWSER_MEMORY_SAMPLE_INTERVAL_MS)");
     expect(shellSource).toContain("frontendVisible, location.pathname, queryClient");
   });
@@ -188,7 +188,7 @@ describe("AppShell layout contract", () => {
   it("keeps startup data loading alive while the managed window is hidden", () => {
     expect(shellSource).toContain("const shellStartupWarmupActive = useStartupWarmup(shellStartupDataReady)");
     expect(shellSource).toContain("const shellPollingVisible = frontendVisible || shellStartupWarmupActive");
-    expect(shellSource).toContain("resolvePollingInterval(\n    shellPollingVisible");
+    expect(shellSource).toMatch(/resolvePollingInterval\(\s+shellPollingVisible/);
     expect(shellSource).toContain("refetchIntervalInBackground: shellStartupWarmupActive");
     expect(shellSource).toContain("if (configQuery.data && runtimeQuery.data && backendHealthQuery.data)");
     expect(shellSource).toContain("setShellStartupDataReady(true)");
@@ -300,6 +300,18 @@ describe("AppShell layout contract", () => {
     expect(styles.topClock).toBeTypeOf("string");
     expect(styles.utilityTriggerLabel).toBeTypeOf("string");
     expect(styles.statusBadgeLabel).toBeTypeOf("string");
+    expect(shellStyles).toContain("@media (max-width: 520px)");
+
+    const narrowShellStyles = shellStyles.slice(shellStyles.indexOf("@media (max-width: 520px)"));
+    expect(narrowShellStyles).toContain("grid-template-columns: minmax(0, 1fr) auto");
+    expect(narrowShellStyles).toContain(".nav {");
+    expect(narrowShellStyles).toContain("justify-self: stretch");
+    expect(narrowShellStyles).toContain("width: 100%");
+    expect(narrowShellStyles).toContain(".navLink {");
+    expect(narrowShellStyles).toContain("flex: 1 1 0");
+    expect(narrowShellStyles).toContain("min-width: 0");
+    expect(narrowShellStyles).toContain("overflow: hidden");
+    expect(narrowShellStyles).toContain("text-overflow: ellipsis");
   });
 
   it("themes the managed app window chrome to match the dark shell", () => {

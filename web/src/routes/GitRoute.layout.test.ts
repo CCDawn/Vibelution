@@ -92,4 +92,39 @@ describe("GitRoute layout contract", () => {
     expect(stylesSource).toContain("grid-template-columns: 1fr");
     expect(stylesSource).toContain("grid-template-rows: auto minmax(0, 1fr)");
   });
+
+  it("keeps manual commit controls compact and moves helper copy to hover", () => {
+    const manualCommitStyles = stylesSource.slice(stylesSource.indexOf(".manualCommitPanel"));
+    const actionStyles = stylesSource.slice(stylesSource.indexOf(".commitActions"));
+
+    expect(manualCommitStyles).toContain("max-height: min(100%, calc(100dvh - 190px))");
+    expect(manualCommitStyles).toContain("overflow: auto");
+    expect(actionStyles).toContain("grid-template-columns: repeat(2, max-content)");
+    expect(actionStyles).toContain("justify-content: end");
+    expect(actionStyles).toContain(".commitActions .secondaryButton");
+    expect(actionStyles).toContain("width: fit-content");
+    expect(routeSource).toContain('title={t("gitAiPromptHint")}');
+    expect(routeSource).toContain('title={t("gitCommitHint")}');
+    expect(routeSource).not.toContain('<span>{t("gitAiPromptHint")}</span>');
+    expect(routeSource).not.toContain('<p className={styles.commitHint}>{t("gitCommitHint")}</p>');
+  });
+
+  it("keeps Git workspaces from forcing tall empty mobile stacks", () => {
+    const mobileWorkspaceStyles = stylesSource.slice(stylesSource.indexOf("@media (max-width: 860px)"));
+
+    expect(mobileWorkspaceStyles).toContain(".workspace {");
+    expect(mobileWorkspaceStyles).toContain("min-height: 0");
+    expect(mobileWorkspaceStyles).not.toContain("min-height: 720px");
+  });
+
+  it("clips long commit titles inside Git cards without local horizontal scrolling", () => {
+    const commitItemStyles = stylesSource.slice(stylesSource.indexOf(".commitItem {"));
+    const commitTitleStyles = stylesSource.slice(stylesSource.indexOf(".commitItem strong"));
+
+    expect(commitItemStyles).toContain("min-width: 0");
+    expect(commitTitleStyles).toContain("display: block");
+    expect(commitTitleStyles).toContain("max-width: 100%");
+    expect(commitTitleStyles).toContain("text-overflow: ellipsis");
+    expect(commitTitleStyles).toContain("white-space: nowrap");
+  });
 });

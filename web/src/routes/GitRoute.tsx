@@ -787,19 +787,19 @@ export function GitRoute() {
             <label className={`${styles.messageField} ${styles.promptTemplateField}`}>
               <span>{t("gitAiPromptTemplate")}</span>
               <textarea
-                rows={5}
+                rows={4}
                 value={aiPromptDraft}
                 placeholder={t("gitAiPromptPlaceholder")}
                 onChange={(event) => setAiPromptDraft(event.target.value)}
               />
             </label>
-            <div className={styles.modelDefaultRow}>
-              <span>{t("gitAiPromptHint")}</span>
+            <div className={`${styles.modelDefaultRow} ${styles.modelActionRow}`} title={t("gitAiPromptHint")}>
               <button
                 type="button"
                 className={styles.secondaryButton}
                 disabled={promptSaveDisabled}
                 onClick={saveAiPrompt}
+                title={t("gitAiPromptHint")}
               >
                 <Save size={14} />
                 {savePromptMutation.isPending ? t("gitAiPromptSaving") : t("gitAiPromptSave")}
@@ -808,13 +808,13 @@ export function GitRoute() {
             <label className={styles.messageField}>
               <span>{t("gitCommitMessage")}</span>
               <textarea
-                rows={6}
+                rows={4}
                 value={commitMessage}
                 placeholder={t("gitCommitMessagePlaceholder")}
                 onChange={(event) => setCommitMessage(event.target.value)}
               />
             </label>
-            <div className={styles.commitActions}>
+            <div className={styles.commitActions} title={t("gitCommitHint")}>
               <button
                 type="button"
                 className={styles.secondaryButton}
@@ -844,9 +844,6 @@ export function GitRoute() {
               <p className={styles.commitBlockReason}>{commitBlockReasonText}</p>
             ) : (
               <p className={styles.commitReady}>{t("gitCommitReady")}</p>
-            )}
-            {commitNotice.text ? null : (
-              <p className={styles.commitHint}>{t("gitCommitHint")}</p>
             )}
           </section>
           <div className={styles.panelHeader}>
