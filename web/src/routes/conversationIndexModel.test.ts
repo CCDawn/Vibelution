@@ -26,6 +26,8 @@ function session(overrides: Partial<SessionSummary> = {}): SessionSummary {
     lastActive: "2026-06-09T00:00:00.000Z",
     updatedAt: "2026-06-09T00:00:00.000Z",
     currentPhase: "idle",
+    conversationIndexKind: "user_chat",
+    conversationIndexErrors: [],
     ...overrides,
   };
 }
@@ -40,6 +42,8 @@ function conversation(overrides: Partial<ConversationSummary> = {}): Conversatio
     summary: "摘要",
     updatedAt: "2026-06-09T00:00:00.000Z",
     workspacePath: "C:/workspace",
+    conversationIndexKind: "user_chat",
+    conversationIndexErrors: [],
     ...overrides,
   };
 }
@@ -91,6 +95,8 @@ function agent(overrides: Partial<AgentInstance> = {}): AgentInstance {
     memoryPolicyId: "default",
     createdBy: "user",
     conversationIndexVisibility: "user_visible",
+    conversationIndexKind: "personal_agent",
+    conversationIndexErrors: [],
     status: "idle",
     metadata: {},
     createdAt: "2026-06-09T00:00:00.000Z",
@@ -220,7 +226,7 @@ describe("conversationIndexModel", () => {
           directSessionId: "session-team-private",
           displayName: "挑战杯资料发现",
           createdBy: "challenge_cup_team",
-          conversationIndexVisibility: "team_private",
+          conversationIndexKind: "hidden",
           metadata: { challengeCupTeamId: "research-team" },
         }),
         agent({ agentId: "agent-archived", directSessionId: "session-archived", status: "archived" }),
@@ -230,22 +236,24 @@ describe("conversationIndexModel", () => {
 
     expect(isVisibleConversationAgent(agent({ status: "archived" }))).toBe(false);
     expect(isVisibleConversationAgent(agent({ directSessionId: "" }))).toBe(false);
-    expect(isVisibleConversationAgent(agent({ conversationIndexVisibility: "team_private" }))).toBe(false);
-    expect(isVisibleConversationAgent(agent({ conversationIndexVisibility: "internal_recovery" }))).toBe(false);
+    expect(isVisibleConversationAgent(agent({ conversationIndexKind: "hidden" }))).toBe(false);
+    expect(isVisibleConversationAgent(agent({ conversationIndexVisibility: "team_private" }))).toBe(true);
     expect(
       isVisibleConversationAgent(agent({
         createdBy: "challenge_cup_team",
+        conversationIndexKind: undefined,
         conversationIndexVisibility: undefined,
         metadata: { challengeCupTeamId: "research-team" },
       })),
-    ).toBe(false);
+    ).toBe(true);
     expect(
       isVisibleConversationAgent(agent({
+        conversationIndexKind: undefined,
         conversationIndexVisibility: undefined,
         roleKey: "challenge_cup_data_discovery",
         metadata: {},
       })),
-    ).toBe(false);
+    ).toBe(true);
     expect(merged.map((item) => item.conversationId).sort()).toEqual(["session-existing", "session-missing"]);
   });
 
@@ -277,17 +285,18 @@ describe("conversationIndexModel", () => {
   });
 
   it("classifies and labels conversation groups", () => {
-    expect(classifyConversation(conversation({ agentPrimaryMode: "research" }))).toBe("research");
-    expect(classifyConversation(conversation({ title: "自进化 Agent" }))).toBe("selfEvolution");
-    expect(conversationGroupLabel("research", "zh")).toBe("科研助手");
-    expect(conversationGroupLabel("selfEvolution", "zh")).toBe("自进化助手");
-    expect(conversationGroupLabel("supervisedEvolution", "zh")).toBe("监督进化助手");
+    expect(classifyConversation(conversation({ conversationIndexKind: "user_chat", agentPrimaryMode: "research" }))).toBe("user");
+    expect(classifyConversation(conversation({ conversationIndexKind: "personal_agent", title: "自进化 Agent" }))).toBe("personalAgent");
+    expect(classifyConversation(conversation({ conversationIndexKind: "invalid" }))).toBe("invalid");
+    expect(conversationGroupLabel("user", "zh")).toBe("用户会话");
+    expect(conversationGroupLabel("personalAgent", "zh")).toBe("个人 Agent 会话");
+    expect(conversationGroupLabel("invalid", "zh")).toBe("异常会话");
     expect(conversationGroupLabel("other", "zh")).toBe("其他助手");
     expect(conversationGroupLabel("setupTeams", "zh")).toBe("待配置团队");
     expect(conversationGroupLabel("standaloneGroups", "zh")).toBe("未归属群聊");
-    expect(DEFAULT_COLLAPSED_CONVERSATION_GROUPS.research).toBe(false);
-    expect(DEFAULT_COLLAPSED_CONVERSATION_GROUPS.selfEvolution).toBe(false);
-    expect(DEFAULT_COLLAPSED_CONVERSATION_GROUPS.supervisedEvolution).toBe(false);
+    expect(DEFAULT_COLLAPSED_CONVERSATION_GROUPS.user).toBe(false);
+    expect(DEFAULT_COLLAPSED_CONVERSATION_GROUPS.personalAgent).toBe(false);
+    expect(DEFAULT_COLLAPSED_CONVERSATION_GROUPS.invalid).toBe(false);
     expect(DEFAULT_COLLAPSED_CONVERSATION_GROUPS.other).toBe(false);
   });
 
@@ -360,13 +369,51 @@ describe("conversationIndexModel", () => {
     });
 
     const groups = new Map(model.groupedConversations.map((group) => [group.groupKey, group.items]));
-    expect(groups.get("research")?.map((item) => item.title).sort()).toEqual(["白书遥", "许景行"]);
-    expect(groups.get("user")?.map((item) => item.title)).toEqual(["周书遥"]);
+    expect(groups.get("personalAgent")?.map((item) => item.title)).toEqual(expect.arrayContaining(["白书遥", "周书遥", "许景行"]));
+    expect(groups.get("personalAgent")).toHaveLength(3);
     expect(model.filteredConversations.map((item) => item.directSessionId).sort()).toEqual([
       "session-research-1",
       "session-research-2",
       "session-user",
     ]);
+  });
+
+  it("puts repaired direct Agents without an explicit index kind into the invalid group", () => {
+    const model = buildConversationIndexModel({
+      agents: [
+        agent({
+          agentId: "agent-repaired",
+          directSessionId: "session-repaired",
+          displayName: "周南栀",
+          primaryMode: "chat",
+          roleKey: "",
+          promptTemplateId: "prompt-chat",
+          createdBy: "session_repair",
+          conversationIndexKind: undefined,
+          conversationIndexVisibility: undefined,
+          metadata: { directSessionVisibility: "active_session", functionalDisplayName: "真实会话" },
+        }),
+      ],
+      conversations: [],
+      lang: "zh",
+      linkedTeamRoomIds: new Set(),
+      rawSessions: [],
+      rightIndexSessions: [],
+      sessionFilter: "",
+      sessionsById: new Map(),
+      teams: [],
+    });
+
+    expect(model.groupedConversations.map((group) => group.groupKey)).toEqual(["invalid"]);
+    expect(model.groupedConversations[0].items[0]).toMatchObject({
+      conversationId: "session-repaired",
+      title: "周南栀",
+      conversationIndexKind: "invalid",
+      conversationIndexErrors: expect.arrayContaining([
+        "missing_conversation_index_kind",
+        "session_repair_missing_conversation_index_kind",
+      ]),
+    });
   });
 
   it("deduplicates same-name empty Teams before they reach the chat index", () => {

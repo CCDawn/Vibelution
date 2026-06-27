@@ -399,6 +399,8 @@ def build_chat_state(
                 "title": title,
                 "updated_at": updated_at,
                 "active_task": dict(active_task or {}) if isinstance(active_task, dict) and active_task else None,
+                "conversation_index_kind": "user_chat",
+                "conversationIndexKind": "user_chat",
             }
         ],
     }

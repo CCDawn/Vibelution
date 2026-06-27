@@ -95,6 +95,20 @@ CONVERSATION_INDEX_VISIBILITIES = {
     CONVERSATION_INDEX_VISIBILITY_INTERNAL_RECOVERY,
     CONVERSATION_INDEX_VISIBILITY_HIDDEN,
 }
+CONVERSATION_INDEX_KIND_USER_CHAT = "user_chat"
+CONVERSATION_INDEX_KIND_PERSONAL_AGENT = "personal_agent"
+CONVERSATION_INDEX_KIND_TEAM_AGENT = "team_agent"
+CONVERSATION_INDEX_KIND_SYSTEM_ENTRY = "system_entry"
+CONVERSATION_INDEX_KIND_HIDDEN = "hidden"
+CONVERSATION_INDEX_KIND_INVALID = "invalid"
+CONVERSATION_INDEX_KINDS = {
+    CONVERSATION_INDEX_KIND_USER_CHAT,
+    CONVERSATION_INDEX_KIND_PERSONAL_AGENT,
+    CONVERSATION_INDEX_KIND_TEAM_AGENT,
+    CONVERSATION_INDEX_KIND_SYSTEM_ENTRY,
+    CONVERSATION_INDEX_KIND_HIDDEN,
+    CONVERSATION_INDEX_KIND_INVALID,
+}
 TEAM_PRIVATE_DIRECT_SESSION_CREATED_BY = {
     "challenge_cup_team",
     "knowledge_expansion_team",
@@ -1092,6 +1106,76 @@ def normalize_conversation_index_visibility(value: Any) -> str:
     return ""
 
 
+def normalize_conversation_index_kind(value: Any) -> str:
+    kind = str(value or "").strip()
+    if kind in CONVERSATION_INDEX_KINDS:
+        return kind
+    return ""
+
+
+def agent_conversation_index_classification(
+    agent: dict[str, Any] | None,
+    *,
+    hidden_team_member_agent_ids: set[str] | None = None,
+) -> dict[str, Any]:
+    """Return the strict conversation index classification for an Agent direct session."""
+
+    if not isinstance(agent, dict):
+        return {"kind": CONVERSATION_INDEX_KIND_HIDDEN, "errors": []}
+    if str(agent.get("kind") or DEFAULT_AGENT_KIND).strip() != DEFAULT_AGENT_KIND:
+        return {"kind": CONVERSATION_INDEX_KIND_HIDDEN, "errors": []}
+    if str(agent.get("status") or "active").strip().lower() == "archived":
+        return {"kind": CONVERSATION_INDEX_KIND_HIDDEN, "errors": []}
+    agent_id = str(agent.get("agentId") or "").strip()
+    direct_session_id = str(agent.get("directSessionId") or "").strip()
+    if not agent_id or not direct_session_id:
+        return {"kind": CONVERSATION_INDEX_KIND_HIDDEN, "errors": []}
+
+    metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
+    raw_kind = str(agent.get("conversationIndexKind") or metadata.get("conversationIndexKind") or "").strip()
+    explicit_kind = normalize_conversation_index_kind(raw_kind)
+    errors: list[str] = []
+    if raw_kind and not explicit_kind:
+        errors.append("invalid_conversation_index_kind")
+    if not explicit_kind:
+        errors.append("missing_conversation_index_kind")
+
+    role_key = _normalize_role_key(agent.get("roleKey") or _infer_agent_role_key(agent))
+    creation_spec = metadata.get("creationSpec") if isinstance(metadata.get("creationSpec"), dict) else {}
+    created_by = str(agent.get("createdBy") or creation_spec.get("source") or "").strip()
+    has_team_marker = bool(
+        str(metadata.get("teamId") or "").strip()
+        or str(metadata.get("challengeCupTeamId") or "").strip()
+        or str(metadata.get("knowledgeExpansionTeamId") or "").strip()
+        or (hidden_team_member_agent_ids and agent_id in hidden_team_member_agent_ids)
+    )
+    looks_team_owned = (
+        has_team_marker
+        or role_key.startswith("challenge_cup_")
+        or role_key.startswith("knowledge_expansion_")
+        or created_by in TEAM_PRIVATE_DIRECT_SESSION_CREATED_BY
+    )
+    if not explicit_kind and looks_team_owned:
+        errors.append("team_agent_missing_conversation_index_kind")
+    if not explicit_kind and created_by == "session_repair":
+        errors.append("session_repair_missing_conversation_index_kind")
+    if not explicit_kind and created_by in INTERNAL_RECOVERY_DIRECT_SESSION_CREATED_BY:
+        errors.append("internal_recovery_missing_conversation_index_kind")
+
+    kind = explicit_kind or CONVERSATION_INDEX_KIND_INVALID
+    if kind == CONVERSATION_INDEX_KIND_HIDDEN:
+        return {"kind": kind, "errors": errors}
+    if kind == CONVERSATION_INDEX_KIND_USER_CHAT:
+        errors.append("agent_direct_session_cannot_be_user_chat")
+    if kind == CONVERSATION_INDEX_KIND_TEAM_AGENT and not has_team_marker:
+        errors.append("team_agent_missing_team_id")
+    if kind == CONVERSATION_INDEX_KIND_SYSTEM_ENTRY:
+        errors.append("agent_direct_session_cannot_be_system_entry")
+    if errors:
+        kind = CONVERSATION_INDEX_KIND_INVALID
+    return {"kind": kind, "errors": sorted(set(errors))}
+
+
 def agent_conversation_index_visibility(
     agent: dict[str, Any] | None,
     *,
@@ -1109,30 +1193,16 @@ def agent_conversation_index_visibility(
     direct_session_id = str(agent.get("directSessionId") or "").strip()
     if not agent_id or not direct_session_id:
         return CONVERSATION_INDEX_VISIBILITY_HIDDEN
-    metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
-    explicit = normalize_conversation_index_visibility(
-        agent.get("conversationIndexVisibility") or metadata.get("conversationIndexVisibility")
+    classification = agent_conversation_index_classification(
+        agent,
+        hidden_team_member_agent_ids=hidden_team_member_agent_ids,
     )
-    if explicit:
-        return explicit
-    if hidden_team_member_agent_ids and agent_id in hidden_team_member_agent_ids:
+    kind = str(classification.get("kind") or "").strip()
+    if kind == CONVERSATION_INDEX_KIND_TEAM_AGENT:
         return CONVERSATION_INDEX_VISIBILITY_TEAM_PRIVATE
-    if str(metadata.get("challengeCupTeamId") or "").strip() or str(metadata.get("knowledgeExpansionTeamId") or "").strip():
-        return CONVERSATION_INDEX_VISIBILITY_TEAM_PRIVATE
-    role_key = _normalize_role_key(agent.get("roleKey") or _infer_agent_role_key(agent))
-    if role_key.startswith("challenge_cup_") or role_key.startswith("knowledge_expansion_"):
-        return CONVERSATION_INDEX_VISIBILITY_TEAM_PRIVATE
-    creation_spec = metadata.get("creationSpec") if isinstance(metadata.get("creationSpec"), dict) else {}
-    created_by = str(agent.get("createdBy") or creation_spec.get("source") or "").strip()
-    if created_by in TEAM_PRIVATE_DIRECT_SESSION_CREATED_BY:
-        return CONVERSATION_INDEX_VISIBILITY_TEAM_PRIVATE
-    if created_by in INTERNAL_RECOVERY_DIRECT_SESSION_CREATED_BY:
-        return CONVERSATION_INDEX_VISIBILITY_INTERNAL_RECOVERY
-    if bool(metadata.get("showInSessionIndex")):
+    if kind in {CONVERSATION_INDEX_KIND_PERSONAL_AGENT, CONVERSATION_INDEX_KIND_USER_CHAT, CONVERSATION_INDEX_KIND_SYSTEM_ENTRY}:
         return CONVERSATION_INDEX_VISIBILITY_USER_VISIBLE
-    if str(metadata.get("directSessionVisibility") or "").strip() == SESSION_AGENT_VISIBILITY_ACTIVE:
-        return CONVERSATION_INDEX_VISIBILITY_USER_VISIBLE
-    return CONVERSATION_INDEX_VISIBILITY_USER_VISIBLE
+    return CONVERSATION_INDEX_VISIBILITY_HIDDEN
 
 
 def _active_chat_session_id() -> str:
@@ -5343,6 +5413,7 @@ def _agent_to_api(
     tool_policy = _tool_policy_for_agent(agent, hydration=hydration)
     agent_source_ref = _source_authority_ref("agent", agent_id)
     agent_projection_edit = _projection_edit_contract("agent", agent_id)
+    conversation_index_classification = agent_conversation_index_classification({**agent, "metadata": metadata})
     conversation_index_visibility = agent_conversation_index_visibility({**agent, "metadata": metadata})
     return {
         "agentId": agent_id,
@@ -5366,6 +5437,8 @@ def _agent_to_api(
         ),
         "directSessionId": str(agent.get("directSessionId") or "").strip(),
         "conversationIndexVisibility": conversation_index_visibility,
+        "conversationIndexKind": str(conversation_index_classification.get("kind") or "").strip(),
+        "conversationIndexErrors": list(conversation_index_classification.get("errors") or []),
         "workspacePath": workspace,
         "workspaceTerritory": _agent_workspace_territory(agent),
         "toolPolicyId": str(agent.get("toolPolicyId") or DEFAULT_TOOL_POLICY_ID).strip() or DEFAULT_TOOL_POLICY_ID,
@@ -5417,6 +5490,7 @@ def _agent_to_api_summary(agent: dict[str, Any]) -> dict[str, Any]:
     agent_id = str(agent.get("agentId") or "").strip()
     agent_source_ref = _source_authority_ref("agent", agent_id)
     agent_projection_edit = _projection_edit_contract("agent", agent_id)
+    conversation_index_classification = agent_conversation_index_classification({**agent, "metadata": metadata})
     conversation_index_visibility = agent_conversation_index_visibility({**agent, "metadata": metadata})
     return {
         "agentId": agent_id,
@@ -5439,6 +5513,8 @@ def _agent_to_api_summary(agent: dict[str, Any]) -> dict[str, Any]:
         ),
         "directSessionId": str(agent.get("directSessionId") or "").strip(),
         "conversationIndexVisibility": conversation_index_visibility,
+        "conversationIndexKind": str(conversation_index_classification.get("kind") or "").strip(),
+        "conversationIndexErrors": list(conversation_index_classification.get("errors") or []),
         "workspacePath": workspace,
         "workspaceTerritory": _agent_workspace_territory(agent),
         "toolPolicyId": str(agent.get("toolPolicyId") or DEFAULT_TOOL_POLICY_ID).strip() or DEFAULT_TOOL_POLICY_ID,
