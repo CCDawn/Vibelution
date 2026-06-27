@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+
 export type DesktopPublicProductEntry = {
   id: string;
   label: string;
@@ -42,13 +44,46 @@ export type DeepLinkRegistrationPlan = {
   reason: "" | "missing_executable_path";
 };
 
+export type DeepLinkRegistrationReason =
+  | DeepLinkRegistrationPlan["reason"]
+  | "catalog_unavailable"
+  | "development_registration_disabled"
+  | "disabled_by_env"
+  | "electron_registration_failed"
+  | "smoke_registration_disabled"
+  | "unsupported_platform";
+
+export type DeepLinkRegistrationResult = {
+  schemaVersion: 1;
+  protocol: "vibelution";
+  attempted: boolean;
+  registered: boolean;
+  reason: DeepLinkRegistrationReason;
+};
+
 export type DeepLinkRegistrationInput = {
   platform: NodeJS.Platform | string;
   executablePath: string;
 };
 
+export type DeepLinkProtocolRegistrar = {
+  isPackaged: boolean;
+  setAsDefaultProtocolClient: (protocol: string, path?: string, args?: string[]) => boolean;
+};
+
+export type DeepLinkProtocolRegistrationInput = {
+  app: DeepLinkProtocolRegistrar;
+  env: NodeJS.ProcessEnv | Record<string, string | undefined>;
+  platform: NodeJS.Platform | string;
+  smoke: boolean;
+};
+
 const VIBELUTION_PROTOCOL = "vibelution";
 const PUBLIC_LAUNCHER_FOCUS_ROUTE = "vibelution://launcher/focus";
+
+export function readDesktopEntryCatalog(catalogPath: string): DesktopEntryCatalog {
+  return JSON.parse(readFileSync(catalogPath, "utf8")) as DesktopEntryCatalog;
+}
 
 export function buildDeepLinkRegistrationPlan(
   catalog: DesktopEntryCatalog,
@@ -66,6 +101,59 @@ export function buildDeepLinkRegistrationPlan(
     publicRoutes,
     rejectedRoutes,
     reason: executablePath ? "" : "missing_executable_path"
+  };
+}
+
+export function registerDeepLinkProtocolIfAllowed(
+  plan: DeepLinkRegistrationPlan,
+  input: DeepLinkProtocolRegistrationInput
+): DeepLinkRegistrationResult {
+  if (input.smoke) {
+    return skippedDeepLinkRegistration(plan, "smoke_registration_disabled");
+  }
+  if (input.env.VIBELUTION_ELECTRON_REGISTER_DEEP_LINKS === "0") {
+    return skippedDeepLinkRegistration(plan, "disabled_by_env");
+  }
+  if (!input.app.isPackaged) {
+    return skippedDeepLinkRegistration(plan, "development_registration_disabled");
+  }
+  if (input.platform !== "win32") {
+    return skippedDeepLinkRegistration(plan, "unsupported_platform");
+  }
+  if (!plan.enabled) {
+    return skippedDeepLinkRegistration(plan, plan.reason);
+  }
+
+  try {
+    const registered = input.app.setAsDefaultProtocolClient(plan.protocol, plan.executablePath, []);
+    return {
+      schemaVersion: 1,
+      protocol: plan.protocol,
+      attempted: true,
+      registered,
+      reason: registered ? "" : "electron_registration_failed"
+    };
+  } catch {
+    return {
+      schemaVersion: 1,
+      protocol: plan.protocol,
+      attempted: true,
+      registered: false,
+      reason: "electron_registration_failed"
+    };
+  }
+}
+
+export function skippedDeepLinkRegistration(
+  plan: Pick<DeepLinkRegistrationPlan, "protocol">,
+  reason: DeepLinkRegistrationReason
+): DeepLinkRegistrationResult {
+  return {
+    schemaVersion: 1,
+    protocol: plan.protocol,
+    attempted: false,
+    registered: false,
+    reason
   };
 }
 

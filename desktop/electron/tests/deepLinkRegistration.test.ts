@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
   buildDeepLinkRegistrationPlan,
+  registerDeepLinkProtocolIfAllowed,
   type DesktopEntryCatalog
 } from "../src/protocol/deepLinkRegistration.js";
 
@@ -84,6 +85,147 @@ describe("deep-link registration policy", () => {
       publicRoutes: ["vibelution://launcher/focus"],
       rejectedRoutes: ["vibelution://workbench/open"],
       reason: "missing_executable_path"
+    });
+  });
+
+  it("does not touch OS protocol registration during development", () => {
+    const calls: unknown[] = [];
+    const result = registerDeepLinkProtocolIfAllowed(
+      buildDeepLinkRegistrationPlan(readCatalog(), {
+        platform: "win32",
+        executablePath: "C:/Users/17533/Desktop/Vibelution/dist/desktop/win-unpacked/Vibelution.exe"
+      }),
+      {
+        app: {
+          isPackaged: false,
+          setAsDefaultProtocolClient: (...args) => {
+            calls.push(args);
+            return true;
+          }
+        },
+        env: {},
+        platform: "win32",
+        smoke: false
+      }
+    );
+
+    expect(result).toMatchObject({
+      attempted: false,
+      registered: false,
+      reason: "development_registration_disabled"
+    });
+    expect(calls).toEqual([]);
+  });
+
+  it("does not touch OS protocol registration during package smoke verification", () => {
+    const calls: unknown[] = [];
+    const result = registerDeepLinkProtocolIfAllowed(
+      buildDeepLinkRegistrationPlan(readCatalog(), {
+        platform: "win32",
+        executablePath: "C:/Users/17533/Desktop/Vibelution/dist/desktop/win-unpacked/Vibelution.exe"
+      }),
+      {
+        app: {
+          isPackaged: true,
+          setAsDefaultProtocolClient: (...args) => {
+            calls.push(args);
+            return true;
+          }
+        },
+        env: {},
+        platform: "win32",
+        smoke: true
+      }
+    );
+
+    expect(result).toMatchObject({
+      attempted: false,
+      registered: false,
+      reason: "smoke_registration_disabled"
+    });
+    expect(calls).toEqual([]);
+  });
+
+  it("lets operators disable packaged protocol registration through env", () => {
+    const calls: unknown[] = [];
+    const result = registerDeepLinkProtocolIfAllowed(
+      buildDeepLinkRegistrationPlan(readCatalog(), {
+        platform: "win32",
+        executablePath: "C:/Users/17533/Desktop/Vibelution/dist/desktop/win-unpacked/Vibelution.exe"
+      }),
+      {
+        app: {
+          isPackaged: true,
+          setAsDefaultProtocolClient: (...args) => {
+            calls.push(args);
+            return true;
+          }
+        },
+        env: { VIBELUTION_ELECTRON_REGISTER_DEEP_LINKS: "0" },
+        platform: "win32",
+        smoke: false
+      }
+    );
+
+    expect(result).toMatchObject({
+      attempted: false,
+      registered: false,
+      reason: "disabled_by_env"
+    });
+    expect(calls).toEqual([]);
+  });
+
+  it("registers the catalog-approved protocol only for packaged Windows startup", () => {
+    const calls: unknown[] = [];
+    const executablePath = "C:/Users/17533/Desktop/Vibelution/dist/desktop/win-unpacked/Vibelution.exe";
+    const result = registerDeepLinkProtocolIfAllowed(
+      buildDeepLinkRegistrationPlan(readCatalog(), {
+        platform: "win32",
+        executablePath
+      }),
+      {
+        app: {
+          isPackaged: true,
+          setAsDefaultProtocolClient: (...args) => {
+            calls.push(args);
+            return true;
+          }
+        },
+        env: {},
+        platform: "win32",
+        smoke: false
+      }
+    );
+
+    expect(result).toMatchObject({
+      attempted: true,
+      registered: true,
+      reason: ""
+    });
+    expect(calls).toEqual([["vibelution", executablePath, []]]);
+  });
+
+  it("reports Electron protocol registration failures without throwing", () => {
+    const result = registerDeepLinkProtocolIfAllowed(
+      buildDeepLinkRegistrationPlan(readCatalog(), {
+        platform: "win32",
+        executablePath: "C:/Users/17533/Desktop/Vibelution/dist/desktop/win-unpacked/Vibelution.exe"
+      }),
+      {
+        app: {
+          isPackaged: true,
+          setAsDefaultProtocolClient: () => false
+        },
+        env: {},
+        platform: "win32",
+        smoke: false
+      }
+    );
+
+    expect(result).toMatchObject({
+      attempted: true,
+      registered: false,
+      reason: "electron_registration_failed"
     });
   });
 });

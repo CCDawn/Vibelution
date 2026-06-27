@@ -11,8 +11,15 @@ import {
   type DesktopLaunchSettings
 } from "./launch/desktopLaunchSettings.js";
 import { RuntimeSceneBridge, type RuntimeSceneElectronEvent } from "./lifecycle/runtimeSceneBridge.js";
-import { createDesktopPaths, type DesktopPaths } from "./paths.js";
+import { createDesktopPaths, resolveDesktopEntryCatalogPath, type DesktopPaths } from "./paths.js";
 import { fetchLauncherControlToken, runDesktopActionOnce } from "./protocol/desktopActionClient.js";
+import {
+  buildDeepLinkRegistrationPlan,
+  readDesktopEntryCatalog,
+  registerDeepLinkProtocolIfAllowed,
+  skippedDeepLinkRegistration,
+  type DeepLinkRegistrationResult
+} from "./protocol/deepLinkRegistration.js";
 import {
   bootstrapPythonLauncherService,
   stopPythonLauncherService,
@@ -84,6 +91,24 @@ function createDesktopPathsForApp(): DesktopPaths {
     workspaceRoot
   });
   return paths;
+}
+
+function registerPackagedDeepLinks(paths: DesktopPaths): DeepLinkRegistrationResult {
+  try {
+    const catalog = readDesktopEntryCatalog(resolveDesktopEntryCatalogPath(paths));
+    const plan = buildDeepLinkRegistrationPlan(catalog, {
+      platform: process.platform,
+      executablePath: process.execPath
+    });
+    return registerDeepLinkProtocolIfAllowed(plan, {
+      app,
+      env: desktopEnvironment(),
+      platform: process.platform,
+      smoke: desktopCliArgs.smoke
+    });
+  } catch {
+    return skippedDeepLinkRegistration({ protocol: "vibelution" }, "catalog_unavailable");
+  }
 }
 
 function desktopLaunchSettings(): DesktopLaunchSettings {
@@ -541,13 +566,19 @@ app.whenReady()
       await runSmokeAndQuit(paths);
       return;
     }
+    const deepLinkRegistration = registerPackagedDeepLinks(paths);
     launcherBootstrap = await bootstrapLauncherIfEnabled(paths);
     windowProvider = createWindowProvider(paths, launcherBootstrap);
     await windowProvider.openLauncher();
     await recordElectronSupervisorEvent(launcherBootstrap, {
       eventCode: "electron.launcher.supervisor.started",
       message: "Electron launcher supervisor started.",
-      fields: { provider: "electron" }
+      fields: {
+        provider: "electron",
+        deepLinkRegistrationAttempted: deepLinkRegistration.attempted,
+        deepLinkRegistrationRegistered: deepLinkRegistration.registered,
+        deepLinkRegistrationReason: deepLinkRegistration.reason
+      }
     });
     await recordElectronSupervisorEvent(launcherBootstrap, {
       eventCode: "electron.launcher_service.started",

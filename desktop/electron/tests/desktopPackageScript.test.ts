@@ -22,10 +22,12 @@ describe("desktop package script", () => {
 
   it("packages the desktop executable with the shared Vibelution icon", () => {
     const config = JSON.parse(readFileSync(electronBuilderConfigPath, "utf8")) as {
+      files?: string[];
       win?: { icon?: string };
     };
 
     expect(config.win?.icon).toBe("../../assets/icons/vibelution.ico");
+    expect(config.files).toContain("desktop-entry-catalog.json");
   });
 
   it("provides a reusable package verification entrypoint", () => {
