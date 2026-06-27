@@ -445,6 +445,29 @@ def test_list_chat_rooms_for_conversation_index_repair_participants_when_enabled
     assert session_list_calls == 1
 
 
+def test_list_chat_rooms_skips_participant_repair_on_index_surface(tmp_path, monkeypatch):
+    _seed_chat_sessions(tmp_path)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    room = chat_room_service.create_chat_room(
+        title="索引面群聊",
+        participant_session_ids=["session-alpha", "session-beta"],
+    )
+
+    monkeypatch.setattr(
+        chat_room_service,
+        "_repair_room_participants_in_state",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("chat room list should not block on participant repair")
+        ),
+    )
+
+    rooms = chat_room_service.list_chat_rooms()
+
+    assert [item["roomId"] for item in rooms] == [room["roomId"]]
+
+
 def test_room_to_conversation_index_reference_uses_latest_round_summary():
     room = {
         "roomId": "room-index",
@@ -791,8 +814,8 @@ def test_chat_room_list_and_detail_use_lightweight_participant_refresh(tmp_path,
         "session-alpha",
         "session-beta",
     ]
-    assert list_session_calls == 1
-    assert list_agent_calls == 1
+    assert list_session_calls == 0
+    assert list_agent_calls == 0
 
 
 def test_chat_room_participant_index_stays_warm_for_message_only_session_changes(tmp_path, monkeypatch):
@@ -961,6 +984,7 @@ def test_chat_room_disables_missing_agent_participants(tmp_path, monkeypatch):
         "record_runtime_scene_event",
         lambda *args, **kwargs: recorded_session_events.append((args, kwargs)) or {"accepted": True},
     )
+    monkeypatch.setattr(session_service, "_recover_active_direct_session_agent", lambda *args, **kwargs: None)
     sessions = session_service.list_sessions()
     room = chat_room_service.create_chat_room(
         title="断链群聊",
@@ -969,6 +993,7 @@ def test_chat_room_disables_missing_agent_participants(tmp_path, monkeypatch):
     state = load_chat_state(tmp_path)
     state["conversations"][0]["agent_id"] = "agent-missing"
     state["conversations"][0]["agentId"] = "agent-missing"
+    state["conversations"][0]["conversationIndexKind"] = "personal_agent"
     save_chat_state(tmp_path, state)
     session_service._invalidate_session_list_cache()
     room_state = chat_room_service._store().load()
@@ -979,22 +1004,16 @@ def test_chat_room_disables_missing_agent_participants(tmp_path, monkeypatch):
     detail = chat_room_service.get_chat_room_detail(room["roomId"])
 
     assert {item["id"] for item in sessions} == {"session-alpha", "session-beta"}
-    assert "session-alpha" not in {item["id"] for item in session_service.list_sessions()}
+    updated_sessions = {item["id"]: item for item in session_service.list_sessions()}
+    assert updated_sessions["session-alpha"]["agentMissing"] is True
+    assert updated_sessions["session-alpha"]["agentStatusCode"] == "missing_agent"
+    assert updated_sessions["session-alpha"]["conversationIndexKind"] == "invalid"
     participant = detail["participants"][0]
     assert participant["sessionId"] == "session-alpha"
     assert participant["agentMissing"] is True
     assert participant["agentStatusCode"] == "missing_agent"
     assert "缺少有效 Agent" in participant["agentStatusMessage"]
     assert participant["enabled"] is False
-    hidden_events = [
-        event for event in recorded_session_events
-        if event[0][2] == "session.agent_missing.hidden_from_index.batch"
-    ]
-    assert hidden_events
-    assert hidden_events[-1][1]["fields"]["hiddenCount"] == 1
-    assert hidden_events[-1][1]["fields"]["sampleSessions"][0]["sessionId"] == "session-alpha"
-    assert hidden_events[-1][1]["fields"]["sampleSessions"][0]["agentId"] == "agent-missing"
-    assert hidden_events[-1][1]["fields"]["sampleSessions"][0]["agentStatusCode"] == "missing_agent"
     room_missing_events = [
         event for event in recorded_room_events
         if event[0][2] == "chat_room.participant_agent_missing"

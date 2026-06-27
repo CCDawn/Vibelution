@@ -174,10 +174,13 @@ def list_chat_room_purposes() -> list[dict[str, str]]:
 def list_chat_rooms(
     *,
     session_summaries: dict[str, dict[str, Any]] | None = None,
+    repair_participants: bool = False,
 ) -> list[dict[str, Any]]:
     state = _store().load()
-    summaries = session_summaries if session_summaries is not None else _session_summary_index()
-    if _repair_room_participants_in_state(state, session_summaries=summaries):
+    summaries = session_summaries
+    if repair_participants:
+        summaries = session_summaries if session_summaries is not None else _session_summary_index()
+    if repair_participants and _repair_room_participants_in_state(state, session_summaries=summaries):
         _store().save(state)
     available_modes = list_chat_room_modes()
     available_purposes = list_chat_room_purposes()
