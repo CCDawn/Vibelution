@@ -1244,6 +1244,88 @@ def test_compact_team_list_batches_linked_room_compact_reads(tmp_path, monkeypat
     assert all((team.get("linkedChatRoom") or {}).get("participantCount") == 1 for team in payload["teams"])
 
 
+def test_compact_team_list_returns_snapshot_when_team_lock_is_busy(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    alpha = agent_directory_service.create_agent_instance(display_name="Alpha", direct_session_id="session-alpha")
+    team = team_service.create_team(name="Busy Lock Team", members=[{"agentId": alpha["agentId"], "role": "lead"}])
+
+    class BusyTeamLock:
+        def acquire(self, blocking=True, timeout=-1):
+            assert blocking is False
+            return False
+
+        def release(self):
+            raise AssertionError("busy lock should not be released when it was not acquired")
+
+        def __enter__(self):
+            raise AssertionError("compact team list should not block on the team write lock")
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    monkeypatch.setattr(team_service, "_TEAM_LOCK", BusyTeamLock())
+
+    payload = team_service.list_teams_compact()
+
+    assert [item["teamId"] for item in payload["teams"]] == [team["teamId"]]
+    assert payload["teams"][0]["linkedChatRoomId"]
+
+
+def test_archived_team_room_filter_returns_snapshot_when_team_lock_is_busy(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    alpha = agent_directory_service.create_agent_instance(display_name="Alpha", direct_session_id="session-alpha")
+    team = team_service.create_team(name="Archived Busy Team", members=[{"agentId": alpha["agentId"], "role": "lead"}])
+    state = team_service._load_index()
+    state["teams"][0]["status"] = "archived"
+    team_service._save_index(state)
+
+    class BusyTeamLock:
+        def acquire(self, blocking=True, timeout=-1):
+            assert blocking is False
+            return False
+
+        def release(self):
+            raise AssertionError("busy lock should not be released when it was not acquired")
+
+        def __enter__(self):
+            raise AssertionError("archived room filter should not block on the team write lock")
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    monkeypatch.setattr(team_service, "_TEAM_LOCK", BusyTeamLock())
+
+    room_ids = team_service.list_archived_team_linked_chat_room_ids()
+
+    assert room_ids == {team["linkedChatRoomId"]}
+
+
+def test_system_team_bootstrap_request_defers_when_team_lock_is_busy(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _seed_system_team_bootstrap_ready()
+
+    class BusyTeamLock:
+        def acquire(self, blocking=True, timeout=-1):
+            assert blocking is False
+            return False
+
+        def release(self):
+            raise AssertionError("busy lock should not be released when it was not acquired")
+
+        def __enter__(self):
+            raise AssertionError("bootstrap check should not block on the team write lock")
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    monkeypatch.setattr(team_service, "_TEAM_LOCK", BusyTeamLock())
+
+    payload = team_service.request_system_team_bootstrap(reason="team_list")
+
+    assert payload["status"] == "deferred"
+    assert payload["lastError"] == "team_lock_busy"
+
+
 def test_compact_team_list_does_not_hydrate_agents_for_active_teams(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     alpha = agent_directory_service.create_agent_instance(display_name="Alpha", direct_session_id="session-alpha")

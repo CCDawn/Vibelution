@@ -379,6 +379,18 @@ def _elapsed_ms(started_at: float) -> int:
     return max(0, int(round((_perf_counter() - started_at) * 1000)))
 
 
+def _try_acquire_team_lock() -> bool:
+    try:
+        return bool(_TEAM_LOCK.acquire(blocking=False))
+    except TypeError:
+        return bool(_TEAM_LOCK.acquire(False))
+
+
+def _release_team_lock_if_acquired(acquired: bool) -> None:
+    if acquired:
+        _TEAM_LOCK.release()
+
+
 def list_teams(*, include_archived: bool = False) -> dict[str, Any]:
     agent_refs = _agent_reference_maps()
     with _TEAM_LOCK:
@@ -411,11 +423,16 @@ def list_teams_compact(*, include_archived: bool = False) -> dict[str, Any]:
         for room in chat_room_service.list_chat_rooms_compact()
         if isinstance(room, dict) and str(room.get("roomId") or "").strip()
     }
-    with _TEAM_LOCK:
+    team_lock_acquired = _try_acquire_team_lock()
+    try:
         state = _load_index()
-        changed = _repair_index_compact_contracts(state, compact_rooms_by_id=compact_rooms_by_id)
+        changed = False
+        if team_lock_acquired:
+            changed = _repair_index_compact_contracts(state, compact_rooms_by_id=compact_rooms_by_id)
         if changed:
             _save_index(state)
+    finally:
+        _release_team_lock_if_acquired(team_lock_acquired)
     teams = [
         _team_to_compact_reference(item, compact_rooms_by_id=compact_rooms_by_id)
         for item in list(state.get("teams") or [])
@@ -434,15 +451,18 @@ def list_teams_compact(*, include_archived: bool = False) -> dict[str, Any]:
 def list_archived_team_linked_chat_room_ids() -> set[str]:
     """Return room IDs linked to archived teams without loading chat-room catalog data."""
 
-    with _TEAM_LOCK:
+    team_lock_acquired = _try_acquire_team_lock()
+    try:
         state = _load_index()
-        return {
-            str(item.get("linkedChatRoomId") or "").strip()
-            for item in list(state.get("teams") or [])
-            if isinstance(item, dict)
-            and str(item.get("status") or DEFAULT_TEAM_STATUS).strip().lower() == "archived"
-            and str(item.get("linkedChatRoomId") or "").strip()
-        }
+    finally:
+        _release_team_lock_if_acquired(team_lock_acquired)
+    return {
+        str(item.get("linkedChatRoomId") or "").strip()
+        for item in list(state.get("teams") or [])
+        if isinstance(item, dict)
+        and str(item.get("status") or DEFAULT_TEAM_STATUS).strip().lower() == "archived"
+        and str(item.get("linkedChatRoomId") or "").strip()
+    }
 
 
 def list_team_graph_references(*, include_archived: bool = False) -> dict[str, Any]:
@@ -1025,6 +1045,26 @@ def request_system_team_bootstrap(*, reason: str = "team_list") -> dict[str, Any
     with _TEAM_SYSTEM_BOOTSTRAP_LOCK:
         if _TEAM_SYSTEM_BOOTSTRAP_THREAD and _TEAM_SYSTEM_BOOTSTRAP_THREAD.is_alive():
             return _system_team_bootstrap_state_snapshot_locked()
+    team_lock_acquired = _try_acquire_team_lock()
+    if not team_lock_acquired:
+        with _TEAM_SYSTEM_BOOTSTRAP_LOCK:
+            _TEAM_SYSTEM_BOOTSTRAP_STATE.update(
+                {
+                    "status": "deferred",
+                    "requiredSteps": [],
+                    "reason": normalized_reason,
+                    "finishedAt": "",
+                    "lastError": "team_lock_busy",
+                    "elapsedMs": 0,
+                }
+            )
+            snapshot = _system_team_bootstrap_state_snapshot_locked()
+        _record_system_team_bootstrap_event(
+            "team.system_bootstrap.deferred_lock_busy",
+            outcome="deferred",
+            fields={"reason": normalized_reason},
+        )
+        return snapshot
     try:
         required_steps = _system_team_bootstrap_required_steps()
     except Exception as exc:
@@ -1046,6 +1086,8 @@ def request_system_team_bootstrap(*, reason: str = "team_list") -> dict[str, Any
             fields={"reason": normalized_reason, "errorType": type(exc).__name__},
         )
         return snapshot
+    finally:
+        _release_team_lock_if_acquired(team_lock_acquired)
     if not required_steps:
         with _TEAM_SYSTEM_BOOTSTRAP_LOCK:
             _TEAM_SYSTEM_BOOTSTRAP_STATE.update(
