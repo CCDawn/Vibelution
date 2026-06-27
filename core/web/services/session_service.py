@@ -892,6 +892,8 @@ def _reconcile_stale_session_ledger(session_id: str, *, active_turn_id: str = ""
     normalized_session_id = str(session_id or "").strip()
     if not normalized_session_id:
         return
+    if _is_session_running(normalized_session_id):
+        return
     try:
         events = load_conversation_events(PROJECT_ROOT, normalized_session_id)
         turn_id = latest_open_turn_id(events)

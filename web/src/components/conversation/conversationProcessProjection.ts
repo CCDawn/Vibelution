@@ -38,13 +38,19 @@ function mergeExactItems<T>(...itemGroups: Array<T[] | undefined>) {
 
 function mergeText(...values: Array<string | undefined>) {
   const merged: string[] = [];
-  const seen = new Set<string>();
   for (const value of values) {
     const text = String(value ?? "").trim();
-    if (!text || seen.has(text)) {
+    if (!text) {
       continue;
     }
-    seen.add(text);
+    if (merged.some((existing) => existing === text || existing.includes(text))) {
+      continue;
+    }
+    for (let index = merged.length - 1; index >= 0; index -= 1) {
+      if (text.includes(merged[index])) {
+        merged.splice(index, 1);
+      }
+    }
     merged.push(text);
   }
   return merged.join("\n\n");
@@ -62,15 +68,21 @@ function isCliAgentLifecycleMessage(message: ConversationMessage) {
   return metadataText(message.metadata, "kind") === "cli_agent_lifecycle";
 }
 
-function isProjectableProcessOnlyMessage(message: ConversationMessage) {
+function isExcludedAssistantProjectionMessage(message: ConversationMessage) {
   if (
     message.role !== "assistant"
     || isRuntimeNoticeMessage(message)
     || isCliAgentLifecycleMessage(message)
     || isGroupRoomTranscriptMessage(message)
     || isTurnErrorMessage(message)
-    || String(message.content ?? "").trim()
   ) {
+    return true;
+  }
+  return false;
+}
+
+function isProjectableProcessOnlyMessage(message: ConversationMessage) {
+  if (isExcludedAssistantProjectionMessage(message) || String(message.content ?? "").trim()) {
     return false;
   }
   return Boolean(
@@ -83,15 +95,35 @@ function isProjectableProcessOnlyMessage(message: ConversationMessage) {
   );
 }
 
+function normalizedTurnId(message: ConversationMessage) {
+  return metadataText(message.metadata, "turnId").replace(/^live:/, "");
+}
+
 function processProjectionKey(message: ConversationMessage) {
-  const turnId = metadataText(message.metadata, "turnId").replace(/^live:/, "");
+  const turnId = normalizedTurnId(message);
   return turnId ? `turn:${turnId}` : "adjacent-process-thread";
 }
 
+function isSameTurnPacketMessage(message: ConversationMessage) {
+  if (isExcludedAssistantProjectionMessage(message) || !normalizedTurnId(message)) {
+    return false;
+  }
+  return Boolean(String(message.content ?? "").trim() || isProjectableProcessOnlyMessage(message));
+}
+
 function canMergeProcessProjection(previous: ConversationMessage | undefined, next: ConversationMessage) {
+  if (!previous) {
+    return false;
+  }
+  if (
+    isSameTurnPacketMessage(previous)
+    && isSameTurnPacketMessage(next)
+    && normalizedTurnId(previous) === normalizedTurnId(next)
+  ) {
+    return true;
+  }
   return Boolean(
-    previous
-    && isProjectableProcessOnlyMessage(previous)
+    isProjectableProcessOnlyMessage(previous)
     && isProjectableProcessOnlyMessage(next)
     && processProjectionKey(previous) === processProjectionKey(next),
   );
@@ -100,6 +132,7 @@ function canMergeProcessProjection(previous: ConversationMessage | undefined, ne
 function mergeProcessProjectionMessages(previous: ConversationMessage, next: ConversationMessage): ConversationMessage {
   return {
     ...previous,
+    content: mergeText(previous.content, next.content),
     streaming: Boolean(previous.streaming || next.streaming),
     streamStage: next.streamStage || previous.streamStage,
     thought: mergeText(previous.thought, next.thought) || undefined,

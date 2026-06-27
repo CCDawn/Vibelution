@@ -257,13 +257,13 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).toContain("思考过程 1");
     expect(html).toContain("工具调用 1");
     expect(html).toContain("最终回答已经完成。");
-    expect(html.indexOf("responseSection")).toBeLessThan(html.indexOf("answerOnlyProcessGroup"));
+    expect(html.indexOf("answerOnlyProcessGroup")).toBeLessThan(html.indexOf("responseSection"));
     expect(html).toContain('title="展开执行明细"');
     expect(html).not.toContain("先分析缓存链路");
     expect(html).not.toContain("opened session_service.py");
   });
 
-  it("surfaces the current running process after the live answer in the default display", () => {
+  it("surfaces the current running process before the live answer in the default display", () => {
     const html = renderConversation(
       [
         {
@@ -294,7 +294,7 @@ describe("ConversationView edit resend affordance", () => {
 
     expect(html).toContain("正在整理回答。");
     expect(html).toContain("正在读取 ConversationView 渲染链路");
-    expect(html.indexOf("responseSection")).toBeLessThan(html.indexOf("answerOnlyProcessGroup"));
+    expect(html.indexOf("answerOnlyProcessGroup")).toBeLessThan(html.indexOf("responseSection"));
     expect(html).not.toContain("已确定检查范围");
   });
 
@@ -384,7 +384,7 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).toContain("正在唤起对话 agent");
     expect(html).toContain("正在请求");
     expect(html.match(/assistantTurn/g)?.length ?? 0).toBe(1);
-    expect(html.indexOf("正在唤起对话 agent")).toBeLessThan(html.indexOf("正在请求"));
+    expect(html.indexOf("正在请求")).toBeLessThan(html.indexOf("正在唤起对话 agent"));
   });
 
   it("coalesces same-tool feedback updates when merging live overlay with the active turn", () => {
@@ -706,6 +706,9 @@ describe("ConversationView edit resend affordance", () => {
               summary: "正在绑定 Agent",
             },
           ],
+          metadata: {
+            turnId: "turn-avatar-group",
+          },
         },
         {
           id: "assistant-process-tool",
@@ -721,6 +724,9 @@ describe("ConversationView edit resend affordance", () => {
               summary: "读取受控资料上下文",
             },
           ],
+          metadata: {
+            turnId: "turn-avatar-group",
+          },
         },
         {
           id: "assistant-process-answer",
@@ -735,6 +741,9 @@ describe("ConversationView edit resend affordance", () => {
               summary: "整理结果",
             },
           ],
+          metadata: {
+            turnId: "turn-avatar-group",
+          },
         },
       ],
       {
@@ -747,8 +756,10 @@ describe("ConversationView edit resend affordance", () => {
 
     expect(html.match(/src="\/api\/agents\/avatar-image\/agent-zhounanzhi\.png"/g)?.length ?? 0).toBe(1);
     expect(html.match(/周南栀/g)?.length ?? 0).toBe(1);
-    expect(html.match(/<article class="_assistantTurn_/g)?.length ?? 0).toBe(2);
-    expect(html.match(/assistantTurnContinuation/g)?.length ?? 0).toBe(1);
+    expect(html.match(/<article class="_assistantTurn_/g)?.length ?? 0).toBe(1);
+    expect(html.match(/assistantTurnContinuation/g)?.length ?? 0).toBe(0);
+    expect(html.indexOf("answerOnlyProcessGroup")).toBeLessThan(html.indexOf("responseSection"));
+    expect(html).toContain("上下文已读取，继续整理结果。");
   });
 
   it("starts a new assistant avatar group after a user turn", () => {

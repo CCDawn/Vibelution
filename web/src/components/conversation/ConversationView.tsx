@@ -3564,8 +3564,8 @@ export function ConversationView({
                   ) : null}
                   {renderUserAttachments(message)}
 
-                  {answerOnlyProcessMode ? responseSectionNode : null}
                   {processNode}
+                  {answerOnlyProcessMode ? responseSectionNode : null}
                   {turnErrorMessage ? (
                     <div className={styles.turnErrorNotice} role="status" aria-live="polite">
                       <div className={styles.turnErrorNoticeIcon} aria-hidden="true">
