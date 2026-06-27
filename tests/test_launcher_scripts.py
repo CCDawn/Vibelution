@@ -115,9 +115,46 @@ def test_desktop_entry_launcher_window_applies_vibelution_app_identity():
     assert "Vibelution.Launcher" in source
     assert "LAUNCHER_ICON_PATH" in source
     assert "WM_SETICON" in source
-    assert "_apply_window_icon(int(hwnd), LAUNCHER_ICON_PATH)" in source
+    assert "_apply_window_icon(hwnd, LAUNCHER_ICON_PATH)" in source
     assert "_apply_managed_browser_app_identity(int(process.pid), \"launcher\")" in source
     assert "launcher.browser.window_app_identity.succeeded" in source
+
+
+def test_desktop_entry_launcher_identity_falls_back_to_profile_window(monkeypatch, tmp_path):
+    bridge = _load_desktop_entry_py()
+    events: list[tuple[str, dict[str, object]]] = []
+    identities: list[tuple[int, str, str, str]] = []
+    icon_handles: list[int] = []
+
+    monkeypatch.setattr(bridge, "os", type("FakeOs", (), {"name": "nt"})())
+    monkeypatch.setattr(bridge, "LAUNCHER_ICON_PATH", tmp_path / "vibelution.ico")
+    bridge.LAUNCHER_ICON_PATH.write_text("icon", encoding="utf-8")
+    monkeypatch.setattr(bridge, "_visible_windows_for_process", lambda pid: [])
+    monkeypatch.setattr(
+        bridge,
+        "_managed_browser_window_candidates",
+        lambda browser_pid, role: [{"hwnd": 90210, "resolvedBy": "launcher_control_profile", "processId": 4736}],
+    )
+    monkeypatch.setattr(
+        bridge,
+        "_set_window_app_identity",
+        lambda hwnd, app_id, display_name, icon_resource: identities.append((hwnd, app_id, display_name, icon_resource)),
+    )
+    monkeypatch.setattr(bridge, "_apply_window_icon", lambda hwnd, icon_path: icon_handles.append(hwnd) or True)
+    monkeypatch.setattr(bridge, "_window_process_id", lambda hwnd: 4736)
+    monkeypatch.setattr(bridge, "_append_log", lambda event, **fields: events.append((event, fields)))
+
+    result = bridge._apply_managed_browser_app_identity(47264, "launcher")
+
+    assert result["applied"] is True
+    assert result["windowIconApplied"] is True
+    assert result["windowPid"] == 4736
+    assert result["appUserModelId"] == "Vibelution.Launcher"
+    assert result["resolvedBy"] == "launcher_control_profile"
+    assert identities == [(90210, "Vibelution.Launcher", "Vibelution Launcher", f"{bridge.LAUNCHER_ICON_PATH},0")]
+    assert icon_handles == [90210]
+    assert events[-1][0] == "launcher.browser.window_app_identity.succeeded"
+    assert events[-1][1]["resolvedBy"] == "launcher_control_profile"
 
 
 def test_launcher_script_reconciles_stale_control_state_before_lifecycle_actions():
