@@ -4245,6 +4245,160 @@
   white-space: nowrap;
 }
 
+.knowledgeCompletionFlowPanel {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 8px;
+  border-bottom: 1px solid var(--border-soft);
+  background: color-mix(in srgb, var(--surface-panel) 86%, transparent);
+}
+
+.knowledgeCompletionFlowHeader {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.knowledgeCompletionFlowHeader > div {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.knowledgeCompletionFlowHeader strong {
+  color: var(--fg-primary);
+  font-size: 0.82rem;
+}
+
+.knowledgeCompletionFlowHeader span {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg-muted);
+  font-size: 0.7rem;
+  font-weight: 720;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.knowledgeCompletionFlowNodes {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 6px;
+  min-width: 0;
+}
+
+.knowledgeCompletionFlowNode {
+  display: grid;
+  min-width: 0;
+  align-content: start;
+  gap: 6px;
+  min-height: 132px;
+  padding: 7px;
+  border: 1px solid var(--source-step-border, var(--border-soft));
+  border-radius: 8px;
+  background:
+    linear-gradient(90deg, var(--source-step-bg-soft, transparent), transparent 72%),
+    var(--surface-card);
+  color: var(--source-step-fg, var(--fg-muted));
+}
+
+.knowledgeCompletionFlowNodeCurrent {
+  box-shadow:
+    inset 0 -2px 0 color-mix(in srgb, var(--source-step-fg, var(--accent-cool)) 52%, transparent),
+    0 0 0 2px color-mix(in srgb, var(--source-step-fg, var(--accent-cool)) 10%, transparent);
+}
+
+.knowledgeCompletionFlowNodeHeader {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.knowledgeCompletionFlowNodeHeader strong {
+  flex: 0 0 auto;
+  color: var(--source-step-fg, var(--fg-primary));
+  font-size: 0.64rem;
+}
+
+.knowledgeCompletionFlowNodeHeader span {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--source-step-fg, var(--fg-muted));
+  font-size: 0.6rem;
+  font-weight: 820;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.knowledgeCompletionFlowNodeBody {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.knowledgeCompletionFlowNodeBody b,
+.knowledgeCompletionFlowNodeBody small,
+.knowledgeCompletionFlowNodeBody em,
+.knowledgeCompletionFlowNodeBody p {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.knowledgeCompletionFlowNodeBody b {
+  color: var(--fg-primary);
+  font-size: 0.76rem;
+}
+
+.knowledgeCompletionFlowNodeBody small,
+.knowledgeCompletionFlowNodeBody em,
+.knowledgeCompletionFlowNodeBody p {
+  color: var(--fg-muted);
+  font-size: 0.66rem;
+  font-style: normal;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.knowledgeCompletionFlowError {
+  color: color-mix(in srgb, var(--accent-danger) 74%, var(--fg-primary)) !important;
+}
+
+.knowledgeCompletionFlowActions {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: auto;
+}
+
+.knowledgeCompletionFlowActions a,
+.knowledgeCompletionFlowActions button {
+  display: inline-flex;
+  min-width: 0;
+  min-height: 26px;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 0 7px;
+  border: 1px solid color-mix(in srgb, var(--source-step-border, var(--border-soft)) 76%, var(--border-soft));
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--surface-panel-strong) 82%, transparent);
+  color: var(--fg-primary);
+  font-size: 0.66rem;
+  font-weight: 780;
+  text-decoration: none;
+}
+
+.knowledgeCompletionFlowActions button:disabled {
+  opacity: 0.54;
+}
+
 .linkedRoomLine,
 .edgeLayerLine {
   display: block;
@@ -6596,6 +6750,10 @@
 
   .sourceCollectionStageModules {
     grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
+
+  .knowledgeCompletionFlowNodes {
+    grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
   }
 
   .sourceCollectionStageWorkspaceHeader,

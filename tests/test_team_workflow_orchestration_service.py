@@ -6668,6 +6668,82 @@ def test_knowledge_collection_ingestion_auto_closes_to_formal_item_via_coordinat
     assert knowledge_items["summary"]["itemCount"] >= 1
 
 
+def test_knowledge_collection_ingestion_uses_scoped_existing_team_base_when_ids_overlap(tmp_path, monkeypatch):
+    """Existing team KB selection must stay owner-scoped when another owner has the same base id."""
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    steward_id = agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID
+    coordinator = agent_directory_service.create_agent_instance(display_name="Research Coordinator")
+    team = team_service.create_team(
+        name="ai科学研究团队",
+        members=[
+            {"agentId": steward_id, "role": "knowledge_steward"},
+            {"agentId": coordinator["agentId"], "role": "research_coordination"},
+        ],
+    )
+    duplicate_steward = agent_directory_service.create_agent_instance(display_name="Duplicate Steward")
+    other_team = team_service.create_team(
+        name="另一支科研团队",
+        members=[{"agentId": duplicate_steward["agentId"], "role": "knowledge_steward"}],
+    )
+    target_base = team_knowledge_service.create_knowledge_base(
+        team["teamId"],
+        name="挑战杯科研知识库",
+        description="Target team base",
+        actor_agent_id=steward_id,
+    )
+    duplicate_base = team_knowledge_service.create_knowledge_base(
+        other_team["teamId"],
+        name="挑战杯科研知识库",
+        description="Duplicate raw id under another owner",
+        actor_agent_id=duplicate_steward["agentId"],
+    )
+    assert target_base["knowledgeBaseId"] == duplicate_base["knowledgeBaseId"]
+    assert target_base["scopedKnowledgeBaseId"] != duplicate_base["scopedKnowledgeBaseId"]
+
+    for source_payload in (
+        {
+            "title": "Predictive coding cortical hierarchy neural network paper",
+            "sourceUrl": "https://doi.org/10.0000/predictive-coding",
+            "sourceKind": "paper",
+            "summary": "Neural predictive coding evidence for neural-network hierarchy and learning.",
+            "tags": ["neuroscience", "algorithm"],
+            "allowedForAnalysis": True,
+            "createdByAgent": "Data Discovery Agent",
+        },
+        {
+            "title": "Synaptic plasticity learning rule review",
+            "sourceUrl": "https://doi.org/10.0000/stdp-review",
+            "sourceKind": "review",
+            "summary": "Synaptic plasticity evidence can support learning-rule hypotheses.",
+            "tags": ["neuroscience", "learning"],
+            "allowedForAnalysis": True,
+            "createdByAgent": "Source Acquisition Agent",
+        },
+    ):
+        team_workflow_orchestration_service.register_candidate_source(team["teamId"], source_payload)
+
+    response = team_workflow_orchestration_service.run_knowledge_collection_ingestion(
+        team["teamId"],
+        {
+            "stewardAgentId": steward_id,
+            "targetDomain": "神经学启发神经网络算法",
+            "maxCandidates": 10,
+            "autoCreateKnowledgeBase": True,
+            "autoSubmit": True,
+            "autoReviewSource": True,
+            "autoApprove": True,
+            "notifyStewardAgent": False,
+            "wakeStewardAgent": False,
+        },
+    )
+
+    assert response["knowledgeReview"] is not None
+    assert response["summary"]["knowledgeBaseId"] == target_base["knowledgeBaseId"]
+    assert response["summary"]["scopedKnowledgeBaseId"] == target_base["scopedKnowledgeBaseId"]
+    assert response["summary"]["formalKnowledgeItemCount"] >= 1
+    assert response["statusSnapshot"]["officialBoundary"]["writesOfficialKnowledge"] is True
+
+
 def test_knowledge_collection_ingestion_auto_approve_needs_distinct_reviewer(tmp_path, monkeypatch):
     """职责分离负例：团队没有 coordinator/lead 审批人时，autoApprove 不应自提自批出正式知识。"""
     _use_tmp_project_root(tmp_path, monkeypatch)
@@ -6857,6 +6933,18 @@ def test_knowledge_collection_completion_background_normalizes_one_click_default
     assert child_payload["steps"][1]["outputCount"] == 3
     assert child_payload["formalKnowledgeItemCount"] == 1
 
+    status = team_workflow_orchestration_service.get_knowledge_ingestion_status(team["teamId"])
+    active_flow = accepted["activeWorkRun"]["flowVisualization"]
+    latest_run = status["latestWorkRun"]
+    latest_flow = latest_run["flowVisualization"]
+    assert [node["stageId"] for node in active_flow["nodes"]] == ["collection", "candidate", "screening", "graph", "memory"]
+    assert active_flow["nodes"][0]["agentRole"] == "source_collection"
+    assert latest_run["completionSteps"][0]["stageId"] == "remaining_search"
+    assert latest_flow["status"] == "completed"
+    assert latest_flow["nodes"][-1]["status"] == "completed"
+    assert latest_flow["nodes"][-1]["outputCount"] == 1
+    assert latest_flow["nodes"][-1]["agentRole"] == "knowledge_steward"
+
 
 def test_knowledge_collection_completion_background_failure_logs_child_payload(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
@@ -6906,6 +6994,15 @@ def test_knowledge_collection_completion_background_failure_logs_child_payload(t
     assert child_payload["sourceRunId"] == "source-run-failed"
     assert child_payload["steps"][-1]["stageId"] == "candidate_extraction"
     assert child_payload["steps"][-1]["errorType"] == "TeamWorkflowOrchestrationError"
+
+    status = team_workflow_orchestration_service.get_knowledge_ingestion_status(team["teamId"])
+    failed_flow = status["latestWorkRun"]["flowVisualization"]
+    failed_nodes = {node["stageId"]: node for node in failed_flow["nodes"]}
+    assert failed_flow["status"] == "failed"
+    assert failed_nodes["collection"]["status"] == "completed"
+    assert failed_nodes["candidate"]["status"] == "failed"
+    assert failed_nodes["candidate"]["errorType"] == "TeamWorkflowOrchestrationError"
+    assert "Source extraction failed" in failed_flow["error"]
 
 
 def test_knowledge_collection_completion_runs_search_extract_before_ingestion(tmp_path, monkeypatch):
