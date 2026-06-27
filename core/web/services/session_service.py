@@ -175,6 +175,8 @@ _SESSION_UI_CAPTURE_CONTEXT: ContextVar[dict[str, Any]] = ContextVar(
 _SESSION_LIST_CACHE_LOCK = threading.Lock()
 _SESSION_LIST_CACHE_CONDITION = threading.Condition(_SESSION_LIST_CACHE_LOCK)
 _SESSION_LIST_CACHE_TTL_SECONDS = 4.0
+_SESSION_LIST_INFLIGHT_STALE_SECONDS = 2.0
+_SESSION_LIST_INFLIGHT_WAIT_SECONDS = 0.2
 _SESSION_LIST_CACHE: dict[str, Any] = {}
 _SESSION_CONVERSATION_EVENTS_CACHE_LOCK = threading.Lock()
 _SESSION_CONVERSATION_EVENTS_CACHE_MAX_ENTRIES = 64
@@ -365,9 +367,25 @@ def _begin_session_list_cache_build(
             return cached, False, waited_for_inflight
         while _SESSION_LIST_CACHE.get("inflight_signature") == signature:
             waited_for_inflight = True
-            _SESSION_LIST_CACHE_CONDITION.wait(timeout=10.0)
+            inflight_started_at = _SESSION_LIST_CACHE.get("inflight_started_at")
+            try:
+                inflight_age_seconds = now - float(inflight_started_at)
+            except (TypeError, ValueError):
+                inflight_age_seconds = _SESSION_LIST_INFLIGHT_STALE_SECONDS
+            if inflight_age_seconds >= _SESSION_LIST_INFLIGHT_STALE_SECONDS:
+                _SESSION_LIST_CACHE.pop("inflight_signature", None)
+                _SESSION_LIST_CACHE.pop("inflight_started_at", None)
+                break
+            remaining_stale_seconds = max(
+                _SESSION_LIST_INFLIGHT_STALE_SECONDS - inflight_age_seconds,
+                0.0,
+            )
+            _SESSION_LIST_CACHE_CONDITION.wait(
+                timeout=min(_SESSION_LIST_INFLIGHT_WAIT_SECONDS, remaining_stale_seconds)
+            )
+            now = _perf_counter()
             cached = _get_session_list_cache_locked(
-                now=_perf_counter(),
+                now=now,
                 signature=signature,
                 allow_stale_matching_signature=allow_stale_matching_signature,
             )
@@ -376,6 +394,7 @@ def _begin_session_list_cache_build(
             if _SESSION_LIST_CACHE.get("inflight_signature") != signature:
                 break
         _SESSION_LIST_CACHE["inflight_signature"] = signature
+        _SESSION_LIST_CACHE["inflight_started_at"] = now
         return None, True, waited_for_inflight
 
 
@@ -388,7 +407,18 @@ def _finish_session_list_cache_build(
     agent_count: int = 0,
 ) -> None:
     with _SESSION_LIST_CACHE_CONDITION:
+        owns_inflight = _SESSION_LIST_CACHE.get("inflight_signature") == signature
+        if started_at is not None:
+            try:
+                owns_inflight = owns_inflight and (
+                    float(_SESSION_LIST_CACHE.get("inflight_started_at")) == float(started_at)
+                )
+            except (TypeError, ValueError):
+                owns_inflight = False
         if sessions is not None and started_at is not None:
+            if not owns_inflight:
+                _SESSION_LIST_CACHE_CONDITION.notify_all()
+                return
             _SESSION_LIST_CACHE.clear()
             _SESSION_LIST_CACHE.update(
                 {
@@ -400,7 +430,9 @@ def _finish_session_list_cache_build(
                 }
             )
         elif _SESSION_LIST_CACHE.get("inflight_signature") == signature:
-            _SESSION_LIST_CACHE.pop("inflight_signature", None)
+            if started_at is None or owns_inflight:
+                _SESSION_LIST_CACHE.pop("inflight_signature", None)
+                _SESSION_LIST_CACHE.pop("inflight_started_at", None)
         _SESSION_LIST_CACHE_CONDITION.notify_all()
 
 
@@ -2775,7 +2807,7 @@ def list_sessions(*, include_hidden_internal: bool = False) -> list[dict]:
         )
         return sessions
     except Exception:
-        _finish_session_list_cache_build(signature=signature)
+        _finish_session_list_cache_build(signature=signature, started_at=started_at)
         raise
 
 
