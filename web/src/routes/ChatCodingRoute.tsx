@@ -3476,7 +3476,7 @@ export function ChatCodingRoute() {
       return;
     }
     let pendingDetail: SessionDetail | null = null;
-    let applyTimer: ReturnType<typeof window.setTimeout> | null = null;
+    let applyTimer: number | null = null;
     let lastAppliedAt = 0;
     let committedAssistantDeltaLayer: ConversationMessage | undefined = activeTurnLayersBySessionRef.current[streamSessionId];
     let pendingAssistantDeltaPayloads: Array<{
