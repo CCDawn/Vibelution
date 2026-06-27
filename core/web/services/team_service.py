@@ -50,12 +50,14 @@ _TEAM_SYSTEM_BOOTSTRAP_STATE: dict[str, Any] = {
     "lastError": "",
     "elapsedMs": 0,
     "attempt": 0,
+    "checkedAtMonotonic": 0.0,
 }
 _TEAM_DETAIL_LOG_LOCK = threading.Lock()
 _TEAM_DETAIL_LOG_STATE: dict[str, dict[str, Any]] = {}
 TEAM_DETAIL_LOG_SLOW_THRESHOLD_MS = 250
 TEAM_DETAIL_LOG_ROLLUP_REPEAT_THRESHOLD = 5
 TEAM_DETAIL_LOG_ROLLUP_WINDOW_SECONDS = 5.0
+TEAM_SYSTEM_BOOTSTRAP_READY_CACHE_TTL_SECONDS = 30.0
 _SAFE_ID_FRAGMENT = re.compile(r"[^A-Za-z0-9_.-]+")
 AI_SEARCH_SOURCE_PAGE_TIMEOUT_SECONDS = 8.0
 AI_SEARCH_SOURCE_PAGE_MAX_BYTES = 400_000
@@ -1042,9 +1044,20 @@ def request_system_team_bootstrap(*, reason: str = "team_list") -> dict[str, Any
 
     global _TEAM_SYSTEM_BOOTSTRAP_THREAD
     normalized_reason = _safe_token(reason or "team_list", default="team_list", max_length=80)
+    now = _perf_counter()
     with _TEAM_SYSTEM_BOOTSTRAP_LOCK:
         if _TEAM_SYSTEM_BOOTSTRAP_THREAD and _TEAM_SYSTEM_BOOTSTRAP_THREAD.is_alive():
             return _system_team_bootstrap_state_snapshot_locked()
+        if (
+            str(_TEAM_SYSTEM_BOOTSTRAP_STATE.get("status") or "") == "ready"
+            and not list(_TEAM_SYSTEM_BOOTSTRAP_STATE.get("requiredSteps") or [])
+        ):
+            try:
+                checked_at = float(_TEAM_SYSTEM_BOOTSTRAP_STATE.get("checkedAtMonotonic") or 0.0)
+            except (TypeError, ValueError):
+                checked_at = 0.0
+            if checked_at > 0 and now - checked_at <= TEAM_SYSTEM_BOOTSTRAP_READY_CACHE_TTL_SECONDS:
+                return _system_team_bootstrap_state_snapshot_locked()
     team_lock_acquired = _try_acquire_team_lock()
     if not team_lock_acquired:
         with _TEAM_SYSTEM_BOOTSTRAP_LOCK:
@@ -1098,6 +1111,7 @@ def request_system_team_bootstrap(*, reason: str = "team_list") -> dict[str, Any
                     "finishedAt": utc_now_iso(),
                     "lastError": "",
                     "elapsedMs": 0,
+                    "checkedAtMonotonic": now,
                 }
             )
             return _system_team_bootstrap_state_snapshot_locked()
@@ -1191,6 +1205,7 @@ def _run_system_team_bootstrap(request_id: str, required_steps: list[str], reaso
                     "lastError": "",
                     "elapsedMs": elapsed_ms,
                     "requestId": request_id,
+                    "checkedAtMonotonic": _perf_counter() if status == "ready" else 0.0,
                 }
             )
         _record_system_team_bootstrap_event(

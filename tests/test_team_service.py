@@ -1326,6 +1326,25 @@ def test_system_team_bootstrap_request_defers_when_team_lock_is_busy(tmp_path, m
     assert payload["lastError"] == "team_lock_busy"
 
 
+def test_system_team_bootstrap_ready_snapshot_skips_repeated_missing_checks(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _seed_system_team_bootstrap_ready()
+    monkeypatch.setattr(team_service, "_perf_counter", lambda: 100.0)
+    first = team_service.request_system_team_bootstrap(reason="team_list")
+
+    monkeypatch.setattr(team_service, "_perf_counter", lambda: 101.0)
+    monkeypatch.setattr(
+        team_service,
+        "evolution_system_teams_missing",
+        lambda: (_ for _ in ()).throw(AssertionError("ready bootstrap cache should skip repeated checks")),
+    )
+
+    second = team_service.request_system_team_bootstrap(reason="team_list")
+
+    assert first["status"] == "ready"
+    assert second["status"] == "ready"
+
+
 def test_compact_team_list_does_not_hydrate_agents_for_active_teams(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     alpha = agent_directory_service.create_agent_instance(display_name="Alpha", direct_session_id="session-alpha")
