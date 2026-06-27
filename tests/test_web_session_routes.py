@@ -572,6 +572,158 @@ def test_session_repair_direct_agent_without_index_kind_is_invalid_and_listed(tm
     assert detail["hiddenFromIndex"] is False
 
 
+def test_repair_conversation_index_records_migrates_legacy_direct_agent_sessions(tmp_path, monkeypatch):
+    _seed_chat_state(
+        tmp_path,
+        conversations=[
+            {
+                "conversation_id": "session-team-private",
+                "title": "挑战杯资料发现",
+                "agent_id": "agent-team-private",
+                "agentId": "agent-team-private",
+                "session_kind": "main",
+                "updated_at": "2026-05-18T12:00:00",
+                "conversation_index_kind": "invalid",
+                "conversationIndexKind": "invalid",
+                "messages": [],
+            },
+            {
+                "conversation_id": "session-repaired",
+                "title": "真实会话",
+                "agent_id": "agent-repaired",
+                "agentId": "agent-repaired",
+                "session_kind": "main",
+                "updated_at": "2026-05-18T12:00:00",
+                "messages": [],
+            },
+        ],
+    )
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(team_service, "PROJECT_ROOT", tmp_path)
+    agent_directory_service.save_state(
+        {
+            "agents": [
+                {
+                    "agentId": "agent-team-private",
+                    "agentCode": "A001",
+                    "displayName": "挑战杯资料发现",
+                    "status": "active",
+                    "directSessionId": "session-team-private",
+                    "primaryMode": "research",
+                    "roleKey": "challenge_cup_data_discovery",
+                    "promptTemplateId": "prompt-chat-default",
+                    "createdBy": "challenge_cup_team",
+                    "metadata": {
+                        "conversationIndexVisibility": (
+                            agent_directory_service.CONVERSATION_INDEX_VISIBILITY_TEAM_PRIVATE
+                        ),
+                        "challengeCupTeamId": "research-team",
+                        "challengeCupTeamRole": "data_discovery",
+                        "directSessionVisibility": "active_session",
+                    },
+                },
+                {
+                    "agentId": "agent-repaired",
+                    "agentCode": "A002",
+                    "displayName": "周南栀",
+                    "status": "active",
+                    "directSessionId": "session-repaired",
+                    "primaryMode": "chat",
+                    "roleKey": "",
+                    "promptTemplateId": "prompt-chat-default",
+                    "createdBy": "session_repair",
+                    "metadata": {"directSessionVisibility": "active_session"},
+                },
+                {
+                    "agentId": "agent-internal",
+                    "agentCode": "A003",
+                    "displayName": "内部恢复 Agent",
+                    "status": "active",
+                    "directSessionId": "session-internal",
+                    "primaryMode": "research",
+                    "roleKey": "research_organization_advisor",
+                    "promptTemplateId": "prompt-chat-default",
+                    "createdBy": "research_organization",
+                    "metadata": {},
+                },
+            ]
+        }
+    )
+    team_service._save_index(
+        {
+            "schemaVersion": team_service.SCHEMA_VERSION,
+            "updatedAt": "2026-05-18T12:00:00Z",
+            "teams": [
+                {
+                    "teamId": "research-team",
+                    "name": "挑战杯ai科研团队",
+                    "status": "active",
+                    "teamKind": "research",
+                    "teamSource": "research_organization",
+                    "members": [{"agentId": "agent-team-private", "role": "data_discovery"}],
+                    "linkedChatRoomId": "",
+                }
+            ],
+        }
+    )
+    assert {item["id"]: item for item in session_service.list_sessions()}["session-team-private"][
+        "conversationIndexKind"
+    ] == "invalid"
+
+    result = session_service.repair_conversation_index_records()
+
+    assert result["changed"] is True
+    assert result["conversationCount"] == 2
+    assert result["agentCount"] == 3
+    listed = {item["id"]: item for item in session_service.list_sessions()}
+    team_detail = session_service.get_session_detail("session-team-private")
+    assert team_detail["conversationIndexKind"] == (
+        agent_directory_service.CONVERSATION_INDEX_KIND_TEAM_AGENT
+    )
+    assert "session-team-private" not in listed
+    assert listed["session-repaired"]["conversationIndexKind"] == (
+        agent_directory_service.CONVERSATION_INDEX_KIND_PERSONAL_AGENT
+    )
+    assert "session-internal" not in listed
+    payload = load_chat_state(tmp_path)
+    stored_by_id = {item["conversation_id"]: item for item in payload["conversations"]}
+    assert stored_by_id["session-team-private"]["conversationIndexKind"] == (
+        agent_directory_service.CONVERSATION_INDEX_KIND_TEAM_AGENT
+    )
+    assert stored_by_id["session-repaired"]["conversationIndexKind"] == (
+        agent_directory_service.CONVERSATION_INDEX_KIND_PERSONAL_AGENT
+    )
+    stored_agents = {item["agentId"]: item for item in agent_directory_service.load_state()["agents"]}
+    assert stored_agents["agent-team-private"]["metadata"]["conversationIndexKind"] == (
+        agent_directory_service.CONVERSATION_INDEX_KIND_TEAM_AGENT
+    )
+    assert stored_agents["agent-repaired"]["metadata"]["conversationIndexKind"] == (
+        agent_directory_service.CONVERSATION_INDEX_KIND_PERSONAL_AGENT
+    )
+    assert stored_agents["agent-internal"]["metadata"]["conversationIndexKind"] == (
+        agent_directory_service.CONVERSATION_INDEX_KIND_HIDDEN
+    )
+
+
+def test_ensure_agent_for_session_persists_personal_index_kind_for_session_repair(tmp_path, monkeypatch):
+    _seed_chat_state(tmp_path, conversations=[])
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+
+    agent = agent_directory_service.ensure_agent_for_session(
+        "session-new-repair",
+        display_name="恢复会话",
+        created_by="session_repair",
+    )
+
+    assert agent["conversationIndexKind"] == agent_directory_service.CONVERSATION_INDEX_KIND_PERSONAL_AGENT
+    stored = agent_directory_service.get_agent(agent["agentId"])
+    assert stored["metadata"]["conversationIndexKind"] == (
+        agent_directory_service.CONVERSATION_INDEX_KIND_PERSONAL_AGENT
+    )
+
+
 def test_legacy_team_private_agent_direct_session_without_index_kind_is_invalid_and_listed(tmp_path, monkeypatch):
     _seed_chat_state(
         tmp_path,

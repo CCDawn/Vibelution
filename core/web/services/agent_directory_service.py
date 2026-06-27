@@ -950,6 +950,13 @@ def ensure_agent_for_session(
                 normalized_session_id,
                 session_workspace_path=session_workspace_path,
             )
+            metadata_payload = {
+                "legacySessionWorkspacePath": str(session_workspace_path or "").strip(),
+                "directSessionVisibility": session_visibility,
+            }
+            if str(created_by or "").strip() == "session_repair":
+                metadata_payload.setdefault("conversationIndexKind", CONVERSATION_INDEX_KIND_PERSONAL_AGENT)
+                metadata_payload.setdefault("conversationIndexVisibility", CONVERSATION_INDEX_VISIBILITY_USER_VISIBLE)
             created = create_agent_instance(
                 display_name=display_name or normalized_session_id,
                 llm_bindings=normalized_llm_bindings,
@@ -958,10 +965,7 @@ def ensure_agent_for_session(
                 prompt_template_id=prompt_template_id,
                 direct_session_id=normalized_session_id,
                 created_by=created_by,
-                metadata={
-                    "legacySessionWorkspacePath": str(session_workspace_path or "").strip(),
-                    "directSessionVisibility": session_visibility,
-                },
+                metadata=metadata_payload,
             )
             return created
 
@@ -1027,6 +1031,16 @@ def ensure_agent_for_session(
         if policy_changed:
             changed = True
         metadata = dict(agent.get("metadata") or {})
+        creation_spec = metadata.get("creationSpec") if isinstance(metadata.get("creationSpec"), dict) else {}
+        agent_created_by = str(agent.get("createdBy") or creation_spec.get("source") or "").strip()
+        if (
+            agent_created_by == "session_repair"
+            and not str(agent.get("conversationIndexKind") or metadata.get("conversationIndexKind") or "").strip()
+        ):
+            metadata["conversationIndexKind"] = CONVERSATION_INDEX_KIND_PERSONAL_AGENT
+            metadata.setdefault("conversationIndexVisibility", CONVERSATION_INDEX_VISIBILITY_USER_VISIBLE)
+            agent["metadata"] = metadata
+            changed = True
         legacy_path = str(session_workspace_path or "").strip()
         if legacy_path and metadata.get("legacySessionWorkspacePath") != legacy_path:
             metadata["legacySessionWorkspacePath"] = legacy_path
