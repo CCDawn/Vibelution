@@ -37,6 +37,7 @@ import {
   TeamWorkflowCandidateGraphNode,
   TeamWorkflowCoordinationStatus,
   TeamWorkflowKnowledgeCollectionIngestionPayload,
+  TeamWorkflowKnowledgeIngestionWorkRun,
   TeamWorkflowKnowledgeIngestionStatus,
   TeamWorkflowSourceCollectionPromptCachePolicy,
   TeamWorkflowSourceCollectionPromptCachePolicyRef,
@@ -344,6 +345,8 @@ type SourceCollectionStageModule = {
   onDetail: () => void;
 };
 
+type SourceCollectionCompletionFlowNode = NonNullable<TeamWorkflowKnowledgeIngestionWorkRun["flowVisualization"]>["nodes"][number];
+
 type SourceCollectionStageAgentChatStatus = "ready" | "loading" | "error" | "repair";
 
 type SourceCollectionStageCardProjection = {
@@ -434,6 +437,23 @@ function sourceCollectionStageProjectionState(
     return "pending";
   }
   return projection.status === "idle" ? "idle" : fallback;
+}
+
+function sourceCollectionCompletionFlowNodeState(status: string | undefined | null): SourceCollectionStepState {
+  const normalized = String(status || "").trim().toLowerCase();
+  if (normalized === "running" || normalized === "in_progress" || normalized === "active") {
+    return "active";
+  }
+  if (normalized === "completed" || normalized === "done" || normalized === "closed_loop") {
+    return "done";
+  }
+  if (normalized === "failed" || normalized === "blocked" || normalized.includes("failed")) {
+    return "failed";
+  }
+  if (normalized === "pending" || normalized === "pending_review" || normalized === "queued") {
+    return "pending";
+  }
+  return "idle";
 }
 
 function sourceCollectionStageProjectionCount(
@@ -6541,6 +6561,100 @@ export function TeamsRoute({
     );
   }
 
+  function renderKnowledgeCollectionCompletionFlowPanel() {
+    if (!researchWorkflowTeamSelected || !researchCanvasReadOnly) {
+      return null;
+    }
+    const workRun = selectedTeamKnowledgeCollectionWorkRun;
+    const flow = sourceCollectionCompletionFlow;
+    const flowStatus = String(flow?.status || workRun?.status || "queued");
+    const flowError = String(flow?.error || workRun?.error || "");
+    const currentStageId = String(flow?.currentStageId || "");
+    return (
+      <section className={styles.knowledgeCompletionFlowPanel} aria-label={lang === "zh" ? "一键流程图" : "One-click flow graph"}>
+        <div className={styles.knowledgeCompletionFlowHeader}>
+          <div>
+            <strong>{lang === "zh" ? "一键流程图" : "One-click flow graph"}</strong>
+            <span>
+              {workRun
+                ? (workRun.summary || workRun.currentTask || workRun.runId)
+                : (lang === "zh" ? "点击一键完成知识搜集后，这里展示阶段 Agent 的运行状态。" : "After one-click completion starts, stage Agent progress appears here.")}
+            </span>
+          </div>
+          <span className={`${styles.workflowTag} ${workflowIngestionTone(flowStatus)}`}>
+            {workflowIngestionStatusLabel(flowStatus, lang)}
+          </span>
+        </div>
+        {flowError ? (
+          <div className={styles.workflowError}>
+            {flow?.errorType || workRun?.errorType ? `${flow?.errorType || workRun?.errorType}: ` : ""}
+            {flowError}
+          </div>
+        ) : null}
+        <div className={styles.knowledgeCompletionFlowNodes}>
+          {sourceCollectionCompletionFlowNodes.map((rawNode, index) => {
+            const stageId = parseSourceCollectionStageModuleId(String(rawNode.stageId || "")) ?? "collection";
+            const node = { ...rawNode, stageId };
+            const nodeState = sourceCollectionCompletionFlowNodeState(node.status);
+            const binding = sourceCollectionStagePrimaryAgentBinding(stageId);
+            const bindingDisplay = binding?.agent ? agentDisplayInfo(binding.agent, lang) : null;
+            const agentLabel =
+              bindingDisplay?.name
+              || binding?.agentId
+              || sourceCollectionAgentRoleLabel(node.agentRole, lang);
+            const isCurrent = currentStageId === node.stageId || nodeState === "active";
+            return (
+              <article
+                key={`${node.stageId}-${index}`}
+                className={[
+                  styles.knowledgeCompletionFlowNode,
+                  sourceCollectionStepClassName(nodeState),
+                  isCurrent ? styles.knowledgeCompletionFlowNodeCurrent : "",
+                ].filter(Boolean).join(" ")}
+              >
+                <div className={styles.knowledgeCompletionFlowNodeHeader}>
+                  <strong>{String(index + 1).padStart(2, "0")}</strong>
+                  <span>{workflowIngestionStatusLabel(String(node.status || ""), lang)}</span>
+                </div>
+                <div className={styles.knowledgeCompletionFlowNodeBody}>
+                  <b>{node.label || sourceCollectionStageModules.find((module) => module.id === stageId)?.label || stageId}</b>
+                  <small>{lang === "zh" ? `Agent：${agentLabel}` : `Agent: ${agentLabel}`}</small>
+                  <em>
+                    {lang === "zh" ? "输入" : "in"} {Number(node.inputCount || 0)}
+                    {" · "}
+                    {lang === "zh" ? "输出" : "out"} {Number(node.outputCount || 0)}
+                  </em>
+                  {node.detail ? <p>{node.detail}</p> : null}
+                  {node.errorType ? <p className={styles.knowledgeCompletionFlowError}>{node.errorType}</p> : null}
+                </div>
+                <div className={styles.knowledgeCompletionFlowActions}>
+                  <Link to={sourceCollectionStageReturnRoute(stageId)}>
+                    <Link2 size={13} />
+                    {lang === "zh" ? "阶段详情" : "Stage detail"}
+                  </Link>
+                  <button type="button" onClick={() => openSourceCollectionStageAgentChat(node.stageId)}>
+                    <MessageSquare size={13} />
+                    {lang === "zh" ? "Agent 私聊" : "Agent chat"}
+                  </button>
+                  {nodeState === "failed" ? (
+                    <button
+                      type="button"
+                      onClick={runKnowledgeCollectionCompletionAction}
+                      disabled={sourceCollectionCompletionActionDisabled || selectedTeamKnowledgeCollectionIngestPending}
+                    >
+                      <RefreshCw size={13} />
+                      {lang === "zh" ? "重试失败节点" : "Retry failed node"}
+                    </button>
+                  ) : null}
+                </div>
+              </article>
+            );
+          })}
+        </div>
+      </section>
+    );
+  }
+
   function renderAiSearchSourceScopePanel() {
     const scope = selectedTeam?.sourceScope ?? null;
     const latestRunCounts = latestAiSearchRun ? aiSearchRunCounts(latestAiSearchRun) : null;
@@ -10272,6 +10386,10 @@ export function TeamsRoute({
       : null;
   const selectedTeamKnowledgeIngestionActiveWorkRun =
     teamWorkflowKnowledgeIngestionStatusQuery.data?.activeWorkRun ?? null;
+  const selectedTeamKnowledgeIngestionLatestWorkRun =
+    teamWorkflowKnowledgeIngestionStatusQuery.data?.latestWorkRun ?? null;
+  const selectedTeamKnowledgeCollectionWorkRun =
+    selectedTeamKnowledgeIngestionActiveWorkRun ?? selectedTeamKnowledgeIngestionLatestWorkRun ?? null;
   const selectedTeamKnowledgeCollectionIngestPending =
     (runKnowledgeCollectionCompletionMutation.isPending && runKnowledgeCollectionCompletionMutation.variables?.teamId === selectedTeam?.teamId)
     || Boolean(selectedTeamKnowledgeIngestionActiveWorkRun);
@@ -10371,7 +10489,10 @@ export function TeamsRoute({
     "output",
     formalKnowledgeItemCount,
   );
-  const sourceCollectionDefaultKnowledgeBaseId = teamWorkflowKnowledgeIngestionStatus?.knowledgeBases[0]?.knowledgeBaseId ?? "";
+  const sourceCollectionDefaultKnowledgeBaseId =
+    teamWorkflowKnowledgeIngestionStatus?.knowledgeBases[0]?.scopedKnowledgeBaseId
+    ?? teamWorkflowKnowledgeIngestionStatus?.knowledgeBases[0]?.knowledgeBaseId
+    ?? "";
   const sourceCollectionPrecheckCandidateCount = Math.max(sourceCollectionApprovedCount, sourceCollectionRunApprovedCount);
   const sourceCollectionIngestCandidateCount = Math.max(sourceCollectionPrecheckCandidateCount, sourceCollectionDisplayedCandidateCount);
   const sourceCollectionMemoryActionDisabled =
@@ -10569,6 +10690,11 @@ export function TeamsRoute({
     if (sourceCollectionCompletionActionDisabled) {
       return;
     }
+    selectResearchWorkspaceView("canvas");
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.set("team", selectedTeam.teamId);
+    nextParams.set("researchView", "canvas");
+    setSearchParams(nextParams, { replace: false });
     runKnowledgeCollectionCompletionMutation.mutate({
       teamId: selectedTeam.teamId,
       runId: sourceCollectionActionRunId,
@@ -10585,7 +10711,6 @@ export function TeamsRoute({
       maxRecords: Math.max(1, Math.min(1000, Math.max(sourceCollectionRawRecordCount, sourceCollectionDisplayedCandidateCount, 100))),
       forceReview: sourceCollectionPrecheckCandidateCount <= 0 && sourceCollectionDisplayedCandidateCount > 0,
     });
-    openSourceCollectionStage("memory");
   };
   const runSourceCollectionSearchFromHeader = () => {
     if (!selectedTeam?.teamId || !selectedSourceCollectionRunEffectiveId || !canExecuteSourceCollectionSearch) {
@@ -10913,6 +11038,20 @@ export function TeamsRoute({
       onDetail: () => openSourceCollectionStage("memory"),
     },
   ];
+  const sourceCollectionCompletionFlow = selectedTeamKnowledgeCollectionWorkRun?.flowVisualization ?? null;
+  const sourceCollectionCompletionFlowNodes: SourceCollectionCompletionFlowNode[] =
+    sourceCollectionCompletionFlow?.nodes?.length
+      ? sourceCollectionCompletionFlow.nodes
+      : sourceCollectionStageModules.map((module) => ({
+          stageId: module.id,
+          label: module.label,
+          agentRole: SOURCE_COLLECTION_STAGE_AGENT_KEYS[module.id][0] || module.id,
+          status: module.state === "active" ? "running" : module.state === "done" ? "completed" : module.state === "failed" ? "failed" : module.state === "pending" ? "pending" : "queued",
+          inputCount: 0,
+          outputCount: 0,
+          artifactIds: [],
+          detail: module.summary,
+        }));
   const sourceCollectionStageCardKeyDown = (
     event: ReactKeyboardEvent<HTMLElement>,
     onDetail: () => void,
@@ -11271,6 +11410,7 @@ export function TeamsRoute({
               )}
             </div>
           </div>
+          {renderKnowledgeCollectionCompletionFlowPanel()}
           {canvas ? (
             <div className={styles.canvas} ref={canvasFrameRef}>
               <div className={styles.canvasViewport} style={canvasViewportStyle}>
