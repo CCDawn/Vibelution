@@ -109,6 +109,34 @@ describe("Electron window provider state", () => {
     });
   });
 
+  it("reuses an open launcher window and focuses it for public deep links", async () => {
+    const windows: FakeWindow[] = [];
+    const provider = new ElectronWindowProvider(desktopPaths, "http://127.0.0.1:8765/launcher", "http://127.0.0.1:8000", {
+      createLauncherWindow: (url) => {
+        const window = new FakeWindow(7, url, 7070);
+        windows.push(window);
+        return window;
+      },
+      createWorkbenchWindow: (url) => new FakeWindow(42, url, 4242)
+    });
+
+    const first = await provider.openLauncher();
+    const second = await provider.openLauncher();
+
+    expect(windows).toHaveLength(1);
+    expect(windows[0].focusCount).toBe(2);
+    expect(second).toEqual(first);
+    expect(second).toMatchObject({
+      role: "launcher",
+      provider: "electron",
+      open: true,
+      focused: true,
+      windowId: 7,
+      rendererProcessId: 7070,
+      url: "http://127.0.0.1:8765/launcher"
+    });
+  });
+
   it("routes launcher window close through the desktop shell exit guard before the renderer unloads", async () => {
     const closeRequests: string[] = [];
     const launcherWindow = new FakeWindow(7, "http://127.0.0.1:8765/launcher", 7070);
