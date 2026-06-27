@@ -910,7 +910,8 @@ def _bootstrap_launcher(args: argparse.Namespace) -> dict[str, object]:
     after = _read_state()
     backend_pid = int(after.get("launcherBackendPid") or 0)
     port = int(after.get("launcherControlPort") or _launcher_control_port())
-    mode = "attached" if before_pid > 0 and before_pid == backend_pid else "started"
+    mode = _launcher_bootstrap_mode(before_pid=before_pid, backend_pid=backend_pid)
+    ready = _launcher_control_healthy(port)
     return {
         "schemaVersion": 1,
         "workspaceRoot": str(args.workspace or PROJECT_ROOT),
@@ -921,7 +922,7 @@ def _bootstrap_launcher(args: argparse.Namespace) -> dict[str, object]:
         "launcherBackendPid": backend_pid,
         "launcherUrl": _launcher_control_url(port),
         "workbenchUrl": str(after.get("url") or ""),
-        "ready": _launcher_control_healthy(port),
+        "ready": ready,
         "protocolVersion": 1,
         "minDesktopProtocolVersion": 1,
         "maxDesktopProtocolVersion": 1,
@@ -931,6 +932,14 @@ def _bootstrap_launcher(args: argparse.Namespace) -> dict[str, object]:
             "runtime_scene.electron_event",
         ],
     }
+
+
+def _launcher_bootstrap_mode(*, before_pid: int, backend_pid: int) -> str:
+    if backend_pid <= 0:
+        return "attached"
+    if before_pid > 0 and before_pid == backend_pid:
+        return "attached"
+    return "started"
 
 
 def _stop_owned_launcher(args: argparse.Namespace) -> dict[str, object]:
