@@ -466,7 +466,7 @@ function normalizeOperationDisplay(operation: ConversationOperation): Conversati
 
 function normalizeDisplayStatus(status: string) {
   const normalized = String(status || "").trim().toLowerCase();
-  if (["done", "success", "completed", "succeeded", "finished", "ready"].includes(normalized)) {
+  if (["done", "success", "completed", "succeeded", "finished", "ready", "degraded", "observed"].includes(normalized)) {
     return "done";
   }
   if (["error", "failed", "failure", "timeout", "timed_out"].includes(normalized)) {
