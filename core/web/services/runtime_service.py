@@ -1762,14 +1762,17 @@ def _context_compression_summary(runtime_state: dict, context_usage: dict[str, i
             "lastCompressionEventId": ledger_compression.get("lastCompressionEventId") or "",
             "lastCompressionSeq": ledger_compression.get("lastCompressionSeq") or 0,
         }
+    persisted_effective_limit = _positive_int(persisted.get("effectiveTokenLimit"))
+    persisted_context_window = _positive_int(persisted.get("contextWindowLimit"))
+    has_applied_runtime_policy = persisted_effective_limit > 0 or persisted_context_window > 0
     enabled = bool(getattr(cfg, "enabled", True)) if cfg is not None else bool(persisted.get("enabled", True))
     effective_limit = _positive_int(
-        persisted.get("effectiveTokenLimit"),
+        persisted_effective_limit,
         context_usage.get("limit"),
         getattr(cfg, "max_token_limit", 0) if cfg is not None else 0,
     )
     context_window = _positive_int(
-        persisted.get("contextWindowLimit"),
+        persisted_context_window,
         runtime_state.get("context_token_limit"),
         effective_limit,
     )
@@ -1780,8 +1783,15 @@ def _context_compression_summary(runtime_state: dict, context_usage: dict[str, i
     )
     if policy_payload:
         enabled = bool(policy_payload.get("enabled", enabled))
-        effective_limit = _positive_int(policy_payload.get("effectiveTokenLimit"), effective_limit)
-        context_window = _positive_int(policy_payload.get("contextWindowLimit"), context_window, effective_limit)
+        if has_applied_runtime_policy:
+            policy_payload = {
+                **policy_payload,
+                "appliedPolicySource": str(policy_payload.get("source") or "global").strip() or "global",
+                "source": "runtime_state_applied_policy",
+            }
+        else:
+            effective_limit = _positive_int(policy_payload.get("effectiveTokenLimit"), effective_limit)
+            context_window = _positive_int(policy_payload.get("contextWindowLimit"), context_window, effective_limit)
     used = max(0, int(context_usage.get("used") or 0))
     ratio = round(min(1.0, used / effective_limit), 4) if effective_limit > 0 else 0.0
     level = _compression_level_for_ratio(ratio)
@@ -1796,7 +1806,10 @@ def _context_compression_summary(runtime_state: dict, context_usage: dict[str, i
         "enabled": enabled,
         "source": "conversation_ledger" if ledger_compression.get("compressionCount") else "runtime_state",
         "policyMode": str((policy_payload or {}).get("mode") or "inherit").strip() or "inherit",
-        "policySource": str((policy_payload or {}).get("source") or "global").strip() or "global",
+        "policySource": str(
+            (policy_payload or {}).get("source")
+            or ("runtime_state_applied_policy" if has_applied_runtime_policy else "global")
+        ).strip() or "global",
         "policyAgentId": str((policy_payload or {}).get("agentId") or "").strip(),
         "scope": "runtime_prompt_estimate",
         "tokenBasis": "current_context_tokens",
