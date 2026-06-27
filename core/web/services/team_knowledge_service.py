@@ -273,7 +273,7 @@ def list_ingestion_adapters() -> dict[str, Any]:
 
 
 def list_team_knowledge_bases(team_id: str, *, agent_id: str = "", internal: bool = False) -> dict[str, Any]:
-    team = _require_team(team_id)
+    team = _require_team_identity(team_id) if internal else _require_team(team_id)
     owner = _owner_context("team", team["teamId"], team=team)
     bases = []
     for base in _knowledge_bases_for_owner(owner):
@@ -2530,6 +2530,17 @@ def _require_team(team_id: str) -> dict[str, Any]:
         raise TeamKnowledgeNotFoundError("Team not found.") from exc
     except team_service.TeamServiceError as exc:
         raise TeamKnowledgeError(str(exc)) from exc
+
+
+def _require_team_identity(team_id: str) -> dict[str, Any]:
+    _sync_roots()
+    try:
+        normalized_team_id = team_service.assert_team_exists(team_id)
+    except team_service.TeamNotFoundError as exc:
+        raise TeamKnowledgeNotFoundError("Team not found.") from exc
+    except team_service.TeamServiceError as exc:
+        raise TeamKnowledgeError(str(exc)) from exc
+    return {"teamId": normalized_team_id, "name": ""}
 
 
 def _require_agent(agent_id: str) -> dict[str, Any]:
