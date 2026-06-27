@@ -5813,6 +5813,55 @@ export type EvolutionRoleConversationSession = {
   updatedAt?: string;
 };
 
+export type EvolutionClosedLoopRoleSession = EvolutionRoleConversationSession;
+
+export type EvolutionClosedLoopEvidence = {
+  decisionPath: string;
+  policyRecordPath: string;
+  lineageIndexPath: string;
+  proposalPaths: string[];
+  touchedFiles: string[];
+};
+
+export type EvolutionClosedLoopCounts = {
+  roleSessionCount: number;
+  proposalCount: number;
+  touchedFileCount: number;
+  caseEvidenceCount: number;
+};
+
+export type EvolutionClosedLoopNextAction = {
+  kind: string;
+  label: string;
+  description: string;
+  action: string;
+  enabled: boolean;
+};
+
+export type EvolutionClosedLoopRecord = {
+  runId: string;
+  sessionId: string;
+  status: string;
+  currentPhase: string;
+  sourceKind: string;
+  bundleName: string;
+  datasetName: string;
+  datasetLimit: number | null;
+  startedAt: string;
+  updatedAt: string;
+  finishedAt: string;
+  decision: string;
+  reason: string;
+  policyAction: string;
+  policySummary: string;
+  lineageSummary: string;
+  recordStatus: string;
+  roleSessions: Record<string, EvolutionClosedLoopRoleSession>;
+  evidence: EvolutionClosedLoopEvidence;
+  counts: EvolutionClosedLoopCounts;
+  nextAction: EvolutionClosedLoopNextAction;
+};
+
 export type EvolutionCurrentAgentBindingIssue = {
   role?: string;
   agentId?: string;
@@ -5849,6 +5898,7 @@ export type EvolutionActiveRun = {
   currentAgentBinding: EvolutionActiveRunAgentBinding;
   currentCaseIo: EvolutionActiveRunCaseIo | null;
   roleConversationSessions?: Record<string, EvolutionRoleConversationSession>;
+  closedLoopRecord?: EvolutionClosedLoopRecord | null;
   currentTask: string;
   decision: string;
   reason: string;
@@ -6189,6 +6239,7 @@ export type EvolutionWorkspaceSnapshot = {
   workbench: EvolutionWorkbench;
   activeRun: EvolutionActiveRun | null;
   latestRun: EvolutionActiveRun | null;
+  latestClosedLoopRecord: EvolutionClosedLoopRecord | null;
   currentAgentBindings: Record<string, EvolutionActiveRunAgentBinding>;
   currentAgentBindingSource?: string;
   currentAgentBindingStatus?: string;

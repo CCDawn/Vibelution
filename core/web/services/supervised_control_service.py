@@ -77,6 +77,7 @@ _RUN_STREAM_QUEUE_SIZE = 16
 _EVENT_TAIL_LIMIT = 12
 _ACTIVE_RUN_STATUSES = {"queued", "running", "paused", "stopping"}
 _MANAGER_CONTROL_KEY = "runtimeManagerControl"
+_CLOSED_LOOP_ROLES = ("baseline", "candidate", "judge")
 
 
 class SupervisedRunBusyError(RuntimeError):
@@ -2087,8 +2088,244 @@ def _manager_control_is_current(payload: dict[str, Any]) -> bool:
     return owner_pid > 0 and owner_pid == _current_runtime_manager_owner_pid()
 
 
+def _read_closed_loop_json(path_value: Any) -> dict[str, Any]:
+    raw = str(path_value or "").strip()
+    if not raw:
+        return {}
+    path = Path(raw)
+    if not path.is_absolute():
+        path = (PROJECT_ROOT / path).resolve()
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _string_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    items: list[str] = []
+    for item in value:
+        text = str(item or "").strip()
+        if text:
+            items.append(text)
+    return items
+
+
+def _first_text(payload: dict[str, Any], *keys: str) -> str:
+    for key in keys:
+        value = payload.get(key)
+        text = str(value or "").strip()
+        if text:
+            return text
+    return ""
+
+
+def _closed_loop_policy_payload(snapshot: dict[str, Any]) -> dict[str, Any]:
+    direct_policy = snapshot.get("policyAction")
+    if isinstance(direct_policy, dict):
+        policy_payload = dict(direct_policy)
+    else:
+        decision_payload = _read_closed_loop_json(snapshot.get("decisionPath"))
+        policy_value = decision_payload.get("policy_action") or decision_payload.get("policyAction")
+        policy_payload = dict(policy_value) if isinstance(policy_value, dict) else {}
+    policy_record_path = _first_text(policy_payload, "policyRecordPath", "policy_record_path")
+    if policy_record_path:
+        policy_record_payload = _read_closed_loop_json(policy_record_path)
+        if policy_record_payload:
+            policy_payload = {**policy_record_payload, **policy_payload}
+    return policy_payload
+
+
+def _closed_loop_role_sessions(snapshot: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    sessions = snapshot.get("roleConversationSessions")
+    if not isinstance(sessions, dict):
+        return {}
+    role_sessions: dict[str, dict[str, Any]] = {}
+    allowed_keys = {
+        "role",
+        "status",
+        "agentId",
+        "displayName",
+        "roleLabel",
+        "conversationPath",
+        "conversationSessionId",
+        "conversationTurnId",
+        "caseId",
+        "caseIndex",
+        "caseTotal",
+        "scenario",
+        "mode",
+        "latestMessage",
+        "latestOutputKind",
+        "latestOutputLabel",
+        "updatedAt",
+    }
+    for role in _CLOSED_LOOP_ROLES:
+        raw = sessions.get(role)
+        if not isinstance(raw, dict):
+            continue
+        normalized = {key: raw.get(key) for key in allowed_keys if key in raw}
+        normalized["role"] = role
+        normalized["status"] = str(normalized.get("status") or "unknown").strip() or "unknown"
+        role_sessions[role] = normalized
+    return role_sessions
+
+
+def _closed_loop_next_action(
+    *,
+    status: str,
+    decision: str,
+    policy_action: str,
+    action_states: dict[str, Any],
+) -> dict[str, Any]:
+    normalized_status = str(status or "").strip().lower()
+    normalized_decision = str(decision or "").strip().upper()
+    normalized_policy = str(policy_action or normalized_decision).strip().upper()
+    retry_state = action_states.get("retry") if isinstance(action_states.get("retry"), dict) else {}
+    retry_enabled = bool(retry_state.get("enabled"))
+
+    if normalized_status in _ACTIVE_RUN_STATUSES:
+        kind = "watch_current_run"
+        label = "继续观察当前运行"
+        description = "当前监督运行仍在进行，先等待 baseline/candidate/judge 会话收束。"
+        action = ""
+        enabled = False
+    elif normalized_policy in {"HOLD", "OBSERVE"}:
+        kind = "observe"
+        label = "进入审查观察"
+        description = "本轮未自动推进，优先查看 Agent 会话轨迹和策略证据。"
+        action = "retry" if retry_enabled else ""
+        enabled = retry_enabled
+    elif normalized_policy == "PROMOTE":
+        kind = "review_promotion"
+        label = "审查晋升提案"
+        description = "候选表现满足晋升条件，先审查提案与 lineage 证据。"
+        action = "promote"
+        enabled = True
+    elif normalized_policy == "ROLLBACK":
+        kind = "review_rollback"
+        label = "审查回滚证据"
+        description = "策略建议回滚，先核对失败样本和 touched files。"
+        action = "rollback"
+        enabled = True
+    elif normalized_policy == "REJECT":
+        kind = "archive_rejection"
+        label = "归档拒绝记录"
+        description = "候选被拒绝，保留证据用于后续审查和复跑。"
+        action = ""
+        enabled = False
+    elif normalized_decision == "INCONCLUSIVE":
+        kind = "needs_more_evidence"
+        label = "补充样本证据"
+        description = "本轮结论不足，需要重跑失败项或调整评测环境。"
+        action = "retry" if retry_enabled else ""
+        enabled = retry_enabled
+    elif normalized_status in {"failed", "cancelled"}:
+        kind = "recover_run"
+        label = "恢复失败运行"
+        description = "本轮未完成闭环，优先检查失败事件并按需重跑。"
+        action = "retry" if retry_enabled else ""
+        enabled = retry_enabled
+    else:
+        kind = "none"
+        label = "暂无审查动作"
+        description = "还没有可审查的监督闭环记录。"
+        action = ""
+        enabled = False
+    return {
+        "kind": kind,
+        "label": label,
+        "description": description,
+        "action": action,
+        "enabled": enabled,
+    }
+
+
+def build_supervised_closed_loop_record(snapshot: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Project a supervised run into a compact review ledger record."""
+
+    if not isinstance(snapshot, dict):
+        return None
+    run_id = str(snapshot.get("runId") or "").strip()
+    session_id = str(snapshot.get("sessionId") or "").strip()
+    if not run_id and not session_id:
+        return None
+
+    role_sessions = _closed_loop_role_sessions(snapshot)
+    policy_payload = _closed_loop_policy_payload(snapshot)
+    decision_path = str(snapshot.get("decisionPath") or "").strip()
+    policy_record_path = _first_text(policy_payload, "policyRecordPath", "policy_record_path")
+    lineage_index_path = (
+        _first_text(policy_payload, "lineageIndexPath", "lineage_index_path")
+        or str(snapshot.get("lineageIndexPath") or "").strip()
+    )
+    proposal_paths = _string_list(policy_payload.get("proposalPaths") or policy_payload.get("proposal_paths"))
+    touched_files = _string_list(policy_payload.get("touchedFiles") or policy_payload.get("touched_files"))
+    case_evidence = policy_payload.get("caseEvidence") or policy_payload.get("case_evidence")
+    if not isinstance(case_evidence, list):
+        case_evidence = []
+    policy_action = (
+        _first_text(policy_payload, "action", "policyAction", "policy_action")
+        or str(snapshot.get("policyAction") or "").strip()
+    )
+    decision = str(snapshot.get("decision") or "").strip().upper()
+    status = str(snapshot.get("status") or "").strip().lower()
+    action_states = snapshot.get("actionStates") if isinstance(snapshot.get("actionStates"), dict) else {}
+    evidence = {
+        "decisionPath": decision_path,
+        "policyRecordPath": policy_record_path,
+        "lineageIndexPath": lineage_index_path,
+        "proposalPaths": proposal_paths,
+        "touchedFiles": touched_files,
+    }
+    if status in _ACTIVE_RUN_STATUSES:
+        record_status = "active"
+    elif decision or decision_path or policy_action:
+        record_status = "ready_for_review"
+    elif status in {"done", "failed", "cancelled"}:
+        record_status = "incomplete"
+    else:
+        record_status = "empty"
+    return {
+        "runId": run_id,
+        "sessionId": session_id,
+        "status": status,
+        "currentPhase": str(snapshot.get("currentPhase") or "").strip(),
+        "sourceKind": str(snapshot.get("sourceKind") or "").strip(),
+        "bundleName": str(snapshot.get("bundleName") or "").strip(),
+        "datasetName": str(snapshot.get("datasetName") or "").strip(),
+        "datasetLimit": snapshot.get("datasetLimit"),
+        "startedAt": str(snapshot.get("startedAt") or "").strip(),
+        "updatedAt": str(snapshot.get("updatedAt") or "").strip(),
+        "finishedAt": str(snapshot.get("finishedAt") or "").strip(),
+        "decision": decision,
+        "reason": str(snapshot.get("reason") or "").strip(),
+        "policyAction": policy_action,
+        "policySummary": _first_text(policy_payload, "summary"),
+        "lineageSummary": str(snapshot.get("lineageSummary") or "").strip(),
+        "recordStatus": record_status,
+        "roleSessions": role_sessions,
+        "evidence": evidence,
+        "counts": {
+            "roleSessionCount": len(role_sessions),
+            "proposalCount": len(proposal_paths),
+            "touchedFileCount": len(touched_files),
+            "caseEvidenceCount": len(case_evidence),
+        },
+        "nextAction": _closed_loop_next_action(
+            status=status,
+            decision=decision,
+            policy_action=policy_action,
+            action_states=action_states,
+        ),
+    }
+
+
 def _decorate_supervised_snapshot(payload: dict[str, Any]) -> dict[str, Any]:
     payload["actionStates"] = _supervised_action_states(payload, lang=get_web_language())
+    payload["closedLoopRecord"] = build_supervised_closed_loop_record(payload)
     return payload
 
 

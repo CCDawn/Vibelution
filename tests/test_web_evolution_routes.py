@@ -463,6 +463,7 @@ def test_evolution_workspace_snapshot_combines_dashboard_payloads(tmp_path, monk
     assert "bundles" in payload["workbench"]
     assert payload["activeRun"] is None
     assert payload["latestRun"] is None
+    assert payload["latestClosedLoopRecord"] is None
     assert payload["currentAgentBindings"] == {}
     assert payload["currentAgentBindingSource"] == "current_agent_config"
     assert payload["currentAgentBindingStatus"] == "error"
@@ -527,6 +528,7 @@ def test_evolution_workspace_snapshot_keeps_current_agent_bindings_separate_from
     assert response.status_code == 200
     payload = response.json()
     assert payload["latestRun"]["agentBindings"]["baseline"]["dialogueModelId"] == "xiaomi_mimo_v2_5_pro_token_plan"
+    assert payload["latestClosedLoopRecord"]["runId"] == "old-run"
     assert payload["currentAgentBindings"]["baseline"]["agentId"] == "agent-current"
     assert payload["currentAgentBindings"]["baseline"]["dialogueModelId"] == "mimo_v2_5"
     assert payload["currentAgentBindingStatus"] == "ready"
@@ -574,6 +576,7 @@ def test_evolution_workspace_snapshot_reuses_supervised_dashboard_scan(monkeypat
     payload = response.json()
     assert payload["activeRun"]["runId"] == "active-1"
     assert payload["latestRun"]["runId"] == "active-1"
+    assert payload["latestClosedLoopRecord"]["runId"] == "active-1"
     assert calls == ["dashboard", "active"]
 
 def test_evolution_workspace_snapshot_can_include_full_self_payload(monkeypatch):
