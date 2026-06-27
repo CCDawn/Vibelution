@@ -34,6 +34,7 @@ import { useAppI18n } from "../../i18n/useAppI18n";
 import { shouldSubmitComposerOnKeydown } from "./composerShortcuts";
 import { COMPOSER_SESSION_REFERENCE_MIME } from "./conversationConstants";
 import { mergeConversationFeedbackEvents } from "./conversationFeedbackEvents";
+import { projectConversationProcessMessages } from "./conversationProcessProjection";
 import {
   buildConversationOperationGroups,
   buildConversationReActOperationGroups,
@@ -1049,7 +1050,7 @@ export function ConversationView({
   );
   const activeTimelineMessages = useMemo(() => {
     if (!activeTurnMessage) {
-      return timelineMessages;
+      return projectConversationProcessMessages(timelineMessages);
     }
     let mergedActiveTurnMessage = activeTurnMessage;
     const dedupedTimelineMessages = timelineMessages.filter((message) => {
@@ -1059,7 +1060,7 @@ export function ConversationView({
       }
       return true;
     });
-    return [...dedupedTimelineMessages, mergedActiveTurnMessage];
+    return projectConversationProcessMessages([...dedupedTimelineMessages, mergedActiveTurnMessage]);
   }, [activeTurnMessage, timelineMessages]);
   const streamingTimelineMessages = useMemo(
     () => activeTimelineMessages.filter((message) => message.streaming),
