@@ -20,11 +20,11 @@ from core.web.services.session_service import (
     delete_chat_session_lightweight,
     edit_and_resubmit_session_message,
     get_session_detail,
-    get_session_stream_initial_state,
     list_child_sessions,
     list_sessions,
     query_sessions,
     request_stop_session_turn,
+    resolve_session_stream_initial_payload,
     resolve_session_image_artifact,
     select_chat_session,
     store_session_user_image_attachment,
@@ -254,13 +254,10 @@ def session_delete(session_id: str, request: Request) -> dict:
 
 @router.get("/sessions/{session_id}/events")
 def session_events(session_id: str, initial: str = Query("light")) -> StreamingResponse:
-    initial_mode = str(initial or "light").strip().lower()
-    if initial_mode not in {"light", "full", "none"}:
-        initial_mode = "light"
-    detail = get_session_detail(session_id) if initial_mode == "full" else None
-    initial_state = get_session_stream_initial_state(session_id) if initial_mode != "full" else None
-    if detail is None and initial_state is None:
-        raise HTTPException(status_code=404, detail="Session not found")
+    try:
+        initial_mode, detail, initial_state = resolve_session_stream_initial_payload(session_id, initial)
+    except SessionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Session not found") from exc
     return StreamingResponse(
         stream_session_events(
             session_id,
