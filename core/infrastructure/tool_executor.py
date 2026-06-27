@@ -337,6 +337,24 @@ def _classify_tool_semantic_result(tool_name: str, result: Any) -> dict[str, Any
                 "toolResultError": str(payload.get("error") or "").strip()[:120],
             },
         }
+    if payload_status in {"degraded", "partial"}:
+        failure_class = str(
+            payload.get("failureClass")
+            or payload.get("failure_class")
+            or ("partial_result" if payload_status == "partial" else "degraded_result")
+        ).strip()
+        return {
+            "eventCode": "tool.execute.degraded",
+            "level": "warning",
+            "outcome": "degraded",
+            "lifecycle": True,
+            "fields": {
+                **fields,
+                "semanticStatus": "degraded",
+                "toolResultStatus": payload_status,
+                "failureClass": failure_class,
+            },
+        }
     if text.startswith(("[错误]", "[超时]", "[短路]")):
         return {
             "eventCode": "tool.execute.failed",

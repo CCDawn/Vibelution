@@ -118,6 +118,11 @@ def extract_tool_result_semantics(result: Any) -> dict[str, Any]:
         status = _normalize_text_payload(str(payload.get("status") or "")).lower()
         if status:
             semantics["semanticStatus"] = status
+        failure_class = _normalize_text_payload(
+            str(payload.get("failureClass") or payload.get("failure_class") or "")
+        )
+        if failure_class:
+            semantics["failureClass"] = failure_class
         for key in ("exitCode", "exit_code", "returncode", "return_code"):
             if key in payload:
                 try:
