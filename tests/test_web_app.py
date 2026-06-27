@@ -1370,6 +1370,51 @@ def test_session_events_stream_initial_lightweight_payload_avoids_full_detail(tm
     assert payload["latestMessage"]["contentLength"] >= 0
 
 
+def test_session_stream_initial_payload_helper_normalizes_route_default(tmp_path, monkeypatch):
+    _seed_chat_state(tmp_path, task_status="running")
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+
+    mode, detail, initial_state = session_service.resolve_session_stream_initial_payload(
+        "session-live",
+        "invalid-mode",
+    )
+
+    assert mode == "light"
+    assert detail is None
+    assert initial_state is not None
+    assert initial_state["type"] == "session_initial"
+    assert initial_state["sessionId"] == "session-live"
+
+
+def test_session_stream_initial_payload_helper_keeps_none_as_no_initial_event(tmp_path, monkeypatch):
+    _seed_chat_state(tmp_path, task_status="running")
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+
+    mode, detail, initial_state = session_service.resolve_session_stream_initial_payload("session-live", "none")
+
+    assert mode == "none"
+    assert detail is None
+    assert initial_state is not None
+    assert initial_state["type"] == "session_initial"
+
+
+def test_web_app_entrypoint_uses_extracted_app_chain_helpers():
+    from core.web import app as web_app
+    from core.web.lifecycle import web_workbench_lifespan
+    from core.web.middleware.runtime_scene_api import RuntimeSceneApiEventMiddleware
+    from core.web.router_registry import register_web_routers
+    from core.web.static_spa import web_index_response
+
+    app = create_app()
+    middleware_classes = [item.cls for item in app.user_middleware]
+
+    assert RuntimeSceneApiEventMiddleware in middleware_classes
+    assert web_app.web_workbench_lifespan is web_workbench_lifespan
+    assert web_app.register_web_routers is register_web_routers
+    assert web_app.web_index_response is web_index_response
+    assert web_app.app.title == "Vibelution Web Workbench"
+
+
 def test_session_detail_snapshot_publish_records_perf_event(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path, task_status="done")
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
