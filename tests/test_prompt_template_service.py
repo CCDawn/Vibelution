@@ -88,6 +88,11 @@ def test_prompt_template_registry_repairs_research_defaults(tmp_path, monkeypatc
     extraction_detail = prompt_template_service.get_prompt_template("prompt-challenge-cup-content-extraction")
     assert extraction_detail is not None
     assert "不直接写正式 Team Knowledge" in extraction_detail["content"]
+    assert "candidate_offset" in extraction_detail["content"]
+    assert "candidate_limit" in extraction_detail["content"]
+    assert "context_mode=compact" in extraction_detail["content"]
+    assert "candidateExtractions" in extraction_detail["content"]
+    assert "不要推断截断或隐藏候选" in extraction_detail["content"]
     knowledge_source_intake = prompt_template_service.get_prompt_template("prompt-knowledge-expansion-source-intake")
     assert knowledge_source_intake is not None
     assert knowledge_source_intake["metadata"]["roleKey"] == "knowledge_expansion_source_intake"

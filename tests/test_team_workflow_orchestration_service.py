@@ -2912,6 +2912,74 @@ def test_source_collection_context_reports_actual_candidate_page(tmp_path, monke
     assert all(item["qualityBucket"] == "pending" for item in context["candidates"])
 
 
+def test_source_collection_context_compact_candidate_paging_stays_model_visible(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
+    agent = agent_directory_service.create_agent_instance(display_name="资料提炼")
+    session_service.ensure_agent_direct_session(agent_id=agent["agentId"], title="资料提炼")
+    team = team_service.create_team(
+        name="挑战杯科研团队",
+        members=[{"agentId": agent["agentId"], "role": "content_extraction", "agentName": "资料提炼"}],
+    )
+    run_response = team_workflow_orchestration_service.start_source_collection_run(
+        team["teamId"],
+        {
+            "topic": "预测编码皮层层级",
+            "agentRoles": ["content_extraction"],
+            "agentIds": {"content_extraction": agent["agentId"]},
+            "querySeeds": ["predictive coding cortical hierarchy"],
+            "promptCachePolicy": {"requirement": "disabled"},
+        },
+    )
+    run_id = run_response["run"]["runId"]
+    candidate_ids = []
+    for index in range(15):
+        candidate = team_workflow_orchestration_service.register_candidate_source(
+            team["teamId"],
+            {
+                "title": f"Predictive coding candidate {index}",
+                "sourceUrl": f"https://doi.org/10.0000/compact-page-{index}",
+                "sourceKind": "paper",
+                "summary": "Neural predictive coding evidence for model-visible compact context. " * 4,
+                "allowedForAnalysis": True,
+                "metadata": {"sourceCollectionRunId": run_id, "doi": f"10.0000/compact-page-{index}"},
+                "createdByAgent": "content-extraction-agent",
+            },
+        )["candidate"]
+        candidate_ids.append(candidate["candidateId"])
+    monkeypatch.setattr(
+        session_service,
+        "submit_session_message",
+        lambda session_id, content, **kwargs: {"accepted": True, "sessionId": session_id, "turnId": "turn-compact-context", "status": "running"},
+    )
+    task = team_workflow_orchestration_service.start_source_collection_stage_session_task(
+        team["teamId"],
+        run_id,
+        {"stageId": "candidate", "agentId": agent["agentId"], "agentRole": "content_extraction"},
+    )
+
+    pages = [
+        team_workflow_orchestration_service.get_source_collection_stage_task_context(
+            team["teamId"],
+            task_id=task["taskId"],
+            max_records=1,
+            candidate_offset=offset,
+            candidate_limit=5,
+            context_mode="compact",
+        )
+        for offset in (0, 5, 10)
+    ]
+
+    paged_candidate_ids = [item["candidateId"] for page in pages for item in page["candidates"]]
+    assert paged_candidate_ids == candidate_ids
+    assert pages[0]["contextMode"] == "compact"
+    assert pages[0]["candidatePage"]["hasMore"] is True
+    assert pages[0]["candidatePage"]["nextOffset"] == 5
+    assert "candidate_offset=5" in pages[0]["usage"]["continuationHint"]
+    assert pages[2]["candidatePage"]["hasMore"] is False
+    assert len(json.dumps(pages[0], ensure_ascii=False)) < 4000
+
+
 def test_source_quality_stage_writeback_materializes_candidate_decisions(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)
@@ -3034,6 +3102,185 @@ def test_source_quality_stage_writeback_materializes_candidate_decisions(tmp_pat
     assert screening_projection["status"] == "closed_loop"
     assert screening_projection["counts"]["artifact"] == 3
     assert screening_projection["counts"]["pending"] == 0
+
+
+def test_content_extraction_writeback_requires_candidate_coverage_and_materializes_extractions(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
+    agent = agent_directory_service.create_agent_instance(display_name="资料提炼")
+    session_service.ensure_agent_direct_session(agent_id=agent["agentId"], title="资料提炼")
+    team = team_service.create_team(
+        name="挑战杯科研团队",
+        members=[{"agentId": agent["agentId"], "role": "content_extraction", "agentName": "资料提炼"}],
+    )
+    run_response = team_workflow_orchestration_service.start_source_collection_run(
+        team["teamId"],
+        {
+            "topic": "神经预测编码资料提炼",
+            "agentRoles": ["content_extraction"],
+            "agentIds": {"content_extraction": agent["agentId"]},
+            "querySeeds": ["predictive coding neural algorithm"],
+            "promptCachePolicy": {"requirement": "disabled"},
+        },
+    )
+    run_id = run_response["run"]["runId"]
+    candidates = [
+        team_workflow_orchestration_service.register_candidate_source(
+            team["teamId"],
+            {
+                "title": f"Predictive coding extraction candidate {index}",
+                "sourceUrl": f"https://doi.org/10.0000/extraction-coverage-{index}",
+                "sourceKind": "paper",
+                "summary": "Predictive coding evidence for content extraction coverage.",
+                "allowedForAnalysis": True,
+                "metadata": {"sourceCollectionRunId": run_id, "doi": f"10.0000/extraction-coverage-{index}"},
+                "createdByAgent": "content-extraction-agent",
+            },
+        )["candidate"]
+        for index in range(3)
+    ]
+    monkeypatch.setattr(
+        session_service,
+        "submit_session_message",
+        lambda session_id, content, **kwargs: {"accepted": True, "sessionId": session_id, "turnId": "turn-content-extraction", "status": "running"},
+    )
+    task = team_workflow_orchestration_service.start_source_collection_stage_session_task(
+        team["teamId"],
+        run_id,
+        {"stageId": "candidate", "agentId": agent["agentId"], "agentRole": "content_extraction"},
+    )
+
+    partial = team_workflow_orchestration_service.writeback_source_collection_stage_session_task(
+        team["teamId"],
+        task["taskId"],
+        {
+            "status": "completed",
+            "summary": "只提炼了 1 条，但错误声明完成。",
+            "result": {
+                "candidateExtractions": [
+                    {
+                        "candidateId": candidates[0]["candidateId"],
+                        "status": "extracted",
+                        "summary": "预测编码皮层层级可启发神经网络结构。",
+                        "evidenceRefs": [{"type": "doi", "id": "10.0000/extraction-coverage-0"}],
+                    },
+                    {
+                        "candidateId": "remaining_2_candidates",
+                        "status": "extracted",
+                        "summary": "这是伪造聚合 ID，不能计入覆盖。",
+                    },
+                ]
+            },
+            "recordedByAgent": agent["agentId"],
+        },
+    )
+
+    assert partial["writeback"]["status"] == "needs_review"
+    assert partial["task"]["status"] == "needs_review"
+    assert partial["writeback"]["coverageSummary"]["total"] == 3
+    assert partial["writeback"]["coverageSummary"]["processed"] == 1
+    assert partial["writeback"]["coverageSummary"]["missing"] == 2
+    assert partial["writeback"]["coverageSummary"]["invalid"] == 1
+    assert partial["writeback"]["invalidCandidateIds"] == ["remaining_2_candidates"]
+    refreshed_candidates = {
+        item["candidateId"]: item
+        for item in team_workflow_orchestration_service.list_candidate_store(team["teamId"], candidate_type="source_manifest")["candidates"]
+    }
+    extraction = refreshed_candidates[candidates[0]["candidateId"]]["metadata"]["contentExtraction"]
+    assert extraction["taskId"] == task["taskId"]
+    assert extraction["summary"] == "预测编码皮层层级可启发神经网络结构。"
+
+    complete = team_workflow_orchestration_service.writeback_source_collection_stage_session_task(
+        team["teamId"],
+        task["taskId"],
+        {
+            "status": "completed",
+            "summary": "完成 3/3 条候选资料提炼。",
+            "result": {
+                "candidateExtractions": [
+                    {"candidateId": item["candidateId"], "status": "extracted", "summary": f"{item['title']} 已提炼。"}
+                    for item in candidates
+                ]
+            },
+            "recordedByAgent": agent["agentId"],
+        },
+    )
+
+    assert complete["writeback"]["status"] == "completed"
+    assert complete["writeback"]["coverageSummary"]["processed"] == 3
+    assert complete["writeback"]["coverageSummary"]["missing"] == 0
+
+
+def test_source_quality_writeback_downgrades_completed_when_candidate_coverage_is_partial(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
+    agent = agent_directory_service.create_agent_instance(display_name="资料审查")
+    session_service.ensure_agent_direct_session(agent_id=agent["agentId"], title="资料审查")
+    team = team_service.create_team(
+        name="挑战杯科研团队",
+        members=[{"agentId": agent["agentId"], "role": "source_quality", "agentName": "资料审查"}],
+    )
+    run_response = team_workflow_orchestration_service.start_source_collection_run(
+        team["teamId"],
+        {
+            "topic": "神经算法资料审查",
+            "agentRoles": ["source_quality"],
+            "agentIds": {"source_quality": agent["agentId"]},
+            "querySeeds": ["predictive coding neural algorithm"],
+            "promptCachePolicy": {"requirement": "disabled"},
+        },
+    )
+    run_id = run_response["run"]["runId"]
+    candidates = [
+        team_workflow_orchestration_service.register_candidate_source(
+            team["teamId"],
+            {
+                "title": f"Predictive coding review candidate {index}",
+                "sourceUrl": f"https://doi.org/10.0000/source-quality-coverage-{index}",
+                "sourceKind": "paper",
+                "summary": "Predictive coding evidence for source quality coverage.",
+                "allowedForAnalysis": True,
+                "metadata": {"sourceCollectionRunId": run_id, "doi": f"10.0000/source-quality-coverage-{index}"},
+                "createdByAgent": "content-extraction-agent",
+            },
+        )["candidate"]
+        for index in range(3)
+    ]
+    monkeypatch.setattr(
+        session_service,
+        "submit_session_message",
+        lambda session_id, content, **kwargs: {"accepted": True, "sessionId": session_id, "turnId": "turn-source-quality-partial", "status": "running"},
+    )
+    task = team_workflow_orchestration_service.start_source_collection_stage_session_task(
+        team["teamId"],
+        run_id,
+        {"stageId": "screening", "agentId": agent["agentId"], "agentRole": "source_quality"},
+    )
+
+    response = team_workflow_orchestration_service.writeback_source_collection_stage_session_task(
+        team["teamId"],
+        task["taskId"],
+        {
+            "status": "completed",
+            "summary": "只审查了 1 条，但错误声明完成。",
+            "result": {
+                "candidateDecisions": [
+                    {"candidateId": candidates[0]["candidateId"], "decision": "pass", "reason": "可追踪。"},
+                    {"candidateId": "fake-candidate-id", "decision": "pass", "reason": "伪造 ID。"},
+                ],
+                "unassessedCandidates": ["remaining_2_candidates"],
+            },
+            "recordedByAgent": agent["agentId"],
+        },
+    )
+
+    assert response["writeback"]["status"] == "needs_review"
+    assert response["task"]["status"] == "needs_review"
+    assert response["writeback"]["coverageSummary"]["total"] == 3
+    assert response["writeback"]["coverageSummary"]["processed"] == 1
+    assert response["writeback"]["coverageSummary"]["missing"] == 2
+    assert response["writeback"]["coverageSummary"]["invalid"] == 1
+    assert response["writeback"]["invalidCandidateIds"] == ["fake-candidate-id"]
 
 
 def test_knowledge_steward_memory_writeback_auto_ingests_approved_candidates(tmp_path, monkeypatch):

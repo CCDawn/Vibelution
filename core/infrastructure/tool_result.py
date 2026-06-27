@@ -284,7 +284,16 @@ def infer_tool_business_success(result: Any) -> bool:
 
 def _infer_result_kind(tool_name: str = "", result_str: str = "") -> str:
     name = (tool_name or "").lower()
-    text = result_str or ""
+    text = _normalize_text_payload(result_str or "")
+    if name == "source_collection_context_tool":
+        return "source_collection_context"
+    if text.startswith("{"):
+        try:
+            parsed = json.loads(text)
+            if isinstance(parsed, dict) and parsed.get("contextKind") == "source_collection_stage_task_context":
+                return "source_collection_context"
+        except Exception:
+            pass
     if name == "read_file_tool" or text.startswith("[文件]"):
         return "file_read"
     if name == "code_symbol_tool" or text.startswith("[AST]"):
@@ -316,6 +325,17 @@ def _extract_continuation_hint(result_kind: str, result_str: str) -> str:
         return "优先继续使用 code_symbol_tool 的 explore/inspect/references/impact/affected_tests 模式做结构化补读。"
     if result_kind == "search":
         return "优先缩小搜索范围，或按命中文件继续读取局部上下文。"
+    if result_kind == "source_collection_context":
+        payload = _try_parse_json_object(result_str)
+        if payload:
+            page = payload.get("candidatePage") if isinstance(payload.get("candidatePage"), dict) else {}
+            if page.get("hasMore"):
+                next_offset = page.get("nextOffset")
+                limit = page.get("limit") or 5
+                return (
+                    "继续调用 source_collection_context_tool，"
+                    f"candidate_offset={next_offset}, candidate_limit={limit}, context_mode=compact。"
+                )
     return ""
 
 
@@ -390,6 +410,78 @@ def _compact_search_result(result_str: str, max_chars: int, continuation_hint: s
     return None
 
 
+def _try_parse_json_object(result_str: str) -> dict[str, Any] | None:
+    try:
+        payload = json.loads(_normalize_text_payload(result_str))
+    except Exception:
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _compact_source_collection_context_result(result_str: str, max_chars: int, continuation_hint: str) -> Optional[str]:
+    payload = _try_parse_json_object(result_str)
+    if not payload:
+        return None
+    page = payload.get("candidatePage") if isinstance(payload.get("candidatePage"), dict) else {}
+    candidates = [
+        item
+        for item in list(payload.get("candidates") or [])
+        if isinstance(item, dict)
+    ]
+    compact_candidates = []
+    for item in candidates[:12]:
+        doi = str(item.get("doi") or "")[:160]
+        source_url = str(item.get("sourceUrl") or "")[:240]
+        source_path = str(item.get("sourcePath") or "")[:240]
+        compact_candidates.append(
+            {
+                "candidateId": str(item.get("candidateId") or item.get("id") or "")[:160],
+                "title": str(item.get("title") or "")[:180],
+                "sourceKind": str(item.get("sourceKind") or "")[:80],
+                "locator": doi or source_url or source_path,
+                "qualityBucket": str(item.get("qualityBucket") or "")[:80],
+                "summary": str(item.get("summary") or "")[:220],
+            }
+        )
+    compact_usage = {
+        "readTool": "source_collection_context_tool",
+        "writebackTool": "source_collection_stage_writeback_tool",
+        "continuationHint": continuation_hint,
+    }
+    if page.get("hasMore") and not continuation_hint:
+        compact_usage["continuationHint"] = (
+            "继续调用 source_collection_context_tool，"
+            f"candidate_offset={page.get('nextOffset')}, candidate_limit={page.get('limit') or 5}, context_mode=compact。"
+        )
+    compact = {
+        "status": payload.get("status"),
+        "contextKind": payload.get("contextKind"),
+        "contextMode": "compact_from_tool_result",
+        "counts": payload.get("counts") if isinstance(payload.get("counts"), dict) else {},
+        "candidatePage": page,
+        "candidateIds": [item.get("candidateId") for item in compact_candidates if item.get("candidateId")],
+        "candidates": compact_candidates,
+        "unassessedCandidateIds": payload.get("unassessedCandidateIds") if isinstance(payload.get("unassessedCandidateIds"), list) else [],
+        "usage": compact_usage,
+        "truncationGuard": {
+            "originalLength": len(result_str),
+            "message": "source_collection_context_tool result was structurally compacted; continue paging with real candidateId values only.",
+        },
+    }
+    content = json.dumps(compact, ensure_ascii=False, sort_keys=True)
+    if len(content) <= max_chars + 500:
+        return content
+    for item in compact_candidates:
+        item["summary"] = str(item.get("summary") or "")[:80]
+        item["title"] = str(item.get("title") or "")[:120]
+    content = json.dumps(compact, ensure_ascii=False, sort_keys=True)
+    if len(content) <= max_chars + 500:
+        return content
+    compact["candidates"] = compact_candidates[:5]
+    compact["candidateIds"] = [item.get("candidateId") for item in compact["candidates"] if item.get("candidateId")]
+    return json.dumps(compact, ensure_ascii=False, sort_keys=True)
+
+
 def package_tool_result(
     result: Any,
     *,
@@ -434,6 +526,8 @@ def package_tool_result(
         compact_content = _compact_file_read(result_str, max_chars, continuation_hint)
     elif result_kind == "search":
         compact_content = _compact_search_result(result_str, max_chars, continuation_hint)
+    elif result_kind == "source_collection_context":
+        compact_content = _compact_source_collection_context_result(result_str, max_chars, continuation_hint)
     if compact_content:
         return ToolResultEnvelope(
             content=compact_content,

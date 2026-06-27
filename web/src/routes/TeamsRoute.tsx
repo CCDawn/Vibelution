@@ -349,6 +349,17 @@ type SourceCollectionCompletionFlowNode = NonNullable<TeamWorkflowKnowledgeInges
 
 type SourceCollectionStageAgentChatStatus = "ready" | "loading" | "error" | "repair";
 
+type SourceCollectionCoverageSummary = {
+  applicable?: boolean;
+  complete?: boolean;
+  total?: number;
+  processed?: number;
+  missing?: number;
+  invalid?: number;
+  blocked?: number;
+  duplicate?: number;
+};
+
 type SourceCollectionStageCardProjection = {
   stageId: SourceCollectionStageModuleId;
   status: string;
@@ -376,7 +387,10 @@ type SourceCollectionStageCardProjection = {
     resultKeys?: string[];
     evidenceRefCount?: number;
     nextActionCount?: number;
+    coverageSummary?: SourceCollectionCoverageSummary;
+    invalidCandidateIds?: string[];
     materializedSources?: Record<string, unknown>;
+    materializedContentExtraction?: Record<string, unknown>;
   };
   resultKeys?: string[];
   nextActions?: string[];
@@ -465,6 +479,26 @@ function sourceCollectionStageProjectionCount(
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
 }
 
+function sourceCollectionCoverageMetric(
+  coverage: SourceCollectionCoverageSummary | null | undefined,
+  lang: "zh" | "en",
+) {
+  if (!coverage?.applicable) {
+    return "";
+  }
+  const total = typeof coverage.total === "number" ? coverage.total : 0;
+  const processed = typeof coverage.processed === "number" ? coverage.processed : 0;
+  const missing = typeof coverage.missing === "number" ? coverage.missing : 0;
+  const invalid = typeof coverage.invalid === "number" ? coverage.invalid : 0;
+  if (!total) {
+    return "";
+  }
+  if (lang === "zh") {
+    return `已处理 ${processed}/${total}${missing > 0 ? ` · 待补读 ${missing}` : ""}${invalid > 0 ? ` · 无效 ID ${invalid}` : ""}`;
+  }
+  return `processed ${processed}/${total}${missing > 0 ? ` · missing ${missing}` : ""}${invalid > 0 ? ` · invalid IDs ${invalid}` : ""}`;
+}
+
 function sourceCollectionStageProjectionTaskMetric(
   projection: SourceCollectionStageCardProjection | null | undefined,
   lang: "zh" | "en",
@@ -483,6 +517,10 @@ function sourceCollectionStageProjectionTaskMetric(
   }
   const evidenceCount = typeof latestTask.evidenceRefCount === "number" ? latestTask.evidenceRefCount : 0;
   const nextActionCount = typeof latestTask.nextActionCount === "number" ? latestTask.nextActionCount : 0;
+  const coverageMetric = sourceCollectionCoverageMetric(latestTask.coverageSummary, lang);
+  if (coverageMetric) {
+    return `${latestTask.status || projection?.agentTaskStatus || (lang === "zh" ? "任务" : "task")} · ${coverageMetric}${historicalTaskCount > 0 ? (lang === "zh" ? ` · 历史 ${historicalTaskCount}` : ` · historical ${historicalTaskCount}`) : ""}`;
+  }
   if (lang === "zh") {
     return `${latestTask.status || projection?.agentTaskStatus || "任务"} · 证据 ${evidenceCount} · 后续 ${nextActionCount}${historicalTaskCount > 0 ? ` · 历史 ${historicalTaskCount}` : ""}`;
   }
@@ -508,9 +546,17 @@ function sourceCollectionStageArtifactSummaryLabel(
     return `${artifact} 条原始资料；${pending} 个搜索任务待执行`;
   }
   if (projection.stageId === "candidate") {
+    const coverage = sourceCollectionCoverageMetric(projection.latestTask?.coverageSummary, lang);
+    if (coverage) {
+      return coverage;
+    }
     return `${artifact} 条候选资料来自本轮`;
   }
   if (projection.stageId === "screening") {
+    const coverage = sourceCollectionCoverageMetric(projection.latestTask?.coverageSummary, lang);
+    if (coverage) {
+      return coverage;
+    }
     return `已审 ${artifact}/${input}；通过 ${output}`;
   }
   if (projection.stageId === "graph") {
@@ -527,6 +573,9 @@ function sourceCollectionStageBlockingReasonLabel(reason: string, lang: "zh" | "
     return reason;
   }
   const normalized = reason.trim();
+  if (normalized.startsWith("Agent writeback has partial candidate coverage:")) {
+    return "Agent 回写只覆盖了部分候选，需要继续分页读取并补齐逐候选结果。";
+  }
   const labels: Record<string, string> = {
     "Agent task wrote back a structured result, but the expected stage artifact has not been created yet.":
       "Agent 已回写结构化结果，但该阶段的目标产物还没有生成。",
@@ -7495,8 +7544,15 @@ export function TeamsRoute({
     const candidateListNeedsScrollHint = visibleCandidates.length > 4;
     const candidateProjection = sourceCollectionCandidateProjection;
     const candidateLatestTask = candidateProjection?.latestTask;
+    const candidateCoverageMetric = sourceCollectionCoverageMetric(candidateLatestTask?.coverageSummary, lang);
+    const candidateInvalidIdCount = Array.isArray(candidateLatestTask?.invalidCandidateIds)
+      ? candidateLatestTask.invalidCandidateIds.length
+      : 0;
     const candidateMaterializedSources = isRecord(candidateLatestTask?.materializedSources)
       ? candidateLatestTask?.materializedSources
+      : null;
+    const candidateMaterializedExtraction = isRecord(candidateLatestTask?.materializedContentExtraction)
+      ? candidateLatestTask?.materializedContentExtraction
       : null;
     const candidatePanelFilteredCount = sourceCollectionSourceFilter === "all"
       ? sourceCollectionDisplayedCandidateCount
@@ -7550,8 +7606,20 @@ export function TeamsRoute({
             {candidateLatestTask?.taskId ? (
               <div>
                 <span>{lang === "zh" ? "Agent 任务" : "Agent task"} <strong>{candidateLatestTask.status || candidateProjection.agentTaskStatus || "-"}</strong></span>
+                {candidateCoverageMetric ? (
+                  <span>{candidateCoverageMetric}</span>
+                ) : null}
+                {candidateInvalidIdCount > 0 ? (
+                  <span>{lang === "zh" ? "无效回写 ID" : "invalid writeback IDs"} <strong>{candidateInvalidIdCount}</strong></span>
+                ) : null}
                 <span>evidence <strong>{candidateLatestTask.evidenceRefCount ?? 0}</strong></span>
                 <span>next <strong>{candidateLatestTask.nextActionCount ?? 0}</strong></span>
+                {candidateMaterializedExtraction ? (
+                  <span>
+                    {lang === "zh" ? "提炼写入" : "extractions"}{" "}
+                    <strong>{String(candidateMaterializedExtraction.extractedCandidateCount ?? 0)}</strong>
+                  </span>
+                ) : null}
                 {candidateMaterializedSources ? (
                   <span>
                     {lang === "zh" ? "物化" : "materialized"}{" "}
@@ -10814,6 +10882,10 @@ export function TeamsRoute({
     }
     if (sourceCollectionStageProjectionSyncing(projection)) {
       return lang === "zh" ? "正在同步 Agent 结果" : "Syncing Agent result";
+    }
+    const coverage = projection.latestTask?.coverageSummary;
+    if (coverage?.applicable && coverage.complete === false) {
+      return lang === "zh" ? "覆盖不足 · 待补读" : "partial coverage";
     }
     if (projection.status === "pending" && Number(projection.counts?.artifact ?? 0) > 0) {
       return lang === "zh" ? "产物部分就绪" : "partial artifact ready";
