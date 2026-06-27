@@ -3085,6 +3085,45 @@ def get_session_stream_initial_state(session_id: str) -> dict | None:
     }
 
 
+def normalize_session_stream_initial_mode(initial: str | None, *, default: str = "light") -> str:
+    normalized_default = str(default or "light").strip().lower()
+    if normalized_default not in {"full", "light", "none"}:
+        normalized_default = "light"
+    initial_mode = str(initial or normalized_default).strip().lower()
+    if initial_mode not in {"full", "light", "none"}:
+        return normalized_default
+    return initial_mode
+
+
+def resolve_session_stream_initial_payload(
+    session_id: str,
+    initial: str | None = "light",
+) -> tuple[str, dict[str, Any] | None, dict[str, Any] | None]:
+    """Resolve the initial SSE payload once before a session event stream starts."""
+
+    conversation_id = str(session_id or "").strip()
+    if not conversation_id:
+        raise SessionNotFoundError(
+            text_for(get_web_language(), zh="未找到当前会话。", en="Session not found.")
+        )
+
+    initial_mode = normalize_session_stream_initial_mode(initial, default="light")
+    if initial_mode == "full":
+        detail = get_session_detail(conversation_id)
+        if detail is None:
+            raise SessionNotFoundError(
+                text_for(get_web_language(), zh="未找到当前会话。", en="Session not found.")
+            )
+        return initial_mode, detail, None
+
+    initial_state = get_session_stream_initial_state(conversation_id)
+    if initial_state is None:
+        raise SessionNotFoundError(
+            text_for(get_web_language(), zh="未找到当前会话。", en="Session not found.")
+        )
+    return initial_mode, None, initial_state
+
+
 def get_session_turn_completion_snapshot(session_id: str, turn_id: str = "") -> dict[str, Any]:
     """Return a turn-scoped completion snapshot for external harness pollers."""
 
@@ -4931,9 +4970,7 @@ def stream_session_events(
         raise SessionNotFoundError(
             text_for(get_web_language(), zh="未找到当前会话。", en="Session not found.")
         )
-    initial_mode = str(initial or "full").strip().lower()
-    if initial_mode not in {"full", "light", "none"}:
-        initial_mode = "full"
+    initial_mode = normalize_session_stream_initial_mode(initial, default="full")
     detail: dict[str, Any] | None = None
     state: dict[str, Any] | None = None
     if initial_mode == "full":

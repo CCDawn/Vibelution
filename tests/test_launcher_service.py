@@ -30,6 +30,19 @@ def test_standalone_launcher_app_exposes_project_lifecycle_routes(monkeypatch):
     assert calls == ["start"]
 
 
+def test_launcher_payload_contract_is_shared_between_standalone_and_web_routes():
+    from core.launcher import api_contract
+
+    assert launcher_app.LauncherStartupSettingsPayload is api_contract.LauncherStartupSettingsPayload
+    assert web_launcher_routes.LauncherStartupSettingsPayload is api_contract.LauncherStartupSettingsPayload
+    assert launcher_app.DesktopSessionWindowPayload is api_contract.DesktopSessionWindowPayload
+    assert web_launcher_routes.DesktopSessionWindowPayload is api_contract.DesktopSessionWindowPayload
+    assert api_contract.launcher_error_detail("invalid_mode", ValueError("bad")) == {
+        "code": "invalid_mode",
+        "message": "bad",
+    }
+
+
 def test_window_provider_dispatcher_routes_electron_to_desktop_action_without_edge_call():
     from core.launcher.window_provider_dispatcher import WindowProviderDispatcher
 
