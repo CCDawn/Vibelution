@@ -179,6 +179,7 @@ class StashAuditItem:
     file_count: int
     touched_paths: list[str]
     untracked_paths: list[str]
+    untracked_file_states: dict[str, str]
     sample_paths: list[str]
     touches_protected: bool
     touches_hot: bool
@@ -383,6 +384,39 @@ def stash_untracked_paths(root: Path, ref: str) -> list[str]:
         for line in tree_result.stdout.splitlines()
         if line.strip()
     )
+
+
+def stash_untracked_file_states(root: Path, ref: str, untracked_paths: list[str]) -> dict[str, str]:
+    states: dict[str, str] = {}
+    for path in untracked_paths:
+        blob_result = run_git(root, "rev-parse", f"{ref}^3:{path}")
+        if blob_result.code != 0:
+            states[path] = "unknown"
+            continue
+        stash_blob = blob_result.stdout.strip()
+        local_path = root / Path(path)
+        if not local_path.exists():
+            states[path] = "missing_in_main"
+            continue
+        current_blob_result = run_git(root, "hash-object", str(local_path))
+        current_blob = current_blob_result.stdout.strip() if current_blob_result.code == 0 else ""
+        states[path] = "absorbed_by_main" if current_blob == stash_blob else "diverged_in_main"
+    return states
+
+
+def summarize_untracked_absorption(file_states: dict[str, str]) -> str:
+    if not file_states:
+        return "not_checked"
+    values = list(file_states.values())
+    if all(value == "absorbed_by_main" for value in values):
+        return "absorbed_by_main"
+    if all(value == "missing_in_main" for value in values):
+        return "not_absorbed"
+    if any(value == "absorbed_by_main" for value in values):
+        return "partially_absorbed"
+    if any(value == "diverged_in_main" for value in values):
+        return "diverged"
+    return "not_checked"
 
 
 def stash_absorption_state(root: Path, ref: str, paths: list[str], *, kind: str) -> str:
@@ -802,6 +836,7 @@ def build_stash_report(root: Path, limit: int | None = None) -> StashAuditReport
     for ref, message in stashes:
         paths = stash_paths(root, ref)
         untracked_paths = stash_untracked_paths(root, ref)
+        untracked_file_states = stash_untracked_file_states(root, ref, untracked_paths)
         preliminary_kind = (
             "empty_or_untracked_only"
             if not paths
@@ -811,7 +846,10 @@ def build_stash_report(root: Path, limit: int | None = None) -> StashAuditReport
             if len(paths) <= 5
             else "broad_snapshot"
         )
-        absorption_state = stash_absorption_state(root, ref, paths, kind=preliminary_kind)
+        if not paths and untracked_paths:
+            absorption_state = summarize_untracked_absorption(untracked_file_states)
+        else:
+            absorption_state = stash_absorption_state(root, ref, paths, kind=preliminary_kind)
         kind, suggested_action, reasons, touches_protected, touches_hot = classify_stash_item(
             paths,
             untracked_paths=untracked_paths,
@@ -825,6 +863,7 @@ def build_stash_report(root: Path, limit: int | None = None) -> StashAuditReport
                 file_count=len(paths),
                 touched_paths=paths,
                 untracked_paths=untracked_paths,
+                untracked_file_states=untracked_file_states,
                 sample_paths=paths[:5],
                 touches_protected=touches_protected,
                 touches_hot=touches_hot,
@@ -996,6 +1035,9 @@ def format_stash_plan(report: StashAuditReport) -> str:
             lines.append(f"    absorption: {item.absorption_state}")
         if item.untracked_paths:
             lines.append(f"    untracked: {', '.join(item.untracked_paths[:5])}")
+        if item.untracked_file_states:
+            state_bits = [f"{path}={state}" for path, state in item.untracked_file_states.items()]
+            lines.append(f"    untracked-state: {', '.join(state_bits[:5])}")
         lines.append(f"    action: {item.suggested_action}")
         if item.reasons:
             lines.append(f"    reasons: {', '.join(item.reasons)}")
