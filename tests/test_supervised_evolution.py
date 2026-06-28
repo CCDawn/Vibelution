@@ -2489,6 +2489,18 @@ def test_transaction_issue_check_tolerates_bom_transaction_status():
     assert _has_transaction_issue(metrics) is False
 
 
+def test_transaction_issue_check_accepts_ok_transaction_status():
+    metrics = {
+        "transaction_required": True,
+        "llm_failure_detected": False,
+        "transaction_opened": True,
+        "transaction_closed": True,
+        "transaction_status": "ok",
+        "environment_unavailable": False,
+    }
+    assert _has_transaction_issue(metrics) is False
+
+
 def test_transaction_issue_check_rejects_bom_failed_transaction_status():
     metrics = {
         "transaction_required": True,
