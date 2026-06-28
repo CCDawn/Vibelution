@@ -139,6 +139,8 @@ def test_tool_registry_lists_builtins_as_protected(tmp_path, monkeypatch):
     assert "no_quota_api" in stage_context_tool["capabilityTags"]
     assert stage_context_tool["permissionTier"] == "medium"
     key_tools_source = (Path(__file__).resolve().parents[1] / "tools" / "Key_Tools.py").read_text(encoding="utf-8")
+    assert "record_offset" in key_tools_source
+    assert "record_limit" in key_tools_source
     assert "candidate_offset" in key_tools_source
     assert "candidate_limit" in key_tools_source
     assert "context_mode" in key_tools_source
