@@ -221,7 +221,7 @@ def test_ensure_supervised_agent_instances_preserves_agent_center_llm_binding(tm
     assert repaired["llmBindings"]["dialogue"]["modelId"] == "model-primary"
 
 
-def test_ensure_supervised_agent_instances_prefers_xiaomi_when_role_profile_missing(tmp_path, monkeypatch):
+def test_ensure_supervised_agent_instances_uses_primary_profile_when_role_profile_missing(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     monkeypatch.setattr(
         supervised_agent_service,
@@ -234,7 +234,7 @@ def test_ensure_supervised_agent_instances_prefers_xiaomi_when_role_profile_miss
     assert {
         agent["llmBindings"]["dialogue"]["modelId"]
         for agent in agents
-    } == {"xiaomi_mimo_v2_5_pro_token_plan"}
+    } == {"deepseek_v4_pro"}
 
 
 def test_ensure_supervised_agent_instances_cleans_stale_exclusions_before_slot_sync(tmp_path, monkeypatch):
