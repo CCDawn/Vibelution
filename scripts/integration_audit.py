@@ -178,11 +178,13 @@ class StashAuditItem:
     summary: str
     file_count: int
     touched_paths: list[str]
+    untracked_paths: list[str]
     sample_paths: list[str]
     touches_protected: bool
     touches_hot: bool
     kind: str
     suggested_action: str
+    absorption_state: str
     reasons: list[str]
 
 
@@ -365,18 +367,62 @@ def stash_paths(root: Path, ref: str) -> list[str]:
     )
 
 
+def stash_untracked_paths(root: Path, ref: str) -> list[str]:
+    parent_result = run_git(root, "rev-list", "--parents", "-n", "1", ref)
+    if parent_result.code != 0:
+        return []
+    parts = [item for item in parent_result.stdout.strip().split() if item]
+    if len(parts) < 4:
+        return []
+    third_parent = parts[3]
+    tree_result = run_git(root, "ls-tree", "-r", "--name-only", third_parent)
+    if tree_result.code != 0:
+        return []
+    return unique_ordered(
+        line.strip()
+        for line in tree_result.stdout.splitlines()
+        if line.strip()
+    )
+
+
+def stash_absorption_state(root: Path, ref: str, paths: list[str], *, kind: str) -> str:
+    if kind not in {"test_only", "small_snapshot"} or not paths:
+        return "not_checked"
+    patch_result = run_git(root, "stash", "show", "-p", ref)
+    patch = patch_result.stdout
+    if patch_result.code != 0 or not patch.strip():
+        return "not_checked"
+    completed = subprocess.run(
+        ["git", "apply", "--reverse", "--check", "--whitespace=nowarn", "-"],
+        cwd=root,
+        input=patch,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    return "absorbed_by_main" if completed.returncode == 0 else "not_absorbed"
+
+
 def path_is_hot_file(path: str) -> bool:
     normalized = normalize_repo_path(path)
     return any(fragment.casefold() in normalized for fragment in HOT_FILE_FRAGMENTS)
 
 
-def classify_stash_item(paths: list[str]) -> tuple[str, str, list[str], bool, bool]:
+def classify_stash_item(
+    paths: list[str],
+    *,
+    untracked_paths: list[str],
+    absorption_state: str,
+) -> tuple[str, str, list[str], bool, bool]:
     file_count = len(paths)
     touches_protected = any(path_is_config_sensitive(path, Path("__operator_config_unused__")) for path in paths)
     touches_hot = any(path_is_hot_file(path) for path in paths)
     tests_only = file_count > 0 and all(normalize_repo_path(path).startswith("tests/") for path in paths)
     reasons: list[str] = []
     if file_count == 0:
+        if untracked_paths:
+            reasons.append("untracked_only_snapshot")
+            return "empty_or_untracked_only", "inspect_untracked_payload_before_drop", reasons, touches_protected, touches_hot
         reasons.append("no_tracked_paths_reported")
         return "empty_or_untracked_only", "manual_check_before_drop", reasons, touches_protected, touches_hot
     if touches_protected:
@@ -387,10 +433,12 @@ def classify_stash_item(paths: list[str]) -> tuple[str, str, list[str], bool, bo
         return "hot_snapshot", "manual_scope_review", reasons, touches_protected, touches_hot
     if tests_only:
         reasons.append("tests_only")
-        return "test_only", "compare_with_main_then_drop_if_absorbed", reasons, touches_protected, touches_hot
+        action = "drop_after_spot_check" if absorption_state == "absorbed_by_main" else "compare_with_main_then_drop_if_absorbed"
+        return "test_only", action, reasons, touches_protected, touches_hot
     if file_count <= 5:
         reasons.append("narrow_snapshot")
-        return "small_snapshot", "targeted_review_for_salvage", reasons, touches_protected, touches_hot
+        action = "drop_after_spot_check" if absorption_state == "absorbed_by_main" else "targeted_review_for_salvage"
+        return "small_snapshot", action, reasons, touches_protected, touches_hot
     reasons.append("broad_snapshot")
     return "broad_snapshot", "retain_as_history_do_not_reapply_blindly", reasons, touches_protected, touches_hot
 
@@ -753,7 +801,22 @@ def build_stash_report(root: Path, limit: int | None = None) -> StashAuditReport
     summary: dict[str, int] = {}
     for ref, message in stashes:
         paths = stash_paths(root, ref)
-        kind, suggested_action, reasons, touches_protected, touches_hot = classify_stash_item(paths)
+        untracked_paths = stash_untracked_paths(root, ref)
+        preliminary_kind = (
+            "empty_or_untracked_only"
+            if not paths
+            else "test_only"
+            if all(normalize_repo_path(path).startswith("tests/") for path in paths)
+            else "small_snapshot"
+            if len(paths) <= 5
+            else "broad_snapshot"
+        )
+        absorption_state = stash_absorption_state(root, ref, paths, kind=preliminary_kind)
+        kind, suggested_action, reasons, touches_protected, touches_hot = classify_stash_item(
+            paths,
+            untracked_paths=untracked_paths,
+            absorption_state=absorption_state,
+        )
         summary[kind] = summary.get(kind, 0) + 1
         items.append(
             StashAuditItem(
@@ -761,11 +824,13 @@ def build_stash_report(root: Path, limit: int | None = None) -> StashAuditReport
                 summary=message,
                 file_count=len(paths),
                 touched_paths=paths,
+                untracked_paths=untracked_paths,
                 sample_paths=paths[:5],
                 touches_protected=touches_protected,
                 touches_hot=touches_hot,
                 kind=kind,
                 suggested_action=suggested_action,
+                absorption_state=absorption_state,
                 reasons=reasons,
             )
         )
@@ -927,6 +992,10 @@ def format_stash_plan(report: StashAuditReport) -> str:
         lines.append(f"    summary: {item.summary}")
         if item.sample_paths:
             lines.append(f"    sample: {', '.join(item.sample_paths)}")
+        if item.absorption_state != "not_checked":
+            lines.append(f"    absorption: {item.absorption_state}")
+        if item.untracked_paths:
+            lines.append(f"    untracked: {', '.join(item.untracked_paths[:5])}")
         lines.append(f"    action: {item.suggested_action}")
         if item.reasons:
             lines.append(f"    reasons: {', '.join(item.reasons)}")

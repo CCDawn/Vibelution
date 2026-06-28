@@ -392,7 +392,7 @@ def test_build_stash_report_classifies_protected_test_only_and_untracked_entries
     }
     assert report.items[0].summary == "On main: untracked stash"
     assert report.items[0].kind == "empty_or_untracked_only"
-    assert report.items[0].suggested_action == "manual_check_before_drop"
+    assert report.items[0].suggested_action == "inspect_untracked_payload_before_drop"
     assert report.items[1].kind == "protected_risk"
     assert report.items[1].touches_protected is True
     assert report.items[1].suggested_action == "retain_until_manual_diff_review"
@@ -494,3 +494,78 @@ def test_build_stash_report_treats_package_lock_as_protected(tmp_path: Path) -> 
 
     assert report.items[0].kind == "protected_risk"
     assert report.items[0].touches_protected is True
+
+
+def test_build_stash_report_marks_absorbed_test_only_stash(tmp_path: Path) -> None:
+    root = init_repo(tmp_path / "repo")
+    commit_files(
+        root,
+        {
+            "tests/test_sample.py": "def test_sample():\n    assert True\n",
+        },
+        "seed test file",
+    )
+    create_stash(
+        root,
+        message="absorbed test stash",
+        tracked_changes={"tests/test_sample.py": "def test_sample():\n    assert False\n"},
+    )
+    (root / "tests" / "test_sample.py").write_text(
+        "def test_sample():\n    assert False\n",
+        encoding="utf-8",
+    )
+
+    report = audit.build_stash_report(root, limit=1)
+
+    assert report.items[0].kind == "test_only"
+    assert report.items[0].absorption_state == "absorbed_by_main"
+    assert report.items[0].suggested_action == "drop_after_spot_check"
+
+
+def test_build_stash_report_exposes_untracked_payload_for_empty_stash(tmp_path: Path) -> None:
+    root = init_repo(tmp_path / "repo")
+    create_stash(
+        root,
+        message="untracked payload stash",
+        untracked_changes={"scratch/note.txt": "payload\n"},
+    )
+
+    report = audit.build_stash_report(root, limit=1)
+
+    assert report.items[0].kind == "empty_or_untracked_only"
+    assert report.items[0].untracked_paths == ["scratch/note.txt"]
+    assert report.items[0].suggested_action == "inspect_untracked_payload_before_drop"
+
+
+def test_format_stash_plan_shows_absorption_and_untracked_paths(tmp_path: Path) -> None:
+    root = init_repo(tmp_path / "repo")
+    commit_files(
+        root,
+        {
+            "tests/test_sample.py": "def test_sample():\n    assert True\n",
+        },
+        "seed test file",
+    )
+    create_stash(
+        root,
+        message="absorbed test stash",
+        tracked_changes={"tests/test_sample.py": "def test_sample():\n    assert False\n"},
+    )
+    commit_files(
+        root,
+        {
+            "tests/test_sample.py": "def test_sample():\n    assert False\n",
+        },
+        "absorb stashed test change into main",
+    )
+    create_stash(
+        root,
+        message="untracked payload stash",
+        untracked_changes={"scratch/note.txt": "payload\n"},
+    )
+
+    report = audit.build_stash_report(root, limit=2)
+    plan = audit.format_stash_plan(report)
+
+    assert "absorbed_by_main" in plan
+    assert "untracked: scratch/note.txt" in plan
