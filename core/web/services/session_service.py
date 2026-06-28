@@ -2480,6 +2480,9 @@ class SessionTurnCapture:
     _last_recorded_thought_sequence: int = 0
     _last_recorded_thought_text: str = ""
     _pending_related_thought_sequence: int = 0
+    _tool_loop_call_count: int = 0
+    _tool_loop_failure_count: int = 0
+    _tool_loop_last_failure: str = ""
 
     def note_thought(self, text: str) -> None:
         cleaned = _sanitize_thought_delta_text(text)
@@ -2695,17 +2698,65 @@ class SessionTurnCapture:
             if existing.get("name") == tool_name and existing.get("status") == "running":
                 self.tool_calls[index] = entry
                 self._update_running_tool_feedback_event(entry, related_thought_sequence=related_thought_sequence)
+                self._remember_tool_loop_outcome(entry)
+                self._update_long_loop_progress_event(tool_name)
                 self._latest_thought_sequence = 0
                 self._latest_thought_text = ""
                 self._pending_related_thought_sequence = 0
                 return
         self.tool_calls.append(entry)
+        self._tool_loop_call_count += 1
         if len(self.tool_calls) > 30:
             self.tool_calls = self.tool_calls[-30:]
         self._append_tool_feedback_event(entry, related_thought_sequence=related_thought_sequence)
+        self._remember_tool_loop_outcome(entry)
+        self._update_long_loop_progress_event(tool_name)
         self._latest_thought_sequence = 0
         self._latest_thought_text = ""
         self._pending_related_thought_sequence = 0
+
+    def _remember_tool_loop_outcome(self, tool_call: dict[str, Any]) -> None:
+        status = _normalize_tool_call_status(tool_call.get("status"), default="running")
+        if status == "running":
+            return
+        details = " ".join(
+            str(tool_call.get(key) or "")
+            for key in ("summary", "error", "resultPreview", "failureClass")
+            if tool_call.get(key)
+        )
+        failure_hint = _compact_tool_loop_failure_hint(details)
+        if status in {"failed", "timeout"} or failure_hint:
+            self._tool_loop_failure_count += 1
+            self._tool_loop_last_failure = failure_hint or trim_lines(details, max_lines=1)
+
+    def _update_long_loop_progress_event(self, tool_name: str) -> None:
+        if self._tool_loop_call_count < 3:
+            return
+        failure_suffix = ""
+        if self._tool_loop_failure_count > 0:
+            latest = self._tool_loop_last_failure or "工具返回失败"
+            failure_suffix = f"；失败 {self._tool_loop_failure_count} 次，最近失败：{latest}"
+        summary = f"尚未形成最终回答 · {tool_name} 第 {self._tool_loop_call_count} 次工具调用{failure_suffix}"
+        preview = (
+            f"{summary}\n"
+            "当前仍在工具循环中，过程会继续更新；如果中断，可发送“继续”恢复这轮现场。"
+        )
+        for existing in self.feedback_events:
+            if existing.get("kind") == "status" and existing.get("name") == "long_loop_progress":
+                existing["status"] = "running"
+                existing["summary"] = summary
+                existing["resultPreview"] = preview
+                existing["timestamp"] = _now_timestamp()
+                return
+        self._append_feedback_event(
+            {
+                "kind": "status",
+                "status": "running",
+                "name": "long_loop_progress",
+                "summary": summary,
+                "resultPreview": preview,
+            }
+        )
 
     def _append_feedback_event(self, event: dict[str, Any]) -> int:
         sequence = self._next_feedback_sequence
@@ -15937,6 +15988,25 @@ def _normalize_tool_call_status(value: Any, *, default: str = "done") -> str:
             return "timeout"
         return status
     return default
+
+
+def _compact_tool_loop_failure_hint(value: Any) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    http_match = re.search(r"\bHTTP\s+(\d{3})\b", text, flags=re.IGNORECASE)
+    if http_match:
+        return f"HTTP {http_match.group(1)}"
+    lowered = text.lower()
+    if "无法连接" in text or "connection" in lowered or "connect" in lowered:
+        return "无法连接"
+    if "重定向" in text or "redirect" in lowered:
+        return "重定向被拦截"
+    if "内容为空" in text or "empty" in lowered:
+        return "内容为空"
+    if _looks_like_tool_call_failure_summary(text):
+        return trim_lines(text, max_lines=1)
+    return ""
 
 
 _TOOL_RESULT_FACT_ALIASES: dict[str, tuple[str, ...]] = {

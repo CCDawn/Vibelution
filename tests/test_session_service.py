@@ -168,6 +168,84 @@ def test_session_assistant_delta_queue_updates_unsequenced_feedback_event():
     ]
 
 
+def test_session_turn_capture_summarizes_repeated_tool_loop_progress():
+    capture = session_service.SessionTurnCapture(session_id="session-loop", turn_id="turn-loop")
+
+    for index in range(3):
+        capture.note_tool_event(
+            "web_fetch_tool",
+            "running",
+            f"正在抓取第 {index + 1} 个来源",
+            arguments={"url": f"https://example.test/paper-{index}"},
+        )
+        capture.note_tool_event(
+            "web_fetch_tool",
+            "failed",
+            f"[错误] HTTP 403: https://example.test/paper-{index}",
+            error=f"[错误] HTTP 403: https://example.test/paper-{index}",
+        )
+
+    progress_events = [
+        event
+        for event in capture.feedback_events
+        if event.get("kind") == "status" and event.get("name") == "long_loop_progress"
+    ]
+
+    assert len(progress_events) == 1
+    assert progress_events[0]["status"] == "running"
+    assert "第 3 次工具调用" in progress_events[0]["summary"]
+    assert "web_fetch_tool" in progress_events[0]["summary"]
+    assert "HTTP 403" in progress_events[0]["summary"]
+    assert "尚未形成最终回答" in progress_events[0]["resultPreview"]
+
+
+def test_session_live_output_publishes_long_loop_progress_as_status_only_delta(monkeypatch, tmp_path):
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(session_service, "_publish_session_detail_snapshot", lambda _session_id: None)
+    monkeypatch.setattr(session_service, "_write_session_live_output_checkpoint", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(session_service, "_delete_session_live_output_checkpoint", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(session_service, "_session_ledger_sequence", lambda _session_id: 7)
+    subscriber = queue.Queue()
+    capture = session_service.SessionTurnCapture(session_id="session-loop", turn_id="turn-loop")
+    for index in range(3):
+        capture.note_tool_event("web_fetch_tool", "running", f"抓取来源 {index + 1}")
+        capture.note_tool_event(
+            "web_fetch_tool",
+            "failed",
+            f"[错误] HTTP 403: https://example.test/paper-{index}",
+            error=f"[错误] HTTP 403: https://example.test/paper-{index}",
+        )
+
+    session_service._register_session_stream_subscriber("session-loop", subscriber)
+    try:
+        session_service._set_session_live_output(
+            "session-loop",
+            turn_id="turn-loop",
+            tool_calls=capture.tool_calls,
+            feedback_events=capture.feedback_events,
+        )
+    finally:
+        session_service._unregister_session_stream_subscriber("session-loop", subscriber)
+        with session_service._SESSION_LIVE_OUTPUTS_LOCK:
+            session_service._SESSION_LIVE_OUTPUTS.pop("session-loop", None)
+
+    event = subscriber.get_nowait()
+    progress = [
+        item
+        for item in event["feedbackEvents"]
+        if item.get("kind") == "status" and item.get("name") == "long_loop_progress"
+    ]
+
+    assert event["type"] == "assistant_delta"
+    assert event["sessionId"] == "session-loop"
+    assert event["turnId"] == "turn-loop"
+    assert event["ledgerSeq"] == 7
+    assert event["content"] == ""
+    assert event["contentDelta"] == ""
+    assert progress
+    assert "第 3 次工具调用" in progress[0]["summary"]
+
+
 def test_completed_visible_reply_with_tool_trace_is_terminal():
     result = {
         "status": "completed",
