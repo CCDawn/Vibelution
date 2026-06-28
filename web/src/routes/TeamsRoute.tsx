@@ -556,7 +556,7 @@ function sourceCollectionStageProjectionTaskMetric(
     return `${taskStatusLabel} · ${coverageMetric}${historicalTaskCount > 0 ? (lang === "zh" ? ` · 历史 ${historicalTaskCount}` : ` · historical ${historicalTaskCount}`) : ""}`;
   }
   if (lang === "zh") {
-    return `${taskStatusLabel} · 证据 ${evidenceCount} · 后续 ${nextActionCount}${historicalTaskCount > 0 ? ` · 历史 ${historicalTaskCount}` : ""}`;
+    return `${taskStatusLabel} · 证据引用 ${evidenceCount} · 后续建议 ${nextActionCount}${historicalTaskCount > 0 ? ` · 历史任务 ${historicalTaskCount}` : ""}`;
   }
   return `${taskStatusLabel} · evidence ${evidenceCount} · next ${nextActionCount}${historicalTaskCount > 0 ? ` · historical ${historicalTaskCount}` : ""}`;
 }
@@ -608,15 +608,15 @@ function sourceCollectionStageBlockingReasonLabel(reason: string, lang: "zh" | "
   }
   const normalized = reason.trim();
   if (normalized.startsWith("Agent writeback has partial candidate coverage:")) {
-    return "Agent 回写只覆盖了部分候选，需要继续分页读取并补齐逐候选结果。";
+    return "Agent 只处理了部分候选，需要继续分页读取并补齐逐候选结果。";
   }
   const labels: Record<string, string> = {
     "Agent task wrote back a structured result, but the expected stage artifact has not been created yet.":
-      "Agent 已回写结构化结果，但该阶段的目标产物还没有生成。",
+      "已收到 Agent 结果，但还没有生成本阶段可用资料。",
     "Latest Agent task is blocked or failed.":
       "最近一次 Agent 任务受阻或失败。",
     "Inputs exist, but this stage has not produced its expected artifact yet.":
-      "已有输入，等待该阶段生成目标产物。",
+      "上游资料已存在，但这里还没有生成可用结果。",
   };
   return labels[normalized] ?? normalized;
 }
@@ -628,6 +628,173 @@ function sourceCollectionStageBlockingReasonsLabel(
   return (reasons ?? [])
     .map((reason) => sourceCollectionStageBlockingReasonLabel(reason, lang))
     .filter(Boolean);
+}
+
+function sourceCollectionStageRecoveryActionLabel(stageId: SourceCollectionStageModuleId | string | null | undefined, lang: "zh" | "en") {
+  const normalized = String(stageId || "").toLowerCase();
+  if (lang !== "zh") {
+    const labels: Record<string, string> = {
+      collection: "continue collecting",
+      candidate: "continue extraction",
+      screening: "continue review",
+      graph: "rebuild candidate map",
+      memory: "ask admin to review",
+    };
+    return labels[normalized] ?? "continue this stage";
+  }
+  const labels: Record<string, string> = {
+    collection: "继续补充资料",
+    candidate: "继续补全提炼",
+    screening: "继续补全审查",
+    graph: "重新生成候选图谱",
+    memory: "通知管理员审核",
+  };
+  return labels[normalized] ?? "继续处理本阶段";
+}
+
+function sourceCollectionStageReadableObjectLabel(stageId: SourceCollectionStageModuleId | string | null | undefined, lang: "zh" | "en") {
+  const normalized = String(stageId || "").toLowerCase();
+  if (lang !== "zh") {
+    const labels: Record<string, string> = {
+      collection: "source records",
+      candidate: "candidate sources",
+      screening: "review decisions",
+      graph: "candidate relationships",
+      memory: "admin review pack",
+    };
+    return labels[normalized] ?? "usable results";
+  }
+  const labels: Record<string, string> = {
+    collection: "原始资料",
+    candidate: "候选资料",
+    screening: "审查结论",
+    graph: "候选关系",
+    memory: "入库审核包",
+  };
+  return labels[normalized] ?? "可用资料";
+}
+
+function sourceCollectionStageUserStatusLabel(
+  projection: SourceCollectionStageCardProjection | null | undefined,
+  lang: "zh" | "en",
+  syncing = false,
+) {
+  if (!projection?.status) {
+    return "";
+  }
+  if (syncing) {
+    return lang === "zh" ? "正在同步 Agent 结果" : "Syncing Agent result";
+  }
+  const coverage = projection.latestTask?.coverageSummary;
+  if (coverage?.applicable && coverage.complete === false) {
+    const action = sourceCollectionStageRecoveryActionLabel(projection.stageId, lang);
+    if (lang === "zh") {
+      return `${action}中`;
+    }
+    return action;
+  }
+  if (projection.status === "agent_done_artifact_pending") {
+    return lang === "zh" ? "已收到 Agent 结果，等待生成可用资料" : "Agent result received; waiting for usable output";
+  }
+  if (projection.status === "artifact_ready_agent_blocked") {
+    return lang === "zh" ? "资料已生成，最近任务需排查" : "Output ready; latest task needs review";
+  }
+  if (projection.status === "pending" && Number(projection.counts?.artifact ?? 0) > 0) {
+    return lang === "zh" ? "已有部分资料" : "Partial output ready";
+  }
+  const labels: Record<string, string> = lang === "zh"
+    ? {
+        agent_running: "Agent 正在处理",
+        closed_loop: "本阶段已完成",
+        artifact_ready_no_latest_agent_task: "资料已生成",
+        agent_blocked: "Agent 任务受阻",
+        pending: "等待本阶段产出",
+        idle: "未开始",
+      }
+    : {
+        agent_running: "Agent running",
+        closed_loop: "Stage complete",
+        artifact_ready_no_latest_agent_task: "Output ready",
+        agent_blocked: "Agent blocked",
+        pending: "Waiting for output",
+        idle: "Not started",
+      };
+  return labels[projection.status] ?? (lang === "zh" ? "需要处理" : projection.status);
+}
+
+function sourceCollectionStageUserSummary(
+  projection: SourceCollectionStageCardProjection | null | undefined,
+  lang: "zh" | "en",
+) {
+  if (!projection) {
+    return "";
+  }
+  const objectLabel = sourceCollectionStageReadableObjectLabel(projection.stageId, lang);
+  const coverage = projection.latestTask?.coverageSummary;
+  const total = typeof coverage?.total === "number" ? coverage.total : 0;
+  const processed = typeof coverage?.processed === "number" ? coverage.processed : 0;
+  const missing = typeof coverage?.missing === "number" ? coverage.missing : 0;
+  const invalid = typeof coverage?.invalid === "number" ? coverage.invalid : 0;
+  if (coverage?.applicable && coverage.complete === false && total > 0) {
+    if (lang === "zh") {
+      const invalidText = invalid > 0 ? `Agent 返回的候选 ID 没有匹配到本轮资料 ${invalid} 条。` : "";
+      return `${objectLabel}处理进度 ${processed}/${total}，还有 ${missing} 条需要补齐。${invalidText}建议：${sourceCollectionStageRecoveryActionLabel(projection.stageId, lang)}。`;
+    }
+    return `${processed}/${total} processed; ${missing} still need work${invalid > 0 ? `; ${invalid} writeback IDs did not match this run` : ""}.`;
+  }
+  if (projection.status === "agent_done_artifact_pending") {
+    if (lang === "zh") {
+      return `已收到 Agent 结果，但还没有生成可用${objectLabel}。建议：${sourceCollectionStageRecoveryActionLabel(projection.stageId, lang)}。`;
+    }
+    return `Agent returned a result, but usable ${objectLabel} has not been generated yet.`;
+  }
+  if (projection.status === "artifact_ready_agent_blocked") {
+    return lang === "zh"
+      ? `${objectLabel}已经可用，但最近一次 Agent 任务受阻；可以先查看结果，再决定是否重试。`
+      : `${objectLabel} is available, but the latest Agent task is blocked.`;
+  }
+  if (projection.status === "agent_blocked") {
+    return lang === "zh"
+      ? `最近一次 Agent 任务没有完成。建议进入 Agent 私聊查看原因，或重新启动本阶段。`
+      : "The latest Agent task did not complete. Open the Agent chat or restart this stage.";
+  }
+  const firstReason = sourceCollectionStageBlockingReasonsLabel(projection.blockingReasons, lang)[0];
+  if (firstReason) {
+    return firstReason;
+  }
+  return sourceCollectionStageArtifactSummaryLabel(projection, lang);
+}
+
+function sourceCollectionCandidateEmptyStateText(input: {
+  lang: "zh" | "en";
+  loading: boolean;
+  awaitingRefresh: boolean;
+  displayedCandidateCount: number;
+  filteredCandidateCount: number;
+  rawRecordCount: number;
+  projection?: SourceCollectionStageCardProjection | null;
+}) {
+  if (input.loading) {
+    return input.lang === "zh" ? "正在加载资料提炼结果..." : "Loading extracted sources...";
+  }
+  if (input.awaitingRefresh) {
+    return input.lang === "zh"
+      ? `Agent 已生成 ${input.displayedCandidateCount} 条候选资料，列表正在同步；请刷新或稍候。`
+      : `Agent produced ${input.displayedCandidateCount} candidates; the list is syncing. Refresh or wait a moment.`;
+  }
+  if (input.displayedCandidateCount > 0) {
+    return input.lang === "zh" ? "当前过滤条件下没有候选资料。" : "No candidates match this filter.";
+  }
+  const projectionSummary = sourceCollectionStageUserSummary(input.projection, input.lang);
+  if (projectionSummary) {
+    return projectionSummary;
+  }
+  if (input.rawRecordCount > 0) {
+    return input.lang === "zh"
+      ? `已收到 ${input.rawRecordCount} 条原始资料，但本轮还没有生成候选资料。建议：继续补全提炼。`
+      : `${input.rawRecordCount} source records exist, but no candidate sources have been generated for this run yet.`;
+  }
+  return input.lang === "zh" ? "本轮还没有可提炼的资料。" : "No sources are ready for extraction in this run yet.";
 }
 
 type SourceCollectionStorageOpenTarget =
@@ -7681,44 +7848,50 @@ export function TeamsRoute({
         {candidateProjection ? (
           <div className={styles.sourceCollectionStageTaskSummary}>
             <div>
-              <strong>{sourceCollectionStageProjectionLabel(candidateProjection)}</strong>
+              <strong>{sourceCollectionStageUserStatusLabel(candidateProjection, lang, sourceCollectionStageProjectionSyncing(candidateProjection))}</strong>
               <span>{sourceCollectionStageArtifactSummaryLabel(candidateProjection, lang)}</span>
             </div>
-            {candidateLatestTask?.taskId ? (
-              <div>
-                <span>
-                  {lang === "zh" ? "Agent 任务" : "Agent task"}{" "}
-                  <strong>{sourceCollectionStageTaskStatusLabel(candidateLatestTask.status || candidateProjection.agentTaskStatus, lang)}</strong>
-                </span>
-                {candidateCoverageMetric ? (
-                  <span>{candidateCoverageMetric}</span>
-                ) : null}
-                {candidateInvalidIdCount > 0 ? (
-                  <span>{lang === "zh" ? "无效回写 ID" : "invalid writeback IDs"} <strong>{candidateInvalidIdCount}</strong></span>
-                ) : null}
-                <span>evidence <strong>{candidateLatestTask.evidenceRefCount ?? 0}</strong></span>
-                <span>next <strong>{candidateLatestTask.nextActionCount ?? 0}</strong></span>
-                {candidateMaterializedExtraction ? (
-                  <span>
-                    {lang === "zh" ? "提炼写入" : "extractions"}{" "}
-                    <strong>{String(candidateMaterializedExtraction.extractedCandidateCount ?? 0)}</strong>
-                  </span>
-                ) : null}
-                {candidateMaterializedSources ? (
-                  <span>
-                    {lang === "zh" ? "物化" : "materialized"}{" "}
-                    <strong>
-                      {String(candidateMaterializedSources.importedCandidateCount ?? candidateMaterializedSources.createdRecordCount ?? 0)}
-                    </strong>
-                  </span>
-                ) : null}
-              </div>
+            {sourceCollectionStageUserSummary(candidateProjection, lang) ? (
+              <p>{sourceCollectionStageUserSummary(candidateProjection, lang)}</p>
             ) : null}
-            {candidateLatestTask?.summary ? <p>{candidateLatestTask.summary}</p> : null}
-            {candidateProjection.blockingReasons?.length ? (
-              <p className={styles.sourceCollectionStageBlockers}>
-                {sourceCollectionStageBlockingReasonsLabel(candidateProjection.blockingReasons, lang).join(" · ")}
-              </p>
+            {candidateLatestTask?.taskId ? (
+              <details className={styles.sourceCollectionStageTechnicalDetails}>
+                <summary>{lang === "zh" ? "技术详情" : "Technical details"}</summary>
+                <div>
+                  <span>
+                    {lang === "zh" ? "Agent 任务" : "Agent task"}{" "}
+                    <strong>{sourceCollectionStageTaskStatusLabel(candidateLatestTask.status || candidateProjection.agentTaskStatus, lang)}</strong>
+                  </span>
+                  {candidateCoverageMetric ? (
+                    <span>{candidateCoverageMetric}</span>
+                  ) : null}
+                  {candidateInvalidIdCount > 0 ? (
+                    <span>{lang === "zh" ? "未匹配资料" : "unmatched writeback IDs"} <strong>{candidateInvalidIdCount}</strong></span>
+                  ) : null}
+                  <span>{lang === "zh" ? "证据引用" : "evidence refs"} <strong>{candidateLatestTask.evidenceRefCount ?? 0}</strong></span>
+                  <span>{lang === "zh" ? "后续建议" : "next actions"} <strong>{candidateLatestTask.nextActionCount ?? 0}</strong></span>
+                  {candidateMaterializedExtraction ? (
+                    <span>
+                      {lang === "zh" ? "提炼写入" : "extractions"}{" "}
+                      <strong>{String(candidateMaterializedExtraction.extractedCandidateCount ?? 0)}</strong>
+                    </span>
+                  ) : null}
+                  {candidateMaterializedSources ? (
+                    <span>
+                      {lang === "zh" ? "候选写入" : "materialized"}{" "}
+                      <strong>
+                        {String(candidateMaterializedSources.importedCandidateCount ?? candidateMaterializedSources.createdRecordCount ?? 0)}
+                      </strong>
+                    </span>
+                  ) : null}
+                </div>
+                {candidateLatestTask?.summary ? <p>{candidateLatestTask.summary}</p> : null}
+                {candidateProjection.blockingReasons?.length ? (
+                  <p className={styles.sourceCollectionStageBlockers}>
+                    {sourceCollectionStageBlockingReasonsLabel(candidateProjection.blockingReasons, lang).join(" · ")}
+                  </p>
+                ) : null}
+              </details>
             ) : null}
           </div>
         ) : null}
@@ -7792,15 +7965,15 @@ export function TeamsRoute({
           </div>
         ) : (
           <div className={styles.empty}>
-            {sourceCollectionPrimaryDataLoading
-              ? (lang === "zh" ? "正在加载资料提炼结果..." : "Loading extracted sources...")
-            : candidateListAwaitingRefresh
-              ? (lang === "zh"
-                ? `Agent 已生成 ${sourceCollectionDisplayedCandidateCount} 条候选资料，列表正在同步；请刷新或稍候。`
-                : `Agent produced ${sourceCollectionDisplayedCandidateCount} candidates; the list is syncing. Refresh or wait a moment.`)
-            : sourceCollectionDisplayedCandidateCount
-              ? (lang === "zh" ? "当前过滤条件下没有候选资料。" : "No candidates match this filter.")
-            : (lang === "zh" ? "本轮暂无候选资料。" : "No candidates from this run yet.")}
+            {sourceCollectionCandidateEmptyStateText({
+              lang,
+              loading: sourceCollectionPrimaryDataLoading,
+              awaitingRefresh: candidateListAwaitingRefresh,
+              displayedCandidateCount: sourceCollectionDisplayedCandidateCount,
+              filteredCandidateCount: candidatePanelFilteredCount,
+              rawRecordCount: sourceCollectionProjectedCollectedCount,
+              projection: candidateProjection,
+            })}
           </div>
         )}
         {renderSourceCollectionPagination("candidate", filteredCandidates.length)}
@@ -11134,43 +11307,7 @@ export function TeamsRoute({
     if (!projection?.status) {
       return "";
     }
-    if (sourceCollectionStageProjectionSyncing(projection)) {
-      return lang === "zh" ? "正在同步 Agent 结果" : "Syncing Agent result";
-    }
-    const coverage = projection.latestTask?.coverageSummary;
-    if (coverage?.applicable && coverage.complete === false) {
-      const incompleteLabels: Record<SourceCollectionStageModuleId, { zh: string; en: string }> = {
-        collection: { zh: "覆盖不足 · 待补读", en: "partial source coverage" },
-        candidate: { zh: "覆盖不足 · 待补提炼", en: "partial extraction coverage" },
-        screening: { zh: "覆盖不足 · 待补审", en: "partial review coverage" },
-        graph: { zh: "覆盖不足 · 待补建图", en: "partial graph coverage" },
-        memory: { zh: "覆盖不足 · 待补入库审核", en: "partial steward coverage" },
-      };
-      return incompleteLabels[projection.stageId]?.[lang] ?? (lang === "zh" ? "覆盖不足" : "partial coverage");
-    }
-    if (projection.status === "pending" && Number(projection.counts?.artifact ?? 0) > 0) {
-      return lang === "zh" ? "产物部分就绪" : "partial artifact ready";
-    }
-    const labels: Record<string, string> = lang === "zh"
-      ? {
-          agent_running: "Agent 进行中",
-          closed_loop: "闭环完成",
-          artifact_ready_no_latest_agent_task: "产物已就绪",
-          agent_done_artifact_pending: "Agent 已回写，仍待补产物",
-          agent_blocked: "Agent 受阻",
-          pending: "待 Agent 产出",
-          idle: "未开始",
-        }
-      : {
-          agent_running: "Agent running",
-          closed_loop: "closed loop",
-          artifact_ready_no_latest_agent_task: "artifact ready",
-          agent_done_artifact_pending: "Agent wrote back · artifact pending",
-          agent_blocked: "Agent blocked",
-          pending: "pending",
-          idle: "not started",
-        };
-    return labels[projection.status] ?? projection.status;
+    return sourceCollectionStageUserStatusLabel(projection, lang, sourceCollectionStageProjectionSyncing(projection));
   };
   const sourceCollectionStepClassName = (state: SourceCollectionStepState) => ({
     active: styles.sourceCollectionStepActive,
@@ -11299,7 +11436,7 @@ export function TeamsRoute({
       id: "collection",
       label: lang === "zh" ? "搜索资料" : "Search sources",
       metric: lang === "zh" ? `原始资料 ${sourceCollectionProjectedCollectedCountLabel}` : sourceCollectionProjectedCollectedCountLabel,
-      summary: sourceCollectionCollectionProjection?.latestTask?.summary || (!selectedSourceCollectionRun
+      summary: sourceCollectionStageUserSummary(sourceCollectionCollectionProjection, lang) || (!selectedSourceCollectionRun
         ? (lang === "zh" ? "点击开始生成本轮任务" : "Start to create this run")
         : sourceCollectionSearchOpenAssignmentCount > 0
           ? (lang === "zh" ? `${sourceCollectionSearchOpenAssignmentCount} 个搜索任务待执行` : `${sourceCollectionSearchOpenAssignmentCount} search tasks remain`)
@@ -11328,7 +11465,7 @@ export function TeamsRoute({
       metric: sourceCollectionPrimaryDataLoading
         ? (lang === "zh" ? "候选资料 加载中" : "candidate sources loading")
         : (lang === "zh" ? `候选资料 ${sourceCollectionProjectedCandidateCountText} 条` : `${sourceCollectionProjectedCandidateCountText} candidate sources`),
-      summary: sourceCollectionCandidateProjection?.latestTask?.summary || (sourceCollectionPrimaryDataLoading
+      summary: sourceCollectionStageUserSummary(sourceCollectionCandidateProjection, lang) || (sourceCollectionPrimaryDataLoading
         ? sourceCollectionLoadingSummary
         : sourceCollectionProjectedCandidateCount > 0
           ? (lang === "zh" ? `已形成 ${sourceCollectionProjectedCandidateCountText} 条可追溯候选资料` : `${sourceCollectionProjectedCandidateCountText} traceable candidate sources`)
@@ -11386,7 +11523,7 @@ export function TeamsRoute({
       id: "graph",
       label: lang === "zh" ? "候选图谱" : "Candidate map",
       metric: lang === "zh" ? `节点 ${sourceCollectionProjectedGraphNodeCount} / 关系 ${sourceCollectionProjectedGraphEdgeCount}` : `${sourceCollectionProjectedGraphNodeCount} nodes / ${sourceCollectionProjectedGraphEdgeCount} edges`,
-      summary: sourceCollectionGraphProjection?.latestTask?.summary || (sourceCollectionProjectedGraphNodeCount > 0
+      summary: sourceCollectionStageUserSummary(sourceCollectionGraphProjection, lang) || (sourceCollectionProjectedGraphNodeCount > 0
         ? (lang === "zh" ? "候选资料关系已生成" : "Candidate relationships are ready")
         : sourceCollectionDisplayedCandidateCount > 0
           ? (lang === "zh" ? "可由 Agent 生成候选关系" : "Agent can build candidate relationships")
@@ -11413,7 +11550,7 @@ export function TeamsRoute({
       id: "memory",
       label: lang === "zh" ? "知识库管理员入库审核" : "Knowledge base admin review",
       metric: lang === "zh" ? `正式知识 ${sourceCollectionProjectedFormalKnowledgeCount}` : `${sourceCollectionProjectedFormalKnowledgeCount} formal items`,
-      summary: sourceCollectionMemoryProjection?.latestTask?.summary || (sourceCollectionProjectedFormalKnowledgeCount > 0
+      summary: sourceCollectionStageUserSummary(sourceCollectionMemoryProjection, lang) || (sourceCollectionProjectedFormalKnowledgeCount > 0
         ? (lang === "zh" ? "已进入团队知识库" : "Synced into Team Knowledge")
         : sourceCollectionProjectedStewardPackCount > 0
           ? (lang === "zh" ? "已生成管理员待审包" : "Admin review pack ready")
@@ -11614,19 +11751,18 @@ export function TeamsRoute({
                     <em>{module.metric}</em>
                     <small>{module.summary}</small>
                   </span>
-                  {module.projection ? (
+                  {module.projection && sourceCollectionStageProjectionTaskMetric(module.projection, lang, sourceCollectionStageProjectionSyncing(module.projection)) ? (
                     <div className={styles.sourceCollectionStageProjection}>
-                      <span>{sourceCollectionStageProjectionLabel(module.projection)}</span>
-                      {sourceCollectionStageProjectionTaskMetric(module.projection, lang, sourceCollectionStageProjectionSyncing(module.projection)) ? (
+                      <details className={styles.sourceCollectionStageTechnicalDetails}>
+                        <summary>{lang === "zh" ? "技术详情" : "Technical details"}</summary>
                         <small>{sourceCollectionStageProjectionTaskMetric(module.projection, lang, sourceCollectionStageProjectionSyncing(module.projection))}</small>
-                      ) : null}
-                      {module.projection.blockingReasons?.length ? (
-                        <small className={styles.sourceCollectionStageBlockers}>
-                          {sourceCollectionStageBlockingReasonLabel(module.projection.blockingReasons[0], lang)}
-                        </small>
-                      ) : module.projection.artifactSummary ? (
-                        <small>{sourceCollectionStageArtifactSummaryLabel(module.projection, lang)}</small>
-                      ) : null}
+                        {module.projection.latestTask?.summary ? <small>{module.projection.latestTask.summary}</small> : null}
+                        {module.projection.blockingReasons?.length ? (
+                          <small className={styles.sourceCollectionStageBlockers}>
+                            {sourceCollectionStageBlockingReasonsLabel(module.projection.blockingReasons, lang).join(" · ")}
+                          </small>
+                        ) : null}
+                      </details>
                     </div>
                   ) : null}
                 </article>
