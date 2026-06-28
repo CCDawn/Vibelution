@@ -1407,7 +1407,7 @@ def get_source_collection_stage_task_context(
     context_mode: str = "compact",
 ) -> dict[str, Any]:
     normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
-    team_service.get_team(normalized_team_id)
+    team_service.assert_team_exists(normalized_team_id)
     normalized_task_id = _trim_text(task_id, max_length=160)
     task: dict[str, Any] = {}
     task_run_id = ""
@@ -14971,8 +14971,21 @@ def _reconcile_source_collection_stage_session_tasks(team_id: str) -> bool:
 def _repair_missing_source_collection_stage_round(team_id: str, run_id: str, tasks: list[dict[str, Any]]) -> bool:
     normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
     normalized_run_id = _normalize_required_id(run_id, "Data processing run id is required.")
+    with _WORKFLOW_LOCK:
+        store = _load_stage_round_store(normalized_team_id)
+        rounds = _stage_rounds(store)
+        existing = _latest_stage_round(
+            [
+                item
+                for item in rounds
+                if str(item.get("stageType") or "") == "knowledge_collection"
+                and normalized_run_id in {str(source_run_id) for source_run_id in list(item.get("sourceRunIds") or [])}
+            ]
+        )
+        if existing is not None:
+            return False
     try:
-        team_service.get_team(normalized_team_id)
+        team_service.assert_team_exists(normalized_team_id)
         run = data_processing_service.get_processing_run(normalized_run_id)
         assignments_payload = data_processing_service.list_collection_assignments(normalized_run_id)
         run_status = data_processing_service.get_processing_status(normalized_run_id)
