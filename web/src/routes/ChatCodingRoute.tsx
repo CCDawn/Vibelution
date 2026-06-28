@@ -147,6 +147,7 @@ import { AgentSessionTabStrip, type CliAgentRunTab } from "./AgentSessionTabStri
 import { ConversationIndexTree } from "./ConversationIndexTree";
 import {
   DEFAULT_COLLAPSED_CONVERSATION_GROUPS,
+  defaultConversationGroupCollapsed,
   conversationGroupLabel,
   hasInvalidChildSessionLink,
   isRepresentedInAgentSessionTabs,
@@ -5406,7 +5407,7 @@ export function ChatCodingRoute() {
   function toggleConversationGroup(groupKey: ConversationIndexDynamicGroupKey) {
     setCollapsedConversationGroups((current) => ({
       ...current,
-      [groupKey]: !current[groupKey],
+      [groupKey]: !(current[groupKey] ?? defaultConversationGroupCollapsed(groupKey)),
     }));
   }
 
@@ -6306,6 +6307,98 @@ export function ChatCodingRoute() {
   );
   const contextMenuDeleteDisabled = contextMenuDeletePending || contextMenuSessionIsBusy;
   const contextMenuAddToReviewDisabled = contextMenuAddToReviewPending || contextMenuSessionIsBusy;
+  const conversationIndexPanel = (
+    <>
+      {sessionComposerErrors.__sessions__ ? (
+        <div className={styles.panelState}>{sessionComposerErrors.__sessions__}</div>
+      ) : null}
+      {sessionsErrorState.transientError ? (
+        <div className={styles.panelNotice} role="status">{sessionsErrorMessage}</div>
+      ) : null}
+      {sessionsErrorState.blockingError ? (
+        <div className={styles.panelState}>{sessionsErrorMessage}</div>
+      ) : conversationsQuery.isPending && !conversationsQuery.data && sessionsQuery.isPending && !sessionsQuery.data ? (
+        <div className={styles.panelState}>{t("loadingSession")}</div>
+      ) : filteredConversations.length === 0 && filteredTeams.length === 0 && filteredStandaloneGroupConversations.length === 0 ? (
+        <div className={styles.panelState}>
+          {sessionFilter.trim() ? t("noSessionMatches") : t("noSessionsYet")}
+        </div>
+      ) : (
+        <>
+          <ConversationIndexTree
+            activeGroupRoomId={activeGroupRoomId}
+            activeSessionId={activeSessionId}
+            addToReviewSucceededLabel={t("addSessionToReviewSucceeded")}
+            agentsById={agentsById}
+            avatarImageUrlFrom={avatarImageUrlFrom}
+            avatarInitials={avatarInitials}
+            buildSessionReferencePayload={buildSessionReferencePayload}
+            collapsedConversationGroups={collapsedConversationGroups}
+            conversationGroupLabel={conversationGroupLabel}
+            deleteBusyLabel={t("deleteSessionBusy")}
+            editingSessionId={editingSessionId}
+            editingSessionTitle={editingSessionTitle}
+            filteredConversationsCount={filteredConversations.length}
+            filteredStandaloneGroupConversations={filteredStandaloneGroupConversations}
+            filteredTeams={filteredTeams}
+            formatTime={formatTime}
+            groupPanelActive={groupPanelActive}
+            groupedConversations={groupedConversations}
+            isBusyPhase={isBusyPhase}
+            lang={lang}
+            renamePending={renameSessionMutation.isPending}
+            renameSessionId={renameSessionMutation.variables?.sessionId ?? ""}
+            resolveModelLabel={resolveModelLabel}
+            searchHasTerm={searchHasTerm}
+            sessionComposerErrors={sessionComposerErrors}
+            sessionsById={sessionsById}
+            statusLabel={statusLabel}
+            t={t}
+            onCancelRename={cancelRenameSession}
+            onContextMenu={openSessionContextMenu}
+            onDragReference={startSessionReferenceDrag}
+            onOpenDirectSession={handleOpenDirectSession}
+            onOpenGroupRoom={handleOpenGroupRoom}
+            onRenameTitleChange={setEditingSessionTitle}
+            onSubmitRename={submitRenameSession}
+            onToggleConversationGroup={toggleConversationGroup}
+          />
+          {sessionIndexHasMore ? (
+            <button
+              type="button"
+              className={styles.sessionLoadMoreButton}
+              onClick={() => rawSessionsQuery.loadMore()}
+              disabled={rawSessionsQuery.isLoadingMore}
+              aria-label={sessionIndexLoadMoreLabel}
+            >
+              <span>{sessionIndexLoadMoreLabel}</span>
+              <strong>{sessionIndexProgressLabel}</strong>
+            </button>
+          ) : sessionIndexProgressVisible ? (
+            <div className={styles.sessionLoadMoreStatus} role="status">
+              <span>{sessionIndexFullyLoadedLabel}</span>
+              <strong>{sessionIndexProgressLabel}</strong>
+            </div>
+          ) : null}
+          {sessionContextMenu && contextMenuSession ? (
+            <SessionContextMenu
+              addToReviewDisabled={contextMenuAddToReviewDisabled}
+              addToReviewPending={contextMenuAddToReviewPending}
+              deleteDisabled={contextMenuDeleteDisabled}
+              lang={lang}
+              position={sessionContextMenu}
+              session={contextMenuSession}
+              t={t}
+              onAddToReview={handleAddSessionToReview}
+              onDelete={handleDeleteSession}
+              onOpenAgentConfig={openSessionAgentConfig}
+              onRename={beginRenameSession}
+            />
+          ) : null}
+        </>
+      )}
+    </>
+  );
 
   return (
     <div
@@ -7781,6 +7874,7 @@ export function ChatCodingRoute() {
                 <span>{groupComposerOpen ? (lang === "zh" ? "收起" : "Close") : (lang === "zh" ? "新建群聊" : "New group")}</span>
               </button>
             </div>
+            {conversationIndexPanel}
             <section className={styles.systemEntryGroup} aria-label={lang === "zh" ? "系统入口" : "System entries"}>
               <div className={styles.conversationTreeRootHeader}>
                 <span>{lang === "zh" ? "系统入口" : "System"}</span>
@@ -7902,94 +7996,6 @@ export function ChatCodingRoute() {
                 </button>
               </section>
             ) : null}
-            {sessionComposerErrors.__sessions__ ? (
-              <div className={styles.panelState}>{sessionComposerErrors.__sessions__}</div>
-            ) : null}
-            {sessionsErrorState.transientError ? (
-              <div className={styles.panelNotice} role="status">{sessionsErrorMessage}</div>
-            ) : null}
-            {sessionsErrorState.blockingError ? (
-              <div className={styles.panelState}>{sessionsErrorMessage}</div>
-            ) : conversationsQuery.isPending && !conversationsQuery.data && sessionsQuery.isPending && !sessionsQuery.data ? (
-              <div className={styles.panelState}>{t("loadingSession")}</div>
-            ) : filteredConversations.length === 0 && filteredTeams.length === 0 && filteredStandaloneGroupConversations.length === 0 ? (
-              <div className={styles.panelState}>
-                {sessionFilter.trim() ? t("noSessionMatches") : t("noSessionsYet")}
-              </div>
-            ) : (
-              <>
-              <ConversationIndexTree
-                activeGroupRoomId={activeGroupRoomId}
-                activeSessionId={activeSessionId}
-                addToReviewSucceededLabel={t("addSessionToReviewSucceeded")}
-                agentsById={agentsById}
-                avatarImageUrlFrom={avatarImageUrlFrom}
-                avatarInitials={avatarInitials}
-                buildSessionReferencePayload={buildSessionReferencePayload}
-                collapsedConversationGroups={collapsedConversationGroups}
-                conversationGroupLabel={conversationGroupLabel}
-                deleteBusyLabel={t("deleteSessionBusy")}
-                editingSessionId={editingSessionId}
-                editingSessionTitle={editingSessionTitle}
-                filteredConversationsCount={filteredConversations.length}
-                filteredStandaloneGroupConversations={filteredStandaloneGroupConversations}
-                filteredTeams={filteredTeams}
-                formatTime={formatTime}
-                groupPanelActive={groupPanelActive}
-                groupedConversations={groupedConversations}
-                isBusyPhase={isBusyPhase}
-                lang={lang}
-                renamePending={renameSessionMutation.isPending}
-                renameSessionId={renameSessionMutation.variables?.sessionId ?? ""}
-                resolveModelLabel={resolveModelLabel}
-                searchHasTerm={searchHasTerm}
-                sessionComposerErrors={sessionComposerErrors}
-                sessionsById={sessionsById}
-                statusLabel={statusLabel}
-                t={t}
-                onCancelRename={cancelRenameSession}
-                onContextMenu={openSessionContextMenu}
-                onDragReference={startSessionReferenceDrag}
-                onOpenDirectSession={handleOpenDirectSession}
-                onOpenGroupRoom={handleOpenGroupRoom}
-                onRenameTitleChange={setEditingSessionTitle}
-                onSubmitRename={submitRenameSession}
-                onToggleConversationGroup={toggleConversationGroup}
-              />
-              {sessionIndexHasMore ? (
-                <button
-                  type="button"
-                  className={styles.sessionLoadMoreButton}
-                  onClick={() => rawSessionsQuery.loadMore()}
-                  disabled={rawSessionsQuery.isLoadingMore}
-                  aria-label={sessionIndexLoadMoreLabel}
-                >
-                  <span>{sessionIndexLoadMoreLabel}</span>
-                  <strong>{sessionIndexProgressLabel}</strong>
-                </button>
-              ) : sessionIndexProgressVisible ? (
-                <div className={styles.sessionLoadMoreStatus} role="status">
-                  <span>{sessionIndexFullyLoadedLabel}</span>
-                  <strong>{sessionIndexProgressLabel}</strong>
-                </div>
-              ) : null}
-              {sessionContextMenu && contextMenuSession ? (
-                <SessionContextMenu
-                  addToReviewDisabled={contextMenuAddToReviewDisabled}
-                  addToReviewPending={contextMenuAddToReviewPending}
-                  deleteDisabled={contextMenuDeleteDisabled}
-                  lang={lang}
-                  position={sessionContextMenu}
-                  session={contextMenuSession}
-                  t={t}
-                  onAddToReview={handleAddSessionToReview}
-                  onDelete={handleDeleteSession}
-                  onOpenAgentConfig={openSessionAgentConfig}
-                  onRename={beginRenameSession}
-                />
-              ) : null}
-              </>
-            )}
             </>
           )}
           </div>

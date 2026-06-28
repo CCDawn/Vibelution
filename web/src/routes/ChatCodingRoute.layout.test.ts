@@ -1497,6 +1497,9 @@ describe("ChatCodingRoute layout contract", () => {
 
   it("groups the unified conversation list like expandable contact folders", () => {
     expect(conversationIndexModelSource).toContain("DEFAULT_COLLAPSED_CONVERSATION_GROUPS");
+    expect(conversationIndexModelSource).toContain("teams: true");
+    expect(conversationIndexModelSource).toContain("defaultConversationGroupCollapsed");
+    expect(conversationIndexModelSource).toContain('String(groupKey).startsWith("team:")');
     expect(conversationIndexModelSource).toContain("CONVERSATION_GROUP_ORDER");
     expect(conversationIndexModelSource).toContain("classifyConversation");
     expect(conversationIndexModelSource).toContain("conversationGroupLabel");
@@ -1513,9 +1516,14 @@ describe("ChatCodingRoute layout contract", () => {
     expect(conversationIndexTreeSource).toContain("groupedConversations.map");
     expect(conversationIndexTreeSource).toContain("onToggleConversationGroup: (groupKey: ConversationIndexDynamicGroupKey) => void");
     expect(routeSource).toContain("toggleConversationGroup");
+    expect(routeSource).toContain("defaultConversationGroupCollapsed(groupKey)");
     expect(routeSource).toContain("ConversationIndexTree");
     expect(routeSource).toContain("<ConversationIndexTree");
+    expect(routeSource.indexOf("<ConversationIndexTree")).toBeLessThan(
+      routeSource.indexOf("styles.systemEntryGroup"),
+    );
     expect(conversationIndexTreeSource).toContain("ConversationIndexSection");
+    expect(conversationIndexTreeSource).toContain("defaultConversationGroupCollapsed(group.groupKey, group.groupKind)");
     expect(conversationIndexTreeSource).toContain("expanded={!collapsed}");
     expect(conversationIndexSectionSource).toContain("styles.conversationGroupHeader");
     expect(conversationIndexSectionSource).toContain("styles.conversationGroupList");
