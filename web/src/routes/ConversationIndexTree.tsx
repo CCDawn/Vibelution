@@ -10,7 +10,7 @@ import type {
 import type { TranslationKey } from "../i18n/dictionary";
 import type { ModelLabelResolver } from "./agentDisplay";
 import type { ConversationIndexDynamicGroupKey, ConversationIndexGroup, ConversationIndexGroupKey, ConversationIndexTeam } from "./conversationIndexModel";
-import { isConfiguredConversationIndexTeam } from "./conversationIndexModel";
+import { defaultConversationGroupCollapsed, isConfiguredConversationIndexTeam } from "./conversationIndexModel";
 import { ConversationIndexSection } from "./ConversationIndexSection";
 import { DirectSessionIndexList } from "./DirectSessionIndexList";
 import {
@@ -114,7 +114,8 @@ export function ConversationIndexTree({
   return (
     <>
       {filteredConversationsCount ? groupedConversations.map((group) => {
-        const collapsed = !searchHasTerm && collapsedConversationGroups[group.groupKey];
+        const collapsed = !searchHasTerm
+          && (collapsedConversationGroups[group.groupKey] ?? defaultConversationGroupCollapsed(group.groupKey, group.groupKind));
         const groupRoomConversations = group.items.filter((conversation) => conversation.type === "group_room");
         const directSessionConversations = group.items.filter((conversation) => conversation.type !== "group_room");
         return (

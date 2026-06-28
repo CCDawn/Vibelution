@@ -64,7 +64,7 @@ export const DEFAULT_COLLAPSED_CONVERSATION_GROUPS: Record<ConversationIndexGrou
   research: false,
   selfEvolution: false,
   supervisedEvolution: false,
-  teams: false,
+  teams: true,
   setupTeams: true,
   standaloneGroups: true,
   other: false,
@@ -81,6 +81,16 @@ export const CONVERSATION_GROUP_ORDER: ConversationIndexGroupKey[] = [
   "other",
   "invalid",
 ];
+
+export function defaultConversationGroupCollapsed(
+  groupKey: ConversationIndexDynamicGroupKey,
+  groupKind?: ConversationIndexGroup["groupKind"],
+) {
+  if (groupKind === "team" || String(groupKey).startsWith("team:")) {
+    return true;
+  }
+  return DEFAULT_COLLAPSED_CONVERSATION_GROUPS[groupKey as ConversationIndexGroupKey] ?? false;
+}
 
 type TeamAwareConversationSummary = ConversationSummary & {
   teamId?: string;
