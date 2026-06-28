@@ -145,9 +145,10 @@ describe("ConversationView edit resend affordance", () => {
     expect(conversationViewSource).toContain("return messageDefaults[section]");
   });
 
-  it("renders streaming assistant text through a light text path before markdown parsing", () => {
+  it("renders streaming assistant markdown progressively instead of waiting for the final answer", () => {
     expect(conversationViewSource).toContain("function renderStreamingResponseText(content: string)");
-    expect(conversationViewSource).toContain("<StreamingResponseContent content={content} />");
+    expect(conversationViewSource).toContain("<StreamingResponseContent content={content} renderBlock={renderMarkdownBlock} />");
+    expect(conversationViewSource).toContain("parseStreamingMarkdownBlocks");
     expect(conversationViewSource).toContain("STREAMING_RESPONSE_REVEAL_MAX_CHARS");
     expect(conversationViewSource).toContain("STREAMING_RESPONSE_CATCH_UP_BACKLOG_CHARS");
     expect(conversationViewSource).toContain("type StreamingRevealState");
@@ -156,13 +157,10 @@ describe("ConversationView edit resend affordance", () => {
     expect(conversationViewSource).toContain("appendStableText");
     expect(conversationViewSource).toContain("requestAnimationFrame");
     expect(conversationViewSource).toContain("setVisibleContent");
-    expect(conversationViewSource).toContain("styles.streamingResponseText");
-    expect(conversationViewSource).toContain("styles.streamingResponseParagraph");
     expect(conversationViewSource).toContain("const isResponseStreaming = Boolean(message.streaming) && showResponseBlock");
     expect(conversationViewSource).toContain("showResponseBlock && !isStreamingStatusPlaceholder && responseExpanded && !isResponseStreaming");
     expect(conversationViewSource).toContain("? renderStreamingResponseText(message.content)");
     expect(conversationViewStylesSource).toContain(".streamingResponseText");
-    expect(conversationViewStylesSource).toContain(".streamingResponseParagraph");
   });
 
   it("does not reintroduce a fixed-rate typewriter buffer for live assistant deltas", () => {
@@ -1641,6 +1639,61 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).toContain("OLD_RECENT_ASSISTANT_RESPONSE_STAYS_VISIBLE");
     expect(html).toContain("STREAMING_ASSISTANT_RESPONSE_STAYS_VISIBLE");
     expect(html).toContain("LATEST_ASSISTANT_RESPONSE_STAYS_VISIBLE");
+  });
+
+  it("renders streaming headings lists and open code fences as components", () => {
+    const html = renderConversation([
+      {
+        id: "message-streaming-markdown",
+        role: "assistant",
+        content: [
+          "## 实时标题",
+          "",
+          "- **第一项**：`alpha`",
+          "- 第二项",
+          "",
+          "```ts",
+          "const value = 1;",
+          "return value;",
+        ].join("\n"),
+        timestamp: "2026-05-22T00:02:00Z",
+        streaming: true,
+      },
+    ]);
+
+    expect(html).toContain("markdownHeading2");
+    expect(html).toContain("实时标题");
+    expect(html).toContain("<ul");
+    expect(html).toContain("inlineStrong");
+    expect(html).toContain("inlineCode");
+    expect(html).toContain("responseSegmentPre");
+    expect(html).toContain("const value = 1;");
+    expect(html).not.toContain("## 实时标题");
+    expect(html).not.toContain("```ts");
+  });
+
+  it("renders streaming markdown tables once the header and separator are visible", () => {
+    const html = renderConversation([
+      {
+        id: "message-streaming-table",
+        role: "assistant",
+        content: [
+          "| 指标 | 数值 |",
+          "| --- | --- |",
+          "| 缓存 | 98% |",
+        ].join("\n"),
+        timestamp: "2026-05-22T00:02:00Z",
+        streaming: true,
+      },
+    ]);
+
+    expect(html).toContain("markdownTable");
+    expect(html).toContain("<table");
+    expect(html).toContain("<th");
+    expect(html).toContain("<td");
+    expect(html).toContain("缓存");
+    expect(html).toContain("98%");
+    expect(html).not.toContain("| --- | --- |");
   });
 
   it("renders only the latest message window by default for long conversations", () => {
