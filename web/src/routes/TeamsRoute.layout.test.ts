@@ -529,6 +529,12 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("materializedSources");
     expect(routeSource).toContain("SourceCollectionCoverageSummary");
     expect(routeSource).toContain("coverageSummary");
+    expect(routeSource).toContain("SourceCollectionStageClosureSummary");
+    expect(routeSource).toContain("closureSummary");
+    expect(routeSource).toContain("invalidRecordIds");
+    expect(routeSource).toContain("本轮未生成候选资料");
+    expect(routeSource).toContain("没有生成候选资料");
+    expect(routeSource).toContain("完整 recordId");
     expect(routeSource).toContain("sourceCollectionCoverageMetric");
     expect(routeSource).toContain("invalidCandidateIds");
     expect(routeSource).toContain("materializedContentExtraction");
