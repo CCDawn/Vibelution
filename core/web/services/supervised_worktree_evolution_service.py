@@ -6,7 +6,6 @@ import base64
 import json
 import queue
 import shutil
-import subprocess
 import tempfile
 import threading
 import time
@@ -18,6 +17,10 @@ from typing import Any, Callable
 from uuid import uuid4
 
 from core.evaluation import load_supervised_bundle, prepare_dataset_run
+from core.evaluation.supervised_evolution import (
+    normalize_supervised_mental_model_mode,
+    supervised_mental_model_enabled_for_mode,
+)
 from core.infrastructure import developer_sandbox, git_process
 from core.runtime_manager import work_run_store
 from core.runtime_manager.work_run_leases import (
@@ -28,20 +31,18 @@ from core.runtime_manager.work_run_leases import (
 )
 from core.runtime_manager.work_run_store import WorkRunStore
 from scripts.evolution_harness import (
-    HarnessResult,
-    build_agent_command,
     create_checkpoint_snapshot,
-    create_harness_config,
     create_worktree,
     delete_checkpoint_ref,
+    HarnessResult,
     remove_worktree,
-    resolve_python_executable,
-    run_harness,
 )
 
 from .i18n import get_web_language, text_for
 from .runtime_scene_service import record_runtime_scene_event
 from .session_service import list_active_session_work_runs
+from .supervised_agent_service import supervised_agent_bindings
+from .supervised_conversation_harness_adapter import run_supervised_conversation_harness
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -147,6 +148,9 @@ def start_supervised_worktree_run(payload: dict[str, Any]) -> dict[str, Any]:
             "startRequest": options["startRequest"],
             "selfEvolutionOrigin": options["selfEvolutionOrigin"],
             "reviewGate": options["reviewGate"],
+            "agentBindings": options["agentBindings"],
+            "mentalModelMode": options["mentalModelMode"],
+            "mentalModelEnabled": options["mentalModelEnabled"],
             "startedAt": now,
             "updatedAt": now,
             "finishedAt": "",
@@ -207,6 +211,9 @@ def run_supervised_worktree_flow(
         "startRequest": options["startRequest"],
         "selfEvolutionOrigin": options["selfEvolutionOrigin"],
         "reviewGate": options["reviewGate"],
+        "agentBindings": options["agentBindings"],
+        "mentalModelMode": options["mentalModelMode"],
+        "mentalModelEnabled": options["mentalModelEnabled"],
         "startedAt": now,
         "updatedAt": now,
         "finishedAt": "",
@@ -573,7 +580,7 @@ def _execute_flow(
         modification = modifier(
             candidate_path,
             str(reflection.get("selfModificationPrompt") or ""),
-            {"runId": run_id, "cancelChecker": cancel_checker},
+            {"runId": run_id, "options": options, "cancelChecker": cancel_checker},
         )
         _raise_if_run_cancelled(snapshot)
         snapshot["candidateModification"] = modification
@@ -647,6 +654,8 @@ def _normalize_start_payload(
     dataset_limit = _coerce_optional_int(payload.get("datasetLimit"))
     self_origin = _normalize_self_evolution_origin(payload)
     review_gate = _normalize_review_gate(payload, self_origin)
+    mental_model_mode = normalize_supervised_mental_model_mode(payload.get("mentalModelMode") or "follow")
+    mental_model_enabled = supervised_mental_model_enabled_for_mode(mental_model_mode)
 
     if mode not in {"auto", "manual"}:
         raise SupervisedWorktreeRunValidationError("mode must be auto or manual.")
@@ -679,6 +688,12 @@ def _normalize_start_payload(
             f"{estimate['modelCalls']} 次模型调用，约 {estimate['estimatedTotalTokens']} tokens。"
             " 如确认消耗，请传 confirmRealLlmCost=true。"
         )
+    agent_bindings = _normalize_worktree_agent_bindings(payload.get("agentBindings"))
+    if execution_mode == "real" and not agent_bindings:
+        try:
+            agent_bindings = _normalize_worktree_agent_bindings(supervised_agent_bindings())
+        except Exception as exc:
+            raise SupervisedWorktreeRunValidationError(f"监督 worktree 真实闭环缺少可用 Agent 绑定：{exc}") from exc
     return {
         "sourceKind": source_kind,
         "mode": mode,
@@ -691,7 +706,28 @@ def _normalize_start_payload(
         "startRequest": _normalize_start_request_metadata(payload),
         "selfEvolutionOrigin": self_origin,
         "reviewGate": review_gate,
+        "agentBindings": agent_bindings,
+        "mentalModelMode": mental_model_mode,
+        "mentalModelEnabled": mental_model_enabled,
     }
+
+
+def _normalize_worktree_agent_bindings(value: Any) -> dict[str, dict[str, Any]]:
+    if not isinstance(value, dict):
+        return {}
+    bindings: dict[str, dict[str, Any]] = {}
+    for role in ("baseline", "candidate", "judge"):
+        item = value.get(role)
+        if not isinstance(item, dict):
+            continue
+        agent_id = str(item.get("agentId") or "").strip()
+        if not agent_id:
+            continue
+        payload = dict(item)
+        payload["agentId"] = agent_id
+        payload["role"] = str(payload.get("role") or role).strip() or role
+        bindings[role] = payload
+    return bindings
 
 
 def _normalize_self_evolution_origin(payload: dict[str, Any]) -> dict[str, Any]:
@@ -833,6 +869,31 @@ def _real_evaluation_runner(project_root: Path, bundle_name: str, role: str, con
     bundle = load_supervised_bundle(bundle_name, project_root=_storage_project_root_arg(project_root))
     cases = list(bundle.get("cases") or [])
     run_id = str(context.get("runId") or "")
+    options = context.get("options") if isinstance(context.get("options"), dict) else {}
+    agent_bindings = options.get("agentBindings") if isinstance(options.get("agentBindings"), dict) else {}
+    agent_binding = dict(agent_bindings.get(role) or {})
+    if not agent_binding.get("agentId"):
+        return {
+            "role": role,
+            "status": "failed",
+            "score": 0.0,
+            "successes": 0,
+            "total": len(cases),
+            "failures": len(cases),
+            "bundleName": bundle_name,
+            "summary": f"{role} evaluation missing supervised Agent binding",
+            "cases": [
+                {
+                    "caseId": str(case.get("case_id") or f"case-{index}"),
+                    "role": role,
+                    "status": "failed",
+                    "reason": "missing_supervised_agent_binding",
+                }
+                for index, case in enumerate(cases, start=1)
+            ],
+        }
+    mental_model_mode = str(options.get("mentalModelMode") or "follow")
+    mental_model_enabled = options.get("mentalModelEnabled")
     cancel_checker = context.get("cancelChecker") if callable(context.get("cancelChecker")) else None
     results: list[dict[str, Any]] = []
     for case in cases:
@@ -850,21 +911,30 @@ def _real_evaluation_runner(project_root: Path, bundle_name: str, role: str, con
                 "cases": results,
             }
         case_id = str(case.get("case_id") or "case").strip() or "case"
-        prompt = str(case.get("baseline_prompt") or case.get("prompt") or "").strip()
+        prompt = (
+            str(case.get("candidate_prompt") or case.get("baseline_prompt") or case.get("prompt") or "").strip()
+            if role == "candidate"
+            else str(case.get("baseline_prompt") or case.get("prompt") or "").strip()
+        )
         scenario = str(case.get("scenario") or "transaction").strip() or "transaction"
         mode = str(case.get("mode") or "single_turn").strip() or "single_turn"
         timeout_seconds = int(case.get("timeout_seconds") or bundle.get("default_timeout_seconds") or 600)
         expect_restart = bool(case.get("expect_restart", False))
         post_restart_observe_seconds = int(case.get("post_restart_observe_seconds") or 20)
-        result = run_harness(
+        result = run_supervised_conversation_harness(
             repo_root=project_root,
             mode=mode,
             prompt=prompt,
             scenario=scenario,
             timeout_seconds=timeout_seconds,
+            max_steps=int(case.get("max_steps") or 0) or None,
             expect_restart=expect_restart,
             post_restart_observe_seconds=post_restart_observe_seconds,
             keep_worktree=False,
+            agent_binding=agent_binding,
+            mental_model_mode=mental_model_mode,
+            mental_model_enabled=mental_model_enabled,
+            workspace_override=project_root if role == "candidate" else None,
             cancel_checker=cancel_checker,
         )
         cancel_reason = _call_cancel_checker(cancel_checker)
@@ -932,84 +1002,48 @@ def _simulation_candidate_modifier(worktree_path: Path, prompt: str, context: di
 
 
 def _real_candidate_modifier(worktree_path: Path, prompt: str, context: dict[str, Any]) -> dict[str, Any]:
-    config_path = create_harness_config(worktree_path)
-    command = build_agent_command(
-        "single_turn",
-        prompt,
-        python_executable=resolve_python_executable(worktree_path),
-        config_path=str(config_path) if config_path else None,
-    )
     started = _now_iso()
     timeout_seconds = 900
     cancel_checker = context.get("cancelChecker") if callable(context.get("cancelChecker")) else None
-    proc: subprocess.Popen[str] | None = None
-    stdout = ""
-    stderr = ""
-    try:
-        proc = subprocess.Popen(
-            command,
-            cwd=str(worktree_path),
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            **_subprocess_no_window_kwargs(),
-        )
-        deadline = time.monotonic() + max(float(timeout_seconds), 0.1)
-        while True:
-            cancel_reason = _call_cancel_checker(cancel_checker)
-            if cancel_reason:
-                _terminate_supervised_subprocess(proc)
-                stdout, stderr = _collect_supervised_process_output(proc)
-                return {
-                    "status": "cancelled",
-                    "startedAt": started,
-                    "endedAt": _now_iso(),
-                    "returnCode": proc.returncode,
-                    "command": command,
-                    "stdoutTail": stdout.splitlines()[-40:],
-                    "stderrTail": stderr.splitlines()[-40:],
-                    "summary": f"candidate self-edit cancelled: {cancel_reason}",
-                }
-
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                _terminate_supervised_subprocess(proc)
-                stdout, stderr = _collect_supervised_process_output(proc)
-                return {
-                    "status": "timeout",
-                    "startedAt": started,
-                    "endedAt": _now_iso(),
-                    "returnCode": proc.returncode,
-                    "command": command,
-                    "stdoutTail": stdout.splitlines()[-40:],
-                    "stderrTail": stderr.splitlines()[-40:],
-                    "summary": f"candidate self-edit timed out after {timeout_seconds}s",
-                }
-
-            try:
-                stdout, stderr = proc.communicate(timeout=min(0.5, remaining))
-                stdout = stdout or ""
-                stderr = stderr or ""
-                break
-            except subprocess.TimeoutExpired:
-                continue
-
-        status = "success" if proc.returncode == 0 else "failed"
+    options = context.get("options") if isinstance(context.get("options"), dict) else {}
+    agent_bindings = options.get("agentBindings") if isinstance(options.get("agentBindings"), dict) else {}
+    agent_binding = dict(agent_bindings.get("candidate") or {})
+    if not agent_binding.get("agentId"):
         return {
-            "status": status,
+            "status": "failed",
             "startedAt": started,
             "endedAt": _now_iso(),
-            "returnCode": proc.returncode,
-            "command": command,
-            "stdoutTail": stdout.splitlines()[-40:],
-            "stderrTail": stderr.splitlines()[-40:],
-            "summary": "candidate self-edit agent finished" if status == "success" else "candidate self-edit agent failed",
+            "summary": "candidate self-edit missing supervised candidate Agent binding",
         }
-    finally:
-        if proc is not None and proc.poll() is None:
-            _terminate_supervised_subprocess(proc)
+    result = run_supervised_conversation_harness(
+        repo_root=worktree_path,
+        mode="single_turn",
+        prompt=prompt,
+        scenario="candidate_self_improvement",
+        timeout_seconds=timeout_seconds,
+        expect_restart=False,
+        post_restart_observe_seconds=0,
+        keep_worktree=True,
+        agent_binding=agent_binding,
+        mental_model_mode=str(options.get("mentalModelMode") or "follow"),
+        mental_model_enabled=options.get("mentalModelEnabled"),
+        workspace_override=worktree_path,
+        cancel_checker=cancel_checker,
+    )
+    return {
+        "status": result.status,
+        "startedAt": started,
+        "endedAt": result.ended_at or _now_iso(),
+        "returnCode": result.returncode,
+        "command": result.command,
+        "summary": result.reason or (
+            "candidate self-edit conversation finished"
+            if result.status == "success"
+            else "candidate self-edit conversation failed"
+        ),
+        "conversationSummary": result.evolution_summary,
+        "workspaceOverride": str(worktree_path),
+    }
 
 
 def _default_worktree_factory(project_root: Path, run_id: str) -> dict[str, Any]:
@@ -1721,11 +1755,6 @@ def _git_status_files(repo_root: Path) -> list[dict[str, str]]:
     return items
 
 
-def _subprocess_no_window_kwargs() -> dict[str, int]:
-    flags = int(getattr(subprocess, "CREATE_NO_WINDOW", 0))
-    return {"creationflags": flags} if flags else {}
-
-
 def _call_cancel_checker(cancel_checker: Callable[[], Any] | None) -> str:
     if not callable(cancel_checker):
         return ""
@@ -1736,43 +1765,6 @@ def _call_cancel_checker(cancel_checker: Callable[[], Any] | None) -> str:
     if isinstance(value, bool):
         return "监督工作树进化运行已取消。" if value else ""
     return str(value or "").strip()
-
-
-def _terminate_supervised_subprocess(process: subprocess.Popen[str]) -> None:
-    pid = int(getattr(process, "pid", 0) or 0)
-    if pid > 0:
-        try:
-            from core.runtime_manager.process_inventory import terminate_process_descendants
-
-            terminate_process_descendants(pid, timeout_seconds=1.0)
-        except Exception:
-            pass
-    if process.poll() is None:
-        try:
-            process.terminate()
-        except OSError:
-            pass
-    try:
-        process.wait(timeout=1.0)
-    except subprocess.TimeoutExpired:
-        if process.poll() is None:
-            try:
-                process.kill()
-            except OSError:
-                pass
-
-
-def _collect_supervised_process_output(process: subprocess.Popen[str]) -> tuple[str, str]:
-    try:
-        stdout, stderr = process.communicate(timeout=2.0)
-        return stdout or "", stderr or ""
-    except subprocess.TimeoutExpired:
-        _terminate_supervised_subprocess(process)
-        try:
-            stdout, stderr = process.communicate(timeout=1.0)
-            return stdout or "", stderr or ""
-        except Exception:
-            return "", ""
 
 
 def _change_type(status: str) -> str:
