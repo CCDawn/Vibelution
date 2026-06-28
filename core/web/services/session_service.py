@@ -87,6 +87,7 @@ from core.orchestration.output_boundary import (
     sanitize_assistant_thought_text,
     sanitize_assistant_visible_text,
 )
+from core.orchestration.cache_diagnostics import compact_repeated_metadata_text
 from core.orchestration.context_engine import build_agent_context, record_agent_turn_result
 from core.orchestration.turn_runner import (
     call_agent_factory_with_supported_kwargs,
@@ -8698,8 +8699,8 @@ def _normalize_turn_llm_usage(value: Any) -> dict[str, Any] | None:
         "cacheCreationInputTokens": cache_creation_input_tokens,
         "uncachedInputTokens": uncached_input_tokens,
         "cacheHitRate": (cached_input_tokens / input_tokens) if input_tokens > 0 else 0.0,
-        "provider": str(value.get("provider") or "").strip(),
-        "model": str(value.get("model") or "").strip(),
+        "provider": compact_repeated_metadata_text(value.get("provider") or ""),
+        "model": compact_repeated_metadata_text(value.get("model") or ""),
         "promptCacheScope": str(value.get("prompt_cache_scope") or value.get("promptCacheScope") or "").strip(),
         "promptCachePartition": str(
             value.get("prompt_cache_partition") or value.get("promptCachePartition") or ""
@@ -14827,11 +14828,12 @@ def _record_session_llm_usage_event(
         "provider": str((normalized or {}).get("provider") or "").strip(),
         "model": str((normalized or {}).get("model") or "").strip(),
     }
+    event_code = "conversation.llm_usage.recorded" if observed else "conversation.llm_usage.missing"
     try:
-        record_runtime_scene_event(
+        result = record_runtime_scene_event(
             "conversation",
             "llm_usage",
-            "conversation.llm_usage.recorded" if observed else "conversation.llm_usage.missing",
+            event_code,
             level="info" if observed else "warning",
             outcome="recorded" if observed else "missing",
             message="Conversation turn LLM usage recorded." if observed else "Conversation turn LLM usage missing.",
@@ -14840,6 +14842,18 @@ def _record_session_llm_usage_event(
             child_log_payload=fields,
             lifecycle=False,
         )
+        if isinstance(result, dict) and result.get("accepted") is False:
+            reason = str(result.get("reason") or "unknown").strip() or "unknown"
+            _debug_logger.warning(
+                (
+                    "conversation llm usage runtime scene event rejected: "
+                    f"eventCode={event_code} reason={reason} "
+                    f"sessionId={fields['sessionId']} turnId={fields['turnId']} "
+                    f"source={source} inputTokens={fields['inputTokens']} "
+                    f"cachedInputTokens={fields['cachedInputTokens']}"
+                ),
+                tag="CHAT",
+            )
     except Exception:
         return
 
