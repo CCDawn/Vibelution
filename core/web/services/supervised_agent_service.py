@@ -767,6 +767,7 @@ def _ensure_supervised_role(role: SupervisedAgentRole) -> tuple[dict[str, Any] |
             title=role.label,
             llm_bindings=seed_llm_bindings,
             created_by="supervised_evolution",
+            conversation_index_kind=agent_directory_service.CONVERSATION_INDEX_KIND_HIDDEN,
         )
         agent_id = str(session_detail.get("agentId") or "").strip()
         existing = agent_directory_service.get_agent(agent_id) if agent_id else None
@@ -827,10 +828,14 @@ def _ensure_supervised_role(role: SupervisedAgentRole) -> tuple[dict[str, Any] |
     expected_metadata = {
         "agentMode": "supervised_evolution",
         "configSurface": "model_config",
+        "conversationIndexKind": agent_directory_service.CONVERSATION_INDEX_KIND_HIDDEN,
+        "conversationIndexVisibility": agent_directory_service.CONVERSATION_INDEX_VISIBILITY_HIDDEN,
         "fixedRole": True,
         "protected": role.role in CORE_SUPERVISED_AGENT_ROLES,
+        "showInSessionIndex": False,
         "supervisedRole": role.role,
         "supervisedRoleLabel": role.label,
+        "directSessionVisibility": "active_session",
         "functionalDisplayName": role.label,
         "supervisedRoleContract": _supervised_role_contract(role.role),
     }
