@@ -11706,6 +11706,39 @@ def _supervised_role_for_runtime_context(context: dict[str, Any], agent_instance
     return ""
 
 
+def _supervised_workspace_override_path(context: dict[str, Any]) -> Path | None:
+    """Return a per-turn candidate worktree override for supervised hidden sessions."""
+
+    if str(context.get("user_message_source") or "").strip() != "supervised_evolution":
+        return None
+    candidates: list[Any] = [
+        context.get("message_metadata"),
+        context.get("supervised_context"),
+    ]
+    raw_path = ""
+    for payload in candidates:
+        if not isinstance(payload, dict):
+            continue
+        for key in ("workspaceOverride", "workspace_override", "toolWorkspaceOverride", "tool_workspace_override"):
+            value = str(payload.get(key) or "").strip()
+            if value:
+                raw_path = value
+                break
+        if raw_path:
+            break
+    if not raw_path:
+        return None
+    try:
+        candidate_path = Path(raw_path).expanduser().resolve()
+    except (OSError, RuntimeError) as exc:
+        raise SessionValidationError(f"Invalid supervised workspace override: {raw_path}") from exc
+    if not candidate_path.exists():
+        raise SessionValidationError(f"Supervised workspace override does not exist: {candidate_path}")
+    if not candidate_path.is_dir():
+        raise SessionValidationError(f"Supervised workspace override is not a directory: {candidate_path}")
+    return candidate_path
+
+
 def _run_session_turn(context: dict[str, Any]) -> None:
     prepare_started_at = _perf_counter()
     session_id = str(context.get("session_id") or "").strip()
@@ -11785,14 +11818,20 @@ def _run_session_turn(context: dict[str, Any]) -> None:
         if agent_instance and str((agent_instance or {}).get("workspacePath") or "").strip()
         else session_workspace
     )
+    supervised_workspace_override = _supervised_workspace_override_path(context)
     stage_started_at = _perf_counter()
-    workspace_decision = (
-        evaluate_agent_workspace_write(agent_id, agent_workspace_path, purpose="chat_turn_tool_workspace")
-        if agent_id
-        else None
-    )
+    if supervised_workspace_override is not None:
+        workspace_decision = None
+        tool_workspace = supervised_workspace_override
+    else:
+        workspace_decision = (
+            evaluate_agent_workspace_write(agent_id, agent_workspace_path, purpose="chat_turn_tool_workspace")
+            if agent_id
+            else None
+        )
+        tool_workspace = agent_workspace_path if not workspace_decision or workspace_decision.allowed else session_workspace
     prepare_timings["workspacePolicyMs"] = _elapsed_ms(stage_started_at)
-    tool_workspace = agent_workspace_path if not workspace_decision or workspace_decision.allowed else session_workspace
+    prepare_timings["supervisedWorkspaceOverride"] = str(supervised_workspace_override or "")
     resolved_agent_llm = None
     if agent_instance:
         stage_started_at = _perf_counter()

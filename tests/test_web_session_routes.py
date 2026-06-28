@@ -1,4 +1,6 @@
 import json
+from contextlib import contextmanager
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -1227,6 +1229,105 @@ def test_supervised_agent_session_is_hidden_and_preserves_prompt_with_mental_ove
     assert "resolvedRecentImageReference" not in (latest_user.get("metadata") or {})
     assert session_id not in {item["id"] for item in session_service.list_sessions()}
     assert (agent_directory_service.get_agent("agent-supervised") or {}).get("directSessionId") != session_id
+
+
+def test_supervised_session_workspace_override_routes_tool_workspace_to_candidate_worktree(tmp_path, monkeypatch):
+    _seed_chat_state(tmp_path, conversations=[])
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    candidate_path = tmp_path / "candidate-worktree"
+    candidate_path.mkdir()
+    cfg = runtime_service.get_config().model_copy(deep=True)
+    primary_profile = cfg.llm.get_profile(role="primary")
+    cfg.llm.model_library["model-a"] = {
+        "provider_id": primary_profile.provider_id,
+        "model": "model-a",
+        "label": "Supervised test model",
+    }
+    monkeypatch.setattr(session_service, "get_config", lambda: cfg)
+    agent_directory_service.save_state(
+        {
+            "agents": [
+                {
+                    "agentId": "agent-candidate",
+                    "displayName": "Candidate Agent",
+                    "status": "active",
+                    "directSessionId": "",
+                    "primaryMode": "supervised_evolution",
+                    "roleKey": "candidate",
+                    "toolPolicyId": "tool-agent-candidate",
+                    "metadata": {"supervisedRole": "candidate"},
+                    "llmBindings": {"dialogue": {"modelId": "model-a"}},
+                }
+            ],
+            "toolPolicies": {
+                "tool-agent-candidate": {
+                    "policyId": "tool-agent-candidate",
+                    "allowedTools": [],
+                    "preferredTools": [],
+                    "blockedTools": [],
+                    "readScopes": [],
+                    "writeScopes": [],
+                    "allowedCommandKinds": [],
+                    "blockedCommandPatterns": [],
+                    "networkAccess": "none",
+                    "mutationAccess": "none",
+                    "maxCallsPerTurn": 0,
+                    "perToolRules": {},
+                }
+            },
+        }
+    )
+    captured_overrides: list[tuple[str, str]] = []
+
+    class DummyAgent:
+        def set_mental_model_enabled_override(self, enabled):
+            self.override = enabled
+
+        def seed_chat_history(self, messages):
+            self.seeded_history = list(messages)
+
+        def run_single_turn(self, initial_prompt=None):
+            return {
+                "status": "completed",
+                "summary": f"seen: {initial_prompt}",
+                "raw_output": f"seen: {initial_prompt}",
+                "tool_call_count": 0,
+                "tool_trace": [],
+            }
+
+    @contextmanager
+    def capture_workspace_override(session_workspace, memory_workspace=None):
+        captured_overrides.append((str(session_workspace), str(memory_workspace or "")))
+        yield
+
+    monkeypatch.setattr(session_service, "create_chat_agent", DummyAgent)
+    monkeypatch.setattr(session_service, "_session_tool_workspace_override", capture_workspace_override)
+    monkeypatch.setattr(
+        session_service,
+        "_schedule_session_turn",
+        lambda context: session_service._run_session_turn(context),
+    )
+
+    created = session_service.create_supervised_agent_session(
+        agent_id="agent-candidate",
+        title="hidden supervised candidate",
+        metadata={"role": "candidate", "workspaceOverride": str(candidate_path)},
+    )
+    response = session_service.submit_session_message(
+        created["id"],
+        "improve inside candidate worktree",
+        mental_model_enabled=False,
+        message_source="supervised_evolution",
+    )
+
+    assert response["messages"][-1]["content"].startswith("seen: improve inside candidate worktree")
+    assert captured_overrides
+    tool_workspace, memory_workspace = captured_overrides[-1]
+    assert Path(tool_workspace).resolve() == candidate_path.resolve()
+    assert Path(memory_workspace).resolve() != candidate_path.resolve()
+
+
 def test_session_query_keeps_active_session_on_default_first_page(tmp_path, monkeypatch):
     conversations = []
     for index in range(60):

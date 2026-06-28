@@ -128,6 +128,7 @@ class SupervisedWorktreeRunStartPayload(BaseModel):
     mode: str = "auto"
     executionMode: str = "simulation"
     confirmRealLlmCost: bool = False
+    mentalModelMode: str = "follow"
     uiRoute: str = "/evolution"
     clientAction: str = "start_supervised_worktree_run"
 
