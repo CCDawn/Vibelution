@@ -1769,10 +1769,11 @@ def _handle_progress_event(run_id: str, event: dict[str, Any]) -> None:
             state["currentCaseId"] = str(event.get("case_id") or "")
             state["currentRole"] = str(event.get("role") or "")
             state["currentAgentBinding"] = _agent_binding_snapshot(event.get("agent_binding") or state.get("currentAgentBinding"))
+            role_session_status = "reused" if event_type == "role_reused" else _role_finish_session_status(event)
             _sync_role_conversation_session_locked(
                 state,
                 event,
-                status="completed" if event_type == "role_finish" else "reused",
+                status=role_session_status,
             )
             state["latestMessage"] = _event_summary(event)
             state["runtimeStatus"] = "stopping" if stop_requested else "waiting" if pause_requested else "running"
@@ -2255,7 +2256,6 @@ def _role_finish_session_status(event: dict[str, Any]) -> str:
         return "completed"
     return status or "completed"
 
-
 def _normalize_supervised_session_status(value: Any) -> str:
     status = str(value or "").strip().lower()
     if status in {"success", "completed", "done", "passed"}:
@@ -2404,8 +2404,6 @@ def _normalize_supervised_role_session_evidence(payload: dict[str, Any]) -> None
         )
     if diagnostic_refs:
         payload["diagnosticRefs"] = diagnostic_refs
-
-
 def build_supervised_closed_loop_record(snapshot: dict[str, Any] | None) -> dict[str, Any] | None:
     """Project a supervised run into a compact review ledger record."""
 

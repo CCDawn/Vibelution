@@ -1041,6 +1041,23 @@ def test_handle_progress_event_updates_current_case_io_snapshot():
     assert candidate_session["caseId"] == "case_2"
     assert candidate_session["caseIndex"] == 2
 
+    service._handle_progress_event(
+        run_id,
+        {
+            "event": "role_finish",
+            "case_index": 2,
+            "case_total": 2,
+            "case_id": "case_2",
+            "role": "candidate",
+            "status": "cancelled",
+            "reason": "operator stopped the turn",
+        },
+    )
+    snapshot = service.get_supervised_run_snapshot(run_id)
+    candidate_session = snapshot["roleConversationSessions"]["candidate"]
+    assert candidate_session["status"] == "cancelled"
+    assert candidate_session["caseId"] == "case_2"
+
 
 def test_handle_progress_event_records_environment_preflight_live_event():
     run_id = _seed_running_run()

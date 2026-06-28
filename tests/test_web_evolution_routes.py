@@ -528,7 +528,7 @@ def test_evolution_workspace_snapshot_keeps_current_agent_bindings_separate_from
     assert response.status_code == 200
     payload = response.json()
     assert payload["latestRun"]["agentBindings"]["baseline"]["dialogueModelId"] == "xiaomi_mimo_v2_5_pro_token_plan"
-    assert payload["latestClosedLoopRecord"]["runId"] == "old-run"
+    assert payload["latestClosedLoopRecord"] is None
     assert payload["currentAgentBindings"]["baseline"]["agentId"] == "agent-current"
     assert payload["currentAgentBindings"]["baseline"]["dialogueModelId"] == "mimo_v2_5"
     assert payload["currentAgentBindingStatus"] == "ready"

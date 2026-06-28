@@ -192,19 +192,21 @@ def _supervised_role_model_id(role: str) -> str:
     if normalized_role:
         profile_ids.append(f"supervised_{normalized_role}")
     for profile_id in profile_ids:
-        try:
-            profile = config.llm.get_profile(profile_id=profile_id)
-            model_id, _entry = config.llm.get_model_library_entry_for_profile(profile)
-        except Exception:
-            continue
-        normalized_model_id = str(model_id or "").strip()
-        if normalized_model_id:
-            return normalized_model_id
+        model_id = _profile_model_id(config, profile_id)
+        if model_id:
+            return model_id
+    primary_model_id = _profile_model_id(config, "primary")
+    if primary_model_id:
+        return primary_model_id
     preferred_model_id = _preferred_supervised_model_id(config)
     if preferred_model_id:
         return preferred_model_id
+    return ""
+
+
+def _profile_model_id(config: Any, profile_id: str) -> str:
     try:
-        profile = config.llm.get_profile(profile_id="primary")
+        profile = config.llm.get_profile(profile_id=profile_id)
         model_id, _entry = config.llm.get_model_library_entry_for_profile(profile)
     except Exception:
         return ""

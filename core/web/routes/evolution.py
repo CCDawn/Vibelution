@@ -217,9 +217,7 @@ def evolution_workspace_snapshot(includeSelf: bool = False) -> dict:
     latest_run = timed("latest_run", lambda: get_latest_supervised_run(active_run=active_run, active_run_loaded=True))
     latest_closed_loop_record = timed(
         "latest_closed_loop_record",
-        lambda: latest_run.get("closedLoopRecord")
-        if isinstance(latest_run, dict) and isinstance(latest_run.get("closedLoopRecord"), dict)
-        else build_supervised_closed_loop_record(latest_run),
+        lambda: _reviewable_supervised_closed_loop_record(latest_run),
     )
     current_agent_bindings = timed("current_agent_bindings", current_supervised_agent_bindings_snapshot)
     if isinstance(current_agent_bindings, dict):
@@ -267,6 +265,21 @@ def evolution_workspace_snapshot(includeSelf: bool = False) -> dict:
         include_self=includeSelf,
     )
     return payload
+
+
+def _reviewable_supervised_closed_loop_record(latest_run: dict | None) -> dict | None:
+    if not isinstance(latest_run, dict):
+        return None
+    record = (
+        latest_run.get("closedLoopRecord")
+        if isinstance(latest_run.get("closedLoopRecord"), dict)
+        else build_supervised_closed_loop_record(latest_run)
+    )
+    if not isinstance(record, dict):
+        return None
+    if str(record.get("recordStatus") or "").strip().lower() == "incomplete":
+        return None
+    return record
 
 
 @router.get("/evolution/runs")
