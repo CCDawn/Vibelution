@@ -97,6 +97,7 @@ from core.orchestration.turn_runner import (
 from core.runtime_manager.evolution_store import load_active_run_snapshot as load_evolution_active_run_snapshot
 from core.runtime_manager.work_run_leases import (
     MEMORY_WRITE_LEASE,
+    SUPERVISED_EVALUATION_CHAT_LEASE,
     WORKTREE_WRITE_LEASE,
     WorkRunLeaseRequest,
     check_lease_conflicts,
@@ -5248,7 +5249,7 @@ def submit_session_message(
             )
 
         if normalized_message_source == "supervised_evolution":
-            requested_leases = ["readonly_chat"]
+            requested_leases = [SUPERVISED_EVALUATION_CHAT_LEASE]
         else:
             requested_leases = infer_chat_turn_leases(
                 {
@@ -12136,6 +12137,7 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                     agent_instance=agent_instance,
                     llm_slot=llm_slot,
                     resolved_llm=resolved_agent_llm,
+                    mode="supervised_evolution" if supervised_runtime_role else "chat",
                 )
                 agent_create_ms = _elapsed_ms(stage_started_at)
                 attachments = _normalize_message_attachments(context.get("attachments") or [])
@@ -12575,18 +12577,20 @@ def _create_chat_agent_for_session(
     agent_instance: dict[str, Any] | None,
     llm_slot: str = SESSION_LLM_SLOT_DIALOGUE,
     resolved_llm: Any | None = None,
+    mode: str = "chat",
 ) -> Any:
     agent_config = getattr(resolved_llm, "config", None) or _session_agent_config_for_llm_slot(agent_instance, llm_slot)
     return call_agent_factory_with_supported_kwargs(
         create_chat_agent,
+        mode=mode,
         workspace_path=session_workspace,
         config=agent_config,
     )
 
 
-def create_chat_agent(workspace_path: str | Path | None = None, config: Any | None = None) -> Any:
+def create_chat_agent(workspace_path: str | Path | None = None, config: Any | None = None, mode: str = "chat") -> Any:
     return create_agent_runtime(
-        mode="chat",
+        mode=str(mode or "chat").strip() or "chat",
         workspace_path=str(workspace_path) if workspace_path else None,
         config=config,
     )
