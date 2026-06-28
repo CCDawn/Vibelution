@@ -1351,6 +1351,122 @@ def test_supervised_closed_loop_record_projects_decision_policy_and_role_session
     assert decorated["closedLoopRecord"]["runId"] == "web-supervised-finished"
 
 
+def test_decorate_supervised_snapshot_repairs_legacy_role_result_status_and_child_refs():
+    snapshot = {
+        "runId": "web-supervised-legacy",
+        "sessionId": "supervised_20260628_053141",
+        "status": "cancelled",
+        "currentPhase": "cancelled",
+        "runtimeStatus": "idle",
+        "sourceKind": "bundle",
+        "bundleName": "terminal_bench_agent_judged_v1",
+        "currentCaseId": "tb_agent_local_registry_probe",
+        "roleConversationSessions": {
+            "baseline": {
+                "role": "baseline",
+                "status": "completed",
+                "agentId": "agent-baseline",
+                "conversationSessionId": "session-baseline",
+                "conversationTurnId": "session-baseline-20260628133142386442",
+                "caseId": "tb_agent_local_registry_probe",
+            },
+            "candidate": {
+                "role": "candidate",
+                "status": "completed",
+                "agentId": "agent-candidate",
+                "conversationSessionId": "session-candidate",
+                "conversationTurnId": "session-candidate-20260628133408449610",
+                "caseId": "tb_agent_local_registry_probe",
+            },
+        },
+        "eventTail": [
+            {
+                "event": "role_finish",
+                "role": "baseline",
+                "status": "failed",
+                "caseId": "tb_agent_local_registry_probe",
+                "reason": "事务探针未开账",
+                "agentBinding": {"agentId": "agent-baseline"},
+            },
+            {
+                "event": "role_finish",
+                "role": "candidate",
+                "status": "cancelled",
+                "caseId": "tb_agent_local_registry_probe",
+                "reason": "监督运行已按请求终止。",
+                "agentBinding": {"agentId": "agent-candidate"},
+            },
+        ],
+    }
+
+    decorated = service._decorate_supervised_snapshot(copy.deepcopy(snapshot))
+
+    baseline = decorated["roleConversationSessions"]["baseline"]
+    candidate = decorated["roleConversationSessions"]["candidate"]
+    assert baseline["status"] == "failed"
+    assert baseline["supervisedResultStatus"] == "failed"
+    assert baseline["conversationStatus"] == "completed"
+    assert baseline["childRunRefs"]["chatTurnRunId"] == "session-baseline-20260628133142386442"
+    assert baseline["childRunRefs"]["agentRunId"] == (
+        "agentrun-agent-baseline-session-baseline-20260628133142386442"
+    )
+    assert baseline["diagnosticRefs"]["roleReportPath"].endswith(
+        "workspace/supervised_evolution/sessions/supervised_20260628_053141/tb_agent_local_registry_probe_baseline.json"
+    )
+    assert candidate["status"] == "cancelled"
+    assert candidate["supervisedResultStatus"] == "cancelled"
+    assert decorated["childRunRefs"]["baseline"] == baseline["childRunRefs"]
+    assert decorated["closedLoopRecord"]["roleSessions"]["baseline"]["status"] == "failed"
+    assert decorated["closedLoopRecord"]["roleSessions"]["candidate"]["status"] == "cancelled"
+    assert decorated["closedLoopRecord"]["roleSessions"]["baseline"]["childRunRefs"] == baseline["childRunRefs"]
+    assert decorated["diagnosticRefs"]["roleReports"]["baseline"] == baseline["diagnosticRefs"]["roleReportPath"]
+
+
+def test_closed_loop_record_preserves_role_child_refs_and_diagnostic_refs():
+    snapshot = {
+        "runId": "web-supervised-with-child-refs",
+        "sessionId": "supervised_session",
+        "status": "failed",
+        "currentPhase": "failed",
+        "runtimeStatus": "idle",
+        "sourceKind": "bundle",
+        "bundleName": "manual_bundle",
+        "roleConversationSessions": {
+            "baseline": {
+                "role": "baseline",
+                "status": "failed",
+                "supervisedResultStatus": "failed",
+                "conversationStatus": "completed",
+                "conversationSessionId": "session-baseline",
+                "conversationTurnId": "turn-baseline",
+                "caseId": "case_1",
+                "childRunRefs": {
+                    "chatTurnRunId": "turn-baseline",
+                    "agentRunId": "agentrun-agent-baseline-turn-baseline",
+                },
+                "diagnosticRefs": {
+                    "roleReportPath": "workspace/supervised_evolution/sessions/supervised_session/case_1_baseline.json",
+                },
+            }
+        },
+        "diagnosticRefs": {
+            "roleReports": {
+                "baseline": "workspace/supervised_evolution/sessions/supervised_session/case_1_baseline.json",
+            }
+        },
+    }
+
+    record = service.build_supervised_closed_loop_record(snapshot)
+
+    baseline = record["roleSessions"]["baseline"]
+    assert baseline["status"] == "failed"
+    assert baseline["supervisedResultStatus"] == "failed"
+    assert baseline["conversationStatus"] == "completed"
+    assert baseline["childRunRefs"]["agentRunId"] == "agentrun-agent-baseline-turn-baseline"
+    assert baseline["diagnosticRefs"]["roleReportPath"].endswith("case_1_baseline.json")
+    assert record["evidence"]["diagnosticRefs"]["roleReports"]["baseline"].endswith("case_1_baseline.json")
+
+
 def test_runtime_manager_workbench_can_skip_catalog_scan(monkeypatch):
     monkeypatch.setattr(service, "_runtime_manager_live_control_enabled", lambda: True)
     monkeypatch.setattr(service, "default_bundle_name", lambda: "default_bundle")
