@@ -2519,6 +2519,17 @@ export type LauncherComponentState = {
   detail: string;
 };
 
+export type LauncherRequestAudit = {
+  operation?: string;
+  trigger?: string;
+  endpoint?: string;
+  method?: string;
+  clientHost?: string;
+  refererPath?: string;
+  originHost?: string;
+  userAgent?: string;
+};
+
 export type LauncherProjectBundleState = {
   schemaVersion: number;
   id: string;
@@ -2536,6 +2547,7 @@ export type LauncherProjectBundleState = {
     reason: string;
     source: string;
     transitionAt: string;
+    requestAudit?: LauncherRequestAudit;
   };
   components: LauncherComponentState[];
   backend: {

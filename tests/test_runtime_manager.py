@@ -5300,9 +5300,11 @@ def test_handle_open_workbench_skips_initial_observation_when_cached_closed(monk
             "desiredState": "closed",
             "observedState": "closed",
             "phase": "steady",
+            "lastRequestAudit": {"operation": "stop", "trigger": "stale_close"},
         },
     }
     events: list[tuple[str, dict]] = []
+    saved_states: list[dict] = []
     observe_calls = 0
 
     ready_observation = {
@@ -5329,7 +5331,7 @@ def test_handle_open_workbench_skips_initial_observation_when_cached_closed(monk
         return dict(ready_observation)
 
     monkeypatch.setattr(daemon, "load_state", lambda: state)
-    monkeypatch.setattr(daemon, "save_state", lambda next_state: next_state)
+    monkeypatch.setattr(daemon, "save_state", lambda next_state: saved_states.append(json.loads(json.dumps(next_state))) or next_state)
     monkeypatch.setattr(daemon, "observe_workbench", fake_observe_workbench)
     monkeypatch.setattr(daemon, "build_evolution_summary", lambda: {"self": {}, "supervised": {}})
     monkeypatch.setattr(daemon, "_start_background_thread", lambda **kwargs: None)
@@ -5340,10 +5342,11 @@ def test_handle_open_workbench_skips_initial_observation_when_cached_closed(monk
         lambda *, no_browser, cancel_check=None: subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr=""),
     )
 
-    result = runtime_daemon._handle_open_workbench(command_id="cmd-open", args={})
+    result = runtime_daemon._handle_open_workbench(command_id="cmd-open", args={"reason": "launcher_start_button", "source": "launcher_api"})
 
     assert result["ok"] is True
     assert observe_calls == 1
+    assert saved_states[0]["workbench"]["lastRequestAudit"] == {}
     assert _event_payload(events, "workbench.open.fast_path_started")["prelaunchProbeSkipped"] is True
 
 
@@ -7026,6 +7029,7 @@ def test_handle_restart_workbench_accepts_trusted_backend_when_health_probe_lags
 def test_handle_close_workbench_records_shutdown_source(monkeypatch):
     runtime_daemon = daemon.RuntimeManagerDaemon()
     saved_states: list[dict] = []
+    events: list[tuple[str, dict]] = []
     state = {
         "command": {"activeCommandId": "cmd-close"},
         "workbench": {
@@ -7037,6 +7041,7 @@ def test_handle_close_workbench_records_shutdown_source(monkeypatch):
 
     monkeypatch.setattr(daemon, "load_state", lambda: state)
     monkeypatch.setattr(daemon, "save_state", lambda next_state: saved_states.append(json.loads(json.dumps(next_state))) or next_state)
+    monkeypatch.setattr(daemon, "_append_event", lambda event_type, payload: events.append((event_type, payload)))
     monkeypatch.setattr(daemon, "now_iso", lambda: "2026-05-19T09:00:00+00:00")
     monkeypatch.setattr(
         daemon,
@@ -7090,16 +7095,37 @@ def test_handle_close_workbench_records_shutdown_source(monkeypatch):
         "_close_active_evolution_runs_for_shutdown",
         lambda: closed_calls.append("closed") or [],
     )
+    request_audit = {
+        "operation": "stop",
+        "trigger": "app_shell_shutdown_button",
+        "endpoint": "/api/launcher/stop",
+        "method": "POST",
+        "refererPath": "/launcher",
+        "secret": "ignored",
+    }
 
     result = runtime_daemon._handle_close_workbench(
         command_id="cmd-close",
-        args={"reason": "web_close_button", "source": "web_ui"},
+        args={"reason": "web_close_button", "source": "web_ui", "requestAudit": request_audit},
     )
 
     assert result["ok"] is True
     assert closed_calls == ["closed"]
     assert saved_states[0]["workbench"]["lastReason"] == "web_close_button"
     assert saved_states[0]["workbench"]["lastSource"] == "web_ui"
+    assert saved_states[0]["workbench"]["lastRequestAudit"] == {
+        "operation": "stop",
+        "trigger": "app_shell_shutdown_button",
+        "endpoint": "/api/launcher/stop",
+        "method": "POST",
+        "refererPath": "/launcher",
+    }
+    requested_payload = _event_payload(events, "workbench.close.requested")
+    assert requested_payload["requestAudit"]["trigger"] == "app_shell_shutdown_button"
+    assert requested_payload["reason"] == "web_close_button"
+    succeeded_payload = _event_payload(events, "workbench.close.verification_succeeded")
+    assert succeeded_payload["requestAudit"]["endpoint"] == "/api/launcher/stop"
+    assert result["closeRequest"]["requestAudit"]["operation"] == "stop"
 
 
 def test_handle_close_workbench_uses_runtime_manager_fast_path(monkeypatch):
