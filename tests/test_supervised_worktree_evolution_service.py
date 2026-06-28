@@ -6,6 +6,7 @@ import pytest
 
 from core.infrastructure import developer_sandbox
 from core.web.services import supervised_worktree_evolution_service as service
+from scripts.evolution_harness import HarnessResult
 
 pytestmark = pytest.mark.slow
 
@@ -66,6 +67,47 @@ def _fake_evaluator(_: Path, bundle_name: str, role: str, __: dict) -> dict:
         "bundleName": bundle_name,
         "summary": f"{role} fake score",
     }
+
+
+def _fake_harness_result(*, role: str, repo_root: Path, prompt: str, status: str = "success") -> HarnessResult:
+    return HarnessResult(
+        harness_id=f"h_{role}",
+        status=status,
+        reason=f"{role} ok" if status == "success" else f"{role} failed",
+        started_at="2026-05-14T00:00:00Z",
+        ended_at="2026-05-14T00:00:10Z",
+        repo_root=str(repo_root),
+        worktree_path=str(repo_root),
+        base_head="abc123",
+        checkpoint_commit="abc123",
+        checkpoint_ref=None,
+        tracked_dirty=False,
+        untracked_files=[],
+        command=["session_service.submit_session_message", "--prompt", prompt],
+        returncode=0 if status == "success" else 1,
+        timeout_seconds=60,
+        restarts_observed=0,
+        normalized_restarts_observed=0,
+        restart_expected=False,
+        restart_reentered=False,
+        process_history=[],
+        process_summary={},
+        new_conversation_files=[],
+        new_debug_files=[],
+        stdout_tail=[],
+        stderr_tail=[],
+        agent_realtime_tail=[],
+        last_observation={},
+        post_restart_observation={},
+        evolution_summary={
+            "validation": {"passed": 1 if status == "success" else 0, "failed": 0 if status == "success" else 1, "last": None},
+            "transaction": {"opened": False, "closed": False, "status": None, "txn_id": None},
+            "git": {"commit_detected": False, "commit_refs": []},
+            "restart": {"expected": False, "triggered": False, "reentered": False},
+            "guarded_tools": {"total": 0, "restart_guarded": 0},
+        },
+        agent_binding={"role": role},
+    )
 
 
 def _retryable_provider_failure_evaluator(_: Path, bundle_name: str, role: str, __: dict) -> dict:
@@ -209,6 +251,84 @@ def test_self_origin_worktree_flow_carries_goal_and_requires_review(tmp_path):
     assert "supervised_review_pending" in snapshot["mergeAnalysis"]["blockers"]
     assert snapshot["actionStates"]["approveReview"]["enabled"] is True
     assert snapshot["actionStates"]["merge"]["enabled"] is False
+
+
+def test_real_worktree_flow_uses_supervised_conversation_chain_for_candidate_branch(tmp_path, monkeypatch):
+    project_root = tmp_path / "project"
+    _init_repo(project_root)
+    (project_root / "agent.py").write_text("print('base')\n", encoding="utf-8")
+    _write_bundle(project_root)
+    _run_git(project_root, "add", ".")
+    _run_git(project_root, "commit", "-m", "init")
+    calls: list[dict] = []
+
+    def worktree_factory(root: Path, run_id: str) -> dict:
+        candidate = _make_candidate_repo(tmp_path, root)
+        return {
+            "path": str(candidate),
+            "baseHead": "base",
+            "checkpointCommit": "base",
+            "checkpointRef": "",
+            "trackedDirty": False,
+            "untrackedFiles": [],
+        }
+
+    def fake_bindings() -> dict:
+        return {
+            "baseline": {"agentId": "agent-baseline", "role": "baseline", "workspacePath": "workspace/agents/baseline"},
+            "candidate": {"agentId": "agent-candidate", "role": "candidate", "workspacePath": "workspace/agents/candidate"},
+            "judge": {"agentId": "agent-judge", "role": "judge", "workspacePath": "workspace/agents/judge"},
+        }
+
+    def fake_conversation_harness(**kwargs):
+        call = dict(kwargs)
+        calls.append(call)
+        role = str((kwargs.get("agent_binding") or {}).get("role") or "")
+        repo_root = Path(kwargs["repo_root"])
+        prompt = str(kwargs.get("prompt") or "")
+        if kwargs.get("scenario") == "candidate_self_improvement":
+            (repo_root / "agent.py").write_text(
+                (repo_root / "agent.py").read_text(encoding="utf-8") + "\n# improved by candidate\n",
+                encoding="utf-8",
+            )
+        return _fake_harness_result(role=role or "candidate", repo_root=repo_root, prompt=prompt)
+
+    monkeypatch.setattr(service, "supervised_agent_bindings", fake_bindings)
+    monkeypatch.setattr(service, "run_supervised_conversation_harness", fake_conversation_harness)
+
+    snapshot = service.run_supervised_worktree_flow(
+        {
+            "sourceKind": "bundle",
+            "bundleName": "closed_loop_v1",
+            "mode": "manual",
+            "executionMode": "real",
+            "confirmRealLlmCost": True,
+            "mentalModelMode": "enabled",
+        },
+        project_root=project_root,
+        dependencies=service.WorktreeRunDependencies(worktree_factory=worktree_factory),
+    )
+
+    assert snapshot["status"] == "done"
+    assert snapshot["candidateWorktree"]["path"]
+    candidate_path = Path(snapshot["candidateWorktree"]["path"]).resolve()
+    assert "# improved by candidate" in (candidate_path / "agent.py").read_text(encoding="utf-8")
+    assert [str(call["agent_binding"]["role"]) for call in calls] == [
+        "baseline",
+        "baseline",
+        "candidate",
+        "candidate",
+        "candidate",
+    ]
+    improvement_call = calls[2]
+    assert improvement_call["scenario"] == "candidate_self_improvement"
+    assert Path(improvement_call["repo_root"]).resolve() == candidate_path
+    assert Path(improvement_call["workspace_override"]).resolve() == candidate_path
+    candidate_eval_calls = calls[3:]
+    assert all(Path(call["repo_root"]).resolve() == candidate_path for call in candidate_eval_calls)
+    assert all(Path(call["workspace_override"]).resolve() == candidate_path for call in candidate_eval_calls)
+    assert snapshot["agentBindings"]["candidate"]["agentId"] == "agent-candidate"
+    assert snapshot["mentalModelMode"] == "enabled"
 
 
 def test_supervised_worktree_flow_stops_when_baseline_provider_transport_fails(tmp_path):
