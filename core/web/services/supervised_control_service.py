@@ -2152,6 +2152,10 @@ def _closed_loop_role_sessions(snapshot: dict[str, Any]) -> dict[str, dict[str, 
         "conversationPath",
         "conversationSessionId",
         "conversationTurnId",
+        "conversationStatus",
+        "supervisedResultStatus",
+        "childRunRefs",
+        "diagnosticRefs",
         "caseId",
         "caseIndex",
         "caseTotal",
@@ -2243,6 +2247,165 @@ def _closed_loop_next_action(
     }
 
 
+def _role_finish_session_status(event: dict[str, Any]) -> str:
+    status = str(event.get("status") or event.get("result_status") or "").strip().lower()
+    if status in {"cancelled", "failed", "timeout"}:
+        return status
+    if status in {"success", "completed", "done", "passed"}:
+        return "completed"
+    return status or "completed"
+
+
+def _normalize_supervised_session_status(value: Any) -> str:
+    status = str(value or "").strip().lower()
+    if status in {"success", "completed", "done", "passed"}:
+        return "completed"
+    return status
+
+
+def _latest_role_terminal_events(payload: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
+    terminal_events: dict[str, list[dict[str, Any]]] = {}
+    for raw in list(payload.get("eventTail") or []):
+        if not isinstance(raw, dict):
+            continue
+        event_name = str(raw.get("event") or "").strip()
+        if event_name not in {"role_finish", "session_cancelled", "session_error"}:
+            continue
+        role = str(raw.get("role") or "").strip().lower()
+        if role:
+            terminal_events.setdefault(role, []).append(raw)
+    return terminal_events
+
+
+def _role_event_case_id(event: dict[str, Any]) -> str:
+    return str(event.get("caseId") or event.get("case_id") or "").strip()
+
+
+def _latest_role_terminal_event_for_session(
+    events: list[dict[str, Any]],
+    session: dict[str, Any],
+) -> dict[str, Any] | None:
+    if not events:
+        return None
+    session_case_id = str(session.get("caseId") or "").strip()
+    if not session_case_id:
+        return events[-1]
+    for event in reversed(events):
+        if _role_event_case_id(event) == session_case_id:
+            return event
+    return None
+
+
+def _infer_supervised_child_run_refs(session: dict[str, Any]) -> dict[str, str]:
+    refs: dict[str, str] = {}
+    existing_refs = session.get("childRunRefs")
+    if isinstance(existing_refs, dict):
+        refs.update(
+            {str(key): str(value) for key, value in existing_refs.items() if str(value or "").strip()}
+        )
+    conversation_session_id = str(session.get("conversationSessionId") or "").strip()
+    conversation_turn_id = str(session.get("conversationTurnId") or "").strip()
+    agent_id = str(session.get("agentId") or "").strip()
+    if conversation_session_id:
+        refs.setdefault("conversationSessionId", conversation_session_id)
+    if conversation_turn_id:
+        refs.setdefault("conversationTurnId", conversation_turn_id)
+        refs.setdefault("chatTurnRunId", conversation_turn_id)
+    if agent_id and conversation_turn_id:
+        refs.setdefault("agentRunId", f"agentrun-{agent_id}-{conversation_turn_id}")
+    return refs
+
+
+def _infer_supervised_role_report_path(payload: dict[str, Any], role: str, session: dict[str, Any]) -> str:
+    diagnostic_refs = session.get("diagnosticRefs") if isinstance(session.get("diagnosticRefs"), dict) else {}
+    report_path = str(
+        session.get("roleReportPath")
+        or session.get("reportPath")
+        or diagnostic_refs.get("roleReportPath")
+        or diagnostic_refs.get("reportPath")
+        or ""
+    ).strip()
+    if report_path:
+        return report_path
+    session_id = str(payload.get("sessionId") or "").strip()
+    case_id = str(session.get("caseId") or payload.get("currentCaseId") or "").strip()
+    role_name = str(role or session.get("role") or "").strip().lower()
+    if session_id and case_id and role_name:
+        return f"workspace/supervised_evolution/sessions/{session_id}/{case_id}_{role_name}.json"
+    return ""
+
+
+def _normalize_supervised_role_session_evidence(payload: dict[str, Any]) -> None:
+    sessions = payload.get("roleConversationSessions")
+    if not isinstance(sessions, dict):
+        return
+    terminal_events = _latest_role_terminal_events(payload)
+    top_level_child_refs = payload.get("childRunRefs") if isinstance(payload.get("childRunRefs"), dict) else {}
+    top_level_child_refs = dict(top_level_child_refs)
+    diagnostic_refs = payload.get("diagnosticRefs") if isinstance(payload.get("diagnosticRefs"), dict) else {}
+    diagnostic_refs = dict(diagnostic_refs)
+    role_reports = diagnostic_refs.get("roleReports") if isinstance(diagnostic_refs.get("roleReports"), dict) else {}
+    role_reports = dict(role_reports)
+
+    for raw_role, raw_session in list(sessions.items()):
+        if not isinstance(raw_session, dict):
+            continue
+        role = str(raw_session.get("role") or raw_role or "").strip().lower()
+        if not role:
+            continue
+        session = dict(raw_session)
+        existing_status = _normalize_supervised_session_status(session.get("status"))
+        terminal_event = _latest_role_terminal_event_for_session(terminal_events.get(role) or [], session)
+        existing_result_status = _normalize_supervised_session_status(session.get("supervisedResultStatus"))
+        result_status = _role_finish_session_status(terminal_event) if terminal_event is not None else ""
+        result_status = _normalize_supervised_session_status(result_status or existing_result_status)
+        if result_status:
+            session["supervisedResultStatus"] = result_status
+            if result_status in {"completed", "failed", "cancelled", "timeout"}:
+                session["status"] = result_status
+
+        conversation_status = _normalize_supervised_session_status(session.get("conversationStatus"))
+        if not conversation_status:
+            if existing_status and existing_status != result_status:
+                conversation_status = existing_status
+            elif result_status in {"failed", "cancelled", "timeout"}:
+                conversation_status = "completed"
+            else:
+                conversation_status = result_status
+        if conversation_status:
+            session["conversationStatus"] = conversation_status
+
+        child_refs = _infer_supervised_child_run_refs(session)
+        if child_refs:
+            session["childRunRefs"] = child_refs
+            top_level_child_refs[role] = child_refs
+
+        role_report_path = ""
+        if result_status in {"completed", "failed", "cancelled", "timeout"}:
+            role_report_path = _infer_supervised_role_report_path(payload, role, session)
+        if role_report_path:
+            session_diagnostic_refs = (
+                session.get("diagnosticRefs") if isinstance(session.get("diagnosticRefs"), dict) else {}
+            )
+            session["diagnosticRefs"] = {**session_diagnostic_refs, "roleReportPath": role_report_path}
+            role_reports[role] = role_report_path
+
+        sessions[role] = session
+
+    if top_level_child_refs:
+        payload["childRunRefs"] = top_level_child_refs
+    if role_reports:
+        diagnostic_refs["roleReports"] = role_reports
+    run_id = str(payload.get("runId") or "").strip()
+    if run_id:
+        diagnostic_refs.setdefault(
+            "supervisedRunSnapshotPath",
+            f".runtime/runtime-manager/evolution/supervised/runs/{run_id}.json",
+        )
+    if diagnostic_refs:
+        payload["diagnosticRefs"] = diagnostic_refs
+
+
 def build_supervised_closed_loop_record(snapshot: dict[str, Any] | None) -> dict[str, Any] | None:
     """Project a supervised run into a compact review ledger record."""
 
@@ -2280,6 +2443,9 @@ def build_supervised_closed_loop_record(snapshot: dict[str, Any] | None) -> dict
         "proposalPaths": proposal_paths,
         "touchedFiles": touched_files,
     }
+    diagnostic_refs = snapshot.get("diagnosticRefs") if isinstance(snapshot.get("diagnosticRefs"), dict) else {}
+    if diagnostic_refs:
+        evidence["diagnosticRefs"] = diagnostic_refs
     if status in _ACTIVE_RUN_STATUSES:
         record_status = "active"
     elif decision or decision_path or policy_action:
@@ -2324,6 +2490,7 @@ def build_supervised_closed_loop_record(snapshot: dict[str, Any] | None) -> dict
 
 
 def _decorate_supervised_snapshot(payload: dict[str, Any]) -> dict[str, Any]:
+    _normalize_supervised_role_session_evidence(payload)
     payload["actionStates"] = _supervised_action_states(payload, lang=get_web_language())
     payload["closedLoopRecord"] = build_supervised_closed_loop_record(payload)
     return payload
