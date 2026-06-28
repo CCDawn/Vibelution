@@ -713,6 +713,7 @@ def _ensure_self_evolution_role(role: dict[str, str]) -> dict[str, Any] | None:
             title=label,
             llm_bindings=seed_llm_bindings,
             created_by="self_evolution",
+            conversation_index_kind=agent_directory_service.CONVERSATION_INDEX_KIND_HIDDEN,
         )
         agent_id = str(session_detail.get("agentId") or "").strip()
         existing = agent_directory_service.get_agent(agent_id) if agent_id else None
@@ -732,9 +733,13 @@ def _ensure_self_evolution_role(role: dict[str, str]) -> dict[str, Any] | None:
     expected_metadata = {
         "agentMode": "self_evolution",
         "configSurface": "model_config",
+        "conversationIndexKind": agent_directory_service.CONVERSATION_INDEX_KIND_HIDDEN,
+        "conversationIndexVisibility": agent_directory_service.CONVERSATION_INDEX_VISIBILITY_HIDDEN,
         "fixedRole": True,
+        "showInSessionIndex": False,
         "selfEvolutionRole": role_key,
         "selfEvolutionRoleLabel": label,
+        "directSessionVisibility": "active_session",
         "functionalDisplayName": label,
     }
     if (

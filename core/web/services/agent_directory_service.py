@@ -110,11 +110,11 @@ CONVERSATION_INDEX_KINDS = {
     CONVERSATION_INDEX_KIND_INVALID,
 }
 TEAM_PRIVATE_DIRECT_SESSION_CREATED_BY = {
+    "ai_search_team",
     "challenge_cup_team",
     "knowledge_expansion_team",
 }
 INTERNAL_RECOVERY_DIRECT_SESSION_CREATED_BY = {
-    "ai_search_team",
     "research_organization",
     "self_evolution",
     "supervised_evolution",
@@ -940,6 +940,7 @@ def ensure_agent_for_session(
     existing_agent_id: str = "",
     session_workspace_path: str = "",
     created_by: str = "session_repair",
+    conversation_index_kind: str = "",
 ) -> dict[str, Any]:
     normalized_session_id = str(session_id or "").strip()
     if not normalized_session_id:
@@ -961,6 +962,7 @@ def ensure_agent_for_session(
                 "legacySessionWorkspacePath": str(session_workspace_path or "").strip(),
                 "directSessionVisibility": session_visibility,
             }
+            metadata_payload.update(_agent_metadata_conversation_index_updates(conversation_index_kind))
             if str(created_by or "").strip() == "session_repair":
                 metadata_payload.setdefault("conversationIndexKind", CONVERSATION_INDEX_KIND_PERSONAL_AGENT)
                 metadata_payload.setdefault("conversationIndexVisibility", CONVERSATION_INDEX_VISIBILITY_USER_VISIBLE)
@@ -1048,6 +1050,12 @@ def ensure_agent_for_session(
             metadata.setdefault("conversationIndexVisibility", CONVERSATION_INDEX_VISIBILITY_USER_VISIBLE)
             agent["metadata"] = metadata
             changed = True
+        conversation_index_updates = _agent_metadata_conversation_index_updates(conversation_index_kind)
+        for key, value in conversation_index_updates.items():
+            if metadata.get(key) != value:
+                metadata[key] = value
+                agent["metadata"] = metadata
+                changed = True
         legacy_path = str(session_workspace_path or "").strip()
         if legacy_path and metadata.get("legacySessionWorkspacePath") != legacy_path:
             metadata["legacySessionWorkspacePath"] = legacy_path
@@ -1132,6 +1140,31 @@ def normalize_conversation_index_kind(value: Any) -> str:
     if kind in CONVERSATION_INDEX_KINDS:
         return kind
     return ""
+
+
+def _conversation_index_visibility_for_kind(kind: str) -> str:
+    if kind == CONVERSATION_INDEX_KIND_TEAM_AGENT:
+        return CONVERSATION_INDEX_VISIBILITY_TEAM_PRIVATE
+    if kind == CONVERSATION_INDEX_KIND_HIDDEN:
+        return CONVERSATION_INDEX_VISIBILITY_HIDDEN
+    return CONVERSATION_INDEX_VISIBILITY_USER_VISIBLE
+
+
+def _agent_metadata_conversation_index_updates(kind: Any) -> dict[str, Any]:
+    normalized = normalize_conversation_index_kind(kind)
+    if normalized not in {
+        CONVERSATION_INDEX_KIND_PERSONAL_AGENT,
+        CONVERSATION_INDEX_KIND_TEAM_AGENT,
+        CONVERSATION_INDEX_KIND_HIDDEN,
+    }:
+        return {}
+    updates: dict[str, Any] = {
+        "conversationIndexKind": normalized,
+        "conversationIndexVisibility": _conversation_index_visibility_for_kind(normalized),
+    }
+    if normalized in {CONVERSATION_INDEX_KIND_TEAM_AGENT, CONVERSATION_INDEX_KIND_HIDDEN}:
+        updates["showInSessionIndex"] = False
+    return updates
 
 
 def agent_conversation_index_classification(

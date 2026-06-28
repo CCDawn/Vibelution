@@ -666,7 +666,7 @@ export function classifyConversation(conversation: ConversationSummary): Convers
     return "personalAgent";
   }
   if (kind === CONVERSATION_INDEX_KIND_TEAM_AGENT) {
-    return "personalAgent";
+    return "invalid";
   }
   if (kind === CONVERSATION_INDEX_KIND_SYSTEM_ENTRY) {
     return "other";
