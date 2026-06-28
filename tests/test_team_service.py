@@ -310,13 +310,15 @@ def test_challenge_cup_research_team_uses_knowledge_base_admin_for_ingestion_rev
     admin_member = next(member for member in team["members"] if member["role"] == "knowledge_steward")
     admin_agent = agent_directory_service.get_agent(admin_member["agentId"])
 
-    assert admin_member["agentId"] == agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID
+    assert admin_member["agentId"] != agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID
     assert admin_member["purpose"] == "知识库管理员入库审核"
     assert all("资料入库" not in str(value) for value in [admin_member["agentName"], admin_member["purpose"]])
     assert admin_agent["displayName"]
     assert "资料入库" not in admin_agent["displayName"]
-    assert admin_agent["metadata"]["functionalDisplayName"] == agent_directory_service.KNOWLEDGE_STEWARD_FUNCTIONAL_NAME
+    assert admin_agent["roleKey"] == agent_directory_service.KNOWLEDGE_STEWARD_ROLE_KEY
+    assert admin_agent["metadata"]["functionalDisplayName"] == "知识库管理员"
     assert admin_agent["metadata"]["challengeCupTeamRole"] == "knowledge_steward"
+    assert admin_agent["metadata"]["managedDomain"] == "challenge_cup_neuro_algorithm"
 
 
 def test_knowledge_expansion_team_agents_seed_complete_team(tmp_path, monkeypatch):
@@ -364,6 +366,97 @@ def test_knowledge_expansion_team_agents_seed_complete_team(tmp_path, monkeypatc
     canvas = team_service.get_team_canvas("knowledge-expansion-team")
     assert {node["agentId"] for node in canvas["nodes"]} == {member["agentId"] for member in team["members"]}
     assert team_service.knowledge_expansion_team_agents_need_repair() is False
+
+
+def test_knowledge_steward_roles_are_per_team_agents_with_matching_capabilities(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+
+    research = team_service.ensure_challenge_cup_research_team_agents(purge_stale=True)["team"]
+    expansion = team_service.ensure_knowledge_expansion_team_agents(purge_stale=True)["team"]
+
+    research_steward = next(member for member in research["members"] if member["role"] == "knowledge_steward")
+    expansion_steward = next(member for member in expansion["members"] if member["role"] == "knowledge_steward")
+    research_agent = agent_directory_service.get_agent(research_steward["agentId"])
+    expansion_agent = agent_directory_service.get_agent(expansion_steward["agentId"])
+
+    assert research_steward["agentId"] != expansion_steward["agentId"]
+    assert research_agent["roleKey"] == agent_directory_service.KNOWLEDGE_STEWARD_ROLE_KEY
+    assert expansion_agent["roleKey"] == agent_directory_service.KNOWLEDGE_STEWARD_ROLE_KEY
+    assert research_agent["metadata"]["challengeCupTeamRole"] == "knowledge_steward"
+    assert expansion_agent["metadata"]["knowledgeExpansionTeamRole"] == "knowledge_steward"
+
+    research_policy = agent_directory_service.resolve_tool_policy_for_agent(research_steward["agentId"])
+    expansion_policy = agent_directory_service.resolve_tool_policy_for_agent(expansion_steward["agentId"])
+    assert research_policy["allowedTools"] == expansion_policy["allowedTools"]
+    assert research_policy["preferredTools"] == expansion_policy["preferredTools"]
+    assert research_policy["mutationAccess"] == expansion_policy["mutationAccess"] == "restricted"
+    assert "knowledge_ingestion_tool" in research_policy["allowedTools"]
+
+    research_canvas = team_service.get_team_canvas("research-team")
+    expansion_canvas = team_service.get_team_canvas("knowledge-expansion-team")
+    assert research_canvas["validation"]["valid"] is True
+    assert expansion_canvas["validation"]["valid"] is True
+    assert all(issue["code"] != "agent_team_conflict" for issue in research_canvas["validation"]["issues"])
+    assert all(issue["code"] != "agent_team_conflict" for issue in expansion_canvas["validation"]["issues"])
+
+
+def test_challenge_cup_research_team_ignores_legacy_global_steward_metadata(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    agent_directory_service.repair_agent_directory()
+    global_steward = agent_directory_service.get_agent(agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID)
+    agent_directory_service.update_agent_instance(
+        global_steward["agentId"],
+        metadata={
+            "challengeCupTeamId": "research-team",
+            "challengeCupTeamManagedVersion": 1,
+            "challengeCupTeamRole": "knowledge_steward",
+            "challengeCupTeamRoleKey": "knowledge_steward",
+        },
+        status="active",
+    )
+
+    result = team_service.ensure_challenge_cup_research_team_agents(purge_stale=True)
+    team = result["team"]
+    steward_member = next(member for member in team["members"] if member["role"] == "knowledge_steward")
+
+    assert steward_member["agentId"] != agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID
+    assert all(item["agentId"] != agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID for item in result["purgeResults"])
+    assert agent_directory_service.get_agent(agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID, include_archived=False)
+
+
+def test_challenge_cup_research_team_default_canvas_has_stage_relationships(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+
+    result = team_service.ensure_challenge_cup_research_team_agents(purge_stale=True)
+    canvas = team_service.get_team_canvas(result["teamId"])
+
+    role_by_node_id = {node["id"]: node["role"] for node in canvas["nodes"]}
+    edge_pairs = {
+        (role_by_node_id[edge["source"]], role_by_node_id[edge["target"]], edge["type"])
+        for edge in canvas["edges"]
+    }
+
+    assert canvas["validation"]["valid"] is True
+    assert ("research_coordination", "data_discovery", "reports_to") in edge_pairs
+    assert ("source_quality", "content_extraction", "communication") in edge_pairs
+    assert ("candidate_graph", "knowledge_steward", "reports_to") in edge_pairs
+    assert len([edge for edge in canvas["edges"] if edge["type"] != "communication"]) >= 10
+    assert len([edge for edge in canvas["edges"] if edge["type"] == "communication"]) >= 3
+
+
+def test_challenge_cup_research_team_canvas_self_repairs_missing_default_edges(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+
+    team_service.ensure_challenge_cup_research_team_agents(purge_stale=True)
+    canvas_path = team_service._team_canvas_path("research-team")
+    raw_canvas = json.loads(canvas_path.read_text(encoding="utf-8"))
+    raw_canvas["edges"] = []
+    canvas_path.write_text(json.dumps(raw_canvas, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    repaired = team_service.get_team_canvas("research-team")
+
+    assert repaired["edges"]
+    assert json.loads(canvas_path.read_text(encoding="utf-8"))["edges"] == repaired["edges"]
 
 
 def test_challenge_cup_research_team_agent_repair_purges_stale_and_rebuilds_complete_team(tmp_path, monkeypatch):

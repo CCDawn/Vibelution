@@ -1857,6 +1857,20 @@ def _team_canvas_with_validation(
         agents_by_id=agents_by_id,
         active_agents_by_id=active_agents_by_id,
     )
+    if _default_canvas_edges_missing_for_team(team, canvas_path):
+        default_edges = _default_edges_for_team(team, list(canvas.get("nodes") or []))
+        if default_edges:
+            previous_edge_count = len(list(canvas.get("edges") or []))
+            canvas["edges"] = default_edges
+            _record_team_event(
+                "team.canvas.default_edges_repaired",
+                team,
+                fields={
+                    "previousEdgeCount": previous_edge_count,
+                    "edgeCount": len(default_edges),
+                    "reason": "missing_default_edges",
+                },
+            )
     validation = _validate_canvas(canvas, team_id=team["teamId"], active_agents_by_id=active_agents_by_id)
     if raw != canvas:
         _write_json(canvas_path, canvas)
@@ -2216,11 +2230,12 @@ def _ensure_challenge_cup_research_team_role_agent(role: dict[str, Any], *, sess
     if not role_name or not role_key:
         return None
 
-    if role_key == agent_directory_service.KNOWLEDGE_STEWARD_ROLE_KEY:
-        agent_directory_service.repair_agent_directory()
-        existing = agent_directory_service.get_agent(agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID, include_archived=False)
-    else:
-        existing = _find_challenge_cup_research_team_agent(role_name)
+    existing = _find_challenge_cup_research_team_agent(role_name)
+    if (
+        role_key == agent_directory_service.KNOWLEDGE_STEWARD_ROLE_KEY
+        and str((existing or {}).get("agentId") or "").strip() == agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID
+    ):
+        existing = None
 
     if existing and not _agent_direct_session_available(existing, session_service=session_service):
         session_service.ensure_agent_direct_session(
@@ -2576,6 +2591,8 @@ def _challenge_cup_research_team_duplicate_agent_ids(expected_agent_ids: set[str
     for agent in agent_directory_service.list_agents(include_archived=True, detail="summary"):
         agent_id = str(agent.get("agentId") or "").strip()
         if not agent_id or agent_id in expected_agent_ids:
+            continue
+        if agent_id == agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID:
             continue
         metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
         if str(metadata.get("challengeCupTeamId") or "").strip() == CHALLENGE_CUP_RESEARCH_TEAM_ID:
@@ -5288,6 +5305,25 @@ def _default_edges_for_team(team: dict[str, Any], nodes: list[dict[str, Any]]) -
                 ("signal_quality_gate", "ai_search_scope_lead", "启用规则回写"),
             ],
         )
+    if _infer_team_kind(team) == "research":
+        return _edges_from_role_links(
+            nodes_by_role,
+            [
+                ("research_coordination", "data_discovery", "分配资料发现任务", "reports_to"),
+                ("data_discovery", "source_acquisition", "交接来源线索", "reports_to"),
+                ("source_acquisition", "content_extraction", "交接可读来源", "reports_to"),
+                ("content_extraction", "source_quality", "提交资料审查", "reports_to"),
+                ("source_quality", "candidate_graph", "交接通过资料", "reports_to"),
+                ("candidate_graph", "knowledge_steward", "提交入库审核", "reports_to"),
+                ("research_coordination", "experiment_planner", "分配实验规划", "reports_to"),
+                ("experiment_planner", "experiment_ledger", "登记实验计划与结果", "reports_to"),
+                ("experiment_ledger", "iteration_planner", "交接实验证据", "reports_to"),
+                ("iteration_planner", "iteration_versioning", "交接版本决策", "reports_to"),
+                ("source_quality", "content_extraction", "退回补读与补提炼", "communication"),
+                ("candidate_graph", "source_quality", "反馈关系缺口", "communication"),
+                ("knowledge_steward", "candidate_graph", "反馈入库前关系补全", "communication"),
+            ],
+        )
     return []
 
 
@@ -5317,8 +5353,37 @@ def _edges_from_role_chain(
     return edges
 
 
+def _edges_from_role_links(
+    nodes_by_role: dict[str, dict[str, Any]],
+    links: list[tuple[str, str, str, str]],
+) -> list[dict[str, Any]]:
+    edges: list[dict[str, Any]] = []
+    for index, (source_role, target_role, label, edge_type) in enumerate(links, start=1):
+        source = nodes_by_role.get(source_role)
+        target = nodes_by_role.get(target_role)
+        if not source or not target:
+            continue
+        source_id = str(source.get("id") or "").strip()
+        target_id = str(target.get("id") or "").strip()
+        if not source_id or not target_id:
+            continue
+        normalized_type = str(edge_type or "communication").strip()
+        if normalized_type not in EDGE_TYPES:
+            normalized_type = "communication"
+        edges.append(
+            {
+                "id": _safe_token(f"{normalized_type}-{source_role}-{target_role}", default=f"edge-{index}", max_length=96),
+                "source": source_id,
+                "target": target_id,
+                "label": label,
+                "type": normalized_type,
+            }
+        )
+    return edges
+
+
 def _default_canvas_edges_missing_for_team(team: dict[str, Any], canvas_path: Path) -> bool:
-    if _infer_team_kind(team) not in {"self_evolution", "supervised_evolution", "ai_search"}:
+    if _infer_team_kind(team) not in {"self_evolution", "supervised_evolution", "ai_search", "research"}:
         return False
     if not canvas_path.exists():
         return True

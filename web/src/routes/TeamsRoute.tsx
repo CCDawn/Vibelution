@@ -2980,6 +2980,24 @@ function teamNodeFunctionLabel(node: TeamCanvasNode, displayLabel: string | unde
   return displayLabel || role || (lang === "zh" ? "未绑定" : "Unbound");
 }
 
+function canvasNodeStatusLabel(node: TeamCanvasNode | null | undefined, lang: "zh" | "en") {
+  if (!node) {
+    return lang === "zh" ? "未选择" : "not selected";
+  }
+  const status = String(node.status || "").trim().toLowerCase();
+  const role = String(node.role || "").trim();
+  if (role === "knowledge_steward" && node.agentId) {
+    return lang === "zh" ? "专属管理员" : "dedicated admin";
+  }
+  if (status === "stale") {
+    return lang === "zh" ? "引用失效" : "stale reference";
+  }
+  if (node.agentId || status === "bound") {
+    return lang === "zh" ? "已绑定" : "bound";
+  }
+  return lang === "zh" ? "未绑定" : "unbound";
+}
+
 function teamConversationStatusLabel(status: string, lang: "zh" | "en") {
   const normalized = String(status || "").trim();
   const zh: Record<string, string> = {
@@ -6682,7 +6700,7 @@ export function TeamsRoute({
             </div>
             <div>
               <span>{lang === "zh" ? "状态" : "Status"}</span>
-              <strong>{node.status || (node.agentId ? "bound" : "unbound")}</strong>
+              <strong>{canvasNodeStatusLabel(node, lang)}</strong>
             </div>
             <div className={styles.canvasReadOnlyNodeWide}>
               <span>{lang === "zh" ? "目的" : "Purpose"}</span>
@@ -9911,12 +9929,16 @@ export function TeamsRoute({
   const linkedRoomBusy = linkedRoomStatus === "running" || linkedRoomStatus === "stopping";
   const canStartTeamRound = Boolean(selectedTeam?.teamId && linkedChatRoomId && activeTeamMemberCount > 0 && teamTaskTopic.trim() && !linkedRoomBusy);
   const visibleCommunicationEdgeCount = visibleCommunicationEdges.length;
-  const communicationEdgeHint = showCommunicationEdges
+  const communicationEdgeHint = communicationEdges.length === 0
+    ? (lang === "zh" ? "没有可展开的信息线" : "No information lines to expand")
+    : showCommunicationEdges
     ? selectedNodeId
       ? (lang === "zh" ? `信息线已展开：选中节点 ${visibleCommunicationEdgeCount} 条` : `Information lines expanded: ${visibleCommunicationEdgeCount} for selected node`)
       : (lang === "zh" ? `信息线已展开：全部 ${visibleCommunicationEdgeCount} 条` : `Information lines expanded: ${visibleCommunicationEdgeCount} total`)
     : (lang === "zh" ? `信息线已收起（${communicationEdges.length} 条，可展开）` : `Information lines hidden (${communicationEdges.length} available)`);
-  const communicationEdgeButtonLabel = showCommunicationEdges
+  const communicationEdgeButtonLabel = communicationEdges.length === 0
+    ? (lang === "zh" ? "暂无信息线" : "No info lines")
+    : showCommunicationEdges
     ? (lang === "zh" ? "收起信息线" : "Hide info lines")
     : (lang === "zh" ? `展开信息线 ${communicationEdges.length}` : `Show info ${communicationEdges.length}`);
   const teamWorkflow = teamWorkflowQuery.data ?? null;
