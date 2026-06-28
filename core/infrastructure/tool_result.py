@@ -328,6 +328,14 @@ def _extract_continuation_hint(result_kind: str, result_str: str) -> str:
     if result_kind == "source_collection_context":
         payload = _try_parse_json_object(result_str)
         if payload:
+            record_page = payload.get("recordPage") if isinstance(payload.get("recordPage"), dict) else {}
+            if record_page.get("hasMore"):
+                next_offset = record_page.get("nextOffset")
+                limit = record_page.get("limit") or 5
+                return (
+                    "继续调用 source_collection_context_tool，"
+                    f"record_offset={next_offset}, record_limit={limit}, context_mode=compact。"
+                )
             page = payload.get("candidatePage") if isinstance(payload.get("candidatePage"), dict) else {}
             if page.get("hasMore"):
                 next_offset = page.get("nextOffset")
@@ -422,7 +430,24 @@ def _compact_source_collection_context_result(result_str: str, max_chars: int, c
     payload = _try_parse_json_object(result_str)
     if not payload:
         return None
+    record_page = payload.get("recordPage") if isinstance(payload.get("recordPage"), dict) else {}
     page = payload.get("candidatePage") if isinstance(payload.get("candidatePage"), dict) else {}
+    records = [
+        item
+        for item in list(payload.get("records") or [])
+        if isinstance(item, dict)
+    ]
+    compact_records = []
+    for item in records[:12]:
+        compact_records.append(
+            {
+                "recordId": str(item.get("recordId") or item.get("id") or "")[:160],
+                "title": str(item.get("title") or "")[:180],
+                "sourceType": str(item.get("sourceType") or "")[:80],
+                "locator": str(item.get("doi") or item.get("sourceUrl") or item.get("sourceRef") or "")[:240],
+                "summaryPreview": str(item.get("summary") or "")[:220],
+            }
+        )
     candidates = [
         item
         for item in list(payload.get("candidates") or [])
@@ -448,6 +473,11 @@ def _compact_source_collection_context_result(result_str: str, max_chars: int, c
         "writebackTool": "source_collection_stage_writeback_tool",
         "continuationHint": continuation_hint,
     }
+    if record_page.get("hasMore"):
+        compact_usage["recordContinuationHint"] = (
+            "继续调用 source_collection_context_tool，"
+            f"record_offset={record_page.get('nextOffset')}, record_limit={record_page.get('limit') or 5}, context_mode=compact。"
+        )
     if page.get("hasMore") and not continuation_hint:
         compact_usage["continuationHint"] = (
             "继续调用 source_collection_context_tool，"
@@ -462,7 +492,12 @@ def _compact_source_collection_context_result(result_str: str, max_chars: int, c
         "doNotUsePreviewAsEvidence": True,
         "visibleCandidateCount": len(compact_candidates),
         "omittedReturnedCandidateCount": max(0, int(page.get("returned") or len(compact_candidates)) - len(compact_candidates)),
+        "visibleRecordCount": len(compact_records),
+        "omittedReturnedRecordCount": max(0, int(record_page.get("returned") or len(compact_records)) - len(compact_records)),
         "counts": payload.get("counts") if isinstance(payload.get("counts"), dict) else {},
+        "recordPage": record_page,
+        "recordIds": [item.get("recordId") for item in compact_records if item.get("recordId")],
+        "records": compact_records,
         "candidatePage": page,
         "candidateIds": [item.get("candidateId") for item in compact_candidates if item.get("candidateId")],
         "candidates": compact_candidates,
@@ -479,9 +514,16 @@ def _compact_source_collection_context_result(result_str: str, max_chars: int, c
     for item in compact_candidates:
         item["summaryPreview"] = str(item.get("summaryPreview") or "")[:80]
         item["title"] = str(item.get("title") or "")[:120]
+    for item in compact_records:
+        item["summaryPreview"] = str(item.get("summaryPreview") or "")[:80]
+        item["title"] = str(item.get("title") or "")[:120]
     content = json.dumps(compact, ensure_ascii=False, sort_keys=True)
     if len(content) <= max_chars + 500:
         return content
+    compact["records"] = compact_records[:5]
+    compact["recordIds"] = [item.get("recordId") for item in compact["records"] if item.get("recordId")]
+    compact["visibleRecordCount"] = len(compact["records"])
+    compact["omittedReturnedRecordCount"] = max(0, int(record_page.get("returned") or len(compact_records)) - len(compact["records"]))
     compact["candidates"] = compact_candidates[:5]
     compact["candidateIds"] = [item.get("candidateId") for item in compact["candidates"] if item.get("candidateId")]
     compact["visibleCandidateCount"] = len(compact["candidates"])

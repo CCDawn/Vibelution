@@ -574,6 +574,8 @@ def create_key_tools() -> List[BaseTool]:
         task_id: str = "",
         max_records: int = 5,
         include_candidates: bool = True,
+        record_offset: int = 0,
+        record_limit: int = 5,
         candidate_offset: int = 0,
         candidate_limit: int = 5,
         context_mode: str = "compact",
@@ -592,12 +594,14 @@ def create_key_tools() -> List[BaseTool]:
             task_id: 阶段任务 ID；传入后会自动补齐 run/stage
             max_records: 最多返回多少条资料记录，默认 5，上限由后端限制
             include_candidates: 是否返回本轮已导入的 source_manifest 候选
+            record_offset: 原始 DataRecord 分页起点，默认 0；下一页用 recordPage.nextOffset
+            record_limit: 每页原始 DataRecord 数量，默认 5；资料提炼阶段应逐页读完
             candidate_offset: 候选资料分页起点，默认 0；下一页用 candidatePage.nextOffset
             candidate_limit: 每页候选资料数量，默认 5；阶段 Agent 应逐页读完
             context_mode: compact 或 full；默认 compact，避免工具结果被通用截断
 
         Returns:
-            JSON 字符串，包含 counts、candidatePage、真实 candidateId、records、candidates、writebackContract 和边界
+            JSON 字符串，包含 counts、recordPage、candidatePage、真实 recordId/candidateId、records、candidates、writebackContract 和边界
         """
         return _source_collection_context_impl(
             team_id=team_id,
@@ -606,6 +610,8 @@ def create_key_tools() -> List[BaseTool]:
             task_id=task_id,
             max_records=max_records,
             include_candidates=include_candidates,
+            record_offset=record_offset,
+            record_limit=record_limit,
             candidate_offset=candidate_offset,
             candidate_limit=candidate_limit,
             context_mode=context_mode,

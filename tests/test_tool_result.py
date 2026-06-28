@@ -195,6 +195,66 @@ class TestTruncateResult:
         assert "summaryPreview" in compact["candidates"][0]
         assert "summary" not in compact["candidates"][0]
 
+    def test_package_tool_result_compacts_source_collection_context_with_record_paging_ids(self):
+        payload = {
+            "status": "ok",
+            "contextKind": "source_collection_stage_task_context",
+            "contextMode": "full",
+            "counts": {
+                "recordCount": 15,
+                "returnedRecordCount": 5,
+                "candidateCount": 0,
+                "returnedCandidateCount": 0,
+            },
+            "recordPage": {
+                "offset": 0,
+                "limit": 5,
+                "returned": 5,
+                "total": 15,
+                "hasMore": True,
+                "nextOffset": 5,
+            },
+            "candidatePage": {
+                "offset": 0,
+                "limit": 5,
+                "returned": 0,
+                "total": 0,
+                "hasMore": False,
+                "nextOffset": None,
+            },
+            "records": [
+                {
+                    "recordId": f"dprec-2026062812000000000{i}-record{i}",
+                    "title": "Long raw record title " + ("X" * 240),
+                    "summary": "The raw record text is long and must be compacted.",
+                    "sourceType": "paper",
+                    "doi": f"10.0000/raw-record-{i}",
+                }
+                for i in range(5)
+            ],
+            "candidates": [],
+            "usage": {
+                "readTool": "source_collection_context_tool",
+                "writebackTool": "source_collection_stage_writeback_tool",
+            },
+        }
+
+        packaged = package_tool_result(
+            json.dumps(payload, ensure_ascii=False),
+            tool_name="source_collection_context_tool",
+            max_chars=900,
+        )
+
+        assert packaged.truncated is True
+        assert packaged.result_kind == "source_collection_context"
+        assert packaged.strategy == "structured_compact"
+        assert "dprec-20260628120000000000-record0" in packaged.content
+        assert "record_offset=5" in packaged.content
+        compact = json.loads(packaged.content)
+        assert compact["recordPage"]["hasMore"] is True
+        assert compact["recordIds"][0] == "dprec-20260628120000000000-record0"
+        assert compact["usage"]["recordContinuationHint"]
+
 
 class TestFormatToolMessage:
     """format_tool_message 测试"""
