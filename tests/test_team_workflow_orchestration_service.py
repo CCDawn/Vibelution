@@ -1591,6 +1591,66 @@ def test_source_collection_stage_task_context_returns_bounded_records_for_extrac
     assert "file://" in context["usage"]["doNotUse"]
 
 
+def test_source_collection_stage_task_context_uses_lightweight_team_existence(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
+    team = team_service.create_team(name="挑战杯科研团队")
+    run_response = team_workflow_orchestration_service.start_source_collection_run(
+        team["teamId"],
+        {
+            "topic": "脑启发路由",
+            "goal": "搜集神经机制启发算法资料",
+            "agentRoles": ["content_extraction"],
+            "agentIds": {"content_extraction": "extraction-agent"},
+            "querySeeds": ["brain-inspired routing"],
+            "promptCachePolicy": {"requirement": "disabled"},
+        },
+    )
+    run_id = run_response["run"]["runId"]
+    data_processing_service.add_record(
+        run_id,
+        {
+            "sourceType": "paper",
+            "sourceRef": "https://doi.org/10.0000/predictive-coding",
+            "title": "Predictive coding for cortical hierarchy",
+            "metadata": {"allowedForAnalysis": True},
+        },
+    )
+    task = {
+        "taskId": "stagetask-context-lightweight",
+        "runId": run_id,
+        "stageId": "candidate",
+        "agentId": "extraction-agent",
+        "agentRole": "content_extraction",
+        "sessionId": "session-extraction",
+        "status": "running",
+        "title": "资料提炼任务",
+        "writebackContract": {"taskId": "stagetask-context-lightweight"},
+    }
+    team_workflow_orchestration_service._upsert_source_collection_stage_session_task(team["teamId"], run_id, task)
+    existence_reads = []
+
+    def counted_assert_team_exists(team_id):
+        existence_reads.append(team_id)
+        return {"teamId": team_id}
+
+    def fail_full_team_read(team_id):
+        raise AssertionError("stage task context must not hydrate full team detail")
+
+    monkeypatch.setattr(team_workflow_orchestration_service.team_service, "assert_team_exists", counted_assert_team_exists)
+    monkeypatch.setattr(team_workflow_orchestration_service.team_service, "get_team", fail_full_team_read)
+
+    context = team_workflow_orchestration_service.get_source_collection_stage_task_context(
+        team["teamId"],
+        task_id="stagetask-context-lightweight",
+        max_records=1,
+    )
+
+    assert context["status"] == "ok"
+    assert context["counts"]["recordCount"] == 1
+    assert existence_reads == [team["teamId"]]
+
+
 def test_source_collection_stage_task_context_uses_memory_steward_boundaries(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)
@@ -5786,6 +5846,51 @@ def test_research_stage_round_status_uses_lightweight_team_snapshot(tmp_path, mo
         team_workflow_orchestration_service.RESEARCH_STAGE_TYPES
     )
     assert {phase["coordinationRoomId"] for phase in payload["phases"]} == {team["linkedChatRoomId"]}
+
+
+def test_research_stage_round_status_skips_repair_hydration_when_round_exists(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
+    team = team_service.create_team(name="挑战杯科研团队")
+    stage_response = team_workflow_orchestration_service.start_research_stage_round(
+        team["teamId"],
+        {
+            "stageType": "knowledge_collection",
+            "topic": "predictive coding",
+            "agentRoles": ["data_discovery"],
+            "querySeeds": ["predictive coding"],
+            "promptCachePolicy": {"requirement": "disabled"},
+        },
+    )
+    run_id = stage_response["run"]["runId"]
+    team_workflow_orchestration_service._upsert_source_collection_stage_session_task(
+        team["teamId"],
+        run_id,
+        {
+            "taskId": "stagetask-existing-round",
+            "runId": run_id,
+            "stageId": "collection",
+            "agentId": "discovery-agent",
+            "agentRole": "data_discovery",
+            "sessionId": "session-discovery",
+            "status": "completed",
+            "summary": "已完成资料搜索。",
+            "writebackContract": {"taskId": "stagetask-existing-round"},
+        },
+    )
+
+    def fail_full_team_read(team_id):
+        raise AssertionError("existing stage round repair must not hydrate full team detail")
+
+    monkeypatch.setattr(team_workflow_orchestration_service.team_service, "get_team", fail_full_team_read)
+
+    payload = team_workflow_orchestration_service.get_research_stage_round_status(team["teamId"])
+
+    assert payload["latestRound"]["sourceRunIds"] == [run_id]
+    collection_card = next(
+        item for item in payload["latestRound"]["sourceCollectionStageCards"] if item["stageId"] == "collection"
+    )
+    assert collection_card["latestTask"]["taskId"] == "stagetask-existing-round"
 
 
 def test_source_collection_stage_card_projection_resolves_current_stage_agents_once(tmp_path, monkeypatch):
