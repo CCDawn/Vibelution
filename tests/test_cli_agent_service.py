@@ -124,6 +124,37 @@ def _write_mimocode_session_db(path, *, cwd, session_id="ses_test", created=10_0
         connection.close()
 
 
+def test_cli_agent_run_tool_binds_current_runtime_source(monkeypatch):
+    from tools import cli_agent_tools
+    from core.web.services import cli_agent_service
+
+    captured = {}
+
+    def fake_run_cli_agent(**kwargs):
+        captured.update(kwargs)
+        return {
+            "status": "task_sent",
+            "taskId": "cli-task-runtime",
+            "terminalSessionId": "cli-term-runtime",
+            "sourceSessionId": kwargs.get("source_session_id") or "",
+            "sourceRunId": kwargs.get("source_run_id") or "",
+        }
+
+    monkeypatch.setattr(
+        cli_agent_tools,
+        "_current_runtime_source",
+        lambda: {"sessionId": "session-live", "turnId": "turn-live"},
+    )
+    monkeypatch.setattr(cli_agent_service, "run_cli_agent", fake_run_cli_agent)
+
+    payload = json.loads(cli_agent_tools.cli_agent_run_tool(agent_type="mimo_code", task="分析问题"))
+
+    assert captured["source_session_id"] == "session-live"
+    assert captured["source_run_id"] == "turn-live"
+    assert payload["sourceSessionId"] == "session-live"
+    assert payload["sourceRunId"] == "turn-live"
+
+
 def _write_cli_agent_config_with_mimo_db(path, db_path):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
