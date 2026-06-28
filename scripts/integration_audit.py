@@ -9,9 +9,15 @@ from pathlib import Path
 from typing import Any, Iterable
 
 
-CONFIG_SENSITIVE_EXACT = {
+CONFIG_SENSITIVE_BASENAMES = {
     "config.toml",
     "config.example.toml",
+    "VERSION",
+    "CHANGELOG.md",
+}
+
+CONFIG_SENSITIVE_REPO_PATHS = {
+    "web/package-lock.json",
 }
 
 CONFIG_SENSITIVE_FRAGMENTS = {
@@ -91,6 +97,15 @@ MERGED_STATUSES = {
     "done",
 }
 
+HOT_FILE_FRAGMENTS = (
+    "AGENTS.md",
+    "DEVELOPMENT_STANDARD.md",
+    ".docs/project-memory/",
+    ".docs/project-memory\\",
+    "PROJECT_MEMORY.html",
+    "tests/test_web_app.py",
+)
+
 
 @dataclass
 class GitResult:
@@ -154,6 +169,27 @@ class IntegrationAuditReport:
     merge_queue_claim_ids: list[str]
     duplicate_ready_groups: list[DuplicateReadyGroup]
     items: list[WorktreeAuditItem]
+    summary: dict[str, int]
+
+
+@dataclass
+class StashAuditItem:
+    ref: str
+    summary: str
+    file_count: int
+    touched_paths: list[str]
+    sample_paths: list[str]
+    touches_protected: bool
+    touches_hot: bool
+    kind: str
+    suggested_action: str
+    reasons: list[str]
+
+
+@dataclass
+class StashAuditReport:
+    root: str
+    items: list[StashAuditItem]
     summary: dict[str, int]
 
 
@@ -279,7 +315,9 @@ def is_ancestor(root: Path, ancestor: str, descendant: str) -> bool:
 def path_is_config_sensitive(path: str, operator_config: Path) -> bool:
     normalized = path.replace("\\", "/").casefold()
     basename = Path(path).name.casefold()
-    if basename in CONFIG_SENSITIVE_EXACT:
+    if basename in {item.casefold() for item in CONFIG_SENSITIVE_BASENAMES}:
+        return True
+    if normalized in {item.casefold() for item in CONFIG_SENSITIVE_REPO_PATHS}:
         return True
     if norm_path_key(path) == norm_path_key(operator_config):
         return True
@@ -303,6 +341,58 @@ def unique_ordered(values: Iterable[str]) -> list[str]:
             result.append(value)
             seen.add(value)
     return result
+
+
+def list_stashes(root: Path) -> list[tuple[str, str]]:
+    result = run_git(root, "stash", "list", "--format=%gd|%gs", check=True)
+    stashes: list[tuple[str, str]] = []
+    for line in result.stdout.splitlines():
+        if not line:
+            continue
+        ref, _, summary = line.partition("|")
+        stashes.append((ref.strip(), summary.strip()))
+    return stashes
+
+
+def stash_paths(root: Path, ref: str) -> list[str]:
+    result = run_git(root, "stash", "show", "--name-only", "--format=", ref)
+    if result.code != 0:
+        return []
+    return unique_ordered(
+        line.strip()
+        for line in result.stdout.splitlines()
+        if line.strip()
+    )
+
+
+def path_is_hot_file(path: str) -> bool:
+    normalized = normalize_repo_path(path)
+    return any(fragment.casefold() in normalized for fragment in HOT_FILE_FRAGMENTS)
+
+
+def classify_stash_item(paths: list[str]) -> tuple[str, str, list[str], bool, bool]:
+    file_count = len(paths)
+    touches_protected = any(path_is_config_sensitive(path, Path("__operator_config_unused__")) for path in paths)
+    touches_hot = any(path_is_hot_file(path) for path in paths)
+    tests_only = file_count > 0 and all(normalize_repo_path(path).startswith("tests/") for path in paths)
+    reasons: list[str] = []
+    if file_count == 0:
+        reasons.append("no_tracked_paths_reported")
+        return "empty_or_untracked_only", "manual_check_before_drop", reasons, touches_protected, touches_hot
+    if touches_protected:
+        reasons.append("protected_files")
+        return "protected_risk", "retain_until_manual_diff_review", reasons, touches_protected, touches_hot
+    if touches_hot:
+        reasons.append("hot_files")
+        return "hot_snapshot", "manual_scope_review", reasons, touches_protected, touches_hot
+    if tests_only:
+        reasons.append("tests_only")
+        return "test_only", "compare_with_main_then_drop_if_absorbed", reasons, touches_protected, touches_hot
+    if file_count <= 5:
+        reasons.append("narrow_snapshot")
+        return "small_snapshot", "targeted_review_for_salvage", reasons, touches_protected, touches_hot
+    reasons.append("broad_snapshot")
+    return "broad_snapshot", "retain_as_history_do_not_reapply_blindly", reasons, touches_protected, touches_hot
 
 
 def recommend_validations(
@@ -654,7 +744,39 @@ def build_duplicate_ready_groups(
     ]
 
 
-def report_to_json(report: IntegrationAuditReport) -> str:
+def build_stash_report(root: Path, limit: int | None = None) -> StashAuditReport:
+    root = root.resolve()
+    stashes = list_stashes(root)
+    if limit is not None and limit >= 0:
+        stashes = stashes[:limit]
+    items: list[StashAuditItem] = []
+    summary: dict[str, int] = {}
+    for ref, message in stashes:
+        paths = stash_paths(root, ref)
+        kind, suggested_action, reasons, touches_protected, touches_hot = classify_stash_item(paths)
+        summary[kind] = summary.get(kind, 0) + 1
+        items.append(
+            StashAuditItem(
+                ref=ref,
+                summary=message,
+                file_count=len(paths),
+                touched_paths=paths,
+                sample_paths=paths[:5],
+                touches_protected=touches_protected,
+                touches_hot=touches_hot,
+                kind=kind,
+                suggested_action=suggested_action,
+                reasons=reasons,
+            )
+        )
+    return StashAuditReport(
+        root=str(root),
+        items=items,
+        summary=dict(sorted(summary.items())),
+    )
+
+
+def report_to_json(report: IntegrationAuditReport | StashAuditReport) -> str:
     return json.dumps(asdict(report), ensure_ascii=False, indent=2, sort_keys=True)
 
 
@@ -775,6 +897,42 @@ def format_merge_plan(report: IntegrationAuditReport) -> str:
     return "\n".join(lines)
 
 
+def format_stash_plan(report: StashAuditReport) -> str:
+    lines = [
+        "READ-ONLY stash governance plan",
+        f"root: {report.root}",
+        "",
+        "This plan does not apply, drop, or mutate stashes.",
+        "Use it to decide which snapshots are absorbed, risky, or worth salvaging in a separate round.",
+        "",
+        "Summary:",
+    ]
+    if not report.summary:
+        lines.append("  none")
+    for kind, count in report.summary.items():
+        lines.append(f"  {kind}: {count}")
+    if report.items:
+        lines.append("")
+        lines.append("Recent stashes:")
+    for item in report.items:
+        flags: list[str] = []
+        if item.touches_protected:
+            flags.append("protected")
+        if item.touches_hot:
+            flags.append("hot")
+        flag_text = f" [{' '.join(flags)}]" if flags else ""
+        lines.append(
+            f"  {item.ref} kind={item.kind} files={item.file_count}{flag_text}"
+        )
+        lines.append(f"    summary: {item.summary}")
+        if item.sample_paths:
+            lines.append(f"    sample: {', '.join(item.sample_paths)}")
+        lines.append(f"    action: {item.suggested_action}")
+        if item.reasons:
+            lines.append(f"    reasons: {', '.join(item.reasons)}")
+    return "\n".join(lines)
+
+
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Read-only audit for Vibelution worktree integration decisions."
@@ -793,23 +951,41 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         action="store_true",
         help="Emit a read-only prioritized merge plan.",
     )
+    parser.add_argument(
+        "--stash-plan",
+        action="store_true",
+        help="Emit a read-only stash governance plan.",
+    )
+    parser.add_argument(
+        "--stash-limit",
+        type=int,
+        default=24,
+        help="Maximum number of most-recent stashes to inspect for --stash-plan.",
+    )
     return parser.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv or sys.argv[1:])
-    report = build_report(
-        root=args.root,
-        registry_path=args.registry,
-        main_branch=args.main_branch,
-        operator_config=args.operator_config,
-    )
-    if args.json:
-        output = report_to_json(report)
-    elif args.merge_plan:
-        output = format_merge_plan(report)
+    if args.stash_plan:
+        report = build_stash_report(root=args.root, limit=args.stash_limit)
+        if args.json:
+            output = report_to_json(report)
+        else:
+            output = format_stash_plan(report)
     else:
-        output = format_report(report)
+        report = build_report(
+            root=args.root,
+            registry_path=args.registry,
+            main_branch=args.main_branch,
+            operator_config=args.operator_config,
+        )
+        if args.json:
+            output = report_to_json(report)
+        elif args.merge_plan:
+            output = format_merge_plan(report)
+        else:
+            output = format_report(report)
     print(output)
     return 0
 

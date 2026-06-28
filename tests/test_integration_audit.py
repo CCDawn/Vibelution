@@ -58,6 +58,37 @@ def commit_file(worktree: Path, file_name: str, content: str, message: str) -> s
     return git(worktree, "rev-parse", "HEAD")
 
 
+def commit_files(worktree: Path, files: dict[str, str], message: str) -> str:
+    for file_name, content in files.items():
+        path = worktree / file_name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+    git(worktree, "add", ".")
+    git(worktree, "commit", "-m", message)
+    return git(worktree, "rev-parse", "HEAD")
+
+
+def create_stash(
+    worktree: Path,
+    *,
+    message: str,
+    tracked_changes: dict[str, str] | None = None,
+    untracked_changes: dict[str, str] | None = None,
+) -> None:
+    for file_name, content in (tracked_changes or {}).items():
+        path = worktree / file_name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+    for file_name, content in (untracked_changes or {}).items():
+        path = worktree / file_name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+    args = ["stash", "push", "-m", message]
+    if untracked_changes:
+        args.insert(2, "--include-untracked")
+    git(worktree, *args)
+
+
 def item_by_branch(report: audit.IntegrationAuditReport, branch: str) -> audit.WorktreeAuditItem:
     matches = [item for item in report.items if item.branch == branch]
     assert len(matches) == 1
@@ -323,3 +354,143 @@ def test_merge_plan_is_read_only_and_prioritized(tmp_path: Path) -> None:
     assert "method=fast_forward" in plan
     assert "codex/config" in plan
     assert "manual: review config boundary" in plan
+
+
+def test_build_stash_report_classifies_protected_test_only_and_untracked_entries(tmp_path: Path) -> None:
+    root = init_repo(tmp_path / "repo")
+    commit_files(
+        root,
+        {
+            "tests/test_sample.py": "def test_sample():\n    assert True\n",
+            "config.toml": "model = 'base'\n",
+            "notes.txt": "base\n",
+        },
+        "seed files",
+    )
+    create_stash(
+        root,
+        message="test-only stash",
+        tracked_changes={"tests/test_sample.py": "def test_sample():\n    assert False\n"},
+    )
+    create_stash(
+        root,
+        message="config stash",
+        tracked_changes={"config.toml": "model = 'changed'\n"},
+    )
+    create_stash(
+        root,
+        message="untracked stash",
+        untracked_changes={"scratch/untracked.txt": "temp\n"},
+    )
+
+    report = audit.build_stash_report(root, limit=3)
+
+    assert report.summary == {
+        "empty_or_untracked_only": 1,
+        "protected_risk": 1,
+        "test_only": 1,
+    }
+    assert report.items[0].summary == "On main: untracked stash"
+    assert report.items[0].kind == "empty_or_untracked_only"
+    assert report.items[0].suggested_action == "manual_check_before_drop"
+    assert report.items[1].kind == "protected_risk"
+    assert report.items[1].touches_protected is True
+    assert report.items[1].suggested_action == "retain_until_manual_diff_review"
+    assert report.items[2].kind == "test_only"
+    assert report.items[2].suggested_action == "compare_with_main_then_drop_if_absorbed"
+
+
+def test_build_stash_report_marks_hot_and_broad_snapshots(tmp_path: Path) -> None:
+    root = init_repo(tmp_path / "repo")
+    commit_files(
+        root,
+        {
+            "DEVELOPMENT_STANDARD.md": "base\n",
+            "core/a.py": "A = 1\n",
+            "core/b.py": "B = 1\n",
+            "core/c.py": "C = 1\n",
+            "core/d.py": "D = 1\n",
+            "core/e.py": "E = 1\n",
+            "core/f.py": "F = 1\n",
+        },
+        "seed governance files",
+    )
+    create_stash(
+        root,
+        message="hot stash",
+        tracked_changes={"DEVELOPMENT_STANDARD.md": "changed\n"},
+    )
+    create_stash(
+        root,
+        message="broad stash",
+        tracked_changes={
+            "core/a.py": "A = 2\n",
+            "core/b.py": "B = 2\n",
+            "core/c.py": "C = 2\n",
+            "core/d.py": "D = 2\n",
+            "core/e.py": "E = 2\n",
+            "core/f.py": "F = 2\n",
+        },
+    )
+
+    report = audit.build_stash_report(root, limit=2)
+
+    assert report.summary == {"broad_snapshot": 1, "hot_snapshot": 1}
+    assert report.items[0].kind == "broad_snapshot"
+    assert report.items[0].suggested_action == "retain_as_history_do_not_reapply_blindly"
+    assert report.items[1].kind == "hot_snapshot"
+    assert report.items[1].touches_hot is True
+    assert report.items[1].suggested_action == "manual_scope_review"
+
+
+def test_format_stash_plan_is_read_only_and_grouped(tmp_path: Path) -> None:
+    root = init_repo(tmp_path / "repo")
+    commit_files(
+        root,
+        {
+            "tests/test_sample.py": "def test_sample():\n    assert True\n",
+            "config.toml": "model = 'base'\n",
+        },
+        "seed files",
+    )
+    create_stash(
+        root,
+        message="test-only stash",
+        tracked_changes={"tests/test_sample.py": "def test_sample():\n    assert False\n"},
+    )
+    create_stash(
+        root,
+        message="config stash",
+        tracked_changes={"config.toml": "model = 'changed'\n"},
+    )
+
+    report = audit.build_stash_report(root, limit=2)
+    plan = audit.format_stash_plan(report)
+
+    assert "READ-ONLY stash governance plan" in plan
+    assert "does not apply, drop, or mutate stashes" in plan
+    assert "protected_risk: 1" in plan
+    assert "test_only: 1" in plan
+    assert "retain_until_manual_diff_review" in plan
+    assert "compare_with_main_then_drop_if_absorbed" in plan
+
+
+def test_build_stash_report_treats_package_lock_as_protected(tmp_path: Path) -> None:
+    root = init_repo(tmp_path / "repo")
+    commit_files(
+        root,
+        {
+            "web/package-lock.json": "{\n  \"name\": \"repo\"\n}\n",
+        },
+        "seed package lock",
+    )
+    create_stash(
+        root,
+        message="package lock stash",
+        tracked_changes={"web/package-lock.json": "{\n  \"name\": \"repo\",\n  \"lockfileVersion\": 3\n}\n"},
+    )
+
+    report = audit.build_stash_report(root, limit=1)
+
+    assert report.items[0].kind == "protected_risk"
+    assert report.items[0].touches_protected is True
