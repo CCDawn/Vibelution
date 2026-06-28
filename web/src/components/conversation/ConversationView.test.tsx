@@ -2414,6 +2414,35 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).not.toContain("回答</span>");
   });
 
+  it("keeps transient reasoning placeholders out of the assistant answer block", () => {
+    const html = renderConversation([
+      {
+        id: "message-runtime-reasoning-placeholder",
+        role: "assistant",
+        content: "正在思考，已收到思考片段...\n模型已经开始返回 reasoning，正文可能稍后出现。",
+        timestamp: "2026-06-05T09:35:18Z",
+        streaming: true,
+        streamStage: "model_thinking",
+        feedbackEvents: [
+          {
+            sequence: 1,
+            kind: "status",
+            status: "running",
+            name: "model_thinking",
+            summary: "正在思考，已收到思考片段...",
+          },
+        ],
+      },
+    ]);
+
+    expect(html).toContain("正在请求");
+    expect(html).not.toContain("正在思考，已收到思考片段");
+    expect(html).not.toContain("模型已经开始返回 reasoning");
+    expect(html).not.toContain("正文可能稍后出现");
+    expect(html).not.toContain("回答</span>");
+    expect(html).not.toContain("responseSection");
+  });
+
   it("hides internal runtime pipeline steps behind a compact request state", () => {
     const fullModelStatus = "正在请求模型，等待首个响应片段... 上下文已组装完成，正在进入 LLM 调用。";
     const html = renderConversation([
