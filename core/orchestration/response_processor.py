@@ -16,6 +16,7 @@ from typing import Any, Dict, List
 from langchain_core.messages import AIMessage
 
 from core.infrastructure.llm_utils import parse_state_block, parse_xml_tool_calls
+from core.orchestration.cache_diagnostics import compact_repeated_metadata_text
 from core.orchestration.output_boundary import strip_llm_protocol_artifacts
 
 
@@ -64,6 +65,43 @@ class ResponseProcessingResult:
         return AIMessage(**ai_kwargs)
 
 
+def _merge_response_metadata_without_duplication(
+    previous: Any,
+    current: Any,
+    merged: Any,
+) -> Dict[str, Any] | None:
+    previous_map = previous if isinstance(previous, dict) else {}
+    current_map = current if isinstance(current, dict) else {}
+    merged_map = merged if isinstance(merged, dict) else {}
+    if not previous_map and not current_map and not merged_map:
+        return None
+    keys = set(previous_map) | set(current_map) | set(merged_map)
+    return {
+        key: _stable_metadata_value(
+            previous_map.get(key),
+            current_map.get(key),
+            merged_map.get(key),
+        )
+        for key in keys
+    }
+
+
+def _stable_metadata_value(previous: Any, current: Any, merged: Any) -> Any:
+    if isinstance(previous, dict) or isinstance(current, dict) or isinstance(merged, dict):
+        return _merge_response_metadata_without_duplication(previous, current, merged) or {}
+    if current not in (None, ""):
+        if isinstance(current, str):
+            return compact_repeated_metadata_text(current)
+        return current
+    if merged not in (None, ""):
+        if isinstance(merged, str):
+            return compact_repeated_metadata_text(merged)
+        return merged
+    if isinstance(previous, str):
+        return compact_repeated_metadata_text(previous)
+    return previous
+
+
 class ResponseProcessor:
     """将 LLM 响应压成稳定的协议结果。"""
 
@@ -95,7 +133,18 @@ class ResponseProcessor:
             return full
         if full is None:
             return chunk
-        return full + chunk
+        merged = full + chunk
+        metadata = _merge_response_metadata_without_duplication(
+            getattr(full, "response_metadata", None),
+            getattr(chunk, "response_metadata", None),
+            getattr(merged, "response_metadata", None),
+        )
+        if metadata is not None:
+            try:
+                merged.response_metadata = metadata
+            except Exception:
+                object.__setattr__(merged, "response_metadata", metadata)
+        return merged
 
     @staticmethod
     def strip_state_echo(raw_content: str) -> str:
