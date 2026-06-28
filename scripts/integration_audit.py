@@ -106,6 +106,10 @@ HOT_FILE_FRAGMENTS = (
     "tests/test_web_app.py",
 )
 
+EXPECTED_UNTRACKED_STASH_ARTIFACTS = {
+    "tests/harness_safe_modify_probe.py",
+}
+
 
 @dataclass
 class GitResult:
@@ -331,6 +335,10 @@ def normalize_repo_path(path: str) -> str:
     return path.replace("\\", "/").casefold()
 
 
+def is_expected_untracked_stash_artifact(path: str) -> bool:
+    return normalize_repo_path(path) in EXPECTED_UNTRACKED_STASH_ARTIFACTS
+
+
 def any_path_matches(paths: Iterable[str], fragments: Iterable[str]) -> bool:
     normalized = [normalize_repo_path(path) for path in paths]
     return any(fragment.casefold() in path for path in normalized for fragment in fragments)
@@ -396,7 +404,11 @@ def stash_untracked_file_states(root: Path, ref: str, untracked_paths: list[str]
         stash_blob = blob_result.stdout.strip()
         local_path = root / Path(path)
         if not local_path.exists():
-            states[path] = "missing_in_main"
+            states[path] = (
+                "expected_artifact_missing_in_main"
+                if is_expected_untracked_stash_artifact(path)
+                else "missing_in_main"
+            )
             continue
         current_blob_result = run_git(root, "hash-object", str(local_path))
         current_blob = current_blob_result.stdout.strip() if current_blob_result.code == 0 else ""
@@ -410,6 +422,8 @@ def summarize_untracked_absorption(file_states: dict[str, str]) -> str:
     values = list(file_states.values())
     if all(value == "absorbed_by_main" for value in values):
         return "absorbed_by_main"
+    if all(value == "expected_artifact_missing_in_main" for value in values):
+        return "expected_disposable_artifact"
     if all(value == "missing_in_main" for value in values):
         return "not_absorbed"
     if any(value == "absorbed_by_main" for value in values):
@@ -456,6 +470,15 @@ def classify_stash_item(
     if file_count == 0:
         if untracked_paths:
             reasons.append("untracked_only_snapshot")
+            if absorption_state == "expected_disposable_artifact":
+                reasons.append("expected_disposable_artifact")
+                return (
+                    "empty_or_untracked_only",
+                    "drop_expected_disposable_artifact",
+                    reasons,
+                    touches_protected,
+                    touches_hot,
+                )
             return "empty_or_untracked_only", "inspect_untracked_payload_before_drop", reasons, touches_protected, touches_hot
         reasons.append("no_tracked_paths_reported")
         return "empty_or_untracked_only", "manual_check_before_drop", reasons, touches_protected, touches_hot

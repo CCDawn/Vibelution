@@ -537,6 +537,33 @@ def test_build_stash_report_exposes_untracked_payload_for_empty_stash(tmp_path: 
     assert report.items[0].suggested_action == "inspect_untracked_payload_before_drop"
 
 
+def test_build_stash_report_marks_expected_disposable_untracked_probe(tmp_path: Path) -> None:
+    root = init_repo(tmp_path / "repo")
+    create_stash(
+        root,
+        message="safe modify probe stash",
+        untracked_changes={
+            "tests/harness_safe_modify_probe.py": (
+                'HARNESS_SAFE_MODIFY_MARKER = "HARNESS_SAFE_MODIFY_MARKER"\n\n'
+                "\n"
+                "def probe_marker() -> str:\n"
+                "    return HARNESS_SAFE_MODIFY_MARKER\n"
+            )
+        },
+    )
+
+    report = audit.build_stash_report(root, limit=1)
+    item = report.items[0]
+
+    assert item.kind == "empty_or_untracked_only"
+    assert item.absorption_state == "expected_disposable_artifact"
+    assert item.untracked_file_states == {
+        "tests/harness_safe_modify_probe.py": "expected_artifact_missing_in_main",
+    }
+    assert item.suggested_action == "drop_expected_disposable_artifact"
+    assert "expected_disposable_artifact" in item.reasons
+
+
 def test_format_stash_plan_shows_absorption_and_untracked_paths(tmp_path: Path) -> None:
     root = init_repo(tmp_path / "repo")
     commit_files(
@@ -629,3 +656,26 @@ def test_format_stash_plan_shows_untracked_file_states(tmp_path: Path) -> None:
     assert "untracked-state: scratch/absorbed.txt=absorbed_by_main" in plan
     assert "scratch/diverged.txt=diverged_in_main" in plan
     assert "scratch/missing.txt=missing_in_main" in plan
+
+
+def test_format_stash_plan_shows_expected_disposable_untracked_probe(tmp_path: Path) -> None:
+    root = init_repo(tmp_path / "repo")
+    create_stash(
+        root,
+        message="safe modify probe stash",
+        untracked_changes={
+            "tests/harness_safe_modify_probe.py": (
+                'HARNESS_SAFE_MODIFY_MARKER = "HARNESS_SAFE_MODIFY_MARKER"\n\n'
+                "\n"
+                "def probe_marker() -> str:\n"
+                "    return HARNESS_SAFE_MODIFY_MARKER\n"
+            )
+        },
+    )
+
+    report = audit.build_stash_report(root, limit=1)
+    plan = audit.format_stash_plan(report)
+
+    assert "expected_disposable_artifact" in plan
+    assert "tests/harness_safe_modify_probe.py=expected_artifact_missing_in_main" in plan
+    assert "drop_expected_disposable_artifact" in plan
