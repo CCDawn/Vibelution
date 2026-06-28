@@ -3018,7 +3018,10 @@ def _source_collection_stage_writeback_candidate_coverage(
         if _trim_text(item.get("recordId"), max_length=160)
     ]
     if stage_id == "candidate" or agent_role == "content_extraction":
-        record_entries = _source_collection_stage_writeback_record_extractions(result)
+        record_entries = _source_collection_stage_writeback_record_extractions(
+            result,
+            include_candidate_fallback=not bool(source_candidate_ids),
+        )
         if record_entries or not source_candidate_ids:
             coverage_kind = "record_extractions"
             processed_ids: list[str] = []
@@ -3838,53 +3841,6 @@ def _source_collection_stage_writeback_closure_summary(
         "retryInstruction": retry_instruction,
         "nextAction": retry_instruction,
     }
-
-
-def _source_collection_stage_previous_attempt_lines(previous_task: dict[str, Any] | None) -> list[str]:
-    if not isinstance(previous_task, dict):
-        return []
-    writeback = previous_task.get("writeback") if isinstance(previous_task.get("writeback"), dict) else {}
-    result = previous_task.get("result") if isinstance(previous_task.get("result"), dict) else {}
-    closure_summary = (
-        writeback.get("closureSummary")
-        if isinstance(writeback.get("closureSummary"), dict)
-        else result.get("closureSummary") if isinstance(result.get("closureSummary"), dict) else {}
-    )
-    if not closure_summary and not writeback and not result:
-        return []
-    invalid_ids = [
-        _trim_text(item, max_length=160)
-        for item in (
-            list(writeback.get("invalidRecordIds") or [])
-            + list(writeback.get("invalidCandidateIds") or [])
-            + list(result.get("invalidRecordIds") or [])
-            + list(result.get("invalidCandidateIds") or [])
-            + list(closure_summary.get("invalidIds") or [])
-        )
-        if _trim_text(item, max_length=160)
-    ]
-    deduped_invalid_ids = list(dict.fromkeys(invalid_ids))[:8]
-    progress_label = _trim_text(closure_summary.get("progressLabel"), max_length=240)
-    message = _trim_text(
-        closure_summary.get("message")
-        or writeback.get("summary")
-        or previous_task.get("summary"),
-        max_length=500,
-    )
-    retry_instruction = _trim_text(closure_summary.get("retryInstruction"), max_length=500)
-    task_status = _trim_text(previous_task.get("status"), max_length=80)
-    lines = ["## 上一轮结果"]
-    if progress_label:
-        lines.append(f"- 进度：{progress_label}")
-    if message:
-        lines.append(f"- 结论：{message}")
-    if task_status:
-        lines.append(f"- 状态：{task_status}")
-    if deduped_invalid_ids:
-        lines.append(f"- 未匹配 ID：{', '.join(deduped_invalid_ids)}")
-    if retry_instruction:
-        lines.append(f"- 重试要求：{retry_instruction}")
-    return lines if len(lines) > 1 else []
 
 
 def _materialize_source_collection_stage_writeback_candidate_graph(

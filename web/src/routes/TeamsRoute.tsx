@@ -357,6 +357,7 @@ type SourceCollectionStageAgentChatStatus = "ready" | "loading" | "error" | "rep
 
 type SourceCollectionCoverageSummary = {
   applicable?: boolean;
+  coverageKind?: string;
   complete?: boolean;
   total?: number;
   processed?: number;
@@ -364,6 +365,21 @@ type SourceCollectionCoverageSummary = {
   invalid?: number;
   blocked?: number;
   duplicate?: number;
+};
+
+type SourceCollectionStageClosureSummary = {
+  userStatus?: "success" | "partial" | "failed" | string;
+  artifactStatus?: string;
+  agentTurnStatus?: string;
+  targetLabel?: string;
+  message?: string;
+  progressLabel?: string;
+  successCount?: number;
+  failedCount?: number;
+  blockedCount?: number;
+  invalidIds?: string[];
+  retryInstruction?: string;
+  nextAction?: string;
 };
 
 type SourceCollectionStageCardProjection = {
@@ -395,6 +411,8 @@ type SourceCollectionStageCardProjection = {
     nextActionCount?: number;
     coverageSummary?: SourceCollectionCoverageSummary;
     invalidCandidateIds?: string[];
+    invalidRecordIds?: string[];
+    closureSummary?: SourceCollectionStageClosureSummary;
     materializedSources?: Record<string, unknown>;
     materializedContentExtraction?: Record<string, unknown>;
   };
@@ -707,6 +725,19 @@ function sourceCollectionStageUserStatusLabel(
   if (syncing) {
     return lang === "zh" ? "正在同步 Agent 结果" : "Syncing Agent result";
   }
+  const closure = projection.latestTask?.closureSummary;
+  if (closure?.userStatus === "failed") {
+    if (projection.stageId === "candidate") {
+      return lang === "zh" ? "本轮未生成候选资料" : "No candidate sources generated";
+    }
+    return lang === "zh" ? "本轮未完成闭环" : "This attempt did not close";
+  }
+  if (closure?.userStatus === "partial") {
+    return lang === "zh" ? "本轮部分完成，待补齐" : "Partially completed";
+  }
+  if (closure?.userStatus === "success") {
+    return lang === "zh" ? "本轮已成功闭环" : "Attempt closed successfully";
+  }
   const coverage = projection.latestTask?.coverageSummary;
   if (coverage?.applicable && coverage.complete === false) {
     return sourceCollectionStageRecoveryStatusLabel(projection.stageId, lang);
@@ -748,6 +779,23 @@ function sourceCollectionStageUserSummary(
     return "";
   }
   const objectLabel = sourceCollectionStageReadableObjectLabel(projection.stageId, lang);
+  const closure = projection.latestTask?.closureSummary;
+  if (closure?.userStatus === "failed" && projection.stageId === "candidate" && lang === "zh") {
+    const message = closure.message || "Agent 已回写，但没有生成候选资料。";
+    const retryInstruction = closure.retryInstruction || closure.nextAction || "请使用完整 recordId 重试。";
+    return `${message}建议：${retryInstruction}`;
+  }
+  if (closure?.message) {
+    const retryInstruction = closure.retryInstruction || closure.nextAction || "";
+    if (lang === "zh") {
+      return closure.userStatus === "success" || !retryInstruction
+        ? closure.message
+        : `${closure.message}建议：${retryInstruction}`;
+    }
+    return closure.userStatus === "success" || !retryInstruction
+      ? closure.message
+      : `${closure.message} Next: ${retryInstruction}`;
+  }
   const coverage = projection.latestTask?.coverageSummary;
   const total = typeof coverage?.total === "number" ? coverage.total : 0;
   const processed = typeof coverage?.processed === "number" ? coverage.processed : 0;
@@ -755,8 +803,13 @@ function sourceCollectionStageUserSummary(
   const invalid = typeof coverage?.invalid === "number" ? coverage.invalid : 0;
   if (coverage?.applicable && coverage.complete === false && total > 0) {
     if (lang === "zh") {
-      const invalidText = invalid > 0 ? `Agent 返回的候选 ID 没有匹配到本轮资料 ${invalid} 条。` : "";
-      return `${objectLabel}处理进度 ${processed}/${total}，还有 ${missing} 条需要补齐。${invalidText}建议：${sourceCollectionStageRecoveryActionLabel(projection.stageId, lang)}。`;
+      const invalidText = invalid > 0
+        ? (coverage.coverageKind === "record_extractions"
+          ? `Agent 返回的 recordId 没有匹配到本轮资料 ${invalid} 条。`
+          : `Agent 返回的候选 ID 没有匹配到本轮资料 ${invalid} 条。`)
+        : "";
+      const recordIdHint = coverage.coverageKind === "record_extractions" ? "请使用完整 recordId 重试。" : "";
+      return `${objectLabel}处理进度 ${processed}/${total}，还有 ${missing} 条需要补齐。${invalidText}建议：${sourceCollectionStageRecoveryActionLabel(projection.stageId, lang)}。${recordIdHint}`;
     }
     return `${processed}/${total} processed; ${missing} still need work${invalid > 0 ? `; ${invalid} writeback IDs did not match this run` : ""}.`;
   }
@@ -7811,9 +7864,9 @@ export function TeamsRoute({
     const candidateProjection = sourceCollectionCandidateProjection;
     const candidateLatestTask = candidateProjection?.latestTask;
     const candidateCoverageMetric = sourceCollectionCoverageMetric(candidateLatestTask?.coverageSummary, lang, "candidate");
-    const candidateInvalidIdCount = Array.isArray(candidateLatestTask?.invalidCandidateIds)
-      ? candidateLatestTask.invalidCandidateIds.length
-      : 0;
+    const candidateInvalidIdCount =
+      (Array.isArray(candidateLatestTask?.invalidCandidateIds) ? candidateLatestTask.invalidCandidateIds.length : 0)
+      + (Array.isArray(candidateLatestTask?.invalidRecordIds) ? candidateLatestTask.invalidRecordIds.length : 0);
     const candidateMaterializedSources = isRecord(candidateLatestTask?.materializedSources)
       ? candidateLatestTask?.materializedSources
       : null;
