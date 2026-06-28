@@ -1,4 +1,4 @@
-from langchain_core.messages import AIMessage, ToolMessage
+from langchain_core.messages import AIMessage, AIMessageChunk, ToolMessage
 import pytest
 from types import SimpleNamespace
 import json
@@ -1455,6 +1455,39 @@ def test_stream_final_chunk_exposes_usage_observation_for_ui():
     assert usage_observation["cache_hit_rate"] == pytest.approx(0.5)
     assert streamed[0].response_metadata["llm_protocol"]["protocol"]
     assert streamed[-1].response_metadata["llm_protocol"]["payloadValidationResult"] == "passed"
+
+
+def test_stream_chunk_merge_preserves_single_copy_of_response_metadata():
+    first = AIMessageChunk(
+        content="你",
+        response_metadata={
+            "provider": "xiaomi",
+            "model": "mimo-v2.5-pro",
+            "llm_protocol": {
+                "protocol": "chat_completions",
+                "payloadValidationResult": "passed",
+            },
+        },
+    )
+    second = AIMessageChunk(
+        content="好",
+        response_metadata={
+            "provider": "xiaomi",
+            "model": "mimo-v2.5-pro",
+            "llm_protocol": {
+                "protocol": "chat_completions",
+                "payloadValidationResult": "passed",
+            },
+        },
+    )
+
+    merged = ResponseProcessor.merge_stream_chunk(first, second)
+
+    assert merged.content == "你好"
+    assert merged.response_metadata["provider"] == "xiaomi"
+    assert merged.response_metadata["model"] == "mimo-v2.5-pro"
+    assert merged.response_metadata["llm_protocol"]["protocol"] == "chat_completions"
+    assert merged.response_metadata["llm_protocol"]["payloadValidationResult"] == "passed"
 
 
 def test_stream_records_started_event_before_first_provider_chunk(monkeypatch):

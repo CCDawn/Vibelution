@@ -29,6 +29,25 @@ def _preview(text: Any, *, limit: int = 180) -> str:
     return value[: max(0, limit - 1)].rstrip() + "..."
 
 
+def compact_repeated_metadata_text(value: Any, *, max_chars: int = 300) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    compacted = text
+    for unit_length in range(1, (len(text) // 2) + 1):
+        if len(text) % unit_length:
+            continue
+        unit = text[:unit_length]
+        if len(unit.strip()) < 3:
+            continue
+        if unit * (len(text) // unit_length) == text:
+            compacted = unit
+            break
+    if len(compacted) > max_chars:
+        return compacted[:max_chars].rstrip()
+    return compacted
+
+
 def estimate_segment_tokens(chars: int, item_count: int = 0) -> int:
     return max(0, int((max(0, chars) + 2) // 3) + max(0, item_count) * 8)
 
@@ -345,8 +364,8 @@ def build_llm_usage_from_observation(
         "cacheCreationInputTokens": cache_creation_tokens,
         "uncachedInputTokens": uncached_tokens if observed else 0,
         "cacheHitRate": (cached_tokens / input_tokens) if observed and input_tokens > 0 else 0.0,
-        "provider": str(response_metadata.get("provider") or runtime_metadata.get("provider") or "").strip(),
-        "model": str(response_metadata.get("model") or runtime_metadata.get("model") or "").strip(),
+        "provider": compact_repeated_metadata_text(response_metadata.get("provider") or runtime_metadata.get("provider") or ""),
+        "model": compact_repeated_metadata_text(response_metadata.get("model") or runtime_metadata.get("model") or ""),
         "llmModelId": str(
             response_metadata.get("llmModelId")
             or response_metadata.get("modelId")
@@ -405,8 +424,8 @@ def normalize_runtime_llm_usage(value: Any) -> dict[str, Any] | None:
         "cacheCreationInputTokens": cache_creation_tokens,
         "uncachedInputTokens": uncached_tokens,
         "cacheHitRate": (cached_tokens / input_tokens) if input_tokens > 0 else 0.0,
-        "provider": str(value.get("provider") or "").strip(),
-        "model": str(value.get("model") or "").strip(),
+        "provider": compact_repeated_metadata_text(value.get("provider") or ""),
+        "model": compact_repeated_metadata_text(value.get("model") or ""),
         "llmModelId": str(value.get("llmModelId") or value.get("llm_model_id") or "").strip(),
         "promptCacheScope": str(value.get("promptCacheScope") or value.get("prompt_cache_scope") or "").strip(),
         "promptCachePartition": str(value.get("promptCachePartition") or value.get("prompt_cache_partition") or "").strip(),
