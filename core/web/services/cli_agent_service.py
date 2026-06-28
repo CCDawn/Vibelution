@@ -137,6 +137,9 @@ def run_cli_agent(
     model: str = "",
     agent: str = "",
     allow_unsafe_permissions: bool = False,
+    source_session_id: str = "",
+    source_message_id: str = "",
+    source_run_id: str = "",
     action: str = "task",
     terminal_session_id: str = "",
     input_text: str = "",
@@ -202,6 +205,9 @@ def run_cli_agent(
                     model=model,
                     agent=agent,
                     allow_unsafe_permissions=allow_unsafe_permissions,
+                    source_session_id=source_session_id,
+                    source_message_id=source_message_id,
+                    source_run_id=source_run_id,
                     started_at=started_at,
                 )
                 controller_result["runId"] = controller_result.get("terminalSessionId") or _new_run_id()
@@ -222,6 +228,9 @@ def run_cli_agent(
                 mode=normalized_mode,
                 model=model,
                 agent=agent,
+                source_session_id=source_session_id,
+                source_message_id=source_message_id,
+                source_run_id=source_run_id,
                 allow_unsafe_permissions=allow_unsafe_permissions,
                 send_initial_task=False,
             )
@@ -394,6 +403,9 @@ def _run_terminal_controller_action(
     model: str,
     agent: str,
     allow_unsafe_permissions: bool,
+    source_session_id: str,
+    source_message_id: str,
+    source_run_id: str,
     started_at: float,
 ) -> dict[str, Any]:
     from . import cli_agent_terminal_service
@@ -424,6 +436,9 @@ def _run_terminal_controller_action(
             mode=mode,
             model=model,
             agent=agent,
+            source_session_id=source_session_id,
+            source_message_id=source_message_id,
+            source_run_id=source_run_id,
             allow_unsafe_permissions=allow_unsafe_permissions,
             send_initial_task=False,
             intent=intent,

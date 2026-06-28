@@ -266,6 +266,92 @@ def test_submit_cli_agent_task_send_failure_fails_task_and_returns_error_like_re
     assert result["timedOut"] is False
 
 
+def test_submit_cli_agent_task_rejects_stale_terminal_without_writing(monkeypatch, tmp_path):
+    project_root = tmp_path / "Vibelution"
+    project_root.mkdir()
+    monkeypatch.setattr(task_kernel, "PROJECT_ROOT", project_root)
+    monkeypatch.setattr(task_kernel, "TASK_STATE_DIR", project_root / ".runtime" / "cli_agents" / "tasks")
+    monkeypatch.setattr(task_kernel, "_ensure_watcher_started", lambda: None)
+
+    from core.web.services import cli_agent_terminal_service
+
+    def unexpected_write(*_args, **_kwargs):
+        raise AssertionError("stale terminal must not receive task input")
+
+    monkeypatch.setattr(cli_agent_terminal_service, "write_cli_agent_terminal_input", unexpected_write)
+
+    result = task_kernel.submit_cli_agent_task(
+        terminal_session={
+            "terminalSessionId": "cli-term-stale",
+            "adapterId": "mimo_code",
+            "label": "MiMo Code",
+            "sourceSessionId": "session-1",
+            "cwd": str(project_root),
+            "mode": "readonly",
+            "alive": False,
+            "status": "stale",
+            "interactionState": "resumable",
+            "canInput": False,
+            "canResume": True,
+            "resumeAction": "resume_session",
+            "stateReason": "backend_startup",
+        },
+        task="继续分析",
+        timeout_seconds=60,
+        output_limit=8000,
+    )
+
+    assert result["status"] == "failed"
+    assert result["semanticStatus"] == "failed"
+    assert result["internalStatus"] == "terminal_unavailable"
+    assert result["code"] == "CLI_AGENT_TERMINAL_NOT_RUNNING"
+    assert result["terminalSessionId"] == "cli-term-stale"
+    assert result["terminalStatus"] == "stale"
+    assert result["terminalAlive"] is False
+    assert result["canInput"] is False
+    assert result["canResume"] is True
+    assert result["resumeAction"] == "resume_session"
+    assert result["taskId"] == ""
+    assert result["resultSource"] == "terminal_state"
+    assert "需要先恢复" in result["stdoutPreview"]
+
+
+def test_submit_cli_agent_task_reports_user_closed_terminal_as_closed(monkeypatch, tmp_path):
+    project_root = tmp_path / "Vibelution"
+    project_root.mkdir()
+    monkeypatch.setattr(task_kernel, "PROJECT_ROOT", project_root)
+    monkeypatch.setattr(task_kernel, "TASK_STATE_DIR", project_root / ".runtime" / "cli_agents" / "tasks")
+    monkeypatch.setattr(task_kernel, "_ensure_watcher_started", lambda: None)
+
+    result = task_kernel.submit_cli_agent_task(
+        terminal_session={
+            "terminalSessionId": "cli-term-closed",
+            "adapterId": "mimo_code",
+            "label": "MiMo Code",
+            "sourceSessionId": "session-1",
+            "cwd": str(project_root),
+            "mode": "readonly",
+            "alive": False,
+            "status": "closed",
+            "userClosed": True,
+            "interactionState": "closed",
+            "canInput": False,
+            "canResume": False,
+            "stateReason": "user_closed",
+        },
+        task="继续分析",
+        timeout_seconds=60,
+        output_limit=8000,
+    )
+
+    assert result["status"] == "closed"
+    assert result["semanticStatus"] == "closed"
+    assert result["code"] == "CLI_AGENT_TERMINAL_CLOSED"
+    assert result["terminalStatus"] == "closed"
+    assert result["canResume"] is False
+    assert "已关闭" in result["message"]
+
+
 def test_mark_terminal_closed_marks_active_task_as_failed_and_completes_to_session(monkeypatch, tmp_path):
     project_root = tmp_path / "Vibelution"
     project_root.mkdir()

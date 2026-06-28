@@ -44,6 +44,14 @@ def submit_cli_agent_task(
         return _error_result("MISSING_TERMINAL_SESSION", "CLI Agent terminal session id is missing.", adapter_id=adapter_id)
     if not normalized_task:
         return _error_result("MISSING_TASK", "cli_agent_run_tool requires a non-empty task.", adapter_id=adapter_id)
+    unavailable = _terminal_unavailable_result(
+        terminal_session=terminal_session,
+        task=normalized_task,
+        timeout_seconds=timeout_seconds,
+        output_limit=output_limit,
+    )
+    if unavailable:
+        return unavailable
 
     _ensure_watcher_started()
     timeout = cli_agent_service._clamp_int(timeout_seconds, cli_agent_service.DEFAULT_TIMEOUT_SECONDS, 1, cli_agent_service.MAX_TIMEOUT_SECONDS)
@@ -338,6 +346,111 @@ def _finalize_task_result(task_state: dict[str, Any], *, reason: str) -> None:
         )
 
 
+def _terminal_unavailable_result(
+    *,
+    terminal_session: dict[str, Any],
+    task: str,
+    timeout_seconds: int,
+    output_limit: int,
+) -> dict[str, Any]:
+    if _terminal_can_accept_task(terminal_session):
+        return {}
+    adapter_id = cli_agent_service._normalize_id(terminal_session.get("adapterId") or terminal_session.get("agentType") or "")
+    terminal_status = str(terminal_session.get("status") or "").strip().lower()
+    interaction_state = str(terminal_session.get("interactionState") or "").strip().lower()
+    user_closed = bool(terminal_session.get("userClosed")) or terminal_status == "closed" or interaction_state == "closed"
+    public_status = "closed" if user_closed else "failed"
+    code = "CLI_AGENT_TERMINAL_CLOSED" if user_closed else "CLI_AGENT_TERMINAL_NOT_RUNNING"
+    reason = (
+        str(terminal_session.get("stateReason") or terminal_session.get("closeReason") or "").strip()
+        or terminal_status
+        or interaction_state
+        or "not_running"
+    )
+    if user_closed:
+        message = "CLI Agent 终端已关闭，本次任务没有发送。"
+    elif bool(terminal_session.get("canResume")):
+        message = "CLI Agent 终端当前未运行，需要先恢复会话后才能发送任务。"
+    else:
+        message = "CLI Agent 终端当前不可输入，本次任务没有发送。"
+    segment_text = "；".join(
+        part
+        for part in [
+            message,
+            f"终端状态：{terminal_status or 'unknown'}",
+            f"交互状态：{interaction_state or 'unknown'}",
+            f"原因：{reason}" if reason else "",
+        ]
+        if part
+    )
+    limit = cli_agent_service._clamp_int(output_limit, cli_agent_service.DEFAULT_OUTPUT_LIMIT, 1000, cli_agent_service.MAX_OUTPUT_LIMIT)
+    return {
+        "status": public_status,
+        "semanticStatus": public_status,
+        "internalStatus": "terminal_unavailable",
+        "code": code,
+        "message": message,
+        "taskId": "",
+        "agentType": adapter_id,
+        "adapterId": adapter_id,
+        "label": str(terminal_session.get("label") or adapter_id or "CLI Agent").strip(),
+        "mode": str(terminal_session.get("mode") or "readonly").strip() or "readonly",
+        "cwd": str(terminal_session.get("cwd") or "").strip(),
+        "taskHash": cli_agent_service._task_hash(task),
+        "taskPreview": cli_agent_service._clip(task, 500),
+        "timeoutSeconds": cli_agent_service._clamp_int(
+            timeout_seconds,
+            cli_agent_service.DEFAULT_TIMEOUT_SECONDS,
+            1,
+            cli_agent_service.MAX_TIMEOUT_SECONDS,
+        ),
+        "terminalSessionId": str(terminal_session.get("terminalSessionId") or "").strip(),
+        "cliRunId": str(terminal_session.get("cliRunId") or "").strip(),
+        "lockKey": str(terminal_session.get("lockKey") or "").strip(),
+        "cliSessionId": str(terminal_session.get("cliSessionId") or "").strip(),
+        "sourceSessionId": str(terminal_session.get("sourceSessionId") or "").strip(),
+        "sourceMessageId": str(terminal_session.get("sourceMessageId") or "").strip(),
+        "sourceRunId": str(terminal_session.get("sourceRunId") or "").strip(),
+        "createdAt": "",
+        "sentAt": "",
+        "completedAt": _now_iso(),
+        "completionReason": reason,
+        "terminalAlive": bool(terminal_session.get("alive")),
+        "terminalStatus": terminal_status,
+        "interactionState": str(terminal_session.get("interactionState") or "").strip(),
+        "terminalReuse": bool(terminal_session.get("reusedActiveLock")),
+        "canInput": bool(terminal_session.get("canInput")),
+        "canResume": bool(terminal_session.get("canResume")),
+        "canStart": bool(terminal_session.get("canStart")),
+        "resumeAction": str(terminal_session.get("resumeAction") or "").strip(),
+        "displayMode": str(terminal_session.get("displayMode") or "").strip(),
+        "stateReason": reason,
+        "tuiState": str(terminal_session.get("tuiState") or "").strip(),
+        "resultSegments": [{"index": 0, "kind": "status", "text": segment_text}],
+        "resultSource": "terminal_state",
+        "parserConfidence": "high",
+        "stdoutPreview": cli_agent_service._clip(segment_text, limit),
+        "stderrPreview": "",
+        "exitCode": None,
+        "timedOut": False,
+        "logPath": "",
+    }
+
+
+def _terminal_can_accept_task(terminal_session: dict[str, Any]) -> bool:
+    if not isinstance(terminal_session, dict) or not str(terminal_session.get("terminalSessionId") or "").strip():
+        return False
+    status = str(terminal_session.get("status") or "").strip().lower()
+    interaction_state = str(terminal_session.get("interactionState") or "").strip().lower()
+    if bool(terminal_session.get("userClosed")) or status in TERMINAL_CLOSED_STATUSES or interaction_state in {"closed", "resumable", "history"}:
+        return False
+    if "canInput" in terminal_session and not bool(terminal_session.get("canInput")):
+        return False
+    if not bool(terminal_session.get("alive")):
+        return False
+    return True
+
+
 def _public_task_result(
     task_state: dict[str, Any],
     *,
@@ -384,7 +497,15 @@ def _public_task_result(
         "completionReason": str(task_state.get("completionReason") or "").strip(),
         "terminalAlive": bool(terminal.get("alive")),
         "terminalStatus": str(terminal.get("status") or "").strip(),
+        "interactionState": str(terminal.get("interactionState") or "").strip(),
         "terminalReuse": bool(terminal.get("reusedActiveLock")),
+        "canInput": bool(terminal.get("canInput")),
+        "canResume": bool(terminal.get("canResume")),
+        "canStart": bool(terminal.get("canStart")),
+        "resumeAction": str(terminal.get("resumeAction") or "").strip(),
+        "displayMode": str(terminal.get("displayMode") or "").strip(),
+        "stateReason": str(terminal.get("stateReason") or "").strip(),
+        "tuiState": str(terminal.get("tuiState") or "").strip(),
         "resultSegments": segments,
         "resultSource": result_source,
         "parserConfidence": _parser_confidence(task_state, result_source),
@@ -452,7 +573,7 @@ def _semantic_task_status(status: str, code: str) -> str:
         return "task_locked"
     if normalized in {"queued", "sent"}:
         return "task_sent"
-    if normalized in {"completed", "failed", "timeout", "running", "error"}:
+    if normalized in {"completed", "failed", "timeout", "running", "error", "closed"}:
         return normalized
     return normalized or "unknown"
 
