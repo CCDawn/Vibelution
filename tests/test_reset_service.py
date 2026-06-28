@@ -562,6 +562,53 @@ def test_launcher_maintenance_apply_rejects_profile_mismatch(reset_project: Path
     assert mismatch_error.value.code == "profile_mismatch"
 
 
+def test_launcher_maintenance_apply_rejects_stale_profile_item_set(
+    reset_project: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    events: list[dict] = []
+
+    def capture_reset_event(component: str, phase: str, event_code: str, **kwargs):
+        events.append(
+            {
+                "component": component,
+                "phase": phase,
+                "eventCode": event_code,
+                "fields": kwargs.get("fields") or {},
+            }
+        )
+
+    monkeypatch.setattr(reset_service, "record_runtime_scene_event", capture_reset_event, raising=False)
+    plan_dir = reset_project / ".runtime" / "launcher" / "maintenance-reset-plans"
+    preview = reset_service.preview_launcher_maintenance_plan({"profileId": "clean_start"}, plan_dir=plan_dir)
+    plan = dict(preview["plan"])
+    plan["selectedItemIds"] = [*plan["selectedItemIds"], "agents"]
+    plan["planHash"] = reset_service._maintenance_plan_hash(plan)
+    (plan_dir / f"{plan['planId']}.json").write_text(
+        json.dumps(plan, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(reset_service.LauncherMaintenancePlanError) as stale_error:
+        reset_service.apply_launcher_maintenance_plan(
+            {
+                "planId": plan["planId"],
+                "planHash": plan["planHash"],
+                "profileId": "clean_start",
+                "confirm": True,
+            },
+            plan_dir=plan_dir,
+        )
+
+    assert stale_error.value.code == "profile_items_mismatch"
+    event = next(event for event in events if event["eventCode"] == "launcher.maintenance_reset.profile_items_mismatch")
+    assert event["component"] == "reset"
+    assert event["phase"] == "apply"
+    assert event["fields"]["profileId"] == "clean_start"
+    assert event["fields"]["planItemCount"] == len(plan["selectedItemIds"])
+    assert event["fields"]["currentItemCount"] == len(reset_service.PROFILES["clean_start"])
+
+
 def test_reset_routes_report_migration_to_launcher(reset_project: Path):
     _write(reset_project / "web" / "dist" / "index.html", "<html></html>")
     client = TestClient(create_app(), headers={CONTROL_TOKEN_HEADER: get_control_token()})
