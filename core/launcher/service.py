@@ -1554,6 +1554,7 @@ def _workbench_payload(*, runtime_state: dict[str, Any], observed_workbench: dic
     backend_observed = bool(observed_or_state("backendObserved", False))
     backend_healthy = bool(observed_or_state("backendHealthy", False))
     backend_port_listening = bool(observed_or_state("backendPortListening", False))
+    last_request_audit = _last_request_audit_payload(state_workbench.get("lastRequestAudit"))
     backend_port_conflict = bool(observed_or_state("backendPortConflict", False))
     backend_alive = bool(
         observed_or_state("backendAlive", False)
@@ -1658,6 +1659,7 @@ def _workbench_payload(*, runtime_state: dict[str, Any], observed_workbench: dic
         "lastReason": str(state_workbench.get("lastReason") or "").strip(),
         "lastSource": str(state_workbench.get("lastSource") or "").strip(),
         "lastTransitionAt": str(state_workbench.get("lastTransitionAt") or "").strip(),
+        "lastRequestAudit": last_request_audit,
         "statusLine": status_line,
         "failureMessage": failure_message,
         "staleRuntimeStateReconciled": stale_open_state_reconciled,
@@ -1840,6 +1842,7 @@ def _project_bundle_from_workbench(
         workbench.update(window_provider_projection(workbench))
 
     window_projection = window_provider_projection(workbench)
+    last_request_audit = _last_request_audit_payload(workbench.get("lastRequestAudit"))
 
     frontend_dist_ready = not bool(workbench.get("frontendOrphaned"))
     backend_component = _component_state(
@@ -1892,6 +1895,7 @@ def _project_bundle_from_workbench(
             "reason": str(workbench.get("lastReason") or ""),
             "source": str(workbench.get("lastSource") or ""),
             "transitionAt": str(workbench.get("lastTransitionAt") or ""),
+            "requestAudit": last_request_audit,
         },
         "components": [backend_component, frontend_component, browser_component],
         "backend": {
@@ -2487,3 +2491,26 @@ def _audit_url_host(value: object, limit: int) -> str:
     except Exception:
         return ""
     return _truncate(parsed.netloc or "", limit)
+
+
+def _last_request_audit_payload(value: object) -> dict[str, str]:
+    if not isinstance(value, dict):
+        return {}
+    limits = {
+        "operation": 48,
+        "trigger": 80,
+        "endpoint": 120,
+        "method": 16,
+        "clientHost": 80,
+        "refererPath": 160,
+        "originHost": 120,
+        "userAgent": 160,
+    }
+    audit: dict[str, str] = {}
+    for key, limit in limits.items():
+        if key not in value:
+            continue
+        text = _audit_value(value.get(key), limit)
+        if text:
+            audit[key] = text
+    return audit
