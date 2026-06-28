@@ -2673,6 +2673,7 @@ def _ensure_ai_search_role_agent(role: dict[str, Any], *, session_service: Any) 
             title=label,
             llm_bindings=session_service.default_session_llm_bindings(),
             created_by="ai_search_team",
+            conversation_index_kind=agent_directory_service.CONVERSATION_INDEX_KIND_TEAM_AGENT,
         )
         agent_id = str(session_detail.get("agentId") or "").strip()
         existing = agent_directory_service.get_agent(agent_id) if agent_id else None
@@ -2726,10 +2727,15 @@ def _ai_search_role_metadata(role: dict[str, Any]) -> dict[str, Any]:
     return {
         "agentMode": "ai_search",
         "configSurface": "team",
+        "conversationIndexKind": agent_directory_service.CONVERSATION_INDEX_KIND_TEAM_AGENT,
+        "conversationIndexVisibility": agent_directory_service.CONVERSATION_INDEX_VISIBILITY_TEAM_PRIVATE,
         "fixedRole": True,
         "protected": True,
+        "showInSessionIndex": False,
+        "teamId": AI_SEARCH_TEAM_ID,
         "aiSearchRole": role_key,
         "aiSearchRoleLabel": label,
+        "directSessionVisibility": "active_session",
         "functionalDisplayName": label,
         "managedDomain": "ai_latest_news_source_scope",
         "personaProfile": {
