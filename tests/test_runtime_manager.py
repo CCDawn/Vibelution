@@ -4,6 +4,7 @@ import subprocess
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -2527,6 +2528,49 @@ def test_command_queue_records_queued_claimed_and_result_written_events(tmp_path
     assert all(kwargs["occurred_at"] for _, _, kwargs in scene_events)
 
 
+def test_claim_next_command_logs_debug_when_claim_move_fails(tmp_path, monkeypatch):
+    inbox_dir = tmp_path / "inbox"
+    processing_dir = tmp_path / "processing"
+    results_dir = tmp_path / "results"
+    events_path = tmp_path / "events.jsonl"
+    for path in (inbox_dir, processing_dir, results_dir):
+        path.mkdir(parents=True)
+    (inbox_dir / "cmd-ready.json").write_text(
+        json.dumps(
+            {
+                "commandId": "cmd-ready",
+                "type": "open_workbench",
+                "requestedBy": "launcher_ps",
+                "args": {"reason": "launcher_start"},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(command_queue, "INBOX_DIR", inbox_dir)
+    monkeypatch.setattr(command_queue, "PROCESSING_DIR", processing_dir)
+    monkeypatch.setattr(command_queue, "RESULTS_DIR", results_dir)
+    monkeypatch.setattr(command_queue, "EVENTS_PATH", events_path)
+    monkeypatch.setattr(command_queue, "ensure_runtime_manager_dirs", lambda: None)
+
+    debug_calls: list[tuple[str, dict[str, object]]] = []
+    monkeypatch.setattr(
+        command_queue,
+        "_COMMAND_QUEUE_LOGGER",
+        SimpleNamespace(debug=lambda event, *, extra=None, **_kwargs: debug_calls.append((event, dict(extra or {})))),
+        raising=False,
+    )
+    monkeypatch.setattr(command_queue.os, "replace", lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("busy")))
+
+    claimed = command_queue.claim_next_command()
+
+    assert claimed is None
+    assert debug_calls
+    assert debug_calls[0][0] == "command_queue.claim_move_failed"
+    assert debug_calls[0][1]["path"].endswith("cmd-ready.json")
+    assert debug_calls[0][1]["errorType"] == "OSError"
+
+
 def test_submit_close_interrupts_active_open_command(tmp_path, monkeypatch):
     inbox_dir = tmp_path / "inbox"
     processing_dir = tmp_path / "processing"
@@ -3018,6 +3062,70 @@ def test_submit_command_treats_duplicate_stop_manager_close_as_idempotent(tmp_pa
     assert result["ok"] is True
     assert result["runtimeManagerStopping"] is True
     assert result["message"] == "Runtime manager shutdown is already in progress."
+
+
+def test_complete_command_logs_debug_when_processing_cleanup_fails(tmp_path, monkeypatch):
+    inbox_dir = tmp_path / "inbox"
+    processing_dir = tmp_path / "processing"
+    results_dir = tmp_path / "results"
+    events_path = tmp_path / "events.jsonl"
+    for path in (inbox_dir, processing_dir, results_dir):
+        path.mkdir(parents=True)
+
+    processing_path = processing_dir / "cmd-processing.json"
+    processing_path.write_text(
+        json.dumps(
+            {
+                "commandId": "cmd-processing",
+                "type": "open_workbench",
+                "requestedBy": "launcher_ps",
+                "requestedAt": "2026-06-28T00:00:00+00:00",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(command_queue, "INBOX_DIR", inbox_dir)
+    monkeypatch.setattr(command_queue, "PROCESSING_DIR", processing_dir)
+    monkeypatch.setattr(command_queue, "RESULTS_DIR", results_dir)
+    monkeypatch.setattr(command_queue, "EVENTS_PATH", events_path)
+    monkeypatch.setattr(command_queue, "ensure_runtime_manager_dirs", lambda: None)
+    monkeypatch.setattr(command_queue, "record_runtime_manager_scene_event", lambda *args, **kwargs: None)
+    monkeypatch.setattr(command_queue, "clear_lifecycle_interrupt", lambda _command_id: None)
+
+    debug_calls: list[tuple[str, dict[str, object]]] = []
+    monkeypatch.setattr(
+        command_queue,
+        "_COMMAND_QUEUE_LOGGER",
+        SimpleNamespace(debug=lambda event, *, extra=None, **_kwargs: debug_calls.append((event, dict(extra or {})))),
+        raising=False,
+    )
+
+    path_type = type(processing_path)
+    original_unlink = path_type.unlink
+
+    def failing_unlink(self, missing_ok=False):
+        if self == processing_path:
+            raise OSError("locked")
+        return original_unlink(self, missing_ok=missing_ok)
+
+    monkeypatch.setattr(path_type, "unlink", failing_unlink)
+
+    command_queue.complete_command(
+        processing_path,
+        {
+            "commandId": "cmd-processing",
+            "ok": True,
+            "completed": True,
+            "message": "Workbench opened.",
+        },
+    )
+
+    assert (results_dir / "cmd-processing.json").exists()
+    assert debug_calls
+    assert debug_calls[0][0] == "command_queue.command_result_cleanup_failed"
+    assert debug_calls[0][1]["commandId"] == "cmd-processing"
+    assert debug_calls[0][1]["errorType"] == "OSError"
 
 
 def test_submit_command_joins_active_close_workbench_without_stop_manager(tmp_path, monkeypatch):

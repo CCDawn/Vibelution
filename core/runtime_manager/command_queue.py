@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import tempfile
 import time
@@ -29,6 +30,8 @@ from .scene_logging import (
 from .state_store import load_pid, load_state
 from .restart_coordinator import create_restart_intent
 
+
+_COMMAND_QUEUE_LOGGER = logging.getLogger(__name__)
 
 DEFERRED_COMMAND_POLL_SECONDS = 10.0
 ACTIVE_LIFECYCLE_INTERRUPT_TYPES = {"open_workbench", "restart_workbench"}
@@ -265,7 +268,15 @@ def claim_next_command() -> tuple[Path, dict[str, Any]] | None:
         target = PROCESSING_DIR / path.name
         try:
             os.replace(path, target)
-        except OSError:
+        except OSError as exc:
+            _COMMAND_QUEUE_LOGGER.debug(
+                "command_queue.claim_move_failed",
+                extra={
+                    "path": str(path),
+                    "errorType": type(exc).__name__,
+                    "message": str(exc),
+                },
+            )
             continue
         try:
             payload = json.loads(target.read_text(encoding="utf-8"))
@@ -731,8 +742,16 @@ def complete_command(path: Path, result: dict[str, Any]) -> None:
     clear_lifecycle_interrupt(command_id)
     try:
         path.unlink(missing_ok=True)
-    except OSError:
-        pass
+    except OSError as exc:
+        _COMMAND_QUEUE_LOGGER.debug(
+            "command_queue.command_result_cleanup_failed",
+            extra={
+                "commandId": command_id,
+                "path": str(path),
+                "errorType": type(exc).__name__,
+                "message": str(exc),
+            },
+        )
     event_payload = {
         "commandId": command_id,
         "type": str(result.get("type") or command_payload.get("type") or ""),
