@@ -747,6 +747,11 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("researchCanvasReadOnly ? renderResearchCanvasReadOnlyPanel() : null");
     expect(routeSource).toContain("只读组织画布");
     expect(routeSource).toContain("不会同步群聊或修改节点");
+    expect(routeSource).toContain("canvasNodeStatusLabel");
+    expect(routeSource).toContain("已绑定");
+    expect(routeSource).toContain("专属管理员");
+    expect(routeSource).toContain("暂无信息线");
+    expect(routeSource).toContain("没有可展开的信息线");
     expect(routeSource).toContain('useState<ResearchCanvasLayoutMode>("auto")');
     expect(routeSource).toContain("autoLayoutResearchCanvasNodes(canvasNodes, organizationEdges)");
     expect(routeSource).toContain("const researchCanvasAutoLayoutActive = researchCanvasReadOnly && researchCanvasLayoutMode === \"auto\"");
@@ -1326,6 +1331,8 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("信息线");
     expect(routeSource).toContain("信息线已收起（");
     expect(routeSource).toContain("展开信息线");
+    expect(routeSource).toContain("暂无信息线");
+    expect(routeSource).toContain("没有可展开的信息线");
     expect(routeSource).toContain("收起信息线");
     expect(routeSource).toContain("Info");
     expect(routeSource).toContain('type: "reports_to"');
