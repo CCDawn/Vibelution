@@ -191,6 +191,34 @@ describe("ConversationView edit resend affordance", () => {
     expect(processToggleHoverRule).not.toContain("border-color");
   });
 
+  it("uses readable contrast for compact conversation metadata and toggles", () => {
+    const readableRules = [
+      ".turnMeta",
+      ".turnMetaActions",
+      ".turnIconButton",
+      ".operationSummaryPreview",
+      ".operationSummaryCount",
+      ".answerOnlyProcessToggle",
+      ".answerOnlyProcessTitle",
+      ".answerOnlyProcessMeta",
+      ".answerOnlyProcessPreview",
+      ".timelineCellHeader",
+      ".timelineCellPreview",
+      ".timelineCellMeta",
+      ".responseToggle",
+    ];
+
+    for (const selector of readableRules) {
+      const rule = cssRule(selector);
+      expect(rule).not.toBe("");
+      expect(rule).not.toMatch(/color:\s*var\(--fg-tertiary\)/);
+      expect(rule).not.toMatch(/color:\s*color-mix\(in srgb,\s*var\(--fg-tertiary\)[^;]*transparent\)/);
+    }
+
+    expect(cssRule(".responseToggle")).toContain("color: var(--fg-secondary)");
+    expect(cssRule(".answerOnlyProcessToggle")).toContain("color: var(--fg-secondary)");
+  });
+
   it("folds streaming request placeholders into the process strip", () => {
     expect(conversationViewSource).toContain("function isStreamingStatusPlaceholderContent(content: string)");
     expect(conversationViewSource).toContain("const isStreamingStatusPlaceholder = Boolean(message.streaming)");
@@ -269,6 +297,36 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).toContain('title="展开执行明细"');
     expect(html).not.toContain("先分析缓存链路");
     expect(html).not.toContain("opened session_service.py");
+  });
+
+  it("shows recent assistant answers by default in answer-only display", () => {
+    const html = renderConversation(
+      [
+        {
+          id: "assistant-answer-1",
+          role: "assistant",
+          content: "第一轮回答正文。",
+          timestamp: "2026-06-27T10:00:00Z",
+        },
+        {
+          id: "assistant-answer-2",
+          role: "assistant",
+          content: "第二轮回答正文。",
+          timestamp: "2026-06-27T10:01:00Z",
+        },
+        {
+          id: "assistant-answer-3",
+          role: "assistant",
+          content: "第三轮回答正文。",
+          timestamp: "2026-06-27T10:02:00Z",
+        },
+      ],
+      { useDefaultProcessDisplayMode: true },
+    );
+
+    expect(html).toContain("第一轮回答正文。");
+    expect(html).toContain("第二轮回答正文。");
+    expect(html).toContain("第三轮回答正文。");
   });
 
   it("surfaces the current running process before the live answer in the default display", () => {
@@ -768,6 +826,62 @@ describe("ConversationView edit resend affordance", () => {
     expect(html.match(/assistantTurnContinuation/g)?.length ?? 0).toBe(0);
     expect(html.indexOf("answerOnlyProcessGroup")).toBeLessThan(html.indexOf("responseSection"));
     expect(html).toContain("上下文已读取，继续整理结果。");
+  });
+
+  it("keeps the settled answer visible after projecting same-turn process packets", () => {
+    const html = renderConversation(
+      [
+        {
+          id: "assistant-settled-process-prepare",
+          role: "assistant",
+          content: "",
+          timestamp: "2026-06-27T01:00:00Z",
+          feedbackEvents: [
+            {
+              sequence: 1,
+              kind: "status",
+              status: "done",
+              name: "agent_prepare",
+              summary: "已绑定 Agent",
+            },
+          ],
+          metadata: {
+            turnId: "turn-settled-answer",
+          },
+        },
+        {
+          id: "assistant-settled-process-tool",
+          role: "assistant",
+          content: "",
+          timestamp: "2026-06-27T01:00:04Z",
+          feedbackEvents: [
+            {
+              sequence: 2,
+              kind: "tool",
+              status: "done",
+              name: "source_collection_context_tool",
+              summary: "读取受控资料上下文",
+            },
+          ],
+          metadata: {
+            turnId: "turn-settled-answer",
+          },
+        },
+        {
+          id: "assistant-settled-answer",
+          role: "assistant",
+          content: "这是最终回答，默认应该直接可见。",
+          timestamp: "2026-06-27T01:00:08Z",
+          metadata: {
+            turnId: "turn-settled-answer",
+          },
+        },
+      ],
+      { useDefaultProcessDisplayMode: true },
+    );
+
+    expect(html.match(/<article class="_assistantTurn_/g)?.length ?? 0).toBe(1);
+    expect(html).toContain("这是最终回答，默认应该直接可见。");
   });
 
   it("starts a new assistant avatar group after a user turn", () => {
@@ -1496,9 +1610,15 @@ describe("ConversationView edit resend affordance", () => {
   it("keeps historical assistant responses collapsed while preserving latest and streaming responses", () => {
     const html = renderConversation([
       {
+        id: "message-older-assistant",
+        role: "assistant",
+        content: "OLDER_HEAVY_ASSISTANT_RESPONSE_SHOULD_NOT_RENDER_BY_DEFAULT",
+        timestamp: "2026-05-22T00:00:00Z",
+      },
+      {
         id: "message-old-assistant",
         role: "assistant",
-        content: "OLD_HEAVY_ASSISTANT_RESPONSE_SHOULD_NOT_RENDER_BY_DEFAULT",
+        content: "OLD_RECENT_ASSISTANT_RESPONSE_STAYS_VISIBLE",
         timestamp: "2026-05-22T00:01:00Z",
       },
       {
@@ -1517,7 +1637,8 @@ describe("ConversationView edit resend affordance", () => {
     ]);
 
     expect(html).toContain('aria-expanded="false"');
-    expect(html).not.toContain("OLD_HEAVY_ASSISTANT_RESPONSE_SHOULD_NOT_RENDER_BY_DEFAULT");
+    expect(html).not.toContain("OLDER_HEAVY_ASSISTANT_RESPONSE_SHOULD_NOT_RENDER_BY_DEFAULT");
+    expect(html).toContain("OLD_RECENT_ASSISTANT_RESPONSE_STAYS_VISIBLE");
     expect(html).toContain("STREAMING_ASSISTANT_RESPONSE_STAYS_VISIBLE");
     expect(html).toContain("LATEST_ASSISTANT_RESPONSE_STAYS_VISIBLE");
   });
@@ -2291,6 +2412,35 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).not.toContain('title="展开工具详情"');
     expect(html).not.toContain("正在思考，已收到思考片段");
     expect(html).not.toContain("回答</span>");
+  });
+
+  it("keeps transient reasoning placeholders out of the assistant answer block", () => {
+    const html = renderConversation([
+      {
+        id: "message-runtime-reasoning-placeholder",
+        role: "assistant",
+        content: "正在思考，已收到思考片段...\n模型已经开始返回 reasoning，正文可能稍后出现。",
+        timestamp: "2026-06-05T09:35:18Z",
+        streaming: true,
+        streamStage: "model_thinking",
+        feedbackEvents: [
+          {
+            sequence: 1,
+            kind: "status",
+            status: "running",
+            name: "model_thinking",
+            summary: "正在思考，已收到思考片段...",
+          },
+        ],
+      },
+    ]);
+
+    expect(html).toContain("正在请求");
+    expect(html).not.toContain("正在思考，已收到思考片段");
+    expect(html).not.toContain("模型已经开始返回 reasoning");
+    expect(html).not.toContain("正文可能稍后出现");
+    expect(html).not.toContain("回答</span>");
+    expect(html).not.toContain("responseSection");
   });
 
   it("hides internal runtime pipeline steps behind a compact request state", () => {

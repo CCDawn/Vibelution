@@ -66,6 +66,39 @@ export function isRuntimeNoticeMessage(message: ConversationMessage) {
   ].some((notice) => content.includes(notice));
 }
 
+function normalizeRuntimeStatusText(text: unknown) {
+  return String(text ?? "").replace(/\s+/g, " ").trim().toLowerCase();
+}
+
+function isStreamingRuntimeStatusCarrier(message: ConversationMessage) {
+  const kind = String(message.metadata?.kind ?? "").trim();
+  const stage = String(message.streamStage ?? "").trim().toLowerCase();
+  return Boolean(message.streaming)
+    || kind === "session_live_overlay"
+    || kind === "session_active_turn_layer"
+    || stage === "model_thinking"
+    || stage === "model_request";
+}
+
+function isTransientReasoningStatusText(text: unknown) {
+  const content = normalizeRuntimeStatusText(text);
+  if (!content || content.length > 360) {
+    return false;
+  }
+  const hasReasoningStatusMarker = [
+    "已收到思考片段",
+    "模型已经开始返回 reasoning",
+    "正文可能稍后出现",
+    "received reasoning",
+    "reasoning has started",
+    "answer may appear later",
+  ].some((marker) => content.includes(marker));
+  const hasThinkingMarker = content.includes("正在思考")
+    || content.includes("reasoning")
+    || content.includes("thinking");
+  return hasReasoningStatusMarker && hasThinkingMarker;
+}
+
 export function isRuntimeStatusContent(message: ConversationMessage) {
   if (message.role !== "assistant") {
     return false;
@@ -74,8 +107,13 @@ export function isRuntimeStatusContent(message: ConversationMessage) {
   if (!content) {
     return false;
   }
-  return /^(状态|status)\s+.+/i.test(content)
-    && /(正在|running|thinking|reasoning|tooling|模型|model|上下文|context)/i.test(content);
+  if (
+    /^(状态|status)\s+.+/i.test(content)
+    && /(正在|running|thinking|reasoning|tooling|模型|model|上下文|context)/i.test(content)
+  ) {
+    return true;
+  }
+  return isStreamingRuntimeStatusCarrier(message) && isTransientReasoningStatusText(content);
 }
 
 export function isAgentInboxMessage(message: ConversationMessage) {
