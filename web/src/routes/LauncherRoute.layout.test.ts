@@ -444,6 +444,11 @@ describe("LauncherRoute layout contract", () => {
     expect(routeSource).toContain("previewLauncherMaintenancePlan");
     expect(routeSource).toContain("applyLauncherMaintenancePlan");
     expect(routeSource).toContain("maintenanceProfile");
+    expect(routeSource).toContain("maintenancePlansByProfile");
+    expect(routeSource).toContain("setMaintenancePlansByProfile");
+    expect(routeSource).toContain('useState<LauncherMaintenanceProfileId>("clean_start")');
+    expect(routeSource).not.toContain('useState<LauncherMaintenanceProfileId>("factory_runtime")');
+    expect(routeSource).toContain("profileId: maintenanceProfile");
     expect(routeSource).toContain("launcherMaintenanceSummary()");
     expect(routeSource).toContain("maintenance/reset/summary");
     expect(routeSource).toContain("maintenance/reset/preview");
@@ -455,6 +460,9 @@ describe("LauncherRoute layout contract", () => {
     expect(launcherApiSource).toContain("maintenance/reset/preview");
     expect(launcherApiSource).toContain("maintenance/reset/apply");
     expect(routeSource).not.toContain('"/api/reset/');
+    expect(sourceSlice(routeSource, "onProfileChange={(profile) => {", "onPreview={previewMaintenancePlan}")).not.toContain(
+      "setMaintenancePlan(null)",
+    );
   });
 
   it("treats status disconnect after stop as an expected closed state", () => {

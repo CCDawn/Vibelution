@@ -474,8 +474,52 @@ def test_launcher_maintenance_summary_exposes_profiles_and_contract(reset_projec
     assert summary["applyContract"]["requiresLauncher"] is True
     assert summary["applyContract"]["retiredWebApi"] is True
     assert summary["applyContract"]["blocksActiveWork"] is True
+    assert summary["applyContract"]["requiresProfileId"] is True
     profile_ids = {profile["id"] for profile in summary["profiles"]}
     assert {"clean_start", "factory_runtime"} <= profile_ids
+
+
+def test_launcher_factory_runtime_profile_preserves_agent_team_structure(reset_project: Path):
+    summary = reset_service.get_launcher_maintenance_summary()
+    factory_profile = next(profile for profile in summary["profiles"] if profile["id"] == "factory_runtime")
+
+    structural_item_ids = {
+        "agents",
+        "agent_config_state",
+        "teams",
+        "chat_rooms",
+        "project_agent_bus",
+        "generated_tools",
+    }
+
+    assert structural_item_ids.isdisjoint(set(factory_profile["itemIds"]))
+
+    preview = reset_service.preview_launcher_maintenance_plan({"profileId": "factory_runtime"})
+
+    assert structural_item_ids.isdisjoint(set(preview["plan"]["selectedItemIds"]))
+
+
+def test_launcher_clean_start_profile_preserves_user_visible_state(reset_project: Path):
+    summary = reset_service.get_launcher_maintenance_summary()
+    clean_profile = next(profile for profile in summary["profiles"] if profile["id"] == "clean_start")
+
+    user_visible_item_ids = {
+        "chat_history",
+        "workspace_sessions",
+        "chat_rooms",
+        "agents",
+        "agent_config_state",
+        "teams",
+        "project_agent_bus",
+        "generated_tools",
+        "memory",
+    }
+
+    assert user_visible_item_ids.isdisjoint(set(clean_profile["itemIds"]))
+
+    preview = reset_service.preview_launcher_maintenance_plan({"profileId": "clean_start"})
+
+    assert user_visible_item_ids.isdisjoint(set(preview["plan"]["selectedItemIds"]))
 
 
 def test_launcher_maintenance_plan_requires_confirm_and_active_work_clear(reset_project: Path):
@@ -497,6 +541,25 @@ def test_launcher_maintenance_plan_requires_confirm_and_active_work_clear(reset_
             plan_dir=plan_dir,
         )
     assert active_work_error.value.code == "active_work_blocked"
+
+
+def test_launcher_maintenance_apply_rejects_profile_mismatch(reset_project: Path):
+    plan_dir = reset_project / ".runtime" / "launcher" / "maintenance-reset-plans"
+    preview = reset_service.preview_launcher_maintenance_plan({"profileId": "clean_start"}, plan_dir=plan_dir)
+    plan = preview["plan"]
+
+    with pytest.raises(reset_service.LauncherMaintenancePlanError) as mismatch_error:
+        reset_service.apply_launcher_maintenance_plan(
+            {
+                "planId": plan["planId"],
+                "planHash": plan["planHash"],
+                "profileId": "factory_runtime",
+                "confirm": True,
+            },
+            plan_dir=plan_dir,
+        )
+
+    assert mismatch_error.value.code == "profile_mismatch"
 
 
 def test_reset_routes_report_migration_to_launcher(reset_project: Path):

@@ -290,6 +290,8 @@ type LauncherCopy = {
   maintenanceApply: string;
   maintenancePlanReady: string;
   maintenancePlanEmpty: string;
+  maintenancePlanMissingForProfile: string;
+  maintenancePlanProfileMismatch: string;
   maintenanceTargets: string;
   maintenanceEstimated: string;
   maintenanceActiveWorkPolicy: string;
@@ -384,6 +386,14 @@ function stateTone(state: string, ok = true) {
 
 function boolText(value: boolean | undefined, yes: string, no: string) {
   return value ? yes : no;
+}
+
+function normalizeMaintenanceProfileId(value: unknown): LauncherMaintenanceProfileId | null {
+  const profileId = String(value || "").trim();
+  if (profileId === "custom" || profileId === "clean_start" || profileId === "factory_runtime") {
+    return profileId;
+  }
+  return null;
 }
 
 function humanState(value: string | undefined, lang: "zh" | "en") {
@@ -1057,9 +1067,16 @@ function ProjectMaintenancePanel({
   const selectedItems = (summary?.items ?? []).filter((item) => selectedItemIds.includes(item.id));
   const estimatedBytes = selectedItems.reduce((total, item) => total + Number(item.sizeBytes || 0), 0);
   const targetCount = selectedItems.reduce((total, item) => total + Number(item.candidateCount || 0), 0);
-  const planRows = plan?.preview.items.slice(0, 5) ?? [];
+  const planProfileMatches = !plan || normalizeMaintenanceProfileId(plan.profileId) === maintenanceProfile;
+  const visiblePlan = planProfileMatches ? plan : null;
+  const planRows = visiblePlan?.preview.items.slice(0, 5) ?? [];
   const canPreview = Boolean(summary) && !loading && !previewPending && !applyPending;
-  const canApply = Boolean(plan) && !loading && !previewPending && !applyPending;
+  const canApply = Boolean(visiblePlan) && !loading && !previewPending && !applyPending;
+  const applyTitle = !plan
+    ? copy.maintenancePlanMissingForProfile
+    : !planProfileMatches
+      ? copy.maintenancePlanProfileMismatch
+      : copy.maintenanceApply;
 
   return (
     <section
@@ -1078,7 +1095,7 @@ function ProjectMaintenancePanel({
           {previewPending ? <LoaderCircle size={15} className={styles.spin} /> : <Trash2 size={15} />}
           <span>{copy.maintenancePreview}</span>
         </button>
-        <button type="button" className={styles.primaryButton} onClick={onApply} disabled={!canApply} title={copy.maintenanceApply}>
+        <button type="button" className={styles.primaryButton} onClick={onApply} disabled={!canApply} title={canApply ? copy.maintenanceApply : applyTitle}>
           {applyPending ? <LoaderCircle size={15} className={styles.spin} /> : <ShieldCheck size={15} />}
           <span>{copy.maintenanceApply}</span>
         </button>
@@ -1096,8 +1113,8 @@ function ProjectMaintenancePanel({
           </div>
           <div className={styles.segmentedControl} role="group" aria-label={copy.maintenanceProfile}>
             {[
-              ["factory_runtime", copy.maintenanceFactoryRuntime],
               ["clean_start", copy.maintenanceCleanStart],
+              ["factory_runtime", copy.maintenanceFactoryRuntime],
             ].map(([profile, label]) => (
               <button
                 key={profile}
@@ -1124,13 +1141,13 @@ function ProjectMaintenancePanel({
         </div>
         <div className={styles.cleanupConsole}>
           <div className={styles.cleanupMetrics}>
-            <span>{copy.maintenanceEstimated}: <strong>{formatBytes(plan?.estimatedBytes ?? estimatedBytes)}</strong></span>
-            <span>{copy.maintenanceTargets}: <strong>{plan?.targetCount ?? targetCount}</strong></span>
+            <span>{copy.maintenanceEstimated}: <strong>{formatBytes(visiblePlan?.estimatedBytes ?? estimatedBytes)}</strong></span>
+            <span>{copy.maintenanceTargets}: <strong>{visiblePlan?.targetCount ?? targetCount}</strong></span>
           </div>
-          {plan ? (
+          {visiblePlan ? (
             <div className={styles.cleanupPlan}>
               <strong>{copy.maintenancePlanReady}</strong>
-              <small>{plan.planId} · {plan.planHash.slice(0, 10)}</small>
+              <small>{visiblePlan.planId} · {visiblePlan.planHash.slice(0, 10)}</small>
               {planRows.length ? (
                 <ul>
                   {planRows.map((item) => (
@@ -1142,7 +1159,7 @@ function ProjectMaintenancePanel({
               )}
             </div>
           ) : (
-            <small>{copy.maintenanceHint}</small>
+            <small>{plan && !planProfileMatches ? copy.maintenancePlanProfileMismatch : copy.maintenancePlanMissingForProfile}</small>
           )}
         </div>
       </div>
@@ -1610,7 +1627,7 @@ export function LauncherRoute() {
         developerModeSettingsReadonly: "设置页只读展示，不能在工作台设置里改动",
         developerModeUpdated: "开发者沙盒已更新",
         maintenanceTitle: "恢复初始化",
-        maintenanceHint: "清理与恢复初始化由 Launcher 生成计划、校验 planHash，并在执行前阻止 active work。",
+        maintenanceHint: "清理与恢复初始化由 Launcher 生成计划、校验档位和 planHash，并在执行前阻止 active work；默认保留用户会话和 Agent/Team 结构。",
         maintenanceProfile: "维护档位",
         maintenanceCleanStart: "干净启动",
         maintenanceFactoryRuntime: "恢复初始化",
@@ -1619,10 +1636,12 @@ export function LauncherRoute() {
         maintenanceApply: "确认执行",
         maintenancePlanReady: "维护计划已就绪",
         maintenancePlanEmpty: "当前计划没有可执行目标。",
+        maintenancePlanMissingForProfile: "当前档位尚未生成预览，请先生成预览。",
+        maintenancePlanProfileMismatch: "当前档位与预览计划不一致，请重新生成预览。",
         maintenanceTargets: "目标",
         maintenanceEstimated: "预计释放",
         maintenanceActiveWorkPolicy: "active work 存在时阻止执行",
-        maintenanceRequiresConfirm: "确认执行当前 Launcher 维护计划？执行前会再次校验 planId、planHash 和 active work。",
+        maintenanceRequiresConfirm: "确认执行当前 Launcher 维护计划？执行前会再次校验档位、planId、planHash 和 active work。",
         maintenanceApplied: "Launcher 维护计划已执行",
         maintenanceLoading: "正在读取维护盘点",
         developerModeNoiseOverview: "噪声概览",
@@ -1840,7 +1859,7 @@ export function LauncherRoute() {
         developerModeSettingsReadonly: "Settings shows this read-only and cannot change it",
         developerModeUpdated: "Developer sandbox updated",
         maintenanceTitle: "Restore initialization",
-        maintenanceHint: "Cleanup and restore initialization are planned by Launcher, validated with planHash, and blocked when active work exists.",
+        maintenanceHint: "Cleanup and restore initialization are planned by Launcher, validated with profile and planHash, and blocked when active work exists. The default keeps user sessions and Agent/Team structure.",
         maintenanceProfile: "Maintenance profile",
         maintenanceCleanStart: "Clean start",
         maintenanceFactoryRuntime: "Restore initialization",
@@ -1848,11 +1867,13 @@ export function LauncherRoute() {
         maintenancePreview: "Preview",
         maintenanceApply: "Apply",
         maintenancePlanReady: "Maintenance plan ready",
-        maintenancePlanEmpty: "This plan has no executable targets.",
+        maintenancePlanEmpty: "This profile has no executable targets.",
+        maintenancePlanMissingForProfile: "Generate a preview for the selected profile first.",
+        maintenancePlanProfileMismatch: "The selected profile does not match this preview plan. Generate a new preview.",
         maintenanceTargets: "targets",
         maintenanceEstimated: "Estimated",
         maintenanceActiveWorkPolicy: "Blocks execution when active work exists",
-        maintenanceRequiresConfirm: "Apply this Launcher maintenance plan? Vibelution will re-check planId, planHash, and active work before executing.",
+        maintenanceRequiresConfirm: "Apply this Launcher maintenance plan? Vibelution will re-check profile, planId, planHash, and active work before executing.",
         maintenanceApplied: "Launcher maintenance plan applied",
         maintenanceLoading: "Reading maintenance inventory",
         developerModeNoiseOverview: "Noise overview",
@@ -1888,8 +1909,9 @@ export function LauncherRoute() {
   const [trackedCommand, setTrackedCommand] = useState<LauncherTrackedCommand | null>(null);
   const [selectedCleanupAction, setSelectedCleanupAction] = useState<LauncherDeveloperCleanupAction>("quick_clean");
   const [cleanupPlan, setCleanupPlan] = useState<LauncherDeveloperCleanupPlan | null>(null);
-  const [maintenanceProfile, setMaintenanceProfile] = useState<LauncherMaintenanceProfileId>("factory_runtime");
-  const [maintenancePlan, setMaintenancePlan] = useState<LauncherMaintenancePlan | null>(null);
+  const [maintenanceProfile, setMaintenanceProfile] = useState<LauncherMaintenanceProfileId>("clean_start");
+  const [maintenancePlansByProfile, setMaintenancePlansByProfile] = useState<Partial<Record<LauncherMaintenanceProfileId, LauncherMaintenancePlan>>>({});
+  const maintenancePlan = maintenancePlansByProfile[maintenanceProfile] ?? null;
   const statusQuery = useQuery({
     queryKey: queryKeys.launcherStatus(),
     queryFn: getLauncherStatus,
@@ -2075,20 +2097,33 @@ export function LauncherRoute() {
   });
   const maintenancePreviewMutation = useMutation({
     mutationFn: previewLauncherMaintenancePlan,
-    onSuccess: (response) => {
-      setMaintenancePlan(response.plan);
+    onSuccess: (response, variables) => {
+      const planProfile = normalizeMaintenanceProfileId(response.plan.profileId)
+        ?? normalizeMaintenanceProfileId(variables.profileId)
+        ?? maintenanceProfile;
+      setMaintenancePlansByProfile((plans) => ({ ...plans, [planProfile]: response.plan }));
       setNotice({ tone: response.plan.targetCount > 0 ? "warning" : "neutral", text: response.message || copy.maintenancePlanReady });
       void queryClient.invalidateQueries({ queryKey: queryKeys.launcherMaintenanceSummary() });
     },
-    onError: (error) => {
-      setMaintenancePlan(null);
+    onError: (error, variables) => {
+      const failedProfile = normalizeMaintenanceProfileId(variables.profileId) ?? maintenanceProfile;
+      setMaintenancePlansByProfile((plans) => {
+        const nextPlans = { ...plans };
+        delete nextPlans[failedProfile];
+        return nextPlans;
+      });
       setNotice({ tone: "error", text: error instanceof Error ? error.message : String(error) });
     },
   });
   const maintenanceApplyMutation = useMutation({
     mutationFn: applyLauncherMaintenancePlan,
     onSuccess: (response) => {
-      setMaintenancePlan(null);
+      const appliedProfile = normalizeMaintenanceProfileId(response.profileId) ?? maintenanceProfile;
+      setMaintenancePlansByProfile((plans) => {
+        const nextPlans = { ...plans };
+        delete nextPlans[appliedProfile];
+        return nextPlans;
+      });
       setNotice({ tone: response.ok ? "success" : "warning", text: response.message || copy.maintenanceApplied });
       void queryClient.invalidateQueries({ queryKey: queryKeys.launcherMaintenanceSummary() });
       void queryClient.invalidateQueries({ queryKey: queryKeys.launcherStatus() });
@@ -2296,7 +2331,11 @@ export function LauncherRoute() {
     });
   };
   const previewMaintenancePlan = () => {
-    setMaintenancePlan(null);
+    setMaintenancePlansByProfile((plans) => {
+      const nextPlans = { ...plans };
+      delete nextPlans[maintenanceProfile];
+      return nextPlans;
+    });
     maintenancePreviewMutation.mutate({ profileId: maintenanceProfile });
   };
   const applyMaintenancePlan = () => {
@@ -2310,6 +2349,7 @@ export function LauncherRoute() {
     maintenanceApplyMutation.mutate({
       planId: maintenancePlan.planId,
       planHash: maintenancePlan.planHash,
+      profileId: maintenanceProfile,
       confirm: true,
     });
   };
@@ -2595,7 +2635,6 @@ export function LauncherRoute() {
         applyPending={maintenanceApplyMutation.isPending}
         onProfileChange={(profile) => {
           setMaintenanceProfile(profile);
-          setMaintenancePlan(null);
         }}
         onPreview={previewMaintenancePlan}
         onApply={applyMaintenancePlan}

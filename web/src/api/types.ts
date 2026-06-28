@@ -2424,6 +2424,7 @@ export type LauncherMaintenanceSummary = ResetSummary & {
     requiresLauncher: boolean;
     requiresPlanId: boolean;
     requiresPlanHash: boolean;
+    requiresProfileId: boolean;
     requiresConfirm: boolean;
     blocksActiveWork: boolean;
     retiredWebApi: boolean;
@@ -2462,6 +2463,7 @@ export type LauncherMaintenancePreviewResponse = {
 export type LauncherMaintenanceApplyRequest = {
   planId: string;
   planHash: string;
+  profileId: LauncherMaintenanceProfileId | string;
   confirm: boolean;
 };
 
