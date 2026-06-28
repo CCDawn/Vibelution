@@ -300,6 +300,37 @@ def test_session_detail_exposes_last_provider_llm_usage(tmp_path, monkeypatch):
     assert llm_usage["recordedAt"] == "2026-05-18T12:04:00"
 
 
+def test_session_detail_compacts_repeated_provider_metadata_from_stream_merge(tmp_path, monkeypatch):
+    _seed_chat_state(tmp_path)
+    append_conversation_event(
+        tmp_path,
+        "session-live",
+        "turn-provider-usage-repeated",
+        EVENT_ASSISTANT_MESSAGE,
+        status="completed",
+        payload={
+            "content": "模型用量来自被聚合后的 stream chunk。",
+            "llmUsage": {
+                "source": "provider_usage",
+                "input_tokens": 2048,
+                "output_tokens": 256,
+                "cached_input_tokens": 512,
+                "provider": "xiaomixiaomixiaomi",
+                "model": "mimo-v2.5-promimo-v2.5-promimo-v2.5-pro",
+                "recorded_at": "2026-05-18T12:04:00",
+            },
+        },
+    )
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+
+    response = client.get("/api/sessions/session-live")
+
+    assert response.status_code == 200
+    llm_usage = response.json()["llmUsage"]
+    assert llm_usage["provider"] == "xiaomi"
+    assert llm_usage["model"] == "mimo-v2.5-pro"
+
+
 def test_session_detail_recovers_llm_usage_from_assistant_ledger_payload(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path)
     append_conversation_event(
@@ -369,6 +400,39 @@ def test_persist_turn_result_records_missing_llm_usage_without_estimate(tmp_path
         event["args"][:3] == ("conversation", "llm_usage", "conversation.llm_usage.missing")
         for event in events
     )
+
+
+def test_record_session_llm_usage_warns_when_runtime_scene_rejects_event(monkeypatch):
+    warnings: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        session_service,
+        "record_runtime_scene_event",
+        lambda *args, **kwargs: {"accepted": False, "reason": "no_runtime_scene"},
+    )
+    monkeypatch.setattr(
+        session_service._debug_logger,
+        "warning",
+        lambda message, tag="": warnings.append((message, tag)),
+    )
+
+    session_service._record_session_llm_usage_event(
+        "session-live",
+        "turn-provider-usage",
+        {
+            "source": "provider_usage",
+            "input_tokens": 1000,
+            "cached_input_tokens": 250,
+            "provider": "xiaomi",
+            "model": "mimo-v2.5-pro",
+        },
+    )
+
+    assert warnings
+    assert warnings[-1][1] == "CHAT"
+    assert "conversation.llm_usage.recorded" in warnings[-1][0]
+    assert "no_runtime_scene" in warnings[-1][0]
+    assert "session-live" in warnings[-1][0]
+    assert "turn-provider-usage" in warnings[-1][0]
 
 
 def test_persist_turn_result_preserves_ordered_feedback_events(tmp_path, monkeypatch):
