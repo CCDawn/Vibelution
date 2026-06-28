@@ -2200,13 +2200,19 @@ button.timelineCellHeader:hover,
 }
 
 .streamingResponseText {
-  display: block;
+  display: grid;
 }
 
-.streamingResponseParagraph {
+.streamingCodeBlock {
+  border-color: color-mix(in srgb, var(--accent) 24%, var(--border-subtle));
+}
+
+.markdownBlockquote {
   margin: 0;
+  padding: 4px 0 4px 10px;
+  border-left: 1px solid color-mix(in srgb, var(--accent) 34%, var(--border-subtle));
+  color: var(--fg-secondary);
   white-space: pre-wrap;
-  overflow-wrap: anywhere;
 }
 
 .markdownHeading {
