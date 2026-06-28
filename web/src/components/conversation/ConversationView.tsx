@@ -60,6 +60,7 @@ import {
   researchOrgMessageChips,
 } from "./messageSections";
 import { parseResponseSegments, ResponseSegment } from "./messageResponseSegments";
+import { parseStreamingMarkdownBlocks, type MarkdownBlock } from "./streamingMarkdown";
 import styles from "./ConversationView.module.css";
 
 const RUNNING_OPERATION_STATUSES = new Set(["queued", "pending", "running", "thinking", "tooling", "answering"]);
@@ -141,15 +142,6 @@ export function extractComposerSessionReferenceDrop(data: ComposerDragData): Ses
 export function hasComposerSessionReferenceDragPayload(data: ComposerDragData): boolean {
   return Boolean(extractComposerSessionReferenceDrop(data));
 }
-
-type MarkdownBlock =
-  | { type: "heading"; level: 1 | 2 | 3 | 4; content: string }
-  | { type: "paragraph"; content: string }
-  | { type: "image"; alt: string; url: string }
-  | { type: "table"; headers: string[]; rows: string[][] }
-  | { type: "unorderedList"; items: string[] }
-  | { type: "orderedList"; items: string[] }
-  | { type: "divider" };
 
 type ComputerUseResult = {
   status: string;
@@ -267,7 +259,13 @@ const EMPTY_STREAMING_REVEAL_STATE: StreamingRevealState = {
   revealTail: "",
 };
 
-function StreamingResponseContent({ content }: { content: string }) {
+function StreamingResponseContent({
+  content,
+  renderBlock,
+}: {
+  content: string;
+  renderBlock: (block: MarkdownBlock, index: number) => ReactNode;
+}) {
   const targetContent = String(content ?? "");
   const [visibleContent, setVisibleContent] = useState<StreamingRevealState>(() =>
     typeof window === "undefined"
@@ -278,6 +276,8 @@ function StreamingResponseContent({ content }: { content: string }) {
   const visibleContentRef = useRef(visibleContent);
   const frameIdRef = useRef<number | null>(null);
   const visibleText = streamingRevealText(visibleContent);
+  const blocks = useMemo(() => parseStreamingMarkdownBlocks(visibleText), [visibleText]);
+  const hasTable = blocks.some((block) => block.type === "table");
 
   useEffect(() => {
     visibleContentRef.current = visibleContent;
@@ -327,12 +327,18 @@ function StreamingResponseContent({ content }: { content: string }) {
     };
   }, [targetContent]);
 
-  if (!visibleText) {
+  if (!visibleText || blocks.length === 0) {
     return null;
   }
   return (
-    <div className={`${styles.markdownBody} ${styles.streamingResponseText}`}>
-      <p className={styles.streamingResponseParagraph}>{visibleText}</p>
+    <div
+      className={[
+        styles.markdownBody,
+        styles.streamingResponseText,
+        hasTable ? styles.markdownBodyWithTable : "",
+      ].filter(Boolean).join(" ")}
+    >
+      {blocks.map((block, index) => renderBlock(block, index))}
     </div>
   );
 }
@@ -3007,7 +3013,7 @@ export function ConversationView({
     if (!content) {
       return null;
     }
-    return <StreamingResponseContent content={content} />;
+    return <StreamingResponseContent content={content} renderBlock={renderMarkdownBlock} />;
   }
 
   function renderMarkdownBlock(block: MarkdownBlock, index: number, duplicateImageUrls?: Set<string>) {
@@ -3089,6 +3095,26 @@ export function ConversationView({
             </tbody>
           </table>
         </div>
+      );
+    }
+    if (block.type === "code") {
+      return (
+        <pre
+          key={`code-${index}-${block.language}-${block.content.length}`}
+          className={[
+            styles.responseSegmentPre,
+            block.open ? styles.streamingCodeBlock : "",
+          ].filter(Boolean).join(" ")}
+        >
+          <code>{block.content}</code>
+        </pre>
+      );
+    }
+    if (block.type === "blockquote") {
+      return (
+        <blockquote key={`quote-${index}-${block.content}`} className={styles.markdownBlockquote}>
+          {renderInlineContent(block.content)}
+        </blockquote>
       );
     }
     if (block.type === "unorderedList") {
