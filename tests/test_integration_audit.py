@@ -569,3 +569,63 @@ def test_format_stash_plan_shows_absorption_and_untracked_paths(tmp_path: Path) 
 
     assert "absorbed_by_main" in plan
     assert "untracked: scratch/note.txt" in plan
+
+
+def test_build_stash_report_classifies_untracked_payload_file_states(tmp_path: Path) -> None:
+    root = init_repo(tmp_path / "repo")
+    create_stash(
+        root,
+        message="mixed untracked payload",
+        untracked_changes={
+            "scratch/absorbed.txt": "same\n",
+            "scratch/diverged.txt": "stash-version\n",
+            "scratch/missing.txt": "only-in-stash\n",
+        },
+    )
+    commit_files(
+        root,
+        {
+            "scratch/absorbed.txt": "same\n",
+            "scratch/diverged.txt": "main-version\n",
+        },
+        "add absorbed and diverged files",
+    )
+
+    report = audit.build_stash_report(root, limit=1)
+    item = report.items[0]
+
+    assert item.kind == "empty_or_untracked_only"
+    assert item.absorption_state == "partially_absorbed"
+    assert item.untracked_file_states == {
+        "scratch/absorbed.txt": "absorbed_by_main",
+        "scratch/diverged.txt": "diverged_in_main",
+        "scratch/missing.txt": "missing_in_main",
+    }
+
+
+def test_format_stash_plan_shows_untracked_file_states(tmp_path: Path) -> None:
+    root = init_repo(tmp_path / "repo")
+    create_stash(
+        root,
+        message="mixed untracked payload",
+        untracked_changes={
+            "scratch/absorbed.txt": "same\n",
+            "scratch/diverged.txt": "stash-version\n",
+            "scratch/missing.txt": "only-in-stash\n",
+        },
+    )
+    commit_files(
+        root,
+        {
+            "scratch/absorbed.txt": "same\n",
+            "scratch/diverged.txt": "main-version\n",
+        },
+        "add absorbed and diverged files",
+    )
+
+    report = audit.build_stash_report(root, limit=1)
+    plan = audit.format_stash_plan(report)
+
+    assert "untracked-state: scratch/absorbed.txt=absorbed_by_main" in plan
+    assert "scratch/diverged.txt=diverged_in_main" in plan
+    assert "scratch/missing.txt=missing_in_main" in plan
