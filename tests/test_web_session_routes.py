@@ -1152,8 +1152,11 @@ def test_supervised_agent_session_is_hidden_and_preserves_prompt_with_mental_ove
     )
     scheduled_contexts: list[dict] = []
 
+    created_agent_kwargs: list[dict] = []
+
     class DummyAgent:
-        def __init__(self):
+        def __init__(self, **kwargs):
+            created_agent_kwargs.append(dict(kwargs))
             self.override = None
             self.seeded_history = []
             self.visible_tools = []
@@ -1205,6 +1208,7 @@ def test_supervised_agent_session_is_hidden_and_preserves_prompt_with_mental_ove
             "- Case: tb2_fix_code_vulnerability",
             "- Docker image: alexgshaw/fix-code-vulnerability:20251031",
             "This is a Vibelution custom-harness run; preserve the prompt as the case input.",
+            "Do not commit or publish changes.",
         ]
     )
     assert session_service._has_recent_image_attachment_reference(prompt) is True
@@ -1223,7 +1227,8 @@ def test_supervised_agent_session_is_hidden_and_preserves_prompt_with_mental_ove
     assert scheduled_contexts[-1]["user_message"] == prompt
     assert scheduled_contexts[-1]["user_message_source"] == "supervised_evolution"
     assert scheduled_contexts[-1]["mental_model_enabled"] is False
-    assert scheduled_contexts[-1]["leases"] == ["readonly_chat"]
+    assert scheduled_contexts[-1]["leases"] == ["supervised_evaluation_chat"]
+    assert created_agent_kwargs[-1]["mode"] == "supervised_evolution"
     latest_user = [item for item in response["messages"] if item["role"] == "user"][-1]
     assert latest_user["content"] == prompt
     assert "resolvedRecentImageReference" not in (latest_user.get("metadata") or {})
