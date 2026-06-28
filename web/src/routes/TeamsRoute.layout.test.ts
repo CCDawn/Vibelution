@@ -508,11 +508,14 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("blockingReasons");
     expect(routeSource).toContain("sourceCollectionStageUserStatusLabel");
     expect(routeSource).toContain("sourceCollectionStageUserSummary");
+    expect(routeSource).toContain("sourceCollectionStageRecoveryStatusLabel");
     expect(routeSource).toContain("sourceCollectionStageTechnicalDetails");
     expect(routeSource).toContain("sourceCollectionCandidateEmptyStateText");
     expect(routeSource).toContain("已收到 Agent 结果，等待生成可用资料");
     expect(routeSource).toContain("Agent 返回的候选 ID 没有匹配到本轮资料");
     expect(routeSource).toContain("技术详情");
+    expect(routeSource).toContain("待补提炼");
+    expect(routeSource).toContain("待补审查");
     expect(routeSource).toContain("继续补全提炼");
     expect(routeSource).not.toContain("sourceCollectionStageBlockingReasonLabel(module.projection.blockingReasons[0], lang)");
     expect(routeSource).toContain("sourceCollectionStageBlockingReasonsLabel");

@@ -652,6 +652,28 @@ function sourceCollectionStageRecoveryActionLabel(stageId: SourceCollectionStage
   return labels[normalized] ?? "继续处理本阶段";
 }
 
+function sourceCollectionStageRecoveryStatusLabel(stageId: SourceCollectionStageModuleId | string | null | undefined, lang: "zh" | "en") {
+  const normalized = String(stageId || "").toLowerCase();
+  if (lang !== "zh") {
+    const labels: Record<string, string> = {
+      collection: "Needs more sources",
+      candidate: "Needs extraction",
+      screening: "Needs review",
+      graph: "Needs mapping",
+      memory: "Needs admin review",
+    };
+    return labels[normalized] ?? "Needs follow-up";
+  }
+  const labels: Record<string, string> = {
+    collection: "待补资料",
+    candidate: "待补提炼",
+    screening: "待补审查",
+    graph: "待补建图",
+    memory: "待管理员审核",
+  };
+  return labels[normalized] ?? "待继续处理";
+}
+
 function sourceCollectionStageReadableObjectLabel(stageId: SourceCollectionStageModuleId | string | null | undefined, lang: "zh" | "en") {
   const normalized = String(stageId || "").toLowerCase();
   if (lang !== "zh") {
@@ -687,11 +709,7 @@ function sourceCollectionStageUserStatusLabel(
   }
   const coverage = projection.latestTask?.coverageSummary;
   if (coverage?.applicable && coverage.complete === false) {
-    const action = sourceCollectionStageRecoveryActionLabel(projection.stageId, lang);
-    if (lang === "zh") {
-      return `${action}中`;
-    }
-    return action;
+    return sourceCollectionStageRecoveryStatusLabel(projection.stageId, lang);
   }
   if (projection.status === "agent_done_artifact_pending") {
     return lang === "zh" ? "已收到 Agent 结果，等待生成可用资料" : "Agent result received; waiting for usable output";
@@ -7814,6 +7832,7 @@ export function TeamsRoute({
       ? `${pagedCandidates.start}-${pagedCandidates.end}/${filteredCandidates.length}`
       : `0/${candidatePanelFilteredCount}`;
     const candidateListAwaitingRefresh = !sourceCollectionRunCandidateCount && sourceCollectionDisplayedCandidateCount > 0;
+    const candidateProjectionUserSummary = sourceCollectionStageUserSummary(candidateProjection, lang);
     return (
       <details
         id="source-collection-candidates-panel"
@@ -7851,8 +7870,8 @@ export function TeamsRoute({
               <strong>{sourceCollectionStageUserStatusLabel(candidateProjection, lang, sourceCollectionStageProjectionSyncing(candidateProjection))}</strong>
               <span>{sourceCollectionStageArtifactSummaryLabel(candidateProjection, lang)}</span>
             </div>
-            {sourceCollectionStageUserSummary(candidateProjection, lang) ? (
-              <p>{sourceCollectionStageUserSummary(candidateProjection, lang)}</p>
+            {candidateProjectionUserSummary ? (
+              <p>{candidateProjectionUserSummary}</p>
             ) : null}
             {candidateLatestTask?.taskId ? (
               <details className={styles.sourceCollectionStageTechnicalDetails}>
