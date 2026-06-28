@@ -1393,7 +1393,7 @@ def _has_transaction_issue(metrics: Dict[str, Any]) -> bool:
     return (
         not bool(metrics.get("transaction_opened"))
         or not bool(metrics.get("transaction_closed"))
-        or _normalize_status_value(metrics.get("transaction_status")) not in {"", "success"}
+        or _normalize_status_value(metrics.get("transaction_status")) not in {"", "success", "ok"}
     )
 
 
