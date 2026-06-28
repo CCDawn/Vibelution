@@ -1236,6 +1236,53 @@ describe("TeamsRoute layout contract", () => {
     expect(memoryModuleSource).not.toContain("runKnowledgeCollectionIngestMutation.mutate");
   });
 
+  it("keeps side-effect source collection actions behind initial-data readiness gates", () => {
+    expect(routeSource).toContain("type SourceCollectionActionReadiness");
+    expect(routeSource).toContain("sourceCollectionActionInitialDataPending");
+    expect(routeSource).toContain("sourceCollectionActionDataError");
+    expect(routeSource).toContain("sourceCollectionSearchActionReadiness");
+    expect(routeSource).toContain("sourceCollectionCompletionActionReadiness");
+    expect(routeSource).toContain("sourceCollectionCandidateExtractionActionReadiness");
+    expect(routeSource).toContain("sourceCollectionScreeningActionReadiness");
+    expect(routeSource).toContain("sourceCollectionGraphActionReadiness");
+    expect(routeSource).toContain("sourceCollectionMemoryActionReadiness");
+    expect(routeSource).toContain("sourceCollectionStageTaskActionReadiness");
+    expect(routeSource).toContain("sourceCollectionActionDisabledTitle");
+
+    const readinessSource = routeSource.slice(
+      routeSource.indexOf("const sourceCollectionActionInitialDataPending = Boolean("),
+      routeSource.indexOf("const sourceCollectionCompletionActionLabel ="),
+    );
+    expect(readinessSource).toContain("sourceCollectionRecordsDataLoading");
+    expect(readinessSource).toContain("sourceCollectionAssignmentsDataLoading");
+    expect(readinessSource).toContain("sourceCollectionPrimaryDataLoading");
+    expect(readinessSource).toContain("sourceCollectionSourceQualityLoading");
+    expect(routeSource).toContain("teamWorkflowCandidateGraphQuery.isPending && !teamWorkflowCandidateGraphQuery.data");
+    expect(routeSource).toContain("teamWorkflowKnowledgeIngestionStatusQuery.isPending && !teamWorkflowKnowledgeIngestionStatusQuery.data");
+    expect(readinessSource).not.toContain("sourceCollectionSummaryQuery.isFetching");
+    expect(readinessSource).not.toContain("sourceCollectionRecordsQuery.isFetching");
+    expect(readinessSource).not.toContain("sourceCollectionAssignmentsQuery.isFetching");
+
+    const launcherSource = routeSource.slice(
+      routeSource.indexOf("function renderResearchStageLauncher"),
+      routeSource.indexOf("function renderResearchStageStandalonePage"),
+    );
+    expect(launcherSource).toContain("sourceCollectionSearchActionReadiness.disabled");
+    expect(launcherSource).toContain("disabled={sourceCollectionCompletionActionDisabled}");
+    expect(routeSource).toContain("const sourceCollectionCompletionActionDisabled = sourceCollectionCompletionActionReadiness.disabled");
+    expect(launcherSource).toContain("title={sourceCollectionActionDisabledTitle(sourceCollectionCompletionActionReadiness,");
+
+    const stageModuleSource = routeSource.slice(
+      routeSource.indexOf("const sourceCollectionStageModules"),
+      routeSource.indexOf("const sourceCollectionStageCardKeyDown"),
+    );
+    expect(stageModuleSource).toContain("actionDisabled: sourceCollectionCollectionActionReadiness.disabled");
+    expect(stageModuleSource).toContain("sourceCollectionStageTaskActionReadiness(sourceCollectionCandidateExtractionActionReadiness)");
+    expect(stageModuleSource).toContain("sourceCollectionStageTaskActionReadiness(sourceCollectionScreeningActionReadiness)");
+    expect(stageModuleSource).toContain("sourceCollectionStageTaskActionReadiness(sourceCollectionGraphActionReadiness)");
+    expect(stageModuleSource).toContain("sourceCollectionStageTaskActionReadiness(sourceCollectionMemoryActionReadiness)");
+  });
+
   it("keeps Team actions scoped to the selected Team or message event", () => {
     expect(routeSource).toContain("canvasSavePendingForTeam");
     expect(routeSource).toContain("saveCanvasMutation.variables?.teamId === teamId");
