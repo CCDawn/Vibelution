@@ -869,10 +869,43 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
           bundleName: sourceKind === "bundle" ? bundleNameInput : "",
           keepWorktree: true,
           mode: currentIntakeMode === "auto" ? "auto" : "manual",
-          executionMode: "simulation",
-          confirmRealLlmCost: false,
+          executionMode: "real",
+          confirmRealLlmCost: true,
+          mentalModelMode: supervisedMentalModelMode,
           uiRoute: `${location.pathname}${location.search}`,
           clientAction: "start_supervised_worktree_run",
+        }),
+      }),
+    onSuccess: async (snapshot) => {
+      setActionFeedback(snapshot.latestMessage || t("startClosedLoopQueued"));
+      await evolutionWorkspaceCache.afterWorktreeRunChanged();
+    },
+  });
+  const startSimulationWorktreeRunMutation = useMutation({
+    onMutate: () => {
+      setActionFeedback("");
+    },
+    mutationFn: () =>
+      fetchJson<SupervisedWorktreeRun>("/api/evolution/worktree-runs", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          sourceKind,
+          datasetName: sourceKind === "dataset" ? datasetName : "",
+          datasetLimit:
+            sourceKind === "dataset" && datasetLimitInput.trim()
+              ? Number(datasetLimitInput.trim())
+              : null,
+          bundleName: sourceKind === "bundle" ? bundleNameInput : "",
+          keepWorktree: true,
+          mode: currentIntakeMode === "auto" ? "auto" : "manual",
+          executionMode: "simulation",
+          confirmRealLlmCost: false,
+          mentalModelMode: supervisedMentalModelMode,
+          uiRoute: `${location.pathname}${location.search}`,
+          clientAction: "start_supervised_worktree_simulation",
         }),
       }),
     onSuccess: async (snapshot) => {
@@ -1190,10 +1223,11 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     activeWorktreeRun
     && ["queued", "running", "paused", "stopping"].includes(String(activeWorktreeRun.status || "").toLowerCase()),
   );
-  const supervisedStartSubmitting = startRunMutation.isPending || isLocalSupervisedStartPlaceholder(liveActiveRun);
+  const supervisedStartSubmitting = startWorktreeRunMutation.isPending || isLocalSupervisedStartPlaceholder(liveActiveRun);
+  const supervisedPrimaryRunning = runLocked || worktreeRunLocked;
   const supervisedStartButtonLabel = supervisedStartSubmitting
     ? (lang === "zh" ? "提交中" : "Submitting")
-    : runLocked
+    : supervisedPrimaryRunning
       ? (lang === "zh" ? "监督运行中" : "Supervised running")
       : t("startSupervisedRun");
   const monitoredRunStatus = String(monitoredRun?.status || "").toLowerCase();
@@ -1373,6 +1407,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     ?? deleteRunMutation.error?.message
     ?? startRunMutation.error?.message
     ?? startWorktreeRunMutation.error?.message
+    ?? startSimulationWorktreeRunMutation.error?.message
     ?? "";
   const monitoredSelfRun = latestSelfRunSnapshot ?? liveSelfRun;
   const lockedSelfRun =
@@ -2976,14 +3011,14 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                           runLocked
                           || worktreeRunLocked
                           || !workbenchControl
-                          || startRunMutation.isPending
+                          || startWorktreeRunMutation.isPending
                           || (sourceKind === "dataset" && !datasetName)
                           || (sourceKind === "bundle" && !selectedBundleExists)
                         }
-                        onClick={() => startRunMutation.mutate()}
+                        onClick={() => startWorktreeRunMutation.mutate()}
                         title={t("launchSupervisedRunHint")}
                       >
-                        {supervisedStartSubmitting || runLocked ? <LoaderCircle size={15} /> : <Play size={15} />}
+                        {supervisedStartSubmitting || supervisedPrimaryRunning ? <LoaderCircle size={15} /> : <Play size={15} />}
                         {supervisedStartButtonLabel}
                       </button>
                     </div>
@@ -3006,14 +3041,14 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                           runLocked
                           || worktreeRunLocked
                           || !workbenchControl
-                          || startWorktreeRunMutation.isPending
+                          || startSimulationWorktreeRunMutation.isPending
                           || (sourceKind === "dataset" && !datasetName)
                           || (sourceKind === "bundle" && !selectedBundleExists)
                         }
-                        onClick={() => startWorktreeRunMutation.mutate()}
+                        onClick={() => startSimulationWorktreeRunMutation.mutate()}
                         title={t("startClosedLoopHint")}
                       >
-                        {startWorktreeRunMutation.isPending ? <LoaderCircle size={15} /> : <Sparkles size={15} />}
+                        {startSimulationWorktreeRunMutation.isPending ? <LoaderCircle size={15} /> : <Sparkles size={15} />}
                         {t("startClosedLoopRun")}
                       </button>
                     </div>

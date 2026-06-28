@@ -5988,6 +5988,9 @@ export type SupervisedWorktreeRun = {
   datasetLimit: number | null;
   bundleName: string;
   keepWorktree: boolean;
+  agentBindings?: Record<string, EvolutionActiveRunAgentBinding>;
+  mentalModelMode?: string;
+  mentalModelEnabled?: boolean | null;
   startRequest?: {
     requestSource?: string;
     uiRoute?: string;

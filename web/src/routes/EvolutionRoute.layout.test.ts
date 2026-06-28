@@ -308,7 +308,10 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).toContain("visibleLiveRunSnapshot");
     expect(routeSource).toContain("const streamLiveRun = isLocalSupervisedStartPlaceholder(liveActiveRun) ? null : liveActiveRun");
     expect(routeSource).toContain("setLiveActiveRun((current) => (isLocalSupervisedStartPlaceholder(current) ? null : current))");
-    expect(routeSource).toContain("const supervisedStartSubmitting = startRunMutation.isPending || isLocalSupervisedStartPlaceholder(liveActiveRun)");
+    expect(routeSource).toContain("const supervisedStartSubmitting = startWorktreeRunMutation.isPending || isLocalSupervisedStartPlaceholder(liveActiveRun)");
+    expect(routeSource).toContain("onClick={() => startWorktreeRunMutation.mutate()}");
+    expect(routeSource).toContain('executionMode: "real"');
+    expect(routeSource).toContain("confirmRealLlmCost: true");
     expect(routeSource).toContain("监督运行中");
     expect(routeSource).toContain("supervisedStartButtonLabel");
   });
