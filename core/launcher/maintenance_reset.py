@@ -452,11 +452,35 @@ def apply_launcher_maintenance_plan(
             "维护档位与预览计划不一致，请重新生成预览。",
             detail={"planProfileId": plan_profile_id, "requestedProfileId": requested_profile_id},
         )
+    item_ids = [str(item_id) for item_id in plan.get("selectedItemIds", [])]
+    if plan_profile_id in PROFILES and item_ids != list(PROFILES[plan_profile_id]):
+        _record_reset_scene_event(
+            "apply",
+            "launcher.maintenance_reset.profile_items_mismatch",
+            message="Launcher maintenance plan item set no longer matches the selected profile.",
+            level="warning",
+            outcome="rejected",
+            fields={
+                "planId": plan_id,
+                "profileId": plan_profile_id,
+                "planItemCount": len(item_ids),
+                "currentItemCount": len(PROFILES[plan_profile_id]),
+            },
+            lifecycle=True,
+        )
+        raise LauncherMaintenancePlanError(
+            "profile_items_mismatch",
+            "维护计划条目与当前档位定义不一致，请重新生成预览。",
+            detail={
+                "planProfileId": plan_profile_id,
+                "planItemIds": item_ids,
+                "currentItemIds": list(PROFILES[plan_profile_id]),
+            },
+        )
     if _maintenance_plan_expired(str(plan.get("expiresAt") or "")):
         raise LauncherMaintenancePlanError("plan_expired", "维护计划已过期，请重新预览。")
     if Path(str(plan.get("projectRoot") or "")).resolve() != PROJECT_ROOT.resolve():
         raise LauncherMaintenancePlanError("project_root_mismatch", "维护计划不属于当前项目工作区。")
-    item_ids = [str(item_id) for item_id in plan.get("selectedItemIds", [])]
     result = execute_reset(item_ids, confirmed=True)
     failed_count = int(result.get("totals", {}).get("failedCount") or 0)
     _record_reset_scene_event(
