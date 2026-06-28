@@ -496,7 +496,7 @@
   min-width: 0;
   width: fit-content;
   max-width: 100%;
-  color: var(--fg-tertiary);
+  color: var(--fg-secondary);
   font-size: 0.68rem;
   line-height: 1.2;
 }
@@ -514,7 +514,7 @@
   justify-content: flex-start;
   gap: 8px;
   min-width: 0;
-  color: var(--fg-tertiary);
+  color: var(--fg-secondary);
   font-family: var(--font-mono);
   font-size: 0.66rem;
   white-space: nowrap;
@@ -528,7 +528,7 @@
   border: 1px solid color-mix(in srgb, var(--fg-tertiary) 18%, transparent);
   border-radius: 999px;
   background: transparent;
-  color: var(--fg-tertiary);
+  color: var(--fg-secondary);
   cursor: pointer;
 }
 
@@ -842,7 +842,7 @@
   min-width: 0;
   max-width: min(46vw, 420px);
   overflow: hidden;
-  color: var(--fg-tertiary);
+  color: var(--fg-secondary);
   font-size: 0.72rem;
   font-weight: 450;
   text-overflow: ellipsis;
@@ -853,7 +853,7 @@
   min-width: 0;
   max-width: min(34vw, 320px);
   overflow: hidden;
-  color: color-mix(in srgb, var(--fg-tertiary) 78%, transparent);
+  color: var(--fg-secondary);
   font-size: 0.68rem;
   font-weight: 520;
   text-overflow: ellipsis;
@@ -879,7 +879,7 @@
   border: 0;
   border-radius: 0;
   background: transparent;
-  color: color-mix(in srgb, var(--fg-tertiary) 86%, transparent);
+  color: var(--fg-secondary);
   cursor: pointer;
   font: inherit;
   font-size: 0.7rem;
@@ -892,7 +892,7 @@
 .answerOnlyProcessIcon {
   display: inline-grid;
   place-items: center;
-  color: color-mix(in srgb, var(--accent-cool-2) 58%, var(--fg-tertiary));
+  color: color-mix(in srgb, var(--accent-cool-2) 70%, var(--fg-secondary));
 }
 
 .answerOnlyProcessGroup_failed .answerOnlyProcessIcon,
@@ -901,7 +901,7 @@
 }
 
 .answerOnlyProcessTitle {
-  color: color-mix(in srgb, var(--fg-secondary) 82%, var(--fg-tertiary));
+  color: var(--fg-primary);
   font-weight: 620;
   white-space: nowrap;
 }
@@ -915,13 +915,13 @@
 }
 
 .answerOnlyProcessMeta {
-  color: color-mix(in srgb, var(--fg-tertiary) 84%, transparent);
+  color: var(--fg-secondary);
   font-weight: 520;
 }
 
 .answerOnlyProcessPreview {
   max-width: min(48vw, 520px);
-  color: color-mix(in srgb, var(--fg-tertiary) 68%, transparent);
+  color: var(--fg-secondary);
   font-weight: 430;
 }
 
@@ -941,7 +941,7 @@
   min-width: 0;
   max-width: 100%;
   overflow: hidden;
-  color: var(--fg-tertiary);
+  color: var(--fg-secondary);
   font-size: 0.72rem;
   line-height: 1.35;
 }
@@ -997,7 +997,7 @@
   padding: 0;
   border: 0;
   background: transparent;
-  color: var(--fg-tertiary);
+  color: var(--fg-secondary);
   font: inherit;
   font-size: 0.78rem;
   font-weight: 620;
@@ -1017,14 +1017,14 @@ button.timelineCellHeader:hover,
   min-width: 0;
   max-width: min(58vw, 640px);
   overflow: hidden;
-  color: color-mix(in srgb, var(--fg-tertiary) 84%, transparent);
+  color: var(--fg-secondary);
   font-weight: 460;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .timelineCellMeta {
-  color: color-mix(in srgb, var(--fg-tertiary) 74%, transparent);
+  color: var(--fg-secondary);
   font-size: 0.72rem;
   font-weight: 520;
 }
@@ -1793,7 +1793,7 @@ button.timelineCellHeader:hover,
   border: 0;
   border-radius: 0;
   background: transparent;
-  color: var(--fg-tertiary);
+  color: var(--fg-secondary);
   cursor: pointer;
   font: inherit;
   font-size: 0.7rem;
