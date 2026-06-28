@@ -86,12 +86,16 @@ def image2_generate_tool(
                 duration_ms=_duration_ms(started),
             )
             if session_id:
-                _append_failure_message(
-                    session_service,
-                    session_id,
-                    result,
-                    prompt=normalized_prompt,
-                )
+                try:
+                    _append_failure_message(
+                        session_service,
+                        session_id,
+                        result,
+                        prompt=normalized_prompt,
+                    )
+                except Exception as append_exc:
+                    result["appendError"] = f"{type(append_exc).__name__}: {append_exc}"
+                    result["appendFailure"] = True
             _record_image2_event(
                 "image2.generate.failed",
                 runtime=runtime,
@@ -301,8 +305,9 @@ def image2_generate_tool(
                     result,
                     prompt=str(prompt or "").strip(),
                 )
-            except Exception:
-                pass
+            except Exception as append_exc:
+                result["appendError"] = f"{type(append_exc).__name__}: {append_exc}"
+                result["appendFailure"] = True
         _record_image2_event(
             "image2.generate.failed",
             runtime=runtime,

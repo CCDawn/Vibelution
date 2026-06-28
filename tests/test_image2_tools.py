@@ -472,6 +472,26 @@ def test_image2_tool_appends_failure_message_for_invalid_args(tmp_path, monkeypa
     assert message["metadata"]["errorType"] == "validation_error"
 
 
+def test_image2_tool_reports_append_failure_for_invalid_args(tmp_path, monkeypatch):
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    _seed_session(tmp_path)
+    agent = _bind_agent(tmp_path)
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("append failed")
+
+    monkeypatch.setattr(image2_tools, "_append_failure_message", boom)
+
+    with agent_directory_service.active_agent_runtime(agent["agentId"], session_id="session-image", turn_id="turn-image"):
+        result = json.loads(image2_tools.image2_generate_tool(prompt="画图", size="2048x2048"))
+
+    assert result["ok"] is False
+    assert result["errorType"] == "validation_error"
+    assert result["appendFailure"] is True
+    assert result["appendError"] == "RuntimeError: append failed"
+
+
 def test_image2_tool_is_llm_visible():
     names = {tool.name for tool in create_llm_facing_tools()}
 
