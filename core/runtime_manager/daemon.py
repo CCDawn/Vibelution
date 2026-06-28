@@ -113,6 +113,16 @@ _STARTUP_COMMAND_GRACE_SECONDS = 1.0
 _STARTUP_COMMAND_GRACE_POLL_SECONDS = 0.05
 _RESTART_BUILD_PREFLIGHT_TIMEOUT_SECONDS = 120.0
 _ACTIVE_WORK_LIFECYCLE_BLOCKED_MESSAGE = "有进行中的任务，无法重启 Vibelution。请等待任务完成或先停止任务。"
+_LIFECYCLE_REQUEST_AUDIT_LIMITS = {
+    "operation": 48,
+    "trigger": 80,
+    "endpoint": 120,
+    "method": 16,
+    "clientHost": 80,
+    "refererPath": 160,
+    "originHost": 120,
+    "userAgent": 160,
+}
 
 
 def _observe_workbench_for_close() -> dict[str, Any]:
@@ -145,6 +155,35 @@ class ActiveWorkProbeFailed(RuntimeError):
 
 def _command_affects_workbench_lifecycle(command_type: str) -> bool:
     return str(command_type or "").strip() in _WORKBENCH_LIFECYCLE_COMMANDS
+
+
+def _bounded_lifecycle_text(value: object, *, limit: int) -> str:
+    text = str(value or "").replace("\r", " ").replace("\n", " ").strip()
+    return text if len(text) <= limit else f"{text[: max(0, limit - 3)]}..."
+
+
+def _safe_lifecycle_request_audit(args: dict[str, Any]) -> dict[str, str]:
+    raw_audit = args.get("requestAudit") if isinstance(args.get("requestAudit"), dict) else {}
+    audit: dict[str, str] = {}
+    for key, limit in _LIFECYCLE_REQUEST_AUDIT_LIMITS.items():
+        if key not in raw_audit:
+            continue
+        value = _bounded_lifecycle_text(raw_audit.get(key), limit=limit)
+        if value:
+            audit[key] = value
+    return audit
+
+
+def _lifecycle_request_event_fields(command_type: str, args: dict[str, Any]) -> dict[str, Any]:
+    fields: dict[str, Any] = {
+        "commandType": str(command_type or "").strip(),
+        "reason": _bounded_lifecycle_text(args.get("reason") or "", limit=160),
+        "source": _bounded_lifecycle_text(args.get("source") or "", limit=160),
+    }
+    audit = _safe_lifecycle_request_audit(args)
+    if audit:
+        fields["requestAudit"] = audit
+    return fields
 
 
 def _active_work_run_item(kind: str, payload: dict[str, Any]) -> dict[str, str]:
@@ -3043,13 +3082,21 @@ class RuntimeManagerDaemon:
     def _handle_open_workbench(self, *, command_id: str, args: dict[str, Any]) -> dict[str, Any]:
         state = load_state()
         workbench = state.setdefault("workbench", {})
+        request_audit = _safe_lifecycle_request_audit(args)
         no_browser = bool(args.get("noBrowser"))
         should_probe_before_launch = _open_should_probe_before_launch(workbench, no_browser=no_browser)
         observation = observe_workbench() if should_probe_before_launch else {}
         if observation and _open_request_already_satisfied(observation, no_browser=no_browser) and str(workbench.get("phase") or "") != "failed":
-            workbench["desiredState"] = "open"
-            workbench["phase"] = "steady"
-            workbench["failureMessage"] = ""
+            workbench.update(
+                {
+                    "desiredState": "open",
+                    "phase": "steady",
+                    "lastReason": str(workbench.get("lastReason") or args.get("reason") or "already_open"),
+                    "lastSource": str(workbench.get("lastSource") or args.get("source") or "runtime_manager"),
+                    "lastRequestAudit": request_audit,
+                    "failureMessage": "",
+                }
+            )
             save_state(self._reconcile_observation(state))
             _append_event(
                 "workbench.open.already_satisfied",
@@ -3095,6 +3142,7 @@ class RuntimeManagerDaemon:
                 "lastReason": str(args.get("reason") or "explicit_open"),
                 "lastSource": str(args.get("source") or "").strip(),
                 "lastTransitionAt": now_iso(),
+                "lastRequestAudit": request_audit,
                 "failureMessage": "",
             }
         )
@@ -3534,6 +3582,10 @@ class RuntimeManagerDaemon:
         }
 
     def _handle_close_workbench(self, *, command_id: str, args: dict[str, Any]) -> dict[str, Any]:
+        reason = str(args.get("reason") or "explicit_close").strip() or "explicit_close"
+        source = str(args.get("source") or "").strip()
+        request_audit = _safe_lifecycle_request_audit(args)
+        request_fields = _lifecycle_request_event_fields("close_workbench", args)
         blocked = self._block_lifecycle_command_if_active_work(
             command_id=command_id,
             command_type="close_workbench",
@@ -3545,11 +3597,33 @@ class RuntimeManagerDaemon:
         state = load_state()
         workbench = state.setdefault("workbench", {})
         observation = _observe_workbench_for_close()
-        if _close_request_already_satisfied(observation) and str(workbench.get("phase") or "") != "failed":
+        already_satisfied = _close_request_already_satisfied(observation) and str(workbench.get("phase") or "") != "failed"
+        _append_event(
+            "workbench.close.requested",
+            _close_verification_event_payload(
+                observation,
+                command_id=command_id,
+                message="Close requested for the managed workbench.",
+            )
+            | request_fields
+            | {
+                "alreadySatisfied": already_satisfied,
+                "stopManager": bool(args.get("stopManager")),
+            },
+        )
+        if already_satisfied:
             closed_runs = _close_active_evolution_runs_for_shutdown()
-            workbench["desiredState"] = "closed"
-            workbench["phase"] = "steady"
-            workbench["failureMessage"] = ""
+            workbench.update(
+                {
+                    "desiredState": "closed",
+                    "phase": "steady",
+                    "lastReason": reason,
+                    "lastSource": source,
+                    "lastTransitionAt": now_iso(),
+                    "lastRequestAudit": request_audit,
+                    "failureMessage": "",
+                }
+            )
             save_state(self._reconcile_observation(state, observation=observation))
             cleanup_result = {"supported": True, "requested": [], "terminated": [], "remaining": [], "skipped": "already_closed_no_residual"}
             if bool(args.get("stopManager")) or _closed_observation_has_residual_evidence(observation):
@@ -3580,6 +3654,7 @@ class RuntimeManagerDaemon:
                     "runDeferredWorkbenchOpen": bool(reopen_intent),
                     "restartIntent": reopen_intent or {},
                     "launcherStateCleanup": launcher_state_cleanup,
+                    "closeRequest": request_fields,
                 },
                 reconcile_observation=observation,
             )
@@ -3589,9 +3664,10 @@ class RuntimeManagerDaemon:
             {
                 "desiredState": "closed",
                 "phase": "closing",
-                "lastReason": str(args.get("reason") or "explicit_close"),
-                "lastSource": str(args.get("source") or "").strip(),
+                "lastReason": reason,
+                "lastSource": source,
                 "lastTransitionAt": now_iso(),
+                "lastRequestAudit": request_audit,
                 "failureMessage": "",
             }
         )
@@ -3622,6 +3698,7 @@ class RuntimeManagerDaemon:
                 | {
                     "attempts": verification_attempts,
                     "closeStrategy": close_strategy,
+                    **request_fields,
                     "fastClose": close_outcome.get("fastClose") if isinstance(close_outcome.get("fastClose"), dict) else {},
                 },
             )
@@ -3637,6 +3714,7 @@ class RuntimeManagerDaemon:
             | {
                 "attempts": verification_attempts,
                 "closeStrategy": close_strategy,
+                **request_fields,
                 "fastClose": close_outcome.get("fastClose") if isinstance(close_outcome.get("fastClose"), dict) else {},
             },
         )
@@ -3662,6 +3740,7 @@ class RuntimeManagerDaemon:
                 "lifecycleTimingsMs": lifecycle_timings_ms,
                 "closeStrategy": close_strategy,
                 "launcherStateCleanup": launcher_state_cleanup,
+                "closeRequest": request_fields,
             },
             reconcile_observation=verification,
         )
@@ -3680,6 +3759,8 @@ class RuntimeManagerDaemon:
         force_close_started = time.monotonic()
         reason = str(args.get("reason") or "explicit_force_close").strip() or "explicit_force_close"
         source = str(args.get("source") or "").strip()
+        request_audit = _safe_lifecycle_request_audit(args)
+        request_fields = _lifecycle_request_event_fields("force_close_workbench", args)
         state = load_state()
         workbench = state.setdefault("workbench", {})
         observation_started = time.monotonic()
@@ -3705,6 +3786,7 @@ class RuntimeManagerDaemon:
                 "lastReason": reason,
                 "lastSource": source,
                 "lastTransitionAt": now_iso(),
+                "lastRequestAudit": request_audit,
                 "failureMessage": "",
             }
         )
@@ -3718,9 +3800,8 @@ class RuntimeManagerDaemon:
                 command_id=command_id,
                 message="Force close requested for the managed workbench.",
             )
+            | request_fields
             | {
-                "reason": reason,
-                "source": source,
                 "alreadySatisfied": already_satisfied,
                 "activeWorkCount": len(active_work_runs),
                 "activeWorkRuns": [
@@ -3761,6 +3842,7 @@ class RuntimeManagerDaemon:
                     message="Force close skipped process cleanup because the workbench was already closed.",
                     cleanup_result=cleanup_result,
                 )
+                | request_fields
                 | {"attempts": 0, "timingsMs": lifecycle_timings_ms},
             )
             return self._finish_command(
@@ -3774,6 +3856,7 @@ class RuntimeManagerDaemon:
                     "alreadySatisfied": True,
                     "launcherStateCleanup": launcher_state_cleanup,
                     "lifecycleTimingsMs": lifecycle_timings_ms,
+                    "closeRequest": request_fields,
                 },
                 reconcile_observation=initial_observation,
             )
@@ -3818,6 +3901,7 @@ class RuntimeManagerDaemon:
                     message=message,
                     cleanup_result=cleanup_result,
                 )
+                | request_fields
                 | {"attempts": verification_attempts, "verificationSource": verification_source, "timingsMs": lifecycle_timings_ms},
             )
             return self._finish_command(
@@ -3832,6 +3916,7 @@ class RuntimeManagerDaemon:
                     "closedEvolutionRuns": closed_runs,
                     "forceStoppedWorkRuns": force_stopped_runs,
                     "lifecycleTimingsMs": lifecycle_timings_ms,
+                    "closeRequest": request_fields,
                 },
             )
 
@@ -3842,6 +3927,7 @@ class RuntimeManagerDaemon:
                 command_id=command_id,
                 cleanup_result=cleanup_result,
             )
+            | request_fields
             | {"attempts": verification_attempts, "verificationSource": verification_source, "timingsMs": lifecycle_timings_ms},
         )
         state = load_state()
@@ -3850,6 +3936,9 @@ class RuntimeManagerDaemon:
             {
                 "desiredState": "closed",
                 "phase": "steady",
+                "lastReason": reason,
+                "lastSource": source,
+                "lastRequestAudit": request_audit,
                 "failureMessage": "",
             }
         )
@@ -3875,6 +3964,7 @@ class RuntimeManagerDaemon:
                 "forceStoppedWorkRuns": force_stopped_runs,
                 "launcherStateCleanup": launcher_state_cleanup,
                 "lifecycleTimingsMs": lifecycle_timings_ms,
+                "closeRequest": request_fields,
             },
             reconcile_observation=verification,
         )
@@ -3932,6 +4022,7 @@ class RuntimeManagerDaemon:
     def _perform_restart_workbench(self, *, command_id: str, args: dict[str, Any]) -> dict[str, Any]:
         state = load_state()
         workbench = state.setdefault("workbench", {})
+        request_audit = _safe_lifecycle_request_audit(args)
         requested_no_browser = bool(args.get("noBrowser"))
         workbench.update(
             {
@@ -3940,6 +4031,7 @@ class RuntimeManagerDaemon:
                 "lastReason": str(args.get("reason") or "explicit_restart"),
                 "lastSource": str(args.get("source") or "").strip(),
                 "lastTransitionAt": now_iso(),
+                "lastRequestAudit": request_audit,
                 "failureMessage": "",
             }
         )
@@ -4037,6 +4129,7 @@ class RuntimeManagerDaemon:
                 "lastReason": str(args.get("reason") or "explicit_restart"),
                 "lastSource": str(args.get("source") or "").strip(),
                 "lastTransitionAt": now_iso(),
+                "lastRequestAudit": request_audit,
                 "failureMessage": "",
             }
         )

@@ -1560,6 +1560,8 @@ export function LauncherRoute() {
         queue: "队列",
         reason: "原因",
         source: "来源",
+        requestTrigger: "触发入口",
+        requestEndpoint: "请求路径",
         transition: "转换",
         proof: "证明",
         schema: "schema",
@@ -1792,6 +1794,8 @@ export function LauncherRoute() {
         queue: "Queue",
         reason: "Reason",
         source: "Source",
+        requestTrigger: "Trigger",
+        requestEndpoint: "Request",
         transition: "Transition",
         proof: "Proof",
         schema: "schema",
@@ -2149,6 +2153,9 @@ export function LauncherRoute() {
   const componentRows = useMemo(() => sortComponents(bundle?.components ?? []), [bundle?.components]);
   const headerTone = stateTone(bundle?.overallState ?? status?.launcher.phase ?? "", Boolean(bundle));
   const transitionAt = compactDate(bundle?.lastOperation.transitionAt ?? "", locale);
+  const lastRequestAudit = bundle?.lastOperation.requestAudit ?? {};
+  const lastRequestTrigger = lastRequestAudit.trigger || "-";
+  const lastRequestEndpoint = [lastRequestAudit.method, lastRequestAudit.endpoint].filter(Boolean).join(" ") || "-";
   const canRequestSupervisorReattach = Boolean(status && guardian?.supervisor && !guardian.supervisor.alive);
   const uiLang = lang === "zh" ? "zh" : "en";
   const bundleDesired = String(bundle?.desiredState || "").toLowerCase();
@@ -2722,6 +2729,7 @@ export function LauncherRoute() {
                 <Spec label={copy.overall} value={launcherSummary} />
                 <Spec label={copy.guardian} value={guardianProgress} />
                 <Spec label={copy.reason} value={bundle?.lastOperation.reason || bundle?.lastReason || "-"} />
+                <Spec label={copy.requestTrigger} value={lastRequestTrigger} />
                 <Spec label={copy.transition} value={transitionAt} />
               </dl>
             </section>
@@ -2809,6 +2817,7 @@ export function LauncherRoute() {
             <Spec label="bundle mode" value={bundle?.mode || "-"} />
             <Spec label="url" value={bundle?.url || "-"} />
             <Spec label={copy.source} value={bundle?.lastOperation.source || "-"} />
+            <Spec label={copy.requestEndpoint} value={lastRequestEndpoint} />
             <Spec label={copy.proof} value={status?.lifecycleProof.summary || "-"} />
             <Spec label={copy.supervisor} value={guardian?.supervisor?.blocking === false && guardian.supervisor.impact ? humanState(guardian.supervisor.impact, uiLang) : guardian?.supervisor?.status || "-"} />
             <Spec label={copy.internalMigrationDetails} value={[status?.launcher.mode, guardian?.mode, status?.launcher.controlPlane.nextPhase, guardian?.targetMode].filter(Boolean).join(" | ") || "-"} />

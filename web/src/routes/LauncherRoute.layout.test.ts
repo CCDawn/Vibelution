@@ -324,6 +324,16 @@ describe("LauncherRoute layout contract", () => {
     expect(routeSource).toContain('setNotice({ tone: "neutral", text: "" })');
   });
 
+  it("surfaces last close request provenance in Launcher diagnostics", () => {
+    expect(routeSource).toContain("lastRequestAudit = bundle?.lastOperation.requestAudit ?? {}");
+    expect(routeSource).toContain("lastRequestTrigger");
+    expect(routeSource).toContain("lastRequestEndpoint");
+    expect(routeSource).toContain("requestTrigger");
+    expect(routeSource).toContain("requestEndpoint");
+    expect(routeSource).toContain("<Spec label={copy.requestTrigger} value={lastRequestTrigger} />");
+    expect(routeSource).toContain("<Spec label={copy.requestEndpoint} value={lastRequestEndpoint} />");
+  });
+
   it("keeps lifecycle actions icon-backed and compact", () => {
     expect(routeSource).toContain("<Play size={15} />");
     expect(routeSource).toContain("<Square size={15} />");
