@@ -388,6 +388,59 @@
   pointer-events: none;
 }
 
+.shell[data-topbar-mode="hidden"] {
+  --shell-topbar-height: 0px;
+}
+
+.shell[data-topbar-mode="hidden"] .topBar {
+  display: none;
+}
+
+.topBarRestoreButton {
+  position: fixed;
+  top: 10px;
+  right: 10px;
+  z-index: 22;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 32px;
+  max-width: min(176px, calc(100vw - 20px));
+  padding: 6px 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-control);
+  color: var(--fg-secondary);
+  background: color-mix(in srgb, var(--shell-surface) 90%, transparent);
+  box-shadow: 0 10px 24px var(--shell-shadow);
+  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.82rem;
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+  transition: border-color 150ms ease, background-color 150ms ease, color 150ms ease;
+}
+
+.topBarRestoreButton:hover,
+.topBarRestoreButton:focus-visible {
+  border-color: var(--border-strong);
+  color: var(--fg-primary);
+  background: var(--shell-panel-soft);
+}
+
+.topBarRestoreButton:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent-cool) 46%, transparent);
+  outline-offset: 2px;
+}
+
+.topBarRestoreButton span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .brandBlock {
   position: relative;
   z-index: 1;
